@@ -18,19 +18,28 @@ first honest run found #501).
   (5 Sep). Docs-only branch, no code.
 - **The design is fully written** and re-read against #474 (warp vectors =
   baked backtracking, retired by stages 4/5) and #498 (below).
-- **Stage 3 is blocked on a ruling from Jim, not on engineering.** PR #498
-  measured the road↔trestle pair *over-determined*: ring feet boxed to
-  outset [6.15, 6.92]; a 7.78 m road parallel to the wall needs centre in
-  [3.89, 8.11]; clearing a foot needs ≤ 2.1 or ≥ 10.9 — empty. Every
-  party is human-ruled (family brief, arrival sequence, terrain). Three
-  ways out, all Jim's: widen the apron / bus arrives radially / a
-  straddling support kind. Doc section "Stage 3, re-examined (5 Sep)".
-- **Briefs**: step 1 (`BRIEF-stage3-step1-road-placer.md`) is **READY,
-  dispatchable against main today**, no dependency on #498 or the ruling
-  — creates the one production `GroundClaims` instance (today test-only)
-  and claims the road's corridor from its owner; byte-identical. Steps
-  2–4 are **HELD on the ruling**, each header says what it becomes under
-  each answer. Strictly sequential after step 1.
+- **Jim ruled (5 Sep): "no flat ground — it is a sphere".** The park
+  comes off its hill (#511); both ceilings of the over-determination were
+  hill constants (`RIM_OUTSET_START`); no party yields. Doc section
+  "Stage 3, ruled". Architect's rulings there: the three `*_RADIAL_NUDGES`
+  ladders are deleted (one outward march, one function, stops where the
+  world says); claims describe the drawn *post* below the road's headroom,
+  not the foot; a refused foot's next decision is a support *shape*.
+  **Prediction on record**: the sphere clears feet on the five red seeds
+  but not posts at height with today's leaning trunk — confirmed or
+  falsified by the #511 engineer's measurement. If falsified, strike it
+  and re-cut.
+- **Briefs**: step 1 nearly landed (byte-identical, 16 seeds). **Step 2a**
+  (`BRIEF-stage3-step2a-swept-bus-instrument.md`, swept bus vs drawn
+  posts as a ratchet) **READY today**. Step 2 held on step 1 + #511 +
+  the measurement. Steps 3, 4 sequential after. Step 4 re-cut: no clause
+  to delete; it is the `CoSolveEngine`→`GroundClaims` migration + the
+  first support-shape negotiation + counters, shrinking if the sphere
+  alone suffices.
+- **Step 1's finding, folded in**: the road is not constants — the spur's
+  end depends on `publishPaving()` inside `new World`, after generation;
+  the road is a two-turn (provisional → realised) placer. Trap for step 2:
+  legs are built at `World.ts:214`, entrance at `:268`.
 - **#498** (`fix/road-487-488`): OPEN, CONFLICTING (only
   `scripts/coplanar-baseline.mts`), two unanswered "changes requested"
   reviews (blocker: swept-bus checks feet, 8–9 leaning posts/seed still in
@@ -39,10 +48,9 @@ first honest run found #501).
   the local `road-487-488` worktree is a stale mid-rebase with nothing
   unpushed. Its #487 visibles and the swept-bus instrument are worth
   landing separately — Overseer's call, reported.
-- **Next action if resumed**: if the Overseer has dispatched step 1,
-  review its PR for the one-owner rule. If Jim has ruled, re-cut steps
-  2–4 for that ruling (headers already say how) and hand step 2 over.
-  Otherwise idle; nothing else is owed.
+- **Next action if resumed**: review step 1's PR for the one-owner rule
+  when it opens; when the #511 engineer's five-seed measurement arrives,
+  confirm or strike the prediction and release step 2. Otherwise idle.
 
 ## Checkpoint, 5 Sep — #474 and #498 read against the design
 

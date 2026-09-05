@@ -1,128 +1,71 @@
-# Engineering brief — stage 3, step 4: negotiation, and the named clause comes out
+# Engineering brief — stage 3, step 4: the first support-shape negotiation, and the engine moves onto the registry
 
-**Status: HELD on Jim's ruling (design doc, "Stage 3, re-examined (5 Sep)").**
-#498 measured the road↔trestle pair over-determined: the ring's feet are
-boxed to outset [6.15, 6.92] by the family's brief, masonry and hill; a
-7.78 m road parallel to the wall needs its centre in [3.89, 8.11]; clearing
-a foot needs ≤ 2.1 or ≥ 10.9. No generator-owned decision can change that,
-so this brief cannot be built green on 5 of 16 seeds until one of three
-human-ruled things gives — and what this brief becomes depends on which:
-
-- **Apron widens** → the road sits outside the ring; legs never conflict.
-  No conflict ever fires; the budget counters ship reading zero, honestly reported; the 'clause comes out' sections are void — no clause reached `main`.
-- **Bus arrives radially** → the road crosses the ring once. This brief minus the clause-deletion sections: the negotiation is real on the crossing, counters report it.
-- **A straddling support kind** (Artist geometry) → This is where the straddling support is chosen when a plain foot is refused — the first support-kind negotiation; `CoSolveEngine` migrates onto `GroundClaims` here.
-
-Also re-cut 5 Sep: this brief was written against #498's file layout
-(`entrance/roadRoute.ts`, a named road clause in `railRace/track.ts`).
-**Neither exists on `main`.** Re-verify every commit point at pickup; the
-intent binds, not the references. The swept-bus control (bus body vs the
-**drawn post at height**, never the foot) must exist on `main` and have
-been **watched failing** against today's legs before this lands.
+**Status: HELD until step 3 merges; its size is set by the five-seed
+measurement** (design doc, "Stage 3, ruled"). Re-cut 5 Sep: there is no
+named clause to delete — none reached `main` — so the earlier "the clause
+comes out" brief is void; this is what stands in its place. Authority:
+`docs/DESIGN-round-robin-generation.md` ("Stage 3, ruled" ruling points
+1–3, "Backtracking, one mechanism instead of six", "A feature's own
+supports are claims"). One engineer, one worktree.
 
 ## The rule a reviewer looks for first
 
-**The exploration query and the commit check must be the same function** —
-and in this step, so is the *negotiation's* question. When a refused claim
-asks "who blocks me?" and "would it work if the blocker moved?", both
-answers come from `GroundClaims`' own predicates (`blockers()`, the commit
-check), never from a re-derivation. Three askers, one function. A
-negotiation that reasons about geometry the registry didn't compute is a
-fourth ground model, and the whole point of this stage is getting from ten
-to one.
-
-## Byte-for-byte expectation: **THE PARK MAY CHANGE where the pair conflicted — signed, bounded, and only there**
-
-- Parks where road corridor and trestle footprints never conflicted must
-  hash **identically** — negotiation that never fires must change
-  nothing. Prove it per seed.
-- Parks where they did conflict change **only in the pair's geometry**:
-  diff the built park's fact set per seed and account for every moved
-  entity — a moved lamp on a conflict-free seed is a bug, not noise.
-- Change accounting countersigned by the Architect; conflicted seeds are
-  **visible work** (preview link, deep link to the changed spot via
-  `/spawn?pos=…`, one sentence, Jim's sign-off).
+**Three askers, one function.** The search's exploration query, the
+claim's commit check, and the negotiation's "who blocks me / would it work
+if I changed shape?" all come from `GroundClaims`' own predicates
+(`allows`, `blockers`) — never a re-derivation. A negotiation reasoning
+about geometry the registry did not compute is a fourth ground model.
 
 ## What this step is
 
-- **The refusal path runs across the feature boundary**: where road
-  corridor and trestle footprint want the same ground, the trestle steps
-  aside first (cheap — many candidates); if no leg placement serves the
-  ring, the road's corridor re-draws (`CoSolveEngine`'s
-  blockers-hint mechanism, per the spec's ladder: retry → negotiate →
-  unwind).
-- **`railRace/track.ts`'s named road-corridor clause is deleted.** This is
-  the acceptance the Overseer fixed (3 Sep): the registry now refuses the
-  same ground the clause did (proved in advance by step 2's redundancy
-  demonstration), so the clause is a second definition, and second
-  definitions do not get to stay for comfort.
-- **Budget counters ship and report**: conflicts-per-attempt and
-  retries-per-placer for the pair, printed to stderr on every procgen run
-  (a coverage note nobody can hear is the same disease as a check that
-  cannot fail). This is the design's first thrash measurement, and the
-  number that decides when forward checking / most-constrained-first get
-  built — record it in the PR.
+- **`CoSolveEngine` migrates onto `GroundClaims`.** `coSolve.ts` is
+  test-only today and types against the superseded `PlacementField`; the
+  engine's round-robin/backtracking mechanics carry forward, its field
+  becomes the one production registry, and `PlacementField` is deleted
+  (two registries with a sign saying which is dead was the interim; the
+  interim ends here).
+- **The refusal path runs across the feature boundary for the pair**:
+  a trestle whose nearest allowed foot leaves its trunk in the corridor
+  at height gets a different support shape (step 2's dormant bullet,
+  now live if the measurement says so); if no shape serves the ring, the
+  refusal propagates via `blockers()` — the road does **not** yield (Jim,
+  5 Sep) and the ring does not move (family brief), so the only unwind
+  above the support shape is a loud failure naming the seed. That
+  failure must be reachable and must be watched happening in a scratch
+  build (disable the shape choice, run the pool, paste the red transcript
+  with geometry).
+- **Budget counters ship and report**: refusals-per-leg, shape-changes-
+  per-seed, retries-per-placer for the pair, printed to stderr on every
+  procgen run — the design's first thrash measurement. Record the numbers
+  in the PR; they decide when forward checking / most-constrained-first
+  get built.
+- **If the measurement shows the sphere alone clears posts at height**:
+  the shape negotiation is not built (nothing would exercise it — a check
+  that cannot fail); this step shrinks to the engine migration plus the
+  counters, and says so in the PR body.
 
 ## What must not change
 
-- Every clearance stands: no negotiated outcome may leave less clearance
-  than the hand fix achieved (the #498 stakes — same or better).
-- `check:entrance-road`'s swept-bus sweep itself. The *control clause* is
-  the one part that changes, deliberately — see below.
-- No new named pairings anywhere. If the negotiation needs to know
-  something about a feature, that knowledge enters the compatibility
-  table or a claim kind, in the open — never a private clause.
+- Every clearance stands: step 2a's instrument at zero on every seed; the
+  40 m ring-support and duck-bar invariants green.
+- No new named pairings. Anything the negotiation must know about a
+  feature enters the compatibility table or a claim kind, in the open.
+- Determinism: blocker choice and retry order from the fixed round order
+  and per-placer substreams, never map iteration.
 
-## The control must be watched failing before it is trusted
+## Acceptance — measured
 
-The swept-bus control (151 legs across 16 seeds in #498's version) becomes
-the **independent instrument standing in for the deleted clause** — the
-thing that would catch the registry marking its own homework. Per the
-Overseer's explicit instruction and CLAUDE.md's "break every check
-deliberately":
-
-1. Delete the clause **and disable the negotiation** in a scratch build.
-2. Run the sweep. It must go **red** — legs in the bus's swept body.
-3. Paste the red output **with the geometry it was proved against**
-   (seed, leg coordinates) — a red-run transcript is a measurement and
-   measurements go stale (CLAUDE.md).
-4. Re-enable negotiation; the sweep goes green; paste that too.
-
-A control that was never watched failing after the clause came out is a
-green line implying cover it does not give. The step-2 redundancy
-demonstration does NOT count — it proved the registry refuses the same
-ground with the clause still present; this proves the *sweep* can see the
-failure the registry is now the only thing preventing.
-
-## Acceptance — measured, not asserted
-
-1. Named clause deleted; universal invariant's road×trestle pairing green
-   across the whole pool.
-2. Control watched failing then passing, both transcripts with geometry.
-3. Conflict-free seeds hash identical; conflicted seeds' diffs fully
-   accounted; countersigned.
-4. Clearances same or better than #498's, measured by its own instruments.
-5. Budget counters reported per seed on stderr; numbers quoted in the PR.
-6. Full gates green (`check`, `test:procgen`, `check:coplanar`,
-   `check:park-boot`), exit codes captured directly.
-7. **The stage-3 decision point is answered in the PR body**: does this
-   clearly beat the hand-written fix (spec: same-or-better clearances, no
-   named pairing, next neighbour covered with zero new code)? That
-   answer, with its numbers, is what the Architect takes to the Overseer
-   to green-light stage 4.
-
-## Traps, pre-paid
-
-- Deleting the clause changes nothing *visible* on most seeds — do not
-  let that read as "invisible work" overall; the conflicted seeds decide.
-- The negotiation must be deterministic: blocker choice and retry order
-  from the fixed round order and substreams, never from map iteration.
-- Do not let the road re-draw relax any #487 property (length, grey,
-  curvature) — those are Jim-ruled visibles; the corridor may move, the
-  road's contract may not.
-
-## Definition of done
-
-One mechanism where two private ones stood; the clause gone; the control
-proved able to see its absence; every changed park accounted for and
-signed; the beat-the-hand-fix question answered with numbers.
+1. `PlacementField` gone; `CoSolveEngine` on `GroundClaims`; its tests
+   (`test/coSolve.test.ts`) re-pointed and green.
+2. The loud-failure path watched happening (transcript with geometry),
+   then the pool green with the shape choice enabled.
+3. Counters on stderr per seed; numbers quoted.
+4. Per-seed park-hash accounting: seeds where no negotiation fired hash
+   identical to step 3's; every other change named. Countersigned by the
+   Architect.
+5. Full gates green, exit codes captured directly.
+6. **The stage-3 decision point answered in the PR body**: does this beat
+   the hand fix (#498's stakes: bus clear of every post at height on all
+   sixteen seeds, rings supported, no named pairing, no warp or terrain
+   change, next neighbour covered with zero new code)? The Architect takes
+   that answer to the Overseer to green-light stage 4.
