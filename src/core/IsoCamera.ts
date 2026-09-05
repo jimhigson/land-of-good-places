@@ -267,7 +267,7 @@ export class IsoCamera {
    */
   private get focusHalfHeight(): number {
     if (this.camera instanceof PerspectiveCamera) {
-      return Math.tan(((this.camera.fov / 2) * Math.PI) / 180) * CAMERA_DISTANCE;
+      return Math.tan(((this.camera.fov / 2) * Math.PI) / 180) * this.eyeToFocusDistance;
     }
     return this.camera.top;
   }
@@ -451,6 +451,29 @@ export class IsoCamera {
    */
   get poseDistance(): number {
     return this.poseOffset.length();
+  }
+
+  /**
+   * **How far the eye actually is from the point it is looking at, this
+   * frame** — the rig's own offset plus whatever a shot override has added.
+   *
+   * Not {@link CAMERA_DISTANCE}. That constant is where the eye sits when
+   * *nothing* is overriding the pose, and treating it as "the distance" is
+   * only right while that holds. `setShotOverride` exists precisely to break
+   * it: the arrival's door beat dives to about 6.6 m and threads the arch at
+   * 4.0 m, against the rig's 90 m.
+   *
+   * **Why this matters only now.** Under an orthographic projection the
+   * stand-back is inert for framing — sliding an ortho eye along its own view
+   * axis changes nothing on screen — so nothing downstream cared what the real
+   * distance was. Under perspective the stand-back *is* the framing, so a FOV
+   * derived against 90 m while the eye is 6.6 m away frames about half a metre
+   * of world and a child stands three times the height of the frame. Same
+   * disease as this branch's other two: a quantity taken against a convenient
+   * origin rather than against the thing being drawn.
+   */
+  private get eyeToFocusDistance(): number {
+    return SCRATCH_EYE_DISTANCE.copy(this.offset).add(this.poseOffset).length();
   }
 
   // -------------------------------------------------- drag to look around
@@ -665,11 +688,24 @@ export class IsoCamera {
    * not beside it.
    */
   private updatePose(dt: number): void {
+    const movedX = this.poseOffset.x;
+    const movedY = this.poseOffset.y;
+    const movedZ = this.poseOffset.z;
     this.poseOffset.x = damp(this.poseOffset.x, this.poseTarget.x, CAMERA_POSE_HALF_LIFE, dt);
     this.poseOffset.y = damp(this.poseOffset.y, this.poseTarget.y, CAMERA_POSE_HALF_LIFE, dt);
     this.poseOffset.z = damp(this.poseOffset.z, this.poseTarget.z, CAMERA_POSE_HALF_LIFE, dt);
     if (this.poseOffset.distanceToSquared(this.poseTarget) < POSE_HOME_EPSILON * POSE_HOME_EPSILON) {
       this.poseOffset.copy(this.poseTarget);
+    }
+    // **A perspective FOV is derived from the eye's real distance, so a moving
+    // pose changes it.** The ortho box does not depend on the stand-back at
+    // all, which is why this re-derivation did not exist before and why
+    // nothing needs it when the rig is orthographic.
+    if (
+      this.camera instanceof PerspectiveCamera &&
+      (this.poseOffset.x !== movedX || this.poseOffset.y !== movedY || this.poseOffset.z !== movedZ)
+    ) {
+      this.applyFrustum();
     }
   }
 
@@ -786,7 +822,7 @@ export class IsoCamera {
       // for at the player's own distance. Things nearer than the focus grow
       // and things beyond it shrink, which is the entire point of the
       // prototype.
-      this.camera.fov = (2 * Math.atan(halfHeight / CAMERA_DISTANCE) * 180) / Math.PI;
+      this.camera.fov = (2 * Math.atan(halfHeight / this.eyeToFocusDistance) * 180) / Math.PI;
       this.camera.aspect = this.aspect;
       this.camera.updateProjectionMatrix();
       return;
@@ -945,3 +981,5 @@ const POSE_HOME_EPSILON = 0.001;
 // Scratch vector for clampToFrustum's own intermediate maths — discarded
 // before the method returns, so safe to share across calls.
 const SCRATCH_CLAMP_RELATIVE = new Vector3();
+/** Scratch for {@link IsoCamera.eyeToFocusDistance}; nothing escapes it. */
+const SCRATCH_EYE_DISTANCE = new Vector3();
