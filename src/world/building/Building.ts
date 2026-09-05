@@ -33,7 +33,7 @@ import type { AnchorPlots } from '../AnchorPlots';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
 
 import { BallPit } from './BallPit';
-import { solveChaseEye } from '../slide/chaseEye';
+import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
 import { FloorFader } from './floorFade';
 import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
@@ -1643,6 +1643,11 @@ export class Building implements GameSystem {
     // child who goes down the slide twice would have.
     this.chaseGaveUp = 0;
     this.chaseCompanions = 0;
+    // The near bound's counters describe this descent too (#518), and they live
+    // on the solver's module rather than here because the solver is where the
+    // rejection happens. Same reasoning as the two above: a counter whose doc
+    // says "this descent" must be zeroed by the descent starting.
+    resetChaseCeilingCounters();
     player.beginRide();
   }
 

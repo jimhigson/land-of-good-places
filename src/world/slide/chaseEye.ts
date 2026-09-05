@@ -209,6 +209,52 @@ const toChild = new Vector3();
 const axis = new Vector3();
 
 /**
+ * **What the near bound actually did, counted rather than assumed** (#518).
+ *
+ * The ceiling guard below was written to stop the lens pressing a companion
+ * against the glass, and for its whole life it **rejected nothing** — the
+ * defect #518 is about. A guard that looks calibrated and cannot fire is worse
+ * than one visibly absent, and the only thing that tells the two apart is a
+ * count, so these are counted and `check:pet-slide` prints them on every run.
+ *
+ * Kept after the fix, not deleted with it: "it fires now" is exactly as much a
+ * measurement as "it never fired", and the next change in this area needs to be
+ * able to see which it is without re-deriving an instrument.
+ */
+let ceilingRejections = 0;
+let ceilingCalls = 0;
+let ceilingWorstShare = 0;
+
+/** How many placements the near bound has rejected — 0 was the whole of #518. */
+export function chaseCeilingRejections(): number {
+  return ceilingRejections;
+}
+
+/** How many times the near bound was asked at all, so a 0 above can be read. */
+export function chaseCeilingCalls(): number {
+  return ceilingCalls;
+}
+
+/** The largest frame share the near bound ever estimated, against its threshold. */
+export function chaseCeilingWorstShare(): number {
+  return ceilingWorstShare;
+}
+
+/** Zero the near-bound counters — called when a ride is boarded. */
+export function resetChaseCeilingCounters(): void {
+  ceilingRejections = 0;
+  ceilingCalls = 0;
+  ceilingWorstShare = 0;
+}
+
+/**
+ * The threshold the near bound actually compares against, exported so a check
+ * can print the guard's worst estimate *beside the number that would have made
+ * it fire* rather than restating the product itself.
+ */
+export const CEILING_REJECT_ABOVE = PET_FRAME_CEILING * CEILING_SAFETY;
+
+/**
  * Solve the lens placement for this instant of the descent.
  *
  * `rider`, `pet` and the mount basis are all world-space and all come from the
@@ -294,7 +340,12 @@ export function solveChaseEye(
         halfFovRad,
         aspect,
       );
-      if (share > PET_FRAME_CEILING * CEILING_SAFETY) continue;
+      ceilingCalls += 1;
+      if (share > ceilingWorstShare) ceilingWorstShare = share;
+      if (share > CEILING_REJECT_ABOVE) {
+        ceilingRejections += 1;
+        continue;
+      }
       toChild.copy(rider).sub(eye);
       const childAngle = Math.acos(
         Math.min(1, Math.max(-1, toChild.clone().normalize().dot(axis))),
