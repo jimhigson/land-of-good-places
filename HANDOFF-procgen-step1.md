@@ -85,15 +85,72 @@ rule — "the claim must BE the road" — while respecting the real ordering):
    order across a re-commit. This is what makes the registry on the *built* park
    hold the road as built, rather than a snapshot taken before the paths existed.
 
+## Byte-identical: PROVED
+
+All sixteen pool seeds bit-identical to the baseline above, measured after the
+whole change with `scripts/park-digest-sweep.sh`. Not one mesh moved.
+
+Note what the digest does and does not cover: it builds the park through
+`park-harness.mts`, which is the `World` path (the same one `check:park` and
+`test:procgen` use) and does **not** run `ParkGeneration`. The generator path is
+covered by `check:park-boot` (green, sliced and straight-through solves
+identical) and by `check:ground-claims`, which drives a real generation.
+
+## Deliberate breaks, all proved red
+
+Canonical seed geometry these were proved against — paste it with any re-run,
+because a red transcript is a measurement and measurements go stale:
+kerb `x -29.91508..14.91508` at `z 69`; spur `x 0`, `z 65.11..55.90999999999995`;
+`halfWidth 3.89`.
+
+| break | probe that caught it | red evidence |
+|---|---|---|
+| `World` makes its own registry instead of taking the letterbox | probe 3 (`===`) | exit 1, "the World's claims registry is NOT the object the generator claimed against" |
+| the owner's claim shifted 0.5 m | probe 5 (claim vs drawn mesh) | exit 1, three edges at `0.5000 m apart` |
+| a hand-typed copy in `World`, accurate to 5 mm | probe 4 (byte-equality) **and** probe 5 | exit 1, byte-equality diff printed, plus `0.0049 m apart` |
+| the owner's spur end shifted 0.8 m | the procgen invariant, seed 5 | `1 failed | 88 passed`, "gateway minZ is 58.5100 in the scene and the corridor claims 59.3100, 0.8000 m apart" |
+| `ROAD_HALF_WIDTH` + 1 mm | the digest instrument itself | canonical `1ef4ff81decec5d4` -> `1c9175afb7659c80` |
+
+Probe 4 stayed green on the 0.5 m break, correctly: that break moved the owner,
+so registry and owner still agreed. Probe 4 catches registry-vs-owner drift,
+probe 5 catches owner-vs-drawn-road drift. Together they close the loop; neither
+alone does.
+
+## What the new checks actually cover
+
+- **`check:ground-claims`** — six probes, but **the canonical seed only**,
+  because it drives a whole `ParkGeneration` first. It is the only thing that
+  tests the letterbox hand-over at all.
+- **The procgen invariant** — the same claim-is-the-road question on **7 of the
+  16 pool seeds**, one per seed test file. That is issue #510's gap and this
+  does not close it.
+
+## Deliberately not done
+
+- `CoSolveEngine` and `PlacementField` untouched, per the brief — they move onto
+  `GroundClaims` at step 4.
+- No trestle work (step 2), no ladder loosening (step 3), no negotiation.
+- The brief's acceptance 1 asked for the road corridor and rail-race legs added
+  to `check:park-boot`'s hash set. Not done in that form: the 16-seed digest
+  hashes **every mesh in the park**, which strictly contains both, on 16 seeds
+  rather than one. Said plainly rather than doing the weaker thing to match the
+  letter.
+- The brief's acceptance 3 asked for "exactly one corridor claim". It is
+  **two** — the road turns a corner at the gate and a capsule is a straight
+  segment. The check asserts two and says why.
+
 ## State
 
 - [x] Worktree, install, brief and design read
-- [x] Measurement instrument built, both controls passed, 16-seed baseline captured
-- [ ] `roadCorridor.ts` — the one owner
-- [ ] Production `GroundClaims` instance + letterbox + `World` field
-- [ ] `roadCorridor` scheduler task
-- [ ] `parkFacts.ts` read-only exposure
-- [ ] Invariant in `test/procgen/invariants.ts`
-- [ ] Deliberate breaks proved red, with the geometry pasted
-- [ ] `check`, `test:procgen`, `check:coplanar`, `build` — exit codes read directly
-- [ ] After-sweep vs baseline
+- [x] Measurement instrument, both controls, 16-seed baseline
+- [x] `roadCorridor.ts` — the one owner
+- [x] Production `GroundClaims` + letterbox + `World` field + re-commit
+- [x] `roadCorridor` scheduler task
+- [x] `check:ground-claims`, added to the chain (step sets compared with main)
+- [x] Invariant in `test/procgen/invariants.ts`
+- [x] Deliberate breaks proved red with geometry recorded
+- [x] Byte-identical on all 16 seeds
+- [x] `pnpm run build` exit 0; `pnpm run test:procgen` exit 0 (759 passed, 0 skipped)
+- [ ] `pnpm run check` — running
+- [ ] `pnpm run check:coplanar`
+- [ ] PR
