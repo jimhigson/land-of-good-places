@@ -104,7 +104,10 @@ import {
 // A leaf module: pure geometry over a `standable` predicate, no three.js and
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
-import { entranceBusArriveAt, entranceRoadAt } from '../../src/world/entrance/roadRoute.ts';
+// NOTE: `roadRoute.ts` is deliberately **not** imported here. It builds a
+// `RingPath` off the seeded boundary at module scope, so a static import
+// pins every seed to the default park. Its one number this file needs
+// travels on `ParkFacts.catBus.roadStartX/Z` instead.
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import {
   GATE_FOOT_TOLERANCE,
@@ -7440,7 +7443,7 @@ const theCatBusIsInThePark: Invariant = (facts) => {
   // straight kerb that no longer exists — the road follows the park's edge now,
   // and the bus comes on at the brow. `entranceRoadAt(entranceBusArriveAt())` is
   // where the sequence itself starts the bus, so this cannot drift from it.
-  const start = entranceRoadAt(entranceBusArriveAt());
+  const start = { x: bus.roadStartX, z: bus.roadStartZ };
   const kerbGap = Math.hypot(bus.x - start.x, bus.z - start.z);
   if (kerbGap > 1) {
     fouls.push(
