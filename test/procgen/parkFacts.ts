@@ -21,6 +21,8 @@ import { HAIR_STYLES } from '../../src/state/types.ts';
 import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
+import type { Claim } from '../../src/boot/groundClaims.ts';
+import type { RoadSegment } from '../../src/world/entrance/roadCorridor.ts';
 
 /**
  * One side of one ring of a bridge's drawn parapet. See
@@ -479,9 +481,33 @@ export interface BridgePavingFact {
   readonly worstLayer: string;
 }
 
+/**
+ * **The entrance road, as claimed and as drawn** — see
+ * `src/world/entrance/roadCorridor.ts`, which is the one owner of both.
+ *
+ * Gathered here rather than imported by `invariants.ts` because the owner
+ * reaches `world/boundary.ts`, whose `PARK_BOUNDARY` is generated from
+ * `PARK_SEED` at module scope. A static import of it into a test file would
+ * load `parkManifest.ts` before the seed was set and pin every seed to the
+ * canonical park — the 76-silent-skips disease this file's header warns
+ * about. Read after `buildHeadlessPark()`, it is a fact about *this* seed.
+ */
+export interface RoadCorridorFacts {
+  /** The feature name the road's ground is committed under. */
+  readonly feature: string;
+  /** What the built park's registry actually holds for it. */
+  readonly claimed: readonly Claim[];
+  /** What the owner returns, asked again right now. These must agree exactly. */
+  readonly fromOwner: readonly Claim[];
+  /** The runs of centreline, in the owner's own order — index-matched to both. */
+  readonly segments: readonly RoadSegment[];
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
+  /** The entrance road's corridor, claimed and drawn — see {@link RoadCorridorFacts}. */
+  readonly roadCorridor: RoadCorridorFacts;
   /**
    * Headroom under the finish rainbow, per ring per lane — see
    * {@link ArchClearanceFact}.
@@ -1177,6 +1203,19 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // the seed-pinning trap this file's header already warns about.
   const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
   const bridgeReservations = planBridgeFootprints(world.train.crossings);
+
+  // Same rule, same reason: the road's owner reaches PARK_BOUNDARY, so it is
+  // imported here — after the world for this seed is built — and never at the
+  // top of a test file.
+  const { ROAD_FEATURE, entranceRoadClaims, entranceRoadSegments } = await import(
+    '../../src/world/entrance/roadCorridor.ts'
+  );
+  const roadCorridor: RoadCorridorFacts = {
+    feature: ROAD_FEATURE,
+    claimed: world.groundClaims.claimsOf(ROAD_FEATURE),
+    fromOwner: entranceRoadClaims(),
+    segments: entranceRoadSegments(),
+  };
 
   const { CROSSING_SITES } = await import('../../src/world/train/crossingPlan.ts');
   const { SITE_SNAP_TOLERANCE } = await import('../../src/world/train/crossings.ts');
@@ -2673,6 +2712,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   }
 
   return {
+    roadCorridor,
     laneCarriageway,
     laneGreenery,
     laneRoadHalfWidth: ROAD_HALF_WIDTH,

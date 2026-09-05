@@ -38,6 +38,9 @@ import { ARRIVAL_KID_COUNT } from './entrance/ArrivalSequence';
 import { terrainHeight } from './terrain';
 import { bridgeHeightAt, bridgePavingHeightAt } from './train/bridges';
 import { drapePathsOverBridges } from './pathGraph';
+import { GroundClaims } from '../boot/groundClaims';
+import { takePrewarmedGroundClaims } from '../boot/groundClaimsPrewarm';
+import { ROAD_FEATURE, entranceRoadClaims } from './entrance/roadCorridor';
 
 export interface WorldOptions {
   /** Passed straight to {@link Entrance} — see `EntranceOptions.arriveByBus`. */
@@ -60,6 +63,27 @@ export class World implements GameSystem {
   readonly name = 'world';
 
   readonly collision = new CollisionWorld();
+
+  /**
+   * **The ground every placer claims against** — the registry side of
+   * {@link collision}, and threaded exactly as it is: one instance, owned here,
+   * handed to whoever needs it rather than imported.
+   *
+   * The round-robin generator (`boot/parkGeneration.ts`) makes the park's
+   * registry and claims the road's corridor into it while the cat bus is still
+   * on screen, then leaves it in `boot/groundClaimsPrewarm.ts`'s letterbox.
+   * Taking it here rather than making a fresh one is what makes the claims a
+   * built park holds the *same* claims the generator negotiated over —
+   * `World.groundClaims === ParkGeneration.groundClaims`, asserted by
+   * `check:park-boot`.
+   *
+   * Nothing pre-warms in Node, so a headless park (the harness, `check:park`,
+   * `test:procgen`) gets a fresh registry and fills it from its own builders.
+   * That is the honest result either way: the registry describes the park in
+   * this `World`, never a previous one.
+   */
+  readonly groundClaims: GroundClaims = takePrewarmedGroundClaims() ?? new GroundClaims();
+
   readonly garden: Garden;
   readonly scenery: Scenery;
   readonly flowers: Flowers;
@@ -266,6 +290,23 @@ export class World implements GameSystem {
     // `Entrance.findWelcomeSignSpot`. `this.train` above is built well before
     // this line for exactly that reason.
     this.entrance = new Entrance(this.collision, this.train.route, options.entrance ?? {});
+
+    // **The road claims its ground, from the road's own owner.**
+    //
+    // `boot/parkGeneration.ts`'s `roadCorridor` task already claimed this
+    // corridor during the round-robin, but it ran before any path was drawn —
+    // and the spur's inner end is measured against the plaza's paving, which
+    // `Garden` publishes inside this very constructor. So the claim is made
+    // again here, from the same `entranceRoadClaims()` the ribbons above were
+    // built from, now that the park it is measured against exists.
+    //
+    // Re-committing is the registry's own mechanism, not a workaround:
+    // `GroundClaims.commit` keeps a feature's original commit order across a
+    // re-commit, so the road's place in the backjumping order is unchanged.
+    // What it buys is that the registry a built park carries describes the
+    // road that was actually drawn, rather than a snapshot taken before the
+    // paths existed.
+    this.groundClaims.commit(ROAD_FEATURE, { claims: entranceRoadClaims() });
     // The welcome sign's spot is chosen dynamically against the *solved*
     // train route (see above), which the meadow — planted long before this
     // line — could not have known about either. Same pattern as the train's
