@@ -102,6 +102,7 @@ import {
   ENTRANCE_WALK_DEPTH,
   entranceGateFrame,
   isInEntranceGateOpening,
+  isInEntranceGateway,
 } from '../../src/world/entrance/layout.ts';
 // A leaf module: pure geometry over a `standable` predicate, no three.js and
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
@@ -9141,8 +9142,236 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
   return fouls;
 };
 
+/**
+ * **The road the bus arrives on is the road the registry claims — on every
+ * seed, and it goes where it says it goes.**
+ *
+ * Stage 3, step 1 of the round-robin rework makes the entrance road the first
+ * production placer: `entrance/roadCorridor.ts` is the one owner of its
+ * centreline, `Entrance.ts` draws its ribbons from that, and the same owner's
+ * output is committed to `World.groundClaims` as two `corridor` claims. Every
+ * later placer will negotiate against those claims rather than against the
+ * mesh, so a claim that has drifted from the road is a placer politely keeping
+ * out of ground the road does not occupy — and walking into ground it does.
+ *
+ * `check:ground-claims` proves the same thing far more thoroughly, **but only
+ * on the canonical seed**, and only there because it drives a whole
+ * `ParkGeneration` first. This is the clause that covers the other fifteen
+ * (issue #510: both required checks can be green while fourteen of sixteen
+ * pool seeds are unmeasured), and it is the reason it is worth having twice.
+ *
+ * Three clauses, and only the third has a threshold in it:
+ *
+ * 1. **The registry holds exactly the owner's output**, compared number for
+ *    number with no tolerance. These must be one call, not two calculations
+ *    that agree to some number of places.
+ * 2. **Each claim describes the ribbon that was drawn.** Measured off the
+ *    ribbon's own world-space vertices, which is the park that was built
+ *    rather than the rules that built it. The only slack here is `float32`:
+ *    mesh positions are a `Float32Array` and cannot carry the owner's
+ *    `float64`, so a metre value read back off geometry is good to about
+ *    seven significant digits. That is a property of the mesh format, not a
+ *    tuned number, and the worst residual is reported on every run so drift
+ *    shows as a number changing long before it crosses anything.
+ * 3. **The road is continuous, and it reaches the arch.** Jim, 7 August 2026:
+ *    *"it doesn't actually drive up to the park, the road needs to actually go
+ *    to the park."* The kerb and the spur are separate ribbons that must abut,
+ *    and the spur must arrive at the gateway. The gap threshold is
+ *    `PLAYER_RADIUS` — taken from the game, not from the generator's target,
+ *    because the thing that matters is whether a six-year-old stepping off the
+ *    bus can walk in without her feet leaving the road.
+ */
+const theRoadsCorridorIsTheRoadItDrew: Invariant = (facts) => {
+  const wrong: string[] = [];
+  // Read off `ParkFacts`, never imported here: the road's owner reaches
+  // `PARK_BOUNDARY`, and a static value import of a seed-dependent module into
+  // a test file pins every seed to the canonical park.
+  const { feature, claimed: claims, fromOwner, segments } = facts.roadCorridor;
+
+  if (claims.length === 0) {
+    return [
+      `seed ${facts.seed}: nothing is claimed under "${feature}" on the built park — the ` +
+        'road occupies ground no placer can see, which is the private-obstacle-list bug the ' +
+        'whole claims design exists to remove',
+    ];
+  }
+
+  // --- 1. the registry is the owner's output, to the number ------------------
+  const key = (claim: (typeof claims)[number]): string => {
+    const s = claim.shape;
+    return s.shape === 'capsule'
+      ? `${claim.kind}:capsule(${s.x1},${s.z1},${s.x2},${s.z2},${s.halfWidth})`
+      : `${claim.kind}:disc(${s.x},${s.z},${s.radius})`;
+  };
+  const registryKeys = claims.map(key);
+  const ownerKeys = fromOwner.map(key);
+  if (
+    registryKeys.length !== ownerKeys.length ||
+    registryKeys.some((k, i) => k !== ownerKeys[i])
+  ) {
+    wrong.push(
+      `seed ${facts.seed}: the road corridor in the registry is not what ` +
+        `entranceRoadClaims() returns — registry [${registryKeys.join(' ')}] vs owner ` +
+        `[${ownerKeys.join(' ')}]. Two definitions of one road, kept in step by hand`,
+    );
+  }
+
+  // --- 2. each claim describes the ribbon that was drawn ---------------------
+  // float32 mesh positions; see the header. Not a tuned tolerance.
+  const FLOAT32_SLACK = 1e-3;
+  let measured = 0;
+  let worstResidual = 0;
+  let worstNote = 'nothing measured';
+  facts.world.entrance.group.updateMatrixWorld(true);
+  for (const [index, claim] of claims.entries()) {
+    const shape = claim.shape;
+    const segment = segments[index];
+    if (shape.shape !== 'capsule' || !segment) {
+      wrong.push(
+        `seed ${facts.seed}: claim ${index} is not a capsule the owner also produces — the ` +
+          'registry and entranceRoadSegments() no longer describe the same road',
+      );
+      continue;
+    }
+    let mesh: { geometry: { getAttribute: (n: string) => unknown } } | null = null;
+    facts.world.entrance.group.traverse((object) => {
+      if (object.name === segment.name && 'geometry' in object) {
+        mesh = object as unknown as typeof mesh;
+      }
+    });
+    if (mesh === null) {
+      wrong.push(
+        `seed ${facts.seed}: the registry claims a corridor for "${segment.name}" but no such ` +
+          'ribbon is in the entrance group — the claim describes a road nobody drew',
+      );
+      continue;
+    }
+    const position = (mesh as { geometry: { getAttribute: (n: string) => PositionLike } }).geometry.getAttribute(
+      'position',
+    );
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < position.count; i += 1) {
+      minX = Math.min(minX, position.getX(i));
+      maxX = Math.max(maxX, position.getX(i));
+      minZ = Math.min(minZ, position.getZ(i));
+      maxZ = Math.max(maxZ, position.getZ(i));
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minZ)) {
+      wrong.push(`seed ${facts.seed}: "${segment.name}" has no finite vertices — nothing measured`);
+      continue;
+    }
+    measured += 1;
+    const half = shape.halfWidth;
+    const alongX = segment.along === 'x';
+    const expected = alongX
+      ? {
+          minX: Math.min(shape.x1, shape.x2),
+          maxX: Math.max(shape.x1, shape.x2),
+          minZ: shape.z1 - half,
+          maxZ: shape.z1 + half,
+        }
+      : {
+          minX: shape.x1 - half,
+          maxX: shape.x1 + half,
+          minZ: Math.min(shape.z1, shape.z2),
+          maxZ: Math.max(shape.z1, shape.z2),
+        };
+    for (const [edge, drawn, claimed] of [
+      ['minX', minX, expected.minX],
+      ['maxX', maxX, expected.maxX],
+      ['minZ', minZ, expected.minZ],
+      ['maxZ', maxZ, expected.maxZ],
+    ] as const) {
+      const residual = Math.abs(drawn - claimed);
+      if (residual > worstResidual) {
+        worstResidual = residual;
+        worstNote = `${segment.name}.${edge} drawn ${drawn.toFixed(4)} vs claimed ${claimed.toFixed(4)}`;
+      }
+      if (residual > FLOAT32_SLACK) {
+        wrong.push(
+          `seed ${facts.seed}: the road's claim does not describe the road that was drawn — ` +
+            `"${segment.name}" ${edge} is ${drawn.toFixed(4)} in the scene and the corridor ` +
+            `claims ${claimed.toFixed(4)}, ${residual.toFixed(4)} m apart. A child walks on ` +
+            'the mesh; every later placer negotiates against the claim',
+        );
+      }
+    }
+  }
+
+  // --- 3. the road is continuous, and it reaches the arch --------------------
+  const kerb = claims[segments.findIndex((s) => s.name === 'entrance-road-kerb')]?.shape;
+  const spur = claims[segments.findIndex((s) => s.name === 'entrance-road-gateway')]?.shape;
+  if (kerb?.shape === 'capsule' && spur?.shape === 'capsule') {
+    // The spur's OUTER end is the one that meets the kerb.
+    const outerZ = Math.max(spur.z1, spur.z2);
+    const gap = Math.abs(outerZ - (kerb.z1 - kerb.halfWidth));
+    if (gap > PLAYER_RADIUS) {
+      wrong.push(
+        `seed ${facts.seed}: the gateway spur starts ${gap.toFixed(2)} m from the kerb's inner ` +
+          `edge (spur at z=${outerZ.toFixed(2)}, kerb edge at ` +
+          `${(kerb.z1 - kerb.halfWidth).toFixed(2)}) — wider than a child (PLAYER_RADIUS ` +
+          `${PLAYER_RADIUS}), so she steps off the road between the bus and the gate`,
+      );
+    }
+    // The spur's outer end must be within the kerb's own run, or the two are
+    // two roads that happen to be near each other.
+    const kerbMinX = Math.min(kerb.x1, kerb.x2);
+    const kerbMaxX = Math.max(kerb.x1, kerb.x2);
+    if (spur.x1 < kerbMinX || spur.x1 > kerbMaxX) {
+      wrong.push(
+        `seed ${facts.seed}: the gateway spur leaves the kerb at x=${spur.x1.toFixed(2)}, which ` +
+          `is outside the kerb's own run ${kerbMinX.toFixed(2)}..${kerbMaxX.toFixed(2)} — the ` +
+          'bus stops on a road that does not meet the one going in',
+      );
+    }
+    // …and the spur must actually arrive at the arch.
+    const innerZ = Math.min(spur.z1, spur.z2);
+    if (!isInEntranceGateway(spur.x1, ENTRANCE_GATE_Z) || innerZ > ENTRANCE_GATE_Z) {
+      wrong.push(
+        `seed ${facts.seed}: the gateway spur does not pass through the arch — it runs x=` +
+          `${spur.x1.toFixed(2)}, z=${outerZ.toFixed(2)}..${innerZ.toFixed(2)} and the gate is ` +
+          `at (${ENTRANCE_GATE_X.toFixed(2)}, ${ENTRANCE_GATE_Z.toFixed(2)}). Jim, 7 Aug 2026: ` +
+          '"the road needs to actually go to the park"',
+      );
+    }
+  } else {
+    wrong.push(
+      `seed ${facts.seed}: the road did not claim both a kerb and a gateway spur, so its ` +
+        'continuity was not checked at all',
+    );
+  }
+
+  // What this clause actually covered, said out loud on every run — including
+  // the passing ones, which is the only case the note exists for. stderr,
+  // because vitest's default reporter hides console.log on a passing test.
+  process.stderr.write(
+    `    seed ${facts.seed}: road corridor — ${measured} of ${claims.length} claimed ribbons ` +
+      `measured against drawn geometry, worst edge residual ${worstResidual.toExponential(2)} m ` +
+      `(${worstNote})\n`,
+  );
+  if (measured !== claims.length) {
+    wrong.push(
+      `seed ${facts.seed}: only ${measured} of ${claims.length} claimed corridor runs were ` +
+        'measured against a real ribbon — the rest asserted nothing',
+    );
+  }
+
+  return wrong;
+};
+
+/** The slice of `BufferAttribute` this file reads off a ribbon. */
+interface PositionLike {
+  readonly count: number;
+  getX(index: number): number;
+  getZ(index: number): number;
+}
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
+  ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
   ["nothing grows in the lane but the park's own trees", nothingGrowsInTheLaneButTheParksOwnTrees],
