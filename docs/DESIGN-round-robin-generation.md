@@ -460,6 +460,89 @@ player-visible bug now, and its instruments are the acceptance harness
 above); the migration then *removes* its named clause and keeps its
 checks. Do not race it.
 
+#### Stage 3, re-cut (5 Sep): the hand fix measured its own impossibility
+
+The sequencing above is withdrawn. `fix/road-487-488` (PR #498) did not
+land; it stalled, and *why* it stalled is stage-3 evidence of the kind the
+decision point asked for — gathered before a line of the migration was
+written. Read from the PR, its reviews and its handoff on 5 Sep:
+
+- The named road-corridor clause moves trestle legs out of the road. On
+  **5 of 16 pool seeds** that leaves the rail-race rings standing on air
+  for **61–67 m** (main's own 40 m ring-support invariant, red), because
+  the rings run *along* the road corridor, not across it. There is no leg
+  placement that serves the ring: the legs have no freedom that matters.
+- The engineer's impossibility argument: on flat ground the road's centre
+  must sit ≤ 8.11 m from the wall; clearing the ride needs ≥ 11.94 m. So
+  the road cannot move either. The proposed way out is to **re-sculpt the
+  hilltop apron** (`RIM_OUTSET_*`, `TERRAIN_APRON`) — a terrain change,
+  "needs Jim's yes, not started".
+- The nudged legs lean, and the swept-bus control tested their *feet*:
+  8–9 posts per seed still enter the bus body (review blocker, unanswered).
+
+That is the slide-leg evidence (#501) reproduced on the pair stage 3
+chose, and measured rather than argued: a named clause between the road
+and the legs trades the loud bug (a bus through a trestle) for the quiet
+one (a ring on air), and the only within-ticket exit is to change the
+world so the fixed decision fits. **The decision that has to backtrack is
+the ring's route** — `RAIL_RACE_PLAN`, solved at ungated module load with
+its own private keep-offs (rail corridor, plots, cruiser; never the road),
+one level above the legs. Adding the road to that private list would be
+the third named clause for the same seam.
+
+**The pair is therefore re-cut: entrance road ↔ rail-race ring *with* its
+legs**, the ring migrating onto claims **section by section, legs with
+each section** — Jim's ruling above, no longer deferred by the staging
+note, because the staging note's interim ("legs off a finished ring") is
+exactly the state #498 proved cannot be made green. The ring becomes the
+**first customer of the stage-4 mechanism** ("explore free, commit in
+sections"), ahead of the slide; the slide follows on the same mechanism.
+The steps, each its own brief:
+
+1. **The road becomes the first production placer** (byte-identical,
+   invisible, unblocked — dispatchable against `main` today). On `main`
+   the road has no route search at all: it is `entrance/layout.ts`'s
+   constants plus `road.ts`'s `ROAD_HALF_WIDTH`. Nothing moves; the step
+   creates the **one production `GroundClaims` instance** (today it is
+   instantiated only by its unit test; `CoSolveEngine` is test-only and
+   still types against the superseded `PlacementField`), owned by
+   `parkGeneration.ts`'s scheduler and handed to `World`, and a
+   `roadCorridor` task publishes the corridor claim derived from those
+   owners. If #498's curved road ever lands, the claim follows it for free
+   — that is the point of deriving from the owner.
+2. **The rail-race ring and its legs migrate onto claims** (the park
+   changes on every seed where the ring shares ground with the road —
+   visible, Jim signs). The ring's route search asks the registry with
+   the one function, commits one segment plus that segment's legs per
+   turn, and a segment whose legs cannot claim is refused and the route
+   bends — retry → negotiate → unwind, with the road's corridor the
+   thing the ring yields to first, since the road cannot move. Named
+   per-placer substreams land here. **This fixes #488 by construction on
+   every pool seed** or reports the seed it cannot build; it never adds a
+   warp field or a terrain constant to get one through.
+3. **Confront the ladder** for the two migrated placers — unchanged from
+   the earlier step 3, gated on step 2.
+
+The earlier step 4 ("the named clause comes out") has no object: no clause
+ever reached `main`. Its two obligations survive, moved into step 2 —
+the swept-bus control (bus body against the **drawn post at height**, not
+the foot; #498's `check:entrance-road` is the prior art and the reviewer's
+blocker is its spec) is written on `main` and **watched failing** against
+today's legs before the migration lands, and the budget counters ship
+with the first cross-feature negotiation.
+
+**What #498 still owns:** #487's visibles (a grey, curved, visible road
+and the bus's arrival), and the swept-bus instrument. Whether it lands
+those without its corridor clause is the Overseer's call; this design
+needs none of its code and takes its measurements as the "before".
+
+**Decision point, restated with the new numbers:** the hand fix could not
+be completed within its own scope — it needed a terrain change to have a
+chance and had not proved that would suffice. The rework beats it if
+step 2 builds all sixteen seeds with the bus clear of every post, the
+rings supported, no named pairing, and no warp/terrain change. Those are
+the numbers step 2's PR body must carry.
+
 ### Stage 4 mechanism — incremental route growth: explore free, commit in sections
 
 Jim's section-by-section ruling (the slide-leg section above) reshapes how
