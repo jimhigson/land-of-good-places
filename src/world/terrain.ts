@@ -1,7 +1,5 @@
 import { Vector3 } from 'three';
-import { RIM_DROP, RIM_OUTSET_END, RIM_OUTSET_START, TERRAIN_HEIGHT_SCALE } from '../core/constants';
-import { smoothstep } from '../core/mathUtils';
-import { PARK_BOUNDARY } from './boundary';
+import { GROUND_SPHERE_RADIUS, TERRAIN_HEIGHT_SCALE } from '../core/constants';
 
 /**
  * The shape of the ground, as a pure function.
@@ -21,19 +19,41 @@ export function terrainHeight(x: number, z: number): number {
   const fine = Math.cos((x + z) * 0.031) * 0.34;
   const base = (broad + medium + fine) * TERRAIN_HEIGHT_SCALE;
 
-  // Outside the boundary wall the ground falls away steeply, putting the park
-  // on top of a hill. This is what makes the sky visible: the drop is steeper
-  // than the camera's 38° pitch, so everything past the crest is hidden and the
-  // horizon appears just above the wall. Without it an endless flat plane fills
-  // the screen and the whole day/night cycle goes unseen.
-  // Measured outward from the park's own edge, not from the origin. The
-  // boundary is 57 m out on one bearing and 110 m on another, so a crest at a
-  // fixed radius would slice through the park on one side and leave a plain
-  // outside it on the other. `distanceToEdge` is positive inside, so negating
-  // it gives metres *beyond* the edge, and the hill is the same hill wherever
-  // you walk out of the park.
-  const beyondEdge = -PARK_BOUNDARY.distanceToEdge(x, z);
-  return base - smoothstep(RIM_OUTSET_START, RIM_OUTSET_END, beyondEdge) * RIM_DROP;
+  // **The ground is a piece of a very large sphere (#511)** — tangent to
+  // horizontal at the park's centre, curving away on every bearing.
+  //
+  // What was here before was a `smoothstep` rim: flat inside the boundary, then
+  // a 17 m cliff just outside it, which put the park on a hilltop. Jim asked for
+  // that to go — *"just not make the park on a hill. Let the land spread out in
+  // all directions for a long way"* — and, when a flat apron was proposed as the
+  // fix for the road-versus-ride contention outside the wall, ruled that out
+  // too: *"there should be no 'flat ground' it is a sphere"*.
+  //
+  // **Why a sphere rather than simply deleting the rim.** The rim was not
+  // decoration; it was the only thing letting any sky be seen at ground level,
+  // because an orthographic camera pitched 38° never sees a horizon over a
+  // plane — sky appears only where the ground *runs out*. Deleting it alone
+  // gives a flat disc ending in a cut edge at eye level. A sphere restores a
+  // real horizon instead of a cliff, and it is the shape a child would draw for
+  // "the world". It only *reads* as a horizon under a perspective camera, which
+  // is why #511's ground work and the projection change are one piece of work
+  // and not two — see HANDOFF-no-hill-511.md.
+  //
+  // Exact spherical cap rather than the `d²/2R` paraboloid everyone writes: at
+  // these distances they differ by centimetres, but the exact form cannot
+  // quietly stop being a sphere far out, and one `sqrt` is nothing against the
+  // three trigonometric calls above it.
+  //
+  // `Math.max(0, …)` guards the horizon itself: past `GROUND_SPHERE_RADIUS` the
+  // cap has curved through vertical and there is no real square root. No ground
+  // is authored within two orders of magnitude of that, but a NaN leaking into
+  // `terrainHeight` would put every prop in the park at `NaN` height, and this
+  // is one line.
+  const distanceSquared = x * x + z * z;
+  const fall =
+    GROUND_SPHERE_RADIUS -
+    Math.sqrt(Math.max(0, GROUND_SPHERE_RADIUS * GROUND_SPHERE_RADIUS - distanceSquared));
+  return base - fall;
 }
 
 /** Surface normal at a point, from finite differences. */
