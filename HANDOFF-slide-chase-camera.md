@@ -423,3 +423,69 @@ unclaimed here and has been misidentified twice.
 - **QA slot not yet taken.** A raster cannot answer whether a companion filling
   21% of frame looks right to a six-year-old; that is the one open question and
   the Overseer is scheduling the browser.
+
+## The 16-seed pool sweep — finding 2's question, answered
+
+`LGP_SEED=<seed> pnpm run check:pet-slide`, every seed in `PARK_SEED_POOL`.
+Logs in `/tmp/cam519/sweep/<seed>.log`. **16/16 pass.**
+
+| seed | biggest | smallest | worst off-axis | lens above ground |
+|---|---|---|---|---|
+| 20260728 | 21% | 14.1% | 22.8° | 5.41 m |
+| 5 | 19% | 14.3% | 22.6° | 5.35 m |
+| 11 | 21% | 12.7% | 19.5° | 5.65 m |
+| 24 | 18% | 15.4% | 22.5° | 4.93 m |
+| 115 | 19% | 13.2% | 17.4° | 5.25 m |
+| 128 | 18% | 13.0% | 21.9° | 5.33 m |
+| 131 | 18% | 14.5% | 21.8° | 5.45 m |
+| 208 | 18% | 12.6% | 19.8° | 5.46 m |
+| 225 | 18% | 15.5% | 21.6° | 5.59 m |
+| 267 | 21% | 11.8% | 18.5° | 5.34 m |
+| 274 | 18% | 16.2% | 20.1° | 5.60 m |
+| 288 | 19% | 14.4% | 21.7° | 5.24 m |
+| 326 | 20% | 16.3% | 19.6° | 5.28 m |
+| 346 | 17% | 13.1% | 19.7° | 5.25 m |
+| 428 | 18% | 14.7% | 21.4° | 5.32 m |
+| 451 | 19% | 15.0% | 23.6° | 5.43 m |
+
+**Three conclusions:**
+
+1. **Nothing is near the ceiling.** Biggest raster is **17–21% against 25%**;
+   the worst park keeps four points. The reviewer's condition — "if one is [near
+   25%], this needs #518 before it merges" — **is not met**, so this can land
+   with #518 open. #518 stays just as urgent: the guard is dead, so the next
+   change here has no automatic protection either.
+2. **The aim guard has margin on every park**: 17.4°–23.6° against a 30°
+   half-fov, worst 23.6° on seed 451.
+3. **#516 does not reproduce anywhere in the pool.** With the corrected sampler
+   the lens is **4.93–5.65 m above ground on every seed, 0 frames underground**,
+   including **seed 346, the seed #516 was reported on, which now passes
+   (exit 0)** where the previous handoff recorded it red on both sides. The ray
+   fan never fires on any seed. This is a further reason the old "it's the
+   paving" conclusion had to be withdrawn rather than re-stated — but it is
+   **not** evidence that #516 is fixed. It is evidence that this instrument, on
+   these sixteen parks, does not see it.
+
+## One flake, characterised — seed 131
+
+Seed 131 exited **1** in the sweep with **no clause failure and no stack
+trace**: the wired run printed a complete, passing line and the process died
+during the control descent (`[ELIFECYCLE] Command failed`, no code).
+
+What is known, rather than guessed:
+
+- **Not reproducible.** Re-run standalone it exits **0** (and twice more after
+  that — see `/tmp/cam519/131-rep{1,2}.log`).
+- **The measurement is deterministic.** The failing run's wired line is
+  byte-identical to the clean re-run's: 704 ridden frames, 18% biggest, 14.5%
+  smallest, 21.8° off-axis, 5.45 m above ground. So the park build and the
+  entire wired descent were reproducible; only the process's survival was not.
+- It died while a `tsc --noEmit` was running concurrently in the same worktree.
+  The machine has 48 GB and no jetsam/OOM entry was found in `log show`, so
+  **the cause is not proven** and is recorded as unexplained rather than
+  asserted.
+
+**Scope note:** seed 131 is not run by CI — `check:pet-slide` is canonical-only
+(#510) — and the flake was in an ad-hoc 16-run sweep harness, not in a gate.
+Recorded here so it is not lost; it is not evidence the check is
+non-deterministic, and the numbers say it is not.

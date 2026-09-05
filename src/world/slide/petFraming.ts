@@ -71,6 +71,29 @@ export const PET_FRAME_FLOOR = 0.01;
  * that pushes the nearest companion further into frame needs the biggest
  * raster checked on the whole pool, not the smallest — `check:pet-slide` prints
  * both edges on every run for exactly this reason.
+ *
+ * ## The whole pool, measured, because canonical is one park of sixteen
+ *
+ * `check:pet-slide` is canonical-only (#510), so the ceiling was swept by hand
+ * across every seed in `PARK_SEED_POOL` — the question being whether any park
+ * is *already* near 25%, which would mean #518 had to be fixed before the aim
+ * change could land rather than after.
+ *
+ * **It is not. Biggest raster per seed, all sixteen:**
+ *
+ * | 17% | 18% | 19% | 20% | 21% |
+ * |---|---|---|---|---|
+ * | 346 | 24, 128, 131, 208, 225, 274, 428 | 5, 115, 288, 451 | 326 | canonical, 11, 267 |
+ *
+ * The range is **17–21% against a 25% ceiling**, the worst park keeps **four
+ * points** of margin, and no seed sits near the edge. The spread across sixteen
+ * parks is 4 points, so the ceiling is not being approached by a park-shape
+ * effect that canonical happens to be lucky about.
+ *
+ * That is what makes the 8% → 21% move safe to land with #518 still open. It
+ * does **not** make #518 less urgent: the guard is still dead, so the next
+ * change in this area has no automatic protection and has to sweep by hand
+ * exactly as this one did.
  */
 export const PET_FRAME_CEILING = 0.25;
 
