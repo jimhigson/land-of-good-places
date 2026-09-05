@@ -32,9 +32,10 @@ first honest run found #501).
   binding number is the foot margin. **First prediction CONFIRMED on built parks** (seeds 24/131/326: feet 0,
   posts 1–2; table in the doc). Restated one (road outside ring → feet
   bind) still unmeasured; #511 Engineer measuring next.
-- **Seed 288 throws on bridge siting, hidden as 90 skips** (#511 branch);
-  reproduction on main pending — filed under stage 4 as the first live
-  customer of crossingSites-as-exploration if it does.
+- **Seed 288 throws on bridge siting** (#511 branch only; not on main —
+  latent, revealed by the sphere). Filed under stage 4 as the first real
+  customer of crossingSites-as-exploration; the seed fix is the #511
+  Engineer's; the silent-skip harness half is #524.
   Terrain is no longer seed-dependent (1200 m sphere) — the outward
   march's bound is the support's lean limit, not the ground.
 - **Briefs**: step 1 nearly landed (byte-identical, 16 seeds). **Step 2a**

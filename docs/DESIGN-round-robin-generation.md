@@ -860,15 +860,22 @@ section above (march becomes exploration) is unchanged by them.
 *Filed here from stage 3 (5 Sep): `publishPaving()` runs inside `new World(...)`, after generation — a post-generation commit by the paths that the road's second turn today has to wait for.*
 
 *Also filed (5 Sep, from the #511 branch's `test:procgen` run): **seed 288
-throws during park construction on a bridge-siting failure**, hidden as
-90 skips — the silent-skip pathology in the wild. Reproduction on `main`
-pending. If it reproduces, it is an existing generator (crossing siting /
-bridge realisation) that does not backtrack the way this design requires,
-and it is the first live customer of "crossingSites: the march becomes
-exploration" above — a site that cannot be realised must be refused at
-commit and the next candidate tried, never a throw after the march has
-published it as fact. Until then it stands beside #503/#504 as evidence,
-and any check that skips on it must fail instead.*
+throws during park construction on a bridge-siting failure** —
+`crossings.ts:432`, "the drawn paths cross the railway at railD 35.1
+(−36.2, 2.8), which snaps to no proven bridge site", reached through
+`Scenery` → `isPlantable` → `onRailway` → `isInBridgeFootprint` →
+`computeCrossings`. It does **not** reproduce on `main` at `61e95fe5`
+(88 passed): the hill happened to hand the planner sites it liked, and
+moving the ground everywhere exercised the brittleness the hill had been
+hiding. **Latent, not absent** — filed on the stage-4 list as the first
+real customer of "crossingSites: the march becomes exploration": a site
+that cannot be realised must be refused at commit and the next candidate
+tried, never a throw after the march has published it as fact. The seed
+itself is the #511 Engineer's to fix (it exposed it); the general
+throws-instead-of-backtracks shape is this design's. Its silent half — 90
+skips that were one whole file failing to *build*, reported as quietly as
+any skip — is issue #524, independently ownable: a park that cannot be
+constructed is the suite's most severe result and must be its loudest.*
 
 The heart of Jim's brief. Path growth, railway corridor and crossing
 negotiation interleave; bridges are born from path×rail conflicts with
