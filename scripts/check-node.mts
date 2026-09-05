@@ -23,9 +23,17 @@
  * not** — measured: with `.node-version` saying 26 and fnm's active Node at
  * v25.6.1, `pnpm exec node --version` still returned v25.6.1. pnpm spawns
  * scripts with whatever `node` is first on `PATH` and has no opinion about
- * the file. Nor does the switch happen by itself outside an interactive
- * shell: `fnm env --use-on-cd` installs a `cd` hook, and an agent's
- * non-interactive shell never runs it.
+ * the file.
+ *
+ * Nor does the switch happen by itself. `fnm env --use-on-cd` installs a `cd`
+ * hook, and that hook works perfectly well in a non-interactive shell —
+ * measured, `zsh -c 'eval "$(fnm env --use-on-cd --shell zsh)"; cd <repo>'`
+ * prints `Using Node v26.5.0`. The reason an agent does not get it is simpler
+ * and worth stating precisely, because the wrong reason leads somewhere else:
+ * **the hook is never installed in that shell at all.** fnm is wired into
+ * `config.fish` only; no zsh rc file mentions it, `chpwd_functions` is empty,
+ * and no fnm function is defined. So it is not that the hook cannot fire
+ * outside an interactive shell — it is that there is no hook.
  *
  * So the declaration says what is wanted, and this check is what makes
  * ignoring it loud. A declared version that nothing enforces is a lock on a
@@ -37,10 +45,29 @@
  * the file the seven CI workflows now read too (`node-version-file`), in place
  * of seven hand-kept `node-version: 26` literals.
  *
- * `package.json`'s `engines.node` is a second statement of the same fact,
- * kept because pnpm reads it and warns on install for free. Two statements of
- * one fact is this repo's most-filed bug, so they are not kept in step by a
- * comment promising they agree: this check **fails if they disagree**.
+ * `package.json`'s `engines.node` is a second statement of the same fact. An
+ * earlier version of this comment justified keeping it by saying pnpm reads it
+ * and warns on a mismatched install "for free". **That is false on the pnpm
+ * this repo pins, and it was worth measuring rather than believing:**
+ *
+ * | pnpm | on Node 25 against `">=26"` | with `engine-strict=true` |
+ * |---|---|---|
+ * | 11.24.0 | warns `Unsupported engine`, exit 0 | exit 0 |
+ * | **12.1.0** (this repo) | **no warning at all**, exit 0 | **exit 0** |
+ *
+ * So pnpm 12 neither warns nor enforces. `engine-strict=true` was tried as the
+ * better fix — a real gate at *install* time beats a corrected sentence — and
+ * it does nothing here, under that name or `strict-engines`; in pnpm 12
+ * `engines` survives only as a filter on which optional dependencies get
+ * installed. Adding it would have been precisely the fault this whole ticket
+ * is about: a setting that looks like a gate and gates nothing.
+ *
+ * `engines.node` therefore stays as **declarative metadata** — the standard
+ * field other tools read — and buys nothing at install time. Which makes the
+ * agreement check below the only thing holding it true, and that matters more,
+ * not less: two statements of one fact is this repo's most-filed bug, so they
+ * are not kept in step by a comment promising they agree. This check **fails
+ * if they disagree**.
  *
  * ## What it prints
  *
@@ -105,9 +132,11 @@ const engines = manifest.engines?.node;
 if (engines === undefined) {
   fail(
     'check:node FAILED — package.json has no engines.node.\n' +
-      `  It should be ">=${floor}", matching .node-version. It is kept because pnpm\n` +
-      '  reads it and warns on a mismatched install for free; dropping it silently\n' +
-      '  removes that second signal.',
+      `  It should be ">=${floor}", matching .node-version. It is declarative\n` +
+      '  metadata — measured, pnpm 12 neither warns nor enforces on it — so this\n' +
+      '  check is the only thing keeping it true. Restore it, or if it is genuinely\n' +
+      '  unwanted, delete this clause deliberately rather than leaving a check that\n' +
+      '  passes by having nothing to compare.',
   );
 }
 
@@ -153,8 +182,9 @@ if (major < floor) {
       '\n' +
       '  Note that pnpm will NOT do this for you — measured: it ignores\n' +
       '  .node-version entirely and spawns scripts with whatever node is first on\n' +
-      '  PATH. An interactive shell with `fnm env --use-on-cd` switches on cd; a\n' +
-      "  script's shell does not, which is why this check exists.\n" +
+      '  PATH. And nothing switches it for you here: fnm is wired into config.fish\n' +
+      '  only, so no zsh/bash shell has the `fnm env --use-on-cd` hook installed at\n' +
+      '  all. (The hook itself works fine non-interactively; it is simply absent.)\n' +
       '\n' +
       '  Why a hard failure rather than a warning: every check below this one would\n' +
       '  have run on the same too-old runtime, and some behave differently on it.\n' +

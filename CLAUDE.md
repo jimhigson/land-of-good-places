@@ -381,7 +381,7 @@ The checks and `scripts/*.mts` run **straight on Node** — no bundler, no
 transpile step — so this repo tracks **current Node**, declared once in
 **`.node-version`** at the repo root. That is the file `fnm` reads and the
 file all seven CI workflows read (`node-version-file`). A shell that has not
-switched — any non-interactive one, and the cloud sandbox's older default —
+switched — every agent shell here, and the cloud sandbox's older default —
 gets there with one command, which needs no argument because it reads the
 declaration:
 
@@ -389,10 +389,14 @@ declaration:
 fnm use --install-if-missing
 ```
 
-**pnpm will not do this for you**: measured, it ignores `.node-version` and
-spawns scripts with whatever `node` is first on `PATH`, so `pnpm run check`
-cannot fix its own runtime. That is why `check:node` is the chain's first step
-and fails below the floor — see #506. Modern Node runs TypeScript by
+**Nothing does this for you, so type it.** Measured: pnpm ignores
+`.node-version` entirely and spawns scripts with whatever `node` is first on
+`PATH`, so `pnpm run check` cannot fix its own runtime; and `fnm env
+--use-on-cd`, which would switch on `cd`, is wired into `config.fish` only —
+no zsh/bash rc mentions it, so **no agent shell has that hook at all**. (The
+hook works fine non-interactively when it *is* installed; it simply isn't
+here.) That is why `check:node` is the chain's first step and fails below the
+floor — see #506. Modern Node runs TypeScript by
 *stripping types*, with
 no flags. So two rules, and they are not style preferences — a violation
 either fails to run or only runs on a Node nobody should still be on:

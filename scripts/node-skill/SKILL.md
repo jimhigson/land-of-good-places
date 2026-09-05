@@ -1,6 +1,6 @@
 ---
 name: node
-description: "Run this repo's checks on the Node it declares in `.node-version` (26+), which it requires because its scripts run TypeScript natively (no bundler/transpile). A shell that has not switched — any non-interactive one, and the cloud dev container's older default — fails or hangs until you run `fnm use --install-if-missing`. Use when a check errors with 'bad option', ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX, or hangs at \"measuring out the park\"; when `check:node` fails; or to reproduce CI locally. Examples: \"run check:park-boot\", \"the build says bad option\", \"validate the full suite\", \"reproduce CI\"."
+description: "Run this repo's checks on the Node it declares in `.node-version` (26+), which it requires because its scripts run TypeScript natively (no bundler/transpile). A shell that has not switched — any shell without fnm's cd hook installed, and the cloud dev container's older default — fails or hangs until you run `fnm use --install-if-missing`. Use when a check errors with 'bad option', ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX, or hangs at \"measuring out the park\"; when `check:node` fails; or to reproduce CI locally. Examples: \"run check:park-boot\", \"the build says bad option\", \"validate the full suite\", \"reproduce CI\"."
 ---
 
 # Current Node for this repo
@@ -31,9 +31,13 @@ Two things do **not** happen by themselves, both measured on this project:
   Node at v25.6.1, `pnpm exec node --version` returned **v25.6.1**. pnpm
   spawns scripts with whatever `node` is first on `PATH`; it has no opinion
   about the file. So `pnpm run check` does not fix its own runtime.
-- **`fnm env --use-on-cd` only helps an interactive shell.** It installs a
-  `cd` hook in your shell's rc file. An agent's non-interactive shell never
-  loads it, so `cd`-ing into the repo switches nothing.
+- **Nothing switches Node for you.** `fnm env --use-on-cd` installs a `cd`
+  hook, and that hook works fine in a non-interactive shell — measured:
+  `zsh -c 'eval "$(fnm env --use-on-cd --shell zsh)"; cd <repo>'` prints
+  `Using Node v26.5.0`. The reason you do not get it is that **it is never
+  installed in your shell**: fnm is wired into `config.fish` only, no zsh rc
+  mentions it, `chpwd_functions` is empty. Not "the hook cannot fire here" —
+  there is no hook.
 
 Together those are issue #506: for months the gate chain ran on whatever Node
 was first on PATH, and every local "green on Node 26" from a `pnpm run` line
