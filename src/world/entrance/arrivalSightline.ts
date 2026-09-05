@@ -177,11 +177,35 @@ const BUS_GROUND_Y = terrainHeight(BUS_STOP_POINT.x, BUS_STOP_POINT.z);
  *              its own height. The grazing ray is cast from the top because a
  *              ray that clears the top of a thing is not blocked by it; every
  *              ray below that one is.
+ * @param reach how far the thing **spreads** from that point, in metres.
+ *
+ * ### Why `reach` exists, and who passes what
+ *
+ * A planter knows where it is about to put a clump's *centre*; what a player
+ * sees is the clump's *blobs*, which stand up to `BUSH_REACH` (2.15 m) off
+ * that centre. Asking this about the centre alone answers a question nobody
+ * has: `Scenery.ts`'s bush loop did exactly that, sandwiched between an
+ * `isPlantable(x, z, BUSH_REACH)` and a `clearOfCruiser(x, z, BUSH_REACH, …)`
+ * that both correctly pass the spread — so the centre cleared the shot while
+ * a blob 2 m away stood in it.
+ *
+ * That is the two-definitions-of-one-thing bug CLAUDE.md puts at the top of
+ * the list, and it stayed invisible while the bus stopped somewhere else. The
+ * road moving the stop 3.2 m towards the wall put the corridor under the
+ * bushes' own band and three seeds went red at once (11, 24 and 5 — worst a
+ * clump at −28.9, 61.4 reaching 2.5 m).
+ *
+ * So: **a placer passes the thing's full spread; a check measuring a thing
+ * that is already built passes `0`**, because a drawn blob's own position *is*
+ * the point. `parkFacts.ts` asks per-instance and so takes the default.
+ * Widening a keep-out costs a handful of decorative bushes, which is the
+ * trade this file's header already states.
  */
-export function hidesTheArrivingBus(x: number, z: number, top: number): boolean {
+export function hidesTheArrivingBus(x: number, z: number, top: number, reach = 0): boolean {
   // Behind the bus: it cannot be in front of what it is not in front of.
-  // (`d.z` is positive — the camera is on the +z side.)
-  if (z <= BUS_FAR_Z) return false;
+  // (`d.z` is positive — the camera is on the +z side.) The spread counts here
+  // too: a clump centred behind the far flank can still reach in front of it.
+  if (z + reach <= BUS_FAR_Z) return false;
 
   const back = Math.max(0, (z - BUS_NEAR_Z) / TOWARDS_CAMERA.z);
   const topAtBus = top - TOWARDS_CAMERA.y * back;
@@ -194,10 +218,10 @@ export function hidesTheArrivingBus(x: number, z: number, top: number): boolean 
   // drives? The corridor is the bus's swept body, so "inside it, plus the
   // silhouette's own overhang" is exactly "in front of the bus at some point in
   // the run" — and it is asked of the road rather than restated from it.
-  if (distanceToEntranceCorridor(xAtBus, zAtBus) > RUN_MARGIN) return false;
+  if (distanceToEntranceCorridor(xAtBus, zAtBus) > RUN_MARGIN + reach) return false;
   // Nothing beyond the brow can hide a bus that stops existing there.
   return Math.hypot(xAtBus - BUS_STOP_POINT.x, zAtBus - BUS_STOP_POINT.z) <=
-    entranceRoadBrow() + RUN_MARGIN;
+    entranceRoadBrow() + RUN_MARGIN + reach;
 }
 
 /**
