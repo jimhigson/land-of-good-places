@@ -527,34 +527,124 @@ deferred, not failed.
    placer: this is "a feature's own supports are claims" gaining a second
    support shape, stage-4 work brought forward.
 
-Whichever he picks, the same first step is right and is **dispatchable
-today, against `main`, with no dependency on #498 or the ruling**:
+#### Stage 3, ruled (5 Sep, Jim): "there should be no 'flat ground' — it is a sphere"
 
-1. **The road becomes the first production placer** (byte-identical,
-   invisible). On `main` the road has no route search: it is
-   `entrance/layout.ts`'s constants plus `road.ts`'s `ROAD_HALF_WIDTH`.
-   Nothing moves. The step creates the **one production `GroundClaims`
-   instance** — today it is instantiated only by its unit test, and
-   `CoSolveEngine` is test-only and still types against the superseded
-   `PlacementField` — owned by `parkGeneration.ts`'s scheduler and handed
-   to `World`, and a `roadCorridor` task publishes the corridor claim
-   derived from those owners. Under ruling 1 or 2 the road's changed line
-   flows into the claim for free; under 3 the corridor is what the new
-   support kind must straddle. Brief: `BRIEF-stage3-step1-road-placer.md`.
+Jim rejected the premise of all three options. No party yields: the park
+comes off its hill (#511) and the ground becomes the surface of a large
+sphere, and the over-determination is expected to dissolve because both
+ceilings were the hill. Traced to source by an Engineer, and it holds as
+algebra:
 
-Steps 2–4 (trestles as claims; confront the ladder; negotiation) are
-**held on the ruling**, and their briefs say what each becomes under each
-answer. The swept-bus control (bus body against the **drawn post at
-height**, never the foot) is written on `main` and **watched failing**
-against today's legs before any of them lands — #498's
-`check:entrance-road` is the prior art and its reviewer's blocker is the
-spec.
+| bound | value | owner | survives the sphere? |
+|---|---|---|---|
+| trestle band inner | 6.15 | masonry clearance `1.07 + 5.08` | yes |
+| trestle band outer | 6.92 | `RIM_OUTSET_START (12) − 5.08` | **no — hill** |
+| road centre floor | 3.89 | `ROAD_HALF_WIDTH`, outside the park | yes |
+| road centre ceiling | 8.11 | `RIM_OUTSET_START − ROAD_HALF_WIDTH` | **no — hill** |
 
-**What #498 still owns:** #487's visibles (grey, curved, continues to the
-zoom-out edge) and the instrument. Whether it lands those without its
-corridor clause — which is what turns `test:procgen` red — is the
-Overseer's call; this design needs none of its code and takes its
-sixteen-seed measurements as the "before".
+The road's outset is not chosen: it derives from the bus door,
+`DOOR_PAVEMENT + BUS_DOOR_INBOARD` = **8.26**, which exceeds the 8.11 hill
+ceiling by 0.15 m — that crossing *was* the over-determination. With the
+centre at 8.26 a foot needs outset ≤ 3.86 or ≥ 12.66; the inner route is
+closed by masonry at 6.15, and ≥ 12.66 was forbidden only by
+`RIM_OUTSET_START`. So the trestles escape **outward**, and the corridor
+clause in #498's `groundIsClear` is **deleted, not tuned** (on `main` it
+never existed).
+
+**Caveat, binding until discharged:** this is constant algebra, not a
+built park. The Engineer building #511 re-measures on the **five seeds
+#498 was red on** (5, 11, 24, 131, canonical), not the canonical alone.
+Every step below says what it waits on.
+
+**The algebra is about feet. The bus meets posts.** `track.ts` draws a
+trestle as one straight trunk from the *nudged foot* to a top under the
+lane midpoint at outset 6.5 (`strut(legs, …, trunkFoot, trunkTop)`; "a
+nudged trestle leans very slightly"), and the trunk's top sits below
+`beamY` = `BASE_HEIGHT` 9.5 − `UNDULATION_REACH` 2.95 − `BEAM_DROP` 0.2 =
+6.35 m by the fork height — inside the bus body's 0–5.62 m band. A foot at
+12.66 therefore makes a trunk leaning 6.16 m sideways that crosses the
+road corridor (edges 4.37–12.15) *below bus height* for most of its
+length. That is the #498 review blocker ("sweeps the feet, not the drawn
+post; 8–9 posts per seed in the bus body") reproduced by the algebra, and
+it is the design's #504 variant by name: **a claim describes the drawn
+geometry**. A trestle's ground claim is the plan projection of everything
+of it below the corridor's headroom — for today's trunk, the segment from
+the foot to where the trunk passes the bus's height — not a foot disc.
+
+**Prediction, falsifiable by the #511 measurement:** on the sphere the
+feet go clear on all five seeds and the *posts at height* do not, with
+today's trunk shape. If the measurement disagrees, the design is wrong
+here and this paragraph is struck; if it agrees, the escape needs a
+support shape as well as an outset.
+
+**Ruling on `RADIAL_NUDGES` (Architect, 5 Sep).** The question put was
+whether to extend the ±5 range so the ordinary search can reach 12.66. No
+— and not because ±8 is the wrong number. `RADIAL_NUDGES`,
+`MANDATORY_RADIAL_NUDGES` and `WIDE_RADIAL_NUDGES` are three typed reaches
+forming a three-tier fallback ladder — the exact shape "Backtracking, one
+mechanism instead of six" deletes, and a typed reach is a "constant
+restating something computable". The trestle placer's foot search
+**marches outward from the ring asking the registry with the one
+function, and stops where the world says so** — a claim refuses it, or
+the ground ends — never where a list does. Three consequences:
+
+1. The three ladders are deleted together; there is one search with one
+   predicate and one ordering (nearest-first, deterministic).
+2. The claim it asks with is the below-headroom projection above. The
+   road's corridor claim carries its **headroom** (the bus's height from
+   its own owner, plus the clearance the swept-bus check uses — one
+   owner, read by both), because a ring passing *over* a road is fine and
+   a trunk passing *through* one is not.
+3. When the nearest allowed foot makes today's trunk cross the corridor
+   at height, the placer's "different decision" is **a different support
+   shape**, not a further foot: a trunk that rises vertically to headroom
+   before it leans, or a portal with feet either side. That is a
+   `forkPlan` decision (authored geometry — Artist input on what it looks
+   like), chosen by the same refusal path, and it is "a feature's own
+   supports are claims" gaining a second support kind. If no shape
+   serves, the refusal propagates — never a silent skip, never a warp
+   field.
+
+**Step 1's correction, folded in.** The road is **not** constants: the
+kerb's ends measure against `PARK_BOUNDARY`, and the spur's inner end
+against the plaza's *live* paving — `publishPaving()` runs inside
+`new World(...)`, after generation, so at generation the spur ends at
+z = 52.00 and once drawn at z = 55.91. Step 1 resolved it with
+`roadCorridor.ts` as the one owner plus a **re-commit once paths exist**.
+That is the provisional-claims mechanism, not a special case: the road's
+first turn commits a provisional corridor, its second realises it when
+the paving is published, both through `GroundClaims.commit` on the same
+feature name (the registry keeps the feature's order across re-commits).
+Two things follow for the later steps. A reader of the road's claim
+between the two turns reads a provisional shape — the trestles are built
+at `World.ts:214`, the entrance at `:268`, so **step 2's legs are placed
+against the provisional corridor unless the order is fixed**; the spur
+end moving 3.9 m must be shown not to reach any foot, or the legs' claims
+must come after the realisation. And `publishPaving()` running inside
+`World` is a post-generation commit by the paths — a stage-4 item, listed
+there so nobody re-files it.
+
+**The steps, re-cut for the sphere world:**
+
+1. **Road becomes the first production placer** — nearly landed (byte-
+   identical on all 16 seeds, two controls, four deliberate breaks).
+2a. **The instrument, first and alone** (`BRIEF-stage3-step2a-swept-bus-instrument.md`)
+   — dispatchable today, no dependency: the bus's swept body against the
+   *drawn* trestle posts at height, every seed, as a ratchet with a
+   baseline (the `check:coplanar` precedent), so it merges while `main`
+   is still red on it and step 2 drives it to zero. Watched failing is
+   its own definition of done.
+2. **Trestles become claims** (`BRIEF-stage3-step2-trestles-claim.md`) —
+   dispatchable when #511 (the sphere) and step 1 are both on `main`, and
+   the five-seed measurement is in. The park changes on every seed
+   (#498 counted 2–8 feet per seed in the bus body today) — visible,
+   Jim signs.
+3. **Confront the ladder** — unchanged, after step 2; the road is now a
+   genuinely two-turn task and the ladder confrontation must keep that.
+4. **Negotiation** — the first support-shape negotiation and the
+   `CoSolveEngine` migration onto `GroundClaims`; its size depends on the
+   measurement (if the sphere alone clears the posts, it shrinks to
+   counters + the engine move).
 
 ### Stage 4 mechanism — incremental route growth: explore free, commit in sections
 
@@ -710,6 +800,8 @@ committed-too-early shape rather than move it, and the crossingSites
 section above (march becomes exploration) is unchanged by them.
 
 ### Stage 4 — paths, railway, crossings migrate together (large; parks change)
+
+*Filed here from stage 3 (5 Sep): `publishPaving()` runs inside `new World(...)`, after generation — a post-generation commit by the paths that the road's second turn today has to wait for.*
 
 The heart of Jim's brief. Path growth, railway corridor and crossing
 negotiation interleave; bridges are born from path×rail conflicts with

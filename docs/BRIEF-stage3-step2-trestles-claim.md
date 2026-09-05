@@ -1,102 +1,81 @@
-# Engineering brief — stage 3, step 2: the trestles become a placer
+# Engineering brief — stage 3, step 2: the trestles become a placer (sphere world)
 
-**Status: HELD on Jim's ruling (design doc, "Stage 3, re-examined (5 Sep)").**
-#498 measured the road↔trestle pair over-determined: the ring's feet are
-boxed to outset [6.15, 6.92] by the family's brief, masonry and hill; a
-7.78 m road parallel to the wall needs its centre in [3.89, 8.11]; clearing
-a foot needs ≤ 2.1 or ≥ 10.9. No generator-owned decision can change that,
-so this brief cannot be built green on 5 of 16 seeds until one of three
-human-ruled things gives — and what this brief becomes depends on which:
+**Status: HELD until (a) step 1 (road placer) is on `main`, (b) #511 (the
+park off its hill, ground as a sphere) is on `main`, and (c) the five-seed
+measurement in the design doc's "Stage 3, ruled" section is in.** Then
+dispatchable as written. If the measurement contradicts the doc's
+prediction, the Architect re-cuts first. Authority:
+`docs/DESIGN-round-robin-generation.md`, "Stage 3, ruled (5 Sep, Jim)" and
+"A feature's own supports are claims". One engineer, one worktree.
 
-- **Apron widens** → the road sits outside the ring; legs never conflict.
-  This step is near-trivial: legs become claims and none is refused; keep it for the registry, expect identical hashes without any redundancy demo (there is no clause to be redundant to).
-- **Bus arrives radially** → the road crosses the ring once. This brief as written, minus the clause references: two feet step aside, hashes CHANGE on every seed where the road crosses the ring — visible, Jim signs.
-- **A straddling support kind** (Artist geometry) → the leg placer gains a second support shape; the refused-foot path chooses it; this brief merges with step 4's negotiation and the ruling's geometry is its input.
-
-Also re-cut 5 Sep: this brief was written against #498's file layout
-(`entrance/roadRoute.ts`, a named road clause in `railRace/track.ts`).
-**Neither exists on `main`.** Re-verify every commit point at pickup; the
-intent binds, not the references. The swept-bus control (bus body vs the
-**drawn post at height**, never the foot) must exist on `main` and have
-been **watched failing** against today's legs before this lands.
+**Visible work**: the park changes on every seed (feet leave the road
+corridor — #498 counted 2–8 per seed). Preview link with
+`/spawn?pos=…` at the gate, one sentence ("the bus's road is clear of the
+rail-race posts; the posts now stand outside it"), Jim's sign-off.
 
 ## The rule a reviewer looks for first
 
-**The exploration query and the commit check must be the same function.**
-The trestle search's "may I stand here?" during candidate scanning and the
-footprint claim's own commit check must be one function on `GroundClaims` —
-if the search pre-filters with one predicate and the claim commits with
-another, an explore-yes/commit-no disagreement becomes possible with no
-sibling to blame, and the PR is wrong even while green.
-
-## Byte-for-byte expectation: **IDENTICAL — proved, not presumed**
-
-The park must not change. Legs stand where they stood, on every pool seed,
-proved by hashing leg positions (both rings) before and after, quoted in
-the PR. This is achievable because the road's corridor claim IS the road's
-route (step 1's invariant), so a registry query against it must
-reproduce the named clause's accept/reject decisions exactly — if it does
-not, that is a real finding about the two predicates disagreeing today:
-**stop and report it, do not tune the claim geometry until the hashes
-match.** A tuned-to-match claim is a copy wearing a disguise.
+**The exploration query and the commit check must be the same function**,
+and **a claim describes the drawn geometry** (#504 variant). For a trestle
+that means the plan projection of everything below the road corridor's
+headroom — the leaning trunk, not a foot disc. A search that pre-filters
+with one predicate and commits with another, or a claim that is a foot
+disc while the drawn post leans through the road, is wrong even while
+green.
 
 ## What this step is
 
-- The trestle candidate checks in `railRace/track.ts`'s leg search become
-  **footprint claims** asked of `GroundClaims`: commit a claim per placed
-  leg; a refused candidate moves to the next (the search's existing
-  freedom), then backjumps via `blockers()`.
-- The **construction-order trick dissolves**: today the walk-past ring
-  registers collision first so the race ring's search sees its posts
-  (`RailRace.ts` constructor comment). Both rings' legs become claims in
-  one registry; the ordering effect is reproduced by claim order, and the
-  comment describing the trick is updated to describe the claims.
-- The **named road-corridor clause stays in place** (step 4 deletes it).
-  After this step it is redundant — the registry holds the road corridor —
-  and the PR should demonstrate the redundancy (see acceptance 3) without
-  removing it.
+- **Legs are footprint claims** asked of the one production `GroundClaims`
+  (step 1 created it; `World` receives it — do not make a second). The
+  claim shape per trestle is the plan projection of the support below the
+  road corridor's headroom; the corridor claim carries that headroom
+  (from the bus's own owner + the clearance the step-2a instrument uses —
+  one owner, read by both).
+- **The three nudge ladders are deleted** — `RADIAL_NUDGES`,
+  `MANDATORY_RADIAL_NUDGES`, `WIDE_RADIAL_NUDGES` (and judge `ARC_NUDGES`/
+  `WIDE_ARC_NUDGES` by the same rule; say what you decided). One outward
+  march from the ring, nearest-first, deterministic, asking the registry
+  with the one function, stopping where a claim refuses or the ground
+  ends — never at a typed reach. Ruled in the doc; do not re-argue it in
+  the PR, measure it.
+- **When the nearest allowed foot leaves today's trunk crossing the
+  corridor at height**, the placer chooses a different support shape
+  (`forkPlan`: vertical to headroom, then the fork; or a portal) — see
+  the doc's ruling point 3. If the five-seed measurement shows the sphere
+  alone clears posts at height, this bullet is dormant: say so, with the
+  numbers, and leave the shape decision to step 4. Do not author new
+  geometry without the Artist if it is needed — request it.
+- **The construction-order trick dissolves**: both rings' legs become
+  claims in one registry; the walk-past-first ordering becomes claim
+  order; update the `RailRace.ts` comment to describe the claims.
+- **Order inside `World`**: legs are built at `World.ts:214`, the entrance
+  at `:268`, and the road's corridor is *re-committed* once paving is
+  published. Either prove (measure, all seeds) that the spur end moving
+  z 52.00 → 55.91 reaches no foot, or place the legs after the road's
+  realised claim. State which and why.
+- **No named road clause on `main`.** If #498 landed first and brought
+  one into `groundIsClear`, delete it here — deleted, not tuned.
 
 ## What must not change
 
-- The park (see above). The rings' routes (`RAIL_RACE_PLAN`) are untouched
-  — this step migrates only the legs. *Staging note from the spec applies:*
-  legs off a finished ring is an interim state; the section-by-section
-  ruling is discharged in stage 4/5, not here.
-- No ladder loosening (step 3), no negotiation (step 4), no deletion of
-  the #498 clause (step 4), no new constants.
+- The ring itself (`RAIL_RACE_PLAN`, the perimeter circle — family brief).
+- Ring support: `test:procgen`'s 40 m widest-run invariant and the
+  duck-bar fairness invariant stay green on all sixteen seeds — those are
+  the invariants #498's clause turned red.
+- No ladder loosening (step 3), no cross-feature negotiation beyond the
+  refusal path (step 4), no new constants, no warp fields, no terrain
+  constants.
 
-## Acceptance — measured, not asserted
+## Acceptance — measured
 
-1. **Leg-position hashes identical** before/after, both rings, all pool
-   seeds — quoted in the PR.
-2. **One-function proof**: the search's candidate predicate and the claim
-   commit check are demonstrably the same function (by code identity, not
-   by comment). Break it deliberately — make the search use a stale copy —
-   and paste the red run.
-3. **Redundancy demonstration**: with the named road clause temporarily
-   disabled in a scratch run (not in the shipped code), leg positions
-   still hash identically, because the registry refuses the same ground.
-   Paste both hashes. This is step 4's safety case, bought early.
-4. **The registry sees every leg**: claim count equals built-leg count,
-   every pool seed, both rings.
-5. Full gates: `pnpm run check`, `pnpm run test:procgen`, `check:coplanar`
-   — exit codes captured directly, never through `tail`/`head`.
-6. `check:entrance-road`'s swept-bus control untouched and green.
-
-## Traps, pre-paid
-
-- Leg placement happens at `RailRace` **construction** in `World.ts`, after
-  generation "finishes" — the claims must land in the same registry
-  instance the generation used; check how `World` receives it and do not
-  create a second registry (one owner).
-- The walk-past/race ordering is behaviour, not decoration: two concentric
-  rings' legs must still never share ground. The crowding rule between
-  rings must survive as claims.
-- Invisible work: no player-visible change, nothing to screenshot — merges
-  after review + QA measurement without Jim; say so plainly.
-
-## Definition of done
-
-Legs are claims; one predicate; construction-order trick replaced and its
-comment corrected; byte-identical hashes quoted; redundancy of the named
-clause demonstrated; all gates green.
+1. Step 2a's ratchet reads **0 intrusions on every seed** (posts at
+   height, not feet); baseline file deleted; the check now fails on any
+   intrusion.
+2. Registry sees every leg: claim count == built-leg count, both rings,
+   all seeds.
+3. One-function proof, broken deliberately (search uses a stale copy →
+   red run pasted with geometry).
+4. Leg-position hashes before/after per seed, every change accounted for
+   as "left the corridor" — a moved foot with no corridor nearby is a bug.
+5. Determinism: two builds per seed in separate processes, identical.
+6. Full gates green; chain verified by parsing `scripts`.
