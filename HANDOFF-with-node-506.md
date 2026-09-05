@@ -1,177 +1,118 @@
-# HANDOFF — #506: `scripts/with-node` silently runs on the wrong Node
+# HANDOFF — #506 / PR #517: which Node the check chain actually runs on
 
 Model: **Claude Opus 5 (1M context)**. Role: Engineer. Branch
-`fix/with-node-506`, worktree `.claude/worktrees/with-node-506`, based on
-`origin/main` `10fb7c2d`.
+`fix/with-node-506`, worktree `.claude/worktrees/with-node-506`.
 
-Measurements on Node **26.7.0**. Exit codes from each run's own file.
+**Reworked 5 Sept 2026** on Jim's instruction — *"Use fnm to get node version
+you need"*. The earlier approach on this branch (a 230-line `scripts/with-node`
+that probed Homebrew, fnm, nvm, volta, asdf and mise for the newest Node on the
+box) is **deleted**. What follows is the current design; the superseded
+account is in this file's git history.
 
-## The two faults, and the second was invisible in the issue
+## The hole
 
-1. **It only searched nvm directories.** Reported in #506.
-2. **It derived each candidate's version by regex on the directory name**
-   (`sed -E 's#.*/node/v([0-9]+)\..*#\1 &#'`). Not in the issue, and it is the
-   deeper one: it makes the script depend on a path *layout* rather than on
-   the runtime, so every new manager needs new parsing.
+The repo declared **neither `.node-version` nor `.nvmrc`**. fnm was installed
+(1.39.0), had 26.2.0 and 26.5.0, defaulted to 25.6.1, and Jim's fish already
+ran `fnm env --use-on-cd`. So fnm asked the project which Node it wanted and
+the project never answered.
 
-## The finding that changed the fix
+Consequence, measured: `pnpm exec node --version` → **v25.6.1**, below the
+floor. Every gate line reported as "green on Node 26" from a `pnpm run`
+invocation was a claim about a runtime nobody had checked. Direct invocations
+through an explicit `node@26` path — the 16-seed sweep, the mutation proofs,
+the determinism baselines — genuinely were on 26 and stand.
 
-**Homebrew's v26.7.0 was already on `PATH`** — second, behind an fnm shim at
+## The two questions I was told to measure, and the answers
+
+### 1. Does pnpm honour `.node-version`? **No.**
+
+Measured with `.node-version` present and saying `26`, fnm's active Node at
 v25.6.1:
 
 ```
-/Users/jim/.local/state/fnm_multishells/86942_.../bin/node   v25.6.1
-/opt/homebrew/bin/node                                       v26.7.0
+.node-version says 26; fnm active is v25.6.1
+pnpm exec node          -> v25.6.1
+pnpm run (real script)  -> v25.6.1
+pnpm config get use-node-version -> undefined
 ```
 
-So this was never a missing install. `which -a node` alone would have found it.
-The script never asked the machine anything it could answer.
+Control, ruling out "pnpm just always reports the same thing": strip the fnm
+multishell from `PATH` so Homebrew's node is first, and pnpm reports
+**v26.7.0**. It reports whatever is first on `PATH` and has no opinion about
+the file.
 
-## What it does now
+**So `.node-version` alone does not fix a `pnpm run` gate line**, and the
+ticket does *not* shrink to a one-line file. `check:node` is load-bearing.
 
-- **Candidates** from `which -a node`, plus each manager that is *present*,
-  asked in its own terms — `brew --prefix <formula>` (so /opt/homebrew and
-  /usr/local both work, and keg-only `node@NN` is found), `fnm env --json` for
-  `FNM_DIR`, `$NVM_DIR`, volta/asdf/mise.
-- **Version by execution.** Every candidate is run and asked `--version`. No
-  path parsing anywhere.
-- **Fails loudly**: exit 1, listing every Node found, when nothing clears the
-  floor and nvm cannot install one. Never falls through.
-- **Prints the runtime it chose, every run**, so a transcript records it.
+### 2. Is CI affected? **No.**
 
-**No hard-coded Homebrew path**, per the brief: a longer list of directories is
-the same bug. There is **no OS-level registry of Node installs** — that is
-written into the script's header as the reason it is a list of managers at all,
-with the mitigation being that each entry is a *query to a tool that is
-present* and an unknown manager gets a loud failure naming what was searched.
+All seven workflows already pinned `node-version: 26`, so CI was always on 26
+and this is a **local-developer fix**. The PR description says so and must
+keep saying so.
 
-## A trap worth knowing: fnm multishells
+I did still change them — from the literal to
+`node-version-file: .node-version` — for a different reason: seven hand-kept
+copies of one fact is this repo's most-filed bug, and routing CI through the
+file is what makes the file load-bearing rather than decorative. **No change
+to which Node CI runs.**
 
-My first version also globbed `~/.local/state/fnm_multishells/*/bin/node`.
-That is **12,658 entries against 12 real installs** on this machine — one per
-shell session ever opened — and executing each hung the script for minutes. They
-are symlinks *into* the real installs, so they add nothing. Dropped, and
-candidates are now deduplicated on their **resolved** directory.
+## A third finding, not in the brief
 
-Runtime is now **1 second**.
+**`fnm env --use-on-cd` only ever helps an interactive shell.** It installs a
+`cd` hook in Jim's *fish* rc. An agent's Bash tool shell is **zsh** — proved
+by `functions -q` erroring with `(eval):functions:1: bad option: -q` — so the
+hook does not exist there and `cd`-ing into the repo switches nothing.
 
-## Proved red
+That is why the fix cannot be "declare the file and let the hook do it": for
+every agent on this project, nothing switches automatically at all. The
+declaration plus a loud check is the whole mechanism.
 
-Mutation: `MIN_MAJOR=26` → `99`, so nothing on the machine qualifies.
+## What the branch now does
 
-```
-EXIT=1
-stdout bytes: 0          <- the command did NOT run: no silent fall-through
-with-node: FAILED — no Node >= 99 on this machine.
-  Nodes found, none new enough:
-    v26.7.0  /opt/homebrew/bin/node
-    …14 more, with real versions read from the binaries
-```
+- **`.node-version`** = `26` — the single owner.
+- **`scripts/with-node` deleted.** Replaced by `fnm use --install-if-missing`,
+  which takes no argument because it reads the declaration. Verified: installs
+  if absent, switches, and `pnpm exec node` then reports 26.5.0.
+- **`check:node`** stays, first step of `check`. Reads `.node-version` as
+  owner, and **fails if `engines.node` disagrees with it** — a mechanism, not
+  a comment promising two numbers match.
+- **Seven workflows** read `node-version-file: .node-version`.
+- **CLAUDE.md and `scripts/node-skill/SKILL.md`** stop naming the deleted
+  script; both carry the two measurements above, since neither is guessable.
 
-Restored to 26: exit 0, `with-node: v26.7.0 at /opt/homebrew/bin/node`, 1 s.
+## Proved red, on this geometry
 
-## Also fixed: the same bug in the documentation
+`check:node`, all three states, exit codes read from the run
+(`.node-version` = `26`, `engines.node` = `">=26"`):
 
-`scripts/node-skill/SKILL.md` told agents to run **`npm`** in a pnpm repo,
-called `build` "the whole CI suite" (it is `vite build` now), and its
-"by hand instead" recipe **hard-coded `/root/.nvm`** — the identical
-nvm-only assumption that caused #506. A documented recipe that hard-codes a
-path is the same defect as a script that does, and it *outlives* the script,
-because nobody runs a comment to find out it is wrong.
+| state | exit |
+|---|---|
+| running Node v25.6.1 | **1** — names `fnm use --install-if-missing` |
+| `engines.node` mutated to `">=25"` | **1** — prints both numbers |
+| running Node v26.5.0, both agreeing | **0** |
 
-## Verification
+Chain step **sets** compared by parsing, never grepping: **59 → 60, none
+removed, one added** (`pnpm run check:node`); no script *name* removed either.
 
-`bash -n` clean. Both invocation forms exercised (with a command, and bare).
-Gates in flight: `/tmp/wn-{check,procgen,coplanar,build}.exit`.
+Workflows verified by **parsing** all seven (ruby YAML), not grepping: each
+loads, and every `setup-node` step's `with` is `node-version-file:
+.node-version`. No `node-version: 26` literal remains.
 
-## The scope grew, and this is why
+## Traps recorded
 
-**`with-node` was a lock on a door that is not in the wall.** Fixing it is
-necessary and insufficient: **no script in `package.json` routes through it.**
-Every `check:*` step invokes a bare `node`, so the chain runs on whatever is
-first on `PATH` — here **v25.6.1**, below the floor, with 26.7.0 installed a
-directory away.
-
-Measured, not assumed: `pnpm exec node --version` → `v25.6.1`, and
-`node -e "…scripts…"` shows **0 of 60** scripts pin a Node.
-
-So **every local "gates green on Node 26.7.0" report tonight — mine included,
-across #512 and #515 — was a claim about a runtime nobody had checked.** The
-distinction that survives: direct invocations through the explicit
-`/opt/homebrew/opt/node@26/bin/node` path (the 16-seed sweep, the mutation
-proofs, the 13-run determinism baseline) genuinely were on 26 and stand; the
-`pnpm run` gate lines did not. The damage is to the claim, not the evidence.
-
-### `check:node`, at the head of the chain
-
-`scripts/check-node.mts` states the runtime on every run and **fails below the
-floor**, naming the command to type before explaining itself. Verified both
-ways: exit **1** on the machine's default v25.6.1, exit **0** under 26.7.0,
-and `scripts/with-node pnpm run check:node` green end to end.
-
-**One owner for the floor: `package.json`'s `engines.node`.** This deletes a
-duplicate I had myself just written (`MIN_MAJOR=26` in `with-node`) — the
-repo's most-filed fault, committed inside the fix for a bug about believing a
-stale local copy of the truth. `with-node` parses it with `sed`, never by
-running a Node, because it exists for the case where the available Node is
-wrong or missing.
-
-Two things checked before shipping it, either of which could have broken the
-fleet:
-
-- **pnpm warns but does not fail** on a mismatched `engines` (measured: exit 0,
-  `[WARN] Unsupported engine`; no `engine-strict` in `.npmrc`). Declaring it
-  cannot break an install — and it buys a free second signal.
-- **All seven CI workflows already pin `node-version: 26`**, so the new gate
-  cannot redden CI.
-
-Chain step **sets** compared against `origin/main` by parsing (never grepping):
-**59 → 60, none removed, one added.**
-
-### This changes the command every agent types
-
-`pnpm run check` now **fails** on this machine unless run as
-`scripts/with-node pnpm run check`. That is the intended effect — a silent
-wrong runtime becomes a loud one — but it is a workflow change, not just a new
-check, and whoever merges should know that.
-
-**Deliberately not done here:** rerouting every script through `with-node`.
-That changes how every gate in the project executes and wants its own change
-and its own review. Next step, not this PR.
-
-## A red check found on the way, and not reproduced
-
-`pnpm run check` **failed once** on this branch at `check:pet-slide` — step ~44
-— dying after its first line with **no verdict, no `FAILED`, no stack**. Run
-alone immediately after: exit 0, 675 frames, `deepest inside her 0.00`. A full
-re-run of the chain: **exit 0**.
-
-So: **once, not reproduced.** Still a red check by this project's rules. What
-was ruled out, so the next person inherits the elimination rather than a clean
-slate:
-
-- **Not a crash.** No report in `~/Library/Logs/DiagnosticReports` for `node`,
-  where a genuine segfault or abort would leave one. Silent death with no
-  output points at an external **SIGKILL** — memory pressure is the obvious
-  candidate for step ~44 of a chain that builds a full 3D park per step.
-- **Not self-inflicted.** The failed run's log closed at **12:16:51**; every
-  `kill` issued in this session ran earlier, during script debugging.
-- **Not caused by this branch**, which touches only `scripts/with-node`,
-  `SKILL.md`, `check-node.mts` and the manifest — none of which the failing
-  step invokes.
-
-### Near-miss worth recording
-
-My kill pattern `grep "[w]ith-node"` **would have matched the gate shell's own
-command line** (`cd …/worktrees/with-node-506 && pnpm run check …`), and the
-same pattern *did* kill one of my own test commands earlier. That is CLAUDE.md's
-blanket-match hazard in a new costume: the worktree *name* made an
-innocent-looking pattern dangerous. Match on PID, or anchor the pattern on the
-binary rather than on any path.
+- **`fnm use` mutates a symlink shared by the whole session.**
+  `FNM_MULTISHELL_PATH` is inherited from the Claude Code process, so an
+  `fnm use` in one Bash call changes `node` for *every later call in that
+  session*. I contaminated one measurement this way and had to redo it with an
+  explicit clean `PATH`. Restore with `fnm use default` when measuring.
+- **Blanket process matches bite here.** `grep "[w]ith-node"` matches the gate
+  shell's own command line, because the worktree is *named* `with-node-506`.
+  Kill by PID, or anchor on the binary.
+- **`setup-node` accepting a bare major from `node-version-file`** is proved
+  by this PR's own CI run, not locally — that is the honest verification and
+  it is loud if wrong.
 
 ## Status
 
-Invisible to a player → review → QA → merge without Jim. **Do not merge.**
-Gates re-running under a genuinely current Node
-(`/tmp/wn-{check,procgen,coplanar,build}3.exit`), which doubles as a third
-crash trial. Raise the PR once they are green.
+Gates run on **Node v26.5.0** (`fnm use --install-if-missing` in the same
+shell). Invisible to a player → review → QA → merge without Jim.
