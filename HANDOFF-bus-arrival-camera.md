@@ -896,3 +896,339 @@ reproduces ~43% empty band at t=3.00s. Only then trust it on perspective.
 
 Nothing built, nothing committed but this note. No code change may be the right
 answer; that is a live possibility, not a fallback.
+
+---
+
+# Round nine, continued — MEASURED. Read this before you touch the shot
+
+**Handing over.** Jim has folded the arrival camera, the perspective projection,
+the sphere ground (#511) and the entrance road into **one branch owned by the
+`feat/no-hill-511` Engineer**. This branch is not being continued separately;
+its history is being merged, not discarded. Everything below is for whoever
+picks the shot up on that branch.
+
+## The headline, in two sentences
+
+**Perspective removes the empty ground completely — measured 27.4% → 0.00%, on
+rendered pixels, at every instant of the shot.** But the arrival shot **as built
+today is unusable under perspective for a different reason**: it dives its
+stand-back to 4–6.6 m, which was free in orthographic and is a ~20× magnification
+in perspective, so from elapsed ≈2.0 s to ≈9.3 s the frame is filled with a
+child's cheek.
+
+---
+
+## 1. Where the shot lives
+
+| file | what it owns |
+|---|---|
+| `src/world/entrance/ArrivalSequence.ts` | **everything about the shot.** `arrivalShot(elapsed, archPass)` (line ~820) is a *pure* function returning `{ yawDegrees, pitchDegrees, zoom, distance, watchesTheDoor, ownsTheZoom }`. `solveArchPass` returns `{ sheThrough, eyeThrough }`. |
+| `src/core/IsoCamera.ts` | `setShotOverride(yaw, pitch, distance)` — a **delta** from the rig's own `offset`, so landing is `(0,0,0)` by construction. `applyFrustum()` is where projection is decided. Exports `CAMERA_FOCUS_LIFT`. |
+| `src/Game.ts` | wiring only — drives the shot, clears it once when it lets go. |
+| `scripts/check-arrival-camera.mts` | the check, 39 clauses, in the `check` chain as `check:arrival-camera`. |
+
+### The timeline, resolved to numbers
+
+Read from source (`ArrivalSequence.ts` lines 174–188), because the derived
+constants cannot be `import`-ed from a bare `node -e` — the repo uses
+extensionless imports and the resolver is the check-script wrapper's:
+
+```
+ROLLING_IN            3.0     AT_STOPPED        = 3.0   (tilt reaches zero here)
+DOORS_OPENING         0.8     AT_WALKING        = 4.8   (framing pushes in here)
+STEPPING_DOWN         1.0     ARRIVAL_CONTROL_AT= 9.3   (she gets the controls)
+WALKING_IN            4.5     ARRIVAL_RISE_TAIL = 1.6
+BUS_PULLS_AWAY        3.0     AT_SHOT_HOME      = 10.9  (shot returns null)
+```
+
+**The wide-and-level window is `AT_STOPPED` → `AT_WALKING`, i.e. elapsed
+3.0 → 4.8 s.** That is the 1.8 s in which the tilt is already zero but the zoom
+has not pushed in yet, so the frame is *tall* and level — and it is where the
+empty band is worst. The door beat proper is the tight end of the same stretch.
+
+`walkIn` drives her along a **quadratic bezier under a `smoothstep`**, so her
+pace is not constant: peak ≈1.5× average. The game's measured pace through the
+gate is ~**4.24 m/s** against `NPC_WALK_SPEED`'s ~2.55 m/s average — that is
+expected from the smoothstep, and it is why the check derives its synthetic
+sweep spacing as `offset / pace` over a walking band rather than typing a
+spacing (round five). **Do not re-type it.**
+
+The dive is `smoothstep(gatewayEntered - ARRIVAL_DIVE_SECONDS, gatewayEntered, elapsed)`
+with `ARRIVAL_DIVE_SECONDS = |ARRIVAL_ARCH_EYE_OFFSET_Z| / (4 * NPC_WALK_SPEED)`.
+
+---
+
+## 2. Where the 43% came from, and how to re-measure it
+
+**Provenance.** `scripts/check-arrival-camera.mts`, the stderr note at the end
+of the door-beat clause (~line 704). It is **printed, never asserted** — "how
+much empty frame is acceptable" is a composition question and Jim's alone.
+
+```
+pnpm run check:arrival-camera        # exit 0
+```
+
+prints, on this branch head, unchanged:
+
+```
+worst frame in the shot, at t=3.00s:  8.7761 m of a 20.3837 m frame (43.1%)
+tightest level frame (the door beat's own):  1.8513 m of a 6.5340 m frame (28.3%)
+390x844 portrait, door beat:  3.7690 m of a 10.3695 m frame (36.3%)
+```
+
+**I ran that as my control before trusting anything, and it reproduces exactly.**
+
+### The formula, and why it is ORTHOGRAPHIC-ONLY
+
+```
+band = frameHeight / 2 - eyeHeight
+frameHeight = 2 * max(CAMERA_VIEW_HEIGHT/2, CAMERA_MIN_VIEW_WIDTH/2/aspect) / zoom
+            = 15 / zoom   at aspect 1.6
+```
+
+This is derived from the ground being seen **exactly edge-on**: an orthographic
+camera at zero pitch projects the ground plane to a *line* at the eye's own
+height, and nothing renders below it.
+
+**Under perspective this quantity does not exist.** A horizontal perspective
+camera puts the **horizon at the vertical centre of frame** and the ground fills
+the entire lower half continuously. Pointing this formula at a perspective
+camera would print a number describing nothing — the "assertion reporting
+success about something it is not describing" fault this repo keeps hitting.
+**Do not port it. Delete or gate it if the park goes perspective.**
+
+Second, independent reason it cannot see perspective: `perspectiveFlag.ts`'s
+`readFlag()` returns **`false` when there is no `location`**, so *every check
+script gets the shipped orthographic projection by construction*. **A fully
+green `pnpm run check` says nothing whatever about the perspective look.** That
+is a live blind spot on the merged branch.
+
+---
+
+## 3. What I actually measured, on rendered pixels
+
+### The rig
+
+- Scratch worktree: this branch + `git cherry-pick 96b20c8f` (the
+  `?projection=perspective` prototype from `feat/no-hill-511`). Cherry-picked
+  **clean**; `tsc --noEmit` exit 0 on the combined tree. Not pushed anywhere.
+- Dev server `vite --port 5417 --strictPort`. (5391 was taken by another agent —
+  `--strictPort` is what made that loud rather than silent. Pick your own.)
+- `playwright-core` is a dependency and Chromium 1234 is installed, so this
+  needs **no MCP browser** and no ownership grant. 1280×800 = aspect **1.600**,
+  matching the check's `DEFAULT_ASPECT`.
+
+### Two traps in the harness, both cost me a run
+
+1. **`btn.click()` from `page.evaluate` is ignored** — the title screen needs a
+   *trusted* event. I captured 121 frames of the character-preview screen before
+   noticing. Use a real input click.
+2. **Playwright's own `.click()` then times out under the dilated clock**, because
+   its actionability check waits for the element to be "stable" across animation
+   frames and a 10× rAF never settles. Take the `boundingBox()` **before**
+   dilating, then `p.mouse.click(cx, cy)`.
+   Also, per round eight: **inject the dilation after the park has built**, never
+   before — a slowed rAF slows the generator too.
+
+### The instrument, and the control that caught it being wrong
+
+My first pixel instrument was **"lowest row carrying geometry"**. It reported
+**0.00% band on every frame**, including frames where the void is plainly
+visible. It was wrong: a foreground bush draws all the way to the bottom edge,
+so the lowest-geometry row is 100% regardless of the void. *The control caught
+it; the number was clean, decisive and entirely false.* This is the third time
+this file records that shape — run the control.
+
+The working instrument: **the void is one exact flat colour, `RGB(216,228,234)`**
+(the clear colour — note it is *not* the sky dome, which is `(87,173,234)` blue
+and gradient-shaded). Classify `|c - (216,228,234)| <= 4` per channel.
+
+Controlled against the analytic figure:
+
+```
+door beat (analytic says 28.3%):   measured void 26-28% of frame,
+                                   median column band 28.5-31%
+```
+
+The ~2 pt excess is the terrain's own slope — round eight saw the same sign
+(ground line observed ~68% vs 71.7% predicted). **The instrument agrees with
+the analytic one where both are valid, so it is measuring the same thing.**
+
+The analytic **43.1%** is *not* reproduced as a contiguous bottom-of-frame run
+at elapsed 3.0, and that is correct rather than a fault: the analytic figure
+assumes a bare ground plane, while the real park has the bus and furniture
+partly filling the lower frame at the wide moment. Total void there is still
+27.1% of frame.
+
+### The result
+
+Void (flat clear colour) as % of frame, 1280×800, seed as generated on a fresh
+profile, `t` measured from the click:
+
+```
+  t     ortho   persp    where
+ 0.5     0.00    0.00    before the shot, rig framing
+ 1.5     0.00    0.00    shot taking over
+ 3.0    27.12    0.00    level + wide  (the analytic 43.1% moment)
+ 5.0    27.85    0.00    door beat     (the analytic 28.3% moment)
+ 7.0    27.43    0.00    arch pass
+ 9.5     0.00    0.00    handing back
+11.5     0.00    0.00    rig framing
+```
+
+**Ortho carries a 27–28% empty band right across the level stretch. Perspective
+carries none, anywhere.**
+
+### And the reason perspective is not yet a free win
+
+Per-frame edge-detail, perspective ÷ ortho (a proxy for "is the camera buried
+in one surface"):
+
+```
+ t     0.5   1.0   1.5 | 2.0   3.0   5.0   6.0   7.0   9.0 | 9.5  10.5  11.5
+ratio 1.15  1.04  0.86 |0.20  0.54  0.22  0.08  0.12  0.20 |0.67  1.04  1.13
+```
+
+Collapse from **t ≈ 2.0 to t ≈ 9.3**, recovering at 9.5. `ARRIVAL_CONTROL_AT`
+is **9.30** — the recovery lands exactly on it, which is what identifies the
+cause as the shot's own camera override rather than anything in the park.
+
+Looked at, not just counted: at t=5.00 and t=7.00 the frame is a child's cheek,
+blush and eyebrow, edge to edge. At t=1.00, t=10.00 and t=11.50 perspective
+looks **good** — park legible, ground filling the lower frame, no void.
+
+**So the 0.00% at t=3.0–7.0 is real but not sufficient**: there is no void
+because there is no ground in shot, only a face. Perspective genuinely removes
+the void — the geometry guarantees it and the correctly-framed instants confirm
+it — but the shot's own composition must be fixed before anyone can *judge* the
+level beat under perspective.
+
+---
+
+## 4. The root cause, stated so it is not re-derived
+
+**In orthographic, stand-back is inert for framing.** That is round one's
+founding finding: sliding an ortho eye along its own view axis changes nothing
+on screen. So `ARRIVAL_DOOR_DISTANCE` (~6.6 m) and `ARRIVAL_ARCH_DISTANCE`
+(4.0 m) were free to be used purely as **occlusion** controls — keeping park
+furniture out from between lens and child, and threading the arch.
+
+**In perspective, stand-back is the whole framing.** And the prototype derives
+its FOV against a *constant*:
+
+```ts
+// IsoCamera.applyFrustum, feat/no-hill-511
+this.camera.fov = (2 * Math.atan(halfHeight / CAMERA_DISTANCE) * 180) / Math.PI;
+```
+
+`CAMERA_DISTANCE = 90`, `frustumBase() = max(15/2, 11/2/1.6) = 7.5`, so default
+zoom 1 gives **fov 9.53°** — *not* the ~22° I was briefed with; read it from the
+source. At the door beat's `ARRIVAL_DOOR_ZOOM` (frame 6.534 m ⇒ zoom 2.2957) the
+fov is **4.157°**, and a 4.157° lens at the shot's actual **6.6 m** frames about
+**0.48 m** of world height against a 1.4157 m child. She is ~3× the frame.
+
+> ### This is exactly the shape of #518, and it should be flagged as such
+>
+> #518 on this same camera family was the **seat-not-body** bug: a distance
+> measured to a companion's *seat* rather than to its *body*. Here the FOV is
+> measured against `CAMERA_DISTANCE`, the rig's convenient constant, rather than
+> against **where the eye actually is this frame** — which the arrival shot
+> deliberately overrides. Same disease: a quantity taken against a convenient
+> origin instead of against the thing that gets drawn.
+>
+> **The fix is one owner:** derive the fov from the *live* stand-back
+> (`setShotOverride`'s `distance`) so that "the zoom asks for N metres of world
+> at the subject" stays true at any stand-back. Everything else on this branch
+> that reads `CAMERA_DISTANCE` while a shot override is active wants the same
+> audit — I did not do that audit.
+
+---
+
+## 5. What is unfinished, and what I assumed but did not prove
+
+- **Not proved: that a *correctly framed* level perspective shot has no void.**
+  The geometry says the horizon sits at frame centre so it cannot; the
+  correctly-framed instants (t ≤ 1.5, t ≥ 9.5) show 0.00%; but those are all
+  *pitched* rig frames, not level ones. The discriminating instants are exactly
+  the broken ones. **Fix the fov/stand-back coupling and re-measure at elapsed
+  3.0–4.8 — that is the one experiment that closes this.** It is cheap: the
+  harness below already does it.
+- **One measurement disagreement, left open rather than resolved.** Round eight
+  recorded the shot's clock as running **~2.0 s behind the click**. My frames say
+  the offset is **≈0** — the void appears at t≈2.5–3.0 against a level stretch
+  starting at elapsed 3.0, and the perspective collapse ends at t=9.3–9.5 against
+  `ARRIVAL_CONTROL_AT` = 9.30. Two independent landmarks agree on ≈0. I did not
+  chase why round eight saw 2.0 s (different injection point, possibly a fade).
+  **Do not trust either number blind; re-derive it from `ARRIVAL_CONTROL_AT`,
+  which is a landmark you can see in the frames.**
+- **One seed only.** Round eight's composition-is-seed-stable finding was not
+  re-tested under perspective. The magnification fault is structural so seed
+  cannot matter, but the *look* once fixed will need several parks.
+- **`pnpm run check` / `test:procgen` / `build` were NOT run by me on this head.**
+  My only commits are handoff text (markdown), so no code changed and nothing can
+  have regressed — but that is reasoning, not a green run. The last full green
+  run is round eight's. **Run all three on the merged branch.**
+- `ARRIVAL_GATE_STANDOFF = 3` is still in the tree. Round six established its
+  original justification was false and round seven corrected its doc; nobody has
+  re-justified or removed the constant itself.
+- **`.claude/worktrees/bus-camera` holds a STAGED REVERT** — −1260 lines,
+  `ArrivalSequence.ts` back to an older shape, this handoff's rounds three-plus
+  deleted. It is not work. I left it untouched per CLAUDE.md and adopted none of
+  it. Do not `git add` anything from that worktree. `bus-camera-2` is clean.
+
+## 6. The harness, so none of this is re-derived
+
+Capture (run from inside the package, or `playwright-core` will not resolve):
+
+```js
+// capture.mjs — node capture.mjs ortho|persp
+import { chromium } from 'playwright-core';
+import { mkdirSync } from 'node:fs';
+const SLOW = 10, mode = process.argv[2];
+const url = 'http://localhost:5417/arrive' + (mode === 'persp' ? '?projection=perspective' : '');
+const outDir = `/tmp/bc4-${mode}`; mkdirSync(outDir, { recursive: true });
+const b = await chromium.launch({ channel: 'chromium',
+  args: ['--use-gl=angle','--use-angle=metal','--ignore-gpu-blocklist'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+await p.goto(url, { waitUntil: 'domcontentloaded' });
+await p.waitForFunction(() => [...document.querySelectorAll('button')]
+  .some(x => /Go to the park/.test(x.innerText)), null, { timeout: 120000 });
+// box BEFORE dilating: actionability never settles under a slowed rAF
+const box = await p.getByRole('button', { name: /Go to the park/ }).boundingBox();
+await p.evaluate((SLOW) => {            // AFTER the build, never before
+  const raf = window.requestAnimationFrame.bind(window); let origin = null;
+  window.__dilation = { fake: 0, real: 0 };
+  window.requestAnimationFrame = (cb) => raf((t) => {
+    if (origin === null) origin = t;
+    const fake = origin + (t - origin) / SLOW;
+    window.__dilation.fake = fake - origin; window.__dilation.real = t - origin; cb(fake); });
+}, SLOW);
+await p.evaluate(() => { window.__clickedAt = window.__dilation.fake; });
+await p.mouse.click(box.x + box.width / 2, box.y + box.height / 2);  // trusted input
+await p.waitForFunction(() => ![...document.querySelectorAll('button')]
+  .some(x => /Go to the park/.test(x.innerText)), null, { timeout: 60000, polling: 200 });
+for (let want = 0; want <= 12.0001; want += 0.1) {
+  await p.waitForFunction((w) => (window.__dilation.fake - window.__clickedAt) / 1000 >= w,
+    want, { timeout: 60000, polling: 16 });
+  await p.screenshot({ path: `${outDir}/t${want.toFixed(2)}.png` });
+}
+await b.close();
+```
+
+Measure (python3 + PIL, both present on this Mac; numpy is **not**):
+
+```python
+from PIL import Image
+VOID=(216,228,234); TOL=4          # the flat clear colour. NOT the sky dome.
+def voidfrac(path):
+    im=Image.open(path).convert('RGB'); w,h=im.size; px=im.load(); n=t=0
+    for x in range(0,w,4):
+        for y in range(0,h,2):
+            c=px[x,y]; t+=1
+            if all(abs(c[i]-VOID[i])<=TOL for i in range(3)): n+=1
+    return n/t
+```
+
+**Control it before you trust it:** ortho at the door beat must come out
+26–28%, matching `check:arrival-camera`'s analytic 28.3%. If it does not, the
+instrument is wrong, not the shot.
