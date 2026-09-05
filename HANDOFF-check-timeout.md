@@ -296,3 +296,26 @@ The honest question is *how much slower than the slowest already seen*:
 
 **Two correct numbers do not necessarily multiply.** Worth remembering next
 time a percentage and a ratio are sitting in the same table.
+
+## Follow-up: the measurer had the same bug it was built to catch
+
+`measure-check-chain.mts` called `capSeconds()` with no argument — always
+`checks.yml`'s 30 minutes, whatever log it was given. A `Procgen invariants`
+log measured as **"9m56s, 33.1% of cap used"**; the truth is **66.2% of its own
+15-minute cap**. Wrong by 2×, in the reassuring direction, from the tool built
+to stop that.
+
+Fixed: the log names its own job in column 1, and `capSecondsForJob` scans the
+workflows for the one declaring that job `name:` — which is already unique,
+because that string is what GitHub matches a required status check by. **No
+default**: absence and ambiguity both throw, since a fallback is what caused
+this.
+
+Controls: procgen log 15m/66.2%, checks log unchanged 30m/87.6%, timed-out run
+still fires OVER CAP, unknown job exits 1, explicit workflow argument still
+overrides.
+
+**The generalisable bit:** when this branch's watchdog was extended to a second
+workflow, Control B caught that it read the right cap. Nobody ran the equivalent
+control on the *measurer* until a reviewer asked. A mechanism proven against one
+input is not proven; the second input is where the hard-coded assumption shows.
