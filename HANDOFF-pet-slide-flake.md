@@ -210,3 +210,75 @@ Full gates re-queued after the #507 sweep (`/tmp/psflake/r2-*.exit`).
 
 `git worktree remove .claude/worktrees/pet-slide-pre508` (detached at
 `3aa55407`, created only for measurement B).
+
+---
+
+## Review round 3 (5 Sep) — rebase onto #515, and the body's reproduction
+
+Model: **Claude Opus 5 (1M context)**, Engineer, same as the agent replaced.
+Measurements on Node **26.7.0**; exit codes from each run's own `.exit` file.
+
+### The reviewer was reading a stale head
+
+Round 3's review (5 Sep 22:04) quotes `park seed 20260728 (remembered)` and
+lists `(remembered)` as a non-blocking finding. **It was already fixed** — by
+`0f516e63`, pushed 4 Sep, which is two commits before the head the review was
+posted against. The reviewer's rebase trial branch (`review-512-rebase-trial`,
+`d860e9a2`) is built from `76bd311b`, i.e. one commit *before* the canonical
+fix. Their three-dot diff of "2 files" follows from that, as does their
+explanation that `parkSeedPool.ts` and `check-seed-pool.mts` were "#508's,
+appearing only because the merge base is stale" — they are in fact **this
+branch's own** changes.
+
+So of the review's items: blocking 1 (rebase) was real and is done; blocking 2
+(stale reproduction) was real and is done; the non-blocking `(remembered)` item
+and round 2's `ok`-line item were **both already in the branch**.
+
+### Rebase — clean, and #515 survived
+
+`git rebase origin/main` onto `61e95fe5`, no conflicts, 8 commits replayed.
+
+- Three-dot diff still 4 files, no deletions.
+- `bendAllowanceExhaustions` (#515's): **3** references on `main`, **3** on
+  HEAD. Checked deliberately — a clean rebase is the shape of a silent revert.
+- `check` chain: 59 steps both sides, **step sets identical**, parsed not
+  grepped. Branch does not touch the chain.
+
+### #507 is fixed by #515 — the old reproduction is dead
+
+Measured myself on the rebased tree, not taken from the review:
+
+| run | exit | ridden frames |
+|---|---|---|
+| unpinned | **0** | 624, `park seed 20260728 (canonical)` |
+| `LGP_SEED=346` | **0** | 634 |
+| `LGP_SEED=11` | **0** | 739 |
+
+Both #507 seeds green. Also note **675 → 624** on the canonical park: any note
+quoting 675 for this check predates #515.
+
+### The replacement reproduction, and its geometry
+
+Mutation: `const ON_CHUTE = 0.5;` in `scripts/check-pet-slide.mts`. **Exit 1**,
+`check:pet-slide FAILED on park seed 20260728 (canonical)`,
+`Little Mouse was 0.76 m off the chute on ridden frame 121 (trough allows 0.50 m)`.
+
+Proved against: real `ON_CHUTE` = **1.5014 m** =
+`hypot(halfWidth 0.9500, above 0.8600) + PARADE_MEMBER_RADIUS 0.22`; worst
+off-chute on the green run = **0.78 m**. Fires because `0.50 < 0.78`; green
+because `1.5014 > 0.78`. **Stops reproducing** if the worst off-chute drops
+under 0.50 m or the envelope moves — then pick a threshold under the
+then-current worst off-chute, which the green run prints. Mutation reverted.
+
+### Also taken this round
+
+`e4a104a4` — the comment now says what the `drawn` tripwire covers (that one
+`inNode()` branch, not general assurance) and that this check measures **1 park
+of 16**, the canonical seed. Both were review asks; the second is #510's gap,
+made legible rather than closed.
+
+### Note for whoever runs the gates next
+
+This worktree's `CLAUDE.md` adds **`pnpm run check:coplanar`** as a third
+pre-push gate (own workflow, not in `check`). Run it; the shared checkout's copy
+of CLAUDE.md does not mention it.
