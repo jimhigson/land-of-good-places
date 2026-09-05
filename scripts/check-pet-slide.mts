@@ -109,6 +109,17 @@ const { terrainHeight } = await import('../src/world/terrain.ts');
 const { PET_FRAME_FLOOR, PET_FRAME_CEILING } = await import(
   '../src/world/slide/petFraming.ts'
 );
+// **#518's instrument.** The near bound's own counters, so "it fires" and "it
+// cannot fire" are distinguishable from a run rather than from reading the
+// source. `CEILING_REJECT_ABOVE` comes from the solver too — printing the
+// worst estimate beside a threshold restated here would be the copy this
+// module family keeps being bitten by.
+const {
+  chaseCeilingRejections,
+  chaseCeilingCalls,
+  chaseCeilingWorstShare,
+  CEILING_REJECT_ABOVE,
+} = await import('../src/world/slide/chaseEye.ts');
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
 
 // Live controls, as `check:slide-rider` uses: boarding the slide is a change of
@@ -1274,6 +1285,14 @@ async function ride(wired: boolean): Promise<RunResult> {
       // of it.
       `biggest pet ${(biggestPet * 100).toFixed(0)}% of frame — ${biggestPetName}, ` +
       `against a ${(PET_FRAME_CEILING * 100).toFixed(0)}% ceiling), ` +
+      // **#518: did the near bound do anything?** Printed every run, because
+      // the whole defect was a guard that looked calibrated and rejected
+      // nothing, and only a count can tell that from a guard with nothing to
+      // reject.
+      `near bound ${chaseCeilingRejections()} rejections in ${chaseCeilingCalls()} calls ` +
+      `(worst estimate ${(chaseCeilingWorstShare() * 100).toFixed(1)}% against ` +
+      `${(CEILING_REJECT_ABOVE * 100).toFixed(1)}% to reject)` +
+      `${chaseCeilingRejections() === 0 ? ' — NEVER FIRED' : ''}, ` +
       // The #514 aim guard's own number, printed green or red.
       `nearest pet worst ` +
       `${worstPetOffAxis < 0 ? 'NEVER MEASURED' : `${worstPetOffAxis.toFixed(1)}° off the lens axis (frame ${worstPetOffAxisFrame}, half-fov ${petHalfFov.toFixed(1)}°)`}, ` +
