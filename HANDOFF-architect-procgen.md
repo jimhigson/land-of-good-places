@@ -29,8 +29,12 @@ first honest run found #501).
   outward" is struck; the road moves outside the ring's band (centre ~16,
   0.1 m foot margin). **Prediction on record, restated**: with the road
   outside the ring, posts at height are clear wherever feet are; the
-  binding number is the foot margin. Step 2a's ratchet settles it; if a
-  post/branch hits on a seed whose feet are clear, strike and re-cut.
+  binding number is the foot margin. **First prediction CONFIRMED on built parks** (seeds 24/131/326: feet 0,
+  posts 1–2; table in the doc). Restated one (road outside ring → feet
+  bind) still unmeasured; #511 Engineer measuring next.
+- **Seed 288 throws on bridge siting, hidden as 90 skips** (#511 branch);
+  reproduction on main pending — filed under stage 4 as the first live
+  customer of crossingSites-as-exploration if it does.
   Terrain is no longer seed-dependent (1200 m sphere) — the outward
   march's bound is the support's lean limit, not the ground.
 - **Briefs**: step 1 nearly landed (byte-identical, 16 seeds). **Step 2a**

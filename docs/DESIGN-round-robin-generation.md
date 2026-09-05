@@ -596,8 +596,32 @@ are the ones to watch. `test:procgen` on the sphere branch is 9 failed /
 667 passed with the sole cause isolated to #498's corridor clause, which
 is being deleted.
 
-**Prediction, restated (5 Sep, after the correction), falsifiable by
-step 2a:** *for a road outside the ring's band, the drawn posts at height
+**Measured (5 Sep, #511 Engineer, built parks, corridor clause still
+active — i.e. the original geometry, road not yet moved), with a control:**
+
+| seed | legs | leaning | worst lean | feet in bus | posts in bus |
+|---|---|---|---|---|---|
+| 5 | 89 | 1 | 1.00 m | 1 | 2 |
+| 11 | 90 | 0 | 0.00 m | 2 | 2 |
+| 24 | 92 | 2 | **4.00 m** | **0** | **2** |
+| 131 | 89 | 1 | 3.00 m | **0** | **1** |
+| 326 | 91 | 1 | 2.00 m | **0** | **1** |
+| canonical | 91 | 1 | 1.00 m | 1 | 2 |
+
+The first prediction ("clears feet, not posts") is **confirmed**: on
+seeds 24, 131 and 326 the feet are entirely clear while one or two posts
+stand inside the bus at height. So `check:entrance-road`'s "0 legs hit on
+all sixteen seeds" was true and useless on three of the five seeds that
+mattered — the sharpest statement yet of why a feet-only headline cannot
+be inherited, and why step 2a sweeps the drawn geometry. Two caveats,
+the Engineer's own: seed 11 has nothing leaning, so foot and post cannot
+differ there and that row is evidence of nothing (the instrument says so
+on stderr rather than report an agreement it did not earn); and the worst
+lean is **4.00 m**, double the 2 m a reviewer had on record.
+
+**Prediction, restated (5 Sep, after the correction), **still unmeasured** — the road-outside-the-ring build is
+next, and the Engineer reports the real foot margin, not the derived
+0.1 m:** *for a road outside the ring's band, the drawn posts at height
 are clear wherever the feet are clear*, because nudged trunks lean
 inward; *the binding number is the foot margin (0.1 m at centre 16)*,
 and any seed where it fails will fail at a foot, not a post. If step 2a
@@ -834,6 +858,17 @@ section above (march becomes exploration) is unchanged by them.
 ### Stage 4 — paths, railway, crossings migrate together (large; parks change)
 
 *Filed here from stage 3 (5 Sep): `publishPaving()` runs inside `new World(...)`, after generation — a post-generation commit by the paths that the road's second turn today has to wait for.*
+
+*Also filed (5 Sep, from the #511 branch's `test:procgen` run): **seed 288
+throws during park construction on a bridge-siting failure**, hidden as
+90 skips — the silent-skip pathology in the wild. Reproduction on `main`
+pending. If it reproduces, it is an existing generator (crossing siting /
+bridge realisation) that does not backtrack the way this design requires,
+and it is the first live customer of "crossingSites: the march becomes
+exploration" above — a site that cannot be realised must be refused at
+commit and the next candidate tried, never a throw after the march has
+published it as fact. Until then it stands beside #503/#504 as evidence,
+and any check that skips on it must fail instead.*
 
 The heart of Jim's brief. Path growth, railway corridor and crossing
 negotiation interleave; bridges are born from path×rail conflicts with
