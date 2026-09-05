@@ -319,3 +319,54 @@ overrides.
 workflow, Control B caught that it read the right cap. Nobody ran the equivalent
 control on the *measurer* until a reviewer asked. A mechanism proven against one
 input is not proven; the second input is where the hard-coded assumption shows.
+
+## Rebased onto #517 (`f1c99347`) — 6 September
+
+**The rebase produced NO conflicts**, which is precisely the shape CLAUDE.md
+warns a silent revert takes. #517 adds `check:node` to the chain and touches
+every workflow file; another engineer hit a genuine conflict there whose
+natural resolution (and the one `rerere` had a preimage for) would have deleted
+that step. Ran with `-c rerere.enabled=false` regardless.
+
+Verified by parsing, sets not counts: main 60 / branch 60, empty difference
+both ways, **`check:node` present and first**. All three of this branch's
+script definitions survived, both workflow `run:` edits survived, and the only
+deletions in the workflow diff are the two `run:` lines this branch replaces on
+purpose. Three-dot: 7 files, zero deletions.
+
+**Why it was clean:** this branch adds *no chain steps*, only definitions. The
+correct resolution was therefore main's chain verbatim. Worth knowing for the
+next rebase — the danger here is not this branch's own chain edit (there isn't
+one) but a resolution that reverts main's.
+
+### Numbers re-taken, because `check:node` shifts them
+
+- alarm path: EXIT=124, **`scripts finished 6`** (was 5 — `check:node` now runs
+  ahead of the others), killed during `measure-deck-fallthrough`
+- pass path: `across 1 script invocations` against a one-invocation script,
+  ground truth 1 marker
+- survivors: none
+
+### Production evidence, `f487d581` (pre-rebase), all four things confirmed
+
+```
+watchdog[check] — budget 27m00s against .github/workflows/checks.yml's 30m00s cap (3m00s left for the runner).
+watchdog[check] — took 25m05s of a 30m00s cap (83.6% used, 4m55s spare) across 61 script invocations.
+```
+
+`61` not `60` — the off-by-one fix, in production. No impossible times. **The
+over-80% note fired**, so that path is real. All of it needs re-confirming on
+the post-rebase sha before merge: this PR rewrites that job's own `run:` line,
+so a pass on an ancestor is evidence about different code.
+
+### The trend, and the thing this PR does NOT fix
+
+- `Checks` hit **27m26s** on #527 — the highest yet, **91.4%** of the 30m cap,
+  on a diff adding about one second.
+- `Procgen invariants` ran **9m48s of its 15m cap** on #527; recent `main` runs
+  7.8 / 9.8 / 10.3 min, and it now carries three pool sweeps.
+
+**Covering a workflow makes its death audible; it does not make it less
+likely.** The headroom question on both is real and unowned. Worth its own
+ticket once `check:entrance-road` leaves the chain via the sphere-ground branch
+and the per-step table can be honestly re-taken.
