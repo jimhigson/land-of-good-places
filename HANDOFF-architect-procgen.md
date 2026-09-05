@@ -13,23 +13,48 @@ first honest run found #501).
 
 ## State at a glance (for a cold pickup — details in the checkpoints below)
 
-- **The design is fully written.** All five stages carry specs or
-  checklists in the doc; both of Jim's 3-Sep rulings (unwind reaches any
-  decision; supports section-by-section, all extra geometry) are recorded
-  verbatim; the contradiction pass is done and its habit adopted.
-- **Four engineering briefs are drafted and HELD** in
-  `docs/BRIEF-stage3-step{1,2,3,4}-*.md`. Strictly sequential; step 1
-  goes out the moment PR #498 (`fix/road-487-488`, rebased `7bfcca23`,
-  in review) merges. **If you are resumed and #498 has merged: send the
-  step-1 brief to the coordinator as a proposal. That is the next
-  action.**
-- **Nothing else is owed** that this agent knows of. Deliberately NOT
-  written: stage-4/5 per-placer briefs (premature until stage 3's
-  decision point is answered with step 4's numbers) and quality-tier
-  soft-list additions (await Jim's ruling, per the doc).
-- Report to the coordinator, never Jim. Do not merge. Design work is
-  standing authority; anything changing shipped behaviour goes up as a
-  proposal first.
+- **Worktree**: `.claude/worktrees/design-round-robin` on
+  `design/round-robin-generation`, merged with `origin/main` at `61e95fe5`
+  (5 Sep). Docs-only branch, no code.
+- **The design is fully written** and re-read against #474 (warp vectors =
+  baked backtracking, retired by stages 4/5) and #498 (below).
+- **Stage 3 is blocked on a ruling from Jim, not on engineering.** PR #498
+  measured the road↔trestle pair *over-determined*: ring feet boxed to
+  outset [6.15, 6.92]; a 7.78 m road parallel to the wall needs centre in
+  [3.89, 8.11]; clearing a foot needs ≤ 2.1 or ≥ 10.9 — empty. Every
+  party is human-ruled (family brief, arrival sequence, terrain). Three
+  ways out, all Jim's: widen the apron / bus arrives radially / a
+  straddling support kind. Doc section "Stage 3, re-examined (5 Sep)".
+- **Briefs**: step 1 (`BRIEF-stage3-step1-road-placer.md`) is **READY,
+  dispatchable against main today**, no dependency on #498 or the ruling
+  — creates the one production `GroundClaims` instance (today test-only)
+  and claims the road's corridor from its owner; byte-identical. Steps
+  2–4 are **HELD on the ruling**, each header says what it becomes under
+  each answer. Strictly sequential after step 1.
+- **#498** (`fix/road-487-488`): OPEN, CONFLICTING (only
+  `scripts/coplanar-baseline.mts`), two unanswered "changes requested"
+  reviews (blocker: swept-bus checks feet, 8–9 leaning posts/seed still in
+  the bus body), `test:procgen` red on 5 seeds (61–67 m ring on air),
+  engineer's handoff says "needs Jim's yes" on the apron. Nobody on it;
+  the local `road-487-488` worktree is a stale mid-rebase with nothing
+  unpushed. Its #487 visibles and the swept-bus instrument are worth
+  landing separately — Overseer's call, reported.
+- **Next action if resumed**: if the Overseer has dispatched step 1,
+  review its PR for the one-owner rule. If Jim has ruled, re-cut steps
+  2–4 for that ruling (headers already say how) and hand step 2 over.
+  Otherwise idle; nothing else is owed.
+
+## Checkpoint, 5 Sep — #474 and #498 read against the design
+
+- Merged main (rebase replayed 31 commits into an add/add on the doc;
+  merge instead, as before). #474 touched none of the pair's files; doc
+  gained a warp-vectors section and "zero level crossings" marked shipped.
+- First re-cut said "the ring re-routes" — **wrong**, struck the same
+  hour: `railRace/route.ts` is the perimeter circle by the family's brief,
+  nothing to steer. Lesson recorded in the doc: check whether a decision
+  is generator-owned before prescribing backtracking over it.
+- Also found: `GroundClaims` has no production instance; `CoSolveEngine`
+  is test-only on `PlacementField`. Step 1 now owns creating the instance.
 
 ## Checkpoint, 3 Sep — the slide-leg evidence is in the doc
 
