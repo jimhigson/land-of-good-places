@@ -262,3 +262,37 @@ pre-push gate (CLAUDE.md line 298), sits outside the `check` chain by design
 status check (line 285) — documented, unenforced, and outside the chain. Three
 workflows are now in that position. Branch protection is a repository setting;
 the Overseer has it queued as an ask for Jim.
+
+## PR #523 opened — final state
+
+All gates, exit codes read from each run's own log, nothing piped:
+
+| gate | exit |
+|---|---|
+| `check:watchdog` (full chain + pass path) | **0** — 15m06s of 30m (50.3%), 60 invocations, no false alarm |
+| `test:procgen` | **0** — 21 files, 752 passed, 0 skipped |
+| `build` | **0** |
+| `check:coplanar` | **0** — 224 seams, all baselined, none new, 81.9 s |
+| control, `check` | **124**, named `measure-deck-fallthrough`, no survivors |
+| control, `test:procgen` | **124**, 15m cap read, named `vitest run`, no survivors |
+
+Three-dot diff: 7 files, **zero deletions**. Chain parsed against
+`origin/main`: 59 steps both sides, empty set difference both ways.
+
+### The arithmetic correction worth carrying forward
+
+An Overseer put it that `0.666 × 1.67 = 1.11`, so `Procgen invariants` was
+already breaching. **It double-counts**: 66.6% *is* the slowest observed run,
+so the spread is already inside it. The same sum on `checks.yml` gives
+`0.879 × 1.58 = 1.39` — "already 39% over" — which it plainly is not.
+
+The honest question is *how much slower than the slowest already seen*:
+
+- `checks.yml` needs **1.14×** — close.
+- `procgen-invariants.yml` needs **1.50×** — not close, but its own ten runs
+  span **2.83×**, wider than the chain's 1.58×, and from a different cause
+  (seed-dependent solver work, not uniform runner speed). Covered anyway.
+- `coplanar.yml` needs **2.73×** — left uncovered, and not a required check.
+
+**Two correct numbers do not necessarily multiply.** Worth remembering next
+time a percentage and a ratio are sitting in the same table.
