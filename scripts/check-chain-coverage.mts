@@ -41,10 +41,12 @@
  * The question is **not** "is it in the `check` chain?" — that would be wrong in
  * both directions. `check:coplanar`, `check:live-version`, `check:gateway` and
  * `check:update-adoption` are deliberately *outside* it, each with its own
- * workflow, because `checks.yml` is at **26m23s worst-of-ten against a 30-minute
- * cap** — 87.9%, needing only 1.14x its own slowest to breach — and a job killed
- * by `timeout-minutes` reports as `cancelled`, which is how this project lost a
- * deploy on 29 August. Calling those four orphans would be an instrument
+ * workflow, because `checks.yml` is at **26m55s against a 30-minute cap —
+ * 89.7%, needing only 1.11x its own slowest run to breach** (measured by #523,
+ * n=15 over `main`, and independently reproduced by its reviewer from a
+ * different window; against a 1.58x observed spread in runner speed). A job
+ * killed by `timeout-minutes` reports as `cancelled`, which is how this project
+ * lost a deploy on 29 August. Calling those four orphans would be an instrument
  * measuring the wrong thing.
  *
  * So this starts from **what the workflows actually invoke** — every `pnpm run`
