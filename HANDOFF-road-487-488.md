@@ -437,3 +437,113 @@ It needs `KID_DELAYS` to stop being module-scope (it is computed before seats ar
 known, and `BUS_WAITS_FOR_THE_REST` reads it), so it becomes per-instance work in
 `ArrivalSequence`'s constructor once the seats exist. Not a change to make in the
 last five minutes of a session, which is why it is written down instead.
+
+
+---
+
+# Rebased onto #474, and both CI failures root-caused (5 September)
+
+Picked up red: `Procgen invariants` fail, `Checks` fail, PR `CONFLICTING`.
+**The two failures were unrelated to each other, and neither was what the
+CI summary made it look like.**
+
+## The rebase
+
+Rebased onto `origin/main` (19 commits), past #474 (every crossing a bridge),
+#499 (round-robin spine / ground-claims), #481/#485 (gate opens on every seed),
+#480/#482 (the torus was the gate arch). Ran with **`-c rerere.enabled=false`**
+throughout, deliberately: CLAUDE.md warns rerere replays a stale resolution
+silently, and this branch had been rebased before.
+
+Three conflicts, all resolved by hand:
+
+1. **`package.json`'s `check` chain.** Rebuilt deterministically from *main's*
+   step list with `check:entrance-road` inserted after `check:rail-race`, rather
+   than accepting either side. Script: the resolve is reproducible.
+   **The trap this caught:** base had 58 steps, main had 59, this branch had 59
+   — *and they were not the same 59*. Main had added
+   `check:speech-bubbles:wide`; this branch had added `check:entrance-road`.
+   A count comparison says "59 vs 59, fine" and silently drops a step. Compare
+   the **sets**. Correct result was 60.
+2. **`Entrance.ts`** — import block only. Union taken; main's `buildGateArch`
+   survives. `CAT_BUS_LENGTH` and `edgeRadiusAt` genuinely go (their only user
+   was the `buildEntranceRoad` body this branch rewrote).
+3. **`test/procgen/invariants.ts`** — import block only. The remaining
+   `ENTRANCE_BUS_*` mentions are in *prose*, not code.
+
+**Beware the usage grep.** I counted symbol uses with `grep -c` to decide what
+to keep, and it counted mentions inside comments as uses — `PARK_BOUNDARY` was
+kept on that basis and `tsc` then reported it unused. Comments are not code;
+let `tsc` be the arbiter.
+
+Three-dot diff after rebase: 22 files, **zero deletions**. Nothing reverted.
+
+## Failure 1 — `Procgen invariants`: this branch was seed-poisoning every seed
+
+The CI log for the *pre-rebase* commit showed trestle-gap and duck-bar
+assertion failures. **Those are not the live failure** and chasing them would
+have been chasing a ghost. Post-rebase, locally:
+
+```
+Test Files  6 failed | 15 passed (21)
+     Tests  224 passed | 528 skipped (752)
+```
+
+`parkFacts: asked for seed 11 but the park built with 20260728.`
+
+**The tell is the 528 skips, not the 6 fails** — precisely CLAUDE.md's
+documented pathology. Cause: this branch added
+
+```ts
+import { entranceBusArriveAt, entranceRoadAt } from '.../roadRoute.ts';
+```
+
+to `test/procgen/invariants.ts`, and **`roadRoute.ts` builds a `RingPath` off
+the seeded boundary at module scope** (`KERB_PATH`/`GATE_AT`, lines 262-263).
+So importing it loaded the manifest before the seed was set and every seed
+built the canonical park.
+
+`parkFacts.ts`'s own `measureCatBusFit` comment already documented this exact
+failure happening to `catBus.ts`. Fix follows that precedent: read the number
+inside `buildParkFacts` behind an `await import(...)` (which runs after the
+seed is chosen) and publish it as `CatBusFact.roadStartX/Z`. **Never statically
+import `roadRoute.ts` into `test/`.**
+
+## Failure 2 — `Checks`: a timeout, not an assertion
+
+Nothing in that job asserted anything. It ran 54 steps clean and then hit
+`checks.yml`'s **30-minute `timeout-minutes`** five minutes into
+`check:climb-wave`. GitHub reports a timeout as **`cancelled`** — the 29 August
+deploy-outage failure mode, where nothing goes red.
+
+`checks.yml` is at ~25 min against a 30 min cap. `check:entrance-road` builds
+all sixteen parks; `coplanar.yml` measures 3-4 minutes for that same sixteen-
+park build and had *already* written down that this chain is not somewhere to
+add minutes. Adding it was always going to tip it.
+
+**Fixed by moving it beside the chain, not inside it**:
+`.github/workflows/entrance-road.yml`, modelled on `coplanar.yml`. The chain is
+now step-for-step identical to main's 59 (verified by parsing, empty set
+difference both ways); the script stays *defined* so the workflow calls it.
+
+**Needs a repository setting nobody here may make:** it must be added to branch
+protection as a required status check, or it runs and goes red without blocking
+a merge. `coplanar.yml` is in the same position. Report, do not act.
+
+## The open design question — do NOT resolve it alone
+
+The road's outset is pinned between a **floor** (the bus door needs
+`CHILD_FOOTPRINT * 2` of pavement before the arch → 8.26) and a **ceiling**
+(the outer kerb must stay inside `RIM_OUTSET_START` → 8.11). **They cross by
+0.15 m.** The design is over-constrained, and that is what forces the trestle
+legs to nudge inward.
+
+**Both `RIM_OUTSET_START` and `TERRAIN_APRON` are properties of the hill**, and
+another engineer is on `feat/no-hill-511`, taking the park off its hill and
+bending the ground like a large sphere. If the hill goes, the ceiling that
+makes this over-constrained may go with it — and the road/trestle contention
+could dissolve rather than needing to be fought.
+
+So: **do not tune the outset further before that lands.** Coordinate through
+the Overseer. Re-running the gates at each new outset is the expensive part and
+it has already been paid three times.
