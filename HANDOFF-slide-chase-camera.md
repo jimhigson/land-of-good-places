@@ -474,8 +474,10 @@ during the control descent (`[ELIFECYCLE] Command failed`, no code).
 
 What is known, rather than guessed:
 
-- **Not reproducible.** Re-run standalone it exits **0** (and twice more after
-  that — see `/tmp/cam519/131-rep{1,2}.log`).
+- **Not reproducible in two standalone re-runs**, both exit **0**
+  (`/tmp/cam519/131-retry.log` and `/tmp/cam519/131-rep1.log`). A third was
+  still in flight when this was written and its result is **not** included in
+  that count — two is the number actually read off the screen.
 - **The measurement is deterministic.** The failing run's wired line is
   byte-identical to the clean re-run's: 704 ridden frames, 18% biggest, 14.5%
   smallest, 21.8° off-axis, 5.45 m above ground. So the park build and the
