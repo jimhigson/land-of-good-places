@@ -108,13 +108,29 @@ kerb `x -29.91508..14.91508` at `z 69`; spur `x 0`, `z 65.11..55.90999999999995`
 | `World` makes its own registry instead of taking the letterbox | probe 3 (`===`) | exit 1, "the World's claims registry is NOT the object the generator claimed against" |
 | the owner's claim shifted 0.5 m | probe 5 (claim vs drawn mesh) | exit 1, three edges at `0.5000 m apart` |
 | a hand-typed copy in `World`, accurate to 5 mm | probe 4 (byte-equality) **and** probe 5 | exit 1, byte-equality diff printed, plus `0.0049 m apart` |
-| the owner's spur end shifted 0.8 m | the procgen invariant, seed 5 | `1 failed | 88 passed`, "gateway minZ is 58.5100 in the scene and the corridor claims 59.3100, 0.8000 m apart" |
+| the **claim alone** drifted 0.8 m (`entranceRoadClaims`, which no mesh reads) | the procgen invariant, seed 5 | `1 failed | 88 passed`, "gateway minZ is 58.5100 in the scene and the corridor claims 59.3100, 0.8000 m apart" |
+| the **owner** shifted 0.8 m (`spurReach`) | *deliberately not* the invariant — the digest | invariant `89 passed`, exit 0; digest seed 5 `4672408cfa1b0af0` -> `f4f2227f0ceb51d3` |
 | `ROAD_HALF_WIDTH` + 1 mm | the digest instrument itself | canonical `1ef4ff81decec5d4` -> `1c9175afb7659c80` |
 
 Probe 4 stayed green on the 0.5 m break, correctly: that break moved the owner,
 so registry and owner still agreed. Probe 4 catches registry-vs-owner drift,
 probe 5 catches owner-vs-drawn-road drift. Together they close the loop; neither
 alone does.
+
+**Which instrument owns which question — get this right before re-running a
+break.** Shifting the *owner* (`spurReach`) moves the claim **and the mesh
+together**, so the invariant passes and *should*: measured, the drawn edge went
+58.5100 -> 59.3100 and the claim followed it exactly, residual 1.37e-6 m. That
+is the one-owner design working, not a check that failed to fire. A moved owner
+is a **moved park**, and the instrument that owns that question is the digest —
+which caught it, seed 5 `4672408cfa1b0af0` -> `f4f2227f0ceb51d3`.
+
+To arm the invariant you must drift the **claim alone**, i.e. inside
+`entranceRoadClaims()`, which `buildEntranceRoad` does not read. An earlier
+version of this table described the working break as "the owner's spur end
+shifted", which is a different mutation that correctly gives a green run — a
+reproduction a later agent would follow to exit 0 and reasonably conclude the
+check had rotted. Both mutations re-run and quoted above.
 
 ## What the new checks actually cover
 
