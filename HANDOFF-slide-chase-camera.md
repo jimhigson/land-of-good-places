@@ -491,3 +491,36 @@ What is known, rather than guessed:
 (#510) — and the flake was in an ad-hoc 16-run sweep harness, not in a gate.
 Recorded here so it is not lost; it is not evidence the check is
 non-deterministic, and the numbers say it is not.
+
+## The stale matrix skewed the RASTERS too, not only the diagnostics
+
+Found by the reviewer, and it upgrades the instrument fix from a reporting
+correction to a **measurement** correction. The smallest raster reads:
+
+| | smallest nearest-pet raster |
+|---|---|
+| before the matrix fix | 10.7% |
+| after | **14.1%** |
+
+The raster block does call `scene.updateMatrixWorld(true)` before rastering, so
+it looked immune. It was not: the chase camera's chain is not flushed by that
+call in the state it runs in, and `liveCamera.updateMatrixWorld(true)`
+recomputes from its **parent's** matrixWorld, which was itself stale — so the
+raster was projecting through a one-frame-old lens. The `updateWorldMatrix(true,
+false)` added for the #516 sampler runs earlier in the same frame and
+incidentally leaves the chain fresh for the raster as well.
+
+**Consequence for anyone comparing numbers across this branch:** every
+nearest-pet raster figure taken before that commit is a frame stale. The
+before/after table for #514 was re-taken after the fix and is consistent; older
+figures in this file's earlier sections are not, and are left as written with
+this note rather than silently retouched.
+
+## Record corrections made after review (not code)
+
+- **PR body**: the withdrawn #516 paving hypothesis replaced with the explicit
+  retraction and the corrected numbers; the stale 675-frame `chaseGaveUp`
+  transcript corrected to **624**, with a note saying why it moved.
+- **Issue #516**: the retraction posted on the issue itself, since the issue
+  thread is the record and chat is not. States plainly that no cause is claimed
+  and the issue is open and unassigned.
