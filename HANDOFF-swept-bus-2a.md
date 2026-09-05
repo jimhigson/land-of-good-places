@@ -1,7 +1,11 @@
 # Handoff — stage 3, step 2a: the swept-bus instrument, as a ratchet
 
-- **Branch**: `feat/swept-bus-instrument`, cut from `origin/design/round-robin-generation`
-  (which is level with `main`). PR targets the design branch.
+- **Branch**: `feat/swept-bus-instrument`. Cut from
+  `origin/design/round-robin-generation`, then rebased **onto `main`** with
+  `git rebase --onto origin/main origin/design/round-robin-generation` so only
+  this branch's own commits replay. **PR base retargeted to `main`**: the design
+  branch is behind it, this instrument is disjoint from its work, and a gate
+  belongs on the branch it protects.
 - **Worktree**: `.claude/worktrees/swept-bus-2a`.
 - **Model**: Opus 5 (1M context), by the Overseer's dispatch under the Engineer
   default. **A replacement must run the same model.**
@@ -104,7 +108,7 @@ Real metres and real coordinates throughout — no `NaN`, no `Infinity`.
   instrument agrees with the old one when asked the old question, and finds
   three to four times as much when asked about the drawn post.
 
-## Watched failing — five deliberate breaks, all proved red
+## Watched failing — seven deliberate breaks, all proved red
 
 | break | what was changed | result |
 |---|---|---|
@@ -112,6 +116,8 @@ Real metres and real coordinates throughout — no `NaN`, no `Infinity`.
 | B | `999999: 4` added to the baseline (a seed not in the pool) | **exit 1**, "1 orphaned baseline entry" |
 | C | baseline for seed 326 tightened 10 → 9 | **exit 1**, "WORSE: seed 326 — 10 … baseline allows 9" |
 | D | `CONTROL_LIFT` 200 → 0 | **exit 1**, VOID: "the sweep is not height-aware … every number is void" |
+| F | seed 326's baseline loosened 10 → 11 | **exit 1**, "1 baseline entry is now looser than the park" |
+| G | the real sweep made to read zero | **exit 1**, and the coarse-zero warning printed |
 | E | `cat-bus-arrival` given a 1 m offset | **exit 1**, "`cat-bus-arrival`, an ancestor of the cat bus, has a transform of its own" |
 
 Break A is the #520 guard and the one that matters most: this check finds posts
@@ -176,6 +182,17 @@ feet do — is already true today, at a ratio the sphere would have to close
 entirely to falsify it. Re-run `pnpm run check:swept-bus` once #511 is on
 `main`; if the post counts fall to zero the design paragraph is struck, and if
 they do not the prediction stands.
+
+## Chain safety after the rebase onto main
+
+`main` moved twice mid-flight: #512, and **#517 which adds `check:node` to the
+`check` chain in first position** and rewrote every workflow to
+`node-version-file`. The rebase produced **no conflict**, which CLAUDE.md warns
+is the exact shape of a silent revert, so it was verified by parsing rather than
+trusted: **60 chain steps on `main`, 60 on this branch, `check:node` present at
+position 0, identical order, empty symmetric difference**, one added script key.
+`swept-bus.yml` was written before #517 and restated `node-version: 26`; it now
+reads `.node-version` like the other seven.
 
 ## For whoever picks this up
 
