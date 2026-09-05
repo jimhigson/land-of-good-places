@@ -39,7 +39,30 @@ jobs:
   invariants:
     name: Procgen invariants
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # **25, raised from 15 by #510, because this job legitimately takes ~14
+    # minutes now and 15 was simply the wrong number for it.**
+    #
+    # Measured on `b56d7651`, the merge candidate: **13.8 min** — 92% of a
+    # 15-minute cap, 1.2 minutes of headroom. Per step: invariant suite ~5.5m,
+    # `check:gateway` ~3.6m, `check:park-pool` ~3.9m. Recent successful runs on
+    # `main` without the new step: 9.9, 9.8, 10.3, 7.8 — so this sits ~3.5 min
+    # above the top of that spread, and the addition is NOT unresolvable against
+    # variance, which is what an earlier reading of it claimed. (Even on this
+    # branch the same job has run 10.1 and 13.8 minutes on different shas, so
+    # runner variance alone is worth minutes.)
+    #
+    # Why that had to be fixed rather than noted: a job killed by
+    # `timeout-minutes` reports as **`cancelled`**, which reads as "superseded"
+    # rather than as a failure — the 29 August outage shape, cited twice in the
+    # comments below. At 92% of cap a slow runner or a seventeenth pool seed
+    # tips a *required* check into silently not reporting.
+    #
+    # **This is not the same situation as `checks.yml`, and must not be read as
+    # licence to raise that one.** There the chain takes ~27 minutes of a
+    # 30-minute budget and the honest fix is to make it faster — issue #530.
+    # Here the work is genuinely ~14 minutes, so the cap was wrong; 25 still
+    # catches a real hang while leaving room for a slow runner.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -85,3 +108,28 @@ jobs:
       # make. It is ~90 s against this job's 15-minute budget.
       - name: The front gate opens, on every seed in the pool
         run: pnpm run check:gateway
+
+      # **`check:park` on all sixteen parks a child can be given** (issue #510).
+      #
+      # Until this step, `check:park` — the gate that asks whether a park
+      # *works*, every attraction routing from the entrance and nothing walking
+      # across the railway — ran on the canonical seed and nothing else. So did
+      # 40 of the 63 expanded steps of `pnpm run check`. Nine pool seeds (115,
+      # 128, 208, 225, 267, 274, 346, 428, 451) were built by **no** required
+      # check at all, and both required checks could be fully green with
+      # fourteen of the sixteen unmeasured.
+      #
+      # Here, and not in `checks.yml`, for the reason that workflow's own
+      # comments give: its recent successful runs on `main` are 26.7, 26.8 and
+      # 25.9 minutes against a `timeout-minutes: 30`, and a job killed by a
+      # timeout reports as `cancelled` — which reads as "superseded" rather
+      # than as a failure. That is the 29 August deploy outage's exact shape.
+      #
+      # Here, and not in a workflow of its own, because **this job is already a
+      # required status check**, so the gate takes effect the day it lands
+      # instead of waiting on a branch-protection change only Jim can make —
+      # the same reasoning `check:gateway` above sits here under.
+      #
+      # ~2 minutes on four lanes, against this job's 15-minute budget.
+      - name: check:park, on every seed in the pool
+        run: pnpm run check:park-pool
