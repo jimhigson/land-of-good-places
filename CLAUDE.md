@@ -233,6 +233,28 @@ the Overseer rather than signing it off.
 - Never `git add -A` or `git add .`. Name the files you mean.
 - `.claude/` is gitignored; worktree gitlinks must never reach `main`.
 
+**Never `git stash` in this repo. The stash is shared by every worktree.**
+
+It is a single stack on the common `.git`, not a per-worktree one, and with a
+dozen agents working at once that makes it a shared mutable global with no
+owner. On 3 September an agent ran `git stash -u` in its own clean worktree —
+saving nothing, because there was nothing to save — and the `pop` that followed
+pulled **another agent's uncommitted work** out of the stack and into its tree:
+conflict markers in `Building.ts` and four other files. Nothing was lost only
+because the conflict made git keep the entry rather than drop it.
+
+Note how ordinary that looked. Stashing in a tree you have just verified clean
+is the safest-feeling use of the command there is, and it is the one that goes
+wrong here, because the danger is in what the *pop* finds rather than in what
+the stash saved.
+
+You do not need it. **Commit instead** — this file already tells you to commit
+after every meaningful edit, and a commit on your own branch is private to your
+worktree in the way a stash is not. To set work aside, commit it; to throw it
+away, `git reset --hard HEAD` (which is also what cleaned up the incident). If
+you find yourself reaching for a stash, what you actually want is a commit you
+can amend later.
+
 ## `build` and `check` are different things
 
 Jim, 30 August 2026: *"why would we EVER run tests on a deploy to start
@@ -390,8 +412,17 @@ list, and it then runs on every seed for free.
 
 Two rules when you do: measure the park that was built, never the rules that
 built it; and take thresholds from the game (`PLAYER_RADIUS`,
-`TRACK_CLEARANCE`) rather than from the generator's own target. Never weaken an
-assertion to make a seed pass — swap the seed and write down why.
+`TRACK_CLEARANCE`) rather than from the generator's own target.
+
+**The bar is sixteen good seeds, not every seed** (Jim's ruling, 2 Sep 2026,
+revising the older "swap the seed and write down why"): the pool
+(`parkSeedPool.ts`) holds sixteen seeds that pass **all** invariants —
+including quality, like not bunching the park up — and beyond those sixteen,
+a seed the generator cannot make a good park from simply is not in the pool.
+**The invariants themselves are never weakened**, for any seed; what changed
+is only that universal seed coverage was never the goal. When a pool seed
+stops passing, fix the generator or replace the seed in the pool — and
+write down why, either way.
 
 `pnpm run test:procgen`. CI runs it on every PR and **blocks the merge**, so this
 is not optional. It complements `check:park`, which owns whether the park
@@ -420,8 +451,12 @@ always works."** This is the standing rule for every generator in this
 codebase, not a one-off fix for bridges: on a real collision, try a different
 decision — a different width, position, or orientation, clearing a movable
 obstacle the way pylon placement fells foliage, or as a last resort falling
-back to a simpler alternative (a level crossing instead of a bridge) — never
-shrink to a floor and accept a result that still doesn't clear.
+back to a simpler alternative — never shrink to a floor and accept a result
+that still doesn't clear. (One former example of "simpler alternative" is
+dead: a level crossing instead of a bridge. Since 2 Sep 2026 every rail
+crossing is a bridge and the ability to plan a level crossing does not
+exist; a generator that cannot bridge backtracks further — a warp vector,
+`parkWarp.ts` — or the seed leaves the pool.)
 
 **Because every feature generates step by step at the same time, not one
 system finishing before the next starts, "backtrack" means checking the real

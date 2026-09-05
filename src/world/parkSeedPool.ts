@@ -122,6 +122,84 @@ export const PARK_SEED_POOL: readonly number[] = [
   451,
 ];
 
+/**
+ * **The seeds a multi-seed check script sweeps — THE one owner.**
+ *
+ * Before 2 Sep 2026 each sweeping script kept its own hand-typed list
+ * (`CI_SEEDS = [PARK_SEED, 5, 11, 18, 24]` and variations), and when seed
+ * 18 was retired (it structurally needs a level crossing, which no longer
+ * exists — see `test/procgen/invariants.ts`'s header for the ruling) the
+ * lists kept building it and CI went red on a seed the rules say does not
+ * have to pass. A second hand-maintained list that can drift from the pool
+ * is the two-definitions shape this repo keeps paying for, so the sweep
+ * list now derives from the pool itself.
+ *
+ * **Seed 18 (and old seed 2) are not "missing" from this list — they are
+ * out by ruling.** Do not add a non-pool seed back here: a seed that is
+ * not in {@link PARK_SEED_POOL} is not a park a child can be given, and
+ * the filter below throws rather than sweep one.
+ *
+ * The subset is **exactly the pool seeds with a checked-in invariant file**
+ * (the deep sweep), not all sixteen — `vet:seeds` owns whole-pool coverage;
+ * this keeps the blocking chain's cost where it was.
+ *
+ * That sentence was false when it was written: seed 131 had
+ * `test/procgen/seed-131.test.ts` and was not in this list, so a comment
+ * added to retire a hand-maintained list was itself describing a derivation
+ * nobody performed. 131 is in the list now, and — because this module ships
+ * to the browser and cannot read a directory — the agreement is enforced from
+ * the outside instead of promised here:
+ * `check:seed-pool` fails if the two sets ever differ, in either direction.
+ * Add a per-seed file and it tells you to add the seed here; delete one and it
+ * tells you to take it out. It is in the blocking chain, so neither drifts
+ * silently again.
+ *
+ * ## What being in this list does NOT mean
+ *
+ * **It does not mean `check:park` builds that seed's park. `check:park` is
+ * canonical-only.** The only `check:*` step that sweeps this list today is
+ * `check:fountain-hop` — so the `--- seed N: passed` lines in a `pnpm run
+ * check` log are *its* sweep, and nothing else's. The other consumers are
+ * `measure-*`/`sweep-*` scripts nobody runs in CI. Grep before believing
+ * otherwise; the list of importers is short and this comment can rot.
+ *
+ * **The trap that makes this easy to misread**: `check-park.mts` *does*
+ * import something called `SEEDS` (line 72) and prints `N/M seeds placed`
+ * and `N/M waypoints connected`. Those are `poiGraph`'s **waypoint** seeds —
+ * points of interest a child can walk to — and have nothing whatever to do
+ * with park seeds. Two different meanings of "seed", one of them in the
+ * output of the very check people assume is sweeping the other. If you are
+ * checking whether `check:park` covers a park seed, the question is whether
+ * it imports **this** file; it does not.
+ *
+ * Measured 2 Sep 2026: seed 326 is in this list, went green through the whole
+ * 58-step chain, and was stranding 8 waypoints under `check:park` the entire
+ * time. Seed 115 failed the other way round — `check:park` green, three
+ * invariants red. Neither gate implies the other (#437), and neither sees
+ * most of the pool.
+ *
+ * **So when the generator's geometry changes, the tell is `pnpm run
+ * vet:seeds` over the whole pool — not a green `check`, which by
+ * construction cannot see a stale warp vector on ten of the sixteen seeds a
+ * child can actually draw.** See `parkWarp.ts`'s `WARPS_BY_SEED` header.
+ */
+export const CI_SWEEP_SEEDS: readonly number[] = [
+  CANONICAL_PARK_SEED,
+  5,
+  11,
+  24,
+  131,
+  288,
+  326,
+].map(
+  (seed) => {
+    if (!PARK_SEED_POOL.includes(seed)) {
+      throw new Error(`CI_SWEEP_SEEDS: ${seed} is not in PARK_SEED_POOL — sweep only real parks`);
+    }
+    return seed;
+  },
+);
+
 /** Where the drawn seed is remembered, so a reload is the same park. */
 export const PARK_SEED_KEY = 'lgp:parkSeed';
 
@@ -195,10 +273,55 @@ function urlPin(): number | null {
   }
 }
 
-/** Is there a save on this device — i.e. is somebody already playing a park? */
-function hasSave(): boolean {
+/**
+ * **Is this Node rather than a real browser?**
+ *
+ * Asked because {@link resolveParkSeed} must never draw a random park outside
+ * a browser, and — issue #496 — it used to decide that by accident rather
+ * than on purpose.
+ *
+ * The rule this file used to rely on was written in its own doc comment:
+ * *"In Node, with nothing pinned, this is still `CANONICAL_PARK_SEED`,
+ * because there is no `localStorage`."* That is an observation about a
+ * runtime, not a mechanism, and it is exactly the "two definitions of one
+ * thing, kept in step by hand" fault CLAUDE.md catalogues — the moment
+ * anything supplied a `localStorage`, the invariant died silently.
+ *
+ * Something did. `scripts/headless-dom.mjs` has long carried
+ * `globalThis.localStorage ??= { getItem: () => null, setItem() {}, … }`, and
+ * which way the `??=` falls is decided by the Node version:
+ *
+ * - **Node 25 and earlier** ship their own `globalThis.localStorage`, so the
+ *   shim is *not* installed; Node's own throws on `getItem` without
+ *   `--localstorage-file`, {@link storage} catches that and returns `null`,
+ *   and the canonical seed is reached. Deterministic, by luck.
+ * - **Node 26** — the version this repo requires and CI pins — has no
+ *   `globalThis.localStorage` at all, so the shim *is* installed, its
+ *   `getItem` returns `null` without throwing, {@link storage} hands it back,
+ *   and {@link resolveParkSeed} fell through to {@link drawFromPool} and
+ *   `Math.random()`. Its `setItem` is a no-op, so nothing was ever
+ *   remembered and **every run drew a different park**.
+ *
+ * Measured on `488605cd`, five consecutive runs of a script that imports
+ * `headless-dom.mjs`: `PARK_SEED` came out 326, 326, 20260728, 274, 5 on
+ * Node 26.7.0, and 20260728 every time on Node 25.6.1. That is why
+ * `check:pet-slide` was flaky (#496) — it was not measuring one park.
+ *
+ * So the answer is now asked directly, of the runtime rather than of a DOM
+ * global a harness can fake. `process.versions.node` is absent from the
+ * browser bundle (there is no `process` shim — `vite.config.ts`'s `define`
+ * block adds only `__APP_VERSION__`), so this is `false` in the game and
+ * `true` in every check, test and script.
+ */
+function inNode(): boolean {
+  const nodeProcess = (globalThis as { process?: { versions?: { node?: unknown } } }).process;
+  return typeof nodeProcess?.versions?.node === 'string';
+}
+
+/** Is there a save in `store` — i.e. is somebody already playing a park? */
+function hasSave(store: Storage | null): boolean {
   try {
-    return storage()?.getItem(SAVE_KEY) != null;
+    return store?.getItem(SAVE_KEY) != null;
   } catch {
     return false;
   }
@@ -213,7 +336,8 @@ function hasSave(): boolean {
  * position in her save; and only then a fresh draw from the pool.
  *
  * **Node, with nothing pinned, always lands on {@link CANONICAL_PARK_SEED}**,
- * because there is no `localStorage` for step two or four to use. That is what
+ * and since issue #496 that is enforced by {@link inNode} rather than left to
+ * depend on whether the runtime happens to have a `localStorage`. That is what
  * keeps every check script and the canonical test seed measuring exactly the
  * park they measured before this file existed.
  */
@@ -224,7 +348,37 @@ export function resolveParkSeed(): number {
     return pinned;
   }
 
-  const store = storage();
+  // **Node never draws a park.** A random seed is a thing a *child* gets, once,
+  // on a device that can remember it; a check script that drew one would be
+  // measuring a different park on every run, which is issue #496 exactly. See
+  // {@link inNode} for how that happened and why this is asked of the runtime
+  // rather than of `localStorage`.
+  if (inNode()) {
+    source = 'remembered';
+    return CANONICAL_PARK_SEED;
+  }
+
+  return parkSeedFor(storage());
+}
+
+/**
+ * **What a browser profile holding `store` gets** — everything after the pins
+ * and after {@link inNode}.
+ *
+ * Split out so `check:seed-pool` can exercise the browser's own path from
+ * Node, which is the only runtime any check has. It used to do that by
+ * assigning a fake `localStorage` onto `globalThis` and calling
+ * {@link resolveParkSeed}, and that is no longer possible now that Node never
+ * draws — nor should it be, because a check able to fake its way into the
+ * browser path is a check that cannot notice Node taking it for real, which is
+ * exactly how #496 hid.
+ *
+ * So the split is the point rather than a concession to testing: **which
+ * storage this runtime has** is {@link resolveParkSeed}'s question, and
+ * **what to do with one** is this function's, and a test can answer the second
+ * honestly without being able to lie about the first.
+ */
+export function parkSeedFor(store: Storage | null): number {
   const remembered = readSeed(store?.getItem(PARK_SEED_KEY));
   // A seed no longer in the pool is one that has been retired — usually
   // because it was found to build a bad park — so it is not honoured. The
@@ -243,7 +397,7 @@ export function resolveParkSeed(): number {
   // A save with no remembered seed is a profile from before the pool existed:
   // the park she has been playing is the canonical one, and every position in
   // her save is measured in it.
-  const fromBeforeThePool = remembered === null && hasSave();
+  const fromBeforeThePool = remembered === null && hasSave(store);
   const seed = fromBeforeThePool ? CANONICAL_PARK_SEED : drawFromPool();
   source = fromBeforeThePool ? 'remembered' : 'drawn';
   try {

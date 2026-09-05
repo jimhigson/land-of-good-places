@@ -1,0 +1,85 @@
+ ✓ test/procgen/seed-18.test.ts > seed 18 > no wall run stands on the railway 2ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > no tree stands on the railway 0ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > no entrance prop stands on the railway 4ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > the Rail Race flies clear of the railway and stands on clear ground 17ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > the Rail Race sleepers bridge both rails, a metre apart 12ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > the rail-race stall's doormat is standable and reachable 3ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > the clearance over the railway covers the train and everyone riding it 458ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > every railway crossing has a bridge you can walk to, onto and across 7ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > nothing a bridge builds hangs into its own tunnel, measured by ray from the rail 139ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > every bridge is as wide as its own path, with the rail corridor open beneath 67ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > the park's own paving rides over every bridge, and none is left in a tunnel 3ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > every bridge's carried paving has its own masonry under it 0ms
+ × test/procgen/seed-18.test.ts > seed 18 > railway crossings are planned — station-clear, and mostly real bridges 8ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > every crossing on a site the planner proved bridgeable still carries its bridge 0ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > no drawn path ends in mid-air on a bridge 0ms
+ ✓ test/procgen/seed-18.test.ts > seed 18 > no bridge stands where the crossing planner proved none fits 0ms
+ × test/procgen/seed-18.test.ts > seed 18 > the walk in from the gate crosses the railway where the planner planned it to, on a bridge 1ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > no wall run stands on the railway 1ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > no tree stands on the railway 0ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > no entrance prop stands on the railway 4ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > the Rail Race flies clear of the railway and stands on clear ground 17ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > the Rail Race sleepers bridge both rails, a metre apart 13ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > the rail-race stall's doormat is standable and reachable 1ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > the clearance over the railway covers the train and everyone riding it 452ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > every railway crossing has a bridge you can walk to, onto and across 32ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > nothing a bridge builds hangs into its own tunnel, measured by ray from the rail 424ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > every bridge is as wide as its own path, with the rail corridor open beneath 150ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > the park's own paving rides over every bridge, and none is left in a tunnel 9ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > every bridge's carried paving has its own masonry under it 0ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > railway crossings are planned — station-clear, and mostly real bridges 0ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > every crossing on a site the planner proved bridgeable still carries its bridge 0ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > no drawn path ends in mid-air on a bridge 0ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > no bridge stands where the crossing planner proved none fits 0ms
+ ✓ test/procgen/seed-5.test.ts > seed 5 > the walk in from the gate crosses the railway where the planner planned it to, on a bridge 1ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > no wall run stands on the railway 1ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > no tree stands on the railway 0ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > no entrance prop stands on the railway 3ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > the Rail Race flies clear of the railway and stands on clear ground 16ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > the Rail Race sleepers bridge both rails, a metre apart 12ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > no wall run stands on the railway 1ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > no tree stands on the railway 0ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > no entrance prop stands on the railway 4ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > the rail-race stall's doormat is standable and reachable 2ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > the clearance over the railway covers the train and everyone riding it 440ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > the Rail Race flies clear of the railway and stands on clear ground 17ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > the Rail Race sleepers bridge both rails, a metre apart 11ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > every railway crossing has a bridge you can walk to, onto and across 21ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > nothing a bridge builds hangs into its own tunnel, measured by ray from the rail 351ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > every bridge is as wide as its own path, with the rail corridor open beneath 158ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > the park's own paving rides over every bridge, and none is left in a tunnel 6ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > every bridge's carried paving has its own masonry under it 0ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > railway crossings are planned — station-clear, and mostly real bridges 0ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > every crossing on a site the planner proved bridgeable still carries its bridge 0ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > no drawn path ends in mid-air on a bridge 0ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > no bridge stands where the crossing planner proved none fits 0ms
+ ✓ test/procgen/seed-11.test.ts > seed 11 > the walk in from the gate crosses the railway where the planner planned it to, on a bridge 1ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > the rail-race stall's doormat is standable and reachable 0ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > the clearance over the railway covers the train and everyone riding it 453ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > every railway crossing has a bridge you can walk to, onto and across 27ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > nothing a bridge builds hangs into its own tunnel, measured by ray from the rail 370ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > every bridge is as wide as its own path, with the rail corridor open beneath 122ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > the park's own paving rides over every bridge, and none is left in a tunnel 6ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > every bridge's carried paving has its own masonry under it 0ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > railway crossings are planned — station-clear, and mostly real bridges 0ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > every crossing on a site the planner proved bridgeable still carries its bridge 0ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > no drawn path ends in mid-air on a bridge 0ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > no bridge stands where the crossing planner proved none fits 0ms
+ ✓ test/procgen/seed-canonical.test.ts > canonical seed 20260728 > the walk in from the gate crosses the railway where the planner planned it to, on a bridge 1ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > no wall run stands on the railway 1ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > no tree stands on the railway 0ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > no entrance prop stands on the railway 3ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > the Rail Race flies clear of the railway and stands on clear ground 16ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > the Rail Race sleepers bridge both rails, a metre apart 11ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > the rail-race stall's doormat is standable and reachable 0ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > the clearance over the railway covers the train and everyone riding it 410ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > every railway crossing has a bridge you can walk to, onto and across 11ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > nothing a bridge builds hangs into its own tunnel, measured by ray from the rail 138ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > every bridge is as wide as its own path, with the rail corridor open beneath 56ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > the park's own paving rides over every bridge, and none is left in a tunnel 3ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > every bridge's carried paving has its own masonry under it 0ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > railway crossings are planned — station-clear, and mostly real bridges 0ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > every crossing on a site the planner proved bridgeable still carries its bridge 0ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > no drawn path ends in mid-air on a bridge 0ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > no bridge stands where the crossing planner proved none fits 0ms
+ ✓ test/procgen/seed-24.test.ts > seed 24 > the walk in from the gate crosses the railway where the planner planned it to, on a bridge 0ms

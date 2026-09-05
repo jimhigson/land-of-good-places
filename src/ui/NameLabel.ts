@@ -23,9 +23,15 @@ function labelPixelHeight(): number {
   return minTextPx() * (NAME_LABEL_CANVAS_HEIGHT / NAME_LABEL_FONT_PX);
 }
 
-/** Beyond this many metres from the camera, a label hides rather than floats
- *  as a huge screen-constant pill over a tiny distant character. */
-const LABEL_MAX_DISTANCE = 46;
+/**
+ * Beyond this many metres from the camera, a label hides rather than floats
+ * as a huge screen-constant pill over a tiny distant character.
+ *
+ * Exported so `check:speech-bubbles` can tell a pill that is legitimately away
+ * (too far) from one that is stuck down — reading this number rather than
+ * keeping a copy of it, which is the fault CLAUDE.md names most often.
+ */
+export const LABEL_MAX_DISTANCE = 46;
 
 /** The label canvas is 512x160 — kept as a ratio so any target height stays honest. */
 const LABEL_ASPECT = 512 / 160;

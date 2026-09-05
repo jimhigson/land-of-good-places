@@ -101,7 +101,7 @@ export class World implements GameSystem {
     // Living, pickable flowers — no collision (you walk straight through
     // them, same as the old decorative scatter), so it needs nothing from
     // the world to be built.
-    this.flowers = new Flowers();
+    this.flowers = new Flowers(this.collision);
     this.fountain = new Fountain(this.collision, PLAZA.x, PLAZA.z);
     this.fairyLights = new FairyLights(this.collision);
     // Lamp posts along the paths — the family's "night is too dark" feedback.
@@ -321,6 +321,15 @@ export class World implements GameSystem {
     // this cannot be a constructor argument in either direction — it is the
     // same late-binding `attachPlayer` has always used.
     this.entrance.attachNpcs(this.npcs.all.slice(0, ARRIVAL_KID_COUNT));
+
+    // The park is complete, so the meadow can finally be asked the one question
+    // it could not answer when it was sown two hundred lines above: is any
+    // flower standing inside something solid? The lamp posts, the stalls, the
+    // rides and the entrance are all built after it, and a flower planted where
+    // a lamp post later goes ends up inside the post. Same late-binding as the
+    // `keepClearOfTapZones` calls above, for the same reason — see
+    // `Flowers.settleAgainstTheFinishedPark`.
+    this.flowers.settleAgainstTheFinishedPark();
 
     // Everything the park *is*, as far as the scene is concerned. Kept as a
     // list rather than only spread into `scene.add` so {@link setParkVisible}

@@ -608,6 +608,21 @@ Decision 8's own opening question ("is a level crossing an acceptable normal
 outcome, not just a rare exception") being revisited is the next lever is now
 a question for Jim again, not an engineering default to assume either way.
 
+**Answered, 2 Sep 2026 — Jim's ruling closes the question the hard way: a
+level crossing is not an acceptable outcome at all, and the ability to create
+one must not exist in the code.** The level tier (`LEVEL_CROSSING_SITES`, the
+`fallbackCrossings` fence gap, `LGP_ALLOW_UNPROVEN_BRIDGES`) is deleted;
+every place a path crosses the railway is a proven, built bridge, or the
+build fails loudly. Where a pool seed's park needed the tier, an offline
+**warp vector** (`parkWarp.ts`, found by `scripts/warp-search.mts`) perturbs
+one seeded decision — move one attraction's placement draw — and the whole
+pipeline replays; measured before deletion, emptying the tier cost no
+attraction on any of the sixteen pool seeds. In the same ruling the seed bar
+became "sixteen good seeds that pass all invariants, not every seed" — see
+CLAUDE.md's procgen section. Seed 18, whose entrance walk structurally needs
+a level crossing, is retired from the sweep rather than the invariants
+learning to excuse it.
+
 ## Decision 9 — The limit is the boundary, and the manifest is unpinned
 
 **Date:** 7 August 2026 · **Status:** decided and implemented (issue #241,

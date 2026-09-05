@@ -556,6 +556,28 @@ class GameStore {
   }
 
   /**
+   * {@link catchWildPet}, but never twice for the same animal — the pairing
+   * {@link grantFreeOnce} is to `grantFree`.
+   *
+   * For callers that may run again over a save that already has the pet: the
+   * `/slide-with-pets` deep link, which grants three companions so the ride can
+   * be seen on a fresh profile and which somebody will paste twice. Catching in
+   * the roof garden stays on {@link catchWildPet}, because catching a *second*
+   * kitten there is a real second animal and Jim asked for no cap.
+   *
+   * Written here rather than as an ownership test at the call site: an
+   * `inventory.find` beside the caller would be a second description of
+   * "already got one", and this file already owns that question — down to
+   * keeping her Cute-o-dex `acquiredAt` honest and leaving a deliberately
+   * stowed pet stowed.
+   */
+  catchWildPetOnce(spec: PurchaseSpec): InventoryItem {
+    const item = this.grantFreeOnce(spec, false);
+    this.notify();
+    return item;
+  }
+
+  /**
    * Picks a free flower straight out of the meadow — no shop, no price.
    *
    * Unlike `buy()` it never touches the purse and it is never carryable or

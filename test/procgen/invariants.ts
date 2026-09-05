@@ -26,9 +26,31 @@
  * **Whichever you write, prove it can fail.** Break the thing it guards, watch
  * it go red, put it back. An invariant nobody has ever seen fail is a claim
  * about the park, not a check on it.
+ *
+ * ## Which seeds run this suite, and the rule that governs the list
+ *
+ * Jim's ruling, 2 Sep 2026, revising the older "swap the seed and write down
+ * why": **the bar is sixteen good seeds** (`parkSeedPool.ts`) **that pass
+ * every invariant — including quality, like not bunching the park up —
+ * and beyond those sixteen, not every seed the generator can produce needs
+ * to pass. The invariants themselves are never weakened; a seed that cannot
+ * satisfy them is simply not in the pool.**
+ *
+ * That ruling retired **seed 18** from this suite (its file registered
+ * `registerParkInvariants(18)` since the #374 gradient work): seed 18's
+ * loop pins the entrance walk to ground where only a *level* crossing ever
+ * fit, and since every crossing must be a bridge (2 Sep 2026 — the level
+ * tier is deleted), a park like seed 18 cannot exist under the rules. It
+ * was never in the sixteen-seed pool (b2617949 records why); it stops
+ * being a sweep seed rather than the invariants learning to excuse it.
+ * Nothing about the deletion was assumed: emptying the tier was measured
+ * across all sixteen pool seeds first (branch feat/park-warp-solver,
+ * measurements/ — no attraction lost anywhere; only seed 18, not in the
+ * pool, went red).
  */
 import { describe, it, beforeAll, expect } from 'vitest';
 import { Box3, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
+import { WIDEST_FLOWER } from '../../src/world/flowerDimensions.ts';
 import {
   buildParkFacts,
   segmentDistance,
@@ -3655,6 +3677,72 @@ const trainClearsEveryPlotAndStall: Invariant = (facts) => {
 };
 
 /**
+ * **No flower grows on the railway.**
+ *
+ * The fourth twin of {@link wallsClearTheRailway}, {@link treesClearTheRailway}
+ * and {@link trainClearsEveryPlotAndStall}, and the meadow needed one for
+ * exactly the reason the trees did: `Flowers.pickSpawnPoint` kept its own list
+ * of things to avoid — paths, plots, tap zones, the Sky Cruiser — and the train
+ * was not on it. Nothing measured the result, so a flower could sprout between
+ * the rails and stay there.
+ *
+ * It did. Found on 3 September 2026 by `check:coplanar`, which reported
+ * `flowers/living-flower-stems` sharing a plane with
+ * `park-train/train-track/track-ballast` on pool seed 225 — 0.0035 m² at a
+ * 5.0 mm stand-off. The seam is the symptom; the defect is a flower growing out
+ * of the ballast, on the far side of a fence a child cannot cross, so it can
+ * never be picked either.
+ *
+ * Measured on the **built meadow** — the world-space instance positions of the
+ * `living-flower-stems` `InstancedMesh` as the renderer is handed them — not on
+ * the scatter's own rules, which is what let the gap exist unseen. Both numbers
+ * in the threshold are owned elsewhere and imported, never restated here:
+ * `TRACK_CLEARANCE`, the train's own half-width, the same figure the three
+ * invariants above hold walls, trees and plots to; and `WIDEST_FLOWER` from
+ * `world/flowerDimensions.ts`, the bloom's horizontal half-extent, so the
+ * question is asked in the units a collision would happen in.
+ * `Scenery.onRailway`'s 2.6 m fence margin is the generator's target and is
+ * deliberately **not** the number here.
+ *
+ * The reach used to be read off the stem's *unscaled unit* geometry's bounding
+ * sphere — 0.5008 m, dominated by the cylinder's half-height rather than any
+ * horizontal extent, under a comment claiming it was `WIDEST_FLOWER`
+ * restated. It was 13.6 cm short of it and would have doubled if anyone
+ * changed the unit height and compensated in the instance scale. See
+ * `flowerDimensions.ts`'s header.
+ */
+const flowersClearTheRailway: Invariant = (facts) => {
+  const fouls: string[] = [];
+  const matrix = new Matrix4();
+  const at = new Vector3();
+  let measured = 0;
+  facts.world.flowers.group.updateMatrixWorld(true);
+  facts.world.flowers.group.traverse((object) => {
+    if (!(object instanceof InstancedMesh) || object.name !== 'living-flower-stems') return;
+    for (let index = 0; index < object.count; index += 1) {
+      object.getMatrixAt(index, matrix);
+      at.setFromMatrixPosition(matrix).applyMatrix4(object.matrixWorld);
+      // A picked flower is scaled to nothing until it respawns; it is not
+      // standing anywhere yet and is not a finding.
+      if (matrix.getMaxScaleOnAxis() <= 0) continue;
+      measured += 1;
+      const gap = facts.distanceToRail(at.x, at.z) - WIDEST_FLOWER;
+      if (gap < TRACK_CLEARANCE) {
+        fouls.push(
+          `flower at ${fmt([at.x, at.z])} reaches to ${gap.toFixed(2)} m of the rail centre ` +
+            `line (needs ${TRACK_CLEARANCE} m, plus its own ${WIDEST_FLOWER.toFixed(2)} m bloom) ` +
+            `— it is growing on the track`,
+        );
+      }
+    }
+  });
+  if (measured === 0) {
+    return ['the meadow reported no flowers at all — this invariant measured nothing'];
+  }
+  return fouls;
+};
+
+/**
  * The suite. **Add an invariant by adding a line here.**
  */
 /**
@@ -4953,14 +5041,8 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
   // platform's.
   const clearancePoint = new Vector3();
   for (const crossing of facts.world.train.crossings) {
-    // A crossing the real, backtracking footprint search (issues #317,
-    // #319) found no walkable, collision-clear bridge for at all falls back
-    // to an ordinary level crossing instead — genuinely rare, the last
-    // resort `bridgeFootprint.ts`'s own header describes. There is no deck
-    // to measure clearance over there by design, not by omission: nothing
-    // stands over the rail at that one spot, so nothing needs the air
-    // `BRIDGE_RISE` reserves for a train passing underneath.
-    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
+    // Every crossing carries a bridge now — the level fallback died with
+    // the tier (2 Sep 2026), so nothing is skipped here.
     // The same name `bridges.ts` builds this crossing's own group under —
     // one owner (the crossing's own `railDistance`) for both.
     const deckMesh = facts.world.train.group.getObjectByName(
@@ -5059,7 +5141,6 @@ const nothingHangsIntoTheTunnel: Invariant = (facts) => {
   const route = facts.world.train.route;
 
   for (const crossing of facts.world.train.crossings) {
-    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
     const group = facts.world.train.group.getObjectByName(
       `bridge-${crossing.railDistance.toFixed(1)}`,
     );
@@ -5163,7 +5244,6 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
   let bridgesTested = 0;
 
   for (const crossing of facts.world.train.crossings) {
-    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
     const group = facts.world.train.group.getObjectByName(
       `bridge-${crossing.railDistance.toFixed(1)}`,
     );
@@ -5365,7 +5445,11 @@ const noBridgeParapetCanBeSeenThrough: Invariant = (facts) => {
 
   const groups = new Map<string, Object3D>();
   for (const crossing of facts.world.train.crossings) {
-    if (facts.world.train.fallbackCrossings.includes(crossing)) continue;
+    // #493 skipped `fallbackCrossings` here — the crossings that carried no
+    // bridge because the planner had fallen back to a level crossing. That tier
+    // is deleted (2 Sep 2026): every crossing carries a bridge or the build
+    // throws, so there is nothing left to excuse and the exemption is gone
+    // rather than reinstated under a new name.
     const name = `bridge-${crossing.railDistance.toFixed(1)}`;
     const group = facts.world.train.group.getObjectByName(name);
     if (group) groups.set(name, group);
@@ -6605,18 +6689,13 @@ const crossingsArePlannedAndWalkable: Invariant = (facts) => {
  *    canonical seed losing "sites 172/228 both"), and at the entrance it is
  *    indistinguishable, to a child, from the park having no bridges at all.
  *
- * **Why clause 2 is conditional, and why that is not a let-off.** The
- * planner has a deliberate level tier for ground where a bridge provably does
- * not fit, and one swept seed lands the entrance on it: seed 11 solves a loop
- * across the park's own front door, cutting `x = 0` at `z = 54.5`, five and a
- * half metres inside the arch, with the boundary wall 8 m away on the outside
- * against the 7.27 m of clear run each ramp needs. `LEVEL_CROSSING_SITES`
- * holds that spot, at `railDistance` 30, because the planner measured it and
- * said so. Demanding a bridge there is demanding one that cannot be built;
- * the real fix is to keep the railway off the walk in from the gate, which
- * was tried and measured on this branch and re-solves every seed's loop (it
- * takes seed 18 from 0 fallbacks to 2), so it belongs in its own issue with
- * its own five-seed QA. Clause 1 still holds seed 11 to the plan, which is
+ * **The level tier this note used to describe is gone** (2 Sep 2026: every
+ * crossing is a bridge, the ability to plan a level crossing no longer
+ * exists). Seed 11's entrance used to land on that tier's railDistance 30;
+ * with the tier empty its network re-routes through a proven bridge site
+ * and both park gates pass — measured before the deletion
+ * (feat/park-warp-solver, measurements/). Clause 1 still holds every seed
+ * to the plan, which is
  * the part that was broken.
  *
  * Of the five swept seeds, the canonical one, 5 and 11 cross on the way in
@@ -6694,24 +6773,18 @@ const theWalkInFromTheGateCrossesWhereItWasPlannedTo: Invariant = (facts) => {
       `${walked.toFixed(1)} m in from the arch`;
 
     const bridgeSite = nearestOf(railDistance, facts.plannedBridgeSiteDistances);
-    const levelSite = nearestOf(railDistance, facts.plannedLevelSiteDistances);
     const onBridgeSite =
       bridgeSite !== null && alongLoop(railDistance, bridgeSite) <= facts.crossingSiteSnapTolerance;
-    const onLevelSite =
-      levelSite !== null && alongLoop(railDistance, levelSite) <= facts.crossingSiteSnapTolerance;
 
-    if (!onBridgeSite && !onLevelSite) {
+    if (!onBridgeSite) {
       complaints.push(
         `the walk in from the gate crosses the railway ${where}, and the crossing planner ` +
-          `planned no crossing there at all — its bridge sites are at ${list(facts.plannedBridgeSiteDistances)} ` +
-          `and its level sites at ${list(facts.plannedLevelSiteDistances)}, so this is the one ` +
-          'leg of the network that meets the track somewhere `crossingPlanSolve.ts` had already ' +
-          'measured and rejected, which is exactly what it exists to prevent',
+          `proved no bridge there — its bridge sites are at ${list(facts.plannedBridgeSiteDistances)}, ` +
+          'and every crossing must be a bridge (there is no level tier, 2 Sep 2026), so this leg ' +
+          'meets the track somewhere `crossingPlanSolve.ts` never proved',
       );
       continue;
     }
-
-    if (!onBridgeSite) continue; // the planner's own deliberate level tier
 
     const bridged = train.bridges.some((bridge) => bridge.deckCovers(midX, midZ));
     if (bridged) continue;
@@ -6870,11 +6943,10 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
   // planned site keeps the failure it exists for — an empty or lost plan puts
   // no crossing on any site at all — while no longer asserting a promise the
   // router never made.
-  const allPlanned = [...planned, ...facts.plannedLevelSiteDistances];
+  const allPlanned = planned;
   if (!train.crossings.some((crossing) => onSite(crossing, allPlanned))) {
     complaints.push(
-      `the crossing planner proved ${planned.length} bridge site(s) and ` +
-        `${facts.plannedLevelSiteDistances.length} level site(s) on this loop ` +
+      `the crossing planner proved ${planned.length} bridge site(s) on this loop ` +
         `(at railDistance ${allPlanned.map((d) => d.toFixed(1)).join(', ')}) and not one of the ` +
         `park's ${train.crossings.length} built crossing(s) stands on any of them ` +
         `(they sit at ${train.crossings.map((c) => c.railDistance.toFixed(1)).join(', ') || 'nowhere — there are none'}) — ` +
@@ -6887,18 +6959,21 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
   const onPlannedSite = train.crossings.filter((crossing) => onSite(crossing, planned));
   announce(onPlannedSite.length);
 
-  for (const crossing of onPlannedSite) {
-    // Measured off the built world twice over: the crossing is in
-    // `fallbackCrossings` (the search gave up), or `bridges` holds nothing
-    // whose deck stands over it (the search claimed a bridge that is not
-    // there). Either way the promise the plan made was not kept.
-    const gaveUp = train.fallbackCrossings.includes(crossing);
+  // **Every crossing, not just the ones on a planned site** — a crossing
+  // off every proven site is itself the defect now (there is no level tier
+  // for it to be standing on, 2 Sep 2026), and a crossing without a deck
+  // is a fence gap onto live rails.
+  for (const crossing of train.crossings) {
+    const onProven = onSite(crossing, planned);
     const deckOverIt = train.bridges.some((bridge) => bridge.deckCovers(crossing.x, crossing.z));
-    if (gaveUp || !deckOverIt) {
+    if (!onProven || !deckOverIt) {
       complaints.push(
         `the crossing at (${fmt([crossing.x, crossing.z])}), railDistance ` +
-          `${crossing.railDistance.toFixed(1)}, stands on a site the crossing planner proved a ` +
-          `bridge fits on, and ${gaveUp ? 'the bridge search fell back to a level crossing' : 'no built bridge deck covers it'} — ` +
+          `${crossing.railDistance.toFixed(1)}, ${
+            !onProven
+              ? 'stands on no site the crossing planner ever proved a bridge fits on'
+              : 'stands on a proven site and no built bridge deck covers it'
+          } — every crossing must be a bridge; ` +
           `the park has ${train.bridges.length} bridge(s) for ${train.crossings.length} crossing(s)`,
       );
     }
@@ -6912,10 +6987,9 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
  * converse of {@link everyProvenBridgeSiteKeepsItsBridge}, and the direction
  * that was missing.
  *
- * `crossingPlanSolve.ts` marches the loop and sorts every candidate into two
- * tiers: ground a deck and both ramps demonstrably fit on
- * (`CROSSING_SITES`), and ground it looked at and rejected
- * (`LEVEL_CROSSING_SITES`). `bridgeFootprint.ts`'s late `planReal` sweep then
+ * `crossingPlanSolve.ts` marches the loop and keeps only ground a deck and
+ * both ramps demonstrably fit on (`CROSSING_SITES`); everything else it
+ * looked at and rejected. `bridgeFootprint.ts`'s late `planReal` sweep then
  * used to search *every* crossing for a deck regardless of which tier it came
  * from — and where it found one on the rejected tier, it built ramps whose
  * ground nothing had reserved. `paths.ts` keeps other legs off a *proven*
@@ -6930,11 +7004,14 @@ const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
  * routed correctly through those crossings; the bridge built on top of them
  * is what severed them.
  *
- * **Proved red by mutation**, not by argument: `LGP_ALLOW_UNPROVEN_BRIDGES=1`
- * restores the old search and this goes red on the canonical seed with those
- * two bridges named. The geometry it was proved against is this branch's
- * head — canonical loop 361.8 m, proven sites at railDistance 0, 234, 336,
- * level sites at 70, 116, 166, 202, 306.
+ * **Proved red by mutation** when it was written: `LGP_ALLOW_UNPROVEN_BRIDGES=1`
+ * restored the old search and this went red on the canonical seed with two
+ * bridges named (geometry of that proof: canonical loop 361.8 m, proven
+ * sites at railDistance 0, 234, 336, level sites at 70, 116, 166, 202,
+ * 306). That reversal lever was deleted with the level tier (2 Sep 2026) —
+ * `crossings.ts` now fails the build before an unproven crossing can even
+ * reach the bridge search — so this invariant stands as the measured
+ * backstop on the built park should that construction ever regress.
  *
  * Measured off the built park (`facts.world.train`), never off the planner:
  * a bridge's deck is asked which built crossing it covers, and that
@@ -9079,6 +9156,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every wall run sits on a grid axis and actually borders something', wallsBorderTheGridSensibly],
   ['every wall run goes alongside a path, and some stand flush against one', wallsRunAlongsideAPath],
   ['no tree stands on the railway', treesClearTheRailway],
+  ['no flower grows on the railway', flowersClearTheRailway],
   ['no entrance prop stands on the railway', entrancePropsClearTheRailway],
   ['the train runs through no plot and no stall', trainClearsEveryPlotAndStall],
   ['the park train keeps its turning circle', trainKeepsItsTurningCircle],

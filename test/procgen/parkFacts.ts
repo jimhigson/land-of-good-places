@@ -667,10 +667,6 @@ export interface ParkFacts {
     /** The bridge group's own name, `bridge-<railDistance>`. */
     readonly bridge: string;
   }[];
-  /** The same, for the planner's rare deliberate level-crossing tier
-   * (`LEVEL_CROSSING_SITES`) — so an invariant can tell "the planner chose a
-   * level crossing here" from "nobody planned this crossing at all". */
-  readonly plannedLevelSiteDistances: readonly number[];
   /** `crossings.ts`'s `SITE_SNAP_TOLERANCE` — how far a measured crossing may
    * sit from a planned site and still *be* that site. Carried rather than
    * restated: a hand-copied threshold whose comment promises it matches is
@@ -1182,12 +1178,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
   const bridgeReservations = planBridgeFootprints(world.train.crossings);
 
-  const { CROSSING_SITES, LEVEL_CROSSING_SITES } = await import(
-    '../../src/world/train/crossingPlan.ts'
-  );
+  const { CROSSING_SITES } = await import('../../src/world/train/crossingPlan.ts');
   const { SITE_SNAP_TOLERANCE } = await import('../../src/world/train/crossings.ts');
   const plannedBridgeSiteDistances = CROSSING_SITES.map((site) => site.railDistance);
-  const plannedLevelSiteDistances = LEVEL_CROSSING_SITES.map((site) => site.railDistance);
 
   const { BOUNDARY_BLOCK_WIDTH, BOUNDARY_MASONRY_HALF_WIDTH, BOUNDARY_WALL_COLLISION_HALF } =
     await import('../../src/world/Garden.ts');
@@ -2703,7 +2696,6 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     plannedBridgeSiteDistances,
     bridgePaving,
     strandedPathEnds,
-    plannedLevelSiteDistances,
     crossingSiteSnapTolerance: SITE_SNAP_TOLERANCE,
     plots,
     railRaceArchFeet,

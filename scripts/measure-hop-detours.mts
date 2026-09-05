@@ -48,6 +48,7 @@ import { autoHopClears } from '../src/world/Collision.ts';
 import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
+import { CI_SWEEP_SEEDS } from '../src/world/parkSeedPool.ts';
 
 /**
  * The five seeds CI builds a park on — the canonical one and four sweeps.
@@ -60,7 +61,7 @@ import { PARK_SEED } from '../src/world/parkManifest.ts';
  * hardest, so the check that exists to defend the fountain was the one seed
  * short of being able to see it.
  */
-const CI_SEEDS = [PARK_SEED, 5, 11, 18, 24] as const;
+const CI_SEEDS = CI_SWEEP_SEEDS; // the pool's own sweep list — see parkSeedPool.ts
 
 /** The percentile of the pooled detours the price of a crossing is set to. */
 const TARGET_PERCENTILE = 0.9;

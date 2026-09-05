@@ -138,6 +138,9 @@ let rideEndFrame = -1;
 let genReadyFrame = -1;
 let stepsDuringRide = 0;
 let stepsDuringOverrun = 0;
+/** Every distinct budget the switch handed out, on each side of the ride's end. */
+const budgetsWhileRolling = new Set<number>();
+const budgetsWhileLooping = new Set<number>();
 const startedAt = performance.now();
 
 while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
@@ -151,6 +154,11 @@ while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
       GENERATION_BUDGET_MS,
       OVERRUN_GENERATION_BUDGET_MS,
     );
+    // **The budget the switch actually handed this frame**, recorded per frame
+    // and per side of the ride's end. This is the mechanism the clause below
+    // asserts on — `overrunAwareBudgetMs` is the switch, so asking it what it
+    // returned is the question itself rather than a proxy for it.
+    (director.rideOver ? budgetsWhileLooping : budgetsWhileRolling).add(budgetMs);
     const stepBudget = Math.max(1, Math.round(budgetMs * STEPS_PER_MS));
     for (let i = 0; i < stepBudget; i += 1) {
       const before = stepsDone();
@@ -251,9 +259,11 @@ const speedup = rollingRate > 0 ? parkedRate / rollingRate : 0;
 /** One 60 Hz refresh: a slice at or above this cannot leave the moving bus a frame to draw. */
 const SMOOTH_OVERRUN_CEILING_MS = 16;
 said.push(
-  `work per frame: ${rollingRate.toFixed(1)} steps while rolling, ${parkedRate.toFixed(1)} while ` +
-    `looping — the loop drains ${speedup.toFixed(1)}x the ride's rate (chosen for a smooth moving bus, ` +
-    `not to drain flat-out)`,
+  `work per frame: ${rollingRate.toFixed(1)} counted steps while rolling, ${parkedRate.toFixed(1)} ` +
+    `while looping (${speedup.toFixed(1)}x) — NARRATION, not an assertion. It is counted steps per ` +
+    'frame, and the phases with no step counter behind them (the path solve, an import settling) ' +
+    'end a frame early while still counting as a frame, so this reads below 1.5x whenever those ' +
+    'land on the looping side. It cannot see the budget; the switch line below can',
 );
 said.push(
   `so the residual wait is ${overrunFrames} frames (~${(overrunFrames / RIDE_FRAMES).toFixed(0)} rides) ` +
@@ -282,11 +292,46 @@ if (OVERRUN_GENERATION_BUDGET_MS < GENERATION_BUDGET_MS) {
       'which makes a slow device wait longer for no smoothness gained',
   );
 }
-if (overrunFrames > 0 && parkedRate + 1e-6 < rollingRate) {
+// ---------------------------------------------------------------------------
+// **Did the switch actually hand the loop the overrun budget?** Asked of
+// `overrunAwareBudgetMs` itself, every frame, on each side of the ride's end.
+//
+// This replaced `parkedRate >= rollingRate` on 2 Sep 2026. That clause's own
+// comment called it "the same statement measured on the run", and it is not:
+// steps are not a fixed size, and the two windows do not contain the same
+// work. The harness turns the budget into a STEP budget
+// (`budgetMs * STEPS_PER_MS`), so a frame that got the bigger budget still
+// records fewer steps whenever it `break`s on an advance that did no counted
+// step at all — an import settling, a phase being set up, or the path solve,
+// which has no step counter behind it. On the canonical park those frames are
+// almost all in the looping window, so the rate fell to 5.3 against 7.7 and
+// the check reported that the budget switch was not firing. Measured, it was:
+// every looping frame was handed 12 ms and every rolling frame 8 ms.
+//
+// So the rates below stay as narration, because a jump in them still means
+// something, and they carry the note that they are NOT the assertion. What is
+// asserted is the switch's own output, which is exact, device-independent, and
+// cannot be moved by which phase happened to land in which window.
+// ---------------------------------------------------------------------------
+const oneBudget = (seen: ReadonlySet<number>): string =>
+  seen.size === 0 ? 'never asked' : [...seen].map((ms) => `${ms} ms`).join(', ');
+said.push(
+  `the budget switch handed out ${oneBudget(budgetsWhileRolling)} while the bus was rolling and ` +
+    `${oneBudget(budgetsWhileLooping)} while it looped — this is the assertion; the steps-per-frame ` +
+    'above is narration, and cannot see the phases that have no step counter (the path solve)',
+);
+if (budgetsWhileRolling.size !== 1 || !budgetsWhileRolling.has(GENERATION_BUDGET_MS)) {
   fouls.push(
-    `the looping frames drain ${parkedRate.toFixed(1)} steps each against ${rollingRate.toFixed(1)} while ` +
-      'rolling — the overrun is draining no faster than the ride, so `overrunAwareBudgetMs`/`overrunning` ' +
-      'is not applying the overrun budget once the ride is over',
+    `while the bus was still rolling the budget switch handed out ${oneBudget(budgetsWhileRolling)}, ` +
+      `not the ${GENERATION_BUDGET_MS} ms rolling budget — \`overrunAwareBudgetMs\` is applying the ` +
+      'wrong budget before the ride is over',
+  );
+}
+if (overrunFrames > 0 && (budgetsWhileLooping.size !== 1 || !budgetsWhileLooping.has(OVERRUN_GENERATION_BUDGET_MS))) {
+  fouls.push(
+    `once the ride was over the budget switch handed out ${oneBudget(budgetsWhileLooping)}, not the ` +
+      `${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget — \`overrunAwareBudgetMs\`/\`overrunning\` is ` +
+      'not applying the overrun budget once the ride is over, so the residual wait drains at the ride rate',
   );
 }
 

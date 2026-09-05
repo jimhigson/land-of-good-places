@@ -21,9 +21,10 @@
 import { performance } from 'node:perf_hooks';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { CI_SWEEP_SEEDS } from '../src/world/parkSeedPool.ts';
 
-/** The seeds `test/procgen` sweeps. Keep this list in step with that suite. */
-const SWEEP_SEEDS = [20260728, 2, 5, 11, 18];
+/** The pool's own sweep list — one owner, see parkSeedPool.ts (2 and 18 are out by ruling: neither can build a park since the level-tier deletion). */
+const SWEEP_SEEDS = CI_SWEEP_SEEDS;
 
 /**
  * Times one seed **in a fresh process**.
