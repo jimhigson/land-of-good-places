@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { terrainHeight } from '../terrain';
-import { PET_SLIDE_LEAD, petBodyCentreOnSlide } from './petRiders';
+import { PET_SLIDE_LEAD } from './petRiders';
 import { PET_FRAME_CEILING, PET_SCREEN_RADIUS, estimatedFrameShare } from './petFraming';
 
 /**
@@ -272,6 +272,13 @@ export const CEILING_REJECT_ABOVE = PET_FRAME_CEILING * CEILING_SAFETY;
 export function solveChaseEye(
   rider: Vector3,
   pet: Vector3 | null,
+  /**
+   * The nearest companion's **drawn body centre**, from the parade that owns
+   * the animal (#518) — or `null` when it cannot be measured, in which case the
+   * near bound falls back to the seat and is, as it always was, unable to fire.
+   * Passed in rather than derived: see the note at its use.
+   */
+  petBodyCentre: Vector3 | null,
   behind: Vector3,
   up: Vector3,
   halfFovRad: number,
@@ -340,7 +347,14 @@ export function solveChaseEye(
       // Kept in its own vector rather than reusing `toPet`, which above still
       // means "to the seat" and is what the frustum bound is measured on. One
       // name per meaning, in the file whose bug was two meanings for one point.
-      petBodyCentreOnSlide(pet, behind, petBody);
+      //
+      // `petBody` is **handed in, measured off the drawn animal by the parade**
+      // that owns it — this module does not derive it. Deriving it here was
+      // tried and measured **0.70 m out** from the real body, which is most of
+      // the error the fix was meant to remove: a second description of where an
+      // animal is, kept in step with the drawn one by hand, inside the fix for
+      // an instance of exactly that fault.
+      petBody.copy(petBodyCentre ?? pet);
       toPetBody.copy(petBody).sub(eye);
       const share = estimatedFrameShare(
         toPetBody.length(),

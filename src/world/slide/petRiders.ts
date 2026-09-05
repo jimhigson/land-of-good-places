@@ -84,6 +84,30 @@ export interface PetSlideLink {
   callPetsOffSlide(): void;
   /** How many companions are on the chute right now. */
   petsOnSlide(): number;
+  /**
+   * **Where the nearest companion's body is actually drawn**, world space,
+   * written into `out`; `false` when nobody is aboard (#518).
+   *
+   * The chase camera has to know how close the animal it is filming really is,
+   * and the ride cannot answer that: it knows where it offered a **seat**,
+   * which is an origin at the animal's feet, while the reclining body lies most
+   * of a metre back from there **towards the lens**. Reasoning about the seat
+   * is what made the camera's near bound estimate 6% of frame where the raster
+   * measured 21%, so it never fired once in its life. That is #518.
+   *
+   * **Answered by the system that owns those bodies**, exactly as
+   * {@link petsOnSlide} is and for the same stated reason — rather than by the
+   * ride deriving it from a seat and a length, which would be a second
+   * description of where an animal is, kept in step with the drawn one by hand.
+   * That was tried first and **measured 0.70 m out** from the real body on the
+   * canonical park, which is most of the error it was supposed to remove.
+   *
+   * This does not break the "nothing crosses back" rule this interface is built
+   * on. What crosses back is a **point**, computed on demand from the bodies
+   * the parade already draws — not a body for the ride to hold, and not state
+   * for anyone to keep in step.
+   */
+  nearestRiderBodyCentre(out: Vector3): boolean;
 }
 
 /**
@@ -452,71 +476,3 @@ export function petSeatOnSlide(
   seat.recline = RIDE_RECLINE;
 }
 
-/**
- * **Where a reclining companion's body actually is, as opposed to where its
- * seat is — the one owner of that question** (issue #518).
- *
- * ## The bug this exists to end
- *
- * A seat is an animal's **origin, at its feet**. The body then lies back from
- * there, up-slope, *towards a chase lens that is further up-slope still*. So
- * anything that reasons about "how far is the companion from the camera" using
- * the seat is asking about a point where none of the animal is:
- *
- * | | distance from the chase lens, canonical park |
- * |---|---|
- * | the **seat** | ~2.30 m |
- * | the **drawn body's centre** | ~1.35 m |
- *
- * `solveChaseEye`'s near bound used the seat, so it estimated ~6% of frame
- * where `check:pet-slide` then rastered **21%** — it read a number less than
- * half the truth, never crossed its threshold, and **rejected nothing in its
- * entire life**. That is #518, and the issue is explicit that it is a design
- * gap rather than a constant to tune: the camera solve is handed *seats, not
- * bodies*, so no threshold anywhere could have fixed it.
- *
- * ## Why this is a function here, and not arithmetic at the call site
- *
- * #518 is filed as the **third instance of one pattern** — with #471 (a check
- * measuring a pet's root while its body hangs outside the trough) and #513 — and
- * names the durable fix: *"a shared way to ask 'what does this body actually
- * occupy, as drawn?'"*. Two call sites each doing `seat + up-slope × half a
- * length` would be the two-definitions fault this repo files more than any
- * other, committed inside the fix for an instance of it. So there is one
- * function, and everybody asks it.
- *
- * It lives in **this** module because this is where the pose is decided —
- * {@link petSeatOnSlide} sets the recline, and {@link PET_RECLINED_LENGTH} is
- * already owned here. A copy in `chaseEye.ts` would be a second answer to "how
- * does a body lie on this chute", which the seat solve's own comment refuses
- * for exactly the same reason.
- *
- * ## Why a derived point rather than a `Box3` of the real mesh
- *
- * Deliberate, and it follows the precedent {@link PET_RECLINED_LENGTH} sets
- * three doc-comments above: that length is *"written down rather than measured
- * at run time on purpose"*, because measuring it would drag the model classes
- * into the ride's module graph for one scalar — and its guard against drift is
- * not a comment but a check that re-measures the **real drawn meshes** every
- * build. *"A number that a check re-measures every build is not a copy."*
- *
- * This follows that exactly. The point is derived here, cheaply, every frame;
- * and `check:pet-slide` asserts it against `Box3.setFromObject` of the actual
- * animal on a real descent, so if the pose, the model or the length ever moves,
- * a check goes red rather than a camera quietly going wrong again.
- *
- * @param seat the companion's seat, world space, as {@link petSeatOnSlide} left it.
- * @param upSlope the unit vector pointing **back up the chute** — the direction
- *   the reclining body extends from its feet. The caller already holds this
- *   (the chase rig reads it off its own mount basis), and taking it rather than
- *   re-deriving it is what keeps this free of a second idea of which way the
- *   chute runs.
- * @param out written in place and returned, so a per-frame caller allocates nothing.
- */
-export function petBodyCentreOnSlide(seat: Vector3, upSlope: Vector3, out: Vector3): Vector3 {
-  // Feet at the seat, body extending up-slope: the centre is half a body along
-  // that. `PET_RECLINED_LENGTH` is the longest companion in the catalogue, so
-  // this is the most forward centre any animal presents — which is the
-  // conservative direction for a guard about being too close to the lens.
-  return out.copy(seat).addScaledVector(upSlope, PET_RECLINED_LENGTH / 2);
-}

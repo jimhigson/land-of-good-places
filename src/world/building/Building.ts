@@ -499,6 +499,9 @@ export class Building implements GameSystem {
   private readonly chaseEye = new Vector3();
   private readonly chaseAim = new Vector3();
   private readonly chasePet = new Vector3();
+  /** The body centre the near bound used this frame (#518), and whether it is set. */
+  private readonly chaseBody = new Vector3();
+  private chaseBodyValid = false;
   private readonly chaseSeat: SlideSeat = {
     x: 0, y: 0, z: 0, facing: 0, pitch: 0, recline: 0,
   };
@@ -528,6 +531,24 @@ export class Building implements GameSystem {
    */
   chaseSolveGaveUpFrames(): number {
     return this.chaseGaveUp;
+  }
+
+  /**
+   * **The body point the chase solve's near bound actually reasoned about this
+   * frame** (#518), or `null` if there was no companion to reason about.
+   *
+   * Exposed for one purpose: so `check:pet-slide` can hold it up against
+   * `Box3.setFromObject` of the **real drawn animal** and fail if the two
+   * disagree. `petBodyCentreOnSlide` derives this point from the pose rather
+   * than measuring the mesh — deliberately, following the precedent
+   * `PET_RECLINED_LENGTH` sets — and that choice is only honest if something
+   * re-measures it every build. This accessor is what makes that possible.
+   *
+   * Without it the fix for #518 would be a *second* formula asserting it agrees
+   * with the drawn body, which is the fault #518 is the third instance of.
+   */
+  chaseNearestBodyCentre(): Vector3 | null {
+    return this.chaseBodyValid ? this.chaseBody : null;
   }
 
   /**
@@ -1723,10 +1744,17 @@ export class Building implements GameSystem {
       if (this.chaseCompanions > 0) {
         petSeatOnSlide(ride.slide, ride.distance, 0, this.chaseSeat);
         nearestPet = this.chasePet.set(this.chaseSeat.x, this.chaseSeat.y, this.chaseSeat.z);
+        // The same point the solve's near bound will derive, kept so
+        // `check:pet-slide` can measure it against the drawn animal (#518).
+        // **Ask the parade where the animal actually is** (#518). It owns the
+        // bodies and measures the drawn one; the ride only ever knew where it
+        // offered a seat, which is an origin at the animal's feet.
+        this.chaseBodyValid = this.petParade?.nearestRiderBodyCentre(this.chaseBody) ?? false;
       }
       const solved = solveChaseEye(
         this.rideMount.position,
         nearestPet,
+        this.chaseBodyValid ? this.chaseBody : null,
         this.chaseBehind,
         this.chaseUp,
         // Vertical half-fov in radians, asked of the camera rather than
