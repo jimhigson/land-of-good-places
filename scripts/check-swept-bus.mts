@@ -667,7 +667,9 @@ if (voids.length > 0) {
 
 if (orphans.length > 0) {
   console.error(
-    `\ncheck:swept-bus — ${orphans.length} orphaned baseline entr(y|ies): ` +
+    `\ncheck:swept-bus — ${orphans.length} orphaned baseline ` +
+      `${orphans.length === 1 ? 'entry' : 'entries'}, for ` +
+      `${orphans.length === 1 ? 'a seed' : 'seeds'} not in PARK_SEED_POOL: ` +
       `${orphans.join(', ')}.\n` +
       'A ratchet entry that matches no seed has stopped measuring anything, and #520 is\n' +
       'exactly what happens when that is allowed to be quiet. Delete the entry, or put\n' +

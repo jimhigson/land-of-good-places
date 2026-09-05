@@ -83,7 +83,7 @@
     "render:castle": "blender --background --factory-startup --python-exit-code 1 --python art/blend/castle_render.py",
     "check:wall-tunnelling": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-wall-tunnelling.mts",
     "check:deck-fallthrough": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-deck-fallthrough.mts",
-    "check:all": "pnpm run check && pnpm run build && pnpm run test:procgen && pnpm run check:wall-tunnelling",
+    "check:all": "pnpm run check && pnpm run build && pnpm run test:procgen && pnpm run check:wall-tunnelling && pnpm run check:swept-bus",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "sweep:seeds": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/sweep-park-seeds.mts",
