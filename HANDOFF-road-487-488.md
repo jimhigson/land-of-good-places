@@ -1585,3 +1585,251 @@ moving a road.
    that `check-entrance-road.mts` calls it is false twice over. Wiring it up needs
    a public way to ask the ground reach at an aspect, not just an import.
 6. The four stale-text items.
+
+
+---
+
+# Session 8: a stale-branch force-push, and the handover split (5 September)
+
+**Read this section before you trust any git hash written above.**
+
+## READ FIRST: I force-pushed a 71-commit-stale rebase over this branch
+
+An Overseer asked me to rebase #498 onto `main` and fix its red CI. My
+worktree, `.claude/worktrees/road-487-488`, was checked out at **`07f03b39`**
+— **71 commits behind `origin/fix/road-487-488` (`9768fe62`)**. I did not
+check that before starting. I rebased the stale line onto `main` and pushed it
+with `--force-with-lease`, which **did not save me**: the lease compares
+against your remote-tracking ref, and mine was current. It protects against
+*somebody else pushing after your fetch*; it does **not** protect against
+rebasing your own stale checkout. That is the trap, and it is worth adding to
+the team's habits: `--force-with-lease` is not a staleness check. The check is
+
+```
+git merge-base --is-ancestor origin/<branch> HEAD
+```
+
+**before** you rebase — if that says no, you are behind and must fast-forward
+first.
+
+**Nothing was lost.** Refs on the remote now:
+
+| ref | what it is |
+|---|---|
+| `recover/road-487-488-true-tip` | **`9768fe62` — the real work, all 71 commits. This is the branch to use.** |
+| `salvage/road-487-488-stale-rebase` | my stale rebase, `18d82c9a`. Of historical interest only — see below. |
+| `fix/road-487-488` | **still points at my stale rebase.** Needs force-updating back to `9768fe62`; my sandbox refused the force-update, so somebody with the permission must do it, or just take the `recover/…` ref as the source when folding into the combined branch. |
+
+This handoff is committed on `recover/road-487-488-true-tip`.
+
+## What my stale session produced, and why almost none of it is wanted
+
+I "fixed" three things. **All three were already fixed on the true tip**, which
+is exactly what being 71 commits behind buys you. Recorded so nobody re-does
+the archaeology:
+
+1. `test/procgen/invariants.ts` statically importing `roadRoute.ts` — poisons
+   every seed, 528 silent skips. **The true tip already reads it off
+   `ParkFacts`** (`invariants.ts:7481`, "Read off the facts, not imported").
+2. `hidesTheArrivingBus` asked about a clump's centre, not its spread. **The
+   true tip already takes a `reach` argument at all three call sites**
+   (`Scenery.ts` 649, 946, 1177) — including a third site my stale line did
+   not even have.
+3. `check:entrance-road` in the `check` chain. Already there, 60 steps.
+
+**The one finding that may still be live** is the CI timeout, below.
+
+## The `Checks` job is failing on a TIMEOUT, not an assertion
+
+Worth separating because the CI summary does not: on the run I examined,
+`Checks` was red with **no assertion having failed anywhere in the log**. It
+ran 54 steps clean, then hit `checks.yml`'s **`timeout-minutes: 30`** five
+minutes into `check:climb-wave`. GitHub reports a timeout as **`cancelled`** —
+the 29 August deploy-outage failure mode, where nothing goes red and it looks
+like somebody pressed a button.
+
+`checks.yml` is at ~25 minutes against that 30-minute cap and trending up.
+`check:entrance-road` builds all sixteen parks, and `coplanar.yml` measures
+3–4 minutes for that same sixteen-park build — and `coplanar.yml`'s own header
+already says this chain is not somewhere to add minutes.
+
+Both reviewers ran `pnpm run check` **locally** at EXIT=0, so this is
+invisible to a local run by construction: local has no 30-minute cap. **A
+green local `check` is not evidence this is fixed.**
+
+On my stale line I moved it out to its own workflow
+(`.github/workflows/entrance-road.yml`, modelled on `coplanar.yml`) and
+restored the chain to main's exact 59 steps. **That file is on
+`salvage/road-487-488-stale-rebase` and is the one thing there worth
+cherry-picking** if `check:entrance-road` survives into the combined branch at
+all. It would also need adding to branch protection as a required check —
+a repository setting, so report, do not act.
+
+## THE SPLIT the next agent actually needs
+
+Jim's ruling (via the Overseer, 5 September): there is to be **no flat
+apron** — *"there should be no 'flat ground' it is a sphere - combine them and
+this should go away"* — and he wants **one branch** to try. This work is being
+folded into `feat/no-hill-511` with the sphere ground, the perspective camera
+and the arrival camera. So sort this branch's contents into two piles:
+
+### (a) Keep — worth landing on its own merits, independent of the ground shape
+
+- **#487's visibles**: the road is **grey** (`roadMaterial()`'s tone; the intro
+  `BusJourney.ts` keeps the sand default *by construction*, not by promise),
+  **curved** (swept along `entranceRoadStations()`), and **runs to the
+  zoom-out edge** instead of stopping in a field.
+- **The swept-bus instrument**, `scripts/check-entrance-road.mts`, and its
+  control. See the next section for exactly what it does and does not cover.
+- **The one-owner cleanups** both reviewers praised: `ART.statueStone*` →
+  `PALETTE.stoneGrey*`; `publishDrawnPath`; `distanceToSegment`'s zero-length
+  guard; the `GeometryBuilder`/`addPathRibbon` extraction into
+  `pathSurface.ts`; `attachNpcs` asking the seat-to-door distance in the bus's
+  **own frame** rather than through an axis-aligned box.
+- **`check:cat-bus` asking about the arrival *surface* rather than a mesh
+  name** — a reviewer proved this red by mutation (renaming the three
+  `entrance-gateway-path*` meshes fires all three clauses).
+- **The leaning-post work**: `addPostCollider`, and the invariant *"every Rail
+  Race post is solid all the way up a child"*, which a reviewer independently
+  re-proved red (5 seeds, drift 1.82–**2.26** m).
+
+### (b) Expected to become unnecessary — the corridor clause
+
+`isInEntranceRoad` inside `railRace/track.ts`'s `groundIsClear` is what makes
+the ride's feet dodge the road. **It is what turns `test:procgen` red**, and it
+is what the sphere ground is expected to make moot.
+
+The reason it cannot be fixed by backtracking — the generator has no winning
+decision to find — is measured and holds:
+
+- trestle feet are boxed to a centre band of **[6.15, 6.92] m** outset by the
+  masonry inside and the hillside outside;
+- a 7.78 m road (`ROAD_HALF_WIDTH` 3.89) needs its centre in **[3.89, 8.11]**
+  to be outside the park and off the hill;
+- clearing a foot (`POST_FOOT_RADIUS` 0.68) needs the centre **≥ 4.57 m**
+  away, so outset **≤ 1.93 or ≥ 11.07**.
+
+**Those bands do not intersect.** `ENTRANCE_ROAD_OUTSET` lands at **8.26**
+against a hill ceiling of **8.11** — the file states the 0.15 m crossing
+plainly rather than rounding it away. With no solution available, the corridor
+clause moves every leg, and the rings end up standing on air for **61–67 m**.
+
+**Both `RIM_OUTSET_START` and `TERRAIN_APRON` are properties of the hill.** If
+the sphere ground removes that ceiling, the conflict dissolves and clause (b)
+should be **deleted, not tuned** — along with the leg-lean it causes, which is
+what forced `addPostCollider` in the first place.
+
+## The two "changes requested" reviews — what they actually asked for
+
+Both are on `#498`, both verdict *changes requested*, both unusually thorough
+(gates re-run, claims re-proved by mutation, not by reading).
+
+**Review 1** — one blocking item, three tidy-ups:
+
+1. **BLOCKING (since fixed by `addPostCollider`): legs lean 2.00 m off their
+   own colliders**, on every seed, *caused by this branch*. On `main` the legs
+   are perfectly vertical — `RADIAL_NUDGES` never fire; the corridor clause is
+   what makes them fire. `strut` composes a leg's matrix about the **midpoint**
+   of foot-to-top while the collider is registered at the **foot**. Seed 326:
+   5 legs leaning, drawn post at 1.4 m standing up to **3.3× the collider
+   radius** outside its own collider — a visible post a child walks through.
+2. **The RNG-stream claim in `buildTreeline` is false.** The comment says a
+   refusal leaves the stream untouched; the `continue` sits **above six `rng`
+   draws**, so a refusal desynchronises every later tree. Measured: 436 trunks
+   with the clause, 494 without, but **only 115 of the 436 survivors stand
+   where they would have**, diverging from the 2nd tree on. Cosmetic in
+   effect — but the same false sentence is **already on `main`** three lines
+   up for the `hidesTheArrivingBus` refusal. **Fix both**, or the next agent
+   inherits it a third time.
+3. **`isInEntranceRoad`'s default argument makes it a predicate that cannot be
+   true**: `distanceToEntranceCorridor` returns 0 inside the corridor, so
+   `isInEntranceRoad(x, z)` with `radius = 0` is `0 < 0` — **false in the dead
+   centre of the road**. Make `radius` required.
+4. **Stale docs**: an orphaned `ENTRANCE_ROAD_OUTSET` block at
+   `roadRoute.ts` 102–110 ("as near the wall as a road can be laid",
+   contradicting the real 8.26 rule sixty lines below); `Entrance.ts` ~679
+   still describing the deleted straight-kerb algorithm;
+   `CORRIDOR_SAMPLE_SPACING` is `0.2` under a comment arguing for "a quarter of
+   a metre"; dead exports `distanceToEntranceRoad` and
+   `ENTRANCE_ROAD_MINIMUM_OUTSET` (`noUnusedLocals` cannot see exports).
+5. **The PR body is stale** in three places (coplanar described as red when it
+   is green and *removes* a baseline row; "2272 of 2336 triangles" now 81008;
+   "81.6 m" now 79.5 m).
+
+**Review 2** — one blocking item, still open as far as I can tell:
+
+1. **BLOCKING: `check:entrance-road` proves the bus's clearance at each leg's
+   FOOT, and this branch is what makes the legs lean.** Asked at height with
+   *the check's own bus box and its own leg extraction*: **0 legs hit at the
+   foot, but 8–9 legs whose drawn post the bus sweeps through** below its own
+   roofline, on every seed tried (20260728, 5, 11, 208, 288) — 4 of them on the
+   **visible** walk-past ring each time. Canonical seed, worst penetrations
+   1.09–1.70 m at 4.65–6.10 m up, inside a bus whose body is world y −0.51 →
+   5.62.
+   - **Controls the reviewer ran first**, which is what makes this credible:
+     flat bus (height 0.2 m) → **0** post hits, so the probe *can* report zero;
+     corridor off → **9 foot hits and 9 post hits, identical**, because with no
+     nudges foot and post are the same place — and that 9 matches
+     `check:entrance-road`'s own printed control for that seed, cross-validating
+     the leg extraction against the check's.
+   - **This is the CLAUDE.md failure mode by name**: the check asks its
+     question at the foot exactly as the buggy generator does, and so agrees
+     with it. Either sweep the **post**, or make the `covered:` note say
+     plainly that only the feet are covered. The reviewer's judgement, which I
+     share: "not covered" is not the right answer twice.
+   - Not claimed: that a rendered frame shows an obvious clip (deepest
+     intrusions are near the roofline, and the box is a prism where the shell
+     is rounded). **Wants a QA eye in a browser.**
+2. Confirmed good: the new post-solidity invariant is real and re-proved red on
+   `7bfcca23`; `addPostCollider` does not move reachability; the `Scenery.ts`
+   conflict resolution kept both sides.
+
+## The swept-bus instrument: how to run it, and which version it is
+
+```
+pnpm run check:entrance-road
+```
+
+(`scripts/check-entrance-road.mts`; sweeps `PARK_SEED_POOL`, all sixteen.)
+
+Three clauses, in this order, and **the order is the point**:
+
+1. **The control, first and every run, generated per run rather than
+   remembered.** It sweeps with the corridor switched off
+   (`setEntranceCorridorHonoured(false)`) and requires that to come back
+   dirty — latest **151 legs back in the bus's path across 16 seeds**. If it
+   ever reads clean the instrument is blind and the run is declared **void
+   rather than passing**. A reviewer verified the control is correctly scoped:
+   the switch touches only `isInEntranceRoad`, while `Scenery.ts` and
+   `arrivalSightline.ts` call `distanceToEntranceCorridor` directly and are
+   unaffected.
+2. **The sweep**: the bus's oriented footprint stepped at 0.25 m along the run,
+   against every trestle leg, using the ring's own **scaled** foot radius
+   (`POST_FOOT_RADIUS * ringSizeVsRace`) — not the bare constant, which
+   understates the walk-past ring's fatter legs. **0 hits on all sixteen
+   seeds.**
+3. **Plan versus park**: every vertex of every drawn `entrance-road*` mesh must
+   lie inside the corridor the sweep measured, so it cannot report a clean
+   sweep of a *route* while the game draws a different kerb. Prints
+   `facing: 81008 / 0`.
+
+**Which version is it? The FOOT version — the compromised one.** Per review 2
+above, it resolves each leg to its foot and asks only there, which on a
+*leaning* leg is up to 2 m from the drawn post. Its own docblock explains why
+the foot resolution is delicate and then asks the question only at the foot.
+**Do not read its "0 legs hit on all sixteen seeds" as "the bus clears the
+posts".** It means the bus clears the feet. Fixing that — sweeping the post, or
+saying so in the `covered:` note — is the top open item on the instrument.
+
+Sampling note worth keeping: `CORRIDOR_SAMPLE_SPACING` is **0.2 m** and must
+stay finer than anything measuring against it. At 1 m station spacing the union
+of bus boxes misses the bulge *between* samples and two seeds kept a leg 0.18
+and 0.22 m inside the bus.
+
+## Also worth knowing
+
+- **`scripts/with-node` wrongly reports that no Node 26 exists.** Both
+  reviewers worked around it with
+  `/opt/homebrew/opt/node@26/bin/node`. Unfixed.
+- Never pipe a `pnpm run` through `head`/`tail` here — it masks the exit code.
+  Redirect to a file and read the status.
