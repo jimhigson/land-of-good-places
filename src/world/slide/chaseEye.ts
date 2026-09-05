@@ -45,6 +45,24 @@ import { PET_FRAME_CEILING, PET_SCREEN_RADIUS, estimatedFrameShare } from './pet
  * describing machinery that never runs is how the next person inherits a false
  * model of their own camera.
  *
+ * ## It aims at the front of the line, not the whole of it
+ *
+ * **Two of three companions are behind the lens by construction, and no aim can
+ * bring them back.** The seats are `PET_SLIDE_LEAD` = 2.73 m, then
+ * `PET_SLIDE_GAP` = 1.98 m apart — so 2.73 / 4.71 / 6.69 m behind her — while
+ * the lens sits at `BASE_BACK` = 4.35 m. Only the first animal (1.62 m in
+ * front of the lens) is ever in the picture at all; the second is 0.36 m behind
+ * it and the third 2.34 m behind it.
+ *
+ * So this module aims at the midpoint of the child and the **nearest**
+ * companion, and `check:pet-slide` asserts on `shot.pets[0]` alone. That is a
+ * deliberate scope, not an oversight — but it is narrower than "the line", and
+ * it is written down here because the fix's own PR title says the camera "aims
+ * at the line it is filming" when what it aims at is the front two-thirds of
+ * it. Getting the whole line in frame is a **seat-layout** question (a shorter
+ * `PET_SLIDE_GAP`, or the lens further back than any bend needs), not an aim
+ * one, and nothing here should be read as covering it.
+ *
  * ## The search below is a guard, and an unexercised one
  *
  * It is kept because the aim alone has no answer for a chute that genuinely
@@ -59,20 +77,39 @@ import { PET_FRAME_CEILING, PET_SCREEN_RADIUS, estimatedFrameShare } from './pet
  * asserts the count is zero, because a shipped game must not throw at a child
  * mid-ride.
  *
- * ## What this does NOT fix: #516
+ * ## What this does NOT fix: #516 — and no claim about its cause
  *
  * The {@link terrainHeight} rejection below was written to fix #516 (the lens
  * buried in geometry near the bottom of the chute). **It never rejects
  * anything** — zero rejections in ~22,000 calls across all 16 parks — so it has
- * never once acted, and #516 is untouched by this file in practice.
+ * never once acted, and **#516 is untouched by this file**. That much is a
+ * solve-side count and it stands.
  *
- * The reason is almost certainly that **`terrainHeight()` is the wrong question**:
- * it is one scalar height field, and the mass burying the lens in QA's frame was
- * flat tan **paving**, which is a mesh — as are the buildings and the chute
- * itself. A camera can be inside a great deal of world that a height field knows
- * nothing about. Whoever takes #516 should ask the collision world or cast
- * against real geometry, and **name the mesh**; a hand-picked notion of "the
- * world" is the fault this project files most often.
+ * **What does NOT stand is the explanation an earlier draft of this header gave
+ * for it**, and the retraction is worth more here than the deletion would be.
+ * It argued that `terrainHeight` never fires because the mass burying the lens
+ * is *paving, a mesh, which a height field cannot see*. The corroboration
+ * offered for that was `check:pet-slide`'s own sampler reporting the lens
+ * −0.09 m below ground and a ray fan naming the nearest object to it. **Both
+ * numbers were false readings**: nothing renders in a check process, so the
+ * camera's `matrixWorld` was never flushed and the sampler was measuring the
+ * **world origin** — `terrainHeight(0, 0)` = 0.09 — rather than the lens. The
+ * tell was that the control run, whose camera is somewhere else entirely,
+ * printed identical figures.
+ *
+ * With the sampler fixed (`updateWorldMatrix(true, false)`), the canonical park
+ * measures the chase lens **5.41 m above the ground at its lowest, 0 frames
+ * underground**, and 53.53 m from the ball pit's rim — where the same run
+ * previously claimed 1.99 m. The ray fan, gated on the lens being underground,
+ * therefore **never fires at all**, and now says so on every run.
+ *
+ * So this file makes **no claim about #516's cause**. Its stated culprit (the
+ * pit rim) is not supported here, and neither is the paving hypothesis that
+ * replaced it — that hypothesis was reasoning from an instrument reading the
+ * origin. #516's cause has now been misidentified twice; whoever takes it
+ * should measure the camera on the seed the defect was reported on, with an
+ * instrument whose control disagrees with its wired run, before naming
+ * anything.
  */
 
 /** Where the lens sits, in the mount's frame: `back` behind, `up` above. */
@@ -202,8 +239,10 @@ export function solveChaseEye(
       //
       // **This has never rejected a placement** — 0 rejections in ~22,000 calls
       // across all 16 pool parks — so it is not, in practice, the fix for #516
-      // that it was written to be. `terrainHeight` is a height field; paving,
-      // buildings and the chute are meshes. See the header.
+      // that it was written to be. Measured with a corrected sampler, the lens
+      // on the canonical park never comes within 5.41 m of the ground, which is
+      // consistent with a guard that never fires and is not evidence about what
+      // #516 actually is. **No cause is claimed here — see the header.**
       if (eye.y - terrainHeight(eye.x, eye.z) < GROUND_CLEARANCE) continue;
 
       // With nobody behind her the shot only has to hold the child, which the
