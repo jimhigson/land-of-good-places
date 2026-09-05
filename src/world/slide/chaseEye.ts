@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { terrainHeight } from '../terrain';
-import { PET_SLIDE_LEAD } from './petRiders';
+import { PET_SLIDE_LEAD, petBodyCentreOnSlide } from './petRiders';
 import { PET_FRAME_CEILING, PET_SCREEN_RADIUS, estimatedFrameShare } from './petFraming';
 
 /**
@@ -204,7 +204,11 @@ const FRAME_SAFETY = 0.75;
 const CEILING_SAFETY = 0.6;
 
 const eye = new Vector3();
+/** To the companion's **seat** — what the frustum bound is measured on. */
 const toPet = new Vector3();
+/** The companion's drawn **body centre**, and the vector to it (#518). */
+const petBody = new Vector3();
+const toPetBody = new Vector3();
 const toChild = new Vector3();
 const axis = new Vector3();
 
@@ -316,23 +320,30 @@ export function solveChaseEye(
       //
       // The ceiling is imported, never restated: `slide/petFraming.ts` owns it
       // and `check:pet-slide` reads the same one.
-      // **KNOWN GAP — this guard still does not bind, and the reason is the
-      // reference point, not the radius.** `toPet` runs to the companion's
-      // *seat*, which is its origin at its feet; the reclining body extends
-      // back from there **towards the lens**. Measured on the canonical park,
-      // the seat sits ~2.3 m from the eye while the drawn body's centre is
-      // ~1.35 m, and the threshold only bites under about 1.5 m — so the solve
-      // reads ~6% where the raster later measures 21%, and accepts.
+      // **Measured to the BODY, not to the seat** (#518, fixed). A seat is the
+      // animal's origin *at its feet*; the reclining body lies back from there
+      // up-slope, towards this lens. Measuring the seat asked about a point
+      // where none of the animal is — ~2.30 m away where the drawn centre is
+      // ~1.35 m — so this guard estimated ~6% where the raster measured 21%
+      // and **rejected nothing in its entire life**.
       //
-      // That is the same disease as **#471** (a check measuring a pet's *root*
-      // while its body hangs outside the trough) and as #513: a measurement
-      // taken on a convenient point rather than on the thing that gets drawn.
-      // Fixing it means asking the companion's real extent, which this module
-      // deliberately does not have — it is given seats, not bodies. Recorded
-      // here rather than papered over, because the alternative is a guard that
-      // looks calibrated and cannot fire.
+      // `petBodyCentreOnSlide` is the one owner of that question, and it lives
+      // in `petRiders.ts` because that is where the pose is decided. Asking it
+      // rather than doing `seat + upSlope × half a length` here is the whole
+      // point: #518 is the *third* instance of "a measurement taken on a
+      // convenient origin rather than on the thing that gets drawn" (with #471
+      // and #513), and a second copy of the arithmetic would be that same fault
+      // committed inside its own fix.
+      //
+      // `behind` is the up-slope direction the body extends along — the mount's
+      // own basis vector, already held, never re-derived.
+      // Kept in its own vector rather than reusing `toPet`, which above still
+      // means "to the seat" and is what the frustum bound is measured on. One
+      // name per meaning, in the file whose bug was two meanings for one point.
+      petBodyCentreOnSlide(pet, behind, petBody);
+      toPetBody.copy(petBody).sub(eye);
       const share = estimatedFrameShare(
-        toPet.length(),
+        toPetBody.length(),
         // The radius that predicts *screen area*, not the collision radius —
         // see PET_SCREEN_RADIUS. Using PARADE_MEMBER_RADIUS here made this
         // guard read a median 4.2x light across the pool.
