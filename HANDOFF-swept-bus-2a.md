@@ -112,6 +112,7 @@ Real metres and real coordinates throughout — no `NaN`, no `Infinity`.
 | B | `999999: 4` added to the baseline (a seed not in the pool) | **exit 1**, "1 orphaned baseline entry" |
 | C | baseline for seed 326 tightened 10 → 9 | **exit 1**, "WORSE: seed 326 — 10 … baseline allows 9" |
 | D | `CONTROL_LIFT` 200 → 0 | **exit 1**, VOID: "the sweep is not height-aware … every number is void" |
+| E | `cat-bus-arrival` given a 1 m offset | **exit 1**, "`cat-bus-arrival`, an ancestor of the cat bus, has a transform of its own" |
 
 Break A is the #520 guard and the one that matters most: this check finds posts
 by mesh name, so without it a rename would make the sweep measure nothing and

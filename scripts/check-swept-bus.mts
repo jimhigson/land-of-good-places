@@ -350,8 +350,16 @@ async function measureOneSeed(): Promise<void> {
       const footY = centre.y - axis.y * (length / 2);
       const footZ = centre.z - axis.z * (length / 2);
       const post = `${ring}:${part}:${i}`;
-      for (let along = 0; along <= length; along += POST_STEP) {
-        const t = along / length;
+      // Stepped by a whole number of intervals rather than by adding
+      // {@link POST_STEP} until it overshoots, so **both ends are always
+      // sampled** and the spacing is never coarser than asked for. Walking a
+      // float up to `<= length` drops the top of a strut whenever the length is
+      // not a multiple of the step — and the top of a trunk is exactly where
+      // the fork the bus meets is.
+      const steps = Math.max(1, Math.ceil(length / POST_STEP));
+      for (let step = 0; step <= steps; step += 1) {
+        const t = step / steps;
+        const along = t * length;
         samples.push({
           x: footX + axis.x * along,
           y: footY + axis.y * along,
@@ -359,7 +367,7 @@ async function measureOneSeed(): Promise<void> {
           radius: (radiusBottom + (radiusTop - radiusBottom) * t) * widthScale,
           post,
           part,
-          isFoot: along === 0,
+          isFoot: step === 0,
         });
       }
     }
