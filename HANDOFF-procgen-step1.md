@@ -151,6 +151,18 @@ alone does.
 - [x] Deliberate breaks proved red with geometry recorded
 - [x] Byte-identical on all 16 seeds
 - [x] `pnpm run build` exit 0; `pnpm run test:procgen` exit 0 (759 passed, 0 skipped)
-- [ ] `pnpm run check` — running
-- [ ] `pnpm run check:coplanar`
-- [ ] PR
+- [x] `pnpm run check` exit 0 (60 steps)
+- [x] `pnpm run check:coplanar` exit 0 (224 seams, all baselined, none new)
+- [x] PR 522, based on `design/round-robin-generation`
+
+## Mesh names — issue #520
+
+No mesh renamed. The two road mesh names moved verbatim between files. Proved by
+measurement: the *set* of mesh names in the built park is identical on all 16
+seeds, before vs after. So check:coplanar's name-keyed ratchet has not silently
+lost a baseline entry on this branch.
+
+## Next
+
+Awaiting review + QA. Invisible to a player, so it merges on those without Jim.
+Steps 2/3/4 remain held on Jim's ruling — do not start them from here.
