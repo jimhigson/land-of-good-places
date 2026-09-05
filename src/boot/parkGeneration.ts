@@ -5,6 +5,8 @@ import { offerPrewarmedCruiser } from '../world/coaster/prewarm';
 import { offerPrewarmedSlide } from '../world/slide/prewarm';
 import { offerPrewarmedTrain } from '../world/train/prewarm';
 import { SolveScheduler } from './solveScheduler';
+import { GroundClaims } from './groundClaims';
+import { offerPrewarmedGroundClaims } from './groundClaimsPrewarm';
 
 /**
  * **Building the park a few milliseconds at a time, while a bus is on screen.**
@@ -182,6 +184,17 @@ interface ImportStep {
 export class ParkGeneration {
   private readonly scheduler: SolveScheduler;
 
+  /**
+   * **The park's one claims registry** — made here because the scheduler owns
+   * the round-robin, and the round-robin is what claims ground.
+   *
+   * Handed to `World` through `groundClaimsPrewarm.ts`'s letterbox rather than
+   * imported from a module-level singleton, so there is exactly one per park
+   * and it cannot outlive the seed it describes. `check:park-boot` asserts
+   * `World`'s registry is identically this object.
+   */
+  private readonly claims = new GroundClaims();
+
   private importIndex = 0;
   private importInFlight = false;
   private failure: Error | null = null;
@@ -195,6 +208,7 @@ export class ParkGeneration {
   private crossingPrewarmModule: typeof import('../world/train/crossingPrewarm') | null = null;
   private pathsModule: typeof import('../world/paths') | null = null;
   private pathsPrewarmModule: typeof import('../world/pathsPrewarm') | null = null;
+  private roadModule: typeof import('../world/entrance/roadCorridor') | null = null;
 
   // ---- results passed between tasks (a dep is done before a dependent starts) ----
   private cruiserStart: CruiserSearchStart | null = null;
@@ -296,8 +310,18 @@ export class ParkGeneration {
         ),
     },
     {
+      // The road's own owner, loaded before its claim task can run. Cheap —
+      // `roadCorridor.ts` reads the boundary and the (as yet unpublished)
+      // paving map, neither of which solves anything.
+      name: 'entrance/roadCorridor',
+      begin: () =>
+        import('../world/entrance/roadCorridor').then((module) => {
+          this.roadModule = module;
+        }),
+    },
+    {
       name: 'pathGraph',
-      gate: () => this.scheduler.isDone('pathGraph'),
+      gate: () => this.scheduler.isDone('pathGraph') && this.scheduler.isDone('roadCorridor'),
       begin: () =>
         import('../world/pathGraph').then(() => {
           this.pathsDone = true;
@@ -493,6 +517,38 @@ export class ParkGeneration {
             .pathsPrewarmModule as typeof import('../world/pathsPrewarm');
           const graph = yield* pathsModule.pathGraphSearch();
           prewarmModule.offerPrewarmedPathGraph(graph);
+        },
+      },
+      {
+        // **The entrance road claims its corridor.** The first production
+        // placer: everything above solves a route and hands it to a letterbox,
+        // and this one publishes the ground it occupies to the registry every
+        // later placer will have to ask.
+        //
+        // There is no search to slice here — the road does not move — so the
+        // task is one commit. It sits last because that is where the road sits
+        // in today's order (`Entrance` is built near the end of `World`'s
+        // constructor), and this step is required to leave the park
+        // byte-identical: it does not confront the import ladder, which is
+        // step 3's job.
+        //
+        // **What this claim can and cannot know, stated plainly.** The
+        // road's spur stops where the plaza's paving starts, and paving is
+        // published by `buildPaths()` inside `new World(...)` — after every
+        // rung here has run. So at this point `entranceRoadClaims()` honestly
+        // reports the road's full ground, in to `ENTRANCE_STOP_Z`, which is
+        // the conservative claim to make while the park is still being
+        // decided. `World` re-commits the same feature from the same owner
+        // once the paths exist; see the call there.
+        name: 'roadCorridor',
+        deps: ['pathGraph'],
+        ready: () => self.roadModule !== null,
+        *start() {
+          const module = self.roadModule as typeof import('../world/entrance/roadCorridor');
+          self.claims.commit(module.ROAD_FEATURE, { claims: module.entranceRoadClaims() });
+          // Nothing else runs in the generator after this, so the registry is
+          // complete as far as generation is concerned: hand it on.
+          offerPrewarmedGroundClaims(self.claims);
         },
       },
     ]);
