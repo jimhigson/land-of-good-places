@@ -156,3 +156,78 @@ runs it exists for.
 
 (The chain's own budget line runs in a shell step rather than under Vitest, so
 this applies to any per-check coverage note, not to the workflow-level print.)
+
+---
+
+# Built: the watchdog (5 September)
+
+Model: **Opus** (chosen by the Overseer for this ticket). Branch
+`fix/check-chain-timeout`.
+
+## What landed
+
+- `scripts/checkChain.mts` — one owner for the two facts both tools need: the
+  cap (**read out of `checks.yml`**, never copied) and how to name a step from
+  a pnpm `$ <command>` line.
+- `scripts/check-watchdog.mts` — runs the identical `pnpm run check` under a
+  clock set `DEFAULT_MARGIN_SECONDS` (180) *inside* the job's cap. On firing:
+  kills the chain, prints a block naming the step, exits **124**.
+- `scripts/measure-check-chain.mts` — the per-step measurer, now sharing the
+  owner above.
+- `checks.yml`'s "Run the checks" step calls `pnpm run check:watchdog`.
+  `timeout-minutes: 30` is unchanged, as the backstop.
+
+**The `check` chain's contents are untouched** — parsed against `origin/main`,
+59 steps both sides, empty set difference both ways.
+
+## The control, and the real bug it caught
+
+```
+CHECK_WATCHDOG_BUDGET_SECONDS=20 pnpm run check:watchdog
+```
+
+```
+=== CONTROL EXIT=124 (want 124) ===
+check:watchdog — THE CHECK CHAIN RAN OUT OF CLOCK
+  ran for            0m20s
+  watchdog budget    0m20s
+  checks.yml cap     30m00s
+  steps completed    5
+  killed during      measure-deck-fallthrough  (after 0m17s in it)
+check:watchdog — chain took 0m20s of a 30m00s cap (1.1% used, 29m40s spare) across 5 steps.
+```
+
+**The control has two halves and the second is the one that mattered.** On the
+first attempt the alarm fired and named the step perfectly — and the chain
+**kept running for another three minutes**, advancing well past the step it had
+supposedly been killed in. Nine node processes were still alive.
+
+Cause: `pnpm run check` is a chain of `&&`-ed `pnpm run check:*`, so signalling
+the direct child leaves every grandchild alive, and `close` never arrives while
+they hold the stdio pipes. **On CI that watchdog would have been decorative** —
+it would have printed its failure and then let the job run on to
+`timeout-minutes` anyway, producing the very `cancelled` it exists to prevent.
+It would have looked like a working solution in every log.
+
+Fixed by spawning `detached: true` (own process group) and signalling the
+**group** (`process.kill(-pid, …)`), plus a `SIGINT`/`SIGTERM` handler so the
+watchdog takes the chain with it if it is killed itself. Second half of the
+control now reads:
+
+```
+=== SECOND HALF OF THE CONTROL: did anything survive? ===
+none — the whole chain died with the watchdog
+```
+
+**If you change the kill path, run both halves.** Exit 124 alone does not
+prove the chain stopped.
+
+## Still to do
+
+- Full `pnpm run check:watchdog`, `test:procgen`, `build` — exit codes.
+- Open the PR. It merges after review + QA without going to Jim (invisible
+  to a player).
+- **Report the table back once `check:entrance-road` leaves the chain** via
+  the sphere-ground branch; if the chain is still above ~80% of cap after
+  that, the top steps become their own ticket. `check:climb-wave` (5m37s,
+  ~21%) wants a look at *why* it is slow, not a trim.
