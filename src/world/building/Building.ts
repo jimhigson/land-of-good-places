@@ -1634,6 +1634,15 @@ export class Building implements GameSystem {
   private startRide(slide: SlideRide, giant: boolean, player: Player): void {
     this.controls.cancelWalk();
     this.ride = { slide, giant, distance: 0 };
+    // **Both chase counters describe THIS descent, so this descent starts them
+    // at zero.** Their docs said "this descent" while the fields were
+    // cumulative for the `Building`'s whole lifetime, so a second ride in one
+    // session reported the first ride's frames added to its own — a comment
+    // asserting something the code did not do, which is the fault this repo
+    // files most often. `check:pet-slide` rides once and so never saw it; a
+    // child who goes down the slide twice would have.
+    this.chaseGaveUp = 0;
+    this.chaseCompanions = 0;
     player.beginRide();
   }
 
