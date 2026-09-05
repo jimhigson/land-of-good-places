@@ -181,12 +181,23 @@ const wiredInto = BLOCKING_JOBS.filter((where) => {
   }
   // **The indentation is the whole assertion.** A workflow file carries its own
   // top-level `name:` as well as each job's, and both read `name: Procgen
-  // invariants` here. Matching without requiring indentation therefore matched
-  // the *workflow* name and stayed green while the **job** was renamed — which
-  // is the rename that actually stops a required check gating merges, since
-  // GitHub matches the job's name. Proved: renaming the job to "Procgen
-  // invariants (fast)" left this check exit 0 until the `\s{2,}` was added.
-  if (!new RegExp(`^\\s{2,}name:\\s*${where.job}\\s*$`, 'm').test(text)) {
+  // invariants` here — on lines 1 and 40. GitHub gates on the **job's**, so
+  // matching without requiring indentation matched the *workflow* name and
+  // stayed green while the job was renamed: green through the exact rename this
+  // exists to catch.
+  //
+  // **`[ \t]{2,}`, never `\s{2,}` — `\s` matches a NEWLINE.** With `\s{2,}` the
+  // quantifier is satisfied by two *line breaks*, so `^\s{2,}name:` happily
+  // matches a top-of-file `name:` preceded by two blank lines and the check goes
+  // blind again, silently, in precisely the way it was just fixed not to.
+  // Proved in isolation against
+  //   "\n\nname: Procgen invariants\njobs:\n  invariants:\n    name: Procgen invariants (fast)\n"
+  // — a file whose JOB is renamed, i.e. one where this must fail:
+  //   \s{2,}    matches -> true    (blind: reports the gate is fine)
+  //   [ \t]{2,} matches -> false   (correct)
+  // and both still match an ordinary healthy file, so the fix does not simply
+  // break the match.
+  if (!new RegExp(`^[ \\t]{2,}name:\\s*${where.job}\\s*$`, 'm').test(text)) {
     fail(
       `${where.workflow} no longer contains a job named "${where.job}". A required status check is ` +
         `matched BY NAME, so renaming it stops it gating merges and nothing goes red. Update branch ` +
@@ -235,7 +246,10 @@ function nonBlockingGates(): string[] {
     // or a scheduled job is not a gate that is missing, it is not a gate.
     if (!/^on:/m.test(text) || !/^\s+pull_request:?\s*$/m.test(text)) continue;
     for (const line of text.split('\n')) {
-      const match = /^\s{2,}name:\s*(.+?)\s*$/.exec(line);
+      // [ \t]{2,}, not \s{2,}: this one splits on newlines first so \s cannot span
+      // them today, but the trap is one refactor away and the sibling assertion
+      // above shipped with exactly this bug. Same shape, same fix.
+      const match = /^[ \t]{2,}name:\s*(.+?)\s*$/.exec(line);
       if (!match?.[1]) continue;
       const job = match[1].replace(/^['"]|['"]$/g, '');
       if (!blocking.has(job) && !NOT_A_GATE.includes(job)) out.push(`${job}  (${file})`);
