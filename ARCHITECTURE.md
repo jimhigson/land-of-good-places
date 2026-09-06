@@ -235,9 +235,10 @@ Two consequences worth knowing:
   a grey glass office block; high, and the 38° camera cannot see over the near
   wall into the floor you are standing on.
 - **Collision is height-blind within one space** (see `Collision.ts`), but
-  since #377/#380 each castle floor is its own space, **279 m apart**, so a
-  shop counter on deck two blocks nothing on deck four (measured: 0 of 21250
-  swept points). The old exemption — "castle props get no collider because
+  since #377/#380 each castle floor is its own space, spaced
+  `FLOOR_SPACE_SPACING` = **300 m** apart (`floors.ts:64`; the nearest
+  colliders of adjacent floors measured 279 m apart), so a shop counter on
+  deck two blocks nothing on deck four (measured: 0 of 21250 swept points). The old exemption — "castle props get no collider because
   they would wall off every deck" — is dead, and every prop a child can see
   must be solid, on every floor. Several `src/` comments still reason from the
   dead version (#568); correct them where you meet them.

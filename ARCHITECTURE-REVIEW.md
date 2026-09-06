@@ -734,7 +734,8 @@ last happened to run it.*
 
 Reviewed `main` at **`f1c99347`** ("`.node-version` is the answer fnm was
 asking for", #517). 287 first-parent commits since Review 7; the check chain
-has gone from 7 scripts to 64 steps; the park is generated on 16 pool seeds.
+has gone from 7 scripts to 60 steps (64 scripts counting the `pnpm run`
+closure); the park is generated on 16 pool seeds.
 This review was done by four read-only sweeps (hand copies, checks that cannot
 fail, measurements on a convenient origin, structure), each claim then
 re-verified against the source before filing. **Forty-three issues filed,
