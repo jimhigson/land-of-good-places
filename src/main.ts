@@ -33,7 +33,7 @@ import { ALL_CATALOGUE_ITEMS } from './world/building/shops/catalogue';
 // and this is the boot entry that lazy-loads `Game` on purpose.
 import { MAX_PARADE_VISIBLE } from './entities/parade/paradeCap';
 import { saveFlags } from './state/flags';
-import { clearSave, loadSave, type SaveFile } from './state/save';
+import { clearSave, loadSave, makeSessionUnsavable, type SaveFile } from './state/save';
 import { PARK_SEED } from './world/parkManifest';
 import { forgetParkSeed, parkSeedSource } from './world/parkSeedPool';
 import { canAdoptWithoutAsking, noteAdopting, watchForFirstTouch } from './update-adoption';
@@ -630,11 +630,34 @@ async function loadGame(): Promise<typeof import('./Game').Game> {
  * would hang the tab rather than answer anything.
  */
 function grantDebugPets(search: string): void {
-  const asked = Number(new URLSearchParams(search).get('pets'));
-  if (!Number.isFinite(asked) || asked < 1) return;
+  const raw = new URLSearchParams(search).get('pets');
+  if (raw === null) return;
+  const asked = Number(raw);
+  if (!Number.isFinite(asked) || asked < 1) {
+    // Say so, exactly as `parseDebugSpawn` does for an unreadable `pos`. These
+    // are typed by hand off a message, so the boot must survive it — but
+    // opening the ordinary park in silence looks like the link simply does not
+    // work, and the next thing anyone does is retype the same typo.
+    console.warn(
+      `?pets=${raw}: not a whole number of companions, so none were granted. ` +
+        `Expected something like ?pets=5. Opening normally.`,
+    );
+    return;
+  }
   const wanted = Math.min(Math.floor(asked), MAX_DEBUG_PETS);
   const companions = ALL_CATALOGUE_ITEMS.filter((item) => walksInParade(item.kind));
   if (companions.length === 0) return;
+
+  // **Nothing this session does may ever reach the real save.** Called before
+  // the first grant, not after, so an exception midway cannot leave granted
+  // pets in a still-savable session. See `makeSessionUnsavable` for why this
+  // link needs it when `/spawn` does not: `continueGame` hydrates the **real
+  // profile** before `launchGame` runs, `catchWildPetOnce` bumps the revision
+  // the autosave is gated on, and the inventory is part of `SaveFile` — so
+  // without this, `…/hotel-suite?pets=12` typed against production on the
+  // machine holding Eleri's save would give her twelve companions for ever,
+  // with no inverse.
+  makeSessionUnsavable();
   // `catchWildPetOnce` is what `/slide-with-pets` grants through — the store's
   // own "already got one" test, so pasting the link twice does not double the
   // line. Past the catalogue's length that stops adding, which is the honest

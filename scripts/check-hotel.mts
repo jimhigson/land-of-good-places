@@ -2370,6 +2370,15 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
 {
   const middleCapacity = petBedSlots(400, MIDDLE_BEDROOM_INDEX).length;
   const sideCapacity = petBedSlots(400, 0).length;
+  // Both widths measured off the same `clearFloorAround` the slot generator
+  // uses, never a hand-typed span — a number typed into a coverage note is
+  // exactly the copy this repo keeps finding wrong.
+  const sideSpot = SUITE_BED_SPOTS[0] ?? [0, 0];
+  const middleSpot = SUITE_BED_SPOTS[MIDDLE_BEDROOM_INDEX] ?? [0, 0];
+  const sideRect = clearFloorAround(SUITE, sideSpot[0], sideSpot[1]);
+  const middleRect = clearFloorAround(SUITE, middleSpot[0], middleSpot[1]);
+  const sideWidth = sideRect.maxX - sideRect.minX;
+  const middleWidth = middleRect.maxX - middleRect.minX;
   const companionSpecs = ALL_CATALOGUE_ITEMS.filter((item) => walksInParade(item.kind));
   let controlEverBit = false;
   let worstShortfall = 0;
@@ -2443,9 +2452,11 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
       `middle one ${middleCapacity}; every companion of a child owning up to ${middleCapacity} of ` +
       `them is sent to a bed whichever of the 3 bedrooms she naps in. **Past ${middleCapacity} ` +
       `companions there is no bed left to send anyone to** — at ${middleCapacity + 2} owned, ` +
-      `${worstShortfall} animal(s) stayed standing in the line. The suite has no floor for more ` +
-      `(a side bedroom would need ~12.3 m of width to hold 12 beds and has ` +
-      `${sideCapacity === 2 ? '6.35' : '?'} m), so raising it is a layout change, not a packing one.`,
+      `${worstShortfall} animal(s) stayed standing in the line. The suite has no floor for more: ` +
+      `a side bedroom's clear floor is ${sideWidth.toFixed(2)} m wide against the middle one's ` +
+      `${middleWidth.toFixed(2)} m, and asking the generator for ${middleCapacity + 2} beds in a ` +
+      `side bedroom still returns ${sideCapacity}. So raising it is a layout change, not a ` +
+      `packing one.`,
   );
 }
 
