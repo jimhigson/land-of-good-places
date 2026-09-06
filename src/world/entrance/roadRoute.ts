@@ -1,6 +1,7 @@
 import { RIM_OUTSET_START } from '../../core/constants';
 import { PARK_BOUNDARY, TERRAIN_APRON } from '../boundary';
 import { RingPath } from '../railRace/ringPath';
+import { outsetClearOfSupports } from '../railRace/supportGround';
 import { CHILD_FOOTPRINT } from '../../art/models/kid';
 import { CAT_BUS_LENGTH } from './catBus';
 import { ENTRANCE_ANGLE } from './layout';
@@ -90,24 +91,14 @@ import { ROAD_HALF_WIDTH } from './road';
  * and is genuinely as far as the game draws in that direction.
  */
 
-/**
- * How far the boundary masonry stands proud of the park's own edge line.
- *
- * `Garden.ts` lays 0.7 m-deep blocks centred on the outline, so the outer face
- * is half of that out; the pillars are fatter again. Stated here so the road's
- * inner kerb can be put against the wall rather than through it.
- */
-const BOUNDARY_MASONRY_REACH = 0.6;
+// `BOUNDARY_MASONRY_REACH` (0.6 m, how far the wall's blocks stand proud of the
+// park's outline) lived here to let the road's inner kerb be laid against the
+// masonry without going through it. **Nothing reads it any more.** The road no
+// longer hugs the wall at all — it is laid outboard of the Rail Race's supports
+// now that the hill's ceiling is gone (see `ENTRANCE_ROAD_OUTSET`), so the
+// masonry is nowhere near it. Deleted rather than kept "in case": a constant
+// with no consumer is one the next reader has to prove is dead.
 
-/**
- * **The road's centre line, as metres beyond the park's edge.**
- *
- * As near the wall as a road can be laid — its inner kerb ends up
- * {@link BOUNDARY_MASONRY_REACH} clear of the masonry's outer face — and that
- * is the point. Every metre the road sits further out is a metre of the Rail
- * Race's own apron it takes, and a bigger radial nudge the ride's trestle
- * search has to find. Hugging the wall is the cheapest place for it to be.
- */
 /**
  * **How much pavement a child needs between the bus's door and the arch.**
  *
@@ -155,15 +146,38 @@ const BUS_DOOR_INBOARD = 4.66;
  *   stay inside it or the carriageway is cambered down a 17 m slope. That is the
  *   ceiling, at `RIM_OUTSET_START - ROAD_HALF_WIDTH` = 8.11.
  *
- * The floor is `3.6 + 4.66` = 8.26 and the ceiling 8.11, so **they cross by
- * 0.15 m** — which is the honest statement of how tight the apron outside this
- * park is, and why the old straight road simply sat on top of the ride instead.
- * The road takes the floor, and its outer kerb overhangs the very start of the
- * rim by 15 cm, where the fall is `smoothstep(12, 22, 12.15)` of 17 m — under a
- * centimetre. It is inside the ceiling in every sense that matters and outside it
- * arithmetically, and that is worth saying plainly rather than rounding away.
+ * The floor is `3.6 + 4.66` = 8.26 and the ceiling 8.11, so **they crossed by
+ * 0.15 m** — which was the honest statement of how tight the apron outside this
+ * park was, and why the old straight road simply sat on top of the ride instead.
+ *
+ * ## The ceiling is gone (#511), and that is what unlocks this
+ *
+ * `RIM_OUTSET_START` was a property of **the hill**, and there is no hill: the
+ * ground is a spherical cap now (`terrain.ts`), falling the same gentle fall on
+ * every bearing with no rim to stay inside. So the upper bound simply does not
+ * exist any more, and the road is free to move outboard of the ride rather than
+ * being crushed against it. That is what Jim meant by *"there should be no 'flat
+ * ground' it is a sphere — combine them and this should go away"*: the
+ * contention dissolves rather than either party giving way.
+ *
+ * The second bound is now the **Rail Race's supports**, and it is *asked for*
+ * rather than restated. This block used to recite the trestle line's outset and
+ * do the clearing arithmetic itself — a second definition of the ride's business
+ * living in the road, which would go stale the moment the ride changed how it
+ * searches, silently, because nothing compares them.
+ * `railRace/supportGround.ts` publishes the band and this asks; when the radial
+ * nudge ladders are replaced, this follows for free.
  */
-export const ENTRANCE_ROAD_OUTSET = DOOR_PAVEMENT + BUS_DOOR_INBOARD;
+export const ENTRANCE_ROAD_OUTSET = Math.max(
+  DOOR_PAVEMENT + BUS_DOOR_INBOARD,
+  // Only the carriageway's own half-width is claimed here. **How far the bus's
+  // body overhangs its lane as it turns is not guessed at in this file** —
+  // `check:swept-bus` measures the drawn vehicle against the drawn supports at
+  // the height the bus occupies, across every seed, and that measurement is
+  // what says whether this outset is enough. A constant invented here would be
+  // a second opinion about the bus's shape, held by the road.
+  outsetClearOfSupports(ROAD_HALF_WIDTH),
+);
 
 /**
  * How far out the tails run before the road is off the edge of the world.

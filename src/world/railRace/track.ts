@@ -1,3 +1,4 @@
+import { SUPPORT_MAX_RADIAL_NUDGE } from './supportGround';
 import {
   TorusGeometry,
   BoxGeometry,
@@ -1559,6 +1560,25 @@ const MANDATORY_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4];
  * rather than becoming a silent, permanent crutch.
  */
 const WIDE_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8];
+
+// **The published band and this ladder are one fact, so they are checked
+// against each other rather than trusted to agree.** `supportGround.ts` tells
+// the entrance road how far out the ride may put a foot; if this ladder ever
+// reaches further than the band admits, the road would be laid through ground
+// the ride is still using and nothing would say so. A comment promising two
+// numbers match is not a mechanism (CLAUDE.md); this is.
+const widestNudge = Math.max(
+  ...RADIAL_NUDGES,
+  ...MANDATORY_RADIAL_NUDGES,
+  ...WIDE_RADIAL_NUDGES,
+);
+if (widestNudge > SUPPORT_MAX_RADIAL_NUDGE) {
+  throw new Error(
+    `railRace: a radial nudge ladder reaches ${widestNudge} m but supportGround.ts ` +
+      `publishes ${SUPPORT_MAX_RADIAL_NUDGE} m as the band the entrance road clears. ` +
+      'Widen SUPPORT_MAX_RADIAL_NUDGE (and re-measure the road) or narrow the ladder.',
+  );
+}
 
 /**
  * Tries each (radial, arc) nudge in order and returns the first clear ground
