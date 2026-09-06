@@ -1005,6 +1005,145 @@ export class NavGrid {
   // --------------------------------------------------------------- the search
 
   /**
+   * **Every place a walker standing at `(x, z, y)` can get to**, as a predicate
+   * — one flood over exactly the lattice, steps, hops and connector edges
+   * {@link findRoute} searches, so it can never answer differently from a
+   * route. The one owner of "can a child reach this?" for a whole *set* of
+   * destinations: `findRoute` per destination costs ~6 ms each on the park
+   * (224 waypoints: 1.4 s, measured on seed 13), this is one pass.
+   *
+   * `null` when there is no lattice or nowhere to stand at the start — the
+   * same cases in which `findRoute` returns 0.
+   *
+   * The predicate describes the lattice **as built at the moment of the
+   * flood**. Asking it after the collision world's revision has moved on is
+   * a programming error and throws, rather than quietly answering about a
+   * park that no longer exists — an answer nobody can hear being wrong is
+   * the disease CLAUDE.md names.
+   */
+  reachableFrom(
+    startX: number,
+    startZ: number,
+    startY: number,
+    sample: GroundSampler,
+  ): ((x: number, z: number, y: number) => boolean) | null {
+    if (!this.ensureLattice(sample)) return null;
+    let startCell = this.cellAt(startX, startZ);
+    if (startCell < 0) return null;
+    if (this.blocked[startCell] === 1) {
+      startCell = this.nearestFreeCell(startCell);
+      if (startCell < 0) return null;
+    }
+    const startNode = this.nodeNearest(startCell, startY);
+    if (startNode < 0) return null;
+
+    const reached = new Uint8Array(this.nodeCount);
+    const stack = new Int32Array(this.nodeCount);
+    let top = 0;
+    reached[startNode] = 1;
+    stack[top++] = startNode;
+    const visit = (neighbour: number): void => {
+      if (reached[neighbour] === 1) return;
+      reached[neighbour] = 1;
+      stack[top++] = neighbour;
+    };
+    while (top > 0) {
+      const node = stack[--top] ?? 0;
+      this.forEachStep(node, visit);
+    }
+
+    const revision = this.builtRevision;
+    const boundary = this.builtBoundary;
+    return (x, z, y) => {
+      if (this.builtRevision !== revision || this.builtBoundary !== boundary) {
+        throw new Error(
+          'NavGrid.reachableFrom: the lattice was rebuilt after this flood — flood again',
+        );
+      }
+      const cell = this.cellAt(x, z);
+      if (cell < 0 || this.blocked[cell] === 1) return false;
+      const node = this.nodeNearest(cell, y);
+      return node >= 0 && reached[node] === 1;
+    };
+  }
+
+  /**
+   * Every node one step from `node` — the eight lattice neighbours at each
+   * level a foot can reach, plus the connector edges — with the cost of the
+   * step and the connector it rode (`0` for a lattice step). **The one owner
+   * of what a step is**: {@link search} and {@link reachableFrom} both walk
+   * this, so a rule about corners, hops or ground cost written here is a
+   * rule about routes and about reachability at once.
+   */
+  private forEachStep(
+    node: number,
+    visit: (neighbour: number, cost: number, via: number) => void,
+  ): void {
+    const cell = this.nodeCell[node] ?? 0;
+    const cx = cell % this.cells;
+    const cz = (cell - cx) / this.cells;
+    const nodeHeight = this.nodeHeight[node] ?? 0;
+    const onBand = this.hopBand[cell] === 1;
+
+    for (let i = 0; i < 8; i += 1) {
+      const nx = cx + (NEIGHBOUR_X[i] ?? 0);
+      const nz = cz + (NEIGHBOUR_Z[i] ?? 0);
+      if (nx < 0 || nz < 0 || nx >= this.cells || nz >= this.cells) continue;
+
+      const neighbourCell = nz * this.cells + nx;
+      if (this.blocked[neighbourCell] === 1) continue;
+
+      let step = 1;
+      if (i >= 4) {
+        // No cutting corners: a diagonal is only a step if both of the
+        // straight cells it passes between are walkable too. Without this a
+        // route slips through the gap where two walls meet, which the
+        // resolver then refuses to let her through.
+        if (this.blocked[cz * this.cells + nx] === 1) continue;
+        if (this.blocked[nz * this.cells + cx] === 1) continue;
+        step = Math.SQRT2;
+      }
+
+      // An edge touching a hoppable wall's band is a *hop*, so it is priced
+      // at the multiplier and held to the hop's own reach rather than to a
+      // walking step. Both facts come from the same place — see the header —
+      // and neither applies anywhere a hoppable collider is not stamped.
+      const intoBand = this.hopBand[neighbourCell] === 1;
+      if (intoBand) step *= HOP_COST_MULTIPLIER;
+      const rise = onBand || intoBand ? MAX_AUTO_HOP_HEIGHT : MAX_STEP;
+
+      // What the ground is worth (issue #416). Charged on the cell being
+      // stepped *into*, which is the standard weighted-lattice reading and
+      // the one that makes the first step off a kerb cost what the grass
+      // costs. Paving is 1, so the octile heuristic — which is in cell units
+      // at cost 1 — still never overestimates and A* stays optimal.
+      //
+      // **The two multipliers compose safely, structurally rather than by
+      // luck.** Both are written on this same `step`, neither touches
+      // {@link heuristic} (octile, in cell units, at cost 1), and both are
+      // >= 1 on the geometric step — so the heuristic remains a lower bound
+      // with both applied exactly as it is with either alone. Any further
+      // weighting of this shape is admissible for the same reason.
+      step *= this.costOf(neighbourCell);
+
+      // Every level of the neighbouring cell a walking foot could reach.
+      // Levels of one cell are more than a step apart by construction, so
+      // at most one matches; the loop is over the cell's own short range.
+      const from = this.levelStart[neighbourCell] ?? 0;
+      const to = this.levelStart[neighbourCell + 1] ?? 0;
+      for (let neighbour = from; neighbour < to; neighbour += 1) {
+        if (Math.abs((this.nodeHeight[neighbour] ?? 0) - nodeHeight) > rise) continue;
+        visit(neighbour, step, 0);
+      }
+    }
+
+    const edges = this.connectorEdges.get(node);
+    if (edges) {
+      for (const edge of edges) visit(edge.to, edge.cost, edge.via);
+    }
+  }
+
+  /**
    * A* from one node to another, over the eight-connected lattice plus the
    * connector edges.
    *
@@ -1043,75 +1182,38 @@ export class NavGrid {
       expansions += 1;
       if (expansions > MAX_EXPANSIONS) break;
 
-      const cell = this.nodeCell[node] ?? 0;
-      const cx = cell % this.cells;
-      const cz = (cell - cx) / this.cells;
-      const nodeHeight = this.nodeHeight[node] ?? 0;
-      const nodeCost = this.gScore[node] ?? 0;
-      const onBand = this.hopBand[cell] === 1;
-
-      for (let i = 0; i < 8; i += 1) {
-        const nx = cx + (NEIGHBOUR_X[i] ?? 0);
-        const nz = cz + (NEIGHBOUR_Z[i] ?? 0);
-        if (nx < 0 || nz < 0 || nx >= this.cells || nz >= this.cells) continue;
-
-        const neighbourCell = nz * this.cells + nx;
-        if (this.blocked[neighbourCell] === 1) continue;
-
-        let step = 1;
-        if (i >= 4) {
-          // No cutting corners: a diagonal is only a step if both of the
-          // straight cells it passes between are walkable too. Without this a
-          // route slips through the gap where two walls meet, which the
-          // resolver then refuses to let her through.
-          if (this.blocked[cz * this.cells + nx] === 1) continue;
-          if (this.blocked[nz * this.cells + cx] === 1) continue;
-          step = Math.SQRT2;
-        }
-
-        // An edge touching a hoppable wall's band is a *hop*, so it is priced
-        // at the multiplier and held to the hop's own reach rather than to a
-        // walking step. Both facts come from the same place — see the header —
-        // and neither applies anywhere a hoppable collider is not stamped.
-        const intoBand = this.hopBand[neighbourCell] === 1;
-        if (intoBand) step *= HOP_COST_MULTIPLIER;
-        const rise = onBand || intoBand ? MAX_AUTO_HOP_HEIGHT : MAX_STEP;
-
-        // What the ground is worth (issue #416). Charged on the cell being
-        // stepped *into*, which is the standard weighted-lattice reading and
-        // the one that makes the first step off a kerb cost what the grass
-        // costs. Paving is 1, so the octile heuristic — which is in cell units
-        // at cost 1 — still never overestimates and A* stays optimal.
-        //
-        // **The two multipliers compose safely, structurally rather than by
-        // luck.** Both are written on this same `step`, neither touches
-        // {@link heuristic} (octile, in cell units, at cost 1), and both are
-        // >= 1 on the geometric step — so the heuristic remains a lower bound
-        // with both applied exactly as it is with either alone. Any further
-        // weighting of this shape is admissible for the same reason.
-        step *= this.costOf(neighbourCell);
-
-        // Every level of the neighbouring cell a walking foot could reach.
-        // Levels of one cell are more than a step apart by construction, so
-        // at most one matches; the loop is over the cell's own short range.
-        const from = this.levelStart[neighbourCell] ?? 0;
-        const to = this.levelStart[neighbourCell + 1] ?? 0;
-        for (let neighbour = from; neighbour < to; neighbour += 1) {
-          if (Math.abs((this.nodeHeight[neighbour] ?? 0) - nodeHeight) > rise) continue;
-          this.relax(node, neighbour, nodeCost + step, 0, goalX, goalZ, goalY);
-        }
-      }
-
-      const edges = this.connectorEdges.get(node);
-      if (edges) {
-        for (const edge of edges) {
-          this.relax(node, edge.to, nodeCost + edge.cost, edge.via, goalX, goalZ, goalY);
-        }
-      }
+      // The steps themselves — corners, hops, ground cost, levels, connectors
+      // — are {@link forEachStep}'s, shared with {@link reachableFrom}.
+      this.expandFrom = node;
+      this.expandCost = this.gScore[node] ?? 0;
+      this.expandGoalX = goalX;
+      this.expandGoalZ = goalZ;
+      this.expandGoalY = goalY;
+      this.forEachStep(node, this.relaxStep);
     }
 
     return this.searchBestNode;
   }
+
+  // The node being expanded and its goal, held on the instance so the visitor
+  // {@link forEachStep} is handed can be one arrow allocated once rather than
+  // one per expansion — `search` expands up to MAX_EXPANSIONS nodes a route.
+  private expandFrom = -1;
+  private expandCost = 0;
+  private expandGoalX = 0;
+  private expandGoalZ = 0;
+  private expandGoalY = 0;
+  private readonly relaxStep = (neighbour: number, cost: number, via: number): void => {
+    this.relax(
+      this.expandFrom,
+      neighbour,
+      this.expandCost + cost,
+      via,
+      this.expandGoalX,
+      this.expandGoalZ,
+      this.expandGoalY,
+    );
+  };
 
   /** One A* relaxation, tracking the best fallback ending as it goes. */
   private relax(
