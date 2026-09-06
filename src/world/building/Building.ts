@@ -103,6 +103,7 @@ import {
   ROOF_PAVILION_HALF_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  CASTLE_TOWERS,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
@@ -816,6 +817,7 @@ export class Building implements GameSystem {
     this.parkRoot.add(this.rideMount);
 
     registerFacadeCollision(collision);
+    registerCastleTowerCollision(collision);
 
     const plot = anchorPlots.getGroup('building');
     const plotAnchor = plot.position;
@@ -2395,4 +2397,52 @@ function registerFacadeCollision(collision: CollisionWorld): void {
   // The back of the lobby.
   const lobbyZ = facadeZ(BUILDING_HALF_Z - 1.8);
   collision.addWall(facadeX(ENTRANCE_MIN_X), lobbyZ, facadeX(ENTRANCE_MAX_X), lobbyZ, 0.3);
+}
+
+/**
+ * **The four corner turrets are solid** (issue #549).
+ *
+ * The facade above is a 24 x 18 m rectangle, and the towers stand *outside* it:
+ * their axes sit half a wall thickness beyond each corner and their flared feet
+ * bulge 2.21 m further out again. So there was about **2.1 m of drawn stone at
+ * each of four corners with nothing behind it**, and a child walked into a
+ * turret and came out the other side. Measured before the fix, on 48 bearings
+ * at two strides: a player-sized body reached **0.60 m** from the axis of a
+ * 2.214 m turret, on all four.
+ *
+ * Nobody saw it because nothing was missing from a list — `CASTLE_TOWERS`
+ * existed and was correct, `slide/plan.ts` routed around it properly, and the
+ * procgen invariant measured it. The collision world simply had never been told
+ * the towers were there. That is CLAUDE.md's opening rule and its stated cause:
+ * scenery built with no collider at all.
+ *
+ * **A disc, not a rectangle, and that is what makes it safe** — the same
+ * argument {@link registerRoofTurretCollision} makes, and it is a property of
+ * `CollisionWorld` rather than a preference. `addRectangle` is four walls round
+ * a hollow middle and a mover inside one is never pushed out; a circle has no
+ * inside to be trapped in, because `resolve()` pushes radially outward from
+ * wherever the mover is and shoves it off dead centre rather than dividing by
+ * zero. So there is no "is the interior enterable and leavable?" question to
+ * answer here: it is leavable by construction.
+ *
+ * **The radius is the tower body's own flared foot, read off {@link CASTLE_TOWERS}**
+ * — one owner for the mesh, the slide's routing and this collider, so a turret
+ * that is moved or re-flared takes its collision with it. Deliberately *not*
+ * `CASTLE_TURRET_FOOTPRINT_RADIUS` (2.45), which `registerRoofTurretCollision`
+ * uses: that is the wider *cone*, and out here the cone begins 10.6 m up where
+ * no child reaches. Standing her 0.24 m off visible stone is a smaller fault
+ * than letting her through it, but it is still one. (She is kept clear of the
+ * cone's footprint either way — held at 2.83 m from the axis, she is already
+ * outside its 2.45 m.)
+ *
+ * Infinity-topped, like the shell and the roof turrets: the body is 10.6 m with
+ * a 4.2 m cone on it, and a 1.28 m jump apex has no business clearing that.
+ */
+function registerCastleTowerCollision(collision: CollisionWorld): void {
+  for (const tower of CASTLE_TOWERS) {
+    // The roof cones sit on top of the bodies and share their axis, so the body
+    // alone is the whole footprint a child can walk into.
+    if (!tower.name.startsWith('tower-body-')) continue;
+    collision.addCircle(tower.x, tower.z, tower.radiusBottom);
+  }
 }
