@@ -55,11 +55,38 @@ Reported to the coordinator; awaiting the Architect's ruling on making
 `PoiGraph` connectivity the same question `NavGrid` answers, keeping the
 layout-entry redraw for a POI the player genuinely cannot reach (zero today).
 
-## Status
+## Status (6 Sep, evening) — built, rebased, gates running
 
-No generator code written yet. Next: refusal shape + trace + digest hashing
-+ `check:every-seed-builds` scaffolding (needed whichever way the ruling
-goes), then the rung itself.
+Rulings (both in the design doc, c4fff476): `PoiGraph.reachable` is the
+JourneyPlanner's NavGrid flood from the entrance; node placement is
+`NavGrid.nearestStandable`; rung 1 armed for genuine unreachability, prints
+"never fired". Implemented:
+
+- `NavGrid.floodFrom`/`reachableFrom`/`nearestStandable`; `forEachStep` is the
+  one owner of a step for `search` and the flood (0 disagreements vs
+  per-node routes on 224/225/245 waypoints; 7 ms vs 1.4 s).
+- `PoiGraph` rewritten: chords/lanes/neighbours deleted (nobody read them);
+  `PoiReach { grid, sample }`; `noSpot` by coordinate; `NUDGE_REACH` re-exports
+  `STAND_SEARCH_REACH` (NavGrid owns it so parkLayout can import it).
+- `parkLayout.ts`: `buildOnce(restart, attempts)` ranks candidates (attempt k =
+  k-th best; budget = supply); `solve()` is the ladder; `doormatRefusals`
+  floods a plots+boundary+turret NavGrid from the entrance (~195 ms/solve);
+  blockers from the door's pocket (`pocketBlockers`) or covering plots
+  (`coveringBlockers`); `LGP_LAYOUT_REFUSE=<id>[:<n>|always]` Node-only hook;
+  `probeDoormats` exported for the check; `LAYOUT_TRACE` on stderr.
+- `check:layout-rung` (in the chain), `check:every-seed-builds` (standalone
+  workflow, bidirectional ratchet), `park-digest` `trace` line.
+- `readSeed` accepts 0: **"seed 0" was the canonical park until now.**
+
+Numbers on the rebased base: **7 of 16 build** (3, 4, 5, 11, 13, 14, 15).
+Red: rail.unsolvable 0, 8, 9, 10; crossing.nosite 1, 2, 7; anchor.reach 12
+(+ poi.nospot on 6: gate-approach samples on the railway at (0,42.5),
+(0,38.7), no deck — a crossing foul, stage 4). POI class discharged on 1, 4,
+13, 15 with no placement moved.
+
+Remaining: gates (check ~26 min, test:procgen, coplanar, swept-bus,
+park-pool, build), watch `check:arrival-completes` for the 724 ms lattice
+build now paid at NpcSystem construction, PR with `/spawn` link.
 
 ## Finding 2 (6 Sep, later) — nobody walks `PoiGraph`'s edges
 
