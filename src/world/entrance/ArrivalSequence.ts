@@ -21,16 +21,12 @@ import {
 import {
   createCatBus,
   CAT_BUS_DOOR_DROP,
-  CAT_BUS_LENGTH,
   CAT_BUS_LONGEST_WALK_TO_DOOR,
   CAT_BUS_SEAT_COUNT,
   CAT_BUS_TOP,
-  CAT_BUS_WIDTH,
   type CatBusHandle,
 } from './catBus';
 import {
-  CAMERA_DISTANCE,
-  CAMERA_PITCH_DEGREES,
   CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
 } from '../../core/constants';
@@ -244,29 +240,6 @@ export const ARRIVAL_CONTROL_AT =
  */
 export const ARRIVAL_KID_COUNT = CAT_BUS_SEAT_COUNT - 1;
 
-/**
- * **How far out the camera sits while the bus is the subject.**
- *
- * Jim's first watched run of Stage A opened on a bus that filled the frame with
- * its own cat face cropped off the corner, and the previous round left it
- * alone rather than ship a camera change it could not re-verify.
- *
- * The default framing is built around a child: `CAMERA_VIEW_HEIGHT` is 15 m,
- * chosen so *"a 2.12 m kid fills about 14% of the height"*. The bus is
- * **18.16 m** long. It was never going to fit.
- *
- * So this is derived rather than dialled in, from the bus's **bounding
- * sphere** — which is the right measure precisely because it does not care
- * which way round the bus is, and the camera swings all the way round it
- * during the journey before this ever applies. The radius is half the body
- * diagonal; the view's half-height at zoom `z` is `CAMERA_VIEW_HEIGHT / 2 / z`;
- * asking the sphere to fit inside it with a little air gives the number below.
- * A bus that grows re-derives it and stays in shot.
- */
-const ARRIVAL_BUS_RADIUS = Math.hypot(CAT_BUS_LENGTH, CAT_BUS_WIDTH, CAT_BUS_TOP) / 2;
-const ARRIVAL_FRAMING_AIR = 1.15;
-export const ARRIVAL_CAMERA_ZOOM =
-  CAMERA_VIEW_HEIGHT / 2 / (ARRIVAL_BUS_RADIUS * ARRIVAL_FRAMING_AIR);
 
 
 /**
@@ -336,7 +309,7 @@ export function arrivalDoorDropWorld(): { readonly x: number; readonly z: number
  * {@link ARRIVAL_EYE_FLOOR_MARGIN} of clearance. **They are one call, not two
  * numbers that agree.**
  */
-export function arrivalGroundUnderEye(
+function arrivalGroundUnderEye(
   drop: { readonly x: number; readonly z: number },
   shot: { readonly yawDegrees: number; readonly pitchDegrees: number; readonly distance: number; readonly zoom: number },
 ): number {
@@ -362,6 +335,50 @@ export function arrivalGroundUnderEye(
 const ARRIVAL_GROUND_SAMPLES = 24;
 /** Bearings round the eye. Twelve is every 30°, finer than the ground bends. */
 const ARRIVAL_GROUND_BEARINGS = 12;
+
+/**
+ * **The whole of the arrival camera, as Jim stated it on 6 September 2026:**
+ * *"the rule should be simple - camera fixed on the player, about 2m from them,
+ * at head height, until they're in the park - that's it."*
+ *
+ * That sentence replaced a shot with four beats — a wide roll-in, a door beat
+ * orbiting the bus's own drop point, a walk beat, and an arch pass with a dive
+ * and a hold — plus the constants that answered each of them. They are deleted
+ * rather than left in place, because a constant kept "in case" is a second
+ * answer to a question nobody is asking any more.
+ *
+ * **The one place the rule does not map straight onto this rig**, and it is
+ * worth stating rather than hiding: the park camera is **orthographic**, so an
+ * eye's distance from its subject changes nothing on screen. "About 2 m from
+ * them" therefore lands as two separate facts — a 2 m stand-back, which is
+ * purely an occlusion control here, and a frame height, which is what actually
+ * makes her that size. {@link ARRIVAL_FOLLOW_ZOOM} is the second of those, sized
+ * so she fills the frame the way a 2 m stand-back would.
+ */
+export const ARRIVAL_FOLLOW_DISTANCE = 2;
+
+/**
+ * How tall the frame is while the arrival owns the camera, in metres of world.
+ *
+ * A child plus a little air, and nothing to do with the bus: the subject is
+ * her. Derived from {@link TALLEST_CHILD_HEIGHT} so a child who grows reframes
+ * the shot, and kept a shade above her so the tallest possible hat has
+ * somewhere to go — `check:arrival-camera` asserts both edges.
+ */
+const ARRIVAL_FOLLOW_FRAME_HEIGHT = TALLEST_CHILD_HEIGHT * 1.2;
+export const ARRIVAL_FOLLOW_ZOOM = CAMERA_VIEW_HEIGHT / ARRIVAL_FOLLOW_FRAME_HEIGHT;
+
+/**
+ * How long the bearing takes to come home to the rig's own yaw at the end.
+ *
+ * **The only interpolation left in the shot, and it is about her thumb rather
+ * than the picture.** GAME_DESIGN.md's CONTROL rule reads "up on the stick"
+ * through the camera's yaw, so handing her the controls while the bearing is
+ * still moving sends her somewhere that is not up the screen. Snapping it at
+ * the hand-over would be a visible cut on the frame she takes control, which is
+ * the worst possible instant for one.
+ */
+const ARRIVAL_YAW_HOME_SECONDS = 0.6;
 
 export const ARRIVAL_EYE_FLOOR_MARGIN = 0.3;
 
@@ -397,7 +414,7 @@ const ARRIVAL_EYE_COMPOSITION_LIFT = 0.3;
  * That constant is deleted rather than kept "in case"; a spare definition of a
  * height is how this comes back.
  */
-export const ARRIVAL_EYE_HEIGHT = KID_EYE_HEIGHT + ARRIVAL_EYE_FLOOR_MARGIN + ARRIVAL_EYE_COMPOSITION_LIFT;
+const ARRIVAL_EYE_HEIGHT = KID_EYE_HEIGHT + ARRIVAL_EYE_FLOOR_MARGIN + ARRIVAL_EYE_COMPOSITION_LIFT;
 
 /**
  * **Which way the bus points while it is standing at the stop.**
@@ -731,7 +748,7 @@ function arrivalDoorDistance(): number {
 const ARRIVAL_CLOSE_FRAMING_AIR = 1.7;
 
 /** The push-in on the doorway itself, once the bus has stopped. */
-export const ARRIVAL_DOOR_ZOOM =
+const ARRIVAL_DOOR_ZOOM =
   CAMERA_VIEW_HEIGHT / (TALLEST_CHILD_HEIGHT * ARRIVAL_CLOSE_FRAMING_AIR);
 
 
@@ -804,29 +821,6 @@ function arrivalArchEyeOffsetZ(): number {
   );
 }
 
-/**
- * How long the eye takes to dive from the door shot's stand-back to the
- * arch's, in seconds — see the note at its use.
- *
- * Derived from her own walking pace and the camera's own lag — a quarter of
- * the time she takes to walk the distance the eye trails her by — so a slower
- * walk or a shorter lag stretch or shorten it on their own rather than needing
- * a second number nudged to match.
- *
- * **Short on purpose, and the quarter is the measurement.** There is a band of
- * stand-backs, roughly 14 m down to 6 m, in which the near plane lies along the
- * length of the parked bus and saws it open down the left of frame. Photographed
- * at 20.7 m (clean, the bus wholly in front of the lens), at 10.5 m (a wedge of
- * cut-open bus) and at 5.6 m (clean again, the bus gone from the frame
- * entirely). The band cannot be avoided — the eye has to end up between the bus
- * and the park — so it is crossed quickly instead: `smoothstep` is at its
- * fastest in the middle of its own range, which is exactly where the band sits,
- * and at a quarter of the lag the whole crossing is a few frames at the extreme
- * edge of a frame whose subject is centred.
- */
-function arrivalDiveSeconds(): number {
-  return Math.abs(arrivalArchEyeOffsetZ()) / (4 * NPC_WALK_SPEED);
-}
 
 
 /**
@@ -856,7 +850,6 @@ function arrivalDiveSeconds(): number {
 export const ARRIVAL_RISE_TAIL = Math.min(1.6, ARRIVAL_TIMELINE.departing);
 
 /** On the arrival's own clock: the instant the bus has stopped at the kerb. */
-const AT_STOPPED = ARRIVAL_TIMELINE.rollingIn;
 /** The instant she steps off the kerb and starts walking in. */
 export const AT_WALKING = ARRIVAL_CONTROL_AT - ARRIVAL_TIMELINE.walkingIn;
 /** The instant the whole shot has landed on the rig's own pose. */
@@ -952,192 +945,50 @@ export interface ArrivalShot {
  * and the rig is the single owner of the pose again.
  */
 export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | null {
-  if (elapsed >= AT_SHOT_HOME) return null;
+  if (elapsed >= ARRIVAL_CONTROL_AT) return null;
+  // The arch pass is no longer part of the shot's shape — see the header. Kept
+  // in the signature because `Game` has it to hand and a future beat may want
+  // it; reading it here would be reinstating choreography that has been ruled
+  // out.
+  void archPass;
 
-  const { sheThrough, eyeThrough } = archPass;
-  // **Order-agnostic.** The eye leads her through the gateway on the square-on
-  // pass and trailed her on the three-quarter one, so neither instant may be
-  // assumed to be the earlier. Everything below is expressed against the
-  // transit as a whole.
-  const gatewayEntered = Math.min(sheThrough, eyeThrough);
-  const gatewayLeft = Math.max(sheThrough, eyeThrough);
-
-  // **How much of the door shot is in force**, 0 being the rig exactly. It
-  // comes home over the walk *up to the arch*, not over the whole walk: by the
-  // time the eye has to thread the gateway it must already be on the rig's own
-  // bearing, or it goes through a pier instead of the gap.
-  // **The eye holds its close pose for this long after it is through the
-  // archway, before it starts pulling back.** Derived from the pass itself:
-  // `clear - under` is exactly how long she takes to walk one eye-trail, so
-  // holding for the same again puts her a second trail-length into the park
-  // before the retreat begins.
-  //
-  // **This is what stops the camera shearing the arch open on the way out**,
-  // and it is a geometry fix rather than a taste one. The stand-back has to
-  // open from a few metres to the rig's 90 m, which retreats the eye far
-  // faster than a child walks — so the eye is dragged back out through the
-  // plane of the archway whatever it does. Photographed on two parks doing
-  // exactly that: the near pier sheared into a wedge with its front faces
-  // gone and a child drawn straight through it. The fix is to be *further in*
-  // when the retreat starts, so that by the time the eye is back level with
-  // the gate it is already above the whole arch rather than inside it.
-  const holdPast = Math.min(gatewayLeft + (gatewayLeft - gatewayEntered), ARRIVAL_CONTROL_AT);
-
-  const swing =
-    elapsed < AT_STOPPED
-      ? // **Already on the bus, from the first frame.** Jim, 6 September 2026:
-        // *"arrival camera — it should START facing the bus, not transition
-        // down to there."*
-        //
-        // This used to `smoothstep(0, 1, elapsed / rollingIn)`, opening on the
-        // ordinary pseudo-isometric rig and swinging round onto the bus while it
-        // rolled up — "the arrival opens on a move rather than on a cut", which
-        // was the reasoning and which he has now ruled against. A child watching
-        // her own arrival should be looking at the bus when the picture appears,
-        // not watching the camera find it.
-        //
-        // Held at 1 rather than deleted, because `swing` is also what carries
-        // the stand-back in from the rig's 90 m to the door's own: at 1 from the
-        // first frame the shot simply *is* the door shot, which is the whole of
-        // what he asked for.
-        1
-      : // **Square-on, held all the way through the gateway.** Jim: *"when the
-        // child walks out it should stay looking straight at them, as they
-        // walk through the gates the camera should glide to follow them
-        // under."* The bearing is the whole of "looking straight at them" in
-        // an orthographic rig, so it may not start coming home until the eye
-        // is out the other side — an earlier version began unwinding it at
-        // `under` and he read the result as the camera turning away from her
-        // mid-walk.
-        //
-        // It still lands exactly on the rig at `ARRIVAL_CONTROL_AT`, which is
-        // GAME_DESIGN.md's CONTROL rule and clause 2 of the check: the axes
-        // "up on the stick" is read through are solved from the rig's fixed
-        // yaw, so a bearing still moving under her hand sends her somewhere
-        // that is not up the screen.
-        elapsed < gatewayLeft
-        ? 1
-        : 1 -
+  return {
+    // **Square on to her.** In an orthographic rig the bearing is the whole of
+    // "the camera is on her" — an ortho eye's distance changes nothing you can
+    // see, so yaw and pitch are the entire vocabulary. Held from the first
+    // frame to the hand-over, then the rig's own yaw takes over in one step
+    // because `ArrivalShot` stops being returned.
+    //
+    // **It must land on the rig's yaw by `ARRIVAL_CONTROL_AT`**, and that is
+    // not composition: GAME_DESIGN.md's CONTROL rule reads "up on the stick"
+    // through the camera's yaw, so a bearing still moving under her hand sends
+    // her somewhere that is not up the screen. This comes home over the last
+    // {@link ARRIVAL_YAW_HOME_SECONDS} rather than snapping, which is the one
+    // interpolation left in the shot and is about her thumb rather than the
+    // picture.
+    yawDegrees:
+      CAMERA_YAW_DEGREES +
+      (angleDelta(CAMERA_YAW_DEGREES * DEG, arrivalDoorYawDegrees() * DEG) / DEG) *
+        (1 -
           smoothstep(
             0,
             1,
-            (elapsed - gatewayLeft) / Math.max(0.001, ARRIVAL_CONTROL_AT - gatewayLeft),
-          );
-
-  // **How close the shot is riding**, 1 at the arch pass and 0 at the rig.
-  // Held all the way through the gateway — from the moment she starts walking
-  // until the *eye* is out the other side — and only then released. Releasing
-  // it at her own crossing would start the pull-away while the camera was
-  // still under the crossbar, which is the one moment the whole shot is for.
-  const ride =
-    elapsed < AT_WALKING
-      ? swing
-      : elapsed < holdPast
-        ? 1
-        : 1 - smoothstep(0, 1, (elapsed - holdPast) / Math.max(0.001, AT_SHOT_HOME - holdPast));
-
-  // The tilt is the last thing home: it is still lifting when she takes the
-  // controls, which is Jim's third beat. See ARRIVAL_RISE_TAIL.
-  const lift =
-    elapsed < AT_WALKING
-      ? swing
-      : elapsed < holdPast
-        ? 1
-        : 1 - smoothstep(0, 1, (elapsed - holdPast) / Math.max(0.001, AT_SHOT_HOME - holdPast));
-
-  // **Close from the first frame, and it stays close all the way under the
-  // arch.** Jim, 6 September 2026: *"the arrival camera is really weird how it
-  // seems to zoom into the player - it should start that close to them, and
-  // follow them under the entrance arch, not start far out and zoom in."*
-  //
-  // This used to open at {@link ARRIVAL_CAMERA_ZOOM} — a framing built round
-  // the whole bus — and interpolate to {@link ARRIVAL_DOOR_ZOOM} over the
-  // stopped beat. That interpolation *is* the zoom he is describing, and it is
-  // the same fault as the opening swoop reported before it: a shot that
-  // approaches its framing instead of opening on it.
-  //
-  // **It also explains why `check:arrival-camera` was green while he watched it
-  // happen.** The clause that guards against a cut measures how far the *eye*
-  // moves in a frame, and this is an orthographic rig — a zoom moves the eye by
-  // exactly nothing. Eye translation is structurally incapable of seeing a
-  // dolly here, which is why the check now measures the frame's own height as
-  // well.
-  //
-  // `ARRIVAL_CAMERA_ZOOM` is left where it is: `arrivalZoomFor` still uses it
-  // for the *ride in on the bus*, which is a different shot with the child
-  // aboard and nothing to be close to.
-  const zoom =
-    elapsed < AT_WALKING
-      ? ARRIVAL_DOOR_ZOOM
-      : // **Home by `ARRIVAL_CONTROL_AT`, unlike the stand-back**, and for a
-          // reason the stand-back does not share: `nudgeZoom` writes this same
-          // field, so every frame the shot drives it is a frame her pinch is
-          // discarded (#329). The instant she can pinch, this must stop
-          // moving. It rides `ride`'s curve while it can and is then held to
-          // the handover, so the close framing still lasts through the
-          // gateway.
-          lerp(
-            1,
-            ARRIVAL_DOOR_ZOOM,
-            elapsed < gatewayLeft
-              ? 1
-              : 1 -
-                smoothstep(
-                  0,
-                  1,
-                  (elapsed - gatewayLeft) / Math.max(0.001, ARRIVAL_CONTROL_AT - gatewayLeft),
-                ),
-          );
-
-  // **The stand-back, which is the whole of "the camera goes under the arch
-  // too".** It dives from the door shot's 20.8 m to ARRIVAL_ARCH_DISTANCE as
-  // she walks up to the gateway, holds there while the eye passes through, and
-  // then opens back out to the rig's 90 m on the way up. On `ride`, so it is
-  // one continuous move with the framing rather than a second one beside it.
-  //
-  // **Late and quick, and that is not a taste call.** The eye has to travel
-  // from the door shot's vantage — deep in the park, with the bus in front of
-  // it — to a few metres behind her, which puts the bus *behind* it. So the
-  // bus must cross the near plane, and an orthographic near plane crossing an
-  // 18 m vehicle slowly, at a shallow angle, saws it open: the first version
-  // dived from the moment she started walking and the bus sat sliced through
-  // the corner of frame for the better part of a second, showing its own
-  // hollow interior. Photographed, and it reads as a rendering fault rather
-  // than as a move.
-  //
-  // Diving over only the last {@link arrivalDiveSeconds} means the crossing
-  // happens once she is well clear of the bus, when it is off the edge of a
-  // frame that is by then close on her — so the cut lands on nothing anybody
-  // is looking at.
-  // Timed to end at `clear` rather than at `under`: the crossing has to happen
-  // once she is far enough past the bus that it has left the frame, and at
-  // `under` it has not. Half a second earlier there is a wedge of sawn-open bus
-  // down the left edge — photographed twice while getting this right.
-  const dive = smoothstep(gatewayEntered - arrivalDiveSeconds(), gatewayEntered, elapsed);
-  const distance =
-    elapsed < AT_WALKING
-      ? lerp(CAMERA_DISTANCE, arrivalDoorDistance(), swing)
-      : elapsed < holdPast
-        ? lerp(arrivalDoorDistance(), ARRIVAL_ARCH_DISTANCE, dive)
-        : lerp(CAMERA_DISTANCE, ARRIVAL_ARCH_DISTANCE, ride);
-
-  return {
-    // Turned the short way round — `angleDelta` owns that question everywhere
-    // else in the codebase.
-    yawDegrees:
-      CAMERA_YAW_DEGREES +
-      (angleDelta(CAMERA_YAW_DEGREES * DEG, arrivalDoorYawDegrees() * DEG) / DEG) * swing,
-    pitchDegrees: lerp(CAMERA_PITCH_DEGREES, ARRIVAL_DOOR_PITCH_DEGREES, lift),
-    distance,
-    zoom,
-    // The door is the subject exactly while the bus is stopped with children
-    // coming out of it. Not during `rolling-in`: she is aboard for all of it,
-    // so following the player already follows the bus, and pinning the camera
-    // to a door that is still moving would hold the shot still while the bus
-    // slid across it. From `walking-in` on it is her, and the ordinary damped
-    // follow is what carries the camera through the gateway with her.
-    ownsTheZoom: elapsed < ARRIVAL_CONTROL_AT,
-    watchesTheDoor: elapsed >= AT_STOPPED && elapsed < AT_WALKING,
+            (elapsed - (ARRIVAL_CONTROL_AT - ARRIVAL_YAW_HOME_SECONDS)) /
+              ARRIVAL_YAW_HOME_SECONDS,
+          )),
+    // **Head height, looking level.** Zero pitch is what "at head height"
+    // means for a camera that is on her: the eye rides at the focus's own
+    // height, and the focus is her head.
+    pitchDegrees: 0,
+    // **About 2 m from her.** Jim's number, held for the whole shot.
+    distance: ARRIVAL_FOLLOW_DISTANCE,
+    zoom: ARRIVAL_FOLLOW_ZOOM,
+    ownsTheZoom: true,
+    // **Never.** "Fixed on the player" is the rule, so the ordinary damped
+    // player-follow is the whole of the tracking and there is no second focus
+    // to arbitrate against. The door beat that used to orbit `doorFocus` is
+    // gone with the rest of the choreography.
+    watchesTheDoor: false,
   };
 }
 
