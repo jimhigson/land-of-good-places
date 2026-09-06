@@ -194,8 +194,12 @@ export interface SeedReport {
     readonly top: number;
     /** `CAT_BUS_TOP`, the bus's own owner of its height — must equal `top`. */
     readonly ownerTop: number;
-    /** The top the sweep used: `top` raised by the suspension's travel at the crown (`CAT_BUS_DRIVEN_TOP`). */
+    /** The top the sweep used: the highest vertex-precise top of the sprung body posed at full heave, full pitch, roll none or full. */
     readonly drivenTop: number;
+    /** Which pose reached `drivenTop`, for the transcript. */
+    readonly drivenPose: string;
+    /** `CAT_BUS_DRIVEN_TOP`, the bus's own owner of its driven top — must equal `drivenTop`. */
+    readonly ownerDrivenTop: number;
   };
   /** The run the bus was swept along, for the transcript. */
   readonly route: { readonly fromX: number; readonly toX: number; readonly z: number };
@@ -305,6 +309,38 @@ async function measureOneSeed(): Promise<void> {
   // sine of the tilt — the ears' boxes put the top at 6.15 m when no vertex
   // is above 6.04. The drawn bus is its vertices, not boxes round its parts.
   const busBox = new Box3().setFromObject(bus, true);
+  // Still at the origin, unrotated: the poses below are in the bus's own frame.
+  const { CAT_BUS_TOP, CAT_BUS_DRIVEN_TOP, CAT_BUS_RIDE_LIFT, CAT_BUS_MAX_HEAVE, CAT_BUS_MAX_PITCH, CAT_BUS_MAX_ROLL } =
+    await import('../src/world/entrance/catBus.ts');
+  const restTop = busBox.max.y;
+  // **The bus is swept as it drives, not as it rests.** The sprung body is
+  // POSED — full heave, full pitch either way, roll none or full either way —
+  // and the highest vertex-precise top of those poses is the envelope's top.
+  // Measured off the mesh rather than added from a constant, so the parent
+  // can hold `CAT_BUS_DRIVEN_TOP` (what the road's claim carries) to it.
+  const chassis = bus.getObjectByName('chassis');
+  if (!chassis) throw new Error('check:swept-bus: the drawn cat bus has no `chassis` group to pose');
+  const kept = { y: chassis.position.y, rx: chassis.rotation.x, rz: chassis.rotation.z };
+  let drivenTop = -Infinity;
+  let drivenPose = '';
+  for (const pitchSign of [1, -1]) {
+    for (const rollSign of [0, 1, -1]) {
+      chassis.position.y = CAT_BUS_RIDE_LIFT + CAT_BUS_MAX_HEAVE;
+      chassis.rotation.x = pitchSign * CAT_BUS_MAX_PITCH;
+      chassis.rotation.z = rollSign * CAT_BUS_MAX_ROLL;
+      bus.updateMatrixWorld(true);
+      const top = new Box3().setFromObject(bus, true).max.y;
+      if (top > drivenTop) {
+        drivenTop = top;
+        drivenPose = `heave +${CAT_BUS_MAX_HEAVE}, pitch ${pitchSign > 0 ? '+' : '-'}${CAT_BUS_MAX_PITCH}, roll ${rollSign === 0 ? '0' : (rollSign > 0 ? '+' : '-') + CAT_BUS_MAX_ROLL}`;
+      }
+    }
+  }
+  chassis.position.y = kept.y;
+  chassis.rotation.x = kept.rx;
+  chassis.rotation.z = kept.rz;
+  bus.updateMatrixWorld(true);
+  busBox.max.y = drivenTop;
   bus.position.copy(keptPosition);
   bus.rotation.y = keptRotationY;
   bus.updateMatrixWorld(true);
@@ -313,14 +349,6 @@ async function measureOneSeed(): Promise<void> {
   }
   // The bus's own owner of its height, carried up to the parent, which asserts
   // it equals this box's top and says so where a run's reader can hear it.
-  const { CAT_BUS_TOP, CAT_BUS_DRIVEN_TOP } = await import('../src/world/entrance/catBus.ts');
-  // **The bus is swept as it drives, not as it rests.** The box is the drawn
-  // vehicle at rest; its top is raised by the suspension's own upward travel
-  // at the crown — the same owner the road's claim reads — so a branch in the
-  // band the crown rises through on a bump is found here, not by a child.
-  // The rest top is still what the owner assertion below compares against.
-  const restTop = busBox.max.y;
-  busBox.max.y = restTop + (CAT_BUS_DRIVEN_TOP - CAT_BUS_TOP);
 
   // --- the posts, as they are drawn ----------------------------------------
   interface Sample {
@@ -514,8 +542,10 @@ async function measureOneSeed(): Promise<void> {
       width: busBox.max.x - busBox.min.x,
       bottom: busBox.min.y,
       top: restTop,
-      drivenTop: busBox.max.y,
+      drivenTop,
+      drivenPose,
       ownerTop: CAT_BUS_TOP,
+      ownerDrivenTop: CAT_BUS_DRIVEN_TOP,
     },
     route: { fromX, toX, z: z0 },
   };
@@ -614,6 +644,14 @@ for (const report of reports) {
   // vertex-precise. They were two definitions once — a hand-copied ear formula
   // 6.8 cm under the face's crown — and nothing compared them. Compared here on
   // every seed, and said out loud below, so the gap can never reopen silently.
+  if (Math.abs(report.bus.drivenTop - report.bus.ownerDrivenTop) > OWNER_SLACK) {
+    voids.push(
+      `seed ${report.seed}: CAT_BUS_DRIVEN_TOP (${report.bus.ownerDrivenTop.toFixed(4)} m, the bus's own owner of its ` +
+        `driven top) is not the drawn bus posed at its highest (${report.bus.drivenTop.toFixed(4)} m at ` +
+        `${report.bus.drivenPose}) — off by ${(report.bus.drivenTop - report.bus.ownerDrivenTop).toFixed(4)} m. ` +
+        'The road claims this as headroom: it must be the crown the mesh actually reaches, derived, never guessed.',
+    );
+  }
   if (Math.abs(report.bus.top - report.bus.ownerTop) > OWNER_SLACK) {
     voids.push(
       `seed ${report.seed}: CAT_BUS_TOP (${report.bus.ownerTop.toFixed(4)} m, the bus's own owner) is ` +
@@ -649,7 +687,9 @@ process.stderr.write(
         `${bus.bottom.toFixed(2)} to ${bus.top.toFixed(2)} m above the ground it stands on\n` +
         `  owner check: CAT_BUS_TOP ${bus.ownerTop.toFixed(4)} m vs the drawn top ${bus.top.toFixed(4)} m ` +
         `(off by ${(bus.top - bus.ownerTop).toFixed(4)} m, slack ${OWNER_SLACK})\n` +
-        `  swept as driven: top raised to ${bus.drivenTop.toFixed(4)} m (CAT_BUS_DRIVEN_TOP, +${(bus.drivenTop - bus.top).toFixed(4)} m of suspension travel at the crown)\n` +
+        `  driven check: CAT_BUS_DRIVEN_TOP ${bus.ownerDrivenTop.toFixed(4)} m vs the drawn bus posed at its highest ` +
+        `${bus.drivenTop.toFixed(4)} m (${bus.drivenPose}; off by ${(bus.drivenTop - bus.ownerDrivenTop).toFixed(4)} m, slack ${OWNER_SLACK})\n` +
+        `  swept as driven: top ${bus.drivenTop.toFixed(4)} m, +${(bus.drivenTop - bus.top).toFixed(4)} m over rest\n` +
         `  swept along z=${route.z.toFixed(2)} from x=${route.fromX.toFixed(2)} to ` +
         `x=${route.toX.toFixed(2)}, every ${SWEEP_STEP} m\n`
       : '') +
