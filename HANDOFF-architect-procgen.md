@@ -84,6 +84,15 @@ first honest run found #501).
   determinism by stream-named attempts + unwind trace hashed into the
   digest; proof `check:every-seed-builds` with "built" and "built well"
   on separate lines. Pool = quality curation only.
+- **POI rung brief written 6 Sep**: `docs/BRIEF-totality-poi-rung.md`
+  (Fable engineer). Rung 1 runs inside `parkLayout.solve`'s existing
+  loop with the router's own reachability probe; rungs 2–3 need
+  re-runnable solves (step 3 generalised) — stated, not smuggled.
+- **#522 is NOT on `main`** (6 Sep): it merged into this design branch.
+  `main` lacks `roadCorridor.ts` / `check-ground-claims.mts`. Design
+  branch merged with `main` (chain 63 = main's 62 + ground-claims,
+  rebuilt from parsed steps). Overseer to merge the design branch to
+  `main`, or engineers branch from it.
 - **#524** (open): a park that fails to build is a test failure, not a
   skip — and after the screen lands, **a named refusal at commit is a
   failure too**, not a skip. Same issue, one more case; say so on it. Step 2 held on step 1 + #511 +
