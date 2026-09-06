@@ -133,6 +133,12 @@ export interface RailRaceTrack {
    */
   readonly claims: readonly Claim[];
   /**
+   * The duck bars this ring did not draw because the road rule did not build
+   * their slot — slot and lane — so the loss is accounted for by name rather
+   * than tolerated. Empty for the ride-scale ring, which keeps every leg.
+   */
+  readonly barsLostToRoad: readonly { readonly slot: number; readonly lane: number }[];
+  /**
    * Makes this ring's trestle posts things a child can walk into.
    *
    * **Only the walk-past ring is ever asked, and only after both rings have
@@ -578,7 +584,7 @@ export function buildRailRaceTrack(
   const mandatoryTrestleIndices = new Set(
     layout.bars.map((bar) => trestleGridIndex(bar.at, route.length)),
   );
-  const spots = trestleSpots(
+  const { spots, overRoadSlots } = trestleSpots(
     route,
     collision,
     options.groundClaims,
@@ -588,6 +594,13 @@ export function buildRailRaceTrack(
     ringSizeVsRace,
     mandatoryTrestleIndices,
   );
+  // **A bar whose slot the road rule did not build is not drawn** (its support
+  // is gone — see the bar loop's fallback), and that loss is named here, by
+  // slot and lane, so the fairness invariant can hold the walk-past ring to
+  // "the race ring's count minus exactly these" and say each one out loud.
+  const barsLostToRoad: readonly { readonly slot: number; readonly lane: number }[] = layout.bars
+    .map((bar) => ({ slot: trestleGridIndex(bar.at, route.length), lane: bar.lane }))
+    .filter((bar) => overRoadSlots.has(bar.slot));
   const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
   // **The supports' claims** — the very claims the search was answered with,
   // returned on the track for `RailRace.ts` to commit with the other ring's as
@@ -930,6 +943,7 @@ export function buildRailRaceTrack(
 
   return {
     claims,
+    barsLostToRoad,
     registerCollision,
     group,
 
@@ -1577,7 +1591,7 @@ function trestleSpots(
   respectsRoad: boolean,
   ringSizeVsRace: number,
   mandatoryIndices: ReadonlySet<number>,
-): TrestleSpot[] {
+): { readonly spots: TrestleSpot[]; readonly overRoadSlots: ReadonlySet<number> } {
   const spots: TrestleSpot[] = [];
   const count = Math.floor(route.length / TRESTLE_SPACING);
   const footRadius = POST_FOOT_RADIUS * ringSizeVsRace;
@@ -1604,6 +1618,8 @@ function trestleSpots(
     ? groundClaims.claimsOf(ROAD_FEATURE).filter((claim) => claim.kind === 'corridor')
     : [];
   let overRoad = 0;
+  /** The slots the road rule did not build, so a bar scheduled on one is accounted for by name. */
+  const overRoadSlots = new Set<number>();
   /** March candidates refused for standing over the road, for the coverage line. */
   let roadRefused = 0;
   // The furthest any trunk on this ring could lean — a loop guard, from the
@@ -1621,6 +1637,7 @@ function trestleSpots(
       trestleTreeAt(route, nominalAt, nominal.x, nominal.z, tree);
       if (treeStandsOn(tree, ringSizeVsRace, road)) {
         overRoad += 1;
+        overRoadSlots.add(i);
         continue;
       }
     }
@@ -1700,7 +1717,7 @@ function trestleSpots(
     }
   }
   reportLegacyRefusals(ringName, legacyTally, respectsRoad ? { overRoad, roadRefused } : null);
-  return spots;
+  return { spots, overRoadSlots };
 }
 
 /**

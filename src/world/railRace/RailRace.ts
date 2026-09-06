@@ -342,6 +342,16 @@ export class RailRace implements GameSystem {
    * compares a ring's drawn supports to its own slice of the one feature.
    */
   readonly supportClaims: { readonly walkPast: readonly Claim[]; readonly race: readonly Claim[] };
+  /**
+   * The duck bars each ring lost to the road rule (slot and lane) — see
+   * `RailRaceTrack.barsLostToRoad`. The fairness invariant reads it: the race
+   * happens on the ride-scale ring, which loses none; the walk-past ring's
+   * count per lane is the race ring's minus exactly these, each said aloud.
+   */
+  readonly barsLostToRoad: {
+    readonly walkPast: readonly { readonly slot: number; readonly lane: number }[];
+    readonly race: readonly { readonly slot: number; readonly lane: number }[];
+  };
   readonly laneCount = LANE_COUNT;
   /** The side-on view leaves her model on screen: watching her duck is the game. */
   readonly playerStaysVisible = true;
@@ -465,6 +475,10 @@ export class RailRace implements GameSystem {
     this.supportClaims = {
       walkPast: this.walkPastRing.track.claims,
       race: this.raceRing.track.claims,
+    };
+    this.barsLostToRoad = {
+      walkPast: this.walkPastRing.track.barsLostToRoad,
+      race: this.raceRing.track.barsLostToRoad,
     };
     groundClaims.commit(RAIL_RACE_FEATURE, {
       claims: [...this.supportClaims.walkPast, ...this.supportClaims.race],

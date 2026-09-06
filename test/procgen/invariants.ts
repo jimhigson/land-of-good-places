@@ -8463,6 +8463,18 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
  * time distributed around the track so that each racer has the same total number
  * but not always at the same spots".
  *
+ * **Fairness is a property of the race, and the race happens on the ride-scale
+ * ring only** (ruled 7 Sep 2026): on the walk-past ring "nobody is racing, but
+ * the rivals do not know that" — no standings, no winner, no player. So
+ * equal-per-racer is asserted on the race ring; the walk-past ring, which by
+ * Jim's road rule skips its legs over the bus's road, is held to a different
+ * object, not a weaker number: **each lane's bar count equals the race ring's
+ * count for that lane minus the bars whose slot the road rule did not build on
+ * that ring** — those are named by slot (`RailRace.barsLostToRoad`) and said to
+ * stderr on every seed, so a bar missing for any OTHER reason is still caught,
+ * and the road rule's cost is stated out loud rather than tolerated. The ride
+ * ring may lose none. No-two-touch holds on both rings.
+ *
  * Two claims and two assertions, both read off the built bars rather than off
  * `planHazards`: which lane a bar is on is decided here by which lane's rails it
  * is nearest to, the same technique the dropper check uses — **not** by its
@@ -8476,8 +8488,11 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
  */
 const duckBarsAreOnePerLaneAndNeverTouch: Invariant = (facts) => {
   const complaints: string[] = [];
+  const countsByRing = new Map<string, number[]>();
 
-  for (const ring of builtRings(facts)) {
+  // Race ring first: the walk-past ring is compared against it.
+  const rings = [...builtRings(facts)].sort((a, b) => (a.label === 'race' ? -1 : 0) - (b.label === 'race' ? -1 : 0));
+  for (const ring of rings) {
     const bars = ring.group.getObjectByName('railRace:duck-bars');
     if (!(bars instanceof InstancedMesh)) {
       complaints.push(`the ${ring.label} ring has no duck bars in the built scene to measure`);
@@ -8499,12 +8514,42 @@ const duckBarsAreOnePerLaneAndNeverTouch: Invariant = (facts) => {
     }
 
     const counts = Array.from({ length: lanes }, (_unused, lane) => perLane.get(lane) ?? 0);
-    if (new Set(counts).size !== 1) {
-      complaints.push(
-        `the ${ring.label} ring gives its four racers ${counts.join('/')} duck bars — they must meet ` +
-          'the same number each, which is what makes the race fair now that they no longer meet ' +
-          'them in the same places',
+    countsByRing.set(ring.label, counts);
+    const lost = ring.label === 'race' ? facts.world.railRace.barsLostToRoad.race : facts.world.railRace.barsLostToRoad.walkPast;
+    if (ring.label === 'race') {
+      if (lost.length > 0) {
+        complaints.push(
+          `the race ring lost ${lost.length} duck bar(s) to the road rule (slots ${lost.map((b) => b.slot).join(', ')}) — ` +
+            'the ride-scale ring keeps every leg; it exists only mid-race, when the bus is gone',
+        );
+      }
+      if (new Set(counts).size !== 1) {
+        complaints.push(
+          `the race ring gives its four racers ${counts.join('/')} duck bars — they must meet ` +
+            'the same number each, which is what makes the race fair now that they no longer meet ' +
+            'them in the same places',
+        );
+      }
+    } else {
+      process.stderr.write(
+        lost.length === 0
+          ? `  walk-past ring seed ${facts.seed}: 0 bars lost to the road rule\n`
+          : `  walk-past ring seed ${facts.seed}: ${lost.length} bar(s) lost to the road rule at slot ` +
+              `${lost.map((b) => `${b.slot} (lane ${b.lane})`).join(', ')}\n`,
       );
+      const race = countsByRing.get('race');
+      if (!race) {
+        complaints.push('the walk-past ring was measured before the race ring — the comparison needs the race ring first');
+      } else {
+        const expected = race.map((n, lane) => n - lost.filter((b) => b.lane === lane).length);
+        if (counts.some((n, lane) => n !== expected[lane])) {
+          complaints.push(
+            `the walk-past ring gives its lanes ${counts.join('/')} duck bars, but the race ring gives ` +
+              `${race.join('/')} and the road rule accounts for ${lost.length} on this ring ` +
+              `(expected ${expected.join('/')}) — a bar is missing for a reason the road rule does not explain`,
+          );
+        }
+      }
     }
 
     const barWidth = 2 * BAR_HALF_SPAN_AT_PARK_SCALE * ring.scale;
