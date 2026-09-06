@@ -296,13 +296,36 @@ async function measureOneSeed(): Promise<void> {
   bus.position.set(0, 0, 0);
   bus.rotation.y = 0;
   bus.updateMatrixWorld(true);
-  const busBox = new Box3().setFromObject(bus);
+  // Vertex-precise (`precise = true`): the default transforms each geometry's
+  // own bounding *box*, and a tilted cone's box rises by its radius times the
+  // sine of the tilt — the ears' boxes put the top at 6.15 m when no vertex
+  // is above 6.04. The drawn bus is its vertices, not boxes round its parts.
+  const busBox = new Box3().setFromObject(bus, true);
   bus.position.copy(keptPosition);
   bus.rotation.y = keptRotationY;
   bus.updateMatrixWorld(true);
   if (!Number.isFinite(busBox.min.x) || busBox.max.y <= busBox.min.y) {
     throw new Error('check:swept-bus: the drawn cat bus has no measurable body');
   }
+  // **The bus's own owner must equal the drawn top** (ruling 3, 6 Sep 2026).
+  // `CAT_BUS_TOP` is what the road's corridor claim carries as headroom and
+  // what the arrival's sightline keep-out reads; this box is the drawn
+  // vehicle. They were two definitions once — a hand-copied ear formula 6.8 cm
+  // under the face's crown — and nothing compared them. Measured independently
+  // here, on every run, so the gap can never reopen silently.
+  const { CAT_BUS_TOP } = await import('../src/world/entrance/catBus.ts');
+  const ownerGap = busBox.max.y - CAT_BUS_TOP;
+  if (Math.abs(ownerGap) > 1e-3) {
+    throw new Error(
+      `check:swept-bus: CAT_BUS_TOP (${CAT_BUS_TOP.toFixed(4)} m, the bus's own owner) is not the drawn ` +
+        `top (${busBox.max.y.toFixed(4)} m, vertex-precise Box3) — off by ${ownerGap.toFixed(4)} m. ` +
+        'Two definitions of one thing: derive the owner from the geometry that reaches highest, never restate it.',
+    );
+  }
+  process.stdout.write(
+    `  owner check: CAT_BUS_TOP ${CAT_BUS_TOP.toFixed(4)} m equals the drawn top ${busBox.max.y.toFixed(4)} m ` +
+      `(off by ${ownerGap.toFixed(4)} m, slack 0.001)\n`,
+  );
 
   // --- the posts, as they are drawn ----------------------------------------
   interface Sample {

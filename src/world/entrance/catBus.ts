@@ -235,6 +235,12 @@ const ROW_END_MARGIN = Math.max(0, WIDEST_CHILD_FOOTPRINT - SEAT_PITCH) / 2;
 const CABIN_LENGTH_FROM_SEATS = SEAT_ROWS * SEAT_PITCH + ROW_END_MARGIN * 2;
 const DRIVER_AREA_LENGTH = 1.45;
 const FACE_RADIUS = BODY_WIDTH * 0.52;
+/** How the face sphere is squashed: full width, a little shorter, flattened toward the windscreen. */
+const FACE_SQUASH = [1, 0.92, 0.6] as const;
+/** The face's outline hull, pushed out along its normals by this much before the squash. */
+const FACE_OUTLINE = 0.02 * DETAIL;
+/** Where the face sphere's centre sits above the bus's origin — see `createCatBus`. */
+const FACE_Y = BODY_BOTTOM_Y + BODY_HEIGHT * 0.62;
 const BODY_LENGTH = CABIN_LENGTH_FROM_SEATS + DRIVER_AREA_LENGTH + FACE_RADIUS * 1.1;
 
 /**
@@ -785,15 +791,27 @@ function roadHeightAt(distance: number): number {
 }
 
 /**
- * The top of the bus above its own origin — **ear tips included**, per
+ * The top of the bus above its own origin — **the drawn top**, per
  * ART_DIRECTION §7's asset contract, not the roof (which would crop a name
- * label, and here would let a tree stand in front of the cat's ears).
+ * label, and would let a tree stand in front of the cat's face).
+ *
+ * The drawn top is the **face sphere's crown, outline hull included** — the
+ * squashed sphere at the front stands 6 cm above the ear tips (measured
+ * vertex-precisely on 6 Sep 2026: face 6.043 m, ears 5.985 m). This used to
+ * be a second, hand-copied statement of the ears' geometry ("ear tips
+ * included"), 6.8 cm under the thing actually drawn — the two-definitions
+ * disease, ruled out by the Architect's ruling 3 on step 2. It is now derived
+ * from the same constants the face is built from, and `check:swept-bus`
+ * asserts on every run that it equals the drawn bounding box's top within
+ * float slack, so it can never drift from the mesh again.
+ *
  * `createCatBus` returns exactly this as `CatBusHandle.height`; it is a module
- * constant so that something deciding what may stand in front of the bus can
- * ask before there is a bus to ask.
+ * constant so that something deciding what may stand in front of the bus, or
+ * what may lean over the road it drives (the road's corridor claim carries it
+ * as `headroom`), can ask before there is a bus to ask.
  */
 export const CAT_BUS_TOP =
-  CAT_BUS_RIDE_LIFT + BODY_BOTTOM_Y + BODY_HEIGHT + (0.28 + 0.56 / 2) * DETAIL;
+  CAT_BUS_RIDE_LIFT + FACE_Y + (FACE_RADIUS + FACE_OUTLINE) * FACE_SQUASH[1];
 
 /**
  * The doorway, sized by the child who walks down out of it.
@@ -1263,18 +1281,18 @@ export function createCatBus(): CatBusHandle {
   // same "nose" trick `dodgems/car.ts` uses, just scaled up to be the whole
   // front of the bus.
   const faceZ = BODY_LENGTH / 2 - FACE_RADIUS * 0.62;
-  const faceY = BODY_BOTTOM_Y + BODY_HEIGHT * 0.62;
+  const faceY = FACE_Y;
   // 38 segments, matching the kid's own skull (`kid.ts`), because this sphere is
   // now the surface the face is *printed on* rather than a blank the face hangs
   // in front of — the UV remap below is exact at every vertex, so how finely the
   // sphere is divided is how finely the eyes are drawn.
-  const faceSphere = blob(FACE_RADIUS, bodyMaterial, [1, 0.92, 0.6], 38);
+  const faceSphere = blob(FACE_RADIUS, bodyMaterial, [...FACE_SQUASH], 38);
   faceSphere.name = 'cat-bus-face';
   faceSphere.position.set(0, faceY, faceZ);
   chassis.add(faceSphere);
   // Before the bake, so the outline takes its tint from the bodywork's own
   // colour rather than from the white the baked material carries.
-  addOutline(faceSphere, 0.02 * DETAIL);
+  addOutline(faceSphere, FACE_OUTLINE);
 
   // **The face is painted into the head's own UV map. There is no second mesh.**
   //
