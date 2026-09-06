@@ -96,6 +96,27 @@ export const CANONICAL_PARK_SEED = 20260728;
  * guard the expensive half — that each one still builds a sound park — which
  * is what the re-vetting run above is for, and it says so on every run.
  *
+ *
+ * **115, 225 and 346 retired, 6 September 2026 (#511's sphere).** They fail
+ * `check:park-pool` on the sphere ground with `poi.stranded` 15, 73 and 1, plus
+ * `poi.nospot: 2` on 346 — waypoints in a pocket nobody can walk to. Retired
+ * rather than fixed on Jim's ruling: *"I don't care if any seeds don't work in
+ * the old procgen that is going away anyway, just delete any such work"*, and
+ * *"the new proc gen should work for 0..15 so forget they ever existed."* All
+ * three are outside 0..15. This is the same move #589 made on 267 and 288 and
+ * the direction #584 takes the pool.
+ *
+ * **What is NOT being retired, and why the distinction matters: seed 5.** It is
+ * inside 0..15, it fails the same way (`poi.stranded: 28`), and it fails for
+ * the **same root cause as 115 and 225** — measured, not assumed: with
+ * `GROUND_SPHERE_RADIUS` raised to 1200000 (flat), all three pass with no other
+ * change. So these three retirements do not make a finding go away; seed 5
+ * still carries it, and fixing seed 5 is what fixes the cause. The root cause
+ * is written up in `HANDOFF-no-hill-511.md` — a bridge's ramp-foot side wall,
+ * `topIsAbsolute`-pinned to the local road surface, standing 1.30 m over ground
+ * that the sphere has dropped 0.93 m beneath it, walling off the path beside
+ * it.
+ *
  * **Seed 18 is deliberately absent**, and it is the reason a pool is not just
  * "the seeds `test/procgen` already uses": it is one of that suite's four
  * sweep seeds, green on all 80 invariants, and it fails `check:park` with
@@ -108,14 +129,11 @@ export const PARK_SEED_POOL: readonly number[] = [
   5,
   11,
   24,
-  115,
   128,
   131,
   208,
-  225,
   274,
   326,
-  346,
   428,
   451,
 ];
