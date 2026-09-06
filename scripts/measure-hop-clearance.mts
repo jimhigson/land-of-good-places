@@ -244,10 +244,14 @@ if (Math.abs(JUMP_APEX_HEIGHT - MEASURED_HOP_APEX) > APEX_TOLERANCE) {
 //    correctness precondition of the boot check: `checkHoppableColliders` uses
 //    the line to demote a collider too fat for the flat ceiling, so if the line
 //    ever rises *above* the truth it waves through a wall that stranded her.
-//    Non-strict, deliberately: on the park as measured the line touches the
-//    measurement exactly at half=0.15 (1.112 vs 1.112), and touching is still
-//    underneath. A safety margin here would be a number invented to look
-//    prudent.
+//    Compared at BISECTION_RESOLUTION, and the honest claim is therefore "a
+//    lower bound to within the 1 mm measurement resolution", not "a lower
+//    bound everywhere". At half=0.15 the line in fact sits 0.4 mm *above* the
+//    measurement. The two printing as 1.112 vs 1.112 is a 3-dp artefact — and
+//    believing that identity is what produced the original misdiagnosis of
+//    this as float noise, so it is spelled out here rather than rounded away.
+//    Anything under one bisection step is the instrument's grid, not the jump.
+//    A safety margin on top would be a number invented to look prudent.
 for (const r of rows) {
   if (!Number.isFinite(r.clean)) continue;
   const crossing = 2 * (r.halfThickness + PLAYER_RADIUS);
@@ -294,9 +298,10 @@ if (problems.length > 0) {
       `  - all ${rows.length} points measured a real number (none NaN)\n` +
       `  - the jump apex ${JUMP_APEX_HEIGHT.toFixed(4)} m still matches MEASURED_HOP_APEX ` +
       `to within ${APEX_TOLERANCE} m\n` +
-      `  - measuredHopCeiling() is a lower bound at every point; tightest margin ` +
-      `${(tightest * 1000).toFixed(1)} mm, against a ${BISECTION_RESOLUTION * 1000} mm ` +
-      `measurement resolution (it touches the measurement exactly at half=0.15)\n` +
+      `  - measuredHopCeiling() is a lower bound to within the ` +
+      `${BISECTION_RESOLUTION * 1000} mm measurement resolution at all ${rows.length} points; ` +
+      `tightest margin ${(tightest * 1000).toFixed(1)} mm` +
+      `${tightest < 0 ? ' (i.e. the line sits above the measurement there, by less than one bisection step)' : ''}\n` +
       `  - MAX_AUTO_HOP_HEIGHT ${MAX_AUTO_HOP_HEIGHT.toFixed(2)} m sits under the worst clean ` +
       `crossing ${worstClean.toFixed(3)} m by ${((worstClean - MAX_AUTO_HOP_HEIGHT) * 1000).toFixed(1)} mm\n` +
       `  - NOT covered: whether the park's actual colliders obey these numbers — that is ` +
