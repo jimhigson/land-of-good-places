@@ -77,23 +77,6 @@ export type ClaimKind = 'footprint' | 'corridor' | 'walkable' | 'surface';
 export interface Claim {
   readonly kind: ClaimKind;
   readonly shape: ClaimShape;
-  /**
-   * **How far above the ground this claim needs to be clear**, in metres —
-   * the height of the thing that travels the corridor, or of the child who
-   * stands on the walkable. Optional: a claim that says nothing needs only
-   * the ground itself.
-   *
-   * The registry is two-dimensional on purpose (see the header), so this is
-   * not a third axis on the overlap test. It is *data a solid claimant reads*:
-   * a support whose trunk leans and whose branches fork asks
-   * {@link GroundClaims.tallestHeadroom} and claims the plan projection of
-   * everything it draws **below** that height, rather than a foot disc — a
-   * ring passing over a road is fine, a trunk through a bus is not, and the
-   * road is the one that knows how tall its bus is. Stage 3, step 2 of
-   * `docs/DESIGN-round-robin-generation.md`; the claim describes the drawn
-   * geometry (#504 variant) without either party naming the other.
-   */
-  readonly headroom?: number;
 }
 
 /**
@@ -327,29 +310,6 @@ export class GroundClaims {
 
   demandsOf(feature: string): readonly Demand[] {
     return this.contributions.get(feature)?.demands ?? [];
-  }
-
-  /**
-   * The tallest {@link Claim.headroom} any committed claim declares, or
-   * `atLeast` if none declares more. A solid claimant asks this before it
-   * decides how much of itself to claim — see {@link Claim.headroom} — and
-   * passes the least it must respect regardless (a child's height, say), so a
-   * park with no corridor claimed yet still gets an honest answer rather than
-   * zero.
-   *
-   * Deliberately not filtered by distance or by feature: a support that
-   * claimed less near a road because it had not looked far enough would be
-   * the pre-filter/commit split #504 forbids, and the extra ground claimed
-   * elsewhere is a few square metres of trunk projection nobody else wants.
-   */
-  tallestHeadroom(atLeast: number): number {
-    let tallest = atLeast;
-    for (const contribution of this.contributions.values()) {
-      for (const claim of contribution.claims) {
-        if (claim.headroom !== undefined && claim.headroom > tallest) tallest = claim.headroom;
-      }
-    }
-    return tallest;
   }
 
   /**

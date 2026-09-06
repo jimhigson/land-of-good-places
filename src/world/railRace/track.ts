@@ -51,9 +51,10 @@ import {
   SLEEPER_SPACING,
   SLEEPER_THICKNESS,
 } from './trestleGeometry';
-import type { Claim, GroundClaims } from '../../boot/groundClaims';
+import { shapesOverlap, type Claim, type GroundClaims } from '../../boot/groundClaims';
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import { RAIL_RACE_FEATURE } from './feature';
+import { ROAD_FEATURE } from '../entrance/roadCorridor';
 // Re-exported: these used to be defined here, and `cart.ts` and
 // `scripts/check-rail-race.mts` import them from this module.
 export { BAR_HALF_SPAN_AT_PARK_SCALE, RAIL_GAUGE_AT_PARK_SCALE } from './trestleGeometry';
@@ -1342,30 +1343,23 @@ export function trestleStruts(tree: TrestleTree): readonly TrestleStrut[] {
 
 /**
  * **What a trestle claims: the plan projection of everything it draws below
- * `headroom` above its own ground** — the leaning trunk, and whichever branches
- * dip under that height — as `footprint` capsules, one per strut, each as wide
- * as the thickest end of the strut it covers.
+ * a walker's height above its own ground** — the leaning trunk, and whichever
+ * branches dip under {@link TALLEST_CHILD_HEIGHT} — as `footprint` capsules,
+ * one per strut, each as wide as the thickest end of the strut it covers.
  *
  * Not a foot disc. `check:swept-bus` measured 364 drawn posts inside the bus
  * across the pool while every foot was clear of the road, because a nudged
  * trunk leans and a fork opens below bus-roof height. The claim is the drawn
- * geometry (design: the #504 variant), so a leg that is allowed is a leg the bus
- * does not meet — by construction, and independently checked by the sweep.
- *
- * `headroom` is whatever the registry says the tallest thing claimed needs
- * ({@link GroundClaims.tallestHeadroom}); the trestle never names the road, the
- * bus, or anything else. A strut wholly above the headroom claims nothing: a
- * ring passing over a road is fine.
+ * geometry (design: the #504 variant), so what a walker meets near the ground
+ * is exactly what is claimed. The bus is not the claim's business any more:
+ * Jim's rule (7 Sep 2026) skips every slot over the road outright — see
+ * `trestleSpots` — and `check:swept-bus` guards the rest.
  *
  * Exported so the invariant can rebuild the very same claims from the drawn
  * struts and compare them with what the registry holds.
  */
-export function trestleClaims(
-  tree: TrestleTree,
-  headroom: number,
-  ringSizeVsRace: number,
-): readonly Claim[] {
-  const ceiling = tree.ground + headroom;
+export function trestleClaims(tree: TrestleTree, ringSizeVsRace: number): readonly Claim[] {
+  const ceiling = tree.ground + TALLEST_CHILD_HEIGHT;
   const claims: Claim[] = [];
   for (const strut of trestleStruts(tree)) {
     const { from, to } = strut;
@@ -1373,7 +1367,7 @@ export function trestleClaims(
     const high = from.y <= to.y ? to : from;
     if (low.y >= ceiling) continue;
     // Clip the strut where it crosses the ceiling, so a branch that only dips
-    // its root under the headroom claims only that root.
+    // its root under a walker's height claims only that root.
     const t = high.y <= ceiling ? 1 : (ceiling - low.y) / (high.y - low.y);
     claims.push({
       kind: 'footprint',
@@ -1445,7 +1439,7 @@ type LegacyPredicate =
  * announced rather than inferred. Node only: a browser has no `process`, and
  * the read is optional-chained, exactly as `parkLayout.ts`'s hooks.
  */
-function reportLegacyRefusals(feature: string, tally: ReadonlyMap<LegacyPredicate, number>): void {
+function reportLegacyRefusals(feature: string, tally: ReadonlyMap<LegacyPredicate, number>, overRoad: number): void {
   try {
     const nodeProcess = (globalThis as { process?: { stderr?: { write: (s: string) => unknown } } }).process;
     if (!nodeProcess?.stderr) return;
@@ -1458,7 +1452,7 @@ function reportLegacyRefusals(feature: string, tally: ReadonlyMap<LegacyPredicat
     nodeProcess.stderr.write(
       `  ${feature}: candidates refused by legacy predicates: ` +
         (total === 0 ? '0 — the registry decided every slot' : `${total} (${parts.join(', ')})`) +
-        '\n',
+        `; slots over the road not built: ${overRoad}\n`,
     );
   } catch {
     // A runtime with a `process` that is not Node's — say nothing rather than fail a park.
@@ -1500,7 +1494,7 @@ function* nearestFirst(reach: number): Generator<number, void, void> {
  *    never a typed reach, and never "where the ground ends", which on the
  *    sphere world (#511) it does not.
  * 2. **May it stand here?** The registry is asked with the plan projection of
- *    the tree as it would be drawn, below the tallest headroom anything
+ *    the tree as it would be drawn, below a walker's height, that anything
  *    claimed needs ({@link trestleClaims}); then the predicates nothing has
  *    migrated yet ({@link legacyRefuser}). The claims that answer the
  *    search are the claims that are committed — one function, one object.
@@ -1544,9 +1538,16 @@ function trestleSpots(
   const count = Math.floor(route.length / TRESTLE_SPACING);
   const footRadius = POST_FOOT_RADIUS * ringSizeVsRace;
   const arcReach = TRESTLE_SPACING / 2 - footRadius;
-  // The tallest thing anything claimed needs to pass under, and never less
-  // than a child walking beneath the ring.
-  const headroom = groundClaims.tallestHeadroom(TALLEST_CHILD_HEIGHT);
+  // **Jim's road rule (7 Sep 2026): "just skip all the legs over the road,
+  // otherwise keep them."** A slot whose foot disc, at its nominal place on
+  // the ring, lies on the road's corridor claim — the drawn carriageway, one
+  // number, `ROAD_HALF_WIDTH` — is not built: no search, no lean, no shape,
+  // on either ring. Every other slot is placed exactly as before, and a march
+  // candidate that lands on the road is refused like any other claim. A
+  // mandatory slot over the road is not pre-solved: it takes the duck-bar
+  // invariant red, which is the alarm.
+  const road = groundClaims.claimsOf(ROAD_FEATURE).filter((claim) => claim.kind === 'corridor');
+  let overRoad = 0;
   // The furthest any trunk on this ring could lean — a loop guard, from the
   // same owner as the per-candidate bound below, never the bound itself.
   const leanGuard = maxTrunkLean(route.base);
@@ -1556,6 +1557,14 @@ function trestleSpots(
 
   for (let i = 0; i < count; i += 1) {
     const atArch0 = (i / count) * route.length;
+    {
+      const nominal = route.path.sampleAt(route.wrap(route.startDistance + atArch0));
+      const disc = { shape: 'disc' as const, x: nominal.x, z: nominal.z, radius: footRadius };
+      if (road.some((claim) => shapesOverlap(disc, claim.shape))) {
+        overRoad += 1;
+        continue;
+      }
+    }
     let placed: TrestleSpot | null = null;
     let leanExhausted = false;
     /** The registry's refusers, for the message if nothing serves. */
@@ -1576,7 +1585,7 @@ function trestleSpots(
         if (run > maxTrunkLean(tree.trunkTop.y - tree.ground)) continue;
         admissible = true;
         // 2. May it stand? The registry first, with the drawn geometry.
-        const claims = trestleClaims(tree, headroom, ringSizeVsRace);
+        const claims = trestleClaims(tree, ringSizeVsRace);
         const blockers = groundClaims.blockers(feature, claims);
         if (blockers.length > 0) {
           for (const blocker of blockers) refusedBy.add(blocker.feature);
@@ -1621,7 +1630,7 @@ function trestleSpots(
       );
     }
   }
-  reportLegacyRefusals(ringName, legacyTally);
+  reportLegacyRefusals(ringName, legacyTally, overRoad);
   return spots;
 }
 

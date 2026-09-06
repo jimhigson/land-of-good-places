@@ -317,7 +317,9 @@ async function measureOneSeed(): Promise<void> {
   // POSED — full heave, full pitch either way, roll none or full either way —
   // and the highest vertex-precise top of those poses is the envelope's top.
   // Measured off the mesh rather than added from a constant, so the parent
-  // can hold `CAT_BUS_DRIVEN_TOP` (what the road's claim carries) to it.
+  // can hold `CAT_BUS_DRIVEN_TOP` to it — the guard for Jim's road rule:
+  // trestle slots over the road are not built, and this proves no kept post
+  // hangs where the bus drives.
   const chassis = bus.getObjectByName('chassis');
   if (!chassis) throw new Error('check:swept-bus: the drawn cat bus has no `chassis` group to pose');
   const kept = { y: chassis.position.y, rx: chassis.rotation.x, rz: chassis.rotation.z };

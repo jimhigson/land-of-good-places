@@ -1,7 +1,7 @@
 import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
 import { forEachPavedDisc } from '../paving';
 import type { Claim } from '../../boot/groundClaims';
-import { CAT_BUS_DRIVEN_TOP, CAT_BUS_LENGTH } from './catBus';
+import { CAT_BUS_LENGTH } from './catBus';
 import { ROAD_HALF_WIDTH } from './road';
 import {
   ENTRANCE_BUS_ARRIVE_X,
@@ -182,16 +182,16 @@ export function entranceRoadSegments(): readonly RoadSegment[] {
  * one because the road turns a corner at the gate, and a capsule is a straight
  * segment.
  *
- * **The claim carries the bus's height** (`Claim.headroom`, stage 3 step 2):
- * a corridor is not only ground, it is the air the bus drives through, and a
- * Rail Race trestle whose foot stands clear of the road can still lean
- * through the bus at head height — `check:swept-bus` found 364 of them across
- * the pool. The number is the bus's own {@link CAT_BUS_DRIVEN_TOP} — the
- * drawn top (the face's crown) plus the furthest the suspension lifts it on a
- * bump, because the bus does not drive at rest — read from the vehicle rather
- * than restated here; the trestle never reads it directly, it asks the
- * registry what the tallest thing claimed needs and claims everything of
- * itself below that.
+ * **The claim carries no height.** It did for a day (stage 3 step 2's first
+ * cut: the bus's driven top as `headroom`, so a leaning trestle claimed
+ * everything of itself the bus could meet). Jim, 7 Sep 2026: *"just skip all
+ * the legs over the road, otherwise keep them — one simple rule is all we
+ * need here."* So a Rail Race slot whose foot disc lies on this corridor is
+ * simply not built (`railRace/track.ts`, `trestleSpots`), every other slot is
+ * placed as before, and `check:swept-bus` — sweeping the drawn bus posed at
+ * its highest against the drawn posts — is the guard that a kept branch never
+ * hangs where the bus drives. The corridor's `halfWidth` is the drawn
+ * carriageway, so "over the road" has one definition.
  */
 export function entranceRoadClaims(): readonly Claim[] {
   return entranceRoadSegments().map((segment) => ({
@@ -204,6 +204,5 @@ export function entranceRoadClaims(): readonly Claim[] {
       z2: segment.to.z,
       halfWidth: ROAD_HALF_WIDTH,
     },
-    headroom: CAT_BUS_DRIVEN_TOP,
   }));
 }

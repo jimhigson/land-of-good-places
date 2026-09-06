@@ -852,9 +852,9 @@ function crownHeightUnderPitch(pitch: number): number {
 /**
  * **The top of the bus as it drives** — the face's crown at full heave and
  * full nose-up pitch, from {@link crownHeightUnderPitch}. {@link CAT_BUS_TOP}
- * stays the rest top for the name label and the asset contract; anything
- * that must stay out of the bus's way while it is *moving* — the road's
- * corridor claim, the swept-bus check's envelope — reads this one.
+ * stays the rest top for the name label and the asset contract; this one is
+ * what `check:swept-bus` sweeps — the guard for Jim's road rule (trestle
+ * slots over the road are not built) against the drawn park.
  *
  * **Roll is deliberately absent.** The crown sits on the bus's centreline,
  * where roll has no first-order lift; to second order it *lowers* the crown

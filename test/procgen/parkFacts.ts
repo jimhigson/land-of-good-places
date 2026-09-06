@@ -1302,14 +1302,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // {@link RailRaceSupportFacts}. `track.ts` reaches `parkLayout.ts`, so it is
   // imported here, after this seed's world exists, never at the top of a test.
   const { trestleClaims } = await import('../../src/world/railRace/track.ts');
-  const { TALLEST_CHILD_HEIGHT } = await import('../../src/art/models/kid.ts');
   const railRaceSupports: RailRaceSupportFacts[] = [];
   {
     const railRace = world.railRace;
-    // What the placer asked for when it claimed: the tallest headroom in the
-    // registry, never less than a child. The rings themselves declare none, so
-    // the answer is the same now as it was at claim time.
-    const headroom = world.groundClaims.tallestHeadroom(TALLEST_CHILD_HEIGHT);
     // Aliased: a later block in this function destructures `Matrix4` from its
     // own dynamic import, which would shadow a top-level one into the TDZ here.
     const { Matrix4: StrutMatrix4 } = await import('three');
@@ -1370,7 +1365,6 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
               trunkFoot: trunk.from,
               ground: trunk.from.y,
             },
-            headroom,
             scale / railRace.raceRoute.scale,
           ),
         );
