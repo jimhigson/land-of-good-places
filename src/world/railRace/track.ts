@@ -1406,14 +1406,52 @@ interface TrestleSpot {
  * things a leaning trunk actually met — are claims now and are asked with the
  * drawn geometry.
  */
-function legacyGroundIsClear(x: number, z: number, collision: CollisionWorld): boolean {
-  if (!collision.isClearCircle(x, z, 1.1)) return false;
-  if (distanceToPath(x, z) < 2.8) return false;
-  if (distanceToRailCorridor(x, z) < 2.4) return false;
+/**
+ * Which unmigrated predicate refuses `(x, z)`, by its own name — or `null` if
+ * none does. Named so a refusal can say *which* one (ruling 4, 6 Sep 2026):
+ * stage 5 reads what is left to migrate off the traces, not off this file.
+ */
+function legacyRefuser(x: number, z: number, collision: CollisionWorld): LegacyPredicate | null {
+  if (!collision.isClearCircle(x, z, 1.1)) return 'legacy:collision';
+  if (distanceToPath(x, z) < 2.8) return 'legacy:distanceToPath';
+  if (distanceToRailCorridor(x, z) < 2.4) return 'legacy:distanceToRailCorridor';
   const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
     (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
   );
-  return !pinchesCorridor;
+  return pinchesCorridor ? 'legacy:parkLayoutEntries' : null;
+}
+
+/** The four predicates the registry does not own yet, as a refusal names them. */
+type LegacyPredicate =
+  | 'legacy:collision'
+  | 'legacy:distanceToPath'
+  | 'legacy:distanceToRailCorridor'
+  | 'legacy:parkLayoutEntries';
+
+/**
+ * Says, once per ring per seed, how much the unmigrated predicates still
+ * decide — a coverage line, so the day the registry decides every slot is
+ * announced rather than inferred. Node only: a browser has no `process`, and
+ * the read is optional-chained, exactly as `parkLayout.ts`'s hooks.
+ */
+function reportLegacyRefusals(feature: string, tally: ReadonlyMap<LegacyPredicate, number>): void {
+  try {
+    const nodeProcess = (globalThis as { process?: { stderr?: { write: (s: string) => unknown } } }).process;
+    if (!nodeProcess?.stderr) return;
+    let total = 0;
+    const parts: string[] = [];
+    for (const [name, count] of tally) {
+      total += count;
+      parts.push(`${name} ${count}`);
+    }
+    nodeProcess.stderr.write(
+      `  ${feature}: candidates refused by legacy predicates: ` +
+        (total === 0 ? '0 — the registry decided every slot' : `${total} (${parts.join(', ')})`) +
+        '\n',
+    );
+  } catch {
+    // A runtime with a `process` that is not Node's — say nothing rather than fail a park.
+  }
 }
 
 /**
@@ -1453,7 +1491,7 @@ function* nearestFirst(reach: number): Generator<number, void, void> {
  * 2. **May it stand here?** The registry is asked with the plan projection of
  *    the tree as it would be drawn, below the tallest headroom anything
  *    claimed needs ({@link trestleClaims}); then the predicates nothing has
- *    migrated yet ({@link legacyGroundIsClear}). The claims that answer the
+ *    migrated yet ({@link legacyRefuser}). The claims that answer the
  *    search are the claims that are committed — one function, one object.
  *
  * Along the ring, a slot may also slide by up to `arcReach` either way. That
@@ -1500,6 +1538,8 @@ function trestleSpots(
   // same owner as the per-candidate bound below, never the bound itself.
   const leanGuard = maxTrunkLean(route.base);
   const tree = newTrestleTree();
+  /** Candidates each unmigrated predicate refused on this ring — reported once, below. */
+  const legacyTally = new Map<LegacyPredicate, number>();
 
   for (let i = 0; i < count; i += 1) {
     const atArch0 = (i / count) * route.length;
@@ -1529,7 +1569,12 @@ function trestleSpots(
           for (const blocker of blockers) refusedBy.add(blocker.feature);
           continue;
         }
-        if (!legacyGroundIsClear(x, z, collision)) continue;
+        const legacy = legacyRefuser(x, z, collision);
+        if (legacy !== null) {
+          refusedBy.add(legacy);
+          legacyTally.set(legacy, (legacyTally.get(legacy) ?? 0) + 1);
+          continue;
+        }
         placed = { at, x, z, index: i, tree: cloneTrestleTree(tree), claims };
         break search;
       }
@@ -1558,11 +1603,12 @@ function trestleSpots(
           `with arc room ±${arcReach.toFixed(2)} m` +
           (refusedBy.size > 0
             ? `, refused by ${[...refusedBy].sort().join(', ')}`
-            : ', refused only by the unmigrated ground predicates') +
+            : ', refused by nothing named — every candidate failed the lean bound') +
           '. A bar with no support is not built; the placer needs a second support shape or the blocker must move.',
       );
     }
   }
+  reportLegacyRefusals(feature, legacyTally);
   return spots;
 }
 
