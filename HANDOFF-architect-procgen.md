@@ -74,6 +74,16 @@ first honest run found #501).
   baseline re-take. The moment #511 merges, step 2 is dispatchable from
   `main`; its definition of done drives the swept-bus baseline to 0 and
   replaces it with "fails on any intrusion".
+- **Jim ruled (6 Sep): no seed is unbuildable** — backtrack to decision
+  zero ≡ another seed. Doc section "Totality, ruled and mechanised":
+  numbered decisions, refusals not throws, ladder retry → negotiate →
+  unwind (most recent blocker) → decision zero (counted); the three
+  terminal classes mapped (RailRouteUnsolvable → plot redraws; no site →
+  recovery contract then train-route redraw; **POI stranded → the POI's
+  own layout entry redraws, first rung to build, on main's ground**);
+  determinism by stream-named attempts + unwind trace hashed into the
+  digest; proof `check:every-seed-builds` with "built" and "built well"
+  on separate lines. Pool = quality curation only.
 - **#524** (open): a park that fails to build is a test failure, not a
   skip — and after the screen lands, **a named refusal at commit is a
   failure too**, not a skip. Same issue, one more case; say so on it. Step 2 held on step 1 + #511 +

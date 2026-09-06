@@ -97,6 +97,126 @@ a bounded attempt budget, and that is **a generator bug that gets logged
 loudly with the conflict that caused it** — never a hung boot, never invalid
 geometry shipped, and never, ever, "a bad seed".
 
+### Totality, ruled and mechanised (Jim, 6 Sep)
+
+Asked whether to curate which seeds a new profile draws — on today's
+generator only **2 of seeds 0–15** build a working park — Jim refused the
+question: *"given we can backtrack back to zero, there's no reason this
+should happen if things are implemented correctly since the backtrack to
+zero is equivalent to trying another seed — fix it properly."* So the four
+points above are a **requirement**, and the seed pool is at most a quality
+curation, never a buildability filter: retiring a seed hides an instance
+and changes nothing. The mechanism, concretely:
+
+**Every decision is numbered and every failure is a refusal.** The
+round-robin's turn log is a sequence of decisions
+`(feature, decisionName, attempt)`, each drawn from
+`hash(seed, feature, decisionName, attempt)`. A generator **never throws
+on a placement it cannot make**; it returns a *refusal* to the scheduler
+naming what blocked it — either blockers (claims, from the registry's
+`blockers()`) or, for a search that fails against its own inputs, the
+*decisions it consumed* (its `deps`' latest decisions). A throw is
+reserved for programming errors and exhausted budgets; a throw on a
+seed's geometry is the bug.
+
+**Unwind order — the ladder, from the section below, with its last rung
+now named:**
+
+1. **retry** — the refused decision draws its next attempt (same
+   feature, `attempt + 1`);
+2. **negotiate** — the most recently committed blocker is asked to move
+   (its own next attempt), the refused decision retried;
+3. **unwind** — backjump to the **most recent decision among the
+   blockers** (or among the consumed inputs), withdraw everything
+   committed after it, redraw it, replay forward. Repeat, each time one
+   decision further back, until the refusal clears;
+4. **decision zero** — the layout's first draw. Redrawing it with
+   `layoutAttempt + 1` is a different park from the same seed —
+   *equivalent to another seed*, which is exactly Jim's point, and it is
+   what `parkWarp.ts`'s `layoutRestart` does by hand today. Reaching it
+   is legal and *counted*, never silent.
+
+Budgets are per rung and derived from the search (attempts a decision
+has; number of decisions to unwind through), never a typed "try 5
+times"; exhausting the budget at decision zero is the one remaining
+failure, logged with the whole refusal chain, and it is a generator bug.
+
+**The three terminal failures today, mapped onto the ladder** (seeds
+0–15, 6 Sep):
+
+- **`RailRouteUnsolvable`** (seeds 0, 8, 9, 10): the rail search fails
+  against layout plots, boundary and terrain. Its refusal names the plot
+  placements its search collided with (the search knows its obstacles;
+  naming them is the change). Unwind: the most recent of those plots
+  redraws (its own `layout` stream, next attempt — `parkWarp`'s `layout`
+  bump made automatic and general) → rail retries → … → decision zero.
+- **A crossing with no proven site** (seeds 2, 3, 7): the recovery
+  contract in "Seed 288, root-caused" — demand a site at the drawn `d`,
+  else re-route that route — and, when both fail, its refusal names the
+  **train route decision** (the sites are a function of it): unwind
+  re-solves the train route at its next attempt → stations move → sites
+  move → paths re-solve. `banCrossingsAt` made automatic.
+- **`poi.stranded` / `poi.nospot`** (seeds 1, 4, 5, 6, 13, 15; and 346
+  in the old pool) — **the class that matters most, because it survives
+  the old generator: it is on `main`'s own ground.** A stranded POI is an
+  **unserved demand** (the fifth claim kind: "a door served flush by a
+  corridor"), and an unserved demand fails the paths' commit *by name*.
+  Its blockers are whatever stands between the POI and the network —
+  from the registry, `blockers()` on a corridor probe from the POI to the
+  nearest path; before the registry, the path solver's own obstacle hits
+  on that probe. Unwind: the most recent of those (a plot, a wall, a
+  railway section) redraws; if the blocker is the POI's *own* plot (no
+  spot: `poi.nospot`), that plot redraws first. **Interim rung,
+  implementable on today's code without the registry**: the stranded
+  POI's own layout entry redraws at its next attempt and paths re-solve —
+  the warp's per-entry `layout` bump, automatic — then the entries it
+  collided with, then decision zero. That is the rung to build first;
+  it discharges six of sixteen seeds' failure class on `main`'s ground.
+
+**Determinism — the rule that keeps a seed meaning something.** A park
+that reached decision zero is *a different park than seed n nominally
+asked for*, and that is fine; what is not fine is a park that is not a
+function of its seed. So:
+
+- every attempt counter is folded into the stream name, never a global
+  counter; the refusal sequence is itself deterministic (fixed round
+  order, fixed blocker choice — most recent — no map iteration), so
+  the trace `seed → [decisions, refusals, unwinds] → park` replays
+  exactly. Two builds in separate processes, identical, is the proof
+  and is already the digest instrument's job;
+- the **unwind trace is printed to stderr on every build** (per seed:
+  refusals, negotiations, unwinds, whether decision zero was reached and
+  how many times) and its hash is folded into the park digest, so a
+  regression is reported as *"seed n now reaches decision zero, it did
+  not before"* — repeatable, and visible on the seed, not on a
+  randomly re-drawn one;
+- the *nominal* park (attempt 0 throughout) is a thing a check may
+  still describe, because "this seed needed unwinding to build" is a
+  thrash number worth watching — but it is a quality signal, never a
+  buildability verdict.
+
+**What proves it — `check:every-seed-builds`, honest about two words.**
+Builds seeds **0–15 and a rolling random draw** (stage 5's nightly sweep
+brought forward as the instrument; the fixed sixteen so the numbers are
+comparable day to day) in separate processes and reports, per seed, on
+**two separate lines that are never merged**:
+
+- **built**: no throw; every hard-tier demand served (no stranded POI,
+  every door reached, every crossing on a proven site, every elevated
+  structure supported); unwind trace printed. This is the gate — red on
+  any seed is a broken generator, and it is proved red first by making
+  the layout throw on a known seed;
+- **built well**: the soft tier and the thrash numbers — unwinds, decision
+  zero reached, attempts consumed — reported as measurements with a
+  ratchet, not as pass/fail. "Built" can be green while "built well"
+  says a seed needed three restarts; that is a true statement about the
+  generator and the whole reason the two lines are separate.
+
+The seed pool (`parkSeedPool.ts`, #584) survives only as a *quality*
+curation over "built well", never as the reason a seed is playable;
+stage 5 deletes it. **No warp field, no vetting step and no seed
+retirement may ever be the answer to a seed that does not build.**
+
 ### What totality retires
 
 - **Seed vetting.** The pool exists because vetting tried 515 seeds to keep
@@ -1177,7 +1297,8 @@ one placer plus the shared table. When the last private obstacle list is
 gone: delete `parkSeedPool.ts`, switch CI to seeds 0–15 **plus a rolling
 random-seed sweep** (new seeds every night — totality means never being
 attached to any of them), and add the one new meta-invariant: *any seed
-builds within budget*.
+builds within budget* — `check:every-seed-builds`, specified under
+"Totality, ruled and mechanised" above.
 
 #### The migration checklist (3 Sep) — every private obstacle list, named
 
