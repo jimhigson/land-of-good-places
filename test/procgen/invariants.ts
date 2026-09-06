@@ -9141,8 +9141,108 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
   return fouls;
 };
 
+/**
+ * **Every castle corner turret is solid, on every seed.**
+ *
+ * Issue #549: the facade's collider is a rectangle and the four turrets stand
+ * outside it, so about 2.3 m of drawn stone at each corner had nothing behind
+ * it and a child walked into a turret and out the other side. `check:castle-towers`
+ * proves the fix thoroughly — 48 bearings, two strides, both controls — but it
+ * runs on **the canonical seed only**. This is the clause that covers the other
+ * pool seeds, and it matters here because the turrets' world position is a
+ * function of the seed: `BUILDING_CENTRE_X/Z` comes from `placedEntry`, so a
+ * seed that moves the castle moves all four turrets with it.
+ *
+ * Two questions, cheap enough to run per seed:
+ *
+ * 1. **The axis is occupied.** A player-sized body cannot stand on a turret's
+ *    centre. `isClearCircle` answers this in O(1) and is decisive for the
+ *    regression that actually threatens — a collider deleted, or a turret moved
+ *    somewhere its collider did not follow.
+ * 2. **It is solid from every approach**, marched at `PLAYER_LONGEST_STEP`,
+ *    which is the stride that tunnels. Eight bearings rather than the check's
+ *    48: this runs on seven parks and the check owns the exhaustive sweep.
+ *
+ * The threshold is the game's own — `PLAYER_RADIUS` against the turret's drawn
+ * `radiusBottom`, read off the built park rather than from the generator.
+ */
+const castleTurretsAreSolid: Invariant = (facts) => {
+  const wrong: string[] = [];
+  const turrets = facts.castleTurrets;
+  if (turrets.length === 0) {
+    return [
+      `seed ${facts.seed}: the park published no castle turrets, so nothing about their ` +
+        'solidity was measured — this clause has stopped covering the castle rather than passing',
+    ];
+  }
+
+  const collision = facts.world.collision;
+  let marched = 0;
+  let worstApproach = Infinity;
+  let worstNote = '';
+
+  for (const turret of turrets) {
+    // 1. Nothing may stand on the axis.
+    if (collision.isClearCircle(turret.x, turret.z, PLAYER_RADIUS)) {
+      wrong.push(
+        `seed ${facts.seed}: ${turret.name} at (${turret.x.toFixed(2)}, ${turret.z.toFixed(2)}) ` +
+          `has clear ground on its own axis — a child stands inside ${turret.radiusBottom.toFixed(2)} m ` +
+          'of drawn stone (Building.ts registerCastleTowerCollision)',
+      );
+    }
+
+    // 2. Marched at from eight bearings, at the stride that tunnels.
+    for (let i = 0; i < 8; i += 1) {
+      const bearing = (i / 8) * Math.PI * 2;
+      const from = turret.radiusBottom + 8;
+      const probe = new Vector3(
+        turret.x + Math.sin(bearing) * from,
+        0,
+        turret.z + Math.cos(bearing) * from,
+      );
+      let closest = Infinity;
+      for (let travelled = 0; travelled < from + 3; travelled += PLAYER_LONGEST_STEP) {
+        collision.resolveMovement(
+          probe,
+          -Math.sin(bearing) * PLAYER_LONGEST_STEP,
+          -Math.cos(bearing) * PLAYER_LONGEST_STEP,
+          PLAYER_RADIUS,
+          0,
+          MAX_FRAME_DELTA,
+        );
+        closest = Math.min(closest, Math.hypot(probe.x - turret.x, probe.z - turret.z));
+      }
+      marched += 1;
+      if (closest < worstApproach) {
+        worstApproach = closest;
+        worstNote = `${turret.name} at ${((bearing * 180) / Math.PI).toFixed(0)} deg`;
+      }
+      if (closest < turret.radiusBottom) {
+        wrong.push(
+          `seed ${facts.seed}: ${turret.name} is not solid ` +
+            `${((bearing * 180) / Math.PI).toFixed(0)} deg round: a player-sized body marched at ` +
+            `${PLAYER_LONGEST_STEP.toFixed(2)} m a step reached ${closest.toFixed(2)} m of the ` +
+            `axis, inside its own ${turret.radiusBottom.toFixed(2)} m stone`,
+        );
+      }
+    }
+  }
+
+  // Said on every run, passing ones included — stderr, because vitest hides
+  // console.log for a passing test and a coverage note nobody can hear is the
+  // same disease one layer out.
+  process.stderr.write(
+    `    seed ${facts.seed}: castle turrets — ${turrets.length} measured, ${marched} marches at ` +
+      `${PLAYER_LONGEST_STEP.toFixed(2)} m; closest any got to an axis ${worstApproach.toFixed(2)} m ` +
+      `(${worstNote}), stone radius ${turrets[0]?.radiusBottom.toFixed(2) ?? 'n/a'} m\n`,
+  );
+
+  return wrong;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
+  ['every castle corner turret is solid', castleTurretsAreSolid],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
   ["nothing grows in the lane but the park's own trees", nothingGrowsInTheLaneButTheParksOwnTrees],

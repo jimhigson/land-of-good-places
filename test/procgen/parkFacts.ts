@@ -479,9 +479,30 @@ export interface BridgePavingFact {
   readonly worstLayer: string;
 }
 
+/**
+ * **A castle corner turret, as the solid it publishes.** See
+ * `src/world/building/layout.ts`'s `CASTLE_TOWERS`.
+ *
+ * Gathered here rather than imported by `invariants.ts` because the towers'
+ * world position comes from `BUILDING_CENTRE_X/Z`, which is derived from
+ * `placedEntry('building')` and so is a function of the seed. A static value
+ * import of `layout.ts` into a test file would load `parkManifest.ts` before
+ * the seed was set and pin every seed to the canonical park — the
+ * 76-silent-skips disease this file's header warns about.
+ */
+export interface CastleTurretFact {
+  readonly name: string;
+  readonly x: number;
+  readonly z: number;
+  /** The drawn shaft's radius at its foot — the widest a child can reach. */
+  readonly radiusBottom: number;
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
+  /** The castle's four corner turrets — see {@link CastleTurretFact}. */
+  readonly castleTurrets: readonly CastleTurretFact[];
   /**
    * Headroom under the finish rainbow, per ring per lane — see
    * {@link ArchClearanceFact}.
@@ -1177,6 +1198,19 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // the seed-pinning trap this file's header already warns about.
   const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
   const bridgeReservations = planBridgeFootprints(world.train.crossings);
+
+  // Same rule, same reason as above: the turrets' world position is a function
+  // of the seed, so `layout.ts` is imported here rather than at a test file's
+  // top level.
+  const { CASTLE_TOWERS } = await import('../../src/world/building/layout.ts');
+  const castleTurrets = CASTLE_TOWERS.filter((tower) =>
+    tower.name.startsWith('tower-body-'),
+  ).map((tower) => ({
+    name: tower.name,
+    x: tower.x,
+    z: tower.z,
+    radiusBottom: tower.radiusBottom,
+  }));
 
   const { CROSSING_SITES } = await import('../../src/world/train/crossingPlan.ts');
   const { SITE_SNAP_TOLERANCE } = await import('../../src/world/train/crossings.ts');
@@ -2673,6 +2707,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   }
 
   return {
+    castleTurrets,
     laneCarriageway,
     laneGreenery,
     laneRoadHalfWidth: ROAD_HALF_WIDTH,

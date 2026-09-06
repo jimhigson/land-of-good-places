@@ -157,7 +157,20 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // stranded=0, oracle=pass.
   115: { layout: { hotel: 1 } },
   225: { layout: { 'stall.railRacer': 1 } },
-  288: { layout: { waterFight: 1 } },
+  // **Re-searched 6 September 2026, for #549.** Giving the castle's corner
+  // turrets a collider also gave the layout solver the castle's true extent
+  // (`footprintAsPlaced`), which moved this seed's castle entrance 2.6 m off a
+  // turret it had been sited inside. That is a geometry change, so the vector
+  // baked against the old geometry is no longer the one this seed wants — it
+  // left `stall.keychain` and `station-0` 14.2 m apart in a straight line and
+  // 229.7 m apart by paving (16.13x).
+  //
+  // Exactly seed 5's history one section up, and 326's below: a vector is
+  // sound against the code that built it, not in the abstract. Re-run of
+  // `scripts/warp-search.mts 288`: SOLVED after 26 candidates in 1065 s,
+  // stranded=0, oracle=pass, 8 oracle rejections along the way.
+  // (measurements/warp-search-6sep-castle-extent.jsonl.)
+  288: { layout: { 'stall.waterFight': 2 } },
   // **326 is second-vintage**, and it is the #437 blind spot pointing the
   // other way from 115's. First baked as {fountain:1} on check:park evidence
   // alone; the moment seed-326.test.ts existed that went red on ONE invariant
