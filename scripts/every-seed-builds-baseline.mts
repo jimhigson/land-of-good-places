@@ -17,8 +17,8 @@
  */
 export const UNBUILT_BASELINE: Readonly<Record<number, string>> = {
   0: 'rail.unsolvable',
-  1: 'crossing.nosite',
   2: 'crossing.nosite',
+  3: 'crossing.nosite',
   6: 'anchor.reach:waterFight+poi.nospot',
   7: 'crossing.nosite',
   8: 'rail.unsolvable',
@@ -33,7 +33,7 @@ export const UNBUILT_BASELINE: Readonly<Record<number, string>> = {
  * too, until re-taken.
  */
 export const DECISION_ZERO_BASELINE: Readonly<Record<number, number>> = {
-  3: 0,
+  1: 0,
   4: 0,
   5: 0,
   11: 0,

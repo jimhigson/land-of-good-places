@@ -143,3 +143,17 @@ the PR. `/spawn` link: `/spawn?pos=-46.7,29.6&seed=13` (dodgems door, seed 13).
 Head 03080f31 + this. Awaiting reviewer/QA via the Overseer and the deploy
 preview comment; link to hand over: `<preview>/spawn?pos=-46.7,29.6&seed=13`.
 Do not merge own work. Probes deleted; scratchpad `pr-body.md` is the body.
+
+## Seed 1 round (review/QA, late 6 Sep) — false refusal, fixed at the owner
+
+The probe counted every footprint solid and refused the castle's doormat
+inside the ball pit (near pair, walkable) on seeds 1 and 3 — moving the
+castle broke seed 1 and, by luck, built seed 3. Fix: each door's world holds
+only plots the router would refuse an arriving stub past (`ARRIVAL_EXEMPT_NEAR`
+in `src/world/streetRules.ts`, one owner with `paths.ts`). Rung armed, seed 1
+= base `48740be264e8be1f`; rung fires on no seed 0–15; 7/16 = 1,4,5,11,13,14,15.
+Guard: `LAYOUT_REFUSALS_IGNORED` + `check:park`'s `layout.falseRefusal` (hard)
++ second pass in `check:every-seed-builds`; proved red (exemption −1e9 →
+`layout.falseRefusal: 1` on seed 1). `LGP_LAYOUT_RUNG=off` scratch flag,
+present-and-disarmed like the refuse hook. Design finding with the Architect:
+"a footprint is not solid" — claim kinds missing at layout time.

@@ -70,7 +70,6 @@ import { PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { ANCHORS, anchorGroupName } from '../src/world/anchors.ts';
 import { NUDGE_REACH, PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
-import { LAYOUT_REFUSALS_IGNORED } from '../src/world/parkLayout.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
@@ -79,6 +78,7 @@ import { STATION_GAP } from '../src/world/train/fence.ts';
 import { BRIDGE_RISE } from '../src/world/train/clearance.ts';
 import { bridgeHeightAt } from '../src/world/train/bridges.ts';
 import type { InteractZone } from '../src/world/interact.ts';
+import { LAYOUT_REFUSALS_IGNORED } from '../src/world/parkLayout.ts';
 
 // ---------------------------------------------------------------- the ratchet
 
