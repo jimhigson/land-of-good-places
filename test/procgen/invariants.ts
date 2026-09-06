@@ -9468,10 +9468,135 @@ const castleTurretsAreSolid: Invariant = (facts) => {
   return wrong;
 };
 
+/**
+ * **Every Rail Race support is claimed exactly as it is drawn** — stage 3,
+ * step 2 of `docs/DESIGN-round-robin-generation.md`: the trestle legs are
+ * `footprint` claims asked of and committed to the park's one registry.
+ *
+ * Three things must hold, and each is measured off the built park rather than
+ * off the rules that built it:
+ *
+ * 1. **The registry holds, for each ring, exactly the claims the drawn struts
+ *    produce** through the one owner (`track.ts`'s `trestleClaims`), compared
+ *    number for number with no tolerance. `ParkFacts` decodes every drawn
+ *    trunk and branch back out of the instance buffers, rebuilds each trestle's
+ *    tree from them, and runs it through that same function; if the search had
+ *    asked with one geometry and the builder drawn another (a foot disc for the
+ *    query, a leaning trunk for the picture — the #504 variant), the two lists
+ *    would differ here. Every leg accounted for is the acceptance test's
+ *    "claim count == built-leg count", made stronger: the claims are equal,
+ *    not merely as many.
+ * 2. **No trunk leans further than a trunk may.** The old nudge lists could
+ *    stand a foot 5–8 m from the point under its top; the bound is now the
+ *    support's own `maxTrunkLean` (`trestleGeometry.ts`: no steeper than its
+ *    branches), and every drawn trunk is measured against it. The threshold is
+ *    the geometry's, not the placer's — the placer reads the same function, so
+ *    a placer that quietly stopped obeying it is exactly what this would see.
+ * 3. **Nothing in the registry shares ground it may not.** Every claim of
+ *    every feature against every claim of every other feature, under
+ *    `CLAIM_COMPATIBILITY` — the universal-overlap sweep the design asks for,
+ *    on the registry's own terms. Today that is the road's corridor against
+ *    both rings' supports and the two rings against each other; the next
+ *    placer is covered without a line changing here.
+ *
+ * Coverage is printed on every run (how many struts, trees and claim pairs were
+ * compared), to stderr so it is visible on a passing run.
+ */
+const railRaceSupportsAreClaimedAsDrawn: Invariant = (facts) => {
+  const wrong: string[] = [];
+  const key = (claim: Claim): string => {
+    const s = claim.shape;
+    return s.shape === 'capsule'
+      ? `${claim.kind}:capsule(${s.x1},${s.z1},${s.x2},${s.z2},${s.halfWidth})`
+      : `${claim.kind}:disc(${s.x},${s.z},${s.radius})`;
+  };
+
+  let struts = 0;
+  let trees = 0;
+  let worstLeanRatio = 0;
+  for (const ring of facts.railRaceSupports) {
+    if (ring.trees.length === 0) {
+      wrong.push(
+        `seed ${facts.seed}: the ${ring.label} ring drew no trestle legs at all — nothing to ` +
+          'claim and nothing measured',
+      );
+      continue;
+    }
+    trees += ring.trees.length;
+    struts += ring.struts;
+
+    // --- 1. the registry is the drawn geometry, to the number ----------------
+    const registryKeys = ring.claimed.map(key);
+    const drawnKeys = ring.fromDrawn.map(key);
+    if (
+      registryKeys.length !== drawnKeys.length ||
+      registryKeys.some((k, i) => k !== drawnKeys[i])
+    ) {
+      const firstDiff = registryKeys.findIndex((k, i) => k !== drawnKeys[i]);
+      wrong.push(
+        `seed ${facts.seed}: the ${ring.label} ring's registry claims are not what its drawn ` +
+          `supports produce — ${registryKeys.length} claimed vs ${drawnKeys.length} from the ` +
+          `${ring.trees.length} drawn trestles; first difference at claim ${firstDiff}: ` +
+          `registry ${registryKeys[firstDiff] ?? '(none)'} vs drawn ${drawnKeys[firstDiff] ?? '(none)'}. ` +
+          'The search asked with one geometry and the builder drew another',
+      );
+    }
+
+    // --- 2. no trunk leans further than a trunk may --------------------------
+    for (const [i, tree] of ring.trees.entries()) {
+      const allowed = maxTrunkLean(tree.trunkHeight);
+      if (allowed > 0) worstLeanRatio = Math.max(worstLeanRatio, tree.lean / allowed);
+      // float32 instance matrices; the same slack `theRoadsCorridorIsTheRoadItDrew` allows.
+      if (tree.lean > allowed + 1e-3) {
+        wrong.push(
+          `seed ${facts.seed}: trestle ${i} on the ${ring.label} ring leans ${tree.lean.toFixed(2)} m ` +
+            `on a ${tree.trunkHeight.toFixed(2)} m trunk, past the ${allowed.toFixed(2)} m ` +
+            `maxTrunkLean allows (foot ${fmt([tree.footX, tree.footZ])})`,
+        );
+      }
+    }
+  }
+
+  // --- 3. nothing in the registry shares ground it may not -------------------
+  const registry = facts.world.groundClaims;
+  const features = registry.committedFeatures();
+  let pairs = 0;
+  for (let a = 0; a < features.length; a += 1) {
+    for (let b = a + 1; b < features.length; b += 1) {
+      const featureA = features[a]!;
+      const featureB = features[b]!;
+      for (const claimA of registry.claimsOf(featureA)) {
+        for (const claimB of registry.claimsOf(featureB)) {
+          pairs += 1;
+          const rule = CLAIM_COMPATIBILITY[claimA.kind][claimB.kind];
+          if (rule === true) continue;
+          if (!shapesOverlap(claimA.shape, claimB.shape)) continue;
+          // `'crossing'` needs a declared crossing, which `allows` knows how to
+          // judge; ask it rather than re-deriving the crossing rule here.
+          if (rule === 'crossing' && registry.allows(featureA, claimA)) continue;
+          wrong.push(
+            `seed ${facts.seed}: "${featureA}" claim ${key(claimA)} shares ground with ` +
+              `"${featureB}" claim ${key(claimB)}, which ${claimA.kind}×${claimB.kind} forbids — ` +
+              'a placer stood on ground the registry should have refused',
+          );
+        }
+      }
+    }
+  }
+
+  process.stderr.write(
+    `  railRaceSupportsAreClaimedAsDrawn seed ${facts.seed}: ${trees} trestles, ${struts} drawn ` +
+      `struts rebuilt into claims; worst lean ${(worstLeanRatio * 100).toFixed(0)}% of its ` +
+      `limit; ${pairs} registry claim pairs across ${features.length} features checked\n`,
+  );
+  return wrong;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],
+  ['every Rail Race support is claimed exactly as it is drawn', railRaceSupportsAreClaimedAsDrawn],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
   ["nothing grows in the lane but the park's own trees", nothingGrowsInTheLaneButTheParksOwnTrees],
