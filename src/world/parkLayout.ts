@@ -563,8 +563,8 @@ function standsReachably(
 }
 
 /**
- * The strictest world any door is probed on — every plot but the fountain
- * (exempt for every door), plus the boundary — with its one flood from the
+ * The strictest world any door is probed on — every plot but
+ * {@link ALWAYS_EXEMPT}, plus the boundary — with its one flood from the
  * entrance. `null` if the entrance itself has nowhere to stand on it, in
  * which case every door takes the per-door probe, where that is a thrown
  * error rather than a quiet fall-through.
@@ -572,16 +572,26 @@ function standsReachably(
 function strictGrid(
   placed: readonly PlacedEntry[],
 ): { grid: NavGrid; reachable: (x: number, z: number, y: number) => boolean } | null {
-  const world = plotsWorld(placed, new Set(['fountain']));
+  const world = plotsWorld(placed, ALWAYS_EXEMPT);
   const grid = new NavGrid(world, PLAYER_RADIUS, 0);
   const reachable = grid.reachableFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0, (): number => 0);
   return reachable ? { grid, reachable } : null;
 }
 
+/**
+ * The plots no door's probe world ever holds: the fountain, whose rim a child
+ * hops rather than walks round (`check:fountain-hop`), so its footprint is not
+ * a wall. One owner for the strict world ({@link strictGrid}) and every
+ * per-door world ({@link exemptFor}) — the fast path rests on the strict world
+ * holding a superset of every door's obstacles, and that holds only while
+ * both read this set.
+ */
+const ALWAYS_EXEMPT: ReadonlySet<string> = new Set(['fountain']);
+
 /** The plots `door`'s probe world leaves out: its own, and any the router's
  * arrival exemption would let its stub pass — see {@link doormatRefusals}. */
 function exemptFor(door: PlacedEntry, placed: readonly PlacedEntry[]): ReadonlySet<string> {
-  const exempt = new Set<string>([door.id, 'fountain']);
+  const exempt = new Set<string>([door.id, ...ALWAYS_EXEMPT]);
   const columns = columnsOf(placed);
   for (let i = 0; i < columns.count; i += 1) {
     if (footprintWithin(columns, i, door.entranceX, door.entranceZ, ARRIVAL_EXEMPT_NEAR)) {
@@ -647,7 +657,7 @@ function pocketBlockers(
     if (!boundary && PARK_BOUNDARY.distanceToEdge(x, z) < PLAYER_RADIUS + NAV_CELL) boundary = true;
     for (let i = 0; i < columns.count; i += 1) {
       const id = columns.ids[i] as string;
-      if (id === exceptId || id === 'fountain' || exempt.has(id) || plots.includes(id)) continue;
+      if (id === exceptId || ALWAYS_EXEMPT.has(id) || exempt.has(id) || plots.includes(id)) continue;
       if (footprintWithin(columns, i, x, z, reach)) plots.push(id);
     }
   });
@@ -670,7 +680,7 @@ function coveringBlockers(
   const plots: string[] = [];
   for (let i = 0; i < columns.count; i += 1) {
     const id = columns.ids[i] as string;
-    if (id === exceptId || id === 'fountain' || exempt.has(id)) continue;
+    if (id === exceptId || ALWAYS_EXEMPT.has(id) || exempt.has(id)) continue;
     if (footprintWithin(columns, i, x, z, reach)) plots.push(id);
   }
   return { plots, boundary: PARK_BOUNDARY.distanceToEdge(x, z) < PLAYER_RADIUS };
@@ -684,7 +694,7 @@ function nearestPlot(x: number, z: number, columns: PlotColumns, exceptId: strin
   // bisection on `footprintWithin` keeps this on the one footprint rule.
   for (let i = 0; i < columns.count; i += 1) {
     const id = columns.ids[i] as string;
-    if (id === exceptId || id === 'fountain') continue;
+    if (id === exceptId || ALWAYS_EXEMPT.has(id)) continue;
     let lo = 0;
     let hi = 400;
     for (let step = 0; step < 24; step += 1) {
