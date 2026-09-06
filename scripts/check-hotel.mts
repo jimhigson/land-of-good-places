@@ -97,6 +97,7 @@ import {
   SUITE_BED_HALF_Z,
   SUITE_DOOR_WIDTH,
   petBedSlots,
+  MIDDLE_BEDROOM_INDEX,
   petBedFootprintRadius,
   clearFloorAround,
   doorwayClearanceZones,
@@ -123,7 +124,7 @@ import {
 } from '../src/world/hotel/Hotel.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import { gameStore, walksInParade } from '../src/state/index.ts';
-import { shopItem } from '../src/world/building/shops/catalogue.ts';
+import { shopItem, ALL_CATALOGUE_ITEMS } from '../src/world/building/shops/catalogue.ts';
 import { Parade } from '../src/entities/parade/Parade.ts';
 
 /** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
@@ -2339,6 +2340,113 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
       ]);
     }
   }
+}
+
+// ------------------------------------- 3c. nobody is left out of the nap
+//
+// Issue #582, Jim, 6 Sep 2026: *"there should be more pet beds, so that when
+// the player goes to sleep, all their pets have somewhere to sleep."*
+//
+// **The bed count was never the bug.** It has been one bed per companion
+// since #275, read from the save. What failed is *which room she is in*: the
+// two side bedrooms hold 2 pet beds each against a catalogue offering 12
+// companions, and `Hotel.enterSuite` puts her nearest the west bedroom's
+// door — so the room she actually naps in is usually a capacity-2 one and a
+// child with three pets watched one of them stand about. `Hotel.sendPetsToBed`
+// now sends a companion with no bed in that room to its bed in the middle
+// bedroom instead (Jim's choice of 6 Sep, from four costed options).
+//
+// So the question this asks is the child's one — **did every animal I own get
+// sent to a bed?** — of `Hotel.petBedsForNapIn`, the single owner of that
+// choice, on a real built park per cast, for a nap taken in **each** of the
+// three bedrooms. Not of the slot generator: `petBedSlots` can be perfect
+// while the room she is standing in still sends nobody, which is precisely
+// the shape of the bug.
+//
+// **It carries its own control.** `old` below is the rule this replaced —
+// beds in the napped room and nowhere else. If the two ever agree for a cast
+// bigger than a side bedroom holds, this probe has stopped measuring the
+// change it exists for and says so, rather than passing on a tautology.
+{
+  const middleCapacity = petBedSlots(400, MIDDLE_BEDROOM_INDEX).length;
+  const sideCapacity = petBedSlots(400, 0).length;
+  const companionSpecs = ALL_CATALOGUE_ITEMS.filter((item) => walksInParade(item.kind));
+  let controlEverBit = false;
+  let worstShortfall = 0;
+
+  // Counts that mean something rather than a round number each: one pet, a
+  // count a side bedroom cannot hold (the reported bug), the middle
+  // bedroom's own whole capacity, and one past it — all asked of the
+  // generator, none typed, so a bedroom that changes size re-aims this.
+  for (const want of [1, sideCapacity + 1, middleCapacity, middleCapacity + 2]) {
+    emptyProfile();
+    gameStore.earn(100000);
+    let bought = 0;
+    for (let i = 0; i < want; i += 1) {
+      const spec = companionSpecs[i % companionSpecs.length];
+      if (spec !== undefined && gameStore.buy(spec).outcome === 'kept') bought += 1;
+    }
+    gameStore.setCarried(null);
+    if (bought !== want) {
+      problems.push(
+        `could not give the #582 probe ${want} companions (bought ${bought}) — it cannot mean anything`,
+      );
+      continue;
+    }
+    // The park is built *after* the inventory is set, because
+    // `Hotel.ownedCompanions` snapshots it once at construction.
+    const { world: petWorld } = quietly(() => buildHeadlessPark());
+    const petHotel = petWorld.hotel;
+
+    for (const bedIndex of [0, 1, 2]) {
+      const sent = petHotel.petBedsForNapIn(bedIndex);
+      const shortfall = petHotel.petBedShortfall(bedIndex);
+      const old = petHotel.petBeds.filter((bed) => bed.bedIndex === bedIndex && bed.uid !== null).length;
+      if (want > sideCapacity && bedIndex !== MIDDLE_BEDROOM_INDEX && sent.length !== old) {
+        controlEverBit = true;
+      }
+      // No two companions may be sent to one bed — two animals easing onto
+      // the same cushion is what a child sees, and identity here is the
+      // `spot` object itself, exactly as `Parade.petBedPhase` compares it.
+      if (new Set(sent.map((entry) => entry.spot)).size !== sent.length) {
+        problems.push(
+          `a nap in bedroom ${bedIndex + 1} owning ${want} companion(s) sent two of them to the ` +
+            'same pet bed',
+        );
+      }
+      // Up to what the middle bedroom holds, **everyone** must get a bed,
+      // whichever room she chose. That is the whole of issue #582.
+      if (want <= middleCapacity && shortfall !== 0) {
+        problems.push(
+          `a child owning ${want} companion(s) who naps in bedroom ${bedIndex + 1} leaves ` +
+            `${shortfall} of them with no bed at all, though the middle bedroom holds ` +
+            `${middleCapacity} — issue #582 is not fixed for that room`,
+        );
+      }
+      worstShortfall = Math.max(worstShortfall, shortfall);
+    }
+  }
+
+  if (!controlEverBit) {
+    problems.push(
+      'the #582 control never bit: sending pets to the middle bedroom placed no more of them ' +
+        'than the old napped-room-only rule did, at any cast, in either side bedroom — this ' +
+        'probe is no longer measuring the change it exists for',
+    );
+  }
+
+  // Say out loud what this still does *not* cover. Past the middle bedroom's
+  // own capacity there is nowhere left to send a companion, and a green line
+  // that implied otherwise is how the next agent inherits a false belief.
+  console.log(
+    `check:hotel — #582 pet-bed overflow: side bedrooms hold ${sideCapacity} pet bed(s) each, the ` +
+      `middle one ${middleCapacity}; every companion of a child owning up to ${middleCapacity} of ` +
+      `them is sent to a bed whichever of the 3 bedrooms she naps in. **Past ${middleCapacity} ` +
+      `companions there is no bed left to send anyone to** — at ${middleCapacity + 2} owned, ` +
+      `${worstShortfall} animal(s) stayed standing in the line. The suite has no floor for more ` +
+      `(a side bedroom would need ~12.3 m of width to hold 12 beds and has ` +
+      `${sideCapacity === 2 ? '6.35' : '?'} m), so raising it is a layout change, not a packing one.`,
+  );
 }
 
 // ---- and quote the numbers off the screen, not the ones expected. A pet-bed
