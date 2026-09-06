@@ -20,10 +20,32 @@ two-definitions disease and is a rejection even while green.
 
 ## What this is
 
-- The screen runs inside the generator's `pathGraph` task on the built
-  graph's **drawn** samples (post fillet + Catmull-Rom — the samples
-  `recordSamples` produces, not the control polyline), **before**
-  `offerPrewarmedPathGraph`. A foul names the edge and is refused.
+- The screen runs inside the generator's `pathGraph` task, **before**
+  `offerPrewarmedPathGraph`, on the **drawn** samples of the candidate
+  graph. **Corrected 6 Sep — the trap the first draft of this brief set:**
+  at that moment `pathCentreline()` is *empty*; it is filled by
+  `buildPaths()` at world-build (`Garden.ts:72`). A screen that reads it
+  there scans zero samples, finds zero fouls and passes on every seed
+  including 288 — a check that cannot fail. The samples must instead be
+  **derived from the candidate graph** the task already holds:
+  `ROUTES` = paved edges → `routeCurve(route)` → divisions →
+  `recordSamples`, all computable with no mesh built. **That curve→samples
+  step is extracted and shared** between `buildPaths()` and the screen —
+  never its divisions formula (`max(24, round(len/0.8))`) copied into the
+  screen, which would drift the first time path smoothness is tuned.
+  A foul names the edge and is refused.
+- Status of the pieces (6 Sep): the predicate is extracted and proved
+  behaviour-identical — `createCrossingScan(route)` owns the flip,
+  `siteForFlip(route, d)` owns the snap, `computeCrossings` is refactored
+  **onto** both (canonical 90/90). `bridgeCandidateAt` is not new work:
+  `crossingPlanSolve.ts:269`, already called at `:460`.
+- **Scope split (Overseer, 6 Sep, Architect agreed):** the shared
+  predicate + commit-time screen land first. The per-producer refusal
+  ladder below is **held and sized from the screen's own transcript on
+  seed 288** — it will say which producers actually foul, and the honest
+  answer may be one, not six. Until the first rung lands, the screen
+  turns 288's throw-at-planting into a **named refusal at commit** —
+  better evidence, still a red seed, so #511 stays gated on that rung.
 - The refusal path, in order of cheapness, per the ruling's point 2:
   screen the unscreened appendages (spur `lead`/`past`, station approach
   points, connector leads, lattice-snap jogs) with the leg's own rail

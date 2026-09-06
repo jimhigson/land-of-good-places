@@ -922,6 +922,15 @@ first customer, and the fix has the design's shape, not the hill's:
    and the router takes its next decision. The construction-time throw
    stays as the last-resort invariant and must become unreachable.
    **One function, two askers** — not a second predicate in `paths.ts`.
+   *Corrected 6 Sep:* `pathCentreline()` is empty at that moment (filled
+   by `buildPaths()` at world-build), so the screen derives the drawn
+   samples from the candidate graph through the **same extracted
+   curve→samples step** `buildPaths()` uses — a copied divisions formula
+   is the disease one level down. Done: `createCrossingScan` /
+   `siteForFlip`, with `computeCrossings` refactored onto them;
+   `bridgeCandidateAt` (`crossingPlanSolve.ts:269`) already exists. The
+   per-producer ladder in point 2 is sized from the screen's transcript
+   on 288, not from the list.
 2. **"Next decision" per producer**, in order of cheapness:
    - an unscreened appendage (spur lead/past, station approach,
      connector lead, snap jog) is a producer drawing without asking the
