@@ -186,6 +186,8 @@ export interface SeedReport {
   readonly samples: number;
   /** Instances found per trestle mesh, so a rename cannot pass as a clean park. */
   readonly instances: Readonly<Record<string, number>>;
+  /** Race-ring instances seen and deliberately not swept — the ring that exists only mid-race. */
+  readonly excludedByDesign: Readonly<Record<string, number>>;
   /** The bus box as measured off the drawn bus, for the transcript. */
   readonly bus: {
     readonly length: number;
@@ -368,6 +370,8 @@ async function measureOneSeed(): Promise<void> {
   const instances: Record<string, number> = Object.fromEntries(
     TRESTLE_MESHES.map((name) => [name, 0]),
   );
+  /** Race-ring instances seen and NOT swept — said in the report so the exclusion is audible. */
+  const excludedByDesign: Record<string, number> = {};
   const matrix = new Matrix4();
   const centre = new Vector3();
   const axis = new Vector3();
@@ -380,18 +384,26 @@ async function measureOneSeed(): Promise<void> {
     if (!TRESTLE_MESHES.includes(name)) return;
     instances[name] = (instances[name] ?? 0) + mesh.count;
 
-    // Which ring, so a reader knows whether this is the one a child stands
-    // beside on foot or the one she meets mid-ride.
+    // **The walk-past ring only, by its exact group name.** It is the ring
+    // standing there while the bus drives; the ride-scale ring exists only
+    // mid-race, when the bus is long gone, and by Jim's ruling (7 Sep 2026)
+    // keeps every leg, road or not. Sound only because the two rings are
+    // never in the world together — the same fact `RAIL_RACE_FEATURE` rests
+    // on. Named rather than taken as "whichever mesh came first".
     let ring = 'unknown';
     for (let node: Object3D | null = mesh; node; node = node.parent) {
-      if (node.name.includes('walk-past')) {
+      if (node.name === 'railRace:walk-past-ring') {
         ring = 'walk-past';
         break;
       }
-      if (node.name.includes('race-ring')) {
+      if (node.name === 'railRace:race-ring') {
         ring = 'race';
         break;
       }
+    }
+    if (ring !== 'walk-past') {
+      excludedByDesign[name] = (excludedByDesign[name] ?? 0) + mesh.count;
+      return;
     }
 
     // `strut` stands a unit-height cylinder from `from` to `to`, so the
@@ -539,6 +551,7 @@ async function measureOneSeed(): Promise<void> {
     worst: [...real.posts.values()].sort((a, b) => b.penetration - a.penetration),
     samples: samples.length,
     instances,
+    excludedByDesign,
     bus: {
       length: busBox.max.z - busBox.min.z,
       width: busBox.max.x - busBox.min.x,
@@ -685,7 +698,10 @@ process.stderr.write(
   `\ncheck:swept-bus — the drawn cat bus against the drawn rail-race posts, ` +
     `${reports.length} of ${seeds.length} seed(s) of PARK_SEED_POOL built.\n` +
     (bus && route
-      ? `  bus body as drawn: ${bus.length.toFixed(2)} m long, ${bus.width.toFixed(2)} m wide, ` +
+      ? `  swept the walk-past ring only (railRace:walk-past-ring), by name: the ride-scale ring exists only ` +
+        `mid-race, when the bus is gone, and keeps every leg by Jim's ruling; race-ring instances seen and not swept: ` +
+        `${Object.entries(reports[0]?.excludedByDesign ?? {}).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}\n` +
+        `  bus body as drawn: ${bus.length.toFixed(2)} m long, ${bus.width.toFixed(2)} m wide, ` +
         `${bus.bottom.toFixed(2)} to ${bus.top.toFixed(2)} m above the ground it stands on\n` +
         `  owner check: CAT_BUS_TOP ${bus.ownerTop.toFixed(4)} m vs the drawn top ${bus.top.toFixed(4)} m ` +
         `(off by ${(bus.top - bus.ownerTop).toFixed(4)} m, slack ${OWNER_SLACK})\n` +

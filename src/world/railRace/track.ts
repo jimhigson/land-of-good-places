@@ -225,6 +225,20 @@ export interface RailRaceTrackOptions {
    */
   readonly ringName: string;
   /**
+   * Whether this ring keeps its supports off the bus's road.
+   *
+   * Jim, 7 Sep 2026: *"make the big version have all its legs, but the normal
+   * version can have them selectively."* The walk-past ring is the one
+   * standing there while a child is on foot and the bus is driving, so it
+   * skips every slot over the road (`trestleSpots`); the ride-scale ring
+   * exists only mid-race, when the bus is long gone, so nothing it stands on
+   * can ever be met from the road, and it keeps every leg. Sound rather than
+   * an exemption for exactly one reason: the two rings are never in the world
+   * together — the same fact `RAIL_RACE_FEATURE` rests on. If that were ever
+   * false, both are wrong together.
+   */
+  readonly respectsRoad: boolean;
+  /**
    * **The park's one claims registry**, which this ring's supports ask before
    * they stand (stage 3, step 2 of `docs/DESIGN-round-robin-generation.md`).
    * They ask as {@link RAIL_RACE_FEATURE} — one feature for both rings, so
@@ -570,6 +584,7 @@ export function buildRailRaceTrack(
     options.groundClaims,
     RAIL_RACE_FEATURE,
     options.ringName,
+    options.respectsRoad,
     ringSizeVsRace,
     mandatoryTrestleIndices,
   );
@@ -1463,8 +1478,7 @@ type LegacyPredicate =
 function reportLegacyRefusals(
   feature: string,
   tally: ReadonlyMap<LegacyPredicate, number>,
-  overRoad: number,
-  roadRefused: number,
+  road: { readonly overRoad: number; readonly roadRefused: number } | null,
 ): void {
   try {
     const nodeProcess = (globalThis as { process?: { stderr?: { write: (s: string) => unknown } } }).process;
@@ -1478,7 +1492,9 @@ function reportLegacyRefusals(
     nodeProcess.stderr.write(
       `  ${feature}: candidates refused by legacy predicates: ` +
         (total === 0 ? '0 — the registry decided every slot' : `${total} (${parts.join(', ')})`) +
-        `; slots over the road not built: ${overRoad}; candidates refused by the road: ${roadRefused}\n`,
+        (road
+          ? `; slots over the road not built: ${road.overRoad}; candidates refused by the road: ${road.roadRefused}\n`
+          : '; the ride ring ignores the road (it exists only mid-race, when the bus is gone)\n'),
     );
   } catch {
     // A runtime with a `process` that is not Node's — say nothing rather than fail a park.
@@ -1557,6 +1573,8 @@ function trestleSpots(
   feature: string,
   /** The ring's own name, for the trace and the coverage line — never the feature asked as. */
   ringName: string,
+  /** See `RailRaceTrackOptions.respectsRoad`: only the walk-past ring asks the road rule. */
+  respectsRoad: boolean,
   ringSizeVsRace: number,
   mandatoryIndices: ReadonlySet<number>,
 ): TrestleSpot[] {
@@ -1582,7 +1600,9 @@ function trestleSpots(
   // and inside the driven bus on 7 of 14 seeds (5: 8 posts, 11: 10, 346: 6,
   // 451: 7, 326: 4, 24: 1, 128: 1). The guard stays armed; the rule now says
   // what he said.
-  const road = groundClaims.claimsOf(ROAD_FEATURE).filter((claim) => claim.kind === 'corridor');
+  const road = respectsRoad
+    ? groundClaims.claimsOf(ROAD_FEATURE).filter((claim) => claim.kind === 'corridor')
+    : [];
   let overRoad = 0;
   /** March candidates refused for standing over the road, for the coverage line. */
   let roadRefused = 0;
@@ -1679,7 +1699,7 @@ function trestleSpots(
       );
     }
   }
-  reportLegacyRefusals(ringName, legacyTally, overRoad, roadRefused);
+  reportLegacyRefusals(ringName, legacyTally, respectsRoad ? { overRoad, roadRefused } : null);
   return spots;
 }
 

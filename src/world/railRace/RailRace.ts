@@ -432,10 +432,22 @@ export class RailRace implements GameSystem {
     // walk-past ring's *colliders* (what a child on foot walks into) are
     // registered after BOTH rings have found their ground, so the race ring's
     // search never meets them through the unmigrated collision predicate.
+    //
+    // **The two rings differ in whether they respect the road**, and that is
+    // sound rather than an exemption for the same reason the one feature is:
+    // they are never in the world together. Jim, 7 Sep 2026: "make the big
+    // version have all its legs, but the normal version can have them
+    // selectively." The walk-past ring is there while the bus drives, so it
+    // skips its legs over the road; the ride ring exists only mid-race, when
+    // the bus is gone, so it keeps every leg (`RailRaceTrackOptions.
+    // respectsRoad`). If the rings were ever co-present, both changes would be
+    // wrong together — and `check:swept-bus` sweeps the walk-past ring alone,
+    // by name, for the same reason.
     this.walkPastRing = {
       route: RAIL_RACE_PLAN.walkPastRing,
       track: buildRailRaceTrack(RAIL_RACE_PLAN.walkPastRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:walk-past-ring',
+        respectsRoad: true,
         groundClaims,
         // No finish rainbow here — see `RailRaceTrackOptions.showArch` (#299).
         showArch: false,
@@ -445,6 +457,7 @@ export class RailRace implements GameSystem {
       route: RAIL_RACE_PLAN.raceRing,
       track: buildRailRaceTrack(RAIL_RACE_PLAN.raceRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:race-ring',
+        respectsRoad: false,
         groundClaims,
         showArch: true,
       }),

@@ -2932,6 +2932,26 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   const at = new Vector3();
   const RADIUS_SLACK = 1e-3;
   const CENTRE_SLACK = 1e-3;
+  // **Precondition, asserted before anything is measured**: the clause tells
+  // the rings apart by foot radius alone, and the two radii differ ONLY by the
+  // ride's own scale (`POST_FOOT_RADIUS × sizeVsRace`, one owner). Were
+  // `RIDE_SCALE` ever 1, a registered race ring would pass here without a
+  // word — so say so, in those terms, rather than pass.
+  {
+    const radii = rings.map((ring) => POST_FOOT_RADIUS * ring.sizeVsRace);
+    for (let a = 0; a < radii.length; a += 1) {
+      for (let b = a + 1; b < radii.length; b += 1) {
+        if (Math.abs((radii[a] as number) - (radii[b] as number)) <= RADIUS_SLACK) {
+          complaints.push(
+            `this clause cannot tell the rings apart: the ${rings[a]?.label} and ${rings[b]?.label} rings' ` +
+              `foot radii are ${(radii[a] as number).toFixed(3)} and ${(radii[b] as number).toFixed(3)} m, within ` +
+              `the ${RADIUS_SLACK} m it discriminates by — it would pass a registered race ring in silence`,
+          );
+          return complaints;
+        }
+      }
+    }
+  }
   for (const ring of rings) {
     const legs = ring.group.getObjectByName('railRace:trestle-legs');
     if (!(legs instanceof InstancedMesh)) {
