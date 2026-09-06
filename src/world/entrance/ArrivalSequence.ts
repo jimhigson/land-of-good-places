@@ -904,9 +904,22 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
 
   const swing =
     elapsed < AT_STOPPED
-      ? // Swinging round off the ordinary view as the bus rolls up, so the
-        // arrival opens on a move rather than on a cut.
-        smoothstep(0, 1, elapsed / Math.max(0.001, ARRIVAL_TIMELINE.rollingIn))
+      ? // **Already on the bus, from the first frame.** Jim, 6 September 2026:
+        // *"arrival camera — it should START facing the bus, not transition
+        // down to there."*
+        //
+        // This used to `smoothstep(0, 1, elapsed / rollingIn)`, opening on the
+        // ordinary pseudo-isometric rig and swinging round onto the bus while it
+        // rolled up — "the arrival opens on a move rather than on a cut", which
+        // was the reasoning and which he has now ruled against. A child watching
+        // her own arrival should be looking at the bus when the picture appears,
+        // not watching the camera find it.
+        //
+        // Held at 1 rather than deleted, because `swing` is also what carries
+        // the stand-back in from the rig's 90 m to the door's own: at 1 from the
+        // first frame the shot simply *is* the door shot, which is the whole of
+        // what he asked for.
+        1
       : // **Square-on, held all the way through the gateway.** Jim: *"when the
         // child walks out it should stay looking straight at them, as they
         // walk through the gates the camera should glide to follow them
