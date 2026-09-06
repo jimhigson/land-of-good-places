@@ -38,9 +38,10 @@ first honest run found #501).
   Engineer's; the silent-skip harness half is #524.
   Terrain is no longer seed-dependent (1200 m sphere) — the outward
   march's bound is the support's lean limit, not the ground.
-- **Briefs**: step 1 nearly landed (byte-identical, 16 seeds). **Step 2a**
-  (`BRIEF-stage3-step2a-swept-bus-instrument.md`, swept bus vs drawn
-  posts as a ratchet) **READY today**. Step 2 held on step 1 + #511 +
+- **Briefs**: step 1 = **#522, merged** into this branch at `0845e9fa`
+  (reviewed by this Architect, approved 5 Sep). **Step 2a = #528**
+  `check:swept-bus`, approved, awaiting QA (364 drawn posts vs 107 feet,
+  3.40×; feet-only mode reproduces #498's 2–8/seed as calibration). Step 2 held on step 1 + #511 +
   step 2a in the chain (dispatched). Steps 3, 4 sequential after. Step 4 re-cut: no clause
   to delete; it is the `CoSolveEngine`→`GroundClaims` migration + the
   first support-shape negotiation + counters, shrinking if the sphere
