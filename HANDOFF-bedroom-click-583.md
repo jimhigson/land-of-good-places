@@ -14,14 +14,17 @@ point without saying so is explicitly **not acceptable** (ticket).
 ## Status
 - [x] Worktree + `pnpm install --frozen-lockfile` (pnpm 12.1.0 confirmed running)
 - [x] Read #583, CLAUDE.md, GAME_DESIGN.md CONTROL/HIGHLIGHT, HANDOFF-pet-beds-582
-- [ ] Map the click pipeline (subagent running)
-- [ ] Instrument the click + **control run first** on a click that works
-- [ ] Identify which of the three causes it is
-- [ ] Fix + a check that goes red without it (proved red, geometry pasted)
+- [x] Map the click pipeline
+- [x] Instrument the click + **control run first** (4/4 hall probes reached)
+- [x] Identify the cause — **cause 3**, and the room is the lounge, not a bedroom
+- [x] Fix (`Hotel.ts` lounge sofa) + `check:hotel` probe 31, **proved red then green**
 - [ ] Gates: `check`, `test:procgen`, `build`, `check:coplanar`, `check:swept-bus`,
       `check:park-pool`
-- [ ] Browser slot (must ask the Overseer — I do not own it)
+- [ ] Browser slot (must ask the Overseer — I do not own it). **Short test, ready:**
+      `/hotel-suite`, walk south through the lounge door, confirm she gets in and
+      that the sofa still reads well from the fixed camera.
 - [ ] PR + `/hotel…` deep link and one sentence for Jim
+- **Model: Opus (Opus 5, 1M context), chosen by the Overseer's brief.**
 
 ## The three candidate causes (from the ticket — they look identical from outside)
 1. **No pick target** — raycast hits nothing, no destination produced.
@@ -137,7 +140,63 @@ relocates without saying so. Its own doc admits it: *"a 'nope' sound will want t
 know one day"* (`TapNavigator.ts:216`). GAME_DESIGN.md's HIGHLIGHT rule already
 requires a tap to visibly register. Needs a decision on scope — see the Overseer.
 
+## THE FIX, and why it is in z rather than x
+
+First attempt moved the sofa **east** of the doorway. That only moved the sealed
+room: it then cut off the lounge's east end instead (**85 cells / 21.3 m²**,
+measured). The constraint is not the door, it is **depth** — the sofa's turned box
+sweeps **3.34 m** through a sub-room whose clear floor is ~5.75 m deep, so mid-room
+it leaves ~1.2 m either side against a child **1.24 m** wide. It was never one bad
+number; the piece nearly spans the room, which is why four positions in a row
+"cleared the doorway" and sealed the lounge anyway.
+
+So it is pushed **south**, gathering the clearance into one usable walkway along its
+north side, and the position is now **derived** — from the lounge's own
+`clearFloorAround`, the sofa's own turn, and `PLAYER_RADIUS` — rather than nudged
+past whatever last complained. Everything QA chose about how it looks is kept:
+mid-room, off both walls, still turned −0.9 rad between "facing the telly" and
+"facing the lens".
+
+  `hotel.suite`: 347 cells unreachable → **all 961 standable cells reachable**
+
+## The check: `check:hotel` probe 31
+
+Floods every hotel room's floor from where the player is actually dropped, using
+`NavGrid.canStandAt` and NavGrid's own neighbour rule, then **confirms every doubted
+cell with a real `findRoute`** so a failure is always the game's router refusing. It
+**controls on the entry cell first** and refuses to report on a room whose control
+fails. A cell inside a prop's own keep-out disc is discounted — a `CollisionWorld`
+rectangle is four walls round a hollow middle, so the lattice reads the space under
+a sofa as free floor and the flood correctly finds it cut off; that is the outcome
+this repo wants, not a defect.
+
+**Proved red then green** on the geometry named in the commit (sofa at local
+(5.6, 4.8), spin −0.9, halfX 1.1, halfZ 1.3; SUITE halfX 14.8 halfZ 8; lounge door
+x 4.4 on the partition at z 1.7; `SUITE_DOOR_WIDTH` 2.4, `SUITE_PARTITION_HALF` 0.2,
+`PLAYER_RADIUS` 0.62):
+
+    fix reverted -> hotel.suite: 338 cells UNREACHABLE, check:hotel FAILED, exit 1
+    fix in place -> hotel.suite: all 961 standable cells reachable, OK, exit 0
+
+## Still open, for the Overseer — NOT mine to decide
+
+1. **Two pre-existing pockets in other rooms**, found by probe 31 and declared in
+   `KNOWN_UNREACHABLE_CELLS` (the ratchet `check:coplanar` and `check:swept-bus`
+   already use): `hotel.lobby` 22 cells (5.5 m²) and `hotel.garden` 12 cells
+   (3.0 m²). Same disease as #583, smaller. Left declared rather than fixed because
+   each is a **visible** furniture move in a room this ticket was not about. They
+   print on every run and a worse one fails. **Worth its own issue.**
+2. **The silent click itself.** Even with the lounge reachable, a tap that cannot be
+   honoured is still silent, and `planRoute` still relocates the destination without
+   saying so. GAME_DESIGN.md's HIGHLIGHT rule already requires a tap to register
+   visibly. Not fixed here — it is a design change touching every tap in the game,
+   not just this room. **Worth its own issue.**
+3. **File overlap with #582.** Both branches edit `src/world/hotel/Hotel.ts`;
+   different methods (`dressSuite` ~5340 here vs `dressPetBeds` ~4982 there), so a
+   rebase should be clean, but whoever merges second should re-run `check:hotel`.
+
 ## Log
 - Worktree created off `d7da0408`, deps installed, context read.
 - Pipeline mapped; instruments written and **controlled**; root cause found and
-  proved by arithmetic on the built collision world. Not yet fixed.
+  proved by arithmetic on the built collision world.
+- Fixed, checked, rebased onto `b581462d`. Gates running.
