@@ -83,6 +83,57 @@ Verified in a real browser on 5392, `/arrive`, not assumed:
    today.
 
 
+## ⛔ RED, and the most serious of them: `check:park-pool`, 4 of 14 seeds
+
+```
+seed 5:   poi.stranded: 28 (no allowance — this is new)
+seed 115: poi.stranded: 15 (no allowance — this is new)
+seed 225: poi.stranded: 73 (no allowance — this is new)
+seed 346: poi.nospot: 2, poi.stranded: 1 (no allowance — both new)
+```
+
+**It is this branch's**, measured: `origin/main` at `dd5b3b6b`, run in a scratch
+worktree, exits 0. The check's own words for what these are: *"these are parks a
+child can be given"*. The sphere lowers the ground away from the park's centre,
+and points of interest that used to have a reachable stand spot no longer do —
+the same four-steps-upstream shape as seed 288's bridge throw already written up
+further down this file, where a height threshold reads the ground.
+
+This is the one that most obviously must be fixed before the sphere ships, and
+it is **not** in `pnpm run check` — it is its own script and nothing in the
+required chain will tell you about it. Run it.
+
+## The split: attempted, and it does not decompose the way the seams suggested
+
+The Overseer asked for four pieces to go to `main` as their own PRs — the
+`check:park-map` framing, `funnelCorner`, the ribbon-measurement owner with
+`distanceOutside`, and `check:ground-claims`. **None of the four is separable,
+and the reason is the same one each time: they are all downstream of modules
+that exist only on this branch.** Checked rather than assumed:
+
+- **`roadRoute.ts` is not on `main`** (`git ls-tree origin/main src/world/entrance/`).
+  `busStopOnMap()` reads `entranceRoadAt` from it, so the park-map fix cannot
+  compile there — and the bug it fixes does not exist there either, because a
+  straight road pressed against the wall leaves the bus inside
+  `PARK_BOUNDARY.extent`. `check:park-map` is green on `main`.
+- **`funnelCorner` fixes a wall-walk the arc causes.** `check:cat-bus`'s
+  boundary clause is green on `main`, so the change would land there with no bug
+  behind it and no red proof obtainable.
+- **`RoadSegment` is `across`/`along`/`centre` on `main`** and `from`/`to` here,
+  so `road-ribbon-measure.mts` does not typecheck against `main`'s owner.
+- **The doorway clause looked like the one clean candidate and is not.** It was
+  cherry-picked onto a real branch off `main` and *`tsc` passed* — then the
+  check died at runtime on `SyntaxError: does not provide an export named
+  'CAT_BUS_DOOR_DROP'`. That constant is this branch's hoist. Worth keeping the
+  lesson: `tsc -p tsconfig.json` covers `src` only, so a green typecheck says
+  **nothing** about whether a script's imports resolve.
+
+`distanceOutside` alone would apply, and would be a dead export with no caller.
+The only genuinely separable pair is `CAT_BUS_DOOR_DROP`'s hoist (91 lines in
+`catBus.ts`, with its 1e-9 drift assertion) carried together with the doorway
+clause — that is a real, invisible, self-proving PR if someone wants it, but it
+is a piece of the arrival-camera work being pulled out ahead of the rest.
+
 ## ⛔ Also RED, found by running the chain: `check:cat-bus`'s doorway gap
 
 **One clause, and it is a marginal failure of a proxy.** `pnpm run check:cat-bus`
