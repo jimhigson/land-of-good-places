@@ -9296,6 +9296,80 @@ const theRoadsCorridorIsTheRoadItDrew: Invariant = (facts) => {
             `"${segment.name}" ${edge} is ${drawn.toFixed(4)} in the scene and the corridor ` +
             `claims ${claimed.toFixed(4)}, ${residual.toFixed(4)} m apart. A child walks on ` +
             'the mesh; every later placer negotiates against the claim',
+        );
+      }
+    }
+  }
+
+  // --- 3. the road is continuous, and it reaches the arch --------------------
+  const kerb = claims[segments.findIndex((s) => s.name === 'entrance-road-kerb')]?.shape;
+  const spur = claims[segments.findIndex((s) => s.name === 'entrance-road-gateway')]?.shape;
+  if (kerb?.shape === 'capsule' && spur?.shape === 'capsule') {
+    // The spur's OUTER end is the one that meets the kerb.
+    const outerZ = Math.max(spur.z1, spur.z2);
+    const gap = Math.abs(outerZ - (kerb.z1 - kerb.halfWidth));
+    if (gap > PLAYER_RADIUS) {
+      wrong.push(
+        `seed ${facts.seed}: the gateway spur starts ${gap.toFixed(2)} m from the kerb's inner ` +
+          `edge (spur at z=${outerZ.toFixed(2)}, kerb edge at ` +
+          `${(kerb.z1 - kerb.halfWidth).toFixed(2)}) — wider than a child (PLAYER_RADIUS ` +
+          `${PLAYER_RADIUS}), so she steps off the road between the bus and the gate`,
+      );
+    }
+    // The spur's outer end must be within the kerb's own run, or the two are
+    // two roads that happen to be near each other.
+    const kerbMinX = Math.min(kerb.x1, kerb.x2);
+    const kerbMaxX = Math.max(kerb.x1, kerb.x2);
+    if (spur.x1 < kerbMinX || spur.x1 > kerbMaxX) {
+      wrong.push(
+        `seed ${facts.seed}: the gateway spur leaves the kerb at x=${spur.x1.toFixed(2)}, which ` +
+          `is outside the kerb's own run ${kerbMinX.toFixed(2)}..${kerbMaxX.toFixed(2)} — the ` +
+          'bus stops on a road that does not meet the one going in',
+      );
+    }
+    // …and the spur must actually arrive at the arch.
+    const innerZ = Math.min(spur.z1, spur.z2);
+    if (!isInEntranceGateway(spur.x1, ENTRANCE_GATE_Z) || innerZ > ENTRANCE_GATE_Z) {
+      wrong.push(
+        `seed ${facts.seed}: the gateway spur does not pass through the arch — it runs x=` +
+          `${spur.x1.toFixed(2)}, z=${outerZ.toFixed(2)}..${innerZ.toFixed(2)} and the gate is ` +
+          `at (${ENTRANCE_GATE_X.toFixed(2)}, ${ENTRANCE_GATE_Z.toFixed(2)}). Jim, 7 Aug 2026: ` +
+          '"the road needs to actually go to the park"',
+      );
+    }
+  } else {
+    wrong.push(
+      `seed ${facts.seed}: the road did not claim both a kerb and a gateway spur, so its ` +
+        'continuity was not checked at all',
+    );
+  }
+
+  // What this clause actually covered, said out loud on every run — including
+  // the passing ones, which is the only case the note exists for. stderr,
+  // because vitest's default reporter hides console.log on a passing test.
+  process.stderr.write(
+    `    seed ${facts.seed}: road corridor — ${measured} of ${claims.length} claimed ribbons ` +
+      `measured against drawn geometry, worst edge residual ${worstResidual.toExponential(2)} m ` +
+      `(${worstNote})\n`,
+  );
+  if (measured !== claims.length) {
+    wrong.push(
+      `seed ${facts.seed}: only ${measured} of ${claims.length} claimed corridor runs were ` +
+        'measured against a real ribbon — the rest asserted nothing',
+    );
+  }
+
+  return wrong;
+};
+
+/** The slice of `BufferAttribute` this file reads off a ribbon. */
+interface PositionLike {
+  readonly count: number;
+  getX(index: number): number;
+  getZ(index: number): number;
+}
+
+/**
  * **Every castle corner turret is solid, on every seed.**
  *
  * Issue #549: the facade's collider is a rectangle and the four turrets stand
@@ -9382,63 +9456,6 @@ const castleTurretsAreSolid: Invariant = (facts) => {
     }
   }
 
-  // --- 3. the road is continuous, and it reaches the arch --------------------
-  const kerb = claims[segments.findIndex((s) => s.name === 'entrance-road-kerb')]?.shape;
-  const spur = claims[segments.findIndex((s) => s.name === 'entrance-road-gateway')]?.shape;
-  if (kerb?.shape === 'capsule' && spur?.shape === 'capsule') {
-    // The spur's OUTER end is the one that meets the kerb.
-    const outerZ = Math.max(spur.z1, spur.z2);
-    const gap = Math.abs(outerZ - (kerb.z1 - kerb.halfWidth));
-    if (gap > PLAYER_RADIUS) {
-      wrong.push(
-        `seed ${facts.seed}: the gateway spur starts ${gap.toFixed(2)} m from the kerb's inner ` +
-          `edge (spur at z=${outerZ.toFixed(2)}, kerb edge at ` +
-          `${(kerb.z1 - kerb.halfWidth).toFixed(2)}) — wider than a child (PLAYER_RADIUS ` +
-          `${PLAYER_RADIUS}), so she steps off the road between the bus and the gate`,
-      );
-    }
-    // The spur's outer end must be within the kerb's own run, or the two are
-    // two roads that happen to be near each other.
-    const kerbMinX = Math.min(kerb.x1, kerb.x2);
-    const kerbMaxX = Math.max(kerb.x1, kerb.x2);
-    if (spur.x1 < kerbMinX || spur.x1 > kerbMaxX) {
-      wrong.push(
-        `seed ${facts.seed}: the gateway spur leaves the kerb at x=${spur.x1.toFixed(2)}, which ` +
-          `is outside the kerb's own run ${kerbMinX.toFixed(2)}..${kerbMaxX.toFixed(2)} — the ` +
-          'bus stops on a road that does not meet the one going in',
-      );
-    }
-    // …and the spur must actually arrive at the arch.
-    const innerZ = Math.min(spur.z1, spur.z2);
-    if (!isInEntranceGateway(spur.x1, ENTRANCE_GATE_Z) || innerZ > ENTRANCE_GATE_Z) {
-      wrong.push(
-        `seed ${facts.seed}: the gateway spur does not pass through the arch — it runs x=` +
-          `${spur.x1.toFixed(2)}, z=${outerZ.toFixed(2)}..${innerZ.toFixed(2)} and the gate is ` +
-          `at (${ENTRANCE_GATE_X.toFixed(2)}, ${ENTRANCE_GATE_Z.toFixed(2)}). Jim, 7 Aug 2026: ` +
-          '"the road needs to actually go to the park"',
-      );
-    }
-  } else {
-    wrong.push(
-      `seed ${facts.seed}: the road did not claim both a kerb and a gateway spur, so its ` +
-        'continuity was not checked at all',
-    );
-  }
-
-  // What this clause actually covered, said out loud on every run — including
-  // the passing ones, which is the only case the note exists for. stderr,
-  // because vitest's default reporter hides console.log on a passing test.
-  process.stderr.write(
-    `    seed ${facts.seed}: road corridor — ${measured} of ${claims.length} claimed ribbons ` +
-      `measured against drawn geometry, worst edge residual ${worstResidual.toExponential(2)} m ` +
-      `(${worstNote})\n`,
-  );
-  if (measured !== claims.length) {
-    wrong.push(
-      `seed ${facts.seed}: only ${measured} of ${claims.length} claimed corridor runs were ` +
-        'measured against a real ribbon — the rest asserted nothing',
-    );
-  }
   // Said on every run, passing ones included — stderr, because vitest hides
   // console.log for a passing test and a coverage note nobody can hear is the
   // same disease one layer out.
@@ -9451,18 +9468,9 @@ const castleTurretsAreSolid: Invariant = (facts) => {
   return wrong;
 };
 
-/** The slice of `BufferAttribute` this file reads off a ribbon. */
-interface PositionLike {
-  readonly count: number;
-  getX(index: number): number;
-  getZ(index: number): number;
-}
-
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
-const INVARIANTS: readonly (readonly [string, Invariant])[] = [
-  ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['every castle corner turret is solid', castleTurretsAreSolid],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
