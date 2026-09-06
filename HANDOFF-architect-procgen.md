@@ -349,3 +349,23 @@ rewriting history.
 - A constant restating something computable is a bug even while it agrees.
 - `rerere` is on: rebuild any `check`-chain conflict resolution from main's
   parsed step list, never accept the replay.
+
+## Checkpoint 6 Sep, ~13:00 — merge of `origin/main` into the design branch
+
+- Worktree `.claude/worktrees/design-merge-main`, branch `arch/design-merge-main`
+  (pushed). Merge commit `bf2ff61f` = design `2bc4b51f` + `origin/main`
+  `dd5b3b6b` (#588). Awaiting `check`, `test:procgen`, `build`,
+  `check:coplanar`, `check:swept-bus`, `check:park-pool` exit codes, then
+  it is pushed to `design/round-robin-generation`.
+- **Finding, verified**: `#585` on `main` is a squash of this branch (its
+  body is this branch's commit messages). So the merge's only conflicts are
+  the three docs this branch edited *after* the squash snapshot
+  (`HANDOFF-architect-procgen.md`, `docs/BRIEF-totality-poi-rung.md`,
+  `docs/DESIGN-round-robin-generation.md`), and each design copy is a strict
+  superset of main's (0 lines removed; 12/11/90 added). Resolved to ours.
+  The merged tree differs from `origin/main` by those 124 insertions only —
+  no deletions (`git diff --cached --diff-filter=D dd5b3b6b` empty).
+- `check` chain: 64 steps, same set on main, design and merged (parsed, not
+  grepped). `rerere` had nothing recorded; nothing replayed.
+- A predecessor had merged `e080b753` (#585) rather than the tip; that
+  in-progress merge was aborted and redone against `dd5b3b6b`.
