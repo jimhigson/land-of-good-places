@@ -1,6 +1,10 @@
 # HANDOFF — issue #539: arm `check:hop-clearance`
 
-Branch `fix/check-539`, worktree `.claude/worktrees/check-539`, based on `main` @ `807445af`.
+Branch `fix/check-539`, worktree `.claude/worktrees/check-539`, rebased onto `main` @ `d186ae62`.
+PR #578.
+
+Chain arithmetic, since two counts disagree and both are right: **62 `&&`-separated steps, of
+which 61 are `pnpm run ...`** plus a bare `tsc --noEmit`. `check:chain-coverage` reports the 61.
 
 ## The finding, re-verified myself (not taken on trust)
 
@@ -124,8 +128,11 @@ nothing (its minimum is 1.045 m, the same as 0.34's) — the headline is still 1
 - [x] hoppable wall thicknesses given a single owner; 0.32 now measured (180 -> 210 rows)
 - [x] proved red x5, each mutation asserted to have landed; two failed mutations documented
 - [x] `build` 0, `test:procgen` 0 (21 files, 752 tests), `check:coplanar` 0, `check:swept-bus` 0
-- [ ] `check` (61 steps) — running
-- [ ] PR opened
+- [x] `check` exit 0 on the rebased sha
+- [x] `check:chain-coverage` exit 0 (new on main via #529; names 5 known orphans, incl. #525)
+- [x] rebased onto d186ae62; verified by parsing vs the MERGE BASE, not moved main
+- [x] PR #578 opened
+- [ ] awaiting one review + a QA measurement; invisible to a player, so it merges without Jim
 
 ## Cost
 
