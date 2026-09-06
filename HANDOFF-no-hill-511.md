@@ -1,5 +1,185 @@
 # HANDOFF — issue #511, "the park is not on a hill"
 
+## ⛔ COLD START — 6 September 2026, 23:20, browser pass, stopped part-way
+
+**Model: Opus** (a replacement must also be Opus). Branch `feat/sphere-combined`,
+worktree `.claude/worktrees/sphere-combined`, head at the time of writing
+`2be47b83` plus this commit. **No source file was changed by this session** —
+only this handoff. The whole fleet was stopped for budget mid-measurement, so
+read every "open" below as genuinely open, not as shorthand for "nearly done".
+
+My dev server was **5473** and is killed. The browser page I opened is closed
+(it closed itself — see the crash note below).
+
+### The three-times-asked questions: two answered, one still open
+
+**1. Did the rebuilt camera get in front of a browser at Jim's shape? YES.**
+First time on this feature. `http://127.0.0.1:5473/arrive`, viewport measured
+from inside the page as `innerWidth 2000, innerHeight 1100, devicePixelRatio 2`
+— his wide-and-short shape, not assumed. Three frames were captured and are
+saved **outside git** (they are binaries and must not reach a feature branch) at:
+
+```
+/Users/jim/dev/landOfGoodPlaces/.claude/arrival-frames-20260906/
+  01-title-2000x1100.png
+  02-arrival-opening-inside-the-bus-2000x1100.png   <- the one that matters
+  03-title-wide-scene-2000x1100.png
+```
+
+`.claude/` is gitignored, so these survive only on Jim's Mac. If they matter to
+anyone, they go to the `qa-screenshots` orphan branch per CLAUDE.md — **that has
+not been done.**
+
+**2. The near plane — ANSWERED, read off the live camera object, not reasoned.**
+
+```
+camera.type = "OrthographicCamera"   near = 0.1   far = 270
+```
+
+So **the near plane is not clipping the ground.** It also means the opposite of
+what a near plane is usually blamed for: at a 2 m stand-back with `near` at
+0.1, *everything* between 0.1 m and 2 m in front of the eye is drawn, and
+during `rolling-in` that volume is **the inside of the cat bus**. Delete "check
+the near plane" from the list; it is done.
+
+**3. What the grey region actually is — STILL OPEN. I did not pick under it.**
+
+I had the raycast written and was one call from the answer when the page died.
+Do not read my hypothesis below as the answer.
+
+### What frame 02 shows, and the strongest lead on this branch
+
+**The opening frame of the arrival is *inside the bus*.** Screenshot 02 is the
+first frame after "Go to the park!": the whole viewport is the cat bus's
+interior — Eleri and Elowen in their seats with name tags, and large pale
+striped slabs (the bus's own body panels, seen edge-on from within) crossing the
+foreground with sky and distant scenery visible past them. That is what a 2 m
+stand-back at head height with zero pitch gives you while she is still *seated
+on the bus*, and `rolling-in` is 3.0 s of the 9.3 s shot.
+
+**My hypothesis, explicitly NOT verified:** "walls in the foreground sitting on
+nothing" is the bus's own panels. It fits the picture, but *it is the fourth
+reasoned explanation on this bug and it has not been measured*, which is exactly
+the thing this file already says not to do. **Pick under the pixels before
+telling Jim anything.** The raycast that was about to run:
+
+```js
+const THREE = await import('/node_modules/.vite/deps/three.js?v=<hash from perf entries>');
+const rc = new THREE.Raycaster();
+rc.setFromCamera(new THREE.Vector2(0, ndcY), g.camera.camera);
+rc.intersectObjects(scene.children, true)   // report object.name of hits[0]
+```
+
+### The measured discrepancy nobody has explained — start here
+
+Read off the live camera at `elapsed 0.459` (`phase: rolling-in`), all values
+from the page, none derived:
+
+| quantity | browser, 2000x1100 | `check:arrival-camera` says |
+|---|---|---|
+| frame height | **3.7662 m** | 3.5640 m |
+| frame width | 6.8476 m | — |
+| eye y | −0.081 | — |
+| player feet y | −0.929 | — |
+| eye-to-player | 2.159 m | 2.0000 m |
+| frame below her feet | **1.035 m (27.5% of frame)** | 0.2656 m |
+
+**The check and the browser disagree about the shot.** The check reports 0.2656 m
+of frame under her feet; the browser at Jim's aspect has **1.035 m**, nearly four
+times as much, and 27.5% of the frame is below the ground line. A quarter of the
+picture being empty under her is a very good candidate for "sitting on nothing".
+
+**Two honest caveats before anyone runs with that.** At `elapsed 0.459` she is
+still *seated on the bus*, so "under her feet" is the bus floor, not the ground —
+the check may be measuring a later beat where the two agree. And the 2.159 m vs
+2.0000 m gap is consistent with the follow being *damped* rather than rigid
+(`watchesTheDoor: false` hands tracking to the ordinary damped player-follow), so
+that one may be honest lag rather than a fault. **Neither caveat has been
+checked.** Sample the same quantities across the whole 9.3 s before concluding
+anything — the harness for that is below and it works.
+
+**The first question to settle: does frame height depend on aspect?** If
+`focusHalfHeight` is fixed and width follows aspect, 3.7662 ≠ 3.5640 needs
+another cause; if height moves with aspect, then `check:arrival-camera` is
+green about a frame Jim never sees, which would be this file's own "a check
+that passes without checking anything" in its purest form. `IsoCamera.ts`
+around lines 269–276 is where `focusHalfHeight` and `aspect` meet.
+
+### Keep this distinction — do not soften it
+
+Unchanged and still true: the terrain measurement **rules out "the ground stops
+short"** (the `terrain` mesh spans ±124.9 m in x and z and every z the arrival
+looks across is inside it). **It is NOT a verified account of Jim's pixels.**
+Nothing I did changes that either way. I did not disprove the fault and I did
+not see it disproved — I saw an opening frame full of bus interior, which is a
+different observation.
+
+### The browser harness that works — reuse it, do not rediscover it
+
+`window.game` is assigned **late** (after the park builds), so polling for it
+from a script that clicks the button loses the opening. Beat that with an
+`initScript` on `navigate_page` that defines a setter, which fires the instant
+the game is assigned:
+
+```js
+let _g;
+Object.defineProperty(window, 'game', {
+  configurable: true,
+  get() { return _g; },
+  set(v) { _g = v; try { v.timeScale = 0.06; } catch (e) {} }
+});
+```
+
+Then click "Go to the park!" and poll — it lands at `elapsed 0, phase
+rolling-in` with the clock at 6%, so the 9.3 s shot takes ~155 s of wall clock
+and every beat can be sampled and screenshotted calmly. This worked first time.
+Useful paths: `g.world.entrance.arrival` (`.phase`, `.elapsed`, `.finished`),
+`g.camera.camera`, `g.player.position`, `g.timeScale`.
+
+**The crash to expect.** The page died with `Error: No page found` /
+`list_pages` returning nothing, part-way through a session at 2000x1100 —
+**the same failure my predecessor hit** ("`Target closed` after resizing to his
+2000x1100"). Twice now, so treat it as reproducible rather than bad luck.
+Screenshot as you go and copy each frame out of the MCP temp directory
+immediately; do not batch the copying to the end, or the crash takes the
+evidence with it.
+
+### Timeline, for whoever writes the deep links
+
+`rolling-in` 0–3.0 · `doors-opening` 3.0–3.8 · `stepping-down` 3.8–4.8 ·
+`walking-in` 4.8–9.3 · `ARRIVAL_CONTROL_AT` **9.3** · then `departing`.
+Durations are `ROLLING_IN 3.0`, `DOORS_OPENING 0.8`, `STEPPING_DOWN 1.0`,
+`WALKING_IN 4.5`, `BUS_PULLS_AWAY 3.0` in `ArrivalSequence.ts` ~line 173.
+
+### The two deep links — NOT STARTED, mechanism settled
+
+Neither was begun. Jim has asked twice and still has neither.
+
+- one landing on **her getting off the bus** — `stepping-down`, so pump to
+  **≈3.8 s**; this is the beat he is iterating on and will use most;
+- one landing on **the end state in the park**, after the whole arrival — past
+  `ARRIVAL_CONTROL_AT` **9.3 s**.
+
+**The mechanism is settled and is not open to reinvention:** pump
+`ArrivalSequence.update(context)` with real dt until the beat you want and
+**stop**. **Never construct a pose that merely looks like the beat** — an
+approximation Jim cannot distinguish from the real thing is worse than no link,
+because it makes a wrong camera look right. A **parameter naming the beat** is
+better than two separate code paths, so a future beat needs no further change.
+
+### What I would do first, in order
+
+1. Answer the frame-height discrepancy above — it is measured, it is unexplained,
+   and it can make `check:arrival-camera` a check that cannot fail.
+2. Pick under the grey pixels with the raycast, at several beats, and name the
+   mesh. **No fifth reasoned explanation.**
+3. Sweep the whole 9.3 s with the harness above and keep every frame.
+4. The two deep links.
+5. Only then the remaining gates (`check:cat-bus` was the one red step in
+   `check`; `check:park-pool` still fails on seed 5 — both written up below).
+
+---
+
 ## ⛔ READ THIS FIRST — the arrival camera, 6 September 2026, late
 
 **Branch head `07f460d8`. Model: Opus** (a replacement must also be Opus).
