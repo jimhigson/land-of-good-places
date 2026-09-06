@@ -234,9 +234,14 @@ Two consequences worth knowing:
 - **`BUILDING_PARAPET` is the whole exterior look.** Low, and the tower reads as
   a grey glass office block; high, and the 38° camera cannot see over the near
   wall into the floor you are standing on.
-- **Collision is height-blind** (see `Collision.ts`), so a shop counter on deck
-  two is also a wall on deck four. Shop units are placed so no two stack, and
-  none of them block a doorway on the ground floor.
+- **Collision is height-blind within one space** (see `Collision.ts`), but
+  since #377/#380 each castle floor is its own space, spaced
+  `FLOOR_SPACE_SPACING` = **300 m** apart (`floors.ts:64`; the nearest
+  colliders of adjacent floors measured 279 m apart), so a shop counter on
+  deck two blocks nothing on deck four (measured: 0 of 21250 swept points). The old exemption — "castle props get no collider because
+  they would wall off every deck" — is dead, and every prop a child can see
+  must be solid, on every floor. Several `src/` comments still reason from the
+  dead version (#568); correct them where you meet them.
 
 Riding a slide is scripted: `SlideRide` sweeps a chute along a curve *and* gives
 the ride the same curve to drive the player along, so the geometry and the path
