@@ -94,6 +94,14 @@ first honest run found #501).
   (Fable engineer). Rung 1 runs inside `parkLayout.solve`'s existing
   loop with the router's own reachability probe; rungs 2–3 need
   re-runnable solves (step 3 generalised) — stated, not smuggled.
+- **Merged `main` @ `bbb853af` (castle turrets) into this branch, 6 Sep**:
+  chain 64 = main's 63 + `check:ground-claims`, sets compared against
+  the merge base; `invariants.ts`/`parkFacts.ts` conflicts were NOT
+  clean both-side adds — git split the road and castle blocks mid-comment
+  and a keep-both interleaved them (tsc clean, typecheck:test red). Fixed
+  by rebuilding from main + the road pieces whole. **Lesson: after any
+  merge run `typecheck:test`, not only `tsc` — test files are not in
+  tsc's project.** #585 = this branch → main.
 - **#522 is NOT on `main`** (6 Sep): it merged into this design branch.
   `main` lacks `roadCorridor.ts` / `check-ground-claims.mts`. Design
   branch merged with `main` (chain 63 = main's 62 + ground-claims,
