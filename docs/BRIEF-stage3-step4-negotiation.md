@@ -1,6 +1,16 @@
 # Engineering brief — stage 3, step 4: refusals reach the scheduler, and the scheduler learns to unwind
 
-**Status: HELD until step 3 merges; re-cut 6 Sep.** Branch from
+**Status: HELD — no customer (6 Sep, after Jim's road rule).** Jim ruled
+*"just skip all the legs over the road, otherwise keep them — one simple
+rule is all we need here"* (design doc, "The road rule (Jim, 6 Sep)"). A
+trestle refused by the road is skipped, never negotiated, and the road is
+never refused by a trestle, so the pair this step was written for has
+nothing to negotiate, and building the ladder against it would be a
+mechanism exercised by a check that cannot fail. **Do not dispatch this
+step until a placer genuinely returns a refusal that a blocker can clear**
+— expected to be stage 4's paths (an unserved door demand whose blocker is
+a plot). When that customer exists, the mechanics below are the brief;
+re-verify every code fact first. Branch from
 `design/round-robin-generation`. One engineer, one worktree, Fable.
 Authority: `docs/DESIGN-round-robin-generation.md` — "Totality, ruled and
 mechanised (Jim, 6 Sep)" (the unwind ladder with its four named rungs),

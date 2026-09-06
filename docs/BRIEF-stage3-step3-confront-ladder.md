@@ -151,7 +151,7 @@ No such owner exists in `src/` (grep `substream`, `placerName`,
 - **Both placers in this pair are deterministic searches that draw nothing**
   (nearest-first marches). So the substream helper is exercised here by the
   *decision log*, not by a random draw: every commit the two tasks make is
-  logged as `(feature, decision, attempt)` — `road:outset`,
+  logged as `(feature, decision, attempt)` — `road:corridor`,
   `road:spur-end`, `railRace:walk-past-ring:slot-N`, `railRace:race-ring:slot-N`
   — with `attempt` 0 throughout in this step. Say in the PR body, in
   those words, that no random draw goes through the helper yet; a brief
@@ -185,11 +185,14 @@ The other six tasks' rungs, gates and deps stay exactly as they are.
   the slide's per-rung catch, import failure captured not thrown). Add
   nothing to that list. Under totality those throws are debts, not
   contracts; they are stage 4/5's to retire, not yours to add to.
-- No negotiation, no unwind (step 4). A refusal surfacing during
-  interleaving follows the existing path (step 2's loud throw naming
-  blockers). If any seed hits it on the sphere, stop and report with the
-  message — that is step 4's first customer, not a thing to hand-patch.
-- The ring (`RAIL_RACE_PLAN`), the road's derived outset, every clearance.
+- No negotiation, no unwind. The road rule (design doc, "The road rule
+  (Jim, 6 Sep)") is inherited exactly: a slot over the road is skipped,
+  and there is no headroom, no outset march and nothing for the road and
+  the trestles to negotiate. A refusal surfacing during interleaving from
+  any *other* blocker follows the existing path (step 2's loud throw
+  naming blockers); if any seed hits it on the sphere, stop and report
+  with the message — do not hand-patch.
+- The ring (`RAIL_RACE_PLAN`), the road's position (its band owner), every clearance.
 
 ## Byte-for-byte expectation: signed, not discovered
 

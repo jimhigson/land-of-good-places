@@ -487,3 +487,16 @@ Design doc "One rail race (Jim, 6 Sep)". Both rings claim as one feature
 invariant #4 read them); the ~100 canonical `legacy:collision` refusals
 go. Recommended to land inside step 2. Step 3 brief re-cut to inherit.
 Open with Jim: whether the ride-scale ring may stand on/over the bus road.
+
+## Ruling, 6 Sep late — the road rule (Jim): skip legs over the road
+
+Design doc "The road rule (Jim, 6 Sep)". One sentence: a slot whose foot
+disc at its nominal position overlaps the road's corridor claim (=
+`ROAD_HALF_WIDTH`, one owner) is not built; everything else as today.
+Fires on 0 slots on the sphere. Deletes: `Claim.headroom`,
+`tallestHeadroom`, the corridor's bus height, `trestleClaims`' headroom
+(clip stays at `TALLEST_CHILD_HEIGHT`), the road's registry outset march
+and the `supportGround.ts` deletion, and **step 4's customer** — step 4 is
+HELD without one. Stays: `CAT_BUS_TOP`, `CAT_BUS_DRIVEN_TOP` + posed-crown
+owner (read by `check:swept-bus`), `suspensionTravelAt`. Lands in step 2's
+series with the one-rail-race deletion.

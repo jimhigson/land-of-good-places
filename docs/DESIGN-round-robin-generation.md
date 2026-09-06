@@ -1080,6 +1080,53 @@ are also for a co-presence that cannot happen. Until he rules, both rings
 keep respecting the road; `check:swept-bus` sweeps the walk-past ring's
 posts (the first `railRace:trestle-legs` in the scene) and should say so.
 
+#### The road rule (Jim, 6 Sep) — legs over the road are skipped; nothing else changes
+
+Jim, asked whether the ride-scale ring may stand on or over the bus road:
+*"just skip all the legs over the road, otherwise keep them — one simple
+rule is all we need here."* The rule, as an engineer implements it:
+
+> A trestle slot whose foot disc (`POST_FOOT_RADIUS` at the ring's scale)
+> at its nominal position on the ring overlaps the road's corridor claim —
+> `entranceRoadClaims()`, whose `halfWidth` **is** `ROAD_HALF_WIDTH`, the
+> drawn carriageway, no outset — is not built: no search, no lean, no
+> shape, on either ring. Every other slot is placed exactly as today; a
+> march candidate that lands on the road is refused like any other claim.
+
+"Over the road" has one owner because the corridor claim and the drawn
+carriageway are one number. Cost, measured on the branch: on the sphere
+the road sits at outset 19.07 against a ring ground band ending at 11.58
+plus a foot, so the rule fires on **zero** slots on every pool seed and the
+40 m-run and duck-bar invariants are untouched. A road that ever crossed
+the band would cost at most one slot per radial crossing (12 m spacing
+against 7.78 m of carriageway — a 24 m gap); a *mandatory* duck-bar slot
+over the road loses its post and `duckBarsStandOnRealSupports` says so —
+the alarm, and the day for a second clause, not now.
+
+**What the rule makes unnecessary** — each a rule the generator would
+otherwise imply and no longer applies, so deleted, not left:
+
+- `Claim.headroom` and `GroundClaims.tallestHeadroom`; the corridor claim
+  carrying a bus height; `trestleClaims`' headroom parameter — the clip
+  stays, at `TALLEST_CHILD_HEIGHT` from `kid.ts`, because a claim describes
+  what a walker meets near the ground.
+- The road's outset marching the registry against trestle claims, and the
+  deletion of `supportGround.ts` (step 2 phase 2, item 3): the road no
+  longer avoids trestles — they skip it — so it stays where its band owner
+  puts it.
+- **Step 4's negotiation has no customer.** A trestle refused by the road
+  is skipped, never negotiated, and the road is never refused by a
+  trestle; "the first negotiated pair" has nothing to negotiate. The
+  scheduler's ladder lands with the first placer that genuinely returns a
+  refusal (stage 4's paths), not as a mechanism exercised by a check that
+  cannot fail.
+
+**What stays**: `CAT_BUS_TOP` (label, asset contract); `CAT_BUS_DRIVEN_TOP`
+and the posed-crown derivation, as the owner `check:swept-bus` reads — the
+check is now the instrument that proves the rule against the drawn park
+and the alarm if a kept branch ever hangs where the bus drives;
+`suspensionTravelAt` for the chin, wheel and step.
+
 #### Two roads met (6 Sep) — ruled: one road, `roadCorridor` shape, `roadRoute` geometry
 
 The sphere branch carries `roadRoute.ts` (#498's arc, now at outset
