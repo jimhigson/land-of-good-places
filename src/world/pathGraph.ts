@@ -198,7 +198,7 @@ export function buildPaths(): Mesh[] {
 
   for (const route of ROUTES) {
     const curve = routeCurve(route);
-    const divisions = Math.max(24, Math.round(curve.getLength() / 0.8));
+    const divisions = pathDivisions(curve);
     addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT);
     addRibbonKerb(kerb, curve, route.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
     recordSamples(curve, divisions, route.width / 2);
@@ -352,13 +352,70 @@ export function drapePathsOverBridges(
 
 
 function recordSamples(curve: CatmullRomCurve3, divisions: number, halfWidth: number): void {
-  const point = new Vector3();
   const run = nextRun;
   nextRun += 1;
+  for (const sample of sampleCurve(curve, divisions, halfWidth, run)) samples.push(sample);
+}
+
+/**
+ * **How finely a route's curve is drawn — the one owner.**
+ *
+ * `buildPaths` uses it to divide the ribbon, the kerb and the samples, and the
+ * generator's commit-time crossing screen uses it to reproduce exactly the
+ * samples the drawing will lay down. A second `max(24, len / 0.8)` written
+ * beside either would be two definitions of "how smooth is a path", and it
+ * would drift the first time anybody tuned smoothness — with the screen then
+ * measuring a slightly different curve from the one drawn, which is the whole
+ * disease this work exists to remove, one level down.
+ */
+export function pathDivisions(curve: CatmullRomCurve3): number {
+  return Math.max(24, Math.round(curve.getLength() / 0.8));
+}
+
+/**
+ * The samples a curve lays down when it is drawn — **post fillet and
+ * Catmull-Rom**, which is the geometry a child actually walks and the only
+ * geometry worth asking the railway about. The control polyline is not this.
+ */
+export function sampleCurve(
+  curve: CatmullRomCurve3,
+  divisions: number,
+  halfWidth: number,
+  run: number,
+): PathSample[] {
+  const point = new Vector3();
+  const out: PathSample[] = [];
   for (let i = 0; i <= divisions; i += 1) {
     curve.getPoint(i / divisions, point);
-    samples.push({ x: point.x, z: point.z, halfWidth, run });
+    out.push({ x: point.x, z: point.z, halfWidth, run });
   }
+  return out;
+}
+
+/**
+ * **The drawn samples a candidate set of routes would produce, without drawing
+ * anything.**
+ *
+ * The generator's `pathGraph` task needs the drawn geometry *before* it commits
+ * a graph, and a reviewer's first question is reasonably "how can you have
+ * drawn samples before anything is drawn". The answer is that **the drawing is
+ * a pure function of the graph**: `buildPaths` derives `ROUTES` from
+ * `PATH_GRAPH.edges`, turns each into a curve with {@link routeCurve}, and
+ * samples it at {@link pathDivisions}. Given the candidate edges, the same
+ * three steps give the same samples — so this shares those steps rather than
+ * restating them.
+ */
+export function drawnSamplesFor(routes: readonly RouteDefinition[]): PathSample[] {
+  const out: PathSample[] = [];
+  let run = 0;
+  for (const route of routes) {
+    const curve = routeCurve(route);
+    for (const sample of sampleCurve(curve, pathDivisions(curve), route.width / 2, run)) {
+      out.push(sample);
+    }
+    run += 1;
+  }
+  return out;
 }
 
 /** Sweeps a flat ribbon of `width` along the curve, draped onto the terrain. */
