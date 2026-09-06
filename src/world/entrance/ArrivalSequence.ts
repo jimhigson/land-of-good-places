@@ -1045,19 +1045,31 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
         ? 1
         : 1 - smoothstep(0, 1, (elapsed - holdPast) / Math.max(0.001, AT_SHOT_HOME - holdPast));
 
-  // Wide on the arriving bus, close on the child coming down the step, and it
-  // *stays* close through the gateway — the framing does not back off until
-  // the camera is out the other side.
+  // **Close from the first frame, and it stays close all the way under the
+  // arch.** Jim, 6 September 2026: *"the arrival camera is really weird how it
+  // seems to zoom into the player - it should start that close to them, and
+  // follow them under the entrance arch, not start far out and zoom in."*
+  //
+  // This used to open at {@link ARRIVAL_CAMERA_ZOOM} — a framing built round
+  // the whole bus — and interpolate to {@link ARRIVAL_DOOR_ZOOM} over the
+  // stopped beat. That interpolation *is* the zoom he is describing, and it is
+  // the same fault as the opening swoop reported before it: a shot that
+  // approaches its framing instead of opening on it.
+  //
+  // **It also explains why `check:arrival-camera` was green while he watched it
+  // happen.** The clause that guards against a cut measures how far the *eye*
+  // moves in a frame, and this is an orthographic rig — a zoom moves the eye by
+  // exactly nothing. Eye translation is structurally incapable of seeing a
+  // dolly here, which is why the check now measures the frame's own height as
+  // well.
+  //
+  // `ARRIVAL_CAMERA_ZOOM` is left where it is: `arrivalZoomFor` still uses it
+  // for the *ride in on the bus*, which is a different shot with the child
+  // aboard and nothing to be close to.
   const zoom =
-    elapsed < AT_STOPPED
-      ? lerp(1, ARRIVAL_CAMERA_ZOOM, swing)
-      : elapsed < AT_WALKING
-        ? lerp(
-            ARRIVAL_CAMERA_ZOOM,
-            ARRIVAL_DOOR_ZOOM,
-            smoothstep(0, 1, (elapsed - AT_STOPPED) / Math.max(0.001, AT_WALKING - AT_STOPPED)),
-          )
-        : // **Home by `ARRIVAL_CONTROL_AT`, unlike the stand-back**, and for a
+    elapsed < AT_WALKING
+      ? ARRIVAL_DOOR_ZOOM
+      : // **Home by `ARRIVAL_CONTROL_AT`, unlike the stand-back**, and for a
           // reason the stand-back does not share: `nudgeZoom` writes this same
           // field, so every frame the shot drives it is a frame her pinch is
           // discarded (#329). The instant she can pinch, this must stop

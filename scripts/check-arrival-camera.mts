@@ -217,6 +217,15 @@ const PASS: ArchPass = PASSES[3]!;
  */
 const GROUND_GRID_STEP = 0.25;
 
+/**
+ * How much a frame may tighten before it counts as a dolly, in metres of frame
+ * height per 1/60 s. Zero would be the honest bound and is unreachable through
+ * `smoothstep` arithmetic in float; this is a hundredth of a millimetre, which
+ * is four orders of magnitude under the 0.58 m the removed zoom moved in its
+ * first frame.
+ */
+const FRAMING_TIGHTEN_FLOOR = 1e-5;
+
 let checks = 0;
 let failures = 0;
 function check(ok: boolean, what: string): void {
@@ -740,6 +749,70 @@ console.log("the door shot is taken at a child's own face height, looking level"
     0.01,
     'and must stay there for the whole beat, not only at its start',
   );
+
+  // ---- the shot opens on its framing and never tightens --------------------
+  //
+  // Jim, 6 September 2026: *"the arrival camera is really weird how it seems to
+  // zoom into the player - it should start that close to them, and follow them
+  // under the entrance arch, not start far out and zoom in."*
+  //
+  // **This clause exists because the cut clause could not see it.** That one
+  // measures how far the *eye* travels in a frame, and this is an orthographic
+  // rig: a zoom moves the eye by exactly nothing. So a dolly from a bus-wide
+  // framing to a child-close one — which is what he watched — registered as
+  // 0.000 m of eye movement and passed. Eye translation is structurally
+  // incapable of measuring what a viewer calls "coming closer" here; the
+  // frame's own height is the thing that changes, so that is what is measured.
+  //
+  // Two assertions, and the first is the one his sentence is about:
+  //
+  // 1. **The first frame is already the close framing.** Not near it, not on
+  //    its way to it.
+  // 2. **No frame is tighter than the one before it**, anywhere in the shot.
+  //    Opening out at the end is the hand-back and is fine; tightening is a
+  //    dolly in, wherever it happens. Swept over every frame rather than the
+  //    beat somebody expects it in, because the last two rounds of this fault
+  //    were each at a different beat.
+  {
+    const opening = arrivalShot(0, PASS);
+    check(opening !== null, 'the shot must exist on its first frame');
+    const openingHalfHeight = opening ? CAMERA_VIEW_HEIGHT / (2 * opening.zoom) : Number.NaN;
+    const closeHalfHeight = CAMERA_VIEW_HEIGHT / (2 * ARRIVAL_DOOR_ZOOM);
+    let worstTighten = 0;
+    let worstAt = 0;
+    let previousHalfHeight = openingHalfHeight;
+    let frames = 0;
+    for (let t = STEP; t < AT_SHOT_HOME; t += STEP) {
+      const shot = arrivalShot(t, PASS);
+      if (!shot) continue;
+      frames += 1;
+      const halfHeight = CAMERA_VIEW_HEIGHT / (2 * shot.zoom);
+      const tighten = previousHalfHeight - halfHeight;
+      if (tighten > worstTighten) {
+        worstTighten = tighten;
+        worstAt = t;
+      }
+      previousHalfHeight = halfHeight;
+    }
+    console.log(
+      `  the shot opens on a ${show(openingHalfHeight * 2)} m frame against a close framing of ` +
+        `${show(closeHalfHeight * 2)} m, and tightens by at most ${show(worstTighten)} m in any of ` +
+        `${frames} frames`,
+    );
+    near(
+      openingHalfHeight,
+      closeHalfHeight,
+      1e-6,
+      'the arrival must OPEN at its close framing, not travel to it — a shot that starts wide ' +
+        'and comes in is the dolly Jim has now reported twice',
+    );
+    check(
+      worstTighten <= FRAMING_TIGHTEN_FLOOR,
+      `the framing tightens by ${worstTighten.toFixed(4)} m at t=${worstAt.toFixed(2)}s — the shot ` +
+        'is dollying in on her somewhere. It must open close and follow her, opening out only on ' +
+        'the hand-back',
+    );
+  }
 
   // ---- the lens is never in the ground, curvature included -----------------
   //
