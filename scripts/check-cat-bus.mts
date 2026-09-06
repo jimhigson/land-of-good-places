@@ -63,6 +63,7 @@ import {
 } from '../src/world/entrance/layout.ts';
 import {
   CAT_BUS_DESTINATION,
+  CAT_BUS_DOOR_DROP,
   CAT_BUS_ROUTE_NUMBER,
   CAT_BUS_SEAT_COUNT,
   createCatBus,
@@ -437,6 +438,26 @@ let deepestIntoPark = -Infinity;
 let widestDoorSwing = 0;
 let doorAtEnd = 0;
 
+/** Reused for the door's world position, so the per-frame loop allocates nothing. */
+const SCRATCH_DOOR = new Vector3();
+
+/**
+ * Per child: **when they were at the bus's door**, and how close they got to
+ * it — the pair of arrays clause 3 is measured from.
+ *
+ * Sampled rather than read off the schedule, and sampled against the *live*
+ * door position (`busRoot.localToWorld(CAT_BUS_DOOR_DROP)`), which is the same
+ * local point `ArrivalSequence` steps them down onto and `catBus.ts` asserts
+ * against the built mesh. A child walks through the doorway, so the frame at
+ * which their distance to it is least *is* the frame they were in it — no
+ * threshold, and nothing to tune.
+ *
+ * Only while the arrival still owns them: once released they wander, and the
+ * bus later drives away past children already standing in the park.
+ */
+const atDoorAt = new Array<number>(ARRIVAL_KID_COUNT).fill(Number.NaN);
+const atDoorDistance = new Array<number>(ARRIVAL_KID_COUNT).fill(Infinity);
+
 /** Per child: when they left their seat, and where they were each frame. */
 const leftSeatAt = new Array<number>(ARRIVAL_KID_COUNT).fill(Number.NaN);
 const releasedAt = new Array<number>(ARRIVAL_KID_COUNT).fill(Number.NaN);
@@ -515,6 +536,19 @@ for (let index = 0; index < frames; index += 1) {
     }
     const onFoot = offTheBus[kidIndex]!;
     if (Number.isNaN(leftSeatAt[kidIndex]) && onFoot) leftSeatAt[kidIndex] = elapsed;
+
+    // **Where the doorway is, this frame.** The bus is a moving object, so the
+    // door is asked of the bus rather than of a world coordinate written down
+    // once — the same cure the seat-distance measurement was given when the
+    // bus started driving a curve (#488).
+    if (kid.scripted && busRoot !== null) {
+      const door = busRoot.localToWorld(SCRATCH_DOOR.set(CAT_BUS_DOOR_DROP.x, 0, CAT_BUS_DOOR_DROP.z));
+      const toDoor = Math.hypot(kid.position.x - door.x, kid.position.z - door.z);
+      if (toDoor < atDoorDistance[kidIndex]!) {
+        atDoorDistance[kidIndex] = toDoor;
+        atDoorAt[kidIndex] = elapsed;
+      }
+    }
     if (Number.isNaN(releasedAt[kidIndex]) && !kid.scripted) releasedAt[kidIndex] = elapsed;
 
     // Distance and speed are only meaningful while the script owns them; after
@@ -739,11 +773,50 @@ check(
     'the hand-back to the wander driver did not take',
 );
 
-// --- 3. they got off at genuinely different times -------------------------
-const departures = leftSeatAt.filter((when) => !Number.isNaN(when)).sort((a, b) => a - b);
+// --- 3. they came through the doorway one at a time -----------------------
+//
+// **Measured at the doorway, which is what this clause is named after.** It
+// used to be measured at the edge of the bus's own bounding box — the moment a
+// child stopped being geometrically inside a 5.37 x 12.90 m vehicle — and while
+// the road was straight those were near enough the same instant, because the
+// step down and the gate stood on one axis and every child walked the same
+// short way out. #498's arc parks the bus on a curve, so some fan routes now
+// set off *along* its flank and take half a second longer to leave the box than
+// others: measured, child 7 took 2.637 s to clear it and child 8 took 2.151 s,
+// while the two of them passed the door 1.119 s apart. The clause failed at
+// 0.633 s against 0.635 and named the doorway in its message while measuring
+// something else entirely — a convenient proxy standing in for the thing it is
+// about, which is this repo's most-repeated bug and the reason #518 exists.
+//
+// **The threshold has not moved.** It is the same derivation it always was, and
+// deliberately so: a proxy that had drifted is not evidence that the bar was
+// too high.
+//
+// **What the post-door leg is covered by, now that this clause is not
+// pretending to:** ordinary collision, which is Jim's own ruling of 18 August
+// 2026 — *"just use normal pathfinding and collision detection... who cares how
+// close they are so long as they collide normally."* Clause 4 below reports the
+// closest two children ever get and deliberately does not gate on it; genuine
+// interpenetration is gated by the seated-overlap clause above, which is where
+// the original twelve-children-inside-one-another bug actually lived; and
+// `check:npc-separation` owns walkers keeping out of each other once they are
+// in the park. If post-door clearance is ever judged a property worth gating,
+// it wants a clause with its own name and its own red proof — never a widened
+// version of this one.
+const departures = atDoorAt.filter((when) => !Number.isNaN(when)).sort((a, b) => a - b);
 check(
   departures.length === ARRIVAL_KID_COUNT,
-  `only ${departures.length} of ${ARRIVAL_KID_COUNT} children ever left their seat`,
+  `only ${departures.length} of ${ARRIVAL_KID_COUNT} children were ever seen at the door`,
+);
+// **Coverage guard.** A timestamp for a child who never came near the doorway
+// is a number with nothing behind it, and the minimum-distance sampling above
+// will always produce one. Half a child's own width is the width of the
+// doorway they are walking through, taken from the game rather than chosen.
+const farthestFromDoor = Math.max(...atDoorDistance.filter((d) => Number.isFinite(d)));
+check(
+  farthestFromDoor < CHILD_FOOTPRINT,
+  `a child never got closer than ${farthestFromDoor.toFixed(2)} m to the bus's door, so the gap ` +
+    `measured below is between two moments that are not the doorway (a child is ${CHILD_FOOTPRINT} m wide)`,
 );
 let tightestGap = Infinity;
 for (let index = 1; index < departures.length; index += 1) {
@@ -754,8 +827,9 @@ for (let index = 1; index < departures.length; index += 1) {
 const REQUIRED_GAP = (CHILD_FOOTPRINT / NPC_WALK_SPEED) * 0.9;
 check(
   tightestGap >= REQUIRED_GAP,
-  `two children left the bus only ${tightestGap.toFixed(2)} s apart — a ${CHILD_FOOTPRINT} m child ` +
-    `walking at ${NPC_WALK_SPEED} m/s needs ${REQUIRED_GAP.toFixed(2)} s to clear the doorway, so they overlap in it`,
+  `two children came through the bus's door only ${tightestGap.toFixed(2)} s apart — a ` +
+    `${CHILD_FOOTPRINT} m child walking at ${NPC_WALK_SPEED} m/s needs ${REQUIRED_GAP.toFixed(2)} s ` +
+    'to clear the doorway, so they overlap in it',
 );
 
 // --- 4. how close free children get, for information only -----------------
@@ -1148,8 +1222,11 @@ check(saveFlags.arrivedByBus === true, 'the arrival never recorded that she has 
 notes.push(`bus travelled x ${busStart.toFixed(1)} to ${busEnd.toFixed(1)}, never closer than ${(-deepestIntoPark).toFixed(2)} m outside the park`);
 notes.push(`door swung to ${widestDoorSwing.toFixed(2)} rad while unloading, shut at the end`);
 notes.push(
-  `children left over ${(departures[departures.length - 1]! - departures[0]!).toFixed(1)} s, ` +
-    `tightest gap ${tightestGap.toFixed(2)} s (needs ${REQUIRED_GAP.toFixed(2)})`,
+  `children came through the door over ${(departures[departures.length - 1]! - departures[0]!).toFixed(1)} s, ` +
+    `tightest gap ${tightestGap.toFixed(2)} s (needs ${REQUIRED_GAP.toFixed(2)}); each was measured ` +
+    `within ${farthestFromDoor.toFixed(2)} m of the door at their closest. NOT covered here: how far ` +
+    'apart they are once past it — ordinary collision owns that (see clause 3), and this clause no ' +
+    'longer stands in for it',
 );
 notes.push(`closest two children ever got: ${closestPairEver.toFixed(2)} m (informational only — see check 4's comment)`);
 notes.push(`walking speed ${slowest.toFixed(2)}-${fastest.toFixed(2)} m/s against the park's ${NPC_WALK_SPEED}`);
