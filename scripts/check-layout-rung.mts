@@ -13,11 +13,12 @@
  * fire two ways, every run:
  *
  * 1. **Geometry.** The real park's placement is probed (control: zero
- *    refusals, on a seed that solves). Then a *synthetic* plot is dropped on
- *    one doormat — the refusal must name that entry, be `poi.nospot`, and
- *    name the synthetic plot as its only blocker. Then synthetic plots box a
- *    doormat in at a distance — `poi.stranded`, every wall the pocket presses
- *    on named and nothing else. Blockers
+ *    refusals, on a seed that solves). Then a door is put outside the
+ *    boundary — `poi.nospot`, the boundary named. Then four walls ring a
+ *    doormat with their faces beyond the router's arrival exemption —
+ *    `poi.stranded`, every wall named and nothing else. Then a plot is put
+ *    squarely on a doormat *inside* that exemption — and must NOT refuse,
+ *    because a footprint is not solid (seed 1's ball pit). Blockers
  *    come from the plot table by geometry, so a plot this names is one the
  *    solver would redraw.
  * 2. **Machinery.** A child process solves the canonical layout with
@@ -34,6 +35,8 @@
 import { spawnSync } from 'node:child_process';
 
 import { PARK_LAYOUT, probeDoormats, type PlacedEntry } from '../src/world/parkLayout.ts';
+import { PARK_BOUNDARY } from '../src/world/boundary.ts';
+import { ARRIVAL_EXEMPT_NEAR } from '../src/world/streetRules.ts';
 
 const failures: string[] = [];
 const said: string[] = [];
@@ -70,12 +73,65 @@ function plot(id: string, x: number, z: number, half: number): PlacedEntry {
   };
 }
 
-// (a) a plot squarely on the hotel's doormat: nowhere within reach to stand.
-// A CIRCLE, deliberately — a CollisionWorld rectangle is four walls round a
-// hollow middle (CLAUDE.md), so a rectangle here would leave standable,
-// unreachable ground inside it and read as `poi.stranded` instead.
+// The probe exempts, for each door, every plot within ARRIVAL_EXEMPT_NEAR of
+// it — the router's own arrival exemption, and the lesson of seed 1 (a
+// footprint is not solid; the castle's door stands inside the walkable ball
+// pit by design). So a synthetic plot must stand beyond that reach to be an
+// obstacle here at all, and "nowhere to stand" can only come from the
+// boundary.
+
+// (a) a door outside the park: nowhere within reach to stand, blocker the boundary.
+const outside: PlacedEntry = {
+  ...hotel,
+  id: 'outsider',
+  entranceX: 0,
+  entranceZ: PARK_BOUNDARY.extent.maxZ + 20,
+};
+const squashed = probeDoormats([...placed, outside]).filter((r) => r.entry === 'outsider');
+said.push(
+  `a door 20 m outside the boundary at (0, ${outside.entranceZ.toFixed(1)}): ` +
+    (squashed[0]
+      ? `${squashed[0].kind}, blockers=[${squashed[0].blockers.join(',')}], non-plot=[${squashed[0].nonPlotBlockers.join(',')}]`
+      : 'NO REFUSAL'),
+);
+if (!squashed[0]) failures.push('a door outside the boundary produced no refusal');
+else {
+  if (squashed[0].kind !== 'poi.nospot') failures.push(`expected poi.nospot, got ${squashed[0].kind}`);
+  if (!squashed[0].nonPlotBlockers.includes('boundary')) failures.push('the boundary is not named for a door outside it');
+}
+
+// (b) four long thin plots ringing the hotel's doormat, their faces 12 m out —
+// beyond the arrival exemption, so genuine obstacles — leave standable ground
+// inside and no way in: `poi.stranded`, and every wall of the ring named.
+const face = ARRIVAL_EXEMPT_NEAR + 5;
+const ring: PlacedEntry[] = [
+  { ...plot('ring-n', hotel.entranceX, hotel.entranceZ - face - 1, 1), footprint: { kind: 'rect', halfX: face + 2, halfZ: 1 } },
+  { ...plot('ring-s', hotel.entranceX, hotel.entranceZ + face + 1, 1), footprint: { kind: 'rect', halfX: face + 2, halfZ: 1 } },
+  { ...plot('ring-e', hotel.entranceX + face + 1, hotel.entranceZ, 1), footprint: { kind: 'rect', halfX: 1, halfZ: face + 2 } },
+  { ...plot('ring-w', hotel.entranceX - face - 1, hotel.entranceZ, 1), footprint: { kind: 'rect', halfX: 1, halfZ: face + 2 } },
+];
+const boxed = probeDoormats([...placed, ...ring]).filter((r) => r.entry === 'hotel');
+said.push(
+  `four walls ringing the hotel doormat with faces ${face} m out: ` +
+    (boxed[0] ? `${boxed[0].kind}, blockers=[${boxed[0].blockers.join(',')}]` : 'NO REFUSAL'),
+);
+if (!boxed[0]) failures.push('a doormat ringed by four walls produced no refusal');
+else {
+  if (boxed[0].kind !== 'poi.stranded') failures.push(`expected poi.stranded (standable but unreachable), got ${boxed[0].kind}`);
+  const named = new Set(boxed[0].blockers);
+  for (const wall of ring) {
+    if (!named.has(wall.id)) failures.push(`ring wall ${wall.id} is not named as a blocker`);
+  }
+  const synthetic = new Set(ring.map((wall) => wall.id));
+  for (const id of named) {
+    if (!synthetic.has(id)) failures.push(`'${id}' is named as bounding the ring, but only the ring does`);
+  }
+}
+
+// (c) the exemption itself, proved: a plot squarely on the doormat but within
+// the arrival reach is NOT an obstacle — the ball pit case — so no refusal.
 const onDoormat: PlacedEntry = {
-  id: 'boxer',
+  id: 'pit',
   x: hotel.entranceX,
   z: hotel.entranceZ,
   footprint: { kind: 'circle', radius: 3 },
@@ -84,57 +140,9 @@ const onDoormat: PlacedEntry = {
   entranceZ: hotel.entranceZ + 4.4,
   signYaw: 0,
 };
-const squashed = probeDoormats([...placed, onDoormat]).filter((r) => r.entry === 'hotel');
-said.push(
-  `boxer, a 3 m circle on the hotel doormat (${hotel.entranceX.toFixed(1)}, ${hotel.entranceZ.toFixed(1)}): ` +
-    (squashed[0]
-      ? `${squashed[0].kind}, blockers=[${squashed[0].blockers.join(',')}]`
-      : 'NO REFUSAL'),
-);
-if (!squashed[0]) failures.push('a plot on the hotel doormat produced no refusal for the hotel');
-else {
-  if (squashed[0].kind !== 'poi.nospot') failures.push(`expected poi.nospot, got ${squashed[0].kind}`);
-  if (squashed[0].blockers.join(',') !== 'boxer') failures.push(`expected exactly the covering plot named, got [${squashed[0].blockers.join(',')}]`);
-}
-
-// (b) four plots boxing the doormat in at 4 m: standable ground inside the
-// box, none of it reachable. Every wall of the box must be named.
-const gap = 4;
-const box = [
-  plot('box-n', hotel.entranceX, hotel.entranceZ - gap - 1, 1),
-  plot('box-s', hotel.entranceX, hotel.entranceZ + gap + 1, 1),
-  plot('box-e', hotel.entranceX + gap + 1, hotel.entranceZ, 1),
-  plot('box-w', hotel.entranceX - gap - 1, hotel.entranceZ, 1),
-];
-// Two-metre plots four metres out leave 1 m gaps at the corners for a 1.24 m
-// child — the walker radius fattens each plot's stamp past the corner, so
-// the box is closed on the grid. Corner plots make it closed by geometry too.
-// Not every corner need be NAMED: the hotel's own stamp reaches into the box
-// on its side, and a corner plot buried in it never bounds the pocket — the
-// derivation names what the pocket presses on, and only that.
-const corners = [
-  plot('box-ne', hotel.entranceX + gap, hotel.entranceZ - gap, 1),
-  plot('box-nw', hotel.entranceX - gap, hotel.entranceZ - gap, 1),
-  plot('box-se', hotel.entranceX + gap, hotel.entranceZ + gap, 1),
-  plot('box-sw', hotel.entranceX - gap, hotel.entranceZ + gap, 1),
-];
-const boxed = probeDoormats([...placed, ...box, ...corners]).filter((r) => r.entry === 'hotel');
-said.push(
-  `eight 2 m plots boxing the hotel doormat at ${gap} m: ` +
-    (boxed[0] ? `${boxed[0].kind}, blockers=[${boxed[0].blockers.join(',')}]` : 'NO REFUSAL'),
-);
-if (!boxed[0]) failures.push('a doormat boxed in by eight plots produced no refusal');
-else {
-  if (boxed[0].kind !== 'poi.stranded') failures.push(`expected poi.stranded (standable but unreachable), got ${boxed[0].kind}`);
-  const named = new Set(boxed[0].blockers);
-  for (const wall of box) {
-    if (!named.has(wall.id)) failures.push(`box wall ${wall.id} is not named as a blocker`);
-  }
-  const synthetic = new Set([...box, ...corners].map((wall) => wall.id));
-  for (const id of named) {
-    if (!synthetic.has(id)) failures.push(`'${id}' is named as bounding the box, but only the box does`);
-  }
-}
+const exempted = probeDoormats([...placed, onDoormat]).filter((r) => r.entry === 'hotel');
+said.push(`a 3 m plot on the hotel doormat (inside the ${ARRIVAL_EXEMPT_NEAR} m arrival exemption): ${exempted.length} refusal(s)`);
+if (exempted.length > 0) failures.push('a plot within the arrival exemption refused the door it stands on — seed 1 again');
 
 // ------------------------------------------------------------ 2. machinery
 

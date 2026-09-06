@@ -20,6 +20,7 @@ import { ENTRANCE_GATE_X, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entranc
 import { CollisionWorld } from './Collision';
 import { NAV_CELL, NavGrid, STAND_SEARCH_REACH, type ReachSet } from './NavGrid';
 import { PLAYER_RADIUS } from '../core/constants';
+import { ARRIVAL_EXEMPT_NEAR } from './streetRules';
 import type { AnchorFootprint } from './anchors';
 
 /**
@@ -321,7 +322,20 @@ function solve(): ParkLayout {
         break;
       }
       const refusals = doormatRefusals(outcome.placed);
-      if (refusals.length === 0) {
+      // `LGP_LAYOUT_RUNG=off` (Node only, same gating as the refuse hook):
+      // probe and trace, never unwind — the scratch flag the brief asks for,
+      // so a seed can be built exactly as the base built it while the trace
+      // still says what the rung would have refused.
+      if (refusals.length > 0 && rungDisabled()) {
+        for (const refusal of refusals) {
+          ignoredRefusals.push(refusal);
+          traceLine(
+            `refusal-ignored (LGP_LAYOUT_RUNG=off) restart=${restart} kind=${refusal.kind} entry=${refusal.entry} ` +
+              `blockers=${refusal.blockers.join(',') || '-'} at=${refusal.at.x.toFixed(1)},${refusal.at.z.toFixed(1)}`,
+          );
+        }
+      }
+      if (refusals.length === 0 || rungDisabled()) {
         traceLine(
           `solved restart=${restart} decision-zero-reached=${restart - base} ` +
             `rung-1-fired=${rungOneFired} doormats=${outcome.placed.length}/${outcome.placed.length}`,
@@ -424,39 +438,40 @@ export interface LayoutRefusal {
  * would arm every one of these hooks at once; that is the thing to check for.
  */
 function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
-  const world = new CollisionWorld();
-  for (const entry of placed) {
-    // The plaza is paving, not an obstacle — `streetPlots` skips it too.
-    if (entry.id === 'fountain') continue;
-    if (entry.footprint.kind === 'circle') world.addCircle(entry.x, entry.z, entry.footprint.radius);
-    else world.addRectangle(entry.x, entry.z, entry.footprint.halfX, entry.footprint.halfZ);
-    // Corner solids past the rectangle — the castle's turrets (#549), declared
-    // on the placed footprint by `footprintAsPlaced`. A doormat inside one is
-    // precisely a refusal this probe exists to make.
-    if (entry.footprint.kind === 'rect' && entry.footprint.corners) {
-      const { radius, at } = entry.footprint.corners;
-      for (const [cx, cz] of at) world.addCircle(entry.x + cx, entry.z + cz, radius);
-    }
-  }
-  world.setPlayBounds(PARK_BOUNDARY);
-  // A flat park (nothing here has a height yet) and no hop: a plot's
-  // footprint is not something a child hops, so the apex is moot and the
-  // player's own figure would only mean importing `Player` into the layout.
-  const flat = (): number => 0;
-  const grid = new NavGrid(world, PLAYER_RADIUS, 0);
-  const reachable = grid.reachableFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0, flat);
-  if (!reachable) {
-    // A plot over the entrance is forbidden by `inGateCorridor`, so this is a
-    // programming error, not a park.
-    throw new Error(
-      `park layout: nowhere to stand at the entrance (${ENTRANCE_PLAYER_X}, ${ENTRANCE_PLAYER_Z}) ` +
-        'on the plots-and-boundary world — the gate corridor rule should make this impossible',
-    );
-  }
   const forced = forcedRefusal();
   const columns = columnsOf(placed);
+  const flat = (): number => 0;
   const refusals: LayoutRefusal[] = [];
   for (const entry of placed) {
+    // **What this world may contain, and the principle behind it.** The probe
+    // explores an OVER-APPROXIMATE world: a footprint is where a plot is
+    // placed, not ground a child cannot stand on. The ball pit's footprint is
+    // walkable — the slide exits into it, and the castle's doormat stands
+    // inside it by design (the near pair). Seed 1, 6 Sep 2026: a probe that
+    // counted every footprint as solid refused that door as `nospot`, redrew
+    // the castle, and broke a seed the built park had been building (its
+    // real spot was 0.07 m from the door, the only real collider 1.30 m
+    // clear). So this world holds exactly the plots the router itself would
+    // refuse to draw an arriving stub past — every plot but those within
+    // {@link ARRIVAL_EXEMPT_NEAR} of this door (the router's own arrival
+    // exemption, one owner in `streetRules.ts`) and the door's own — plus the
+    // boundary. A refusal here is one the paths' commit would make too;
+    // anything else is the commit's to find, and `check:park`'s
+    // `layout.falseRefusal` proves every refusal against the built park.
+    const world = worldForDoor(entry, placed);
+    // A flat park (nothing here has a height yet) and no hop: a plot's
+    // footprint is not something a child hops, so the apex is moot and the
+    // player's own figure would only mean importing `Player` into the layout.
+    const grid = new NavGrid(world, PLAYER_RADIUS, 0);
+    const reachable = grid.reachableFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0, flat);
+    if (!reachable) {
+      // A plot over the entrance is forbidden by `inGateCorridor`, so this is
+      // a programming error, not a park.
+      throw new Error(
+        `park layout: nowhere to stand at the entrance (${ENTRANCE_PLAYER_X}, ${ENTRANCE_PLAYER_Z}) ` +
+          'on the plots-and-boundary world — the gate corridor rule should make this impossible',
+      );
+    }
     const spot = grid.nearestStandable(
       entry.entranceX,
       entry.entranceZ,
@@ -487,11 +502,14 @@ function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
     //   cover the door, and the boundary if the door is within a walker of it;
     // - somewhere to stand but no way there (`stranded`): flood the pocket
     //   from that spot and name whatever bounds it — every plot the pocket
-    //   presses against, the boundary if the pocket reaches it. A plot four
+    //   presses against, the boundary if the pocket reaches it. A plot twelve
     //   metres off that closes the box is named exactly as one on the door.
+    // Only plots this door's world holds can be named: an exempt plot was
+    // never an obstacle to it.
+    const exempt = exemptFor(entry, placed);
     const named = spot
-      ? pocketBlockers(grid.floodFrom(spot.x, spot.z, spot.y, flat), columns, entry.id)
-      : coveringBlockers(entry.entranceX, entry.entranceZ, columns, entry.id);
+      ? pocketBlockers(grid.floodFrom(spot.x, spot.z, spot.y, flat), columns, entry.id, exempt)
+      : coveringBlockers(entry.entranceX, entry.entranceZ, columns, entry.id, exempt);
     refusals.push({
       kind: spot ? 'poi.stranded' : 'poi.nospot',
       entry: entry.id,
@@ -501,6 +519,38 @@ function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
     });
   }
   return refusals;
+}
+
+/** The plots `door`'s probe world leaves out: its own, and any the router's
+ * arrival exemption would let its stub pass — see {@link doormatRefusals}. */
+function exemptFor(door: PlacedEntry, placed: readonly PlacedEntry[]): ReadonlySet<string> {
+  const exempt = new Set<string>([door.id, 'fountain']);
+  const columns = columnsOf(placed);
+  for (let i = 0; i < columns.count; i += 1) {
+    if (footprintWithin(columns, i, door.entranceX, door.entranceZ, ARRIVAL_EXEMPT_NEAR)) {
+      exempt.add(columns.ids[i] as string);
+    }
+  }
+  return exempt;
+}
+
+/** The plots-and-boundary world one door is probed on. */
+function worldForDoor(door: PlacedEntry, placed: readonly PlacedEntry[]): CollisionWorld {
+  const exempt = exemptFor(door, placed);
+  const world = new CollisionWorld();
+  for (const entry of placed) {
+    if (exempt.has(entry.id)) continue;
+    if (entry.footprint.kind === 'circle') world.addCircle(entry.x, entry.z, entry.footprint.radius);
+    else world.addRectangle(entry.x, entry.z, entry.footprint.halfX, entry.footprint.halfZ);
+    // Corner solids past the rectangle — the castle's turrets (#549), declared
+    // on the placed footprint by `footprintAsPlaced`.
+    if (entry.footprint.kind === 'rect' && entry.footprint.corners) {
+      const { radius, at } = entry.footprint.corners;
+      for (const [cx, cz] of at) world.addCircle(entry.x + cx, entry.z + cz, radius);
+    }
+  }
+  world.setPlayBounds(PARK_BOUNDARY);
+  return world;
 }
 
 /**
@@ -522,6 +572,7 @@ function pocketBlockers(
   pocket: ReachSet | null,
   columns: PlotColumns,
   exceptId: string,
+  exempt: ReadonlySet<string> = new Set(),
 ): { plots: string[]; boundary: boolean } {
   if (!pocket) return { plots: [], boundary: false };
   // One cell past the stamp: the walker's radius (NavGrid fattens every
@@ -534,7 +585,7 @@ function pocketBlockers(
     if (!boundary && PARK_BOUNDARY.distanceToEdge(x, z) < PLAYER_RADIUS + NAV_CELL) boundary = true;
     for (let i = 0; i < columns.count; i += 1) {
       const id = columns.ids[i] as string;
-      if (id === exceptId || id === 'fountain' || plots.includes(id)) continue;
+      if (id === exceptId || id === 'fountain' || exempt.has(id) || plots.includes(id)) continue;
       if (footprintWithin(columns, i, x, z, reach)) plots.push(id);
     }
   });
@@ -551,12 +602,13 @@ function coveringBlockers(
   z: number,
   columns: PlotColumns,
   exceptId: string,
+  exempt: ReadonlySet<string> = new Set(),
 ): { plots: string[]; boundary: boolean } {
   const reach = PLAYER_RADIUS + RECT_WALL_HALF_THICKNESS;
   const plots: string[] = [];
   for (let i = 0; i < columns.count; i += 1) {
     const id = columns.ids[i] as string;
-    if (id === exceptId || id === 'fountain') continue;
+    if (id === exceptId || id === 'fountain' || exempt.has(id)) continue;
     if (footprintWithin(columns, i, x, z, reach)) plots.push(id);
   }
   return { plots, boundary: PARK_BOUNDARY.distanceToEdge(x, z) < PLAYER_RADIUS };
@@ -584,6 +636,32 @@ function nearestPlot(x: number, z: number, columns: PlotColumns, exceptId: strin
     }
   }
   return best ? [best] : [];
+}
+
+/**
+ * The refusals the rung would have unwound on but did not, because
+ * `LGP_LAYOUT_RUNG=off` — for `check:park`'s `layout.falseRefusal`: every
+ * one of these must be a door the BUILT park cannot reach either, or the
+ * probe refused something real that the real park allows (seed 1's ball
+ * pit), which is the rung's one failure mode and the one this catches.
+ */
+const ignoredRefusals: LayoutRefusal[] = [];
+export const LAYOUT_REFUSALS_IGNORED: readonly LayoutRefusal[] = ignoredRefusals;
+
+/**
+ * `LGP_LAYOUT_RUNG=off`: see {@link solve}. Like `LGP_LAYOUT_REFUSE`, its
+ * text ships in the bundle; it is inert for a player because nothing in the
+ * bundle defines a `process` global and the read is optional-chained —
+ * present and disarmed, not absent. Anything that ever introduces a
+ * `process` global in the browser arms both hooks at once.
+ */
+function rungDisabled(): boolean {
+  try {
+    const nodeProcess = (globalThis as { process?: { env?: Record<string, string> } }).process;
+    return nodeProcess?.env?.['LGP_LAYOUT_RUNG'] === 'off';
+  } catch {
+    return false;
+  }
 }
 
 /**

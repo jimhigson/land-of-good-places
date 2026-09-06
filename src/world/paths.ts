@@ -1,4 +1,5 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
+import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
 import { PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
@@ -2498,7 +2499,8 @@ function computeStreetStubs(p: readonly [number, number], arrival: boolean): Str
   // Sized to cover a doormat's stand-off (1.4 m), its 3.5 m arrival lead
   // and a plot's own frontage wobble — the ball-pit's slide exit measured
   // 5.7 m from the plot edge, just past the first (5.6 m) version of this.
-  const exemptNear = arrival ? 7 : 0.5;
+  // One owner with the layout's doormat probe: `streetRules.ts`.
+  const exemptNear = arrival ? ARRIVAL_EXEMPT_NEAR : DEPARTURE_EXEMPT_NEAR;
   const legClear = (ax: number, az: number, bx: number, bz: number): boolean =>
     streetSegmentClear(ax, az, bx, bz, p, exemptNear) &&
     segmentClearOfRing(ax, az, bx, bz) &&

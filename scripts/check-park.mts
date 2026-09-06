@@ -70,6 +70,7 @@ import { PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { ANCHORS, anchorGroupName } from '../src/world/anchors.ts';
 import { NUDGE_REACH, PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
+import { LAYOUT_REFUSALS_IGNORED } from '../src/world/parkLayout.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
@@ -535,6 +536,48 @@ if (dropped > 0) {
   });
 }
 
+// -------------------------------------------- 3b. no false layout refusal
+//
+// Under `LGP_LAYOUT_RUNG=off` the layout probes every doormat but never
+// unwinds, and exports what it would have refused. The rung's one failure
+// mode is refusing a door the built park accepts (it then moves a plot to
+// satisfy a measurement error — seed 1, 6 Sep 2026, the castle's door inside
+// the walkable ball pit), so each ignored refusal is proved here against the
+// park that was actually built, on the same grid the children walk: a
+// standable, reachable spot within the waypoint reach of that door means the
+// refusal was false. With the rung armed there is nothing to prove and this
+// says so.
+{
+  const entranceY = park.sample(ENTRANCE_X, ENTRANCE_Z, 0);
+  const reachable = navGrid.reachableFrom(ENTRANCE_X, ENTRANCE_Z, entranceY, park.sample);
+  if (LAYOUT_REFUSALS_IGNORED.length === 0) {
+    table.push('layout refusals: none to prove (the rung was armed, or refused nothing)');
+  }
+  for (const refusal of LAYOUT_REFUSALS_IGNORED) {
+    const y = park.sample(refusal.at.x, refusal.at.z, TOP_REFERENCE);
+    const spot = reachable
+      ? navGrid.nearestStandable(refusal.at.x, refusal.at.z, y, park.sample, NUDGE_REACH, reachable)
+      : null;
+    const contradicted = spot !== null && reachable !== null && reachable(spot.x, spot.z, spot.y);
+    table.push(
+      `layout refusal ${refusal.kind} '${refusal.entry}' at (${refusal.at.x.toFixed(1)}, ${refusal.at.z.toFixed(1)}) ` +
+        `blockers=[${refusal.blockers.join(',')}]: built park ${contradicted ? 'REACHES it — FALSE refusal' : 'agrees'}`,
+    );
+    if (contradicted) {
+      report({
+        invariant: 3,
+        key: 'layout.falseRefusal',
+        measured: 1,
+        detail:
+          `the layout probe refused '${refusal.entry}' (${refusal.kind}, blockers [${refusal.blockers.join(',')}]) ` +
+          `at (${refusal.at.x.toFixed(1)}, ${refusal.at.z.toFixed(1)}), but the built park has a standable, reachable ` +
+          `spot ${Math.hypot((spot as { x: number }).x - refusal.at.x, (spot as { z: number }).z - refusal.at.z).toFixed(2)} m ` +
+          'from it — a rung armed on this would move a plot to satisfy a measurement error',
+      });
+    }
+  }
+}
+
 const stranded = graph.nodes.filter((node) => !node.reachable);
 for (const node of stranded) {
   report({
@@ -921,8 +964,8 @@ for (const finding of findings) {
 // prefer. The canonical park is held to all of them.
 const HARD_KEYS = new Set(
   ratchetEnforced
-    ? ['route.unreachable', 'route.crossesRail', 'poi.nospot', 'poi.stranded', 'poi.split', 'boot.asserts']
-    : ['route.unreachable', 'route.crossesRail', 'boot.asserts'],
+    ? ['route.unreachable', 'route.crossesRail', 'poi.nospot', 'poi.stranded', 'poi.split', 'boot.asserts', 'layout.falseRefusal']
+    : ['route.unreachable', 'route.crossesRail', 'boot.asserts', 'layout.falseRefusal'],
 );
 const regressions: string[] = [];
 for (const [key, amount] of measured) {
