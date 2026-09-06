@@ -9,7 +9,8 @@ which 61 are `pnpm run ...`** plus a bare `tsc --noEmit`. `check:chain-coverage`
 ## The finding, re-verified myself (not taken on trust)
 
 - `scripts/measure-hop-clearance.mts`: `grep -c "process.exit\|exitCode\|throw "` = **0**. Confirmed.
-- It is **step 6 of 61** in the required `check` chain (parsed from `package.json`, not grepped).
+- It is **step 7** in the required `check` chain (parsed, not grepped). It was step 6 before #529
+  prepended `check:chain-coverage`; the stale 6 was corrected after review.
 - Baseline run: **exit 0**, ~**1 s**, prints
   `Worst clean crossing over the park's own wall thicknesses: 1.045 m`
   against `MAX_AUTO_HOP_HEIGHT = 1.00` — the 45 mm margin the issue names, enforced by nothing.
@@ -132,7 +133,23 @@ nothing (its minimum is 1.045 m, the same as 0.34's) — the headline is still 1
 - [x] `check:chain-coverage` exit 0 (new on main via #529; names 5 known orphans, incl. #525)
 - [x] rebased onto d186ae62; verified by parsing vs the MERGE BASE, not moved main
 - [x] PR #578 opened
-- [ ] awaiting one review + a QA measurement; invisible to a player, so it merges without Jim
+- [x] reviewed and **approved**, with one wording fix (applied, `c9f0a8a9`)
+- [ ] awaiting QA measurement; invisible to a player, so it merges without Jim
+
+## Review findings folded in
+
+- Wording: assertion 3's comment and the pass output claimed the line "touches the measurement
+  exactly" / "is a lower bound at every point" while printing -0.4 mm. Now "a lower bound to
+  within the 1 mm measurement resolution", and the negative sign is named. Three sites total;
+  the docstring had already been corrected, these two had not.
+- The old window was wrong at **both** ends: it missed 0.32 **and** included 0.28, which the park
+  never builds.
+- Constants list proved complete against a **built park**: 66 hoppable walls, 3 distinct
+  half-thicknesses [0.22, 0.32, 0.34], 0 hoppable circles. Matters because `addCircle` and
+  `addRectangle` also forward `autoHoppable`, so an `addWall` grep alone could not have settled it.
+- The unchanged 1.045 m headline is **not** evidence the old sampling was harmless: `clean` falls
+  as walls fatten, so the minimum is set by the fattest sampled wall and 0.34 is in both sets.
+  Only "repaired without moving the answer" is a compliment.
 
 ## Cost
 
