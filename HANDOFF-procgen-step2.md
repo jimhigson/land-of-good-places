@@ -376,3 +376,26 @@ the bus road) now has a cost. Recipe additions for the real merge:
 calls `addPostCollider(collision, spot.tree.trunkFoot, spot.tree.trunkTop,
 ringSizeVsRace)`; `invariants.ts` clause 4: keep the sphere's `legAxis` line.
 Logs: `merge-swept-bus7.log`, `merge-seeds4/`, `merge-procgen5.log`.
+
+## Jim's final road rule; radius guard (7 Sep) — head a06178a4
+
+Jim, with the duck-bar cost put to him: *"ok fine, make the big version have
+all its legs, but the normal version can have them selectively."*
+`RailRaceTrackOptions.respectsRoad` — walk-past true, race false;
+`treeStandsOn` asked of the walk-past ring only; the race ring places every
+slot and backtracks off the road's claim like any other (it does not skip).
+Sound because the rings are never co-present — the same fact the one feature
+rests on (stated in `RailRace.ts`). `check:swept-bus` sweeps the walk-past
+ring only, by exact group name, and reports the race-ring instances it did
+not sweep. Clause 4 asserts the rings' foot radii differ by > `RADIUS_SLACK`
+before measuring (red at equal radii; Architect's item on ab763a4d, which it
+approved with its own red proof).
+
+Sphere scratch (b6b1a983 + whole series, cherry-picks clean): swept-bus 0
+posts 14/14, driven 0.0000; refusals 0, both rings built everywhere;
+walk-past skips one gate slot on 24, 115, 131, 346, 428, 451; **test:procgen
+705/706** — the residue is seed 131's walk-past ring 10/10/9/10 (its gate slot
+carries a bar): the ruling's alarm, not pre-solved; Overseer's call. Hill:
+3/14 build (race claims meet the road along the ring) — retired cost;
+canonical hill invariants green. Logs: `merge-swept-bus8.log`,
+`merge-procgen6.log`, `merge-seeds5/`. PR body: `scratchpad/pr-body-step2.md`.
