@@ -6,7 +6,6 @@ import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
 import {
   CAMERA_ZOOM_STEP,
-  PARADE_MEMBER_RADIUS,
   PLAYER_LONGEST_STEP,
   PLAYER_RADIUS,
   VIEWMODEL_LAYER,
@@ -29,6 +28,7 @@ import { InteractRouter, type InteractClaim } from './world/InteractRouter';
 import type { InteriorControls } from './world/building';
 import { GARDEN_FLOOR, LOBBY, OCEAN_FLOOR } from './world/hotel/layout';
 import {
+  createPetNavGrid,
   HeldBalloons,
   Parade,
   Player,
@@ -406,22 +406,12 @@ export class Game {
     );
 
     // And the same map again, laid out for a companion rather than for her —
-    // issue #602, the pets that walked through the bedroom wall to get to bed.
-    // A pet is 0.22 m across against her 0.62 m and cannot jump, so its own
-    // lattice is the honest one to plan its walk on; every other input is
-    // read from the same owner the player's grid reads it from, so there is
-    // no second copy of "where the stairs are" or "what a bridge covers".
-    // Hop apex 0 says what is true of an animal: a wall she hops is a wall it
-    // walks round.
-    this.parade.setNavGrid(
-      new NavGrid(
-        this.world.collision,
-        PARADE_MEMBER_RADIUS,
-        0,
-        () => this.world.building.surfaces.connectors,
-        (x, z) => this.world.train.bridges.some((bridge) => bridge.covers(x, z)),
-      ),
-    );
+    // issue #602, the pets that walked through the bedroom wall to get to
+    // bed. `createPetNavGrid` is the single owner of what a pet's grid is
+    // made of, because `check-hotel.mts` needs the same one over its own
+    // headless park; see its comment for why that is not two `new NavGrid`
+    // calls.
+    this.parade.setNavGrid(createPetNavGrid(this.world));
 
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler
