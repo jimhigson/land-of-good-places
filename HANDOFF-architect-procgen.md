@@ -114,6 +114,13 @@ first honest run found #501).
   branch merged with `main` (chain 63 = main's 62 + ground-claims,
   rebuilt from parsed steps). Overseer to merge the design branch to
   `main`, or engineers branch from it.
+- **Two roads met, RULED 6 Sep**: `roadCorridor.ts` (shape/owner) keeps
+  ownership; `roadRoute.ts` (the sphere's arc) becomes the geometry
+  `entranceRoadSegments()` returns, sampled into runs, one capsule claim
+  per run; `RoadSegment` generalised; invariant/check go oriented-bounds;
+  swept-bus/supportGround read through the owner. Cost: #511 engineer,
+  half a day–a day; proof = digest unchanged on 14 seeds + ground-claims
+  green. #585 merged → #522 IS on main now.
 - **#524** (open): a park that fails to build is a test failure, not a
   skip — and after the screen lands, **a named refusal at commit is a
   failure too**, not a skip. Same issue, one more case; say so on it. Step 2 held on step 1 + #511 +

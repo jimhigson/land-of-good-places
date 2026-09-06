@@ -939,6 +939,47 @@ there so nobody re-files it.
    measurement (if the sphere alone clears the posts, it shrinks to
    counters + the engine move).
 
+#### Two roads met (6 Sep) — ruled: one road, `roadCorridor` shape, `roadRoute` geometry
+
+The sphere branch carries `roadRoute.ts` (#498's arc, now at outset
+19.07 m from `supportGround.ts`'s published band, with the arc-aware
+`check:swept-bus` at 0 drawn posts on fourteen seeds); `main` carries
+step 1's `roadCorridor.ts` (the one owner of the road's segments and
+claims; `check:ground-claims`). Step 1 *knew*: its brief was re-cut off
+`roadRoute.ts` when #498 stalled, with "if it lands later the claim
+follows its owner" — the shape was built to receive the arc. Not a
+duplication; a sequencing seam, closed as follows:
+
+- **`roadCorridor.ts` stays the owner of what the road *is* to everyone
+  else** — `entranceRoadSegments()` / `entranceRoadClaims()`, the
+  provisional-then-realised commit, the letterbox, the invariant.
+- **`roadRoute.ts` becomes the geometry it returns.** `entranceRoadSegments()`
+  samples the arc (from `roadRoute`'s own owner of the outset, which reads
+  `supportGround.ts`'s band — no copy of 19.07 anywhere) into straight
+  runs; `RoadSegment` is generalised from axis-aligned `across/along` to an
+  arbitrary `from → to` (a capsule claim already is one); claims become
+  **one capsule per run**, and the "exactly two" probe becomes "claim
+  count == segment count, and each claim is its segment".
+- **`Entrance.ts` draws from the segments** using the sphere branch's arc
+  ribbon builder; nothing in the builder or the claim re-derives an
+  endpoint. The spur (gate approach) keeps its provisional/realised end.
+- `check:ground-claims` and the road invariant measure oriented bounds
+  per run instead of axis-aligned; probe 2b, probe 3 (`===`) and probe 4
+  (byte-equality with the owner) unchanged.
+- `check:swept-bus`, `supportGround.ts` and the ring band are **untouched
+  in substance**: they read the road through its owner. If any reads
+  `roadRoute.ts` directly, redirect the read to `roadCorridor.ts`'s
+  exports or make `roadRoute` a private import of it — one owner chain,
+  whichever is fewer lines.
+
+**Proof the merge changed nothing it should not**: the sphere branch's
+park digest on all fourteen building seeds before and after (the road's
+geometry must not move by a millimetre — `check:swept-bus`'s bidirectional
+ratchet says so independently at 0 posts), and `check:ground-claims`
+green with the arc. **Honest size: one engineer, half a day to a day** —
+the #511 engineer, who holds both sides' measurements; the risk is in the
+oriented-bounds rewrite of the invariant, not in the geometry.
+
 ### Stage 4 mechanism — incremental route growth: explore free, commit in sections
 
 Jim's section-by-section ruling (the slide-leg section above) reshapes how
