@@ -157,3 +157,20 @@ Guard: `LAYOUT_REFUSALS_IGNORED` + `check:park`'s `layout.falseRefusal` (hard)
 `layout.falseRefusal: 1` on seed 1). `LGP_LAYOUT_RUNG=off` scratch flag,
 present-and-disarmed like the refuse hook. Design finding with the Architect:
 "a footprint is not solid" — claim kinds missing at layout time.
+
+## Solve-cost round (6 Sep, night) — the per-door worlds, paid once
+
+The seed-1 fix gave every door its own world (exempt plots differ per door),
+so 14 doors × (lattice + whole-park flood): CI layout 369.7 ms vs 250 budget,
+local 122 ms; profile put 112 of 117 ms in `doormatRefusals → reachableFrom`.
+Fix (47f6b915): `strictGrid` — one world of every plot but the fountain, one
+flood — asked of every door first; a pass there (`standsReachably`) is a pass
+on the door's laxer world (fewer obstacles only grow the free/reached sets),
+so only a failing door takes the per-door probe, unchanged. `plotsWorld` is
+the one builder for both. Trace carries `probed-alone=N`. Layout local 122 →
+31 ms (31.6/31.1/28.0); budget NOT re-derived. `park-digest` seeds 0–15
+before/after identical (scratchpad `digest/`); seed 1 `48740be264e8be1f`;
+`probed-alone` 1 on seeds 1 and 3, 0 elsewhere. `check:layout-rung`,
+`test:procgen` (766), `build`, `check:coplanar`, `check:swept-bus`,
+`check:park-pool` all exit 0; `check` chain in scratchpad `check.log`.
+Scratch worktree `scratchpad/base-596` (PR head 0c7ee7b3) — remove when done.
