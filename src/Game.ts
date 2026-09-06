@@ -28,7 +28,6 @@ import { InteractRouter, type InteractClaim } from './world/InteractRouter';
 import type { InteriorControls } from './world/building';
 import { GARDEN_FLOOR, LOBBY, OCEAN_FLOOR } from './world/hotel/layout';
 import {
-  createPetNavGrid,
   HeldBalloons,
   Parade,
   Player,
@@ -405,13 +404,14 @@ export class Game {
       (x, z) => this.world.train.bridges.some((bridge) => bridge.covers(x, z)),
     );
 
-    // And the same map again, laid out for a companion rather than for her —
-    // issue #602, the pets that walked through the bedroom wall to get to
-    // bed. `createPetNavGrid` is the single owner of what a pet's grid is
-    // made of, because `check-hotel.mts` needs the same one over its own
-    // headless park; see its comment for why that is not two `new NavGrid`
-    // calls.
-    this.parade.setNavGrid(createPetNavGrid(this.world));
+    // And the same map, handed to the parade — issues #602 and #605, the pets
+    // that walked through the bedroom wall to get to bed and warped back
+    // through it on the way out. **The same instance, not a second grid**: a
+    // companion-sized one was written for #602 and deleted with the timings
+    // in `petRoute.ts`, because the walker is not what a lattice costs and a
+    // second lattice charges the first nap another second of blocked main
+    // thread (#607).
+    this.parade.setNavGrid(this.navGrid);
 
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler

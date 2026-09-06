@@ -56,6 +56,7 @@ import './headless-canvas.mjs';
 import { BackSide, Box3, Mesh, type Object3D, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
+import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { circleBoundary } from '../src/world/boundary.ts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
@@ -126,7 +127,6 @@ import { saveFlags } from '../src/state/flags.ts';
 import { gameStore, walksInParade } from '../src/state/index.ts';
 import { shopItem, ALL_CATALOGUE_ITEMS } from '../src/world/building/shops/catalogue.ts';
 import { Parade } from '../src/entities/parade/Parade.ts';
-import { createPetNavGrid } from '../src/entities/parade/petNavGrid.ts';
 
 /** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
 const FLOOR_OF_THE_WORLD = -2;
@@ -2537,10 +2537,19 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
     const routeParade = new Parade(walker as never, routeWorld.collision, routeCamera);
     routeScene.add(routeParade.group);
     // Both wire-ups `Game.ts` makes, and only those: the hotel seam, and the
-    // pet-sized route map — built by the one function `Game.ts` calls, so a
-    // grid that drifts here cannot pass while the real one fails.
+    // route map. The map is **the player's own grid**, built here with exactly
+    // the arguments `Game.ts` gives it — a companion-sized one was tried in
+    // #602 and deleted in #605 (see `petRoute.ts` for the timings), and the
+    // parade is handed the same instance the player walks on.
     routeHotel.petParade = routeParade;
-    routeParade.setNavGrid(createPetNavGrid(routeWorld));
+    const routeGrid = new NavGrid(
+      routeWorld.collision,
+      PLAYER_RADIUS,
+      JUMP_APEX_HEIGHT,
+      () => routeWorld.building.surfaces.connectors,
+      (x, z) => routeWorld.train.bridges.some((bridge) => bridge.covers(x, z)),
+    );
+    routeParade.setNavGrid(routeGrid);
 
     // ---- the suite's own **built** partitions, off the collision world.
     // Every wall with both ends inside the suite rectangle and a top a
@@ -2697,11 +2706,179 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
         );
       }
 
+      // ================= #605: and the walk *back* to the line =============
+      //
+      // Jim, on the #602 preview: *"when they get out of bed they warp through
+      // walls again - I think this might be a wider bug - the pets should
+      // ALWAYS use normal path finding by default to get to where they need to
+      // go, including while following the player in a parade formation."*
+      //
+      // Following was measured first and is **not** the bug: the trail is the
+      // ground the player herself covered, and on the built suite companions
+      // crossed 0 partitions in 26,180 pet-steps of walking her through every
+      // doorway. Getting *back* onto that trail was — a body standing up out of
+      // a bed in another room is nowhere near it, and the spring took it there
+      // in a straight line through the partition.
+      //
+      // So this half wakes her, walks her out of this bedroom **on her own
+      // routed path** (the same `NavGrid`, so the trail the companions inherit
+      // is a real walk and not a line through a wall), and measures the same
+      // question of the same drawn bodies. Its control is the same one: the
+      // straight line from where each animal stood up to where the line had
+      // got to.
+      const wakeStart = new Map<string, { x: number; z: number }>();
+      for (const entry of sent) {
+        const state = routeParade.petState(entry.uid);
+        if (state) wakeStart.set(entry.uid, { x: state.x, z: state.z });
+      }
+      routeHotel.wakeNap();
+
+      // Her own route out of this bedroom, planned on the grid the parade uses,
+      // then walked a stride at a time so the trail behind her is real. The
+      // goal is the middle bedroom's own bed spot, which is on the far side of
+      // at least one partition from where she has been sleeping.
+      const awayLocal = SUITE_BED_SPOTS[MIDDLE_BEDROOM_INDEX] ?? [0, 0];
+      const walkRoute = new Float32Array(MAX_ROUTE_WAYPOINTS * 2);
+      const walkerSampler = walker.groundSampler;
+      const walkLegs = walkerSampler
+        ? routeGrid.findRoute(
+            walker.position.x,
+            walker.position.z,
+            0,
+            SUITE.originX + awayLocal[0],
+            SUITE.originZ + awayLocal[1] + 1.4,
+            0,
+            walkerSampler,
+            walkRoute,
+          )
+        : 0;
+      if (walkLegs === 0) {
+        problems.push(
+          '#605: the player could not be routed out of the bedroom she napped in, so there is no ' +
+            'honest trail for the companions to re-form onto and this half of the probe is blind',
+        );
+      }
+
+      const reformed = new Map<string, { x: number; z: number }[]>(
+        sent.map((entry) => [entry.uid, []]),
+      );
+      const STRIDE = 0.06;
+      const REFORM_FRAMES = 900;
+      let leg = 0;
+      let elapsedWake = 0;
+      for (let frame = 0; frame < REFORM_FRAMES; frame += 1) {
+        // Walk her along her own route, one stride a frame, then stand still.
+        if (leg < walkLegs) {
+          const legX = walkRoute[leg * 2]!;
+          const legZ = walkRoute[leg * 2 + 1]!;
+          const dx = legX - walker.position.x;
+          const dz = legZ - walker.position.z;
+          const gap = Math.hypot(dx, dz);
+          if (gap <= STRIDE) {
+            walker.position.set(legX, 0, legZ);
+            leg += 1;
+          } else {
+            walker.position.set(
+              walker.position.x + (dx / gap) * STRIDE,
+              0,
+              walker.position.z + (dz / gap) * STRIDE,
+            );
+          }
+          walker.group.position.copy(walker.position);
+        }
+        elapsedWake = 12 + frame / 60;
+        routeHotel.update({ dt: 1 / 60, elapsed: elapsedWake, input: noInput } as never);
+        routeParade.update({ dt: 1 / 60, elapsed: elapsedWake } as never);
+        for (const entry of sent) {
+          const state = routeParade.petState(entry.uid);
+          if (!state) continue;
+          reformed.get(entry.uid)!.push({ x: state.x, z: state.z });
+        }
+      }
+
+      // ---- the control, again, and again before anything is believed: the
+      // straight line each animal would have taken from its bed to where the
+      // line ended up.
+      let wakeStraightHits = 0;
+      for (const entry of sent) {
+        const from = wakeStart.get(entry.uid);
+        const path = reformed.get(entry.uid) ?? [];
+        const to = path[path.length - 1];
+        if (!from || !to) continue;
+        wakeStraightHits += partitionsCrossedBy(from.x, from.z, to.x, to.z);
+      }
+
+      let wakeHits = 0;
+      let wakeSteps = 0;
+      let wakeFirst = '';
+      for (const entry of sent) {
+        const path = reformed.get(entry.uid) ?? [];
+        for (let index = 1; index < path.length; index += 1) {
+          const from = path[index - 1]!;
+          const to = path[index]!;
+          wakeSteps += 1;
+          const hits = partitionsCrossedBy(from.x, from.z, to.x, to.z);
+          if (hits === 0) continue;
+          wakeHits += hits;
+          if (!wakeFirst) {
+            wakeFirst =
+              `${entry.uid} stepped from (${from.x.toFixed(2)}, ${from.z.toFixed(2)}) to ` +
+              `(${to.x.toFixed(2)}, ${to.z.toFixed(2)})`;
+          }
+        }
+      }
+      if (wakeStraightHits === 0) {
+        problems.push(
+          `#605: the waking control never bit — the straight line from each of ${sent.length} ` +
+            'companions\' beds to where the line ended up crosses 0 built suite partitions, so ' +
+            '"they crossed none getting up" is a tautology and this half is measuring nothing',
+        );
+      } else if (wakeHits > 0) {
+        problems.push(
+          `#605: companions getting out of bed and re-forming behind her crossed a built suite ` +
+            `partition ${wakeHits} time(s) over ${wakeSteps} measured steps — first: ${wakeFirst}. ` +
+            'A pet must route back onto the line, not warp through the wall it slept behind',
+        );
+      }
+
+      // ---- **the fallback, said out loud** (#605). A straight line that fires
+      // routinely is how this bug hides, so the count is printed on every run
+      // whether it is zero or not, and `onLine` is printed beside it because a
+      // companion on the player's own trail is *following a route* — hers —
+      // rather than falling back to anything.
+      const stats = routeParade.routingStats;
+      // A "last leg" longer than this is not a last leg, it is the straight
+      // line this change exists to delete, reached by a different code path.
+      // `TapNavigator.SHORTFALL_TOLERANCE` owns the same idea for the player.
+      if (stats.worstLastLeg > SHORTFALL_TOLERANCE) {
+        problems.push(
+          `#605: a companion finished a route ${stats.worstLastLeg.toFixed(2)} m from its goal ` +
+            `and walked the rest in a straight line (allowed: ${SHORTFALL_TOLERANCE} m, the same ` +
+            'shortfall the player\'s own tap-to-walk tolerates) — that is long enough to cross ' +
+            'something, so the route stopped nowhere near rather than a little short',
+        );
+      }
+      if (stats.noRoute > 0) {
+        problems.push(
+          `#605: companions spent ${stats.noRoute} member-frame(s) off the player's trail with no ` +
+            'route at all — moving on a straight line with no router behind it is the defect ' +
+            'this change exists to delete, and a count above zero means it is still happening',
+        );
+      }
+
       process.stderr.write(
-        `check:hotel — #602 pet walk: ${sent.length} companions (${overflow.length} sent to ` +
-          `another bedroom) over ${stepsMeasured} measured steps against ${partitions.length} ` +
-          `built suite partitions. Routed crossings: ${routedHits}. Control — the straight line ` +
-          `this replaced would have crossed ${straightHits}.\n`,
+        `check:hotel — #602/#605 pet walk: ${sent.length} companions (${overflow.length} sent to ` +
+          `another bedroom) against ${partitions.length} built suite partitions.\n` +
+          `  to bed:  ${routedHits} crossing(s) over ${stepsMeasured} measured steps ` +
+          `(control — the straight line this replaced would have crossed ${straightHits})\n` +
+          `  waking:  ${wakeHits} crossing(s) over ${wakeSteps} measured steps ` +
+          `(control — straight lines from bed to line would have crossed ${wakeStraightHits})\n` +
+          `  routing: ${stats.onLine} member-frames on the player's own trail, ${stats.routed} ` +
+          `walking a planned route (${stats.plans} plans), ${stats.lastLeg} on the last leg of ` +
+          `a route that stopped where the lattice could stop it (longest such leg ` +
+          `${stats.worstLastLeg.toFixed(2)} m) — all three are routed walks. Off the line with ` +
+          `**no route at all**: ${stats.noRoute}, which is the number that hides this bug and ` +
+          `is ${stats.noRoute === 0 ? 'zero' : 'NOT ZERO'}\n`,
       );
     }
     routeScene.remove(walker.group);
