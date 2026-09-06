@@ -551,6 +551,16 @@ if (dropped > 0) {
   const entranceY = park.sample(ENTRANCE_X, ENTRANCE_Z, 0);
   const reachable = navGrid.reachableFrom(ENTRANCE_X, ENTRANCE_Z, entranceY, park.sample);
   if (LAYOUT_REFUSALS_IGNORED.length === 0) {
+    // Said on every run, on stderr, so it can be heard on a green one: with
+    // the rung armed (or nothing refused) this guard iterates an empty list
+    // and asserts nothing. `check:every-seed-builds` is what exercises it,
+    // by re-running this with LGP_LAYOUT_RUNG=off on any seed whose trace
+    // fired. A reviewer nearly filed the guard as broken after a canonical
+    // run that exited 0 for exactly this reason.
+    console.error(
+      'check:park layout.falseRefusal: 0 refusals to test on this seed — the guard asserted nothing ' +
+        '(the rung was armed, or refused nothing; check:every-seed-builds exercises it with LGP_LAYOUT_RUNG=off)',
+    );
     table.push('layout refusals: none to prove (the rung was armed, or refused nothing)');
   }
   for (const refusal of LAYOUT_REFUSALS_IGNORED) {
