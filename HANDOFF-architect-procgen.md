@@ -528,3 +528,11 @@ six sphere seeds (engineer's measurement; my "zero" was reasoned, not
 measured), and on 131/326 that slot carries a duck bar — fairness alarm
 firing as designed, left with Jim (2 of 14 seeds, one bar, one racer).
 `CAT_BUS_WIDTH` 5.28 vs drawn 7.30 still to file.
+
+## Ruling recorded, 7 Sep — the road rule's final form (Jim)
+
+Ride-scale ring keeps every leg; walk-past ring skips its own. Design doc
+"The road rule", "Final form". The load-bearing fact — the rings are never
+co-present — is now written once, with both consequences hanging off it
+and `RailRace.setActiveRing` named as where it lives. Seed 326's possible
+one-bar cost is accepted by Jim with the number; PR-body item, not his.

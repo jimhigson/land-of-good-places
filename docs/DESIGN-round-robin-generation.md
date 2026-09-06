@@ -1103,6 +1103,27 @@ against 7.78 m of carriageway — a 24 m gap); a *mandatory* duck-bar slot
 over the road loses its post and `duckBarsStandOnRealSupports` says so —
 the alarm, and the day for a second clause, not now.
 
+**Final form (Jim, 7 Sep), after the duck-bar alarm fired on two seeds:**
+*"ok fine, make the big version have all its legs, but the normal version
+can have them selectively."* So: **the ride-scale ring ignores the road
+entirely and keeps every leg; the walk-past ring applies the rule and
+skips its own.** The alarm was the ruling's design doing its job — put to
+Jim as "two of fourteen pool seeds lose one bar for one racer", answered
+with the number in front of him. Seed 131's slot was the race ring's and
+clears; seed 326's is the walk-past ring's and may not — if it does not,
+that is the rule costing exactly one bar on one seed, **accepted**, and it
+goes in the PR body as an accepted cost, not back to Jim.
+
+**The one fact this rests on, stated once because it is now load-bearing
+in two places:** *the two rings are never in the world at the same time.*
+The one-feature change (the rings do not constrain each other) and the
+rule's asymmetry (the ride ring may stand over a road the bus is never on
+while it exists) are both consequences of exactly that fact, and nothing
+else. If it were ever false — a design that showed both rings at once, or
+the bus on the road mid-race — **both are wrong together**, and the first
+thing to re-examine is `RailRace.setActiveRing`, the one place the fact
+lives in code.
+
 **What the rule makes unnecessary** — each a rule the generator would
 otherwise imply and no longer applies, so deleted, not left:
 
