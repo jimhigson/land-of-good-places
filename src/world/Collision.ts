@@ -206,6 +206,20 @@ export const MAX_AUTO_HOP_HEIGHT = 1.0;
 export const MEASURED_HOP_APEX = 1.2812;
 
 /**
+ * How far the live jump apex may drift from {@link MEASURED_HOP_APEX} before
+ * the measurement behind {@link MAX_AUTO_HOP_HEIGHT} and
+ * {@link measuredHopCeiling} is treated as stale.
+ *
+ * Exported because two places must agree on it and neither should own a copy:
+ * {@link CollisionWorld.checkHoppableColliders} enforces it at boot, and
+ * `scripts/measure-hop-clearance.mts` enforces the same thing in CI. It was
+ * inline here and hand-copied there until #539 — a comment asserting the two
+ * numbers matched, which is exactly the thing this codebase keeps being bitten
+ * by.
+ */
+export const HOP_APEX_TOLERANCE = 0.001;
+
+/**
  * The measured ceiling as a function of how far a mover must travel to cross a
  * collider — `2·(halfThickness + moverRadius)`, its full footprint plus her own
  * width on both sides.
@@ -1090,7 +1104,7 @@ export class CollisionWorld {
   checkHoppableColliders(moverRadius: number, apexClearance: number): string[] {
     const problems: string[] = [];
 
-    if (Math.abs(apexClearance - MEASURED_HOP_APEX) > 0.001) {
+    if (Math.abs(apexClearance - MEASURED_HOP_APEX) > HOP_APEX_TOLERANCE) {
       problems.push(
         `the jump apex is now ${apexClearance.toFixed(4)} m but MAX_AUTO_HOP_HEIGHT ` +
           `and measuredHopCeiling() were measured at ${MEASURED_HOP_APEX.toFixed(4)} m — ` +

@@ -328,6 +328,7 @@ export function createThing(options?: ThingOptions): AssetHandle;
 | **Facing** | Forward is **+Z**. `root.rotation.y = 0` faces the camera in the default view. Rotate the root only. |
 | **Scale** | Leave `root.scale` at 1 — it is reserved for gameplay squash-and-stretch. Bake size into geometry. |
 | **`height`** | Measure to the **actual top**, including ears and hats. RiPika's is 1.24 (ear tips), not 1.06 (skull). Labels crop otherwise. |
+| **Collider** | Anything a child can see, she must not walk through (CLAUDE.md). Nothing derives a collider from a mesh, so the two agree only on purpose: **the radius, half-width or height the collider uses must be the same constant the geometry is built from** — one owner, imported by both — or measured off the built group (`visibleBounds`). Never a second literal typed beside the `addCircle`. The 6 September review found seven colliders that disagree with their own mesh by a hand-typed number (#562), four corner towers with no collider at all (#549), and a deck whose colliders run 90° from its drawn railings (#550). The tell is a literal next to `collision.add*` when the mesh's constant is already in scope. |
 | **Shadows** | Solid meshes: `solid(mesh)` (casts + receives). Decals, catchlights, glows, strings: `decal(mesh)` (neither). |
 | **Naming** | `root.name` = the asset key: `'ripika'`, `'balloon.corgi'`, `'prop.lollipopTree'`. Parts an animator needs are exposed as typed fields, never looked up by string. |
 | **Colour** | Only from `PALETTE` or `ART`. No inline hex in model files. |

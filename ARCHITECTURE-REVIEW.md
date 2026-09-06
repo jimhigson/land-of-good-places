@@ -727,3 +727,187 @@ sightline check does.
 codebase has been bitten four times tonight by a claim nobody re-derived.
 An unrun script is exactly that — a measurement frozen at the moment someone
 last happened to run it.*
+
+---
+
+## Review 8 — the three standing diseases, at scale (6 September 2026, 01:30)
+
+Reviewed `main` at **`f1c99347`** ("`.node-version` is the answer fnm was
+asking for", #517). 287 first-parent commits since Review 7; the check chain
+has gone from 7 scripts to 60 steps (64 scripts counting the `pnpm run`
+closure); the park is generated on 16 pool seeds.
+This review was done by four read-only sweeps (hand copies, checks that cannot
+fail, measurements on a convenient origin, structure), each claim then
+re-verified against the source before filing. **Forty-three issues filed,
+#532–#574.** No code was changed; the design docs were corrected where a
+conclusion belonged there.
+
+*Not reviewed here, by instruction:* the round-robin procgen rework on
+`design/round-robin-generation` and its briefs. One note for whoever owns it:
+Decision 12's status line still reads *"not yet wired into the live park"*,
+and #499 merged the scheduler and ground-claims registry on 4 September — the
+line is stale, though the registry is, as `docs/DESIGN-round-robin-generation.md`
+says, still "wired into nothing" (`groundClaims.ts` is imported by `coSolve.ts`
+and its test; no placer touches either).
+
+### Fixed since Review 7
+
+| finding | status |
+|---|---|
+| R3 F1 — WaterFight hard-codes the camera pitch | **fixed**: imports `CAMERA_PITCH_DEGREES`; `WaterFight.ts:110` records the old copy |
+| R3 F2 — eye-offset formula duplicated | **fixed**: `core/cameraRig.ts:43 cameraOffset` is the one owner; `IsoCamera` and `WaterFight` both import it |
+| R4 F3 — one lattice cached, thrashed by Decision 3 | **open** for the player's grid: `NavGrid.ensureLattice` (`:662`) still rebuilds on every boundary change; only `JourneyPlanner`'s children got per-space grids. → #574 |
+| R4 F4 — two `spaces.ts` | **fixed**: one `src/world/spaces.ts` |
+| R6 F5, R6 F6 | fixed at the time (#72, #75) |
+| R7 F7 — four orphaned checks rot | **half-fixed, and the half that rotted is instructive.** All four got `check:` entries. `check:shop-spacing`, `check:gondola-sightline` and `check:hop-clearance` are in the required chain — but the first two import nothing from `src/` (#534, #291) and the third has no failure path (#539). `check:wall-tunnelling` is in no chain and has no failure path (#525). Giving a script a name did not make it a check. |
+
+The other side of the ledger is real: `check:assets`, `check:castle` (#393,
+"looks at the built castle, not at a factory's return value"), `check:coplanar`,
+the 87 procgen invariants with their `Invariant` type that makes forgetting to
+assert impossible, `visibleBounds`, `zoomToFit`, `bandCrossed`, `keepOutsFor`,
+`archFeet` as a named single owner — every one of these is the right shape,
+and the fixes filed tonight mostly point at one of them as the precedent.
+
+### Disease 1 — two definitions kept in step by hand
+
+The parse-not-grep check on the workflows came back clean: all seven read
+`.node-version`; branch protection (read back) requires exactly
+`["Procgen invariants", "Checks"]` and both match the *job* `name:`. There is
+no coverage script for that on `main` — the one with the `\s{2,}` regex is on a
+branch — so the protection is held by nobody looking, which is the state it
+has always been in.
+
+Filed:
+
+- **#532** the detour invariant's cap is `2.0`; the generator's owner is `2.5`
+  (#416). The comment says *"mirrors … exactly"*. The invariant does not ask
+  about the pairs the generator now connects.
+- **#533** `KID_HEIGHT` 2.12 typed in four files; the hotel mezzanine fade is
+  tied by comment to a *script's* copy.
+- **#534** `checkShopSpacing.mjs` — ~20 values from `layout.ts` re-typed, zero
+  `src/` imports, in the required chain. Its reason ("plain Node") is obsolete.
+- **#535** `RIDE_DEEP_LINKS` has 15 keys; `check:deep-links` covers 2 (and is
+  itself unwired, #526).
+- **#536** twelve invariants take their threshold from the generator's own
+  constant. The sleeper clause is the generator's expression, verbatim.
+- **#537** `check-castle`'s `EXTERIOR_MASONRY_PATTERN` is a hand copy of
+  `parkFacts`' regex — the exact mechanism of the 29 August
+  `castleMasonryTopY` incident, still in the tree.
+- **#538** fifteen promise-only comments as a checklist, including `spaces.ts`'s
+  "written once" defeated by `SpaceId = string`, and `cruiserWindow.ts`'s copy of
+  a constant that is already exported.
+
+### Disease 2 — a check that passes without checking anything
+
+Measured against the chain as parsed: 60 steps in `check`, +`check:gateway` in
+the procgen workflow, `check:coplanar` in its own non-required workflow, five
+scripts in no workflow (#525, #526 — nothing new). No `it.skip`/`todo`/`only`
+anywhere in `test/`; every one of the 87 invariants is registered. The rot is
+not in the plumbing. It is in **what the clause compares**:
+
+- **#539** `check:hop-clearance`, step 6 of the required chain: zero exit
+  sites, prints its number. The sibling of #525 that actually costs CI time.
+- **#540** `check:baked-face` reads `canvas.ops`; the headless canvas never
+  records ops. Always "0.0000 mm". Its header says it replaced a tautology.
+- **#541** no wall floor in the procgen suite; the harness comment says there
+  is. Six wall invariants vacuous on a wall-less park.
+- **#542** `check:cat-bus`'s "children drawn" clause counts every
+  `InstancedMesh`: a flower within 2 m proves a child.
+- **#543** `check:bus-journey`'s prove-red control is `pinnedZ - pinnedZ`.
+- **#544** `check:coplanar`'s ratchet can only loosen and is not required.
+- **#545** `check:rail-race` arms clause seeds `-Infinity`, prints "Infinity m".
+- **#546** five empty-collection passes (stall-shape, tie-frame, keyring-view,
+  cruiser-turn-radius, two invariant clauses).
+- **#547** five clauses that measure less than their message (path-preference
+  ignores `reachedGoal`; park-map's tautological anchor fallback; hotel's
+  `< BEARINGS` against 2×; benches' control; npc-dispersal's denominator).
+- **#548** seven print-only coverage counters and nine silent returns, with
+  nothing tallying them.
+
+The pattern across all ten: the accumulator is seeded with the passing value
+(`0`, `-Infinity`, `[]`), and nothing asserts that anything was compared.
+CLAUDE.md's rule — *break every check deliberately and watch it go red* — was
+not applied to these when written, and once green they were never doubted. A
+shared `requireMeasured(count, what)` helper, failing on zero and printing the
+count to stderr, would have caught nine of the ten.
+
+### Disease 3 — measured on a convenient origin, not on the thing drawn
+
+Seven instances were known going in. Fourteen more, and the biggest findings of
+the night are here, because this disease is the one that puts a child inside a
+wall:
+
+- **#549** the castle's four corner towers have **no collider** — the only
+  outdoor castle collider is a 24 × 18 m rectangle, and the towers stand
+  2.1 m outside it. The slide invariant measures the towers correctly, which
+  is why nobody noticed.
+- **#550** the ferris deck's colliders run 90° from its drawn railings; the
+  open ends are walled and the rails are air.
+- **#551** `check:gateway` asks "is there stone here?" with the collision
+  half-width (0.45) not the masonry (0.86), the one distinction `Garden.ts`
+  spells out.
+- **#552** the slide-leg walkability clause is the placer's own inequality.
+- **#553** a pinned NPC's pill ignores her scale (0.30–0.42 m of sky).
+- **#554** `plotsDoNotOverlap` compares anchors; the castle is drawn 3.54 m off
+  its anchor.
+- **#555** `distanceToPath` answers about paving; the kerb is 0.425 m wider,
+  and walls, bushes and lamps stand in it.
+- **#556** tree collider 0.55 vs drawn trunk 0.30; the canopy question (3.55 m)
+  asked of the trunk.
+- **#557** the station is levelled off one sample; its canopy is 0.5 m from
+  the rail centre; `CARRIAGE_BODY_HALF_WIDTH` is narrower than the train.
+- **#558** `PLAYER_SEPARATION` uses the collision radius for the drawn body,
+  eight lines under the comment that argues against it.
+- **#559** `check:hall-solid` and `check:stall-shape` measure the registrar,
+  not the mesh.
+- **#560** arrival zoom and rail-race camera solved against a constant rig.
+- **#561** `FoliageFade` tests the sightline to her feet.
+- **#562** seven colliders that disagree with their own mesh by a literal
+  typed beside the imported constant. **#563** the smaller ones.
+
+The through-line, for `ParkFacts`: 27 fields are measured off built geometry
+and 12 are source constants, and the split is systematic — rides and
+structures measured, scenery and props constant. Every clearance invariant
+reaches for the constant half first.
+
+### Structure
+
+- **#564** `CollisionWorld` has three rules for a zero-length wall (planning:
+  solid point; routing: solid point; physics: skipped), so such a wall blocks
+  placement and routing while a child walks through it, and no probe can see
+  it. Twelve copies of point-to-segment distance; `parkFacts`' copy is
+  byte-identical to `Scenery`'s, so the test cannot disagree with the code.
+- **#565** `distanceToPath` fails open before `buildPaths`; `World.ts` orders
+  twenty systems by array position, with four post-hoc fixups for flowers.
+- **#566** the Rail Race arch feet are route-blocking and deliberately not
+  solid. **#567** the great-hall props, including a dais that is not a platform.
+  **#568** the stale "castle props are exempt" comments still reasoning in `src/`.
+- **#569** `boundingRadius` answers three questions (#492's shape, one level
+  down); `check:park` asserts as a maximum what the solver treats as a target.
+- **#570** five placers that accept a known-bad answer rather than backtrack —
+  Jim's 22 August rule, unmet in five files.
+- **#571** six `AudioContext`s. **#572** a runtime import cycle through
+  `keepOutsFor`. **#573** residue. **#574** the F3 lattice.
+
+Not filed, recorded: `hotel/Hotel.ts` is 6692 lines with one section header;
+`paths.ts` 5522; `Scenery.ts` and `Building.ts` each ~2400 with two unrelated
+systems sharing the file. And a tell in the scheduler (#499) worth the procgen
+Architect's attention rather than a ticket from here: `nextRunnable()`
+returning null is commented "(a bug) deadlocked" and not thrown, and a typo in
+a `gate:` string idles the bus at the kerb forever with no error.
+
+### The one finding
+
+**There is no owner of the question "what is on this ground, and how big is
+it?" — so every placer, every collider and every check carries its own answer,
+and the answers disagree.** That single absence produces the tower with no
+collider, the bush that is 0.85 m to the sweep and 2.15 m on screen, the
+three degenerate-wall rules, the twelve segment-distance copies, the twelve
+generator-derived thresholds and the registrar-measuring checks. The registry
+that would own it is written, tested and connected to nothing. Until it is,
+the cheapest defence is the one `check:assets` already proved for heights: a
+probe that marches a player-sized body at every registered prop from many
+bearings and asserts it stops within a few centimetres of the drawn surface.
+That check would have found #549, #550, #562 and the hotel-shell bug of
+9 August, and it is the one check on the list that cannot be satisfied by
+comparing a constant to itself.

@@ -31,8 +31,9 @@
  * three routes a child actually asks for. Proven red by reverting each of the
  * four mechanisms in turn.
  *
- * **It runs on all five CI seeds, and that is not thoroughness for its own
- * sake — it is the only reason mechanism 4 is checked at all.** The terrain
+ * **It runs on every seed `CI_SWEEP_SEEDS` holds — seven today, not the five
+ * this line used to claim — and that is not thoroughness for its own sake, it
+ * is the only reason mechanism 4 is checked at all.** The terrain
  * round the rim is not level, so whether *some* cell pair happens to clear a
  * walking step is down to the ground under that particular park. Measured with
  * mechanism 4 removed: the canonical seed and seeds 2, 5 and 18 still get in,
@@ -56,7 +57,14 @@ import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { CI_SWEEP_SEEDS } from '../src/world/parkSeedPool.ts';
 
 /**
- * The five seeds CI builds a park on — the canonical one and four sweeps.
+ * The seeds CI builds a park on — whatever `CI_SWEEP_SEEDS` holds, which is
+ * **seven** today.
+ *
+ * This comment used to say "the five seeds ... the canonical one and four
+ * sweeps" and named seeds 2 and 18, one line above code that reads the pool
+ * and contains neither. The code was right the whole time; the sentence over
+ * it was a second copy of a fact with an owner, so it is now stated as a
+ * reference rather than a number (#510).
  *
  * **The pool owns this list** (`CI_SWEEP_SEEDS`, 2 Sep 2026): this file's own
  * hand-typed copy kept building retired seed 18 after its retirement and

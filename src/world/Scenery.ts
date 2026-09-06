@@ -10,7 +10,12 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import { PLAYER_MAX_SPEED, PLAYER_RADIUS } from '../core/constants';
+import {
+  PLAYER_MAX_SPEED,
+  PLAYER_RADIUS,
+  STONE_WALL_COLLIDER_HALF,
+  WOOD_WALL_COLLIDER_HALF,
+} from '../core/constants';
 import { edgeRadiusAt, PARK_BOUNDARY, TERRAIN_APRON } from './boundary';
 
 /** How far inside the park's edge anything may be planted. Was `> 55` against a 60 m wall. */
@@ -2193,7 +2198,7 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
     // `autoHoppable: true` is what lets `Player` clear one on its own, with no
     // button press, the moment walking (or tap-to-move) runs into one it
     // could jump anyway (design feedback #30e).
-    collision.addWall(x1, z1, x2, z2, 0.22, run.height, true);
+    collision.addWall(x1, z1, x2, z2, WOOD_WALL_COLLIDER_HALF, run.height, true);
     built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
   }
 
@@ -2288,7 +2293,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gro
 
     // Real wall height, not the `Infinity` default — see the wooden walls
     // above, including why `autoHoppable` is `true` here too.
-    collision.addWall(x1, z1, x2, z2, 0.34, run.height, true);
+    collision.addWall(x1, z1, x2, z2, STONE_WALL_COLLIDER_HALF, run.height, true);
     built.push({ ...run, halfWidth: WALL_HALF_WIDTH[run.kind] });
   }
 

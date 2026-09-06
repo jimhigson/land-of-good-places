@@ -1416,7 +1416,9 @@ Rough order of construction, each step playable:
     separate spaces, "go up one floor" is a transition rather than a
     physical arc that has to clear a hole in a slab.
 
-    **Why 31f needs the architect first:** a great deal currently assumes
+    **Why 31f needs the architect first** *(historical — this was done as
+    Decision 3 / #377 / #380; the floors are now separate spaces and the
+    escalators and helter-skelter are gone)*: a great deal at the time assumed
     one continuous interior — `WalkSurfaces` samples the highest walkable
     surface within a step of your feet across all decks, the floor-fader
     hides decks above you for the cutaway view, and the lift, escalators,
