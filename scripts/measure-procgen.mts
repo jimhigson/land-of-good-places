@@ -86,12 +86,13 @@ async function measureWorldStages(): Promise<StageTime[]> {
     out.push({ stage: 'world(scene+scatter)', ms: performance.now() - at });
 
     at = performance.now();
-    new NavGrid(world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+    const navGrid = new NavGrid(world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
     out.push({ stage: 'navGrid', ms: performance.now() - at });
 
     at = performance.now();
-    new PoiGraph(world.collision);
-    out.push({ stage: 'poiGraph', ms: performance.now() - at });
+    // Includes the lattice's first build: the graph floods it (poiGraph.ts).
+    new PoiGraph({ grid: navGrid, sample: (x, z, y) => world.building.surfaces.sample(x, z, y) });
+    out.push({ stage: 'poiGraph (incl. lattice build)', ms: performance.now() - at });
   } finally {
     console.warn = warn;
     console.error = error;

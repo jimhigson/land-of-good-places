@@ -614,8 +614,6 @@ export class NpcSystem implements GameSystem {
     const otherNames = pickNames(nameRng, NPC_COUNT - activePinned.length);
     let nameCursor = 0;
 
-    this.graph = new PoiGraph(collision, bridgeHeightAt);
-
     // The park has hills and a railway bridge, so an attraction's height is
     // sampled rather than assumed — see `attractions.ts`. Falls back to a flat
     // park when there is no sampler, which is only the case in a test harness
@@ -636,6 +634,14 @@ export class NpcSystem implements GameSystem {
       (x, z) => bridgeHeightAt(x, z) !== null,
       attractions,
     );
+    // The waypoints stand on, and are classified by, the very grid the
+    // children route on — one instrument for "can a child get there"
+    // (the Architect's ruling, 6 Sep 2026; see poiGraph.ts's header). So the
+    // planner comes first and the graph asks it for the garden's grid.
+    const gardenGrid = this.planner.grid(SPACE_GARDEN);
+    if (!gardenGrid) throw new Error('NpcSystem: the garden has no NavGrid to stand waypoints on');
+    this.graph = new PoiGraph({ grid: gardenGrid, sample: this.planner.groundSampler });
+
     this.kids = new KidCrowd(NPC_COUNT);
     this.group.add(this.kids.crowd.group);
 

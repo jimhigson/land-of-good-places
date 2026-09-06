@@ -69,7 +69,7 @@ import { NavGrid, MAX_ROUTE_WAYPOINTS, TOP_REFERENCE } from '../src/world/NavGri
 import { PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { ANCHORS, anchorGroupName } from '../src/world/anchors.ts';
-import { PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
+import { NUDGE_REACH, PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
@@ -78,6 +78,7 @@ import { STATION_GAP } from '../src/world/train/fence.ts';
 import { BRIDGE_RISE } from '../src/world/train/clearance.ts';
 import { bridgeHeightAt } from '../src/world/train/bridges.ts';
 import type { InteractZone } from '../src/world/interact.ts';
+import { LAYOUT_REFUSALS_IGNORED } from '../src/world/parkLayout.ts';
 
 // ---------------------------------------------------------------- the ratchet
 
@@ -518,7 +519,9 @@ for (const target of targets) {
 // Built here rather than borrowed from `NpcSystem`, which keeps its copy
 // private. Forty-odd nodes, so the edge validation costs a few milliseconds —
 // and it is the same constructor the game runs, which is the point.
-const graph = quietly(() => new PoiGraph(collision, (x, z) => bridgeHeightAt(world.train.bridges, x, z)));
+// The same grid the attractions were just routed on — one instrument, so a
+// waypoint this calls stranded is one the children's own planner cannot reach.
+const graph = quietly(() => new PoiGraph({ grid: navGrid, sample: park.sample }));
 
 const dropped = SEEDS.length - graph.nodes.length;
 if (dropped > 0) {
@@ -527,9 +530,62 @@ if (dropped > 0) {
     key: 'poi.nospot',
     measured: dropped,
     detail:
-      `${dropped} waypoint seed(s) had nowhere within 2.2 m that a child fits — ` +
-      'poiGraph discarded them before the graph was even built',
+      `${dropped} waypoint seed(s) had nowhere within ${NUDGE_REACH} m a child can stand — ` +
+      'poiGraph discarded them before the graph was even built: ' +
+      graph.noSpot.map((seed) => `(${seed.x.toFixed(1)}, ${seed.z.toFixed(1)})`).join(' '),
   });
+}
+
+// -------------------------------------------- 3b. no false layout refusal
+//
+// Under `LGP_LAYOUT_RUNG=off` the layout probes every doormat but never
+// unwinds, and exports what it would have refused. The rung's one failure
+// mode is refusing a door the built park accepts (it then moves a plot to
+// satisfy a measurement error — seed 1, 6 Sep 2026, the castle's door inside
+// the walkable ball pit), so each ignored refusal is proved here against the
+// park that was actually built, on the same grid the children walk: a
+// standable, reachable spot within the waypoint reach of that door means the
+// refusal was false. With the rung armed there is nothing to prove and this
+// says so.
+{
+  const entranceY = park.sample(ENTRANCE_X, ENTRANCE_Z, 0);
+  const reachable = navGrid.reachableFrom(ENTRANCE_X, ENTRANCE_Z, entranceY, park.sample);
+  if (LAYOUT_REFUSALS_IGNORED.length === 0) {
+    // Said on every run, on stderr, so it can be heard on a green one: with
+    // the rung armed (or nothing refused) this guard iterates an empty list
+    // and asserts nothing. `check:every-seed-builds` is what exercises it,
+    // by re-running this with LGP_LAYOUT_RUNG=off on any seed whose trace
+    // fired. A reviewer nearly filed the guard as broken after a canonical
+    // run that exited 0 for exactly this reason.
+    console.error(
+      'check:park layout.falseRefusal: 0 refusals to test on this seed — the guard asserted nothing ' +
+        '(the rung was armed, or refused nothing; check:every-seed-builds exercises it with LGP_LAYOUT_RUNG=off)',
+    );
+    table.push('layout refusals: none to prove (the rung was armed, or refused nothing)');
+  }
+  for (const refusal of LAYOUT_REFUSALS_IGNORED) {
+    const y = park.sample(refusal.at.x, refusal.at.z, TOP_REFERENCE);
+    const spot = reachable
+      ? navGrid.nearestStandable(refusal.at.x, refusal.at.z, y, park.sample, NUDGE_REACH, reachable)
+      : null;
+    const contradicted = spot !== null && reachable !== null && reachable(spot.x, spot.z, spot.y);
+    table.push(
+      `layout refusal ${refusal.kind} '${refusal.entry}' at (${refusal.at.x.toFixed(1)}, ${refusal.at.z.toFixed(1)}) ` +
+        `blockers=[${refusal.blockers.join(',')}]: built park ${contradicted ? 'REACHES it — FALSE refusal' : 'agrees'}`,
+    );
+    if (contradicted) {
+      report({
+        invariant: 3,
+        key: 'layout.falseRefusal',
+        measured: 1,
+        detail:
+          `the layout probe refused '${refusal.entry}' (${refusal.kind}, blockers [${refusal.blockers.join(',')}]) ` +
+          `at (${refusal.at.x.toFixed(1)}, ${refusal.at.z.toFixed(1)}), but the built park has a standable, reachable ` +
+          `spot ${Math.hypot((spot as { x: number }).x - refusal.at.x, (spot as { z: number }).z - refusal.at.z).toFixed(2)} m ` +
+          'from it — a rung armed on this would move a plot to satisfy a measurement error',
+      });
+    }
+  }
 }
 
 const stranded = graph.nodes.filter((node) => !node.reachable);
@@ -540,7 +596,8 @@ for (const node of stranded) {
     measured: 1,
     detail:
       `waypoint (${node.x.toFixed(1)}, ${node.z.toFixed(1)})${node.interesting ? ' (interesting)' : ''} ` +
-      `is in a pocket of the '${node.space}' graph nobody can walk to`,
+      `cannot be reached from the entrance by the children's own NavGrid — the drawn paving ` +
+      'there is inside something solid',
   });
 }
 
@@ -917,8 +974,8 @@ for (const finding of findings) {
 // prefer. The canonical park is held to all of them.
 const HARD_KEYS = new Set(
   ratchetEnforced
-    ? ['route.unreachable', 'route.crossesRail', 'poi.nospot', 'poi.stranded', 'poi.split', 'boot.asserts']
-    : ['route.unreachable', 'route.crossesRail', 'boot.asserts'],
+    ? ['route.unreachable', 'route.crossesRail', 'poi.nospot', 'poi.stranded', 'poi.split', 'boot.asserts', 'layout.falseRefusal']
+    : ['route.unreachable', 'route.crossesRail', 'boot.asserts', 'layout.falseRefusal'],
 );
 const regressions: string[] = [];
 for (const [key, amount] of measured) {
