@@ -157,11 +157,20 @@ export const PARK_SEED_POOL: readonly number[] = [
  * ## What being in this list does NOT mean
  *
  * **It does not mean `check:park` builds that seed's park. `check:park` is
- * canonical-only.** The only `check:*` step that sweeps this list today is
- * `check:fountain-hop` — so the `--- seed N: passed` lines in a `pnpm run
- * check` log are *its* sweep, and nothing else's. The other consumers are
- * `measure-*`/`sweep-*` scripts nobody runs in CI. Grep before believing
- * otherwise; the list of importers is short and this comment can rot.
+ * canonical-only.** The only `check:*` step in the `check` chain that sweeps
+ * *this* list is `check:fountain-hop` — so the `--- seed N: passed` lines in a
+ * `pnpm run check` log are *its* sweep, and nothing else's. The other
+ * consumers are `measure-*`/`sweep-*` scripts nobody runs in CI. Grep before
+ * believing otherwise; the list of importers is short and this comment can rot.
+ *
+ * **Since #510 the whole pool IS built by blocking checks — but by
+ * {@link PARK_SEED_POOL}, not by this subset, and not from the `check` chain.**
+ * `check:park-pool` and `check:gateway` each sweep all sixteen from the
+ * required `Procgen invariants` job. So "is seed N built by something that
+ * blocks a merge?" is now a question about the pool, not about this list; this
+ * list answers only "does seed N have a per-seed invariant file?". Do not read
+ * membership here as coverage in either direction — `check:seed-coverage`
+ * prints the real map on every run.
  *
  * **The trap that makes this easy to misread**: `check-park.mts` *does*
  * import something called `SEEDS` (line 72) and prints `N/M seeds placed`
@@ -173,10 +182,21 @@ export const PARK_SEED_POOL: readonly number[] = [
  * it imports **this** file; it does not.
  *
  * Measured 2 Sep 2026: seed 326 is in this list, went green through the whole
- * 58-step chain, and was stranding 8 waypoints under `check:park` the entire
- * time. Seed 115 failed the other way round — `check:park` green, three
- * invariants red. Neither gate implies the other (#437), and neither sees
- * most of the pool.
+ * 58-step chain (60 steps as of #510 — the measurement is kept at the number it
+ * was actually taken against, since a transcript rewritten to today's count is
+ * no longer a measurement of anything), and was stranding 8 waypoints under
+ * `check:park` the entire time. Seed 115 failed the other way round —
+ * `check:park` green, three invariants red. Neither gate implies the other
+ * (#437).
+ *
+ * **The last clause of this paragraph used to read "and neither sees most of
+ * the pool". That is no longer true, and it is the point of #510:**
+ * `check:park-pool` puts every one of the sixteen through `check:park`, and
+ * `check:gateway` walks a child in through every one's front arch, both in the
+ * required `Procgen invariants` job. What remains uncovered is the *invariant*
+ * side — only the seven seeds with per-seed files get that — and
+ * `check:seed-coverage` prints exactly that gap on every run rather than
+ * leaving it to a comment here to remember.
  *
  * **So when the generator's geometry changes, the tell is `pnpm run
  * vet:seeds` over the whole pool — not a green `check`, which by
@@ -206,10 +226,23 @@ export const PARK_SEED_KEY = 'lgp:parkSeed';
 /**
  * How this load got its seed. `startFresh` reads it: only a **remembered**
  * seed may be thrown away and redrawn, because a *pinned* one is a developer
- * asking for that exact park and a *drawn* one is already brand new — and
- * redrawing either would put `main.ts` in a reload loop.
+ * asking for that exact park, a *drawn* one is already brand new, and a
+ * *canonical* one was never anybody's choice to throw away — and redrawing any
+ * of them would put `main.ts` in a reload loop.
+ *
+ * **`canonical` is its own value because the alternative was a lie.** The Node
+ * branch of {@link resolveParkSeed} used to report `remembered`, on the path
+ * every unpinned check run in CI takes — where there is no storage, no save and
+ * nothing remembered. It is the *"Node never draws"* rule returning
+ * {@link CANONICAL_PARK_SEED}, which is a different fact about the world, and
+ * saying `remembered` made the one string whose entire job is to state
+ * provenance state it falsely. That is the same disease as a check that reports
+ * success about something it is not describing — #496's whole family — one
+ * level down, and it was caught in review of the very PR that added a line to
+ * print this. `check:seed-pool` had the tell already: a clause *named* "Node
+ * gets the canonical seed" asserting `=== 'remembered'`.
  */
-export type ParkSeedSource = 'pinned' | 'remembered' | 'drawn';
+export type ParkSeedSource = 'pinned' | 'remembered' | 'drawn' | 'canonical';
 
 let source: ParkSeedSource = 'pinned';
 
@@ -354,7 +387,8 @@ export function resolveParkSeed(): number {
   // {@link inNode} for how that happened and why this is asked of the runtime
   // rather than of `localStorage`.
   if (inNode()) {
-    source = 'remembered';
+    // Not `remembered` — nothing was. See {@link ParkSeedSource}.
+    source = 'canonical';
     return CANONICAL_PARK_SEED;
   }
 

@@ -22,6 +22,7 @@ import {
   petSeatOnSlide,
   slopeOf,
   type PetSlideLink,
+  type SlideSeat,
   type SlideSeatFor,
 } from '../slide/petRiders';
 import { RideCamera } from '../../core/RideCamera';
@@ -32,6 +33,7 @@ import type { AnchorPlots } from '../AnchorPlots';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
 
 import { BallPit } from './BallPit';
+import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
 import { FloorFader } from './floorFade';
 import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
@@ -174,6 +176,23 @@ const GROWN_UP_RECLINE = -Math.PI / 2;
  * it. This is the first number to move if the shot is wrong.
  */
 const CHASE_EYE = { x: 0, y: 1.62, z: 4.35 } as const;
+
+/**
+ * The look pitch `RideCamera` starts the chase view at.
+ *
+ * Named rather than typed inline because the boom's own aim has to **subtract**
+ * it — the camera carries this on top of whatever the boom does, so a copy of
+ * the number in two places would silently double or cancel the aim.
+ */
+const CHASE_START_PITCH = -0.14;
+
+/**
+ * `CHASE_EYE`'s numbers now live in `slide/chaseEye.ts` as the solve's floor.
+ * Kept here, referenced, so the historical offset and the reasoning above it
+ * stay findable from the file that used to own them — and so nobody
+ * reintroduces a second copy by "restoring" it.
+ */
+export const CHASE_EYE_FLOOR = CHASE_EYE;
 
 /**
  * How steeply the chute is falling here — **`slide/petRiders.ts` owns it now.**
@@ -458,6 +477,86 @@ export class Building implements GameSystem {
    * how cameras work.
    */
   private readonly eyeMount = new Group();
+  /**
+   * **The chase lens's boom**, inside {@link eyeMount}.
+   *
+   * `RideCamera.mountOn` is a boot-time call, so the eye offset cannot be moved
+   * through it — and the offset now has to move, because it is solved against
+   * the ride that was actually built rather than fixed (#514, #516). Its own
+   * header names this as the way out: *"a ride that wants the eye somewhere
+   * else moves its own mount, and then there is one place where the seat's
+   * position is decided."* This is that mount.
+   *
+   * A `Group`'s local matrix is `T(position) * R(rotation)`, so where the lens
+   * sits and where it points stay independent — which is exactly what the solve
+   * hands back.
+   */
+  private readonly eyeBoom = new Group();
+
+  /** Scratch for the chase solve — allocated once; this runs every frame. */
+  private readonly chaseUp = new Vector3();
+  private readonly chaseBehind = new Vector3();
+  private readonly chaseEye = new Vector3();
+  private readonly chaseAim = new Vector3();
+  private readonly chasePet = new Vector3();
+  /** The body centre the near bound used this frame (#518), and whether it is set. */
+  private readonly chaseBody = new Vector3();
+  private chaseBodyValid = false;
+  private readonly chaseSeat: SlideSeat = {
+    x: 0, y: 0, z: 0, facing: 0, pitch: 0, recline: 0,
+  };
+  /**
+   * How many companions rode last frame, from `ridePetsDownSlide`'s own return.
+   *
+   * **One frame stale, deliberately.** The pets are seated later in the same
+   * update than the camera is placed, so asking now would be asking before the
+   * answer exists. A companion joining or leaving the line changes this a frame
+   * later than the shot — invisible at 60 fps, and the alternative is a second
+   * idea of how many animals are on the chute, which is worse.
+   */
+  private chaseCompanions = 0;
+  /**
+   * Frames the chase solve could not place the lens (see `slide/chaseEye.ts`).
+   * Counted rather than thrown: a shipped game must not crash at a child
+   * mid-ride. `check:pet-slide` asserts this is zero.
+   */
+  private chaseGaveUp = 0;
+
+  /**
+   * How many frames of this descent the chase solve could not place the lens.
+   *
+   * Exposed because a counter nobody reads is not a guard — and this one
+   * carried a comment saying `check:pet-slide` asserted it was zero for as long
+   * as no such assertion existed. The check now really does read it.
+   */
+  chaseSolveGaveUpFrames(): number {
+    return this.chaseGaveUp;
+  }
+
+  /**
+   * **The body point the chase solve's near bound actually reasoned about this
+   * frame** (#518), or `null` if there was no companion to reason about.
+   *
+   * Exposed for one purpose: so `check:pet-slide` can hold it up against
+   * `Box3.setFromObject` of the **real drawn animal** and **fail** if the two
+   * disagree — see that clause for the threshold and why it is where it is.
+   *
+   * The point itself comes from `Parade.nearestRiderBodyCentre`, which measures
+   * the drawn mesh; nothing here derives it from the pose. An earlier attempt
+   * did derive it and was **0.70 m out**, so what this accessor guards against
+   * is not a formula drifting but the solve being handed the wrong point at
+   * all — most obviously a reversion to the **seat**, which is ~0.95 m away.
+   *
+   * **It is read one frame before the pets are moved** (`advanceRide` places
+   * the lens at the top of the frame and seats the animals at the bottom), so
+   * it is deliberately one frame stale, exactly as `chaseCompanions` above is
+   * and for the same reason: asking now would be asking before the answer
+   * exists. `check:pet-slide` measures that frame of travel rather than
+   * restating it, and asserts its drift threshold keeps clear of it.
+   */
+  chaseNearestBodyCentre(): Vector3 | null {
+    return this.chaseBodyValid ? this.chaseBody : null;
+  }
 
   /**
    * The building's own space. Added straight to the scene rather than to the
@@ -1076,11 +1175,15 @@ export class Building implements GameSystem {
     // re-derived (`Coaster.attachPlayer`).
     this.rideView = new RideCamera({
       yawLimit: 0.55,
-      startPitch: -0.14,
+      startPitch: CHASE_START_PITCH,
       fov: 60,
       sensorLook: false,
     });
-    this.rideView.mountOn(this.eyeMount, CHASE_EYE);
+    // Mounted on the boom at zero: `CHASE_EYE`'s numbers are now the solve's
+    // FLOOR (see `slide/chaseEye.ts`), not a fixed offset, and the boom carries
+    // whatever it decides each frame.
+    this.eyeMount.add(this.eyeBoom);
+    this.rideView.mountOn(this.eyeBoom, { x: 0, y: 0, z: 0 });
   }
 
   /**
@@ -1559,6 +1662,20 @@ export class Building implements GameSystem {
   private startRide(slide: SlideRide, giant: boolean, player: Player): void {
     this.controls.cancelWalk();
     this.ride = { slide, giant, distance: 0 };
+    // **Both chase counters describe THIS descent, so this descent starts them
+    // at zero.** Their docs said "this descent" while the fields were
+    // cumulative for the `Building`'s whole lifetime, so a second ride in one
+    // session reported the first ride's frames added to its own — a comment
+    // asserting something the code did not do, which is the fault this repo
+    // files most often. `check:pet-slide` rides once and so never saw it; a
+    // child who goes down the slide twice would have.
+    this.chaseGaveUp = 0;
+    this.chaseCompanions = 0;
+    // The near bound's counters describe this descent too (#518), and they live
+    // on the solver's module rather than here because the solver is where the
+    // rejection happens. Same reasoning as the two above: a counter whose doc
+    // says "this descent" must be zeroed by the descent starting.
+    resetChaseCeilingCounters();
     player.beginRide();
   }
 
@@ -1616,6 +1733,65 @@ export class Building implements GameSystem {
       // `rotation.order` is `YXZ` — set in the constructor, for the same reason
       // `GROWN_UP_RECLINE` needs it: yaw first, then pitch in the yawed frame.
       this.rideMount.rotation.x = slopeOf(this.tangent);
+
+      // **Solve where the lens goes, against the ride that was actually built**
+      // (#514, #516). `CHASE_EYE` was a fixed offset picked for a rider with
+      // nobody behind her; companions arrived in #468 and it never moved, so
+      // the lens has been sitting INSIDE the line it films — the nearest pet
+      // 34-45 degrees below its own axis against a 30 degree half-fov, on every
+      // raster of every seed.
+      this.eyeMount.updateMatrixWorld(true);
+      const basis = this.eyeMount.matrixWorld.elements;
+      // `eyeMount` is yawed by PI, so its +Z is BEHIND the rider and its +Y is
+      // up out of the trough. Read off the matrix rather than re-derived, so a
+      // change to how the mount is turned cannot leave this behind.
+      this.chaseUp.set(basis[4] ?? 0, basis[5] ?? 0, basis[6] ?? 0).normalize();
+      this.chaseBehind.set(basis[8] ?? 0, basis[9] ?? 0, basis[10] ?? 0).normalize();
+      let nearestPet: Vector3 | null = null;
+      if (this.chaseCompanions > 0) {
+        petSeatOnSlide(ride.slide, ride.distance, 0, this.chaseSeat);
+        nearestPet = this.chasePet.set(this.chaseSeat.x, this.chaseSeat.y, this.chaseSeat.z);
+        // The same point the solve's near bound will derive, kept so
+        // `check:pet-slide` can measure it against the drawn animal (#518).
+        // **Ask the parade where the animal actually is** (#518). It owns the
+        // bodies and measures the drawn one; the ride only ever knew where it
+        // offered a seat, which is an origin at the animal's feet.
+        this.chaseBodyValid = this.petParade?.nearestRiderBodyCentre(this.chaseBody) ?? false;
+      }
+      const solved = solveChaseEye(
+        this.rideMount.position,
+        nearestPet,
+        this.chaseBodyValid ? this.chaseBody : null,
+        this.chaseBehind,
+        this.chaseUp,
+        // Vertical half-fov in radians, asked of the camera rather than
+        // restated: `RideCamera` owns it and a copy would drift.
+        (this.rideView!.camera.fov * Math.PI) / 360,
+        // Aspect from the live camera too, for the same reason: the solve's
+        // frame-share estimate is about the shot as it will actually be drawn,
+        // and a portrait phone frames a companion very differently from a
+        // landscape desktop.
+        this.rideView!.camera.aspect,
+      );
+      if (solved.gaveUp) this.chaseGaveUp += 1;
+      this.eyeBoom.position.set(0, solved.up, solved.back);
+
+      // **Aim by vectors, never by an angle in a guessed frame.** The lens's
+      // unpitched forward is `-behind`; the wanted forward is the direction to
+      // the solved aim point. Decomposing one against the other in the mount's
+      // own up/forward plane gives the boom's pitch with no frame to get the
+      // sign of wrong — which is the trap `RideCamera`'s header records two
+      // agents falling into. `startPitch` is subtracted because the camera
+      // carries it on top of whatever the boom does.
+      this.chaseEye
+        .copy(this.rideMount.position)
+        .addScaledVector(this.chaseBehind, solved.back)
+        .addScaledVector(this.chaseUp, solved.up);
+      this.chaseAim.copy(solved.aimAt).sub(this.chaseEye).normalize();
+      const forward = -this.chaseAim.dot(this.chaseBehind);
+      const rise = this.chaseAim.dot(this.chaseUp);
+      this.eyeBoom.rotation.x = Math.atan2(rise, forward) - CHASE_START_PITCH;
+
       // **The chase camera keeps running while a trackside shot is live.** It is
       // the ride's own view and it has damping and idle sway with state in them;
       // freezing it for two seconds and cutting back would hand over a view that
@@ -1630,7 +1806,7 @@ export class Building implements GameSystem {
     // arrive somewhere the ride is not. The seats come from
     // `slide/petRiders.ts`; the parade owns the animals, and this file never
     // touches one.
-    if (ride.giant) this.petParade?.ridePetsDownSlide(this.petSeat);
+    if (ride.giant) this.chaseCompanions = this.petParade?.ridePetsDownSlide(this.petSeat) ?? 0;
 
     if (ride.giant && this.grownUpComing) {
       // In front, and lying down. Clamped to the end of the chute so the

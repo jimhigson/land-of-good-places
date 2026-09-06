@@ -283,6 +283,7 @@ timeout as `cancelled`, so the site sat stale for hours with nothing red.
 | `check` | `checks.yml` ("Checks") | **yes** |
 | `test:procgen` | `procgen-invariants.yml` ("Procgen invariants") | **yes** |
 | `check:coplanar` | `coplanar.yml` ("Coplanar faces") | not yet — needs adding |
+| `check:swept-bus` | `swept-bus.yml` ("Swept bus") | not yet — needs adding |
 | `build` | `deploy.yml`, `pr-preview.yml`, and `checks.yml` | — |
 
 **Both required checks are load-bearing by *name*.** A required status check is
@@ -295,7 +296,8 @@ and read it back:
 gh api repos/jimhigson/land-of-good-places/branches/main/protection
 ```
 
-**Run `check`, `test:procgen` and `check:coplanar` before every push.** `build` exiting 0
+**Run `check`, `test:procgen`, `check:coplanar` and `check:swept-bus` before every
+push.** `build` exiting 0
 now tells you almost nothing — it means the bundle was produced, not that
 anything is correct.
 
@@ -378,9 +380,26 @@ properties must be **omitted**, never assigned `undefined`.
 ### Use current runtimes; never an old-version-only flag
 
 The checks and `scripts/*.mts` run **straight on Node** — no bundler, no
-transpile step — so this repo tracks **current Node** (26+; CI pins it, and
-the cloud sandbox ships an older default, so install the latest and use it:
-`scripts/with-node`). Modern Node runs TypeScript by *stripping types*, with
+transpile step — so this repo tracks **current Node**, declared once in
+**`.node-version`** at the repo root. That is the file `fnm` reads and the
+file all seven CI workflows read (`node-version-file`). A shell that has not
+switched — every agent shell here, and the cloud sandbox's older default —
+gets there with one command, which needs no argument because it reads the
+declaration:
+
+```
+fnm use --install-if-missing
+```
+
+**Nothing does this for you, so type it.** Measured: pnpm ignores
+`.node-version` entirely and spawns scripts with whatever `node` is first on
+`PATH`, so `pnpm run check` cannot fix its own runtime; and `fnm env
+--use-on-cd`, which would switch on `cd`, is wired into `config.fish` only —
+no zsh/bash rc mentions it, so **no agent shell has that hook at all**. (The
+hook works fine non-interactively when it *is* installed; it simply isn't
+here.) That is why `check:node` is the chain's first step and fails below the
+floor — see #506. Modern Node runs TypeScript by
+*stripping types*, with
 no flags. So two rules, and they are not style preferences — a violation
 either fails to run or only runs on a Node nobody should still be on:
 
@@ -922,6 +941,39 @@ by nudging a surface apart**: a stand-off is a number somebody has to maintain,
 it goes stale the moment either surface moves, and the check reports those
 separately for exactly that reason (112 fighting under 0.1 mm today, 169 more
 held apart by a stand-off under 1 cm).
+
+## The bus must not drive through the ride
+
+**`pnpm run check:swept-bus`** sweeps the cat bus's **drawn** body along its
+arrival run and asks which **drawn** rail-race trestle posts it reaches, on all
+sixteen seeds. Like `check:coplanar` it is **not** in `pnpm run check` — it has
+its own workflow, `swept-bus.yml`, because it takes 3m26s on a runner and that
+chain is at ~25 minutes against a 30-minute cap. Run it yourself.
+
+It exists because the check before it was **honestly green and wrong**.
+`check:entrance-road` headlined *"0 legs hit on all sixteen seeds"* while
+resolving each trestle to its **foot**. `track.ts` stands a trunk from the
+*nudged* foot to a top under the rails, so a nudged post **leans** — its foot
+can be 2 m from the part of it the bus meets. Measured along the drawn post
+instead: **364 posts across the pool, against 107 feet — 3.40× more.** That is
+this file's own "measurement taken on a convenient origin rather than on the
+thing that gets drawn", and it is why every number in that check comes off the
+built scene.
+
+It **ratchets** against `scripts/swept-bus-baseline.mts`, so green means *no
+worse*, never *clear* — the check says so on every run. Two things about it are
+deliberate and worth knowing before you touch it:
+
+- **The baseline is keyed on the seed number, and an entry matching no pool
+  seed is a failure.** That is the fix for **#520** (`check:coplanar`'s baseline
+  is keyed on mesh names, so a rename orphans the entry silently). The same
+  hazard one layer out — the check finds posts *by mesh name* — is caught by
+  asserting each named trestle mesh is present with instances, so a rename in
+  `track.ts` makes the run **VOID** rather than a triumphant zero.
+- **Its 0.2 m post sampling can only ever *under*-count**, at grazing contact.
+  So when the count eventually reaches zero, **confirm that zero at a finer
+  step before deleting the baseline** — the check prints this instruction at
+  the moment it matters.
 
 ## Handoff files
 
