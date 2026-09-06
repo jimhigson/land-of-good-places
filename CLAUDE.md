@@ -960,20 +960,20 @@ this file's own "measurement taken on a convenient origin rather than on the
 thing that gets drawn", and it is why every number in that check comes off the
 built scene.
 
-It **ratchets** against `scripts/swept-bus-baseline.mts`, so green means *no
-worse*, never *clear* — the check says so on every run. Two things about it are
-deliberate and worth knowing before you touch it:
+It landed as a ratchet against a per-seed baseline (364 posts) and, since
+stage 3 step 2 made the trestles claims, **it fails on any intrusion on any
+pool seed, and on any seed whose park cannot be built** — there is no baseline
+file to add an entry to. Two things about it are deliberate and worth knowing
+before you touch it:
 
-- **The baseline is keyed on the seed number, and an entry matching no pool
-  seed is a failure.** That is the fix for **#520** (`check:coplanar`'s baseline
-  is keyed on mesh names, so a rename orphans the entry silently). The same
-  hazard one layer out — the check finds posts *by mesh name* — is caught by
-  asserting each named trestle mesh is present with instances, so a rename in
-  `track.ts` makes the run **VOID** rather than a triumphant zero.
+- **The check finds posts *by mesh name***, and that hazard (**#520**:
+  `check:coplanar`'s baseline is keyed on mesh names, so a rename orphans the
+  entry silently) is caught by asserting each named trestle mesh is present
+  with instances, so a rename in `track.ts` makes the run **VOID** rather than
+  a triumphant zero.
 - **Its 0.2 m post sampling can only ever *under*-count**, at grazing contact.
-  So when the count eventually reaches zero, **confirm that zero at a finer
-  step before deleting the baseline** — the check prints this instruction at
-  the moment it matters.
+  So when the supports or the road move, **confirm the zero at a finer step**
+  — the check prints this instruction on every run that reads zero.
 
 ## Handoff files
 

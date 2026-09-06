@@ -79,6 +79,86 @@ duck-bar invariants' final numbers.
 - Park digests, 16 seeds: scratchpad `before/<seed>.txt`.
 (scratchpad = `/private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/92acae52-e71b-43c9-a76b-92e2c76ea5d3/scratchpad`)
 
+## Phase 1 built and measured (6 Sep, commits f5229ace, 5b26f233, 0f00bc17)
+
+**What is in:** `track.ts` — the five nudge lists and the three-tier ladder
+deleted; `trestleTreeAt` / `trestleStruts` / `trestleClaims` (one solved tree,
+drawn and claimed from the same object); one outward march per slot, lean outer
+(nearest first, inward before outward) × arc inner, bounded by
+`maxTrunkLean(trunkHeight)` (`trestleGeometry.ts`, `tan(BRANCH_ANGLE)` × the
+drawn trunk's height) and `arcReach = TRESTLE_SPACING/2 − foot`; the registry
+asked first with the drawn geometry below `tallestHeadroom`, then the four
+unmigrated predicates (`legacyGroundIsClear`); a duck-bar slot with no support
+**throws** (`refused by <features>`). `Claim.headroom` +
+`GroundClaims.tallestHeadroom`; the road's claims carry `CAT_BUS_TOP`.
+`RailRace(collision, groundClaims)`; `World` builds it after the road's
+realised re-commit (headless parks have no generator registry — the brief's
+option 2). `STRUT_RADII` one owner. `check:ground-claims` probe 2 widened to
+`[road, walk-past-ring, race-ring]`. Invariant
+`railRaceSupportsAreClaimedAsDrawn` (registry == claims rebuilt from the drawn
+struts through `trestleClaims`, float32 slack; lean ≤ `maxTrunkLean`; every
+cross-feature claim pair obeys `CLAIM_COMPATIBILITY`; coverage on stderr).
+`ParkFacts.railRaceSupports` decodes the instance buffers.
+
+**Instrument control that failed, and the fix.** `scripts/park-digest.mts`
+hashed `matrixWorld` + vertex positions only; an `InstancedMesh` keeps its
+instances in `instanceMatrix`, so the whole-park digest was byte-identical
+(`1ef4ff81decec5d4`) while `check:swept-bus` on the same park went 28 → 0.
+Step 1's "byte-identical on all 16 seeds" could never have seen a leg move.
+Fixed (hashes instanceMatrix + instanceColor, over `count`); re-baselined on
+`d81d0820` in a scratch worktree (`scratchpad/before2/`), branch in
+`scratchpad/after2/`.
+
+**Measured on the hill (`main` geometry), all 16 pool seeds:**
+
+| seed | result |
+|---|---|
+| 20260728 | builds; swept-bus **0 posts / 0 feet** (was 28 / 8); walk-past ring widest run **51.1 m** (>40) |
+| 225 | builds; swept-bus **0 / 0** (was 24 / 8) |
+| 5, 11, 24, 115, 128, 131, 208, 267, 274, 288, 326, 346, 428, 451 | **REFUSED**: "no support can stand for the duck bar at slot N of railRace:walk-past-ring (24: race-ring) … lean limit reached … refused by road" |
+
+Why: on the hill the road (z=69, ±3.89 m) runs *through* the ring's band, and
+a trunk's claim always contains the point under the rails (the top is under
+the rails and below the bus's 5.98 m headroom), so no lean clears it — the
+over-determination the design re-examination found; the old ladder "escaped"
+only by leaning posts through the bus at height. **Step 2 cannot be green on
+the hill. Phase 2 (the sphere, road outside the ring) is not optional.** Per
+Jim, none of this is to be propped up.
+
+**One-function proof (acceptance 3), red then reverted:** committing the
+claims 1 cm wider than the ones the search asked with (`halfWidth + 0.01` at
+the `commit` in `buildRailRaceTrack`) → invariant red on both rings, canonical
+seed: walk-past claim 0 `capsule(18.52345, 73.00811, …, 0.282)` vs drawn
+`0.272`; race claim 0 `capsule(20.42003, 73.64285, …, 0.69)` vs drawn `0.68`.
+Green again on revert (93 trestles, 651 struts, 16,376 pairs).
+
+**Observation for the Architect:** the walk-past ring's rails sit at 3.8 m and
+the bus is 6 m tall; on the hill the bus's road crosses *under the walk-past
+ring itself*, and no instrument measures rails vs bus (swept-bus sweeps
+trestles only). Hill-only — on the sphere the bus never crosses the ring (only
+the walking spur does) — but nobody has measured that either.
+
+**`CAT_BUS_TOP` (5.98 m) vs the drawn box (6.15 m):** a 0.17 m pre-existing
+gap between the asset-contract constant and the drawn ears; the headroom uses
+the constant, the swept-bus check the drawn box. The check is the instrument
+that would catch a branch in between.
+
+## Phase 2 checklist (when #511 is on `main`)
+
+1. Rebase; drop the step-1 carry commit if #522 has landed on its own.
+2. Merge with the sphere's `track.ts` (`trestleTreeAt`, `addPostCollider`,
+   `SUPPORT_MAX_RADIAL_NUDGE` import) — keep this branch's search; take the
+   sphere's leaning collider if it survives review.
+3. Delete `railRace/supportGround.ts`; make `roadRoute.ts`'s outset march
+   the registry from the 8.26 floor (`DOOR_PAVEMENT + BUS_DOOR_INBOARD`)
+   until `allows` — report the outset per seed in the PR body.
+4. Re-measure everything above on 16 seeds; expect 0 refusals; quote foot
+   margins; re-run the digest before/after and account for every moved foot.
+5. `check:swept-bus` must read 0 everywhere at POST_STEP 0.02 too, then the
+   flip (fail-on-any, baseline deleted — already on this branch) is green.
+6. `check:park-pool`, `check:gateway`, `check:coplanar`, `check`, `build`,
+   `test:procgen`; chain parsed.
+
 ## Open questions for the Architect (asked through the Overseer)
 
 1. Arc nudges: delete with the radial ladders, replacing both with one derived
