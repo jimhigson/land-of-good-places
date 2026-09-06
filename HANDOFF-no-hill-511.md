@@ -76,6 +76,30 @@ Not started: curving the ground, measuring the sky on extended ground.
 **#498 (entrance road) is still blocked on the ground shape** — nothing this
 session settled it, because the session went to Jim's re-prioritisation.
 
+## Two names that exist only on the stale road line — contamination warning
+
+`fix/road-487-488` was force-pushed over with a 71-commit-stale rebase and then
+recovered; the stale line survives at `salvage/road-487-488-stale-rebase`
+(`18d82c9a`). **Anything you read from it may not exist on the true tip**
+(`0814e359`), and reaching for a name from memory afterwards is how it spreads.
+
+Caught here, both by `tsc` rather than by care:
+
+- **`BUS_SILHOUETTE_OVERHANG`** — stale line only. I used it deriving the road's
+  outset because I had read its reasoning ("the road's outset also had to carry
+  the bus's silhouette, 1.24 m of tail, whiskers and swung door").
+- **`ENTRANCE_ROAD_MINIMUM_OUTSET`** — stale line only.
+
+Neither is on the true tip. The road now claims only the carriageway's own
+half-width, and **how far the bus overhangs its lane as it turns is left to
+`check:swept-bus`** — which measures the drawn vehicle against the drawn posts
+at the bus's own height, across all sixteen seeds, and is merged. A constant
+invented in `roadRoute.ts` would be a second opinion about the bus's shape,
+held by the road, which is this repo's most expensive habit.
+
+**If you find yourself confident about a road constant you cannot see in the
+file, check which line you read it on.**
+
 ## Seed 288's bridge throw — root-caused to the Sky Cruiser's low corridor
 
 **The sphere does not break bridge siting directly. It breaks it four steps
