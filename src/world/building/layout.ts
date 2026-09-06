@@ -340,6 +340,28 @@ export const TOWER_ROOF_OVERHANG = 0.4;
 export const TOWER_BASE_FLARE = 1.08;
 
 /**
+ * **How wide a turret's shaft is at its foot** — the one owner of the number,
+ * read by the mesh, by {@link CASTLE_TOWERS} and by the collider.
+ *
+ * Issue #549 asked why a child could walk through the corner towers; the answer
+ * was that nothing had ever given them a collider. Writing one exposed this:
+ * `TOWER_RADIUS * TOWER_BASE_FLARE` was being computed in **three** separate
+ * places — `castleMasonry.ts`'s `CylinderGeometry`, this file's
+ * {@link CASTLE_TURRET_FOOTPRINT_RADIUS}, and {@link CASTLE_TOWERS}'s
+ * `radiusBottom` — and the mesh did not read the solid at all. They agreed only
+ * because three copies of one expression happened to be typed identically,
+ * which is CLAUDE.md's most expensive bug shape sitting one edit away from
+ * biting: re-flare the turret and the drawn stone moves while the collider and
+ * the slide's routing stay put.
+ *
+ * This is the first collider to land under `ART_DIRECTION.md` §7's Collider
+ * row — one owner for a mesh and its collider radius. The rule generalises:
+ * the *solid* publishes its radius, and the geometry and the collision both
+ * ask it.
+ */
+export const CASTLE_TURRET_BASE_RADIUS = TOWER_RADIUS * TOWER_BASE_FLARE;
+
+/**
  * **How wide a turret is**, for anything that has to keep out of one — a
  * collider, a keep-out disc, a bench scatter, the offset that pushes the roof
  * garden's turrets clear of its paving.
@@ -350,7 +372,7 @@ export const TOWER_BASE_FLARE = 1.08;
  * that grows must take its keep-out with it.
  */
 export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
-  TOWER_RADIUS * TOWER_BASE_FLARE,
+  CASTLE_TURRET_BASE_RADIUS,
   TOWER_RADIUS + TOWER_ROOF_OVERHANG,
 );
 
@@ -396,7 +418,7 @@ export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
       z,
       bottomY: BUILDING_BASE_Y,
       topY: BUILDING_BASE_Y + TOWER_HEIGHT,
-      radiusBottom: TOWER_RADIUS * TOWER_BASE_FLARE,
+      radiusBottom: CASTLE_TURRET_BASE_RADIUS,
       radiusTop: TOWER_RADIUS,
     });
     solids.push({

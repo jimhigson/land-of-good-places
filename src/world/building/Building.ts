@@ -2458,6 +2458,28 @@ function registerFacadeCollision(collision: CollisionWorld): void {
  * face and never inside one. That is the general rule for a faceted solid of
  * revolution, and worth applying to the next one.
  *
+ * ## One radius at every height, and why `topIsAbsolute` is not the answer here
+ *
+ * The obvious worry is that the stone she meets at head height is not the stone
+ * at her feet, which is exactly what `topIsAbsolute` exists for. Measured off
+ * the built `tower-bodies` mesh, the shaft has just two vertex rings:
+ *
+ * | ring | drawn radius |
+ * | --- | --- |
+ * | y 0.73 (its foot) | **2.2140** |
+ * | y 11.33 (its top) | 2.0500 |
+ *
+ * So it is a plain linear taper that gets **narrower** with height, and the
+ * widest stone at any height a child can occupy is the one at her feet. Her
+ * head at ~1.6 m stands at y 2.33, where the shaft is 2.189 — so a single
+ * collider at 2.214 never admits her inside drawn stone at any height, and
+ * holds her at most **25 mm** proud of it at head height.
+ *
+ * `topIsAbsolute` answers the opposite shape — a prop solid to feet on the
+ * floor and air to feet mid-jump, or a top she can stand on (`hotel/place.ts`).
+ * There is no reachable height band here where the right answer differs, so a
+ * banded collider would be machinery with nothing to do.
+ *
  * Infinity-topped, like the shell and the roof turrets: the body is 10.6 m with
  * a 4.2 m cone on it, and a 1.28 m jump apex has no business clearing that.
  */
@@ -2466,6 +2488,8 @@ function registerCastleTowerCollision(collision: CollisionWorld): void {
     // The roof cones sit on top of the bodies and share their axis, so the body
     // alone is the whole footprint a child can walk into.
     if (!tower.name.startsWith('tower-body-')) continue;
+    // `radiusBottom` is `CASTLE_TURRET_BASE_RADIUS`, which the drawn shaft is
+    // also built from — one owner, so the two cannot drift.
     collision.addCircle(tower.x, tower.z, tower.radiusBottom);
   }
 }
