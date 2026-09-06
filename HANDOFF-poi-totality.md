@@ -60,3 +60,41 @@ layout-entry redraw for a POI the player genuinely cannot reach (zero today).
 No generator code written yet. Next: refusal shape + trace + digest hashing
 + `check:every-seed-builds` scaffolding (needed whichever way the ruling
 goes), then the rung itself.
+
+## Finding 2 (6 Sep, later) — nobody walks `PoiGraph`'s edges
+
+`wanderDriver.ts` (#350): the random walk over the graph was deleted; `Journey`
+routes every child on the player's own `NavGrid` (`JourneyPlanner`, one grid per
+space). `neighbours` has no consumer outside `poiGraph.ts`. The edges exist only
+to compute `reachable`, which gates `spawnNodes()`/`nearest()`.
+
+So the one owner of "can a child get there" is NavGrid — the children's own
+planner — and the Architect's first ruling (edges follow the drawn lane) was
+made on the premise that children walk the graph. Reported; awaiting a ruling
+on: `PoiGraph.reachable := NavGrid can route here from the entrance`.
+
+Evidence the lane rule cannot work anyway: seed 13's cut is `gate-approach`
+crossing a 3.3 m deck transversely (six samples = the deck's width) with
+pushes 0.38–0.42 either side; seed 15's spur crosses a ramp sideways (push
+0.55/0.52). `bridgePavingHeightAt` clears neither (push@paving = push@deck at
+every refused sample). NavGrid's real routes: seed 15 rides the bridge along
+x≈34 lengthwise and steps off the ramp toe onto grass; seed 13 reaches the west
+pocket with no bridge at all, round the railway's west end along x≈−49.
+
+## Costs measured (seed 13, headless)
+
+- NavGrid construct: lazy, 0.1 ms. 224 `findRoute` calls from the entrance:
+  1416 ms (6.3 ms each) — a per-node route at boot is too slow; one flood is
+  the shape.
+- Plots+boundary only (`CollisionWorld` of plot footprints + `setPlayBounds`):
+  14 doormat routes 231 ms; `check:park-boot`'s slice ceiling is ~20 ms, and the
+  layout solves at import. A layout-time probe needs a flood or a coarser cell.
+
+## Scaffolding landed (9a4d1227)
+
+`check:every-seed-builds` (standalone workflow `every-seed-builds.yml`,
+bidirectional ratchet in `scripts/every-seed-builds-baseline.mts`, keyed on seed
+number; proved red three ways), `LAYOUT_TRACE` from `parkLayout.ts` on stderr,
+`trace` line in `scripts/park-digest.mts` (two processes identical on seed 6).
+
+Untracked probes in `scripts/_probe-*.mts` — do not commit.
