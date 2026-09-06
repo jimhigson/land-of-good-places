@@ -101,7 +101,27 @@ const { PARADE_MEMBER_RADIUS } = await import('../src/core/constants.ts');
 const { IsoCamera } = await import('../src/core/IsoCamera.ts');
 const { gameStore } = await import('../src/state/index.ts');
 const { shopItem } = await import('../src/world/building/shops/catalogue.ts');
+const { PARK_SEED } = await import('../src/world/parkManifest.ts');
+const { parkSeedSource } = await import('../src/world/parkSeedPool.ts');
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
+
+// **Say which park was measured, on every run, pass or fail.** Every clause in
+// this file is a statement about one generated park, and until #508 a Node
+// check silently drew a different one each run — so the same command gave a
+// different answer with no edit between, and nothing in the output said why.
+// Two separate agents then spent hours re-deriving "it is not the harness" from
+// frame counts, because a red log named a pet and a frame number but never the
+// park those belonged to. `drawn` here means the run is not repeatable and the
+// result is about whichever park came up; it must never appear under Node.
+//
+// **What that tripwire is and is not.** Seeing `drawn` under Node means #508's
+// `inNode()` early return in `resolveParkSeed` has been removed or broken —
+// that one branch, and nothing wider. It is not general assurance that the park
+// is the one you meant: this file measures **exactly one** park, the canonical
+// seed, 1 of the 16 in the pool, so a green run here is a statement about seed
+// 20260728 and no other while a child can draw any of the 16. That gap is #510;
+// this line makes it legible rather than closing it.
+console.log(`  park seed ${PARK_SEED} (${parkSeedSource()})`);
 
 // Live controls, as `check:slide-rider` uses: boarding the slide is a change of
 // space, and the ride does not start until the iris midpoint fires.
@@ -962,13 +982,22 @@ if (control.complaints.length === 0) {
 }
 
 if (failures.length > 0) {
-  console.error('check:pet-slide FAILED');
+  // The seed goes on the failure line as well as the opening one: a red log is
+  // what gets quoted into an issue, and quoted without the park it is about it
+  // reads as flakiness rather than as a finding about one seed. #507's two red
+  // seeds were each mistaken for a flake exactly this way.
+  console.error(`check:pet-slide FAILED on park seed ${PARK_SEED} (${parkSeedSource()})`);
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
 
 console.log(
-  `check:pet-slide ok — three companions rode all ${wired.ridingFrames} frames of the descent ` +
+  // The seed is on the green summary as well as on line 1 and on the failure,
+  // because **the misleading pass was the expensive half**: a red log at least
+  // gets read, while five green runs quoting different frame counts were read
+  // as one park behaving inconsistently for a whole evening.
+  `check:pet-slide ok on park seed ${PARK_SEED} (${parkSeedSource()}) — three companions rode ` +
+    `all ${wired.ridingFrames} frames of the descent ` +
     `behind her and in order, never more than ${wired.worstOffChute.toFixed(2)} m off the chute, ` +
     `lying down throughout (most upright ${wired.worstLie.toFixed(3)}, against ` +
     `${LYING_DOWN_DOT} required), never closer to her own body than ` +
