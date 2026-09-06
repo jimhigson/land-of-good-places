@@ -83,25 +83,56 @@ Verified in a real browser on 5392, `/arrive`, not assumed:
    today.
 
 
-## ⛔ RED, and the most serious of them: `check:park-pool`, 4 of 14 seeds
+## `check:park-pool` — root-caused, three seeds retired, seed 5 is the work
 
-```
-seed 5:   poi.stranded: 28 (no allowance — this is new)
-seed 115: poi.stranded: 15 (no allowance — this is new)
-seed 225: poi.stranded: 73 (no allowance — this is new)
-seed 346: poi.nospot: 2, poi.stranded: 1 (no allowance — both new)
-```
+**Was** 4 of 14 seeds failing (5, 115, 225, 346). 115, 225 and 346 are retired
+in their own commit — they are outside 0..15 and Jim's ruling covers them. **The
+pool is 11 and `check:park-pool` still fails on seed 5**, which is inside 0..15
+and cannot be retired.
 
-**It is this branch's**, measured: `origin/main` at `dd5b3b6b`, run in a scratch
-worktree, exits 0. The check's own words for what these are: *"these are parks a
-child can be given"*. The sphere lowers the ground away from the park's centre,
-and points of interest that used to have a reachable stand spot no longer do —
-the same four-steps-upstream shape as seed 288's bridge throw already written up
-further down this file, where a height threshold reads the ground.
+### The root cause, located
 
-This is the one that most obviously must be fixed before the sphere ships, and
-it is **not** in `pnpm run check` — it is its own script and nothing in the
-required chain will tell you about it. Run it.
+Measured on seed 5 with the real park built:
+
+- 236 waypoints placed, **208 in the main component, 28 in one pocket** spanning
+  radii 30.8 to 67.1 m — a long arc through the park's south-west.
+- The closest stranded/main pair is **2.48 m apart**, both in the garden, at
+  (4.3, −48.6) and (5.9, −50.5), and the straight line between them is blocked
+  the whole way, peaking at **0.678 m of push**.
+- It is **not the railway**: the block is 12.33 m from the rail centreline.
+- What is there is a chain of `topIsAbsolute` walls with **absolute tops
+  climbing 0.367, 1.243, 2.085, 2.894 m** along consecutive 2 m segments —
+  a **bridge's side wall (spandrel + parapet) going up its ramp**, which
+  `bridges.ts` pins to *"the local road surface plus the parapet"*.
+- At the blocked point the wall's absolute top is **1.24 m** and the terrain is
+  **−0.93 m**. On the old flat ground that wall stood 0.37 m over the grass at
+  the ramp foot; the sphere dropped the ground out from under it and it now
+  stands **1.30 m** over the ground beside it, walling off the path that runs
+  alongside.
+
+**The shared-cause test, run rather than argued:** with `GROUND_SPHERE_RADIUS`
+raised to 1200000 (flat) and nothing else changed, seeds 5, 115 and 225 all pass
+`check:park`. (Seed 346 throws in `ParkTrain` at that radius, so the probe says
+nothing about it — do not read its result.) So one cause, three seeds, and it
+survives the retirements in seed 5.
+
+**Where it belongs:** `src/world/train/bridges.ts` — `parapetHeightFor` already
+deletes the wall at ramp feet below `PARAPET_GONE_HUMP`, and that hump is
+measured against a terrain that has moved. This is the same subsystem and the
+same shape as three of the five `check:coplanar` findings, so it wants the same
+engineer.
+
+### A theory that was wrong, so nobody spends the hour again
+
+`poiGraph.ts`'s `isClear` stands its probe at `bridgeHeightAt(x, z) ?? 0` — a
+literal zero — and its own comment calls that *"exactly the old ground-level
+probe"*, which stopped being true the day the sphere landed. It is a real
+mismatch and it looks exactly like the cause. **It is not.** Standing the probe
+on `terrainHeight` in the garden (and keeping 0 for the interior spaces, whose
+own floors are hundreds of metres out) left seed 5 unchanged at 28 stranded and
+made **seed 225 worse, 73 to 84**. Reverted, unpushed. If someone fixes the
+probe height on principle later, that is fine — but it is not this bug, and it
+needs its own justification and its own measurement.
 
 ## The split: attempted, and it does not decompose the way the seams suggested
 
