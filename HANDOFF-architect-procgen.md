@@ -369,3 +369,40 @@ rewriting history.
   grepped). `rerere` had nothing recorded; nothing replayed.
 - A predecessor had merged `e080b753` (#585) rather than the tip; that
   in-progress merge was aborted and redone against `dd5b3b6b`.
+
+## Rulings, 6 Sep — step 2's four open questions (asked in `HANDOFF-procgen-step2.md`)
+
+1. **Arc nudges: delete with the radial ladders.** One search over
+   (lean, arc), nearest-first, lean-outer / arc-inner as built; the arc bound
+   is derived, `TRESTLE_SPACING / 2 − foot radius` (two neighbouring slots
+   can then never share ground), never a list. Confirmed as proposed.
+2. **Lean limit: `maxLean = tan(BRANCH_ANGLE) × trunkHeight`**, trunk height
+   from `forkPlan` (the `MIN_TRUNK_FRACTION` floor), owner
+   `trestleGeometry.ts`. Confirmed. A trunk may not lean further from
+   vertical than its own branches fork — that is the geometry's statement,
+   not a typed reach.
+3. **Headroom owner: the drawn bus, and the constant must equal it.**
+   `CAT_BUS_TOP` 5.98 m versus a drawn box of 6.15 m is the two-definitions
+   disease exactly (a constant asserting it matches a mesh). Anything drawn
+   is solid, ears included, so the headroom is the drawn top. Resolution:
+   the bus asset's own owner (`catBus.ts` — take the sphere branch's
+   `CAT_BUS_BODY_TOP_Y` if it is *derived* from the drawn geometry; if it is
+   another typed number, derive it) is what the corridor claim's `headroom`
+   reads, and `check:swept-bus` keeps measuring the drawn `Box3`
+   **independently** and gains one line asserting the owner equals the
+   drawn top within float slack — so the 0.17 m gap can never reopen
+   silently. Do not widen the claim by a margin to cover the gap.
+4. **The four legacy predicates stay behind the one predicate function,
+   registry asked first.** Confirmed, with two conditions: a refusal names
+   *which* predicate refused (registry blockers by feature name; a legacy
+   predicate by its own name, e.g. `legacy:distanceToPath`), so stage 5 can
+   see what is left to migrate from the traces rather than from the code;
+   and the count of refusals-by-legacy-predicate is printed to stderr per
+   seed as a coverage line, "0 — the registry decided every slot" when so.
+
+Not a ruling, a correction for the record: the placer **throwing** on a
+refused duck-bar slot (`track.ts` ~L1552, "refused by …") is the interim
+step 2 was allowed — it is loud and names its blockers — but under the
+totality ruling a throw on a seed's geometry is the bug; step 4 converts
+it to a refusal returned to the scheduler. Step 2 should not spend time
+on that conversion, only keep the message carrying the blockers by name.
