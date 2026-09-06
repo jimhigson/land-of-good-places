@@ -345,7 +345,19 @@ function footprintsOverlap(a: Candidate, b: Candidate): boolean {
   return true;
 }
 
-function selectSpaced(candidates: readonly Candidate[]): CrossingSite[] {
+/**
+ * @param forced Sites the network has *demanded* — proven at a rail distance a
+ * committed path actually crosses at. They seed the keep list, so everything
+ * else spaces itself around them by the rule below rather than the other way
+ * round. **A demanded site is not a bypass of the spacing, footprint and warp
+ * rules; it is a must-keep input to the same selection** — which is why this is
+ * still one function and not a second, laxer one for demands.
+ *
+ * With no demands `forced` is empty and every line below runs exactly as it
+ * always did. That is deliberate and is the branch's byte-identity proof: the
+ * fourteen pool seeds that foul nothing must produce the same park to the byte.
+ */
+function selectSpaced(candidates: readonly Candidate[], forced: readonly Candidate[] = []): CrossingSite[] {
   const route = TRAIN_PLAN.route;
   const scored = [...candidates].sort(
     (a, b) =>
@@ -377,8 +389,14 @@ function selectSpaced(candidates: readonly Candidate[]): CrossingSite[] {
   // in this PR because it would change site selection on every seed, which is
   // exactly the kind of change that invalidates the baked warp vectors this
   // branch has already had to re-search twice.
-  const kept: Candidate[] = [];
+  // The demanded sites go in first and unconditionally. Ordinary candidates
+  // then space themselves around them through the identical test below, so a
+  // demand never *adds* a site to a published list — it changes the input to
+  // one pure solve, which is the whole point of the recovery contract.
+  const kept: Candidate[] = [...forced];
   for (const candidate of scored) {
+    // A candidate the march found at (or beside) a demanded distance is already
+    // represented by the forced entry; the spacing test below drops it.
     const tooClose = kept.some(
       (other) =>
         Math.abs(
@@ -437,6 +455,56 @@ export function explainBridgeRefusal(railDistance: number): string[] {
 
 export interface SolvedCrossingSites {
   readonly bridges: readonly CrossingSite[];
+  /** The demands this solve was asked to serve, after rounding (see
+   *  {@link roundDemands}) — empty on a seed where nothing crossed off-site. */
+  readonly demands: readonly number[];
+  /** Demanded distances {@link bridgeCandidateAt} could prove a bridge at, and
+   *  which are therefore force-kept in {@link SolvedCrossingSites.bridges}. */
+  readonly served: readonly number[];
+  /** Demanded distances no bridge can be proven at. The router's next rung is a
+   *  re-route; a producer with no re-route decision fails by name. */
+  readonly unservable: readonly number[];
+}
+
+/**
+ * **Two demands closer together than one site's spacing are one demand.**
+ *
+ * {@link SITE_SPACING} is the rule that two bridges nearer than 24 m along the
+ * loop fight over the same ground, so asking for two of them is asking for
+ * something the selection would refuse anyway. Rounding here rather than in the
+ * router is deliberate (contract point 2): the router reports *where the drawn
+ * curve crossed*, and what that means for the site list is the solve's business.
+ *
+ * It is also what makes the loop's iteration bound derivable rather than typed —
+ * every accepted demand consumes at least `SITE_SPACING` of the loop, so there
+ * can never be more than `loopLength / SITE_SPACING` of them.
+ */
+function roundDemands(demands: readonly number[]): number[] {
+  const route = TRAIN_PLAN.route;
+  const out: number[] = [];
+  // Ascending, so the result is a function of the *set* and not of the order
+  // fouls happened to be found in — order-independence, contract point 7.
+  for (const d of [...demands].map((x) => route.wrap(x)).sort((a, b) => a - b)) {
+    const merged = out.some(
+      (kept) =>
+        Math.abs(route.wrap(d - kept + route.length / 2) - route.length / 2) < SITE_SPACING,
+    );
+    if (!merged) out.push(d);
+  }
+  return out;
+}
+
+/** The most demands that can ever be accepted, and therefore the most times the
+ *  path/site loop can go round: each one consumes {@link SITE_SPACING} of the
+ *  loop. Derived, never typed — a bound somebody picked would be a threshold
+ *  nobody could defend when a seed reached it. */
+export function maxCrossingDemands(): number {
+  return Math.ceil(TRAIN_PLAN.route.length / SITE_SPACING);
+}
+
+function write(line: string): void {
+  const p = (globalThis as { process?: { stderr?: { write: (s: string) => void } } }).process;
+  p?.stderr?.write(line);
 }
 
 /**
@@ -448,8 +516,35 @@ export interface SolvedCrossingSites {
  * between candidates cannot change the result: every candidate is a pure
  * function of its own rail distance and the already-solved layout.
  */
-export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, void> {
+export function* crossingSitesSearch(
+  demands: readonly number[] = [],
+): Generator<number, SolvedCrossingSites, void> {
   const route = TRAIN_PLAN.route;
+
+  // **The demands are proven first**, so the march's own candidates space
+  // themselves around the places the network actually needs to cross rather
+  // than the network having to make do with wherever the march happened to
+  // like the ground. `bridgeCandidateAt` is the existing exploration query —
+  // the same one the march below uses — asked at a distance a committed path
+  // was measured crossing at.
+  const rounded = roundDemands(demands);
+  const forced: Candidate[] = [];
+  const served: number[] = [];
+  const unservable: number[] = [];
+  for (const d of rounded) {
+    // A demand does not bypass the warp ban: `banCrossingsAt` bans sites, and
+    // a demand that overrode it would be the "field that adds one" the design
+    // forbids by name. A banned demand is simply unservable, and the router's
+    // next rung is a re-route.
+    const candidate = crossingSiteBanned(d) ? null : bridgeCandidateAt(d);
+    if (candidate) {
+      forced.push(candidate);
+      served.push(d);
+    } else {
+      unservable.push(d);
+    }
+  }
+
   const bridgeCandidates: Candidate[] = [];
   for (let d = 0; d < route.length; d += MARCH_STEP) {
     yield d;
@@ -460,7 +555,29 @@ export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, v
     const bridge = bridgeCandidateAt(d);
     if (bridge) bridgeCandidates.push(bridge);
   }
-  const bridges = selectSpaced(bridgeCandidates);
+  const bridges = selectSpaced(bridgeCandidates, forced);
+
+  // **Every run says what it did, including the run that did nothing.** A
+  // recovery loop that silently no-ops reads exactly like one that had nothing
+  // to recover from, and telling those apart is the whole reason the sample
+  // count exists one level up. So "0 demands" is printed, not omitted.
+  if (rounded.length === 0) {
+    write(`crossing sites: 0 demands, ${bridges.length} site(s) solved\n`);
+  } else {
+    const point = new Vector3();
+    write(
+      `crossing sites: ${rounded.length} demand(s) (${demands.length} raw), ` +
+        `${served.length} proven, ${unservable.length} unservable, ` +
+        `${bridges.length} site(s) solved\n`,
+    );
+    for (const d of rounded) {
+      route.pointAt(d, point);
+      write(
+        `  demand railD ${d.toFixed(1)} at (${point.x.toFixed(1)}, ${point.z.toFixed(1)}): ` +
+          `${served.includes(d) ? 'PROVEN, force-kept' : 'UNSERVABLE — no bridge fits here'}\n`,
+      );
+    }
+  }
   // Zero bridge sites is an invalid park, full stop — there is no level
   // tier to fall back to (Jim, 2 Sep 2026: a path crosses the railway on a
   // bridge or not at all), and every route the paths could take across the
@@ -474,14 +591,14 @@ export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, v
         'or drop it from the pool. All sixteen pool seeds prove at least one site.',
     );
   }
-  return { bridges };
+  return { bridges, demands: rounded, served, unservable };
 }
 
 
 /** The same search, driven straight through — Node, the harness and any
  * boot that did not pre-warm. */
-export function solveCrossingSites(): SolvedCrossingSites {
-  const search = crossingSitesSearch();
+export function solveCrossingSites(demands: readonly number[] = []): SolvedCrossingSites {
+  const search = crossingSitesSearch(demands);
   for (;;) {
     const step = search.next();
     if (step.done) return step.value;
