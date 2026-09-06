@@ -9604,11 +9604,75 @@ const railRaceSupportsAreClaimedAsDrawn: Invariant = (facts) => {
   return wrong;
 };
 
+/**
+ * **The road's corridor claim covers the whole run the bus drives.**
+ *
+ * Found on pool seed 14, 6 September 2026: the kerb's claim ran x −14.5 … 14.9
+ * (`kerbReach` clips the kerb where the road's inner edge re-enters the park
+ * boundary) while the bus drove to x = −22 with its body reaching −29.3, and
+ * every one of the five trestle posts `check:swept-bus` found inside the bus
+ * stood at x −17 … −20 — past the end of the claimed road. The registry had
+ * answered honestly about ground nobody claimed: the trestle placer asked, was
+ * allowed, and the bus then drove off the road and through the support.
+ *
+ * So the rule, measured here on every seed: every point of the bus's run —
+ * as wide as the bus, from where its body first appears to where it vanishes,
+ * read from the arrival's own owners — lies inside the road's committed
+ * corridor claims. Sampled along the run at every `PLAYER_RADIUS`, across it at
+ * both edges and the centre; the threshold is the game's (a child's half-width
+ * is the finest thing the road is ever asked to carry), not the generator's.
+ * A run that leaves the claim is reported with the first metre that does.
+ */
+const theRoadClaimCoversTheBusRun: Invariant = (facts) => {
+  const { claimed } = facts.roadCorridor;
+  const run = facts.busRun;
+  const corridors = claimed.filter((claim) => claim.kind === 'corridor');
+  if (corridors.length === 0) {
+    return [`seed ${facts.seed}: the road claimed no corridor, so nothing covers the bus's run`];
+  }
+  const inside = (x: number, z: number): boolean =>
+    corridors.some((claim) => {
+      const s = claim.shape;
+      if (s.shape === 'disc') return Math.hypot(x - s.x, z - s.z) <= s.radius;
+      return pointToSegment([x, z], [s.x1, s.z1], [s.x2, s.z2]) <= s.halfWidth;
+    });
+  const length = Math.hypot(run.x2 - run.x1, run.z2 - run.z1);
+  const ux = (run.x2 - run.x1) / length;
+  const uz = (run.z2 - run.z1) / length;
+  const nx = -uz;
+  const nz = ux;
+  let samples = 0;
+  let uncovered = 0;
+  let first: readonly [number, number] | null = null;
+  for (let along = 0; along <= length; along += PLAYER_RADIUS) {
+    for (const across of [-run.halfWidth, 0, run.halfWidth]) {
+      const x = run.x1 + ux * along + nx * across;
+      const z = run.z1 + uz * along + nz * across;
+      samples += 1;
+      if (inside(x, z)) continue;
+      uncovered += 1;
+      if (first === null) first = [x, z];
+    }
+  }
+  process.stderr.write(
+    `  theRoadClaimCoversTheBusRun seed ${facts.seed}: ${samples} samples along a ` +
+      `${length.toFixed(1)} m run, ${uncovered} outside the road's claim\n`,
+  );
+  if (uncovered === 0) return [];
+  return [
+    `seed ${facts.seed}: the bus drives ${uncovered} of ${samples} sampled points outside the ` +
+      `road's corridor claim, first at ${fmt(first as readonly [number, number])} — the bus ` +
+      `leaves the road, and whatever the registry allowed on that ground (a trestle, a tree) ` +
+      `the bus then drives through. The claim must cover the run the vehicle drives.`,
+  ];
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],
   ['every Rail Race support is claimed exactly as it is drawn', railRaceSupportsAreClaimedAsDrawn],
+  ["the road's corridor claim covers the whole run the bus drives", theRoadClaimCoversTheBusRun],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
   ["nothing grows in the lane but the park's own trees", nothingGrowsInTheLaneButTheParksOwnTrees],

@@ -561,6 +561,20 @@ export interface ParkFacts {
   /** Each Rail Race ring's supports, claimed and drawn — see {@link RailRaceSupportFacts}. */
   readonly railRaceSupports: readonly RailRaceSupportFacts[];
   /**
+   * The run the cat bus actually drives, as a capsule: from where its body
+   * first appears to where it vanishes, along the kerb line, as wide as the
+   * bus. Read from the arrival's own owners (`entrance/layout.ts`,
+   * `entrance/catBus.ts`), never restated, so an invariant can ask whether
+   * the road's corridor claim covers every metre of it.
+   */
+  readonly busRun: {
+    readonly x1: number;
+    readonly z1: number;
+    readonly x2: number;
+    readonly z2: number;
+    readonly halfWidth: number;
+  };
+  /**
    * Headroom under the finish rainbow, per ring per lane — see
    * {@link ArchClearanceFact}.
    *
@@ -2869,10 +2883,27 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
   }
 
+  // The bus's run, from the same owners `ArrivalSequence.placeBus` and
+  // `check:swept-bus` read: it rolls in from `ENTRANCE_BUS_ARRIVE_X` and drives
+  // off past `ENTRANCE_BUS_VANISH_X` along `ENTRANCE_BUS_STOP_Z`, and its body
+  // reaches half its own length beyond each of those.
+  const { ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_STOP_Z, ENTRANCE_BUS_VANISH_X } = await import(
+    '../../src/world/entrance/layout.ts'
+  );
+  const { CAT_BUS_LENGTH, CAT_BUS_WIDTH } = await import('../../src/world/entrance/catBus.ts');
+  const busRun = {
+    x1: Math.max(ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_VANISH_X) + CAT_BUS_LENGTH / 2,
+    z1: ENTRANCE_BUS_STOP_Z,
+    x2: Math.min(ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_VANISH_X) - CAT_BUS_LENGTH / 2,
+    z2: ENTRANCE_BUS_STOP_Z,
+    halfWidth: CAT_BUS_WIDTH / 2,
+  };
+
   return {
     roadCorridor,
     castleTurrets,
     railRaceSupports,
+    busRun,
     laneCarriageway,
     laneGreenery,
     laneRoadHalfWidth: ROAD_HALF_WIDTH,
