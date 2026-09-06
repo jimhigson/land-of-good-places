@@ -2427,13 +2427,36 @@ function registerFacadeCollision(collision: CollisionWorld): void {
  *
  * **The radius is the tower body's own flared foot, read off {@link CASTLE_TOWERS}**
  * — one owner for the mesh, the slide's routing and this collider, so a turret
- * that is moved or re-flared takes its collision with it. Deliberately *not*
- * `CASTLE_TURRET_FOOTPRINT_RADIUS` (2.45), which `registerRoofTurretCollision`
- * uses: that is the wider *cone*, and out here the cone begins 10.6 m up where
- * no child reaches. Standing her 0.24 m off visible stone is a smaller fault
- * than letting her through it, but it is still one. (She is kept clear of the
- * cone's footprint either way — held at 2.83 m from the axis, she is already
- * outside its 2.45 m.)
+ * that is moved or re-flared takes its collision with it.
+ *
+ * Deliberately **not** `CASTLE_TURRET_FOOTPRINT_RADIUS` (2.45), which
+ * {@link registerRoofTurretCollision} uses, and the reason is measured off the
+ * built meshes rather than argued:
+ *
+ * | mesh | height span | max radius |
+ * | --- | --- | --- |
+ * | `tower-bodies` | y 0.73 - 11.33 | **2.2140** |
+ * | `tower-roofs`  | y 11.33 - 15.53 | 2.4500 |
+ *
+ * 2.45 is the *cone's* radius and the cone starts **10.6 m above the tower's
+ * base** — ten metres over a child's head. At every height she can occupy the
+ * drawn stone is 2.214 or less, so a 2.45 collider would hold her 0.236 m off
+ * visible stone: an invisible wall, which is the same mesh-versus-collider
+ * disagreement issue #562 is about, pointed the other way. Walking through
+ * stone is the worse fault; standing away from it is still a fault.
+ *
+ * `CASTLE_TOWERS[i].radiusBottom` is not a recomputation of
+ * `TOWER_RADIUS * TOWER_BASE_FLARE` — it is the field where that product is
+ * published once, and the same data `Shell.ts` composes the instance matrices
+ * from. Measured: the drawn `tower-bodies` mesh's max radius is 2.2140, equal
+ * to `radiusBottom` exactly.
+ *
+ * **The shaft is a 16-segment cylinder, so the collider takes the
+ * circumradius**, which is what keeps a circular collider from ever sitting
+ * *inside* the drawn surface: the flats of a 16-gon lie at `cos(pi/16)` =
+ * 0.98079 of the circumradius, so she is held at most 43 mm proud of a flat
+ * face and never inside one. That is the general rule for a faceted solid of
+ * revolution, and worth applying to the next one.
  *
  * Infinity-topped, like the shell and the roof turrets: the body is 10.6 m with
  * a 4.2 m cone on it, and a 1.28 m jump apex has no business clearing that.
