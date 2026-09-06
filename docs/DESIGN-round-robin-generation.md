@@ -243,6 +243,45 @@ lane rule can express.
 5. Seed 12 (`anchor.reach:waterFight`, built 19.5 m vs declared 18.5 m)
    remains its own item — declared-versus-built, in the plot's builder.
 
+**Condition discharged, extension confirmed (6 Sep).** `NavGrid.reachableFrom`
+(`2da54979`) floods exactly the steps `findRoute` searches — `forEachStep`
+is the single owner of what a step is, and `search` walks it too — and
+agrees with per-waypoint `findRoute` on **224/225/245** waypoints across
+seeds 13, 15, 0 with zero disagreements, answers false off-park, leaves
+`check:park`'s routing findings identical, in 7 ms against 1.0–1.4 s.
+NavGrid does not over-approximate; it correctly refuses the transverse
+crossings. **Extension confirmed**: a node is placed at **NavGrid's
+nearest standable cell** — `nospot` is `stranded` asked at placement
+time, same owner.
+
+**What the true definition finds — real defects, not classifier noise**,
+and where each belongs:
+
+- Seed 13, 4 of 224 route samples standing **inside a collider**: two at
+  the deck edge of the gate approach's transverse crossing, one on the
+  ramp crossing, one inside the lineside fence's stamp on
+  `spur-waterFight`. Seed 6, 8 of 271, including a station stand at
+  (−25.0, 16.6) inside the fence stamp.
+- **Seed 6, four gate-approach samples on the railway** at x = 0,
+  z 34.8–46.3, rail distance 0.3–1.8 m, **with no deck under them** — the
+  drawn lane of that crossing does not lie on its own bridge's deck.
+
+The second is the crossing family's, seen from the other end, and it is
+folded into the commit-time crossing predicate now: **a crossing that
+snaps to a site is still a foul if any of its drawn samples inside the
+rail corridor is not covered by that site's deck footprint** (the deck's
+own owner, `bridgeFootprint` / `bridgeHeightAt` non-null). Same predicate,
+one more clause; the recovery contract's rungs apply unchanged (re-route
+the lane onto its deck; on-demand site; named failure). The samples
+inside colliders are the same disease one class over — a drawn route
+standing in something solid — and are the universal invariant's; the POI
+rung reports them by name and does not move a placement for them.
+
+The rung therefore takes the class from five red seeds to **a handful of
+genuine defects, named** — a better result than zero, because what
+remains is real.
+
+
 **On the record**: this is the third premise this engineer has corrected
 by reading the code rather than the document, and each correction made
 the design simpler. The Architect's error both times was inferring a

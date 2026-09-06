@@ -88,7 +88,10 @@ first honest run found #501).
   edges (Journey routes on NavGrid, #350); `PoiGraph.reachable :=
   NavGrid can route from the entrance` — one instrument; edges at most a
   prefilter. Conditional: if NavGrid over-approximates at transverse
-  deck crossings, that is a NavGrid bug fixed in the same PR. First
+  deck crossings, that is a NavGrid bug fixed in the same PR. Condition DISCHARGED
+  (`reachableFrom` = `findRoute`'s steps, 0 disagreements); node placement
+  = NavGrid nearest standable cell (confirmed). New clause in the crossing
+  predicate: samples in the corridor must be on the deck (seed 6). First
   ruling (edges follow the drawn route) withdrawn — premise inferred
   from an import;
   `poi.stranded` restated as NPC-reach ⊇ player-reach; layout redraw

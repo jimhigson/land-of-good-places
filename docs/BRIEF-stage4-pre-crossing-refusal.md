@@ -75,6 +75,14 @@ two-definitions disease and is a rejection even while green.
   fixed candidate order and the seed, never from map iteration. Two
   builds per seed in separate processes, identical.
 
+## One more clause in the predicate (6 Sep, from the POI rung's measurement)
+
+A crossing that snaps to a site is **still a foul if any drawn sample of
+it inside the rail corridor is not on that site's deck** (deck footprint /
+`bridgeHeightAt` non-null — the deck's own owner). Seed 6's gate approach
+has four such samples at x = 0, z 34.8–46.3 with no deck under them. Same
+predicate, one more clause; same rungs.
+
 ## Recovery — the contract (Architect, 6 Sep; the design doc's numbered
 list is the spec, this is the checklist)
 
