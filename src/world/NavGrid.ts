@@ -733,16 +733,24 @@ export class NavGrid {
     // clamp cannot disagree about where the park ends. If they ever do,
     // tap-to-move routes to somewhere walking refuses to go.
     // The boundary band — every cell outside the park or within a walker of
-    // its edge — the same set `distanceToEdge(x, z) < walkerRadius` describes,
-    // built the way every wall's band is: the edge is a closed polyline
-    // (`outline()`, the very points `distanceToEdge` measures against), so
-    // `stampSegment` each segment at the walker's radius, and block what
-    // `contains` says is outside. Asking `distanceToEdge` per cell instead
-    // scans the spline's 512 vertices 134k times: measured 189 ms of a 195 ms
-    // lattice build, paid by the player's grid, every journey grid and the
-    // layout's doormat probe alike. Proved cell-for-cell identical to the
-    // per-cell distance on the real park before landing (see `check:nav-routes`
-    // for the ongoing control).
+    // its edge — the set `distanceToEdge(x, z) < walkerRadius` describes,
+    // built the way every wall's band is: block what `contains` says is
+    // outside, then `stampSegment` each segment of `outline()` at the
+    // walker's radius. Asking `distanceToEdge` per cell instead scans the
+    // spline's 512 vertices 134k times: measured 189 ms of a 195 ms lattice
+    // build, paid by the player's grid, every journey grid and the layout's
+    // doormat probe alike.
+    //
+    // **Equivalent, not identical by construction.** For the park's spline,
+    // `outline()` and `distanceToEdge` read the same 512-sample table, so they
+    // are one curve. For a circle boundary they are not: the outline is an
+    // inscribed 512-gon, so a cell can sit up to r(1 - cos(pi/512)) inside the
+    // true circle's band and outside the polygon's — 0.57 mm at r = 30, 2.3 mm
+    // at r = 120, against a 500 mm cell. Small, and empirical, which is why
+    // `check:nav-routes`'s band clause compares every cell centre of a
+    // colliders-free lattice against the per-cell rule on every run (exact on
+    // the spline, within that chord error on a circle) and fails naming the
+    // cell. That clause is the guard; this comment is not.
     for (let cz = 0; cz < side; cz += 1) {
       const z = this.originZ + cz * CELL;
       const row = cz * side;
@@ -1586,6 +1594,28 @@ export class NavGrid {
     const cz = this.rowOf(z);
     if (cx < 0 || cz < 0 || cx >= this.cells || cz >= this.cells) return -1;
     return cz * this.cells + cx;
+  }
+
+  /**
+   * Every cell centre of the lattice with whether it is blocked — the
+   * lattice's own geometry, for a check that must compare it cell-for-cell
+   * against a rule (`check:nav-routes`'s band clause). Re-deriving the cell
+   * layout in the check is how a first control compared different points and
+   * reported 104 phantom disagreements; the one owner of where a cell is, is
+   * here.
+   */
+  forEachCellCentre(
+    sample: GroundSampler,
+    visit: (x: number, z: number, blocked: boolean) => void,
+  ): void {
+    if (!this.ensureLattice(sample)) return;
+    for (let cz = 0; cz < this.cells; cz += 1) {
+      const z = this.originZ + cz * CELL;
+      const row = cz * this.cells;
+      for (let cx = 0; cx < this.cells; cx += 1) {
+        visit(this.originX + cx * CELL, z, this.blocked[row + cx] === 1);
+      }
+    }
   }
 
   /**

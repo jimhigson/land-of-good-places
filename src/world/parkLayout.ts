@@ -414,11 +414,14 @@ export interface LayoutRefusal {
  * rung's, named there by coordinate. What this sees, this answers, by
  * redrawing a plot rather than moving anything to satisfy a measurement.
  *
- * `LGP_LAYOUT_REFUSE=<id>` (Node only, exactly as `paths.ts`'s debug hooks:
- * a `globalThis.process` read that is `undefined` in a browser, so there is
- * no switch to reach in a shipped build) forces that entry's first attempt
- * to be refused — the red proof that the ladder above moves. `<id>:always`
- * refuses every attempt, which walks rungs 2 and 3 and the final throw.
+ * `LGP_LAYOUT_REFUSE=<id>[:<n>|always]` forces that entry's next `n` probes
+ * to be refused — the red proof that the ladder above moves. **The hook's
+ * text ships** (it is in `dist/assets/parkLayout-*.js`); what makes it inert
+ * for a player is that nothing in the bundle defines a `process` global and
+ * the read is `globalThis.process?.env?.[…]` under a `try`, so it resolves to
+ * `null` — exactly as `paths.ts`'s `LGP_DEBUG_STREETS` and `parkWarp.ts`'s
+ * `LGP_WARP`. Anything that ever introduces a `process` global in the browser
+ * would arm every one of these hooks at once; that is the thing to check for.
  */
 function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
   const world = new CollisionWorld();
@@ -586,8 +589,9 @@ function nearestPlot(x: number, z: number, columns: PlotColumns, exceptId: strin
 /**
  * The `LGP_LAYOUT_REFUSE=<id>[:<count>]` hook, parsed once: refuse `<id>`'s
  * doormat the first `<count>` times it is probed (default 1; `always` for
- * every time). `null` everywhere but Node — `globalThis.process` does not
- * exist in a browser, so a shipped build has no switch to reach.
+ * every time). `null` wherever `globalThis.process` is undefined — a browser
+ * with no `process` global defined by anything in the bundle, which is the
+ * shipped park today (see {@link doormatRefusals}).
  */
 function forcedRefusal(): { entry: string; remaining: number } | null {
   return forcedRefusalState;
