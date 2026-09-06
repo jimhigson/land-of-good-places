@@ -3940,6 +3940,35 @@ if (!lobbyShellForDisco) {
  * Islands are reported by size and centre, in the room's own local metres, so
  * the failure names the place to go and stand.
  */
+/**
+ * Pockets of floor that are already cut off, per room, on the day probe 31 was
+ * written — and **only** so that the probe can land without hiding what it
+ * found.
+ *
+ * This is the same ratchet `check:coplanar` and `check:swept-bus` use, and it
+ * carries their rule: **an entry here means "already wrong before this gate
+ * existed", never "acceptable".** A number that goes up is a failure; a number
+ * that goes down prints a line telling you to lower it, so an improvement
+ * cannot quietly rot back. Nothing was added here to make this branch pass —
+ * issue #583's own 347 cells were **fixed**, not declared, and the suite is
+ * absent from this list because it now has none.
+ *
+ * Every one of these is the same disease as #583, smaller: furniture and a wall
+ * leaving a gap narrower than the 1.24 m child who has to walk through it. They
+ * are recorded rather than fixed here because each is a visible change to a
+ * room this ticket was not about, and moving lobby or garden furniture is Jim's
+ * call and wants its own eyes on it. Measured islands, at the time of writing:
+ *
+ * - `hotel.lobby` — 2.5 m² at local x -11.75..-10.75, z 9.85..12.35;
+ *   1.5 m² at x -10.25..-8.75, z 7.35..7.85; and a symmetric 0.8 m² pair in the
+ *   far corners at x ±11.75, z -24.15..-23.15.
+ * - `hotel.garden` — 3.0 m² at local x 9.85..11.35, z -6.75..-5.75.
+ */
+const KNOWN_UNREACHABLE_CELLS: Readonly<Record<string, number>> = {
+  'hotel.lobby': 22,
+  'hotel.garden': 12,
+};
+
 const REACH_CELL = 0.5;
 let roomsFlooded = 0;
 let roomsSkipped = 0;
@@ -4087,15 +4116,28 @@ for (const room of ROOMS) {
     );
     continue;
   }
-  problems.push(
-    `probe 31: ${room.space} has ${confirmed} standable cells ` +
-      `(${(confirmed * REACH_CELL * REACH_CELL).toFixed(1)} m² of floor) that the router cannot reach ` +
-      `from where the player walks in at local (${entryLocalX.toFixed(2)}, ${entryLocalZ.toFixed(2)}) — ` +
-      `centred on local (${(sumX / marooned).toFixed(2)}, ${(sumZ / marooned).toFixed(2)}), ` +
-      `e.g. local (${sample!.x.toFixed(2)}, ${sample!.z.toFixed(2)}). ` +
-      `A child tapping there is ignored: the walk is planned, finds no route, and ends where she stands`,
-  );
-  reachSummaries.push(`${room.space}: ${confirmed} cells UNREACHABLE`);
+  const allowed = KNOWN_UNREACHABLE_CELLS[room.space] ?? 0;
+  const where =
+    `(${(confirmed * REACH_CELL * REACH_CELL).toFixed(1)} m² of floor) that the router cannot reach ` +
+    `from where the player walks in at local (${entryLocalX.toFixed(2)}, ${entryLocalZ.toFixed(2)}) — ` +
+    `centred on local (${(sumX / marooned).toFixed(2)}, ${(sumZ / marooned).toFixed(2)}), ` +
+    `e.g. local (${sample!.x.toFixed(2)}, ${sample!.z.toFixed(2)})`;
+  if (confirmed > allowed) {
+    problems.push(
+      `probe 31: ${room.space} has ${confirmed} standable cells ${where}` +
+        (allowed > 0 ? `, up from the ${allowed} already declared` : '') +
+        `. A child tapping there is ignored: the walk is planned, finds no route, ` +
+        `and ends where she stands. See KNOWN_UNREACHABLE_CELLS`,
+    );
+    reachSummaries.push(`${room.space}: ${confirmed} cells UNREACHABLE (declared ${allowed})`);
+  } else if (confirmed < allowed) {
+    reachSummaries.push(
+      `${room.space}: ${confirmed} cells cut off, DOWN from the ${allowed} declared — ` +
+        `lower KNOWN_UNREACHABLE_CELLS to ${confirmed} so it cannot creep back`,
+    );
+  } else {
+    reachSummaries.push(`${room.space}: ${confirmed} cells cut off, as declared — ${where}`);
+  }
 }
 
 // Put the play bounds back where the rest of the file expects them.
