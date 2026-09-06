@@ -93,10 +93,11 @@ function attempt(o: Options): Outcome {
  * How finely {@link highest} resolves a threshold. It returns `lo`, the tallest
  * wall it *proved* flyable, so a measurement is a lower bound on the truth
  * understated by up to this much — which is why the assertions below compare
- * against it. Anything finer is quantisation noise, not the game: at
- * half=0.15 the fitted `measuredHopCeiling()` line and the measurement are the
- * same number to 3 dp (1.112 m), and a strict `>` comparison there fires on a
- * float difference of 1e-16.
+ * against it. Anything finer is quantisation, not the game: at half=0.15 the
+ * fitted `measuredHopCeiling()` line sits 0.4 mm *above* the measurement —
+ * both read 1.112 m to 3 dp — which is less than one bisection step, so a
+ * strict `>` comparison there would fail on the grid the measurement is
+ * quantised to rather than on anything about the jump.
  */
 const BISECTION_RESOLUTION = 0.001;
 
@@ -285,11 +286,20 @@ if (problems.length > 0) {
   );
   process.exitCode = 1;
 } else {
+  const tightest = Math.min(
+    ...rows.map((r) => r.clean - measuredHopCeiling(2 * (r.halfThickness + PLAYER_RADIUS))),
+  );
   console.log(
-    `\nOK: apex matches MEASURED_HOP_APEX to ${APEX_TOLERANCE} m; measuredHopCeiling() is a ` +
-      `lower bound at all ${rows.length} measured points (tightest margin ` +
-      `${Math.min(...rows.map((r) => r.clean - measuredHopCeiling(2 * (r.halfThickness + PLAYER_RADIUS)))).toFixed(3)} m); ` +
-      `MAX_AUTO_HOP_HEIGHT ${MAX_AUTO_HOP_HEIGHT.toFixed(2)} m clears the worst clean crossing ` +
-      `${worstClean.toFixed(3)} m by ${(worstClean - MAX_AUTO_HOP_HEIGHT).toFixed(3)} m.`,
+    `\nOK, and what that covers:\n` +
+      `  - all ${rows.length} points measured a real number (none NaN)\n` +
+      `  - the jump apex ${JUMP_APEX_HEIGHT.toFixed(4)} m still matches MEASURED_HOP_APEX ` +
+      `to within ${APEX_TOLERANCE} m\n` +
+      `  - measuredHopCeiling() is a lower bound at every point; tightest margin ` +
+      `${(tightest * 1000).toFixed(1)} mm, against a ${BISECTION_RESOLUTION * 1000} mm ` +
+      `measurement resolution (it touches the measurement exactly at half=0.15)\n` +
+      `  - MAX_AUTO_HOP_HEIGHT ${MAX_AUTO_HOP_HEIGHT.toFixed(2)} m sits under the worst clean ` +
+      `crossing ${worstClean.toFixed(3)} m by ${((worstClean - MAX_AUTO_HOP_HEIGHT) * 1000).toFixed(1)} mm\n` +
+      `  - NOT covered: whether the park's actual colliders obey these numbers — that is ` +
+      `check:park, via CollisionWorld.checkHoppableColliders`,
   );
 }
