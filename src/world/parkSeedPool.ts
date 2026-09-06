@@ -51,14 +51,14 @@ import { SAVE_KEY } from '../state/save';
  * cannot make a good park from is a generator bug, not a seed to swap.
  *
  * The canonical seed — the park Node builds by default, the one every
- * canonical-only check measures — is **14, provisionally**. Measured on 6 Sep
- * 2026 (`check:park-pool`, hill geometry): 14 is the one seed of the sixteen
- * that builds end to end today, so it is the one the forty canonical-only
- * steps can measure at all; seed 0 dies in the railway loop solver
+ * canonical-only check measures — is **14, provisionally**. Measured with
+ * `check:park-pool` on 6 Sep 2026: of 0..15 only **11 and 14** pass
+ * `check:park` through today's generator, and 14 is also the one that builds
+ * under the stage-3 trestle placer, so it is the one park every canonical-only
+ * step can measure on either branch. Seed 0 dies in the railway loop solver
  * (`RailRouteUnsolvable`). **This goes back to 0 the moment 0 builds** — a
- * canonical that does not build is not a canonical, and a pool where the
- * canonical has to be chosen by survival is the generator bug this ruling
- * exists to expose.
+ * canonical chosen by survival is the generator bug this ruling exists to
+ * expose, not a fact about seed 14.
  */
 export const CANONICAL_PARK_SEED = 14;
 
