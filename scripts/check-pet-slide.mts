@@ -183,6 +183,28 @@ const REGROUP_RADIUS = 14;
 /** How long it is given to get there. */
 const REGROUP_SECONDS = 3;
 
+/**
+ * **How far the point the chase solve used may sit from the companion's drawn
+ * centre**, in metres (#518).
+ *
+ * Derived from the two numbers it has to separate, not chosen:
+ *
+ * | | distance |
+ * |---|---|
+ * | one frame of travel, which this comparison is stale by *by construction* | **0.118 m** |
+ * | **0.40 m — this threshold** | 3.4x one frame |
+ * | the derived stand-in tried first, and rejected | 0.70 m |
+ * | the **seat**, i.e. a straight reversion to #518 | ~0.95 m |
+ *
+ * The staleness is real and not a defect: the solve reads the body point at the
+ * top of `advanceRide` and the animals are seated at the bottom, exactly as
+ * `Building.chaseCompanions` is deliberately one frame behind. So the floor
+ * cannot be zero. The ceiling is set by what the clause must reject, and a
+ * threshold above 0.70 m would fail to reject the very error this fix was
+ * rewritten to remove.
+ */
+const MAX_BODY_DRIFT = 0.4;
+
 /** The fraction of chase rasters the nearest companion must be in the shot on. */
 const IN_SHOT_FLOOR = 0.95;
 
@@ -1121,18 +1143,32 @@ async function ride(wired: boolean): Promise<RunResult> {
           // **Does the point the camera solve reasons about actually sit on the
           // animal?** (#518.)
           //
-          // `petBodyCentreOnSlide` *derives* the body centre from the pose —
-          // seat plus half a reclined length up-slope — rather than measuring
-          // the mesh, following the precedent `PET_RECLINED_LENGTH` sets: a
-          // number written down on purpose, whose guard against drift is a
-          // check that re-measures the real thing every build. **This is that
-          // check.** Without it the #518 fix would be a second formula
-          // asserting it agrees with the drawn body, which is precisely the
-          // fault #518 is the third instance of.
+          // The solve is handed a point measured off the drawn mesh by
+          // `Parade.nearestRiderBodyCentre`. This asks whether the point it
+          // actually used is on the animal — measured here independently, with
+          // `Box3.setFromObject` on the real body, on real frames of a real
+          // descent.
           //
-          // Compared against `Box3.setFromObject` of the actual animal, on real
-          // frames of a real descent. If the pose, the model or the length ever
-          // moves, this goes red rather than the camera quietly going wrong.
+          // **What it is really guarding.** Both sides run `Box3.setFromObject`
+          // on the *same* `Object3D`, so this cannot catch a drifting formula —
+          // there is no formula left. What it catches is the solve being handed
+          // the **wrong point**: most obviously a reversion to the **seat**
+          // (~0.95 m away, and the whole of #518), or a derived stand-in like
+          // the one tried first here, which measured **0.70 m out**.
+          //
+          // **Why the threshold is what it is.** The two reads differ in *when*,
+          // not in what: the body point is taken at the top of `advanceRide`
+          // and the animals are seated at the bottom, so this is one frame
+          // stale by construction. One frame at `GIANT_SLIDE_SPEED` is
+          // ~0.118 m — the same quantity this file's own "biggest single-frame
+          // step" clause measures, and it reads 0.118 m. So the honest window
+          // is: comfortably above one frame of motion, comfortably below the
+          // 0.70 m error it exists to reject.
+          //
+          // {@link MAX_BODY_DRIFT} is 0.40 m: 3.4x one frame of travel, and
+          // well under both 0.70 m and the seat's 0.95 m. A threshold at
+          // ~0.95 m — proposed at one point — would sit *above* the error it
+          // was offered as catching, which is the same fault one layer out.
           const solved = building.chaseNearestBodyCentre();
           if (solved) {
             const drift = solved.distanceTo(bodyCentre);
@@ -1243,6 +1279,35 @@ async function ride(wired: boolean): Promise<RunResult> {
         `frame on only ${(framedFraction * 100).toFixed(0)}% of ${rasters} rasters, against ` +
         `${(IN_SHOT_FLOOR * 100).toFixed(0)}% required (its smallest was ` +
         `${(smallestNearest * 100).toFixed(1)}%) — it is behind her, but not in the shot`,
+    );
+  }
+
+  // **The body point the solve used was actually on the animal (#518).**
+  //
+  // This clause exists because the first version of this instrument **only
+  // printed** `worstBodyDrift` and asserted on nothing — so an injected 8.66 m
+  // offset in `Parade.nearestRiderBodyCentre` produced
+  // `worst 8.73 m out` and still `check:pet-slide ok`, exit 0. A printed number
+  // nobody asserts on is not protection, which is the entire thesis of the
+  // change this file is checking; the clause meant to embody it was itself only
+  // printed. Caught in review by a person reading the number, which is
+  // creditable and is not a mechanism.
+  if (worstBodyDrift < 0) {
+    say(
+      'the solve measured the drawn body',
+      'the point the chase solve used for the nearest companion was never compared against ' +
+        'the drawn animal, so #518 — the near bound reasoning about a point the animal is ' +
+        'not at — was not tested on this run',
+    );
+  } else if (worstBodyDrift > MAX_BODY_DRIFT) {
+    say(
+      'the solve measured the drawn body',
+      `the point the chase solve used for the nearest companion sat ` +
+        `${worstBodyDrift.toFixed(2)} m from that animal's drawn centre on ridden frame ` +
+        `${worstBodyDriftFrame}, against ${MAX_BODY_DRIFT.toFixed(2)} m allowed (one frame of ` +
+        `travel is ~0.118 m). The near bound is reasoning about a point the animal is not at, ` +
+        `which is #518: measuring to the seat reads ~0.95 m out and estimates 6% of frame ` +
+        `where the raster measures 21%. Ask the parade for the drawn body; do not derive it`,
     );
   }
 

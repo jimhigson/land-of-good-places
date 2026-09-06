@@ -372,16 +372,14 @@ export function solveChaseEye(
       // ~1.35 m — so this guard estimated ~6% where the raster measured 21%
       // and **rejected nothing in its entire life**.
       //
-      // `petBodyCentreOnSlide` is the one owner of that question, and it lives
-      // in `petRiders.ts` because that is where the pose is decided. Asking it
-      // rather than doing `seat + upSlope × half a length` here is the whole
-      // point: #518 is the *third* instance of "a measurement taken on a
-      // convenient origin rather than on the thing that gets drawn" (with #471
-      // and #513), and a second copy of the arithmetic would be that same fault
-      // committed inside its own fix.
-      //
-      // `behind` is the up-slope direction the body extends along — the mount's
-      // own basis vector, already held, never re-derived.
+      // The point is **handed in**, measured off the drawn animal by
+      // `Parade.nearestRiderBodyCentre` — the system that owns the bodies.
+      // This module derives nothing, which is the whole point: #518 is the
+      // *third* instance of "a measurement taken on a convenient origin rather
+      // than on the thing that gets drawn" (with #471 and #513), and computing
+      // `seat + upSlope × half a length` here would be that same fault
+      // committed inside its own fix. That was tried first and measured
+      // **0.70 m out** from the real body — see the PR.
       // Kept in its own vector rather than reusing `toPet`, which above still
       // means "to the seat" and is what the frustum bound is measured on. One
       // name per meaning, in the file whose bug was two meanings for one point.

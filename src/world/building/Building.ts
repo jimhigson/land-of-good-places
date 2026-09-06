@@ -538,14 +538,21 @@ export class Building implements GameSystem {
    * frame** (#518), or `null` if there was no companion to reason about.
    *
    * Exposed for one purpose: so `check:pet-slide` can hold it up against
-   * `Box3.setFromObject` of the **real drawn animal** and fail if the two
-   * disagree. `petBodyCentreOnSlide` derives this point from the pose rather
-   * than measuring the mesh — deliberately, following the precedent
-   * `PET_RECLINED_LENGTH` sets — and that choice is only honest if something
-   * re-measures it every build. This accessor is what makes that possible.
+   * `Box3.setFromObject` of the **real drawn animal** and **fail** if the two
+   * disagree — see that clause for the threshold and why it is where it is.
    *
-   * Without it the fix for #518 would be a *second* formula asserting it agrees
-   * with the drawn body, which is the fault #518 is the third instance of.
+   * The point itself comes from `Parade.nearestRiderBodyCentre`, which measures
+   * the drawn mesh; nothing here derives it from the pose. An earlier attempt
+   * did derive it and was **0.70 m out**, so what this accessor guards against
+   * is not a formula drifting but the solve being handed the wrong point at
+   * all — most obviously a reversion to the **seat**, which is ~0.95 m away.
+   *
+   * **It is read one frame before the pets are moved** (`advanceRide` places
+   * the lens at the top of the frame and seats the animals at the bottom), so
+   * it is deliberately one frame stale, exactly as `chaseCompanions` above is
+   * and for the same reason: asking now would be asking before the answer
+   * exists. At `GIANT_SLIDE_SPEED` one frame is ~0.118 m, and the check's
+   * threshold is set knowing that.
    */
   chaseNearestBodyCentre(): Vector3 | null {
     return this.chaseBodyValid ? this.chaseBody : null;
