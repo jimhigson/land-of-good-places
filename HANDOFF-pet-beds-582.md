@@ -70,6 +70,64 @@ pet bed footprint r **0.774 m**, pitch **2.156 m**; `SUITE` halfX **14.8** halfZ
 `SUITE_BED_SPOTS` `[[-10.7,-5.2],[-0.4,-5.2],[11.0,-5.2]]`; side capacity **2**,
 middle capacity **10**; catalogue offers **12** `walksInParade` items.
 
+## Rebased onto `main` after #588, 6 Sep 2026
+
+`origin/main` = `dd5b3b6b` ("The hotel suite's lounge and bathroom can be walked
+into (#583) (#588)"), which touches **the same two files this branch does** —
+`scripts/check-hotel.mts` and `src/world/hotel/Hotel.ts`. The rebase was clean,
+which CLAUDE.md warns is the exact shape of a silent revert, so it was checked
+rather than trusted: **all 330 lines #588 added to those two files are present
+in the rebased tree** (249 in `check-hotel.mts`, 81 in `Hotel.ts`; each added
+line grepped back out of the current file, 0 missing).
+
+The `check` chain was compared as a **set**, not a count: 117 scripts on both
+sides, nothing missing, nothing added, and `main`'s new `check:ground-claims`
+step is present. This branch does not touch `package.json`.
+
+## The parade cap is announced now, not silently truncating
+
+`?pets=N` grants N and dresses N beds, but only **8** companions have a body in
+the park at once, and `Parade.sendPetToBed` is a no-op for one with none. So
+`?pets=12` builds twelve beds' worth of layout and at most eight animals walk
+to them — which reads as a broken link rather than as a second system's limit.
+
+That cap (`MAX_VISIBLE`, "more than this and the park disappears") is deliberate
+design and predates this link, so it is **announced, not raised** — raising it
+is a visible gameplay change and Jim's call. `grantDebugPets` now warns on the
+console with the real numbers when more companions are owned than can walk.
+
+The number moved to **`src/entities/parade/paradeCap.ts`**, a leaf module with
+no imports, and `Parade` asks it for the value. Two reasons: CLAUDE.md's "one
+owner; everyone else asks", and `main.ts` is the boot entry that lazy-loads
+`Game` on purpose — a static import of `Parade` there would drag `three` and
+the whole scene graph into the first chunk.
+
+## Browser QA — re-watched on the rebased branch, 6 Sep 2026
+
+Port 5417, `--strictPort`, killed by PID; pages closed as each was read.
+Napped in the **west** bedroom (bedroom 0, capacity 2) every time, so the
+overflow is forced. Phases read from `Parade.petBedPhase`, so "it reached a
+bed" is measured rather than inferred.
+
+| N | beds planned | shortfall | parade members | waiting | asleep | verdict |
+|---|---|---|---|---|---|---|
+| 1 | 1 | 0 | 1 | 0 | **1** | traced `climbing → climbing → asleep` |
+| 5 | 5 | 0 | 5 | 0 | **5** | 2 in her room, 3 next door — all asleep |
+| 12 | 10 | **2** | 8 | **4** | **6** | both limits, exactly as recorded below |
+
+**N=5 is the case that answers Jim's question and it reads well** — the fixed
+camera holds her room and the middle bedroom in one frame, so the three
+overflow pets are plainly asleep next door. It reads as *my pets are next
+door*, not *my pets have vanished*.
+
+At N=12 a companion with no bed at all is left standing **on her own bed**
+while she sleeps — visible in the screenshot, and a consequence of the
+shortfall rather than of anything on this branch.
+
+**A bad value cannot break the boot**: `?pets=not-a-number` booted into the
+suite normally, granted nothing, logged no error, and — correctly — printed no
+cap warning either, since the link did nothing to warn about.
+
 ## Status
 - [x] Worktree + `pnpm install --frozen-lockfile` (pnpm 12.1.0 running, confirmed)
 - [x] Survey of pet/bed/hotel code
