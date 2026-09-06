@@ -150,6 +150,58 @@ export const KID_REACH_HEIGHT = 1.04;
 export const KID_HEIGHT = 2.12;
 
 /**
+ * **Where a standing child's eyes are, above her feet, in metres.**
+ *
+ * Measured off a built kid — `kidEyeCentre(1)` taken into world space through
+ * the `crown` group it is written in — not derived from the numbers that place
+ * it, the same way {@link KID_SHOULDER_HEIGHT} and {@link KID_HIP_HEIGHT} are.
+ * `pnpm run measure:kid-landmarks` prints it back, and
+ * `check:character-parity` asserts it against the rig, so it cannot drift from
+ * the child it describes.
+ *
+ * ## Why this had to exist
+ *
+ * The park had **no single definition of a standing eye height**, and needed
+ * one the moment a camera wanted to sit where a person's eyes are (#491, Jim:
+ * *"the camera should be at eye-height, not overlapping into the floor"*).
+ *
+ * What it had instead was a scatter of numbers that *sound* like this one and
+ * are not, which is the more dangerous half — reusing any of them would have
+ * looked reasonable and been wrong:
+ *
+ * - `faces.ts`'s `eyeY` (0.43 here, 0.44 on the ferris friends and the dodgems
+ *   tree) is a **fraction of the face canvas**, not a height, and not even in
+ *   metres.
+ * - `spookyHouse/face.ts`'s `EYE_Y = 0.55` is a **model-local offset** for a
+ *   monster's eye stalks, beside `EYE_X 0.95` and `EYE_Z 1.42`.
+ * - `ferrisWheel/gondola.ts`'s `PASSENGER_EYE_Y = 1.1` is the one real
+ *   relative: a *seated* passenger's eyes above the seat. It is the same
+ *   underlying quantity hand-approximated — `KID_EYE_HEIGHT - KID_HIP_HEIGHT`
+ *   is 1.156 — but it aims a passenger's gaze, so correcting it moves
+ *   something a child can see and belongs in its own change, not this one.
+ *
+ * ## What it is NOT
+ *
+ * This is the **standing** eye height of the ordinary kid rig. A seated child's
+ * eyes are this minus {@link KID_HIP_HEIGHT}; a taller child's are not this at
+ * all (see {@link TALLEST_CHILD_HEIGHT}). It describes where eyes *are*, not
+ * where a camera must sit — a camera that wants to avoid the floor needs this
+ * plus whatever its own near plane demands, and that sum belongs to the camera.
+ *
+ * **That last distinction is not hypothetical: it has already collapsed once.**
+ * `ferrisWheel/gondola.ts`'s `GONDOLA_EYE` is used *both* as the camera's mount
+ * offset (`FerrisWheelRide.mountOn`) and as `playerLookPoint`, where a
+ * passenger looks when it looks at you — one number doing "where the camera
+ * sits" and "where a child's eyes are" at the same time, so neither can move
+ * without dragging the other. It is also the worst-hidden copy of this
+ * quantity: its `y` of 1.8 is `PLAYER_SEAT_Y` (0.8) *plus a seated child*, so
+ * it embeds **1.0** where the rig measures `KID_EYE_HEIGHT - KID_HIP_HEIGHT` =
+ * **1.1564** — a 156 mm error with no name on it, buried in a sum rather than
+ * written as a constant anyone would think to check. #587 unpicks it.
+ */
+export const KID_EYE_HEIGHT = 1.5164;
+
+/**
  * The height of the **tallest child the park can produce**, in metres — every
  * hair style crossed with every hat, measured with {@link visibleTop} on real
  * models.
