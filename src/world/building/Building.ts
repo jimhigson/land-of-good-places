@@ -551,8 +551,8 @@ export class Building implements GameSystem {
    * the lens at the top of the frame and seats the animals at the bottom), so
    * it is deliberately one frame stale, exactly as `chaseCompanions` above is
    * and for the same reason: asking now would be asking before the answer
-   * exists. At `GIANT_SLIDE_SPEED` one frame is ~0.118 m, and the check's
-   * threshold is set knowing that.
+   * exists. `check:pet-slide` measures that frame of travel rather than
+   * restating it, and asserts its drift threshold keeps clear of it.
    */
   chaseNearestBodyCentre(): Vector3 | null {
     return this.chaseBodyValid ? this.chaseBody : null;

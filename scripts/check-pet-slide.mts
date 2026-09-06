@@ -187,12 +187,15 @@ const REGROUP_SECONDS = 3;
  * **How far the point the chase solve used may sit from the companion's drawn
  * centre**, in metres (#518).
  *
- * Derived from the two numbers it has to separate, not chosen:
+ * **Read off the failures it has to separate, not reasoned from first
+ * principles** — the same method `PET_FRAME_CEILING`'s own doc records as
+ * *"read off the failure, not chosen in the abstract"*, and the method this
+ * whole ticket argues for:
  *
  * | | distance |
  * |---|---|
- * | one frame of travel, which this comparison is stale by *by construction* | **0.118 m** |
- * | **0.40 m — this threshold** | 3.4x one frame |
+ * | one frame of travel, which this comparison is stale by *by construction* | **measured** — see below |
+ * | **0.40 m — this threshold** | a few frames' headroom |
  * | the derived stand-in tried first, and rejected | 0.70 m |
  * | the **seat**, i.e. a straight reversion to #518 | ~0.95 m |
  *
@@ -202,8 +205,26 @@ const REGROUP_SECONDS = 3;
  * cannot be zero. The ceiling is set by what the clause must reject, and a
  * threshold above 0.70 m would fail to reject the very error this fix was
  * rewritten to remove.
+ *
+ * **The floor is never written down here.** One frame of travel is a quantity
+ * this file already *measures* — `worstStep`, printed as "biggest single-frame
+ * step" — so quoting it as a literal would be two owners of one number, which
+ * is the fault this very PR is about. The failure message interpolates the
+ * measured value, and {@link bodyDriftHeadroom} asserts the relationship still
+ * holds rather than trusting a comment about it.
  */
 const MAX_BODY_DRIFT = 0.4;
+
+/**
+ * How many frames of travel {@link MAX_BODY_DRIFT} must stay clear of.
+ *
+ * 2 rather than today's ~3.4 because this guards the *relationship*, not the
+ * current value: it should fire when the window has genuinely closed up, not
+ * every time a frame gets slightly longer. Below 2x, a clause measured across
+ * one unavoidable frame of staleness is being asked to resolve less than two
+ * frames, and honest runs start failing.
+ */
+const MIN_DRIFT_HEADROOM = 2;
 
 /** The fraction of chase rasters the nearest companion must be in the shot on. */
 const IN_SHOT_FLOOR = 0.95;
@@ -1159,16 +1180,17 @@ async function ride(wired: boolean): Promise<RunResult> {
           // **Why the threshold is what it is.** The two reads differ in *when*,
           // not in what: the body point is taken at the top of `advanceRide`
           // and the animals are seated at the bottom, so this is one frame
-          // stale by construction. One frame at `GIANT_SLIDE_SPEED` is
-          // ~0.118 m — the same quantity this file's own "biggest single-frame
-          // step" clause measures, and it reads 0.118 m. So the honest window
-          // is: comfortably above one frame of motion, comfortably below the
-          // 0.70 m error it exists to reject.
+          // stale by construction. The honest window is therefore: comfortably
+          // above one frame of motion, comfortably below the 0.70 m error it
+          // exists to reject.
           //
-          // {@link MAX_BODY_DRIFT} is 0.40 m: 3.4x one frame of travel, and
-          // well under both 0.70 m and the seat's 0.95 m. A threshold at
-          // ~0.95 m — proposed at one point — would sit *above* the error it
-          // was offered as catching, which is the same fault one layer out.
+          // One frame of travel is **not written down** — this file measures it
+          // as `worstStep` and the clause interpolates that measurement, so
+          // there is one owner of it rather than a literal to keep in step.
+          // {@link MAX_BODY_DRIFT} is 0.40 m, well under both 0.70 m and the
+          // seat's 0.95 m. A threshold at ~0.95 m — proposed at one point —
+          // would sit *above* the error it was offered as catching, which is
+          // the same fault one layer out.
           const solved = building.chaseNearestBodyCentre();
           if (solved) {
             const drift = solved.distanceTo(bodyCentre);
@@ -1282,6 +1304,30 @@ async function ride(wired: boolean): Promise<RunResult> {
     );
   }
 
+  // **The window has not closed up underneath us (#518).**
+  //
+  // `MAX_BODY_DRIFT` only means anything relative to one frame of travel, which
+  // this comparison is stale by. That quantity is **measured** here as
+  // `worstStep`, not written down — so instead of a comment asserting "0.40 m
+  // is about 3.4x a frame", which would rot silently the moment the ride's
+  // speed or frame step changed, the relationship is asserted.
+  //
+  // At `GIANT_SLIDE_SPEED` a frame is ~0.12 m today, giving ~3.4x. If a frame
+  // ever grew past `MAX_BODY_DRIFT / MIN_DRIFT_HEADROOM` the threshold would
+  // start catching honest staleness as if it were a wrong point, and nothing
+  // would announce it. This does.
+  if (worstStep > 0 && MAX_BODY_DRIFT / worstStep < MIN_DRIFT_HEADROOM) {
+    say(
+      'the drift window still has room',
+      `one frame of travel is now ${worstStep.toFixed(3)} m, so ${MAX_BODY_DRIFT.toFixed(2)} m ` +
+        `of allowed drift is only ${(MAX_BODY_DRIFT / worstStep).toFixed(1)}x a frame, against ` +
+        `${MIN_DRIFT_HEADROOM}x required. The drift clause is measured across a one-frame ` +
+        'staleness it cannot remove, so a threshold this close to a frame will start failing ' +
+        'honest runs. Raise MAX_BODY_DRIFT (it has room below the 0.70 m it must still reject) ' +
+        'or slow what moved',
+    );
+  }
+
   // **The body point the solve used was actually on the animal (#518).**
   //
   // This clause exists because the first version of this instrument **only
@@ -1304,8 +1350,9 @@ async function ride(wired: boolean): Promise<RunResult> {
       'the solve measured the drawn body',
       `the point the chase solve used for the nearest companion sat ` +
         `${worstBodyDrift.toFixed(2)} m from that animal's drawn centre on ridden frame ` +
-        `${worstBodyDriftFrame}, against ${MAX_BODY_DRIFT.toFixed(2)} m allowed (one frame of ` +
-        `travel is ~0.118 m). The near bound is reasoning about a point the animal is not at, ` +
+        `${worstBodyDriftFrame}, against ${MAX_BODY_DRIFT.toFixed(2)} m allowed (this run's ` +
+        `biggest single-frame step, which the comparison is stale by, was ` +
+        `${worstStep.toFixed(3)} m). The near bound is reasoning about a point the animal is not at, ` +
         `which is #518: measuring to the seat reads ~0.95 m out and estimates 6% of frame ` +
         `where the raster measures 21%. Ask the parade for the drawn body; do not derive it`,
     );
