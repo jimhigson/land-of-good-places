@@ -76,8 +76,40 @@ middle capacity **10**; catalogue offers **12** `walksInParade` items.
 - [x] Implementation (option C)
 - [x] Instrument with a built-in control; check proved red then green
 - [ ] Gates: `check`, `test:procgen`, `build`, `check:coplanar`, `check:swept-bus`, `check:park-pool`
-- [ ] Browser watch: 1 pet, several, maximum — pet must *reach and enter* a bed
+- [x] Browser watch at N=1, 5, 12 — watched, screenshotted, server killed by PID
 - [ ] PR
+
+## Browser QA — watched, 6 Sep 2026 (port 5391, killed by PID; pages closed)
+
+`/hotel-suite?pets=N`, napping in the **west** bedroom (the capacity-2 one she
+reaches first) each time. Pet phases sampled every 0.7 s from `petBedPhase`, so
+"it walked and climbed in" is measured, not inferred.
+
+| N | beds w/ mid | sent | in her room | in middle room | no bed | all asleep? |
+|---|---|---|---|---|---|---|
+| 1 | 1 | 1 | 1 | — | 0 | **yes** (climbing → asleep) |
+| 5 | 5 | 5 | 2 | 3 | 0 | **yes** (all 5 climbing → asleep) |
+| 12 | 10 | 10 | 2 | 8 | **2** | **no — only 6 asleep** |
+
+**N=5 is the case that answers Jim's question, and it reads well.** The fixed
+camera shows her room *and* the middle bedroom in one frame — the partition is
+2.2 m and the camera is above it — so the three overflow pets are plainly
+visible asleep next door. It reads as *my pets are next door*, not *my pets have
+vanished*. That is a frame for Jim to judge, not my call.
+
+### A second, pre-existing limit found at N=12 — NOT caused by this change
+
+At 12 companions only **6** animals are actually asleep, though 10 were sent:
+
+- 2 own no bed at all (middle bedroom holds 10) — the known, announced shortfall;
+- and separately **the parade only walks 8 companions at once** —
+  `paradeMemberCount` 8, `waitingCount` 4. `Parade.sendPetToBed` is a no-op for a
+  uid with no body in the line, so those come back `petBedPhase === null`.
+
+This is **not** something #582 introduced: `sendPetsToBed` could only ever reach
+pets in the line, before and after. But it means "every pet asleep in a bed"
+stops being literally true above ~8 companions for a *second* reason, in a
+different system. Worth its own issue; deliberately not fixed here.
 
 ## The three questions — all settled
 1. **Max pet count 12** (catalogue); side bedrooms hold 2, middle 10. No floor space
