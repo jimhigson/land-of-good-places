@@ -6,19 +6,84 @@
 Jim, 6 Sep 2026: the hotel bedroom needs **as many pet beds as the player has pets**.
 Done = she sleeps, and every pet is asleep *in* a bed. Not a fixed larger number.
 
+**Model: Opus 5 (1M context)**, chosen by the Overseer for this ticket. A replacement
+must run the same model (CLAUDE.md, "A replacement runs the same model").
+
+## The decision — Jim chose option C, 6 Sep 2026
+
+Overflow pets sleep in the **middle bedroom**. Put to him with all four options and
+their costs, including that C was rejected once on 18 Aug because she cannot see those
+pets from the room she is in. **He picked it knowing that. Do not re-litigate it.**
+The remaining duty is to *show* him what it looks like and let him keep it or change
+his mind having seen it.
+
+## What was built
+
+- `Hotel.petBedsForNapIn(bedIndex)` — **the single owner** of "which bed does each
+  companion go to for a nap here": its bed in that room, else its bed in the middle
+  bedroom. `sendPetsToBed` acts on it, `petBedShortfall` counts what it could not
+  place, `check:hotel` asks it directly, so the three cannot drift apart.
+- `Hotel.petBedShortfall(bedIndex)` — how many companions get **no bed at all**.
+  Exists to be non-zero out loud rather than passing quietly.
+- `MIDDLE_BEDROOM_INDEX` in `layout.ts` — replaces a bare `1` in two files.
+- `check:hotel` probe 3c, with its own control and a coverage announcement.
+
+### Measured behaviour on the built park (control included)
+
+The instrument computed the **old** rule (napped room only) beside the new one; they
+differ, so it is not measuring a tautology.
+
+| owns | room 0 old→new | room 1 old→new | room 2 old→new | shortfall |
+|---|---|---|---|---|
+| 1 | 1→1 | 1→1 | 1→1 | 0 |
+| 2 | 2→2 | 2→2 | 2→2 | 0 |
+| 3 | **2→3** | 3→3 | **2→3** | 0 |
+| 7 | **2→7** | 7→7 | **2→7** | 0 |
+| 12 | **2→10** | 10→10 | **2→10** | **2** |
+
+No two companions are ever sent to the same bed (spot identity, as `Parade.petBedPhase`
+compares it).
+
+### The residual gap, reported not hidden
+
+**The middle bedroom holds 10, not 12.** The "12" in my earlier note was from the
+*hypothetical anchored* packing model, not shipped geometry — measured on the real park
+it is 10. So a child owning 11+ companions still has animals with nowhere, in every
+room. `petBedShortfall` and probe 3c's printed line both say so. Raising it is a layout
+change, not a packing one, and **must not** be done via the 0.002 m north-strip trick.
+
+### Red-run proof, with the geometry it was proved against
+
+Mutation: `const chosen = here ?? overflow` → `const chosen = here` (the old
+napped-room-only rule) in `Hotel.petBedsForNapIn`.
+`pnpm run check:hotel` → **exit 1, 4 failures**, e.g.:
+
+```
+✗ a child owning 3 companion(s) who naps in bedroom 1 leaves 1 of them with no bed
+  at all, though the middle bedroom holds 10 — issue #582 is not fixed for that room
+✗ a child owning 10 companion(s) who naps in bedroom 1 leaves 8 of them with no bed
+  at all, though the middle bedroom holds 10 — issue #582 is not fixed for that room
+```
+
+Proved against this geometry (if it moves, re-prove rather than trusting the above):
+pet bed footprint r **0.774 m**, pitch **2.156 m**; `SUITE` halfX **14.8** halfZ **8**;
+`SUITE_BED_SPOTS` `[[-10.7,-5.2],[-0.4,-5.2],[11.0,-5.2]]`; side capacity **2**,
+middle capacity **10**; catalogue offers **12** `walksInParade` items.
+
 ## Status
 - [x] Worktree + `pnpm install --frozen-lockfile` (pnpm 12.1.0 running, confirmed)
 - [ ] Survey of pet/bed/hotel code (subagent running)
-- [ ] Implementation
-- [ ] Reachability instrument + **control run first**
+- [x] Implementation (option C)
+- [x] Instrument with a built-in control; check proved red then green
 - [ ] Gates: `check`, `test:procgen`, `build`, `check:coplanar`, `check:swept-bus`, `check:park-pool`
 - [ ] Browser watch: 1 pet, several, maximum — pet must *reach and enter* a bed
 - [ ] PR
 
-## Open questions to bring to the Overseer (not to decide alone)
-1. Max pet count + whether the bedroom has floor space for that many beds.
-2. Bed layout as count grows (row / cluster / along a wall) — Jim's call, screenshot each option.
-3. Build-time placement from the save's pet list vs. beds appearing as pets are acquired.
+## The three questions — all settled
+1. **Max pet count 12** (catalogue); side bedrooms hold 2, middle 10. No floor space
+   for 12 in a side room — reported, not silently capped.
+2. **Layout** — settled by Jim choosing option C; no new bed arrangement was invented.
+3. **Build time**, and not open: `Hotel.ts:4924` already decided it deliberately.
 
 ## Findings — the feature already exists; the bug is room capacity
 
