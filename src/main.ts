@@ -27,7 +27,8 @@ import { JourneyTitle } from './ui/JourneyTitle';
 import { JourneyWait } from './ui/JourneyWait';
 import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
-import { gameStore } from './state';
+import { gameStore, walksInParade } from './state';
+import { ALL_CATALOGUE_ITEMS } from './world/building/shops/catalogue';
 import { saveFlags } from './state/flags';
 import { clearSave, loadSave, type SaveFile } from './state/save';
 import { PARK_SEED } from './world/parkManifest';
@@ -609,6 +610,45 @@ async function loadGame(): Promise<typeof import('./Game').Game> {
   return (await import('./Game')).Game;
 }
 
+/**
+ * `?pets=N` on any deep link: own `N` companions before the park is built.
+ *
+ * For looking at issue #582 — a child's pets all having somewhere to sleep —
+ * which cannot be judged on the one companion a default save owns. Grants
+ * from the catalogue's own `walksInParade` items, so what turns up is real
+ * animals the shop sells rather than a stand-in cast written out here; it
+ * cycles the list if asked for more than exist.
+ *
+ * **Deliberately forgiving, like `/spawn`'s coordinate.** A missing, unreadable
+ * or non-positive `pets` grants nothing at all and leaves the boot exactly as
+ * it was — these are typed by hand, often off a message, and a typo must not
+ * fail in front of whoever was sent the link. It is clamped because the URL is
+ * an integer somebody can slip a zero onto, and building a thousand animals
+ * would hang the tab rather than answer anything.
+ */
+function grantDebugPets(search: string): void {
+  const asked = Number(new URLSearchParams(search).get('pets'));
+  if (!Number.isFinite(asked) || asked < 1) return;
+  const wanted = Math.min(Math.floor(asked), MAX_DEBUG_PETS);
+  const companions = ALL_CATALOGUE_ITEMS.filter((item) => walksInParade(item.kind));
+  if (companions.length === 0) return;
+  // `catchWildPetOnce` is what `/slide-with-pets` grants through — the store's
+  // own "already got one" test, so pasting the link twice does not double the
+  // line. Past the catalogue's length that stops adding, which is the honest
+  // answer: there are only so many different companions to own.
+  for (let i = 0; i < wanted; i += 1) {
+    const spec = companions[i % companions.length];
+    if (spec !== undefined) gameStore.catchWildPetOnce(spec);
+  }
+  gameStore.setCarried(null);
+}
+
+/**
+ * The most companions `?pets=` will grant. Not a rule about the game — the
+ * store puts no ceiling on ownership — purely a guard on a hand-typed URL.
+ */
+const MAX_DEBUG_PETS = 40;
+
 function launchGame(
   canvas: HTMLCanvasElement,
   uiRoot: HTMLElement,
@@ -628,6 +668,22 @@ function launchGame(
   // cannot forget to opt out. See `world/entrance/ArrivalSequence.ts`.
   const gameOptions: GameOptions =
     deepLink !== undefined ? { ...options, arriveByBus: false } : options;
+
+  // **`?pets=N` — arrive already owning N companions (#582).** Here, and
+  // nowhere else, because this is the one funnel every boot path reaches
+  // *before* `new GameClass(...)`, and the hotel reads the inventory **once**,
+  // in its own constructor (`Hotel.ownedCompanions`). Granting after the park
+  // exists dresses the bedrooms against the old inventory and proves nothing —
+  // an earlier round of browser QA on this very feature lost an afternoon to
+  // exactly that, and `check:hotel`'s own casts carry the same warning.
+  //
+  // It exists because `/hotel-suite` alone cannot show what #582 changed: a
+  // default save owns one companion, one bed is all anyone sees, and the whole
+  // question — *where do my other pets sleep?* — needs more than one pet to
+  // ask. A URL a developer types, never a button a child presses, exactly as
+  // `/view` and `/spawn` are.
+  grantDebugPets(location.search);
+
   const engine = new Engine(canvas);
 
   // **The ride comes first, and the park is built while it plays.**
