@@ -84,6 +84,12 @@ first honest run found #501).
   determinism by stream-named attempts + unwind trace hashed into the
   digest; proof `check:every-seed-builds` with "built" and "built well"
   on separate lines. Pool = quality curation only.
+- **POI class RULED 6 Sep after measurement**: NavGrid reaches 100% of
+  "stranded" nodes; PoiGraph (what NPCs walk) can't walk the router's
+  own bridges. Fix = PoiGraph edges follow the drawn route (one owner);
+  `poi.stranded` restated as NPC-reach ⊇ player-reach; layout redraw
+  kept for genuine (NavGrid) unreachability = 0 today. Seed 12 = declared
+  vs built waterFight (separate item). Baseline 4/16 build.
 - **POI rung brief written 6 Sep**: `docs/BRIEF-totality-poi-rung.md`
   (Fable engineer). Rung 1 runs inside `parkLayout.solve`'s existing
   loop with the router's own reachability probe; rungs 2–3 need

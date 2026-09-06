@@ -173,6 +173,65 @@ failure, logged with the whole refusal chain, and it is a generator bug.
   collided with, then decision zero. That is the rung to build first;
   it discharges six of sixteen seeds' failure class on `main`'s ground.
 
+**The POI class, measured before a line was written (6 Sep) — and the
+ruling it forced.** The POI engineer probed every stranded node on seeds
+1, 4, 6, 13, 15 and unwarped 5 with the **player's own router** (NavGrid,
+from the entrance): **100 % reachable on every seed** (83/83, 63/63,
+13/13, 12/12, 3/3, 10/10). `check:park`'s "19/19 attractions route" had
+been saying so beside a `poi.stranded` count. What cuts each pocket is
+`PoiGraph`'s edge rule — a straight chord, same lane only, 0.7 m off-path
+clearance, 13 m max — refusing walks the lattice makes: bridge parapets
+and the lineside fence at rail distance 3–11 m (seeds 4, 13, 15, 5), a
+booth's own wall (6), walls inside the water-fight footprint reached
+through `computeStreetStubs`' 7 m arrival exemption plus two bushes (1).
+Every one of those paths was drawn by the router believing it connects.
+
+So the brief's rung 1 would have fired on **zero** of six seeds, and a
+layout redraw would have been *moving rides to placate a measurement* —
+the disease, not the cure. But the measurement is not lying either:
+`PoiGraph` is what **the children walk** (`wanderDriver.ts`), and NavGrid's
+own header keeps the two graphs apart on purpose (a waypoint is a
+destination; a lattice cell is a patch of floor). `poi.stranded` truthfully
+says *no child will ever walk to that ride*. That is a real defect of a
+different kind: **the NPC graph cannot walk what the router drew.**
+
+**Ruling (Architect, 6 Sep):**
+
+1. **"Reachable" has one owner: the drawn path network.** Both walkers
+   derive from it. `PoiGraph`'s edges are no longer chords tested against
+   the collision world; an edge between neighbouring waypoints **follows
+   the drawn route between them** (the route polylines / paving the
+   router committed — bridge decks included, at the deck height the
+   player uses, `bridgeHeightAt`, one owner), validated along that
+   polyline. A chord may remain as a *shortcut candidate*; it is never
+   the only edge. Lane identity changes at a junction because the drawn
+   network says so, not because `laneIsClear` is loosened.
+2. **`poi.stranded` stays a hard "built" criterion, restated honestly**:
+   *the set of POIs the children can walk to must contain every POI the
+   player's router reaches* — one invariant, both walkers, the same
+   network. Its count goes to zero without touching a single placement,
+   and the fix is measured by that.
+3. **The layout redraw (the brief's rung, refusal shape, trace, digest)
+   stays, for genuine unreachability** — defined as **the player's router
+   cannot reach the POI's doormat from the entrance**. That is zero of
+   seeds 0–15 today, and the check says "0 genuinely stranded; the rung
+   never fired" every run rather than implying cover.
+4. **No placement moves to satisfy a graph.** No seed retires. Seed 5's
+   baked warp (`layout: { waterFight: 1 }`) is deleted **when and because**
+   seed 5 builds without it — the first warp field retired by measurement,
+   which is the shape every retirement must take.
+5. Two findings routed out of this class, each its own item: **seed 12**
+   is the water fight *built* 19.5 m against a *declared* 18.5 m
+   (`anchor.reach:waterFight`, also on 6) — a declared-versus-built two
+   definitions bug in that plot's builder, not a placement; **seed 6's
+   `poi.nospot`** are route samples at (0.0, 42.5) and (0.0, 38.7) on the
+   railway under a deck, where `bridgeHeightAt` answers null — the
+   waypoint seeder standing a sample in the under-deck `TRACK_CLEARANCE`
+   block instead of on the deck: same owner as point 1 (a deck is walkable
+   at its draped height), fixed by it.
+
+**Baseline corrected**: 4 of 16 build (0, 5, 11, 14), not 2.
+
 **Determinism — the rule that keeps a seed meaning something.** A park
 that reached decision zero is *a different park than seed n nominally
 asked for*, and that is fine; what is not fine is a park that is not a

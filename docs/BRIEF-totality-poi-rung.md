@@ -13,6 +13,35 @@ engineer, one worktree, normal CLAUDE.md discipline.
 on 6 and 12 — measured by #584 on `main`'s own generator. Measure against
 them from the first hour.
 
+## RULED 6 Sep, after your measurement — read this before the rest
+
+Your probe was right and the design doc now carries it ("The POI class,
+measured before a line was written"). Amendments to this brief:
+
+- **The fix for seeds 1, 4, 5, 6, 13, 15 is in `entities/npc/poiGraph.ts`'s
+  edge derivation, not in any placement.** Edges follow the **drawn route
+  between neighbouring waypoints** (route polylines / paving, bridge decks
+  at `bridgeHeightAt`'s height — one owner), validated along that
+  polyline; a chord is at most a shortcut candidate. `laneIsClear` is not
+  loosened; junctions are where the drawn network says. Seed 6's
+  `poi.nospot` (samples on the railway under a deck) is the same fix.
+- **`poi.stranded` stays hard**, restated as the invariant: *POIs the
+  children can walk to ⊇ POIs the player's router reaches*. Prove it red
+  first — it is red today on those seeds — then green with **zero
+  placements moved** (digest byte-identical for every plot; only
+  `PoiGraph` edges and NPC behaviour change).
+- **Rung 1 (layout redraw) stays exactly as specified below** — refusal
+  shape, trace, digest hash, `check:every-seed-builds` — but its trigger
+  is **genuine** unreachability: NavGrid from the entrance cannot reach
+  the doormat. Zero of 0–15 today. The check prints "0 genuinely
+  stranded; rung never fired" every run. Prove the rung itself red by a
+  deliberate break (wall a doormat in, in a scratch run) — not by seed 5.
+- **Seed 5's warp field `layout: { waterFight: 1 }` is deleted in this PR
+  if and only if seed 5 builds without it** — say so with the digest.
+- **Seed 12 / `anchor.reach:waterFight` (built 19.5 vs declared 18.5) is
+  NOT yours**: file it as a declared-vs-built bug in the water-fight
+  builder and leave it red, named.
+
 ## The prohibition, first
 
 **No warp field, no vetting step, no seed retirement, no widened band may
