@@ -288,3 +288,43 @@ instrument), 14 pool seeds:** byte-identical whole park on 8 (5, 11, 128,
 `railRace:trestle-*` groups differ — no other group on any seed (answers the
 World.ts build-order question by measurement). Logs: `digest2/`,
 `merge-seeds2/`, `merge-swept-bus4.log`.
+
+## Driven top, second round (7 Sep, small hours) — head 61b306e0
+
+Architect at 65982c2a: roll does not belong at the crown (x = 0; second-order
+it LOWERS it, −4.8 mm at full roll), the linear pitch·FACE_Z overstated the
+rotated crown, and nothing compared the derived number to the mesh. Built:
+`crownHeightUnderPitch` = `FACE_Y cos + FACE_Z sin + FACE_SEMI_Y cos` — the
+drawn face is a 38-segment sphere whose POLE VERTEX stays the top for any
+pitch under π/38, and the smooth ellipsoid's support function overstates that
+by 0.9 mm (measured; fails the millimetre). `CAT_BUS_DRIVEN_TOP` = 6.4991
+(RIDE_LIFT + heave 0.2 + crown at pitch 0.042). `check:swept-bus` poses the
+chassis (heave +MAX, pitch ±MAX, roll 0/±MAX) inside the at-origin unrotated
+window, sweeps with the highest vertex-precise top, and the parent holds the
+owner to it at 1 mm; red at +1 cm. `suspensionTravelAt` stays for chin, wheel,
+step. **Trap paid for:** b49cc4c0 undid its red-proof mutation with
+`git checkout <file>`, which also discarded the uncommitted pole-form edit —
+the commit shipped the assertion against the old owner. Undo a proof
+mutation with its inverse edit, never by checking the file out (61b306e0).
+A first posing read 6.2003: the bus had already been put back at its world
+position and heading — pose in the same at-origin window as the rest box.
+
+Scratch merge now at 61b306e0 + sphere b6b1a983: `check:swept-bus` 0 posts,
+14/14, owner 0.0000, driven 0.0000 (posed 6.4991 at heave +0.2, pitch −0.042,
+roll 0); trestle refusals 0 on all 14 pool seeds, both rings built on every
+one. `ENTRANCE_ROAD_OUTSET` 19.070 — `max(8.26, outsetClearOfSupports(3.89))`
+from `supportGround`'s typed band; the road does not march the registry, so
+the headroom cannot move it (open question to the Overseer: re-derive
+`SUPPORT_MAX_RADIAL_NUDGE` from `maxTrunkLean`, ≈8.1 vs 8, in this PR or the
+sphere's). **Observation for the sphere engineer:** at b6b1a983
+`entranceRoadBrow()` is 1.0 m, so `check:swept-bus` drives the bus only from
++1 to −1 m of arc (`entranceBusArriveAt/VanishAt`) — about one bus length of
+road round the stop; whether that is the whole run the bus drives is theirs.
+**`legacy:collision` named (probe, canonical seed):** all 100 race-ring
+refusals are 0.728 m from a circle r = 0.272 — the walk-past ring's post
+collider (`POST_FOOT_RADIUS × 0.4`), centre exactly 1.0 m off: the 1.1 m
+clear-circle test refuses what the registry's compatibility (foot 0.68 vs
+0.272, gap 0.048) allows. First stage-5 item, for the PR body.
+**Moved feet (scratch vs sphere alone, same instrument):** 24, 115, 131, 428,
+451 — one leg per ring; 346 — two per ring; 14 legs across six seeds, every
+other leg byte-identical, and no non-trestle group on any seed.
