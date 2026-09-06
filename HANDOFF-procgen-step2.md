@@ -147,8 +147,8 @@ that would catch a branch in between.
 `check:park`, `check:rail-race`, `check:ground-claims`, `check:seed-pool`,
 `check:seed-coverage` green; `pnpm run check` runs 31 steps green then stops at
 `check:fountain-hop`, the first multi-seed step (6 of its 7 seeds refuse — all
-six errors are the refusal, nothing else). Steps after it were run one by one
-(scratchpad `chain-rest.log`). `check:swept-bus` exits 1: 2 seeds at 0/0/0,
+six errors are the refusal, nothing else). The 31 steps after it were run one by
+one: **all 31 green** (scratchpad `chain-rest.log`). `check:swept-bus` exits 1: 2 seeds at 0/0/0,
 14 NOT BUILT. `test:procgen`, `check:park-pool`, `check:gateway`: red on the
 refusing seeds until phase 2 — not run in full, by design.
 
