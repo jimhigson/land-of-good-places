@@ -338,7 +338,8 @@ function solve(): ParkLayout {
       if (refusals.length === 0 || rungDisabled()) {
         traceLine(
           `solved restart=${restart} decision-zero-reached=${restart - base} ` +
-            `rung-1-fired=${rungOneFired} doormats=${outcome.placed.length}/${outcome.placed.length}`,
+            `rung-1-fired=${rungOneFired} doormats=${outcome.placed.length}/${outcome.placed.length} ` +
+            `probed-alone=${lastProbedAlone}`,
         );
         if (rungOneFired === 0) {
           // Said out loud, on every solve where it is true: a rung that never
@@ -418,9 +419,10 @@ export interface LayoutRefusal {
  * decided. Asked of `NavGrid`, the grid the children walk, flooded from the
  * entrance (the one thing that never moves) exactly as `PoiGraph` asks it
  * once the park is built — one question, one owner, so the two cannot
- * disagree about the same door. Measured at ~195 ms a solve (seed 13: a
- * fresh world, lattice, flood and fourteen doormats), inside the 1 s
- * `check:park-boot` allows a module evaluation.
+ * disagree about the same door. One lattice and one flood for the whole
+ * park when no door is refused (~8 ms, the layout stage's `check:solve-cost`
+ * budget is 250 ms); a door that fails that shared world gets its own —
+ * see the body for why a pass on the shared world is a pass on the door's.
  *
  * Exploration with the commit's own function on a partial world: the paths'
  * later commit is the check, and a stranding it finds that this could not —
@@ -442,7 +444,26 @@ function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
   const columns = columnsOf(placed);
   const flat = (): number => 0;
   const refusals: LayoutRefusal[] = [];
+  // **One world for the common case, then one per door that needs it.** Each
+  // door's own world (below) differs from every other's only in which plots
+  // are exempt near it, and the lattice-and-flood over the whole park is the
+  // entire cost of asking (~8 ms here; profiled 6 Sep 2026: 14 doors x their
+  // own flood was 112 of the layout stage's 117 ms, on a seed where no door
+  // was refused). So every door is first asked on the STRICTEST world any
+  // door sees — every plot but the fountain, plus the boundary. A door whose
+  // doormat stands, reachably, with every plot solid still stands with fewer
+  // of them (taking obstacles out of a `CollisionWorld` only grows NavGrid's
+  // free and reached cells), so a pass here is a pass on its own world and
+  // needs no second look. A door that fails here is asked again on its own
+  // world, exactly as before — the refusal, and what it names, come only
+  // from that world, never from this one. The trace's `probed-alone` count
+  // is how many took the second look.
+  const strict = strictGrid(placed);
+  let probedAlone = 0;
   for (const entry of placed) {
+    const forcedHere = forced !== null && forced.entry === entry.id && forced.remaining > 0;
+    if (!forcedHere && strict && standsReachably(strict.grid, strict.reachable, entry, flat)) continue;
+    probedAlone += 1;
     // **What this world may contain, and the principle behind it.** The probe
     // explores an OVER-APPROXIMATE world: a footprint is where a plot is
     // placed, not ground a child cannot stand on. The ball pit's footprint is
@@ -480,7 +501,6 @@ function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
       STAND_SEARCH_REACH,
       reachable,
     );
-    const forcedHere = forced !== null && forced.entry === entry.id && forced.remaining > 0;
     if (spot && reachable(spot.x, spot.z, spot.y) && !forcedHere) continue;
     if (forcedHere && forced) {
       // The test hook: the door is in fact reachable, so its pocket is the
@@ -518,7 +538,44 @@ function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
       at: { x: entry.entranceX, z: entry.entranceZ },
     });
   }
+  lastProbedAlone = probedAlone;
   return refusals;
+}
+
+/** How many doors the last {@link doormatRefusals} had to probe on their own
+ * world — for the trace, so the shared world's coverage is said out loud. */
+let lastProbedAlone = 0;
+
+/**
+ * Does `door`'s doormat have somewhere to stand that the entrance reaches, on
+ * `grid`? The same two questions the per-door probe asks, on whatever world
+ * `grid` was built over. Only ever a "yes" on the strict world: a "no" there
+ * is not a refusal, it is the cue to ask again on the door's own world.
+ */
+function standsReachably(
+  grid: NavGrid,
+  reachable: (x: number, z: number, y: number) => boolean,
+  door: PlacedEntry,
+  flat: () => number,
+): boolean {
+  const spot = grid.nearestStandable(door.entranceX, door.entranceZ, 0, flat, STAND_SEARCH_REACH, reachable);
+  return spot !== null && reachable(spot.x, spot.z, spot.y);
+}
+
+/**
+ * The strictest world any door is probed on — every plot but the fountain
+ * (exempt for every door), plus the boundary — with its one flood from the
+ * entrance. `null` if the entrance itself has nowhere to stand on it, in
+ * which case every door takes the per-door probe, where that is a thrown
+ * error rather than a quiet fall-through.
+ */
+function strictGrid(
+  placed: readonly PlacedEntry[],
+): { grid: NavGrid; reachable: (x: number, z: number, y: number) => boolean } | null {
+  const world = plotsWorld(placed, new Set(['fountain']));
+  const grid = new NavGrid(world, PLAYER_RADIUS, 0);
+  const reachable = grid.reachableFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0, (): number => 0);
+  return reachable ? { grid, reachable } : null;
 }
 
 /** The plots `door`'s probe world leaves out: its own, and any the router's
@@ -536,7 +593,12 @@ function exemptFor(door: PlacedEntry, placed: readonly PlacedEntry[]): ReadonlyS
 
 /** The plots-and-boundary world one door is probed on. */
 function worldForDoor(door: PlacedEntry, placed: readonly PlacedEntry[]): CollisionWorld {
-  const exempt = exemptFor(door, placed);
+  return plotsWorld(placed, exemptFor(door, placed));
+}
+
+/** Every placed plot's footprint but the `exempt` ones, inside the boundary —
+ * the one builder behind both the strict world and each door's own. */
+function plotsWorld(placed: readonly PlacedEntry[], exempt: ReadonlySet<string>): CollisionWorld {
   const world = new CollisionWorld();
   for (const entry of placed) {
     if (exempt.has(entry.id)) continue;
