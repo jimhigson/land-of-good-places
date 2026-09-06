@@ -1098,6 +1098,64 @@ interface Vector2Like {
   readonly z: number;
 }
 
+/**
+ * **The control point that makes a walk actually pass through the gate at the
+ * x it was aimed at.**
+ *
+ * The route's middle point is called the corner and its comment calls it *"the
+ * point they funnel through"*, and until now it was neither: a quadratic
+ * Bézier does not pass through its control point, it is only pulled towards
+ * it. On the straight road that was harmless, because the step down and the
+ * gate were on the same axis, so the curve sagged symmetrically and the sag
+ * cost nothing. #498's arc moved the bus's door drop off that axis — the bus
+ * stands on a curve now and steps its children down at an angle to it — and
+ * the sag stopped being symmetric. Measured by `check:cat-bus`: **child 0
+ * crossed the boundary at across = −4.95 m, 0.65 m outside a gate opening that
+ * is ±4.30 m**, walking through the masonry beside the arch.
+ *
+ * Widening the opening or narrowing the fan would both be numbers tuned until
+ * this seed passed. This solves it instead: find the parameter at which the
+ * curve crosses the gate line, and place the control point so that the curve
+ * is at `gateX` *there*.
+ *
+ * ```
+ * x(t) = (1−t)²·from.x + 2(1−t)t·corner.x + t²·to.x
+ * ```
+ *
+ * is linear in `corner.x`, so inverting it for a chosen `x(t*)` is one line and
+ * exact. `t*` comes from the z equation, which is unaffected because the corner
+ * keeps its own z on the gate line.
+ *
+ * Where the crossing is too close to either end for that inversion to be
+ * stable — the denominator `2(1−t*)t*` going to zero — the aimed-at x is
+ * returned unchanged, which is exactly the old behaviour. That cannot happen
+ * with a drop outside the wall and a destination well inside it, but a fallback
+ * that silently divides by zero is how a camera path ends up at `NaN`.
+ */
+function funnelCorner(from: Vector2Like, to: Vector2Like, gateX: number): Vector2Like {
+  const corner = { x: gateX, z: ENTRANCE_GATE_Z };
+  // Where does the curve cross the gate line? z(t) with corner.z on the line.
+  const a = from.z - 2 * corner.z + to.z;
+  const b = 2 * (corner.z - from.z);
+  const c = from.z - ENTRANCE_GATE_Z;
+  let crossing = Number.NaN;
+  if (Math.abs(a) < 1e-9) {
+    if (Math.abs(b) > 1e-9) crossing = -c / b;
+  } else {
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant >= 0) {
+      const root = Math.sqrt(discriminant);
+      for (const t of [(-b - root) / (2 * a), (-b + root) / (2 * a)]) {
+        if (t > 0 && t < 1 && (Number.isNaN(crossing) || t < crossing)) crossing = t;
+      }
+    }
+  }
+  const weight = Number.isNaN(crossing) ? 0 : 2 * (1 - crossing) * crossing;
+  if (weight < 1e-3) return corner;
+  const rest = (1 - crossing) * (1 - crossing) * from.x + crossing * crossing * to.x;
+  return { x: (gateX - rest) / weight, z: corner.z };
+}
+
 /** One walker's route: off the pavement, through the gate, into the park. */
 interface WalkRoute {
   readonly from: Vector2Like;
@@ -1347,7 +1405,7 @@ export class ArrivalSequence {
     const end = { x: ENTRANCE_PLAYER_X, z: ENTRANCE_PLAYER_Z };
     this.playerRoute = {
       from: drop,
-      corner: { x: ENTRANCE_BUS_DOOR_X, z: ENTRANCE_GATE_Z },
+      corner: funnelCorner(drop, end, ENTRANCE_BUS_DOOR_X),
       to: end,
     };
 
@@ -1364,8 +1422,15 @@ export class ArrivalSequence {
       const across = ARRIVAL_KID_COUNT <= 1 ? 0 : index / (ARRIVAL_KID_COUNT - 1) - 0.5;
       const wobble = (amount: number): number => (rng() - 0.5) * 2 * amount;
 
+      const start = { x: drop.x + wobble(0.35), z: drop.z + wobble(0.25) };
+      const finish = {
+        // Same rule at the far end: 2.4 m of spacing, so the wobble cannot
+        // reorder them here either.
+        x: end.x + across * 24 + wobble(1.0),
+        z: end.z - 2.4 - rng() * 5.5 - Math.abs(across) * 1.4,
+      };
       const route: WalkRoute = {
-        from: { x: drop.x + wobble(0.35), z: drop.z + wobble(0.25) },
+        from: start,
         // The point they funnel through. Two competing constraints, and the
         // first version got the balance wrong in a way that showed:
         //
@@ -1379,13 +1444,13 @@ export class ArrivalSequence {
         //
         // 6 m of fan gives 0.6 m of spacing, comfortably more than the wobble,
         // and still leaves the outermost child half a body inside the gate.
-        corner: { x: ENTRANCE_BUS_DOOR_X + across * 6.0 + wobble(0.2), z: ENTRANCE_GATE_Z },
-        to: {
-          // Same rule at the far end: 2.4 m of spacing, so the wobble cannot
-          // reorder them here either.
-          x: end.x + across * 24 + wobble(1.0),
-          z: end.z - 2.4 - rng() * 5.5 - Math.abs(across) * 1.4,
-        },
+        // **Solved so the curve is actually at this x on the gate line** — see
+        // {@link funnelCorner}. Before that it was this x used directly as the
+        // control point, which a quadratic Bézier does not pass through, and
+        // once the arc moved the drop off the gate's axis the outermost child
+        // walked through the masonry.
+        corner: funnelCorner(start, finish, ENTRANCE_BUS_DOOR_X + across * 6.0 + wobble(0.2)),
+        to: finish,
       };
       const arc = buildArcTable(route.from, route.corner, route.to);
       walks.push({
