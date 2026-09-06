@@ -501,6 +501,9 @@ export interface RoadCorridorFacts {
   readonly fromOwner: readonly Claim[];
   /** The runs of centreline, in the owner's own order — index-matched to both. */
   readonly segments: readonly RoadSegment[];
+}
+
+/**
  * **A castle corner turret, as the solid it publishes.** See
  * `src/world/building/layout.ts`'s `CASTLE_TOWERS`.
  *
