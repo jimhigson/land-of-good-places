@@ -114,7 +114,10 @@
     "check:gateway": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-gateway.mts",
     "vet:seeds": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/vet-seed-pool.mts",
     "check:seed-pool": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-seed-pool.mts",
-    "measure:bridge-parapet": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-bridge-parapet.mts"
+    "measure:bridge-parapet": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-bridge-parapet.mts",
+    "measure:check-chain": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-check-chain.mts",
+    "check:watchdog": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-watchdog.mts check .github/workflows/checks.yml",
+    "test:procgen:watchdog": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-watchdog.mts test:procgen .github/workflows/procgen-invariants.yml"
   },
   "dependencies": {
     "three": "^0.185.1",
