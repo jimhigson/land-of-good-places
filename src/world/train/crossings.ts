@@ -118,23 +118,26 @@ export const SITE_SNAP_TOLERANCE = 8;
  * {@link CrossingScan.breakRun} says.
  */
 export interface CrossingScan {
-  /** Offer the next sample of the current run. */
-  consider(x: number, z: number): void;
+  /** Offer the next sample of the current run. `run` identifies the drawn
+   *  route it came from, so a foul can name the edge that drew it. */
+  consider(x: number, z: number, run?: number): void;
   /** End the current run: the next sample starts a new one and cannot flip
    *  against the last. */
   breakRun(): void;
   /** Every flip found so far, as distances along the loop, ascending. */
   flips(): number[];
+  /** The same flips, each with the run that drew it (-1 when unknown). */
+  flipsWithRun(): { railDistance: number; run: number }[];
 }
 
 export function createCrossingScan(route: TrainRoute): CrossingScan {
   const point = new Vector3();
   const tangent = new Vector3();
-  const found: number[] = [];
+  const found: { railDistance: number; run: number }[] = [];
   let previous: { x: number; z: number; railDistance: number; side: number; perp: number } | null =
     null;
   return {
-    consider(x: number, z: number): void {
+    consider(x: number, z: number, run = -1): void {
       const railDistance = route.distanceNear(x, z);
       route.pointAt(railDistance, point);
       route.tangentAt(railDistance, tangent);
@@ -150,7 +153,7 @@ export function createCrossingScan(route: TrainRoute): CrossingScan {
         ) {
           const half = route.length / 2;
           const delta = route.wrap(railDistance - previous.railDistance + half) - half;
-          found.push(route.wrap(previous.railDistance + delta / 2));
+          found.push({ railDistance: route.wrap(previous.railDistance + delta / 2), run });
         }
       }
       previous = current;
@@ -159,7 +162,10 @@ export function createCrossingScan(route: TrainRoute): CrossingScan {
       previous = null;
     },
     flips(): number[] {
-      return [...found].sort((a, b) => a - b);
+      return found.map((f) => f.railDistance).sort((a, b) => a - b);
+    },
+    flipsWithRun(): { railDistance: number; run: number }[] {
+      return [...found].sort((a, b) => a.railDistance - b.railDistance);
     },
   };
 }
@@ -521,4 +527,61 @@ export function computeCrossings(
       spine: found.spine,
     };
   });
+}
+
+/** One drawn crossing that snapped to no proven bridge site. */
+export interface OffSiteCrossing {
+  /** Where along the loop the path crossed. */
+  readonly railDistance: number;
+  /** Where that is in the park, for a message somebody has to act on. */
+  readonly x: number;
+  readonly z: number;
+  /** Which drawn route laid the samples that crossed — the producer to blame. */
+  readonly run: number;
+}
+
+/** What {@link screenDrawnPathsForOffSiteCrossings} found, and how hard it looked. */
+export interface CrossingScreenResult {
+  readonly fouls: readonly OffSiteCrossing[];
+  /**
+   * **How many drawn samples were actually scanned.**
+   *
+   * Reported on every run, and it is not decoration. A screen that scans zero
+   * samples and a screen that scans six thousand both report "no fouls", and
+   * this number is the only thing that tells them apart at a glance. That is
+   * not hypothetical: the first attempt at this screen was very nearly wired
+   * where `pathCentreline()` is still empty — `buildPaths()` fills it at
+   * world-build time, long after the generator's `pathGraph` task — and it
+   * would have passed every seed including the one known to be broken, while
+   * describing nothing at all.
+   */
+  readonly samplesScanned: number;
+}
+
+/**
+ * **Do these drawn paths cross the railway anywhere no bridge was proven?**
+ *
+ * The commit-time asker of the predicate above. The generator's `pathGraph`
+ * task calls this on the *candidate* graph's drawn samples before publishing
+ * it, so a path crossing off-site becomes a refused decision naming the edge
+ * rather than a throw out of scenery planting three systems later.
+ *
+ * Same scanner, same snap, same tolerances as {@link computeCrossings} — one
+ * predicate with two askers. If these ever diverge, the generator would be
+ * approving graphs the builder then refuses to build, which is seed 288.
+ */
+export function screenDrawnPathsForOffSiteCrossings(
+  route: TrainRoute,
+  samples: readonly { readonly x: number; readonly z: number; readonly run?: number }[],
+): CrossingScreenResult {
+  const scan = createCrossingScan(route);
+  for (const sample of samples) scan.consider(sample.x, sample.z, sample.run ?? -1);
+  const point = new Vector3();
+  const fouls: OffSiteCrossing[] = [];
+  for (const flip of scan.flipsWithRun()) {
+    if (siteForFlip(route, flip.railDistance)) continue;
+    route.pointAt(flip.railDistance, point);
+    fouls.push({ railDistance: flip.railDistance, x: point.x, z: point.z, run: flip.run });
+  }
+  return { fouls, samplesScanned: samples.length };
 }
