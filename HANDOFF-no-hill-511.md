@@ -134,6 +134,39 @@ made **seed 225 worse, 73 to 84**. Reverted, unpushed. If someone fixes the
 probe height on principle later, that is fine — but it is not this bug, and it
 needs its own justification and its own measurement.
 
+## `check:entrance-road` is RED in CI, and it is the brow bug wearing a different hat
+
+`Entrance road` (`entrance-road.yml`) fails on the PR. **It is this branch's own
+check** — neither the workflow nor `scripts/check-entrance-road.mts` exists on
+`origin/main`, so there is nothing to compare against and nothing pre-existing
+to blame.
+
+It is red for the best possible reason: **its control caught it.**
+
+```
+control: with the corridor off the ride puts 0 legs back in the bus's path
+across 10 seeds (worst 0.00 m inside a bus) — the sweep can see a collision
+covered: ... bus swept from the brow at +1 m to -1 m
+
+FAIL: the control found NO collision on 10 seed(s) — with the road's corridor
+switched off the Rail Race puts its legs back through the road, so the bus is
+supposed to sweep through them. Reading zero there means this sweep cannot see
+a collision at all, and its verdict on the real road is void
+```
+
+**Same root cause as the section below.** The bus is swept from `+brow` to
+`-brow`, the brow has collapsed to 1.0 m, so the sweep covers 2 m of a 142 m
+road and never reaches a trestle even with the corridor deliberately switched
+off. The check is refusing to certify a result it knows it cannot see, which is
+exactly what CLAUDE.md asks of a control — and it means **`check:swept-bus`'s
+green "0 posts on 14 seeds" is narrow in precisely the same way**, without
+saying so.
+
+So this is one bug with three faces: a visible arrival defect, a void
+`check:entrance-road`, and a `check:swept-bus` covering 1.4% of the road it
+names. Fixing `browAt()` fixes all three, and the fix belongs with whoever takes
+the brow.
+
 ## ⛔ `entranceRoadBrow()` is 1.0 m, and this is worse than a coverage gap
 
 Raised by the step-2 engineer at `b6b1a983`, confirmed here by measurement:
