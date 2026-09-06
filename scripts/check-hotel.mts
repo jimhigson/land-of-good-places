@@ -55,6 +55,8 @@
 import './headless-canvas.mjs';
 import { BackSide, Box3, Mesh, type Object3D, Raycaster, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
+import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
+import { circleBoundary } from '../src/world/boundary.ts';
 import { HotelCinematic, MIN_SHOT_DISTANCE } from '../src/world/hotel/cinematic.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
 import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
@@ -3890,6 +3892,199 @@ if (!lobbyShellForDisco) {
   }
 }
 
+// ------------------------------------------- 31. every room is reachable throughout
+/**
+ * **Can she get to all of the room she is standing in?**
+ *
+ * Jim, 6 September 2026 (issue #583): *"some of the bedroom isn't reachable by
+ * clicking on the floor — the near sub-room fails. The player simply does
+ * nothing in response to the click."*
+ *
+ * The suite is one space cut into four sub-rooms by partitions, and the lounge
+ * sofa stood so that its footprint and the lounge doorway's own jambs left no
+ * channel a `PLAYER_RADIUS` body could pass: the lounge **and** the bathroom
+ * behind it were sealed off. Measured on the built collision world, a body
+ * needed its centre at `x >= 4.07` to clear the doorway jambs and at
+ * `x <= 3.28` to round the sofa's west end — impossible, short by 0.79 m.
+ *
+ * **Probe 22 (`marchCrossing`) could not see it, and neither could
+ * `HotelProps.assertDoorwaysClear`**, because both ask about the *doorway*:
+ * the clearance zone reaches `DOORWAY_CLEARANCE + DOORWAY_THROUGH_DEPTH`
+ * (1.24 m) past the wall and no further, so a prop parked 1.25 m into a room
+ * can seal it while every doorway assertion stays honestly green. That is
+ * CLAUDE.md's "a check can pass without checking anything": the sofa had
+ * already been moved three times (#273/#278) to satisfy those, and the room it
+ * stands in still had no way in.
+ *
+ * So this asks the whole-room question instead: **from where the player
+ * actually enters, is every standable patch of that room's floor reachable?**
+ * It is the reachability instrument CLAUDE.md asks for, over every hotel room
+ * rather than the one that broke.
+ *
+ * ## How it measures, and why it is trustworthy
+ *
+ * - Standability comes from `NavGrid.canStandAt` — the game's **own** lattice,
+ *   built from the finished collision world, not a model of it.
+ * - Connectivity is a breadth-first flood over those cells using NavGrid's own
+ *   neighbour rule (8-connected, and a diagonal only when **both** orthogonals
+ *   are free — `NavGrid`'s no-corner-cutting rule), which is fast enough to run
+ *   over every room.
+ * - **Every cell the flood calls unreachable is then confirmed with a real
+ *   `findRoute`**, so a failure is always the game's own router refusing, never
+ *   this probe's approximation of it. That is what stops a false alarm here.
+ * - The **control runs first**: the entry cell itself must come back reachable
+ *   from the flood *and* from `findRoute`. A flood that cannot even find where
+ *   she is standing is measuring the wrong thing, and this says so and gives up
+ *   on that room rather than reporting a clean, wrong answer.
+ *
+ * Islands are reported by size and centre, in the room's own local metres, so
+ * the failure names the place to go and stand.
+ */
+const REACH_CELL = 0.5;
+let roomsFlooded = 0;
+let roomsSkipped = 0;
+const reachSummaries: string[] = [];
+
+for (const room of ROOMS) {
+  // Where the player is put when she walks in: `Hotel.stepThroughDoor` lands her
+  // 1.6 m in from the west wall, on the west gap's own centre line. Derived from
+  // the room's own `gaps`, never re-typed — a gap that moves takes this with it.
+  const westGap = room.gaps?.west;
+  if (!westGap) {
+    roomsSkipped += 1;
+    reachSummaries.push(`${room.space}: asserts nothing (no west doorway to enter by)`);
+    continue;
+  }
+  const entryLocalX = -room.halfX + 1.6;
+  const entryLocalZ = (westGap[0] + westGap[1]) / 2;
+
+  collision.setPlayBounds(circleBoundary(HOTEL_PLAY_RADIUS, room.originX, room.originZ));
+  const grid = new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, () => world.building.surfaces.connectors);
+
+  const sampleAt = (lx: number, lz: number): number =>
+    world.building.surfaces.sample(room.originX + lx, room.originZ + lz, 3);
+  const standable = (lx: number, lz: number): boolean =>
+    grid.canStandAt(room.originX + lx, room.originZ + lz, sampleAt(lx, lz), sampleAt);
+
+  // The lattice over this room's own floor, in local metres.
+  const columns = Math.floor((room.halfX * 2) / REACH_CELL);
+  const rows = Math.floor((room.halfZ * 2) / REACH_CELL);
+  const localX = (cx: number): number => -room.halfX + (cx + 0.5) * REACH_CELL;
+  const localZ = (cz: number): number => -room.halfZ + (cz + 0.5) * REACH_CELL;
+  const free = new Uint8Array(columns * rows);
+  let freeCells = 0;
+  for (let cz = 0; cz < rows; cz += 1) {
+    for (let cx = 0; cx < columns; cx += 1) {
+      if (standable(localX(cx), localZ(cz))) {
+        free[cz * columns + cx] = 1;
+        freeCells += 1;
+      }
+    }
+  }
+
+  // CONTROL, before anything below is read: the cell she is actually dropped on
+  // must be standable and routable to. If it is not, this probe is measuring
+  // something other than the room she walks into.
+  const entryCx = Math.round((entryLocalX + room.halfX) / REACH_CELL - 0.5);
+  const entryCz = Math.round((entryLocalZ + room.halfZ) / REACH_CELL - 0.5);
+  const entryIndex = entryCz * columns + entryCx;
+  if (entryCx < 0 || entryCx >= columns || entryCz < 0 || entryCz >= rows || free[entryIndex] !== 1) {
+    roomsSkipped += 1;
+    problems.push(
+      `probe 31 CONTROL FAILED in ${room.space}: the spot the player is dropped on ` +
+        `(local ${entryLocalX.toFixed(2)}, ${entryLocalZ.toFixed(2)}) is not a standable lattice cell, ` +
+        `so this probe cannot say anything about that room — fix the probe, not the room`,
+    );
+    continue;
+  }
+
+  // Flood, using NavGrid's own neighbour rule: 8-connected, diagonals only when
+  // both orthogonals are free (no corner cutting).
+  const seen = new Uint8Array(columns * rows);
+  const queue = [entryIndex];
+  seen[entryIndex] = 1;
+  let reachedCount = 0;
+  while (queue.length > 0) {
+    const at = queue.pop()!;
+    reachedCount += 1;
+    const cx = at % columns;
+    const cz = (at - cx) / columns;
+    for (let dz = -1; dz <= 1; dz += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dz === 0) continue;
+        const nx = cx + dx;
+        const nz = cz + dz;
+        if (nx < 0 || nx >= columns || nz < 0 || nz >= rows) continue;
+        const next = nz * columns + nx;
+        if (seen[next] === 1 || free[next] !== 1) continue;
+        if (dx !== 0 && dz !== 0) {
+          if (free[cz * columns + nx] !== 1 || free[nz * columns + cx] !== 1) continue;
+        }
+        seen[next] = 1;
+        queue.push(next);
+      }
+    }
+  }
+
+  roomsFlooded += 1;
+  const marooned = freeCells - reachedCount;
+  if (marooned === 0) {
+    reachSummaries.push(`${room.space}: all ${freeCells} standable cells reachable`);
+    continue;
+  }
+
+  // Confirm with the game's own router before calling it a failure, and describe
+  // the biggest island by where it is rather than by how many cells it has.
+  const routeOut = new Float32Array(MAX_ROUTE_WAYPOINTS * 2);
+  const entryWorldY = sampleAt(entryLocalX, entryLocalZ);
+  let confirmed = 0;
+  let sumX = 0;
+  let sumZ = 0;
+  let sample: { x: number; z: number } | null = null;
+  for (let i = 0; i < free.length; i += 1) {
+    if (free[i] !== 1 || seen[i] === 1) continue;
+    const cx = i % columns;
+    const cz = (i - cx) / columns;
+    const lx = localX(cx);
+    const lz = localZ(cz);
+    sumX += lx;
+    sumZ += lz;
+    if (!sample) sample = { x: lx, z: lz };
+    grid.findRoute(
+      room.originX + entryLocalX, room.originZ + entryLocalZ, entryWorldY,
+      room.originX + lx, room.originZ + lz, sampleAt(lx, lz),
+      sampleAt, routeOut,
+    );
+    if (!grid.lastRouteReachedGoal) confirmed += 1;
+  }
+  if (confirmed === 0) {
+    reachSummaries.push(
+      `${room.space}: ${marooned} cells the flood doubted, all reachable by the real router`,
+    );
+    continue;
+  }
+  problems.push(
+    `probe 31: ${room.space} has ${confirmed} standable cells ` +
+      `(${(confirmed * REACH_CELL * REACH_CELL).toFixed(1)} m² of floor) that the router cannot reach ` +
+      `from where the player walks in at local (${entryLocalX.toFixed(2)}, ${entryLocalZ.toFixed(2)}) — ` +
+      `centred on local (${(sumX / marooned).toFixed(2)}, ${(sumZ / marooned).toFixed(2)}), ` +
+      `e.g. local (${sample!.x.toFixed(2)}, ${sample!.z.toFixed(2)}). ` +
+      `A child tapping there is ignored: the walk is planned, finds no route, and ends where she stands`,
+  );
+  reachSummaries.push(`${room.space}: ${confirmed} cells UNREACHABLE`);
+}
+
+// Put the play bounds back where the rest of the file expects them.
+collision.setPlayBounds(circleBoundary(HOTEL_PLAY_RADIUS, LOBBY.originX, LOBBY.originZ));
+
+// Coverage, on stderr so it is heard on a passing run too (CLAUDE.md: vitest and
+// most reporters swallow stdout from passing checks; this one is a plain script,
+// but the same rule keeps the note beside the failures).
+process.stderr.write(
+  `probe 31 reachability — ${roomsFlooded} room(s) flooded, ${roomsSkipped} asserting nothing:\n` +
+    reachSummaries.map((line) => `    ${line}\n`).join(''),
+);
+
 // ----------------------------------------------------------------- report
 
 console.log(
@@ -3901,7 +4096,8 @@ console.log(
     `${furnitureWallPairsChecked} furniture-vs-wall pairs, ${furnitureWallEmbeds.length} embedded, ` +
     `${furnitureWallGrazes.length} grazed (warnings); ` +
     `lobby disco beam and near-wall hide/collision probes ran; ` +
-    `disco ball checked against ${discoNeighboursChecked} lobby fixtures.`,
+    `disco ball checked against ${discoNeighboursChecked} lobby fixtures; ` +
+    `${roomsFlooded} room(s) flood-filled for whole-room reachability.`,
 );
 
 if (problems.length > 0) {
