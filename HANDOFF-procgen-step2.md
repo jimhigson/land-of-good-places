@@ -314,7 +314,7 @@ Scratch merge now at 61b306e0 + sphere b6b1a983: `check:swept-bus` 0 posts,
 roll 0); trestle refusals 0 on all 14 pool seeds, both rings built on every
 one. `ENTRANCE_ROAD_OUTSET` 19.070 — `max(8.26, outsetClearOfSupports(3.89))`
 from `supportGround`'s typed band; the road does not march the registry, so
-the headroom cannot move it (open question to the Overseer: re-derive
+the headroom cannot move it (ruled: NOT in this PR — filed as #601; re-derive
 `SUPPORT_MAX_RADIAL_NUDGE` from `maxTrunkLean`, ≈8.1 vs 8, in this PR or the
 sphere's). **Observation for the sphere engineer:** at b6b1a983
 `entranceRoadBrow()` is 1.0 m, so `check:swept-bus` drives the bus only from
