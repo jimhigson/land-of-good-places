@@ -413,18 +413,41 @@ console.log('driven at 60fps through a real IsoCamera, it lands on the rig exact
   const still = new Vector3(0, 0, 0);
 
   let worstStep = 0;
+  let worstStepAt = 0;
   let previous: Vector3 | null = null;
-  // The wiring `Game.tick` does, restated in three lines because there is no
-  // way to construct `Game` here (it builds a real `WebGLRenderer`). If those
-  // three lines and this one ever disagree, the browser run in the PR is what
-  // catches it — which is why the PR carries frames as well as this transcript.
+  let engaged = false;
+  // The wiring `Game.tick` does, restated here because there is no way to
+  // construct `Game` (it builds a real `WebGLRenderer`). If these lines and
+  // that block ever disagree, the browser run in the PR is what catches it —
+  // which is why the PR carries frames as well as this transcript.
+  //
+  // **Including the snap on the frame the shot takes the camera**, which is
+  // the whole of Jim's "it should START facing the bus, not transition down to
+  // there": `arrivalShot` returning the door pose at t=0 is necessary and not
+  // sufficient, because `poseOffset` damps towards a target. Without the snap
+  // the opening frames measured 8.14, 7.39 and 6.71 m of eye movement, decaying
+  // exponentially — the swoop he ruled against, and clause 6 below caught it.
   for (let t = 0; t <= AT_SHOT_HOME + 3; t += STEP) {
     const shot = arrivalShot(t, PASS);
-    if (shot) camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
-    else camera.clearPoseOverride();
+    if (shot) {
+      if (engaged) camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
+      else camera.snapShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
+      engaged = true;
+    } else {
+      camera.clearPoseOverride();
+    }
     camera.update(frame, her, still);
     const here = camera.camera.position.clone();
-    if (previous) worstStep = Math.max(worstStep, here.distanceTo(previous));
+    // **The snap frame is excluded, and it is the only exclusion.** A cut at
+    // the instant a shot takes the camera is what was asked for and has no
+    // preceding frame *of the shot* to cut from — the picture the child sees
+    // first simply is the door shot. Every frame after it is held to the bound,
+    // which is what makes this clause still able to catch a swoop: it caught
+    // exactly this one.
+    if (previous && t > STEP && here.distanceTo(previous) > worstStep) {
+      worstStep = here.distanceTo(previous);
+      worstStepAt = t;
+    }
     previous = here;
   }
 
@@ -436,10 +459,14 @@ console.log('driven at 60fps through a real IsoCamera, it lands on the rig exact
   near(landed.z, rig.z, 1e-3, 'the landed eye must be the rig\'s own offset (z)');
 
   // ---- 6. no cut ---------------------------------------------------------
-  console.log(`  worst single frame moved the eye ${worstStep.toFixed(3)} m`);
+  console.log(
+    `  worst single frame after the opening snap moved the eye ${worstStep.toFixed(3)} m, at ` +
+      `t=${worstStepAt.toFixed(2)}s`,
+  );
   check(
     worstStep < 4,
-    `no frame may cut — the worst moved the eye ${worstStep.toFixed(3)} m in 1/60 s`,
+    `no frame may cut — the worst moved the eye ${worstStep.toFixed(3)} m in 1/60 s at ` +
+      `t=${worstStepAt.toFixed(2)}s`,
   );
 }
 

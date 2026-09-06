@@ -436,6 +436,35 @@ export class IsoCamera {
     this.poseTarget.set(eye.x - this.offset.x, eye.y - this.offset.y, eye.z - this.offset.z);
   }
 
+  /**
+   * **The same override, but already arrived** — for the first frame of a shot
+   * that is supposed to *open* on its pose rather than travel to it.
+   *
+   * Jim, 6 September 2026, on the cat bus arrival: *"arrival camera — it
+   * should START facing the bus, not transition down to there."*
+   * {@link setShotOverride} alone cannot do that. It writes the *target*, and
+   * `poseOffset` damps towards a target at {@link CAMERA_POSE_HALF_LIFE} — so
+   * a shot whose first frame asks for the door pose still spends about half a
+   * second flying there from the rig's 90 m. Measured on the real rig at
+   * 60 fps: the opening frames moved the eye 8.14 m, 7.39 m, 6.71 m, decaying
+   * exponentially. That swoop *is* the transition he ruled against, and it
+   * survived the fix to `arrivalShot` because that fix corrected where the
+   * camera was being *told* to be, not where it was.
+   *
+   * So this is for the moment a shot takes the camera, and nothing else. Use
+   * {@link setShotOverride} on every frame after: a shot that snapped every
+   * frame would not be a camera move at all, it would be a slideshow.
+   *
+   * The zoom is deliberately **not** part of this. It is a separate field with
+   * a separate owner (`nudgeZoom` writes it too — #329), and a caller that
+   * wants the framing to open closed as well says so itself.
+   */
+  snapShotOverride(yawDegrees: number, pitchDegrees: number, distance = CAMERA_DISTANCE): void {
+    this.setShotOverride(yawDegrees, pitchDegrees, distance);
+    this.poseOffset.copy(this.poseTarget);
+    this.applyTransform();
+  }
+
   /** Rises back to the ordinary pseudo-isometric pose. */
   clearPoseOverride(): void {
     this.poseTarget.set(0, 0, 0);

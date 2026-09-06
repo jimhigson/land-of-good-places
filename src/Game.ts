@@ -1696,7 +1696,22 @@ export class Game {
         // The shot outlives the zoom by `ARRIVAL_RISE_TAIL`, and writing a
         // constant into a field `nudgeZoom` shares is #329.
         if (shot.ownsTheZoom) this.camera.setZoomTarget(shot.zoom);
-        this.camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
+        // **The shot opens on its pose; it does not fly there.** Jim,
+        // 6 September 2026: *"arrival camera — it should START facing the bus,
+        // not transition down to there."* `arrivalShot` was corrected to
+        // return the door pose from its first frame, which is necessary and
+        // was not sufficient: `poseOffset` damps towards whatever target it is
+        // given, so the camera still spent about half a second travelling from
+        // the rig's 90 m — 8.14 m of eye movement on the very first frame,
+        // measured. Snapping on the frame the shot takes the camera is the
+        // other half of that fix, and it is safe *only* on that frame, which
+        // is what `arrivalCameraEngaged` says: it is false until the shot has
+        // engaged and is set true two lines below.
+        if (this.arrivalCameraEngaged) {
+          this.camera.setShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
+        } else {
+          this.camera.snapShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
+        }
         // The focus is *claimed* here, not written — see `focusClaim` below.
         if (shot.watchesTheDoor) focusClaim = arrival.doorFocus;
         this.arrivalCameraEngaged = true;
