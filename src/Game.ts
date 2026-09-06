@@ -6,6 +6,7 @@ import { InputSystem, PointerControls } from './core/input';
 import { isTouchDevice } from './core/device';
 import {
   CAMERA_ZOOM_STEP,
+  PARADE_MEMBER_RADIUS,
   PLAYER_LONGEST_STEP,
   PLAYER_RADIUS,
   VIEWMODEL_LAYER,
@@ -402,6 +403,24 @@ export class Game {
       // Every railway bridge's deck and ramps (issue #116, Decision 8) — see
       // NavGrid's own `bridgeCovers` header.
       (x, z) => this.world.train.bridges.some((bridge) => bridge.covers(x, z)),
+    );
+
+    // And the same map again, laid out for a companion rather than for her —
+    // issue #602, the pets that walked through the bedroom wall to get to bed.
+    // A pet is 0.22 m across against her 0.62 m and cannot jump, so its own
+    // lattice is the honest one to plan its walk on; every other input is
+    // read from the same owner the player's grid reads it from, so there is
+    // no second copy of "where the stairs are" or "what a bridge covers".
+    // Hop apex 0 says what is true of an animal: a wall she hops is a wall it
+    // walks round.
+    this.parade.setNavGrid(
+      new NavGrid(
+        this.world.collision,
+        PARADE_MEMBER_RADIUS,
+        0,
+        () => this.world.building.surfaces.connectors,
+        (x, z) => this.world.train.bridges.some((bridge) => bridge.covers(x, z)),
+      ),
     );
 
     // Tap-to-move. Built after the world so it can ask the building where its

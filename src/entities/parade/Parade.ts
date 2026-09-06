@@ -17,6 +17,8 @@ import { PlayerTrail } from './trail';
 import { ParadeMember, type BedPhase, type PetTablePlace } from './ParadeMember';
 import { BackpackPeek } from './BackpackPeek';
 import { MAX_PARADE_VISIBLE } from './paradeCap';
+import { BedRoute } from './bedRoute';
+import type { NavGrid } from '../../world/NavGrid';
 
 /**
  * The parade of cute things.
@@ -112,6 +114,23 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
 
   private readonly unsubscribe: () => void;
 
+  /**
+   * The map a bedtime walk is routed on — issue #602, and see `bedRoute.ts`.
+   *
+   * Handed over by `Game` after the collision world is finished, the same way
+   * the hotel and the great hall are introduced to this class, because the
+   * parade is constructed before there is a lattice to give it. `null` until
+   * then, and on any harness that never builds one: a pet with no router walks
+   * to its bed exactly as it did before, in a straight line.
+   */
+  private navGrid: NavGrid | null = null;
+  /**
+   * One route per pet on its way to bed, by uid. Entries are made when a pet
+   * is sent to bed and dropped when it is stood down or leaves the line, so
+   * this holds nothing at all for the whole of an ordinary walk round the park.
+   */
+  private readonly bedRoutes = new Map<string, BedRoute>();
+
   private wasAirborne = false;
   private rotateTimer = 0;
   private rotation = 0;
@@ -191,6 +210,23 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     if (!member) return false;
     member.goToBed(bed);
     return true;
+  }
+
+  /**
+   * **The map a bedtime walk is routed on** — issue #602. `Game` is the one
+   * caller, in the same breath as it introduces this class to the hotel and to
+   * the great hall, and for the same reason: the parade is built before the
+   * collision world has a lattice over it.
+   *
+   * A pet-sized {@link NavGrid}, not the player's: the router is the one owner
+   * of "how does a body get from A to B" and this asks it, but a companion is
+   * 0.22 m across against her 0.62 m and does not jump, and the middle bedroom
+   * packs ten beds close enough that a pet walks between them where she could
+   * not. Same class, same A*, same lattice code — only the walker differs,
+   * exactly as `JourneyPlanner` gives the park's children their own.
+   */
+  setNavGrid(navGrid: NavGrid): void {
+    this.navGrid = navGrid;
   }
 
   /**
@@ -355,6 +391,10 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     for (const member of this.members) {
       if (member.uid === uid) member.getOutOfBed();
     }
+    // The route it walked in on goes with the nap: the next one plans afresh
+    // from wherever this animal has got to, rather than replaying waypoints
+    // laid out for a body that was somewhere else entirely.
+    this.bedRoutes.delete(uid);
   }
 
   /**
@@ -418,12 +458,14 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       // at a trail sample. That is the *only* difference: the same spring,
       // the same easing, the same turn-to-face and the same walk cycle carry
       // it there, so there is no second way of moving a pet in this game.
-      // A pet on its way to bed aims at its bed's own run-up spot, and one on
-      // its way to the pets' table (#449) at its own place there, instead of
-      // at a trail sample. That is the *only* difference in either case: the
-      // same spring, the same easing, the same turn-to-face and the same walk
-      // cycle carry it there, so there is no second way of moving a pet in
-      // this game.
+      // A pet on its way to bed aims at the next waypoint of a `NavGrid` route
+      // to its bed's own run-up spot (#602 — see `bedRoute.ts`; it used to aim
+      // straight at the spot and walk through the bedroom wall on the way),
+      // and one on its way to the pets' table (#449) at its own place there,
+      // instead of at a trail sample. That is the *only* difference in either
+      // case: the same spring, the same easing, the same turn-to-face and the
+      // same walk cycle carry it there, so there is no second way of moving a
+      // pet in this game.
       const bed = member.bedSpot;
       const place = member.tablePlace;
       // **A companion on the ginormous slide (#468) is aimed at nothing at
@@ -433,7 +475,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       // for a body that is thirty metres up in the air.
       if (member.onSlide) {
         // nothing to aim
-      } else if (bed) member.target.set(bed.runUpX, bed.runUpY, bed.runUpZ);
+      } else if (bed) this.aimAtBed(member, bed, dt);
       else if (place) member.target.set(place.x, place.y, place.z);
       else this.aimAt(member);
       member.update(dt, elapsed);
@@ -556,6 +598,55 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     point.y = this.groundAt(point.x, point.z, point.y);
   }
 
+  /**
+   * Works out where a pet **on its way to bed** should be walking, and writes
+   * it into the member's target — issue #602.
+   *
+   * The route is planned once, by `bedRoute.ts`, on the same {@link NavGrid}
+   * class the player's tap-to-walk and every NPC child plan on. All this does
+   * is ask it which waypoint the animal is on and point the ordinary follow
+   * spring at it: no avoidance, no second search, and nothing here that knows
+   * a wall from a doorway.
+   *
+   * Two deliberate fall-throughs to the old straight line, and neither is a
+   * quiet failure — a pet that walks the shortest way to a bed *in the room it
+   * is standing in* is exactly right:
+   *
+   * - **No router at all** (a harness, or before `Game` has handed one over).
+   * - **The route is spent**, which is every leg after the last waypoint. The
+   *   lattice is fattened by the walker's own width and the middle bedroom's
+   *   ten beds are close-packed, so a route can honestly stop a little short of
+   *   the run-up spot; that last stretch is inside one room, and the arrival
+   *   check `ParadeMember` makes against `bed.runUpX/Z` still wants the exact
+   *   spot rather than a waypoint near it.
+   *
+   * The body's own drawn position drives the waypoint advance, taken off
+   * `ParadeMember.root` — never {@link ParadeMember.target}, which is a
+   * waypoint from the frame it is written and would count every leg walked
+   * before the animal had moved at all.
+   */
+  private aimAtBed(member: ParadeMember, bed: PetBedSpot, dt: number): void {
+    const point = member.target;
+    const navGrid = this.navGrid;
+    const sampler = this.player.groundSampler;
+    if (navGrid && sampler) {
+      let route = this.bedRoutes.get(member.uid);
+      if (!route) {
+        route = new BedRoute();
+        this.bedRoutes.set(member.uid, route);
+      }
+      const body = member.root.position;
+      if (route.advance(navGrid, sampler, bed, body.x, body.z, bed.runUpY, dt, point)) {
+        // The waypoints are `x, z` only; the floor under one is the same
+        // question `aimAt` asks of a trail sample, with the bed's own level as
+        // the hint that tells "this bedroom" from whatever is under it.
+        point.y = this.groundAt(point.x, point.z, bed.runUpY);
+        return;
+      }
+    }
+    point.set(bed.runUpX, bed.runUpY, bed.runUpZ);
+  }
+
   private groundAt(x: number, z: number, y: number): number {
     const sampler = this.player.groundSampler;
     return sampler ? sampler(x, z, y) : terrainHeight(x, z);
@@ -604,6 +695,10 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       member.beginExit();
       this.leaving.push(member);
       this.members.splice(index, 1);
+      // Nothing walks to a bed while it is poofing out of existence, so the
+      // route it was walking goes with it rather than waiting in the map for a
+      // body that is not coming back.
+      this.bedRoutes.delete(member.uid);
     }
 
     // --- joiners ------------------------------------------------------------
