@@ -328,3 +328,13 @@ clear-circle test refuses what the registry's compatibility (foot 0.68 vs
 **Moved feet (scratch vs sphere alone, same instrument):** 24, 115, 131, 428,
 451 — one leg per ring; 346 — two per ring; 14 legs across six seeds, every
 other leg byte-identical, and no non-trestle group on any seed.
+
+**Step 2 approved by the Architect at 61b306e0** (re-posed: 0.0000 rest and
+driven; ellipsoid support 0.96 mm above the polygon pole). PR-body item: the
+canonical walk-past ring draws 92 legs vs 93 under the rest-top claim (a
+non-mandatory slot near the road skipped by the taller headroom) — Jim's
+sentence: **a post near the bus's road is gone, not moved.** NOT reproduced on
+the scratch with sphere b6b1a983 (50 + 50 legs on sphere-alone, rest-top and
+driven heads, 0 differ); measure on the real merge and put it in the digest
+table. Open the PR from `scratchpad/pr-body-step2.md` once the sphere is on
+the design branch.
