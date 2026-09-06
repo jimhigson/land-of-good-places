@@ -472,5 +472,9 @@ support function sits 0.96 mm above the drawn polygon pole (so the
 polygon derivation is required, not decorative); driven assertion VOID at
 +1 cm on both built seeds; tsc 0; canonical sweep 0/0/0 with the posed
 envelope. Approved, PR to open once the sphere reaches the design branch.
-Note for the PR body: canonical walk-past ring 92 legs (was 93 under the
-rest-top claim) — a non-mandatory slot near the road refused and skipped.
+**Struck**: an earlier note here said the canonical walk-past ring lost a
+leg (93 → 92) under the driven-top claim. That was measured on the branch
+tip alone — hill geometry, road through the ring's band — and does not
+reproduce on the sphere merge (50 + 50 per ring, 0 differing, engineer's
+measurement on `b6b1a983`). A hill-only number reported without its base;
+nothing disappears in the park that ships.
