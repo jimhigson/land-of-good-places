@@ -822,22 +822,52 @@ function roadHeightAt(distance: number): number {
  * what may lean over the road it drives (the road's corridor claim carries it
  * as `headroom`), can ask before there is a bus to ask.
  */
-export const CAT_BUS_TOP =
-  CAT_BUS_RIDE_LIFT + FACE_Y + (FACE_RADIUS + FACE_OUTLINE) * FACE_SQUASH[1];
+/** The face's up semi-axis, outline hull included: the pushed-out sphere, squashed. */
+const FACE_SEMI_Y = (FACE_RADIUS + FACE_OUTLINE) * FACE_SQUASH[1];
+export const CAT_BUS_TOP = CAT_BUS_RIDE_LIFT + FACE_Y + FACE_SEMI_Y;
 
 /**
- * **The top of the bus as it drives** — {@link CAT_BUS_TOP} plus the furthest
- * the suspension can lift the face's crown: full heave, nose-up pitch at the
- * crown's distance along the bus, roll at the face's half-width, from the one
- * owner of that sum ({@link suspensionTravelAt}), the same terms the ride
- * height is built from. The rest top stays the name label's and the asset
- * contract's number; anything that must stay out of the bus's way while it is
- * *moving* — the road's corridor claim, the swept-bus check's envelope — reads
- * this one. Found by the Architect on step 2 (6 Sep 2026): a claim carrying
- * the rest top let a branch sit in the 0.3 m the crown rises through on a
- * bump, and the check, sweeping a bus at rest, shared the blind band exactly.
+ * How high the face's crown stands above the chassis origin when the chassis
+ * is pitched nose-up by `pitch` — the crown of the *drawn* face, not of an
+ * ideal ellipsoid. The centre rides the rotation (`FACE_Y cos + FACE_Z sin`,
+ * front up); the crown is the sphere's pole vertex, which rides it too
+ * (`FACE_SEMI_Y cos`). The face is a 38-segment sphere, so its pole stays the
+ * highest vertex for any pitch under half the ring spacing (π/38 ≈ 0.083 rad,
+ * twice `CAT_BUS_MAX_PITCH`); the smooth ellipsoid's support function,
+ * `hypot(b cos, c sin)`, overstates that polygonal crown by 0.9 mm at full
+ * pitch — measured, and enough to fail the millimetre the check holds.
+ *
+ * **Not `suspensionTravelAt`.** That linear sum is right for the chin, a
+ * wheel and the step, which are off-axis points; a crown is the top of a
+ * rotated body, and `pitch × FACE_Z` overstates it by the crown's own
+ * shortening. Found by the Architect on step 2 (6 Sep 2026), by posing the
+ * mesh: the linear form gave 6.64 m for a drawn 6.50.
  */
-export const CAT_BUS_DRIVEN_TOP = CAT_BUS_TOP + suspensionTravelAt(FACE_Z, FACE_RADIUS);
+function crownHeightUnderPitch(pitch: number): number {
+  const c = Math.cos(pitch);
+  const s = Math.sin(pitch);
+  return FACE_Y * c + FACE_Z * s + FACE_SEMI_Y * c;
+}
+
+/**
+ * **The top of the bus as it drives** — the face's crown at full heave and
+ * full nose-up pitch, from {@link crownHeightUnderPitch}. {@link CAT_BUS_TOP}
+ * stays the rest top for the name label and the asset contract; anything
+ * that must stay out of the bus's way while it is *moving* — the road's
+ * corridor claim, the swept-bus check's envelope — reads this one.
+ *
+ * **Roll is deliberately absent.** The crown sits on the bus's centreline,
+ * where roll has no first-order lift; to second order it *lowers* the crown
+ * (the centre drops by `FACE_Y (1 − cos roll)`, more than the wider x-axis
+ * raises the extent) — 4.8 mm at full roll, measured on the posed mesh. So
+ * the highest pose is heave + pitch with no roll, and that is what this is.
+ * `check:swept-bus` poses the drawn bus at full heave, full pitch (both
+ * signs) and roll 0 / ±full, and asserts this equals the highest of them
+ * within a millimetre — the same assertion the rest top gets — so a derived
+ * number here can never again describe a bus that is not drawn.
+ */
+export const CAT_BUS_DRIVEN_TOP =
+  CAT_BUS_RIDE_LIFT + CAT_BUS_MAX_HEAVE + crownHeightUnderPitch(CAT_BUS_MAX_PITCH);
 
 /**
  * The doorway, sized by the child who walks down out of it.
