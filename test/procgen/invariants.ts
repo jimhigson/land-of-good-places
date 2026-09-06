@@ -1,3 +1,4 @@
+import { terrainHeight } from '../../src/world/terrain.ts';
 /**
  * **The invariants themselves. This list is meant to grow.**
  *
@@ -90,6 +91,9 @@ import {
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
   RIM_OUTSET_START,
+  GROUND_SPHERE_RADIUS,
+  BUS_MAX_GRADE,
+  TERRAIN_HEIGHT_SCALE,
 } from '../../src/core/constants.ts';
 import {
   ENTRANCE_GATE_HALF_WIDTH,
@@ -9482,7 +9486,101 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
   return fouls;
 };
 
+/**
+ * **The ground really is the sphere the constant claims, and it is gentle
+ * enough for the bus (#511).**
+ *
+ * `GROUND_SPHERE_RADIUS` is chosen against `BUS_MAX_GRADE`: on a sphere the
+ * gradient at horizontal distance `d` is `d / R`, so a radius is a promise
+ * about how steep the ground gets. **A promise is not a mechanism** — this
+ * measures the terrain the park was actually built on and holds the pair to
+ * each other, so if either constant moves the two are re-proved rather than
+ * assumed to still agree.
+ *
+ * Two clauses, and the first is what stops the second passing vacuously:
+ *
+ * 1. **The drawn ground is that sphere.** Sampled against the exact cap, so a
+ *    terrain that quietly stopped being spherical — a rim creeping back, a
+ *    tuned fudge — fails here rather than being measured as if it were one.
+ * 2. **Its gradient stays inside the budget** as far out as the park itself
+ *    reaches, which is the ground a bus could be driven on.
+ *
+ * `terrainHeight` is imported statically, which was **forbidden until this
+ * branch**: it used to reach `parkManifest` through `boundary.ts`, so a static
+ * import pinned every seed to the default park (CLAUDE.md's 76-silent-skips
+ * trap). The sphere removed that edge — `terrain.ts` imports nothing but
+ * constants now — so the ground is no longer seed-dependent and this is safe.
+ * If a later change gives terrain a seeded input again, this import must go
+ * back to being read from `ParkFacts`.
+ */
+const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
+  const fouls: string[] = [];
+  const reach = facts.boundary.maxRadius;
+  if (!Number.isFinite(reach) || reach <= 0) {
+    return [
+      `the park boundary reports maxRadius ${reach}, so there is no extent to ` +
+        'sample the ground over and both clauses below would pass vacuously',
+    ];
+  }
+
+  // Sample on several bearings: a cap is the same on all of them, and a fault
+  // that is only on one bearing is exactly what a single ray would miss.
+  const bearings = 12;
+  let worstShapeError = 0;
+  let worstGrade = 0;
+  let worstGradeAt = 0;
+  for (let b = 0; b < bearings; b += 1) {
+    const angle = (b / bearings) * Math.PI * 2;
+    for (let d = 5; d <= reach; d += 5) {
+      const x = Math.cos(angle) * d;
+      const z = Math.sin(angle) * d;
+      const expectedFall =
+        GROUND_SPHERE_RADIUS -
+        Math.sqrt(Math.max(0, GROUND_SPHERE_RADIUS * GROUND_SPHERE_RADIUS - d * d));
+      // The rolling sine waves ride on top of the cap, so compare against the
+      // cap plus the height at the centre rather than demanding an exact match.
+      const shapeError = Math.abs(terrainHeight(x, z) - (terrainHeight(0, 0) - expectedFall));
+      if (shapeError > worstShapeError) worstShapeError = shapeError;
+      const grade = d / GROUND_SPHERE_RADIUS;
+      if (grade > worstGrade) {
+        worstGrade = grade;
+        worstGradeAt = d;
+      }
+    }
+  }
+
+  // The sine waves' own amplitude is the honest tolerance for clause 1: they
+  // are the park's gentle undulation and they are supposed to be there.
+  const undulation = TERRAIN_HEIGHT_SCALE * 1.3;
+  if (worstShapeError > undulation) {
+    fouls.push(
+      `the drawn ground departs from its own spherical cap by ${worstShapeError.toFixed(2)} m, ` +
+        `past the ${undulation.toFixed(2)} m the rolling sine waves account for — the terrain ` +
+        'has stopped being the sphere GROUND_SPHERE_RADIUS says it is, so the gradient clause ' +
+        'below is measuring something else',
+    );
+  }
+  if (worstGrade > BUS_MAX_GRADE) {
+    fouls.push(
+      `the ground reaches a gradient of ${(worstGrade * 100).toFixed(2)}% at ${worstGradeAt.toFixed(1)} m ` +
+        `from the centre, past the ${(BUS_MAX_GRADE * 100).toFixed(0)}% BUS_MAX_GRADE budget that ` +
+        `GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS} m) was chosen against — either the radius ` +
+        'shrank or the park grew, and the cat bus now drives a slope steeper than anybody agreed',
+    );
+  }
+
+  process.stderr.write(
+    `[ground sphere] ${bearings} bearings to ${reach.toFixed(1)} m: worst departure from the cap ` +
+      `${worstShapeError.toFixed(2)} m (tolerance ${undulation.toFixed(2)}), worst gradient ` +
+      `${(worstGrade * 100).toFixed(2)}% at ${worstGradeAt.toFixed(1)} m (budget ` +
+      `${(BUS_MAX_GRADE * 100).toFixed(0)}%). Asserts nothing about ground beyond the park's own ` +
+      'boundary, where the road and the bus still run.\n',
+  );
+  return fouls;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
+  ['the ground is the sphere it claims to be, and gentle enough for the bus', theGroundIsTheSphereItClaimsToBe],
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
