@@ -98,91 +98,78 @@ resolution silently.
 
 ---
 
-# BLOCKED — a second defect the fix exposes, needing a ruling
+# Status after the layout fix (ruling: option 1)
 
-## The collider work is done and green
+## Both halves of the omission are now fixed, from one owner
 
-`check:castle-towers` passes and goes red (exit 1, all four turrets, 0.60 m
-against 2.214 m of stone) when the registration is deleted. `pnpm run check`
-exit **0**. `pnpm run build` exit **0**. The base-radius one-owner refactor is
-in and behaviour-preserving (drawn mesh still 2.2140).
+The castle's extent had **two** wrong answers in the codebase and no owner: the
+collision world did not know about the turrets, and neither did the layout
+solver. Both now ask the same source.
 
-## What blocks it
+- `core/constants.ts` (which imports nothing — the only cycle-free home, since
+  `building/layout.ts` imports `parkLayout`) owns `CASTLE_TURRET_BASE_RADIUS`
+  and `CASTLE_TURRET_CORNERS`.
+- `parkLayout`'s `footprintAsPlaced` writes the turrets into the **placed**
+  footprint. Both consumers of `edgeDistanceAlong` already read
+  `PlacedEntry.footprint` — the entrance placement, and the spur's target at
+  `paths.ts:3902` — so neither had to learn what a turret is, **and the
+  short-spur cascade disappeared without its own patch.**
+- They could not be declared statically in `parkManifest`, because the drawn
+  castle is not centred on its plot: it is nudged `BUILDING_CENTRE_NUDGE`
+  toward the park middle, in a direction that depends on where the plot landed.
 
-`pnpm run test:procgen` is **red: 1 failed | 758 passed**, on
-`seed 288 > every entrance has standable ground` — a **pre-existing invariant**,
-not one of mine. My turret clause passes on all seven tested seeds (2.83 m).
+**Measured result: only the three broken parks moved.**
 
-Root cause, measured: `parkLayout` puts an anchor's entrance at
-`plot centre + dir x (edgeDistanceAlong(footprint) + 1.4)`, and the building's
-footprint is the **24 x 18 rectangle, which excludes the four corner turrets** —
-precisely the same omission as the collider, one level up. So on a seed whose
-outward bearing points at a corner, the **sign, the doormat and the path spur's
-end land inside drawn stone.**
+| seed | before | after |
+|---|---|---|
+| 274 | 1.15 m from a turret axis — INSIDE STONE | 3.61 m — clear |
+| 288 | 0.46 m — INSIDE STONE | 3.60 m — clear |
+| 346 | 0.45 m — INSIDE STONE | 3.60 m — clear |
 
-It was invisible for exactly as long as the turrets were walk-through: a child
-could stand inside a tower, so "standable ground at the entrance" was true.
+The other **thirteen** seeds' entrances are unchanged, canonical included.
 
-## How widespread — 3 of the 16 pool seeds, measured on `main`'s own layout
+## One failure left, and it is not local
 
-| seed | entrance | nearest turret | verdict |
-|---|---|---|---|
-| 274 | (-31.5, 23.1) | 1.15 m | **INSIDE STONE** |
-| 288 | (27.8, -22.2) | 0.46 m | **INSIDE STONE** |
-| 346 | (-28.1, 22.2) | 0.45 m | **INSIDE STONE** |
+`test:procgen`: **1 failed | 758 passed**, seed 288,
+`no two close destinations are left with a wildly disproportionate paved detour`
+— `stall.keychain` and `station-0` are 14.2 m apart but 229.7 m by paving
+(16.13x).
 
-(against a 2.214 m stone radius; the other thirteen are clear, closest 3.49 m.)
-Only 288 is in the seven-seed procgen set, which is why only it went red.
+Investigated rather than assumed:
 
-## Why I did not fix it here, and what I tried
+- **Not the collider.** The train route on 288 is byte-identical with and
+  without it — loop length 188.263 both ways, same station tap points. The
+  railway does not pass near the turrets on that seed.
+- **Not local to the castle.** `station-0` is at (-24.7, -19.5); the castle
+  entrance moved from (27.8, -22.2) to (25.2, -20.1), roughly 50 m away.
 
-I implemented the smallest post-hoc fix — push the castle's entrance outward
-along its own bearing until a child standing there clears every turret, with
-`ANCHOR_ENTRANCE_STAND_OFF` made a shared owner so `parkLayout` and the push use
-one stand-off. It works geometrically but **cascades into the path network**: on
-288 the anchor moved 3.75 m and seed 288 then failed *two* different invariants —
+So the 2.6 m entrance move reshuffled the **global** path solve, and this seed
+now lands on a network where two close destinations get no direct connector.
+That is chaotic sensitivity in the walk-graph search, not a generator refusing
+to adapt to the change — the one that *was* refusing (the spur stopping 2.00 m
+short) is fixed and gone.
 
-- `spur-building's end at 26.2, -20.9 stops 2.00 m short of 'building' (anchor)
-  at 24.6, -19.7 — a path to nowhere`
-- a detour ratio: `'stall.keychain' and 'station-0' ... 16.13x, wasting 215.5 m`
+**I deliberately did not shrink the turret stand-off to make this pass.** 1.4 m
+is the same stand-off every other anchor's doormat gets; picking a smaller one
+because it makes a seed green is the disease CLAUDE.md names.
 
-That is a generator change with player-visible consequences on at least three
-parks, and the correct version is almost certainly at the source — the layout
-solver siting the castle, or choosing its entrance bearing, so that its own
-turrets are not in the way ("procgen backtracks on collision, always") — rather
-than a post-hoc shove that the path router then has to chase. **Reverted; the
-branch carries only the collider work.**
+## The decision left
 
-## The ruling needed
-
-Three options, none of which is mine to pick:
-
-1. **Fix the layout solver** so the castle's entrance clears its own turrets,
-   in this PR or a stacked one. Player-visible on ~3 of 16 seeds (a sign and a
-   doormat move); needs Jim either way.
-2. **Land the collider and fix the entrance in a separate ticket**, which means
-   `test:procgen` is red on 288 in the meantime — not acceptable under zero
-   tolerance, so this only works if the two land together.
-3. **Replace seed 288 in the pool.** Explicitly sanctioned by CLAUDE.md, but it
-   would hide a defect that demonstrably affects 274 and 346 too, so I would
-   argue against it.
-
-## State
-
-- [x] Collider registered from one owner, measured, documented
-- [x] `check:castle-towers` in the chain, proved red without the fix
-- [x] Procgen invariant, proved red, coverage note on stderr
-- [x] Reachability proved with controls; `pnpm run check` and `build` exit 0
-- [ ] **BLOCKED**: `test:procgen` red on seed 288 — awaiting the ruling above
-- [ ] `check:coplanar`
-- [ ] PR
+1. **Make the walk graph guarantee a connector** between close destination
+   pairs. Real work in `paths.ts` and its own ticket, I think.
+2. **Replace seed 288 in the pool, and write down why.** This was refused
+   earlier — correctly — because it would have hidden the entrance defect. That
+   reason is gone: the defect is fixed on all three seeds. What remains is a
+   seed whose park has a genuinely poor walk (230 m between two things 14 m
+   apart), which is exactly the "not every seed makes a good park" case the pool
+   exists for.
 
 ## The `/spawn` link, ready for Jim (do not send directly)
 
-Verified standable against the built collision world, canonical seed, all four
-corners; use the south-east turret:
-
+Verified standable against the built collision world:
 `/spawn?pos=60.4,24.0&facing=233`
 
-One sentence: *walk into the castle's corner turret — before, you strolled
-straight through the stone and out the other side; now it stops you.*
+Both halves in one sentence: *walk up to the castle's corner turret — you used
+to stroll straight through the stone and out the other side, and on some parks
+the castle's own doormat was buried inside it; now the tower stops you and the
+doorway is out in the open.*
