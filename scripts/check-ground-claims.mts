@@ -201,7 +201,14 @@ if (ownerKeys.length !== registryKeys.length || ownerKeys.some((k, i) => k !== r
       '    They must be the same call, not two definitions kept in step by hand',
   );
 } else {
-  said.push(`the registry's corridor is byte-identical to entranceRoadClaims(): ${ownerKeys.join('  ')}`);
+  // Summarised, not listed. The arc is sampled at its own station spacing, so
+  // this is 143 capsules on the canonical seed; printing them all buried every
+  // other line of this check's output. The equality above is over the whole
+  // list — what is printed is evidence of the shape of it, not the comparison.
+  said.push(
+    `the registry's corridor is byte-identical to entranceRoadClaims(), all ${ownerKeys.length} ` +
+      `run(s) — first ${ownerKeys[0]}, last ${ownerKeys[ownerKeys.length - 1]}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
