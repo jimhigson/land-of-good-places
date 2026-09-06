@@ -33,7 +33,7 @@ import type { AnchorPlots } from '../AnchorPlots';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
 
 import { BallPit } from './BallPit';
-import { solveChaseEye } from '../slide/chaseEye';
+import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
 import { FloorFader } from './floorFade';
 import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
@@ -105,6 +105,7 @@ import {
   ROOF_PAVILION_HALF_Z,
   ROOF_PAVILION_X,
   ROOF_PAVILION_Z,
+  CASTLE_TOWERS,
   TOILET_DECK,
   TOILET_ROOM,
   TOP_DECK,
@@ -499,6 +500,9 @@ export class Building implements GameSystem {
   private readonly chaseEye = new Vector3();
   private readonly chaseAim = new Vector3();
   private readonly chasePet = new Vector3();
+  /** The body centre the near bound used this frame (#518), and whether it is set. */
+  private readonly chaseBody = new Vector3();
+  private chaseBodyValid = false;
   private readonly chaseSeat: SlideSeat = {
     x: 0, y: 0, z: 0, facing: 0, pitch: 0, recline: 0,
   };
@@ -528,6 +532,31 @@ export class Building implements GameSystem {
    */
   chaseSolveGaveUpFrames(): number {
     return this.chaseGaveUp;
+  }
+
+  /**
+   * **The body point the chase solve's near bound actually reasoned about this
+   * frame** (#518), or `null` if there was no companion to reason about.
+   *
+   * Exposed for one purpose: so `check:pet-slide` can hold it up against
+   * `Box3.setFromObject` of the **real drawn animal** and **fail** if the two
+   * disagree — see that clause for the threshold and why it is where it is.
+   *
+   * The point itself comes from `Parade.nearestRiderBodyCentre`, which measures
+   * the drawn mesh; nothing here derives it from the pose. An earlier attempt
+   * did derive it and was **0.70 m out**, so what this accessor guards against
+   * is not a formula drifting but the solve being handed the wrong point at
+   * all — most obviously a reversion to the **seat**, which is ~0.95 m away.
+   *
+   * **It is read one frame before the pets are moved** (`advanceRide` places
+   * the lens at the top of the frame and seats the animals at the bottom), so
+   * it is deliberately one frame stale, exactly as `chaseCompanions` above is
+   * and for the same reason: asking now would be asking before the answer
+   * exists. `check:pet-slide` measures that frame of travel rather than
+   * restating it, and asserts its drift threshold keeps clear of it.
+   */
+  chaseNearestBodyCentre(): Vector3 | null {
+    return this.chaseBodyValid ? this.chaseBody : null;
   }
 
   /**
@@ -887,6 +916,7 @@ export class Building implements GameSystem {
     this.parkRoot.add(this.rideMount);
 
     registerFacadeCollision(collision);
+    registerCastleTowerCollision(collision);
 
     const plot = anchorPlots.getGroup('building');
     const plotAnchor = plot.position;
@@ -1643,6 +1673,11 @@ export class Building implements GameSystem {
     // child who goes down the slide twice would have.
     this.chaseGaveUp = 0;
     this.chaseCompanions = 0;
+    // The near bound's counters describe this descent too (#518), and they live
+    // on the solver's module rather than here because the solver is where the
+    // rejection happens. Same reasoning as the two above: a counter whose doc
+    // says "this descent" must be zeroed by the descent starting.
+    resetChaseCeilingCounters();
     player.beginRide();
   }
 
@@ -1718,10 +1753,17 @@ export class Building implements GameSystem {
       if (this.chaseCompanions > 0) {
         petSeatOnSlide(ride.slide, ride.distance, 0, this.chaseSeat);
         nearestPet = this.chasePet.set(this.chaseSeat.x, this.chaseSeat.y, this.chaseSeat.z);
+        // The same point the solve's near bound will derive, kept so
+        // `check:pet-slide` can measure it against the drawn animal (#518).
+        // **Ask the parade where the animal actually is** (#518). It owns the
+        // bodies and measures the drawn one; the ride only ever knew where it
+        // offered a seat, which is an origin at the animal's feet.
+        this.chaseBodyValid = this.petParade?.nearestRiderBodyCentre(this.chaseBody) ?? false;
       }
       const solved = solveChaseEye(
         this.rideMount.position,
         nearestPet,
+        this.chaseBodyValid ? this.chaseBody : null,
         this.chaseBehind,
         this.chaseUp,
         // Vertical half-fov in radians, asked of the camera rather than
@@ -2531,4 +2573,99 @@ function registerFacadeCollision(collision: CollisionWorld): void {
   // The back of the lobby.
   const lobbyZ = facadeZ(BUILDING_HALF_Z - 1.8);
   collision.addWall(facadeX(ENTRANCE_MIN_X), lobbyZ, facadeX(ENTRANCE_MAX_X), lobbyZ, 0.3);
+}
+
+/**
+ * **The four corner turrets are solid** (issue #549).
+ *
+ * The facade above is a 24 x 18 m rectangle, and the towers stand *outside* it:
+ * their axes sit half a wall thickness beyond each corner and their flared feet
+ * bulge 2.21 m further out again. So there was about **2.1 m of drawn stone at
+ * each of four corners with nothing behind it**, and a child walked into a
+ * turret and came out the other side. Measured before the fix, on 48 bearings
+ * at two strides: a player-sized body reached **0.60 m** from the axis of a
+ * 2.214 m turret, on all four.
+ *
+ * Nobody saw it because nothing was missing from a list — `CASTLE_TOWERS`
+ * existed and was correct, `slide/plan.ts` routed around it properly, and the
+ * procgen invariant measured it. The collision world simply had never been told
+ * the towers were there. That is CLAUDE.md's opening rule and its stated cause:
+ * scenery built with no collider at all.
+ *
+ * **A disc, not a rectangle, and that is what makes it safe** — the same
+ * argument {@link registerRoofTurretCollision} makes, and it is a property of
+ * `CollisionWorld` rather than a preference. `addRectangle` is four walls round
+ * a hollow middle and a mover inside one is never pushed out; a circle has no
+ * inside to be trapped in, because `resolve()` pushes radially outward from
+ * wherever the mover is and shoves it off dead centre rather than dividing by
+ * zero. So there is no "is the interior enterable and leavable?" question to
+ * answer here: it is leavable by construction.
+ *
+ * **The radius is the tower body's own flared foot, read off {@link CASTLE_TOWERS}**
+ * — one owner for the mesh, the slide's routing and this collider, so a turret
+ * that is moved or re-flared takes its collision with it.
+ *
+ * Deliberately **not** `CASTLE_TURRET_FOOTPRINT_RADIUS` (2.45), which
+ * {@link registerRoofTurretCollision} uses, and the reason is measured off the
+ * built meshes rather than argued:
+ *
+ * | mesh | height span | max radius |
+ * | --- | --- | --- |
+ * | `tower-bodies` | y 0.73 - 11.33 | **2.2140** |
+ * | `tower-roofs`  | y 11.33 - 15.53 | 2.4500 |
+ *
+ * 2.45 is the *cone's* radius and the cone starts **10.6 m above the tower's
+ * base** — ten metres over a child's head. At every height she can occupy the
+ * drawn stone is 2.214 or less, so a 2.45 collider would hold her 0.236 m off
+ * visible stone: an invisible wall, which is the same mesh-versus-collider
+ * disagreement issue #562 is about, pointed the other way. Walking through
+ * stone is the worse fault; standing away from it is still a fault.
+ *
+ * `CASTLE_TOWERS[i].radiusBottom` is not a recomputation of
+ * `TOWER_RADIUS * TOWER_BASE_FLARE` — it is the field where that product is
+ * published once, and the same data `Shell.ts` composes the instance matrices
+ * from. Measured: the drawn `tower-bodies` mesh's max radius is 2.2140, equal
+ * to `radiusBottom` exactly.
+ *
+ * **The shaft is a 16-segment cylinder, so the collider takes the
+ * circumradius**, which is what keeps a circular collider from ever sitting
+ * *inside* the drawn surface: the flats of a 16-gon lie at `cos(pi/16)` =
+ * 0.98079 of the circumradius, so she is held at most 43 mm proud of a flat
+ * face and never inside one. That is the general rule for a faceted solid of
+ * revolution, and worth applying to the next one.
+ *
+ * ## One radius at every height, and why `topIsAbsolute` is not the answer here
+ *
+ * The obvious worry is that the stone she meets at head height is not the stone
+ * at her feet, which is exactly what `topIsAbsolute` exists for. Measured off
+ * the built `tower-bodies` mesh, the shaft has just two vertex rings:
+ *
+ * | ring | drawn radius |
+ * | --- | --- |
+ * | y 0.73 (its foot) | **2.2140** |
+ * | y 11.33 (its top) | 2.0500 |
+ *
+ * So it is a plain linear taper that gets **narrower** with height, and the
+ * widest stone at any height a child can occupy is the one at her feet. Her
+ * head at ~1.6 m stands at y 2.33, where the shaft is 2.189 — so a single
+ * collider at 2.214 never admits her inside drawn stone at any height, and
+ * holds her at most **25 mm** proud of it at head height.
+ *
+ * `topIsAbsolute` answers the opposite shape — a prop solid to feet on the
+ * floor and air to feet mid-jump, or a top she can stand on (`hotel/place.ts`).
+ * There is no reachable height band here where the right answer differs, so a
+ * banded collider would be machinery with nothing to do.
+ *
+ * Infinity-topped, like the shell and the roof turrets: the body is 10.6 m with
+ * a 4.2 m cone on it, and a 1.28 m jump apex has no business clearing that.
+ */
+function registerCastleTowerCollision(collision: CollisionWorld): void {
+  for (const tower of CASTLE_TOWERS) {
+    // The roof cones sit on top of the bodies and share their axis, so the body
+    // alone is the whole footprint a child can walk into.
+    if (!tower.name.startsWith('tower-body-')) continue;
+    // `radiusBottom` is `CASTLE_TURRET_BASE_RADIUS`, which the drawn shaft is
+    // also built from — one owner, so the two cannot drift.
+    collision.addCircle(tower.x, tower.z, tower.radiusBottom);
+  }
 }

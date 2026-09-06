@@ -157,7 +157,6 @@ const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
   // stranded=0, oracle=pass.
   115: { layout: { hotel: 1 } },
   225: { layout: { 'stall.railRacer': 1 } },
-  288: { layout: { waterFight: 1 } },
   // **326 is second-vintage**, and it is the #437 blind spot pointing the
   // other way from 115's. First baked as {fountain:1} on check:park evidence
   // alone; the moment seed-326.test.ts existed that went red on ONE invariant

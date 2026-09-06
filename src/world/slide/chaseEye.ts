@@ -204,9 +204,92 @@ const FRAME_SAFETY = 0.75;
 const CEILING_SAFETY = 0.6;
 
 const eye = new Vector3();
+/** To the companion's **seat** — what the frustum bound is measured on. */
 const toPet = new Vector3();
+/** The companion's drawn **body centre**, and the vector to it (#518). */
+const petBody = new Vector3();
+const toPetBody = new Vector3();
 const toChild = new Vector3();
 const axis = new Vector3();
+
+/**
+ * **What the near bound actually did, counted rather than assumed** (#518).
+ *
+ * The ceiling guard below was written to stop the lens pressing a companion
+ * against the glass, and for its whole life it **rejected nothing** — the
+ * defect #518 is about. A guard that looks calibrated and cannot fire is worse
+ * than one visibly absent, and the only thing that tells the two apart is a
+ * count, so these are counted and `check:pet-slide` prints them on every run.
+ *
+ * Kept after the fix, not deleted with it: "it fires now" is exactly as much a
+ * measurement as "it never fired", and the next change in this area needs to be
+ * able to see which it is without re-deriving an instrument.
+ */
+let solveCalls = 0;
+let solveCandidates = 0;
+let solveWorstCandidates = 0;
+let candidatesThisCall = 0;
+let ceilingRejections = 0;
+let ceilingCalls = 0;
+let ceilingWorstShare = 0;
+
+/**
+ * **How hard the placement search actually worked** — calls, candidates tried,
+ * and the most any single call tried.
+ *
+ * Here because the search's cost changed character with #518. Before it, the
+ * near bound rejected nothing, so the first candidate was accepted on every
+ * frame of every park and `worstCandidates` was **1** — the search was, as this
+ * file's header says, unexercised and therefore unproven. Now it rejects, so
+ * the loop genuinely iterates, and the honest question "how far does it walk?"
+ * needs an answer that is measured rather than reasoned.
+ *
+ * Measured across all sixteen pool parks: mean **2.2** candidates per call and
+ * **worst 4**, against a loop bounded at 30 x 20 = 600. So the search is
+ * exercised at last, and nowhere near its stop.
+ *
+ * No wall-clock timing here on purpose. A `performance.now()` pair in a
+ * per-frame path measures whatever else the process was doing: timing this
+ * reported a single 20.6 ms call on seed 5 that had examined **4** candidates,
+ * the same as calls costing 0.03 ms elsewhere — a GC pause caught inside the
+ * window, not the solve. Counting the work is the honest instrument; timing it
+ * measures the machine.
+ */
+export function chaseSolveCost(): { calls: number; candidates: number; worstCandidates: number } {
+  return { calls: solveCalls, candidates: solveCandidates, worstCandidates: solveWorstCandidates };
+}
+
+/** How many placements the near bound has rejected — 0 was the whole of #518. */
+export function chaseCeilingRejections(): number {
+  return ceilingRejections;
+}
+
+/** How many times the near bound was asked at all, so a 0 above can be read. */
+export function chaseCeilingCalls(): number {
+  return ceilingCalls;
+}
+
+/** The largest frame share the near bound ever estimated, against its threshold. */
+export function chaseCeilingWorstShare(): number {
+  return ceilingWorstShare;
+}
+
+/** Zero the near-bound counters — called when a ride is boarded. */
+export function resetChaseCeilingCounters(): void {
+  ceilingRejections = 0;
+  solveCalls = 0;
+  solveCandidates = 0;
+  solveWorstCandidates = 0;
+  ceilingCalls = 0;
+  ceilingWorstShare = 0;
+}
+
+/**
+ * The threshold the near bound actually compares against, exported so a check
+ * can print the guard's worst estimate *beside the number that would have made
+ * it fire* rather than restating the product itself.
+ */
+export const CEILING_REJECT_ABOVE = PET_FRAME_CEILING * CEILING_SAFETY;
 
 /**
  * Solve the lens placement for this instant of the descent.
@@ -222,15 +305,26 @@ const axis = new Vector3();
 export function solveChaseEye(
   rider: Vector3,
   pet: Vector3 | null,
+  /**
+   * The nearest companion's **drawn body centre**, from the parade that owns
+   * the animal (#518) — or `null` when it cannot be measured, in which case the
+   * near bound falls back to the seat and is, as it always was, unable to fire.
+   * Passed in rather than derived: see the note at its use.
+   */
+  petBodyCentre: Vector3 | null,
   behind: Vector3,
   up: Vector3,
   halfFovRad: number,
   aspect: number,
 ): ChaseEye {
   const wanted = halfFovRad * FRAME_SAFETY;
+  solveCalls += 1;
+  candidatesThisCall = 0;
 
   for (let extraBack = 0; extraBack <= MAX_EXTRA_BACK; extraBack += BACK_STEP) {
     for (let extraUp = 0; extraUp <= MAX_EXTRA_UP; extraUp += UP_STEP) {
+      solveCandidates += 1;
+      candidatesThisCall += 1;
       const back = BASE_BACK + extraBack;
       const high = BASE_UP + extraUp;
       eye.copy(rider).addScaledVector(behind, back).addScaledVector(up, high);
@@ -249,6 +343,7 @@ export function solveChaseEye(
       // historical placement already did — so the first candidate wins and
       // every park without companions keeps exactly the camera it had.
       if (!pet) {
+      if (candidatesThisCall > solveWorstCandidates) solveWorstCandidates = candidatesThisCall;
         return { back, up: high, aimAt: new Vector3().copy(rider), gaveUp: false };
       }
 
@@ -270,23 +365,35 @@ export function solveChaseEye(
       //
       // The ceiling is imported, never restated: `slide/petFraming.ts` owns it
       // and `check:pet-slide` reads the same one.
-      // **KNOWN GAP — this guard still does not bind, and the reason is the
-      // reference point, not the radius.** `toPet` runs to the companion's
-      // *seat*, which is its origin at its feet; the reclining body extends
-      // back from there **towards the lens**. Measured on the canonical park,
-      // the seat sits ~2.3 m from the eye while the drawn body's centre is
-      // ~1.35 m, and the threshold only bites under about 1.5 m — so the solve
-      // reads ~6% where the raster later measures 21%, and accepts.
+      // **Measured to the BODY, not to the seat** (#518, fixed). A seat is the
+      // animal's origin *at its feet*; the reclining body lies back from there
+      // up-slope, towards this lens. Measuring the seat asked about a point
+      // where none of the animal is — ~2.30 m away where the drawn centre is
+      // ~1.35 m — so this guard estimated ~6% where the raster measured 21%
+      // and **rejected nothing in its entire life**.
       //
-      // That is the same disease as **#471** (a check measuring a pet's *root*
-      // while its body hangs outside the trough) and as #513: a measurement
-      // taken on a convenient point rather than on the thing that gets drawn.
-      // Fixing it means asking the companion's real extent, which this module
-      // deliberately does not have — it is given seats, not bodies. Recorded
-      // here rather than papered over, because the alternative is a guard that
-      // looks calibrated and cannot fire.
+      // The point is **handed in**, measured off the drawn animal by
+      // `Parade.nearestRiderBodyCentre` — the system that owns the bodies.
+      // This module derives nothing, which is the whole point: #518 is the
+      // *third* instance of "a measurement taken on a convenient origin rather
+      // than on the thing that gets drawn" (with #471 and #513), and computing
+      // `seat + upSlope × half a length` here would be that same fault
+      // committed inside its own fix. That was tried first and measured
+      // **0.70 m out** from the real body — see the PR.
+      // Kept in its own vector rather than reusing `toPet`, which above still
+      // means "to the seat" and is what the frustum bound is measured on. One
+      // name per meaning, in the file whose bug was two meanings for one point.
+      //
+      // `petBody` is **handed in, measured off the drawn animal by the parade**
+      // that owns it — this module does not derive it. Deriving it here was
+      // tried and measured **0.70 m out** from the real body, which is most of
+      // the error the fix was meant to remove: a second description of where an
+      // animal is, kept in step with the drawn one by hand, inside the fix for
+      // an instance of exactly that fault.
+      petBody.copy(petBodyCentre ?? pet);
+      toPetBody.copy(petBody).sub(eye);
       const share = estimatedFrameShare(
-        toPet.length(),
+        toPetBody.length(),
         // The radius that predicts *screen area*, not the collision radius —
         // see PET_SCREEN_RADIUS. Using PARADE_MEMBER_RADIUS here made this
         // guard read a median 4.2x light across the pool.
@@ -294,12 +401,18 @@ export function solveChaseEye(
         halfFovRad,
         aspect,
       );
-      if (share > PET_FRAME_CEILING * CEILING_SAFETY) continue;
+      ceilingCalls += 1;
+      if (share > ceilingWorstShare) ceilingWorstShare = share;
+      if (share > CEILING_REJECT_ABOVE) {
+        ceilingRejections += 1;
+        continue;
+      }
       toChild.copy(rider).sub(eye);
       const childAngle = Math.acos(
         Math.min(1, Math.max(-1, toChild.clone().normalize().dot(axis))),
       );
       if (petAngle <= wanted && childAngle <= wanted) {
+      if (candidatesThisCall > solveWorstCandidates) solveWorstCandidates = candidatesThisCall;
         return { back, up: high, aimAt: aim, gaveUp: false };
       }
     }
@@ -307,6 +420,7 @@ export function solveChaseEye(
 
   // **No placement in range framed her line and stayed out of the hill.** Not a
   // floor to settle on — reported, and asserted zero by `check:pet-slide`.
+      if (candidatesThisCall > solveWorstCandidates) solveWorstCandidates = candidatesThisCall;
   return {
     back: BASE_BACK,
     up: BASE_UP,

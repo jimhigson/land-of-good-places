@@ -17,7 +17,7 @@ import { PALETTE } from '../../core/palette';
 import { softMaterial } from './parts';
 import {
   CASTLE_MERLON_HEIGHT,
-  TOWER_BASE_FLARE,
+  CASTLE_TURRET_BASE_RADIUS,
   TOWER_RADIUS,
   TOWER_ROOF_HEIGHT,
   TOWER_ROOF_OVERHANG,
@@ -260,7 +260,7 @@ export function buildCastleTurrets(options: TurretOptions): Group {
   // plain cylinder reading as a drainpipe.
   const shaft = bodyHeight + bodyBelow;
   const bodies = new InstancedMesh(
-    new CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS * TOWER_BASE_FLARE, shaft, 16),
+    new CylinderGeometry(TOWER_RADIUS, CASTLE_TURRET_BASE_RADIUS, shaft, 16),
     softMaterial(CASTLE_STONE, 0.78),
     Math.max(1, spots.length),
   );

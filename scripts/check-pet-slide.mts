@@ -111,6 +111,18 @@ const { terrainHeight } = await import('../src/world/terrain.ts');
 const { PET_FRAME_FLOOR, PET_FRAME_CEILING } = await import(
   '../src/world/slide/petFraming.ts'
 );
+// **#518's instrument.** The near bound's own counters, so "it fires" and "it
+// cannot fire" are distinguishable from a run rather than from reading the
+// source. `CEILING_REJECT_ABOVE` comes from the solver too — printing the
+// worst estimate beside a threshold restated here would be the copy this
+// module family keeps being bitten by.
+const {
+  chaseCeilingRejections,
+  chaseCeilingCalls,
+  chaseCeilingWorstShare,
+  CEILING_REJECT_ABOVE,
+  chaseSolveCost,
+} = await import('../src/world/slide/chaseEye.ts');
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
 
 // **Say which park was measured, on every run, pass or fail.** Every clause in
@@ -170,6 +182,49 @@ const MAX_STEP = 0.35;
 const REGROUP_RADIUS = 14;
 /** How long it is given to get there. */
 const REGROUP_SECONDS = 3;
+
+/**
+ * **How far the point the chase solve used may sit from the companion's drawn
+ * centre**, in metres (#518).
+ *
+ * **Read off the failures it has to separate, not reasoned from first
+ * principles** — the same method `PET_FRAME_CEILING`'s own doc records as
+ * *"read off the failure, not chosen in the abstract"*, and the method this
+ * whole ticket argues for:
+ *
+ * | | distance |
+ * |---|---|
+ * | one frame of travel, which this comparison is stale by *by construction* | **measured** — see below |
+ * | **0.40 m — this threshold** | a few frames' headroom |
+ * | the derived stand-in tried first, and rejected | 0.70 m |
+ * | the **seat**, i.e. a straight reversion to #518 | ~0.95 m |
+ *
+ * The staleness is real and not a defect: the solve reads the body point at the
+ * top of `advanceRide` and the animals are seated at the bottom, exactly as
+ * `Building.chaseCompanions` is deliberately one frame behind. So the floor
+ * cannot be zero. The ceiling is set by what the clause must reject, and a
+ * threshold above 0.70 m would fail to reject the very error this fix was
+ * rewritten to remove.
+ *
+ * **The floor is never written down here.** One frame of travel is a quantity
+ * this file already *measures* — `worstStep`, printed as "biggest single-frame
+ * step" — so quoting it as a literal would be two owners of one number, which
+ * is the fault this very PR is about. The failure message interpolates the
+ * measured value, and {@link bodyDriftHeadroom} asserts the relationship still
+ * holds rather than trusting a comment about it.
+ */
+const MAX_BODY_DRIFT = 0.4;
+
+/**
+ * How many frames of travel {@link MAX_BODY_DRIFT} must stay clear of.
+ *
+ * 2 rather than today's ~3.4 because this guards the *relationship*, not the
+ * current value: it should fire when the window has genuinely closed up, not
+ * every time a frame gets slightly longer. Below 2x, a clause measured across
+ * one unavoidable frame of staleness is being asked to resolve less than two
+ * frames, and honest runs start failing.
+ */
+const MIN_DRIFT_HEADROOM = 2;
 
 /** The fraction of chase rasters the nearest companion must be in the shot on. */
 const IN_SHOT_FLOOR = 0.95;
@@ -651,6 +706,12 @@ async function ride(wired: boolean): Promise<RunResult> {
    * mean nothing was ever measured, which the report says out loud rather than
    * printing a reassuring zero.
    */
+  /**
+   * **How far the solve's derived body centre sat from the drawn body's own
+   * centre** (#518), in metres, and where. `-1` means never measured.
+   */
+  let worstBodyDrift = -1;
+  let worstBodyDriftFrame = 0;
   let worstPetOffAxis = -1;
   let worstPetOffAxisFrame = 0;
   let petHalfFov = 0;
@@ -1099,6 +1160,45 @@ async function ride(wired: boolean): Promise<RunResult> {
           const cam = liveCamera as unknown as PerspectiveCameraLike;
           const bodyCentre = new Vector3();
           new Box3().setFromObject(first.root as never).getCenter(bodyCentre);
+
+          // **Does the point the camera solve reasons about actually sit on the
+          // animal?** (#518.)
+          //
+          // The solve is handed a point measured off the drawn mesh by
+          // `Parade.nearestRiderBodyCentre`. This asks whether the point it
+          // actually used is on the animal — measured here independently, with
+          // `Box3.setFromObject` on the real body, on real frames of a real
+          // descent.
+          //
+          // **What it is really guarding.** Both sides run `Box3.setFromObject`
+          // on the *same* `Object3D`, so this cannot catch a drifting formula —
+          // there is no formula left. What it catches is the solve being handed
+          // the **wrong point**: most obviously a reversion to the **seat**
+          // (~0.95 m away, and the whole of #518), or a derived stand-in like
+          // the one tried first here, which measured **0.70 m out**.
+          //
+          // **Why the threshold is what it is.** The two reads differ in *when*,
+          // not in what: the body point is taken at the top of `advanceRide`
+          // and the animals are seated at the bottom, so this is one frame
+          // stale by construction. The honest window is therefore: comfortably
+          // above one frame of motion, comfortably below the 0.70 m error it
+          // exists to reject.
+          //
+          // One frame of travel is **not written down** — this file measures it
+          // as `worstStep` and the clause interpolates that measurement, so
+          // there is one owner of it rather than a literal to keep in step.
+          // {@link MAX_BODY_DRIFT} is 0.40 m, well under both 0.70 m and the
+          // seat's 0.95 m. A threshold at ~0.95 m — proposed at one point —
+          // would sit *above* the error it was offered as catching, which is
+          // the same fault one layer out.
+          const solved = building.chaseNearestBodyCentre();
+          if (solved) {
+            const drift = solved.distanceTo(bodyCentre);
+            if (drift > worstBodyDrift) {
+              worstBodyDrift = drift;
+              worstBodyDriftFrame = ridingFrames;
+            }
+          }
           const inCamera = cam.worldToLocal(bodyCentre.clone());
           const ahead = -inCamera.z;
           // Vertical off-axis only, compared against the VERTICAL half-fov:
@@ -1204,6 +1304,60 @@ async function ride(wired: boolean): Promise<RunResult> {
     );
   }
 
+  // **The window has not closed up underneath us (#518).**
+  //
+  // `MAX_BODY_DRIFT` only means anything relative to one frame of travel, which
+  // this comparison is stale by. That quantity is **measured** here as
+  // `worstStep`, not written down — so instead of a comment asserting "0.40 m
+  // is about 3.4x a frame", which would rot silently the moment the ride's
+  // speed or frame step changed, the relationship is asserted.
+  //
+  // At `GIANT_SLIDE_SPEED` a frame is ~0.12 m today, giving ~3.4x. If a frame
+  // ever grew past `MAX_BODY_DRIFT / MIN_DRIFT_HEADROOM` the threshold would
+  // start catching honest staleness as if it were a wrong point, and nothing
+  // would announce it. This does.
+  if (worstStep > 0 && MAX_BODY_DRIFT / worstStep < MIN_DRIFT_HEADROOM) {
+    say(
+      'the drift window still has room',
+      `one frame of travel is now ${worstStep.toFixed(3)} m, so ${MAX_BODY_DRIFT.toFixed(2)} m ` +
+        `of allowed drift is only ${(MAX_BODY_DRIFT / worstStep).toFixed(1)}x a frame, against ` +
+        `${MIN_DRIFT_HEADROOM}x required. The drift clause is measured across a one-frame ` +
+        'staleness it cannot remove, so a threshold this close to a frame will start failing ' +
+        'honest runs. Raise MAX_BODY_DRIFT (it has room below the 0.70 m it must still reject) ' +
+        'or slow what moved',
+    );
+  }
+
+  // **The body point the solve used was actually on the animal (#518).**
+  //
+  // This clause exists because the first version of this instrument **only
+  // printed** `worstBodyDrift` and asserted on nothing — so an injected 8.66 m
+  // offset in `Parade.nearestRiderBodyCentre` produced
+  // `worst 8.73 m out` and still `check:pet-slide ok`, exit 0. A printed number
+  // nobody asserts on is not protection, which is the entire thesis of the
+  // change this file is checking; the clause meant to embody it was itself only
+  // printed. Caught in review by a person reading the number, which is
+  // creditable and is not a mechanism.
+  if (worstBodyDrift < 0) {
+    say(
+      'the solve measured the drawn body',
+      'the point the chase solve used for the nearest companion was never compared against ' +
+        'the drawn animal, so #518 — the near bound reasoning about a point the animal is ' +
+        'not at — was not tested on this run',
+    );
+  } else if (worstBodyDrift > MAX_BODY_DRIFT) {
+    say(
+      'the solve measured the drawn body',
+      `the point the chase solve used for the nearest companion sat ` +
+        `${worstBodyDrift.toFixed(2)} m from that animal's drawn centre on ridden frame ` +
+        `${worstBodyDriftFrame}, against ${MAX_BODY_DRIFT.toFixed(2)} m allowed (this run's ` +
+        `biggest single-frame step, which the comparison is stale by, was ` +
+        `${worstStep.toFixed(3)} m). The near bound is reasoning about a point the animal is not at, ` +
+        `which is #518: measuring to the seat reads ~0.95 m out and estimates 6% of frame ` +
+        `where the raster measures 21%. Ask the parade for the drawn body; do not derive it`,
+    );
+  }
+
   // **The aim guard (#514).** See the measurement's own comment in the raster
   // block for why this is the clause that actually holds the fix down.
   //
@@ -1294,6 +1448,17 @@ async function ride(wired: boolean): Promise<RunResult> {
       // of it.
       `biggest pet ${(biggestPet * 100).toFixed(0)}% of frame — ${biggestPetName}, ` +
       `against a ${(PET_FRAME_CEILING * 100).toFixed(0)}% ceiling), ` +
+      // **#518: did the near bound do anything?** Printed every run, because
+      // the whole defect was a guard that looked calibrated and rejected
+      // nothing, and only a count can tell that from a guard with nothing to
+      // reject.
+      `solve search ${chaseSolveCost().candidates} candidates in ${chaseSolveCost().calls} calls (worst ${chaseSolveCost().worstCandidates} of 600 possible), ` +
+      `solved body centre vs drawn ` +
+      `${worstBodyDrift < 0 ? 'NEVER MEASURED' : `worst ${worstBodyDrift.toFixed(2)} m out (frame ${worstBodyDriftFrame})`}, ` +
+      `near bound ${chaseCeilingRejections()} rejections in ${chaseCeilingCalls()} calls ` +
+      `(worst estimate ${(chaseCeilingWorstShare() * 100).toFixed(1)}% against ` +
+      `${(CEILING_REJECT_ABOVE * 100).toFixed(1)}% to reject)` +
+      `${chaseCeilingRejections() === 0 ? ' — NEVER FIRED' : ''}, ` +
       // The #514 aim guard's own number, printed green or red.
       `nearest pet worst ` +
       `${worstPetOffAxis < 0 ? 'NEVER MEASURED' : `${worstPetOffAxis.toFixed(1)}° off the lens axis (frame ${worstPetOffAxisFrame}, half-fov ${petHalfFov.toFixed(1)}°)`}, ` +

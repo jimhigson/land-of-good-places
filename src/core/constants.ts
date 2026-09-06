@@ -470,6 +470,62 @@ export const BUILDING_PLINTH = 0.3;
 export const BUILDING_SLAB = 0.3;
 export const BUILDING_WALL_THICKNESS = 0.45;
 
+// ------------------------------------------- the castle's corner turrets
+//
+// These live here, beside `BUILDING_HALF_X/Z` and the wall thickness they are
+// measured from, because **"how far does the castle reach?" must have exactly
+// one answer** and three very different places need it: the drawn masonry, the
+// collider that makes it solid, and the park layout that has to leave room for
+// it. Issue #549 is what that costs when it does not — the turrets stand
+// outside the 24 x 18 footprint rectangle, so the collision world did not know
+// they existed (a child walked through them) *and* the layout solver did not
+// either (on three of the sixteen pool seeds it put the castle's own doormat
+// inside one).
+//
+// `core/constants.ts` imports nothing, which is the property that makes it the
+// only possible home: `building/layout.ts` imports `parkLayout`, so neither
+// `parkLayout` nor `parkManifest` can import it back without a cycle.
+
+/** A turret shaft's radius at the top of its taper. */
+export const TOWER_RADIUS = 2.05;
+/** How much wider the shaft is at its foot than at its top. */
+export const TOWER_BASE_FLARE = 1.08;
+/** How far the conical roof oversails the shaft it sits on. */
+export const TOWER_ROOF_OVERHANG = 0.4;
+
+/**
+ * **How wide a turret's shaft is at its foot** — the one owner of the number,
+ * read by the drawn mesh, by `CASTLE_TOWERS` and by the collider.
+ *
+ * Writing #549's collider found this being computed in **three** separate
+ * places, with the mesh not reading the solid at all. They agreed only because
+ * three copies of one expression were typed identically, one edit away from a
+ * re-flared turret moving the drawn stone while the collider stayed put.
+ *
+ * This is the first collider landing under `ART_DIRECTION.md` §7's Collider
+ * row. The rule generalises: **the solid publishes its radius, and the geometry
+ * and the collision both ask it.** And for a faceted solid of revolution the
+ * collider takes the **circumradius** — the shaft is a 16-segment cylinder and
+ * a 16-gon's flats sit at `cos(pi/16)` = 0.98079 of it — so a circular collider
+ * is at most 43 mm proud of a flat face and never sits *inside* drawn stone.
+ */
+export const CASTLE_TURRET_BASE_RADIUS = TOWER_RADIUS * TOWER_BASE_FLARE;
+
+/**
+ * **Where the four turrets stand, relative to the castle's centre.**
+ *
+ * Half a wall thickness outside each corner of the footprint rectangle, which
+ * is exactly why they escape it. Read by `CASTLE_TOWERS` (which adds the
+ * building's world centre) and by the park manifest's own footprint, so the
+ * layout solver knows the castle is not the rectangle it looks like.
+ */
+export const CASTLE_TURRET_CORNERS: readonly (readonly [number, number])[] = [
+  [-(BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2), -(BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2)],
+  [BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2, -(BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2)],
+  [-(BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2), BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2],
+  [BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2, BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2],
+];
+
 /**
  * Height of the solid painted wall; a band of glass fills the gap up to the
  * deck above.

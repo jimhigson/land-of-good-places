@@ -1,5 +1,10 @@
 import { candidateRng, hashString, Rng, TAU } from '../core/mathUtils';
-import { CAMERA_FACING_YAW } from '../core/constants';
+import {
+  BUILDING_CENTRE_NUDGE,
+  CAMERA_FACING_YAW,
+  CASTLE_TURRET_BASE_RADIUS,
+  CASTLE_TURRET_CORNERS,
+} from '../core/constants';
 import {
   BOUNDARY_CLEARANCE,
   GATE_CORRIDOR_HALF_WIDTH,
@@ -177,7 +182,69 @@ export function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ
   // own (unrotated) frame — plots are axis-aligned, as they always were.
   const tx = ax > 1e-6 ? footprint.halfX / ax : Infinity;
   const tz = az > 1e-6 ? footprint.halfZ / az : Infinity;
-  return Math.min(tx, tz);
+  let edge = Math.min(tx, tz);
+
+  // **Corner solids reach past the rectangle, so they are asked too** — the
+  // castle's turrets (#549). For each disc, how far along the ray its far
+  // surface lies: the standard ray-circle exit distance, `Infinity` discarded
+  // where the ray misses the disc entirely. Taking the max keeps this exactly
+  // the rectangle's answer for every plot that has no corners declared.
+  if (footprint.corners) {
+    const { radius } = footprint.corners;
+    for (const [cx, cz] of footprint.corners.at) {
+      const along = cx * dirX + cz * dirZ;
+      const perpendicularSquared = cx * cx + cz * cz - along * along;
+      const halfChordSquared = radius * radius - perpendicularSquared;
+      if (halfChordSquared <= 0) continue; // the ray misses this corner
+      edge = Math.max(edge, along + Math.sqrt(halfChordSquared));
+    }
+  }
+  return edge;
+}
+
+/**
+ * **The footprint a plot actually occupies once it has been placed.**
+ *
+ * For everything but the castle this is the authored footprint unchanged.
+ *
+ * The castle is different, and issue #549 is what the difference cost. Its four
+ * corner turrets stand outside the footprint rectangle, so a rectangle cannot
+ * say where the castle reaches — and *everything* that asked got the same wrong
+ * answer: the collision world did not know the turrets were there (a child
+ * walked through them), and neither did this solver, so on three of the sixteen
+ * pool seeds it put the castle's own doormat and path spur inside one.
+ *
+ * The turrets cannot simply be declared on the authored footprint, because the
+ * drawn castle is **not centred on its plot**: `building/layout.ts` nudges it
+ * {@link BUILDING_CENTRE_NUDGE} towards the park middle so every interior
+ * corner stays inside `GARDEN_PLAY_RADIUS`. That direction is a function of
+ * where the plot landed, so it is only knowable here, at placement — which is
+ * exactly why this is the right place to resolve it, and why a static entry in
+ * `parkManifest.ts` could not.
+ *
+ * Writing the discs into the **placed** footprint gives one owner for "how far
+ * does the castle reach": `PlacedEntry.footprint` is what both consumers of
+ * `edgeDistanceAlong` already read — the entrance placement below, and the path
+ * spur's target in `paths.ts` — so neither had to learn about turrets, and they
+ * cannot disagree.
+ */
+function footprintAsPlaced(entry: ManifestEntry, x: number, z: number): AnchorFootprint {
+  if (entry.id !== 'building' || entry.footprint.kind !== 'rect') return entry.footprint;
+  // The same nudge `building/layout.ts` applies: towards the park middle.
+  const length = Math.hypot(x, z) || 1;
+  const offsetX = -(x / length) * BUILDING_CENTRE_NUDGE;
+  const offsetZ = -(z / length) * BUILDING_CENTRE_NUDGE;
+  return {
+    kind: 'rect',
+    halfX: entry.footprint.halfX,
+    halfZ: entry.footprint.halfZ,
+    corners: {
+      at: CASTLE_TURRET_CORNERS.map(
+        ([cx, cz]) => [cx + offsetX, cz + offsetZ] as readonly [number, number],
+      ),
+      radius: CASTLE_TURRET_BASE_RADIUS,
+    },
+  };
 }
 
 function solve(): ParkLayout {
@@ -291,7 +358,11 @@ function buildOnce(restart: number): ParkLayout | null {
       dirX = (towardMiddle[0] as number) / length;
       dirZ = (towardMiddle[1] as number) / length;
     }
-    const edge = edgeDistanceAlong(entry.footprint, dirX, dirZ);
+    // The placed footprint, not the authored one: for the castle it carries the
+    // corner turrets, nudged to where they are actually drawn. Asking the
+    // authored rectangle here is what put three seeds' doormats inside a tower.
+    const placedFootprint = footprintAsPlaced(entry, x, z);
+    const edge = edgeDistanceAlong(placedFootprint, dirX, dirZ);
     const standOff = 1.4; // the sign and the doormat, just clear of the plot
     const entranceX = x + dirX * (edge + standOff);
     const entranceZ = z + dirZ * (edge + standOff);
@@ -300,7 +371,7 @@ function buildOnce(restart: number): ParkLayout | null {
       id: entry.id,
       x,
       z,
-      footprint: entry.footprint,
+      footprint: placedFootprint,
       boundingRadius: entry.boundingRadius,
       entranceX,
       entranceZ,

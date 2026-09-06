@@ -34,6 +34,8 @@ import './headless-canvas.mjs';
 import { Vector3, type Object3D } from 'three';
 import {
   createKid,
+  kidEyeCentre,
+  KID_EYE_HEIGHT,
   KID_HEIGHT,
   KID_HIP_HEIGHT,
   KID_REACH_HEIGHT,
@@ -50,6 +52,20 @@ function jointY(name: string): number {
   const node: Object3D | undefined = root.getObjectByName(name);
   if (!node) throw new Error(`measure:kid-landmarks: no node named '${name}'.`);
   return node.getWorldPosition(new Vector3()).y;
+}
+
+/**
+ * **Where the painted eyes are, above the feet.**
+ *
+ * `kidEyeCentre()` is written in the `crown` group's frame, so it is taken into
+ * world space through the real crown rather than added to `KID_HEAD_HEIGHT` by
+ * hand — the head is tipped by `HEAD_TILT`, and a trigonometry sum here would
+ * be a second description of a surface `kid.ts` already owns.
+ */
+function eyeCentreY(): number {
+  const crown: Object3D | undefined = root.getObjectByName('crown');
+  if (!crown) throw new Error("measure:kid-landmarks: no node named 'crown'.");
+  return crown.localToWorld(kidEyeCentre(1).clone()).y;
 }
 
 /**
@@ -96,6 +112,7 @@ const rows: [string, number, string][] = [
   ['reach, arm straight up', reach, `pivot + a ${armLength.toFixed(2)} m arm`],
   ['top of the torso', meshSpan('torso')?.top ?? NaN, `KID_SHOULDER_HEIGHT is ${KID_SHOULDER_HEIGHT}`],
   ['head pivot', jointY('head'), ''],
+  ['painted eye centre', eyeCentreY(), `KID_EYE_HEIGHT is ${KID_EYE_HEIGHT}`],
   ['top of the hair', top, 'this style only; hats go far higher'],
 ];
 for (const [name, value, note] of rows) {
@@ -111,5 +128,7 @@ for (const name of ['foot-l', 'leg-upper-l', 'hand-l', 'torso', 'skull']) {
 }
 
 console.log(`\n  published: KID_HIP_HEIGHT ${KID_HIP_HEIGHT}, KID_REACH_HEIGHT ${KID_REACH_HEIGHT},`);
+console.log(`             KID_EYE_HEIGHT ${KID_EYE_HEIGHT} — standing eyes; NOT faces.ts eyeY (a canvas`);
+console.log(`             fraction) and NOT gondola.ts PASSENGER_EYE_Y (measured from a seat).`);
 console.log(`             KID_SHOULDER_HEIGHT ${KID_SHOULDER_HEIGHT}, KID_HEIGHT ${KID_HEIGHT}`);
-console.log('  check:character-parity asserts the first two against this rig.\n');
+console.log('  check:character-parity asserts the hip, the reach and the eye against this rig.\n');
