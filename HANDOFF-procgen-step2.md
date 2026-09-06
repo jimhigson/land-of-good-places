@@ -152,6 +152,24 @@ one: **all 31 green** (scratchpad `chain-rest.log`). `check:swept-bus` exits 1: 
 14 NOT BUILT. `test:procgen`, `check:park-pool`, `check:gateway`: red on the
 refusing seeds until phase 2 — not run in full, by design.
 
+## Rebased onto main 930f5195 (#589 merged: seeds 267, 288 retired) — re-measured
+
+Branch is 10 commits on `930f5195`; the two 0..15 pool commits were dropped
+(that change lives in #584, open and red by design until the generator builds
+0..15). The 0..15 table above was measured on the branch **with** `readSeed`
+accepting 0, so its seed-0 rows were genuinely seed 0 — but that pool is not
+on `main` yet, so the numbers that stand today are these, on the fourteen-seed
+sweep (thirteen pool seeds plus the canonical):
+
+| result | seeds |
+|---|---|
+| **build, 0 posts in the bus** | 20260728, 225 |
+| **refuse** — a duck-bar slot the hill road blocks (`refused by road`) | 5, 11, 24 (race ring), 115, 128, 131, 208, 274, 326, 346, 428, 451 |
+
+**New placer on the hill: 2 of 14 build, 12 refuse.** Retiring 267 and 288
+removed two refusals and no builds. The sphere (road outside the ring) is the
+thing that moves 12 → 0; nothing else is named by any refusal.
+
 ## Phase 2 checklist (when #511 is on `main`)
 
 1. Rebase; drop the step-1 carry commit if #522 has landed on its own.
