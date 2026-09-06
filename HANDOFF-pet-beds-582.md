@@ -120,9 +120,38 @@ camera holds her room and the middle bedroom in one frame, so the three
 overflow pets are plainly asleep next door. It reads as *my pets are next
 door*, not *my pets have vanished*.
 
-At N=12 a companion with no bed at all is left standing **on her own bed**
-while she sleeps — visible in the screenshot, and a consequence of the
-shortfall rather than of anything on this branch.
+### At N=12 the bedless animals stack on one point — measured, after a wrong first reading
+
+**Correcting a claim made earlier in this file's own history: they are not "on
+her bed".** That came from reading a screenshot, and from a probe whose
+`m.group ?? m.object ?? m.root` fallback silently resolved to the *player*, so
+it reported her position as theirs. The tell was that the "pets'" coordinate
+was byte-identical to `player.position`. Measured against `ParadeMember.root`,
+which is the drawn body:
+
+```
+pet.bunny#5    (-613.2, 0, 1380)  phase null
+toy.star#4     (-613.2, 0, 1380)  phase null
+toy.biscuit#3  (-613.2, 0, 1380)  phase null   -- separation between them: 0.000 m
+```
+
+That point is exactly `player.position` — where she was standing when she got
+into bed. A companion with no bed keeps following, and the follow target
+collapses onto her once she stops moving, so **three animals interpenetrate at
+one spot**, awake, while the other five sleep. `player.position` itself stays
+at her pre-nap spot (the nap is a *ride pose*, not a move), which is why the
+pile is 5.77 m from the bed she is actually lying in.
+
+**This branch strictly improves it rather than causing it.** Under the old
+napped-room-only rule a nap in bedroom 0 gave beds to 2 of the walkers, so 6
+would have piled up; now 5 sleep and 3 pile. The stacking is the parade's
+follow behaviour for a bedless companion, untouched here, and it is worth its
+own issue.
+
+**It is not a reason to hold the link back**: it needs N=12, which is above
+both the bed capacity (10) and the parade cap (8) and is only reachable by
+typing it. At N=5 — the value that answers Jim's question — every companion
+gets a bed and nothing stacks.
 
 **A bad value cannot break the boot**: `?pets=not-a-number` booted into the
 suite normally, granted nothing, logged no error, and — correctly — printed no
