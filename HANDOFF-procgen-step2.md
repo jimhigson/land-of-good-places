@@ -338,3 +338,41 @@ the scratch with sphere b6b1a983 (50 + 50 legs on sphere-alone, rest-top and
 driven heads, 0 differ); measure on the real merge and put it in the digest
 table. Open the PR from `scratchpad/pr-body-step2.md` once the sphere is on
 the design branch.
+
+## One rail race, one feature; Jim's road rule; headroom deleted (7 Sep) — head ab763a4d
+
+Rulings (Overseer/Architect, recorded on the design branch): (a) there is ONE
+rail race drawn at two scales, so both rings claim as `RAIL_RACE_FEATURE =
+'railRace'` (`railRace/feature.ts`, a leaf) — 7eba9cc0; the walk-past
+colliders register AFTER both rings are placed (`RailRaceTrack.
+registerCollision`), so the race ring's `legacy:collision` never sees them:
+canonical race ring 100 → 0. (b) Jim: *"just skip all the legs over the road,
+otherwise keep them"* — 609fd20a; extended to the WHOLE drawn tree at the
+nominal slot and of every march candidate (`treeStandsOn`) — 091d813c —
+because claims now clip at `TALLEST_CHILD_HEIGHT` and a candidate's branches
+over the carriageway are otherwise invisible to the registry. Deleted:
+`Claim.headroom`, `tallestHeadroom`, the corridor's driven-top headroom,
+`trestleClaims`' headroom parameter. Kept: `CAT_BUS_TOP`, `CAT_BUS_DRIVEN_TOP`
+(posed crown), `suspensionTravelAt`; `check:swept-bus` is the guard. (c) The
+ring-solidity clause re-cut by radius (0.272 vs 0.680) — ab763a4d; red by
+registering the race feet.
+
+Hill (this branch alone): 14/14 pool seeds BUILD (2/14 before); the guard's
+residue on 5, 11, 326, 346, 451 is all beyond the kerb claim's clipped inner
+end (Architect: 0 of 25 posts inside the claim) — the road's, hill-only.
+Hill-only costs of the rule where a road runs ALONG the ring: widest
+unsupported run 59.7/71.7 m (seed 11), 59.4 m (131) vs 40 m; fairness
+9/9/8/9 (11), 10/9/9/8 (131); `theRoadClaimCoversTheBusRun` on 5, 11, 24, 326.
+
+Sphere scratch (b6b1a983 + all four): typecheck:test 0; swept-bus 0 posts
+14/14, driven 0.0000; refusals 0; legacy:collision 0; **test:procgen 704/706**
+— the rule fires at the GATE (the road runs radially in and crosses the band):
+one slot per ring on 24, 115, 131, 346, 428, 451, race-only on 128, 326; on
+131 (race 9/10/10/10) and 326 (walk-past 10/10/9/10) that slot carries a duck
+bar → fairness red. Reported, not pre-solved: Jim's pending question (legs on
+the bus road) now has a cost. Recipe additions for the real merge:
+`roadCorridor.ts` import = `PATH_KERB_OVERHANG` only; drop the duplicate
+`TALLEST_CHILD_HEIGHT` import in `track.ts`; `registerCollision`'s closure
+calls `addPostCollider(collision, spot.tree.trunkFoot, spot.tree.trunkTop,
+ringSizeVsRace)`; `invariants.ts` clause 4: keep the sphere's `legAxis` line.
+Logs: `merge-swept-bus7.log`, `merge-seeds4/`, `merge-procgen5.log`.
