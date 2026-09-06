@@ -4027,9 +4027,32 @@ for (const room of ROOMS) {
   }
 
   roomsFlooded += 1;
-  const marooned = freeCells - reachedCount;
+
+  // **The inside of a prop is not marooned floor.** A `CollisionWorld`
+  // rectangle is four walls round a hollow middle, so the lattice reads the
+  // space under a sofa or a bed as free and the flood correctly finds it cut
+  // off — which is the outcome this repo wants, not a defect. Discount any cell
+  // inside a prop's own keep-out disc, so what is left is only floor a child
+  // can see and cannot walk to. Discs come from `HotelProps` itself, the same
+  // list the guests walk round, rather than from a size threshold that would in
+  // time be tuned until it hid a real one.
+  const propDiscs = hotel.propKeepOuts.filter((keepOut) => keepOut.room === room);
+  const insideAProp = (lx: number, lz: number): boolean =>
+    propDiscs.some((disc) => Math.hypot(lx - disc.x, lz - disc.z) <= disc.radius);
+
+  let marooned = 0;
+  let insideProps = 0;
+  for (let i = 0; i < free.length; i += 1) {
+    if (free[i] !== 1 || seen[i] === 1) continue;
+    const cx = i % columns;
+    if (insideAProp(localX(cx), localZ((i - cx) / columns))) insideProps += 1;
+    else marooned += 1;
+  }
   if (marooned === 0) {
-    reachSummaries.push(`${room.space}: all ${freeCells} standable cells reachable`);
+    reachSummaries.push(
+      `${room.space}: all ${freeCells - insideProps} standable cells reachable` +
+        (insideProps > 0 ? ` (${insideProps} more are inside a prop's own footprint)` : ''),
+    );
     continue;
   }
 
@@ -4047,6 +4070,7 @@ for (const room of ROOMS) {
     const cz = (i - cx) / columns;
     const lx = localX(cx);
     const lz = localZ(cz);
+    if (insideAProp(lx, lz)) continue;
     sumX += lx;
     sumZ += lz;
     if (!sample) sample = { x: lx, z: lz };
