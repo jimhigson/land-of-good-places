@@ -515,3 +515,16 @@ seed (canonical included) because race legs now share slots with walk-past
 legs and the clause detects solidity by "a circle contains this leg" —
 re-cut to "collision holds exactly the walk-past feet". Filed for later:
 `CAT_BUS_WIDTH` 5.28 vs drawn 7.30 (the bus-run invariant under-asks).
+
+## Step 2 approved again, 7 Sep small hours — `ab763a4d`
+
+Clause 4 re-cut to "what a collider is": walk-past legs have a collider
+of their own foot radius (0.272) centred on the foot; no collider of the
+race radius (0.680) on a race leg. Proved red by registering the race
+ring's feet (46 legs), green restored. Radii differ by `RIDE_SCALE` (2.5),
+owner-derived — precondition `RIDE_SCALE ≠ 1`, asked to be asserted in
+the clause. **Corrections**: the road rule fires on one slot per ring on
+six sphere seeds (engineer's measurement; my "zero" was reasoned, not
+measured), and on 131/326 that slot carries a duck bar — fairness alarm
+firing as designed, left with Jim (2 of 14 seeds, one bar, one racer).
+`CAT_BUS_WIDTH` 5.28 vs drawn 7.30 still to file.
