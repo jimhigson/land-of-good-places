@@ -13,11 +13,13 @@ import {
 import { terrainHeight } from './terrain';
 import {
   buildGraph,
-  curvePoints,
+  drawnSamplesFor,
   pathDivisions,
   PLAZA,
   routeCurve,
+  sampleCurve,
   type PathGraph,
+  type PathSample,
   type RouteDefinition,
 } from './paths';
 
@@ -128,25 +130,6 @@ export function pathBorderSegments(): readonly PathBorderSegment[] {
   }
   cachedBorderSegments = segments;
   return segments;
-}
-
-/** Sampled path centreline, used for scenery placement queries. */
-export interface PathSample {
-  readonly x: number;
-  readonly z: number;
-  readonly halfWidth: number;
-  /**
-   * Which drawn route this sample belongs to — a fresh id per
-   * {@link recordSamples} call, i.e. per route curve. Two routes meeting at
-   * a shared graph node are spatially contiguous, so a consumer walking
-   * this array in order (the railway crossings' spine extraction,
-   * `train/crossings.ts`) cannot tell the seam apart by stride alone; a
-   * walk that silently continued across one wandered onto a *different*
-   * path heading a different way (found live, seed 2: a bridge's spine
-   * hair-pinned onto an adjacent route and the bridge's parapets ended up
-   * crisscrossing its own roadway).
-   */
-  readonly run: number;
 }
 
 const samples: PathSample[] = [];
@@ -383,44 +366,13 @@ function recordSamples(curve: CatmullRomCurve3, divisions: number, halfWidth: nu
 // the crossing check could only ever run after the graph was published.
 
 /**
- * The samples a curve lays down when it is drawn — **post fillet and
- * Catmull-Rom**, which is the geometry a child actually walks and the only
- * geometry worth asking the railway about. The control polyline is not this.
+ * Re-exported from `paths.ts`, which owns it along with the rest of the
+ * sampling (`routeCurve`, `pathDivisions`, `curvePoints`, `sampleCurve`). It
+ * moved there so the router and the converge loop can reproduce the drawn
+ * geometry before a graph is committed — this file imports `paths.ts`, so
+ * anything they need could not live here without a cycle.
  */
-function sampleCurve(
-  curve: CatmullRomCurve3,
-  divisions: number,
-  halfWidth: number,
-  run: number,
-): PathSample[] {
-  return curvePoints(curve, divisions).map((p) => ({ x: p.x, z: p.z, halfWidth, run }));
-}
-
-/**
- * **The drawn samples a candidate set of routes would produce, without drawing
- * anything.**
- *
- * The generator's `pathGraph` task needs the drawn geometry *before* it commits
- * a graph, and a reviewer's first question is reasonably "how can you have
- * drawn samples before anything is drawn". The answer is that **the drawing is
- * a pure function of the graph**: `buildPaths` derives `ROUTES` from
- * `PATH_GRAPH.edges`, turns each into a curve with {@link routeCurve}, and
- * samples it at {@link pathDivisions}. Given the candidate edges, the same
- * three steps give the same samples — so this shares those steps rather than
- * restating them.
- */
-export function drawnSamplesFor(routes: readonly RouteDefinition[]): PathSample[] {
-  const out: PathSample[] = [];
-  let run = 0;
-  for (const route of routes) {
-    const curve = routeCurve(route);
-    for (const sample of sampleCurve(curve, pathDivisions(curve), route.width / 2, run)) {
-      out.push(sample);
-    }
-    run += 1;
-  }
-  return out;
-}
+export { drawnSamplesFor, type PathSample };
 
 /** Sweeps a flat ribbon of `width` along the curve, draped onto the terrain. */
 /**

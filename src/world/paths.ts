@@ -5330,6 +5330,70 @@ export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
   return new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
 }
 
+/** One sampled point of a drawn path centreline. See {@link sampleCurve}. */
+export interface PathSample {
+  readonly x: number;
+  readonly z: number;
+  readonly halfWidth: number;
+  /**
+   * Which drawn route this sample belongs to — a fresh id per curve. Two routes
+   * meeting at a shared graph node are spatially contiguous, so a consumer
+   * walking this array in order (the railway crossings' spine extraction,
+   * `train/crossings.ts`) cannot tell the seam apart by stride alone; a walk
+   * that silently continued across one wandered onto a *different* path heading
+   * a different way (found live, seed 2: a bridge's spine hair-pinned onto an
+   * adjacent route and the bridge's parapets ended up crisscrossing its own
+   * roadway).
+   */
+  readonly run: number;
+}
+
+/**
+ * The samples a curve lays down when it is drawn — **post fillet and
+ * Catmull-Rom**, which is the geometry a child actually walks and the only
+ * geometry worth asking the railway about. The control polyline is not this.
+ */
+export function sampleCurve(
+  curve: CatmullRomCurve3,
+  divisions: number,
+  halfWidth: number,
+  run: number,
+): PathSample[] {
+  return curvePoints(curve, divisions).map((p) => ({ x: p.x, z: p.z, halfWidth, run }));
+}
+
+/**
+ * **The drawn samples a candidate set of routes would produce, without drawing
+ * anything.**
+ *
+ * The converge loop needs the drawn geometry *before* it commits a graph, and a
+ * reviewer's first question is reasonably "how can you have drawn samples
+ * before anything is drawn". The answer is that **the drawing is a pure
+ * function of the graph**: `buildPaths` derives its routes from the graph's
+ * paved edges, turns each into a curve with {@link routeCurve}, and samples it
+ * at {@link pathDivisions}. Given the candidate edges, the same three steps
+ * give the same samples — so this shares those steps rather than restating them.
+ *
+ * **It lives here, beside `routeCurve` / `pathDivisions` / `curvePoints`,
+ * because sampling has one owner** (CLAUDE.md) and because the router has to be
+ * able to ask it: it used to live in `pathGraph.ts`, which imports this file, so
+ * anything the router needed could not live there without a cycle. That import
+ * direction is exactly why the crossing check could only ever run *after* the
+ * graph was published.
+ */
+export function drawnSamplesFor(routes: readonly RouteDefinition[]): PathSample[] {
+  const out: PathSample[] = [];
+  let run = 0;
+  for (const route of routes) {
+    const curve = routeCurve(route);
+    for (const sample of sampleCurve(curve, pathDivisions(curve), route.width / 2, run)) {
+      out.push(sample);
+    }
+    run += 1;
+  }
+  return out;
+}
+
 /**
  * A route's own drawn centreline, sampled — cached per route object, because
  * every spur asks every paved route for a branch point and the fillet pass is
