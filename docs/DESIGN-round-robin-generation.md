@@ -931,6 +931,40 @@ first customer, and the fix has the design's shape, not the hill's:
    `bridgeCandidateAt` (`crossingPlanSolve.ts:269`) already exists. The
    per-producer ladder in point 2 is sized from the screen's transcript
    on 288, not from the list.
+
+   **The transcript (6 Sep), and the ruling it sized:**
+
+   ```
+   seed 288: 25 paved routes, 1342 drawn samples scanned, 1 off-site crossing(s)
+     FOUL railD 35.1 at (-36.2, 2.8) — no proven bridge site within SITE_SNAP_TOLERANCE
+           drawn by route "spur-station-1" (#17, width 2.6, 5 control points,
+           (-22.6, 2.8) -> (-37.5, 0.1))
+   ```
+
+   **One producer, not six**: a station approach spur (`paths.ts:4060`),
+   the class diagnosed above. The other five draw clean on 288. The foul
+   lands on **the exact coordinate `crossings.ts:432` throws at during
+   construction** — the same foul, caught three systems earlier. That
+   identity is the justification for the extraction over a second
+   screen: two askers of one function name the same point; two functions
+   that resemble each other would not. Control, three legs: fires on 288
+   (one foul); silent on six building seeds (canonical, 5, 11, 24, 131,
+   326) at zero; samples scanned printed every run, 1224–1455, **never
+   zero, exit 2 on a zero scan** rather than a clean report — the leg
+   that caught the empty-`pathCentreline()` wiring before it shipped.
+
+   **Ladder ruling (Overseer 6 Sep, Architect concurs):** fix the one
+   producer that fouls — station approach spurs get the rail screen the
+   routed legs already have — and leave the other five alone. Five
+   speculative fixes are five regressions to owe byte-identity for,
+   against no measured defect; the commit-time screen is the mechanism
+   that catches each of them *when* it fouls, by name. The engineer's
+   caveat stands and is binding on the record: **one seed's transcript is
+   one seed's evidence** — the connector leads, lattice-snap jogs, fillet
+   pass and ring were *observed clean on 288*, not audited and cleared,
+   and remain listed above as producers that do not ask the railway.
+   `pathDivisions` / `sampleCurve` are shared by `buildPaths()` and
+   `drawnSamplesFor(routes)`; no copied divisions formula.
 2. **"Next decision" per producer**, in order of cheapness:
    - an unscreened appendage (spur lead/past, station approach,
      connector lead, snap jog) is a producer drawing without asking the

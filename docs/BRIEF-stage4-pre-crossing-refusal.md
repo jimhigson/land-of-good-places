@@ -46,6 +46,13 @@ two-definitions disease and is a rejection even while green.
   answer may be one, not six. Until the first rung lands, the screen
   turns 288's throw-at-planting into a **named refusal at commit** —
   better evidence, still a red seed, so #511 stays gated on that rung.
+- **Sized (6 Sep)**: the 288 transcript names one producer,
+  `spur-station-1` (station approach spur, `paths.ts:4060`). Ruled: fix
+  that producer only — it gets the routed leg's rail screen — and leave
+  the other five to the commit-time screen, which names them when they
+  foul. Caveat in the PR body: one seed's transcript is one seed's
+  evidence. The ladder below stays as the design's order for the next
+  producer the screen names:
 - The refusal path, in order of cheapness, per the ruling's point 2:
   screen the unscreened appendages (spur `lead`/`past`, station approach
   points, connector leads, lattice-snap jogs) with the leg's own rail

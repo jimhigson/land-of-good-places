@@ -42,6 +42,11 @@ first honest run found #501).
   #528 QA** (it blocks #511, which gates step 2). Brief:
   `docs/BRIEF-stage4-pre-crossing-refusal.md`, for the #511 Engineer.
   #524 lands with it if not already merged.
+  **Sized 6 Sep**: screen finds ONE producer on 288 (`spur-station-1`,
+  station approach spur) at the exact throw coordinate; ruling: fix that
+  producer only, screen guards the rest. Next: review the PR (screen
+  wired into pathGraph + station spur screened); then #511 goes green
+  and step 2 unblocks.
   Terrain is no longer seed-dependent (1200 m sphere) — the outward
   march's bound is the support's lean limit, not the ground.
 - **Briefs**: step 1 = **#522, merged** into this branch at `0845e9fa`
