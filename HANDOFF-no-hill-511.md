@@ -60,6 +60,58 @@ Verified in a real browser on 5392, `/arrive`, not assumed:
    today.
 
 
+## ⛔ Also RED, found by running the chain: `check:cat-bus`'s doorway gap
+
+**One clause, and it is a marginal failure of a proxy.** `pnpm run check:cat-bus`
+prints `tightest gap 0.63 s (needs 0.64)` — 0.633 against a `REQUIRED_GAP` of
+0.635, a 0.3% miss. **It is this branch's, measured**: `origin/main` at
+`dd5b3b6b`, run in a scratch worktree, prints `tightest gap 0.68 s`.
+
+**Do not fix it by widening the schedule until it passes** — that is a
+stand-off, and the numbers below say it would be fixing the wrong quantity.
+What the clause measures is when a child leaves the **bus's bounding box**
+(5.37 x 12.90 m). What its message claims is that two children "overlap in the
+doorway". Those were near enough the same thing on the straight road and are
+not on the arc. Measured, per child, on the canonical seed:
+
+```
+i   delay   aisle   at the door   door gap   speed
+0   0.000   1.368   1.368            -       2.603
+1   0.820   1.684   2.504         1.136      2.570
+2   1.578   1.698   3.276         0.772      2.486
+3   2.512   2.211   4.723         1.447      2.532
+4   3.271   2.363   5.634         0.911      2.692
+5   4.035   2.366   6.401         0.767      2.614
+6   4.872   2.562   7.434         1.033      2.517
+7   5.709   2.571   8.280         0.846      2.684
+8   6.589   2.810   9.399         1.119      2.497
+9   7.494   2.936  10.430         1.031      2.511
+10  8.462   3.409  11.871         1.441      2.581
+```
+
+**Every gap at the doorway itself is >= 0.767 s**, comfortably over the 0.635
+the clause asks for; the tightest is between children 5 and 6, not the pair the
+check names. The failure is between 7 and 8, and it is entirely in the leg
+*after* the door: child 7 takes 2.637 s to clear the bounding box and child 8
+takes 2.151 s. Half a second of difference in how long it takes to walk out of
+a 12.9 m box.
+
+**That is the finding, and it is a look problem as much as a check one**:
+because the bus now stands on a curve, some children's fan routes set off
+*along* the bus rather than away from it, and walk five or more metres beside
+it before turning in. Two candidate fixes, and the choice is a judgement about
+choreography that Jim should see rather than one to make silently:
+
+- **Make the first stride out of the door head away from the bus** for every
+  child, and fan afterwards. Uniform box-exit times, the schedule's gap
+  survives to where the check measures it, and it looks like a bus emptying
+  rather than children filing along its flank. Visible; needs eyes.
+- **Change the clause to measure the doorway it talks about** rather than the
+  bounding box. Defensible — the message and the measurement genuinely
+  disagree now — but changing a gating check on a 0.3% miss is exactly the
+  move this repo distrusts, so it wants a second opinion, not an engineer
+  acting alone at the end of a session.
+
 ## ⛔ BLOCKING BEFORE ANY PR: `check:coplanar` is RED — but not for the reason
 this file used to say
 
