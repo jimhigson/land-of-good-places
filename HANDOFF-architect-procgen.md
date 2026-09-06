@@ -354,9 +354,9 @@ rewriting history.
 
 - Worktree `.claude/worktrees/design-merge-main`, branch `arch/design-merge-main`
   (pushed). Merge commit `bf2ff61f` = design `2bc4b51f` + `origin/main`
-  `dd5b3b6b` (#588). Awaiting `check`, `test:procgen`, `build`,
-  `check:coplanar`, `check:swept-bus`, `check:park-pool` exit codes, then
-  it is pushed to `design/round-robin-generation`.
+  `dd5b3b6b` (#588). `check` (64 steps), `test:procgen`, `build`,
+  `check:coplanar`, `check:swept-bus`, `check:park-pool` all exit 0 on it;
+  **pushed to `design/round-robin-generation` as `753ca8c3`** (6 Sep 20:44).
 - **Finding, verified**: `#585` on `main` is a squash of this branch (its
   body is this branch's commit messages). So the merge's only conflicts are
   the three docs this branch edited *after* the squash snapshot
