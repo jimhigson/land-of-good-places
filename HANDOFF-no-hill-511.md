@@ -22,6 +22,29 @@ after the merge). Browser owned.
   `halfWidth` reduced by 0.5 m: 4 fouls, each reporting 0.5000 m. That is the
   geometry the red run was taken against — restore it to reproduce.
 
+### Gate status at the end of this session, all run locally with exit codes read
+
+| gate | result |
+|---|---|
+| `pnpm run check` | **RED** at `check:cat-bus` only — the doorway-gap clause below. Reached that step at 696 s. |
+| `pnpm run test:procgen` | **green**, 694 tests in 20 files, 98 s |
+| `pnpm run build` | **green** |
+| `pnpm run check:swept-bus` | **green**, 0 intruding posts on 14 seeds, 77 s |
+| `pnpm run check:ground-claims` | **green** |
+| `pnpm run check:coplanar` | **RED**, 5 findings — see below |
+| `pnpm run check:park-pool` | not run this session |
+
+**Chain wall-clock (issue 3 of the brief).** The branch adds **exactly one step**
+to the `check` chain — `check:arrival-camera` — and it runs in **1 second**.
+Step sets compared by parsing `package.json`'s `scripts` object rather than
+grepping it: `main` has 64 chain steps, this branch 65, nothing dropped and
+nothing swapped. Every other step's *name* is unchanged; the ones that build a
+park build a sphere park, which costs the same (terrain height is a formula,
+and the 14-seed digest sweep took the same wall-clock before and after the
+merge). So there is **no wall-clock case for this branch pushing `checks.yml`
+past its cap** — but note that a full green local run has not been timed end to
+end yet, because the chain has stopped at a failure on all three runs.
+
 ### The one substantive thing I changed beyond finishing the merge
 
 **Both measurement sites stopped comparing bounding boxes.** The old clause 2
