@@ -209,6 +209,25 @@ const distToCore = (px: number, pz: number, s: ClaimShape): number =>
     : distPointSegment(px, pz, s.x1, s.z1, s.x2, s.z2);
 
 /**
+ * **How far outside a claim's ground a point lies**, in metres — zero or
+ * negative when the point is on it.
+ *
+ * Exported because it is the one honest way to ask "is this vertex of the
+ * drawn mesh on the ground the registry claims?", and two measurement sites
+ * need to ask it: `scripts/check-ground-claims.mts` on the canonical seed and
+ * `test/procgen/invariants.ts` on every pool seed. Asking it here rather than
+ * re-deriving the point-to-capsule distance in each is the difference between
+ * one owner and this repo's most expensive habit.
+ *
+ * It is also the reason the curved road can be checked at all. An axis-aligned
+ * ribbon can be compared by its bounding box; an arc's cannot, because the
+ * box of a bent capsule is mostly ground the capsule does not hold. This
+ * measures the claim's own shape instead of a box around it.
+ */
+export const distanceOutside = (px: number, pz: number, s: ClaimShape): number =>
+  distToCore(px, pz, s) - reachOf(s);
+
+/**
  * Is the shared ground of two overlapping shapes confined to the crossing's
  * disc? Marched, not witnessed: every core sample of either shape that is
  * within combined reach of the other's core — i.e. every place the two

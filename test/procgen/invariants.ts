@@ -1,4 +1,3 @@
-import { terrainHeight } from '../../src/world/terrain.ts';
 /**
  * **The invariants themselves. This list is meant to grow.**
  *
@@ -104,12 +103,18 @@ import {
   ENTRANCE_WALK_DEPTH,
   entranceGateFrame,
   isInEntranceGateOpening,
+  isInEntranceGateway,
 } from '../../src/world/entrance/layout.ts';
 // A leaf module: pure geometry over a `standable` predicate, no three.js and
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { GATE_POST_COLLIDER_RADIUS } from '../../src/world/entrance/gateArch.ts';
+import { terrainHeight } from '../../src/world/terrain.ts';
+// The road corridor's measurement, shared with `check:ground-claims` so the two
+// sites that ask "is the claim the road?" cannot answer it differently. Pure
+// geometry over what it is handed — nothing seed-dependent is imported here.
+import { collectRoadRibbons, measureRoadRibbons } from '../../scripts/road-ribbon-measure.mts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { COPING_SINK, bridgeStoneGeometry } from '../../src/art/models/bridgeStones.ts';
 import {
@@ -9580,6 +9585,201 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
 };
 
 /**
+ * **The road the bus arrives on is the road the registry claims — on every
+ * seed, and it goes where it says it goes.**
+ *
+ * Stage 3, step 1 of the round-robin rework makes the entrance road the first
+ * production placer: `entrance/roadCorridor.ts` is the one owner of its
+ * centreline, `Entrance.ts` draws its ribbons from that, and the same owner's
+ * output is committed to `World.groundClaims` as `corridor` claims. Every
+ * later placer will negotiate against those claims rather than against the
+ * mesh, so a claim that has drifted from the road is a placer politely keeping
+ * out of ground the road does not occupy — and walking into ground it does.
+ *
+ * `check:ground-claims` proves the same thing far more thoroughly, **but only
+ * on the canonical seed**, and only there because it drives a whole
+ * `ParkGeneration` first. This is the clause that covers the other thirteen
+ * (issue #510: both required checks can be green while most of the pool is
+ * unmeasured), and it is the reason it is worth having twice.
+ *
+ * ## The road is an arc now, and that changed what "the claim is the road" can
+ * mean
+ *
+ * When this invariant was written the road was two axis-aligned runs, so
+ * clause 2 compared four numbers — the ribbon's bounding box against the
+ * capsule swept by its half-width. #498's curve ended that: **the bounding box
+ * of an arc is mostly ground the arc does not hold**, so a box comparison on a
+ * curve is not imprecise, it is measuring a different shape, and it would have
+ * gone on passing while saying so. The comparison is now made against the
+ * claim's own geometry, per vertex, by `scripts/road-ribbon-measure.mts` —
+ * shared with `check:ground-claims` so the two cannot drift apart.
+ *
+ * Three clauses, and only the third has a threshold in it:
+ *
+ * 1. **The registry holds exactly the owner's output**, compared number for
+ *    number with no tolerance. These must be one call, not two calculations
+ *    that agree to some number of places.
+ * 2. **The claims describe the ribbons that were drawn**, measured off the
+ *    ribbons' own world-space vertices — the park that was built rather than
+ *    the rules that built it. Exactly one of the two directions is an
+ *    equality, and `road-ribbon-measure.mts` says at length why: nothing drawn
+ *    may be unclaimed, while the gateway approach's claim is honestly a
+ *    conservative envelope round a staircase of individually trimmed columns.
+ * 3. **The road is continuous, and it reaches the arch.** Jim, 7 August 2026:
+ *    *"it doesn't actually drive up to the park, the road needs to actually go
+ *    to the park."* The kerb is now many runs sampled off the arc's own
+ *    stations, so continuity is asserted run to run as well as between the
+ *    kerb and the approach. The gap threshold is `PLAYER_RADIUS` — taken from
+ *    the game, not from the generator's target, because the thing that matters
+ *    is whether a six-year-old stepping off the bus can walk in without her
+ *    feet leaving the road.
+ */
+const theRoadsCorridorIsTheRoadItDrew: Invariant = (facts) => {
+  const wrong: string[] = [];
+  // Read off `ParkFacts`, never imported here: the road's owner reaches
+  // `PARK_BOUNDARY`, and a static value import of a seed-dependent module into
+  // a test file pins every seed to the canonical park.
+  const { feature, claimed: claims, fromOwner, segments } = facts.roadCorridor;
+
+  if (claims.length === 0) {
+    return [
+      `seed ${facts.seed}: nothing is claimed under "${feature}" on the built park — the ` +
+        'road occupies ground no placer can see, which is the private-obstacle-list bug the ' +
+        'whole claims design exists to remove',
+    ];
+  }
+
+  // --- 1. the registry is the owner's output, to the number ------------------
+  const key = (claim: (typeof claims)[number]): string => {
+    const s = claim.shape;
+    return s.shape === 'capsule'
+      ? `${claim.kind}:capsule(${s.x1},${s.z1},${s.x2},${s.z2},${s.halfWidth})`
+      : `${claim.kind}:disc(${s.x},${s.z},${s.radius})`;
+  };
+  const registryKeys = claims.map(key);
+  const ownerKeys = fromOwner.map(key);
+  if (registryKeys.length !== ownerKeys.length || registryKeys.some((k, i) => k !== ownerKeys[i])) {
+    wrong.push(
+      `seed ${facts.seed}: the road corridor in the registry is not what ` +
+        `entranceRoadClaims() returns — registry [${registryKeys.join(' ')}] vs owner ` +
+        `[${ownerKeys.join(' ')}]. Two definitions of one road, kept in step by hand`,
+    );
+  }
+
+  // --- 2. the claims describe the ribbons that were drawn --------------------
+  facts.world.entrance.group.updateMatrixWorld(true);
+  const ribbons = collectRoadRibbons(facts.world.entrance.group, segments);
+  const measured = measureRoadRibbons(segments, claims, ribbons);
+  for (const foul of measured.fouls) wrong.push(`seed ${facts.seed}: ${foul}`);
+
+  // --- 3. the road is continuous, and it reaches the arch --------------------
+  // The kerb's runs come off one list of stations, so consecutive runs share an
+  // endpoint exactly; anything else means the sampling has been re-derived
+  // somewhere rather than read.
+  for (let i = 1; i < segments.length; i += 1) {
+    const previous = segments[i - 1];
+    const here = segments[i];
+    if (!previous || !here || previous.name !== here.name) continue;
+    const step = Math.hypot(here.from.x - previous.to.x, here.from.z - previous.to.z);
+    if (step > 0) {
+      wrong.push(
+        `seed ${facts.seed}: "${here.name}" run ${i} starts ${step.toFixed(4)} m from where run ` +
+          `${i - 1} ended — the runs of one ribbon must share their endpoints exactly, because ` +
+          'they are consecutive pairs of one list of stations',
+      );
+    }
+  }
+
+  const kerbRuns = segments.filter((segment) => segment.name === 'entrance-road-kerb');
+  const gateway = segments.find((segment) => segment.name === 'entrance-gateway-path');
+  if (kerbRuns.length === 0 || !gateway) {
+    wrong.push(
+      `seed ${facts.seed}: the road did not claim both a kerb and a gateway approach ` +
+        `(${kerbRuns.length} kerb run(s), gateway ${gateway ? 'present' : 'absent'}), so its ` +
+        'continuity was not checked at all',
+    );
+  } else {
+    // The approach leaves the kerb at its outer end. How far is that from the
+    // kerb's own inner edge? Measured against the polyline rather than against
+    // one run, because the arc's nearest point is not necessarily on the run
+    // whose x-range contains the gate.
+    let toKerb = Infinity;
+    for (const run of kerbRuns) {
+      toKerb = Math.min(
+        toKerb,
+        distancePointToSegment(gateway.from.x, gateway.from.z, run.from.x, run.from.z, run.to.x, run.to.z) -
+          run.halfWidth,
+      );
+    }
+    if (toKerb > PLAYER_RADIUS) {
+      wrong.push(
+        `seed ${facts.seed}: the gateway approach starts ${toKerb.toFixed(2)} m clear of the ` +
+          `kerb's inner edge (at ${gateway.from.x.toFixed(2)}, ${gateway.from.z.toFixed(2)}) — ` +
+          `wider than a child (PLAYER_RADIUS ${PLAYER_RADIUS}), so she steps off the road ` +
+          'between the bus and the gate',
+      );
+    }
+    // …and the approach must actually arrive at the arch.
+    if (!isInEntranceGateway(gateway.to.x, ENTRANCE_GATE_Z) || gateway.to.z > ENTRANCE_GATE_Z) {
+      wrong.push(
+        `seed ${facts.seed}: the gateway approach does not pass through the arch — it runs ` +
+          `(${gateway.from.x.toFixed(2)}, ${gateway.from.z.toFixed(2)}) to ` +
+          `(${gateway.to.x.toFixed(2)}, ${gateway.to.z.toFixed(2)}) and the gate is at ` +
+          `(${ENTRANCE_GATE_X.toFixed(2)}, ${ENTRANCE_GATE_Z.toFixed(2)}). Jim, 7 Aug 2026: ` +
+          '"the road needs to actually go to the park"',
+      );
+    }
+  }
+
+  // What this clause actually covered, said out loud on every run — including
+  // the passing ones, which is the only case the note exists for. stderr,
+  // because vitest's default reporter hides console.log on a passing test.
+  process.stderr.write(
+    `    seed ${facts.seed}: road corridor — ${measured.runsMeasured} of ${claims.length} ` +
+      `claimed runs backed by a drawn ribbon, ${measured.verticesTested} ribbon vertices tested ` +
+      `against the claims (worst ${measured.worstOutside.toExponential(2)} m outside: ` +
+      `${measured.worstOutsideNote}); claim overshoots the ribbon by at most ` +
+      `${measured.worstOvershoot.toFixed(3)} m (${measured.worstOvershootNote})\n`,
+  );
+  if (measured.runsMeasured !== claims.length) {
+    wrong.push(
+      `seed ${facts.seed}: only ${measured.runsMeasured} of ${claims.length} claimed corridor ` +
+        'runs were measured against a real ribbon — the rest asserted nothing',
+    );
+  }
+  if (measured.verticesTested === 0) {
+    wrong.push(
+      `seed ${facts.seed}: no ribbon vertices were tested at all, so clause 2 proved nothing — ` +
+        'the road claims ground and nothing was found drawn on it',
+    );
+  }
+
+  return wrong;
+};
+
+/**
+ * Distance from a point to a segment in plan. The same arithmetic
+ * `groundClaims.ts` keeps privately for its own shapes; used here on the
+ * corridor's *centrelines*, which are not claims, to ask how far the approach
+ * starts from the kerb it leaves.
+ */
+const distancePointToSegment = (
+  px: number,
+  pz: number,
+  x1: number,
+  z1: number,
+  x2: number,
+  z2: number,
+): number => {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const lengthSquared = dx * dx + dz * dz;
+  if (lengthSquared === 0) return Math.hypot(px - x1, pz - z1);
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (pz - z1) * dz) / lengthSquared));
+  return Math.hypot(px - (x1 + t * dx), pz - (z1 + t * dz));
+};
+
+/**
  * **Every castle corner turret is solid, on every seed.**
  *
  * Issue #549: the facade's collider is a rectangle and the four turrets stand
@@ -9680,6 +9880,7 @@ const castleTurretsAreSolid: Invariant = (facts) => {
 
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the ground is the sphere it claims to be, and gentle enough for the bus', theGroundIsTheSphereItClaimsToBe],
+  ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],

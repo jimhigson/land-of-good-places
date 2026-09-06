@@ -27,13 +27,13 @@ import { buildGateArch } from './gateArch';
 import { ROAD_HALF_WIDTH, ROAD_TILE_METRES, roadMaterial } from './road';
 import {
   entranceRoadAt,
-  entranceRoadInnerEdge,
   entranceRoadInnerEdgeAcross,
   entranceRoadInnerEdgeRing,
   entranceRoadInnerNormal,
   entranceRoadStations,
   type RoadStation,
 } from './roadRoute';
+import { entranceGatewayReach, type GatewayReach } from './roadCorridor';
 import { PATH_KERB_OVERHANG } from '../../core/constants';
 import {
   addPathQuilt,
@@ -44,7 +44,7 @@ import {
   pathSurfaceMaterial,
 } from '../pathSurface';
 
-import { type DrawnPathLayer, forEachPavedDisc, pointIsOnDrawnPath } from '../paving';
+import { type DrawnPathLayer, pointIsOnDrawnPath } from '../paving';
 import { ArrivalSequence, arrivalIsDue } from './ArrivalSequence';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { highlightObject } from '../highlight';
@@ -57,7 +57,6 @@ import {
   ENTRANCE_CLEAR_Z,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
-  ENTRANCE_STOP_Z,
 } from './layout';
 import { TRACK_CLEARANCE, type TrainRoute } from '../train/route';
 import { BALLAST_HALF_WIDTH } from '../train/track';
@@ -680,53 +679,10 @@ export class Entrance implements GameSystem {
 function buildEntranceRoad(): Mesh[] {
   const material = roadMaterial('grey');
 
-  /**
-   * How far in through the gate the spur can run before the park's own paving
-   * is already under it.
-   *
-   * The spur used to run all the way to `ENTRANCE_STOP_Z`, which is inside the
-   * plaza's paving — so its last five and a half metres were a road slab drawn
-   * 5 mm under a path slab, 24 m² of shared plane and the fourth-worst seam in
-   * the game (#472). The paving wins that argument anyway (`path-surface`
-   * carries `polygonOffset: -2`), so the road under it is a hidden face, and
-   * `ART_DIRECTION.md` §7's answer to a hidden face is to not draw it.
-   *
-   * The stopping line is *asked for*, not written down. `paving.ts` is where
-   * `buildPaths()` publishes the discs it actually drew, and `Garden` builds
-   * the path network long before `Entrance` is constructed, so it is live by
-   * the time this runs. A hard-coded z here would be exactly CLAUDE.md's "two
-   * definitions of one thing, kept in step by hand" — the paths are generated
-   * per seed and this line moves with them. It reads `forEachPavedDisc` rather
-   * than `pathGraph`'s own `distanceToPath` for the reason that module exists:
-   * importing `pathGraph` *runs the whole path solve*, and this file must not
-   * be the thing that triggers it.
-   *
-   * The road's centre is the part that reaches the paving first, because the
-   * path arrives head-on; stopping the whole ribbon there therefore keeps its
-   * wings off the paving too. Nothing walkable is lost — the paving carries on
-   * from the exact line the road stops at, which is the castle roof deck's fix
-   * in a different material.
-   */
-  const spurReach = (): SpurReach => {
-    const from = entranceRoadInnerEdge(0).z;
-    for (let z = from; z >= ENTRANCE_STOP_Z; z -= 0.1) {
-      let met: number | null = null;
-      const known = forEachPavedDisc((x, discZ, radius) => {
-        if (Math.hypot(ENTRANCE_GATE_X - x, z - discZ) < radius) {
-          // The narrowest path covering the axis here, because that is the one
-          // whose width the gateway path should match: joining a 1.3 m-wide
-          // street with a ribbon sized off the plaza would step out at the seam.
-          if (met === null || radius < met) met = radius;
-        }
-      });
-      // Nothing published — an interior harness with no garden. Behave as
-      // before rather than guessing.
-      if (!known) return { z: ENTRANCE_STOP_Z, halfWidth: null };
-      if (met !== null) return { z, halfWidth: met };
-    }
-    // No paving reaches the gate on this seed: run the whole way in, as before.
-    return { z: ENTRANCE_STOP_Z, halfWidth: null };
-  };
+  // How far in through the gate the run goes, and how wide it is, from the
+  // owner of both (`roadCorridor.ts`) — so the claim the round-robin commits
+  // and the surface drawn here are one call, not two that agree.
+  const reach = entranceGatewayReach();
 
   /**
    * The same question asked **down one column** of the gateway path rather than
@@ -839,7 +795,7 @@ function buildEntranceRoad(): Mesh[] {
   // the ground the terrain disc is actually built out to.
   meshes.push(curvedRoadRibbon('entrance-road-kerb', material, entranceRoadStations()));
 
-  meshes.push(...buildGatewayPath(spurReach(), columnReach));
+  meshes.push(...buildGatewayPath(reach, columnReach));
 
   return meshes;
 }
@@ -857,21 +813,6 @@ function distanceToTrackCentre(x: number, z: number): number {
   return Math.hypot(near.x - x, near.z - z);
 }
 const trackProbe = new Vector3();
-
-/** Where the run in from the road stops, and how wide the paving it meets is. */
-interface SpurReach {
-  readonly z: number;
-  /** Half-width of the narrowest path covering the gate axis there, if any. */
-  readonly halfWidth: number | null;
-}
-
-/**
- * Fallback width for the run in through the gate on a seed whose paving never
- * reaches the gate (and in an interior harness with no garden at all), where
- * there is no path to take a width from. The park's own streets are 2.6 to
- * 3.6 m across, so this is one of them rather than a number of its own.
- */
-const GATEWAY_PATH_FALLBACK_HALF_WIDTH = 1.6;
 
 /**
  * **The short run in through the gate — an ordinary park path.**
@@ -891,7 +832,7 @@ const GATEWAY_PATH_FALLBACK_HALF_WIDTH = 1.6;
  * size as the network it joins, rather than a copy of any of them.
  *
  * **Its width comes from the path it meets**, and its far end from that path's
- * own paving (`spurReach`), so nothing here is a number picked to look right on
+ * own paving ({@link entranceGatewayReach}), so nothing here is a number picked to look
  * one seed: on the sixteen in the pool the run is 5.9 to 10.2 m long and the
  * paving it joins is 2.8 to 3.2 m across, and it follows both.
  *
@@ -904,10 +845,10 @@ const GATEWAY_PATH_FALLBACK_HALF_WIDTH = 1.6;
  * the quilt is built onto them.
  */
 function buildGatewayPath(
-  reach: SpurReach,
+  reach: GatewayReach,
   columnReach: (x: number, from: number, ballastMargin: number, layer: DrawnPathLayer, floor: number) => number,
 ): Mesh[] {
-  const halfWidth = reach.halfWidth ?? GATEWAY_PATH_FALLBACK_HALF_WIDTH;
+  const halfWidth = reach.halfWidth;
 
   /**
    * One band of the run, between two signed offsets from the gate's axis, at
