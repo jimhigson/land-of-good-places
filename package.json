@@ -125,7 +125,8 @@
     "check:watchdog": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-watchdog.mts check .github/workflows/checks.yml",
     "test:procgen:watchdog": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-watchdog.mts test:procgen .github/workflows/procgen-invariants.yml",
     "check:swept-bus": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-swept-bus.mts",
-    "check:ground-claims": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-ground-claims.mts"
+    "check:ground-claims": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-ground-claims.mts",
+    "check:every-seed-builds": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-every-seed-builds.mts"
   },
   "dependencies": {
     "three": "^0.185.1",

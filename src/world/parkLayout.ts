@@ -247,17 +247,55 @@ function footprintAsPlaced(entry: ManifestEntry, x: number, z: number): AnchorFo
   };
 }
 
+/**
+ * **The layout's unwind trace** — one line per decision the restart loop
+ * took, in the order it took them (design doc, "Totality, ruled and
+ * mechanised": *the unwind trace is printed to stderr on every build and
+ * its hash is folded into the park digest*).
+ *
+ * `restart r` is **decision zero**: the whole park re-drawn from the same
+ * seed. A trace that reads `solved restart=0` needed no unwinding; one that
+ * reads `dead-end restart=0 entry=hotel … solved restart=3` reached decision
+ * zero three times, and that number is a *quality* measurement
+ * (`check:every-seed-builds`'s "built well" line), never a buildability
+ * verdict. It is a pure function of the seed and the fixed entry order — no
+ * timing, no map iteration — so two processes print the same lines, which is
+ * what lets `scripts/park-digest.mts` hash them.
+ *
+ * Empty when the layout came out of `cachedSolve`'s store rather than being
+ * solved, and says so — an empty trace must never read as "no unwinding".
+ */
+const layoutTrace: string[] = [];
+export const LAYOUT_TRACE: readonly string[] = layoutTrace;
+
+function traceLine(text: string): void {
+  const line = `layout-trace: seed=${PARK_SEED} ${text}`;
+  layoutTrace.push(line);
+  // stderr, not console.log: vitest shows stdout from failing tests only,
+  // and this line exists precisely for the passing run (CLAUDE.md).
+  try {
+    const nodeProcess = (globalThis as { process?: { stderr?: { write: (s: string) => void } } })
+      .process;
+    nodeProcess?.stderr?.write(`${line}\n`);
+  } catch {
+    /* browser: the trace is still readable from LAYOUT_TRACE */
+  }
+}
+
 function solve(): ParkLayout {
   // The warp vector may start the loop above zero (a whole-park re-roll the
   // offline search chose); with no warp this is the same `0` as ever.
   const base = layoutRestartBase();
   for (let restart = base; restart < base + PARK_RESTARTS; restart += 1) {
     const built = buildOnce(restart);
-    if (built) return built;
+    if (built) {
+      traceLine(`solved restart=${restart} decision-zero-reached=${restart - base}`);
+      return built;
+    }
   }
   throw new Error(
     `park layout: unsolvable in ${PARK_RESTARTS} restarts (seed ${PARK_SEED}) — ` +
-      `loosen bands, shrink the manifest, or bump the seed`,
+      `loosen bands, shrink the manifest, or bump the seed. Trace:\n${layoutTrace.join('\n')}`,
   );
 }
 
@@ -323,7 +361,12 @@ function buildOnce(restart: number): ParkLayout | null {
       if (entry.pin) break; // a pin is one candidate, validated
     }
 
-    if (candidates.length === 0) return null; // dead end; the caller restarts
+    if (candidates.length === 0) {
+      // Dead end; the caller restarts (decision zero). Named, so the trace
+      // says which entry could not be placed and how much of its budget went.
+      traceLine(`dead-end restart=${restart} entry=${entry.id} draws=${MAX_TRIES}`);
+      return null;
+    }
 
     // Maximin: of the legal spots, the one furthest from its nearest
     // neighbour. Ties keep draw order, which keeps the choice seeded.
@@ -511,6 +554,11 @@ export const PARK_LAYOUT: ParkLayout = cachedSolve(
     };
   },
 );
+
+// A layout handed back from the cache ran no solve, so it has no trace. Say
+// so on the trace itself rather than leaving an empty list that reads like
+// "solved first time" — the same disease as a check that asserts nothing.
+if (layoutTrace.length === 0) traceLine('cached — no solve ran in this process');
 
 /**
  * The plots as a flat array, built once.
