@@ -38,9 +38,13 @@ element — and was caught only by the control): independent `sort -n` per thick
 ends (0.15 -> 1.112, 0.60 -> 0.879), and the three worked examples in `measuredHopCeiling`'s own
 docstring (1.54/1.112, 1.92/1.045, 2.44/0.879) reproduce exactly.
 
-**The margin at half=0.15 is exactly zero — the fitted line touches the measurement.** So the
-lower-bound assertion must be non-strict (`ceiling <= measured`); any added safety margin would
-fail today's park for a number nobody can justify.
+**The margin at half=0.15 reads +0.0000 above only because that table is computed from the
+printed 3 dp values.** Measured at full precision it is **-0.4 mm** — the fitted line sits
+fractionally *above* the measurement there. That is less than one 1 mm bisection step, so it is
+the instrument's quantisation and not a fact about the jump; see "One thing the first armed run
+got wrong" below. Consequence either way: the lower-bound assertion is compared at
+`BISECTION_RESOLUTION`, and any *added* safety margin would fail today's park for a number nobody
+can justify.
 
 ## What is being asserted, and why each threshold comes from the game
 
