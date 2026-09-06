@@ -136,6 +136,28 @@ nothing (its minimum is 1.045 m, the same as 0.34's) — the headline is still 1
 - [x] reviewed and **approved**, with one wording fix (applied, `c9f0a8a9`)
 - [ ] awaiting QA measurement; invisible to a player, so it merges without Jim
 
+## Second round: coordinator + QA
+
+- **`HOP_APEX_TOLERANCE` now exported from `Collision.ts`** and imported by the script. It was
+  inline at the boot check and hand-copied in the script under a comment saying they agreed —
+  the same fault the PR exists to remove. Proved live, not vestigial: setting the owner to 0.077
+  makes the script print "to within 0.077 m".
+- **Trap worth remembering:** reverting that control with `git checkout --` also wiped the
+  *uncommitted* export, so the script then imported a missing constant and exited 1. Commit the
+  change before mutating the file it lives in. Caught only because the post-revert re-run was
+  verified rather than assumed.
+- **Lower-bound sensitivity, measured here** (lift of the fitted line -> problem count):
+  +6 mm -> 1, +26 mm -> 2, +46 mm -> 8, **+76 mm -> 32** (the PR's row), +126 mm -> 70.
+  It fires at +6 mm, six times the 1 mm resolution. The body now names the lift, because the
+  count is meaningless without it.
+- **The danger quantified:** a 0.45 m hoppable wall would have been excluded by the old window,
+  which would have kept printing 1.045 m against a true worst of 0.975 m — unsafe by 70 mm,
+  silently. This now leads the "why it mattered" section.
+- **Completeness on a built park:** 1241 wall colliders, 661 circles; 66 hoppable walls, 0
+  hoppable circles; 0.22 x24, 0.32 x28, 0.34 x14 = 66.
+- **Both ends wrong for independent reasons:** minimum `clean` is flat at 1.045 across 0.28, 0.32
+  and 0.34, so the old headline was right by coincidence twice.
+
 ## Review findings folded in
 
 - Wording: assertion 3's comment and the pass output claimed the line "touches the measurement
