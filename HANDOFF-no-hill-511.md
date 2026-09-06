@@ -60,14 +60,74 @@ Verified in a real browser on 5392, `/arrive`, not assumed:
    today.
 
 
-## ⛔ BLOCKING BEFORE ANY PR: `check:coplanar` is RED and must be green
+## ⛔ BLOCKING BEFORE ANY PR: `check:coplanar` is RED — but not for the reason
+this file used to say
 
 Do not open a PR from this branch until `pnpm run check:coplanar` exits 0.
 
+**Re-measured 6 September, after the two-roads merge. The finding this section
+named is GONE, and five different ones are there instead.** The entrance
+gateway path's 0.006 m² residue against `path-surface` no longer appears at
+all — the merge, which put the drawn approach and its claimed reach behind one
+call, closed it. Everything below replaces it; the old text is kept at the end
+of this section only because its *reasoning* about baselines is still right.
+
+The five, exactly as the check prints them (seed pool of 14, run at the merge
+commit):
+
 ```
-NEW: garden|entrance/entrance-gateway-path|garden/path-surface
-     0.006 m² of shared plane, a maintained stand-off at 9.7e-3 m, seed 20260728
+MORE:  garden|park-train/railway-bridges/bridge/deck|park-train/railway-bridges/bridge/shell
+       2 separate seam(s) between these two on one seed, recorded at 1
+WORSE: garden|garden/boundary-wall/boundary-blocks|park-train/rail-fence/<Mesh:BoxGeometry>
+       0.280 m², recorded at 0.051 m²
+MORE:  garden|garden/boundary-wall/boundary-blocks|park-train/rail-fence/<Mesh:BoxGeometry>
+       2 separate seam(s) between these two on one seed, recorded at 1
+WORSE: garden|garden/path-surface|park-train/train-track/track-ballast
+       5.993 m², recorded at 3.032 m²
+NEW:   garden|park-train/railway-bridges/bridge/shell|park-train/railway-bridges/bridge/wallTop
+       0.052 m² of shared plane, a maintained stand-off at 5.3e-3 m, seen on seed 326
 ```
+
+**They are one root cause with four faces: the sphere moved the terrain under
+geometry whose seam-avoidance thresholds were measured against the old hill.**
+None of them is the entrance road, the arrival camera or the gate arch. Note
+what that means for whoever picks this up — it is not five small fixes in this
+branch's own new code, it is a re-measurement in three subsystems that already
+have careful, heavily-reasoned seam logic:
+
+- **`src/world/train/bridges.ts`** owns the `shell`/`wallTop`/`deck` seams, and
+  its comments (around the `artefact = COURSE_HEIGHT / 100` test) explain that
+  the reveal-deletion thresholds were calibrated by measuring the *distribution*
+  across all pool seeds — "the strays sat 16–77 mm below the wall top, while a
+  reveal actually fighting the cap sits 1.5 mm under it". Those two populations
+  were separated on the old terrain. The sphere moves which ring lands on the
+  coincidence, exactly as #489 did, and the same measurement has to be redone
+  rather than the threshold widened by feel.
+- **`garden/path-surface` vs `train-track/track-ballast`**, the biggest at
+  5.99 m², is a *pre-existing* baselined seam (3.03 m²) that roughly doubled.
+  The path network does not keep clear of the ballast the way the entrance's
+  gateway path does — `BALLAST_HALF_WIDTH` is exported from `track.ts` for that
+  one caller only. The obstacle to fixing it the same way is ordering:
+  `buildPaths()` runs inside `Garden` **before the train exists**, so it cannot
+  ask the track where it is. A post-pass, in the shape of the existing
+  `drapePathsOverBridges`, is the likely answer.
+- **`boundary-blocks` vs `rail-fence`** is the wall and the fence meeting where
+  the railway leaves the park.
+
+**Do NOT add baseline entries for any of these.** An entry means "already wrong
+before the gate existed"; four of these five *have* entries and are worse than
+them, which is the ratchet doing its job. `ART_DIRECTION.md` §7: delete the
+hidden face, never nudge a surface apart.
+
+Also printed on that run: **seven `BASELINE LOOSE` lines** — entries whose seam
+is gone (hotel tower and door jamb against terrain, the water-fight plot, three
+stall cylinders against terrain, the face-paint stall). Those are seams the
+sphere *fixed*, and their entries should be deleted in the same change, because
+a baseline entry for a seam that no longer exists is a licence for it to come
+back unnoticed.
+
+### The original text of this section, kept for its reasoning about baselines
+
 
 **Root-caused, with a stated fix and a stated moment to apply it** — which is
 why deferring it is legitimate rather than brushing it aside. The road branch
