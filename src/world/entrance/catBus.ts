@@ -624,6 +624,20 @@ export const CAT_BUS_MAX_PITCH = 0.042;
 export const CAT_BUS_MAX_ROLL = 0.05;
 
 /**
+ * **How far the suspension can move a point of the sprung body**, up or down,
+ * from where it rests — the one owner of that sum. Full heave, plus the pitch
+ * contribution at the point's distance along the bus, plus the roll
+ * contribution at its distance across it (small angles: the three limits are
+ * radians and metres, so this is metres). Every derivation from the limits
+ * reads this — the ride height (at the chin), the mudguard gap (at a wheel),
+ * the step (at the door), and the driven top (at the crown of the face) — so
+ * raising a limit moves all of them together and none can be restated stale.
+ */
+function suspensionTravelAt(z: number, x: number): number {
+  return CAT_BUS_MAX_HEAVE + CAT_BUS_MAX_PITCH * Math.abs(z) + CAT_BUS_MAX_ROLL * Math.abs(x);
+}
+
+/**
  * **How much higher the sprung body rests than it is drawn** — the ride height
  * the doubled wheels bought.
  *
@@ -648,9 +662,10 @@ export const CAT_BUS_MAX_ROLL = 0.05;
  * pavement, from 0.51 m to 0.78 m — which is the honest consequence of fitting
  * wheels twice the size, and is what a bus with big wheels looks like.
  */
-const NOSE_Z = BODY_LENGTH / 2 - FACE_RADIUS * 0.62 + FACE_RADIUS * 0.6;
-export const CAT_BUS_RIDE_LIFT =
-  (CAT_BUS_MAX_HEAVE + CAT_BUS_MAX_PITCH * NOSE_Z + CAT_BUS_MAX_ROLL * FACE_RADIUS) * 1.15;
+/** Where the face sphere's centre sits along the bus — see `createCatBus`. */
+const FACE_Z = BODY_LENGTH / 2 - FACE_RADIUS * 0.62;
+const NOSE_Z = FACE_Z + FACE_RADIUS * 0.6;
+export const CAT_BUS_RIDE_LIFT = suspensionTravelAt(NOSE_Z, FACE_RADIUS) * 1.15;
 
 /**
  * The gap between a tyre and the mudguard over it, **at rest**.
@@ -672,10 +687,7 @@ export const CAT_BUS_RIDE_LIFT =
  * the derivation promised 0.071 — a small number, but the derivation being
  * wrong is the interesting part, not the size of the error.
  */
-const WORST_BODY_DROP_AT_A_WHEEL =
-  CAT_BUS_MAX_HEAVE +
-  CAT_BUS_MAX_PITCH * Math.max(...WHEEL_Z.map(Math.abs)) +
-  CAT_BUS_MAX_ROLL * WHEEL_X;
+const WORST_BODY_DROP_AT_A_WHEEL = suspensionTravelAt(Math.max(...WHEEL_Z.map(Math.abs)), WHEEL_X);
 export const CAT_BUS_ARCH_GAP =
   WORST_BODY_DROP_AT_A_WHEEL * 1.35 + FENDER_OUTLINE_THICKNESS;
 
@@ -812,6 +824,20 @@ function roadHeightAt(distance: number): number {
  */
 export const CAT_BUS_TOP =
   CAT_BUS_RIDE_LIFT + FACE_Y + (FACE_RADIUS + FACE_OUTLINE) * FACE_SQUASH[1];
+
+/**
+ * **The top of the bus as it drives** — {@link CAT_BUS_TOP} plus the furthest
+ * the suspension can lift the face's crown: full heave, nose-up pitch at the
+ * crown's distance along the bus, roll at the face's half-width, from the one
+ * owner of that sum ({@link suspensionTravelAt}), the same terms the ride
+ * height is built from. The rest top stays the name label's and the asset
+ * contract's number; anything that must stay out of the bus's way while it is
+ * *moving* — the road's corridor claim, the swept-bus check's envelope — reads
+ * this one. Found by the Architect on step 2 (6 Sep 2026): a claim carrying
+ * the rest top let a branch sit in the 0.3 m the crown rises through on a
+ * bump, and the check, sweeping a bus at rest, shared the blind band exactly.
+ */
+export const CAT_BUS_DRIVEN_TOP = CAT_BUS_TOP + suspensionTravelAt(FACE_Z, FACE_RADIUS);
 
 /**
  * The doorway, sized by the child who walks down out of it.
@@ -1280,7 +1306,7 @@ export function createCatBus(): CatBusHandle {
   // A big squashed sphere at the front, flattened toward the windscreen — the
   // same "nose" trick `dodgems/car.ts` uses, just scaled up to be the whole
   // front of the bus.
-  const faceZ = BODY_LENGTH / 2 - FACE_RADIUS * 0.62;
+  const faceZ = FACE_Z;
   const faceY = FACE_Y;
   // 38 segments, matching the kid's own skull (`kid.ts`), because this sphere is
   // now the surface the face is *printed on* rather than a blank the face hangs
@@ -1561,10 +1587,7 @@ export function createCatBus(): CatBusHandle {
   // out 0.05 m optimistic and the check duly reported the bodywork reaching
   // y=0.010 where 0.06 was intended: not a failure, but the derivation being
   // wrong is the interesting part, exactly as it was for the arch gap.
-  const worstDropAtDoor =
-    CAT_BUS_MAX_HEAVE +
-    CAT_BUS_MAX_PITCH * (Math.abs(stepZ) + stepDepth / 2) +
-    CAT_BUS_MAX_ROLL * (Math.abs(stepX) + stepWidth / 2);
+  const worstDropAtDoor = suspensionTravelAt(Math.abs(stepZ) + stepDepth / 2, Math.abs(stepX) + stepWidth / 2);
   const lowestTreadUnderside =
     STEP_ROAD_CLEARANCE + worstDropAtDoor - CAT_BUS_RIDE_LIFT;
   const stepGeometry = new RoundedBoxGeometry(
