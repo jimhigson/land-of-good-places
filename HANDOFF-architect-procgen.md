@@ -463,3 +463,14 @@ heave + pitch + roll within 1 mm (as the rest top is), and the owner is
 derived from the face ellipsoid under the pitch rotation, roll
 contributing nothing at the crown. `suspensionTravelAt` stays right for
 the chin, wheels and step (off-axis points).
+
+## Step 2 approved, 6 Sep late — `61b306e0`
+
+Measured on the sha: rest top 6.0429 = owner; posed highest 6.4991 (heave
++0.2, nose-up pitch, roll 0) = `CAT_BUS_DRIVEN_TOP`; the ideal ellipsoid's
+support function sits 0.96 mm above the drawn polygon pole (so the
+polygon derivation is required, not decorative); driven assertion VOID at
++1 cm on both built seeds; tsc 0; canonical sweep 0/0/0 with the posed
+envelope. Approved, PR to open once the sphere reaches the design branch.
+Note for the PR body: canonical walk-past ring 92 legs (was 93 under the
+rest-top claim) — a non-mandatory slot near the road refused and skipped.
