@@ -72,7 +72,7 @@ middle capacity **10**; catalogue offers **12** `walksInParade` items.
 
 ## Status
 - [x] Worktree + `pnpm install --frozen-lockfile` (pnpm 12.1.0 running, confirmed)
-- [ ] Survey of pet/bed/hotel code (subagent running)
+- [x] Survey of pet/bed/hotel code
 - [x] Implementation (option C)
 - [x] Instrument with a built-in control; check proved red then green
 - [ ] Gates: `check`, `test:procgen`, `build`, `check:coplanar`, `check:swept-bus`, `check:park-pool`
@@ -129,8 +129,10 @@ Modelled four packing rules against the real geometry:
 
 Two things this says, and they decide the whole design:
 
-1. **The middle bedroom already holds 12 — exactly the catalogue maximum** — once the
-   first bed row is anchored to the north wall. The middle room is a complete answer.
+1. **The middle bedroom holds 10 as shipped.** The "12" in this row was a *hypothetical*
+   model (anchoring the first row hard to the north wall) and it was **not built** —
+   measured on the real park the middle bedroom holds **10**. Do not quote 12 as fact;
+   see "The residual gap" above, which is the measured number.
 2. **The side bedrooms top out at 4**, and only via a knife-edge. Row 0 clears the human
    bed in z by **0.002 m**; that is why "z-aware" alone gains nothing and a 0.1 m nudge
    flips capacity from 2 to 4. Not a mechanism to ship. The depth (5.85 m) fits only
