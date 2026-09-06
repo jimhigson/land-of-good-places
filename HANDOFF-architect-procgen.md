@@ -49,10 +49,21 @@ first honest run found #501).
   and step 2 unblocks.
   Terrain is no longer seed-dependent (1200 m sphere) — the outward
   march's bound is the support's lean limit, not the ground.
-- **Briefs**: step 1 = **#522, merged** into this branch at `0845e9fa`
-  (reviewed by this Architect, approved 5 Sep). **Step 2a = #528**
-  `check:swept-bus`, approved, awaiting QA (364 drawn posts vs 107 feet,
-  3.40×; feet-only mode reproduces #498's 2–8/seed as calibration). Step 2 held on step 1 + #511 +
+- **Briefs**: step 1 = **#522, merged** (this branch `0845e9fa` and
+  `main`). **Step 2a = #528 `check:swept-bus`, merged to `main`** — its
+  own workflow, seed-keyed, **bidirectional** (fails on a drop as well as
+  a rise), red-by-design at 364 drawn posts across 16 seeds, so #511
+  must re-take the baseline to land (the posts-at-height prediction made
+  mechanically unavoidable). `main` = `d80a3d4c` (6 Sep).
+- **Step 2 is gated on #511 alone** (rechecked 6 Sep): step 1 done, 2a
+  done. #511 is gated on the crossing-screen PR (station spur screened,
+  screen wired into `pathGraph`, exit 2 on a zero scan) + its swept-bus
+  baseline re-take. The moment #511 merges, step 2 is dispatchable from
+  `main`; its definition of done drives the swept-bus baseline to 0 and
+  replaces it with "fails on any intrusion".
+- **#524** (open): a park that fails to build is a test failure, not a
+  skip — and after the screen lands, **a named refusal at commit is a
+  failure too**, not a skip. Same issue, one more case; say so on it. Step 2 held on step 1 + #511 +
   step 2a in the chain (dispatched). Steps 3, 4 sequential after. Step 4 re-cut: no clause
   to delete; it is the `CoSolveEngine`→`GroundClaims` migration + the
   first support-shape negotiation + counters, shrinking if the sphere

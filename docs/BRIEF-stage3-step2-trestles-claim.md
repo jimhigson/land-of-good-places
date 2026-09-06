@@ -1,9 +1,8 @@
 # Engineering brief — stage 3, step 2: the trestles become a placer (sphere world)
 
-**Status: HELD until (a) step 1 (road placer) is on `main`, (b) #511 (the
-sphere, with the road moved outside the ring's band) is on `main`, and
-(c) step 2a's swept-bus ratchet is in the `check` chain.** Then
-dispatchable as written. Re-cut 5 Sep after the #511 correction: a radial
+**Status: HELD on #511 alone** (rechecked 6 Sep: step 1 = #522 on `main`;
+step 2a = #528 `check:swept-bus` on `main`, its own workflow, seed-keyed
+and bidirectional). **Dispatchable from `main` the moment #511 merges.** Re-cut 5 Sep after the #511 correction: a radial
 nudge is a *lean*; the trestles do not escape outward; the road sits
 outside the ring's band and its outset is the thing this step derives. Authority:
 `docs/DESIGN-round-robin-generation.md`, "Stage 3, ruled (5 Sep, Jim)" and
