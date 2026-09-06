@@ -732,13 +732,30 @@ export class NavGrid {
     // Asked of the boundary itself, so the lattice and `CollisionWorld`'s
     // clamp cannot disagree about where the park ends. If they ever do,
     // tap-to-move routes to somewhere walking refuses to go.
+    // The boundary band — every cell outside the park or within a walker of
+    // its edge — the same set `distanceToEdge(x, z) < walkerRadius` describes,
+    // built the way every wall's band is: the edge is a closed polyline
+    // (`outline()`, the very points `distanceToEdge` measures against), so
+    // `stampSegment` each segment at the walker's radius, and block what
+    // `contains` says is outside. Asking `distanceToEdge` per cell instead
+    // scans the spline's 512 vertices 134k times: measured 189 ms of a 195 ms
+    // lattice build, paid by the player's grid, every journey grid and the
+    // layout's doormat probe alike. Proved cell-for-cell identical to the
+    // per-cell distance on the real park before landing (see `check:nav-routes`
+    // for the ongoing control).
     for (let cz = 0; cz < side; cz += 1) {
       const z = this.originZ + cz * CELL;
       const row = cz * side;
       for (let cx = 0; cx < side; cx += 1) {
         const x = this.originX + cx * CELL;
-        if (boundary.distanceToEdge(x, z) < this.walkerRadius) this.blocked[row + cx] = 1;
+        if (!boundary.contains(x, z)) this.blocked[row + cx] = 1;
       }
+    }
+    const edge = boundary.outline();
+    for (let i = 0; i < edge.length; i += 1) {
+      const a = edge[i] as readonly [number, number];
+      const b = edge[(i + 1) % edge.length] as readonly [number, number];
+      this.stampSegment(a[0], a[1], b[0], b[1], this.walkerRadius, this.blocked);
     }
 
     // Then everything solid, fattened by the walker's own width — the walls
