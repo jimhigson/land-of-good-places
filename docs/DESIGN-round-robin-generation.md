@@ -195,40 +195,59 @@ destination; a lattice cell is a patch of floor). `poi.stranded` truthfully
 says *no child will ever walk to that ride*. That is a real defect of a
 different kind: **the NPC graph cannot walk what the router drew.**
 
-**Ruling (Architect, 6 Sep):**
+**Ruling (Architect, 6 Sep) — superseded the same day; kept for the
+record of the error.** The first ruling said "reachable has one owner:
+the drawn path network — `PoiGraph`'s edges follow the drawn route." Its
+premise — that the children walk `PoiGraph`'s edges — was inferred from
+an import list and is false: `wanderDriver.ts`'s header (#350) records
+the random walk over the graph **deleted**, `Journey` is the one owner of
+where a child is headed and routes every leg on **the player's own
+NavGrid** (`JourneyPlanner`, one NavGrid per space), and `neighbours` has
+no consumer outside `poiGraph.ts`. The edges exist only to compute
+`reachable`, which gates `spawnNodes()` / `nearest()`. So that ruling
+would have built a *second reachability instrument that nobody walks* —
+and one the drawn paths defeat: a lane-following edge rule refuses
+exactly what the chord refuses (seed 13's gate approach crosses a 3.3 m
+deck transversely, push 0.38–0.42 either side; seed 15's spur crosses a
+ramp sideways through its flank walls, push 0.55/0.52; the paving twin
+clears neither), while NavGrid's real seed-15 route rides the bridge
+lengthwise along x = 34 and steps off the ramp toe — a legitimate walk no
+lane rule can express.
 
-1. **"Reachable" has one owner: the drawn path network.** Both walkers
-   derive from it. `PoiGraph`'s edges are no longer chords tested against
-   the collision world; an edge between neighbouring waypoints **follows
-   the drawn route between them** (the route polylines / paving the
-   router committed — bridge decks included, at the deck height the
-   player uses, `bridgeHeightAt`, one owner), validated along that
-   polyline. A chord may remain as a *shortcut candidate*; it is never
-   the only edge. Lane identity changes at a junction because the drawn
-   network says so, not because `laneIsClear` is loosened.
-2. **`poi.stranded` stays a hard "built" criterion, restated honestly**:
-   *the set of POIs the children can walk to must contain every POI the
-   player's router reaches* — one invariant, both walkers, the same
-   network. Its count goes to zero without touching a single placement,
-   and the fix is measured by that.
-3. **The layout redraw (the brief's rung, refusal shape, trace, digest)
-   stays, for genuine unreachability** — defined as **the player's router
-   cannot reach the POI's doormat from the entrance**. That is zero of
-   seeds 0–15 today, and the check says "0 genuinely stranded; the rung
-   never fired" every run rather than implying cover.
-4. **No placement moves to satisfy a graph.** No seed retires. Seed 5's
-   baked warp (`layout: { waterFight: 1 }`) is deleted **when and because**
-   seed 5 builds without it — the first warp field retired by measurement,
-   which is the shape every retirement must take.
-5. Two findings routed out of this class, each its own item: **seed 12**
-   is the water fight *built* 19.5 m against a *declared* 18.5 m
-   (`anchor.reach:waterFight`, also on 6) — a declared-versus-built two
-   definitions bug in that plot's builder, not a placement; **seed 6's
-   `poi.nospot`** are route samples at (0.0, 42.5) and (0.0, 38.7) on the
-   railway under a deck, where `bridgeHeightAt` answers null — the
-   waypoint seeder standing a sample in the under-deck `TRACK_CLEARANCE`
-   block instead of on the deck: same owner as point 1 (a deck is walkable
-   at its draped height), fixed by it.
+**Ruling (Architect, 6 Sep, second):**
+
+1. **`PoiGraph.reachable := "NavGrid can route here from the park's main
+   body (the entrance)"`** — the same instrument `check:park`'s
+   `route.unreachable` already uses, computed per space with the same
+   NavGrid the `JourneyPlanner` builds. **One instrument, not two kept in
+   step**; *NPC-reachable ⊇ player-reachable* then holds by construction
+   because they are the same predicate. Edges survive only as a cheap
+   prefilter, if at all — never as the verdict.
+2. **`poi.stranded` stays hard** and means *"the children's own planner
+   cannot reach this waypoint"* — a real defect whenever it fires. It is
+   **0 on seeds 0–15** under this definition. Seed 6's `poi.nospot`
+   (samples on the railway under a deck) is discharged the same way: a
+   spot is a spot NavGrid can stand on.
+3. **The layout redraw (rung, refusal shape, trace, digest) stays armed**
+   for the genuine case and prints "rung never fired" every run. No
+   placement moves. Seed 5's warp retires when and because it builds
+   without it.
+4. **Conditional on the caveat being checked, and the ruling depends on
+   the answer**: whether NavGrid *over-approximates* at those transverse
+   crossings — a 1.9 m step onto a ramp top would be a **NavGrid bug**
+   (it is the player's walker; a child would be walking through a
+   parapet), fixed in NavGrid, never accepted as reachability and never
+   compensated by widening anything. The seed-15 route needed no such
+   step; the check is whether any route the new `reachable` relies on
+   does. That measurement lands in the same PR, red or green, by name.
+5. Seed 12 (`anchor.reach:waterFight`, built 19.5 m vs declared 18.5 m)
+   remains its own item — declared-versus-built, in the plot's builder.
+
+**On the record**: this is the third premise this engineer has corrected
+by reading the code rather than the document, and each correction made
+the design simpler. The Architect's error both times was inferring a
+walker from an import list; the rule that follows is in "Traps" below —
+**name the consumer, not the importer.**
 
 **Baseline corrected**: 4 of 16 build (0, 5, 11, 14), not 2.
 
