@@ -92,117 +92,16 @@ export interface WarpVector {
  * did not see 326's even though 326 is in the sweep list. See
  * `parkSeedPool.ts`'s note beside `CI_SWEEP_SEEDS`.
  */
+/**
+ * **Empty, on purpose.** Every entry this held was a baked backtrack for one
+ * of the sixteen arbitrary seeds the pool used to contain (20260728, 5, 24,
+ * 115, 225, 288, 326, 428 had vectors). Jim, 6 September 2026, retiring those
+ * seeds for 0..15: *"just delete any such work."* A seed in 0..15 that needs a
+ * warp is a generator that needs fixing (or, once stage 4 lands, a decision the
+ * round-robin backtracks on its own) — not a vector to search for and bake.
+ * `LGP_WARP` still works for an experiment.
+ */
 const WARPS_BY_SEED: Readonly<Record<number, WarpVector>> = {
-  // First baked as {ferrisWheel:2}, which passed check:park and all 81
-  // invariants yet failed check:path-preference's kerb-step clause in CI
-  // (84.1% vs 73% ceiling) — the canonical seed answers to canonical-only
-  // gates the pool seeds do not (#437). Re-searched with that gate in the
-  // acceptance loop: {hotel:2}, candidate 22.
-  20260728: { layout: { hotel: 2 } },
-  // Re-searched 2 Sep 2026, after `rail/generate.ts`'s `buildRoute` stopped
-  // leaving a dead spot at every piece join: that fix moves every route
-  // slightly, so the vector baked against the old geometry
-  // (`{ferrisWheel:2}`) is no longer the one this seed wants — it now leaves
-  // one pair of destinations with a 30.8x paved detour. Re-run of
-  // `scripts/warp-search.mts 5`, control passed first: SOLVED after 5
-  // candidates, stranded=0, oracle=pass.
-  // (measurements/warp-search-2sep-railroute-fix.jsonl.)
-  //
-  // Note the empty vector is *not* enough here even though seed 5 passes all
-  // 81 of its own invariants unwarped — check:park still strands 10 waypoints
-  // on it. Both gates, or it is not a vector.
-  5: { layout: { waterFight: 1 } },
-  // Not a stranded seed originally: 24's unwarped network crossed the rail
-  // at railD 47.8, off every proven site — absorbed silently as a fence gap
-  // while the level tier existed, invisible to check:park (which samples only
-  // the entrance route), surfaced the moment crossings.ts learned to throw.
-  //
-  // **Re-searched 3 Sep 2026, after this branch was rebased onto main
-  // c95facf6.** The old vector was {waterFight:1}, baked before #499's
-  // round-robin spine reordered generation, #502 moved the bushes and #508
-  // stopped check scripts building a randomly drawn park. On the rebased tree
-  // it strands one waypoint at (9.1, -55.8) — check:park red, all 88
-  // invariants still green, which is the same split 115 showed in the other
-  // direction and the reason the whole pool has to be vetted rather than
-  // either gate trusted. Control run first and passed; SOLVED after 28
-  // candidates, stranded=0, oracle=pass.
-  // (measurements/warp-search-post-rebase-24-428.jsonl.)
-  24: { layout: { 'stall.skyCruiser': 2 } },
-  // 225 was one of the full pool re-vet's catches (2 Sep): green under
-  // check:park, red under the invariant suite (Sky Cruiser clearance) — the
-  // same #437 shape as 326. Proved with a throwaway vet-style oracle, since
-  // it has no checked-in test file. Still holds on the fixed geometry
-  // (re-vetted, 81/81).
-  //
-  // **115 is second-vintage.** It was `{dodgems:1}`, baked against the park
-  // the route's dead spot produced. On the fixed geometry that vector goes to
-  // 78/81 — three red: the bridge-tunnel ray clearance, the coping stones,
-  // and "every crossing on a site the planner proved bridgeable still carries
-  // its bridge". `check:park` stayed green throughout and 115 is not in
-  // `CI_SWEEP_SEEDS`, so nothing in the blocking chain could see it; only
-  // `vet:seeds` over the whole pool could, and did.
-  //
-  // Worth recording why this is *not* the other explanation that was on the
-  // table. The bridge-tunnel invariant takes its across-track direction from
-  // a 0.1 m finite difference on `route.pointAt`, which inside the old dead
-  // spot returned the identical point twice — `norm` 0, the `|| 1` guard, and
-  // the whole probe fan collapsing onto the centreline. That is a real latent
-  // blindness and the fix removes it, so "a pre-existing breach merely
-  // uncovered" was the obvious suspicion. Measured instead of assumed: on the
-  // pre-fix geometry, with that tangent replaced by the route's own
-  // `tangentAt` so the fan is honest, 115 still passes **81/81**. The breach
-  // is not older than the fix; it is this seed's vector being stale.
-  //
-  // Re-searched 2 Sep 2026, control passed first: SOLVED after 8 candidates,
-  // stranded=0, oracle=pass.
-  115: { layout: { hotel: 1 } },
-  225: { layout: { 'stall.railRacer': 1 } },
-  288: { layout: { waterFight: 1 } },
-  // **326 is second-vintage**, and it is the #437 blind spot pointing the
-  // other way from 115's. First baked as {fountain:1} on check:park evidence
-  // alone; the moment seed-326.test.ts existed that went red on ONE invariant
-  // the check cannot see (the slide climbing 0.001 m), so it was re-searched
-  // with the oracle in the loop to {waterFight:1}.
-  //
-  // On the fixed geometry {waterFight:1} keeps passing all 81 invariants and
-  // fails the *other* gate instead: check:park strands 8 waypoints
-  // (216/216 connected before, 208/216 after). So neither gate implies the
-  // other in either direction, which is why vet:seeds runs both — and note
-  // check:park is **canonical-only**, so even though 326 is in
-  // CI_SWEEP_SEEDS nothing in the blocking chain builds its park under
-  // check:park. The `--- seed N: passed` lines in a `check` log are
-  // check:fountain-hop's sweep, not check:park's.
-  //
-  // Re-searched 2 Sep 2026: SOLVED after 3 candidates, stranded=0,
-  // oracle=pass.
-  326: { layout: { building: 1 } },
-  // **New on 3 Sep 2026, and the one that shows a seed can go bad without
-  // ever having had a vector.** 428 passed both gates unwarped on this branch
-  // before the rebase (measurements/rebased-vet-seeds.jsonl records it), so
-  // it had no entry here at all. Rebased onto main c95facf6 it strands six
-  // waypoints, clustered along the top of the park — (18.2, 53.2) (6.9, 57.1)
-  // (10.7, 58.2) (14.6, 57.1) (18.4, 57.1) (20.6, 55.1) — with its invariants
-  // still green.
-  //
-  // The absence of an entry is therefore NOT evidence a seed is safe across a
-  // rebase; only a whole-pool vet:seeds is. 428 has no per-seed invariant file
-  // either, so nothing in the blocking chain could see this (issue #510).
-  // Control run first and passed; SOLVED after 16 candidates, stranded=0,
-  // oracle=pass. (measurements/warp-search-post-rebase-24-428.jsonl.)
-  // Candidate 26, not candidate 16. {fountain:2} was the first vector to score
-  // 0 on check:park and it stood the fountain's own cylinder flush with the
-  // paving — 'garden|fountain/<Mesh:CylinderGeometry>|garden/path-surface',
-  // 0.051 m² at a 5.0 mm stand-off, NEW to check:coplanar. That is #437's
-  // shape and the canonical seed's story repeated: a gate outside the
-  // acceptance loop finds the winner afterwards. Re-searched with
-  // check:coplanar INSIDE the loop (control on that gate first: it flagged
-  // exactly the one known-bad key out of 34).
-  //
-  // Worth knowing for the next search: candidate 21, {hotel:2}, also scores 0
-  // on check:park and brings TEN new seams — the rail race's rainbow arch legs
-  // sharing planes with each other. A vector can be structurally fine and
-  // visually wrong, and only the third gate says so.
-  428: { layout: { 'stall.dodgems': 2 } },
 };
 
 function envWarp(): WarpVector | null {

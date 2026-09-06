@@ -41,177 +41,43 @@ import { SAVE_KEY } from '../state/save';
  */
 
 /**
- * The park everyone had before the pool existed, and the one every check and
- * every test that does not ask for another still gets.
+ * **The pool is seeds 0 through 15.** Jim, 6 September 2026, retiring the
+ * sixteen arbitrary seeds the pool used to hold (20260728, 5, 11, 24, 115, 128,
+ * 131, 208, 225, 267, 274, 288, 326, 346, 428, 451): *"I don't care about those
+ * seeds — the new procgen should work for 0..15 so forget they ever existed."*
+ * Nothing about the old seeds is carried over: no warp vectors
+ * (`parkWarp.ts`), no per-seed notes, no baselines. The bar for the generator
+ * is that every one of these sixteen builds a good park; a seed the generator
+ * cannot make a good park from is a generator bug, not a seed to swap.
  *
- * It stays the canonical seed for three separate jobs, and they are worth
- * keeping apart: it is the park a **returning child** carries on playing (her
- * save's positions mean nothing in a different park); it is the seed **Node
- * resolves to** when nothing pins one, so `check:park` and every other check
- * measures the same park it always did; and it is `test/procgen`'s canonical
- * regression seed. It is also, being the most-played park in the game, the
- * most thoroughly vetted member of the pool.
+ * The canonical seed — the park Node builds by default, the one every
+ * canonical-only check measures — is **14, provisionally**. Measured on 6 Sep
+ * 2026 (`check:park-pool`, hill geometry): 14 is the one seed of the sixteen
+ * that builds end to end today, so it is the one the forty canonical-only
+ * steps can measure at all; seed 0 dies in the railway loop solver
+ * (`RailRouteUnsolvable`). **This goes back to 0 the moment 0 builds** — a
+ * canonical that does not build is not a canonical, and a pool where the
+ * canonical has to be chosen by survival is the generator bug this ruling
+ * exists to expose.
  */
-export const CANONICAL_PARK_SEED = 20260728;
+export const CANONICAL_PARK_SEED = 14;
 
 /**
- * **The vetted pool. Sixteen for now; change the array and nothing else.**
- *
- * Jim expects this number to move ("that's enough for now but we might change
- * the number later"), so there is no `16` anywhere in the code — the size of
- * the pool *is* `PARK_SEED_POOL.length`, and every consumer asks the array.
- *
- * **To change it:**
- *
- * 1. `pnpm run vet:seeds -- <from> <to>` to find candidates.
- * 2. Put the passers in this array.
- * 3. `pnpm run vet:seeds -- --list <the whole pool>` to confirm the pool as a
- *    whole, and update the note below with the date and commit.
- *
- * **Budget for a low hit rate.** Vetting candidates from 1-1400 at `101b5415`
- * tried **515 and kept 17 — about one in thirty.** Sixteen are here; 1102 and
- * 1104 are spares, recorded on the PR rather than used.
- *
- * That rate is a measurement of the generator's health rather than of the
- * search. Of the 498 rejected, about three quarters fail `check:park` — most
- * often waypoints with nowhere a child fits (`poi.stranded`, 100 seeds) or a
- * railway loop that will not solve at all (~96) — and the rest fail an
- * invariant, most often the Rail Race's duck bar standing where it slows the
- * ride (95), its camera running backwards (94), or the Sky Cruiser flying
- * through the castle (73).
- *
- * **Re-vet the whole pool whenever the generator changes.** A seed is not
- * sound in the abstract; it is sound against the code that builds it. #460 (a
- * hoppable wall's routing cost, 6.4 → 2.65) invalidated a whole vetting run of
- * these seeds mid-search by moving paths across the park — that is how quickly
- * it goes stale. **Three routing changes landed while this pool was being
- * found, and it was re-vetted against every one of them**: #460 (the hop
- * multiplier), #461 (long grass, and solid benches, planters and pavilion) and
- * #421 (paving preference in the router). All sixteen still pass after all
- * three, and not one seed that passed earlier fails now.
- * **Vetted at `fb8496a0`, 1 September 2026.**
- *
- * `check:seed-pool` guards the cheap half of this: that the pool is a set of
- * distinct positive integers containing {@link CANONICAL_PARK_SEED}. It cannot
- * guard the expensive half — that each one still builds a sound park — which
- * is what the re-vetting run above is for, and it says so on every run.
- *
- * **Seed 18 is deliberately absent**, and it is the reason a pool is not just
- * "the seeds `test/procgen` already uses": it is one of that suite's four
- * sweep seeds, green on all 80 invariants, and it fails `check:park` with
- * `route.crossesRail: 4` — four walks routed across the railway at grade,
- * 0.56 m above the rail where the deck they need is 4.06 m up. The seed goes,
- * not the assertion. Written up on #437.
+ * Sixteen, by ruling — and there is no `16` anywhere else: the size of the
+ * pool *is* `PARK_SEED_POOL.length`, and every consumer asks the array.
+ * `check:park-pool` builds every one of these on every PR; `check:seed-pool`
+ * guards only that this is a well-formed set containing
+ * {@link CANONICAL_PARK_SEED}.
  */
-export const PARK_SEED_POOL: readonly number[] = [
-  CANONICAL_PARK_SEED,
-  5,
-  11,
-  24,
-  115,
-  128,
-  131,
-  208,
-  225,
-  267,
-  274,
-  288,
-  326,
-  346,
-  428,
-  451,
-];
-
+export const PARK_SEED_POOL: readonly number[] = Array.from({ length: 16 }, (_, seed) => seed);
 /**
- * **The seeds a multi-seed check script sweeps — THE one owner.**
- *
- * Before 2 Sep 2026 each sweeping script kept its own hand-typed list
- * (`CI_SEEDS = [PARK_SEED, 5, 11, 18, 24]` and variations), and when seed
- * 18 was retired (it structurally needs a level crossing, which no longer
- * exists — see `test/procgen/invariants.ts`'s header for the ruling) the
- * lists kept building it and CI went red on a seed the rules say does not
- * have to pass. A second hand-maintained list that can drift from the pool
- * is the two-definitions shape this repo keeps paying for, so the sweep
- * list now derives from the pool itself.
- *
- * **Seed 18 (and old seed 2) are not "missing" from this list — they are
- * out by ruling.** Do not add a non-pool seed back here: a seed that is
- * not in {@link PARK_SEED_POOL} is not a park a child can be given, and
- * the filter below throws rather than sweep one.
- *
- * The subset is **exactly the pool seeds with a checked-in invariant file**
- * (the deep sweep), not all sixteen — `vet:seeds` owns whole-pool coverage;
- * this keeps the blocking chain's cost where it was.
- *
- * That sentence was false when it was written: seed 131 had
- * `test/procgen/seed-131.test.ts` and was not in this list, so a comment
- * added to retire a hand-maintained list was itself describing a derivation
- * nobody performed. 131 is in the list now, and — because this module ships
- * to the browser and cannot read a directory — the agreement is enforced from
- * the outside instead of promised here:
- * `check:seed-pool` fails if the two sets ever differ, in either direction.
- * Add a per-seed file and it tells you to add the seed here; delete one and it
- * tells you to take it out. It is in the blocking chain, so neither drifts
- * silently again.
- *
- * ## What being in this list does NOT mean
- *
- * **It does not mean `check:park` builds that seed's park. `check:park` is
- * canonical-only.** The only `check:*` step in the `check` chain that sweeps
- * *this* list is `check:fountain-hop` — so the `--- seed N: passed` lines in a
- * `pnpm run check` log are *its* sweep, and nothing else's. The other
- * consumers are `measure-*`/`sweep-*` scripts nobody runs in CI. Grep before
- * believing otherwise; the list of importers is short and this comment can rot.
- *
- * **Since #510 the whole pool IS built by blocking checks — but by
- * {@link PARK_SEED_POOL}, not by this subset, and not from the `check` chain.**
- * `check:park-pool` and `check:gateway` each sweep all sixteen from the
- * required `Procgen invariants` job. So "is seed N built by something that
- * blocks a merge?" is now a question about the pool, not about this list; this
- * list answers only "does seed N have a per-seed invariant file?". Do not read
- * membership here as coverage in either direction — `check:seed-coverage`
- * prints the real map on every run.
- *
- * **The trap that makes this easy to misread**: `check-park.mts` *does*
- * import something called `SEEDS` (line 72) and prints `N/M seeds placed`
- * and `N/M waypoints connected`. Those are `poiGraph`'s **waypoint** seeds —
- * points of interest a child can walk to — and have nothing whatever to do
- * with park seeds. Two different meanings of "seed", one of them in the
- * output of the very check people assume is sweeping the other. If you are
- * checking whether `check:park` covers a park seed, the question is whether
- * it imports **this** file; it does not.
- *
- * Measured 2 Sep 2026: seed 326 is in this list, went green through the whole
- * 58-step chain (60 steps as of #510 — the measurement is kept at the number it
- * was actually taken against, since a transcript rewritten to today's count is
- * no longer a measurement of anything), and was stranding 8 waypoints under
- * `check:park` the entire time. Seed 115 failed the other way round —
- * `check:park` green, three invariants red. Neither gate implies the other
- * (#437).
- *
- * **The last clause of this paragraph used to read "and neither sees most of
- * the pool". That is no longer true, and it is the point of #510:**
- * `check:park-pool` puts every one of the sixteen through `check:park`, and
- * `check:gateway` walks a child in through every one's front arch, both in the
- * required `Procgen invariants` job. What remains uncovered is the *invariant*
- * side — only the seven seeds with per-seed files get that — and
- * `check:seed-coverage` prints exactly that gap on every run rather than
- * leaving it to a comment here to remember.
- *
- * **So when the generator's geometry changes, the tell is `pnpm run
- * vet:seeds` over the whole pool — not a green `check`, which by
- * construction cannot see a stale warp vector on ten of the sixteen seeds a
- * child can actually draw.** See `parkWarp.ts`'s `WARPS_BY_SEED` header.
+ * **The seeds a multi-seed check script sweeps — THE one owner.** Derived
+ * from the pool (the filter below throws on a seed that is not in it): the
+ * canonical and the first six, each with a checked-in `test/procgen/seed-N.test.ts`, so
+ * `test:procgen`'s deep sweep keeps the blocking chain's cost where it was
+ * while `check:park-pool` covers all sixteen.
  */
-export const CI_SWEEP_SEEDS: readonly number[] = [
-  CANONICAL_PARK_SEED,
-  5,
-  11,
-  24,
-  131,
-  288,
-  326,
-].map(
+export const CI_SWEEP_SEEDS: readonly number[] = [CANONICAL_PARK_SEED, 0, 1, 2, 3, 4, 5].map(
   (seed) => {
     if (!PARK_SEED_POOL.includes(seed)) {
       throw new Error(`CI_SWEEP_SEEDS: ${seed} is not in PARK_SEED_POOL — sweep only real parks`);
@@ -267,7 +133,8 @@ function storage(): Storage | null {
 function readSeed(raw: string | null | undefined): number | null {
   if (!raw) return null;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+  // `>= 0`, not `> 0`: seed 0 is a real park now that the pool is 0..15.
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
 }
 
 /**
