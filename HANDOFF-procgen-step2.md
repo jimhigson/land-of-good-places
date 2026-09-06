@@ -248,3 +248,43 @@ Numbers on the merge (`tsc` 0, `typecheck:test` 0):
   **0 % of its limit on every seed** (98–100 trestles, ~40k claim pairs);
   `theRoadClaimCoversTheBusRun`: 87 samples, 17.8 m run, 0 outside, every seed.
 Logs: scratchpad `merge-*.log`, `merge-seeds/`.
+
+## Rulings 3 and 4 built; Architect's driven-top finding built (6–7 Sep, night)
+
+Head **65982c2a** (pushed). Commits: 8cad795b ruling 4 (`legacyRefuser`
+names the predicate; per-ring stderr coverage line); f92830c1 ruling 3
+(`CAT_BUS_TOP` derived from the face's crown — measured vertex-precise: face
+6.0429, ears 5.9845, old constant 5.9751; the "6.15" was `Box3.setFromObject`'s
+default box of a tilted cone); c5544009 the owner assertion moved to the
+check's PARENT (the child's stdout is the JSON channel — inaudible there);
+65982c2a **driven top**: `suspensionTravelAt(z, x)` is the one owner of
+heave + pitch·|z| + roll·|x| (ride lift, mudguard, step and crown all read
+it); `CAT_BUS_DRIVEN_TOP = 6.6411` (+0.5982); the corridor claim carries it;
+`check:swept-bus` sweeps the box raised by it and still asserts rest top ==
+Box3 (proved red at +1 cm, "off by −0.0100", exit 1).
+
+Corrections from #596 QA, recorded: the seed-1 digest `48740be264e8be1f` is
+the PRE-rebase value (post-rebase `d918bf4082f679da`, 5561 meshes); my pair
+was measured pre-rebase on both sides but quoted after the rebase push.
+`test:procgen` on the design branch is 676 passed; the 766 was my terminal on
+the pre-rebase head. **Step 3 todo (Overseer):** `probed-alone=0` in the
+layout trace needs its sentence, one line in `parkLayout.ts`.
+
+Scratch merge (`scratchpad/step2-sphere-merge`, now at step 2 65982c2a +
+sphere **b6b1a983** — the sphere has since moved to 40dcbc87; re-merge before
+trusting these on a newer sphere). Extra recipe items: drop the sphere's
+"whole post, not just its foot" comment in `legacyRefuser` (describes the
+deleted `isInEntranceRoad`); `check-swept-bus.mts` summary block: owner line
++ driven line, then the sphere's arc line; `roadCorridor.ts` import =
+`CAT_BUS_DRIVEN_TOP` + `PATH_KERB_OVERHANG`.
+Measured with the driven headroom: `check:swept-bus` **0 posts, 14/14
+built**, owner 0.0000 off, driven 6.6411; trestle refusals **0** on all 14 pool
+seeds and on the ten of 0..15 whose rings build (rings-built read off the
+coverage lines; 1/12/14 crossings, 3/8/10 train route never reach the ring);
+race ring `legacy:collision` 97–100 per seed (one per slot's first candidate),
+walk-past 0 except seed 346 (1). **Digest vs sphere alone (b6b1a983, same
+instrument), 14 pool seeds:** byte-identical whole park on 8 (5, 11, 128,
+208, 274, 326, 225, 20260728); on 24, 115, 131, 346, 428, 451 only the three
+`railRace:trestle-*` groups differ — no other group on any seed (answers the
+World.ts build-order question by measurement). Logs: `digest2/`,
+`merge-seeds2/`, `merge-swept-bus4.log`.
