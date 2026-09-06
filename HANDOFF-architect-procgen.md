@@ -478,3 +478,12 @@ tip alone — hill geometry, road through the ring's band — and does not
 reproduce on the sphere merge (50 + 50 per ring, 0 differing, engineer's
 measurement on `b6b1a983`). A hill-only number reported without its base;
 nothing disappears in the park that ships.
+
+## Ruling, 6 Sep late — one rail race (Jim): cross-ring constraint deleted
+
+Design doc "One rail race (Jim, 6 Sep)". Both rings claim as one feature
+`railRace`; walk-past colliders registered after both rings are placed
+(they stay — CollisionWorld, NavGrid/NPC routes, LampPosts, check:park,
+invariant #4 read them); the ~100 canonical `legacy:collision` refusals
+go. Recommended to land inside step 2. Step 3 brief re-cut to inherit.
+Open with Jim: whether the ride-scale ring may stand on/over the bus road.

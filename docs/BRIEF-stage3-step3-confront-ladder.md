@@ -82,28 +82,18 @@ that should be asking the generator's registry inside its own turn.
   (`roadCorridor`'s first turn) and nothing else — not `pathGraph`, unless
   measurement says the paths predicate changes a foot (below).
 - **`collision.isClearCircle(x, z, 1.1)` has no generation-time owner** —
-  there is no `CollisionWorld` in the scheduler. Do not invent one. **It is
-  not zero**: step 2's own coverage line on the canonical seed reads
-  `railRace:race-ring: candidates refused by legacy predicates: 91
-  (legacy:collision 91)` against 0 on the walk-past ring — and since the
-  registry is asked first, those are 91 candidates the registry *allowed*
-  and the collision world refused. The overwhelming suspect is the
-  walk-past ring's own registered post circles (`registerCollision: true`,
-  1.1 m clearance) being wider than the walk-past ring's *claims*: a
-  second definition of that ring's ground beside its claim. Step 2's PR
-  names what the 91 are; this step resolves it with **one owner**: the
-  walk-past ring's claim is what the race ring asks about, and if a
-  clearance wider than the drawn strut is wanted between rings, it is a
-  property of the claim (a `footprint` with the clearance in its shape),
-  not of a collision circle the scheduler cannot see. Anything else the
-  predicate turns out to refuse (a wall, a tree, a turret) gets *that
-  thing's own generation-time owner* as a named legacy predicate
-  (`legacy:<owner>`), never a copy of its geometry, filed on the stage-5
-  checklist. Measure on every pool seed before and after; the leg digest
-  says what moved. Either way the universal overlap invariant,
-  `railRaceSupportsAreClaimedAsDrawn` and `check:swept-bus` are the
-  instruments that say nothing was lost; the leg digest per seed says what
-  moved.
+  there is no `CollisionWorld` in the scheduler. Do not invent one. The
+  ~100 refusals it produced on the canonical race ring were the walk-past
+  ring's posts, and **that constraint is deleted, not migrated** (design
+  doc, "One rail race (Jim, 6 Sep)": the rings are never in the world
+  together; both claim as one feature `railRace`; the walk-past colliders
+  are registered after both rings are placed). Expect step 2 to have
+  landed that; if it has not, it is the first thing this step does.
+  Whatever the predicate refuses **after** that deletion is measured on
+  every pool seed, and each refuser gets *its own* generation-time owner
+  as a named legacy predicate (`legacy:<owner>`), never a copy of its
+  geometry, filed on the stage-5 checklist; if it refuses nothing, it is
+  dropped with the number quoted. The leg digest says what moved.
 - The step-2 throw on a refused mandatory slot (`track.ts` ~L1552,
   "refused by …") is **left as it is in this step** — it is loud and names
   blockers, and converting it to a scheduler refusal is step 4's whole

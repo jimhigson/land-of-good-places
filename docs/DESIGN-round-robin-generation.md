@@ -1046,6 +1046,40 @@ The briefs (`BRIEF-stage3-step3-confront-ladder.md`,
 `BRIEF-stage3-step4-negotiation.md`) carry the detail; this section is the
 authority they cite.
 
+#### One rail race (Jim, 6 Sep) — the two rings are never in the world together
+
+Jim: *"either the small one or the big one is shown — it is purely a
+visual trick, they never occupy the world at the same time."* Confirmed in
+code: `RailRace.setActiveRing` shows exactly one ring's group; invariant
+"only the walk-past ring is solid" already forbids the race ring a
+collider because it is hidden except mid-race. **There is one rail race,
+drawn at one of two scales.** Anything that makes the two rings clear
+each other describes a world that never occurs — on the canonical seed
+that was ~100 race-ring candidates refused by `legacy:collision` at
+exactly 1.0 m from walk-past posts (1.1 m clear circle), pure waste.
+
+Ruled, as deletions rather than better-shaped claims:
+
+- **One feature name, `railRace`**, for both rings' claims. The registry
+  never refuses a feature with its own claims (`refusalsOf` skips the
+  asker), so the rings stop constraining each other with no
+  exemption-by-identity; the road and everything later still see the
+  union, because either ring can be shown while they are there.
+- **The walk-past ring's colliders are registered after both rings are
+  placed.** They stay — a child on foot, `NavGrid` (so every NPC route),
+  `LampPosts` and `check:park` all read them, and none of that is
+  cross-ring — but they are for feet on the floor, not for placing the
+  ride ring, so the race ring's search never sees them.
+- The walk-past × race pairs vanish from the registry sweep; the
+  three-feature probe becomes `[road, railRace]`; per-ring facts compare
+  each ring's drawn claims to its slice of the one feature's.
+
+Open with Jim: the race ring exists only mid-race, when the bus is not on
+the road, so its headroom clip and its feet's refusal by the road corridor
+are also for a co-presence that cannot happen. Until he rules, both rings
+keep respecting the road; `check:swept-bus` sweeps the walk-past ring's
+posts (the first `railRace:trestle-legs` in the scene) and should say so.
+
 #### Two roads met (6 Sep) — ruled: one road, `roadCorridor` shape, `roadRoute` geometry
 
 The sphere branch carries `roadRoute.ts` (#498's arc, now at outset
