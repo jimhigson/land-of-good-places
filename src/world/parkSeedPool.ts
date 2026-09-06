@@ -264,7 +264,11 @@ function storage(): Storage | null {
 function readSeed(raw: string | null | undefined): number | null {
   if (!raw) return null;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+  // `>= 0`, not `> 0`: seed 0 is a seed. Until 6 Sep 2026 this rejected it,
+  // so every `LGP_SEED=0` run — including check:every-seed-builds's "seed 0"
+  // — quietly measured the canonical park instead. Found by the layout trace
+  // printing `seed=20260728` for it.
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
 }
 
 /**

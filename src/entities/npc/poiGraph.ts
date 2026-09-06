@@ -13,7 +13,7 @@ import { STALL_STANDS } from '../../minigames/stallPlacement';
 import { TRAIN_PLAN } from '../../world/train/plan';
 import { SPACE_GARDEN, spaceAt, type SpaceId } from '../../world/spaces';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../../world/entrance/layout';
-import { TOP_REFERENCE, type NavGrid } from '../../world/NavGrid';
+import { STAND_SEARCH_REACH, TOP_REFERENCE, type NavGrid } from '../../world/NavGrid';
 import type { GroundSampler } from '../Player';
 
 /**
@@ -86,15 +86,12 @@ import type { GroundSampler } from '../Player';
  */
 
 /**
- * How far from its seed a waypoint may be moved to find somewhere to stand.
- *
- * Authored waypoints are approximate — the scenery is scattered from a seed and
- * nobody hand-checks forty coordinates against twelve hundred trees. A metre or
- * two of search turns "that one is inside a bush" into "that one is beside a
- * bush", which is where a child would have stood anyway. Exported so
- * `check:park` describes the same reach it was measured with.
+ * How far from its seed a waypoint may be moved to find somewhere to stand —
+ * {@link STAND_SEARCH_REACH}, owned by the grid so the layout's own doormat
+ * probe (`parkLayout.ts`) asks the same reach. Re-exported so `check:park`
+ * describes the reach it was measured with.
  */
-export const NUDGE_REACH = 2.2;
+export const NUDGE_REACH = STAND_SEARCH_REACH;
 
 interface NodeSeed {
   readonly x: number;

@@ -206,7 +206,9 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  * her round it; a pessimistic one seals a gap she can plainly see and walks her
  * the long way about.
  */
-const CELL = 0.5;
+/** The lattice's cell pitch — exported for a caller sampling one cell outside a stamp. */
+export const NAV_CELL = 0.5;
+const CELL = NAV_CELL;
 const INVERSE_CELL = 1 / CELL;
 
 /** Metres of lattice built beyond the soft play boundary, for elbow room. */
@@ -333,7 +335,25 @@ const BEST_HEIGHT_WEIGHT = 0.25 / CELL;
  * place in here that can put a leg through scenery, and the cost of never
  * reaching it is a 1 KB array.
  */
+/** What {@link NavGrid.floodFrom} reached. See there. */
+export interface ReachSet {
+  /** Can a walker at the flood's start get to `(x, z, y)`? */
+  readonly has: (x: number, z: number, y: number) => boolean;
+  /** Every lattice cell the flood reached, as its centre, once each. */
+  readonly forEachCell: (visit: (x: number, z: number) => void) => void;
+}
+
 export const MAX_ROUTE_WAYPOINTS = 128;
+
+/**
+ * How far from where it was asked for a waypoint may be moved to find
+ * somewhere to stand — the reach {@link NavGrid.nearestStandable} is asked
+ * with by `PoiGraph` at boot and by `parkLayout.ts`'s doormat probe at layout
+ * time, so both ask the same question. A metre or two turns "that one is
+ * inside a bush" into "that one is beside a bush", which is where a child
+ * would have stood anyway. Owned here, by the grid that answers it.
+ */
+export const STAND_SEARCH_REACH = 2.2;
 
 /**
  * How much dearer than the lattice legs it replaces a smoothed chord may be
@@ -1027,6 +1047,19 @@ export class NavGrid {
     startY: number,
     sample: GroundSampler,
   ): ((x: number, z: number, y: number) => boolean) | null {
+    const flood = this.floodFrom(startX, startZ, startY, sample);
+    return flood ? flood.has : null;
+  }
+
+  /**
+   * The flood {@link reachableFrom} is the predicate of, with its cells
+   * exposed: `has` answers for a point, `forEachCell` visits every lattice
+   * cell the walker reached (once per cell, whatever its levels). The
+   * layout's doormat probe walks the cells of an *unreachable* pocket to name
+   * what bounds it — the plots and the boundary a door is boxed in by —
+   * derived from the pocket's own geometry rather than from any radius.
+   */
+  floodFrom(startX: number, startZ: number, startY: number, sample: GroundSampler): ReachSet | null {
     if (!this.ensureLattice(sample)) return null;
     let startCell = this.cellAt(startX, startZ);
     if (startCell < 0) return null;
@@ -1054,16 +1087,32 @@ export class NavGrid {
 
     const revision = this.builtRevision;
     const boundary = this.builtBoundary;
-    return (x, z, y) => {
+    const fresh = (): void => {
       if (this.builtRevision !== revision || this.builtBoundary !== boundary) {
-        throw new Error(
-          'NavGrid.reachableFrom: the lattice was rebuilt after this flood — flood again',
-        );
+        throw new Error('NavGrid.floodFrom: the lattice was rebuilt after this flood — flood again');
       }
-      const cell = this.cellAt(x, z);
-      if (cell < 0 || this.blocked[cell] === 1) return false;
-      const node = this.nodeNearest(cell, y);
-      return node >= 0 && reached[node] === 1;
+    };
+    return {
+      has: (x, z, y) => {
+        fresh();
+        const cell = this.cellAt(x, z);
+        if (cell < 0 || this.blocked[cell] === 1) return false;
+        const node = this.nodeNearest(cell, y);
+        return node >= 0 && reached[node] === 1;
+      },
+      forEachCell: (visitCell) => {
+        fresh();
+        let lastCell = -1;
+        for (let node = 0; node < this.nodeCount; node += 1) {
+          if (reached[node] !== 1) continue;
+          const cell = this.nodeCell[node] ?? 0;
+          if (cell === lastCell) continue; // levels of one cell are contiguous
+          lastCell = cell;
+          const cx = cell % this.cells;
+          const cz = (cell - cx) / this.cells;
+          visitCell(this.originX + cx * CELL, this.originZ + cz * CELL);
+        }
+      },
     };
   }
 
