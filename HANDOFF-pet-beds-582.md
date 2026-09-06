@@ -70,6 +70,34 @@ pet bed footprint r **0.774 m**, pitch **2.156 m**; `SUITE` halfX **14.8** halfZ
 `SUITE_BED_SPOTS` `[[-10.7,-5.2],[-0.4,-5.2],[11.0,-5.2]]`; side capacity **2**,
 middle capacity **10**; catalogue offers **12** `walksInParade` items.
 
+## The review's blocking bug: `?pets=` wrote itself into the real save
+
+`grantDebugPets` runs inside `launchGame`, which `continueGame` reaches
+**after** `gameStore.hydrate(save)` — so the grant landed on the loaded
+profile. `catchWildPetOnce` bumps `gameStore.revision`, the autosave is
+revision-gated, `inventory` is in `SaveFile`. `…/hotel-suite?pets=12` typed
+against production on Jim's machine would have given Eleri twelve companions
+for ever, with no inverse.
+
+Fixed by `makeSessionUnsavable()` in `state/save.ts`, called **before** the
+first grant (so a mid-way exception cannot leave granted pets in a savable
+session). `writeSave` refuses for the page's life; `SaveSystem.start` also
+asks, so the suppressed session does not re-serialise the park every 5 s to
+throw it away. Enforced at `writeSave` because it is the single place anything
+is persisted — gating the grant or the timer would each leave the other open.
+
+**Proved with a control first** (dev server 5418, killed by PID):
+
+| step | saved inventory | saved place |
+|---|---|---|
+| baseline `/spawn?pos=0,0` | `["hat.party","pet.ripika"]` | (0,0) |
+| **control** `/spawn?pos=25,25` | same | **(25,25)** — instrument can see writes |
+| `/hotel-suite?pets=12`, 12 live, `flush()` forced | **unchanged** | **unchanged** |
+| `?pets=twelve` | same, 1 companion in session | — |
+
+Without the control, "nothing changed" would have been indistinguishable from a
+blind probe.
+
 ## Rebased onto `main` after #588, 6 Sep 2026
 
 `origin/main` = `dd5b3b6b` ("The hotel suite's lounge and bathroom can be walked
