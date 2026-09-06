@@ -14,7 +14,7 @@
  * Run: LGP_SEED=<n> node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/probe-crossing-screen.mts
  */
 import { TRAIN_PLAN } from '../src/world/train/plan.ts';
-import { screenDrawnPathsForOffSiteCrossings } from '../src/world/train/crossings.ts';
+import { screenDrawnPathsForOffSiteCrossings } from '../src/world/train/crossingPredicate.ts';
 import { drawnSamplesFor, ROUTES } from '../src/world/pathGraph.ts';
 
 const seed = process.env.LGP_SEED ?? '(default)';

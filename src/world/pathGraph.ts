@@ -11,7 +11,15 @@ import {
   pathSurfaceMaterial,
 } from './pathSurface';
 import { terrainHeight } from './terrain';
-import { buildGraph, PLAZA, routeCurve, type PathGraph, type RouteDefinition } from './paths';
+import {
+  buildGraph,
+  curvePoints,
+  pathDivisions,
+  PLAZA,
+  routeCurve,
+  type PathGraph,
+  type RouteDefinition,
+} from './paths';
 
 /**
  * **The one Catmull-Rom every consumer of a route's drawn shape builds.**
@@ -368,28 +376,24 @@ function recordSamples(curve: CatmullRomCurve3, divisions: number, halfWidth: nu
  * measuring a slightly different curve from the one drawn, which is the whole
  * disease this work exists to remove, one level down.
  */
-export function pathDivisions(curve: CatmullRomCurve3): number {
-  return Math.max(24, Math.round(curve.getLength() / 0.8));
-}
+// `pathDivisions` and `curvePoints` live in `paths.ts`, beside `routeCurve`.
+// They moved there so the ROUTER can reproduce the drawn geometry before it
+// commits a decision — `crossings.ts` imports this file, so anything the router
+// needs cannot live here without a cycle. That import direction is exactly why
+// the crossing check could only ever run after the graph was published.
 
 /**
  * The samples a curve lays down when it is drawn — **post fillet and
  * Catmull-Rom**, which is the geometry a child actually walks and the only
  * geometry worth asking the railway about. The control polyline is not this.
  */
-export function sampleCurve(
+function sampleCurve(
   curve: CatmullRomCurve3,
   divisions: number,
   halfWidth: number,
   run: number,
 ): PathSample[] {
-  const point = new Vector3();
-  const out: PathSample[] = [];
-  for (let i = 0; i <= divisions; i += 1) {
-    curve.getPoint(i / divisions, point);
-    out.push({ x: point.x, z: point.z, halfWidth, run });
-  }
-  return out;
+  return curvePoints(curve, divisions).map((p) => ({ x: p.x, z: p.z, halfWidth, run }));
 }
 
 /**
