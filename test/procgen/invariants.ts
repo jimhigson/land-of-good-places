@@ -169,6 +169,7 @@ import {
   RAIL_GAUGE_AT_PARK_SCALE,
   RAIL_RADIUS_AT_PARK_SCALE,
   SLEEPER_THICKNESS,
+  POST_FOOT_RADIUS,
 } from '../../src/world/railRace/trestleGeometry.ts';
 import { CLAIM_COMPATIBILITY, shapesOverlap, type Claim } from '../../src/boot/groundClaims.ts';
 import { RAIL_RACE_FEATURE } from '../../src/world/railRace/feature.ts';
@@ -2914,12 +2915,23 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   });
 
   // --- 4. only the walk-past ring is solid ----------------------------------
+  // The two rings are ONE rail race drawn at two scales (`railRace/feature.ts`),
+  // and since 7 Sep 2026 they stand on the same slots — so "is there a circle
+  // under this leg" cannot tell a walk-past post from a race post, and a
+  // clause that asked it paid for co-presence exactly as the placer once did.
+  // What is actually meant, measured: every walk-past leg has a collider
+  // centred on its foot at ITS OWN foot radius; and no collider of the RACE
+  // ring's radius stands on a race leg. The radii differ by the ride's scale
+  // (2.5x), so an invisible race post is still detectable — by what it is,
+  // not by where it is.
   const solid: { x: number; z: number; radius: number }[] = [];
   facts.world.collision.forEachCircle((x, z, radius) => {
     solid.push({ x, z, radius });
   });
   const matrix = new Matrix4();
   const at = new Vector3();
+  const RADIUS_SLACK = 1e-3;
+  const CENTRE_SLACK = 1e-3;
   for (const ring of rings) {
     const legs = ring.group.getObjectByName('railRace:trestle-legs');
     if (!(legs instanceof InstancedMesh)) {
@@ -2927,21 +2939,26 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
       continue;
     }
     const wantsSolid = ring.label === 'walk-past';
+    const footRadius = POST_FOOT_RADIUS * ring.sizeVsRace;
     for (let i = 0; i < legs.count; i += 1) {
       legs.getMatrixAt(i, matrix);
       at.setFromMatrixPosition(matrix);
       const found = solid.some(
-        (circle) => Math.hypot(circle.x - at.x, circle.z - at.z) < circle.radius,
+        (circle) =>
+          Math.hypot(circle.x - at.x, circle.z - at.z) < CENTRE_SLACK &&
+          Math.abs(circle.radius - footRadius) < RADIUS_SLACK,
       );
       if (found === wantsSolid) continue;
       complaints.push(
         wantsSolid
-          ? `the walk-past ring's trestle leg at ${fmt([at.x, at.z])} is not solid — it is the ` +
-            `ring that is standing there while a child is on foot, so it has to be something ` +
-            `she bumps into rather than walks through`
-          : `the race ring's trestle leg at ${fmt([at.x, at.z])} registered a collider. That ring ` +
-            `is hidden except mid-race, and CollisionWorld cannot un-register anything, so this ` +
-            `is an invisible solid post standing in the park for the rest of the session`,
+          ? `the walk-past ring's trestle leg at ${fmt([at.x, at.z])} is not solid — no collider of its ` +
+            `own foot radius ${footRadius.toFixed(3)} m is centred on its foot; it is the ring that is ` +
+            'standing there while a child is on foot, so it has to be something she bumps into rather ' +
+            'than walks through'
+          : `the race ring's trestle leg at ${fmt([at.x, at.z])} registered a collider of its own ` +
+            `radius ${footRadius.toFixed(3)} m. That ring is hidden except mid-race, and CollisionWorld ` +
+            'cannot un-register anything, so this is an invisible solid post standing in the park for ' +
+            'the rest of the session',
       );
     }
   }
