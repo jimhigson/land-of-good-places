@@ -90,7 +90,26 @@ jobs:
       # is why both are required.
       #
       # **Run under the same watchdog `checks.yml` uses**, for the same reason
-      # and against this job's own 15-minute cap. This is a *required* status
+      # and against this job's own cap — **now 25 minutes, not the 15 the
+      # figures just below were measured against** (#510 raised it; the dated
+      # measurements are left at the cap they were taken on rather than
+      # rewritten, because a transcript edited to a number it never ran against
+      # stops being a measurement).
+      #
+      # **That raise moved this alarm, and it is invisible in the diff.**
+      # `check-watchdog.mts` is handed this very file and derives its budget
+      # from the `timeout-minutes` above, so 15 -> 25 silently took the
+      # `test:procgen` alarm from ~13.5m to ~22.5m. Not a defect — the backstop
+      # still sits above it — but nobody would guess it from a one-line cap
+      # change, so it is written down here.
+      #
+      # **And note what the watchdog does NOT cover: the two pool sweeps
+      # below.** `check:gateway` (~3.6m) and `check:park-pool` (~3.9m) run
+      # outside it, so roughly 7.5 of this job's ~14 minutes can still die grey
+      # as `cancelled` — the exact mode this watchdog exists to abolish. That
+      # gap predates #510 (`check:gateway`'s half of it) and is logged on #530.
+      #
+      # This is a *required* status
       # check, so when it runs out of clock GitHub marks it `cancelled` — grey,
       # not red, and identical to a superseded push — and the merge gate goes
       # quiet rather than going red.
