@@ -1522,6 +1522,65 @@ export class NavGrid {
     return cz * this.cells + cx;
   }
 
+  /**
+   * **The nearest spot to `(x, z)` a walker can stand on** — within `within`
+   * metres, preferring one `accept` says yes to (a reachable one, say), and
+   * answering `null` when nothing within reach is standable at all. The one
+   * owner of "where may a waypoint stand?", asked by `PoiGraph` so that a
+   * node is placed by exactly the lattice the children then walk: a spot the
+   * resolver calls clear but no route can stand on is a node nobody can
+   * visit, which is what stranded three waypoints inside the castle facade
+   * for weeks.
+   *
+   * Nearest by real distance over the whole square of cells, not first-ring
+   * order, so two callers with the same inputs get the same cell whatever the
+   * lattice's origin — determinism the graph's spawn order rests on.
+   */
+  nearestStandable(
+    x: number,
+    z: number,
+    y: number,
+    sample: GroundSampler,
+    within: number,
+    accept: (x: number, z: number, y: number) => boolean = () => true,
+  ): { x: number; z: number; y: number } | null {
+    if (!this.ensureLattice(sample)) return null;
+    const reach = Math.ceil(within / CELL);
+    const cx = this.columnOf(x);
+    const cz = this.rowOf(z);
+    let best: { x: number; z: number; y: number } | null = null;
+    let bestDistance = Infinity;
+    let fallback: { x: number; z: number; y: number } | null = null;
+    let fallbackDistance = Infinity;
+    for (let dz = -reach; dz <= reach; dz += 1) {
+      const row = cz + dz;
+      if (row < 0 || row >= this.cells) continue;
+      for (let dx = -reach; dx <= reach; dx += 1) {
+        const column = cx + dx;
+        if (column < 0 || column >= this.cells) continue;
+        const cell = row * this.cells + column;
+        if (this.blocked[cell] === 1) continue;
+        const node = this.nodeNearest(cell, y);
+        if (node < 0) continue;
+        const px = this.originX + column * CELL;
+        const pz = this.originZ + row * CELL;
+        const distance = Math.hypot(px - x, pz - z);
+        if (distance > within) continue;
+        const py = this.nodeHeight[node] ?? y;
+        if (accept(px, pz, py)) {
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = { x: px, z: pz, y: py };
+          }
+        } else if (distance < fallbackDistance) {
+          fallbackDistance = distance;
+          fallback = { x: px, z: pz, y: py };
+        }
+      }
+    }
+    return best ?? fallback;
+  }
+
   /** The closest cell to `cell` a walker could stand in, or -1 if none is near. */
   private nearestFreeCell(cell: number): number {
     const cx = cell % this.cells;

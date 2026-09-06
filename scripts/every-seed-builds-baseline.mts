@@ -16,18 +16,14 @@
  * `docs/DESIGN-round-robin-generation.md`, "Totality, ruled and mechanised".
  */
 export const UNBUILT_BASELINE: Readonly<Record<number, string>> = {
-  1: 'poi.stranded',
   2: 'crossing.nosite',
   3: 'crossing.nosite',
-  4: 'poi.stranded',
-  6: 'anchor.reach:waterFight+poi.nospot+poi.stranded',
+  6: 'anchor.reach:waterFight+poi.nospot',
   7: 'crossing.nosite',
   8: 'rail.unsolvable',
   9: 'rail.unsolvable',
   10: 'rail.unsolvable',
   12: 'anchor.reach:waterFight',
-  13: 'poi.stranded',
-  15: 'poi.stranded',
 };
 
 /**
@@ -37,7 +33,11 @@ export const UNBUILT_BASELINE: Readonly<Record<number, string>> = {
  */
 export const DECISION_ZERO_BASELINE: Readonly<Record<number, number>> = {
   0: 0,
+  1: 0,
+  4: 0,
   5: 0,
   11: 0,
+  13: 0,
   14: 0,
+  15: 0,
 };

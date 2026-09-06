@@ -69,7 +69,7 @@ import { NavGrid, MAX_ROUTE_WAYPOINTS, TOP_REFERENCE } from '../src/world/NavGri
 import { PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { ANCHORS, anchorGroupName } from '../src/world/anchors.ts';
-import { PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
+import { NUDGE_REACH, PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
@@ -518,7 +518,9 @@ for (const target of targets) {
 // Built here rather than borrowed from `NpcSystem`, which keeps its copy
 // private. Forty-odd nodes, so the edge validation costs a few milliseconds —
 // and it is the same constructor the game runs, which is the point.
-const graph = quietly(() => new PoiGraph(collision, (x, z) => bridgeHeightAt(world.train.bridges, x, z)));
+// The same grid the attractions were just routed on — one instrument, so a
+// waypoint this calls stranded is one the children's own planner cannot reach.
+const graph = quietly(() => new PoiGraph({ grid: navGrid, sample: park.sample }));
 
 const dropped = SEEDS.length - graph.nodes.length;
 if (dropped > 0) {
@@ -527,8 +529,9 @@ if (dropped > 0) {
     key: 'poi.nospot',
     measured: dropped,
     detail:
-      `${dropped} waypoint seed(s) had nowhere within 2.2 m that a child fits — ` +
-      'poiGraph discarded them before the graph was even built',
+      `${dropped} waypoint seed(s) had nowhere within ${NUDGE_REACH} m a child can stand — ` +
+      'poiGraph discarded them before the graph was even built: ' +
+      graph.noSpot.map((seed) => `(${seed.x.toFixed(1)}, ${seed.z.toFixed(1)})`).join(' '),
   });
 }
 
@@ -540,7 +543,8 @@ for (const node of stranded) {
     measured: 1,
     detail:
       `waypoint (${node.x.toFixed(1)}, ${node.z.toFixed(1)})${node.interesting ? ' (interesting)' : ''} ` +
-      `is in a pocket of the '${node.space}' graph nobody can walk to`,
+      `cannot be reached from the entrance by the children's own NavGrid — the drawn paving ` +
+      'there is inside something solid',
   });
 }
 
