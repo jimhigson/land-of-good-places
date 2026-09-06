@@ -71,7 +71,7 @@ import { execFile } from 'node:child_process';
 import { cpus } from 'node:os';
 import { promisify } from 'node:util';
 
-import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
+import { CI_SWEEP_SEEDS, PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
 
 /**
  * **The seeds this sweep asks, taken from the pool itself** — never a list
@@ -235,15 +235,19 @@ const failed = results.filter((r) => !r.ok);
  * so the "stderr gets buried" caution does not apply to these two. Verified by
  * running them and counting, not by reading the code.)
  */
+// Derived, never retyped: a hand-written list of "seeds only this sweep builds"
+// went stale the day two seeds were retired (#589), directly beneath a derived
+// count that disagreed with it — a coverage announcement is the one line that
+// must not overstate what was measured.
+const onlyBuiltHere = seeds.filter((seed) => !CI_SWEEP_SEEDS.includes(seed));
 process.stdout.write(
   `\ncheck:park-pool: ${results.length - failed.length}/${results.length} pool seed(s) ` +
     `pass check:park with the ratchet enforced.\n` +
     `  - COVERS: every seed in PARK_SEED_POOL, which is every park a child can be drawn.\n` +
-    `    Nine of them (115, 128, 208, 225, 267, 274, 346, 428, 451) were built by NO\n` +
-    `    required check before #510, and none of the sixteen had ever been put\n` +
-    `    through check:park.\n` +
+    `    ${onlyBuiltHere.length} of the ${results.length} (${onlyBuiltHere.join(', ')}) are built by NO other\n` +
+    `    required check — this sweep is the only gate that ever builds them (#510).\n` +
     `  - DOES NOT COVER: the procgen invariant suite, which keeps per-seed files for\n` +
-    `    ${'CI_SWEEP_SEEDS'}' seven seeds only. A pool seed outside that set passes here\n` +
+    `    ${'CI_SWEEP_SEEDS'}' ${CI_SWEEP_SEEDS.length} seeds only. A pool seed outside that set passes here\n` +
     `    having had its placement checked by test/procgen not at all. The two gates do\n` +
     `    not imply each other (#437) — a seed has gone green through the whole chain\n` +
     `    while stranding eight waypoints, and another has failed three invariants with\n` +

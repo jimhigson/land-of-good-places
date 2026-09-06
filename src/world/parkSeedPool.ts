@@ -113,9 +113,7 @@ export const PARK_SEED_POOL: readonly number[] = [
   131,
   208,
   225,
-  267,
   274,
-  288,
   326,
   346,
   428,
@@ -209,7 +207,6 @@ export const CI_SWEEP_SEEDS: readonly number[] = [
   11,
   24,
   131,
-  288,
   326,
 ].map(
   (seed) => {
