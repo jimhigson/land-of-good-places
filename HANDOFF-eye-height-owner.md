@@ -34,14 +34,37 @@ a worse duplicate than the one that existed.
 | `faces.ts` `eyeY` (0.43 kid, 0.44 ferris friends + dodgems tree) | a fraction of the face **canvas** — not a height, not in metres | **different quantity, untouched** |
 | `spookyHouse/face.ts` `EYE_Y = 0.55` | model-local offset for a **monster's eye stalks**, beside `EYE_X 0.95`, `EYE_Z 1.42` | **different quantity, untouched** |
 | `ferrisWheel/gondola.ts` `PASSENGER_EYE_Y = 1.1` | a **seated** passenger's eyes above the seat | **the one real duplicate** — see below |
+| `ferrisWheel/gondola.ts` `GONDOLA_EYE.y = 1.8` | `PLAYER_SEAT_Y` (0.8) **plus a seated child**, so it embeds **1.0** | **the worst copy — found in review, not by this survey** |
 | — | standing eyes above the feet | **new: `KID_EYE_HEIGHT`** |
+
+**A fifth look-alike was found in review, and it is the worst of them** —
+`GONDOLA_EYE`, which this survey missed. Three hand-written values now exist
+for one quantity, and the largest error is the one with **no name**:
+
+| where | seated child's eye height | gap from measured |
+|---|---|---|
+| `GONDOLA_EYE` (embedded in a sum) | **1.0** | **156 mm** |
+| `PASSENGER_EYE_Y` | 1.1 | 56 mm |
+| measured (`KID_EYE_HEIGHT - KID_HIP_HEIGHT`) | **1.1564** | — |
+
+It is buried inside `PLAYER_SEAT_Y + a seated child` rather than written as a
+constant anyone would think to grep for, which is exactly why a name-based
+survey could not see it. **The lesson: survey by how a quantity is *consumed*,
+not by what it is called** — the reviewer's method, and it also settled the one
+place this survey asserts *sameness*, since `gondola.ts:30` imports `createKid`
+and its passengers really are kid rigs.
+
+`GONDOLA_EYE` is also the trap `KID_EYE_HEIGHT`'s doc warns about, already
+sprung: it is used **both** as the camera's mount offset
+(`FerrisWheelRide.ts:322`) **and** as `playerLookPoint` (`gondola.ts:648`) — one
+number meaning "where the camera sits" and "where a child's eyes are" at once.
 
 `PASSENGER_EYE_Y` is the same underlying quantity hand-approximated:
 `KID_EYE_HEIGHT - KID_HIP_HEIGHT` = 1.5164 − 0.36 = **1.156** against its 1.1.
 Its own comment says "near enough for aiming", and it does exactly that — it
 aims a passenger's gaze. **Correcting it moves something a child can see**, so
 it belongs in its own visible change rather than smuggled into an invisible
-one. Worth a ticket; not taken here.
+one. Now covered, with `GONDOLA_EYE` and the camera/look-at split, by **#587**.
 
 ## 3. The arrival-camera lineage analysis (for whoever takes the shot)
 

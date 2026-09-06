@@ -187,6 +187,17 @@ export const KID_HEIGHT = 2.12;
  * all (see {@link TALLEST_CHILD_HEIGHT}). It describes where eyes *are*, not
  * where a camera must sit — a camera that wants to avoid the floor needs this
  * plus whatever its own near plane demands, and that sum belongs to the camera.
+ *
+ * **That last distinction is not hypothetical: it has already collapsed once.**
+ * `ferrisWheel/gondola.ts`'s `GONDOLA_EYE` is used *both* as the camera's mount
+ * offset (`FerrisWheelRide.mountOn`) and as `playerLookPoint`, where a
+ * passenger looks when it looks at you — one number doing "where the camera
+ * sits" and "where a child's eyes are" at the same time, so neither can move
+ * without dragging the other. It is also the worst-hidden copy of this
+ * quantity: its `y` of 1.8 is `PLAYER_SEAT_Y` (0.8) *plus a seated child*, so
+ * it embeds **1.0** where the rig measures `KID_EYE_HEIGHT - KID_HIP_HEIGHT` =
+ * **1.1564** — a 156 mm error with no name on it, buried in a sum rather than
+ * written as a constant anyone would think to check. #587 unpicks it.
  */
 export const KID_EYE_HEIGHT = 1.5164;
 
