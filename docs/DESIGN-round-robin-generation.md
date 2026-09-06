@@ -997,6 +997,55 @@ there so nobody re-files it.
    measurement (if the sphere alone clears the posts, it shrinks to
    counters + the engine move).
 
+#### Steps 3 and 4, re-cut (6 Sep) — what the code turned out to be
+
+Read against the code before the briefs were re-cut (`parkGeneration.ts`,
+`solveScheduler.ts`, `groundClaims.ts`, `coSolve.ts`, and step 2's branch),
+three facts the step list above did not state, and the rulings they force:
+
+- **The trestles are not a scheduler task after step 2.** Step 2 makes
+  each leg a claim, but `trestleSpots` still runs at `RailRace`
+  construction inside `World`, against the letterboxed registry. So "the
+  two migrated placers interleave" has nothing on the trestle side to
+  interleave until **step 3 makes a `railRaceSupports` task** — both
+  rings, sliced per slot, output letterboxed to `World`, `RailRace`
+  consuming it and re-solving only when the letterbox is empty. Its
+  `collision.isClearCircle` legacy predicate has no generation-time owner;
+  step 3 measures what it was refusing on every seed and either drops it
+  with the number or names the collider's own owner as a legacy predicate.
+- **The road task is last by declaration, not by data**: `roadCorridor` is
+  registered `deps: ['pathGraph']`, and its second turn is `World`
+  re-committing after `Entrance` because `publishPaving()` is called from
+  `buildPaths()` (a draw). Step 3 splits it into `roadCorridor`
+  (provisional, `deps: []`) and `roadCorridorRealised` (`deps:
+  ['pathGraph', 'roadCorridor']`), and **brings forward one stage-4 item
+  only: `publishPaving()` moves into the `pathGraph` task** (the graph is
+  solved there already; publishing is data readiness). The paths do not
+  migrate.
+- **Neither placer in the pair draws randomness** (both are nearest-first
+  marches), so step 3's park is expected byte-identical unless the two
+  measurements above move a leg. The decision-stream owner
+  (`hash(seed, feature, decision, attempt)`) still lands in step 3, as the
+  decision log's owner; the PR says in words that no draw goes through it
+  yet.
+- **Step 4 is the scheduler learning the ladder, not "a loud failure".**
+  `SolveScheduler` absorbs `CoSolveEngine`'s mechanics (attempt, withdraw,
+  negotiate, unwind, restart, counters) and both `coSolve.ts` and
+  `PlacementField` are deleted; a task returns a `Refused` value instead
+  of throwing; the trestle throw becomes that refusal; the road's next
+  attempt is the nearest outset past the refusing claim's extent (derived,
+  finite). The scheduler's own decision zero is wired and proved reachable
+  under a scratch flag; the **layout's** decision zero is not reachable
+  from a scheduler refusal until the layout is a task (stage 4), and the
+  trace says so on every run. The support shape is built only if a seed's
+  refusal survives the road's negotiation on the sphere — measured first.
+  A refusal surviving every rung with the flag off is a bug that stops the
+  PR, per Jim's ruling; it is never a designed terminal state.
+
+The briefs (`BRIEF-stage3-step3-confront-ladder.md`,
+`BRIEF-stage3-step4-negotiation.md`) carry the detail; this section is the
+authority they cite.
+
 #### Two roads met (6 Sep) — ruled: one road, `roadCorridor` shape, `roadRoute` geometry
 
 The sphere branch carries `roadRoute.ts` (#498's arc, now at outset
@@ -1193,7 +1242,7 @@ section above (march becomes exploration) is unchanged by them.
 
 ### Stage 4 — paths, railway, crossings migrate together (large; parks change)
 
-*Filed here from stage 3 (5 Sep): `publishPaving()` runs inside `new World(...)`, after generation — a post-generation commit by the paths that the road's second turn today has to wait for.*
+*Filed here from stage 3 (5 Sep): `publishPaving()` runs inside `new World(...)`, after generation — a post-generation commit by the paths that the road's second turn today has to wait for. **Re-filed 6 Sep: the publishing alone moves into the `pathGraph` task in stage 3 step 3** ("Steps 3 and 4, re-cut"); the paths' migration itself stays here.*
 
 *Also filed (5 Sep, from the #511 branch's `test:procgen` run): **seed 288
 throws during park construction on a bridge-siting failure** —

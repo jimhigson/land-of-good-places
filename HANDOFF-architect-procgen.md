@@ -406,3 +406,17 @@ step 2 was allowed — it is loud and names its blockers — but under the
 totality ruling a throw on a seed's geometry is the bug; step 4 converts
 it to a refusal returned to the scheduler. Step 2 should not spend time
 on that conversion, only keep the message carrying the blockers by name.
+
+## Checkpoint 6 Sep, ~21:30 — steps 3 and 4 re-cut to implementable shape
+
+Both briefs rewritten against the code (not the earlier drafts): the
+trestles are not a scheduler task after step 2 (step 3 makes one,
+`railRaceSupports`); `roadCorridor` is `deps: ['pathGraph']` and its second
+turn is a `World` re-commit (step 3 splits it and moves `publishPaving()`
+into the `pathGraph` task — the one stage-4 item brought forward); neither
+placer draws randomness; step 4 = `SolveScheduler` absorbs `CoSolveEngine`
+(deleted with `PlacementField`), tasks return `Refused`, the trestle throw
+becomes a refusal, the road's next attempt is derived from the blocker's
+extent, scheduler decision zero wired and proved under a scratch flag, the
+layout's decision zero named as stage 4's. Design doc: "Steps 3 and 4,
+re-cut (6 Sep)". Step 2's four questions ruled (section above).
