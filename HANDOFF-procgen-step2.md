@@ -143,6 +143,15 @@ gap between the asset-contract constant and the drawn ears; the headroom uses
 the constant, the swept-bus check the drawn box. The check is the instrument
 that would catch a branch in between.
 
+**Gates on the hill (branch `50bc8380`):** `tsc`, `typecheck:test`, `build`,
+`check:park`, `check:rail-race`, `check:ground-claims`, `check:seed-pool`,
+`check:seed-coverage` green; `pnpm run check` runs 31 steps green then stops at
+`check:fountain-hop`, the first multi-seed step (6 of its 7 seeds refuse — all
+six errors are the refusal, nothing else). Steps after it were run one by one
+(scratchpad `chain-rest.log`). `check:swept-bus` exits 1: 2 seeds at 0/0/0,
+14 NOT BUILT. `test:procgen`, `check:park-pool`, `check:gateway`: red on the
+refusing seeds until phase 2 — not run in full, by design.
+
 ## Phase 2 checklist (when #511 is on `main`)
 
 1. Rebase; drop the step-1 carry commit if #522 has landed on its own.
