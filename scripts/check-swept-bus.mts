@@ -199,7 +199,8 @@ export interface SeedReport {
     readonly top: number;
   };
   /** The run the bus was swept along, for the transcript. */
-  readonly route: { readonly fromX: number; readonly toX: number; readonly z: number };
+  /** The stretch of the road's arc the bus was swept along, for the transcript. */
+  readonly route: { readonly fromAt: number; readonly toAt: number };
 }
 
 // ------------------------------------------------------------------ the child
@@ -215,9 +216,12 @@ export interface SeedReport {
 async function measureOneSeed(): Promise<void> {
   const { buildHeadlessPark } = await import('./park-harness.mts');
   const { terrainHeight } = await import('../src/world/terrain.ts');
-  const { ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_STOP_Z, ENTRANCE_BUS_VANISH_X } = await import(
-    '../src/world/entrance/layout.ts'
-  );
+  // The road is a curve now, so its own accessors replace layout.ts's three
+  // straight-road constants (which this branch deleted). Dynamic, like every
+  // import here: `roadRoute.ts` builds a RingPath off the seeded boundary at
+  // module scope, so a static import would pin the seed.
+  const { entranceRoadAt, entranceRoadFacing, entranceBusArriveAt, entranceBusVanishAt } =
+    await import('../src/world/entrance/roadRoute.ts');
   const { PARK_SEED: seed } = await import('../src/world/parkManifest.ts');
   const { saveFlags } = await import('../src/state/flags.ts');
   const { Box3 } = await import('three');
@@ -406,16 +410,29 @@ async function measureOneSeed(): Promise<void> {
 
   // --- the sweep -----------------------------------------------------------
   //
-  // The bus rolls in along the kerb from `ENTRANCE_BUS_ARRIVE_X`, stops, and
-  // drives off past `ENTRANCE_BUS_VANISH_X` — `layout.ts` owns both ends, and
-  // `ArrivalSequence.placeBus` is the one line that turns an x into a pose:
-  // `position.set(x, terrainHeight(x, ENTRANCE_BUS_STOP_Z), ENTRANCE_BUS_STOP_Z)`
-  // with the bearing read off the bus above. So this sweeps the same x range
-  // through the same formula, and holds no separate opinion about where the
-  // road goes.
-  const fromX = Math.max(ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_VANISH_X);
-  const toX = Math.min(ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_VANISH_X);
-  const z0 = ENTRANCE_BUS_STOP_Z;
+  // **The road is an arc, so the sweep is an arc.** The bus rolls in from
+  // `entranceBusArriveAt()`, stops, and drives off past `entranceBusVanishAt()`,
+  // and `ArrivalSequence.placeBus` is the three lines that turn a position along
+  // that arc into a pose:
+  //
+  //     const station = entranceRoadAt(at);
+  //     root.position.set(station.x, terrainHeight(station.x, station.z), station.z);
+  //     root.rotation.y = entranceRoadFacing(at);
+  //
+  // So this asks the same three functions and holds no separate opinion about
+  // where the road goes — the same rule the straight version followed.
+  //
+  // **This check has never measured a curved road before.** It was written
+  // against a straight kerb: an x-range at a fixed z, with the bus's bearing
+  // read once off the built vehicle because it never changed. On the arc the
+  // bearing changes at every station, so it is read per position instead — and
+  // that is the ONLY thing that changed. The post sampling, the height test,
+  // `reachInto`'s box arithmetic and both controls are untouched, so a number
+  // that moves here moves because the road is genuinely somewhere else.
+  // A green result on geometry an instrument has just been taught is the moment
+  // to be most suspicious of it, which is why both controls are re-proved below.
+  const fromAt = entranceBusArriveAt();
+  const toAt = entranceBusVanishAt();
 
   /**
    * How far a post sample reaches inside the bus's body, standing at `busX`.
@@ -424,15 +441,21 @@ async function measureOneSeed(): Promise<void> {
    */
   const reachInto = (
     sample: Sample,
-    busX: number,
+    pose: { readonly x: number; readonly z: number; readonly facing: number },
     busGroundY: number,
     lift: number,
   ): number => {
-    // Into the bus's own frame, using the bearing read off the bus itself.
-    const dx = sample.x - busX;
-    const dz = sample.z - z0;
-    const localZ = dx * forwardX + dz * forwardZ;
-    const localX = dx * rightX + dz * rightZ;
+    // Into the bus's own frame. The bearing comes from the pose because the arc
+    // turns the bus as it drives; on the straight road it was a constant read
+    // once off the built vehicle, and this is the same quantity per position.
+    const fx = Math.sin(pose.facing);
+    const fz = Math.cos(pose.facing);
+    const rx = Math.cos(pose.facing);
+    const rz = -Math.sin(pose.facing);
+    const dx = sample.x - pose.x;
+    const dz = sample.z - pose.z;
+    const localZ = dx * fx + dz * fz;
+    const localX = dx * rx + dz * rz;
     const localY = sample.y - busGroundY - lift;
     const outX = Math.max(busBox.min.x - localX, localX - busBox.max.x);
     const outY = Math.max(busBox.min.y - localY, localY - busBox.max.y);
@@ -463,10 +486,12 @@ async function measureOneSeed(): Promise<void> {
     const looking = feetOnly
       ? samples.filter((sample) => sample.isFoot && sample.part === 'legs')
       : samples;
-    for (let busX = fromX; busX >= toX; busX -= SWEEP_STEP) {
-      const busGroundY = terrainHeight(busX, z0);
+    for (let at = fromAt; at >= toAt; at -= SWEEP_STEP) {
+      const station = entranceRoadAt(at);
+      const pose = { x: station.x, z: station.z, facing: entranceRoadFacing(at) };
+      const busGroundY = terrainHeight(station.x, station.z);
       for (const sample of looking) {
-        const reach = reachInto(sample, busX, busGroundY, lift);
+        const reach = reachInto(sample, pose, busGroundY, lift);
         if (reach <= 0) continue;
         const already = hit.get(sample.post);
         if (already && already.penetration >= reach) continue;
@@ -477,7 +502,7 @@ async function measureOneSeed(): Promise<void> {
           y: sample.y,
           z: sample.z,
           up: sample.y - terrainHeight(sample.x, sample.z),
-          busX,
+          busX: station.x,
         });
       }
     }
@@ -502,7 +527,7 @@ async function measureOneSeed(): Promise<void> {
       bottom: busBox.min.y,
       top: busBox.max.y,
     },
-    route: { fromX, toX, z: z0 },
+    route: { fromAt, toAt },
   };
   process.stdout.write(`\n__SWEPT_BUS__${JSON.stringify(report)}\n`);
 }
@@ -685,8 +710,8 @@ process.stderr.write(
     (bus && route
       ? `  bus body as drawn: ${bus.length.toFixed(2)} m long, ${bus.width.toFixed(2)} m wide, ` +
         `${bus.bottom.toFixed(2)} to ${bus.top.toFixed(2)} m above the ground it stands on\n` +
-        `  swept along z=${route.z.toFixed(2)} from x=${route.fromX.toFixed(2)} to ` +
-        `x=${route.toX.toFixed(2)}, every ${SWEEP_STEP} m\n`
+        `  swept along the road's arc from ${route.fromAt.toFixed(2)} to ` +
+        `${route.toAt.toFixed(2)} m, every ${SWEEP_STEP} m\n`
       : '') +
     `  seed   posts  feet(control)  lifted(control)  worst penetration\n`,
 );
