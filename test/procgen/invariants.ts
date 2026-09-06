@@ -164,11 +164,13 @@ import {
   BAR_HALF_SPAN_AT_PARK_SCALE,
   BEAM_DROP,
   forkPlan,
+  maxTrunkLean,
   LEGACY_LEG_FOOT_RADIUS,
   RAIL_GAUGE_AT_PARK_SCALE,
   RAIL_RADIUS_AT_PARK_SCALE,
   SLEEPER_THICKNESS,
 } from '../../src/world/railRace/trestleGeometry.ts';
+import { CLAIM_COMPATIBILITY, shapesOverlap, type Claim } from '../../src/boot/groundClaims.ts';
 
 /**
  * The narrowest gap a child can actually use.

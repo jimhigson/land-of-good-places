@@ -520,6 +520,9 @@ export interface CastleTurretFact {
   readonly z: number;
   /** The drawn shaft's radius at its foot — the widest a child can reach. */
   readonly radiusBottom: number;
+}
+
+/**
  * **One Rail Race ring's supports, as the registry holds them and as they were
  * drawn** — stage 3, step 2: the trestle legs are `footprint` claims.
  *
