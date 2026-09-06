@@ -157,6 +157,61 @@ for (const file of workflowFiles) {
   for (const m of text.matchAll(/(?:pnpm|npm)\s+run\s+([A-Za-z0-9:_-]+)/g)) entryPoints.add(m[1]!);
 }
 
+/**
+ * **Runners: scripts that run another script named as a bare argument.**
+ *
+ * `pnpm run X` is not the only way one script causes another to run, and
+ * assuming it was broke this check the first time a legitimate indirection
+ * landed. #523 put the chain under a watchdog, so `checks.yml` stopped saying
+ * `pnpm run check` and started saying `pnpm run check:watchdog`, whose body is:
+ *
+ * ```
+ * node ... scripts/check-watchdog.mts check .github/workflows/checks.yml
+ * ```
+ *
+ * The chain is named there as an **argument**, not as `pnpm run check`. Rebasing
+ * onto that produced **63 false orphans out of 73 leaves** — `check` unreachable,
+ * and every step of it unreachable with it.
+ *
+ * Two things worth keeping from that, because they are the argument for the
+ * shape of this file. It failed **loudly** — 63 red, impossible to miss, in the
+ * safe direction — rather than quietly exonerating anything. And it was caught
+ * by a real merge rather than by imagination, which is why this table exists
+ * instead of a cleverer guess.
+ *
+ * **Why a table rather than a general rule.** The tempting generalisation — "any
+ * bare token in a script body that matches another script's name counts as
+ * running it" — fails in the *dangerous* direction: it would silently exonerate
+ * any check whose name happened to appear as an argument anywhere, which is the
+ * same false-negative this file was reviewed for. So runners are named
+ * explicitly, and the list is **ratcheted**: a listed runner that matches no
+ * script body fails this check rather than rotting into a lie.
+ */
+const RUNNERS: ReadonlyArray<{ file: string; argIndex: number; why: string }> = [
+  {
+    file: 'scripts/check-watchdog.mts',
+    argIndex: 0,
+    why: '#523 — runs the named script under a clock set inside the job timeout, so a chain overrun goes red naming its step instead of reporting as cancelled',
+  },
+];
+
+/** Script names a runner is given as an argument, e.g. `check` and `test:procgen`. */
+const runnerTargets = (body: string): string[] => {
+  const found: string[] = [];
+  for (const runner of RUNNERS) {
+    const at = body.indexOf(runner.file);
+    if (at < 0) continue;
+    const args = body
+      .slice(at + runner.file.length)
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    const target = args[runner.argIndex];
+    if (target !== undefined) found.push(target);
+  }
+  return found;
+};
+
 /** Expand through the scripts object: a step that calls a step is covered too. */
 const reachable = new Set<string>();
 const visit = (name: string, depth: number): void => {
@@ -165,6 +220,7 @@ const visit = (name: string, depth: number): void => {
   if (body === undefined) return;
   reachable.add(name);
   for (const m of body.matchAll(/(?:pnpm|npm)\s+run\s+([A-Za-z0-9:_-]+)/g)) visit(m[1]!, depth + 1);
+  for (const target of runnerTargets(body)) visit(target, depth + 1);
 };
 for (const entry of entryPoints) visit(entry, 0);
 
@@ -209,6 +265,18 @@ if (workflowFiles.length === 0) {
 if (entryPoints.size === 0) {
   failures.push(`instrument: parsed ${workflowFiles.length} workflow file(s) and found no "pnpm run" invocation in any of them — the entry-point regex has stopped matching`);
 }
+// A runner that no longer runs anything is a stale exemption, and this file is
+// about exemptions that stopped being true. Fail rather than carry it.
+for (const runner of RUNNERS) {
+  const used = Object.values(scripts).some((body) => body.includes(runner.file));
+  if (!used) {
+    failures.push(
+      `RUNNERS lists ${runner.file}, which no script invokes any more — delete the entry, and ` +
+        `check whether whatever it used to run is still reached some other way (${runner.why})`,
+    );
+  }
+}
+
 const chainSteps = [...(scripts['check'] ?? '').matchAll(/(?:pnpm|npm)\s+run\s+([A-Za-z0-9:_-]+)/g)];
 if (chainSteps.length < 20) {
   failures.push(`instrument: the "check" chain parsed to only ${chainSteps.length} steps, which is far fewer than this repo has — the chain regex has stopped matching`);
