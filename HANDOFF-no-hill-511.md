@@ -1,5 +1,65 @@
 # HANDOFF — issue #511, "the park is not on a hill"
 
+## Where this is, 6 September 2026, evening (read this before the rest)
+
+**Model: Opus** (chosen by the Overseer; a replacement must also be Opus).
+Branch `feat/sphere-combined`, worktree
+`.claude/worktrees/sphere-combined`, dev server **5392** (mine, restarted
+after the merge). Browser owned.
+
+**The two-roads merge is done, and proved.** `origin/main`'s `e080b753`
+(stage 3 step 1, `roadCorridor.ts`) merged into this branch, resolved per Jim's
+6 September ruling in `docs/DESIGN-round-robin-generation.md` — one road,
+`roadCorridor`'s shape with `roadRoute`'s geometry. Acceptance:
+
+- **Fourteen-seed park digest byte-identical across the merge.** Measured with
+  `scripts/park-digest-sweep.sh` at `f7ebf4f7` (pre-merge tip) and at the merge
+  commit; all fourteen `.txt` files diff clean. The road did not move.
+- **`check:swept-bus` green**, 0 intruding posts on all 14 seeds, 77 s.
+- **`check:ground-claims` green**: 143 corridor runs, 3095 ribbon vertices
+  tested, worst 4.08e-6 m outside the nearest claim (float32 noise).
+  **Proved red first**, on the canonical seed with `entranceRoadClaims()`'s
+  `halfWidth` reduced by 0.5 m: 4 fouls, each reporting 0.5000 m. That is the
+  geometry the red run was taken against — restore it to reproduce.
+
+### The one substantive thing I changed beyond finishing the merge
+
+**Both measurement sites stopped comparing bounding boxes.** The old clause 2
+(and probe 5) compared the ribbon's min/max in x and z against the capsule
+swept by its half-width. That is exact for an axis-aligned run and *measures a
+different shape* on an arc — the bounding box of a curve is mostly ground the
+curve does not hold — so it would have gone on passing while saying so.
+
+`scripts/road-ribbon-measure.mts` is now the one owner of "is the claim the
+road?", imported by `scripts/check-ground-claims.mts` (canonical seed) and
+`test/procgen/invariants.ts` (every pool seed). `groundClaims.ts` exports
+`distanceOutside` so neither re-derives point-to-capsule distance. Exactly one
+of the two directions is an equality, and the module header says why: nothing
+drawn may be unclaimed, while the gateway approach's claim is honestly the
+envelope round a staircase of individually trimmed columns — that overshoot is
+**reported as a number on every run**, never thresholded.
+
+### Two arrival-camera findings, both for Jim rather than for an engineer
+
+Verified in a real browser on 5392, `/arrive`, not assumed:
+
+1. **Both of Jim's reports are satisfied.** It opens *on* the bus on the first
+   frame (no transition down to it), and the door beat sits at eye height
+   clear of the floor.
+2. **But the bottom ~45% of the frame is empty sky during the door and walk
+   beats.** `ARRIVAL_DOOR_PITCH_DEGREES` is 0, which is what "square on"
+   requires, and a horizontal *orthographic* look draws the ground as a line
+   with nothing under it. Not a sphere regression — flat ground looks the same.
+   This is a composition call, so it is Jim's.
+3. **`?projection=perspective` breaks the arrival shot.** The stand-back is
+   derived for ortho, where sliding the eye along its own axis is purely
+   occlusion control and does nothing for framing (this file says so already,
+   under "The stand-back bug"). Under perspective the same number puts the
+   camera behind the boundary wall with the pet filling the frame. The
+   *ordinary in-park* perspective camera looks good; the arrival is ortho-only
+   today.
+
+
 ## ⛔ BLOCKING BEFORE ANY PR: `check:coplanar` is RED and must be green
 
 Do not open a PR from this branch until `pnpm run check:coplanar` exits 0.
