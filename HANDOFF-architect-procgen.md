@@ -121,6 +121,11 @@ first honest run found #501).
   swept-bus/supportGround read through the owner. Cost: #511 engineer,
   half a day–a day; proof = digest unchanged on 14 seeds + ground-claims
   green. #585 merged → #522 IS on main now.
+- **False refusal ruled 6 Sep**: layout-time probes may refuse only what
+  is certainly bad on their world's terms; footprint≠solid at layout time
+  → the probe may not refuse on a footprint. Durable home = claim kinds
+  via the **plots' migration** (stage 5 row 1, brought forward — next
+  brief to write when an engineer is free). No manifest flag.
 - **#524** (open): a park that fails to build is a test failure, not a
   skip — and after the screen lands, **a named refusal at commit is a
   failure too**, not a skip. Same issue, one more case; say so on it. Step 2 held on step 1 + #511 +

@@ -38,6 +38,19 @@ them from the first hour.
   without it. Seed 12 is a declared-vs-built water-fight bug — not yours;
   file it and leave it red, named.
 
+## False refusals (6 Sep) — binding
+
+Seed 1 refused the castle's doormat inside the ball pit's *walkable*
+footprint and redrew the castle. Rule: **a layout-time probe may refuse
+only what is certainly bad on the layout-time world's own terms; that
+world cannot express "walkable", so a footprint overlap is never certainly
+bad.** Concretely: the probe's obstacle set is the router's own (one
+owner — `streetPlots` or its sibling); if nothing owns it, the probe
+refuses nothing and the built-park NavGrid verdict alone arms the rung.
+**No manifest flag.** The durable fix is the plots' claim kinds
+(design doc, "Where the distinction lives"), a separate brief. Keep the
+`layout.falseRefusal` guard on every run.
+
 ## The prohibition, first
 
 **No warp field, no vetting step, no seed retirement, no widened band may

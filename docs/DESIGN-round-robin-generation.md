@@ -290,6 +290,64 @@ walker from an import list; the rule that follows is in "Traps" below —
 
 **Baseline corrected**: 4 of 16 build (0, 5, 11, 14), not 2.
 
+**A false refusal, measured (6 Sep), and the rule it sharpens.** Rung 1
+refused the castle's doormat on seed 1 and redrew the castle. The door at
+(−28.5, 24.7) sits 5.49 m from the ball pit's centre, inside its 7.5 m
+footprint circle **by design** (the near pair: the slide exits into the
+pit). In the layout-time world every footprint is solid and fattened by
+the walker, so nothing within 2.2 m is standable; in the **built** park
+the nearest standable reachable spot is 0.07 m from the door and the only
+collider within 2.5 m is a turret 1.30 m clear. The ball pit's footprint
+is walkable ground. So "a door covered by another plot's footprint is
+certainly bad" is false, and there is no safe over-approximation while
+the layout-time world cannot tell a solid from a surface.
+
+**Rule, binding on every rung that reasons about a partial world:** *a
+probe exploring an over-approximate world may refuse only what is
+certainly bad on that world's own terms — and if the world cannot express
+"walkable", nothing is certainly bad and the probe must not refuse at
+all.* A refusal on an over-approximation redraws real geometry to satisfy
+a measurement error, which is the failure the totality contract exists to
+prevent. The engineer's guard — refusals ignored under a scratch flag are
+asserted genuinely unreachable in the built park, else
+`layout.falseRefusal` — is the net; it stays, on every run.
+
+**Where the distinction lives — ruled.** It is the claim kinds, and the
+registry is its home; that is what `footprint` versus `walkable` /
+`surface` were defined for, and `CLAIM_COMPATIBILITY` already says a
+corridor and a stand spot are welcome on walkable ground. What is missing
+is not a new field but the **plots' migration** — stage 5's first row,
+"plots first (everyone re-derives their circles by hand)" — brought
+forward, because this is the third consumer in a week to invent the
+solid/surface answer privately (#503, #504, now the layout probe):
+
+- **One owner per plot: the thing that draws it.** A plot's builder
+  publishes its claims — `footprint` for what is solid (the ball pit's
+  rim and walls, a booth's body), `walkable` for ground a child stands on
+  (the pit's floor, a plaza), `surface` for a deck — describing the
+  *drawn* geometry (#504's variant). Not a manifest flag: a flag beside a
+  radius is a second definition of the shape, and the manifest already
+  lies about one radius (#504's bush).
+- **`PARK_LAYOUT`'s circles become the plots' *provisional* claims** at
+  layout time (a footprint disc is the conservative shape while nothing
+  is drawn), realised by the builder into their kinds when the plot is
+  built — the provisional-then-realised mechanism the road already uses.
+  Until a plot is realised its provisional claim is `footprint`, and by
+  the rule above **a layout-time probe may not refuse on a provisional
+  footprint** — it may only note "unresolved" and defer the verdict to
+  the commit (the built NavGrid).
+- **Interim, accepted**: the layout probe's obstacle set is *what the
+  router itself treats as obstacles*, read from its one owner
+  (`streetPlots` or its sibling) — the same function the paths' commit
+  uses, so an explore-yes/commit-no disagreement has one legal cause.
+  **If nothing owns that set today, the answer is not a manifest field;
+  it is the plots row above, and the probe refuses nothing until it
+  lands** (the built verdict still arms the rung).
+
+`headroom` on a corridor claim and `standable` on a footprint are the same
+idea — a claim saying what may share its ground — and both belong on the
+claim, not on the consumer.
+
 **Determinism — the rule that keeps a seed meaning something.** A park
 that reached decision zero is *a different park than seed n nominally
 asked for*, and that is fine; what is not fine is a park that is not a
