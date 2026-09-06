@@ -500,3 +500,18 @@ and the `supportGround.ts` deletion, and **step 4's customer** — step 4 is
 HELD without one. Stays: `CAT_BUS_TOP`, `CAT_BUS_DRIVEN_TOP` + posed-crown
 owner (read by `check:swept-bus`), `suspensionTravelAt`. Lands in step 2's
 series with the one-rail-race deletion.
+
+## Re-review, 6 Sep night — step 2 at `091d813c` (one rail race + road rule + whole-tree): one item
+
+Measured: features `[road, railRace]`; `legacy:collision` 0 both rings;
+4 slots per ring skipped on the canonical hill seed; swept-bus 14/14 hill
+seeds build, 9 at zero; **residue true** — 0 of 25 residual posts on seeds
+5/11/326/346/451 inside the road's claim, all beyond the kerb claim's
+clipped end (hill `kerbReach`) under a bus run to x −29.9.
+`test:procgen` hill: 20 red / 668 green. Three invariants hill-only (road
+along the ring: 59.7/71.7 m runs, duck bars 9/9/8/9, kerb clip). **One is
+not**: "only the walk-past ring is solid" misfires on 44 race legs per
+seed (canonical included) because race legs now share slots with walk-past
+legs and the clause detects solidity by "a circle contains this leg" —
+re-cut to "collision holds exactly the walk-past feet". Filed for later:
+`CAT_BUS_WIDTH` 5.28 vs drawn 7.30 (the bus-run invariant under-asks).
