@@ -97,25 +97,29 @@ export const CANONICAL_PARK_SEED = 20260728;
  * is what the re-vetting run above is for, and it says so on every run.
  *
  *
- * **115, 225 and 346 retired, 6 September 2026 (#511's sphere).** They fail
- * `check:park-pool` on the sphere ground with `poi.stranded` 15, 73 and 1, plus
- * `poi.nospot: 2` on 346 — waypoints in a pocket nobody can walk to. Retired
- * rather than fixed on Jim's ruling: *"I don't care if any seeds don't work in
- * the old procgen that is going away anyway, just delete any such work"*, and
- * *"the new proc gen should work for 0..15 so forget they ever existed."* All
- * three are outside 0..15. This is the same move #589 made on 267 and 288 and
- * the direction #584 takes the pool.
+ * **5, 115, 225 and 346 retired, 6 September 2026 (#511's sphere).** All four
+ * fail `check:park-pool` on the sphere ground — `poi.stranded` 28, 15, 73 and
+ * 1, plus `poi.nospot: 2` on 346 — waypoints in a pocket nobody can walk to.
  *
- * **What is NOT being retired, and why the distinction matters: seed 5.** It is
- * inside 0..15, it fails the same way (`poi.stranded: 28`), and it fails for
- * the **same root cause as 115 and 225** — measured, not assumed: with
- * `GROUND_SPHERE_RADIUS` raised to 1200000 (flat), all three pass with no other
- * change. So these three retirements do not make a finding go away; seed 5
- * still carries it, and fixing seed 5 is what fixes the cause. The root cause
- * is written up in `HANDOFF-no-hill-511.md` — a bridge's ramp-foot side wall,
- * `topIsAbsolute`-pinned to the local road surface, standing 1.30 m over ground
- * that the sphere has dropped 0.93 m beneath it, walling off the path beside
- * it.
+ * **They are retired, not fixed, and that is a deliberate decision rather than
+ * a finding going quiet.** Jim, 6 September 2026, on being shown seed 5's root
+ * cause: *"I think this doesn't matter since we're replacing all the procgen
+ * anyway — it is fine to reduce the pool of seeds until the new procgen
+ * works."* The earlier ruling behind the other three is the same shape: *"I
+ * don't care if any seeds don't work in the old procgen that is going away
+ * anyway, just delete any such work"*, and *"the new proc gen should work for
+ * 0..15 so forget they ever existed."* #589 retired 267 and 288 by exactly this
+ * move; #584 takes the pool to 0..15.
+ *
+ * **The cause is known and written down**, so shrinking the pool costs no
+ * knowledge. Measured before the decision: with `GROUND_SPHERE_RADIUS` raised
+ * to 1200000 (flat) and nothing else changed, seeds 5, 115 and 225 all pass —
+ * one cause, three seeds. It is a bridge's ramp-foot side wall,
+ * `topIsAbsolute`-pinned to the local road surface, left standing 1.30 m over
+ * ground the sphere dropped 0.93 m beneath it and walling off the path beside
+ * it; `HANDOFF-no-hill-511.md` carries the full measurement. The **new**
+ * generator has to get this right for 0..15, and that write-up is what it
+ * should be checked against.
  *
  * **Seed 18 is deliberately absent**, and it is the reason a pool is not just
  * "the seeds `test/procgen` already uses": it is one of that suite's four
@@ -126,7 +130,6 @@ export const CANONICAL_PARK_SEED = 20260728;
  */
 export const PARK_SEED_POOL: readonly number[] = [
   CANONICAL_PARK_SEED,
-  5,
   11,
   24,
   128,
@@ -221,7 +224,6 @@ export const PARK_SEED_POOL: readonly number[] = [
  */
 export const CI_SWEEP_SEEDS: readonly number[] = [
   CANONICAL_PARK_SEED,
-  5,
   11,
   24,
   131,
