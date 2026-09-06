@@ -443,3 +443,23 @@ first row); the `World.ts` reorder needs the per-seed digest accounting
 for every non-trestle group; a stale "ear tips included" comment in
 `roadCorridor.ts`; the sightline keep-out grows 6.8 cm. Step 3's brief
 corrected on the collision predicate (it is not zero).
+
+## Re-review, 6 Sep late — step 2 at `65982c2a`: one item left
+
+Measured on the sha (not the account): claim carries 6.6411 m; `tallestHeadroom`
+6.6411 on a headless park; `trestleClaims` clips at `ground + headroom`, so
+the 6.35 m fork nodes are inside the band; swept-bus child canonical 0/0/0
+with the driven envelope; rest-top assertion VOID on every built seed at
++1 cm; hill digests differ in exactly the three trestle groups on both
+building seeds; sphere-merge digests (`digest2/`) 8 of 14 identical, 6
+trestle-only, no other group anywhere — the `World.ts` reorder moved
+nothing.
+
+**Remaining change**: `CAT_BUS_DRIVEN_TOP` 6.6411 over-states the posed
+vertex-precise top by 0.147 m (heave 6.2429; + nose-up pitch 6.4991;
++ roll 6.4943 — roll *lowers* the crown 4.8 mm; the crown is at x = 0).
+Required: the check asserts the driven top against the bus posed at full
+heave + pitch + roll within 1 mm (as the rest top is), and the owner is
+derived from the face ellipsoid under the pitch rotation, roll
+contributing nothing at the crown. `suspensionTravelAt` stays right for
+the chin, wheels and step (off-axis points).
