@@ -53,13 +53,20 @@ two-definitions disease and is a rejection even while green.
   foul. Caveat in the PR body: one seed's transcript is one seed's
   evidence. The ladder below stays as the design's order for the next
   producer the screen names:
-- The refusal path, in order of cheapness, per the ruling's point 2:
-  screen the unscreened appendages (spur `lead`/`past`, station approach
-  points, connector leads, lattice-snap jogs) with the leg's own rail
-  test; a routed leg takes its next site candidate / re-routes; the ring
-  or a leg with no site in reach asks `bridgeCandidateAt(d)` for a site
-  **on demand** at that rail distance and adds it if proven; otherwise
-  the segment re-routes; otherwise a loud, named failure.
+- **Amended 6 Sep — the first phrasing of this bullet produced a
+  measured no-op (1342 samples → 1342, same foul).** Polyline tests
+  (`segmentHoldsRailSide`, `enforceRailSide`) test control points; the
+  fault is in the drawn Catmull-Rom, which bulges across the rail while
+  the polyline holds its side. **A rung is: change a decision →
+  resample through the shared `sampleCurve` → ask the same drawn-sample
+  predicate at the point of decision.** Polyline tests may pre-reject a
+  candidate, never accept one. In order of cheapness, each stated as
+  what changes the *curve*: pin the curve with extra control points
+  where it bulges (a Catmull-Rom passes through its points); straighten
+  the run; take the next site / re-route; ask `bridgeCandidateAt(d)` for a
+  site on demand at the **drawn** rail distance and add it if proven;
+  otherwise a loud, named failure. Every rung's acceptance is the sample
+  count *and* the foul count, before and after.
 - The construction-time throw at `crossings.ts:432` stays and must
   become unreachable; `test:procgen` reports a park that cannot be built
   as a **failure** (#524 — land it here if it is not already merged, it

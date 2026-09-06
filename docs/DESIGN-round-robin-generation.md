@@ -965,6 +965,55 @@ first customer, and the fix has the design's shape, not the hill's:
    and remain listed above as producers that do not ask the railway.
    `pathDivisions` / `sampleCurve` are shared by `buildPaths()` and
    `drawnSamplesFor(routes)`; no copied divisions formula.
+
+   **Amended (6 Sep, after the one-producer fix measured as a no-op):**
+   screening `spur-station-1`'s appended points with `segmentHoldsRailSide`
+   and bending them left **1342 samples before and after, the same foul
+   at the same coordinate — the bend never fired.** `segmentHoldsRailSide`
+   walks the straight segments between control points; what is drawn is
+   a Catmull-Rom through them, and it bulges. The control polyline held
+   its side while the drawn curve crossed. So the fault is not in one
+   producer's tail; **it is in every rail-side question `paths.ts` asks
+   of the control polyline** — the six producers above *and* the legal
+   crosser's own `enforceRailSide`, whose comment at `paths.ts:1272`
+   already names the curve hazard. The ladder as first written, in
+   polyline terms, would have manufactured five more plausible no-ops.
+
+   **Ruling, restated one level down — the one-function rule applies to
+   the geometry, not only to the predicate:**
+
+   - **A rung is: change a decision → resample the affected routes
+     through the shared `sampleCurve` → ask the same drawn-sample
+     predicate.** A rung whose test is on control points is not a rung.
+     The question is always "does the *drawn* curve flip sides off-site",
+     asked at the point of decision, of the geometry a child will walk.
+   - **Polyline tests survive only as pre-filters that may reject, never
+     accept.** `segmentHoldsRailSide` / `enforceRailSide` can cheaply throw
+     out a candidate whose control points already cross; they can never
+     pass one. Commit is the drawn predicate, full stop.
+   - **The "next decision" per producer is therefore stated as what
+     changes the curve**, and re-measured: extra control points pinning
+     the curve (a Catmull-Rom cannot bulge past a point it must pass
+     through), a straightened run, a re-route to the next site, an
+     on-demand site where the curve actually crosses (`bridgeCandidateAt`
+     at the *drawn* rail distance, not the polyline's), and the ring's
+     32-bearing sample density is a decision of the same kind.
+   - The mechanism the engineer is building is exactly this: the exported
+     drawn-sample predicate asked in the router at the point of decision,
+     with `createCrossingScan` / `siteForFlip` / the screen in a module
+     depending only on `TrainRoute` and `CROSSING_SITES` (no
+     `crossings → pathGraph → paths` cycle) and `pathDivisions` /
+     `sampleCurve` beside `routeCurve` — one sampling for `buildPaths()`,
+     the screen and the router.
+   - **The no-op is committed, labelled insufficient, with its negative
+     result** — deliberately: the polyline test was tried, here is why it
+     cannot work. A reader who removes that commit as dead code has
+     removed the evidence.
+
+   The measurement discipline that caught it is the design's own: the
+   sample count printed every run. "1342 → 1342" is what said the
+   geometry had not moved; a screen that printed only "1 foul" would have
+   let a no-op read as a partial fix.
 2. **"Next decision" per producer**, in order of cheapness:
    - an unscreened appendage (spur lead/past, station approach,
      connector lead, snap jog) is a producer drawing without asking the

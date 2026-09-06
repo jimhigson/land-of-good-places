@@ -43,8 +43,14 @@ first honest run found #501).
   `docs/BRIEF-stage4-pre-crossing-refusal.md`, for the #511 Engineer.
   #524 lands with it if not already merged.
   **Sized 6 Sep**: screen finds ONE producer on 288 (`spur-station-1`,
-  station approach spur) at the exact throw coordinate; ruling: fix that
-  producer only, screen guards the rest. Next: review the PR (screen
+  station approach spur) at the exact throw coordinate; first fix (polyline
+  screen on the spur) measured as a NO-OP — 1342 samples → 1342, same
+  foul: the drawn Catmull-Rom bulges across the rail while the control
+  polyline holds its side. Ruling amended: a rung = change decision →
+  resample via shared `sampleCurve` → same drawn predicate; polyline
+  tests pre-reject only, never accept. Engineer moving the drawn
+  predicate to the point of decision (module split to break the import
+  cycle). Next: review the PR (screen
   wired into pathGraph + station spur screened); then #511 goes green
   and step 2 unblocks.
   Terrain is no longer seed-dependent (1200 m sphere) — the outward
