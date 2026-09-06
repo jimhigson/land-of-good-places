@@ -29,7 +29,12 @@ import {
   INTERIOR_ORIGIN_Z,
   INTERIOR_PLATE_SHRINK,
   INTERIOR_PLAZA_DROP,
+  CASTLE_TURRET_BASE_RADIUS,
+  CASTLE_TURRET_CORNERS,
   PLAYER_RADIUS,
+  TOWER_BASE_FLARE,
+  TOWER_RADIUS,
+  TOWER_ROOF_OVERHANG,
 } from '../../core/constants';
 import { CASTLE_HALL, CASTLE_MALL, CASTLE_ROOF } from './floors';
 import { TAP_FINGER_METRES } from '../tapSpacing';
@@ -331,13 +336,20 @@ export const CASTLE_MASONRY_TOP = CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT;
  * Jim rode the slide through one. Measured on the canonical seed the chute ran
  * 1.10 m inside a tower body while every invariant stayed green.
  */
-export const TOWER_RADIUS = 2.05;
+// Owned by `core/constants.ts` — see the note beside them there for why the
+// castle's extent cannot live in this file. Re-exported so the many places
+// that already read them from here are untouched.
+export {
+  TOWER_RADIUS,
+  TOWER_BASE_FLARE,
+  TOWER_ROOF_OVERHANG,
+  CASTLE_TURRET_BASE_RADIUS,
+  CASTLE_TURRET_CORNERS,
+};
+
 export const TOWER_HEIGHT = 10.6;
 export const TOWER_ROOF_HEIGHT = 4.2;
-/** How far the conical roof oversails the body it sits on. */
-export const TOWER_ROOF_OVERHANG = 0.4;
-/** How much wider the body is at its foot than at its top. */
-export const TOWER_BASE_FLARE = 1.08;
+
 
 /**
  * **How wide a turret is**, for anything that has to keep out of one — a
@@ -350,7 +362,7 @@ export const TOWER_BASE_FLARE = 1.08;
  * that grows must take its keep-out with it.
  */
 export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
-  TOWER_RADIUS * TOWER_BASE_FLARE,
+  CASTLE_TURRET_BASE_RADIUS,
   TOWER_RADIUS + TOWER_ROOF_OVERHANG,
 );
 
@@ -369,9 +381,6 @@ export interface TowerSolid {
   readonly radiusTop: number;
 }
 
-/** Where the four towers stand, facade-local. Outside the footprint rectangle. */
-const TOWER_HALF_X = BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2;
-const TOWER_HALF_Z = BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2;
 
 /**
  * The towers in world space, body and roof, ready to be routed around.
@@ -381,12 +390,7 @@ const TOWER_HALF_Z = BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2;
  */
 export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
   const solids: TowerSolid[] = [];
-  const corners: readonly (readonly [number, number])[] = [
-    [-TOWER_HALF_X, -TOWER_HALF_Z],
-    [TOWER_HALF_X, -TOWER_HALF_Z],
-    [-TOWER_HALF_X, TOWER_HALF_Z],
-    [TOWER_HALF_X, TOWER_HALF_Z],
-  ];
+  const corners = CASTLE_TURRET_CORNERS;
   corners.forEach(([localX, localZ], index) => {
     const x = BUILDING_CENTRE_X + localX;
     const z = BUILDING_CENTRE_Z + localZ;
@@ -396,7 +400,7 @@ export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
       z,
       bottomY: BUILDING_BASE_Y,
       topY: BUILDING_BASE_Y + TOWER_HEIGHT,
-      radiusBottom: TOWER_RADIUS * TOWER_BASE_FLARE,
+      radiusBottom: CASTLE_TURRET_BASE_RADIUS,
       radiusTop: TOWER_RADIUS,
     });
     solids.push({

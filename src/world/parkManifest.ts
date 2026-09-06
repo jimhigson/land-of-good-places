@@ -148,6 +148,10 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
   },
   {
     id: 'building',
+    // The corner turrets are NOT declared here: the drawn castle is nudged off
+    // its plot centre by an amount only known once the plot is placed, so the
+    // discs are written into the *placed* footprint instead — see
+    // `parkLayout.ts`'s `footprintAsPlaced`.
     footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
     // 19.3: the castle's own masonry reaches 19.0 exactly, and on some seeds
     // the dressing spills another few centimetres (the reach sweep measured
