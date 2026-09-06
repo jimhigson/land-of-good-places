@@ -1124,6 +1124,19 @@ the bus on the road mid-race — **both are wrong together**, and the first
 thing to re-examine is `RailRace.setActiveRing`, the one place the fact
 lives in code.
 
+**Fairness is the race ring's property (Architect, 7 Sep).** With the
+final form in, seed 131's walk-past ring reads 10/10/9/10 duck bars per
+lane. `RailRace.ts` on that ring: *"nobody is racing, but the rivals do
+not know that — they carry on"*; no standings, no winner, no player.
+Equal-per-racer — Jim's 7 Aug ask, "what makes the race fair" — is a
+property of the race, and the race happens on the ride-scale ring only,
+so asserting it on the walk-past ring measures the wrong object. Re-cut:
+equal-per-racer on the race ring; on the walk-past ring, no-two-touch
+stays and each lane's count equals the race ring's for that lane minus
+the bars whose slot the road rule skipped there, the skipped count
+printed per seed — a bar missing for any other reason is still caught,
+and the rule's cost is stated on every run, never tolerated silently.
+
 **What the rule makes unnecessary** — each a rule the generator would
 otherwise imply and no longer applies, so deleted, not left:
 

@@ -536,3 +536,12 @@ Ride-scale ring keeps every leg; walk-past ring skips its own. Design doc
 co-present — is now written once, with both consequences hanging off it
 and `RailRace.setActiveRing` named as where it lives. Seed 326's possible
 one-bar cost is accepted by Jim with the number; PR-body item, not his.
+
+## Step 2 approved at `a06178a4` (7 Sep); fairness ruling
+
+Measured: tsc 0; ground-claims 0 (walk-past skips 4 hill slots, race ring
+"ignores the road"); radius guard red at equal radii, green restored;
+sweep names the walk-past ring. Ruling (design doc, "Fairness is the race
+ring's property"): equal-per-racer asserted on the race ring only; the
+walk-past ring's lane counts equal the race ring's minus road-rule skips,
+printed. Expect 706/706 on the sphere merge after the re-cut.
