@@ -24,6 +24,7 @@ import {
   type ArchPass,
 } from '../src/world/entrance/ArrivalSequence.ts';
 import { CAMERA_FOCUS_LIFT } from '../src/core/IsoCamera.ts';
+import { KID_EYE_HEIGHT } from '../src/art/models/kid.ts';
 import { cameraOffset } from '../src/core/cameraRig.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import { DEG } from '../src/core/mathUtils.ts';
@@ -47,8 +48,13 @@ for (let t = 0; t <= 12; t += 0.25) {
   // by the gate's, which is what the shot is composed around.
   const focusX = ENTRANCE_GATE_X;
   const focusZ = ENTRANCE_GATE_Z;
-  const lift = shot.watchesTheDoor ? ARRIVAL_DOOR_FOCUS_LIFT : CAMERA_FOCUS_LIFT;
-  const focusY = terrainHeight(focusX, focusZ) + lift;
+  // Mirror doorFocus: the lift is measured from the ground under the EYE.
+  const lift = shot.watchesTheDoor ? KID_EYE_HEIGHT + 0.3 : CAMERA_FOCUS_LIFT;
+  const probeEye = cameraOffset(shot.yawDegrees * DEG, shot.pitchDegrees * DEG, shot.distance);
+  const groundUnderEye = shot.watchesTheDoor
+    ? Math.max(terrainHeight(focusX, focusZ), terrainHeight(focusX + probeEye.x, focusZ + probeEye.z))
+    : terrainHeight(focusX, focusZ);
+  const focusY = groundUnderEye + lift;
   const eye = cameraOffset(shot.yawDegrees * DEG, shot.pitchDegrees * DEG, shot.distance);
   const ex = focusX + eye.x;
   const ez = focusZ + eye.z;

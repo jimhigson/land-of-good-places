@@ -18,6 +18,7 @@ import {
   KID_HEAD_HEIGHT,
   kidEyeCentre,
   TALLEST_CHILD_HEIGHT,
+  KID_EYE_HEIGHT,
 } from '../../art/models/kid';
 import {
   createCatBus,
@@ -35,6 +36,7 @@ import {
   CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
 } from '../../core/constants';
+import { cameraOffset } from '../../core/cameraRig';
 import { createBusDriver, type BusDriver } from './busDriver';
 import { playBrakeSqueak, playDoorHiss, playHornToot } from './sounds';
 import { markArrived } from './arrivalFlag';
@@ -324,6 +326,25 @@ export const ARRIVAL_CAMERA_ZOOM =
  * `check:arrival-camera` prints the band's measured size on every run.
  */
 export const ARRIVAL_DOOR_FOCUS_LIFT = KID_HEAD_HEIGHT + kidEyeCentre(1).y;
+
+/**
+ * **How high the arrival camera's eye rides: a child's eye height, plus the
+ * clearance a *camera* needs that a child does not.**
+ *
+ * `KID_EYE_HEIGHT` (#586, 1.5164 m, measured off the built rig) is the one
+ * owner of where a child's eyes are — and it describes exactly that. **It does
+ * not describe where a camera may sit.** A camera also carries a near plane,
+ * and a near plane inside the ground is the floor drawn across the bottom of
+ * frame however high the eye nominally is. That margin belongs to the camera,
+ * not to the child, which is why it is added here rather than folded into the
+ * constant.
+ *
+ * Generous against the rig's own 0.1 m near plane: the ground under the eye is
+ * sampled at a point, and a camera a hand's breadth above a curved surface is
+ * still on the wrong side of it a metre away.
+ */
+const ARRIVAL_EYE_FLOOR_MARGIN = 0.3;
+const ARRIVAL_EYE_HEIGHT = KID_EYE_HEIGHT + ARRIVAL_EYE_FLOOR_MARGIN;
 
 /**
  * **Which way the bus points while it is standing at the stop.**
@@ -1554,7 +1575,27 @@ export class ArrivalSequence {
    */
   get doorFocus(): Vector3 {
     const { x, z } = this.playerRoute.from;
-    return new Vector3(x, terrainHeight(x, z) + ARRIVAL_DOOR_FOCUS_LIFT, z);
+    // **Anchored under the EYE, not under what it looks at.** Jim, 6 September
+    // 2026: *"the camera should be at eye-height, not overlapping into the
+    // floor"*.
+    //
+    // The door beat looks purely horizontally, so the eye sits at exactly this
+    // focus's height — but it stands `distance` metres away, over ground that is
+    // not the ground here. Anchoring the lift to the drop's own terrain left the
+    // eye wherever the difference happened to put it: measured on the canonical
+    // seed, **0.44 m of clearance** above the ground it was actually over, which
+    // is ankle height and takes any camber or undulation straight into the floor.
+    //
+    // So the ground under the *eye* is what the lift is measured from. Resolvable
+    // without circularity because the eye's x,z depend only on the shot's yaw and
+    // stand-back, never on the focus's height.
+    const shot = arrivalShot(this.elapsed, this.archPassAt);
+    let groundUnderEye = terrainHeight(x, z);
+    if (shot) {
+      const eye = cameraOffset(shot.yawDegrees * DEG, shot.pitchDegrees * DEG, shot.distance);
+      groundUnderEye = Math.max(groundUnderEye, terrainHeight(x + eye.x, z + eye.z));
+    }
+    return new Vector3(x, groundUnderEye + ARRIVAL_EYE_HEIGHT, z);
   }
 
   /** Where the bus is, for a check that wants to measure rather than trust. */
