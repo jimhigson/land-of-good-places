@@ -1,5 +1,10 @@
 import { Vector3 } from 'three';
-import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../../core/constants';
+import {
+  BUILDING_HALF_X,
+  BUILDING_HALF_Z,
+  CASTLE_TURRET_BASE_RADIUS,
+  CASTLE_TURRET_CORNERS,
+} from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../../world/building/layout';
 import { ANCHORS } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
@@ -302,24 +307,47 @@ function sampleRoute(route: RouteDefinition): { x: number; z: number; at: number
 }
 
 /**
- * Is this inside the big building's solid facade?
+ * Is this inside the big building's solid stonework — its facade **or one of
+ * its four corner turrets**?
  *
- * The one place in the park where "a character fits here" is a lie: the facade
- * is four wall segments with nothing registered between them, so the resolver
- * finds the middle of a solid tower perfectly clear. The building's path spur
- * ends *inside* it — the last control point is the doorway approach seen from
- * the model's side — so sampling that route without this test seeds a waypoint
- * in a wall, which is precisely what `scripts/check-waypoints.mts` fails a
- * build for. Same four constants, same rectangle, so the two agree by
- * construction rather than by somebody keeping them in step.
+ * The building's path spur ends *inside* the facade (its last control point is
+ * the doorway approach seen from the model's side), so sampling that route
+ * without this test seeds a waypoint in a wall, which is what
+ * `scripts/check-waypoints.mts` fails a build for.
+ *
+ * **The turrets are here because of #549, and their absence used to be
+ * invisible.** This tested the 24 x 18 rectangle alone, and the turrets stand
+ * *outside* it — so a path sample beside one was seeded as a waypoint. Nothing
+ * complained, because the turrets had no collider: `PoiGraph` asked "does a
+ * child fit here?", the resolver said yes, and she would have been standing
+ * inside drawn stone. The moment the turrets became solid, that seed had
+ * nowhere within 2.2 m a child fits and `check:park-pool` failed pool seed 5
+ * with `poi.nospot: 1` — measured, the seed sat **0.57 m from tower-body-3's
+ * axis**, well inside its 2.214 m stone.
+ *
+ * That is the same omission as the missing collider and as the layout solver's
+ * doormat-in-a-turret, in a third place. All of them now ask one owner:
+ * `CASTLE_TURRET_CORNERS` and `CASTLE_TURRET_BASE_RADIUS`.
+ *
+ * **The old comment here said the facade is "four wall segments with nothing
+ * registered between them, so the resolver finds the middle of a solid tower
+ * perfectly clear".** That is no longer true of the turrets — they are
+ * registered now — and it is corrected rather than left to mislead the next
+ * reader.
  */
 function insideFacade(x: number, z: number): boolean {
-  return (
+  const inRectangle =
     x >= BUILDING_CENTRE_X - BUILDING_HALF_X &&
     x <= BUILDING_CENTRE_X + BUILDING_HALF_X &&
     z >= BUILDING_CENTRE_Z - BUILDING_HALF_Z &&
-    z <= BUILDING_CENTRE_Z + BUILDING_HALF_Z
-  );
+    z <= BUILDING_CENTRE_Z + BUILDING_HALF_Z;
+  if (inRectangle) return true;
+  for (const [cx, cz] of CASTLE_TURRET_CORNERS) {
+    const dx = x - (BUILDING_CENTRE_X + cx);
+    const dz = z - (BUILDING_CENTRE_Z + cz);
+    if (dx * dx + dz * dz < CASTLE_TURRET_BASE_RADIUS * CASTLE_TURRET_BASE_RADIUS) return true;
+  }
+  return false;
 }
 
 export interface PoiNode {
