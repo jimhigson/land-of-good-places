@@ -30,6 +30,7 @@
 import { circleBoundary } from '../src/world/boundary.ts';
 import {
   CollisionWorld,
+  HOP_APEX_TOLERANCE,
   MAX_AUTO_HOP_HEIGHT,
   MEASURED_HOP_APEX,
   measuredHopCeiling,
@@ -226,15 +227,16 @@ if (!Number.isFinite(worstClean)) {
 }
 
 // 2. The measurement `Collision.ts` believes it was given must still be the one
-//    this jump produces. Tolerance is the game's own: `checkHoppableColliders`
-//    compares against MEASURED_HOP_APEX with exactly this 0.001 m at boot.
-const APEX_TOLERANCE = 0.001;
-if (Math.abs(JUMP_APEX_HEIGHT - MEASURED_HOP_APEX) > APEX_TOLERANCE) {
+//    this jump produces. The tolerance is imported, not restated: the boot
+//    check `checkHoppableColliders` enforces the same drift with the same
+//    number, and until #539 this script kept its own copy under a comment
+//    promising the two agreed.
+if (Math.abs(JUMP_APEX_HEIGHT - MEASURED_HOP_APEX) > HOP_APEX_TOLERANCE) {
   problems.push(
     `the jump apex is now ${JUMP_APEX_HEIGHT.toFixed(4)} m but Collision.ts's ` +
       `MEASURED_HOP_APEX says ${MEASURED_HOP_APEX.toFixed(4)} m ` +
       `(difference ${Math.abs(JUMP_APEX_HEIGHT - MEASURED_HOP_APEX).toFixed(4)} m > ` +
-      `${APEX_TOLERANCE} m) — MAX_AUTO_HOP_HEIGHT and measuredHopCeiling() are stale`,
+      `${HOP_APEX_TOLERANCE} m) — MAX_AUTO_HOP_HEIGHT and measuredHopCeiling() are stale`,
   );
 }
 
@@ -297,7 +299,7 @@ if (problems.length > 0) {
     `\nOK, and what that covers:\n` +
       `  - all ${rows.length} points measured a real number (none NaN)\n` +
       `  - the jump apex ${JUMP_APEX_HEIGHT.toFixed(4)} m still matches MEASURED_HOP_APEX ` +
-      `to within ${APEX_TOLERANCE} m\n` +
+      `to within ${HOP_APEX_TOLERANCE} m\n` +
       `  - measuredHopCeiling() is a lower bound to within the ` +
       `${BISECTION_RESOLUTION * 1000} mm measurement resolution at all ${rows.length} points; ` +
       `tightest margin ${(tightest * 1000).toFixed(1)} mm` +
