@@ -420,3 +420,26 @@ becomes a refusal, the road's next attempt is derived from the blocker's
 extent, scheduler decision zero wired and proved under a scratch flag, the
 layout's decision zero named as stage 4's. Design doc: "Steps 3 and 4,
 re-cut (6 Sep)". Step 2's four questions ruled (section above).
+
+## Review, 6 Sep night — step 2 at `f92830c1` (branch diff; no PR yet): changes requested
+
+Measured on a detached scratch worktree: `tsc` 0, `typecheck:test` 0,
+`check:ground-claims` 0, 45 unit tests green, swept-bus child on the
+canonical seed 0/0/0. Ruling 3 verified by measurement: owner 6.0429 m ==
+vertex-precise drawn top 6.0429 m (gap 0.0000); `CAT_BUS_TOP` + 1 cm makes
+the child throw "off by −0.0100 m". Rulings 1, 2, 4 present as ruled.
+
+**The change**: the corridor's `headroom` is the bus at rest, and the bus
+drives with `chassis.position.y = CAT_BUS_RIDE_LIFT + heave` (±0.2 m) and a
+nose-up pitch to 0.042 rad; the race ring's fork nodes sit below `beamY`
+6.35 m against a 6.04 m rest top, so a branch in that band is allowed by
+the claim and hit by a heaving bus, and `check:swept-bus` sweeps a static
+bus (its control lift is 200 m). One owner for the upward travel (the
+terms `CAT_BUS_RIDE_LIFT` is built from), a driven-top export, the claim
+reads it, the check sweeps with it. Notes for the PR body: the 91
+`legacy:collision` refusals on the canonical race ring (walk-past post
+circles wider than walk-past claims — a second definition; stage 5's
+first row); the `World.ts` reorder needs the per-seed digest accounting
+for every non-trestle group; a stale "ear tips included" comment in
+`roadCorridor.ts`; the sightline keep-out grows 6.8 cm. Step 3's brief
+corrected on the collision predicate (it is not zero).

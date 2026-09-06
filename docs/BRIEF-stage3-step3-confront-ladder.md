@@ -82,16 +82,25 @@ that should be asking the generator's registry inside its own turn.
   (`roadCorridor`'s first turn) and nothing else — not `pathGraph`, unless
   measurement says the paths predicate changes a foot (below).
 - **`collision.isClearCircle(x, z, 1.1)` has no generation-time owner** —
-  there is no `CollisionWorld` in the scheduler. Do not invent one. Measure
-  first, in a scratch run on every pool seed: log every candidate that
-  `collision.isClearCircle` refused **and** the other three predicates
-  (`distanceToPath`, `distanceToRailCorridor`, `PARK_LAYOUT` bounding)
-  allowed. If that count is **0 on every seed**, drop the collision
-  predicate from the task with the number quoted in the PR. If it is not,
-  name what the collider was (a wall, a tree, a castle turret) and add
-  *that thing's own generation-time owner* as a named legacy predicate
-  (`legacy:<owner>`), never a copy of its geometry — and file it on the
-  stage-5 migration checklist. Either way the universal overlap invariant,
+  there is no `CollisionWorld` in the scheduler. Do not invent one. **It is
+  not zero**: step 2's own coverage line on the canonical seed reads
+  `railRace:race-ring: candidates refused by legacy predicates: 91
+  (legacy:collision 91)` against 0 on the walk-past ring — and since the
+  registry is asked first, those are 91 candidates the registry *allowed*
+  and the collision world refused. The overwhelming suspect is the
+  walk-past ring's own registered post circles (`registerCollision: true`,
+  1.1 m clearance) being wider than the walk-past ring's *claims*: a
+  second definition of that ring's ground beside its claim. Step 2's PR
+  names what the 91 are; this step resolves it with **one owner**: the
+  walk-past ring's claim is what the race ring asks about, and if a
+  clearance wider than the drawn strut is wanted between rings, it is a
+  property of the claim (a `footprint` with the clearance in its shape),
+  not of a collision circle the scheduler cannot see. Anything else the
+  predicate turns out to refuse (a wall, a tree, a turret) gets *that
+  thing's own generation-time owner* as a named legacy predicate
+  (`legacy:<owner>`), never a copy of its geometry, filed on the stage-5
+  checklist. Measure on every pool seed before and after; the leg digest
+  says what moved. Either way the universal overlap invariant,
   `railRaceSupportsAreClaimedAsDrawn` and `check:swept-bus` are the
   instruments that say nothing was lost; the leg digest per seed says what
   moved.
