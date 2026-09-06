@@ -121,6 +121,7 @@ const {
   chaseCeilingCalls,
   chaseCeilingWorstShare,
   CEILING_REJECT_ABOVE,
+  chaseSolveCost,
 } = await import('../src/world/slide/chaseEye.ts');
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
 
@@ -1339,6 +1340,7 @@ async function ride(wired: boolean): Promise<RunResult> {
       // the whole defect was a guard that looked calibrated and rejected
       // nothing, and only a count can tell that from a guard with nothing to
       // reject.
+      `solve search ${chaseSolveCost().candidates} candidates in ${chaseSolveCost().calls} calls (worst ${chaseSolveCost().worstCandidates} of 600 possible), ` +
       `solved body centre vs drawn ` +
       `${worstBodyDrift < 0 ? 'NEVER MEASURED' : `worst ${worstBodyDrift.toFixed(2)} m out (frame ${worstBodyDriftFrame})`}, ` +
       `near bound ${chaseCeilingRejections()} rejections in ${chaseCeilingCalls()} calls ` +

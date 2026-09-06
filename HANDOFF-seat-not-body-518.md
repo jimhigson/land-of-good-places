@@ -72,3 +72,104 @@ asked. A reader must not take that 0 for the same 0 as the wired run's.
 The seed-131 flake from #519's sweep: one silent process death mid-control,
 not reproducible in three standalone re-runs, all printing byte-identical
 wired lines. Cause unproven. Recorded as unexplained, not diagnosed.
+
+---
+
+## The fix, as shipped — and the wrong turn on the way, which is the useful part
+
+### Attempt 1, abandoned: derive the body centre from the seat
+
+`petBodyCentreOnSlide(seat, upSlope, out)` = `seat + upSlope × PET_RECLINED_LENGTH/2`,
+in `petRiders.ts`. It looked right and it followed a documented precedent —
+`PET_RECLINED_LENGTH`'s own doc says it is *"written down rather than measured
+at run time on purpose"*, with a check that re-measures the drawn meshes as the
+guard against drift.
+
+**So I wrote that drift check, and it failed my own fix: 0.70 m out** from
+`Box3.setFromObject` of the real animal. That is most of the ~0.95 m error the
+fix existed to remove. The guard's estimate went 6.6% → 10.3% against a 15%
+threshold — still could not fire.
+
+**This is the lesson of the ticket, one level in.** #518 is "a measurement taken
+on a convenient origin rather than on the thing that gets drawn". A formula
+derived from the pose *is another convenient origin*, dressed up as a principled
+one. The check caught it; reasoning did not.
+
+### Attempt 2, shipped: ask the system that owns the bodies
+
+`PetSlideLink.nearestRiderBodyCentre(out): boolean`, implemented by `Parade`
+with `Box3.setFromObject` on the real member, `updateWorldMatrix(true, true)`
+first. Exactly the precedent `petsOnSlide` and `companionAt` set on either side
+of it: *"answered by the system that owns those bodies"*, observing rather than
+recomputing. Only a **point** crosses back, so the interface's "nothing crosses
+back" rule is intact.
+
+`solveChaseEye` now takes `petBodyCentre` as a parameter and derives nothing.
+
+### Numbers, canonical park
+
+| | seat (#518 defect) | derived | measured (shipped) |
+|---|---|---|---|
+| solved centre vs drawn | — | 0.70 m out | **0.12 m out** |
+| worst near-bound estimate | 6.6% | 10.3% | **20.1%** |
+| rejections | 0 / 623 | 0 / 623 | **760 / 1383** |
+| biggest pet in frame | 21% | 21% | **15%** |
+
+The drift clause stays armed and goes red at ~0.95 m if anyone passes the seat
+again. **A check that caught its author is the one to leave in.**
+
+## The 16-seed sweep — 16/16 pass, and the guard fires on every park
+
+| seed | biggest | smallest | off-axis | in shot | rejections |
+|---|---|---|---|---|---|
+| 20260728 | 15% | 11.8% | 23.7° | 100% | 760 |
+| 5 | 18% | 12.6% | 23.5° | 100% | 687 |
+| 11 | 18% | 12.7% | 21.2° | 100% | 862 |
+| 24 | 18% | 12.0% | 24.1° | 100% | 556 |
+| 115 | 19% | 13.2% | 17.4° | 100% | 319 |
+| 128 | 18% | 13.0% | 22.8° | 100% | 579 |
+| 131 | 14% | 12.5% | 23.4° | 100% | 871 |
+| 208 | 17% | 11.7% | 21.1° | 100% | 859 |
+| 225 | 15% | 13.2% | 22.6° | 100% | 725 |
+| 267 | 17% | 11.8% | 21.5° | 100% | 791 |
+| 274 | 17% | 11.8% | 20.7° | 100% | 628 |
+| 288 | 17% | 11.8% | 23.4° | 100% | 601 |
+| 326 | 18% | 16.3% | 19.6° | 100% | 424 |
+| 346 | 17% | 13.1% | 19.7° | 100% | 364 |
+| 428 | 14% | 12.0% | 23.1° | 100% | 651 |
+| 451 | 18% | 12.2% | 24.4° | 100% | 652 |
+
+- **Biggest raster 17-21% → 14-19%.** Every park keeps more ceiling headroom
+  than before; worst margin against the 25% ceiling goes from 4 points to 6.
+- **Nothing is lost from the shot**: in-shot 100% on all sixteen, smallest
+  raster 11.7-16.3% against a 1% floor, off-axis 17.4-24.4° against 30°.
+- **The guard fires on all sixteen** (319-871 rejections), where it had never
+  fired on any.
+
+## Cost — re-taken, not the stale "1.0 candidates per call"
+
+| | before #518 | after |
+|---|---|---|
+| candidates per call, mean | 1.0 | **2.2** |
+| worst candidates in one call | 1 | **4** (of 600 possible) |
+
+The search is exercised at last — #519's header calls it "unexercised and
+therefore unproven", and that is now out of date in the good direction — and
+nowhere near its stop.
+
+**A timing trap worth recording.** Wall-clock timing of the solve reported a
+**20.6 ms** single call on seed 5, over a 16.67 ms frame budget. It examined
+**4** candidates — identical work to calls costing 0.03 ms on other parks. It
+was a GC pause caught inside the `performance.now()` window, not the solve. The
+timing was removed and the **work** is counted instead: counting the work is the
+honest instrument, timing it measures the machine. `worstCandidates` is the
+number to watch, and it is 4.
+
+## This is a VISIBLE change — it does not take the invisible-merge route
+
+`biggest pet 21% → 15% of frame` is a child seeing a different chase shot. The
+brief scoped this as invisible ("the guard firing changes no frame today");
+that was wrong and the Overseer has corrected it. **It goes to Jim.**
+
+It also supersedes numbers #519 published: #519's "biggest pet 21%, 17-21%
+across the pool" becomes **15% / 14-19%** with this branch on top.

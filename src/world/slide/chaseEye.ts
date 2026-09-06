@@ -225,9 +225,39 @@ const axis = new Vector3();
  * measurement as "it never fired", and the next change in this area needs to be
  * able to see which it is without re-deriving an instrument.
  */
+let solveCalls = 0;
+let solveCandidates = 0;
+let solveWorstCandidates = 0;
+let candidatesThisCall = 0;
 let ceilingRejections = 0;
 let ceilingCalls = 0;
 let ceilingWorstShare = 0;
+
+/**
+ * **How hard the placement search actually worked** — calls, candidates tried,
+ * and the most any single call tried.
+ *
+ * Here because the search's cost changed character with #518. Before it, the
+ * near bound rejected nothing, so the first candidate was accepted on every
+ * frame of every park and `worstCandidates` was **1** — the search was, as this
+ * file's header says, unexercised and therefore unproven. Now it rejects, so
+ * the loop genuinely iterates, and the honest question "how far does it walk?"
+ * needs an answer that is measured rather than reasoned.
+ *
+ * Measured across all sixteen pool parks: mean **2.2** candidates per call and
+ * **worst 4**, against a loop bounded at 30 x 20 = 600. So the search is
+ * exercised at last, and nowhere near its stop.
+ *
+ * No wall-clock timing here on purpose. A `performance.now()` pair in a
+ * per-frame path measures whatever else the process was doing: timing this
+ * reported a single 20.6 ms call on seed 5 that had examined **4** candidates,
+ * the same as calls costing 0.03 ms elsewhere — a GC pause caught inside the
+ * window, not the solve. Counting the work is the honest instrument; timing it
+ * measures the machine.
+ */
+export function chaseSolveCost(): { calls: number; candidates: number; worstCandidates: number } {
+  return { calls: solveCalls, candidates: solveCandidates, worstCandidates: solveWorstCandidates };
+}
 
 /** How many placements the near bound has rejected — 0 was the whole of #518. */
 export function chaseCeilingRejections(): number {
@@ -247,6 +277,9 @@ export function chaseCeilingWorstShare(): number {
 /** Zero the near-bound counters — called when a ride is boarded. */
 export function resetChaseCeilingCounters(): void {
   ceilingRejections = 0;
+  solveCalls = 0;
+  solveCandidates = 0;
+  solveWorstCandidates = 0;
   ceilingCalls = 0;
   ceilingWorstShare = 0;
 }
@@ -285,9 +318,13 @@ export function solveChaseEye(
   aspect: number,
 ): ChaseEye {
   const wanted = halfFovRad * FRAME_SAFETY;
+  solveCalls += 1;
+  candidatesThisCall = 0;
 
   for (let extraBack = 0; extraBack <= MAX_EXTRA_BACK; extraBack += BACK_STEP) {
     for (let extraUp = 0; extraUp <= MAX_EXTRA_UP; extraUp += UP_STEP) {
+      solveCandidates += 1;
+      candidatesThisCall += 1;
       const back = BASE_BACK + extraBack;
       const high = BASE_UP + extraUp;
       eye.copy(rider).addScaledVector(behind, back).addScaledVector(up, high);
@@ -306,6 +343,7 @@ export function solveChaseEye(
       // historical placement already did — so the first candidate wins and
       // every park without companions keeps exactly the camera it had.
       if (!pet) {
+      if (candidatesThisCall > solveWorstCandidates) solveWorstCandidates = candidatesThisCall;
         return { back, up: high, aimAt: new Vector3().copy(rider), gaveUp: false };
       }
 
@@ -376,6 +414,7 @@ export function solveChaseEye(
         Math.min(1, Math.max(-1, toChild.clone().normalize().dot(axis))),
       );
       if (petAngle <= wanted && childAngle <= wanted) {
+      if (candidatesThisCall > solveWorstCandidates) solveWorstCandidates = candidatesThisCall;
         return { back, up: high, aimAt: aim, gaveUp: false };
       }
     }
@@ -383,6 +422,7 @@ export function solveChaseEye(
 
   // **No placement in range framed her line and stayed out of the hill.** Not a
   // floor to settle on — reported, and asserted zero by `check:pet-slide`.
+      if (candidatesThisCall > solveWorstCandidates) solveWorstCandidates = candidatesThisCall;
   return {
     back: BASE_BACK,
     up: BASE_UP,
