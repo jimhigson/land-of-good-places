@@ -9525,19 +9525,31 @@ const railRaceSupportsAreClaimedAsDrawn: Invariant = (facts) => {
     trees += ring.trees.length;
     struts += ring.struts;
 
-    // --- 1. the registry is the drawn geometry, to the number ----------------
-    const registryKeys = ring.claimed.map(key);
-    const drawnKeys = ring.fromDrawn.map(key);
-    if (
-      registryKeys.length !== drawnKeys.length ||
-      registryKeys.some((k, i) => k !== drawnKeys[i])
-    ) {
-      const firstDiff = registryKeys.findIndex((k, i) => k !== drawnKeys[i]);
+    // --- 1. the registry is the drawn geometry -------------------------------
+    // Kind, count and order exact; each number within float32 of the other.
+    // The registry holds the search's float64 and the instance buffers hold
+    // float32, so a metre read back off a drawn strut is good to about seven
+    // significant digits — the mesh format's slack, the same one
+    // `theRoadsCorridorIsTheRoadItDrew` allows, not a tuned tolerance.
+    const FLOAT32_SLACK = 1e-3;
+    const same = (a: Claim, b: Claim): boolean => {
+      if (a.kind !== b.kind || a.shape.shape !== b.shape.shape) return false;
+      const na = Object.values(a.shape).filter((v): v is number => typeof v === 'number');
+      const nb = Object.values(b.shape).filter((v): v is number => typeof v === 'number');
+      return na.length === nb.length && na.every((v, i) => Math.abs(v - (nb[i] as number)) <= FLOAT32_SLACK);
+    };
+    const firstDiff = ring.claimed.findIndex((claim, i) => {
+      const drawn = ring.fromDrawn[i];
+      return drawn === undefined || !same(claim, drawn);
+    });
+    if (ring.claimed.length !== ring.fromDrawn.length || firstDiff !== -1) {
+      const at = firstDiff === -1 ? ring.claimed.length : firstDiff;
       wrong.push(
         `seed ${facts.seed}: the ${ring.label} ring's registry claims are not what its drawn ` +
-          `supports produce — ${registryKeys.length} claimed vs ${drawnKeys.length} from the ` +
-          `${ring.trees.length} drawn trestles; first difference at claim ${firstDiff}: ` +
-          `registry ${registryKeys[firstDiff] ?? '(none)'} vs drawn ${drawnKeys[firstDiff] ?? '(none)'}. ` +
+          `supports produce — ${ring.claimed.length} claimed vs ${ring.fromDrawn.length} from the ` +
+          `${ring.trees.length} drawn trestles; first difference at claim ${at}: ` +
+          `registry ${ring.claimed[at] ? key(ring.claimed[at]!) : '(none)'} vs drawn ` +
+          `${ring.fromDrawn[at] ? key(ring.fromDrawn[at]!) : '(none)'}. ` +
           'The search asked with one geometry and the builder drew another',
       );
     }
