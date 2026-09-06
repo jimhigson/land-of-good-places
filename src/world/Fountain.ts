@@ -9,6 +9,7 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three';
+import { FOUNTAIN_RIM_COLLIDER_HALF } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { pinkStoneTexture } from '../core/textures';
 import { ART } from '../art/style/artPalette';
@@ -362,7 +363,7 @@ export class Fountain implements GameSystem {
         z + Math.sin(a1) * this.rimRadius,
         x + Math.cos(a2) * this.rimRadius,
         z + Math.sin(a2) * this.rimRadius,
-        0.32,
+        FOUNTAIN_RIM_COLLIDER_HALF,
         Fountain.RIM_TOP_HEIGHT,
         true,
       );
