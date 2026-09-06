@@ -192,6 +192,8 @@ export interface SeedReport {
     readonly width: number;
     readonly bottom: number;
     readonly top: number;
+    /** `CAT_BUS_TOP`, the bus's own owner of its height — must equal `top`. */
+    readonly ownerTop: number;
   };
   /** The run the bus was swept along, for the transcript. */
   readonly route: { readonly fromX: number; readonly toX: number; readonly z: number };
@@ -307,25 +309,9 @@ async function measureOneSeed(): Promise<void> {
   if (!Number.isFinite(busBox.min.x) || busBox.max.y <= busBox.min.y) {
     throw new Error('check:swept-bus: the drawn cat bus has no measurable body');
   }
-  // **The bus's own owner must equal the drawn top** (ruling 3, 6 Sep 2026).
-  // `CAT_BUS_TOP` is what the road's corridor claim carries as headroom and
-  // what the arrival's sightline keep-out reads; this box is the drawn
-  // vehicle. They were two definitions once — a hand-copied ear formula 6.8 cm
-  // under the face's crown — and nothing compared them. Measured independently
-  // here, on every run, so the gap can never reopen silently.
+  // The bus's own owner of its height, carried up to the parent, which asserts
+  // it equals this box's top and says so where a run's reader can hear it.
   const { CAT_BUS_TOP } = await import('../src/world/entrance/catBus.ts');
-  const ownerGap = busBox.max.y - CAT_BUS_TOP;
-  if (Math.abs(ownerGap) > 1e-3) {
-    throw new Error(
-      `check:swept-bus: CAT_BUS_TOP (${CAT_BUS_TOP.toFixed(4)} m, the bus's own owner) is not the drawn ` +
-        `top (${busBox.max.y.toFixed(4)} m, vertex-precise Box3) — off by ${ownerGap.toFixed(4)} m. ` +
-        'Two definitions of one thing: derive the owner from the geometry that reaches highest, never restate it.',
-    );
-  }
-  process.stdout.write(
-    `  owner check: CAT_BUS_TOP ${CAT_BUS_TOP.toFixed(4)} m equals the drawn top ${busBox.max.y.toFixed(4)} m ` +
-      `(off by ${ownerGap.toFixed(4)} m, slack 0.001)\n`,
-  );
 
   // --- the posts, as they are drawn ----------------------------------------
   interface Sample {
@@ -519,6 +505,7 @@ async function measureOneSeed(): Promise<void> {
       width: busBox.max.x - busBox.min.x,
       bottom: busBox.min.y,
       top: busBox.max.y,
+      ownerTop: CAT_BUS_TOP,
     },
     route: { fromX, toX, z: z0 },
   };
@@ -596,6 +583,8 @@ reports.sort((a, b) => a.seed - b.seed);
  * inferred later.
  */
 const voids: string[] = [];
+/** Float slack between the owner and the measured top: a millimetre, not a margin. */
+const OWNER_SLACK = 1e-3;
 for (const report of reports) {
   for (const name of TRESTLE_MESHES) {
     if ((report.instances[name] ?? 0) === 0) {
@@ -608,6 +597,20 @@ for (const report of reports) {
   }
   if (report.samples === 0) {
     voids.push(`seed ${report.seed}: the sweep had no post samples to look at`);
+  }
+  // **The bus's own owner must equal the drawn top** (ruling 3, 6 Sep 2026).
+  // `CAT_BUS_TOP` is what the road's corridor claim carries as headroom and what
+  // the arrival's sightline keep-out reads; `bus.top` is the drawn vehicle,
+  // vertex-precise. They were two definitions once — a hand-copied ear formula
+  // 6.8 cm under the face's crown — and nothing compared them. Compared here on
+  // every seed, and said out loud below, so the gap can never reopen silently.
+  if (Math.abs(report.bus.top - report.bus.ownerTop) > OWNER_SLACK) {
+    voids.push(
+      `seed ${report.seed}: CAT_BUS_TOP (${report.bus.ownerTop.toFixed(4)} m, the bus's own owner) is ` +
+        `not the drawn top (${report.bus.top.toFixed(4)} m, vertex-precise Box3) — off by ` +
+        `${(report.bus.top - report.bus.ownerTop).toFixed(4)} m. Two definitions of one thing: derive the ` +
+        'owner from the geometry that reaches highest, never restate it.',
+    );
   }
   if (report.lifted !== 0) {
     voids.push(
@@ -634,6 +637,8 @@ process.stderr.write(
     (bus && route
       ? `  bus body as drawn: ${bus.length.toFixed(2)} m long, ${bus.width.toFixed(2)} m wide, ` +
         `${bus.bottom.toFixed(2)} to ${bus.top.toFixed(2)} m above the ground it stands on\n` +
+        `  owner check: CAT_BUS_TOP ${bus.ownerTop.toFixed(4)} m vs the drawn top ${bus.top.toFixed(4)} m ` +
+        `(off by ${(bus.top - bus.ownerTop).toFixed(4)} m, slack ${OWNER_SLACK})\n` +
         `  swept along z=${route.z.toFixed(2)} from x=${route.fromX.toFixed(2)} to ` +
         `x=${route.toX.toFixed(2)}, every ${SWEEP_STEP} m\n`
       : '') +
