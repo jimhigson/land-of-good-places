@@ -76,6 +76,68 @@ Not started: curving the ground, measuring the sky on extended ground.
 **#498 (entrance road) is still blocked on the ground shape** — nothing this
 session settled it, because the session went to Jim's re-prioritisation.
 
+## Seed 288's bridge throw — root-caused to the Sky Cruiser's low corridor
+
+**The sphere does not break bridge siting directly. It breaks it four steps
+upstream, through a height threshold that reads the ground.**
+
+`test/procgen/seed-288.test.ts` throws during park *construction* (not an
+assertion) with:
+
+```
+rail crossings: the drawn paths cross the railway at railD 35.1 (-36.2, 2.8),
+which snaps to no proven bridge site.
+```
+
+**It does not throw on `main`** — measured at `61e95fe5`, exit 0, 88 passed. So
+it is this branch's, and it is worth knowing exactly why.
+
+### Two hypotheses, one killed by experiment
+
+The obvious suspect was **module initialisation order**: this branch removed
+`terrain.ts`'s import of `PARK_BOUNDARY`, and losing an import edge can change
+when modules evaluate and therefore the seeded RNG sequence. Tested directly by
+restoring the edge as a side-effect `import './boundary';` while keeping the
+sphere maths. **Identical failure, same coordinate** — so it is not init order,
+it is genuinely geometric. (The import is not needed and was not kept.)
+
+### The actual chain
+
+`plan.ts:256`, inside `cruiserLowPoints()`:
+
+```ts
+if (probe.y - terrainHeight(probe.x, probe.z) >= 5.9) continue;
+```
+
+That collects the Sky Cruiser's **low-flying** sample points — the places it
+flies under 5.9 m above the ground — and `clearStationDistance` asks them for
+every candidate offset of every station. So:
+
+1. The sphere lowers the ground away from the park's centre (−3.25 m where the
+   bus drives, −5.73 m at the road's reach).
+2. `probe.y - terrainHeight` therefore gets **larger** for the same cruiser.
+3. Fewer points fall under 5.9 m, so the low corridor **shrinks**.
+4. Station placement changes, so the **train route** changes.
+5. `TRAIN_PLAN` feeds `crossingPlanSolve`, so **`CROSSING_SITES` change**.
+6. On seed 288 the path router draws a crossing where the solver proved no
+   site, and `crossings.ts:432` throws.
+
+**Nothing in that chain is wrong on its own.** The cruiser really *is* higher
+above the ground once the ground falls away; the 5.9 m test is doing its job.
+
+### What it exposes, which is the part that matters
+
+`crossings.ts`'s own comment says this case is *"always a bug upstream — find
+the router that drew this leg"*. So the path router and the site solver can
+disagree, and the only thing that kept them agreeing was the particular
+geometry the hill happened to produce. **A generator that throws rather than
+backtracking is not doing what CLAUDE.md requires of every generator here**,
+and that brittleness is pre-existing; the sphere is what exercised it.
+
+Do **not** fix this by widening 5.9, which is a real clearance number owned by
+the cruiser, nor by dropping seed 288 from the pool before the disagreement
+itself is understood — the seed is the messenger.
+
 ## Unreachable-so-copied is a distinct smell from varies-so-copied
 
 Worth naming, because the repo has more of the first than anyone has written
