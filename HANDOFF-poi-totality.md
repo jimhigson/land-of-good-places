@@ -137,3 +137,9 @@ old rule; 195 → 8 ms; layout stage 26.9 ms. Gates rerunning (`check2.out`,
 PR body draft: scratchpad `pr-body.md` (two placeholders: lattice-after,
 arrival verdict). Probes `scripts/_probe-*.mts` are untracked; delete before
 the PR. `/spawn` link: `/spawn?pos=-46.7,29.6&seed=13` (dodgems door, seed 13).
+
+## PR #596 open (against design/round-robin-generation), all gates green
+
+Head 03080f31 + this. Awaiting reviewer/QA via the Overseer and the deploy
+preview comment; link to hand over: `<preview>/spawn?pos=-46.7,29.6&seed=13`.
+Do not merge own work. Probes deleted; scratchpad `pr-body.md` is the body.
