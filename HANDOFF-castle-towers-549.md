@@ -72,104 +72,100 @@ tower solids are directly usable as world coordinates. Verified by reading both,
 because a frame mismatch would have put four colliders in the wrong place while
 every number still looked plausible.
 
-## State
-
-- [x] Worktree at `731f7cbe`, installed
-- [x] Instrument written, **both controls passed**, bug quantified
-- [ ] Register the colliders from `CASTLE_TOWERS`
-- [ ] Prove the check goes red without the fix
-- [ ] `keepOutsFor` reachability: prove no doorway / stand spot / seat blocked
-      (the castle doorway is on the **south** face between `ENTRANCE_MIN_X` and
-      `ENTRANCE_MAX_X` — the nearest thing at risk)
-- [ ] Fold the sweep into `check:castle`
-- [ ] Invariant in `test/procgen/invariants.ts` if placement is generated
-- [ ] `check`, `test:procgen`, `check:coplanar`, `build` — exit codes unpiped
-- [ ] `/spawn` link + one sentence, handed to the Overseer, not to Jim
-
-## Rebase warning inherited
-
-`main` moved twice tonight: #517 added `check:node` **first** in the chain, #523
-wrapped the chain in a watchdog. If a chain conflict arises, rebuild the
-resolution from the **merge base**'s step list (not a moved `main`), re-apply
-this branch's addition, and verify by **parsing** the scripts object comparing
-step **sets** — never counts, never grep. `rerere` is on and will replay a stale
-resolution silently.
-
-
 ---
 
-# Status after the layout fix (ruling: option 1)
+# DONE — PR 581 open, approved, green on all six gates
 
-## Both halves of the omission are now fixed, from one owner
+**Nothing here is outstanding.** An earlier version of this file said
+`test:procgen` was red on seed 288 with a decision left to make. That is
+**stale and was wrong to leave standing**: it is green, and had been for some
+time before the record caught up.
 
-The castle's extent had **two** wrong answers in the codebase and no owner: the
-collision world did not know about the turrets, and neither did the layout
-solver. Both now ask the same source.
+## Final state, measured at `08dca78c`
 
-- `core/constants.ts` (which imports nothing — the only cycle-free home, since
-  `building/layout.ts` imports `parkLayout`) owns `CASTLE_TURRET_BASE_RADIUS`
-  and `CASTLE_TURRET_CORNERS`.
-- `parkLayout`'s `footprintAsPlaced` writes the turrets into the **placed**
-  footprint. Both consumers of `edgeDistanceAlong` already read
-  `PlacedEntry.footprint` — the entrance placement, and the spur's target at
-  `paths.ts:3902` — so neither had to learn what a turret is, **and the
-  short-spur cascade disappeared without its own patch.**
-- They could not be declared statically in `parkManifest`, because the drawn
-  castle is not centred on its plot: it is nudged `BUILDING_CENTRE_NUDGE`
-  toward the park middle, in a direction that depends on where the plot landed.
+| gate | exit |
+|---|---|
+| `pnpm run check` (63 steps) | **0** |
+| `pnpm run test:procgen` (21 files, **759 passed, 0 skipped**) | **0** |
+| `pnpm run check:coplanar` (224 seams, all baselined, none new) | **0** |
+| `pnpm run check:swept-bus` | **0** |
+| `pnpm run check:park-pool` (**all 16 pool seeds**) | **0** |
+| `pnpm run build` | **0** |
 
-**Measured result: only the three broken parks moved.**
+**Four standalone gates, not three.** Each was verified to have actually
+*executed* by finding its own script name in its own log — an exit code alone
+does not prove a step ran, and another agent reported "all gates green" having
+never executed `check:swept-bus`. One trap in that technique: `check:hop-clearance`
+runs `scripts/measure-hop-clearance.mts`, so grepping for the check's name
+finds nothing even though it ran.
 
-| seed | before | after |
-|---|---|---|
-| 274 | 1.15 m from a turret axis — INSIDE STONE | 3.61 m — clear |
-| 288 | 0.46 m — INSIDE STONE | 3.60 m — clear |
-| 346 | 0.45 m — INSIDE STONE | 3.60 m — clear |
+## What the fix turned out to be: one omission, four consumers
 
-The other **thirteen** seeds' entrances are unchanged, canonical included.
+"How far does the castle reach?" had no owner, and four places each answered
+with the same wrong rectangle. All four were silent for the same reason — the
+turrets were walk-through, so standing inside drawn stone looked fine.
 
-## One failure left, and it is not local
+| consumer | how it surfaced |
+|---|---|
+| the **collider** | a child walks through 2.3 m of stone |
+| the layout solver's **entrance** | 3 of 16 seeds put sign, doormat and spur inside a tower |
+| the path **spur's target** (`paths.ts:3902`) | a spur stopping 2.00 m short |
+| the **waypoint seeder** (`insideFacade`) | seed 5: a waypoint 0.57 m from a turret axis, `poi.nospot: 1` |
 
-`test:procgen`: **1 failed | 758 passed**, seed 288,
-`no two close destinations are left with a wildly disproportionate paved detour`
-— `stall.keychain` and `station-0` are 14.2 m apart but 229.7 m by paving
-(16.13x).
+The last two were **found by this fix, not caused by it**. Making the stone
+solid is what made them observable.
 
-Investigated rather than assumed:
+Only the three broken parks moved: 274 1.15 → 3.61 m, 288 0.46 → 3.60 m, 346
+0.45 → 3.60 m. **Thirteen seeds unchanged, canonical included.** The 1.4 m
+stand-off was deliberately not shrunk to make a seed pass.
 
-- **Not the collider.** The train route on 288 is byte-identical with and
-  without it — loop length 188.263 both ways, same station tap points. The
-  railway does not pass near the turrets on that seed.
-- **Not local to the castle.** `station-0` is at (-24.7, -19.5); the castle
-  entrance moved from (27.8, -22.2) to (25.2, -20.1), roughly 50 m away.
+## The seed-288 warp re-search is SUPERSEDED — do not imitate it
 
-So the 2.6 m entrance move reshuffled the **global** path solve, and this seed
-now lands on a network where two close destinations get no direct connector.
-That is chaotic sensitivity in the walk-graph search, not a generator refusing
-to adapt to the change — the one that *was* refusing (the spur stopping 2.00 m
-short) is fixed and gone.
+`parkWarp.ts`'s 288 entry was re-searched here
+(`{layout:{waterFight:1}}` → `{layout:{'stall.waterFight':2}}`, SOLVED in 26
+candidates, `stranded=0`, `oracle=pass`, JSONL under `measurements/`).
 
-**I deliberately did not shrink the turret stand-off to make this pass.** 1.4 m
-is the same stand-off every other anchor's doormat gets; picking a smaller one
-because it makes a seed green is the disease CLAUDE.md names.
+**Jim has since ruled the seed pool becomes 0..15** — *"I don't care about
+those seeds — the new procgen should work for 0..15 so forget they ever
+existed"* — so seed 288 is a park being retired, and that re-search is about
+geometry nobody will generate. It is left in place because it is correct for
+the pool as it stands today and removing it would make this branch red, **but
+it is not a live mechanism to copy.** Anyone reaching for "re-search the warp
+vector" as a remedy should first check whether the seed still exists.
 
-## The decision left
+The seed-5 warp re-search was **abandoned** and is not in the diff: UNSOLVED
+after 35 candidates, and its best candidate (`{layout:{fountain:1}}`) passed
+`check:park` while failing the Rail Race camera invariant — tested rather than
+believed from the label. Seed 5 was fixed at its source instead, in
+`insideFacade`, and keeps its original vector.
 
-1. **Make the walk graph guarantee a connector** between close destination
-   pairs. Real work in `paths.ts` and its own ticket, I think.
-2. **Replace seed 288 in the pool, and write down why.** This was refused
-   earlier — correctly — because it would have hidden the entrance defect. That
-   reason is gone: the defect is fixed on all three seeds. What remains is a
-   seed whose park has a genuinely poor walk (230 m between two things 14 m
-   apart), which is exactly the "not every seed makes a good park" case the pool
-   exists for.
+## Independently confirmed in review
 
-## The `/spawn` link, ready for Jim (do not send directly)
+Re-measured by the reviewer rather than taken on trust: bodies y 0.73–11.33 at
+radius **2.2140** (two rings — 2.2140 foot, 2.0500 top), roofs y 11.33–15.53 at
+**2.4500**, so the cone genuinely starts 10.6 m up; the taper argument for not
+using `topIsAbsolute` holds on measured ring data; `CASTLE_TURRET_BASE_RADIUS`
+is genuinely single-owner with mesh and collider both built from it; and the
+discs go into the **placed** footprint, so both pre-existing consumers of
+`edgeDistanceAlong` are corrected without learning what a turret is.
+
+## Filed separately, not fixed here
+
+- **#577** — the walk graph can leave two close destinations without a
+  connector (seen on 288, on spare seed 1104 while vetting, and in seed 5's
+  recorded history).
+- **#579** — the documented local pre-push ritual can go fully green on a tree
+  that breaks a park: `check` and `test:procgen` do not build the sixteen
+  parks. This is how the fourth consumer was found, and it has since caught a
+  second agent.
+- Both recorded spare seeds, **1102 and 1104, fail against current `main`** —
+  the spares noted in `parkSeedPool.ts` are stale.
+
+## The `/spawn` link (held for the Overseer to give Jim)
 
 Verified standable against the built collision world:
 `/spawn?pos=60.4,24.0&facing=233`
 
-Both halves in one sentence: *walk up to the castle's corner turret — you used
-to stroll straight through the stone and out the other side, and on some parks
-the castle's own doormat was buried inside it; now the tower stops you and the
+*You used to stroll straight through the corner tower, and on some parks the
+castle's own doormat was buried inside it; now the tower stops you and the
 doorway is out in the open.*
