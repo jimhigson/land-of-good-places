@@ -453,6 +453,68 @@ new finding means you have just made another one.
 
 ---
 
+### A solid publishes its own radius; the collider asks it
+
+**If a child can see it and lean on it, its collider and its mesh must be built
+from one number — and that number belongs to the solid, not to either of them.**
+
+Issue #549 is the worked example. The castle's four corner turrets had **no
+collider at all**, so a child walked into 2.2 m of drawn stone and out the other
+side. Writing one found the real fault underneath: `TOWER_RADIUS *
+TOWER_BASE_FLARE` was being computed in **three separate places** —
+`castleMasonry.ts`'s `CylinderGeometry`, `CASTLE_TURRET_FOOTPRINT_RADIUS`, and
+`CASTLE_TOWERS`'s `radiusBottom` — and **the mesh did not read the solid at
+all.** They agreed only because three copies of one expression happened to be
+typed identically. Re-flare the turret and the drawn stone moves while the
+collider and the ride that routes around it stay put.
+
+So:
+
+- **The solid owns the number.** `CASTLE_TURRET_BASE_RADIUS` is defined once;
+  the geometry, the collider and the layout all ask it. Nothing recomputes the
+  product, and a comment promising two numbers agree is not a mechanism.
+- **A faceted solid of revolution gives its collider the *circumradius*.** The
+  turret shaft is a 16-segment cylinder, and a 16-gon's flats sit at
+  `cos(π/16)` = **0.98079** of its circumradius. Taking the circumradius holds a
+  child at most 43 mm proud of a flat face and **never inside drawn stone**;
+  taking the flat radius would let her into the corners. Round up, always.
+- **Take the radius at the height she can actually reach**, not the widest the
+  object ever is. Measured off the built mesh, the turret shaft spans y
+  0.73–11.33 at radius **2.2140**, and its roof cone spans y 11.33–15.53 at
+  **2.4500**. The cone is the wider number and it starts ten metres over her
+  head — using it would have stood her 0.236 m off visible stone, which is an
+  invisible wall, the same mesh-versus-collider disagreement pointed the other
+  way (#562).
+- **Prefer a disc to a rectangle for anything round.** `CollisionWorld`'s
+  `addRectangle` is four walls round a hollow middle and a mover inside one is
+  never pushed out; `addCircle` pushes radially from wherever the mover is,
+  including dead centre, so it has no inside to be trapped in.
+- **`topIsAbsolute` only when the answer really differs with height.** The
+  turret shaft *narrows* upward (2.2140 at its foot, 2.0500 at its top), so the
+  widest stone a child can reach is at her feet and one radius covers every
+  height. A banded collider there would be machinery with nothing to do. It
+  earns its place on a knee-high prop — solid to feet on the floor, air to feet
+  mid-jump (`hotel/place.ts`).
+
+**And the solid's extent is not only the collider's business.** The same #549
+omission existed one level out: the castle's *layout* footprint was the
+rectangle the turrets stand outside, so on three of the sixteen pool seeds the
+solver put the castle's own doormat and path spur **inside a tower**. Anything
+that asks "how far does this reach?" — collision, path routing, scenery
+exclusion, plot packing — must get the answer from the same owner.
+
+**Prove it by marching, not by reading the collider list.** Assert that
+`addCircle` was called and you have proved a call was made. March a
+player-sized body at the thing from many bearings at more than one stride —
+including `PLAYER_LONGEST_STEP`, because a gap you cannot walk into at 5 cm a
+step you may still tunnel into at full sprint — and assert where it stops.
+`check:castle-towers` and `check:hotel`'s probe 22 are the pattern, and both
+carry a control at each end: a march at known-solid stone and a march across
+known-open lawn, so a green run cannot mean the instrument was never
+consulting collision.
+
+---
+
 ## 8. Quick checklist before you commit an asset
 
 - [ ] Origin at the base, facing +Z, `root.scale` untouched
@@ -466,5 +528,10 @@ new finding means you have just made another one.
 - [ ] No two faces share a plane — the hidden one is deleted, not offset.
       **`pnpm run check:coplanar` answers this**; a rule nobody can run is a
       rule that rots, and this one did, three reports in one week
+- [ ] If a child can lean on it, it has a collider built from the **solid's
+      own published radius** — not a second copy of the number, and the
+      circumradius if the mesh is faceted. **Marched at, not asserted**: a
+      probe from many bearings at more than one stride, with a control at each
+      end (`scripts/check-castle-towers.mts` is the pattern)
 - [ ] No `Math.random()`, no inline hex, no `MeshBasicMaterial` on a solid
 - [ ] Looked at it in `/art-samples.html` at gameplay distance, not just close up
