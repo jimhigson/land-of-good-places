@@ -877,6 +877,85 @@ skips that were one whole file failing to *build*, reported as quietly as
 any skip — is issue #524, independently ownable: a park that cannot be
 constructed is the suite's most severe result and must be its loudest.*
 
+#### Seed 288, root-caused (6 Sep): the path router and the site solver disagree, and the fix is a refusal, not a tune
+
+The chain, found by the #511 Engineer and confirmed by experiment
+(restoring `terrain.ts`'s `PARK_BOUNDARY` edge as a side-effect import
+gave an identical failure at an identical coordinate — geometric, not
+init order): the sphere lowers the ground away from centre, so
+`cruiserLowPoints()`'s 5.9 m clearance test (`plan.ts:256`) qualifies
+fewer points → the low corridor shrinks → the station moves → the train
+route moves → `TRAIN_PLAN` feeds `crossingPlanSolve` → **`CROSSING_SITES`
+move** → a drawn path crosses the railway at railD 35.1 with no site
+within `SITE_SNAP_TOLERANCE` 8 m → `crossings.ts:432` throws. Nothing in
+the chain is individually wrong; two generators simply have no contract
+between them and the hill kept them agreeing by accident.
+
+Read from the code (`paths.ts`, `crossings.ts`, `crossingPlanSolve.ts`):
+
+- `routeLeg` is the only *legal* crosser — the rail corridor is an
+  obstacle everywhere and the sites are its only apertures. But the drawn
+  geometry `computeCrossings` measures is produced by several things that
+  never ask the railway: the spur's `lead`/`past` points (`paths.ts:3905-3915`),
+  station approach points (`:4060`), connector `leadA`/`leadB` (`:4514-4520`),
+  the lattice-snap joining jogs (`:2971-2973`, which say so), the
+  draw-time fillet + Catmull-Rom pass whose samples are the truth
+  (`:5143`, `:5215`), and **the ring itself** — a plain circle at
+  `RING_RADIUS` (`:259-274`) with no rail term at all.
+- `computeCrossings` runs **after** `buildPaths`, from `Scenery`/`LampPosts`
+  via `bridgeKeepout.ts` and from `ParkTrain`'s constructor — never inside
+  the router's own loop.
+- `selectSpaced` prunes sites (24 m spacing, footprint overlap, warp bans)
+  and, in its own comment, "nothing here prefers a site" where the
+  network needs one.
+
+**Ruling (Architect, 6 Sep).** This is the crossingSites case with its
+first customer, and the fix has the design's shape, not the hill's:
+
+1. **The question moves to commit time and becomes a refusal.** The
+   predicate `computeCrossings` already owns (a side *flip* of the drawn
+   samples within `TOUCH_DISTANCE`, snapped to a site within
+   `SITE_SNAP_TOLERANCE`) is exported **once** from `crossings.ts` and
+   asked by the `pathGraph` task on the built graph's *drawn* samples
+   **before** `offerPrewarmedPathGraph` publishes it. A foul there is a
+   refused decision inside the generator, with the offending edge named,
+   and the router takes its next decision. The construction-time throw
+   stays as the last-resort invariant and must become unreachable.
+   **One function, two askers** — not a second predicate in `paths.ts`.
+2. **"Next decision" per producer**, in order of cheapness:
+   - an unscreened appendage (spur lead/past, station approach,
+     connector lead, snap jog) is a producer drawing without asking the
+     world — the disease itself. It gets the same screen the leg has
+     (`railInfoAt` / `segmentHoldsRailSide`), and is shortened or bent
+     until it holds its side;
+   - a routed leg whose drawn curve slips across takes the next site
+     candidate, then re-routes;
+   - the ring, or a leg with no site within reach, **asks the march for a
+     site on demand at that rail distance** — `bridgeCandidateAt(d)`
+     exists and is exactly the exploration query; a site proven there is
+     added (sites are candidates, claimed when a conflict needs them —
+     the crossingSites section above, now load-bearing). If none can be
+     proven, the ring segment or leg re-routes; if nothing serves, the
+     failure is loud, names the seed and the edge, and is a *test
+     failure* (#524), never a skip.
+3. **Forbidden**: widening 5.9 (the cruiser's own clearance), widening
+   `SITE_SNAP_TOLERANCE` or `TOUCH_DISTANCE`, dropping seed 288 (the
+   messenger), and any new warp field — `banCrossingsAt` bans sites; a
+   field that *adds* one is the same disease with the sign flipped.
+4. **Proved red twice**: on seed 288 on the sphere branch (already red),
+   and by a deliberate break on `main` that the fix's refusal path must
+   catch — move one canonical site by more than 8 m along the loop and
+   watch the router refuse and re-route rather than the build throw.
+
+**Priority against stage 3**: this blocks #511, which is Jim's ruling and
+gates step 2; steps 3–4 cannot start before step 2. So it is **ahead of
+everything in stage 3 after #528's QA**, and dispatchable now — by the
+#511 Engineer, who holds the red seed and the falsification rig, as its
+own PR based on the sphere branch so it is reviewable alone. Brief:
+`docs/BRIEF-stage4-pre-crossing-refusal.md`. Stage-4 work brought
+forward, recorded as such; the registry is not required for it and must
+not be smuggled in.
+
 The heart of Jim's brief. Path growth, railway corridor and crossing
 negotiation interleave; bridges are born from path×rail conflicts with
 provisional-then-realised claims; `SITE_HALF_WIDTH` and the six ladders come

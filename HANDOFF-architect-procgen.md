@@ -32,10 +32,16 @@ first honest run found #501).
   binding number is the foot margin. **First prediction CONFIRMED on built parks** (seeds 24/131/326: feet 0,
   posts 1–2; table in the doc). Restated one (road outside ring → feet
   bind) still unmeasured; #511 Engineer measuring next.
-- **Seed 288 throws on bridge siting** (#511 branch only; not on main —
-  latent, revealed by the sphere). Filed under stage 4 as the first real
-  customer of crossingSites-as-exploration; the seed fix is the #511
-  Engineer's; the silent-skip harness half is #524.
+- **Seed 288, root-caused and RULED (6 Sep)**: cruiser 5.9 m clearance →
+  station → train route → sites move → a rail-unaware producer (ring /
+  spur lead / draw-time smoothing) crosses off-site → throw at planting.
+  Ruling: the `computeCrossings` predicate exported once and asked at
+  commit inside the `pathGraph` task; refusal ladder per producer;
+  on-demand `bridgeCandidateAt(d)`; forbidden to tune 5.9/tolerances,
+  drop 288, or add a warp field. **Priority: ahead of all stage 3 after
+  #528 QA** (it blocks #511, which gates step 2). Brief:
+  `docs/BRIEF-stage4-pre-crossing-refusal.md`, for the #511 Engineer.
+  #524 lands with it if not already merged.
   Terrain is no longer seed-dependent (1200 m sphere) — the outward
   march's bound is the support's lean limit, not the ground.
 - **Briefs**: step 1 = **#522, merged** into this branch at `0845e9fa`
