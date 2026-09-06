@@ -1,7 +1,7 @@
 import type { TrainRoute } from './route';
 import { pathCentreline } from '../pathGraph';
 import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
-import { CROSSING_SITES } from './crossingPlan';
+import { CROSSING_SITES, type CrossingSite } from './crossingPlan';
 import { Vector3 } from 'three';
 
 /**
@@ -88,6 +88,100 @@ const RUN_BREAK = 3;
  * the site by `paths.ts`, so a miss beyond a few metres is a different
  * crossing (the gate walk's own fixed corridor, mostly), not the site. */
 export const SITE_SNAP_TOLERANCE = 8;
+
+/**
+ * **The one owner of "do these drawn samples cross the railway, and where?"**
+ *
+ * A crossing is a *side flip*: two consecutive samples of one drawn run landing
+ * on opposite sides of the rail centre line, with at least one of them within
+ * {@link TOUCH_DISTANCE} of it. That definition, the {@link RUN_BREAK} stride
+ * guard that keeps two paths hugging opposite sides of the fence from reading
+ * as a crossing between them, and the {@link SITE_SNAP_TOLERANCE} snap to a
+ * planned site, are **one predicate with two askers**:
+ *
+ * - {@link computeCrossings}, at construction time, which turns the flips into
+ *   the decks and fence gaps the park draws;
+ * - the generator's `pathGraph` task, at **commit** time, which asks the same
+ *   question of the same drawn samples *before* the graph is published, so a
+ *   path crossing off-site is a refused decision naming the edge rather than a
+ *   throw from scenery planting three systems later.
+ *
+ * **It must stay one function.** A second "does this cross off-site?" written
+ * beside the router would be two definitions of one thing kept in step by hand
+ * — this repo's most expensive habit — and the copy would be found wrong by a
+ * park that fails to build, which is exactly how seed 288 was found.
+ *
+ * Stateful rather than a pure function over an array because the callers feed
+ * it from different places: `computeCrossings` walks `pathCentreline()` and
+ * then marches the esplanade, and the task walks the graph's edges. Both need
+ * "these samples are one run, those are another", which is what
+ * {@link CrossingScan.breakRun} says.
+ */
+export interface CrossingScan {
+  /** Offer the next sample of the current run. */
+  consider(x: number, z: number): void;
+  /** End the current run: the next sample starts a new one and cannot flip
+   *  against the last. */
+  breakRun(): void;
+  /** Every flip found so far, as distances along the loop, ascending. */
+  flips(): number[];
+}
+
+export function createCrossingScan(route: TrainRoute): CrossingScan {
+  const point = new Vector3();
+  const tangent = new Vector3();
+  const found: number[] = [];
+  let previous: { x: number; z: number; railDistance: number; side: number; perp: number } | null =
+    null;
+  return {
+    consider(x: number, z: number): void {
+      const railDistance = route.distanceNear(x, z);
+      route.pointAt(railDistance, point);
+      route.tangentAt(railDistance, tangent);
+      const perp = Math.hypot(point.x - x, point.z - z);
+      const side = Math.sign(tangent.z * (x - point.x) - tangent.x * (z - point.z)) || 1;
+      const current = { x, z, railDistance, side, perp };
+      if (previous) {
+        const stride = Math.hypot(x - previous.x, z - previous.z);
+        if (
+          stride < RUN_BREAK &&
+          side !== previous.side &&
+          Math.min(perp, previous.perp) <= TOUCH_DISTANCE
+        ) {
+          const half = route.length / 2;
+          const delta = route.wrap(railDistance - previous.railDistance + half) - half;
+          found.push(route.wrap(previous.railDistance + delta / 2));
+        }
+      }
+      previous = current;
+    },
+    breakRun(): void {
+      previous = null;
+    },
+    flips(): number[] {
+      return [...found].sort((a, b) => a - b);
+    },
+  };
+}
+
+/**
+ * The planned site a flip at this rail distance belongs to, or `null` if none
+ * is within {@link SITE_SNAP_TOLERANCE} — i.e. the path crosses the railway
+ * somewhere no bridge was ever proven.
+ *
+ * The other half of the predicate above, and the half that decides whether a
+ * crossing is legal. Both askers use it, so "off-site" means the same thing at
+ * commit time and at construction time.
+ */
+export function siteForFlip(route: TrainRoute, railDistance: number): CrossingSite | null {
+  for (const site of CROSSING_SITES) {
+    const along = Math.abs(
+      route.wrap(railDistance - site.railDistance + route.length / 2) - route.length / 2,
+    );
+    if (along <= SITE_SNAP_TOLERANCE) return site;
+  }
+  return null;
+}
 
 /**
  * A crossing whose nearest drawn-path sample is further away than this has
@@ -289,44 +383,12 @@ export function computeCrossings(
   stationDistances: readonly number[] = [],
 ): LevelCrossing[] {
   void stationDistances; // crossings are planned station-clear (crossingPlan.ts); kept for callers
-  const point = new Vector3();
-  const tangent = new Vector3();
-
-  /**
-   * Flip events: a single drawn run's consecutive samples landing on
-   * opposite sides of the centre line while at least one of them is within
-   * {@link TOUCH_DISTANCE} of it. This — not the cloud of "touches" the old
-   * clustering collected — is what a crossing *is*: in the strips between
-   * rail and boundary a path legitimately runs beside the fence for tens of
-   * metres, and measuring from raw touch spans smeared one crossing's
-   * halfGap to the 14 m cap and let it swallow the gate walk's own separate
-   * crossing 20 m away.
-   */
-  const flips: number[] = [];
-  let previous: { x: number; z: number; railDistance: number; side: number; perp: number } | null =
-    null;
-
-  const consider = (x: number, z: number) => {
-    const railDistance = route.distanceNear(x, z);
-    route.pointAt(railDistance, point);
-    route.tangentAt(railDistance, tangent);
-    const perp = Math.hypot(point.x - x, point.z - z);
-    const side = Math.sign(tangent.z * (x - point.x) - tangent.x * (z - point.z)) || 1;
-    const current = { x, z, railDistance, side, perp };
-    if (previous) {
-      const stride = Math.hypot(x - previous.x, z - previous.z);
-      if (
-        stride < RUN_BREAK &&
-        side !== previous.side &&
-        Math.min(perp, previous.perp) <= TOUCH_DISTANCE
-      ) {
-        const half = route.length / 2;
-        const delta = route.wrap(railDistance - previous.railDistance + half) - half;
-        flips.push(route.wrap(previous.railDistance + delta / 2));
-      }
-    }
-    previous = current;
-  };
+  // **The flip definition lives in `createCrossingScan`, not here.** It used to
+  // be written out inline in this function, which is why the generator had no
+  // way to ask the same question at commit time without copying it — and a
+  // copied predicate is the two-definitions disease. See `createCrossingScan`.
+  const scan = createCrossingScan(route);
+  const consider = (x: number, z: number): void => scan.consider(x, z);
 
   for (const sample of pathCentreline()) consider(sample.x, sample.z);
 
@@ -380,7 +442,7 @@ export function computeCrossings(
     consider(x, z);
   }
 
-  flips.sort((a, b) => a - b);
+  const flips = scan.flips();
   type BareCrossing = Omit<LevelCrossing, 'pathHalfWidth' | 'spine'>;
   const crossings: BareCrossing[] = [];
   let group: number[] = [];
@@ -400,11 +462,9 @@ export function computeCrossings(
     // rail-corridor test sits right at its margin on curved stretches, so
     // that jitter alone flipped provably-feasible sites into level-crossing
     // fallbacks (canonical seed, 2026-08-23: sites 172/228 both lost to it).
-    for (const site of CROSSING_SITES) {
-      const along = Math.abs(
-        route.wrap(midDistance - site.railDistance + route.length / 2) - route.length / 2,
-      );
-      if (along <= SITE_SNAP_TOLERANCE) {
+    const site = siteForFlip(route, midDistance);
+    {
+      if (site) {
         crossings.push({
           x: site.x,
           z: site.z,
