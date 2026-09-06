@@ -202,3 +202,49 @@ thing that moves 12 → 0; nothing else is named by any refusal.
 4. The four legacy predicates in `groundIsClear` stay, behind the one
    predicate function, as the not-yet-migrated obstacle list (stage 5), with
    the registry asked first. Confirm.
+
+## Phase 2 measured on a scratch merge with the sphere (6 Sep, night)
+
+Branch rebased onto `design/round-robin-generation` f6ad6032 (pushed
+11d822c6; the step-1 carry commit is gone, `main` is in the base). The four
+open questions are ruled — `HANDOFF-architect-procgen.md` at e422a951:
+(1) (lean, arc) search as built; (2) `maxTrunkLean` as built; (3) headroom =
+the DRAWN bus, `catBus.ts`'s owner made equal to the drawn top and
+`check:swept-bus` asserting owner == Box3 top; (4) legacy predicates stay
+behind the one function, each refusal NAMES its predicate
+(`legacy:distanceToPath`), stderr count per seed. The throw on a refused slot
+is step 4's to convert; keep the blockers named.
+
+Scratch merge `scratchpad/step2-sphere-merge` (detached at 11d822c6 +
+`origin/feat/sphere-combined`, NOT pushed, measurement only). Conflicts and
+how they resolve — the recipe for the real merge once the sphere lands:
+- `track.ts`: ours in all six hunks (ladders gone, registry-first search);
+  graft the sphere's `addPostCollider` (leaning collider, walks the lean to
+  `TALLEST_CHILD_HEIGHT`) called with `spot.tree.trunkFoot/trunkTop` in
+  place of the single foot circle; drop its `postClearsEntranceRoad`,
+  `isInEntranceRoad`, `SUPPORT_MAX_RADIAL_NUDGE` imports (the road is a
+  corridor claim with headroom; the registry answers first); add
+  `POST_TOP_RADIUS` to the trestleGeometry import; drop `footRadius` param.
+- `roadCorridor.ts`: keep both imports (drop `CAT_BUS_LENGTH`); the sphere's
+  per-run body already carries `headroom: CAT_BUS_TOP`.
+- `parkFacts.ts`/`invariants.ts`: keep both; `busRun` fact becomes the ARC
+  (`entranceBusArriveAt/VanishAt`, `entranceRoadAt/Facing`, ±half a bus,
+  points every PLAYER_RADIUS with the right vector `cos/−sin facing`), and
+  `theRoadClaimCoversTheBusRun` samples those through the sphere's
+  `distanceOutside` (one owner) — the straight-road constants it read from
+  `layout.ts` are deleted on the sphere.
+- `swept-bus-baseline.mts`: deleted (ours). `supportGround.ts` STAYS: the
+  road reads `outsetClearOfSupports` from it (road files are the sphere
+  engineer's); re-derive its band from the lean bound rather than delete.
+
+Numbers on the merge (`tsc` 0, `typecheck:test` 0):
+- `check:swept-bus`: **0 posts on all 14 pool seeds, every seed built** (hill: 2/14).
+- `check:park` per seed, trestle refusals: **0 on every pool seed (14/14
+  built)**; seeds 0..15: 0 refusals on the ten whose ring gets built
+  (0,2,4,5,6,7,9,11,13,15); 1, 12, 14 throw at the crossings and 3, 8, 10 at
+  the train route BEFORE the ring exists — unmeasured, other producers'.
+  Post-build reds are `poi.stranded`/`nospot` (the #596 rung, not in this tree).
+- `test:procgen` 706/706; `railRaceSupportsAreClaimedAsDrawn`: worst lean
+  **0 % of its limit on every seed** (98–100 trestles, ~40k claim pairs);
+  `theRoadClaimCoversTheBusRun`: 87 samples, 17.8 m run, 0 outside, every seed.
+Logs: scratchpad `merge-*.log`, `merge-seeds/`.
