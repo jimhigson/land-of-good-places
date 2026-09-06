@@ -134,6 +134,41 @@ made **seed 225 worse, 73 to 84**. Reverted, unpushed. If someone fixes the
 probe height on principle later, that is fine — but it is not this bug, and it
 needs its own justification and its own measurement.
 
+## ⛔ `entranceRoadBrow()` is 1.0 m, and this is worse than a coverage gap
+
+Raised by the step-2 engineer at `b6b1a983`, confirmed here by measurement:
+
+```
+brow 1.000 m; bus runs -1.00 .. 1.00
+stations 143, arc spans roughly 142 m of road
+```
+
+**The cat bus drives two metres of a 142 m road.** `entranceBusArriveAt()` and
+`entranceBusVanishAt()` are both `±entranceRoadBrow()`, which replaced two
+hand-measured x coordinates with "the point at which the road goes over the
+hill". On the old hill that point was far out. **The sphere falls away from the
+park's centre in every direction, so the road is descending from the very first
+metre and the brow collapses to nothing.**
+
+Two consequences, and the second is the serious one:
+
+1. **`check:swept-bus` sweeps the bus over 2 m of arc**, about one bus length
+   either side of the stop. Its headline — 0 intruding posts on 14 seeds, which
+   this file and the PR body both quote as acceptance — is therefore covering
+   far less than its name suggests. **Discount that evidence accordingly**; it
+   is not wrong, it is narrow, and nothing in its output says so.
+2. **It is a live visible defect, not only an instrument one.** The whole point
+   of the brow was that *"the bus drives on from out of sight and leaves the
+   same way, instead of appearing on a kerb"*. At a 1 m brow it appears on the
+   kerb. `check:cat-bus` has been printing the evidence all along — `bus
+   travelled x 0.8 to -1.1` — and I read past it.
+
+Not fixed tonight, by the Overseer's instruction, and it is mine to own. The
+fix is in `roadRoute.ts`'s `browAt()`: "over the hill" needs a definition that
+survives a ground with no hill on it — most likely the road's own grade against
+`BUS_MAX_GRADE`, or a plain distance, rather than a search for a crest that no
+longer exists.
+
 ## The split: attempted, and it does not decompose the way the seams suggested
 
 The Overseer asked for four pieces to go to `main` as their own PRs — the
