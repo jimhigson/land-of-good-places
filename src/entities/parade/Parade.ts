@@ -16,6 +16,7 @@ import type { Player } from '../Player';
 import { PlayerTrail } from './trail';
 import { ParadeMember, type BedPhase, type PetTablePlace } from './ParadeMember';
 import { BackpackPeek } from './BackpackPeek';
+import { MAX_PARADE_VISIBLE } from './paradeCap';
 
 /**
  * The parade of cute things.
@@ -53,8 +54,14 @@ import { BackpackPeek } from './BackpackPeek';
  * thing in the player's hands is never also in the parade.
  */
 
-/** How many walk behind you at once. More than this and the park disappears. */
-const MAX_VISIBLE = 8;
+/**
+ * How many walk behind you at once.
+ *
+ * Read from {@link MAX_PARADE_VISIBLE} rather than written here, because
+ * `main.ts`'s `?pets=N` needs the same number to warn that it is about to
+ * grant more companions than can walk, and cannot import this file to get it.
+ */
+const MAX_VISIBLE = MAX_PARADE_VISIBLE;
 
 /**
  * Seconds before the line shuffles, when you own more than fit.

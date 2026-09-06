@@ -29,6 +29,9 @@ import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
 import { gameStore, walksInParade } from './state';
 import { ALL_CATALOGUE_ITEMS } from './world/building/shops/catalogue';
+// The number only — `Parade` itself reaches `three` and the whole scene graph,
+// and this is the boot entry that lazy-loads `Game` on purpose.
+import { MAX_PARADE_VISIBLE } from './entities/parade/paradeCap';
 import { saveFlags } from './state/flags';
 import { clearSave, loadSave, type SaveFile } from './state/save';
 import { PARK_SEED } from './world/parkManifest';
@@ -641,6 +644,29 @@ function grantDebugPets(search: string): void {
     if (spec !== undefined) gameStore.catchWildPetOnce(spec);
   }
   gameStore.setCarried(null);
+
+  // **Say when the number asked for cannot all be shown**, because the
+  // shortfall is in a different system and looks like this link is broken.
+  //
+  // Only `MAX_PARADE_VISIBLE` companions have a body in the park at once, and
+  // `Parade.sendPetToBed` is a no-op for one that has none — so past that
+  // count some animals never walk to a bed however many beds were built. That
+  // cap predates `?pets=` and is a deliberate design limit ("more than this
+  // and the park disappears"), not something this link should quietly raise;
+  // the honest thing is to let the URL grant what was asked and announce what
+  // will not be visible. The beds themselves are all dressed either way —
+  // `Hotel.dressPetBeds` reads the inventory, not the line — so a large `N`
+  // still answers "is there a bed for every pet?", just not "does every pet
+  // walk to one".
+  const owned = gameStore.get().inventory.filter((item) => walksInParade(item.kind)).length;
+  if (owned > MAX_PARADE_VISIBLE) {
+    console.warn(
+      `?pets=${String(wanted)}: ${String(owned)} companions are owned and their beds are all ` +
+        `built, but only ${String(MAX_PARADE_VISIBLE)} walk behind the player at once, so at ` +
+        `most ${String(MAX_PARADE_VISIBLE)} can be seen going to bed. This is the parade's own ` +
+        `pre-existing cap, not the pet-bed code. Use ?pets=5 to watch every pet reach a bed.`,
+    );
+  }
 }
 
 /**
