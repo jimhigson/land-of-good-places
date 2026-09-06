@@ -55,18 +55,75 @@ C. `measuredHopCeiling(crossing) <= measured clean` at every swept point — thi
    Currently that claim is a comment, i.e. two definitions kept in step by hand.
 D. `MAX_AUTO_HOP_HEIGHT <= worstClean` over the thicknesses the park really uses.
 
+## Model
+
+Opus 5 (1M context), chosen by the Overseer brief that dispatched this ticket. A replacement
+runs the same model.
+
+## Proved red — five mutations, each asserted to have landed before the result was believed
+
+Geometry these were proved against is the block above (`PLAYER_RADIUS 0.62`, `JUMP_SPEED 6.6`,
+`GRAVITY 17`, `MEASURED_HOP_APEX 1.2812`, `MAX_AUTO_HOP_HEIGHT 1.0`,
+`measuredHopCeiling(c) = 1.574 - 0.3c`, park thicknesses {0.22, 0.32, 0.34}), on
+`fix/check-539` at the armed commit. Every mutation was reverted with `git checkout --` and the
+tree confirmed clean by `git status --porcelain` after each.
+
+| # | mutation | exit | what it said |
+|---|---|---|---|
+| M1 | `MAX_AUTO_HOP_HEIGHT` 1.0 -> 1.1 | **1** | 1 problem: "is 1.100 m but the worst clean crossing ... is 1.045 m — the router plans hops by 0.055 m more than the jump delivers" |
+| M2 | `measuredHopCeiling` intercept 1.574 -> 1.65 | **1** | 32 problems, e.g. "promises 1.188 m but the flight only cleanly carried her over 1.112 m ... above the measurement by 0.076 m" |
+| M3 | `MEASURED_HOP_APEX` 1.2812 -> 1.2 | **1** | 1 problem: "the jump apex is now 1.2812 m but ... says 1.2000 m (difference 0.0812 m > 0.001 m)" |
+| M5 | `JUMP_SPEED` 6.6 -> 6.0 (a realistic retune) | **1** | 174 problems: apex complaint **plus** the lower bound failing everywhere, e.g. "promises 1.112 m but ... 0.937 m" |
+| M4c | `while (time < 20)` -> `while (time < 0)` (every attempt stuck) | **1** | 421 problems: 420 "clean is NaN, not a number" + "the worst clean crossing came out NaN, so nothing below was measured" |
+
+No message contains `NaN` or `Infinity` as a *number in the complaint* except M4c, where NaN is
+precisely the thing being reported.
+
+### Two failed mutations, kept because they are the useful part
+
+- **M4 (first attempt): release gate `face + 0.05` -> `face + 50`. Exit 0, output byte-identical
+  to the clean run.** This looked like a dead NaN assertion. It is not: after clearing the wall she
+  keeps walking +z and still passes z=50 inside the 20 s budget, so every outcome is unchanged.
+  A mutation that lands in the file and changes nothing is a vacuous green — the reason each
+  mutation here asserts its own match count *and* the output is compared, not just the exit code.
+- **M4b: `hopProbe` disabled. Exit 1, 211 problems — but measured 0.150 m, not NaN.** She steps
+  over a 15 cm kerb without hopping, so the NaN branch still was not reached. Only M4c reaches it.
+
+### One thing the first armed run got wrong, worth not repeating
+
+The first armed run **failed** (exit 1) on `half=0.15` with "above the measurement by 0.000 m".
+The cause is that `highest()` bisects to 1 mm and returns `lo`, so a measurement understates the
+truth by up to a step; at 0.15 the fitted line sits **0.4 mm above** the measurement, both reading
+1.112 m. The fix is to compare at the instrument's own resolution (`BISECTION_RESOLUTION`, now
+shared with the bisection loop). Note the first diagnosis written down was "a float difference of
+1e-16" — that was wrong, and the docstring was corrected to the measured 0.4 mm.
+
 ## Open question being resolved
 
-`worstClean` is computed only over rows with `halfThickness >= 0.2 && halfThickness <= 0.4`, a
-hard-coded window the script *calls* "the park's own wall thicknesses". Rows at 0.60 read as low as
-**0.879**, below the 1.00 m ceiling. A subagent is enumerating real `addWall` half-thicknesses to
-say whether that window is faithful. If the park builds hoppable walls fatter than 0.4, D is a
-genuine red and gets reported, not weakened.
+**Resolved.** The park's hoppable (`autoHoppable: true`) walls are exactly three, half-thickness
+**{0.22 (`Scenery.ts:2154`, wood), 0.32 (`Fountain.ts:365`, fountain rim), 0.34
+(`Scenery.ts:2249`, stone)}**. Every other `addWall`/`addRectangle` in `src/` leaves
+`autoHoppable` false — including the 0.45 garden boundary, the 0.18 fences and the 0.15
+balustrade — so the excluded 0.60 rows were correctly excluded and D is **not** red.
+
+But the window was still wrong twice over: it **never sampled 0.32 at all**, so the headline
+interpolated over the fountain rim; and it was a pair of magic numbers with no link to a source of
+truth, so widening a hoppable wall past 0.4 would have dropped it out of the headline silently.
+Fixed by giving the three literals a single owner, `HOPPABLE_WALL_HALF_THICKNESSES` in
+`src/core/constants.ts`, which the sweep now derives its set from. Measuring 0.32 directly changed
+nothing (its minimum is 1.045 m, the same as 0.34's) — the headline is still 1.045 m.
 
 ## Status
 
 - [x] finding re-verified, baseline captured, geometry recorded
-- [] assertions implemented
-- [ ] proved red (mutation asserted to have landed), transcript + geometry pasted
-- [ ] `check`, `test:procgen`, `check:coplanar`, `build` green, exit codes read unpiped
+- [x] assertions implemented (4), thresholds all taken from the game
+- [x] hoppable wall thicknesses given a single owner; 0.32 now measured (180 -> 210 rows)
+- [x] proved red x5, each mutation asserted to have landed; two failed mutations documented
+- [x] `build` 0, `test:procgen` 0 (21 files, 752 tests), `check:coplanar` 0, `check:swept-bus` 0
+- [ ] `check` (61 steps) — running
 - [ ] PR opened
+
+## Cost
+
+Armed run **822 ms** vs **833 ms** toothless, despite 30 extra rows. No CI margin spent, so #530
+is untouched.
