@@ -65,6 +65,79 @@ point without saying so is explicitly **not acceptable** (ticket).
 - Three-dot diff (`origin/main...HEAD`) before every push.
 - Never `git stash`; commit and push after every meaningful edit.
 
+## ROOT CAUSE — found, measured, and it is **cause 3** (no path), for a real reason
+
+**The lounge sofa physically seals the only doorway into the whole south half of the
+suite.** The lounge *and* the bathroom behind it are unreachable by any body of
+`PLAYER_RADIUS`. Not a router bug — the router correctly reports no route, because
+there is none.
+
+### The arithmetic, all read off the built collision world (`scripts/gap-583.mts`)
+
+```
+lounge doorway opening: local x 3.45 .. 5.35 (1.90 m; SUITE_DOOR_WIDTH = 2.4 is
+                        centre-to-centre, the clear opening is 2.4 - 2*0.25)
+  a body of radius 0.62 must have its centre in x 4.07 .. 4.73 to pass the jambs
+  sofa north face at local z=3.33, spans x 3.90 .. 7.30, top=0.5
+  to walk round its west end a body's centre must be at x <= 3.28
+  => needs x >= 4.07 (doorway) AND x <= 3.28 (past the sofa):
+     IMPOSSIBLE — short by 0.79 m
+```
+
+The offender is `Hotel.dressSuite`'s lounge sofa, `src/world/hotel/Hotel.ts:5340`:
+`this.props.place(shell, SUITE, sofa(3.2, ...), { x: 5.6, z: 4.8, spin: -0.9,
+halfX: 1.1, halfZ: 1.3, top: SOFA_SEAT_TOP })`. Its `spin: -0.9` rotated footprint
+is 3.40 × 3.34 m, registered as a **three-walled rectangle open to the south**
+(CLAUDE.md's own hazard) at local x 3.90..7.30, z 3.33..6.27.
+
+### Why the existing guard did not catch it
+
+`Hotel.buildAll` already calls `this.props.assertDoorwaysClear()`
+(`Hotel.ts:1283`), and it **passes**. It checks the doorway *band* is clear — it
+does not ask whether the room behind the doorway is still reachable. This sofa has
+been moved three times chasing that band (#273/#278; the comment at `Hotel.ts:5320`
+records z = 4.4 as "the third miss") and clears it "by 0.19 m", while the room it
+stands in has no way in. A check passing without checking the thing that matters.
+
+### "The player simply does nothing" — reproduced exactly
+
+```
+stood in the doorway pocket (4.4, 2.0), tap the lounge floor (6.0, 5.5)
+  -> reached=false, route ends (4.75, 2.25), she moves 0.43 m
+     — under ARRIVE_RADIUS (0.55): SHE DOES NOTHING
+```
+
+`TapNavigator.planRoute:447` silently relocates the target to the nearest reachable
+point; when that point is where she already stands, the walk completes instantly and
+nothing happens on screen. From further off it is worse than nothing — tapping the
+**bathroom** from the pocket sends her 14.21 m to `(-9.75, 0.75)`, a different room.
+
+### Which sub-room is "near"
+
+The iso camera backs out along **+X/+Z** (`check-nav-routes.mts`'s `isoRayAt`), so
+the **+Z half is the near half on screen** — that is the lounge/bathroom, and it is
+the half that fails. The three bedrooms (−Z, the far half) all route correctly.
+So "the bedroom" is Jim's name for the suite, and "the near sub-room" is the lounge.
+**Confirm in the browser before shipping the claim** — it is an inference from the
+camera basis, not something I have seen.
+
+## Measured evidence (control-first, per CLAUDE.md)
+
+`scripts/instrument-583.mts` — CONTROL is 4/4 `reached=YES` on hall spots before any
+bedroom result is read. `scripts/sweep-583.mts` — dense 0.5 m sweep of the whole
+suite floor: `#=927 not standable, .=614 works, R=346 standable but no route, P=1`.
+Every one of the 346 `R` cells is in the south half. Causes 1 and 2 are
+**exonerated**: the pick lands within 0.75 m of the aimed point everywhere except one
+cell, and every failing cell is standable.
+
+## The second defect, which outlives the sofa fix
+Even once the lounge is reachable, a tap that genuinely cannot be honoured is
+**silent** — `TapNavigator.handleTap` has four bare `return false`s and `planRoute`
+relocates without saying so. Its own doc admits it: *"a 'nope' sound will want to
+know one day"* (`TapNavigator.ts:216`). GAME_DESIGN.md's HIGHLIGHT rule already
+requires a tap to visibly register. Needs a decision on scope — see the Overseer.
+
 ## Log
-- Worktree created off `d7da0408`, deps installed, context read. Pipeline survey
-  dispatched to a subagent.
+- Worktree created off `d7da0408`, deps installed, context read.
+- Pipeline mapped; instruments written and **controlled**; root cause found and
+  proved by arithmetic on the built collision world. Not yet fixed.
