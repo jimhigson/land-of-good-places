@@ -40,10 +40,10 @@ import {
 import {
   BAR_HALF_SPAN_AT_PARK_SCALE,
   BEAM_DROP,
-  BRANCH_TAPER,
   forkPlan,
+  maxTrunkLean,
   POST_FOOT_RADIUS,
-  POST_TOP_RADIUS,
+  STRUT_RADII,
   RAIL_GAUGE_AT_PARK_SCALE,
   RAIL_RADIUS_AT_PARK_SCALE,
   SLEEPER_ALONG_TRACK,
@@ -51,6 +51,8 @@ import {
   SLEEPER_SPACING,
   SLEEPER_THICKNESS,
 } from './trestleGeometry';
+import type { Claim, GroundClaims } from '../../boot/groundClaims';
+import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 // Re-exported: these used to be defined here, and `cart.ts` and
 // `scripts/check-rail-race.mts` import them from this module.
 export { BAR_HALF_SPAN_AT_PARK_SCALE, RAIL_GAUGE_AT_PARK_SCALE } from './trestleGeometry';
@@ -211,6 +213,16 @@ export interface RailRaceTrackOptions {
    * drawn) has nowhere to live.
    */
   readonly registerCollision: boolean;
+  /**
+   * **The park's one claims registry**, which this ring's supports ask before
+   * they stand and commit to once they have (stage 3, step 2 of
+   * `docs/DESIGN-round-robin-generation.md`). The feature name they commit
+   * under is `ringName`, so the two rings are two features and the second
+   * ring's search sees the first ring's legs as claimed ground — which is what
+   * the walk-past-first construction order in `RailRace.ts` used to buy
+   * through the collision world.
+   */
+  readonly groundClaims: GroundClaims;
   /**
    * Whether this ring builds the finish-line rainbow arch at all.
    *
@@ -541,8 +553,23 @@ export function buildRailRaceTrack(
   const mandatoryTrestleIndices = new Set(
     layout.bars.map((bar) => trestleGridIndex(bar.at, route.length)),
   );
-  const spots = trestleSpots(route, collision, mandatoryTrestleIndices);
+  const spots = trestleSpots(
+    route,
+    collision,
+    options.groundClaims,
+    options.ringName,
+    ringSizeVsRace,
+    mandatoryTrestleIndices,
+  );
   const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
+  // **The supports claim their ground** — the very claims the search was
+  // answered with, under this ring's own name. Committed as one contribution
+  // once every slot is decided: a ring's legs never collide with each other
+  // through the registry (a feature is its own business), and the arc bound in
+  // `trestleSpots` is what keeps two neighbouring slots off the same ground.
+  options.groundClaims.commit(options.ringName, {
+    claims: spots.flatMap((spot) => spot.claims),
+  });
 
   // --- the duck bars ---------------------------------------------------------
   //
@@ -667,9 +694,9 @@ export function buildRailRaceTrack(
     //
     // This used to be `spot.at` — its supporting trestle's position, including
     // that trestle's own collision-avoidance nudge along the loop — so that bar
-    // and leg stayed exactly coincident. `MANDATORY_RADIAL_NUDGES`' doc comment
-    // below argues that an arc nudge therefore "costs nothing". It costs the
-    // hazard its correctness: `simulate.ts` bonks at `bar.at`, knows nothing of
+    // and leg stayed exactly coincident, on the argument that an arc nudge
+    // therefore "costs nothing". It costs the hazard its correctness:
+    // `simulate.ts` bonks at `bar.at`, knows nothing of
     // any nudge, and on the canonical seed every one of the seven bars was
     // being drawn 2.00 m before the point that actually bonked you. A rider
     // flew clean through the bar and lost her speed a cart's length later —
@@ -740,7 +767,6 @@ export function buildRailRaceTrack(
   sleeves.instanceColor!.needsUpdate = true;
 
   // --- the trestles ----------------------------------------------------------
-  const beamY = route.base - UNDULATION_REACH - BEAM_DROP;
 
   // One colour for the whole support tree — trunk and both generations of
   // branch — which is Jim's "the supports can all be one colour that
@@ -765,16 +791,20 @@ export function buildRailRaceTrack(
   // trunk it grew from, and a taper baked into the geometry costs nothing,
   // where faking it with a non-uniform instance scale would squash the
   // cross-section into an ellipse.
-  const legGeometry = new CylinderGeometry(POST_TOP_RADIUS, POST_FOOT_RADIUS, 1, 8);
+  //
+  // Radii from `STRUT_RADII`, the same table `trestleClaims` reads: a
+  // `CylinderGeometry` takes its top radius first, and `strut` stands the
+  // cylinder from `from` (its bottom) to `to` (its top).
+  const legGeometry = new CylinderGeometry(STRUT_RADII.legs.to, STRUT_RADII.legs.from, 1, 8);
   const lowerBranchGeometry = new CylinderGeometry(
-    POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER,
-    POST_TOP_RADIUS * BRANCH_TAPER,
+    STRUT_RADII['branches-lower'].to,
+    STRUT_RADII['branches-lower'].from,
     1,
     8,
   );
   const upperBranchGeometry = new CylinderGeometry(
-    POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER * BRANCH_TAPER,
-    POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER,
+    STRUT_RADII['branches-upper'].to,
+    STRUT_RADII['branches-upper'].from,
     1,
     8,
   );
@@ -816,66 +846,23 @@ export function buildRailRaceTrack(
     mesh.setMatrixAt(index, matrix);
   };
 
-  // Scratch points for one trestle's tree, reused across spots.
-  const laneTops = Array.from({ length: LANE_COUNT }, () => new Vector3());
-  const forkNodes = [new Vector3(), new Vector3()];
-  const trunkTop = new Vector3();
-  const trunkFoot = new Vector3();
-
   spots.forEach((spot, index) => {
-    route.outwardAt(spot.at, outward);
-    rotation.setFromUnitVectors(ACROSS, outward);
-
-    const ground = terrainHeight(spot.x, spot.z);
-    const postHeight = beamY - ground;
-    const plan = forkPlan(postHeight, route.laneSpacing);
-
-    // **A branch top is the middle of the lane it carries** — the whole point of
-    // Jim's 7 August ruling, and `route.pointAt` in full, height included, not
-    // flattened onto a plane. One owner: this is the same call the rails
-    // themselves are swept from, so a branch cannot end up anywhere but on the
-    // track's own centre line.
-    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      laneTops[lane]!.copy(route.pointAt(lane, spot.at, point));
-    }
-    // A fork node sits under the midpoint of the pair it carries, and the trunk
-    // under the midpoint of the two fork nodes — horizontally derived from the
-    // tops rather than from `spot`, which `trestleSpots` may have nudged
-    // sideways to find clear ground.
-    //
-    // The *height* is measured down from the *lowest* of what each node carries,
-    // never the mean. That is what stops "different branches reach different
-    // heights" turning into a branch lying nearly flat: the lower of a pair then
-    // gets exactly `plan.upper` of rise and so exactly the solved angle, and its
-    // partner — whose lane is higher — is steeper. The solved angle is the
-    // widest the fork can ever open, in one direction only. See
-    // `trestleGeometry.ts` for the measured lane spread (up to 4.38 m across the
-    // four, 3.02 m within one pair) that makes this necessary.
-    for (let half = 0; half < 2; half += 1) {
-      const a = laneTops[half * 2]!;
-      const b = laneTops[half * 2 + 1]!;
-      forkNodes[half]!
-        .copy(a)
-        .lerp(b, 0.5)
-        .setY(Math.min(a.y, b.y) - plan.upper);
-    }
-    trunkTop
-      .copy(forkNodes[0]!)
-      .lerp(forkNodes[1]!, 0.5)
-      .setY(Math.min(forkNodes[0]!.y, forkNodes[1]!.y) - plan.lower);
-    // The foot, though, stands exactly where the clear ground was found — so a
-    // nudged trestle leans very slightly rather than planting itself in whatever
-    // the nudge was avoiding.
-    trunkFoot.set(spot.x, ground, spot.z);
-
-    strut(legs, index, trunkFoot, trunkTop);
-    for (let half = 0; half < 2; half += 1) {
-      strut(lowerBranches, lowerIndex, trunkTop, forkNodes[half]!);
-      lowerIndex += 1;
-    }
-    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      strut(upperBranches, upperIndex, forkNodes[Math.floor(lane / 2)]!, laneTops[lane]!);
-      upperIndex += 1;
+    // **Drawn from the tree the search solved, allowed and claimed** — not
+    // re-solved here. `trestleTreeAt` is the one owner of the shape (a branch
+    // top is the middle of the lane it carries; a fork node sits under the
+    // midpoint of its pair; heights measured down from the lowest lane, never
+    // the mean — see its doc comment), and `trestleStruts` the one owner of
+    // which points make which strut. The foot stands exactly where the search
+    // found clear ground, so a moved foot is a lean, not a moved support.
+    const meshes = {
+      legs,
+      'branches-lower': lowerBranches,
+      'branches-upper': upperBranches,
+    } as const;
+    for (const piece of trestleStruts(spot.tree)) {
+      const mesh = meshes[piece.part];
+      const slot = piece.part === 'legs' ? index : piece.part === 'branches-lower' ? lowerIndex++ : upperIndex++;
+      strut(mesh, slot, piece.from, piece.to);
     }
 
     // A post is a thing a child can walk into — on the ring that is actually
@@ -1218,16 +1205,208 @@ function buildRailZoneVertexRanges(
   });
 }
 
+/**
+ * **One trestle, as the seven struts it is drawn from** — the trunk, the two
+ * lower branches, the four upper ones — solved for one slot and one foot.
+ *
+ * This is the one owner of a support's shape. `buildRailRaceTrack` draws
+ * exactly these points, `trestleSpots`'s search asks the registry with the plan
+ * projection of exactly these points, and `test/procgen/invariants.ts` decodes
+ * the drawn struts back into the same points to check the registry against
+ * them. A search that pre-filtered with one geometry and committed with another
+ * — a foot disc for the query, a leaning trunk for the drawing — is the fault
+ * `docs/DESIGN-round-robin-generation.md` calls the #504 variant, and it is
+ * unconstructible while there is only this.
+ */
+export interface TrestleTree {
+  /** Where each lane's rails pass overhead — the four tips of the tree. */
+  readonly laneTops: readonly Vector3[];
+  /** The two nodes where the trunk's fork splits again to reach a pair of lanes. */
+  readonly forkNodes: readonly Vector3[];
+  /** Where the trunk stops and the first fork begins. **Not** the lane tops. */
+  readonly trunkTop: Vector3;
+  /** Where the trunk stands: the found foot, on the ground under it. */
+  readonly trunkFoot: Vector3;
+  /** The terrain height under the foot this tree was solved for. */
+  ground: number;
+}
+
+function newTrestleTree(): TrestleTree {
+  return {
+    laneTops: Array.from({ length: LANE_COUNT }, () => new Vector3()),
+    forkNodes: [new Vector3(), new Vector3()],
+    trunkTop: new Vector3(),
+    trunkFoot: new Vector3(),
+    ground: 0,
+  };
+}
+
+function cloneTrestleTree(tree: TrestleTree): TrestleTree {
+  return {
+    laneTops: tree.laneTops.map((p) => p.clone()),
+    forkNodes: tree.forkNodes.map((p) => p.clone()),
+    trunkTop: tree.trunkTop.clone(),
+    trunkFoot: tree.trunkFoot.clone(),
+    ground: tree.ground,
+  };
+}
+
+/** Scratch for {@link trestleTreeAt}; it is called once per candidate in a search loop. */
+const treeScratch = new Vector3();
+
+/**
+ * Solves the tree for a foot at `(footX, footZ)` under the ring at `at` (a raw
+ * route distance). Writes into `into` and returns it.
+ *
+ * **A branch top is the middle of the lane it carries** — Jim's 7 August ruling,
+ * and `route.pointAt` in full, height included. A fork node sits under the
+ * midpoint of the pair it carries and the trunk under the midpoint of the two
+ * fork nodes — horizontally derived from the *tops*, never from the foot, which
+ * is what makes a moved foot a lean rather than a moved support. The height of
+ * each is measured down from the *lowest* of what it carries, never the mean,
+ * so the solved angle is the widest a fork ever opens (see `trestleGeometry.ts`
+ * for the measured lane spread that makes that necessary).
+ */
+function trestleTreeAt(
+  route: RailRaceRoute,
+  at: number,
+  footX: number,
+  footZ: number,
+  into: TrestleTree,
+): TrestleTree {
+  const ground = terrainHeight(footX, footZ);
+  // The notional deck the fork is solved against — `BEAM_DROP` under the lowest
+  // the rails ever get. Nothing is built on it; it fixes the post height the
+  // angle is solved from, and so the angle (`trestleGeometry.ts`, `BEAM_DROP`).
+  const beamY = route.base - UNDULATION_REACH - BEAM_DROP;
+  const plan = forkPlan(beamY - ground, route.laneSpacing);
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    into.laneTops[lane]!.copy(route.pointAt(lane, at, treeScratch));
+  }
+  for (let half = 0; half < 2; half += 1) {
+    const a = into.laneTops[half * 2]!;
+    const b = into.laneTops[half * 2 + 1]!;
+    into.forkNodes[half]!.copy(a).lerp(b, 0.5).setY(Math.min(a.y, b.y) - plan.upper);
+  }
+  into.trunkTop
+    .copy(into.forkNodes[0]!)
+    .lerp(into.forkNodes[1]!, 0.5)
+    .setY(Math.min(into.forkNodes[0]!.y, into.forkNodes[1]!.y) - plan.lower);
+  into.trunkFoot.set(footX, ground, footZ);
+  into.ground = ground;
+  return into;
+}
+
+/** One drawn strut of a tree: its two ends and the radii of the cylinder it is drawn as, at race-ring size. */
+export interface TrestleStrut {
+  readonly from: Vector3;
+  readonly to: Vector3;
+  readonly radiusFrom: number;
+  readonly radiusTo: number;
+  readonly part: 'legs' | 'branches-lower' | 'branches-upper';
+}
+
+/**
+ * The seven struts of a tree, in the order they are drawn. The radii are the
+ * ones `buildRailRaceTrack` bakes into its three cylinder geometries — stated
+ * here once, and the geometries below read the same expressions.
+ */
+export function trestleStruts(tree: TrestleTree): readonly TrestleStrut[] {
+  const one = (part: TrestleStrut['part'], from: Vector3, to: Vector3): TrestleStrut => ({
+    from,
+    to,
+    radiusFrom: STRUT_RADII[part].from,
+    radiusTo: STRUT_RADII[part].to,
+    part,
+  });
+  const struts: TrestleStrut[] = [one('legs', tree.trunkFoot, tree.trunkTop)];
+  for (let half = 0; half < 2; half += 1) {
+    struts.push(one('branches-lower', tree.trunkTop, tree.forkNodes[half]!));
+  }
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    struts.push(one('branches-upper', tree.forkNodes[Math.floor(lane / 2)]!, tree.laneTops[lane]!));
+  }
+  return struts;
+}
+
+/**
+ * **What a trestle claims: the plan projection of everything it draws below
+ * `headroom` above its own ground** — the leaning trunk, and whichever branches
+ * dip under that height — as `footprint` capsules, one per strut, each as wide
+ * as the thickest end of the strut it covers.
+ *
+ * Not a foot disc. `check:swept-bus` measured 364 drawn posts inside the bus
+ * across the pool while every foot was clear of the road, because a nudged
+ * trunk leans and a fork opens below bus-roof height. The claim is the drawn
+ * geometry (design: the #504 variant), so a leg that is allowed is a leg the bus
+ * does not meet — by construction, and independently checked by the sweep.
+ *
+ * `headroom` is whatever the registry says the tallest thing claimed needs
+ * ({@link GroundClaims.tallestHeadroom}); the trestle never names the road, the
+ * bus, or anything else. A strut wholly above the headroom claims nothing: a
+ * ring passing over a road is fine.
+ *
+ * Exported so the invariant can rebuild the very same claims from the drawn
+ * struts and compare them with what the registry holds.
+ */
+export function trestleClaims(
+  tree: TrestleTree,
+  headroom: number,
+  ringSizeVsRace: number,
+): readonly Claim[] {
+  const ceiling = tree.ground + headroom;
+  const claims: Claim[] = [];
+  for (const strut of trestleStruts(tree)) {
+    const { from, to } = strut;
+    const low = from.y <= to.y ? from : to;
+    const high = from.y <= to.y ? to : from;
+    if (low.y >= ceiling) continue;
+    // Clip the strut where it crosses the ceiling, so a branch that only dips
+    // its root under the headroom claims only that root.
+    const t = high.y <= ceiling ? 1 : (ceiling - low.y) / (high.y - low.y);
+    claims.push({
+      kind: 'footprint',
+      shape: {
+        shape: 'capsule',
+        x1: low.x,
+        z1: low.z,
+        x2: low.x + (high.x - low.x) * t,
+        z2: low.z + (high.z - low.z) * t,
+        halfWidth: Math.max(strut.radiusFrom, strut.radiusTo) * ringSizeVsRace,
+      },
+    });
+  }
+  return claims;
+}
+
 interface TrestleSpot {
   readonly at: number;
   readonly x: number;
   readonly z: number;
   /** Which of `trestleSpots`'s `TRESTLE_SPACING` grid slots this is — see `planHazards`'s `snapToTrestleGrid`. */
   readonly index: number;
+  /** The tree that was searched, allowed and claimed — and is now drawn. One computation, three uses. */
+  readonly tree: TrestleTree;
+  /** Exactly what was asked of the registry for this tree, and what is committed for it. */
+  readonly claims: readonly Claim[];
 }
 
-/** Every one of `trestleSpots`'s four ground-clearance predicates, together. */
-function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean {
+/**
+ * **The ground predicates the registry does not own yet.**
+ *
+ * Trees, walls and plots (`collision`), the walking network
+ * (`distanceToPath`), the railway's band (`distanceToRailCorridor`) and the
+ * park's entries are not claims — they are the private obstacle lists stage 5
+ * of `docs/DESIGN-round-robin-generation.md` migrates ("The migration
+ * checklist"). Until they are, a support has to ask them by name, here, behind
+ * the one predicate `trestleSpots` uses for both its search and its commit.
+ * Each line that leaves this function is a feature that has become a claim.
+ *
+ * Asked at the foot, as they always were; the road and the other ring — the two
+ * things a leaning trunk actually met — are claims now and are asked with the
+ * drawn geometry.
+ */
+function legacyGroundIsClear(x: number, z: number, collision: CollisionWorld): boolean {
   if (!collision.isClearCircle(x, z, 1.1)) return false;
   if (distanceToPath(x, z) < 2.8) return false;
   if (distanceToRailCorridor(x, z) < 2.4) return false;
@@ -1238,221 +1417,151 @@ function groundIsClear(x: number, z: number, collision: CollisionWorld): boolean
 }
 
 /**
- * How far `trestleSpots` will nudge a candidate before giving up on it — along
- * the route (metres of arc) and across it (metres off the centre line).
- * Kept well inside half of `TRESTLE_SPACING` (12 m) so two neighbouring
- * slots' searches can never land on the same ground.
- *
- * Ordering within each array no longer matters (`searchForClearGround` picks
- * its own priority, radial-first — see that function's doc comment); kept
- * closest-to-zero-first anyway because it reads as "the nudge, ranked."
+ * The resolution of the outward march, in metres of lean and metres of arc.
+ * A resolution, not a reach: the march stops where the support's own geometry
+ * or the registry says, however many steps that takes. One metre is the
+ * spacing the old nudge lists had, kept so a slot nothing refuses stands
+ * exactly where it did.
  */
-const ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3];
-const RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
+const SEARCH_STEP = 1;
 
-/**
- * The wider arc search a grid slot gets when a duck bar is actually scheduled
- * on it — see `planHazards`'s `snapToTrestleGrid`. An ambient, decorative
- * slot with nothing scheduled on it is allowed to go missing (the track
- * "shrugs it off"); a slot a bar is relying on for its own visible support is
- * not, so it is worth searching harder — still well inside half of
- * `TRESTLE_SPACING` so it can never reach into a neighbouring slot's ground.
- */
-const WIDE_ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
-
-/**
- * The radial budget a *mandatory* slot's wide search is normally allowed —
- * deliberately **not** the same `±8` a decorative slot's search would use if
- * it had one (it doesn't; only mandatory slots get a second attempt at all).
- *
- * **Why radial is special and arc is not.** A duck bar renders at its lane's
- * fixed radius (`route.pointAt`'s `LANE_RADII[lane]`, `route.ts`) — nothing
- * ever nudges *that*. An arc nudge shifts `at` for the leg and the bar
- * identically (both derive from the same `spot.at`, `track.ts`'s duck-bar
- * loop above), so it costs nothing: bar and leg stay exactly as coincident as
- * they always were, just moved together along the loop. A radial nudge only
- * moves the leg — the bar has no radial nudge to match it with — so every
- * metre of radial nudge is a metre the bar and its own support drift apart.
- *
- * Found the hard way (2 August 2026): PR #162 moved the rail-race stall to
- * the rim, which (via the shared-RNG butterfly effect documented in that
- * PR — an earlier consumer's draw count shifting every later one) changed
- * which ground was clear near two mandatory slots enough that their old,
- * uncapped `±8` wide search reached all the way to `dr = 8`. With `LANE_RADII`
- * offsets up to `±3.9` off nominal (`LANE_SPAN / 2`, `route.ts`), that put
- * the duck bar on the innermost lane a measured `|8 - (-3.9)| = 11.9 m` from
- * its own support — over `DUCK_BAR_SUPPORT_TOLERANCE` (8 m,
- * `test/procgen/invariants.ts`) and, worse, a real visual bug: the trestle's
- * beam and leg (both drawn at the leg's nudged `x,z`) would stand visibly
- * beside the branch tops standing under the actual rails (drawn, correctly,
- * at the unnudged `x,z` `route.pointAt` gives — see the duck-bar loop and
- * the trestle loop above), not under them.
- *
- * `4` keeps the worst case (`4 + 3.9 = 7.9 m`, the innermost lane against a
- * full `+4` nudge) under the 8 m tolerance with a little room to spare, while
- * still giving the search four full extra metres either way beyond the
- * ordinary, non-mandatory `RADIAL_NUDGES` reach. Paired with
- * `searchForClearGround`'s radial-outer ordering (below), a mandatory slot
- * now always tries every `WIDE_ARC_NUDGES` offset at each radial step before
- * growing the radial nudge further, so the search spends its "free" arc room
- * before its costly radial room — the fix that actually matters; this cap is
- * the backstop that makes the guarantee structural rather than merely
- * "usually true of whatever the search happens to find."
- */
-const MANDATORY_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4];
-
-/**
- * The old, uncapped `±8` radial range — kept only as the last-resort
- * fallback `trestleSpots` reaches for if even `MANDATORY_RADIAL_NUDGES`
- * finds no clear ground at all. Accepting a support that may exceed the duck
- * bar's own tolerance is still better than the alternative: `trestleSpots`
- * drops the bar's geometry entirely when its slot has no support at all (see
- * the duck-bar loop's `if (!spot) { ... continue; }`), and a duck bar with no
- * support of any kind is a worse bug than one whose support is visibly a
- * little off to the side. `trestleSpots` warns loudly whenever this fallback
- * is the one that actually placed a mandatory slot, so it stays visible
- * rather than becoming a silent, permanent crutch.
- */
-const WIDE_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8];
-
-/**
- * Tries each (radial, arc) nudge in order and returns the first clear ground
- * it finds.
- *
- * **Radial-outer, arc-inner — not the other way round.** A slot's search
- * used to be arc-outer: try every radial nudge at `da = 0` before ever
- * trying `da = ±1`. That is backwards for a mandatory slot, where a radial
- * nudge costs real alignment (see `MANDATORY_RADIAL_NUDGES`'s doc comment)
- * and an arc nudge costs nothing — the old order reached for the biggest,
- * costliest radial nudges long before it had exhausted the free arc ones.
- * Radial-outer instead tries every arc offset at the smallest radial
- * deviation first, and only grows the radial nudge once the whole arc
- * range has failed to turn up clear ground that close in. Harmless for the
- * ordinary (non-mandatory) search too — a decorative trestle looking a
- * little closer to its nominal radius is no worse than one that doesn't.
- *
- * `atArch` is arch-relative — the same convention `hazards.ts`'s `DuckBar.at`
- * uses ("metres along the loop, measured from the start/finish arch") —
- * **not** the raw route coordinate `route.angleAt`/`pointAt` actually want.
- * Converting it here, the same way the duck-bar loop below always has
- * (`route.wrap(route.startDistance + at)`), is what makes a trestle grid
- * index and a hazard-schedule grid index agree on which physical point on
- * the ring they mean. Before this, `trestleSpots` computed its candidates in
- * the *raw* route coordinate directly — harmless when nothing else needed to
- * agree with it, which stopped being true the moment a duck bar needed to
- * find "its own" trestle by index.
- */
-function searchForClearGround(
-  route: RailRaceRoute,
-  collision: CollisionWorld,
-  atArch0: number,
-  arcNudges: readonly number[],
-  radialNudges: readonly number[],
-): { at: number; x: number; z: number } | null {
-  for (const dr of radialNudges) {
-    for (const da of arcNudges) {
-      const at = route.wrap(route.startDistance + atArch0 + da);
-      // Nudged along the centre line's own outward normal, not out from the
-      // origin. On a ring that follows the park's edge the two differ wherever
-      // the boundary's radius is changing, and a radial nudge would drift the
-      // candidate sideways along the track as well as outward — searching a
-      // different place from the one it reports.
-      const sample = route.path.sampleAt(at);
-      const x = sample.x + sample.normalX * dr;
-      const z = sample.z + sample.normalZ * dr;
-      if (groundIsClear(x, z, collision)) return { at, x, z };
-    }
+/** `0, -1, 1, -2, 2, …` up to `reach` — nearest first, inward before outward. */
+function* nearestFirst(reach: number): Generator<number, void, void> {
+  yield 0;
+  for (let k = SEARCH_STEP; k <= reach; k += SEARCH_STEP) {
+    yield -k;
+    yield k;
   }
-  return null;
 }
 
 /**
- * Where the ring can actually be stood up.
+ * **Where the ring can actually be stood up — one outward march per slot,
+ * asking the registry.**
  *
- * The same predicate set the coaster's pylons use, plus one this ride needs and
- * the coaster does not: the ring runs *inside the railway's own band*, so a leg
- * has to clear the train's corridor as well as the walking network.
+ * Every `TRESTLE_SPACING` metres round the loop is a slot. For each, the search
+ * tries the ring's own centre line first and then marches the foot away from
+ * it — *leaning* the support, because its top stays under the rails — asking
+ * two things of every candidate, in this order:
  *
- * **A rigid, one-shot candidate grid found almost nowhere to stand.** The first
- * version of this function tried exactly one point per slot — the centre line
- * at the slot's own arc position — and gave up outright if that one point was
- * blocked. Measured against the real, built park (1 August 2026): **1 of 28**
- * candidates survived. The ride's own docs already say it "runs through a band
- * of the park that is already full" — garden planting, the walking network, the
- * railway corridor — and that density is exactly what a single fixed point
- * cannot route around. The result was not "a few trestles skipped here and
- * there", which the docs' "shrugs off a missing support" language anticipates;
- * it was a 336 m elevated loop standing on one leg.
+ * 1. **Can the support still be a trunk here?** The foot may stand no further
+ *    from the point under its trunk's top than `maxTrunkLean` allows for the
+ *    trunk the slot actually gets (`trestleGeometry.ts`: no steeper than its
+ *    own branches). This is the bound of the march. It is derived from the
+ *    support's geometry and varies round the ring with the lanes' height —
+ *    never a typed reach, and never "where the ground ends", which on the
+ *    sphere world (#511) it does not.
+ * 2. **May it stand here?** The registry is asked with the plan projection of
+ *    the tree as it would be drawn, below the tallest headroom anything
+ *    claimed needs ({@link trestleClaims}); then the predicates nothing has
+ *    migrated yet ({@link legacyGroundIsClear}). The claims that answer the
+ *    search are the claims that are committed — one function, one object.
  *
- * So each slot now searches a small, bounded neighbourhood — a handful of
- * along-the-route and across-the-ring nudges, closest first — before it is
- * actually given up on. Against the same real park this finds a clear spot for
- * **25 of 28**. The remaining few are still allowed to go missing, on purpose:
- * over the railway, over a path, in the gap between two plots, no amount of
- * local nudging *should* find a leg — the walk network cannot shrug off a
- * misplaced one, and a rare true gap is what "the track shrugs off a missing
- * support" was always meant to cover.
+ * Along the ring, a slot may also slide by up to `arcReach` either way. That
+ * costs the support nothing (the top follows), and is bounded so two
+ * neighbouring slots can never share ground: half the spacing, less a foot.
+ * Lean is the outer loop and arc the inner one, as before — arc room is free
+ * and lean is not, so the whole arc range is tried at each lean before the
+ * lean grows.
  *
- * **`mandatoryIndices` may not go missing.** These are the grid slots
- * `planHazards`'s `snapToTrestleGrid` actually scheduled a duck bar onto — a
- * bar with no visible support underneath it is the exact bug this whole
- * mechanism exists to fix, so those slots get a second, wider attempt rather
- * than being allowed to shrug: `WIDE_ARC_NUDGES` paired with
- * `MANDATORY_RADIAL_NUDGES` (bigger arc room, which costs a mandatory slot
- * nothing, and a deliberately *capped* radial room, which does — see
- * `MANDATORY_RADIAL_NUDGES`'s own doc comment for the bug this cap fixes).
- * Only if even that fails does a third attempt reach for the old, uncapped
- * `WIDE_RADIAL_NUDGES` — a support that may sit further from its bar than
- * the invariant likes is still better than a bar rendered with no support at
- * all. Every index is returned on the result so the duck-bar geometry can
- * look its own support up directly rather than re-deriving it.
+ * **What replaced the three-tier ladder.** `RADIAL_NUDGES` ±5, then for a slot
+ * with a duck bar `WIDE_ARC_NUDGES` × `MANDATORY_RADIAL_NUDGES` ±4, then
+ * `WIDE_RADIAL_NUDGES` ±8 with a warning — three typed reaches deciding where a
+ * support may stand, none of them derived from the support. Ruled out in
+ * `docs/DESIGN-round-robin-generation.md` ("Ruling on `RADIAL_NUDGES`"): one
+ * search, one predicate, one ordering. A bar's slot is no longer searched
+ * *harder*; it is searched the same and, if nothing serves, **refused loudly**
+ * rather than shrugged off — a duck bar scored at a point with nothing under it
+ * is a hazard the rider hits with no support in sight, the bug this whole
+ * grid exists to prevent. A slot with nothing scheduled on it may still go
+ * missing (over a path, over the railway); `test:procgen`'s widest-run
+ * invariant bounds how many.
+ *
+ * `atArch` is arch-relative — the same convention `hazards.ts`'s `DuckBar.at`
+ * uses — and is converted to the raw route coordinate here, the same way the
+ * duck-bar loop always has, so a trestle grid index and a hazard-schedule grid
+ * index agree on which physical point on the ring they mean.
  */
 function trestleSpots(
   route: RailRaceRoute,
   collision: CollisionWorld,
+  groundClaims: GroundClaims,
+  feature: string,
+  ringSizeVsRace: number,
   mandatoryIndices: ReadonlySet<number>,
 ): TrestleSpot[] {
   const spots: TrestleSpot[] = [];
-  // Arch-relative, matching `planHazards`'s `snapToTrestleGrid` exactly — the
-  // same formula, not an approximation of it — so grid index `i` names the
-  // same physical point on the ring in both files. `searchForClearGround`
-  // converts it to the raw route coordinate `route.angleAt`/`pointAt` want.
   const count = Math.floor(route.length / TRESTLE_SPACING);
+  const footRadius = POST_FOOT_RADIUS * ringSizeVsRace;
+  const arcReach = TRESTLE_SPACING / 2 - footRadius;
+  // The tallest thing anything claimed needs to pass under, and never less
+  // than a child walking beneath the ring.
+  const headroom = groundClaims.tallestHeadroom(TALLEST_CHILD_HEIGHT);
+  // The furthest any trunk on this ring could lean — a loop guard, from the
+  // same owner as the per-candidate bound below, never the bound itself.
+  const leanGuard = maxTrunkLean(route.base);
+  const tree = newTrestleTree();
+
   for (let i = 0; i < count; i += 1) {
     const atArch0 = (i / count) * route.length;
-    const mandatory = mandatoryIndices.has(i);
-    let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES);
-    if (!placed && mandatory) {
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES);
-    }
-    if (!placed && mandatory) {
-      // Last resort — see `WIDE_RADIAL_NUDGES`'s own doc comment. Loud
-      // because this is the one path where a duck bar's support can land
-      // further from it than `DUCK_BAR_SUPPORT_TOLERANCE`
-      // (`test/procgen/invariants.ts`) actually wants; if this fires on a
-      // real seed, that slot's ground is worth a closer look, not just a
-      // wider search.
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES);
-      if (placed) {
-        console.warn(
-          `railRace/track.ts: the mandatory trestle at slot ${i} (arch-relative at=` +
-            `${atArch0.toFixed(1)}) only found clear ground beyond MANDATORY_RADIAL_NUDGES' ` +
-            `safe radial range — its duck bar may sit further from it than the ` +
-            `DUCK_BAR_SUPPORT_TOLERANCE invariant expects.`,
-        );
+    let placed: TrestleSpot | null = null;
+    let leanExhausted = false;
+    /** The registry's refusers, for the message if nothing serves. */
+    const refusedBy = new Set<string>();
+
+    search: for (const lean of nearestFirst(leanGuard)) {
+      let admissible = false;
+      for (const along of nearestFirst(arcReach)) {
+        const at = route.wrap(route.startDistance + atArch0 + along);
+        // Nudged along the centre line's own outward normal, not out from the
+        // origin: on a ring that follows the park's edge the two differ.
+        const sample = route.path.sampleAt(at);
+        const x = sample.x + sample.normalX * lean;
+        const z = sample.z + sample.normalZ * lean;
+        trestleTreeAt(route, at, x, z, tree);
+        // 1. Still a trunk? The lean is the horizontal run from foot to top.
+        const run = Math.hypot(tree.trunkTop.x - x, tree.trunkTop.z - z);
+        if (run > maxTrunkLean(tree.trunkTop.y - tree.ground)) continue;
+        admissible = true;
+        // 2. May it stand? The registry first, with the drawn geometry.
+        const claims = trestleClaims(tree, headroom, ringSizeVsRace);
+        const blockers = groundClaims.blockers(feature, claims);
+        if (blockers.length > 0) {
+          for (const blocker of blockers) refusedBy.add(blocker.feature);
+          continue;
+        }
+        if (!legacyGroundIsClear(x, z, collision)) continue;
+        placed = { at, x, z, index: i, tree: cloneTrestleTree(tree), claims };
+        break search;
+      }
+      // No arc offset at this lean can still be a trunk: the march is over.
+      if (!admissible && lean !== 0) {
+        leanExhausted = true;
+        break;
       }
     }
-    if (!placed && mandatory) {
-      // Exceedingly rare given the search above — genuinely no clear ground
-      // within 8 m of a bar's own scheduled position — but a bar must never
-      // silently render with no support, so this is loud rather than quiet.
-      console.warn(
-        `railRace/track.ts: no clear ground found for the mandatory trestle at slot ${i} ` +
-          `(arch-relative at=${atArch0.toFixed(1)}) even after the wide search — a duck bar is ` +
-          `scheduled here with no visible support. Widen WIDE_ARC_NUDGES/WIDE_RADIAL_NUDGES or move this bar.`,
+
+    if (placed) {
+      spots.push(placed);
+      continue;
+    }
+    if (mandatoryIndices.has(i)) {
+      // The refusal propagates. There is no wider list to reach for: the
+      // support's next decision would be a different *shape* (a trunk rising
+      // vertically to the headroom before it forks — design ruling point 3),
+      // which does not exist yet. Say exactly what refused it.
+      throw new Error(
+        `railRace/track.ts: no support can stand for the duck bar at slot ${i} of ` +
+          `${feature} (arch-relative at=${atArch0.toFixed(1)}): ` +
+          (leanExhausted
+            ? `the trunk's lean limit was reached (maxTrunkLean, trestleGeometry.ts) `
+            : `the ring's whole lean range was tried `) +
+          `with arc room ±${arcReach.toFixed(2)} m` +
+          (refusedBy.size > 0
+            ? `, refused by ${[...refusedBy].sort().join(', ')}`
+            : ', refused only by the unmigrated ground predicates') +
+          '. A bar with no support is not built; the placer needs a second support shape or the blocker must move.',
       );
     }
-    if (placed) spots.push({ ...placed, index: i });
   }
   return spots;
 }

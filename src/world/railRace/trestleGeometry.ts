@@ -167,6 +167,50 @@ export function forkPlan(
 }
 
 /**
+ * The radius of each kind of strut at its two ends, at race-ring size — the
+ * trunk from its foot to its top, then each generation of branch tapering by
+ * {@link BRANCH_TAPER}. `track.ts` bakes these into its three cylinder
+ * geometries and `trestleClaims` reads them for the width of what a support
+ * claims; one owner so the claim is as wide as the thing drawn.
+ */
+export const STRUT_RADII = {
+  legs: { from: POST_FOOT_RADIUS, to: POST_TOP_RADIUS },
+  'branches-lower': { from: POST_TOP_RADIUS * BRANCH_TAPER, to: POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER },
+  'branches-upper': {
+    from: POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER,
+    to: POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER * BRANCH_TAPER,
+  },
+} as const;
+
+/**
+ * **How far a trunk may lean before the support stops being a trunk** — the
+ * bound on the trestle placer's outward march (stage 3, step 2).
+ *
+ * A trestle's top must stay under the rails, so moving its foot sideways to
+ * find clear ground does not move the support: it *leans* it (`track.ts`
+ * stands the trunk from the found foot to a top the lanes dictate). The old
+ * search bounded that lean with typed reaches — `RADIAL_NUDGES` ±5,
+ * `WIDE_RADIAL_NUDGES` ±8 — which on a 2 m trunk is a 68–76° lean, and nothing
+ * about the support said so. Those lists are gone; the bound is now the
+ * support's own geometry, stated once, here:
+ *
+ * **a trunk may lean no further from vertical than its own branches fork.**
+ * {@link BRANCH_ANGLE} is the angle a branch makes with what it grew from; a
+ * trunk leaning past it would fork *tighter* than it leans, and read as a
+ * branch with no trunk under it. So the furthest a foot may stand from the
+ * point under its trunk's top is `tan(BRANCH_ANGLE)` times the trunk's own
+ * height — which {@link forkPlan} fixes through {@link MIN_TRUNK_FRACTION},
+ * plus however far the lanes at that slot ride above their lowest.
+ *
+ * Measured off the built park by `test/procgen/invariants.ts` (the lean of
+ * every drawn trunk against this same function), so the placer cannot obey a
+ * different number from the one the check reads.
+ */
+export function maxTrunkLean(trunkHeight: number): number {
+  return Math.tan(BRANCH_ANGLE) * Math.max(0, trunkHeight);
+}
+
+/**
  * How far apart the sleepers bridging a lane's two rails sit, in metres.
  *
  * Jim, 5 August 2026: "the sky ride and race should have cross-bars like railway

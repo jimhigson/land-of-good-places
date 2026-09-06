@@ -25,6 +25,7 @@ import {
 } from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
+import type { GroundClaims } from '../../boot/groundClaims';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { createSparks, type Sparks } from './sparks';
@@ -404,7 +405,7 @@ export class RailRace implements GameSystem {
   /** The running order last sent to the HUD, so it is only sent on a change. */
   private standings: number[] = [];
 
-  constructor(collision: CollisionWorld) {
+  constructor(collision: CollisionWorld, groundClaims: GroundClaims) {
     this.collision = collision;
     this.group.name = 'railRace';
 
@@ -413,16 +414,24 @@ export class RailRace implements GameSystem {
     // hazard geometry is built once, in full, whichever level ends up chosen;
     // `setHazardLevel` only ever toggles its visibility.
     //
-    // The walk-past ring goes up **first**, and it is the one that registers
-    // collision. The race ring's own trestle search then sees those posts as
-    // occupied ground and stands its legs clear of them for free, so the two
-    // rings' supports never land on the same square metre even though the
-    // rings are concentric.
+    // **Each ring's supports are claims** (stage 3, step 2 of
+    // `docs/DESIGN-round-robin-generation.md`): `buildRailRaceTrack` asks the
+    // park's one registry where a leg may stand, with the plan projection of
+    // the support as it will be drawn, and commits those claims under the
+    // ring's own name. So the order below is *claim order*: the walk-past ring
+    // claims first, and the race ring's search sees its legs as claimed ground
+    // and stands clear of them — the same square-metre guarantee the old
+    // "walk-past registers collision first" trick bought by construction
+    // order, now a fact in the registry that anything placed later can read
+    // too. The walk-past ring is still the only one that registers *collision*
+    // (see `RailRaceTrackOptions.registerCollision`): that is about what a
+    // child on foot walks into, and a claim is about what may share the ground.
     this.walkPastRing = {
       route: RAIL_RACE_PLAN.walkPastRing,
       track: buildRailRaceTrack(RAIL_RACE_PLAN.walkPastRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:walk-past-ring',
         registerCollision: true,
+        groundClaims,
         // No finish rainbow here — see `RailRaceTrackOptions.showArch` (#299).
         showArch: false,
       }),
@@ -432,6 +441,7 @@ export class RailRace implements GameSystem {
       track: buildRailRaceTrack(RAIL_RACE_PLAN.raceRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:race-ring',
         registerCollision: false,
+        groundClaims,
         showArch: true,
       }),
     };

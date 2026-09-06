@@ -1,7 +1,7 @@
 import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
 import { forEachPavedDisc } from '../paving';
 import type { Claim } from '../../boot/groundClaims';
-import { CAT_BUS_LENGTH } from './catBus';
+import { CAT_BUS_LENGTH, CAT_BUS_TOP } from './catBus';
 import { ROAD_HALF_WIDTH } from './road';
 import {
   ENTRANCE_BUS_ARRIVE_X,
@@ -181,6 +181,15 @@ export function entranceRoadSegments(): readonly RoadSegment[] {
  * a declared crossing, and nothing solid may share it. Two claims rather than
  * one because the road turns a corner at the gate, and a capsule is a straight
  * segment.
+ *
+ * **The claim carries the bus's height** (`Claim.headroom`, stage 3 step 2):
+ * a corridor is not only ground, it is the air the bus drives through, and a
+ * Rail Race trestle whose foot stands clear of the road can still lean
+ * through the bus at head height — `check:swept-bus` found 364 of them across
+ * the pool. The number is the bus's own {@link CAT_BUS_TOP}, ear tips
+ * included, read from the vehicle rather than restated here; the trestle
+ * never reads it directly, it asks the registry what the tallest thing
+ * claimed needs and claims everything of itself below that.
  */
 export function entranceRoadClaims(): readonly Claim[] {
   return entranceRoadSegments().map((segment) => ({
@@ -193,5 +202,6 @@ export function entranceRoadClaims(): readonly Claim[] {
       z2: segment.to.z,
       halfWidth: ROAD_HALF_WIDTH,
     },
+    headroom: CAT_BUS_TOP,
   }));
 }

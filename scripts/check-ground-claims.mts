@@ -95,20 +95,25 @@ const park = buildHeadlessPark();
 const worldRegistry = park.world.groundClaims;
 
 // ---------------------------------------------------------------------------
-// Probe 2: exactly one feature has claimed ground, it is the road, and every
-// claim it made is a corridor.
+// Probe 2: exactly the production placers have claimed ground — the road
+// (step 1) and the two Rail Race rings (step 2) — and every claim the road
+// made is a corridor.
 //
-// **What this covers, honestly**: at step 1 the road is the ONLY production
-// placer, so "one feature" is the whole registry. It will stop being one the
-// moment step 2 lands, and the assertion below is written to fail loudly then
-// rather than silently widen — a check that quietly accepts more than it was
-// written for is how the next agent inherits a false belief.
+// **What this covers, honestly**: this is the whole list of placers, in the
+// order they commit, and it is deliberately exact. Step 1 asserted `[road]`
+// alone; step 2 widened it to the three below, on purpose, in its own diff.
+// The next placer widens it again the same way — a check that quietly accepts
+// more than it was written for is how the next agent inherits a false belief.
 // ---------------------------------------------------------------------------
+const EXPECTED_FEATURES = [ROAD_FEATURE, 'railRace:walk-past-ring', 'railRace:race-ring'];
 const features = worldRegistry.committedFeatures();
-if (features.length !== 1 || features[0] !== ROAD_FEATURE) {
+if (
+  features.length !== EXPECTED_FEATURES.length ||
+  features.some((feature, i) => feature !== EXPECTED_FEATURES[i])
+) {
   fouls.push(
-    `the registry on the built park holds features [${features.join(', ')}] — step 1 makes the ` +
-      `road the one and only production placer, so this should be exactly ["${ROAD_FEATURE}"]. ` +
+    `the registry on the built park holds features [${features.join(', ')}] — the production ` +
+      `placers, in commit order, are exactly [${EXPECTED_FEATURES.join(', ')}]. ` +
       'If a later step has added a placer, widen this probe deliberately rather than deleting it',
   );
 }
