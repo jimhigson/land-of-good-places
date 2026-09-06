@@ -15,9 +15,35 @@ import { placedEntry } from './parkLayout';
  */
 export type AnchorId = 'building' | 'ballPit' | 'ferrisWheel' | 'dodgems' | 'waterFight' | 'hotel';
 
+/**
+ * A plot's shape on the ground.
+ *
+ * `rect` may carry **corner discs**, and the castle is why (issue #549). Its
+ * four turrets stand half a wall thickness *outside* each corner of its
+ * rectangle and bulge 2.21 m further out again, so a rectangle cannot describe
+ * where the castle actually reaches — and everything that asked the rectangle
+ * got the wrong answer in the same direction. The collision world did not know
+ * the turrets existed, so a child walked through them; and the layout solver
+ * did not either, so on three of the sixteen pool seeds it put the castle's own
+ * doormat and path spur inside one.
+ *
+ * Declaring the discs on the footprint means every consumer of
+ * `edgeDistanceAlong` — the entrance placement in `parkLayout` and the spur's
+ * target in `paths.ts` — gets the true extent from one place, rather than each
+ * being patched to know about turrets.
+ */
 export type AnchorFootprint =
   | { readonly kind: 'circle'; readonly radius: number }
-  | { readonly kind: 'rect'; readonly halfX: number; readonly halfZ: number };
+  | {
+      readonly kind: 'rect';
+      readonly halfX: number;
+      readonly halfZ: number;
+      /** Solids standing at the rectangle's corners, in the plot's own frame. */
+      readonly corners?: {
+        readonly at: readonly (readonly [number, number])[];
+        readonly radius: number;
+      };
+    };
 
 export interface AnchorDefinition {
   readonly id: AnchorId;

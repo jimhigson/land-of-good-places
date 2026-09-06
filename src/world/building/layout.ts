@@ -29,7 +29,12 @@ import {
   INTERIOR_ORIGIN_Z,
   INTERIOR_PLATE_SHRINK,
   INTERIOR_PLAZA_DROP,
+  CASTLE_TURRET_BASE_RADIUS,
+  CASTLE_TURRET_CORNERS,
   PLAYER_RADIUS,
+  TOWER_BASE_FLARE,
+  TOWER_RADIUS,
+  TOWER_ROOF_OVERHANG,
 } from '../../core/constants';
 import { CASTLE_HALL, CASTLE_MALL, CASTLE_ROOF } from './floors';
 import { TAP_FINGER_METRES } from '../tapSpacing';
@@ -331,35 +336,20 @@ export const CASTLE_MASONRY_TOP = CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT;
  * Jim rode the slide through one. Measured on the canonical seed the chute ran
  * 1.10 m inside a tower body while every invariant stayed green.
  */
-export const TOWER_RADIUS = 2.05;
+// Owned by `core/constants.ts` — see the note beside them there for why the
+// castle's extent cannot live in this file. Re-exported so the many places
+// that already read them from here are untouched.
+export {
+  TOWER_RADIUS,
+  TOWER_BASE_FLARE,
+  TOWER_ROOF_OVERHANG,
+  CASTLE_TURRET_BASE_RADIUS,
+  CASTLE_TURRET_CORNERS,
+};
+
 export const TOWER_HEIGHT = 10.6;
 export const TOWER_ROOF_HEIGHT = 4.2;
-/** How far the conical roof oversails the body it sits on. */
-export const TOWER_ROOF_OVERHANG = 0.4;
-/** How much wider the body is at its foot than at its top. */
-export const TOWER_BASE_FLARE = 1.08;
 
-/**
- * **How wide a turret's shaft is at its foot** — the one owner of the number,
- * read by the mesh, by {@link CASTLE_TOWERS} and by the collider.
- *
- * Issue #549 asked why a child could walk through the corner towers; the answer
- * was that nothing had ever given them a collider. Writing one exposed this:
- * `TOWER_RADIUS * TOWER_BASE_FLARE` was being computed in **three** separate
- * places — `castleMasonry.ts`'s `CylinderGeometry`, this file's
- * {@link CASTLE_TURRET_FOOTPRINT_RADIUS}, and {@link CASTLE_TOWERS}'s
- * `radiusBottom` — and the mesh did not read the solid at all. They agreed only
- * because three copies of one expression happened to be typed identically,
- * which is CLAUDE.md's most expensive bug shape sitting one edit away from
- * biting: re-flare the turret and the drawn stone moves while the collider and
- * the slide's routing stay put.
- *
- * This is the first collider to land under `ART_DIRECTION.md` §7's Collider
- * row — one owner for a mesh and its collider radius. The rule generalises:
- * the *solid* publishes its radius, and the geometry and the collision both
- * ask it.
- */
-export const CASTLE_TURRET_BASE_RADIUS = TOWER_RADIUS * TOWER_BASE_FLARE;
 
 /**
  * **How wide a turret is**, for anything that has to keep out of one — a
@@ -391,9 +381,6 @@ export interface TowerSolid {
   readonly radiusTop: number;
 }
 
-/** Where the four towers stand, facade-local. Outside the footprint rectangle. */
-const TOWER_HALF_X = BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2;
-const TOWER_HALF_Z = BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2;
 
 /**
  * The towers in world space, body and roof, ready to be routed around.
@@ -403,12 +390,7 @@ const TOWER_HALF_Z = BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2;
  */
 export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
   const solids: TowerSolid[] = [];
-  const corners: readonly (readonly [number, number])[] = [
-    [-TOWER_HALF_X, -TOWER_HALF_Z],
-    [TOWER_HALF_X, -TOWER_HALF_Z],
-    [-TOWER_HALF_X, TOWER_HALF_Z],
-    [TOWER_HALF_X, TOWER_HALF_Z],
-  ];
+  const corners = CASTLE_TURRET_CORNERS;
   corners.forEach(([localX, localZ], index) => {
     const x = BUILDING_CENTRE_X + localX;
     const z = BUILDING_CENTRE_Z + localZ;
