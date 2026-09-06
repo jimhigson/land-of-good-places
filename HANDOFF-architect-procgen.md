@@ -54,7 +54,10 @@ first honest run found #501).
   demand set; path solve owns the converge loop; `CROSSING_SITES`
   published once after convergence; `footprints()` throws if early;
   bound derived from `SITE_SPACING`. #511 gated on it → critical path to
-  step 2. Next: review the PR (screen
+  step 2. **Two pool seeds foul** (267 at railD 213.4, producer TBA;
+  288 `spur-station-1`); contract holds for any producer — each
+  producer exposes a re-route decision, the ring has only the on-demand
+  rung. #579: 7 seed files ≠ 16-seed pool. Next: review the PR (screen
   wired into pathGraph + station spur screened); then #511 goes green
   and step 2 unblocks.
   Terrain is no longer seed-dependent (1200 m sphere) — the outward

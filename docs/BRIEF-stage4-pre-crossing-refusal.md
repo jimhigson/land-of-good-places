@@ -88,7 +88,12 @@ list is the spec, this is the checklist)
 - Bound = `loopLength / SITE_SPACING` (derived); hitting it is a named
   failure.
 - Unprovable demand → re-route to an existing site with the corridor at
-  `d` hard in the drawn predicate → else named failure.
+  `d` hard in the drawn predicate → else named failure. **Each producer
+  exposes its re-route decision** (spur/connector: re-plan the street
+  route; snapped run: un-snap or re-pin); a producer with none (the
+  ring) has the on-demand site as its only rung and fails by name.
+- Acceptance is **pool-wide, sixteen seeds** (#579): 267 and 288 build;
+  fourteen byte-identical; `check:coplanar` on the branch green.
 - `CROSSING_SITES` published once, after convergence, via the prewarm
   letterbox; no module-load read before it.
 - `bridgeKeepout.footprints()` throws if called before the graph is

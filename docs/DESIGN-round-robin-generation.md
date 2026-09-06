@@ -1095,6 +1095,32 @@ first customer, and the fix has the design's shape, not the hill's:
       numbers, and the line that says "0 demands" on seeds where nothing
       happened so a silent loop cannot read as a working one.
 
+   **Pool-wide (6 Sep): two seeds foul, not one.** Screened across all
+   sixteen — seed 267: 1252 samples, 1 off-site at railD 213.4
+   (36.9, 6.5), producer being attributed; seed 288: 1342 samples, 1
+   off-site at railD 35.1, `spur-station-1`; the other fourteen 0 at
+   1172–1574 samples. "Only 288 is red" had been true of `test:procgen`'s
+   **seven** seed files and false of the **sixteen**-seed pool — issue
+   #579, `check`/`test:procgen`/`build` all green while a pool park is
+   broken, which caught two agents in one night. Consequence: on the
+   sphere branch `check:coplanar` cannot go green until this recovery
+   exists, because it cannot build two of the parks it sweeps — so #511
+   is gated on this contract, and step 2 behind it.
+
+   **The contract does not depend on which producer fouls**, and that is
+   settled before 267 is attributed: the loop screens the *committed
+   routes' drawn samples* whoever drew them, and its rungs — demand a
+   site at the drawn `d`, else re-route that route — never ask what kind
+   of route it is. A second producer adds no rung. It adds one
+   obligation, binding now: **every producer exposes a re-route decision
+   to the second rung** (a spur re-plans its street route with the
+   corridor at `d` hard; a connector likewise; a snapped run un-snaps or
+   re-pins), and **a producer with no route decision — the ring is a
+   fixed circle — has the on-demand site as its only rung**, so an
+   unprovable demand on it is a *named failure*, never a fall-through
+   that keeps the fouling route. The screen names the route; the route's
+   producer owns what "re-route" means for it; the loop owns the order.
+
    This is the crossingSites section made concrete: the march is
    exploration (candidates), a site is claimed when a real path×rail
    conflict demands it, and staleness is handled by re-solving the pure
