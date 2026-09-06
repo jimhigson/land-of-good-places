@@ -25,6 +25,7 @@ import { terrainHeight } from './terrain';
 import { buildPaths } from './pathGraph';
 import type { CollisionWorld } from './Collision';
 import { isInEntranceGateOpening } from './entrance/layout';
+import { clearOfRailway } from './Scenery';
 
 /**
  * The ground itself: grassy terrain, the winding paths and the pink stone
@@ -181,9 +182,11 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   const blockWidth = BOUNDARY_BLOCK_WIDTH;
   const courses = 2;
   const courseStations = [
-    alongBoundary(PARK_BOUNDARY, blockWidth).filter(outsideTheGate),
+    alongBoundary(PARK_BOUNDARY, blockWidth).filter(outsideTheGate).filter(offTheRailway),
     // Half a block along the edge, which is what makes alternate courses bond.
-    alongBoundary(PARK_BOUNDARY, blockWidth, blockWidth / 2).filter(outsideTheGate),
+    alongBoundary(PARK_BOUNDARY, blockWidth, blockWidth / 2)
+      .filter(outsideTheGate)
+      .filter(offTheRailway),
   ];
   const blockCount = Math.max(courseStations[0]!.length, courseStations[1]!.length);
   const courseHeight = 0.62;
@@ -237,7 +240,9 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   const pillarStations = alongBoundary(
     PARK_BOUNDARY,
     PARK_BOUNDARY.perimeter / PILLAR_TARGET_COUNT,
-  ).filter(outsideTheGate);
+  )
+    .filter(outsideTheGate)
+    .filter(offTheRailway);
   const pillarCount = pillarStations.length;
   const pillarGeometry = new BoxGeometry(1.5, 2.1, 1.5);
   const pillarMaterial = new MeshStandardMaterial({
@@ -369,6 +374,40 @@ function inGateGap(x: number, z: number, margin: number): boolean {
  */
 function outsideTheGate(station: EdgeStation): boolean {
   return !inGateGap(station.x, station.z, DRAWN_BLOCK_GATE_MARGIN);
+}
+
+/**
+ * **And the wall gives way to the railway, the same as it gives way to the
+ * gate.**
+ *
+ * The boundary outline runs from 57 m to 110 m and the train's loop is solved
+ * without reference to it, so on some seeds the two cross: on pool seed 326,
+ * measured on the built park, **77 fence posts and 129 fence rails stand inside
+ * a boundary block** — masonry and pickets in the same cubic metre, which is
+ * where `check:coplanar` found 0.280 m² of `boundary-blocks` sharing a plane
+ * with `rail-fence` (it was 0.051 m² before the sphere ground moved the terrain
+ * under both, which changed nothing about the overlap and everything about
+ * whether the two heights happened to coincide). The shared plane is the
+ * symptom; a decorative wall built through a live railway is the defect.
+ *
+ * The wall is what moves, not the fence: the fence is the rule that keeps a
+ * child off the track (`check:park`'s rail.exclusion) and has to be continuous,
+ * while this wall is scenery — the player is held by the *soft* boundary at
+ * `GARDEN_PLAY_RADIUS`, two metres inside the masonry, which is what has always
+ * actually kept her in the park. The collision ring is deliberately left whole
+ * (see the `collisionStations` loop): nothing drawn is being made unsolid here,
+ * only stone that stood inside a fence is not being laid.
+ *
+ * **`clearOfRailway` is asked rather than a distance restated here** — it is
+ * `Scenery.ts`'s single owner of "is this the railway", corridor, platforms and
+ * bridge footprints together, and the thing this file must not grow is a second
+ * idea of where the track is. The margin is {@link DRAWN_BLOCK_GATE_MARGIN},
+ * which is already this wall's own reach from a station's centre to the far
+ * corner of the stone laid on it — the same expression the procgen invariant
+ * rebuilds for the gate.
+ */
+function offTheRailway(station: EdgeStation): boolean {
+  return clearOfRailway(station.x, station.z, DRAWN_BLOCK_GATE_MARGIN);
 }
 
 /**
