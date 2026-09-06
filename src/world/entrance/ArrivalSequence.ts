@@ -15,8 +15,6 @@ import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
 import {
   CHILD_FOOTPRINT,
-  KID_HEAD_HEIGHT,
-  kidEyeCentre,
   TALLEST_CHILD_HEIGHT,
   KID_EYE_HEIGHT,
 } from '../../art/models/kid';
@@ -270,62 +268,6 @@ const ARRIVAL_FRAMING_AIR = 1.15;
 export const ARRIVAL_CAMERA_ZOOM =
   CAMERA_VIEW_HEIGHT / 2 / (ARRIVAL_BUS_RADIUS * ARRIVAL_FRAMING_AIR);
 
-/**
- * **How far above the pavement the door shot is aimed, in metres — a child's
- * own face.**
- *
- * Jim, 3 September 2026, shown the horizontal door beat with the bottom of the
- * frame empty: *"For the arrival shot the camera should be face height so the
- * ground should be visible normally."*
- *
- * With {@link ARRIVAL_DOOR_PITCH_DEGREES} at zero this is also **the height the
- * eye itself rides at** — `cameraOffset` puts the eye at `focus + offset`, and a
- * horizontal offset has no `y` — so this one number is both what the shot aims
- * at and where it is taken from. That is the whole of "the camera should be
- * face height", and `check:arrival-camera` clause 9 asserts the two agree, which
- * is also what makes reintroducing a downward tilt here fail rather than pass
- * quietly.
- *
- * **Derived from the child, not typed.** It is the head pivot
- * ({@link KID_HEAD_HEIGHT}) plus the painted eye's own height on the skull
- * ({@link kidEyeCentre}) — 1.36 + 0.056 = **1.416 m**. Both come from the one
- * file that owns where a child's face is, so a head that is re-modelled or
- * re-scaled carries this shot with it. It replaces a hand-typed 1.1 "about a
- * child's chest", which is the class of number this repo has been bitten by
- * repeatedly.
- *
- * It ignores the head's own 10° backward tilt (`HEAD_TILT`, private to
- * `kid.ts`), which would add about 0.10 m. That is deliberate: the tilt is a
- * pose, and the shot wants the line a face sits on rather than where the pose
- * happens to swing it this frame.
- *
- * ## What this does and does not fix, measured
- *
- * The complaint it answers is real: at zero pitch an orthographic camera sees
- * the ground **exactly edge-on**, so the ground plane projects to a *line* at
- * the eye's own height and everything below that line in frame is empty. The
- * size of that empty band is `frameHeight / 2 − eyeHeight`, so **raising the
- * eye shrinks it** — which is why Jim's instruction is the right direction and
- * not merely a preference.
- *
- * It does not close it. At {@link ARRIVAL_DOOR_ZOOM} the frame is 6.534 m tall
- * on a 16:10 screen, so:
- *
- * ```
- * eye 1.100 m (the old chest)  void 2.167 m  33.2% of frame height
- * eye 1.416 m (a child's face) void 1.851 m  28.3%
- * ```
- *
- * The band would only vanish at an eye height of `frameHeight / 2` = 3.27 m,
- * which is a camera above a child's head rather than at her face. **Do not
- * reach for a downward tilt to close it** — that is the sign-across-her fault
- * Jim has ruled on twice; see {@link ARRIVAL_DOOR_PITCH_DEGREES}. The remaining
- * band is a composition question (a tighter frame would crop it out) and it is
- * his to answer from a rendered frame, not one to guess at here.
- *
- * `check:arrival-camera` prints the band's measured size on every run.
- */
-export const ARRIVAL_DOOR_FOCUS_LIFT = KID_HEAD_HEIGHT + kidEyeCentre(1).y;
 
 /**
  * **How high the arrival camera's eye rides: a child's eye height, plus the
@@ -343,8 +285,119 @@ export const ARRIVAL_DOOR_FOCUS_LIFT = KID_HEAD_HEIGHT + kidEyeCentre(1).y;
  * sampled at a point, and a camera a hand's breadth above a curved surface is
  * still on the wrong side of it a metre away.
  */
-const ARRIVAL_EYE_FLOOR_MARGIN = 0.3;
-const ARRIVAL_EYE_HEIGHT = KID_EYE_HEIGHT + ARRIVAL_EYE_FLOOR_MARGIN;
+/**
+ * **The world point every child steps down onto** — the drop, in world space,
+ * asked of the road and the bus rather than restated.
+ *
+ * Exported so `check:arrival-camera` can measure the shot against the ground it
+ * is actually over. The check used to model the focus at an arbitrary point,
+ * which is fine for angles and useless for clearance: how far the eye is above
+ * the grass depends entirely on *where in the park it is standing*.
+ */
+export function arrivalDoorDropWorld(): { readonly x: number; readonly z: number } {
+  const facing = busFacingAtStop(BUS_STOP_AT);
+  const stop = entranceRoadAt(BUS_STOP_AT);
+  return busLocalToWorld(stop.x, stop.z, CAT_BUS_DOOR_DROP.x, CAT_BUS_DOOR_DROP.z, facing);
+}
+
+/**
+ * **How high the ground is that the arrival's eye has to clear — the one
+ * owner, and the whole of what "not inside the ground" means here.**
+ *
+ * Jim, 6 September 2026: *"it should not be drawn inside the ground in any way,
+ * even taking the curvature into account."* The last clause is the load-bearing
+ * one and it is why this is not a point sample.
+ *
+ * **Why the curvature changes the question.** The ground is a sphere of
+ * {@link GROUND_SPHERE_RADIUS} now, so it falls away from the park's centre as
+ * `r²/2R`. The eye stands `distance` metres from the drop, *towards the gate* —
+ * which is towards the middle of the park, where the ground is **higher**.
+ * Measured on the canonical seed: the drop sits at radius 75.0 m where the
+ * terrain is −2.465 m, and the eye stands at radius 59.4 m where it is
+ * −1.76 m. Anchoring the shot's height to the ground under the *drop* would put
+ * the lens 0.7 m into a hill it cannot see, and the further back the shot
+ * stands the worse that gets — which is precisely the failure his sentence
+ * names.
+ *
+ * So this returns the **highest** ground the eye has to be above, over:
+ *
+ * - the drop itself and the eye's own footprint;
+ * - the run between them, because on a convex ground the middle of a chord
+ *   stands higher than either end, and that is the ground the shot looks
+ *   along;
+ * - a disc around the eye of the shot's **own frame half-height**, because an
+ *   orthographic near plane is a rectangle that size, not a point — ground
+ *   inside it is ground drawn across the picture. Derived from the shot's zoom
+ *   rather than chosen, so a tighter frame automatically samples a smaller
+ *   disc.
+ *
+ * `doorFocus` sits {@link ARRIVAL_EYE_HEIGHT} above whatever this returns, and
+ * `check:arrival-camera` asserts the result never leaves
+ * {@link ARRIVAL_EYE_FLOOR_MARGIN} of clearance. **They are one call, not two
+ * numbers that agree.**
+ */
+export function arrivalGroundUnderEye(
+  drop: { readonly x: number; readonly z: number },
+  shot: { readonly yawDegrees: number; readonly pitchDegrees: number; readonly distance: number; readonly zoom: number },
+): number {
+  const eye = cameraOffset(shot.yawDegrees * DEG, shot.pitchDegrees * DEG, shot.distance);
+  const eyeX = drop.x + eye.x;
+  const eyeZ = drop.z + eye.z;
+  let highest = Math.max(terrainHeight(drop.x, drop.z), terrainHeight(eyeX, eyeZ));
+  // Along the run the shot looks down.
+  for (let step = 1; step < ARRIVAL_GROUND_SAMPLES; step += 1) {
+    const f = step / ARRIVAL_GROUND_SAMPLES;
+    highest = Math.max(highest, terrainHeight(drop.x + eye.x * f, drop.z + eye.z * f));
+  }
+  // The near face's own reach around the eye.
+  const reach = CAMERA_VIEW_HEIGHT / (2 * Math.max(0.01, shot.zoom));
+  for (let step = 0; step < ARRIVAL_GROUND_BEARINGS; step += 1) {
+    const bearing = (step / ARRIVAL_GROUND_BEARINGS) * Math.PI * 2;
+    highest = Math.max(highest, terrainHeight(eyeX + Math.cos(bearing) * reach, eyeZ + Math.sin(bearing) * reach));
+  }
+  return highest;
+}
+
+/** How finely the run from the drop to the eye is sampled. A metre or so at the shot's longest. */
+const ARRIVAL_GROUND_SAMPLES = 24;
+/** Bearings round the eye. Twelve is every 30°, finer than the ground bends. */
+const ARRIVAL_GROUND_BEARINGS = 12;
+
+export const ARRIVAL_EYE_FLOOR_MARGIN = 0.3;
+
+/**
+ * **A little higher than her own eyes.** Jim, 6 September 2026, on the sphere
+ * preview: *"the entry camera on spherical world is basically good, it just
+ * needs to be closer to the player and also a little higher."*
+ *
+ * A **composition** number, and said so plainly rather than dressed up as a
+ * derivation: he asked to be looking slightly over her rather than dead level
+ * with her face, and how much is a thing you answer by looking at a frame. It
+ * is deliberately not folded into {@link ARRIVAL_EYE_FLOOR_MARGIN} — that one
+ * is the camera's safety clearance over the ground and must not move when
+ * somebody re-judges the framing, which is exactly the confusion that gets a
+ * lens driven into the grass.
+ *
+ * **Bounded by her feet, not by taste alone.** At zero pitch the aim rises with
+ * the eye, so lifting this drops her down the frame; lift it far enough and her
+ * feet leave the bottom. `check:arrival-camera` measures that and fails, so the
+ * band this can move in is held by a check rather than by care.
+ */
+const ARRIVAL_EYE_COMPOSITION_LIFT = 0.3;
+
+/**
+ * **How high the arrival's eye rides above the ground it is over** — the one
+ * owner, and the number `doorFocus` actually uses.
+ *
+ * Exported on 6 September 2026 to kill a second definition. `check:arrival-
+ * camera` was asserting the eye's height against `ARRIVAL_DOOR_FOCUS_LIFT`, a
+ * constant **nothing in `src/` read** — `doorFocus` has used this expression
+ * since the eye was anchored under itself. So the check was measuring a number
+ * the game did not use, and would have gone on passing while the shot moved.
+ * That constant is deleted rather than kept "in case"; a spare definition of a
+ * height is how this comes back.
+ */
+export const ARRIVAL_EYE_HEIGHT = KID_EYE_HEIGHT + ARRIVAL_EYE_FLOOR_MARGIN + ARRIVAL_EYE_COMPOSITION_LIFT;
 
 /**
  * **Which way the bus points while it is standing at the stop.**
@@ -667,8 +720,15 @@ function arrivalDoorDistance(): number {
  *
  * Still derived rather than dialled: a child who grows re-frames the shot, the
  * same way a bus that grew used to.
+ *
+ * **2.2 -> 1.7 on 6 September 2026**, on Jim's *"it just needs to be closer to
+ * the player"* against the sphere preview. She goes from 45% of frame height to
+ * **59%**. The floor on this number is her own feet: at zero pitch the aim sits
+ * {@link ARRIVAL_EYE_COMPOSITION_LIFT} above her eyeline, so a tighter frame
+ * crops her from the bottom before it crops her head. `check:arrival-camera`
+ * measures the margin under her feet and fails if it goes.
  */
-const ARRIVAL_CLOSE_FRAMING_AIR = 2.2;
+const ARRIVAL_CLOSE_FRAMING_AIR = 1.7;
 
 /** The push-in on the doorway itself, once the bus has stopped. */
 export const ARRIVAL_DOOR_ZOOM =
@@ -1633,7 +1693,7 @@ export class ArrivalSequence {
    * by this one point (see the constructor), so it frames the whole queue
    * coming off, not just her.
    *
-   * Lifted to a child's own face ({@link ARRIVAL_DOOR_FOCUS_LIFT}) — and since
+   * Lifted to {@link ARRIVAL_EYE_HEIGHT} over the ground under the eye — and since
    * the door beat looks purely horizontally, that is also the height the eye
    * itself stands at. Jim: *"For the arrival shot the camera should be face
    * height so the ground should be visible normally."*
@@ -1651,15 +1711,16 @@ export class ArrivalSequence {
     // seed, **0.44 m of clearance** above the ground it was actually over, which
     // is ankle height and takes any camber or undulation straight into the floor.
     //
-    // So the ground under the *eye* is what the lift is measured from. Resolvable
-    // without circularity because the eye's x,z depend only on the shot's yaw and
+    // So the ground under the *eye* is what the lift is measured from — and,
+    // since #511's sphere, the highest ground anywhere the near face reaches,
+    // not a point sample. {@link arrivalGroundUnderEye} owns that question and
+    // `check:arrival-camera` asserts against the same call. Resolvable without
+    // circularity because the eye's x,z depend only on the shot's yaw and
     // stand-back, never on the focus's height.
     const shot = arrivalShot(this.elapsed, this.archPassAt);
-    let groundUnderEye = terrainHeight(x, z);
-    if (shot) {
-      const eye = cameraOffset(shot.yawDegrees * DEG, shot.pitchDegrees * DEG, shot.distance);
-      groundUnderEye = Math.max(groundUnderEye, terrainHeight(x + eye.x, z + eye.z));
-    }
+    const groundUnderEye = shot
+      ? arrivalGroundUnderEye({ x, z }, shot)
+      : terrainHeight(x, z);
     return new Vector3(x, groundUnderEye + ARRIVAL_EYE_HEIGHT, z);
   }
 

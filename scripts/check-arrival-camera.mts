@@ -109,7 +109,7 @@
  *
  * ```
  * ARRIVAL_DOOR_PITCH_DEGREES 0    ARRIVAL_DOOR_DISTANCE ~6.6 m
- * ARRIVAL_DOOR_FOCUS_LIFT = KID_HEAD_HEIGHT 1.36 + kidEyeCentre(1).y 0.056 = 1.4157 m
+ * ARRIVAL_EYE_HEIGHT = KID_EYE_HEIGHT 1.5164 + floor margin 0.30 + composition lift 0.30
  * ARRIVAL_DOOR_ZOOM 2.2957 -> a 6.534 m frame on 16:10
  * green run: 39 checks; the eye rides 1.4157-1.4157 m through the door beat at 0.00 deg of tilt
  * ```
@@ -117,7 +117,7 @@
  * | mutation | result |
  * |---|---|
  * | none (control) | pass, 39 checks, exit 0 |
- * | `ARRIVAL_DOOR_FOCUS_LIFT` back to the typed 1.1 "about a child's chest" | **red, clause 9**: eye 1.1000 m, off by -0.3157 m, exit 1 |
+ * | `ARRIVAL_EYE_HEIGHT` back to the typed 1.1 "about a child's chest" | **red, clause 9**: eye 1.1000 m, off by -1.0164 m, exit 1 |
  * | `ARRIVAL_DOOR_PITCH_DEGREES` back to 24 — the sign-across-her composition | **red, clause 9**: eye rides 4.0871 m, off by +2.6714 m, exit 1 |
  *
  * That second mutation is the live risk rather than a hypothetical one: it is
@@ -140,7 +140,10 @@ import {
 import { angleDelta, DEG } from '../src/core/mathUtils.ts';
 import {
   ARRIVAL_CONTROL_AT,
-  ARRIVAL_DOOR_FOCUS_LIFT,
+  ARRIVAL_EYE_HEIGHT,
+  ARRIVAL_EYE_FLOOR_MARGIN,
+  arrivalDoorDropWorld,
+  arrivalGroundUnderEye,
   ARRIVAL_DOOR_ZOOM,
   ARRIVAL_RISE_TAIL,
   AT_SHOT_HOME,
@@ -151,6 +154,7 @@ import {
 import { GATE_ARCH_CLEAR_HEIGHT, GATE_ARCH_CLEAR_WIDTH } from '../src/art/models/gateArch.ts';
 import { KID_HEAD_HEIGHT, kidEyeCentre, TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 import { NPC_WALK_SPEED } from '../src/entities/npc/NpcCharacter.ts';
+import { terrainHeight } from '../src/world/terrain.ts';
 
 /**
  * The walking paces the pass is swept at, in m/s.
@@ -204,6 +208,14 @@ const PASSES: readonly ArchPass[] = [0.25, 0.44, 0.7].flatMap((fraction) =>
 );
 /** The one nearest the game's own geometry, for the single-value clauses. */
 const PASS: ArchPass = PASSES[3]!;
+
+/**
+ * How finely this file sweeps the terrain when it is checking the shot's ground
+ * clearance. Deliberately much finer than `arrivalGroundUnderEye`'s own
+ * sampling, because the point of the sweep is to catch that sampling being too
+ * coarse.
+ */
+const GROUND_GRID_STEP = 0.25;
 
 let checks = 0;
 let failures = 0;
@@ -280,7 +292,7 @@ const frameHeightAt = (zoom: number, aspect = DEFAULT_ASPECT): number =>
  * **Where a child's face is above her own feet**, in metres — read from the one
  * file that owns her head, not copied.
  *
- * The same expression `ARRIVAL_DOOR_FOCUS_LIFT` is built from, deliberately, so
+ * The same expression a child's face height is built from, deliberately, so
  * that clause 9 is asking *"is the shot still taken at the face?"* rather than
  * *"does this constant still equal the number I wrote down?"*. If `kid.ts`
  * re-scales the head, both move together and the clause keeps meaning what it
@@ -559,7 +571,7 @@ console.log('the eye passes under the crossbar and between the piers');
   // **The lift is read from `IsoCamera`, not typed here.** The arch pass runs
   // with `watchesTheDoor === false`, so the shot is orbiting the ordinary
   // player-follow focus — her feet plus {@link CAMERA_FOCUS_LIFT}. An earlier
-  // version of this clause hand-copied 1.1 from `ARRIVAL_DOOR_FOCUS_LIFT`,
+  // version of this clause hand-copied 1.1 from the arrival's aim height,
   // which is the *door beat's* aim height and belongs to a beat that is over
   // by the time the eye reaches the gateway. It measured the eye 0.15 m low,
   // and that 0.15 m was the whole of the margin the clause reported.
@@ -687,7 +699,7 @@ console.log("the door shot is taken at a child's own face height, looking level"
   //
   // **This is one assertion, not two, and that is the point.** At zero pitch
   // `cameraOffset`'s offset has no `y` at all, so the eye rides at exactly the
-  // focus height — `ARRIVAL_DOOR_FOCUS_LIFT + d·sin(pitch)` with the second
+  // focus height — `ARRIVAL_EYE_HEIGHT + d·sin(pitch)` with the second
   // term zero. Measuring the eye rather than reading the constant therefore
   // catches *both* ways this shot can stop being what he asked for: somebody
   // moving the aim height off the face, and somebody reintroducing a downward
@@ -703,30 +715,153 @@ console.log("the door shot is taken at a child's own face height, looking level"
     if (!shot || !shot.watchesTheDoor) continue;
     sawTheDoorBeat = true;
     const eyeUp =
-      ARRIVAL_DOOR_FOCUS_LIFT + shot.distance * Math.sin(shot.pitchDegrees * DEG);
+      ARRIVAL_EYE_HEIGHT + shot.distance * Math.sin(shot.pitchDegrees * DEG);
     lowest = Math.min(lowest, eyeUp);
     highest = Math.max(highest, eyeUp);
     worstTilt = Math.max(worstTilt, Math.abs(shot.pitchDegrees));
   }
   check(sawTheDoorBeat, 'there must BE a door beat — no frame reported watchesTheDoor');
   console.log(
-    `  the eye rides ${show(lowest)}–${show(highest)} m up through the door beat, ` +
-      `against a face at ${show(CHILD_FACE_HEIGHT)} m; worst tilt ${worstTilt.toFixed(2)}°`,
+    `  the eye rides ${show(lowest)}–${show(highest)} m over the ground under it through the ` +
+      `door beat, against a child's face at ${show(CHILD_FACE_HEIGHT)} m; ` +
+      `worst tilt ${worstTilt.toFixed(2)}°`,
   );
   near(
     lowest,
-    CHILD_FACE_HEIGHT,
+    ARRIVAL_EYE_HEIGHT,
     0.01,
-    "the door shot's eye must sit at a child's face — Jim asked for face height, and at " +
-      'zero pitch the eye height IS the aim height, so a miss here is either a moved aim ' +
-      'or a reintroduced downward tilt',
+    "the door shot's eye must sit at ARRIVAL_EYE_HEIGHT — the height `doorFocus` actually " +
+      'uses. At zero pitch the eye height IS the aim height, so a miss here is either a moved ' +
+      'aim or a reintroduced downward tilt',
   );
   near(
     highest,
-    CHILD_FACE_HEIGHT,
+    ARRIVAL_EYE_HEIGHT,
     0.01,
     'and must stay there for the whole beat, not only at its start',
   );
+
+  // ---- the lens is never in the ground, curvature included -----------------
+  //
+  // Jim, 6 September 2026: *"it should not be drawn inside the ground in any
+  // way, even taking the curvature into account."*
+  //
+  // **Measured against the real drop, not a modelled focus.** Everything else
+  // in this file is about angles, which are the same wherever the shot stands;
+  // clearance is not. `arrivalDoorDropWorld()` is where the bus actually puts a
+  // child down on this seed, so the terrain samples below are the terrain the
+  // shot is really over.
+  //
+  // **And measured through `arrivalGroundUnderEye`, which is the same call
+  // `doorFocus` sets its own height from.** That is deliberate and it is the
+  // only way this clause means anything: a check that re-derived "the ground
+  // under the eye" would be a second opinion about it, and the two would agree
+  // until the day they did not. One call, asked twice.
+  //
+  // What it asserts is the margin `ARRIVAL_EYE_HEIGHT` is built to leave, so a
+  // shot that stands somewhere the ground rises to meet it fails here rather
+  // than being discovered in a frame.
+  {
+    const drop = arrivalDoorDropWorld();
+    let worstClearance = Infinity;
+    let worstAt = 0;
+    let worstNote = 'nothing measured';
+    let frames = 0;
+    for (let t = 0; t < AT_SHOT_HOME; t += STEP) {
+      const shot = arrivalShot(t, PASS);
+      if (!shot) continue;
+      frames += 1;
+      const eye = cameraOffset(shot.yawDegrees * DEG, shot.pitchDegrees * DEG, shot.distance);
+      // Exactly what the game puts the eye at: the owner's ground plus the
+      // shot's own rise. Taken from the owner because that IS the thing under
+      // test — what follows must not.
+      const eyeY = arrivalGroundUnderEye(drop, shot) + ARRIVAL_EYE_HEIGHT + eye.y;
+      const eyeX = drop.x + eye.x;
+      const eyeZ = drop.z + eye.z;
+      // **Now measure the terrain independently, and much more finely than the
+      // owner does.** This is the half of the clause that can actually fail: if
+      // `arrivalGroundUnderEye`'s 24 samples along the run and 12 bearings round
+      // the eye ever miss ground that a 0.25 m grid finds, the eye it placed is
+      // lower over the real surface than it believes and this says so. A check
+      // that re-used the owner's own sampler here would be arithmetic, not a
+      // measurement — it would report `ARRIVAL_EYE_HEIGHT` every time and could
+      // not fail.
+      const reach = CAMERA_VIEW_HEIGHT / (2 * Math.max(0.01, shot.zoom));
+      let highest = -Infinity;
+      for (let dx = -reach; dx <= reach + 1e-9; dx += GROUND_GRID_STEP) {
+        for (let dz = -reach; dz <= reach + 1e-9; dz += GROUND_GRID_STEP) {
+          if (dx * dx + dz * dz > reach * reach) continue;
+          highest = Math.max(highest, terrainHeight(eyeX + dx, eyeZ + dz));
+        }
+      }
+      const run = Math.hypot(eye.x, eye.z);
+      const alongSteps = Math.max(1, Math.ceil(run / GROUND_GRID_STEP));
+      for (let k = 0; k <= alongSteps; k += 1) {
+        const f = k / alongSteps;
+        highest = Math.max(highest, terrainHeight(drop.x + eye.x * f, drop.z + eye.z * f));
+      }
+      const clearance = eyeY - highest;
+      if (clearance < worstClearance) {
+        worstClearance = clearance;
+        worstAt = t;
+        worstNote =
+          `eye at (${eyeX.toFixed(1)}, ${eyeZ.toFixed(1)}), ${shot.distance.toFixed(1)} m back, ` +
+          `highest ground within ${reach.toFixed(1)} m of it ${highest.toFixed(2)} m, eye ${eyeY.toFixed(2)} m`;
+      }
+    }
+    check(frames > 0, 'no frame of the shot was measured for ground clearance');
+    console.log(
+      `  the lens clears the ground by at least ${show(worstClearance)} m across ${frames} frames ` +
+        `(at t=${worstAt.toFixed(2)}s, ${worstNote}); the floor is ${show(ARRIVAL_EYE_FLOOR_MARGIN)} m, ` +
+        `and the terrain here is swept on a ${GROUND_GRID_STEP} m grid rather than by the owner's own samples`,
+    );
+    check(
+      worstClearance >= ARRIVAL_EYE_FLOOR_MARGIN,
+      `the arrival camera goes into the ground: ${worstClearance.toFixed(4)} m of clearance at ` +
+        `t=${worstAt.toFixed(2)}s, against a floor of ${ARRIVAL_EYE_FLOOR_MARGIN} m — ${worstNote}. ` +
+        'The ground is a sphere, so it rises towards the park centre faster than a shot standing ' +
+        'back expects; see arrivalGroundUnderEye',
+    );
+  }
+
+  // ---- and she is still in the frame after all that ------------------------
+  //
+  // **The guard on "closer and higher".** Both of Jim's refinements crop from
+  // the bottom: a tighter frame shrinks it, and lifting the aim pushes her
+  // down it. Either alone is fine and the pair is what takes her feet off the
+  // bottom edge, so the two numbers are held together here rather than
+  // separately. Measured at the tightest frame of the beat, in metres of her
+  // own body, so the failure says how much of her went.
+  {
+    let worstUnderFeet = Infinity;
+    let atZoom = 0;
+    for (let t = 0; t < AT_SHOT_HOME; t += STEP) {
+      const shot = arrivalShot(t, PASS);
+      if (!shot || !shot.watchesTheDoor) continue;
+      const halfHeight = CAMERA_VIEW_HEIGHT / (2 * shot.zoom);
+      // Her feet are on the ground; the frame is centred ARRIVAL_EYE_HEIGHT above it.
+      const underFeet = halfHeight - ARRIVAL_EYE_HEIGHT;
+      if (underFeet < worstUnderFeet) {
+        worstUnderFeet = underFeet;
+        atZoom = shot.zoom;
+      }
+    }
+    const headroom = CAMERA_VIEW_HEIGHT / (2 * atZoom) + ARRIVAL_EYE_HEIGHT - TALLEST_CHILD_HEIGHT;
+    console.log(
+      `  at the tightest frame (zoom ${atZoom.toFixed(3)}) her feet have ${show(worstUnderFeet)} m ` +
+        `of frame below them and the tallest hat ${show(headroom)} m above it`,
+    );
+    check(
+      worstUnderFeet > 0,
+      `the close frame crops her feet by ${(-worstUnderFeet).toFixed(3)} m — ` +
+        'ARRIVAL_CLOSE_FRAMING_AIR and ARRIVAL_EYE_COMPOSITION_LIFT crop from the same edge, so ' +
+        'they have to be judged together',
+    );
+    check(
+      headroom > 0,
+      `the close frame crops the tallest child's hat by ${(-headroom).toFixed(3)} m`,
+    );
+  }
 
   // **The empty band below the ground line — measured, and printed rather than
   // asserted.** A horizontal orthographic camera sees the ground exactly
@@ -759,15 +894,15 @@ console.log("the door shot is taken at a child's own face height, looking level"
     // other end of the same range, so the pair brackets what is on screen
     // rather than quoting one end twice.
     if (height < doorBeatFrame || doorBeatFrame === 0) doorBeatFrame = height;
-    if (height / 2 - ARRIVAL_DOOR_FOCUS_LIFT > worstBand) {
-      worstBand = height / 2 - ARRIVAL_DOOR_FOCUS_LIFT;
+    if (height / 2 - ARRIVAL_EYE_HEIGHT > worstBand) {
+      worstBand = height / 2 - ARRIVAL_EYE_HEIGHT;
       worstFrame = height;
       worstAt = t;
     }
   }
   const band = (height: number): string =>
-    `${show(height / 2 - ARRIVAL_DOOR_FOCUS_LIFT)} m of a ${show(height)} m frame ` +
-    `(${(((height / 2 - ARRIVAL_DOOR_FOCUS_LIFT) / height) * 100).toFixed(1)}%)`;
+    `${show(height / 2 - ARRIVAL_EYE_HEIGHT)} m of a ${show(height)} m frame ` +
+    `(${(((height / 2 - ARRIVAL_EYE_HEIGHT) / height) * 100).toFixed(1)}%)`;
   process.stderr.write(
     'MEASURED, NOT ASSERTED — the empty band under the ground line. A purely horizontal ' +
       'orthographic camera sees the ground edge-on, so it projects to a LINE at the eye ' +
