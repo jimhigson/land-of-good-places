@@ -118,7 +118,7 @@ import {
   trellisArch,
 } from './dressing';
 import { hotelResidents } from './HotelGuests';
-import { HotelProps, Plate } from './place';
+import { HotelProps, Plate, type RoomKeepOut } from './place';
 import { HotelLighting, pendantLight } from './lighting';
 import type { ResidentSpec } from '../../entities/npc';
 import { placedEntry } from '../parkLayout';
@@ -1022,6 +1022,23 @@ export class Hotel implements GameSystem {
    * a single description of its footprint.
    */
   private readonly props: HotelProps;
+  /**
+   * Every prop's footprint disc, in its room's own local metres — the same list
+   * the guests walk round.
+   *
+   * Exposed for `check:hotel`'s probe 31, which floods each room's floor asking
+   * what a child can reach. **A `CollisionWorld` rectangle is four walls round
+   * a hollow middle** (CLAUDE.md), so the lattice reads the inside of a sofa or
+   * a bed as free floor and the flood correctly reports it as cut off. That is
+   * the *right* answer — an interior a body can never get into is exactly what
+   * this repo wants — but it is not "floor a child can see and cannot walk to",
+   * which is what the probe exists to find. This list is how it tells the two
+   * apart, rather than by a size threshold that would eventually be tuned until
+   * it hid a real one.
+   */
+  get propKeepOuts(): readonly RoomKeepOut[] {
+    return this.props.roomKeepOuts;
+  }
   /** The guests, handed to `NpcSystem` — see {@link residents}. */
   private readonly guests: readonly ResidentSpec[];
   private seatedAt: string | null = null;
@@ -5336,12 +5353,70 @@ export class Hotel implements GameSystem {
     // doorway than the axis-aligned one ever admitted. 4.8 clears the
     // strengthened zone against that honest, rotated footprint by 0.19 m and
     // is still on the rug the sofa sits on.
+    //
+    // **x = 5.6 was the fourth miss, and it sealed the room** — issue #583,
+    // Jim playing on 6 September 2026: *"some of the bedroom isn't reachable
+    // by clicking on the floor — the near sub-room fails. The player simply
+    // does nothing in response to the click."* Clearing the doorway's own
+    // zone was never the same question as leaving a way *in*: the zone stops
+    // `DOORWAY_CLEARANCE + DOORWAY_THROUGH_DEPTH` (1.24 m) past the wall, and
+    // this sofa stood 1.63 m past it, straight across the only channel
+    // through. Measured on the built collision world: a `PLAYER_RADIUS` body
+    // needed its centre at `x >= 4.07` to pass the doorway's jambs and at
+    // `x <= 3.28` to round the sofa's west end — **impossible, short by
+    // 0.79 m**, so the lounge *and* the bathroom behind it (86.8 m², two of
+    // the suite's four sub-rooms) could not be entered at all. Each of the
+    // three earlier moves satisfied the doorway assertions and left the room
+    // sealed, which is why the number below is now **derived from the
+    // doorway** instead of nudged past whatever last complained, and why
+    // `check:hotel`'s probe 31 asks the whole-room question — is every
+    // standable patch of this room reachable from where she walks in? — that
+    // none of `assertDoorwaysClear`, `isClearOfDoorways` or probe 22's
+    // doorway marches was ever shaped to see.
+    //
+    // **The fix is in z, not x, and the reason is worth writing down.** Moving
+    // the sofa *east* of the doorway was tried first and it only moved the
+    // sealed room: the lounge is 22.8 m wide and the sofa then cut its east end
+    // off instead (measured, 85 cells / 21.3 m² marooned east of it). The real
+    // constraint is depth. The sofa's turned box sweeps **3.34 m** through a
+    // sub-room whose clear floor is only ~5.75 m deep, so wherever it stands
+    // mid-room it leaves ~1.2 m either side of it — and a child is **1.24 m**
+    // wide. It was not one bad number; the piece nearly spans the room.
+    //
+    // So it is pushed south until the gap along its **north** side is a proper
+    // walkway a body can use, rather than two gaps that are each just too
+    // narrow. That keeps everything QA chose about how it *looks* — mid-room,
+    // off both walls, turned −0.9 rad between "facing the telly" and "facing
+    // the lens" (see above) — and gives the lounge and the bathroom a way in.
+    //
+    // Every number below is **derived**: from the lounge's own clear floor
+    // (`clearFloorAround`, the same owner the rug reads), from the sofa's own
+    // turn, and from `PLAYER_RADIUS`. Nothing here is nudged past whatever last
+    // complained, which is what the previous four positions all were.
+    const sofaSpin = -0.9;
+    const sofaHalfX = 1.1;
+    const sofaHalfZ = 1.3;
+    // The turned box the sofa really sweeps — the same rotation `place.ts`'s
+    // `effectiveHalfExtents` measures it by.
+    const sofaSweptHalfZ =
+      sofaHalfX * Math.abs(Math.sin(sofaSpin)) + sofaHalfZ * Math.abs(Math.cos(sofaSpin));
+    const SOFA_X = 5.6;
+    const loungeFloor = clearFloorAround(SUITE, SOFA_X, FLOOR_Z);
+    /**
+     * Clear floor along the sofa's north side. A body is `2 * PLAYER_RADIUS`
+     * wide, and the lattice the router plans on classifies cells by their
+     * centres, so a channel exactly one body wide is a channel that may hold no
+     * cell centre at all. One more player-radius of slack is what makes it a
+     * walkway rather than a coin toss — the same reasoning
+     * `DOORWAY_THROUGH_DEPTH` is written down with.
+     */
+    const SOFA_NORTH_WALKWAY = PLAYER_RADIUS * 3;
     this.props.place(shell, SUITE, sofa(3.2, PALETTE.markerSky, PALETTE.blossomWhite), {
-      x: 5.6,
-      z: 4.8,
-      spin: -0.9,
-      halfX: 1.1,
-      halfZ: 1.3,
+      x: SOFA_X,
+      z: loungeFloor.minZ + SOFA_NORTH_WALKWAY + sofaSweptHalfZ,
+      spin: sofaSpin,
+      halfX: sofaHalfX,
+      halfZ: sofaHalfZ,
       top: SOFA_SEAT_TOP,
     });
 
