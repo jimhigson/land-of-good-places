@@ -173,7 +173,6 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.right/stair-right-newel/<Mesh:BufferGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.right/stair-right-stringer/<Mesh:BufferGeometry>": { area: 0.0218, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.straightStaircase/stair-straight-newel|the-land-hotel-inside/hotel:hotel.lobby/hotel.straightStaircase/stair-straight-rail": { area: 0.0209, seams: 1, fighting: true },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel:lobby/overhang/<Mesh:BoxGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel:lobby/overhang/hotel.landingNosing/landing-nose": { area: 0.0190, seams: 1, fighting: true },
-  "garden|park-train/railway-bridges/bridge/deck|park-train/railway-bridges/bridge/shell": { area: 0.0174, seams: 1, fighting: true },
   "garden|railRace/railRace:cart/hopper|railRace/railRace:cart/seat-back/<Mesh:BufferGeometry>": { area: 0.0165, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.wall|the-land-hotel-inside/hotel:hotel.lobby/hotel:lobby/overhang/hotel.bridgeRailing/bridge-rail-hand": { area: 0.0165, seams: 1, fighting: true },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.straightStaircase/stair-straight-stringer|the-land-hotel-inside/hotel:hotel.lobby/hotel.straightStaircase/stair-straight-tread": { area: 0.0164, seams: 1, fighting: true },

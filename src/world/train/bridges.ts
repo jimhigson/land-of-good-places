@@ -674,12 +674,33 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // `.visible`, so it still answers that question with the same geometry
   // the old, rendered version did, at zero draw cost and with nothing left
   // to fall out of step with the shell beside it.
+  //
+  // **And it carries no faces at all** — `setIndex([])` below. Hiding it was
+  // not enough: `check:coplanar` buckets triangles by their plane and asks
+  // what a *modeller drew*, and it has never consulted `.visible` (it cannot
+  // — the hotel's rooms and the castle's floors are whole subtrees held
+  // hidden until you walk into them, so a visibility test there would blind
+  // the sweep to three and a half thousand meshes). So this marker's four
+  // upright sides went on being reported against the shell's abutment
+  // faces they sit exactly in the plane of, on 13 of the 16 pool seeds —
+  // 0.0173 m² of "shared plane" between a drawn wall and a box nothing
+  // renders, and on seed 208's `bridge-0.0` at *both* ends at once, which is
+  // what the check calls a second seam.
+  //
+  // Deleting the faces is `ART_DIRECTION.md` §7's own remedy rather than a
+  // dodge, because **nothing wanted them**. Both readers of this object take
+  // `new Box3().setFromObject(...).min.y`, which is computed from the
+  // position attribute and does not look at the index at all, so the box
+  // they measure is unchanged to the bit; and all three places that raycast
+  // a bridge already exclude this object *by name* (`invariants.ts`,
+  // `parkFacts.ts`, `measure-bridge-parapet.mts`), because a marker is not
+  // stone. What is left is eight corners and a name — exactly what is
+  // actually read.
   const at0 = frame.pointAt(0);
   const origin0 = frame.worldAt(0, 0, shift);
-  const deckMesh = new Mesh(
-    new BoxGeometry(halfAcross * 2, BRIDGE_DECK_SLAB, ARCH_CLEAR_HALF * 2),
-    bridgeMaterials().stone,
-  );
+  const deckGeometry = new BoxGeometry(halfAcross * 2, BRIDGE_DECK_SLAB, ARCH_CLEAR_HALF * 2);
+  deckGeometry.setIndex([]);
+  const deckMesh = new Mesh(deckGeometry, bridgeMaterials().stone);
   deckMesh.name = 'deck';
   deckMesh.visible = false;
   const yaw = Math.atan2(at0.dirX, at0.dirZ);
