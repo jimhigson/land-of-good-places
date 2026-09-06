@@ -3,7 +3,7 @@
  *
  * Issue #426 made which park a child gets a *decision* rather than a constant.
  * This check owns the cheap half of that decision being right: that
- * `PARK_SEED_POOL` is a set of distinct positive integers containing the
+ * `PARK_SEED_POOL` is a set of distinct non-negative integers containing the
  * canonical seed, and that `resolveParkSeed()` picks from it in the documented
  * order — pins first, then the seed this profile already drew, then a draw.
  *
@@ -65,8 +65,8 @@ check(
 );
 check(
   'every seed is a positive integer',
-  PARK_SEED_POOL.every((s) => Number.isInteger(s) && s > 0),
-  `got ${PARK_SEED_POOL.filter((s) => !Number.isInteger(s) || s <= 0).join(', ')}`,
+  PARK_SEED_POOL.every((s) => Number.isInteger(s) && s >= 0),
+  `got ${PARK_SEED_POOL.filter((s) => !Number.isInteger(s) || s < 0).join(', ')}`,
 );
 check(
   'no seed appears twice',

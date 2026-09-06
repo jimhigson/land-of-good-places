@@ -523,6 +523,8 @@ const seeds = [...new Set([PARK_SEED, ...PARK_SEED_POOL])].sort((a, b) => a - b)
 
 const limit = Math.max(1, Math.min(seeds.length, cpus().length - 1));
 const reports: SeedReport[] = [];
+/** Seeds whose park threw before the bus could be swept, with the thrown reason. */
+const unbuilt: { seed: number; reason: string }[] = [];
 let cursor = 0;
 await Promise.all(
   Array.from({ length: limit }, async () => {
@@ -531,16 +533,36 @@ await Promise.all(
       cursor += 1;
       const seed = seeds[index];
       if (seed === undefined) return;
-      const { stdout } = await run(
-        process.execPath,
-        ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', HERE],
-        {
-          env: { ...process.env, LGP_SEED: String(seed), LGP_SWEPT_BUS_CHILD: '1' },
-          maxBuffer: 64 * 1024 * 1024,
-        },
-      );
+      let stdout = '';
+      try {
+        ({ stdout } = await run(
+          process.execPath,
+          ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', HERE],
+          {
+            env: { ...process.env, LGP_SEED: String(seed), LGP_SWEPT_BUS_CHILD: '1' },
+            maxBuffer: 64 * 1024 * 1024,
+          },
+        ));
+      } catch (error) {
+        // **A park that cannot be built is a failed seed, said in one line**,
+        // beside the seeds that did build — not a stack trace that hides the
+        // other fifteen. The pool is 0..15 by ruling (parkSeedPool.ts) and
+        // some of those parks the old generator cannot grow at all.
+        const stderr = (error as { stderr?: string }).stderr ?? String(error);
+        const reason =
+          stderr
+            .split('\n')
+            .find((each) => /^[A-Z][A-Za-z]*(Error|Unsolvable)?: /.test(each) && !each.startsWith('Node.js')) ??
+          stderr.trim().split('\n').slice(-1)[0] ??
+          'unknown';
+        unbuilt.push({ seed, reason });
+        continue;
+      }
       const line = stdout.split('\n').find((each) => each.startsWith('__SWEPT_BUS__'));
-      if (!line) throw new Error(`check:swept-bus: seed ${seed} produced no report`);
+      if (!line) {
+        unbuilt.push({ seed, reason: 'the child produced no report' });
+        continue;
+      }
       reports.push(JSON.parse(line.slice('__SWEPT_BUS__'.length)) as SeedReport);
     }
   }),
@@ -759,6 +781,20 @@ for (const report of loose) {
 
 // -------------------------------------------------------------------- verdict
 
+for (const { seed, reason } of unbuilt) {
+  process.stderr.write(`  ${String(seed).padStart(5)}  NOT BUILT — ${reason}\n`);
+}
+
+if (unbuilt.length > 0) {
+  console.error(
+    `\ncheck:swept-bus — ${unbuilt.length} seed(s) could not be built, so the bus was not ` +
+      'swept on them:\n',
+  );
+  for (const { seed, reason } of unbuilt) console.error(`  seed ${seed}: ${reason}`);
+  console.error('\nA park that does not build is not a clear park; the ratchet below covers only the seeds that did.');
+  process.exitCode = 1;
+}
+
 if (voids.length > 0) {
   console.error(
     `\ncheck:swept-bus VOID — this run measured nothing it can be trusted about:\n`,
@@ -820,6 +856,10 @@ if (regressions.length > 0) {
   }
 }
 
+if (unbuilt.length > 0) {
+  console.error(`check:swept-bus FAILED — ${unbuilt.length} seed(s) could not be built (above); the ratchet held on the ${reports.length} that did.`);
+  process.exit(1);
+}
 console.log(
   `check:swept-bus OK — swept ${reports.length} seed(s); ` +
     `${intruding.length} still have the bus driving through the drawn ride ` +
