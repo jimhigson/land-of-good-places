@@ -33,7 +33,7 @@ import type { AnchorPlots } from '../AnchorPlots';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
 
 import { BallPit } from './BallPit';
-import { solveChaseEye } from '../slide/chaseEye';
+import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
 import { FloorFader } from './floorFade';
 import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
@@ -499,6 +499,9 @@ export class Building implements GameSystem {
   private readonly chaseEye = new Vector3();
   private readonly chaseAim = new Vector3();
   private readonly chasePet = new Vector3();
+  /** The body centre the near bound used this frame (#518), and whether it is set. */
+  private readonly chaseBody = new Vector3();
+  private chaseBodyValid = false;
   private readonly chaseSeat: SlideSeat = {
     x: 0, y: 0, z: 0, facing: 0, pitch: 0, recline: 0,
   };
@@ -528,6 +531,31 @@ export class Building implements GameSystem {
    */
   chaseSolveGaveUpFrames(): number {
     return this.chaseGaveUp;
+  }
+
+  /**
+   * **The body point the chase solve's near bound actually reasoned about this
+   * frame** (#518), or `null` if there was no companion to reason about.
+   *
+   * Exposed for one purpose: so `check:pet-slide` can hold it up against
+   * `Box3.setFromObject` of the **real drawn animal** and **fail** if the two
+   * disagree — see that clause for the threshold and why it is where it is.
+   *
+   * The point itself comes from `Parade.nearestRiderBodyCentre`, which measures
+   * the drawn mesh; nothing here derives it from the pose. An earlier attempt
+   * did derive it and was **0.70 m out**, so what this accessor guards against
+   * is not a formula drifting but the solve being handed the wrong point at
+   * all — most obviously a reversion to the **seat**, which is ~0.95 m away.
+   *
+   * **It is read one frame before the pets are moved** (`advanceRide` places
+   * the lens at the top of the frame and seats the animals at the bottom), so
+   * it is deliberately one frame stale, exactly as `chaseCompanions` above is
+   * and for the same reason: asking now would be asking before the answer
+   * exists. `check:pet-slide` measures that frame of travel rather than
+   * restating it, and asserts its drift threshold keeps clear of it.
+   */
+  chaseNearestBodyCentre(): Vector3 | null {
+    return this.chaseBodyValid ? this.chaseBody : null;
   }
 
   /**
@@ -1643,6 +1671,11 @@ export class Building implements GameSystem {
     // child who goes down the slide twice would have.
     this.chaseGaveUp = 0;
     this.chaseCompanions = 0;
+    // The near bound's counters describe this descent too (#518), and they live
+    // on the solver's module rather than here because the solver is where the
+    // rejection happens. Same reasoning as the two above: a counter whose doc
+    // says "this descent" must be zeroed by the descent starting.
+    resetChaseCeilingCounters();
     player.beginRide();
   }
 
@@ -1718,10 +1751,17 @@ export class Building implements GameSystem {
       if (this.chaseCompanions > 0) {
         petSeatOnSlide(ride.slide, ride.distance, 0, this.chaseSeat);
         nearestPet = this.chasePet.set(this.chaseSeat.x, this.chaseSeat.y, this.chaseSeat.z);
+        // The same point the solve's near bound will derive, kept so
+        // `check:pet-slide` can measure it against the drawn animal (#518).
+        // **Ask the parade where the animal actually is** (#518). It owns the
+        // bodies and measures the drawn one; the ride only ever knew where it
+        // offered a seat, which is an origin at the animal's feet.
+        this.chaseBodyValid = this.petParade?.nearestRiderBodyCentre(this.chaseBody) ?? false;
       }
       const solved = solveChaseEye(
         this.rideMount.position,
         nearestPet,
+        this.chaseBodyValid ? this.chaseBody : null,
         this.chaseBehind,
         this.chaseUp,
         // Vertical half-fov in radians, asked of the camera rather than

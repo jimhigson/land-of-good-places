@@ -84,6 +84,30 @@ export interface PetSlideLink {
   callPetsOffSlide(): void;
   /** How many companions are on the chute right now. */
   petsOnSlide(): number;
+  /**
+   * **Where the nearest companion's body is actually drawn**, world space,
+   * written into `out`; `false` when nobody is aboard (#518).
+   *
+   * The chase camera has to know how close the animal it is filming really is,
+   * and the ride cannot answer that: it knows where it offered a **seat**,
+   * which is an origin at the animal's feet, while the reclining body lies most
+   * of a metre back from there **towards the lens**. Reasoning about the seat
+   * is what made the camera's near bound estimate 6% of frame where the raster
+   * measured 21%, so it never fired once in its life. That is #518.
+   *
+   * **Answered by the system that owns those bodies**, exactly as
+   * {@link petsOnSlide} is and for the same stated reason — rather than by the
+   * ride deriving it from a seat and a length, which would be a second
+   * description of where an animal is, kept in step with the drawn one by hand.
+   * That was tried first and **measured 0.70 m out** from the real body on the
+   * canonical park, which is most of the error it was supposed to remove.
+   *
+   * This does not break the "nothing crosses back" rule this interface is built
+   * on. What crosses back is a **point**, computed on demand from the bodies
+   * the parade already draws — not a body for the ride to hold, and not state
+   * for anyone to keep in step.
+   */
+  nearestRiderBodyCentre(out: Vector3): boolean;
 }
 
 /**
@@ -451,3 +475,4 @@ export function petSeatOnSlide(
   // "how does a body lie on this chute" for the two kinds of body on it.
   seat.recline = RIDE_RECLINE;
 }
+
