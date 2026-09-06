@@ -75,6 +75,27 @@ two-definitions disease and is a rejection even while green.
   fixed candidate order and the seed, never from map iteration. Two
   builds per seed in separate processes, identical.
 
+## Recovery — the contract (Architect, 6 Sep; the design doc's numbered
+list is the spec, this is the checklist)
+
+- `solveCrossingSites(demands)` / `crossingSitesSearch(demands)`: pure,
+  deterministic; demanded distances proven via `bridgeCandidateAt(d)`
+  first and force-kept, then `selectSpaced` as today around them. Empty
+  demands reproduce today's list exactly (byte-identity on clean seeds).
+- The path solve owns the converge loop; demands are the **drawn** rail
+  distances of fouls on the **committed** routes (not screened
+  candidates that differ from what is laid — the station-0 finding).
+- Bound = `loopLength / SITE_SPACING` (derived); hitting it is a named
+  failure.
+- Unprovable demand → re-route to an existing site with the corridor at
+  `d` hard in the drawn predicate → else named failure.
+- `CROSSING_SITES` published once, after convergence, via the prewarm
+  letterbox; no module-load read before it.
+- `bridgeKeepout.footprints()` throws if called before the graph is
+  published — break it deliberately (call early) and paste the red run.
+- Stderr every run: demands (d, x, z), proven, unservable, iterations;
+  "0 demands" printed on seeds where nothing happened.
+
 ## What must not change
 
 - `cruiserLowPoints()`'s 5.9 m. `SITE_SNAP_TOLERANCE`, `TOUCH_DISTANCE`,

@@ -48,9 +48,13 @@ first honest run found #501).
   foul: the drawn Catmull-Rom bulges across the rail while the control
   polyline holds its side. Ruling amended: a rung = change decision →
   resample via shared `sampleCurve` → same drawn predicate; polyline
-  tests pre-reject only, never accept. Engineer moving the drawn
-  predicate to the point of decision (module split to break the import
-  cycle). Next: review the PR (screen
+  tests pre-reject only, never accept. Point 1 landed (detection at
+  the point of decision, `crossingPredicate.ts`). **Recovery contract
+  written 6 Sep** (doc, 8 points): site solve = pure function of a
+  demand set; path solve owns the converge loop; `CROSSING_SITES`
+  published once after convergence; `footprints()` throws if early;
+  bound derived from `SITE_SPACING`. #511 gated on it → critical path to
+  step 2. Next: review the PR (screen
   wired into pathGraph + station spur screened); then #511 goes green
   and step 2 unblocks.
   Terrain is no longer seed-dependent (1200 m sphere) — the outward

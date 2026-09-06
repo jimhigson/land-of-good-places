@@ -1014,6 +1014,94 @@ first customer, and the fix has the design's shape, not the hill's:
    sample count printed every run. "1342 → 1342" is what said the
    geometry had not moved; a screen that printed only "1 foul" would have
    let a no-op read as a partial fix.
+
+   **Point 1 landed (6 Sep): detection at the point of decision.**
+   `crossingPredicate.ts` depends only on `TrainRoute` and
+   `CROSSING_SITES`, so the router asks it without the
+   `crossings → pathGraph → paths` cycle; `pathDivisions` / `curvePoints`
+   sit beside `routeCurve` with one owner. On 288: `station-0 holds=true`,
+   `station-1 holds=false` at the foul. Two findings for the record:
+   the bend to the approach *also* fouls, so recovery is the whole of
+   what remains; and **the screen at first measured a candidate nobody
+   lays** — when `leadPlan` is null the committed route is
+   `fallbackSpurRoute`, while the screened candidate was
+   `[stationLead, approach, stand]`, and station-0 takes exactly that
+   path. Found by instrumenting, not reading, inside the fix for screens
+   that measure what they do not describe. So the rung definition gains
+   a clause: **screen the route that will actually be committed**, never
+   the candidate under consideration when the two differ.
+
+   **The recovery contract (Architect, 6 Sep) — asked for because
+   "claim a site on demand" as first written mutates `CROSSING_SITES`
+   after `crossingPlanSolve` has run and collides with `bridgeKeepout`'s
+   memoised `footprints()`.** That is cache invalidation across two
+   generators, and the design's answer is to make it impossible to need:
+
+   1. **Sites are candidates until a path uses them, and the site solve
+      is a pure function of a demand set.** `solveCrossingSites` (and the
+      generator's `crossingSitesSearch`) take `demands: readonly number[]`
+      — rail distances the network needs a crossing at — and return the
+      site list. Inside, each demanded distance is proven **first** with
+      `bridgeCandidateAt(d)` (the existing query, `crossingPlanSolve.ts:269`)
+      and force-kept; `selectSpaced` then spaces the remaining candidates
+      around the kept ones by its existing rule. **One function** — a
+      demanded site is not a bypass of spacing/footprint/warp rules, it is
+      a must-keep input to the same selection.
+   2. **What is asked, and at what distance**: the *drawn* rail distance
+      of the foul — `siteForFlip`'s `d`, the router's own measurement of
+      the curve — never the control polyline's. Rounding two demands that
+      fall within `SITE_SPACING` of each other into one demand is the
+      solve's business, not the router's.
+   3. **The loop lives with the path solve and converges**: solve paths
+      against `sites(demands)` (initially ∅) → screen the *committed*
+      routes' drawn samples → for each foul, `demands ∪= {d}` → re-solve
+      sites → re-solve paths → repeat until no foul or the demand set
+      stops changing. **Bound derived, not typed**: two demands within
+      `SITE_SPACING` are one, so iterations ≤ `loopLength / SITE_SPACING`;
+      reaching it is a loud failure naming the seed and the fouls.
+   4. **When `bridgeCandidateAt(d)` cannot prove a site**, the demand is
+      recorded unservable and the fouling route's next decision is a
+      **re-route to an existing site** with the rail corridor at `d` a
+      hard obstacle *in the drawn predicate* (the router re-asks the same
+      function after re-sampling); if that fails, loud failure. Never a
+      warp field, never a widened tolerance, never a silent keep.
+   5. **`CROSSING_SITES` is published exactly once, from the converged
+      loop, before any consumer reads it** — through the existing prewarm
+      letterbox (`offerPrewarmedCrossingSites`) filled *after* convergence
+      in the generator, and by the same converged solve in the Node
+      harness. Whether `paths.ts` owns the loop and `crossingPlan.ts`
+      reads its result, or the `crossingSites` task re-runs on the
+      `pathGraph` task's demands, is the engineer's wiring choice; what is
+      **not** a choice is that no module-load read of the site list may
+      happen before convergence.
+   6. **The memo is not invalidated; it is made impossible to compute
+      early.** `bridgeKeepout.footprints()` asserts the path graph is
+      published (the converged sites are final) and **throws** if asked
+      before — an invariant, not a cache protocol. A second definition of
+      freshness beside the registry's own is exactly what the
+      crossingSites section above forbids; this is the same rule with the
+      roles named.
+   7. **Order-independence**: the demand set is a function of (seed,
+      train route, stations, candidates) computed inside one solve. No
+      mutable module-level list, no read whose answer depends on which
+      module happened to load first. Proof: two builds per seed in
+      separate processes, identical; and the six clean seeds — whose
+      demand set is ∅ — **byte-identical** before and after (the digest
+      instrument), since an empty demand set must reproduce today's
+      `selectSpaced` exactly.
+   8. **Reported every run on stderr**: demands per seed with their `d`
+      and coordinates, sites proven on demand, unservable demands,
+      iterations to converge — the crossing negotiation's first thrash
+      numbers, and the line that says "0 demands" on seeds where nothing
+      happened so a silent loop cannot read as a working one.
+
+   This is the crossingSites section made concrete: the march is
+   exploration (candidates), a site is claimed when a real path×rail
+   conflict demands it, and staleness is handled by re-solving the pure
+   function rather than by editing a published list. Stage 4 will move
+   the same loop onto the registry (a demand becomes a `Demand` claim,
+   `CROSSING_SITES` becomes claims of kind `surface` at crossings); the
+   loop's shape does not change when it does.
 2. **"Next decision" per producer**, in order of cheapness:
    - an unscreened appendage (spur lead/past, station approach,
      connector lead, snap jog) is a producer drawing without asking the
