@@ -266,6 +266,12 @@ function sidePlusDirection(tangent: Vector3): readonly [number, number] {
   return [tangent.z, -tangent.x];
 }
 
+/** {@link bridgeCandidateAt}, exposed for instruments that need to ask "could a
+ *  bridge stand here?" without running a whole solve. */
+export function provableCrossingAt(railDistance: number): CrossingSite | null {
+  return bridgeCandidateAt(railDistance);
+}
+
 function bridgeCandidateAt(railDistance: number): Candidate | null {
   if (stationBlocked(railDistance)) return null;
   const route = TRAIN_PLAN.route;
