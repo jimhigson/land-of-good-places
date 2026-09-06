@@ -9,8 +9,12 @@
 - **Worktree**: `.claude/worktrees/swept-bus-2a`.
 - **Model**: Opus 5 (1M context), by the Overseer's dispatch under the Engineer
   default. **A replacement must run the same model.**
-- **Brief**: `docs/BRIEF-stage3-step2a-swept-bus-instrument.md`. Authority:
-  `docs/DESIGN-round-robin-generation.md`, "Stage 3, ruled (5 Sep, Jim)".
+- **Brief**: `docs/BRIEF-stage3-step2a-swept-bus-instrument.md` — **note this
+  file lives on `design/round-robin-generation`, not on `main`**, so it is not
+  reachable from this branch since the retarget. The context it carried is
+  restated inline in `scripts/check-swept-bus.mts`'s header for that reason.
+  Authority: `docs/DESIGN-round-robin-generation.md`, "Stage 3, ruled (5 Sep,
+  Jim)", which **is** on `main`.
 - **Scope**: step 2a only. Steps 2, 3 and 4 are held behind other work.
 - **Status**: complete. All gates green (`check`, `test:procgen`, `build`, `check:coplanar`, exit 0 each). PR open.
 

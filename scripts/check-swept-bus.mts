@@ -8,11 +8,22 @@
  * LGP_RATCHET=off pnpm run check:swept-bus      # report the drift, do not fail
  * ```
  *
- * This is stage 3's independent instrument
- * (`docs/BRIEF-stage3-step2a-swept-bus-instrument.md`). It exists **before** the
- * fix, so that it can be watched failing, and it lands as a **ratchet** because
- * `main` is red on it today. Step 2's definition of done is driving
- * `scripts/swept-bus-baseline.mts` to zero and deleting it.
+ * This is stage 3's independent instrument — the thing every later stage-3 step
+ * is measured by. See `docs/DESIGN-round-robin-generation.md`, "Stage 3".
+ *
+ * Three facts about why it is shaped as it is, stated here rather than pointed
+ * at, because the engineering brief they came from lives on the
+ * `design/round-robin-generation` branch and a pointer to it from `main` would
+ * dangle — which is this file's own subject, one level up:
+ *
+ * 1. **It was written before the fix**, deliberately, so that it could be
+ *    watched failing. A check nobody has seen go red is not known to be able to.
+ * 2. **It lands as a ratchet** (`scripts/swept-bus-baseline.mts`) because the
+ *    park is genuinely red on it — 364 drawn posts inside the bus across the
+ *    sixteen pool seeds when this was written. Green here means *no worse*,
+ *    never *clear*, and the run says so every time.
+ * 3. **Step 2 owns driving that to zero** and deleting the baseline file. Read
+ *    the note this prints when a seed first reaches zero before you do.
  *
  * ## The bug it is written against is a bug in the previous instrument
  *
