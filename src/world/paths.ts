@@ -4056,7 +4056,52 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     // so the incoming leg can arrive from any bearing without paving through
     // the canopy posts on the furnished half (see `PlannedStation.leadX`).
     const stationLead: readonly [number, number] = [station.leadX, station.leadZ];
-    const stationStreets = streetRoute(stationLead);
+    const approach: readonly [number, number] = [station.approachX, station.approachZ];
+    const stand: readonly [number, number] = [station.standX, station.standZ];
+
+    // **The approach and the stand are appended, so they must be screened.**
+    //
+    // Everything before them is routed by `streetRoute`, which knows about the
+    // railway; these two points were simply tacked on the end, and a producer
+    // that draws without asking the world is the disease CLAUDE.md names. On
+    // seed 288 that tail slipped across the rail at railD 35.1, (-36.2, 2.8),
+    // with no proven bridge site — the park then failed to build, three systems
+    // later, from scenery planting.
+    //
+    // The screen is the leg's own (`railInfoAt` / `segmentHoldsRailSide`), not a
+    // new one. A station stands beside the track, so its approach has a definite
+    // rail side; the tail is legal exactly when it reaches that approach without
+    // ever changing side.
+    const approachSide = railInfoAt(approach[0], approach[1]).side;
+    const tailHolds = (from: readonly [number, number]): boolean =>
+      segmentHoldsRailSide(from[0], from[1], approach[0], approach[1], approachSide, 0) &&
+      segmentHoldsRailSide(approach[0], approach[1], stand[0], stand[1], approachSide, 0);
+
+    // **Planned, not routed, until one is chosen.** `streetRoute` *commits* its
+    // plan into the shared street network as a side effect, so asking it for two
+    // candidates would lay both. `planStreetToNetwork` is the same search
+    // without the commit.
+    const leadPlan = planStreetToNetwork(stationLead);
+    const leadEnd = leadPlan?.points[leadPlan.points.length - 1] ?? stationLead;
+
+    let chosen = leadPlan;
+    let tail: (readonly [number, number])[] = [approach, stand];
+    if (!tailHolds(leadEnd)) {
+      // **Bend the appendage rather than shorten it**: route to the approach
+      // itself, which the rail-aware street search will reach on the correct
+      // side, instead of hanging it off a lead that sits on the wrong one.
+      const approachPlan = planStreetToNetwork(approach);
+      const approachEnd = approachPlan?.points[approachPlan.points.length - 1] ?? approach;
+      if (
+        approachPlan &&
+        segmentHoldsRailSide(approachEnd[0], approachEnd[1], stand[0], stand[1], approachSide, 0)
+      ) {
+        chosen = approachPlan;
+        tail = [stand];
+      }
+    }
+    if (chosen) commitStreetPlan(chosen);
+
     edges.push({
       from: 'ring',
       to: id,
@@ -4065,11 +4110,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: `spur-${id}`,
         width: 2.6,
         closed: false,
-        points: [
-          ...(stationStreets ?? fallbackSpurRoute(network(), stationLead)),
-          [station.approachX, station.approachZ],
-          [station.standX, station.standZ],
-        ],
+        points: [...(chosen?.points ?? fallbackSpurRoute(network(), stationLead)), ...tail],
       },
     });
     yield (progress += 1);
