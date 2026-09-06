@@ -427,6 +427,13 @@ function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
     if (entry.id === 'fountain') continue;
     if (entry.footprint.kind === 'circle') world.addCircle(entry.x, entry.z, entry.footprint.radius);
     else world.addRectangle(entry.x, entry.z, entry.footprint.halfX, entry.footprint.halfZ);
+    // Corner solids past the rectangle — the castle's turrets (#549), declared
+    // on the placed footprint by `footprintAsPlaced`. A doormat inside one is
+    // precisely a refusal this probe exists to make.
+    if (entry.footprint.kind === 'rect' && entry.footprint.corners) {
+      const { radius, at } = entry.footprint.corners;
+      for (const [cx, cz] of at) world.addCircle(entry.x + cx, entry.z + cz, radius);
+    }
   }
   world.setPlayBounds(PARK_BOUNDARY);
   // A flat park (nothing here has a height yet) and no hop: a plot's
