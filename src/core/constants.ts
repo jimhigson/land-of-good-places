@@ -112,6 +112,46 @@ export const PLAYER_TURN_SPEED = 13;
 export const PLAYER_RADIUS = 0.62;
 
 /**
+ * Half-thickness of the collider under a **hoppable** wall — one entry per
+ * wall the park registers with `autoHoppable: true`, and there are exactly
+ * three of them.
+ *
+ * These live here, together, for the same reason `NPC_RADIUS` does: a leaf
+ * module under Node's strip-only TypeScript can read them without dragging in
+ * `Scenery.ts` or `Fountain.ts`. `scripts/measure-hop-clearance.mts` is the
+ * caller that matters — it measures how tall a wall the jump actually carries
+ * a child over, and `MAX_AUTO_HOP_HEIGHT` is set from the answer. That
+ * measurement is only honest if it sweeps the thicknesses the park really
+ * builds, so the sweep derives them from here rather than hard-coding a
+ * `>= 0.2 && <= 0.4` window, which is what it did until #539 — a window that
+ * silently never sampled the fountain rim at all, and that a widened garden
+ * wall would have dropped out of with nothing going red.
+ *
+ * Deliberately *not* `WALL_HALF_WIDTH` in `Scenery.ts`: that is the visual
+ * half-width (0.24 / 0.36), a couple of centimetres fatter than the collider
+ * on purpose, and used for spacing rather than collision.
+ */
+export const WOOD_WALL_COLLIDER_HALF = 0.22;
+
+/** Half-thickness of a stone garden wall's collider. See {@link WOOD_WALL_COLLIDER_HALF}. */
+export const STONE_WALL_COLLIDER_HALF = 0.34;
+
+/** Half-thickness of the fountain rim's collider. See {@link WOOD_WALL_COLLIDER_HALF}. */
+export const FOUNTAIN_RIM_COLLIDER_HALF = 0.32;
+
+/**
+ * Every half-thickness the park gives an `autoHoppable` collider. The one
+ * owner of "which walls must the jump clear?" — add a hoppable wall of a new
+ * thickness and it belongs here, which is what puts it into the hop-clearance
+ * sweep.
+ */
+export const HOPPABLE_WALL_HALF_THICKNESSES = [
+  WOOD_WALL_COLLIDER_HALF,
+  FOUNTAIN_RIM_COLLIDER_HALF,
+  STONE_WALL_COLLIDER_HALF,
+] as const;
+
+/**
  * An NPC child's collision radius. Lives here rather than in
  * `entities/npc/NpcCharacter.ts` (which re-exports it) so that leaf modules
  * loaded under Node's strip-only TypeScript (`check:waypoints` and friends)
