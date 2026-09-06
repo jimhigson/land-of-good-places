@@ -9,6 +9,7 @@ import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
 import { CROSSING_SITES, type CrossingSite } from './train/crossingPlan';
+import { screenDrawnPathsForOffSiteCrossings } from './train/crossingPredicate';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -4119,10 +4120,27 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     // new one. A station stands beside the track, so its approach has a definite
     // rail side; the tail is legal exactly when it reaches that approach without
     // ever changing side.
-    const approachSide = railInfoAt(approach[0], approach[1]).side;
-    const tailHolds = (from: readonly [number, number]): boolean =>
-      segmentHoldsRailSide(from[0], from[1], approach[0], approach[1], approachSide, 0) &&
-      segmentHoldsRailSide(approach[0], approach[1], stand[0], stand[1], approachSide, 0);
+    // **Asked of the DRAWN curve, not the control polyline.** The polyline test
+    // (`segmentHoldsRailSide` on the straight segments) was tried first and is
+    // structurally unable to see this fault: on seed 288 the control points held
+    // their rail side while the Catmull-Rom through them bulged across it, and
+    // the screen changed not one of 1342 samples. So the candidate route is
+    // curved and sampled exactly as `buildPaths` will draw it — same
+    // `routeCurve`, same `pathDivisions` — and the shared crossing predicate is
+    // asked whether that curve crosses anywhere no bridge was proven.
+    const tailHolds = (points: readonly (readonly [number, number])[]): boolean => {
+      const candidate: RouteDefinition = {
+        name: `spur-${id}`,
+        width: 2.6,
+        closed: false,
+        points,
+      };
+      const curve = routeCurve(candidate);
+      const drawn = curvePoints(curve, pathDivisions(curve));
+      return (
+        screenDrawnPathsForOffSiteCrossings(TRAIN_PLAN.route, drawn).fouls.length === 0
+      );
+    };
 
     // **Planned, not routed, until one is chosen.** `streetRoute` *commits* its
     // plan into the shared street network as a side effect, so asking it for two
@@ -4133,16 +4151,26 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
 
     let chosen = leadPlan;
     let tail: (readonly [number, number])[] = [approach, stand];
-    if (!tailHolds(leadEnd)) {
+    // **Screen the route that will actually be drawn, not a stand-in for it.**
+    // When `leadPlan` is null the committed route falls back to
+    // `fallbackSpurRoute`, so testing `[stationLead, ...]` would be asking about
+    // geometry nobody lays — a screen measuring something it is not describing,
+    // which is the fault this whole branch exists to remove. Caught by
+    // instrumenting rather than by reading: station-0 takes exactly that path.
+    const leadPoints = [
+      ...(leadPlan?.points ?? fallbackSpurRoute(network(), stationLead)),
+      approach,
+      stand,
+    ];
+    void leadEnd;
+    if (!tailHolds(leadPoints)) {
       // **Bend the appendage rather than shorten it**: route to the approach
       // itself, which the rail-aware street search will reach on the correct
       // side, instead of hanging it off a lead that sits on the wrong one.
       const approachPlan = planStreetToNetwork(approach);
       const approachEnd = approachPlan?.points[approachPlan.points.length - 1] ?? approach;
-      if (
-        approachPlan &&
-        segmentHoldsRailSide(approachEnd[0], approachEnd[1], stand[0], stand[1], approachSide, 0)
-      ) {
+      void approachEnd;
+      if (approachPlan && tailHolds([...approachPlan.points, stand])) {
         chosen = approachPlan;
         tail = [stand];
       }
@@ -5351,6 +5379,49 @@ function drawnPolyline(
  * The closed backbone ring keeps its raw points: it is a circle through 32
  * bearings, and filleting a circle's own samples would only dent it.
  */
+/**
+ * **How finely a route's curve is drawn — the one owner.**
+ *
+ * Beside {@link routeCurve} because the two go together: the curve is what gets
+ * drawn and this is how densely. `pathGraph.ts`'s `buildPaths` divides the
+ * ribbon, the kerb and its samples by it; the router asks it to reproduce
+ * exactly the geometry a decision will lay down, *before* committing to that
+ * decision.
+ *
+ * **Nobody reimplements this.** A second `max(24, len / 0.8)` beside either
+ * caller would be two definitions of "how smooth is a path", and it would drift
+ * the first time somebody tuned smoothness — with the screen then measuring a
+ * slightly different curve from the one drawn, which is this work's own disease
+ * one level down.
+ */
+export function pathDivisions(curve: CatmullRomCurve3): number {
+  return Math.max(24, Math.round(curve.getLength() / 0.8));
+}
+
+/**
+ * **The points a curve actually lays down when drawn** — post fillet and
+ * Catmull-Rom.
+ *
+ * This is the geometry a child walks and the only geometry worth asking the
+ * railway about. **The control polyline is not this**, and the difference is
+ * not academic: on seed 288 the control points held their side of the rail
+ * while the drawn curve bulged across it, so a screen written against the
+ * polyline (`segmentHoldsRailSide` on the straight segments) was structurally
+ * unable to see the fault — measured, it changed not one of 1342 samples.
+ */
+export function curvePoints(
+  curve: CatmullRomCurve3,
+  divisions: number,
+): { readonly x: number; readonly z: number }[] {
+  const point = new Vector3();
+  const out: { x: number; z: number }[] = [];
+  for (let i = 0; i <= divisions; i += 1) {
+    curve.getPoint(i / divisions, point);
+    out.push({ x: point.x, z: point.z });
+  }
+  return out;
+}
+
 export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
   const points = route.closed ? route.points : drawnPolyline(route.points, route.squareCorners ?? []);
   const vectors = points.map(([x, z]) => new Vector3(x, 0, z));
