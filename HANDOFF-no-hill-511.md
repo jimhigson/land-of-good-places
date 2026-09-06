@@ -1,5 +1,121 @@
 # HANDOFF — issue #511, "the park is not on a hill"
 
+## ⛔ READ THIS FIRST — the arrival camera, 6 September 2026, late
+
+**Branch head `07f460d8`. Model: Opus** (a replacement must also be Opus).
+Worktree `.claude/worktrees/sphere-combined`. Dev server on 5392 killed.
+PR #600 is open against `main` and is **not ready for review**.
+
+**Note the branch will move under you:** the five `check:coplanar` findings are
+a *different* engineer's work on `fix/coplanar-sphere`, branched off this one.
+
+### What is done and pushed
+
+**The arrival camera is one rule now.** Jim, 6 September 2026, after four rounds
+of choreography he did not ask for: *"the rule should be simple - camera fixed
+on the player, about 2m from them, at head height, until they're in the park -
+that's it."*
+
+`arrivalShot` is a constant pose: square on to her, **zero pitch**,
+`ARRIVAL_FOLLOW_DISTANCE` **2 m**, one frame height (`ARRIVAL_FOLLOW_ZOOM`,
+derived from `TALLEST_CHILD_HEIGHT`), **`watchesTheDoor: false`** so the
+ordinary damped player-follow is the whole of the tracking, and it returns
+`null` at `ARRIVAL_CONTROL_AT` — *"until they're in the park"*.
+
+**Deleted with the old shot**, because his rule does not ask what they answered:
+the wide roll-in and `ARRIVAL_CAMERA_ZOOM`; the door beat that orbited the bus's
+drop point; the walk beat; the arch pass with its dive, hold and
+`ARRIVAL_ARCH_DISTANCE`; the stop-to-gate stand-back derivation;
+`ARRIVAL_CLOSE_FRAMING_AIR`; `ARRIVAL_EYE_COMPOSITION_LIFT`; the swing/ride/lift
+curves; `arrivalDiveSeconds`; `AT_STOPPED`.
+
+**Two things kept, each for a stated reason.** The bearing still comes home over
+0.6 s rather than snapping — that is GAME_DESIGN.md's **CONTROL rule**, not
+composition: "up on the stick" is read through the camera's yaw, so a bearing
+still moving under her hand sends her somewhere that is not up the screen, and a
+snap on the frame she takes control is the worst instant for a cut. And the
+**ground-clearance assertion**, because on a 1200 m sphere the ground rises
+towards the park's middle and 2 m is not automatically clear of it.
+
+**One place the rule does not map onto this rig, stated rather than hidden:**
+the park camera is **orthographic**, so an eye's distance from its subject
+changes nothing on screen. "About 2 m from them" lands as two separate facts — a
+2 m stand-back, which here is purely an occlusion control, and a frame height,
+which is what actually makes her that size.
+
+**`check:arrival-camera` re-cut from 46 clauses to 13.** Forty-six clauses
+testing a shot that no longer exists is worse than none — every one would have
+gone on passing about geometry nobody renders. What is left is one clause per
+clause of his sentence, plus the two carried over. Green today:
+
+```
+2.0000-2.0000 m held across 558 frames
+worst tilt 0.0000 deg
+0 of 558 frames orbit anything but her
+frame 3.5640 m tall: 0.2656 m under her feet, 0.3284 m over the tallest hat
+tightens by at most 0.0000 m in any frame
+lens clears the ground by at least 1.3341 m
+bearing 0.2779 deg off the rig at the hand-over
+```
+
+### ⚠️ What is UNVERIFIED — do not read any of this as settled
+
+- **Nobody has looked at the new camera in a browser, at any aspect ratio.**
+  Not once. Given the history below, a claim that it looks right without a frame
+  in front of you is worth nothing.
+- **The grey region in Jim's screenshots is still unidentified by picking.** A
+  browser probe to read what is under those pixels died mid-run (`Target closed`
+  after resizing to his 2000x1100) and was not restarted.
+- **The near plane is still unanswered.** It was asked for twice and never
+  checked. An orthographic camera has one, and geometry nearer than it is
+  clipped.
+- **The ground measurement rules something out; it does not explain the
+  picture.** Measured on the built park: the `terrain` mesh spans
+  **x -124.9..124.9, z -124.9..124.9** (a 250 m square, y -6.95..0.38), and
+  **every z the arrival looks across is inside it** — z=55 at -1.45 m, z=75 at
+  -2.45 m, z=100 at -4.27 m. **That rules out "the ground stops short". It is
+  NOT a verified account of Jim's pixels.** Write that distinction on your hand
+  before you start: a replacement who reads it as "the ground is fine" will
+  waste the same day that has already gone.
+
+### The history of this bug — the thing not to repeat
+
+Three reports from Jim, three explanations, **two of them relayed to him as fact
+and both wrong**:
+
+1. *"the camera is still visually under the floor"* → explained as the empty
+   band being a **composition consequence of the pitch-0 orthographic look**,
+   and his to judge. Wrong. Reasoned, not measured.
+2. Same report again → explained as **the dolly** (the zoom opening at a
+   bus-wide framing and interpolating in). Fixing that genuinely changed the
+   opening frame, which made it look like the answer. Wrong, or at least not
+   the whole of it. Reasoned, not measured.
+3. Jim on the screenshot offered as proof it was fixed: **"even your own
+   screenshot shows this — walls in the foreground sitting on nothing."**
+   Unexplained to this day.
+
+**The lesson is procedural, not technical: every one of those was produced by
+reasoning about geometry instead of measuring the built page.** The next
+explanation must come from a pick under a pixel, a hidden group, or a depth
+read — not from arithmetic about `terrainHeight`.
+
+### Not started
+
+- **Two beat deep links Jim asked for**, both queued and neither begun:
+  - straight to **her getting off the bus**, skipping the intro that shows the
+    bus — the beat he is iterating on and will use most;
+  - straight to the **end state in the park**, after the whole arrival.
+  A parameter naming the beat is likely better than separate paths, so a future
+  beat needs no further change. **The mechanism is established and must be
+  followed:** `ArrivalSequence.update(context)` drives the timeline off `dt` and
+  `finish()` does the hand-over, so **pump `update` with real dt until the beat
+  you want and stop**. Do NOT construct a pose that looks like the beat — an
+  approximation Jim cannot tell from the real thing is worse than no link.
+- **`entranceRoadBrow()` is 1.0 m**, so the cat bus drives 2 m of a 142 m road
+  and `check:swept-bus` sweeps only that 2 m. Written up further down. Its
+  "0 posts on 14 seeds" is correspondingly narrow.
+
+
 ## Where this is, 6 September 2026, evening (read this before the rest)
 
 **Model: Opus** (chosen by the Overseer; a replacement must also be Opus).
