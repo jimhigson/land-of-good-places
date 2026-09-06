@@ -66,8 +66,10 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   createKid,
   KID_BODY_PARTS,
+  KID_EYE_HEIGHT,
   KID_HIP_HEIGHT,
   KID_REACH_HEIGHT,
+  kidEyeCentre,
   type KidBodyPart,
   type KidHandle,
 } from '../src/art/models/kid.ts';
@@ -570,6 +572,28 @@ for (const side of ['l', 'r']) {
     `KID_HIP_HEIGHT says ${KID_HIP_HEIGHT} m but leg-pivot-${side} is at ${hip.toFixed(4)} m. ` +
       `A seat is cut from this number — the castle's bench and throne are at hip height so a ` +
       `child's feet reach the floor — so fix the constant, and re-cut the furniture that reads it.`,
+  );
+}
+
+// **`KID_EYE_HEIGHT` must still describe this rig.**
+//
+// Measured the way the constant was derived: `kidEyeCentre()` is written in the
+// `crown` group's frame, so it is taken into world space through the real
+// crown of a real built kid — never reconstructed from `KID_HEAD_HEIGHT` plus
+// the head's tilt, which would be a second description of the same surface and
+// is exactly the sum `kid.ts` refuses to write.
+{
+  const crown = authored.root.getObjectByName('crown');
+  if (!crown) throw new Error("check:character-parity: no node named 'crown'.");
+  authored.root.updateMatrixWorld(true);
+  const eye = crown.localToWorld(kidEyeCentre(1).clone());
+  check(
+    Math.abs(eye.y - KID_EYE_HEIGHT) <= LANDMARK_TOLERANCE,
+    `KID_EYE_HEIGHT says ${KID_EYE_HEIGHT} m but the painted eye centre is at ` +
+      `${eye.y.toFixed(4)} m on the built rig. A camera that sits at eye height reads this, ` +
+      `so a drift here points a shot at the wrong part of the world — and note the numbers ` +
+      `that merely SOUND like it (faces.ts eyeY is a canvas fraction, gondola.ts ` +
+      `PASSENGER_EYE_Y is measured from a seat) are not substitutes.`,
   );
 }
 
