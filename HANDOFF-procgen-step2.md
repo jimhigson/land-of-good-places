@@ -1,0 +1,97 @@
+# Handoff — procgen stage 3, step 2: the trestles become claims
+
+- **Model: Fable (`claude-fable-5-1`).** Jim's instruction, 6 Sep 2026: the
+  big procgen refactor is always worked by Fable. **A replacement must run
+  Fable too.** The Architect who owns the design and reviews this is also
+  Fable, resumable through the Overseer.
+- **Branch**: `feat/procgen-step2-trestles-claim`, cut from `origin/main`
+  `d7da0408`. **Worktree**: `.claude/worktrees/procgen-step2`.
+- **Brief**: `docs/BRIEF-stage3-step2-trestles-claim.md` on
+  `origin/design/round-robin-generation` (not on `main`). Authority:
+  `docs/DESIGN-round-robin-generation.md` there, "Stage 3, ruled (5 Sep, Jim)".
+- **Two phases, not blurred.** Phase 1 (now): everything not dependent on the
+  ground's shape. Phase 2 (when #511 merges): rebase, re-measure everything the
+  ground touches. **Never guess the sphere's numbers in advance.**
+
+## Findings that contradict the brief (reported to the Overseer, 6 Sep)
+
+1. **Step 1 (#522) is NOT on `main`.** It merged into
+   `design/round-robin-generation`. `main` has no `roadCorridor.ts`, no
+   `GroundClaims` in production, no `roadCorridor` scheduler task. Step 2
+   needs all three, so commit `d81d0820` **carries step 1 squashed onto
+   `main`** (code only; the design docs stay on the design branch). The one
+   conflict was `package.json`'s check chain, rebuilt from `main`'s 62 steps
+   + `check:ground-claims` after `check:park-boot`, verified by parsing
+   `scripts` (63 steps, none of `main`'s missing). **Drop that commit when
+   #522 lands on `main` in its own right.**
+2. **#511 is an open issue; its code is `origin/feat/sphere-combined`**
+   (78 files, +14k, based on current `main`, does NOT contain step 1). It
+   rewrites `Entrance.ts` (+710) which step 1 also edits (−124), adds
+   `entrance/roadRoute.ts` (the curved road, outset ~16 read from
+   `railRace/supportGround.ts`'s `SUPPORT_GROUND_BAND` — the interim owner
+   step 2 deletes), and refactors `track.ts` (`trestleTreeAt`, a per-post
+   leaning collider). Expect a real merge when it lands; phase 2 absorbs it.
+
+## What step 2 is, in code terms (mapped 6 Sep)
+
+- `src/world/railRace/track.ts`: `groundIsClear` (four predicates:
+  `collision.isClearCircle(1.1)`, `distanceToPath < 2.8`,
+  `distanceToRailCorridor < 2.4`, `PARK_LAYOUT.entries` bounding + 2.4),
+  `ARC_NUDGES`/`RADIAL_NUDGES`/`WIDE_ARC_NUDGES`/`MANDATORY_RADIAL_NUDGES`/
+  `WIDE_RADIAL_NUDGES`, `searchForClearGround`, `trestleSpots` (three-tier
+  ladder), the trestle loop at ~L825 (`forkPlan`, `strut`, `collision.addCircle`).
+- Consumers of the ladders outside `track.ts`: only doc comments —
+  `test/procgen/invariants.ts` L2952 (`DUCK_BAR_SUPPORT_TOLERANCE` doc) and
+  L3245 (a message), `test/procgen/parkFacts.ts` L2094 (comment naming
+  `groundIsClear`). No code reads them.
+- `RailRace.ts` L416: the walk-past ring registers collision first so the race
+  ring's search sees its posts — the construction-order trick that becomes
+  claim order.
+- `World.ts`: `RailRace` built at ~L214, `Entrance` at ~L268; step 1
+  re-commits the road corridor right after `Entrance` (spur end provisional
+  z 52.00 → realised 55.91 on the canonical seed).
+- Registry: `src/boot/groundClaims.ts` (`Claim` = footprint|corridor|
+  walkable|surface, `Disc`|`Capsule`, `allows`, `blockers`, `commit` keeps a
+  feature's order across re-commits). No heights on claims.
+- Instruments on `main`: `check:swept-bus` (ratchet, 364 posts / 16 seeds,
+  bidirectional, `scripts/swept-bus-baseline.mts`), step 1's
+  `scripts/park-digest.mts` + `park-digest-sweep.sh` (per-mesh sha per seed;
+  `railRace:trestle-legs` digest IS the leg-position hash), `check:ground-claims`.
+
+## Ground-independence estimate (for Jim's progress number)
+
+Roughly **70 % of step 2 by effort is ground-independent**: the claim shapes
+from the drawn support (one function for build, explore and commit), the
+registry wiring for both rings, the ladder deletion and the one outward march
+with a derived lean limit, the invariants (claim count == leg count; no leg
+claim overlaps another feature's), the instruments with controls (leg-position
+digest per seed, one-function break, two-process determinism, spur-end vs foot
+reach), and flipping `check:swept-bus` to fail-on-any. Ground-dependent
+(phase 2): the road's outset marching the registry from its 8.26 floor (the
+road on `main` is a fixed chord; the marching road lives in the sphere branch),
+deleting `supportGround.ts`, the per-seed foot margin and outset report, driving
+the swept-bus count to zero and deleting the baseline, the 40 m-run and
+duck-bar invariants' final numbers.
+
+## Baselines taken on this base (`d81d0820`)
+
+- `check:swept-bus`: see scratchpad `swept-bus-before.log` (expected 364).
+- Park digests, 16 seeds: scratchpad `before/<seed>.txt`.
+(scratchpad = `/private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/92acae52-e71b-43c9-a76b-92e2c76ea5d3/scratchpad`)
+
+## Open questions for the Architect (asked through the Overseer)
+
+1. Arc nudges: delete with the radial ladders, replacing both with one derived
+   bound (`TRESTLE_SPACING / 2 − foot`, so neighbouring slots can never share
+   ground), or keep arc as a free dimension? Proposed: one search over
+   (lean, arc), nearest-first, lean-outer/arc-inner as today.
+2. Lean limit: proposed `maxLean = tan(BRANCH_ANGLE) × trunkHeight`, trunk
+   height from `forkPlan` (the `MIN_TRUNK_FRACTION` floor) — a trunk may not
+   lean further from vertical than its own branches fork. Owner:
+   `trestleGeometry.ts`.
+3. Headroom owner: `catBus.ts` exports the body top (the sphere branch adds
+   `CAT_BUS_BODY_TOP_Y`); the swept-bus check measures the drawn `Box3`
+   (ears included). Which is "the bus's own owner"?
+4. The four legacy predicates in `groundIsClear` stay, behind the one
+   predicate function, as the not-yet-migrated obstacle list (stage 5), with
+   the registry asked first. Confirm.
