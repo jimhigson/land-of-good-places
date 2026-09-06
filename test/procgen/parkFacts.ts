@@ -1342,7 +1342,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         railRaceSupports.push({
           label,
           feature,
-          claimed: world.groundClaims.claimsOf(feature),
+          claimed: label === 'walk-past' ? railRace.supportClaims.walkPast : railRace.supportClaims.race,
           fromDrawn: [],
           struts: 0,
           trees: [],
@@ -1384,7 +1384,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       railRaceSupports.push({
         label,
         feature,
-        claimed: world.groundClaims.claimsOf(feature),
+        // The ring's own slice of the one `railRace` feature — see `RailRace.supportClaims`.
+        claimed: label === 'walk-past' ? railRace.supportClaims.walkPast : railRace.supportClaims.race,
         fromDrawn,
         struts,
         trees,

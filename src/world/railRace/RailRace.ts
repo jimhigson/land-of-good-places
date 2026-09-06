@@ -25,7 +25,8 @@ import {
 } from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
-import type { GroundClaims } from '../../boot/groundClaims';
+import type { Claim, GroundClaims } from '../../boot/groundClaims';
+import { RAIL_RACE_FEATURE } from './feature';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { createSparks, type Sparks } from './sparks';
@@ -335,6 +336,12 @@ export class RailRace implements GameSystem {
    */
   readonly walkPastRoute = RAIL_RACE_PLAN.walkPastRing;
   readonly raceRoute = RAIL_RACE_PLAN.raceRing;
+  /**
+   * Each ring's support claims, in the order they were committed under
+   * {@link RAIL_RACE_FEATURE} (walk-past first): `test/procgen/parkFacts.ts`
+   * compares a ring's drawn supports to its own slice of the one feature.
+   */
+  readonly supportClaims: { readonly walkPast: readonly Claim[]; readonly race: readonly Claim[] };
   readonly laneCount = LANE_COUNT;
   /** The side-on view leaves her model on screen: watching her duck is the game. */
   readonly playerStaysVisible = true;
@@ -414,23 +421,21 @@ export class RailRace implements GameSystem {
     // hazard geometry is built once, in full, whichever level ends up chosen;
     // `setHazardLevel` only ever toggles its visibility.
     //
-    // **Each ring's supports are claims** (stage 3, step 2 of
-    // `docs/DESIGN-round-robin-generation.md`): `buildRailRaceTrack` asks the
-    // park's one registry where a leg may stand, with the plan projection of
-    // the support as it will be drawn, and commits those claims under the
-    // ring's own name. So the order below is *claim order*: the walk-past ring
-    // claims first, and the race ring's search sees its legs as claimed ground
-    // and stands clear of them — the same square-metre guarantee the old
-    // "walk-past registers collision first" trick bought by construction
-    // order, now a fact in the registry that anything placed later can read
-    // too. The walk-past ring is still the only one that registers *collision*
-    // (see `RailRaceTrackOptions.registerCollision`): that is about what a
-    // child on foot walks into, and a claim is about what may share the ground.
+    // **One rail race, two scales, one feature.** Jim, 7 Sep 2026: *"either
+    // the small one or the big one is shown — it is purely a visual trick,
+    // they never occupy the world at the same time."* So each ring's supports
+    // ask the park's one registry where they may stand as `RAIL_RACE_FEATURE`
+    // (stage 3, step 2 of `docs/DESIGN-round-robin-generation.md`), which
+    // means neither ring is ever an obstacle to the other, and both rings'
+    // claims are committed together, once, below — the road and anything
+    // placed later see the union. Order matters for one thing only: the
+    // walk-past ring's *colliders* (what a child on foot walks into) are
+    // registered after BOTH rings have found their ground, so the race ring's
+    // search never meets them through the unmigrated collision predicate.
     this.walkPastRing = {
       route: RAIL_RACE_PLAN.walkPastRing,
       track: buildRailRaceTrack(RAIL_RACE_PLAN.walkPastRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:walk-past-ring',
-        registerCollision: true,
         groundClaims,
         // No finish rainbow here — see `RailRaceTrackOptions.showArch` (#299).
         showArch: false,
@@ -440,11 +445,18 @@ export class RailRace implements GameSystem {
       route: RAIL_RACE_PLAN.raceRing,
       track: buildRailRaceTrack(RAIL_RACE_PLAN.raceRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:race-ring',
-        registerCollision: false,
         groundClaims,
         showArch: true,
       }),
     };
+    this.supportClaims = {
+      walkPast: this.walkPastRing.track.claims,
+      race: this.raceRing.track.claims,
+    };
+    groundClaims.commit(RAIL_RACE_FEATURE, {
+      claims: [...this.supportClaims.walkPast, ...this.supportClaims.race],
+    });
+    this.walkPastRing.track.registerCollision();
     for (const ring of [this.walkPastRing, this.raceRing]) {
       ring.track.setHazardLevel(this.activeLevel);
       this.group.add(ring.track.group);

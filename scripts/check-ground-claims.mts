@@ -37,6 +37,7 @@ import {
   entranceRoadClaims,
   entranceRoadSegments,
 } from '../src/world/entrance/roadCorridor.ts';
+import { RAIL_RACE_FEATURE } from '../src/world/railRace/feature.ts';
 import { ROAD_HALF_WIDTH } from '../src/world/entrance/road.ts';
 import type { Capsule, Claim } from '../src/boot/groundClaims.ts';
 
@@ -105,7 +106,8 @@ const worldRegistry = park.world.groundClaims;
 // The next placer widens it again the same way — a check that quietly accepts
 // more than it was written for is how the next agent inherits a false belief.
 // ---------------------------------------------------------------------------
-const EXPECTED_FEATURES = [ROAD_FEATURE, 'railRace:walk-past-ring', 'railRace:race-ring'];
+// One rail race at two scales is one feature — see `src/world/railRace/feature.ts`.
+const EXPECTED_FEATURES = [ROAD_FEATURE, RAIL_RACE_FEATURE];
 const features = worldRegistry.committedFeatures();
 if (
   features.length !== EXPECTED_FEATURES.length ||

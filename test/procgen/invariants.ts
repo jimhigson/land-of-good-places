@@ -171,6 +171,7 @@ import {
   SLEEPER_THICKNESS,
 } from '../../src/world/railRace/trestleGeometry.ts';
 import { CLAIM_COMPATIBILITY, shapesOverlap, type Claim } from '../../src/boot/groundClaims.ts';
+import { RAIL_RACE_FEATURE } from '../../src/world/railRace/feature.ts';
 
 /**
  * The narrowest gap a child can actually use.
@@ -9498,8 +9499,12 @@ const castleTurretsAreSolid: Invariant = (facts) => {
  *    every feature against every claim of every other feature, under
  *    `CLAIM_COMPATIBILITY` — the universal-overlap sweep the design asks for,
  *    on the registry's own terms. Today that is the road's corridor against
- *    both rings' supports and the two rings against each other; the next
- *    placer is covered without a line changing here.
+ *    the rail race's supports — both rings are ONE feature (there is one rail
+ *    race, shown at one scale at a time — `railRace/feature.ts`), so the two
+ *    rings are never a pair here by design, and the registry's `railRace`
+ *    claims are checked to be exactly the walk-past slice followed by the race
+ *    slice, so a ring's slice can never be a private story; the next placer is
+ *    covered without a line changing here.
  *
  * Coverage is printed on every run (how many struts, trees and claim pairs were
  * compared), to stderr so it is visible on a passing run.
@@ -9571,8 +9576,25 @@ const railRaceSupportsAreClaimedAsDrawn: Invariant = (facts) => {
     }
   }
 
-  // --- 3. nothing in the registry shares ground it may not -------------------
+  // --- 2b. the one feature is the two slices, in order ----------------------
+  // `RailRace.ts` commits walk-past then race under RAIL_RACE_FEATURE; each
+  // ring above was compared to its own slice, so the registry must hold
+  // exactly those slices concatenated or a ring's "claimed" was not what the
+  // park claimed.
   const registry = facts.world.groundClaims;
+  {
+    const union = registry.claimsOf(RAIL_RACE_FEATURE);
+    const slices = facts.railRaceSupports.flatMap((ring) => ring.claimed);
+    if (union.length !== slices.length || union.some((claim, i) => claim !== slices[i])) {
+      wrong.push(
+        `seed ${facts.seed}: the registry holds ${union.length} "${RAIL_RACE_FEATURE}" claims but the ` +
+          `two rings' slices total ${slices.length} (walk-past then race) — the slices a ring was ` +
+          'compared to are not the claims the park committed',
+      );
+    }
+  }
+
+  // --- 3. nothing in the registry shares ground it may not -------------------
   const features = registry.committedFeatures();
   let pairs = 0;
   for (let a = 0; a < features.length; a += 1) {

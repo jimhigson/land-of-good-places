@@ -53,6 +53,7 @@ import {
 } from './trestleGeometry';
 import type { Claim, GroundClaims } from '../../boot/groundClaims';
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
+import { RAIL_RACE_FEATURE } from './feature';
 // Re-exported: these used to be defined here, and `cart.ts` and
 // `scripts/check-rail-race.mts` import them from this module.
 export { BAR_HALF_SPAN_AT_PARK_SCALE, RAIL_GAUGE_AT_PARK_SCALE } from './trestleGeometry';
@@ -124,6 +125,27 @@ export type DuckBarPart = (typeof DUCKBAR_PARTS)[number];
 
 export interface RailRaceTrack {
   readonly group: Group;
+  /**
+   * The ground this ring's supports claim — the very claims its search was
+   * answered with, one per strut below the headroom, from the tree as drawn.
+   * `RailRace.ts` commits both rings' together under {@link RAIL_RACE_FEATURE}.
+   */
+  readonly claims: readonly Claim[];
+  /**
+   * Makes this ring's trestle posts things a child can walk into.
+   *
+   * **Only the walk-past ring is ever asked, and only after both rings have
+   * found their ground.** `CollisionWorld` has no per-collider removal — only
+   * `clear()` — so a ring that registered colliders and was then hidden would
+   * leave invisible solid posts in the park forever; the race ring only exists
+   * while a child is strapped into a cart, and nobody is walking then. And a
+   * collider registered before the race ring searched would be an obstacle to
+   * it through the unmigrated `legacy:collision` predicate — a second
+   * definition of the walk-past ring's ground, which the registry (one feature
+   * for both rings) says is no obstacle at all. Measured before this order was
+   * fixed: 100 of the canonical race ring's candidates refused by exactly that.
+   */
+  registerCollision(): void;
   /**
    * Drives the warning lamps.
    *
@@ -197,30 +219,18 @@ export interface RailRaceTrackOptions {
   /**
    * A name for the built group, so the two rings can be told apart in the
    * scene graph (and by `test/procgen/invariants.ts`, which measures them
-   * separately).
+   * separately). Not a feature name: both rings claim ground as
+   * {@link RAIL_RACE_FEATURE}.
    */
   readonly ringName: string;
   /**
-   * Whether this ring's trestle legs become things a child can walk into.
-   *
-   * **Only the walk-past ring says yes**, and there is no way to say it twice.
-   * `CollisionWorld` has no per-collider removal — only `clear()` — so a ring
-   * that registered colliders and was then hidden would leave invisible solid
-   * posts standing in the park forever. The race ring never needs them: it only
-   * exists while a child is strapped into a cart, and nobody is walking then.
-   * So the one ring that is ever there while you are on foot is the one ring
-   * that is ever solid, and the classic bug (walking into a rail that is not
-   * drawn) has nowhere to live.
-   */
-  readonly registerCollision: boolean;
-  /**
    * **The park's one claims registry**, which this ring's supports ask before
-   * they stand and commit to once they have (stage 3, step 2 of
-   * `docs/DESIGN-round-robin-generation.md`). The feature name they commit
-   * under is `ringName`, so the two rings are two features and the second
-   * ring's search sees the first ring's legs as claimed ground — which is what
-   * the walk-past-first construction order in `RailRace.ts` used to buy
-   * through the collision world.
+   * they stand (stage 3, step 2 of `docs/DESIGN-round-robin-generation.md`).
+   * They ask as {@link RAIL_RACE_FEATURE} — one feature for both rings, so
+   * the other ring's supports are never an obstacle (there is one rail race,
+   * shown at one scale at a time) — and they do **not** commit here: the
+   * built track returns its {@link RailRaceTrack.claims} and `RailRace.ts`
+   * commits both rings' claims as one contribution once both are placed.
    */
   readonly groundClaims: GroundClaims;
   /**
@@ -557,19 +567,18 @@ export function buildRailRaceTrack(
     route,
     collision,
     options.groundClaims,
+    RAIL_RACE_FEATURE,
     options.ringName,
     ringSizeVsRace,
     mandatoryTrestleIndices,
   );
   const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
-  // **The supports claim their ground** — the very claims the search was
-  // answered with, under this ring's own name. Committed as one contribution
-  // once every slot is decided: a ring's legs never collide with each other
-  // through the registry (a feature is its own business), and the arc bound in
+  // **The supports' claims** — the very claims the search was answered with,
+  // returned on the track for `RailRace.ts` to commit with the other ring's as
+  // one feature. A ring's legs never collide with each other through the
+  // registry (a feature is its own business), and the arc bound in
   // `trestleSpots` is what keeps two neighbouring slots off the same ground.
-  options.groundClaims.commit(options.ringName, {
-    claims: spots.flatMap((spot) => spot.claims),
-  });
+  const claims: readonly Claim[] = spots.flatMap((spot) => spot.claims);
 
   // --- the duck bars ---------------------------------------------------------
   //
@@ -865,15 +874,6 @@ export function buildRailRaceTrack(
       strut(mesh, slot, piece.from, piece.to);
     }
 
-    // A post is a thing a child can walk into — on the ring that is actually
-    // there while she is on foot. See `RailRaceTrackOptions.registerCollision`.
-    //
-    // Taken from the post's own foot radius rather than the 0.36 this was
-    // written as when the leg was half as thick: the collider and the thing you
-    // can see are now the same claim about the same post.
-    if (options.registerCollision) {
-      collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS * ringSizeVsRace);
-    }
   });
 
   legs.count = spots.length;
@@ -903,7 +903,18 @@ export function buildRailRaceTrack(
   const INK = new Color(PALETTE.ink);
   const FLASH = new Color(PALETTE.fairyWarm);
 
+  // A post is a thing a child can walk into — on the ring that is actually
+  // there while she is on foot, and only once both rings have found their
+  // ground. See `RailRaceTrack.registerCollision`. Taken from the post's own
+  // foot radius: the collider and the thing you can see are the same claim
+  // about the same post.
+  const registerCollision = (): void => {
+    for (const spot of spots) collision.addCircle(spot.x, spot.z, POST_FOOT_RADIUS * ringSizeVsRace);
+  };
+
   return {
+    claims,
+    registerCollision,
     group,
 
     setAlerts(lapOffset: number, safe: boolean, elapsed: number): void {
@@ -1524,6 +1535,8 @@ function trestleSpots(
   collision: CollisionWorld,
   groundClaims: GroundClaims,
   feature: string,
+  /** The ring's own name, for the trace and the coverage line — never the feature asked as. */
+  ringName: string,
   ringSizeVsRace: number,
   mandatoryIndices: ReadonlySet<number>,
 ): TrestleSpot[] {
@@ -1596,7 +1609,7 @@ function trestleSpots(
       // which does not exist yet. Say exactly what refused it.
       throw new Error(
         `railRace/track.ts: no support can stand for the duck bar at slot ${i} of ` +
-          `${feature} (arch-relative at=${atArch0.toFixed(1)}): ` +
+          `${ringName} (arch-relative at=${atArch0.toFixed(1)}): ` +
           (leanExhausted
             ? `the trunk's lean limit was reached (maxTrunkLean, trestleGeometry.ts) `
             : `the ring's whole lean range was tried `) +
@@ -1608,7 +1621,7 @@ function trestleSpots(
       );
     }
   }
-  reportLegacyRefusals(feature, legacyTally);
+  reportLegacyRefusals(ringName, legacyTally);
   return spots;
 }
 
