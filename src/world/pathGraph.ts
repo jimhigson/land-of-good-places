@@ -12,7 +12,6 @@ import {
 } from './pathSurface';
 import { terrainHeight } from './terrain';
 import {
-  buildGraph,
   drawnSamplesFor,
   pathDivisions,
   PLAZA,
@@ -32,6 +31,7 @@ import {
  */
 export { routeCurve };
 import { takePrewarmedPathGraph } from './pathsPrewarm';
+import { convergePathGraph } from './pathGraphConverge';
 import { publishDrawnPath, publishPaving } from './paving';
 
 /**
@@ -47,8 +47,16 @@ import { publishDrawnPath, publishPaving } from './paving';
  * generator, one order — the sliced boot cannot build a different park.
  */
 
-/** The solved graph — nodes, edges, backbone. One per build, like the park. */
-export const PATH_GRAPH: PathGraph = takePrewarmedPathGraph() ?? buildGraph();
+/**
+ * The solved graph — nodes, edges, backbone. One per build, like the park.
+ *
+ * `convergePathGraph()` rather than `buildGraph()`: the path solve and the
+ * crossing-site solve negotiate until they agree, and it is that loop, not this
+ * module, that publishes `CROSSING_SITES`. See `pathGraphConverge.ts`. A
+ * pre-warmed graph has already been through the same loop in
+ * `boot/parkGeneration.ts`.
+ */
+export const PATH_GRAPH: PathGraph = takePrewarmedPathGraph() ?? convergePathGraph();
 
 /**
  * The ribbons actually drawn — the graph's paved edges. Exported so anything

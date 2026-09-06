@@ -4212,6 +4212,54 @@ export function buildGraph(): PathGraph {
   }
 }
 
+/**
+ * **Forget everything this module worked out, so the next solve starts where
+ * the first one did.**
+ *
+ * `pathGraphSearch()` is **not idempotent**, and that was invisible until the
+ * recovery loop needed to run it twice. Four bindings here are
+ * process-lifetime *accumulators*, not memos, and they are read back as routing
+ * inputs: {@link pavedLatticeNodes} and {@link pavedLatticeEdges} give already-
+ * paved lines a cost discount in `latticeSearch`, `planStreetToNetwork` treats
+ * paved nodes as free, and `ensureCompassTaps` skips taps already in
+ * {@link usedTaps} / {@link tapRimsDrawn}. A second solve in the same process
+ * therefore routes more cheaply and emits *fewer* compass taps than the first —
+ * a different park, from the same seed, for no reason a reader could see.
+ *
+ * It never showed because `pathGraph.ts` builds exactly once per module
+ * instance. The converge loop breaks that assumption, so the assumption gets a
+ * mechanism instead of a comment.
+ *
+ * **Everything is cleared, not the subset believed to matter.** The memos below
+ * are individually pure functions of the seeded layout, and several of them
+ * (`latticeCache`, `streetStubsCache`) are *also* functions of `CROSSING_SITES`,
+ * which the loop changes between iterations — `streetLatticeSearch` registers
+ * every site as a pair of lattice edges. Working out which of these depend on
+ * the site list and clearing only those would be a second definition of that
+ * dependency, kept in step by hand, and it would go wrong the first time
+ * somebody made one more of them site-aware. Clearing all of them cannot.
+ */
+export function resetPathSolveState(): void {
+  stubDebugTarget = null;
+  railInfoCache.clear();
+  streetPlotsCache = null;
+  archFootBlockersCache = null;
+  boundaryDistanceCache.clear();
+  pavedLatticeNodes.clear();
+  pavedLatticeEdges.clear();
+  usedTaps.clear();
+  slideTrackSamplesCache = null;
+  latticeCache = null;
+  streetStubsCache.clear();
+  tapRimsDrawn.clear();
+  gateCorridorDeepestCache = null;
+  rideCorridorSamplesCache = null;
+  railCorridorSamplesCache = null;
+  // `drawnSamplesCache` is a WeakMap keyed on the `RouteDefinition` object
+  // itself. A re-solve builds new route objects, so its entries are
+  // unreachable rather than stale — there is nothing to clear.
+}
+
 /** Destination kinds {@link addInterconnects} considers connecting directly
  * — real places a child is going, not the ring/gate/plaza structural nodes
  * (the plaza's own recorded coordinate is its centre, not the paved arrival

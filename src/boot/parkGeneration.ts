@@ -193,7 +193,7 @@ export class ParkGeneration {
   private solveModule: typeof import('../world/slide/solve') | null = null;
   private crossingModule: typeof import('../world/train/crossingPlanSolve') | null = null;
   private crossingPrewarmModule: typeof import('../world/train/crossingPrewarm') | null = null;
-  private pathsModule: typeof import('../world/paths') | null = null;
+  private pathConvergeModule: typeof import('../world/pathGraphConverge') | null = null;
   private pathsPrewarmModule: typeof import('../world/pathsPrewarm') | null = null;
 
   // ---- results passed between tasks (a dep is done before a dependent starts) ----
@@ -288,12 +288,17 @@ export class ParkGeneration {
       name: 'paths',
       gate: () => this.scheduler.isDone('crossingSites'),
       begin: () =>
-        Promise.all([import('../world/paths'), import('../world/pathsPrewarm')]).then(
-          ([pathsModule, prewarmModule]) => {
-            this.pathsModule = pathsModule;
-            this.pathsPrewarmModule = prewarmModule;
-          },
-        ),
+        Promise.all([
+          import('../world/paths'),
+          import('../world/pathsPrewarm'),
+          import('../world/pathGraphConverge'),
+        ]).then(([, prewarmModule, convergeModule]) => {
+          // `paths` is imported for its side effect of being warmed here rather
+          // than inside the frame that solves; `pathGraphConverge` is what the
+          // task actually drives.
+          this.pathsPrewarmModule = prewarmModule;
+          this.pathConvergeModule = convergeModule;
+        }),
     },
     {
       name: 'pathGraph',
@@ -486,12 +491,20 @@ export class ParkGeneration {
         // blocking a frame on the whole street-lattice solve (~215 ms).
         name: 'pathGraph',
         deps: ['crossingSites'],
-        ready: () => self.pathsModule !== null && self.pathsPrewarmModule !== null,
+        ready: () =>
+          self.pathConvergeModule !== null && self.pathsPrewarmModule !== null,
         *start() {
-          const pathsModule = self.pathsModule as typeof import('../world/paths');
+          const convergeModule = self
+            .pathConvergeModule as typeof import('../world/pathGraphConverge');
           const prewarmModule = self
             .pathsPrewarmModule as typeof import('../world/pathsPrewarm');
-          const graph = yield* pathsModule.pathGraphSearch();
+          // **The converge loop, not the bare graph search.** The path solve
+          // and the crossing-site solve negotiate until they agree, and this is
+          // where `CROSSING_SITES` is published. Driving `pathGraphSearch()`
+          // here instead would give the boot a different park from Node's on
+          // any seed where a path crosses off-site — two cadences, two parks,
+          // which is exactly what the sliced boot exists not to do.
+          const graph = yield* convergeModule.pathGraphConvergeSearch();
           prewarmModule.offerPrewarmedPathGraph(graph);
         },
       },

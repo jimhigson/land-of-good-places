@@ -1,4 +1,5 @@
 import { TRAIN_PLAN } from './plan';
+import { assertCrossingSitesPublished } from './crossingPlan';
 import { computeCrossings } from './crossings';
 import { planBridgeFootprints, type PlannedFootprint } from './bridgeFootprint';
 
@@ -43,6 +44,20 @@ let footprintsCache: readonly PlannedFootprint[] | null = null;
 
 function footprints(): readonly PlannedFootprint[] {
   if (footprintsCache) return footprintsCache;
+  // **The memo is not invalidated; it is made impossible to compute early.**
+  //
+  // The crossing sites this list is derived from are solved from a demand set
+  // the *committed paths* produce, so they are not final until the path solve
+  // converges (`pathGraphConverge.ts`). A memo filled before that would be a
+  // stale read of a site list that no longer exists — and teaching it to notice
+  // would be a second definition of freshness beside the one the loop already
+  // owns, kept in step by hand, which is this repo's most expensive habit.
+  //
+  // So it asserts instead. `Garden` (which drives the path solve) always builds
+  // before `Scenery` (whose wall and tree placement is where the first call
+  // here happens) in `World`'s own build order, so this holds by construction
+  // and a throw means that order was broken.
+  assertCrossingSitesPublished('bridgeKeepout.footprints()');
   const crossings = computeCrossings(
     TRAIN_PLAN.route,
     TRAIN_PLAN.stations.map((station) => station.distance),
