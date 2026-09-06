@@ -125,3 +125,15 @@ number; proved red three ways), `LAYOUT_TRACE` from `parkLayout.ts` on stderr,
 `trace` line in `scripts/park-digest.mts` (two processes identical on seed 6).
 
 Untracked probes in `scripts/_probe-*.mts` — do not commit.
+
+## Late 6 Sep — the chain caught the rung's cost; fixed at the source
+
+`check:solve-cost`: layout 307.6 ms vs 250 budget. 189 of the 195 ms lattice
+build was `PARK_BOUNDARY.distanceToEdge` per cell (134k × 512-vertex scan).
+`NavGrid.rebuild` now blocks `!contains()` cells and `stampSegment`s each
+`outline()` segment at the walker radius — 0 of 133,956 cells differ from the
+old rule; 195 → 8 ms; layout stage 26.9 ms. Gates rerunning (`check2.out`,
+`gates2.txt` in the scratchpad). Issue #595 filed for `LGP_SEED=0`.
+PR body draft: scratchpad `pr-body.md` (two placeholders: lattice-after,
+arrival verdict). Probes `scripts/_probe-*.mts` are untracked; delete before
+the PR. `/spawn` link: `/spawn?pos=-46.7,29.6&seed=13` (dodgems door, seed 13).
