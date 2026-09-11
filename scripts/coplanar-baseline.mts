@@ -189,16 +189,41 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   //   seed 326  block top -1.823  vs  rail top -1.825   (2.05e-3 apart)
   //   seed 128  block top -3.526  vs  rail top -3.529   (3.38e-3 apart)
   //
-  // **Why no fix belongs here.** Moving the rail off 0.62 does not remove the
-  // coincidence, it relocates it to a different ground difference on a
-  // different seed — a number tuned to today's park, which is the trap this
-  // whole branch dead-ended on once already. ART_DIRECTION.md §7's remedy does
-  // not apply either: nothing is hidden. The posts are 0.95 m tall against a
-  // 0.62 m course and the rails are 2.6-2.8 m long inside a 1.63 m block, so
-  // about a metre of every offending rail is in open air. There is no hidden
-  // face to delete. The general statement is the load-bearing one: **two solids
-  // that interpenetrate will always put some pair of faces in a shared plane.**
-  // Only separating the solids fixes it, and that is #612.
+  // **Why no fix belongs here — and NOT because no height would work.**
+  //
+  // An earlier draft of this comment argued that moving the rail off 0.62 would
+  // only relocate the coincidence, and rested that on "two solids that
+  // interpenetrate must share a face plane". **Both claims are false and are
+  // struck.** The geometric one is plainly false — `[0,10]³` against
+  // `[5,15]x[1,2]x[1,2]` interpenetrate over 5 m³ and share no face plane;
+  // overlap is *necessary* for this seam, because the faces must also overlap
+  // in plan to be reported, but nowhere near sufficient. And the practical
+  // claim is false where it counts: measured over all ten pool seeds, **757
+  // overlapping block/rail pairs** (seed 11 contributing 0, the control, and
+  // consistent with #612's record that it is already 4.83 m clear), the gap
+  // `blockTop - railTop` occupies a narrow band `[-0.187, +0.118]` — a spread
+  // of only **0.305 m**. Sweeping the rail height against that band: today's
+  // 0.62 leaves **123 pairs within 1 cm**, while **0.80, 0.90 and 0.98 each
+  // leave zero**, 0.90 clearing by 0.1027 m. A height change would not
+  // relocate this seam; one would remove it, pool-wide.
+  //
+  // **It is still not the fix, for two better reasons.** First, that ~18 cm
+  // window exists *only* because today's terrain happens to hold the band to
+  // 0.305 m, and it closes the moment the terrain spreads wider — so 0.90 is
+  // precisely the "number tuned to today's park" that this same branch refused
+  // when it rejected a threshold for `shell|wallTop` after instrumenting 16856
+  // reveals. Second, it is a **visible art change**: the rail would move from
+  // mid-post to flush with the cap on a 0.95 m post, which is Jim's call and
+  // not an engineer's.
+  //
+  // ART_DIRECTION.md §7's remedy does not apply either: nothing is hidden. The
+  // posts are 0.95 m tall against a 0.62 m course and the rails are 2.6-2.8 m
+  // long inside a 1.63 m block, so about a metre of every offending rail is in
+  // open air. There is no hidden face to delete.
+  //
+  // So the honest statement is the narrow one: **no *honest* height exists**,
+  // not "no height exists" — and the cure that survives a terrain change is to
+  // stop the two solids overlapping at all, which is #612.
   //
   // #612 is not taken on this branch because its blast radius is the whole
   // pool: `vet:seeds --pool` goes from 8/10 to 1/10, and five of the eight
