@@ -41,39 +41,6 @@ import { JOURNEY_SECONDS, MIN_LOOP_SECONDS, SETTLE_SECONDS } from './BusJourney'
  * happening, so the ride can hold rather than freeze.
  */
 export class JourneyDirector {
-  /**
-   * **Hand over the instant the park is fit to play** — for `/arrive?at=<beat>`
-   * and nothing a child ever sees.
-   *
-   * Jim, 11 September 2026, on `/arrive?at=stepping-down`: *"but it still
-   * doesn't skip the inside bus animation"*, then *"it just shouldn't show
-   * that part at all."*
-   *
-   * **The thing he was sitting through is not the arrival.** There are two
-   * different cat-bus sequences in this game and they had been conflated for
-   * four rounds of feedback: the *arrival* (`ArrivalSequence`, the bus pulling
-   * up at the gate, which `runTo` has always landed on instantly), and this
-   * *ride* — the loading screen, an interior shot of a bus full of children
-   * that runs {@link MIN_LOOP_SECONDS} + {@link SETTLE_SECONDS} = 20 s
-   * whatever the machine. Every "close-up of her face between seat backs" ever
-   * reported on this workstream was this ride, not a camera anybody had aimed.
-   *
-   * What this does **not** relax: {@link parkFitToPlay}. The park is still
-   * generated, built and shader-warmed before hand-over, so a beat link lands
-   * in the state a child reaches. The two waits dropped here exist purely so a
-   * fast device still gets the whole cinematic, and a developer typing a beat
-   * URL has said in as many words that they do not want it.
-   *
-   * `main.ts` additionally stops *drawing* the ride while this is set, which is
-   * the other half of "shouldn't show that part at all" and cannot live here —
-   * this class owns sequencing, not rendering.
-   */
-  private hurrying = false;
-
-  hurry(): void {
-    this.hurrying = true;
-  }
-
   private elapsedSeconds = 0;
   private parkReadyFlag = false;
   private warmupReadyFlag = false;
@@ -264,7 +231,7 @@ export class JourneyDirector {
    * ({@link BusJourney.update}); the director latches it in {@link advance}.
    */
   get readyToArrive(): boolean {
-    return this.parkFitToPlay && (this.hurrying || this.elapsedSeconds >= MIN_LOOP_SECONDS);
+    return this.parkFitToPlay && this.elapsedSeconds >= MIN_LOOP_SECONDS;
   }
 
   /**
@@ -282,7 +249,7 @@ export class JourneyDirector {
   get readyToHandOver(): boolean {
     return (
       this.arrivalStartedAtSeconds >= 0 &&
-      (this.hurrying || this.elapsedSeconds - this.arrivalStartedAtSeconds >= SETTLE_SECONDS)
+      this.elapsedSeconds - this.arrivalStartedAtSeconds >= SETTLE_SECONDS
     );
   }
 
