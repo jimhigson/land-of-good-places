@@ -360,6 +360,35 @@ export class IsoCamera {
     this.zoomTarget = clamp(zoom, this.zoomMin, CAMERA_ZOOM_MAX);
   }
 
+  /**
+   * **The same zoom, but already arrived** — {@link snapShotOverride}'s
+   * missing other half, for the first frame of a shot that must *open* at its
+   * framing rather than travel to it.
+   *
+   * `snapShotOverride`'s own note says the zoom is deliberately not part of
+   * it and that "a caller that wants the framing to open closed as well says
+   * so itself". The cat-bus arrival is exactly such a caller and it did not
+   * say so: it snapped the pose and only ever wrote the zoom *target*, which
+   * damps at a 0.12 s half-life. Measured in the page, the arrival's realised
+   * frame opened at **14.958 m** and reached its declared 3.59 m only by
+   * t=0.81 — a 4.2x dolly-in over the first four fifths of a second, in a
+   * shot whose own check has a clause titled "it opens at its framing, and
+   * never tightens".
+   *
+   * That clause could not see it, because it asserted on the *declared*
+   * `shot.zoom` and the dolly lived entirely in the gap between what the shot
+   * asked for and what the camera did — CLAUDE.md's "a check that passes
+   * without checking anything", on the exact sentence it was written for.
+   *
+   * Like `snapShotOverride`, this is for the moment a shot takes the camera
+   * and nothing else: calling it every frame would not be a zoom at all.
+   */
+  snapZoomTarget(zoom: number): void {
+    this.setZoomTarget(zoom);
+    this.zoomValue = this.zoomTarget;
+    this.applyFrustum();
+  }
+
   nudgeZoom(delta: number): void {
     this.zoomTarget = clamp(this.zoomTarget + delta, this.zoomMin, CAMERA_ZOOM_MAX);
   }

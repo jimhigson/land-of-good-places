@@ -27,6 +27,7 @@ import {
   type CatBusHandle,
 } from './catBus';
 import {
+  CAMERA_PITCH_DEGREES,
   CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
 } from '../../core/constants';
@@ -976,10 +977,46 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
             (elapsed - (ARRIVAL_CONTROL_AT - ARRIVAL_YAW_HOME_SECONDS)) /
               ARRIVAL_YAW_HOME_SECONDS,
           )),
-    // **Head height, looking level.** Zero pitch is what "at head height"
-    // means for a camera that is on her: the eye rides at the focus's own
-    // height, and the focus is her head.
-    pitchDegrees: 0,
+    // **Head height, at the park camera's own angle.**
+    //
+    // This was `0` — "at head height means looking level" — and that reading
+    // of Jim's sentence is what he then reported three times as *"the camera
+    // is under the floor"* and *"walls in the foreground sitting on
+    // nothing"*. Two explanations were relayed to him as fact without being
+    // measured (a composition consequence of the level look; the dolly
+    // opening on a 20 m frame) and both were wrong. This is the measured one.
+    //
+    // **An orthographic camera at zero pitch cannot see the ground at all.**
+    // Ortho rays are parallel, so at pitch 0 every ray in the frame is
+    // *horizontal* and stays at its own height for ever. The ground is
+    // therefore not a surface in the picture, it is a single line where the
+    // terrain crosses eye height; every ray below that line runs underneath
+    // the terrain (single-sided, so it draws nothing) all the way to the far
+    // plane. The bottom of the frame is void by construction, and anything
+    // standing in it — the bus's flank, the gate-arch piers, the rail-race
+    // trestle legs — is drawn sitting on nothing. Exactly his sentence.
+    //
+    // Measured in the page at his own 1.82 aspect, ray-picking a 3x9 grid of
+    // the frame at seven beats across the whole 9.3 s shot: `terrain` was hit
+    // **once in 189 picks**. At t=1.5, 3.2 and 4.0 the entire frame is
+    // `cat-bus-shell-lower`/`cat-bus-door-panel`; at t=6.5 two of the three
+    // columns are `NOTHING` from top to bottom. A 21-rung ladder down the
+    // frame returned `hitY == rayY` at every rung — the rays never descend,
+    // which is the mechanism itself, read off the running game.
+    //
+    // So the pitch is the rig's own, {@link CAMERA_PITCH_DEGREES}, and for
+    // the same reason the yaw comes home to {@link CAMERA_YAW_DEGREES}: this
+    // shot hands over to the ordinary park camera, and the park camera's
+    // angle is the one angle in this game that is known to show a floor. It
+    // is one owner, not a second number that agrees — and it also removes a
+    // 38-degree pitch swing at the hand-over that nobody had asked for.
+    //
+    // "At head height" survives where it is actually visible: an ortho eye's
+    // *position* changes nothing on screen, so what that phrase buys is the
+    // frame being centred on her head at {@link ARRIVAL_FOLLOW_FRAME_HEIGHT},
+    // and it still is. What the pitch buys is that the lower half of that
+    // frame has ground in it.
+    pitchDegrees: CAMERA_PITCH_DEGREES,
     // **About 2 m from her.** Jim's number, held for the whole shot.
     distance: ARRIVAL_FOLLOW_DISTANCE,
     zoom: ARRIVAL_FOLLOW_ZOOM,

@@ -1695,7 +1695,19 @@ export class Game {
         // Only while it is genuinely moving — see `ArrivalShot.ownsTheZoom`.
         // The shot outlives the zoom by `ARRIVAL_RISE_TAIL`, and writing a
         // constant into a field `nudgeZoom` shares is #329.
-        if (shot.ownsTheZoom) this.camera.setZoomTarget(shot.zoom);
+        //
+        // **The framing snaps on the engaging frame, exactly as the pose
+        // does.** Writing only the target here left the zoom damping from the
+        // rig's 1 to the shot's, and the realised frame measured in the page
+        // opened at 14.958 m and did not reach its declared 3.59 m until
+        // t=0.81 — the dolly-in Jim ruled against, surviving in the zoom after
+        // it had been fixed in the pose. Same condition as `snapShotOverride`
+        // below, for the same reason: this is safe only on the frame the shot
+        // takes the camera.
+        if (shot.ownsTheZoom) {
+          if (this.arrivalCameraEngaged) this.camera.setZoomTarget(shot.zoom);
+          else this.camera.snapZoomTarget(shot.zoom);
+        }
         // **The shot opens on its pose; it does not fly there.** Jim,
         // 6 September 2026: *"arrival camera — it should START facing the bus,
         // not transition down to there."* `arrivalShot` was corrected to
