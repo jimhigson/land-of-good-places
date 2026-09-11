@@ -32,8 +32,13 @@ const MAX_LENGTH = 30;
  * two ends would lay a straight line of crumbs through whatever is in between,
  * and the parade would follow it through a wall. The trail is dropped and
  * restarted instead, so the toys catch up across open space and then fall in.
+ *
+ * Exported so `check:hotel`'s probe 3d can teleport by an amount this file
+ * agrees is a teleport, rather than carrying its own copy of the number: the
+ * check would otherwise silently stop exercising the thing it is named for the
+ * day this moves.
  */
-const TELEPORT_GAP = 3;
+export const TELEPORT_GAP = 3;
 
 interface Crumb {
   x: number;

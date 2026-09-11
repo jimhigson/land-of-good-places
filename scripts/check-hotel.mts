@@ -127,6 +127,9 @@ import { saveFlags } from '../src/state/flags.ts';
 import { gameStore, walksInParade } from '../src/state/index.ts';
 import { shopItem, ALL_CATALOGUE_ITEMS } from '../src/world/building/shops/catalogue.ts';
 import { Parade } from '../src/entities/parade/Parade.ts';
+// The game's own definition of "that was not a walk", so probe 3d's teleport
+// clause jumps by an amount the game agrees is a jump. See its use below.
+import { TELEPORT_GAP } from '../src/entities/parade/trail.ts';
 
 /** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
 const FLOOR_OF_THE_WORLD = -2;
@@ -2841,6 +2844,122 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
         );
       }
 
+      // ============ #605: and the leg nobody walks — being *moved* ==========
+      //
+      // Found by driving the browser rather than this probe, which is why it is
+      // here: on `/hotel-suite?pets=5` the deep link put her in the suite at
+      // (-613.2, 1380) while all five companion bodies were still standing at
+      // the park spawn, (-1.6, 51.6). The suite's nav lattice spans
+      // x -630..-570, z 1350..1410 and nothing else, so the animal was not in
+      // it at all: `findRoute` honestly answered 0, and the follow spring
+      // dragged five animals 640 m across the park and in through the hotel
+      // wall. 120 `noRoute` member-frames on every single load.
+      //
+      // The lattice was built and the sampler installed on every one of those
+      // frames, so this was never #608's first-tap stall — the router was asked
+      // a question it cannot answer. `Parade.catchUpAfterTeleport` is the fix:
+      // she was moved, so her companions are moved with her.
+      //
+      // Measuring it needs a **jump this game calls a jump**, so the gap comes
+      // from `trail.ts` rather than from a 3 written here — the check would
+      // otherwise quietly stop exercising a teleport the day that number moves.
+      // Says "asserts nothing" unless the clause below actually runs, so a run
+      // that skipped it cannot read like a run that passed it.
+      let teleportNote = '  moved:   ASSERTS NOTHING — the teleport clause did not run\n';
+      const followers = sent.filter((entry) => {
+        const state = routeParade.petState(entry.uid);
+        return state !== null;
+      });
+      const noRouteBeforeJump = routeParade.routingStats.noRoute;
+      const jumpX = walker.position.x;
+      const jumpZ = walker.position.z;
+      // Straight back across the suite to the bedroom she napped in — several
+      // times `TELEPORT_GAP`, a spot the walker could stand, and with at least
+      // one partition between it and where the waking half left her and her
+      // line. The lift and the ride set-downs do exactly this: one frame, no
+      // crumbs in between.
+      const landX = bedX;
+      const landZ = bedZ + 1.4;
+      const jumped = Math.hypot(landX - jumpX, landZ - jumpZ);
+      // How far each animal was from where it is about to be needed, *before*
+      // anything catches it up. This is the control: if they were already
+      // standing there, "they came with her" is a tautology and proves nothing.
+      const strandedBefore = followers.map((entry) => {
+        const state = routeParade.petState(entry.uid)!;
+        return Math.hypot(state.x - landX, state.z - landZ);
+      });
+      const worstStranded = strandedBefore.length > 0 ? Math.max(...strandedBefore) : 0;
+
+      if (jumped <= TELEPORT_GAP) {
+        problems.push(
+          `#605: the teleport clause moved her ${jumped.toFixed(2)} m, which \`trail.ts\` does ` +
+            `not count as a teleport (needs more than ${TELEPORT_GAP} m) — it is measuring an ` +
+            'ordinary walk and can prove nothing about being moved',
+        );
+      } else if (followers.length === 0) {
+        problems.push(
+          '#605: no companion had a drawn body to follow through the teleport — the clause is ' +
+            'measuring nothing',
+        );
+      } else if (worstStranded <= TELEPORT_GAP) {
+        problems.push(
+          `#605: every companion was already within ${worstStranded.toFixed(2)} m of where she ` +
+            'lands, so "they came with her" is true before the teleport happens — the control ' +
+            'never bit and this clause is a tautology',
+        );
+      } else {
+        walker.position.set(landX, 0, landZ);
+        walker.group.position.copy(walker.position);
+        elapsedWake += 1 / 60;
+        routeHotel.update({ dt: 1 / 60, elapsed: elapsedWake, input: noInput } as never);
+        routeParade.update({ dt: 1 / 60, elapsed: elapsedWake } as never);
+
+        // **One frame.** Not "they get there eventually" — the whole defect is
+        // the frames in between, during which the spring walks them through
+        // whatever stands between the two places.
+        const strandedAfter = followers.map((entry) => {
+          const state = routeParade.petState(entry.uid)!;
+          return Math.hypot(state.x - landX, state.z - landZ);
+        });
+        const worstAfter = Math.max(...strandedAfter);
+        // **Half the teleport, and the threshold is scaled to the jump on
+        // purpose.** A fixed allowance cannot answer this question: the first
+        // draft allowed 12 m for "the queue behind her", and the suite is only
+        // 10.65 m across, so a companion left behind *entirely* measured 10.65
+        // and passed. Proved by disabling the fix and watching the clause stay
+        // green — which is the whole reason for doing that.
+        //
+        // Halfway is unambiguous because the two populations are not close
+        // together. A teleport resets the trail to a single crumb at her feet
+        // (`trail.ts`), so every follower's line point *is* her landing spot
+        // and one that came with her measures ~0; one left behind measures the
+        // whole jump. There is no queue to allow for yet — the line spaces out
+        // again only as she walks.
+        const allowed = jumped / 2;
+        if (worstAfter > allowed) {
+          problems.push(
+            `#605: one frame after she was moved ${jumped.toFixed(2)} m, a companion is still ` +
+              `${worstAfter.toFixed(2)} m away — over half the jump (allowed ` +
+              `${allowed.toFixed(2)} m), so it stayed where it was rather than coming with her. ` +
+              `They were ${worstStranded.toFixed(2)} m away before. A companion left standing ` +
+              'in the space she left walks back through everything in between',
+          );
+        }
+        const noRouteFromJump = routeParade.routingStats.noRoute - noRouteBeforeJump;
+        if (noRouteFromJump > 0) {
+          problems.push(
+            `#605: being moved cost ${noRouteFromJump} member-frame(s) off the line with no route ` +
+              'at all — a body outside the lattice of the space she is now in is exactly what ' +
+              'the browser measured 120 of on every hotel deep link',
+          );
+        }
+        teleportNote =
+          `  moved:   companions ${worstStranded.toFixed(2)} m from her landing spot before a ` +
+          `${jumped.toFixed(2)} m teleport, ${worstAfter.toFixed(2)} m one frame after ` +
+          `(allowed ${allowed.toFixed(2)}, half the jump); no-route frames it cost: ` +
+          `${noRouteFromJump}\n`;
+      }
+
       // ---- **the fallback, said out loud** (#605). A straight line that fires
       // routinely is how this bug hides, so the count is printed on every run
       // whether it is zero or not, and `onLine` is printed beside it because a
@@ -2873,6 +2992,7 @@ function probeCompanionBeds(cast: string, owned: readonly BedCandidate[]): void 
           `(control — the straight line this replaced would have crossed ${straightHits})\n` +
           `  waking:  ${wakeHits} crossing(s) over ${wakeSteps} measured steps ` +
           `(control — straight lines from bed to line would have crossed ${wakeStraightHits})\n` +
+          teleportNote +
           `  routing: ${stats.onLine} member-frames on the player's own trail, ${stats.routed} ` +
           `walking a planned route (${stats.plans} plans), ${stats.lastLeg} on the last leg of ` +
           `a route that stopped where the lattice could stop it (longest such leg ` +
