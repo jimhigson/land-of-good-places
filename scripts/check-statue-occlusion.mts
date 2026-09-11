@@ -27,8 +27,12 @@ import { cameraOffset } from '../src/core/cameraRig.ts';
  * the thing under test:
  *
  *  - **HIDDEN** — a real raycast from the player's head, chest and waist along
- *    the camera's view axis into the statue's actual meshes. The camera is
- *    orthographic, so that axis is a constant and this is exact.
+ *    the camera's view axis into the statue's actual meshes. That axis is taken
+ *    as a constant, which was exact while the park camera was orthographic and
+ *    is an approximation since it became perspective (11 September 2026): at the
+ *    rig's 90 m stand-back a point a metre off the axis is 0.64° away from it,
+ *    so the ray moves by about a centimetre over a player's height. Under the
+ *    sampling here, and far under the margins this reports.
  *  - **FADED** — a replica of `FoliageFade`'s capsule sightline test, with the
  *    maths re-derived here but its four tuning numbers imported from
  *    `world/foliageFadeTuning.ts`. The split is deliberate: two independent

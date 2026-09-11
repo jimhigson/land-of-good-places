@@ -46,8 +46,19 @@
  * forearm — the part a wave is made of), casts a ray along the camera's view
  * direction and asks whether anything else is in front of it.
  *
- * The camera is orthographic (`CAMERA_IS_ORTHOGRAPHIC`), so every ray is
- * parallel and the view direction is one constant: `-cameraOffset(yaw, pitch)`.
+ * **The view direction is taken as one constant**, `-cameraOffset(yaw, pitch)`,
+ * and that is an approximation now rather than an identity. It was exact while
+ * the park camera was orthographic; since 11 September 2026 the rig is a
+ * perspective one, so rays converge on the eye. The error is small enough to
+ * ignore here and the number is worth writing down rather than waving at: the
+ * rig stands `CAMERA_DISTANCE` (90 m) back at about a 9.5° lens, so a point a
+ * metre off the view axis is `atan(1/90)` = **0.64°** away from it, and an arm
+ * is about a metre. That moves the ray by roughly a centimetre over the length
+ * of the hand — far under the sampling this check does.
+ *
+ * If the shot this measures ever moves in close (the arrival's door beat stands
+ * 6.5 m off its subject, where the same point is 8.7° off axis), this
+ * approximation stops being free and the rays have to be cast at the eye.
  *
  * A **control** is measured alongside: the head's visibility, by the identical
  * method. A method that reports 0% for everything proves nothing. QA measured
