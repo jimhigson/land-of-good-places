@@ -904,9 +904,12 @@ if (corroborated.length > 0) {
 // The same question asked in units of WORK rather than of time.
 //
 // **Why this exists, and why it is the load-bearing half.** The assertion above
-// is wall-clock, so it is really a question about the machine that ran it: this
-// check passed on an M4 Pro at 18 ms and failed on a CI runner at 54.6 ms with
-// identical code. Neither box is the one that matters — Eleri plays on a phone,
+// is a clock, so even now it is partly a question about the machine that ran
+// it: this check passed on an M4 Pro at 18 ms and failed on a CI runner at 54.6
+// ms with identical code. Since #606 it is charged only for work the process
+// can be shown to have done, and scaled by the box's measured speed, which
+// removes the *load* half of that — but a genuinely slow device still spends
+// more wall clock on the same unit, and no clock can be told otherwise. Neither box is the one that matters — Eleri plays on a phone,
 // which is far closer to the slow runner than to the laptop. A budget tuned
 // until CI goes quiet would be a check that can no longer catch the stutter it
 // was built for.
@@ -933,10 +936,11 @@ if (corroborated.length > 0) {
 // unnamed device: that depends on the device, and no device-independent number
 // can settle it. It promises the thing that is actually in this code's gift —
 // that the work is offered up in the smallest pieces the algorithms admit, and
-// that the driver takes the first chance to stop. The wall-clock ceiling above
+// that the driver takes the first chance to stop. The busy-time ceiling above
 // is kept as the secondary observation that catches a unit growing *more
-// expensive*, which these counts would not notice — and it is now scaled by
-// this box's own measured speed, so that half is a question about the code too.
+// expensive*, which these counts would not notice — and it is scaled by this
+// box's own measured speed and charged only for attested work (#606), so that
+// half is a question about the code too.
 //
 // **A floor is only worth what it counts.** The 9 August 2026 failure was an
 // un-sliced prologue in `coasterProfileSearch`, and this half missed it: the
