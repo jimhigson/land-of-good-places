@@ -601,11 +601,20 @@ legs, but the normal version can have them selectively"*).
   constant). Step 4 converts the throw on a refused slot; blockers are named.
 
 **Measured on the real merge («sha») — 14 pool seeds + canonical.**
-- `check:swept-bus`: «0 posts on 14/14», owner off «0.0000», driven off
-  «0.0000».
+- `check:swept-bus`: 0 posts on 10/10 pool seeds (scratch: 11, 24, 128, 131,
+  208, 274, 326, 428, 451, 20260728), walk-past ring only by name; owner
+  `CAT_BUS_TOP` 6.0429 vs drawn 6.0429 (off 0.0000), driven
+  `CAT_BUS_DRIVEN_TOP` 6.4991 vs posed 6.4991 (off 0.0000); both controls
+  held. «re-quote on the real merge»
 - Trestle refusals: «0» on every seed; both rings built on every seed.
 - Walk-past ring skips one gate slot on «24, 115, 131, 346, 428, 451».
-- `test:procgen`: «706/706». Seed 131: `walk-past ring seed 131: 1 bar(s)
+- `test:procgen`: «611/611» (scratch: 19 files, 611 passed, 0 failed, 0
+  skipped). **Why not the 706 quoted earlier on this branch:** that was 20
+  files on sphere b6b1a983; sphere commit 364672c1 retired pool seeds 5, 115,
+  225 and 346 and deleted `test/procgen/seed-5.test.ts`. The two sorted file
+  lists diff to exactly that line; `vitest list` collects 95 tests per seed
+  file on this tree and 611 in total, and 706 − 611 = 95 = one seed file. Not
+  a file that stopped being collected. Seed 131: `walk-past ring seed 131: 1 bar(s)
   lost to the road rule at slot «S» (lane «L»)` — the road rule's one cost,
   put to Jim with the number and accepted.
 - Whole-park digest per seed (`scripts/park-digest.mts`, hashes
@@ -614,8 +623,11 @@ legs, but the normal version can have them selectively"*).
   group on any seed». Moved feet: «table».
 - Walk-past legs on the canonical seed: «N» vs «N» on the base — «"a post
   near the bus's road is gone, not moved" / or: no leg differs».
-- `pnpm run check` «66 steps, all green», `build` green, `check:coplanar`,
-  `check:park-pool` green; chain verified by parsing `scripts`.
+- `check:park-pool`: 10/10 pool seeds pass with the ratchet enforced
+  (scratch). `pnpm run check` «66 steps, all green», `build` green,
+  `check:coplanar` green; chain verified by parsing `scripts` (66 = the
+  design branch's 65 + the sphere's `check:arrival-camera`; every step of
+  both parents present).
 
 **Red proofs (each reverted by inverse edit):** claims 1 cm wider than
 searched → red on both rings; `layout.falseRefusal` → red on seed 1;
