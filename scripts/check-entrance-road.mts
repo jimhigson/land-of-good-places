@@ -13,8 +13,29 @@
  * The fault is **motion**. A still frame of the bus parked at the gate is
  * innocent; the bus passes through a leg on its way in and on its way out, and
  * on the canonical seed it did so at four separate legs. So this sweeps the
- * bus's own oriented footprint along every metre of the road it drives and asks,
+ * bus's own oriented footprint along every metre of the **drawn road** and asks,
  * at each step, whether any trestle leg is inside it.
+ *
+ * ## The span it sweeps, and why it is the road rather than the bus's run
+ *
+ * It swept `+entranceRoadBrow()` to `-entranceRoadBrow()` — what
+ * `ArrivalSequence` animates — until the sphere (#511) collapsed the brow to one
+ * station spacing, leaving this sweeping **2 m of a 145.7 m road, 1.4%**, with
+ * nothing in its output admitting it. The control read zero on every seed, which
+ * is what a sweep that cannot see a collision reads, and the check correctly
+ * declared its own verdict void.
+ *
+ * The question in this file's own title is about **the road**, and the road is
+ * `isInEntranceRoad`'s corridor over its whole extent — the exact span
+ * `railRace/track.ts` is asked to keep its legs out of. So the sweep is
+ * `entranceRoadExtent()`, end to end, and the swept length is printed in metres
+ * and as a fraction of the road on every run.
+ *
+ * **It is a harness span and nothing about the game moved.** The bus still rolls
+ * in from `entranceBusArriveAt()` and away to `entranceBusVanishAt()`, which is
+ * about a metre either side of the gate; `ArrivalSequence` is untouched by this
+ * file. `check:swept-bus` is the check that measures the bus's **driven** run
+ * and prints its own, much smaller, coverage fraction.
  *
  * And it is a **seed sweep**, over the whole of `PARK_SEED_POOL`, because the
  * original measurement found 2 to 8 legs in the bus's path on *every one of the
@@ -26,27 +47,41 @@
  * CLAUDE.md: *"run a control on the instrument first — two agents got clean,
  * decisive, entirely wrong answers from flood fills that were measuring the
  * wrong thing"*. A sweep that finds nothing is exactly what a broken sweep also
- * finds, so every seed is built **twice**: once as the game builds it, and once
- * with `roadRoute.ts`'s `setEntranceCorridorHonoured(false)`, which switches off
- * the single clause in `railRace/track.ts`'s `groundIsClear` that keeps trestle
- * legs out of the road. The second park is the ride placing its supports the way
- * it did before this change — through the road — and **the identical sweep** is
- * run against it. It must come back dirty. If it does not, the instrument cannot
- * see a collision at all and the whole run is void, whatever it says about the
- * real park.
+ * finds, so something known to be dirty goes through this same instrument on
+ * every seed on every run, and its numbers are printed.
  *
- * That control is not a one-off transcript pasted into a comment; it is measured
- * on every seed on every run, and its numbers are printed.
+ * The control here is **the identical sweep with the bus driven onto the ride**:
+ * every station of the real run translated by one vector — the offset from the
+ * closest-approach pose to the post it came closest to — so the bus box passes
+ * centrally through a trestle that is genuinely there. Same park, same legs, same
+ * bus, same box arithmetic, same stations and headings; only where the box stands
+ * changes. It must come back non-zero, and a sweep reading the wrong meshes, the
+ * wrong bus or an empty leg list reads zero here exactly as it would on the real
+ * road. The offset is re-derived from whatever park was just built, so it cannot
+ * decay.
  *
- * **It replaced a weaker one, and why matters.** The first control swept the road
- * as it *used* to be — the straight chord at the wall — against the legs as they
- * are now. That degraded as the fix worked: the ride nudging its legs clear of
- * the new road moved them off the old line too, and the count fell from 96 legs
- * across the pool to 35, as low as **one leg on seed 11**. A control one
- * placement decision away from reading zero is a control that will one day void a
- * perfectly good run, and nothing would announce that it had stopped being a
- * measurement. Generating the dirty park instead of remembering it cannot decay,
- * because it is rebuilt from whatever the ride does today.
+ * **It replaced two weaker controls, and both failures are the same shape.** The
+ * first swept the road as it *used* to be — the straight chord at the wall —
+ * against the legs as they are now, and degraded as the fix worked: 96 legs
+ * across the pool fell to 35, as low as **one leg on seed 11**.
+ *
+ * The second — the one this change retires — built each park twice, once with
+ * `roadRoute.ts`'s `setEntranceCorridorHonoured(false)`, which switches off the
+ * single clause in `railRace/track.ts`'s `groundIsClear` that keeps trestle legs
+ * out of the road, on the premise that the ride would then place supports through
+ * it. **Measured on this branch, it does not.** The two parks' trestle positions
+ * are identical on all ten pool seeds — every strut sampled every 0.25 m and
+ * hashed — and the nearest post stands 2.77 m to 3.87 m outside the bus's swept
+ * corridor. Since the sphere (#511) the ride simply does not want to stand in the
+ * road, so the "dirty" park is clean and the control read zero for the most
+ * innocent reason there is.
+ *
+ * A control whose dirty input has stopped being dirty is not a control, and the
+ * lesson generalises past this file: **a control built by disabling a rule is only
+ * as good as the rule still being the thing that holds the result.** The second
+ * park is still built and still compared, but as a *finding* — printed on every
+ * run, saying how many seeds the clause actually moves a trestle on, and saying
+ * "asserts nothing" when the answer is none. It is not a gate.
  *
  * ## What is measured, and off what
  *
@@ -65,12 +100,20 @@
  */
 import './headless-canvas.mjs';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { InstancedMesh, Matrix4, type Object3D, Vector3 } from 'three';
 import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
 
 const run = promisify(execFile);
+
+/**
+ * How finely the bus box is stepped along the road. Finer than the thinnest
+ * trestle, so a post cannot slip between two stations of the sweep. Module
+ * scope so the parent's coverage note can state it rather than restate it.
+ */
+const STEP = 0.25;
 const HERE = fileURLToPath(import.meta.url);
 
 interface SeedReport {
@@ -81,10 +124,40 @@ interface SeedReport {
   /** Of {@link hits}, the ones on the ring a child stands beside — the visible fault. */
   readonly walkPastHits: number;
   readonly worstPenetration: number;
+  /**
+   * The clearance at the closest approach, in metres — how far the nearest post
+   * stands outside the bus's swept body. Negative would mean contact, which
+   * {@link hits} already reports. On a clean park this is the only number that
+   * says *by how much* it is clean.
+   */
+  readonly clearance: number;
+  /**
+   * **The control.** The identical sweep, with every station translated so the
+   * bus box is driven through the post it came closest to. Must be non-zero, or
+   * this instrument cannot see a collision at all and its verdict is void.
+   */
+  readonly offsetControlHits: number;
+  readonly offsetControlWorst: number;
+  /** How far the control moved the bus, in metres — derived, never picked. */
+  readonly offsetControlBy: number;
+  /**
+   * A digest of every sampled post position in this park. Compared between the
+   * real park and the corridor-off one to say plainly whether
+   * `groundIsClear`'s road clause moved a single trestle.
+   */
+  readonly trestleHash: string;
   /** True if this park was built with the corridor off — the control run. */
   readonly control: boolean;
   readonly reach: number;
   readonly brow: number;
+  /** The stretch of the road's arc the bus box was swept along, in metres from the gate. */
+  readonly sweptFrom: number;
+  readonly sweptTo: number;
+  /** The road's own full length, so the fraction swept can be stated rather than implied. */
+  readonly roadLength: number;
+  /** Where the bus is really driven to and from, for the coverage note. */
+  readonly drivenFrom: number;
+  readonly drivenTo: number;
   /** Road triangles drawn facing the ground rather than the sky. Must be zero. */
   readonly downFacingTriangles: number;
   readonly roadTriangles: number;
@@ -111,8 +184,16 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
    */
   const POST_STEP = 0.25;
   const { PARK_SEED } = await import('../src/world/parkManifest.ts');
-  const { entranceRoadAt, entranceRoadBrow, entranceRoadReach, distanceToEntranceCorridor, setEntranceCorridorHonoured } =
-    await import('../src/world/entrance/roadRoute.ts');
+  const {
+    entranceRoadAt,
+    entranceRoadBrow,
+    entranceRoadReach,
+    entranceRoadExtent,
+    entranceBusArriveAt,
+    entranceBusVanishAt,
+    distanceToEntranceCorridor,
+    setEntranceCorridorHonoured,
+  } = await import('../src/world/entrance/roadRoute.ts');
 
   // **The control's dirty input, generated rather than remembered.** With the
   // corridor switched off the ride places its trestles exactly as it did before
@@ -163,6 +244,7 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
    * which is the bug this whole branch keeps finding.
    */
   const legs: { x: number; z: number; radius: number; up: number; ring: string; post: string }[] = [];
+  const trestleHash = createHash('sha256');
   const matrix = new Matrix4();
   const centre = new Vector3();
   const axis = new Vector3();
@@ -224,6 +306,11 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
           ring,
           post: `${ring}:${part}:${i}`,
         });
+        // **Where every sampled post stands, hashed.** This is what makes the
+        // "did the corridor clause move anything?" measurement below possible:
+        // the real park and the corridor-off park are compared by this digest
+        // rather than by anybody's impression of them.
+        trestleHash.update(`${x.toFixed(4)},${z.toFixed(4)};`);
       }
     }
   });
@@ -237,8 +324,27 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
     z: number,
     headingX: number,
     headingZ: number,
-  ): { worst: number; hits: number; posts: Set<string>; walkPast: Set<string> } => {
+  ): {
+    worst: number;
+    hits: number;
+    posts: Set<string>;
+    walkPast: Set<string>;
+    /**
+     * The **closest** any post gets, signed, whether or not it touches — positive
+     * is inside the body, negative is the clearance in metres. `worst` above only
+     * ever reports contact, so on a clean park it is 0 on every seed and says
+     * nothing about whether the road missed the ride by a metre or by a
+     * millimetre. This is the number that makes a green run informative.
+     */
+    nearestReach: number;
+    /** The offset from this pose to the nearest post's centre — see the offset control. */
+    nearestDx: number;
+    nearestDz: number;
+  } => {
     let worst = 0;
+    let nearestReach = -Infinity;
+    let nearestDx = 0;
+    let nearestDz = 0;
     // **Distinct posts, not samples.** Each post contributes a sample every
     // POST_STEP of its length, so counting raw hits counts one post many times
     // and reports a number nobody can act on.
@@ -256,19 +362,49 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
       const inside =
         outAlong <= 0 && outAcross <= 0 ? Math.min(-outAlong, -outAcross) : -outside;
       const reach = inside + leg.radius;
+      if (reach > nearestReach) {
+        nearestReach = reach;
+        nearestDx = dx;
+        nearestDz = dz;
+      }
       if (reach > 0) {
         posts.add(leg.post);
         if (leg.ring === 'walk-past') walkPast.add(leg.post);
         worst = Math.max(worst, reach);
       }
     }
-    return { worst, hits: posts.size, posts, walkPast };
+    return { worst, hits: posts.size, posts, walkPast, nearestReach, nearestDx, nearestDz };
   };
 
-  const STEP = 0.25;
-
   // --- the road the bus is actually on now ----------------------------------
+  //
+  // **The whole drawn road, not the two metres the bus is driven along.**
+  //
+  // This used to sweep `+brow` to `-brow`, which is what `ArrivalSequence`
+  // drives. Since the sphere (#511) removed the ceiling that crushed the road
+  // inboard of the ride, `entranceRoadBrow()`'s predicate — outset past
+  // `RIM_OUTSET_START` — is true at the **first** station, so the brow collapsed
+  // to one station spacing and the sweep shrank to **2 m of a 145.7 m road,
+  // 1.4%**. Nothing in the output said so, and the control read zero on all ten
+  // seeds, so the check correctly declared its own verdict void.
+  //
+  // The question this check's own name asks is **"does the entrance road run
+  // through the Rail Race"** — a question about the *road*, which is
+  // `isInEntranceRoad`'s corridor over its whole extent, not about the short
+  // stretch the arrival animation happens to animate today. So the sweep is the
+  // road's own extent, `entranceRoadExtent()`, which is the same span
+  // `corridorSamples()` builds the corridor from and therefore the exact span
+  // `railRace/track.ts` was asked to keep clear.
+  //
+  // **This is a harness decision and changes nothing a child sees.** The bus
+  // still rolls in from `entranceBusArriveAt()` — 1 m — exactly as before;
+  // `ArrivalSequence` is untouched. Only where this script stands the bus box
+  // while asking its question has changed.
   const brow = entranceRoadBrow();
+  const extent = entranceRoadExtent();
+  const sweptFrom = extent.to;
+  const sweptTo = extent.from;
+  const roadLength = extent.to - extent.from;
   // **Distinct posts over the whole run, not samples and not per-station.**
   // A post is sampled every POST_STEP of its length and the bus is inside it
   // for many consecutive stations, so counting either would report one post
@@ -276,19 +412,76 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
   const hitPosts = new Set<string>();
   const hitWalkPast = new Set<string>();
   let worstPenetration = 0;
-  for (let at = brow; at >= -brow; at -= STEP) {
+  /** The closest approach anywhere on the run, and the pose it happened at. */
+  let closestReach = -Infinity;
+  let closestOffsetX = 0;
+  let closestOffsetZ = 0;
+  for (let at = sweptFrom; at >= sweptTo; at -= STEP) {
     const station = entranceRoadAt(at);
-    const { worst, posts, walkPast } = penetration(
+    const { worst, posts, walkPast, nearestReach, nearestDx, nearestDz } = penetration(
       station.x,
       station.z,
       station.headingX,
       station.headingZ,
     );
     worstPenetration = Math.max(worstPenetration, worst);
+    if (nearestReach > closestReach) {
+      closestReach = nearestReach;
+      closestOffsetX = nearestDx;
+      closestOffsetZ = nearestDz;
+    }
     for (const post of posts) hitPosts.add(post);
     for (const post of walkPast) hitWalkPast.add(post);
   }
   const hitLegs = hitPosts;
+
+  // --- THE CONTROL: the identical sweep, driven onto the ride ---------------
+  //
+  // **What a control has to do here, and why the old one stopped doing it.**
+  //
+  // CLAUDE.md: *"run a control on the instrument first — two agents got clean,
+  // decisive, entirely wrong answers from flood fills that were measuring the
+  // wrong thing"*. A sweep that finds nothing is exactly what a **broken** sweep
+  // also finds, so something known to be dirty must go through this same
+  // instrument on every run.
+  //
+  // The old control built a second park with `setEntranceCorridorHonoured(false)`
+  // — the switch that turns off `groundIsClear`'s road clause — on the premise
+  // that the ride would then put its legs back through the road. **Measured on
+  // this branch, that premise is false.** The trestle positions of the two parks
+  // are byte-identical on all ten pool seeds (sampled every 0.25 m along every
+  // strut and hashed — see `trestleHash` below), and the nearest post stands
+  // between 2.77 m and 3.87 m *outside* the bus's swept corridor. The ride does
+  // not want to stand in the road any more, with or without the clause, so
+  // switching the clause off produces a **clean** park and a control that reads
+  // zero for the most innocent reason there is. A control whose dirty input has
+  // stopped being dirty is not a control.
+  //
+  // **So the dirty input is made on the instrument's side instead: the bus is
+  // driven onto the ride.** Every station of the real sweep is translated by one
+  // vector — the offset from the closest-approach pose to the post it came
+  // closest to — so the bus box passes centrally through a post that is really
+  // there. Everything else is the real measurement: the same legs off the same
+  // built park, the same bus dimensions, the same box arithmetic, the same
+  // stations and headings. Only *where* the box stands changes.
+  //
+  // It cannot go stale, because the offset is re-derived from whichever post is
+  // nearest on whatever park was just built; and it cannot be satisfied by a
+  // blind instrument, because a sweep reading the wrong meshes, the wrong bus or
+  // an empty leg list reads zero here exactly as it would on the real road.
+  const offsetHitPosts = new Set<string>();
+  let offsetWorst = 0;
+  for (let at = sweptFrom; at >= sweptTo; at -= STEP) {
+    const station = entranceRoadAt(at);
+    const { worst, posts } = penetration(
+      station.x + closestOffsetX,
+      station.z + closestOffsetZ,
+      station.headingX,
+      station.headingZ,
+    );
+    offsetWorst = Math.max(offsetWorst, worst);
+    for (const post of posts) offsetHitPosts.add(post);
+  }
 
   // --- is the road that is DRAWN the road the bus drives? -------------------
   //
@@ -397,10 +590,20 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
     hits: hitLegs.size,
     walkPastHits: hitWalkPast.size,
     worstPenetration: Number(worstPenetration.toFixed(3)),
+    clearance: Number((-closestReach).toFixed(3)),
+    offsetControlHits: offsetHitPosts.size,
+    offsetControlWorst: Number(offsetWorst.toFixed(3)),
+    offsetControlBy: Number(Math.hypot(closestOffsetX, closestOffsetZ).toFixed(3)),
+    trestleHash: trestleHash.digest('hex').slice(0, 16),
     control: asControl,
     spurGap: Number((Number.isFinite(spurGap) ? spurGap : 999).toFixed(3)),
     reach: Number(entranceRoadReach().toFixed(1)),
-    brow: Number(brow.toFixed(1)),
+    brow: Number(brow.toFixed(3)),
+    sweptFrom: Number(sweptFrom.toFixed(2)),
+    sweptTo: Number(sweptTo.toFixed(2)),
+    roadLength: Number(roadLength.toFixed(2)),
+    drivenFrom: Number(entranceBusArriveAt().toFixed(3)),
+    drivenTo: Number(entranceBusVanishAt().toFixed(3)),
   };
   console.log(JSON.stringify(report));
 }
@@ -434,18 +637,19 @@ async function sweepThePool(): Promise<void> {
   // of that mistake here would be a sweep silently measuring the wrong bus, the
   // wrong legs, or nothing at all, on a run that prints "0 hits" and passes.
   //
-  // The dirty park is built fresh on every run rather than remembered from a
-  // transcript: same seed, same road, same sweep, with only
-  // `groundIsClear`'s corridor clause switched off. Anything that blinds the
-  // real sweep blinds this one identically, which is the whole point.
-  const blind = pairs.filter((pair) => pair.control.hits === 0);
+  // The dirty input is made fresh on every run and on the instrument's own side:
+  // the real sweep, over the real park, with the bus box translated onto the post
+  // it came closest to. See the block that computes it in the child. Anything
+  // that blinds the real sweep blinds this one identically, which is the point.
+  const blind = pairs.filter((pair) => pair.real.offsetControlHits === 0);
   if (blind.length > 0) {
     failures.push(
-      `the control found NO collision on ${blind.length} seed(s) — with the road's corridor switched ` +
-        'off the Rail Race puts its legs back through the road, so the bus is supposed to sweep ' +
-        'through them. Reading zero there means this sweep cannot see a collision at all, and its ' +
-        'verdict on the real road is void: ' +
-        blind.map((pair) => pair.control.seed).join(', '),
+      `the CONTROL found NO collision on ${blind.length} seed(s). The control drives this exact ` +
+        'sweep, over this exact park, straight through the trestle post the real run came closest ' +
+        'to — so it must report that post inside the bus. Reading zero there means the sweep ' +
+        'cannot see a collision at all (wrong meshes, wrong bus, empty leg list), and its verdict ' +
+        'on the real road is void: ' +
+        blind.map((pair) => pair.real.seed).join(', '),
     );
   }
 
@@ -481,28 +685,80 @@ async function sweepThePool(): Promise<void> {
     }
   }
 
-  const controlTotal = pairs.reduce((sum, pair) => sum + pair.control.hits, 0);
-  const controlWorst = Math.max(...pairs.map((pair) => pair.control.worstPenetration));
+  // **The control's own numbers, said out loud on every run, pass or fail.**
+  const offsetTotal = reports.reduce((sum, r) => sum + r.offsetControlHits, 0);
+  const offsetWorst = Math.max(...reports.map((r) => r.offsetControlWorst));
+  const offsetLeast = Math.min(...reports.map((r) => r.offsetControlHits));
   process.stderr.write(
-    `  control: with the corridor off the ride puts ${controlTotal} legs back in the bus's path across ` +
-      `${pairs.length} seeds (worst ${controlWorst.toFixed(2)} m inside a bus) — the sweep can see a collision\n`,
+    `  CONTROL (bus driven onto the ride): the identical sweep, every station shifted by the ` +
+      `offset to the nearest post, finds ${offsetTotal} post(s) inside the bus across ` +
+      `${reports.length} seeds — fewest ${offsetLeast} on a seed, worst ` +
+      `${offsetWorst.toFixed(2)} m in. Non-zero everywhere, so this sweep can see a collision.\n`,
+  );
+
+  // **The measurement the old control used to be, kept as a finding.**
+  //
+  // Until this change the control *was* a second park built with
+  // `groundIsClear`'s road clause switched off, on the premise that the ride
+  // would then put legs back through the road. That premise is now false and the
+  // premise failing is worth knowing, so the second park is still built and the
+  // two are compared — by a digest of every sampled post position, not by
+  // anyone's impression. This says plainly whether the clause is load-bearing
+  // today. It is **not** a gate: a clause that has stopped mattering because the
+  // ride moved away from the road is not a fault, and a clause that starts
+  // mattering again would show up here as a non-zero count rather than silently.
+  const moved = pairs.filter((pair) => pair.real.trestleHash !== pair.control.trestleHash);
+  const controlTotal = pairs.reduce((sum, pair) => sum + pair.control.hits, 0);
+  process.stderr.write(
+    `  corridor clause (\`isInEntranceRoad\` inside \`groundIsClear\`): switching it off moves a ` +
+      `trestle on ${moved.length} of ${pairs.length} seed(s), and puts ${controlTotal} post(s) ` +
+      `back in the bus's path.\n` +
+      (moved.length === 0
+        ? '  ASSERTS NOTHING: the clause is inert on every pool seed — the ride does not want to\n' +
+          '  stand in the road with or without it, so this measurement is a statement about the\n' +
+          "  ride's placement, not a control on this sweep. The control above is the one that\n" +
+          '  proves the instrument works.\n'
+        : '  The clause is load-bearing on those seeds.\n'),
   );
   process.stderr.write(
     `  facing: ${reports.reduce((sum, r) => sum + r.roadTriangles, 0)} road triangles checked, ` +
       `${reports.reduce((sum, r) => sum + r.downFacingTriangles, 0)} facing the ground\n`,
   );
-  process.stderr.write(
-    `  covered: ${pairs.length} seeds x 2 parks (real and control), ` +
-      `${reports.reduce((sum, r) => sum + r.legs, 0)} trestle legs, ` +
-      `bus swept from the brow at +${reports[0]?.brow ?? 0} m to -${reports[0]?.brow ?? 0} m\n`,
-  );
+  // **The coverage note, in metres and as a fraction, on every run.**
+  //
+  // CLAUDE.md: a check that stops covering something must say so on every run.
+  // This one covered 2 m of a 145.7 m road — 1.4% — for as long as the brow was
+  // collapsed, and said only "from the brow at +1 m to -1 m", a sentence that
+  // reads like a coverage statement while giving the reader nothing to compare
+  // it against. A span is only coverage when the whole is beside it.
+  const first = reports[0];
+  if (first) {
+    const swept = first.sweptFrom - first.sweptTo;
+    const driven = first.drivenFrom - first.drivenTo;
+    process.stderr.write(
+      `  covered: ${pairs.length} seeds x 2 parks (real and control), ` +
+        `${reports.reduce((sum, r) => sum + r.legs, 0)} trestle legs\n` +
+        `  SWEPT: ${swept.toFixed(1)} m of a ${first.roadLength.toFixed(1)} m road ` +
+        `(${((100 * swept) / first.roadLength).toFixed(1)}%), ` +
+        `from ${first.sweptFrom.toFixed(1)} m to ${first.sweptTo.toFixed(1)} m either side of the gate, ` +
+        `every ${STEP} m\n` +
+        `  That is the whole drawn road — the span \`isInEntranceRoad\` keeps trestles out of — ` +
+        `not the ${driven.toFixed(1)} m the bus is animated along\n` +
+        `  (${first.drivenFrom.toFixed(1)} m to ${first.drivenTo.toFixed(1)} m, ` +
+        `${((100 * driven) / first.roadLength).toFixed(1)}% of the road). ` +
+        `Sweeping only that drove the control to zero and made this check's verdict void.\n`,
+    );
+  }
 
   for (const pair of pairs) {
     console.log(
-      `  seed ${String(pair.real.seed).padStart(8)}  legs ${String(pair.real.legs).padStart(3)}  ` +
-        `posts in the bus ${pair.real.hits} (${pair.real.walkPastHits} on the walk-past ring)  ` +
-        `(corridor off: ${pair.control.hits} posts, ${pair.control.walkPastHits} walk-past, ` +
-        `worst ${pair.control.worstPenetration.toFixed(2)} m)`,
+      `  seed ${String(pair.real.seed).padStart(8)}  legs ${String(pair.real.legs).padStart(4)}  ` +
+        `posts in the bus ${pair.real.hits} (${pair.real.walkPastHits} walk-past)  ` +
+        `nearest post clears by ${pair.real.clearance.toFixed(2)} m  ` +
+        `(control: bus shifted ${pair.real.offsetControlBy.toFixed(2)} m finds ` +
+        `${pair.real.offsetControlHits} post(s), worst ${pair.real.offsetControlWorst.toFixed(2)} m in; ` +
+        `corridor off: ${pair.control.hits} posts, trestles ` +
+        `${pair.real.trestleHash === pair.control.trestleHash ? 'unmoved' : 'MOVED'})`,
     );
   }
 
@@ -511,7 +767,12 @@ async function sweepThePool(): Promise<void> {
     for (const failure of failures) console.error(`  - ${failure}`);
     process.exit(1);
   }
-  console.log('\nentrance road OK — the bus clears every trestle leg on every pool seed');
+  console.log(
+    `\nentrance road OK — the bus's swept body clears every trestle post along the whole ` +
+      `${(reports[0]?.roadLength ?? 0).toFixed(1)} m road on all ${reports.length} pool seeds; ` +
+      `the tightest anywhere is ${Math.min(...reports.map((r) => r.clearance)).toFixed(2)} m ` +
+      `(seed ${reports.reduce((a, b) => (a.clearance <= b.clearance ? a : b)).seed})`,
+  );
 }
 
 if (process.argv.includes('--one')) {
