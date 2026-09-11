@@ -685,3 +685,10 @@ under this branch by design.
   duck-bar groups (`duck-bars`, `duck-bar-posts`, and the unnamed `sleeves`
   InstancedMesh at track.ts:690, sized `barCount`) — a bar lost to the road
   rule on each. No other group on any seed.
+- **The road rule's cost, all 10 pool seeds, probed directly
+  (`RailRace.barsLostToRoad` + built `duck-bars` counts):** race ring 40 bars
+  on every seed, loses none; walk-past ring 40 on eight seeds, **39 on 131
+  (slot 28, lane 2) and 39 on 451 (slot 33, lane 2)**. Two bars on the whole
+  pool, both on the walk-past ring where nobody races — the number to put in
+  front of Jim, since 451 is not a CI-suite seed and the invariant never says
+  it out loud.
