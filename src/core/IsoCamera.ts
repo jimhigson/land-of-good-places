@@ -69,7 +69,12 @@ export class IsoCamera {
   private zoomValue = 1;
   private zoomTarget = 1;
   /** Eye-to-focus distance the perspective lens was last solved for. See {@link update}. */
-  private lastFrustumReach = Number.NaN;
+  // **Not `NaN`.** `Math.abs(reach - NaN) > 1e-3` is `false`, so a NaN seed
+  // meant the re-solve below could never fire even once and the lens stayed
+  // at whatever the constructor solved for 90 m — a 5.7-degree telephoto on a
+  // 12 m shot. Same disease as a check that cannot fail. `-1` is a reach no
+  // camera can have, so the first update always re-solves.
+  private lastFrustumReach = -1;
 
   /**
    * **How far out this load may zoom** — `CAMERA_ZOOM_MIN` for every real
@@ -493,6 +498,10 @@ export class IsoCamera {
   snapShotOverride(yawDegrees: number, pitchDegrees: number, distance = CAMERA_DISTANCE): void {
     this.setShotOverride(yawDegrees, pitchDegrees, distance);
     this.poseOffset.copy(this.poseTarget);
+    // The snap moves the eye, so the lens it was solved for is now the wrong
+    // one — and this runs on the frame the shot opens, which is the one frame
+    // a stale lens is most visible on.
+    this.applyFrustum();
     this.applyTransform();
   }
 
