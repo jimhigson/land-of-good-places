@@ -539,3 +539,101 @@ support under its slot — not this one.) A first version of the script did
 not prove anything: its `-t` filter matched no test name (92 skipped) and its
 `barIndex` shadowed track.ts's own; a proof that skips everything reads as
 green — read the pass count.
+
+## PR body draft (rebuilt 11 Sep — the scratchpad copy was lost; this one lives on the branch)
+
+Open against `design/round-robin-generation`, never `main`. Fill every
+`«…»` from the real merge before opening; nothing below is to be quoted from
+the scratch merge if the real base moved the number.
+
+---
+
+**Stage 3, step 2: the Rail Race's trestles become claims — one search, one
+shape, Jim's road rule**
+
+Base: `design/round-robin-generation` (the sphere on `main` merged in).
+Brief: `docs/BRIEF-stage3-step2-trestles-claim.md`; rulings in
+`docs/DESIGN-round-robin-generation.md` ("Stage 3, ruled") and the Architect's
+`HANDOFF-architect-procgen.md`. Approved by the Architect at `a06178a4`; the
+fairness re-cut (`064e834b`) is the one change after that, proved red both
+ways (below).
+
+**What a player sees.** On the walk-past ring, no trestle leg stands on the
+cat bus's road any more, and every post is solid along its whole lean, not
+just at its foot. `/spawn?pos=«x,z»&facing=«deg»` stands you at the gate
+looking along the road under the ring: «one sentence naming what is
+different there, measured on the real merge». The ride-scale ring is unchanged
+to look at — it keeps every leg (Jim: *"make the big version have all its
+legs, but the normal version can have them selectively"*).
+
+**What changed.**
+- `track.ts`: the five nudge ladders are gone. Each slot does one outward
+  march over (lean, arc), nearest first, bounded by `maxTrunkLean(trunkHeight)`
+  (`trestleGeometry.ts`: a trunk may not lean further from vertical than its
+  own branches fork) and `arcReach = TRESTLE_SPACING/2 − foot` (two slots can
+  never share ground). The registry is asked first, with the drawn tree
+  (`trestleTreeAt` → `trestleClaims`, one function for search, build and
+  commit); the four unmigrated predicates stay behind it, and a refusal names
+  its predicate (`legacy:collision`, `legacy:distanceToPath`, …) with a
+  per-ring count on stderr.
+- One rail race, one feature (`RAIL_RACE_FEATURE`): both rings claim as it;
+  the walk-past colliders register after both rings are placed
+  (`RailRaceTrack.registerCollision`), through the sphere's `addPostCollider`
+  along the lean to `TALLEST_CHILD_HEIGHT`.
+- Jim's road rule, final form: `respectsRoad` — the walk-past ring does not
+  build a slot whose drawn tree stands on the road's corridor claim
+  (`treeStandsOn`, asked of the nominal slot and of every march candidate);
+  the ride ring ignores the road. Sound because the rings are **never in the
+  world at once** (`RailRace.setActiveRing`) — the one fact both this and the
+  one-feature change rest on.
+- Headroom deleted (`Claim.headroom`, `tallestHeadroom`, the corridor's
+  driven-top claim). Kept as the guard: `check:swept-bus` sweeps the drawn bus
+  **posed at its highest** (`CAT_BUS_DRIVEN_TOP` = «6.4991», heave + pitch,
+  the pole vertex of the drawn face) against the walk-past ring only, by
+  name, and **fails on any post on any seed** — the ratchet baseline
+  (`swept-bus-baseline.mts`, 364 posts) is deleted. `CAT_BUS_TOP` is derived
+  from the face's crown and asserted equal to the drawn `Box3` in the check's
+  parent (the child's stdout is the JSON channel).
+- Fairness re-cut: equal-per-racer on the race ring only; the walk-past ring's
+  lane counts equal the race ring's minus the bars whose slot the road rule
+  skipped (`RailRace.barsLostToRoad`), printed per seed to stderr.
+- `supportGround.ts` stays (the road reads it; #601 owns its orphaned
+  constant). Step 4 converts the throw on a refused slot; blockers are named.
+
+**Measured on the real merge («sha») — 14 pool seeds + canonical.**
+- `check:swept-bus`: «0 posts on 14/14», owner off «0.0000», driven off
+  «0.0000».
+- Trestle refusals: «0» on every seed; both rings built on every seed.
+- Walk-past ring skips one gate slot on «24, 115, 131, 346, 428, 451».
+- `test:procgen`: «706/706». Seed 131: `walk-past ring seed 131: 1 bar(s)
+  lost to the road rule at slot «S» (lane «L»)` — the road rule's one cost,
+  put to Jim with the number and accepted.
+- Whole-park digest per seed (`scripts/park-digest.mts`, hashes
+  `instanceMatrix`) vs the base without step 2: «byte-identical on N seeds;
+  on the rest only the three `railRace:trestle-*` groups differ — no other
+  group on any seed». Moved feet: «table».
+- Walk-past legs on the canonical seed: «N» vs «N» on the base — «"a post
+  near the bus's road is gone, not moved" / or: no leg differs».
+- `pnpm run check` «66 steps, all green», `build` green, `check:coplanar`,
+  `check:park-pool` green; chain verified by parsing `scripts`.
+
+**Red proofs (each reverted by inverse edit):** claims 1 cm wider than
+searched → red on both rings; `layout.falseRefusal` → red on seed 1;
+`CAT_BUS_TOP` +1 cm → `check:swept-bus` "off by −0.0100", exit 1;
+`CAT_BUS_DRIVEN_TOP` +1 cm → same, in the parent; committing only the
+walk-past slice → "126 railRace claims but the slices total 302"; registering
+the race ring's feet → "registered a collider of its own radius 0.680 m";
+equal foot radii → "this clause cannot tell the rings apart"; a race bar
+dropped → "9/10/10/10"; a walk-past bar dropped → "a bar is missing for a
+reason the road rule does not explain".
+
+**For stage 5 (the migration list, read off the refusal traces):** the 1.1 m
+`legacy:collision` clear-circle refuses what the registry's compatibility
+allows (measured: 0.728 m from a 0.272 m walk-past post, gap 0.048 m).
+
+**Invariants added/changed:** `railRaceSupportsAreClaimedAsDrawn`,
+`theRoadClaimCoversTheBusRun` (samples the road's arc through
+`distanceOutside`), ring-solidity clause re-cut by radius with the
+radius guard, `duckBarsAreOnePerLaneAndNeverTouch` re-cut as above.
+
+---
