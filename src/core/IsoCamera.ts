@@ -68,6 +68,8 @@ export class IsoCamera {
 
   private zoomValue = 1;
   private zoomTarget = 1;
+  /** Eye-to-focus distance the perspective lens was last solved for. See {@link update}. */
+  private lastFrustumReach = Number.NaN;
 
   /**
    * **How far out this load may zoom** — `CAMERA_ZOOM_MIN` for every real
@@ -677,6 +679,27 @@ export class IsoCamera {
     const previousZoom = this.zoomValue;
     this.zoomValue = damp(this.zoomValue, this.zoomTarget, 0.12, dt);
     if (Math.abs(this.zoomValue - previousZoom) > 1e-4) this.applyFrustum();
+    // **PROTOTYPE (#511): the perspective lens also has to follow the eye.**
+    //
+    // `applyFrustum` derives `fov` from {@link eyeToFocusDistance}, so under
+    // the perspective rig the lens depends on *two* things that move — the
+    // zoom and the stand-back — while only the zoom re-ran it. Any shot that
+    // dollies without touching zoom therefore kept a fov solved for wherever
+    // the camera used to be: measured on the cat-bus arrival, a 12 m
+    // stand-back rendered at **5.7 degrees** (the lens for 90 m) at three
+    // beats and a correct **41.1 degrees** at the one beat whose zoom happened
+    // to still be moving. That is two definitions of the framing kept in step
+    // by hand, and the hand let go the moment a shot moved the camera.
+    //
+    // Ortho is untouched: its frustum does not depend on the distance at all,
+    // so the guard costs it nothing.
+    if (this.camera instanceof PerspectiveCamera) {
+      const reach = this.eyeToFocusDistance;
+      if (Math.abs(reach - this.lastFrustumReach) > 1e-3) {
+        this.lastFrustumReach = reach;
+        this.applyFrustum();
+      }
+    }
 
     if (this.focusOverrideActive) {
       // No look-ahead, no chest-height lift: those are about a walking

@@ -27,6 +27,7 @@ import {
   type CatBusHandle,
 } from './catBus';
 import {
+  CAMERA_DISTANCE,
   CAMERA_PITCH_DEGREES,
   CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
@@ -356,7 +357,24 @@ const ARRIVAL_GROUND_BEARINGS = 12;
  * makes her that size. {@link ARRIVAL_FOLLOW_ZOOM} is the second of those, sized
  * so she fills the frame the way a 2 m stand-back would.
  */
-export const ARRIVAL_FOLLOW_DISTANCE = 2;
+export const ARRIVAL_FOLLOW_DISTANCE = 12;
+
+/**
+ * **PROTOTYPE (#511). How wide a slice of world the shot frames at her own
+ * distance, in metres.**
+ *
+ * Under the perspective rig `IsoCamera.applyFrustum` derives the lens from
+ * `eyeToFocusDistance`, not from `CAMERA_DISTANCE` — so at a 12 m stand-back a
+ * zoom of 1 would frame `CAMERA_VIEW_HEIGHT` (15 m) at her, a 64-degree lens.
+ * That is too wide: the bus stops reading as a bus. 9 m frames her, the open
+ * door and a good stretch of the road, which is about a 40-degree lens at this
+ * distance, and 40 is the ordinary cinematic answer for a two-shot.
+ */
+const ARRIVAL_FRAME_AT_PLAYER = 9;
+
+/** The pitch the shot holds while the bus is the subject. Shallower than the
+ *  rig's 38, because the bus is a long low thing and 38 looks down on its roof. */
+const ARRIVAL_BUS_PITCH_DEGREES = 30;
 
 /**
  * How tall the frame is while the arrival owns the camera, in metres of world.
@@ -366,7 +384,7 @@ export const ARRIVAL_FOLLOW_DISTANCE = 2;
  * the shot, and kept a shade above her so the tallest possible hat has
  * somewhere to go — `check:arrival-camera` asserts both edges.
  */
-const ARRIVAL_FOLLOW_FRAME_HEIGHT = TALLEST_CHILD_HEIGHT * 1.2;
+const ARRIVAL_FOLLOW_FRAME_HEIGHT = ARRIVAL_FRAME_AT_PLAYER;
 export const ARRIVAL_FOLLOW_ZOOM = CAMERA_VIEW_HEIGHT / ARRIVAL_FOLLOW_FRAME_HEIGHT;
 
 /**
@@ -985,6 +1003,25 @@ export interface ArrivalShot {
  * "the ordinary camera owns this now" — the caller then clears its overrides
  * and the rig is the single owner of the pose again.
  */
+/**
+ * **How far the framing has come home**, 0 while the bus is the subject and 1
+ * at `ARRIVAL_CONTROL_AT`.
+ *
+ * Spread over the whole **walk in** rather than the bearing's 0.6 s, because
+ * this curve moves the stand-back from 12 m to the rig's 90 m and a 78 m pull
+ * in six tenths of a second is a lurch, not a move. Over the walk it reads as
+ * the park opening up around her as she comes through the gate — which is the
+ * thing actually happening.
+ *
+ * The bearing keeps its own, shorter window: it has to be still under her
+ * thumb at the hand-over (GAME_DESIGN.md's CONTROL rule) and nothing else here
+ * does. One curve per thing that genuinely wants a different one; the pitch,
+ * the stand-back and the lens share this one so they cannot arrive apart.
+ */
+function homeT(elapsed: number): number {
+  return smoothstep(0, 1, (elapsed - AT_WALKING) / Math.max(0.001, ARRIVAL_TIMELINE.walkingIn));
+}
+
 export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | null {
   if (elapsed >= ARRIVAL_CONTROL_AT) return null;
   // The arch pass is no longer part of the shot's shape — see the header. Kept
@@ -1056,10 +1093,16 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     // frame being centred on her head at {@link ARRIVAL_FOLLOW_FRAME_HEIGHT},
     // and it still is. What the pitch buys is that the lower half of that
     // frame has ground in it.
-    pitchDegrees: CAMERA_PITCH_DEGREES,
-    // **About 2 m from her.** Jim's number, held for the whole shot.
-    distance: ARRIVAL_FOLLOW_DISTANCE,
-    zoom: ARRIVAL_FOLLOW_ZOOM,
+    pitchDegrees: lerp(ARRIVAL_BUS_PITCH_DEGREES, CAMERA_PITCH_DEGREES, homeT(elapsed)),
+    // **PROTOTYPE (#511): the arrival is the CLOSE shot, and the park is the
+    // far one.** Under perspective the park rig stands 90 m off behind a
+    // 9.5-degree telephoto; 12 m with a 40-degree lens is intimate and has real
+    // depth in it. So the shot opens close on the bus and **pulls back** to the
+    // rig as she walks in, which reads as the world opening up around her
+    // rather than as a cut. It lands exactly on the rig by `ARRIVAL_CONTROL_AT`,
+    // over the same window the bearing uses, so the hand-over is invisible.
+    distance: lerp(ARRIVAL_FOLLOW_DISTANCE, CAMERA_DISTANCE, homeT(elapsed)),
+    zoom: lerp(ARRIVAL_FOLLOW_ZOOM, 1, homeT(elapsed)),
     ownsTheZoom: true,
     // **Never.** "Fixed on the player" is the rule, so the ordinary damped
     // player-follow is the whole of the tracking and there is no second focus

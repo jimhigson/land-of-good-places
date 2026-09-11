@@ -1,6 +1,155 @@
 # HANDOFF — issue #511, "the park is not on a hill"
 
-## ✅ 11 September 2026 — THE GREY REGION IS ANSWERED. Read this first.
+## ⛔ STOP — 11 September 2026. Jim halted all work. READ THIS BEFORE ANYTHING.
+
+**Model: Opus** (a replacement must also be Opus; this task was assigned Opus).
+Branch `feat/sphere-combined`, worktree `.claude/worktrees/sphere-combined`.
+Dev server 5641 killed. No browser page left open.
+
+### 1. What the shot looks like today — the state you are inheriting
+
+The Overseer opened `/arrive?at=park` at **1900×1000** and saw **a giant
+close-up of a face**: her head filling the left half of the screen top to
+bottom, a second character's head filling the right, a pink slab (bus seat
+back) across the middle, and the park visible only as a thumbnail of green
+between the two heads. **Jim's reaction: *"is this a joke?"*.**
+
+Write that down as the truth of the branch. My own last headless capture of the
+same beat (2000×1100, frozen) looked different — the bus, the path and five
+children walking in — so **the two do not agree and I did not get to the bottom
+of why**. Possible causes, none checked: my captures freeze the clock with
+`timeScale` and his does not; my last two edits (below) were landing on the dev
+server while he looked. **Trust his frame over mine — he saw it live.**
+
+### 2. "2 m at head height" must NOT be taken literally
+
+Jim's sentence — *"camera fixed on the player, about 2m from them, at head
+height, until they're in the park"* — described **the feeling he wanted**: the
+camera staying with her rather than swooping. It is not a distance to obey.
+
+On the **orthographic** rig 2 m meant almost nothing (an ortho eye's distance
+changes nothing on screen). On a **perspective** rig it is a portrait lens
+pressed against her face, which is exactly the frame above. Four attempts have
+now been wrecked by obeying the number. **Pull back to whatever distance shows
+her *and* where she is — the gate, the arch, the bus she just left — with her
+clearly the subject. My guess is several times 2 m. Guess with your eyes.**
+
+### 3. THE CAMERA IS PERSPECTIVE NOW. All orthographic reasoning is dead.
+
+Jim, 11 September 2026: *"yeah but the camera is perspective now"*, *"we already
+established this"*. Everything in the older sections below that reasons about
+orthographic projection is **stale**, including my own headline finding.
+
+Measured live on the page, per URL, at every beat:
+
+| URL | camera | fov | far |
+|---|---|---|---|
+| `/arrive?at=rolling-in` (before my change) | OrthographicCamera | — | 270 |
+| `…&projection=perspective` | PerspectiveCamera | 9.53° | 6000 |
+
+**On this branch perspective was opt-in** (`perspectiveFlag.ts`'s `readFlag()`
+returned true only for `?projection=perspective|persp`). So every frame anyone
+shot from a plain `/arrive` was of the projection nobody means any more — **that
+mismatch is the likeliest reason five explanations of one bug were all wrong.**
+I have changed `/arrive` to default to perspective (`?projection=orthographic`
+still forces the old one). Keep that or replace it deliberately.
+
+### 4. The five wrong explanations. Do not produce a sixth.
+
+In order, all relayed to Jim as fact, all reasoned rather than measured on the
+thing he was actually looking at:
+
+1. the empty band is a composition consequence of the pitch-0 look;
+2. it is the dolly opening on a 20 m frame;
+3. the ground stops short (the terrain measurement disproved this, but the
+   disproof was then wrongly read as "the ground is fine");
+4. the near plane is clipping it (checked three times, innocent every time);
+5. **mine** — "an orthographic camera at pitch 0 cannot see the ground at all".
+
+**Which of my findings survive the perspective correction, and which do not:**
+
+- **SURVIVES — the 4.2× dolly.** The realised frame opened at **14.958 m** and
+  reached its declared 3.590 m only at **t=0.81**. `Game` snapped the pose but
+  only ever wrote the zoom *target*, which damps at a 0.12 s half-life. Pure
+  measurement, projection-independent. Fixed by `IsoCamera.snapZoomTarget`.
+- **SURVIVES — the ray-pick results.** 3×9 grid at seven beats: `terrain` hit
+  **once in 189 picks**; a 21-rung ladder returned `hitY == rayY` at every rung.
+  Those are readings off the running game. **But they were taken on the
+  ORTHOGRAPHIC URL**, so they describe a camera nobody means. Re-take them on
+  `/arrive` now that it is perspective before building anything on them.
+- **DEAD — the explanation built on them.** "Ortho at pitch 0 makes the ground a
+  line and everything below it void" is true *of an ortho rig* and is **not** an
+  account of Jim's pixels if the arrival is perspective. Do not repeat it.
+- **UNCERTAIN — the 38° pitch.** It genuinely put a floor in the ortho frames,
+  but its justification was the dead argument above. Re-judge it by eye.
+
+### 5. `?at=park` may not be landing where it claims — CHECK THIS FIRST
+
+Jim said the link was wrong, and what the Overseer saw was neither in the park
+nor controllable-looking. My instrumented runs report `t=9.33 phase=departing`
+and the player on the path, which *should* be the end state — but a link that
+says "park" and shows a bus interior is its own bug. **Unresolved. First thing
+to check.**
+
+### 6. A real bug I found in the perspective rig, and did not finish fixing
+
+`IsoCamera.applyFrustum` derives `fov` from `eyeToFocusDistance`, but `update()`
+only re-ran it when the **zoom** changed. So any shot that dollies without
+touching zoom keeps a fov solved for wherever the camera used to be. Measured on
+the arrival at a 12 m stand-back: **fov 5.7°** (the lens for 90 m) at three
+beats, and a correct **41.1°** at the one beat whose zoom happened to still be
+moving. A 5.7° lens at 12 m frames ~1.2 m of world — **that is a face filling the
+screen, and it is very probably what Jim saw.**
+
+I added a guard in `update()` to re-solve the lens when the eye-to-focus
+distance moves. **It did not take effect** — the reshoot still reported 5.7° at
+the bus beats. So the guard is wrong or something else owns the fov. **This is
+the highest-value loose end on the branch.**
+
+### 7. What is built, pushed and worth keeping
+
+- **`/arrive?at=stepping-down` and `/arrive?at=park`** — the two beat links Jim
+  asked for twice. `ArrivalSequence.runTo` **plays** the timeline at a fixed
+  1/60 step rather than posing a lookalike, so the beat is the one a child gets.
+  Beat times sum `ARRIVAL_TIMELINE`, never typed.
+  **Trap:** `main.ts` may not import `ArrivalSequence` (it drags in `terrain`,
+  `layout`, `boundary` and solves `PARK_BOUNDARY` at module scope — the reason
+  `arrivalIsDue` lives in `arrivalFlag.ts`). The beat travels as a raw string
+  and `Game` resolves it.
+- **`IsoCamera.snapZoomTarget`** — `snapShotOverride`'s missing other half.
+- **`check:deep-links`**: covers `?at=stepping-down`, and its wait for
+  `window.game` went **30 s → 120 s** (autosave wait 15 s → 60 s) because it was
+  asserting on dev-server latency. Boots measured, three fresh Chromium each:
+  `/keychain-stall` 8.3/5.7/8.6 s, `/castle` 11.8/12.8/6.2 s, **`/arrive`
+  22.0/22.0/21.7 s** (slow by design — the one link that opts *into* the bus).
+  Three consecutive green runs afterwards, 18/18.
+  **`check:deep-links` is orphaned — run by nothing (#526) — so it gates nothing.**
+- **Prototype tooling, committed because it will save you hours:**
+  `scripts/tmp-arrival-frames.mts` shoots every beat at 2000×1100;
+  `scripts/tmp-arrival-sweep.mts` boots ONE beat and then drives the camera
+  through many (yaw, pitch, distance, fov) looks, screenshotting each — a boot
+  costs ~22 s, so per-candidate rebuilds make iteration hopeless. Delete them
+  when the shot is settled.
+
+### 8. Uncommitted-intent warning: the prototype framing is MINE and unjudged
+
+The framing constants now on the branch (`ARRIVAL_FOLLOW_DISTANCE = 12`,
+`ARRIVAL_FRAME_AT_PLAYER = 9`, `ARRIVAL_BUS_PITCH_DEGREES = 30`, and a `homeT`
+curve that pulls the shot back to the rig across the walk-in) are **my
+prototype, never approved and never seen to look right**. They are pushed so
+they are not lost, not because they are good. Feel free to throw them away.
+
+### 9. CI on this branch (Jim said to ignore it; recording it so you know)
+
+`Coplanar faces` **fail** — four findings, all railway-bridge / boundary-wall /
+rail-fence geometry, identical to the four present before I touched anything;
+`fix/coplanar-sphere` owns them. `Entrance road` **fail** — the other
+engineer's workstream. `Checks`, `Procgen invariants`, `Swept bus`,
+`Deploy PR preview`, `A reload gets the new build` were green on `36ee9ce4`.
+
+---
+
+## ✅ 11 September 2026 — earlier section. NOTE: its headline is superseded by §3 above.
 
 **Model: Opus** (a replacement must also be Opus, and this task was assigned
 Opus). Branch `feat/sphere-combined`, worktree

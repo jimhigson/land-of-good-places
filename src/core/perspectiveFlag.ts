@@ -50,10 +50,29 @@ export function perspectiveParkCamera(): boolean {
 }
 
 function readFlag(): boolean {
+  // **PROTOTYPE (#511): `/arrive` is perspective unless told otherwise.**
+  //
+  // Jim, 11 September 2026, on being given yet another account of the arrival
+  // camera built on orthographic reasoning: *"yeah but the camera is
+  // perspective now"*, *"we already established this"*. He is right about the
+  // decision and this file was still making it opt-in, so every frame anyone
+  // shot of the arrival from a plain `/arrive` was of the projection nobody
+  // means any more. That mismatch is the likeliest reason four explanations of
+  // one bug were all wrong.
+  //
+  // `?projection=orthographic` still forces the old one, so the two can still
+  // be compared on the same URL — which is the whole point of the flag.
   const search = querystring();
-  if (search === null) return false;
-  const value = new URLSearchParams(search).get('projection');
-  return value === 'perspective' || value === 'persp';
+  const value = search === null ? null : new URLSearchParams(search).get('projection');
+  if (value === 'orthographic' || value === 'ortho') return false;
+  if (value === 'perspective' || value === 'persp') return true;
+  return onTheArrivalRoute();
+}
+
+/** True on `/arrive`, the one route whose whole subject is the arrival shot. */
+function onTheArrivalRoute(): boolean {
+  const path = (globalThis as { location?: { pathname?: string } }).location?.pathname;
+  return typeof path === 'string' && path.replace(/\/+$/, '') === '/arrive';
 }
 
 /**
