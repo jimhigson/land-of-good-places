@@ -427,18 +427,55 @@ let framesThatBlockedMeasurably = 0;
 // diagnosis that names the wrong cause is worse than one that names none, so
 // the attribution now comes from `sliceCountsByTask` — one owner, and a task
 // added tomorrow is named the day it exists.
-type Phase = 'brief' | 'cruiserSearch' | 'cruiserFinish' | 'trainSearch' | 'slideSearch';
-const PHASES: readonly Phase[] = ['brief', 'cruiserSearch', 'cruiserFinish', 'trainSearch', 'slideSearch'];
-const isPhase = (name: string): name is Phase => (PHASES as readonly string[]).includes(name);
 /** Slices seen so far, per scheduler task — the delta across one `advance()`. */
 const unitsSeen: Record<string, number> = {};
+
+/**
+ * Which tasks moved across one `advance()`, from the scheduler's own counts.
+ *
+ * Mutates `seen` to the new totals, so it is called exactly once per slice.
+ */
+const tasksThatMoved = (
+  counts: Readonly<Record<string, number>>,
+  seen: Record<string, number>,
+): { steps: number; key: string; label: string } => {
+  let steps = 0;
+  const moved: string[] = [];
+  const labels: string[] = [];
+  for (const [task, count] of Object.entries(counts)) {
+    const done = count - (seen[task] ?? 0);
+    seen[task] = count;
+    if (done > 0) {
+      steps += done;
+      moved.push(task);
+      labels.push(`${task} x${done}`);
+    }
+  }
+  if (moved.length === 0) {
+    return { steps: 0, key: 'no scheduler slice at all', label: 'no scheduler slice at all' };
+  }
+  return { steps, key: [...moved].sort().join(' + '), label: labels.join(' + ') };
+};
 type SliceRecord = {
   /** Wall clock the `advance()` took. */
   ms: number;
   /** The part of it the process can be shown to have computed — `busyMsOf`. */
   busyMs: number;
-  /** The last task that moved: the one that ran up against the deadline. */
-  task: string;
+  /**
+   * **The tasks that moved in this slice, sorted and joined — not a guess at
+   * which one hit the deadline.**
+   *
+   * More than one task may move in a single `advance()`: a task finishing
+   * mid-budget hands the rest of the frame to the next runnable one. The
+   * comment here used to claim this named "the LAST phase that moved ... the
+   * one that ran up against the deadline", and it did not: it named whichever
+   * task the scheduler happened to register last, which is an artefact of
+   * declaration order and nothing to do with the deadline. Slice counts cannot
+   * tell you execution order, so the honest label is the whole set, and the
+   * honest grouping key is the whole set too — a task's slices group together
+   * consistently, which is all the corroboration below needs.
+   */
+  key: string;
   /** Every task that moved, with its unit count, for the diagnosis. */
   phase: string;
   steps: number;
@@ -447,7 +484,7 @@ type SliceRecord = {
 let worstSlice: SliceRecord = {
   ms: 0,
   busyMs: 0,
-  task: 'no scheduler slice at all',
+  key: 'no scheduler slice at all',
   phase: 'no scheduler slice at all',
   steps: 0,
   stage: 'waiting',
@@ -459,15 +496,6 @@ let worstWallSlice: SliceRecord = { ...worstSlice };
  * *distribution* rather than about one sample — see `MIN_CORROBORATING_SLICES`.
  */
 const slices: SliceRecord[] = [];
-/** Wall clock spent in slices that did each phase's work — the calibration. */
-const phaseMs: Record<Phase, number> = {
-  brief: 0,
-  cruiserSearch: 0,
-  cruiserFinish: 0,
-  trainSearch: 0,
-  slideSearch: 0,
-};
-
 const startedAt = performance.now();
 const startedAtCpu = cpuMs();
 
@@ -484,37 +512,8 @@ while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
   frames += 1;
   totalAdvanceMs += spent;
   totalAdvanceCpuMs += cpuSpent;
-  // Since the one-scheduler driver, more than one phase MAY do work in one
-  // `advance()` — a task finishing mid-budget hands the rest of the frame to
-  // the next runnable task (today that happens across the cruiser's three
-  // phases; when stage 3 loosens the module gating it happens generally).
-  // The label therefore names the LAST phase that moved, which is the right
-  // owner for a worst-slice diagnosis (it is the one that ran up against the
-  // deadline), and `phaseMs` attributes the whole frame to it — a
-  // calibration-grade approximation, not an exact per-phase ledger.
-  let did: Phase | null = null;
-  let steps = 0;
-  let lastTask = 'no scheduler slice at all';
-  const moved: string[] = [];
-  for (const [task, count] of Object.entries(generation.sliceCountsByTask)) {
-    const done = count - (unitsSeen[task] ?? 0);
-    unitsSeen[task] = count;
-    if (done > 0) {
-      steps += done;
-      moved.push(`${task} x${done}`);
-      lastTask = task;
-      if (isPhase(task)) did = task;
-    }
-  }
-  if (did) phaseMs[did] += spent;
-  const record = {
-    ms: spent,
-    busyMs: busy,
-    task: lastTask,
-    phase: moved.length > 0 ? moved.join(' + ') : 'no scheduler slice at all',
-    steps,
-    stage,
-  };
+  const { steps, key, label } = tasksThatMoved(generation.sliceCountsByTask, unitsSeen);
+  const record = { ms: spent, busyMs: busy, key, phase: label, steps, stage };
   slices.push(record);
   if (spent > worstAdvanceMs) {
     worstAdvanceMs = spent;
@@ -799,6 +798,26 @@ if (frames < MIN_WORKING_FRAMES) {
 // for 50.8 ms against a ... 20.0 ms ceiling` and `one advance() at the 12 ms
 // overrun budget blocked for 42.9 ms`. Issue #606 in one pair of runs.
 //
+// *Mutation D — the same burn in a task that runs ONCE.* The review finding on
+// #615: `roadCorridor` commits in a single `advance()` by design, so put
+// mutation A's identical burn in its generator instead, before
+// `self.claims.commit(module.ROAD_FEATURE, ...)`:
+//
+// → **exit 1**, both ceilings, `1 of the 1 slices of "pathGraph + roadCorridor"
+// went past the ceiling, worst 36.9 ms of attested busy time (53.0 ms wall)
+// against a 8 ms budget and a 22.2 ms ceiling already scaled 1.18x`. Under the
+// count-only clause this branch shipped for a day it was **exit 0** at 44.5 ms
+// against a 25.2 ms ceiling, while `main` caught it — a measured coverage
+// regression, which is what the exhaustive clause exists to close.
+//
+// *Mutation E — the control on D.* Replace that burn with a 40 ms
+// `Atomics.wait` in the same once-only slice, the case where an exhaustive
+// clause could wrongly prosecute a stall: **exit 0**, `worst single advance()
+// by WALL clock 48.2 ms — pathGraph x9 + roadCorridor x1, 10 work units, 2.3 ms
+// of it attested busy`. The two clauses are independent — attestation clears
+// the stall before the breach set is built, so "every slice of a once-only
+// task" never becomes a back door for the flakiness #606 was about.
+//
 // *Mutation C — the instrument itself.* Swap `process.threadCpuUsage()` for
 // `process.cpuUsage()` in `cpuMs` and the control rejects it by name: `it is
 // not this thread's clock: 56.4 ms charged over a 28.8 ms allocation churn,
@@ -851,46 +870,70 @@ if (worstAdvanceMs > ADVANCE_CEILING_MS && worstBusyAdvanceMs <= ADVANCE_CEILING
 // caught ... it sits just inside"), and `check:solve-cost` owns per-unit cost.
 // What is new is that the gap is now stated rather than implied.
 const MIN_CORROBORATING_SLICES = 2;
-const breaches = new Map<string, { count: number; worst: SliceRecord }>();
-for (const slice of slices) {
-  if (slice.busyMs <= ADVANCE_CEILING_MS) continue;
-  const existing = breaches.get(slice.task);
-  if (!existing) {
-    breaches.set(slice.task, { count: 1, worst: slice });
-  } else {
-    existing.count += 1;
-    if (slice.busyMs > existing.worst.busyMs) existing.worst = slice;
+
+type Breach = { count: number; total: number; worst: SliceRecord };
+
+/**
+ * Which task groups broke `ceilingMs`, and whether the breach is corroborated.
+ *
+ * Corroborated means **repeated, or exhaustive**: two or more slices of the
+ * group, *or* every slice the group has. The second clause is what makes a
+ * once-only task catchable, and it is not a softening — a task that runs one
+ * slice and blows the ceiling on it has breached on 100% of the slices it will
+ * ever run, which is exactly the evidence the first clause asks for from a task
+ * that runs many.
+ */
+const breachesIn = (records: readonly SliceRecord[], ceilingMs: number): Map<string, Breach> => {
+  const totals = new Map<string, number>();
+  for (const slice of records) totals.set(slice.key, (totals.get(slice.key) ?? 0) + 1);
+  const found = new Map<string, Breach>();
+  for (const slice of records) {
+    if (slice.busyMs <= ceilingMs) continue;
+    const existing = found.get(slice.key);
+    if (!existing) {
+      found.set(slice.key, { count: 1, total: totals.get(slice.key) ?? 1, worst: slice });
+    } else {
+      existing.count += 1;
+      if (slice.busyMs > existing.worst.busyMs) existing.worst = slice;
+    }
   }
-}
-const corroborated = [...breaches.entries()].filter(
-  ([, breach]) => breach.count >= MIN_CORROBORATING_SLICES,
-);
+  return found;
+};
+
+const isCorroborated = (breach: Breach): boolean =>
+  breach.count >= MIN_CORROBORATING_SLICES || breach.count === breach.total;
+
+const breaches = breachesIn(slices, ADVANCE_CEILING_MS);
+const corroborated = [...breaches.entries()].filter(([, breach]) => isCorroborated(breach));
 for (const [task, breach] of breaches) {
-  if (breach.count >= MIN_CORROBORATING_SLICES) continue;
+  if (isCorroborated(breach)) continue;
   process.stderr.write(
-    `check:park-boot NOTE: one lone slice of "${task}" went past the ${ADVANCE_CEILING_MS.toFixed(1)} ms ` +
-      `ceiling — ${breach.worst.busyMs.toFixed(1)} ms busy of ${breach.worst.ms.toFixed(1)} ms wall, ` +
-      `${breach.worst.steps} work unit(s) — and was NOT prosecuted, because one sample of ` +
-      `${slices.length} cannot tell a unit that is too big from a garbage collection landing ` +
-      'inside this one slice. A unit that is genuinely too big breaches on every slice that runs ' +
-      `it; ${MIN_CORROBORATING_SLICES} would have been a foul (issue #606). If you see this line ` +
-      'run after run, naming the same task, that is the check telling you it IS the code.\n',
+    `check:park-boot NOTE: ${breach.count} slice(s) of "${task}" went past the ` +
+      `${ADVANCE_CEILING_MS.toFixed(1)} ms ceiling — worst ${breach.worst.busyMs.toFixed(1)} ms busy of ` +
+      `${breach.worst.ms.toFixed(1)} ms wall, ${breach.worst.steps} work unit(s) — and were NOT ` +
+      `prosecuted, because that is ${breach.count} of the ${breach.total} slices that group ran, ` +
+      'and one sample cannot tell a unit that is too big from a garbage collection landing inside ' +
+      'one slice. A unit that is genuinely too big breaches on every slice that runs it; ' +
+      `${MIN_CORROBORATING_SLICES}, or all of them, would have been a foul (issue #606). If you ` +
+      'see this line run after run, naming the same task, that is the check telling you it IS the ' +
+      'code.\n',
   );
 }
 if (corroborated.length > 0) {
   const [task, breach] = corroborated.sort((a, b) => b[1].worst.busyMs - a[1].worst.busyMs)[0]!;
-  const worstBreachMs = breach.worst.busyMs;
   fouls.push(
-    `${breach.count} slices of "${task}" went past the ceiling, worst ` +
-      `${worstBreachMs.toFixed(1)} ms of ${BUSY_LABEL} (${breach.worst.ms.toFixed(1)} ms ` +
+    `${breach.count} of the ${breach.total} slices of "${task}" went past the ceiling, worst ` +
+      `${breach.worst.busyMs.toFixed(1)} ms of ${BUSY_LABEL} (${breach.worst.ms.toFixed(1)} ms ` +
       `wall) against a ${GENERATION_BUDGET_MS} ms budget and a ${ADVANCE_CEILING_MS.toFixed(1)} ms ` +
       `ceiling already scaled ${slowness.toFixed(2)}x for this box's speed. ` +
       (cpuClock.usable
         ? 'Attested busy time does not advance while the process is descheduled, so this is NOT a '
         : 'NOTE that with no attestation this is raw wall clock, so a descheduled slice can reach it — ') +
       (cpuClock.usable ? 'loaded machine either. ' : 'fix the CPU clock reading before reading further. ') +
-      `And it happened ${breach.count} times to the same task, so it is not one unlucky slice ` +
-      `either: a unit that is too big is too big every time it runs. That worst one did ` +
+      (breach.count >= MIN_CORROBORATING_SLICES
+        ? `And it happened ${breach.count} times to the same task, so it is not one unlucky slice either: `
+        : 'And it happened on EVERY slice that group ran, so it is not one unlucky slice either: ') +
+      `a unit that is too big is too big every time it runs. That worst one did ` +
       `${breach.worst.steps} work unit(s) (${breach.worst.phase}) during ` +
       `"${breach.worst.stage}" — if it got through hundreds of work units it merely spent its budget ` +
       `and something else is wrong; if it got through one or two, that unit is too big to be a ` +
@@ -1416,10 +1459,14 @@ if (cruiserRidden !== cruiserPlain) {
   const FRAME_MS = 1000 / 60;
   const overrunGen = new ParkGeneration();
   const advances: number[] = [];
+  /** Per-task, exactly as the rolling loop — see `breachesIn`. */
+  const overrunSlices: SliceRecord[] = [];
+  const overrunUnitsSeen: Record<string, number> = {};
   let worst = 0;
   let worstWall = 0;
   let overrunFrames = 0;
   while (!overrunGen.ready && !overrunGen.failed && overrunFrames < MAX_FRAMES) {
+    const stage = overrunGen.stage;
     const beforeCpu = cpuMs();
     const before = performance.now();
     overrunGen.advance(OVERRUN_GENERATION_BUDGET_MS);
@@ -1428,7 +1475,9 @@ if (cruiserRidden !== cruiserPlain) {
     // ceiling is one 60 Hz refresh plus a unit's grace, so it is the *tightest*
     // in the file and the one a 30 ms deschedule reddens most easily.
     const spent = busyMsOf(wall, cpuMs() - beforeCpu);
+    const { steps, key, label } = tasksThatMoved(overrunGen.sliceCountsByTask, overrunUnitsSeen);
     advances.push(spent);
+    overrunSlices.push({ ms: wall, busyMs: spent, key, phase: label, steps, stage });
     if (spent > worst) worst = spent;
     if (wall > worstWall) worstWall = wall;
     overrunFrames += 1;
@@ -1456,30 +1505,43 @@ if (cruiserRidden !== cruiserPlain) {
   if (worstWall > OVERRUN_ADVANCE_CEILING_MS && worst <= OVERRUN_ADVANCE_CEILING_MS) {
     noteCleared('advance() at the overrun budget', worstWall, worst);
   }
-  // Corroborated the same way as the rolling ceiling above (#606): this one is
-  // tighter still — one refresh rather than the budget — so a single distorted
-  // sample reaches it even more easily, and a revert of the overrun budget to
-  // 200 ms breaches on nearly every slice rather than on one.
-  const overrunBreaches = advances.filter((a) => a > OVERRUN_ADVANCE_CEILING_MS).length;
-  if (overrunBreaches > 0 && overrunBreaches < MIN_CORROBORATING_SLICES) {
+  // Corroborated the same way as the rolling ceiling above (#606) — **per task
+  // group, and exhaustively**, not as a bare count across the whole run. A bare
+  // count was the review finding on #615: `roadCorridor` runs one unit in one
+  // advance by design ("the task is one commit", and it is the first production
+  // placer, so that shape is the growth path rather than an oddity), so a fat
+  // unit there produces exactly one breach out of a hundred-odd overrun slices
+  // and a plain `count >= 2` let it straight through.
+  const overrunBreaches = breachesIn(overrunSlices, OVERRUN_ADVANCE_CEILING_MS);
+  const overrunCorroborated = [...overrunBreaches.entries()].filter(([, breach]) =>
+    isCorroborated(breach),
+  );
+  for (const [task, breach] of overrunBreaches) {
+    if (isCorroborated(breach)) continue;
     process.stderr.write(
-      `check:park-boot NOTE: one lone slice at the ${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget ` +
-        `went past its ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ceiling — ${worst.toFixed(1)} ms ` +
-        `busy of ${worstWall.toFixed(1)} ms wall — and was NOT prosecuted, for want of a second ` +
-        'slice to corroborate it (issue #606). A budget too large for a moving shot breaches on ' +
-        'most of its slices, not on one.\n',
+      `check:park-boot NOTE: ${breach.count} slice(s) of "${task}" at the ` +
+        `${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget went past the ` +
+        `${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ceiling — worst ` +
+        `${breach.worst.busyMs.toFixed(1)} ms busy of ${breach.worst.ms.toFixed(1)} ms wall — and ` +
+        `were NOT prosecuted, being ${breach.count} of the ${breach.total} slices that group ran ` +
+        '(issue #606).\n',
     );
   }
-  if (overrunBreaches >= MIN_CORROBORATING_SLICES) {
+  if (overrunCorroborated.length > 0) {
+    const [task, breach] = overrunCorroborated.sort(
+      (a, b) => b[1].worst.busyMs - a[1].worst.busyMs,
+    )[0]!;
     fouls.push(
-      `${overrunBreaches} advance() slices at the ${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget were busy for up to ` +
-        `${worst.toFixed(1)} ms against a ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ceiling ` +
+      `${breach.count} of the ${breach.total} slices of "${task}" at the ` +
+        `${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget were busy for up to ` +
+        `${breach.worst.busyMs.toFixed(1)} ms against a ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ceiling ` +
         `(one 60 Hz refresh + grace, scaled ${slowness.toFixed(2)}x for this box). The bus is MOVING ` +
         'through the overrun now, so a frame that blocks this long jumps the bus, the camera and the ' +
         'countryside across — the judder Jim reported. The overrun budget is too large for a moving ' +
         'shot: bias it toward smoothness (near the rolling budget), do not drain flat-out',
     );
   }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -1514,11 +1576,11 @@ if (!cpuClock.usable) {
   // from a quiet green line.
   process.stderr.write(
     'check:park-boot NOTE: this check does NOT assert on (a) a slice whose wall clock overran ' +
-      'while the process was descheduled, nor (b) a single un-repeated slice over the ceiling. ' +
-      '(a) is not work the park did; (b) cannot be told from a garbage collection landing ' +
-      'inside one slice. Per-unit cost is `check:solve-cost`\'s question, and a unit that is ' +
-      `genuinely too big breaches on every slice that runs it — ${MIN_CORROBORATING_SLICES} is a ` +
-      'foul here (issue #606).\n',
+      'while the process was descheduled, nor (b) a lone slice over the ceiling in a task group ' +
+      'that ran others inside it. (a) is not work the park did; (b) cannot be told from a garbage ' +
+      'collection landing inside one slice. A unit that is genuinely too big breaches on every ' +
+      `slice that runs it, so ${MIN_CORROBORATING_SLICES} slices — OR every slice a group ran, ` +
+      'which is how a once-only task like roadCorridor is caught — is a foul here (issue #606).\n',
   );
   for (const cleared of clearedAsDescheduled) {
     process.stderr.write(
