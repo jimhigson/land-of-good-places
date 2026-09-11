@@ -40,7 +40,7 @@
  * radius a well-aimed tap can still miss by. Change the camera framing or the
  * UI floor and this number follows automatically.
  */
-import { CAMERA_MIN_VIEW_WIDTH, CAMERA_VIEW_HEIGHT } from '../core/constants';
+import { cameraViewHalfHeight } from '../core/constants';
 import { FALLBACK_UNIT_PX } from '../core/uiScale';
 import { ZONE_HEIGHT_TOLERANCE, zoneVerb, type InteractZone } from './interact';
 
@@ -48,15 +48,18 @@ import { ZONE_HEIGHT_TOLERANCE, zoneVerb, type InteractZone } from './interact';
 export const PHONE_VIEWPORT = { width: 390, height: 844 } as const;
 
 /**
- * World metres per CSS pixel at default zoom on {@link PHONE_VIEWPORT} —
- * `IsoCamera.applyFrustum`'s formula, evaluated once here. The camera is
- * orthographic, so this is exact, not a near-plane approximation.
+ * World metres per CSS pixel at default zoom on {@link PHONE_VIEWPORT} — asked
+ * of {@link cameraViewHalfHeight}, which is the camera framing's one owner, so
+ * this genuinely does follow a change to the framing rather than merely
+ * agreeing with it today. The camera is orthographic, so this is exact, not a
+ * near-plane approximation.
+ *
+ * This used to re-express that `Math.max` by hand. The comment above already
+ * claimed the number "follows automatically"; it did not, and a drift here
+ * would have mis-sized every interact zone on a phone with nothing going red.
  */
 const PHONE_ASPECT = PHONE_VIEWPORT.width / PHONE_VIEWPORT.height;
-const PHONE_VIEW_HALF_HEIGHT = Math.max(
-  CAMERA_VIEW_HEIGHT / 2,
-  CAMERA_MIN_VIEW_WIDTH / 2 / PHONE_ASPECT,
-);
+const PHONE_VIEW_HALF_HEIGHT = cameraViewHalfHeight(PHONE_ASPECT);
 const PHONE_METRES_PER_PX = (PHONE_VIEW_HALF_HEIGHT * 2) / PHONE_VIEWPORT.height;
 
 /**

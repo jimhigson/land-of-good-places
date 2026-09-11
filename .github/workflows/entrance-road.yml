@@ -1,0 +1,85 @@
+name: Entrance road
+
+# Proves the cat bus can drive the entrance road without going through the Rail
+# Race's trestle legs (#488), and that the road the game actually *draws* is the
+# road the sweep measured (#487). Sixteen parks, the whole of `PARK_SEED_POOL`,
+# because every one of the sixteen had legs inside the bus's swept body before
+# this work — 2 to 8 per seed — so it is structural, not luck on one park.
+#
+# The check runs its own **control** first, on every run: it sweeps the road as
+# it used to be and requires that to come back dirty. If the control ever reads
+# clean the instrument is blind, and the run is declared void rather than
+# passing. CLAUDE.md: *"run a control on the instrument first"*.
+#
+# ## Why this is its own workflow rather than a step in `checks.yml`
+#
+# It was a step in that chain, and that is what turned PR #498's `Checks` job
+# red: the job hit `checks.yml`'s 30-minute `timeout-minutes` five minutes into
+# `check:climb-wave`, having run the 54 steps before it clean. Nothing had
+# asserted anything — the job simply ran out of clock, and GitHub reports a
+# timeout as **`cancelled`**, the exact failure mode that cost this project a
+# deploy on 29 August.
+#
+# `checks.yml` is already at ~25 minutes against that 30-minute cap and trending
+# up, which `coplanar.yml` had already written down as a live hazard nobody
+# should knowingly walk into. This check builds the same sixteen parks the
+# coplanar sweep does, and coplanar measures 3-4 minutes for that — so adding it
+# to the chain was always going to be the step that tipped it over.
+#
+# So it takes `coplanar.yml`'s shape, which took `procgen-invariants.yml`'s: its
+# own runner, its own budget, and a failure that reads plainly as "the bus
+# clips the ride" rather than being buried in a 25-minute log. It runs *beside*
+# the checks rather than after them, so it costs nothing on the critical path.
+#
+# ## This must be made a required status check on `main`
+#
+# It is not one automatically, and adding it needs a repository setting that
+# only Jim can make — CLAUDE.md's "report, do not act" rule covers exactly
+# this, and `coplanar.yml` is in the same position. Until it is added, this
+# workflow runs and goes red but **does not block a merge**.
+#
+# **Do not rename this job.** A required status check is matched by name, so a
+# rename stops it gating merges with nothing going red — the failure mode
+# CLAUDE.md describes under "A check that never runs is worse than a check that
+# fails".
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: entrance-road-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  entrance-road:
+    name: Entrance road
+    runs-on: ubuntu-latest
+    # Generous against the 3-4 minutes the same sixteen-park build measures in
+    # `coplanar.yml`: a runner having a slow day should say so by being slow,
+    # not by being cancelled.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install dependencies
+        # Registry hiccups are common enough to be worth retrying — same
+        # reasoning as deploy.yml; the counts live in `.npmrc`.
+        run: pnpm install --frozen-lockfile
+
+      - name: Entrance road sweep
+        run: pnpm run check:entrance-road

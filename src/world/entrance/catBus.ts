@@ -290,6 +290,20 @@ export const CAT_BUS_LENGTH = BODY_LENGTH;
 export const CAT_BUS_WIDTH = BODY_WIDTH;
 
 /**
+ * **How high off its own ground the bodywork starts and stops.**
+ *
+ * Exported for the same reason {@link CAT_BUS_LENGTH} and
+ * {@link CAT_BUS_WIDTH} are: anything asking what the bus would hit has to ask
+ * the bus, not restate it. `check:entrance-road` needs the vertical span
+ * because a trestle post leans — its foot can stand clear of the road while
+ * the post itself passes through the bus at head height — so "does this leg
+ * hit the bus" is a question about a *height range*, not a point on the
+ * ground, and the range belongs to the vehicle.
+ */
+export const CAT_BUS_BODY_BOTTOM_Y = BODY_BOTTOM_Y;
+export const CAT_BUS_BODY_TOP_Y = BODY_BOTTOM_Y + BODY_HEIGHT;
+
+/**
  * **Where the bodywork stops and the window opening starts.**
  *
  * The old bus had no openings at all: it was one closed `RoundedBoxGeometry`
@@ -807,6 +821,44 @@ const DOOR_WIDTH = SEAT_WIDTH * 1.15;
 /** How far the door swings open, in radians, at `doorOpen = 1`. */
 const DOOR_SWING = 2.05;
 
+/**
+ * **Where the bus's body sits in its own local space** — hoisted to module
+ * scope so {@link CAT_BUS_DOOR_DROP} can be answered without building a bus.
+ *
+ * These were function-scope locals inside {@link buildCatBus}. Nothing about
+ * them varies per bus or per seed: every input is a module constant, so the
+ * values were always fixed — they were merely *unreachable*, which is a
+ * different thing and a far more dangerous one. See {@link CAT_BUS_DOOR_DROP}.
+ */
+const CABIN_LENGTH = BODY_LENGTH - FACE_RADIUS * 1.1;
+const BODY_CENTRE_Z = BODY_LENGTH / 2 - CABIN_LENGTH / 2 - FACE_RADIUS * 0.55;
+const DOOR_Z = BODY_CENTRE_Z - CABIN_LENGTH * 0.28;
+const STEP_X = -(BODY_WIDTH / 2 + 0.16 * DETAIL);
+const STEP_Z = DOOR_Z + DOOR_WIDTH / 2;
+
+/**
+ * **Where a child lands when she steps off the bus, in the bus's own local
+ * space — the one owner.**
+ *
+ * Straight out from the step and clear of the sill. `buildCatBus` returns this
+ * same object as its `doorDrop`, and the arrival camera reads it from here,
+ * so there is exactly one expression for "where the door puts her down".
+ *
+ * **Why this had to be hoisted, rather than left to the built bus.** The
+ * arrival camera's geometry — which way the shot faces, how far back it
+ * stands — is derived from where the door is relative to the gate. That
+ * derivation happens at module scope; the door drop used to exist only on a
+ * *built* bus. A value that is deterministic but unreachable is precisely the
+ * shape that gets hand-copied into a second definition and then drifts, which
+ * CLAUDE.md names as this repo's most common bug by a distance. The fix is to
+ * make the real value reachable, never to write down a constant that "should
+ * match" it — a comment promising two numbers agree is not a mechanism.
+ */
+export const CAT_BUS_DOOR_DROP = {
+  x: STEP_X - 0.77 * DETAIL,
+  z: STEP_Z,
+} as const;
+
 /** One paw print: a palm oval plus three toe dots, proud of whatever it sits on. */
 export function buildPawPrint(material: ReturnType<typeof toonMaterial>): Group {
   const group = new Group();
@@ -1116,8 +1168,9 @@ export function createCatBus(): CatBusHandle {
   // Stops short of the very front — the face sphere below picks up from there —
   // so the join between "boxy body" and "round cat face" reads as one shape
   // rather than a sphere glued onto a box.
-  const cabinLength = BODY_LENGTH - FACE_RADIUS * 1.1;
-  const bodyCentreZ = BODY_LENGTH / 2 - cabinLength / 2 - FACE_RADIUS * 0.55;
+  // Module-scope now, so `CAT_BUS_DOOR_DROP` can be answered without a bus.
+  const cabinLength = CABIN_LENGTH;
+  const bodyCentreZ = BODY_CENTRE_Z;
   const cabinBackZ = bodyCentreZ - cabinLength / 2;
   const bodyTopY = BODY_BOTTOM_Y + BODY_HEIGHT;
 
@@ -1139,7 +1192,7 @@ export function createCatBus(): CatBusHandle {
   // leaves **2.9 m** of approach before the nose is inside the park; the same
   // door 4.6 m behind centre leaves **11.6 m**. A rear door is also just what a
   // coach has.
-  const doorZ = bodyCentreZ - cabinLength * 0.28;
+  const doorZ = DOOR_Z;
 
   // --- the shell, built as bands so the windows are real holes ---------------
   // Under the windows: the full-width lower body, floor to sill.
@@ -1532,8 +1585,8 @@ export function createCatBus(): CatBusHandle {
   const stepHeight = 0.1 * DETAIL;
   const stepWidth = 0.5 * DETAIL;
   const stepDepth = DOOR_WIDTH * 0.8;
-  const stepX = -(BODY_WIDTH / 2 + 0.16 * DETAIL);
-  const stepZ = doorGroup.position.z + DOOR_WIDTH / 2;
+  const stepX = STEP_X;
+  const stepZ = STEP_Z;
   /** How far the road stays clear of the lowest tread at full deflection. */
   const STEP_ROAD_CLEARANCE = 0.06;
   // **At the tread's furthest corner, not at its centre.** Pitch and roll are
@@ -1592,7 +1645,23 @@ export function createCatBus(): CatBusHandle {
       bumperMaterial,
     ),
   );
-  riser.position.set(stepX, lowestTreadUnderside + riserHeight / 2, stepZ - stepDepth / 2 + 0.08 * DETAIL);
+  // **Set into the treads, not flush with them.** The riser is `0.16 * DETAIL`
+  // deep and used to be centred exactly half that in from `stepZ - stepDepth /
+  // 2`, which put its back face in the *same plane* as both treads' back faces,
+  // pointing the same way — two surfaces fighting for one plane, which is
+  // `check:coplanar`'s whole subject and ART_DIRECTION.md §7's flat
+  // prohibition. It was in the baseline as 31 tolerated seams and went to 33 the
+  // moment the bus stopped parking square to the camera, because the sweep only
+  // counts what the iso camera can see and a new yaw shows it more of the step.
+  //
+  // Moved forward by `0.02 * DETAIL` so the back face sits *inside* the treads
+  // rather than on their boundary. Interpenetration is fine — the depth buffer
+  // has an unambiguous answer everywhere — and the riser still overlaps both
+  // treads, so `check:bus-journey`'s "every part touches the bodywork" is
+  // unaffected. This is the §7 fix (stop sharing the plane), not a stand-off:
+  // there is no gap to maintain and nothing goes stale if the step is resized,
+  // because the inset is expressed in the same `DETAIL` the step is.
+  riser.position.set(stepX, lowestTreadUnderside + riserHeight / 2, stepZ - stepDepth / 2 + 0.10 * DETAIL);
   stepGroup.add(riser);
 
   // --- bumpers ---------------------------------------------------------------
@@ -1854,12 +1923,22 @@ export function createCatBus(): CatBusHandle {
   // the same number before any bus exists.
   const height = CAT_BUS_TOP;
 
-  // Straight out from the step, clear of the sill. Derived from the step's own
-  // position rather than restated, so moving the door moves this with it.
-  const doorDrop = {
-    x: step.position.x - 0.77 * DETAIL,
-    z: step.position.z,
-  } as const;
+  // `CAT_BUS_DOOR_DROP` is the one owner; this asserts the built mesh agrees
+  // with it rather than restating the arithmetic. If the door is ever moved by
+  // editing the mesh instead of the constants, this fails loudly at build time
+  // instead of letting the arrival camera aim at a door that is not there.
+  const doorDrop = CAT_BUS_DOOR_DROP;
+  const drift = Math.hypot(
+    step.position.x - 0.77 * DETAIL - doorDrop.x,
+    step.position.z - doorDrop.z,
+  );
+  if (drift > 1e-9) {
+    throw new Error(
+      `cat bus: the built step is ${drift.toFixed(4)} m from CAT_BUS_DOOR_DROP ` +
+        `(${doorDrop.x.toFixed(4)}, ${doorDrop.z.toFixed(4)}). They are one thing; ` +
+        `move the constants, not the mesh.`,
+    );
+  }
 
   let doorOpenAmount = 0;
   let wheelSpin = 0;

@@ -1445,7 +1445,6 @@ export class BusJourney {
   private buildParkAhead(): void {
     const gateZ = PARK_AHEAD_Z;
     const stone = toonMaterial(PALETTE.stonePink);
-    const capStone = toonMaterial(PALETTE.stonePinkLight);
 
     // --- the boundary wall, either side of the opening -----------------------
     // Blocks laid along the ground it stands on, so the wall rides the same
@@ -1485,14 +1484,14 @@ export class BusJourney {
     // post tops, and only the park's own gate also had it turned across the
     // path. Nothing about the shape is written down here any more.
     //
-    // This road runs along Z, so the gateway spans world X and the yaw is 0.
+    // This road runs along Z and the bus drives down it towards -Z, so the
+    // arch's lettered face has to look back up the road at the bus: `outward`
+    // is +Z. The piers come out of the perpendicular to that, spanning world X.
     const gate = buildGateArch({
       centreX: 0,
       centreZ: gateZ,
-      yaw: 0,
+      outward: { x: 0, z: 1 },
       groundAt: groundHeight,
-      stoneMaterial: stone,
-      capMaterial: capStone,
       // Deliberately unnamed: `check:park-map` finds the park's gate by
       // `park-gate-arch`, and `getObjectByName` returns the first match.
     }).group;

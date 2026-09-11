@@ -52,7 +52,6 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   "garden|garden/path-surface|park-train/train-track/track-ballast": { area: 3.0323, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.column/<Mesh:CylinderGeometry>/<Mesh:CylinderGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.column/<Mesh:CylinderGeometry>/<Mesh:CylinderGeometry>": { area: 3.0179, seams: 1, fighting: false },
   "castle.roof|the-big-building-inside/building-shell/building-shell-floor-2/castle-decor-2/castle-roof-burrows-2/castle-roof-burrow-mounds-2|the-big-building-inside/building-shell/building-shell-floor-2/castle-decor-2/castle-roof-burrows-2/castle-roof-burrow-mouths-2": { area: 2.9668, seams: 1, fighting: false },
-  "garden|entrance/entrance-road-gateway|garden/path-surface": { area: 2.4910, seams: 1, fighting: false },
   "garden|anchor-plots/anchor:waterFight/waterfight:plot/<Mesh:RoundedBoxGeometry>|anchor-plots/anchor:waterFight/waterfight:plot/<Mesh:RoundedBoxGeometry>/<Mesh:RoundedBoxGeometry>": { area: 2.4824, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.artwork/<Mesh:BoxGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.artwork/<Mesh:PlaneGeometry>": { area: 2.2800, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.column/<Mesh:CylinderGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.column/<Mesh:CylinderGeometry>": { area: 2.0203, seams: 1, fighting: true },

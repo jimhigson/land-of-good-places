@@ -1,18 +1,13 @@
-import { PARK_BOUNDARY, edgeRadiusAt } from '../boundary';
 import { forEachPavedDisc } from '../paving';
 import type { Claim } from '../../boot/groundClaims';
-import { CAT_BUS_LENGTH } from './catBus';
+import { PATH_KERB_OVERHANG } from '../../core/constants';
 import { ROAD_HALF_WIDTH } from './road';
-import {
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_STOP_Z,
-  ENTRANCE_BUS_VANISH_X,
-  ENTRANCE_GATE_X,
-  ENTRANCE_STOP_Z,
-} from './layout';
+import { entranceRoadInnerEdge, entranceRoadStations } from './roadRoute';
+import { ENTRANCE_GATE_X, ENTRANCE_STOP_Z } from './layout';
 
 /**
- * **Where the entrance road runs — the one owner of its centreline.**
+ * **What the entrance road *is* to everyone else — the one owner of its
+ * segments and of the ground it claims.**
  *
  * The road is drawn by `Entrance.ts` and *claimed* by the round-robin
  * generator's `roadCorridor` task (`boot/parkGeneration.ts`). Before this
@@ -23,164 +18,194 @@ import {
  * stop. The builder and the claim now call {@link entranceRoadSegments} and use
  * what it returns verbatim; neither re-derives an endpoint.
  *
- * ## Neither end of this road is a constant, and that is the point
+ * ## Two roads met, and this is the seam where they were closed
  *
- * It reads as two straight ribbons, so it is tempting to write the four numbers
- * down. Three of them are measured against the park as it stands:
+ * This file and `roadRoute.ts` were written in parallel — step 1 of the
+ * round-robin rework on `main`, #498's curved road on the sphere branch — and
+ * for a few days the park had two descriptions of one road. Jim ruled the
+ * resolution on 6 September 2026 (`docs/DESIGN-round-robin-generation.md`,
+ * "Two roads met"): **one road, this file's shape, `roadRoute.ts`'s geometry.**
  *
- * - The **kerb**'s two ends come from {@link kerbReach}, which marches outward
- *   from the gate axis and stops where the road's *inner* edge would re-enter
- *   the park. `PARK_BOUNDARY` is a spline pinned to 60 m on the gate's bearing
- *   and bulging to 92 m a few degrees either side (#115), so a straight kerb
- *   dives back inside the park at both ends of its run, at a different `x` on
- *   every seed.
- * - The **spur**'s inner end comes from {@link spurReach}, which walks in from
- *   the gate and stops the moment the plaza's own paving is already underneath
- *   it. That is #472's fix: the spur used to run on to `ENTRANCE_STOP_Z`, so
- *   its last five and a half metres were a road slab drawn 5 mm under a path
- *   slab — 24 m² of shared plane, the fourth-worst seam in the game. The
- *   paving is generated per seed, so this line moves per seed too.
+ * So the division of labour is:
+ *
+ * - **`roadRoute.ts` owns where the road goes.** Its outset, its curve, its
+ *   tails, the stations the bus drives along, its inner edge. Nothing about
+ *   that line is restated here.
+ * - **This file owns what that line means to the rest of the park**: the runs
+ *   it breaks into, the ground each run occupies, and the claims committed to
+ *   the registry.
+ *
+ * That is a chain with one owner at each link, not two definitions kept in
+ * step by hand. The step-1 brief anticipated it in as many words — *"if it
+ * lands later the claim follows its owner"* — which is why closing it moved no
+ * geometry: the fourteen-seed park digest is unchanged across the merge.
+ *
+ * ## Why a curved road is many claims and not two
+ *
+ * A `capsule` claim is a straight segment swept by a half-width, and the kerb
+ * is an arc. It is therefore sampled at the road's own station spacing — one
+ * run per consecutive pair of {@link entranceRoadStations} — rather than at
+ * some tolerance somebody typed. **There is deliberately no simplification
+ * pass here.** A coarser polyline is a chord across the arc, and a chord's
+ * capsule does not cover the ground the ribbon is actually drawn on; the
+ * error would be invisible, small, and exactly where a child walks off the bus.
+ * The stations are the road's own resolution, so claiming at that resolution
+ * is exact by construction and costs a list rather than a decision.
  *
  * ## The ordering fact a caller has to know
  *
- * {@link spurReach} asks `world/paving.ts`, and **paving is published by
- * `buildPaths()`, which `Garden` runs inside `new World(...)`** — after park
- * generation has entirely finished. So this function answers differently
- * depending on when it is called, and honestly so:
+ * {@link entranceGatewayReach} asks `world/paving.ts`, and **paving is
+ * published by `buildPaths()`, which `Garden` runs inside `new World(...)`** —
+ * after park generation has entirely finished. So this function answers
+ * differently depending on when it is called, and honestly so:
  *
  * - **During generation** (the `roadCorridor` scheduler task) no paving is
- *   published, `forEachPavedDisc` reports nothing is known, and the spur is
- *   claimed all the way in to `ENTRANCE_STOP_Z`. That is the road's full
+ *   published, `forEachPavedDisc` reports nothing is known, and the gateway is
+ *   claimed all the way in to `ENTRANCE_STOP_Z`. That is the approach's full
  *   ground, which is the conservative and correct thing to claim while the
  *   park is still being decided.
  * - **At build time** (`Entrance.ts`, and the `roadCorridor` re-commit beside
- *   it) the paving is live, and the answer is the road that is actually drawn.
+ *   it) the paving is live, and the answer is the ground actually drawn on.
  *
  * This is not two definitions kept in step — it is one definition asked twice
  * about two different parks. What must never happen is a *cached* answer: the
- * pre-paving result baked in and served later would make the drawn road longer
- * than it is today, which is a park that changed. There is deliberately no
- * memoisation here for that reason.
+ * pre-paving result baked in and served later would make the drawn approach
+ * longer than it is today, which is a park that changed. There is deliberately
+ * no memoisation here for that reason.
  */
 
-/** Which world axis a ribbon runs across, and which along. */
+/**
+ * One straight run of the entrance road's ground.
+ *
+ * **Generalised from an axis-aligned run to an arbitrary `from → to`** when the
+ * curved road landed: the pair of `across`/`along` axes and a `centre`
+ * coordinate could only describe a ribbon parallel to a world axis, which the
+ * kerb has not been since #498. A capsule claim was always an arbitrary
+ * segment; this is the shape catching up with it.
+ */
 export interface RoadSegment {
-  /** The mesh name `Entrance.ts` gives this ribbon. */
+  /** The mesh name `Entrance.ts` gives the ribbon this run belongs to. */
   readonly name: string;
   readonly from: { readonly x: number; readonly z: number };
   readonly to: { readonly x: number; readonly z: number };
-  /** Which world axis runs across the carriageway. */
-  readonly across: 'x' | 'z';
-  /** Which world axis runs along it. */
-  readonly along: 'x' | 'z';
-  /** Where the centre line sits on the `across` axis. */
-  readonly centre: number;
+  /** How far either side of the centreline this run's ground reaches. */
+  readonly halfWidth: number;
 }
 
 /** The feature name the road commits its ground under. */
 export const ROAD_FEATURE = 'road';
 
-/**
- * How far along the kerb the road can run, in `direction`, before its inner
- * edge is inside the park.
- *
- * Asks `PARK_BOUNDARY` itself rather than restating a number once derived from
- * it — the same reason `ENTRANCE_BUS_ARRIVE_X` is a measured number rather than
- * a symmetrical one.
- */
-function kerbReach(direction: -1 | 1): number {
-  // The road's inner edge is the part that would enter the park first.
-  const edgeZ = ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH;
-  let reach = 0;
-  for (let x = 0; x <= 60; x += 0.5) {
-    const at = direction * x;
-    if (Math.hypot(at, edgeZ) < edgeRadiusAt(PARK_BOUNDARY, Math.atan2(edgeZ, at))) break;
-    reach = x;
-  }
-  return reach;
+/** Where the run in from the road stops, and how wide the paving it meets is. */
+export interface GatewayReach {
+  readonly z: number;
+  /** Half-width of the narrowest path covering the gate axis there. */
+  readonly halfWidth: number;
 }
 
 /**
- * How far in through the gate the spur runs before the park's own paving is
- * already under it.
+ * Fallback width for the run in through the gate on a seed whose paving never
+ * reaches the gate (and in an interior harness with no garden at all), where
+ * there is no path to take a width from. The park's own streets are 2.6 to
+ * 3.6 m across, so this is one of them rather than a number of its own.
+ */
+const GATEWAY_PATH_FALLBACK_HALF_WIDTH = 1.6;
+
+/**
+ * **How far in through the gate the approach runs, and how wide it is.**
  *
- * The road's centre is the part that reaches the paving first, because the path
- * arrives head-on; stopping the whole ribbon there therefore keeps its wings off
- * the paving too. Nothing walkable is lost — the paving carries on from the
- * exact line the road stops at.
+ * The run used to go all the way to `ENTRANCE_STOP_Z`, which is inside the
+ * plaza's paving — so its last five and a half metres were a slab drawn 5 mm
+ * under a path slab, 24 m² of shared plane and the fourth-worst seam in the
+ * game (#472). The paving wins that argument anyway (`path-surface` carries
+ * `polygonOffset: -2`), so the surface under it is a hidden face, and
+ * `ART_DIRECTION.md` §7's answer to a hidden face is to not draw it.
  *
- * Reads `forEachPavedDisc` rather than `pathGraph`'s own `distanceToPath` for
- * the reason `paving.ts` exists: importing `pathGraph` *runs the whole path
+ * The stopping line is *asked for*, not written down: a hard-coded `z` here
+ * would be CLAUDE.md's "two definitions of one thing, kept in step by hand",
+ * because the paths are generated per seed and this line moves with them. It
+ * reads `forEachPavedDisc` rather than `pathGraph`'s own `distanceToPath` for
+ * the reason that module exists: importing `pathGraph` *runs the whole path
  * solve*, and neither the road's builder nor its claim may be the thing that
  * triggers it.
+ *
+ * The centre of the run is the part that reaches the paving first, because the
+ * path arrives head-on; stopping here therefore keeps the whole width off the
+ * paving, and `Entrance.ts` then trims each column of it back further still
+ * against the surface that column would otherwise lie on. **Every column stops
+ * at or before this `z`**, which is what lets the claim below be exact rather
+ * than approximate: this is the deepest ground the approach can occupy.
  */
-function spurReach(): number {
-  const from = ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH;
+export function entranceGatewayReach(): GatewayReach {
+  const from = entranceRoadInnerEdge(0).z;
   for (let z = from; z >= ENTRANCE_STOP_Z; z -= 0.1) {
-    let paved = false;
+    let met: number | null = null;
     const known = forEachPavedDisc((x, discZ, radius) => {
-      if (Math.hypot(ENTRANCE_GATE_X - x, z - discZ) < radius) paved = true;
+      if (Math.hypot(ENTRANCE_GATE_X - x, z - discZ) < radius) {
+        // The narrowest path covering the axis here, because that is the one
+        // whose width the gateway path should match: joining a 1.3 m-wide
+        // street with a ribbon sized off the plaza would step out at the seam.
+        if (met === null || radius < met) met = radius;
+      }
     });
     // Nothing published — generation time, or an interior harness with no
-    // garden. Claim/build the whole way in, which is what the road was before
+    // garden. Claim/build the whole way in, which is what the run was before
     // #472 trimmed it back off the paving.
-    if (!known) return ENTRANCE_STOP_Z;
-    if (paved) return z;
+    if (!known) return { z: ENTRANCE_STOP_Z, halfWidth: GATEWAY_PATH_FALLBACK_HALF_WIDTH };
+    if (met !== null) return { z, halfWidth: met };
   }
-  // No paving reaches the gate on this seed: run the whole way in.
-  return ENTRANCE_STOP_Z;
+  // No paving reaches the gate on this seed: run the whole way in, as before.
+  return { z: ENTRANCE_STOP_Z, halfWidth: GATEWAY_PATH_FALLBACK_HALF_WIDTH };
 }
 
 /**
- * **The road, as two straight runs of centreline.** Everything that draws or
- * claims the entrance road reads this and nothing else.
+ * **The road, as straight runs of centreline.** Everything that draws or claims
+ * the entrance road's ground reads this and nothing else.
  *
- * 1. The **kerb**, along the bus's own stopping line outside the wall. Long
- *    enough to cover the whole run the bus drives so it is never on grass —
- *    `ENTRANCE_BUS_ARRIVE_X` in, `ENTRANCE_BUS_VANISH_X` out, plus half a bus
- *    either end for its own length — clipped to what the boundary allows.
- * 2. The **spur**, from the kerb's **inner** edge in through the gate opening.
- *    Starting at the inner rather than the outer edge is #472's other half: an
- *    outer-edge start ran the spur straight across the full 7.78 m width of the
- *    kerb, a 48 m² slab of road on another slab of road 0.08 mm apart, and the
- *    single worst coplanar seam in the game. The two abut exactly at
- *    `ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH`, so the surface is still
- *    traceable from outside the wall to inside it, which is the thing this road
- *    exists to do.
+ * 1. The **kerb**, one run per pair of `roadRoute.ts`'s stations. It is a
+ *    curve at a constant outset from the park's own edge, with a tail at each
+ *    end climbing away over the brow of the hill — see `roadRoute.ts` for why
+ *    a straight kerb cannot exist at any outset without a Rail Race trestle
+ *    standing in the bus.
+ * 2. The **gateway approach**, from the kerb's inner edge on the gate's axis in
+ *    through the arch, stopping where the park's own paving already is.
+ *
+ * The second is drawn as an ordinary park path rather than as road (Jim,
+ * 3 September 2026: *"the small run of path from the road into the park should
+ * be just a normal path"*), but the ground it occupies is still the entrance's
+ * to claim, and it is still the ground a child crosses between the bus and the
+ * gate — so it stays a run of this corridor. Its half-width is the path's own
+ * plus its kerb's overhang, which is the full width `Entrance.ts` draws.
  */
 export function entranceRoadSegments(): readonly RoadSegment[] {
-  const halfBus = CAT_BUS_LENGTH / 2;
-  const kerbTo = Math.min(kerbReach(1), ENTRANCE_BUS_ARRIVE_X + halfBus);
-  const kerbFrom = -Math.min(kerbReach(-1), Math.abs(ENTRANCE_BUS_VANISH_X) + halfBus);
-  return [
-    {
+  const stations = entranceRoadStations();
+  const segments: RoadSegment[] = [];
+  for (let i = 1; i < stations.length; i += 1) {
+    const previous = stations[i - 1] as { x: number; z: number };
+    const here = stations[i] as { x: number; z: number };
+    segments.push({
       name: 'entrance-road-kerb',
-      from: { x: kerbFrom, z: ENTRANCE_BUS_STOP_Z },
-      to: { x: kerbTo, z: ENTRANCE_BUS_STOP_Z },
-      across: 'z',
-      along: 'x',
-      centre: ENTRANCE_BUS_STOP_Z,
-    },
-    {
-      name: 'entrance-road-gateway',
-      from: { x: ENTRANCE_GATE_X, z: ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH },
-      to: { x: ENTRANCE_GATE_X, z: spurReach() },
-      across: 'x',
-      along: 'z',
-      centre: ENTRANCE_GATE_X,
-    },
-  ];
+      from: { x: previous.x, z: previous.z },
+      to: { x: here.x, z: here.z },
+      halfWidth: ROAD_HALF_WIDTH,
+    });
+  }
+  const gateway = entranceGatewayReach();
+  segments.push({
+    name: 'entrance-gateway-path',
+    from: { x: ENTRANCE_GATE_X, z: entranceRoadInnerEdge(0).z },
+    to: { x: ENTRANCE_GATE_X, z: gateway.z },
+    halfWidth: gateway.halfWidth + PATH_KERB_OVERHANG,
+  });
+  return segments;
 }
 
 /**
  * The road's ground, as claims for the registry — one `corridor` capsule per
- * run of centreline, at the carriageway's own half-width.
+ * run of centreline, at that run's own half-width.
  *
  * `corridor` rather than `footprint` because a road is a thing that travels:
  * paths and stand spots are welcome on it, another corridor may only meet it at
- * a declared crossing, and nothing solid may share it. Two claims rather than
- * one because the road turns a corner at the gate, and a capsule is a straight
- * segment.
+ * a declared crossing, and nothing solid may share it.
  */
 export function entranceRoadClaims(): readonly Claim[] {
   return entranceRoadSegments().map((segment) => ({
@@ -191,7 +216,7 @@ export function entranceRoadClaims(): readonly Claim[] {
       z1: segment.from.z,
       x2: segment.to.x,
       z2: segment.to.z,
-      halfWidth: ROAD_HALF_WIDTH,
+      halfWidth: segment.halfWidth,
     },
   }));
 }

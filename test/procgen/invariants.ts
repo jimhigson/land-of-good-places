@@ -90,10 +90,11 @@ import {
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
   RIM_OUTSET_START,
+  GROUND_SPHERE_RADIUS,
+  BUS_MAX_GRADE,
+  TERRAIN_HEIGHT_SCALE,
 } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
@@ -108,11 +109,12 @@ import {
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
-import {
-  GATE_FOOT_TOLERANCE,
-  GATE_POST_PROBE_INSET,
-  GATE_POST_REACH,
-} from '../../src/world/entrance/gateArch.ts';
+import { GATE_POST_COLLIDER_RADIUS } from '../../src/world/entrance/gateArch.ts';
+import { terrainHeight } from '../../src/world/terrain.ts';
+// The road corridor's measurement, shared with `check:ground-claims` so the two
+// sites that ask "is the claim the road?" cannot answer it differently. Pure
+// geometry over what it is handed — nothing seed-dependent is imported here.
+import { collectRoadRibbons, measureRoadRibbons } from '../../scripts/road-ribbon-measure.mts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { COPING_SINK, bridgeStoneGeometry } from '../../src/art/models/bridgeStones.ts';
 import {
@@ -807,49 +809,93 @@ const plotsDoNotOverlap: Invariant = (facts) => {
  *    green for a reason that has nothing to do with the gate, which is
  *    exactly how the first draft of this invariant passed the *broken*
  *    arch's own geometry. See `scripts/measure-gate-480.mts`.
- * 3. **Nothing hangs into that gap.** The lowest point of the arch clears
- *    {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child, party
- *    hat and all, taken from the game rather than from the gate's own design.
- *    The broken arch reached below ground and failed this by 4.31 m.
+ * 3. **Nothing hangs into that gap.** The lowest thing *over the opening*
+ *    clears {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child,
+ *    party hat and all, taken from the game rather than from the gate's own
+ *    design. The broken arch reached below ground and failed this by 4.31 m.
  *
- * The arch itself is deliberately **not** solid: its feet are the posts,
+ *    **Measured by raycasting up through the opening, not off the bounding
+ *    box**, and that is not a refinement — it is the difference between the
+ *    clause working and the clause lying. `arch.minY - groundY` was right only
+ *    while the gate was a half-torus crossbar held up by two *separate* post
+ *    meshes, so the box's floor really was the underside of the span. The
+ *    authored arch is one asset whose piers come down to the paving: the same
+ *    expression reports **0.00 m of headroom** under a gate a child walks
+ *    through on every arrival. It would have failed loudly for a correct arch
+ *    having passed quietly for a broken one, which is this repo's own
+ *    definition of a check that is not describing what it claims.
+ *    See `scripts/gate-arch-measure.mts`.
+ *
+ * The arch itself is deliberately **not** solid: its feet are the piers,
  * which are, and the span is headroom over a child walking under it.
  */
-/** The cover this invariant does not give, said the same way every time. */
-const GATE_UNCOVERED =
-  'the park gate arch invariant asserts nothing about whether a child can walk through the gateway ' +
-  '— that is theWalkInFromTheGateIsWalkable (#481, #485); this one covers only the arch pointing the ' +
-  'right way, the posts being solid, and the headroom';
+/**
+ * How far off its own pier an arch end may land and still be standing on it.
+ *
+ * **Derived from the asset, not chosen.** The gate's bounding box overshoots
+ * each pier's centre by exactly that pier's own keep-out radius, by
+ * construction — the widest thing on the pier is what
+ * {@link GATE_POST_COLLIDER_RADIUS} is measured from — so the tolerance is
+ * that plus a hand's width. It moved from 0.6 to 1.1 when the authored arch
+ * replaced the half-torus, because the piers are wider than the old 0.28 m
+ * tube, and it will move again by itself if the asset changes.
+ *
+ * Nothing about it is delicately chosen: the arch turned a quarter-turn out of
+ * the gate plane put its ends **6.11 m** from the nearest post.
+ */
+const GATE_FOOT_TOLERANCE = GATE_POST_COLLIDER_RADIUS + 0.3;
+
+/**
+ * How far off square to the way out the gate may sit, as |cos| of the angle
+ * between its long axis and the outward radial.
+ *
+ * 0.2 is about 11.5 degrees of lean, which is far more than a correctly built
+ * gate ever has (it measures 0.00 on the canonical seed) and far less than the
+ * 1.00 a gate laid flat along the path measures.
+ */
+const GATE_SQUARENESS_TOLERANCE = 0.2;
+
+/**
+ * How nearly the lettered face must point out of the park, as the cosine of
+ * the angle between them. 0.8 is about 37 degrees of slop — generous, because
+ * the failure this exists for is a **180 degree** one, which measures -1.00.
+ */
+const GATE_FACING_TOLERANCE = 0.8;
+
+/**
+ * How far inside the park the gate probe stands, in metres.
+ *
+ * Derived from the reach a gate post has over a child — `PLAYER_RADIUS` (0.62)
+ * + {@link GATE_POST_COLLIDER_RADIUS} (0.55) = 1.17 m. `solid` is **inside**
+ * that reach, so a child there must be pushed out, which is what proves the
+ * posts carry colliders at all and is the control on the probe.
+ *
+ * It must not be pointed at the gate line itself: the park boundary keeps a
+ * child *inside* the park, so a `PLAYER_RADIUS` body standing on the line
+ * overlaps the outside and every probe along it comes back blocked — 33 of 33
+ * across the gate on the canonical seed, whatever the gate is doing.
+ *
+ * `open` (1.5 m, outside the posts' reach and clear of the boundary) is what
+ * the withheld walkability clause used, kept here for whoever lands it with
+ * issue #481's fix.
+ */
+const GATE_POST_PROBE_INSET = { solid: 1.0, open: 1.5 } as const;
+
+/**
+ * How much further than its own reach a pier may hold a child before we
+ * conclude something else is holding her.
+ *
+ * The pier resolves a child to exactly `PLAYER_RADIUS +
+ * GATE_POST_COLLIDER_RADIUS` = 1.42 m from its centre. On the canonical seed
+ * the *left* pier's probe comes to rest at 1.53 m — the boundary wall, whose
+ * end sits alongside that pier and pushes the same way. 0.05 m is well inside
+ * that 0.11 m gap and well outside float noise.
+ */
+const GATE_MASK_TOLERANCE = 0.05;
 
 const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
-  // **What this invariant does not assert.** Written before the early returns
-  // below, not after, so a park with no gate in it at all still says what is
-  // uncovered rather than falling silent at the one moment that matters.
-  //
-  // There is no clause here that the gateway is *walkable* — that a child can
-  // actually get from outside the gate to inside it. That clause was written
-  // on this branch, it worked, and it found a defect that is not this one: the
-  // park boundary is a seed-dependent spline while the gate is a fixed
-  // constant at (0, 60), so on some seeds the boundary wall ran *across* the
-  // opening — pool seed 288 (a chain of 0.18 m walls through (0.01, 57.76))
-  // and sweep seed 18 (through (-1.13, 59.87), shut but for a 1 m slot at
-  // x = 3.5). It was withheld rather than weakened, to land with that fix.
-  //
-  // **It has since landed, and not here.** #481 was fixed by #485, which moved
-  // the boundary masonry out of the opening and brought its own invariant,
-  // `theWalkInFromTheGateIsWalkable`, over `gatewayWalk.ts`'s full-width flood
-  // fill. So the clause is no longer withheld — it exists, it is simply owned
-  // by the check next door, and this one stays about the arch. The note above
-  // says which, because "asserts nothing about X" is only useful to the next
-  // reader if it also says who does.
-  //
-  // On `process.stderr`, because Vitest shows `console.log` from *failing*
-  // tests only and this note exists for the passing runs.
-  const say = (line: string): void => process.stderr.write(`${line}\n`);
-
   const arch = facts.parkGateArch;
   if (!arch) {
-    say(GATE_UNCOVERED + ' — and there is no gate in the scene at all, so it covers nothing else either');
     return [
       'NO SCENE OBJECT "park-gate-arch": the park has no front gate to measure. ' +
         'Either the entrance stopped building one or the crossbar lost its name, ' +
@@ -857,7 +903,6 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
     ];
   }
   if (arch.posts.length !== 2) {
-    say(GATE_UNCOVERED + ` — and the gate has ${arch.posts.length} named posts, so clause 1 covers nothing`);
     return [
       `the park gate has ${arch.posts.length} named posts in the built scene, not 2 — ` +
         'clause 1 below has nothing to measure the arch against',
@@ -877,7 +922,9 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   const along = (t: number): readonly [number, number] =>
     alongX ? [arch.centreX + t * half, arch.centreZ] : [arch.centreX, arch.centreZ + t * half];
 
-  // 1. Each end of the arch comes down on a post.
+  // 1. Each end of the arch comes down on a post. `GATE_FOOT_TOLERANCE` is
+  // the arch's own tube plus a hand's width — a foot further off its post
+  // than that is not standing on it.
   for (const t of [-1, 1] as const) {
     const [x, z] = along(t);
     let nearest = Infinity;
@@ -890,81 +937,175 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
           `${nearest.toFixed(2)} m from the nearest post — it is not standing on the gate, so it is ` +
           `pointing somewhere the gate does not go (it spans ${span.toFixed(2)} m along ` +
           `${alongX ? 'X' : 'Z'}, posts at ` +
-          arch.posts.map((post) => `(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`).join(' and ') +
-          ')',
+          arch.posts.map((post) => `(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`).join(' and '),
       );
     }
   }
 
-  // 2. The gate is solid where a child bumps into it — and the probe proves
-  // itself at each post before it is believed there.
+  // 1b. **The gate spans its own gateway, and faces out of the park.**
   //
-  // **Why per-post and not once:** on the canonical seed, with the colliders
-  // removed, the *east* post's probe flips to standable — a clean control —
-  // while the west post's stays blocked, because something other than the post
-  // occupies that ground. A clause that quietly covers one post while reading
-  // as though it covers two is the disease this file is most often about. So
-  // each post is asked twice: outside the post's reach (must be open, or
-  // nothing here is being answered by the gate) and inside it (must be
-  // closed), and the stderr note below reports how many posts survived that.
+  // Clause 1 above can no longer see either of these, and that is worth
+  // stating plainly rather than leaving as cover it does not give. It caught
+  // #480 because the crossbar carried a rotation its posts did not — a
+  // *disagreement* between two meshes. The authored arch is one asset, and
+  // `gateArch.ts` derives the pier markers from the very rotation it turns
+  // that asset by, so mesh and markers now turn together by construction:
+  // clause 1 is green for a gate laid flat along the path, which was proved by
+  // turning `outward` 90 degrees and watching it stay green.
   //
-  // **What the count is, measured on the rebased tree** (`test:procgen`, five
-  // seeds, 541 tests, exit 0): **9 of 10 post-probes live** — four seeds at 2
-  // of 2, one seed masked at (-4.30, 60.00) — and no seed where it asserts
-  // nothing. Before the rebase onto #485 it was 5 of 10 with two seeds
-  // covering nothing at all; moving the boundary masonry out of the opening is
-  // what freed the other four. Both numbers were true when taken, which is the
-  // reason this one is dated to the tree it was read off rather than left as a
-  // bare figure for the next reader to trust.
+  // So these two ask the questions that survived. Both are measured against
+  // the arch's own world position on the boundary rather than against
+  // `ENTRANCE_ANGLE`, which is the constant the builder already used.
+  const outwardLength = Math.hypot(arch.centreX, arch.centreZ);
+  if (outwardLength < 1e-6) {
+    fouls.push('the park gate stands at the middle of the park, so there is no outward direction to check it against');
+  } else {
+    const outX = arch.centreX / outwardLength;
+    const outZ = arch.centreZ / outwardLength;
+
+    // The gate must span *across* the way out, not along it: its long
+    // horizontal axis is perpendicular to the outward radial.
+    const alongX2 = arch.maxX - arch.minX >= arch.maxZ - arch.minZ;
+    const spanDotOut = Math.abs(alongX2 ? outX : outZ);
+    if (spanDotOut > GATE_SQUARENESS_TOLERANCE) {
+      fouls.push(
+        `the gate arch's long axis runs along ${alongX2 ? 'X' : 'Z'}, which is ${spanDotOut.toFixed(2)} of the ` +
+          `way parallel to the outward direction (${outX.toFixed(2)}, ${outZ.toFixed(2)}) out of the park — ` +
+          'the gate is lying along the path rather than spanning it, so there is nothing to walk under',
+      );
+    }
+
+    // ...and the lettering faces the child arriving, not the fountain. The
+    // *only* clause that can see a gate installed 180 degrees out: the box,
+    // the piers, the headroom and the colliders are all identical either way.
+    const facingOut = arch.forwardX * outX + arch.forwardZ * outZ;
+    if (facingOut < GATE_FACING_TOLERANCE) {
+      fouls.push(
+        `the gate arch's lettered face points (${arch.forwardX.toFixed(2)}, ${arch.forwardZ.toFixed(2)}), only ` +
+          `${facingOut.toFixed(2)} of the way towards the outward direction (${outX.toFixed(2)}, ` +
+          `${outZ.toFixed(2)}) — LAND OF GOOD PLACES and the ferris-wheel roundel are turned in at the park ` +
+          'instead of out at the child getting off the bus. Nothing about the arch\'s shape can catch this: ' +
+          'an arch 180 degrees out has an identical bounding box.',
+      );
+    }
+  }
+
+  // 2. The gate is solid where a child bumps into it: a stride in front of
+  // each post, inside the reach the post is supposed to have over her. This
+  // is the clause that fails if the gate loses its colliders, and it is also
+  // this probe's control — it must be able to answer "no" before an answer of
+  // "yes" anywhere else is worth anything.
   const toMiddle = Math.hypot(arch.centreX, arch.centreZ);
   const inward: readonly [number, number] =
     toMiddle > 1e-6 ? [-arch.centreX / toMiddle, -arch.centreZ / toMiddle] : [0, 0];
-  const reach = GATE_POST_REACH;
-  let postsCovered = 0;
+  //
+  // **A probe is only worth reading where the pier is the only thing that
+  // could have blocked it**, and on the canonical seed one of the two is not.
+  // The boundary wall runs close in on the left of the gate: at (-4.30, 59.00)
+  // a child is pushed to z 58.47 by the wall whatever the pier does, so
+  // deleting the left pier's collider left this clause **green** — proved, by
+  // deleting it. Half a clause, silently, on the gate that is the whole point
+  // of the check.
+  //
+  // So each pier is first asked whether it *can* be measured: is the ground
+  // just outside its reach free? If not, the pier is masked, and this clause
+  // says so on stderr rather than reporting a solidity it never established.
+  let covered = 0;
   const masked: string[] = [];
-
+  const pierReach = PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS;
   for (const post of arch.posts) {
-    const at = (inset: number): readonly [number, number] => [
-      post.x + inward[0] * inset,
-      post.z + inward[1] * inset,
-    ];
-    const [clearX, clearZ] = at(GATE_POST_PROBE_INSET.clear);
-    if (!facts.isStandable(clearX, clearZ)) {
-      // Something that is not this post is answering here, so the reading a
-      // stride closer cannot be attributed to the post's collider.
-      masked.push(`(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`);
+    // **Is this pier's probe decisive?** Put a child inside the pier's reach
+    // and see *where she is held*. A pier can only ever hold her at exactly
+    // its own reach; if she comes to rest further out than that, something
+    // else is doing the holding and deleting the pier would not move her — so
+    // the probe below cannot see the pier at all.
+    //
+    // Asking "was she pushed?" instead is what failed: the boundary wall and
+    // the left pier push in the *same direction* on the canonical seed, so the
+    // clause stayed green with that pier's collider deleted.
+    const at = facts.pushedTo(
+      post.x + inward[0] * GATE_POST_PROBE_INSET.solid,
+      post.z + inward[1] * GATE_POST_PROBE_INSET.solid,
+    );
+    const held = Math.hypot(at.x - post.x, at.z - post.z);
+    if (held > pierReach + GATE_MASK_TOLERANCE) {
+      masked.push(
+        `(${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — a child probing it is held ${held.toFixed(2)} m out, ` +
+          `beyond the pier's own ${pierReach.toFixed(2)} m reach, so something that is not the gate owns ` +
+          'that ground and deleting this pier would change nothing here',
+      );
       continue;
     }
-    postsCovered += 1;
-    const [solidX, solidZ] = at(GATE_POST_PROBE_INSET.solid);
-    if (facts.isStandable(solidX, solidZ)) {
+    covered += 1;
+    const x = post.x + inward[0] * GATE_POST_PROBE_INSET.solid;
+    const z = post.z + inward[1] * GATE_POST_PROBE_INSET.solid;
+    if (facts.isStandable(x, z)) {
       fouls.push(
-        `a child can stand at (${solidX.toFixed(2)}, ${solidZ.toFixed(2)}), ${GATE_POST_PROBE_INSET.solid} m ` +
-          `in front of the gate post at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
-          `${reach.toFixed(2)} m the post is supposed to hold her off, so the gate is not solid`,
+        `a child can stand at (${x.toFixed(2)}, ${z.toFixed(2)}), ${GATE_POST_PROBE_INSET.solid} m in front of ` +
+          `the gate pier at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
+          `${(PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS).toFixed(2)} m the pier is supposed to hold her ` +
+          'off, so the gate is not solid',
       );
     }
   }
-
-  say(
-    `${GATE_UNCOVERED}; its solidity clause is live on ${postsCovered} of ${arch.posts.length} gate posts` +
-      (masked.length > 0
-        ? ` — masked at ${masked.join(' and ')}, where something that is not the post already blocks ` +
-          `${GATE_POST_PROBE_INSET.clear.toFixed(2)} m out, past the ${reach.toFixed(2)} m the post ` +
-          `itself reaches, so the reading a stride closer proves nothing there`
-        : ''),
-  );
-  if (postsCovered === 0) {
-    say('  ...so the gate-is-solid clause asserts NOTHING on this seed');
+  if (masked.length > 0) {
+    process.stderr.write(
+      `the park gate's solidity clause could measure ${covered} of ${arch.posts.length} piers on this seed; ` +
+        `masked: ${masked.join('; ')}\n`,
+    );
+  }
+  // A clause that measured neither pier is not a passing clause.
+  if (covered === 0) {
+    fouls.push(
+      'neither gate pier could be measured for solidity: the ground in front of both is blocked by ' +
+        'something that is not the gate, so this clause established nothing at all about whether the ' +
+        'gate is solid. It must not report success about something it is not describing.',
+    );
   }
 
-  // 3. Nothing of it hangs into that gap.
-  const headroom = arch.minY - arch.groundY;
-  if (headroom < TALLEST_CHILD_HEIGHT) {
+  // **What this invariant deliberately does NOT assert, and why.** There is no
+  // clause here that the gateway is *walkable* — that a child can actually get
+  // from outside the gate to inside it — and that gap is real cover this check
+  // does not give.
+  //
+  // It was written, it worked, and it found a defect that is not this one: the
+  // park boundary is a seed-dependent spline while the gate is a fixed
+  // constant at (0, 60), so on some seeds the boundary wall runs *across* the
+  // opening. Measured 1.5 m inside the gate, the middle of the way in is
+  // blocked on pool seed 288 (a chain of 0.18 m walls through (0.01, 57.76))
+  // and on sweep seed 18 (through (-1.13, 59.87), the opening shut but for a
+  // 1 m slot at x = 3.5). That is the two-definitions disease and it predates
+  // this file's interest in the gate; it is issue #481, and the walkability
+  // clause lands with its fix rather than being weakened to go green here.
+  //
+  // Announced on stderr on every run, passing or failing, because a green line
+  // that implies cover it does not give is how the next agent inherits a false
+  // belief — and Vitest only shows `console.log` from *failing* tests.
+  process.stderr.write(
+    'the park gate arch invariant asserts nothing about whether a child can walk through the gateway ' +
+      '— the boundary crosses it on some seeds (#481); it covers only the arch spanning and facing its ' +
+      'gateway, the piers being solid, and the headroom.\n' +
+      'Its foot clause no longer covers a whole-gate rotation: mesh and pier markers are derived from one ' +
+      'rotation in gateArch.ts, so they turn together and the clause stays green for a gate laid along the ' +
+      'path. That case is covered by the squareness and facing clauses instead; the foot clause now only ' +
+      'proves the markers the colliders use agree with the mesh that is drawn.\n',
+  );
+
+  // 3. Nothing of it hangs into that gap. Raycast up through the opening —
+  // see the note on clause 3 above for why the bounding box cannot answer this.
+  if (!(arch.headroom < Infinity)) {
     fouls.push(
-      `the gate arch reaches down to ${arch.minY.toFixed(2)} m, ${headroom.toFixed(2)} m over ground at ` +
-        `${arch.groundY.toFixed(2)} m — less than the ${TALLEST_CHILD_HEIGHT} m of the tallest child the ` +
-        'park can make, so she walks through it',
+      'nothing at all overhangs the park gateway: rays cast up through the opening hit no part of the ' +
+        'arch, so there is no arch over the way in — and every headroom number below would have been ' +
+        'vacuously generous',
+    );
+  } else if (arch.headroom < TALLEST_CHILD_HEIGHT) {
+    const where = arch.lowestOverheadAt;
+    fouls.push(
+      `the gate arch comes down to ${arch.headroom.toFixed(2)} m over the opening` +
+        (where ? ` at (${where.x.toFixed(2)}, ${where.z.toFixed(2)})` : '') +
+        ` — less than the ${TALLEST_CHILD_HEIGHT} m of the tallest child the park can make, so she ` +
+        'walks through it',
     );
   }
 
@@ -2811,6 +2952,108 @@ const DROPPER_RAIL_TOLERANCE = 0.25;
  *    the classic "walked into a rail that is not drawn" bug. Checked by asking
  *    the real collision world what is at each measured leg position.
  */
+/**
+ * **A post a child can see is solid at every height she can touch it.**
+ *
+ * `railRaceRingsStandOutsideThePark`'s solidity clause asks whether a collider
+ * sits under each leg's **foot**. That is the right question about the foot and
+ * it is not the whole question about the post: it was moved midpoint→foot
+ * precisely because legs had begun to lean, which fixed the *collider* question
+ * and left the **mesh-versus-collider** one unasked — and unasked, it was
+ * answerable "no". A leg leans because `trunkFoot` is the nudged spot while
+ * `trunkTop` comes from the lane tops, which are never nudged; with a single
+ * circle at the foot, the drawn post at a child's chest stood up to 0.91 m from
+ * the centre of a 0.272 m collider, and she walked through it.
+ *
+ * So this walks the drawn post upward from its foot and asks, at each step,
+ * whether that point is inside something solid — stopping at
+ * {@link TALLEST_CHILD_HEIGHT}, because above that nothing that walks can reach
+ * it and `keepOutsFor` would rather have the ground.
+ *
+ * **Only the walk-past ring.** The race ring deliberately registers no
+ * colliders (it is hidden except mid-race), so asking this of it would demand
+ * the exact bug the sibling invariant forbids.
+ */
+const everyPostIsSolidAllTheWayUpAChild: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const solid: { x: number; z: number; radius: number }[] = [];
+  facts.world.collision.forEachCircle((x, z, radius) => {
+    solid.push({ x, z, radius });
+  });
+
+  const ring = builtRings(facts).find((candidate) => candidate.label === 'walk-past');
+  if (!ring) {
+    complaints.push('there is no walk-past ring in the built scene to measure posts on');
+    return complaints;
+  }
+  const legs = ring.group.getObjectByName('railRace:trestle-legs');
+  if (!(legs instanceof InstancedMesh)) {
+    complaints.push('the walk-past ring has no trestle legs in the built scene to measure');
+    return complaints;
+  }
+
+  const matrix = new Matrix4();
+  const centre = new Vector3();
+  const axis = new Vector3();
+  let leaning = 0;
+  let worstGap = 0;
+  let worstAt = '';
+  /** Finer than the collider chain's own spacing, so it can see between links. */
+  const STEP = 0.05;
+
+  for (let i = 0; i < legs.count; i += 1) {
+    legs.getMatrixAt(i, matrix);
+    centre.setFromMatrixPosition(matrix);
+    axis.setFromMatrixColumn(matrix, 1);
+    const length = axis.length() || 1;
+    axis.divideScalar(length);
+    // Foot and top from the instance's own matrix, the same derivation the
+    // sibling clause uses — measured off the mesh that is drawn, never from the
+    // spot the generator meant to put it at.
+    const footX = centre.x - (axis.x * length) / 2;
+    const footZ = centre.z - (axis.z * length) / 2;
+    const lean = Math.hypot(axis.x, axis.z) * length;
+    if (lean > STEP) leaning += 1;
+
+    // How far up this post a child can still walk into it, as a length along
+    // the post rather than a height, because a leaning post covers less height
+    // per metre of itself.
+    const rise = Math.abs(axis.y) * length;
+    const reachable = rise > 0 ? Math.min(length, (TALLEST_CHILD_HEIGHT / rise) * length) : 0;
+    for (let along = 0; along <= reachable; along += STEP) {
+      const x = footX + axis.x * along;
+      const z = footZ + axis.z * along;
+      let gap = Infinity;
+      for (const circle of solid) gap = Math.min(gap, Math.hypot(circle.x - x, circle.z - z) - circle.radius);
+      if (gap > 0 && gap > worstGap) {
+        worstGap = gap;
+        worstAt = `${fmt([x, z])} at ${(Math.abs(axis.y) * along).toFixed(2)} m up`;
+      }
+    }
+  }
+
+  // Says what it covered on every run, passing or failing — a park whose legs
+  // all stand straight asserts far less than one whose legs lean, and a reader
+  // has no way to tell those apart from a bare green line.
+  process.stderr.write(
+    `[post solidity] ${legs.count} walk-past posts, ${leaning} of them leaning, ` +
+      `swept to ${TALLEST_CHILD_HEIGHT} m at ${STEP} m\n`,
+  );
+  if (leaning === 0) {
+    process.stderr.write('[post solidity] no post leans on this seed — asserts nothing beyond the foot\n');
+  }
+
+  if (worstGap > 0) {
+    complaints.push(
+      `a walk-past trestle post is drawn ${worstGap.toFixed(2)} m outside anything solid at ` +
+        `${worstAt} — a child can see the post there and walk straight through it. The collider ` +
+        'is registered along the post in `track.ts`\'s `addPostCollider`; a leaning post whose ' +
+        'collider is a single circle at its foot is the fault this exists to catch',
+    );
+  }
+  return complaints;
+};
+
 const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   const complaints: string[] = [];
   const rings = builtRings(facts);
@@ -2917,6 +3160,7 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   });
   const matrix = new Matrix4();
   const at = new Vector3();
+  const legAxis = new Vector3();
   for (const ring of rings) {
     const legs = ring.group.getObjectByName('railRace:trestle-legs');
     if (!(legs instanceof InstancedMesh)) {
@@ -2926,7 +3170,28 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
     const wantsSolid = ring.label === 'walk-past';
     for (let i = 0; i < legs.count; i += 1) {
       legs.getMatrixAt(i, matrix);
+      // **The foot, not the instance centre.** `track.ts`'s `strut` composes a
+      // leg's matrix about the *midpoint* of foot-to-top, and registers its
+      // collider at the foot — so on a leg that leans (a trestle whose spot was
+      // nudged sideways to find clear ground, while its branch tops stay under
+      // the rails) the two are different places. Measured on the canonical seed:
+      // the centre drifts up to **2.00 m** horizontally from the foot, and at
+      // that lean this test reported four perfectly solid legs as "not solid".
+      //
+      // This was always the wrong point to ask about, and the reason it read
+      // green for so long is that legs barely leaned: the collider is at the
+      // foot, which is the only place a child's feet can meet a post, and the
+      // centre is four metres in the air. Asking about the foot is also
+      // strictly stronger — the old form would have passed a leg whose foot had
+      // no collider at all if its midpoint happened to overhang a neighbour's
+      // circle. Control run when this was changed: of 100 legs, 50 (the whole
+      // race ring, which registers nothing) have no collider under the foot and
+      // 50 (the whole walk-past ring) do, so the test still separates the two
+      // rings exactly as it is written to.
       at.setFromMatrixPosition(matrix);
+      legAxis.setFromMatrixColumn(matrix, 1);
+      const legLength = legAxis.length() || 1;
+      at.addScaledVector(legAxis.divideScalar(legLength), -legLength / 2);
       const found = solid.some(
         (circle) => Math.hypot(circle.x - at.x, circle.z - at.z) < circle.radius,
       );
@@ -7249,7 +7514,19 @@ const theRoadArrivesAtTheParkAndGoesIn: Invariant = (facts) => {
   const at = new Vector3();
   facts.world.entrance.group.traverse((object: Object3D) => {
     if (!(object instanceof Mesh)) return;
-    if (!object.name.startsWith('entrance-road')) return;
+    // **The road and the path that carries on from it**, because what this
+    // asserts is that a made surface runs from the kerb through the arch and
+    // into the park — not that any one mesh does. Since 3 September the run in
+    // through the gate is ordinary park paving rather than road (Jim: *"the
+    // small run of path from the road into the park should be just a normal
+    // path"*), and a filter that named only the road would have gone on
+    // asserting the road's own end while the thing it exists to prove — that
+    // you can walk in on something — had moved into a differently-named mesh.
+    // It went red the moment the spur was renamed, which is what an invariant
+    // measuring the park rather than the code is for.
+    const road = object.name.startsWith('entrance-road');
+    const gateway = object.name.startsWith('entrance-gateway-path');
+    if (!road && !gateway) return;
     const position = object.geometry.getAttribute('position');
     for (let i = 0; i < position.count; i += 1) {
       at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(object.matrixWorld);
@@ -7412,13 +7689,25 @@ const theCatBusIsInThePark: Invariant = (facts) => {
     );
   }
 
-  // Waiting on the kerb outside the gate, where the sequence starts. A bus left
+  // Waiting on the road outside the gate, where the sequence starts. A bus left
   // at the origin is in the middle of the ball pit.
-  const kerbGap = Math.hypot(bus.x - ENTRANCE_BUS_ARRIVE_X, bus.z - ENTRANCE_BUS_STOP_Z);
+  //
+  // **Asked of the road, not of a coordinate.** This used to compare against
+  // `ENTRANCE_BUS_ARRIVE_X`/`ENTRANCE_BUS_STOP_Z`, two hand-measured points on a
+  // straight kerb that no longer exists — the road follows the park's edge now,
+  // and the bus comes on at the brow. `bus.startsAt*` is `entranceRoadAt(
+  // entranceBusArriveAt())`, where the sequence itself starts the bus, so this
+  // cannot drift from it.
+  //
+  // **Read off the facts, not imported.** Calling `roadRoute.ts` from this file
+  // loaded the seeded park manifest at module load, before `buildParkFacts` set
+  // the seed — see `CatBusFact.startsAtX`.
+  const start = { x: bus.startsAtX, z: bus.startsAtZ };
+  const kerbGap = Math.hypot(bus.x - start.x, bus.z - start.z);
   if (kerbGap > 1) {
     fouls.push(
-      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the kerb ` +
-        `${fmt([ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_STOP_Z])} it is supposed to pull in from`,
+      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the point on the ` +
+        `entrance road ${fmt([start.x, start.z])} it is supposed to drive on from`,
     );
   }
 
@@ -7558,6 +7847,63 @@ const nothingPlantedHidesTheArrivingBus: Invariant = (facts) => {
       `arriving cat bus — she cannot see the bus she is arriving on. Worst: ` +
       worst
         .map((thing) => `${thing.what} at ${fmt([thing.x, thing.z])} reaching ${thing.top.toFixed(1)} m`)
+        .join('; '),
+  ];
+};
+
+/**
+ * **Nothing is planted in the road the cat bus drives.**
+ *
+ * Jim, 3 September 2026: *"the bus drives through trees on its final
+ * approach"*. It did, and on every seed — measured on the built park before the
+ * fix, **64 to 106 treeline instances per seed** stood inside the corridor the
+ * bus sweeps, at outsets of 13.7 to 21.1 m. That is structural, not luck:
+ * `Scenery.ts`'s treeline band runs from 11.5 m outside the boundary to
+ * `TERRAIN_APRON - 1.5`, and the road's tails climb from the kerb to
+ * `ENTRANCE_ROAD_TAIL_OUTSET` straight through it.
+ *
+ * ## Why the trees are the ones that move
+ *
+ * Because the road cannot. Its outset is pinned between the pavement the bus's
+ * door needs and `RIM_OUTSET_START`, two bounds that **cross by 0.15 m**
+ * (`roadRoute.ts`), so there is no offset at which a road along this wall
+ * misses anything — the same impossibility `check:entrance-road` was built
+ * around for the Rail Race's supports. And the corridor is derived from
+ * `PARK_BOUNDARY` alone, so it is solved before a single tree exists, exactly
+ * as the train's route is in `Scenery.ts`'s own `onRailway` note. The road
+ * claims its corridor and the woodland gives way, which is what pylon placement
+ * already does when it fells foliage.
+ *
+ * ## What is measured
+ *
+ * The **built park's instance matrices**, not the scatter's rules — the same
+ * distinction {@link nothingPlantedHidesTheArrivingBus} earned twice. The
+ * threshold is the game's: `distanceToEntranceCorridor` is the bus's own swept
+ * body (a `CAT_BUS_LENGTH` box at every sample, sampled at 0.2 m so the bulge
+ * between samples cannot hide anything), against each instance's own drawn
+ * reach. Nothing here restates the keep-out `buildTreeline` applies; if that
+ * keep-out were sized off the ribbon rather than the sweep, this would still
+ * fail.
+ */
+const nothingIsPlantedInTheBusRoad: Invariant = (facts) => {
+  // Coverage on every run, passing or not — `process.stderr`, because vitest's
+  // default reporter shows console output from failing tests only, so the note
+  // would be invisible in exactly the case it exists for.
+  process.stderr.write(
+    `[bus road cover] ${facts.plantedInstancesSwept} planted instances swept against the ` +
+      `bus's corridor, ${facts.treesInTheBusRoad.length} inside it\n`,
+  );
+  if (facts.treesInTheBusRoad.length === 0) return [];
+  const worst = [...facts.treesInTheBusRoad].sort((a, b) => b.inside - a.inside).slice(0, 3);
+  return [
+    `${facts.treesInTheBusRoad.length} planted thing(s) stand in the road the cat bus drives — ` +
+      `it drives through them on its way in. Worst: ` +
+      worst
+        .map(
+          (tree) =>
+            `${tree.what} at ${fmt([tree.x, tree.z])} reaching ${tree.reach.toFixed(2)} m, ` +
+            `${tree.inside.toFixed(2)} m inside the bus`,
+        )
         .join('; '),
   ];
 };
@@ -9112,7 +9458,10 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
 
   for (const thing of facts.laneGreenery) {
     if (thing.parkTreeGeometry !== null) continue;
-    if (LANE_FURNITURE.has(thing.population)) continue;
+    // *Any* named ancestor being declared is enough — see `populations` in
+    // `parkFacts.ts`. An authored asset names its own parts, so the declared
+    // name is often one level out from the mesh that draws.
+    if (thing.populations.some((name) => LANE_FURNITURE.has(name))) continue;
     fouls.push(
       `\`${thing.population}\`${thing.node && thing.node !== thing.population ? ` (${thing.node})` : ''} ` +
         `draws ${thing.instances} instance(s) of a \`${thing.geometryType}\` that is not one of the ` +
@@ -9143,43 +9492,147 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
 };
 
 /**
+ * **The ground really is the sphere the constant claims, and it is gentle
+ * enough for the bus (#511).**
+ *
+ * `GROUND_SPHERE_RADIUS` is chosen against `BUS_MAX_GRADE`: on a sphere the
+ * gradient at horizontal distance `d` is `d / R`, so a radius is a promise
+ * about how steep the ground gets. **A promise is not a mechanism** — this
+ * measures the terrain the park was actually built on and holds the pair to
+ * each other, so if either constant moves the two are re-proved rather than
+ * assumed to still agree.
+ *
+ * Two clauses, and the first is what stops the second passing vacuously:
+ *
+ * 1. **The drawn ground is that sphere.** Sampled against the exact cap, so a
+ *    terrain that quietly stopped being spherical — a rim creeping back, a
+ *    tuned fudge — fails here rather than being measured as if it were one.
+ * 2. **Its gradient stays inside the budget** as far out as the park itself
+ *    reaches, which is the ground a bus could be driven on.
+ *
+ * `terrainHeight` is imported statically, which was **forbidden until this
+ * branch**: it used to reach `parkManifest` through `boundary.ts`, so a static
+ * import pinned every seed to the default park (CLAUDE.md's 76-silent-skips
+ * trap). The sphere removed that edge — `terrain.ts` imports nothing but
+ * constants now — so the ground is no longer seed-dependent and this is safe.
+ * If a later change gives terrain a seeded input again, this import must go
+ * back to being read from `ParkFacts`.
+ */
+const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
+  const fouls: string[] = [];
+  const reach = facts.boundary.maxRadius;
+  if (!Number.isFinite(reach) || reach <= 0) {
+    return [
+      `the park boundary reports maxRadius ${reach}, so there is no extent to ` +
+        'sample the ground over and both clauses below would pass vacuously',
+    ];
+  }
+
+  // Sample on several bearings: a cap is the same on all of them, and a fault
+  // that is only on one bearing is exactly what a single ray would miss.
+  const bearings = 12;
+  let worstShapeError = 0;
+  let worstGrade = 0;
+  let worstGradeAt = 0;
+  for (let b = 0; b < bearings; b += 1) {
+    const angle = (b / bearings) * Math.PI * 2;
+    for (let d = 5; d <= reach; d += 5) {
+      const x = Math.cos(angle) * d;
+      const z = Math.sin(angle) * d;
+      const expectedFall =
+        GROUND_SPHERE_RADIUS -
+        Math.sqrt(Math.max(0, GROUND_SPHERE_RADIUS * GROUND_SPHERE_RADIUS - d * d));
+      // The rolling sine waves ride on top of the cap, so compare against the
+      // cap plus the height at the centre rather than demanding an exact match.
+      const shapeError = Math.abs(terrainHeight(x, z) - (terrainHeight(0, 0) - expectedFall));
+      if (shapeError > worstShapeError) worstShapeError = shapeError;
+      const grade = d / GROUND_SPHERE_RADIUS;
+      if (grade > worstGrade) {
+        worstGrade = grade;
+        worstGradeAt = d;
+      }
+    }
+  }
+
+  // The sine waves' own amplitude is the honest tolerance for clause 1: they
+  // are the park's gentle undulation and they are supposed to be there.
+  const undulation = TERRAIN_HEIGHT_SCALE * 1.3;
+  if (worstShapeError > undulation) {
+    fouls.push(
+      `the drawn ground departs from its own spherical cap by ${worstShapeError.toFixed(2)} m, ` +
+        `past the ${undulation.toFixed(2)} m the rolling sine waves account for — the terrain ` +
+        'has stopped being the sphere GROUND_SPHERE_RADIUS says it is, so the gradient clause ' +
+        'below is measuring something else',
+    );
+  }
+  if (worstGrade > BUS_MAX_GRADE) {
+    fouls.push(
+      `the ground reaches a gradient of ${(worstGrade * 100).toFixed(2)}% at ${worstGradeAt.toFixed(1)} m ` +
+        `from the centre, past the ${(BUS_MAX_GRADE * 100).toFixed(0)}% BUS_MAX_GRADE budget that ` +
+        `GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS} m) was chosen against — either the radius ` +
+        'shrank or the park grew, and the cat bus now drives a slope steeper than anybody agreed',
+    );
+  }
+
+  process.stderr.write(
+    `[ground sphere] ${bearings} bearings to ${reach.toFixed(1)} m: worst departure from the cap ` +
+      `${worstShapeError.toFixed(2)} m (tolerance ${undulation.toFixed(2)}), worst gradient ` +
+      `${(worstGrade * 100).toFixed(2)}% at ${worstGradeAt.toFixed(1)} m (budget ` +
+      `${(BUS_MAX_GRADE * 100).toFixed(0)}%). Asserts nothing about ground beyond the park's own ` +
+      'boundary, where the road and the bus still run.\n',
+  );
+  return fouls;
+};
+
+/**
  * **The road the bus arrives on is the road the registry claims — on every
  * seed, and it goes where it says it goes.**
  *
  * Stage 3, step 1 of the round-robin rework makes the entrance road the first
  * production placer: `entrance/roadCorridor.ts` is the one owner of its
  * centreline, `Entrance.ts` draws its ribbons from that, and the same owner's
- * output is committed to `World.groundClaims` as two `corridor` claims. Every
+ * output is committed to `World.groundClaims` as `corridor` claims. Every
  * later placer will negotiate against those claims rather than against the
  * mesh, so a claim that has drifted from the road is a placer politely keeping
  * out of ground the road does not occupy — and walking into ground it does.
  *
  * `check:ground-claims` proves the same thing far more thoroughly, **but only
  * on the canonical seed**, and only there because it drives a whole
- * `ParkGeneration` first. This is the clause that covers the other fifteen
- * (issue #510: both required checks can be green while fourteen of sixteen
- * pool seeds are unmeasured), and it is the reason it is worth having twice.
+ * `ParkGeneration` first. This is the clause that covers the other thirteen
+ * (issue #510: both required checks can be green while most of the pool is
+ * unmeasured), and it is the reason it is worth having twice.
+ *
+ * ## The road is an arc now, and that changed what "the claim is the road" can
+ * mean
+ *
+ * When this invariant was written the road was two axis-aligned runs, so
+ * clause 2 compared four numbers — the ribbon's bounding box against the
+ * capsule swept by its half-width. #498's curve ended that: **the bounding box
+ * of an arc is mostly ground the arc does not hold**, so a box comparison on a
+ * curve is not imprecise, it is measuring a different shape, and it would have
+ * gone on passing while saying so. The comparison is now made against the
+ * claim's own geometry, per vertex, by `scripts/road-ribbon-measure.mts` —
+ * shared with `check:ground-claims` so the two cannot drift apart.
  *
  * Three clauses, and only the third has a threshold in it:
  *
  * 1. **The registry holds exactly the owner's output**, compared number for
  *    number with no tolerance. These must be one call, not two calculations
  *    that agree to some number of places.
- * 2. **Each claim describes the ribbon that was drawn.** Measured off the
- *    ribbon's own world-space vertices, which is the park that was built
- *    rather than the rules that built it. The only slack here is `float32`:
- *    mesh positions are a `Float32Array` and cannot carry the owner's
- *    `float64`, so a metre value read back off geometry is good to about
- *    seven significant digits. That is a property of the mesh format, not a
- *    tuned number, and the worst residual is reported on every run so drift
- *    shows as a number changing long before it crosses anything.
+ * 2. **The claims describe the ribbons that were drawn**, measured off the
+ *    ribbons' own world-space vertices — the park that was built rather than
+ *    the rules that built it. Exactly one of the two directions is an
+ *    equality, and `road-ribbon-measure.mts` says at length why: nothing drawn
+ *    may be unclaimed, while the gateway approach's claim is honestly a
+ *    conservative envelope round a staircase of individually trimmed columns.
  * 3. **The road is continuous, and it reaches the arch.** Jim, 7 August 2026:
  *    *"it doesn't actually drive up to the park, the road needs to actually go
- *    to the park."* The kerb and the spur are separate ribbons that must abut,
- *    and the spur must arrive at the gateway. The gap threshold is
- *    `PLAYER_RADIUS` — taken from the game, not from the generator's target,
- *    because the thing that matters is whether a six-year-old stepping off the
- *    bus can walk in without her feet leaving the road.
+ *    to the park."* The kerb is now many runs sampled off the arc's own
+ *    stations, so continuity is asserted run to run as well as between the
+ *    kerb and the approach. The gap threshold is `PLAYER_RADIUS` — taken from
+ *    the game, not from the generator's target, because the thing that matters
+ *    is whether a six-year-old stepping off the bus can walk in without her
+ *    feet leaving the road.
  */
 const theRoadsCorridorIsTheRoadItDrew: Invariant = (facts) => {
   const wrong: string[] = [];
@@ -9205,10 +9658,7 @@ const theRoadsCorridorIsTheRoadItDrew: Invariant = (facts) => {
   };
   const registryKeys = claims.map(key);
   const ownerKeys = fromOwner.map(key);
-  if (
-    registryKeys.length !== ownerKeys.length ||
-    registryKeys.some((k, i) => k !== ownerKeys[i])
-  ) {
+  if (registryKeys.length !== ownerKeys.length || registryKeys.some((k, i) => k !== ownerKeys[i])) {
     wrong.push(
       `seed ${facts.seed}: the road corridor in the registry is not what ` +
         `entranceRoadClaims() returns — registry [${registryKeys.join(' ')}] vs owner ` +
@@ -9216,158 +9666,118 @@ const theRoadsCorridorIsTheRoadItDrew: Invariant = (facts) => {
     );
   }
 
-  // --- 2. each claim describes the ribbon that was drawn ---------------------
-  // float32 mesh positions; see the header. Not a tuned tolerance.
-  const FLOAT32_SLACK = 1e-3;
-  let measured = 0;
-  let worstResidual = 0;
-  let worstNote = 'nothing measured';
+  // --- 2. the claims describe the ribbons that were drawn --------------------
   facts.world.entrance.group.updateMatrixWorld(true);
-  for (const [index, claim] of claims.entries()) {
-    const shape = claim.shape;
-    const segment = segments[index];
-    if (shape.shape !== 'capsule' || !segment) {
+  const ribbons = collectRoadRibbons(facts.world.entrance.group, segments);
+  const measured = measureRoadRibbons(segments, claims, ribbons);
+  for (const foul of measured.fouls) wrong.push(`seed ${facts.seed}: ${foul}`);
+
+  // --- 3. the road is continuous, and it reaches the arch --------------------
+  // The kerb's runs come off one list of stations, so consecutive runs share an
+  // endpoint exactly; anything else means the sampling has been re-derived
+  // somewhere rather than read.
+  for (let i = 1; i < segments.length; i += 1) {
+    const previous = segments[i - 1];
+    const here = segments[i];
+    if (!previous || !here || previous.name !== here.name) continue;
+    const step = Math.hypot(here.from.x - previous.to.x, here.from.z - previous.to.z);
+    if (step > 0) {
       wrong.push(
-        `seed ${facts.seed}: claim ${index} is not a capsule the owner also produces — the ` +
-          'registry and entranceRoadSegments() no longer describe the same road',
+        `seed ${facts.seed}: "${here.name}" run ${i} starts ${step.toFixed(4)} m from where run ` +
+          `${i - 1} ended — the runs of one ribbon must share their endpoints exactly, because ` +
+          'they are consecutive pairs of one list of stations',
       );
-      continue;
-    }
-    let mesh: { geometry: { getAttribute: (n: string) => unknown } } | null = null;
-    facts.world.entrance.group.traverse((object) => {
-      if (object.name === segment.name && 'geometry' in object) {
-        mesh = object as unknown as typeof mesh;
-      }
-    });
-    if (mesh === null) {
-      wrong.push(
-        `seed ${facts.seed}: the registry claims a corridor for "${segment.name}" but no such ` +
-          'ribbon is in the entrance group — the claim describes a road nobody drew',
-      );
-      continue;
-    }
-    const position = (mesh as { geometry: { getAttribute: (n: string) => PositionLike } }).geometry.getAttribute(
-      'position',
-    );
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    for (let i = 0; i < position.count; i += 1) {
-      minX = Math.min(minX, position.getX(i));
-      maxX = Math.max(maxX, position.getX(i));
-      minZ = Math.min(minZ, position.getZ(i));
-      maxZ = Math.max(maxZ, position.getZ(i));
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minZ)) {
-      wrong.push(`seed ${facts.seed}: "${segment.name}" has no finite vertices — nothing measured`);
-      continue;
-    }
-    measured += 1;
-    const half = shape.halfWidth;
-    const alongX = segment.along === 'x';
-    const expected = alongX
-      ? {
-          minX: Math.min(shape.x1, shape.x2),
-          maxX: Math.max(shape.x1, shape.x2),
-          minZ: shape.z1 - half,
-          maxZ: shape.z1 + half,
-        }
-      : {
-          minX: shape.x1 - half,
-          maxX: shape.x1 + half,
-          minZ: Math.min(shape.z1, shape.z2),
-          maxZ: Math.max(shape.z1, shape.z2),
-        };
-    for (const [edge, drawn, claimed] of [
-      ['minX', minX, expected.minX],
-      ['maxX', maxX, expected.maxX],
-      ['minZ', minZ, expected.minZ],
-      ['maxZ', maxZ, expected.maxZ],
-    ] as const) {
-      const residual = Math.abs(drawn - claimed);
-      if (residual > worstResidual) {
-        worstResidual = residual;
-        worstNote = `${segment.name}.${edge} drawn ${drawn.toFixed(4)} vs claimed ${claimed.toFixed(4)}`;
-      }
-      if (residual > FLOAT32_SLACK) {
-        wrong.push(
-          `seed ${facts.seed}: the road's claim does not describe the road that was drawn — ` +
-            `"${segment.name}" ${edge} is ${drawn.toFixed(4)} in the scene and the corridor ` +
-            `claims ${claimed.toFixed(4)}, ${residual.toFixed(4)} m apart. A child walks on ` +
-            'the mesh; every later placer negotiates against the claim',
-        );
-      }
     }
   }
 
-  // --- 3. the road is continuous, and it reaches the arch --------------------
-  const kerb = claims[segments.findIndex((s) => s.name === 'entrance-road-kerb')]?.shape;
-  const spur = claims[segments.findIndex((s) => s.name === 'entrance-road-gateway')]?.shape;
-  if (kerb?.shape === 'capsule' && spur?.shape === 'capsule') {
-    // The spur's OUTER end is the one that meets the kerb.
-    const outerZ = Math.max(spur.z1, spur.z2);
-    const gap = Math.abs(outerZ - (kerb.z1 - kerb.halfWidth));
-    if (gap > PLAYER_RADIUS) {
-      wrong.push(
-        `seed ${facts.seed}: the gateway spur starts ${gap.toFixed(2)} m from the kerb's inner ` +
-          `edge (spur at z=${outerZ.toFixed(2)}, kerb edge at ` +
-          `${(kerb.z1 - kerb.halfWidth).toFixed(2)}) — wider than a child (PLAYER_RADIUS ` +
-          `${PLAYER_RADIUS}), so she steps off the road between the bus and the gate`,
+  const kerbRuns = segments.filter((segment) => segment.name === 'entrance-road-kerb');
+  const gateway = segments.find((segment) => segment.name === 'entrance-gateway-path');
+  if (kerbRuns.length === 0 || !gateway) {
+    wrong.push(
+      `seed ${facts.seed}: the road did not claim both a kerb and a gateway approach ` +
+        `(${kerbRuns.length} kerb run(s), gateway ${gateway ? 'present' : 'absent'}), so its ` +
+        'continuity was not checked at all',
+    );
+  } else {
+    // The approach leaves the kerb at its outer end. How far is that from the
+    // kerb's own inner edge? Measured against the polyline rather than against
+    // one run, because the arc's nearest point is not necessarily on the run
+    // whose x-range contains the gate.
+    let toKerb = Infinity;
+    for (const run of kerbRuns) {
+      toKerb = Math.min(
+        toKerb,
+        distancePointToSegment(gateway.from.x, gateway.from.z, run.from.x, run.from.z, run.to.x, run.to.z) -
+          run.halfWidth,
       );
     }
-    // The spur's outer end must be within the kerb's own run, or the two are
-    // two roads that happen to be near each other.
-    const kerbMinX = Math.min(kerb.x1, kerb.x2);
-    const kerbMaxX = Math.max(kerb.x1, kerb.x2);
-    if (spur.x1 < kerbMinX || spur.x1 > kerbMaxX) {
+    if (toKerb > PLAYER_RADIUS) {
       wrong.push(
-        `seed ${facts.seed}: the gateway spur leaves the kerb at x=${spur.x1.toFixed(2)}, which ` +
-          `is outside the kerb's own run ${kerbMinX.toFixed(2)}..${kerbMaxX.toFixed(2)} — the ` +
-          'bus stops on a road that does not meet the one going in',
+        `seed ${facts.seed}: the gateway approach starts ${toKerb.toFixed(2)} m clear of the ` +
+          `kerb's inner edge (at ${gateway.from.x.toFixed(2)}, ${gateway.from.z.toFixed(2)}) — ` +
+          `wider than a child (PLAYER_RADIUS ${PLAYER_RADIUS}), so she steps off the road ` +
+          'between the bus and the gate',
       );
     }
-    // …and the spur must actually arrive at the arch.
-    const innerZ = Math.min(spur.z1, spur.z2);
-    if (!isInEntranceGateway(spur.x1, ENTRANCE_GATE_Z) || innerZ > ENTRANCE_GATE_Z) {
+    // …and the approach must actually arrive at the arch.
+    if (!isInEntranceGateway(gateway.to.x, ENTRANCE_GATE_Z) || gateway.to.z > ENTRANCE_GATE_Z) {
       wrong.push(
-        `seed ${facts.seed}: the gateway spur does not pass through the arch — it runs x=` +
-          `${spur.x1.toFixed(2)}, z=${outerZ.toFixed(2)}..${innerZ.toFixed(2)} and the gate is ` +
-          `at (${ENTRANCE_GATE_X.toFixed(2)}, ${ENTRANCE_GATE_Z.toFixed(2)}). Jim, 7 Aug 2026: ` +
+        `seed ${facts.seed}: the gateway approach does not pass through the arch — it runs ` +
+          `(${gateway.from.x.toFixed(2)}, ${gateway.from.z.toFixed(2)}) to ` +
+          `(${gateway.to.x.toFixed(2)}, ${gateway.to.z.toFixed(2)}) and the gate is at ` +
+          `(${ENTRANCE_GATE_X.toFixed(2)}, ${ENTRANCE_GATE_Z.toFixed(2)}). Jim, 7 Aug 2026: ` +
           '"the road needs to actually go to the park"',
       );
     }
-  } else {
-    wrong.push(
-      `seed ${facts.seed}: the road did not claim both a kerb and a gateway spur, so its ` +
-        'continuity was not checked at all',
-    );
   }
 
   // What this clause actually covered, said out loud on every run — including
   // the passing ones, which is the only case the note exists for. stderr,
   // because vitest's default reporter hides console.log on a passing test.
   process.stderr.write(
-    `    seed ${facts.seed}: road corridor — ${measured} of ${claims.length} claimed ribbons ` +
-      `measured against drawn geometry, worst edge residual ${worstResidual.toExponential(2)} m ` +
-      `(${worstNote})\n`,
+    `    seed ${facts.seed}: road corridor — ${measured.runsMeasured} of ${claims.length} ` +
+      `claimed runs backed by a drawn ribbon, ${measured.verticesTested} ribbon vertices tested ` +
+      `against the claims (worst ${measured.worstOutside.toExponential(2)} m outside: ` +
+      `${measured.worstOutsideNote}); claim overshoots the ribbon by at most ` +
+      `${measured.worstOvershoot.toFixed(3)} m (${measured.worstOvershootNote})\n`,
   );
-  if (measured !== claims.length) {
+  if (measured.runsMeasured !== claims.length) {
     wrong.push(
-      `seed ${facts.seed}: only ${measured} of ${claims.length} claimed corridor runs were ` +
-        'measured against a real ribbon — the rest asserted nothing',
+      `seed ${facts.seed}: only ${measured.runsMeasured} of ${claims.length} claimed corridor ` +
+        'runs were measured against a real ribbon — the rest asserted nothing',
+    );
+  }
+  if (measured.verticesTested === 0) {
+    wrong.push(
+      `seed ${facts.seed}: no ribbon vertices were tested at all, so clause 2 proved nothing — ` +
+        'the road claims ground and nothing was found drawn on it',
     );
   }
 
   return wrong;
 };
 
-/** The slice of `BufferAttribute` this file reads off a ribbon. */
-interface PositionLike {
-  readonly count: number;
-  getX(index: number): number;
-  getZ(index: number): number;
-}
+/**
+ * Distance from a point to a segment in plan. The same arithmetic
+ * `groundClaims.ts` keeps privately for its own shapes; used here on the
+ * corridor's *centrelines*, which are not claims, to ask how far the approach
+ * starts from the kerb it leaves.
+ */
+const distancePointToSegment = (
+  px: number,
+  pz: number,
+  x1: number,
+  z1: number,
+  x2: number,
+  z2: number,
+): number => {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const lengthSquared = dx * dx + dz * dz;
+  if (lengthSquared === 0) return Math.hypot(px - x1, pz - z1);
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (pz - z1) * dz) / lengthSquared));
+  return Math.hypot(px - (x1 + t * dx), pz - (z1 + t * dz));
+};
 
 /**
  * **Every castle corner turret is solid, on every seed.**
@@ -9469,9 +9879,10 @@ const castleTurretsAreSolid: Invariant = (facts) => {
 };
 
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
-  ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
+  ['the ground is the sphere it claims to be, and gentle enough for the bus', theGroundIsTheSphereItClaimsToBe],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],
+  ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
   ["nothing grows in the lane but the park's own trees", nothingGrowsInTheLaneButTheParksOwnTrees],
@@ -9537,6 +9948,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'both Rail Race rings stand outside the park, built to their own size, ' +
       'and only the walk-past one is solid',
     railRaceRingsStandOutsideThePark,
+  ],
+  [
+    'every Rail Race post is solid all the way up a child',
+    everyPostIsSolidAllTheWayUpAChild,
   ],
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
@@ -9629,6 +10044,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theEntranceIsClearEnoughToArriveAt,
   ],
   ['you can see the cat bus she arrives on', nothingPlantedHidesTheArrivingBus],
+  ['nothing is planted in the road the cat bus drives', nothingIsPlantedInTheBusRoad],
 ];
 
 /**

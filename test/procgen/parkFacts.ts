@@ -16,6 +16,7 @@
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
 import { Box3, Mesh, Vector3 } from 'three';
+import { measureGateArch } from '../../scripts/gate-arch-measure.mts';
 import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
 import { createCatBus } from '../../src/world/entrance/catBus.ts';
@@ -60,6 +61,18 @@ export interface HidingFact {
   readonly what: string;
 }
 
+/** One planted thing found standing in the road the cat bus drives. */
+export interface TreeInTheRoadFact {
+  readonly x: number;
+  readonly z: number;
+  /** How far it spreads on the ground, in metres — its own instance scale. */
+  readonly reach: number;
+  /** How far that reach comes inside the corridor the bus sweeps. */
+  readonly inside: number;
+  /** Which `InstancedMesh` it came out of, so a failure names the population. */
+  readonly what: string;
+}
+
 /**
  * One thing found standing in the journey lane's carriageway — the road the cat
  * bus drives up to the park on.
@@ -91,6 +104,24 @@ export interface LaneGreeneryFact {
   readonly node: string;
   /** Nearest named ancestor including itself — the population it belongs to. */
   readonly population: string;
+  /**
+   * **Every** named ancestor, innermost first, including the node itself.
+   *
+   * `population` alone was enough while the lane's furniture was built from
+   * anonymous meshes inside one named group: the nearest name *was* the
+   * declared population. An authored `.glb` names each of its own parts, so
+   * the gate arch's five nodes started answering `gate-arch-piers`,
+   * `gate-arch-band` and so on — five undeclared populations where there had
+   * been one declared `journey-park-gate`, and the no-mystery-items guard
+   * fired on a thing that is declared, by the name it is declared under, one
+   * level further out.
+   *
+   * So the guard asks whether *any* of these is declared. That is exactly the
+   * strength it had before — an undeclared new population has no declared
+   * ancestor either — and it lets one line of `LANE_FURNITURE` cover the thing
+   * it actually names.
+   */
+  readonly populations: readonly string[];
   /** Instances drawn, or 1 for a plain `Mesh`. */
   readonly instances: number;
   /** Which park foliage shape this is, by object identity, or `null`. */
@@ -240,6 +271,22 @@ export interface CatBusFact {
   readonly widestRealChild: number;
   /** How many disembarking children were found in the arrival's group. */
   readonly kidCount: number;
+  /**
+   * Where on the entrance road the arrival starts the bus — `entranceRoadAt(
+   * entranceBusArriveAt())`, the sequence's own answer, so a test cannot drift
+   * from it.
+   *
+   * **A fact rather than an import**, for the reason this file's header gives
+   * and which cost this branch a red suite: `invariants.ts` reached for
+   * `roadRoute.ts` directly, that module imports `world/boundary.ts`, and the
+   * whole seeded manifest loaded at the test file's own module load — before
+   * `buildParkFacts` had set `LGP_SEED`. Every non-canonical seed then built the
+   * canonical park and threw, which is 4 failures and **328 silently skipped
+   * tests**. Seed-dependent geometry is read from here, where the park has
+   * already been built for the right seed.
+   */
+  readonly startsAtX: number;
+  readonly startsAtZ: number;
 }
 
 /** One drawn path, sampled along its centre line. */
@@ -772,6 +819,17 @@ export interface ParkFacts {
    */
   readonly hidingTheArrivingBus: readonly HidingFact[];
   /**
+   * **Every planted thing standing in the road the cat bus drives**, measured
+   * the same way and for the same reason as {@link hidingTheArrivingBus}: off
+   * the built scene's instance matrices, never off the scatter's own rules.
+   *
+   * Empty is the healthy state. Before the keep-out went in this was 64 to 106
+   * entries a seed.
+   */
+  readonly treesInTheBusRoad: readonly TreeInTheRoadFact[];
+  /** How many treeline/foliage instances were examined to fill it. */
+  readonly plantedInstancesSwept: number;
+  /**
    * **Everything standing in the journey lane's carriageway**, measured off the
    * built `BusJourney` scene in world space.
    *
@@ -1081,10 +1139,49 @@ export interface ParkFacts {
      * invariant reports rather than passing over.
      */
     readonly posts: readonly { readonly x: number; readonly z: number }[];
+    /**
+     * Air under the lowest thing over the *opening*, in metres above **the
+     * terrain a child stands on** — raycast up from a child's toes, not read
+     * off the bounding box.
+     *
+     * The distinction is the whole clause. While the gate was a half-torus
+     * crossbar on two separate posts, `minY` happened to be the underside of
+     * the span and the box answered correctly. The authored arch is one asset
+     * whose piers come down to the paving, so `minY` is now the floor: the box
+     * reports 0.00 m of headroom under a gate a child walks through every
+     * time she arrives. See `scripts/gate-arch-measure.mts`.
+     *
+     * `Infinity` if nothing overhangs the gateway at all, which is a gate with
+     * no arch on it and which the invariant treats as a failure rather than as
+     * generous headroom.
+     */
+    readonly headroom: number;
+    /** Where that lowest overhead thing is, so a failure names a place. */
+    readonly lowestOverheadAt: { readonly x: number; readonly z: number } | null;
+    /**
+     * Which way the arch's lettered face looks, in world XZ. See
+     * `scripts/gate-arch-measure.mts`: the gate's *shape* cannot answer this,
+     * because an arch turned 180 degrees has an identical bounding box.
+     */
+    readonly forwardX: number;
+    readonly forwardZ: number;
   } | null;
   readonly distanceToRail: (x: number, z: number) => number;
   /** Can a walker of `radius` stand here without being pushed out? */
   readonly isStandable: (x: number, z: number, radius?: number) => boolean;
+  /**
+   * Where a walker of `radius` standing here actually ends up after collision
+   * resolves — not merely whether she moved.
+   *
+   * `isStandable` answers "was she pushed?", which cannot tell two blockers
+   * apart, and that is how half the gate's solidity clause died: the boundary
+   * wall and the gate pier both push a child at (-4.30, 59.00) in the same
+   * direction, so deleting the pier's collider changed nothing `isStandable`
+   * could see. *Where* she lands does tell them apart — the pier can only ever
+   * hold her at exactly its own reach, and anything further is somebody else's
+   * doing.
+   */
+  readonly pushedTo: (x: number, z: number, radius?: number) => { readonly x: number; readonly z: number };
   /**
    * Can the real nav lattice actually route a child here from where she
    * starts? The same question `scripts/check-park.mts` asks of every
@@ -1385,34 +1482,32 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // it built a gate cannot tell you which way the gate is pointing.
   let parkGateArch: ParkFacts['parkGateArch'] = null;
   {
-    let archMesh: import('three').Object3D | null = null;
-    scene.traverse((object) => {
-      if (object.name === 'park-gate-arch') archMesh = object;
-    });
-    if (archMesh) {
-      const mesh = archMesh as import('three').Object3D;
-      const box = new Box3().setFromObject(mesh);
-      const where = new Vector3();
-      mesh.getWorldPosition(where);
-      const posts: { x: number; z: number }[] = [];
-      const postAt = new Vector3();
-      scene.traverse((object) => {
-        if (!/^park-gate-post-\d+$/.test(object.name)) return;
-        object.getWorldPosition(postAt);
-        posts.push({ x: postAt.x, z: postAt.z });
-      });
+    // `scripts/gate-arch-measure.mts` is the one owner of this traversal and
+    // of the headroom raycast — `scripts/probe-gate-pool.mts` asks the same
+    // questions of the sixteen pool seeds and must get its answers the same
+    // way. It imports nothing but `three`, so it is safe here: nothing in it
+    // reads the seed at module load.
+    const measured = measureGateArch(scene);
+    if (measured) {
       const { terrainHeight: groundAt } = await import('../../src/world/terrain.ts');
       parkGateArch = {
-        minX: box.min.x,
-        maxX: box.max.x,
-        minY: box.min.y,
-        maxY: box.max.y,
-        minZ: box.min.z,
-        maxZ: box.max.z,
-        centreX: where.x,
-        centreZ: where.z,
-        groundY: groundAt(where.x, where.z),
-        posts,
+        minX: measured.minX,
+        maxX: measured.maxX,
+        minY: measured.minY,
+        maxY: measured.maxY,
+        minZ: measured.minZ,
+        maxZ: measured.maxZ,
+        centreX: measured.centreX,
+        centreZ: measured.centreZ,
+        groundY: groundAt(measured.centreX, measured.centreZ),
+        posts: measured.posts,
+        // Against the terrain, never against the arch's own base: an arch
+        // sunk into the paving takes its base down with it and a
+        // base-relative number cannot see that.
+        headroom: measured.lowestOverheadY - groundAt(measured.centreX, measured.centreZ),
+        lowestOverheadAt: measured.lowestOverheadAt,
+        forwardX: measured.forwardX,
+        forwardZ: measured.forwardZ,
       };
     }
   }
@@ -1449,7 +1544,16 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       // control", which is the thing the arrival actually asserts.
       const kidCount = world.npcs.all.filter((child) => child.scripted).length;
       const fit = measureCatBusFit();
+      // Dynamically imported, for the reason `startsAtX` documents: statically
+      // importing `roadRoute.ts` into `test/` loads the seeded manifest before
+      // the seed is set.
+      const { entranceBusArriveAt, entranceRoadAt } = await import(
+        '../../src/world/entrance/roadRoute.ts'
+      );
+      const startsAt = entranceRoadAt(entranceBusArriveAt());
       catBus = {
+        startsAtX: startsAt.x,
+        startsAtZ: startsAt.z,
         seatCount: fit.seatCount,
         worstOccupantProtrusion: fit.worstProtrusion,
         worstOccupantOverlap: fit.worstOverlap,
@@ -1473,7 +1577,10 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // manifest and loads it before the seed is set, which silently skips 156
   // tests rather than failing one.
   const { hidesTheArrivingBus } = await import('../../src/world/entrance/arrivalSightline.ts');
+  const { distanceToEntranceCorridor } = await import('../../src/world/entrance/roadRoute.ts');
   const hidingTheArrivingBus: HidingFact[] = [];
+  const treesInTheBusRoad: TreeInTheRoadFact[] = [];
+  let plantedInstancesSwept = 0;
   {
     // Only the two groups the scatter owns. The boundary wall and the Rail
     // Race's trestles also cross this corridor — 20 wall blocks and 40-odd
@@ -1500,6 +1607,21 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
           at.setFromMatrixPosition(matrix);
           scale.setFromMatrixScale(matrix);
           const top = at.y + bounds.max.y * scale.y;
+          plantedInstancesSwept += 1;
+          // How far this instance spreads on the ground: its own horizontal
+          // scale, read off the matrix that will be drawn, so a canopy is
+          // measured by the canopy and a trunk by the trunk.
+          const reach = Math.max(scale.x, scale.z) * Math.max(bounds.max.x, bounds.max.z);
+          const outside = distanceToEntranceCorridor(at.x, at.z);
+          if (outside < reach) {
+            treesInTheBusRoad.push({
+              x: at.x,
+              z: at.z,
+              reach,
+              inside: reach - outside,
+              what: object.name,
+            });
+          }
           if (!hidesTheArrivingBus(at.x, at.z, top)) continue;
           hidingTheArrivingBus.push({ x: at.x, z: at.z, top, what: object.name });
         }
@@ -1864,6 +1986,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     probe.set(x, 0, z);
     world.collision.resolve(probe, radius);
     return Math.hypot(probe.x - x, probe.z - z) < 1e-3;
+  };
+  const pushedTo = (x: number, z: number, radius = 0.62): { x: number; z: number } => {
+    probe.set(x, 0, z);
+    world.collision.resolve(probe, radius);
+    return { x: probe.x, z: probe.z };
   };
 
   // Every ride's exit, straight off `PATH_GRAPH` — the same nodes `paths.ts`
@@ -2418,18 +2545,16 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       if (!drawn) return;
       const geometry = (node as InstanceType<typeof Mesh>).geometry;
       if (!geometry?.getAttribute('position')) return;
-      let population = '(unrooted)';
+      const populations: string[] = [];
       // Typed as the base class rather than `typeof node`: by here `node` has
       // been narrowed to `Mesh | InstancedMesh`, and a parent is neither.
       for (let up: import('three').Object3D | null = node; up; up = up.parent) {
-        if (up.name) {
-          population = up.name;
-          break;
-        }
+        if (up.name) populations.push(up.name);
       }
       laneGreenery.push({
         node: node.name,
-        population,
+        population: populations[0] ?? '(unrooted)',
+        populations,
         instances: node instanceof Instanced ? node.count : 1,
         parkTreeGeometry: parkShape.get(geometry) ?? null,
         geometryType: geometry.type,
@@ -2777,6 +2902,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     keychainKeyringEntrances,
     catBus,
     hidingTheArrivingBus,
+    treesInTheBusRoad,
+    plantedInstancesSwept,
     exits,
     pathNodes,
     pathEdges,
@@ -2804,6 +2931,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     wallCollisionHalf: BOUNDARY_WALL_COLLISION_HALF,
     distanceToRail,
     isStandable,
+    pushedTo,
     buildMs,
   };
 }

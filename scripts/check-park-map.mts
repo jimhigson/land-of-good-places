@@ -160,10 +160,10 @@ import {
 } from '../src/ui/parkMapProjection.ts';
 import {
   ENTRANCE_BUS_DOOR_X,
-  ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
 } from '../src/world/entrance/layout.ts';
+import { entranceRoadAt } from '../src/world/entrance/roadRoute.ts';
 import { buildHeadlessPark } from './park-harness.mts';
 
 // --------------------------------------------------------------- thresholds
@@ -684,7 +684,7 @@ function truePosition(feature: MapFeature): readonly [number, number] | null {
     // the stop is the right field to have chosen. What it does catch is drift:
     // move `ENTRANCE_BUS_STOP_Z` or the kerb and leave the map behind, and
     // this goes red.
-    return [ENTRANCE_BUS_DOOR_X, ENTRANCE_BUS_STOP_Z];
+    return [ENTRANCE_BUS_DOOR_X, entranceRoadAt(0).z];
   }
   return null;
 }

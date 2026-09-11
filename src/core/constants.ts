@@ -47,6 +47,44 @@ export const TERRAIN_RADIUS = 83.5;
 export const RIM_DROP = 17;
 
 /**
+ * **The radius of the sphere the ground is a piece of, in metres (#511).**
+ *
+ * Jim, 4 September 2026: *"I think the answer there is to just not make the
+ * park on a hill. Let the land spread out in all directions for a long way but
+ * low poly"*, and then the shape: *"make the ground bend down like the surface
+ * of a sphere but big enough that the bus is ok"*. And, ruling out the
+ * alternative that was put to him: *"there should be no 'flat ground' it is a
+ * sphere"*.
+ *
+ * So the ground is a spherical cap, tangent to horizontal at the park's centre,
+ * and it curves away on every bearing. There is no rim, no crest and no flat
+ * apron: the fall is the same gentle fall everywhere, which is what makes the
+ * road-versus-ride contention outside the wall dissolve rather than have to be
+ * fought (both of the constraints that boxed it were properties of the hill).
+ *
+ * **Where the number comes from — "big enough that the bus is ok".** On a
+ * sphere of radius `R` the ground's gradient at a horizontal distance `d` from
+ * the tangent point is `d / R`. Measured on the built road (`roadRoute.ts`),
+ * the cat bus drives out to **88.26 m** from the origin and the drawn road
+ * reaches **117.08 m**. Taking the road's full reach and a **10% gradient
+ * budget** — comfortably drivable, and gentle enough that a bus does not look
+ * like it is climbing — gives `117.08 / 0.10 = 1171 m`, rounded up to:
+ */
+export const GROUND_SPHERE_RADIUS = 1200;
+
+/**
+ * The steepest the ground is allowed to be anywhere the cat bus drives, as a
+ * gradient (rise over run). {@link GROUND_SPHERE_RADIUS} is chosen against it.
+ *
+ * **This is a budget with a check behind it, not a comment promising a
+ * number.** `test/procgen/invariants.ts` walks the bus's own arc on the built
+ * park and asserts the real gradient under it stays inside this, so if either
+ * the radius or the road's reach ever moves, the pair is re-proved rather than
+ * assumed to still agree.
+ */
+export const BUS_MAX_GRADE = 0.1;
+
+/**
  * The hilltop crest, as a distance **outside the park's edge** rather than as a
  * radius from the origin.
  *
@@ -611,6 +649,33 @@ export const CAMERA_VIEW_HEIGHT = 15;
  * already wins and this number does nothing.
  */
 export const CAMERA_MIN_VIEW_WIDTH = 11;
+
+/**
+ * **Half the view's height in world metres at zoom 1, for a given aspect — the
+ * one owner of the framing formula.**
+ *
+ * Height-led framing with a minimum width: the height wins on any landscape
+ * screen, and {@link CAMERA_MIN_VIEW_WIDTH}'s floor takes over on a portrait
+ * phone, where it makes the view *taller* rather than stretching anything.
+ * The half-height at an arbitrary zoom is this divided by that zoom.
+ *
+ * **Why it is a function here rather than a line inside `IsoCamera`.** It had
+ * two definitions: `IsoCamera.frustumBase()` and a hand-copied `Math.max` in
+ * `world/tapSpacing.ts`, whose comment promised the tap radius "follows
+ * automatically" when the camera framing changes. It did not follow
+ * automatically — it followed because two places happened to still agree, which
+ * is the single most common bug in this repo (CLAUDE.md, "Two definitions of one
+ * thing, kept in step by hand"). Whoever changes the framing now changes it
+ * once.
+ *
+ * The cost of the drift, had it happened, was not cosmetic: `tapSpacing` sizes
+ * the world-space radius by which a child's tap is allowed to miss what she
+ * aimed at, so a stale copy would have quietly mis-sized every interact zone on
+ * a phone while every check stayed green.
+ */
+export function cameraViewHalfHeight(aspect: number): number {
+  return Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / aspect);
+}
 
 /**
  * Zoom bounds. Rebalanced around the closer default: the old 0.55 floor now

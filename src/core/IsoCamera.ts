@@ -1,4 +1,5 @@
-import { OrthographicCamera, Vector2, Vector3 } from 'three';
+import { OrthographicCamera, PerspectiveCamera, Vector2, Vector3 } from 'three';
+import { perspectiveParkCamera, zoomMinOverride } from './perspectiveFlag';
 import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
@@ -6,13 +7,12 @@ import {
   CAMERA_LOOK_MAX_DISTANCE,
   CAMERA_LOOK_RETURN_DELAY,
   CAMERA_LOOK_RETURN_HALF_LIFE,
-  CAMERA_MIN_VIEW_WIDTH,
   CAMERA_PITCH_DEGREES,
-  CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
   CAMERA_ZOOM_MAX,
   CAMERA_ZOOM_MIN,
   CAMERA_ZOOM_STEP,
+  cameraViewHalfHeight,
 } from './constants';
 import { clamp, damp, DEG } from './mathUtils';
 import { cameraOffset } from './cameraRig';
@@ -37,7 +37,7 @@ import type { ParkBoundary } from '../world/boundary';
  * them.
  */
 export class IsoCamera {
-  readonly camera: OrthographicCamera;
+  readonly camera: OrthographicCamera | PerspectiveCamera;
 
   /** Point the camera orbits. Damped towards the follow target every frame. */
   private readonly focus = new Vector3();
@@ -70,11 +70,43 @@ export class IsoCamera {
   private zoomTarget = 1;
 
   /**
+   * **How far out this load may zoom** — `CAMERA_ZOOM_MIN` for every real
+   * player, and the `?zoomMin=` prototype override when one was asked for
+   * (#511). Read once at construction: a URL cannot change mid-session, and
+   * this sits on the zoom path.
+   *
+   * It is a field rather than a call at each clamp so there is exactly one
+   * answer to "how far out can this camera go?", which is also what any future
+   * caller wanting to *report* the floor should read.
+   */
+  private readonly zoomMin: number = zoomMinOverride() ?? CAMERA_ZOOM_MIN;
+
+  /**
    * A fixed world point the camera orbits instead of the ordinary follow
    * target, or `null` when nothing is overriding it — see {@link
    * setFocusOverride}.
    */
   private focusOverrideActive = false;
+
+  /**
+   * **How far the camera currently sits from its normal pseudo-isometric
+   * pose** — a delta in metres, damped to zero, added on top of
+   * {@link offset} rather than replacing it.
+   *
+   * This is what lets a shot sit lower and flatter than the rig and then
+   * *rise* back into it, which is the cat bus arrival's third beat: Jim, on
+   * the arrival, *"once through the arch the camera moves up to its usual
+   * pseudo-isometric perspective."*
+   *
+   * **A delta, and never a second pose.** `offset` stays the one owner of
+   * where the camera lives; nothing here writes a pitch or a distance down a
+   * second time, and the rise cannot land somewhere near-but-not-quite home
+   * because "home" is this reaching exactly zero. Two definitions of the
+   * camera's resting place kept in step by hand is the bug this repo has paid
+   * for more than any other.
+   */
+  private readonly poseOffset = new Vector3();
+  private readonly poseTarget = new Vector3();
   private readonly focusOverrideValue = new Vector3();
 
   /**
@@ -147,7 +179,25 @@ export class IsoCamera {
     this.forwardVector = new Vector3(basis.upX, 0, basis.upZ);
     this.rightVector = new Vector3(basis.rightX, 0, basis.rightZ);
 
-    this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, CAMERA_DISTANCE * 3);
+    // **PROTOTYPE (#511): a perspective park camera behind a URL flag.**
+    //
+    // Not a migration. `?projection=perspective` builds a `PerspectiveCamera`
+    // in the *same place*, at the *same* pitch and yaw, so the only thing that
+    // changes is the projection — ARCHITECTURE.md fixes the angle and this
+    // does not touch it.
+    //
+    // Why it exists: an orthographic projection has no convergence, so a
+    // horizon is drawn at its true distance rather than compressed to a line.
+    // Jim's sphere (#511) does have a horizon — at 870 m for a bus-safe
+    // radius — and ortho simply cannot show it, because the frame is ~29 m
+    // tall and the ground clips at 270 m. Perspective is the projection in
+    // which distance compresses, so a horizon lands in frame at all.
+    //
+    // `far` is deliberately far past the ortho rig's `CAMERA_DISTANCE * 3`:
+    // the whole question is what is visible a long way off.
+    this.camera = perspectiveParkCamera()
+      ? new PerspectiveCamera(50, 1, 0.1, 6000)
+      : new OrthographicCamera(-1, 1, 1, -1, 0.1, CAMERA_DISTANCE * 3);
     this.camera.position.copy(this.offset);
     this.applyFrustum();
   }
@@ -192,13 +242,41 @@ export class IsoCamera {
    * {@link skyAnchor}.
    */
   get viewHalfHeight(): number {
-    return this.camera.top;
+    return this.focusHalfHeight;
   }
 
   /** Half the width of the orthographic box, in world metres. */
   get viewHalfWidth(): number {
+    return this.focusHalfWidth;
+  }
+  /**
+   * **Half the frame in world metres, at the focus** — the one place that
+   * answers it for either projection.
+   *
+   * Orthographic has a single answer: the box is the frame everywhere. A
+   * perspective frame widens with distance, so "the frame in metres" is only
+   * meaningful at a stated depth, and the depth every caller means is the one
+   * the rig is focused on — `CAMERA_DISTANCE` away, where the player is.
+   *
+   * **This is why the prototype's HUD placement is approximate rather than
+   * wrong-but-silent.** Callers that clamp a bubble or a name pill to the frame
+   * are asking a question that no longer has one answer; at the focus they get
+   * the right one, and nearer or further they get a slightly generous or
+   * slightly tight box. Named here rather than hidden so the consequence list
+   * in the PR can point at it.
+   */
+  private get focusHalfHeight(): number {
+    if (this.camera instanceof PerspectiveCamera) {
+      return Math.tan(((this.camera.fov / 2) * Math.PI) / 180) * this.eyeToFocusDistance;
+    }
+    return this.camera.top;
+  }
+
+  private get focusHalfWidth(): number {
+    if (this.camera instanceof PerspectiveCamera) return this.focusHalfHeight * this.aspect;
     return this.camera.right;
   }
+
 
   /**
    * "Right on screen" as three.js itself resolved it, straight off the camera's
@@ -238,7 +316,7 @@ export class IsoCamera {
    * scale that reads as that size regardless of zoom — see `ui/NameLabel.ts`.
    */
   get worldUnitsPerPixel(): number {
-    return (this.camera.top - this.camera.bottom) / this.viewportHeight;
+    return (this.focusHalfHeight * 2) / this.viewportHeight;
   }
 
   /** Snaps the camera straight to a position, skipping the follow smoothing. */
@@ -279,11 +357,40 @@ export class IsoCamera {
    * nobody else may legitimately be nudging this same target.
    */
   setZoomTarget(zoom: number): void {
-    this.zoomTarget = clamp(zoom, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
+    this.zoomTarget = clamp(zoom, this.zoomMin, CAMERA_ZOOM_MAX);
+  }
+
+  /**
+   * **The same zoom, but already arrived** — {@link snapShotOverride}'s
+   * missing other half, for the first frame of a shot that must *open* at its
+   * framing rather than travel to it.
+   *
+   * `snapShotOverride`'s own note says the zoom is deliberately not part of
+   * it and that "a caller that wants the framing to open closed as well says
+   * so itself". The cat-bus arrival is exactly such a caller and it did not
+   * say so: it snapped the pose and only ever wrote the zoom *target*, which
+   * damps at a 0.12 s half-life. Measured in the page, the arrival's realised
+   * frame opened at **14.958 m** and reached its declared 3.59 m only by
+   * t=0.81 — a 4.2x dolly-in over the first four fifths of a second, in a
+   * shot whose own check has a clause titled "it opens at its framing, and
+   * never tightens".
+   *
+   * That clause could not see it, because it asserted on the *declared*
+   * `shot.zoom` and the dolly lived entirely in the gap between what the shot
+   * asked for and what the camera did — CLAUDE.md's "a check that passes
+   * without checking anything", on the exact sentence it was written for.
+   *
+   * Like `snapShotOverride`, this is for the moment a shot takes the camera
+   * and nothing else: calling it every frame would not be a zoom at all.
+   */
+  snapZoomTarget(zoom: number): void {
+    this.setZoomTarget(zoom);
+    this.zoomValue = this.zoomTarget;
+    this.applyFrustum();
   }
 
   nudgeZoom(delta: number): void {
-    this.zoomTarget = clamp(this.zoomTarget + delta, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
+    this.zoomTarget = clamp(this.zoomTarget + delta, this.zoomMin, CAMERA_ZOOM_MAX);
   }
 
   /** What {@link zoom} is damping towards — read this, not `zoom` itself, to
@@ -314,6 +421,117 @@ export class IsoCamera {
   /** Hands the follow back to the ordinary player target. */
   clearFocusOverride(): void {
     this.focusOverrideActive = false;
+  }
+
+  /**
+   * **Puts the camera somewhere else entirely** — a different compass angle and
+   * a different tilt from the rig's own {@link CAMERA_YAW_DEGREES} /
+   * {@link CAMERA_PITCH_DEGREES}, at the same {@link CAMERA_DISTANCE}.
+   *
+   * The yaw is the half that matters and the half that was missing. This
+   * method used to take a pitch alone, and the cat bus arrival built on it
+   * changed only the tilt — so the shot looked at the bus from the park's one
+   * eternal compass angle, a few degrees flatter, and Jim's verdict on
+   * watching it was *"why doesn't the camera follow into the park like asked
+   * for?"* and *"this is nothing like what I asked for."* He was right: **this
+   * is an orthographic rig, so the eye's distance along the view axis changes
+   * nothing you can see. Yaw, pitch and the focus point are the entire
+   * vocabulary of "the camera moved."** A shot that holds the yaw fixed has,
+   * visually, not moved at all.
+   *
+   * Stored as the **difference** from the normal pose, so
+   * {@link clearPoseOverride} needs no memory of what the normal pose was and
+   * cannot restore a stale copy of it, and so a shot that eases its own angles
+   * back to the rig's lands on `(0, 0, 0)` exactly rather than near it.
+   *
+   * **`distance` is an occlusion control, not a framing one**, and that is the
+   * one counter-intuitive thing here. An orthographic projection has no size
+   * falloff, so pulling the eye in does not make anything bigger — every object
+   * lands on exactly the same pixels. What it changes is *what is in the way*:
+   * only geometry between the eye and the subject can cover the subject, so a
+   * shot that stands 20 m back sees past the whole park, and one that stands
+   * the rig's 90 m back sees a coaster, a hotel tower and a castle turret drawn
+   * across it. That is not hypothetical — it is what the first three attempts
+   * at the arrival's door shot looked like, on three different bearings, on the
+   * same seed. Defaults to {@link CAMERA_DISTANCE}, which is the rig's own.
+   *
+   * **Safe and expected to call every frame with a moving value.** Unlike
+   * {@link setZoomTarget} nothing else in the game competes for this, so there
+   * is no #329 here to walk into: a caller driving a camera *path* writes a
+   * different pose every frame, and that is the point.
+   */
+  setShotOverride(yawDegrees: number, pitchDegrees: number, distance = CAMERA_DISTANCE): void {
+    const eye = cameraOffset(yawDegrees * DEG, pitchDegrees * DEG, distance);
+    this.poseTarget.set(eye.x - this.offset.x, eye.y - this.offset.y, eye.z - this.offset.z);
+  }
+
+  /**
+   * **The same override, but already arrived** — for the first frame of a shot
+   * that is supposed to *open* on its pose rather than travel to it.
+   *
+   * Jim, 6 September 2026, on the cat bus arrival: *"arrival camera — it
+   * should START facing the bus, not transition down to there."*
+   * {@link setShotOverride} alone cannot do that. It writes the *target*, and
+   * `poseOffset` damps towards a target at {@link CAMERA_POSE_HALF_LIFE} — so
+   * a shot whose first frame asks for the door pose still spends about half a
+   * second flying there from the rig's 90 m. Measured on the real rig at
+   * 60 fps: the opening frames moved the eye 8.14 m, 7.39 m, 6.71 m, decaying
+   * exponentially. That swoop *is* the transition he ruled against, and it
+   * survived the fix to `arrivalShot` because that fix corrected where the
+   * camera was being *told* to be, not where it was.
+   *
+   * So this is for the moment a shot takes the camera, and nothing else. Use
+   * {@link setShotOverride} on every frame after: a shot that snapped every
+   * frame would not be a camera move at all, it would be a slideshow.
+   *
+   * The zoom is deliberately **not** part of this. It is a separate field with
+   * a separate owner (`nudgeZoom` writes it too — #329), and a caller that
+   * wants the framing to open closed as well says so itself.
+   */
+  snapShotOverride(yawDegrees: number, pitchDegrees: number, distance = CAMERA_DISTANCE): void {
+    this.setShotOverride(yawDegrees, pitchDegrees, distance);
+    this.poseOffset.copy(this.poseTarget);
+    this.applyTransform();
+  }
+
+  /** Rises back to the ordinary pseudo-isometric pose. */
+  clearPoseOverride(): void {
+    this.poseTarget.set(0, 0, 0);
+  }
+
+  /**
+   * How far the camera still is from its normal pose, in metres — 0 once the
+   * rise has actually landed.
+   *
+   * Read by `scripts/check-arrival-camera.mts` to prove the hand-over into
+   * ordinary play ends on the rig's own pose exactly, rather than near it.
+   * Nothing in the game needs it.
+   */
+  get poseDistance(): number {
+    return this.poseOffset.length();
+  }
+
+  /**
+   * **How far the eye actually is from the point it is looking at, this
+   * frame** — the rig's own offset plus whatever a shot override has added.
+   *
+   * Not {@link CAMERA_DISTANCE}. That constant is where the eye sits when
+   * *nothing* is overriding the pose, and treating it as "the distance" is
+   * only right while that holds. `setShotOverride` exists precisely to break
+   * it: the arrival's door beat dives to about 6.6 m and threads the arch at
+   * 4.0 m, against the rig's 90 m.
+   *
+   * **Why this matters only now.** Under an orthographic projection the
+   * stand-back is inert for framing — sliding an ortho eye along its own view
+   * axis changes nothing on screen — so nothing downstream cared what the real
+   * distance was. Under perspective the stand-back *is* the framing, so a FOV
+   * derived against 90 m while the eye is 6.6 m away frames about half a metre
+   * of world and a child stands three times the height of the frame. Same
+   * disease as this branch's other two: a quantity taken against a convenient
+   * origin rather than against the thing being drawn.
+   */
+  private get eyeToFocusDistance(): number {
+    return SCRATCH_EYE_DISTANCE.copy(this.offset).add(this.poseOffset).length();
   }
 
   // -------------------------------------------------- drag to look around
@@ -479,6 +697,7 @@ export class IsoCamera {
     this.focus.z = damp(this.focus.z, this.desiredFocus.z, CAMERA_FOLLOW_HALF_LIFE, dt);
 
     this.updateLook(dt);
+    this.updatePose(dt);
     this.applyTransform();
   }
 
@@ -516,11 +735,43 @@ export class IsoCamera {
     }
   }
 
+  /**
+   * Eases the pose delta towards its target by one frame.
+   *
+   * The last millimetre is snapped off for the same reason `updateLook` snaps
+   * its own: an exponential approaches zero forever, so without this the
+   * camera would sit a hair off its resting pose for the whole rest of the
+   * session and "has the rise finished?" would have no answer that ever
+   * arrives. Beat three of the arrival has to land *on* the ordinary camera,
+   * not beside it.
+   */
+  private updatePose(dt: number): void {
+    const movedX = this.poseOffset.x;
+    const movedY = this.poseOffset.y;
+    const movedZ = this.poseOffset.z;
+    this.poseOffset.x = damp(this.poseOffset.x, this.poseTarget.x, CAMERA_POSE_HALF_LIFE, dt);
+    this.poseOffset.y = damp(this.poseOffset.y, this.poseTarget.y, CAMERA_POSE_HALF_LIFE, dt);
+    this.poseOffset.z = damp(this.poseOffset.z, this.poseTarget.z, CAMERA_POSE_HALF_LIFE, dt);
+    if (this.poseOffset.distanceToSquared(this.poseTarget) < POSE_HOME_EPSILON * POSE_HOME_EPSILON) {
+      this.poseOffset.copy(this.poseTarget);
+    }
+    // **A perspective FOV is derived from the eye's real distance, so a moving
+    // pose changes it.** The ortho box does not depend on the stand-back at
+    // all, which is why this re-derivation did not exist before and why
+    // nothing needs it when the rig is orthographic.
+    if (
+      this.camera instanceof PerspectiveCamera &&
+      (this.poseOffset.x !== movedX || this.poseOffset.y !== movedY || this.poseOffset.z !== movedZ)
+    ) {
+      this.applyFrustum();
+    }
+  }
+
   private applyTransform(): void {
     // The look-around offset is applied *here*, on top of the settled follow,
     // rather than folded into `focus` — see `viewFocus`.
     this.viewFocus.copy(this.focus).add(this.lookOffset);
-    this.camera.position.copy(this.viewFocus).add(this.offset);
+    this.camera.position.copy(this.viewFocus).add(this.offset).add(this.poseOffset);
     this.camera.lookAt(this.viewFocus);
     this.camera.updateMatrixWorld();
 
@@ -553,7 +804,7 @@ export class IsoCamera {
    * checked on and clips somewhere else.
    */
   private frustumBase(): number {
-    return Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / this.aspect);
+    return cameraViewHalfHeight(this.aspect);
   }
 
   /**
@@ -619,6 +870,21 @@ export class IsoCamera {
   private applyFrustum(): void {
     const base = this.frustumBase();
     const halfHeight = base / this.zoomValue;
+    if (this.camera instanceof PerspectiveCamera) {
+      // **Match today's apparent scale at the focus.** The ortho rig frames
+      // `halfHeight` world metres top-to-centre; a perspective lens
+      // `CAMERA_DISTANCE` away frames the same amount when its half-fov is
+      // `atan(halfHeight / CAMERA_DISTANCE)`. Derived from the zoom rather
+      // than fixed, so every existing zoom level — including the cutscene
+      // framings that ask for a specific one — still frames what it asked
+      // for at the player's own distance. Things nearer than the focus grow
+      // and things beyond it shrink, which is the entire point of the
+      // prototype.
+      this.camera.fov = (2 * Math.atan(halfHeight / this.eyeToFocusDistance) * 180) / Math.PI;
+      this.camera.aspect = this.aspect;
+      this.camera.updateProjectionMatrix();
+      return;
+    }
     const halfWidth = halfHeight * this.aspect;
     this.camera.left = -halfWidth;
     this.camera.right = halfWidth;
@@ -674,8 +940,8 @@ export class IsoCamera {
   isOnScreen(point: Readonly<Vector3>, margin = 0): boolean {
     const relative = SCRATCH_CLAMP_RELATIVE.copy(point).sub(this.camera.position);
     return (
-      Math.abs(relative.dot(this.screenRight)) <= this.camera.right - margin &&
-      Math.abs(relative.dot(this.screenUp)) <= this.camera.top - margin
+      Math.abs(relative.dot(this.screenRight)) <= this.focusHalfWidth - margin &&
+      Math.abs(relative.dot(this.screenUp)) <= this.focusHalfHeight - margin
     );
   }
 
@@ -710,8 +976,8 @@ export class IsoCamera {
     const right = relative.dot(this.screenRight);
     const up = relative.dot(this.screenUp);
 
-    const maxRight = Math.max(0, this.camera.right - halfWidth - margin);
-    const maxUp = Math.max(0, this.camera.top - halfHeight - margin);
+    const maxRight = Math.max(0, this.focusHalfWidth - halfWidth - margin);
+    const maxUp = Math.max(0, this.focusHalfHeight - halfHeight - margin);
     const clampedRight = clamp(right, -maxRight, maxRight);
     const clampedUp = clamp(up, -maxUp, maxUp);
 
@@ -726,9 +992,21 @@ export class IsoCamera {
   }
 }
 
-// Raised with the closer framing: the aim point wants to sit around chest height
-// on the character, and the character's chest went up when her head did.
-const TEMP_LIFT = new Vector3(0, 1.25, 0);
+/**
+ * How far above her feet the follow camera aims, in metres.
+ *
+ * Raised with the closer framing: the aim point wants to sit around chest
+ * height on the character, and the character's chest went up when her head did.
+ *
+ * **Exported because it is the eye's own height reference.** The camera orbits
+ * this point, so anything asking "how high does the eye ride?" — the arrival
+ * shot's clearance under the gate arch, for one — is asking about this number.
+ * `check:arrival-camera` used to carry its own hand-copied 1.1, which was the
+ * *door beat's* lift and 0.15 m too low, and its headroom clause passed only
+ * because of the difference. One owner; everyone else asks.
+ */
+export const CAMERA_FOCUS_LIFT = 1.25;
+const TEMP_LIFT = new Vector3(0, CAMERA_FOCUS_LIFT, 0);
 
 /**
  * Below this many metres from her, the look-around offset is simply zero.
@@ -739,6 +1017,27 @@ const TEMP_LIFT = new Vector3(0, 1.25, 0);
  */
 const LOOK_HOME_EPSILON = 0.001;
 
+/**
+ * How quickly the camera settles onto the pose it has been asked for, in
+ * seconds per halving.
+ *
+ * **Short, because this is a smoother and not the animation.** It was
+ * `CAMERA_LOOK_RETURN_HALF_LIFE` (0.45 s) back when the only caller set one
+ * pose and let the damping carry the whole move — an easing of last resort. The
+ * cat bus arrival now drives a genuine camera *path*, writing a fresh pose
+ * every frame off its own clock, so a long half-life here would not smooth that
+ * path, it would lag half a second behind it and blur the moment the shot is
+ * supposed to land on. At 0.12 s the damping does what damping is for — it
+ * absorbs a discontinuity at a phase boundary — and leaves the shape of the
+ * move to whoever is driving it.
+ */
+const CAMERA_POSE_HALF_LIFE = 0.12;
+
+/** Below this, the rise has landed. Metres. */
+const POSE_HOME_EPSILON = 0.001;
+
 // Scratch vector for clampToFrustum's own intermediate maths — discarded
 // before the method returns, so safe to share across calls.
 const SCRATCH_CLAMP_RELATIVE = new Vector3();
+/** Scratch for {@link IsoCamera.eyeToFocusDistance}; nothing escapes it. */
+const SCRATCH_EYE_DISTANCE = new Vector3();

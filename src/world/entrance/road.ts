@@ -1,6 +1,6 @@
 import type { BufferAttribute, BufferGeometry } from 'three';
 import { toonMaterial } from '../../art/style/materials';
-import { roadTexture } from '../../core/textures';
+import { roadTexture, type RoadTone } from '../../core/textures';
 import { CAT_BUS_WIDTH } from './catBus';
 
 /**
@@ -14,13 +14,20 @@ import { CAT_BUS_WIDTH } from './catBus';
  * has to be on screen before any park exists). So "the road goes to the park"
  * cannot be one continuous mesh. What it *can* be — and what it now is — is one
  * road **specification**, which both scenes build from: the same width, the same
- * kerbs, the same slabs, the same dashed line down the middle.
+ * kerbs, the same slab courses, the same dashed line down the middle.
  *
  * That is the whole reason this file exists rather than each scene owning its
  * own ribbon. Two roads kept the same width by hand is this repo's most
  * expensive bug shape, and here it would be visible in the worst possible place:
  * the single cut between the ride and the park, where a child's eye is on the
  * road and nothing else.
+ *
+ * **One thing does differ across the cut, on purpose** (#477): the park's road
+ * is cut from grey stone and the ride's lane from sand. See
+ * {@link roadMaterial}. It is a tone, not a shape — every dimension above still
+ * comes from here, so the two roads still line up kerb to kerb and dash to
+ * dash, and the thing that would actually read as a jump (a road that changes
+ * width or loses its markings) still cannot happen.
  */
 
 /**
@@ -65,9 +72,31 @@ export const ROAD_HALF_WIDTH = CAT_BUS_WIDTH / 2 + 1.25;
  */
 export const ROAD_TILE_METRES = ROAD_HALF_WIDTH * 2;
 
-/** The road's material — one texture, shared by every road in the game. */
-export function roadMaterial(): ReturnType<typeof toonMaterial> {
-  return toonMaterial(0xffffff, { map: roadTexture() });
+/**
+ * The road's material.
+ *
+ * **The width, the kerbs, the slab courses and the centre line are the same
+ * whatever tone is asked for** — that is the whole point of this module, and
+ * `tone` deliberately cannot reach any of them. It picks which stone the
+ * carriageway is cut from, and nothing else (`textures.ts`'s {@link RoadTone}
+ * explains why that is a second bake rather than a tint).
+ *
+ * Two callers, and the difference between them is issue #477:
+ *
+ * - `BusJourney.ts` — the **intro ride's** lane, in its own scene. Takes the
+ *   default, `'sand'`, and is therefore byte-identical to what it always drew.
+ * - `Entrance.ts` — the park's own road, the one a child walks out to and the
+ *   one the bus stands on. `'grey'`, per Jim: *"the paving outside the park
+ *   that the bus arrives on should be grey during gameplay - don't change the
+ *   intro sequence."*
+ *
+ * A default of `'sand'` rather than a required argument is what keeps that
+ * promise mechanical: the intro asks for a road and gets the road it had, so
+ * nobody can change it here without going to the ride and typing the change
+ * out.
+ */
+export function roadMaterial(tone: RoadTone = 'sand'): ReturnType<typeof toonMaterial> {
+  return toonMaterial(0xffffff, { map: roadTexture(tone) });
 }
 
 export interface RoadUvOptions {
