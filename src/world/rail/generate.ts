@@ -200,21 +200,9 @@ interface RouteBriefBase {
   readonly corridorRadius: number;
   /**
    * Half-width kept clear of the boundary specifically — defaults to
-   * {@link corridorRadius}.
-   *
-   * The train sets it much wider, because the thing that meets the park wall is
-   * not its track but its **fence**: `train/route.ts`'s
-   * `TRACK_BOUNDARY_CLEARANCE`.
-   *
-   * **That sentence used to be a promise with nothing behind it.** It named
-   * that constant while no such constant existed, and the train's own brief
-   * passed no `boundaryMargin` at all — so the train fell through to the `??`
-   * below and was allowed to 1.8 m of the outline. Measured on the built park,
-   * that put it under 2.2 m on six of the ten pool seeds and stood **77
-   * rail-fence posts and 129 rails inside the boundary masonry** on seed 326.
-   * So if you add a caller here, **pass the field or take the default
-   * deliberately**: do not describe a margin in a comment and leave the wiring
-   * to somebody's memory.
+   * {@link corridorRadius}. The train sets it much wider (see
+   * `train/route.ts`'s `TRACK_BOUNDARY_CLEARANCE`): the ground between its
+   * loop and the rim must stay wide enough to actually walk, or not exist.
    */
   readonly boundaryMargin?: number;
   /**

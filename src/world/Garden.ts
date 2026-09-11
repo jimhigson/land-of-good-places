@@ -1,10 +1,4 @@
-import {
-  alongBoundary,
-  BOUNDARY_MASONRY_HALF_WIDTH,
-  PARK_BOUNDARY,
-  TERRAIN_EDGE_RADIUS,
-  type EdgeStation,
-} from './boundary';
+import { alongBoundary, PARK_BOUNDARY, TERRAIN_EDGE_RADIUS, type EdgeStation } from './boundary';
 import {
   BoxGeometry,
   BufferAttribute,
@@ -40,16 +34,22 @@ import { isInEntranceGateOpening } from './entrance/layout';
  * builder rather than a GameSystem.
  */
 /**
- * Half the width the boundary masonry occupies about the park's outline — the
- * pillar caps, which are the widest part of it.
+ * Half the width the boundary masonry occupies about the park's outline, in
+ * metres — the pillar caps, which are the widest part of it.
  *
- * **Re-exported so every existing importer keeps one obvious home for it; the
- * value itself lives in `boundary.ts`**, which is the leaf both this module and
- * `train/route.ts` can reach. See that declaration for why it had to move out
- * of here (a real, measured import cycle) and why re-exporting rather than
- * copying is the whole point — there is still exactly one declaration of it.
+ * Exported because anything asking "is this thing clear of the park wall?" has
+ * to measure against the *widest* stone, not the collision half-width (0.45)
+ * that only the physics sees. A rail passing 0.5 m outside the outline would
+ * clear the collider and still be driven straight through a pillar cap.
+ *
+ * Exported rather than copied, deliberately. This session alone has produced
+ * four bugs of the form "the same number declared twice, then diverging" —
+ * two stall stand points (#114), two `ParkBoundary` types, two `circleBoundary`
+ * functions, and a `BRIDGE_RISE` that no longer matched the locomotive it was
+ * supposed to clear. A number that describes built geometry belongs to the
+ * module that builds it.
  */
-export { BOUNDARY_MASONRY_HALF_WIDTH } from './boundary';
+export const BOUNDARY_MASONRY_HALF_WIDTH = 0.86;
 
 /**
  * Half-thickness of the boundary wall as **collision** sees it — what a child
