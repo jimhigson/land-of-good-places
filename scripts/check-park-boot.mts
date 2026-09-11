@@ -208,6 +208,17 @@ said.push(
 const busyMsOf = (wallMs: number, cpuDeltaMs: number): number =>
   cpuClock.usable ? Math.min(wallMs, cpuDeltaMs) : wallMs;
 
+/**
+ * What the number `busyMsOf` returned actually is, in words.
+ *
+ * Every message that quotes one says which, because on the fallback path it is
+ * plain wall clock and a message calling that "attested CPU time" would be this
+ * file's own disease: an assertion reporting something it is not describing.
+ */
+const BUSY_LABEL = cpuClock.usable
+  ? 'attested busy time'
+  : 'wall clock (the CPU clock failed its control, so there is no attestation)';
+
 /** What the gates stopped prosecuting, so the run can say so out loud. */
 const clearedAsDescheduled: { count: number; worstWallMs: number; worstBusyMs: number; where: string }[] =
   [];
@@ -317,15 +328,33 @@ const PHASES: readonly Phase[] = ['brief', 'cruiserSearch', 'cruiserFinish', 'tr
 const isPhase = (name: string): name is Phase => (PHASES as readonly string[]).includes(name);
 /** Slices seen so far, per scheduler task — the delta across one `advance()`. */
 const unitsSeen: Record<string, number> = {};
-let worstSlice = {
+type SliceRecord = {
+  /** Wall clock the `advance()` took. */
+  ms: number;
+  /** The part of it the process can be shown to have computed — `busyMsOf`. */
+  busyMs: number;
+  /** The last task that moved: the one that ran up against the deadline. */
+  task: string;
+  /** Every task that moved, with its unit count, for the diagnosis. */
+  phase: string;
+  steps: number;
+  stage: string;
+};
+let worstSlice: SliceRecord = {
   ms: 0,
   busyMs: 0,
+  task: 'no scheduler slice at all',
   phase: 'no scheduler slice at all',
   steps: 0,
   stage: 'waiting',
 };
 /** The worst slice by *wall clock*, kept separately so both can be printed. */
-let worstWallSlice = { ...worstSlice };
+let worstWallSlice: SliceRecord = { ...worstSlice };
+/**
+ * Every slice of the run, kept so the ceiling can ask a question about the
+ * *distribution* rather than about one sample — see `MIN_CORROBORATING_SLICES`.
+ */
+const slices: SliceRecord[] = [];
 /** Wall clock spent in slices that did each phase's work — the calibration. */
 const phaseMs: Record<Phase, number> = {
   brief: 0,
@@ -361,6 +390,7 @@ while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
   // calibration-grade approximation, not an exact per-phase ledger.
   let did: Phase | null = null;
   let steps = 0;
+  let lastTask = 'no scheduler slice at all';
   const moved: string[] = [];
   for (const [task, count] of Object.entries(generation.sliceCountsByTask)) {
     const done = count - (unitsSeen[task] ?? 0);
@@ -368,6 +398,7 @@ while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
     if (done > 0) {
       steps += done;
       moved.push(`${task} x${done}`);
+      lastTask = task;
       if (isPhase(task)) did = task;
     }
   }
@@ -375,10 +406,12 @@ while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
   const record = {
     ms: spent,
     busyMs: busy,
+    task: lastTask,
     phase: moved.length > 0 ? moved.join(' + ') : 'no scheduler slice at all',
     steps,
     stage,
   };
+  slices.push(record);
   if (spent > worstAdvanceMs) {
     worstAdvanceMs = spent;
     worstWallSlice = record;
@@ -409,7 +442,7 @@ said.push(
     `${(totalAdvanceMs / 1000).toFixed(2)} s of it inside advance()`,
 );
 said.push(
-  `worst single advance() ${worstBusyAdvanceMs.toFixed(1)} ms of attested busy time against a ` +
+  `worst single advance() ${worstBusyAdvanceMs.toFixed(1)} ms of ${BUSY_LABEL} against a ` +
     `${GENERATION_BUDGET_MS} ms budget; ${framesThatBlockedMeasurably} frames did over a ` +
     'millisecond of work',
 );
@@ -526,7 +559,7 @@ const REFERENCE_CALIBRATION_MS = 1.34;
  */
 const slowness = Math.max(1, calibrationMs / REFERENCE_CALIBRATION_MS);
 said.push(
-  `this box runs the calibration loop in ${calibrationMs.toFixed(2)} ms of attested busy time ` +
+  `this box runs the calibration loop in ${calibrationMs.toFixed(2)} ms of ${BUSY_LABEL} ` +
     `against the reference ${REFERENCE_CALIBRATION_MS.toFixed(2)} ms — ${slowness.toFixed(2)}x`,
 );
 
@@ -627,22 +660,122 @@ if (frames < MIN_WORKING_FRAMES) {
 // slice is prosecuted for the work it did and nothing else. A genuinely fat
 // unit is unaffected: it spends the CPU it costs, so its busy time is its wall
 // time, and the ceiling meets it exactly as before.
+//
+// **Proved both ways on 11 September 2026, on the same code, by mutation.** The
+// mutations are written out in full because a red-run transcript is a
+// measurement and measurements go stale: repeat these exactly, or the numbers
+// below say nothing about the check as it stands then.
+//
+// *Mutation A — a genuinely fat unit.* In `parkGeneration.ts`'s `brief` task,
+// immediately before `yield step.value`, 25 ms of real arithmetic per unit:
+//
+//     let x = 1.000001; let sum = 0;
+//     const until = performance.now() + 25;
+//     while (performance.now() < until) {
+//       for (let i = 0; i < 20000; i += 1) { x = x * 1.0000001 + 1e-9; sum += Math.sqrt(x) * 0.5; }
+//     }
+//     if (!Number.isFinite(sum)) throw new Error('mutation diverged');
+//
+// → **exit 1**: `worst single advance() 26.0 ms ... that worst slice was
+// brief x1, 1 work units in 26.0 ms busy of 26.0 ms wall` against a 22.2 ms
+// ceiling at 1.19x. The granularity fault is still caught, and now named.
+//
+// *Mutation B — the machine takes the CPU away.* The same place, once only:
+//
+//     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 40);
+//
+// → **exit 0**, with `worst single advance() by WALL clock 50.6 ms — brief x1,
+// 1 work units, 0.9 ms of it attested busy`, and the stderr note saying that
+// span was cleared. The **control** is the pre-#606 copy of this file run
+// against the identical mutated generator: **exit 1**, twice —
+// `one advance() blocked for 50.8 ms against a ... 20.0 ms ceiling` and
+// `one advance() at the 12 ms overrun budget blocked for 42.9 ms`. That is the
+// whole of issue #606 in one pair of runs.
+//
+// *Mutation C — the instrument itself.* Forcing `cpuClock.usable` to `false`
+// with mutation B still in place → **exit 1** with the same two fouls as the
+// control, under the loud stderr note. The fallback is a live path, not a
+// comforting sentence.
 const WORST_UNIT_GRACE_MS = 12;
 const ADVANCE_CEILING_MS = GENERATION_BUDGET_MS + WORST_UNIT_GRACE_MS * slowness;
 said.push(
-  `so one slice may spend ${ADVANCE_CEILING_MS.toFixed(1)} ms of busy time ` +
+  `so one slice may spend ${ADVANCE_CEILING_MS.toFixed(1)} ms of ${BUSY_LABEL} ` +
     `(${GENERATION_BUDGET_MS} ms budget + ${WORST_UNIT_GRACE_MS} ms of grace x ${slowness.toFixed(2)})`,
 );
 if (worstAdvanceMs > ADVANCE_CEILING_MS && worstBusyAdvanceMs <= ADVANCE_CEILING_MS) {
   noteCleared('advance() at the rolling budget', worstAdvanceMs, worstWallSlice.busyMs);
 }
-if (worstBusyAdvanceMs > ADVANCE_CEILING_MS) {
+
+// ---------------------------------------------------------------------------
+// **A breach has to happen more than once, to the same task, before it is a
+// foul — because the fault it is looking for is reproducible and an outlier is
+// not.**
+//
+// `busyMsOf` removes a plain deschedule, but not every distortion: CPU time is
+// `getrusage(RUSAGE_SELF)`, which counts **every thread of the process**, so on
+// a contended box an allocation-heavy slice can be charged V8's concurrent
+// marker running on another core while the main thread was itself waiting for
+// one. Measured here on 11 September 2026 with four other agents on the
+// machine: one `pathGraph x1` slice attested 35.8 ms against a 27.9 ms ceiling,
+// on an unmutated tree, in a run whose next-worst slice was inside the ceiling.
+// One sample cannot tell that from a unit that genuinely costs 35.8 ms.
+//
+// The distribution can. The park is deterministic, so a unit that is too big is
+// too big **every time that unit runs** — mutation A below breached on all 152
+// of the `brief` task's slices — while contention lands on one slice and moves
+// somewhere else next run. So the gate asks for corroboration: two or more
+// slices of the same task over the ceiling. That is a question about work, and
+// it is the difference between a check and a coin toss.
+//
+// **What it therefore cannot catch, and this is announced on every run:** a
+// single unit that is dear *on its own*, where the task runs it once — the
+// castle-window carve is the real example. That was never caught here anyway
+// (this file's own note: "making the slide's satisfies five times dearer is not
+// caught ... it sits just inside"), and `check:solve-cost` owns per-unit cost.
+// What is new is that the gap is now stated rather than implied.
+const MIN_CORROBORATING_SLICES = 2;
+const breaches = new Map<string, { count: number; worst: SliceRecord }>();
+for (const slice of slices) {
+  if (slice.busyMs <= ADVANCE_CEILING_MS) continue;
+  const existing = breaches.get(slice.task);
+  if (!existing) {
+    breaches.set(slice.task, { count: 1, worst: slice });
+  } else {
+    existing.count += 1;
+    if (slice.busyMs > existing.worst.busyMs) existing.worst = slice;
+  }
+}
+const corroborated = [...breaches.entries()].filter(
+  ([, breach]) => breach.count >= MIN_CORROBORATING_SLICES,
+);
+for (const [task, breach] of breaches) {
+  if (breach.count >= MIN_CORROBORATING_SLICES) continue;
+  process.stderr.write(
+    `check:park-boot NOTE: one lone slice of "${task}" went past the ${ADVANCE_CEILING_MS.toFixed(1)} ms ` +
+      `ceiling — ${breach.worst.busyMs.toFixed(1)} ms busy of ${breach.worst.ms.toFixed(1)} ms wall, ` +
+      `${breach.worst.steps} work unit(s) — and was NOT prosecuted, because one sample of ` +
+      `${slices.length} cannot tell a unit that is too big from this box's other threads being ` +
+      'charged to the slice. A unit that is genuinely too big breaches on every slice that runs ' +
+      `it; ${MIN_CORROBORATING_SLICES} would have been a foul (issue #606). If you see this line ` +
+      'run after run, naming the same task, that is the check telling you it IS the code.\n',
+  );
+}
+if (corroborated.length > 0) {
+  const [task, breach] = corroborated.sort((a, b) => b[1].worst.busyMs - a[1].worst.busyMs)[0]!;
+  const worstBreachMs = breach.worst.busyMs;
   fouls.push(
-    `one advance() spent ${worstBusyAdvanceMs.toFixed(1)} ms of attested CPU time (${worstSlice.ms.toFixed(1)} ms ` +
+    `${breach.count} slices of "${task}" went past the ceiling, worst ` +
+      `${worstBreachMs.toFixed(1)} ms of ${BUSY_LABEL} (${breach.worst.ms.toFixed(1)} ms ` +
       `wall) against a ${GENERATION_BUDGET_MS} ms budget and a ${ADVANCE_CEILING_MS.toFixed(1)} ms ` +
-      `ceiling already scaled ${slowness.toFixed(2)}x for this box's speed — and busy time does not ` +
-      `advance while the process is descheduled, so this is NOT a loaded machine either. Read the ` +
-      `worst-slice line above: if it got through hundreds of work units it merely spent its budget ` +
+      `ceiling already scaled ${slowness.toFixed(2)}x for this box's speed. ` +
+      (cpuClock.usable
+        ? 'Attested busy time does not advance while the process is descheduled, so this is NOT a '
+        : 'NOTE that with no attestation this is raw wall clock, so a descheduled slice can reach it — ') +
+      (cpuClock.usable ? 'loaded machine either. ' : 'fix the CPU clock reading before reading further. ') +
+      `And it happened ${breach.count} times to the same task, so it is not one unlucky slice ` +
+      `either: a unit that is too big is too big every time it runs. That worst one did ` +
+      `${breach.worst.steps} work unit(s) (${breach.worst.phase}) during ` +
+      `"${breach.worst.stage}" — if it got through hundreds of work units it merely spent its budget ` +
       `and something else is wrong; if it got through one or two, that unit is too big to be a ` +
       `unit. Profile it with \`generation.advance(0)\`, which makes every drive loop do exactly ` +
       `one step so the slice time IS the unit cost. Do not raise the ceiling: it stutters the ` +
@@ -1190,7 +1323,7 @@ if (cruiserRidden !== cruiserPlain) {
       `${overRefresh} over one 60 Hz refresh (${FRAME_MS.toFixed(1)} ms)`,
   );
   said.push(
-    `so one looping-overrun slice may spend ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms of busy time ` +
+    `so one looping-overrun slice may spend ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms of ${BUSY_LABEL} ` +
       `(one refresh + ${WORST_UNIT_GRACE_MS} ms of grace x ${slowness.toFixed(2)})`,
   );
   if (!overrunGen.ready) {
@@ -1202,9 +1335,23 @@ if (cruiserRidden !== cruiserPlain) {
   if (worstWall > OVERRUN_ADVANCE_CEILING_MS && worst <= OVERRUN_ADVANCE_CEILING_MS) {
     noteCleared('advance() at the overrun budget', worstWall, worst);
   }
-  if (worst > OVERRUN_ADVANCE_CEILING_MS) {
+  // Corroborated the same way as the rolling ceiling above (#606): this one is
+  // tighter still — one refresh rather than the budget — so a single distorted
+  // sample reaches it even more easily, and a revert of the overrun budget to
+  // 200 ms breaches on nearly every slice rather than on one.
+  const overrunBreaches = advances.filter((a) => a > OVERRUN_ADVANCE_CEILING_MS).length;
+  if (overrunBreaches > 0 && overrunBreaches < MIN_CORROBORATING_SLICES) {
+    process.stderr.write(
+      `check:park-boot NOTE: one lone slice at the ${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget ` +
+        `went past its ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ceiling — ${worst.toFixed(1)} ms ` +
+        `busy of ${worstWall.toFixed(1)} ms wall — and was NOT prosecuted, for want of a second ` +
+        'slice to corroborate it (issue #606). A budget too large for a moving shot breaches on ' +
+        'most of its slices, not on one.\n',
+    );
+  }
+  if (overrunBreaches >= MIN_CORROBORATING_SLICES) {
     fouls.push(
-      `one advance() at the ${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget was busy for ` +
+      `${overrunBreaches} advance() slices at the ${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget were busy for up to ` +
         `${worst.toFixed(1)} ms against a ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ceiling ` +
         `(one 60 Hz refresh + grace, scaled ${slowness.toFixed(2)}x for this box). The bus is MOVING ` +
         'through the overrun now, so a frame that blocks this long jumps the bus, the camera and the ' +
@@ -1241,13 +1388,18 @@ if (!cpuClock.usable) {
       'so a busy machine can redden it for reasons no commit caused (issue #606). Fix the clock ' +
       'reading, do not raise the ceilings.\n',
   );
-} else if (clearedAsDescheduled.length === 0) {
-  process.stderr.write(
-    'check:park-boot NOTE: nothing was cleared as descheduled this run — every span was inside ' +
-      'its ceiling on wall clock as well as on attested busy time, so the CPU attestation changed ' +
-      'no verdict here. It is still the thing standing between this check and a loaded box.\n',
-  );
 } else {
+  // The standing coverage statement: what this check structurally does not
+  // assert, printed whether or not it bit this run, so nobody has to infer it
+  // from a quiet green line.
+  process.stderr.write(
+    'check:park-boot NOTE: this check does NOT assert on (a) a slice whose wall clock overran ' +
+      'while the process was descheduled, nor (b) a single un-repeated slice over the ceiling. ' +
+      '(a) is not work the park did; (b) cannot be told from this box\'s other threads being ' +
+      'charged to one slice. Per-unit cost is `check:solve-cost`\'s question, and a unit that is ' +
+      `genuinely too big breaches on every slice that runs it — ${MIN_CORROBORATING_SLICES} is a ` +
+      'foul here (issue #606).\n',
+  );
   for (const cleared of clearedAsDescheduled) {
     process.stderr.write(
       `check:park-boot NOTE: ${cleared.count} span(s) of ${cleared.where} went past the ceiling on ` +
