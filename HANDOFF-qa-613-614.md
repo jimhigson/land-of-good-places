@@ -460,3 +460,67 @@ the bridge raycast call sites enumerated; `shell|wallTop` proved red; and
 base, for the CI symmetry above). If you are picking this up cold, those four are
 the remaining gap and the dispatch brief for them is reproduced in the resumed
 task message.
+
+---
+
+# Final — all gaps closed, 11 September 2026
+
+## #613 — PASS on substance. See the PR comment for the 4-of-5 correction and issue #617.
+
+## #614 — CHANGES REQUESTED. One finding, everything else verified.
+
+**The blocker.** `bridges.ts:742`'s new comment claims "all three places that
+raycast a bridge already exclude this object **by name**". There are **four**, and
+`test/procgen/invariants.ts:6417` does not — it takes `hits[0]` raw off
+`intersectObject(bridgesGroup, true)`. (5443 and 5757 *do* filter, each with a
+comment explaining why, which makes 6417 look like an oversight.) I read the
+source myself to confirm, not just the sub-agent's report.
+
+Measured effect, canonical seed, 75 upward sample points under the decks:
+
+```
+deck index RESTORED :  first hit 'deck' 57,  other stone 14
+as built (emptied)  :  first hit 'deck'  0,  other stone 71
+clearance move at 71 comparable points: changed at 57,
+  smallest 0.0028 m  largest 0.1800 m  mean 0.1148 m, always HIGHER
+```
+
+A required, merge-blocking invariant's clause against `TRAIN_CLEARANCE_Y` became
+**up to 0.18 m more permissive**, silently, in a diff asserting nothing reads
+faces off that object. The new reading is probably the *right* one — measure what
+is drawn — but it must be deliberate. Fix: add the same by-name `deck` filter at
+6417, and correct "all three places".
+
+**Verified and holding:**
+
+- **Hand-edited baseline — CONFIRMED, provably.** Determinism controlled first
+  (two `--print-baseline` runs byte-identical). 213 committed vs 213 machine
+  entries, 0 added, 0 missing, **19 differing**; **17 machine-*better*** (the tool
+  would have written stricter numbers), 2 machine-worse by +0.0198 and +0.0021 m²
+  against the ratchet's 0.1 m² slack. Tell of the century: the re-taken entry
+  reads **0.2802** committed where the tool deterministically prints **0.2801**.
+- **`deck|shell` control reproduces:** `min=(-3.710502, 3.752630, -32.531601)`
+  identical to the bit with index full and emptied; raycastHits 1 → 0.
+- **`shell|wallTop` PROVED RED.** Reverting only `bridges.ts:1242-1243` gives
+  exit 1, `NEW ... shell|wallTop 0.052 m², stand-off 5.3e-3 m, seed 326`.
+  **Geometry:** pool seed 326, `bridge-0.0`'s wall top. Cross-checks against the
+  base reporting the same finding independently. Restored → exit 0.
+- **Exit codes:** head **0**, base **1** with exactly four findings + nine
+  `BASELINE LOOSE` lines matching the nine deletions one for one.
+- **The red `Entrance road` CI check is the BASE's** — confirmed by running it on
+  `66c0964c`: exit 1, "the control found NO collision on 10 seed(s) … void".
+  #614's three files touch nothing in that path. So the #613/#614 CI symmetry is
+  what it looked like: complementary, each carrying the other's inherited red.
+
+**Full call-site enumeration** (the diff's is wrong) — index-blind, fine:
+`invariants.ts:5316-5323`, `invariants.ts:6579-6581`. Excludes `deck` by name,
+fine: `invariants.ts:5443`, `invariants.ts:5757`, `measure-bridge-parapet.mts:180`,
+`parkFacts.ts:2707`. **Neither: `invariants.ts:6417`.**
+
+## Written up
+#613 comment; #614 two comments (browser pass with frames, then the verdict);
+#612 comment with frames + `origin/main` OBB counts; new issue **#617**.
+Screenshots on the `qa-screenshots` orphan branch.
+
+All QA worktrees removed. No dev server was ever started; the browser page was
+closed immediately after looking.
