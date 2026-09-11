@@ -92,6 +92,54 @@ t=7.63  eye (21.5, 9.6, 80.7) fov 18.1   through the arch, drawing back on the r
 t=10.14 eye (48.0, 55.4, 101.5) fov 9.5  the rig exactly
 ```
 
+## THE BLOCKER THAT NEARLY SHIPPED NOTHING — read this first
+
+**The shot Jim approved did not ship, and the reason is one line of code.**
+
+`perspectiveParkCamera()` chose the projection, and its fallback was
+`onTheArrivalRoute()` — a **literal pathname test**. `/arrive` → true, `/` →
+false, `/spawn` → false. A child boots at `/`, `arrivalIsDue()` fires, and there
+is no `pushState`/`replaceState` anywhere in `src/`. **So a real player's arrival
+was orthographic**, while the 9° of pitch, the 6.5 m stand-back and the 9 m
+framing were every one of them judged on perspective frames at `/arrive`.
+
+It bit the check too. Its header struck the *"there is a floor in the picture"*
+clause — the one guarding Jim's thrice-reported under-the-floor bug — by citing
+`onTheArrivalRoute` as proof the arrival is perspective. True of a developer's
+URL, false of the game.
+
+**Fixed by Jim's own ruling, *"ALL cameras EVERYWHERE perspective."*** The park
+camera is a `PerspectiveCamera` unconditionally; `src/core/perspectiveFlag.ts` is
+deleted with its `?projection=` and `?zoomMin=` switches; `CAMERA_IS_ORTHOGRAPHIC`
+is deleted too (nothing read it — it was cited only in prose, the worst possible
+shape for a fact).
+
+**It was far smaller than it looked.** Nothing in the game ever branched on the
+projection except `IsoCamera` itself — two call sites. The whole 65-step chain is
+green afterwards. Proved on the routes that were previously false:
+
+```
+/spawn?pos=0,60          PerspectiveCamera, fov 9.53   (was orthographic)
+/arrive?at=stepping-down PerspectiveCamera, fov 69.39  (matches the check's declared lens)
+```
+
+**This is a visible change to the whole game** — subtle, because 9.53° is a long
+lens and the park still reads as a toy model, but real, and Jim has not judged
+ordinary play on it. It needs his eyes, not just the arrival.
+
+## Left for someone else, deliberately
+
+- **The minigame cameras are still orthographic**: `SpookyHouse`, `WaterFight`,
+  `Dodgems`. Changing them is a *visible* change to three games Jim has not been
+  shown, so it is reported rather than done. (`Transition` and `Sky` also use
+  `OrthographicCamera`, but those render full-screen quads in `-1..1` — screen
+  blits, not cameras anyone looks through. They must not change.)
+- **`Sky`'s full-screen quad was justified by the park camera being
+  orthographic.** What keeps it now is that the rig is a 9.5° lens at 90 m, near
+  enough parallel that a dome would still be a nearly flat patch.
+  `check:sky-view` is green and the sky reads correctly in every frame I shot,
+  but the *argument* has changed and deserves a deliberate look.
+
 ## The check
 
 `check:arrival-camera` was **re-read, not deleted**. Every clause that only held
@@ -142,6 +190,12 @@ run. That is the right answer, not a stuck one.
 | `pnpm run check:park-pool` | **0** |
 | `pnpm run check:coplanar` | **1 — INHERITED RED, see below** |
 | `pnpm run check` | **0** — the whole 65-step chain, and `check:arrival-camera` ran inside it |
+
+Re-run in full **after** the projection change: `check` **0**, `test:procgen`
+**0** (19 files, 601 tests), `build` **0**, `check:swept-bus` **0**,
+`check:park-pool` **0**, the ten-seed `check:arrival-camera` sweep **0**, and
+`check:coplanar` still **1** with findings byte-for-byte identical to the
+pre-work control.
 
 **`check:coplanar` is red and it is not this work.** Four findings, all on
 bridge / boundary-wall / rail-fence geometry:
