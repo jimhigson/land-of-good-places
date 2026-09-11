@@ -7319,6 +7319,114 @@ const noBridgeStandsWhereNoneWasProven: Invariant = (facts) => {
 };
 
 /**
+ * **No picket of the railway's fence stands inside the boundary masonry.**
+ *
+ * The park wall is a ring on a fixed outline and cannot move; the railway's
+ * loop is solved fresh from the seed and can. So when the two occupy the same
+ * ground, it is the railway that is in the wrong place — and it was, on most of
+ * the pool.
+ *
+ * `rail/generate.ts`'s `boundaryMargin` was documented as being set wide by the
+ * train, naming a `TRACK_BOUNDARY_CLEARANCE` that **did not exist**; the train's
+ * brief passed no margin at all and fell through to the field's own
+ * `?? corridorRadius`, so the loop was allowed to 1.8 m of the outline. The
+ * fence stands 2.18 m out from the centre line and the drawn stone reaches
+ * 0.86 m about the outline, so that was 1.2 m short. Measured on the built park
+ * before the fix: the closest approach was **1.83 m** and under 2.2 m on six of
+ * the ten pool seeds, and on seed 326 **77 fence posts and 129 fence rails
+ * stood inside a boundary block**.
+ *
+ * `check:coplanar` is what found it, as 0.280 m² of `boundary-blocks` sharing a
+ * plane with `rail-fence` — but only because the sphere ground happened to make
+ * their *heights* coincide as well. The interpenetration long predated that and
+ * nothing could see it, which is why this clause exists rather than the
+ * coplanar baseline being left to stand in for it.
+ *
+ * **It measures boxes of built geometry against boxes of built geometry** — the
+ * fence instances the park actually placed against the wall instances it
+ * actually laid — not the centre line against the outline. A distance
+ * assertion would re-derive the margin under test and go green the moment
+ * somebody changed the rule and the clause together, which is the failure
+ * {@link theGateIsAHoleInTheWall}'s own note records paying for once already.
+ */
+const noFenceStandsInTheBoundaryMasonry: Invariant = (facts) => {
+  const boxesOf = (mesh: Mesh): Box3[] => {
+    mesh.geometry.computeBoundingBox();
+    const local = mesh.geometry.boundingBox;
+    if (!local) return [];
+    const matrix = new Matrix4();
+    const out: Box3[] = [];
+    const copies = mesh instanceof InstancedMesh ? mesh.count : 1;
+    for (let i = 0; i < copies; i += 1) {
+      if (mesh instanceof InstancedMesh) {
+        mesh.getMatrixAt(i, matrix);
+        matrix.premultiply(mesh.matrixWorld);
+      } else matrix.copy(mesh.matrixWorld);
+      out.push(local.clone().applyMatrix4(matrix));
+    }
+    return out;
+  };
+
+  const masonry: Box3[] = [];
+  facts.world.garden.group.traverse((object: Object3D) => {
+    if (object instanceof Mesh && object.name === 'boundary-blocks') {
+      masonry.push(...boxesOf(object));
+    }
+  });
+  const pickets: { name: string; boxes: Box3[] }[] = [];
+  facts.world.train.group.traverse((object: Object3D) => {
+    if (object instanceof Mesh && object.parent?.name === 'rail-fence') {
+      pickets.push({ name: object.name || object.type, boxes: boxesOf(object) });
+    }
+  });
+
+  // **Say so when this clause is covering nothing.** A park with no fence
+  // instances, or no wall instances, would make the loop below assert zero
+  // overlaps out of zero comparisons and report a triumphant pass — CLAUDE.md's
+  // "a check can pass without checking anything", in the form where a rename in
+  // `Garden.ts` or `fence.ts` silently orphans the search.
+  const picketCount = pickets.reduce((n, p) => n + p.boxes.length, 0);
+  if (masonry.length === 0 || picketCount === 0) {
+    return [
+      `found ${masonry.length} boundary-block instance(s) and ${picketCount} rail-fence ` +
+        'instance(s) to compare — this clause asserts nothing without both, so a mesh ' +
+        'has been renamed out from under it',
+    ];
+  }
+  process.stderr.write(
+    `noFenceStandsInTheBoundaryMasonry: ${picketCount} fence instance(s) vs ` +
+      `${masonry.length} wall instance(s)\n`,
+  );
+
+  const fouls: string[] = [];
+  for (const picket of pickets) {
+    let hits = 0;
+    let worstVolume = 0;
+    let worstAt = '';
+    for (const a of picket.boxes) {
+      for (const b of masonry) {
+        if (!a.intersectsBox(b)) continue;
+        hits += 1;
+        const size = a.clone().intersect(b).getSize(new Vector3());
+        const volume = size.x * size.y * size.z;
+        if (volume <= worstVolume) continue;
+        worstVolume = volume;
+        const centre = a.clone().intersect(b).getCenter(new Vector3());
+        worstAt = `${fmt([centre.x, centre.z])}, overlapping ${size.x.toFixed(2)}x${size.y.toFixed(2)}x${size.z.toFixed(2)} m`;
+      }
+    }
+    if (hits > 0) {
+      fouls.push(
+        `${hits} ${picket.name} of the railway's fence stand inside the boundary ` +
+          `masonry, worst at (${worstAt}) — the wall cannot move, so the loop is in ` +
+          "the wrong place; see train/route.ts's TRACK_BOUNDARY_CLEARANCE",
+      );
+    }
+  }
+  return fouls;
+};
+
+/**
  * **Is there actually a hole in the wall at the gate?**
  *
  * Issue #195. The gate-gap predicate sat in `entrance/layout.ts` from the day the
@@ -10126,6 +10234,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
+  ["no picket of the railway's fence stands inside the boundary masonry", noFenceStandsInTheBoundaryMasonry],
   ['a child can walk in through the front gate', theWalkInFromTheGateIsWalkable],
   ['the road arrives at the park and goes in through the gate', theRoadArrivesAtTheParkAndGoesIn],
   [
