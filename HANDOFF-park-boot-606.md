@@ -28,8 +28,18 @@ uniformly slower, so the check failed 3 runs in 6 on a loaded laptop and passed
   fail on a loaded box): scales with work; stops when the thread sleeps; is the
   thread's clock, not the process's. Fail any → attestation dropped, ceilings
   back to raw wall clock, loud stderr note.
-- **A breach must be corroborated**: two or more slices of the same task over
-  the ceiling. A lone breach is reported on stderr, naming the task.
+- **A breach must be corroborated: repeated OR exhaustive** — two or more
+  slices of the task group, *or* every slice that group ran. The second half
+  was the review finding on #615: `roadCorridor` runs one unit in one advance
+  by design, so a count-only clause made a whole class of task uncatchable
+  (the reviewer's burn in it: exit 0 at 44.5 ms vs a 25.2 ms ceiling on this
+  branch, exit 1 with three fouls on `main` — a measured coverage regression).
+  A lone breach inside a group that ran others is reported on stderr instead.
+  The overrun ceiling had the identical hole and uses the same rule.
+- **Slices are grouped and labelled by the SET of tasks that moved.** The key
+  used to be registration-order-last, which the comment claimed was "the task
+  that ran up against the deadline" — it is not, and slice counts cannot tell
+  you execution order.
 - **Worst-slice attribution reads every scheduler task**
   (`ParkGeneration.sliceCountsByTask`, added in `src/boot/parkGeneration.ts`),
   not the five phases carrying floors. That is why #606 saw "no generator step
@@ -46,6 +56,8 @@ uniformly slower, so the check failed 3 runs in 6 on a loaded laptop and passed
 | one 40 ms `Atomics.wait` in a `brief` unit | **exit 0** + cleared-span notes; the **pre-#606 file on the same mutated tree: exit 1, twice** |
 | `cpuMs` fed `process.cpuUsage()` | control rejects by name; with the fat unit also in, still **exit 1** on wall clock |
 | unmutated, 6 consecutive runs | 6/6 green, 0 lone breaches, worst 12.2–21.7 ms vs ceilings 20.0–26.4 ms |
+| the same burn in `roadCorridor` (runs once) | **exit 1**, both ceilings, `1 of the 1 slices of "pathGraph + roadCorridor" ... 36.9 ms busy (53.0 ms wall) vs 22.2 ms` |
+| a 40 ms `Atomics.wait` in that same once-only slice | **exit 0**, `48.2 ms wall, 2.3 ms attested busy` — the control proving the exhaustive clause is not a back door for descheduling |
 
 ## Open finding, not fixed here
 
