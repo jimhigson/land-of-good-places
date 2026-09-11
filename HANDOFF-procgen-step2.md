@@ -709,3 +709,22 @@ under this branch by design.
     registers colliders after both rings are placed (ruling (a), one rail
     race), so the race feet sit at nominal — `worst lean 0% of its limit` on
     every suite seed. A ring-wide 2 m slide along the track, by design.
+- **`pnpm run check` on the merge: all 66 steps exit 0**, with one honest
+  wrinkle. The first full run stopped at step 62, `check:park-boot`: one
+  `advance()` slice 26.2 ms against a 25.5 ms ceiling, and the check's own
+  worst-slice line said **0 work units** in it ("joining up the paths") — its
+  documented signature for an event loop blocked by something other than
+  generator work. That run overlapped my digest sweep, per-foot sweep and
+  bars probe on this box (plus 17 other agents' node processes). Re-run with
+  my sweeps finished: park-boot **passed** (worst slice 15.8 ms, `trainSearch`,
+  2 work units), then ground-claims, arrival-completes, layout-rung,
+  arrival-camera all 0. Steps 1–61 had exited 0 in the first run (the chain
+  is `&&`; park-boot's banner is the last in the log). Not step 2's code —
+  park-boot is `main`'s timing check — but say it in the PR: CI's quiet
+  runner is the arbiter, and a 0-work-unit slice is load, not a unit.
+- **Staging state:** everything measured; the real merge only re-quotes
+  numbers. Scratch worktrees: `scratchpad/step2-sphere-merge` (branch +
+  sphere 903982ba, committed locally as 5ab834b9, never pushed),
+  `scratchpad/digest-base` (design + sphere, no step 2, 6f271068), and
+  `scratchpad/red-proof`. Remove all three with `git worktree remove` when
+  the PR opens.
