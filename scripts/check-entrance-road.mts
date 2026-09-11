@@ -60,6 +60,22 @@
  * road. The offset is re-derived from whatever park was just built, so it cannot
  * decay.
  *
+ * **What this control cannot catch, stated because the retired one could.** It
+ * sweeps *the same span* as the real run, so it is blind to that span being
+ * wrong: shrink the sweep back to the brow and the control shrinks with it,
+ * finds a post anyway — the offset simply lands on whatever is nearest to those
+ * two metres — and reports a healthy non-zero while the check covers 1.4% of the
+ * road. The retired corridor-off control did catch that, by accident rather than
+ * by design: it read zero on a two-metre span because no trestle stands within a
+ * bus-length of the gate, which is what made the collapse visible at all.
+ *
+ * That cover is not lost, it has moved: **the coverage note is what guards the
+ * span now**, printing the swept length against the road's own length on every
+ * run and saying plainly when it is not the whole road. A control proves the
+ * instrument can see; the coverage note proves it is pointed at the right place.
+ * Neither substitutes for the other, and if you ever make this control
+ * span-independent, say so here.
+ *
  * **It replaced two weaker controls, and both failures are the same shape.** The
  * first swept the road as it *used* to be — the straight chord at the wall —
  * against the legs as they are now, and degraded as the fix worked: 96 legs
@@ -130,7 +146,7 @@ interface SeedReport {
    * {@link hits} already reports. On a clean park this is the only number that
    * says *by how much* it is clean.
    */
-  readonly clearance: number;
+  readonly clearance: number | null;
   /**
    * **The control.** The identical sweep, with every station translated so the
    * bus box is driven through the post it came closest to. Must be non-zero, or
@@ -590,7 +606,15 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
     hits: hitLegs.size,
     walkPastHits: hitWalkPast.size,
     worstPenetration: Number(worstPenetration.toFixed(3)),
-    clearance: Number((-closestReach).toFixed(3)),
+    // **`null`, not `Infinity`, when nothing was measured.** `closestReach`
+    // starts at `-Infinity`, so an empty leg list made this `Infinity`, which
+    // `JSON.stringify` writes as `null` — and the parent then called
+    // `.toFixed()` on it and died with a `TypeError` in the per-seed table,
+    // *before* printing the `FAIL:` block its own stderr line had just told the
+    // operator to read. The exit code still held, so the gate was sound, but
+    // the diagnosis was lost at exactly the moment somebody needed it. Typed
+    // honestly here and handled at both readers below.
+    clearance: Number.isFinite(closestReach) ? Number((-closestReach).toFixed(3)) : null,
     offsetControlHits: offsetHitPosts.size,
     offsetControlWorst: Number(offsetWorst.toFixed(3)),
     offsetControlBy: Number(Math.hypot(closestOffsetX, closestOffsetZ).toFixed(3)),
@@ -651,6 +675,21 @@ async function sweepThePool(): Promise<void> {
         'on the real road is void: ' +
         blind.map((pair) => pair.real.seed).join(', '),
     );
+  }
+
+  // **A seed whose sweep had no legs to look at measured nothing.** Mirrors
+  // `check:swept-bus`'s `samples === 0` guard: this check finds the ride's
+  // supports by mesh name, so a rename empties the list and every clause below
+  // reads clean. Reported before the per-seed table so the diagnosis survives
+  // even if a later line cannot render.
+  for (const report of reports) {
+    if (report.legs === 0) {
+      failures.push(
+        `seed ${report.seed}: the sweep had NO trestle legs to look at. This check finds the ` +
+          "ride's supports by mesh name, so a rename empties the list and every verdict here " +
+          'becomes vacuous. Fix the name in this check, do not accept the zero.',
+      );
+    }
   }
 
   for (const report of reports) {
@@ -742,22 +781,47 @@ async function sweepThePool(): Promise<void> {
   // collapsed, and said only "from the brow at +1 m to -1 m", a sentence that
   // reads like a coverage statement while giving the reader nothing to compare
   // it against. A span is only coverage when the whole is beside it.
+  //
+  // **Every sentence below is derived, and that was not true when it was
+  // written.** The first version printed "That is the whole drawn road" and
+  // "Sweeping only that drove the control to zero and made this check's verdict
+  // void" as fixed strings. Both were true of the run in front of me and of no
+  // other: shrink the span back to the brow and the note reads "1.4%" and
+  // "That is the whole drawn road" two lines apart, and claims the control was
+  // driven to zero on a run whose control read 39 and passed — because that
+  // sentence describes the *retired* control, which no longer exists. A note
+  // that asserts something untrue is the disease this whole file is about, one
+  // layer out, and it got into the coverage note itself.
   const first = reports[0];
   if (first) {
     const swept = first.sweptFrom - first.sweptTo;
     const driven = first.drivenFrom - first.drivenTo;
+    const sweptPercent = (100 * swept) / first.roadLength;
+    const drivenPercent = (100 * driven) / first.roadLength;
     process.stderr.write(
       `  covered: ${pairs.length} seeds x 2 parks (real and control), ` +
         `${reports.reduce((sum, r) => sum + r.legs, 0)} trestle legs\n` +
         `  SWEPT: ${swept.toFixed(1)} m of a ${first.roadLength.toFixed(1)} m road ` +
-        `(${((100 * swept) / first.roadLength).toFixed(1)}%), ` +
+        `(${sweptPercent.toFixed(1)}%), ` +
         `from ${first.sweptFrom.toFixed(1)} m to ${first.sweptTo.toFixed(1)} m either side of the gate, ` +
         `every ${STEP} m\n` +
-        `  That is the whole drawn road — the span \`isInEntranceRoad\` keeps trestles out of — ` +
-        `not the ${driven.toFixed(1)} m the bus is animated along\n` +
-        `  (${first.drivenFrom.toFixed(1)} m to ${first.drivenTo.toFixed(1)} m, ` +
-        `${((100 * driven) / first.roadLength).toFixed(1)}% of the road). ` +
-        `Sweeping only that drove the control to zero and made this check's verdict void.\n`,
+        // Derived from the fraction, not asserted. `isInEntranceRoad`'s corridor
+        // spans the road's whole extent, so only a ~100% sweep covers it.
+        (sweptPercent >= 99.5
+          ? `  That is the whole drawn road — the span \`isInEntranceRoad\` keeps trestles out of.\n`
+          : `  THAT IS NOT THE WHOLE ROAD: ${(first.roadLength - swept).toFixed(1)} m ` +
+            `(${(100 - sweptPercent).toFixed(1)}%) of the span \`isInEntranceRoad\` keeps trestles ` +
+            `out of is NOT swept, so a leg standing there would not be found.\n`) +
+        `  The bus is animated along ${driven.toFixed(1)} m of it ` +
+        `(${first.drivenFrom.toFixed(1)} m to ${first.drivenTo.toFixed(1)} m, ` +
+        `${drivenPercent.toFixed(1)}% of the road); \`check:swept-bus\` is the check that ` +
+        `sweeps that.\n` +
+        // Also derived. The control shares this span, so what it read is a fact
+        // about this run and has to be read off it.
+        (offsetLeast === 0
+          ? `  The control read ZERO on at least one seed over this span — see the FAIL below.\n`
+          : `  Over this span the control reads ${offsetLeast} at its weakest, so the span is ` +
+            `wide enough to contain a collision the sweep can find.\n`),
     );
   }
 
@@ -765,7 +829,7 @@ async function sweepThePool(): Promise<void> {
     console.log(
       `  seed ${String(pair.real.seed).padStart(8)}  legs ${String(pair.real.legs).padStart(4)}  ` +
         `posts in the bus ${pair.real.hits} (${pair.real.walkPastHits} walk-past)  ` +
-        `nearest post clears by ${pair.real.clearance.toFixed(2)} m  ` +
+        `nearest post clears by ${pair.real.clearance === null ? 'NOTHING MEASURED' : `${pair.real.clearance.toFixed(2)} m`}  ` +
         `(control: bus shifted ${pair.real.offsetControlBy.toFixed(2)} m finds ` +
         `${pair.real.offsetControlHits} post(s), worst ${pair.real.offsetControlWorst.toFixed(2)} m in; ` +
         `corridor off: ${pair.control.hits} posts, trestles ` +
@@ -778,11 +842,19 @@ async function sweepThePool(): Promise<void> {
     for (const failure of failures) console.error(`  - ${failure}`);
     process.exit(1);
   }
+  // The tightest clearance across the pool, ignoring any seed that measured
+  // nothing (which is a failure above, not a number to minimise over).
+  const measured = reports.filter(
+    (r): r is SeedReport & { clearance: number } => r.clearance !== null,
+  );
+  const tightest =
+    measured.length === 0
+      ? null
+      : measured.reduce((a, b) => (a.clearance <= b.clearance ? a : b));
   console.log(
     `\nentrance road OK — the bus's swept body clears every trestle post along the whole ` +
       `${(reports[0]?.roadLength ?? 0).toFixed(1)} m road on all ${reports.length} pool seeds; ` +
-      `the tightest anywhere is ${Math.min(...reports.map((r) => r.clearance)).toFixed(2)} m ` +
-      `(seed ${reports.reduce((a, b) => (a.clearance <= b.clearance ? a : b)).seed})`,
+      `the tightest anywhere is ${tightest === null ? 'not measurable' : `${tightest.clearance?.toFixed(2)} m (seed ${tightest.seed})`}`,
   );
 }
 
