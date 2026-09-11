@@ -637,3 +637,17 @@ allows (measured: 0.728 m from a 0.272 m walk-past post, gap 0.048 m).
 radius guard, `duckBarsAreOnePerLaneAndNeverTouch` re-cut as above.
 
 ---
+
+## Sphere scratch merge, 11 Sep (step 2 3dd39a3f + sphere 903982ba): test:procgen 611/611, and why not 706
+
+`test:procgen`: **19 files, 611 passed, 0 failed, 0 skipped**; seed 131 says
+`walk-past ring seed 131: 1 bar(s) lost to the road rule at slot 28 (lane 2)`;
+every other seed `0 bars lost`. The earlier figure (706 / 20 files) was on
+sphere b6b1a983; the one file gone is **`test/procgen/seed-5.test.ts`**,
+deleted by sphere commit 364672c1 (6 Sep, "Retire pool seeds 5, 115, 225 and
+346 while the generator is being replaced") — checked by diffing the two
+sorted `ls-tree`/`ls-files` lists (exactly that line) and by `vitest list`:
+95 tests per seed file on this tree, 611 collected = 611 run, 706 − 611 = 95.
+Not a file that stopped being collected. **Quote the pass count against a
+collection count, not against last time's total** — the pool is shrinking
+under this branch by design.
