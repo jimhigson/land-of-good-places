@@ -579,7 +579,16 @@ legs, but the normal version can have them selectively"*).
 - One rail race, one feature (`RAIL_RACE_FEATURE`): both rings claim as it;
   the walk-past colliders register after both rings are placed
   (`RailRaceTrack.registerCollision`), through the sphere's `addPostCollider`
-  along the lean to `TALLEST_CHILD_HEIGHT`.
+  along the lean to `TALLEST_CHILD_HEIGHT`. **The evidence it did what it
+  claims:** on the base, every race-ring foot is refused at its nominal spot
+  by the walk-past post standing 1.0 m off (the 1.1 m clear circle) and the
+  arc ladder `[0, ±1, ±2, ±3]` steps it ±2 m along the track; on this branch
+  the colliders do not exist yet when the race ring is placed, so its feet
+  sit at nominal. Measured per foot on the scratch merge: **the whole race
+  ring sits exactly 2.000 m along the track from where the base put it, on
+  every pool seed** (49–50 of 50 feet per seed; one at 1.00 on 24 and 428,
+  one at 4.00 on 131), worst lean 0 % of its limit on every seed. «re-quote
+  on the real merge»
 - Jim's road rule, final form: `respectsRoad` — the walk-past ring does not
   build a slot whose drawn tree stands on the road's corridor claim
   (`treeStandsOn`, asked of the nominal slot and of every march candidate);
@@ -627,7 +636,12 @@ legs, but the normal version can have them selectively"*).
   (scratch). `pnpm run check` «66 steps, all green», `build` green,
   `check:coplanar` green; chain verified by parsing `scripts` (66 = the
   design branch's 65 + the sphere's `check:arrival-camera`; every step of
-  both parents present).
+  both parents present). One note for the reviewer: `check:park-boot`
+  charges wall-clock to a generator-step budget, and on the scratch merge it
+  went red once with **0 work units** in the offending slice while three of
+  my own sweeps were loading the box, then passed on re-run (15.8 ms, a real
+  `trainSearch` slice); that is the known park-boot defect (its own engineer
+  is on it), not this branch, and CI's quiet runner is the arbiter.
 
 **Red proofs (each reverted by inverse edit):** claims 1 cm wider than
 searched → red on both rings; `layout.falseRefusal` → red on seed 1;
