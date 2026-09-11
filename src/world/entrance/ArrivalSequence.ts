@@ -23,7 +23,6 @@ import {
   CAT_BUS_DOOR_DROP,
   CAT_BUS_LONGEST_WALK_TO_DOOR,
   CAT_BUS_SEAT_COUNT,
-  CAT_BUS_TOP,
   type CatBusHandle,
 } from './catBus';
 import {
@@ -360,6 +359,19 @@ const ARRIVAL_GROUND_BEARINGS = 12;
 export const ARRIVAL_FOLLOW_DISTANCE = 12;
 
 /**
+ * **How far out in the park the door shot stands, in metres.**
+ *
+ * Jim, 11 September 2026: *"the camera should FACE the doors of the bus while
+ * the player gets off."* Under the perspective rig this is the framing and not
+ * merely an occlusion control: at 6.5 m, square-on to the flank, the whole cat
+ * bus is in frame with the open door and its step at the middle of it, and a
+ * child stepping down lands at about a third of the frame's height. Measured by
+ * standing the shot there and looking at it, which is the only way a
+ * composition number is ever right.
+ */
+const ARRIVAL_DOOR_STAND_BACK = 6.5;
+
+/**
  * **PROTOTYPE (#511). How wide a slice of world the shot frames at her own
  * distance, in metres.**
  *
@@ -372,9 +384,6 @@ export const ARRIVAL_FOLLOW_DISTANCE = 12;
  */
 const ARRIVAL_FRAME_AT_PLAYER = 9;
 
-/** The pitch the shot holds while the bus is the subject. Shallower than the
- *  rig's 38, because the bus is a long low thing and 38 looks down on its roof. */
-const ARRIVAL_BUS_PITCH_DEGREES = 30;
 
 /**
  * How tall the frame is while the arrival owns the camera, in metres of world.
@@ -387,17 +396,6 @@ const ARRIVAL_BUS_PITCH_DEGREES = 30;
 const ARRIVAL_FOLLOW_FRAME_HEIGHT = ARRIVAL_FRAME_AT_PLAYER;
 export const ARRIVAL_FOLLOW_ZOOM = CAMERA_VIEW_HEIGHT / ARRIVAL_FOLLOW_FRAME_HEIGHT;
 
-/**
- * How long the bearing takes to come home to the rig's own yaw at the end.
- *
- * **The only interpolation left in the shot, and it is about her thumb rather
- * than the picture.** GAME_DESIGN.md's CONTROL rule reads "up on the stick"
- * through the camera's yaw, so handing her the controls while the bearing is
- * still moving sends her somewhere that is not up the screen. Snapping it at
- * the hand-over would be a visible cut on the frame she takes control, which is
- * the worst possible instant for one.
- */
-const ARRIVAL_YAW_HOME_SECONDS = 0.6;
 
 export const ARRIVAL_EYE_FLOOR_MARGIN = 0.3;
 
@@ -553,53 +551,6 @@ function squareOnToTheDoorDegrees(): number {
   return arrivalShotGeometry().squareOnDegrees;
 }
 
-/**
- * How far off square-on the door shot sits, in degrees, turned towards the
- * rig's own bearing — so the camera looks **along the kerb** at the bus rather
- * than straight through the gateway at it.
- *
- * **This is the number that decides whether the arch frames the shot or lands
- * on top of it**, and the reason is the projection rather than taste. An
- * orthographic camera puts everything on the view axis at the same screen
- * point, however far apart the two things are — so from square-on, where the
- * gate, the door and the lens are collinear, the arch draws itself squarely
- * across the doorway at the same size it would be if it were touching the bus.
- * It was photographed doing exactly that: the LAND OF GOOD PLACES sign lying
- * across a child's chest as she stepped down. There is no pitch and no zoom
- * that moves it, because in this projection nothing about distance moves
- * anything.
- *
- * Turned this far down the kerb the arch stands at the edge of frame, as the
- * thing she is about to walk under rather than a thing across her. It also
- * gives the doorway some depth — dead square-on to an orthographic bus is a
- * flat elevation drawing — and shortens the arc the camera has to travel on
- * the way home, so the swing under the arch stays a move rather than a spin.
- *
- * **The quantity this is really setting**, and the one to re-measure if the
- * bus stop ever moves, is the screen-horizontal separation between the drop
- * point the shot orbits and the arch's *nearer pier*:
- *
- * ```
- * separation = D · sin θ − ENTRANCE_GATE_HALF_WIDTH · cos θ
- *              where D = distance from the drop to the gate line
- * ```
- *
- * Measured today: D = 7.70 m, θ = 60° → **4.52 m**. The working band is
- * roughly **2 m** at the bottom — a child is `CHILD_FOOTPRINT` 1.53 m across,
- * and below that the pier is drawn on top of her, which at θ = 25° it is
- * (−0.64 m: the pier is past her) — and the frame's own half-width at the top,
- * **7.17 m** on a 16:10 screen at {@link ARRIVAL_DOOR_ZOOM}, beyond which the
- * arch leaves the frame entirely and stops framing anything. On a 390×844
- * phone that ceiling is only **3.29 m**, so the arch is already at the very
- * edge there.
- *
- * **`D` is not a constant — it is wherever the bus put its door**, so a stop
- * that moves nearer the wall shrinks the whole band. At D = 4.5 m the
- * separation cannot exceed 4.5 m at any θ, and 60° would give 1.75 m, which is
- * under the floor. That is not a number to nudge; it is a sign the shot needs
- * its focus moved out along the bus rather than its bearing turned further.
- */
-const ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 0;
 
 /**
  * The bearing the door shot is taken from. **Square-on, and nothing else.**
@@ -625,12 +576,20 @@ const ARRIVAL_DOOR_THREE_QUARTER_DEGREES = 0;
  * than watch her come towards it.
  */
 export function arrivalDoorYawDegrees(): number {
-  const squareOn = squareOnToTheDoorDegrees();
-  return (
-    squareOn +
-    Math.sign(angleDelta(squareOn * DEG, CAMERA_YAW_DEGREES * DEG)) *
-      ARRIVAL_DOOR_THREE_QUARTER_DEGREES
-  );
+  const facing = busFacingAtStop(BUS_STOP_AT);
+  // **Straight out of the bus's door flank.** The door is on the bus's local
+  // -X side — `CAT_BUS_DOOR_DROP.x` comes from `STEP_X`, which is negative —
+  // so this is the world direction that bus-local unit vector maps to, through
+  // `busLocalToWorld`'s own rotation with the stop's translation dropped
+  // because a direction has none. The sign is read off the drop rather than
+  // written down, so a bus whose door moved to the other flank turns the shot
+  // round with it.
+  const side = Math.sign(CAT_BUS_DOOR_DROP.x) || -1;
+  const outX = side * Math.cos(facing);
+  const outZ = -side * Math.sin(facing);
+  // `cameraOffset` puts the eye at `focus + (sin yaw, ., cos yaw) * distance`,
+  // so the bearing wanted is simply that direction read as a yaw.
+  return Math.atan2(outX, outZ) / DEG;
 }
 
 /**
@@ -675,7 +634,7 @@ export function arrivalDoorYawDegrees(): number {
  * {@link arrivalShot}, which now holds zero through the gateway and does the
  * whole climb afterwards.
  */
-const ARRIVAL_DOOR_PITCH_DEGREES = 0;
+const ARRIVAL_DOOR_PITCH_DEGREES = 9;
 
 /**
  * How far short of the gate line the door shot stands, in metres.
@@ -742,33 +701,7 @@ function arrivalDoorDistance(): number {
 }
 
 
-/**
- * How much air the close shot leaves around a child, as a multiple of her own
- * height.
- *
- * **The subject is the child, not the bus**, and that is the change Jim asked
- * for: *"as the child gets out of the bus I want the camera much closer to
- * them."* It used to frame {@link CAT_BUS_TOP} — the whole vehicle, ears
- * included — which put her at a sixth of the frame with the bus filling the
- * rest. Framed against {@link TALLEST_CHILD_HEIGHT} instead she is nearly half
- * of it, and the bus becomes the thing she is stepping out of rather than the
- * thing being photographed.
- *
- * Still derived rather than dialled: a child who grows re-frames the shot, the
- * same way a bus that grew used to.
- *
- * **2.2 -> 1.7 on 6 September 2026**, on Jim's *"it just needs to be closer to
- * the player"* against the sphere preview. She goes from 45% of frame height to
- * **59%**. The floor on this number is her own feet: at zero pitch the aim sits
- * {@link ARRIVAL_EYE_COMPOSITION_LIFT} above her eyeline, so a tighter frame
- * crops her from the bottom before it crops her head. `check:arrival-camera`
- * measures the margin under her feet and fails if it goes.
- */
-const ARRIVAL_CLOSE_FRAMING_AIR = 1.7;
 
-/** The push-in on the doorway itself, once the bus has stopped. */
-const ARRIVAL_DOOR_ZOOM =
-  CAMERA_VIEW_HEIGHT / (TALLEST_CHILD_HEIGHT * ARRIVAL_CLOSE_FRAMING_AIR);
 
 
 /**
@@ -1047,13 +980,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     yawDegrees:
       CAMERA_YAW_DEGREES +
       (angleDelta(CAMERA_YAW_DEGREES * DEG, arrivalDoorYawDegrees() * DEG) / DEG) *
-        (1 -
-          smoothstep(
-            0,
-            1,
-            (elapsed - (ARRIVAL_CONTROL_AT - ARRIVAL_YAW_HOME_SECONDS)) /
-              ARRIVAL_YAW_HOME_SECONDS,
-          )),
+        (1 - homeT(elapsed)),
     // **Head height, at the park camera's own angle.**
     //
     // This was `0` — "at head height means looking level" — and that reading
@@ -1093,7 +1020,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     // frame being centred on her head at {@link ARRIVAL_FOLLOW_FRAME_HEIGHT},
     // and it still is. What the pitch buys is that the lower half of that
     // frame has ground in it.
-    pitchDegrees: lerp(ARRIVAL_BUS_PITCH_DEGREES, CAMERA_PITCH_DEGREES, homeT(elapsed)),
+    pitchDegrees: lerp(ARRIVAL_DOOR_PITCH_DEGREES, CAMERA_PITCH_DEGREES, homeT(elapsed)),
     // **PROTOTYPE (#511): the arrival is the CLOSE shot, and the park is the
     // far one.** Under perspective the park rig stands 90 m off behind a
     // 9.5-degree telephoto; 12 m with a 40-degree lens is intimate and has real
@@ -1101,14 +1028,28 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     // rig as she walks in, which reads as the world opening up around her
     // rather than as a cut. It lands exactly on the rig by `ARRIVAL_CONTROL_AT`,
     // over the same window the bearing uses, so the hand-over is invisible.
-    distance: lerp(ARRIVAL_FOLLOW_DISTANCE, CAMERA_DISTANCE, homeT(elapsed)),
+    distance: lerp(ARRIVAL_DOOR_STAND_BACK, CAMERA_DISTANCE, homeT(elapsed)),
     zoom: lerp(ARRIVAL_FOLLOW_ZOOM, 1, homeT(elapsed)),
     ownsTheZoom: true,
-    // **Never.** "Fixed on the player" is the rule, so the ordinary damped
-    // player-follow is the whole of the tracking and there is no second focus
-    // to arbitrate against. The door beat that used to orbit `doorFocus` is
-    // gone with the rest of the choreography.
-    watchesTheDoor: false,
+    // **While she is still getting off, yes.** Jim, 11 September 2026: *"the
+    // camera should FACE the doors of the bus while the player gets off, then
+    // travel with the player under the arch."* Those are two subjects, so they
+    // are two focus points, and this is the switch between them.
+    //
+    // **Orbiting the player through the door beat is what put the lens inside
+    // the bus.** She is aboard for the whole of it — measured on the canonical
+    // seed at the beat's first frame, she stands at (1.07, 78.43) while the
+    // bus's own shell is centred at (-2.56, 78.94) — so a camera aimed at her
+    // is a camera aimed into the vehicle, and at any stand-back that puts
+    // seat backs and pillars between it and its subject. Aimed at the **drop**
+    // instead — (0.95, 74.95), out on the pavement — the same bearing shows the
+    // flank, the open door and the step she is about to come down.
+    //
+    // It goes false the moment she is walking in, and the ordinary damped
+    // follow then carries the shot from the drop to her: that glide *is* beat
+    // two, and it costs nothing to express because `IsoCamera` damps its focus
+    // already.
+    watchesTheDoor: elapsed < AT_WALKING,
   };
 }
 

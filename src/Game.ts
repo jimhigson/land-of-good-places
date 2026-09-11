@@ -1762,7 +1762,17 @@ export class Game {
           this.camera.snapShotOverride(shot.yawDegrees, shot.pitchDegrees, shot.distance);
         }
         // The focus is *claimed* here, not written — see `focusClaim` below.
-        if (shot.watchesTheDoor) focusClaim = arrival.doorFocus;
+        if (shot.watchesTheDoor) {
+          focusClaim = arrival.doorFocus;
+          // **And the focus opens on its mark too, not only the pose.** The
+          // snap above fixes where the eye *stands*; the focus is damped like
+          // the ordinary follow, so on the engaging frame the camera would
+          // still swing from the player — who is aboard the bus — out to the
+          // drop on the pavement. That is the same swoop Jim ruled against,
+          // one field along. Safe only on this frame, for the same reason and
+          // by the same flag.
+          if (!this.arrivalCameraEngaged) this.camera.snapTo(focusClaim);
+        }
         this.arrivalCameraEngaged = true;
       }
     }
