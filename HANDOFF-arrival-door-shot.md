@@ -92,15 +92,84 @@ t=7.63  eye (21.5, 9.6, 80.7) fov 18.1   through the arch, drawing back on the r
 t=10.14 eye (48.0, 55.4, 101.5) fov 9.5  the rig exactly
 ```
 
+## The check
+
+`check:arrival-camera` was **re-read, not deleted**. Every clause that only held
+for the old orthographic, zero-pitch, fixed-stand-back shot is struck (the file's
+own header lists which and why); what is left is Jim's sentence, one clause each,
+plus the two that are not composition — the bearing is home when she takes the
+controls, and the lens is never in the ground.
+
+The square-on clause had to be **rebuilt out of world points off the standing
+bus** (new export `arrivalBusPointWorld`). Asking `arrivalDoorYawDegrees`
+whether the shot agrees with it is a tautology, and it was proved so by
+mutation: adding 20° inside that function moved the shot and the expectation
+together and the clause stayed green.
+
+**Ten mutations proved red**, with the geometry they were proved against, in the
+check's own docblock — plus **two that did not reach a clause**, recorded there
+as the honest measure of how much slack each has. `20 checks, exit 0` on all ten
+pool seeds.
+
+## Widened past one seed
+
+`LGP_SEED=<n> pnpm run check:arrival-camera` on every seed in `PARK_SEED_POOL`:
+all ten exit 0.
+
+**With a control on the instrument first**, because the numbers barely move
+between seeds and that is exactly what a seed pin that is not reaching the
+module looks like. The control shows it is:
+
+```
+LGP_SEED=20260728  PARK_SEED=20260728  drop=(0.95,74.95)  busOrigin=(-2.57,78.94)  doorYaw=167.33
+LGP_SEED=128       PARK_SEED=128       drop=(1.61,75.84)  busOrigin=(-2.36,79.37)  doorYaw=160.24
+LGP_SEED=451       PARK_SEED=451       drop=(-2.17,77.24) busOrigin=(-2.11,82.55)  doorYaw=-150.69
+```
+
+A 42° spread of door bearing across three parks, and the shot follows it. The
+two numbers that *are* constant across seeds — the eye 11.0820 m off the bus's
+axis, square-on to 0.0000° — are constant **because they are facts in the bus's
+own local space**: the drop's offset from the axis plus the stand-back's ground
+run. That is the right answer, not a stuck one.
+
+## Gates
+
+| gate | exit |
+|---|---|
+| `pnpm run build` | **0** |
+| `pnpm run test:procgen` | **0** — 19 files, 601 tests |
+| `pnpm run check:swept-bus` | **0** |
+| `pnpm run check:park-pool` | **0** |
+| `pnpm run check:coplanar` | **1 — INHERITED RED, see below** |
+| `pnpm run check` | see the tail of this file |
+
+**`check:coplanar` is red and it is not this work.** Four findings, all on
+bridge / boundary-wall / rail-fence geometry:
+
+```
+MORE:  garden|park-train/railway-bridges/bridge/deck|…/bridge/shell        2 seams, recorded at 1
+WORSE: garden|garden/boundary-wall/boundary-blocks|park-train/rail-fence/… 0.280 m², recorded at 0.051 m²
+MORE:  garden|garden/boundary-wall/boundary-blocks|park-train/rail-fence/… 2 seams, recorded at 1
+NEW:   garden|…/bridge/shell|…/bridge/wallTop                              0.052 m², seed 326
+```
+
+**Proved inherited with a control**, not argued: a detached worktree at
+`d1a2055a` — the commit before any of this work — produces those four findings
+**byte for byte identical** (`diff` of both reports: no output). This branch is
+`feat/sphere-combined` and carries several other workstreams (the road route,
+the gate arch, the rail race, the railway bridges); those seams belong to
+whichever of them placed that geometry. CLAUDE.md's zero-tolerance rule means it
+has to be fixed before this lands — it is reported up rather than silently
+fixed, because nudging someone else's bridge apart is exactly the fix
+ART_DIRECTION.md §7 forbids, and deleting the right hidden face needs whoever
+owns that geometry.
+
 ## Still unproven
 
-- **One seed only.** Everything above was measured on whatever seed the dev
-  server booted. The bearing is derived from the road facing at the stop, so it
-  should follow a curved road, but that has not been checked on a second seed.
-- **No checks were run.** `check:arrival-camera` in particular asserts things
-  about the old zero-pitch shot (ground clearance under the eye, her feet in
-  frame) and will need re-reading against the new one before the gates come
-  back on. `pnpm exec tsc --noEmit` is clean.
+- **The browser measurements are one seed only.** The ten-seed sweep above is
+  of the *declared* shot. What `IsoCamera` realises from it was watched in a
+  real browser on one park; the check says on every run that it cannot see that
+  gap, and a five-day fault once lived in exactly it.
 - A lamp post beside the gate crosses the lens briefly during the travel beat
   (visible around t = 7.3 s). Real park furniture, not a camera fault, but worth
   a look if Jim mentions it.
