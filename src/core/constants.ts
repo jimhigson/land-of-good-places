@@ -603,12 +603,13 @@ export const BALL_PIT_COUNT = 900;
 
 // ----------------------------------------------------------------- camera
 
-/**
- * Pseudo-isometric rig, Theme Park style: an orthographic camera at one fixed
- * downward pitch and one fixed compass angle. It never rotates, in 90° steps
- * or otherwise — see ARCHITECTURE.md, "One camera angle, forever".
- */
-export const CAMERA_IS_ORTHOGRAPHIC = true;
+// `CAMERA_IS_ORTHOGRAPHIC = true` stood here until 11 September 2026, when Jim
+// ruled *"ALL cameras EVERYWHERE perspective."* It is deleted rather than set
+// to `false`, because **nothing in the game ever read it** — it was cited only
+// in prose, which is the worst possible shape for a fact: a second definition
+// of the projection that no code could contradict and no check could catch
+// going stale. `IsoCamera` builds the rig and is the only owner of what it is.
+// The pitch and the yaw below are unchanged; only the projection moved.
 
 /** Downward pitch of the camera in degrees. Theme Park sat around 35–40°. */
 export const CAMERA_PITCH_DEGREES = 38;

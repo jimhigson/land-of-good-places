@@ -22,10 +22,21 @@
  * - *"there is a floor in the picture"* — a march of the frame's top ray down
  *   the far plane. Its whole argument is that **an orthographic projection has
  *   parallel rays**, so pitch is the only thing that makes any of them descend.
- *   The arrival route is a `PerspectiveCamera` (`perspectiveFlag.ts`'s
- *   `onTheArrivalRoute`), whose rays diverge, so the quantity it computed is
- *   not a fact about this picture. Struck rather than adapted: a check that has
- *   to be re-derived for a different projection is a new check.
+ *   The park camera is a `PerspectiveCamera` now, always and for every route,
+ *   so its rays diverge and the quantity it computed is not a fact about this
+ *   picture. Struck rather than adapted: a check that has to be re-derived for
+ *   a different projection is a new check.
+ *
+ *   **This struck-through reasoning was very nearly wrong**, and the near-miss
+ *   is the most useful thing in this file. It originally cited
+ *   `perspectiveFlag.ts`'s `onTheArrivalRoute()` as proof the arrival is
+ *   perspective. That function was a literal pathname test: `/arrive` → true,
+ *   `/` → false. A child boots at `/`, `arrivalIsDue()` fires, and nothing in
+ *   `src/` ever put `/arrive` in the URL — **so a real player's arrival was
+ *   orthographic**, and this clause would have been struck as describing a
+ *   camera we do not ship while guarding the projection a child actually got.
+ *   The flag is deleted and the rig is perspective unconditionally, which is
+ *   what makes the striking honest.
  * - *"the shot holds exactly one pitch, the rig's"* — the shot now tilts from
  *   {@link ARRIVAL_DOOR_PITCH_DEGREES} up to the rig's across the walk, which
  *   is the hand-over Jim asked for.
@@ -56,7 +67,22 @@
  * shot never returns null            "the shot must let go at ARRIVAL_CONTROL_AT", and "stay let go"
  * ARRIVAL_EYE_HEIGHT -> -3           -2.0317 m of clearance against a 0.3 m floor
  * door pitch -> -32 degrees          -1.3766 m of clearance against a 0.3 m floor
+ * stand-back 6.5 -> 60               lens 8.5783 deg; eye 11.5025 m up, over a 5.9751 m roof
+ * stand-back 6.5 -> 3.9              lens 98.1712 deg
+ * door pitch 9 -> 60                 eye 7.7456 m up, over a 5.9751 m roof
+ * framing 9 m -> 30 m                lens 133.1426 deg; frame 53.3333 m wide against a 15.8302 m bus
+ * framing 9 m -> 4 m                 frame 4.0000 m tall against a 5.9751 m bus
  * ```
+ *
+ * **The last five were added on the same day after a review found them
+ * passing**, and the reason they passed is worth more than the clauses: the
+ * stand-back does **not** change the framing under this rig. `applyFrustum`
+ * solves `fov` from the eye's real distance so the zoom frames
+ * `ARRIVAL_FRAME_AT_SUBJECT` metres *at the subject* whatever the distance —
+ * so a 60 m stand-back frames the same 9 m of bus as a 6.5 m one, through a
+ * telephoto with the whole park in the way. Every clause asking about the frame
+ * was structurally blind to it. What moves is the **lens**, and that is what is
+ * asked now.
  *
  * Two mutations that did **not** reach a clause, recorded because they are the
  * honest measure of how much slack there is: `ARRIVAL_EYE_HEIGHT -> 0.05` left
@@ -66,6 +92,13 @@
  * against a 3.62 m half-width. Neither is a hole — both are clauses that only
  * fire on a fault big enough to matter — but a replacement should not expect
  * either to catch a nudge.
+ *
+ * **One bar was deliberately not taken**, and it is recorded so nobody
+ * re-derives it and thinks it was missed: re-asserting the bus's length fit
+ * *after* the tilt's foreshortening. At the shipped 9° that is 15.8030 m
+ * against a 15.8302 m bus — a fail by 2.7 cm, which is the width clause
+ * re-litigated at a hair's stricter bar rather than anything anyone could see.
+ * The tilt is fenced by the bus's own roofline instead.
  *
  * ## What this file still cannot see, and says so on every run
  *
@@ -81,6 +114,7 @@ import {
   CAMERA_PITCH_DEGREES,
   CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
+  cameraViewHalfHeight,
 } from '../src/core/constants.ts';
 import { angleDelta, DEG } from '../src/core/mathUtils.ts';
 import {
@@ -95,7 +129,11 @@ import {
   arrivalShot,
   type ArchPass,
 } from '../src/world/entrance/ArrivalSequence.ts';
-import { CAT_BUS_TRACK_WIDTH } from '../src/world/entrance/catBus.ts';
+import {
+  CAT_BUS_LENGTH,
+  CAT_BUS_TOP,
+  CAT_BUS_TRACK_WIDTH,
+} from '../src/world/entrance/catBus.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 
 const STEP = 1 / 60;
@@ -187,7 +225,6 @@ check(walkFrames.length > 10, `only ${walkFrames.length} walk-beat frames — th
   let closestAt = 0;
   for (const { t, shot } of doorFrames) {
     const eye = cameraOffset(shot.yawDegrees * DEG, shot.pitchDegrees * DEG, shot.distance);
-    const run = Math.hypot(eye.x, eye.z);
     // How far round from the flank's own normal the eye stands, in degrees.
     const off = Math.abs(Math.atan2(eye.x * flankZ - eye.z * flankX, eye.x * flankX + eye.z * flankZ) / DEG);
     if (off > worstOff) {
@@ -203,7 +240,6 @@ check(walkFrames.length > 10, `only ${walkFrames.length} walk-beat frames — th
     const dx = eyeX - origin.x;
     const dz = eyeZ - origin.z;
     const across = Math.abs(dx * alongZ - dz * alongX);
-    void run;
     if (across < closest) {
       closest = across;
       closestAt = t;
@@ -217,6 +253,111 @@ check(walkFrames.length > 10, `only ${walkFrames.length} walk-beat frames — th
       'for here, and the flank above is measured off the standing bus, not taken from the ' +
       'shot\'s own expression for it',
   );
+
+  // **The three numbers Jim judged off a screenshot, fenced.**
+  //
+  // Proved unfenced by mutation on 11 September 2026, before this existed:
+  // `ARRIVAL_DOOR_STAND_BACK` 6.5 -> **60** exited 0 (the eye 63.9 m off the
+  // bus's axis, right across the park), 6.5 -> **3.9** exited 0, and
+  // `ARRIVAL_DOOR_PITCH_DEGREES` 9 -> **60** exited 0 — a camera looking down
+  // on the bus's roof passes "FACE the doors" on bearing alone. Every one of
+  // those is a shot nobody would accept.
+  //
+  // **The stand-back does not change the framing here, which is the whole trap.**
+  // `IsoCamera.applyFrustum` solves `fov` from the eye's real distance so that
+  // the zoom still frames `ARRIVAL_FRAME_AT_SUBJECT` metres AT the subject —
+  // so a 60 m stand-back frames the same 9 m of bus as a 6.5 m one, just
+  // through a telephoto with the whole park in the way. A clause asking "does
+  // the bus fit the frame" therefore cannot see either mutation. What moves is
+  // the **lens**: 98.5° at 3.9 m, 69.4° at 6.5 m, 8.6° at 60 m. One quantity,
+  // both directions, and it is the quantity a photographer would name.
+  {
+    const opening = doorFrames[0];
+    const halfFrame = opening ? CAMERA_VIEW_HEIGHT / (2 * opening.shot.zoom) : NaN;
+    const fov = opening ? (2 * Math.atan(halfFrame / opening.shot.distance)) / DEG : NaN;
+    console.log(`the door beat's lens is ${show(fov)}° across the frame's height`);
+    // A real lens, both ends. Below ~35° the bus is a distant object and the
+    // park is between the two; above ~85° it is a fisheye pressed against the
+    // doorway. 69.4° is the shot Jim approved.
+    const WIDEST = 85;
+    const LONGEST = 35;
+    check(
+      fov <= WIDEST,
+      `the door beat's lens is ${show(fov)}° — wider than ${WIDEST}°, which is a fisheye held ` +
+        'against the doorway rather than a camera facing it',
+    );
+    check(
+      fov >= LONGEST,
+      `the door beat's lens is ${show(fov)}° — longer than ${LONGEST}°, so the camera is a long ` +
+        'way off with the park between it and the bus. The frame is unchanged (the fov ' +
+        'compensates), which is exactly why nothing else here can see it',
+    );
+
+    // **And the whole bus is in the picture**, asked of the bus's own
+    // dimensions the way `CAT_BUS_TRACK_WIDTH` already is. `frustumBase` is the
+    // one owner of how the frame is sized for an aspect, so it is called rather
+    // than restated — a hand-kept copy of that `max` is what `IsoCamera`'s own
+    // docblock warns about.
+    const frameAt = (aspect: number): { width: number; height: number } => {
+      const half = cameraViewHalfHeight(aspect) / (opening ? opening.shot.zoom : NaN);
+      return { width: half * 2 * aspect, height: half * 2 };
+    };
+    const LANDSCAPE = 16 / 9;
+    const wide = frameAt(LANDSCAPE);
+    console.log(
+      `at 16:9 the opening frame is ${show(wide.width)} x ${show(wide.height)} m at the drop, ` +
+        `against a bus ${show(CAT_BUS_LENGTH)} m long and ${show(CAT_BUS_TOP)} m tall`,
+    );
+    check(
+      wide.height >= CAT_BUS_TOP,
+      `the opening frame is ${show(wide.height)} m tall and the bus is ${show(CAT_BUS_TOP)} m — ` +
+        'it does not fit, so "FACE the doors of the bus" is showing part of a bus',
+    );
+    check(
+      wide.width >= CAT_BUS_LENGTH,
+      `at 16:9 the opening frame is ${show(wide.width)} m wide and the bus is ` +
+        `${show(CAT_BUS_LENGTH)} m long — it does not fit`,
+    );
+    check(
+      wide.width <= CAT_BUS_LENGTH * 2,
+      `at 16:9 the opening frame is ${show(wide.width)} m wide against a ${show(CAT_BUS_LENGTH)} m ` +
+        'bus — more than twice its length, so the bus is a detail in a wide shot',
+    );
+
+    // **The tilt, fenced by the bus's own roofline.**
+    //
+    // "Facing the doors" and "looking down on the roof" are separated by one
+    // fact and it is not a matter of taste: **where the eye is relative to the
+    // top of the bus.** Below it you see the flank, the doorway and a child in
+    // it; above it the roof is the largest thing in frame and the doorway is
+    // foreshortened to a slot. So this is asked of {@link CAT_BUS_TOP}, not of
+    // a tolerance in degrees.
+    //
+    // Deliberately **not** re-asserting the length fit after foreshortening,
+    // which is the obvious-looking version of this clause: at the shipped 9° it
+    // came to 15.8030 m against a 15.8302 m bus and failed by 2.7 cm, which is
+    // the width clause above being re-litigated at a hair's stricter bar rather
+    // than anything anyone could see.
+    const worstPitch = Math.max(...doorFrames.map((f) => f.shot.pitchDegrees));
+    const eyeAbove = doorFrames.reduce(
+      (highest, f) =>
+        Math.max(
+          highest,
+          ARRIVAL_EYE_HEIGHT + Math.sin(f.shot.pitchDegrees * DEG) * f.shot.distance,
+        ),
+      -Infinity,
+    );
+    console.log(
+      `the door beat's steepest tilt is ${show(worstPitch)}°, putting the eye ` +
+        `${show(eyeAbove)} m over the pavement against a ${show(CAT_BUS_TOP)} m roof`,
+    );
+    check(
+      eyeAbove <= CAT_BUS_TOP,
+      `the eye rides ${show(eyeAbove)} m over the pavement at ${show(worstPitch)}° of tilt, above ` +
+        `the bus's own ${show(CAT_BUS_TOP)} m roof — it is looking DOWN on the vehicle rather ` +
+        'than facing its doors',
+    );
+  }
 
   const half = CAT_BUS_TRACK_WIDTH / 2;
   console.log(

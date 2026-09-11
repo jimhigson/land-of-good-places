@@ -1,5 +1,4 @@
-import { OrthographicCamera, PerspectiveCamera, Vector2, Vector3 } from 'three';
-import { perspectiveParkCamera, zoomMinOverride } from './perspectiveFlag';
+import { PerspectiveCamera, Vector2, Vector3 } from 'three';
 import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
@@ -23,13 +22,21 @@ import type { ParkBoundary } from '../world/boundary';
 /**
  * The Theme Park camera.
  *
- * An orthographic camera pinned at one fixed downward pitch and one fixed
+ * A **perspective** camera pinned at one fixed downward pitch and one fixed
  * compass angle, for the life of the app — see ARCHITECTURE.md, "One camera
  * angle, forever". Theme Park itself let you spin the view in 90° steps; this
  * park does not, so everything built into it is instead authored to read
- * correctly from this one angle. Orthographic (rather than perspective) is
- * what sells the classic look: parallel lines stay parallel, so the park
- * reads like a toy model rather than a first-person world.
+ * correctly from this one angle.
+ *
+ * **It was orthographic until 11 September 2026**, on the reasoning that
+ * parallel lines staying parallel is what sells the toy-model look. Two things
+ * outranked that. The ground is a sphere now (#511), and an orthographic
+ * projection draws a horizon at its true distance rather than compressing it —
+ * 870 m up-screen against a frame 29 m tall — so it simply cannot show one.
+ * And Jim, 11 September 2026: *"ALL cameras EVERYWHERE perspective."* The
+ * pitch, the yaw and the framing at the focus are all unchanged; what a
+ * perspective lens adds is that things nearer than the player grow and things
+ * beyond her shrink.
  *
  * Movement input is interpreted through {@link forward} / {@link right} so
  * that "up" on the stick always means "up the screen" — a fixed rig still
@@ -37,7 +44,7 @@ import type { ParkBoundary } from '../world/boundary';
  * them.
  */
 export class IsoCamera {
-  readonly camera: OrthographicCamera | PerspectiveCamera;
+  readonly camera: PerspectiveCamera;
 
   /** Point the camera orbits. Damped towards the follow target every frame. */
   private readonly focus = new Vector3();
@@ -86,7 +93,7 @@ export class IsoCamera {
    * answer to "how far out can this camera go?", which is also what any future
    * caller wanting to *report* the floor should read.
    */
-  private readonly zoomMin: number = zoomMinOverride() ?? CAMERA_ZOOM_MIN;
+  private readonly zoomMin: number = CAMERA_ZOOM_MIN;
 
   /**
    * A fixed world point the camera orbits instead of the ordinary follow
@@ -186,25 +193,33 @@ export class IsoCamera {
     this.forwardVector = new Vector3(basis.upX, 0, basis.upZ);
     this.rightVector = new Vector3(basis.rightX, 0, basis.rightZ);
 
-    // **PROTOTYPE (#511): a perspective park camera behind a URL flag.**
+    // **The park camera is a perspective one, always.** Jim, 11 September
+    // 2026: *"ALL cameras EVERYWHERE perspective."*
     //
-    // Not a migration. `?projection=perspective` builds a `PerspectiveCamera`
-    // in the *same place*, at the *same* pitch and yaw, so the only thing that
-    // changes is the projection — ARCHITECTURE.md fixes the angle and this
-    // does not touch it.
+    // The same place, the same pitch and the same yaw as the orthographic rig
+    // it replaces — ARCHITECTURE.md fixes the angle and this does not touch
+    // it. Only the projection changed.
     //
-    // Why it exists: an orthographic projection has no convergence, so a
-    // horizon is drawn at its true distance rather than compressed to a line.
-    // Jim's sphere (#511) does have a horizon — at 870 m for a bus-safe
-    // radius — and ortho simply cannot show it, because the frame is ~29 m
-    // tall and the ground clips at 270 m. Perspective is the projection in
-    // which distance compresses, so a horizon lands in frame at all.
+    // Why: an orthographic projection has no convergence, so a horizon is
+    // drawn at its true distance rather than compressed to a line. The ground
+    // sphere (#511) does have a horizon — at 870 m for a bus-safe radius — and
+    // ortho simply cannot show it, because the frame is ~29 m tall and the
+    // ground clips at 270 m. Perspective is the projection in which distance
+    // compresses, so a horizon lands in frame at all.
     //
-    // `far` is deliberately far past the ortho rig's `CAMERA_DISTANCE * 3`:
+    // **This was a `?projection=` flag until 11 September 2026, and the flag
+    // defaulting by ROUTE is what nearly shipped a shot nobody had seen.**
+    // `onTheArrivalRoute()` was a literal pathname test: `/arrive` got
+    // perspective and `/` did not. A child boots at `/`, `arrivalIsDue()`
+    // fires, and nothing in `src/` ever pushes `/arrive` into the URL — so
+    // every frame of the arrival that anyone shot, judged and approved was of
+    // a projection **no player would ever get**. The pitch, the stand-back and
+    // the framing of the approved shot were all read off those frames. One
+    // projection, chosen once, is the only version of this that cannot drift.
+    //
+    // `far` is deliberately far past the old ortho rig's `CAMERA_DISTANCE * 3`:
     // the whole question is what is visible a long way off.
-    this.camera = perspectiveParkCamera()
-      ? new PerspectiveCamera(50, 1, 0.1, 6000)
-      : new OrthographicCamera(-1, 1, 1, -1, 0.1, CAMERA_DISTANCE * 3);
+    this.camera = new PerspectiveCamera(50, 1, 0.1, 6000);
     this.camera.position.copy(this.offset);
     this.applyFrustum();
   }
@@ -226,12 +241,12 @@ export class IsoCamera {
 
   /**
    * The ground point the camera is orbiting — usually right on top of the
-   * player. **Not** the camera's own position: this is an orthographic rig,
-   * so the camera sits a fixed `CAMERA_DISTANCE` back at every zoom level,
-   * and a straight-line distance to *that* would be roughly constant no
-   * matter what is actually on screen. Anything checking "is this far from
-   * what the camera is looking at" — a name label deciding whether to hide,
-   * say — wants distance to this point instead.
+   * player. **Not** the camera's own position: the rig sits a fixed
+   * `CAMERA_DISTANCE` back at every zoom level, so a straight-line distance to
+   * *that* would be roughly constant no matter what is actually on screen.
+   * Anything checking "is this far from what the camera is looking at" — a
+   * name label deciding whether to hide, say — wants distance to this point
+   * instead.
    */
   get focusPoint(): Readonly<Vector3> {
     // `viewFocus`, not `focus`: this answers "what is the camera looking at",
@@ -243,7 +258,7 @@ export class IsoCamera {
   }
 
   /**
-   * Half the height of the orthographic box, in world metres. Multiply a
+   * Half the frame's height **at the focus**, in world metres. Multiply a
    * screen-space offset measured in half-heights by this to get world metres,
    * or divide the other way — which is what the sky does with
    * {@link skyAnchor}.
@@ -252,36 +267,33 @@ export class IsoCamera {
     return this.focusHalfHeight;
   }
 
-  /** Half the width of the orthographic box, in world metres. */
+  /** Half the frame's width at the focus, in world metres. */
   get viewHalfWidth(): number {
     return this.focusHalfWidth;
   }
   /**
    * **Half the frame in world metres, at the focus** — the one place that
-   * answers it for either projection.
+   * answers it.
    *
-   * Orthographic has a single answer: the box is the frame everywhere. A
-   * perspective frame widens with distance, so "the frame in metres" is only
-   * meaningful at a stated depth, and the depth every caller means is the one
-   * the rig is focused on — `CAMERA_DISTANCE` away, where the player is.
+   * A perspective frame widens with distance, so "the frame in metres" has no
+   * single answer; it is only meaningful at a stated depth, and the depth every
+   * caller means is the one the rig is focused on, where the player is. The
+   * orthographic rig this replaced did have one answer — its box was the frame
+   * everywhere — which is why callers were written as though one existed.
    *
-   * **This is why the prototype's HUD placement is approximate rather than
-   * wrong-but-silent.** Callers that clamp a bubble or a name pill to the frame
-   * are asking a question that no longer has one answer; at the focus they get
-   * the right one, and nearer or further they get a slightly generous or
-   * slightly tight box. Named here rather than hidden so the consequence list
-   * in the PR can point at it.
+   * **So HUD placement is approximate rather than wrong-but-silent, and that
+   * is stated here rather than hidden.** Callers that clamp a speech bubble or
+   * a name pill to the frame get the right box at the focus, and a slightly
+   * generous or slightly tight one nearer and further. Nobody has reported it;
+   * it is written down so that whoever eventually does is met with a known
+   * consequence rather than a mystery.
    */
   private get focusHalfHeight(): number {
-    if (this.camera instanceof PerspectiveCamera) {
-      return Math.tan(((this.camera.fov / 2) * Math.PI) / 180) * this.eyeToFocusDistance;
-    }
-    return this.camera.top;
+    return Math.tan(((this.camera.fov / 2) * Math.PI) / 180) * this.eyeToFocusDistance;
   }
 
   private get focusHalfWidth(): number {
-    if (this.camera instanceof PerspectiveCamera) return this.focusHalfHeight * this.aspect;
-    return this.camera.right;
+    return this.focusHalfHeight * this.aspect;
   }
 
 
@@ -310,8 +322,8 @@ export class IsoCamera {
    * player is standing — see `world/Sky.setParallax`.
    *
    * Read straight off the camera's world matrix rather than by projecting a
-   * point, because the orthographic projection would divide the answer back
-   * out by the frustum size and the sky wants the metres, not the fraction.
+   * point, because projection would divide the answer back out by the frustum
+   * size and the sky wants the metres, not the fraction.
    */
   get skyAnchor(): Readonly<Vector2> {
     return this.anchor;
@@ -440,27 +452,32 @@ export class IsoCamera {
    * changed only the tilt — so the shot looked at the bus from the park's one
    * eternal compass angle, a few degrees flatter, and Jim's verdict on
    * watching it was *"why doesn't the camera follow into the park like asked
-   * for?"* and *"this is nothing like what I asked for."* He was right: **this
-   * is an orthographic rig, so the eye's distance along the view axis changes
-   * nothing you can see. Yaw, pitch and the focus point are the entire
-   * vocabulary of "the camera moved."** A shot that holds the yaw fixed has,
-   * visually, not moved at all.
+   * for?"* and *"this is nothing like what I asked for."* He was right, and for
+   * a reason that was true of the rig at the time: **it was orthographic, so
+   * the eye's distance along the view axis changed nothing you could see, and
+   * yaw, pitch and the focus point were the entire vocabulary of "the camera
+   * moved."** A shot that held the yaw fixed had, visually, not moved at all.
+   *
+   * **Under perspective the stand-back is a framing control as well**, so the
+   * vocabulary is wider now — but the fix that sentence bought (this method
+   * taking a yaw at all, rather than a pitch alone) is exactly as necessary.
    *
    * Stored as the **difference** from the normal pose, so
    * {@link clearPoseOverride} needs no memory of what the normal pose was and
    * cannot restore a stale copy of it, and so a shot that eases its own angles
    * back to the rig's lands on `(0, 0, 0)` exactly rather than near it.
    *
-   * **`distance` is an occlusion control, not a framing one**, and that is the
-   * one counter-intuitive thing here. An orthographic projection has no size
-   * falloff, so pulling the eye in does not make anything bigger — every object
-   * lands on exactly the same pixels. What it changes is *what is in the way*:
-   * only geometry between the eye and the subject can cover the subject, so a
-   * shot that stands 20 m back sees past the whole park, and one that stands
-   * the rig's 90 m back sees a coaster, a hotel tower and a castle turret drawn
-   * across it. That is not hypothetical — it is what the first three attempts
-   * at the arrival's door shot looked like, on three different bearings, on the
-   * same seed. Defaults to {@link CAMERA_DISTANCE}, which is the rig's own.
+   * **`distance` is a framing control AND an occlusion control**, and the
+   * second half is the one that catches people out. Under the perspective lens
+   * `applyFrustum` solves, pulling the eye in genuinely makes the subject
+   * bigger. It *also* changes what is in the way: only geometry between the eye
+   * and the subject can cover it, so a shot standing 20 m back sees past the
+   * whole park while one at the rig's 90 m can have a coaster, a hotel tower or
+   * a castle turret drawn across it. That is not hypothetical — it is what the
+   * first three attempts at the arrival's door shot looked like, on three
+   * different bearings, on the same seed, and it is why the arrival brings its
+   * bearing home *before* it draws the eye back. Defaults to
+   * {@link CAMERA_DISTANCE}, the rig's own.
    *
    * **Safe and expected to call every frame with a moving value.** Unlike
    * {@link setZoomTarget} nothing else in the game competes for this, so there
@@ -529,8 +546,8 @@ export class IsoCamera {
    * Not {@link CAMERA_DISTANCE}. That constant is where the eye sits when
    * *nothing* is overriding the pose, and treating it as "the distance" is
    * only right while that holds. `setShotOverride` exists precisely to break
-   * it: the arrival's door beat dives to about 6.6 m and threads the arch at
-   * 4.0 m, against the rig's 90 m.
+   * it: the arrival's door beat stands 6.5 m off the bus and the travel beat
+   * draws back from there to the rig's 90 m.
    *
    * **Why this matters only now.** Under an orthographic projection the
    * stand-back is inert for framing — sliding an ortho eye along its own view
@@ -688,26 +705,19 @@ export class IsoCamera {
     const previousZoom = this.zoomValue;
     this.zoomValue = damp(this.zoomValue, this.zoomTarget, 0.12, dt);
     if (Math.abs(this.zoomValue - previousZoom) > 1e-4) this.applyFrustum();
-    // **PROTOTYPE (#511): the perspective lens also has to follow the eye.**
-    //
-    // `applyFrustum` derives `fov` from {@link eyeToFocusDistance}, so under
-    // the perspective rig the lens depends on *two* things that move — the
-    // zoom and the stand-back — while only the zoom re-ran it. Any shot that
-    // dollies without touching zoom therefore kept a fov solved for wherever
-    // the camera used to be: measured on the cat-bus arrival, a 12 m
+    // **The lens follows the eye.** `applyFrustum` derives `fov` from
+    // {@link eyeToFocusDistance}, so the lens depends on *two* things that
+    // move — the zoom and the stand-back — while only the zoom re-ran it. Any
+    // shot that dollies without touching zoom therefore kept a fov solved for
+    // wherever the camera used to be: measured on the cat-bus arrival, a 12 m
     // stand-back rendered at **5.7 degrees** (the lens for 90 m) at three
     // beats and a correct **41.1 degrees** at the one beat whose zoom happened
     // to still be moving. That is two definitions of the framing kept in step
     // by hand, and the hand let go the moment a shot moved the camera.
-    //
-    // Ortho is untouched: its frustum does not depend on the distance at all,
-    // so the guard costs it nothing.
-    if (this.camera instanceof PerspectiveCamera) {
-      const reach = this.eyeToFocusDistance;
-      if (Math.abs(reach - this.lastFrustumReach) > 1e-3) {
-        this.lastFrustumReach = reach;
-        this.applyFrustum();
-      }
+    const reach = this.eyeToFocusDistance;
+    if (Math.abs(reach - this.lastFrustumReach) > 1e-3) {
+      this.lastFrustumReach = reach;
+      this.applyFrustum();
     }
 
     if (this.focusOverrideActive) {
@@ -788,13 +798,8 @@ export class IsoCamera {
       this.poseOffset.copy(this.poseTarget);
     }
     // **A perspective FOV is derived from the eye's real distance, so a moving
-    // pose changes it.** The ortho box does not depend on the stand-back at
-    // all, which is why this re-derivation did not exist before and why
-    // nothing needs it when the rig is orthographic.
-    if (
-      this.camera instanceof PerspectiveCamera &&
-      (this.poseOffset.x !== movedX || this.poseOffset.y !== movedY || this.poseOffset.z !== movedZ)
-    ) {
+    // pose changes it.**
+    if (this.poseOffset.x !== movedX || this.poseOffset.y !== movedY || this.poseOffset.z !== movedZ) {
       this.applyFrustum();
     }
   }
@@ -819,8 +824,8 @@ export class IsoCamera {
   }
 
   /**
-   * Half the height of the orthographic box **at zoom 1**, for the viewport
-   * this camera is currently sized to.
+   * Half the frame's height at the focus **at zoom 1**, for the viewport this
+   * camera is currently sized to.
    *
    * Framing is height-led — the same vertical slice of park on every machine —
    * but with a **minimum width**, because a portrait phone's aspect is under
@@ -898,30 +903,20 @@ export class IsoCamera {
     return (pixels * 2 * base) / (Math.max(worldMetres, 1e-6) * this.viewportHeight);
   }
 
-  /** Sizes the orthographic box. See {@link frustumBase} for the framing rule. */
+  /** Solves the lens. See {@link frustumBase} for the framing rule. */
   private applyFrustum(): void {
     const base = this.frustumBase();
     const halfHeight = base / this.zoomValue;
-    if (this.camera instanceof PerspectiveCamera) {
-      // **Match today's apparent scale at the focus.** The ortho rig frames
-      // `halfHeight` world metres top-to-centre; a perspective lens
-      // `CAMERA_DISTANCE` away frames the same amount when its half-fov is
-      // `atan(halfHeight / CAMERA_DISTANCE)`. Derived from the zoom rather
-      // than fixed, so every existing zoom level — including the cutscene
-      // framings that ask for a specific one — still frames what it asked
-      // for at the player's own distance. Things nearer than the focus grow
-      // and things beyond it shrink, which is the entire point of the
-      // prototype.
-      this.camera.fov = (2 * Math.atan(halfHeight / this.eyeToFocusDistance) * 180) / Math.PI;
-      this.camera.aspect = this.aspect;
-      this.camera.updateProjectionMatrix();
-      return;
-    }
-    const halfWidth = halfHeight * this.aspect;
-    this.camera.left = -halfWidth;
-    this.camera.right = halfWidth;
-    this.camera.top = halfHeight;
-    this.camera.bottom = -halfHeight;
+    // **The zoom is still the framing.** The orthographic rig this replaced
+    // framed `halfHeight` world metres top-to-centre everywhere; a perspective
+    // lens frames the same amount **at the focus** when its half-fov is
+    // `atan(halfHeight / eyeToFocusDistance)`. Derived from the zoom rather
+    // than fixed, so every existing zoom level — including the cutscene
+    // framings that ask for a specific one — still frames what it asked for at
+    // the player's own distance. Things nearer than the focus grow and things
+    // beyond it shrink, which is the whole of what changed.
+    this.camera.fov = (2 * Math.atan(halfHeight / this.eyeToFocusDistance) * 180) / Math.PI;
+    this.camera.aspect = this.aspect;
     this.camera.updateProjectionMatrix();
   }
 

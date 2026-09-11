@@ -15,7 +15,6 @@ import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
 import {
   CHILD_FOOTPRINT,
-  TALLEST_CHILD_HEIGHT,
   KID_EYE_HEIGHT,
 } from '../../art/models/kid';
 import {
@@ -37,7 +36,6 @@ import { playBrakeSqueak, playDoorHiss, playHornToot } from './sounds';
 import { markArrived } from './arrivalFlag';
 import {
   ENTRANCE_BUS_DOOR_X,
-  ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
@@ -358,26 +356,13 @@ const ARRIVAL_GROUND_SAMPLES = 24;
 /** Bearings round the eye. Twelve is every 30°, finer than the ground bends. */
 const ARRIVAL_GROUND_BEARINGS = 12;
 
-/**
- * **The whole of the arrival camera, as Jim stated it on 6 September 2026:**
- * *"the rule should be simple - camera fixed on the player, about 2m from them,
- * at head height, until they're in the park - that's it."*
- *
- * That sentence replaced a shot with four beats — a wide roll-in, a door beat
- * orbiting the bus's own drop point, a walk beat, and an arch pass with a dive
- * and a hold — plus the constants that answered each of them. They are deleted
- * rather than left in place, because a constant kept "in case" is a second
- * answer to a question nobody is asking any more.
- *
- * **The one place the rule does not map straight onto this rig**, and it is
- * worth stating rather than hiding: the park camera is **orthographic**, so an
- * eye's distance from its subject changes nothing on screen. "About 2 m from
- * them" therefore lands as two separate facts — a 2 m stand-back, which is
- * purely an occlusion control here, and a frame height, which is what actually
- * makes her that size. {@link ARRIVAL_FOLLOW_ZOOM} is the second of those, sized
- * so she fills the frame the way a 2 m stand-back would.
- */
-export const ARRIVAL_FOLLOW_DISTANCE = 12;
+// `ARRIVAL_FOLLOW_DISTANCE = 12` stood here, exported, with **zero readers** —
+// a stale second definition of the stand-back sitting beside the real one,
+// {@link ARRIVAL_DOOR_STAND_BACK}. Its docblock still argued from a rule Jim
+// replaced ("about 2m from them") and a projection the game no longer uses.
+// Deleted on 11 September 2026 rather than corrected: this repo's commonest bug
+// is two definitions of one number kept in step by hand, and the second one is
+// always found wrong by a child rather than by a check.
 
 /**
  * **How far out in the park the door shot stands, in metres.**
@@ -393,29 +378,27 @@ export const ARRIVAL_FOLLOW_DISTANCE = 12;
 export const ARRIVAL_DOOR_STAND_BACK = 6.5;
 
 /**
- * **PROTOTYPE (#511). How wide a slice of world the shot frames at her own
- * distance, in metres.**
+ * **How tall a slice of world the shot frames at whatever it is looking at, in
+ * metres.**
  *
- * Under the perspective rig `IsoCamera.applyFrustum` derives the lens from
- * `eyeToFocusDistance`, not from `CAMERA_DISTANCE` — so at a 12 m stand-back a
- * zoom of 1 would frame `CAMERA_VIEW_HEIGHT` (15 m) at her, a 64-degree lens.
- * That is too wide: the bus stops reading as a bus. 9 m frames her, the open
- * door and a good stretch of the road, which is about a 40-degree lens at this
- * distance, and 40 is the ordinary cinematic answer for a two-shot.
- */
-const ARRIVAL_FRAME_AT_PLAYER = 9;
-
-
-/**
- * How tall the frame is while the arrival owns the camera, in metres of world.
+ * `IsoCamera.applyFrustum` derives the lens from `eyeToFocusDistance`, so at
+ * the door beat's {@link ARRIVAL_DOOR_STAND_BACK} a zoom of 1 would frame
+ * `CAMERA_VIEW_HEIGHT` (15 m), a very wide lens on a 6.5 m stand-back. **9 m
+ * fits the whole cat bus** — it is {@link CAT_BUS_LENGTH} long and
+ * {@link CAT_BUS_TOP} tall — with the open door and its step at the middle of
+ * the frame, which is the thing Jim asked to see. `check:arrival-camera`
+ * asserts exactly that, against the bus's own dimensions, so this number cannot
+ * drift away from the vehicle it is framing.
  *
- * A child plus a little air, and nothing to do with the bus: the subject is
- * her. Derived from {@link TALLEST_CHILD_HEIGHT} so a child who grows reframes
- * the shot, and kept a shade above her so the tallest possible hat has
- * somewhere to go — `check:arrival-camera` asserts both edges.
+ * **Two former docblocks lived here and both lied.** One claimed the height was
+ * derived from `TALLEST_CHILD_HEIGHT` "so a child who grows reframes the shot"
+ * and that a check asserted both edges of her in frame; neither was true after
+ * the subject became the bus, and the clause it named had been deleted. The
+ * other was a wrapper constant, `ARRIVAL_FOLLOW_FRAME_HEIGHT`, that only ever
+ * aliased this one. One name, one number, and a check that can see it.
  */
-const ARRIVAL_FOLLOW_FRAME_HEIGHT = ARRIVAL_FRAME_AT_PLAYER;
-export const ARRIVAL_FOLLOW_ZOOM = CAMERA_VIEW_HEIGHT / ARRIVAL_FOLLOW_FRAME_HEIGHT;
+const ARRIVAL_FRAME_AT_SUBJECT = 9;
+export const ARRIVAL_FOLLOW_ZOOM = CAMERA_VIEW_HEIGHT / ARRIVAL_FRAME_AT_SUBJECT;
 
 
 export const ARRIVAL_EYE_FLOOR_MARGIN = 0.3;
@@ -533,44 +516,14 @@ function busFacingAtStop(stopAt: number): number {
  */
 const BUS_STOP_AT = CAT_BUS_DOOR_DROP.z;
 
-/**
- * The shot's geometry, solved once against the **road as it actually curves**
- * and then cached.
- *
- * **Lazy rather than module-scope-eager on purpose.** `roadRoute.ts` builds
- * its `RingPath` off the seeded park boundary, so anything that asks it a
- * question at import time is asking before the seed is necessarily set. These
- * are wanted only once a bus is arriving, by which point the park exists.
- */
-let shotGeometry: { readonly squareOnDegrees: number; readonly doorDistance: number } | null = null;
+// `squareOnToTheDoorDegrees()` — square-on to the GATE — stood here and is
+// deleted on 11 September 2026, with `arrivalDoorDistance()`,
+// `ARRIVAL_GATE_STANDOFF` and the cache the three shared. Nothing reads it any
+// more: the shot's bearing comes from the door's own flank
+// ({@link arrivalDoorYawDegrees}) and the arch pass now asks that same function,
+// so there is one answer to "which way is this camera pointing" instead of two
+// that differed by 20° on the canonical seed.
 
-function arrivalShotGeometry(): { readonly squareOnDegrees: number; readonly doorDistance: number } {
-  if (shotGeometry !== null) return shotGeometry;
-  const facing = entranceRoadFacing(BUS_STOP_AT);
-  const stop = entranceRoadAt(BUS_STOP_AT);
-  // Perpendicular to the way the bus points, taken on whichever side the gate
-  // is — a bus turned by the road's curve carries the shot round with it.
-  const travelX = Math.sin(facing);
-  const travelZ = Math.cos(facing);
-  const towardsGateX = ENTRANCE_GATE_X - stop.x;
-  const towardsGateZ = ENTRANCE_GATE_Z - stop.z;
-  // Both perpendiculars; keep the one that points at the gate.
-  const sign = Math.sign(travelZ * towardsGateX - travelX * towardsGateZ) || 1;
-  const squareOnDegrees = Math.atan2(sign * travelZ, -sign * travelX) / DEG;
-  // **The stand-back is a ground-plan distance from the stop to the gate**, not
-  // a difference of z. On the straight road those were the same number and the
-  // z-difference was written down; the arc separates them, and a shot standing
-  // the wrong distance back is a shot with the park's furniture in front of it.
-  const doorDistance =
-    (Math.hypot(towardsGateX, towardsGateZ) - ARRIVAL_GATE_STANDOFF) /
-    Math.cos(ARRIVAL_DOOR_PITCH_DEGREES * DEG);
-  shotGeometry = { squareOnDegrees, doorDistance };
-  return shotGeometry;
-}
-
-function squareOnToTheDoorDegrees(): number {
-  return arrivalShotGeometry().squareOnDegrees;
-}
 
 
 /**
@@ -589,12 +542,12 @@ function squareOnToTheDoorDegrees(): number {
  * at the bus. The arch was between the lens and the subject because the camera
  * had put it there.
  *
- * {@link arrivalDoorDistance} now stands the eye **short of the gate**,
- * between the drop and the archway, so the arch is behind the lens and cannot
- * land on anybody. Square-on then costs nothing — and it is also what makes
- * the rest of Jim's sentence possible, because a camera already on the bus
- * side of the gateway is a camera that can *glide through it with her* rather
- * than watch her come towards it.
+ * {@link ARRIVAL_DOOR_STAND_BACK} now stands the eye 6.5 m out from the bus's
+ * own flank, well short of the gate, so the arch is behind the lens and cannot
+ * land on anybody. Square-on then costs nothing — and it is also what makes the
+ * rest of Jim's sentence possible, because a camera already on the bus side of
+ * the gateway is a camera that can *glide through it with her* rather than
+ * watch her come towards it.
  */
 export function arrivalDoorYawDegrees(): number {
   const facing = busFacingAtStop(BUS_STOP_AT);
@@ -657,69 +610,7 @@ export function arrivalDoorYawDegrees(): number {
  */
 const ARRIVAL_DOOR_PITCH_DEGREES = 9;
 
-/**
- * How far short of the gate line the door shot stands, in metres.
- *
- * **This does NOT put the arch behind the lens, and nothing about a stand-back
- * ever could.** An earlier version of this comment claimed it did; it was
- * wrong, it was photographed being wrong, and the correction is worth more
- * than the constant. An orthographic camera renders everything along the view
- * ray whatever the eye's position on that ray — the near plane sits far
- * behind the eye, which is the same property that once let the eye end up
- * *inside* a pier without being clipped away. Moving the eye 3 m nearer the
- * bus leaves the archway exactly where it was in frame.
- *
- * What actually makes square-on possible is {@link ARRIVAL_DOOR_PITCH_DEGREES}
- * being zero. Read that first.
- *
- * So what this constant is still for is smaller and honest: it keeps the eye
- * on the bus side of the archway so the shot **starts inside the gateway's
- * approach**, which is what lets it glide *through* the opening with her
- * rather than watch her walk towards it.
- *
- * It is also the first metre of Jim's third beat. A camera already inside the
- * gateway's approach is one that can **glide through the opening ahead of
- * her** as she walks up to it, which is what *"as they walk through the gates
- * the camera should glide to follow them under"* asks for. The old 20.8 m
- * stand-back was on the far side of the arch looking back, and could only ever
- * watch her come towards it.
- *
- * Big enough that the eye is unambiguously on the bus side of the archway
- * rather than in its mouth — the arch's own piers stand at
- * `ENTRANCE_GATE_HALF_WIDTH`, and an eye level with them would have them in
- * the frame edges from the first frame.
- */
-const ARRIVAL_GATE_STANDOFF = 3;
 
-/**
- * **How far back the door shot's eye stands, in metres — and this is about
- * what is in the way, not about how big anything looks.**
- *
- * An orthographic camera has no size falloff, so this cannot frame anything:
- * every object lands on the same pixels whatever it is set to. The only thing
- * it decides is **which geometry sits between the lens and the bus**, and on
- * this shot that is the whole difficulty. The door faces *into* the park, so
- * any bearing that faces the door is also looking down the length of the park,
- * and at the rig's own 90 m stand-back that means whatever the seed put there:
- * the rail race's track and pylons on one bearing, the hotel tower straight
- * through the middle on another. Both were photographed while building this.
- * Nothing tuneable fixes that, because it is a different obstacle on every
- * seed.
- *
- * So the eye comes forward until it is standing **in the park's own gateway**,
- * and the horizontal run is derived from the one thing in the world that
- * promises a clear line: `ENTRANCE_CLEAR_RADIUS`, the disc `Scenery.ts` keeps
- * free of trees and bushes around the stop and the gate. Stand within that and
- * the deep park is behind the lens, where it cannot intrude, and the only
- * things left between the camera and the children are the gateway and the arch
- * — which are the subject's own setting rather than clutter across it.
- *
- * Divided by the pitch's cosine because {@link cameraOffset} takes a slant
- * distance and the reasoning above is entirely about ground plan.
- */
-function arrivalDoorDistance(): number {
-  return arrivalShotGeometry().doorDistance;
-}
 
 
 
@@ -776,9 +667,9 @@ const ARRIVAL_ARCH_DISTANCE = 4.0;
  * It used to be taken at `CAMERA_YAW_DEGREES`, the rig's 45°, which was right
  * only while the shot came home to the rig's bearing *before* the pass. It no
  * longer does: the bearing is held square-on all the way through the gateway,
- * so the pass is flown at {@link squareOnToTheDoorDegrees} and that is
- * the bearing this has to be measured at. Square-on points from the bus
- * towards the gate, so this went negative and the eye became a leading one —
+ * so the pass is flown at {@link arrivalDoorYawDegrees} and that is the
+ * bearing this has to be measured at. It points from the bus out through its
+ * own door, so this went negative and the eye became a leading one —
  * which is what *"the camera should glide to follow them under"* actually
  * asks for, and it is also why the shot no longer has to drag the eye back
  * out through the plane of the arch at speed.
@@ -790,7 +681,12 @@ function arrivalArchEyeOffsetZ(): number {
   return (
     ARRIVAL_ARCH_DISTANCE *
     Math.cos(ARRIVAL_DOOR_PITCH_DEGREES * DEG) *
-    Math.cos(squareOnToTheDoorDegrees() * DEG)
+    // **The bearing the shot is actually flown at**, which since 11 September
+    // 2026 is the door's own flank rather than square-on to the gate. Those
+    // differ by 20° on the canonical seed, so reading the old one here would be
+    // a second definition of "which way is the camera pointing" — this file's
+    // own besetting bug, in the one place that measures where the eye is.
+    Math.cos(arrivalDoorYawDegrees() * DEG)
   );
 }
 
@@ -1071,7 +967,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     //
     // "At head height" survives where it is actually visible: an ortho eye's
     // *position* changes nothing on screen, so what that phrase buys is the
-    // frame being centred on her head at {@link ARRIVAL_FOLLOW_FRAME_HEIGHT},
+    // frame being centred on her head at {@link ARRIVAL_FRAME_AT_SUBJECT},
     // and it still is. What the pitch buys is that the lower half of that
     // frame has ground in it.
     pitchDegrees: lerp(ARRIVAL_DOOR_PITCH_DEGREES, CAMERA_PITCH_DEGREES, poseHomeT(elapsed)),
