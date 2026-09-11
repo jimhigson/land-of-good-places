@@ -857,6 +857,46 @@ export const AT_WALKING = ARRIVAL_CONTROL_AT - ARRIVAL_TIMELINE.walkingIn;
 export const AT_SHOT_HOME = ARRIVAL_CONTROL_AT + ARRIVAL_RISE_TAIL;
 
 /**
+ * **The beats `/arrive?at=` can open on, on the arrival's own clock.**
+ *
+ * Jim asked twice for a link that lands on her *getting off the bus* and a
+ * link that lands on the park *after* the arrival, rather than one that starts
+ * a nine-second sequence he then has to sit through — twice, on every round of
+ * feedback, on a park that is different on every seed.
+ *
+ * **Every number here is summed from {@link ARRIVAL_TIMELINE}, never typed.**
+ * Lengthen a phase and these move with it. A hand-written 3.8 here would be a
+ * second definition of the timeline and would be found wrong by whoever
+ * shortened `doorsOpening` — this repo's most common bug, and this file has
+ * already paid for it once.
+ */
+export const ARRIVAL_BEATS = {
+  /** The bus still rolling along the kerb — the ordinary `/arrive`. */
+  'rolling-in': 0,
+  /** The bus stopped, the door swinging open. */
+  'doors-opening': ARRIVAL_TIMELINE.rollingIn,
+  /** **Her stepping down onto the pavement**, first off the bus. */
+  'stepping-down': ARRIVAL_TIMELINE.rollingIn + ARRIVAL_TIMELINE.doorsOpening,
+  /** Off the kerb, walking in through the gate. */
+  'walking-in': AT_WALKING,
+  /** **The end state**: she is in the park and has the controls. */
+  park: ARRIVAL_CONTROL_AT,
+} as const;
+
+export type ArrivalBeat = keyof typeof ARRIVAL_BEATS;
+
+/**
+ * The fixed step {@link ArrivalSequence.runTo} replays the timeline at — a
+ * 60 fps frame, so the replay is the sequence the game itself would have run.
+ */
+const BEAT_STEP = 1 / 60;
+
+/** Whether a hand-typed `?at=` names a beat. Nothing else may be trusted. */
+export function isArrivalBeat(name: string): name is ArrivalBeat {
+  return Object.hasOwn(ARRIVAL_BEATS, name);
+}
+
+/**
  * **When she is under the arch, and when the camera is out the other side** —
  * both on the arrival's own clock.
  *
@@ -1632,6 +1672,40 @@ export class ArrivalSequence {
   /** How many children are still aboard — for a check, and for the bus's patience. */
   get stillAboard(): number {
     return this.kidWalks.filter((walk) => !walk.released).length;
+  }
+
+  /**
+   * **Runs the sequence forward to a beat, by actually playing it** — for
+   * `/arrive?at=`, and for nothing else.
+   *
+   * The one rule this had to obey: **never construct a pose that merely looks
+   * like the beat.** A hand-placed bus, a hand-placed child and a hand-written
+   * camera would be a second definition of the arrival, and the whole value of
+   * a link that lands on a beat is that it lands on *the* beat — the one a
+   * child gets when she sits through the nine seconds. So this pumps
+   * {@link update} with real `dt`, at a fixed step, exactly as the game would,
+   * and simply does not draw the frames in between. Everything the sequence
+   * drives — the bus, the eleven borrowed NPCs, her own walk, the sounds'
+   * triggers — arrives at the beat having genuinely been through it.
+   *
+   * The step is {@link BEAT_STEP} rather than the caller's `dt`: this is a
+   * fixed-step replay of a timeline, and using whatever the first real frame
+   * happened to be would make the same URL land somewhere slightly different
+   * on a slow machine.
+   *
+   * Returns how far it actually got, which is the honest answer when `target`
+   * is past the end.
+   */
+  runTo(target: number, context: FrameContext): number {
+    const step = { ...context, dt: BEAT_STEP };
+    // Bounded rather than `while`: a beat that never arrives must not hang the
+    // boot in front of whoever was sent the link.
+    const limit = Math.ceil(ARRIVAL_DURATION / BEAT_STEP) + 2;
+    for (let i = 0; i < limit; i += 1) {
+      if (this.doneFlag || this.elapsed >= target) break;
+      this.update(step);
+    }
+    return this.elapsed;
   }
 
   update(context: FrameContext): void {

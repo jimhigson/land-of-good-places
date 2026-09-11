@@ -20,7 +20,7 @@ import {
   ENTRANCE_PLAYER_Z,
 } from './world/entrance/layout';
 import { arrivalOwnsTheSpawn } from './world/entrance/arrivalSpawn';
-import { arrivalShot } from './world/entrance/ArrivalSequence';
+import { ARRIVAL_BEATS, arrivalShot, isArrivalBeat } from './world/entrance/ArrivalSequence';
 import { Highlights } from './world/Highlights';
 import { Selection } from './world/Selection';
 import { pickInteractZone, PRIMARY_ACTION, type InteractZone } from './world/interact';
@@ -1440,6 +1440,43 @@ export class Game {
    * all, so the URL degrades to an ordinary spawn and says so, rather than
    * teleporting her to the origin and looking like the park is broken.
    */
+  /**
+   * **Opens `/arrive` on a named beat instead of at the kerb** — `?at=`.
+   *
+   * Jim asked twice for a link that lands on her getting off the bus and one
+   * that lands on the park after the arrival. Without this the only way to
+   * look at either is to watch the whole nine seconds first, on every round of
+   * feedback.
+   *
+   * It **plays** the sequence to the beat rather than posing it — see
+   * `ArrivalSequence.runTo`. Constructing a frame that resembles the beat
+   * would be a second definition of the arrival, and the copy is always the
+   * one found wrong.
+   *
+   * The camera then engages on the very next tick, and because the shot snaps
+   * both its pose (`snapShotOverride`) and now its framing (`snapZoomTarget`),
+   * the first frame he sees is the beat's own shot rather than a swoop into
+   * it.
+   *
+   * **It takes the beat's name, not its time, and resolves it here.** `main.ts`
+   * cannot import `ArrivalSequence` — that pulls in `terrain`, `layout` and
+   * `boundary` and solves `PARK_BOUNDARY` at module scope, which is the whole
+   * reason `arrivalIsDue` lives in `arrivalFlag.ts`. `Game` already has the
+   * module, so the lookup belongs here and there is still one owner of what a
+   * beat is worth in seconds.
+   *
+   * Returns false for a name that is no beat, and for a profile with no
+   * arrival to run, so the caller can say so instead of silently showing an
+   * ordinary park.
+   */
+  fastForwardArrival(beat: string): boolean {
+    if (!isArrivalBeat(beat)) return false;
+    const arrival = this.world.entrance.arrival;
+    if (!arrival || arrival.finished) return false;
+    arrival.runTo(ARRIVAL_BEATS[beat], this.frameContext);
+    return true;
+  }
+
   enterBridgeSpawn(): boolean {
     const bridges = this.world.train.bridges;
     if (bridges.length === 0) return false;
