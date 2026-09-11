@@ -511,3 +511,31 @@ carries a bar): the ruling's alarm, not pre-solved; Overseer's call. Hill:
 3/14 build (race claims meet the road along the ring) — retired cost;
 canonical hill invariants green. Logs: `merge-swept-bus8.log`,
 `merge-procgen6.log`, `merge-seeds5/`. PR body: `scratchpad/pr-body-step2.md`.
+
+## Fairness re-cut: red proof run (11 Sep, on the rebased head 3dd39a3f)
+
+Rebased clean onto `design/round-robin-generation` 1eb6f210 (three-dot stat:
+the same 15 files, one deletion — `swept-bus-baseline.mts`, ours); `tsc` 0,
+`typecheck:test` 0. Canonical-seed geometry the proof was taken against:
+race ring 10/10/10/10, walk-past ring 10/10/10/10, **0 bars lost to the road
+rule**. Mutation in `buildRailRaceTrack`'s bar loop — `for (const
+[redProofIndex, bar] of layout.bars.entries()) { if (redProofIndex === 0 &&
+<cond>) { barSlots.push([]); continue; } …` — undone each time by restoring a
+byte copy taken before the edit (residue 0, `git status` clean):
+
+- **A, race ring** (`!options.respectsRoad`): `2 failed | 90 passed`, the
+  clause says *"the race ring gives its four racers 9/10/10/10 duck bars"*
+  and, from the walk-past comparison, *"walk-past 10/10/10/10 but the race
+  ring gives 9/10/10/10 … expected 9/10/10/10"*.
+- **B, walk-past ring** (`options.respectsRoad`): `2 failed | 90 passed`:
+  *"the walk-past ring gives its lanes 9/10/10/10 duck bars, but the race ring
+  gives 10/10/10/10 and the road rule accounts for 0 on this ring (expected
+  10/10/10/10) — a bar is missing for a reason the road rule does not
+  explain"*. The stderr line printed on the passing side of each run:
+  `walk-past ring seed 20260728: 0 bars lost to the road rule`.
+
+(The second red in each run is the support clause — a dropped bar has no
+support under its slot — not this one.) A first version of the script did
+not prove anything: its `-t` filter matched no test name (92 skipped) and its
+`barIndex` shadowed track.ts's own; a proof that skips everything reads as
+green — read the pass count.
