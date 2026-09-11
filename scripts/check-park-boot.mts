@@ -135,11 +135,33 @@ const nextFrame = (): Promise<void> =>
 // that cannot fail.** A CPU clock with millisecond granularity, or one that
 // simply returns zero on some future runtime, would clear *every* slice and
 // leave a check that reports success about nothing at all. So before anything
-// is measured, the instrument is shown two known answers: a busy arithmetic
-// loop, which it must attest as busy, and a deliberately descheduled sleep,
-// which it must attest as idle. If either comes back wrong the attestation is
-// abandoned, the ceilings go back to raw wall clock, and the run says so on
-// stderr rather than quietly gating on nothing.
+// is measured, the instrument is shown three known answers.
+//
+// **None of the three is a ratio against wall clock, and that matters.** The
+// first version of this control asked that a busy loop attest at least 0.8 of
+// its own wall clock — and on a loaded box the main thread is descheduled
+// *inside the control itself*, so the control failed, the attestation was
+// dropped, and the ceilings fell back to wall clock exactly on the runs that
+// needed them most. Measured: it failed on this laptop with four other agents
+// running. A control whose verdict depends on the machine's mood is the very
+// fault being fixed, one layer out. So:
+//
+//  1. **It scales with work.** `spin(4M)` must attest at least twice `spin(1M)`,
+//     and 1M must resolve above a fifth of a millisecond. A clock stuck at
+//     zero, or too coarse to see a slice, fails here — and descheduling cannot
+//     make it pass, because being descheduled does not add CPU time.
+//  2. **It stops when the thread stops.** A 30 ms `Atomics.wait` must attest
+//     near zero. This is the property the whole fix rests on.
+//  3. **It is the *thread's* clock, not the process's.** Churn allocations hard
+//     enough to start V8's concurrent marker: a per-thread clock cannot exceed
+//     its own wall clock, a process-wide one can and does. This is the probe
+//     that rejects `process.cpuUsage()` — measured 44.7 ms of CPU against 25.2
+//     ms of wall — and it exists because that clock was used here first and was
+//     wrong in a way nothing else caught.
+//
+// Fail any of the three and the attestation is abandoned, the ceilings go back
+// to raw wall clock, and the run says so on stderr rather than quietly gating
+// on nothing.
 // ---------------------------------------------------------------------------
 const cpuMs = (): number => {
   const used = process.threadCpuUsage();
@@ -163,51 +185,120 @@ const sleepBlocking = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
 
-const CONTROL_SLEEP_MS = 30;
-/** Busy work must attest as at least this much of its wall clock. */
-const BUSY_CONTROL_FLOOR = 0.8;
-/** A descheduled sleep must attest as at most this much of its wall clock. */
-const IDLE_CONTROL_CEILING = 0.2;
+/** Churn garbage hard enough to put V8's concurrent marker on another core. */
+const churn = (rounds: number): number => {
+  let kept: { a: number; b: number[] }[] = [];
+  let seen = 0;
+  for (let i = 0; i < rounds; i += 1) {
+    kept.push({ a: i, b: [i, i + 1, i + 2] });
+    seen += kept.length;
+    if (kept.length > 50_000) kept = [];
+  }
+  return seen;
+};
 
-const controlOfCpuClock = (): {
+const CONTROL_SLEEP_MS = 30;
+/** `spin(4M)` must attest at least this multiple of `spin(1M)`. */
+const SCALING_CONTROL_FLOOR = 2;
+/** `spin(1M)` must resolve at least this many ms, or the clock is too coarse. */
+const RESOLUTION_CONTROL_FLOOR_MS = 0.2;
+/** A descheduled sleep may attest at most this fraction of its wall clock. */
+const IDLE_CONTROL_CEILING = 0.2;
+/** A per-thread clock may exceed its own wall clock by at most this much. */
+const THREAD_LOCAL_CONTROL_CEILING = 1.1;
+
+type ClockControl = {
   usable: boolean;
-  busyWallMs: number;
-  busyCpuMs: number;
+  smallCpuMs: number;
+  bigCpuMs: number;
   idleWallMs: number;
   idleCpuMs: number;
-} => {
-  spin(200_000); // warm-up, so the busy probe measures steady-state arithmetic
-  const busyWall0 = performance.now();
-  const busyCpu0 = cpuMs();
-  spin(3_000_000);
-  const busyWallMs = performance.now() - busyWall0;
-  const busyCpuMs = cpuMs() - busyCpu0;
+  churnWallMs: number;
+  churnCpuMs: number;
+  failures: string[];
+};
 
+const controlOfCpuClock = (): ClockControl => {
+  spin(200_000); // warm-up, so the probes measure steady-state arithmetic
+
+  // 1. Does it scale with work? Two sizes, four times apart.
+  const smallCpu0 = cpuMs();
+  spin(1_000_000);
+  const smallCpuMs = cpuMs() - smallCpu0;
+  const bigCpu0 = cpuMs();
+  spin(4_000_000);
+  const bigCpuMs = cpuMs() - bigCpu0;
+
+  // 2. Does it stop when the thread does?
   const idleWall0 = performance.now();
   const idleCpu0 = cpuMs();
   sleepBlocking(CONTROL_SLEEP_MS);
   const idleWallMs = performance.now() - idleWall0;
   const idleCpuMs = cpuMs() - idleCpu0;
 
+  // 3. Is it the thread's clock, or the whole process's? Worst of three, since
+  //    the concurrent marker does not start on every round.
+  let churnWallMs = 0;
+  let churnCpuMs = 0;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wall0 = performance.now();
+    const cpu0 = cpuMs();
+    churn(400_000);
+    const wall = performance.now() - wall0;
+    const cpu = cpuMs() - cpu0;
+    if (wall > 0 && cpu / wall > (churnWallMs > 0 ? churnCpuMs / churnWallMs : 0)) {
+      churnWallMs = wall;
+      churnCpuMs = cpu;
+    }
+  }
+
+  const failures: string[] = [];
+  if (smallCpuMs < RESOLUTION_CONTROL_FLOOR_MS) {
+    failures.push(
+      `it cannot resolve a slice: ${smallCpuMs.toFixed(3)} ms for a megaflop, under the ` +
+        `${RESOLUTION_CONTROL_FLOOR_MS} ms floor`,
+    );
+  }
+  if (bigCpuMs < smallCpuMs * SCALING_CONTROL_FLOOR) {
+    failures.push(
+      `it does not scale with work: ${bigCpuMs.toFixed(2)} ms for four megaflops against ` +
+        `${smallCpuMs.toFixed(2)} ms for one, under the ${SCALING_CONTROL_FLOOR}x floor`,
+    );
+  }
+  if (idleWallMs < CONTROL_SLEEP_MS * 0.5) {
+    failures.push(`the idle probe never slept: ${idleWallMs.toFixed(1)} ms of wall clock`);
+  } else if (idleCpuMs > idleWallMs * IDLE_CONTROL_CEILING) {
+    failures.push(
+      `it keeps running while the thread sleeps: ${idleCpuMs.toFixed(2)} ms charged for ` +
+        `${idleWallMs.toFixed(1)} ms of Atomics.wait`,
+    );
+  }
+  if (churnWallMs > 0 && churnCpuMs > churnWallMs * THREAD_LOCAL_CONTROL_CEILING) {
+    failures.push(
+      `it is not this thread's clock: ${churnCpuMs.toFixed(1)} ms charged over a ` +
+        `${churnWallMs.toFixed(1)} ms allocation churn, which one thread cannot have done`,
+    );
+  }
+
   return {
-    usable:
-      busyWallMs > 1 &&
-      busyCpuMs >= busyWallMs * BUSY_CONTROL_FLOOR &&
-      idleWallMs > CONTROL_SLEEP_MS * 0.5 &&
-      idleCpuMs <= idleWallMs * IDLE_CONTROL_CEILING,
-    busyWallMs,
-    busyCpuMs,
+    usable: failures.length === 0,
+    smallCpuMs,
+    bigCpuMs,
     idleWallMs,
     idleCpuMs,
+    churnWallMs,
+    churnCpuMs,
+    failures,
   };
 };
 
 const cpuClock = controlOfCpuClock();
 said.push(
-  `CPU clock control: ${cpuClock.busyCpuMs.toFixed(1)} ms of CPU attested for ` +
-    `${cpuClock.busyWallMs.toFixed(1)} ms of busy arithmetic, and ` +
-    `${cpuClock.idleCpuMs.toFixed(2)} ms for ${cpuClock.idleWallMs.toFixed(1)} ms of descheduled ` +
-    `sleep — ${cpuClock.usable ? 'usable' : 'NOT USABLE'}`,
+  `CPU clock control: ${cpuClock.smallCpuMs.toFixed(2)} ms for one megaflop and ` +
+    `${cpuClock.bigCpuMs.toFixed(2)} ms for four; ${cpuClock.idleCpuMs.toFixed(2)} ms for ` +
+    `${cpuClock.idleWallMs.toFixed(1)} ms of descheduled sleep; ${cpuClock.churnCpuMs.toFixed(1)} ms ` +
+    `over a ${cpuClock.churnWallMs.toFixed(1)} ms allocation churn — ` +
+    `${cpuClock.usable ? 'usable' : `NOT USABLE (${cpuClock.failures.join('; ')})`}`,
 );
 
 /**
@@ -674,40 +765,47 @@ if (frames < MIN_WORKING_FRAMES) {
 // unit is unaffected: it spends the CPU it costs, so its busy time is its wall
 // time, and the ceiling meets it exactly as before.
 //
-// **Proved both ways on 11 September 2026, on the same code, by mutation.** The
-// mutations are written out in full because a red-run transcript is a
-// measurement and measurements go stale: repeat these exactly, or the numbers
-// below say nothing about the check as it stands then.
+// **Proved every way round on 11 September 2026, by mutation, on a laptop
+// carrying four other agents** — which is the box this check kept failing on,
+// so the numbers are from the hard case rather than the easy one. The mutations
+// are written out in full because a red-run transcript is a measurement and
+// measurements go stale: repeat these exactly, or the numbers say nothing about
+// the check as it stands then.
 //
-// *Mutation A — a genuinely fat unit.* In `parkGeneration.ts`'s `brief` task,
-// immediately before `yield step.value`, 25 ms of real arithmetic per unit:
+// *Mutation A — a unit that is genuinely too big.* In `parkGeneration.ts`'s
+// `brief` task, immediately before `yield step.value`, a **fixed** 20-million
+// iteration burn per unit (fixed, not a wall-clock-bounded spin: a time-bounded
+// one does less work on a slow box and is therefore not the regression this
+// guards against — the first attempt at this mutation made that mistake and
+// slipped under a ceiling that had scaled to 2.08x):
 //
 //     let x = 1.000001; let sum = 0;
-//     const until = performance.now() + 25;
-//     while (performance.now() < until) {
-//       for (let i = 0; i < 20000; i += 1) { x = x * 1.0000001 + 1e-9; sum += Math.sqrt(x) * 0.5; }
-//     }
+//     for (let i = 0; i < 20_000_000; i += 1) { x = x * 1.0000001 + 1e-9; sum += Math.sqrt(x) * 0.5; }
 //     if (!Number.isFinite(sum)) throw new Error('mutation diverged');
 //
-// → **exit 1**: `worst single advance() 26.0 ms ... that worst slice was
-// brief x1, 1 work units in 26.0 ms busy of 26.0 ms wall` against a 22.2 ms
-// ceiling at 1.19x. The granularity fault is still caught, and now named.
+// → **exit 1**: `151 slices of "brief" went past the ceiling, worst 91.6 ms of
+// attested busy time (141.2 ms wall) against a 8 ms budget and a 28.6 ms
+// ceiling already scaled 1.72x`. Note 151 of 152 — a fat unit is fat on every
+// slice that runs it, which is exactly what the corroboration clause is for.
 //
 // *Mutation B — the machine takes the CPU away.* The same place, once only:
 //
 //     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 40);
 //
-// → **exit 0**, with `worst single advance() by WALL clock 50.6 ms — brief x1,
-// 1 work units, 0.9 ms of it attested busy`, and the stderr note saying that
-// span was cleared. The **control** is the pre-#606 copy of this file run
-// against the identical mutated generator: **exit 1**, twice —
-// `one advance() blocked for 50.8 ms against a ... 20.0 ms ceiling` and
-// `one advance() at the 12 ms overrun budget blocked for 42.9 ms`. That is the
-// whole of issue #606 in one pair of runs.
+// → **exit 0**, with `worst single advance() by WALL clock 47.0 ms — brief x1,
+// 1 work units, 1.7 ms of it attested busy`, and two stderr notes naming the
+// cleared spans. The **control** is the pre-#606 copy of this file run against
+// the identical mutated generator: **exit 1**, twice — `one advance() blocked
+// for 50.8 ms against a ... 20.0 ms ceiling` and `one advance() at the 12 ms
+// overrun budget blocked for 42.9 ms`. Issue #606 in one pair of runs.
 //
-// *Mutation C — the instrument itself.* Forcing `cpuClock.usable` to `false`
-// with mutation B still in place → **exit 1** with the same two fouls as the
-// control, under the loud stderr note. The fallback is a live path, not a
+// *Mutation C — the instrument itself.* Swap `process.threadCpuUsage()` for
+// `process.cpuUsage()` in `cpuMs` and the control rejects it by name: `it is
+// not this thread's clock: 56.4 ms charged over a 28.8 ms allocation churn,
+// which one thread cannot have done`. With mutation A also in place that run is
+// **exit 1** on raw wall clock — `151 slices of "brief" ... worst 216.1 ms of
+// wall clock (the CPU clock failed its control, so there is no attestation)` —
+// so the fallback is a live path that still prosecutes a real fault, not a
 // comforting sentence.
 const WORST_UNIT_GRACE_MS = 12;
 const ADVANCE_CEILING_MS = GENERATION_BUDGET_MS + WORST_UNIT_GRACE_MS * slowness;
@@ -1401,9 +1499,8 @@ if (cruiserRidden !== cruiserPlain) {
 if (!cpuClock.usable) {
   process.stderr.write(
     'check:park-boot NOTE: this runtime\'s CPU clock failed its control — ' +
-      `${cpuClock.busyCpuMs.toFixed(2)} ms attested for ${cpuClock.busyWallMs.toFixed(2)} ms of busy ` +
-      `arithmetic, ${cpuClock.idleCpuMs.toFixed(2)} ms for ${cpuClock.idleWallMs.toFixed(1)} ms of ` +
-      'descheduled sleep. Every ceiling in this run was therefore compared against RAW WALL CLOCK, ' +
+      `${cpuClock.failures.join('; ')}. ` +
+      'Every ceiling in this run was therefore compared against RAW WALL CLOCK, ' +
       'so a busy machine can redden it for reasons no commit caused (issue #606). Fix the clock ' +
       'reading, do not raise the ceilings.\n',
   );
