@@ -153,31 +153,97 @@ plans*. With it right: 10 plans.
 
 ---
 
+## The `noRoute: 445` finding — closed, root-caused, fixed
+
+**It was not a startup transient and it was not #608.** Measured in the
+browser by wrapping `NavGrid.findRoute` and diffing `routingStats` per frame:
+
+- Every `noRoute` frame had **both** the nav grid and the ground sampler
+  present (`grid=true sampler=true`, 70/70 then 120/120). That kills the
+  "before the lattice or the sampler is ready" hypothesis the old note
+  offered.
+- The lattice was **built** on those frames (`built: true`,
+  `builtRevision === collision.revision`), so it is **not** #608's first-tap
+  lattice stall either. Say so if anyone asks: #608 is still real and still
+  unfixed, but it is not this.
+- The actual cause: `/hotel-suite` puts **her** in the suite at
+  `(-613.2, 1380)` and leaves all five **companion bodies** at the park
+  spawn, `(-1.6, 51.6)`. The suite's lattice spans `x -630..-570,
+  z 1350..1410`, so `cellAt(start) = -1` and `findRoute` honestly returns 0.
+  `routeTo` correctly counted it. All 120 fell in frames **2–25** and none
+  in the 2,193 frames after — the ~0.4 s the spring took to drag five
+  animals 640 m across the park and in through the hotel wall.
+
+**The fix**: `PlayerTrail.push` already detects the teleport (`TELEPORT_GAP`)
+and resets; it now *returns* that fact, and `Parade.catchUpAfterTeleport`
+re-places its followers on the new line. One owner of "was she moved?", no
+second threshold. Members that are asleep/walking to a bed, at the pets'
+table, or on the slide are left alone — the same three exclusions `update`
+already makes.
+
+After: **`noRoute` 0 over 1,688 frames, `findRoute` returned 0 zero times.**
+
+## Verification done
+
+**Browser lap for #605** (`/hotel-suite?pets=5`, port 5731), the drawn
+bodies (`ParadeMember.root`) against the 14 built suite partitions:
+
+| phase | pet-steps | crossings |
+|---|---|---|
+| walking her through four doorways | 19,320 | **0** |
+| going to bed | 12,500 | **0** |
+| waking and re-forming | 13,470 | **0** |
+| second bedtime | 18,015 | **0** |
+| second waking | 8,300 | **0** |
+| **total** | **71,605** | **0** |
+
+`routingStats` over the whole session: onLine 67,861, routed 4,064, lastLeg
+29,140 (worst 1.54 m, under `SHORTFALL_TOLERANCE`), **noRoute 0**, 166 plans.
+All five companions `asleep`, across bedrooms 0 and 1 — so 3 of the 5 were
+sent through a wall to the middle bedroom, which is the case that matters.
+
+**Three controls, all of which bit** (the instrument was proved before it was
+believed):
+
+1. The instrument reads the **pets**, not the player: 0 of 9,061 frames had
+   pet coordinates identical to hers. (16 frames had two pets identical to
+   each other — the moment after a teleport when they stack on her single
+   trail crumb.) Use `m.root`; **never** `m.group ?? m.object ?? m.root`.
+2. The crossing test **can** fire: a straight line across the suite crosses
+   3 partitions, so "0" is not a tautology.
+3. Her own path crossed 0 over 9,058 steps.
+
+Two traps I hit, worth keeping:
+
+- `forEachWall`'s 6th argument is `topHeight`, and in the **browser** it is
+  `null` for a full-height wall (only low walls carry a number). A first
+  draft filtered `top >= 0.8` and found **0 partitions** — an instrument
+  measuring nothing. Treat `null` as full height; it comes out at 14, which
+  is what the headless probe reports.
+- `Hotel.petIsAsleep(bed)` takes a **bed entry**, and
+  `Parade.petBedPhase(uid, spot)` takes **two** arguments. Calling either
+  with just a uid returns a confident `false`/`null` — it reads exactly like
+  "the pets never went to sleep" and is not.
+
+**`check:hotel` probe 3d gained a third clause** (extended, not duplicated):
+the teleport. Proved **red** with `catchUpAfterTeleport` short-circuited —
+"a companion is still 10.65 m away — over half the jump (allowed 5.15 m)",
+exit 1 — and green as shipped: 10.65 m before a 10.30 m teleport, **0.00 m
+one frame after**, 0 no-route frames.
+
+Its threshold is **half the jump, not a fixed metre count**, and that matters:
+the first draft allowed a fixed 12 m for "the queue behind her", and the
+suite is only 10.65 m across, so a companion left behind *entirely* measured
+10.65 and **passed**. Only disabling the fix and watching the clause stay
+green found that. `TELEPORT_GAP` is exported from `trail.ts` so the check
+cannot drift from the game's own definition of a teleport.
+
 ## What is left
 
-1. **One open finding, and it is the first thing to chase.** In a **browser**
-   session (not the headless probe, where it is 0) `Parade.routingStats`
-   reported **`noRoute: 445`** — member-frames off the line with no route at
-   all. It accumulated **early, in the first walk after load, and did not grow
-   afterwards**, which points at the first frames before the lattice or the
-   ground sampler is ready rather than at a wall being crossed. No partition
-   crossing was measured in that session. It still has to be explained and
-   driven to zero, or explained in the note as a startup transient — the whole
-   point of that counter is that a non-zero is not waved past. Reproduce with
-   `/hotel-suite?pets=5`, wrap `game.parade.update`, and read
-   `game.parade.routingStats` at boot and after each phase.
-2. Re-run the full browser lap for #605 as Jim asked: put her to bed, wake her,
-   walk her round the suite and through doorways, and confirm **0 crossings**
-   with a screenshot. (The #602 lap is done; the #605 lap is not.)
-3. Gates. On commit `b0beca9` CI already gave **Coplanar faces: pass** and
-   **Swept bus: pass**. Still to run on the current head: `pnpm run check`,
-   `pnpm run test:procgen`, `pnpm run build`, `pnpm run check:park-pool`.
-   Note `check:park-boot` is flaky — see below — so a single red run of it is
-   not a signal; re-run it on a quiet box.
-4. Update PR #603's body: it currently describes #602 only, and says the branch
-   is not ready for review. It now covers #605 as well.
-5. Fresh preview URL for Jim, pulled from the PR's newest "Deploy PR preview"
-   comment, loaded first, with `/hotel-suite?pets=5` on it.
+1. Gates on the current head — running as this was written; results go in the
+   PR body.
+2. Preview URL for Jim from #603's newest "Deploy PR preview" comment, loaded
+   first, landing on `/hotel-suite?pets=5`.
 
 ## Two issues filed. Neither is this branch's to fix.
 
