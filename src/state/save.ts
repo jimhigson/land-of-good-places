@@ -291,10 +291,60 @@ function renameRipikaToPet(old: Record<string, unknown>): Record<string, unknown
 // --------------------------------------------------------------- writing
 
 /**
+ * Set once a debug URL has altered this session's state — see
+ * {@link makeSessionUnsavable}.
+ */
+let sessionUnsavable = false;
+
+/**
+ * **Nothing from this session may ever be written to the save.** One-way, for
+ * the rest of the page's life.
+ *
+ * A developer deep link that *grants* something — `?pets=N` is the only one
+ * today — hands the store state a real player never earned. The boot order
+ * makes that dangerous rather than merely untidy: `continueGame` hydrates the
+ * **real profile** and only then reaches `launchGame`, so the grant lands on
+ * the loaded save; `catchWildPetOnce` bumps `gameStore.revision`; and the
+ * autosave is revision-gated. So `…/hotel-suite?pets=12` typed against
+ * production on the machine holding Eleri's save would give her twelve
+ * companions **for ever, with no inverse**, and stamp the Cute-o-dex's
+ * `acquiredAt` besides. These URLs are meant to be typed against production,
+ * so that is not a theoretical path.
+ *
+ * The rule this restores is `/spawn`'s: a debug link leaves **no durable
+ * mark**. `/spawn` gets there by ignoring `save.place`, having nothing to
+ * write; a link that grants has to say so out loud instead.
+ *
+ * It is enforced here, at {@link writeSave}, because this is the **single**
+ * place the game persists anything — gating the grant, or the autosave's
+ * timer, would each leave the other path open. {@link SaveSystem} also asks
+ * before it starts, so a suppressed session does not re-serialise the park
+ * every five seconds to throw it away.
+ *
+ * This deliberately costs the whole session's progress, not just the granted
+ * pets: there is no way to write "everything except the twelve animals" once
+ * they are in the inventory, and losing a debug session is the cheaper half of
+ * that trade by a wide margin.
+ */
+export function makeSessionUnsavable(): void {
+  sessionUnsavable = true;
+}
+
+/** Whether {@link makeSessionUnsavable} has been called on this page. */
+export function isSessionUnsavable(): boolean {
+  return sessionUnsavable;
+}
+
+/**
  * Writes the save. Returns false if storage refused it (full, disabled, or
  * private mode), which nothing needs to act on — the next tick tries again.
+ *
+ * Also returns false, permanently, once {@link makeSessionUnsavable} has been
+ * called — a debug URL has put something in this session that must never
+ * reach a real child's profile.
  */
 export function writeSave(file: SaveFile): boolean {
+  if (sessionUnsavable) return false;
   try {
     window.localStorage.setItem(SAVE_KEY, JSON.stringify(file));
     return true;

@@ -155,6 +155,7 @@ import {
   SUITE_BEDSIDE_RADIUS,
   petBedSlots,
   petBedPitch,
+  MIDDLE_BEDROOM_INDEX,
   SUITE_DOOR_WIDTH,
   SUITE_PARTITION_HEIGHT,
   type HotelDoorBand,
@@ -5102,16 +5103,102 @@ export class Hotel implements GameSystem {
    * against the real one, the stand-in being a different species from the pet
    * she owned, and the stand-in's own hand-placed pose hanging off the bed.
    *
-   * **Only the room she is actually in.** Every pet has a bed in each of the
-   * three bedrooms (see {@link dressPetBeds}) and there is exactly one body
-   * per pet, so exactly one of those beds may be sent for. `bedIndex` is the
-   * room she pressed Sleep in; see {@link Bed.bedIndex}.
+   * **One bed per pet, and only one.** Every pet has a bed in each of the
+   * three bedrooms it fits in (see {@link dressPetBeds}) and there is exactly
+   * one body per pet, so exactly one of those beds may be sent for.
+   * `bedIndex` is the room she pressed Sleep in; see {@link Bed.bedIndex}.
+   *
+   * ## The room she is in first, the middle bedroom for the overflow
+   *
+   * Issue #582, Jim, 6 Sep 2026: *"In the hotel bedroom there should be more
+   * pet beds, so that when the player goes to sleep, all their pets have
+   * somewhere to sleep."* The bed **count** was never the bug — it has been
+   * one per companion since #275, derived from the save. The bug is that the
+   * two side bedrooms hold **2** pet beds against a catalogue that offers
+   * **12** companions, and `Hotel.enterSuite` puts her nearest the *west*
+   * bedroom's door, so the room she actually naps in is usually one of the
+   * capacity-2 ones. Measured on the built suite, 6 Sep 2026: side bedrooms
+   * 6.35 m and 7.15 m of clear floor holding **2** beds each, middle bedroom
+   * 14.80 m holding **10**. A side bedroom cannot be tiled into holding
+   * twelve — that needs ~12.3 m of width — so this is not a packing problem
+   * anyone can solve in the side rooms.
+   *
+   * So a companion with **no bed in the room she chose** is sent to its bed
+   * in the {@link MIDDLE_BEDROOM_INDEX} bedroom instead, rather than being
+   * left standing in the line. Jim chose this on 6 Sep 2026 from four costed
+   * options, knowing the cost below.
+   *
+   * **The known cost, recorded rather than hidden.** Those pets are asleep
+   * behind a partition she cannot see past — the fixed camera only ever shows
+   * the bedroom she is in, and a 2.2 m partition hides 2.8 m of the floor
+   * behind it. This is the same objection that was raised on 18 Aug 2026,
+   * when *every* pet bed lived in the middle bedroom and a nap taken from
+   * bedroom 1 looked exactly like nothing had happened (Jim: *"the pet didn't
+   * get into any bed"*). It is different now only in degree: the pets she has
+   * room for are in the bed beside her, and only the surplus is next door.
+   * It is a deliberate decision, not an oversight — if a child reads it as
+   * "my pets vanished" rather than "my pets are next door", the fix is a
+   * layout change, not a change here.
+   *
+   * **Past the middle bedroom's own capacity there is still nowhere**, and
+   * that is the one case this cannot answer: a child owning more companions
+   * than the middle bedroom holds leaves the remainder standing in the line,
+   * exactly as they do everywhere else in the park. {@link petBedShortfall}
+   * is what says so out loud rather than letting it pass as success.
    */
   private sendPetsToBed(bedIndex: number): void {
-    for (const bed of this.petBedRoster) {
-      if (bed.bedIndex !== bedIndex || bed.uid === null) continue;
-      this.petParade?.sendPetToBed(bed.uid, bed.spot);
+    for (const { uid, spot } of this.petBedsForNapIn(bedIndex)) {
+      this.petParade?.sendPetToBed(uid, spot);
     }
+  }
+
+  /**
+   * Which bed each companion actually goes to for a nap taken in `bedIndex` —
+   * its own bed in that room, or, failing that, its bed in the middle
+   * bedroom. **The single owner of that choice**: {@link sendPetsToBed} acts
+   * on it, {@link petBedShortfall} counts what it could not place, and
+   * `check:hotel` asks it directly, so no two of the three can drift into
+   * disagreeing about where a given pet was sent (CLAUDE.md's opening rule —
+   * this feature has already been bitten twice by exactly that).
+   *
+   * At most one entry per companion, by construction: the roster is grouped
+   * by `uid` and each group contributes a single bed. A `uid` of `null` is
+   * the empty look-forward-to bed a save with nothing bought still gets; it
+   * has no body to send, so it is skipped here.
+   */
+  petBedsForNapIn(bedIndex: number): { readonly uid: string; readonly spot: PetBedSpot }[] {
+    const byUid = new Map<string, PetBedEntry[]>();
+    for (const bed of this.petBedRoster) {
+      if (bed.uid === null) continue;
+      const list = byUid.get(bed.uid);
+      if (list === undefined) byUid.set(bed.uid, [bed]);
+      else list.push(bed);
+    }
+    const sent: { readonly uid: string; readonly spot: PetBedSpot }[] = [];
+    for (const [uid, beds] of byUid) {
+      const here = beds.find((bed) => bed.bedIndex === bedIndex);
+      const overflow = beds.find((bed) => bed.bedIndex === MIDDLE_BEDROOM_INDEX);
+      const chosen = here ?? overflow;
+      if (chosen !== undefined) sent.push({ uid, spot: chosen.spot });
+    }
+    return sent;
+  }
+
+  /**
+   * How many companions a nap in `bedIndex` leaves with **no bed at all** —
+   * not in that room and not in the middle bedroom either, because she owns
+   * more than the middle bedroom holds.
+   *
+   * **This exists to be non-zero out loud.** CLAUDE.md: a check that stops
+   * covering something must say so on every run, and a feature that stops
+   * covering a child's seventh pet is the same disease one layer out. Zero is
+   * the ordinary answer for every save anyone has actually played; it stops
+   * being zero only past the middle bedroom's own measured capacity, and when
+   * it does, `check:hotel` prints the number rather than passing quietly.
+   */
+  petBedShortfall(bedIndex: number): number {
+    const owned = this.ownedCompanions().filter((c) => c.uid !== null).length;
+    return Math.max(owned - this.petBedsForNapIn(bedIndex).length, 0);
   }
 
   /**

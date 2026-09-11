@@ -404,6 +404,15 @@ export class Game {
       (x, z) => this.world.train.bridges.some((bridge) => bridge.covers(x, z)),
     );
 
+    // And the same map, handed to the parade — issues #602 and #605, the pets
+    // that walked through the bedroom wall to get to bed and warped back
+    // through it on the way out. **The same instance, not a second grid**: a
+    // companion-sized one was written for #602 and deleted with the timings
+    // in `petRoute.ts`, because the walker is not what a lattice costs and a
+    // second lattice charges the first nap another second of blocked main
+    // thread (#607).
+    this.parade.setNavGrid(this.navGrid);
+
     // Tap-to-move. Built after the world so it can ask the building where its
     // tap targets are, and after the player so it can borrow the ground sampler
     // the building installed. `treeClimbing` is constructed further down (it

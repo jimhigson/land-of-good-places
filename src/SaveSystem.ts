@@ -1,6 +1,12 @@
 import { saveFlags } from './state/flags';
 import { gameStore } from './state';
-import { SAVE_VERSION, writeSave, type SaveFile, type SavedPlace } from './state/save';
+import {
+  SAVE_VERSION,
+  isSessionUnsavable,
+  writeSave,
+  type SaveFile,
+  type SavedPlace,
+} from './state/save';
 import { spaceAt, worldToLocal, type SpaceId } from './world/spaces';
 
 /**
@@ -109,8 +115,19 @@ export class SaveSystem {
     this.sources = sources;
   }
 
-  /** Starts the interval and hooks the three ways a page can go away. */
+  /**
+   * Starts the interval and hooks the three ways a page can go away.
+   *
+   * **Except on a session a debug URL has made unsavable** — `?pets=N` grants
+   * companions into whatever profile was hydrated, so nothing from this page
+   * may reach the save (see `makeSessionUnsavable` in `state/save.ts`).
+   * `writeSave` refuses
+   * on its own, which is what makes that safe; not attaching as well is what
+   * stops the timer serialising the park every five seconds only to throw the
+   * string away, and stops `flush` running on the way out.
+   */
   start(): void {
+    if (isSessionUnsavable()) return;
     if (this.attached) return;
     this.attached = true;
     this.timer = window.setInterval(() => this.tick(), AUTOSAVE_INTERVAL_MS);
