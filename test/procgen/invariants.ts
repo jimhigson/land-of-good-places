@@ -9574,12 +9574,101 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
     );
   }
 
+  // --- the bus's own arc, which is mostly outside the boundary above --------
+  //
+  // **This clause exists because a comment promised it and nothing delivered
+  // it.** `BUS_MAX_GRADE`'s doc in `core/constants.ts` said *"`invariants.ts`
+  // walks the bus's own arc on the built park and asserts the real gradient
+  // under it stays inside this"*. It did not: the sweep above is radial, it
+  // stops at `facts.boundary.maxRadius`, and it printed — correctly — that it
+  // asserted nothing beyond the boundary, *which is where the road and the bus
+  // actually are*. So the one place the budget is spent was the one place
+  // nothing measured it, and the constant's own doc said otherwise. That is
+  // CLAUDE.md's "two definitions of one thing kept in step by hand" with the
+  // second definition being a sentence.
+  //
+  // It is also where `GROUND_SPHERE_RADIUS` came from: the radius is
+  // `the drawn road's full reach / BUS_MAX_GRADE`. Measuring the road rather
+  // than the boundary is therefore measuring the thing the number was derived
+  // from, which is the only way the pair can be re-proved instead of assumed.
+  //
+  // **The grade is measured between consecutive points on the drawn road**, not
+  // computed as `d / GROUND_SPHERE_RADIUS`. The latter is the sphere's own
+  // formula and would pass by restating the model; this asks the built terrain
+  // how far it actually falls from one metre of road to the next, so the rolling
+  // sine waves that ride on top of the cap are included — they are ground the
+  // bus really drives over.
+  const ROAD_GRADE_STEP = 1;
+  let worstRoadGrade = 0;
+  let worstRoadGradeAt = { x: 0, z: 0 };
+  let roadMetresWalked = 0;
+  let roadReach = 0;
+  // **The kerb only — the ground the bus actually drives on.**
+  //
+  // `roadCorridor.segments` also carries the ~5 m gateway approach, the run
+  // from the kerb in through the arch. A child walks that; the bus never does
+  // (it stops outside the wall — #195). Including it made this clause harmlessly
+  // stricter, but a foul landing there would have been *mis-worded*: it would
+  // have said "the cat bus drives a slope steeper than anybody agreed" about
+  // ground no bus has ever been on, and `BUS_MAX_GRADE` is a bus budget. A
+  // measurement is only as good as the sentence it will print when it fails.
+  const busDrives = facts.roadCorridor.segments.filter(
+    (segment) => segment.name === 'entrance-road-kerb',
+  );
+  for (const segment of busDrives) {
+    const runLength = Math.hypot(segment.to.x - segment.from.x, segment.to.z - segment.from.z);
+    if (runLength < 1e-6) continue;
+    const steps = Math.max(1, Math.ceil(runLength / ROAD_GRADE_STEP));
+    let previous: { x: number; z: number; y: number } | null = null;
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      const x = segment.from.x + (segment.to.x - segment.from.x) * t;
+      const z = segment.from.z + (segment.to.z - segment.from.z) * t;
+      const y = terrainHeight(x, z);
+      roadReach = Math.max(roadReach, Math.hypot(x, z));
+      if (previous) {
+        const run = Math.hypot(x - previous.x, z - previous.z);
+        roadMetresWalked += run;
+        const grade = run < 1e-6 ? 0 : Math.abs(y - previous.y) / run;
+        if (grade > worstRoadGrade) {
+          worstRoadGrade = grade;
+          worstRoadGradeAt = { x, z };
+        }
+      }
+      previous = { x, z, y };
+    }
+  }
+
+  if (roadMetresWalked === 0) {
+    fouls.push(
+      `seed ${facts.seed}: the road corridor reports no kerb run, so the gradient under ` +
+        'the bus was not measured at all — this clause would have passed vacuously, which is ' +
+        'exactly the state BUS_MAX_GRADE\'s doc has been describing as a measurement',
+    );
+  } else if (worstRoadGrade > BUS_MAX_GRADE) {
+    fouls.push(
+      `seed ${facts.seed}: the ground under the drawn entrance road reaches a gradient of ` +
+        `${(worstRoadGrade * 100).toFixed(2)}% at (${worstRoadGradeAt.x.toFixed(1)}, ` +
+        `${worstRoadGradeAt.z.toFixed(1)}), past the ${(BUS_MAX_GRADE * 100).toFixed(0)}% ` +
+        `BUS_MAX_GRADE budget that GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS} m) was chosen ` +
+        'against — the cat bus drives a slope steeper than anybody agreed',
+    );
+  }
+
   process.stderr.write(
     `[ground sphere] ${bearings} bearings to ${reach.toFixed(1)} m: worst departure from the cap ` +
       `${worstShapeError.toFixed(2)} m (tolerance ${undulation.toFixed(2)}), worst gradient ` +
       `${(worstGrade * 100).toFixed(2)}% at ${worstGradeAt.toFixed(1)} m (budget ` +
-      `${(BUS_MAX_GRADE * 100).toFixed(0)}%). Asserts nothing about ground beyond the park's own ` +
-      'boundary, where the road and the bus still run.\n',
+      `${(BUS_MAX_GRADE * 100).toFixed(0)}%).\n` +
+      `[ground sphere] and the bus's own arc: ${roadMetresWalked.toFixed(1)} m of drawn kerb ` +
+      `walked every ${ROAD_GRADE_STEP} m, out to ${roadReach.toFixed(1)} m from the centre ` +
+      `(past the ${reach.toFixed(1)} m boundary the radial sweep stops at), worst gradient ` +
+      `${(worstRoadGrade * 100).toFixed(2)}% at (${worstRoadGradeAt.x.toFixed(1)}, ` +
+      `${worstRoadGradeAt.z.toFixed(1)}).\n` +
+      `[ground sphere] Asserts nothing about the ${(
+        facts.roadCorridor.segments.length - busDrives.length
+      ).toString()} gateway-approach run(s) in through the arch: a child walks those, the bus ` +
+      'does not, and BUS_MAX_GRADE is a bus budget.\n',
   );
   return fouls;
 };
