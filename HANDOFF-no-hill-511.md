@@ -85,6 +85,29 @@ validates/resolves it.
 - The realised zoom is still not measured by any Node check; the check now says
   so on **stderr** on every run.
 
+### Gates run locally, with exit codes
+
+`check` **0** · `test:procgen` **0** (601 passed) · `build` **0** ·
+`check:swept-bus` **0** · `check:park-pool` **0** · `check:arrival-camera` **0**
+(14 checks) · `check:deep-links` **0**, three consecutive runs, 18/18.
+
+**`check:coplanar` is RED (exit 1)** and is **not mine** — 4 findings, all
+railway-bridge / boundary-wall / rail-fence geometry (`bridge/shell` vs
+`bridge/wallTop`, `boundary-blocks` vs `rail-fence`). My whole diff on top of
+`903982ba` is six files and none constructs geometry. `fix/coplanar-sphere`
+owns this.
+
+**`check:deep-links` was flaky before I touched it, and is not any more.**
+`/keychain-stall (startFresh)` timed out at 30 s on a run where everything else
+was green. Root cause measured, not guessed: the wait for `window.game` was
+being asserted on as well as the link. Boots timed over three fresh Chromium
+processes each — `/keychain-stall` 8.3/5.7/8.6 s, `/castle` 11.8/12.8/6.2 s,
+`/arrive` **22.0/22.0/21.7 s** (slow by design: it is the one link that opts
+*into* the bus, so the park builds while the ride plays). 22 s against a 30 s
+budget is not a margin. Budget is now 120 s, autosave wait 60 s. Note
+`check:deep-links` is **orphaned — not run by anything** (#526), so it gates
+nothing today.
+
 ### Practical notes that still hold
 
 The `window.game` setter harness works (see below). The **2000x1100 crash did
