@@ -353,6 +353,56 @@ export const COURSE_HEIGHT = 0.7;
  */
 export const COURSE_RECESS = 0.06;
 
+/**
+ * **A course boundary this close under a ring's own wall top is that wall
+ * top** — the ladder snaps to it, so no sliver of a course is ever laid at
+ * the top of a wall.
+ *
+ * The coursing is one ladder per bridge, struck from `highestTop` — the
+ * tallest wall top anywhere on it. Every *other* ring's wall top therefore
+ * falls at an arbitrary point between two rungs, and the topmost course there
+ * is clamped to whatever is left: a stone of any height from zero to a full
+ * `COURSE_HEIGHT`, decided by nothing but where the ladder happened to land.
+ * Where that leftover is a hair, the reveal under it is a horizontal shelf a
+ * hair below the `wallTop` cap, in the cap's plane to within the depth buffer's
+ * ability to tell them apart — 0.052 m² of it on pool seed 326's `bridge-0.0`,
+ * 7.6 mm under the cap, found by `check:coplanar` the day the sphere ground
+ * moved the terrain under these walls.
+ *
+ * **This is deliberately not another threshold on the reveal-deletion clause
+ * below, and the measurement is why.** Instrumented across all ten pool seeds,
+ * 16856 reveals, 3372 of them where no coping stone is laid, the height of the
+ * course above the reveal comes out as a *continuum* — 2723 at exactly zero (a
+ * course collapsed clean onto the wall top), then 1 in 4–7 mm, 3 in 7–10 mm, 5
+ * in 10–20 mm, 13 in 20–40 mm, 14 in 40–60 mm, and on up through 206 between
+ * 0.4 and 0.7 m. The two populations that clause's own comment separated ("the
+ * strays sat 16–77 mm below the wall top, a reveal actually fighting the cap
+ * sits 1.5 mm under it") **no longer have a gap between them**, so no line
+ * drawn through them is a measurement — it is a number tuned to today's park.
+ * Two such lines were tried and rejected on the numbers: making the clause an
+ * OR over the ring pair would newly delete 82 reveals whose other end is a real
+ * ledge up to 0.549 m tall, and raising its sink to `COURSE_RECESS` would delete
+ * 35 more with open slots up to 60 mm — both of them reopening the see-through
+ * holes #489 was reported for.
+ *
+ * Snapping the ladder instead removes the sliver rather than arguing about it.
+ * The leftover course collapses to nothing, so the existing clause deletes its
+ * reveal by the rule it already had; the course *below* grows to reach the wall
+ * top, so the wall stays closed and no slot is opened. That makes this number
+ * benign in both directions — too large and a course reads up to 9% taller than
+ * its neighbours, too small and the seam comes back — which is exactly what a
+ * threshold on the deletion clause could not be.
+ *
+ * `COURSE_RECESS` is the size to use, and it is the same argument the
+ * `revealInGround` clause below already makes for the same constant: a shelf
+ * standing less than its own depth out of anything is not reading as masonry to
+ * anybody. A stone shallower than the reveal beneath it is deep is not a course;
+ * it is where the ladder fell.
+ */
+function snapToWallTop(level: number, topY: number): number {
+  return level < topY && topY - level < COURSE_RECESS ? topY : level;
+}
+
 /** Pitch of the parapet collision-wall segments, metres. */
 const WALL_SEGMENT = 2.0;
 
@@ -674,12 +724,33 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // `.visible`, so it still answers that question with the same geometry
   // the old, rendered version did, at zero draw cost and with nothing left
   // to fall out of step with the shell beside it.
+  //
+  // **And it carries no faces at all** — `setIndex([])` below. Hiding it was
+  // not enough: `check:coplanar` buckets triangles by their plane and asks
+  // what a *modeller drew*, and it has never consulted `.visible` (it cannot
+  // — the hotel's rooms and the castle's floors are whole subtrees held
+  // hidden until you walk into them, so a visibility test there would blind
+  // the sweep to three and a half thousand meshes). So this marker's four
+  // upright sides went on being reported against the shell's abutment
+  // faces they sit exactly in the plane of, on 13 of the 16 pool seeds —
+  // 0.0173 m² of "shared plane" between a drawn wall and a box nothing
+  // renders, and on seed 208's `bridge-0.0` at *both* ends at once, which is
+  // what the check calls a second seam.
+  //
+  // Deleting the faces is `ART_DIRECTION.md` §7's own remedy rather than a
+  // dodge, because **nothing wanted them**. Both readers of this object take
+  // `new Box3().setFromObject(...).min.y`, which is computed from the
+  // position attribute and does not look at the index at all, so the box
+  // they measure is unchanged to the bit; and all three places that raycast
+  // a bridge already exclude this object *by name* (`invariants.ts`,
+  // `parkFacts.ts`, `measure-bridge-parapet.mts`), because a marker is not
+  // stone. What is left is eight corners and a name — exactly what is
+  // actually read.
   const at0 = frame.pointAt(0);
   const origin0 = frame.worldAt(0, 0, shift);
-  const deckMesh = new Mesh(
-    new BoxGeometry(halfAcross * 2, BRIDGE_DECK_SLAB, ARCH_CLEAR_HALF * 2),
-    bridgeMaterials().stone,
-  );
+  const deckGeometry = new BoxGeometry(halfAcross * 2, BRIDGE_DECK_SLAB, ARCH_CLEAR_HALF * 2);
+  deckGeometry.setIndex([]);
+  const deckMesh = new Mesh(deckGeometry, bridgeMaterials().stone);
   deckMesh.name = 'deck';
   deckMesh.visible = false;
   const yaw = Math.atan2(at0.dirX, at0.dirZ);
@@ -1168,8 +1239,8 @@ function buildShellGeometry(
       for (let course = 0; course < courseCount; course += 1) {
         const recess = course % 2 === 0 ? 0 : COURSE_RECESS;
         const face = frame.worldAt(along, (halfAcross - recess) * side, shift);
-        const levelTop = courseLevels[course] as number;
-        const levelBottom = courseLevels[course + 1] as number;
+        const levelTop = snapToWallTop(courseLevels[course] as number, topY);
+        const levelBottom = snapToWallTop(courseLevels[course + 1] as number, topY);
         const yTop = Math.min(topY, Math.max(bottomY, levelTop));
         const yBottom = Math.min(topY, Math.max(bottomY, levelBottom));
         column.push(
