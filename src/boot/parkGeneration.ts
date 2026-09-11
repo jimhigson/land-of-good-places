@@ -660,6 +660,22 @@ export class ParkGeneration {
     };
   }
 
+  /**
+   * How many slices **every** task has had, by task name.
+   *
+   * `unitCounts` above names the five phases that carry piece-count floors, and
+   * a driver that reports against it alone is blind to every other task the
+   * scheduler runs — the paths, the rail race, the crossings. `check:park-boot`
+   * was reporting its worst slice as "no generator step at all, 0 work units"
+   * for exactly that reason, and issue #606 reasonably read that as the process
+   * having been descheduled. It had not been: the work was in a task the driver
+   * could not see. One owner for the counts, so a task added tomorrow is
+   * attributed the day it exists rather than showing up as nothing.
+   */
+  get sliceCountsByTask(): Readonly<Record<string, number>> {
+    return this.scheduler.sliceCounts;
+  }
+
   /** How many of the cruiser finish's structural seams were taken. */
   get cruiserFinishSeamCount(): number {
     return this.cruiserFinishSeams;
