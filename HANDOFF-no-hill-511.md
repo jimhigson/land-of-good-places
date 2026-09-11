@@ -1,5 +1,98 @@
 # HANDOFF — issue #511, "the park is not on a hill"
 
+## ✅ 11 September 2026 — THE GREY REGION IS ANSWERED. Read this first.
+
+**Model: Opus** (a replacement must also be Opus, and this task was assigned
+Opus). Branch `feat/sphere-combined`, worktree
+`.claude/worktrees/sphere-combined`. Dev server **5641** (kill by PID when
+done). Every browser page I opened is closed.
+
+### The answer, measured, not reasoned
+
+**An orthographic camera at pitch 0 cannot see the ground at all.** Ortho rays
+are parallel, so pitch is the only thing that makes any of them descend. At
+pitch 0 every ray in the frame is horizontal and stays at its own height for
+ever: the ground is not a surface in the picture, only the single line where
+the terrain crosses eye height, and every ray below that line runs underneath
+single-sided terrain to the far plane and draws nothing. Anything standing in
+that band — the bus's flank, the gate-arch piers, the rail-race trestle legs —
+is drawn **sitting on nothing**. That is Jim's sentence exactly.
+
+How it was measured, in the running page at aspect **1.8189** (1466x806, his
+2000x1100 shape; his exact pixel size is not reachable — this display maxes at
+`outerHeight` 949):
+
+- **Ray-picked a 3x9 grid of the frame at seven beats across the whole 9.3 s
+  shot: `terrain` was hit ONCE in 189 picks.** At t=1.5, 3.2 and 4.0 the entire
+  frame is `cat-bus-shell-lower`/`cat-bus-door-panel`; at t=6.5 two of the
+  three columns are `NOTHING` top to bottom.
+- **A 21-rung ladder down the frame returned `hitY == rayY` at every rung** —
+  the rays never descend. That is the mechanism itself, read off the game.
+- **The instrument was controlled first** (a ray straight down from 60 m above
+  her, which hit `cat-bus-roof` with 19 hits). My *first* version of it was
+  broken — it climbed to the camera instead of the scene and returned `NOTHING`
+  for all 27 picks, which would have been a clean, decisive, entirely wrong
+  answer. The control is what caught it. Do not skip it.
+
+### The second, independent defect, also measured
+
+**The realised frame opened at 14.958 m and reached its declared 3.590 m only
+at t=0.81** — a 4.2x dolly-in over the first four fifths of a second, in a shot
+whose own check has a clause titled *"it opens at its framing, and never
+tightens"*. `Game` snapped the *pose* (`snapShotOverride`) but only ever wrote
+the zoom *target*, which damps at a 0.12 s half-life. The clause asserted on
+the **declared** `shot.zoom`, so the whole fault lived in the gap it could not
+see. This also explains the 3.7662-vs-3.5640 discrepancy the previous session
+could not account for: it sampled at t=0.459, mid-ease. It was never aspect.
+
+### What was done
+
+1. `ArrivalSequence.arrivalShot` — `pitchDegrees: CAMERA_PITCH_DEGREES` (38,
+   the rig's own) instead of `0`. One owner; it also removes a 38-degree pitch
+   swing at the hand-over.
+2. `IsoCamera.snapZoomTarget` — `snapShotOverride`'s missing other half, whose
+   own doc already said a caller wanting the framing to open closed "says so
+   itself". `Game` calls it on the engaging frame. **Verified in the page: the
+   realised frame is now 3.564 m on the first frame**, exactly the declared
+   framing.
+3. `check:arrival-camera` — the `worstTilt === 0` clause (which *enshrined* the
+   bug) is replaced by one that marches the frame's topmost ray the whole far
+   plane and asks whether it has reached the ground. **Proved red against the
+   exact geometry Jim saw** (pitch 0, nothing else changed): `the top of the
+   frame is still 3.2984 m above the ground after the whole 270.0000 m of the
+   far plane ... 2 FAILURE(S) out of 14 checks`. Green at 38°: `-163.3080 m`.
+   Finite at every pitch, never `Infinity`.
+4. **`/arrive?at=stepping-down`** (she gets off the bus) and **`/arrive?at=park`**
+   (the end state, she has the controls) — the two links Jim asked for twice.
+   `ArrivalSequence.runTo` *plays* the timeline at a fixed 1/60 step; it never
+   poses a frame that resembles the beat. Beat times sum `ARRIVAL_TIMELINE`.
+   Both verified in the page: `t=3.833 phase stepping-down frameH 3.564`, and
+   `t=9.333 phase departing frameH 15` standing on the path inside the park.
+
+**The trap to know if you touch the links:** `main.ts` may **not** import
+`ArrivalSequence` — it pulls in `terrain`, `layout` and `boundary` and solves
+`PARK_BOUNDARY` at module scope, which is the whole reason `arrivalIsDue` lives
+in `arrivalFlag.ts`. So the beat travels as a raw string and `Game`
+validates/resolves it.
+
+### Still open / judgement for Jim
+
+- The `stepping-down` frame now has a real paved floor with shadows, but at a
+  2 m stand-back with a 3.56 m frame **the bus's own doorway still fills most
+  of it** and she is not clearly the subject. That is Jim's stated framing
+  producing a cluttered shot; the "sitting on nothing" defect is gone. **His
+  call, not an engineer's** — send him the frames.
+- The realised zoom is still not measured by any Node check; the check now says
+  so on **stderr** on every run.
+
+### Practical notes that still hold
+
+The `window.game` setter harness works (see below). The **2000x1100 crash did
+not recur** at 1466x806 in this session. Frames from this session are in the
+scratchpad, not in git.
+
+---
+
 ## ⛔ COLD START — 6 September 2026, 23:20, browser pass, stopped part-way
 
 **Model: Opus** (a replacement must also be Opus). Branch `feat/sphere-combined`,
