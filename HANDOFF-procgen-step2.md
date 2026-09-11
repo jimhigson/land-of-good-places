@@ -663,3 +663,25 @@ sorted `ls-tree`/`ls-files` lists (exactly that line) and by `vitest list`:
 Not a file that stopped being collected. **Quote the pass count against a
 collection count, not against last time's total** — the pool is shrinking
 under this branch by design.
+
+## Scratch-merge gates, 11 Sep (step 2 3dd39a3f + sphere 903982ba)
+
+- `test:procgen` 0 (611/611, above). `check:swept-bus` 0: 0 posts on 10/10
+  pool seeds, owner 6.0429 vs 6.0429, driven 6.4991 vs 6.4991 (both off
+  0.0000), both controls held. `check:park-pool` 0: 10/10. `build` 0.
+- **`check:coplanar` 1 — not step 2's.** Four seams: bridge deck|shell (MORE),
+  boundary-blocks|rail-fence (WORSE 0.280 m² vs 0.051, and MORE), bridge
+  shell|wallTop (NEW, seed 326). **Control run on design 1eb6f210 + sphere
+  903982ba with no step 2 (`scratchpad/digest-base`): exit 1 with the
+  identical four seams** and the identical loose baseline entry
+  (`duck-bars|trestle-branches-upper` "is gone" — loose on the base too, so
+  not this branch's to delete). That is the sphere's own red gate
+  (`fix/coplanar-sphere` is open for it); step 2 adds no coplanar seam.
+- Merged check chain: design 65 steps, sphere 65, merged 66 = the exact
+  union (`check:layout-rung` + `check:arrival-camera`), every step defined —
+  parsed, not grepped.
+- Whole-park digest vs that same base, 10 seeds: **only the three
+  `railRace:trestle-*` groups differ on every seed**, plus on 131 and 451 the
+  duck-bar groups (`duck-bars`, `duck-bar-posts`, and the unnamed `sleeves`
+  InstancedMesh at track.ts:690, sized `barCount`) — a bar lost to the road
+  rule on each. No other group on any seed.
