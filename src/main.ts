@@ -713,7 +713,14 @@ function launchGame(
   // which is false for everyone who has already arrived once — i.e. for nearly
   // every profile this link will ever be typed on.
   if (gameOptions.arriveByBus === true || (gameOptions.arriveByBus !== false && arrivalIsDue())) {
-    rideInThenPlay(engine, uiRoot, splash, gameOptions, () => {
+    // **`?at=<beat>` must never show the loading ride.** Jim, 11 September
+    // 2026: *"it just shouldn't show that part at all."* The bus interior he
+    // was sitting through is this ride, not the arrival — see
+    // `JourneyDirector.hurry`. The park is still generated behind a loading
+    // caption; what is skipped is the twenty-second cinematic and every frame
+    // of it.
+    const hurryPastTheRide = deepLink?.kind === 'arrive' && deepLink.beat !== undefined;
+    rideInThenPlay(engine, uiRoot, splash, gameOptions, hurryPastTheRide, () => {
       void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
     });
     return;
@@ -756,6 +763,11 @@ function rideInThenPlay(
   uiRoot: HTMLElement,
   splash: HTMLElement | null,
   options: GameOptions,
+  /**
+   * Skip the ride entirely — hand over the instant the park is fit to play, and
+   * draw no frame of the bus on the way. See `JourneyDirector.hurry`.
+   */
+  hurry: boolean,
   handOver: () => void,
 ): void {
   const player = gameStore.get().player;
@@ -767,6 +779,7 @@ function rideInThenPlay(
   });
 
   const director = new JourneyDirector();
+  if (hurry) director.hurry();
   const generation = new ParkGeneration();
   const skip = new JourneySkip();
   // The opening credit, over the whole ride. Mounted on `document.body` for the
@@ -774,6 +787,10 @@ function rideInThenPlay(
   // which happens mid-ride — and disposed everywhere the ride tears down, of
   // which there are two: `finish()` and the generation-failure path below.
   const title = new JourneyTitle();
+  // The opening credit belongs to the cinematic. A beat link is not showing the
+  // cinematic, so it is torn down before it can draw a frame rather than left
+  // animating over a loading card.
+  if (hurry) title.dispose();
   // The loading caption, shown only while the bus is parked at the gate waiting
   // for a slow device to finish the park (`director.overrunning`). Idle and
   // invisible for the whole of an on-time ride. Mounted and torn down alongside
@@ -865,16 +882,25 @@ function rideInThenPlay(
     // over 6.4 s, against 262 during the ride, and read as a crash rather than
     // as a wait. Anything drawn that must keep moving reads the clock that
     // never stops. See `ui/JourneyTitle.ts` and `BusJourney.animationTime`.
-    title.update(journey.animationTime);
+    if (!hurry) title.update(journey.animationTime);
     // **The loading caption.** Shown only while the drive is looping past its
     // nominal length waiting for a slow device to finish the park (`overrunning`),
     // and told which part is being built so the wait reads as progress. The bus is
     // moving throughout now, so this reassures rather than rescues; idle and
     // invisible for the whole of an on-time ride.
-    wait.update(director.overrunning, generation.stage);
+    //
+    // **Under `hurry` the caption is shown from the first frame**, not only on an
+    // overrun: there is no bus to look at, so the honest thing on screen while
+    // the park builds is "what is being built", and a blank canvas would be the
+    // same complaint in a different colour.
+    wait.update(hurry || director.overrunning, generation.stage);
     const renderer = engine.renderer;
     renderer.clear(true, true, true);
-    journey.render(renderer, engine.width, engine.height);
+    // **Not one frame of the bus.** `journey.update` above still runs — the ride
+    // is the thing being waited on and its state must stay coherent — but under
+    // `hurry` nothing of it reaches the screen, which is the requirement in as
+    // many words.
+    if (!hurry) journey.render(renderer, engine.width, engine.height);
 
     // **The park's generation, a slice at a time, behind a moving bus.**
     //
