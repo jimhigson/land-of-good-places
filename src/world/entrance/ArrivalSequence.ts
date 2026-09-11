@@ -269,9 +269,30 @@ export const ARRIVAL_KID_COUNT = CAT_BUS_SEAT_COUNT - 1;
  * the grass depends entirely on *where in the park it is standing*.
  */
 export function arrivalDoorDropWorld(): { readonly x: number; readonly z: number } {
+  return arrivalBusPointWorld(CAT_BUS_DOOR_DROP.x, CAT_BUS_DOOR_DROP.z);
+}
+
+/**
+ * **Any point of the standing bus, in world space** — bus-local metres in, park
+ * metres out.
+ *
+ * Exported for `check:arrival-camera`, which needs to derive the bus's flank
+ * normal **from world geometry** rather than from
+ * {@link arrivalDoorYawDegrees}'s own expression. Asking that function whether
+ * the shot agrees with it is a tautology — proved so by mutation on
+ * 11 September 2026: adding 20° inside it moved the shot and the expectation
+ * together and the clause stayed green. Given three world points off the bus
+ * (its origin, a point ahead of it, and the drop) the check can build the
+ * normal independently, and a bearing that is 20° off the flank — which is
+ * exactly what the previous square-on-to-the-gate solve was — then fails.
+ */
+export function arrivalBusPointWorld(
+  localX: number,
+  localZ: number,
+): { readonly x: number; readonly z: number } {
   const facing = busFacingAtStop(BUS_STOP_AT);
   const stop = entranceRoadAt(BUS_STOP_AT);
-  return busLocalToWorld(stop.x, stop.z, CAT_BUS_DOOR_DROP.x, CAT_BUS_DOOR_DROP.z, facing);
+  return busLocalToWorld(stop.x, stop.z, localX, localZ, facing);
 }
 
 /**
@@ -369,7 +390,7 @@ export const ARRIVAL_FOLLOW_DISTANCE = 12;
  * standing the shot there and looking at it, which is the only way a
  * composition number is ever right.
  */
-const ARRIVAL_DOOR_STAND_BACK = 6.5;
+export const ARRIVAL_DOOR_STAND_BACK = 6.5;
 
 /**
  * **PROTOTYPE (#511). How wide a slice of world the shot frames at her own
@@ -431,7 +452,7 @@ const ARRIVAL_EYE_COMPOSITION_LIFT = 0.3;
  * That constant is deleted rather than kept "in case"; a spare definition of a
  * height is how this comes back.
  */
-const ARRIVAL_EYE_HEIGHT = KID_EYE_HEIGHT + ARRIVAL_EYE_FLOOR_MARGIN + ARRIVAL_EYE_COMPOSITION_LIFT;
+export const ARRIVAL_EYE_HEIGHT = KID_EYE_HEIGHT + ARRIVAL_EYE_FLOOR_MARGIN + ARRIVAL_EYE_COMPOSITION_LIFT;
 
 /**
  * **Which way the bus points while it is standing at the stop.**
