@@ -693,7 +693,18 @@ async function sweepThePool(): Promise<void> {
     `  CONTROL (bus driven onto the ride): the identical sweep, every station shifted by the ` +
       `offset to the nearest post, finds ${offsetTotal} post(s) inside the bus across ` +
       `${reports.length} seeds — fewest ${offsetLeast} on a seed, worst ` +
-      `${offsetWorst.toFixed(2)} m in. Non-zero everywhere, so this sweep can see a collision.\n`,
+      `${offsetWorst.toFixed(2)} m in.\n` +
+      // **Said conditionally, because the unconditional version was written
+      // first and it lied.** Zeroing the control's offset deliberately, to watch
+      // the void gate fire, produced a run whose summary still read "Non-zero
+      // everywhere, so this sweep can see a collision" above a FAIL saying the
+      // opposite. A sentence that asserts the control's verdict has to be
+      // derived from the control's numbers, or it is exactly the assertion
+      // reporting success about something it is not describing that this file
+      // exists to catch.
+      (offsetLeast > 0
+        ? '  Non-zero on every seed, so this sweep can see a collision.\n'
+        : '  ZERO on at least one seed — this sweep cannot see a collision; see the FAIL below.\n'),
   );
 
   // **The measurement the old control used to be, kept as a finding.**

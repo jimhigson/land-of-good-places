@@ -77,10 +77,18 @@ export const GROUND_SPHERE_RADIUS = 1200;
  * gradient (rise over run). {@link GROUND_SPHERE_RADIUS} is chosen against it.
  *
  * **This is a budget with a check behind it, not a comment promising a
- * number.** `test/procgen/invariants.ts` walks the bus's own arc on the built
- * park and asserts the real gradient under it stays inside this, so if either
- * the radius or the road's reach ever moves, the pair is re-proved rather than
- * assumed to still agree.
+ * number.** `test/procgen/invariants.ts`'s `theGroundIsTheSphereItClaimsToBe`
+ * walks the **drawn entrance road** — the bus's own arc, most of which lies
+ * outside the park boundary — a metre at a time, and asserts the gradient
+ * between consecutive points of the built terrain stays inside this. So if
+ * either the radius or the road's reach ever moves, the pair is re-proved
+ * rather than assumed to still agree.
+ *
+ * That sentence was here before the clause was, and said the same thing while
+ * the invariant in fact sampled radially and stopped at the boundary — printing,
+ * honestly, that it asserted nothing beyond it, which is precisely where the
+ * road is. The clause exists now; if you weaken it, weaken this paragraph in the
+ * same edit rather than leaving a promise standing over nothing.
  */
 export const BUS_MAX_GRADE = 0.1;
 

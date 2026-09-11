@@ -96,10 +96,23 @@
  *
  * ## What this covers, stated plainly
  *
- * Every seed in `PARK_SEED_POOL` — the sixteen parks a child can be given.
- * Nothing outside the pool. Separately, `check:park` is canonical-only and
- * `test:procgen` covers seven of the sixteen; that gap is **#510** and is not
- * this check's to close.
+ * Every seed in `PARK_SEED_POOL` — the parks a child can be given. Nothing
+ * outside the pool. Separately, `check:park` is canonical-only and `test:procgen`
+ * covers seven of the sixteen; that gap is **#510** and is not this check's to
+ * close.
+ *
+ * **And only the stretch of road the bus is driven along** —
+ * `entranceBusArriveAt()` to `entranceBusVanishAt()`. That is the right subject
+ * for a check named "swept bus", and since the sphere (#511) collapsed the brow
+ * it is about **2 m of a 145.7 m road, 1.4%**. The run now prints that fraction,
+ * with the denominator, on every run: it printed only "from 1.00 to -1.00 m"
+ * before, under a headline of "0 intruding posts on 14 seeds" that was then
+ * quoted as acceptance evidence for the *road*. A span with no whole beside it is
+ * not a coverage statement, and this file's whole subject is instruments that
+ * report success about something they are not describing.
+ *
+ * `check:entrance-road` sweeps the **whole** road and has its own control for it.
+ * Neither check covers the other's span; neither may be read as if it did.
  *
  * One park per seed, one child process per seed, because `parkManifest.ts`
  * reads `LGP_SEED` once at import.
@@ -198,9 +211,23 @@ export interface SeedReport {
     readonly bottom: number;
     readonly top: number;
   };
-  /** The run the bus was swept along, for the transcript. */
-  /** The stretch of the road's arc the bus was swept along, for the transcript. */
-  readonly route: { readonly fromAt: number; readonly toAt: number };
+  /**
+   * The stretch of the road's arc the bus was swept along, and the road's own
+   * full length beside it.
+   *
+   * **`roadLength` is here because a span without a whole is not coverage.** This
+   * check printed `swept along the road's arc from 1.00 to -1.00 m` and headlined
+   * "0 intruding posts on 14 seeds", and both sentences were true while the thing
+   * a reader took from them — that the bus had been proved clear of the ride —
+   * covered **2 m of a 145.7 m road, 1.4%**. That number was quoted as acceptance
+   * evidence for the road merge. Nothing in the output contradicted it because
+   * nothing in the output gave the reader the denominator.
+   */
+  readonly route: {
+    readonly fromAt: number;
+    readonly toAt: number;
+    readonly roadLength: number;
+  };
 }
 
 // ------------------------------------------------------------------ the child
@@ -220,8 +247,13 @@ async function measureOneSeed(): Promise<void> {
   // straight-road constants (which this branch deleted). Dynamic, like every
   // import here: `roadRoute.ts` builds a RingPath off the seeded boundary at
   // module scope, so a static import would pin the seed.
-  const { entranceRoadAt, entranceRoadFacing, entranceBusArriveAt, entranceBusVanishAt } =
-    await import('../src/world/entrance/roadRoute.ts');
+  const {
+    entranceRoadAt,
+    entranceRoadFacing,
+    entranceBusArriveAt,
+    entranceBusVanishAt,
+    entranceRoadExtent,
+  } = await import('../src/world/entrance/roadRoute.ts');
   const { PARK_SEED: seed } = await import('../src/world/parkManifest.ts');
   const { saveFlags } = await import('../src/state/flags.ts');
   const { Box3 } = await import('three');
@@ -527,7 +559,11 @@ async function measureOneSeed(): Promise<void> {
       bottom: busBox.min.y,
       top: busBox.max.y,
     },
-    route: { fromAt, toAt },
+    route: {
+      fromAt,
+      toAt,
+      roadLength: entranceRoadExtent().to - entranceRoadExtent().from,
+    },
   };
   process.stdout.write(`\n__SWEPT_BUS__${JSON.stringify(report)}\n`);
 }
@@ -704,14 +740,53 @@ const intruding = reports.filter((report) => report.posts > 0);
 const bus = reports[0]?.bus;
 const route = reports[0]?.route;
 
+/**
+ * **What this check covers, in metres and as a fraction of the road, every run.**
+ *
+ * CLAUDE.md: *"when a check stops covering something, it must say so on every
+ * run"*. This one covers the stretch the bus is **driven** along —
+ * `entranceBusArriveAt()` to `entranceBusVanishAt()`, which is the whole and only
+ * honest subject of a check named "swept bus". But since the sphere (#511)
+ * collapsed the brow, that stretch is about **2 m of a 145.7 m road, 1.4%**, and
+ * the run said only "from 1.00 to -1.00 m" — a span with no denominator beside
+ * it, printed under a headline of "0 intruding posts on 14 seeds". That headline
+ * was then quoted as acceptance evidence for the road merge, which it cannot
+ * support: it says the bus does not hit the ride *where the bus goes*, and says
+ * nothing whatever about the other 98.6% of the road.
+ *
+ * So the denominator is printed, and so is the sentence saying which question the
+ * number answers and which it does not. `check:entrance-road` is the one that
+ * sweeps the whole road; this is the one that sweeps the driven run. Neither
+ * covers the other, and neither may be read as if it did.
+ */
+function coverageNote(at: NonNullable<typeof route>, seed: number): string {
+  const swept = Math.abs(at.fromAt - at.toAt);
+  const percent = (100 * swept) / at.roadLength;
+  // The road's length is seeded, so the seed this was measured on is named
+  // rather than left for a reader to assume it is every seed's.
+  return (
+    `  SWEPT (on seed ${seed}; the road's length is seeded): ${swept.toFixed(1)} m of a ` +
+    `${at.roadLength.toFixed(1)} m road ` +
+    `(${percent.toFixed(1)}%), from ${at.fromAt.toFixed(2)} to ${at.toAt.toFixed(2)} m ` +
+    `either side of the gate, every ${SWEEP_STEP} m\n` +
+    `  That is the stretch \`ArrivalSequence\` actually drives the bus along, which is what ` +
+    `this check is about.\n` +
+    (percent < 99
+      ? `  COVERS NOTHING ELSE: the remaining ${(at.roadLength - swept).toFixed(1)} m ` +
+        `(${(100 - percent).toFixed(1)}%) of the road is NOT swept here. A zero below means the\n` +
+        `  bus clears the ride where the bus goes — it is not a statement about the road.\n` +
+        `  \`check:entrance-road\` is the check that sweeps the whole road; read that one for that.\n`
+      : '  That is the whole road.\n')
+  );
+}
+
 process.stderr.write(
   `\ncheck:swept-bus — the drawn cat bus against the drawn rail-race posts, ` +
     `${reports.length} seed(s) of PARK_SEED_POOL.\n` +
     (bus && route
       ? `  bus body as drawn: ${bus.length.toFixed(2)} m long, ${bus.width.toFixed(2)} m wide, ` +
         `${bus.bottom.toFixed(2)} to ${bus.top.toFixed(2)} m above the ground it stands on\n` +
-        `  swept along the road's arc from ${route.fromAt.toFixed(2)} to ` +
-        `${route.toAt.toFixed(2)} m, every ${SWEEP_STEP} m\n`
+        coverageNote(route, reports[0]?.seed ?? 0)
       : '') +
     `  seed   posts  feet(control)  lifted(control)  worst penetration\n`,
 );
@@ -846,7 +921,8 @@ if (regressions.length > 0) {
 }
 
 console.log(
-  `check:swept-bus OK — swept ${reports.length} seed(s); ` +
+  `check:swept-bus OK — swept ${reports.length} seed(s) over ` +
+    `${route ? `${Math.abs(route.fromAt - route.toAt).toFixed(1)} m of a ${route.roadLength.toFixed(1)} m road (${((100 * Math.abs(route.fromAt - route.toAt)) / route.roadLength).toFixed(1)}%), the driven run only` : 'an unknown span'}; ` +
     `${intruding.length} still have the bus driving through the drawn ride ` +
     `(${reports.reduce((sum, report) => sum + report.posts, 0)} post(s)), all within the ` +
     `baseline in scripts/swept-bus-baseline.mts. ` +
