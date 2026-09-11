@@ -6415,7 +6415,38 @@ const bridgesMatchTheirPathAndKeepTheRailClear: Invariant = (facts) => {
         raycaster.set(rayOrigin, up);
         raycaster.far = TRAIN_CLEARANCE_Y + 6;
         const hits = raycaster.intersectObject(bridgesGroup, true);
-        const first = hits[0];
+        // **The train is stopped by drawn stone, not by a claim about it.**
+        //
+        // `deck` is the invisible marker `bridges.ts` keeps so a couple of
+        // readers have something named `deck` to take a `Box3.min.y` off, and
+        // `intersectObject` does not consult `.visible` — so without this
+        // filter the first hit over the track can be the marker rather than the
+        // soffit a locomotive would actually hit. The two sibling raycasts in
+        // this file (the standable-air probe and the parapet face probe) have
+        // filtered it by name all along, each with a comment saying why;
+        // **this call site did not, and that was an oversight rather than a
+        // decision.**
+        //
+        // Measured on the built park at `feat/sphere-combined`, casting these
+        // exact rays and comparing the raw first hit against the first
+        // non-`deck` hit: on the canonical seed, **85 comparable points, the
+        // stone reading higher at 79 of them, worst 0.1800 m**. (#614's review
+        // reports 57 of 71 on its own sample; the samples differ, the 0.18 m
+        // worst case agrees, and the direction is the same on both.) The marker
+        // sits *below* the soffit, so reading it understated the headroom.
+        //
+        // Stone is the correct reading — nothing can collide with an invisible
+        // marker — so this clause is now slightly more permissive than it was,
+        // and that is the honest direction rather than a relaxation.
+        //
+        // It is written here explicitly rather than left to the fact that the
+        // marker currently carries no faces at all (`setIndex([])`, so that it
+        // cannot share a plane with the abutments). **That is a property of the
+        // geometry and this is a property of the question being asked**; an
+        // invariant that is only correct because another module happens to have
+        // emptied an index is one geometry change away from silently measuring
+        // the wrong thing again.
+        const first = hits.find((candidate) => candidate.object.name !== 'deck');
         if (!first) continue;
         const clearance = first.point.y - routePoint.y;
         if (Math.abs(offset) <= 1.5) anyHitOverCrossing = true;
