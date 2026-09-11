@@ -24,7 +24,12 @@
  * `terrainHeight` is a formula, so this is a second and not a park build.
  */
 import { cameraOffset } from '../src/core/cameraRig.ts';
-import { CAMERA_VIEW_HEIGHT, CAMERA_YAW_DEGREES } from '../src/core/constants.ts';
+import {
+  CAMERA_DISTANCE,
+  CAMERA_PITCH_DEGREES,
+  CAMERA_VIEW_HEIGHT,
+  CAMERA_YAW_DEGREES,
+} from '../src/core/constants.ts';
 import { angleDelta, DEG } from '../src/core/mathUtils.ts';
 import {
   ARRIVAL_CONTROL_AT,
@@ -80,14 +85,67 @@ check(frames.length > 100, `only ${frames.length} frames of shot — nothing bel
   );
 }
 
-// --- "at head height", and level -------------------------------------------
+// --- there is a floor in the picture ---------------------------------------
+//
+// **The clause this file was missing, and the one Jim reported three times.**
+//
+// It used to assert the opposite — `worstTilt === 0`, "at head height means
+// looking level" — and it was green for every one of those three reports,
+// because a level ortho camera is *precisely* what removes the floor.
+//
+// An orthographic projection has parallel rays, so pitch is the only thing
+// that makes any of them descend. At pitch 0 every ray in the frame is
+// horizontal: the ground is not a surface in the picture at all, only the one
+// line where the terrain crosses eye height, and every ray below that line
+// runs underneath single-sided terrain to the far plane and draws nothing.
+// Anything standing in that band is drawn sitting on nothing.
+//
+// So this asks the only question that distinguishes the two: **march the
+// frame's topmost ray the whole length of the far plane and see whether it
+// has got down to the ground yet.** Finite at every pitch, including 0, where
+// it answers "no, and it never will" with a real number.
 {
-  const worstTilt = Math.max(...frames.map((f) => Math.abs(f.shot.pitchDegrees)));
-  console.log(`the shot's worst tilt is ${show(worstTilt)}°, against a head at ${show(KID_EYE_HEIGHT)} m`);
+  const far = CAMERA_DISTANCE * 3;
+  const drop = arrivalDoorDropWorld();
+  const groundY = terrainHeight(drop.x, drop.z);
+  let worstHeight = -Infinity;
+  let worstAt = 0;
+  let worstPitch = 0;
+  for (const { t, shot } of frames) {
+    const pitch = shot.pitchDegrees * DEG;
+    const halfFrame = CAMERA_VIEW_HEIGHT / (2 * shot.zoom);
+    // The frame is centred on her head. The top edge sits `halfFrame` up the
+    // screen, whose own vertical component is `cos(pitch)`; every ray then
+    // descends `sin(pitch)` per metre it travels.
+    const startY = groundY + KID_EYE_HEIGHT + halfFrame * Math.cos(pitch);
+    const afterFar = startY - far * Math.sin(pitch);
+    if (afterFar - groundY > worstHeight) {
+      worstHeight = afterFar - groundY;
+      worstAt = t;
+      worstPitch = shot.pitchDegrees;
+    }
+  }
+  console.log(
+    `after ${show(far)} m the frame's top ray is ${show(worstHeight)} m above the ground at ` +
+      `its worst (t=${worstAt.toFixed(2)}s, pitch ${show(worstPitch)}°)`,
+  );
   check(
-    worstTilt === 0,
-    `the shot tilts ${show(worstTilt)}° — at head height means looking level, and any pitch ` +
-      'lifts the eye off her head by `distance · sin(pitch)`',
+    worstHeight <= 0,
+    `the top of the frame is still ${show(worstHeight)} m above the ground after the whole ` +
+      `${show(far)} m of the far plane, at t=${worstAt.toFixed(2)}s with a pitch of ` +
+      `${show(worstPitch)}° — that band of the picture has no floor in it, and whatever ` +
+      'stands in it is drawn sitting on nothing',
+  );
+  // "At head height" is not abandoned, it is moved to where it is visible: an
+  // orthographic eye's position changes nothing on screen, so the phrase buys
+  // the frame being centred on her head, which the clause below owns.
+  const tilts = new Set(frames.map((f) => f.shot.pitchDegrees));
+  console.log(`the shot holds ${tilts.size} distinct pitch(es): ${[...tilts].map(show).join(', ')}`);
+  check(
+    tilts.size === 1 && tilts.has(CAMERA_PITCH_DEGREES),
+    `the shot's pitch is ${[...tilts].map(show).join(', ')}° — it must be the rig's own ` +
+      `${show(CAMERA_PITCH_DEGREES)}°, held, so that the hand-over into ordinary play is not a ` +
+      'tilt she can see and so there is only one owner of the park camera\'s angle',
   );
 }
 
@@ -142,6 +200,26 @@ check(frames.length > 100, `only ${frames.length} frames of shot — nothing bel
   check(
     first !== undefined && first.shot.zoom === ARRIVAL_FOLLOW_ZOOM,
     'the shot must OPEN at its framing, not travel to it',
+  );
+  // **What this clause does NOT cover, announced on every run.**
+  //
+  // It reads the zoom the shot *declares*. It cannot see the zoom the camera
+  // *realises*, and for five days the whole fault lived in that gap: `Game`
+  // snapped the pose on the engaging frame but only ever wrote the zoom
+  // target, which damps at a 0.12 s half-life, so the realised frame opened at
+  // **14.958 m** and reached this declared 3.59 m only at t=0.81 — measured in
+  // the page on 11 September 2026, at 1466x806 (aspect 1.8189, Jim's own
+  // 2000x1100 shape), sampling `(camera.top - camera.bottom) / camera.zoom`
+  // every frame from `elapsed 0`. The clause was green throughout. It is fixed
+  // by `IsoCamera.snapZoomTarget`, not by anything this file can see.
+  //
+  // To stderr, not `console.log`: vitest-style reporters and CI logs show a
+  // passing run's stdout to nobody, and an announcement nobody can hear is the
+  // same disease one layer out.
+  process.stderr.write(
+    'NOTE check:arrival-camera — the framing clauses read the DECLARED shot. The zoom the ' +
+      'camera actually realises is not measured here and needs a browser; last measured ' +
+      '11 September 2026 at 1466x806, opening at 14.958 m before `snapZoomTarget` landed.\n',
   );
   check(
     worstTighten <= 1e-9,
