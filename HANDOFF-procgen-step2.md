@@ -692,3 +692,20 @@ under this branch by design.
   pool, both on the walk-past ring where nobody races — the number to put in
   front of Jim, since 451 is not a CI-suite seed and the invariant never says
   it out loud.
+- **Every moved foot accounted for** (per-foot dump on both trees,
+  `scratchpad/_dump-feet.mts` — `probe-trestle-move.mts`'s list printed, not
+  hashed; nearest-neighbour at 1.5 mm):
+  - **Walk-past ring: no leg moves on any seed** (max 0.000 m). One leg is
+    **gone, not moved**, on 24, 131, 428, 451 (50→49, 49→48 on 131); the
+    nearest surviving foot to each is 11.9–12.1 m away = `TRESTLE_SPACING`
+    12 — the slot the road rule skipped. Jim's sentence holds on the pool.
+  - **Race ring: every foot differs, by exactly 2.000 m** (49–50 of 50 per
+    seed; one at 1.00 on 24 and 428, one at 4.00 on 131), mean 1.85 m
+    *along* the ring and 0.66 m across. The base (sphere placer) searches the
+    race ring after the walk-past posts' colliders are registered, so every
+    nominal slot is refused by the 1.1 m clear-circle test (the
+    `legacy:collision` finding: a 0.272 m post 1.0 m off) and its ladder
+    `ARC_NUDGES = [0, −1, 1, −2, 2, −3, 3]` takes the ±2 m step. Step 2
+    registers colliders after both rings are placed (ruling (a), one rail
+    race), so the race feet sit at nominal — `worst lean 0% of its limit` on
+    every suite seed. A ring-wide 2 m slide along the track, by design.
