@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
-import { edgeRadiusAt, PARK_BOUNDARY } from '../boundary';
+import { BOUNDARY_MASONRY_HALF_WIDTH, edgeRadiusAt, PARK_BOUNDARY } from '../boundary';
 import { COASTER_PLANS } from '../coaster/plan';
 import { ENTRANCE_GATE_HALF_WIDTH, ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
 import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
@@ -81,10 +81,64 @@ export const TRACK_CLEARANCE = 1.3;
 const TRACK_PLOT_CLEARANCE = 4.2;
 
 /**
- * Half-width kept clear of the boundary wall while solving. The wall's own
- * collision half is ~0.45; this leaves the track's width plus a hair inside it.
+ * Half-width of track kept clear of **plots, stalls and every other obstacle**
+ * while solving. The rails themselves are 1.3 m across
+ * ({@link TRACK_CLEARANCE}); this leaves a hair more.
+ *
+ * It used to double as the boundary margin, and its old comment said so —
+ * *"half-width kept clear of the boundary wall while solving; the wall's own
+ * collision half is ~0.45, this leaves the track's width plus a hair inside
+ * it"*. That was the bug. The thing that meets the wall is not the track, it is
+ * the **fence**, which stands 2.18 m out from the centre line; and the thing it
+ * meets is not the 0.45 m collider, it is the 0.86 m of drawn stone. See
+ * {@link TRACK_BOUNDARY_CLEARANCE}.
  */
 const CORRIDOR_RADIUS = 1.8;
+
+/**
+ * **How far the centre line keeps off the park's boundary wall** — the margin
+ * `rail/generate.ts` has always documented the train as setting, and which the
+ * train in fact never set.
+ *
+ * That module's `boundaryMargin` field carries the note *"the train sets it
+ * much wider (see `train/route.ts`'s `TRACK_BOUNDARY_CLEARANCE`)"*. No such
+ * constant existed and {@link briefForLength} passed no `boundaryMargin` at
+ * all, so the search fell through to its `?? corridorRadius` default and let
+ * the loop run to **1.8 m** of the outline — inside the wall's own reach. A
+ * comment promising a mechanism, with no mechanism behind it, for as long as
+ * that field has existed.
+ *
+ * What it cost, measured on the built park across the ten pool seeds: the
+ * closest approach to the edge was **1.83 m** on seed 24 and under 2.2 m on six
+ * of the ten, and on seed 326 **77 rail-fence posts and 129 rail-fence rails
+ * stood inside a boundary block** — pickets and masonry in the same cubic
+ * metre. `check:coplanar` found it as 0.280 m² of `boundary-blocks` sharing a
+ * plane with `rail-fence`; the shared plane was the symptom, a decorative wall
+ * built through a live railway was the defect.
+ *
+ * **Derived, never chosen**, exactly as {@link GATE_WALK_RAIL_CLEARANCE} is:
+ * the fence line, plus the fence's own thickness, plus the widest stone the
+ * wall puts about the outline. Every term is read from its owner, so moving the
+ * fence out or widening the pillar caps moves this without anybody remembering
+ * it exists — which is the failure this constant is replacing.
+ *
+ * `PLAYER_RADIUS` is deliberately **not** in here. The question is "does the
+ * fence miss the stone", not "can she walk between them": she never can, and
+ * never needs to. The soft boundary holds her at `GARDEN_PLAY_RADIUS`, well
+ * inside the masonry, and the fence is solid from the ground up either way — so
+ * a strip too narrow to stand in is not a strip anybody is shut out of.
+ *
+ * The loop **backtracks** onto this rather than being clamped to it: a piece
+ * that would come closer is simply not a piece the search can place, and
+ * {@link TRAIN_LENGTH_FRACTIONS}'s ladder hands a rung that cannot close to a
+ * shorter, slacker one. That is CLAUDE.md's standing rule — *"the procgen
+ * should backtrack on collisions and make some different decisions until it
+ * works"* — and it is why the honest fix here is a metre of extra margin on the
+ * railway rather than the 89 m hole in the wall that giving way the other way
+ * measured out at.
+ */
+const TRACK_BOUNDARY_CLEARANCE =
+  FENCE_OFFSET + FENCE_HALF_THICKNESS + BOUNDARY_MASONRY_HALF_WIDTH;
 
 /**
  * **How far the centre line keeps off the park's front doorway** (issue #481).
@@ -130,7 +184,28 @@ const SELF_CLEARANCE = 3;
  * further inside the rim but always has room to solve. A loop shorter than
  * these still avoids everything — it just rings less of the park.
  */
-const TRAIN_LENGTH_FRACTIONS: readonly number[] = [0.62, 0.5, 0.4, 0.32];
+const TRAIN_LENGTH_FRACTIONS: readonly number[] = [0.62, 0.5, 0.4, 0.32, 0.26, 0.21];
+
+/*
+ * The last two rungs were added with {@link TRACK_BOUNDARY_CLEARANCE}, and only
+ * one seed has ever reached them.
+ *
+ * Holding the fence out of the boundary masonry costs the loop about a metre of
+ * the rim it used to be allowed to hug. Nine of the ten pool seeds did not
+ * notice — measured, every one still closes on a rung it already used, at 3.14 m
+ * or better from the edge. **Seed 326 exhausted the ladder at 0.32 and threw**:
+ * 458688 candidate pieces, 180742 of them rejected on the boundary alone. That
+ * seed is the pool's worst case for this by a distance (74.8 m of its old route
+ * ran close enough for the fence to reach the stone, against 30.3 m for the next
+ * worst), so it is the one that needed somewhere further to fall.
+ *
+ * Adding rungs costs the other nine nothing: the ladder returns the first rung
+ * that closes and always tries the longest first, so a seed that solves at 0.62
+ * never sees these. That is the point of writing it as a ladder rather than as a
+ * clamp — CLAUDE.md's "backtrack on collisions and make some different decisions
+ * until it works", where the different decision is a smaller ride rather than a
+ * known-too-close one.
+ */
 
 /**
  * How far inside the wall the ring of candidate start poses sits — the modern
@@ -457,6 +532,7 @@ function briefForLength(context: TrainContext, desiredLength: number, salt: numb
     clear: context.clear,
     boundary: PARK_BOUNDARY,
     corridorRadius: CORRIDOR_RADIUS,
+    boundaryMargin: TRACK_BOUNDARY_CLEARANCE,
     selfClearance: SELF_CLEARANCE,
     minRadius: TRAIN_MIN_TURN_RADIUS,
     budgets: { perJoint: 16, restarts: context.startPoses.length },

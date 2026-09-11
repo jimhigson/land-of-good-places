@@ -720,6 +720,31 @@ export function terrainEdgeRadiusAt(bearing: number): number {
   return edgeRadiusAt(PARK_BOUNDARY, bearing) + TERRAIN_APRON;
 }
 
+/**
+ * Half the width the boundary masonry occupies about the park's outline, in
+ * metres — the pillar caps, which are the widest part of it.
+ *
+ * **Anything asking "is this thing clear of the park wall?" measures against
+ * this**, the *widest* stone, not the collision half-width (0.45) that only the
+ * physics sees. A rail passing 0.5 m outside the outline would clear the
+ * collider and still be driven straight through a pillar cap.
+ *
+ * ## Why it lives here rather than in `Garden.ts`, which builds the stone
+ *
+ * It used to live there, with a note saying a number describing built geometry
+ * belongs to the module that builds it — and that note is right about *owners*
+ * and wrong about *files*. `train/route.ts` has to ask this question while
+ * solving (see its `TRACK_BOUNDARY_CLEARANCE`), and `Garden.ts` reaches
+ * `paths.ts` through `pathGraph`, which reaches `train/route.ts` back again:
+ * measured, importing it from there dies at module load with
+ * `Cannot access 'TRAIN_PLAN' before initialization`. So the value sits in the
+ * leaf both sides already import — `Garden.ts` re-exports it, so every existing
+ * importer is unchanged and there is still exactly one declaration. It is the
+ * same move `train/fence.ts` makes with `clearance.ts`'s constants, and for the
+ * same reason; see that module's own note.
+ */
+export const BOUNDARY_MASONRY_HALF_WIDTH = 0.86;
+
 /** A point along the park's edge, with the way the edge runs there. */
 export interface EdgeStation {
   readonly x: number;
