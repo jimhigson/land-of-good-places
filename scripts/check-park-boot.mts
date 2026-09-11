@@ -16,7 +16,7 @@
  * counts calls to `advance()`, or reads `framesWorked`, passes on an
  * implementation that does the whole 3.46 s solve inside the first call.
  *
- * So the load-bearing measurement is a **wall clock**, in two places:
+ * So the load-bearing measurement is a **clock**, in two places:
  *
  * - **How long each `advance()` blocked**, directly timed. This catches a
  *   solver slice that overruns the budget it was given.
@@ -30,6 +30,15 @@
  *
  * Both are compared against thresholds derived from **the game's own**
  * `GENERATION_BUDGET_MS`, not from whatever this machine happened to produce.
+ *
+ * **And both are measured in *attested busy time*, not raw wall clock (#606).**
+ * A wall clock answers "how long did this take", which on a contended box is a
+ * question about the box: this check failed three runs out of six on a loaded
+ * laptop, three of its worst slices having done **zero work units**. So every
+ * span here is charged only for the CPU time the process can be shown to have
+ * spent inside it — `busyMsOf`, whose instrument is controlled against a known
+ * busy loop and a known sleep before anything is measured. See the block above
+ * `cpuMs` for the full argument and for what it deliberately stops covering.
  *
  * The per-slice ceiling additionally **calibrates itself to the box it is
  * running on**, because the park is deterministic and so does the same number
@@ -82,6 +91,140 @@ const nextFrame = (): Promise<void> =>
   });
 
 // ---------------------------------------------------------------------------
+// **Busy, not blocked — and a control on the instrument before it is trusted.**
+//
+// Issue #606. Every ceiling in this file used to be a *wall clock* compared
+// against a budget for *generator work*, and those are only the same number on
+// an idle machine. A box under contention does not run everything uniformly
+// slower: it deschedules one slice for tens of milliseconds while the rest run
+// at full speed. So this check failed three runs out of six on a loaded laptop
+// and passed six out of six on a quiet one with the same commits — and its own
+// failure message said, on three of the seven worst slices, **"no generator
+// step at all, 0 work units in 29.8 ms"**. A slice that did zero work cannot
+// have blown a budget on the cost of a work unit. It was blocked, not busy.
+//
+// The fix is to gate on the part of the wall clock the process can be *shown*
+// to have spent computing, and to report the rest as an observation:
+//
+//     busyMs = min(wall clock elapsed, CPU time consumed)
+//
+// `process.cpuUsage()` is `getrusage(RUSAGE_SELF)` — it does not advance while
+// the thread is descheduled, so a stall costs wall clock and no CPU and drops
+// straight out of the minimum. It counts *every* thread of the process, which
+// means it is an **over**-estimate of the main thread's own work: V8's
+// concurrent marker and its background optimizing compiler both show up in it
+// (measured here: a 10.3 ms allocation-heavy stretch reported 27.6 ms of CPU).
+// That error only ever points one way, and the `min` is why it is safe — CPU
+// time can fail to clear a stall, it can never wrongly clear a busy slice, so
+// nothing this check used to catch can hide behind it.
+//
+// **The control runs first, because this file's whole subject is instruments
+// that cannot fail.** A CPU clock with millisecond granularity, or one that
+// simply returns zero on some future runtime, would clear *every* slice and
+// leave a check that reports success about nothing at all. So before anything
+// is measured, the instrument is shown two known answers: a busy arithmetic
+// loop, which it must attest as busy, and a deliberately descheduled sleep,
+// which it must attest as idle. If either comes back wrong the attestation is
+// abandoned, the ceilings go back to raw wall clock, and the run says so on
+// stderr rather than quietly gating on nothing.
+// ---------------------------------------------------------------------------
+const cpuMs = (): number => {
+  const used = process.cpuUsage();
+  return (used.user + used.system) / 1000;
+};
+
+/** Deterministic arithmetic, no allocation: real work for a known duration. */
+const spin = (iterations: number): number => {
+  let x = 1.000001;
+  let sum = 0;
+  for (let i = 0; i < iterations; i += 1) {
+    x = x * 1.0000001 + 1e-9;
+    sum += Math.sqrt(x) * 0.5;
+  }
+  if (!Number.isFinite(sum)) throw new Error('spin diverged');
+  return sum;
+};
+
+/** A real deschedule: the thread sleeps, so no CPU time may be charged for it. */
+const sleepBlocking = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+const CONTROL_SLEEP_MS = 30;
+/** Busy work must attest as at least this much of its wall clock. */
+const BUSY_CONTROL_FLOOR = 0.8;
+/** A descheduled sleep must attest as at most this much of its wall clock. */
+const IDLE_CONTROL_CEILING = 0.2;
+
+const controlOfCpuClock = (): {
+  usable: boolean;
+  busyWallMs: number;
+  busyCpuMs: number;
+  idleWallMs: number;
+  idleCpuMs: number;
+} => {
+  spin(200_000); // warm-up, so the busy probe measures steady-state arithmetic
+  const busyWall0 = performance.now();
+  const busyCpu0 = cpuMs();
+  spin(3_000_000);
+  const busyWallMs = performance.now() - busyWall0;
+  const busyCpuMs = cpuMs() - busyCpu0;
+
+  const idleWall0 = performance.now();
+  const idleCpu0 = cpuMs();
+  sleepBlocking(CONTROL_SLEEP_MS);
+  const idleWallMs = performance.now() - idleWall0;
+  const idleCpuMs = cpuMs() - idleCpu0;
+
+  return {
+    usable:
+      busyWallMs > 1 &&
+      busyCpuMs >= busyWallMs * BUSY_CONTROL_FLOOR &&
+      idleWallMs > CONTROL_SLEEP_MS * 0.5 &&
+      idleCpuMs <= idleWallMs * IDLE_CONTROL_CEILING,
+    busyWallMs,
+    busyCpuMs,
+    idleWallMs,
+    idleCpuMs,
+  };
+};
+
+const cpuClock = controlOfCpuClock();
+said.push(
+  `CPU clock control: ${cpuClock.busyCpuMs.toFixed(1)} ms of CPU attested for ` +
+    `${cpuClock.busyWallMs.toFixed(1)} ms of busy arithmetic, and ` +
+    `${cpuClock.idleCpuMs.toFixed(2)} ms for ${cpuClock.idleWallMs.toFixed(1)} ms of descheduled ` +
+    `sleep — ${cpuClock.usable ? 'usable' : 'NOT USABLE'}`,
+);
+
+/**
+ * The part of a wall-clock span the process can be **shown** to have computed.
+ *
+ * This is what every ceiling below is compared against. With the instrument
+ * controlled it is `min(wall, cpu)`; without it, the old raw wall clock, so a
+ * runtime whose CPU clock cannot be trusted gets the pre-#606 check rather than
+ * a check that passes everything.
+ */
+const busyMsOf = (wallMs: number, cpuDeltaMs: number): number =>
+  cpuClock.usable ? Math.min(wallMs, cpuDeltaMs) : wallMs;
+
+/** What the gates stopped prosecuting, so the run can say so out loud. */
+const clearedAsDescheduled: { count: number; worstWallMs: number; worstBusyMs: number; where: string }[] =
+  [];
+const noteCleared = (label: string, wallMs: number, busyMs: number): void => {
+  const existing = clearedAsDescheduled.find((entry) => entry.where === label);
+  if (existing) {
+    existing.count += 1;
+    if (wallMs > existing.worstWallMs) {
+      existing.worstWallMs = wallMs;
+      existing.worstBusyMs = busyMs;
+    }
+    return;
+  }
+  clearedAsDescheduled.push({ count: 1, worstWallMs: wallMs, worstBusyMs: busyMs, where: label });
+};
+
+// ---------------------------------------------------------------------------
 // The event loop's own lateness. A 2 ms timer that fires 40 ms late was blocked
 // for 38 ms, and a blocked main thread is precisely what a dropped frame is.
 // This sees work that `advance()` does not — above all a dynamic import's
@@ -90,16 +233,33 @@ const nextFrame = (): Promise<void> =>
 // importing its dependencies first; imported cold it also carries the cruiser's
 // ~1.3 s, which is the misreading behind issue #252.)
 // ---------------------------------------------------------------------------
+//
+// Attested the same way as a slice (#606): the gap between two ticks is wall
+// clock, and a gap the process spent descheduled is the machine's, not the
+// park's. `worstBlockMs` stays the raw number — it is printed, and a reader
+// wants to know the loop really did go quiet — while `worstBusyBlockMs` is the
+// part of it the process can be shown to have been computing through, and that
+// is the one the ceiling prosecutes.
 const LAG_INTERVAL_MS = 2;
 let worstBlockMs = 0;
+let worstBusyBlockMs = 0;
+let worstBusyBlockWallMs = 0;
 let blockedOver16 = 0;
 let lastTick = performance.now();
+let lastTickCpu = cpuMs();
 const lagTimer = setInterval(() => {
   const now = performance.now();
+  const nowCpu = cpuMs();
   const blocked = now - lastTick - LAG_INTERVAL_MS;
+  const busy = busyMsOf(blocked, nowCpu - lastTickCpu);
   if (blocked > worstBlockMs) worstBlockMs = blocked;
+  if (busy > worstBusyBlockMs) {
+    worstBusyBlockMs = busy;
+    worstBusyBlockWallMs = blocked;
+  }
   if (blocked > 16.7) blockedOver16 += 1;
   lastTick = now;
+  lastTickCpu = nowCpu;
 }, LAG_INTERVAL_MS);
 
 // ---------------------------------------------------------------------------
@@ -123,7 +283,9 @@ const MAX_FRAMES = 6000;
 
 let frames = 0;
 let worstAdvanceMs = 0;
+let worstBusyAdvanceMs = 0;
 let totalAdvanceMs = 0;
+let totalAdvanceCpuMs = 0;
 let framesThatBlockedMeasurably = 0;
 
 // **Which phase the worst slice was in, and how many units it got through.**
@@ -139,16 +301,31 @@ let framesThatBlockedMeasurably = 0;
 // interesting one: either that unit is genuinely too big to be a unit, or the
 // machine took the CPU away mid-slice. The two are told apart by the per-unit
 // figure below — a unit that is expensive is expensive on every run.
+//
+// **And it asks the scheduler for EVERY task, not the five that carry floors
+// (#606).** This loop used to walk `PHASES`, which is the five phases with
+// piece-count floors below — so a slice spent in the path graph, the rail race
+// or the crossings was faithfully reported as **"no generator step at all, 0
+// work units"**. Three of the seven worst slices on the runs that opened #606
+// said exactly that, and the issue reasonably read it as the process having
+// been descheduled. It was not: it was a task this driver could not see. A
+// diagnosis that names the wrong cause is worse than one that names none, so
+// the attribution now comes from `sliceCountsByTask` — one owner, and a task
+// added tomorrow is named the day it exists.
 type Phase = 'brief' | 'cruiserSearch' | 'cruiserFinish' | 'trainSearch' | 'slideSearch';
 const PHASES: readonly Phase[] = ['brief', 'cruiserSearch', 'cruiserFinish', 'trainSearch', 'slideSearch'];
-const unitsSeen: Record<Phase, number> = {
-  brief: 0,
-  cruiserSearch: 0,
-  cruiserFinish: 0,
-  trainSearch: 0,
-  slideSearch: 0,
+const isPhase = (name: string): name is Phase => (PHASES as readonly string[]).includes(name);
+/** Slices seen so far, per scheduler task — the delta across one `advance()`. */
+const unitsSeen: Record<string, number> = {};
+let worstSlice = {
+  ms: 0,
+  busyMs: 0,
+  phase: 'no scheduler slice at all',
+  steps: 0,
+  stage: 'waiting',
 };
-let worstSlice = { ms: 0, phase: 'no generator step at all', steps: 0, stage: 'waiting' };
+/** The worst slice by *wall clock*, kept separately so both can be printed. */
+let worstWallSlice = { ...worstSlice };
 /** Wall clock spent in slices that did each phase's work — the calibration. */
 const phaseMs: Record<Phase, number> = {
   brief: 0,
@@ -159,15 +336,21 @@ const phaseMs: Record<Phase, number> = {
 };
 
 const startedAt = performance.now();
+const startedAtCpu = cpuMs();
 
 lastTick = performance.now();
+lastTickCpu = cpuMs();
 while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
   const stage = generation.stage;
+  const beforeCpu = cpuMs();
   const before = performance.now();
   generation.advance(GENERATION_BUDGET_MS);
   const spent = performance.now() - before;
+  const cpuSpent = cpuMs() - beforeCpu;
+  const busy = busyMsOf(spent, cpuSpent);
   frames += 1;
   totalAdvanceMs += spent;
+  totalAdvanceCpuMs += cpuSpent;
   // Since the one-scheduler driver, more than one phase MAY do work in one
   // `advance()` — a task finishing mid-budget hands the rest of the frame to
   // the next runnable task (today that happens across the cruiser's three
@@ -178,23 +361,37 @@ while (!generation.ready && !generation.failed && frames < MAX_FRAMES) {
   // calibration-grade approximation, not an exact per-phase ledger.
   let did: Phase | null = null;
   let steps = 0;
-  for (const phase of PHASES) {
-    const done = generation.unitCounts[phase] - unitsSeen[phase];
-    unitsSeen[phase] = generation.unitCounts[phase];
+  const moved: string[] = [];
+  for (const [task, count] of Object.entries(generation.sliceCountsByTask)) {
+    const done = count - (unitsSeen[task] ?? 0);
+    unitsSeen[task] = count;
     if (done > 0) {
-      did = phase;
-      steps = done;
+      steps += done;
+      moved.push(`${task} x${done}`);
+      if (isPhase(task)) did = task;
     }
   }
   if (did) phaseMs[did] += spent;
+  const record = {
+    ms: spent,
+    busyMs: busy,
+    phase: moved.length > 0 ? moved.join(' + ') : 'no scheduler slice at all',
+    steps,
+    stage,
+  };
   if (spent > worstAdvanceMs) {
     worstAdvanceMs = spent;
-    worstSlice = { ms: spent, phase: did ?? 'no generator step at all', steps, stage };
+    worstWallSlice = record;
+  }
+  if (busy > worstBusyAdvanceMs) {
+    worstBusyAdvanceMs = busy;
+    worstSlice = record;
   }
   if (spent > 1) framesThatBlockedMeasurably += 1;
   await nextFrame();
 }
 const wallClockMs = performance.now() - startedAt;
+const totalRunCpuMs = cpuMs() - startedAtCpu;
 clearInterval(lagTimer);
 
 if (generation.failed) {
@@ -212,16 +409,24 @@ said.push(
     `${(totalAdvanceMs / 1000).toFixed(2)} s of it inside advance()`,
 );
 said.push(
-  `worst single advance() ${worstAdvanceMs.toFixed(1)} ms against a ${GENERATION_BUDGET_MS} ms budget; ` +
-    `${framesThatBlockedMeasurably} frames did over a millisecond of work`,
-);
-said.push(
-  `worst the event loop was blocked: ${worstBlockMs.toFixed(1)} ms, ` +
-    `over one 60 Hz frame on ${blockedOver16} occasions`,
+  `worst single advance() ${worstBusyAdvanceMs.toFixed(1)} ms of attested busy time against a ` +
+    `${GENERATION_BUDGET_MS} ms budget; ${framesThatBlockedMeasurably} frames did over a ` +
+    'millisecond of work',
 );
 said.push(
   `that worst slice was ${worstSlice.phase}, ${worstSlice.steps} work units in ` +
-    `${worstSlice.ms.toFixed(1)} ms, during "${worstSlice.stage}"`,
+    `${worstSlice.busyMs.toFixed(1)} ms busy of ${worstSlice.ms.toFixed(1)} ms wall, ` +
+    `during "${worstSlice.stage}"`,
+);
+said.push(
+  `worst single advance() by WALL clock ${worstAdvanceMs.toFixed(1)} ms — ` +
+    `${worstWallSlice.phase}, ${worstWallSlice.steps} work units, ` +
+    `${worstWallSlice.busyMs.toFixed(1)} ms of it attested busy (the rest was this box, not the park)`,
+);
+said.push(
+  `worst the event loop was blocked: ${worstBlockMs.toFixed(1)} ms wall, worst attested busy ` +
+    `${worstBusyBlockMs.toFixed(1)} ms (of a ${worstBusyBlockWallMs.toFixed(1)} ms gap), ` +
+    `over one 60 Hz frame on ${blockedOver16} occasions`,
 );
 said.push(`the slide's search reached attempt ${generation.attempts}`);
 
@@ -273,20 +478,24 @@ const units = generation.unitCounts;
  * repo's most common bug, wearing a stopwatch. So the ruler below is a
  * deterministic float loop that exists for no other purpose: it cannot be
  * optimised by a solver change, cannot regress when a unit gets dearer, and
- * has no cold start worth speaking of after its own warm-up pass.
+ * has no cold start worth speaking of after its own warm-up pass. Its body is
+ * `spin()` above — the same arithmetic the CPU-clock control uses, so there is
+ * one owner of the loop rather than two copies to keep in step.
+ *
+ * **And it is timed the same way the slices are (#606).** A ruler read off a
+ * wall clock measures the box *and whatever else the box is doing*: the runs
+ * that failed this check read 1.80-1.99x on a laptop that reads 1.00x idle,
+ * which inflated the ceiling on exactly the runs that then failed anyway. Best
+ * of three took the edge off and could not remove it, because contention is not
+ * a constant factor. Attested busy time is a question about the machine alone.
  */
 function msPerMegaflop(): number {
   const run = (): number => {
+    const startedCpu = cpuMs();
     const started = performance.now();
-    let x = 1.000001;
-    let sum = 0;
-    for (let i = 0; i < 1_000_000; i += 1) {
-      x = x * 1.0000001 + 1e-9;
-      sum += Math.sqrt(x) * 0.5;
-    }
     // Consumed so no engine can fold the loop away.
-    if (!Number.isFinite(sum)) throw new Error('calibration loop diverged');
-    return performance.now() - started;
+    spin(1_000_000);
+    return busyMsOf(performance.now() - started, cpuMs() - startedCpu);
   };
   run();
   return Math.min(run(), run(), run());
@@ -317,8 +526,8 @@ const REFERENCE_CALIBRATION_MS = 1.34;
  */
 const slowness = Math.max(1, calibrationMs / REFERENCE_CALIBRATION_MS);
 said.push(
-  `this box runs the calibration loop in ${calibrationMs.toFixed(2)} ms against the ` +
-    `reference ${REFERENCE_CALIBRATION_MS.toFixed(2)} ms — ${slowness.toFixed(2)}x`,
+  `this box runs the calibration loop in ${calibrationMs.toFixed(2)} ms of attested busy time ` +
+    `against the reference ${REFERENCE_CALIBRATION_MS.toFixed(2)} ms — ${slowness.toFixed(2)}x`,
 );
 
 // --- it is SPREAD, not merely done -----------------------------------------
@@ -406,22 +615,38 @@ if (frames < MIN_WORKING_FRAMES) {
 // measured median. One owner per question. The tell here is the printed "us per
 // cruiser joint" line: on a machine you believe is fast, a number far above the
 // reference means the work got dearer, not that the box got slower.
+//
+// **And what it is compared against is attested busy time, not wall clock
+// (#606).** The paragraphs above are the history of trying to make a wall clock
+// answer a question about work: a constant in milliseconds twice blocked main's
+// deploy, and scaling it by the box's speed fixed the "uniformly slower box"
+// half while leaving the other half — a box that deschedules one slice for 30
+// ms. Three of the seven worst slices recorded on the failing runs did **zero
+// work units**, which no budget for the cost of a work unit can be blown by.
+// `busyMsOf` drops that stall out of the number before it is compared, so a
+// slice is prosecuted for the work it did and nothing else. A genuinely fat
+// unit is unaffected: it spends the CPU it costs, so its busy time is its wall
+// time, and the ceiling meets it exactly as before.
 const WORST_UNIT_GRACE_MS = 12;
 const ADVANCE_CEILING_MS = GENERATION_BUDGET_MS + WORST_UNIT_GRACE_MS * slowness;
 said.push(
-  `so one slice may block for ${ADVANCE_CEILING_MS.toFixed(1)} ms ` +
+  `so one slice may spend ${ADVANCE_CEILING_MS.toFixed(1)} ms of busy time ` +
     `(${GENERATION_BUDGET_MS} ms budget + ${WORST_UNIT_GRACE_MS} ms of grace x ${slowness.toFixed(2)})`,
 );
-if (worstAdvanceMs > ADVANCE_CEILING_MS) {
+if (worstAdvanceMs > ADVANCE_CEILING_MS && worstBusyAdvanceMs <= ADVANCE_CEILING_MS) {
+  noteCleared('advance() at the rolling budget', worstAdvanceMs, worstWallSlice.busyMs);
+}
+if (worstBusyAdvanceMs > ADVANCE_CEILING_MS) {
   fouls.push(
-    `one advance() blocked for ${worstAdvanceMs.toFixed(1)} ms against a ${GENERATION_BUDGET_MS} ms ` +
-      `budget and a ${ADVANCE_CEILING_MS.toFixed(1)} ms ceiling already scaled ${slowness.toFixed(2)}x ` +
-      `for this box's speed — so this is NOT simply a slow machine. Read the worst-slice line ` +
-      `above: if it got through hundreds of work units it merely spent its budget and something ` +
-      `else is wrong; if it got through one or two, that unit is too big to be a unit. Profile it ` +
-      `with \`generation.advance(0)\`, which makes every drive loop do exactly one step so the ` +
-      `slice time IS the unit cost. Do not raise the ceiling: it stutters the orbit on a phone ` +
-      `whatever CI says`,
+    `one advance() spent ${worstBusyAdvanceMs.toFixed(1)} ms of attested CPU time (${worstSlice.ms.toFixed(1)} ms ` +
+      `wall) against a ${GENERATION_BUDGET_MS} ms budget and a ${ADVANCE_CEILING_MS.toFixed(1)} ms ` +
+      `ceiling already scaled ${slowness.toFixed(2)}x for this box's speed — and busy time does not ` +
+      `advance while the process is descheduled, so this is NOT a loaded machine either. Read the ` +
+      `worst-slice line above: if it got through hundreds of work units it merely spent its budget ` +
+      `and something else is wrong; if it got through one or two, that unit is too big to be a ` +
+      `unit. Profile it with \`generation.advance(0)\`, which makes every drive loop do exactly ` +
+      `one step so the slice time IS the unit cost. Do not raise the ceiling: it stutters the ` +
+      `orbit on a phone whatever CI says`,
   );
 }
 
@@ -626,11 +851,19 @@ if (seamsSeen !== CRUISER_FINISH_SEAMS) {
 // caught by ADVANCE_CEILING_MS above, which is the assertion that owns that
 // question. This one exists for the work that never passes through `advance()`
 // at all.
+//
+// Prosecuted on attested busy time (#606), like every other ceiling here: an
+// event loop that went quiet because the OS took the CPU away is not a module
+// evaluation hogging it, and only the second is something a commit can cause.
 const BLOCK_CEILING_MS = 250;
-if (worstBlockMs > BLOCK_CEILING_MS) {
+if (worstBlockMs > BLOCK_CEILING_MS && worstBusyBlockMs <= BLOCK_CEILING_MS) {
+  noteCleared('the event loop between two 2 ms ticks', worstBlockMs, worstBusyBlockMs);
+}
+if (worstBusyBlockMs > BLOCK_CEILING_MS) {
   fouls.push(
-    `the main thread was blocked for ${worstBlockMs.toFixed(0)} ms in one go — that is ` +
-      `${(worstBlockMs / 16.7).toFixed(0)} dropped frames, and a hitch in the orbit is a failure ` +
+    `the main thread was busy for ${worstBusyBlockMs.toFixed(0)} ms in one go ` +
+      `(${worstBusyBlockWallMs.toFixed(0)} ms of wall clock) — that is ` +
+      `${(worstBusyBlockMs / 16.7).toFixed(0)} dropped frames, and a hitch in the orbit is a failure ` +
       'even when the totals look good',
   );
 }
@@ -675,15 +908,26 @@ if (takePrewarmedSlide() !== null) {
 // meant to catch. On a slow runner that scheduling is the larger half — 200
 // frames of it are measured above, and the estimate is subtracted here so the
 // number means what the sentence says.
+//
+// Attested too (#606). `wallClock - advance` on a contended box carries every
+// millisecond the process spent waiting for a core, which is not generation at
+// all; `busyMsOf` keeps only the part it can be shown to have computed, and the
+// module evaluations this exists to catch are pure computation.
 const outsideAdvanceMs = wallClockMs - totalAdvanceMs;
+const outsideAdvanceCpuMs = Math.max(0, totalRunCpuMs - totalAdvanceCpuMs);
 const loopOverheadMs = perFrameOverheadMs * frames;
-const unbudgetedMs = Math.max(0, outsideAdvanceMs - loopOverheadMs);
+const unbudgetedWallMs = Math.max(0, outsideAdvanceMs - loopOverheadMs);
+const unbudgetedMs = Math.max(0, busyMsOf(outsideAdvanceMs, outsideAdvanceCpuMs) - loopOverheadMs);
 said.push(
   `${unbudgetedMs.toFixed(0)} ms of generation happened outside a budgeted slice ` +
-    `(${outsideAdvanceMs.toFixed(0)} ms outside advance(), less ${loopOverheadMs.toFixed(0)} ms ` +
+    `(${outsideAdvanceMs.toFixed(0)} ms outside advance() against ${outsideAdvanceCpuMs.toFixed(0)} ms ` +
+    `of process CPU over the same span — the lesser of the two, less ${loopOverheadMs.toFixed(0)} ms ` +
     `of this check's own frame loop: ${frames} frames x ${perFrameOverheadMs.toFixed(3)} ms)`,
 );
 const UNBUDGETED_CEILING_MS = 1000;
+if (unbudgetedWallMs > UNBUDGETED_CEILING_MS && unbudgetedMs <= UNBUDGETED_CEILING_MS) {
+  noteCleared('generation outside a budgeted slice', unbudgetedWallMs, unbudgetedMs);
+}
 if (unbudgetedMs > UNBUDGETED_CEILING_MS) {
   // **This message used to name the cause, and named the wrong one.** It said
   // "at this size it is the slide being solved a second time" — but when this
@@ -919,13 +1163,20 @@ if (cruiserRidden !== cruiserPlain) {
   const overrunGen = new ParkGeneration();
   const advances: number[] = [];
   let worst = 0;
+  let worstWall = 0;
   let overrunFrames = 0;
   while (!overrunGen.ready && !overrunGen.failed && overrunFrames < MAX_FRAMES) {
+    const beforeCpu = cpuMs();
     const before = performance.now();
     overrunGen.advance(OVERRUN_GENERATION_BUDGET_MS);
-    const spent = performance.now() - before;
+    const wall = performance.now() - before;
+    // Attested busy time, exactly as the rolling budget above (#606): this
+    // ceiling is one 60 Hz refresh plus a unit's grace, so it is the *tightest*
+    // in the file and the one a 30 ms deschedule reddens most easily.
+    const spent = busyMsOf(wall, cpuMs() - beforeCpu);
     advances.push(spent);
     if (spent > worst) worst = spent;
+    if (wall > worstWall) worstWall = wall;
     overrunFrames += 1;
     await nextFrame();
   }
@@ -935,11 +1186,11 @@ if (cruiserRidden !== cruiserPlain) {
   const OVERRUN_ADVANCE_CEILING_MS = FRAME_MS + WORST_UNIT_GRACE_MS * slowness;
   said.push(
     `overrun budget ${OVERRUN_GENERATION_BUDGET_MS} ms: ${overrunFrames} frames, worst advance ` +
-      `${worst.toFixed(1)} ms, p99 ${p99.toFixed(1)} ms, ${overRefresh} over one 60 Hz refresh ` +
-      `(${FRAME_MS.toFixed(1)} ms)`,
+      `${worst.toFixed(1)} ms busy (${worstWall.toFixed(1)} ms wall), p99 ${p99.toFixed(1)} ms, ` +
+      `${overRefresh} over one 60 Hz refresh (${FRAME_MS.toFixed(1)} ms)`,
   );
   said.push(
-    `so one looping-overrun slice may block for ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ` +
+    `so one looping-overrun slice may spend ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms of busy time ` +
       `(one refresh + ${WORST_UNIT_GRACE_MS} ms of grace x ${slowness.toFixed(2)})`,
   );
   if (!overrunGen.ready) {
@@ -948,14 +1199,62 @@ if (cruiserRidden !== cruiserPlain) {
         `${overrunFrames} frames — the looping bus would drive forever`,
     );
   }
+  if (worstWall > OVERRUN_ADVANCE_CEILING_MS && worst <= OVERRUN_ADVANCE_CEILING_MS) {
+    noteCleared('advance() at the overrun budget', worstWall, worst);
+  }
   if (worst > OVERRUN_ADVANCE_CEILING_MS) {
     fouls.push(
-      `one advance() at the ${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget blocked for ` +
+      `one advance() at the ${OVERRUN_GENERATION_BUDGET_MS} ms overrun budget was busy for ` +
         `${worst.toFixed(1)} ms against a ${OVERRUN_ADVANCE_CEILING_MS.toFixed(1)} ms ceiling ` +
         `(one 60 Hz refresh + grace, scaled ${slowness.toFixed(2)}x for this box). The bus is MOVING ` +
         'through the overrun now, so a frame that blocks this long jumps the bus, the camera and the ' +
         'countryside across — the judder Jim reported. The overrun budget is too large for a moving ' +
         'shot: bias it toward smoothness (near the rolling budget), do not drain flat-out',
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// **What this run did NOT prosecute, said out loud, on every run.**
+//
+// Since #606 the four wall-clock ceilings above are compared against attested
+// busy time, which is deliberately *less* coverage than raw wall clock: a slice
+// that blocked for 30 ms while the OS had the CPU elsewhere is now cleared,
+// because a generator-step budget cannot be blown by a step that did not run.
+// That is the right trade — the alternative is a gate that reddens on the
+// machine's mood — but it is a trade, and a gate that quietly stopped
+// prosecuting something is how the next reader inherits a false belief.
+//
+// So every run says which spans were cleared and by how much, and says it on
+// `process.stderr`, because `console.log` from a passing run is exactly the
+// output nobody sees.
+//
+// It also says when the *instrument* failed its control, in which case there is
+// no attestation at all and every ceiling is back on raw wall clock — the
+// pre-#606 behaviour, flakiness included. That is loud on purpose.
+if (!cpuClock.usable) {
+  process.stderr.write(
+    'check:park-boot NOTE: this runtime\'s CPU clock failed its control — ' +
+      `${cpuClock.busyCpuMs.toFixed(2)} ms attested for ${cpuClock.busyWallMs.toFixed(2)} ms of busy ` +
+      `arithmetic, ${cpuClock.idleCpuMs.toFixed(2)} ms for ${cpuClock.idleWallMs.toFixed(1)} ms of ` +
+      'descheduled sleep. Every ceiling in this run was therefore compared against RAW WALL CLOCK, ' +
+      'so a busy machine can redden it for reasons no commit caused (issue #606). Fix the clock ' +
+      'reading, do not raise the ceilings.\n',
+  );
+} else if (clearedAsDescheduled.length === 0) {
+  process.stderr.write(
+    'check:park-boot NOTE: nothing was cleared as descheduled this run — every span was inside ' +
+      'its ceiling on wall clock as well as on attested busy time, so the CPU attestation changed ' +
+      'no verdict here. It is still the thing standing between this check and a loaded box.\n',
+  );
+} else {
+  for (const cleared of clearedAsDescheduled) {
+    process.stderr.write(
+      `check:park-boot NOTE: ${cleared.count} span(s) of ${cleared.where} went past the ceiling on ` +
+        `wall clock and were NOT prosecuted, because the process was descheduled rather than ` +
+        `working — worst ${cleared.worstWallMs.toFixed(1)} ms wall, of which only ` +
+        `${cleared.worstBusyMs.toFixed(1)} ms was attested busy. This check does not assert on ` +
+        'those; a generator-step budget cannot be blown by a step that did not run (issue #606).\n',
     );
   }
 }
