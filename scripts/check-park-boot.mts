@@ -108,15 +108,28 @@ const nextFrame = (): Promise<void> =>
 //
 //     busyMs = min(wall clock elapsed, CPU time consumed)
 //
-// `process.cpuUsage()` is `getrusage(RUSAGE_SELF)` — it does not advance while
-// the thread is descheduled, so a stall costs wall clock and no CPU and drops
-// straight out of the minimum. It counts *every* thread of the process, which
-// means it is an **over**-estimate of the main thread's own work: V8's
-// concurrent marker and its background optimizing compiler both show up in it
-// (measured here: a 10.3 ms allocation-heavy stretch reported 27.6 ms of CPU).
-// That error only ever points one way, and the `min` is why it is safe — CPU
-// time can fail to clear a stall, it can never wrongly clear a busy slice, so
-// nothing this check used to catch can hide behind it.
+// A CPU clock does not advance while its thread is descheduled, so a stall
+// costs wall clock and no CPU and drops straight out of the minimum.
+//
+// **It must be `process.threadCpuUsage()`, not `process.cpuUsage()`, and that
+// distinction was found by measurement rather than by reading.** The first
+// version of this used `process.cpuUsage()`, which is `getrusage(RUSAGE_SELF)`
+// — **every thread of the process**, including V8's concurrent marker and its
+// background optimizing compiler. So an allocation-heavy slice gets charged
+// work done on another core while its own thread was waiting for one, and the
+// attestation quietly fails in the one case it exists for. Measured on this
+// laptop, one allocation-churning stretch: 25.2 ms wall, **44.7 ms** of process
+// CPU, **18.9 ms** of thread CPU. And measured on the real thing, with four
+// other agents on the machine: under `process.cpuUsage()` the `pathGraph` task
+// breached the ceiling on one slice of nine, on every run of three, worst 33.9
+// ms — a fat unit that did not exist. Under `process.threadCpuUsage()`, on the
+// same loaded box, three runs: **zero breaches on every task**, `pathGraph`
+// worst 17.9-24.9 ms against ceilings of 25.9-28.6 ms.
+//
+// Thread CPU is still never *less* than the main thread's own work, so the
+// `min` remains safe in the direction that matters: it can fail to clear a
+// stall, it can never wrongly clear a busy slice, and nothing this check used
+// to catch can hide behind it.
 //
 // **The control runs first, because this file's whole subject is instruments
 // that cannot fail.** A CPU clock with millisecond granularity, or one that
@@ -129,7 +142,7 @@ const nextFrame = (): Promise<void> =>
 // stderr rather than quietly gating on nothing.
 // ---------------------------------------------------------------------------
 const cpuMs = (): number => {
-  const used = process.cpuUsage();
+  const used = process.threadCpuUsage();
   return (used.user + used.system) / 1000;
 };
 
@@ -711,21 +724,27 @@ if (worstAdvanceMs > ADVANCE_CEILING_MS && worstBusyAdvanceMs <= ADVANCE_CEILING
 // foul — because the fault it is looking for is reproducible and an outlier is
 // not.**
 //
-// `busyMsOf` removes a plain deschedule, but not every distortion: CPU time is
-// `getrusage(RUSAGE_SELF)`, which counts **every thread of the process**, so on
-// a contended box an allocation-heavy slice can be charged V8's concurrent
-// marker running on another core while the main thread was itself waiting for
-// one. Measured here on 11 September 2026 with four other agents on the
-// machine: one `pathGraph x1` slice attested 35.8 ms against a 27.9 ms ceiling,
-// on an unmutated tree, in a run whose next-worst slice was inside the ceiling.
-// One sample cannot tell that from a unit that genuinely costs 35.8 ms.
+// `busyMsOf` removes the deschedule, and `process.threadCpuUsage()` removes the
+// background threads — but a main-thread garbage collection landing inside one
+// slice is still charged to it, correctly (the game pays that too) and
+// unpredictably. That is precisely the distortion this file already records as
+// unavoidable: "room for a garbage collection landing inside a slice, which is
+// real ... and which no amount of correct code prevents".
 //
+// One sample cannot tell such a slice from a unit that is genuinely too big.
 // The distribution can. The park is deterministic, so a unit that is too big is
 // too big **every time that unit runs** — mutation A below breached on all 152
-// of the `brief` task's slices — while contention lands on one slice and moves
-// somewhere else next run. So the gate asks for corroboration: two or more
-// slices of the same task over the ceiling. That is a question about work, and
-// it is the difference between a check and a coin toss.
+// of the `brief` task's slices — while a GC or a contention artefact lands on
+// one slice and is somewhere else next run. So the gate asks for corroboration:
+// two or more slices of the same task over the ceiling. That is a question
+// about work, and it is the difference between a check and a coin toss.
+//
+// Measured on a box carrying four other agents, three runs, unmutated: **zero
+// breaches on any task**, so the corroboration rule is a second line of defence
+// here rather than the thing doing the work. It earned its place under the
+// weaker `process.cpuUsage()` instrument, where `pathGraph` breached once per
+// run on every run — and it is kept because it is the clause that says what
+// kind of fault this check is for.
 //
 // **What it therefore cannot catch, and this is announced on every run:** a
 // single unit that is dear *on its own*, where the task runs it once — the
@@ -754,8 +773,8 @@ for (const [task, breach] of breaches) {
     `check:park-boot NOTE: one lone slice of "${task}" went past the ${ADVANCE_CEILING_MS.toFixed(1)} ms ` +
       `ceiling — ${breach.worst.busyMs.toFixed(1)} ms busy of ${breach.worst.ms.toFixed(1)} ms wall, ` +
       `${breach.worst.steps} work unit(s) — and was NOT prosecuted, because one sample of ` +
-      `${slices.length} cannot tell a unit that is too big from this box's other threads being ` +
-      'charged to the slice. A unit that is genuinely too big breaches on every slice that runs ' +
+      `${slices.length} cannot tell a unit that is too big from a garbage collection landing ` +
+      'inside this one slice. A unit that is genuinely too big breaches on every slice that runs ' +
       `it; ${MIN_CORROBORATING_SLICES} would have been a foul (issue #606). If you see this line ` +
       'run after run, naming the same task, that is the check telling you it IS the code.\n',
   );
@@ -1054,7 +1073,7 @@ const unbudgetedMs = Math.max(0, busyMsOf(outsideAdvanceMs, outsideAdvanceCpuMs)
 said.push(
   `${unbudgetedMs.toFixed(0)} ms of generation happened outside a budgeted slice ` +
     `(${outsideAdvanceMs.toFixed(0)} ms outside advance() against ${outsideAdvanceCpuMs.toFixed(0)} ms ` +
-    `of process CPU over the same span — the lesser of the two, less ${loopOverheadMs.toFixed(0)} ms ` +
+    `of thread CPU over the same span — the lesser of the two, less ${loopOverheadMs.toFixed(0)} ms ` +
     `of this check's own frame loop: ${frames} frames x ${perFrameOverheadMs.toFixed(3)} ms)`,
 );
 const UNBUDGETED_CEILING_MS = 1000;
@@ -1395,8 +1414,8 @@ if (!cpuClock.usable) {
   process.stderr.write(
     'check:park-boot NOTE: this check does NOT assert on (a) a slice whose wall clock overran ' +
       'while the process was descheduled, nor (b) a single un-repeated slice over the ceiling. ' +
-      '(a) is not work the park did; (b) cannot be told from this box\'s other threads being ' +
-      'charged to one slice. Per-unit cost is `check:solve-cost`\'s question, and a unit that is ' +
+      '(a) is not work the park did; (b) cannot be told from a garbage collection landing ' +
+      'inside one slice. Per-unit cost is `check:solve-cost`\'s question, and a unit that is ' +
       `genuinely too big breaches on every slice that runs it — ${MIN_CORROBORATING_SLICES} is a ` +
       'foul here (issue #606).\n',
   );
