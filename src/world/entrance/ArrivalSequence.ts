@@ -951,8 +951,41 @@ export interface ArrivalShot {
  * does. One curve per thing that genuinely wants a different one; the pitch,
  * the stand-back and the lens share this one so they cannot arrive apart.
  */
-function homeT(elapsed: number): number {
-  return smoothstep(0, 1, (elapsed - AT_WALKING) / Math.max(0.001, ARRIVAL_TIMELINE.walkingIn));
+/**
+ * **The bearing comes home first, and the stand-back second.** Both are done by
+ * `ARRIVAL_CONTROL_AT`; what these two windows decide is the order.
+ *
+ * They are not a flourish — they are the fix for a photographed fault. Homing
+ * both on one curve means the eye spends the middle of the walk a long way out
+ * on a bearing that is neither the door's nor the rig's, and **the park's
+ * furniture is only ever arranged to be seen from the rig's**. Measured at
+ * t = 7.3 s on the canonical seed with both on `homeT`: the whole frame was the
+ * blue flank of a shop unit standing between the lens and a child who was not
+ * in shot at all. Stand-back is an occlusion control before it is anything
+ * else, and a bearing nothing was laid out for is the one place that bites.
+ *
+ * So the yaw swings round behind her while the eye is still close enough that
+ * there is nothing between it and her, and only then does the eye draw back —
+ * along the rig's own bearing, which is the one bearing this park is built to
+ * be looked at from. The windows overlap so it reads as one move rather than
+ * two.
+ *
+ * It is also the better reading of what was asked for: *"then travel with the
+ * player under the arch"* is a camera that stays with her through the gateway,
+ * not one that is already sixty metres away by the time she reaches it.
+ */
+const ARRIVAL_YAW_HOME_FRACTION = 0.45;
+const ARRIVAL_POSE_HOME_FROM = 0.35;
+
+function yawHomeT(elapsed: number): number {
+  const walk = Math.max(0.001, ARRIVAL_TIMELINE.walkingIn);
+  return smoothstep(0, 1, (elapsed - AT_WALKING) / (walk * ARRIVAL_YAW_HOME_FRACTION));
+}
+
+function poseHomeT(elapsed: number): number {
+  const walk = Math.max(0.001, ARRIVAL_TIMELINE.walkingIn);
+  const from = AT_WALKING + walk * ARRIVAL_POSE_HOME_FROM;
+  return smoothstep(0, 1, (elapsed - from) / Math.max(0.001, ARRIVAL_CONTROL_AT - from));
 }
 
 export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | null {
@@ -980,7 +1013,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     yawDegrees:
       CAMERA_YAW_DEGREES +
       (angleDelta(CAMERA_YAW_DEGREES * DEG, arrivalDoorYawDegrees() * DEG) / DEG) *
-        (1 - homeT(elapsed)),
+        (1 - yawHomeT(elapsed)),
     // **Head height, at the park camera's own angle.**
     //
     // This was `0` — "at head height means looking level" — and that reading
@@ -1020,7 +1053,7 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     // frame being centred on her head at {@link ARRIVAL_FOLLOW_FRAME_HEIGHT},
     // and it still is. What the pitch buys is that the lower half of that
     // frame has ground in it.
-    pitchDegrees: lerp(ARRIVAL_DOOR_PITCH_DEGREES, CAMERA_PITCH_DEGREES, homeT(elapsed)),
+    pitchDegrees: lerp(ARRIVAL_DOOR_PITCH_DEGREES, CAMERA_PITCH_DEGREES, poseHomeT(elapsed)),
     // **PROTOTYPE (#511): the arrival is the CLOSE shot, and the park is the
     // far one.** Under perspective the park rig stands 90 m off behind a
     // 9.5-degree telephoto; 12 m with a 40-degree lens is intimate and has real
@@ -1028,8 +1061,8 @@ export function arrivalShot(elapsed: number, archPass: ArchPass): ArrivalShot | 
     // rig as she walks in, which reads as the world opening up around her
     // rather than as a cut. It lands exactly on the rig by `ARRIVAL_CONTROL_AT`,
     // over the same window the bearing uses, so the hand-over is invisible.
-    distance: lerp(ARRIVAL_DOOR_STAND_BACK, CAMERA_DISTANCE, homeT(elapsed)),
-    zoom: lerp(ARRIVAL_FOLLOW_ZOOM, 1, homeT(elapsed)),
+    distance: lerp(ARRIVAL_DOOR_STAND_BACK, CAMERA_DISTANCE, poseHomeT(elapsed)),
+    zoom: lerp(ARRIVAL_FOLLOW_ZOOM, 1, poseHomeT(elapsed)),
     ownsTheZoom: true,
     // **While she is still getting off, yes.** Jim, 11 September 2026: *"the
     // camera should FACE the doors of the bus while the player gets off, then
