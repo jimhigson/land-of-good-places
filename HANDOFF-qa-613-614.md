@@ -385,3 +385,78 @@ them.**
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01AdWSEA9ZM7e1tnoSodQ5Aw
+
+---
+
+# Update — pass resumed after the halt, 11 September 2026
+
+Heads re-read at resume: `main` `2e168982`, `feat/sphere-combined` **`66c0964c`** (moved
+again), `fix/road-coverage` **`ced03827`**, `fix/coplanar-sphere` **`3ca6b24b`**.
+
+## CI, and a clean symmetry that says both reds are the base's
+
+```
+#613  Entrance road  PASS    Coplanar faces  FAIL
+#614  Entrance road  FAIL    Coplanar faces  PASS
+```
+
+Each PR fixes one gate and still carries the other's red. That is exactly what
+you would see if both reds are inherited from `feat/sphere-combined` and the two
+PRs are complementary — but it is being **confirmed by running both checks on the
+base**, not assumed. Whoever finishes: that confirmation is the one thing standing
+between these two and a merge recommendation, per zero-tolerance.
+
+## The browser pass — DONE. The flicker is not the problem; the interpenetration is.
+
+Deployed preview `pr-614-3ca6b24`, **seed 326**, console-confirmed
+`park seed 326 (pinned)`. Five viewpoints. Page closed after looking; **no dev
+server was ever started** (the preview was used instead).
+
+**No depth strobing exists.** Two frames from cameras **5 cm apart**, aimed at the
+tightest coplanar pair on this seed (0.4 mm at (81.7, −29.3), blockTop −2.5705 vs
+railTop −2.5709), show an **identical** pattern that tracks the finial's soft
+shadow. Z-fighting flips under a camera step that size; this does not. The
+mottling that looks like fighting in a single frame is shadow.
+
+**Per-seed tightest block/rail gap** (this is the number that decides who ever
+sees it): canonical **14.5 mm**, seed 326 **0.4 mm**, 128 3.4 mm, 451 25.5 mm. So
+even if it did strobe it would be seed-326 only and invisible on the default park.
+**My pre-browser prediction was right on both halves.**
+
+**What a child does see: a wooden fence passing through a stone wall.** From
+inside the park at child height the railway fence runs through the masonry and
+across the front face of a wall pillar. From overhead the fence line and the wall
+line are the same line. From **outside** the park the wall reads as clean
+masonry — because it has swallowed the fence entirely, so the safety fence
+between a child and the railway is **not drawn at all** on those stretches. That
+last one is the strongest argument for #612 and it is not in #612 today.
+
+Frames are hosted on the `qa-screenshots` orphan branch:
+`https://raw.githubusercontent.com/jimhigson/land-of-good-places/qa-screenshots/`
++ `614-parkside-fence-through-wall.png`, `614-topdown-fence-line-is-wall-line.png`,
+`614-outside-wall-clean.png`, `614-closeup-a.png`, `614-closeup-b-5cm-moved.png`.
+
+Repro: `<preview>/spawn?pos=77,-33&facing=54&seed=326` to stand there;
+`<preview>/view?camPos=70,-1.2,-31&camDir=20,-0.9,11&seed=326` for the key frame.
+
+## Written up on the record
+
+- **PR #613 comment** — the `4 of 5` correction, the stale digests, and the
+  verified claims. Posted.
+- **Issue #617** — the pre-existing radial gradient clause restates
+  `d / GROUND_SPHERE_RADIUS` instead of measuring the ground, so it cannot fail
+  for a terrain reason and it masks the new road clause. Filed.
+- **PR #614 comment** — the browser pass with frames, the no-strobe finding, the
+  pairs-not-parts wording fix, and the red `Entrance road` check. Posted.
+- **Issue #612 comment** — the same frames plus the independent `origin/main`
+  OBB counts, so the issue carries its own visual evidence. Posted.
+
+## Still outstanding at the time of writing
+
+The four #614 measurements are running in a sub-agent and had **not** reported:
+`--print-baseline` vs the committed file; `deck|shell` proved by measurement plus
+the bridge raycast call sites enumerated; `shell|wallTop` proved red; and
+`check:coplanar` exit codes on head and base (plus `check:entrance-road` on the
+base, for the CI symmetry above). If you are picking this up cold, those four are
+the remaining gap and the dispatch brief for them is reproduced in the resumed
+task message.
