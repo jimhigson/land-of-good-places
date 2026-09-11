@@ -141,7 +141,7 @@ run. That is the right answer, not a stuck one.
 | `pnpm run check:swept-bus` | **0** |
 | `pnpm run check:park-pool` | **0** |
 | `pnpm run check:coplanar` | **1 — INHERITED RED, see below** |
-| `pnpm run check` | see the tail of this file |
+| `pnpm run check` | **0** — the whole 65-step chain, and `check:arrival-camera` ran inside it |
 
 **`check:coplanar` is red and it is not this work.** Four findings, all on
 bridge / boundary-wall / rail-fence geometry:
