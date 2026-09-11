@@ -7350,33 +7350,101 @@ const noBridgeStandsWhereNoneWasProven: Invariant = (facts) => {
  * {@link theGateIsAHoleInTheWall}'s own note records paying for once already.
  */
 const noFenceStandsInTheBoundaryMasonry: Invariant = (facts) => {
-  const boxesOf = (mesh: Mesh): Box3[] => {
+  /**
+   * One box, rotated about Y only — which both the wall's blocks and the
+   * fence's pickets are.
+   *
+   * **Kept as centre-plus-axis rather than as a world `Box3`, and that is the
+   * whole correctness of this clause.** A `Box3` built by pushing a rotated
+   * box's local bounds through its matrix is the *axis-aligned hull* of it,
+   * which for a 1.63 x 0.70 m block laid at 45 degrees along the edge reaches
+   * 1.65 m across against a true 0.85 m. Two such hulls touch long before the
+   * boxes do.
+   *
+   * Measured, because this clause was written the wrong way first and caught by
+   * its own red run: on pool seed 451, hull-against-hull reports **15** fence
+   * pickets inside the masonry and box-against-box reports **0**. Every one of
+   * those fifteen was an artefact of the hulls. A version of this invariant
+   * that shipped would have been red on a park with nothing wrong with it.
+   */
+  interface Slab {
+    readonly cx: number;
+    readonly cy: number;
+    readonly cz: number;
+    readonly hx: number;
+    readonly hy: number;
+    readonly hz: number;
+    readonly ax: number;
+    readonly az: number;
+  }
+
+  const slabsOf = (mesh: Mesh): Slab[] => {
     mesh.geometry.computeBoundingBox();
     const local = mesh.geometry.boundingBox;
     if (!local) return [];
+    const size = local.getSize(new Vector3());
+    const offset = local.getCenter(new Vector3());
     const matrix = new Matrix4();
-    const out: Box3[] = [];
+    const centre = new Vector3();
+    const scale = new Vector3();
+    const out: Slab[] = [];
     const copies = mesh instanceof InstancedMesh ? mesh.count : 1;
     for (let i = 0; i < copies; i += 1) {
       if (mesh instanceof InstancedMesh) {
         mesh.getMatrixAt(i, matrix);
         matrix.premultiply(mesh.matrixWorld);
       } else matrix.copy(mesh.matrixWorld);
-      out.push(local.clone().applyMatrix4(matrix));
+      centre.copy(offset).applyMatrix4(matrix);
+      const axisX = matrix.elements[0] as number;
+      const axisZ = matrix.elements[2] as number;
+      const axisLength = Math.hypot(axisX, axisZ) || 1;
+      scale.setFromMatrixScale(matrix);
+      out.push({
+        cx: centre.x,
+        cy: centre.y,
+        cz: centre.z,
+        hx: (size.x * scale.x) / 2,
+        hy: (size.y * scale.y) / 2,
+        hz: (size.z * scale.z) / 2,
+        ax: axisX / axisLength,
+        az: axisZ / axisLength,
+      });
     }
     return out;
   };
 
-  const masonry: Box3[] = [];
+  /**
+   * Exact separation for two Y-rotated boxes: the separating-axis test on the
+   * four XZ axes the two boxes offer, plus a plain interval test in Y.
+   */
+  const reachAlong = (s: Slab, ux: number, uz: number): number =>
+    s.hx * Math.abs(s.ax * ux + s.az * uz) + s.hz * Math.abs(-s.az * ux + s.ax * uz);
+  const overlaps = (a: Slab, b: Slab): boolean => {
+    if (Math.abs(a.cy - b.cy) >= a.hy + b.hy) return false;
+    const dx = b.cx - a.cx;
+    const dz = b.cz - a.cz;
+    const axes: readonly (readonly [number, number])[] = [
+      [a.ax, a.az],
+      [-a.az, a.ax],
+      [b.ax, b.az],
+      [-b.az, b.ax],
+    ];
+    for (const [ux, uz] of axes) {
+      if (Math.abs(dx * ux + dz * uz) >= reachAlong(a, ux, uz) + reachAlong(b, ux, uz)) return false;
+    }
+    return true;
+  };
+
+  const masonry: Slab[] = [];
   facts.world.garden.group.traverse((object: Object3D) => {
     if (object instanceof Mesh && object.name === 'boundary-blocks') {
-      masonry.push(...boxesOf(object));
+      masonry.push(...slabsOf(object));
     }
   });
-  const pickets: { name: string; boxes: Box3[] }[] = [];
+  const pickets: { name: string; slabs: Slab[] }[] = [];
   facts.world.train.group.traverse((object: Object3D) => {
     if (object instanceof Mesh && object.parent?.name === 'rail-fence') {
-      pickets.push({ name: object.name || object.type, boxes: boxesOf(object) });
+      pickets.push({ name: object.name || object.type, slabs: slabsOf(object) });
     }
   });
 
@@ -7385,7 +7453,7 @@ const noFenceStandsInTheBoundaryMasonry: Invariant = (facts) => {
   // overlaps out of zero comparisons and report a triumphant pass — CLAUDE.md's
   // "a check can pass without checking anything", in the form where a rename in
   // `Garden.ts` or `fence.ts` silently orphans the search.
-  const picketCount = pickets.reduce((n, p) => n + p.boxes.length, 0);
+  const picketCount = pickets.reduce((n, p) => n + p.slabs.length, 0);
   if (masonry.length === 0 || picketCount === 0) {
     return [
       `found ${masonry.length} boundary-block instance(s) and ${picketCount} rail-fence ` +
@@ -7401,25 +7469,20 @@ const noFenceStandsInTheBoundaryMasonry: Invariant = (facts) => {
   const fouls: string[] = [];
   for (const picket of pickets) {
     let hits = 0;
-    let worstVolume = 0;
     let worstAt = '';
-    for (const a of picket.boxes) {
+    for (const a of picket.slabs) {
       for (const b of masonry) {
-        if (!a.intersectsBox(b)) continue;
+        if (!overlaps(a, b)) continue;
         hits += 1;
-        const size = a.clone().intersect(b).getSize(new Vector3());
-        const volume = size.x * size.y * size.z;
-        if (volume <= worstVolume) continue;
-        worstVolume = volume;
-        const centre = a.clone().intersect(b).getCenter(new Vector3());
-        worstAt = `${fmt([centre.x, centre.z])}, overlapping ${size.x.toFixed(2)}x${size.y.toFixed(2)}x${size.z.toFixed(2)} m`;
+        if (!worstAt) worstAt = fmt([a.cx, a.cz]);
       }
     }
     if (hits > 0) {
       fouls.push(
         `${hits} ${picket.name} of the railway's fence stand inside the boundary ` +
-          `masonry, worst at (${worstAt}) — the wall cannot move, so the loop is in ` +
-          "the wrong place; see train/route.ts's TRACK_BOUNDARY_CLEARANCE",
+          `masonry, e.g. at (${worstAt}) — the wall is a ring on a fixed outline and ` +
+          "cannot move, so the loop is in the wrong place; see train/route.ts's " +
+          'TRACK_BOUNDARY_CLEARANCE',
       );
     }
   }
