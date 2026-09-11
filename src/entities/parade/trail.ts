@@ -64,22 +64,35 @@ export class PlayerTrail {
     this.crumbs.push({ x, y, z, at: 0 });
   }
 
-  /** Call once a frame with the player's feet. */
-  push(x: number, y: number, z: number): void {
+  /**
+   * Call once a frame with the player's feet.
+   *
+   * **Returns true on the frame the character was *moved* rather than walked**
+   * — the deep link into a hotel room, a ride setting her down, anything that
+   * puts her somewhere instead of taking her there. This class already had to
+   * know (a trail spliced across a 640 m jump is a line through everything in
+   * between, which is why {@link TELEPORT_GAP} exists); saying so out loud is
+   * what lets {@link Parade} act on it, and keeps "was that a teleport?" a
+   * question with **one owner** rather than a second threshold somewhere else
+   * that has to be kept in step with this one.
+   */
+  push(x: number, y: number, z: number): boolean {
     const last = this.crumbs[this.crumbs.length - 1];
     if (!last) {
+      // The very first crumb of a run. Nobody was anywhere to be moved *from*,
+      // so this is a start, not a teleport.
       this.reset(x, y, z);
-      return;
+      return false;
     }
 
     const moved = Math.hypot(x - last.x, z - last.z);
     if (moved > TELEPORT_GAP) {
       this.reset(x, y, z);
-      return;
+      return true;
     }
     // Standing still leaves no crumbs, which is what stops the parade drifting
     // into the player's back while she waits at a shop counter.
-    if (moved < STEP) return;
+    if (moved < STEP) return false;
 
     this.travelled += moved;
     this.crumbs.push({ x, y, z, at: this.travelled });
@@ -88,6 +101,7 @@ export class PlayerTrail {
     while (this.crumbs.length > 2 && this.travelled - this.crumbs[1]!.at > MAX_LENGTH) {
       this.crumbs.shift();
     }
+    return false;
   }
 
   /**

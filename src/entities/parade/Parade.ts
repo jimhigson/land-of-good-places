@@ -498,7 +498,14 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     const { dt, elapsed } = context;
     const player = this.player;
 
-    this.trail.push(player.position.x, player.position.y, player.position.z);
+    // The trail is the one owner of "was she moved, or did she walk?" — see
+    // `PlayerTrail.push`. When she was moved, her companions were moved with
+    // her, and leaving them behind in the space she left is what sent five
+    // animals flying across the park and in through the hotel wall on every
+    // `/hotel-suite` deep link. See {@link catchUpAfterTeleport}.
+    if (this.trail.push(player.position.x, player.position.y, player.position.z)) {
+      this.catchUpAfterTeleport();
+    }
 
     // Copy the hop. Reading the player's own airborne edge rather than the jump
     // button means the trampoline and the slide's landing get a hop out of the
@@ -663,10 +670,46 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
    * somewhere is added.
    */
   private aimAt(member: ParadeMember, dt: number): void {
+    // Everything up to here is *where the line is*, and it is wanted on its own
+    // by `spaceOut` and by `catchUpAfterTeleport` — see {@link aimAtLine}.
+    if (!this.aimAtLine(member)) return;
+
+    // A member that has never been placed has no body to route *from* — see
+    // `spaceOut`, which places it onto exactly this point.
+    if (!member.placed) return;
+
+    // On the line: the trail is this animal's route, and it is already on it.
+    if (this.trail.distanceTo(member.root.position.x, member.root.position.z) <= ON_LINE_RADIUS) {
+      this.routes.get(member.uid)?.clear();
+      this.routing.onLine += 1;
+      return;
+    }
+    // Off it: walk back on, round whatever is in the way.
+    this.routeTo(member, member.target, dt);
+  }
+
+  /**
+   * Writes **where this member's place in the line is** into its target, and
+   * returns whether that point is an ordinary walked-to spot on the ground —
+   * that is, whether **routing to it means anything**. `false` says the target
+   * was written by one of the two shortcuts below (no trail to sample yet, or
+   * she is flying and the line is pinned to her altitude); the point is still
+   * somewhere to stand, so a caller that only wants to *place* a body there
+   * ignores the answer.
+   *
+   * Split out of {@link aimAt} because two other callers want exactly this and
+   * emphatically do not want the routing that follows it: `spaceOut`, placing a
+   * brand-new member, and {@link catchUpAfterTeleport}. Both are about to move
+   * the body *onto* this point, so asking for a route to it would be planning a
+   * walk that is not going to happen — and, before this was split, `spaceOut`
+   * relied on `aimAt`'s `!member.placed` guard to stop it doing just that,
+   * which is a guard doing duty as control flow.
+   */
+  private aimAtLine(member: ParadeMember): boolean {
     const point = member.target;
     if (!this.trail.sample(member.offset, point)) {
       point.copy(this.player.position);
-      return;
+      return false;
     }
 
     // In the air, the line flies at *her* altitude rather than at the height the
@@ -683,24 +726,55 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     if (this.player.isFlying) {
       this.collision.resolve(point, MEMBER_RADIUS, this.player.heightAboveGround);
       point.y = this.player.position.y;
-      return;
+      return false;
     }
 
     this.collision.resolve(point, MEMBER_RADIUS);
     point.y = this.groundAt(point.x, point.z, point.y);
+    return true;
+  }
 
-    // A member that has never been placed has no body to route *from* — see
-    // `spaceOut`, which places it onto exactly this point.
-    if (!member.placed) return;
-
-    // On the line: the trail is this animal's route, and it is already on it.
-    if (this.trail.distanceTo(member.root.position.x, member.root.position.z) <= ON_LINE_RADIUS) {
+  /**
+   * **The character was moved rather than walked, so her companions were
+   * moved too** — put them back in the line where she now is, instead of
+   * leaving them standing in the space she left.
+   *
+   * Measured on `/hotel-suite?pets=5` before this existed: the deep link puts
+   * her in the suite at `(-613.2, 1380)` while all five companion bodies are
+   * still at the park spawn, `(-1.6, 51.6)`. That is 640 m and a different
+   * space, so the suite's own nav lattice — which spans `x -630..-570,
+   * z 1350..1410` and nothing else — does not contain the animal at all.
+   * `NavGrid.findRoute` correctly answers 0 ("route unknown"), `routeTo`
+   * correctly counts `noRoute`, and the follow spring drags five animals in a
+   * straight line across the park and in through the hotel wall. **120
+   * `noRoute` member-frames, all of them in frames 2–25 and none after**, and
+   * ~0.4 s of exactly the wall-walking #602 and #605 exist to delete.
+   *
+   * Note what this is *not*: no lattice was cold and no ground sampler was
+   * missing — both were present and built on every one of those frames, which
+   * is what rules out #608 (the first-tap lattice stall) as the cause. The
+   * router was asked a question it cannot answer, and the honest answer is the
+   * one it gave. The bug is the asking.
+   *
+   * A member that is **not following** is left exactly where it is: one asleep
+   * in a bed or walking to one belongs to that room and not to the line, one
+   * at the pets' table has its own place, and one on the slide is being
+   * carried by the ride. Those are the same three exclusions `update` makes
+   * when it decides what a member is aiming at, read from the same fields, so
+   * there is no second opinion about who is in the parade.
+   */
+  private catchUpAfterTeleport(): void {
+    for (const member of this.members) {
+      if (member.onSlide || member.bedSpot || member.tablePlace) continue;
       this.routes.get(member.uid)?.clear();
-      this.routing.onLine += 1;
-      return;
+      this.aimAtLine(member);
+      member.placeAt(
+        member.target.x,
+        member.target.y,
+        member.target.z,
+        this.player.group.rotation.y,
+      );
     }
-    // Off it: walk back on, round whatever is in the way.
-    this.routeTo(member, point, dt);
   }
 
   /**
@@ -905,7 +979,11 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
       // Placing a brand-new member: the trail point itself, never a route.
       // There is no body to route *from* yet — `placeAt` is what first gives
       // it one — and a member dropped onto the line is by construction on it.
-      this.aimAt(member, 0);
+      // {@link aimAtLine} rather than `aimAt` says that in the call rather
+      // than leaning on `aimAt`'s `!placed` guard to mean it. Its return says
+      // whether *routing* would apply, which is no business of placing: the
+      // target it writes is somewhere to stand either way.
+      this.aimAtLine(member);
       member.placeAt(
         member.target.x,
         member.target.y,
