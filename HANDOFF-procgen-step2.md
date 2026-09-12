@@ -558,13 +558,21 @@ Brief: `docs/BRIEF-stage3-step2-trestles-claim.md`; rulings in
 fairness re-cut (`064e834b`) is the one change after that, proved red both
 ways (below).
 
-**What a player sees.** On the walk-past ring, no trestle leg stands on the
-cat bus's road any more, and every post is solid along its whole lean, not
-just at its foot. `/spawn?pos=«x,z»&facing=«deg»` stands you at the gate
-looking along the road under the ring: «one sentence naming what is
-different there, measured on the real merge». The ride-scale ring is unchanged
-to look at — it keeps every leg (Jim: *"make the big version have all its
-legs, but the normal version can have them selectively"*).
+**What a player sees.** Honestly: on the canonical seed, nothing — that is
+the point; the park is on the sphere with the new placer underneath and no
+leg moves. The difference is on the four pool seeds whose walk-past ring
+crossed the bus's road with a leg on it: **`/spawn?pos=0,62&facing=0&seed=131`**
+stands you just inside the gate looking out along the gateway path to the
+road; the Rail Race's walk-past ring crosses over that path ahead of you
+**with no trestle leg standing on it** — on the base a leg stood at
+(0.77, 66.69), in the middle of the path 7 m ahead. (Same on seeds 24, 428,
+451: `seed=24`, leg was at (−0.45, 66.90); `seed=428`, (−1.59, 66.50);
+`seed=451`, (−0.96, 67.59).) Every other post on every seed stands exactly
+where it did, and each is now solid along its lean, not only at its foot.
+The ride-scale ring is unchanged to look at — it keeps every leg (Jim:
+*"make the big version have all its legs, but the normal version can have
+them selectively"*). «check the link lands there on the real preview before
+sending»
 
 **What changed.**
 - `track.ts`: the five nudge ladders are gone. Each slot does one outward
@@ -636,12 +644,9 @@ legs, but the normal version can have them selectively"*).
   (scratch). `pnpm run check` «66 steps, all green», `build` green,
   `check:coplanar` green; chain verified by parsing `scripts` (66 = the
   design branch's 65 + the sphere's `check:arrival-camera`; every step of
-  both parents present). One note for the reviewer: `check:park-boot`
-  charges wall-clock to a generator-step budget, and on the scratch merge it
-  went red once with **0 work units** in the offending slice while three of
-  my own sweeps were loading the box, then passed on re-run (15.8 ms, a real
-  `trainSearch` slice); that is the known park-boot defect (its own engineer
-  is on it), not this branch, and CI's quiet runner is the arbiter.
+  both parents present). (`check:park-boot` reddened once on the scratch merge with 0 work units in
+  the slice — the wall-clock defect #615 has since fixed on `main`; on the
+  real merge it ran «green/red, quote»; a red now is a real finding.)
 
 **Red proofs (each reverted by inverse edit):** claims 1 cm wider than
 searched → red on both rings; `layout.falseRefusal` → red on seed 1;
