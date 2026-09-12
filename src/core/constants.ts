@@ -70,7 +70,7 @@ export const RIM_DROP = 17;
  * budget** — comfortably drivable, and gentle enough that a bus does not look
  * like it is climbing — gives `117.08 / 0.10 = 1171 m`, rounded up to:
  */
-export const GROUND_SPHERE_RADIUS = 1200;
+export const GROUND_SPHERE_RADIUS = 400;
 
 /**
  * The steepest the ground is allowed to be anywhere the cat bus drives, as a
