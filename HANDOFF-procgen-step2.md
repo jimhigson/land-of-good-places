@@ -1,114 +1,46 @@
 # Handoff — procgen stage 3, step 2: the trestles become claims
 
-## READ THIS FIRST — cold start (written 7 Sep 2026 on Jim's pause)
+## READ THIS FIRST — cold start (rewritten 12 Sep 2026; the 7 Sep version is superseded)
 
-**Branch and sha you are picking up:** `feat/procgen-step2-trestles-claim`
-at **`a6652ca3`** (pushed). Base: `design/round-robin-generation` at
-f6ad6032 (contains `main` and #596). Make your own worktree; never the
-shared checkout; never `git stash`.
+**Branch:** `feat/procgen-step2-trestles-claim`, rebased on
+`design/round-robin-generation` 1eb6f210, pushed. Make your own worktree
+(`.claude/worktrees/procgen-step2` is this one); never the shared checkout;
+never `git stash`. **Model: Fable, by Jim's standing ruling.**
 
-**Model:** this workstream runs on **Fable, by Jim's standing ruling**. A
-replacement runs the same model.
+**State: everything is done except opening the PR, and the PR waits on the
+base.** Step 2 is approved by the Architect at a06178a4; the fairness re-cut
+(a6652ca3, now 38b68951 after the rebase) is **verified**: proved red both ways
+on the canonical seed and green on a scratch merge with the sphere (details in
+the 11 Sep sections at the bottom). Every gate has been run on that scratch
+merge and every number the PR body needs is measured and written into the
+"PR body draft" section below, with `«…»` where the real merge must re-quote.
 
-**Approval state:** step 2 is **approved by the Architect at `a06178a4`**
-(it re-measured everything itself, including its own red proofs). Nothing
-on the branch up to a06178a4 needs re-review.
+**The one blocker:** the sphere (`feat/sphere-combined`, PR #600) must land on
+`main` and the Architect must re-merge `main` into
+`design/round-robin-generation`. The Overseer names the sha. Then, from this
+worktree: `S=<scratchpad> bash $S/real-merge.sh <sha>` (scratchpad copies:
+`real-merge.sh`, `real-gates.sh` — if the scratchpad is gone, the recipe
+below and `scripts/audit-step2-merge.sh` on the branch are the substance):
+merge the base in (one conflict set — the shapes in "The merge recipe,
+collected"; `rerere` will replay this session's resolutions, so **run
+`scripts/audit-step2-merge.sh <sha>` regardless** and rebuild the check chain
+from the base's step list + `check:layout-rung`, parsed); then tsc,
+typecheck:test, test:procgen, check:swept-bus, check:park-pool,
+check:coplanar, build, check; the per-seed digest against the base
+(`scripts/park-digest-sweep.sh`) and the per-foot comparison
+(`scratchpad/_dump-feet.mts`, or rebuild it from `probe-trestle-move.mts`
+printing the sorted list instead of hashing). Fill the `«…»`, open the PR
+**against `design/round-robin-generation`, never `main`**, preview link
+`/spawn?pos=0,62&facing=0&seed=131` with the sentence from the PR body —
+**and do not merge: Jim signs the procgen work off himself.**
 
-**The ONE outstanding change** — the duck-bar fairness clause re-cut, ruled
-by the Architect at **`064e834b` on the design branch**: fairness is a
-property of the race, and the race happens on the ride-scale ring only ("on
-the walk-past ring nobody is racing, but the rivals do not know that" — no
-standings, no winner, no player), so equal-per-racer on the walk-past ring
-measured the wrong object. Required: equal-per-racer on the **race ring
-only**; on the walk-past ring no-two-touch stays and each lane's count must
-equal the race ring's count for that lane **minus the bars whose slot the
-road rule skipped on that ring**, the skipped count printed per seed to
-`process.stderr` ("walk-past ring: N bars lost to the road rule at slot S"),
-so a bar missing for any other reason is still caught. **State: written and
-committed at `a6652ca3` but UNVERIFIED beyond the canonical seed** — `tsc`,
-`typecheck:test` and the canonical fairness test pass ("0 bars lost to the
-road rule"). Still to do: (1) the red proof — drop one walk-past bar for a
-non-road reason (e.g. in `buildRailRaceTrack`'s bar loop, skip
-`layout.bars[0]` on the walk-past ring), watch the clause fail, revert by
-the INVERSE EDIT (never `git checkout <file>` — that cost this branch a
-commit once, b49cc4c0); (2) the sphere scratch-merge run, expected
-**706/706** on `test:procgen`, with the stderr line on seed 131 ("1 bar lost
-… (lane 2)" — 131's walk-past measured 10/10/9/10 before).
+**The fact the whole rewrite rests on:** the two Rail Race rings are never in
+the world at once (`RailRace.setActiveRing`). Both the one-feature change
+and the road rule's asymmetry rest on it; if it were false, both are wrong
+together.
 
-**The ONE blocker:** the PR cannot open until the sphere
-(`feat/sphere-combined`, PR against `main`) lands on `main` and the
-Architect re-merges `main` into `design/round-robin-generation`. Then:
-fetch, rebase onto the design branch, apply the recipe below, run the gates
-(`pnpm run check`, `test:procgen`, `build`, plus standalone `check:coplanar`,
-`check:swept-bus`, `check:park-pool`; verify the check chain by PARSING
-`package.json`'s scripts, never grep), take the per-seed whole-park digest
-against the design base (`scripts/park-digest.mts`, one seed per child
-process; it hashes `instanceMatrix`), and open the PR **against
-`design/round-robin-generation`, never `main`**, from the drafted body at
-`/private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/92acae52-e71b-43c9-a76b-92e2c76ea5d3/scratchpad/pr-body-step2.md`
-(session-local scratchpad; if gone, its substance is in the checkpoints
-below — rebuild it). The 92-vs-93 walk-past legs sentence for Jim ("a post
-near the bus's road is gone, not moved") must be measured on the real merge
-before it is written.
-
-**The merge recipe, collected** (worked out on a scratch merge with the
-sphere at b6b1a983; the sphere has moved since — expect the same shapes):
-- `track.ts`: ours in every hunk (ladders gone; registry-first (lean, arc)
-  search; `treeStandsOn`; `legacyRefuser`); graft the sphere's
-  `addPostCollider` (leaning collider) and make the `registerCollision`
-  closure call `addPostCollider(collision, spot.tree.trunkFoot,
-  spot.tree.trunkTop, ringSizeVsRace)` instead of the single foot circle;
-  drop the sphere's `postClearsEntranceRoad`, `isInEntranceRoad`,
-  `SUPPORT_MAX_RADIAL_NUDGE` imports and its "whole post, not just its foot"
-  comment; add `POST_TOP_RADIUS` to the trestleGeometry import; drop the
-  `footRadius` parameter; keep exactly one `TALLEST_CHILD_HEIGHT` import.
-- `roadCorridor.ts`: import `PATH_KERB_OVERHANG` only (no `CAT_BUS_*`; the
-  claim carries no headroom); the sphere's per-run body stays.
-- `check-swept-bus.mts`: ours (parent-side owner and driven assertions, the
-  walk-past-by-name sweep), then the sphere's arc lines (`fromAt/toAt`,
-  `entranceRoadAt/Facing`) in the summary block.
-- `check-ground-claims.mts`: both import lines (`RAIL_RACE_FEATURE`,
-  `ROAD_HALF_WIDTH`).
-- `parkFacts.ts`: keep both imports (`InstancedMesh`, `measureGateArch`);
-  the `busRun` fact reads the ARC through `roadRoute`'s accessors
-  (`entranceBusArriveAt/VanishAt`, `entranceRoadAt/Facing`, ±half a bus,
-  points every `PLAYER_RADIUS`, right vector `cos/−sin facing`) — the sphere
-  deletes `layout.ts`'s three straight-road constants.
-- `invariants.ts`: keep both list entries; `theRoadClaimCoversTheBusRun`
-  samples the arc points through the sphere's `distanceOutside`; clause 4 of
-  the ring invariant: keep the sphere's `legAxis` line beside our
-  `RADIUS_SLACK`/`CENTRE_SLACK`.
-- `swept-bus-baseline.mts`: deleted (ours). `supportGround.ts` STAYS — the
-  road reads it; #601 is filed for its orphaned constant; do NOT re-derive
-  it here (it moves the road and erases the digest evidence).
-
-**The fact the whole rewrite rests on:** the two Rail Race rings are
-**never in the world at once** (`RailRace.setActiveRing` shows exactly one;
-the race ring registers no collider). Both the one-feature change (both
-rings claim as `railRace`; neither refuses the other) and the road rule's
-asymmetry (the walk-past ring skips its legs over the road; the ride ring
-keeps every leg) rest on it. **If that fact were ever false, both are wrong
-together.** `check:swept-bus` sweeps the walk-past ring alone, by name, for
-the same reason.
-
-**Red proofs already run (do not re-derive), each reverted by inverse edit:**
-one-function claim proof (claims committed 1 cm wider than searched → red
-on both rings); `layout.falseRefusal` (#596: exemption −1e9 → red on seed
-1); `CAT_BUS_TOP` +1 cm → `check:swept-bus` "off by −0.0100", exit 1;
-`CAT_BUS_DRIVEN_TOP` +1 cm → same, in the parent; union check (commit only
-the walk-past slice → "126 railRace claims but the slices total 302");
-ring-solidity clause (register the race ring's feet → "registered a collider
-of its own radius 0.680 m"; the Architect reproduced it, 46 legs); radius
-guard (equal radii → "this clause cannot tell the rings apart"). The
-fairness re-cut's red proof is the one NOT yet run.
-
-**Numbers to expect on the sphere scratch merge (b6b1a983 + a06178a4):**
-`check:swept-bus` 0 posts on 14/14, owner and driven 0.0000; trestle
-refusals 0 on every pool seed, both rings built; canonical race ring
-`legacy:collision` 0; walk-past ring skips one gate slot on 24, 115, 131,
-346, 428, 451; `test:procgen` 705/706 before the fairness re-cut (residue:
-131's walk-past 10/10/9/10), 706/706 expected after. Hill: 3/14 build (a
-road running along the ring; retired).
+**Red proofs already run (do not re-derive):** every one listed in the PR
+body draft, including the fairness re-cut's two.
 
 Everything below is the chronological record.
 
