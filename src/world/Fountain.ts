@@ -5,6 +5,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   PointLight,
+  Quaternion,
   RingGeometry,
   TorusGeometry,
   Vector3,
@@ -22,7 +23,7 @@ import {
   playPloosh,
   type WaterSplashEffects,
 } from '../art/effects/waterSplash';
-import { terrainHeight } from './terrain';
+import { standOnSphere, terrainHeight, upAt } from './terrain';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 import type { Player } from '../entities/Player';
@@ -85,6 +86,16 @@ const GLOW_INTENSITY = 5.23;
 const GLOW_DECAY = 1.25;
 const GLOW_DISTANCE = 27;
 
+/**
+ * Height of the basin's water above the ground the fountain stands on.
+ *
+ * One owner: the water disc is drawn at this height in the fountain's own
+ * frame, {@link Fountain.waterLevel} is the same height in world Y, and
+ * {@link Fountain.waterSurfaceY} works out where that surface has got to now
+ * the frame leans. They used to be three separate `0.82`s.
+ */
+const WATER_HEIGHT = 0.82;
+
 export class Fountain implements GameSystem {
   readonly name = 'fountain';
   readonly group = new Group();
@@ -92,7 +103,14 @@ export class Fountain implements GameSystem {
   /** Centre of the fountain in world space. */
   readonly centre: Vector3;
   readonly rimRadius = 4.2;
+  /** World Y of the water surface **at the fountain's centre** — see {@link waterSurfaceY}. */
   readonly waterLevel: number;
+
+  /** The local up here, and the rotation that takes a world offset into the leaning frame. */
+  private readonly up = new Vector3(0, 1, 0);
+  private readonly intoFountain = new Quaternion();
+  /** Scratch for turning a world offset into a splash's place in the group. */
+  private readonly splashLocal = new Vector3();
 
   /** 0 in daylight, 1 at night. Set by the DayNight system each frame. */
   nightFactor = 0;
@@ -166,7 +184,14 @@ export class Fountain implements GameSystem {
     const groundY = terrainHeight(x, z);
     this.centre = new Vector3(x, groundY, z);
     this.group.position.copy(this.centre);
-    this.waterLevel = groundY + 0.82;
+    // The fountain is built around an origin on the ground at its own centre,
+    // so leaning the group there leans basin, statue, jets and coins together
+    // and keeps that centre point exactly where it was. Everything inside goes
+    // on being authored in plain local `+Y`.
+    standOnSphere(this.group);
+    upAt(x, groundY, z, this.up);
+    this.intoFountain.copy(this.group.quaternion).invert();
+    this.waterLevel = groundY + WATER_HEIGHT;
 
     // Stonework is a toy object, so it bands with everything else in the park.
     // The water below is deliberately NOT toon-shaded — see `waterMaterial`.
@@ -217,7 +242,7 @@ export class Fountain implements GameSystem {
     });
     const water = new Mesh(this.waterGeometry, this.waterMaterial);
     water.name = 'fountain-water';
-    water.position.y = 0.82;
+    water.position.y = WATER_HEIGHT;
     water.receiveShadow = true;
     this.group.add(water);
 
@@ -284,11 +309,16 @@ export class Fountain implements GameSystem {
     // World space, because the fade test works against the camera and the
     // player. `this.centre` is the fountain's own world position and the statue
     // stands 2.17 m above it on the bowl water.
-    const statueBase = this.centre.y + 2.17;
+    // Measured **along the local up**, not straight up the world Y axis: the
+    // statue stands four and a half metres above a frame that leans, so out at
+    // the plaza its middle is getting on for half a metre to one side of the
+    // fountain's centre. The capsule is generous, but a capsule that is
+    // generous *in the wrong place* stops hiding the child it exists for.
+    const statueMiddle = 2.17 + this.statue.halfHeight;
     this.statueOccluder = {
-      x: this.centre.x,
-      z: this.centre.z,
-      centreY: statueBase + this.statue.halfHeight,
+      x: this.centre.x + this.up.x * statueMiddle,
+      z: this.centre.z + this.up.z * statueMiddle,
+      centreY: this.centre.y + this.up.y * statueMiddle,
       halfHeight: this.statue.halfHeight,
       radius: this.statue.occluderRadius,
       setFade: (alpha: number) => this.statue.setFade(alpha),
@@ -393,9 +423,28 @@ export class Fountain implements GameSystem {
     const dx = x - this.centre.x;
     const dz = z - this.centre.z;
     if (dx * dx + dz * dz < this.waterRadius * this.waterRadius) {
-      return this.waterLevel - Fountain.WADE_SINK;
+      return this.waterSurfaceY(x, z) - Fountain.WADE_SINK;
     }
     return fallback;
+  }
+
+  /**
+   * World Y of the basin's surface over (x, z).
+   *
+   * **Not one number any more.** The water is a flat disc in a frame that now
+   * leans, so in world terms it is a tilted plane: across a basin nearly eight
+   * metres wide, out where the plaza sits, the two sides differ by something
+   * like a foot. Wading was the one place that mattered — a single height
+   * would have the child's feet under the surface on one side of the fountain
+   * and above it on the other — so the plane is solved rather than sampled:
+   * every point of the surface satisfies `up · (P − centre) = WATER_HEIGHT`.
+   */
+  private waterSurfaceY(x: number, z: number): number {
+    const { x: ux, y: uy, z: uz } = this.up;
+    return (
+      this.centre.y +
+      (WATER_HEIGHT - ux * (x - this.centre.x) - uz * (z - this.centre.z)) / uy
+    );
   }
 
   update({ dt, elapsed }: FrameContext): void {
@@ -467,20 +516,25 @@ export class Fountain implements GameSystem {
     player.speedMultiplier = inWater ? Fountain.WADE_SPEED_FACTOR : 1;
     player.waterHappy = inWater;
 
-    // Splash positions are given in the fountain group's own local space
-    // (it has no rotation, so world offset from the centre is local x/z
-    // directly) — `splashEffects.root` is parented to `this.group`.
-    const localY = this.waterLevel - this.centre.y;
+    // Splash positions are given in the fountain group's own local space, and
+    // **that frame leans now**, so a world offset is no longer local x/z with
+    // the water's height dropped in beside it — it has to be turned back
+    // through the group's own rotation first, or a splash drifts off the spot
+    // her feet are actually in by the width of the tilt.
+    this.splashLocal
+      .set(dx, this.waterSurfaceY(player.position.x, player.position.z) - this.centre.y, dz)
+      .applyQuaternion(this.intoFountain);
+    const { x: splashX, y: localY, z: splashZ } = this.splashLocal;
 
     // Landed in the water from a jump: the proper splash.
     if (this.wasAirborne && !airborne && inWater) {
-      this.splashEffects.splash(dx, localY, dz);
+      this.splashEffects.splash(splashX, localY, splashZ);
       playPloosh();
     }
 
     // Jumped while standing in the water: a smaller splash on takeoff.
     if (!this.wasAirborne && airborne && this.wasInWaterGrounded) {
-      this.splashEffects.footSplash(dx, localY, dz);
+      this.splashEffects.footSplash(splashX, localY, splashZ);
       playPlip(0.8);
     }
 
@@ -492,7 +546,7 @@ export class Fountain implements GameSystem {
         this.footSoundTimer -= dt;
         if (this.footSplashTimer <= 0) {
           this.footSplashTimer = Fountain.FOOT_SPLASH_INTERVAL;
-          this.splashEffects.footSplash(dx, localY, dz);
+          this.splashEffects.footSplash(splashX, localY, splashZ);
         }
         if (this.footSoundTimer <= 0) {
           this.footSoundTimer = Fountain.FOOT_SOUND_INTERVAL;
