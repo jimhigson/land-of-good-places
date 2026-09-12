@@ -453,6 +453,12 @@ function buildBenches(deck: number, spots: readonly BenchSpot[]): InstancedMesh 
 
   const matrix = new Matrix4();
   const rotation = new Quaternion();
+  // **Plain +Y, and it stays plain +Y.** Outdoors "up" is now the radial of
+  // the ground sphere (`world/terrain.ts`), but every deck this file dresses
+  // is an *interior* space at its own origin hundreds of metres from the park,
+  // where that formula leans by tens of degrees and would lay the room on its
+  // side. `world/up.ts` is the one place that branch is decided; nothing here
+  // is ever on the garden's ground.
   const axis = new Vector3(0, 1, 0);
   const scale = new Vector3(1, 1, 1);
   const position = new Vector3();
