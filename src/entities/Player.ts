@@ -20,7 +20,7 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
-import { standOnGround } from '../world/up';
+import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
@@ -708,8 +708,7 @@ export class Player implements GameSystem {
     this.escorting = false;
     if (facing !== undefined) this.facingAngle = facing;
     this.group.position.copy(this.position);
-    this.group.rotation.y = this.facingAngle;
-    standOnGround(this.group);
+    faceOnGround(this.group, this.facingAngle);
   }
 
   /** True while a ride is driving the character instead of the player. */
@@ -863,9 +862,7 @@ export class Player implements GameSystem {
     this.groundHeight = y;
     this.facingAngle = facing;
     this.group.position.copy(this.position);
-    this.group.rotation.y = facing;
-    this.group.rotation.x = pitch;
-    standOnGround(this.group);
+    faceOnGround(this.group, facing, pitch);
   }
 
   /**
@@ -1209,14 +1206,13 @@ export class Player implements GameSystem {
       const target = Math.atan2(this.velocity.x, this.velocity.z);
       this.facingAngle = turnTowards(this.facingAngle, target, PLAYER_TURN_SPEED * dt);
     }
-    this.group.rotation.y = this.facingAngle;
     // She stands perpendicular to the ground she is on, which out in the park
-    // means leaning away from its centre. Written after the yaw and as a
-    // pre-multiply, so `facingAngle` still means "a turn about her own up"
-    // everywhere else in this class — the trig at `forwardX`/`forwardZ` and the
-    // camera's screen basis both depend on that being untouched. Indoors
-    // `standOnGround` does nothing at all.
-    standOnGround(this.group);
+    // means leaning away from its centre. `facingAngle` is still the only thing
+    // that means "which way is she pointing" — the trig at `forwardX`/`forwardZ`
+    // and the camera's screen basis both read it, and neither can read it back
+    // off `group.rotation` any more. Indoors this is a plain yaw and nothing
+    // else.
+    faceOnGround(this.group, this.facingAngle);
 
     // --- animation ----------------------------------------------------------
     this.gait = damp(this.gait, clamp01(planarSpeed / PLAYER_MAX_SPEED), 0.07, dt);

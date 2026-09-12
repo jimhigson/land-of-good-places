@@ -175,6 +175,12 @@ const _tilt = /* @__PURE__ */ new Quaternion();
  * one-line form of {@link tiltToSphere} and is what almost every call site
  * wants; reach for the quaternion directly only when you are composing a
  * transform by hand.
+ *
+ * **Build time only — once per object, never per frame.** It pre-multiplies,
+ * and three.js writes the result straight back into `object.rotation`, so the
+ * next `rotation.y = yaw` inherits this tilt as if it had been asked for and
+ * leans again on top of it. `world/up.ts`'s `faceOnGround` is the per-frame
+ * form; it takes the yaw and never reads what is already there.
  */
 export function standOnSphere(object: Object3D): void {
   const { x, y, z } = object.position;

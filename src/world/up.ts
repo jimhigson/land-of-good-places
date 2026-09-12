@@ -1,4 +1,4 @@
-import { Quaternion, Vector3, type Object3D } from 'three';
+import { Euler, Quaternion, Vector3, type Object3D } from 'three';
 import { SPACE_GARDEN, spaceAt } from './spaces';
 import { INDOOR_UP, tiltToSphere, upAt } from './terrain';
 
@@ -37,15 +37,50 @@ export function isOutdoors(x: number, z: number): boolean {
 }
 
 const _tilt = /* @__PURE__ */ new Quaternion();
+const _euler = /* @__PURE__ */ new Euler();
+
+/**
+ * Point an object along a yaw (and optionally a pitch) **and** stand it on the
+ * ground it is on — written from scratch, so it is safe to call every frame.
+ *
+ * **Use this, not {@link standOnGround}, for anything that is re-oriented each
+ * tick**, and it is worth knowing exactly why, because the wrong one of the two
+ * does not look wrong for the first second.
+ *
+ * `object.rotation.y = yaw` does not set the *rotation* to a yaw. It rebuilds
+ * the quaternion from **all three** Euler components, and `x` and `z` are
+ * whatever they were last frame. Tilt by a pre-multiply and the tilt is
+ * decomposed straight back into `rotation.x` and `rotation.z`; the next frame's
+ * `rotation.y =` picks those up as if they were intentional and the tilt is
+ * applied on top of itself. Measured on the player at the park's boundary: a
+ * 10.5 degree lean, then `rotation.x = -0.59` on the first frame and
+ * `(1.11, 3.14)` a second later — she was slowly tumbling. The first screenshot
+ * of it happened to catch her the right way up, which is the whole reason this
+ * paragraph exists.
+ *
+ * So this takes the yaw as an argument and never reads what is already there.
+ * The build-time helpers may pre-multiply safely, because they run once.
+ */
+export function faceOnGround(object: Object3D, yaw: number, pitch = 0): void {
+  object.quaternion.setFromEuler(_euler.set(pitch, yaw, 0));
+  const { x, y, z } = object.position;
+  if (spaceAt(x, z) !== SPACE_GARDEN) return;
+  object.quaternion.premultiply(tiltToSphere(x, y, z, _tilt));
+}
 
 /**
  * Lean an already-positioned, already-yawed object onto the ground it is
  * standing on — the sphere outdoors, plain `+Y` in any interior.
  *
- * The space-aware twin of `terrain.ts`'s `standOnSphere`, and what anything
- * that can walk between the two should call. Reads the object's own
- * `position`, so set the position first; pre-multiplies, so the object's yaw
- * keeps meaning "a turn about its own up".
+ * The space-aware twin of `terrain.ts`'s `standOnSphere`. Reads the object's
+ * own `position`, so set the position first; pre-multiplies, so the object's
+ * yaw keeps meaning "a turn about its own up".
+ *
+ * **Build time only.** Called once, on an object being assembled, it is exactly
+ * right. Called every frame on an object whose orientation is written as
+ * `rotation.y = yaw`, it compounds its own tilt until the thing tumbles — see
+ * {@link faceOnGround}, which exists for that case and is the one to reach for
+ * if there is any doubt.
  *
  * Indoors this is a no-op by construction rather than by a flag somebody has to
  * remember to clear, which matters because the same character object is used in

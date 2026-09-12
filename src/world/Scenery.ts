@@ -35,7 +35,7 @@ import {
   RAIL_CORRIDOR_CLEARANCE,
 } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
-import { terrainHeight } from './terrain';
+import { standOnSphere, terrainHeight } from './terrain';
 import { PLAZA } from './paths';
 import {
   distanceToPath,
@@ -2178,6 +2178,11 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
     const boards = new Mesh(geometry, boardMaterial);
     boards.position.set(midX, base + run.height / 2, midZ);
     boards.rotation.y = -angle;
+    // Leant at the run's midpoint, while its two corner posts below lean at
+    // their own feet. Over a fence run that is metres rather than tens of
+    // metres the two tilts differ by well under a degree, which is cheaper
+    // than bending the boards.
+    standOnSphere(boards);
     boards.castShadow = true;
     boards.receiveShadow = true;
     group.add(boards);
@@ -2206,6 +2211,7 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
     const postHeight = corner.top - corner.base;
     const post = new Mesh(postGeometry, postMaterial);
     post.position.set(corner.x, corner.base + postHeight / 2, corner.z);
+    standOnSphere(post);
     post.scale.y = postHeight;
     post.castShadow = true;
     post.receiveShadow = true;
@@ -2213,6 +2219,7 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
 
     const cap = new Mesh(capGeometry, capMaterial);
     cap.position.set(corner.x, corner.top, corner.z);
+    standOnSphere(cap);
     cap.scale.set(1, 0.8, 1);
     cap.castShadow = true;
     group.add(cap);
@@ -2259,6 +2266,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gro
     const wall = new Mesh(geometry, wallMaterial);
     wall.position.set(midX, base + run.height / 2, midZ);
     wall.rotation.y = -angle;
+    standOnSphere(wall);
     wall.castShadow = true;
     wall.receiveShadow = true;
     group.add(wall);
@@ -2267,6 +2275,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gro
     const coping = new Mesh(new BoxGeometry(length + 0.2, 0.16, 0.72), copingMaterial);
     coping.position.set(midX, base + run.height + 0.08, midZ);
     coping.rotation.y = -angle;
+    standOnSphere(coping);
     coping.castShadow = true;
     coping.receiveShadow = true;
     group.add(coping);
