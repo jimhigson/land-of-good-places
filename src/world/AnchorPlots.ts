@@ -13,7 +13,7 @@ import {
   Vector3,
 } from 'three';
 import { TAU } from '../core/mathUtils';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, standOnSphere, terrainHeight, tiltToSphere } from './terrain';
 import { ANCHORS, anchorGroupName, type AnchorDefinition, type AnchorId } from './anchors';
 import { createFerrisWheelProp, type FerrisWheelProp } from '../minigames/ferrisWheel/wheelProp';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -63,6 +63,13 @@ export class AnchorPlots implements GameSystem {
       const content = new Group();
       content.name = anchorGroupName(anchor.id);
       content.position.set(x, ground, z);
+      // **The plot's whole frame leans, not the things standing in it.** The
+      // group's origin is already on the ground at the plot centre, so tilting
+      // it there keeps that point put and takes everything built into it — the
+      // placeholder, and the ferris wheel below — with it as one rigid piece.
+      // It also means a ride authored around (0, 0, 0) needs to know nothing
+      // about the sphere: local `+Y` in here *is* the local up.
+      standOnSphere(content);
       content.userData.anchor = anchor;
       this.group.add(content);
       this.contentGroups.set(anchor.id, content);
@@ -161,10 +168,26 @@ function buildPlaceholder(anchor: AnchorDefinition): Group {
   const pegPosition = new Vector3();
   const pegRotation = new Quaternion();
   const pegScale = new Vector3(1, 1, 1);
+  // **A peg is placed in the world and then carried back into the plot's own
+  // frame — it is not offset in world Y.** The old line added
+  // `terrainHeight(peg) − terrainHeight(centre)`, which on a sphere is mostly
+  // the plot's *own* tilt: the parent group now applies that tilt, so adding
+  // it again would count it twice and bury the far pegs (1.1 m of it on a 9 m
+  // plot out at 50 m, measured as `tan(asin(d/R)) · r`). Asking
+  // {@link placeOnSphere} where the peg really stands and undoing the parent's
+  // rotation leaves only the bumps, which is all this line ever meant.
+  const plotCentre = new Vector3(cx, ground, cz);
+  const intoPlot = tiltToSphere(cx, ground, cz).invert();
+  const pegFlat = new Vector3();
+  const pegWorld = new Vector3();
+  const pegLean = new Quaternion();
   outline.forEach((point, index) => {
     const worldX = cx + point.x;
     const worldZ = cz + point.z;
-    pegPosition.set(point.x, terrainHeight(worldX, worldZ) - ground + 0.28, point.z);
+    pegFlat.set(worldX, terrainHeight(worldX, worldZ) + 0.28, worldZ);
+    placeOnSphere(pegFlat, 0, pegWorld, pegLean);
+    pegPosition.copy(pegWorld).sub(plotCentre).applyQuaternion(intoPlot);
+    pegRotation.copy(intoPlot).multiply(pegLean);
     pegMatrix.compose(pegPosition, pegRotation, pegScale);
     pegs.setMatrixAt(index, pegMatrix);
   });
