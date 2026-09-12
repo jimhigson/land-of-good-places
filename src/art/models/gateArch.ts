@@ -580,6 +580,13 @@ function gateArchMesh(name: string): Mesh {
  * arriving child* — the lettering faces her, so `root.rotation.y` should point
  * +Z down the road the bus comes in on.
  *
+ * **Nothing here knows about the ground sphere, and it must not.** The origin
+ * being the foot of the gateway is exactly what lets a caller stand this on
+ * leaning ground: `world/entrance/gateArch.ts` pre-multiplies the local up at
+ * that foot onto the root, so the gate leans without the foot moving. The
+ * asset stays authored along plain +Y, because the bus journey builds the same
+ * arch on a lane that is not on that sphere at all.
+ *
  * `height` is measured to the top of the roundel, outline included.
  */
 export function createGateArch(): AssetHandle {
