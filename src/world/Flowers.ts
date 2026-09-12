@@ -15,7 +15,7 @@ import { PALETTE } from '../core/palette';
 import { Rng, TAU, clamp01, lerp, smoothstep } from '../core/mathUtils';
 import { toonMaterial } from '../art/style/materials';
 import { createFlowerPickEffect, type FlowerPickEffect } from '../art/effects/flowerSparkle';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, terrainHeight } from './terrain';
 import { isOnPath } from './pathGraph';
 import { clearOfCruiser, clearOfRailway } from './Scenery';
 import type { CollisionWorld } from './Collision';
@@ -233,6 +233,13 @@ export class Flowers implements GameSystem {
   private readonly scratchQuaternion = new Quaternion();
   private readonly scratchPosition = new Vector3();
   private readonly scratchScale = new Vector3();
+  /**
+   * The flat, authored position of the part being written — an (x, z) and a
+   * height above the ground there. {@link placeOnSphere} turns it into the
+   * leaning one; it is a separate vector from `scratchPosition` because that
+   * is the output and this is the input.
+   */
+  private readonly scratchFlat = new Vector3();
   private readonly scratchColour = new Color();
 
   /**
@@ -741,16 +748,20 @@ export class Flowers implements GameSystem {
     const wiggleYaw = Math.sin(wig * TAU * 2.5) * wig * 0.6;
     const wiggleFlare = 1 + wig * 0.18;
 
-    this.scratchQuaternion.setFromAxisAngle(UP, rotY);
-    this.scratchPosition.set(x, groundY + stemHeight / 2, z);
+    // Stem, head and petals all measure their height from the ground at the
+    // *same* (x, z), so they lean by the same angle and the flower stays one
+    // rigid thing — a head tilted about its own centre would slide off a stem
+    // that had leaned away from it.
+    this.scratchFlat.set(x, groundY + stemHeight / 2, z);
+    placeOnSphere(this.scratchFlat, rotY, this.scratchPosition, this.scratchQuaternion);
     this.scratchScale.set(stalkWidth, stemHeight, stalkWidth);
     this.scratchMatrix.compose(this.scratchPosition, this.scratchQuaternion, this.scratchScale);
     this.stems.setMatrixAt(index, this.scratchMatrix);
 
     if (petalRow < 0) {
       // Small: one flattening blob on a short stalk, exactly as it always was.
-      this.scratchQuaternion.setFromAxisAngle(UP, rotY + wiggleYaw);
-      this.scratchPosition.set(x, groundY + stemHeight, z);
+      this.scratchFlat.set(x, groundY + stemHeight, z);
+      placeOnSphere(this.scratchFlat, rotY + wiggleYaw, this.scratchPosition, this.scratchQuaternion);
       this.scratchScale.set(width * wiggleFlare, width * flatten * wiggleFlare, width * wiggleFlare);
       this.scratchMatrix.compose(this.scratchPosition, this.scratchQuaternion, this.scratchScale);
       this.heads.setMatrixAt(index, this.scratchMatrix);
@@ -758,10 +769,10 @@ export class Flowers implements GameSystem {
     }
 
     const petalOpen = smoothstep(PETAL_OPEN_START, 1, t);
-    this.scratchQuaternion.setFromAxisAngle(UP, rotY + wiggleYaw);
 
     const petalRadius = width * petalOpen * wiggleFlare;
-    this.scratchPosition.set(x, groundY + stemHeight, z);
+    this.scratchFlat.set(x, groundY + stemHeight, z);
+    placeOnSphere(this.scratchFlat, rotY + wiggleYaw, this.scratchPosition, this.scratchQuaternion);
     this.scratchScale.set(petalRadius, petalRadius, petalRadius);
     this.scratchMatrix.compose(this.scratchPosition, this.scratchQuaternion, this.scratchScale);
     this.petals.setMatrixAt(petalRow, this.scratchMatrix);
@@ -770,7 +781,11 @@ export class Flowers implements GameSystem {
     // round bud on its own while the flower grows, and the bloom's centre once
     // the petals are out from around it.
     const centre = width * lerp(1, CENTRE_RATIO, petalOpen) * wiggleFlare;
-    this.scratchPosition.set(x, groundY + stemHeight, z);
+    // Same flat position and same yaw as the petal ring it sits inside — both
+    // are re-derived rather than reusing the ring's, so a later edit to one
+    // cannot quietly leave the other behind.
+    this.scratchFlat.set(x, groundY + stemHeight, z);
+    placeOnSphere(this.scratchFlat, rotY + wiggleYaw, this.scratchPosition, this.scratchQuaternion);
     this.scratchScale.set(centre, centre * flatten, centre);
     this.scratchMatrix.compose(this.scratchPosition, this.scratchQuaternion, this.scratchScale);
     this.heads.setMatrixAt(index, this.scratchMatrix);
@@ -808,8 +823,6 @@ export class Flowers implements GameSystem {
     if (this.stems.instanceColor) this.stems.instanceColor.needsUpdate = true;
   }
 }
-
-const UP = new Vector3(0, 1, 0);
 
 /** Growth fraction at which a large flower's petals start to unfold. */
 const PETAL_OPEN_START = 0.72;
