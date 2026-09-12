@@ -1,4 +1,4 @@
-import { PerspectiveCamera, Vector2, Vector3 } from 'three';
+import { PerspectiveCamera, Quaternion, Vector2, Vector3 } from 'three';
 import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
@@ -18,6 +18,8 @@ import { cameraOffset } from './cameraRig';
 import { screenBasis } from './screenBasis';
 import type { FrameContext } from './types';
 import type { ParkBoundary } from '../world/boundary';
+import { upFor } from '../world/up';
+import { INDOOR_UP as WORLD_UP } from '../world/terrain';
 
 /**
  * The Theme Park camera.
@@ -63,6 +65,11 @@ export class IsoCamera {
    * view slide as she walks.
    */
   private readonly viewFocus = new Vector3();
+
+  /** Scratch for the shot's frame: which way is up here, and the rotation to it. */
+  private readonly frameUp = new Vector3(0, 1, 0);
+  private readonly frameTilt = new Quaternion();
+  private readonly rigOffset = new Vector3();
 
   /**
    * Ground-plane basis vectors and the camera's fixed offset from its focus.
@@ -808,7 +815,32 @@ export class IsoCamera {
     // The look-around offset is applied *here*, on top of the settled follow,
     // rather than folded into `focus` — see `viewFocus`.
     this.viewFocus.copy(this.focus).add(this.lookOffset);
-    this.camera.position.copy(this.viewFocus).add(this.offset).add(this.poseOffset);
+
+    // **The whole rig rides the ground it is looking at.**
+    //
+    // `offset` and `poseOffset` are solved once, in the flat frame, from a yaw
+    // and a pitch — "stand this far back and this far up from her". Out in the
+    // park "up" is no longer world `+Y`, so the same rig is placed by rotating
+    // that offset into the local frame and telling the camera which way up it
+    // is. At the park's centre the rotation is the identity and this is exactly
+    // the shot it always was; at the boundary it leans by `asin(d / R)`, about
+    // fourteen degrees on a four-hundred-metre sphere, and the horizon stays
+    // level in frame instead of tipping as she walks out.
+    //
+    // Rotating the *offset* rather than only setting `up` is the part that
+    // matters: `up` alone would roll the picture while leaving the eye hanging
+    // off a vertical that the ground no longer agrees with, so the pitch would
+    // read as steeper on one side of the park than the other.
+    //
+    // Taken at the focus, not at the eye — the focus is where she is standing,
+    // and it is her ground that decides which way up the shot is. Indoors
+    // `upFor` hands back plain `+Y` and every line below collapses to what it
+    // was, which is why the hotel and the castle need no branch of their own.
+    upFor(this.viewFocus.x, this.viewFocus.y, this.viewFocus.z, this.frameUp);
+    this.frameTilt.setFromUnitVectors(WORLD_UP, this.frameUp);
+    this.rigOffset.copy(this.offset).add(this.poseOffset).applyQuaternion(this.frameTilt);
+    this.camera.position.copy(this.viewFocus).add(this.rigOffset);
+    this.camera.up.copy(this.frameUp);
     this.camera.lookAt(this.viewFocus);
     this.camera.updateMatrixWorld();
 
