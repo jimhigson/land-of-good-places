@@ -13,6 +13,7 @@ import { type FoliageOccluder, type Scenery } from './Scenery';
 // The geometry itself comes from the tree model both the park and the cat bus's
 // lane build from — sharing the object is what makes a stand-in pixel-identical.
 import { FOLIAGE_GEOMETRY } from './treeModel';
+import { placeOnSphere } from './terrain';
 
 /**
  * Fades out any tree standing between the camera and the player.
@@ -372,9 +373,16 @@ export class FoliageFade implements GameSystem {
       }
       mesh.visible = true;
       mesh.geometry = FOLIAGE_GEOMETRY[part.kind];
-      mesh.position.copy(part.position);
+      // **The stand-in has to be composed exactly the way the instance it
+      // replaces was**, and `treeModel.ts` composes every trunk, canopy and
+      // cone through `placeOnSphere` — a `part.position` is a height above the
+      // ground under its own (x, z), not a world point. Copying it straight in
+      // and setting `rotation.y` would put the look-alike upright beside a
+      // leaning tree, and the whole design of this system is that the swap is
+      // invisible: it happens at full opacity, so any mismatch reads as the
+      // tree jumping.
+      placeOnSphere(part.position, part.rotationY, mesh.position, mesh.quaternion);
       mesh.scale.copy(part.scale);
-      mesh.rotation.y = part.rotationY;
       material.color.setHex(part.colour).multiplyScalar(part.shade);
       material.opacity = slot.alpha;
     }
