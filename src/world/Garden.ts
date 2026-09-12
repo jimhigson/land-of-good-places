@@ -21,7 +21,7 @@ import {
 import { PALETTE } from '../core/palette';
 import { Rng } from '../core/mathUtils';
 import { grassTexture, pinkStoneTexture } from '../core/textures';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, terrainHeight } from './terrain';
 import { buildPaths } from './pathGraph';
 import type { CollisionWorld } from './Collision';
 import { isInEntranceGateOpening } from './entrance/layout';
@@ -203,6 +203,7 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   const matrix = new Matrix4();
   const positionVector = new Vector3();
   const quaternion = new Quaternion();
+  const flatVector = new Vector3();
   const scale = new Vector3(1, 1, 1);
   const rng = new Rng(0x5701e);
   const colour = new Color();
@@ -214,11 +215,15 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
       const station = stations[i % stations.length] as EdgeStation;
       const { x, z } = station;
       const y = terrainHeight(x, z) + courseHeight * (course + 0.5);
-      positionVector.set(x, y, z);
+      flatVector.set(x, y, z);
       // The box's long axis is X and must lie *along* the edge. `alongBoundary`
       // hands back the yaw that does it; pointing it across instead turns the
       // wall into a ring of separate tombstones.
-      quaternion.setFromAxisAngle(UP, station.yaw);
+      //
+      // Every course of every block is placed from the ground under it, so the
+      // whole ring leans outward with the sphere and the courses stay stacked
+      // square on each other instead of shearing as the wall runs downhill.
+      placeOnSphere(flatVector, station.yaw, positionVector, quaternion);
       matrix.compose(positionVector, quaternion, scale);
       blocks.setMatrixAt(index, matrix);
       // Gentle per-block colour jitter so the ring isn't a flat pink band.
@@ -263,12 +268,13 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
     const { x, z } = station;
     const ground = terrainHeight(x, z);
 
-    positionVector.set(x, ground + 1.05, z);
-    quaternion.setFromAxisAngle(UP, station.yaw);
+    flatVector.set(x, ground + 1.05, z);
+    placeOnSphere(flatVector, station.yaw, positionVector, quaternion);
     matrix.compose(positionVector, quaternion, scale);
     pillars.setMatrixAt(i, matrix);
 
-    positionVector.set(x, ground + 2.15, z);
+    flatVector.set(x, ground + 2.15, z);
+    placeOnSphere(flatVector, station.yaw, positionVector, quaternion);
     matrix.compose(positionVector, quaternion, SQUASHED_CAP);
     caps.setMatrixAt(i, matrix);
   }
@@ -398,7 +404,6 @@ export const BOUNDARY_BLOCK_WIDTH = 1.7;
  */
 export const DRAWN_BLOCK_GATE_MARGIN = BOUNDARY_BLOCK_WIDTH / 2 + BOUNDARY_MASONRY_HALF_WIDTH;
 
-const UP = new Vector3(0, 1, 0);
 const SQUASHED_CAP = new Vector3(1, 0.72, 1);
 
 /** Metres of ground covered by one repeat of the grass texture. */
