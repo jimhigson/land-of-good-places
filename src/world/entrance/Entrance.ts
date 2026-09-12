@@ -18,7 +18,7 @@ import {
   woodTexture,
 } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
-import { terrainHeight } from '../terrain';
+import { standOnSphere, terrainHeight } from '../terrain';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import type { Player } from '../../entities/Player';
@@ -356,31 +356,44 @@ export class Entrance implements GameSystem {
     const shelterGround = terrainHeight(shelterX, shelterZ);
     const woodMaterial = toonMaterial(0xffffff, { map: woodTexture(2, 1) });
 
+    // **The shelter is one group, and that is what makes it lean in one
+    // piece.** Its posts, canopy and bench used to be three siblings each
+    // placed at its own world position; out here, ninety-odd metres from the
+    // park's centre, "up" leans several degrees, and leaning three separate
+    // objects about their own centres would slide the canopy off the posts
+    // holding it up. Parented, they lean as the one object a child sees.
+    const shelter = new Group();
+    shelter.name = 'bus-shelter';
+    shelter.position.set(shelterX, shelterGround, shelterZ);
+    this.group.add(shelter);
+
     const shelterPostGeometry = new CylinderGeometry(0.14, 0.16, 2.3, 8);
     for (const dz of [-1, 1] as const) {
       const post = new Mesh(shelterPostGeometry, woodMaterial);
-      post.position.set(shelterX, shelterGround + 1.15, shelterZ + dz * 0.9);
+      post.position.set(0, 1.15, dz * 0.9);
       post.castShadow = true;
       post.receiveShadow = true;
-      this.group.add(post);
-      collision.addCircle(post.position.x, post.position.z, 0.2);
+      shelter.add(post);
+      // The collider is asked of the plan, not of `post.position`, which is
+      // now local to the shelter. Collision is a flat (x, z) world either way.
+      collision.addCircle(shelterX, shelterZ + dz * 0.9, 0.2);
     }
 
     const canopy = new Mesh(
       new BoxGeometry(1.6, 0.14, 2.3),
       toonMaterial(PALETTE.buildingTrim),
     );
-    canopy.position.set(shelterX + 0.3, shelterGround + 2.3, shelterZ);
+    canopy.position.set(0.3, 2.3, 0);
     canopy.rotation.z = 0.1;
     canopy.castShadow = true;
     canopy.receiveShadow = true;
-    this.group.add(canopy);
+    shelter.add(canopy);
 
     const bench = new Mesh(new BoxGeometry(1.4, 0.42, 0.5), woodMaterial);
-    bench.position.set(shelterX, shelterGround + 0.21, shelterZ);
+    bench.position.set(0, 0.21, 0);
     bench.castShadow = true;
     bench.receiveShadow = true;
-    this.group.add(bench);
+    shelter.add(bench);
 
     // The little "Bus Stop 🚌" lollipop went with every other sign, and its
     // post went with it rather than being left standing on the verge holding
@@ -388,10 +401,15 @@ export class Entrance implements GameSystem {
     // "the bus comes here", and the bus itself says the rest.
 
     const pawB = buildPawPrint(toonMaterial(PALETTE.stonePinkDark));
-    pawB.position.set(shelterX, shelterGround + 0.02, shelterZ - 1.1);
+    pawB.position.set(0, 0.02, -1.1);
     pawB.rotation.x = -Math.PI / 2;
     pawB.scale.setScalar(2.1);
-    this.group.add(pawB);
+    shelter.add(pawB);
+
+    // Set once the whole shelter is assembled: `standOnSphere` reads the
+    // group's position and pre-multiplies its rotation, so a lean applied here
+    // leaves every child's own placement above meaning exactly what it says.
+    standOnSphere(shelter);
 
     // --- the road ------------------------------------------------------------
     for (const mesh of buildEntranceRoad()) this.group.add(mesh);
@@ -501,6 +519,10 @@ export class Entrance implements GameSystem {
     signGroup.name = 'welcome-sign';
     signGroup.position.set(signX, ground, signZ);
     signGroup.rotation.y = WELCOME_SIGN_YAW;
+    // Posts, board, both plaques, the lintel bulbs and the topper are all
+    // children, so the sign leans as one board on two posts rather than a
+    // board that has slid off them. The colliders below stay on the flat plan.
+    standOnSphere(signGroup);
     this.group.add(signGroup);
 
     const bulbMaterials = WELCOME_SIGN_BULB_COLOURS.map((colour) =>
