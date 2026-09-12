@@ -31,7 +31,7 @@ import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
 import { KEYCHAIN_KINDS, createKeychain, type KeychainKind } from '../art/models/keychains';
 import { pressAction, type InteractZone, type ZoneAction } from './interact';
 import { highlightObject } from './highlight';
-import { terrainHeight } from './terrain';
+import { standOnSphere, terrainHeight } from './terrain';
 import type { CollisionWorld } from './Collision';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
@@ -681,6 +681,11 @@ export class KeychainShop implements GameSystem {
     this.groundY = terrainHeight(STALL_X, STALL_Z);
     this.group.position.set(STALL_X, this.groundY, STALL_Z);
     this.group.rotation.y = STALL_FACING;
+    // The cart, its canopy, the rack, the sparkle pool and the pop-up backdrop
+    // are all children of this one group, so leaning the group is what keeps
+    // them a single rigid object. Tilting any of them individually would swing
+    // it about its own centre and pull the cart apart.
+    standOnSphere(this.group);
 
     const stand = STALL_STANDS_BY_ID.get('keychain');
     if (!stand) throw new Error('KeychainShop: no stand point in STALL_PLACEMENTS.keychain');
