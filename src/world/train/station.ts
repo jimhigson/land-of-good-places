@@ -11,7 +11,7 @@ import { PALETTE } from '../../core/palette';
 import { woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
-import { terrainHeight } from '../terrain';
+import { standOnSphere, terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import type { InteractZone } from '../interact';
 import type { MovingPlatform } from '../building/surfaces';
@@ -128,6 +128,11 @@ export class Station {
     this.group.name = `train-station-${options.index}`;
     this.group.position.set(this.standX, ground, this.standZ);
     this.group.rotation.y = yaw;
+    // The whole station is one group standing on one ground point, so leaning
+    // the group leans the platform, the canopy, the benches and the sign
+    // together — the cheapest correct answer, and the one to prefer whenever
+    // the parts are already parented.
+    standOnSphere(this.group);
 
     this.build(options, trackSide, collision);
   }

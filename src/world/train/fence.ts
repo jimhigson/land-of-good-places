@@ -15,7 +15,7 @@ import { PLAYER_RADIUS } from '../../core/constants';
 import type { CollisionWorld } from '../Collision';
 import { PALETTE } from '../../core/palette';
 import { toonMaterial } from '../../art/style/materials';
-import { terrainHeight } from '../terrain';
+import { placeOnSphere, terrainHeight } from '../terrain';
 
 /**
  * The exclusion fence — Decision 4 §6, "keeping feet off the track".
@@ -403,18 +403,23 @@ export function buildRailFence(
 
   const matrix = new Matrix4();
   const rotation = new Quaternion();
-  const axis = new Vector3(0, 1, 0);
   const one = new Vector3(1, 1, 1);
   const position = new Vector3();
+  const flat = new Vector3();
   posts.forEach((post, index) => {
-    position.set(post.x, post.y + 0.48, post.z);
-    matrix.compose(position, rotation.identity(), one);
+    flat.set(post.x, post.y + 0.48, post.z);
+    placeOnSphere(flat, 0, position, rotation);
+    matrix.compose(position, rotation, one);
     postMesh.setMatrixAt(index, matrix);
   });
   const stretch = new Vector3();
   rails.forEach((rail, index) => {
-    rotation.setFromAxisAngle(axis, rail.yaw);
-    position.set(rail.x, rail.y, rail.z);
+    // A rail is placed from its own midpoint while the two posts carrying it
+    // lean at their own feet. Over a fence bay that is a fraction of a degree
+    // apart, and it is what keeps the run reading as one fence rather than as
+    // posts and rails leaning by different amounts.
+    flat.set(rail.x, rail.y, rail.z);
+    placeOnSphere(flat, rail.yaw, position, rotation);
     stretch.set(1, 1, rail.length);
     matrix.compose(position, rotation, stretch);
     railMesh.setMatrixAt(index, matrix);
