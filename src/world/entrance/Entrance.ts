@@ -311,6 +311,10 @@ export class Entrance implements GameSystem {
       // written, which is the argument for scene names being qualified by what
       // owns them.
       namePrefix: 'park-gate',
+      // This gate is on the park's own ground, ninety-odd metres out from its
+      // centre, so it leans with it. `BusJourney`'s copy of the same arch does
+      // not — see the option's own note.
+      onParkSphere: true,
     });
     this.group.add(arch.group);
 

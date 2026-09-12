@@ -5,6 +5,7 @@ import {
   GATE_ARCH_PIER_KEEP_OUT,
 } from '../../art/models/gateArch';
 import { ENTRANCE_GATE_HALF_WIDTH } from './layout';
+import { standOnSphere } from '../terrain';
 
 /**
  * **The park's front gate: the authored arch, seated on its gateway.**
@@ -94,6 +95,22 @@ export interface GateArchOptions {
    * answer for the park's own.
    */
   readonly namePrefix?: string;
+  /**
+   * **True when this gate stands on the park's own ground**, and so leans with
+   * it — the arch's up is the radial of `terrain.ts`'s ground sphere rather
+   * than world `+Y`. The park's gate is nearly a hundred metres out from the
+   * centre, where that is several degrees; a gate standing bolt upright in
+   * ground that leans reads as a gate about to fall over.
+   *
+   * It is a flag rather than something derived here because the *other* caller
+   * is not on the park at all: `BusJourney` builds this same arch on its
+   * synthetic lane, whose ground is `laneHeight` and whose coordinates mean
+   * nothing to the park's sphere — `spaceAt` would nonetheless call that patch
+   * of lane "the garden", so asking it is not an available shortcut. The
+   * caller passing `groundAt` is the one that knows which world it is in, and
+   * it says so here too.
+   */
+  readonly onParkSphere?: boolean;
 }
 
 export interface GateArch {
@@ -157,6 +174,10 @@ export function buildGateArch(options: GateArchOptions): GateArch {
   const arch = createGateArch();
   arch.root.position.set(centreX, ground, centreZ);
   arch.root.rotation.y = yaw;
+  // Piers, span and lettering are one authored mesh under this root, so the
+  // whole gate leans as the single object it is. The feet below are the pivot
+  // and do not move, which is what keeps the colliders honest.
+  if (options.onParkSphere) standOnSphere(arch.root);
   if (options.namePrefix !== undefined) arch.root.name = `${options.namePrefix}-arch`;
   group.add(arch.root);
 
