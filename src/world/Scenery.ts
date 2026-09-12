@@ -6,6 +6,7 @@ import {
   IcosahedronGeometry,
   InstancedMesh,
   Matrix4,
+  Quaternion,
   Mesh,
   SphereGeometry,
   Vector3,
@@ -35,7 +36,7 @@ import {
   RAIL_CORRIDOR_CLEARANCE,
 } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
-import { standOnSphere, terrainHeight } from './terrain';
+import { placeOnSphere, standOnSphere, terrainHeight } from './terrain';
 import { PLAZA } from './paths';
 import {
   distanceToPath,
@@ -232,6 +233,11 @@ interface BushCollider {
 
 /** Degenerate matrix that renders an instance as nothing — cheaper than touching instance count. */
 const HIDDEN_MATRIX = new Matrix4().makeScale(0, 0, 0);
+
+/** Scratch for leaning a tree's sightline sphere onto the sphere. */
+const occluderFlat = new Vector3();
+const occluderCentre = new Vector3();
+const occluderSpin = new Quaternion();
 
 /**
  * A wall run as actually built — the run plus the half-width it occupies.
@@ -718,7 +724,26 @@ function buildFoliage(collision: CollisionWorld): {
       climbableTrees.push({ x, z, canopyTopY: tree.topBallTopY, trunkRadius: 0.55 * lean });
     }
 
-    occluders.push({ x, z, centreY: tree.wideCentreY, radius: tree.wideRadius, parts });
+    // **The sightline sphere goes where the canopy actually is**, which since
+    // the trees started leaning is not above the trunk any more. `wideCentreY`
+    // is a flat-frame height above the ground at (x, z); the same map
+    // `treeModel.ts` draws the canopy through puts the sphere on it. At the
+    // park's edge that is over a metre sideways — more than `SIGHTLINE_MARGIN`
+    // — so left flat, a tree near the boundary would fade at the wrong moment
+    // or not at all.
+    //
+    // This does **not** double up with `FoliageFade`'s own `placeOnSphere`
+    // call: that one composes the stand-in mesh from `part.position`, a
+    // different record, and the two never meet.
+    occluderFlat.set(x, tree.wideCentreY, z);
+    placeOnSphere(occluderFlat, 0, occluderCentre, occluderSpin);
+    occluders.push({
+      x: occluderCentre.x,
+      z: occluderCentre.z,
+      centreY: occluderCentre.y,
+      radius: tree.wideRadius,
+      parts,
+    });
     occluderRefs.push(refs);
 
     const trunkRadius = 0.55 * lean;
