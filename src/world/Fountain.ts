@@ -432,9 +432,9 @@ export class Fountain implements GameSystem {
    * World Y of the basin's surface over (x, z).
    *
    * **Not one number any more.** The water is a flat disc in a frame that now
-   * leans, so in world terms it is a tilted plane: across a basin nearly eight
-   * metres wide, out where the plaza sits, the two sides differ by something
-   * like a foot. Wading was the one place that mattered — a single height
+   * leans, so in world terms it is a tilted plane: measured on the bare cap
+   * with the fountain 21.6 m from the park's origin, the two sides of the
+   * 7.8 m basin sit 0.35 m apart. Wading was the one place that mattered — a single height
    * would have the child's feet under the surface on one side of the fountain
    * and above it on the other — so the plane is solved rather than sampled:
    * every point of the surface satisfies `up · (P − centre) = WATER_HEIGHT`.

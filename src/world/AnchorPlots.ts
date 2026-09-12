@@ -172,8 +172,9 @@ function buildPlaceholder(anchor: AnchorDefinition): Group {
   // frame — it is not offset in world Y.** The old line added
   // `terrainHeight(peg) − terrainHeight(centre)`, which on a sphere is mostly
   // the plot's *own* tilt: the parent group now applies that tilt, so adding
-  // it again would count it twice and bury the far pegs (1.1 m of it on a 9 m
-  // plot out at 50 m, measured as `tan(asin(d/R)) · r`). Asking
+  // it again would count it twice and bury the far pegs: measured on the bare
+  // cap, a peg 9 m out from a plot centre 50 m from the park's origin wants
+  // local y +0.18 and the old line asks for −0.73. Asking
   // {@link placeOnSphere} where the peg really stands and undoing the parent's
   // rotation leaves only the bumps, which is all this line ever meant.
   const plotCentre = new Vector3(cx, ground, cz);
