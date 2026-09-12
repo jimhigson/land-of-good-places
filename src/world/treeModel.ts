@@ -14,6 +14,7 @@ import {
 import { PALETTE } from '../core/palette';
 import { Rng, TAU } from '../core/mathUtils';
 import { toonMaterial } from '../art/style/materials';
+import { placeOnSphere } from './terrain';
 
 /**
  * **What a tree in this game is.** One owner, for every tree anybody plants.
@@ -349,8 +350,6 @@ export function foliageMaterial(_roughness: number): MeshToonMaterial {
   return toonMaterial(0xffffff);
 }
 
-const UP = new Vector3(0, 1, 0);
-
 /** Composes a list of {@link InstanceItem}s into one `InstancedMesh`. */
 export function makeInstanced(
   name: string,
@@ -367,11 +366,19 @@ export function makeInstanced(
 
   const matrix = new Matrix4();
   const quaternion = new Quaternion();
+  const position = new Vector3();
   const colour = new Color();
 
   items.forEach((item, index) => {
-    quaternion.setFromAxisAngle(UP, item.rotationY);
-    matrix.compose(item.position, quaternion, item.scale);
+    // Every part is authored as "a height above the ground at its own (x, z)",
+    // which is still what it means — `placeOnSphere` only re-measures that
+    // height along the local up, so the tree leans away from the park's centre
+    // instead of standing stubbornly along world Y. Doing it here rather than
+    // at each caller is deliberate: this one function composes every trunk,
+    // canopy, cone and bush in the park *and* the treeline outside it, so the
+    // whole of the foliage leans or none of it does. See `world/terrain.ts`.
+    placeOnSphere(item.position, item.rotationY, position, quaternion);
+    matrix.compose(position, quaternion, item.scale);
     mesh.setMatrixAt(index, matrix);
     colour.setHex(item.colour).multiplyScalar(item.shade);
     mesh.setColorAt(index, colour);

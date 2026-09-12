@@ -180,3 +180,46 @@ export function standOnSphere(object: Object3D): void {
   const { x, y, z } = object.position;
   object.quaternion.premultiply(tiltToSphere(x, y, z, _tilt));
 }
+
+/**
+ * **The one map from the flat frame everything in this park was authored in,
+ * onto the sphere.**
+ *
+ * Nearly every prop here is placed as "an (x, z), and a height above the ground
+ * at that (x, z)" — `position.set(x, terrainHeight(x, z) + 1.4, z)` is the
+ * commonest line in the whole codebase. That description is still exactly what
+ * the author meant; what has changed is that "above" now leans. This turns the
+ * one into the other:
+ *
+ * - the foot stays put, on the ground, at the (x, z) it was given;
+ * - the height is re-measured **along the local up** instead of along world Y,
+ *   so the thing leans away from the park's centre;
+ * - the yaw it was given is still a turn about its own up.
+ *
+ * **Why the foot and not the centre.** A tree's canopy and its trunk are
+ * separate instances with separate world positions, and rotating each about its
+ * own centre would pull the tree apart — the trunk would lean and the ball
+ * would stay. Measuring both from the ground under them keeps the tree rigid,
+ * because a rigid lean *is* what "same foot, height along the same up" means.
+ *
+ * Writes into `position` and `quaternion`; reads `flat` without touching it, so
+ * it is safe to pass a stored authoring position and call this every rebuild.
+ */
+export function placeOnSphere(
+  flat: { x: number; y: number; z: number },
+  yaw: number,
+  position: Vector3,
+  quaternion: Quaternion,
+): void {
+  const ground = terrainHeight(flat.x, flat.z);
+  upAt(flat.x, ground, flat.z, _up);
+  const height = flat.y - ground;
+  position.set(
+    flat.x + _up.x * height,
+    ground + _up.y * height,
+    flat.z + _up.z * height,
+  );
+  quaternion
+    .setFromAxisAngle(INDOOR_UP, yaw)
+    .premultiply(_tilt.setFromUnitVectors(INDOOR_UP, _up));
+}
