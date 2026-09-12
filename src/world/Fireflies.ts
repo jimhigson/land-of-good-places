@@ -13,7 +13,7 @@ import { CAMERA_PITCH_DEGREES } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { glowTexture } from '../core/textures';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, terrainHeight } from './terrain';
 import { ANCHORS } from './anchors';
 import type { FrameContext, GameSystem } from '../core/types';
 
@@ -117,6 +117,19 @@ export class Fireflies implements GameSystem {
     const rng = new Rng(0xf1efa1);
 
     const homes: number[] = [];
+    // A fly's home is authored as "so many metres above the ground at its own
+    // (x, z)", and {@link placeOnSphere} is what re-measures that along the
+    // local up, so a swarm out at `MAX_RADIUS` hangs over the lawn rather than
+    // over where the lawn would have been if the park were flat.
+    //
+    // **The drift stays in world axes on purpose.** A firefly is not a rigid
+    // thing bolted to a post: its wander is a ±1.5 m box round the home point,
+    // and leaning that box by six degrees would move nothing a child could
+    // see while costing three trigonometric calls per fly per frame, in the
+    // one system in this file's docs that allocates nothing after construction.
+    const flatHome = new Vector3();
+    const leanedHome = new Vector3();
+    const homeLean = new Quaternion();
     for (let swarm = 0; swarm < SWARM_COUNT; swarm += 1) {
       const centre = pickSwarmCentre(rng);
       if (!centre) continue;
@@ -127,7 +140,9 @@ export class Fireflies implements GameSystem {
         const spread = Math.sqrt(rng.unit()) * SWARM_SPREAD;
         const x = cx + Math.cos(angle) * spread;
         const z = cz + Math.sin(angle) * spread;
-        homes.push(x, terrainHeight(x, z) + height + rng.range(-0.35, 0.35), z);
+        flatHome.set(x, terrainHeight(x, z) + height + rng.range(-0.35, 0.35), z);
+        placeOnSphere(flatHome, 0, leanedHome, homeLean);
+        homes.push(leanedHome.x, leanedHome.y, leanedHome.z);
       }
     }
 
