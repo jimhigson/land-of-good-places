@@ -40,6 +40,7 @@ import { createPetBlob, PET_BODY_NODE, PET_HEAD_NODE } from './petBlob';
 import { WanderDriver, type ClimberBudget } from './wanderDriver';
 import type { ActivityBudget } from './activities/activity';
 import { SPACE_CASTLE_MALL, SPACE_GARDEN, spaceAt } from '../../world/spaces';
+import { faceOnGround } from '../../world/up';
 // Chatting (see the additive block in wanderDriver.ts): the shared budget
 // that caps how many children may be mid-chat at once, and the speed below
 // which the player counts as "stood still" for that same block.
@@ -1074,7 +1075,7 @@ export class NpcSystem implements GameSystem {
   private updatePets(dt: number, elapsed: number): void {
     for (const pet of this.petList) {
       const owner = pet.owner.position;
-      const facing = pet.owner.avatar.rig.root.rotation.y;
+      const facing = pet.owner.facingAngle;
 
       // Aim for a spot behind the child, in the direction they are facing.
       const targetX = owner.x - Math.sin(facing) * PET_TRAIL;
@@ -1094,7 +1095,7 @@ export class NpcSystem implements GameSystem {
       if (distance > 0.12) pet.facing = Math.atan2(dx, dz);
 
       pet.root.position.copy(pet.position);
-      pet.root.rotation.y = pet.facing;
+      faceOnGround(pet.root, pet.facing);
 
       // A blob does not walk, it boings. Faster when it is hurrying.
       pet.bounce += dt * (5 + Math.min(distance, 1.5) * 6);
@@ -1118,7 +1119,7 @@ export class NpcSystem implements GameSystem {
    */
   private updatePinnedPets(dt: number, elapsed: number): void {
     for (const { member, owner } of this.pinnedPets) {
-      const facing = owner.avatar.rig.root.rotation.y;
+      const facing = owner.facingAngle;
       const targetX = owner.position.x - Math.sin(facing) * PET_TRAIL;
       const targetZ = owner.position.z - Math.cos(facing) * PET_TRAIL;
       member.target.set(targetX, owner.position.y, targetZ);
