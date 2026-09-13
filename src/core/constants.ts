@@ -96,6 +96,18 @@ export const GROUND_SPHERE_RADIUS = 220;
  * middle of the park — which is a thing to look at on screen, not to settle in
  * a comment.
  */
+/**
+ * The radius the park's authored extent is calibrated against.
+ *
+ * **Held equal to `GROUND_SPHERE_RADIUS` for now, which makes the scale exactly
+ * 1 and leaves the park at its authored size.** Growing it is blocked, not
+ * abandoned: at 220 m with the park grown 2.33x the layout solves but the
+ * rail-crossing planner fails on 7 of the 10 pool seeds with an identical
+ * error — the paths router draws a leg across the railway at a radius where no
+ * bridge site was ever proven, because the rail loop moved outward underneath
+ * it. That is a real piece of work in `train/crossings.ts` and the bridge
+ * planner, not a constant, and it has to be done before this can move.
+ */
 const PARK_REFERENCE_SPHERE_RADIUS = 1200;
 export const PARK_SURFACE_SCALE = Math.sqrt(
   PARK_REFERENCE_SPHERE_RADIUS / GROUND_SPHERE_RADIUS,
