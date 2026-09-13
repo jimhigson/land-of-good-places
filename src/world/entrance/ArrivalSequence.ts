@@ -9,6 +9,7 @@ import {
   turnTowards,
 } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
+import { faceOnGround } from '../up';
 import type { FrameContext } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
@@ -1842,7 +1843,23 @@ export class ArrivalSequence {
   private placeBus(at: number): void {
     const station = entranceRoadAt(at);
     this.bus.root.position.set(station.x, terrainHeight(station.x, station.z), station.z);
-    this.bus.root.rotation.y = entranceRoadFacing(at);
+    // **Standing on the road's own up, not on world `+Y`.** Jim, 13 September
+    // 2026: *"cat bus when children get off has one wheel in ground due to not
+    // using local 'up'."* The bus is 3.5 m across its wheels and the road runs
+    // out to 117 m from the park's centre, where the ground leans by about 14
+    // degrees — so a chassis held level to world `+Y` digs its downhill wheel
+    // roughly half a metre in while the uphill one hangs.
+    //
+    // Solved **here**, inside `placeBus`, and not once at the stop: this runs
+    // every frame of the approach and the pull-away, so the tilt follows the
+    // ground along the whole run. Solved once, the far end of the run would be
+    // wrong by exactly the mechanism being fixed.
+    //
+    // `faceOnGround` rather than a pre-multiply, because this is a per-frame
+    // write: `rotation.y =` rebuilds the quaternion from all three euler
+    // components, so a tilt left in `rotation.x`/`z` would be picked up next
+    // frame as if it had been asked for and leant again on top.
+    faceOnGround(this.bus.root, entranceRoadFacing(at));
   }
 
   private setPlayerPose(
