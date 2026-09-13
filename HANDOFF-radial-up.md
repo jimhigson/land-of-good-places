@@ -21,16 +21,24 @@ for this work.
 
 ## The links
 
-- `http://localhost:5391/view?camPos=0,22,0&camDir=0,-0.12,-1&timeOfDay=12:00`
-  — **the frame for judging the planet's size.** A free camera 22 m up at the
-  park's centre, looking south, frozen at noon. The treeline bends away on both
-  sides, the lamp posts and trunks fan outward.
-- `http://localhost:5391/spawn?pos=0,-95&facing=180` — standing at the boundary,
-  where the lean is strongest (13° there).
+**Jim's links come from the built preview on 5412, never the dev server.** See
+the section on that below — it is a standing rule now, not a preference.
 
-**Do not send a `/spawn` link to judge the planet.** Measured: at play zoom the
-camera is pitched steeply enough at the ground that **no horizon is in frame at
-all**. The size of the ball is only judgeable from a camera that can see one.
+- `http://localhost:5412/sky-cruiser` — **the planet.** Riding over the real
+  park, the world falls away to the side. This is the link he judges the radius
+  from.
+- `http://localhost:5412/arrive` — the cat bus pulls up with both wheels flat on
+  the road, the ground curving away either side. Add `?at=stepping-down` to skip
+  the twenty-second loading ride and land at the stop.
+- `http://localhost:5412/spawn?pos=0,-95&facing=180` — standing at the boundary,
+  where the lean is strongest.
+
+For your **own** iteration, on the dev server (5391):
+
+- `/view?camPos=0,22,0&camDir=0,-0.12,-1&timeOfDay=12:00` — a frozen free camera
+  22 m up at the park's centre. It is the right instrument for comparing two
+  radii side by side because nothing in it moves, and it is the wrong thing to
+  send Jim.
 
 ## The radius, judged by eye
 
@@ -44,7 +52,9 @@ Four frames from one fixed camera on the canonical seed, in
 | 350 | the world clearly domes; you see over the treeline all round |
 | 220 | a knoll — the park itself falls away and the disc reads as a lump |
 
-**Taken 400.** Jim gets the link and says bigger or smaller.
+**Taken 400 first; now at 300**, which Jim asked to see next. He has not answered
+yet. **Do not change the radius without him** — it is the one thing he is
+actively judging.
 
 ## The mechanism — three functions and one file
 
@@ -150,6 +160,83 @@ is `(0.004, 0.974, -0.225)` — **0.000° apart**, and 13.03° off world `+Y`.
 `pnpm run build` exit 0, `pnpm exec tsc --noEmit` exit 0. No gates run — Jim
 suspended them for this work.
 
+## Links to Jim come from a built preview, never the dev server
+
+Jim, 13 September 2026: *"the live reload keeps stopping my game - only give me
+stable urls with vite preview and a build."* Every link he had been given was a
+dev server, so each push reloaded the page under him mid-play.
+
+- **Preview on 5412** — `pnpm run build`, then
+  `pnpm exec vite preview --port 5412 --strictPort`. PID in
+  `/tmp/preview5412.pid`. **Leave it up; do not restart it while he is looking.**
+  Build again and tell the Overseer when there is something new worth showing.
+- **Dev server on 5391** is for your own iteration only.
+- The rule is in `CLAUDE.md` on `main` as of `49310060`.
+
+## The link that shows the planet is a ride, not a camera
+
+`/sky-cruiser`. It flies over the real park and the world visibly falls away.
+
+I got this wrong first time and it cost a round trip: I checked `/spawn` at play
+zoom, found no horizon in frame — which is true, the camera is pitched at the
+grass — and concluded the curve was not judgeable in-game. Jim rejected that,
+and he was right: **elevation was what was missing, not the projection.**
+`/ferris` is no good either, because the wheel is its own space with its own sky
+and no park in it. The cruiser's circuit passes *through* the castle for a few
+seconds where there is nothing to see; the curve reads on the open stretches.
+
+## Done since the first pass
+
+- **The castle and the hotel were floating**, and it was three height faults,
+  not a `spaceAt` fault — both shells were already leaning correctly (0.5° and
+  0.0° off radial) before I touched them. See the commit "The castle and the
+  hotel stand on the ground again" for the full account. Now: castle courtyard
+  floor +0.22 m over the grass, hotel crystals −0.26 to −0.31 m against the
+  0.30 m buried margin `hotelAssets.ts` documents.
+- **`standInPlot`** (`world/AnchorPlots.ts`) — stands a building's root on the
+  ground at a world coordinate inside a plot that is already leaning, by solving
+  the world transform and carrying it back through the plot's inverse. Use it
+  rather than subtracting world positions, which arrive rotated.
+- **`groundInPlot`** (same file) — "how high is the ground here, in this plot's
+  own leaning frame". Its control: **it returns zero everywhere on a bare cap.**
+  Fixed the water fight's lawn and the ferris wheel's feet and boarding deck,
+  which were each differencing two world heights and so driving the downhill
+  side in by twice the cap's drop.
+- **The rail race rides the sphere.** `route.base` was one absolute world `y`;
+  the ring follows a boundary running 58–110 m out, so it varied its clearance
+  by 11 m round its own circumference. Now `capHeight + route.clearance`, with
+  `baseAt(distance)` replacing `base`. Trestles measure **0.16° off radial**,
+  duck-bar posts **0.30°**, and the rail's height above the sphere varies by
+  6.12 m, which is the ride's own designed undulation and nothing else.
+- **The cat bus stands on the road's own up**, solved inside `placeBus` which
+  runs every frame, so the tilt follows the run. All four wheels within 1.9 cm
+  of the ground (worst dig-in 1.9 cm, spread 0.185 m — the waves under a 5 m
+  wheelbase). Before: the ground under the four contact points differs by
+  **2.43 m** and a yawed-only chassis puts all four wheel bottoms at one height.
+
+## Two traps this work has already sprung twice
+
+**1. A per-frame tilt must not be a pre-multiply.** `rotation.y = yaw` rebuilds
+the quaternion from all three euler components, so a tilt decomposed into
+`rotation.x`/`z` is inherited next frame and compounds. The player was
+*tumbling* and the screenshot that "proved" it working had caught her the right
+way up. `faceOnGround(object, yaw, pitch?)` is the per-frame form;
+`standOnSphere`/`standOnGround` are build-time only.
+
+**2. Build a multi-part shape in ONE frame, then lean the finished thing.** The
+trestles' fork nodes and trunk top are each derived from their neighbours.
+Solved from rails that had already been leant, the top inherited the rails'
+outward displacement while the foot stayed on its own ground, and the trunks
+came out at **28°** from `+Y` against a radial of 14 — leaning twice as far as
+the ground. `route.flatPointAt` exists for exactly this.
+
+**And the third, which is about instruments rather than code:** two of my own
+measurements were wrong before they were right. A sweep that grepped mesh names
+for `/rail|trunk|post/` silently mixed **tree** trunks in with the ride's; and I
+reported the arrival camera as broken from a probe taken at eight seconds when
+`?at=stepping-down` enters at elapsed 6.6 s and the shot ends at 9.1. Run a
+control on the instrument, and check *when* you sampled as well as what.
+
 ## NOT done, and why — read this before picking it up
 
 ### Collision, navigation and gravity stay in the flat frame
@@ -162,32 +249,38 @@ feet, and a 1.28 m hop on a 13° tilt drifts by centimetres. So this work tilts
 the **render frame** and leaves collision flat. If Jim ever wants a child to
 walk right round the ball, that is a different and much larger piece of work.
 
-### The rides are a real piece of work, not a one-line lean
+### The rides: what is left, and the shape of it
 
-Left standing vertical, and visible as such in the frame: the **rail race
-trestles**, the **ferris tower**, the **coaster/sky-cruiser pylons**.
+**Done:** the rail race (ring, trestles, duck bars) and the cat bus.
 
-The rail race is the instructive one. Its ring is at a single constant world
-height — `base = (max terrainHeight round the ring) + BASE_HEIGHT` — and its
-physics gradient `slopeAt` is a **closed form** that assumes that base is level.
-On a 400 m sphere a ring whose radius runs 58–110 m now varies its clearance
-above the ground by up to **11 m** round its own circumference. Fixing it
-properly means the base following the cap (which is also the physically right
-answer: the cap contributes no felt gradient, so `slopeAt` should keep returning
-the undulation alone) and `pointAt` displacing laterally — and that last part
-moves the route's horizontal geometry by up to ~5 m, which ripples into
-`postClearsEntranceRoad`, the boundary clearance checks and the invariants.
-**Do not bodge it.** Expect the failures four steps upstream, as every sphere
-bug on this branch has behaved.
+**Left standing on world `+Y`:** the **coaster and sky-cruiser pylons** and the
+**ginormous slide's legs**. Jim has ruled these in — *"ride supports need to be
+using local gravity, as does their slope and any other measure"* — so they are
+the job, not a ticket.
 
-### The arrival camera
+**The shape of the fix, worked out but not yet applied.** Both rides are a
+`CatmullRomCurve3` through control points solved in the flat frame. Do **not**
+map the control points: the physics, the clearance solves and the invariants all
+read `pointAt`, and because `placeOnSphere` is locally a rotation, a height
+above the ground and a gradient are both **preserved** by it — so the flat frame
+is already the right frame for every one of those. Instead add a `drawPointAt`
+(the flat point, leant) and use it for the **drawn** geometry only: the track
+ribbon and the top of each pylon, with the pylon's **foot** left at the flat
+`(x, z)`. That is the same split `flatPointAt`/`pointAt` gives the rail race,
+and it makes each pylon lean radially for free while nothing that solves or
+checks the ride moves at all. Lower risk than what the rail race needed, where
+the *base* was genuinely wrong and had to change.
 
-Jim's approved arrival still runs: it opens low at the pavement (`camera.y` 1.5),
-travels, and hands over to the ordinary camera at `y` 46.5, whose `up` is now
-radial. **I did not manage to photograph the door beat itself** — `?at=` fast
-forwards during the load, so both attempts landed after handover. Somebody with
-a frame-accurate capture should confirm the door framing, which was judged by
-eye and could have shifted.
+### The arrival camera is fine — do not go looking for a bug
+
+`arrivalCameraEngaged` is **true** from the first frame of
+`/arrive?at=stepping-down` through to elapsed 9.09 s, then releases normally.
+I reported it broken; I was wrong, and the reason is worth keeping: `?at=`
+enters at elapsed **6.61 s** and the shot has ~2.4 s left, so any probe or
+screenshot taken later than that sees the ordinary camera doing its job. To
+photograph the door beat, freeze it: poll until `game.arrivalCameraEngaged`,
+then set `game.timeScale = 0`. The shot itself is intact after the bus was
+tilted — outside the bus, facing its doors, children coming down the step.
 
 ### Everything the radius change moves
 
