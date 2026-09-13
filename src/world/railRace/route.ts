@@ -342,7 +342,6 @@ function undulation(lane: number, phase: number): number {
  * `pointAt`/`tangentAt`/`length`/`wrap` shape the other two routes expose, which
  * is what "our standard track path following" actually means here.
  */
-const flatPoint = /* @__PURE__ */ new Vector3();
 const spin = /* @__PURE__ */ new Quaternion();
 
 export class RailRaceRoute {
@@ -525,13 +524,37 @@ export class RailRaceRoute {
    * ground.
    */
   pointAt(lane: number, distance: number, target: Vector3 = this.scratch): Vector3 {
+    this.flatPointAt(lane, distance, target);
+    placeOnSphere(target, 0, target, spin);
+    return target;
+  }
+
+  /**
+   * The same point **before** it is leant onto the sphere — an (x, z) on the
+   * ground and a height straight up from it, in the flat frame the whole ride
+   * is authored in.
+   *
+   * This exists for anything that has to *build a shape* out of several route
+   * points rather than just read one. A trestle is the case: its trunk, its two
+   * fork nodes and its four branch tops are solved from each other, and solving
+   * them from points that have each already been leant by a different amount
+   * bakes the lean into the shape. Measured when that happened: the trunks came
+   * out at **28 degrees** from world `+Y` where the radial is 14 — leaning
+   * twice as far as the ground does, because the top had been displaced
+   * outward and the foot had not.
+   *
+   * So: build in this frame, then lean the finished assembly. `pointAt` is
+   * exactly this followed by that lean, so the two can never disagree about
+   * where a rail is.
+   */
+  flatPointAt(lane: number, distance: number, target: Vector3 = this.scratch): Vector3 {
     const sample = RING_PATH.sampleAt(distance);
     const offset = this.laneOffsets[lane] ?? 0;
-    const x = sample.x + sample.normalX * offset;
-    const z = sample.z + sample.normalZ * offset;
-    flatPoint.set(x, this.heightAt(lane, distance), z);
-    placeOnSphere(flatPoint, 0, target, spin);
-    return target;
+    return target.set(
+      sample.x + sample.normalX * offset,
+      this.heightAt(lane, distance),
+      sample.z + sample.normalZ * offset,
+    );
   }
 
   /**

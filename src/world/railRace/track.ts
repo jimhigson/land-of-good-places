@@ -20,7 +20,7 @@ import { hazardTapeTexture } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
-import { terrainHeight } from '../terrain';
+import { placeOnSphere, terrainHeight, tiltToSphere } from '../terrain';
 import { distanceToPath } from '../pathGraph';
 import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
@@ -693,24 +693,36 @@ export function buildRailRaceTrack(
     // nudge, which always moved the leg out from under the bar anyway.
     const at = route.wrap(route.startDistance + bar.at);
     route.outwardAt(at, outward);
-    rotation.setFromUnitVectors(ACROSS, outward);
     route.pointAt(bar.lane, at, point);
-    const barY = point.y + duckClearance;
+    // **The whole gantry leans with the track it straddles.** Its two posts and
+    // the bar between them are placed as offsets from a point on the rail —
+    // sideways along `outward`, upward by a clearance — and both of those
+    // directions lean out here. Left in world axes the posts stood dead
+    // vertical over a rail that does not: measured, 0.00 degrees from world
+    // `+Y` where the radial is 14.5. One tilt, taken at the rail, turns the
+    // offsets and the posts' own axis together so the frame stays square to the
+    // track.
+    tiltToSphere(point.x, point.y, point.z, barTilt);
+    rotation.setFromUnitVectors(ACROSS, outward).premultiply(barTilt);
     postLaneColour.set(LANE_COLOURS[bar.lane % LANE_COLOURS.length]!);
 
     for (const side of [-1, 1] as const) {
-      position.set(
-        point.x + outward.x * side * barHalfSpan,
-        point.y + postFootY + (postHeight * postStretch) / 2,
-        point.z + outward.z * side * barHalfSpan,
-      );
+      barOffset
+        .set(
+          outward.x * side * barHalfSpan,
+          postFootY + (postHeight * postStretch) / 2,
+          outward.z * side * barHalfSpan,
+        )
+        .applyQuaternion(barTilt);
+      position.copy(point).add(barOffset);
       matrix.compose(position, rotation, postScale);
       posts.setMatrixAt(postIndex, matrix);
       posts.setColorAt(postIndex, postLaneColour);
       postIndex += 1;
     }
 
-    position.set(point.x, barY, point.z);
+    barOffset.set(0, duckClearance, 0).applyQuaternion(barTilt);
+    position.copy(point).add(barOffset);
     matrix.compose(position, rotation, assetScale);
     bars.setMatrixAt(barIndex, matrix);
     // The sleeve's own geometry is already built at this ring's size (see
@@ -1272,7 +1284,10 @@ function newTrestleTree(): TrestleTree {
 }
 
 /** Scratch for {@link trestleTreeAt}; it is called once per candidate in a search loop. */
+const barTilt = new Quaternion();
+const barOffset = new Vector3();
 const treeScratch = new Vector3();
+const treeSpin = new Quaternion();
 
 /** See {@link TrestleTree}. Writes into `into` and returns it. */
 function trestleTreeAt(
@@ -1286,7 +1301,7 @@ function trestleTreeAt(
   const beamY = route.baseAt(at) - UNDULATION_REACH - BEAM_DROP;
   const plan = forkPlan(beamY - ground, route.laneSpacing);
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-    into.laneTops[lane]!.copy(route.pointAt(lane, at, treeScratch));
+    into.laneTops[lane]!.copy(route.flatPointAt(lane, at, treeScratch));
   }
   // A fork node sits under the midpoint of the pair it carries, and the trunk
   // under the midpoint of the two fork nodes — horizontally derived from the
@@ -1310,6 +1325,23 @@ function trestleTreeAt(
     .copy(into.forkNodes[0]!)
     .lerp(into.forkNodes[1]!, 0.5)
     .setY(Math.min(into.forkNodes[0]!.y, into.forkNodes[1]!.y) - plan.lower);
+
+  // **The whole tree is solved flat, then leant as one piece.**
+  //
+  // Every node above is derived from its neighbours — a fork node is the
+  // midpoint of the pair it carries, the trunk top the midpoint of the two fork
+  // nodes — so the tree only holds its shape if all of them are in the same
+  // frame while it is being solved. Built from already-leant rails instead, the
+  // top inherited the rails' outward displacement while the foot stayed on its
+  // own patch of ground, and the trunks came out at **28 degrees** from world
+  // `+Y` against a radial of 14: leaning twice as far as the ground they stand
+  // in. Leaning each node here, at its own (x, z), puts the trunk on the local
+  // up and lands the branch tops exactly on the rails, because the rails are
+  // `flatPointAt` followed by this same call.
+  for (const node of into.laneTops) placeOnSphere(node, 0, node, treeSpin);
+  for (const node of into.forkNodes) placeOnSphere(node, 0, node, treeSpin);
+  placeOnSphere(into.trunkTop, 0, into.trunkTop, treeSpin);
+
   into.ground = ground;
   return into;
 }
