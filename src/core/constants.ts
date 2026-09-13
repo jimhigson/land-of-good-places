@@ -8,12 +8,6 @@
 
 // ------------------------------------------------------------------ world
 
-/** Half-width of the playable garden, in metres. The garden is square. */
-export const GARDEN_HALF_SIZE = 62;
-
-/** Player is pushed back inside this radius from the centre (soft boundary). */
-export const GARDEN_PLAY_RADIUS = 58;
-
 /**
  * Where the ground stops.
  *
@@ -70,7 +64,59 @@ export const RIM_DROP = 17;
  * budget** — comfortably drivable, and gentle enough that a bus does not look
  * like it is climbing — gives `117.08 / 0.10 = 1171 m`, rounded up to:
  */
-export const GROUND_SPHERE_RADIUS = 300;
+export const GROUND_SPHERE_RADIUS = 220;
+
+/**
+ * **The park grows as the world shrinks.**
+ *
+ * Jim, 13 September 2026: *"since this makes the park smaller in terms of
+ * surface area, as we decrease the radius, increase the size of the park in
+ * other ways eg increase the target radius of the park on the surface of the
+ * sphere."*
+ *
+ * A smaller ball does not make the park smaller in metres — nothing about the
+ * park's own extent depends on the radius. What shrinks is the *world around
+ * it*: the horizon comes closer and less ground is visible past the boundary,
+ * so the park stops reading as a place in a landscape and starts reading as a
+ * lid on a knoll. This is the compensation, and it is a relationship rather
+ * than a second hand-set number so that the next radius change carries it along
+ * instead of needing the conversation again.
+ *
+ * **Square root, not linear.** The park's extent and the sphere's are two
+ * lengths. Holding their *ratio* fixed would shrink the park exactly as fast as
+ * the world and compensate for nothing; inverting it outright grows the park
+ * absurdly — 58 m becomes 316 m at a radius of 220. The geometric mean of the
+ * two is the middle course.
+ *
+ * **What it costs, stated plainly, because it is the trade being made.** The
+ * drop from the park's centre to its edge is about `a² / 2R`, so growing `a`
+ * while shrinking `R` steepens the park's *own* dome on both counts. Across the
+ * play radius that is 1.4 m at the reference, 22 m at 300, and 41 m at 220.
+ * Past some point the boundary wall falls below the horizon seen from the
+ * middle of the park — which is a thing to look at on screen, not to settle in
+ * a comment.
+ */
+const PARK_REFERENCE_SPHERE_RADIUS = 1200;
+export const PARK_SURFACE_SCALE = Math.sqrt(
+  PARK_REFERENCE_SPHERE_RADIUS / GROUND_SPHERE_RADIUS,
+);
+
+/** Half-width of the playable garden, in metres. The garden is square. */
+export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
+
+/**
+ * Player is pushed back inside this radius from the centre (soft boundary).
+ *
+ * **The one owner of how big the park is.** `boundary.ts`'s
+ * `CIRCULAR_PARK_AREA` is `pi * this²`, the generated outline's target area is
+ * that times `PARK_AREA_MULTIPLIER`, and the masonry, the terrain disc, the
+ * treeline band and every keep-out follow the outline. The gate follows too,
+ * through `GARDEN_HALF_SIZE` above — which matters, because `boundary.ts` warns
+ * that the gap between the outline's mean radius and a *pinned* gate is what
+ * the shell has to swell to cover. Scaling both together keeps the gate on the
+ * wall rather than stranding it inside a park that grew around it.
+ */
+export const GARDEN_PLAY_RADIUS = 58 * PARK_SURFACE_SCALE;
 
 /**
  * The steepest the ground is allowed to be anywhere the cat bus drives, as a
