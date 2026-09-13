@@ -17,7 +17,7 @@ import { PALETTE } from '../../core/palette';
 import { TAU, clamp01 } from '../../core/mathUtils';
 import { addOutline, disposeTree, solid, toonMaterial } from '../../art/style/materials';
 import { gameStore } from '../../state';
-import { terrainHeight } from '../../world/terrain';
+import { groundInPlot } from '../../world/AnchorPlots';
 import type { AnchorDefinition } from '../../world/anchors';
 import type { CollisionWorld } from '../../world/Collision';
 
@@ -154,7 +154,6 @@ export function createFerrisWheelProp(
       ? Math.atan2(entranceDz, -entranceDx)
       : WHEEL_YAW;
   root.rotation.y = wheelYaw;
-  const ground = terrainHeight(centreX, centreZ);
   /** Plot-local (x, z) to world (x, z), through the wheel's own yaw. */
   const toWorld = (lx: number, lz: number): [number, number] => [
     centreX + lx * Math.cos(wheelYaw) + lz * Math.sin(wheelYaw),
@@ -178,7 +177,13 @@ export function createFerrisWheelProp(
   for (const sx of [-1, 1] as const) {
     for (const sz of [-1, 1] as const) {
       const [footWorldX, footWorldZ] = toWorld(sx * footSpreadX, sz * footSpreadZ);
-      const footY = terrainHeight(footWorldX, footWorldZ) - ground;
+      // In the plot's own leaning frame, not as a difference of two world
+      // heights: the plot group's `+Y` is already the local up, so the sphere's
+      // fall across the wheel's footprint has been taken out by the parent and
+      // subtracting world heights would hand it back — driving the downhill
+      // feet into the grass by twice the cap's drop. What is left is the waves,
+      // which is what a foot should follow.
+      const footY = groundInPlot(centreX, centreZ, footWorldX - centreX, footWorldZ - centreZ);
 
       const top = new Vector3(0, HUB_Y, sz * axleHalf);
       const foot = new Vector3(sx * footSpreadX, footY + 0.1, sz * footSpreadZ);
@@ -336,7 +341,7 @@ export function createFerrisWheelProp(
   root.add(deck);
 
   const [deckWorldX, deckWorldZ] = toWorld(deckX, 0);
-  deck.position.y = terrainHeight(deckWorldX, deckWorldZ) - ground;
+  deck.position.y = groundInPlot(centreX, centreZ, deckWorldX - centreX, deckWorldZ - centreZ);
 
   const platform = solid(new Mesh(new RoundedBoxGeometry(3.2, 0.44, 4.2, 3, 0.12), woodMaterial));
   platform.position.y = 0.22;

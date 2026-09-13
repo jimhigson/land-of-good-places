@@ -14,7 +14,7 @@ import {
   type Object3D,
 } from 'three';
 import { TAU } from '../core/mathUtils';
-import { placeOnSphere, standOnSphere, terrainHeight, tiltToSphere } from './terrain';
+import { placeOnSphere, standOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
 import { ANCHORS, anchorGroupName, type AnchorDefinition, type AnchorId } from './anchors';
 import { createFerrisWheelProp, type FerrisWheelProp } from '../minigames/ferrisWheel/wheelProp';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -84,6 +84,37 @@ export function standInPlot(
   plot.updateMatrixWorld(true);
   root.position.copy(plot.worldToLocal(_standWorld));
   root.quaternion.copy(plot.getWorldQuaternion(_plotQuat).invert().multiply(_standQuat));
+}
+
+const _plotUp = /* @__PURE__ */ new Vector3();
+
+/**
+ * How high the real ground stands under a point in a plot, **in that plot's own
+ * leaning frame** — the number a prop authored around the plot's origin wants
+ * for its local `y`.
+ *
+ * The obvious `terrainHeight(world) - terrainHeight(centre)` is wrong now, and
+ * wrong by a lot. A plot group's `+Y` is already the local up, so the sphere's
+ * fall across the plot has been taken out by the parent's rotation; subtracting
+ * two world heights hands it back, and the prop is pushed into the ground by
+ * twice the cap's drop. Measured on the bare cap by the agent that found this
+ * on the plot pegs: a point 9 m out from a centre 50 m from the origin wants
+ * local `y` **+0.18** and the old expression asks for **−0.73**.
+ *
+ * What is left after the tilt is the part that is genuinely bumpy — the rolling
+ * waves — which is exactly what a prop should be following. On a bare cap this
+ * returns zero everywhere, and that is the control to check it against.
+ */
+export function groundInPlot(
+  centreX: number,
+  centreZ: number,
+  localX: number,
+  localZ: number,
+): number {
+  const centre = terrainHeight(centreX, centreZ);
+  upAt(centreX, centre, centreZ, _plotUp);
+  const rise = terrainHeight(centreX + localX, centreZ + localZ) - centre;
+  return _plotUp.x * localX + _plotUp.y * rise + _plotUp.z * localZ;
 }
 
 export class AnchorPlots implements GameSystem {
