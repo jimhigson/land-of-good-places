@@ -17,7 +17,7 @@ import {
   CART_EYE_HEIGHT,
   CART_SEAT_HEIGHT,
 } from './cart';
-import { railFrameAt, sweptRails, type RailFrame } from '../rail/sweptRail';
+import { drawnOnSphere, railFrameAt, sweptRails, type RailFrame } from '../rail/sweptRail';
 import { planCruiserPylons } from './pylons';
 import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/trestleGeometry';
 import type { PlannedCoaster } from './plan';
@@ -25,7 +25,7 @@ import { RideCamera } from '../../core/RideCamera';
 import { toonMaterial } from '../../art/style/materials';
 import { addOutline } from '../../art/style/materials';
 import { PALETTE } from '../../core/palette';
-import { terrainHeight } from '../terrain';
+import { placeOnSphere, terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import { resolveDismount } from '../dismount';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -347,7 +347,13 @@ export class Coaster implements GameSystem {
     // a **half**-offset, while the shared helper (and `train/track.ts` before
     // it) take `gauge` to mean the railway's own centre-to-centre. Hence 1.1
     // here: the same rails, the standard name for the number.
-    const railGeometries = sweptRails(this.route, {
+    // **Drawn on the sphere, solved flat.** `drawnOnSphere` leans every sampled
+    // point as it is drawn; the route object itself stays in the flat frame,
+    // which is where its clearance solve, its physics and its invariants all
+    // want to be. See that function for why the two frames give the same
+    // answers to every question except "where does this get drawn".
+    const drawn = drawnOnSphere(this.route);
+    const railGeometries = sweptRails(drawn, {
       gauge: RAIL_GAUGE,
       radius: 0.075,
       // Denser than the 1.4 m this used to sample at, and a real fix rather than
@@ -399,7 +405,7 @@ export class Coaster implements GameSystem {
 
     for (let i = 0; i < segments; i += 1) {
       const d = i * step;
-      railFrameAt(this.route, d, frame);
+      railFrameAt(drawn, d, frame);
       basis.makeBasis(frame.side, frame.up, frame.forward);
       rotation.setFromRotationMatrix(basis);
       matrix.compose(position.copy(mid).setY(mid.y - 0.12), rotation, one);
@@ -457,6 +463,11 @@ export class Coaster implements GameSystem {
     pylons.name = 'skyCruiser:pylons';
     pylons.count = pylonSpots.length;
     const stretch = new Vector3();
+    const PYLON_UP = new Vector3(0, 1, 0);
+    const pylonFoot = new Vector3();
+    const pylonFlatTop = new Vector3();
+    const pylonTop = new Vector3();
+    const pylonSpan = new Vector3();
     pylonSpots.forEach((spot, index) => {
       // Top at `ground + height` exactly, which `pylons.ts` derives as
       // `route.pointAt(d).y` — **the middle of the track**, the same rule the
@@ -469,9 +480,23 @@ export class Coaster implements GameSystem {
       // no overlap at all. A support whose contact with what it carries is
       // measured in millimetres and varies by pylon is not joined on purpose —
       // it is joined by luck, which is the fault Jim reported on the Rail Race.
-      position.set(spot.x, spot.ground + spot.height / 2, spot.z);
-      stretch.set(1, spot.height, 1);
-      matrix.compose(position, rotation.identity(), stretch);
+      // **A strut from its foot to where the track now is**, not a vertical
+      // cylinder. The track is drawn leant onto the sphere, so its centre line
+      // out at the ride's radius stands metres further out than the flat frame
+      // put it; a pylon left plumb to world `+Y` would no longer reach the
+      // thing it carries. The foot stays exactly where the planner found clear
+      // ground — `tryPlace` checked *that* square metre against the paving and
+      // the plots — and the lean falls out of the two ends, which is also how
+      // the Rail Race's trestles are drawn.
+      pylonFoot.set(spot.x, spot.ground, spot.z);
+      pylonFlatTop.set(spot.x, spot.ground + spot.height, spot.z);
+      placeOnSphere(pylonFlatTop, 0, pylonTop, rotation);
+      pylonSpan.subVectors(pylonTop, pylonFoot);
+      const pylonLength = pylonSpan.length() || spot.height;
+      position.copy(pylonFoot).addScaledVector(pylonSpan, 0.5);
+      rotation.setFromUnitVectors(PYLON_UP, pylonSpan.divideScalar(pylonLength));
+      stretch.set(1, pylonLength, 1);
+      matrix.compose(position, rotation, stretch);
       pylons.setMatrixAt(index, matrix);
       // Registered here rather than inside the planner, so a pure function stays
       // pure and the collision world gains a post exactly once.
