@@ -1,3 +1,4 @@
+import { Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { placedEntry } from '../parkLayout';
 import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
@@ -38,7 +39,7 @@ import {
 } from '../../core/constants';
 import { CASTLE_HALL, CASTLE_MALL, CASTLE_ROOF } from './floors';
 import { TAP_FINGER_METRES } from '../tapSpacing';
-import { terrainHeight } from '../terrain';
+import { terrainHeight, upAt } from '../terrain';
 
 /**
  * The floor plan of the big building, as data.
@@ -80,7 +81,7 @@ import { terrainHeight } from '../terrain';
 // --------------------------------------------------------------- geometry
 
 /** Ground-floor deck height in world units. Deck 0 is level; the site is not. */
-export const BUILDING_BASE_Y = highestTerrainUnderFootprint() + BUILDING_PLINTH;
+export const BUILDING_BASE_Y = deckClearanceOverFootprint() + BUILDING_PLINTH;
 
 /**
  * The interior's own ground, a little below its ground-floor deck.
@@ -178,15 +179,45 @@ export function facadeZ(localZ: number): number {
   return BUILDING_CENTRE_Z + localZ;
 }
 
-function highestTerrainUnderFootprint(): number {
-  let highest = -Infinity;
+/**
+ * How high the castle's ground-floor deck has to sit so that no corner of it is
+ * buried in the grass — measured **in the deck's own tilted frame**.
+ *
+ * It used to be "the highest terrain anywhere under the footprint", which was
+ * right while the deck was a level plane on a nearly level park: the worst
+ * corner was simply the highest ground. Since the deck leans to the local
+ * surface normal with everything else outdoors, that rule **double-counts the
+ * sphere's own fall** — the ground drops 4 m across a 24 m footprint at this
+ * distance from the park's centre, and every millimetre of that drop is already
+ * taken out by the tilt. Taking the maximum anyway left the castle hanging
+ * roughly two metres over the grass, which is what Jim saw: *"the castle and
+ * hotel, and maybe some others are now floating in space above the earth."*
+ *
+ * So the question is asked against the deck rather than against world `+Y`. The
+ * deck is the plane through the footprint's centre with the local up as its
+ * normal; `residual` is how far the real ground at a sample stands **proud of
+ * that plane**, which on a bare cap is zero everywhere and in practice is just
+ * the rolling waves. The largest residual is what the deck must clear.
+ *
+ * The samples are of the terrain that gets drawn, not of the rule that draws
+ * it, and the centre is included, so the answer can never be below the ground
+ * at the point the building is anchored to.
+ */
+function deckClearanceOverFootprint(): number {
+  const centre = terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z);
+  const up = upAt(BUILDING_CENTRE_X, centre, BUILDING_CENTRE_Z, new Vector3());
+  let worst = 0;
   for (let x = -BUILDING_HALF_X; x <= BUILDING_HALF_X; x += 1.5) {
     for (let z = -BUILDING_HALF_Z; z <= BUILDING_HALF_Z; z += 1.5) {
-      const h = terrainHeight(BUILDING_CENTRE_X + x, BUILDING_CENTRE_Z + z);
-      if (h > highest) highest = h;
+      const ground = terrainHeight(BUILDING_CENTRE_X + x, BUILDING_CENTRE_Z + z);
+      // Where the tilted deck sits over this sample: the plane through the
+      // centre with `up` as its normal, solved for y.
+      const deck = centre - (up.x * x + up.z * z) / up.y;
+      const residual = ground - deck;
+      if (residual > worst) worst = residual;
     }
   }
-  return highest;
+  return centre + worst;
 }
 
 // ------------------------------------------------------------------ holes

@@ -29,7 +29,8 @@ import { RideCamera } from '../../core/RideCamera';
 import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
-import type { AnchorPlots } from '../AnchorPlots';
+import { standInPlot, type AnchorPlots } from '../AnchorPlots';
+import { terrainHeight } from '../terrain';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
 
 import { BallPit } from './BallPit';
@@ -919,13 +920,20 @@ export class Building implements GameSystem {
     registerCastleTowerCollision(collision);
 
     const plot = anchorPlots.getGroup('building');
-    const plotAnchor = plot.position;
-    this.gardenRoot.position.set(
-      BUILDING_CENTRE_X - plotAnchor.x,
-      BUILDING_BASE_Y - plotAnchor.y,
-      BUILDING_CENTRE_Z - plotAnchor.z,
-    );
     plot.add(this.gardenRoot);
+    // **Stood on the ground under the facade's own centre**, not offset from the
+    // plot's anchor by a world-space vector. The plot leans now, so a raw
+    // subtraction of world positions gets turned by the tilt on its way in —
+    // the facade is nudged `BUILDING_CENTRE_NUDGE` off the anchor, and at the
+    // park's edge that leaked about half a metre into the castle's height. See
+    // `standInPlot`, which also owns the same fix for the hotel.
+    standInPlot(
+      plot,
+      this.gardenRoot,
+      BUILDING_CENTRE_X,
+      BUILDING_CENTRE_Z,
+      BUILDING_BASE_Y - terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z),
+    );
     anchorPlots.setPlaceholderVisible('building', false);
 
     const pitPlot = anchorPlots.getGroup('ballPit');

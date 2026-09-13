@@ -21,7 +21,7 @@ import { lerp, Rng, smoothstep } from '../../core/mathUtils';
 import { mosaicTexture } from '../../core/textures';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld, WallCollider } from '../Collision';
-import type { AnchorPlots } from '../AnchorPlots';
+import { standInPlot, type AnchorPlots } from '../AnchorPlots';
 import type { CreatureHandle } from '../../art/style/asset';
 import type { Player } from '../../entities/Player';
 import type { InteriorControls } from '../building';
@@ -1251,7 +1251,24 @@ export class Hotel implements GameSystem {
     this.gardenRoot.name = 'the-land-hotel-outside';
 
     const group = anchorPlots.getGroup('hotel');
-    this.gardenRoot.position.set(plot.x - group.position.x, -group.position.y, plot.z - group.position.z);
+    // **Zero, not `-group.position.y`.** The plot's own origin *is* the ground
+    // under the hotel — `AnchorPlots` sets it from `terrainHeight` and leans it
+    // to the local up — so a local `y` of zero stands the tower on it.
+    //
+    // Cancelling the plot's height instead pinned the tower to **absolute world
+    // y = 0**, which is the old flat park's ground plane and nothing at all on
+    // a sphere. It read as correct for as long as the ground near the hotel
+    // happened to be near zero: on the 1200 m sphere it was 0.76 m down there,
+    // which the crystals' own skirt exactly covered. Shrink the sphere to 400 m
+    // and the ground drops to 2.3 m down while the tower stays at zero — Jim,
+    // 13 September 2026: *"the castle and hotel, and maybe some others are now
+    // floating in space above the earth."* Measured before the fix: the lowest
+    // crystal sat **1.75 m** clear of the grass.
+    //
+    // `standInPlot` solves the world transform first and carries it back
+    // through the plot's inverse, so neither the plot's tilt nor any offset
+    // between the plot's anchor and the tower's own spot can leak into height.
+    standInPlot(group, this.gardenRoot, plot.x, plot.z, 0, 0);
     group.add(this.gardenRoot);
     anchorPlots.setPlaceholderVisible('hotel', false);
 

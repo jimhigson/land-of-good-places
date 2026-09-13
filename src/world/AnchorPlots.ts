@@ -11,6 +11,7 @@ import {
   Quaternion,
   TorusGeometry,
   Vector3,
+  type Object3D,
 } from 'three';
 import { TAU } from '../core/mathUtils';
 import { placeOnSphere, standOnSphere, terrainHeight, tiltToSphere } from './terrain';
@@ -43,6 +44,48 @@ import type { CollisionWorld } from './Collision';
  * The group sits at the plot centre with its origin on the ground, so children
  * can be authored around (0, 0, 0).
  */
+const _standWorld = /* @__PURE__ */ new Vector3();
+const _standQuat = /* @__PURE__ */ new Quaternion();
+const _plotQuat = /* @__PURE__ */ new Quaternion();
+const _standFlat = /* @__PURE__ */ new Vector3();
+
+/**
+ * Stand a building's own root **on the ground at a world coordinate**, inside a
+ * plot group that is already positioned and already leaning.
+ *
+ * The obvious line — `root.position.set(worldX - plot.position.x, someY -
+ * plot.position.y, worldZ - plot.position.z)` — is wrong twice over now, and
+ * both mistakes shipped:
+ *
+ * - **A local offset is read in the plot's rotated frame.** Subtracting world
+ *   positions gives a world-space vector, and handing that to a tilted parent
+ *   turns it by the tilt. The castle's facade is nudged 3.54 m off its anchor,
+ *   and at the park's edge that leaked about half a metre straight into its
+ *   height.
+ * - **Cancelling the plot's own `y` pins the thing to world zero.** That is the
+ *   old flat park's ground plane and nothing at all on a sphere. It is exactly
+ *   how the hotel came to be hanging 1.75 m over the grass.
+ *
+ * So the world transform is solved first — `placeOnSphere` at the building's
+ * real (x, z), which is the same map every tree and lamp post goes through —
+ * and then carried back through the plot's inverse. Same pattern as the plot
+ * pegs above, and for the same reason.
+ */
+export function standInPlot(
+  plot: Object3D,
+  root: Object3D,
+  worldX: number,
+  worldZ: number,
+  heightAboveGround: number,
+  yaw = 0,
+): void {
+  _standFlat.set(worldX, terrainHeight(worldX, worldZ) + heightAboveGround, worldZ);
+  placeOnSphere(_standFlat, yaw, _standWorld, _standQuat);
+  plot.updateMatrixWorld(true);
+  root.position.copy(plot.worldToLocal(_standWorld));
+  root.quaternion.copy(plot.getWorldQuaternion(_plotQuat).invert().multiply(_standQuat));
+}
+
 export class AnchorPlots implements GameSystem {
   readonly name = 'anchorPlots';
   readonly group = new Group();
