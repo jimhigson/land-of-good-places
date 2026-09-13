@@ -1283,7 +1283,7 @@ function trestleTreeAt(
   into: TrestleTree,
 ): TrestleTree {
   const ground = terrainHeight(footX, footZ);
-  const beamY = route.base - UNDULATION_REACH - BEAM_DROP;
+  const beamY = route.baseAt(at) - UNDULATION_REACH - BEAM_DROP;
   const plan = forkPlan(beamY - ground, route.laneSpacing);
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     into.laneTops[lane]!.copy(route.pointAt(lane, at, treeScratch));
@@ -1786,14 +1786,15 @@ function buildArch(
 
   // The feet spring from just below the lowest rail, so the arch reads as
   // growing out of the track rather than out of the ground far below it.
-  const footY = route.base - UNDULATION_REACH - 1.4;
+  const archBase = route.baseAt(at);
+  const footY = archBase - UNDULATION_REACH - 1.4;
   // The highest the rails ever get, which is the one a rider has least room
   // over. Vertical clearances are deliberately *not* scaled by the ring: a
   // park-scale child on the walk-past ring needs her head height under this
   // just as much as a toy-scale one does on the race ring, and the race ring's
   // riders are the taller of the two, so one absolute height serves both.
   const clearHeight =
-    route.base + UNDULATION_REACH + RIDER_HEAD_TOP_AT_PARK_SCALE * RIDE_SCALE + ARCH_HEADROOM - footY;
+    archBase + UNDULATION_REACH + RIDER_HEAD_TOP_AT_PARK_SCALE * RIDE_SCALE + ARCH_HEADROOM - footY;
   // Half the width the arc must still be that high at: the outermost lane's
   // centre, plus room for a rider who is not a line.
   const halfWidth = route.laneSpan / 2 + ARCH_SHOULDER_ROOM;

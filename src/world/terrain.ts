@@ -85,6 +85,28 @@ export function terrainHeight(x: number, z: number): number {
  * rather than differencing world heights and having the cap's tilt come back
  * in with the answer.
  */
+/**
+ * The sphere on its own — the ground with the rolling waves switched off.
+ *
+ * `terrainHeight` is this plus {@link groundWaves} leant onto it, and the split
+ * matters to anything that **flies at a constant height**. A ride's rails are
+ * not laid on the grass; they are held a fixed distance above the world, and
+ * "the world" here is the sphere, not the bumps. A ring that followed
+ * `terrainHeight` would ripple with every hummock under it; one held at a
+ * constant world `y` — which is what the rail race did while the park was
+ * nearly flat — varies its clearance by **11 m** round its own circumference
+ * once the sphere is 400 m, because the boundary it follows runs anywhere from
+ * 58 m to 110 m out. This is the middle answer, and the only one that means
+ * "the same height above the world all the way round".
+ */
+export function capHeight(x: number, z: number): number {
+  const distanceSquared = x * x + z * z;
+  return (
+    Math.sqrt(Math.max(0, GROUND_SPHERE_RADIUS * GROUND_SPHERE_RADIUS - distanceSquared)) -
+    GROUND_SPHERE_RADIUS
+  );
+}
+
 export function groundWaves(x: number, z: number): number {
   const broad = Math.sin(x * 0.055) * Math.cos(z * 0.048) * 0.62;
   const medium = Math.sin(x * 0.108 + 1.7) * Math.sin(z * 0.094 - 0.6) * 0.3;

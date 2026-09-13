@@ -1,6 +1,6 @@
-import { Vector3 } from 'three';
+import { Quaternion, Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
-import { terrainHeight } from '../terrain';
+import { capHeight, placeOnSphere, terrainHeight } from '../terrain';
 import { PARK_LAYOUT, placedEntry } from '../parkLayout';
 import { RingPath } from './ringPath';
 
@@ -342,6 +342,9 @@ function undulation(lane: number, phase: number): number {
  * `pointAt`/`tangentAt`/`length`/`wrap` shape the other two routes expose, which
  * is what "our standard track path following" actually means here.
  */
+const flatPoint = /* @__PURE__ */ new Vector3();
+const spin = /* @__PURE__ */ new Quaternion();
+
 export class RailRaceRoute {
   /**
    * How big this ring is built: `1` for the walk-past ring, {@link RIDE_SCALE}
@@ -395,7 +398,7 @@ export class RailRaceRoute {
    * even if it is close — and so that both rings share one base exactly (see
    * {@link WIDEST_HALF_SPAN}).
    */
-  readonly base: number;
+  readonly clearance: number;
 
   private readonly scratch = new Vector3();
 
@@ -416,15 +419,25 @@ export class RailRaceRoute {
       // line and not just this ring's own lanes: the outer rails can be over
       // higher ground than the middle is, and both rings must agree on the
       // answer. Offsets are along the local normal now rather than radial.
+      //
+      // **The waves, not the ground.** This used to take the highest
+      // `terrainHeight` and use it as an absolute world `y` for the whole ring,
+      // which held the ride level in a park that was nearly level. It is a
+      // sphere now, and the boundary this ring follows runs from 58 m to 110 m
+      // out — so a level ring varies its clearance over the ground by **11 m**
+      // round its own circumference, riding high on one side and low on the
+      // other. The ring rides the sphere instead (see `heightAt`), and what is
+      // solved here is the part that is genuinely a constant: how far the
+      // rolling waves stand proud of the sphere at their worst, so the promised
+      // clearance still holds at the worst point rather than on average.
       for (const offset of [-WIDEST_HALF_SPAN, 0, WIDEST_HALF_SPAN]) {
-        const height = terrainHeight(
-          sample.x + sample.normalX * offset,
-          sample.z + sample.normalZ * offset,
-        );
-        if (height > highest) highest = height;
+        const x = sample.x + sample.normalX * offset;
+        const z = sample.z + sample.normalZ * offset;
+        const proud = terrainHeight(x, z) - capHeight(x, z);
+        if (proud > highest) highest = proud;
       }
     }
-    this.base = highest + BASE_HEIGHT;
+    this.clearance = highest + BASE_HEIGHT;
 
     // The arch goes at the bearing of the booth that boards the ride, so the
     // rails a child can see from the queue are the rails she is about to start
@@ -476,20 +489,49 @@ export class RailRaceRoute {
     return (-distance / this.length) * TAU;
   }
 
-  /** Height of a lane's rail head, in world metres. */
-  heightAt(lane: number, distance: number): number {
-    return this.base + undulation(lane, this.phaseAt(distance));
+  /**
+   * The level this ring's lanes undulate about, **at a point on it** — what
+   * `base` used to be as a single number.
+   *
+   * It has to be a function of position now: the ring is held a constant height
+   * above the *sphere*, so its world `y` falls away round the loop exactly as
+   * the world does. Anything that used to read `route.base` as "the height of
+   * the ride" wants this instead, asked at its own arc length.
+   */
+  baseAt(distance: number, lane = 0): number {
+    const sample = RING_PATH.sampleAt(distance);
+    const offset = this.laneOffsets[lane] ?? 0;
+    return (
+      capHeight(sample.x + sample.normalX * offset, sample.z + sample.normalZ * offset) +
+      this.clearance
+    );
   }
 
-  /** A point on a lane's rail. */
+  /** Height of a lane's rail head, in world metres. */
+  heightAt(lane: number, distance: number): number {
+    return this.baseAt(distance, lane) + undulation(lane, this.phaseAt(distance));
+  }
+
+  /**
+   * A point on a lane's rail.
+   *
+   * **Lifted along the local up, not along world `+Y`.** The lane's centre line
+   * and its lateral offset are authored on the ground; the rail is then a
+   * height above that ground, and out here that height leans. At the ring's
+   * radius it puts the rail about **3.7 m further out** than the flat frame did
+   * — which is not an error to be corrected but the whole of what Jim asked
+   * for, and it is what makes a trestle drawn from its foot up to the rail lean
+   * away from the park's centre instead of standing at an angle to its own
+   * ground.
+   */
   pointAt(lane: number, distance: number, target: Vector3 = this.scratch): Vector3 {
     const sample = RING_PATH.sampleAt(distance);
     const offset = this.laneOffsets[lane] ?? 0;
-    return target.set(
-      sample.x + sample.normalX * offset,
-      this.heightAt(lane, distance),
-      sample.z + sample.normalZ * offset,
-    );
+    const x = sample.x + sample.normalX * offset;
+    const z = sample.z + sample.normalZ * offset;
+    flatPoint.set(x, this.heightAt(lane, distance), z);
+    placeOnSphere(flatPoint, 0, target, spin);
+    return target;
   }
 
   /**

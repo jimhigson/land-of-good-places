@@ -55,9 +55,13 @@ export function archFeet(route: RailRaceRoute): ArchFoot[] {
   const outward = route.outwardAt(at, new Vector3());
   const sample = route.path.sampleAt(at);
 
-  const footY = route.base - UNDULATION_REACH - 1.4;
+  // `baseAt(at)`, not a single `base`: the ring rides the sphere, so the level
+  // the lanes undulate about is a different world height at every bearing. The
+  // arch stands at one bearing, so it asks at its own.
+  const archBase = route.baseAt(at);
+  const footY = archBase - UNDULATION_REACH - 1.4;
   const clearHeight =
-    route.base +
+    archBase +
     UNDULATION_REACH +
     RIDER_HEAD_TOP_AT_PARK_SCALE * RIDE_SCALE +
     ARCH_HEADROOM -

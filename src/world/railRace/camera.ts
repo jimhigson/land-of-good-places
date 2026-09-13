@@ -640,7 +640,7 @@ export class RaceCamera {
     const offset = riderOffset(this.route);
     return into.set(
       sample.x + sample.normalX * offset,
-      this.route.base + 0.6 + RIDER_RIDE_HEIGHT,
+      this.route.baseAt(s) + 0.6 + RIDER_RIDE_HEIGHT,
       sample.z + sample.normalZ * offset,
     );
   }
