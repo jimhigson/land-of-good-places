@@ -23,10 +23,14 @@ are the lead's, not mine** — do not touch them.
 | — | `scripts/measure-fill-elevation.mts` | the measurement behind it, re-runnable |
 | §3.1 `flowerSparkle.ts` | `src/art/effects/flowerSparkle.ts`, `src/world/up.ts` | `tiltFor`, and the pick flourish plays in the flower's frame |
 | §3.1 `puffs.ts`, `dustPuff.ts` | both | smoke and heel dust leave the ground they were kicked off |
-| §3.1 `ActionChips.ts:210`, `interact.ts:254` **and §2.4 #2** | `ActionChips.ts`, `interact.ts`, `tapSpacing.ts`, `check-tap-spacing.mts`, `invariants.ts` | `sameStorey` is one function and asks the planet |
+| §3.1 `ActionChips.ts:210` | `src/ui/ActionChips.ts` | the action chips anchor above the thing |
 | §3.4 | `src/core/constants.ts`, `src/world/Garden.ts` | `TERRAIN_RADIUS` deleted |
 
-**Still open in my area**: nothing. §3.1's `rainbowRing.ts:140,290,317` and
+**Left open deliberately**: §3.1's `interact.ts:254` (and with it §2.4 #2). I
+closed it, then reverted it — see below. The row is still open and its right
+home is the checks side.
+
+**Still open otherwise in my area**: nothing. §3.1's `rainbowRing.ts:140,290,317` and
 `tapMarker.ts` are the lead's. §3.3 (coaster/castleWindows clearance) is not
 world UI and was left alone.
 
@@ -36,13 +40,18 @@ world UI and was left alone.
    of `tiltToSphere`: the rotation from the flat authoring frame into the frame
    at a world point, the identity indoors. Four effects use it. The lead owns
    shared helpers; if it wants this shaped differently, it is one function.
-2. **`sameStorey` moved from `tapSpacing.ts` into `interact.ts`** and its
-   signature changed from `(aY, bY)` to `(ax, ay, az, bx, by, bz)`.
-   `tapSpacing.ts` re-exports it, so the name still imports from there, but the
-   **four call sites in `scripts/check-tap-spacing.mts` and
-   `test/procgen/invariants.ts` were updated in the same commit**. Whoever owns
-   §2 of the inventory should know that row is closed, and that a rebase of
-   those two files will conflict here.
+2. ~~`sameStorey` moved into `interact.ts`~~ — **done and then reverted.**
+   `interact.ts` **cannot import `world/spaces.ts`**: the chain is `spaces` →
+   `building/layout` → `parkLayout` (seed-dependent), and `building/layout` →
+   `tapSpacing` → back into `interact`. A static import from `test/procgen`
+   then loads the park manifest before the seed is set and `parkFacts` throws
+   at collection time. Measured: `test:procgen` went from the base's
+   `49 failed | 269 passed | 279 skipped` to `132 passed | 465 skipped` — no
+   failures, 137 fewer tests run, nothing red. The fix belongs one layer out,
+   or behind a `spaces`-free owner of "which space is this"; the note is
+   written into `ZONE_HEIGHT_TOLERANCE`'s doc comment. `scripts/`,
+   `check-tap-spacing.mts` and `invariants.ts` are untouched by this branch, so
+   there is no conflict waiting for whoever takes §2.4 #2.
 
 ## What has NOT been verified, and why
 
@@ -66,3 +75,27 @@ world UI and was left alone.
 - **`DayNight`'s terminator is Jim's call, not an engineer's** (inventory §3.2,
   third row). Deliberately untouched. The outer park sits in true geometric
   shadow for hours while `nightFactorValue` says noon.
+
+
+## Verified
+
+- **`tsc --noEmit`** and **`typecheck:test`** clean.
+- **`pnpm run test:procgen`**: `49 failed | 269 passed | 279 skipped`, failing
+  set **identical to the base's**, name for name and count for count (the base
+  is red before this branch — inventory §0, the `railD 0.0` crossing throw).
+  Compared by name rather than by count, because a count cannot see a swap.
+- **In a browser**, two dev servers side by side (base on 5419, this branch on
+  5418), `/spawn?seed=428&pos=118,0&facing=270` — 118 m out, 30° of lean:
+  - the park builds, no new console errors (only the base's own `skyCruiser`
+    warnings, byte-identical on both);
+  - the grass at the rim reads brighter after the hemisphere fix — sampled
+    mean green **111.5 → 114.9** over the same patch;
+  - running leaves a proper trail of dust puffs lying flat on the leaned grass.
+- **The fill-light direction is proved by measurement, not by eye**:
+  `scripts/measure-fill-elevation.mts`, sun 30° up, elevation above the *local*
+  horizon **+32.0° / +22.1° / +6.2° / −11.5°** at 0/40/100/157 m before, and
+  **+32.0°** at every radius after.
+- **Not shown in a frame**: the fill's worst case is a low sun, and `/spawn`
+  cannot freeze the clock while `/view` has no player for `followPlayer` to
+  read — so the blue underneath-lighting itself was not photographed. The
+  measurement above is the evidence for that row.
