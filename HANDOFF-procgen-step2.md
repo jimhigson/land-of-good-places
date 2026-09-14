@@ -718,3 +718,14 @@ Architect is resumable and asked directly** for rulings; the Overseer hears
 only scope changes and things needing Jim. Browser/QA at the end, seeds
 proposed from the 0..15 measurement. Do not start until the Overseer says
 the sphere is on `main`.
+
+**#584 takeover, pre-read (14 Sep):** two commits, 17 files. What matters:
+`readSeed` is one line (`parsed > 0` → `>= 0`, "seed 0 is a real park") —
+cherry-pick that alone into the measurement worktree for the 0..15
+inventory. The rest conflicts with this branch by design: its
+`check-swept-bus.mts` (+58) and `swept-bus-baseline.mts` re-take a ratchet
+baseline this branch deleted (fail-on-any), so those hunks are **dropped,
+not merged**; its `parkSeedPool.ts`/`parkWarp.ts` (pool → 0..15, warp
+vectors gone) and `seed-0..5.test.ts` are the substance to carry, re-cut
+against the sphere's own retirements (5, 115, 225, 346 already gone;
+267/288 gone on `main`). Take it over only at step 6, once 0..15 build.
