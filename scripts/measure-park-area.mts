@@ -240,28 +240,43 @@ async function main(): Promise<void> {
   if (args.includes('--control')) return;
 
   const constants = await import('../src/core/constants.ts');
+  const { PARK_SEED_POOL } = await import('../src/world/parkSeedPool.ts');
   const sphere = constants.GROUND_SPHERE_RADIUS;
-  const seedArg = args.find((a) => a.startsWith('--seed='));
-  const seed = seedArg ? Number(seedArg.slice('--seed='.length)) : 0;
 
-  console.log(`seed ${seed}, GROUND_SPHERE_RADIUS ${sphere} m\n`);
-  console.log(
-    'reference   scale   play r    gate r     planar m2    surface m2   max r   edge drop',
-  );
-  const references = [sphere, 300, 400, 600, 1200];
-  for (const reference of references) {
-    const scale = Math.sqrt(reference / sphere);
-    try {
-      const m = measure(seed, scale, sphere);
-      console.log(
-        `${String(reference).padStart(9)}  ${scale.toFixed(4)}  ` +
-          `${m.playRadius.toFixed(1).padStart(6)}  ${m.gateRadius.toFixed(1).padStart(7)}  ` +
-          `${m.planarArea.toFixed(0).padStart(11)}  ${m.surfaceArea.toFixed(0).padStart(11)}  ` +
-          `${m.maxRadius.toFixed(1).padStart(6)}  ${m.edgeDrop.toFixed(1).padStart(8)}`,
-      );
-    } catch (error) {
-      console.log(`${String(reference).padStart(9)}  ${scale.toFixed(4)}  threw: ${(error as Error).message.slice(0, 80)}`);
+  // The three scales worth putting side by side: the park as authored on flat
+  // ground (the baseline Jim is asking to be given back), the park as shipped
+  // at 220 m, and the park as this branch now builds it.
+  const rows: (readonly [string, number])[] = [
+    ['authored, flat', 1],
+    ['as shipped (sqrt(1200/R))', Math.sqrt(1200 / sphere)],
+    ['this branch', constants.PARK_SURFACE_SCALE],
+  ];
+
+  console.log(`GROUND_SPHERE_RADIUS ${sphere} m, seeds from PARK_SEED_POOL\n`);
+  for (const [label, scale] of rows) {
+    let planar = 0;
+    let surface = 0;
+    let worstMaxRadius = 0;
+    let built = 0;
+    for (const seed of PARK_SEED_POOL) {
+      try {
+        const m = measure(seed, scale, sphere);
+        planar += m.planarArea;
+        surface += m.surfaceArea;
+        worstMaxRadius = Math.max(worstMaxRadius, m.maxRadius);
+        built += 1;
+      } catch {
+        // A boundary that will not solve at this scale is itself a result.
+      }
     }
+    const first = measure(PARK_SEED_POOL[0] as number, scale, sphere);
+    console.log(
+      `${label.padEnd(26)} scale ${scale.toFixed(4)}  play r ${first.playRadius.toFixed(2).padStart(6)} m  ` +
+        `mean planar ${(planar / built).toFixed(0).padStart(6)} m2  ` +
+        `mean surface ${(surface / built).toFixed(0).padStart(6)} m2  ` +
+        `worst max r ${worstMaxRadius.toFixed(1).padStart(6)} m` +
+        (worstMaxRadius > sphere ? '  <-- PAST THE HORIZON' : ''),
+    );
   }
 }
 

@@ -9523,6 +9523,75 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
 };
 
 /**
+ * **The park fits on its own sphere.**
+ *
+ * The ground is a spherical cap of radius `GROUND_SPHERE_RADIUS`, so there is
+ * simply **no ground at all** past that horizontal distance: the cap's drop
+ * goes to infinity and the surface turns vertical on the way. A park whose
+ * boundary reaches further than its own sphere is a park with its wall off the
+ * edge of the world, and nothing else in the suite asks that question — every
+ * other clause measures things *relative to* the boundary, so all of them stay
+ * happily green while the boundary itself is nowhere.
+ *
+ * **This is not hypothetical; it shipped.** On 13 September the park's extent
+ * was made a ratio against a hand-set `PARK_REFERENCE_SPHERE_RADIUS` of 1200,
+ * which at `GROUND_SPHERE_RADIUS = 220` scaled the park by 2.335x. Measured
+ * across the pool, the worst boundary then reached **252.8 m on a 220 m
+ * sphere**. The commit's own doc comment said the scale was "exactly 1". Jim
+ * found it by looking at it — *"the park now feels too big/sparse"* — which is
+ * the expensive way to find a thing a check can find in a second.
+ *
+ * **Where the threshold comes from.** The hard geometric wall is `maxRadius <
+ * GROUND_SPHERE_RADIUS`, but a park whose edge sits just inside that is a
+ * boundary wall standing on a near-vertical cliff. So this asserts the gradient
+ * *at the park's furthest edge* — `d / R` on a sphere, the same formula
+ * `BUS_MAX_GRADE` is spent against — stays under 45°, which is `R / sqrt(2)`.
+ * That is deliberately a floor rather than a target: it is where the shape is
+ * *wrong*, not where it is ideal. Today's park clears it with room (the number
+ * is printed on every run, green or not, so the margin cannot quietly erode
+ * without anyone seeing it).
+ */
+const theParkFitsOnItsOwnSphere: Invariant = (facts) => {
+  const fouls: string[] = [];
+  const reach = facts.boundary.maxRadius;
+
+  if (!Number.isFinite(reach) || reach <= 0) {
+    return [
+      `the park boundary reports maxRadius ${reach}, so this clause cannot tell ` +
+        'whether the park fits on its sphere and would otherwise pass vacuously',
+    ];
+  }
+
+  // The steepest ground any part of the park stands on, as a gradient.
+  const edgeGrade = reach / Math.sqrt(Math.max(0, GROUND_SPHERE_RADIUS ** 2 - reach ** 2));
+  const limit = GROUND_SPHERE_RADIUS / Math.SQRT2;
+
+  process.stderr.write(
+    `  theParkFitsOnItsOwnSphere: boundary reaches ${reach.toFixed(1)} m on a ` +
+      `${GROUND_SPHERE_RADIUS} m sphere (limit ${limit.toFixed(1)} m); ground at that ` +
+      `edge falls at ${Number.isFinite(edgeGrade) ? `${(edgeGrade * 100).toFixed(1)}%` : 'a cliff'}\n`,
+  );
+
+  if (reach >= GROUND_SPHERE_RADIUS) {
+    fouls.push(
+      `the park boundary reaches ${reach.toFixed(1)} m but GROUND_SPHERE_RADIUS is ` +
+        `${GROUND_SPHERE_RADIUS} m — the park's edge is past its own horizon, where the ` +
+        'spherical cap has no ground on it at all. The park is bigger than the world it ' +
+        'stands on; either shrink the park or grow the sphere',
+    );
+  } else if (reach > limit) {
+    fouls.push(
+      `the park boundary reaches ${reach.toFixed(1)} m on a ${GROUND_SPHERE_RADIUS} m sphere, ` +
+        `past the ${limit.toFixed(1)} m at which the ground under the boundary wall passes 45°. ` +
+        `The ground there falls at ${(edgeGrade * 100).toFixed(0)}% — that is a cliff with a ` +
+        'park wall on it, not a hilltop. Either the park grew or the sphere shrank',
+    );
+  }
+
+  return fouls;
+};
+
+/**
  * **The ground really is the sphere the constant claims, and it is gentle
  * enough for the bus (#511).**
  *
@@ -9999,6 +10068,7 @@ const castleTurretsAreSolid: Invariant = (facts) => {
 };
 
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
+  ['the park fits on its own sphere', theParkFitsOnItsOwnSphere],
   ['the ground is the sphere it claims to be, and gentle enough for the bus', theGroundIsTheSphereItClaimsToBe],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],

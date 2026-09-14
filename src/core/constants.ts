@@ -123,6 +123,17 @@ const AUTHORED_PLAY_RADIUS = 58;
  * shipped was a park 5.45x too big. There is no second number here to drift:
  * the scale is a function of `GROUND_SPHERE_RADIUS` and nothing else.
  *
+ * **What it holds exactly, and what it only mostly holds.** The equation above
+ * is about the *nominal* circular park of radius `GARDEN_PLAY_RADIUS` — the one
+ * `CIRCULAR_PARK_AREA` names and `PARK_AREA_MULTIPLIER` multiplies. That circle's
+ * walked area is held exactly. The **generated** outline is twice that area and
+ * reaches ~108 m, where the ground has tilted further and the metric stretches
+ * more, so its walked area lands a little over the flat original: measured
+ * across the sixteen pool seeds, **21,609 m² against the flat park's 21,136 —
+ * 2.2% over**, where leaving the scale at a plain 1 gives 22,007 m², 4.1% over.
+ * Calibrating on the generated outline instead would make the park's size
+ * depend on its seed, which is worse than a 2% residual nobody can see.
+ *
  * **And it is not merely a size preference — 2.335x was geometrically broken.**
  * The boundary reached **236.3 m on a 220 m sphere**: past the horizon, where
  * the cap has no ground left and the drop is infinite. Any scale that puts the
