@@ -1,4 +1,4 @@
-import { BufferAttribute, BufferGeometry, Matrix3, Matrix4, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, Matrix3, Matrix4, Quaternion, Vector3 } from 'three';
 import type { SpineFrame } from './bridgeSpine';
 import {
   COPING_HEIGHT,
@@ -255,11 +255,27 @@ function basisAt(up: Vector3, forward: Vector3, at: Vector3): Matrix4 {
  * company with the swept spandrel exactly the way the old `deckMesh` box did
  * (Jim, 2026-08-24, *"there's still a big hole in the mesh"*).
  */
+/**
+ * **How a rigid arch built in a tangent frame is put back into the world.**
+ *
+ * `bridges.ts` builds its arch in the crossing's own tangent frame, so the
+ * curve's `y` is a *rise* above that plane rather than a world height, and the
+ * frame itself is tilted — by up to 45° at the park's reach. Both halves have
+ * to be applied or the stone does not sit on the hole it is framing: `y` turns
+ * a rise into a world height at the plan point asking, and `lean` is the
+ * rotation taking world `+Y` to the local up, for the basis vectors.
+ */
+export interface ArchPlacement {
+  readonly y: (x: number, z: number, rise: number) => number;
+  readonly lean: Quaternion;
+}
+
 export function buildVoussoirRing(
   frame: SpineFrame,
   shift: number,
   halfAcross: number,
   curve: ArchCurve,
+  placement: ArchPlacement,
 ): BufferGeometry {
   const available = curve.arcHalf - KEYSTONE_PITCH / 2;
   const count = Math.max(1, Math.round(available / VOUSSOIR_PITCH));
@@ -280,10 +296,18 @@ export function buildVoussoirRing(
       const point = frame.pointAt(along);
       const world = frame.worldAt(along, side * halfAcross, shift);
       // "Up" is radially out of the arch, in the frame's own vertical plane;
-      // "forward" is straight out of this mouth.
-      const up = new Vector3(point.dirX * normalAlong, normalY, point.dirZ * normalAlong);
-      const forward = new Vector3(point.acrossX * side, 0, point.acrossZ * side);
-      const matrix = basisAt(up, forward, new Vector3(world.x, y, world.z));
+      // "forward" is straight out of this mouth. Both are built against world
+      // `+Y` and then leaned onto the local up, because the arch they belong to
+      // is rigid in the tangent frame rather than in world space.
+      const up = new Vector3(point.dirX * normalAlong, normalY, point.dirZ * normalAlong)
+        .applyQuaternion(placement.lean);
+      const forward = new Vector3(point.acrossX * side, 0, point.acrossZ * side)
+        .applyQuaternion(placement.lean);
+      const matrix = basisAt(
+        up,
+        forward,
+        new Vector3(world.x, placement.y(world.x, world.z, y), world.z),
+      );
       (stone.keystone ? keystones : voussoirs).push(matrix);
     }
   }
@@ -303,11 +327,19 @@ export function buildVoussoirRing(
       const { along, y } = curve.at(end * curve.arcHalf);
       const point = frame.pointAt(along);
       const world = frame.worldAt(along, side * halfAcross, shift);
-      // Lying along the frame, level, with its top at the springing — the arch
-      // starts exactly where this stone stops.
-      const up = new Vector3(0, 1, 0);
-      const forward = new Vector3(point.dirX, 0, point.dirZ);
-      imposts.push(basisAt(up, forward, new Vector3(world.x, y - COPING_HEIGHT, world.z)));
+      // Lying along the frame, level *in the arch's own frame*, with its top at
+      // the springing — the arch starts exactly where this stone stops. "Level"
+      // is the local up, not world `+Y`; the two are 45° apart at the park's
+      // reach and an impost built to the latter tips out of its own wall.
+      const up = new Vector3(0, 1, 0).applyQuaternion(placement.lean);
+      const forward = new Vector3(point.dirX, 0, point.dirZ).applyQuaternion(placement.lean);
+      imposts.push(
+        basisAt(
+          up,
+          forward,
+          new Vector3(world.x, placement.y(world.x, world.z, y - COPING_HEIGHT), world.z),
+        ),
+      );
     }
   }
 
