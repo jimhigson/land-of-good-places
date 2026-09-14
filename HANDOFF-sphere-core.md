@@ -84,3 +84,28 @@ against `terrainHeight` itself rather than re-deriving the field.
 The three rules that cover most of what goes wrong when migrating a subsystem
 are at the top of `src/world/geo/index.ts`. Read that file first; it is written
 for exactly this handover.
+
+## #619 merged into this branch (14 Sep)
+
+Verified by control before merging: same instrument, same tree, only
+`constants.ts` + `paths.ts` reverted between runs. Base builds **3 of 10** pool
+seeds (11, 326, 428) and the canonical seed throws at (0.0, 125.8) with the
+error three engineers reported; with the fix, **10 of 10**, every crossing on a
+proven site with a drawn path through it, nearest paving to the arch 3.5–4.4 m
+against 23.7–64.8 m before.
+
+**The park builds again on all ten seeds.** Measurements that lanes wrote off as
+impossible are available now.
+
+One correction posted to the PR thread: its "identical parks on the three seeds
+that already built" claim is wrong. Those three change, and for the better — on
+the base, seed 326 had 6 crossings but only 5 with a drawn path, and seed 428
+had 2 with only 1. That also makes the seed-326 `path-kerb`/`path-surface`
+coplanar finding more likely newly *created* than newly visible; re-measure now
+the base can run.
+
+Merged as a merge commit, not a squash, because several lanes are branched off
+`feat/sphere-combined` and a rewritten history would cost each of them a
+reconciliation.
+
+Merged head `6562ec2b`: `tsc --noEmit` clean, `test/geo/core.test.ts` 28/28.
