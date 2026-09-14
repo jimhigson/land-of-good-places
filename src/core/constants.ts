@@ -9,15 +9,21 @@
 // ------------------------------------------------------------------ world
 
 /**
- * Where the ground stops.
+ * **`TERRAIN_RADIUS` was here, and it was a lie. Do not put it back.**
  *
- * The park is a diorama on a hilltop: the terrain is a disc that ends a little
- * beyond the boundary wall, so that walking to the edge of the park reveals the
- * sky, the sunset and the distant hills. With an orthographic camera an endless
- * ground plane would fill the frame forever and the sky would never be seen.
- * The cut edge is hidden behind the treeline (see Scenery).
+ * It said *"where the ground stops"* and was 83.5 m. Nothing read it. The
+ * ground actually stops at `boundary.ts`'s {@link TERRAIN_EDGE_RADIUS} —
+ * `PARK_BOUNDARY.maxRadius + TERRAIN_APRON`, **251.7 m** on the canonical park
+ * — which is what `Garden.ts`'s `buildTerrain` has always built the disc from,
+ * and which moves with the boundary instead of having to be re-typed when it
+ * does. The constant survived as a number nobody used whose doc comment two
+ * other comments in this file then reasoned from, 168 m adrift of the thing it
+ * claimed to describe. That is CLAUDE.md's "two definitions of one thing" with
+ * the second definition not even wired up.
+ *
+ * It also described *"an orthographic camera"*, which the game has not had for
+ * some time. Both claims are corrected at their remaining sites below.
  */
-export const TERRAIN_RADIUS = 83.5;
 
 /**
  * How far the ground falls away across the hilltop crest, in metres.
@@ -356,7 +362,8 @@ export const BUILDING_HALF_Z = 9;
  * continuous, which is the whole point: the interior floor plate is 42 x 31 m
  * inside a shell that is 24 x 18 m outside.
  *
- * Six hundred is chosen to be far past TERRAIN_RADIUS *and* past FOG_FAR, so
+ * Six hundred is chosen to be far past the ground's own edge
+ * (`boundary.ts`'s `TERRAIN_EDGE_RADIUS`, 251.7 m) *and* past FOG_FAR, so
  * neither space can ever appear in a frame of the other, while staying small
  * enough that single-precision float positions are still exact to a millimetre.
  */
@@ -409,8 +416,10 @@ export const INTERIOR_PLAZA_DROP = 1.2;
 /**
  * Where the interior's ground stops.
  *
- * Same reasoning as TERRAIN_RADIUS out in the park: the camera is orthographic,
- * so an endless ground plane fills the frame forever and the sky is never seen.
+ * Same reasoning as the park's own ground edge (`boundary.ts`'s
+ * `TERRAIN_EDGE_RADIUS`): the camera is a fixed-angle rig looking down at a
+ * shallow pitch, so an endless ground plane fills the frame forever and the sky
+ * is never seen.
  * The top floor here is the *roof* and it is meant to be outdoors, so the ground
  * has to end inside the view — and at this distance the fog has already faded
  * its rim into the horizon colour, so the cut never shows.

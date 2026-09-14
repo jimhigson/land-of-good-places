@@ -14,7 +14,6 @@ import {
   Vector3,
 } from 'three';
 import {
-  TERRAIN_RADIUS,
   TERRAIN_HEIGHT_SCALE,
   TERRAIN_SEGMENTS,
 } from '../core/constants';
@@ -77,12 +76,17 @@ export class Garden {
 /**
  * Rolling grass, built as a disc that ends a little way past the boundary wall.
  *
- * Why a disc and not an endless plane? Because the camera is orthographic and
- * tilted 38° down, so it only ever shows about 36 metres of ground depth — an
+ * Why a disc and not an endless plane? Because the camera is a fixed-angle rig
+ * tilted well down, so it only ever shows a shallow band of ground depth — an
  * endless plane fills the frame completely and you never see the sky, which
  * would waste the entire day/night cycle. Ending the ground at
- * {@link TERRAIN_RADIUS} turns the park into a diorama on a hilltop: walk near
- * the edge and the sunset, the stars and the distant hills come into view.
+ * {@link TERRAIN_EDGE_RADIUS} turns the park into a diorama on a hilltop: walk
+ * near the edge and the sunset, the stars and the distant hills come into view.
+ *
+ * That radius is `boundary.ts`'s, and deliberately not a constant of its own:
+ * it is `PARK_BOUNDARY.maxRadius + TERRAIN_APRON`, so the ground follows the
+ * boundary wherever a seed puts it. The `TERRAIN_RADIUS` this comment used to
+ * name was a separate 83.5 m that nothing built anything from.
  *
  * The visible cut edge is masked by the treeline in `Scenery`.
  */
