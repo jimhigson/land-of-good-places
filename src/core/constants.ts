@@ -116,12 +116,45 @@ export const GROUND_SPHERE_RADIUS = 220;
 /**
  * The radius the park's authored extent is calibrated against.
  *
- * **This is 1200 while `GROUND_SPHERE_RADIUS` is 220, so the scale is 2.335 and
- * the park is built 2.335x its authored size.** The sentence that used to stand
- * here said the two were held equal and the scale was exactly 1; that stopped
- * being true the moment the radius moved, and it is corrected rather than
- * deleted because what it said next was a diagnosis, and the diagnosis was
- * wrong.
+ * **Held equal to `GROUND_SPHERE_RADIUS`, so the scale is 1 and the park is
+ * built at its authored size.**
+ *
+ * ## Two engineers changed this docblock in opposite directions. Read both.
+ *
+ * #619 found the paragraph claiming a scale of 1 while the constant was 1200,
+ * and corrected **the paragraph** — keeping 2.335x and demolishing the stale
+ * diagnosis that had been used to justify it. That demolition was right and is
+ * kept in full below; its `paths.ts` fix is real, is untouched here, and took
+ * the pool from 3 of 10 seeds building to 10 of 10.
+ *
+ * This branch corrected **the constant** instead, for a reason #619 did not
+ * measure and could not have seen from the crossing planner: at 2.335x the park
+ * does not fit on its own planet.
+ *
+ * Measured on the rebased tree, **with #619's fix in place**, seed 11:
+ *
+ *     the park reaches 247.0 m on a 220 m planet — 27.0 m PAST ITS OWN EQUATOR
+ *     worst gradient INFINITE (tan theta) at 220.0 m
+ *
+ * Past the equator the cap has curved through vertical and `terrainHeight`'s
+ * `Math.max(0, R² - d²)` guard clamps the ground to a flat plane at `y = -R`.
+ * A tree out there stands on the clamp, not on the planet; on seed 326 one
+ * stood at 216 m on a **1045%** slope, 179.6 m below the park's centre, and a
+ * Rail Race duck bar at 246 m stood on no ground at all.
+ *
+ * **So "the park builds" and "the park is on the planet" are different
+ * questions, and #619 answered the first.** `theGroundIsTheSphereItClaimsToBe`
+ * now asserts the second, which is why 2.335x fails it on every seed.
+ *
+ * Whole-suite counts, diffed by name:
+ *
+ *     scale 2.335 (#619's base)   501 passed  128 failed  0 pending
+ *     scale 1     (this branch)   552 passed   96 failed  0 pending
+ *
+ * **This is a live disagreement, flagged to the Overseer rather than settled
+ * here.** If 2.335x is wanted back, the planet has to grow with it — the two
+ * numbers are one decision, and that is the point of holding them in one
+ * expression rather than two.
  *
  * It read: *"the paths router draws a leg across the railway at a radius where
  * no bridge site was ever proven, because the rail loop moved outward
@@ -137,9 +170,10 @@ export const GROUND_SPHERE_RADIUS = 220;
  * length. One constant, in `paths.ts`, given its proper owner: 3 of 10 pool
  * seeds built before, **10 of 10 after**, every crossing on every seed bridged.
  *
- * So this number is no longer what blocks the radius moving. What it costs is
- * still real and still above: the park's own dome steepens as `a` grows and `R`
- * shrinks, and that is a thing to look at on screen.
+ * So the crossing planner is no longer what blocks the radius moving. What
+ * blocks it now is the equator, measured above. What it costs is still real and
+ * still above: the park's own dome steepens as `a` grows and `R` shrinks, and
+ * that is a thing to look at on screen.
  */
 const PARK_REFERENCE_SPHERE_RADIUS = GROUND_SPHERE_RADIUS;
 export const PARK_SURFACE_SCALE = Math.sqrt(
