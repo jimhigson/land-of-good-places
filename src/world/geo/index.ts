@@ -38,6 +38,8 @@
 export { Geo, PLANET_CENTRE_WORLD_Y, PLANET_RADIUS, scratchGeo } from './Geo';
 export { Frame } from './Frame';
 export {
+  FLAT_BUDGET_RADIUS,
+  FLAT_DEPARTURE_BUDGET,
   PARK_CHART,
   allCharts,
   chartById,
@@ -48,6 +50,7 @@ export {
   resetCharts,
   type Chart,
   type ChartId,
+  type DepartureAccepted,
 } from './Chart';
 export { constantOver, field, unboundedConstant, type Field } from './Field';
 export { Anchor } from './Anchor';
