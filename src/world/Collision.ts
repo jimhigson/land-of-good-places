@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
+import { PLANET_RADIUS } from './geo';
 
 /**
  * Deliberately simple solid-object handling.
@@ -126,6 +127,13 @@ export interface WallCollider {
   baseHeight: number;
   /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
   navStamped: boolean;
+  /**
+   * The absolute top at the **far** end (`x2, z2`), where the top at the near
+   * end is {@link topHeight}. See {@link CollisionWorld.addWall}'s
+   * `topHeightFar`; equal to `topHeight` unless a caller says otherwise, which
+   * is exactly today's behaviour.
+   */
+  topHeightFar: number;
 }
 
 /**
@@ -264,6 +272,96 @@ export function measuredHopCeiling(crossing: number): number {
  */
 export function autoHopClears(topHeight: number, apexClearance: number): boolean {
   return clearsTop(topHeight, apexClearance) && topHeight <= MAX_AUTO_HOP_HEIGHT;
+}
+
+/**
+ * **A wall's top, read at the point the mover is actually touching it.**
+ *
+ * `t` is the parameter `resolve` already computes for the closest point on the
+ * segment, so this costs one compare and one lerp and needs no second geometry.
+ *
+ * ## Why a wall needs two tops, and a scalar was never enough
+ *
+ * A collider's absolute top is a claim about a **surface**, and a single number
+ * can only describe that surface where it happens to have been sampled. That
+ * was survivable while the world was flat and a long fence's top really was one
+ * world `y`. It is not survivable on a ball: the ground falls away at up to
+ * 1.02 m per metre at the park's reach, so a fence pinned to it climbs or drops
+ * several metres along its own length, and one number is right at one place and
+ * wrong everywhere else on the same collider.
+ *
+ * That is the live defect this exists for — **an outdoor `topIsAbsolute`
+ * collider approached from the inward side stops being solid at d = 80 m, and a
+ * child walks through a 1.1 m railway fence** — and it is worth being precise
+ * about the cause, because the obvious diagnosis is wrong and was reverted once
+ * already on `eng/radial-collide`. The frame is *not* the disease. Comparing
+ * world `y` against world `y` is exactly right for a top that genuinely is a
+ * constant-`y` plane, which a hotel sofa's plate is; converting those to an
+ * altitude or a radius makes them wrong, and is what put two procgen invariants
+ * at *"0.00 m of standable width"*. The disease is the **single scalar on an
+ * extended collider**. Give the collider enough numbers to describe what is
+ * drawn and the frame question dissolves.
+ *
+ * Two is enough for a wall because a wall is a straight segment and the
+ * surfaces these track — a deck, a ramp, a graded rail bed — vary smoothly
+ * along it; a run that bends gets registered as the chain of segments it
+ * already is. A circle keeps one top, because a circular collider is furniture
+ * and a flat patch is good to 4.7 m of radius at centimetre tolerance on this
+ * planet (`geo/Chart.ts`'s `flatDeparture`).
+ *
+ * **Two is enough only while segments stay short, and that is a measured claim
+ * with a command beside it**, not a hope — see
+ * {@link CollisionWorld.checkAbsoluteTopSag}. A straight line between two end
+ * tops is a *chord*, and the ground it stands in for is a *cap*, so the lerp
+ * sits below the truth in the middle by the sag between them. **The dominant
+ * term is the segment's own length, `L^2/8R`, so this is not a rim-only
+ * problem — it is just as true through the middle of the park**, which is
+ * worth saying plainly because every other defect in this lane has been about
+ * the lean and the instinct is to assume this one is too. Measured on the bare
+ * cap:
+ *
+ * | segment | at the origin | tangential, d = 80 m | radial, d = 157 m |
+ * |---|---|---|---|
+ * | 2.4 m | 0.0033 m | 0.0036 m | 0.0095 m |
+ * | 5 m | 0.0142 m | 0.0155 m | 0.0413 m |
+ * | 10 m | 0.0568 m | 0.0619 m | 0.1656 m |
+ * | 20 m | 0.2274 m | 0.2477 m | 0.6655 m |
+ * | 60 m | 2.0551 m | 2.2403 m | 6.3468 m |
+ *
+ * The lean multiplies it — 2.9x at the park's reach, radially — but it does not
+ * cause it. At a 5 cm tolerance the honest ceiling is about **9.4 m** of
+ * segment anywhere in the park, and under 4 m to be safe radially at the rim.
+ *
+ * `train/fence.ts` registers in `STEP` = 2.4 m pieces, so it is three to nine
+ * millimetres out and two tops is comfortably right for it. A 60 m run written
+ * as one segment sags 2.06 m even through the middle of the park — more than
+ * the whole height of the 1.1 m fence it is describing — and a child then walks
+ * through the middle of a wall that is solid at both its ends, which is the
+ * most confusing possible version of this bug because every probe aimed at a
+ * post reports it solid. The boot check is what stops that arriving unnoticed.
+ *
+ * ## The `Infinity` trap, guarded on purpose rather than by luck
+ *
+ * `Infinity + (Infinity - Infinity) * t` is **`NaN`**, and `clearsTop(NaN, …)`
+ * is `false`, so the collider stays solid — the safe direction, this time. It
+ * is guarded anyway, and loudly, because "it happens to fail safe" is not a
+ * property anybody should have to re-derive: an infinite top is a *sentinel*
+ * meaning "no top at all", not a coordinate, and a sentinel must not enter
+ * arithmetic. That is the same rule `geo/step.ts` is built on, and the reason it
+ * is written down here is that the sibling case on `eng/radial-collide` — a
+ * `-Infinity` sentinel through an unsigned `Math.hypot` — failed the *other*
+ * way and made every collider in the game non-solid while typechecking cleanly.
+ */
+function topOfWallAt(wall: WallCollider, t: number): number {
+  const near = wall.topHeight;
+  const far = wall.topHeightFar;
+  // The overwhelmingly common case, and every call site that has not opted in:
+  // one top, returned untouched, so this is bit-for-bit what it always was.
+  if (near === far) return near;
+  // A sentinel is not a coordinate. If either end declares "no top", the wall
+  // has no top; there is nothing to interpolate between.
+  if (!Number.isFinite(near) || !Number.isFinite(far)) return Infinity;
+  return near + (far - near) * t;
 }
 
 /**
@@ -527,6 +625,14 @@ export class CollisionWorld {
     return true;
   }
 
+  /**
+   * Registers a wall.
+   *
+   * `topHeightFar` is the absolute top at the **far** end (`x2, z2`), where
+   * `topHeight` is the top at the near end; it defaults to `topHeight`, so
+   * every existing call site is unchanged bit for bit. See
+   * {@link CollisionWorld.resolve} for why a long collider needs two.
+   */
   addWall(
     x1: number,
     z1: number,
@@ -538,6 +644,7 @@ export class CollisionWorld {
     topIsAbsolute = false,
     baseHeight = -Infinity,
     navStamped = false,
+    topHeightFar = topHeight,
   ): WallCollider {
     const wall: WallCollider = {
       x1,
@@ -550,6 +657,7 @@ export class CollisionWorld {
       topIsAbsolute,
       baseHeight,
       navStamped,
+      topHeightFar,
     };
     this.walls.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
@@ -641,6 +749,7 @@ export class CollisionWorld {
       autoHoppable: boolean,
       baseHeight: number,
       navStamped: boolean,
+      topHeightFar: number,
     ) => void,
   ): void {
     for (const wall of this.walls) {
@@ -654,6 +763,10 @@ export class CollisionWorld {
         wall.autoHoppable,
         wall.baseHeight,
         wall.navStamped,
+        // Handed over rather than hidden, so a consumer that maps the world
+        // cannot silently read a two-top wall as if it had one. Every existing
+        // visitor simply takes fewer arguments, which costs nothing.
+        wall.topHeightFar,
       );
     }
   }
@@ -942,8 +1055,12 @@ export class CollisionWorld {
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
         // Same banded-base rule as the circles above.
         if (position.y < wall.baseHeight) continue;
-        // Same absolute-top rule as the circles above.
-        if (clearsTop(wall.topHeight, wall.topIsAbsolute ? position.y : clearance)) {
+        // Same absolute-top rule as the circles above, but read **at the
+        // contact point**. See the `topHeightFar` note in the header: a
+        // declared top means something at a particular place, and taking a
+        // long wall's top once at one end is how a 1.1 m railway fence stops
+        // being solid from the inward side.
+        if (clearsTop(topOfWallAt(wall, t), wall.topIsAbsolute ? position.y : clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -1023,7 +1140,11 @@ export class CollisionWorld {
     }
 
     for (const wall of this.walls) {
-      if (!wall.autoHoppable || !autoHopClears(wall.topHeight, apexClearance)) continue;
+      // The taller end, so a two-top wall can never be hopped on the strength
+      // of its lower one. `checkHoppableColliders` demotes these outright at
+      // boot; this keeps the answer safe in the window before it has run.
+      const top = wall.topHeight > wall.topHeightFar ? wall.topHeight : wall.topHeightFar;
+      if (!wall.autoHoppable || !autoHopClears(top, apexClearance)) continue;
       const ax = wall.x2 - wall.x1;
       const az = wall.z2 - wall.z1;
       const lengthSquared = ax * ax + az * az;
@@ -1067,6 +1188,83 @@ export class CollisionWorld {
       `carried straight through something on a stuttering frame`;
     console.error(`Land of Good Places: ${problem}`);
     return [problem];
+  }
+
+  /**
+   * Boot-time check: **an absolute-topped wall must be short enough that a
+   * straight line between its two ends still describes the surface it stands
+   * for.** Call it once, beside {@link checkHoppableColliders}.
+   *
+   * See {@link topOfWallAt} for the table this enforces. The top of a
+   * ground-pinned collider follows a *cap*; the two numbers it carries describe
+   * a *chord*; and the gap between them grows as the square of the segment's
+   * length. At the park's 2.4 m fence pieces it is 3 mm and nobody need think
+   * about it. At 20 m it is 0.67 m, which is most of a fence, and a child walks
+   * through the middle of a wall that is solid at both its ends — the most
+   * confusing possible version of this bug, because every probe aimed at a post
+   * reports it solid.
+   *
+   * Reported and **not** repaired, deliberately: the repair is to register the
+   * run as more pieces, which is the builder's business and not something to do
+   * behind it. `announce` says the count and the worst sag on **every** run,
+   * including the clean ones and including "asserts nothing" where no wall in
+   * the world declares an absolute top at all — a green line that implied cover
+   * it does not give is how the next engineer inherits a false belief.
+   *
+   * The sag is computed against the bare spherical cap, with no terrain lookup:
+   * the cap is the irreducible part and the waves are under 0.6 m at the park's
+   * reach and not a function of the segment's length. So this is cheap enough
+   * to run over every wall at boot and it cannot drift from the drawn ground in
+   * the way a re-derived wave field could.
+   *
+   * Returns the human-readable complaints, so a check or a test can assert on
+   * them rather than scraping the console.
+   */
+  checkAbsoluteTopSag(tolerance = 0.05, announce = true): string[] {
+    const problems: string[] = [];
+    let measured = 0;
+    let worst = 0;
+
+    const capY = (x: number, z: number): number => {
+      const dSquared = x * x + z * z;
+      if (dSquared >= PLANET_RADIUS * PLANET_RADIUS) return -PLANET_RADIUS;
+      return Math.sqrt(PLANET_RADIUS * PLANET_RADIUS - dSquared) - PLANET_RADIUS;
+    };
+
+    for (const wall of this.walls) {
+      if (!wall.topIsAbsolute) continue;
+      measured += 1;
+      const midX = (wall.x1 + wall.x2) / 2;
+      const midZ = (wall.z1 + wall.z2) / 2;
+      const sag =
+        capY(midX, midZ) - (capY(wall.x1, wall.z1) + capY(wall.x2, wall.z2)) / 2;
+      if (sag > worst) worst = sag;
+      if (sag <= tolerance) continue;
+      problems.push(
+        `the absolute-topped wall [${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)}] → ` +
+          `[${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}] is ` +
+          `${Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1).toFixed(1)} m long, and the ` +
+          `ground under its middle stands ${sag.toFixed(3)} m above the straight line ` +
+          `between its ends — so its declared top reads that much too low in the middle ` +
+          `and a child can walk through there while both its ends are solid. ` +
+          `Register the run in shorter pieces.`,
+      );
+    }
+
+    if (announce) {
+      console.info(
+        measured === 0
+          ? 'Land of Good Places: absolute-top sag asserts nothing — no wall in this ' +
+              'world declares an absolute top'
+          : `Land of Good Places: absolute-top sag checked ${measured} wall(s), worst ` +
+              `${worst.toFixed(3)} m against a ${tolerance.toFixed(2)} m tolerance, ` +
+              `${problems.length} over`,
+      );
+    }
+    if (problems.length > 0) {
+      console.error(`Land of Good Places:\n  ${problems.join('\n  ')}`);
+    }
+    return problems;
   }
 
   /**
@@ -1166,6 +1364,15 @@ export class CollisionWorld {
       }
       if (Number.isFinite(wall.baseHeight)) {
         problems.push(`${where} is autoHoppable with a banded base, which is unsupported`);
+        wall.autoHoppable = false;
+        demoted += 1;
+        continue;
+      }
+      if (wall.topHeight !== wall.topHeightFar) {
+        // Two tops describe an absolute *surface*, and the hop planner reasons
+        // in clearances above the mover's own ground — same reason an absolute
+        // top is unsupported, two lines up.
+        problems.push(`${where} is autoHoppable with a top that varies along it, which is unsupported`);
         wall.autoHoppable = false;
         demoted += 1;
         continue;
