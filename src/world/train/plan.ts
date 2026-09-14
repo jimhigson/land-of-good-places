@@ -150,9 +150,28 @@ function clearStationDistance(
     const off = Math.hypot(standX - centre.x, standZ - centre.z) || 1;
     const parkX = (standX - centre.x) / off;
     const parkZ = (standZ - centre.z) / off;
+    // **The park side has to be open against the RAILWAY too, not only
+    // against the plots.** This probe knew about plots and nothing else — the
+    // hand-picked obstacle list CLAUDE.md's procgen rule warns about — and the
+    // one obstacle it could not see is the loop's own other limb. On seed 451
+    // at the park's authored size the loop runs back within 3.95 m of itself,
+    // and station 0 was placed with its whole approach inside that pinch: a
+    // strip with a lineside fence down both sides and no walkable width
+    // between them. Everything downstream then failed in turn — the lead
+    // stepped across the far limb, the rail-aware street router correctly
+    // refused the leg, and the fallback wove the spur over the rails a dozen
+    // times. A station is the movable thing here, so it moves.
     let approachBlocked = false;
     for (const reach of [4, 7]) {
-      if (!clearOfPlots(standX + parkX * reach, standZ + parkZ * reach, 2)) {
+      const probeX = standX + parkX * reach;
+      const probeZ = standZ + parkZ * reach;
+      if (!clearOfPlots(probeX, probeZ, 2)) {
+        approachBlocked = true;
+        break;
+      }
+      if (
+        distanceToForeignRail(route, distance, probeX, probeZ) < STATION_LEAD_RAIL_MARGIN
+      ) {
         approachBlocked = true;
         break;
       }
