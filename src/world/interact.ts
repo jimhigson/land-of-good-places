@@ -1,6 +1,4 @@
 import type { HighlightTarget } from './highlight';
-import { planetRadiusAt } from './terrain';
-import { spaceAt, SPACE_GARDEN } from './spaces';
 
 /**
  * The tap-target registry, and the SELECTION RULE's vocabulary.
@@ -234,50 +232,33 @@ export function zoneVerb(zone: InteractZone): string {
   return zone.verb ?? defaultVerb(zone);
 }
 
-/** How far above or below a zone a tapped point may land and still count. */
-export const ZONE_HEIGHT_TOLERANCE = 2.2;
-
 /**
- * **Two points on the same storey — the one owner of that question.**
+ * How far above or below a zone a tapped point may land and still count.
  *
- * Everything that has to tell a lift door on deck 0 from the identical one on
- * deck 2 asks this: {@link pickInteractZone} below, and the tap-spacing rule
- * (`world/tapSpacing.ts` re-exports it, and `check-tap-spacing.mts` and
- * `test/procgen/invariants.ts` read it from there). It used to be two
- * expressions — a bare `Math.abs(aY - bY)` here and a copy in `tapSpacing.ts`
- * — which is the fault CLAUDE.md names as this repo's commonest.
+ * **Known wrong on a spherical ground, and the obvious fix does not fit here —
+ * read this before trying it.** `y` outdoors is dominated by *where* a point is
+ * rather than how high: the radial gradient reaches 1.02 m of `y` per metre
+ * travelled outward at the park's rim, so two things standing side by side on
+ * the same grass 3 m apart radially at 100 m out differ by 1.5 m of `y`, and
+ * near the garden edge 2.9 m of separation breaks this tolerance outright. The
+ * right quantity is distance from the planet's centre (`terrain.ts`'s
+ * `planetRadiusAt`) outdoors and plain `y` in an interior — and telling those
+ * two apart needs `world/spaces.ts`.
  *
- * **Why it cannot be a `y` difference any more.** Outdoors the ground is a
- * 220 m sphere, so `y` is dominated by *where* a point is rather than by how
- * high it is: the radial gradient reaches 1.02 m of `y` per metre travelled
- * outward at the park's rim. Two things standing side by side on the same
- * grass, 3 m apart radially at 100 m out, differ by 1.5 m of `y` — most of
- * {@link ZONE_HEIGHT_TOLERANCE} spent on being in different places — and near
- * the garden edge 2.9 m of separation breaks the tolerance outright while both
- * are plainly on the same ground. Distance from the planet's centre is the
- * quantity that actually means "how high up", and it is what this asks.
+ * **`interact.ts` cannot import `world/spaces.ts`.** Measured, 14 September
+ * 2026: `spaces` → `building/layout` → `parkLayout`, which is seed-dependent,
+ * and `building/layout` → `tapSpacing` → back here. Importing it pulls the park
+ * manifest into `test/procgen`'s static import graph *before the seed is set*,
+ * which is CLAUDE.md's own worked example: `test:procgen` went from
+ * `49 failed | 269 passed | 279 skipped` to `132 passed | 465 skipped` — no
+ * failures, 137 fewer tests run, and nothing red to say so.
  *
- * Interiors keep plain `y`, because they are disjoint spaces hundreds of
- * metres from the park's origin where the radial formula means nothing — and
- * two points in *different* spaces are never on the same storey at all,
- * whatever their heights.
+ * So the fix belongs one layer out, in whatever calls {@link pickInteractZone},
+ * or behind a `spaces`-free owner of "which space is this". The same expression
+ * is copied in `world/tapSpacing.ts`'s `sameStorey`, which the checks read, and
+ * the two want fixing together (RADIAL-INVENTORY.md §2.4 #2).
  */
-export function sameStorey(
-  ax: number,
-  ay: number,
-  az: number,
-  bx: number,
-  by: number,
-  bz: number,
-): boolean {
-  const aSpace = spaceAt(ax, az);
-  if (aSpace !== spaceAt(bx, bz)) return false;
-  const separation =
-    aSpace === SPACE_GARDEN
-      ? Math.abs(planetRadiusAt(ax, ay, az) - planetRadiusAt(bx, by, bz))
-      : Math.abs(ay - by);
-  return separation <= ZONE_HEIGHT_TOLERANCE;
-}
+export const ZONE_HEIGHT_TOLERANCE = 2.2;
 
 /**
  * The zone whose centre is nearest the tapped point, or `null` if the tap landed
@@ -295,7 +276,7 @@ export function pickInteractZone(
   let best: InteractZone | null = null;
   let bestDistance = Infinity;
   for (const zone of zones) {
-    if (!sameStorey(x, y, z, zone.x, zone.y, zone.z)) continue;
+    if (Math.abs(y - zone.y) > ZONE_HEIGHT_TOLERANCE) continue;
     const dx = x - zone.x;
     const dz = z - zone.z;
     const distance = Math.hypot(dx, dz);

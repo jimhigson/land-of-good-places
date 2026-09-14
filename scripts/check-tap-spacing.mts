@@ -118,7 +118,7 @@ for (const space of spaces) {
   for (const zone of space.zones) {
     for (const band of space.bands) {
       if (band.ownZoneId === zone.id) continue;
-      if (!sameStorey(zone.x, zone.y, zone.z, band.centreX, band.y, band.centreZ)) continue;
+      if (!sameStorey(zone.y, band.y)) continue;
       bandsChecked += 1;
       const clearance = zoneBandClearance(zone, band);
       if (clearance < TAP_FINGER_METRES) {
@@ -138,7 +138,7 @@ for (const space of spaces) {
     for (let b = a + 1; b < space.zones.length; b += 1) {
       const one = space.zones[a]!;
       const two = space.zones[b]!;
-      if (!sameStorey(one.x, one.y, one.z, two.x, two.y, two.z)) continue;
+      if (!sameStorey(one.y, two.y)) continue;
       const separation = zoneSeparation(one, two);
       if (separation >= TAP_FINGER_METRES) continue;
       pairsChecked += 1;

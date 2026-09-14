@@ -9316,7 +9316,7 @@ const tapTargetsKeepTheirDistance: Invariant = (facts) => {
     for (let b = a + 1; b < zones.length; b += 1) {
       const one = zones[a]!;
       const two = zones[b]!;
-      if (!sameStorey(one.x, one.y, one.z, two.x, two.y, two.z)) continue;
+      if (!sameStorey(one.y, two.y)) continue;
       if (!differentActions(one, two)) continue;
       const separation = zoneSeparation(one, two);
       if (separation >= TAP_FINGER_METRES) continue;
@@ -9332,7 +9332,7 @@ const tapTargetsKeepTheirDistance: Invariant = (facts) => {
   for (const zone of zones) {
     for (const band of bands) {
       if (band.ownZoneId === zone.id) continue;
-      if (!sameStorey(zone.x, zone.y, zone.z, band.centreX, band.y, band.centreZ)) continue;
+      if (!sameStorey(zone.y, band.y)) continue;
       const clearance = zoneBandClearance(zone, band);
       if (clearance >= TAP_FINGER_METRES) continue;
       complaints.push(
