@@ -92,6 +92,22 @@ export function stationStand(
  * Gives up at ±24 m and returns the target; the boot assert and check:park
  * then say so loudly rather than a child finding a platform inside a booth.
  */
+/**
+ * Distance from a point to the **nearest part of the whole loop**, not to the
+ * rail point some caller already had in hand.
+ *
+ * Written once here because two callers need exactly this and the difference
+ * between it and "distance to my own rail point" is what made seed 451
+ * unbuildable — see {@link stationLead} and the park-side test in
+ * {@link clearStationDistance}. `distanceToRailCorridor` below answers the same
+ * question for the *built* corridor and is not usable during planning, because
+ * it is what the plan is producing.
+ */
+function nearestRailDistance(route: TrainRoute, x: number, z: number): number {
+  const at = route.pointAt(route.distanceNear(x, z), new Vector3());
+  return Math.hypot(at.x - x, at.z - z);
+}
+
 function clearStationDistance(
   route: TrainRoute,
   target: number,
@@ -150,9 +166,37 @@ function clearStationDistance(
     const off = Math.hypot(standX - centre.x, standZ - centre.z) || 1;
     const parkX = (standX - centre.x) / off;
     const parkZ = (standZ - centre.z) / off;
+    // **The park side has to be open, and "open" includes the railway itself.**
+    //
+    // This tested the plots and nothing else, which is the same blind spot
+    // #472's own note warns about two comments down — backtrack against the
+    // world as it stands, not against the two or three things this generator
+    // knows by name. The railway is the one obstacle a station is guaranteed to
+    // be next to, and the loop winds tightly enough to come back past its own
+    // platforms.
+    //
+    // Measured on seed 451 at park scale 1, before this term existed: Sunny
+    // Side was placed at railD 58.0 with **another limb of its own loop passing
+    // 8 m away on its park side**, at railD 133.7 — 75.7 m away around the
+    // circuit. Its lead landed 0.76 m from that limb and on the far side of it,
+    // so the station's own spur had to cross the railway to reach its own
+    // platform; `paths.ts` drew that leg, and the park failed to build at all
+    // with *"the drawn paths cross the railway at railD 133.9, which snaps to no
+    // proven bridge site"*. The error named a place 75 m and one module away
+    // from the cause.
+    //
+    // `nearestRailDistance` asks the whole route, not this candidate's own rail
+    // point — which is precisely the distinction that was missing.
     let approachBlocked = false;
     for (const reach of [4, 7]) {
-      if (!clearOfPlots(standX + parkX * reach, standZ + parkZ * reach, 2)) {
+      const px = standX + parkX * reach;
+      const pz = standZ + parkZ * reach;
+      if (!clearOfPlots(px, pz, 2)) {
+        approachBlocked = true;
+        break;
+      }
+      // Far enough from *any* limb of the loop that a spur can stand here.
+      if (nearestRailDistance(route, px, pz) < RAIL_CORRIDOR_CLEARANCE) {
         approachBlocked = true;
         break;
       }
@@ -283,6 +327,99 @@ function nearCruiserLowCorridor(x: number, z: number, reach: number): boolean {
  */
 const STATION_SEPARATION = PLATFORM_LENGTH + STATION_GAP * 2;
 
+/**
+ * **Where the spur arrives from the park — measured against the whole railway,
+ * not against this station's own rail point.**
+ *
+ * The lead used to be one line: `stand + park * 6`, six metres straight out
+ * from the platform along the outward normal at the station's own rail
+ * distance. That is right whenever the nearest rail to the lead is the rail the
+ * platform stands on, and it is **silently wrong the moment the loop doubles
+ * back near the platform** — because "six metres into the park" is only into
+ * the park with respect to the limb you measured from.
+ *
+ * Measured on seed 451, station Sunny Side at railD 58.0, at park scale 1: the
+ * lead came out **8.15 m from its own rail point**, which is exactly what the
+ * derivation intends and looks perfectly healthy — and **0.76 m from the
+ * nearest rail, at railD 133.7, on the far side of it**. That limb is 75.7 m
+ * away around the loop and passes within eight metres of the platform. So the
+ * station's own spur had to cross the railway to reach its own platform,
+ * `paths.ts` drew that leg, and `crossings.ts` threw: *"the drawn paths cross
+ * the railway at railD 133.9 (37.9, -40.1), which snaps to no proven bridge
+ * site"*. The park did not build at all, and the cause was 75 metres and one
+ * module away from the error.
+ *
+ * Bluebell Halt on the same seed is the control that shows the old formula is
+ * otherwise fine: its lead is 8.15 m from its own rail point **and** 8.15 m
+ * from the nearest rail, 0.2 m along the loop — the same limb.
+ *
+ * This is CLAUDE.md's standing rule in its exact words: *"'backtrack' means
+ * checking the real collision world as it stands at that moment, not just the
+ * two or three obstacle classes a given generator happens to know about by
+ * name."* The old lead knew about one rail point. This one asks the route.
+ *
+ * So: try the authored answer first, and only if it lands on the wrong side of
+ * the railway or inside its corridor, make a different decision — pull the lead
+ * in towards the platform, then step it along the platform's own
+ * furniture-free `+tangent` half-plane, never into the negative-along half
+ * where the canopy posts stand. The first candidate is the old formula exactly,
+ * so every station that was already sound is unchanged to the millimetre.
+ */
+function stationLead(
+  route: TrainRoute,
+  standX: number,
+  standZ: number,
+  parkX: number,
+  parkZ: number,
+  tangentX: number,
+  tangentZ: number,
+): { leadX: number; leadZ: number } {
+  const point = new Vector3();
+  const tangent = new Vector3();
+  /** Which side of the *whole* loop this point is on, and how far off it —
+   * `crossings.ts`'s own sign convention, against the nearest rail anywhere. */
+  const railAt = (x: number, z: number): { side: number; dist: number } => {
+    const d = route.distanceNear(x, z);
+    route.pointAt(d, point);
+    route.tangentAt(d, tangent);
+    return {
+      side: Math.sign(tangent.z * (x - point.x) - tangent.x * (z - point.z)) || 1,
+      dist: Math.hypot(point.x - x, point.z - z),
+    };
+  };
+
+  // The stand is the authority on which side of the railway this station is:
+  // a lead the spur can reach without crossing must be on that side.
+  const wanted = railAt(standX, standZ).side;
+
+  // The ladder. `out` is the authored 6 m first, then progressively shorter —
+  // a doubling-back limb is passed by going *further* out, so coming in is what
+  // recovers the side. `along` stays >= 0: the negative-along half is where the
+  // canopy posts and the bench are.
+  for (const along of [0, 2, 4, 6] as const) {
+    for (const out of [6, 5, 4.5, 4, 3.5, 3] as const) {
+      const x = standX + parkX * out + tangentX * along;
+      const z = standZ + parkZ * out + tangentZ * along;
+      const rail = railAt(x, z);
+      if (rail.side === wanted && rail.dist >= RAIL_CORRIDOR_CLEARANCE) {
+        return { leadX: x, leadZ: z };
+      }
+    }
+  }
+
+  // Nothing cleared. Keep the authored answer rather than inventing a worse
+  // one, and say so loudly: a station whose spur cannot reach it without
+  // crossing the railway is a real defect in the layout, and the park's own
+  // crossing checks will fail on it. Silence here is how it went unnoticed
+  // before.
+  console.warn(
+    `train plan: station stand (${standX.toFixed(1)}, ${standZ.toFixed(1)}) has no lead ` +
+      `on its own side of the railway and clear of the corridor — tried 24 placements. ` +
+      'Its spur will have to cross the rail to reach it.',
+  );
+  return { leadX: standX + parkX * 6, leadZ: standZ + parkZ * 6 };
+}
+
 function planStations(route: TrainRoute): readonly PlannedStation[] {
   // Sequential, not `map`: each station is scored against the stands already
   // chosen, which is what stops two of them landing in the same place. See the
@@ -321,8 +458,10 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
       // lead past the platform's far END was tried first and made things
       // worse: a spur arriving from anywhere in the park then had to sweep
       // the whole frontage to get there, 0.3 m from the posts.
-      leadX: standX + parkX * 6,
-      leadZ: standZ + parkZ * 6,
+      //
+      // **Asked of the whole railway, not of this station's own rail point**
+      // — see {@link stationLead}.
+      ...stationLead(route, standX, standZ, parkX, parkZ, tangent.x, tangent.z),
     };
   });
 }
