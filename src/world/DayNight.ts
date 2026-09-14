@@ -25,6 +25,7 @@ import { angleDelta, clamp, clamp01, lerp, smoothstep, TAU } from '../core/mathU
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Sky } from './Sky';
 import { gameStore } from '../state';
+import { upFor } from './up';
 
 /**
  * Time of day: the sun's arc, the colour of everything, and when the fairy
@@ -250,6 +251,14 @@ const MOON_INTENSITY = 0.62;
 const MOON_FILL_BOOST = 1.7;
 
 /**
+ * How far the cool fill is lifted above the horizon, as a tangent: `0.55` is
+ * **28.8°**. The number is unchanged from when it was written inline as the `y`
+ * of `(-key.x, 0.55, -key.z)`; what changed is which horizon it is measured
+ * from. See {@link DayNight.followPlayer}.
+ */
+const FILL_LIGHT_RISE = 0.55;
+
+/**
  * Where {@link DayNight.applyNapNightSky} parks the moon on screen — a fixed
  * azimuth/altitude, not the real midnight moon's own position.
  *
@@ -340,6 +349,15 @@ export class DayNight implements GameSystem {
   private readonly sunDirection = new Vector3(0, 1, 0);
   /** World-space direction *towards* the moon — the sun's, reflected. */
   private readonly moonDirection = new Vector3(0, -1, 0);
+  /**
+   * The bearing the cool fill comes from — opposite whichever of the sun and
+   * the moon is doing the lighting. Written by {@link applyLook}, turned into
+   * an actual light direction by {@link followPlayer}, which is the only code
+   * that knows which way is up where the player is standing.
+   */
+  private readonly fillBearing = new Vector3(0, 1, 0);
+  private readonly localUp = new Vector3(0, 1, 0);
+  private readonly fillDirection = new Vector3(0, 1, 0);
   private readonly fogColour = new Color();
   /**
    * Scratch sun direction for {@link applyWakeSky}, kept deliberately separate
@@ -688,7 +706,31 @@ export class DayNight implements GameSystem {
     this.paintSkyQuad(sunDirection, altitude, look, nightFactor);
   }
 
-  /** Keeps the shadow frustum centred on the action rather than the origin. */
+  /**
+   * Keeps the shadow frustum centred on the action rather than the origin —
+   * and, since the ground became a sphere, points the two lights that mean
+   * "up" at the up the player actually has.
+   *
+   * The **key** light is not one of them: the sun is a real direction in the
+   * sky and its rays are parallel over the whole park, so it stays global. The
+   * other two are art devices phrased in terms of the horizon:
+   *
+   * - the **fill** is "opposite the key, but lifted clear of the horizon". Its
+   *   `0.55` is `tan 28.8°` above the ground plane, and in the world frame that
+   *   put it **17° below** the local horizon out at the rim — precisely the
+   *   underneath-lighting its own comment exists to prevent, so every bench and
+   *   every toy in the outer park was rim-lit in cool blue along its bottom
+   *   edge while the same thing by the fountain looked right.
+   * - the **hemisphere** ambient blends sky above into green ground bounce
+   *   below about its own axis, which three.js takes from the light's position
+   *   and which nothing had ever assigned — so it was left at `+Y`. A surface
+   *   facing the local up at the rim was getting `0.5 + 0.5·cos 45.5° = 0.85`
+   *   of sky instead of all of it, and the outer park went continuously
+   *   greener and flatter than the middle with no seam to explain it.
+   *
+   * Indoors neither runs: both lights are `visible = false` and this method is
+   * not called (see `update`). `upFor` would hand back plain `+Y` there anyway.
+   */
   private followPlayer(playerPosition: Vector3): void {
     this.keyLight.target.position.copy(playerPosition);
     this.keyLight.target.updateMatrixWorld();
@@ -696,6 +738,39 @@ export class DayNight implements GameSystem {
       .copy(playerPosition)
       .addScaledVector(this.sunDirection, 95);
     this.keyLight.updateMatrixWorld();
+
+    upFor(playerPosition.x, playerPosition.y, playerPosition.z, this.localUp);
+
+    // The fill's bearing, flattened into the *local* horizon and then lifted
+    // FILL_LIGHT_RISE above it — the same shape as the old
+    // `(-key.x, 0.55, -key.z)`, with the local up in place of world +Y.
+    //
+    // Length matters as well as direction, because FILL_LIGHT_RISE is a
+    // *tangent* against it: the world-frame line spelled the horizontal part
+    // `(-key.x, -key.z)`, whose length is `hypot(key.x, key.z)` and shrinks as
+    // the sun climbs — that is how the fill already rose towards overhead at
+    // noon. Keep exactly that length so the only thing this changes is which
+    // horizon the 0.55 is measured from; at the park's centre the two
+    // expressions are identical to the last decimal.
+    const horizontal = Math.hypot(this.fillBearing.x, this.fillBearing.z);
+    this.fillDirection
+      .copy(this.fillBearing)
+      .addScaledVector(this.localUp, -this.fillBearing.dot(this.localUp));
+    const tangential = this.fillDirection.length();
+    if (tangential > 1e-4) this.fillDirection.multiplyScalar(horizontal / tangential);
+    this.fillDirection
+      .addScaledVector(this.localUp, FILL_LIGHT_RISE)
+      .normalize()
+      .multiplyScalar(60);
+    // A DirectionalLight's direction is `target - position`, and the fill's
+    // target is the default one at the origin, so only the direction of this
+    // vector is ever read. Add the player's position and the light would come
+    // from the wrong side of her entirely.
+    this.fillLight.position.copy(this.fillDirection);
+    this.fillLight.updateMatrixWorld();
+
+    this.ambientLight.position.copy(this.localUp);
+    this.ambientLight.updateMatrixWorld();
   }
 
   /**
@@ -780,11 +855,12 @@ export class DayNight implements GameSystem {
     // The fill sits opposite whichever of the two is actually lighting the
     // park, but still above it: straight opposite would light the ground from
     // underneath and every toy would glow along its bottom edge.
-    const keyDirection = sunStrength >= moonStrength ? this.sunDirection : this.moonDirection;
-    this.fillLight.position
-      .set(-keyDirection.x, 0.55, -keyDirection.z)
-      .normalize()
-      .multiplyScalar(60);
+    //
+    // "Above it" is a **local** statement, and on a sphere it stopped being a
+    // world one. Only the opposed *bearing* is decided here; `followPlayer`
+    // lifts it clear of the horizon the player is actually standing on, which
+    // is the only place that knows where she is.
+    this.fillBearing.copy(sunStrength >= moonStrength ? this.sunDirection : this.moonDirection).negate();
     this.fillLight.color.setHex(look.ambientSky);
     this.fillLight.intensity =
       (sunStrength + moonStrength * MOON_FILL_BOOST) * FILL_LIGHT_RATIO;
