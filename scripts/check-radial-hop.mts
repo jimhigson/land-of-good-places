@@ -118,6 +118,20 @@ function hopAt(x: number, z: number): Hop {
   let apex = 0;
   let lateral = 0;
   let airborneFrames = 0;
+  // **Read the drift where she settles, not at the instant of impact.**
+  //
+  // The landing clamps her height to the ground, and on a leaning surface the
+  // sideways half of that clamp is given back through the next frame's
+  // collision step rather than written onto her position — nothing moves a
+  // mover in x or z except `resolveMovement`. Breaking the moment `airborne`
+  // goes false therefore measured her one frame before the correction had been
+  // applied, and reported 0.0319 m at the rim for a hop that settles at 0.0002.
+  //
+  // Five frames is 83 ms and is far more than enough: the correction is a
+  // single step, and `scratch/drift.mts` shows the figure identical at +1, +2,
+  // +5 and +20 frames. It is five rather than one so that a *future* multi-frame
+  // settle would still be seen.
+  let settleFrames = -1;
   for (let frame = 0; frame < FRAMES; frame += 1) {
     player.step(DT, 0, 0, false);
     if (player.airborne) airborneFrames += 1;
@@ -131,7 +145,11 @@ function hopAt(x: number, z: number): Hop {
     if (altitude > apex) apex = altitude;
     const across = Math.hypot(player.position.x - startX, player.position.z - startZ);
     if (across > lateral) lateral = across;
-    if (!player.airborne && frame > 2) break;
+    if (!player.airborne && frame > 2) {
+      if (settleFrames < 0) settleFrames = 0;
+      else settleFrames += 1;
+      if (settleFrames >= 5) break;
+    }
   }
 
   return {
@@ -171,13 +189,30 @@ note('');
 // which is what this bounds. `groundWaves`'s own amplitude over one hop's
 // lateral travel is the honest size of the residual.
 const APEX_TOLERANCE = 0.06;
-// She must land on the column she took off from.
-const DRIFT_TOLERANCE = 0.05;
+// **She must land on the column she took off from**, and this is now tight
+// enough to mean it. It was 0.05 while the hop had no sideways half at all, in
+// which case the drift was trivially zero and the clause could not fail; with
+// the lift in and the landing correction out it reads **0.0319 m at the rim**,
+// so 0.01 is a threshold that has been seen to fire rather than one chosen to
+// be comfortable. Settled figures today: 0.0000 / 0.0000 / 0.0000 / 0.0003 /
+// 0.0002 across the five radii.
+const DRIFT_TOLERANCE = 0.01;
 /**
- * What the sideways excursion *would* be if the hop's lateral half were
- * implemented. Reported, never asserted — see the note printed on every run.
+ * **How far the sideways excursion may be from `apex · sin θ`.**
+ *
+ * Asserted now. It was reported-and-not-asserted for as long as the lateral
+ * half of the hop was unimplemented, because neither answer was writeable then:
+ * asserting zero would have enshrined the gap and asserting the right number
+ * would have been a check red on purpose. The half is implemented, so the
+ * clause is armed, and this is the number that stops it silently going back.
+ *
+ * Worst error measured across the 21 hops is 0.0010 m, from the wave field
+ * moving the sampled peak a little between frames. 0.02 leaves twenty times
+ * that in hand and still fails decisively on either way of getting it wrong: a
+ * hop that does not move sideways at all is out by 0.875 m at the rim, and one
+ * scaled by `1 / cos θ` instead of not at all is out by 0.36 m.
  */
-const LATERAL_TOLERANCE = 0.05;
+const LATERAL_TOLERANCE = 0.02;
 
 let worstApex = 0;
 let worstDrift = 0;
@@ -202,21 +237,23 @@ for (const d of RADII) {
     worstDrift = Math.max(worstDrift, hop.drift);
     worstLateral = Math.max(worstLateral, lateralError);
 
-    // **The lateral clause is deliberately not asserted.** See the note this
-    // run prints: the sideways half of a radial hop is not implemented, so
-    // `hop.lateral` is 0 everywhere and `lateralError` is the whole of the
-    // travel that *should* happen. Asserting it either way would be wrong —
-    // `=== 0` would enshrine the gap as correct, and `=== expected` would be a
-    // check that is red on purpose, which is the same as no check at all.
-    // It is measured and reported on every run instead.
-    const bad = apexError > APEX_TOLERANCE || hop.drift > DRIFT_TOLERANCE;
+    // **The lateral clause is asserted now**, and the comment it replaces said
+    // the opposite for a good reason that has expired: while the sideways half
+    // of the hop was unimplemented, `hop.lateral` was 0 everywhere and there
+    // was no number to assert that was not either an enshrinement of the gap or
+    // a deliberate red. It is implemented, so this is the clause that keeps it.
+    const bad =
+      apexError > APEX_TOLERANCE ||
+      hop.drift > DRIFT_TOLERANCE ||
+      lateralError > LATERAL_TOLERANCE;
     if (bad) failed = true;
     if (bad || bearing === 0) {
       note(
         `  d=${d.toString().padStart(3)} m (lean ${lean.toFixed(1).padStart(4)} deg) ` +
           `bearing ${((bearing * 180) / Math.PI).toFixed(0).padStart(3)}: ` +
           `apex ${hop.apex.toFixed(4)} m (${(hop.apex - control.apex).toFixed(4)} vs origin), ` +
-          `across ${hop.lateral.toFixed(4)} m (wanted ${expectedLateral.toFixed(4)}), ` +
+          `across ${hop.lateral.toFixed(4)} m (wanted ${expectedLateral.toFixed(4)}, ` +
+          `out by ${lateralError.toFixed(4)}), ` +
           `drift ${hop.drift.toFixed(4)} m` +
           (bad ? '   <-- FAILED' : ''),
       );
@@ -228,32 +265,24 @@ note('');
 note(
   `Measured ${measured} hops across ${RADII.length} radii and ${BEARINGS.length} bearings. ` +
     `Worst apex error ${worstApex.toFixed(4)} m (tolerance ${APEX_TOLERANCE}); ` +
-    `worst landing drift ${worstDrift.toFixed(4)} m (tolerance ${DRIFT_TOLERANCE}).`,
+    `worst landing drift ${worstDrift.toFixed(4)} m (tolerance ${DRIFT_TOLERANCE}); ` +
+    `worst sideways error ${worstLateral.toFixed(4)} m (tolerance ${LATERAL_TOLERANCE}).`,
 );
-// **What is still wrong, announced on every run rather than left to a doc.**
-// A green line here must not imply cover this file does not give.
-note('');
-note(
-  'NOT COVERED, and currently WRONG in the game: the sideways half of the hop. ' +
-    'A jump on a ball carries her outwards as well as upwards and brings her ' +
-    `back; measured above, she travels ${worstLateral.toFixed(4)} m against the ` +
-    `${'`apex · sin θ`'} she should — up to 0.875 m at the rim. In her own frame ` +
-    'the hop therefore still leans towards the middle of the park by that much. ' +
-    'It is not asserted either way here, deliberately: asserting zero would ' +
-    'enshrine it, and asserting the right answer would be a check red on ' +
-    'purpose. The fix is an integrated horizontal impulse at take-off, not a ' +
-    'lift re-derived from the current altitude — that formulation was tried, ' +
-    'and it teleports her sideways whenever a surface drops away, which ran ' +
-    'away on check:deck-fallthrough from gradient 0.1 (401/1280 runs, gaps to ' +
-    '50 m). See HANDOFF-radial-collide.md.',
-);
+// **What is still not covered, announced on every run rather than left to a
+// doc.** A green line here must not imply cover this file does not give.
+//
+// The paragraph that used to sit here said the sideways half of the hop was
+// unimplemented and measured how far short it fell. That is fixed and the note
+// is gone with it — a coverage note that outlives the gap it describes is the
+// same disease one layer out, and the next reader would have inherited a false
+// belief in the opposite direction.
 note('');
 note(
   'What this check does NOT cover: a hop from a bridge deck, a castle floor or ' +
     'any surface that is not the terrain — `SimPlayer` is given `terrainHeight` ' +
     'as its sampler here, so every hop above is off the grass. A deck hop goes ' +
-    'through the same code path and the same `yAtWalkHeight`, but it is not ' +
-    'measured by this file and nothing here would notice if it broke.',
+    'through the same `liftAlongUp` and the same landing correction, but it is ' +
+    'not measured by this file and nothing here would notice if it broke.',
 );
 
 if (failed) {

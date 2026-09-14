@@ -34,6 +34,11 @@
  */
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
+import {
+  altitudeAbove,
+  landingCorrection,
+  liftAlongUp,
+} from '../src/entities/movement/gravity.ts';
 import { damp } from '../src/core/mathUtils.ts';
 import {
   FALL_THRESHOLD,
@@ -184,6 +189,20 @@ export class SimPlayer {
   private readonly moveDirection = new Vector3();
   private readonly desired = new Vector3();
   private readonly probe = new Vector3();
+  /**
+   * This frame's travel along the local up, as a real displacement —
+   * `Player.update`'s field of the same name. Held on the instance rather than
+   * as a local because it is consumed in three places a frame: the collision
+   * step (its `x`/`z`), the height write (its `y`), and the derived-velocity
+   * clause, which subtracts it back out again.
+   */
+  private readonly lift = new Vector3();
+  /**
+   * The sideways half of a landing, waiting for a collision step to carry it —
+   * `Player`'s field of the same name. Never more than a part-frame's lift, so
+   * a few centimetres at most.
+   */
+  private readonly pendingLanding = new Vector3();
 
   constructor(collision: CollisionWorld, options: SimOptions = {}) {
     this.collision = collision;
@@ -227,8 +246,53 @@ export class SimPlayer {
     approach(this.velocity, this.desired, rate * dt);
 
     this.previousPosition.copy(this.position);
-    const deltaX = this.velocity.x * dt;
-    const deltaZ = this.velocity.z * dt;
+
+    // --- the lift she has earned along the local up --------------------------
+    // `Player.update`'s block, for the same reasons; see
+    // `entities/movement/gravity.ts`, which owns both halves of it.
+    //
+    // A hop on a ball is a displacement along the ground's own up, which out in
+    // the park leans outwards — so it has real `x` and `z` components as well
+    // as a `y` one. They are folded into the same step `resolveMovement`
+    // resolves, rather than written onto the position behind its back: that is
+    // what keeps the sub-step guarantee true of everything that moves her, and
+    // what keeps the ground sample riding the move (#358). Under 0.07 m at
+    // `MAX_FRAME_DELTA`, so it costs no extra sub-steps.
+    //
+    // Taken from *last* frame's `verticalVelocity`, before this frame's gravity
+    // — one frame of latency, in exchange for `lift.x`, `lift.y` and `lift.z`
+    // always being three components of one vector rather than two numbers
+    // computed at different moments. `hopClearance` already lags by exactly one
+    // frame for the same reason.
+    // Gravity is applied here, *before* the lift is taken from it, and the
+    // order is not free. `velocity -= g·dt` then `position += velocity·dt` is
+    // semi-implicit Euler, which is what this game has always run; take the
+    // lift first and it becomes explicit Euler, which over-reads the apex by
+    // one frame's worth of `JUMP_SPEED` — measured, **1.2267 m to 1.3367 m**,
+    // a 9 % higher jump everywhere in the park including at the origin, where
+    // nothing about the sphere was supposed to have changed anything. A
+    // control that moves is a control that has stopped controlling.
+    if (this.airborne) {
+      this.verticalVelocity -= GRAVITY * dt;
+      liftAlongUp(
+        this.position.x,
+        this.position.y,
+        this.position.z,
+        this.verticalVelocity * dt,
+        this.lift,
+      );
+    } else {
+      this.lift.set(0, 0, 0);
+    }
+    // Last frame's landing correction, if there was one, rides this frame's
+    // collision step. See the landing below for what it is and why it cannot
+    // simply be written onto `position.x`/`z` there.
+    this.lift.x += this.pendingLanding.x;
+    this.lift.z += this.pendingLanding.z;
+    this.pendingLanding.set(0, 0, 0);
+
+    const deltaX = this.velocity.x * dt + this.lift.x;
+    const deltaZ = this.velocity.z * dt + this.lift.z;
 
     // `Player.update`'s ground sample, riding the same sub-steps. `following`
     // and `reference` mirror it name for name.
@@ -273,8 +337,15 @@ export class SimPlayer {
 
     if (dt > 0 && !this.escorting) {
       const previousSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-      const derivedX = (this.position.x - this.previousPosition.x) / dt;
-      const derivedZ = (this.position.z - this.previousPosition.z) / dt;
+      // **The lift comes back out before the step is read as a walking speed.**
+      // `velocity` is her *walk*, and the trick this clause turns — trust the
+      // resolved position over the intended one, so walking into a wall kills
+      // the momentum — only works if the two are the same quantity. The hop's
+      // sideways excursion went into the step as well, and banking it here
+      // would hand it to the input smoothing as speed she is asking for, which
+      // would then fight it on the way up and again on the way down.
+      const derivedX = (this.position.x - this.previousPosition.x - this.lift.x) / dt;
+      const derivedZ = (this.position.z - this.previousPosition.z - this.lift.z) / dt;
       if (Math.hypot(derivedX, derivedZ) <= previousSpeed) {
         this.velocity.x = derivedX;
         this.velocity.z = derivedZ;
@@ -301,22 +372,57 @@ export class SimPlayer {
     }
     this.groundY = groundY;
 
-    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+    // The `y` half of the lift, now that the `x`/`z` half has been through the
+    // collision step above. One vector, applied in two places because one of
+    // its components has to be resolved against the walls and the others do
+    // not.
+    if (this.airborne) this.position.y += this.lift.y;
+
+    // Her height above the surface, radially — not `position.y - groundY`,
+    // which over-reads by `1 / cos θ` and so spends `FALL_THRESHOLD`'s 0.5 m of
+    // forgiveness on 0.5 m of *lateral* travel out where the ground leans.
+    const altitude = altitudeAbove(this.position.x, this.position.y, this.position.z, groundY);
+
+    if (!this.airborne && altitude > FALL_THRESHOLD) {
       this.airborne = true;
       this.verticalVelocity = 0;
     }
 
     let hopHeight = 0;
     if (this.airborne) {
-      this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
       // The landing. Its absence is what made the earlier rig over-count.
-      if (this.position.y <= groundY) {
+      //
+      // `verticalVelocity <= 0` is new and load-bearing now that the lift is
+      // applied a frame after take-off: without it she would be caught on the
+      // frame she jumps, standing at altitude 0 with a full `JUMP_SPEED` still
+      // in hand, and never leave the ground at all.
+      if (altitude <= 0 && this.verticalVelocity <= 0) {
+        // **She lands along the up, not straight down the world Y.**
+        //
+        // The last part-frame of a fall overshoots the surface — she is put
+        // back on it, and on a flat park putting her back is a change of `y`
+        // and nothing else. On a ball it is a move along the local up, which
+        // has `x` and `z` in it: clamp `y` alone and the sideways lift of that
+        // final part-frame is never given back, so every hop leaves her a
+        // little further out than she started. Measured before this clause:
+        // **0.0319 m of outward drift per hop at the rim**, growing linearly
+        // with radius, where a hop used to land exactly where it left.
+        //
+        // The lateral half is handed to *next* frame's collision step rather
+        // than written here, for the same reason the lift itself is: nothing
+        // moves her in `x` or `z` except through `resolveMovement`.
+        landingCorrection(
+          this.position.x,
+          this.position.y,
+          this.position.z,
+          altitude,
+          this.pendingLanding,
+        );
         this.position.y = groundY;
         this.verticalVelocity = 0;
         this.airborne = false;
       }
-      hopHeight = this.position.y - groundY;
+      hopHeight = Math.max(0, altitude);
     } else {
       this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
     }
