@@ -81,16 +81,50 @@ We each had this inverted once, in opposite directions, and both corrections
 came from arithmetic rather than argument. **If you find a docblock saying
 "divide by cos θ" anywhere near a delta, check it.**
 
+## The walk metric — also done
+
+`PLAYER_MAX_SPEED` is metres per second of **real ground**; `resolveMovement`
+takes **chart** metres. Nothing converted, so a child sped up as she walked away
+from the middle of the park. Ground covered against ground asked, over a 7.4 m
+run, before → after:
+
+| | outward | inward | tangential |
+|---|---|---|---|
+| d = 0 m (0.0°) | 1.0000 → 0.9988 | — | — |
+| d = 40 m (10.5°) | 1.0333 → 1.0058 | 1.0107 → 1.0016 | 1.0018 → 1.0006 |
+| d = 80 m (21.3°) | 1.0960 → 0.9990 | 1.0578 → 1.0031 | 1.0015 → 1.0001 |
+| d = 120 m (33.1°) | 1.2274 → 0.9888 | 1.1485 → 0.9942 | 1.0009 → 0.9993 |
+| **d = 157 m (45.5°)** | **1.5473 → 1.0072** | **1.3461 → 1.0047** | 1.0024 → 1.0000 |
+
+Worst radial error **0.5473 → 0.0112**; the residue is the wave field's own
+undulation, which is ground she really covers.
+
+`chartStep` compresses **only the radial component**, by `cos θ`. `realStep` is
+its inverse and **is not optional**: both movers read velocity back off the
+resolved position, and that read-back lands in `velocity`, which is a real speed
+`chartStep` compresses again next frame. Proved by mutation — drop the inverse
+and the covered/asked ratio at the rim goes to **0.3366**, a child crawling, and
+it presents as the walk sticking rather than as a units bug.
+
 ## Still open, in priority order
 
-1. **The metric factor — walking speeds up as she walks outward, by up to
-   1.43× at the rim.** Not started, and it is the biggest remaining thing a
-   child would feel. The fix is mine and agreed: scale the radial component of
-   the walk step by `cos θ` before handing it to `resolveMovement`. This is
-   where `geodesic.ts`'s `advance` belongs — it is the primitive that gets both
-   the metric and the heading's parallel transport right at once.
-2. **`check:radial-hop` is not yet in the `check` chain.** It is green now, so
-   it should go in. It was deliberately left out while it was honestly red.
+1. **`NpcCharacter.move` has no direct measurement.** Its vertical and walk
+   halves are line-for-line twins of `Player.update`'s and both call the same
+   owner, and the owner is unit-tested — but *nothing runs an NPC and measures
+   where she goes*. `scripts/trace-npc-driver.mts` looks like it would and does
+   not: it drives `WanderDriver`s with **no `CollisionWorld` and no
+   `NpcCharacter` at all** (its own header says collision is not what a driver
+   decides), which is why its hash is byte-identical across all of this work —
+   `trace=2cdba2c3`, 362 hops, on base and on this branch. That identical hash
+   is **correct and not evidence the change is inert**; I checked rather than
+   assumed. The gap is real: constructing an `NpcCharacter` headlessly needs an
+   `NpcAvatar` rig, which is why I stopped rather than half-did it.
+2. **`advance` is still unused by this lane.** `chartStep` gets the metric right
+   by scaling a chart delta, which is the conversion the collision boundary
+   wants today. `geodesic.ts`'s `advance` is the primitive that would get the
+   metric *and* the heading's parallel transport right together, and it is the
+   better answer the day `resolveMovement` can take a `Geo`. Not a defect now;
+   the direction of travel.
 3. **Pets.** There is no pet gravity integrator to convert — `WildPets` poses
    its animals in a group-local frame, and `GRAVITY * dt` appears nowhere else
    in `src/entities`. Confirmed on `eng/radial-collide` and still true. Nothing
@@ -126,6 +160,26 @@ came from arithmetic rather than argument. **If you find a docblock saying
   collision engineer is handling this at the type (`geo/step.ts`'s
   `riseBetween` takes two positions and has no height overload).
 
+## What the gates say
+
+- **`tsc --noEmit`**, **`typecheck:test`**, **`vite build`** — all exit 0.
+- **`check:deck-fallthrough`, `check:hop-clearance`, `check:wall-tunnelling`** —
+  green. The first is the one that caught the earlier
+  re-derive-position-from-altitude runaway at **401 of 1280 runs**; it stays
+  green, which is the signal that an integrated impulse does not have that
+  shape.
+- **`test:procgen`** — **160 passed, 0 failed, 465 skipped**, identical
+  non-passing sets by name to `714e7d4e`, wall clock 5:16 vs 5:15. **Read that
+  465 before trusting the parity**: `new World` throws in `crossings.ts`
+  (`railD 0.0 (0.0, 125.8)`, no proven bridge site) on the base as well as on
+  this branch, so every park-harness test dies at construction.
+  `eng/radial-collide` bisected it to the merge `502ec802` — the gate arch's
+  colliders moving the path router's answer. Not radial, not mine, **and it
+  means this parity gate covers 160 of 625 tests.**
+- **`pnpm run check`** — dies at `check:npc-presence` with exit 1 **on the base
+  too, at the identical step**, for the same reason. My two new steps run and
+  pass before it.
+
 ## Running things
 
 ```
@@ -146,3 +200,18 @@ at `714e7d4e` with `GROUND_SPHERE_RADIUS = 220`**:
 
 The second reproduces the base's numbers exactly, which is the cross-check that
 the mutation really is "the code as it was".
+
+`check:walk-metric` and `test/entities/gravity.test.ts` likewise:
+
+| mutation | result |
+|---|---|
+| drop `realStep` from the read-back | covered/asked **0.3366** at the rim — she crawls |
+| `chartStep` divides instead of multiplying | 1 of 18 unit tests red |
+| `chartStep` scales the whole step, not its radial part | 2 of 18 red |
+| `landingCorrection` sign flipped | 1 of 18 red |
+| `altitudeAbove` drops its indoor branch | 1 of 18 red |
+
+**One process note, learned expensively here:** I ran `git checkout -- <file>`
+to undo a mutation while that file still held **uncommitted** work, and threw
+the work away. Commit *before* you mutate, every time; the mutation is a
+throwaway and your branch is not.
