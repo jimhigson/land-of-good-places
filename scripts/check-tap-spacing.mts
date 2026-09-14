@@ -48,6 +48,50 @@ import {
 } from '../src/world/tapSpacing.ts';
 import { zoneVerb, type InteractZone } from '../src/world/interact.ts';
 import { hotelDoorBands, ROOMS } from '../src/world/hotel/layout.ts';
+import { spaceAt, type SpaceId } from '../src/world/spaces.ts';
+import { heightAboveFloor } from '../src/world/up.ts';
+import { distanceToBand } from '../src/world/tapSpacing.ts';
+
+/**
+ * **Which storey a tappable thing is on, in the frame that applies where it
+ * stands** — the park's `y` is not a storey any more.
+ *
+ * `sameStorey` compares two world `y` values against a 2.2 m tolerance, which
+ * was exactly right on a flat park and is a hole on a sphere. The loops below
+ * pair a zone with a *portal band* and with *another zone*, neither of which
+ * need be close in plan, and on the 220 m sphere the ground falls fast: at
+ * 100 m out a 3 m step towards the origin moves `y` by about 1.5 m, and near
+ * the garden's edge 2.9 m of plan separation exceeds the whole tolerance. So
+ * crowded stall clusters far from the park's centre were being `continue`d as
+ * "a different storey" and never measured at all — `bandsChecked` and
+ * `pairsChecked` simply fell, and nothing went red.
+ *
+ * Two things make a storey here, and they are different questions:
+ *
+ *  - **the space**. The castle's floors and the hotel's rooms are disjoint
+ *    coordinate regions hundreds of metres apart; two things in different
+ *    spaces are never on one storey however their heights compare. That was
+ *    already true before the sphere and the `y` test got it right only by
+ *    accident of where those spaces happen to sit.
+ *  - **the height above that space's own floor**, which is `heightAboveFloor`
+ *    — `altitudeAt` outdoors, a floor-relative `y` indoors.
+ *
+ * The **tolerance stays in `tapSpacing.ts`**: this converts the frame and then
+ * asks `sameStorey`, so there is still one owner of how far apart two storeys
+ * are.
+ */
+interface Storey {
+  readonly space: SpaceId;
+  readonly height: number;
+}
+
+function storeyAt(x: number, y: number, z: number): Storey {
+  return { space: spaceAt(x, z), height: heightAboveFloor(x, y, z) };
+}
+
+function onSameStorey(a: Storey, b: Storey): boolean {
+  return a.space === b.space && sameStorey(a.height, b.height);
+}
 
 const problems: string[] = [];
 const warnings: string[] = [];
@@ -114,11 +158,23 @@ for (const room of ROOMS) {
 
 let pairsChecked = 0;
 let bandsChecked = 0;
+/** Pairs dropped as different storeys that were within a finger in plan. */
+let bandsSkippedWhileClose = 0;
+let pairsSkippedWhileClose = 0;
 for (const space of spaces) {
   for (const zone of space.zones) {
+    const zoneStorey = storeyAt(zone.x, zone.y, zone.z);
     for (const band of space.bands) {
       if (band.ownZoneId === zone.id) continue;
-      if (!sameStorey(zone.y, band.y)) continue;
+      const bandStorey = storeyAt(band.centreX, band.y, band.centreZ);
+      if (!onSameStorey(zoneStorey, bandStorey)) {
+        // Announce the ones that matter: a pair this close in plan is exactly
+        // what rule 1 exists for, so dropping it is worth seeing on every run.
+        if (distanceToBand(band, zone.x, zone.z) - zone.pickRadius < TAP_FINGER_METRES) {
+          bandsSkippedWhileClose += 1;
+        }
+        continue;
+      }
       bandsChecked += 1;
       const clearance = zoneBandClearance(zone, band);
       if (clearance < TAP_FINGER_METRES) {
@@ -138,8 +194,11 @@ for (const space of spaces) {
     for (let b = a + 1; b < space.zones.length; b += 1) {
       const one = space.zones[a]!;
       const two = space.zones[b]!;
-      if (!sameStorey(one.y, two.y)) continue;
       const separation = zoneSeparation(one, two);
+      if (!onSameStorey(storeyAt(one.x, one.y, one.z), storeyAt(two.x, two.y, two.z))) {
+        if (separation < TAP_FINGER_METRES) pairsSkippedWhileClose += 1;
+        continue;
+      }
       if (separation >= TAP_FINGER_METRES) continue;
       pairsChecked += 1;
       if (differentActions(one, two)) {
@@ -165,6 +224,16 @@ console.log(
     `finger = ${TAP_FINGER_METRES.toFixed(2)} m; ${bandsChecked} zone-band and ` +
     `${pairsChecked} close zone-zone pairs measured; ${warnings.length} same-action ` +
     `overlaps (warnings).`,
+);
+// A dropped pair is cover this run did NOT give, so it is announced whether or
+// not anything failed — and on stderr, because a passing run is exactly the
+// case the note exists for.
+process.stderr.write(
+  `check:tap-spacing — storeys judged by space + height above that space's own floor ` +
+    `(altitudeAt outdoors), not by world y. ${bandsSkippedWhileClose} zone-band and ` +
+    `${pairsSkippedWhileClose} zone-zone pair(s) were within a finger in plan but on ` +
+    `different storeys, so ASSERT NOTHING this run` +
+    `${bandsSkippedWhileClose + pairsSkippedWhileClose === 0 ? ' (none)' : ''}.\n`,
 );
 for (const warning of warnings) console.log(`  ~ ${warning}`);
 

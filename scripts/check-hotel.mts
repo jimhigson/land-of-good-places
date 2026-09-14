@@ -113,9 +113,8 @@ import { ZONE_HEIGHT_TOLERANCE, pickInteractZone } from '../src/world/interact.t
 import { cameraOffset } from '../src/core/cameraRig.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
-import { spaceAt, SPACE_GARDEN, worldToLocal } from '../src/world/spaces.ts';
-import { altitudeAt } from '../src/world/terrain.ts';
-import { isOutdoors } from '../src/world/up.ts';
+import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
+import { heightAboveFloor, isOutdoors } from '../src/world/up.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import {
   TOWER_DOOR_HALF,
@@ -153,22 +152,20 @@ const FLOOR_OF_THE_WORLD = -2;
  * How high this child is above the ground she should be standing on, in the
  * frame that applies where she is.
  *
- * Outdoors that is {@link altitudeAt} — a radius difference from the planet's
+ * Outdoors that is a radius difference from the planet's
  * centre, which is the clearance a child would feel under her feet. Indoors
  * the floors are real coordinates hundreds of metres away where the spherical
  * formula is meaningless, and `world/up.ts` keeps plain `+Y` for them, so this
- * keeps plain `+Y` too — but **against the space's own floor**, via
- * `spaces.ts`'s `worldToLocal`, which is the one owner of where each space's
- * floor is. A bare world `y` was wrong for interiors as well as for the park:
+ * keeps plain `+Y` too — but **against the space's own floor**. Both halves
+ * are `world/up.ts`'s `heightAboveFloor`, which is the one owner of the
+ * question; this wrapper exists only to name what the threshold below is about. A bare world `y` was wrong for interiors as well as for the park:
  * the castle's three floors stand at `BUILDING_BASE_Y` = **−42.97 m**, so two
  * children standing 10.55 m above the mall's floor read `y = −32.42` and were
  * reported as falling. Measured on seed 428 at `31d0fb2a`: the old clause
  * raised 24 problems, 22 of them park children on grass and 2 of them these.
  */
 function depthBelowTheWorld(position: Vector3): number {
-  const { x, y, z } = position;
-  if (isOutdoors(x, z)) return altitudeAt(x, y, z);
-  return worldToLocal(spaceAt(x, z), x, y, z).y;
+  return heightAboveFloor(position.x, position.y, position.z);
 }
 
 /** How long the crowd is run before anybody is asked where they are. */

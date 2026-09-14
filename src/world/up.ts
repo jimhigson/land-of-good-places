@@ -1,6 +1,6 @@
 import { Euler, Quaternion, Vector3, type Object3D } from 'three';
-import { SPACE_GARDEN, spaceAt } from './spaces';
-import { INDOOR_UP, tiltToSphere, upAt } from './terrain';
+import { SPACE_GARDEN, spaceAt, worldToLocal } from './spaces';
+import { INDOOR_UP, altitudeAt, tiltToSphere, upAt } from './terrain';
 
 /**
  * **Which way is up, for a thing that might be indoors or out.**
@@ -34,6 +34,36 @@ export function upFor(x: number, y: number, z: number, target = new Vector3()): 
 /** True when this world position is out in the park, where up leans. */
 export function isOutdoors(x: number, z: number): boolean {
   return spaceAt(x, z) === SPACE_GARDEN;
+}
+
+/**
+ * **How high this point is above the floor under it** — the space-aware twin of
+ * {@link altitudeAt}, and the one owner of "how far up is this" for anything
+ * that can be indoors or out.
+ *
+ * `y - terrainHeight(x, z)` is the idiom this replaces, and it was wrong in
+ * *both* halves of the world once the ground became a sphere:
+ *
+ * - **Outdoors**, world `+Y` and the ground's normal are no longer the same
+ *   direction. `altitudeAt` differences two radii from the planet's centre, so
+ *   the tilt cancels exactly; see its own header for the `1 / cos θ` over-read
+ *   and the wrong-column failure a `y` subtraction gives instead.
+ * - **Indoors**, the floors are real coordinates hundreds of metres out and
+ *   plain `+Y` is right — but a bare world `y` is not, because the floor is not
+ *   at `y = 0`. The castle's three floors stand at `BUILDING_BASE_Y` =
+ *   **−42.97 m**. `spaces.ts`'s `worldToLocal` is the one owner of where each
+ *   space's floor is, so this asks it rather than keeping a second copy.
+ *
+ * Found by `scripts/check-hotel.mts`'s fall detector, which was a bare
+ * `y < -2` and so reported 22 park children standing happily on grass — and 2
+ * castle children standing 10 m *above* their floor — as falling through the
+ * world. Every check that asks "how far above the ground is this thing"
+ * against a fixed threshold wants this function.
+ */
+export function heightAboveFloor(x: number, y: number, z: number): number {
+  const space = spaceAt(x, z);
+  if (space === SPACE_GARDEN) return altitudeAt(x, y, z);
+  return worldToLocal(space, x, y, z).y;
 }
 
 const _eyeTilt = /* @__PURE__ */ new Quaternion();
