@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { GROUND_SPHERE_RADIUS } from '../../core/constants';
+import { asUp, type Up } from './Up';
 
 /**
  * **A position is a 3-vector from the centre of the planet. Nothing else is a
@@ -158,10 +159,12 @@ export class Geo {
    * reachable and this returns `+Y` rather than a `NaN` that would put every
    * prop in the park at an undefined orientation.
    */
-  up(target: Vector3): Vector3 {
+  up(target: Vector3): Up {
     const r = this.radius();
-    if (r === 0) return target.set(0, 1, 0);
-    return target.set(this.cx / r, this.cy / r, this.cz / r);
+    // The one point with no radial. This is a *definition* of up, not an
+    // assumption about it, which is why `geo/` is exempt from check:flat-primitives.
+    if (r === 0) return asUp(target.set(0, 1, 0));
+    return asUp(target.set(this.cx / r, this.cy / r, this.cz / r));
   }
 
   /**

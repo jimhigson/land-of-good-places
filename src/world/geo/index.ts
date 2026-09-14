@@ -55,6 +55,20 @@ export {
 export { constantOver, field, unboundedConstant, type Field } from './Field';
 export { Anchor } from './Anchor';
 export {
+  ON_THE_GROUND,
+  altitudeOfMetres,
+  clearanceBetween,
+  formatAltitude,
+  isAbove,
+  isBelow,
+  metresOf,
+  raisedBy,
+  type Altitude,
+} from './Altitude';
+// `asUp` is deliberately NOT re-exported: Geo.up, Frame.up and Chart.upAt are
+// the only honest suppliers of an `Up`, and they live inside this directory.
+export { type Up } from './Up';
+export {
   advance,
   advancedFrom,
   geodesicLerp,
@@ -63,6 +77,7 @@ export {
 } from './geodesic';
 export {
   altitude,
+  altitudeOf,
   dropToGround,
   groundAt,
   groundRadiusToward,
