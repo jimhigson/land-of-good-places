@@ -25,7 +25,9 @@ This lane makes them impossible to write, so nobody has to find them again.
   (= 4.69 m radius on R = 220) unless given `{ departure, because }`.
 - That acceptance is checked against the real departure, so a signed-off number
   that has gone stale is a build failure with both numbers in the message.
-- `test/geo/core.test.ts`: 27 → 32 tests, all passing.
+- `test/geo/core.test.ts`: **28 → 32** tests, all passing. (An earlier commit
+  message on this branch said 27 → 32; 27 was inferred from a failing run's
+  total rather than read off the base. The base count is 28, measured.)
 
 ### 2. `check:flat-primitives` (commit 2) — armed and proved red
 
@@ -149,6 +151,31 @@ additive: `new Box3()` round possibly-leaning geometry (10 uses in `test/`,
 every one axis-aligned), and a raycast fired along world `+Y`
 (`invariants.ts:5400,6357` — the clause deciding whether the train drives
 through its own bridge).
+
+## The branch is broadly red, and none of it is mine
+
+Measured against an untouched worktree at `90e62c5b`, not assumed:
+
+| | base `90e62c5b` | this branch |
+|---|---|---|
+| `check:npc-perch` | **exit 1** | exit 0 (fixed here) |
+| `check:speech-bubbles` | **exit 1**, "0 bubble(s) drawn in 120s" | **exit 1**, identical |
+| `test:procgen` | **128 failed**, 501 passed (629) | **128 failed**, 513 passed (641) |
+
+- **`check:speech-bubbles`** is the next chain step after `check:crowd`, so it
+  was *masked* by `npc-perch` until that was fixed. Same shape as fault 2 inside
+  `npc-perch`: fixing one red uncovers the next. It is failing honestly — it
+  refuses to pass vacuously on a silent park — and the real question is why no
+  child speaks. Not investigated here.
+- **`test:procgen`**: the failure count is **identical**, and the +12 passing is
+  fully accounted for (geo 28 → 40: 4 Chart tests + 8 type tests). Per-file
+  counts on the seed suites are unchanged at 93 each, so **nothing was silently
+  skipped** — that reconciliation is the check CLAUDE.md asks for, and it is
+  what turned up the 27-vs-28 correction above.
+
+The 128 are systemic sphere-rebuild invariant failures (trees interpenetrating,
+paths off grid axes, Rail Race supports, the gate arch) across all five seeds.
+They belong to the conversion lanes, not to this one.
 
 ## Rules I am working under
 
