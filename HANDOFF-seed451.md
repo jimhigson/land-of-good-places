@@ -90,3 +90,65 @@ through the same explainer), `diag-which-leg.mts` (which drawn run crosses, by
 run id and endpoints), `pinch.mts` (limb-to-limb gaps), `leadcheck.mts` (own rail
 point vs nearest rail), `diag-seed-sweep.mts`, `diag-bridges.mts` (bridged, with
 the `covers`-can-say-no control).
+
+## The bridge ramp grade: diagnosed precisely, attempted, and reverted
+
+### Root cause, measured on every crossing of seeds 326, canonical and 11
+
+`WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT` = **10.57 m** assumes the
+ramp descends `BRIDGE_RISE` (4.06 m). True only when the ground at the ramp's
+foot is the ground at the crossing. **On a sphere it falls away**, so the
+downhill ramp must descend `BRIDGE_RISE + the fall`.
+
+| | downhill side | uphill side |
+|---|---|---|
+| mean grade built | **0.505 – 0.638** | 0.073 – 0.195 |
+| budget | 0.384 | 0.384 |
+| rise to the foot | **6.63 – 9.41 m** | ~1.4 – 2.9 m |
+| run needed | **17.3 – 21.0 m** | 10.6 m |
+| run sized | 10.6 m | 10.6 m |
+
+The 1.6–2.0× shortfall in run is exactly the 1.3–1.66× overshoot in mean grade.
+Every failure is downhill; the uphill side over-provisions and is harmless.
+
+**`HUMP_BLEND` is NOT at fault and must not be touched to "fix" this.** Measured
+peak/mean on those same ramps: **1.33, 1.33, 1.37, 1.37, 1.38** against the 1.333
+it claims. The model of a hump is right; the length it is given is wrong.
+
+### The attempt, and why it is reverted rather than shipped
+
+Made the **real search**'s acceptance per-side and terrain-aware
+(`rampRunNeededAt`, comparing each side's reach against
+`(BRIDGE_RISE + fall) / MAX_RAMP_GRADIENT + margin`). Result:
+
+**9 of 10 seeds stopped building**, every one with:
+
+```
+bridges: no walkable bridge fits at proven crossing railD ... The planner
+proved this site; the real search refused it — find the drift between them
+(issue #414).
+```
+
+Which is precisely correct and precisely my fault: `crossingPlanSolve.ts`'s
+`SITE_RAMP_FLOOR` still uses the flat-park number, so the planner proves sites
+the real search then refuses. **Two definitions of "how long must a ramp be",
+and I made one of them right.** The existing error message caught it
+immediately, which is the check doing its job.
+
+### What finishing it actually requires, and the risk to weigh first
+
+Both definitions have to move together, in one commit:
+`bridgeFootprint.ts`'s `WALKABLE_FLOOR`/`MIN_RAMP_RUN`/`MIN_BRIDGE_HALF_LENGTH`
+and `crossingPlanSolve.ts`'s `SITE_RAMP_FLOOR`/`probeReach` — a module-level
+constant becoming a per-site, per-side, terrain-dependent quantity.
+
+**The risk is site feasibility collapse, and it should be measured before the
+work is started.** Roughly doubling the required run on downhill sides makes far
+fewer points on the loop admit a bridge — and seed 451 already proves only
+**2 of 175**. If a seed proves zero, `crossingPlanSolve.ts` throws "a park with
+no way over the railway is invalid", and the cure is a warp vector or the seed
+leaving the pool. `scripts/diag-sites-sweep.mts` counts feasible points per seed
+and is the cheap way to answer that question first.
+
+`MIN_BRIDGE_HALF_LENGTH` also feeds two-bridge spacing, so longer ramps mean
+sites must sit further apart — a third consequence to measure, not assume.
