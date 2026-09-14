@@ -96,6 +96,27 @@ export function isOutdoors(x: number, z: number): boolean {
  * magnitude from a centre is not a substitute for a signed height.** It is the
  * right quantity for *differences between two real places* and the wrong one
  * for an ordering that has to survive an out-of-range value.
+ *
+ * ## Where this function is the WRONG answer — read before reaching for it
+ *
+ * A radius cancels the planet **only** between two points in the *same column*,
+ * or two points both *on the ground*. It does not cancel it between a point in
+ * the air and a point beside it. Measured: two points at the same world `y`,
+ * 1.3 m apart radially at 90 m out, differ by **0.54 m** of `walkHeight`.
+ *
+ * So this is right for a lattice step, a level gap, a stair riser — and
+ * **wrong for `topIsAbsolute`**, where a collider's declared top is compared
+ * against a mover standing beside it, which is neither case. That comparison
+ * wants height **above the ground** — an altitude — not a radius. The collision
+ * engineer measured the consequence of getting it the other way: a 1.1 m fence
+ * approached from the *inward* side goes **ghost from 80 m out**, and a probe
+ * that only walks at it from outward reports all clear, which is why it had
+ * never been found.
+ *
+ * Two quantities, and the redesign needs both named apart: `altitudeAt` for
+ * *how high is this above the ground under it*, this for *how big is the step
+ * between these two places*. Neither substitutes for the other, and the whole
+ * sweep that produced this file turned on the distinction.
  */
 export function walkHeight(x: number, y: number, z: number): number {
   if (spaceAt(x, z) !== SPACE_GARDEN) return y;
