@@ -153,6 +153,7 @@ import {
 // A leaf module (imports nothing), so it cannot pin the park's seed the way a
 // static import of `train/route.ts` would — see that constant's own note.
 import { TRAIN_MIN_TURN_RADIUS } from '../../src/world/train/turning.ts';
+import { RAIL_CORRIDOR_CLEARANCE } from '../../src/world/train/clearance.ts';
 // Safe to import statically: `slide/landing.ts` deliberately reaches nothing
 // seeded — see the note on `PitCircle`. It takes the pit as an argument for
 // exactly this reason, so importing it here cannot fix the park's seed before
@@ -7191,6 +7192,70 @@ const theWalkInFromTheGateCrossesWhereItWasPlannedTo: Invariant = (facts) => {
  */
 const SITE_IDENTITY_TOLERANCE = 0.01;
 
+/**
+ * **The railway never runs closer to itself than a path can pass between.**
+ *
+ * A loop that doubles back near itself leaves a strip that looks like park and
+ * is not: the street lattice keeps a path's centre `RAIL_CORRIDOR_CLEARANCE`
+ * from the track on **each** side, so two limbs closer than twice that have no
+ * walkable corridor between them, and everything beyond is walled off from the
+ * rest of the park.
+ *
+ * Found by seed 451 at park scale 1, which did not build at all: the loop ran
+ * back past itself for **35 m at between 3.95 and 7.41 m**, Sunny Side station
+ * stood beyond the wall, and its own spur could not reach its own platform
+ * without crossing the railway where no bridge could be built. The error that
+ * surfaced named a coordinate 75 m around the loop from the cause, which is why
+ * this is worth asserting directly rather than leaving to whatever fails
+ * downstream.
+ *
+ * Measures the **built** route, and takes its threshold from the game
+ * (`RAIL_CORRIDOR_CLEARANCE`) rather than from the loop solver's own
+ * `RAIL_SELF_CLEARANCE` — so the two cannot drift into agreeing with each other
+ * while both being wrong.
+ */
+const theRailwayLeavesRoomBesideItself: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const route = facts.world.train.route;
+  const needed = RAIL_CORRIDOR_CLEARANCE * 2;
+  // Two samples belong to the same limb unless they are well apart along the
+  // loop; `SAME_LIMB` is generous so a gentle curve is never mistaken for a
+  // doubling-back, and the check can then only ever UNDER-report.
+  const SAME_LIMB = 25;
+  const STEP = 1;
+  const a = new Vector3();
+  const b = new Vector3();
+  let worst = Infinity;
+  let worstAt = '';
+  let examined = 0;
+  for (let d = 0; d < route.length; d += STEP) {
+    route.pointAt(d, a);
+    for (let e = d + SAME_LIMB; e < route.length; e += STEP) {
+      if (Math.abs(route.wrap(e - d + route.length / 2) - route.length / 2) < SAME_LIMB) continue;
+      examined += 1;
+      route.pointAt(e, b);
+      const gap = Math.hypot(a.x - b.x, a.z - b.z);
+      if (gap < worst) {
+        worst = gap;
+        worstAt = `railD ${d.toFixed(0)} (${a.x.toFixed(1)}, ${a.z.toFixed(1)}) to railD ${e.toFixed(0)}`;
+      }
+    }
+  }
+  process.stderr.write(
+    `[rail self-clearance] ${examined} sample pair(s) at least ${SAME_LIMB} m apart along a ` +
+      `${route.length.toFixed(0)} m loop; closest approach ${worst === Infinity ? 'n/a (loop too short to double back)' : worst.toFixed(2) + ' m'} ` +
+      `against ${needed.toFixed(1)} m needed for a path to pass between\n`,
+  );
+  if (worst < needed) {
+    complaints.push(
+      `the railway runs back within ${worst.toFixed(2)} m of itself — ${worstAt} — against the ` +
+        `${needed.toFixed(1)} m a path needs to pass between two limbs ` +
+        `(2 x RAIL_CORRIDOR_CLEARANCE). Whatever is beyond that pinch is walled off from the park.`,
+    );
+  }
+  return complaints;
+};
+
 const everyProvenBridgeSiteKeepsItsBridge: Invariant = (facts) => {
   const complaints: string[] = [];
   const train = facts.world.train;
@@ -10035,6 +10100,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theGroundIsTheSphereItClaimsToBe,
   ],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
+  [
+    'the railway leaves room to walk beside itself',
+    theRailwayLeavesRoomBesideItself,
+  ],
   ['every castle corner turret is solid', castleTurretsAreSolid],
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
