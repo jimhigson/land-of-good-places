@@ -79,7 +79,21 @@ world UI and was left alone.
 
 ## Verified
 
+Every run below was done **twice — once on this branch and once on its base at
+`31d0fb2a`** — because the base is already red (inventory §0) and a bare exit
+code from a red branch says nothing. What is being asserted is *parity*, not
+green.
+
 - **`tsc --noEmit`** and **`typecheck:test`** clean.
+- **`pnpm run check`**: both runs execute the **same 20 steps in the same
+  order** and both die at `check:npc-perch` on the same pre-existing
+  `railD 0.0` crossing throw inside `new World`. The chain itself is
+  **65 steps, step set identical to the base's** — parsed from the `scripts`
+  object, not grepped; no step added, none dropped, and the full 122-name
+  script set is equal.
+- **`pnpm run check:coplanar`** and **`pnpm run check:swept-bus`**: both die in
+  `new World` on that same throw, on this branch and on the base, with the
+  identical message. Neither can assert anything until §0 is fixed.
 - **`pnpm run test:procgen`**: `49 failed | 269 passed | 279 skipped`, failing
   set **identical to the base's**, name for name and count for count (the base
   is red before this branch — inventory §0, the `railD 0.0` crossing throw).
