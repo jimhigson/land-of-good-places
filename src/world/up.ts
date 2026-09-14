@@ -1,4 +1,5 @@
 import { Euler, Quaternion, Vector3, type Object3D } from 'three';
+import { Frame, Geo, type Anchor } from './geo';
 import { SPACE_GARDEN, spaceAt } from './spaces';
 import { INDOOR_UP, tiltToSphere, upAt } from './terrain';
 
@@ -128,3 +129,54 @@ export function standOnGround(object: Object3D): void {
   if (spaceAt(x, z) !== SPACE_GARDEN) return;
   object.quaternion.premultiply(tiltToSphere(x, y, z, _tilt));
 }
+
+const _frameGeo = /* @__PURE__ */ new Geo();
+
+/**
+ * **A `Frame` at a world coordinate — the space-aware constructor, and the one
+ * every `Anchor` outside `geo/` should be built through.**
+ *
+ * `Frame.setFromBearing` always leans onto the sphere, because `geo/` is the
+ * sphere's vocabulary and knows nothing about rooms. Interiors are real
+ * coordinates six hundred metres out, where that lean is fifty-six degrees, so
+ * a hotel bedroom built through it would be on its side. This file already owns
+ * that branch for `upFor`, `faceOnGround` and `standOnGround`; this is the same
+ * branch, for the one type that carries a position *and* an orientation.
+ *
+ * Note what is **not** duplicated here: outdoors this delegates to
+ * `Frame.setFromBearing` rather than re-deriving the tilt composition, so there
+ * is exactly one definition of "what a bearing means on a sphere" and this adds
+ * only the question of whether to ask it. Indoors the tilt is simply not
+ * applied, so the frame collapses to a plain yaw about `+Y` and an `Anchor`
+ * built from it is bit-identical to the `position.set` + `rotation.y` it
+ * replaces.
+ *
+ * Safe every frame: it writes both halves outright and never reads what was
+ * there, which is the distinction `faceOnGround`'s docblock is about.
+ */
+export function frameFor(
+  x: number,
+  y: number,
+  z: number,
+  bearing = 0,
+  target = new Frame(),
+): Frame {
+  if (spaceAt(x, z) !== SPACE_GARDEN) {
+    target.at.setFromWorld(x, y, z);
+    target.q.setFromAxisAngle(INDOOR_UP, bearing);
+    return target;
+  }
+  return target.setFromBearing(_frameGeo.setFromWorld(x, y, z), bearing);
+}
+
+/**
+ * Put an anchor at a world coordinate, leaning onto whatever ground is there.
+ *
+ * The three-line form of `frameFor` + `Anchor.setFrame` that most call sites
+ * want, with no `Frame` to keep hold of. Safe every frame; allocates nothing.
+ */
+export function anchorAt(anchor: Anchor, x: number, y: number, z: number, bearing = 0): void {
+  anchor.setFrame(frameFor(x, y, z, bearing, _frameScratch));
+}
+
+const _frameScratch = /* @__PURE__ */ new Frame();
