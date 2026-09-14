@@ -3,6 +3,7 @@ import { isTouchDevice } from '../core/device';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Selection } from '../world/Selection';
 import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../world/interact';
+import { upFor } from '../world/up';
 
 /**
  * The action chips — GAME_DESIGN.md's SELECTION RULE, step 2: *"once selected,
@@ -188,6 +189,8 @@ export class ActionChips implements GameSystem {
    * at clamping then parked it underneath the Menu button. A button she cannot
    * reach is worse than no button, so riding has a home of its own.
    */
+  private readonly chipUp = new Vector3();
+
   private place(zone: InteractZone): boolean {
     const width = this.root.parentElement?.clientWidth ?? window.innerWidth;
     const height = this.root.parentElement?.clientHeight ?? window.innerHeight;
@@ -207,7 +210,15 @@ export class ActionChips implements GameSystem {
       y = height - EDGE_MARGIN;
     } else {
       const lift = Math.min(MAX_LIFT, Math.max(MIN_LIFT, 1.1 + zone.pickRadius * 0.3));
-      this.projected.set(zone.x, zone.y + lift, zone.z).project(this.activeCamera());
+      // Lifted along the up **where the thing stands**, not the world's. The
+      // projection was always right; the point being projected was not, and it
+      // drifted up to `MAX_LIFT · sin θ` towards the park's centre, so out at
+      // the rim "Ride it!" sat beside the ride rather than over it.
+      upFor(zone.x, zone.y, zone.z, this.chipUp);
+      this.projected
+        .set(zone.x, zone.y, zone.z)
+        .addScaledVector(this.chipUp, lift)
+        .project(this.activeCamera());
       x = (this.projected.x * 0.5 + 0.5) * width;
       y = (1 - (this.projected.y * 0.5 + 0.5)) * height;
 
