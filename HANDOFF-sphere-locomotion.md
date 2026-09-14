@@ -132,7 +132,14 @@ it presents as the walk sticking rather than as a units bug.
 4. **A deck hop is not covered** by `check:radial-hop` — `SimPlayer` is fed
    `terrainHeight`, so every hop it measures is off the grass. Same code path,
    nothing would notice if it broke. The check announces this on every run.
-5. **`check:deck-fallthrough` only runs at 10–40 m from the origin** (its ramp
+5. **`check:deck-fallthrough` only runs at 10–40 m from the origin**, and my
+   attempt to close that from outside is unfinished — `scratch/rim-deck.mts`,
+   whose head explains exactly how far it got and what is wrong with its
+   geometry. **Its numbers are not quotable yet.** The detector in it is sound
+   and controlled; the deck it builds is not a shape the park contains. Finish
+   it by building the deck at constant height above the *local ground* along a
+   geodesic, which is what a bridge is, rather than at a constant world-`y`
+   gradient over chart x. Original note follows: (its ramp
    is `RAMP_X0 = -40`, length 30, `z = 0`), so the worst lean it ever sees is
    **10.5°** against the park's 45.5°. It is the check that caught the earlier
    re-derive-from-altitude runaway at 401 of 1280 runs, and it is green here —
@@ -200,14 +207,24 @@ this section is the correction rather than a rewrite of history.
   re-derive-position-from-altitude runaway at **401 of 1280 runs**; it stays
   green, which is the signal that an integrated impulse does not have that
   shape.
-- **`test:procgen`** — **160 passed, 0 failed, 465 skipped**, identical
-  non-passing sets by name to `714e7d4e`, wall clock 5:16 vs 5:15. **Read that
-  465 before trusting the parity**: `new World` throws in `crossings.ts`
-  (`railD 0.0 (0.0, 125.8)`, no proven bridge site) on the base as well as on
-  this branch, so every park-harness test dies at construction.
-  `eng/radial-collide` bisected it to the merge `502ec802` — the gate arch's
-  colliders moving the path router's answer. Not radial, not mine, **and it
-  means this parity gate covers 160 of 625 tests.**
+- **`test:procgen`**, each run **alone** (see the section above for why that
+  matters):
+
+  | | passed | failed | skipped |
+  |---|---|---|---|
+  | base `714e7d4e` | 297 | **49** | 279 |
+  | this branch | 315 | **49** | 279 |
+
+  **Non-passing sets identical by name.** The 18 extra passes are exactly
+  `test/entities/gravity.test.ts`. The collision engineer measured the same 49
+  on both sides independently, and `eng/radial-collide` recorded 49 before
+  either of us.
+
+  The 49 failures and 279 skips are the base's own: `new World` throws in
+  `crossings.ts` (`railD 0.0 (0.0, 125.8)`, no proven bridge site), so every
+  park-harness test dies at construction. `eng/radial-collide` bisected it to
+  the merge `502ec802` — the gate arch's colliders moving the path router's
+  answer. Not radial, not mine.
 - **`pnpm run check`** — dies at `check:npc-presence` with exit 1 **on the base
   too, at the identical step**, for the same reason. My two new steps run and
   pass before it.
