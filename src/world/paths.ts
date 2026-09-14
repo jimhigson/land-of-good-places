@@ -3269,8 +3269,14 @@ function carriesAnOffLatticeStreetRun(points: readonly (readonly [number, number
  * this, named and shared, rather than a second patch — the next search that
  * needs a terminus asks here.
  *
- * Nothing here stops the lattice routing **over** a bridge: crossing is a
- * question about edges, and this is only about where a walk may come to rest.
+ * **The distinction, stated plainly, because it is the thing a later
+ * "simplification" will undo:** crossing a bridge is a question about **edges**;
+ * stopping on one is a question about **nodes**. This screens nodes only.
+ * Nothing here stops the lattice routing *over* a bridge, and nothing here may
+ * be turned into a blanket refusal of bridge ground — `nodeOk` tried exactly
+ * that, and refusing the deck surface outright **cost seed 24 its only bridge**,
+ * because a crossing's own approach has to stand on it.
+ *
  * A target left with no reachable terminus makes its planner return `null`, and
  * the caller falls back exactly as it already does for a doormat in a pocket —
  * a different decision, rather than a route drawn into a wall.
