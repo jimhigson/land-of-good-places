@@ -88,6 +88,83 @@ defect in the bend itself: the bend is proven by `check:castle-bend`, and
 honest framing for them: the obstacle did not grow, it was always there and is
 now being measured.
 
+## The rest of the lane, audited by measurement (15 Sep)
+
+`scripts/rigid-audit.mts` measures each structure's own footprint radius off the
+built park and compares it against the 4.69 m a flat patch is honest to. Run it
+before bending anything else — the answers were not what the brief assumed.
+
+| structure | radius | departs | verdict |
+|---|---|---|---|
+| building-facade | 24.20 m | 133.5 cm | **bent** |
+| the-land-hotel-outside | 20.69 m | 97.5 cm | **bent** |
+| entrance-arch | 13.22 m | 39.8 cm | child of the facade, bends with it |
+| park-gate-arch | 7.42 m | 12.5 cm | **bent** — but see the gap below |
+| fountain | 6.38 m | 9.2 cm | **not done** — see below |
+| facePaintStall | 3.40 m | 2.6 cm | inside tolerance, left rigid |
+| welcome-sign | 3.06 m | 2.1 cm | inside tolerance, left rigid |
+| bus-shelter | 2.74 m | 1.7 cm | inside tolerance, left rigid |
+| keychainShop | 1.98 m | 0.9 cm | inside tolerance, left rigid |
+
+`railRace:arch` measures 219 m and is the rail race's own ring — another lane.
+
+### The wall does NOT need bending, and the premise that it did was mine
+
+- All **165** real wall runs are at most **8.4 m**, under the 9.38 m a rigid box
+  may honestly be. Worst sphere sag at a run's middle: **4.0 cm**, inside the
+  5 cm tolerance. The terrain's own waves wander up to **9.3 cm** off the
+  chord — more than the sphere contributes.
+- The flat `base` datum leaves at most **0.6 cm** of daylight under any run,
+  measured along the drawn underside of all 165; **zero** runs exceed 5 cm. It
+  errs entirely toward burial, which is invisible and solid.
+- The 37.3 m "wall run" that started this was a **bridge parapet**
+  (`wallTop`/`coping` in `train/bridges.ts`, the other engineer's lane), and
+  "the ground falls 12.44 m along it" is what a bridge is *for*. My first probe
+  matched on a loose name regex and measured bridges.
+
+I built the segmented-and-bent wall first, then reverted it. Shipping it would
+have added vertices and risk to 165 runs already inside tolerance.
+
+### The fountain: measured, and deliberately left alone
+
+6.38 m radius, 9.2 cm departure — over the limit, so by the rule it should bend.
+It is not bent, for reasons that are all measured:
+
+- **Its water surface is vertex-animated.** `update()` rewrites every water
+  vertex each frame — `array[i + 1] = ripple`, from a stored flat `waterBase` —
+  so a bend written into it is overwritten on the first tick while `waterBase`
+  stays unbent. It would not be subtly wrong; it would simply not take.
+- **The water disc is 5.84 m and departs 7.7 cm**, so it is *not* small enough
+  to skip honestly. I wrote a comment claiming it was "about 2 m, ~2 cm" and
+  that claim was wrong — exactly the unverified justification this lane keeps
+  finding. Measured, then deleted.
+- **So a partial bend is worse than none**: bending the stonework while the
+  water stays flat makes the water plane disagree with its own basin by up to
+  7.7 cm, which reads as water floating above or sunk below the rim.
+- It also costs **11.48 ms** of park-build budget (65 meshes, 6 geometry
+  clones), against a `check:park-boot` ceiling already at its limit.
+
+**The correct fix** is to make the ripple bend-aware: store `waterBase` as bent
+positions and displace along the local up at each vertex, so the water curves
+with its basin. That touches wading, splashes and the coin toss
+(`waterSurfaceY`, `waterLevel`, `intoFountain`), which is why it is its own
+piece of work rather than a rider on this one.
+
+### Gate arch — bent, but NOT visually confirmed
+
+Measured and build-verified: 7.42 m radius, one tilt was misplacing its outer
+piers by **12.5 cm**. Its colliders stay honest — bending moves a pier foot
+horizontally by `d − R·sin(d/R)` = **1.4 mm** at that radius, and the drop is
+vertical while the collider is a footprint.
+
+**I could not get it on screen.** Four attempts via `/view` and `/spawn` at its
+measured position (0, −52.65, 142.80) on the canonical seed showed the rail
+race, paths and walls but never the arch. `Entrance.ts:317` does pass
+`onParkSphere: true`, so the bend does run; the likely explanation is that the
+entrance group is hidden outside the arrival sequence, which both `/view` and
+`/spawn` skip. **This needs a QA pass that watches the arrival.** Reported
+rather than claimed.
+
 ## Not done
 
 Boundary wall + pillars (`Scenery.ts` ~2294, long runs, one `standOnSphere`
