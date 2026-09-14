@@ -1,44 +1,79 @@
-# HANDOFF — bend building exteriors to the sphere (eng/bend-exteriors)
+# HANDOFF — bend building exteriors to the sphere
 
-Branch off `feat/sphere-combined`. Jim's brief: a building wider than ~4.7 m must
-**bend**, not tilt rigidly. The castle's four corner towers each stand along their
-*own* local up and splay outward ~3°.
+- **Branch** `eng/bend-exteriors`, off `feat/sphere-combined`.
+- **Model: Opus 5 (1M context)**, chosen by the Overseer. A replacement runs the
+  same model.
+- Worktree `.claude/worktrees/eng-bend-exteriors`. A second worktree,
+  `.claude/worktrees/bend-baseline`, is a detached checkout of the base commit
+  kept **only** for baseline measurements — remove it when done.
 
-## The finding that shapes the whole job
+## What is done
 
-Every large exterior today is `standOnSphere(group)` — **one** rigid tilt taken at
-the group's own position (`terrain.ts:329`). That is correct only for something
-small enough that the tangent plane is a good approximation over its footprint.
-The measured threshold is 5 cm of departure at 4.69 m of radius.
+`src/world/geo/bend.ts` — the primitive. `bentFrame` places a part by the
+chart's exponential map and orients it by the one Rodrigues rotation that
+parallel-transports the anchor's whole basis along the geodesic to it, so each
+part stands on its own local vertical. `bendOntoPlanet` reaches **per-instance
+matrices and per-vertex positions**, because the castle's four towers are four
+*instances* and its curtain walls are one merged `ExtrudeGeometry` covering all
+four sides — there is no per-tower or per-wall object to lean.
 
-Call sites found (grep `standOnSphere|tiltToSphere|standOnGround`):
-- `building/layout.ts:208` — castle, via `deckClearanceOverFootprint` + one `upAt`
-- `hotel/*`, `boundary.ts`, `wallRuns.ts`, `Scenery.ts:2294/2303` (wall + coping)
-- `entrance/gateArch.ts:180`, `entrance/Entrance.ts:416/529`
-- `Fountain.ts:191`, `KeychainShop.ts:688`, `FacePaintStall.ts:170`,
-  `minigames/stalls.ts:215`, `train/station.ts:135` (other engineer's lane)
+Applied to: **castle facade** (`Building.ts`), **hotel tower**
+(`Hotel.ts`).
 
-## The primitive being built
+`layout.ts` owns the castle's frame (`CASTLE_FACADE_FRAME` / `_CHART` /
+`_BASE_ALTITUDE`), built by calling `placeOnSphere` — the existing owner of the
+rigid placement — with the same arguments `standInPlot` uses. Both the drawn
+mesh and `CASTLE_TOWERS` bend against that one chart. Verified bit-identical to
+the scene's own world transform (position gap 0.0000 m, quaternion equal to 5 dp).
 
-`src/world/geo/bend.ts` — `bentFrame(centre, lx, ly, lz, out)`:
-walk the geodesic from the structure's centre frame along its own tangent by
-`hypot(lx,lz)`, parallel-transporting the heading (`geodesic.ts`'s `advance`
-already does the transport), then rebuild the frame at the arrival point so the
-part's authored local direction still points where it did. Derivation:
+`check:castle-bend` is new and **in the chain** (parsed: 65 steps before, 66
+after, zero lost).
 
-    u = unit(lx, 0, lz);  b = atan2(lx, lz)
-    h = q_centre · u                      // world tangent at the centre
-    advance(g, h, hypot(lx,lz))           // g moves, h is transported
-    tilt = quat(+Y -> up(g))
-    h' = tilt⁻¹ · h;  ψ = atan2(h'.x, h'.z)
-    q   = tilt · Ry(ψ - b)                // so q·u == h exactly
-    then lift by ly along up(g)
+## Measured, on the built park
 
-`q·u == h` is the control worth asserting: it is the statement that the part
-still points where the author meant, measured after the bend rather than assumed.
+- turrets splay **7.977°**, each on the radial under its own foot to **0.0084°**
+- wall base course holds one radius to **0.1 cm** against **65.3 cm** for a rigid chord
+- what the rigid tilt cost: **0.51 m** at a tower foot, **1.14 m** 14.8 m up
 
-## Status
-- [ ] bend.ts + its unit control
-- [ ] castle exterior: towers splay
-- [ ] long walls segmented
-- [ ] hotel, boundary, gate arch, fountain
+Red-run proof (delete the `bendOntoPlanet` call in `Building.ts`), against the
+rigid castle on the canonical seed, footprint ±12.225 × ±9.225 m:
+splay **0.0000°**; turret up **3.8796°** off its own radial; wall base course
+**35.4 cm** against its own prediction of **35.5 cm** — agreement to 1 mm, which
+is the strongest evidence the instrument measures what it claims. Exit 1/0.
+
+## THE BIG FINDING — pre-existing, not caused here
+
+`CASTLE_TOWERS` has been describing **vertical** cylinders while the drawn
+towers were **already tilted 36°** by the plot's `standOnSphere`. Measured on
+the *untouched base commit*: drawn bodies stand along up `(0.439, 0.802,
+-0.404)`, centres spanning 18 m of world `y`; the solids claim all four vertical
+over y −43.0…−32.4, so `tower-body-2`'s drawn centre (−29.7) is already above
+the top of its own collider, and axes are up to 4.6 m out in x/z.
+
+This branch's leaning `TowerSolid` fixes it. **Consequence:** the ginormous
+slide can no longer solve on **seed 326** — it is now held to the towers that
+are really there. All ten ladder rungs fail at the same point, so length was
+never the free variable. Needs the slide's owner: fix the generator or replace
+the seed, and write down why.
+
+## CI STATE — the base branch is already red
+
+Measured on the base commit, not on this branch:
+- `check:park` — **4 regressions** (`poi.stranded` 6, `rail.walkable` 7,
+  `anchor.reach:hotel` 2.2, `anchor.reach:ferrisWheel` 1.9)
+- `test:procgen` — **128 failed / 501 passed**
+
+This branch: `check:park` has the same four and no others (`rail.walkable`
+improved 7 → 3, deterministic over two runs). `test:procgen` 108 failed, with
+the seed-326 suite throwing as above.
+
+## Not done
+
+Boundary wall + pillars (`Scenery.ts` ~2294, long runs, one `standOnSphere`
+each and a flat `base = min(terrainHeight)` datum), gate arch
+(`gateArch.ts:180`), bus shelter (`Entrance.ts:416/529`), fountain, shops.
+`segmentsFor`/`segmentsAlong` in `bend.ts` exist for the long-run case and are
+unused so far. Stay out of `train/` — another engineer.
+
+**No visual QA has been done. I was not given the browser.** That is a stop
+sign, not a footnote: nobody has looked at the bent castle on a rendered frame.
