@@ -165,6 +165,58 @@ entrance group is hidden outside the arrival sequence, which both `/view` and
 `/spawn` skip. **This needs a QA pass that watches the arrival.** Reported
 rather than claimed.
 
+## check:park-boot — root-caused, and it is NOT the wall-clock bug
+
+**PR #624.** Ruled out the #606/#615 shape by measurement rather than by reading:
+`process.threadCpuUsage()` appears **nowhere** in this base, so that fix is not
+here — but instrumenting each slice with both clocks shows the failing slice is
+**`wall 21.21 ms, cpu 21.11 ms, descheduled 0.10 ms`**. It is real CPU. The clock
+is honest; widening or re-basing the measurement would fix nothing.
+
+It is the other shape: **the work at boot genuinely exceeds the ceiling**, and
+specifically it is work the budget *cannot* police. The failing slice does
+**0 generator work units in 21 ms**, during "joining up the paths" — and the
+tasks running at that stage (`parkGeneration.ts` ~285-330) are **dynamic
+`import()`s**, whose module evaluation is indivisible. You cannot yield inside an
+ES module evaluation, so whatever it costs lands whole inside whichever budgeted
+slice the microtask resolves in, attributable to no step.
+
+Ranked by evaluation cost under the TS resolver (inflated vs the bundled build,
+but the ranking holds): `slide/solve` 547 ms, `paths` 256 ms, `pathGraph` 93 ms,
+everything else under 7 ms.
+
+**It is flaky at the ceiling**: five consecutive runs on this branch gave 18.7,
+18.8, 17.5, 19.0 and **21.2 ms** — four passes and a fail. On the untouched base:
+21.9 and 22.1 ms. So the branch is *faster* and still fails, and flaky is failing.
+
+**Two honest fixes, neither in a geometry lane**: make `pathGraph`'s top-level
+evaluation cheap by moving its work into a unit-counted task, or have the
+scheduler resolve module imports outside a budgeted slice, since a step budget
+cannot meaningfully police a module evaluation. Do **not** simply raise the
+ceiling — a 21 ms hitch is a real stutter on a phone, which is what the check
+exists to catch. The related trap a reviewer caught on #615 still applies to
+whoever does this: a **single-slice task** can blow its budget and pass, so any
+corroboration must accept "every slice the task ran".
+
+## check:fountain-hop seed 131 — the check's datum was broken, not the hop
+
+Fixed on this branch. The route is entirely correct: it reaches the goal, its
+last waypoint is the fountain's centre to **0.000 m**, and `sample()` there
+returns **0.0201** — exactly the `goalY` handed to `findRoute`.
+
+`NavGrid.lastRouteEndY` returns `nodeHeight[endNode]`, the **lattice node's**
+stored level snapped to the goal cell's nearest level within `MAX_LEVEL_GAP`,
+while the check compared it to an exact point sample with a **10 mm** tolerance.
+The lattice's level fidelity is coarser than that, so the tolerance was tighter
+than the thing it measured could ever be and passed elsewhere by coincidence.
+**`NavGrid`'s own docblock says `lastRouteEndY` is "the goal's own level when it
+was reached", which is not what it returns** — worth fixing at source by whoever
+owns nav.
+
+The clause now asserts what its message always claimed — wading surface rather
+than paving, 0.70 m apart — and was proved red by forcing the end onto the
+paving: 0.706 m from the water against 0.000 m from the paving.
+
 ## Not done
 
 Boundary wall + pillars (`Scenery.ts` ~2294, long runs, one `standOnSphere`
