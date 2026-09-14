@@ -122,7 +122,7 @@ you look, never instead**: that screenshot is why.
 | §3.1 `tapMarker.ts:57,61` | `TapMarker.placeAt` owns position-and-lean, through `upFor`, **assigned** rather than pre-multiplied because `moveTo` runs every frame |
 | §3.1 `rainbowRing.ts:140` | the lean moved into the pool's own copy of the geometry, freeing each mesh's quaternion for the ground it was fired on; `RISE` and `GROUND_CLEARANCE` run along that up. `rainbowRingGeometry` itself is untouched — `Highlights.ts` shares it |
 | §3.1 `rainbowRing.ts:290,317` | the star burst's plane and arc lean with the ground at the burst point |
-| §1 `NavGrid` `MAX_STEP` | `nodeAltitude` beside `nodeHeight`; every step, level, gap and tie-break comparison moved onto it. `nodeNearestAltitude` is the primitive; `lineCost` carries an altitude between cells instead of a `y` measured in the previous column. **See correction 2** |
+| §1 `NavGrid` `MAX_STEP` | `nodeRadius` beside `nodeHeight` — `planetRadiusAt`, not `altitudeAt`, for the reason in correction 3. Every step, level, gap and tie-break comparison moved onto it; `nodeNearestRadius` is the primitive; `lineCost` carries a radius between cells instead of a `y` measured in the previous column. Guarded by `scripts/check-outward-routing.mts`, now in the `check` chain. **See corrections 2 and 3** |
 
 ### Correction 1 — §0 is not "not a radial finding", and it does not pre-date the sphere work
 
@@ -157,7 +157,9 @@ anybody's regression either.
 
 ### Correction 2 — the headline "tap-to-move stops pathing outward" was wrong
 
-Ranked third of the three things Eleri meets today. Measured on the built
+Ranked third of the three things Eleri meets today, as a control that refuses.
+It is not that — though correction 3 shows the row is worse than filed for a
+different reason entirely. Measured on the built
 terrain over 32 bearings, and printed by `scripts/check-outward-routing.mts` on
 every run:
 
@@ -184,6 +186,70 @@ It is fixed regardless — a test spending 91% of its budget on the planet is on
 retune away from giving wrong answers, and the rings genuinely stand at 157 m —
 but it was never a control that refused, and it should not have been ranked
 against two faults that are wrong on every single tap.
+
+### Correction 3 — the same row is *much* worse than either of us said, in the other direction
+
+Found by the engineer on the collision area, not by me, and it is the finding
+that justifies the row rather than the one it was filed under.
+
+The wrong datum does not only refuse flat ground outward. **It admits real
+ledges outward**, and unlike the refusal that has been live across most of the
+park rather than ten metres outside it. Measured over 1536 neighbour steps per
+radius (`check:outward-routing` prints it every run), taking the weakest of all
+eight neighbours so it is the worst case a router could pick:
+
+| radius | a real **0.70 m** ledge reads, in world `y` | radially |
+|---|---|---|
+| 40 m | **0.565 m** — leaks | 0.683 m — blocked |
+| 80 m | **0.463 m** — leaks | 0.685 m — blocked |
+| 120 m | **0.364 m** — leaks | 0.686 m — blocked |
+| 157 m | **0.269 m** — leaks | 0.691 m — blocked |
+
+`MAX_STEP` is 0.62 m. So from **40 m out** the router has been planning routes
+straight up things a child cannot climb, and at the rim it under-reads a real
+ledge by a factor of 2.6. A legal 0.40 m step reads 0.409-0.417 m radially at
+every radius, so the fixed gate has not gone the other way either.
+
+**A refusal is a control that feels dead; a leak is a route that does not
+exist.** This is the more serious half by a distance, and neither the inventory
+nor my own first measurement found it, because we both only swept flat terrain.
+
+Two consequences for everybody else's rows:
+
+- **Sweep the leak direction as well as the refusal direction.** Any row of the
+  form "a threshold compared against a `y` difference" is wrong in *both* signs,
+  and the sign that lets something through is the one a child meets. Several
+  rows in §2 are exactly this shape.
+- **A test obstacle must be built with `yAtAltitude(x, z, h)`, never
+  `terrainHeight(x, z) + h`.** They are not the same thing out in the park: at
+  157 m, `terrainHeight + 0.70` is 0.49 m of real height, under `MAX_STEP`, so
+  the broken gate *and* the fixed gate both pass it and the fixed one looks
+  broken too. The collision engineer's first control was built that way and read
+  clean. This is the "green can mean incapable of failing" fault in its
+  radial clothes, and it will catch the next person too.
+
+### The measure: radii, not altitudes
+
+`altitudeAt` cancels the lean and so does `planetRadiusAt`; the lattice uses the
+**radius**, and the difference is worth knowing before anyone converts another
+call site.
+
+An altitude takes its datum from `terrainHeight` **in the same column**, so the
+terrain's own altitude is *identically zero*. Anything measuring a step over
+open ground in altitude is therefore blind to the ground's undulation — it reads
+0.000 on any terrain whatsoever, waves or cliffs. That is a capability given up
+for nothing, since two radii from one centre cancel the planet just as exactly
+and keep the waves in.
+
+It also nearly cost this file a check that could not fail: the first version of
+`check:outward-routing` guarded the wave field by asserting "the worst altitude
+step over the terrain", which printed **0.000 at all six radii** and would have
+stayed green through any retune at all. Only printing it caught that.
+
+**So: `altitudeAt` for "how high is this thing above the grass" (a camera, a
+prop, a clearance). `planetRadiusAt` differences for "how big is the step
+between these two places".** They are not interchangeable and this is the line
+between them.
 
 **The general lesson for everybody in this fan-out, and it is the reason this
 correction is written out at length rather than struck quietly:** every "High"
