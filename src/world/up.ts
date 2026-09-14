@@ -173,6 +173,16 @@ export function standOnGround(object: Object3D): void {
  * mover is not shared and cannot.
  */
 export function walkHeight(x: number, y: number, z: number): number {
+  // **A non-finite height is a sentinel, not a coordinate**, and it has to come
+  // back out with its sign intact. `Collision.ts` writes "no ceiling" as
+  // `+Infinity` and "no floor" as `-Infinity`, and `planetRadiusAt` is a
+  // `hypot`, which is unsigned: `hypot(x, -Infinity, z)` is `+Infinity`. So a
+  // `-Infinity` base converted naively comes back as `+Infinity`, the gate
+  // `moverUp < baseUp` is then true for every mover, and **every collider in
+  // the game silently stops being solid** — a park a child walks straight
+  // through, from a one-line conversion that typechecks. Verified by running
+  // it, not by reading it.
+  if (!Number.isFinite(y)) return y;
   if (spaceAt(x, z) !== SPACE_GARDEN) return y;
   return planetRadiusAt(x, y, z) - GROUND_SPHERE_RADIUS;
 }
