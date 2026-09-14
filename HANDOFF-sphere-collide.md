@@ -328,6 +328,33 @@ comparison and the failing sets really are identical by name, but it is not
 cover over the canonical seed, 131 or 24, and it must not be read as such.
 Nothing in this lane has been proven against those three.
 
+### A fifth casualty that not even the skip count can see
+
+`test/procgen/scatterDecoupling.test.ts` reports **`(0 test)`** — not skipped,
+*zero*. It has four real `it()`s, but its `describe` body calls `buildDigest()`
+at **collection time**:
+
+```ts
+describe('scenery scatter is decoupled from the paths', () => {
+  const baseline = buildDigest({});          // <- spawns scripts/scatter-digest.mts
+```
+
+That spawns a park build, which throws the same `railD 0.0 (0.0, 125.8)`
+— confirmed by running `scripts/scatter-digest.mts` directly, exit 1, on this
+branch **and** on the base. The `describe` callback throws before a single
+`it()` registers, so the file contributes nothing at all.
+
+**This is a worse shape than the 93-skipped files and worth recognising on
+sight.** A file that dies at *collection* is absent from the pass count, absent
+from the fail count, **and absent from the skip count** — every aggregate a
+person actually reads. It appears in exactly one place: the per-file line saying
+`(0 test)`. A suite can quietly lose a whole file this way and no summary line
+will ever move.
+
+Work registered at collection time (a `const` in a `describe` body, rather than
+in `beforeAll`) is what converts a plain test failure into an invisible one. It
+is the same disease as the seed files one layer further out.
+
 ## Instruments, and the ones that lied
 
 `scratch/nav-step-frame.mts` — the nav step gate in both frames, no park build
