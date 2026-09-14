@@ -113,7 +113,9 @@ import { ZONE_HEIGHT_TOLERANCE, pickInteractZone } from '../src/world/interact.t
 import { cameraOffset } from '../src/core/cameraRig.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
-import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
+import { spaceAt, SPACE_GARDEN, worldToLocal } from '../src/world/spaces.ts';
+import { altitudeAt } from '../src/world/terrain.ts';
+import { isOutdoors } from '../src/world/up.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import {
   TOWER_DOOR_HALF,
@@ -126,8 +128,48 @@ import { gameStore, walksInParade } from '../src/state/index.ts';
 import { shopItem } from '../src/world/building/shops/catalogue.ts';
 import { Parade } from '../src/entities/parade/Parade.ts';
 
-/** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
+/**
+ * **How far below the ground a child has to be before we call it a fall** —
+ * an *altitude*, not a world `y`.
+ *
+ * Deep enough that no floor in the game is near it, shallow enough to catch a
+ * fall early. It was `y < -2` while the park was flat, and that stopped being
+ * a fall detector the day the ground became a sphere: `terrainHeight` first
+ * drops below `-2` at **28.7 m** from the park's origin, the walkable garden
+ * reaches **135.4 m** (`y = -46 m`) and the park's furniture **157 m**
+ * (`y = -65.7 m`). This clause sweeps `npcs.all`, which is every outdoor park
+ * child as well as the hotel's residents, so the old threshold reported
+ * roughly every child in the outer park as "falling through the world" — and,
+ * far worse, a genuine fall would have been one line among dozens. Its own
+ * docblock, *"deep enough that no floor in the game is near it"*, was false by
+ * 63 m.
+ *
+ * {@link depthBelowTheWorld} below is what turns a position into the number
+ * this threshold is about.
+ */
 const FLOOR_OF_THE_WORLD = -2;
+
+/**
+ * How high this child is above the ground she should be standing on, in the
+ * frame that applies where she is.
+ *
+ * Outdoors that is {@link altitudeAt} — a radius difference from the planet's
+ * centre, which is the clearance a child would feel under her feet. Indoors
+ * the floors are real coordinates hundreds of metres away where the spherical
+ * formula is meaningless, and `world/up.ts` keeps plain `+Y` for them, so this
+ * keeps plain `+Y` too — but **against the space's own floor**, via
+ * `spaces.ts`'s `worldToLocal`, which is the one owner of where each space's
+ * floor is. A bare world `y` was wrong for interiors as well as for the park:
+ * the castle's three floors stand at `BUILDING_BASE_Y` = **−42.97 m**, so two
+ * children standing 10.55 m above the mall's floor read `y = −32.42` and were
+ * reported as falling. Measured on seed 428 at `31d0fb2a`: the old clause
+ * raised 24 problems, 22 of them park children on grass and 2 of them these.
+ */
+function depthBelowTheWorld(position: Vector3): number {
+  const { x, y, z } = position;
+  if (isOutdoors(x, z)) return altitudeAt(x, y, z);
+  return worldToLocal(spaceAt(x, z), x, y, z).y;
+}
 
 /** How long the crowd is run before anybody is asked where they are. */
 const SETTLE_SECONDS = 8;
@@ -152,12 +194,26 @@ for (let frame = 0; frame < 60 * SETTLE_SECONDS; frame += 1) {
 }
 
 let lowest = Infinity;
+let highest = -Infinity;
+let lowestY = Infinity;
+let outdoorChildren = 0;
+let furthestOut = 0;
 for (const character of npcs.all) {
-  lowest = Math.min(lowest, character.position.y);
-  if (character.position.y < FLOOR_OF_THE_WORLD) {
+  const depth = depthBelowTheWorld(character.position);
+  lowest = Math.min(lowest, depth);
+  highest = Math.max(highest, depth);
+  lowestY = Math.min(lowestY, character.position.y);
+  if (isOutdoors(character.position.x, character.position.z)) {
+    outdoorChildren += 1;
+    furthestOut = Math.max(furthestOut, Math.hypot(character.position.x, character.position.z));
+  }
+  if (depth < FLOOR_OF_THE_WORLD) {
     problems.push(
-      `${character.name} is at y=${character.position.y.toFixed(2)} m after ${SETTLE_SECONDS} s — ` +
-        `below ${FLOOR_OF_THE_WORLD} m, i.e. falling through the world`,
+      `${character.name} is ${depth.toFixed(2)} m under the ground she is over ` +
+        `(world y=${character.position.y.toFixed(2)} m, ` +
+        `${Math.hypot(character.position.x, character.position.z).toFixed(1)} m from the park's ` +
+        `origin) after ${SETTLE_SECONDS} s — below ${FLOOR_OF_THE_WORLD} m, i.e. falling through ` +
+        `the world`,
     );
   }
 }
@@ -4155,7 +4211,11 @@ process.stderr.write(
 
 console.log(
   `check:hotel — ${npcs.all.length} children (${hotel.residents.length} of them hotel residents), ` +
-    `lowest foot at y=${lowest.toFixed(2)} m after ${SETTLE_SECONDS} s; ` +
+    `feet ${lowest.toFixed(2)} m to ${highest.toFixed(2)} m above the floor each is over ` +
+    `(lowest world y=${lowestY.toFixed(2)} m) after ${SETTLE_SECONDS} s, ` +
+    `${outdoorChildren} of them outdoors, the furthest ${furthestOut.toFixed(1)} m from the ` +
+    `park's origin; this clause detects a FALL only — a child floating above her floor is ` +
+    `visible in that range but asserted on nowhere; ` +
     `${mustBeSolid.length + 1} props solid, 3 beds soft and standable; ` +
     `${panes}/${declared} declared window panes built; ${occlusionReport}; ` +
     `${crossingsChecked} doorway crossing marches, ${crossingFailures.length} fell short; ` +
