@@ -21,6 +21,7 @@ import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
 import { faceOnGround } from '../world/up';
+import { altitudeAbove, landingCorrection, liftAlongUp } from './movement/gravity';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
@@ -454,6 +455,24 @@ export class Player implements GameSystem {
    * collision pass), which is well inside `JUMP_CLEARANCE_GRACE`.
    */
   private hopClearance = 0;
+
+  /**
+   * This frame's travel along the local up, as a real displacement — the whole
+   * of a hop, not just its vertical shadow. See
+   * `entities/movement/gravity.ts`.
+   *
+   * A field rather than a local because it is consumed in three places a
+   * frame: the collision step takes its `x`/`z`, the height write takes its
+   * `y`, and the derived-velocity clause subtracts it back out again.
+   */
+  private readonly lift = new Vector3();
+
+  /**
+   * The sideways half of a landing, waiting for a collision step to carry it.
+   * Never more than a part-frame's lift, so a few centimetres at most — and
+   * exactly zero at the park's origin and anywhere indoors.
+   */
+  private readonly pendingLanding = new Vector3();
 
   /**
    * How she holds herself while a ride owns her.
@@ -1036,10 +1055,76 @@ export class Player implements GameSystem {
     const following = !this.airborne;
     let reference = following ? this.groundHeight : this.position.y;
     let groundY = reference;
+
+    // --- the lift she has earned along the local up --------------------------
+    // **A hop on a ball is not vertical.** She pushes off along the ground's own
+    // up, which out in the park leans outwards, so the jump carries her across
+    // the ground — `apex · sin θ`, up to 0.875 m at the rim — and brings her
+    // back. Run it in `y` alone and she instead lurches that far towards the
+    // middle of the park, in her own frame, on every single hop.
+    // `entities/movement/gravity.ts` owns both halves of this and carries the
+    // full account; `check:radial-hop` measures it.
+    //
+    // The `x`/`z` of that lift go into the same step `resolveMovement`
+    // resolves, rather than onto the position behind its back. That is what
+    // keeps the sub-step anti-tunnelling guarantee true of *everything* that
+    // moves her, and what keeps the ground sample riding the move (#358). Under
+    // 0.07 m at `MAX_FRAME_DELTA`, so it costs no extra sub-steps.
+    //
+    // Gravity is applied *here*, before the lift is taken from it, and the
+    // order is not free: `velocity -= g·dt` then `position += velocity·dt` is
+    // semi-implicit Euler, which is what this game has always run. Take the
+    // lift first and it becomes explicit Euler, which over-reads the apex by a
+    // frame's worth of `JUMP_SPEED` — measured, 1.2267 m to 1.3367 m, a 9 %
+    // higher jump everywhere including at the park's origin, where nothing
+    // about the sphere was supposed to have changed anything.
+    //
+    // Taken from *last* frame's `verticalVelocity`: one frame of latency, in
+    // exchange for `lift.x`, `lift.y` and `lift.z` always being three
+    // components of one vector rather than numbers computed at different
+    // moments. `hopClearance` already lags by exactly one frame, for the same
+    // reason and to no ill effect.
+    // **The one owner of "is the pack pushing her up this frame".** Held: climb.
+    // Released: gravity, exactly as if there were no pack at all — that absence
+    // *is* "come down", there is nothing else to press. It is read once, here,
+    // and again below only to set the plume, because two places deciding it
+    // separately is how the plume and the physics would come to disagree.
+    const thrusting = this.flying && this.canFlyHere && input.isDown('jump');
+    if (this.airborne) {
+      if (thrusting) {
+        // Her real height above her own ground, so the ceiling is the same
+        // height everywhere in the park rather than `cos θ` of it at the rim.
+        // One frame stale — `hopClearance` is last frame's altitude — which is
+        // exactly what it is for and is imperceptible against a ceiling ease.
+        const headroom = clamp01((this.flyCeiling - this.hopClearance) / FLY_CEILING_EASE);
+        this.verticalVelocity = approachScalar(
+          this.verticalVelocity,
+          FLY_RISE_SPEED * headroom,
+          FLY_VERTICAL_ACCELERATION * dt,
+        );
+      } else {
+        this.verticalVelocity -= GRAVITY * dt;
+      }
+      liftAlongUp(
+        this.position.x,
+        this.position.y,
+        this.position.z,
+        this.verticalVelocity * dt,
+        this.lift,
+      );
+    } else {
+      this.lift.set(0, 0, 0);
+    }
+    // Last frame's landing correction, if there was one, rides this frame's
+    // collision step. See the landing below for what it is.
+    this.lift.x += this.pendingLanding.x;
+    this.lift.z += this.pendingLanding.z;
+    this.pendingLanding.set(0, 0, 0);
+
     const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,
-      this.velocity.x * dt,
-      this.velocity.z * dt,
+      this.velocity.x * dt + this.lift.x,
+      this.velocity.z * dt + this.lift.z,
       PLAYER_RADIUS,
       this.hopClearance,
       dt,
@@ -1076,8 +1161,15 @@ export class Player implements GameSystem {
     // simply decelerate normally, as if nothing solid were there at all.
     if (dt > 0 && !this.escorting) {
       const previousSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-      const derivedX = (this.position.x - this.previousPosition.x) / dt;
-      const derivedZ = (this.position.z - this.previousPosition.z) / dt;
+      // **The lift comes back out before the step is read as a walking speed.**
+      // `velocity` is her *walk*, and the trick this clause turns — trust the
+      // resolved position over the intended one, so walking into a wall kills
+      // the momentum — only works if the two are the same quantity. The hop's
+      // sideways excursion went into the step as well, and banking it here
+      // would hand it to the input smoothing as speed she is asking for, which
+      // would then fight it on the way up and again on the way down.
+      const derivedX = (this.position.x - this.previousPosition.x - this.lift.x) / dt;
+      const derivedZ = (this.position.z - this.previousPosition.z - this.lift.z) / dt;
       // Second line of defence, and an invariant worth stating outright:
       // being blocked is a *constraint*, so it can only ever take speed away.
       // If a resolved position ever implies she came out of a collision going
@@ -1091,9 +1183,26 @@ export class Player implements GameSystem {
       }
     }
 
+    // The `y` half of the lift, now that its `x`/`z` half has been through the
+    // collision step above. One vector, applied in two places because one of
+    // its components has to be resolved against the walls and the others do not.
+    if (this.airborne) this.position.y += this.lift.y;
+
+    // **Her height above the surface, radially.** Not `position.y - groundY`,
+    // which over-reads by `1 / cos θ` — 1.43x at the park's reach — so
+    // `FALL_THRESHOLD`'s 0.5 m of forgiveness was being spent by half a metre
+    // of *lateral* travel out where the radial gradient is 1.02 m/m, and she
+    // was declared falling while walking on grass.
+    const altitude = altitudeAbove(
+      this.position.x,
+      this.position.y,
+      this.position.z,
+      groundY,
+    );
+
     // Walk off the edge of a deck — or over one of the shafts inside the big
     // building — and the surface under your feet drops away. Start falling.
-    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+    if (!this.airborne && altitude > FALL_THRESHOLD) {
       this.airborne = true;
       this.verticalVelocity = 0;
     }
@@ -1141,44 +1250,39 @@ export class Player implements GameSystem {
     }
 
     let hopHeight = 0;
-    if (this.flying) {
-      // Held: climb. Released: gravity, exactly as if there were no pack at
-      // all — the same formula the plain fall below uses. That absence *is*
-      // "come down"; there is nothing else to press.
-      const thrusting = canFly && input.isDown('jump');
-      if (thrusting) {
-        const height = this.position.y - groundY;
-        // Ease off into the ceiling instead of stopping dead against it.
-        const headroom = clamp01((this.flyCeiling - height) / FLY_CEILING_EASE);
-        this.verticalVelocity = approachScalar(
-          this.verticalVelocity,
-          FLY_RISE_SPEED * headroom,
-          FLY_VERTICAL_ACCELERATION * dt,
+    if (this.airborne) {
+      // **The landing.** `altitude <= 0` rather than `position.y <= groundY`,
+      // because the two are different questions once the ground leans and only
+      // the first is the one a child feels.
+      //
+      // `verticalVelocity <= 0` is load-bearing now that the lift is applied a
+      // frame after take-off: without it she is caught on the very frame she
+      // jumps, standing at altitude 0 with a full `JUMP_SPEED` still in hand,
+      // and never leaves the ground at all.
+      if (altitude <= 0 && this.verticalVelocity <= 0) {
+        // She lands along the up, not straight down the world Y — the last
+        // part-frame of a fall overshot along a direction that leans, so the
+        // sideways part of putting her back has to be given back too. Measured
+        // without this: 0.0319 m of outward drift per hop at the rim, growing
+        // with radius, on a hop that used to land exactly where it left.
+        landingCorrection(
+          this.position.x,
+          this.position.y,
+          this.position.z,
+          altitude,
+          this.pendingLanding,
         );
-      } else {
-        this.verticalVelocity -= GRAVITY * dt;
-      }
-      this.position.y += this.verticalVelocity * dt;
-      if (this.position.y <= groundY) {
         this.position.y = groundY;
         this.verticalVelocity = 0;
         this.airborne = false;
-        this.flying = false;
-        // And a rainbow on the way back in, so landing is an event too.
-        this.spawnHopRing(groundY);
+        if (this.flying) {
+          this.flying = false;
+          // And a rainbow on the way back in, so landing is an event too.
+          this.spawnHopRing(groundY);
+        }
       }
-      hopHeight = this.position.y - groundY;
-      this.wornJetpack?.setThrust(thrusting ? 1 : FLY_IDLE_THRUST);
-    } else if (this.airborne) {
-      this.wornJetpack?.setThrust(0);
-      this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
-      if (this.position.y <= groundY) {
-        this.position.y = groundY;
-        this.verticalVelocity = 0;
-        this.airborne = false;
-      }
-      hopHeight = this.position.y - groundY;
+      hopHeight = Math.max(0, altitude);
+      this.wornJetpack?.setThrust(this.flying ? (thrusting ? 1 : FLY_IDLE_THRUST) : 0);
     } else {
       this.wornJetpack?.setThrust(0);
       // Damp onto the ground so walking over the gentle hills isn't jittery.
