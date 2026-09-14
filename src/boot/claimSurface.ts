@@ -22,15 +22,18 @@
  * | 150 m | 43.0° | 1.371 m |
  * | 200 m | 65.4° | 2.430 m |
  *
- * **Which way the error points, and why that matters.** A projection can only
- * shorten, so the flat reading is always a *lower bound* on the true distance.
- * For refusing an overlap that is conservative — the registry refuses things
- * that would in fact have cleared, costing solve attempts but never solidity.
- * For {@link GroundClaims.unservedDemands} it is the opposite and it is a real
- * defect: a demand is served when a corridor **ends inside its radius**, so
- * under-reading distance marks a door served by a road that stops 40% further
- * away than the registry believes. A child walks to the door and the paving
- * runs out.
+ * **Which way the error points, and why that matters.** Between two *points* a
+ * projection can only shorten, so the flat reading is a lower bound on the true
+ * distance. For refusing an overlap that is conservative — the registry refuses
+ * things that would in fact have cleared, costing solve attempts but never
+ * solidity. For {@link GroundClaims.unservedDemands} it is the opposite and it
+ * is a real defect: a demand is served when a corridor **ends inside its
+ * radius**, so under-reading distance marks a door served by a road that stops
+ * 40% further away than the registry believes. A child walks to the door and
+ * the paving runs out.
+ *
+ * (Between a point and a *run* the bound does not hold at all, which is the
+ * next section and was very nearly a much worse bug.)
  *
  * ## The broad phase is NOT free, and assuming it was would have been the bug
  *
