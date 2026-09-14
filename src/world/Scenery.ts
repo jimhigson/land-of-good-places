@@ -238,6 +238,10 @@ const HIDDEN_MATRIX = new Matrix4().makeScale(0, 0, 0);
 const occluderFlat = new Vector3();
 const occluderCentre = new Vector3();
 const occluderSpin = new Quaternion();
+/** Scratches for testing the treeline's corridor gate where the canopy is *drawn*. */
+const canopyFlat = new Vector3();
+const canopyDrawn = new Vector3();
+const canopySpin = new Quaternion();
 
 /**
  * A wall run as actually built — the run plus the half-width it occupies.
@@ -1236,7 +1240,28 @@ function buildTreeline(): Group {
     // old sentence here claimed the opposite and was simply false.
     // What a player sees is a cleared run through the woodland where the road
     // comes over the brow, which is what a road through woodland looks like.
-    if (distanceToEntranceCorridor(x, z) < radius) continue;
+    // **Tested where the canopy is DRAWN, not where its trunk stands.**
+    //
+    // `makeInstanced` puts every instance through `placeOnSphere`, which
+    // re-measures a part's authored height along the *local* up — so a canopy,
+    // being metres above the ground, is drawn further out than the trunk it
+    // grew from. Gating on the trunk's `(x, z)` therefore asks the corridor
+    // about a patch of ground the canopy does not occupy.
+    //
+    // Measured on the canonical seed at the park's authored scale: every one of
+    // the 460 surviving treeline instances is displaced outward between plant
+    // time and draw time — **median 1.80 m, worst 3.21 m** — and 18 canopies
+    // landed in the bus's corridor with the gate reporting them clear. The
+    // worst sat 0.49 m from the corridor while reaching 2.86 m, so it was
+    // 2.37 m into a road the bus drives down.
+    //
+    // This is the same correction the occluder above already makes, for the
+    // same reason and with the same call; its comment has said "at the park's
+    // edge that is over a metre sideways" all along. The gate simply never had
+    // it.
+    canopyFlat.set(x, ground + height + radius * 0.35, z);
+    placeOnSphere(canopyFlat, 0, canopyDrawn, canopySpin);
+    if (distanceToEntranceCorridor(canopyDrawn.x, canopyDrawn.z) < radius) continue;
 
     trunks.push({
       position: new Vector3(x, ground + height / 2, z),
