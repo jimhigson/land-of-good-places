@@ -132,6 +132,7 @@ you look, never instead**: that screenshot is why.
 | §3.1 `tapMarker.ts:57,61` | `TapMarker.placeAt` owns position-and-lean, through `upFor`, **assigned** rather than pre-multiplied because `moveTo` runs every frame |
 | §3.1 `rainbowRing.ts:140` | the lean moved into the pool's own copy of the geometry, freeing each mesh's quaternion for the ground it was fired on; `RISE` and `GROUND_CLEARANCE` run along that up. `rainbowRingGeometry` itself is untouched — `Highlights.ts` shares it |
 | §3.1 `rainbowRing.ts:290,317` | the star burst's plane and arc lean with the ground at the burst point |
+| rides (area C) | `rideFrame` in `sweptRail.ts`, one owner for all three vehicle placements; `cartEnvelopePoint` in `cart.ts` replaces the byte-identical clearance sweeps; the cruiser's castle carve (was 10.55 m underground on seed 326, now +1.09 m). `slide/**` in progress. Branch `eng/rides-radial` |
 | shared helper | `walkHeight` added to `world/up.ts`; `NavGrid` uses it, the collision area needs it for absolute tops |
 | §1 `NavGrid` `MAX_STEP` | `nodeWalkHeight` beside `nodeHeight` — `planetRadiusAt`, not `altitudeAt`, for the reason in correction 3. Every step, level, gap and tie-break comparison moved onto it; `nodeNearestRadius` is the primitive; `lineCost` carries a radius between cells instead of a `y` measured in the previous column. Guarded by `scripts/check-outward-routing.mts`, now in the `check` chain. **See corrections 2 and 3** |
 
@@ -197,6 +198,58 @@ It is fixed regardless — a test spending 91% of its budget on the planet is on
 retune away from giving wrong answers, and the rings genuinely stand at 157 m —
 but it was never a control that refused, and it should not have been ranked
 against two faults that are wrong on every single tap.
+
+### Correction 5 — about twenty rows are not bugs: a ride is solved flat and drawn leaned, on purpose
+
+**Read this before converting anything under `src/world/coaster/**` or
+`src/world/slide/**`.** Both inventories list their `point.y - terrainHeight(x,
+z)` sites as medium-high bugs. **They are not bugs.** The rides engineer caught
+it, and `drawnOnSphere`'s own docblock (`src/world/rail/sweptRail.ts:54-72`) had
+said so all along — this document contradicted a comment that was already right,
+which is the reverse of the failure it usually warns about.
+
+The architecture: a ride is **solved in the flat authoring frame and drawn
+leaned**. `placeOnSphere` keeps the foot at the `(x, z)` it was given, takes
+`height = flat.y - ground`, and re-lays that height along the **local up** — a
+unit vector — so a height above the ground in its own column comes out
+**exactly** preserved, and so does a gradient along the track. Every clearance
+solve, physics step and invariant inside those files is therefore already asking
+its question in the right frame, and mapping the route itself would move all of
+them for nothing. Measured over the whole cruiser loop: the flat `clearanceAt`
+and the drawn `altitudeAt` agree to **0.01 m at every sample**.
+
+**The bugs are all at the consumers** — wherever a flat-frame quantity meets
+drawn geometry, or a vehicle or camera riding a drawn track is placed with flat
+Euler angles. That single sentence is what redirects the effort:
+
+- every vehicle placement — `Coaster.placeCart`, `ParkTrain.placeCars`,
+  `RailRace.placeCarts`. The cart was **10.83 m off its own rails at worst,
+  3.42 m mean** around the 213.5 m circuit.
+- the two clearance sweeps that raycast leaned meshes with a flat envelope.
+- **anything holding one absolute world `y` across a span the cap tilts** — the
+  rail race's `route.base`, and the cruiser's castle carve, which had the ride
+  **10.55 m underground** on seed 326.
+- `src/world/slide/**` is the genuine exception: **zero sphere helpers in nine
+  files**, and `Building.ts:875` adds the chute un-leaned into a group where
+  every other plot leans. That one is a real conversion.
+
+**Where the preservation stops, because this is the edge somebody will walk off
+it.** `placeOnSphere` preserves a height above the ground *in the same column*.
+It is **not** a global isometry, so two things it does not preserve:
+
+- **A vertical gap between two points in *different* columns.** Every §2.2
+  invariant of the form `a.y - b.y` where `a` and `b` are metres apart in plan
+  is still wrong, and those live in `test/procgen/invariants.ts`, not in the
+  ride files. Correction 5 does not clear them.
+- **A straight-line distance between two route points far apart.** Each is
+  shifted outward by `height · sin(tilt)`, and the tilt differs along the route:
+  a 10 m-high point moves 1.8 m at 40 m out and 6.4 m at 140 m. Anything
+  measuring a chord across the circuit rather than along it is measuring
+  something the map changed.
+
+Two smaller fixes from the same engineer: `Coaster.ts:321-329` is now `:352`,
+and the coaster's energy/crest row is correctly marked Fixed — verified by
+reading that it uses `route.clearanceAt`, not assumed.
 
 ### Correction 4 — an interior needs the branch just as much, and reachability cannot see it missing
 
