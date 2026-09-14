@@ -1301,14 +1301,11 @@ function buildShellGeometry(
   let highestTop = -Infinity;
   let lowestBottom = Infinity;
   for (const along of alongs) {
-    const centre = frame.pointAt(along);
-    const cx = centre.x + centre.acrossX * shift;
-    const cz = centre.z + centre.acrossZ * shift;
-    const surface = surfaceProfile(cx, cz, along);
     for (const side of [1, -1] as const) {
       const outer = frame.worldAt(along, halfAcross * side, shift);
-      highestTop = Math.max(highestTop, parapetTopFor(surface, outer.x, outer.z));
-      lowestBottom = Math.min(lowestBottom, terrainHeight(outer.x, outer.z) - 0.5);
+      const outerSurface = surfaceProfile(outer.x, outer.z, along);
+      highestTop = Math.max(highestTop, parapetTopFor(outerSurface, outer.x, outer.z));
+      lowestBottom = Math.min(lowestBottom, worldYAtAltitude(outer.x, outer.z, -0.5));
     }
   }
   {
@@ -1344,7 +1341,22 @@ function buildShellGeometry(
     // `BRIDGE_DECK_DEPTH` is now derived from. The parapets' inner faces
     // start here too,
     // so no gap opens between the bed and the wall beside it.
-    const roadBed = surface - BRIDGE_ROAD_BED_DROP;
+    //
+    // **Each point of the cross-section gets the surface at its OWN plan point,
+    // not the centreline's.** A deck is flat across its width only on flat
+    // ground; on this planet the ground leans across the bridge as well as
+    // along it, so one centre-derived world `y` stretched across `2·halfAcross`
+    // of leaning ground draws a road that is level in world space while the
+    // walk surface under it is not. `heightAt` already answers per plan point,
+    // so a shell built off the centre alone is the drawn stone disagreeing with
+    // the surface a child actually stands on — this repo's "two definitions of
+    // one thing", across the width instead of along the length.
+    const surfaceRoadPlus = surfaceProfile(roadPlus.x, roadPlus.z, along);
+    const surfaceRoadMinus = surfaceProfile(roadMinus.x, roadMinus.z, along);
+    const surfaceOuterPlus = surfaceProfile(outerPlus.x, outerPlus.z, along);
+    const surfaceOuterMinus = surfaceProfile(outerMinus.x, outerMinus.z, along);
+    const roadBedPlus = surfaceRoadPlus - BRIDGE_ROAD_BED_DROP;
+    const roadBedMinus = surfaceRoadMinus - BRIDGE_ROAD_BED_DROP;
     const inTunnel = Math.abs(along) < ARCH_SPAN_HALF;
     // A rise in the tangent frame; each reader converts it at its own plan
     // point, so the soffit leans with the ground the way the arch really does.
@@ -1368,8 +1380,8 @@ function buildShellGeometry(
         );
     // The parapet tapers out where the hump is barely above the ground —
     // see `parapetHeightFor`; the collision walls follow the same rule.
-    const parapetTopPlus = parapetTopFor(surface, outerPlus.x, outerPlus.z);
-    const parapetTopMinus = parapetTopFor(surface, outerMinus.x, outerMinus.z);
+    const parapetTopPlus = parapetTopFor(surfaceOuterPlus, outerPlus.x, outerPlus.z);
+    const parapetTopMinus = parapetTopFor(surfaceOuterMinus, outerMinus.x, outerMinus.z);
     const u = along / TEXTURE_METRES;
 
     // The coursed outer face for this ring — two vertices per course, at that
@@ -1418,15 +1430,15 @@ function buildShellGeometry(
         ? [-Infinity, -Infinity]
         : [terrainHeight(outerPlus.x, outerPlus.z), terrainHeight(outerMinus.x, outerMinus.z)],
       innerBottom: [
-        vertex(roadPlus.x, roadBed, roadPlus.z, u, roadBed / TEXTURE_METRES),
-        vertex(roadMinus.x, roadBed, roadMinus.z, u, roadBed / TEXTURE_METRES),
+        vertex(roadPlus.x, roadBedPlus, roadPlus.z, u, roadBedPlus / TEXTURE_METRES),
+        vertex(roadMinus.x, roadBedMinus, roadMinus.z, u, roadBedMinus / TEXTURE_METRES),
       ],
       innerTop: [
         vertex(roadPlus.x, parapetTopPlus, roadPlus.z, u, parapetTopPlus / TEXTURE_METRES),
         vertex(roadMinus.x, parapetTopMinus, roadMinus.z, u, parapetTopMinus / TEXTURE_METRES),
       ],
-      roadA: vertex(roadPlus.x, roadBed, roadPlus.z, u, roadHalf / TEXTURE_METRES),
-      roadB: vertex(roadMinus.x, roadBed, roadMinus.z, u, -roadHalf / TEXTURE_METRES),
+      roadA: vertex(roadPlus.x, roadBedPlus, roadPlus.z, u, roadHalf / TEXTURE_METRES),
+      roadB: vertex(roadMinus.x, roadBedMinus, roadMinus.z, u, -roadHalf / TEXTURE_METRES),
       // `v` spans a flat 0..1 across the whole tunnel width, never scaled by
       // `TEXTURE_METRES` the way every other surface's `v` is: a voussoir is
       // ONE course, uninterrupted for the tunnel's full depth, so
