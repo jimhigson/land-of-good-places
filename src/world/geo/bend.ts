@@ -9,7 +9,7 @@ import {
 import type { Chart } from './Chart';
 import { Frame } from './Frame';
 import { Geo, PLANET_RADIUS } from './Geo';
-import { flatRadiusFor } from './Chart';
+import { chartById, curvedChart, flatRadiusFor, type ChartId } from './Chart';
 
 /**
  * **A building is not a rigid object standing at one up. Down varies across its
@@ -377,4 +377,44 @@ function asGeometryHolder(object: Object3D): GeometryLike | undefined {
 export function segmentsFor(metres: number, tolerance = 0.05): number {
   const longest = 2 * flatRadiusFor(tolerance);
   return Math.max(1, Math.ceil(metres / longest));
+}
+
+const _anchorAt = /* @__PURE__ */ new Geo();
+const _anchorPos = /* @__PURE__ */ new Vector3();
+const _anchorQuat = /* @__PURE__ */ new Quaternion();
+
+/**
+ * **Bend a structure that has already been stood on the sphere, deriving its
+ * chart from where it actually is.**
+ *
+ * The integration point, and it exists so that the one thing a caller can most
+ * easily get wrong is not a thing a caller has to do at all. Both of this
+ * module's probe bugs were the same mistake in the chart's anchor:
+ *
+ * - **the anchor frame must be the structure's own rigid frame, bearing and
+ *   all.** Built from a minimal `+Y`-to-up tilt instead, it drops the
+ *   structure's yaw and the "bend" comes out as a 6.2 m re-yaw of the whole
+ *   castle;
+ * - **`local.y` is an altitude above `PLANET_RADIUS`, not above the ground.**
+ *   An anchor left at some other radius floats the structure by the difference,
+ *   which read as a 45 m gap the first time this was measured.
+ *
+ * Reading both straight off `root.matrixWorld` — which is exactly what
+ * `standInPlot`'s `placeOnSphere` put there — makes both unaskable. Call it
+ * after the structure is assembled *and* placed.
+ *
+ * A chart id is one owner, not a label, so a rebuild (a new seed, a new park)
+ * re-aims the existing chart rather than registering a second one under the same
+ * name — which `Chart`'s registry would rightly refuse.
+ */
+export function bendPlacedStructure(root: Object3D, id: ChartId): BendReport {
+  root.updateMatrixWorld(true);
+  root.getWorldPosition(_anchorPos);
+  root.getWorldQuaternion(_anchorQuat);
+  _anchorAt.setFromWorldVector(_anchorPos);
+  const baseAltitude = _anchorAt.radius() - PLANET_RADIUS;
+  const chart = chartById(id) ?? curvedChart(id, new Frame());
+  chart.anchor.at.copy(_anchorAt);
+  chart.anchor.q.copy(_anchorQuat);
+  return bendOntoPlanet(root, chart, baseAltitude);
 }

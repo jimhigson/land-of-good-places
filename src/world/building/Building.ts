@@ -30,6 +30,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
+import { bendPlacedStructure } from '../geo/bend';
 import { terrainHeight } from '../terrain';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
 
@@ -934,6 +935,24 @@ export class Building implements GameSystem {
       BUILDING_CENTRE_Z,
       BUILDING_BASE_Y - terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z),
     );
+    // **The castle bends across its own footprint.** Jim, 13 September 2026:
+    // *"buildings externals ... need to bend downwards so that they use local
+    // horizontal/vertical, not a global one"*, and, asked directly whether the
+    // four corner towers should still be parallel: they should not.
+    //
+    // Everything above this line is the *rigid* placement — one tilt, taken at
+    // the building's centre, carried by the plot and by `standInPlot`. That is
+    // a flat chart of unbounded extent asserted implicitly, and on R = 220 m it
+    // is worth 5 cm out to 4.69 m. The castle is 24.45 x 18.45 m, so its
+    // corners were 0.51 m out at the foot and 1.14 m out at the top of a
+    // turret. This re-solves every instance matrix and every vertex under the
+    // facade against the curved chart, so each turret stands along the radial
+    // under its *own* foot rather than the centre's.
+    //
+    // It must run after `standInPlot`, because the chart is read off the
+    // facade's own world transform — see `bendPlacedStructure`, which exists so
+    // that the anchor cannot be got wrong here.
+    bendPlacedStructure(this.facade.group, 'castle-facade');
     anchorPlots.setPlaceholderVisible('building', false);
 
     const pitPlot = anchorPlots.getGroup('ballPit');
