@@ -102,6 +102,7 @@ export const FLAT_PRIMITIVE_BASELINE: Readonly<Record<string, BaselineEntry>> = 
   "scripts/check-hotel.mts::Y_THRESHOLD::box.max.y < -0.1": { count: 1, rule: 'Y_THRESHOLD' },
   "scripts/check-hotel.mts::Y_THRESHOLD::box.max.y > 0.35": { count: 1, rule: 'Y_THRESHOLD' },
   "scripts/check-hotel.mts::Y_THRESHOLD::shot.to.y < 0.35": { count: 1, rule: 'Y_THRESHOLD' },
+  "scripts/check-npc-perch.mts::Y_DIFFERENCE::headY - lowest": { count: 1, rule: 'Y_DIFFERENCE' },
   "scripts/check-npc-perch.mts::Y_DIFFERENCE::part.position.y - part.scale.y": { count: 1, rule: 'Y_DIFFERENCE' },
   "scripts/check-pet-slide.mts::HARD_UP::new Vector3(0, -1, 0)": { count: 1, rule: 'HARD_UP' },
   "scripts/check-pet-slide.mts::HARD_UP::new Vector3(0, 1, 0)": { count: 1, rule: 'HARD_UP' },
