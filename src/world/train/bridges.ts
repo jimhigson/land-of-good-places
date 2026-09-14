@@ -29,6 +29,7 @@ import {
 import { TRACK_CLEARANCE } from './route';
 import { BUILDING_STEP_UP, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
 import { terrainHeight } from '../terrain';
+import { Geo, worldYAtAltitude } from '../geo';
 import { PALETTE } from '../../core/palette';
 import { archStoneTexture, pinkStoneTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
@@ -636,17 +637,44 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // any real route may cross the rail anywhere within this corridor, so
   // every point of the crown span has to clear `BRIDGE_RISE` over the worst
   // of it, not just the crossing's own centre point.
-  let worstGroundY = -Infinity;
-  let lowestCrownEdgeGroundY = Infinity;
+  //
+  // **Measured as a rise above the crossing's own tangent plane, not as a world
+  // `y`.** The crown span is the one genuinely rigid part of a bridge — a flat
+  // slab, because the train needs its full height across its whole width — and
+  // it is also small enough to be allowed to be rigid: `ARCH_CLEAR_HALF` is
+  // 1.80 m, where `geo/Chart.ts`'s own table puts the departure of a flat patch
+  // from this planet at **7.4 mm**. That is the declared flat chart this solve
+  // works in. The ramps, at 14–18 m, are nowhere near qualifying and are bent
+  // instead — see {@link surfaceProfile}.
+  //
+  // In world `y` this loop measured the planet rather than the ground: over a
+  // 3.6 m span at the park's reach the dome alone falls 3.9 m, which is
+  // twenty times the terrain wave the worst-case was ever about.
+  const crownCentre = frame.worldAt(0, 0, shift);
+  const crownCentreGeo = Geo.fromWorld(
+    crownCentre.x,
+    terrainHeight(crownCentre.x, crownCentre.z),
+    crownCentre.z,
+  );
+  const crownUp = crownCentreGeo.up(new Vector3());
+  const crownOrigin = crownCentreGeo.toWorld(new Vector3());
+  const sampled = new Vector3();
+  /** How far the ground at a plan point stands above the crossing's own
+   * tangent plane. The planet cancels; what is left is the terrain wave. */
+  const localRise = (x: number, z: number): number =>
+    sampled.set(x, terrainHeight(x, z), z).sub(crownOrigin).dot(crownUp);
+
+  let worstGroundRise = -Infinity;
+  let lowestCrownEdgeRise = Infinity;
   const alongStep = Math.min(GROUND_SAMPLE_STEP, ARCH_CLEAR_HALF);
   const acrossStep = Math.min(GROUND_SAMPLE_STEP, halfAcross);
   for (let along = -ARCH_CLEAR_HALF; along <= ARCH_CLEAR_HALF + 1e-6; along += alongStep) {
     for (let across = -halfAcross; across <= halfAcross + 1e-6; across += acrossStep) {
       const { x, z } = frame.worldAt(along, across, shift);
-      const ground = terrainHeight(x, z);
-      worstGroundY = Math.max(worstGroundY, ground);
+      const rise = localRise(x, z);
+      worstGroundRise = Math.max(worstGroundRise, rise);
       if (ARCH_CLEAR_HALF - Math.abs(along) < alongStep) {
-        lowestCrownEdgeGroundY = Math.min(lowestCrownEdgeGroundY, ground);
+        lowestCrownEdgeRise = Math.min(lowestCrownEdgeRise, rise);
       }
     }
   }
@@ -656,8 +684,13 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // much below its own crown. Without this term a genuine arch would have
   // eaten the clearance it was drawn inside. See `bridgeStonework.ts` for what
   // the three candidate arch shapes cost.
-  const crownBase = worstGroundY + BRIDGE_RISE + HEIGHT_MARGIN + ARCH_CROWN_DIP;
-  const soffitCrownY = crownBase - BRIDGE_DECK_DEPTH;
+  //
+  // **An altitude now, not a world `y`** — how far the crown stands above the
+  // ground measured from the planet's centre, which is the air the train
+  // actually has. Adding these metres to a world `y` instead delivers only
+  // `cos θ` of them: measured, an asked-for 4.60 m arrives as 2.93 m at
+  // (−99, 138). See `geo/ground.ts`'s `worldYAtAltitude`.
+  const crownAltBase = worstGroundRise + BRIDGE_RISE + HEIGHT_MARGIN + ARCH_CROWN_DIP;
   // The hump's own surface has already begun to fall away by the far edge of
   // the flat crown span (±ARCH_CLEAR_HALF), and the slab under it does not:
   // it is flat, because the train needs full height across its whole width.
@@ -668,27 +701,69 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // only kept the shell's thinnest pinch over the *soffit* and knew nothing
   // about the slab's own thickness or the road bed under the paving.)
   //
-  //   surface(edge) = crown − (crown − ground)·dip  ≥  soffitCrownY + BRIDGE_DECK_DEPTH
+  //   surface(edge) = crown − (crown − ground)·dip  ≥  soffit + BRIDGE_DECK_DEPTH
   //
-  // solved for `crown`. Note this is the same height `crownBase` would put
+  // solved for `crown`. Note this is the same height `crownAltBase` would put
   // the crown at if the road were flat — the dip is the whole reason a real
   // hump stands higher than the published `BRIDGE_RISE`, and the shorter the
-  // ramps, the more it costs.
+  // ramps, the more it costs. Every term is a local rise, so the algebra is
+  // unchanged from the world-`y` version it replaces.
   const shorterLength = Math.min(lengthPos, lengthNeg);
   const dipFraction = profileDrop(ARCH_CLEAR_HALF / Math.max(shorterLength, ARCH_CLEAR_HALF + 0.1));
-  const needed = (crownBase - lowestCrownEdgeGroundY * dipFraction) / (1 - dipFraction);
-  const crownY = Math.max(crownBase, needed);
+  const needed = (crownAltBase - lowestCrownEdgeRise * dipFraction) / (1 - dipFraction);
+  /** The crown's own height above the ground beneath it, along the local up. */
+  const crownAlt = Math.max(crownAltBase, needed);
+  /** The crown's world `y` at the crossing point — what the rigid arch, the
+   * slab and the clearance marker are all built from, unchanged. */
+  const crownY = worldYAtAltitude(crownCentre.x, crownCentre.z, crownAlt);
+  const soffitCrownY = crownY - BRIDGE_DECK_DEPTH;
 
   // --- the surface profile — the ONE owner of the hump's shape -------------
+  /**
+   * **The hump bends with the planet, because its shape is stated in
+   * altitudes.**
+   *
+   * Jim, 14 September 2026: *"down is variable along the length of the bridge,
+   * effectively it needs to be bent to cover the curvature of the earth."*
+   * This is that sentence as arithmetic. The blend it performs is exactly the
+   * one it always performed — *lerp from the crown plane down to the ground,
+   * by the hump profile* — but every term in it is now a height above the
+   * ground measured from the planet's centre, and only the last step turns
+   * the answer back into a world `y`.
+   *
+   * **What was wrong with the world-`y` version, precisely.** It read
+   * `ground + (crownY − ground)·(1 − drop)`, which expands to
+   * `crownY·(1 − drop) + ground·drop`. That second term drags the *ground's own
+   * world-`y` slope* into the deck: differentiate it and the deck's height
+   * above the ground picks up `g′·(drop − 1)`, where `g′` is how fast the park's
+   * dome falls away in world `y` — up to 1.02 at the boundary. So a ramp
+   * planned at a grade of 0.09 was built at 0.98–2.18 against a peak budget of
+   * 0.512, and a sprinting child lost the deck under her feet and dropped
+   * through it into the tunnel. Measured on the pool before this change:
+   * **18 of 23 bridges over budget, worst 1.124**, every seed affected.
+   *
+   * Stated in altitudes the ground term is not there at all — the grade is
+   * `crownAlt · drop′`, which is the grade the planner asked for and has
+   * nothing to do with where on the dome the bridge stands. **That is why this
+   * is a bug fix and not a beautification**: a bridge that bends meets the
+   * ground at the same grade at both ends, so the ramp-length problem a
+   * previous engineer could only solve by lengthening ramps (which left eight
+   * parks in ten with no valid bridge site at all) stops existing.
+   *
+   * Both guarantees the old formula was built around survive intact:
+   *
+   * - **`q = 1` is the ground, exactly** — altitude zero is the ground by
+   *   definition, so the feet still blend to the *local* ground rather than to
+   *   a single "low end" reference.
+   * - **`q = 0` is the rigid crown plane.** `crownAlt − localRise` is the
+   *   height of that flat slab above whatever ground happens to be under it, so
+   *   the flat crown stays flat and the worst-ground clearance solved for above
+   *   is still what gets built.
+   */
   const surfaceProfile = (x: number, z: number, along: number): number => {
     const length = along >= 0 ? lengthPos : lengthNeg;
     const q = length > 0 ? clamp01(Math.abs(along) / length) : 1;
-    const ground = terrainHeight(x, z);
-    // Blends to the *local* ground at the feet by construction (q = 1 →
-    // ground exactly), the same guarantee the old ramp geometry made — see
-    // its note on why blending to a single "low end" reference misled a
-    // poiGraph probe at the ramp's own low edge.
-    return ground + (crownY - ground) * (1 - profileDrop(q));
+    return worldYAtAltitude(x, z, (crownAlt - localRise(x, z)) * (1 - profileDrop(q)));
   };
   const heightAt = (x: number, z: number): number => {
     const projected = frame.project(x, z, shift);
