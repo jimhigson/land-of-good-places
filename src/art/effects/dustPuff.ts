@@ -1,4 +1,6 @@
 import { Group, Mesh, MeshBasicMaterial, SphereGeometry } from 'three';
+import { Anchor } from '../../world/geo';
+import { anchorAt } from '../../world/up';
 import { PALETTE } from '../../core/palette';
 import { clamp01, smoothstep } from '../../core/mathUtils';
 import { decal } from '../style/materials';
@@ -34,6 +36,16 @@ import { decal } from '../style/materials';
  * Puffs live in the *parent's* coordinates, not the player's, so they stay on
  * the ground where they were dropped instead of being dragged along behind
  * her. The same trick `hopRings` uses.
+ *
+ * **Each slot hangs off its own {@link Anchor}, and the drift is written in
+ * that anchor's local space.** The anchor is stood on the ground where the
+ * puff was dropped and *turned to face the way she is running*, so "back" is
+ * simply local `-Z` and "up" is local `+Y` — both exactly right on ground that
+ * leans up to 45°, with no trigonometry in this file at all. Before that, the
+ * `DRIFT_UP` lift was world `+Y`, which at the park's rim drove the puff
+ * sideways into the hill as much as upwards, and the `scale.y · 0.62` squash —
+ * the thing that makes a puff read as *settling on the grass* rather than
+ * bouncing off it — was squashed along the wrong axis entirely.
  */
 
 /**
@@ -72,13 +84,12 @@ export interface DustPuffs {
 
 interface Puff {
   readonly mesh: Mesh;
+  /**
+   * The ground frame the puff was dropped in, turned so that local `-Z` points
+   * behind the runner. Everything below is written in here.
+   */
+  readonly anchor: Anchor;
   readonly material: MeshBasicMaterial;
-  /** Where it was dropped, and which way it drifts. Reused, never replaced. */
-  originX: number;
-  originY: number;
-  originZ: number;
-  backX: number;
-  backZ: number;
   /** Seconds lived, or `LIFETIME` when the slot is idle. */
   age: number;
 }
@@ -106,17 +117,10 @@ export function createDustPuffs(): DustPuffs {
     mesh.visible = false;
     // Above the ground and the path decals, below the hop rainbow.
     mesh.renderOrder = 3;
-    root.add(mesh);
-    puffs.push({
-      mesh,
-      material,
-      originX: 0,
-      originY: 0,
-      originZ: 0,
-      backX: 0,
-      backZ: 0,
-      age: LIFETIME,
-    });
+    const anchor = new Anchor();
+    anchor.add(mesh);
+    root.add(anchor);
+    puffs.push({ mesh, anchor, material, age: LIFETIME });
   }
 
   let next = 0;
@@ -128,13 +132,11 @@ export function createDustPuffs(): DustPuffs {
     if (!slot) return;
     if (slot.age >= LIFETIME) alive += 1;
 
-    slot.originX = x;
-    slot.originY = y;
-    slot.originZ = z;
-    slot.backX = backX;
-    slot.backZ = backZ;
+    // The bearing that puts local `+Z` along the way she is *facing*, so the
+    // drift below is a plain walk backwards along `-Z`.
+    anchorAt(slot.anchor, x, y, z, Math.atan2(-backX, -backZ));
     slot.age = 0;
-    slot.mesh.position.set(x, y, z);
+    slot.mesh.position.set(0, 0, 0);
     slot.mesh.scale.set(START_SCALE, START_SCALE * 0.62, START_SCALE);
     slot.mesh.visible = true;
     slot.material.opacity = 0.75;
@@ -156,11 +158,9 @@ export function createDustPuffs(): DustPuffs {
       // Eased so it leaps away from her heel and then loiters, which is what
       // dust actually does — most of the travel is in the first third.
       const ease = smoothstep(0, 1, t);
-      slot.mesh.position.set(
-        slot.originX + slot.backX * DRIFT_BACK * ease,
-        slot.originY + DRIFT_UP * ease,
-        slot.originZ + slot.backZ * DRIFT_BACK * ease,
-      );
+      // Local to the anchor: back is `-Z`, up is `+Y`, and both are the
+      // ground's own directions wherever this puff happens to be.
+      slot.mesh.position.set(0, DRIFT_UP * ease, -DRIFT_BACK * ease);
 
       const scale = START_SCALE + (END_SCALE - START_SCALE) * ease;
       slot.mesh.scale.set(scale, scale * 0.62, scale);
