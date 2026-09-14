@@ -171,6 +171,44 @@ time. **Do not baseline anything against a park that does not build.**
 
 ---
 
+### Also closed
+
+- **`scripts/check-rail-race.mts`** (§2.4 #4) — four clauses. The headline:
+  lane height over the ground read **9.67–74.97 m** on seed 11 and reads
+  **0.00–10.86 m** now. 85% of it was the planet falling away under the ring.
+  Gate clearance 10.82 -> 7.85 m against a 6 m threshold.
+- **`scripts/check-park.mts`** (§2.4 #8) — bridge rise is a `planetRadiusAt`
+  difference. Seed 428, forced to report: 5.22 -> 4.95 m and 5.39 -> 5.12 m.
+  Plus a coverage line on **stderr before the exit**: how many
+  route-meets-rail points it judged (3 on seed 428, **0 on seed 11**, where it
+  therefore says it asserts nothing).
+- **`scripts/check-pet-slide.mts`** (§2.4 #9) — the lens-underground clause.
+  Seed 11: lowest above ground -4.17 -> -3.83 m.
+
+### Verification of the whole branch
+
+```
+pnpm exec tsc --noEmit    exit 0
+pnpm run typecheck:test   exit 0
+pnpm run build            exit 0
+git diff --stat origin/feat/sphere-combined...HEAD   9 files, 0 deletions
+check chain step SET identical to the base (65 = 65, no adds, no drops),
+parsed from package.json's scripts object, not grepped
+test:procgen   base 49 failed | 269 passed | 279 skipped
+               mine 55 failed | 263 passed | 279 skipped
+               ran = 318 both times, files 6 failed | 13 passed both times
+```
+
+The +6 is exactly 3 clauses x 2 buildable seeds, and every one of them is the
+bridge finding above.
+
+**`RADIAL-INVENTORY.md` is not on this branch** — it lives on
+`seek/radial-inventory`. Rows closed here are listed above rather than struck
+there, to avoid merging that branch in and conflicting with the lead, who owns
+that file's truth.
+
+---
+
 ## Still open in my area
 
 Worked in `RADIAL-INVENTORY.md` §2 order. Nothing below is started unless it
