@@ -42,7 +42,29 @@ tripwire could not see it; the tell was the pass count.
 
 `scripts/park-past-the-horizon.mts` is the measurement, re-runnable.
 
-### 2. Open question for Jim — the gradient budget is unsatisfiable
+### 2. RESOLVED — the gradient budget is retired
+
+Overseer's ruling, 14 September 2026: **retire the 10% figure as a constraint on
+the planet, and do not grow the planet for it.** The budget guaranteed the bus
+could drive all 117 m of its road; Jim has ruled it need not — *"showing the bus
+coming in a couple meters is fine and good."* The dead derivation in
+`GROUND_SPHERE_RADIUS`'s docblock is deleted.
+
+`BUS_MAX_GRADE` is kept as a fact about the bus but **nothing asserts it**, and
+the invariant says so on every run, to stderr. What it still refuses is the park
+reaching past its own equator — no ground at all, not a steep slope.
+
+**The durable fix:** the gradient is now `tan θ` via `gradientAtParkRadius`, not
+`d / R`, which is `sin θ`. `sin θ` under-reports everywhere and **cannot exceed
+100%**, which is why 245 m of park off the edge of the planet once read as a
+plausible `111.36%`. A measure that cannot exceed 100% cannot report the thing
+it exists for.
+
+The invariant was renamed from *"...and gentle enough for the bus"* to
+*"...and the park fits on it"*, because it no longer asserts gentleness and a
+test name is a claim like any other.
+
+### (historical) the question that ruling answered
 
 One failure needs a ruling, not an engineer:
 
@@ -70,6 +92,38 @@ equator: it compares `terrainHeight` against an `expectedFall` carrying the same
 `Math.max(0, …)` guard, so out there it compares the terrain to itself. The
 clause that exists to stop clause 2 passing vacuously is itself vacuous exactly
 where it is needed. **Also unfixed.**
+
+## The live disagreement with #619 — read before touching PARK_SURFACE_SCALE
+
+**#619 merged into the base and changed this same docblock in the OPPOSITE
+direction.** Both of us found "the docblock says scale 1, the constant says
+1200". #619 corrected the *paragraph* and kept 2.335x; this branch corrected the
+*constant* and kept scale 1.
+
+The rebase applied with **no conflicts** and produced exactly the bug CLAUDE.md
+warns a clean rebase produces: git took my constant and their paragraph, so the
+file said *"This is 1200 ... the scale is 2.335"* directly above
+`= GROUND_SPHERE_RADIUS`. Resolved by hand; the docblock now carries both sides.
+
+**#619's engineering is untouched and correct.** Its `paths.ts` fix — a
+hard-coded `z = 54` copied from `ENTRANCE_GATE_Z - 6` while the arch stood at
+60, leaving the gate corridor 88.8 m inside the doorway — took the pool from 3
+of 10 seeds building to 10 of 10. It is not mine and I have not touched it.
+
+What it did not measure: **at 2.335x the park does not fit on its planet.**
+On the rebased tree, *with #619's fix in place*, seed 11:
+
+    the park reaches 247.0 m on a 220 m planet — 27.0 m PAST ITS OWN EQUATOR
+    worst gradient INFINITE (tan theta) at 220.0 m
+
+"The park builds" and "the park is on the planet" are different questions. #619
+answered the first; `theGroundIsTheSphereItClaimsToBe` now asserts the second.
+
+    scale 2.335 (#619's base)   501 passed  128 failed  0 pending
+    scale 1     (this branch)   552 passed   96 failed  0 pending
+
+**Do not settle this alone.** If 2.335x is wanted back, the planet must grow
+with it — they are one decision, which is why they live in one expression.
 
 ## The claims migration (the lane proper)
 
