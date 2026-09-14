@@ -3,6 +3,7 @@ import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
 import type { LevelConnector } from './building/surfaces';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
+import { columnYForRise, riseBetweenWorld } from './geo';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
 /**
@@ -220,6 +221,37 @@ const MARGIN = 2;
  * because a bigger drop is a fall, and a route should not casually walk a child
  * off the edge of a deck on the way to somewhere else. The ball pit's 0.5 m lip
  * sits comfortably under it and stays walkable, as it must.
+ *
+ * ## It is 0.62 m of *height*, and that is not a difference of world `y`
+ *
+ * This number used to be compared against `nodeHeight` differences directly,
+ * and `nodeHeight` is a world `y` — a coordinate, not a height. On a ball those
+ * are two different quantities, and the gap between them is one wrong datum
+ * with two opposite symptoms, both live in the game until this change
+ * (`scratch/nav-step-frame.mts` prints the table, with a flat-world control):
+ *
+ * - **Level ground read as a ledge.** The worst of the eight neighbours is a
+ *   diagonal straight out along the radius, and on bare level cap that is a
+ *   **0.724 m** difference of world `y` at d = 157 m and **1.092 m** at
+ *   d = 184.3 m — both past this gate. So out at the park's reach the router
+ *   simply refused to go outward, over ground a child can stroll across. That
+ *   is tap-to-move giving up for no visible reason.
+ * - **A real ledge read as level ground.** The same datum runs the other way
+ *   coming *up*: a genuine 0.70 m step reads only **0.595 m** of world `y` at
+ *   d = 40 m and **−0.022 m** at d = 157 m, so it slid under the gate and the
+ *   router planned a child straight up something she cannot climb.
+ *
+ * Both vanish when the question is asked as a rise rather than a coordinate
+ * difference — `geo/step.ts`'s {@link riseBetweenWorld}, which projects the
+ * vector between the two standing places onto the local up. Level ground then
+ * reads 0.000 m at every lean and a 0.70 m ledge reads 0.700 m at every lean,
+ * so this constant means the same thing everywhere in the park instead of
+ * meaning `0.62 · cos θ` and drifting with every metre she walks outward.
+ *
+ * **Raising the constant was the wrong fix and was measured to be**: to admit
+ * flat grass it would have to exceed 0.729 at 157 m and 1.007 at 180 m — a
+ * different value at every radius — and at that setting it admits real ledges
+ * of 0.51–0.58 m unchecked. There is no single number in the wrong frame.
  */
 const MAX_STEP = BUILDING_STEP_UP;
 
@@ -821,10 +853,18 @@ export class NavGrid {
         // pass above.
         const onBridge = this.bridgeCovers(x, z);
         for (let level = 1; !onBridge && level < MAX_LEVELS_PER_CELL; level += 1) {
-          const next = sample(x, z, cursor - MAX_STEP - LEVEL_EPSILON);
+          // A step down this column is MAX_STEP of *height*, which out at the
+          // park's reach is a good deal more world `y` than MAX_STEP —
+          // 0.884 m at d = 157, 1.132 m at d = 184.3. Handing the sampler the
+          // step verbatim starts the search too high and walks straight past
+          // the level it was looking for, so the cell ends up with fewer
+          // levels than it has surfaces. See `geo/step.ts`.
+          const next = sample(x, z, cursor - columnYForRise(x, cursor, z, MAX_STEP) - LEVEL_EPSILON);
           if (next >= cursor - LEVEL_EPSILON) break;
           cursor = next;
-          if (next < kept - MAX_STEP) {
+          // Same reasoning, asked the other way: two surfaces are one walking
+          // level when a foot lifts less than MAX_STEP between them.
+          if (riseBetweenWorld(x, kept, z, x, next, z) < -MAX_STEP) {
             this.nodeHeight[nodes] = next;
             this.nodeCell[nodes] = index;
             kept = next;
@@ -908,7 +948,12 @@ export class NavGrid {
     if (cell < 0 || this.blocked[cell] === 1) return -1;
     const node = this.nodeNearest(cell, y);
     if (node < 0) return -1;
-    return Math.abs((this.nodeHeight[node] ?? 0) - y) <= MAX_LEVEL_GAP ? node : -1;
+    // Same column, so the rise is the world-`y` gap times `cos θ` — which means
+    // the bare gap is up to 1.43x too big at the park's reach and this gate is
+    // *tighter* than MAX_LEVEL_GAP claims out there. Asked as a rise it means
+    // the same half-metre everywhere.
+    const lift = riseBetweenWorld(x, y, z, x, this.nodeHeight[node] ?? 0, z);
+    return Math.abs(lift) <= MAX_LEVEL_GAP ? node : -1;
   }
 
   /** The node of `cell` whose surface is nearest `y`, or -1 for a blocked cell. */
@@ -1096,8 +1141,23 @@ export class NavGrid {
         // at most one matches; the loop is over the cell's own short range.
         const from = this.levelStart[neighbourCell] ?? 0;
         const to = this.levelStart[neighbourCell + 1] ?? 0;
+        // The two standing places, in full, because a step is a question about
+        // a *pair* of places and not a difference of two heights — see
+        // MAX_STEP's own docblock for the two live defects that caused.
+        const nodeX = this.originX + cx * CELL;
+        const nodeZ = this.originZ + cz * CELL;
+        const neighbourX = this.originX + nx * CELL;
+        const neighbourZ = this.originZ + nz * CELL;
         for (let neighbour = from; neighbour < to; neighbour += 1) {
-          if (Math.abs((this.nodeHeight[neighbour] ?? 0) - nodeHeight) > rise) continue;
+          const lift = riseBetweenWorld(
+            nodeX,
+            nodeHeight,
+            nodeZ,
+            neighbourX,
+            this.nodeHeight[neighbour] ?? 0,
+            neighbourZ,
+          );
+          if (Math.abs(lift) > rise) continue;
           this.relax(node, neighbour, nodeCost + step, 0, goalX, goalZ, goalY);
         }
       }
@@ -1384,17 +1444,28 @@ export class NavGrid {
     // the answer is directly comparable with the search's own g-scores.
     const slice = distance / steps / CELL;
     let previousHeight = aHeight;
+    let previousX = ax;
+    let previousZ = az;
     let cost = 0;
 
     for (let i = 1; i <= steps; i += 1) {
       const t = i / steps;
-      const cell = this.cellAt(ax + (bx - ax) * t, az + (bz - az) * t);
+      const sampleX = ax + (bx - ax) * t;
+      const sampleZ = az + (bz - az) * t;
+      const cell = this.cellAt(sampleX, sampleZ);
       if (cell < 0 || this.blocked[cell] === 1 || this.hopBand[cell] === 1) return -1;
       const node = this.nodeNearest(cell, previousHeight);
       if (node < 0) return -1;
       const height = this.nodeHeight[node] ?? 0;
-      if (Math.abs(height - previousHeight) > MAX_STEP) return -1;
+      // A rise, not a coordinate difference — the string-pull must refuse
+      // exactly the steps the search refuses, or it straightens a route back
+      // over something the router carefully went around. Same owner, so they
+      // cannot drift.
+      const lift = riseBetweenWorld(previousX, previousHeight, previousZ, sampleX, height, sampleZ);
+      if (Math.abs(lift) > MAX_STEP) return -1;
       previousHeight = height;
+      previousX = sampleX;
+      previousZ = sampleZ;
       cost += slice * this.costOf(cell);
     }
     return cost;
