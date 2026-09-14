@@ -225,6 +225,30 @@ export function altitudeAt(x: number, y: number, z: number): number {
   return planetRadiusAt(x, y, z) - groundRadiusAt(x, z);
 }
 
+/**
+ * **The world `y` at which a point in this column stands `altitude` metres above
+ * the ground** — the inverse of {@link altitudeAt} that keeps `(x, z)` fixed.
+ *
+ * The other inverse, {@link liftFromGround}, moves along the local up and so
+ * slides `x` and `z` outwards by `altitude · sin(tilt)`. That is exactly right
+ * for *placing* something — a prop lifted off the grass leans with the grass —
+ * and exactly wrong for anything that has already decided which column it is in
+ * and only wants its height back. The camera's follow is the latter: its `x` and
+ * `z` are a damped chase of the player and must not be quietly dragged outwards
+ * by a lift.
+ *
+ * `altitudeAt(x, yAtAltitude(x, z, a), z) === a` exactly, for any `a`, because
+ * both sides are radii in the same column.
+ *
+ * The `max(0, …)` is the horizon guard {@link terrainHeight} carries for the
+ * same reason: past the sphere's own radius there is no real square root, and a
+ * `NaN` leaking into a camera position is how a frame ends up drawing nothing.
+ */
+export function yAtAltitude(x: number, z: number, altitude: number): number {
+  const wanted = groundRadiusAt(x, z) + altitude;
+  return Math.sqrt(Math.max(0, wanted * wanted - x * x - z * z)) - GROUND_SPHERE_RADIUS;
+}
+
 const _up = /* @__PURE__ */ new Vector3();
 
 /**

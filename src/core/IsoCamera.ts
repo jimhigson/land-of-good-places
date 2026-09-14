@@ -18,7 +18,8 @@ import { cameraOffset } from './cameraRig';
 import { screenBasis } from './screenBasis';
 import type { FrameContext } from './types';
 import type { ParkBoundary } from '../world/boundary';
-import { eyeForFocus } from '../world/up';
+import { eyeForFocus, isOutdoors } from '../world/up';
+import { altitudeAt, yAtAltitude } from '../world/terrain';
 
 /**
  * The Theme Park camera.
@@ -50,6 +51,32 @@ export class IsoCamera {
   /** Point the camera orbits. Damped towards the follow target every frame. */
   private readonly focus = new Vector3();
   private readonly desiredFocus = new Vector3();
+  /**
+   * **How high {@link focus} rides above the ground, as its own damped state.**
+   *
+   * The follow damps `x` and `z` at {@link CAMERA_FOLLOW_HALF_LIFE} and the
+   * height at twice that, because height above the ground genuinely does change
+   * slowly — she crosses the park far faster than she climbs, so a kerb settles
+   * out of frame instead of jolting it.
+   *
+   * On a sphere that sentence stopped being true of `y`, and — the part that
+   * caught this twice — it is not rescuable by recomputing the altitude from
+   * `focus` each frame either. `x` and `z` are damped *first*, so by the time
+   * the height is asked for, the focus has already slid into a different column
+   * whose ground is metres higher or lower; reading `altitudeAt(focus)` there
+   * hands the slow damp the cap's whole change as if it were a climb, and it
+   * spends the next half-second chasing it. Walking in from the bus stop that
+   * put the focus **4.42 m under the grass** and the eye 2.51 m under it.
+   *
+   * So the altitude is kept here, damped on its own, and `focus.y` is *derived*
+   * from it and the current column through `yAtAltitude`. Nothing then feeds the
+   * ground's own shape back into the quantity that is supposed to be describing
+   * her height above it.
+   *
+   * Indoors it is simply `focus.y` minus the floor, and the old `y` damp is used
+   * unchanged — see {@link update}.
+   */
+  private focusAltitude = 0;
   /**
    * {@link focus} plus {@link lookOffset} — the point actually on screen, and
    * what {@link applyTransform} places the camera over.
@@ -347,6 +374,12 @@ export class IsoCamera {
   snapTo(position: Vector3): void {
     this.focus.copy(position);
     this.desiredFocus.copy(position);
+    // The altitude is state, so a snap has to place it too — otherwise the
+    // first frame after a door or a ride damps from whatever the last space
+    // left behind, which is exactly the lag a snap exists to skip.
+    this.focusAltitude = isOutdoors(position.x, position.z)
+      ? altitudeAt(position.x, position.y, position.z)
+      : 0;
     // A snap is a change of *place* — through a door, out of a ride, in from
     // the title screen — and every one of them happens behind a closed iris.
     // Carrying a look-around offset across it would open that iris on a view
@@ -725,23 +758,74 @@ export class IsoCamera {
       this.applyFrustum();
     }
 
+    // **The height the follow is chasing, as an altitude rather than a `y`.**
+    //
+    // Outdoors these are two different numbers now, and the difference is a
+    // camera in the grass. `desiredAltitude` is how far above the ground the
+    // shot wants to sit; `desiredFocus.y` is where that lands in world terms,
+    // which out at the park's reach is dominated by the sphere's own fall.
+    let desiredAltitude: number;
     if (this.focusOverrideActive) {
       // No look-ahead, no chest-height lift: those are about a walking
       // player, and the override's own point is already exactly where it
       // wants the camera to orbit.
       this.desiredFocus.copy(this.focusOverrideValue);
+      desiredAltitude = altitudeAt(
+        this.desiredFocus.x,
+        this.desiredFocus.y,
+        this.desiredFocus.z,
+      );
     } else {
-      this.desiredFocus
-        .copy(target)
-        .addScaledVector(velocity, CAMERA_LOOK_AHEAD)
-        // Aim a little above the player's feet so they sit slightly low on screen,
-        // leaving room to see what you are walking towards.
-        .add(TEMP_LIFT);
+      this.desiredFocus.copy(target).addScaledVector(velocity, CAMERA_LOOK_AHEAD);
+      // Aim a little above the player's feet so they sit slightly low on screen,
+      // leaving room to see what you are walking towards.
+      //
+      // **Taken at her own feet, not at the look-ahead point.** The look-ahead
+      // slides the focus a metre or two along the ground, and out at the park's
+      // edge a metre along the ground is more than a metre of world `y` — so
+      // reading the altitude at the shifted column would fold the cap's slope
+      // into the chest lift. Her position is where "how high is she standing"
+      // has an answer; the look-ahead is about `x` and `z` and nothing else.
+      desiredAltitude = altitudeAt(target.x, target.y, target.z) + CAMERA_FOCUS_LIFT;
+      this.desiredFocus.y = yAtAltitude(this.desiredFocus.x, this.desiredFocus.z, desiredAltitude);
     }
 
     this.focus.x = damp(this.focus.x, this.desiredFocus.x, CAMERA_FOLLOW_HALF_LIFE, dt);
-    this.focus.y = damp(this.focus.y, this.desiredFocus.y, CAMERA_FOLLOW_HALF_LIFE * 2, dt);
     this.focus.z = damp(this.focus.z, this.desiredFocus.z, CAMERA_FOLLOW_HALF_LIFE, dt);
+    // **The height damps as an ALTITUDE outdoors, never as a `y`.**
+    //
+    // The half-life here is deliberately twice the other two, and the reason it
+    // could be is that height above the ground changes slowly: she walks across
+    // the park far faster than she climbs, so a kerb or a hummock should settle
+    // out of the frame rather than jolt it.
+    //
+    // That was a statement about a flat park, and on a sphere it is simply
+    // false of `y`. Walking 5 m towards the gate from the bus stop changes her
+    // world `y` by nearly 5 m — the cap, not a climb — so a `y` damped at half
+    // rate lags metres behind her, and the whole rig hangs off that lagging
+    // point. Measured on `/arrive?seed=428` before this: the eye reached
+    // **0.28 m below the grass** during the walk in, with the focus trailing
+    // ~9 m under the player it was supposed to be following.
+    //
+    // Damping the altitude instead keeps the original intent exactly — the
+    // quantity that settles slowly is the one that genuinely changes slowly —
+    // and `yAtAltitude` puts it back in the same column, so the slow half-life
+    // cannot drag the shot sideways either.
+    //
+    // Indoors `y` *is* the altitude, `isOutdoors` is false, and this is the line
+    // it always was.
+    if (isOutdoors(this.focus.x, this.focus.z)) {
+      this.focusAltitude = damp(
+        this.focusAltitude,
+        desiredAltitude,
+        CAMERA_FOLLOW_HALF_LIFE * 2,
+        dt,
+      );
+      this.focus.y = yAtAltitude(this.focus.x, this.focus.z, this.focusAltitude);
+    } else {
+      this.focus.y = damp(this.focus.y, this.desiredFocus.y, CAMERA_FOLLOW_HALF_LIFE * 2, dt);
+      this.focusAltitude = 0;
+    }
 
     this.updateLook(dt);
     this.updatePose(dt);
@@ -1065,9 +1149,14 @@ export class IsoCamera {
  * `check:arrival-camera` used to carry its own hand-copied 1.1, which was the
  * *door beat's* lift and 0.15 m too low, and its headroom clause passed only
  * because of the difference. One owner; everyone else asks.
+ *
+ * **An altitude, not a `y` offset.** It was added as `new Vector3(0, 1.25, 0)`,
+ * which out at the park's reach lifts the aim 1.25 m up a vertical the ground
+ * leans 44 degrees away from — 0.90 m of real height and 0.87 m sideways of her
+ * chest. `update` adds it to her own altitude instead, so it stays chest height
+ * wherever in the park she is standing.
  */
 export const CAMERA_FOCUS_LIFT = 1.25;
-const TEMP_LIFT = new Vector3(0, CAMERA_FOCUS_LIFT, 0);
 
 /**
  * Below this many metres from her, the look-around offset is simply zero.
