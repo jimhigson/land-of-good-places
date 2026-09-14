@@ -148,11 +148,48 @@ caught it. Verified myself afterwards; he is right:**
 belongs to motion *constrained to the surface*, where the real distance is an
 arc and the chart flattens it. Free flight has no arc.
 
-Known and **not** fixed: `halfThickness` is registered in chart units against
-geometry drawn in real metres, so an outdoor collider is fattened radially by
-`1/cos θ` at the rim (a 0.35 chart band is ~0.50 m of real ground radially,
-0.35 tangentially). Anisotropy in the *registration*, not the solver, and it
-errs towards **more** solid — the safe direction. Below the live defects.
+### The chart anisotropy — and I called it safe too quickly
+
+Since the walk step itself is now converted, **this is the only remaining place
+where the two metrics disagree in the walk path**, and it is no longer masked by
+the step being wrong in the same direction.
+
+Every collider is registered with a chart `halfThickness`/`radius`, and the
+mover's own `radius` is compared in chart space too. So in real ground metres a
+mover's body is not a circle but an **ellipse**, stretched radially by `1/cos θ`:
+1.24 m across tangentially and 1.77 m radially at the park's reach. The
+clearance the solver demands of a radial gap, for a 0.2 m fence and
+`PLAYER_RADIUS`:
+
+| d | lean | real clearance demanded | overshoot |
+|---|---|---|---|
+| 0 m | 0.0° | 0.820 m | 0.000 m |
+| 80 m | 21.3° | 0.880 m | 0.060 m |
+| 157 m | 45.5° | 1.171 m | 0.351 m |
+| 184.3 m | 56.9° | 1.502 m | 0.682 m |
+
+**I first wrote that this "errs towards more solid, the safe direction". That
+was too glib and I am correcting it**, because eating clearance is precisely
+what CLAUDE.md says solidity must never cost — `keepOutsFor` is the single owner
+of where a child has to be able to stand.
+
+The honest position, after measuring, is that **it depends on what the geometry
+was authored in, and I could not settle which**:
+
+- Geometry **placed procedurally by chart `(x, z)`** — most of the park — is
+  self-consistent. Two walls 1.64 m apart in chart are 2.34 m apart on the real
+  ground at the rim, and her radially-fat body scales with them. She fits.
+- Geometry **authored in real metres** — a Blender asset's doorway, attached at
+  an anchor — does not scale with the chart. A real 1.64 m doorway at the rim is
+  1.15 chart metres wide against a body the solver treats as 1.24 chart, and it
+  is **refused**. The gate arch sits near the boundary and is the obvious
+  candidate.
+
+**The check that could settle this is the one that is broken.** It needs a built
+park (`check:park`'s reachability probes, or `keepOutsFor` marched at real
+doorways), and nothing through `park-harness` runs while `crossings.ts` throws.
+So this is measured in principle and unmeasured in the game, and it should not
+be called safe until somebody has stood a body in those doorways.
 
 ## Open, in priority order
 

@@ -858,6 +858,44 @@ export class CollisionWorld {
    * caller that passes nothing (every NPC, `nudge`) takes exactly the code
    * path it took before, including the single-`resolve` fast path.
    */
+  /**
+   * ### `deltaX` / `deltaZ` are CHART metres, deliberately
+   *
+   * Not real metres of ground walked. This is a chart-space solver end to end:
+   * every collider is registered as chart `(x, z)` with a chart `halfThickness`
+   * or `radius`, and {@link maxSafeStep} — the whole anti-tunnelling guarantee —
+   * is derived from {@link thinnestHalfWidth}. That guarantee is the statement
+   * *"a step cannot cross the mid-plane of the thinnest registered band without
+   * a sample landing inside it"*, which is about **chart** perpendicular
+   * distance against a **chart**-registered band. Feeding it real metres while
+   * the bands stay chart-registered breaks exactly that, silently, and only on
+   * stuttering frames.
+   *
+   * So the conversion belongs to the caller, and it lives in one place:
+   * `entities/movement/gravity.ts`'s `chartStep` / `realStep`
+   * (`eng/sphere-locomotion`). **Chart delta = real arc × cos θ, on the radial
+   * component only** — a multiply, and the tangential component is untouched,
+   * which is what makes this a units bug rather than a uniformly wrong speed.
+   * Before that conversion a child sprinting outward at the park's edge covered
+   * **1.55 m of ground for every metre her speed asked for**; after it, 1.007.
+   *
+   * **A hop's lateral half needs no conversion at all**, and that is not an
+   * inconsistency. The chart coordinate of a point simply *is* its world `x`
+   * and `z` — the chart is an orthographic projection, not an unrolling — so
+   * any displacement's chart delta is that displacement's own `x, z`
+   * components. The cos θ appears only for motion **constrained to the
+   * surface**, where the real distance is an arc and the chart flattens it.
+   * Free flight has no arc. (Written down because it was got backwards once,
+   * in both halves at once, and a wrong conversion in a docblock outlives
+   * everyone who could have caught it.)
+   *
+   * And whoever converts a step must convert the **read-back** too: both movers
+   * derive velocity from how far they actually moved, so an unconverted
+   * read-back lands in a real speed that gets compressed again next frame.
+   * Measured by dropping `realStep`: the covered-over-asked ratio at the rim
+   * goes to 0.3366, and it presents as the walk mysteriously sticking rather
+   * than as a units bug.
+   */
   resolveMovement(
     position: Vector3,
     deltaX: number,
