@@ -146,6 +146,47 @@ it presents as the walk sticking rather than as a units bug.
    but a radial fault would be roughly four times more visible at the rim than
    anywhere that harness looks. Worth a second ramp further out.
 
+## How this lane found its mistakes, which is the most reusable thing in this file
+
+Across this lane and the collision lane, **seven confident conclusions were
+wrong**, and every one was caught by the *other* engineer running the
+prescription — never by its author re-reading their own work:
+
+| claim | whose |
+|---|---|
+| raise `MAX_STEP` | collision |
+| the frame is the disease | collision |
+| chart delta = real / cos θ | collision |
+| the chart anisotropy errs safe | collision |
+| duration is the health tell | **mine** |
+| run the suites one at a time | **mine** |
+| 279 skipped is a healthy run | collision's, adopted by me |
+
+Two habits fall out, and they are worth more than the individual corrections:
+
+- **Test the prescription, not just the finding.** A correct diagnosis with a
+  wrong remedy reads exactly like a correct one — and the remedy is the half
+  that gets copied into someone else's file. Three of the seven above were
+  sound diagnoses with bad remedies.
+- **When you hand a number to another lane, hand the command that produced
+  it.** Every correction in this thread began with somebody being able to
+  re-run something.
+
+The failure mode this guards against is not being wrong. It is being wrong
+**and fluent**, in a file the next agent inherits. That is exactly what
+"279 healthy" was: written confidently, adopted reasonably, and it took a third
+measurement to kill it — after it had already propagated into two handoffs.
+
+**A worked instance, so this is not just advice.** The collision engineer went
+to fix the seam wall and stopped, because its acceptance test —
+*"every railway crossing has a bridge you can walk to, onto and across"* — is
+already among the 49 failures. Verified here from my own report data rather
+than taken: **FAILED on seeds 11 and 326**, the only two that run, and SKIPPED
+on the other three. So a `fence.ts` change would land on a gate saying exactly
+the same thing before and after, and that is the gate that caught the previous
+engineer's regression. There was no green to protect and no red to turn green.
+Stopping and writing down why beat producing a plausible diff.
+
 ## Rules inherited, and why (do not relearn these)
 
 - **Never re-derive a position from an altitude.** `position = foot + up *
