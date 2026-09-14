@@ -48,6 +48,15 @@
  * backjumping search behaves identically on every run.
  */
 
+import {
+  arcBetween,
+  arcToRun,
+  boundsOfRun,
+  eachRunSample,
+  runsCross,
+  CLAIM_BROAD_PHASE_SLACK,
+} from './claimSurface';
+
 /** A circular claim shape: trees, lamps, plot discs, stand spots. */
 export interface Disc {
   readonly shape: 'disc';
@@ -142,6 +151,23 @@ export interface Refusal {
   readonly kind: ClaimKind;
 }
 
+/**
+ * **Distance on the ground, not in the chart.**
+ *
+ * Every one of these was plane geometry over world `(x, z)` until the sphere
+ * landed. World `(x, z)` is an orthographic projection of the planet, so
+ * `Math.hypot` over it under-reads radial separation by `cos θ` — 1 m reads as
+ * 1.43 m of real walking at the park's reach. `claimSurface.ts` carries the
+ * measurement and the reasoning; these three lines are where the registry
+ * stopped believing the shadow.
+ *
+ * The kinds of error it was making were not symmetric. Under-reading distance
+ * makes an overlap refusal *stricter* than it needs to be — a cost, not a
+ * hazard. But {@link Demand} is served by a corridor **ending within a
+ * radius**, and there under-reading means calling a door served by paving that
+ * stops 40% further away than the registry believes, which is a child walking
+ * to a door down a path that runs out.
+ */
 const distPointSegment = (
   px: number,
   pz: number,
@@ -149,27 +175,14 @@ const distPointSegment = (
   z1: number,
   x2: number,
   z2: number,
-): number => {
-  const dx = x2 - x1;
-  const dz = z2 - z1;
-  const lenSq = dx * dx + dz * dz;
-  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (pz - z1) * dz) / lenSq));
-  return Math.hypot(px - (x1 + t * dx), pz - (z1 + t * dz));
-};
+): number => arcToRun(px, pz, x1, z1, x2, z2);
 
-const segmentsCross = (a: Capsule, b: Capsule): boolean => {
-  const d = (ax: number, az: number, bx: number, bz: number, cx: number, cz: number) =>
-    (bx - ax) * (cz - az) - (bz - az) * (cx - ax);
-  const d1 = d(b.x1, b.z1, b.x2, b.z2, a.x1, a.z1);
-  const d2 = d(b.x1, b.z1, b.x2, b.z2, a.x2, a.z2);
-  const d3 = d(a.x1, a.z1, a.x2, a.z2, b.x1, b.z1);
-  const d4 = d(a.x1, a.z1, a.x2, a.z2, b.x2, b.z2);
-  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
-};
+const segmentsCross = (a: Capsule, b: Capsule): boolean =>
+  runsCross(a.x1, a.z1, a.x2, a.z2, b.x1, b.z1, b.x2, b.z2);
 
 /** The shortest distance between two shapes' cores (centres/segments). */
 const coreDistance = (a: ClaimShape, b: ClaimShape): number => {
-  if (a.shape === 'disc' && b.shape === 'disc') return Math.hypot(a.x - b.x, a.z - b.z);
+  if (a.shape === 'disc' && b.shape === 'disc') return arcBetween(a.x, a.z, b.x, b.z);
   if (a.shape === 'disc' && b.shape === 'capsule') {
     return distPointSegment(a.x, a.z, b.x1, b.z1, b.x2, b.z2);
   }
@@ -193,20 +206,21 @@ const reachOf = (s: ClaimShape): number => (s.shape === 'disc' ? s.radius : s.ha
  * disc's centre, or a march along the capsule's segment including both ends. */
 const coreSamples = (s: ClaimShape, step: number): { x: number; z: number }[] => {
   if (s.shape === 'disc') return [{ x: s.x, z: s.z }];
-  const length = Math.hypot(s.x2 - s.x1, s.z2 - s.z1);
+  // The GEODESIC's own samples, not the chord's. On the ground the two are
+  // different curves, and a crossing zone is judged by where the shapes really
+  // share ground — so marching the chart's straight line would test points the
+  // claim does not occupy.
+  const length = arcBetween(s.x1, s.z1, s.x2, s.z2);
   const count = Math.max(1, Math.ceil(length / step));
   const out: { x: number; z: number }[] = [];
-  for (let i = 0; i <= count; i += 1) {
-    const t = i / count;
-    out.push({ x: s.x1 + t * (s.x2 - s.x1), z: s.z1 + t * (s.z2 - s.z1) });
-  }
+  eachRunSample(s.x1, s.z1, s.x2, s.z2, (x, z) => out.push({ x, z }), count);
   return out;
 };
 
 const distToCore = (px: number, pz: number, s: ClaimShape): number =>
   s.shape === 'disc'
-    ? Math.hypot(px - s.x, pz - s.z)
-    : distPointSegment(px, pz, s.x1, s.z1, s.x2, s.z2);
+    ? arcBetween(px, pz, s.x, s.z)
+    : arcToRun(px, pz, s.x1, s.z1, s.x2, s.z2);
 
 /**
  * **How far outside a claim's ground a point lies**, in metres — zero or
@@ -252,7 +266,7 @@ const overlapConfinedToZone = (
   ] as const) {
     for (const p of coreSamples(self, step)) {
       if (distToCore(p.x, p.z, other) >= reach) continue; // no shared ground here
-      if (Math.hypot(p.x - zone.x, p.z - zone.z) > zone.radius) return false;
+      if (arcBetween(p.x, p.z, zone.x, zone.z) > zone.radius) return false;
     }
   }
   return true;
@@ -265,13 +279,13 @@ export const shapesOverlap = (a: ClaimShape, b: ClaimShape): boolean =>
 /** Cheap per-axis bounds, so most pairs are dismissed without a hypot. */
 const bounds = (s: ClaimShape): readonly [number, number, number, number] =>
   s.shape === 'disc'
-    ? [s.x - s.radius, s.z - s.radius, s.x + s.radius, s.z + s.radius]
-    : [
-        Math.min(s.x1, s.x2) - s.halfWidth,
-        Math.min(s.z1, s.z2) - s.halfWidth,
-        Math.max(s.x1, s.x2) + s.halfWidth,
-        Math.max(s.z1, s.z2) + s.halfWidth,
-      ];
+    ? [
+        s.x - s.radius - CLAIM_BROAD_PHASE_SLACK,
+        s.z - s.radius - CLAIM_BROAD_PHASE_SLACK,
+        s.x + s.radius + CLAIM_BROAD_PHASE_SLACK,
+        s.z + s.radius + CLAIM_BROAD_PHASE_SLACK,
+      ]
+    : boundsOfRun(s.x1, s.z1, s.x2, s.z2, s.halfWidth);
 
 interface Contribution {
   readonly claims: readonly Claim[];
@@ -395,7 +409,7 @@ export class GroundClaims {
                 [claim.shape.x2, claim.shape.z2] as const,
               ];
         for (const [x, z] of ends) {
-          if (Math.hypot(x - demand.x, z - demand.z) < demand.radius) return true;
+          if (arcBetween(x, z, demand.x, demand.z) < demand.radius) return true;
         }
       }
     }
