@@ -788,6 +788,10 @@ require(
 const forward = new Vector3();
 const inward = new Vector3();
 const travelAtRider = new Vector3();
+/** The rider's own frame at each probe — asked of the rig, never rebuilt here. */
+const localOut = new Vector3();
+const localAlong = new Vector3();
+const localUp = new Vector3();
 
 interface Pose {
   mostAngled: number;
@@ -815,33 +819,45 @@ function sweep(width: number, height: number): Pose {
     rig.reset(travelled);
     const camera = rig.camera;
     camera.getWorldDirection(forward);
-    // Compared flat, so the rig's downward tilt is not mistaken for looking
-    // along the track. The tilt is checked separately.
-    const flat = new Vector3(forward.x, 0, forward.z).normalize();
 
-    // Everything is measured against the rider, who is what the rig is for.
+    // Everything is measured against the rider, who is what the rig is for —
+    // and **in the rider's own frame**, which is what `rigBasis` hands back.
+    //
+    // Every question below used to be asked by setting a `y` to zero. That
+    // projects onto the *world* horizontal, which is the ground's tangent plane
+    // at the middle of the park and nowhere else. Out at the ring the ground
+    // leans, so a rig tilted the intended 20.1 degrees towards its own track
+    // measured 6.6 against world `+Y`, and this check called that too flat and
+    // failed it. The rig makes its promises in the rider's frame; they have to
+    // be read there, and asking the rig itself is what stops the two drifting.
     const at = route.wrap(route.startDistance + travelled);
     route.pointAt(PLAYER_LANE, at, point);
+    rig.rigBasis(at, localOut, localAlong, localUp);
+    // Flattened *in the tangent plane at the rider*, so the rig's downward tilt
+    // is not mistaken for looking along the track. The tilt is checked
+    // separately, below, and against the same up.
+    const flat = forward.clone().addScaledVector(localUp, -forward.dot(localUp)).normalize();
+
     route.tangentAt(PLAYER_LANE, at, travelAtRider);
-    travelAtRider.y = 0;
-    travelAtRider.normalize();
+    travelAtRider.addScaledVector(localUp, -travelAtRider.dot(localUp)).normalize();
     // "Into the park" is the reverse of the ring's own outward normal, not the
     // direction of the origin. Those were the same vector while the ring was a
     // circle centred there; on a ring that follows a spline edge they are not,
     // and pointing at the origin would call a perfectly good side view "not
     // looking into the park" wherever the boundary bulges.
-    const frame = route.path.sampleAt(at);
-    inward.set(-frame.normalX, 0, -frame.normalZ).normalize();
+    inward.copy(localOut).negate();
 
     const angled = flat.dot(travelAtRider);
     worst.mostAngled = Math.max(worst.mostAngled, angled);
     worst.leastAngled = Math.min(worst.leastAngled, angled);
     worst.leastInward = Math.min(worst.leastInward, flat.dot(inward));
-    worst.mostPitch = Math.max(worst.mostPitch, Math.abs(Math.asin(forward.y)));
+    // Tilt below the rider's own horizon, not below the world's.
+    worst.mostPitch = Math.max(worst.mostPitch, Math.abs(Math.asin(-forward.dot(localUp))));
 
     // The rider must cross the screen left to right. Screen-right is the
     // camera's own local +X in world space, which is `matrixWorld`'s first column.
     const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    right.addScaledVector(localUp, -right.dot(localUp)).normalize();
     worst.leastRightward = Math.min(worst.leastRightward, right.dot(travelAtRider));
 
     // Outset, not radius: "is the rig outside the park?" is a question about the
