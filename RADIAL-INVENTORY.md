@@ -128,6 +128,11 @@ This is the section `ALTITUDE-INVENTORY.md` does not have. A check asserting
 against flat geometry is as wrong as the code, and it is worse, because it is
 green.
 
+**The chain, as a datum for the next rebase** (CLAUDE.md asks for the step
+*set*, not its size, but the size is the cheap first tripwire): on `31d0fb2a`
+`pnpm run check` is **65 steps**, from **81** `check:*` scripts defined.
+Read by parsing the `scripts` object, never by grep.
+
 **Coverage of the sweep.** 170 `scripts/*.mts` and 23 `test/**/*.ts`. Of those,
 **only three** mention any sphere helper at all (`check-arrival-camera.mts`,
 `measure-ground-gradient.mts`, `test/procgen/invariants.ts`) — against **129**
