@@ -160,6 +160,38 @@ it presents as the walk sticking rather than as a units bug.
   collision engineer is handling this at the type (`geo/step.ts`'s
   `riseBetween` takes two positions and has no height overload).
 
+## The parity measurement I took wrongly, and the tell that caught it
+
+**Do not run two `test:procgen` suites at the same time on this machine.** I ran
+the base's and mine concurrently to save wall clock. Both came back
+
+```
+160 passed, 0 failed, 465 skipped   —   5:15 and 5:16, 22% CPU
+```
+
+and the non-passing sets were **identical by name**, so it read as clean parity.
+It was two starved runs agreeing with each other. Run alone, the same branch
+gives
+
+```
+315 passed, 49 failed, 279 skipped  —   1:59, 224% CPU
+```
+
+Faster *and* more thorough, because vitest could actually use its workers. Under
+contention it was bailing and booking the remainder as skips.
+
+**The tell was the duration and the CPU percentage, not the counts.** CLAUDE.md
+already says to watch the duration — a silent-skip bug once took this suite from
+89 s to 2.6 s — and the shape here is the same lesson pointing the other way:
+the *slow* run was the broken one, and 22% CPU on a machine with cores to spare
+is the number that gives it away. A pass count cannot see this, and two wrong
+runs agreeing is not a control; it is the same mistake made twice.
+
+Two of my own commit messages (`check:radial-hop joins the chain` and the
+`test:procgen` line in it) quote the 160/0/465 figures as parity. **Those
+numbers are an artefact of how I ran it, not a property of either branch**, and
+this section is the correction rather than a rewrite of history.
+
 ## What the gates say
 
 - **`tsc --noEmit`**, **`typecheck:test`**, **`vite build`** — all exit 0.
