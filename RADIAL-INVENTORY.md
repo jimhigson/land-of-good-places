@@ -231,27 +231,76 @@ that leans 15-30°, inflated by roughly `halfDiagonal · sin θ`"*. Read the cod
 
 So the row is real but for the opposite reason. `bridges.ts` and
 `bridgeStonework.ts` import **zero** sphere helpers (grepped, both files, 0
-hits), so the whole bridge — shell *and* marker — is built in the flat frame.
-Marker and shell agree with each other and both disagree with the leaned world
-they stand in. That is why the measured numbers are **under**-reads fitting
-`need · cos θ` (2.49 against a predicted 2.477 at r = 169.9, 13 mm) rather than
-the over-reads this file predicted: a flat-frame `y` gap is being compared
-against a clearance the train needs along its **local up**.
+hits), so the whole bridge is built in the flat frame — and it is drawn
+un-leaned in a leaned world, which a child sees as a flat bridge sitting in
+tilted ground. **That, and only that, is what is proven.**
 
-**Two faults, and they want opposite fixes** — which is why nobody should
-"correct" either until they are separated:
+**Proof, from the built park on three seeds** — the strongest measurement in
+this sweep, and independent of both the grep above and the marker's
+`setFromAxisAngle(Vector3(0, 1, 0), yaw)`:
 
-1. the bridge is drawn un-leaned in a leaned world (geometry wrong, visible);
-2. the clause measures a flat gap against a radial need (check reads low).
+| seed | track points under a deck | hit by a world `+Y` ray | hit by a local-up ray |
+|---|---|---|---|
+| 11 | 10 | **10 (100%)** | 6 (60%) |
+| canonical | 25 | **25 (100%)** | 11 (44%) |
+| 326 | 25 | **25 (100%)** | 11 (44%) |
 
-The honest instrument is the one the bridges engineer is building: from the rail
-head, **along the local radial up**, how far to the real masonry soffit — not to
-the marker.
+From directly under a deck, a ray along the local up **leaves the bridge
+entirely 40-56% of the time**. A bridge that leaned with the ground would be hit
+by that ray at ~100% and by the world `+Y` ray rather less. Three independent
+reads agreeing.
+
+**RETRACTED — the `need · cos θ` fit, and the clearance severity with it.**
+An earlier revision of this section recorded a measured 2.49 m against a
+predicted 2.477 m at r = 169.9 and called the 13 mm agreement "explained rather
+than coincidental". **It was neither.** The bridges engineer retracted it on
+re-measuring, and I had already propagated it here, which is the fault this file
+keeps warning about committed by its own owner:
+
+- the first instrument required **both** rays to hit before counting a point,
+  which silently discards exactly the points where the two disagree most — a
+  check that cannot fail, in probe form;
+- the short readings (3.757, 3.628) were **not under a bridge deck at all**. The
+  tilted ray was catching ramp undersides and abutment faces, which is not a
+  train-clearance question. The 2.49 at (−99.0, 138.1) is at no crossing on
+  seed 11.
+
+**On the honest denominator — track points a bridge's own `deckCovers` claims —
+clearance along the local up clears the 3.900 m need on every seed: 5.151
+(seed 11), 4.381 (canonical), 5.072 (326).** So *"the clause that decides
+whether the train drives through its own bridge"* has **no reproduced failure**.
+§2.2's train-clearance and tunnel rows should be re-read as frame bugs in a
+check, not as a train hitting masonry, and nobody should quote 2.49 as a
+clearance finding without re-measuring on that denominator.
+
+A fit that survives one discriminating test has survived one test, not been
+confirmed — and both tests here were on the wrong denominator. The lesson is the
+one this file already carries about measuring the park that was built rather
+than the rules that built it; the addition is that **the denominator is part of
+the measurement**, and a probe that drops its disagreements has chosen one.
 
 **The marker is itself a second definition of the soffit, kept in step with the
-masonry by hand**, which is this repo's most expensive recurring bug. Whoever
-converts `bridges.ts` should consider whether the marker should exist at all
-once the shell leans, rather than leaning the marker to match.
+masonry by hand**, which is this repo's most expensive recurring bug, and its
+comment — *"the invariants measure the built clearance off this box"* — is the
+promise CLAUDE.md says is not a mechanism. **Decision: it goes.** Once the shell
+leans, an AABB round it is meaningless anyway, so leaning the marker would buy a
+number nobody should read.
+
+**Deleting it is a nine-file change, not a one-file change**, and every consumer
+must go in the same commit or the cure is worse than the disease:
+
+| site | what it does | after deletion |
+|---|---|---|
+| `bridges.ts:754` | defines `deckMesh.name = 'deck'` | deleted |
+| `invariants.ts:5316`, `:6610` | **read** it via `getObjectByName('deck')` | replaced by a shell raycast |
+| `invariants.ts:5443`, `:5757`, `:6449` | **exclude** it by `!== 'deck'` | dead — remove |
+| `parkFacts.ts:2707` | excludes it by `name === 'deck'` | dead — remove |
+| `measure-bridge-parapet.mts:180` | excludes it by `!== 'deck'` | dead — remove |
+
+A leftover `!== 'deck'` filter is **worse than the marker was**: it reads as
+though it is doing something, it is not, and it would silently exclude any
+future mesh that happens to take the name. That is this file's own "a check that
+never runs is worse than a check that fails", one layer down.
 
 ### Correction 5 — about twenty rows are not bugs: a ride is solved flat and drawn leaned, on purpose
 
