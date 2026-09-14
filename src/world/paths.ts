@@ -14,6 +14,7 @@ import { archFeet } from './railRace/arch';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 import { STALL_STANDS } from '../minigames/stallPlacement';
+import { ENTRANCE_GATE_Z } from './entrance/layout';
 
 /**
  * The winding path network.
@@ -3471,12 +3472,37 @@ export interface PathGraph {
  * so it keeps its authored corridor; only the stretch *past* the railway
  * changes, and only on the seeds where the loop is in the way at all.
  */
-const GATE_CORRIDOR_START_Z = 54;
+/**
+ * How far inside the arch the authored corridor's outer end sits, and how far
+ * in it runs. **Both measured from the gate, which owns where the gate is.**
+ *
+ * These were written as bare z coordinates — 54 and 30 — and that was a
+ * hand-copy of `ENTRANCE_GATE_Z - 6` and `ENTRANCE_GATE_Z - 30` taken while the
+ * gate happened to stand at `z = 60`. It is exactly CLAUDE.md's "two
+ * definitions of one thing, kept in step by hand", and the day the gate moved
+ * the copy did not: with `GROUND_SPHERE_RADIUS` at 220 the park scales by 2.335
+ * and the arch stands at `z = 142.8`, so the corridor began **88.8 m inside the
+ * doorway**. Measured on the canonical seed at that scale: the nearest drawn
+ * path sample to the arch was **76.3 m away**, the walk in from the gate was
+ * undrawn ground for its whole length, and `crossings.ts`'s hand-sampled
+ * esplanade march — which only stops when it finds paving underfoot — ran its
+ * full 32 m, flipped sides on the railway at (0, 125.8) and threw the park's
+ * build with "snaps to no proven bridge site".
+ *
+ * So they are offsets from the arch now, and nothing but the arch decides where
+ * the corridor is. At the authored park size (`PARK_SURFACE_SCALE` 1, gate at
+ * `z = 60`) they are 54 and 30, unchanged.
+ */
+const GATE_CORRIDOR_ARCH_INSET = 6;
 
 /** How far in the authored corridor runs when the loop is nowhere near it —
  * the pre-#339 value, unchanged, and still the answer on three of the five
  * swept seeds. */
-const GATE_CORRIDOR_INNER_Z = 30;
+const GATE_CORRIDOR_DEPTH = 30;
+
+const GATE_CORRIDOR_START_Z = ENTRANCE_GATE_Z - GATE_CORRIDOR_ARCH_INSET;
+
+const GATE_CORRIDOR_INNER_Z = ENTRANCE_GATE_Z - GATE_CORRIDOR_DEPTH;
 
 /**
  * Daylight the corridor's mouth keeps from the rail centre line.

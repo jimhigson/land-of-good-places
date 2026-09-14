@@ -99,14 +99,30 @@ export const GROUND_SPHERE_RADIUS = 220;
 /**
  * The radius the park's authored extent is calibrated against.
  *
- * **Held equal to `GROUND_SPHERE_RADIUS` for now, which makes the scale exactly
- * 1 and leaves the park at its authored size.** Growing it is blocked, not
- * abandoned: at 220 m with the park grown 2.33x the layout solves but the
- * rail-crossing planner fails on 7 of the 10 pool seeds with an identical
- * error — the paths router draws a leg across the railway at a radius where no
- * bridge site was ever proven, because the rail loop moved outward underneath
- * it. That is a real piece of work in `train/crossings.ts` and the bridge
- * planner, not a constant, and it has to be done before this can move.
+ * **This is 1200 while `GROUND_SPHERE_RADIUS` is 220, so the scale is 2.335 and
+ * the park is built 2.335x its authored size.** The sentence that used to stand
+ * here said the two were held equal and the scale was exactly 1; that stopped
+ * being true the moment the radius moved, and it is corrected rather than
+ * deleted because what it said next was a diagnosis, and the diagnosis was
+ * wrong.
+ *
+ * It read: *"the paths router draws a leg across the railway at a radius where
+ * no bridge site was ever proven, because the rail loop moved outward
+ * underneath it... a real piece of work in `train/crossings.ts` and the bridge
+ * planner"*. Measured, it was neither. **Every drawn leg crossed at a proven
+ * site, on every seed, to within 0.4 m.** The seventh crossing was not drawn at
+ * all: it was `crossings.ts`'s hand-sampled esplanade march, which walks in
+ * from the arch until it finds paving underfoot — and it found none, because
+ * `paths.ts` placed the authored gate corridor from a hard-coded `z = 54` that
+ * was a copy of `ENTRANCE_GATE_Z - 6` taken while the arch stood at 60. At this
+ * scale the arch stands at 142.8, so the corridor began 88.8 m inside the
+ * doorway and the walk in from the gate was undrawn ground for its whole
+ * length. One constant, in `paths.ts`, given its proper owner: 3 of 10 pool
+ * seeds built before, **10 of 10 after**, every crossing on every seed bridged.
+ *
+ * So this number is no longer what blocks the radius moving. What it costs is
+ * still real and still above: the park's own dome steepens as `a` grows and `R`
+ * shrinks, and that is a thing to look at on screen.
  */
 const PARK_REFERENCE_SPHERE_RADIUS = 1200;
 export const PARK_SURFACE_SCALE = Math.sqrt(
