@@ -82,3 +82,65 @@ const drawn = route.pointAt(PLAYER_LANE, route.startDistance, new Vector3());
 say(`rider      drawn on the sphere at (${drawn.x.toFixed(2)}, ${drawn.y.toFixed(2)}, ${drawn.z.toFixed(2)})`);
 say(`rider      rig aims at the flat ghost, ${inner.rider.distanceTo(drawn).toFixed(3)} m away ` +
   `(ride height ${RIDER_RIDE_HEIGHT})`);
+
+// --- is the rig's rider point the same point the rails are built from? -------
+//
+// Control: the two must agree in the FLAT frame to within the undulation plus
+// the rider's seat height, or the rig is not describing this ring at all.
+say('');
+{
+  const flatRail = route.flatPointAt(PLAYER_LANE, route.startDistance, new Vector3());
+  say(`flat       rail   (${flatRail.x.toFixed(2)}, ${flatRail.y.toFixed(2)}, ${flatRail.z.toFixed(2)})`);
+  say(`flat       baseAt(s) ${route.baseAt(route.startDistance).toFixed(3)}  ` +
+      `baseAt(s, playerLane) ${route.baseAt(route.startDistance, PLAYER_LANE).toFixed(3)}  ` +
+      `heightAt ${route.heightAt(PLAYER_LANE, route.startDistance).toFixed(3)}`);
+  const leanedRail = route.pointAt(PLAYER_LANE, route.startDistance, new Vector3());
+  say(`leaned     rail   (${leanedRail.x.toFixed(2)}, ${leanedRail.y.toFixed(2)}, ${leanedRail.z.toFixed(2)})`);
+  const rigPoint = rig.ringPoint(route.startDistance, new Vector3());
+  say(`leaned     rig    (${rigPoint.x.toFixed(2)}, ${rigPoint.y.toFixed(2)}, ${rigPoint.z.toFixed(2)})`);
+  say(`            rig is ${rigPoint.distanceTo(leanedRail).toFixed(3)} m from the drawn rail head`);
+}
+
+// --- what does the lookahead table actually look like? ----------------------
+//
+// `solve` takes a MAX over these, so one rogue station sets the stand-off for
+// the whole lap. Print the spread and name the worst, rather than trusting the
+// one number that comes out.
+say('');
+{
+  const table = inner.lookahead;
+  const alongs = table.map((p) => p.along);
+  const outs = table.map((p) => p.out);
+  say(`lookahead  along ${Math.min(...alongs).toFixed(2)} .. ${Math.max(...alongs).toFixed(2)} ` +
+      `(AHEAD is ${20.25})`);
+  say(`lookahead  out   ${Math.min(...outs).toFixed(2)} .. ${Math.max(...outs).toFixed(2)}`);
+  // The station that demands the most: recompute `wanted` the way solve does.
+  let worst = -Infinity;
+  let worstAt = -1;
+  table.forEach((p, i) => {
+    const reach = Math.hypot(p.along, p.out);
+    if (reach > worst) { worst = reach; worstAt = i; }
+  });
+  const p = table[worstAt]!;
+  say(`lookahead  longest reach at station ${worstAt}/${table.length}: ` +
+      `along ${p.along.toFixed(2)} out ${p.out.toFixed(2)} (|${worst.toFixed(2)}| m for a ${20.25} m step)`);
+  const shortest = table.reduce((a, b) => (Math.hypot(a.along, a.out) < Math.hypot(b.along, b.out) ? a : b));
+  say(`lookahead  shortest reach ${Math.hypot(shortest.along, shortest.out).toFixed(2)} m`);
+}
+
+// --- the worst station, opened up -------------------------------------------
+say('');
+{
+  const s = (420 / 512) * route.path.length;
+  const a = rig.ringPoint(s, new Vector3());
+  const b = rig.ringPoint(s + 20.25, new Vector3());
+  say(`worst      s=${s.toFixed(1)}  ringPoint gap ${a.distanceTo(b).toFixed(2)} m for a 20.25 m step`);
+  const sa = route.path.sampleAt(s);
+  const sb = route.path.sampleAt(s + 20.25);
+  say(`worst      flat (x,z) gap ${Math.hypot(sb.x - sa.x, sb.z - sa.z).toFixed(2)} m`);
+  say(`worst      baseAt ${route.baseAt(s, PLAYER_LANE).toFixed(2)} -> ${route.baseAt(s + 20.25, PLAYER_LANE).toFixed(2)}`);
+  say(`worst      path radius ${Math.hypot(sa.x, sa.z).toFixed(2)} -> ${Math.hypot(sb.x, sb.z).toFixed(2)}`);
+  say(`worst      leaned a (${a.x.toFixed(1)}, ${a.y.toFixed(1)}, ${a.z.toFixed(1)})  b (${b.x.toFixed(1)}, ${b.y.toFixed(1)}, ${b.z.toFixed(1)})`);
+  say(`worst      path length ${route.path.length.toFixed(1)}, sample spacing check: guide vs sample tangent dot ` +
+      `${(sa.tangentX * route.path.guideAt(s).tangentX + sa.tangentZ * route.path.guideAt(s).tangentZ).toFixed(3)}`);
+}
