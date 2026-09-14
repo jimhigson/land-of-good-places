@@ -1,5 +1,6 @@
 import { Box3, type InstancedMesh, Matrix4, type Mesh, type Object3D, Raycaster, Vector3 } from 'three';
-import { CART_BODY_LENGTH, CART_ENVELOPE } from './cart';
+import { CART_BODY_LENGTH, CART_ENVELOPE, cartEnvelopePoint } from './cart';
+import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
 import type { CoasterRoute } from './route';
 
 /**
@@ -209,17 +210,27 @@ export function thingsTheCruiserPasses(
   const { halfWidth, above, below } = CART_ENVELOPE;
   const halfLength = CART_BODY_LENGTH / 2;
 
-  // The loop, once, with a frame at each sample.
-  const path: { p: Vector3; forward: Vector3; side: Vector3 }[] = [];
+  // The loop, once, with a frame at each sample — **in the frame the ride is
+  // drawn in**, because the boxes it is about to be compared against are the
+  // bounds of drawn meshes.
+  //
+  // This used to take `along` and `across` from the route's own frame and the
+  // third axis from world `+Y` (`const upCar = offset.y`), which is two axes of
+  // one frame and one of another. On a flat park those agreed; on a leaning one
+  // the reported clearance is neither the real gap nor a consistent
+  // over-estimate of it, which is worse than a wrong number — it is a wrong
+  // number that changes character round the loop.
+  const drawnForBoxes = drawnOnSphere(route);
+  const path: RailFrame[] = [];
   for (let d = 0; d < route.length; d += SAMPLE_STEP) {
-    const p = route.pointAt(d, new Vector3());
-    const t = route.tangentAt(d, new Vector3());
-    const flat = Math.hypot(t.x, t.z) || 1;
-    path.push({
-      p,
-      forward: t.clone(),
-      side: new Vector3(-t.z / flat, 0, t.x / flat),
-    });
+    path.push(
+      railFrameAt(drawnForBoxes, d, {
+        position: new Vector3(),
+        forward: new Vector3(),
+        side: new Vector3(),
+        up: new Vector3(),
+      }),
+    );
   }
 
   const box = new Box3();
@@ -235,12 +246,12 @@ export function thingsTheCruiserPasses(
     for (let i = 0; i < path.length; i += 1) {
       const frame = path[i]!;
       // Cheap reject before the real work.
-      if (box.distanceToPoint(frame.p) - halfLength - 6 > best) continue;
-      box.clampPoint(frame.p, near);
-      offset.subVectors(near, frame.p);
+      if (box.distanceToPoint(frame.position) - halfLength - 6 > best) continue;
+      box.clampPoint(frame.position, near);
+      offset.subVectors(near, frame.position);
       const alongCar = offset.dot(frame.forward);
       const acrossCar = offset.dot(frame.side);
-      const upCar = offset.y;
+      const upCar = offset.dot(frame.up);
       const dx = Math.max(0, Math.abs(alongCar) - halfLength);
       const dz = Math.max(0, Math.abs(acrossCar) - halfWidth);
       const dy = upCar > 0 ? Math.max(0, upCar - above) : Math.max(0, -upCar - below);
@@ -322,28 +333,32 @@ export function cruiserStrikes(
 
   const caster = new Raycaster();
   const section = crossSection();
-  const point = new Vector3();
-  const tangent = new Vector3();
   const previous = new Map<number, Vector3>();
   const direction = new Vector3();
   const struckAlready = new Set<string>();
   const complaints: string[] = [];
 
+  // **Sweep the car that gets drawn, at the meshes that get drawn.** The route
+  // is solved flat and the whole park — this ride's rails included — is leaned
+  // onto the sphere when it is drawn. Building the envelope in the flat frame
+  // and casting it at leaned geometry compares two different worlds, and on
+  // seed 428 that reported the cruiser passing through `castle-wall-lower`,
+  // `castle-courtyard-floor`, `castle-roof-deck` and bare `terrain`.
+  const drawn = drawnOnSphere(route);
+  const frame: RailFrame = {
+    position: new Vector3(),
+    forward: new Vector3(),
+    side: new Vector3(),
+    up: new Vector3(),
+  };
+
   for (let step = 0; step < stepCount; step += 1) {
     const d = step * RAY_STEP;
-    route.pointAt(d % route.length, point);
-    route.tangentAt(d % route.length, tangent);
-    const flat = Math.hypot(tangent.x, tangent.z) || 1;
-    const sideX = -tangent.z / flat;
-    const sideZ = tangent.x / flat;
+    railFrameAt(drawn, d % route.length, frame);
 
     for (let i = 0; i < section.length; i += 1) {
       const [lateral, rise] = section[i]!;
-      const here = new Vector3(
-        point.x + sideX * lateral,
-        point.y + rise,
-        point.z + sideZ * lateral,
-      );
+      const here = cartEnvelopePoint(frame, lateral, rise, new Vector3());
       const before = previous.get(i);
       previous.set(i, here);
       if (!before) continue;
