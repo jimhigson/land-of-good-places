@@ -370,29 +370,28 @@ const WALK_RADIUS = 7;
 const WALK_PERIOD_S = 20;
 
 /**
- * **The walk goes in from the gate and back out, because an orbit of the gate
- * cannot meet the crowd any more.**
+ * **The walk goes in from the gate and back out, and she stands on the ground.**
  *
- * This rig used to circle the entrance at `WALK_RADIUS`, and `MIN_SIGHTINGS`'
- * own note records the calibration: *"twenty-two were seen in 48 s of the real
- * game at this crowd size"*. That was a garden of 58 m. `PARK_SURFACE_SCALE` is
- * now 2.3355, so `GARDEN_PLAY_RADIUS` is 135.5 m while the entrance stays 51.6 m
- * out — and the crowd moved away from the gate with it. Measured over 120 s of
- * the old rig:
+ * Two faults, both found while this check was the chain's first honest failure.
  *
- *   1442 speaking-frames; the NEAREST speaking child was 51.4 m from the camera
- *   focus (median 91.6 m) against BUBBLE_MAX_DISTANCE of 40 m. Within 40 m: 0.
- *   Sightings: 0. The check failed, honestly, having seen nothing to judge.
+ * 1. The rig circled the entrance at `WALK_RADIUS`. That was calibrated on a
+ *    58 m garden — `MIN_SIGHTINGS`' own note records *"twenty-two were seen in
+ *    48 s of the real game at this crowd size"*. It is fine again at the park's
+ *    authored size, but an orbit of the gate is a needlessly thin slice of the
+ *    park to judge bubbles on, and it is the reason a park-size regression
+ *    could empty this check completely: measured on a 135.5 m garden, the
+ *    nearest speaking child was **51.4 m** from the camera focus against
+ *    `BUBBLE_MAX_DISTANCE` of 40, and the run saw nothing at all. Walking in to
+ *    the middle and back out is both more representative of how a child plays
+ *    and much harder to starve.
+ * 2. The player was held at `y = 0` while the entrance ground is metres below
+ *    it, so the whole frame — camera included — floated over the park it was
+ *    measuring (`RADIAL-INVENTORY.md` section 2.4 #15).
  *
- * Nothing was wrong with the bubbles: `check:speech-bubbles:wide`, same park and
- * same code at 1920x1080 for 420 s, drew **601** and passed. The rig had simply
- * stopped going where the park's children are.
- *
- * So the player now walks the route a child actually walks — in from the gate
- * towards the middle of the garden and back out — with the old circle
- * superimposed so the bubbles are still judged on a *moving* speaker, which is
- * what issue #415 was about. The sweep is expressed against the entrance's own
- * position, so it follows the park if it is ever resized again.
+ * The old circle is superimposed on the traverse so bubbles are still judged on
+ * a *moving* speaker, which is what issue #415 was about. The sweep is
+ * expressed against the entrance's own position, so it follows the park if the
+ * park is ever resized again.
  */
 const walkAt = (t: number, target: Vector3): Vector3 => {
   // 0 at the gate, 1 at the middle of the garden, and back.
@@ -400,9 +399,6 @@ const walkAt = (t: number, target: Vector3): Vector3 => {
   const swirl = t * 3;
   const x = ENTRANCE_PLAYER_X * (1 - sweep) + Math.cos(swirl) * WALK_RADIUS;
   const z = ENTRANCE_PLAYER_Z * (1 - sweep) + Math.sin(swirl) * WALK_RADIUS;
-  // And she stands ON the ground. The rig used to hold y = 0 while the entrance
-  // ground is 6.1 m below that, so the whole frame — camera included — floated
-  // over the park it was measuring (RADIAL-INVENTORY.md section 2.4 #15).
   return target.set(x, terrainHeight(x, z), z);
 };
 
@@ -788,28 +784,6 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
   }
 
   // --- 1 and 2: the crowd ---------------------------------------------------
-  {
-    const g = globalThis as unknown as { __loopDiag?: { frames: number; entries: number; visible: number; maxEntries: number } };
-    g.__loopDiag ??= { frames: 0, entries: 0, visible: 0, maxEntries: 0 };
-    let n = 0; let v = 0;
-    const gg = globalThis as any;
-    gg.__spk ??= { speaking: 0, within40: 0, onScreen: 0, both: 0, dists: [] as number[] };
-    for (const e of world.npcs.speechBubbles) {
-      n += 1; if (e.bubble.sprite.visible) v += 1;
-      if (e.speaking) {
-        gg.__spk.speaking += 1;
-        const a = e.bubble.worldAnchor();
-        const d = a.distanceTo(camera.focusPoint);
-        gg.__spk.dists.push(d);
-        const near = d <= 40; const on = camera.isOnScreen(a);
-        if (near) gg.__spk.within40 += 1;
-        if (on) gg.__spk.onScreen += 1;
-        if (near && on) gg.__spk.both += 1;
-      }
-    }
-    g.__loopDiag.frames += 1; g.__loopDiag.entries += n; g.__loopDiag.visible += v;
-    g.__loopDiag.maxEntries = Math.max(g.__loopDiag.maxEntries, n);
-  }
   for (const { character, bubble } of world.npcs.speechBubbles) {
     if (!bubble.sprite.visible) continue;
     sightings += 1;
@@ -924,19 +898,6 @@ if (spokeWithNothingDrawnOnScreen > 0) {
       `be paid for by a bubble that is actually drawn, never by text that merely exists — ` +
       `see NpcSystem.updateLabels. First: ${worstNothingDrawnLine}`,
   );
-}
-{
-  const g = globalThis as unknown as { __bubbleDiag?: Record<string, number> };
-  process.stderr.write(`[diag] ${JSON.stringify(g.__bubbleDiag ?? 'never called')}\n`);
-  const l = globalThis as unknown as { __loopDiag?: unknown };
-  process.stderr.write(`[loop] ${JSON.stringify(l.__loopDiag ?? 'loop never ran')}\n`);
-  const sp = (globalThis as any).__spk;
-  if (sp) {
-    const d = (sp.dists as number[]).sort((a, b) => a - b);
-    const q = (f: number) => (d.length ? d[Math.floor(f * (d.length - 1))].toFixed(1) : 'n/a');
-    process.stderr.write(`[spk] speaking-frames=${sp.speaking} within40=${sp.within40} onScreen=${sp.onScreen} both=${sp.both}\n`);
-    process.stderr.write(`[spk] distance to camera focus: min ${q(0)} p25 ${q(0.25)} median ${q(0.5)} p75 ${q(0.75)} max ${q(1)} (BUBBLE_MAX_DISTANCE 40)\n`);
-  }
 }
 if (sightings < MIN_SIGHTINGS) {
   failures.push(

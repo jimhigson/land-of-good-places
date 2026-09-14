@@ -130,33 +130,42 @@ interface Finding {
  * Both are real, they differ (38.0 vs 45.5 degrees), and a message that quotes
  * one while naming the other teaches the next reader something false.
  *
- * Worse, they are sized against a park that moves: `PARK_SURFACE_SCALE` is
- * 2.3355 today, and the walkable boundary is `58 x` that. A hard-coded 45.5
- * would survive a resize looking perfectly plausible — which is this repo's
- * "two definitions kept in step by hand" in its cheapest form, inside the very
- * check meant to delete that category. So they are computed from
- * `GROUND_SPHERE_RADIUS` and `GARDEN_PLAY_RADIUS` at load, and they follow the
- * park wherever it goes.
+ * Worse, they were sized against a park that moves, and it moved: the branch
+ * they were written on has `PARK_SURFACE_SCALE = 2.3355` and a 135.5 m walkable
+ * boundary, while #620 restores the authored scale of 1 and a **58 m** one —
+ * 38.0 degrees of lean against 15.3. A hard-coded figure would have survived
+ * that resize looking perfectly plausible, which is this repo's "two
+ * definitions kept in step by hand" in its cheapest form, inside the very check
+ * meant to delete the category.
+ *
+ * So they are computed from `GROUND_SPHERE_RADIUS` and `GARDEN_PLAY_RADIUS` at
+ * load. Verified across the change: the same message reads 38.0 degrees at
+ * 135 m on this branch and 15.3 degrees at 58 m with #620 merged, with nothing
+ * edited.
+ *
+ * **And the furniture reach is deliberately NOT quoted as a number.** The park's
+ * furthest furniture is 157 m at scale 2.3355 and 108.6 m at scale 1, and
+ * neither is an authored constant — both are *measured off a built park*, which
+ * this check never builds: it is a 0.65 s static scan. A number that can only
+ * be measured has no business being typed into a static scanner's message, so
+ * the messages name the derived boundary and say "and more beyond it" rather
+ * than inventing a second radius to go stale.
  */
 const leanAt = (metres: number): number => Math.asin(Math.min(1, metres / GROUND_SPHERE_RADIUS));
 const WALKABLE_LEAN = leanAt(GARDEN_PLAY_RADIUS);
-/** The Rail Race rings circle outside the play boundary; this is how far the park's furniture reaches. */
-const FURNITURE_REACH = 157;
-const FURNITURE_LEAN = leanAt(FURNITURE_REACH);
 
 const deg = (radians: number): string => `${((radians * 180) / Math.PI).toFixed(1)} degrees`;
 
 const RULE_WHY: Record<RuleId, string> = {
   HARD_UP:
     `a world +Y axis standing in for the local up (${deg(WALKABLE_LEAN)} out at the walkable ` +
-    `boundary ${GARDEN_PLAY_RADIUS.toFixed(0)} m, ${deg(FURNITURE_LEAN)} at the furthest furniture ${FURNITURE_REACH} m)`,
+    `boundary ${GARDEN_PLAY_RADIUS.toFixed(0)} m, and more on the furniture that stands outside it)`,
   Y_DIFFERENCE:
     `a y difference between two columns — mostly planet, not height (radial gradient ` +
-    `${Math.tan(WALKABLE_LEAN).toFixed(2)} m/m at the boundary, ${Math.tan(FURNITURE_LEAN).toFixed(2)} m/m at the furniture)`,
+    `${Math.tan(WALKABLE_LEAN).toFixed(2)} m/m at the walkable boundary, steeper beyond it)`,
   Y_OVER_GROUND:
     `height as y minus ground — over-reads by 1/cos(lean), ` +
-    `${(1 / Math.cos(WALKABLE_LEAN)).toFixed(2)}x at the boundary and ` +
-    `${(1 / Math.cos(FURNITURE_LEAN)).toFixed(2)}x at the furniture; use altitude()`,
+    `${(1 / Math.cos(WALKABLE_LEAN)).toFixed(2)}x at the walkable boundary and more beyond; use altitude()`,
   Y_THRESHOLD:
     `a fixed y threshold — the ground is already at ${terrainHeight(GARDEN_PLAY_RADIUS, 0).toFixed(1)} m ` +
     `at the walkable boundary, so a threshold near zero fires on grass`,
@@ -652,8 +661,8 @@ function main(): number {
   if (novel.length > 0) {
     console.error(
       `\n${novel.length} new flat primitive(s). The park is a sphere of radius ${GROUND_SPHERE_RADIUS} m; the\n` +
-        `ground leans ${deg(WALKABLE_LEAN)} at the walkable boundary and ${deg(FURNITURE_LEAN)} at the\n` +
-        `furthest furniture. Use the vocabulary in src/world/geo:\n` +
+        `ground leans ${deg(WALKABLE_LEAN)} at the walkable boundary (${GARDEN_PLAY_RADIUS.toFixed(0)} m),\n` +
+        `and further still on the furniture outside it. Use the vocabulary in src/world/geo:\n` +
         `  a height           -> altitude(geo)           (never a.y - b.y)\n` +
         `  a distance         -> geo.chordTo / arcTo     (never a y difference)\n` +
         `  an up              -> geo.up(target)          (never new Vector3(0, 1, 0))\n` +
