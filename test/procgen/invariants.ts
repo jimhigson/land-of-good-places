@@ -110,7 +110,7 @@ import {
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { GATE_POST_COLLIDER_RADIUS } from '../../src/world/entrance/gateArch.ts';
-import { terrainHeight, upAt } from '../../src/world/terrain.ts';
+import { planetRadiusAt, terrainHeight, upAt } from '../../src/world/terrain.ts';
 // The road corridor's measurement, shared with `check:ground-claims` so the two
 // sites that ask "is the claim the road?" cannot answer it differently. Pure
 // geometry over what it is handed — nothing seed-dependent is imported here.
@@ -2615,7 +2615,14 @@ const railRaceFliesClear: Invariant = (facts) => {
       route.pointAt(lane, distance, rail);
       if (facts.distanceToRail(rail.x, rail.z) > TRACK_CLEARANCE * 2) continue;
       train.pointAt(train.distanceNear(rail.x, rail.z), under);
-      const air = rail.y - under.y;
+      // **Two radii from the planet's centre, not two `y`s.** These are two
+      // *different columns* — the gate above only holds them within
+      // `2 · TRACK_CLEARANCE` in plan — and the rings run at 58-157 m out
+      // where the ground's gradient reaches 0.27-1.02 m/m. A `y` difference
+      // there carries up to +/-1.5 m of pure planet into a 5.5 m budget, with
+      // the sign decided by which of the two happens to be further out. A
+      // radius difference is the same quantity with the sphere cancelled.
+      const air = planetRadiusAt(rail.x, rail.y, rail.z) - planetRadiusAt(under.x, under.y, under.z);
       if (air < worstAir) {
         worstAir = air;
         worstAt = [rail.x, rail.z];
@@ -5067,7 +5074,15 @@ const theSlideKeepsItsAirFromTheCruiser: Invariant = (facts) => {
     if (Math.hypot(near.x - point[0], near.z - point[2]) > CHUTE_HALF_WIDTH + CART_HALF_WIDTH) {
       continue;
     }
-    const vertical = Math.abs(near.y - point[1]);
+    // The same radius difference `railRaceFliesClear` uses, and for the same
+    // reason: `near` and `point` are different columns (the gate above is a
+    // *plan* overlap, up to `CHUTE_HALF_WIDTH + CART_HALF_WIDTH` apart), and
+    // out where the chute and the cruiser run a metre of plan separation is
+    // most of a metre of `y`. "Vertical" stopped being a separation the day
+    // the ground stopped being flat.
+    const vertical = Math.abs(
+      planetRadiusAt(near.x, near.y, near.z) - planetRadiusAt(point[0], point[1], point[2]),
+    );
     if (vertical < worst) {
       worst = vertical;
       worstAt = point;
@@ -5320,11 +5335,29 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
       );
       continue;
     }
-    const soffit = new Box3().setFromObject(deckMesh).min.y;
     const route = facts.world.train.route;
     route.pointAt(route.distanceNear(crossing.x, crossing.z), clearancePoint);
-    const groundY = clearancePoint.y;
-    const clearance = soffit - groundY;
+    // **The lowest the deck gets, measured as a radius, not as a `Box3.min.y`.**
+    //
+    // A `Box3` is axis-aligned in *world* space. Round a deck slab that leans
+    // 15-30 degrees with the ground it spans, its `min.y` is the lowest
+    // *corner* of the tilted slab — not the soffit over the track — and it is
+    // low by roughly `halfDiagonal · sin θ`. Then differencing it against the
+    // route point's `y` differenced two columns on top of that.
+    //
+    // Both terms are now radii from the planet's centre, so the tilt cancels
+    // exactly, and the deck's own vertices are walked rather than a box drawn
+    // round them. On a flat park this is identical to the old arithmetic.
+    const soffit = lowestRadius(deckMesh);
+    if (soffit === null) {
+      complaints.push(
+        `the crossing at (${fmt([crossing.x, crossing.z])}) has a bridge deck with no ` +
+          'vertices to measure — the mesh is there but empty, so this clause asserts nothing',
+      );
+      continue;
+    }
+    const clearance =
+      soffit - planetRadiusAt(clearancePoint.x, clearancePoint.y, clearancePoint.z);
     if (clearance < TRAIN_CLEARANCE_Y) {
       complaints.push(
         `the bridge deck at (${fmt([crossing.x, crossing.z])}) leaves only ` +
@@ -10385,4 +10418,40 @@ function distanceToOtherPaving(
 
 function fmt(point: readonly [number, number]): string {
   return `${point[0].toFixed(1)}, ${point[1].toFixed(1)}`;
+}
+
+const _lowestRadiusVertex = /* @__PURE__ */ new Vector3();
+
+/**
+ * **The smallest distance from the planet's centre reached by any vertex of
+ * this object** — the radial replacement for `new Box3().setFromObject(o).min.y`.
+ *
+ * A `Box3` is axis-aligned in *world* space, so round anything that leans it
+ * reports the lowest **corner of the box**, which is lower than the lowest
+ * corner of the thing by roughly `halfDiagonal · sin θ`. `Box3` is used ten
+ * times in this file and every one of them is a box round geometry that may now
+ * be leaning; this is what the ones asking "how low does this get" want
+ * instead.
+ *
+ * Returns `null` for an object with no drawn vertices at all, so a caller can
+ * say it measured nothing rather than quietly reporting `Infinity`.
+ */
+function lowestRadius(object: Object3D): number | null {
+  object.updateMatrixWorld(true);
+  let lowest = Infinity;
+  object.traverse((node) => {
+    const mesh = node as Mesh;
+    const position = mesh.geometry?.getAttribute?.('position');
+    if (!position) return;
+    for (let i = 0; i < position.count; i += 1) {
+      _lowestRadiusVertex.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
+      const radius = planetRadiusAt(
+        _lowestRadiusVertex.x,
+        _lowestRadiusVertex.y,
+        _lowestRadiusVertex.z,
+      );
+      if (radius < lowest) lowest = radius;
+    }
+  });
+  return Number.isFinite(lowest) ? lowest : null;
 }
