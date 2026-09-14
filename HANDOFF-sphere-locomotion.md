@@ -331,6 +331,63 @@ Two earlier commit messages on this branch quote `160 / 0 / 465` as parity, and
 one prescribes running the suites one at a time. **Both are superseded by this
 section**; the history stays as written.
 
+## Verified in a real browser, on seed 11
+
+Dev server on **5473** (`--strictPort`), page opened with `background: true`,
+closed the moment I had looked, server killed by PID. Jim's preview on 5412 not
+touched. Driven through real `KeyboardEvent`s so the input system is in the
+loop, and sampled per `requestAnimationFrame` off `window.game.player.position`.
+
+**The hop, at the rim `/spawn?pos=157,0` (45.5° of lean) against the park's
+origin as control:**
+
+| | origin | rim (157 m) |
+|---|---|---|
+| apex, radial | 1.2525 m | 1.2115 m |
+| sideways excursion | **0.0000 m** | **0.8640 m** |
+| change in world `y` at apex | 1.2525 m | **0.8492 m** |
+| drift on landing | 0.0000 m | 0.0003 m |
+
+The third row is the whole fix in one number. At the rim her world `y` rises
+only 0.85 m while her **radial** altitude rises 1.21 m — the missing 0.86 m is
+the sideways half, and the two together are 1.21 m *straight up along her own
+ground*. The old code put the full 1.21 m into `y`, which delivered 0.85 m of
+felt height and lurched her a metre towards the middle of the park.
+
+Apex differs by 0.041 m (3.3 %) between the two, where the headless check reads
+them identical to 0.0000. That is `requestAnimationFrame` sampling — the true
+apex falls between frames — and it is emphatically not the 30 % the bug
+produced. Stated rather than smoothed over.
+
+**The walk**, ground arc covered per second, same four keys at both places:
+
+| key | origin | rim |
+|---|---|---|
+| ArrowUp | 7.401 | 7.355 |
+| ArrowDown | 7.564 | 7.445 |
+| ArrowLeft | 6.724 | 6.998 |
+| ArrowRight | 7.072 | 7.135 |
+
+Per-key differences of −0.6 %, −1.6 %, +4.1 %, +0.9 % — tiny and mixed in sign,
+against `PLAYER_MAX_SPEED` of 7.4 m/s. Before the fix the outward component
+would have run up to **43 % fast**. (These keys are each ~50 % radial at that
+spot, so this is a blunter instrument than `check:walk-metric`; it agrees with
+it, which is the point of running it.)
+
+**And she is standing up, measured rather than eyeballed.** Her local `+Y`
+against the radial at that position: **0.000°**. Worth doing numerically —
+CLAUDE.md records a screenshot that showed the player upright *while she was
+tumbling*, and her euler `x`/`z` here read ≈ ±π, which looks alarming and is
+merely a gimbal representation of the same orientation. Measure the up vector,
+never the euler components.
+
+**Not my lane, found while there:** on seed 11 the sky cruiser's coaster track
+runs **below the ground** between 168 m and 186 m out — `skyCruiser: coaster at
+174 m is only -2.9 m above ground`, fifteen such warnings in one boot. The
+parked `eng/radial-collide` handoff lists the coaster and sky-cruiser pylons as
+still standing on world `+Y` and records Jim ruling them in. No console
+*errors*.
+
 ## What the gates say
 
 - **`tsc --noEmit`**, **`typecheck:test`**, **`vite build`** — all exit 0.
