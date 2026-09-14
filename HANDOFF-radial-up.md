@@ -241,6 +241,15 @@ control on the instrument, and check *when* you sampled as well as what.
 
 ### Collision, navigation and gravity stay in the flat frame
 
+**The reasoning below is stale as of 14 September 2026 and the numbers in it are
+wrong now.** It argues the change is invisible because "a 1.28 m hop on a 13°
+tilt drifts by centimetres". The lean at the park's reach is **44°**, not 13:
+that hop loses 0.36 m of its 1.28 m and slides 0.89 m sideways, and `NavGrid`'s
+0.62 m `MAX_STEP` is beaten outright by a 0.72 m diagonal cell, so outward
+diagonals in the outer park are impassable. Deferring the rewrite may still be
+the right call; calling it invisible is not. Measurements in
+`ALTITUDE-INVENTORY.md`, sections A and B.
+
 `world/Collision.ts` has **no Y in its geometry at all**: circles and walls in
 XZ, plus `topHeight`/`baseHeight` scalars. `NavGrid` is a 2D lattice. Gravity is
 a scalar on `position.y`. Making those radial is a rewrite of the physics, and
@@ -271,7 +280,15 @@ and it makes each pylon lean radially for free while nothing that solves or
 checks the ride moves at all. Lower risk than what the rail race needed, where
 the *base* was genuinely wrong and had to change.
 
-### The arrival camera is fine — do not go looking for a bug
+### ~~The arrival camera is fine — do not go looking for a bug~~
+
+**STRUCK, 14 September 2026. It had two real bugs and Jim found both by
+looking.** See `ALTITUDE-INVENTORY.md`. The paragraph below is kept because its
+*method* note is still correct and still useful — a probe at the wrong instant
+sees the ordinary camera — but its conclusion was wrong, and "do not go looking"
+is exactly the sentence that made it expensive.
+
+### ~~(original)~~
 
 `arrivalCameraEngaged` is **true** from the first frame of
 `/arrive?at=stepping-down` through to elapsed 9.09 s, then releases normally.

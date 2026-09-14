@@ -73,6 +73,7 @@ the column and changes only `y`.
 | `src/core/IsoCamera.ts` `applyTransform` | — (already correct) | both | **Refactored**, not fixed: the four lines that rotate the rig offset are now `eyeForFocus`, so the arrival cannot hold a second model of them. That duplication is what kept `check:arrival-camera` green about a camera nobody renders |
 | `src/core/IsoCamera.ts` `update` — `focus.y` damped at 2× half-life | height above ground changes slowly, so `y` may damp slowly | OUT | **Fixed.** True of altitude, false of `y`: the cap moves as fast as she does, so the focus trailed **9 m** under the player and the eye 0.28 m under the grass. Altitude is now its own damped state; `focus.y` is derived via `yAtAltitude`. Damping `altitudeAt(focus)` re-read each frame is **not** a fix and made it worse (−4.42 m) — see the field's docblock |
 | `src/core/IsoCamera.ts` `TEMP_LIFT` / `CAMERA_FOCUS_LIFT` | the 1.25 m chest lift is a `+Y` offset | OUT | **Fixed.** Added to her altitude. At 44° the vector form gave 0.90 m of real height and put the aim 0.87 m sideways of her chest |
+| `src/world/coaster/Coaster.ts` — the energy drop **and** the crest search | `drop = crestHeight − height`, both bare `.y`, and the chain's crest found by the largest bare `.y` | OUT | **Fixed.** Both now read `route.clearanceAt(d)`, which already existed with the right doc comment and **zero readers**. Measured on seed 428: the chain let go **95 m along a 213 m loop** from the real crest (the bare-`y` crest is just wherever the circuit passes nearest the origin, because that is where the cap is highest); the cart was handed **25.30 m of free height**, 15 m/s against 10.84; the ride's real vertical range is 19.67 m where a bare `y` reported 33.47 — **70% of the "drop" was the planet** |
 | `scripts/check-arrival-camera.mts` | same flat eye model as the game | — | **Fixed.** Rebuilds the eye (Rodrigues from the sphere's centre) and the altitude from `terrainHeight` itself, importing neither `up.ts` nor `terrain.ts`'s answers, so a disagreement means something. Two new clauses: the sightline must not pass through the ground, and the focus must not drift far above its nominal eye height — a clearance floor alone is blind to the "10 m in the air" half of this bug |
 
 ## Still open — worst first
@@ -83,7 +84,6 @@ Nothing below is fixed. Severity is "does a child see it at 44° of lean".
 
 | file:line | expression | out/in | severity |
 |---|---|---|---|
-| `src/world/coaster/Coaster.ts:266-276` | `drop = crestHeight − height` (bare `.y`), then `sqrt(2·GRAVITY·drop)` | OUT | **Critical.** The loop reaches ~100 m, so the cap alone donates ~23 m of fake "drop" between the near and far sides. The cart accelerates to `MAX_SPEED` for free outbound and stalls coming back |
 | `src/world/ferrisWheel/FerrisWheelRide.ts:260,292,419-425` | `boardY = terrainHeight + FERRIS_CAR_LOW_Y`; `altitude = boardY + height·CLIMB_METRES`; `setY(altitude)` | OUT | **High.** The wheel is placed through `AnchorPlots` and leans; the gondola climbs 96 m straight up `+Y`, so it walks off the rim by `96·sin θ` — tens of metres. `clouds.ts:36,140,204` shares the ladder |
 | `src/entities/Player.ts:1126-1181` | `verticalVelocity` along `+Y`; land test `position.y <= groundY` | OUT (indoor is correct) | **High at the rim.** A 1.28 m hop delivers `1.28·cos 44 = 0.92 m` and slides her 0.89 m across the slope. Auto-hop over `autoHoppable` walls under-clears by the same factor |
 | `src/entities/npc/NpcCharacter.ts:659-681,778` | identical fall/land/hop block | OUT | **High** — NPCs wander the whole park |
@@ -205,6 +205,22 @@ authoring site that is leaned downstream by `placeOnSphere`/`tiltToSphere`;
   `src/world/entrance/BusJourney.ts`, `src/world/hotel/cinematic.ts`,
   `src/core/RideCamera.ts` (mount-relative, no world up anywhere — the bugs are
   in the *mounts*), `src/ui/ParkMap.ts` (2D plan, altitude irrelevant).
+
+## A stale claim, corrected
+
+`HANDOFF-radial-up.md` says collision, navigation and gravity may stay in the
+flat frame because the change would be **invisible** — *"a 1.28 m hop on a 13°
+tilt drifts by centimetres"*. That was true when it was written and the lean was
+13°. **It is 44° now**, and the same hop loses 0.36 m of its 1.28 m and slides
+0.89 m across the slope; `NavGrid`'s 0.62 m `MAX_STEP` is beaten by a 0.72 m
+diagonal cell. The *decision* to defer may well still be right — it is a physics
+rewrite — but the justification is no longer available, and section A/B above is
+what it costs at the current radius. Do not read that handoff as saying these
+are harmless.
+
+The same handoff's *"the arrival camera is fine — do not go looking for a bug"*
+is also now false: there were two real bugs in it, both fixed above. It was
+honestly right when written, against a probe taken at the wrong instant.
 
 ## Suggested order
 
