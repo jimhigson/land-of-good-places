@@ -83,6 +83,92 @@ The summary line now prints the range of feet-above-floor and says the clause
 detects a **fall only**; a child floating above her floor is visible in that
 range but asserted on nowhere.
 
+### `scripts/check-tap-spacing.mts` — storeys (§2.4 #2)
+
+Storey = **space** + **height above that space's own floor**, not world `y`.
+Coverage 166 -> 184 zone-band pairs on seed 428. Proved red with a mutation the
+old check could not see (give `stall:skyCruiser` 23 m more pick radius: patched
+exit 1 naming it, unpatched exit 0). Announces its skipped-but-close pairs on
+stderr every run.
+
+**Done from the script, never from `interact.ts`.** The coordinator relayed a
+trap the effects engineer hit and reverted: `interact.ts` cannot import
+`world/spaces.ts` — `spaces` -> `building/layout` -> `parkLayout` is
+seed-dependent, and `building/layout` -> `tapSpacing` -> back into `interact`.
+That pulls the park manifest into `test/procgen`'s static import graph *before
+the seed is set*, and `test:procgen` went from `49 failed | 269 passed | 279
+skipped` to `132 passed | 465 skipped` — **zero failures and 137 fewer tests
+run, with nothing red**. The trap is recorded in `ZONE_HEIGHT_TOLERANCE`'s doc
+comment on `eng/radial-fx`.
+
+`src/world/up.ts` is safe to extend this way and is where `heightAboveFloor`
+went: it **already** imported both `spaces` and `terrain`, so no new edge was
+added to the graph.
+
+### `scripts/check-swept-bus.mts` (§2.4 #3)
+
+Two faults, one cause — `placeBus` adopted `faceOnGround` and the check did not.
+
+- the bus's "own frame" box was taken with `bus.rotation.y = 0`, which leaves
+  `faceOnGround`'s pre-multiplied tilt in `rotation.x`/`z`. Now
+  `bus.quaternion.identity()`. The tell: one bus model, so the box must be
+  identical on every seed. Before: 12.10/13.73/12.00 m long, bottom
+  -4.95/-5.21/-5.06. After: **14.54 / 7.30 / 0.02 / 6.15 on all three seeds.**
+- the sweep posed the body by yaw alone. Now a stand-in `Object3D` posed with
+  `placeBus`'s own two calls, and `worldToLocal` per sample.
+
+Counts unchanged (0/0/0) — the sweep covers **2 m of a 142.8 m road, 1.4%**,
+because the sphere collapsed the brow. Baseline **not** re-taken: it is `{}`, it
+asserts zero, and the corrected instrument still reads zero on the three seeds
+that can be built. Re-taking it against three of sixteen would be a fiction of a
+different kind.
+
+### `test/procgen/invariants.ts` — the two bridge rays and three radius rows
+
+Both `new Vector3(0, 1, 0)` rays now fire along `upAt`, re-asked per sample,
+with the across-track offset built from the route's 3-D tangent crossed with
+that up, and the clearance read as `hit.distance` — a length, which needs no
+frame. `railRaceFliesClear`, `theSlideKeepsItsAirFromTheCruiser` and the
+deck-soffit clause difference `planetRadiusAt` instead of `y`. `Box3.min.y` has
+a radial replacement, `lowestRadius`, which walks an object's own vertices.
+
+**The finding that matters: the train drives into its own bridges.** Three
+independent clauses, three techniques, one seed (11), agreeing:
+
+| clause | reading | required |
+|---|---|---|
+| ray from the rail, bridge-0.0 | **3.69 m** | 3.90 m |
+| rail corridor, (-86.0, 26.0) | **3.69 m** | 3.90 m |
+| deck soffit, (-86.0, 26.0) | **3.65 m** | 3.90 m |
+
+plus bridge-420.0 at 3.33 m and (-99.0, 138.1) at 2.49 m. **All three clauses
+passed before this branch.** Not mine to fix — `bridges.ts` and the rail
+corridor belong to the world/rides engineer.
+
+---
+
+## Two rules this work runs under
+
+**Compare PASS counts against the base, not just failures.** The base on
+`feat/sphere-combined` `31d0fb2a` is:
+
+```
+Test Files  6 failed | 13 passed (19)
+     Tests  49 failed | 269 passed | 279 skipped (597)
+```
+
+so `failed + passed = 318` is the number of tests that actually *ran*. A change
+that drops that number has disabled tests, however green it looks — that is how
+the `interact.ts` trap above was caught, and a failure count alone cannot see it.
+
+**The park-build red is being fixed.** The coordinator bisected the `railD 0.0`
+throw to `502ec802`, a merge whose two parents are each green alone, and an
+engineer is on it. My own bisect (canonical seed, `check:park`) landed on
+`789d6088`; the two are compatible if the merge broke some seeds and the
+park-growth commit broke the canonical one. Either way: when it lands, headless
+park building comes back and several of these checks will assert for the first
+time. **Do not baseline anything against a park that does not build.**
+
 ---
 
 ## Still open in my area
