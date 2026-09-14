@@ -91,15 +91,68 @@ consumers. Same conclusion for `slide/solve.ts` until measured otherwise.
 The coaster's energy drop and crest search were already fixed upstream in
 `076fbcdf` — verified, not assumed: both now read `route.clearanceAt`.
 
+## Model
+
+**Opus** (`claude-opus-5[1m]`), chosen by the Overseer's brief. A replacement
+runs the same model.
+
 ## Status
 
 - [x] Root-caused, measured, controls run
-- [ ] `rideFrame` helper + the three vehicle placements
-- [ ] Clearance sweep into the drawn frame; re-measure the 10 strikes
-- [ ] The four camera mounts (fixing the mount fixes the camera —
-      `RideCamera.mountOn` is a plain reparent and never touches `camera.up`)
-- [ ] `railRace/camera.ts`: `far = 400` clips the horizon of a 220 m sphere
+- [x] `rideFrame` helper (approved by the lead engineer) — in `sweptRail.ts`
+- [x] Coaster cart: **9.103 m off its rails -> 0.167 m worst**, 100% of circuit
+- [x] Clearance sweep into the drawn frame — strikes 10 -> 9
+- [x] Rail race cart: **90.00 deg -> 3.210 deg** cart-vs-rider up (0.020 m of
+      hand swing against a 0.55 m half-width)
+- [ ] **The castle carve** — the real remainder of the cruiser-through-castle
+      bug. See below; it is a route-solver fix, not a frame fix.
+- [ ] `ParkTrain.placeCars` — same shape, not yet done
+- [ ] Ferris gondola climb (`boardY + height * CLIMB_METRES`, straight up +Y)
+- [ ] `railRace/camera.ts`: world-`Y` rig, `camera.up` never set, `far = 400`
+      clips the horizon of a 220 m sphere
+- [ ] `slide/solve.ts` — not yet examined
 - [ ] Browser QA on `/sky-cruiser`, `/rail-race`, `/slide`, `/ferris`
+
+## The castle carve — the remaining cruiser bug, measured
+
+`scripts/measure-castle-carve.mts`, seed 428. The carve pins the castle span to
+**one absolute world y** (`castleY(WINDOW_TRACK_Y)` = -26.82) and turns it into
+a per-column clearance with `wanted = windowY - terrainHeight(spot.x, spot.z)`.
+
+The castle span is d = 96..126, over which the ground falls **14.6 m**
+(-25.50 at d=96, radius 102.7, to -40.13 at d=124, radius 126.4). So a level
+track through it is:
+
+| d | radius | ground | track | clearance |
+|---|---|---|---|---|
+| 88 | 99.7 | -23.92 | -26.54 | **-2.62** |
+| 96 | 102.7 | -25.50 | -26.82 | **-1.33** |
+| 100 | 105.1 | -26.76 | -26.82 | -0.07 |
+| 110 | 113.8 | -31.84 | -26.82 | +5.02 |
+| 124 | 126.4 | -40.13 | -26.82 | +13.31 |
+
+**The ride is genuinely 2.62 m underground for about 14 m of its circuit**, and
+13.3 m too high at the other end. The repair loop that would lift it is
+explicitly forbidden from touching controls within `WINDOW_FLAT +
+WINDOW_RAMP*0.35` = 10.6 m of the span — which is exactly where the sag is, and
+for a good reason (lifting inside a hole cut to fit the car is how you hit it).
+
+This is the rail race's own `route.base` disease in a second place: *one
+absolute world y held across a span the cap tilts*. The cure there was to split
+it into a constant **clearance** plus a per-position base, and the same split is
+wanted here — but with a constraint the rail race did not have: both window
+openings must stay at one height in the **castle's** frame, or `Shell.ts` can no
+longer cut them as a single band.
+
+Worth knowing before attempting it: the castle is leaned **rigidly, about its
+own centre column** (`standInPlot` -> `placeOnSphere`), while every route point
+is leaned **about its own column**. Those two maps agree near the castle centre
+and diverge as `d^2 / 2R` — only ~0.32 m at the footprint's edge, so that is
+*not* where the 6.9 m discrepancy comes from. It comes from the flat authoring
+frame being a poor model of the castle specifically: in that frame the castle is
+a constant-y box while the ground under it falls 14.6 m, so the castle reads as
+buried at its near edge and floating at its far one, and only becomes correct
+once drawn.
 
 ## Notes for whoever picks this up
 
