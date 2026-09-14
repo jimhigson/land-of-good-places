@@ -84,12 +84,67 @@ failure count byte-identical. That mattered: the gate change shifts the
 treeline's RNG stream, so "it re-scattered and something else got worse" was a
 live risk. It did not happen.
 
+## PROCEDURE — prove a procgen change moved only what you meant
+
+**Do this on every change that touches a generator, not only when you suspect
+something.** It exists because a **net −10** improvement and a **+10/−10 churn**
+produce an *identical* summary line, and the summary line is all anyone reads.
+This change shifted the treeline's RNG stream, so a silent re-scatter regression
+was live the whole time.
+
+1. **Before** your change, on the unmodified base commit in its own worktree,
+   run `pnpm run test:procgen > /tmp/full-before.log 2>&1`.
+   (Redirect order matters: `> file 2>&1`, never `2>&1 > file` — the latter
+   sends stderr to the terminal and silently gives you a half-empty log.)
+2. **After**, the same into `/tmp/full-after.log`.
+3. Check the **totals** first, and check all three:
+   `failed`, `passed`, **and the total**. A change in the total means tests were
+   **skipped**, which is not a pass — see the trap below.
+4. Then diff **per failure**, not in aggregate:
+
+```python
+import re
+def counts(path):
+    log = open(path, encoding='utf8', errors='replace').read()
+    out = {}
+    for b in re.split(r"\n FAIL  ", log)[1:]:
+        head = b.split("\n")[0]
+        seed = head.split(">")[1].strip() if ">" in head else "?"
+        name = head.split(" > ")[-1].strip()
+        m = re.search(r"but got (\d+)", b)
+        out[f"{seed} | {name}"] = m.group(1) if m else "?"
+    return out
+```
+
+   Write both to files, `diff` them, and **account for every line**. The result
+   you want is lines removed and **zero added**, with the removed set being
+   exactly the invariants you meant to fix, on every seed.
+
+Measured here: `95 → 85` failed, `553 → 563` passed, total `648` unchanged, and
+the diff showed **exactly 10 lines removed, 0 added** — two invariants × five
+seeds. Without step 4 that is indistinguishable from fixing twelve and breaking
+two.
+
 ## Trap worth inheriting
 
-Writing the vertex sweep with `instanceof Mesh` threw `Cannot access 'Mesh'
-before initialization` from a circular-import dead zone, which vitest reports as
-**93 skipped, 0 failed** — the quietest way for a suite to stop checking, and
-invisible if you read the failure count alone. Duck-typed now, reason in the code.
+**`instanceof Mesh` in `test/procgen/parkFacts.ts` throws, and vitest reports it
+as `93 skipped, 0 failed`.**
+
+The static `Mesh` binding is in a **circular-import temporal dead zone** at the
+point `buildFacts` runs — `parkFacts.ts` pulls in most of the world, which pulls
+back. Reaching for it throws `ReferenceError: Cannot access 'Mesh' before
+initialization`, the whole suite's `beforeAll` dies, and every test in the file
+is reported **skipped rather than failed**.
+
+**The failure count says nothing.** `0 failed` and a green-looking summary is
+what you get while the suite has stopped checking entirely. This is the
+silent-skip disease with a new cause: the pass/total count is the only tell, and
+step 3 of the procedure above is what catches it.
+
+Use the file's own idiom — `(object as { isMesh?: boolean }).isMesh` — not
+`instanceof`. It is not a style preference; it is the only spelling that works
+here. The same applies to anything else imported statically from `three` and
+touched during fact-building.
 
 ## Not done here, deliberately
 
