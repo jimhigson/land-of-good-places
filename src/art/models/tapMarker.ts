@@ -5,7 +5,10 @@ import {
   MeshBasicMaterial,
   SphereGeometry,
   TorusGeometry,
+  Vector3,
 } from 'three';
+import { INDOOR_UP } from '../../world/terrain';
+import { upFor } from '../../world/up';
 import { PALETTE, TAU, clamp01 } from '../style/bridge';
 import { decal } from '../style/materials';
 
@@ -19,13 +22,26 @@ import { decal } from '../style/materials';
  * shadow under a piece of UI would look like a hole in the grass.
  *
  * Everything is authored around the origin on the ground plane facing +Z, per
- * the asset contract, so a caller only ever sets `root.position`.
+ * the asset contract, so a caller only ever sets the position — through
+ * {@link TapMarker.show} or {@link TapMarker.moveTo}, never `root.position`
+ * directly, because those are also where the marker is leaned onto the ground.
+ *
+ * **Why the lean is not optional.** The ring and the disc are authored flat and
+ * `rotation.x = -PI/2`'d, which is only ever correct if something downstream
+ * leans them (`LampPosts.instanceAt` is the model). Nothing did: the root went
+ * straight into the scene, so on the sphere the ring lay in the world XZ plane
+ * against ground that leans 10.5 degrees at 40 m and 45.5 degrees at the park's
+ * rim. Half of a 0.62 m ring buried in the hillside, half floating, sliced by
+ * the grass — on every tap beyond about 20 m, which makes this the most-seen
+ * radial fault in the game.
  */
 
 /** How far above the surface the ring floats, to keep it out of z-fighting. */
 const HOVER = 0.06;
 
 const RING_RADIUS = 0.62;
+
+const _up = /* @__PURE__ */ new Vector3();
 
 export class TapMarker {
   readonly root = new Group();
@@ -85,7 +101,7 @@ export class TapMarker {
    * from a stroll before the character has even set off.
    */
   show(x: number, y: number, z: number, interactive: boolean, running = false): void {
-    this.root.position.set(x, y, z);
+    this.placeAt(x, y, z);
     this.root.visible = true;
     this.running = running;
     this.ringMaterial.color.setHex(interactive ? PALETTE.markerLemon : PALETTE.markerPink);
@@ -94,7 +110,26 @@ export class TapMarker {
 
   /** Moves the ring without restarting its pop-in — for a moving target. */
   moveTo(x: number, y: number, z: number): void {
+    this.placeAt(x, y, z);
+  }
+
+  /**
+   * Stands the marker on the ground under `(x, y, z)` — position *and* lean,
+   * because on a sphere those are one operation and splitting them is how the
+   * ring came to lie at 45 degrees to the grass it marks.
+   *
+   * The orientation is **assigned**, never pre-multiplied. `moveTo` runs every
+   * frame while the character chases a moving target, and a pre-multiply there
+   * re-inherits the previous frame's tilt and compounds it until the marker
+   * tumbles — the exact failure `world/up.ts`'s `faceOnGround` docblock records
+   * measuring on the player. The marker has no yaw of its own (the ring and
+   * disc are radially symmetric and the orbiting sweets are placed in local
+   * space), so there is nothing for an assignment to lose, and indoors `upFor`
+   * hands back plain `+Y` and this collapses to the identity.
+   */
+  private placeAt(x: number, y: number, z: number): void {
     this.root.position.set(x, y, z);
+    this.root.quaternion.setFromUnitVectors(INDOOR_UP, upFor(x, y, z, _up));
   }
 
   hide(): void {

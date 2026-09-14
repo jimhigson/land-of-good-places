@@ -4,9 +4,12 @@ import {
   Group,
   Mesh,
   MeshBasicMaterial,
+  Quaternion,
   RingGeometry,
   Vector3,
 } from 'three';
+import { INDOOR_UP } from '../../world/terrain';
+import { upFor } from '../../world/up';
 import { ART } from '../style/artPalette';
 import { decal } from '../style/materials';
 import { starGeometry } from '../style/shapes';
@@ -113,13 +116,26 @@ export function createRainbowRings(): RainbowRings {
   const root = new Group();
   root.name = 'effect.rainbowRings';
 
+  // Leaned into the XZ plane **in the geometry**, once, so each mesh's own
+  // quaternion is free to carry the lean of the ground it was fired on. A
+  // `mesh.rotation.x = -PI/2` here would have to be composed with that lean
+  // every frame, which is the pre-multiply trap `world/up.ts` documents.
   const geometry = rainbowRingGeometry();
+  geometry.rotateX(-Math.PI / 2);
   const meshes: Mesh<RingGeometry, MeshBasicMaterial>[] = [];
   const materials: MeshBasicMaterial[] = [];
   /** Seconds elapsed for each ring, or `LIFETIME` (= finished) when idle. */
   const ages: number[] = [];
-  /** Ground height each ring was born at, so it rises from where you jumped. */
-  const bases: number[] = [];
+  /** Where each ring was born, so it rises from the spot you jumped off. */
+  const bases: Vector3[] = [];
+  /**
+   * Which way "up" was at each ring's birthplace. The rise, the clearance and
+   * the plane of the ring are all along this, not along world `+Y` — outdoors
+   * the two differ by 10.5 degrees at 40 m from the park's origin and 45.5 at
+   * the rim, and a rainbow that lay in the world XZ plane on ground leaning
+   * that far was half buried and half floating on **every landing**.
+   */
+  const ups: Vector3[] = [];
   /** Peak-opacity multiplier each ring was born with (see `burst`'s `strength`). */
   const strengths: number[] = [];
   let next = 0;
@@ -137,14 +153,14 @@ export function createRainbowRings(): RainbowRings {
       depthWrite: false,
     });
     const mesh = decal(new Mesh(geometry, material));
-    mesh.rotation.x = -Math.PI / 2;
     mesh.visible = false;
     mesh.renderOrder = 4;
     root.add(mesh);
     meshes.push(mesh);
     materials.push(material);
     ages.push(LIFETIME);
-    bases.push(0);
+    bases.push(new Vector3());
+    ups.push(new Vector3(0, 1, 0));
     strengths.push(1);
   }
 
@@ -155,12 +171,19 @@ export function createRainbowRings(): RainbowRings {
       const index = next;
       next = (next + 1) % POOL_SIZE;
       const mesh = meshes[index];
-      if (!mesh) return;
-      mesh.position.set(x, y + GROUND_CLEARANCE, z);
+      const base = bases[index];
+      const up = ups[index];
+      if (!mesh || !base || !up) return;
+      upFor(x, y, z, up);
+      base.set(x, y, z).addScaledVector(up, GROUND_CLEARANCE);
+      mesh.position.copy(base);
+      // Assigned, not pre-multiplied: `update` rewrites the position of a live
+      // ring every frame, and a ring that inherited its own tilt each time
+      // would spin out of the ground it was fired on.
+      mesh.quaternion.setFromUnitVectors(INDOOR_UP, up);
       mesh.scale.setScalar(START_RADIUS);
       mesh.visible = true;
       ages[index] = 0;
-      bases[index] = y + GROUND_CLEARANCE;
       strengths[index] = strength;
       alive += 1;
     },
@@ -187,7 +210,9 @@ export function createRainbowRings(): RainbowRings {
         const t = next_ / LIFETIME;
         const eased = easeOut(t);
         mesh.scale.setScalar(START_RADIUS + (END_RADIUS - START_RADIUS) * eased);
-        mesh.position.y = (bases[i] ?? 0) + RISE * eased;
+        const base = bases[i];
+        const up = ups[i];
+        if (base && up) mesh.position.copy(base).addScaledVector(up, RISE * eased);
         // Hold full strength for the first fifth, then fade on a curve — a
         // linear fade reads as the ring being switched off.
         const peak = 0.95 * (strengths[i] ?? 1);
@@ -238,10 +263,16 @@ interface Spark {
   readonly mesh: Mesh;
   readonly material: MeshBasicMaterial;
   readonly origin: Vector3;
+  /** Outward, in the **tangent plane** at `origin` — not in the world XZ plane. */
   readonly direction: Vector3;
+  /** Local up at `origin`; the arc lifts along this. */
+  readonly up: Vector3;
   distance: number;
   age: number;
 }
+
+const _sparkTilt = /* @__PURE__ */ new Quaternion();
+const _sparkUp = /* @__PURE__ */ new Vector3();
 
 export function createRainbowSparks(): RainbowSparks {
   const root = new Group();
@@ -270,6 +301,7 @@ export function createRainbowSparks(): RainbowSparks {
       material,
       origin: new Vector3(),
       direction: new Vector3(),
+      up: new Vector3(0, 1, 0),
       distance: 1,
       age: SPARK_LIFETIME,
     });
@@ -279,6 +311,13 @@ export function createRainbowSparks(): RainbowSparks {
     root,
 
     burst(x, y, z, radius) {
+      // One lookup for the whole burst: every star leaves the same point, so
+      // they share a tangent plane. Outdoors that plane leans with the ground,
+      // which is what stops half the stars diving into the grass and half
+      // shooting at the sky — and this burst is, per `world/Highlights.ts`,
+      // the only "yes, that one" a child gets on a phone.
+      upFor(x, y, z, _sparkUp);
+      _sparkTilt.setFromUnitVectors(INDOOR_UP, _sparkUp);
       for (let i = 0; i < SPARKS_PER_BURST; i += 1) {
         const spark = sparks[next];
         next = (next + 1) % SPARK_POOL_SIZE;
@@ -287,8 +326,9 @@ export function createRainbowSparks(): RainbowSparks {
         // slot, so two bursts in the same place do not land star-on-star.
         const angle = ((i + next * 0.25) / SPARKS_PER_BURST) * Math.PI * 2;
         if (spark.age >= SPARK_LIFETIME) alive += 1;
-        spark.origin.set(x, y + radius * 0.35, z);
-        spark.direction.set(Math.cos(angle), 0, Math.sin(angle));
+        spark.up.copy(_sparkUp);
+        spark.origin.set(x, y, z).addScaledVector(_sparkUp, radius * 0.35);
+        spark.direction.set(Math.cos(angle), 0, Math.sin(angle)).applyQuaternion(_sparkTilt);
         spark.distance = Math.max(0.7, radius) * SPARK_TRAVEL;
         spark.age = 0;
         spark.mesh.visible = true;
@@ -313,8 +353,9 @@ export function createRainbowSparks(): RainbowSparks {
           .copy(spark.origin)
           .addScaledVector(spark.direction, spark.distance * eased)
           // Up fast, then over the top: a star that only travels outwards
-          // reads as a diagram of an explosion rather than a sparkle.
-          .setY(spark.origin.y + SPARK_RISE * Math.sin(eased * Math.PI * 0.9));
+          // reads as a diagram of an explosion rather than a sparkle. "Up" is
+          // the local up at the burst, so the arc leans with the ground.
+          .addScaledVector(spark.up, SPARK_RISE * Math.sin(eased * Math.PI * 0.9));
         spark.mesh.rotation.z = t * 3.4;
         spark.mesh.scale.setScalar(1 - 0.45 * t);
         spark.material.opacity = t < 0.25 ? 0.95 : 0.95 * (1 - (t - 0.25) / 0.75) ** 1.4;
