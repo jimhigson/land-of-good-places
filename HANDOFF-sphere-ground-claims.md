@@ -125,6 +125,29 @@ answered the first; `theGroundIsTheSphereItClaimsToBe` now asserts the second.
 **Do not settle this alone.** If 2.335x is wanted back, the planet must grow
 with it — they are one decision, which is why they live in one expression.
 
+### The 10 tests scale 1 costs, stated rather than netted
+
+Final rebased numbers against #619's base: **553 passed / 95 failed** against
+**501 / 128** — net +52 passed, −33 failed, 0 pending either way. But the net
+hides ten tests that pass at 2.335x and fail at scale 1:
+
+    seed 131   the Sky Cruiser built track turns as gently as it promises
+    seed 131   every railway crossing has a bridge you can walk to, onto and across
+    seed 24    every paved path runs on grid axes
+    seed 24    no two close destinations are left with a disproportionate paved detour
+    seed 24    the Sky Cruiser flies clear of the whole park
+    seed 24    the ginormous slide does not clip the castle towers
+    seed 24    the Sky Cruiser fits through the window it cut in the castle
+    seed 326   no two trees interpenetrate
+    seed 326   no tree grows into a wall
+    canonical  the ginormous slide goes downhill all the way, lands in the ball pit
+
+**These are not regressions from the kernel change** — that measured 0 newly
+failing, 0 newly passing across the whole suite. They are a *different park*:
+scale is a layout input, so the seeds land differently and hit different
+problems. A net improvement is still a net, and whoever settles the scale
+question should see the ten rather than the sum.
+
 ## The claims migration (the lane proper)
 
 World `(x, z)` is an **orthographic projection** of the planet — `terrain.ts`
