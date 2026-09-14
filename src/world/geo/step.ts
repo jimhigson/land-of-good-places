@@ -90,3 +90,33 @@ export function riseBetweenWorld(
   if (r === 0) return toY - fromY;
   return ((toX - fromX) * mx + (toY - fromY) * my + (toZ - fromZ) * mz) / r;
 }
+
+/**
+ * **How much world `y` is `metres` of real height, here** — the inverse of
+ * {@link riseBetweenWorld} taken straight down the same column.
+ *
+ * For the callers that must go *looking* for the next surface down rather than
+ * compare two they already hold: a sampler is asked "what is under me, starting
+ * from a world `y`", and the `y` it is handed has to be the one that is a real
+ * step below. Out at the park's reach that is `1/cos θ` bigger than the step
+ * itself — 0.62 m of height is 0.88 m of world `y` at 45.5° of lean — so a
+ * search that hands the sampler the step verbatim stops short and misses the
+ * level it was looking for.
+ *
+ * A short fixed point, because the midpoint the rise is taken about depends on
+ * the answer. It contracts hard — the residual against `riseBetweenWorld` over
+ * d = 0..184.3 m is 5e-3 m after one pass, 3e-6 after two and under 1e-8 after
+ * three — so three it is, on a path walked once per cell per lattice build and
+ * never per frame. `test/geo/step.test.ts` measures that residual rather than
+ * leaving this paragraph to be believed.
+ */
+export function columnYForRise(x: number, y: number, z: number, metres: number): number {
+  let dy = metres;
+  for (let pass = 0; pass < 3; pass += 1) {
+    const my = y + dy / 2 + PLANET_RADIUS;
+    const r = Math.hypot(x, my, z);
+    if (my === 0) return metres;
+    dy = (metres * r) / my;
+  }
+  return dy;
+}

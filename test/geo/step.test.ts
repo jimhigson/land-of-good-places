@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS } from '../../src/core/constants';
-import { Geo, riseBetween, riseBetweenWorld } from '../../src/world/geo';
+import { Geo, columnYForRise, riseBetween, riseBetweenWorld } from '../../src/world/geo';
 
 const R = GROUND_SPHERE_RADIUS;
 
@@ -115,6 +115,26 @@ describe('riseBetween — the honest step between two standing places', () => {
     // Control: the pair really does have a rise, so agreeing at zero would not
     // have counted.
     expect(Math.abs(riseBetween(onCap(157, 0.4), onCap(157.5, 1.2)))).toBeGreaterThan(0.5);
+  });
+
+  it('columnYForRise inverts it down a column, and is not the identity', () => {
+    let worstResidual = 0;
+    const rows: string[] = [];
+    for (const d of [0, 80, 157, 184.3]) {
+      const y = capY(d);
+      const dy = columnYForRise(d, y, 0, BUILDING_STEP_UP);
+      const got = riseBetweenWorld(d, y, 0, d, y + dy, 0);
+      worstResidual = Math.max(worstResidual, Math.abs(got - BUILDING_STEP_UP));
+      rows.push(`d=${d}m needs ${dy.toFixed(3)} m of world y`);
+    }
+    note(`${BUILDING_STEP_UP} m of real height: ${rows.join('; ')}`);
+    note(`worst residual after three fixed-point passes ${worstResidual.toExponential(2)} m`);
+    expect(worstResidual).toBeLessThan(1e-6);
+
+    // The control: if this were the identity the residual would also be small
+    // at the park's origin, so assert it genuinely moves out where the lean is.
+    expect(columnYForRise(0, capY(0), 0, BUILDING_STEP_UP)).toBeCloseTo(BUILDING_STEP_UP, 4);
+    expect(columnYForRise(157, capY(157), 0, BUILDING_STEP_UP)).toBeGreaterThan(0.85);
   });
 
   it('reduces to a plain height difference in the same column', () => {
