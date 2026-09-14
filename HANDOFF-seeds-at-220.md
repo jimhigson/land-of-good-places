@@ -1,5 +1,22 @@
 # Which seeds build, and the one error that stops the rest
 
+> **STALE as of 14 September 2026 — the park size this was measured at has been
+> reverted.** The `PARK_SURFACE_SCALE` that grew the park to a 135.5 m play
+> radius was a drifted constant (its own doc comment claimed it was 1 while the
+> value gave 2.335x), and the park's edge at ≈225–253 m stood **past the 220 m
+> sphere's own horizon**. Jim, 14 September: *"the park now feels too
+> big/sparse - I don't think the area has been maintained from before, it has
+> gotten bigger."*
+>
+> With the area restored (`fix/park-area-maintained`, play radius 57.49 m),
+> **8 of the 10 pool seeds build**, not 3: 20260728, 11, 128, 131, 208, 274,
+> 326, 451. Only **24** (`railD 44.1 ... snaps to no proven bridge site`) and
+> **428** (`RailRouteUnsolvable`) still throw.
+>
+> The table below is kept because the *error* it documents is still the real
+> blocker for those two, and it is still the list the round-robin rewrite wants.
+> **Do not read its pass/fail column as current.** See `HANDOFF-park-area.md`.
+
 Measured 13 September 2026 on `feat/sphere-combined`, at
 `GROUND_SPHERE_RADIUS = 220` with `PARK_SURFACE_SCALE` growing the park to
 match (play radius 58 → 135.5 m, boundary max radius ≈ 225 m).
