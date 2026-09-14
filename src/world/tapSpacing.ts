@@ -42,7 +42,7 @@
  */
 import { cameraViewHalfHeight } from '../core/constants';
 import { FALLBACK_UNIT_PX } from '../core/uiScale';
-import { ZONE_HEIGHT_TOLERANCE, zoneVerb, type InteractZone } from './interact';
+import { zoneVerb, type InteractZone } from './interact';
 
 /** The QA phone viewport (CSS px) — the narrowest screen the game is held to. */
 export const PHONE_VIEWPORT = { width: 390, height: 844 } as const;
@@ -213,10 +213,14 @@ export function zoneSeparation(a: InteractZone, b: InteractZone): number {
   return Math.hypot(a.x - b.x, a.z - b.z) - Math.max(a.pickRadius, b.pickRadius);
 }
 
-/** Zones on the same storey, as the pick itself judges storeys. */
-export function sameStorey(aY: number, bY: number): boolean {
-  return Math.abs(aY - bY) <= ZONE_HEIGHT_TOLERANCE;
-}
+/**
+ * Zones on the same storey, as the pick itself judges storeys — literally so
+ * now: this is `world/interact.ts`'s own function, re-exported here because
+ * this is where the checks look for it. It used to be a second copy of the
+ * expression, which meant the rule the checks enforced and the rule the tap
+ * obeyed were kept in step by hand.
+ */
+export { sameStorey } from './interact';
 
 /** Whether two zones do different things — the pairs rule 2 is hard about. */
 export function differentActions(a: InteractZone, b: InteractZone): boolean {

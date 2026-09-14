@@ -3,6 +3,7 @@ import { isTouchDevice } from '../core/device';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Selection } from '../world/Selection';
 import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../world/interact';
+import { upFor } from '../world/up';
 
 /**
  * The action chips — GAME_DESIGN.md's SELECTION RULE, step 2: *"once selected,
@@ -53,6 +54,7 @@ export class ActionChips implements GameSystem {
   private readonly row: HTMLElement;
   private readonly buttons: HTMLButtonElement[] = [];
   private readonly projected = new Vector3();
+  private readonly zoneUp = new Vector3();
 
   /** What is currently on screen, so a rebuild is only ever a real change. */
   private signature = '';
@@ -207,7 +209,15 @@ export class ActionChips implements GameSystem {
       y = height - EDGE_MARGIN;
     } else {
       const lift = Math.min(MAX_LIFT, Math.max(MIN_LIFT, 1.1 + zone.pickRadius * 0.3));
-      this.projected.set(zone.x, zone.y + lift, zone.z).project(this.activeCamera());
+      // Above the thing, along the up *it* has. Spent on world +Y instead, the
+      // anchor slides up to `lift * sin(lean)` — 1.9 m at the park's rim —
+      // towards the middle of the park, so "Ride it!" ends up beside the ride
+      // rather than over it. The projection itself was always right.
+      upFor(zone.x, zone.y, zone.z, this.zoneUp);
+      this.projected
+        .set(zone.x, zone.y, zone.z)
+        .addScaledVector(this.zoneUp, lift)
+        .project(this.activeCamera());
       x = (this.projected.x * 0.5 + 0.5) * width;
       y = (1 - (this.projected.y * 0.5 + 0.5)) * height;
 
