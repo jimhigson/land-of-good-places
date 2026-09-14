@@ -1,12 +1,13 @@
 import {
   CircleGeometry,
-  Group,
   Mesh,
   MeshBasicMaterial,
   SphereGeometry,
   TorusGeometry,
 } from 'three';
 import { PALETTE, TAU, clamp01 } from '../style/bridge';
+import { Anchor } from '../../world/geo';
+import { anchorAt } from '../../world/up';
 import { decal } from '../style/materials';
 
 /**
@@ -19,7 +20,19 @@ import { decal } from '../style/materials';
  * shadow under a piece of UI would look like a hole in the grass.
  *
  * Everything is authored around the origin on the ground plane facing +Z, per
- * the asset contract, so a caller only ever sets `root.position`.
+ * the asset contract — and it **stays** authored that way. The root is an
+ * {@link Anchor}, so `show`/`moveTo` set a frame rather than a position and
+ * three.js leans the whole marker onto the ground under it. The two
+ * `rotation.x = -Math.PI / 2` discs below are then local to that frame and are
+ * correct without modification, which is the entire point of the Anchor.
+ *
+ * **This is the fault `RADIAL-INVENTORY.md` filed first**, and it was filed
+ * first because it is the most-seen piece of world UI in the game: the root
+ * used to go straight to the scene with nothing but a `position`, so the ring
+ * lay in the world XZ plane while the grass under it leaned up to 45.5°. Past
+ * about 20 m from the park's centre she tapped the ground and got a pink ring
+ * half buried in the hillside and half floating, sliced by the grass. The
+ * geometry below has not changed a line; only what it hangs from has.
  */
 
 /** How far above the surface the ring floats, to keep it out of z-fighting. */
@@ -28,7 +41,7 @@ const HOVER = 0.06;
 const RING_RADIUS = 0.62;
 
 export class TapMarker {
-  readonly root = new Group();
+  readonly root = new Anchor();
   /** Total height in metres — trivial here, but the asset contract asks for it. */
   readonly height = 0.2;
 
@@ -85,7 +98,7 @@ export class TapMarker {
    * from a stroll before the character has even set off.
    */
   show(x: number, y: number, z: number, interactive: boolean, running = false): void {
-    this.root.position.set(x, y, z);
+    anchorAt(this.root, x, y, z);
     this.root.visible = true;
     this.running = running;
     this.ringMaterial.color.setHex(interactive ? PALETTE.markerLemon : PALETTE.markerPink);
@@ -94,7 +107,7 @@ export class TapMarker {
 
   /** Moves the ring without restarting its pop-in — for a moving target. */
   moveTo(x: number, y: number, z: number): void {
-    this.root.position.set(x, y, z);
+    anchorAt(this.root, x, y, z);
   }
 
   hide(): void {
