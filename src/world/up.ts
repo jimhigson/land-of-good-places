@@ -1,6 +1,7 @@
 import { Euler, Quaternion, Vector3, type Object3D } from 'three';
+import { GROUND_SPHERE_RADIUS } from '../core/constants';
 import { SPACE_GARDEN, spaceAt } from './spaces';
-import { INDOOR_UP, tiltToSphere, upAt } from './terrain';
+import { INDOOR_UP, planetRadiusAt, tiltToSphere, upAt } from './terrain';
 
 /**
  * **Which way is up, for a thing that might be indoors or out.**
@@ -127,4 +128,51 @@ export function standOnGround(object: Object3D): void {
   const { x, y, z } = object.position;
   if (spaceAt(x, z) !== SPACE_GARDEN) return;
   object.quaternion.premultiply(tiltToSphere(x, y, z, _tilt));
+}
+
+/**
+ * **The height of a point in a frame its neighbours agree with** — the scalar
+ * two nearby standing places may be differenced against each other.
+ *
+ * This is the one owner of "is that a step up?", and it exists because world
+ * `y` stopped being able to answer it. Outdoors, `y` is dominated by *where you
+ * are* rather than *how high you are*: the radial gradient reaches 1.02 m of
+ * `y` per metre walked outward at the park's reach, so a half-metre step across
+ * level grass at 157 m differences to 0.52 m of `y` — and a diagonal one to
+ * **0.729 m**, past `NavGrid`'s own 0.62 m walking step. Measured, not read:
+ * `scratch/nav-control.mts`.
+ *
+ * So outdoors the answer is the **distance from the centre of the planet**,
+ * offset by {@link GROUND_SPHERE_RADIUS} so the number still reads as "metres
+ * above the park's middle" and so it is numerically interchangeable with the
+ * `y` it replaces at the park's origin. The offset is a constant and cancels in
+ * every difference; it is there to keep a `Float32Array` of these honest and to
+ * stop a debug print looking like nonsense.
+ *
+ * Indoors it is plain `y`, for exactly the reason {@link upFor} branches: a
+ * room six hundred metres from the park's origin would lean by fifty-odd
+ * degrees under the radial formula, and its floor is flat.
+ *
+ * **Why this is not {@link altitudeAt}.** `altitudeAt` answers "how high above
+ * *the ground under me*", which is 0 for everyone standing on grass anywhere.
+ * That is the right question for a jump and the wrong one for a step: two
+ * neighbouring cells both at altitude 0 tell you nothing about the ledge
+ * between them. This answers "how high above *a datum the whole space shares*",
+ * so the difference between two of them is the ledge and nothing else. On flat
+ * grass that difference is the wave field alone — worst 0.016 m anywhere in the
+ * park, against 0.729 m for the same step measured in `y`.
+ *
+ * **What this deliberately refuses to do**, and it is worth stating because it
+ * is the reason the whole conversion is two substitutions rather than a
+ * rewrite: it does not solve anything in a frame local to one mover. Two movers
+ * standing in different places would then disagree about the geometry
+ * *between* them, so a wall's position would depend on who asked. `(x, z)` is a
+ * shared, global, exactly invertible chart of the ground — an orthographic
+ * projection of the cap, preserving tangential distance and compressing radial
+ * distance by `cos θ` — and everything here stays in it. A tangent frame at the
+ * mover is not shared and cannot.
+ */
+export function walkHeight(x: number, y: number, z: number): number {
+  if (spaceAt(x, z) !== SPACE_GARDEN) return y;
+  return planetRadiusAt(x, y, z) - GROUND_SPHERE_RADIUS;
 }
