@@ -108,6 +108,16 @@ variant, ask rather than adding one. Four engineers each adding their own is
 exactly how this codebase acquired two definitions of everything, which is the
 fault CLAUDE.md names as its most common by a distance.
 
+**Grown so far:**
+
+- **`walkHeight(x, y, z)`** in `world/up.ts` — *"how high is this, for
+  comparing two places"*. Outdoors the planet radius (less the sphere's radius,
+  a constant that cancels in every difference); indoors plain `y`. Asked for by
+  the collision area for `CollisionWorld`'s absolute tops, and used by
+  `NavGrid`. **This is the one to reach for whenever a threshold is compared
+  against a difference of heights.** It is not `altitudeAt` — see "the measure"
+  below, which is the distinction the whole sweep turns on.
+
 **Two standing warnings, both of which have already cost a day here.** A
 per-frame tilt must never be a pre-multiply — `rotation.y = yaw` rebuilds the
 quaternion from all three Euler components, so a tilt gets re-inherited and
@@ -122,7 +132,8 @@ you look, never instead**: that screenshot is why.
 | §3.1 `tapMarker.ts:57,61` | `TapMarker.placeAt` owns position-and-lean, through `upFor`, **assigned** rather than pre-multiplied because `moveTo` runs every frame |
 | §3.1 `rainbowRing.ts:140` | the lean moved into the pool's own copy of the geometry, freeing each mesh's quaternion for the ground it was fired on; `RISE` and `GROUND_CLEARANCE` run along that up. `rainbowRingGeometry` itself is untouched — `Highlights.ts` shares it |
 | §3.1 `rainbowRing.ts:290,317` | the star burst's plane and arc lean with the ground at the burst point |
-| §1 `NavGrid` `MAX_STEP` | `nodeRadius` beside `nodeHeight` — `planetRadiusAt`, not `altitudeAt`, for the reason in correction 3. Every step, level, gap and tie-break comparison moved onto it; `nodeNearestRadius` is the primitive; `lineCost` carries a radius between cells instead of a `y` measured in the previous column. Guarded by `scripts/check-outward-routing.mts`, now in the `check` chain. **See corrections 2 and 3** |
+| shared helper | `walkHeight` added to `world/up.ts`; `NavGrid` uses it, the collision area needs it for absolute tops |
+| §1 `NavGrid` `MAX_STEP` | `nodeWalkHeight` beside `nodeHeight` — `planetRadiusAt`, not `altitudeAt`, for the reason in correction 3. Every step, level, gap and tie-break comparison moved onto it; `nodeNearestRadius` is the primitive; `lineCost` carries a radius between cells instead of a `y` measured in the previous column. Guarded by `scripts/check-outward-routing.mts`, now in the `check` chain. **See corrections 2 and 3** |
 
 ### Correction 1 — §0 is not "not a radial finding", and it does not pre-date the sphere work
 
@@ -186,6 +197,34 @@ It is fixed regardless — a test spending 91% of its budget on the planet is on
 retune away from giving wrong answers, and the rings genuinely stand at 157 m —
 but it was never a control that refused, and it should not have been ranked
 against two faults that are wrong on every single tap.
+
+### Correction 4 — an interior needs the branch just as much, and reachability cannot see it missing
+
+Caught in review by the collision engineer. A bare radial frame applied to an
+interior is wrong for exactly the reason a world `y` is wrong outdoors: a castle
+deck and a hotel room are real coordinates six hundred metres out, where the
+formula is meaningless. One 0.5 m lattice step across a **perfectly level
+floor** measures **0.679 m** at `castle.hall`, **0.684 m** at `castle.mall` and
+**0.685 m** at `hotel.lobby`, against a 0.62 m `MAX_STEP`. That is `up.ts`'s
+`upFor` branch, restated for heights, and it is why `walkHeight` exists.
+
+**The clause written to catch it could not fail, and the reason generalises to
+every area in this fan-out.** It was a reachability probe — route diagonally
+across a level interior floor, must succeed. With the `spaceAt` branch deleted
+outright, all three rooms *still routed*: A\* does indoors what it does
+outdoors, walking a staircase of straights (0.44 m, under the step) instead of
+the diagonal, and arriving anyway. Blockier, not absent.
+
+**On a lattice with eight neighbours, "can I get there" almost never detects a
+broken step gate — it detects a wall.** If the gate is the thing under test,
+assert the gate's own number. The clause now measures the floor's levelness
+(0.000 m, tolerance 0.01) and keeps the route underneath as a sanity check.
+
+A second trap in the same clause, which failed all three rooms **on correct
+code**: the probe's lattice boundary was left at the park's origin, so an
+interior point sat off the lattice entirely, where `findRoute` returns
+*unknowable* rather than *blocked* — and both read as a falsy `reachedGoal`.
+Centre the boundary on the room.
 
 ### Correction 3 — the same row is *much* worse than either of us said, in the other direction
 
