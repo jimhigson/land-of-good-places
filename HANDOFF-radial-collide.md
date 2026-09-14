@@ -7,6 +7,31 @@ default.** A replacement runs the same model.
 Area as briefed: `CollisionWorld`, `NavGrid`, gravity/jumping/falling across
 Player, NPCs and pets.
 
+> **STOOD DOWN, 14 September 2026, and nothing here is reverted or deleted.**
+> Jim stopped the instance-by-instance conversion — *"it seems more like trying
+> to fit the new world into the old code"* — and an architect is designing a
+> proper spherical domain: the canonical coordinate a 3-vector from the
+> planet's centre, flatness a **declared local chart with an explicit validity
+> radius**, one translation layer at the scene-graph anchor. This work is not
+> wrong; it is the wrong layer. Jim: *"keep their work in case we need it
+> again."*
+>
+> **What the redesign should take from this file**, in order of how expensive it
+> would be to rediscover:
+>
+> 1. **The anti-tangent-frame argument** (below, verbatim) — the reason a chart
+>    must be shared and global rather than solved at the mover.
+> 2. **The `topIsAbsolute` fence ghost** — a 1.1 m fence is not solid from the
+>    inward side past d = 80 m, live today. Fully measured; the fix is *not*
+>    fully diagnosed, and §"CollisionWorld" says exactly how far it got.
+> 3. **`walkHeight(x, -Infinity, z)` is `+Infinity`** — every collider in the
+>    game non-solid, typechecking cleanly. A thing the new types must make
+>    impossible.
+> 4. **The four wrong-but-clean instruments** — the architect will build
+>    instruments against a new domain and will make these same mistakes.
+> 5. **`walkHeight` vs `standHeight`** — a radius and a height above ground are
+>    different questions, and picking the wrong one is silent.
+
 ## Approach, approved by the Overseer before any code
 
 **Keep the chart, fix the metric and the frame.** Not a per-mover tangent frame,
@@ -21,10 +46,18 @@ and about lengths, which are two separable substitutions rather than a rewrite.
 That is why this is one engineer and not four.
 
 **The argument against per-mover tangent frames, which is the load-bearing one
-and must survive any later "simplification":** *two movers standing in different
-places would disagree about the geometry between them, so a wall's position
-would depend on who asked.* The chart is shared and global; a tangent frame is
-not.
+and must survive any later "simplification":**
+
+> **Two movers standing in different places would disagree about the geometry
+> between them, so a wall's position would depend on who asked.** The chart is
+> shared and global; a tangent frame is not.
+
+The corollary the architect's `Chart` formalises: a chart is only honest inside
+a radius where its distortion is bounded, and that radius must be **declared**
+rather than assumed. `(x, z)` is singular at `GROUND_SPHERE_RADIUS` (220 m) and
+the park already reaches 157 m — so the chart this code leans on has a validity
+radius whether or not anybody wrote one down, which is the whole argument for
+making it a first-class thing.
 
 **Can a child walk right round the ball? No, and nothing here changes that.**
 The chart is singular at `d = 220 m`. The park reaches 157 m. Walking round
@@ -145,11 +178,24 @@ Also found while doing it, and worth keeping whoever picks this up:
 
 Also found while doing it, and worth keeping whoever picks this up:
 
-- **`walkHeight(x, -Infinity, z)` is `+Infinity`**, because `planetRadiusAt` is
-  a `hypot`. A `-Infinity` `baseHeight` converted naively comes back positive,
-  `moverUp < baseUp` is then true for every mover, and **every collider in the
-  game silently stops being solid.** It typechecks. `walkHeight` now guards
-  non-finite heights; the guard is in `up.ts` so nobody can hit it again.
+- **`walkHeight(x, -Infinity, z)` is `+Infinity`, and the *sign* is the whole
+  hazard.** `Math.hypot` is unsigned, so `planetRadiusAt(x, -Infinity, z)` is
+  `+Infinity` — **not `NaN`**, which is what it gets misremembered as, and the
+  difference is the difference between a bug and a catastrophe:
+
+  ```
+  gate:  if (moverUp < baseUp) continue;   // skip this collider
+  +Infinity:  5 < Infinity -> true   -> EVERY collider skipped -> NOTHING solid
+  NaN:        5 < NaN      -> false  -> no collider skipped    -> all solid (safe)
+  ```
+
+  `baseHeight` **defaults to `-Infinity`** on every collider that does not
+  declare a band, which is nearly all of them, so the naive conversion is a park
+  a child walks straight through — and it typechecks. `up.ts:185` now guards it:
+  *a non-finite height is a sentinel, not a coordinate, and must come back with
+  its sign intact.* For the redesign the row is not "guard the sentinel", it is
+  **"a domain type must not let a sentinel through a magnitude function at
+  all"**.
 - A wall's absolute height must be converted at the **contact point**
   (`closestX/closestZ`), never once at its midpoint: a long wall's declared top
   means something at a particular place.
@@ -252,8 +298,34 @@ So the acceptance test could not be run. What was measured instead:
   regression gate that actually caught the collision problem.
 - `scratch/nav-control.mts` — the nav step gate, no park needed.
 
-**The instrument was wrong three times before it was right, every time reading
-clean.** Recorded because the next person will hit the same shapes: a test ledge
+**The four wrong-but-clean measurements, the most reusable thing here.**
+Every one of them read decisively and was wrong; three were instruments and the
+fourth was a fix.
+
+1. **A test ledge built as `terrainHeight(x, z) + 0.70`** — claimed a 0.70 m
+   ledge, measured 0.49 m of real height at d = 157, because 0.70 m of world `y`
+   out there is `0.70 · cos θ` of altitude. Both gates "leaked" it and the
+   *correct* gate looked broken too. Build a test ledge with `yAtAltitude`.
+2. **`keepOutsFor(deck)` fed straight to `spaceAt`** — claimed to ask "are these
+   keep-outs indoors", actually asked about points in the park: `keepOutsFor`
+   returns **deck-local** coordinates, and `(19.2, 5.0)` is an ordinary spot on
+   the grass as well as one on the mall floor. All 351 reported "in the garden",
+   and the identity assertion under it "failed" by 2.32 m — the planet, measured
+   somewhere the keep-out has nothing to do with.
+3. **A ring probe at d = 157 m** — claimed to measure whether a collider was
+   solid, actually measured the **soft boundary leash**, which shoves a mover
+   16 m where a ring point falls outside the play bounds (the park's edge is not
+   a circle). Gate every probe on `distanceToEdge` first.
+4. **Re-deriving position from altitude** (`position = foot + up · altitude`) —
+   not an instrument but a *fix*, and the worst of the four. It makes lateral
+   position a function of altitude, so the instant a surface drops away the
+   mover is teleported sideways, off the deck, which raises the altitude
+   further. `check:deck-fallthrough` went green → **401 of 1280 runs losing the
+   surface at gradient 0.1**, gaps reaching 50 m. The lateral half of a radial
+   hop must be an **integrated impulse**. That is a property of the formulation,
+   not of this code, and it will be true in the new domain too.
+
+**Longer form of the same three instruments:** Recorded because the next person will hit the same shapes: a test ledge
 built as world `y` instead of `yAtAltitude`; `keepOutsFor` returning **deck-local**
 coordinates fed straight to `spaceAt` (all 351 points "in the garden",
 `(19.2, 5.0)` being an ordinary spot on the grass as well as one on the mall
