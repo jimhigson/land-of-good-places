@@ -74,7 +74,7 @@ import {
   BOUNDARY_WALL_COLLISION_HALF,
 } from '../src/world/Garden.ts';
 import { TAU } from '../src/core/mathUtils.ts';
-import { terrainHeight } from '../src/world/terrain.ts';
+import { altitudeAt, planetRadiusAt } from '../src/world/terrain.ts';
 import { TRAIN_PLAN } from '../src/world/train/plan.ts';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from '../src/world/entrance/layout.ts';
 import { EXIT_INSIDE_EDGE, RAIL_RACE_PLAN } from '../src/world/railRace/plan.ts';
@@ -201,7 +201,18 @@ for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     previous = height;
     facts.steepest = Math.max(facts.steepest, Math.abs(route.slopeAt(lane, distance)));
     route.pointAt(lane, distance, point);
-    const above = height - terrainHeight(point.x, point.z);
+    // **`point`, not `height`, and an altitude rather than a `y` difference.**
+    //
+    // Two separate faults lived in `height - terrainHeight(point.x, point.z)`.
+    // `height` is `route.heightAt`, the ride's **flat-frame** y
+    // (`railRace/route.ts`), while `point` came from `route.pointAt`, which
+    // leans the same station about 3.7 m outwards to stand it on the sphere
+    // (`route.ts:526-529`) — so the two terms were about columns roughly 1.9 m
+    // apart. And even had they agreed, a `y` subtraction over-reads a real
+    // clearance by `1 / cos θ` at the 58-157 m radii these rings run at.
+    // `altitudeAt` differences two radii from the planet's centre, which is
+    // the air a child standing underneath would actually have.
+    const above = altitudeAt(point.x, point.y, point.z);
     facts.lowest = Math.min(facts.lowest, above);
     facts.highest = Math.max(facts.highest, above);
   }
@@ -247,15 +258,19 @@ for (let i = 0; i < SAMPLES; i += 1) {
   const distance = (i / SAMPLES) * route.length;
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     route.pointAt(lane, distance, point);
-    const ground = terrainHeight(point.x, point.z);
-    worstGround = Math.min(worstGround, point.y - ground);
+    worstGround = Math.min(worstGround, altitudeAt(point.x, point.y, point.z));
 
     // Where the railway passes under, measure the actual air over its rail head.
     const near = TRAIN_PLAN.route.distanceNear(point.x, point.z);
     TRAIN_PLAN.route.pointAt(near, trainPoint);
     const apart = Math.hypot(trainPoint.x - point.x, trainPoint.z - point.z);
     if (apart < 4) {
-      const air = point.y - trainPoint.y;
+      // Two radii from the planet's centre. These are different columns — the
+      // gate above only holds them within 4 m in plan — and out here that is
+      // metres of `y` on its own.
+      const air =
+        planetRadiusAt(point.x, point.y, point.z) -
+        planetRadiusAt(trainPoint.x, trainPoint.y, trainPoint.z);
       if (air < worstOverTrain) {
         worstOverTrain = air;
         worstOverTrainAt = distance;
@@ -288,7 +303,7 @@ let lowestOverGate = Infinity;
 for (let lane = 0; lane < LANE_COUNT; lane += 1) {
   for (let d = -12; d <= 12; d += 0.5) {
     route.pointAt(lane, route.wrap(gateDistance + d), point);
-    lowestOverGate = Math.min(lowestOverGate, point.y - terrainHeight(point.x, point.z));
+    lowestOverGate = Math.min(lowestOverGate, altitudeAt(point.x, point.y, point.z));
   }
 }
 say(
