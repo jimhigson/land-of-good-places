@@ -71,6 +71,7 @@ import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { ANCHORS, anchorGroupName } from '../src/world/anchors.ts';
 import { PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
+import { planetRadiusAt } from '../src/world/terrain.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { SHORTFALL_TOLERANCE } from '../src/entities/TapNavigator.ts';
 import { TRACK_CLEARANCE } from '../src/world/train/route.ts';
@@ -414,6 +415,15 @@ function crossesTrack(
 const targets = destinations();
 let routed = 0;
 let crossingsTotal = 0;
+/**
+ * How many times a walked route actually met the railway at all — the number
+ * the rise clause below was able to judge. It is **not** `crossingsTotal`,
+ * which counts only the ones that FAILED. A park where every path bridges the
+ * railway properly meets it zero times, and then the rise clause asserts
+ * nothing; that is a fine state for the park to be in and a bad one to report
+ * as if it were cover.
+ */
+let railMeetingsJudged = 0;
 
 for (const target of targets) {
   const points = navGrid.findRoute(
@@ -473,8 +483,17 @@ for (const target of targets) {
     const toZ = route[i * 2 + 1] ?? fromZ;
     const hit = crossesTrack(fromX, fromZ, toX, toZ);
     if (hit) {
+      railMeetingsJudged += 1;
       const deck = park.sample(hit.x, hit.z, TOP_REFERENCE);
-      const overBridge = deck - hit.rail >= BRIDGE_RISE;
+      // **A radius difference, not a `y` one.** Both terms are in the same
+      // column, so this is not the wrong-column fault — it is the other one:
+      // a `y` subtraction over-reads a real rise by `1 / cos θ`, and at the
+      // park's boundary that is 1.27x. A deck clearing only
+      // `BRIDGE_RISE · cos 38°` in reality passed. The clause's own doc still
+      // said "measured from the terrain under the track", which on the sphere
+      // is a radius rather than a `y`.
+      const rise = planetRadiusAt(hit.x, deck, hit.z) - planetRadiusAt(hit.x, hit.rail, hit.z);
+      const overBridge = rise >= BRIDGE_RISE;
       if (!overBridge) {
         crossings += 1;
         report({
@@ -483,7 +502,7 @@ for (const target of targets) {
           measured: 1,
           detail:
             `the walk to ${target.label} crosses the railway at ` +
-            `(${hit.x.toFixed(1)}, ${hit.z.toFixed(1)}) ${(deck - hit.rail).toFixed(2)} m above ` +
+            `(${hit.x.toFixed(1)}, ${hit.z.toFixed(1)}) ${rise.toFixed(2)} m above ` +
             `the rail, short of the ${BRIDGE_RISE.toFixed(2)} m a bridge deck needs`,
         });
       }
@@ -972,6 +991,17 @@ if (verbose || regressions.length > 0) {
 for (const line of loose) {
   console.log(`RATCHET LOOSE: ${line} — delete its entry in scripts/check-park.mts.`);
 }
+
+// **Said on every run, not only a green one.** This is a coverage statement,
+// and coverage matters most on the run that ends `process.exit(1)` a few lines
+// below — a note that only prints when everything passed is invisible in
+// exactly the case it exists for. On stderr, beside the regressions.
+process.stderr.write(
+  `check:park — the bridge-rise clause judged ${railMeetingsJudged} point(s) where a walked ` +
+    `route met the railway, and found ${crossingsTotal} short of a bridge deck` +
+    `${railMeetingsJudged === 0 ? '. Zero points judged means it ASSERTS NOTHING on this seed' : ''}` +
+    '.\n',
+);
 
 if (regressions.length > 0) {
   console.error(`check:park: ${regressions.length} invariant regression(s):\n`);

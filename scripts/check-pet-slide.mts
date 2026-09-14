@@ -103,7 +103,7 @@ const { gameStore } = await import('../src/state/index.ts');
 const { shopItem } = await import('../src/world/building/shops/catalogue.ts');
 const { PARK_SEED } = await import('../src/world/parkManifest.ts');
 const { parkSeedSource } = await import('../src/world/parkSeedPool.ts');
-const { terrainHeight } = await import('../src/world/terrain.ts');
+const { altitudeAt } = await import('../src/world/terrain.ts');
 // **The framing band has one owner**, `src/world/slide/petFraming.ts`, because
 // the camera solve has to respect the same two numbers while PLACING the lens.
 // A copy here would be the two-definitions fault inside the fix for a
@@ -1077,8 +1077,15 @@ async function ride(wired: boolean): Promise<RunResult> {
       // which names the mesh, is gated behind it because 14 rays against the
       // whole scene is seconds per seed and is only interesting where the
       // camera is actually close to something.
-      const groundY = terrainHeight(cameraWorld.x, cameraWorld.z);
-      const aboveGround = cameraWorld.y - groundY;
+      // **An altitude, not a `y` difference**, and that matters most exactly
+      // where this clause is decisive. The slide's chute runs out from the
+      // castle across ground that leans; `cameraWorld.y - terrainHeight(x, z)`
+      // over-reads the real clearance by `1 / cos θ`, so a lens genuinely
+      // buried tens of centimetres in leaning grass reports a positive number,
+      // `undergroundFrames` stays 0, and the ray fan that would *name* the
+      // offending mesh is never gated on — the run prints "ASSERTS NOTHING"
+      // about the one thing #516 was reported for.
+      const aboveGround = altitudeAt(cameraWorld.x, cameraWorld.y, cameraWorld.z);
       if (aboveGround < lowestAboveGround) {
         lowestAboveGround = aboveGround;
         lowestAboveGroundFrame = ridingFrames;
