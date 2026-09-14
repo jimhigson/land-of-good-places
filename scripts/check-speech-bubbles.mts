@@ -324,6 +324,7 @@ import { SpeechBubble, BUBBLE_EDGE_MARGIN_PX } from '../src/ui/SpeechBubble.ts';
 import { LABEL_MAX_DISTANCE } from '../src/ui/NameLabel.ts';
 import { VISIBLE_LABEL_CAP } from '../src/entities/npc/NpcSystem.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
+import { terrainHeight } from '../src/world/terrain.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
 const mutate = process.argv.includes('--mutate');
@@ -367,6 +368,43 @@ const FRAMES = Math.ceil(RUN_SECONDS / DT);
 const WALK_FROM = Math.floor(FRAMES / 2);
 const WALK_RADIUS = 7;
 const WALK_PERIOD_S = 20;
+
+/**
+ * **The walk goes in from the gate and back out, because an orbit of the gate
+ * cannot meet the crowd any more.**
+ *
+ * This rig used to circle the entrance at `WALK_RADIUS`, and `MIN_SIGHTINGS`'
+ * own note records the calibration: *"twenty-two were seen in 48 s of the real
+ * game at this crowd size"*. That was a garden of 58 m. `PARK_SURFACE_SCALE` is
+ * now 2.3355, so `GARDEN_PLAY_RADIUS` is 135.5 m while the entrance stays 51.6 m
+ * out — and the crowd moved away from the gate with it. Measured over 120 s of
+ * the old rig:
+ *
+ *   1442 speaking-frames; the NEAREST speaking child was 51.4 m from the camera
+ *   focus (median 91.6 m) against BUBBLE_MAX_DISTANCE of 40 m. Within 40 m: 0.
+ *   Sightings: 0. The check failed, honestly, having seen nothing to judge.
+ *
+ * Nothing was wrong with the bubbles: `check:speech-bubbles:wide`, same park and
+ * same code at 1920x1080 for 420 s, drew **601** and passed. The rig had simply
+ * stopped going where the park's children are.
+ *
+ * So the player now walks the route a child actually walks — in from the gate
+ * towards the middle of the garden and back out — with the old circle
+ * superimposed so the bubbles are still judged on a *moving* speaker, which is
+ * what issue #415 was about. The sweep is expressed against the entrance's own
+ * position, so it follows the park if it is ever resized again.
+ */
+const walkAt = (t: number, target: Vector3): Vector3 => {
+  // 0 at the gate, 1 at the middle of the garden, and back.
+  const sweep = (1 - Math.cos(t)) / 2;
+  const swirl = t * 3;
+  const x = ENTRANCE_PLAYER_X * (1 - sweep) + Math.cos(swirl) * WALK_RADIUS;
+  const z = ENTRANCE_PLAYER_Z * (1 - sweep) + Math.sin(swirl) * WALK_RADIUS;
+  // And she stands ON the ground. The rig used to hold y = 0 while the entrance
+  // ground is 6.1 m below that, so the whole frame — camera included — floated
+  // over the park it was measuring (RADIAL-INVENTORY.md section 2.4 #15).
+  return target.set(x, terrainHeight(x, z), z);
+};
 
 /** How many drawn-bubble sightings make the run worth believing. Twenty-two
  *  were seen in 48 s of the real game at this crowd size; the run here is
@@ -419,7 +457,11 @@ const park = quietly(() => buildHeadlessPark());
 const { world, scene, camera } = park;
 
 camera.resize(VIEW_WIDTH, VIEW_HEIGHT);
-const playerPosition = new Vector3(ENTRANCE_PLAYER_X, 0, ENTRANCE_PLAYER_Z);
+const playerPosition = new Vector3(
+  ENTRANCE_PLAYER_X,
+  terrainHeight(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z),
+  ENTRANCE_PLAYER_Z,
+);
 const playerVelocity = new Vector3();
 const cameraForward = new Vector3(0, 0, 1);
 camera.snapTo(playerPosition);
@@ -573,11 +615,7 @@ function overshootOf(anchor: Vector3, bubble: SpeechBubble): number {
 for (let frame = 0; frame < FRAMES; frame += 1) {
   if (frame >= WALK_FROM) {
     const t = ((frame - WALK_FROM) * DT * 2 * Math.PI) / WALK_PERIOD_S;
-    const next = new Vector3(
-      ENTRANCE_PLAYER_X + Math.cos(t) * WALK_RADIUS,
-      0,
-      ENTRANCE_PLAYER_Z + Math.sin(t) * WALK_RADIUS,
-    );
+    const next = walkAt(t, new Vector3());
     playerVelocity.copy(next).sub(playerPosition).divideScalar(DT);
     playerPosition.copy(next);
   }
@@ -750,6 +788,28 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
   }
 
   // --- 1 and 2: the crowd ---------------------------------------------------
+  {
+    const g = globalThis as unknown as { __loopDiag?: { frames: number; entries: number; visible: number; maxEntries: number } };
+    g.__loopDiag ??= { frames: 0, entries: 0, visible: 0, maxEntries: 0 };
+    let n = 0; let v = 0;
+    const gg = globalThis as any;
+    gg.__spk ??= { speaking: 0, within40: 0, onScreen: 0, both: 0, dists: [] as number[] };
+    for (const e of world.npcs.speechBubbles) {
+      n += 1; if (e.bubble.sprite.visible) v += 1;
+      if (e.speaking) {
+        gg.__spk.speaking += 1;
+        const a = e.bubble.worldAnchor();
+        const d = a.distanceTo(camera.focusPoint);
+        gg.__spk.dists.push(d);
+        const near = d <= 40; const on = camera.isOnScreen(a);
+        if (near) gg.__spk.within40 += 1;
+        if (on) gg.__spk.onScreen += 1;
+        if (near && on) gg.__spk.both += 1;
+      }
+    }
+    g.__loopDiag.frames += 1; g.__loopDiag.entries += n; g.__loopDiag.visible += v;
+    g.__loopDiag.maxEntries = Math.max(g.__loopDiag.maxEntries, n);
+  }
   for (const { character, bubble } of world.npcs.speechBubbles) {
     if (!bubble.sprite.visible) continue;
     sightings += 1;
@@ -864,6 +924,19 @@ if (spokeWithNothingDrawnOnScreen > 0) {
       `be paid for by a bubble that is actually drawn, never by text that merely exists — ` +
       `see NpcSystem.updateLabels. First: ${worstNothingDrawnLine}`,
   );
+}
+{
+  const g = globalThis as unknown as { __bubbleDiag?: Record<string, number> };
+  process.stderr.write(`[diag] ${JSON.stringify(g.__bubbleDiag ?? 'never called')}\n`);
+  const l = globalThis as unknown as { __loopDiag?: unknown };
+  process.stderr.write(`[loop] ${JSON.stringify(l.__loopDiag ?? 'loop never ran')}\n`);
+  const sp = (globalThis as any).__spk;
+  if (sp) {
+    const d = (sp.dists as number[]).sort((a, b) => a - b);
+    const q = (f: number) => (d.length ? d[Math.floor(f * (d.length - 1))].toFixed(1) : 'n/a');
+    process.stderr.write(`[spk] speaking-frames=${sp.speaking} within40=${sp.within40} onScreen=${sp.onScreen} both=${sp.both}\n`);
+    process.stderr.write(`[spk] distance to camera focus: min ${q(0)} p25 ${q(0.25)} median ${q(0.5)} p75 ${q(0.75)} max ${q(1)} (BUBBLE_MAX_DISTANCE 40)\n`);
+  }
 }
 if (sightings < MIN_SIGHTINGS) {
   failures.push(
