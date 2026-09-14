@@ -305,3 +305,39 @@ export const CROSSING_STATION_CLEARANCE = STATION_GAP + SITE_HALF_WIDTH + 2.0;
  * to *place* a station this close to the loop's chosen crossing.
  */
 export const CROSSING_STATION_STRUCTURE_CLEARANCE = 8;
+
+/**
+ * How far a scattered structure must keep off the rail centre line.
+ *
+ * Measured, not chosen: the fence stands 2 m off the rails (`train/fence.ts`)
+ * and a station platform's canopy reaches 3.7 m from the centre line
+ * (`train/station.ts`: `PLATFORM_OFFSET` 2.15 + half of `PLATFORM_WIDTH` 2.6,
+ * + 0.25 of roof overhang). Anything at 4.2 m clears the widest of those with
+ * room for its own thickness.
+ *
+ * **Here rather than in `plan.ts` because `route.ts` needs it too** and cannot
+ * import `plan.ts` — that is a cycle. `plan.ts` re-exports it, so every existing
+ * caller is unchanged. What `route.ts` needs it for is {@link RAIL_SELF_CLEARANCE}.
+ */
+export const RAIL_CORRIDOR_CLEARANCE = 4.2;
+
+/**
+ * **How close the loop may come to an earlier part of itself** — and the whole
+ * point is that it is derived rather than picked.
+ *
+ * It was a bare `3` in `route.ts`, with no stated reason and nothing tying it to
+ * what the gap is *for*. What it is for is a child walking between the two
+ * limbs: the street lattice keeps any path's centre {@link
+ * RAIL_CORRIDOR_CLEARANCE} from the track on **each** side, so a gap narrower
+ * than twice that is a gap no path may enter. At 3 m the loop was free to run
+ * back alongside itself with no walkable corridor between, walling off whatever
+ * lay beyond.
+ *
+ * Measured on seed 451 at park scale 1, which is what found this: the loop ran
+ * back past itself for **35 m at between 3.95 and 7.41 m**, all of it under the
+ * 8.4 m a path needs. Sunny Side station sat beyond that wall, so its own spur
+ * could not reach it without crossing the railway — and only **2 of 175**
+ * marched points on that loop could take a bridge, none of them there. The park
+ * did not build, and the error named a coordinate 75 m from the cause.
+ */
+export const RAIL_SELF_CLEARANCE = RAIL_CORRIDOR_CLEARANCE * 2;

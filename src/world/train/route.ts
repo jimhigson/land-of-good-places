@@ -9,7 +9,7 @@ import { terrainHeight } from '../terrain';
 import { bridgeableCrossingPosesSearch } from './crossingPoses';
 import { fitBridgeAcross, railCorridorBlocked } from './bridgeFit';
 import { chosenCrossingCorridor, crossingSurvivesStationAt } from './crossingKeepOut';
-import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from './clearance';
+import { FENCE_HALF_THICKNESS, FENCE_OFFSET, RAIL_SELF_CLEARANCE } from './clearance';
 import { PLAYER_RADIUS } from '../../core/constants';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
 import { PARK_SEED } from '../parkManifest';
@@ -115,8 +115,9 @@ const CORRIDOR_RADIUS = 1.8;
 const GATE_WALK_RAIL_CLEARANCE =
   ENTRANCE_GATE_HALF_WIDTH + FENCE_OFFSET + FENCE_HALF_THICKNESS + PLAYER_RADIUS;
 
-/** How close the loop may come to an earlier part of itself. */
-const SELF_CLEARANCE = 3;
+/** How close the loop may come to an earlier part of itself — derived in
+ * `clearance.ts` from the corridor a path needs, not chosen here. */
+const SELF_CLEARANCE = RAIL_SELF_CLEARANCE;
 
 /**
  * The loop lengths tried, as fractions of the rim perimeter, **largest first**.

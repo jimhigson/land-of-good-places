@@ -3,7 +3,7 @@ import { TrainRoute } from './route';
 import { COASTER_PLANS } from '../coaster/plan';
 import { terrainHeight } from '../terrain';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
-import { PLATFORM_LENGTH, STATION_GAP } from './clearance';
+import { PLATFORM_LENGTH, RAIL_CORRIDOR_CLEARANCE, STATION_GAP } from './clearance';
 
 /**
  * The rail plan — the railway as *data*, solved at module load from the park
@@ -502,15 +502,11 @@ export function distanceToRailCorridor(x: number, z: number): number {
 }
 
 /**
- * How far a scattered structure must keep off {@link distanceToRailCorridor}.
- *
- * Measured, not chosen: the fence stands 2 m off the rails (`train/fence.ts`)
- * and a station platform's canopy reaches 3.7 m from the centre line
- * (`train/station.ts`: `PLATFORM_OFFSET` 2.15 + half of `PLATFORM_WIDTH` 2.6,
- * + 0.25 of roof overhang). Anything at 4.2 m clears the widest of those with
- * room for its own thickness.
+ * Re-exported from `clearance.ts`, which now owns it, so that `route.ts` can
+ * have it too without importing this module (a cycle). Every caller that
+ * imported it from here keeps working.
  */
-export const RAIL_CORRIDOR_CLEARANCE = 4.2;
+export { RAIL_CORRIDOR_CLEARANCE } from './clearance';
 
 let corridorX: Float64Array | null = null;
 let corridorZ: Float64Array | null = null;
