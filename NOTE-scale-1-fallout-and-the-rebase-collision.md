@@ -158,6 +158,47 @@ A real playability defect with the arithmetic already worked out in the message:
 
 ---
 
+## 2b. Seed 451 does not build at scale 1 — the one failure that IS this branch's
+
+**`check:swept-bus` passes on the base and fails on this branch.** Measured both
+ways, and this one is not inherited:
+
+    base (scale 2.335)   check:swept-bus OK — 10 seeds, 0 posts, exit 0
+    this branch (scale 1) throws during park generation
+
+Swept across the pool one seed at a time (`LGP_SEED`), **9 of 10 build and one
+does not**:
+
+    seed 20260728 ok    seed 208 ok
+    seed 11       ok    seed 274 ok
+    seed 24       ok    seed 326 ok
+    seed 128      ok    seed 428 ok
+    seed 131      ok    seed 451 FAILS
+
+    Error: rail crossings: the drawn paths cross the railway at railD 133.9
+    (37.9, -40.1), which snaps to no proven bridge site. Every crossing must be
+    a bridge (Jim, 2 Sep 2026); find the router that drew this leg.
+
+**This is the same class of defect #619 fixed, at the other scale.** #619 took
+2.335x from 3 of 10 seeds building to 10 of 10 by giving `paths.ts`'s hard-coded
+gate-corridor `z` its proper owner. Scale 1 is 9 of 10, and seed 451's crossing
+lands somewhere the bridge planner has not proven a site.
+
+**Why `test:procgen` is green on this and `check:swept-bus` is not:** procgen
+sweeps five seeds (`CI_SWEEP_SEEDS` — canonical, 11, 24, 131, 326) and 451 is
+not among them. `check:swept-bus` sweeps the whole ten-seed pool. So the pool is
+the wider net here, and the seed that broke is outside procgen's five.
+
+**Not fixed here, and not papered over.** CLAUDE.md's rule is *"when a pool seed
+stops passing, fix the generator or replace the seed in the pool — and write
+down why, either way"*, and **replacing a seed is a decision, not an
+engineer's shortcut**. The crossing planner and bridge siting belong to the lane
+that shipped #619, which has just done this exact work at the other scale and
+has the context to do it again cheaply. Routing it there rather than guessing at
+it from this branch.
+
+---
+
 ## 3. Two things measured here that belong to someone else
 
 ### `scatterDecoupling.test.ts :: can tell two parks apart at all` — flaky
