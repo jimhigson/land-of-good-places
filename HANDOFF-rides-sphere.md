@@ -10,11 +10,12 @@ clean, no conflicts. **No dev server or browser page is left running.**
 
 ## The rail race is rideable and the camera is right
 
-Screenshots taken on this branch, seed canonical, port 5487, level 3:
+Screenshots (in the session scratchpad, deliberately NOT committed — CLAUDE.md
+keeps binaries out of branch history). Seed canonical, port 5487, level 3:
 
-- `scratchpad/rail-race-leaned.jpeg` — the level-select shot. Park as backdrop,
+- `rail-race-leaned.jpeg` — the level-select shot. Park as backdrop,
   ferris wheel, castle, four lanes, rider left of centre.
-- `scratchpad/rail-race-racing.jpeg` — **mid-race, lap 1 of 2.** Side-on, four
+- `rail-race-racing.jpeg` — **mid-race, lap 1 of 2.** Side-on, four
   lanes running left to right, three duck bars visible ahead on the right, the
   boundary wall and grass behind, horizon level. Her face is turned to the lens.
 
