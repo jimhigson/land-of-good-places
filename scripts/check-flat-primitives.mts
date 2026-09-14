@@ -69,6 +69,8 @@ import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
+import { GARDEN_PLAY_RADIUS, GROUND_SPHERE_RADIUS } from '../src/core/constants.ts';
+import { terrainHeight } from '../src/world/terrain.ts';
 import { FLAT_PRIMITIVE_BASELINE } from './flat-primitives-baseline.mts';
 
 const REPO = new URL('..', import.meta.url).pathname;
@@ -117,11 +119,45 @@ interface Finding {
   readonly text: string;
 }
 
+/**
+ * **The park's own numbers, derived — never a figure typed into a string.**
+ *
+ * Every one of these was originally written out by hand, and every one was
+ * attributed to "the park edge" while actually being the value at the furthest
+ * *furniture* (157 m), not at the walkable boundary (`GARDEN_PLAY_RADIUS`).
+ * Both are real, they differ (38.0 vs 45.5 degrees), and a message that quotes
+ * one while naming the other teaches the next reader something false.
+ *
+ * Worse, they are sized against a park that moves: `PARK_SURFACE_SCALE` is
+ * 2.3355 today, and the walkable boundary is `58 x` that. A hard-coded 45.5
+ * would survive a resize looking perfectly plausible — which is this repo's
+ * "two definitions kept in step by hand" in its cheapest form, inside the very
+ * check meant to delete that category. So they are computed from
+ * `GROUND_SPHERE_RADIUS` and `GARDEN_PLAY_RADIUS` at load, and they follow the
+ * park wherever it goes.
+ */
+const leanAt = (metres: number): number => Math.asin(Math.min(1, metres / GROUND_SPHERE_RADIUS));
+const WALKABLE_LEAN = leanAt(GARDEN_PLAY_RADIUS);
+/** The Rail Race rings circle outside the play boundary; this is how far the park's furniture reaches. */
+const FURNITURE_REACH = 157;
+const FURNITURE_LEAN = leanAt(FURNITURE_REACH);
+
+const deg = (radians: number): string => `${((radians * 180) / Math.PI).toFixed(1)} degrees`;
+
 const RULE_WHY: Record<RuleId, string> = {
-  HARD_UP: 'a world +Y axis standing in for the local up (45.5 degrees out at the park edge)',
-  Y_DIFFERENCE: 'a y difference between two columns — mostly planet, not height (gradient 1.02 m/m)',
-  Y_OVER_GROUND: 'height as y minus ground — over-reads by 1/cos θ, 1.43x at the rim; use altitude()',
-  Y_THRESHOLD: 'a fixed y threshold — the ground reaches −65.7 m, so this fires on grass',
+  HARD_UP:
+    `a world +Y axis standing in for the local up (${deg(WALKABLE_LEAN)} out at the walkable ` +
+    `boundary ${GARDEN_PLAY_RADIUS.toFixed(0)} m, ${deg(FURNITURE_LEAN)} at the furthest furniture ${FURNITURE_REACH} m)`,
+  Y_DIFFERENCE:
+    `a y difference between two columns — mostly planet, not height (radial gradient ` +
+    `${Math.tan(WALKABLE_LEAN).toFixed(2)} m/m at the boundary, ${Math.tan(FURNITURE_LEAN).toFixed(2)} m/m at the furniture)`,
+  Y_OVER_GROUND:
+    `height as y minus ground — over-reads by 1/cos(lean), ` +
+    `${(1 / Math.cos(WALKABLE_LEAN)).toFixed(2)}x at the boundary and ` +
+    `${(1 / Math.cos(FURNITURE_LEAN)).toFixed(2)}x at the furniture; use altitude()`,
+  Y_THRESHOLD:
+    `a fixed y threshold — the ground is already at ${terrainHeight(GARDEN_PLAY_RADIUS, 0).toFixed(1)} m ` +
+    `at the walkable boundary, so a threshold near zero fires on grass`,
   FLAT_DISC: 'a disc laid in the world XZ plane — correct only if something leans it downstream',
 };
 
@@ -544,8 +580,9 @@ function main(): number {
   }
   if (novel.length > 0) {
     console.error(
-      `\n${novel.length} new flat primitive(s). The park is a sphere of radius 220 m and the\n` +
-        `ground leans 45.5 degrees at the park's reach. Use the vocabulary in src/world/geo:\n` +
+      `\n${novel.length} new flat primitive(s). The park is a sphere of radius ${GROUND_SPHERE_RADIUS} m; the\n` +
+        `ground leans ${deg(WALKABLE_LEAN)} at the walkable boundary and ${deg(FURNITURE_LEAN)} at the\n` +
+        `furthest furniture. Use the vocabulary in src/world/geo:\n` +
         `  a height           -> altitude(geo)           (never a.y - b.y)\n` +
         `  a distance         -> geo.chordTo / arcTo     (never a y difference)\n` +
         `  an up              -> geo.up(target)          (never new Vector3(0, 1, 0))\n` +
