@@ -151,10 +151,21 @@ export const GROUND_SPHERE_RADIUS = 220;
  *     scale 2.335 (#619's base)   501 passed  128 failed  0 pending
  *     scale 1     (this branch)   552 passed   96 failed  0 pending
  *
- * **This is a live disagreement, flagged to the Overseer rather than settled
- * here.** If 2.335x is wanted back, the planet has to grow with it — the two
- * numbers are one decision, and that is the point of holding them in one
- * expression rather than two.
+ * ## Settled: scale 1 stands, and it is Jim's decision, not an engineer's
+ *
+ * Ruled 14 September 2026. It is **not** merely that scale 1 passes more tests
+ * — it is what Jim said on seeing the grown park: *"the park now feels too
+ * big/sparse - I don't think the area has been maintained from before, it has
+ * gotten bigger."* A separate engineer then restored the authored area and tied
+ * it to the radius **by a relationship precisely so it could not drift again**.
+ * The expression below is that relationship; this constant being 1200 was the
+ * drift it was built to prevent, quietly reintroduced.
+ *
+ * So the park's area is a **design decision already made**, and this is where it
+ * is kept. Do not restore 2.335x to make a subsystem's tests pass. **If 2.335x
+ * ever comes back, the planet grows with it** — the two numbers are one
+ * decision, which is exactly why they are held in one expression rather than
+ * two.
  *
  * It read: *"the paths router draws a leg across the railway at a radius where
  * no bridge site was ever proven, because the rail loop moved outward
