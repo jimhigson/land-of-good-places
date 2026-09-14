@@ -112,6 +112,37 @@ When ribbons are drawn on the sphere, `distanceOutside` moves back to
 `distToCore` and the two metrics become one. Do **not** close this by loosening a
 tolerance.
 
+## What the kernel change costs, measured
+
+**Behaviourally: nothing, yet.** `test:procgen` diffed by name against the
+scale-1 run with the old flat kernel: **0 newly failing, 0 newly passing, 0
+tests missing**. The registry is only wired to the entrance road today, so the
+demand-serving bug this fixes has no consumer in the suite — the correction is
+ahead of the consumers. `check:ground-claims` is the thing that actually
+exercises it.
+
+| run | total | passed | failed | pending |
+|---|---|---|---|---|
+| base | 625 | 297 | 49 | **279** |
+| scale 1, flat kernel | 629 | 529 | 100 | 0 |
+| scale 1, geodesic kernel (this branch) | 648 | 548 | 100 | 0 |
+
+**Performance: neutral, and I nearly reported a regression that was not there.**
+Wall times across whole-suite runs suggested 2.7x more CPU (246 s user against
+672 s). That comparison was **confounded by machine load** — the two runs show
+561% and 388% CPU, i.e. different parallelism from other agents on the box.
+
+Controlled, one seed, same machine, back to back:
+
+    geodesic kernel   34.61 s user
+    flat kernel       37.18 s user
+
+The geodesic is marginally *faster*, within noise. A micro-benchmark says the
+kernel is 4.32x slower per call (80 ms against 19 ms for 2M calls) — which is
+**40 nanoseconds a call**, far too small to matter; `boundsOfRun`'s 64 samples
+cost 0.6 us each, and the road has 143 claims. **Do not compare whole-suite wall
+times on this machine**; several agents share it.
+
 ## Not done
 
 - **`clear(x, z, radius, distanceAlong)`** — untouched. Surveyed: there are
