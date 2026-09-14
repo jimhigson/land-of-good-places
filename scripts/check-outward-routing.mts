@@ -1,5 +1,6 @@
 /**
- * **Tap-to-move can path outward across the park.**
+ * **The router's step test measures a step, at every radius — it neither
+ * refuses flat ground nor admits a ledge.**
  *
  * The narrowest possible instrument for the narrowest possible bug, and it
  * needs no park at all: an empty {@link CollisionWorld}, the real terrain as
@@ -51,24 +52,29 @@
  *
  * Only if both controls behave does the outward sweep mean anything.
  *
- * ## The one thing the fix gives up, asserted rather than assumed
+ * ## The dangerous half, which is the *other* sign
  *
- * Measuring the step in altitude makes the ground's own **waves** invisible to
- * the lattice: `altitudeAt` takes its datum from `terrainHeight` in the same
- * column, so the terrain's altitude is **identically zero** and every patch of
- * open park is perfectly flat as far as the step test is concerned. That is
- * right — `MAX_STEP` asks "can she walk up this *thing*", and a deck, a kerb or
- * a ball pit's lip still measures its true height above the grass — but it is
- * only harmless while the waves are gentler than the step they replaced.
+ * The same wrong datum that refuses flat ground outward **admits real ledges**
+ * outward, and that one has been live across most of the park rather than ten
+ * metres outside it. A genuine 0.70 m step up on the outward side has the
+ * planet's own drop subtracted from it: measured below, it reads as barely half
+ * that past 80 m, so the router has been planning routes straight up things a
+ * child cannot climb. A refusal is a control that feels dead; a leak is a route
+ * that does not exist, walked by a six-year-old who tapped the far side of it.
  *
- * So the sweep below asserts that, and it asserts it against
- * {@link groundWaves} rather than against an altitude. **Written the obvious
- * way it would have been a check that cannot fail**: the altitude of a terrain
- * point is zero by construction, so "the worst altitude step over the terrain"
- * is 0.000 at every radius on any terrain whatsoever, waves or cliffs. It was
- * written that way first, printed 0.000 six times, and only the printing caught
- * it. The wave field is the quantity that was dropped, so the wave field is the
- * quantity guarded, against {@link WAVE_BUDGET}.
+ * So the ledge sweep here is the real assertion and the flat-ground sweep is
+ * the weaker one. Both are stated in the same terms: `MAX_STEP` must mean
+ * `BUILDING_STEP_UP` at every radius, in both directions.
+ *
+ * **Building the test ledge is where this check can silently stop checking.**
+ * A ledge injected as `terrainHeight(x, z) + 0.70` is not a 0.70 m ledge out in
+ * the park — at 157 m it is 0.49 m of real height, under `MAX_STEP`, so *both*
+ * the broken gate and the fixed one let it through and the fixed one looks
+ * broken too. The engineer on the collision area hit exactly that and their
+ * first control read clean. Every ledge below is built with
+ * {@link yAtAltitude}, which is the one way to say "this much real height" in a
+ * column, and the sweep prints the ledge's own measured altitude so the claim
+ * is visible rather than trusted.
  */
 
 import { BUILDING_STEP_UP, PLAYER_RADIUS } from '../src/core/constants.ts';
@@ -76,7 +82,7 @@ import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { circleBoundary } from '../src/world/boundary.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { NavGrid } from '../src/world/NavGrid.ts';
-import { altitudeAt, groundWaves, terrainHeight } from '../src/world/terrain.ts';
+import { planetRadiusAt, terrainHeight, yAtAltitude } from '../src/world/terrain.ts';
 
 /** How far out the sweep reaches. The walkable garden is 135.4 m. */
 const OUTER = 120;
@@ -90,15 +96,11 @@ const STEP_BEARINGS = 32;
 /** The lattice's cell size. Kept here rather than exported: see the assertion. */
 const CELL = 0.5;
 
-/**
- * How much of `MAX_STEP` the terrain's own undulation may use up.
- *
- * Half. The waves measure 0.08 m at their worst over a cell today, so this is
- * eight times the headroom they need — a tripwire on a retune, not a tight
- * bound. Past it, "the ground is flat to the lattice" stops being true and the
- * altitude step test would let a route climb something a child could not.
- */
-const WAVE_BUDGET = BUILDING_STEP_UP / 2;
+/** A ledge a child plainly cannot walk up. Must be refused at every radius. */
+const TALL_LEDGE = 0.7;
+
+/** A legal step — a kerb, a stair tread. Must be allowed at every radius. */
+const LEGAL_STEP = 0.4;
 
 /** The eight lattice neighbours, straights then diagonals. */
 const NEIGHBOURS = [
@@ -201,79 +203,170 @@ const fail = (message: string): void => {
   }
 }
 
-// -------------------------------------------- the neighbour step, by radius
-// The quantitative half: how much of MAX_STEP the planet is eating, and where
-// it finally eats all of it. Printed on every run, green or red, so the claim
-// in this file's header is re-measured rather than remembered.
+// ------------------------------------------- the step gate, ledge and flat
+// The quantitative half, and the one that matters: what the gate quantity
+// reads for a real ledge and for flat grass, at each radius, in both frames.
+// Printed on every run, green or red, so the claim in this file's header is
+// re-measured rather than remembered.
 {
   const RADII = [40, 80, 120, 135.4, 145, 157] as const;
-  let firstBroken = Infinity;
-  let worstWave = 0;
   const rows: string[] = [];
+  let ledgeLeaks = 0;
+  let flatRefusals = 0;
+  let legalRefusals = 0;
+  let swept = 0;
 
   for (const r of RADII) {
-    let worstY = 0;
-    let worstAltitude = 0;
-    /** The part of the step that is the wave field rather than the cap. */
-    let worstWaveStep = 0;
-    let over = 0;
-    let swept = 0;
+    let worstFlatY = 0;
+    let worstFlatRadial = 0;
+    let weakestLedgeY = Infinity;
+    let weakestLedgeRadial = Infinity;
+    let worstLegalRadial = 0;
+    let ledgeAltitude = 0;
 
     for (let b = 0; b < STEP_BEARINGS; b += 1) {
       const bearing = (b / STEP_BEARINGS) * Math.PI * 2;
       const x = Math.cos(bearing) * r;
       const z = Math.sin(bearing) * r;
       const y = terrainHeight(x, z);
-      const altitude = altitudeAt(x, y, z);
-      const wave = groundWaves(x, z);
+      const radius = planetRadiusAt(x, y, z);
 
       for (const [dx, dz] of NEIGHBOURS) {
         const nx = x + dx * CELL;
         const nz = z + dz * CELL;
-        const ny = terrainHeight(nx, nz);
-        const stepY = Math.abs(ny - y);
-        const stepAltitude = Math.abs(altitudeAt(nx, ny, nz) - altitude);
-        worstY = Math.max(worstY, stepY);
-        worstAltitude = Math.max(worstAltitude, stepAltitude);
-        worstWaveStep = Math.max(worstWaveStep, Math.abs(groundWaves(nx, nz) - wave));
+        const groundY = terrainHeight(nx, nz);
+
+        // Flat grass. Neither gate may refuse it.
+        worstFlatY = Math.max(worstFlatY, Math.abs(groundY - y));
+        worstFlatRadial = Math.max(
+          worstFlatRadial,
+          Math.abs(planetRadiusAt(nx, groundY, nz) - radius),
+        );
+
+        // A real ledge in the neighbouring cell — TALL_LEDGE metres of *height*,
+        // which is what yAtAltitude means and what terrainHeight + h does not.
+        const ledgeY = yAtAltitude(nx, nz, TALL_LEDGE);
+        ledgeAltitude = TALL_LEDGE;
+        weakestLedgeY = Math.min(weakestLedgeY, Math.abs(ledgeY - y));
+        weakestLedgeRadial = Math.min(
+          weakestLedgeRadial,
+          Math.abs(planetRadiusAt(nx, ledgeY, nz) - radius),
+        );
+
+        // And a legal step, which neither gate may refuse.
+        const stepY = yAtAltitude(nx, nz, LEGAL_STEP);
+        worstLegalRadial = Math.max(
+          worstLegalRadial,
+          Math.abs(planetRadiusAt(nx, stepY, nz) - radius),
+        );
         swept += 1;
-        if (stepY > BUILDING_STEP_UP) over += 1;
       }
     }
 
-    worstWave = Math.max(worstWave, worstWaveStep);
-    if (over > 0) firstBroken = Math.min(firstBroken, r);
+    if (weakestLedgeRadial <= BUILDING_STEP_UP) ledgeLeaks += 1;
+    if (worstFlatRadial > BUILDING_STEP_UP) flatRefusals += 1;
+    if (worstLegalRadial > BUILDING_STEP_UP) legalRefusals += 1;
+
     rows.push(
-      `  ${String(r).padStart(6)} m   worst step in y ${worstY.toFixed(3)} m ` +
-        `(${((worstY / BUILDING_STEP_UP) * 100).toFixed(0)}% of MAX_STEP, ` +
-        `${over}/${swept} over) | in altitude ${worstAltitude.toFixed(3)} m ` +
-        `(zero by construction — the guarded number is the wave step, ` +
-        `${worstWaveStep.toFixed(3)} m)`,
+      `  ${String(r).padStart(6)} m  flat grass: y ${worstFlatY.toFixed(3)} ` +
+        `(${((worstFlatY / BUILDING_STEP_UP) * 100).toFixed(0)}%) vs radial ` +
+        `${worstFlatRadial.toFixed(3)} | a ${ledgeAltitude} m ledge reads: y ` +
+        `${weakestLedgeY.toFixed(3)}${weakestLedgeY <= BUILDING_STEP_UP ? ' LEAKS' : ''} ` +
+        `vs radial ${weakestLedgeRadial.toFixed(3)}` +
+        `${weakestLedgeRadial <= BUILDING_STEP_UP ? ' LEAKS' : ''} | a ` +
+        `${LEGAL_STEP} m step reads radial ${worstLegalRadial.toFixed(3)}`,
     );
   }
 
   process.stderr.write(
-    `the neighbour step against MAX_STEP = ${BUILDING_STEP_UP} m:\n${rows.join('\n')}\n`,
+    `the step gate against MAX_STEP = ${BUILDING_STEP_UP} m, ${swept} neighbour ` +
+      `steps per frame:\n${rows.join('\n')}\n`,
   );
 
-  if (worstWave > WAVE_BUDGET) {
+  if (ledgeLeaks > 0) {
     fail(
-      `the terrain's own undulation reaches ${worstWave.toFixed(3)} m over one ` +
-        `${CELL} m cell, past the ${WAVE_BUDGET.toFixed(3)} m this check allows ` +
-        'it. The lattice measures its step in altitude, which is blind to the ' +
-        'waves by construction, and that is only safe while the waves are much ' +
-        'gentler than a step. Either retune them back or stop taking the datum ' +
-        'from terrainHeight.',
+      `a real ${TALL_LEDGE} m ledge reads as walkable at ${ledgeLeaks} of ` +
+        `${RADII.length} swept radii. The router will plan a route straight up ` +
+        'something a child cannot climb. This is the dangerous half of the wrong ' +
+        'datum — see NavGrid.nodeRadius.',
     );
   }
+  if (flatRefusals > 0) {
+    fail(
+      `flat grass reads as a step at ${flatRefusals} of ${RADII.length} swept ` +
+        'radii, so the lattice is refusing ground with nothing on it.',
+    );
+  }
+  if (legalRefusals > 0) {
+    fail(
+      `a legal ${LEGAL_STEP} m step reads as unwalkable at ${legalRefusals} of ` +
+        `${RADII.length} swept radii — the gate has gone the other way and kerbs ` +
+        'and stair treads are no longer climbable.',
+    );
+  }
+}
 
-  process.stderr.write(
-    firstBroken === Infinity
-      ? 'no swept radius out to 157 m breaks MAX_STEP in world y.\n'
-      : `read in world y, the step first breaks MAX_STEP at ${firstBroken} m — ` +
-          'outside the 135.4 m walkable garden, which is why no route was ever ' +
-          'actually refused. See this file\'s header.\n',
-  );
+// ------------------------------------ the router itself, on a real ledge
+// The sweep above measures the *quantity*; this measures the *router*. Without
+// it the check would pass on a NavGrid that had gone back to differencing `y`,
+// because nothing above ever calls one.
+//
+// A plateau is raised in a disc out in the park and a route is asked from
+// outside it to its middle. At TALL_LEDGE the router must refuse; at
+// LEGAL_STEP it must succeed. Both plateaus are built with `yAtAltitude`, so
+// "0.7 m" is 0.7 m of real height at 120 m out and not 0.49 m of it.
+{
+  const AT = 120;
+  const PLATEAU_RADIUS = 5;
+  const centreX = AT;
+  const centreZ = 0;
+
+  const plateauSampler = (height: number) => (x: number, z: number, _y: number): number =>
+    Math.hypot(x - centreX, z - centreZ) <= PLATEAU_RADIUS
+      ? yAtAltitude(x, z, height)
+      : terrainHeight(x, z);
+
+  for (const [height, mustReach] of [
+    [TALL_LEDGE, false],
+    [LEGAL_STEP, true],
+  ] as const) {
+    const grid = gridOver(new CollisionWorld(), 140);
+    const sample = plateauSampler(height);
+    // Start on the grass a comfortable walk outside the plateau, on the side
+    // nearer the park's centre, so reaching the top means climbing outward —
+    // the direction the broken gate under-reads.
+    const startX = centreX - PLATEAU_RADIUS - 6;
+    const reached = grid.findRoute(
+      startX,
+      centreZ,
+      sample(startX, centreZ, 0),
+      centreX,
+      centreZ,
+      sample(centreX, centreZ, 0),
+      sample,
+      OUT,
+    ) >= 0 && grid.lastRouteReachedGoal;
+
+    const measured = (
+      planetRadiusAt(centreX, sample(centreX, centreZ, 0), centreZ) -
+      planetRadiusAt(centreX, terrainHeight(centreX, centreZ), centreZ)
+    ).toFixed(3);
+
+    if (reached !== mustReach) {
+      fail(
+        `a ${height} m plateau at ${AT} m out (measured ${measured} m of real ` +
+          `height) was ${reached ? 'routed onto' : 'refused'}, and it must be ` +
+          `${mustReach ? 'routed onto' : 'refused'}. MAX_STEP is ` +
+          `${BUILDING_STEP_UP} m, so the router is not measuring the step it ` +
+          'thinks it is — see NavGrid.nodeRadius.',
+      );
+    } else {
+      process.stderr.write(
+        `the router ${reached ? 'climbs' : 'refuses'} a ${height} m plateau at ` +
+          `${AT} m out (measured ${measured} m of real height), as it must.\n`,
+      );
+    }
+  }
 }
 
 // ------------------------------------------------------- the routes themselves

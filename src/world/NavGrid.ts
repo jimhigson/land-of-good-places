@@ -223,14 +223,11 @@ const MARGIN = 2;
  * off the edge of a deck on the way to somewhere else. The ball pit's 0.5 m lip
  * sits comfortably under it and stays walkable, as it must.
  *
- * **This is a step in *altitude*, never in world `y`** — see
- * {@link NavGrid.nodeAltitude}. Read as a `y` difference it was beaten by the
- * planet itself: the ground's radial gradient reaches 1.02 m of `y` per metre
- * travelled outward at the park's rim, so a 0.707 m outward diagonal of the
- * lattice changed `y` by up to 0.72 m against this 0.62 m — and **tap-to-move
- * stopped pathing outward at all** in the outer park, with nothing on screen to
- * blame it on. Nothing about the step itself was wrong; it was being measured
- * against a datum that leans.
+ * **This is a step measured radially, never in world `y`** — see
+ * {@link NavGrid.nodeRadius}, which carries the measurement and the reason.
+ * Nothing about the step itself was ever wrong; it was being differenced
+ * against a datum that leans, which both refused flat ground past 145 m and —
+ * far worse — admitted a real 0.70 m ledge as a 0.48 m one past about 80 m.
  */
 const MAX_STEP = BUILDING_STEP_UP;
 
@@ -420,29 +417,52 @@ export class NavGrid {
   /** Height of each node's surface, descending within a cell. */
   private nodeHeight = new Float32Array(0);
   /**
-   * **How far each node's surface stands above the ground in its own column** —
-   * `terrain.ts`'s {@link altitudeAt}, and the quantity every step, level and
-   * gap test in this file is measured in.
+   * **How far each node's surface is from the centre of the planet** —
+   * `terrain.ts`'s {@link planetRadiusAt}, and the quantity every step, level
+   * and gap test in this file is measured in.
    *
    * {@link nodeHeight} is a world `y`, and a world `y` on a sphere is dominated
    * by *where* a cell is rather than *how high* its surface is: at the park's
    * rim the ground drops 1.02 m per metre travelled outward, which is 60 times
    * the 17 mm a cell's own paving stands proud. Differencing two neighbouring
-   * cells' `y` therefore measures the planet, not the step, and the outward
-   * diagonals of this lattice were impassable because of it.
+   * cells' `y` therefore measures the planet rather than the step, and it goes
+   * wrong in **both** directions:
    *
-   * Both terms of an altitude are radii from the same centre, so the lean
-   * cancels exactly and what is left is the step a child's foot would feel.
+   * - **It refuses ground that is flat.** An outward lattice diagonal is
+   *   0.707 m in plan, so past 145 m it moves `y` by more than `MAX_STEP` over
+   *   ground with nothing on it. (Only past 145 m, and only diagonals — see
+   *   `scripts/check-outward-routing.mts`, which measures this and says plainly
+   *   that no route was ever actually refused inside the 135.4 m garden.)
+   * - **It admits ledges that are real, which is the dangerous half.** A
+   *   genuine 0.70 m step up on the *outward* side has the planet's drop
+   *   subtracted from it: it reads 0.555 m of `y` at 80 m and 0.482 m at
+   *   157 m, both under `MAX_STEP`. So from about 80 m out the router has been
+   *   planning routes straight up things a child cannot climb. Same cause,
+   *   opposite sign, and much worse — a refusal is a control that feels dead,
+   *   a leak is a route that does not exist.
+   *
+   * Two radii from one centre difference to the step a foot would feel,
+   * whichever way round the pair is and at whatever radius, so `MAX_STEP` keeps
+   * meaning exactly what `BUILDING_STEP_UP` says it means everywhere.
+   *
+   * **Why a radius and not an altitude.** `altitudeAt` would also cancel the
+   * lean, and it was written that way first. But an altitude takes its datum
+   * from `terrainHeight` in the same column, so the terrain's own altitude is
+   * *identically zero* and the lattice goes blind to the ground's undulation —
+   * a capability given up for nothing, since a radius cancels the planet just
+   * as exactly and keeps the waves in. Built structure still measures its true
+   * height above the grass either way.
+   *
    * Indoors — a castle deck, a hotel room, all of them hundreds of metres out
    * where the radial formula is meaningless — this is simply the world `y`, so
    * every comparison below is unchanged in an interior.
    *
    * Parallel to {@link nodeHeight}, filled in the same pass and grown by the
-   * same {@link growNodes}, because a node's height and its altitude are two
+   * same {@link growNodes}, because a node's height and its radius are two
    * halves of one fact and keeping them in separate structures is how they
    * would drift.
    */
-  private nodeAltitude = new Float32Array(0);
+  private nodeRadius = new Float32Array(0);
   /** The cell each node stands in. */
   private nodeCell = new Int32Array(0);
   private nodeCount = 0;
@@ -843,18 +863,17 @@ export class NavGrid {
         if (nodes + MAX_LEVELS_PER_CELL > this.nodeHeight.length) {
           this.growNodes(this.nodeHeight.length * 2);
         }
-        // One ground radius for the column, then every altitude in it is a
-        // subtraction. This is `altitudeAt`'s own body, composed from its own
-        // two exported owners rather than re-derived, so there is no second
-        // formula to drift; it is spelt out here only because the column is
-        // fixed and `terrainHeight` is much the dearest part of it.
         const outdoors = isOutdoors(x, z);
+        // The column's own ground radius, kept because the downward probe below
+        // has to hand `yAtAltitude` an altitude and this is the datum that
+        // turns a radius into one. Read from `terrain.ts`'s own export rather
+        // than re-derived.
         const groundR = outdoors ? groundRadiusAt(x, z) : 0;
-        let cursorAltitude = outdoors ? planetRadiusAt(x, cursor, z) - groundR : cursor;
+        let cursorRadius = outdoors ? planetRadiusAt(x, cursor, z) : cursor;
         this.nodeHeight[nodes] = cursor;
-        this.nodeAltitude[nodes] = cursorAltitude;
+        this.nodeRadius[nodes] = cursorRadius;
         this.nodeCell[nodes] = index;
-        let kept = cursorAltitude;
+        let kept = cursorRadius;
         nodes += 1;
         // A bridge cell stops here, at its one level — the deck (or ramp
         // tread) itself. `sample` always has *something* to say further
@@ -865,19 +884,21 @@ export class NavGrid {
         // pass above.
         const onBridge = this.bridgeCovers(x, z);
         for (let level = 1; !onBridge && level < MAX_LEVELS_PER_CELL; level += 1) {
-          // "Just over a step beneath" is a step of altitude, asked of the
-          // sampler at the world `y` that stands for it in this column.
-          const probe = cursorAltitude - MAX_STEP - LEVEL_EPSILON;
-          const next = sample(x, z, outdoors ? yAtAltitude(x, z, probe) : probe);
-          const nextAltitude = outdoors ? planetRadiusAt(x, next, z) - groundR : next;
-          if (nextAltitude >= cursorAltitude - LEVEL_EPSILON) break;
+          // "Just over a step beneath" is a step measured radially, asked of
+          // the sampler at the world `y` that stands for it in this column.
+          // `yAtAltitude` wants an altitude, so the radius is turned into one
+          // against this column's ground — the two are the same fact.
+          const probe = cursorRadius - MAX_STEP - LEVEL_EPSILON;
+          const next = sample(x, z, outdoors ? yAtAltitude(x, z, probe - groundR) : probe);
+          const nextRadius = outdoors ? planetRadiusAt(x, next, z) : next;
+          if (nextRadius >= cursorRadius - LEVEL_EPSILON) break;
           cursor = next;
-          cursorAltitude = nextAltitude;
-          if (nextAltitude < kept - MAX_STEP) {
+          cursorRadius = nextRadius;
+          if (nextRadius < kept - MAX_STEP) {
             this.nodeHeight[nodes] = next;
-            this.nodeAltitude[nodes] = nextAltitude;
+            this.nodeRadius[nodes] = nextRadius;
             this.nodeCell[nodes] = index;
-            kept = nextAltitude;
+            kept = nextRadius;
             nodes += 1;
           }
         }
@@ -909,9 +930,9 @@ export class NavGrid {
     const heights = new Float32Array(capacity);
     heights.set(this.nodeHeight);
     this.nodeHeight = heights;
-    const altitudes = new Float32Array(capacity);
-    altitudes.set(this.nodeAltitude);
-    this.nodeAltitude = altitudes;
+    const radii = new Float32Array(capacity);
+    radii.set(this.nodeRadius);
+    this.nodeRadius = radii;
     const cellsOf = new Int32Array(capacity);
     cellsOf.set(this.nodeCell);
     this.nodeCell = cellsOf;
@@ -959,51 +980,51 @@ export class NavGrid {
   private nodeAt(x: number, z: number, y: number): number {
     const cell = this.cellAt(x, z);
     if (cell < 0 || this.blocked[cell] === 1) return -1;
-    const altitude = this.altitudeIn(cell, y);
-    const node = this.nodeNearestAltitude(cell, altitude);
+    const radius = this.radiusIn(cell, y);
+    const node = this.nodeNearestRadius(cell, radius);
     if (node < 0) return -1;
-    return Math.abs((this.nodeAltitude[node] ?? 0) - altitude) <= MAX_LEVEL_GAP ? node : -1;
+    return Math.abs((this.nodeRadius[node] ?? 0) - radius) <= MAX_LEVEL_GAP ? node : -1;
   }
 
   /**
-   * **The altitude a world `y` stands at, asked in a named cell's own column.**
+   * **The planet radius a world `y` stands at, in a named cell's own column.**
    *
    * Every caller of this file hands in a world `y` — the player's feet, a
-   * route's goal, a connector's endpoint. The lattice compares altitudes, so
-   * the conversion happens here, once, against the column the question is
-   * actually about. Handing a `y` measured in one column to a test run in
-   * another is the failure `terrain.ts`'s {@link altitudeAt} docblock is
-   * entirely about, and outdoors at the rim it is worth a metre per metre.
+   * route's goal, a connector's endpoint. The lattice compares radii, so the
+   * conversion happens here, once, against the column the question is actually
+   * about. Handing a `y` measured in one column to a test run in another is
+   * the failure `terrain.ts`'s `altitudeAt` docblock is entirely about, and
+   * outdoors at the rim it is worth a metre per metre.
    */
-  private altitudeIn(cell: number, y: number): number {
+  private radiusIn(cell: number, y: number): number {
     const cx = cell % this.cells;
     const cz = (cell - cx) / this.cells;
     const x = this.originX + cx * CELL;
     const z = this.originZ + cz * CELL;
     if (!isOutdoors(x, z)) return y;
-    return planetRadiusAt(x, y, z) - groundRadiusAt(x, z);
+    return planetRadiusAt(x, y, z);
   }
 
   /** The node of `cell` whose surface is nearest `y`, or -1 for a blocked cell. */
   private nodeNearest(cell: number, y: number): number {
-    return this.nodeNearestAltitude(cell, this.altitudeIn(cell, y));
+    return this.nodeNearestRadius(cell, this.radiusIn(cell, y));
   }
 
   /**
-   * The node of `cell` whose surface is nearest `altitude`, or -1.
+   * The node of `cell` whose surface is nearest `radius`, or -1.
    *
    * The primitive the whole file's level arithmetic sits on: a caller that has
-   * already converted (or that is walking a line and carrying an altitude from
+   * already converted (or that is walking a line and carrying a radius from
    * cell to cell) asks this directly, rather than converting back to a `y` in
    * the wrong column on the way in.
    */
-  private nodeNearestAltitude(cell: number, altitude: number): number {
+  private nodeNearestRadius(cell: number, radius: number): number {
     const from = this.levelStart[cell] ?? 0;
     const to = this.levelStart[cell + 1] ?? 0;
     let best = -1;
     let bestGap = Infinity;
     for (let node = from; node < to; node += 1) {
-      const gap = Math.abs((this.nodeAltitude[node] ?? 0) - altitude);
+      const gap = Math.abs((this.nodeRadius[node] ?? 0) - radius);
       if (gap < bestGap) {
         bestGap = gap;
         best = node;
@@ -1114,14 +1135,14 @@ export class NavGrid {
     this.push(startNode);
 
     this.searchBestNode = startNode;
-    // In altitude, like every other height comparison here: a world-`y`
+    // Radially, like every other height comparison here: a world-`y`
     // difference to the goal out in the park is mostly the planet's own drop,
     // so this tie-breaker was quietly ranking nodes by how far out they were
     // rather than by whether they were on the goal's level.
-    const goalAltitude = this.altitudeIn(goalCell, goalY);
+    const goalRadius = this.radiusIn(goalCell, goalY);
     this.searchBestScore =
       this.heuristic(this.nodeCell[startNode] ?? 0, goalX, goalZ) +
-      Math.abs((this.nodeAltitude[startNode] ?? 0) - goalAltitude) * BEST_HEIGHT_WEIGHT;
+      Math.abs((this.nodeRadius[startNode] ?? 0) - goalRadius) * BEST_HEIGHT_WEIGHT;
     let expansions = 0;
 
     while (this.heapLength > 0) {
@@ -1136,7 +1157,7 @@ export class NavGrid {
       const cell = this.nodeCell[node] ?? 0;
       const cx = cell % this.cells;
       const cz = (cell - cx) / this.cells;
-      const nodeAltitude = this.nodeAltitude[node] ?? 0;
+      const nodeRadius = this.nodeRadius[node] ?? 0;
       const nodeCost = this.gScore[node] ?? 0;
       const onBand = this.hopBand[cell] === 1;
 
@@ -1187,15 +1208,15 @@ export class NavGrid {
         const from = this.levelStart[neighbourCell] ?? 0;
         const to = this.levelStart[neighbourCell + 1] ?? 0;
         for (let neighbour = from; neighbour < to; neighbour += 1) {
-          if (Math.abs((this.nodeAltitude[neighbour] ?? 0) - nodeAltitude) > rise) continue;
-          this.relax(node, neighbour, nodeCost + step, 0, goalX, goalZ, goalAltitude);
+          if (Math.abs((this.nodeRadius[neighbour] ?? 0) - nodeRadius) > rise) continue;
+          this.relax(node, neighbour, nodeCost + step, 0, goalX, goalZ, goalRadius);
         }
       }
 
       const edges = this.connectorEdges.get(node);
       if (edges) {
         for (const edge of edges) {
-          this.relax(node, edge.to, nodeCost + edge.cost, edge.via, goalX, goalZ, goalAltitude);
+          this.relax(node, edge.to, nodeCost + edge.cost, edge.via, goalX, goalZ, goalRadius);
         }
       }
     }
@@ -1211,8 +1232,8 @@ export class NavGrid {
     via: number,
     goalX: number,
     goalZ: number,
-    /** The goal's height as an **altitude** — see {@link NavGrid.nodeAltitude}. */
-    goalAltitude: number,
+    /** The goal's height as a **planet radius** — see {@link NavGrid.nodeRadius}. */
+    goalRadius: number,
   ): void {
     if (this.state[neighbour] !== NEW && tentative >= (this.gScore[neighbour] ?? 0)) {
       return;
@@ -1226,7 +1247,7 @@ export class NavGrid {
     this.push(neighbour);
 
     const score =
-      heuristic + Math.abs((this.nodeAltitude[neighbour] ?? 0) - goalAltitude) * BEST_HEIGHT_WEIGHT;
+      heuristic + Math.abs((this.nodeRadius[neighbour] ?? 0) - goalRadius) * BEST_HEIGHT_WEIGHT;
     if (score < this.searchBestScore) {
       this.searchBestScore = score;
       this.searchBestNode = neighbour;
@@ -1474,23 +1495,23 @@ export class NavGrid {
     // Every sample stands for one equal slice of the line. In cell units, so
     // the answer is directly comparable with the search's own g-scores.
     const slice = distance / steps / CELL;
-    // Carried as an **altitude**, not a world `y`. A `y` carried from one
+    // Carried as a **planet radius**, not a world `y`. A `y` carried from one
     // sample to the next is a height measured in the previous column and
     // applied in this one, and marching a smoothed line outward across the
     // park that error accumulates a metre for every metre walked — which is
     // exactly how a straight line over open grass came to read as a staircase.
-    let previousAltitude = this.altitudeIn(startCell, aHeight);
+    let previousRadius = this.radiusIn(startCell, aHeight);
     let cost = 0;
 
     for (let i = 1; i <= steps; i += 1) {
       const t = i / steps;
       const cell = this.cellAt(ax + (bx - ax) * t, az + (bz - az) * t);
       if (cell < 0 || this.blocked[cell] === 1 || this.hopBand[cell] === 1) return -1;
-      const node = this.nodeNearestAltitude(cell, previousAltitude);
+      const node = this.nodeNearestRadius(cell, previousRadius);
       if (node < 0) return -1;
-      const altitude = this.nodeAltitude[node] ?? 0;
-      if (Math.abs(altitude - previousAltitude) > MAX_STEP) return -1;
-      previousAltitude = altitude;
+      const radius = this.nodeRadius[node] ?? 0;
+      if (Math.abs(radius - previousRadius) > MAX_STEP) return -1;
+      previousRadius = radius;
       cost += slice * this.costOf(cell);
     }
     return cost;
