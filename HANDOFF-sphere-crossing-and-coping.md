@@ -78,22 +78,81 @@ may well clear on its own. **Blast radius is the whole rail loop on every seed**
 If raising it makes seeds fail to close, fall back to reporting the pinch as an
 upstream defect rather than forcing it.
 
-## (2) and (3) — NOT STARTED
+## (2) and (3) — NOT MINE TO FIX: the fix exists on another branch
 
-Ramp grade at (-22.4, 35.4); coping 0.033/0.037 m proud on bridges 238.0/300.0.
-See the Overseer brief. Note the procgen job has **95 failures across 5 seeds**
-— far more than these two; most are other agents' (gate arch, tree
-interpenetration, rail-race duck bars, sky cruiser pylons).
+**`eng/bridge-bend` is not in PR #620's base.** Checked with
+`git merge-base --is-ancestor`:
 
-## Instruments
+- `0c37d151` "The hump bends with the planet: state its shape in altitudes,
+  not in world y" — **NOT an ancestor of `eng/sphere-ground-claims`**
+- `9c3fc274` "The arch is rigid in the tangent frame, not flat in world y" —
+  **NOT an ancestor either**
+- `git branch -r --contains 0c37d151` lists exactly one branch:
+  `origin/eng/bridge-bend`
 
-In the scratchpad (NOT committed — do not `mv scripts/diag-*` , there are
-pre-existing tracked ones, I nearly shipped a 9-file revert doing that):
-`diag-crossing.mts` (flip vs site snap, per seed), `diag-station.mts`
-(lead/approach/stand sides), `diag-selfpinch.mts` (real segment/rail
-intersections + loop self-approach), `diag-control.mts` (point-in-loop),
-`diag-angle.mts` (min swing per seed).
+So PR #620 is failing (2) and (3) against code that predates the bend fix.
+`surfaceProfile` on this base is still the world-y form the brief names as the
+root cause:
 
-Control note: `diag-selfpinch`'s control A "ray from park middle" reads 0
-crossings — that is correct, the loop's bbox starts at x=12.1 so (0,0) is
-genuinely outside it. The premise was wrong, not the instrument.
+```ts
+return ground + (crownY - ground) * (1 - profileDrop(q));   // this base
+```
+
+and on `eng/bridge-bend` it is the altitude form:
+
+```ts
+return worldYAtAltitude(x, z, (crownAlt - localRise(x, z)) * (1 - profileDrop(q)));
+```
+
+`git diff HEAD origin/eng/bridge-bend -- src/world/train/` is **+264/-… in
+`bridges.ts` and +52 in `bridgeStonework.ts`** (the module that lays the
+coping). The brief said to build on that lane's result rather than redo it —
+the result simply is not on this branch.
+
+**Recommendation: merge `eng/bridge-bend` into the sphere stack rather than
+reimplementing.** Reimplementing would duplicate ~300 lines and conflict
+head-on when the lane lands. Both (2) and (3) should be re-measured after that
+merge; only what still fails then is real new work.
+
+## Where (1) stands
+
+Committed and pushed:
+- `planStationLead` — lead backtracks onto its own side of the railway
+- rail-aware station approach siting in `clearStationDistance`
+
+`tsc --noEmit` exit **0**.
+
+Pool sweep after both: **9 of 10 seeds have zero unbridged crossings.**
+Seed 451 still fails — 12 flips, and they are **real**, not nearest-limb
+phantoms: a segment/rail-polyline intersection counts **13 genuine crossings
+of the rail centreline** by run 16, and the parity control holds (run starts
+outside the loop, ends inside, 13 is odd).
+
+Root cause of the residue is upstream of anything I own: **`SELF_CLEARANCE = 3`
+in `train/route.ts`** lets the loop close to 3.95 m of itself, and CLAUDE.md
+already names this constant for this exact seed. Measured remedies:
+
+- **Raise it to 8.2** (derived: `FENCE_OFFSET*2 + FENCE_HALF_THICKNESS*2 +
+  STATION_SPUR_WIDTH + PLAYER_RADIUS*2`): fixes 451, but **seed 24 then proves
+  NO bridge site anywhere** and the park is invalid. Rejected, reverted.
+- **A warp vector** (`parkWarp.ts`, the documented cure). Hand-probed
+  `layoutRestart: 2` and `layoutRestart: 8` both build seed 451 with zero
+  unbridged crossings. **Do not bake a hand-probed vector** — the module says
+  vectors come from `scripts/warp-search.mts` and must clear both gates
+  (`check:park` + the invariant oracle); the file records three vectors that
+  passed one gate and failed the other. `scripts/warp-search.mts 451` was
+  running when this was written; its result is the thing to bake.
+- **Replace 451 in the pool** — explicitly sanctioned by CLAUDE.md ("fix the
+  generator or replace the seed in the pool — and write down why").
+
+### Measurement traps hit, for whoever follows
+
+- `mv scripts/diag-*.mts` swept up **9 pre-existing tracked** diag scripts.
+  Caught by `git status` and restored with `git checkout -- scripts/`. Remove
+  scratch by exact filename.
+- A warp sweep wrapped in `timeout 240` reported **0 unbridged on every
+  vector**; the builds were being killed and `grep -c` read the empty output as
+  a pass. Re-run without the timeout, two of five vectors still failed. Always
+  assert the build actually completed, not just that the bad string is absent.
+- `nohup ... &` inside a backgrounded tool call dies with its wrapper shell —
+  the first warp search logged one line and stopped.
