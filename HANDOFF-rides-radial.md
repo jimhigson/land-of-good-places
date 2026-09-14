@@ -124,6 +124,48 @@ runs the same model.
 - [ ] Browser QA on `/sky-cruiser`, `/rail-race`, `/slide`, `/ferris` —
       **nothing here has been looked at**
 
+## `test:procgen` — the honest accounting
+
+Run on this branch and on `origin/feat/sphere-combined` for comparison, same
+machine, same command.
+
+| | base | this branch |
+|---|---|---|
+| failed | **49** | **50** |
+| passed | 269 | 268 |
+| skipped | 279 | 279 |
+
+Net **+1 failure**, and the composition matters more than the count:
+
+**Now passing that failed on the base (1):**
+`the Sky Cruiser built track turns as gently as it promises`
+
+**Newly failing (4), all on seed 11, all layout cascade:**
+- `no tree grows into a wall` — *"tree at (52.5, -99.2) reaching 4.38 m leaves
+  **-0.48 m** to the wood run"*
+- `nothing a bridge builds hangs into its own tunnel`
+- `the ginormous slide stands on legs a child can walk between` — *"66 m long
+  and stands on 2 legs — at least 3 were expected"*
+- `the ginormous slide's cameras cover the whole ride and can see it`
+
+**These are the carve's knock-on, and I am not hiding them.** Changing the
+coaster's solved profile changes where its pylons go, which changes which trees
+are felled, which moves everything seeded downstream — exactly the "every
+feature generates step by step at the same time" cascade CLAUDE.md describes.
+Two of the four are the **slide**, which is the least robust thing in the park
+right now because it is entirely un-leaned (see below).
+
+**Why I kept the carve anyway, and this is a judgement for the Overseer to
+overrule if it disagrees:** the bug it fixes is a ride running **10.55 m under
+the grass**, which a child would see; the four it shuffles are assertions on a
+branch that already fails 49 and cannot build the canonical park at all. Backing
+out a correct frame fix to preserve a red suite's exact failure set would be
+optimising the wrong thing. But it is a real +1 and it is the Overseer's call.
+
+By CLAUDE.md's own rule these are generator bugs — a generator that cannot
+backtrack into a good layout for seed 11 is the thing to fix, not the frame
+correction that revealed it.
+
 ## Nothing in this branch has been seen in a browser
 
 I had no browser. Every number here is a headless measurement. CLAUDE.md is
