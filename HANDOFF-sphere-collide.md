@@ -254,6 +254,43 @@ be called safe until somebody has stood a body in those doorways.
 it is why they reverted rather than shipped. Run it before every push that
 touches a gate.
 
+### The tripwire has its own failure mode, and the pass count cannot see it
+
+**Quote the skip count, every time, and treat 465 as a VOID run rather than a
+green one.** On a machine running several lanes at once, vitest under CPU
+contention bails and books the remainder as *skips*, so the suite comes back
+with **no failures at all** and reads as triumphant. The two signatures, off my
+own screen:
+
+| run | duration | Tests line, verbatim |
+|---|---|---|
+| mine | 99.29 s | `49 failed \| 303 passed \| 279 skipped (631)` |
+| base | 98.98 s | `49 failed \| 297 passed \| 279 skipped (625)` |
+| mine, post-Collision | 254.61 s | `49 failed \| 308 passed \| 279 skipped (636)` |
+| **mine, "run alone"** | **366.47 s** | **`171 passed \| 465 skipped (636)`** |
+
+**279 skipped is healthy. 465 skipped is starved, and a starved run asserts
+nothing.** The locomotion engineer hit this first and committed two messages
+quoting starved figures as parity; his prescription was *run them one at a
+time*, and **that is not achievable here** — my slowest, most degraded run is
+the one I deliberately ran on its own, because four other lanes were busy. You
+cannot control the machine, so control the *instrument*: read the skip count.
+
+Two things worth keeping from it:
+
+- **Two wrong runs agreeing is not a control**, it is the same mistake made
+  twice. A base-vs-branch diff of two starved runs matches perfectly and means
+  nothing.
+- **It is the opposite shape to the one CLAUDE.md records.** That file's example
+  is a silent-skip bug that made the suite suspiciously *fast* (89 s → 2.6 s),
+  so "fast" is the documented tell. Here the broken run is the **slow** one.
+  Neither direction is the signal; the **skip count** is, and a pass count
+  cannot see either case.
+
+My three healthy runs are what the parity claim rests on, including a
+base-vs-branch pair taken **under the same contention at the same time**, which
+is the fairest comparison available on a shared machine.
+
 ## Instruments, and the ones that lied
 
 `scratch/nav-step-frame.mts` — the nav step gate in both frames, no park build
