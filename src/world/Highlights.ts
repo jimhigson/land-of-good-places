@@ -15,6 +15,8 @@ import {
   type RainbowRings,
   type RainbowSparks,
 } from '../art/effects/rainbowRing';
+import { Anchor } from './geo';
+import { anchorAt } from './up';
 import {
   buildHighlightShell,
   createRainbowOutlineMaterial,
@@ -137,7 +139,7 @@ export class Highlights implements GameSystem {
     for (let i = 0; i < SLOT_COUNT; i += 1) {
       const slot = new HighlightSlot(this.material, this.ringGeometry, this.ringMaterial);
       this.slots.push(slot);
-      this.group.add(slot.shell, slot.ring);
+      this.group.add(slot.shell, slot.ringAnchor);
     }
 
     scene.add(this.group);
@@ -262,6 +264,8 @@ export class Highlights implements GameSystem {
  */
 class HighlightSlot {
   readonly shell: Mesh;
+  /** What goes in the scene: the ring, leaned onto the ground it marks. */
+  readonly ringAnchor = new Anchor();
   readonly ring: Mesh;
   private key: string | null = null;
 
@@ -276,9 +280,15 @@ class HighlightSlot {
     this.shell.matrixWorldAutoUpdate = false;
 
     this.ring = decal(new Mesh(ringGeometry, ringMaterial));
-    this.ring.visible = false;
     this.ring.renderOrder = 3;
+    // Flat in its parent's XZ plane, and its parent is the anchor below, which
+    // carries the frame of the ground under the zone. Before that it went into
+    // world space with a bare `position`, so the ring that *guarantees* every
+    // interactable is highlighted lay at up to 45.5° to the thing it was
+    // marking.
     this.ring.rotation.x = -Math.PI / 2;
+    this.ringAnchor.add(this.ring);
+    this.ringAnchor.visible = false;
   }
 
   showShell(key: string, shell: HighlightShell, worldMatrix: Matrix4): void {
@@ -289,26 +299,26 @@ class HighlightSlot {
     this.shell.matrix.copy(worldMatrix);
     this.shell.matrixWorld.copy(worldMatrix);
     this.shell.visible = true;
-    this.ring.visible = false;
+    this.ringAnchor.visible = false;
   }
 
   showRing(key: string, x: number, y: number, z: number, radius: number): void {
     this.key = key;
-    this.ring.position.set(x, y, z);
+    anchorAt(this.ringAnchor, x, y, z);
     this.ring.scale.set(radius, radius, 1);
-    this.ring.visible = true;
+    this.ringAnchor.visible = true;
     this.shell.visible = false;
   }
 
   hide(): void {
     this.key = null;
     this.shell.visible = false;
-    this.ring.visible = false;
+    this.ringAnchor.visible = false;
   }
 
   dispose(): void {
     this.shell.removeFromParent();
-    this.ring.removeFromParent();
+    this.ringAnchor.removeFromParent();
     // Whatever geometry the shell is holding is a cached shell owned by
     // `Highlights`, and so are both materials. Nothing here is ours to free.
   }
