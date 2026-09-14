@@ -5,7 +5,7 @@ import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN, RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN } from './train/plan';
 import { STATION_GAP } from './train/fence';
-import { FENCE_OFFSET } from './train/clearance';
+import { FENCE_OFFSET, STATION_SPUR_WIDTH } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
 import { CROSSING_SITES, type CrossingSite } from './train/crossingPlan';
 import { COASTER_PLANS } from './coaster/plan';
@@ -4089,7 +4089,10 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       paved: true,
       route: {
         name: `spur-${id}`,
-        width: 2.6,
+        // From the leaf, not a literal: `plan.ts` sizes a station's lead
+        // against half of this to keep the spur's own paving clear of the
+        // lineside fence, so the two must not be free to disagree.
+        width: STATION_SPUR_WIDTH,
         closed: false,
         points: [
           ...(stationStreets ?? fallbackSpurRoute(network(), stationLead)),

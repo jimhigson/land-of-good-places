@@ -254,6 +254,20 @@ export const STATION_GAP = 6.5;
 export const PLATFORM_LENGTH = 7.2;
 
 /**
+ * How wide the spur paved to a station is, metres.
+ *
+ * Here, in the leaf, because **two modules have to agree about it and used
+ * not to**: `paths.ts` paves the ribbon at this width, and `plan.ts` has to
+ * know half of it to work out how close a station's lead may stand to the
+ * railway before its own paving would run into the lineside fence
+ * ({@link FENCE_OFFSET}). It was a bare `2.6` written into the station
+ * spur's `RouteDefinition` and nowhere else, so the planner had no way to
+ * ask — the shape CLAUDE.md calls "two definitions of one thing, kept in
+ * step by hand", caught here before the second definition existed.
+ */
+export const STATION_SPUR_WIDTH = 2.6;
+
+/**
  * Half-width of the corridor a bridge site's deck and ramps are probed at.
  * The real pass starts its width search at the crossing's own `halfGap`
  * (floored at 4.5 in `crossings.ts`, and a square planned crossing measures

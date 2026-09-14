@@ -3,7 +3,7 @@ import { TrainRoute } from './route';
 import { COASTER_PLANS } from '../coaster/plan';
 import { terrainHeight } from '../terrain';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
-import { PLATFORM_LENGTH, STATION_GAP } from './clearance';
+import { FENCE_OFFSET, PLATFORM_LENGTH, STATION_GAP, STATION_SPUR_WIDTH } from './clearance';
 
 /**
  * The rail plan — the railway as *data*, solved at module load from the park
@@ -283,6 +283,178 @@ function nearCruiserLowCorridor(x: number, z: number, reach: number): boolean {
  */
 const STATION_SEPARATION = PLATFORM_LENGTH + STATION_GAP * 2;
 
+/**
+ * How far out from the stand a station's lead stands.
+ *
+ * An **ideal, not a law** — {@link planStationLead} keeps this reach and
+ * turns the *bearing* when the railway is in the way. It used to be a bare
+ * `6` added straight onto the stand along the park-ward radial, on the
+ * premise stated in `crossingPlan.ts` that "the loop is simple (never
+ * self-crossing), so the sign is stable park-wide". That premise died when
+ * the park went back to its authored size: on seed 451 the loop runs back
+ * within 3.95 m of itself right beside station 0, so the platform's park
+ * side is an isthmus narrower than this reach, and a fixed 6 m step off it
+ * landed *across the other limb* — 0.76 m from a rail centre line, on the
+ * far side of the railway from its own platform. The spur then drew its
+ * `lead -> approach` leg straight over the track at railD 133.6, where no
+ * bridge site exists, and `crossings.ts` failed the build exactly as it
+ * should have ("find the router that drew this leg" — this one).
+ *
+ * Measured over the whole pool: 18 of 20 stations are clear on the plain
+ * park-ward bearing and keep the lead they always had; seed 24's station 0
+ * and seed 451's station 0 are the two that turn.
+ */
+const STATION_LEAD_REACH = 6;
+
+/**
+ * How far a lead must stay off any part of the loop that is **not its own
+ * station's stretch**.
+ *
+ * Both terms are read from their owners, never chosen: the lineside fence
+ * stands {@link FENCE_OFFSET} from the rail centre line, and the spur that
+ * will be paved to this lead is {@link STATION_SPUR_WIDTH} wide, so its
+ * outer edge has to stop short of the fence rather than run through it. A
+ * station's *own* stretch is excluded because a platform legitimately
+ * stands close to its own track — the stand itself is 2.15 m from it — and
+ * `fence.ts` opens the fence there ({@link STATION_GAP}) precisely so a
+ * child can walk in.
+ */
+const STATION_LEAD_RAIL_MARGIN = FENCE_OFFSET + STATION_SPUR_WIDTH / 2;
+
+/**
+ * How far along the loop from a station's own centre the track stops being
+ * "its own platform" and becomes another limb the lead has to keep off.
+ * The platform's own half-length plus the fence opening `fence.ts` leaves
+ * around it — past that, the fence is up again and the lead is looking at
+ * ordinary railway.
+ */
+const STATION_LEAD_OWN_STRETCH = PLATFORM_LENGTH / 2 + STATION_GAP;
+
+/** Bearings tried for a lead, in degrees off park-ward, swung toward the
+ * platform's **empty** (+tangent) half — the same half the approach already
+ * uses, so a turned lead still never reaches across the canopy posts and
+ * the bench, which stand at negative platform-along by construction. */
+const STATION_LEAD_SWING_STEP = 5;
+const STATION_LEAD_MAX_SWING = 80;
+
+/**
+ * Distance from a point to the loop, ignoring the stretch belonging to the
+ * station at `ownDistance` — by segment projection, so the answer is the
+ * real distance to the curve rather than to whichever sample happened to be
+ * nearest.
+ */
+function distanceToForeignRail(
+  route: TrainRoute,
+  ownDistance: number,
+  x: number,
+  z: number,
+): number {
+  const count = Math.max(64, Math.ceil(route.length / 2));
+  const half = route.length / 2;
+  const point = new Vector3();
+  let best = Infinity;
+  let ax = 0;
+  let az = 0;
+  let aOwn = false;
+  for (let i = 0; i <= count; i += 1) {
+    const distance = (i / count) * route.length;
+    route.pointAt(distance % route.length, point);
+    const bx = point.x;
+    const bz = point.z;
+    const bOwn =
+      Math.abs(((distance - ownDistance + half * 3) % route.length) - half) <=
+      STATION_LEAD_OWN_STRETCH;
+    if (i > 0 && !aOwn && !bOwn) {
+      const dx = bx - ax;
+      const dz = bz - az;
+      const lengthSquared = dx * dx + dz * dz;
+      const t =
+        lengthSquared < 1e-12
+          ? 0
+          : Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSquared));
+      const gap = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+      if (gap < best) best = gap;
+    }
+    ax = bx;
+    az = bz;
+    aOwn = bOwn;
+  }
+  return best;
+}
+
+/**
+ * Where a station's spur should arrive from the park — **backtracking on the
+ * railway as it actually stands**, per CLAUDE.md's standing procgen rule.
+ *
+ * Keeps {@link STATION_LEAD_REACH} and turns the bearing into the platform's
+ * empty half until both legs the spur will draw through the lead
+ * (`stand -> lead` and `lead -> approach`) clear every foreign limb of the
+ * loop by {@link STATION_LEAD_RAIL_MARGIN}. Turning rather than shortening
+ * is deliberate: shortening trades the defect for a lead too close to the
+ * platform to do its job, and on both affected stations a turn keeps the
+ * full reach (seed 24 station 0 at 35 deg, seed 451 station 0 at 50 deg).
+ *
+ * If no bearing clears — no seed in the pool does this — it returns the
+ * roomiest one rather than a known-bad ideal, and `crossings.ts` stays the
+ * backstop that refuses to ship a path over the rails.
+ */
+function planStationLead(
+  route: TrainRoute,
+  distance: number,
+  standX: number,
+  standZ: number,
+  approachX: number,
+  approachZ: number,
+  parkX: number,
+  parkZ: number,
+  tangentX: number,
+  tangentZ: number,
+): { leadX: number; leadZ: number } {
+  /** Worst clearance along the two legs a spur draws through this lead. */
+  const clearanceOf = (leadX: number, leadZ: number): number => {
+    let worst = Infinity;
+    const legs = [
+      [standX, standZ, leadX, leadZ],
+      [leadX, leadZ, approachX, approachZ],
+    ] as const;
+    for (const [ax, az, bx, bz] of legs) {
+      const steps = Math.max(4, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.5));
+      for (let i = 0; i <= steps; i += 1) {
+        const t = i / steps;
+        const gap = distanceToForeignRail(
+          route,
+          distance,
+          ax + (bx - ax) * t,
+          az + (bz - az) * t,
+        );
+        if (gap < worst) worst = gap;
+      }
+    }
+    return worst;
+  };
+
+  let bestX = standX + parkX * STATION_LEAD_REACH;
+  let bestZ = standZ + parkZ * STATION_LEAD_REACH;
+  let bestClearance = -Infinity;
+  for (let degrees = 0; degrees <= STATION_LEAD_MAX_SWING; degrees += STATION_LEAD_SWING_STEP) {
+    const radians = (degrees * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const leadX = standX + (parkX * cos + tangentX * sin) * STATION_LEAD_REACH;
+    const leadZ = standZ + (parkZ * cos + tangentZ * sin) * STATION_LEAD_REACH;
+    const clearance = clearanceOf(leadX, leadZ);
+    // The first bearing that clears wins: park-ward is tried first, so a
+    // station with room keeps exactly the lead it has always had.
+    if (clearance >= STATION_LEAD_RAIL_MARGIN) return { leadX, leadZ };
+    if (clearance > bestClearance) {
+      bestClearance = clearance;
+      bestX = leadX;
+      bestZ = leadZ;
+    }
+  }
+  return { leadX: bestX, leadZ: bestZ };
+}
+
 function planStations(route: TrainRoute): readonly PlannedStation[] {
   // Sequential, not `map`: each station is scored against the stands already
   // chosen, which is what stops two of them landing in the same place. See the
@@ -302,6 +474,20 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
     const off = Math.hypot(standX - centre.x, standZ - centre.z) || 1;
     const parkX = (standX - centre.x) / off;
     const parkZ = (standZ - centre.z) / off;
+    const approachX = standX + tangent.x * 3.5;
+    const approachZ = standZ + tangent.z * 3.5;
+    const { leadX, leadZ } = planStationLead(
+      route,
+      distance,
+      standX,
+      standZ,
+      approachX,
+      approachZ,
+      parkX,
+      parkZ,
+      tangent.x,
+      tangent.z,
+    );
     return {
       index,
       name: seed.name,
@@ -309,20 +495,22 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
       distance,
       standX,
       standZ,
-      approachX: standX + tangent.x * 3.5,
-      approachZ: standZ + tangent.z * 3.5,
-      // Straight out into the park from the platform's centre. From here the
-      // remaining legs run lead -> approach -> stand entirely in the
-      // platform's furniture-free (+tangent) half-plane: in platform
-      // coordinates the lead is (along 0, park 6) and the approach
-      // (along 3.5, park 0), so the connecting segment never enters the
-      // negative-along half where the canopy posts stand — measured 2.8 m
-      // clear of the nearest post, against the graph's 0.7 m requirement. A
-      // lead past the platform's far END was tried first and made things
-      // worse: a spur arriving from anywhere in the park then had to sweep
-      // the whole frontage to get there, 0.3 m from the posts.
-      leadX: standX + parkX * 6,
-      leadZ: standZ + parkZ * 6,
+      approachX,
+      approachZ,
+      // Out into the park from the platform's centre — park-ward where there
+      // is room, swung toward the platform's empty end where the railway is
+      // in the way (see {@link planStationLead}). Either way the remaining
+      // legs run lead -> approach -> stand entirely in the platform's
+      // furniture-free (+tangent) half-plane: the lead is at platform-along
+      // >= 0 for every bearing tried and the approach at (along 3.5, park
+      // 0), so the connecting segment never enters the negative-along half
+      // where the canopy posts stand — measured 2.8 m clear of the nearest
+      // post, against the graph's 0.7 m requirement. A lead past the
+      // platform's far END was tried first and made things worse: a spur
+      // arriving from anywhere in the park then had to sweep the whole
+      // frontage to get there, 0.3 m from the posts.
+      leadX,
+      leadZ,
     };
   });
 }
