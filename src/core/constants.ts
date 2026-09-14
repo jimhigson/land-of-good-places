@@ -67,50 +67,73 @@ export const RIM_DROP = 17;
 export const GROUND_SPHERE_RADIUS = 220;
 
 /**
- * **The park grows as the world shrinks.**
- *
- * Jim, 13 September 2026: *"since this makes the park smaller in terms of
- * surface area, as we decrease the radius, increase the size of the park in
- * other ways eg increase the target radius of the park on the surface of the
- * sphere."*
- *
- * A smaller ball does not make the park smaller in metres — nothing about the
- * park's own extent depends on the radius. What shrinks is the *world around
- * it*: the horizon comes closer and less ground is visible past the boundary,
- * so the park stops reading as a place in a landscape and starts reading as a
- * lid on a knoll. This is the compensation, and it is a relationship rather
- * than a second hand-set number so that the next radius change carries it along
- * instead of needing the conversation again.
- *
- * **Square root, not linear.** The park's extent and the sphere's are two
- * lengths. Holding their *ratio* fixed would shrink the park exactly as fast as
- * the world and compensate for nothing; inverting it outright grows the park
- * absurdly — 58 m becomes 316 m at a radius of 220. The geometric mean of the
- * two is the middle course.
- *
- * **What it costs, stated plainly, because it is the trade being made.** The
- * drop from the park's centre to its edge is about `a² / 2R`, so growing `a`
- * while shrinking `R` steepens the park's *own* dome on both counts. Across the
- * play radius that is 1.4 m at the reference, 22 m at 300, and 41 m at 220.
- * Past some point the boundary wall falls below the horizon seen from the
- * middle of the park — which is a thing to look at on screen, not to settle in
- * a comment.
+ * The park's extent as it was authored, on flat ground, before there was a
+ * sphere at all. **Every other number about how big the park is comes from
+ * this one**; see `PARK_SURFACE_SCALE` directly below.
  */
+const AUTHORED_PLAY_RADIUS = 58;
+
 /**
- * The radius the park's authored extent is calibrated against.
+ * **The park is the same amount of park at every radius.**
  *
- * **Held equal to `GROUND_SPHERE_RADIUS` for now, which makes the scale exactly
- * 1 and leaves the park at its authored size.** Growing it is blocked, not
- * abandoned: at 220 m with the park grown 2.33x the layout solves but the
- * rail-crossing planner fails on 7 of the 10 pool seeds with an identical
- * error — the paths router draws a leg across the railway at a radius where no
- * bridge site was ever proven, because the rail loop moved outward underneath
- * it. That is a real piece of work in `train/crossings.ts` and the bridge
- * planner, not a constant, and it has to be done before this can move.
+ * Jim, 14 September 2026, on seeing the park grown to match a 220 m sphere:
+ * *"the park now feels too big/sparse - I don't think the area has been
+ * maintained from before, it has gotten bigger."*
+ *
+ * It had. The day before, the ask was the opposite — *"as we decrease the
+ * radius, increase the size of the park in other ways eg increase the target
+ * radius of the park on the surface of the sphere"* — and what was built grew
+ * the park's **radius** by `sqrt(1200 / R)`, which at 220 m is 2.335x the
+ * radius and therefore **5.45x the ground**. Measured on the canonical seed:
+ * 21,136 m² authored, 115,287 m² built. He looked at it and reversed the ask,
+ * and this is the reversal.
+ *
+ * **"The area has been maintained" is read here as area, not as radius, and
+ * the two are different things on a sphere.** A cap out to horizontal distance
+ * `a` has more ground on it than its own `pi a²` footprint, because the metric
+ * stretches by `R / sqrt(R² - d²)` as the ground tilts away underfoot. So
+ * holding the *radius* fixed as `R` shrinks quietly grows the walked area,
+ * and holding the walked area fixed means letting the radius come in a little.
+ * This holds the walked area, which is what a child feels.
+ *
+ * **The relationship.** Setting the cap's surface area equal to the authored
+ * flat area, `2 pi R (R - sqrt(R² - a²)) = pi * AUTHORED_PLAY_RADIUS²`, solves
+ * exactly — no iteration, no search:
+ *
+ * ```
+ * a = AUTHORED_PLAY_RADIUS * sqrt(1 - AUTHORED_PLAY_RADIUS² / (4 R²))
+ * ```
+ *
+ * **How it behaves, which is the point of it being a relationship.** The
+ * correction is second order in `a / R`, so it is small and it is *always*
+ * small: the scale is 0.9913 at `R = 220` (57.49 m), 0.9953 at 300, 0.9997 at
+ * 1200, and it tends to exactly 1 as the sphere flattens out — which is the
+ * right answer, because a flat park is the park as authored. It stays real and
+ * well behaved down to `R = AUTHORED_PLAY_RADIUS / 2` (29 m), far below any
+ * radius the cat bus's gradient budget would tolerate. **So a future radius
+ * change needs no conversation and no second constant: this carries.**
+ *
+ * **What was wrong with the thing it replaces, because it is this repo's
+ * commonest bug and it bit within one commit.** The old form was a ratio
+ * against a hand-set `PARK_REFERENCE_SPHERE_RADIUS`, a *second* statement of
+ * how big the park is, kept in step with the first by hand. Its own doc comment
+ * ended up claiming it was "held equal to `GROUND_SPHERE_RADIUS`, which makes
+ * the scale exactly 1" while the line beneath it read `= 1200` against a 220 m
+ * sphere. The comment was the intent; the number was what shipped, and what
+ * shipped was a park 5.45x too big. There is no second number here to drift:
+ * the scale is a function of `GROUND_SPHERE_RADIUS` and nothing else.
+ *
+ * **And it is not merely a size preference — 2.335x was geometrically broken.**
+ * The boundary reached **236.3 m on a 220 m sphere**: past the horizon, where
+ * the cap has no ground left and the drop is infinite. Any scale that puts the
+ * park's `maxRadius` past `GROUND_SPHERE_RADIUS` is a park with its wall off
+ * the edge of the world. `theParkFitsOnItsOwnSphere` in
+ * `test/procgen/invariants.ts` now measures that on every seed.
  */
-const PARK_REFERENCE_SPHERE_RADIUS = 1200;
 export const PARK_SURFACE_SCALE = Math.sqrt(
-  PARK_REFERENCE_SPHERE_RADIUS / GROUND_SPHERE_RADIUS,
+  1 -
+    (AUTHORED_PLAY_RADIUS * AUTHORED_PLAY_RADIUS) /
+      (4 * GROUND_SPHERE_RADIUS * GROUND_SPHERE_RADIUS),
 );
 
 /** Half-width of the playable garden, in metres. The garden is square. */
@@ -127,8 +150,13 @@ export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
  * that the gap between the outline's mean radius and a *pinned* gate is what
  * the shell has to swell to cover. Scaling both together keeps the gate on the
  * wall rather than stranding it inside a park that grew around it.
+ *
+ * The scale is a shade under 1 rather than exactly 1 because the ground is a
+ * sphere and this is a *horizontal* radius: see `PARK_SURFACE_SCALE`, which
+ * trades those few centimetres to keep the ground actually underfoot equal to
+ * the flat park this was authored as.
  */
-export const GARDEN_PLAY_RADIUS = 58 * PARK_SURFACE_SCALE;
+export const GARDEN_PLAY_RADIUS = AUTHORED_PLAY_RADIUS * PARK_SURFACE_SCALE;
 
 /**
  * The steepest the ground is allowed to be anywhere the cat bus drives, as a
