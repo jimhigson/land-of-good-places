@@ -14,7 +14,13 @@ import type { Expression } from '../../art/style/faces';
 import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
 import type { NpcAvatar } from './npcAvatar';
 import { applyRidePose } from '../ridePose';
-import { altitudeAbove, landingCorrection, liftAlongUp } from '../movement/gravity';
+import {
+  altitudeAbove,
+  chartStep,
+  landingCorrection,
+  liftAlongUp,
+  realStep,
+} from '../movement/gravity';
 
 /**
  * A character that is not the player.
@@ -111,6 +117,10 @@ export class NpcCharacter {
   private readonly lift = new Vector3();
   /** The sideways half of a landing, waiting for a step to carry it. */
   private readonly pendingLanding = new Vector3();
+  /** This frame's walk, in the chart metres `collision.resolve` works in. */
+  private readonly walkStep = new Vector3();
+  /** The resolved step, back in real ground metres for the velocity read-back. */
+  private readonly walkBack = new Vector3();
   private expression: Expression = 'neutral';
 
   // --- tree climbing (see world/TreeClimbing.ts) ---------------------------
@@ -661,9 +671,21 @@ export class NpcCharacter {
     this.lift.z += this.pendingLanding.z;
     this.pendingLanding.set(0, 0, 0);
 
+    // The walk converted to chart metres, the lift not — `Player.update`'s
+    // twin, and it matters as much here: every character out in the park is an
+    // NPC, and without this they walk outward half again as fast as they walk
+    // sideways. See `chartStep`.
+    chartStep(
+      this.position.x,
+      this.position.y,
+      this.position.z,
+      this.velocity.x * dt,
+      this.velocity.z * dt,
+      this.walkStep,
+    );
     this.previousPosition.copy(this.position);
-    this.position.x += this.velocity.x * dt + this.lift.x;
-    this.position.z += this.velocity.z * dt + this.lift.z;
+    this.position.x += this.walkStep.x + this.lift.x;
+    this.position.z += this.walkStep.z + this.lift.z;
     this.collision.resolve(this.position, NPC_RADIUS);
     this.boundEscape(this.previousPosition);
 
@@ -674,8 +696,16 @@ export class NpcCharacter {
       // sideways excursion read back as walking speed would be clamped by the
       // `askedSpeed` guard below and then fought by `approach` on the way up
       // and again on the way down. See `Player.update`, which carries the note.
-      this.velocity.x = (this.position.x - this.previousPosition.x - this.lift.x) / dt;
-      this.velocity.z = (this.position.z - this.previousPosition.z - this.lift.z) / dt;
+      realStep(
+        this.position.x,
+        this.position.y,
+        this.position.z,
+        this.position.x - this.previousPosition.x - this.lift.x,
+        this.position.z - this.previousPosition.z - this.lift.z,
+        this.walkBack,
+      );
+      this.velocity.x = this.walkBack.x / dt;
+      this.velocity.z = this.walkBack.z / dt;
 
       // A wall can only ever take momentum away — this formula has no other
       // way to express "stopped dead" than dividing the resolved delta by
