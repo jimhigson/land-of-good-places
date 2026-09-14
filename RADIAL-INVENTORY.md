@@ -25,10 +25,11 @@ repeated.
   cameras) — unchanged, still open, plus its three carve-outs now struck (§1).
 - **+15** in `src/` world UI, effects and lighting the first sweep never looked
   at (§3), including the two most-seen pieces of world UI in the game.
-- **+13** in the **checks and invariants themselves** (§2) — the half of the
+- **+32** in the **checks and invariants themselves** (§2) — the half of the
   repo nobody had swept. 193 files in `scripts/` and `test/`; **three** of them
-  mention a sphere helper, against 129 sites in `src/`.
-- **≈ 80 open sites** in total, across ~60 files.
+  mention a sphere helper, against 129 sites in `src/`. Twelve of the 32 are in
+  `pnpm run check`; ten are in the merge-blocking `test:procgen` suite.
+- **≈ 95 open sites** in total, across ~70 files.
 
 **The worst three by what a child actually sees:**
 
@@ -43,9 +44,14 @@ repeated.
    against a 0.72 m outward diagonal). Not a lean she can see — a control that
    silently refuses, in the part of the park where there is nothing to blame.
 
-**And the worst one she cannot see:** `check-hotel.mts`'s fall detector fires
-on every outdoor NPC beyond 28.7 m, so it can no longer find a real fall (§2.1)
-— on a branch where the park does not build at all (§0).
+**And the worst three she cannot see, all in the checks:**
+`check-hotel.mts`'s fall detector fires on every outdoor NPC beyond 28.7 m, so
+it can no longer find a real fall (§2.1); `check-tap-spacing.mts` silently skips
+crowded stall clusters in the outer park as "different storeys" and its coverage
+counters fall with nothing going red (§2.4 #2); and `check-swept-bus.mts` sweeps
+a bus the game stopped posing that way months ago, so its committed baseline is
+fiction (§2.4 #3). All of it on a branch where **the park does not build at
+all** (§0).
 
 ## The numbers, measured on this branch
 
@@ -146,7 +152,7 @@ sites in `src/`. That ratio is the finding in one line.
 | **expression** | `const FLOOR_OF_THE_WORLD = -2;` … `if (character.position.y < FLOOR_OF_THE_WORLD)` |
 | **assumes** | the ground is near `y = 0` everywhere, so `y < −2` means a fall |
 | **out/in** | the clause sweeps `npcs.all`, which is **outdoor** park NPCs as well as hotel residents |
-| **measured** | `terrainHeight` first drops below `−2` at **d = 28.7 m** from the park origin. The park reaches 157 m, where the grass is at **−65.7 m**. |
+| **measured** | `terrainHeight` first drops below `−2` at **d = 28.7 m** from the park origin (marched along four bearings, so the terrain waves are in it; the bare spherical cap crosses `−2` at 29.6 m — the two agree, and the difference is the waves). The walkable garden reaches 135.4 m (`−46 m`) and the park's furniture 157 m (`−65.7 m`). |
 | **what breaks** | every NPC standing happily on grass more than 28.7 m out is reported as "falling through the world". The clause's own doc comment — *"Deep enough that no floor in the game is near it"* — is now false by 63 m. |
 | **severity** | **High.** It cannot detect a real fall any more: a genuine fall is drowned in ~every outdoor NPC. Its own docblock cites family QA finding all seven hotel residents falling — that capability is gone. |
 
@@ -189,20 +195,77 @@ The invariants can only be as radial as the facts they read.
 | `:1774` | `right.crossVectors(tangent, new Vector3(0, 1, 0))` — building the chute's local frame for the "can this camera see the rider" rays | the comment says *"the chute's own frame, so 'above the trough floor' leans with the chute"*, and it does lean with the chute's **tangent** but is anchored to **world** up. On a chute that is itself stood on the sphere, the derived `up` is wrong by the local lean, so `rider` is placed off the trough floor laterally | **Medium** |
 | `:1790` | `groundY: terrainHeight(eye.x, eye.z)` published as a fact, consumed as `eye.y − groundY` | a column difference again — the same fault class that put the arrival camera in the earth | **Medium** |
 
-### 2.4 The rest of `scripts/`
+### 2.4 The rest of `scripts/` — 39 files triaged, 18 hits
 
-**193 files sweep; 3 are sphere-aware.** The triage of the remaining check and
-measurement scripts is in **§2.5** below (contributed by the scripts sweep).
-The pattern to expect, and the one to grep for when re-running:
+**Two reference radii, both wanted below.** `GARDEN_PLAY_RADIUS =
+58·√(1200/220) = 135.4 m` — the outdoor park a child can walk, 38° of lean,
+ground `y = −46 m`. The park's *furniture* reaches 157 m (the Rail Race rings
+circle outside the play boundary), 45.5° and −65.7 m. The entrance/bus spot
+(`ENTRANCE_PLAYER_X/Z`) is **51.6 m** out: ground `y = −6.1 m`, lean 13.6°.
 
-- a fixed `y` threshold (`FLOOR_OF_THE_WORLD`, a headroom floor, a "ground is
-  about here" constant);
-- a downward or upward ray along `(0, ±1, 0)`;
-- `Box3` `min.y` / `max.y` on outdoor geometry;
-- `a.y − b.y` where `a` and `b` are at different `x,z`;
-- a camera eye rebuilt in the flat frame (the fault
-  `check-arrival-camera.mts` has already been fixed for, and the only script
-  that has been).
+Chain membership, because it decides what a hit costs: `check:hotel`,
+`check:tap-spacing`, `check:rail-race`, `check:park`, `check:pet-slide`,
+`check:tie-frame`, `check:cart-shape`, `check:climb-wave`,
+`check:statue-occlusion`, `check:speech-bubbles`, `check:hop-clearance` and
+`check:deck-fallthrough` are **in** `pnpm run check`. `check:npc-perch`,
+`check:entrance-road`, `check:swept-bus`, `check:wall-tunnelling` and the
+probes are not.
+
+| # | file:line | expression | what it now gets wrong | sev |
+|---|---|---|---|---|
+| 1 | `check-hotel.mts:130,157` | `FLOOR_OF_THE_WORLD = -2`; `if (character.position.y < FLOOR_OF_THE_WORLD)` | §2.1. Fires on every park NPC past ~29 m; at the garden edge the message reads *"is at y=−46.31 m … falling through the world"*. A required chain step turned into a false red over most of the park, with the real signal drowned | **High** |
+| 2 | `check-tap-spacing.mts:121,141` | `if (!sameStorey(zone.y, band.y)) continue;` — `sameStorey` = `abs(aY−bY) <= 2.2` | **worse than the same call inside `invariants.ts` (§2.2), and the opposite failure.** Here the loop is over *zones and door bands* that need not be close in plan: at 100 m out a 3 m radial step moves `y` by 1.5 m, and near the garden edge 2.9 m of separation exceeds the tolerance outright. Crowded stall clusters far from the origin are silently `continue`d as "different storeys" and **never measured**. `bandsChecked`/`pairsChecked` fall and nothing goes red | **High** |
+| 3 | `check-swept-bus.mts:491,524,536` | `localY = sample.y − busGroundY − lift`, `busGroundY = terrainHeight(station.x, station.z)`, yaw-only frame from `pose.facing` | **the game moved and the check did not.** `ArrivalSequence.placeBus:1915-1934` now calls `faceOnGround`, explicitly because *"the road runs out to 117 m … a chassis held level to world +Y digs its downhill wheel roughly half a metre in"*. `check-swept-bus.mts:451`'s comment still quotes the retired three-line pose as ground truth. The swept body is a bus nobody renders, mis-oriented by the full road lean, and the trestles it is tested against lean the other way — so the post count **and its committed baseline** over- and under-count at once | **High** |
+| 4 | `check-rail-race.mts:251,275,291,298,204` | `worstGround = min(point.y − ground)` → `require(> 4)`; `lowestOverGate = min(point.y − terrainHeight(…))` → `require(> 6)`; `above = height − terrainHeight(point.x, point.z)` | the 4 m "a child walks under this" rule actually passes at ~3.4-3.6 m of real clearance. Line 204 is worse than a cosine: `height` is `route.heightAt` (the **flat-frame** y, `railRace/route.ts:510`) while `point` came from `route.pointAt`, which leans it **~3.7 m outwards** (`route.ts:526-529`) — two different columns, ~1.9 m apart. The lane-fairness clauses (`climbSpread < 0.02`) now include the sphere's own fall through `baseAt`'s `capHeight`, not just the ride's hills | **Medium-High** |
+| 5 | `check-npc-perch.mts:191-192,224,233,294,341` | `top = max(part.position.y + part.scale.y)`; `clearance = headY − band.top` | a leaning canopy's *vertical* extent is not its height along the trunk. Both errors push `fraction` down, so far-out trees drift towards a false "buried in the foliage" red while a genuinely floating head nearer the boundary reads acceptable | Medium |
+| 6 | `check-climb-wave.mts:162-166,309-313` | the climber posed at `tree.canopyTopY − KID_HEAD_HEIGHT + lift + WAVE_RISE·wave`, `rotation.y` only | she is displaced sideways from her own trunk by `lift·sin θ` and stands at an angle to the branch. **The game's `TreeClimbing.climbPose:657` is flat too, so the check mirrors the bug and cannot see it** | Medium |
+| 7 | `check-entrance-road.mts:314,567` | `up = footY + axis.y·along − terrainHeight(x, z)`; `if (up < CAT_BUS_BODY_BOTTOM_Y ‖ up > CAT_BUS_BODY_TOP_Y) continue;` and `if (face.y < 0) downFacingTriangles += 1` | a sample genuinely inside the bus body reads outside the band and is `continue`d — the exact under-count `check:swept-bus` exists to expose, one axis further. `face.y < 0` tests road facing against world `+Y`, which a correctly leaning road no longer aligns with | Medium |
+| 8 | `check-park.mts:476-477` | `deck = park.sample(hit.x, hit.z, TOP_REFERENCE)`; `overBridge = deck − hit.rail >= BRIDGE_RISE` | both terms are world `y` in one column, so the rise over-reads by `1/cos θ`: at the boundary a deck clearing only `BRIDGE_RISE·cos 38°` in reality **passes**. The clause's own doc still asserts *"measured from the terrain under the track"*, which on the sphere is a radius, not a `y` | Medium |
+| 9 | `check-pet-slide.mts:1080-1081` | `aboveGround = cameraWorld.y − terrainHeight(cameraWorld.x, cameraWorld.z)`; `if (aboveGround < 0) undergroundFrames += 1` | the decisive clause for #516. A lens genuinely buried tens of centimetres in leaning grass reports positive clearance, `undergroundFrames` stays 0, and the ray fan that *names* the offending mesh is never gated on — the run prints "ASSERTS NOTHING" | Medium |
+| 10 | `check-tie-frame.mts:109` | `expected.y -= 0.12; // the tie's own deliberate drop below rail height` | `railFrameAt` is already sphere-aware (`sweptRail.ts:140`) and hands this file a real `frame.up` **which it then ignores**. It reproduces `Coaster.ts:436`'s `setY(mid.y − 0.12)`, so `actual` and `expected` agree, the run prints *"every tie sits on both rails"*, and the ties are in fact offset laterally by `0.12·sin θ` where the 50 mm epsilon can never see it. **A check that agrees with the code rather than with the world** | Medium |
+| 11 | `playerSim.mts:304,311-321,338` | `if (!airborne && position.y − groundY > FALL_THRESHOLD)`; `verticalVelocity -= GRAVITY·dt`; and with no `ground` sampler, `sampleGround` returns **`0`** — a flat plane | the shared double under `check:hop-clearance`, `check:deck-fallthrough` and `check:wall-tunnelling`. Its default world is literally flat, and it mirrors the real `Player`, so it cannot expose the divergence it exists to measure | Medium |
+| 12 | `measure-bridge-parapet.mts:208,211-218` | `if (oy − terrainHeight(ox, oz) <= PARAPET_GONE_HUMP) continue;` and a ladder descending by subtracting from `y` | the "is a parapet meant to exist here" gate over-reads the hump, so correctly-tapered stretches still get probed; the ladder walks off the leaning parapet's *face* instead of down it, reporting phantom missing bands far from the origin. (Pairs with §2.3's `parkFacts.ts:1720`, which computes the same hump) | Medium |
+| 13 | `check-statue-occlusion.mts:246,285,305` | `feet = new Vector3(x, 0, z)`; `y = occluder.centreY + f·halfHeight`; ray from `feet.y + PLAYER_HEIGHT·fraction` | models a flat apron at `y = 0` out to ±16 m and a statue axis along `+Y`, while the real statue rides the fountain, whose own code already uses a local `this.up` (`Fountain.ts:319`). Near the origin the error is small, which is why it stays green — the FADED-vs-HIDDEN agreement it certifies is for a flat park | Low-Medium |
+| 14 | `measure-deck-fallthrough.mts:259,295-296` | `base = terrainHeight(RAMP_X0, RAMP_Z) + 6`; `gap = deck − player.groundY` | builds a flat `+Y` ramp 40 m out and runs `SimPlayer`'s `+Y` gravity against it. The sampler question survives; the thresholds are vertical on a leaning world, and it would not notice a platform whose `surfaceY` stopped agreeing with its own tilt | Low |
+| 15 | `check-speech-bubbles.mts:422,441-444` | `playerPosition = new Vector3(ENTRANCE_PLAYER_X, 0, ENTRANCE_PLAYER_Z)`; anchors at a fixed `1.9` | the entrance ground is at **−6.1 m**, so the whole rig — camera included — floats 6 m above the park it claims to be in. The screen-space arithmetic is sound; the frame is one nobody renders | Low |
+| 16 | `check-cart-shape.mts:418-419` | `rotation.y = atan2(tangent.x, tangent.z)`; `rotation.x = -asin(clamp(tangent.y))` — no roll to the local up | the wheel-visibility fraction is measured on a cart standing at the ring's full lean off its own rails. **Mirrors `RailRace.placeCarts:940-942`, so it cannot flag it** | Low |
+| 17 | `measure-hop-clearance.mts:65` | `new SimPlayer(collision, {…})` with no `ground` → the world is `y = 0` | the apex it certifies (and which `Collision.ts` hard-codes) is a **vertical** apex; a child hopping a park wall rises along `+Y` while the wall top follows the radial. Self-consistent with the engine's flat vertical — documentation-of-frame rather than a live false result | Low |
+| 18 | `probe-sightline.mts:55,58` | `top = at.y + bounds.max.y·scale.y`; prints `heightAboveGround` | diagnostic only, but the `top` it feeds to `hidesTheArrivingBus` is the vertical top of a leaning canopy | Low |
+
+**Triaged and NOT a hit — do not re-file.** Indoor or its own space:
+`check-nav-routes.mts` (hotel lobby mezzanine throughout), `check-castle.mts`,
+`check-benches.mts`, `check-npc-presence.mts` (gated on `space !== SPACE_GARDEN`),
+`check-stall-shape.mts`, `check-bus-journey.mts` (`BusJourney` owns a private
+lane that never touches the sphere), `check-cat-bus-suspension.mts`,
+`check-keyring-hang.mts`, `probe-height-blind.mts`, `check-asset-contract.mts`.
+2D or screen/direction space: `check-cat-bus.mts`, `check-castle-towers.mts`,
+`check-npc-separation.mts`, `check-npc-jitter.mts`, `measure-wall-tunnelling.mts`,
+`check-keyring-view.mts`, `check-sky-view.mts`. Curve-relative:
+`check-slide-rider.mts` (its one bare `.y` at `:604` is printed, never asserted,
+and `:585-590` explains why). Not geometric: `check-park-boot.mts` (hashes).
+
+`park-harness.mts` asserts nothing, but is worth knowing: the `sample(x, z, y)`
+it hands every caller is `world.building.surfaces.sample`, a **downward
+vertical** sampler. That is the shared root of hits 8 and 14, and of anything
+else that asks "what is under me".
+
+### 2.5 Four of these are check-and-code *pairs*
+
+Fixing the check alone turns it red, because the game still uses the flat
+convention the check is reproducing. Change both, in one commit:
+
+| check | the code it mirrors | status |
+|---|---|---|
+| `check-swept-bus.mts` | `ArrivalSequence.placeBus:1915-1934` | **code already fixed** (`faceOnGround`); only the check is stale |
+| `check-tie-frame.mts:109` | `Coaster.ts:436` `setY(mid.y − 0.12)` | both flat |
+| `check-cart-shape.mts:418` | `RailRace.placeCarts:940-942` | both flat |
+| `check-climb-wave.mts:309` | `TreeClimbing.climbPose:657` | both flat |
+
+**The single most common repair, in both columns**, is mechanical:
+`a.y − terrainHeight(a.x, a.z)` → `altitudeAt(a.x, a.y, a.z)`, and
+`v.set(x, terrainHeight(x, z) + h, z)` → `liftFromGround(x, z, h, v)`.
+`terrain.ts:200-225`'s own header already states the `1/cos θ` over-read and
+the wrong-column failure that every one of these call sites is an instance of.
 
 ---
 
@@ -408,7 +471,7 @@ patterns reach those files at all; it is also what proves the sweep's headline
 the *work* is the rewrite.** They are not the same three quarters, and the
 difference is the number worth knowing.
 
-**Re-frame — route an existing call through an existing helper** (~60 sites).
+**Re-frame — route an existing call through an existing helper** (~70 sites).
 The vocabulary is already built and proven: `upFor`, `altitudeAt`,
 `liftFromGround`, `yAtAltitude`, `eyeForFocus`, `placeOnSphere`,
 `standOnSphere`, `tiltToSphere`, `capHeight`. Everything in §3.1 (one
