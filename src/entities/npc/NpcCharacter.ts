@@ -14,6 +14,13 @@ import type { Expression } from '../../art/style/faces';
 import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
 import type { NpcAvatar } from './npcAvatar';
 import { applyRidePose } from '../ridePose';
+import {
+  altitudeAbove,
+  chartStep,
+  landingCorrection,
+  liftAlongUp,
+  realStep,
+} from '../movement/gravity';
 
 /**
  * A character that is not the player.
@@ -95,6 +102,25 @@ export class NpcCharacter {
   private gait = 0;
   private verticalVelocity = 0;
   private airborne = false;
+  /**
+   * Her feet's height above the surface she is on, **measured radially** — the
+   * NPC's own `hopClearance`. One frame stale where `animate` reads it as a
+   * foot offset, exactly as `Player`'s is and for the same reason.
+   *
+   * It exists because `animate` used to re-ask the ground sampler and difference
+   * world `y` to get this — a second, disagreeing definition of a number `move`
+   * had already computed correctly one frame earlier. On the sphere the two
+   * answers differ, because one is a `y` difference and the other is radial.
+   */
+  private hopHeightAboveGround = 0;
+  /** This frame's travel along the local up. See `Player`'s field of the same name. */
+  private readonly lift = new Vector3();
+  /** The sideways half of a landing, waiting for a step to carry it. */
+  private readonly pendingLanding = new Vector3();
+  /** This frame's walk, in the chart metres `collision.resolve` works in. */
+  private readonly walkStep = new Vector3();
+  /** The resolved step, back in real ground metres for the velocity read-back. */
+  private readonly walkBack = new Vector3();
   private expression: Expression = 'neutral';
 
   // --- tree climbing (see world/TreeClimbing.ts) ---------------------------
@@ -618,17 +644,68 @@ export class NpcCharacter {
     // the clamp below.
     const askedSpeed = Math.hypot(this.velocity.x, this.velocity.z);
 
+    // --- the lift she has earned along the local up --------------------------
+    // **The same radial gravity the player has**, and it is not cosmetic for an
+    // NPC either: every character out in the park is one, and a hop along world
+    // `+Y` out there loses 30 % of its height and leans 0.875 m towards the
+    // middle of the park in her own frame. `entities/movement/gravity.ts` owns
+    // it and carries the full account; `Player.update` is the twin of this
+    // block, line for line.
+    //
+    // Gravity before the lift, not after: semi-implicit Euler is what this game
+    // has always run, and taking the lift first over-reads the apex by a
+    // frame's worth of jump speed at every radius including the origin.
+    if (this.airborne) {
+      this.verticalVelocity -= GRAVITY * dt;
+      liftAlongUp(
+        this.position.x,
+        this.position.y,
+        this.position.z,
+        this.verticalVelocity * dt,
+        this.lift,
+      );
+    } else {
+      this.lift.set(0, 0, 0);
+    }
+    this.lift.x += this.pendingLanding.x;
+    this.lift.z += this.pendingLanding.z;
+    this.pendingLanding.set(0, 0, 0);
+
+    // The walk converted to chart metres, the lift not — `Player.update`'s
+    // twin, and it matters as much here: every character out in the park is an
+    // NPC, and without this they walk outward half again as fast as they walk
+    // sideways. See `chartStep`.
+    chartStep(
+      this.position.x,
+      this.position.y,
+      this.position.z,
+      this.velocity.x * dt,
+      this.velocity.z * dt,
+      this.walkStep,
+    );
     this.previousPosition.copy(this.position);
-    this.position.x += this.velocity.x * dt;
-    this.position.z += this.velocity.z * dt;
+    this.position.x += this.walkStep.x + this.lift.x;
+    this.position.z += this.walkStep.z + this.lift.z;
     this.collision.resolve(this.position, NPC_RADIUS);
     this.boundEscape(this.previousPosition);
 
     // Trust the resolved position over the intended one, so walking into a wall
     // kills the momentum instead of grinding against it.
     if (dt > 0) {
-      this.velocity.x = (this.position.x - this.previousPosition.x) / dt;
-      this.velocity.z = (this.position.z - this.previousPosition.z) / dt;
+      // The lift comes back out first: `velocity` is her *walk*, and a hop's
+      // sideways excursion read back as walking speed would be clamped by the
+      // `askedSpeed` guard below and then fought by `approach` on the way up
+      // and again on the way down. See `Player.update`, which carries the note.
+      realStep(
+        this.position.x,
+        this.position.y,
+        this.position.z,
+        this.position.x - this.previousPosition.x - this.lift.x,
+        this.position.z - this.previousPosition.z - this.lift.z,
+        this.walkBack,
+      );
+      this.velocity.x = this.walkBack.x / dt;
+      this.velocity.z = this.walkBack.z / dt;
 
       // A wall can only ever take momentum away — this formula has no other
       // way to express "stopped dead" than dividing the resolved delta by
@@ -656,9 +733,23 @@ export class NpcCharacter {
       }
     }
 
+    // The `y` half of the lift, now that its `x`/`z` half has been resolved.
+    if (this.airborne) this.position.y += this.lift.y;
+
     const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
 
-    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+    // Radial, not a `y` difference: the latter over-reads by `1 / cos θ`, so
+    // `FALL_THRESHOLD`'s 0.5 m of forgiveness was spent by half a metre of
+    // *lateral* travel out where the ground leans — which is every outdoor NPC
+    // past about 29 m reading as falling while walking on grass.
+    const altitude = altitudeAbove(
+      this.position.x,
+      this.position.y,
+      this.position.z,
+      groundY,
+    );
+
+    if (!this.airborne && altitude > FALL_THRESHOLD) {
       this.airborne = true;
       this.verticalVelocity = 0;
     }
@@ -669,9 +760,16 @@ export class NpcCharacter {
     }
 
     if (this.airborne) {
-      this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
-      if (this.position.y <= groundY) {
+      // `verticalVelocity <= 0` keeps her from being caught on the frame she
+      // jumps, when she is still at altitude 0 with a full jump in hand.
+      if (altitude <= 0 && this.verticalVelocity <= 0) {
+        landingCorrection(
+          this.position.x,
+          this.position.y,
+          this.position.z,
+          altitude,
+          this.pendingLanding,
+        );
         this.position.y = groundY;
         this.verticalVelocity = 0;
         this.airborne = false;
@@ -679,6 +777,7 @@ export class NpcCharacter {
     } else {
       this.position.y = damp(this.position.y, groundY, 0.04, dt);
     }
+    this.hopHeightAboveGround = this.airborne ? Math.max(0, altitude) : 0;
 
     // --- facing ---------------------------------------------------------
     const planarSpeed = Math.hypot(this.velocity.x, this.velocity.z);
@@ -757,7 +856,13 @@ export class NpcCharacter {
     }
     const gait = this.gait;
     const phase = this.walkPhase;
-    const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
+    // **No second ground sample here.** This used to re-ask the sampler and
+    // difference world `y` to get the hop height — a second, disagreeing
+    // definition of a number `move` had already computed correctly one frame
+    // earlier. On a flat park the two agreed; on the sphere one is a `y`
+    // difference and the other is radial, and they are 1.43x apart at the
+    // park's reach. `move` owns it, in `hopHeightAboveGround`.
+    //
     // The little tuck a child pulls their knees into on the way up from a hop —
     // scaled by how far off the ground they are, which is fine for a hop and
     // **wrong for a climb**, where "off the ground" is the whole height of the
@@ -775,7 +880,7 @@ export class NpcCharacter {
     // a bus floor is 0.62 m above the terrain, which is not a hop, and reading
     // it as one tucks her knees up on the seat.
     const hopHeight =
-      this.climbingFlag || this.scriptedFlag ? 0 : Math.max(0, this.position.y - groundY);
+      this.climbingFlag || this.scriptedFlag ? 0 : this.hopHeightAboveGround;
 
     const bob = Math.abs(Math.sin(phase)) * PLAYER_BOB_HEIGHT * gait;
     const breathe = Math.sin(elapsed * 1.9 + this.walkPhase) * 0.014 * (1 - gait);
