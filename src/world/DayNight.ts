@@ -3,6 +3,7 @@ import {
   DirectionalLight,
   Fog,
   HemisphereLight,
+  Quaternion,
   Scene,
   Vector2,
   Vector3,
@@ -25,6 +26,8 @@ import { angleDelta, clamp, clamp01, lerp, smoothstep, TAU } from '../core/mathU
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Sky } from './Sky';
 import { gameStore } from '../state';
+import { INDOOR_UP } from './terrain';
+import { upFor } from './up';
 
 /**
  * Time of day: the sun's arc, the colour of everything, and when the fairy
@@ -340,6 +343,17 @@ export class DayNight implements GameSystem {
   private readonly sunDirection = new Vector3(0, 1, 0);
   /** World-space direction *towards* the moon — the sun's, reflected. */
   private readonly moonDirection = new Vector3(0, -1, 0);
+  /**
+   * The fill's direction solved in the **flat** frame — `(-key.x, 0.55,
+   * -key.z)` — before {@link followPlayer} leans it onto the ground under the
+   * player. Kept as a field rather than passed, because the two halves are
+   * decided by different questions (what time is it; where is she standing) and
+   * `tick` runs them in that order on the same frame.
+   */
+  private readonly fillFlatDirection = new Vector3(0, 1, 0);
+  /** The local up under the player, and the axis the hemisphere light is aimed along. */
+  private readonly localUp = new Vector3(0, 1, 0);
+  private readonly localTilt = new Quaternion();
   private readonly fogColour = new Color();
   /**
    * Scratch sun direction for {@link applyWakeSky}, kept deliberately separate
@@ -688,7 +702,28 @@ export class DayNight implements GameSystem {
     this.paintSkyQuad(sunDirection, altitude, look, nightFactor);
   }
 
-  /** Keeps the shadow frustum centred on the action rather than the origin. */
+  /**
+   * Keeps the shadow frustum centred on the action rather than the origin —
+   * **and puts the two lights that have no direction of their own onto the
+   * player's local horizon rather than the world's.**
+   *
+   * The key light needed none of this: it is a direction from a sun, and a sun
+   * does not care which way the ground under you leans. The other two do,
+   * because both are defined *relative to a horizon*:
+   *
+   * - the **fill** is "opposite the key and 28.8° up", and 28.8° above world
+   *   `+Y` is 17° *below* the local horizon at the park's rim;
+   * - the **hemisphere** light blends sky against ground bounce by
+   *   `0.5 + 0.5·(N·axis)`, and three.js leaves that axis at `(0, 1, 0)` unless
+   *   somebody assigns `position`. Nobody ever had, so a patch of grass at 157 m
+   *   — whose normal is its own local up, 45.5° off world `+Y` — was collecting
+   *   `0.85` sky and `0.15` green ground bounce instead of pure sky. The outer
+   *   park went continuously greener and flatter than the middle with no seam
+   *   to explain it.
+   *
+   * Both are one line each here, and at the park's origin the local up *is*
+   * `+Y`, so nothing about the centre of the park changes by a single bit.
+   */
   private followPlayer(playerPosition: Vector3): void {
     this.keyLight.target.position.copy(playerPosition);
     this.keyLight.target.updateMatrixWorld();
@@ -696,6 +731,18 @@ export class DayNight implements GameSystem {
       .copy(playerPosition)
       .addScaledVector(this.sunDirection, 95);
     this.keyLight.updateMatrixWorld();
+
+    upFor(playerPosition.x, playerPosition.y, playerPosition.z, this.localUp);
+    this.localTilt.setFromUnitVectors(INDOOR_UP, this.localUp);
+    this.fillLight.position
+      .copy(this.fillFlatDirection)
+      .applyQuaternion(this.localTilt)
+      .multiplyScalar(60);
+
+    // A `HemisphereLight`'s axis is its `position`, normalised. Assigning it is
+    // the entire fix; the light has no target and nothing else reads this.
+    this.ambientLight.position.copy(this.localUp);
+    this.ambientLight.updateMatrixWorld();
   }
 
   /**
@@ -781,10 +828,15 @@ export class DayNight implements GameSystem {
     // park, but still above it: straight opposite would light the ground from
     // underneath and every toy would glow along its bottom edge.
     const keyDirection = sunStrength >= moonStrength ? this.sunDirection : this.moonDirection;
-    this.fillLight.position
-      .set(-keyDirection.x, 0.55, -keyDirection.z)
-      .normalize()
-      .multiplyScalar(60);
+    // `0.55` is `tan 28.8°` above the horizon — and *which* horizon is the
+    // whole point. Solved here in the flat frame, exactly as it always was,
+    // then rotated onto the player's local horizon by `followPlayer`. Left in
+    // world `+Y` it sat **17° below** the local horizon at the park's rim,
+    // which is precisely the thing the comment above exists to prevent: every
+    // bench, every stall and Eleri herself glowing along the bottom edge in
+    // cool blue across the whole outer park, while the same toys by the
+    // fountain looked right.
+    this.fillFlatDirection.set(-keyDirection.x, 0.55, -keyDirection.z).normalize();
     this.fillLight.color.setHex(look.ambientSky);
     this.fillLight.intensity =
       (sunStrength + moonStrength * MOON_FILL_BOOST) * FILL_LIGHT_RATIO;
