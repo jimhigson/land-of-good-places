@@ -35,6 +35,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
+import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import { bendOntoPlanet } from '../geo/bend';
 import { terrainHeight } from '../terrain';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
@@ -2700,8 +2701,31 @@ function registerCastleTowerCollision(collision: CollisionWorld): void {
     // The roof cones sit on top of the bodies and share their axis, so the body
     // alone is the whole footprint a child can walk into.
     if (!tower.name.startsWith('tower-body-')) continue;
+    // **One circle at the foot is not the shaft any more, because the shaft
+    // leans.** Out where the castle stands, a turret's own up is 36° off world
+    // `+Y`, so by a child's chest the drawn stone has moved over a metre away
+    // from a circle drawn round its foot — she could stand with her head inside
+    // masonry and nothing would stop her. `CollisionWorld` circles are
+    // height-blind, so the honest footprint is the *union* of the shaft's
+    // cross-sections over the height a child's body actually occupies, and a
+    // few circles stepped up the axis give that far more tightly than one
+    // inflated radius would. Inflating instead would keep her out of open air
+    // on the uphill side, which is how a solidity fix costs somebody a place to
+    // stand.
+    //
     // `radiusBottom` is `CASTLE_TURRET_BASE_RADIUS`, which the drawn shaft is
     // also built from — one owner, so the two cannot drift.
-    collision.addCircle(tower.x, tower.z, tower.radiusBottom);
+    const steps = 4;
+    for (let i = 0; i <= steps; i += 1) {
+      const up = (i / steps) * TALLEST_CHILD_HEIGHT;
+      // Where the axis has got to `up` metres above the foot, measured along the
+      // tower's own axis rather than along world `+Y`.
+      const along = tower.axisY <= 1e-6 ? 0 : up / tower.axisY;
+      collision.addCircle(
+        tower.x + tower.axisX * along,
+        tower.z + tower.axisZ * along,
+        tower.radiusBottom,
+      );
+    }
   }
 }
