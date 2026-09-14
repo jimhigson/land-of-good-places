@@ -65,4 +65,5 @@ export {
   groundRadiusToward,
   groundRadiusUnder,
   setAltitude,
+  worldYAtAltitude,
 } from './ground';
