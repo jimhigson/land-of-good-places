@@ -61,28 +61,56 @@ Cost **0.65 s**; inserted after `check:text`. Chain step **sets** compared
 Baseline: 217 expressions / 241 findings — HARD_UP 55, Y_DIFFERENCE 58,
 Y_OVER_GROUND 27, Y_THRESHOLD 8, FLAT_DISC 93. **Not adjudicated**, on purpose.
 
-## Still to do
+### 3. `Altitude` and `Up` (commit 4) — additive, nobody ambushed
 
-**3. Types that refuse the mistake** — the remaining deliverable.
+`src/world/geo/Altitude.ts`, `src/world/geo/Up.ts`. **`tsc --noEmit` and
+`typecheck:test` both exit 0 with no other file touched**, so the three
+in-flight lanes compile exactly as before and adopt at their own pace.
 
-The measured constraint that decides the design, probed with `tsc` before
-designing anything:
+The measured constraint that decided the design — probed with `tsc` **before**
+designing anything, not after:
 
-- A **branded number** (`number & { [brand]: true }`) does **not** stop
-  `alt < geo.cy` or `alt - geo.cy`. TS allows both. It only stops a plain
-  `number` being *passed* where the brand is required.
-- An **opaque** type (not a number at all) stops both:
-  `TS2365: Operator '<' cannot be applied` and `TS2362`.
+| expression | branded `number` | opaque |
+|---|---|---|
+| `alt < geo.cy` | **compiles** | TS2365 |
+| `alt - geo.cy` | **compiles** | TS2362 |
+| `needsAltitude(plainNumber)` | TS2345 | TS2345 |
 
-So "a height cannot be compared against a coordinate" requires `Altitude` to be
-**opaque**, with its own small operator vocabulary. That is correct but has a
-wide blast radius across three in-flight lanes, which is why it is staged after
-the check rather than before it. Do not land it without telling the Overseer
-first — the brief is explicit that the timing matters.
+A brand on a `number` is assignable *to* `number`, so every operator stays
+open — it guards function boundaries only, which is the half that was never the
+bug. So **`Altitude` is opaque** (six operations, no runtime representation).
+**`Up` is only a brand**, because for an *object* type a brand already refuses
+a plain `Vector3` while staying assignable to one — which is why it could be
+wired into `Geo.up`/`Frame.up` with zero breakage.
 
-`Geo` already does the positional half of this well (`cx`/`cy`/`cz` so
-`geo.y` will not compile). The gap is `Altitude` and an `Up` that can only come
-from `upAt`.
+`altitudeOf` delegates to the existing `altitude`, so there is no second
+definition to drift.
+
+Proved red (all `@ts-expect-error`, which TS fails as TS2578 when the expected
+error does **not** occur — so these cannot rot):
+- `Altitude` as a branded number → TS2578 on 4 lines, exit 2.
+- `Up` as a plain `Vector3` alias → TS2578 on 2 lines, exit 2.
+
+`check:flat-primitives` caught the two world-axis literals in the new test file
+on its first run; they now carry `// flat-ok:` with a reason. The hatch worked
+on its author first, which is the right first customer.
+
+## Still to do — the decision the Overseer owns
+
+Nothing here forces adoption. **Migrating a subsystem to `Altitude`/`Up` is
+what breaks a lane**, and that is the call to make deliberately:
+
+- Decide whether bridges/railway, exteriors and rides adopt now or after their
+  current work lands, and tell those engineers directly before anything moves.
+- The baseline's 217 entries are the migration list. As sites are fixed the
+  check prints BASELINE LOOSE and asks for the line to be deleted, so the
+  table shrinks to zero as the category closes. That is the progress metric.
+
+Two rules I would extend the check with next, both from the inventory and both
+additive: `new Box3()` round possibly-leaning geometry (10 uses in `test/`,
+every one axis-aligned), and a raycast fired along world `+Y`
+(`invariants.ts:5400,6357` — the clause deciding whether the train drives
+through its own bridge).
 
 ## Rules I am working under
 
