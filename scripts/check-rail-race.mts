@@ -105,7 +105,6 @@ import {
   AHEAD,
   FACE_TURN_MAX,
   RaceCamera,
-  RIDER_RIDE_HEIGHT,
   faceTurnTowardsCamera,
 } from '../src/world/railRace/camera.ts';
 import { SEAT_HEIGHT, WHEEL_RADIUS } from '../src/world/railRace/cart.ts';
@@ -451,28 +450,27 @@ require(
 // that puts an explicit swing dial back on the rig.
 
 const rig = new RaceCamera(route);
-const RIDER_OFFSET = LANE_OFFSETS[PLAYER_LANE]!;
 const probe = new Vector3();
 
 /**
  * The rider's own lane at `s`, at the height the rider themself rides at.
  *
- * At the rider's height and not the rail's, because that is where the rider is
- * and the promises are about the rider. It is the rig's own constant rather than
- * a second copy of it: measuring the framing at a different height from the one
- * it was solved at reads a different answer (a tilted camera pushes a raised
- * off-centre point further off centre), so a duplicate here would drift out of
- * step with the rig and quietly stop measuring it. Grounded in the running game
- * on 1 August 2026: the player's own object sits 1.2–2.0 m above the rail.
+ * **Asked of the rig, never recomputed here.** This was a copy of
+ * `RaceCamera.ringPoint`'s formula, with a comment promising it stayed in step
+ * with it. It did not: the ring stopped being level, `route.base` became
+ * `route.baseAt(s)`, and the copy went on reading `route.base` — `undefined`.
+ * Every `project` through it returned `NaN`, `NaN >= 1` is false, and so **the
+ * seven assertions below about where the rider sits in the picture reported
+ * `NaN%` and could not fail.** That is CLAUDE.md's two-definitions disease and
+ * its check-that-cannot-fail disease in one place, and the fix is the one that
+ * file prescribes: one owner, everyone else asks.
+ *
+ * Measuring at the rider's height and not the rail's still matters for the
+ * reason it always did — a tilted camera pushes a raised off-centre point
+ * further off centre — but that height is now the rig's business, not this
+ * file's.
  */
-const onLane = (s: number, into: Vector3): Vector3 => {
-  const sample = route.path.sampleAt(s);
-  return into.set(
-    sample.x + sample.normalX * RIDER_OFFSET,
-    route.base + 0.6 + RIDER_RIDE_HEIGHT,
-    sample.z + sample.normalZ * RIDER_OFFSET,
-  );
-};
+const onLane = (s: number, into: Vector3): Vector3 => rig.ringPoint(s, into);
 
 /** Where the track `s` metres along lands across the screen, -1 left, +1 right. */
 const across = (s: number): number => onLane(s, probe).project(rig.camera).x;
