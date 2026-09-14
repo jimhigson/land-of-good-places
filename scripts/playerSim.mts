@@ -36,8 +36,10 @@ import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
 import {
   altitudeAbove,
+  chartStep,
   landingCorrection,
   liftAlongUp,
+  realStep,
 } from '../src/entities/movement/gravity.ts';
 import { damp } from '../src/core/mathUtils.ts';
 import {
@@ -203,6 +205,10 @@ export class SimPlayer {
    * a few centimetres at most.
    */
   private readonly pendingLanding = new Vector3();
+  /** This frame's walk, converted to the chart metres `resolveMovement` takes. */
+  private readonly walkStep = new Vector3();
+  /** The resolved step, converted back to real ground for the velocity read-back. */
+  private readonly walkBack = new Vector3();
 
   constructor(collision: CollisionWorld, options: SimOptions = {}) {
     this.collision = collision;
@@ -291,8 +297,21 @@ export class SimPlayer {
     this.lift.z += this.pendingLanding.z;
     this.pendingLanding.set(0, 0, 0);
 
-    const deltaX = this.velocity.x * dt + this.lift.x;
-    const deltaZ = this.velocity.z * dt + this.lift.z;
+    // **The walk converted from real ground to chart metres; the lift not.**
+    // `velocity` is metres per second of ground she covers, and
+    // `resolveMovement` takes chart metres — see `chartStep`. The lift is a
+    // free-flight displacement whose chart delta is already its own x/z, so it
+    // is added *after* the conversion and never through it.
+    chartStep(
+      this.position.x,
+      this.position.y,
+      this.position.z,
+      this.velocity.x * dt,
+      this.velocity.z * dt,
+      this.walkStep,
+    );
+    const deltaX = this.walkStep.x + this.lift.x;
+    const deltaZ = this.walkStep.z + this.lift.z;
 
     // `Player.update`'s ground sample, riding the same sub-steps. `following`
     // and `reference` mirror it name for name.
@@ -344,8 +363,23 @@ export class SimPlayer {
       // sideways excursion went into the step as well, and banking it here
       // would hand it to the input smoothing as speed she is asking for, which
       // would then fight it on the way up and again on the way down.
-      const derivedX = (this.position.x - this.previousPosition.x - this.lift.x) / dt;
-      const derivedZ = (this.position.z - this.previousPosition.z - this.lift.z) / dt;
+      // Back through the conversion as well as the lift: `velocity` is a REAL
+      // speed and what the resolve moved her was a CHART delta. Read one back
+      // as the other and `chartStep` compresses it again next frame — a
+      // geometric decay to a standstill. Proved by mutation: dropping this
+      // takes the covered/asked ratio at the rim to **0.3366**, a child
+      // crawling at a third of her speed, and it reads as the walk mysteriously
+      // sticking rather than as a units bug. `realStep` carries the note.
+      realStep(
+        this.position.x,
+        this.position.y,
+        this.position.z,
+        this.position.x - this.previousPosition.x - this.lift.x,
+        this.position.z - this.previousPosition.z - this.lift.z,
+        this.walkBack,
+      );
+      const derivedX = this.walkBack.x / dt;
+      const derivedZ = this.walkBack.z / dt;
       if (Math.hypot(derivedX, derivedZ) <= previousSpeed) {
         this.velocity.x = derivedX;
         this.velocity.z = derivedZ;

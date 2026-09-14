@@ -207,3 +207,106 @@ export function landingCorrection(
   upFor(x, y, z, _up);
   return target.set(-_up.x * altitude, 0, -_up.z * altitude);
 }
+
+/**
+ * **A step over the real ground, in the chart metres `CollisionWorld` wants.**
+ *
+ * `PLAYER_MAX_SPEED` and every other speed in this game is metres per second of
+ * ground a child covers. `CollisionWorld.resolveMovement` takes **chart**
+ * metres — deliberately, agreed with the engineer who owns it, because that
+ * solver is chart-space end to end and its anti-tunnelling guarantee is a
+ * statement about chart distance against chart-registered bands. Nothing
+ * converted between the two, and on a flat park nothing had to.
+ *
+ * The conversion, and it is a multiply:
+ *
+ * > **chart delta = real arc x cos θ**
+ *
+ * On the cap a surface point's chart coordinate is `R sin θ` and its arc from
+ * the pole is `R θ`, so `d(chart)/d(arc) = cos θ`. Measured at the park's reach:
+ * one real metre of arc outward moves the chart 0.698892 m against
+ * `cos θ = 0.700516`.
+ *
+ * **Only the radial component is compressed.** Tangentially the chart is
+ * undistorted, which is what made the bug measurable rather than a uniform
+ * fudge — the same child at the same spot was too fast walking outward and
+ * exactly right walking sideways. Measured before this existed, ground covered
+ * against ground asked: 1.5473 outward at the rim, 1.3461 inward, 1.0024
+ * tangential.
+ *
+ * The radial direction is taken as the horizontal part of the local up, rather
+ * than as `(x, z)` normalised. They are the same thing outdoors, and taking it
+ * from `up` means the indoor case needs no separate branch: indoors `upFor`
+ * hands back plain `+Y`, its horizontal part is zero, and this returns the step
+ * unchanged — which is exactly right, because a room's floor is flat and its
+ * chart is its own coordinates.
+ *
+ * **This is for a step along the ground only.** A hop's sideways excursion must
+ * *not* go through it: the chart is an orthographic projection, so any
+ * displacement's chart delta is simply its own `x`/`z`, and the `cos θ` here
+ * exists only because a walk's input is an *arc length* rather than a
+ * displacement. Free flight has no arc. See {@link liftAlongUp}.
+ */
+export function chartStep(
+  x: number,
+  y: number,
+  z: number,
+  dx: number,
+  dz: number,
+  target: Vector3,
+): Vector3 {
+  return scaleRadial(x, y, z, dx, dz, target, true);
+}
+
+/**
+ * **The inverse of {@link chartStep}: how far over the real ground a chart step
+ * actually carried her.**
+ *
+ * This is not an optional tidiness. `Player.update` reads its velocity back off
+ * the resolved position — "trust the resolved position over the intended one,
+ * so walking into a wall kills the momentum" — and that read-back lands in
+ * `this.velocity`, which is a **real** speed that `chartStep` will compress
+ * again next frame. Read a chart delta back as a real velocity and her speed is
+ * multiplied by `cos θ` every frame it is not corrected: a geometric decay to a
+ * standstill, 0.70 per frame at the rim, and it would look like the walk
+ * mysteriously sticking rather than like a units bug.
+ *
+ * So the pair must be applied symmetrically, and the reason is written here
+ * rather than at the call site because the call site is where it would be
+ * forgotten.
+ */
+export function realStep(
+  x: number,
+  y: number,
+  z: number,
+  dx: number,
+  dz: number,
+  target: Vector3,
+): Vector3 {
+  return scaleRadial(x, y, z, dx, dz, target, false);
+}
+
+/** The shared body of the pair above; `compress` picks the direction. */
+function scaleRadial(
+  x: number,
+  y: number,
+  z: number,
+  dx: number,
+  dz: number,
+  target: Vector3,
+  compress: boolean,
+): Vector3 {
+  upFor(x, y, z, _up);
+  const horizontal = Math.hypot(_up.x, _up.z);
+  // No lean — the park's exact origin, or anywhere indoors — so the chart is
+  // the ground and there is nothing to convert. Returning early rather than
+  // dividing by a vanishing `horizontal` is the difference between "no
+  // correction" and "every component NaN".
+  if (horizontal < 1e-9 || _up.y <= 1e-6) return target.set(dx, 0, dz);
+  const radialX = _up.x / horizontal;
+  const radialZ = _up.z / horizontal;
+  const along = dx * radialX + dz * radialZ;
+  const wanted = compress ? along * _up.y : along / _up.y;
+  const change = wanted - along;
+  return target.set(dx + change * radialX, 0, dz + change * radialZ);
+}
