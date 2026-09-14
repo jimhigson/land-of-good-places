@@ -291,6 +291,43 @@ My three healthy runs are what the parity claim rests on, including a
 base-vs-branch pair taken **under the same contention at the same time**, which
 is the fairest comparison available on a shared machine.
 
+### And chasing that skip count found the thing that actually matters
+
+**The tripwire covers two of the five seeds. The other three skip all 93
+invariants on every run — on `main`'s base as well as on this branch, on the
+fast runs as well as the slow ones.** Per file, off the base run:
+
+```
+seed-canonical.test.ts  (93 tests | 93 skipped)    2583ms
+seed-131.test.ts        (93 tests | 93 skipped)    5960ms
+seed-24.test.ts         (93 tests | 93 skipped)    6576ms
+seed-326.test.ts        (93 tests | 25 failed)    88743ms
+seed-11.test.ts         (93 tests | 24 failed)    98256ms
+```
+
+So the two numbers decompose exactly: **279 skipped is 3 seed files × 93, and
+465 is 5 × 93.** The "healthy" baseline was never healthy — it is three seeds
+permanently dark, and contention merely takes the remaining two as well.
+
+The cause is the **same `railD 0.0` throw** that blocks the check chain: the
+park build dies during those files' setup, at `(0.0, 125.8)`, `(0.0, 124.8)`,
+`(0.0, 120.8)` — a different crossing per seed — and the file responds by
+skipping its 93 tests rather than failing them. The tell is the runtime: the
+three dark files bail in 2–7 s where the two live ones take 88–98 s.
+
+**This makes `railD` far more serious than "it blocks ~30 check steps".** It
+silently deletes 60% of the coverage of the one suite that is a *required*
+merge gate, and it does so while the suite still prints a confident red/green.
+It is CLAUDE.md's own "a skipped test is not a passing test", live, at seed
+granularity — and that file even records the previous instance of it (one
+failure and 76 silent skips, where the tell was the pass count).
+
+**What this costs my own conclusions, stated plainly:** every parity claim on
+this branch is a parity claim about **seeds 326 and 11 only**. It is a real
+comparison and the failing sets really are identical by name, but it is not
+cover over the canonical seed, 131 or 24, and it must not be read as such.
+Nothing in this lane has been proven against those three.
+
 ## Instruments, and the ones that lied
 
 `scratch/nav-step-frame.mts` — the nav step gate in both frames, no park build
