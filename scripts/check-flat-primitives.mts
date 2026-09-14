@@ -108,7 +108,9 @@ type RuleId =
   | 'Y_DIFFERENCE'
   | 'Y_OVER_GROUND'
   | 'Y_THRESHOLD'
-  | 'FLAT_DISC';
+  | 'FLAT_DISC'
+  | 'AXIS_ALIGNED_BOX'
+  | 'VERTICAL_RAY';
 
 interface Finding {
   readonly file: string;
@@ -159,6 +161,13 @@ const RULE_WHY: Record<RuleId, string> = {
     `a fixed y threshold — the ground is already at ${terrainHeight(GARDEN_PLAY_RADIUS, 0).toFixed(1)} m ` +
     `at the walkable boundary, so a threshold near zero fires on grass`,
   FLAT_DISC: 'a disc laid in the world XZ plane — correct only if something leans it downstream',
+  AXIS_ALIGNED_BOX:
+    'the vertical extreme of an AXIS-ALIGNED box round geometry that may be leaning — ' +
+    'min.y is the lowest CORNER of a tilted slab, not its soffit; inflated by about ' +
+    'halfDiagonal x sin(lean)',
+  VERTICAL_RAY:
+    'a ray fired along a hard-coded vertical through a world that leans — over a 4 m bore ' +
+    'it walks 1-2 m sideways and can miss the thing it was aimed at entirely',
 };
 
 // ---------------------------------------------------------------------------
@@ -315,11 +324,38 @@ function namesHoldingY(sf: ts.SourceFile): Set<string> {
   return names;
 }
 
+/**
+ * Names holding a hard-coded vertical axis, so that laundering one through a
+ * variable does not hide a ray fired along it.
+ *
+ * The same lesson as {@link namesHoldingY}, applied before it could cost
+ * anything: `test/procgen/invariants.ts` does `const up = new Vector3(0, 1, 0)`
+ * and then fires `raycaster.set(origin, up)` — the literal is caught by
+ * `HARD_UP`, but the *ray* is the thing that decides whether the train drives
+ * through its own bridge, and it deserves to be named as such.
+ */
+function namesHoldingVertical(sf: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      const init = node.initializer;
+      if (ts.isNewExpression(init) && /Vector3$/.test(init.expression.getText(sf))) {
+        if (isVerticalTriple(init.arguments ?? [])) names.add(node.name.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return names;
+}
+
 function scan(file: string, source: string): Finding[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.ESNext, true);
   const lines = source.split('\n');
   const found: Finding[] = [];
   const yNames = namesHoldingY(sf);
+    /** Names this file assigned a hard-coded vertical axis to. */
+  const verticalNames = namesHoldingVertical(sf);
   /** A `.y` access, or a name this file assigned one to. */
   const holdsY = (n: ts.Node): boolean =>
     isYAccess(n) || (ts.isIdentifier(n) && yNames.has(n.text));
@@ -345,6 +381,21 @@ function scan(file: string, source: string): Finding[] {
     if (ts.isNewExpression(node) && /Vector3$/.test(node.expression.getText(sf))) {
       if (isVerticalTriple(node.arguments ?? [])) add(node, 'HARD_UP');
     }
+    // 7. VERTICAL_RAY — `new Raycaster(origin, up)`.
+    if (ts.isNewExpression(node) && /Raycaster$/.test(node.expression.getText(sf))) {
+      const dir = node.arguments?.[1];
+      if (dir && ts.isIdentifier(dir) && verticalNames.has(dir.text)) add(node, 'VERTICAL_RAY');
+    }
+    // 6. AXIS_ALIGNED_BOX — `box.min.y` / `box.max.y`, the vertical extreme of
+    //    an axis-aligned box round geometry that may be leaning.
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      node.name.text === 'y' &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      (node.expression.name.text === 'min' || node.expression.name.text === 'max')
+    ) {
+      add(node, 'AXIS_ALIGNED_BOX');
+    }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
       const method = node.expression.name.text;
       if ((method === 'set' || method === 'setFromAxisAngle') && isVerticalTriple(node.arguments.slice(0, 3))) {
@@ -353,6 +404,18 @@ function scan(file: string, source: string): Finding[] {
       // 5. FLAT_DISC — `mesh.rotateX(-Math.PI / 2)`
       if (method === 'rotateX' && node.arguments.length === 1 && isPiOverTwo(node.arguments[0]!)) {
         add(node, 'FLAT_DISC');
+      }
+      // 7. VERTICAL_RAY — `raycaster.set(origin, up)` with a vertical direction.
+      if (method === 'set' && node.arguments.length === 2) {
+        const target = normalise(node.expression.expression.getText(sf));
+        const dir = node.arguments[1]!;
+        if (
+          /ray|caster/i.test(target) &&
+          ts.isIdentifier(dir) &&
+          verticalNames.has(dir.text)
+        ) {
+          add(node, 'VERTICAL_RAY');
+        }
       }
     }
 
@@ -440,6 +503,12 @@ const ARMING: readonly { rule: RuleId; source: string }[] = [
   { rule: 'Y_THRESHOLD', source: 'if (character.position.y < -2) fall();' },
   { rule: 'FLAT_DISC', source: 'disc.rotation.x = -Math.PI / 2;' },
   { rule: 'FLAT_DISC', source: 'geometry.rotateX(Math.PI / 2);' },
+  { rule: 'AXIS_ALIGNED_BOX', source: 'const soffit = new Box3().setFromObject(deck).min.y;' },
+  {
+    rule: 'VERTICAL_RAY',
+    source: 'const up = new Vector3(0, 1, 0);\nraycaster.set(origin, up);',
+  },
+  { rule: 'VERTICAL_RAY', source: 'const up = new Vector3(0, 1, 0);\nconst r = new Raycaster(origin, up);' },
 ];
 
 /** Things that must NOT fire — the false positives a grep cannot dodge. */
@@ -448,6 +517,8 @@ const MUST_NOT_FIRE: readonly string[] = [
   'paw.rotation.x = Math.PI / 2 - ARC;', //  a deliberately tilted part, not a flat disc
   '/** foo.rotation.x = -Math.PI / 2 */', // a docblock explaining the bug
   'if (face.y < 0) down += 1;', //           a facing test, not an altitude
+  'raycaster.set(origin, tangent);', //      a ray along something derived, not a world axis
+  'const lowest = box.min.x;', //            a horizontal extreme is orientation-free here
 ];
 
 function selfTest(): string[] {
