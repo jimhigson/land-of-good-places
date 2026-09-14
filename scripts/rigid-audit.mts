@@ -1,15 +1,43 @@
 /**
  * **Which outdoor structures are too wide to stand rigidly on one up?**
  *
- * Each of these is a `standOnSphere` call site: ONE tilt for a whole object.
- * That is honest only while the object's own footprint stays inside the radius a
- * flat patch is good for — `flatRadiusFor(0.05)` = 4.69 m on this planet.
+ * **This is the reusable result of the bend-exteriors work — more so than any
+ * individual bend.** Every lane that follows has the same question to answer
+ * about its own geometry, and the point of this script is that none of them has
+ * to re-argue it: run it, read the verdict column, bend what is over the line
+ * and leave what is not. The answers are frequently not what a brief assumes —
+ * it is what established that the park's 165 wall runs are all *inside*
+ * tolerance and needed nothing, after a day had been spent preparing to bend
+ * them.
  *
- * **Measured per structure, not per geometry node.** An earlier pass of this
- * audit called `Box3.setFromObject` on every mesh and reported the treeline at
- * 325 m and the rail race at 318 m — those are `InstancedMesh`es whose box spans
- * every instance in the park, so it was measuring the park's radius and calling
- * it a footprint. The unit that matters is the thing that gets one tilt.
+ * Each `standOnSphere` call site takes ONE tilt for a whole object. That is
+ * honest only while the object's own footprint stays inside the radius a flat
+ * patch is good for — `flatRadiusFor(0.05)` = 4.69 m on this planet — and
+ * `flatDeparture` says exactly what a wider one is costing.
+ *
+ * ## Two ways this instrument lied before it was fixed, both worth knowing
+ *
+ * Both are the same disease: **the instrument named the wrong object and
+ * answered confidently.**
+ *
+ * - An earlier pass called `Box3.setFromObject` on every mesh and reported the
+ *   treeline at **325 m** and the rail race at **318 m**. Those are
+ *   `InstancedMesh`es whose box spans every instance in the park, so it was
+ *   measuring the park's own radius and calling it a footprint. The unit that
+ *   matters is **the thing that gets one tilt**, which is why this reads a
+ *   named list rather than traversing everything.
+ * - A sibling probe looking for long wall runs matched mesh names on a loose
+ *   regex and found a 37.3 m run with the ground falling 12.44 m along it. That
+ *   was a **bridge parapet** (`wallTop`/`coping`, `world/train/bridges.ts`), and
+ *   a bridge not following the ground is what a bridge is *for*.
+ *
+ * So: measure the structure, not the scene graph node; and check what a name
+ * actually belongs to before believing a number attached to it.
+ *
+ * Interiors are excluded by construction — they stay flat by Jim's ruling and
+ * sit hundreds of metres out where the radial formula is meaningless.
+ *
+ * Run: `node --import ./scripts/ts-extension-resolver-register.mjs scripts/rigid-audit.mts`
  */
 import './headless-canvas.mjs';
 import { Box3, Vector3, type Object3D } from 'three';
