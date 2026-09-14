@@ -1,4 +1,11 @@
-import { Object3D, Quaternion, Vector3 } from 'three';
+import {
+  Matrix4,
+  Object3D,
+  Quaternion,
+  Vector3,
+  type BufferAttribute,
+  type InterleavedBufferAttribute,
+} from 'three';
 import type { Chart } from './Chart';
 import { Frame } from './Frame';
 import { Geo, PLANET_RADIUS } from './Geo';
@@ -166,90 +173,196 @@ export function bendError(chart: Chart, local: Readonly<Vector3>): number {
 }
 
 /**
- * **Bend a structure that was assembled flat, in place, without touching its
- * tree.**
+ * What a bend actually reached, so a caller can say so out loud.
+ *
+ * A bend that silently skipped the very thing it was asked to bend is this
+ * project's signature failure — a green line implying cover it does not give.
+ * So the applier counts what it touched and the caller prints it.
+ */
+export interface BendReport {
+  /** Meshes whose vertices were displaced. */
+  meshes: number;
+  /** `InstancedMesh`es whose per-instance matrices were re-solved. */
+  instanced: number;
+  /** Individual instances within those. */
+  instances: number;
+  /** Objects skipped because nothing about them is bendable. */
+  skipped: number;
+  /** The largest distance, in metres, any point moved. Zero means nothing bent. */
+  worstShift: number;
+}
+
+const _toRoot = /* @__PURE__ */ new Matrix4();
+const _objInverse = /* @__PURE__ */ new Matrix4();
+const _rootInverse = /* @__PURE__ */ new Matrix4();
+const _m = /* @__PURE__ */ new Matrix4();
+const _pos = /* @__PURE__ */ new Vector3();
+const _scale = /* @__PURE__ */ new Vector3();
+const _rot = /* @__PURE__ */ new Quaternion();
+const _before = /* @__PURE__ */ new Vector3();
+const _qToRoot = /* @__PURE__ */ new Quaternion();
+const _qObjInv = /* @__PURE__ */ new Quaternion();
+
+/**
+ * **Bend everything under `root` onto the planet, in place, without touching
+ * the tree.**
  *
  * The retrofit `standOnSphere` should have been for anything large. Every
  * exterior in this codebase is built the same way — a group, children given
- * authored local positions and yaws, one rigid tilt at the end — so this takes
- * that group as it stands and re-solves each child's transform against the
- * chart, leaving the group itself **unrotated** and every child's name, parent,
- * material and geometry exactly as they were.
+ * authored local positions and yaws, one rigid tilt applied to the whole thing
+ * at the end — and the explorer's map of the castle shows why re-parenting
+ * children cannot be the answer here:
  *
- * Two consequences worth stating, because both are the reason it is done this
- * way rather than by re-parenting onto `Anchor`s:
+ * - **the four corner towers are not four objects.** They are four *instances*
+ *   inside `tower-bodies`, `tower-roofs`, `tower-masts` and `tower-finials`, so
+ *   the splay Jim asked for lives in per-instance matrices;
+ * - **the curtain walls are one merged `ExtrudeGeometry` covering all four
+ *   sides.** There is no per-wall object to lean, so the only honest reading of
+ *   *"the mesh needs to be bent"* is the literal one: move its vertices.
  *
- * - `parkFacts.ts` and every check that finds a mesh by name still finds it, in
- *   the same place in the tree. A bend that renamed or re-nested the castle's
- *   stonework is how `castleMasonryTopY` jumped 10.29 → 14.83 m and every seed
- *   failed while the check chain stayed honestly green.
- * - The group carries no rotation, so nothing downstream can pre-multiply a
- *   second tilt onto it. A structure is bent exactly once, by construction.
+ * So this reaches both. Instances get their matrix re-solved through
+ * {@link bentFrame}; plain meshes get every vertex mapped through it and their
+ * normals recomputed. **Names, parents, materials and object counts are all
+ * untouched** — which is not a nicety: `parkFacts.ts` finds the castle's
+ * stonework by the patterns `^castle-wall-` and `^tower-(bodies|roofs)$`, and a
+ * bend that renamed or re-nested it is exactly how `castleMasonryTopY` once
+ * jumped 10.29 → 14.83 m with the check chain staying honestly green.
  *
- * `baseAltitude` is where the structure's own `y = 0` sits above the sphere —
- * normally the altitude of the ground under its centre — and is added to every
- * child's authored height so that `y` keeps meaning what its author meant.
+ * `baseAltitude` is where the structure's own `y = 0` sits above the sphere, so
+ * that a part's authored height keeps meaning what its author meant.
  *
- * Children are read by their **authored** transform, so call this once, after
- * assembly, and never per frame.
+ * **Call once, after assembly, never per frame** — it reads the authored
+ * geometry and overwrites it, so a second call would bend an already-bent
+ * structure again.
  */
-export function bendChildren(
-  group: Object3D,
+export function bendOntoPlanet(
+  root: Object3D,
   chart: Chart,
   baseAltitude: number,
-): void {
-  group.quaternion.identity();
-  group.updateMatrixWorld(true);
-  const origin = group.position;
-  for (const child of group.children) {
-    _local.set(child.position.x, baseAltitude + child.position.y, child.position.z);
-    const f = bentFrame(chart, _local, _scratchFrame);
-    f.at.toWorld(_world);
-    child.position.copy(_world).sub(origin);
-    // The child's own authored orientation is a turn within its own frame, so
-    // the frame is carried onto it rather than the other way round — the same
-    // `tilt * yaw` composition `Frame.setFromBearing` uses, and for the same
-    // reason.
-    child.quaternion.premultiply(_q.copy(f.q));
-  }
+): BendReport {
+  const report: BendReport = {
+    meshes: 0,
+    instanced: 0,
+    instances: 0,
+    skipped: 0,
+    worstShift: 0,
+  };
+  root.updateMatrixWorld(true);
+  _rootInverse.copy(root.matrixWorld).invert();
+
+  const shift = (a: Readonly<Vector3>, b: Readonly<Vector3>): void => {
+    const d = a.distanceTo(b);
+    if (d > report.worstShift) report.worstShift = d;
+  };
+
+  root.traverse((object) => {
+    // Object-local -> root-local, and back. Composing through the root rather
+    // than through world coordinates is what lets the whole structure keep
+    // sitting inside whatever leaning plot already carries it: the rigid tilt
+    // above the root cancels out of both directions exactly.
+    _objInverse.copy(object.matrixWorld).invert();
+    _toRoot.multiplyMatrices(_rootInverse, object.matrixWorld);
+    _qToRoot.copy(rotationOf(_toRoot));
+    _qObjInv.copy(rotationOf(_objInverse));
+
+    const instanced = asInstanced(object);
+    if (instanced) {
+      for (let i = 0; i < instanced.count; i++) {
+        instanced.getMatrixAt(i, _m);
+        _m.decompose(_pos, _rot, _scale);
+        _before.copy(_pos);
+        _pos.applyMatrix4(_toRoot);
+        _local.set(_pos.x, baseAltitude + _pos.y, _pos.z);
+        const f = bentFrame(chart, _local, _scratchFrame);
+        f.at.toWorld(_world);
+        // Into the instance's own space, and carry the frame onto the
+        // instance's authored orientation rather than the other way round.
+        _pos.copy(_world).applyMatrix4(_objInverse);
+        // World orientation is the bent frame carried onto the instance's own
+        // authored turn, read in the flat frame the author wrote it in:
+        //   world = f.q * rot(toRoot) * authored
+        // and then back into the instance's own space. Composing it in this
+        // order is the same `tilt * yaw` rule `Frame.setFromBearing` states —
+        // a yaw is a turn about the thing's *own* up, so it is applied first.
+        _rot.premultiply(_qToRoot).premultiply(_q.copy(f.q)).premultiply(_qObjInv);
+        shift(_before, _pos);
+        instanced.setMatrixAt(i, _m.compose(_pos, _rot, _scale));
+        report.instances += 1;
+      }
+      instanced.instanceMatrix.needsUpdate = true;
+      instanced.computeBoundingSphere();
+      report.instanced += 1;
+      return;
+    }
+
+    const geometry = asGeometryHolder(object);
+    if (!geometry) {
+      report.skipped += 1;
+      return;
+    }
+    const attribute = geometry.getAttribute('position');
+    if (!attribute) {
+      report.skipped += 1;
+      return;
+    }
+    for (let i = 0; i < attribute.count; i++) {
+      _pos.fromBufferAttribute(attribute, i);
+      _before.copy(_pos);
+      _pos.applyMatrix4(_toRoot);
+      _local.set(_pos.x, baseAltitude + _pos.y, _pos.z);
+      const f = bentFrame(chart, _local, _scratchFrame);
+      f.at.toWorld(_world);
+      _pos.copy(_world).applyMatrix4(_objInverse);
+      shift(_before, _pos);
+      attribute.setXYZ(i, _pos.x, _pos.y, _pos.z);
+    }
+    attribute.needsUpdate = true;
+    // The extrusions and boxes this runs over are non-indexed, so recomputing
+    // gives a flat normal per face — which is what masonry wants, and is also
+    // the only answer available once the vertices no longer lie in the planes
+    // the authored normals described.
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+    geometry.computeBoundingBox();
+    report.meshes += 1;
+  });
+
+  return report;
 }
 
-/**
- * Split one long child into `segments` pieces laid along the chart, each bent to
- * its own middle.
- *
- * A tower is narrow and a single bend at its foot is the whole answer. A curtain
- * wall is not: a 24 m box bent once about its centre still has its two ends
- * 16 cm into the air, because the *box* is straight however its frame leans.
- * This is the chord-versus-arc half of the same problem, and the only honest fix
- * is more pieces.
- *
- * Returns the pieces, already positioned, for the caller to add — it deliberately
- * does not add them itself, because the caller owns the naming and every check
- * on this project that finds geometry finds it by name.
- */
-export function segmentsAlong(
-  chart: Chart,
-  from: Readonly<Vector3>,
-  to: Readonly<Vector3>,
-  segments: number,
-  build: (index: number, length: number) => Object3D,
-): Object3D[] {
-  const out: Object3D[] = [];
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const dz = to.z - from.z;
-  const length = Math.hypot(dx, dz) / segments;
-  for (let i = 0; i < segments; i++) {
-    const t = (i + 0.5) / segments;
-    _local.set(from.x + dx * t, from.y + dy * t, from.z + dz * t);
-    const f = bentFrame(chart, _local, _scratchFrame);
-    const piece = build(i, length);
-    f.at.toWorld(piece.position);
-    piece.quaternion.premultiply(_q.copy(f.q));
-    out.push(piece);
-  }
-  return out;
+const _rotationScratch = /* @__PURE__ */ new Quaternion();
+const _rotationMatrix = /* @__PURE__ */ new Matrix4();
+
+/** The rotation half of a matrix, as a quaternion, with translation and scale dropped. */
+function rotationOf(m: Matrix4): Quaternion {
+  _rotationMatrix.extractRotation(m);
+  return _rotationScratch.setFromRotationMatrix(_rotationMatrix);
+}
+
+interface InstancedLike {
+  readonly isInstancedMesh: true;
+  readonly count: number;
+  readonly instanceMatrix: { needsUpdate: boolean };
+  getMatrixAt(index: number, matrix: Matrix4): void;
+  setMatrixAt(index: number, matrix: Matrix4): void;
+  computeBoundingSphere(): void;
+}
+
+function asInstanced(object: Object3D): InstancedLike | undefined {
+  const candidate = object as unknown as Partial<InstancedLike>;
+  return candidate.isInstancedMesh === true ? (candidate as InstancedLike) : undefined;
+}
+
+interface GeometryLike {
+  getAttribute(name: string): BufferAttribute | InterleavedBufferAttribute | undefined;
+  computeVertexNormals(): void;
+  computeBoundingSphere(): void;
+  computeBoundingBox(): void;
+}
+
+function asGeometryHolder(object: Object3D): GeometryLike | undefined {
+  const candidate = (object as unknown as { geometry?: GeometryLike }).geometry;
+  return candidate && typeof candidate.getAttribute === 'function' ? candidate : undefined;
 }
 
 /**
