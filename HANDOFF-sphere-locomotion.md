@@ -167,69 +167,97 @@ it presents as the walk sticking rather than as a units bug.
   collision engineer is handling this at the type (`geo/step.ts`'s
   `riseBetween` takes two positions and has no height overload).
 
-## `test:procgen` can return a VOID run, and the skip count is the only tell
+## `test:procgen` covers TWO of its five seeds. Read this before quoting it.
 
-**Check the skip count before you read anything else off this suite. 279
-skipped is a healthy run; 465 skipped is a void one.** Not the duration, not
-the CPU percentage, not whether you ran it alongside something else — those all
-look like the answer and none of them is.
+**Three of the five seed files — `seed-canonical`, `seed-131`, `seed-24` — are
+wholly skipped in every run either lane has taken, healthy or degraded.** Not
+failing. Skipped, silently, while the suite prints a confident summary.
+Confirmed independently by two implementations; the collision engineer found it
+and my own JSON counter reproduces it per file:
 
-I took a parity measurement wrongly, prescribed the wrong fix for it, and the
-collision engineer disproved the prescription by testing it. The whole sequence
-is worth keeping, because each step looked sound.
+```
+seed-canonical.test.ts   93 tests   93 skipped     <- dark, every run
+seed-131.test.ts         93 tests   93 skipped     <- dark, every run
+seed-24.test.ts          93 tests   93 skipped     <- dark, every run
+seed-326.test.ts         93 tests   68 passed  25 failed
+seed-11.test.ts          93 tests   69 passed  24 failed
+```
 
-**What I did.** Ran the base's suite and mine concurrently to save wall clock.
-Both returned `160 passed / 0 failed / 465 skipped`, non-passing sets identical
-by name. I committed that as clean parity. Re-run one at a time they give
-`297/49/279` and `315/49/279` — sets still identical, and the 18 extra passes
-are exactly my new unit tests, which is the real parity result.
+Both skip totals decompose exactly: **279 = 3 × 93** and **465 = 5 × 93**. It is
+whole *files* bailing, not a proportional cutoff — which is why the number is
+constant across differing run totals, and which is the thread that found it.
 
-**What I concluded, and it was wrong.** That concurrency was the cause and the
-fix was "run them one at a time", with duration and CPU percentage as the tell.
+The cause is the `railD 0.0` throw that also blocks the check chain: the park
+build dies in those files' setup — `(0.0, 125.8)`, `(0.0, 124.8)`, `(0.0, 120.8)`,
+a different crossing per seed — and vitest skips the file's 93 rather than
+failing them.
 
-**Why that is wrong**, from two directions:
+**So every parity claim in this handoff is a claim about seeds 326 and 11
+only.** Mine really are identical by name and I stand behind that comparison; it
+is not cover over canonical, 131 or 24. `test:procgen` is a **required merge
+gate**, and it is currently passing judgement on 40 % of what it is believed to
+cover. That is CLAUDE.md's own *"a skipped test is not a passing test"* at seed
+granularity — the same shape as the 76-silent-skips incident that file records,
+where the tell was the pass count and not the fail count.
 
-- The collision engineer ran one *deliberately alone* and got the void
-  signature — 366 s, `171 passed / 465 skipped` — the worst of their four runs,
-  because four other lanes are on this machine and "alone" is not something
-  anyone here can arrange. Their two *concurrent* runs, launched nine seconds
-  apart, were both healthy at 279.
-- **My own data refutes the duration tell outright.** My four runs:
+### Two totals, and what each one means
 
-  | run | how | result | wall clock | CPU |
-  |---|---|---|---|---|
-  | base | concurrent | **465 skipped** — void | 5:16 | 22 % |
-  | mine | concurrent | **465 skipped** — void | 5:15 | 19 % |
-  | base | alone | 279 skipped — healthy | **6:11** | 177 % |
-  | mine | alone | 279 skipped — healthy | 1:59 | 224 % |
+| skipped | meaning |
+|---|---|
+| **279** | 3 seeds dark. The best either lane has seen. **Not "healthy".** |
+| **465** | 5 seeds dark. Contention takes the last two as well; measures nothing. |
 
-  The **slowest run of the four was the healthy one**, and it was a minute
-  slower than either void run. A duration threshold would have thrown it away
-  and kept the two that measured nothing.
+A 465 run is not a wrong answer, it is **no answer** — it did not measure a
+different result, it measured nothing, confidently. A 279 run is a real but
+**two-fifths** measurement. I called 279 "healthy" in an earlier revision of
+this file and in a commit message; that was wrong and this supersedes it.
 
-**So the control belongs on the instrument, not on the schedule**, and the skip
-count is it. Both of us hit exactly 465 across differing totals (625, 631, 636,
-643), so it is one deterministic bail rather than noise.
+### Stop using duration as a health signal. It has pointed three ways.
 
-Three things worth carrying out of this:
+1. CLAUDE.md's worked example: a silent-skip bug made this very suite
+   suspiciously **fast**, 89 s → 2.6 s. So fast means dead.
+2. My first prescription: I claimed slow-and-low-CPU meant starved. **My own
+   slowest run (6:11) was my best one**, a minute slower than either run that
+   measured nothing.
+3. The dark seed files: fast again — though note the two lanes are reading two
+   different clocks here, and they disagree. The collision engineer measured
+   those files at 2.6–6.6 s from vitest's per-file line, which includes
+   collection and setup; my counter brackets only the assertions and reads them
+   at **0 ms exactly**, start time equal to end time.
 
-- **Two wrong runs agreeing is not a control; it is the same mistake made
-  twice.** A base-versus-branch diff of two starved runs matches perfectly and
-  means nothing. A run taken under the *same* contention at the *same* time as
-  its comparand is, on a shared machine, the fairest comparison available —
-  provided both are healthy.
-- **A void run is not a wrong answer, it is no answer.** It did not measure a
-  different result; it measured nothing and reported confidently. That
-  distinction matters for whoever reads the numbers next.
-- **This is the opposite shape to the one CLAUDE.md records, which is the
-  trap.** That file's worked example is a silent-skip bug that made *this very
-  suite* suspiciously **fast** — 89 s to 2.6 s — so "fast" is the documented
-  tell, and a slow run reads as merely a busy machine. Neither direction is the
-  signal. A pass count cannot see either case; the skip count sees both.
+Three directions and two disagreeing clocks. **Duration carries no information
+about health. The per-file test counts do, and nothing else we have found
+does.**
 
-Two earlier commit messages on this branch quote the `160 / 0 / 465` figures as
-parity, and one prescribes running the suites one at a time. **Both are
-superseded by this section**; the history stays as written.
+### How to read this suite honestly
+
+Count statuses out of vitest's JSON report **per file** — never off the
+`Tests` or `Test Files` summary lines, which cannot see a whole file going
+dark. The collision engineer found their own summary table scraping the wrong
+line and reporting "6 failed / 93 skipped" for every run: a wrong instrument
+about a wrong instrument.
+
+A one-liner that does it, and the second implementation that corroborated the
+table above:
+
+```
+node -e "
+const r=require('./report.json');
+for (const tf of r.testResults||[]) {
+  let p=0,f=0,s=0;
+  for (const a of tf.assertionResults||[]) {
+    if(a.status==='passed')p++; else if(a.status==='failed')f++; else s++; }
+  console.log(tf.name.split('/').pop(), p+'p', f+'f', s+'s', s===p+f+s&&s>0?'ALL SKIPPED':'');
+}"
+```
+
+**One more hole it shows:** `scatterDecoupling.test.ts` reports **0 tests** —
+a file contributing nothing to the gate at all. Unexamined; flagged, not
+diagnosed.
+
+Two earlier commit messages on this branch quote `160 / 0 / 465` as parity, and
+one prescribes running the suites one at a time. **Both are superseded by this
+section**; the history stays as written.
 
 ## What the gates say
 
@@ -247,7 +275,9 @@ superseded by this section**; the history stays as written.
   | base `714e7d4e` | 297 | **49** | 279 |
   | this branch | 315 | **49** | 279 |
 
-  **Non-passing sets identical by name.** The 18 extra passes are exactly
+  **Non-passing sets identical by name — for seeds 326 and 11, which are the
+  only two that ran.** See the section above: the other three seed files are
+  dark in every run. The 18 extra passes are exactly
   `test/entities/gravity.test.ts`. The collision engineer measured the same 49
   on both sides independently, and `eng/radial-collide` recorded 49 before
   either of us.
