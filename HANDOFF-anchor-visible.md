@@ -40,6 +40,32 @@ Frames: `scratchpad/BEFORE3.png` (the ring is an edge-on pink *sliver* half
 buried in the hill) vs `scratchpad/AFTER3.png` (a complete round ring lying on
 the grass).
 
+## What `check` and `test:procgen` say, and the control that makes it mean something
+
+Run on **both** this branch and the base commit `714e7d4e`, in two worktrees.
+
+- **`pnpm run check`** — exit 1 on both, and the two 540-line logs are
+  **byte-identical apart from process ids**. It dies at the same step
+  (`trace-npc-driver.mts` → `new World`) with the same `crossings.ts:432`
+  error. Because the chain is `&&`, every step after that ran on **neither**
+  run: this branch's effect on them is unproven, not proven good.
+- **`pnpm run test:procgen`, seed 11 alone, run serially on each** —
+  `24 failed | 69 passed (93)` on both, and `diff` of the two failure name
+  lists is **empty**. Identical set, identical count.
+- The full suite run concurrently gave `51 failed | 295 passed | 279 skipped`
+  here against `160 passed | 465 skipped` on the base. **That pair does not
+  mean what it looks like**: on the base run every one of the five seeds
+  crashed in `new World` and skipped its 93 tests, while here two of them
+  happened to build and so actually ran. CLAUDE.md's "a skipped test is not a
+  passing test", exactly. The serial per-seed comparison above is the honest
+  question, and it says the two branches fail identically.
+
+**So: 24 of seed 11's 93 invariants already fail on `feat/sphere-combined`**,
+and they are all geometry — the rail race trestles, the sky cruiser's supports
+and clearance, the cat bus, the gate arch, tree and bush overlap, grid-axis
+paving. Nothing a render-only change could reach. They have been invisible
+because the seeds that would report them mostly crash first.
+
 ## Red on the branch, not mine
 
 **`feat/sphere-combined` still cannot build the canonical seed** — §0 of
