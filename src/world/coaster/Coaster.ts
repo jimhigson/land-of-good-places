@@ -163,11 +163,18 @@ export class Coaster implements GameSystem {
     this.buildTrack(collision);
 
     // Find the highest crest's distance, for the chain phase.
-    let bestY = -Infinity;
+    //
+    // **Highest above the ground, not highest `y`** — same fault as the energy
+    // drop in `update`, and worse in its way. A bare `y` over a loop that spans
+    // 100 m of park finds the point where the sphere's *cap* is highest, which
+    // is simply whichever part of the circuit passes nearest the park's origin.
+    // The chain then hauls the cart to there and lets go, rather than letting go
+    // at the top of the lift hill.
+    let bestClearance = -Infinity;
     for (let d = 0; d < this.route.length; d += 1) {
-      const y = this.route.pointAt(d, this.point).y;
-      if (y > bestY) {
-        bestY = y;
+      const clearance = this.route.clearanceAt(d);
+      if (clearance > bestClearance) {
+        bestClearance = clearance;
         this.crestDistance = d;
       }
     }
@@ -263,8 +270,26 @@ export class Coaster implements GameSystem {
     const { dt } = context;
 
     if (this.phase !== 'waiting') {
-      const height = this.route.pointAt(this.distance, this.point).y;
-      const crestHeight = this.route.pointAt(this.crestDistance, this.point).y;
+      // **Height above the GROUND, not world `y`** — the cart's energy is a fact
+      // about how far it has fallen, and since #511 those two are different
+      // numbers by tens of metres.
+      //
+      // The route is authored in the flat frame, where a point's `y` is
+      // `terrainHeight(x, z)` plus its clearance — so it carries the sphere's
+      // own cap inside it. The loop reaches about 100 m from the park's origin,
+      // where the cap alone is 23 m down. Differencing two `y`s across it
+      // therefore handed the cart 23 m of drop it had not fallen on the way out
+      // (straight to `MAX_SPEED`, for free) and took the same 23 m away coming
+      // back, where it stalled at `MIN_SPEED`. Nothing to do with the lean; it
+      // is the cap, and it was invisible while the park was flat.
+      //
+      // `clearanceAt` is the route's own name for the right quantity and had
+      // **zero readers** — it subtracts the terrain under each point, which is
+      // exactly what removes the cap. It is also what survives `placeOnSphere`:
+      // that map preserves a height above the ground, so the flat frame's
+      // clearance *is* the drawn cart's real altitude.
+      const height = this.route.clearanceAt(this.distance);
+      const crestHeight = this.route.clearanceAt(this.crestDistance);
       if (this.phase === 'chain') {
         this.speed = CHAIN_SPEED;
         const pastCrest =
