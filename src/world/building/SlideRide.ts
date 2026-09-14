@@ -5,10 +5,13 @@ import {
   DoubleSide,
   Group,
   Mesh,
+  Quaternion,
   TubeGeometry,
   Vector3,
 } from 'three';
 import { PALETTE } from '../../core/palette';
+import { placeOnSphere } from '../terrain';
+import { upFor } from '../up';
 import { toonMaterial } from '../../art/style/materials';
 
 /** Cross-section of a chute, as (across, up) pairs in metres. */
@@ -41,6 +44,7 @@ export const CHUTE_ENVELOPE = {
 
 const SEGMENTS_PER_METRE = 2.2;
 const UP = new Vector3(0, 1, 0);
+const _slideSpin = /* @__PURE__ */ new Quaternion();
 
 /**
  * How long one opaque-then-see-through cycle of the chute is, in metres.
@@ -89,6 +93,24 @@ export interface SlideOptions {
   readonly name: string;
   readonly colour?: number;
   readonly railColour?: number;
+  /**
+   * **This chute is out in the park, so draw it on the sphere.**
+   *
+   * Opt-in rather than automatic, because the two slides in this game live in
+   * different frames and only one of them may lean. The ginormous slide is
+   * built from world-space points and hangs off `parkRoot`, whose group is the
+   * identity — so its points are real park coordinates and the ground under it
+   * is a 220 m sphere. The castle roof's **mouth** (`Shell.ts`) is built from
+   * roof-*local* coordinates inside the castle's own plot, which is already
+   * leaned as a rigid body; leaning it again here would tip it off the roof,
+   * and asking `upFor` about a local coordinate would be asking about a point
+   * somewhere else entirely.
+   *
+   * With it set, the incoming points are mapped exactly as `drawnOnSphere` maps
+   * a rail route, and the sweep's "up" becomes the local up rather than world
+   * `+Y`. Without it, everything below is byte-for-byte what it always was.
+   */
+  readonly onSphere?: boolean;
 }
 
 /**
@@ -116,11 +138,23 @@ export class SlideRide {
 
   constructor(points: readonly Vector3[], options: SlideOptions) {
     this.group.name = options.name;
-    this.curve = new CatmullRomCurve3(points.map((p) => p.clone()), false, 'catmullrom', 0.5);
+    // **Leaned here, at the point of drawing, and nowhere else.** The slide is
+    // *solved* in the flat authoring frame (`slide/solve.ts`), and that stays
+    // exactly right: `placeOnSphere` is locally a rotation, so every clearance
+    // the solver measured is preserved. What has to move is the thing a child
+    // sees — and the curve, because everything that rides the slide reads
+    // `getPointAt` and must travel down the chute that was actually drawn.
+    const onSphere = options.onSphere ?? false;
+    const laid = points.map((p) => {
+      const out = p.clone();
+      if (onSphere) placeOnSphere(p, 0, out, _slideSpin);
+      return out;
+    });
+    this.curve = new CatmullRomCurve3(laid, false, 'catmullrom', 0.5);
     this.length = this.curve.getLength();
 
     const steps = Math.max(24, Math.round(this.length * SEGMENTS_PER_METRE));
-    const frames = sampleFrames(this.curve, steps);
+    const frames = sampleFrames(this.curve, steps, onSphere);
 
     // **Two meshes, one sweep**: the same profile swept along the same frames,
     // split into alternating bands so about half the chute is see-through
@@ -214,23 +248,36 @@ interface Frame {
   readonly up: Vector3;
 }
 
-function sampleFrames(curve: CatmullRomCurve3, steps: number): Frame[] {
+/**
+ * `up` is the sky at this point — world `+Y` indoors, and the local up out in
+ * the park, exactly as `sweptRail.ts`'s `railSide` does it for the rails.
+ *
+ * The class docblock's promise that "however the slide loops, the bit you sit
+ * in faces the sky" is the thing being kept here, not broken: on a sphere the
+ * sky is a different direction at each end of a 95 m chute, and holding the
+ * trough open towards world `+Y` tips it sideways relative to the ground the
+ * further out it runs.
+ */
+function sampleFrames(curve: CatmullRomCurve3, steps: number, onSphere: boolean): Frame[] {
   const frames: Frame[] = [];
   const previousRight = new Vector3(1, 0, 0);
+  const up = new Vector3();
 
   for (let i = 0; i <= steps; i += 1) {
     const t = i / steps;
     const position = curve.getPointAt(t, new Vector3());
     const tangent = curve.getTangentAt(t, new Vector3()).normalize();
 
-    const right = new Vector3().crossVectors(tangent, UP);
+    if (onSphere) upFor(position.x, position.y, position.z, up);
+    else up.copy(UP);
+    const right = new Vector3().crossVectors(tangent, up);
     // Straight up or straight down: keep whatever sideways we had last time.
     if (right.lengthSq() < 1e-6) right.copy(previousRight);
     right.normalize();
     previousRight.copy(right);
 
-    const up = new Vector3().crossVectors(right, tangent).normalize();
-    frames.push({ position, right, up });
+    const frameUp = new Vector3().crossVectors(right, tangent).normalize();
+    frames.push({ position, right, up: frameUp });
   }
   return frames;
 }

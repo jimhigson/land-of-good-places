@@ -5,7 +5,7 @@ import type { CollisionWorld } from '../Collision';
 import { PLAYER_RADIUS } from '../../core/constants';
 import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToPath } from '../pathGraph';
-import { terrainHeight } from '../terrain';
+import { placeOnSphere, terrainHeight } from '../terrain';
 // `./solve`, not `./plan`: these two are plan-view geometry helpers, and
 // importing them has no business triggering the three-and-a-half-second solve
 // that `plan.ts` runs to initialise `SLIDE_PLAN`. See `slide/plan.ts`.
@@ -226,6 +226,8 @@ export function planSlideLegs(
  * {@link PATH_CLEARANCE} off the paved network, and is registered as a solid
  * circle so the nav lattice knows it is there.
  */
+const _legFlat = /* @__PURE__ */ new Vector3();
+
 export function buildSlideSupports(
   legs: readonly SlideLeg[],
   collision: CollisionWorld,
@@ -245,8 +247,23 @@ export function buildSlideSupports(
     const post = new Mesh(geometry, material);
     post.name = 'ginormous-slide-leg';
     post.scale.set(1, height, 1);
+    // **Standing on the ground it is planted in, not along world `+Y`.**
+    //
+    // `leg.top - leg.ground` is a flat-frame height above the ground and stays
+    // exactly right — `placeOnSphere` preserves that. What was wrong is the
+    // direction: a `CylinderGeometry` runs along its own `+Y`, nothing ever
+    // rotated it, so a leg rose vertically out of ground that leans, and the
+    // chute it was holding up is now leaned too. Out where this slide stands
+    // (99-148 m from the park's centre on the seeds that build) that is tens of
+    // degrees of disagreement between a post and its own footing.
+    //
+    // `placeOnSphere` on the post's own midpoint gives both halves at once: the
+    // foot stays at the `(x, z)` it was planted at, the height is re-laid along
+    // the local up, and the quaternion leans the cylinder to match. Build-time,
+    // once per leg, so a pre-multiply is safe here.
     // Sunk slightly, so a leg never floats above uneven ground.
-    post.position.set(leg.x, leg.ground + height / 2 - 0.15, leg.z);
+    _legFlat.set(leg.x, leg.ground + height / 2 - 0.15, leg.z);
+    placeOnSphere(_legFlat, 0, post.position, post.quaternion);
     post.castShadow = true;
     post.receiveShadow = true;
     group.add(post);

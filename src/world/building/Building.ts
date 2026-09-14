@@ -2133,6 +2133,10 @@ function buildGinormousSlide(): SlideRide {
     name: 'ginormous-slide',
     colour: PALETTE.slideChute,
     railColour: PALETTE.slideRail,
+    // Out in the park, on the sphere — see `SlideOptions.onSphere`. The chute
+    // used to be the one large thing in the garden drawn in the flat frame,
+    // added straight to `parkRoot` while every anchored plot around it leans.
+    onSphere: true,
   });
 }
 
