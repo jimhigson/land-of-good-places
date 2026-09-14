@@ -239,10 +239,30 @@ const _qObjInv = /* @__PURE__ */ new Quaternion();
  * geometry and overwrites it, so a second call would bend an already-bent
  * structure again.
  */
+export interface BendOptions {
+  /**
+   * Leave this object (and its geometry) exactly as authored.
+   *
+   * **For geometry something else rewrites every frame**, and the fountain is
+   * the worked example: its water surface is a vertex animation that assigns
+   * `array[i + 1] = ripple` from a stored flat `waterBase`, so a bend written
+   * into those vertices is overwritten on the first tick and the stored base is
+   * still unbent. Bending it would not be subtly wrong, it would simply not
+   * take — the worst kind, because the build looks like it worked.
+   *
+   * Skipping is only honest when the skipped part is small enough not to need
+   * the bend on its own: the fountain's water disc spans about 2 m, which
+   * departs ~2 cm, inside tolerance. If a skipped part is itself over the
+   * limit, the answer is to make its animation bend-aware, not to skip it.
+   */
+  skip?(object: Object3D): boolean;
+}
+
 export function bendOntoPlanet(
   root: Object3D,
   chart: Chart,
   baseAltitude: number,
+  options: BendOptions = {},
 ): BendReport {
   const report: BendReport = {
     meshes: 0,
@@ -266,12 +286,12 @@ export function bendOntoPlanet(
   // silently drawing one of the two in the wrong shape.
   const uses = new Map<object, number>();
   root.traverse((object) => {
-    if (asInstanced(object)) return;
+    if (options.skip?.(object) || asInstanced(object)) return;
     const geometry = asGeometryHolder(object);
     if (geometry) uses.set(geometry, (uses.get(geometry) ?? 0) + 1);
   });
   root.traverse((object) => {
-    if (asInstanced(object)) return;
+    if (options.skip?.(object) || asInstanced(object)) return;
     const holder = object as unknown as { geometry?: GeometryLike & { clone?(): GeometryLike } };
     const geometry = holder.geometry;
     if (!geometry || (uses.get(geometry) ?? 0) < 2) return;
@@ -291,6 +311,10 @@ export function bendOntoPlanet(
   };
 
   root.traverse((object) => {
+    if (options.skip?.(object)) {
+      report.skipped += 1;
+      return;
+    }
     // Object-local -> root-local, and back. Composing through the root rather
     // than through world coordinates is what lets the whole structure keep
     // sitting inside whatever leaning plot already carries it: the rigid tilt
@@ -443,14 +467,41 @@ const _anchorQuat = /* @__PURE__ */ new Quaternion();
  * re-aims the existing chart rather than registering a second one under the same
  * name — which `Chart`'s registry would rightly refuse.
  */
-export function bendPlacedStructure(root: Object3D, id: ChartId): BendReport {
+export function bendPlacedStructure(
+  root: Object3D,
+  id?: ChartId,
+  options: BendOptions = {},
+): BendReport {
   root.updateMatrixWorld(true);
   root.getWorldPosition(_anchorPos);
   root.getWorldQuaternion(_anchorQuat);
   _anchorAt.setFromWorldVector(_anchorPos);
   const baseAltitude = _anchorAt.radius() - PLANET_RADIUS;
-  const chart = chartById(id) ?? curvedChart(id, new Frame());
+  const chart = id === undefined ? scratchChart() : (chartById(id) ?? curvedChart(id, new Frame()));
   chart.anchor.at.copy(_anchorAt);
   chart.anchor.q.copy(_anchorQuat);
-  return bendOntoPlanet(root, chart, baseAltitude);
+  return bendOntoPlanet(root, chart, baseAltitude, options);
+}
+
+let _scratchChart: Chart | undefined;
+
+/**
+ * **The chart for a structure nothing else refers to — a single fence run, one
+ * stone bench — re-aimed per call.**
+ *
+ * A chart id is *one owner*, not a label, and `Chart`'s registry rightly refuses
+ * a second chart under the same name. The castle and the hotel deserve named
+ * charts: other code asks about them, and `allCharts()` should be able to sweep
+ * them. Thirty-odd wall runs do not — their frames are ephemeral, used once
+ * inside `bendPlacedStructure` and never referred to again, and registering one
+ * each would fill the registry with names no one will ever look up while
+ * saying, falsely, that each is a coordinate system somebody owns.
+ *
+ * Safe to share because it is used and finished with synchronously: the bend
+ * reads the anchor and returns before anything can re-aim it. Give a structure
+ * its own id the moment anything outside its builder needs to name its frame.
+ */
+function scratchChart(): Chart {
+  _scratchChart ??= curvedChart('bend-scratch', new Frame());
+  return _scratchChart;
 }
