@@ -80,9 +80,18 @@
 import { BUILDING_STEP_UP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { circleBoundary } from '../src/world/boundary.ts';
+import {
+  SPACE_CASTLE_HALL,
+  SPACE_CASTLE_MALL,
+  SPACE_GARDEN,
+  SPACE_HOTEL_LOBBY,
+  localToWorld,
+  spaceAt,
+} from '../src/world/spaces.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { NavGrid } from '../src/world/NavGrid.ts';
 import { planetRadiusAt, terrainHeight, yAtAltitude } from '../src/world/terrain.ts';
+import { walkHeight } from '../src/world/up.ts';
 
 /** How far out the sweep reaches. The walkable garden is 135.4 m. */
 const OUTER = 120;
@@ -96,11 +105,40 @@ const STEP_BEARINGS = 32;
 /** The lattice's cell size. Kept here rather than exported: see the assertion. */
 const CELL = 0.5;
 
+/**
+ * How far from level a level interior floor may measure over one lattice cell.
+ *
+ * A centimetre — it should be zero to floating point, and is. Not a tolerance
+ * anybody is expected to use up: it is here so the clause reads as "level" and
+ * not as an exact-equality trap on a `Float32Array` round trip.
+ */
+const INTERIOR_LEVEL_TOLERANCE = 0.01;
+
 /** A ledge a child plainly cannot walk up. Must be refused at every radius. */
 const TALL_LEDGE = 0.7;
 
 /** A legal step — a kerb, a stair tread. Must be allowed at every radius. */
 const LEGAL_STEP = 0.4;
+
+/**
+ * Real interior origins, read from `world/spaces.ts` rather than typed, so a
+ * room that moves cannot leave this clause probing open park and passing for
+ * the wrong reason. Checked against `spaceAt` before use.
+ */
+const INTERIOR_PROBES: readonly (readonly [number, number, string])[] = [
+  SPACE_CASTLE_HALL,
+  SPACE_CASTLE_MALL,
+  SPACE_HOTEL_LOBBY,
+]
+  .map((space) => {
+    // `localToWorld` is the existing owner of where a space stands, and it
+    // returns null for a space that no longer exists — so a room that is
+    // renamed or removed drops out here and the clause below says the coverage
+    // is gone, rather than quietly probing open park and passing.
+    const origin = localToWorld(space, 0, 0, 0);
+    return origin ? ([origin.x, origin.z, space] as const) : null;
+  })
+  .filter((probe): probe is readonly [number, number, string] => probe !== null);
 
 /** The eight lattice neighbours, straights then diagonals. */
 const NEIGHBOURS = [
@@ -120,14 +158,27 @@ const OUT = new Float32Array(4096);
 /** The park's real ground, sampled the way `Player` samples it outdoors. */
 const sampler = (x: number, z: number, _y: number): number => terrainHeight(x, z);
 
-function gridOver(collision: CollisionWorld, radius: number): NavGrid {
+/**
+ * A lattice over a disc. **The centre is not optional** — an interior stands
+ * six hundred metres from the park's origin, and a boundary left at the origin
+ * puts every interior probe off the lattice entirely, where `findRoute` returns
+ * "unknowable" rather than "blocked". That reads as a failure and is not one:
+ * the first interior clause written here failed all three rooms for exactly
+ * that reason, on code that was correct.
+ */
+function gridOver(
+  collision: CollisionWorld,
+  radius: number,
+  centreX = 0,
+  centreZ = 0,
+): NavGrid {
   return new NavGrid(
     collision,
     PLAYER_RADIUS,
     JUMP_APEX_HEIGHT,
     () => [],
     () => false,
-    circleBoundary(radius),
+    circleBoundary(radius, centreX, centreZ),
   );
 }
 
@@ -364,6 +415,83 @@ const fail = (message: string): void => {
       process.stderr.write(
         `the router ${reached ? 'climbs' : 'refuses'} a ${height} m plateau at ` +
           `${AT} m out (measured ${measured} m of real height), as it must.\n`,
+      );
+    }
+  }
+}
+
+// ------------------------------------------------- and an interior, flat
+// The other side of the branch, and it is not a nicety. A castle deck and a
+// hotel room are real coordinates six hundred metres from the park's origin,
+// where the radial formula is meaningless; applied there blind, one 0.5 m
+// lattice step across a perfectly level floor measures over MAX_STEP, so every
+// diagonal of an interior floor is refused as a wall — quietly, as a lobby
+// route that merely got blockier.
+//
+// **Reachability cannot see this, and the first version of this clause was
+// written that way and could not fail.** Removing `walkHeight`'s `spaceAt`
+// branch entirely left all three rooms still routing, because A* does indoors
+// what it does outdoors: the straights stay under MAX_STEP, so it walks a
+// staircase of them instead of the diagonal and arrives anyway. The route is
+// blockier, not absent — which is exactly the "fails quietly" the collision
+// engineer described, and exactly the kind of thing a flood fill reports clean.
+//
+// So the load-bearing assertion here is the **quantity**: a level floor must
+// measure as level. The route is kept underneath it as a sanity check, not as
+// the proof.
+{
+  const interiors = INTERIOR_PROBES.filter(([x, z]) => spaceAt(x, z) !== SPACE_GARDEN);
+  if (interiors.length === 0) {
+    fail(
+      'no interior probe point still lands in an interior space — the castle or ' +
+        'hotel origins have moved, and this clause is asserting nothing. Re-read ' +
+        'them from world/spaces.ts rather than deleting the clause.',
+    );
+  }
+
+  for (const [x, z, name] of interiors) {
+    // A level floor, the way an interior really is: one height everywhere.
+    const floorY = 0;
+    const flat = (_x: number, _z: number, _y: number): number => floorY;
+
+    // The quantity. Every lattice neighbour of a level floor must measure as
+    // level — if it does not, the sphere's frame has been applied six hundred
+    // metres from the sphere, where it means nothing.
+    let worstStep = 0;
+    const here = walkHeight(x, floorY, z);
+    for (const [dx, dz] of NEIGHBOURS) {
+      worstStep = Math.max(
+        worstStep,
+        Math.abs(walkHeight(x + dx * CELL, floorY, z + dz * CELL) - here),
+      );
+    }
+    if (worstStep > INTERIOR_LEVEL_TOLERANCE) {
+      fail(
+        `one ${CELL} m lattice step across a perfectly level floor in ${name} ` +
+          `(${x.toFixed(0)}, ${z.toFixed(0)}) measures ${worstStep.toFixed(3)} m, ` +
+          `against MAX_STEP ${BUILDING_STEP_UP} m. An interior is a real ` +
+          'coordinate hundreds of metres from the park, where the radial formula ' +
+          'is meaningless — see up.ts walkHeight, which must branch on spaceAt.',
+      );
+    } else {
+      process.stderr.write(
+        `interior ok: ${name} at (${x.toFixed(0)}, ${z.toFixed(0)}) measures ` +
+          `${worstStep.toFixed(3)} m across a level floor.\n`,
+      );
+    }
+
+    const grid = gridOver(new CollisionWorld(), 40, x, z);
+
+    // Diagonally across, which is the direction a bare radial frame refuses.
+    const reached =
+      grid.findRoute(x - 8, z - 8, floorY, x + 8, z + 8, floorY, flat, OUT) >= 0 &&
+      grid.lastRouteReachedGoal;
+
+    if (!reached) {
+      fail(
+        `no route across 23 m of perfectly level floor in ${name}. The sanity ` +
+          'check under the measurement above has fired, which means something ' +
+          'other than the step gate is wrong with the interior lattice.',
       );
     }
   }

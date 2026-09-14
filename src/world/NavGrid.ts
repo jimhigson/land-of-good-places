@@ -1,11 +1,11 @@
 import type { ParkBoundary } from './boundary';
-import { BUILDING_STEP_UP } from '../core/constants';
+import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
 import type { LevelConnector } from './building/surfaces';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
-import { groundRadiusAt, planetRadiusAt, yAtAltitude } from './terrain';
-import { isOutdoors } from './up';
+import { groundRadiusAt, yAtAltitude } from './terrain';
+import { isOutdoors, walkHeight } from './up';
 
 /**
  * The park, as something you can find a way across — **on every level of it**.
@@ -864,12 +864,11 @@ export class NavGrid {
           this.growNodes(this.nodeHeight.length * 2);
         }
         const outdoors = isOutdoors(x, z);
-        // The column's own ground radius, kept because the downward probe below
-        // has to hand `yAtAltitude` an altitude and this is the datum that
-        // turns a radius into one. Read from `terrain.ts`'s own export rather
-        // than re-derived.
-        const groundR = outdoors ? groundRadiusAt(x, z) : 0;
-        let cursorRadius = outdoors ? planetRadiusAt(x, cursor, z) : cursor;
+        // The column's own ground height on the same scale, kept because the
+        // downward probe below has to hand `yAtAltitude` an *altitude* and this
+        // is the datum that turns a walk height into one.
+        const groundHeight = outdoors ? groundRadiusAt(x, z) - GROUND_SPHERE_RADIUS : 0;
+        let cursorRadius = walkHeight(x, cursor, z);
         this.nodeHeight[nodes] = cursor;
         this.nodeRadius[nodes] = cursorRadius;
         this.nodeCell[nodes] = index;
@@ -889,8 +888,8 @@ export class NavGrid {
           // `yAtAltitude` wants an altitude, so the radius is turned into one
           // against this column's ground — the two are the same fact.
           const probe = cursorRadius - MAX_STEP - LEVEL_EPSILON;
-          const next = sample(x, z, outdoors ? yAtAltitude(x, z, probe - groundR) : probe);
-          const nextRadius = outdoors ? planetRadiusAt(x, next, z) : next;
+          const next = sample(x, z, outdoors ? yAtAltitude(x, z, probe - groundHeight) : probe);
+          const nextRadius = walkHeight(x, next, z);
           if (nextRadius >= cursorRadius - LEVEL_EPSILON) break;
           cursor = next;
           cursorRadius = nextRadius;
@@ -1001,8 +1000,7 @@ export class NavGrid {
     const cz = (cell - cx) / this.cells;
     const x = this.originX + cx * CELL;
     const z = this.originZ + cz * CELL;
-    if (!isOutdoors(x, z)) return y;
-    return planetRadiusAt(x, y, z);
+    return walkHeight(x, y, z);
   }
 
   /** The node of `cell` whose surface is nearest `y`, or -1 for a blocked cell. */

@@ -1,6 +1,7 @@
 import { Euler, Quaternion, Vector3, type Object3D } from 'three';
+import { GROUND_SPHERE_RADIUS } from '../core/constants';
 import { SPACE_GARDEN, spaceAt } from './spaces';
-import { INDOOR_UP, tiltToSphere, upAt } from './terrain';
+import { INDOOR_UP, planetRadiusAt, tiltToSphere, upAt } from './terrain';
 
 /**
  * **Which way is up, for a thing that might be indoors or out.**
@@ -34,6 +35,45 @@ export function upFor(x: number, y: number, z: number, target = new Vector3()): 
 /** True when this world position is out in the park, where up leans. */
 export function isOutdoors(x: number, z: number): boolean {
   return spaceAt(x, z) === SPACE_GARDEN;
+}
+
+/**
+ * **A height two places can be compared by, wherever in the world they are.**
+ *
+ * The answer to "how big is the step from here to there?" — which is not the
+ * same question as {@link altitudeAt}'s "how high is this above the grass", and
+ * confusing the two has already cost this sweep a check that could not fail.
+ *
+ * Outdoors it is the distance from the centre of the planet, so differencing
+ * two of them gives the step a foot would actually feel. A world `y` cannot:
+ * on a sphere a `y` is dominated by *where* a place is rather than how high its
+ * surface is, and at the park's rim the ground drops 1.02 m of `y` per metre
+ * travelled outward. Differenced, that is wrong in **both** directions — it
+ * refuses ground that is flat, and, far worse, it admits a real 0.70 m ledge as
+ * 0.565 m from 40 m out and 0.269 m at the rim, so a router reading `y` plans
+ * routes up things a child cannot climb. `world/NavGrid.ts`'s `nodeRadius` and
+ * `scripts/check-outward-routing.mts` carry the full measurement.
+ *
+ * **Indoors it is plain `y`, and that branch is not a nicety.** A castle deck
+ * and a hotel room are real coordinates six hundred metres from the park's
+ * origin, where the radial formula is meaningless. Applied there blind, one
+ * 0.5 m lattice step across a perfectly level floor measures 0.662 m at
+ * `(1200, 600)` and 0.684 m at `(600, 600)` — over `MAX_STEP` — so every
+ * diagonal of an interior floor would be refused as a wall, and it would fail
+ * quietly, as a lobby route that merely got blockier. Measured by the engineer
+ * on the collision area, who caught it in review; the same reason {@link upFor}
+ * branches on `spaceAt` rather than tilting everything.
+ *
+ * **Why the `GROUND_SPHERE_RADIUS` offset.** It is a constant, so it cancels in
+ * every difference and changes no answer. It is subtracted so the number reads
+ * like a height rather than like 220-something — which keeps a debug print
+ * legible and, more usefully, means an indoor `y` and an outdoor walk height
+ * are the same order of magnitude, so a value that has leaked from the wrong
+ * branch looks wrong instead of looking plausible.
+ */
+export function walkHeight(x: number, y: number, z: number): number {
+  if (spaceAt(x, z) !== SPACE_GARDEN) return y;
+  return planetRadiusAt(x, y, z) - GROUND_SPHERE_RADIUS;
 }
 
 const _eyeTilt = /* @__PURE__ */ new Quaternion();
