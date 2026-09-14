@@ -1,4 +1,6 @@
 import { Group, Mesh, MeshBasicMaterial, SphereGeometry, Vector3 } from 'three';
+import { Anchor } from '../../world/geo';
+import { anchorAt, upFor } from '../../world/up';
 import { clamp01, smoothstep, TAU } from '../../core/mathUtils';
 import { starGeometry } from '../style/shapes';
 import { decal } from '../style/materials';
@@ -19,6 +21,20 @@ import { decal } from '../style/materials';
  * Both pools use one `MeshBasicMaterial` per slot rather than a shared one:
  * the pool is small (a child rarely picks more than one flower at once) and
  * per-mesh opacity is what makes the fade-and-shrink trivial to write.
+ *
+ * ## The two halves take different medicine, and that is the point
+ *
+ * The **sparkles** stay where they were fired, so each one hangs off its own
+ * {@link Anchor} and its compass-plus-lift direction is written in the ground's
+ * own frame. The **flyer** does not: it interpolates between the flower and
+ * whatever the player's position is *this frame*, which are two different
+ * frames on a sphere, so there is nothing for an anchor to be. It instead asks
+ * `upFor` at each end and lifts along that.
+ *
+ * Both were world `+Y` before. On the flyer that mattered most: 1.55 m of world
+ * `+Y` at the park's rim is 1.09 m of real height and **1.11 m sideways**, so
+ * the payoff animation of picking a flower parked the bloom in mid-air beside
+ * her ear instead of by her hair.
  */
 
 const FLYER_POOL_SIZE = 3;
@@ -55,8 +71,9 @@ interface Flyer {
 
 interface Sparkle {
   readonly mesh: Mesh;
+  /** The ground frame it was fired in; `direction` below is local to it. */
+  readonly anchor: Anchor;
   readonly material: MeshBasicMaterial;
-  readonly origin: Vector3;
   readonly direction: Vector3;
   age: number;
   active: boolean;
@@ -86,11 +103,13 @@ export function createFlowerPickEffect(): FlowerPickEffect {
     const mesh = decal(new Mesh(sparkleGeometry, material));
     mesh.visible = false;
     mesh.renderOrder = 10;
-    root.add(mesh);
+    const anchor = new Anchor();
+    anchor.add(mesh);
+    root.add(anchor);
     sparkles.push({
       mesh,
+      anchor,
       material,
-      origin: new Vector3(),
       direction: new Vector3(),
       age: 0,
       active: false,
@@ -99,12 +118,15 @@ export function createFlowerPickEffect(): FlowerPickEffect {
   let nextSparkle = 0;
 
   const flightPoint = new Vector3();
+  const flightUp = new Vector3();
 
   function burst(x: number, y: number, z: number, colour: number, target: () => Vector3): void {
     const flyer = flyers[nextFlyer % flyers.length];
     nextFlyer += 1;
     if (flyer) {
-      flyer.from.set(x, y + 0.1, z);
+      // Up off its own stem, along the ground's up, not the world's.
+      upFor(x, y, z, flightUp);
+      flyer.from.set(x, y, z).addScaledVector(flightUp, 0.1);
       flyer.target = target;
       flyer.age = 0;
       flyer.active = true;
@@ -120,13 +142,15 @@ export function createFlowerPickEffect(): FlowerPickEffect {
       nextSparkle += 1;
       if (!sparkle) continue;
       const angle = (i / SPARKLES_PER_BURST) * TAU + nextSparkle * 0.37;
-      sparkle.origin.set(x, y + 0.15, z);
+      anchorAt(sparkle.anchor, x, y, z);
+      // Local to that anchor: a compass in the ground's tangent plane, lifted
+      // along the ground's up.
       sparkle.direction.set(Math.cos(angle), 0.7, Math.sin(angle));
       sparkle.age = 0;
       sparkle.active = true;
       sparkle.material.color.setHex(colour);
       sparkle.material.opacity = 1;
-      sparkle.mesh.position.copy(sparkle.origin);
+      sparkle.mesh.position.set(0, 0.15, 0);
       sparkle.mesh.scale.setScalar(1);
       sparkle.mesh.visible = true;
     }
@@ -143,10 +167,14 @@ export function createFlowerPickEffect(): FlowerPickEffect {
         continue;
       }
       const ease = smoothstep(0, 1, t);
-      flightPoint.copy(flyer.target());
-      flightPoint.y += 1.55; // roughly hair height
+      const to = flyer.target();
+      // Hair height above *her* head, measured along the up where she is
+      // standing — 1.55 m of world +Y out at the rim is 1.09 m of real height
+      // and 1.11 m sideways, which parked the bloom beside her ear.
+      upFor(to.x, to.y, to.z, flightUp);
+      flightPoint.copy(to).addScaledVector(flightUp, 1.55);
       flyer.mesh.position.lerpVectors(flyer.from, flightPoint, ease);
-      flyer.mesh.position.y += Math.sin(t * Math.PI) * FLYER_ARC;
+      flyer.mesh.position.addScaledVector(flightUp, Math.sin(t * Math.PI) * FLYER_ARC);
       // Hold at full size briefly (the "pop"), then shrink away.
       const scale = 1 - smoothstep(0.35, 1, t) * 0.97;
       flyer.mesh.scale.set(scale, scale * 0.55, scale);
@@ -164,9 +192,9 @@ export function createFlowerPickEffect(): FlowerPickEffect {
       }
       const ease = smoothstep(0, 1, t);
       sparkle.mesh.position.set(
-        sparkle.origin.x + sparkle.direction.x * SPARKLE_TRAVEL * ease,
-        sparkle.origin.y + sparkle.direction.y * SPARKLE_TRAVEL * ease,
-        sparkle.origin.z + sparkle.direction.z * SPARKLE_TRAVEL * ease,
+        sparkle.direction.x * SPARKLE_TRAVEL * ease,
+        0.15 + sparkle.direction.y * SPARKLE_TRAVEL * ease,
+        sparkle.direction.z * SPARKLE_TRAVEL * ease,
       );
       sparkle.mesh.rotation.y += dt * 6;
       const scale = 1 - t * 0.6;
