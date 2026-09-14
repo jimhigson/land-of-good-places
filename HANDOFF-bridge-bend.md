@@ -204,13 +204,110 @@ The four clauses to watch, per seed:
 - `nothing a bridge builds hangs into its own tunnel, measured by ray from the rail`
 - `the park's own paving rides over every bridge, and none is left in a tunnel`
 
+## `test:procgen` — the honest state, diffed by name
+
+Base `feat/sphere-combined` @ `90e62c5b`: **128 failed**, 122.55 s.
+This branch after the arch conversion: **139 failed**, 101.99 s.
+**12 new, 1 gone.** Diff the names — the count alone cannot see a swap.
+
+Gone: `seed 11 > every modelled coping stone sits on the wall it caps`.
+
+New — four clauses, across five seeds:
+
+| clause | seeds |
+|---|---|
+| `no bridge parapet can be seen through — its outer face reaches the wall top` | canonical, 11, 24, 131, 326 |
+| `the park's own paving rides over every bridge, and none is left in a tunnel` | canonical, 11, 24, 131, 326 |
+| `every bridge is as wide as its own path, with the rail corridor open beneath` | 326 |
+| `nothing a bridge builds hangs into its own tunnel, measured by ray from the rail` | 326 |
+
+The arch conversion took this from **18 new to 12** and cleared the tunnel
+clauses on every seed but 326.
+
+**These are mine and they are the work now.** Nothing here is "pre-existing" or
+"unrelated" — the road bent and the drawn stone has not fully caught up.
+
+### Three hypotheses tried, all measured, none of them it
+
+Recorded so the next person does not spend the same hour. Each was plausible,
+each was tested by changing it and re-running, and each left the numbers
+essentially unmoved (canonical parapet counts 24/25/58/3/9 before, 24/27/58/3/10
+after):
+
+1. **`humpAbove` — the parapet taper reading an altitude instead of a world-`y`
+   difference.** Reverted that one line alone; both clauses still failed. Not it.
+   (The change is right on its own merits and was kept.)
+2. **The course ladder stepping in world `y`.** Converted it to a ladder of
+   rises in the tangent frame. Numbers unmoved. **Reverted** — an unproven
+   change does not belong in the diff, however good the argument for it. The
+   argument, for whoever wants it: masonry courses are laid *level*, and level
+   on this planet is the local horizontal, so a world-`y` ladder under a leaning
+   parapet cannot reach its top. It reduces to the present ladder exactly on
+   flat ground. It is simply not what these clauses are complaining about.
+3. **The cross-section taking one centre-derived height across its width.**
+   Fixed, and **kept** — it is a real one-owner correction and it is verified
+   neutral-or-better on solidity and grade. But it did not clear the clauses.
+
+### What I could NOT settle, and why you should not trust my guess
+
+My leading remaining hypothesis is that
+`noBridgeParapetCanBeSeenThrough` **measures in a stale frame**: it drops down a
+**world vertical** from the wall top (`y = top - drop`) and fires a ray with a
+zero `y` component (`direction.set(ux, 0, uz)`) at a face that now leans by up
+to 50°. Its own inner "is there masonry here" control is fired from 1.2 m in
+over the roadway and has more room, so it can keep hitting while the outer ray
+walks off the tilted face — which would produce exactly this report.
+
+**I wrote an instrument to test that and it came back inconclusive, so the
+hypothesis is unsupported and must not be acted on as if it were proven.** The
+instrument fired the clause's own outer ray and a local-frame one at the same
+samples. Result:
+
+```
+  bridge          tilt    both hit   world MISS/local HIT   world hit/local miss   both miss
+  bridge-590.0    11.8°       5245                     48                    112        865
+  bridge-92.0     32.9°       5190                     57                    462        321
+  bridge-748.0    39.6°       5054                     23                    499        454
+  bridge-288.0    47.1°       3898                    153                    495        284
+  bridge-326.0    50.4°       4109                     18                    700        243
+```
+
+The column that would support the hypothesis (`world MISS / local HIT`) is 299
+of ~28,000 and **does not grow with tilt** — 48, 57, 23, 153, 18. A frame error
+must scale with the lean, and this does not.
+
+**The instrument is the thing at fault, not the finding.** It aimed both rays
+along the crude outward *radial* rather than along the wall's own normal, so
+every column is contaminated — and the 243–865 samples where **both** rays miss
+say plainly that its sample points are often not on a parapet at all. It was
+deleted rather than committed: an instrument that cannot answer its question
+should not be left lying about looking like one that can.
+
+**Do this properly instead:** take the clause's own ring/normal data
+(`ShellGeometry.planEdge` and `parapetLine`, which is what it already walks),
+and vary *only* the frame — drop along the local up and project the existing
+normal into that point's own horizontal plane. Then it is a one-variable
+experiment. And whichever way it comes out, **the clause must still be proved
+red against a real hole** before it is believed green: it was written for a
+genuine 1.17 m see-through band (#489, Jim standing on one), and a frame change
+that quietly stops it being able to see that is worse than the bug.
+
 ## Still to do
 
-1. Confirm the `test:procgen` re-run clears all 18, and diff by name.
+1. Settle the four red clauses — read the section above first.
 2. `pnpm run check`, `check:coplanar`, `check:swept-bus`.
-3. Re-run `scripts/diag-bridge-solid.mts` — the drawn stone moved.
-4. The parapet/spandrel verticals (see "What is NOT done").
-5. Browser QA: a bridge at an outer crossing, seen from the side. `/spawn`
+3. The parapet/spandrel verticals (see "What is NOT done").
+4. Browser QA: a bridge at an outer crossing, seen from the side. `/spawn`
    coordinates that stand on one — canonical seed, outermost first:
    `/spawn?pos=138.9,-82.1`, `/spawn?pos=139.0,-50.8`, `/spawn?pos=-14.0,121.7`.
    The preview on 5412 is Jim's; do not take it.
+
+## Instruments left behind
+
+- `scripts/diag-bridge-grade.mts` — the grade, both ways, three controls.
+  `LGP_SEED=<n>`; exit 1 if any bridge is over budget, **exit 2 if a control
+  failed**, in which case every number it printed is void.
+- `scripts/diag-bridge-solid.mts` (previous engineer's) — re-run after any
+  geometry change. Currently 24/24 stopped and 125/125 carried at both the
+  innermost and outermost bridge, controls passing: the bend did **not** desync
+  the stone from its collider.
