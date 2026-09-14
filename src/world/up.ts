@@ -1,7 +1,7 @@
 import { Euler, Quaternion, Vector3, type Object3D } from 'three';
 import { GROUND_SPHERE_RADIUS } from '../core/constants';
 import { SPACE_GARDEN, spaceAt } from './spaces';
-import { INDOOR_UP, planetRadiusAt, tiltToSphere, upAt } from './terrain';
+import { INDOOR_UP, altitudeAt, planetRadiusAt, tiltToSphere, upAt } from './terrain';
 
 /**
  * **Which way is up, for a thing that might be indoors or out.**
@@ -205,6 +205,17 @@ const _footUp = /* @__PURE__ */ new Vector3();
  * Writes into `target`. Indoors the local up is `+Y`, so the foot is directly
  * under the body and this is the identity in `x` and `z` — which is exactly
  * what a flat room wants, with no flag to remember.
+ *
+ * **Not used by the movement code, and deliberately so.** It pairs with a hop
+ * that has actually been lifted along the local up, and that lateral half is
+ * not implemented — `Player.update` samples in her own column, and while that
+ * is true her position already *is* her foot. Using this without the lift
+ * invents a foot she does not have, and it drifts: the invented foot moves
+ * inward as she rises, the ground under it reads higher, and she rises further.
+ * Measured at an apex of 8796 m at the park's rim. The two go in together or
+ * not at all. Kept because `check-radial-solidity.mts` genuinely wants it — a
+ * probe placed above a leaning surface — and because it is half of the fix
+ * HANDOFF-radial-collide.md describes.
  */
 export function footColumn(
   x: number,
@@ -241,4 +252,58 @@ export function liftAlongUp(
     surfaceY + _footUp.y * altitude,
     footZ + _footUp.z * altitude,
   );
+}
+
+/**
+ * **The world `y` at which a point in this column has this {@link walkHeight}**
+ * — the inverse that keeps `x` and `z` fixed.
+ *
+ * The other inverse, {@link liftAlongUp}, moves along the local up and so
+ * slides the point sideways. That is right for *placing* a thing on a slope and
+ * wrong for anything that has already decided which column it is in — which is
+ * the same distinction `terrain.ts` draws between `liftFromGround` and
+ * `yAtAltitude`, for the same reason, one surface further out.
+ *
+ * `walkHeight(x, yAtWalkHeight(x, z, u), z) === u` for any finite `u`, because
+ * both sides are radii in one column.
+ */
+export function yAtWalkHeight(x: number, z: number, up: number): number {
+  if (spaceAt(x, z) !== SPACE_GARDEN) return up;
+  const wanted = up + GROUND_SPHERE_RADIUS;
+  return Math.sqrt(Math.max(0, wanted * wanted - x * x - z * z)) - GROUND_SPHERE_RADIUS;
+}
+
+/**
+ * **How high a declared world `y` stands, in a frame two *different places* can
+ * be compared in** — the height above the ground beneath it.
+ *
+ * This is {@link walkHeight}'s sibling and the difference between them is the
+ * single most important thing on this page, because using the wrong one reads
+ * perfectly and is wrong by half a metre.
+ *
+ * - {@link walkHeight} is a radius. It cancels the planet exactly **between two
+ *   points in the same column**, or between two points that are both *on the
+ *   ground* — which is every question `NavGrid` asks, and the altitude a jump
+ *   is integrated in.
+ * - It does **not** cancel the planet between two points at different `(x, z)`
+ *   that are both *off* the ground, because a radius grows with distance from
+ *   the axis as well as with height. Two points at the same world `y`, 1.3 m
+ *   apart radially at 90 m out, differ by **0.54 m** of `walkHeight`.
+ *
+ * That second case is exactly a collider's declared absolute top against a
+ * mover standing somewhere near it, and getting it wrong closed the railway
+ * fence's seam over a bridge deck: converted as radii, the seam cut at
+ * `deckY - FENCE_SEAM_MARGIN` landed half a metre above the deck it was cut
+ * for, the fence went solid across the bridge, and two procgen invariants
+ * reported bridges with **0.00 m of standable width** (seeds 11 and 326).
+ *
+ * So for "is this mover above that collider's top?", both sides become heights
+ * **above the ground**, which is a datum the whole sphere shares: the planet
+ * then cancels for any pair of places, and what is left is the height a child
+ * would feel. Indoors it is plain `y`, for the usual reason.
+ */
+export function standHeight(x: number, y: number, z: number): number {
+  if (!Number.isFinite(y)) return y;
+  if (spaceAt(x, z) !== SPACE_GARDEN) return y;
+  return altitudeAt(x, y, z);
 }

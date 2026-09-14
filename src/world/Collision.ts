@@ -1,6 +1,5 @@
 import { Vector3 } from 'three';
 import { GARDEN_PLAY_BOUNDARY, type ParkBoundary } from './boundary';
-import { walkHeight } from './up';
 
 /**
  * Deliberately simple solid-object handling.
@@ -33,30 +32,6 @@ import { walkHeight } from './up';
  * anything the building registers — auto-hop must never fire for something a
  * child did not choose to jump into, which the fountain's water and a stair's
  * side rail both are.
- *
- * ## An absolute height is a `walkHeight`, not a world `y`
- *
- * Both absolute fields below — `topIsAbsolute`'s top and `baseHeight` — are
- * *given* as a world `y`, because that is what every caller has, and are
- * **stored** as `world/up.ts`'s {@link walkHeight}, which is what they are
- * compared against. Outdoors that is the distance from the planet's centre;
- * indoors it is the same world `y` it always was, so every interior caller —
- * which is most of them — is bit-for-bit unchanged.
- *
- * The conversion is not tidiness. A world `y` out in the park is dominated by
- * *where you are* rather than *how high you are*: the radial gradient reaches
- * 1.02 m of `y` per metre travelled outward at the park's reach. So an absolute
- * top taken off a bridge deck and compared against a child's `y` two metres
- * away radially differs by more than a metre of pure planet — and the
- * railway's fences (`train/fence.ts`) and the bridge seams
- * (`train/bridges.ts`) are precisely that, pinned to a *local* road surface out
- * where the lean is worst. Left in `y` they either stop being solid or go solid
- * against a child who is nowhere near them, both silently.
- *
- * Derived once at registration, from the single number the caller passed, so
- * there is no pair of fields for anybody to keep in step; the caller's own
- * `topHeight` and `baseHeight` are stored untouched and read back exactly as
- * given.
  *
  * ## `topIsAbsolute` — a top you can stand on, not just jump over
  *
@@ -134,11 +109,6 @@ interface CircleCollider {
   topIsAbsolute: boolean;
   /** World Y below which this collider does not exist. See the header. */
   baseHeight: number;
-  /** {@link topHeight} as a `walkHeight`, for the `topIsAbsolute` comparison.
-   *  Derived at registration; meaningless unless `topIsAbsolute`. */
-  topUp: number;
-  /** {@link baseHeight} as a `walkHeight`. Derived at registration. */
-  baseUp: number;
   /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
   navStamped: boolean;
 }
@@ -154,11 +124,6 @@ export interface WallCollider {
   topIsAbsolute: boolean;
   /** World Y below which this collider does not exist. See the header. */
   baseHeight: number;
-  /** {@link topHeight} as a `walkHeight`, for the `topIsAbsolute` comparison.
-   *  Derived at registration; meaningless unless `topIsAbsolute`. */
-  topUp: number;
-  /** {@link baseHeight} as a `walkHeight`. Derived at registration. */
-  baseUp: number;
   /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
   navStamped: boolean;
 }
@@ -527,12 +492,6 @@ export class CollisionWorld {
       autoHoppable,
       topIsAbsolute,
       baseHeight,
-      // Both absolute heights, in the frame they are compared in. See the
-      // header. `walkHeight` returns a non-finite height unchanged — sign and
-      // all, which is the whole point of the guard in it — so a collider that
-      // declared neither keeps exactly its old behaviour.
-      topUp: topIsAbsolute ? walkHeight(x, topHeight, z) : topHeight,
-      baseUp: walkHeight(x, baseHeight, z),
       navStamped,
     });
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
@@ -580,15 +539,6 @@ export class CollisionWorld {
     baseHeight = -Infinity,
     navStamped = false,
   ): WallCollider {
-    // The frame is taken at the wall's **midpoint**, not at an end. A wall is
-    // one rigid thing with one declared top, so it gets one conversion; taking
-    // it at `(x1, z1)` would tilt every wall's top by half its own length's
-    // worth of planet. Long outdoor runs are built as many short walls
-    // (`train/fence.ts` stamps one per segment), so the residual over a single
-    // segment is small — and a caller that wants it exact stamps shorter ones,
-    // which is what it already does for the geometry.
-    const midX = (x1 + x2) / 2;
-    const midZ = (z1 + z2) / 2;
     const wall: WallCollider = {
       x1,
       z1,
@@ -599,8 +549,6 @@ export class CollisionWorld {
       autoHoppable,
       topIsAbsolute,
       baseHeight,
-      topUp: topIsAbsolute ? walkHeight(midX, topHeight, midZ) : topHeight,
-      baseUp: walkHeight(midX, baseHeight, midZ),
       navStamped,
     };
     this.walls.push(wall);
@@ -923,10 +871,6 @@ export class CollisionWorld {
     let clearedAny = false;
     let escorting = false;
     let corrected = false;
-    // The mover's own absolute height, in the frame the absolute fields are
-    // stored in — converted **once**, here, rather than per collider. Indoors
-    // this is `position.y` and nothing below changes at all.
-    const moverUp = walkHeight(position.x, position.y, position.z);
     // Shared across every collider and both passes below, so a mover pinned
     // between two deep overlaps at once still escorts at a combined
     // MAX_DEPENETRATION_SPEED overall, rather than that much again per
@@ -963,10 +907,10 @@ export class CollisionWorld {
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
         // A banded collider does not exist for a mover below its base — the
         // landing rail over the open archway. See the header.
-        if (moverUp < circle.baseUp) continue;
+        if (position.y < circle.baseHeight) continue;
         // Absolute tops compare against the mover's real feet height, so a
         // prop she is stood on holds still under her — see the header.
-        if (clearsTop(circle.topIsAbsolute ? circle.topUp : circle.topHeight, circle.topIsAbsolute ? moverUp : clearance)) {
+        if (clearsTop(circle.topHeight, circle.topIsAbsolute ? position.y : clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -997,9 +941,9 @@ export class CollisionWorld {
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
         // Same banded-base rule as the circles above.
-        if (moverUp < wall.baseUp) continue;
+        if (position.y < wall.baseHeight) continue;
         // Same absolute-top rule as the circles above.
-        if (clearsTop(wall.topIsAbsolute ? wall.topUp : wall.topHeight, wall.topIsAbsolute ? moverUp : clearance)) {
+        if (clearsTop(wall.topHeight, wall.topIsAbsolute ? position.y : clearance)) {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }

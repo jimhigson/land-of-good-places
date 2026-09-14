@@ -34,10 +34,9 @@
  */
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
-import { footColumn, liftAlongUp, walkHeight } from '../src/world/up.ts';
+import { walkHeight, yAtWalkHeight } from '../src/world/up.ts';
 
-/** Scratch for the foot column, reused across steps. */
-const _foot = /* @__PURE__ */ new Vector3();
+
 import { damp } from '../src/core/mathUtils.ts';
 import {
   FALL_THRESHOLD,
@@ -240,19 +239,22 @@ export class SimPlayer {
     // surface height to carry, so in both cases the reference stays put and
     // only the last sub-step's answer is used.
     const damped = this.groundReference === 'damped';
-    // Her feet, not her body — `Player.update`'s own rule, and the reason it
-    // is there: a hop runs along the local up, so at altitude her `x, z` is
-    // not the ground she took off from. `hopClearance` is last frame's
-    // altitude, exactly as stale as `Player` documents it to be; on the ground
-    // it is 0 and `footColumn` is the identity.
-    const lift = this.hopClearance;
-    const foot = _foot;
     const following = !this.airborne && !damped;
     let reference = this.airborne || damped ? this.position.y : this.groundHeight;
     let groundY = reference;
     const onStep = (at: Vector3): void => {
-      footColumn(at.x, at.y, at.z, lift, foot);
-      groundY = this.sampleGround(foot.x, foot.z, reference);
+    // **Sampled under her `x, z`, as it always was.**
+    //
+    // An earlier version asked at a *foot column* — `position - up * altitude`
+    // — which is the right question if her body has genuinely been lifted along
+    // the local up. It has not: the lateral half of the hop is not implemented
+    // (see the note below and `check:radial-hop`), so `position.x, z` already
+    // *is* her foot column, and subtracting the lift from it invents a foot she
+    // does not have. Worse, it drifts: the invented foot moves inward as she
+    // rises, so the ground under it reads higher, which raises her, which moves
+    // the foot further. Measured: an apex of 8796 m at the rim instead of 1.23.
+    // The two changes only make sense together, and they go in together.
+      groundY = this.sampleGround(at.x, at.z, reference);
       if (following) reference = groundY;
     };
 
@@ -309,15 +311,14 @@ export class SimPlayer {
     // The pre-#358 vertical: one sample, at the end of the whole frame's
     // movement, asked from her damped height. This is the control.
     if (!this.groundSubstepping || !this.substepping) {
-      footColumn(this.position.x, this.position.y, this.position.z, lift, foot);
-      groundY = this.sampleGround(foot.x, foot.z, reference);
+      groundY = this.sampleGround(this.position.x, this.position.z, reference);
     }
     this.groundY = groundY;
 
     // Radial altitude, not a `y` difference — `Player.update`'s own form, and
     // the reason it is there: a `y` difference between her body and the ground
     // over-reads by `1 / cos θ` and spends `FALL_THRESHOLD` on lateral travel.
-    const groundUp = walkHeight(foot.x, groundY, foot.z);
+    const groundUp = walkHeight(this.position.x, groundY, this.position.z);
     let altitude = walkHeight(this.position.x, this.position.y, this.position.z) - groundUp;
 
     if (!this.airborne && altitude > FALL_THRESHOLD) {
@@ -337,10 +338,32 @@ export class SimPlayer {
       }
       hopHeight = altitude;
     } else {
+      // Damp onto the ground so walking over the gentle hills isn't jittery —
+      // in **altitude**, so the half-life means the same lag behind the surface
+      // at every radius. `hopHeight` stays 0: this lag is not a hop, it goes
+      // negative on a climb, and banking it as `hopClearance` hands it to
+      // `CollisionWorld` as a jump clearance.
       altitude = damp(altitude, 0, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
-      hopHeight = altitude;
     }
-    liftAlongUp(foot.x, groundY, foot.z, altitude, this.position);
+    // **The altitude becomes a height, in her own column — every frame, both
+    // branches.** Writing it only while `airborne` is a landing that never
+    // happens: `airborne` goes false *inside* the branch above, so the guard is
+    // already false on the frame she touches down and her `y` is left where it
+    // was. She then hangs, the fall detector sees the gap, and she takes off
+    // again from there — measured as an apex of 8796 m at the rim before this
+    // was written unconditionally.
+    //
+    // `yAtWalkHeight` keeps `x` and `z` fixed, deliberately. A hop on a ball
+    // really does carry her outwards too, and an earlier version did that with
+    // `position = foot + up * altitude`, re-derived each frame — which makes her
+    // lateral position a function of her altitude, so the instant a surface
+    // dropped away under her the altitude jumped and she was teleported
+    // sideways, off the deck, which raised the altitude further. A runaway:
+    // `check:deck-fallthrough` went from green to 401 of 1280 runs losing the
+    // surface at gradient 0.1, with gaps reaching 50 m. The lateral half needs
+    // integrating as an impulse at take-off, which is its own piece of work —
+    // see HANDOFF-radial-collide.md and the note `check:radial-hop` prints.
+    this.position.y = yAtWalkHeight(this.position.x, this.position.z, walkHeight(this.position.x, groundY, this.position.z) + altitude);
     this.hopClearance = hopHeight;
     this.groundHeight = groundY;
   }

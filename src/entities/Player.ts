@@ -20,7 +20,7 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
-import { faceOnGround, footColumn, liftAlongUp, walkHeight } from '../world/up';
+import { faceOnGround, walkHeight, yAtWalkHeight } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
@@ -455,9 +455,6 @@ export class Player implements GameSystem {
    */
   private hopClearance = 0;
 
-  /** Scratch for the foot column under her body — see `world/up.ts`'s
-   *  {@link footColumn}. Reused per frame rather than allocated. */
-  private readonly footScratch = new Vector3();
 
   /**
    * How she holds herself while a ride owns her.
@@ -1040,14 +1037,6 @@ export class Player implements GameSystem {
     const following = !this.airborne;
     let reference = following ? this.groundHeight : this.position.y;
     let groundY = reference;
-    // **Ask what is under her feet, not under her body.** A hop runs along the
-    // local up, which out in the park carries her outwards as well as upwards
-    // — 0.91 m across the ground at the rim on an ordinary 1.28 m jump — so at
-    // altitude her `x, z` is not the patch of ground she took off from.
-    // `hopClearance` is last frame's altitude, one frame stale by construction
-    // and already documented as such; on the ground it is 0 and this is the
-    // identity, which is every frame of ordinary walking.
-    const lift = this.hopClearance;
     const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,
       this.velocity.x * dt,
@@ -1056,8 +1045,18 @@ export class Player implements GameSystem {
       this.hopClearance,
       dt,
       (at) => {
-        footColumn(at.x, at.y, at.z, lift, this.footScratch);
-        groundY = this.groundAt(this.footScratch.x, this.footScratch.z, reference);
+    // **Sampled under her `x, z`, as it always was.**
+    //
+    // An earlier version asked at a *foot column* — `position - up * altitude`
+    // — which is the right question if her body has genuinely been lifted along
+    // the local up. It has not: the lateral half of the hop is not implemented
+    // (see the note below and `check:radial-hop`), so `position.x, z` already
+    // *is* her foot column, and subtracting the lift from it invents a foot she
+    // does not have. Worse, it drifts: the invented foot moves inward as she
+    // rises, so the ground under it reads higher, which raises her, which moves
+    // the foot further. Measured: an apex of 8796 m at the rim instead of 1.23.
+    // The two changes only make sense together, and they go in together.
+        groundY = this.groundAt(at.x, at.z, reference);
         if (following) reference = groundY;
       },
     );
@@ -1111,7 +1110,7 @@ export class Player implements GameSystem {
     // replaces over-read by `1 / cos θ` — 1.43x at the rim — so
     // `FALL_THRESHOLD`'s 0.5 m of forgiveness was spent by 0.5 m of *lateral*
     // travel out there, and she was declared falling while walking on grass.
-    const groundUp = walkHeight(this.footScratch.x, groundY, this.footScratch.z);
+    const groundUp = walkHeight(this.position.x, groundY, this.position.z);
     let altitude =
       walkHeight(this.position.x, this.position.y, this.position.z) - groundUp;
 
@@ -1205,31 +1204,33 @@ export class Player implements GameSystem {
       hopHeight = altitude;
     } else {
       this.wornJetpack?.setThrust(0);
-      // Damp onto the ground so walking over the gentle hills isn't jittery.
-      // The half-life is a shared constant, not a literal: it sets how far
-      // behind the ground this height lags on a climb, and so how steep a
-      // slope the park is allowed to build — see its own note, and the
-      // sprint-climb budget in `everyBridgeIsWalkableAndReachable`.
-      // Damped in altitude rather than in world `y`, so the half-life means
-      // the same lag behind the surface at every radius. The two agree exactly
-      // at the park's origin.
+      // Damp onto the ground so walking over the gentle hills isn't jittery —
+      // in **altitude**, so the half-life means the same lag behind the surface
+      // at every radius. `hopHeight` stays 0: this lag is not a hop, it goes
+      // negative on a climb, and banking it as `hopClearance` hands it to
+      // `CollisionWorld` as a jump clearance.
       altitude = damp(altitude, 0, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
-      hopHeight = altitude;
     }
 
-    // **The one place the altitude becomes a world position.** She is lifted
-    // off her own foot column along the local up, so a hop is genuinely
-    // perpendicular to the ground she jumped from: `x` and `z` travel outwards
-    // with her and come back as she lands, which is what a jump on a ball does.
-    // Drawn and collided from the same point, by construction — `Player`'s
-    // group takes `position` verbatim.
-    liftAlongUp(
-      this.footScratch.x,
-      groundY,
-      this.footScratch.z,
-      altitude,
-      this.position,
-    );
+    // **The altitude becomes a height, in her own column — every frame, both
+    // branches.** Writing it only while `airborne` is a landing that never
+    // happens: `airborne` goes false *inside* the branch above, so the guard is
+    // already false on the frame she touches down and her `y` is left where it
+    // was. She then hangs, the fall detector sees the gap, and she takes off
+    // again from there — measured as an apex of 8796 m at the rim before this
+    // was written unconditionally.
+    //
+    // `yAtWalkHeight` keeps `x` and `z` fixed, deliberately. A hop on a ball
+    // really does carry her outwards too, and an earlier version did that with
+    // `position = foot + up * altitude`, re-derived each frame — which makes her
+    // lateral position a function of her altitude, so the instant a surface
+    // dropped away under her the altitude jumped and she was teleported
+    // sideways, off the deck, which raised the altitude further. A runaway:
+    // `check:deck-fallthrough` went from green to 401 of 1280 runs losing the
+    // surface at gradient 0.1, with gaps reaching 50 m. The lateral half needs
+    // integrating as an impulse at take-off, which is its own piece of work —
+    // see HANDOFF-radial-collide.md and the note `check:radial-hop` prints.
+    this.position.y = yAtWalkHeight(this.position.x, this.position.z, walkHeight(this.position.x, groundY, this.position.z) + altitude);
     this.hopClearance = hopHeight;
     // Next frame's sampling reference: the surface she is on, not the damped
     // height she is drawn at. See `groundHeight`.

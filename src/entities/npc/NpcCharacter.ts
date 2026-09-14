@@ -14,6 +14,7 @@ import type { Expression } from '../../art/style/faces';
 import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
 import type { NpcAvatar } from './npcAvatar';
 import { applyRidePose } from '../ridePose';
+import { walkHeight, yAtWalkHeight } from '../../world/up';
 
 /**
  * A character that is not the player.
@@ -74,6 +75,7 @@ const GRAVITY = 17;
  */
 const SCRIPTED_ENCOUNTER_SPEED_FACTOR = 2.4;
 
+
 export class NpcCharacter {
   readonly avatar: NpcAvatar;
   readonly driver: CharacterDriver;
@@ -95,6 +97,12 @@ export class NpcCharacter {
   private gait = 0;
   private verticalVelocity = 0;
   private airborne = false;
+  /**
+   * Her feet's height above the surface she is on, **measured radially** — the
+   * NPC's own `hopClearance`. One frame stale where it is read as a foot
+   * offset, exactly as `Player`'s is and for the same reason.
+   */
+  private hopHeightAboveGround = 0;
   private expression: Expression = 'neutral';
 
   // --- tree climbing (see world/TreeClimbing.ts) ---------------------------
@@ -656,9 +664,24 @@ export class NpcCharacter {
       }
     }
 
+    // **The same radial gravity the player has** — `Player.update`'s block,
+    // with the same reasons, and they are not cosmetic for an NPC either: every
+    // character in the outer park is one. A `y` difference against the ground
+    // over-reads a clearance by `1 / cos θ`, so `FALL_THRESHOLD`'s 0.5 m of
+    // forgiveness was spent by half a metre of *lateral* travel out where the
+    // radial gradient is 1.02 m/m — which is `scripts/check-hotel.mts`'s fall
+    // detector firing on every outdoor NPC past ~29 m, one layer down.
+    //
+    // Sampled under her own `x, z`, as it always was — the lateral half of a
+    // radial hop is not implemented, so her position already *is* her foot
+    // column. See `Player.update`, which carries the full note.
     const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
 
-    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+    const groundUp = walkHeight(this.position.x, groundY, this.position.z);
+    let altitude =
+      walkHeight(this.position.x, this.position.y, this.position.z) - groundUp;
+
+    if (!this.airborne && altitude > FALL_THRESHOLD) {
       this.airborne = true;
       this.verticalVelocity = 0;
     }
@@ -670,15 +693,24 @@ export class NpcCharacter {
 
     if (this.airborne) {
       this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
-      if (this.position.y <= groundY) {
-        this.position.y = groundY;
+      altitude += this.verticalVelocity * dt;
+      if (altitude <= 0) {
+        altitude = 0;
         this.verticalVelocity = 0;
         this.airborne = false;
       }
     } else {
-      this.position.y = damp(this.position.y, groundY, 0.04, dt);
+      altitude = damp(altitude, 0, 0.04, dt);
     }
+    // The altitude becomes a height in her own column. `yAtWalkHeight` keeps
+    // `x` and `z` fixed; see `Player.update` for why the lift that would move
+    // them is not here.
+    this.position.y = yAtWalkHeight(
+      this.position.x,
+      this.position.z,
+      groundUp + altitude,
+    );
+    this.hopHeightAboveGround = this.airborne ? altitude : 0;
 
     // --- facing ---------------------------------------------------------
     const planarSpeed = Math.hypot(this.velocity.x, this.velocity.z);
@@ -757,7 +789,11 @@ export class NpcCharacter {
     }
     const gait = this.gait;
     const phase = this.walkPhase;
-    const groundY = this.groundAt(this.position.x, this.position.z, this.position.y);
+    // No second ground sample here any more. This used to re-ask the sampler
+    // and difference world y to get the hop height, which was a second,
+    // disagreeing definition of a number `update` had already computed
+    // correctly one frame earlier -- and on the sphere the two answers differ,
+    // because one is a y difference and the other is radial.
     // The little tuck a child pulls their knees into on the way up from a hop —
     // scaled by how far off the ground they are, which is fine for a hop and
     // **wrong for a climb**, where "off the ground" is the whole height of the
@@ -775,7 +811,7 @@ export class NpcCharacter {
     // a bus floor is 0.62 m above the terrain, which is not a hop, and reading
     // it as one tucks her knees up on the seat.
     const hopHeight =
-      this.climbingFlag || this.scriptedFlag ? 0 : Math.max(0, this.position.y - groundY);
+      this.climbingFlag || this.scriptedFlag ? 0 : Math.max(0, this.hopHeightAboveGround);
 
     const bob = Math.abs(Math.sin(phase)) * PLAYER_BOB_HEIGHT * gait;
     const breathe = Math.sin(elapsed * 1.9 + this.walkPhase) * 0.014 * (1 - gait);
