@@ -7213,6 +7213,35 @@ const SITE_IDENTITY_TOLERANCE = 0.01;
  * (`RAIL_CORRIDOR_CLEARANCE`) rather than from the loop solver's own
  * `RAIL_SELF_CLEARANCE` — so the two cannot drift into agreeing with each other
  * while both being wrong.
+ *
+ * ## How this was proved red, and why it could not be done the obvious way
+ *
+ * Recorded here rather than only in a commit message, because the next person to
+ * read this will want to know it was armed, and the obvious reproduction does
+ * **not** work.
+ *
+ * It could not be armed on the seed that motivated it. With `SELF_CLEARANCE`
+ * put back to its old bare `3`, seed 451's park **does not build at all**, so
+ * every one of its 94 tests **skips** — and a skipped test is not a red one
+ * (CLAUDE.md's own "76 silent skips", where the tell was the pass count rather
+ * than the fail count). Nor does any other pool seed with a test file pinch
+ * below the 8.4 m threshold at the old constant: the closest is seed 24 at
+ * **10.40 m**.
+ *
+ * So the assertion was armed directly instead, by raising its own threshold to
+ * `RAIL_CORRIDOR_CLEARANCE * 3` = 12.6 m and running seed 24, whose loop was
+ * built at `SELF_CLEARANCE = RAIL_SELF_CLEARANCE`:
+ *
+ * ```
+ * AssertionError: the railway runs back within 10.40 m of itself — railD 61
+ * (22.6, -19.8) to railD 186 — against the 12.6 m a path needs to pass between
+ * two limbs. Whatever is beyond that pinch is walled off from the park.
+ * ```
+ *
+ * Real geometry, real coordinates, no `NaN`. **Both the threshold and the
+ * constant were restored afterwards.** If you want to re-arm it, raise the
+ * threshold — do not lower `SELF_CLEARANCE` and expect a red run, because you
+ * will get a skipped one.
  */
 const theRailwayLeavesRoomBesideItself: Invariant = (facts) => {
   const complaints: string[] = [];
