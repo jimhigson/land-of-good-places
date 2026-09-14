@@ -110,7 +110,7 @@ import {
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { GATE_POST_COLLIDER_RADIUS } from '../../src/world/entrance/gateArch.ts';
-import { terrainHeight } from '../../src/world/terrain.ts';
+import { terrainHeight, upAt } from '../../src/world/terrain.ts';
 // The road corridor's measurement, shared with `check:ground-claims` so the two
 // sites that ask "is the claim the road?" cannot answer it differently. Pure
 // geometry over what it is handed — nothing seed-dependent is imported here.
@@ -5401,7 +5401,25 @@ const nothingHangsIntoTheTunnel: Invariant = (facts) => {
   const from = new Vector3();
   const here = new Vector3();
   const ahead = new Vector3();
-  const up = new Vector3(0, 1, 0);
+  /**
+   * **Up is radial, and it is re-asked at every sample.**
+   *
+   * This was `new Vector3(0, 1, 0)`, fired once and reused. On the 220 m sphere
+   * the ground under a railway bridge leans 15-30 degrees, so a ray along world
+   * `+Y` leaves the tunnel's own axis at that angle and walks **1-2 m sideways**
+   * over the 4 m bore — it can miss the arch entirely (which reads as "no
+   * bridge masonry at all overhead", a complaint about a perfectly good bridge)
+   * or exit through a spandrel. And `hit.point.y - ground`, a vertical drop
+   * between a hit and a bed point the ray is no longer over, over-reads the
+   * headroom by `1 / cos θ` on top of that.
+   *
+   * So the ray is `upAt` at the bed point, the origin is lifted along that same
+   * vector, and the air is `hit.distance` — a length along the ray, which needs
+   * no frame at all.
+   */
+  const up = new Vector3();
+  const tangent = new Vector3();
+  const across3 = new Vector3();
   let bridgesTested = 0;
 
   const route = facts.world.train.route;
@@ -5421,19 +5439,23 @@ const nothingHangsIntoTheTunnel: Invariant = (facts) => {
     for (let d = -4.0; d <= 4.0 + 1e-6; d += 0.4) {
       route.pointAt(centre + d, here);
       route.pointAt(centre + d + 0.1, ahead);
-      let tx = ahead.x - here.x;
-      let tz = ahead.z - here.z;
-      const norm = Math.hypot(tx, tz) || 1;
-      tx /= norm;
-      tz /= norm;
+      // The track bed's own frame: the route's 3-D tangent, the local up under
+      // it, and their cross product for "across the track". The flat version
+      // took the horizontal perpendicular `(-tz, 0, tx)` and kept the centre
+      // point's `y`, which on a leaning bed puts the outer samples up to
+      // `TRACK_CLEARANCE · sin θ` — 0.65 m at 30 degrees — off the rails.
+      tangent.subVectors(ahead, here).normalize();
+      upAt(here.x, here.y, here.z, up);
+      across3.crossVectors(tangent, up).normalize();
       // Across the train's own swept half-width — the same `TRACK_CLEARANCE`
       // the rest of this file measures rail clearance with, never a figure of
       // this invariant's own.
       for (let across = -TRACK_CLEARANCE; across <= TRACK_CLEARANCE + 1e-6; across += 0.325) {
-        const x = here.x + -tz * across;
-        const z = here.z + tx * across;
-        const ground = here.y;
-        from.set(x, ground + 0.05, z);
+        from.copy(here).addScaledVector(across3, across);
+        const x = from.x;
+        const z = from.z;
+        upAt(from.x, from.y, from.z, up);
+        from.addScaledVector(up, 0.05);
         raycaster.set(from, up);
         raycaster.far = 40;
         const hits = raycaster.intersectObject(group, true);
@@ -5442,7 +5464,9 @@ const nothingHangsIntoTheTunnel: Invariant = (facts) => {
         // drawn stone instead of the claim.
         const hit = hits.find((candidate) => candidate.object.name !== 'deck');
         if (!hit) continue;
-        const air = hit.point.y - ground;
+        // Along the ray, not along world `+Y`: a distance needs no frame, and
+        // the 0.05 m the origin was lifted by is added back.
+        const air = hit.distance + 0.05;
         if (air < worst) {
           worst = air;
           worstAt = `${hit.object.name || 'unnamed mesh'} at (${fmt([x, z])})`;
@@ -6355,7 +6379,9 @@ const bridgesMatchTheirPathAndKeepTheRailClear: Invariant = (facts) => {
   }
   bridgesGroup.updateMatrixWorld(true);
   const raycaster = new Raycaster();
-  const up = new Vector3(0, 1, 0);
+  /** Radial, re-asked per sample — see `nothingHangsIntoTheTunnel` for why. */
+  const up = new Vector3();
+  const rayAcross = new Vector3();
   const rayOrigin = new Vector3();
   const routePoint = new Vector3();
   const routeTangent = new Vector3();
@@ -6404,14 +6430,12 @@ const bridgesMatchTheirPathAndKeepTheRailClear: Invariant = (facts) => {
       const railDistance = route.wrap(crossing.railDistance + offset);
       route.pointAt(railDistance, routePoint);
       route.tangentAt(railDistance, routeTangent);
-      const nx = routeTangent.z;
-      const nz = -routeTangent.x;
+      upAt(routePoint.x, routePoint.y, routePoint.z, up);
+      rayAcross.crossVectors(routeTangent, up).normalize();
       for (const lateral of [-TRACK_CLEARANCE, 0, TRACK_CLEARANCE]) {
-        rayOrigin.set(
-          routePoint.x + nx * lateral,
-          routePoint.y + 0.02,
-          routePoint.z + nz * lateral,
-        );
+        rayOrigin.copy(routePoint).addScaledVector(rayAcross, lateral);
+        upAt(rayOrigin.x, rayOrigin.y, rayOrigin.z, up);
+        rayOrigin.addScaledVector(up, 0.02);
         raycaster.set(rayOrigin, up);
         raycaster.far = TRAIN_CLEARANCE_Y + 6;
         const hits = raycaster.intersectObject(bridgesGroup, true);
@@ -6448,7 +6472,11 @@ const bridgesMatchTheirPathAndKeepTheRailClear: Invariant = (facts) => {
         // the wrong thing again.
         const first = hits.find((candidate) => candidate.object.name !== 'deck');
         if (!first) continue;
-        const clearance = first.point.y - routePoint.y;
+        // A length along the ray, so it is the headroom a locomotive standing
+        // on this leaning bed actually has. `first.point.y - routePoint.y`
+        // differenced two columns up to `TRACK_CLEARANCE` apart in plan, which
+        // on a 30-degree slope is 0.65 m of pure planet.
+        const clearance = first.distance + 0.02;
         if (Math.abs(offset) <= 1.5) anyHitOverCrossing = true;
         if (clearance < worstClearance) {
           worstClearance = clearance;
