@@ -146,7 +146,45 @@ failure messages quoted the 157 m column while calling it "the park edge".
 built park (**6.60 m measured**, so the match is tighter as well as
 scale-tracking) and printed every run.
 
-### 7. `check:speech-bubbles` — diagnosed, rig fixed, still red by design
+### 7. `check:speech-bubbles` — GREEN at the park's authored size
+
+**Resolved. Nothing for Jim.** Measured with #620 (`eng/sphere-ground-claims`,
+`PARK_SURFACE_SCALE` 1, `GARDEN_PLAY_RADIUS` 58 m, boundary lean 15.3°) merged
+into this branch in a scratch worktree:
+
+| | scale 2.3355 (this branch) | scale 1 (+ #620) |
+|---|---|---|
+| speaking-frames | 1234 | 5758 |
+| within 40 m | 408 | 615 |
+| on screen | **0** | **516** |
+| sightings | 0 → **exit 1** | 516 → **exit 0** |
+
+I had the cause exactly right and then attributed it to a park size that was
+already fixed and merely unmerged. **A measurement is only as current as the
+tree it was taken in** — that is the lesson, and it is why the earlier "real
+loss of life in the park" line was wrong.
+
+The rig fixes stay (correct at either size); their docblock now records the
+135.5 m numbers as *what a park-size regression does to this check*.
+
+### 7b. Two faults of my own, both the fault this lane exists to delete
+
+- **I committed debug instrumentation** (`__loopDiag`, `__spk`, `__bubbleDiag`
+  and four stderr dumps), by snapshotting the file while instrumented. Rebuilt
+  from the clean parent; verified 0 occurrences and identical behaviour at both
+  scales. There is now a grep over the whole diff for this.
+- **`FURNITURE_REACH = 157` stayed hard-coded** inside the very commit that made
+  the other figures derived — caught only by running at scale 1 and watching the
+  boundary follow to 58 m while the furniture column sat still. **Deleted rather
+  than corrected**: 157 m and 108.6 m are both *measured off a built park*, and
+  this check never builds one (0.65 s static scan). A number that can only be
+  measured does not belong in a static scanner's message.
+
+Verified across the resize with nothing edited: 38.0° / 135 m / 1.27× becomes
+15.3° / 58 m / 1.04×. `check:npc-perch` tracked too (canopy 6.60 → 6.39 m over
+42 trees, exit 0).
+
+### 7c. superseded — the original diagnosis, kept because the method was right
 
 **Speech bubbles are not broken.** `check:speech-bubbles:wide` (same park, same
 code, 1920×1080, 420 s) draws **601** and exits 0.
