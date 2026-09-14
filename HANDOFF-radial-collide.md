@@ -94,36 +94,54 @@ frames agree everywhere, so a probe that only came at it downhill reports all
 clear — `check:radial-solidity` comes at it from inward for that reason, and
 records the number on every run.
 
-**Why the obvious fix is not enough.** Converting both sides through
-`walkHeight` (a radius) regressed two procgen invariants — seeds 11 and 326,
-*"the bridge at (-86.0, 26.0) leaves only 0.00 m of standable width … the
-parapets have closed over the path itself"*. Isolated to the **wall top gate**
-by reverting one gate at a time.
+**Why the obvious fix is not enough.** Converting both sides regressed two
+procgen invariants — seeds 11 and 326, *"the bridge at (-86.0, 26.0) leaves only
+0.00 m of standable width … the parapets have closed over the path itself"*.
+Isolated to the **wall top gate** by reverting one gate at a time.
 
-The cause is worth writing down because it is subtle and it is the thing the
-next attempt will get wrong too:
+The frame to use is `standHeight` (height above the ground), **not**
+`walkHeight` (a radius):
 
-> **`walkHeight` cancels the planet only between two points in the same column,
-> or between two points that are both on the ground.** It does not cancel
-> between two points at different `(x, z)` that are both *off* the ground,
-> because a radius grows with distance from the axis as well as with height. Two
-> points at the same world `y`, 1.3 m apart radially at 90 m out, differ by
-> **0.54 m** of `walkHeight`.
+> `walkHeight` cancels the planet only between two points in the **same
+> column**, or between two points that are both **on the ground**. It does not
+> cancel between two points at different `(x, z)` that are both *off* the
+> ground, because a radius grows with distance from the axis as well as with
+> height. Two points at the same world `y`, 1.3 m apart radially at 90 m out,
+> differ by **0.54 m** of `walkHeight`.
 
-So I switched to `standHeight` (height above the ground, which every column
-shares as a datum). That is the right frame and it still regressed, for a
-different reason: `fence.ts:269,349` pins the under-bridge seam at a **single
-flat `deckY` for a whole fence run**. Once the comparison is honest, that flat
-proxy lands half a metre off the deck it was cut for, the seam closes, and the
-`TRACK_CLEARANCE`-wide wall goes solid across a 2.6 m deck — exactly 0.00 m
-standable.
+**A latent bug found on the way, which is real and worth fixing on its own.**
+`fence.ts`'s `deckSpanForSegment` samples three points along a segment and takes
+the deck with the **lowest world `y`**, as a deliberate conservatism: leave the
+seam as open as possible. On the sphere that picks the wrong sample. The ground
+falls away at up to 1.02 m per metre, so of two samples the one further out has
+the lower `y` **and the greater height above the ground** — minimising `y`
+selects the sample that makes the seam *least* open, the opposite of what the
+clause was written to do. Measured on the canonical park at crossing
+(138.9, -82.1): the `TRACK_CLEARANCE` centre run's seam converts to **5.91 m**
+of altitude at the contact point against a walker on the deck at **5.05 m**,
+0.86 m too high, so the fence goes solid across the bridge.
+`scratch/seam.mts` prints that table for every crossing.
 
-**So the fix is in `fence.ts`, not in `Collision.ts`, and it goes first:** pin
-the seam per segment to the local road surface at that segment's own position
-(which `bridges.ts`'s own docblock already says it should be — *"not one flat
-deck height"*). Then `standHeight` in `Collision.ts` is a one-line change and
-the two procgen invariants stay green. Both belong in one commit; either alone
-is red.
+**But fixing that does not clear the two invariants**, measured: minimising on
+`standHeight` instead of `y`, together with the `Collision.ts` conversion, still
+leaves both seeds at 0.00 m of standable width. **So the mechanism is not fully
+diagnosed and both halves are reverted.** Do not take the paragraph above as the
+whole cause — it is one contributing fault, proven; there is at least one more.
+
+**An earlier version of this file said the cause was `fence.ts` pinning the seam
+to "a single flat `deckY` for a whole fence run". That was wrong** — read the
+code before repeating it. `deckSpanForSegment` is already per-segment and
+already samples three points. The claim was written from `bridges.ts`'s docblock
+rather than from `fence.ts` itself.
+
+**Where to start next.** `scratch/seam.mts` is the instrument: it builds the
+park, walks every crossing, and prints for each overlapping seam wall what the
+old gate and the new gate each decide, with both altitudes. Extend it to march
+the invariant's own `standableReach` across the deck rather than only sampling
+the crossing centre — the failure is about the deck's *width*, and every probe
+so far has been at its middle.
+
+Also found while doing it, and worth keeping whoever picks this up:
 
 Also found while doing it, and worth keeping whoever picks this up:
 
@@ -142,6 +160,48 @@ There is no pet gravity integrator to convert. `WildPets` poses its animals in a
 group-local frame inside the castle roof garden; `GRAVITY * dt` appears nowhere
 else in `src/entities`. The remaining `+Y` integrators are minigame-local or
 effects (`railRace/sparks.ts` is outdoors and belongs to the effects engineer).
+
+## The acceptance test: run, and it does not pass — but not for a radial reason
+
+`check:park` builds again (thank you, `eng/crossing-bridge` `040ae365`; this
+branch is rebased onto it). **`poiGraph: 431/431 seeds placed, 425 in the main
+component` — the six stranded waypoints are real and still there.** Measured,
+with controls, and the conclusion is the opposite of the brief's expectation:
+
+**They are not caused by the flat-versus-radial frame anywhere.**
+
+- The six are at `(-46.0, -158.1)` through `(-49.7, -177.4)`, d = 164.7–184.3 m,
+  ground `y` −74 to −99.6 m, 48–57° of lean. All comfortably **inside** the play
+  boundary (11.7–31.3 m from its edge), so the leash is not doing it.
+- **Applying the lead's landed radial `NavGrid` changes nothing** — still 6.
+  Tested, not assumed: `git checkout origin/eng/radial-visible -- NavGrid.ts`
+  (136 insertions, verified present), `check:park` re-run, same six. My first
+  hypothesis was that this was the step gate, and it was wrong.
+- The step gate *is* badly closed out there — at those six points the flat
+  `|Δy|` gate admits only **4–6 of 8** lattice neighbours on level ground
+  (worst step 0.951 m) where the radial gate admits 8/8, control 8/8 at the
+  origin (`scratch/poi-gate.mts`). Real, worth fixing, **and not what strands
+  these waypoints**, because `poiGraph`'s edges are `CollisionWorld` clearance
+  probes, not lattice routes.
+- The actual blocker, named (`scratch/blocker.mts`): the edge from
+  `(-46.0, -158.1)` to a reachable node **2.94 m away** at `(-43.8, -156.2)` is
+  refused because two walls — `halfThickness` 0.32, **top = Infinity**, no
+  base — meet in a corner across it and pinch the gap below the 2 × 0.7 m
+  `poiGraph` needs (worst overlap 1.00 m at the middle sample). Cut that one
+  edge and the whole six-node pocket rejoins.
+- Those walls carry **no absolute top and no base**, so no frame conversion in
+  this work touches them, and `resolve`'s lateral arithmetic is untouched by all
+  of it. They are 23 walls of 2.10 m segments in several open chains centred
+  about `(-53.3, -159.9)` (`scratch/ring.mts`, `scratch/whichwall.mts`). I did
+  not identify the builder; no `addWall` call site obviously registers
+  `0.32` with an infinite top.
+
+**So this is a layout/placement finding for whoever owns the outer park's wall
+runs, not a radial one.** It reproduces identically on `eng/crossing-bridge`
+without my branch. One note on the instrument: my "distance to the railway"
+probe returned the same rail point for every query and is **wrong** — ignore
+that line if you find it in a scratch file; `route.pointAt`'s parameter is not
+what I assumed.
 
 ## Still open, in priority order
 
