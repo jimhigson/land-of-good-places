@@ -79,6 +79,135 @@ Two consequences, and the second is the one that keeps biting:
   any `y` difference taken between **two different columns** is mostly planet.
   Every "High" row below is that fault.
 
+# STOPPED — and this file is now a requirements document
+
+**Jim, 14 September 2026:** *"I don't think the mission has been taken on
+properly here — it seems more like trying to fit the new world into the old
+code."* The instance-by-instance conversion is **stopped**. An architect is
+designing a proper spherical domain: canonical coordinate a 3-vector from the
+planet's centre, flatness a declared local chart with a validity radius, one
+translation layer at the scene-graph anchor. Roughly eight weeks.
+
+**Nothing is reverted and nothing is deleted.** Every branch is pushed and
+parked on Jim's instruction to keep the work in case it is needed again.
+
+**Read `RADIAL-LESSONS.md` before this file.** It is the *facts*; this is the
+*sites*. Two thirds of what follows collapses into three sentences there, and
+the single most useful line in either document is the checks engineer's: every
+row here is one of exactly two mistakes — **a `y` difference standing in for a
+distance, or a world `+Y` axis standing in for a local up**. A domain in which
+neither is expressible removes the category, not the ninety-five instances.
+
+## The closure ledger — what is done, on which branch, with what measured
+
+All five areas stopped where they stood. Branches are parked, not merged, and
+none has a PR except #619.
+
+### Closed and measured
+
+| area | branch | rows closed |
+|---|---|---|
+| **lead** | `eng/radial-visible` | §3.1 `tapMarker.ts:57,61`; §3.1 `rainbowRing.ts:140` and `:290,317`; §1 `NavGrid` `MAX_STEP`. Shared helper `walkHeight` added to `up.ts`. New `check:outward-routing` in the chain |
+| **A — checks** | `eng/radial-checks` | §2.1 / §2.4 #1 `check-hotel.mts`; §2.4 #2 `check-tap-spacing.mts`; §2.4 #3 `check-swept-bus.mts`; §2.4 #4 `check-rail-race.mts`; §2.4 #8 `check-park.mts`; §2.4 #9 `check-pet-slide.mts`; **five of the ten §2.2 invariants** (both `Vector3(0,1,0)` rays, `railRaceFliesClear`, `theSlideKeepsItsAirFromTheCruiser`, the deck-soffit `Box3` at `:5323`). Added `heightAboveFloor` to `up.ts` and `lowestRadius` as a radial `Box3.min.y` |
+| **B — effects** | `eng/radial-fx` | §3.1 `Highlights.ts:281,217`; `flowerSparkle.ts`; `train/puffs.ts`; `dustPuff.ts`; `ActionChips.ts:210`. §3.2 **both** rows (`DayNight.ts:784-787` fill light, `:399` hemisphere axis). §3.4 `TERRAIN_RADIUS` deleted. Added `tiltFor` to `up.ts` |
+| **C — rides** | `eng/rides-radial` | All three vehicle placements via one new `rideFrame` in `sweptRail.ts`; both clearance sweeps unified into `cartEnvelopePoint`; the cruiser's castle carve |
+| **D — collision** | `eng/radial-collide` | Radial gravity (`check:radial-hop`). **Everything else reverted deliberately** — see below |
+| **E — bridges** | `eng/crossing-bridge` | **PR #619, MERGEABLE — the crossing-throw fix.** No bridge geometry written |
+
+### Deliberately NOT closed, and why that is the right state
+
+- **D reverted its `Collision.ts` conversion and its `fence.ts` seam fix.** The
+  seam fix is a *proven contributing fault* that does **not** clear the two
+  invariants — both seeds still read 0.00 m standable width — so at least one
+  more cause is unfound. The row is **"not fully diagnosed"**, never "fix
+  known".
+- **B closed, measured and then reverted §3.1 `interact.ts:254`** (and with it
+  §2.4 #2) on hitting the import trap. Row stays open.
+- **E wrote no bridge geometry at all**, having been stopped one message before
+  starting. Cheapest possible place to be stopped.
+- **A left twelve `scripts/` rows, five `invariants.ts` rows and all three
+  `parkFacts.ts` rows untouched**, listed explicitly on its branch.
+
+### Rows the sweep added that the seeker's body below does not have
+
+- **`topIsAbsolute` outdoors — a fence that is not solid.** An absolute top is
+  declared as a world `y` and compared against a mover's world `y` in a
+  *different column*. Measured: a 1.1 m fence approached from the **inward**
+  side is **ghost from 80 m out** at 3 m back, and from 157 m at 1.2 m back.
+  **Live in the game today**, and CLAUDE.md's first rule. Invisible to every
+  existing check because a probe that only walks at it downhill reports all
+  clear. **High.**
+- **`NavGrid`'s step gate admits ledges as well as refusing flat ground** — the
+  half neither the seeker nor the lead found. See correction 3.
+- **`check-hotel.mts`'s indoor half was wrong too**, which the inventory did not
+  have: the castle's floors stand at `BUILDING_BASE_Y = -42.97 m`, so two
+  children **10 m above** the mall floor read `y = -32.42` and were reported as
+  falling through the world.
+- **`poiGraph`'s six stranded waypoints are NOT a radial fault** — see
+  correction 7.
+- **Seed 11's furniture reaches 245 m on a 220 m sphere**, past the equator
+  where the ground is vertical and then overhangs. A domain constraint to
+  *state*, not a check to fix.
+
+### Correction 8 — two bisects of the park-build failure, both true, because it is non-monotonic
+
+Three separate accounts of the `railD 0.0` throw were produced, and they
+disagreed. Reconciled:
+
+- the inventory said it *"pre-dates all the sphere work — it reproduces at
+  `db1363ce`"*. **`db1363ce` is itself a sphere commit**, so that was never a
+  pre-sphere datum;
+- a `git bisect` over the canonical seed named **`502ec802`** (5 Sep), a *merge*
+  whose **two parents are both green on their own**;
+- an independent walk named **`789d6088`** (13 Sep), with `check:park` exiting
+  **0** at `db1363ce` and `6e1ebe9a` in between.
+
+`502ec802` **is** an ancestor of `db1363ce` — verified. So the symptom was
+broken, green again, and broken again: **the failure is non-monotonic in
+history, and `git bisect` assumes monotonicity.** It was the wrong instrument
+and it returned a confident answer anyway. Neither commit is "the cause"; there
+were at least two independent breakages of the same symptom, and a commit
+message on the branch asserts the opposite and is wrong.
+
+**Fixed** by PR #619 on `eng/crossing-bridge` — 10 of 10 pool seeds build, up
+from 3. The root cause is recorded on that PR **as a class** rather than as an
+incident: a coordinate that was silently a *derived* quantity written down as a
+literal, with nothing recording the dependency.
+
+It killed the park **in a real browser too** — a blank blue screen on seed 274
+and the canonical seed — not only headlessly.
+
+**Everything in this file recorded as "not measured, the park does not build"
+is re-measurable now and must be re-tried before anyone trusts it.** The
+unblocking took `test:procgen` from **279 skipped / 269 passed to 0 skipped /
+473 passed, exposing 81 previously invisible failures** — overwhelmingly Rail
+Race, Sky Cruiser, slide, trees and coping stones. That is this file's predicted
+damage, finally countable.
+
+### Correction 7 — the acceptance test was not measuring what it was given for
+
+The fleet was handed `check:park`'s six stranded waypoints as a symptom of the
+`NavGrid` row. **It is not.** Measured on `eng/crossing-bridge`:
+
+- the six sit at 164.7-184.3 m, 48-57° of lean, all **inside** the play boundary
+  by 11.7-31.3 m;
+- **the landed radial `NavGrid` changes nothing** — still six, tested by
+  checking the lead's `NavGrid.ts` onto the collision branch and re-running;
+- the step gate *is* badly closed out there (**4-6 of 8** neighbours admitted on
+  level ground, worst step 0.951 m, against 8/8 radial) — real, and **not the
+  cause**, because `poiGraph`'s edges are `CollisionWorld` clearance probes, not
+  lattice routes;
+- the actual blocker is one edge refused by two walls (`halfThickness` 0.32,
+  **top `Infinity`**, no base) meeting in a corner, worst overlap 1.00 m against
+  the 2 × 0.7 m `poiGraph` needs. Cut that edge and the six-node pocket rejoins.
+  23 such walls in 2.10 m segments centred about `(-53.3, -159.9)`; the builder
+  was not identified.
+
+Those walls carry no absolute top and no base, so **no frame conversion touches
+them.** A layout finding for whoever owns the outer park's wall runs.
+
+---
+
 ## Status, ownership, and two corrections — the lead's page
 
 **This file is owned by the lead engineer on the radial conversion, on branch
