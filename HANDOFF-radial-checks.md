@@ -1,6 +1,18 @@
 # HANDOFF — the checks and invariants, made radial
 
-**Branch:** `eng/radial-checks`, off `feat/sphere-combined`.
+> **STOPPED, DELIBERATELY, AND KEPT.** Jim ruled that converting the checks
+> site by site is *"trying to fit the new world into the old code"*, and an
+> architect is designing a proper spherical domain instead. This work is not
+> wrong; it is at the wrong layer. Jim: *"keep their work in case we need it
+> again."* The branch is complete and pushed as it stands — nothing here is
+> half-finished, and the "Still open" list below is work deliberately not
+> started, not work abandoned mid-edit.
+>
+> **What survives the redesign is the two measurements in the next section.**
+> They are facts about the park that will still be true under any architecture;
+> everything after them is repairs the new domain should make unnecessary.
+
+**Branch:** `eng/radial-checks`, off `feat/sphere-combined` at `31d0fb2a`.
 **Worktree:** `.claude/worktrees/eng-radial-checks`.
 **Model:** Opus 5 (1M context), chosen by the Overseer. A replacement runs the
 same model.
@@ -10,7 +22,89 @@ the code half belongs to another engineer.
 
 ---
 
-## Two findings that change how the rest of this work is done
+# The two findings the architect needs
+
+## 1. The train drives into its own bridges, and the cause is the frame
+
+Measured here on seed 11 by **three independent clauses using three different
+techniques**, all of which **passed** before this branch:
+
+| clause | technique | reads | needs |
+|---|---|---|---|
+| `nothingHangsIntoTheTunnel`, `bridge-0.0` | ray fired from the rail | **3.69 m** | 3.90 m |
+| `bridgesMatchTheirPathAndKeepTheRailClear`, (-86.0, 26.0) | corridor raycast | **3.69 m** | 3.90 m |
+| `railwayClearanceCoversTheTrainAndItsRiders`, same bridge | deck vertices | **3.65 m** | 3.90 m |
+
+and, worse, `bridge-420.0` at **3.33 m** and the deck at (-99.0, 138.1) at
+**2.49 m**.
+
+**The crossing engineer then discriminated the cause, and that is the half that
+makes this a diagnosis rather than a complaint.** It is **world `y` versus
+radial up**, not terrain sag: the radial model predicts **2.477 m** against the
+measured **2.49 m** — out by **13 mm** — where the sag model is out by
+**0.59 m**. One hypothesis fits to the millimetre and the other does not fit at
+all.
+
+That pairing is recorded here in full because the measurement and its
+discrimination were produced by two different agents on the same day and would
+otherwise sit in two handoffs, neither of which is the whole answer.
+
+## 2. Seed 11's furniture reaches 245 m on a 220 m sphere
+
+From `test:procgen`, seed 11:
+
+> *"the ground reaches a gradient of 111.36% at 245.0 m from the centre, past
+> the 10% `BUS_MAX_GRADE` budget that `GROUND_SPHERE_RADIUS` (220 m) was chosen
+> against — either the radius shrank or the park grew, and the cat bus now
+> drives a slope steeper than anybody agreed"*
+
+245 m on a 220 m sphere is **past the planet's own equator**, where the ground
+has turned vertical and then begun to overhang. This is a **design conflict
+between the sphere's radius and the park's extent**, it is not a check
+measuring wrongly, and it will still be true under the new architecture. Any
+spherical domain has to answer what the park's maximum radius is allowed to be
+as a function of `GROUND_SPHERE_RADIUS`, or this recurs.
+
+---
+
+## One trap that cost real time, worth carrying forward
+
+**`check:swept-bus`'s bus box varied from seed to seed, and a bus model does
+not.** The box is taken by standing the bus at the origin "unrotated", and
+"unrotated" was `bus.rotation.y = 0`. `ArrivalSequence.placeBus` had adopted
+`faceOnGround`, which writes a yaw and then *pre-multiplies* the ground's lean,
+so zeroing the middle euler term leaves the tilt sitting in `rotation.x` and
+`rotation.z`. The result was an axis-aligned box round a bus leaning ~14°:
+
+| seed | length | width | bottom | top |
+|---|---|---|---|---|
+| before, 11 | 12.10 | 7.52 | -4.95 | 10.09 |
+| before, 326 | 13.73 | 7.31 | -5.21 | 8.01 |
+| before, 428 | 12.00 | 7.57 | -5.06 | 10.10 |
+| after, all three | **14.54** | **7.30** | **0.02** | **6.15** |
+
+**The generalisable part: a quantity that must be seed-invariant and is not is
+a free instrument check**, and it costs one line to print. `rotation.y = 0` is
+no longer "un-rotate" anywhere `faceOnGround` has been; `quaternion.identity()`
+is.
+
+---
+
+## The seed situation has changed — re-try everything
+
+Everything in this file was measured on **seeds 11, 326 and 428**, because on
+`31d0fb2a` the other thirteen pool seeds threw `railD 0.0 … snaps to no proven
+bridge site` inside `new World`. **That is fixed**: after the crossing
+engineer's change the park builds on **all ten seeds**.
+
+So **anything recorded here as "asserts nothing", "could not be measured" or
+"vacuous on this seed" should be re-tried** by whoever comes next — including
+`check:swept-bus`, which could not complete at all, and `check:park`'s
+bridge-rise clause, which judged 0 points on seed 11 and 3 on seed 428.
+
+---
+
+## Two findings that changed how the rest of this work was done
 
 ### 1. The park-build failure is a regression on this branch, not pre-existing
 
@@ -37,6 +131,10 @@ work: the canonical seed throws identically at 1200, 600, 400 and 300, and at
 `db1363ce` builds the canonical park.
 
 ### 2. `LGP_SEED=428` builds the park at the tip — the checks *are* measurable
+
+**Superseded, and kept because the technique is still the right one.** The park
+now builds on all ten seeds; `LGP_SEED` remains the way to measure a check
+against a specific park without changing the default.
 
 `parkSeedPool.ts`'s `envPin()` reads `LGP_SEED`, and `HANDOFF-seeds-at-220.md`
 records 11, 326 and 428 as the pool seeds that build at 220 m. So:
@@ -161,13 +259,14 @@ so `failed + passed = 318` is the number of tests that actually *ran*. A change
 that drops that number has disabled tests, however green it looks — that is how
 the `interact.ts` trap above was caught, and a failure count alone cannot see it.
 
-**The park-build red is being fixed.** The coordinator bisected the `railD 0.0`
-throw to `502ec802`, a merge whose two parents are each green alone, and an
-engineer is on it. My own bisect (canonical seed, `check:park`) landed on
-`789d6088`; the two are compatible if the merge broke some seeds and the
-park-growth commit broke the canonical one. Either way: when it lands, headless
-park building comes back and several of these checks will assert for the first
-time. **Do not baseline anything against a park that does not build.**
+**The park-build red is fixed.** The coordinator bisected the `railD 0.0`
+throw to `502ec802`, a merge whose two parents are each green alone; my own
+bisect (canonical seed, `check:park`) landed on `789d6088`, and the two are
+compatible if the merge broke some seeds and the park-growth commit broke the
+canonical one. The crossing engineer's fix has landed and **the park builds on
+all ten seeds**, so every "asserts nothing" in this file is now re-measurable.
+The rule it taught stands: **do not baseline anything against a park that does
+not build.**
 
 ---
 
@@ -226,3 +325,11 @@ says so.
 **Do not edit the code halves** of the four check-and-code pairs
 (`Coaster.ts:436`, `RailRace.placeCarts:940`, `TreeClimbing.climbPose:657`);
 hand those to the engineer who owns that area.
+
+**But read the stop notice at the top first.** Under a proper spherical domain
+most of the list above should stop being work at all: every one of these rows
+is the same repair — a `y` difference standing in for a distance, or a world
+`+Y` axis standing in for a local up — and a domain that has no way to express
+the wrong one of those removes the whole category rather than the twelve
+instances. The list is here so the architect can see the shape and the count,
+not as a queue to work through.
