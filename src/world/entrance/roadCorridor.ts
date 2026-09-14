@@ -8,6 +8,7 @@ import {
   ENTRANCE_BUS_STOP_Z,
   ENTRANCE_BUS_VANISH_X,
   ENTRANCE_GATE_X,
+  ENTRANCE_GATE_Z,
   ENTRANCE_STOP_Z,
 } from './layout';
 
@@ -115,7 +116,27 @@ function kerbReach(direction: -1 | 1): number {
  * triggers it.
  */
 function spurReach(): number {
-  const from = ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH;
+  // **The search starts at the gate, not at the kerb** (#610).
+  //
+  // The rule this function implements is "stop where the park's own paving is
+  // already under the road". That rule was written about paving *inside* the
+  // park — which is where the paving is, on almost every seed, so the search
+  // walking the whole way from the kerb never mattered. It is not true of a
+  // paved disc that happens to bulge *outside* the arch, and on seed 428 one
+  // does: a 1.30 m disc centred at (0.71, 59.03) reaches z = 60.119 along the
+  // spur's own centre line, 0.119 m past the `ENTRANCE_GATE_Z` of 60.00. The
+  // search met it first, stopped the spur at z = 60.11, and the road then never
+  // reached the arch at all — `the road's corridor claim is the road it drew`
+  // red on `main`, against Jim's ruling of 7 Aug 2026: *"it doesn't actually
+  // drive up to the park, the road needs to actually go to the park."*
+  //
+  // So this is a correction to the rule's **domain**, not a clamp to a floor:
+  // outside the gate there is no park paving that may stop the road, because
+  // outside the gate the paving is not what a child walks in on — the road is.
+  // Inside the gate the road still yields to the paving exactly as #472 asked.
+  // A disc reaching over the gate line is now simply not consulted, rather than
+  // being allowed to decide where the road ends.
+  const from = Math.min(ENTRANCE_BUS_STOP_Z - ROAD_HALF_WIDTH, ENTRANCE_GATE_Z);
   for (let z = from; z >= ENTRANCE_STOP_Z; z -= 0.1) {
     let paved = false;
     const known = forEachPavedDisc((x, discZ, radius) => {
