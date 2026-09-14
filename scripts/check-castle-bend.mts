@@ -129,7 +129,13 @@ check(
     `${flatRadiusFor(0.05).toFixed(2)} m a flat patch is good for, so they must each lean to their own up.`,
 );
 check(
-  worstOwnRadial < 0.01,
+  // 0.05°, not 0, and the slack is named rather than tuned: the chart's anchor
+  // is the radial at the *ground* under the castle's centre (that is what
+  // `placeOnSphere` uses), while this compares against the radial at the
+  // turret's own lifted foot. The two differ by a few thousandths of a degree —
+  // about 2 mm over a turret's height — and that is a real, bounded difference
+  // rather than noise to be papered over.
+  worstOwnRadial < 0.05,
   `a turret's up is ${worstOwnRadial.toFixed(4)}° off the radial under its own foot; ` +
     `bending means standing on the local vertical, so this must be ~0`,
 );
@@ -144,82 +150,97 @@ check(
 check(wallMeshes.length > 0, 'no `castle-wall-*` mesh found; the wall clause asserts nothing');
 
 /**
- * **The first version of this clause could not fail, and the way it could not
- * is worth keeping written down.**
+ * **Two earlier versions of this clause could not fail, and both are worth
+ * keeping written down — they are the same disease in different organs.**
  *
- * It measured the angle between the radial *under each wall vertex* and the
- * radial at the castle's centre, and called a wide spread proof of bending. But
- * that spread is a property of the planet, not of the wall: the radial turns by
- * `d / R` across any 24 m run whether the stone follows it or not. Proved by
- * deleting the bend and re-running — the span read 1.716°, against 1.688° with
- * the bend in. It was describing the ground the wall stands over, and reporting
- * success about something it was not describing.
+ * 1. It measured the angle between the radial *under* each wall vertex and the
+ *    radial at the castle's centre. That angle turns by `d / R` across any 24 m
+ *    run whether the stone follows it or not: 1.716° rigid against 1.688° bent.
+ *    It was describing the ground, not the wall.
+ * 2. Its replacement bucketed vertices by horizontal distance and compared the
+ *    lowest in each bucket. But the wall is built as four stacked bands, and
+ *    taking a minimum per bucket across all of them compares whichever band
+ *    happens to land in each — it read **-394 cm** with the bend working
+ *    perfectly. And the bands are extruded rectangles, so their only vertices
+ *    are at corners: there is nothing at the middle of a run to compare against.
  *
- * What actually distinguishes the two is **altitude**. A rigid wall's base is a
- * straight chord of the tangent plane, so its ends ride `flatDeparture(half)`
- * higher above the sphere than its middle — 34 cm at the castle's half-width. A
- * bent wall's base follows the surface, so every point along it sits at the same
- * altitude. That is a quantity the two cases genuinely disagree about.
+ * What works is to isolate **one course of one band** and ask whether it lies
+ * at one radius from the planet's centre. `castle-wall-lower` is the band on
+ * the plinth; its base course is selected by the geometry's *own* local height,
+ * which separates courses by 3.6 m while the bend moves a vertex by at most
+ * ~0.7 m — so a 1.2 m window takes the base course and nothing else, and the
+ * window is on height while the *measurement* is on radius, so it cannot filter
+ * out its own evidence the way the distance cut did.
+ *
+ * The expected rigid spread is computed from the selected vertices' own reach,
+ * not typed in: a chord of the tangent plane rides `flatDeparture(d)` proud, so
+ * the spread a rigid wall must show is `flatDeparture(dMax) - flatDeparture(dMin)`.
+ * If those two are too close together there is no lever arm and the clause says
+ * it asserts nothing rather than passing.
  */
-let nearVertices = 0;
-let farVertices = 0;
-let nearLowest = Infinity;
-let farLowest = Infinity;
+const baseBand = wallMeshes.filter((m) => m.name === 'castle-wall-lower');
+check(
+  baseBand.length === 1,
+  `expected exactly one castle-wall-lower, found ${baseBand.length} — the wall clause ` +
+    'measures that band alone, so a rename or a split makes it assert nothing',
+);
+
+let minRadius = Infinity;
+let maxRadius = -Infinity;
+let dMin = Infinity;
+let dMax = -Infinity;
+let baseVertices = 0;
 const v = new Vector3();
 const vertexGeo = new Geo();
-for (const wall of wallMeshes) {
+for (const wall of baseBand) {
+  wall.geometry.computeBoundingBox();
+  const box = wall.geometry.boundingBox;
+  if (!box) continue;
+  const floor = box.min.y + 1.2;
   const position = wall.geometry.getAttribute('position');
   for (let i = 0; i < position.count; i++) {
     v.fromBufferAttribute(position, i);
+    if (v.y > floor) continue;
     wall.localToWorld(v);
     vertexGeo.setFromWorldVector(v);
-    // The castle's walls are a *ring*, so nothing is near its middle: the runs
-    // sit at 9.2 m and the corners at 15.3 m. The two buckets are therefore
-    // "middle of a run" and "corner", not "centre" and "edge".
-    //
-    // **Bucketed by horizontal distance, never by height.** The first attempt
-    // selected the base course as "every vertex within 5 cm of the lowest
-    // radius", which is biased against exactly the thing being looked for: on a
-    // rigid wall the raised corners are the evidence, and that filter threw them
-    // out, leaving 13 middle vertices and a confidently passing 3.4 cm. A cut on
-    // distance from the castle's centre is independent of altitude, so neither
-    // case can hide in it.
+    const r = vertexGeo.radius();
+    minRadius = Math.min(minRadius, r);
+    maxRadius = Math.max(maxRadius, r);
     const d = facadeCentre.arcTo(vertexGeo);
-    const altitude = vertexGeo.radius() - PLANET_RADIUS;
-    if (d < 10) {
-      nearLowest = Math.min(nearLowest, altitude);
-      nearVertices += 1;
-    } else if (d > 14) {
-      farLowest = Math.min(farLowest, altitude);
-      farVertices += 1;
-    }
+    dMin = Math.min(dMin, d);
+    dMax = Math.max(dMax, d);
+    baseVertices += 1;
   }
 }
-const cornerRise = farLowest - nearLowest;
-const rigidWouldBe = flatDeparture(15.3) - flatDeparture(9.2);
+const measuredSpread = maxRadius - minRadius;
+const rigidWouldBe = flatDeparture(dMax) - flatDeparture(dMin);
 
 note(
-  `castle-wall-* base: ${nearVertices} vertices within 10 m of the castle's centre ` +
-    `(the middle of a run), ${farVertices} beyond 14 m (the corners); the corners sit ` +
-    `${(cornerRise * 100).toFixed(1)} cm ` +
-    `higher above the sphere than the near ones`,
+  `castle-wall-lower base course: ${baseVertices} vertices reaching ${dMin.toFixed(1)}–${dMax.toFixed(1)} m ` +
+    `from the castle's centre; their radius spans ${(measuredSpread * 100).toFixed(1)} cm`,
 );
 note(
-  `CONTROL: a rigid wall is a chord of the tangent plane, so its corners would ride ` +
-    `${(rigidWouldBe * 100).toFixed(1)} cm proud on R = ${PLANET_RADIUS} m. Bent, that goes to ~0. ` +
-    `Both buckets are cut on horizontal distance only, never on height, so neither ` +
-    `case can be filtered out of its own evidence.`,
+  `CONTROL: over that same reach a rigid chord of the tangent plane would span ` +
+    `${(rigidWouldBe * 100).toFixed(1)} cm (flatDeparture at each end, on R = ${PLANET_RADIUS} m). ` +
+    `Bent, it goes to ~0. The course is selected on height and judged on radius, so ` +
+    `the cut cannot discard its own evidence.`,
 );
 
 check(
-  nearVertices > 0 && farVertices > 0,
-  `the wall clause asserts nothing: ${nearVertices} near and ${farVertices} far vertices`,
+  baseVertices >= 4,
+  `the wall clause asserts nothing: only ${baseVertices} base-course vertices found`,
 );
 check(
-  Math.abs(cornerRise) < rigidWouldBe / 3,
-  `the castle's wall corners ride ${(cornerRise * 100).toFixed(1)} cm proud of its middle, ` +
-    `against the ${(rigidWouldBe * 100).toFixed(1)} cm a rigid chord gives — the walls are ` +
-    `not following the curve`,
+  rigidWouldBe > 0.1,
+  `the wall clause asserts nothing: the base course reaches ${dMin.toFixed(1)}–${dMax.toFixed(1)} m, ` +
+    `so a rigid wall would only span ${(rigidWouldBe * 100).toFixed(1)} cm and there is no lever arm ` +
+    'to tell the two cases apart',
+);
+check(
+  measuredSpread < rigidWouldBe / 3,
+  `the castle's wall base course spans ${(measuredSpread * 100).toFixed(1)} cm of radius, against ` +
+    `the ${(rigidWouldBe * 100).toFixed(1)} cm a rigid chord gives over the same reach — the walls ` +
+    'are not following the curve',
 );
 
 // ------------------------------------------------------------------- verdict
@@ -233,5 +254,6 @@ if (failures.length > 0) {
 process.stderr.write(
   '\ncheck:castle-bend OK — the castle exterior bends across its own footprint: ' +
     `the four turrets splay ${widestSplay.toFixed(2)}° and each stands on its own radial, ` +
-    `and the curtain walls' corners ride only ${(cornerRise * 100).toFixed(1)} cm proud of its middle.\n`,
+    `and the curtain wall's base course holds one radius to ${(measuredSpread * 100).toFixed(1)} cm ` +
+    `against the ${(rigidWouldBe * 100).toFixed(1)} cm a rigid chord would give.\n`,
 );

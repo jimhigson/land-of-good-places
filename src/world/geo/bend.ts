@@ -188,6 +188,10 @@ export interface BendReport {
   instances: number;
   /** Objects skipped because nothing about them is bendable. */
   skipped: number;
+  /** Geometries cloned because more than one mesh shared them. */
+  cloned: number;
+  /** The name of the object that moved furthest — for reporting a surprise. */
+  worstAt: string;
   /** The largest distance, in metres, any point moved. Zero means nothing bent. */
   worstShift: number;
 }
@@ -245,14 +249,45 @@ export function bendOntoPlanet(
     instanced: 0,
     instances: 0,
     skipped: 0,
+    cloned: 0,
+    worstAt: '',
     worstShift: 0,
   };
   root.updateMatrixWorld(true);
   _rootInverse.copy(root.matrixWorld).invert();
 
+  // **A geometry shared by two meshes cannot be bent.** The bend is a function
+  // of *where a vertex is*, so one buffer serving two meshes standing in two
+  // places has no single right answer — and bending it once per mesh compounds,
+  // which is how the castle's worst vertex shift read 6.0 m instead of 0.6 m
+  // when the facade's builders turned out to reuse geometries. Counted first,
+  // then cloned per mesh, so each copy is bent exactly once against its own
+  // position. Cloning is the only correct answer available; the alternative is
+  // silently drawing one of the two in the wrong shape.
+  const uses = new Map<object, number>();
+  root.traverse((object) => {
+    if (asInstanced(object)) return;
+    const geometry = asGeometryHolder(object);
+    if (geometry) uses.set(geometry, (uses.get(geometry) ?? 0) + 1);
+  });
+  root.traverse((object) => {
+    if (asInstanced(object)) return;
+    const holder = object as unknown as { geometry?: GeometryLike & { clone?(): GeometryLike } };
+    const geometry = holder.geometry;
+    if (!geometry || (uses.get(geometry) ?? 0) < 2) return;
+    if (typeof geometry.clone === 'function') {
+      holder.geometry = geometry.clone();
+      report.cloned += 1;
+    }
+  });
+
+  let shiftOwner = '';
   const shift = (a: Readonly<Vector3>, b: Readonly<Vector3>): void => {
     const d = a.distanceTo(b);
-    if (d > report.worstShift) report.worstShift = d;
+    if (d > report.worstShift) {
+      report.worstShift = d;
+      report.worstAt = shiftOwner;
+    }
   };
 
   root.traverse((object) => {
@@ -265,6 +300,7 @@ export function bendOntoPlanet(
     _qToRoot.copy(rotationOf(_toRoot));
     _qObjInv.copy(rotationOf(_objInverse));
 
+    shiftOwner = object.name || object.type;
     const instanced = asInstanced(object);
     if (instanced) {
       for (let i = 0; i < instanced.count; i++) {

@@ -1,7 +1,12 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { CylinderGeometry, Group, Mesh, Object3D, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
-import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
+import {
+  BUILDING_CENTRE_X,
+  BUILDING_CENTRE_Z,
+  CASTLE_FACADE_BASE_ALTITUDE,
+  CASTLE_FACADE_CHART,
+} from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { SpaceManager } from '../SpaceManager';
 import {
@@ -30,7 +35,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
-import { bendPlacedStructure } from '../geo/bend';
+import { bendOntoPlanet } from '../geo/bend';
 import { terrainHeight } from '../terrain';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
 
@@ -952,7 +957,11 @@ export class Building implements GameSystem {
     // It must run after `standInPlot`, because the chart is read off the
     // facade's own world transform — see `bendPlacedStructure`, which exists so
     // that the anchor cannot be got wrong here.
-    bendPlacedStructure(this.facade.group, 'castle-facade');
+    // **The chart comes from `layout.ts`, not from the scene.** One owner: the
+    // same chart leans `CASTLE_TOWERS`, so the solid the ginormous slide routes
+    // around and the stone a child sees are bent by the same arithmetic rather
+    // than by two derivations that agree until one is edited.
+    bendOntoPlanet(this.facade.group, CASTLE_FACADE_CHART, CASTLE_FACADE_BASE_ALTITUDE);
     anchorPlots.setPlaceholderVisible('building', false);
 
     const pitPlot = anchorPlots.getGroup('ballPit');
