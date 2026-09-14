@@ -126,6 +126,7 @@ import {
   AT_WALKING,
   arrivalBusPointWorld,
   arrivalDoorDropWorld,
+  arrivalDoorFocus,
   arrivalShot,
   type ArchPass,
 } from '../src/world/entrance/ArrivalSequence.ts';
@@ -135,6 +136,17 @@ import {
   CAT_BUS_TRACK_WIDTH,
 } from '../src/world/entrance/catBus.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
+import { GROUND_SPHERE_RADIUS } from '../src/core/constants.ts';
+
+/**
+ * **How far the door shot's focus may sit above its nominal eye height.**
+ *
+ * Not zero: the lift solve raises the focus when the eye or the sightline would
+ * otherwise be in the ground, and on a bumpy stretch that is the correct answer.
+ * A metre is well inside "still framing the step she comes down" and far below
+ * the 8 m the flat-frame version drifted by on seed 428.
+ */
+const ARRIVAL_FOCUS_DRIFT = 1;
 
 const STEP = 1 / 60;
 /** The shot no longer reads the arch pass; a value is still needed to call it. */
@@ -485,39 +497,119 @@ check(walkFrames.length > 10, `only ${walkFrames.length} walk-beat frames — th
   check(arrivalShot(ARRIVAL_CONTROL_AT + 60, PASS) === null, 'and stay let go');
 }
 
+/**
+ * **Rebuilt here, from the sphere's own centre, rather than imported.**
+ *
+ * The game asks `world/up.ts`'s `eyeForFocus` where the eye goes, and that is
+ * the right thing for the game to do — one owner, shared with `IsoCamera`. But a
+ * check that imported the same function could only ever say "the shot agrees
+ * with itself", and the fault this clause exists for lived exactly there: the
+ * old version modelled the eye as `drop + cameraOffset(...)`, the offset in the
+ * **flat** frame, which is where the rig would put it on a flat park and is
+ * 44 degrees of rotation away from where it actually goes. The check and the
+ * game held the same wrong model, so the check was green while the lens went
+ * 0.18 m under the grass on seed 428.
+ *
+ * So: Rodrigues, on the axis from world `+Y` to the outward radial at the focus.
+ * Twelve lines of arithmetic with nothing imported from `src/world/up.ts`, which
+ * is what makes a disagreement between the two mean something.
+ */
+function eyeFromFocusIndependently(
+  focus: { x: number; y: number; z: number },
+  offset: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } {
+  // The cap is tangent at the origin, so the sphere's centre is (0, -R, 0).
+  const ux = focus.x;
+  const uy = focus.y + GROUND_SPHERE_RADIUS;
+  const uz = focus.z;
+  const length = Math.hypot(ux, uy, uz) || 1;
+  const up = { x: ux / length, y: uy / length, z: uz / length };
+  // Rotate `offset` from +Y onto `up`: axis = +Y x up, angle = acos(up.y).
+  const axis = { x: up.z, y: 0, z: -up.x };
+  const axisLength = Math.hypot(axis.x, axis.y, axis.z);
+  if (axisLength < 1e-12) {
+    return { x: focus.x + offset.x, y: focus.y + offset.y, z: focus.z + offset.z };
+  }
+  const k = { x: axis.x / axisLength, y: 0, z: axis.z / axisLength };
+  const angle = Math.acos(Math.min(1, Math.max(-1, up.y)));
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const cross = {
+    x: k.y * offset.z - k.z * offset.y,
+    y: k.z * offset.x - k.x * offset.z,
+    z: k.x * offset.y - k.y * offset.x,
+  };
+  const dot = k.x * offset.x + k.y * offset.y + k.z * offset.z;
+  return {
+    x: focus.x + offset.x * cos + cross.x * sin + k.x * dot * (1 - cos),
+    y: focus.y + offset.y * cos + cross.y * sin + k.y * dot * (1 - cos),
+    z: focus.z + offset.z * cos + cross.z * sin + k.z * dot * (1 - cos),
+  };
+}
+
+/**
+ * How high a world point is above the ground, **measured from the centre of the
+ * planet** — the quantity Jim named on 14 September 2026, written out here from
+ * `terrainHeight` and the radius rather than imported from `terrain.ts`, for the
+ * same reason as above.
+ */
+function altitudeIndependently(x: number, y: number, z: number): number {
+  return (
+    Math.hypot(x, y + GROUND_SPHERE_RADIUS, z) -
+    Math.hypot(x, terrainHeight(x, z) + GROUND_SPHERE_RADIUS, z)
+  );
+}
+
 // --- the lens is never in the ground, curvature included -------------------
 //
 // Measured against the real drop, because clearance is a fact about where in
 // the park the shot stands, and swept on a grid finer than anything the game
 // samples so this cannot become arithmetic about its own inputs.
+//
+// **In radial altitude, not world Y.** At the bus stop's radius the ground falls
+// about a metre for every metre towards the park's edge, so a clearance
+// differenced along `+Y` is mostly a statement about the tilt. Both terms here
+// are radii from the sphere's centre, so the tilt cancels and what is left is
+// what a child would feel underfoot.
 {
   const drop = arrivalDoorDropWorld();
   let worst = Infinity;
   let worstNote = 'nothing measured';
+  let worstSightline = Infinity;
+  let worstSightlineNote = 'nothing measured';
   for (const { shot } of doorFrames) {
-    const eye = cameraOffset(shot.yawDegrees * DEG, shot.pitchDegrees * DEG, shot.distance);
-    const eyeX = drop.x + eye.x;
-    const eyeZ = drop.z + eye.z;
-    // The door beat orbits `doorFocus`, which the game puts ARRIVAL_EYE_HEIGHT
-    // over the highest ground the eye has to clear. Asked here of the terrain
-    // directly rather than of that function, so the two are not one number
-    // agreeing with itself.
-    let focusGround = terrainHeight(drop.x, drop.z);
-    for (let f = 0; f <= 1 + 1e-9; f += 1 / 32) {
-      focusGround = Math.max(focusGround, terrainHeight(drop.x + eye.x * f, drop.z + eye.z * f));
-    }
-    const eyeY = focusGround + ARRIVAL_EYE_HEIGHT + eye.y;
-    let highest = -Infinity;
+    // The placement under test: where the game says the shot looks, and where
+    // the rig will therefore stand the lens.
+    const focus = arrivalDoorFocus(drop, shot);
+    const offset = cameraOffset(shot.yawDegrees * DEG, shot.pitchDegrees * DEG, shot.distance);
+    const eye = eyeFromFocusIndependently(focus, offset);
+    // The eye's own footprint, on a grid finer than the game's ring of bearings.
+    let lowest = Infinity;
     for (let dx = -GROUND_DISC; dx <= GROUND_DISC + 1e-9; dx += GROUND_GRID_STEP) {
       for (let dz = -GROUND_DISC; dz <= GROUND_DISC + 1e-9; dz += GROUND_GRID_STEP) {
         if (dx * dx + dz * dz > GROUND_DISC * GROUND_DISC) continue;
-        highest = Math.max(highest, terrainHeight(eyeX + dx, eyeZ + dz));
+        lowest = Math.min(lowest, altitudeIndependently(eye.x + dx, eye.y, eye.z + dz));
       }
     }
-    const clearance = eyeY - highest;
-    if (clearance < worst) {
-      worst = clearance;
-      worstNote = `eye (${eyeX.toFixed(1)}, ${eyeZ.toFixed(1)}) at ${eyeY.toFixed(2)} m, highest ground ${highest.toFixed(2)} m`;
+    if (lowest < worst) {
+      worst = lowest;
+      worstNote =
+        `eye (${eye.x.toFixed(1)}, ${eye.y.toFixed(2)}, ${eye.z.toFixed(1)}), ` +
+        `ground under it ${terrainHeight(eye.x, eye.z).toFixed(2)} m`;
+    }
+    // And the run it looks along — the curvature clause. A straight line between
+    // two points at the same altitude sags below them on a convex world.
+    for (let step = 0; step <= 64; step += 1) {
+      const f = step / 64;
+      const here = altitudeIndependently(
+        eye.x + (focus.x - eye.x) * f,
+        eye.y + (focus.y - eye.y) * f,
+        eye.z + (focus.z - eye.z) * f,
+      );
+      if (here < worstSightline) {
+        worstSightline = here;
+        worstSightlineNote = `${(f * 100).toFixed(0)}% along the run from the eye to the drop`;
+      }
     }
   }
   console.log(`the lens clears the ground by at least ${show(worst)} m (${worstNote})`);
@@ -525,6 +617,27 @@ check(walkFrames.length > 10, `only ${walkFrames.length} walk-beat frames — th
     worst >= ARRIVAL_EYE_FLOOR_MARGIN,
     `the arrival camera goes into the ground: ${show(worst)} m of clearance against a floor of ` +
       `${ARRIVAL_EYE_FLOOR_MARGIN} m — ${worstNote}`,
+  );
+  // **The eye must also not be flung miles from what it is framing.** The bug
+  // this clause is about was found as a camera in the ground, but its other half
+  // was a focus shoved 10 m into the air by ground it was nowhere near — and a
+  // clearance floor alone is blind to that, because too high passes it happily.
+  let highest = -Infinity;
+  for (const { shot } of doorFrames) {
+    const focus = arrivalDoorFocus(drop, shot);
+    highest = Math.max(highest, altitudeIndependently(focus.x, focus.y, focus.z));
+  }
+  console.log(`the door beat looks at a point at most ${show(highest)} m over the pavement`);
+  check(
+    highest <= ARRIVAL_EYE_HEIGHT + ARRIVAL_FOCUS_DRIFT,
+    `the door shot's focus is ${show(highest)} m over the ground, against a nominal ` +
+      `${show(ARRIVAL_EYE_HEIGHT)} m — it is framing the sky, not the step she comes down`,
+  );
+  console.log(`the run from the eye to the drop clears the ground by ${show(worstSightline)} m (${worstSightlineNote})`);
+  check(
+    worstSightline >= 0,
+    `the shot looks through the ground: the run from the eye to the drop dips ` +
+      `${show(-worstSightline)} m below it, ${worstSightlineNote}`,
   );
 }
 

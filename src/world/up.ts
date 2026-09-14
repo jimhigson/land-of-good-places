@@ -36,6 +36,43 @@ export function isOutdoors(x: number, z: number): boolean {
   return spaceAt(x, z) === SPACE_GARDEN;
 }
 
+const _eyeTilt = /* @__PURE__ */ new Quaternion();
+
+/**
+ * **Where a camera's eye actually ends up — the one owner of that question.**
+ *
+ * Every fixed-angle rig in this game is "stand `distance` back on bearing
+ * `yaw`, pitched `pitch` down", which `core/cameraRig.ts` turns into an offset
+ * from the focus. That offset is solved in the **flat** frame, because a yaw
+ * and a pitch are angles against a ground plane and the park was authored on
+ * one. Outdoors there is no longer a single ground plane, so the offset has to
+ * be rotated into the local frame at the focus before it means anything.
+ *
+ * **Why this is a shared function and not four lines inside `IsoCamera`.** It
+ * was four lines inside `IsoCamera`, and the arrival camera — which has to know
+ * where its own eye will land, in order to stand it clear of the grass — had a
+ * second, *flat* model of the same thing. So did
+ * `scripts/check-arrival-camera.mts`, which is how the check stayed green while
+ * the shot dipped 0.18 m under the ground on seed 428: it was measuring a
+ * camera nobody renders. Two definitions of one thing kept in step by hand, in
+ * the place this repo has paid for that most often.
+ *
+ * Writes the eye into `eye` and the frame's up into `up`, because every caller
+ * wants both and re-deriving `up` is the other half of the same mistake.
+ * Indoors `upFor` hands back plain `+Y`, the rotation is the identity, and this
+ * collapses to `focus + offset` — which is exactly what it should be.
+ */
+export function eyeForFocus(
+  focus: Readonly<Vector3>,
+  flatOffset: { readonly x: number; readonly y: number; readonly z: number },
+  eye: Vector3,
+  up: Vector3,
+): void {
+  upFor(focus.x, focus.y, focus.z, up);
+  _eyeTilt.setFromUnitVectors(INDOOR_UP, up);
+  eye.set(flatOffset.x, flatOffset.y, flatOffset.z).applyQuaternion(_eyeTilt).add(focus);
+}
+
 const _tilt = /* @__PURE__ */ new Quaternion();
 const _euler = /* @__PURE__ */ new Euler();
 

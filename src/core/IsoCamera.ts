@@ -1,4 +1,4 @@
-import { PerspectiveCamera, Quaternion, Vector2, Vector3 } from 'three';
+import { PerspectiveCamera, Vector2, Vector3 } from 'three';
 import {
   CAMERA_DISTANCE,
   CAMERA_FOLLOW_HALF_LIFE,
@@ -18,8 +18,7 @@ import { cameraOffset } from './cameraRig';
 import { screenBasis } from './screenBasis';
 import type { FrameContext } from './types';
 import type { ParkBoundary } from '../world/boundary';
-import { upFor } from '../world/up';
-import { INDOOR_UP as WORLD_UP } from '../world/terrain';
+import { eyeForFocus } from '../world/up';
 
 /**
  * The Theme Park camera.
@@ -66,9 +65,8 @@ export class IsoCamera {
    */
   private readonly viewFocus = new Vector3();
 
-  /** Scratch for the shot's frame: which way is up here, and the rotation to it. */
+  /** Scratch for the shot's frame: which way is up here, and the rig offset placed into it. */
   private readonly frameUp = new Vector3(0, 1, 0);
-  private readonly frameTilt = new Quaternion();
   private readonly rigOffset = new Vector3();
 
   /**
@@ -836,10 +834,14 @@ export class IsoCamera {
     // and it is her ground that decides which way up the shot is. Indoors
     // `upFor` hands back plain `+Y` and every line below collapses to what it
     // was, which is why the hotel and the castle need no branch of their own.
-    upFor(this.viewFocus.x, this.viewFocus.y, this.viewFocus.z, this.frameUp);
-    this.frameTilt.setFromUnitVectors(WORLD_UP, this.frameUp);
-    this.rigOffset.copy(this.offset).add(this.poseOffset).applyQuaternion(this.frameTilt);
-    this.camera.position.copy(this.viewFocus).add(this.rigOffset);
+    //
+    // **`eyeForFocus` rather than the four lines this used to be**, because the
+    // arrival camera has to predict where its own eye will land in order to
+    // stand it clear of the grass, and it had its own flat copy of those four
+    // lines. So did `check:arrival-camera`. One owner, so a shot cannot be
+    // solved against a camera the rig does not build — see that function.
+    this.rigOffset.copy(this.offset).add(this.poseOffset);
+    eyeForFocus(this.viewFocus, this.rigOffset, this.camera.position, this.frameUp);
     this.camera.up.copy(this.frameUp);
     this.camera.lookAt(this.viewFocus);
     this.camera.updateMatrixWorld();

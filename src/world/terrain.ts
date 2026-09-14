@@ -163,7 +163,105 @@ export function groundPoint(x: number, z: number, target = new Vector3()): Vecto
   return target.set(x, terrainHeight(x, z), z);
 }
 
+/**
+ * **How far this world point is from the centre of the planet.**
+ *
+ * The cap is tangent to horizontal at the park's origin, so the centre sits at
+ * `(0, -GROUND_SPHERE_RADIUS, 0)` — the same centre {@link upAt} measures its
+ * direction from, and the same one this file's whole vocabulary is built on.
+ *
+ * On its own it is one `hypot`. What it is *for* is {@link altitudeAt}, and
+ * that is the one to read the docblock of.
+ */
+export function planetRadiusAt(x: number, y: number, z: number): number {
+  return Math.hypot(x, y + GROUND_SPHERE_RADIUS, z);
+}
+
+/** The same, for the ground in this column — {@link altitudeAt}'s datum. */
+export function groundRadiusAt(x: number, z: number): number {
+  return planetRadiusAt(x, terrainHeight(x, z), z);
+}
+
+/**
+ * **How high this point actually is above the ground — measured from the centre
+ * of the planet, not along world `+Y`.**
+ *
+ * Jim, 14 September 2026, on the arrival camera going through the grass:
+ * *"EVERYWHERE that uses altitude now needs to use it relative from the centre
+ * of the planet, not absolute, including cameras."* This is that quantity, and
+ * it is the one owner of it.
+ *
+ * **What it replaces, and why the thing it replaces is now wrong.** The whole
+ * park is written in the idiom `y - terrainHeight(x, z)` — "how far above the
+ * grass is this". That was exactly right while the ground was flat, because
+ * world `+Y` and the ground's own normal were the same direction. They are not
+ * any more. At the park's reach — 157 m out on a {@link GROUND_SPHERE_RADIUS}
+ * of 220 — the ground leans **44 degrees**, so a subtraction along `+Y`
+ * over-reads a real clearance by a factor of `1 / cos(44°)` ≈ 1.39 and, worse,
+ * compares a point against ground it is not actually over: step 6 m towards the
+ * park's centre out there and the terrain climbs nearly 6 m, so "the highest
+ * ground within a few metres" — a perfectly sensible question on a flat park —
+ * answers with a number that has nothing to do with what is under you.
+ *
+ * That second failure is the arrival-camera bug in one sentence. Measured on
+ * seed 428 before the fix: the door shot's focus was shoved **10 m** into the
+ * air by ground it was nowhere near, and the eye still dipped **0.18 m below
+ * the grass** at the worst frame — over-lifted and clipping at once, which is
+ * the signature of a height measured in the wrong frame rather than a height
+ * that is merely wrong.
+ *
+ * **Both terms are radii from the same centre**, so the tilt cancels exactly
+ * and the answer is the clearance a child would feel under her feet. At the
+ * park's origin it is identical to `y - terrainHeight(x, z)` to the last
+ * decimal, which is why converting a call site can never make a centre-of-park
+ * measurement worse.
+ *
+ * **Outdoors only.** Interiors are real coordinates hundreds of metres away
+ * where this formula is meaningless — use plain `y - floorY` there, exactly as
+ * `world/up.ts` keeps plain `+Y` for them. This file knows nothing about rooms;
+ * ask `isOutdoors` first if the call site can be either.
+ */
+export function altitudeAt(x: number, y: number, z: number): number {
+  return planetRadiusAt(x, y, z) - groundRadiusAt(x, z);
+}
+
 const _up = /* @__PURE__ */ new Vector3();
+
+/**
+ * **The world point `height` metres above the ground at `(x, z)`, measured
+ * along the local up** — the inverse of {@link altitudeAt}, and the position
+ * half of {@link placeOnSphere} without the rotation.
+ *
+ * Write `liftFromGround(x, z, 1.4, v)` wherever you would have written
+ * `v.set(x, terrainHeight(x, z) + 1.4, z)`. The two agree exactly at the park's
+ * centre and diverge with the lean; out at the boundary the old form puts the
+ * point 1.4 m up a vertical that the ground no longer agrees with, which both
+ * shortens its real clearance to `1.4 · cos(tilt)` and slides it sideways
+ * relative to the thing it was supposed to be standing on.
+ *
+ * **The round trip is exact on the sphere and approximate on the waves**, and
+ * the difference is worth knowing before you use it as an equality.
+ * `planetRadiusAt(liftFromGround(x, z, h))` is exactly `groundRadiusAt(x, z) + h`
+ * by construction — the lift runs along the radial, so the radii simply add.
+ * But the lift also moves the point `h · sin(tilt)` sideways, and
+ * {@link altitudeAt} takes its datum from the ground in the *new* column. The
+ * cap contributes nothing to that (every column of a sphere has the same ground
+ * radius), so the whole discrepancy is the **wave field's** change over that
+ * sideways step: bounded by `groundWaves`'s own amplitude, a few centimetres at
+ * the heights anything here is lifted to. `check:altitude-frame` asserts the
+ * round trip against that bound rather than against zero, and prints the worst
+ * it found, so the claim cannot quietly become untrue if the waves are retuned.
+ */
+export function liftFromGround(
+  x: number,
+  z: number,
+  height: number,
+  target = new Vector3(),
+): Vector3 {
+  const ground = terrainHeight(x, z);
+  upAt(x, ground, z, _up);
+  return target.set(x + _up.x * height, ground + _up.y * height, z + _up.z * height);
+}
 
 /**
  * The rotation that takes a thing built the old way — standing along `+Y` — and
