@@ -9620,13 +9620,47 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
   // guard clamps the whole outer annulus to a flat plane at `y = -R`. Furniture
   // out there stands on the clamp. That is the one thing this still refuses,
   // and it is a fact about the park rather than a budget about the bus.
+  // **This is a limit of the terrain FORMULATION, not of the sphere.**
+  //
+  // Jim, 14 September 2026: *"it also should be possible to make the park any
+  // size so long as it doesn't touch its opposite side by wrapping around the
+  // sphere - no artificial limit please"*, and *"a sphere has no edge, the
+  // worst is that it would touch its own opposite side."* He is right, and the
+  // true bound is the antipode at pi*R (691 m on R = 220), not the equator at
+  // pi*R/2 (345.6 m) — so what is refused below is **exactly half the planet**
+  // that a sphere would happily carry.
+  //
+  // It is still refused, because `terrain.ts` cannot draw it. `terrainHeight`
+  // is written as a height above a plane, so past `d = R` no vertical column
+  // meets the sphere at all and `Math.max(0, R² - d²)` maps **the entire far
+  // half of the planet onto one point**: every `d >= R` reports height -R and a
+  // horizontal up. Measured, on this branch:
+  //
+  //     d=219    capHeight=-199.048   up=(0.9955, 0.0952, 0)
+  //     d=220    capHeight=-220.000   up=(1.0000, 0.0000, 0)
+  //     d=5000   capHeight=-220.000   up=(1.0000, 0.0000, 0)
+  //
+  // So a park out there would be laid on the clamp whatever this clause said,
+  // and permitting it would be an assertion reporting success about something
+  // the renderer cannot draw.
+  //
+  // **The fix is to move the ground onto the core's representation** — a radius
+  // as a function of direction, which `src/world/geo/` already holds and which
+  // has no singularity anywhere on the planet — and only then to re-cut this
+  // clause to what is actually true: the park may not wrap round to meet
+  // itself, i.e. geodesic radius < pi*R. `NOTE-sizing-terrain-onto-geo.md` on
+  // this branch sizes that work. Until it lands, this bound is honest about
+  // being the formulation's and not the sphere's.
   if (reach >= GROUND_SPHERE_RADIUS) {
     fouls.push(
       `the park reaches ${reach.toFixed(1)} m on a ${GROUND_SPHERE_RADIUS} m planet — ` +
-        `${(reach - GROUND_SPHERE_RADIUS).toFixed(1)} m PAST ITS OWN EQUATOR, where the cap has ` +
-        'curved through vertical and terrainHeight clamps to a flat plane at y = -R. Anything ' +
-        'placed out there stands on the clamp, not on the planet. Shrink the park ' +
-        '(PARK_SURFACE_SCALE) or grow the planet (GROUND_SPHERE_RADIUS)',
+        `${(reach - GROUND_SPHERE_RADIUS).toFixed(1)} m past the equator. This is a limit of ` +
+        "terrain.ts's FORMULATION, not of the sphere: `terrainHeight` is a height above a " +
+        'plane, so past d = R no column meets the sphere and the whole far half of the planet ' +
+        `maps to one point (height -R, horizontal up). A sphere would carry a park out to the ` +
+        `antipode at ${(Math.PI * GROUND_SPHERE_RADIUS).toFixed(0)} m of walking; this refuses ` +
+        'everything past half of it. Fix by moving the ground onto a radius-of-direction ' +
+        '(see NOTE-sizing-terrain-onto-geo.md), not by shrinking the park to suit the formula',
     );
   }
 
