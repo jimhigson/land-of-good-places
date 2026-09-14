@@ -1,7 +1,8 @@
-import { Group, Mesh, MeshBasicMaterial, SphereGeometry, Vector3 } from 'three';
+import { Euler, Group, Mesh, MeshBasicMaterial, Quaternion, SphereGeometry, Vector3 } from 'three';
 import { clamp01, smoothstep, TAU } from '../../core/mathUtils';
 import { starGeometry } from '../style/shapes';
 import { decal } from '../style/materials';
+import { tiltFor, upFor } from '../../world/up';
 
 /**
  * The flourish that plays when a bloomed flower is picked.
@@ -48,6 +49,8 @@ interface Flyer {
   readonly mesh: Mesh;
   readonly material: MeshBasicMaterial;
   readonly from: Vector3;
+  /** Which way is up where the flower was picked — the arc's axis. */
+  readonly up: Vector3;
   target: (() => Vector3) | null;
   age: number;
   active: boolean;
@@ -58,6 +61,10 @@ interface Sparkle {
   readonly material: MeshBasicMaterial;
   readonly origin: Vector3;
   readonly direction: Vector3;
+  /** The star's own spin, in radians, kept so its quaternion can be rebuilt from scratch. */
+  spin: number;
+  /** The tilt onto the ground it was thrown from, so the spin is about the local up. */
+  readonly tilt: Quaternion;
   age: number;
   active: boolean;
 }
@@ -75,7 +82,15 @@ export function createFlowerPickEffect(): FlowerPickEffect {
     mesh.renderOrder = 10;
     mesh.scale.set(1, 0.55, 1);
     root.add(mesh);
-    flyers.push({ mesh, material, from: new Vector3(), target: null, age: 0, active: false });
+    flyers.push({
+      mesh,
+      material,
+      from: new Vector3(),
+      up: new Vector3(0, 1, 0),
+      target: null,
+      age: 0,
+      active: false,
+    });
   }
   let nextFlyer = 0;
 
@@ -92,6 +107,8 @@ export function createFlowerPickEffect(): FlowerPickEffect {
       material,
       origin: new Vector3(),
       direction: new Vector3(),
+      spin: 0,
+      tilt: new Quaternion(),
       age: 0,
       active: false,
     });
@@ -99,18 +116,33 @@ export function createFlowerPickEffect(): FlowerPickEffect {
   let nextSparkle = 0;
 
   const flightPoint = new Vector3();
+  const _up = new Vector3();
+  const _tilt = new Quaternion();
+  const _spinEuler = new Euler();
 
   function burst(x: number, y: number, z: number, colour: number, target: () => Vector3): void {
+    // The flourish is authored as "so much sideways, so much up" from the
+    // flower — every number below is in the frame of the ground it grew in, and
+    // outdoors that frame leans by where the flower is. One tilt serves the
+    // whole burst: the flyer, its squash and all four stars start in the same
+    // square metre.
+    const tilt = tiltFor(x, y, z, _tilt);
+    upFor(x, y, z, _up);
+
     const flyer = flyers[nextFlyer % flyers.length];
     nextFlyer += 1;
     if (flyer) {
-      flyer.from.set(x, y + 0.1, z);
+      flyer.from.set(x, y, z).addScaledVector(_up, 0.1);
+      flyer.up.copy(_up);
       flyer.target = target;
       flyer.age = 0;
       flyer.active = true;
       flyer.material.color.setHex(colour);
       flyer.material.opacity = 1;
       flyer.mesh.position.copy(flyer.from);
+      // The bloom is a squashed sphere — 0.55 on its own Y — so the mesh has to
+      // be leaned or the squash flattens it against the wrong plane.
+      flyer.mesh.quaternion.copy(tilt);
       flyer.mesh.scale.set(1, 0.55, 1);
       flyer.mesh.visible = true;
     }
@@ -120,13 +152,16 @@ export function createFlowerPickEffect(): FlowerPickEffect {
       nextSparkle += 1;
       if (!sparkle) continue;
       const angle = (i / SPARKLES_PER_BURST) * TAU + nextSparkle * 0.37;
-      sparkle.origin.set(x, y + 0.15, z);
-      sparkle.direction.set(Math.cos(angle), 0.7, Math.sin(angle));
+      sparkle.origin.set(x, y, z).addScaledVector(_up, 0.15);
+      sparkle.direction.set(Math.cos(angle), 0.7, Math.sin(angle)).applyQuaternion(tilt);
+      sparkle.tilt.copy(tilt);
+      sparkle.spin = 0;
       sparkle.age = 0;
       sparkle.active = true;
       sparkle.material.color.setHex(colour);
       sparkle.material.opacity = 1;
       sparkle.mesh.position.copy(sparkle.origin);
+      sparkle.mesh.quaternion.copy(tilt);
       sparkle.mesh.scale.setScalar(1);
       sparkle.mesh.visible = true;
     }
@@ -143,10 +178,14 @@ export function createFlowerPickEffect(): FlowerPickEffect {
         continue;
       }
       const ease = smoothstep(0, 1, t);
-      flightPoint.copy(flyer.target());
-      flightPoint.y += 1.55; // roughly hair height
+      const to = flyer.target();
+      // Hair height above *her*, along the up where she is standing. 1.55 m of
+      // world +Y at the park's rim is 1.09 m of real height and 1.11 m
+      // sideways — the bloom would sail past her ear and park in mid-air.
+      upFor(to.x, to.y, to.z, _up);
+      flightPoint.copy(to).addScaledVector(_up, 1.55);
       flyer.mesh.position.lerpVectors(flyer.from, flightPoint, ease);
-      flyer.mesh.position.y += Math.sin(t * Math.PI) * FLYER_ARC;
+      flyer.mesh.position.addScaledVector(flyer.up, Math.sin(t * Math.PI) * FLYER_ARC);
       // Hold at full size briefly (the "pop"), then shrink away.
       const scale = 1 - smoothstep(0.35, 1, t) * 0.97;
       flyer.mesh.scale.set(scale, scale * 0.55, scale);
@@ -168,7 +207,13 @@ export function createFlowerPickEffect(): FlowerPickEffect {
         sparkle.origin.y + sparkle.direction.y * SPARKLE_TRAVEL * ease,
         sparkle.origin.z + sparkle.direction.z * SPARKLE_TRAVEL * ease,
       );
-      sparkle.mesh.rotation.y += dt * 6;
+      // Spun about the local up, and rebuilt from scratch every frame:
+      // `rotation.y +=` would decompose the lean back into `rotation.x/z` and
+      // re-apply it on top of itself, which is `world/up.ts`'s tumbling player.
+      sparkle.spin += dt * 6;
+      sparkle.mesh.quaternion
+        .setFromEuler(_spinEuler.set(0, sparkle.spin, 0))
+        .premultiply(sparkle.tilt);
       const scale = 1 - t * 0.6;
       sparkle.mesh.scale.setScalar(scale);
       // Hold bright at the start, then fall away — a linear fade reads as

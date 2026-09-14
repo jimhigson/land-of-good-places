@@ -36,6 +36,36 @@ export function isOutdoors(x: number, z: number): boolean {
   return spaceAt(x, z) === SPACE_GARDEN;
 }
 
+const _identity = /* @__PURE__ */ new Quaternion();
+
+/**
+ * **The rotation that takes anything authored in the flat frame into the frame
+ * at a world point** — the sphere's outdoors, the identity in any interior.
+ *
+ * The space-aware twin of `terrain.ts`'s {@link tiltToSphere}, and the same
+ * relationship {@link upFor} has to `upAt`. Reach for it whenever a *direction*
+ * or a *frame* was written down as "so much sideways, so much up" and that
+ * "up" meant world `+Y`: a particle's launch vector, a decal's quarter turn, a
+ * squashed blob's flattening axis. Effects are full of those, and unlike a
+ * position they cannot be fixed by moving them.
+ *
+ * ```ts
+ * spark.direction.set(Math.cos(a), 0.7, Math.sin(a)).applyQuaternion(tiltFor(x, y, z, _q));
+ * ```
+ *
+ * **Safe to call every frame**, unlike `standOnSphere`/`standOnGround`, because
+ * it hands back a rotation rather than composing one onto an object — nothing
+ * here can accumulate. What you do with it still can: build the object's
+ * quaternion from scratch and pre-multiply this, never pre-multiply onto
+ * whatever last frame left behind. See {@link faceOnGround} for the worked
+ * example, and the tumbling player in its docblock for the cost of getting it
+ * wrong.
+ */
+export function tiltFor(x: number, y: number, z: number, target = new Quaternion()): Quaternion {
+  if (spaceAt(x, z) !== SPACE_GARDEN) return target.copy(_identity);
+  return tiltToSphere(x, y, z, target);
+}
+
 const _eyeTilt = /* @__PURE__ */ new Quaternion();
 
 /**
