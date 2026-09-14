@@ -167,37 +167,69 @@ it presents as the walk sticking rather than as a units bug.
   collision engineer is handling this at the type (`geo/step.ts`'s
   `riseBetween` takes two positions and has no height overload).
 
-## The parity measurement I took wrongly, and the tell that caught it
+## `test:procgen` can return a VOID run, and the skip count is the only tell
 
-**Do not run two `test:procgen` suites at the same time on this machine.** I ran
-the base's and mine concurrently to save wall clock. Both came back
+**Check the skip count before you read anything else off this suite. 279
+skipped is a healthy run; 465 skipped is a void one.** Not the duration, not
+the CPU percentage, not whether you ran it alongside something else — those all
+look like the answer and none of them is.
 
-```
-160 passed, 0 failed, 465 skipped   —   5:15 and 5:16, 22% CPU
-```
+I took a parity measurement wrongly, prescribed the wrong fix for it, and the
+collision engineer disproved the prescription by testing it. The whole sequence
+is worth keeping, because each step looked sound.
 
-and the non-passing sets were **identical by name**, so it read as clean parity.
-It was two starved runs agreeing with each other. Run alone, the same branch
-gives
+**What I did.** Ran the base's suite and mine concurrently to save wall clock.
+Both returned `160 passed / 0 failed / 465 skipped`, non-passing sets identical
+by name. I committed that as clean parity. Re-run one at a time they give
+`297/49/279` and `315/49/279` — sets still identical, and the 18 extra passes
+are exactly my new unit tests, which is the real parity result.
 
-```
-315 passed, 49 failed, 279 skipped  —   1:59, 224% CPU
-```
+**What I concluded, and it was wrong.** That concurrency was the cause and the
+fix was "run them one at a time", with duration and CPU percentage as the tell.
 
-Faster *and* more thorough, because vitest could actually use its workers. Under
-contention it was bailing and booking the remainder as skips.
+**Why that is wrong**, from two directions:
 
-**The tell was the duration and the CPU percentage, not the counts.** CLAUDE.md
-already says to watch the duration — a silent-skip bug once took this suite from
-89 s to 2.6 s — and the shape here is the same lesson pointing the other way:
-the *slow* run was the broken one, and 22% CPU on a machine with cores to spare
-is the number that gives it away. A pass count cannot see this, and two wrong
-runs agreeing is not a control; it is the same mistake made twice.
+- The collision engineer ran one *deliberately alone* and got the void
+  signature — 366 s, `171 passed / 465 skipped` — the worst of their four runs,
+  because four other lanes are on this machine and "alone" is not something
+  anyone here can arrange. Their two *concurrent* runs, launched nine seconds
+  apart, were both healthy at 279.
+- **My own data refutes the duration tell outright.** My four runs:
 
-Two of my own commit messages (`check:radial-hop joins the chain` and the
-`test:procgen` line in it) quote the 160/0/465 figures as parity. **Those
-numbers are an artefact of how I ran it, not a property of either branch**, and
-this section is the correction rather than a rewrite of history.
+  | run | how | result | wall clock | CPU |
+  |---|---|---|---|---|
+  | base | concurrent | **465 skipped** — void | 5:16 | 22 % |
+  | mine | concurrent | **465 skipped** — void | 5:15 | 19 % |
+  | base | alone | 279 skipped — healthy | **6:11** | 177 % |
+  | mine | alone | 279 skipped — healthy | 1:59 | 224 % |
+
+  The **slowest run of the four was the healthy one**, and it was a minute
+  slower than either void run. A duration threshold would have thrown it away
+  and kept the two that measured nothing.
+
+**So the control belongs on the instrument, not on the schedule**, and the skip
+count is it. Both of us hit exactly 465 across differing totals (625, 631, 636,
+643), so it is one deterministic bail rather than noise.
+
+Three things worth carrying out of this:
+
+- **Two wrong runs agreeing is not a control; it is the same mistake made
+  twice.** A base-versus-branch diff of two starved runs matches perfectly and
+  means nothing. A run taken under the *same* contention at the *same* time as
+  its comparand is, on a shared machine, the fairest comparison available —
+  provided both are healthy.
+- **A void run is not a wrong answer, it is no answer.** It did not measure a
+  different result; it measured nothing and reported confidently. That
+  distinction matters for whoever reads the numbers next.
+- **This is the opposite shape to the one CLAUDE.md records, which is the
+  trap.** That file's worked example is a silent-skip bug that made *this very
+  suite* suspiciously **fast** — 89 s to 2.6 s — so "fast" is the documented
+  tell, and a slow run reads as merely a busy machine. Neither direction is the
+  signal. A pass count cannot see either case; the skip count sees both.
+
+Two earlier commit messages on this branch quote the `160 / 0 / 465` figures as
+parity, and one prescribes running the suites one at a time. **Both are
+superseded by this section**; the history stays as written.
 
 ## What the gates say
 
