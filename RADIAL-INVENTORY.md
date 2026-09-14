@@ -397,7 +397,57 @@ patterns reach those files at all; it is also what proves the sweep's headline
 
 ---
 
-## 5. Superseding
+## 5. Re-frame or rewrite — an honest split
+
+**About three quarters of the *sites* are a re-frame. About three quarters of
+the *work* is the rewrite.** They are not the same three quarters, and the
+difference is the number worth knowing.
+
+**Re-frame — route an existing call through an existing helper** (~60 sites).
+The vocabulary is already built and proven: `upFor`, `altitudeAt`,
+`liftFromGround`, `yAtAltitude`, `eyeForFocus`, `placeOnSphere`,
+`standOnSphere`, `tiltToSphere`, `capHeight`. Everything in §3.1 (one
+`tiltToSphere` where the mesh is shown), §3.2's first two rows (two lines),
+§2.1 (`y` → `altitudeAt`), §2.3, and most of `ALTITUDE-INVENTORY.md`'s
+sections C, F and G. Each is between one and ten lines, each is independently
+testable, and none of them needs a decision from anybody.
+
+**Rewrite — a new model, which no helper can absorb** (~20 sites, most of the
+effort):
+
+- **`CollisionWorld`.** It has *no Y in its geometry at all* — circles and
+  rectangles in `x,z`, with `topIsAbsolute` bolted on for knee-high props.
+  Making a collider mean "a shape on the surface" rather than "a prism along
+  world `+Y`" is a change to the representation, and CLAUDE.md's hard-won
+  rules about it (`topIsAbsolute`, the hollow-rectangle trap, `keepOutsFor`)
+  all have to survive the change.
+- **`NavGrid`.** A 2D lattice whose step test is already beaten by its own
+  outward diagonal. A radial world wants the step measured along the local up,
+  which changes the lattice, not a constant in it.
+- **Gravity and jumping** (`Player`, `NpcCharacter`, `ParadeMember`).
+  `verticalVelocity` becomes a radial velocity; every hop, fall, landing,
+  auto-hop and `topIsAbsolute` interaction is downstream of that one change.
+- **`train/bridges.ts` + `bridgeStonework.ts`** — a whole subsystem that
+  imports no sphere helper at all.
+- **`coaster/route.ts`, `slide/solve.ts`** — a 213 m circuit and a 95 m chute
+  solved entirely in world `y`.
+- **The ride camera *mounts*** (`Coaster.placeCart`, `ParkTrain.placeCars`,
+  `railRace/camera.ts`, `slide/cameras.ts`) — the cart is seated in a flat
+  frame while the rails beside it are drawn leaned, so the eye is in a
+  different world from the track.
+- **The check suite.** §2 is not "fix thirteen lines": several invariants are
+  asking a *different question* now (a global flat beam plane, a ray up world
+  `+Y` through a leaning tunnel). Re-deriving them is where the caution goes,
+  because a check that is wrong in the safe direction is only noise, and one
+  that is wrong the other way is how this all shipped.
+- **Two things that are decisions, not patches**: the day/night terminator
+  (§3.2), and what the indoor/outdoor seam means for a ride that crosses it
+  (§3.6).
+
+**The one that gates the rest**: the branch does not build (§0). Nothing in
+either column can be measured until it does.
+
+## 6. Superseding
 
 `ALTITUDE-INVENTORY.md` §"A stale claim, corrected" struck the *justification*
 for deferring collision / navigation / gravity. **§1 of this file strikes the
