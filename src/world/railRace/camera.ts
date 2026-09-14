@@ -650,6 +650,14 @@ export class RaceCamera {
   /**
    * The rider's lane at arc distance `s`, at the level the lanes undulate about.
    *
+   * **Public, and the one owner of that question.** `check:rail-race` used to
+   * keep its own copy of this formula, reading a `route.base` that had been
+   * replaced by `route.baseAt` when the ring stopped being level — so the copy
+   * evaluated to `undefined`, every projection through it came out `NaN`, and
+   * **seven of the check's assertions reported `NaN%` rather than failing**. A
+   * comment in the copy promised it tracked the rig. It did not, and nothing
+   * announced when it stopped. The check now calls this.
+   *
    * **Still the flat point, and that is half of a known bug** — the child this
    * aims at is drawn at the *leaned* point, so out at the rim the rig is aimed
    * some way off her.
@@ -667,7 +675,7 @@ export class RaceCamera {
    * family tuned by eye and `check:rail-race` is red with `NaN`s on this branch
    * and cannot referee it.
    */
-  private ringPoint(s: number, into: Vector3): Vector3 {
+  ringPoint(s: number, into: Vector3): Vector3 {
     const sample = this.route.path.sampleAt(s);
     const offset = riderOffset(this.route);
     return into.set(
