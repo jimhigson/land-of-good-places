@@ -110,7 +110,7 @@ none has a PR except #619.
 | **lead** | `eng/radial-visible` | §3.1 `tapMarker.ts:57,61`; §3.1 `rainbowRing.ts:140` and `:290,317`; §1 `NavGrid` `MAX_STEP`. Shared helper `walkHeight` added to `up.ts`. New `check:outward-routing` in the chain |
 | **A — checks** | `eng/radial-checks` | §2.1 / §2.4 #1 `check-hotel.mts`; §2.4 #2 `check-tap-spacing.mts`; §2.4 #3 `check-swept-bus.mts`; §2.4 #4 `check-rail-race.mts`; §2.4 #8 `check-park.mts`; §2.4 #9 `check-pet-slide.mts`; **five of the ten §2.2 invariants** (both `Vector3(0,1,0)` rays, `railRaceFliesClear`, `theSlideKeepsItsAirFromTheCruiser`, the deck-soffit `Box3` at `:5323`). Added `heightAboveFloor` to `up.ts` and `lowestRadius` as a radial `Box3.min.y` |
 | **B — effects** | `eng/radial-fx` | §3.1 `Highlights.ts:281,217`; `flowerSparkle.ts`; `train/puffs.ts`; `dustPuff.ts`; `ActionChips.ts:210`. §3.2 **both** rows (`DayNight.ts:784-787` fill light, `:399` hemisphere axis). §3.4 `TERRAIN_RADIUS` deleted. Added `tiltFor` to `up.ts` |
-| **C — rides** | `eng/rides-radial` | All three vehicle placements via one new `rideFrame` in `sweptRail.ts`; both clearance sweeps unified into `cartEnvelopePoint`; the cruiser's castle carve |
+| **C — rides** | `eng/rides-radial` | `Coaster.placeCart` (cart **9.103 m** off its rails → 0.167 m); `RailRace.placeCarts` (cart-up vs rider-up **90.00°** → 3.210°); `ParkTrain.placeCars`; `FerrisWheelRide` (climbed 340 m up world `+Y`); both clearance sweeps unified into `cartEnvelopePoint`; `thingsTheCruiserPasses`; **the castle carve** (ride **10.55 m underground** on seed 326 → +1.09 m); `railRace/camera.ts` `far` 400 → 3200. New owner `castleAltitude()` in `cruiserWindow.ts` |
 | **D — collision** | `eng/radial-collide` | Radial gravity (`check:radial-hop`). **Everything else reverted deliberately** — see below |
 | **E — bridges** | `eng/crossing-bridge` | **PR #619, MERGEABLE — the crossing-throw fix.** No bridge geometry written |
 
@@ -125,6 +125,19 @@ none has a PR except #619.
   §2.4 #2) on hitting the import trap. Row stays open.
 - **E wrote no bridge geometry at all**, having been stopped one message before
   starting. Cheapest possible place to be stopped.
+- **C left `railRace/camera.ts`'s rig basis deliberately, and the reasoning must
+  survive because somebody will try it blind again.** Converted, it takes the
+  shot from *the camera inside the hillside* to a proper side-on view — but
+  `raceCameraNeverRunsBackwards` goes red with real numbers: a **116.9 m
+  stand-off** where the rig wants ~30, at 167 of 10578 probes. The rotation
+  preserves length; what does not survive is `measureZoomCeiling`, which solves
+  the ring's capacity in the **flat** frame and is then applied to a leaned rig.
+  **Convert the ceiling with the rig, or not at all.**
+- **C's `slide/**` conversion is on `eng/rides-radial-slide-wip` and must NOT be
+  merged.** Trough bank 30.45° → 0.00°, but `test:procgen` goes from
+  `50 failed / 268 passed / 279 skipped` to `0 failed / 132 passed / 465
+  skipped`. **The zero is not good news** — the pass count halving is the tell,
+  `new World` throwing on many more seeds. Root cause not found.
 - **A left twelve `scripts/` rows, five `invariants.ts` rows and all three
   `parkFacts.ts` rows untouched**, listed explicitly on its branch.
 
@@ -145,6 +158,17 @@ none has a PR except #619.
   falling through the world.
 - **`poiGraph`'s six stranded waypoints are NOT a radial fault** — see
   correction 7.
+- **§3.6's seam does not block the slide** — and the inventory implied it did.
+  Measured on all three building seeds, **every** chute point is in
+  `SPACE_GARDEN`, 83-148 m from the park origin; the chute never enters
+  `SPACE_CASTLE_ROOF`. The design question stays open without holding anything
+  up. `scripts/measure-slide-seam.mts` on `eng/rides-radial`.
+- **A rigidly-leaned building is a third frame.** The castle is leaned about its
+  own centre by `standInPlot` and holds one clearance, while `terrainHeight`
+  under its footprint falls **14.6 m** — so in the flat frame it reads buried at
+  its near edge and floating at its far one, and is only correct once drawn.
+  `castleAltitude()` owns the conversion. Distinct from the vehicle-placement
+  disease.
 - **Seed 11's furniture reaches 245 m on a 220 m sphere**, past the equator
   where the ground is vertical and then overhangs. A domain constraint to
   *state*, not a check to fix.

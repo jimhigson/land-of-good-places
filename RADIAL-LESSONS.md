@@ -126,6 +126,20 @@ somebody fixing half of it once already.
 the flat world was hiding a disagreement.** Curving the world is what develops
 the photograph.
 
+### A third frame, distinct from the other two: a rigidly-leaned building
+
+The castle is leaned **rigidly about its own centre** by `standInPlot`, so it
+holds one clearance across its whole footprint — while `terrainHeight` under
+that footprint falls **14.6 m**. In the flat frame it therefore reads as buried
+at its near edge and floating at its far one, and only becomes correct once
+drawn. **Anything comparing a castle `y` against flat terrain is comparing two
+frames**, and `castleAltitude()` in `cruiserWindow.ts` now owns that conversion.
+
+This is a *different* disease from the vehicle-placement one in §3 and deserves
+its own name in the new domain: a rigid body on a curved ground has a single
+frame of its own, and neither the ground's frame nor the world's is a
+substitute for it.
+
 ## 5. A magnitude is not a signed height, and this repo is full of sentinels
 
 `planetRadiusAt` is a distance, so it is never negative and **loses the sign of
@@ -253,12 +267,15 @@ chase:
   shadow while the rig says broad daylight — lamps off, fog at day distances,
   bright sky over dark flat grass. A terminator is what a planet does. **This is
   Jim's call, not an engineer's.**
-- **The indoor/outdoor seam is undecided.** `SPACE_CASTLE_ROOF` is "open to the
-  sky", a child stands in it, wild pets live in it and the ginormous slide
-  launches from it — and `spaceAt` calls it an interior because its origin is
-  1341 m from the park's centre. The Sky Cruiser and the slide both *cross* the
-  seam, and neither `coaster/**` nor `slide/**` mentions `spaceAt` at all. Nobody
-  has decided what a child should see walking through that door. **Also Jim's.**
+- **The indoor/outdoor seam is undecided — but it blocks nothing.**
+  `SPACE_CASTLE_ROOF` is "open to the sky", a child stands in it and wild pets
+  live in it, yet `spaceAt` calls it an interior because its origin is 1341 m
+  from the park's centre. Nobody has decided what a child should see walking
+  through that door, and it is **Jim's** question. **What is settled is that it
+  does not hold the slide up:** measured on all three building seeds, *every*
+  chute point is in `SPACE_GARDEN`, 83-148 m from the park origin — the chute
+  never enters the roof space at all. The inventory implied the opposite.
+  `scripts/measure-slide-seam.mts` on `eng/rides-radial` re-runs it in seconds.
 - **The hop's sideways half is not implemented.** Gravity is radial and works —
   apex **1.2267 m at every radius**, error 0.0000, against `1.28 · cos θ` before
   (0.90 m at the rim). But in her own frame the hop still leans toward the park's
