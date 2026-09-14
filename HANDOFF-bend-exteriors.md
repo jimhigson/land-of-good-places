@@ -96,5 +96,34 @@ each and a flat `base = min(terrainHeight)` datum), gate arch
 `segmentsFor`/`segmentsAlong` in `bend.ts` exist for the long-run case and are
 unused so far. Stay out of `train/` — another engineer.
 
-**No visual QA has been done. I was not given the browser.** That is a stop
-sign, not a footnote: nobody has looked at the bent castle on a rendered frame.
+## Visual QA — done, 14 Sep
+
+Two `vite preview` builds of the *same commit*, differing only in whether the
+`bendOntoPlanet` call in `Building.ts` runs, served on 5418 (rigid) and 5419
+(bent), both pinned with `?seed=20260728` so the browser matches the harness.
+Jim's preview on 5412 was left alone. Both servers killed by PID afterwards;
+ports confirmed free, 5412 confirmed alive.
+
+The frames:
+
+    /view?seed=20260728&camPos=138.4,-22.9,-65.9&camDir=-38.4,-14.5,-25.9&timeOfDay=12:00
+    /view?seed=20260728&camPos=171.6,-6.8,-47.4&camDir=-74.7,-36.2,-41.6&timeOfDay=12:00   (wider)
+    /view?seed=20260728&camPos=174.4,-77.1,-91.3&camDir=-38.4,-4.8,-32.7&timeOfDay=12:00   (hotel)
+
+**Verdict: the splay is visible and reads correctly.** Rigid, the four turret
+cones are parallel — every one points the same way on screen. Bent, they fan:
+the left one leans left, the right ones lean right. The castle still sits on
+the ground, no floating and no sinking, and the curved horizon behind it makes
+the lean read as *standing on a round world* rather than as falling over.
+
+The hotel's change is much smaller, and that is the correct result rather than a
+disappointment: its crystals cluster close to the tower's centre, so there is
+little footprint for down to vary across. The bend is proportionate to size,
+which is the whole claim.
+
+**One instrument discarded rather than shipped.** An A/B pixel-difference of the
+two builds looked compelling and read **32.8% of frame changed** — but it also
+lights up NPCs, ride vehicles and anything else that is not identical between
+two runs, so it overstates the castle's own movement by a wide margin. Same
+disease as the three wall clauses: a number that is not describing what it
+claims to. The side-by-side is the honest frame.
