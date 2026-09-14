@@ -60,3 +60,62 @@ instead of hard-coding metres. At scale 1 this reproduces main's 54 / 30 exactly
 - `scripts/diag-crossings.mts` — flips, sites, march profile. Control: must
   reproduce the production throw.
 - `scripts/diag-gate-site.mts` — bridge-site feasibility along the loop near the gate.
+
+## Result (measured)
+
+**The fix is two constants in `paths.ts` given their proper owner** — the gate:
+
+```
+const GATE_CORRIDOR_START_Z = ENTRANCE_GATE_Z - GATE_CORRIDOR_ARCH_INSET; // inset 6
+const GATE_CORRIDOR_INNER_Z = ENTRANCE_GATE_Z - GATE_CORRIDOR_DEPTH;      // depth 30
+```
+
+At `PARK_SURFACE_SCALE` 1 these are 54 and 30 — `origin/main` behaviour unchanged.
+
+### Pool sweep, canonical geometry (`GROUND_SPHERE_RADIUS` 220, scale 2.335)
+
+| | before (`eng/crossing-bridge~1`) | after |
+|---|---|---|
+| pool seeds that build | **3 of 10** (11, 326, 428) | **10 of 10** |
+| nearest paving to the arch | 23.7 / 24.5 / 64.8 m | **3.5–4.4 m, all ten** |
+| crossings bridged | — | **every one, every seed** (5/5, 2/2, 2/2, 5/5, 1/1, 3/3) |
+
+The 3-of-10 exactly reproduces the record in `faece133`.
+
+### `check:park`
+
+Now *runs*. On the three seeds that built before, the regression list is
+**byte-identical before and after** — the change is neutral there.
+
+### `test:procgen`
+
+| | before | after |
+|---|---|---|
+| passed | 269 | **473** |
+| failed | 49 | 128 |
+| **skipped** | **279** | **0** |
+
+204 previously-skipped tests now pass; 81 previously-invisible failures are now
+visible. Six baseline failures are gone, two of them squarely this bug:
+`seed 326 > the walk in from the gate crosses the railway where the planner
+planned it to, on a bridge` and `seed 11 > the bus stop and the walk in from it
+are clear of trees and bushes`.
+
+## Findings that are NOT mine (report, do not chase)
+
+1. **Bridge ramps are cliffs at this scale.** `every railway crossing has a
+   bridge you can walk to, onto and across` fails on canonical, 11, 24 and 326 —
+   and it failed on 11 and 326 **before** my fix, so it is pre-existing. The
+   planner's `WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT` is scale-free and
+   correct; what has changed is the ground under the ramp. The park's own dome
+   steepens as `PARK_SURFACE_SCALE` grows (constants.ts says so itself: 41 m of
+   drop at radius 220), so a ramp planned at grade 0.09 is built at 0.98–2.18
+   against a 0.512 budget. This is real crossing-planner work and it is an
+   interaction with the sphere — the ramp planner has to plan against the
+   sphere's own slope, not flat ground.
+2. `poi.stranded`, `rail.walkable`, `anchor.reach:hotel`,
+   `anchor.reach:ferrisWheel` — all four present, identically, before my fix.
+3. `ferrisWheel` declares radius 13 m but builds to 14.9 m; the sky cruiser runs
+   **5.2 m below ground** for ~30 m of its length.
+4. The 81 newly-visible procgen failures are overwhelmingly Rail Race, Sky
+   Cruiser, slide, trees and coping stones — the radial conversion's territory.
