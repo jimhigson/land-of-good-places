@@ -14,9 +14,10 @@ import {
   WINDOW_BELOW_TRACK,
   WINDOW_HALF_WIDTH,
   WINDOW_TRACK_Y,
+  castleAltitude,
   toCastleLocal,
 } from '../building/cruiserWindow';
-import { BUILDING_BASE_Y } from '../building/layout';
+import { terrainHeight } from '../terrain';
 import { CART_ENVELOPE, cartEnvelopePoint } from './cart';
 import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
 import { COASTER_PLANS } from './plan';
@@ -130,7 +131,15 @@ export function openingsFor(route: CoasterRoute): WallOpening[] {
       continue;
     }
     const wall: SideWall = lx > 0 ? 'east' : 'west';
-    const ly = point.y - BUILDING_BASE_Y;
+    // **Castle-local height from a clearance, not from a world `y`.**
+    //
+    // `point.y - BUILDING_BASE_Y` reads a castle-local height off the flat
+    // authoring frame, where the castle is a constant-`y` box and the ground
+    // under it falls 14.6 m. The castle is actually leaned rigidly and holds one
+    // clearance all the way round itself, so the height a point sits at *in the
+    // castle* is its clearance above the ground, minus the castle's own. See
+    // `castleAltitude`, which owns that subtraction.
+    const ly = point.y - terrainHeight(point.x, point.z) - castleAltitude(0);
     if (run && run.wall !== wall) close();
     if (!run) {
       run = { wall, minZ: lz, maxZ: lz, sumZ: lz, sumY: ly, n: 1 };
@@ -429,7 +438,8 @@ export function checkCastleWindows(
     for (const lateral of [-CART_ENVELOPE.halfWidth, CART_ENVELOPE.halfWidth]) {
       for (const rise of [-CART_ENVELOPE.below, CART_ENVELOPE.above]) {
         const { lx, lz } = toCastleLocal(point.x + sideX * lateral, point.z + sideZ * lateral);
-        const ly = point.y + rise - BUILDING_BASE_Y;
+        // The same conversion as `openingsFor` — see the note there.
+        const ly = point.y + rise - terrainHeight(point.x, point.z) - castleAltitude(0);
         if (castleSolidAt(lx, ly, lz, openings)) {
           worstInside ??= { d, lx, ly, lz };
         }

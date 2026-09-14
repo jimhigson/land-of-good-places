@@ -24,7 +24,7 @@ import {
   WINDOW_HALF_WIDTH,
   WINDOW_TRACK_Y,
   castleClear,
-  castleY,
+  castleAltitude,
   crossingBand,
   insideCastleFootprint,
 } from '../building/cruiserWindow';
@@ -1381,12 +1381,25 @@ export function* coasterProfileSearch(
   const castleSpan = spanInsideCastle((d, into) => plan.pointAt(d, into), plan.length);
   yield 0;
   if (castleSpan) {
-    const windowY = castleY(WINDOW_TRACK_Y);
+    // **A clearance, not an absolute `y`.**
+    //
+    // This was `castleY(WINDOW_TRACK_Y)` — one world height — turned into a
+    // per-column clearance by `windowY - terrainHeight(spot.x, spot.z)`. On a
+    // flat park every column has the same ground, so one absolute `y` *is* one
+    // clearance. On a cap the ground falls away radially, and over this span it
+    // falls 14.6 m: measured on seed 428, that put the track 2.62 m **under the
+    // grass** for about fourteen metres and 13.3 m too high at the far end.
+    //
+    // The castle is leaned rigidly and so holds one clearance all the way round
+    // itself; `castleAltitude` is that number. Holding the same clearance keeps
+    // the track level *with respect to the castle*, which is what the carve was
+    // always for — both openings still land at one castle-local height, so
+    // `Shell.ts` can still cut them as a single band.
+    const wantedClearance = castleAltitude(WINDOW_TRACK_Y);
     for (let i = 0; i < controls; i += 1) {
       const s = (i / controls) * plan.length;
       const away = outsideSpan(castleSpan, s, plan.length);
-      const spot = flat[i]!;
-      const wanted = windowY - terrainHeight(spot.x, spot.z);
+      const wanted = wantedClearance;
       if (away < WINDOW_FLAT) heights[i] = wanted;
       else if (away < WINDOW_FLAT + WINDOW_RAMP) {
         const t = (away - WINDOW_FLAT) / WINDOW_RAMP;
