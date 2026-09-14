@@ -154,10 +154,26 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     // discs are written into the *placed* footprint instead — see
     // `parkLayout.ts`'s `footprintAsPlaced`.
     footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
-    // 19.3: the castle's own masonry reaches 19.0 exactly, and on some seeds
-    // the dressing spills another few centimetres (the reach sweep measured
-    // 19.1 on seed 2). Declared at what stands, plus breathing room.
-    boundingRadius: 19.3,
+    // 19.7: the castle's own masonry reached 19.0 exactly while it stood
+    // rigidly, and on some seeds the dressing spilled another few centimetres
+    // (the reach sweep measured 19.1 on seed 2). Declared at what stands, plus
+    // breathing room.
+    //
+    // **Raised from 19.3 when the facade began bending to the planet**, and the
+    // reason is worth keeping because it is not obvious: bending moves the
+    // corners *outward* in world `x`/`z`, even though it moves them *closer* to
+    // the castle's own centre along the ground. A corner 15.3 m out drops about
+    // 0.53 m onto the sphere, and out at the castle's distance the local up
+    // leans some 43° from world `+Y`, so that drop carries a horizontal
+    // component of roughly 0.36 m pointing away from the middle of the park.
+    // Measured on the built park: 19.0 rigid, **19.5 bent**.
+    //
+    // This is a re-declaration, not a silencing — the manifest's rule is that
+    // each anchor declares its *measured* build-out so that paths, spurs and
+    // scatter plan around the real edge, and the real edge moved. The RATCHET
+    // entry for `anchor.reach:building` stays at zero, so anything that builds
+    // proud of *this* number still fails.
+    boundingRadius: 19.7,
     band: { min: 26, max: 60 },
   },
   // Bounding radii for these two are the MEASURED build-out (`check:park`'s
