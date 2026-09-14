@@ -124,10 +124,57 @@ export const GROUND_SPHERE_RADIUS = 220;
  * still real and still above: the park's own dome steepens as `a` grows and `R`
  * shrinks, and that is a thing to look at on screen.
  */
-const PARK_REFERENCE_SPHERE_RADIUS = 1200;
+const PARK_REFERENCE_SPHERE_RADIUS = GROUND_SPHERE_RADIUS;
 export const PARK_SURFACE_SCALE = Math.sqrt(
   PARK_REFERENCE_SPHERE_RADIUS / GROUND_SPHERE_RADIUS,
 );
+
+/**
+ * **The park may not reach past its own planet, and this is where that is
+ * stated rather than discovered.**
+ *
+ * The paragraph above this said the reference was *"held equal to
+ * `GROUND_SPHERE_RADIUS`, which makes the scale exactly 1"*, and described a
+ * park *"grown 2.33x"* as the state that is **blocked**. The constant was 1200
+ * against a radius of 220, so the scale was 2.3355 and the blocked state was
+ * the one shipping. Measured consequence, on `feat/sphere-combined` with
+ * `test:procgen` red on 49 assertions across seeds 11 and 326:
+ * `boundary.maxRadius` reached **245.0 m on a 220 m planet** — 25 m past the
+ * equator, where `terrainHeight`'s `Math.max(0, R² - d²)` guard clamps the
+ * ground to a flat plane at `y = -R`. A tree stood at 216 m on a **1045%**
+ * slope 179.6 m below the park's centre; a Rail Race duck bar stood at 246 m
+ * on no ground at all.
+ *
+ * `scripts/park-past-the-horizon.mts` is that measurement, re-runnable.
+ *
+ * So the domain states its own limit. A cap's gradient at horizontal distance
+ * `d` is `tan θ = d / √(R² − d²)` — **not** `d / R`, which is `sin θ` and is
+ * what the invariant had been measuring: it under-reports everywhere and
+ * saturates at a friendly 100% exactly where the ground turns vertical.
+ * Inverting the real gradient gives the radius a budget permits:
+ *
+ *     d = R·g / √(1 + g²)
+ *
+ * This is deliberately **not** wired into `GARDEN_PLAY_RADIUS` as a clamp. A
+ * clamp would silently resize the park and hide the contradiction; the pair is
+ * held to each other by an invariant instead, so that if the planet shrinks
+ * again the park is re-proved rather than quietly trimmed.
+ */
+export const parkRadiusForGradient = (
+  gradient: number,
+  radius: number = GROUND_SPHERE_RADIUS,
+): number => (radius * gradient) / Math.sqrt(1 + gradient * gradient);
+
+/**
+ * The steepest ground anywhere in the park, as a true gradient, at the extent
+ * the park actually reaches. The inverse of {@link parkRadiusForGradient}, and
+ * `Infinity` past the equator — because there is no ground there to have a
+ * gradient.
+ */
+export const gradientAtParkRadius = (
+  d: number,
+  radius: number = GROUND_SPHERE_RADIUS,
+): number => (d >= radius ? Infinity : d / Math.sqrt(radius * radius - d * d));
 
 /** Half-width of the playable garden, in metres. The garden is square. */
 export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
