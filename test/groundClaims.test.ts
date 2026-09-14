@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Capsule, Claim, ClaimKind, Disc } from '../src/boot/groundClaims';
 import { CLAIM_COMPATIBILITY, GroundClaims, shapesOverlap } from '../src/boot/groundClaims';
+import { arcBetween, arcToRun } from '../src/boot/claimSurface';
 
 /**
  * Unit tests for the ground-claims registry — pure and fast, no park. Each
@@ -213,5 +214,128 @@ describe('GroundClaims', () => {
       'statue',
       'railway',
     ]);
+  });
+});
+
+/**
+ * **Everything above this line sits within ~50 m of the park's origin, where
+ * the orthographic chart and the sphere agree to a few millimetres.** Those
+ * tests all passed unchanged when the kernel moved from plane geometry to
+ * geodesics, which is good evidence that nothing regressed and **no evidence at
+ * all** that the new behaviour is reached. A suite that cannot tell the two
+ * kernels apart would have signed off a no-op with equal confidence.
+ *
+ * So these are the cases out where the park actually is. Each states what the
+ * flat kernel would have answered, so it is visible that the assertion is about
+ * the change rather than about arithmetic that never moved.
+ */
+describe('out where the chart is wrong', () => {
+  /** What `Math.hypot` over the chart would have said — the old kernel, kept as the control. */
+  const flat = (ax: number, az: number, bx: number, bz: number) =>
+    Math.hypot(ax - bx, az - bz);
+
+  it('a door is NOT served by paving that stops short, though the flat chart said it was', () => {
+    // A hotel door 150 m out from the park's centre, with a 3 m demand radius.
+    // The road's end is 2.6 m away IN THE CHART — comfortably inside 3 m, so the
+    // flat registry called this served. On the ground, radially, it is further.
+    const doorX = 150;
+    const doorZ = 0;
+    const roadEndX = 147.4;
+    const chartGap = flat(roadEndX, 0, doorX, doorZ);
+    expect(chartGap).toBeLessThan(3); // the control: the OLD kernel said served
+
+    const ground = new GroundClaims();
+    ground.commit('hotel', {
+      claims: [claim('walkable', disc(doorX, doorZ, 1.2))],
+      demands: [{ x: doorX, z: doorZ, radius: 3, label: 'hotel door at the park edge' }],
+    });
+    ground.commit('roads', {
+      claims: [claim('corridor', capsule(100, 0, roadEndX, 0, 1.5))],
+    });
+
+    // And the new kernel says the paving runs out before it reaches her.
+    expect(ground.unservedDemands().map((u) => u.demand.label)).toEqual([
+      'hotel door at the park edge',
+    ]);
+
+    // State the numbers, so a later reader can see the case is still live and
+    // has not been quietly neutered by the park moving.
+    process.stderr.write(
+      `[ground claims] door at ${doorX} m out: road end is ${chartGap.toFixed(2)} m away in the ` +
+        `chart (inside the 3 m demand) but ${arcBetween(roadEndX, 0, doorX, doorZ).toFixed(2)} m ` +
+        'of real walking (outside it)\n',
+    );
+  });
+
+  it('the same door IS served once the paving really reaches it', () => {
+    // The control for the test above: if this did not pass, the one above would
+    // be proving only that the demand is unserveable, not that the distance
+    // moved.
+    const ground = new GroundClaims();
+    ground.commit('hotel', {
+      claims: [claim('walkable', disc(150, 0, 1.2))],
+      demands: [{ x: 150, z: 0, radius: 3, label: 'hotel door at the park edge' }],
+    });
+    ground.commit('roads', { claims: [claim('corridor', capsule(100, 0, 149, 0, 1.5))] });
+    expect(ground.unservedDemands()).toEqual([]);
+  });
+
+  it('a radial gap that looked clear in the chart is still refused, and vice versa', () => {
+    // Two footprints 150 m out, separated radially. In the chart their centres
+    // are 4 m apart and their radii sum to 5, so the flat kernel refused. On the
+    // ground that gap is over 5 m of real walking, so they genuinely clear.
+    const ground = new GroundClaims();
+    ground.commit('tree', { claims: [claim('footprint', disc(150, 0, 2.5))] });
+    const other = claim('footprint', disc(154, 0, 2.5));
+
+    expect(flat(150, 0, 154, 0)).toBe(4); // control: the old kernel refused
+    expect(arcBetween(150, 0, 154, 0)).toBeGreaterThan(5); // the new one need not
+    expect(ground.allows('bush', other)).toBe(true);
+
+    // And the control in the other direction: pulled close enough that even the
+    // arc is inside the radii, it must still refuse — or this test would pass on
+    // a kernel that had simply stopped refusing anything out here.
+    expect(ground.allows('bush', claim('footprint', disc(152, 0, 2.5)))).toBe(false);
+  });
+
+  it('a tangential gap at the same reach is unchanged — the chart is exact that way', () => {
+    // The other half of the story, and the reason this is a projection rather
+    // than a scale: tangentially the orthographic chart is right. If this moved,
+    // the kernel would be wrong in a way the radial tests could not see.
+    const a = { x: 0, z: 150 };
+    const b = { x: 4, z: 150 };
+    expect(arcBetween(a.x, a.z, b.x, b.z)).toBeCloseTo(flat(a.x, a.z, b.x, b.z), 1);
+  });
+
+  it('the broad phase does not dismiss a pair the narrow phase would refuse', () => {
+    // The 15.4 m trap, as a registry-level test. A long corridor across the park
+    // and a footprint that the CHORD's bounding box would have missed but the
+    // real run passes close to. If the box prefilter is ever rebuilt from the
+    // chord again, this goes red.
+    const ground = new GroundClaims();
+    const run = capsule(51, -141, -148, -26, 2);
+    ground.commit('railway', { claims: [claim('corridor', run)] });
+
+    // Sweep the whole park for any point the narrow phase says is ON the run,
+    // and assert the registry agrees. A disagreement is exactly a prefilter that
+    // dismissed a real overlap.
+    let checked = 0;
+    let disagreements = 0;
+    for (let i = 0; i < 600; i += 1) {
+      const ang = (i / 600) * Math.PI * 2;
+      const r = 10 + ((i * 31) % 190);
+      const px = Math.cos(ang) * r;
+      const pz = Math.sin(ang) * r;
+      const onTheRun = arcToRun(px, pz, 51, -141, -148, -26) < 2 + 1.5;
+      if (!onTheRun) continue;
+      checked += 1;
+      if (ground.allows('tree', claim('footprint', disc(px, pz, 1.5)))) disagreements += 1;
+    }
+    expect(checked).toBeGreaterThan(10);
+    expect(disagreements).toBe(0);
+    process.stderr.write(
+      `[ground claims] broad phase: ${checked} point(s) genuinely on a 199 m corridor, ` +
+        `${disagreements} wrongly allowed\n`,
+    );
   });
 });
