@@ -19,6 +19,34 @@ swept `src/` and is still the right list for the game code. This one:
 Read both. Where a row appears in `ALTITUDE-INVENTORY.md` it is referenced, not
 repeated.
 
+## The headline
+
+- **~50** open sites in `ALTITUDE-INVENTORY.md` (`src/` geometry, physics,
+  cameras) — unchanged, still open, plus its three carve-outs now struck (§1).
+- **+15** in `src/` world UI, effects and lighting the first sweep never looked
+  at (§3), including the two most-seen pieces of world UI in the game.
+- **+13** in the **checks and invariants themselves** (§2) — the half of the
+  repo nobody had swept. 193 files in `scripts/` and `test/`; **three** of them
+  mention a sphere helper, against 129 sites in `src/`.
+- **≈ 80 open sites** in total, across ~60 files.
+
+**The worst three by what a child actually sees:**
+
+1. **The tap-to-move marker lies at 45° to the grass** (`tapMarker.ts:57,61`).
+   She taps the outer park and the pink ring is half buried in the hillside,
+   half floating, sliced by the grass. Every tap beyond ~20 m.
+2. **The hop rainbow and the tap-confirmation burst, the same fault**
+   (`rainbowRing.ts:140`). Fires on every landing and on every successful tap —
+   and its own comment says that burst is *"the only 'yes, that one' a child
+   gets"* on a phone.
+3. **Tap-to-move stops pathing outward at all** (`NavGrid` `MAX_STEP = 0.62`
+   against a 0.72 m outward diagonal). Not a lean she can see — a control that
+   silently refuses, in the part of the park where there is nothing to blame.
+
+**And the worst one she cannot see:** `check-hotel.mts`'s fall detector fires
+on every outdoor NPC beyond 28.7 m, so it can no longer find a real fall (§2.1)
+— on a branch where the park does not build at all (§0).
+
 ## The numbers, measured on this branch
 
 Not quoted from a comment — read out of `src/world/terrain.ts` itself
