@@ -70,9 +70,38 @@ export function isOutdoors(x: number, z: number): boolean {
  * legible and, more usefully, means an indoor `y` and an outdoor walk height
  * are the same order of magnitude, so a value that has leaked from the wrong
  * branch looks wrong instead of looking plausible.
+ *
+ * ## A radius is not a signed height, and every sentinel in this repo is a trap
+ *
+ * `planetRadiusAt` is a **distance**, so it is never negative, and it therefore
+ * **loses the sign of anything below the planet's centre**. Measured:
+ * `walkHeight(100, -1e6, 100)` is **+999560**, a point a million metres *under*
+ * the park reading as most of a million metres *over* it. The function is
+ * monotonic in `y` only for `y > -GROUND_SPHERE_RADIUS`; below that the
+ * ordering silently inverts. Real play is nowhere near it — the ground is at
+ * `y = -65.7` at the park's furthest furniture — but **sentinels are**, and
+ * this codebase is full of them: `Collision`'s `topHeight = Infinity` for
+ * "solid however high you jump", `check-hotel.mts`'s `FLOOR_OF_THE_WORLD`,
+ * any "very low" starting minimum.
+ *
+ * Non-finite `y` is therefore passed straight through rather than run through
+ * the radius, because the radius maps **both** infinities to `+Infinity` and a
+ * comparison that meant "the floor is below the ceiling" becomes false. Left
+ * unguarded that is not a wrong number, it is a **reversed one**, and a
+ * reversed height in a solidity test makes a collider that is never solid while
+ * typechecking perfectly — which is exactly the failure the collision engineer
+ * flagged on this function.
+ *
+ * The general form, and the one the spherical-domain redesign inherits: **a
+ * magnitude from a centre is not a substitute for a signed height.** It is the
+ * right quantity for *differences between two real places* and the wrong one
+ * for an ordering that has to survive an out-of-range value.
  */
 export function walkHeight(x: number, y: number, z: number): number {
   if (spaceAt(x, z) !== SPACE_GARDEN) return y;
+  // See the docblock: the radius folds the sign, so a sentinel must not enter
+  // it. `+Infinity` and `-Infinity` both come out `+Infinity` otherwise.
+  if (!Number.isFinite(y)) return y;
   return planetRadiusAt(x, y, z) - GROUND_SPHERE_RADIUS;
 }
 
