@@ -251,9 +251,40 @@ for (const tf of r.testResults||[]) {
 }"
 ```
 
-**One more hole it shows:** `scatterDecoupling.test.ts` reports **0 tests** —
-a file contributing nothing to the gate at all. Unexamined; flagged, not
-diagnosed.
+### The fifth casualty, and the worst shape of the lot
+
+`scatterDecoupling.test.ts` reports **0 tests**. It has four real `it()`s. Its
+`describe` body calls `buildDigest()` at **collection time**:
+
+```ts
+describe('scenery scatter is decoupled from the paths', () => {
+  const baseline = buildDigest({});                    // line 124
+  const bowed = buildDigest({ LGP_SPUR_STRETCH: ... }); // line 125
+```
+
+Each spawns `scripts/scatter-digest.mts`, which builds a park. Run directly it
+exits 1 with the same `railD 0.0 (0.0, 125.8)` — verified here and on the base.
+The callback throws before a single `it()` registers.
+
+**A file that dies at collection is absent from the pass count, the fail count
+*and* the skip count** — every aggregate anybody reads. It surfaces in exactly
+one place: the per-file line saying `(0 test)`. The three dark seed files at
+least move the skip count; this one moves nothing at all, so a suite can lose a
+whole file this way with no summary number budging by one.
+
+**The generalisable rule:** work registered at *collection* time — a `const` in
+a `describe` body rather than in `beforeAll` — is what converts a plain test
+failure into an invisible one. If a fixture can throw, it belongs in a hook,
+where its failure is reported against the tests it was meant to serve.
+
+### The `railD 0.0` tally
+
+One defect in `crossings.ts`, in nobody's current lane, which:
+
+- darkens **three of five seed files** — the whole 279 skips
+- collapses **a fourth file to zero tests**, invisibly
+- kills every `park-harness` check step (~30 of them)
+- leaves **two seeds carrying the entire required procgen gate**
 
 Two earlier commit messages on this branch quote `160 / 0 / 465` as parity, and
 one prescribes running the suites one at a time. **Both are superseded by this
