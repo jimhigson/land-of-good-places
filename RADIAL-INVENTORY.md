@@ -200,6 +200,59 @@ retune away from giving wrong answers, and the rings genuinely stand at 157 m �
 but it was never a control that refused, and it should not have been ranked
 against two faults that are wrong on every single tap.
 
+### Ruling 1 — how a bridge leans, and the two plan footprints nobody had noticed
+
+**Decided 14 September 2026 by the lead, on the bridges engineer's measurement.
+Architecture is settled; the *look* of a leaning bridge still needs Jim.**
+
+Correction 5's "solve flat, draw leaned" **does not transfer to bridges**, and
+the reason is correction 5's own stated edge. `placeOnSphere` preserves a height
+above ground but slides the point outward by `height · sin(tilt)`. Harmless for
+a ride — the rider is placed by the same transform, so cart and rail move
+together. A bridge is a thing a child **stands on and is stopped by**, and those
+are keyed in the flat plan. Measured, per-vertex, on the built park: the parapet
+top moves **0.746 m** in plan at the innermost crossing and **6.115 m** at the
+outermost, against a `PLAYER_RADIUS` of 0.62 m.
+
+**The decision: a rigid tilt about the crossing's own centre** — bounded, the
+`standOnSphere` idiom rather than a third pattern, and it matches the ground to
+a 0.16 m sagitta over the span. A rigid tilt displaces a point at half-length
+`d` by `d · (1 − cos θ)`, which on `DECK_HALF_LENGTH = 3.2 m` is **0.027 m at
+7.5° and 1.03 m at 47.2°** — under `PLAYER_RADIUS` at the inner crossings, over
+it at the outer ones. A much smaller problem than the per-vertex one, and still
+a real one at the rim.
+
+**And the finding that outlives the ruling: the bridge already keeps two
+definitions of its own plan footprint.** They agree today only because the
+drawing is flat.
+
+| definition | source | follows a leaned sweep? |
+|---|---|---|
+| `insideDrawnStone` / `outline` (`bridges.ts:897-905`) | `shell.planEdge` — the polygon the sweep **drew** | **yes, automatically** |
+| the parapet/spandrel `walls` (`:892-897`) | also `shell.planEdge`, explicitly *"rather than re-derived from the frame"* | **yes, automatically** |
+| `platform.covers`, `bridge.deckCovers` (`:913-930`) | `frame.project` against `DECK_HALF_LENGTH` — analytic | **no** |
+| `bridge.covers` → `footprint` (`:593-597`) | `planBridgeFootprints`, a planner output | **no** |
+
+So the failure mode is not a uniform drift. **The walls she bumps into and the
+paving follow the stone; the walk surface she stands on does not.** She would be
+stopped by the parapet in the right place and fall through the deck beside it,
+silently, because each half stays individually self-consistent. `:892`'s own
+comment — *"taken from `shell.planEdge` rather than re-derived from the
+frame"* — is the tell that somebody has already been here once and fixed half of
+it.
+
+**Therefore the tilt has one owner and it is the `SpineFrame`**, which both the
+sweep and every `project`/`worldAt` query already go through, so all four rows
+move together and cannot be updated one at a time. Re-deriving the two analytic
+definitions by hand is the fallback, in the same commit, and it signs whoever
+does it up to maintaining two plan footprints for ever.
+
+**Gate: a solidity-and-reachability instrument, control first, before the
+geometry lands** — at the innermost and outermost crossing, marching a
+player-sized body at the drawn parapet from many bearings and walking the deck.
+The control is not optional here: the previous probe on this subsystem read
+clean because it discarded its own disagreements.
+
 ### Correction 6 — the deck-soffit row is misdiagnosed, and §0 is closed but not yet merged
 
 **§0 is closed on `eng/crossing-bridge` (PR #619), not on `feat/sphere-combined`.**
