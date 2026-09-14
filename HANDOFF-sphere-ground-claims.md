@@ -4,7 +4,15 @@
 A replacement runs the same model (CLAUDE.md's hard rule).
 
 **Branch:** `eng/sphere-ground-claims`, off `feat/sphere-combined`.
-**Worktree:** `.claude/worktrees/eng-ground-claims`. No PR yet.
+**Worktree:** `.claude/worktrees/eng-ground-claims`.
+**PR #620**, base `feat/sphere-combined`, open and MERGEABLE.
+
+**Expect `Procgen invariants` to be RED on that PR, and it is not this branch's
+doing.** The base is red too — 128 failures against this branch's 95. The
+remaining failures belong to other sphere-migration lanes (Sky Cruiser through
+the castle wall, a pylon off its track, an 8.21 m cat bus, unseated coping
+stones) and this PR cannot go green until those land. It moves the number
+down by 33 and takes 279 silent skips to zero; it does not clear the board.
 
 ## State
 
@@ -41,6 +49,18 @@ suite called itself green. Duration was 87.8 s both runs, so the usual duration
 tripwire could not see it; the tell was the pass count.
 
 `scripts/park-past-the-horizon.mts` is the measurement, re-runnable.
+
+### 1b. RESOLVED — scale 1 stands, by Jim's decision
+
+Not an engineer's preference, and not "it passes more tests". Jim, on the grown
+park: *"the park now feels too big/sparse - I don't think the area has been
+maintained from before, it has gotten bigger."* A separate engineer restored the
+authored area and tied it to the radius **by a relationship precisely so it
+could not drift again** — and `PARK_REFERENCE_SPHERE_RADIUS = 1200` was that
+drift, quietly reintroduced. His reasoning is now recorded at the constant.
+
+**Do not restore 2.335x to make a subsystem's tests pass.** If it ever comes
+back, the planet grows with it.
 
 ### 2. RESOLVED — the gradient budget is retired
 
