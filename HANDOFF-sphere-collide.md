@@ -221,6 +221,18 @@ be called safe until somebody has stood a body in those doorways.
    let a run claim one height without naming a chart it is constant over, and
    there is no chart on this planet 60 m across for which that is true. Two
    tops is the cheap form of the same idea, at no per-frame allocation.
+
+   **And it cannot be verified today. I stopped rather than ship it blind, and
+   this is the reason.** The seam fix's own acceptance test is
+   *"every railway crossing has a bridge you can walk to, onto and across"* —
+   and that invariant is **already among the 49 failures**, on both of the only
+   two seeds that run. So there is no green to protect and no red to turn green:
+   a change to `fence.ts` would land on a gate that says the same thing before
+   and after. Given that this is the exact gate that caught the previous
+   engineer's regression and made them revert, shipping into it unverifiable
+   would be the worst available move. **`railD` has to be fixed first.** When it
+   is, seeds 326 and 11 are the right ones to work against — they are precisely
+   the two the parapet regression showed up on.
 2. **The bridge-parapet regression is still undiagnosed and must be assumed
    live.** `eng/radial-collide` converted this gate and two procgen invariants
    went to *"0.00 m of standable width"* on seeds 11 and 326 — the seam fence
@@ -370,3 +382,35 @@ coordinates and feeding them to `spaceAt` asks about the grass; a ring probe at
 reads as "the collider was solid"; and re-deriving position from altitude makes
 lateral position a function of altitude and teleports her off any surface that
 drops away.
+
+## One working practice, worth more than any finding above
+
+Across this branch, seven confident conclusions were wrong — three of mine,
+three of the locomotion engineer's, and one of mine that he adopted on my say-so
+and had to strike from his own handoff. Every single one was caught the same
+way: **the other person went and ran the prescription instead of accepting it.**
+
+Not by reasoning harder, not by review, and never by the author re-reading their
+own work. The list, because the pattern is clearer than any one entry:
+
+- "raise `MAX_STEP`" — measured, needs a different value at every radius.
+- "the frame is the disease" — inherited from a stood-down branch, and wrong;
+  converting flat plates is what caused that branch's regression.
+- "chart delta = real / cos θ" — inverted, in both halves at once, caught
+  before it reached a docblock.
+- "the anisotropy errs safe" — mine, retracted; eating clearance is not safe.
+- "duration is the tell" — pointed in three directions and then disagreed with
+  itself on two clocks.
+- "run them one at a time" — the deliberately-solo run was the worst of four.
+- "279 skipped is healthy" — mine, adopted by him, and there is no healthy run.
+
+Two habits fall out of it, and they are cheap:
+
+- **Test the prescription, not just the finding.** A correct diagnosis with a
+  wrong remedy reads exactly like a correct one, and the remedy is the part that
+  gets copied into someone else's file.
+- **When you hand a number to another lane, hand the command that produced it.**
+  Every correction above started with somebody being able to re-run something.
+
+The failure mode this guards against is not being wrong. It is being wrong
+*and* fluent, in a file the next agent inherits.
