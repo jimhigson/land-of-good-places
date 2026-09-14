@@ -1,6 +1,7 @@
-import { PerspectiveCamera, Vector3 } from 'three';
+import { PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import { angleDelta, clamp, damp } from '../../core/mathUtils';
 import { PLAYER_LANE, type RailRaceRoute } from './route';
+import { placeOnSphere } from '../terrain';
 
 /**
  * **The Rail Race's side-on camera.**
@@ -394,6 +395,11 @@ export const RIDER_RIDE_HEIGHT = 1.9;
 
 const UP = new Vector3(0, 1, 0);
 
+/** Scratches for standing the side-on rig on the ground the rider is on. */
+const _flatRing = /* @__PURE__ */ new Vector3();
+const _ringSpin = /* @__PURE__ */ new Quaternion();
+
+
 /**
  * **How far a rider turns towards this camera so her face can be seen at all.**
  *
@@ -514,7 +520,17 @@ function ramp(t: number, lo: number, hi: number, a: number, b: number): number {
 }
 
 export class RaceCamera {
-  readonly camera = new PerspectiveCamera(45, 1, 1, 400);
+  /**
+   * `far` was **400**, which was comfortably past the far side of a flat park
+   * and is not past the far side of a round one. The ground is a sphere of
+   * radius 220 now (`GROUND_SPHERE_RADIUS`), so from a rig standing off the rim
+   * the opposite limb is upwards of 440 m away and was being clipped out of the
+   * backdrop — on the one camera in the game whose entire brief is *"looking
+   * into the park"*, with the park as the thing you are looking at.
+   *
+   * 3200 is what `core/RideCamera.ts` uses for the same reason.
+   */
+  readonly camera = new PerspectiveCamera(45, 1, 1, 3200);
 
   private readonly route: RailRaceRoute;
 
@@ -634,15 +650,25 @@ export class RaceCamera {
     this.place();
   }
 
-  /** The rider's lane at arc distance `s`, at the level the lanes undulate about. */
+  /**
+   * The rider's lane at arc distance `s`, at the level the lanes undulate about.
+   *
+   * **Leaned onto the sphere, like the rails and the cart.** The three
+   * quantities this is built from are all correct in the flat frame —
+   * `baseAt` is already cap-relative since the ring was converted — but the
+   * child this camera is pointed at is drawn at the *leaned* point, and a rig
+   * aimed at the flat one is aimed metres away from her out at the rim.
+   */
   private ringPoint(s: number, into: Vector3): Vector3 {
     const sample = this.route.path.sampleAt(s);
     const offset = riderOffset(this.route);
-    return into.set(
+    _flatRing.set(
       sample.x + sample.normalX * offset,
       this.route.baseAt(s) + 0.6 + RIDER_RIDE_HEIGHT,
       sample.z + sample.normalZ * offset,
     );
+    placeOnSphere(_flatRing, 0, into, _ringSpin);
+    return into;
   }
 
   private place(): void {
@@ -660,6 +686,34 @@ export class RaceCamera {
     const sample = this.route.path.guideAt(s);
     this.out.set(sample.normalX, 0, sample.normalZ);
     this.along.set(sample.tangentX, 0, sample.tangentZ);
+
+    // **The rig is deliberately still solved in the flat frame, and that is a
+    // known gap rather than an oversight.**
+    //
+    // `out`, `along` and `UP` are a flat-frame basis: two vectors with `y`
+    // forced to zero, and world `+Y`. On a ring that reaches the rim that is
+    // not the ground the rider is on, and by Jim's ruling it should lean with
+    // everything else.
+    //
+    // It was converted — one `tiltToSphere` at the rider, applied to all three —
+    // and backed out again, because it is not a small change to this rig. The
+    // ring runs out to where the ground leans by tens of degrees, so rotating
+    // the basis swings the camera through a correspondingly large arc, and
+    // `check:rail-race` went from 25 failures to 34: the rider crossing the
+    // screen the wrong way, the rig trailing the rider instead of leading her,
+    // and the view tipping 69.9° down into a map.
+    //
+    // Most of those are the check measuring a *flat* datum and not all of them
+    // are, and telling the two apart needs eyes on the shot — this is the
+    // side-on camera the family tuned by eye, and `check:rail-race` is itself
+    // red with `NaN`s on this branch and so cannot referee it. Converting it
+    // blind would be trading a rig that is wrong in a known way for one that is
+    // wrong in an unknown way.
+    //
+    // What did land here, because neither needs a judgement call: `ringPoint`
+    // now aims at the leaned rider rather than at a flat ghost of her, and the
+    // far plane no longer clips the park this camera exists to look at.
+    // See HANDOFF-rides-radial.md.
 
     // One factor on both, which is a uniform scaling of the rig about the rider:
     // every direction survives it untouched and only the distances grow. See

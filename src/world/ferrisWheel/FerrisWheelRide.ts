@@ -6,7 +6,7 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import type { CollisionWorld } from '../Collision';
 import { resolveDismount } from '../dismount';
-import { terrainHeight } from '../terrain';
+import { liftFromGround, terrainHeight, tiltToSphere } from '../terrain';
 import { placedEntry } from '../parkLayout';
 import { createCloudBand, type CloudBand } from './clouds';
 import { FERRIS_CAR_LOW_Y } from '../../minigames/ferrisWheel/wheelProp';
@@ -243,6 +243,8 @@ export class FerrisWheelRide implements GameSystem {
   /** Where the car sits at the bottom, in world metres. */
   private readonly boardX: number;
   private readonly boardY: number;
+  /** Where the car is, along the local up from the wheel's own column. */
+  private readonly carPoint = new Vector3();
   private readonly boardZ: number;
 
   private readonly collision: CollisionWorld;
@@ -289,7 +291,14 @@ export class FerrisWheelRide implements GameSystem {
     this.group.add(this.clouds.root);
 
     this.gondola = createGondola();
-    this.gondola.root.position.set(this.boardX, this.boardY, this.boardZ);
+    liftFromGround(this.boardX, this.boardZ, FERRIS_CAR_LOW_Y, this.carPoint);
+    this.gondola.root.position.copy(this.carPoint);
+    tiltToSphere(
+      this.carPoint.x,
+      this.carPoint.y,
+      this.carPoint.z,
+      this.gondola.root.quaternion,
+    );
     this.group.add(this.gondola.root);
 
     // The show's own coordinates are all relative to the car — `fromAngle`
@@ -416,12 +425,49 @@ export class FerrisWheelRide implements GameSystem {
     this.clock += dt * this.rate;
 
     const height = rideHeight(this.clock);
+    // **Left exactly as it was, and deliberately not converted.** The cloud band
+    // is a fixed band of world `y` (`clouds.ts`'s `baseY = CLOUD_BASE + …`,
+    // 96-164, with no board offset), and `enveloped` compares this against
+    // `CLOUD_BASE` directly. Feeding it anything else silently moves the moment
+    // the park is put away and the Earth comes out, which is the one cut in this
+    // ride the family actually notices.
+    //
+    // It is worth knowing that this pair is *already* inconsistent and this
+    // change neither causes nor cures it: the band is absolute while the climb
+    // now starts from wherever the wheel stands, so the swap happens at a
+    // different fraction of the climb than when the park was flat and
+    // `boardY ≈ 0`. That is a clouds fix, with a look to judge, and it is
+    // recorded in HANDOFF-rides-radial.md rather than smuggled in here.
     const altitude = this.boardY + height * CLIMB_METRES;
 
     // The one line that makes this a ride in the park rather than a ride in a
     // box: the car goes up, and everything else stays exactly where it is.
-    this.gondola?.root.position.setY(altitude);
-    this.show.position.set(this.boardX, altitude, this.boardZ);
+    //
+    // **Up, not `+Y`.** This was `position.setY(boardY + height * CLIMB_METRES)`
+    // — a climb straight along world `+Y` from a wheel that stands on a sphere.
+    // At the top of the ride that is the difference between rising away from
+    // the planet and rising at an angle to it, and this is the one ride in the
+    // park whose whole point is the view from the top.
+    //
+    // `liftFromGround` is the owner of "the point this far above the ground
+    // here, measured along the local up", so the car leaves its own column and
+    // stays over the wheel it is bolted to.
+    liftFromGround(
+      this.boardX,
+      this.boardZ,
+      FERRIS_CAR_LOW_Y + height * CLIMB_METRES,
+      this.carPoint,
+    );
+    const gondola = this.gondola;
+    if (gondola) {
+      gondola.root.position.copy(this.carPoint);
+      // Stand the car on the local up as well as move it along it, so a child
+      // at the top is sitting upright relative to the ground below rather than
+      // leaning with the park. Written from scratch each frame, never
+      // pre-multiplied — the compounding-tilt trap in `world/up.ts`.
+      tiltToSphere(this.carPoint.x, this.carPoint.y, this.carPoint.z, gondola.root.quaternion);
+    }
+    this.show.position.copy(this.carPoint);
 
     // The park's own sky, taken past night — see `DayNight.setSpaceFactor`.
     // Driven from the same curve as the climb, so the sky and the altitude can
