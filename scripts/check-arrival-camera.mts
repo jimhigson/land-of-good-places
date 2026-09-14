@@ -100,6 +100,41 @@
  * re-litigated at a hair's stricter bar rather than anything anyone could see.
  * The tilt is fenced by the bus's own roofline instead.
  *
+ * ## Proved red again, 14 September 2026 — the radial-altitude round
+ *
+ * Geometry it was proved against, and quote it with the transcript: seed 428,
+ * `GROUND_SPHERE_RADIUS` **220**, drop at **(-0.90, 157.34)** — radius 157.3, so
+ * the ground leans **45.7 degrees** there — ground under the drop **-66.11 m**,
+ * `ARRIVAL_EYE_HEIGHT` 2.1164 m. A mutation stops reaching a clause the moment
+ * the park moves under it, and the same command then exits 0 about nothing.
+ *
+ * ```
+ * eyeForFocus -> focus + offset      focus 6.3271 m over the ground (the ORIGINAL bug:
+ *   (the flat model, `up = +Y`)        a flat eye prediction at a 45.7 deg lean)
+ * ARRIVAL_EYE_HEIGHT -> -3           focus 0.3000 m over the ground, against a nominal -3
+ * door pitch 9 -> -32                focus 6.1750 m over the ground; run's minimum moves
+ *                                      to 0% (the eye end) at 2.8088 m
+ * stand-back 6.5 -> 60               lens 8.5783 deg; eye 11.5025 m up over a 5.9751 m roof
+ * ```
+ *
+ * **Two mutations that did NOT reach a clause, which is the honest measure of
+ * the cover here**, and both are now announced to `stderr` on every run rather
+ * than left in this comment to rot:
+ *
+ * - `ARRIVAL_FOCUS_PASSES -> 0` — the lift solve disabled entirely — leaves all
+ *   **28 checks green**. On this geometry the nominal placement already clears,
+ *   so the solve never fires and nothing here exercises it.
+ * - Deleting the sightline term from the solve changes nothing, at 6.5 m *or*
+ *   at 60 m of stand-back. The run's minimum is always at an endpoint, and both
+ *   endpoints are owned by the other two clauses.
+ *
+ * Note what moved between the September 11 table above and this one:
+ * `ARRIVAL_EYE_HEIGHT -> -3` used to fail the **clearance** clause at -2.0317 m
+ * and now fails the **drift** clause instead, because the solve lifts the focus
+ * until the eye clears. That is the solve working, not a clause rotting — but it
+ * does mean the clearance clause's real job is now guarding the solve rather
+ * than guarding the constants.
+ *
  * ## What this file still cannot see, and says so on every run
  *
  * It reads the **declared** shot — `arrivalShot` is a pure function, so this is
@@ -577,6 +612,10 @@ function altitudeIndependently(x: number, y: number, z: number): number {
   let worstNote = 'nothing measured';
   let worstSightline = Infinity;
   let worstSightlineNote = 'nothing measured';
+  /** The deepest the run dips below BOTH its endpoints — the only thing this clause owns alone. */
+  let worstSag = Infinity;
+  /** The most the lift solve raised a focus above its nominal eye height. */
+  let liftedBy = -Infinity;
   for (const { shot } of doorFrames) {
     // The placement under test: where the game says the shot looks, and where
     // the rig will therefore stand the lens.
@@ -591,6 +630,7 @@ function altitudeIndependently(x: number, y: number, z: number): number {
         lowest = Math.min(lowest, altitudeIndependently(eye.x + dx, eye.y, eye.z + dz));
       }
     }
+    const eyeAltitudeHere = altitudeIndependently(eye.x, eye.y, eye.z);
     if (lowest < worst) {
       worst = lowest;
       worstNote =
@@ -599,6 +639,12 @@ function altitudeIndependently(x: number, y: number, z: number): number {
     }
     // And the run it looks along — the curvature clause. A straight line between
     // two points at the same altitude sags below them on a convex world.
+    //
+    // The run's *endpoints* are the focus and the eye, both of which the two
+    // clauses above already own, so this only says something new when the
+    // minimum falls strictly between them. `worstSag` is that "something new",
+    // reported below so a reader can see whether this clause is doing any work.
+    const focusAltitude = altitudeIndependently(focus.x, focus.y, focus.z);
     for (let step = 0; step <= 64; step += 1) {
       const f = step / 64;
       const here = altitudeIndependently(
@@ -610,7 +656,11 @@ function altitudeIndependently(x: number, y: number, z: number): number {
         worstSightline = here;
         worstSightlineNote = `${(f * 100).toFixed(0)}% along the run from the eye to the drop`;
       }
+      if (f > 0 && f < 1) worstSag = Math.min(worstSag, here - Math.min(focusAltitude, eyeAltitudeHere));
     }
+    // How far the solve had to lift this focus off its nominal placement. Zero
+    // everywhere means the shot clears on its own and the solve is untested.
+    liftedBy = Math.max(liftedBy, focusAltitude - ARRIVAL_EYE_HEIGHT);
   }
   console.log(`the lens clears the ground by at least ${show(worst)} m (${worstNote})`);
   check(
@@ -634,6 +684,29 @@ function altitudeIndependently(x: number, y: number, z: number): number {
       `${show(ARRIVAL_EYE_HEIGHT)} m — it is framing the sky, not the step she comes down`,
   );
   console.log(`the run from the eye to the drop clears the ground by ${show(worstSightline)} m (${worstSightlineNote})`);
+  // **What these three clauses do NOT currently cover, said out loud.**
+  //
+  // Both are true of the shipped geometry and both were found by mutation
+  // (14 September 2026), not by reasoning, and either could stop being true the
+  // moment the shot's pitch or stand-back moves — so they are reported every
+  // run rather than written down here and left to rot.
+  //
+  // `stderr`, because a passing run's `stdout` is shown to nobody.
+  process.stderr.write(
+    `NOTE check:arrival-camera — the sightline clause asserts ${
+      worstSag > -0.005 ? 'NOTHING' : `${show(-worstSag)} m of real sag`
+    }. The run's minimum is at an endpoint (${worstSightlineNote}), which the eye and ` +
+      'focus clauses already own; the sphere only bends the middle of the run below both ' +
+      'ends by d^2/8R, which is 2.4 cm across this beat\'s 6.5 m stand-back. It is kept ' +
+      'armed for the day the shot pitches flatter or stands further back.\n',
+  );
+  process.stderr.write(
+    `NOTE check:arrival-camera — the lift solve in \`arrivalDoorFocus\` raised the focus by at ` +
+      `most ${show(Math.max(0, liftedBy))} m on this geometry. At 0.0000 m it NEVER FIRES, so ` +
+      'every clause here is testing the nominal placement and the solve itself is unproven — ' +
+      'proved by mutation: ARRIVAL_FOCUS_PASSES -> 0 leaves all 28 checks green. The solve is ' +
+      'the guard for ground the shot could stand over on some other seed, not for this one.\n',
+  );
   check(
     worstSightline >= 0,
     `the shot looks through the ground: the run from the eye to the drop dips ` +
