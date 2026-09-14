@@ -47,10 +47,16 @@
  * - the **bus** is `createCatBus()`'s own drawn geometry — its bounding box in
  *   its own frame, measured, not restated from constants. Whiskers, ears,
  *   fenders and all: if it is drawn, a post inside it is clipping.
- * - the comparison is in **absolute world Y**, because both `track.ts` and
- *   `ArrivalSequence.placeBus` put their geometry at `terrainHeight(x, z)`.
- *   Nothing here converts to "height above the ground" and so nothing here can
- *   convert wrongly — which is the mistake one layer down from the foot bug.
+ * - the **pose** is `ArrivalSequence.placeBus`'s own two lines, run on a
+ *   stand-in `Object3D` — `entranceRoadAt` for the position and `faceOnGround`
+ *   for the orientation, so the swept body leans with the road exactly as the
+ *   bus a child rides in does. Every sample is carried into that object's frame
+ *   by `worldToLocal`; nothing here composes a rotation of its own.
+ * - the comparison is then in the **bus's own frame**, which is where its box
+ *   is axis-aligned. It used to be world Y with a hand-written yaw matrix, and
+ *   that was faithful while `placeBus` wrote a bare `rotation.y`. It stopped
+ *   being faithful on 13 September when `placeBus` adopted `faceOnGround` —
+ *   see the note beside `busBox` for what the drift cost, measured.
  *
  * ## The rename hazard, and why this check cannot fall into it
  *
@@ -242,7 +248,10 @@ export interface SeedReport {
  */
 async function measureOneSeed(): Promise<void> {
   const { buildHeadlessPark } = await import('./park-harness.mts');
-  const { terrainHeight } = await import('../src/world/terrain.ts');
+  const { terrainHeight, altitudeAt } = await import('../src/world/terrain.ts');
+  // `placeBus` poses the bus with this, so the sweep poses its stand-in with
+  // the same function rather than reproducing a yaw-and-a-tilt by hand.
+  const { faceOnGround } = await import('../src/world/up.ts');
   // The road is a curve now, so its own accessors replace layout.ts's three
   // straight-road constants (which this branch deleted). Dynamic, like every
   // import here: `roadRoute.ts` builds a RingPath off the seeded boundary at
@@ -256,7 +265,7 @@ async function measureOneSeed(): Promise<void> {
   } = await import('../src/world/entrance/roadRoute.ts');
   const { PARK_SEED: seed } = await import('../src/world/parkManifest.ts');
   const { saveFlags } = await import('../src/state/flags.ts');
-  const { Box3 } = await import('three');
+  const { Box3, Object3D: ThreeObject3D } = await import('three');
 
   // The arrival only exists for a child who has not already arrived — the same
   // hydrate `check:cat-bus` does, and for the same reason: without it the park
@@ -320,26 +329,34 @@ async function measureOneSeed(): Promise<void> {
     }
   }
 
-  /** The bearing `placeBus` gave it. Read, never restated. */
-  const facing = bus.rotation.y;
-  const forwardX = Math.sin(facing);
-  const forwardZ = Math.cos(facing);
-  const rightX = Math.cos(facing);
-  const rightZ = -Math.sin(facing);
-
   // The drawn extent **in the bus's own frame**: +Z along its length, +X across
   // it, y from the underside of the tyres to the tips of its ears. Taken by
-  // standing the real bus at the origin unrotated for the measurement and
+  // standing the real bus at the origin **unrotated** for the measurement and
   // putting it straight back — nothing else has looked at it yet, and the
   // alternative is re-deriving a dozen private constants in `catBus.ts`.
+  //
+  // **`quaternion`, not `rotation.y`, and that is the whole point of this
+  // change.** `ArrivalSequence.placeBus` stopped writing a bare yaw on 13
+  // September: it calls `faceOnGround`, which writes a yaw and then
+  // *pre-multiplies* the lean of the ground under the bus. So `rotation.y = 0`
+  // no longer un-rotates the bus — it re-derives the quaternion from the euler
+  // triple with only the middle term zeroed, leaving the tilt in `rotation.x`
+  // and `rotation.z`. The box was therefore an **axis-aligned box round a bus
+  // leaning about 14 degrees**, which is not the bus's own frame at all.
+  //
+  // Measured on seed 428 before this fix: `width 7.57 m`, `bottom -5.06 m`,
+  // `top 10.10 m` — a 15 m-tall, 7.6 m-wide cat bus. The real drawn body is
+  // roughly half that in each direction. A box that size cannot under-count;
+  // it over-counts, and the numbers it was ratcheting were of a vehicle nobody
+  // renders.
   const keptPosition = bus.position.clone();
-  const keptRotationY = bus.rotation.y;
+  const keptQuaternion = bus.quaternion.clone();
   bus.position.set(0, 0, 0);
-  bus.rotation.y = 0;
+  bus.quaternion.identity();
   bus.updateMatrixWorld(true);
   const busBox = new Box3().setFromObject(bus);
   bus.position.copy(keptPosition);
-  bus.rotation.y = keptRotationY;
+  bus.quaternion.copy(keptQuaternion);
   bus.updateMatrixWorld(true);
   if (!Number.isFinite(busBox.min.x) || busBox.max.y <= busBox.min.y) {
     throw new Error('check:swept-bus: the drawn cat bus has no measurable body');
@@ -467,28 +484,43 @@ async function measureOneSeed(): Promise<void> {
   const toAt = entranceBusVanishAt();
 
   /**
-   * How far a post sample reaches inside the bus's body, standing at `busX`.
-   * Zero or less is clear. The bus is an axis-aligned box once the bearing
-   * above is folded in, so this is the ordinary point-to-box distance.
+   * **The bus's stand-in, posed exactly as `ArrivalSequence.placeBus` poses the
+   * real one** — the same two lines, calling the same two functions.
+   *
+   * It used to be three numbers (`pose.x`, `pose.z`, `pose.facing`) and a
+   * hand-written yaw matrix inside `reachInto`. That was faithful while
+   * `placeBus` was `root.rotation.y = entranceRoadFacing(at)`, and it stopped
+   * being faithful on 13 September when `placeBus` adopted `faceOnGround` —
+   * Jim, on the cat bus: *"one wheel in ground due to not using local 'up'."*
+   * The bus leans with the road now; a yaw-only frame does not, so the swept
+   * body was mis-oriented by the full road lean (about 14 degrees at the far
+   * end of the run) while the trestles it is swept against lean the other way.
+   * The count could therefore over- and under-read at the same time.
+   *
+   * Posing an `Object3D` and asking `worldToLocal` — rather than composing the
+   * quaternion here — is what makes a second opinion impossible: if `placeBus`
+   * changes again, this changes with it.
    */
-  const reachInto = (
-    sample: Sample,
-    pose: { readonly x: number; readonly z: number; readonly facing: number },
-    busGroundY: number,
-    lift: number,
-  ): number => {
-    // Into the bus's own frame. The bearing comes from the pose because the arc
-    // turns the bus as it drives; on the straight road it was a constant read
-    // once off the built vehicle, and this is the same quantity per position.
-    const fx = Math.sin(pose.facing);
-    const fz = Math.cos(pose.facing);
-    const rx = Math.cos(pose.facing);
-    const rz = -Math.sin(pose.facing);
-    const dx = sample.x - pose.x;
-    const dz = sample.z - pose.z;
-    const localZ = dx * fx + dz * fz;
-    const localX = dx * rx + dz * rz;
-    const localY = sample.y - busGroundY - lift;
+  const busStandIn = new ThreeObject3D();
+  const poseBusAt = (at: number): void => {
+    const station = entranceRoadAt(at);
+    busStandIn.position.set(station.x, terrainHeight(station.x, station.z), station.z);
+    faceOnGround(busStandIn, entranceRoadFacing(at));
+    busStandIn.updateMatrixWorld(true);
+  };
+  const _local = new Vector3();
+
+  /**
+   * How far a post sample reaches inside the bus's body, with the stand-in
+   * posed where the bus is. Zero or less is clear. The box is axis-aligned in
+   * the bus's **own** frame, so this is the ordinary point-to-box distance once
+   * the sample is carried into that frame.
+   */
+  const reachInto = (sample: Sample, lift: number): number => {
+    const local = busStandIn.worldToLocal(_local.set(sample.x, sample.y, sample.z));
+    const localX = local.x;
+    const localY = local.y - lift;
+    const localZ = local.z;
     const outX = Math.max(busBox.min.x - localX, localX - busBox.max.x);
     const outY = Math.max(busBox.min.y - localY, localY - busBox.max.y);
     const outZ = Math.max(busBox.min.z - localZ, localZ - busBox.max.z);
@@ -519,11 +551,9 @@ async function measureOneSeed(): Promise<void> {
       ? samples.filter((sample) => sample.isFoot && sample.part === 'legs')
       : samples;
     for (let at = fromAt; at >= toAt; at -= SWEEP_STEP) {
-      const station = entranceRoadAt(at);
-      const pose = { x: station.x, z: station.z, facing: entranceRoadFacing(at) };
-      const busGroundY = terrainHeight(station.x, station.z);
+      poseBusAt(at);
       for (const sample of looking) {
-        const reach = reachInto(sample, pose, busGroundY, lift);
+        const reach = reachInto(sample, lift);
         if (reach <= 0) continue;
         const already = hit.get(sample.post);
         if (already && already.penetration >= reach) continue;
@@ -533,8 +563,8 @@ async function measureOneSeed(): Promise<void> {
           x: sample.x,
           y: sample.y,
           z: sample.z,
-          up: sample.y - terrainHeight(sample.x, sample.z),
-          busX: station.x,
+          up: altitudeAt(sample.x, sample.y, sample.z),
+          busX: busStandIn.position.x,
         });
       }
     }
@@ -786,6 +816,9 @@ process.stderr.write(
     (bus && route
       ? `  bus body as drawn: ${bus.length.toFixed(2)} m long, ${bus.width.toFixed(2)} m wide, ` +
         `${bus.bottom.toFixed(2)} to ${bus.top.toFixed(2)} m above the ground it stands on\n` +
+        '  (one model, so this box MUST be identical on every seed — a box that varies by seed\n' +
+        '  is being measured in a pose rather than in the bus\'s own frame, which is exactly\n' +
+        '  what `rotation.y = 0` did once `placeBus` began leaning the bus with the road)\n' +
         coverageNote(route, reports[0]?.seed ?? 0)
       : '') +
     `  seed   posts  feet(control)  lifted(control)  worst penetration\n`,
