@@ -1367,3 +1367,30 @@ guarded against.
 
 The live domain `landofgoodplaces.blockstack.ing` is reachable too, so anything
 already merged can and should be verified for real.
+
+## Write the error message that names the class, not the symptom
+
+14 September 2026, and it is the cheapest lesson on this page.
+
+An engineer made `bridgeFootprint.ts`'s ramp requirement terrain-aware and did
+not move `crossingPlanSolve.ts`'s `SITE_RAMP_FLOOR` with it. **Two definitions
+of "how long must a ramp be", and one of them got fixed.** Nine of ten seeds
+stopped building — and every one of them threw:
+
+```
+bridges: no walkable bridge fits at proven crossing railD 242.0 (-2.4, -30.6).
+The planner proved this site; the real search refused it — find the drift
+between them (issue #414).
+```
+
+The cause was understood **from the first run**, with no bisect and no probe,
+because whoever wrote that message wrote down *the class of bug it would be*
+rather than the symptom in front of them. "No walkable bridge fits here" would
+have sent the next person measuring ramps. "The planner proved this site; the
+real search refused it" sends them to the two definitions, which is where the
+bug always is.
+
+So when you write a `throw` in a generator, ask what the *class* of mistake is
+that reaches it, and name that. This repo's most expensive recurring bug is two
+descriptions of one thing kept in step by hand; an error message that says
+"these two disagree" pays for itself the first time somebody makes it.

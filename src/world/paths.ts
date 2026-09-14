@@ -2786,6 +2786,7 @@ function planStreetToNetwork(target: readonly [number, number]): StreetPlan | nu
     if (!existing || tap.cost < existing.cost) tapByNode.set(tap.index, tap);
   }
   const goalCost = (node: number): number => {
+    if (!nodeMayEndAWalk(node)) return Infinity;
     if (pavedLatticeNodes.has(node)) return 0;
     return tapByNode.get(node)?.cost ?? Infinity;
   };
@@ -3238,6 +3239,53 @@ function carriesAnOffLatticeStreetRun(points: readonly (readonly [number, number
  * a solved route after seeing it (the interconnection pass) use the plan
  * functions directly instead.
  */
+/**
+ * **May a drawn walk END on this lattice node?**
+ *
+ * The one owner of that question, and it exists because there were two.
+ *
+ * A bridge is somewhere a route may **cross**; it is never somewhere a route
+ * may **stop** (issue #414). A node on a bridge's own ground is a perfectly
+ * good *crossroads* — `nodeOk` deliberately admits it, because refusing the
+ * deck surface refused the crossing's own approach and cost seed 24 its only
+ * bridge. But a route that *terminates* there begins or ends halfway up a
+ * bridge, and its end point hangs in the air against masonry a child cannot
+ * climb. Jim, three times about the same bridge: *"there is also a path that
+ * runs into the side of the bridge — basically runs into a solid wall"*.
+ *
+ * Measured on the canonical seed after the rail loop was re-rolled by the
+ * `RAIL_SELF_CLEARANCE` fix, in two rounds — which is the point:
+ *
+ * 1. `spur-stall.dodgems` and `spur-stall.facePaint` both branched at
+ *    **(-45.1, 7.4)**, **3.60 m above the ground**. Fixed by screening
+ *    `planStreetToNetwork`'s `goalCost`.
+ * 2. `street-tap-west` then ended at **(-33.1, 7.4)**, **2.31 m above the
+ *    ground** — because `streetTapRoutes` runs its *own* `latticeSearch` with
+ *    its *own* inline goal, `pavedLatticeNodes.has(node) ? 0 : Infinity`, and
+ *    that copy had never heard of the rule.
+ *
+ * Two functions answering "where may a walk end", one of them fixed: CLAUDE.md's
+ * most expensive recurring bug, caught the same afternoon it was created. Hence
+ * this, named and shared, rather than a second patch — the next search that
+ * needs a terminus asks here.
+ *
+ * **The distinction, stated plainly, because it is the thing a later
+ * "simplification" will undo:** crossing a bridge is a question about **edges**;
+ * stopping on one is a question about **nodes**. This screens nodes only.
+ * Nothing here stops the lattice routing *over* a bridge, and nothing here may
+ * be turned into a blanket refusal of bridge ground — `nodeOk` tried exactly
+ * that, and refusing the deck surface outright **cost seed 24 its only bridge**,
+ * because a crossing's own approach has to stand on it.
+ *
+ * A target left with no reachable terminus makes its planner return `null`, and
+ * the caller falls back exactly as it already does for a doormat in a pocket —
+ * a different decision, rather than a route drawn into a wall.
+ */
+function nodeMayEndAWalk(node: number): boolean {
+  const lattice = streetLattice();
+  return !pointStandsOnABridgeRamp(lattice.xs[node] as number, lattice.zs[node] as number);
+}
+
 function streetRoute(target: readonly [number, number]): (readonly [number, number])[] | null {
   const plan = planStreetToNetwork(target);
   if (!plan) return null;
@@ -3354,7 +3402,14 @@ function ensureCompassTaps(edges: PathEdge[]): void {
     if (tap.kind !== 'compass') continue;
     if (usedTaps.has(tap.index) || tapRimsDrawn.has(tap.index)) continue;
     let points: (readonly [number, number])[] | null = null;
-    if (pavedLatticeNodes.has(tap.index)) {
+    // **Three routes out of this function, and all three end a walk** — which
+    // is why the rule is asked three times rather than once at the top. This
+    // shortcut was the last of the three to be found: `street-tap-west` ended
+    // at (-33.1, 7.4), 2.31 m up a bridge, because the tap's own node was both
+    // paved and on a hump, so the rim segment alone "completed the connection"
+    // into thin air. When that happens, fall through to the search, which will
+    // walk on to a node a child can actually stand on.
+    if (pavedLatticeNodes.has(tap.index) && nodeMayEndAWalk(tap.index)) {
       // A street already runs through the tap's own node: the rim segment
       // alone completes the connection.
       points = [
@@ -3362,8 +3417,11 @@ function ensureCompassTaps(edges: PathEdge[]): void {
         [lattice.xs[tap.index] as number, lattice.zs[tap.index] as number] as const,
       ];
     } else {
+      // Same rule as `planStreetToNetwork`'s own goal, asked of the one owner
+      // rather than restated here — see {@link nodeMayEndAWalk}. This copy is
+      // where `street-tap-west` ended 2.31 m up a bridge.
       const path = latticeSearch([{ node: tap.index, cost: 0 }], (node) =>
-        pavedLatticeNodes.has(node) ? 0 : Infinity,
+        pavedLatticeNodes.has(node) && nodeMayEndAWalk(node) ? 0 : Infinity,
       );
       if (path) {
         commitLatticePath(path);

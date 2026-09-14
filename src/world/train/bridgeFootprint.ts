@@ -111,6 +111,28 @@ export function parapetReachFor(rampRun: number): number {
  * average grade, and `bridges.ts` already imports from this file — the other
  * direction would be an import cycle.
  */
+/**
+ * **Do not reach for this to fix a bridge that is too steep. It is not the
+ * cause, and it has been measured.**
+ *
+ * It is the obvious constant to blame — it is the one that says how much
+ * steeper a hump's peak is than its average — so this note is here because a
+ * future agent will find it before it finds anything else.
+ *
+ * Measured on the built park, on every failing ramp of seeds 326, canonical and
+ * 11, the peak/mean ratio came out **1.33, 1.33, 1.37, 1.37, 1.38** against the
+ * **1.333** this constant claims. The hump model is right to within measurement
+ * noise.
+ *
+ * What is wrong is the **length the ramp is given**, not the shape it is given.
+ * See {@link WALKABLE_FLOOR}: it sizes the run from `BRIDGE_RISE` alone, which
+ * assumes the ground at the ramp's foot is the ground at the crossing. On a
+ * sphere it falls away, so the downhill ramp has to descend `BRIDGE_RISE` plus
+ * the fall — 6.63 to 9.41 m measured, against the 4.06 m assumed — and the
+ * built hump makes up the difference by being steeper than a child can run up.
+ * Lowering this constant would shorten every ramp in the park to make one
+ * symptom go away.
+ */
 export const HUMP_BLEND = 0.25;
 
 /**
@@ -393,6 +415,50 @@ export const REAL_PROBE_RADIUS = PLAYER_RADIUS + REAL_CLEARANCE_STRIDE;
  * story keeps recurring: that invariant's own check treated `rampReach < 1`
  * as "skip this side" rather than "fail this bridge", so the exact bug this
  * floor exists to catch could pass with the very floor doing nothing.
+ */
+
+/**
+ * **KNOWN WRONG on sloping ground, and the remedy is not a tightening — do not
+ * simply make this terrain-aware.** Measured, with the numbers, so the next
+ * person does not spend the afternoon rediscovering it.
+ *
+ * This assumes the ramp descends exactly `BRIDGE_RISE`, which holds only where
+ * the ground at the ramp's foot is the ground at the crossing. It is not, on a
+ * sphere: the downhill ramp must descend `BRIDGE_RISE + the fall`, measured at
+ * **6.63-9.41 m** against the 4.06 m assumed, needing **17.3-21.0 m** of run
+ * against the **11.1 m** this gives. That shortfall is exactly why built ramps
+ * come out at mean grade 0.505-0.638 against a 0.384 budget, and why a child
+ * running up one loses her own deck and drops into the tunnel.
+ *
+ * **The obvious fix was tried and measured, and it destroys the park.** Making
+ * the requirement honest — per side, `(BRIDGE_RISE + fall) / MAX_RAMP_GRADIENT`
+ * — and sweeping every pool seed through the planner's own
+ * `explainBridgeRefusal` (`scripts/diag-ramp-feasibility.mts`):
+ *
+ * | seed | sites feasible today | with an honest run |
+ * |---|---|---|
+ * | canonical | 9 | **0** |
+ * | 11 | 22 | **0** |
+ * | 24 | 13 | **0** |
+ * | 128 | 14 | **0** |
+ * | 131 | 7 | 1 |
+ * | 208 | 4 | **0** |
+ * | 274 | 21 | **0** |
+ * | 326 | 10 | **0** |
+ * | 428 | 13 | 1 |
+ * | 451 | 5 | **0** |
+ *
+ * **Eight of ten parks would have no way over their own railway at all**, which
+ * `crossingPlanSolve.ts` refuses outright. And two-bridge spacing goes from
+ * `2 x MIN_BRIDGE_HALF_LENGTH` = 28.5 m to 45.6-58.0 m, on loops 198-376 m long.
+ *
+ * So the ramp cannot simply be made longer. Whoever takes this needs a
+ * different decision, not a bigger number — regrading the ground under the
+ * ramp, preferring crossings where the ground is level, or fixing it at the
+ * layer where the failure actually bites: the child loses the deck because
+ * `WalkSurfaces.sample` reaches only `BUILDING_STEP_UP` above her *damped*
+ * height, so a sampler that knew which surface she was already standing on
+ * might carry her up a steeper ramp with no geometry change at all.
  */
 const WALKABLE_FLOOR = BRIDGE_RISE / MAX_RAMP_GRADIENT;
 
