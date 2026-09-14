@@ -1,9 +1,12 @@
 import {
   BufferGeometry,
+  Euler,
   Group,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  Quaternion,
+  Vector3,
   type RingGeometry,
   type Scene,
 } from 'three';
@@ -25,6 +28,8 @@ import {
 import { decal } from '../art/style/materials';
 import type { InteractZone } from './interact';
 import { highlightKey, type HighlightTarget } from './highlight';
+import { isOutdoors, upFor } from './up';
+import { tiltToSphere } from './terrain';
 
 /**
  * The HIGHLIGHT RULE, as one system — and, since 28 July 2026, the SELECTION
@@ -68,6 +73,16 @@ const MIN_RING_RADIUS = 0.7;
 
 /** Ring width as a fraction of its radius — a rim, not a dinner plate. */
 const RING_INNER = 0.84;
+
+/**
+ * The quarter turn that takes a disc authored in XY into the ground plane.
+ * Applied to a *fresh* quaternion every frame and then leaned onto the sphere,
+ * so it is the "flat" half of the orientation and never the whole answer.
+ */
+const FLAT_ON_THE_GROUND = /* @__PURE__ */ new Euler(-Math.PI / 2, 0, 0);
+
+const _ringUp = /* @__PURE__ */ new Vector3();
+const _ringTilt = /* @__PURE__ */ new Quaternion();
 
 /** Gentle breathing, shared by every highlight on screen: cycles per second, and depth. */
 const PULSE_HZ = 0.5;
@@ -214,7 +229,7 @@ export class Highlights implements GameSystem {
     slot.showRing(
       zone.id,
       zone.x,
-      zone.y + RING_CLEARANCE,
+      zone.y,
       zone.z,
       Math.max(MIN_RING_RADIUS, zone.pickRadius),
     );
@@ -278,7 +293,8 @@ class HighlightSlot {
     this.ring = decal(new Mesh(ringGeometry, ringMaterial));
     this.ring.visible = false;
     this.ring.renderOrder = 3;
-    this.ring.rotation.x = -Math.PI / 2;
+    // Orientation is not set here: `showRing` writes it from scratch every
+    // frame, because the ground the ring lies on leans by where it is.
   }
 
   showShell(key: string, shell: HighlightShell, worldMatrix: Matrix4): void {
@@ -292,9 +308,34 @@ class HighlightSlot {
     this.ring.visible = false;
   }
 
+  /**
+   * The guarantee ring, lying on the ground it marks rather than in the world
+   * XZ plane.
+   *
+   * `(x, y, z)` is the zone's own centre; the {@link RING_CLEARANCE} that keeps
+   * it off the grass is spent **along the local up**, and the disc is leaned
+   * onto the same frame. On flat ground that is the old `y + clearance` and a
+   * flat quarter turn exactly; at the park's rim the ground leans 45°, and a
+   * ring in the world XZ plane there is half buried in the hillside and half
+   * floating over it.
+   *
+   * Written from scratch each call — never a pre-multiply onto whatever was
+   * there last frame, which is how `world/up.ts`'s `faceOnGround` docblock
+   * records a character slowly tumbling.
+   */
   showRing(key: string, x: number, y: number, z: number, radius: number): void {
     this.key = key;
-    this.ring.position.set(x, y, z);
+
+    upFor(x, y, z, _ringUp);
+    this.ring.position.set(
+      x + _ringUp.x * RING_CLEARANCE,
+      y + _ringUp.y * RING_CLEARANCE,
+      z + _ringUp.z * RING_CLEARANCE,
+    );
+
+    this.ring.quaternion.setFromEuler(FLAT_ON_THE_GROUND);
+    if (isOutdoors(x, z)) this.ring.quaternion.premultiply(tiltToSphere(x, y, z, _ringTilt));
+
     this.ring.scale.set(radius, radius, 1);
     this.ring.visible = true;
     this.shell.visible = false;
