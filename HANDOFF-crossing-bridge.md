@@ -219,3 +219,48 @@ the fix worth making. The clearance clause is a second, smaller fault on top.
   promise CLAUDE.md says is not a mechanism.
 - Read the rides engineer's "solve flat, draw leaned" (`drawnOnSphere`) before
   choosing how the shell leans — it may be the cheaper architecture here too.
+
+## "Solve flat, draw leaned" does NOT transfer to bridges — measured
+
+Correction 5's architecture is right for a ride and wrong for a bridge, and the
+reason is correction 5's own stated edge: **`placeOnSphere` preserves a height
+above the ground in its own column, but it does not keep the column.** It slides
+a point outward by `height · sin(tilt)`.
+
+For a ride that is harmless: the rider is placed by the same transform, so cart
+and rail move together. **A bridge is a thing a child stands on and is stopped
+by**, and those are keyed in the flat plan — the `MovingPlatform` by `(x, z)`,
+the parapet walls from `planEdge`'s flat `(x, z)` pairs, and `covers` /
+`heightAt` / `deckCovers` / `pavingHeightAt` all by `(x, z)`.
+
+Measured, per-vertex `placeOnSphere` on the built park:
+
+| crossing | r | tilt | deck height | deck moves | parapet top moves |
+|---|---|---|---|---|---|
+| (20.4, −20.3) | 28.7 | 7.5° | 4.73 m | 0.616 m | **0.746 m** |
+| (−86.0, 26.0) | 89.8 | 24.1° | 5.47 m | 2.236 m | **2.644 m** |
+| (51.4, 95.8) | 108.7 | 29.6° | 5.74 m | 2.838 m | **3.332 m** |
+| (−14.0, 121.7) | 122.5 | 33.8° | 6.07 m | 3.387 m | **3.944 m** |
+| (139.0, −50.8) | 147.9 | 42.3° | 6.87 m | 4.625 m | **5.298 m** |
+| (138.9, −82.1) | 161.3 | 47.2° | 7.34 m | 5.382 m | **6.115 m** |
+
+`PLAYER_RADIUS` is **0.62 m**. Every crossing exceeds it — the innermost one
+included. At the outer crossings the drawn stone would stand **up to 6 m** from
+its own collider and its own walk surface: she walks on air beside the parapet,
+and is stopped by nothing where the stone now is. That is CLAUDE.md's "anything
+that looks solid must be solid", made worse than the flat bridge it replaced.
+
+**So the bridge must not be leaned vertex-by-vertex.** Two candidates, and this
+is a decision for the radial lead, not for me alone:
+
+1. **Rigid tilt about the crossing's own centre.** A bridge is a ~24 m rigid
+   object, closer to a big prop than to a route. Tilting it about its own centre
+   to the local ground normal keeps its centre exactly put and moves its ends by
+   a bounded `halfLength · (1 − cos)` rather than by `height · sin`. Collider and
+   walk surface follow by the same rigid transform, so they cannot desync.
+2. **Move the whole bridge into the leaned frame**, queries included — every
+   `(x, z)` lookup would have to un-lean its argument first. More faithful,
+   much larger, and it puts a trigonometric inverse on the hot path of every
+   walk-surface sample.
+
+I have not chosen. (1) looks right and cheap; (2) is what a purist would want.
