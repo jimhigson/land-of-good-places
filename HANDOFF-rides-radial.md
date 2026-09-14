@@ -5,7 +5,14 @@ Branch `eng/rides-radial`, off `feat/sphere-combined`. Worktree
 
 Area: `coaster/route.ts`, `slide/solve.ts`, and the four ride-camera mounts.
 Plus two QA regressions handed over: the cruiser through `castle-wall-lower`,
-and the rail-race rider's arm 0.330 m through the cart side.
+and the rail-race rider's arm through the cart side.
+
+**Both regressions are the same root cause, and it is not the one in the
+brief.** Every ride drew its track leaned and placed its *vehicle* flat. Fixing
+that fixed the rail-race arm outright and removed most of the cruiser's strikes;
+the rest of the cruiser was a second, separate bug — its castle carve held one
+absolute world `y` across a span the cap tilts, which put the ride **10.55 m
+underground**.
 
 ## The finding, and it is one bug with several faces
 
@@ -104,14 +111,69 @@ runs the same model.
 - [x] Clearance sweep into the drawn frame — strikes 10 -> 9
 - [x] Rail race cart: **90.00 deg -> 3.210 deg** cart-vs-rider up (0.020 m of
       hand swing against a 0.55 m half-width)
-- [ ] **The castle carve** — the real remainder of the cruiser-through-castle
-      bug. See below; it is a route-solver fix, not a frame fix.
-- [ ] `ParkTrain.placeCars` — same shape, not yet done
-- [ ] Ferris gondola climb (`boardY + height * CLIMB_METRES`, straight up +Y)
-- [ ] `railRace/camera.ts`: world-`Y` rig, `camera.up` never set, `far = 400`
-      clips the horizon of a 220 m sphere
-- [ ] `slide/solve.ts` — not yet examined
-- [ ] Browser QA on `/sky-cruiser`, `/rail-race`, `/slide`, `/ferris`
+- [x] **The castle carve** — the ride was up to **10.55 m underground**; now
+      +1.09 m worst. Strikes 8 -> 2 (seed 11) and 8 -> 1 (seed 326)
+- [x] `ParkTrain.placeCars`, plus three stale `rotation.y` heading readers
+- [x] Ferris gondola: climbs along the local up, and stands on it
+- [x] `railRace/camera.ts`: aims at the leaned rider; `far` 400 -> 3200
+- [ ] **The rig basis in `railRace/camera.ts`** — deliberately NOT converted.
+      Tried, backed out, reasons in the code and below
+- [ ] **The last two cruiser strikes** — it threads the window and brushes the
+      surround. A much smaller problem than the one it replaced; see below
+- [ ] **The whole of `src/world/slide/`** — assessed, not started. See below
+- [ ] Browser QA on `/sky-cruiser`, `/rail-race`, `/slide`, `/ferris` —
+      **nothing here has been looked at**
+
+## Nothing in this branch has been seen in a browser
+
+I had no browser. Every number here is a headless measurement. CLAUDE.md is
+explicit that this is a stop sign rather than a footnote, so it is the first
+line of the status rather than the last.
+
+## The slide — assessed, untouched, and the biggest thing left
+
+**Not one file in `src/world/slide/` mentions any sphere helper.** Nine files,
+zero hits. Nor does `src/world/building/SlideRide.ts`, which builds the chute
+geometry and sweeps it with a world-`+Y` frame (`crossVectors(tangent, UP)` at
+`SlideRide.ts:226`).
+
+The consequence is bigger than a lean. `Building.ts:875` adds the slide group
+**straight to `anchorPlots.group`**, un-leaned — while every *anchored plot*
+goes through `placeOnSphere`/`standOnSphere` (`AnchorPlots.ts:17,83,146`) and so
+does the drawn ground. So a ~95 m chute and its legs are drawn in the flat
+authoring frame, standing on ground that is not.
+
+- `supports.ts:247-250` — legs are `CylinderGeometry` scaled along local `+Y`
+  with no quaternion ever applied: **they stand along world `+Y` from a
+  flat-frame foot.**
+- `solve.ts:254`, `:690`, `:1467` — all three are **internal flat-frame solves
+  and are fine**, including `:1467`, which compares against the cruiser's route
+  and is flat-vs-flat. Do not "convert" these; the inventory rows read as bugs
+  and are not.
+- `Building.ts:1727-1734` — the rider is posed at the **flat** curve point but
+  `setRidePose` ends in `faceOnGround`, so **her orientation is leaned and her
+  position and the chute are not.** Same class as the cart-on-rails bug, and
+  `petRiders.ts:340` documents the flat assumption outright.
+- `cameras.ts` is self-consistent with the flat chute (`UP` at `:228`,
+  `camera.up.copy(UP)` at `:415`), and its far plane is already 3200.
+
+So the slide is one coherent conversion — chute, legs, rider and camera
+together — and doing any one of them alone makes things worse rather than
+better, because today they at least agree with each other.
+
+## The last two cruiser strikes
+
+The car now threads the window and catches its frame:
+`castle-wall-window` and `cruiser-window-stones`.
+
+The drift assert passes, so the carve and the band agree on the track's height
+to within 5 cm. What is left is that `WINDOW_SILL_Y`/`WINDOW_HEAD_Y` are
+constants derived from the nominal `WINDOW_TRACK_Y`, while the hole's *z* extent
+is measured from the car's real swept path. **Do not widen the opening to make
+this go away** — that is the "nudge a surface apart" anti-pattern CLAUDE.md
+forbids. The principled fix is to cut the band's sill and head from the measured
+envelope the same way its sides already are, which means `Shell.ts` taking them
+per-opening instead of from two module constants.
 
 ## The castle carve — the remaining cruiser bug, measured
 
