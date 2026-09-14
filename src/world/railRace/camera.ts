@@ -1,7 +1,7 @@
-import { PerspectiveCamera, Quaternion, Vector3 } from 'three';
+import { PerspectiveCamera, Vector3 } from 'three';
 import { angleDelta, clamp, damp } from '../../core/mathUtils';
 import { PLAYER_LANE, type RailRaceRoute } from './route';
-import { placeOnSphere } from '../terrain';
+
 
 /**
  * **The Rail Race's side-on camera.**
@@ -395,9 +395,6 @@ export const RIDER_RIDE_HEIGHT = 1.9;
 
 const UP = new Vector3(0, 1, 0);
 
-/** Scratches for standing the side-on rig on the ground the rider is on. */
-const _flatRing = /* @__PURE__ */ new Vector3();
-const _ringSpin = /* @__PURE__ */ new Quaternion();
 
 
 /**
@@ -653,22 +650,31 @@ export class RaceCamera {
   /**
    * The rider's lane at arc distance `s`, at the level the lanes undulate about.
    *
-   * **Leaned onto the sphere, like the rails and the cart.** The three
-   * quantities this is built from are all correct in the flat frame —
-   * `baseAt` is already cap-relative since the ring was converted — but the
-   * child this camera is pointed at is drawn at the *leaned* point, and a rig
-   * aimed at the flat one is aimed metres away from her out at the rim.
+   * **Still the flat point, and that is half of a known bug** — the child this
+   * aims at is drawn at the *leaned* point, so out at the rim the rig is aimed
+   * some way off her.
+   *
+   * Leaning it alone was tried and reverted. On its own it *improved* every
+   * measure of how well the rider is framed — `check:rail-race`'s four
+   * rider's-eye numbers all got better and one started passing outright — and it
+   * broke `raceCameraNeverRunsBackwards` in the procgen suite, because the rig
+   * then stood at flat-frame offsets from a leaned rider: two frames in one
+   * expression, which is the fault this whole sweep is about, just moved.
+   *
+   * The camera is only correct once the rider point, the `out`/`along` basis,
+   * the rise and `camera.up` all move together — see `place()`. That is one
+   * change and it needs eyes on the shot, because this is the side-on view the
+   * family tuned by eye and `check:rail-race` is red with `NaN`s on this branch
+   * and cannot referee it.
    */
   private ringPoint(s: number, into: Vector3): Vector3 {
     const sample = this.route.path.sampleAt(s);
     const offset = riderOffset(this.route);
-    _flatRing.set(
+    return into.set(
       sample.x + sample.normalX * offset,
       this.route.baseAt(s) + 0.6 + RIDER_RIDE_HEIGHT,
       sample.z + sample.normalZ * offset,
     );
-    placeOnSphere(_flatRing, 0, into, _ringSpin);
-    return into;
   }
 
   private place(): void {
