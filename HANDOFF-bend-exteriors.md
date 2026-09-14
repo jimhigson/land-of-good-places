@@ -67,6 +67,27 @@ This branch: `check:park` has the same four and no others (`rail.walkable`
 improved 7 → 3, deterministic over two runs). `test:procgen` 108 failed, with
 the seed-326 suite throwing as above.
 
+## The nine failures this branch adds (all rides vs the castle)
+
+Diffed by **test name**, not by count, against the base commit's own run:
+
+- seed 326 — the whole suite **throws**: `planSlide` finds no rideable chute
+  after all ten ladder rungs, always at the same point. Worst kind of failure:
+  a throw takes 93 tests down as *skipped*, and a skipped test is not a passing
+  one.
+- seed 11 — slide clips the castle towers; slide clears the roof garden; Sky
+  Cruiser turn radius; no tree on the railway; paved detour ratio
+- seed 24 — Sky Cruiser fits through its castle window; Sky Cruiser flies clear
+- canonical — slide clears the garden on the castle roof
+
+Every one is a ride being held to the real castle for the first time. None is a
+defect in the bend itself: the bend is proven by `check:castle-bend`, and
+`check:castle`, `check:castle-towers` and `check:castle-floors` all pass.
+
+**This needs the slide's and the Sky Cruiser's owners**, not this branch. The
+honest framing for them: the obstacle did not grow, it was always there and is
+now being measured.
+
 ## Not done
 
 Boundary wall + pillars (`Scenery.ts` ~2294, long runs, one `standOnSphere`
