@@ -7,6 +7,8 @@ import {
   RingGeometry,
   Vector3,
 } from 'three';
+import { Anchor } from '../../world/geo';
+import { anchorAt } from '../../world/up';
 import { ART } from '../style/artPalette';
 import { decal } from '../style/materials';
 import { starGeometry } from '../style/shapes';
@@ -115,11 +117,27 @@ export function createRainbowRings(): RainbowRings {
 
   const geometry = rainbowRingGeometry();
   const meshes: Mesh<RingGeometry, MeshBasicMaterial>[] = [];
+  /**
+   * One {@link Anchor} per ring, and the reason the rings lie flat on the park
+   * again.
+   *
+   * The ring mesh below is still `rotation.x = -Math.PI / 2` — a flat disc in
+   * its parent's XZ plane — and that is now exactly right, because its parent
+   * carries the ground's own frame at the point the ring was born. It used to
+   * go straight into world space, so a 2.35 m rainbow lay in the *world* XZ
+   * plane over ground leaning up to 45.5°: half of it buried, half of it in the
+   * air, on every landing and on every confirmed tap in the outer park.
+   *
+   * It also turns the `RISE` animation from a fault into a freebie. Rising
+   * along world `+Y` drove the ring into the hillside on the way up; rising
+   * along the anchor's **local** `+Y` is the local up by construction, so the
+   * lift below is now a plain `mesh.position.y` and needs to know nothing about
+   * spheres.
+   */
+  const anchors: Anchor[] = [];
   const materials: MeshBasicMaterial[] = [];
   /** Seconds elapsed for each ring, or `LIFETIME` (= finished) when idle. */
   const ages: number[] = [];
-  /** Ground height each ring was born at, so it rises from where you jumped. */
-  const bases: number[] = [];
   /** Peak-opacity multiplier each ring was born with (see `burst`'s `strength`). */
   const strengths: number[] = [];
   let next = 0;
@@ -140,11 +158,14 @@ export function createRainbowRings(): RainbowRings {
     mesh.rotation.x = -Math.PI / 2;
     mesh.visible = false;
     mesh.renderOrder = 4;
-    root.add(mesh);
+    mesh.position.y = GROUND_CLEARANCE;
+    const anchor = new Anchor();
+    anchor.add(mesh);
+    root.add(anchor);
+    anchors.push(anchor);
     meshes.push(mesh);
     materials.push(material);
     ages.push(LIFETIME);
-    bases.push(0);
     strengths.push(1);
   }
 
@@ -155,12 +176,13 @@ export function createRainbowRings(): RainbowRings {
       const index = next;
       next = (next + 1) % POOL_SIZE;
       const mesh = meshes[index];
-      if (!mesh) return;
-      mesh.position.set(x, y + GROUND_CLEARANCE, z);
+      const anchor = anchors[index];
+      if (!mesh || !anchor) return;
+      anchorAt(anchor, x, y, z);
+      mesh.position.y = GROUND_CLEARANCE;
       mesh.scale.setScalar(START_RADIUS);
       mesh.visible = true;
       ages[index] = 0;
-      bases[index] = y + GROUND_CLEARANCE;
       strengths[index] = strength;
       alive += 1;
     },
@@ -187,7 +209,8 @@ export function createRainbowRings(): RainbowRings {
         const t = next_ / LIFETIME;
         const eased = easeOut(t);
         mesh.scale.setScalar(START_RADIUS + (END_RADIUS - START_RADIUS) * eased);
-        mesh.position.y = (bases[i] ?? 0) + RISE * eased;
+        // Along the anchor's local up, which is the ground's up here.
+        mesh.position.y = GROUND_CLEARANCE + RISE * eased;
         // Hold full strength for the first fifth, then fade on a curve — a
         // linear fade reads as the ring being switched off.
         const peak = 0.95 * (strengths[i] ?? 1);
@@ -236,6 +259,13 @@ export interface RainbowSparks {
 
 interface Spark {
   readonly mesh: Mesh;
+  /**
+   * The frame the burst happened in. Every number below — the compass
+   * `direction`, the outward travel, the `SPARK_RISE` arc — is written in this
+   * anchor's local space, so the whole burst is a flat firework on the ground
+   * it was fired from rather than one in the world XZ plane cutting through it.
+   */
+  readonly anchor: Anchor;
   readonly material: MeshBasicMaterial;
   readonly origin: Vector3;
   readonly direction: Vector3;
@@ -264,9 +294,12 @@ export function createRainbowSparks(): RainbowSparks {
     const mesh = decal(new Mesh(geometry, material));
     mesh.visible = false;
     mesh.renderOrder = 5;
-    root.add(mesh);
+    const anchor = new Anchor();
+    anchor.add(mesh);
+    root.add(anchor);
     sparks.push({
       mesh,
+      anchor,
       material,
       origin: new Vector3(),
       direction: new Vector3(),
@@ -287,7 +320,8 @@ export function createRainbowSparks(): RainbowSparks {
         // slot, so two bursts in the same place do not land star-on-star.
         const angle = ((i + next * 0.25) / SPARKS_PER_BURST) * Math.PI * 2;
         if (spark.age >= SPARK_LIFETIME) alive += 1;
-        spark.origin.set(x, y + radius * 0.35, z);
+        anchorAt(spark.anchor, x, y, z);
+        spark.origin.set(0, radius * 0.35, 0);
         spark.direction.set(Math.cos(angle), 0, Math.sin(angle));
         spark.distance = Math.max(0.7, radius) * SPARK_TRAVEL;
         spark.age = 0;
