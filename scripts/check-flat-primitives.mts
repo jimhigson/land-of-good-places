@@ -212,10 +212,83 @@ function normalise(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * **Names that are holding a `y`, so that laundering one through a variable
+ * does not hide it.**
+ *
+ * This was a real hole, found by this check failing to catch a bug its author
+ * had just fixed by hand. `scripts/check-npc-perch.mts` contained:
+ *
+ * ```ts
+ * const headY = rig.head.getWorldPosition(new Vector3()).y;
+ * …
+ * return headY - lowest;   // a floating-head test, wrong by 1/cos(lean)
+ * ```
+ *
+ * `headY - lowest` is two plain identifiers, so the `.y` on both sides that
+ * `Y_DIFFERENCE` looks for is not there — and the check sailed past the exact
+ * defect it exists to find, one that was failing the whole chain at the time.
+ *
+ * So a single-file pass first records every `const x = <expr>.y`, and those
+ * names then count as a `y` for the difference rule. Local and syntactic: it
+ * does not follow a value across a function boundary, so a `y` passed as a
+ * parameter is still invisible. That residue is announced on every run rather
+ * than left for somebody to discover the way this one was.
+ */
+function namesHoldingY(sf: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+
+  /** Does this expression carry a `y` — directly, or through a name, or through Math.min/max? */
+  const carriesY = (n: ts.Node): boolean => {
+    if (isYAccess(n)) return true;
+    if (ts.isIdentifier(n)) return names.has(n.text);
+    // `Math.min(lowest, part.getWorldPosition(v).y)` — the real shape of the
+    // running minimum that hid the bug this pass exists to catch.
+    if (
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      (n.expression.name.text === 'min' || n.expression.name.text === 'max')
+    ) {
+      return n.arguments.some(carriesY);
+    }
+    if (ts.isParenthesizedExpression(n)) return carriesY(n.expression);
+    return false;
+  };
+
+  // A fixed point, because y-ness propagates along a chain of assignments and
+  // the declarations are not necessarily in dependency order.
+  for (let pass = 0; pass < 8; pass += 1) {
+    const before = names.size;
+    const visit = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+        if (carriesY(node.initializer)) names.add(node.name.text);
+      }
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(node.left) &&
+        carriesY(node.right)
+      ) {
+        names.add(node.left.text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    if (names.size === before) break;
+  }
+  return names;
+}
+
 function scan(file: string, source: string): Finding[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.ESNext, true);
   const lines = source.split('\n');
   const found: Finding[] = [];
+  const yNames = namesHoldingY(sf);
+  /** A `.y` access, or a name this file assigned one to. */
+  const holdsY = (n: ts.Node): boolean =>
+    isYAccess(n) || (ts.isIdentifier(n) && yNames.has(n.text));
+  const subjectOf = (n: ts.Node): string =>
+    isYAccess(n) ? normalise(n.expression.getText(sf)) : normalise(n.getText(sf));
 
   const add = (node: ts.Node, rule: RuleId): void => {
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
@@ -256,15 +329,13 @@ function scan(file: string, source: string): Finding[] {
         if (/\.rotation\.x$/.test(lhs)) add(node, 'FLAT_DISC');
       }
 
-      if (op === ts.SyntaxKind.MinusToken && isYAccess(node.left)) {
+      if (op === ts.SyntaxKind.MinusToken && holdsY(node.left)) {
         const rightText = normalise(node.right.getText(sf));
         // 3. Y_OVER_GROUND — the single commonest repair in the inventory.
         if (GROUND.test(rightText)) add(node, 'Y_OVER_GROUND');
         // 2. Y_DIFFERENCE — two different columns differenced along +Y.
-        else if (isYAccess(node.right)) {
-          const a = normalise(node.left.expression.getText(sf));
-          const b = normalise(node.right.expression.getText(sf));
-          if (a !== b) add(node, 'Y_DIFFERENCE');
+        else if (holdsY(node.right)) {
+          if (subjectOf(node.left) !== subjectOf(node.right)) add(node, 'Y_DIFFERENCE');
         }
       }
 
@@ -319,6 +390,16 @@ const ARMING: readonly { rule: RuleId; source: string }[] = [
   { rule: 'HARD_UP', source: 'const up = new Vector3(0, 1, 0);' },
   { rule: 'HARD_UP', source: 'up.set(0, -1, 0);' },
   { rule: 'Y_DIFFERENCE', source: 'const h = rail.y - under.y;' },
+  // The laundered form, which slipped past the first version of this rule and
+  // let a real chain-failing bug through. See `namesHoldingY`.
+  {
+    rule: 'Y_DIFFERENCE',
+    source:
+      'const headY = rig.head.getWorldPosition(v).y;\n' +
+      'let lowest = headY;\n' +
+      'lowest = Math.min(lowest, proxy.getWorldPosition(s).y);\n' +
+      'const d = headY - lowest;',
+  },
   { rule: 'Y_OVER_GROUND', source: 'const h = p.y - terrainHeight(p.x, p.z);' },
   { rule: 'Y_THRESHOLD', source: 'if (character.position.y < -2) fall();' },
   { rule: 'FLAT_DISC', source: 'disc.rotation.x = -Math.PI / 2;' },
