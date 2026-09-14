@@ -174,10 +174,52 @@ further apart — exactly "sparse".
 Worth its own ticket: make counts follow `PARK_BOUNDARY.area` for real, with the
 `NpcSystem` algebra as the worked example of how to get it wrong.
 
+## `check:npc-perch` is red — root-caused, and it is the lean, not the area
+
+`pnpm run check` exits 1 on this branch at `check:npc-perch`:
+*"climbable tree 0 has no foliage to measure."*
+
+**It is red at the branch base too** — `faece133`, exit 1, measured. There it
+does not even reach the assertion: the canonical seed's park throws
+`railD 0.0 (0.0, 125.8) ... snaps to no proven bridge site` during build. On this
+branch the canonical seed *does* build, so the check gets further and fails on a
+real assertion instead of a crash.
+
+**Root cause, measured.** `canopyBandOf` in `scripts/check-npc-perch.mts` pairs
+each climbable tree to its foliage occluder by horizontal distance **< 0.05 m**.
+Not one of the 36 climbable trees has an occluder that close — the gaps run
+**0.33 m to 1.69 m**. That is a flat-ground assumption: `ClimbableTreeSeed.x/z`
+is the tree's **foot**, the occluder is its **canopy**, and on the sphere a tree
+**leans**, so the two are `canopyHeight * d/R` apart horizontally.
+
+Proved by the correlation rather than asserted — if the gap is lean, then
+`gap / (d/R)` should come out as a constant, and it does:
+
+```
+d from centre   gap (m)   implied canopy height = gap / (d/R)
+     52.9        1.012              4.21
+     73.8        1.508              4.50
+     32.5        0.630              4.27
+     83.8        1.691              4.44
+across all 36 trees: min 2.02, median 3.69, max 4.64 m
+```
+
+A tight 2–4.6 m across trees from 32 m to 84 m out, with gaps varying 3x. That
+is a canopy height, so the gap is the lean.
+
+**Not fixed here, deliberately** — this is exactly the "absolute-altitude /
+flat-ground assumption" class another agent is sweeping, and it is CLAUDE.md's
+own "measurement taken on a convenient origin rather than on the thing that gets
+drawn" (the same shape as the swept-bus foot-vs-post bug). Flagging rather than
+fixing so the two sweeps do not collide. The fix is to pair tree to canopy by
+identity, not by a foot-match tolerance — widening the 5 cm would be a stand-off
+number someone has to maintain.
+
 ## State
 
 - `tsc --noEmit` — exit 0. `typecheck:test` — exit 0. `pnpm run build` — exit 0.
-- `pnpm run check` (the ~16 min chain) — **not yet run.**
+- `pnpm run check` — **exit 1 at `check:npc-perch`**, root-caused above, red at
+  base too. Everything before it in the chain passed.
 - `test:procgen` — as tabulated above; branch is red for pre-existing reasons.
 - No camera or altitude code touched (another agent owns that). No collision
   work. No browser page or dev server left open.
