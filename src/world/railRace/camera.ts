@@ -738,8 +738,17 @@ export class RaceCamera {
    *
    * The tangent and the normal come from the **guide** frame, as they always
    * did — see {@link place} for why the smoothed one and not the faithful one.
+   *
+   * **Public, and `check:rail-race` measures in it.** Five of that check's
+   * questions — is the view angled down the track, does it point into the park,
+   * how far does it tilt, does the rider cross the screen rightward — were all
+   * asked by setting a `y` to zero, which projects onto the *world* horizontal.
+   * That is the right plane at the middle of the park and nowhere else: out at
+   * the ring the ground leans, so a rig tilted the intended 20.1° towards its
+   * own track measured **6.6°** against world `+Y` and the check called it flat.
+   * A promise made in a frame has to be read in that frame.
    */
-  private rigBasis(s: number, out: Vector3, along: Vector3, up: Vector3): void {
+  rigBasis(s: number, out: Vector3, along: Vector3, up: Vector3): void {
     const sample = this.route.path.sampleAt(s);
     const offset = riderOffset(this.route);
     const flatX = sample.x + sample.normalX * offset;
