@@ -135,13 +135,54 @@ Baseline 217 → 226.
 **Known residue, stated rather than discovered later**: the pass is local and
 syntactic, so a `y` arriving as a **function parameter** is still invisible.
 
+### 6. Nothing is sized against a park that can move
+
+`PARK_SURFACE_SCALE` is **2.3355** and live, so the walkable boundary is
+135.5 m (lean **38.0°**) and the furthest furniture 157 m (lean **45.5°**). My
+failure messages quoted the 157 m column while calling it "the park edge".
+`RULE_WHY` and the guidance block are now **computed** from
+`GROUND_SPHERE_RADIUS` and `GARDEN_PLAY_RADIUS`, naming both radii. In
+`check:npc-perch`, `TALLEST_CANOPY = 12` is gone: the bound is read off the
+built park (**6.60 m measured**, so the match is tighter as well as
+scale-tracking) and printed every run.
+
+### 7. `check:speech-bubbles` — diagnosed, rig fixed, still red by design
+
+**Speech bubbles are not broken.** `check:speech-bubbles:wide` (same park, same
+code, 1920×1080, 420 s) draws **601** and exits 0.
+
+The portrait run failed because the rig circled the gate at a 7 m radius while
+the crowd moved out with the park: 1442 speaking-frames, nearest speaking child
+**51.4 m** from the camera focus (median 91.6 m) against a 40 m gate, **0**
+within range. Fixed two rig faults — the walk now goes in from the gate to the
+middle of the garden and back (within-40 m goes **0 → 408**), and she stands on
+the ground instead of `y = 0` six metres above it.
+
+**It is still red**, and the residue is not a rig bug: `onScreen` is **0 of
+408**, the speaker's *feet* are off screen too, and a control proves the frustum
+is fine (`isOnScreen` true on **7200 of 7200** frames for the camera's own focus
+and the player). The children that get within 40 m are at the very edge of it,
+and a 390×844 iso viewport shows far less ground than that.
+
+So the remaining question is **player-visible tuning** — `BUBBLE_MAX_DISTANCE`,
+crowd density near the player, or where NPCs wander. A child sees that change,
+so it is Jim's call, not an engineer's. Reported, not acted on.
+
+### 8. Two more rules
+
+`AXIS_ALIGNED_BOX` (**177** sites) and `VERTICAL_RAY` (**4**). The four are the
+right four: `invariants.ts:5437` and `:6415` — both in the merge-blocking suite,
+and `:6415` decides whether the train drives through its own bridge — plus two
+diagnostics. Baseline 226 → **320**, seven rules.
+
 ## Still to do — the decision the Overseer owns
 
 Nothing here forces adoption. **Migrating a subsystem to `Altitude`/`Up` is
 what breaks a lane**, and that is the call to make deliberately:
 
-- Decide whether bridges/railway, exteriors and rides adopt now or after their
-  current work lands, and tell those engineers directly before anything moves.
+- **Decided: hold.** The Overseer has ruled that adoption waits until the three
+  conversion lanes land, and will then hand it over as its own lane with those
+  engineers still resumable. **Nothing has been pushed under them.**
 - The baseline's 217 entries are the migration list. As sites are fixed the
   check prints BASELINE LOOSE and asks for the line to be deleted, so the
   table shrinks to zero as the category closes. That is the progress metric.
