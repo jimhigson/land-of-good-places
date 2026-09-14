@@ -237,9 +237,51 @@ const distToCore = (px: number, pz: number, s: ClaimShape): number =>
  * ribbon can be compared by its bounding box; an arc's cannot, because the
  * box of a bent capsule is mostly ground the capsule does not hold. This
  * measures the claim's own shape instead of a box around it.
+ *
+ * ## Why this one stayed in the chart when the registry moved to the sphere
+ *
+ * **Because it compares a claim against a MESH, and the mesh is still authored
+ * in the chart.** Every other distance in this file compares one claim with
+ * another, and those are the registry's own decisions — they moved to geodesic
+ * arithmetic, and `claimSurface.ts` says why. This one answers a different
+ * question, and answering it in arc metres would compare two different metrics.
+ *
+ * Measured, on the canonical seed, when it was briefly switched over: the road
+ * is drawn **3.89 m wide in chart metres**, and at the kerb's reach of 108.7 m
+ * from the park's centre that is **4.50 m of real ground** — so a vertex lying
+ * exactly on the drawn kerb reads 0.611 m outside an arc-metre claim, and
+ * `check:ground-claims` failed at 0.5155 m on a road that had not moved.
+ *
+ * The check was right and the kernel was right; the mesh is the thing that is
+ * wrong. `Entrance.ts` builds the ribbon from chart coordinates with a constant
+ * chart half-width, so **the drawn road silently widens as it runs outward** —
+ * about 16% at the kerb's reach. That is a real artefact of drawing on the
+ * planet's shadow, it belongs to the road's own lane rather than to the
+ * registry, and it is not something to hide by loosening a tolerance here.
+ *
+ * **So this is a stated, temporary split, not a permanent one.** When the road
+ * (and every other ribbon) is drawn on the sphere — geodesic centreline,
+ * arc-metre width — this must move to `distToCore` with the rest, and the two
+ * metrics become one again. Until then, mixing them would make every drawn-mesh
+ * check disagree with the ground it measures by a margin that grows with radius.
  */
 export const distanceOutside = (px: number, pz: number, s: ClaimShape): number =>
-  distToCore(px, pz, s) - reachOf(s);
+  chartDistToCore(px, pz, s) - reachOf(s);
+
+/**
+ * The chart-space form of {@link distToCore}, for {@link distanceOutside} only.
+ * Plane geometry on purpose — see that function's docblock for the measurement
+ * that says why, and for what has to happen before it can go.
+ */
+const chartDistToCore = (px: number, pz: number, s: ClaimShape): number => {
+  if (s.shape === 'disc') return Math.hypot(px - s.x, pz - s.z);
+  const dx = s.x2 - s.x1;
+  const dz = s.z2 - s.z1;
+  const lenSq = dx * dx + dz * dz;
+  const t =
+    lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - s.x1) * dx + (pz - s.z1) * dz) / lenSq));
+  return Math.hypot(px - (s.x1 + t * dx), pz - (s.z1 + t * dz));
+};
 
 /**
  * Is the shared ground of two overlapping shapes confined to the crossing's
