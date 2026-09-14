@@ -49,7 +49,8 @@ import { buildHeadlessPark } from './park-harness.mts';
 import { CLIMB_PEEK_LIFT, TreeClimbing } from '../src/world/TreeClimbing.ts';
 import { WanderDriver } from '../src/entities/npc/wanderDriver.ts';
 import { GROUND_SPHERE_RADIUS } from '../src/core/constants.ts';
-import { Geo, altitude } from '../src/world/geo/index.ts';
+import { Geo } from '../src/world/geo/index.ts';
+import { terrainHeight } from '../src/world/terrain.ts';
 import type { NpcCharacter } from '../src/entities/npc/NpcCharacter.ts';
 import type { ClimbableTreeSeed, FoliageOccluder } from '../src/world/Scenery.ts';
 import type { FrameContext } from '../src/core/types.ts';
@@ -213,16 +214,38 @@ const TANGENTIAL_TOLERANCE = 0.05;
  * The radial allowance below is `canopyHeight x sin(lean)`, so it needs a bound
  * on how high a canopy sits above the ground. The first version of this fix
  * hard-coded 12 m, and a hard-coded distance is precisely the thing that goes
- * stale when the park is resized — `PARK_SURFACE_SCALE` is 2.3355 today and is
- * exactly the kind of number that moves. So it is read off the built park's own
- * seeds, through `altitude()`, which is a radial height and therefore already
- * right on a leaning world.
+ * stale when the park is resized. So it is read off the built park's own seeds.
+ *
+ * **In the frame `placeOnSphere` actually consumes, which is the whole point.**
+ * An earlier version of this line read
+ * `altitude(Geo.fromWorld(tree.x, tree.canopyTopY, tree.z))` and its comment
+ * claimed that was "a radial height and therefore already right on a leaning
+ * world". It is not, and the claim was the worse half of the mistake — a
+ * sentence promising a frame the code does not have is how the next lane
+ * inherits a false belief.
+ *
+ * The quantity wanted here is the one `placeOnSphere` leans by, and its own
+ * source says what that is: `height = flat.y - terrainHeight(flat.x, flat.z)` —
+ * the authored height above the ground **in the canopy's own column**. That is
+ * a flat-frame number *on purpose*, because it is the input to the transform,
+ * not an output of it. `altitude()` answers a different question: it measures
+ * down the **radial**, which at 78 m out lands in a different column than
+ * `(x, z)` and under-reads. Measured over the 42 climbable trees:
+ *
+ *   max canopyTopY (a bare world y)            5.19 m
+ *   max height above its OWN column            6.81 m   <- what placeOnSphere leans by
+ *   max altitude(Geo.fromWorld(...))           6.39 m   <- what this used to say
+ *
+ * Worth noting which mistake each number is: comparing the 5.19 against the
+ * 6.39 to judge this line is itself comparing a **coordinate** to a **height**,
+ * and they differ because the worst tree stands where the ground is -14.54 m.
+ * All three numbers are different questions; only 6.81 is this one.
  *
  * It is printed on every run, so a park that grows a taller tree shows the
  * allowance growing with it rather than silently widening the match.
  */
 const tallestCanopy = trees.reduce(
-  (tallest, tree) => Math.max(tallest, altitude(Geo.fromWorld(tree.x, tree.canopyTopY, tree.z))),
+  (tallest, tree) => Math.max(tallest, tree.canopyTopY - terrainHeight(tree.x, tree.z)),
   0,
 );
 process.stderr.write(
@@ -236,6 +259,21 @@ process.stderr.write(
  * canopy — which would leave the check green while measuring the wrong tree,
  * this repo's favourite failure. Two seeds cannot share one canopy, so if that
  * ever happens the run fails rather than reporting on a fiction.
+ *
+ * **To arm-test this guard, delete the TANGENTIAL test, not the radial one.**
+ * The distinction is not pedantry and it cost a reviewer a cycle: widening or
+ * removing the **radial** bound alone leaves the check green, because
+ * nearest-tangential matching still picks each tree's own canopy. Only
+ * `if (tangential < nearestTangential)` decides *which* occluder is taken, so
+ * that is the line to break:
+ *
+ *     if (tangential < nearestTangential)  ->  if (true)
+ *
+ * which makes the matcher take whatever it last looked at and produces
+ * "trees 13 and 15 both matched the same foliage at (76.74, 18.81)", exit 1,
+ * on seed 20260728 at the park's authored scale. Loosening the tolerances
+ * instead (tangential 6 m, canopy 400 m) exits **0** — a reproduction that
+ * quietly proves nothing.
  */
 const claimedBy = new Map<FoliageOccluder, number>();
 

@@ -1240,6 +1240,13 @@ function buildTreeline(): Group {
     // old sentence here claimed the opposite and was simply false.
     // What a player sees is a cleared run through the woodland where the road
     // comes over the brow, which is what a road through woodland looks like.
+    // **One owner for where this canopy's centre sits.** It is used twice — to
+    // ask the corridor about the canopy's drawn position, and to place the
+    // canopy itself six lines below — and two copies of one expression kept in
+    // step by hand is this repo's commonest bug by a distance. It was two
+    // copies in the very commit that fixed a variant of the same disease.
+    const canopyCentreY = ground + height + radius * 0.35;
+
     // **Tested where the canopy is DRAWN, not where its trunk stands.**
     //
     // `makeInstanced` puts every instance through `placeOnSphere`, which
@@ -1259,7 +1266,7 @@ function buildTreeline(): Group {
     // same reason and with the same call; its comment has said "at the park's
     // edge that is over a metre sideways" all along. The gate simply never had
     // it.
-    canopyFlat.set(x, ground + height + radius * 0.35, z);
+    canopyFlat.set(x, canopyCentreY, z);
     placeOnSphere(canopyFlat, 0, canopyDrawn, canopySpin);
     if (distanceToEntranceCorridor(canopyDrawn.x, canopyDrawn.z) < radius) continue;
 
@@ -1271,7 +1278,7 @@ function buildTreeline(): Group {
       shade: rng.range(0.8, 1),
     });
     canopies.push({
-      position: new Vector3(x, ground + height + radius * 0.35, z),
+      position: new Vector3(x, canopyCentreY, z),
       scale: new Vector3(radius, radius * rng.range(0.85, 1.15), radius),
       rotationY: rng.range(0, TAU),
       colour: rng.pick(colours),
