@@ -679,3 +679,42 @@ under this branch by design.
   `scratchpad/digest-base` (design + sphere, no step 2, 6f271068), and
   `scratchpad/red-proof`. Remove all three with `git worktree remove` when
   the PR opens.
+
+## Scope grown (14 Sep, Jim via the Overseer): this branch is the whole procgen rework getting ready
+
+Jim: *"when ready it is up to the procgen rework Fable agent to re-incorporate
+this into its branch and get its branch ready so that seeds 0..15 work and
+also the path gen and other park gen has all the improvements it has been
+working on."* Rulings agreed with the Overseer, in this order:
+
+1. **Measure seeds 0..15 first**, on the new base (sphere on `main`,
+   re-merged into design by the Architect), before step 2 is re-based —
+   classify every throw/refusal by producer. Instrument:
+   `scratchpad/seed-inventory.sh` + `_seed-inventory.mts` (build one seed's
+   headless park, print BUILT or THREW with the producer's frame). Needs
+   #584's `readSeed` (seed 0) — cherry-pick its two commits into the
+   measurement worktree. Known before measuring: 1, 12, 14 throw at the rail
+   crossings (`railD 0.0`, degenerate on +Z, reproduces at db1363ce — mine);
+   3, 8, 10 at the train route; `check:arrival-starts` and anything building
+   the default park is red on the base independently — do not read a
+   pre-existing red as a fix that did not work.
+2. Step 2 onto the new base (merge, `scripts/audit-step2-merge.sh`, gates,
+   digests, numbers re-taken under the 220 m sphere / radial up / restored
+   area; **`trestleTreeAt` and `maxTrunkLean` work in bare `y` — the
+   inventory's class; route through `altitudeAt`/`upAt` and re-prove the
+   lean clause red**). PR into design, reviewed by the Architect.
+3. The `railD 0.0` crossing throw (`BRIEF-stage4-pre-crossing-refusal.md`).
+4. Step 3 (`BRIEF-stage3-step3-confront-ladder.md`).
+5. Stage 4 — paths, railway, crossings migrate together; step 4's ladder
+   lands here with its first real customer.
+6. **#584 taken over**: rebase its two commits onto this work, close #584
+   with a comment saying it moved here.
+7. Quality tier only when Jim asks.
+
+**PR shape:** each step its own PR *into* `design/round-robin-generation`,
+reviewed; **one design→main PR at the end is what Jim previews** — one link
+carrying the whole rewrite. Never merged without Jim's sign-off. **The
+Architect is resumable and asked directly** for rulings; the Overseer hears
+only scope changes and things needing Jim. Browser/QA at the end, seeds
+proposed from the 0..15 measurement. Do not start until the Overseer says
+the sphere is on `main`.
