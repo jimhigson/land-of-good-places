@@ -81,6 +81,46 @@ grass it must exceed 0.729 at 157 m and 1.007 at 180 m — a different value at
 every radius — and at that setting it admits real ledges of 0.51–0.58 m
 unchecked. There is no single number in the wrong frame. The docblock says so.
 
+### `Collision.ts` — the absolute top, read at the contact point
+
+**The frame is not the disease, and this is the single most important
+correction in this lane.** `eng/radial-collide` converted this gate wholesale to
+an altitude and it put two procgen invariants at *"0.00 m of standable width"*.
+That was not bad luck. Comparing world `y` against world `y` is **exactly
+right** for a top that genuinely is a constant-`y` plane — a hotel sofa's plate,
+a built deck — and converting those to an altitude or a radius makes them wrong.
+
+The disease is **a single scalar on an extended collider**: one number is right
+where it was sampled and wrong everywhere else along the same collider. Give the
+collider enough numbers to describe what is drawn and the frame question
+dissolves.
+
+So a wall now carries two tops, one per end, read at the `t` that `resolve`
+already computes. Measured, marching a 0.62 m body into the middle of a 10 m
+fence run whose own ground falls 3.92 m along it:
+
+| | reach |
+|---|---|
+| one top | z = 19.18 **and** z = 23.00 — depending only on which end the builder wrote first |
+| two tops | z = 19.18 and z = 19.18 |
+
+One order solid, one a ghost, for the same physical fence. `topHeightFar`
+defaults to `topHeight`, so every existing call site is unchanged bit for bit
+and `test:procgen` parity is **structural rather than hoped for**.
+
+`checkAbsoluteTopSag` is the new boot check, and **correcting my own control on
+it produced the most transferable finding here**: two tops describe a *chord*
+where the ground is a *cap*, the sag is `L²/8R`, and **the dominant term is the
+segment's own length, not the lean**. The same 20 m run sags 0.227 m through the
+middle of the park against 0.248 m at d = 80 m. The lean multiplies it (2.9× at
+the reach, radially); it does not cause it. I had assumed the origin was exempt,
+because every other defect in this lane *is* about the lean, and the control is
+the only reason I found out otherwise.
+
+At a 5 cm tolerance the ceiling is about **9.4 m of segment** anywhere in the
+park, and under 4 m to be safe radially at the rim. `fence.ts` registers
+`STEP` = 2.4 m pieces (3–9 mm out), so two tops is comfortably right for it.
+
 ## The boundary with locomotion, settled — and I had it backwards
 
 `resolveMovement` takes **chart metres**, deliberately, and this is now
@@ -116,20 +156,34 @@ errs towards **more** solid — the safe direction. Below the live defects.
 
 ## Open, in priority order
 
-1. **`Collision.ts`'s absolute band.** Not started as of this writing. The live
-   defect: an outdoor `topIsAbsolute` collider approached from the **inward**
-   side stops being solid at d = 80 m — a child walks through a 1.1 m railway
-   fence. Diagnosis (mine, from reading; not yet measured on a built park): a
-   collider's `topHeight` is a **single scalar for an extended collider whose
-   local ground varies**, so it is right at one place and wrong everywhere else
-   along its own length. The frame is a symptom; the scalar is the disease. The
-   domain type that makes it unrepresentable already exists and is the lead's:
-   `geo/Field.ts`'s `constantOver(chart, value)`, which will not let a 60 m
-   fence claim one height without naming a chart it is constant over — and
-   there is no chart on this planet 60 m across for which that is true (the sag
-   alone is 2.06 m). Converting the gate **at the contact point**
-   (`closestX/closestZ`), never once at the collider's midpoint, is the minimum;
-   a `Field` is the honest answer.
+1. **Nothing in the park has been converted to declare two tops yet.** The
+   mechanism is in and proven; no builder uses it, so the live ghost is still
+   live. The next step is `train/fence.ts` and `train/bridges.ts`, and the
+   reading that matters before touching them:
+
+   `fence.ts` registers an ordinary fence segment with the **default infinite
+   top** (`addWall(a.x, a.z, b.x, b.z, FENCE_HALF_THICKNESS)`, lines 267 and
+   347), and those are always solid. It registers a `topIsAbsolute` wall only
+   where a segment falls under a bridge deck, with top = `deckY -
+   FENCE_SEAM_MARGIN`. **So the reported ghost is the seam wall, not the
+   ordinary fence** — which also means it is the same wall the parapet
+   regression is about, and the two must be fixed together or neither.
+
+   `deckY` comes from `deckSpanForSegment`, which samples three points and takes
+   the **lowest world `y`** as a deliberate conservatism (leave the seam as open
+   as possible). On the sphere that picks the wrong sample: the ground falls at
+   up to 1.02 m per metre, so of two samples the one further out has the lower
+   `y` **and** the greater height above the ground — minimising `y` selects the
+   sample that makes the seam *least* open, the opposite of the intent. Seam
+   reads 5.91 m at crossing (138.9, −82.1) against a walker on the deck at
+   5.05 m. Two tops gives `deckSpanForSegment` somewhere to put both ends
+   instead of choosing between them, which is why the mechanism had to come
+   first.
+
+   `geo/Field.ts`'s `constantOver(chart, value)` is the end state — it will not
+   let a run claim one height without naming a chart it is constant over, and
+   there is no chart on this planet 60 m across for which that is true. Two
+   tops is the cheap form of the same idea, at no per-frame allocation.
 2. **The bridge-parapet regression is still undiagnosed and must be assumed
    live.** `eng/radial-collide` converted this gate and two procgen invariants
    went to *"0.00 m of standable width"* on seeds 11 and 326 — the seam fence
