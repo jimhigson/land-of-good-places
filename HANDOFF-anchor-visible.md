@@ -49,8 +49,35 @@ proven bridge site". Reproduced in the browser on `20260728` on **both** the
 base commit and this branch, so it is not this branch's doing. Seed **11**
 builds and is what every measurement above used.
 
-## Next in this lane
+6. `src/art/effects/dustPuff.ts` — an `Anchor` per slot, **turned to face the
+   way she is running**, so the drift is `(0, DRIFT_UP, -DRIFT_BACK)` in local
+   space and the `scale.y · 0.62` settling squash is along the ground's up.
+7. `src/art/effects/flowerSparkle.ts` — the sparkles get an `Anchor` each; the
+   **flyer cannot have one** (it interpolates between the flower and wherever
+   the player is *this frame*, two different frames), so it asks `upFor` at
+   each end instead. 1.55 m of world `+Y` at the rim is 1.09 m of height and
+   1.11 m sideways — the bloom parked beside her ear.
+8. `src/world/train/puffs.ts` — `upFor` at the funnel, once per puff; the
+   sideways wander is projected into the tangent plane. No `Anchor`: a puff is
+   an instance matrix and outlives the loco that made it.
+9. `src/ui/ActionChips.ts` — the chip's anchor point is lifted along `upFor`.
 
-`rainbowRing.ts`'s sparks and the highlight ring have not been *looked* at yet
-(measured only). Then `flowerSparkle.ts`, `train/puffs.ts`, `dustPuff.ts`,
-`ActionChips.ts`, `interact.ts` — all §3.1 of `RADIAL-INVENTORY.md`.
+Looked at in a browser, on seed 11 at ~143 m out: the tap ring, the hop
+rainbow, the heel dust and the flower pick all render correctly and throw
+nothing. Frames in the scratchpad.
+
+## Next in this lane, and the trap in it
+
+`src/world/interact.ts:254` — `Math.abs(y - zone.y) > ZONE_HEIGHT_TOLERANCE`.
+**Do not fix this one alone.** `src/world/tapSpacing.ts`'s `sameStorey(aY, bY)`
+is the same rule, exported, and consumed by `test/procgen/invariants.ts`'s
+`tapTargetsKeepTheirDistance` as `sameStorey(one.y, two.y)`. Fixing one and not
+the other is this repo's single commonest bug. The honest metric is the
+perpendicular separation, `|(P − Z) · upFor(Z)|`, which collapses to
+`|y − zone.y|` at the park's origin — so make **one** owner take three
+coordinates apiece and move all three call sites, invariant included, in the
+same commit.
+
+Then `src/world/coaster/clearance.ts` and `castleWindows.ts` (§3.3 — the
+identical swept envelope in two files, plus `Coaster.ts:321-329` seating the
+cart flat: three disagreeing models of one thing, to be fixed from one frame).
