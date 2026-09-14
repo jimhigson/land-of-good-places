@@ -20,7 +20,7 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
-import { faceOnGround } from '../world/up';
+import { faceOnGround, footColumn, liftAlongUp, walkHeight } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
@@ -454,6 +454,10 @@ export class Player implements GameSystem {
    * collision pass), which is well inside `JUMP_CLEARANCE_GRACE`.
    */
   private hopClearance = 0;
+
+  /** Scratch for the foot column under her body — see `world/up.ts`'s
+   *  {@link footColumn}. Reused per frame rather than allocated. */
+  private readonly footScratch = new Vector3();
 
   /**
    * How she holds herself while a ride owns her.
@@ -1036,6 +1040,14 @@ export class Player implements GameSystem {
     const following = !this.airborne;
     let reference = following ? this.groundHeight : this.position.y;
     let groundY = reference;
+    // **Ask what is under her feet, not under her body.** A hop runs along the
+    // local up, which out in the park carries her outwards as well as upwards
+    // — 0.91 m across the ground at the rim on an ordinary 1.28 m jump — so at
+    // altitude her `x, z` is not the patch of ground she took off from.
+    // `hopClearance` is last frame's altitude, one frame stale by construction
+    // and already documented as such; on the ground it is 0 and this is the
+    // identity, which is every frame of ordinary walking.
+    const lift = this.hopClearance;
     const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,
       this.velocity.x * dt,
@@ -1044,7 +1056,8 @@ export class Player implements GameSystem {
       this.hopClearance,
       dt,
       (at) => {
-        groundY = this.groundAt(at.x, at.z, reference);
+        footColumn(at.x, at.y, at.z, lift, this.footScratch);
+        groundY = this.groundAt(this.footScratch.x, this.footScratch.z, reference);
         if (following) reference = groundY;
       },
     );
@@ -1091,9 +1104,20 @@ export class Player implements GameSystem {
       }
     }
 
+    // Her altitude above the surface she is on, **measured from the centre of
+    // the planet** rather than along world `+Y`. Both terms are radii from the
+    // same centre, so the sphere's own fall cancels exactly and what is left is
+    // the height a child would feel under her feet. The `y` difference this
+    // replaces over-read by `1 / cos θ` — 1.43x at the rim — so
+    // `FALL_THRESHOLD`'s 0.5 m of forgiveness was spent by 0.5 m of *lateral*
+    // travel out there, and she was declared falling while walking on grass.
+    const groundUp = walkHeight(this.footScratch.x, groundY, this.footScratch.z);
+    let altitude =
+      walkHeight(this.position.x, this.position.y, this.position.z) - groundUp;
+
     // Walk off the edge of a deck — or over one of the shafts inside the big
     // building — and the surface under your feet drops away. Start falling.
-    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+    if (!this.airborne && altitude > FALL_THRESHOLD) {
       this.airborne = true;
       this.verticalVelocity = 0;
     }
@@ -1147,9 +1171,9 @@ export class Player implements GameSystem {
       // "come down"; there is nothing else to press.
       const thrusting = canFly && input.isDown('jump');
       if (thrusting) {
-        const height = this.position.y - groundY;
-        // Ease off into the ceiling instead of stopping dead against it.
-        const headroom = clamp01((this.flyCeiling - height) / FLY_CEILING_EASE);
+        // Real height above her own ground, so the ceiling is the same height
+        // everywhere in the park rather than `cos θ` of it out at the rim.
+        const headroom = clamp01((this.flyCeiling - altitude) / FLY_CEILING_EASE);
         this.verticalVelocity = approachScalar(
           this.verticalVelocity,
           FLY_RISE_SPEED * headroom,
@@ -1158,27 +1182,27 @@ export class Player implements GameSystem {
       } else {
         this.verticalVelocity -= GRAVITY * dt;
       }
-      this.position.y += this.verticalVelocity * dt;
-      if (this.position.y <= groundY) {
-        this.position.y = groundY;
+      altitude += this.verticalVelocity * dt;
+      if (altitude <= 0) {
+        altitude = 0;
         this.verticalVelocity = 0;
         this.airborne = false;
         this.flying = false;
         // And a rainbow on the way back in, so landing is an event too.
         this.spawnHopRing(groundY);
       }
-      hopHeight = this.position.y - groundY;
+      hopHeight = altitude;
       this.wornJetpack?.setThrust(thrusting ? 1 : FLY_IDLE_THRUST);
     } else if (this.airborne) {
       this.wornJetpack?.setThrust(0);
       this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
-      if (this.position.y <= groundY) {
-        this.position.y = groundY;
+      altitude += this.verticalVelocity * dt;
+      if (altitude <= 0) {
+        altitude = 0;
         this.verticalVelocity = 0;
         this.airborne = false;
       }
-      hopHeight = this.position.y - groundY;
+      hopHeight = altitude;
     } else {
       this.wornJetpack?.setThrust(0);
       // Damp onto the ground so walking over the gentle hills isn't jittery.
@@ -1186,8 +1210,26 @@ export class Player implements GameSystem {
       // behind the ground this height lags on a climb, and so how steep a
       // slope the park is allowed to build — see its own note, and the
       // sprint-climb budget in `everyBridgeIsWalkableAndReachable`.
-      this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
+      // Damped in altitude rather than in world `y`, so the half-life means
+      // the same lag behind the surface at every radius. The two agree exactly
+      // at the park's origin.
+      altitude = damp(altitude, 0, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
+      hopHeight = altitude;
     }
+
+    // **The one place the altitude becomes a world position.** She is lifted
+    // off her own foot column along the local up, so a hop is genuinely
+    // perpendicular to the ground she jumped from: `x` and `z` travel outwards
+    // with her and come back as she lands, which is what a jump on a ball does.
+    // Drawn and collided from the same point, by construction — `Player`'s
+    // group takes `position` verbatim.
+    liftAlongUp(
+      this.footScratch.x,
+      groundY,
+      this.footScratch.z,
+      altitude,
+      this.position,
+    );
     this.hopClearance = hopHeight;
     // Next frame's sampling reference: the surface she is on, not the damped
     // height she is drawn at. See `groundHeight`.

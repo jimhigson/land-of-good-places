@@ -34,6 +34,10 @@
  */
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
+import { footColumn, liftAlongUp, walkHeight } from '../src/world/up.ts';
+
+/** Scratch for the foot column, reused across steps. */
+const _foot = /* @__PURE__ */ new Vector3();
 import { damp } from '../src/core/mathUtils.ts';
 import {
   FALL_THRESHOLD,
@@ -236,11 +240,19 @@ export class SimPlayer {
     // surface height to carry, so in both cases the reference stays put and
     // only the last sub-step's answer is used.
     const damped = this.groundReference === 'damped';
+    // Her feet, not her body — `Player.update`'s own rule, and the reason it
+    // is there: a hop runs along the local up, so at altitude her `x, z` is
+    // not the ground she took off from. `hopClearance` is last frame's
+    // altitude, exactly as stale as `Player` documents it to be; on the ground
+    // it is 0 and `footColumn` is the identity.
+    const lift = this.hopClearance;
+    const foot = _foot;
     const following = !this.airborne && !damped;
     let reference = this.airborne || damped ? this.position.y : this.groundHeight;
     let groundY = reference;
     const onStep = (at: Vector3): void => {
-      groundY = this.sampleGround(at.x, at.z, reference);
+      footColumn(at.x, at.y, at.z, lift, foot);
+      groundY = this.sampleGround(foot.x, foot.z, reference);
       if (following) reference = groundY;
     };
 
@@ -297,11 +309,18 @@ export class SimPlayer {
     // The pre-#358 vertical: one sample, at the end of the whole frame's
     // movement, asked from her damped height. This is the control.
     if (!this.groundSubstepping || !this.substepping) {
-      groundY = this.sampleGround(this.position.x, this.position.z, reference);
+      footColumn(this.position.x, this.position.y, this.position.z, lift, foot);
+      groundY = this.sampleGround(foot.x, foot.z, reference);
     }
     this.groundY = groundY;
 
-    if (!this.airborne && this.position.y - groundY > FALL_THRESHOLD) {
+    // Radial altitude, not a `y` difference — `Player.update`'s own form, and
+    // the reason it is there: a `y` difference between her body and the ground
+    // over-reads by `1 / cos θ` and spends `FALL_THRESHOLD` on lateral travel.
+    const groundUp = walkHeight(foot.x, groundY, foot.z);
+    let altitude = walkHeight(this.position.x, this.position.y, this.position.z) - groundUp;
+
+    if (!this.airborne && altitude > FALL_THRESHOLD) {
       this.airborne = true;
       this.verticalVelocity = 0;
     }
@@ -309,17 +328,19 @@ export class SimPlayer {
     let hopHeight = 0;
     if (this.airborne) {
       this.verticalVelocity -= GRAVITY * dt;
-      this.position.y += this.verticalVelocity * dt;
+      altitude += this.verticalVelocity * dt;
       // The landing. Its absence is what made the earlier rig over-count.
-      if (this.position.y <= groundY) {
-        this.position.y = groundY;
+      if (altitude <= 0) {
+        altitude = 0;
         this.verticalVelocity = 0;
         this.airborne = false;
       }
-      hopHeight = this.position.y - groundY;
+      hopHeight = altitude;
     } else {
-      this.position.y = damp(this.position.y, groundY, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
+      altitude = damp(altitude, 0, PLAYER_HEIGHT_DAMP_HALF_LIFE, dt);
+      hopHeight = altitude;
     }
+    liftAlongUp(foot.x, groundY, foot.z, altitude, this.position);
     this.hopClearance = hopHeight;
     this.groundHeight = groundY;
   }

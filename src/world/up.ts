@@ -186,3 +186,59 @@ export function walkHeight(x: number, y: number, z: number): number {
   if (spaceAt(x, z) !== SPACE_GARDEN) return y;
   return planetRadiusAt(x, y, z) - GROUND_SPHERE_RADIUS;
 }
+
+const _footUp = /* @__PURE__ */ new Vector3();
+
+/**
+ * **Where a mover's feet actually are, given where her body is and how high she
+ * is off the ground** — the foot column, for asking what surface is under her.
+ *
+ * A hop runs along the local up, so out in the park it carries a child
+ * *outwards* as well as upwards: 1.28 m of hop at the rim moves her 0.91 m
+ * across the ground. Her position is therefore not over the patch of ground she
+ * took off from, and "what am I standing on?" must be asked at the foot, not at
+ * the body. Sampling at the body instead is what tilts a hop — she would rise
+ * along a line of constant `(x, z)`, which decomposes in her own frame into
+ * `altitude` of height **and `altitude · tan θ` of lurch towards the park's
+ * middle**, a metre and a quarter of sideways at the rim on an ordinary jump.
+ *
+ * Writes into `target`. Indoors the local up is `+Y`, so the foot is directly
+ * under the body and this is the identity in `x` and `z` — which is exactly
+ * what a flat room wants, with no flag to remember.
+ */
+export function footColumn(
+  x: number,
+  y: number,
+  z: number,
+  altitude: number,
+  target = new Vector3(),
+): Vector3 {
+  upFor(x, y, z, _footUp);
+  return target.set(x - _footUp.x * altitude, y - _footUp.y * altitude, z - _footUp.z * altitude);
+}
+
+/**
+ * **A point `altitude` metres above a surface, along the local up** — the
+ * inverse of {@link footColumn}, and the one place a hop's height becomes a
+ * world position.
+ *
+ * `terrain.ts`'s {@link liftFromGround} is the same idea for the *terrain*
+ * specifically; this takes the surface height as an argument because a child
+ * hops off bridge decks, castle floors and the ball pit's lip as well as off
+ * the grass, and the thing she is standing on is whatever `WalkSurfaces`
+ * answered with, not what the terrain function says.
+ */
+export function liftAlongUp(
+  footX: number,
+  surfaceY: number,
+  footZ: number,
+  altitude: number,
+  target = new Vector3(),
+): Vector3 {
+  upFor(footX, surfaceY, footZ, _footUp);
+  return target.set(
+    footX + _footUp.x * altitude,
+    surfaceY + _footUp.y * altitude,
+    footZ + _footUp.z * altitude,
+  );
+}
