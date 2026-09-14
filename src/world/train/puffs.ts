@@ -8,6 +8,7 @@ import {
   Quaternion,
   Vector3,
 } from 'three';
+import { upFor } from '../up';
 
 /**
  * Chuff-chuff: the little clouds out of the funnel.
@@ -22,6 +23,14 @@ import {
  * better than a fixed-size ball popping out of existence would. The colour is
  * driven per instance, from a faint warm grey towards white, which does the
  * rest of the work.
+ *
+ * **Smoke leaves the funnel along the ground's up, not the world's.** There is
+ * no {@link Anchor} here to do it — a puff is an instance matrix, not a child
+ * object, and it goes on drifting long after the loco that made it has moved
+ * on — so `emit` asks `upFor` once, at the funnel, and the puff's whole rise is
+ * along that. Before this the loco leaned with the railway while its smoke went
+ * up world `+Y`, which at the park's rim is 45° off the chimney and reads as
+ * smoke blowing sideways out of the side of the engine.
  */
 
 /** Plenty: at one puff every 1.5 m and a two-second life, a dozen is the peak. */
@@ -47,6 +56,8 @@ export class SmokePuffs {
   private readonly scale = new Vector3();
   private readonly rotation = new Quaternion();
   private readonly colour = new Color();
+  private readonly up = new Vector3(0, 1, 0);
+  private readonly wander = new Vector3();
 
   constructor() {
     this.group.name = 'train-smoke';
@@ -76,13 +87,17 @@ export class SmokePuffs {
     this.next = (this.next + 1) % MAX_PUFFS;
 
     this.positions[index]?.set(x, y, z);
+    // The up at the funnel — the same answer the loco itself is standing on.
+    upFor(x, y, z, this.up);
     // A gentle random sideways wander, so the trail is not a ruler-straight line
-    // of identical balls.
-    this.drift[index]?.set(
-      (Math.random() - 0.5) * 0.5,
-      RISE_SPEED * (0.85 + Math.random() * 0.3),
-      (Math.random() - 0.5) * 0.5,
-    );
+    // of identical balls. Kept in the tangent plane by taking the wander in
+    // world x/z and then removing whatever component of it points along the up,
+    // so a leaning chimney's smoke wanders across the sky rather than into it.
+    this.wander.set((Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5);
+    this.wander.addScaledVector(this.up, -this.wander.dot(this.up));
+    this.drift[index]
+      ?.copy(this.wander)
+      .addScaledVector(this.up, RISE_SPEED * (0.85 + Math.random() * 0.3));
     this.age[index] = 0;
     this.alive[index] = 1;
   }
