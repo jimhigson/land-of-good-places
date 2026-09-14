@@ -132,6 +132,7 @@ you look, never instead**: that screenshot is why.
 | §3.1 `tapMarker.ts:57,61` | `TapMarker.placeAt` owns position-and-lean, through `upFor`, **assigned** rather than pre-multiplied because `moveTo` runs every frame |
 | §3.1 `rainbowRing.ts:140` | the lean moved into the pool's own copy of the geometry, freeing each mesh's quaternion for the ground it was fired on; `RISE` and `GROUND_CLEARANCE` run along that up. `rainbowRingGeometry` itself is untouched — `Highlights.ts` shares it |
 | §3.1 `rainbowRing.ts:290,317` | the star burst's plane and arc lean with the ground at the burst point |
+| bridges (area E) | `train/bridges.ts` + `bridgeStonework.ts` — the §5 row "a whole subsystem that imports no sphere helper at all". **Also owns `invariants.ts:5323`, `:6612` and `:6357-6451`**, because those three clauses cannot be re-derived without the geometry decision being made in the same change. Branch `eng/crossing-bridge` |
 | rides (area C) | `rideFrame` in `sweptRail.ts`, one owner for all three vehicle placements; `cartEnvelopePoint` in `cart.ts` replaces the byte-identical clearance sweeps; the cruiser's castle carve (was 10.55 m underground on seed 326, now +1.09 m). `slide/**` in progress. Branch `eng/rides-radial` |
 | shared helper | `walkHeight` added to `world/up.ts`; `NavGrid` uses it, the collision area needs it for absolute tops |
 | §1 `NavGrid` `MAX_STEP` | `nodeWalkHeight` beside `nodeHeight` — `planetRadiusAt`, not `altitudeAt`, for the reason in correction 3. Every step, level, gap and tie-break comparison moved onto it; `nodeNearestRadius` is the primitive; `lineCost` carries a radius between cells instead of a `y` measured in the previous column. Guarded by `scripts/check-outward-routing.mts`, now in the `check` chain. **See corrections 2 and 3** |
@@ -198,6 +199,59 @@ It is fixed regardless — a test spending 91% of its budget on the planet is on
 retune away from giving wrong answers, and the rings genuinely stand at 157 m —
 but it was never a control that refused, and it should not have been ranked
 against two faults that are wrong on every single tap.
+
+### Correction 6 — the deck-soffit row is misdiagnosed, and §0 is closed but not yet merged
+
+**§0 is closed on `eng/crossing-bridge` (PR #619), not on `feat/sphere-combined`.**
+10 of 10 pool seeds build, up from 3. Until that merges, every other branch
+still dies in `new World`, so the "not measured, the park does not build" notes
+throughout this file become actionable **after the merge**, not now. Re-run
+`railRaceFliesClear` and everything else deferred for that reason then.
+
+The unblocking exposed the damage this file predicted, now countable:
+`test:procgen` went from 279 skipped / 269 passed to **0 skipped / 473 passed**,
+with **81 previously invisible failures** — mostly Rail Race, Sky Cruiser,
+slide, trees and coping stones. `check:npc-perch` now fails for a real reason
+rather than on the crossings throw.
+
+**And the §2.2 deck-soffit row is wrong about the mechanism.** It says
+`new Box3().setFromObject(deckMesh).min.y` is *"an axis-aligned box round a deck
+that leans 15-30°, inflated by roughly `halfDiagonal · sin θ`"*. Read the code:
+
+- `deckMesh` is **not the deck and not the bridge group**. It is a single
+  invisible **marker box** (`bridges.ts:751-769`), `BoxGeometry(halfAcross·2,
+  BRIDGE_DECK_SLAB, ARCH_CLEAR_HALF·2)` with `BRIDGE_DECK_SLAB = 0.05` — five
+  centimetres thick — deliberately placed at the arch's *binding* height
+  (`soffitCrownY − ARCH_CROWN_DIP`) rather than at its crown, with a comment
+  saying the invariants measure off it.
+- It is composed with **`setFromAxisAngle(new Vector3(0, 1, 0), yaw)`** — a yaw
+  about world `+Y` and nothing else. **It does not lean.** So the AABB is exact
+  to within 0.025 m, and there is no `halfDiagonal · sin θ` inflation to find.
+  The row's predicted ~9 m at r = 169.9 does not exist.
+
+So the row is real but for the opposite reason. `bridges.ts` and
+`bridgeStonework.ts` import **zero** sphere helpers (grepped, both files, 0
+hits), so the whole bridge — shell *and* marker — is built in the flat frame.
+Marker and shell agree with each other and both disagree with the leaned world
+they stand in. That is why the measured numbers are **under**-reads fitting
+`need · cos θ` (2.49 against a predicted 2.477 at r = 169.9, 13 mm) rather than
+the over-reads this file predicted: a flat-frame `y` gap is being compared
+against a clearance the train needs along its **local up**.
+
+**Two faults, and they want opposite fixes** — which is why nobody should
+"correct" either until they are separated:
+
+1. the bridge is drawn un-leaned in a leaned world (geometry wrong, visible);
+2. the clause measures a flat gap against a radial need (check reads low).
+
+The honest instrument is the one the bridges engineer is building: from the rail
+head, **along the local radial up**, how far to the real masonry soffit — not to
+the marker.
+
+**The marker is itself a second definition of the soffit, kept in step with the
+masonry by hand**, which is this repo's most expensive recurring bug. Whoever
+converts `bridges.ts` should consider whether the marker should exist at all
+once the shell leans, rather than leaning the marker to match.
 
 ### Correction 5 — about twenty rows are not bugs: a ride is solved flat and drawn leaned, on purpose
 
