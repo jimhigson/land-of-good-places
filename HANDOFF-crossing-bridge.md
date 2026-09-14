@@ -312,3 +312,56 @@ that caught 1 could not catch 2, because they were run on open grass where there
 is no deck to be blind to. A control proves the probe can produce both verdicts;
 it does not prove the probe can see the object. Both are needed, and only the
 second would have caught an 8.87 m headline that was pure fiction.
+
+## CI on #619 — read this before merging
+
+**Correction to an earlier claim of mine: CI *does* run on this PR.** I reported
+"no check runs"; that was `gh`'s `statusCheckRollup` returning empty, not the
+truth. Seven runs, two red.
+
+**The base branch's last CI was 11 September at `36ee9ce4`.** Every commit after
+it — including `faece133`, which broke the park — **never ran CI at all**. That
+is why nothing went red when the park stopped building. At that last measured
+point: `Checks` **success**, `Coplanar faces` **failure**.
+
+### `Checks` — red at `check:npc-perch`, NOT mine
+
+*"climbable tree 0 has no foliage to measure."* Proved by running it on the
+**base branch** with seed 428, which builds there, so no throw is involved:
+**it fails identically**. Pre-existing, introduced between 11 and 14 September by
+the scale work. On the unfixed branch it dies on the crossings throw instead, so
+this PR reveals it rather than causes it.
+
+### `Coplanar faces` — red, and **40 NEW findings that were unmeasurable before**
+
+On the base, `check:coplanar` **dies on the crossings throw at the first seed and
+sweeps nothing** — so its "0 findings" was never a measurement. Same disease as
+`test:procgen`'s 279 skips.
+
+The 40 break down as **27 railRace**, 6 garden, 2 scenery, 2 entrance, 1
+park-train, 1 fountain, 1 anchor-plots. The railRace majority is rail-vs-rail and
+rail-vs-sleeper self-coplanarity — the radial work's meshes, untouched by this
+PR's two constants.
+
+**The honest gap, stated rather than resolved.** Four findings name path/kerb
+meshes:
+
+```
+garden|entrance/entrance-gateway-path|entrance/entrance-road-kerb   seed 131
+garden|garden/path-kerb|garden/path-surface        3.966 m²         seed 326
+garden|fountain/<CylinderGeometry>|garden/path-surface              seed 128
+garden|garden/path-kerb|scenery/stone-walls/<BoxGeometry>           seed 208
+```
+
+Seeds 131, 128 and 208 did not build before this PR, so theirs are newly visible
+by definition. **Seed 326 did build**, and this PR changed its park (6 crossings
+to 5, nearest paving to the arch 24.5 m to ~4 m) — so I **cannot** separate
+"newly visible" from "newly created" there, because the base check cannot run at
+all to be compared against. `LGP_SEED` is not respected by `check:coplanar`, so
+there is no per-seed comparison available either.
+
+What can be said: `path-kerb` vs `path-surface` is a path's own two drawn layers
+(`pathGraph.ts` draws a cream kerb with the sandy surface a few centimetres
+proud), so it is a property of how every path in the park is drawn rather than of
+where this one goes. That is an argument, not a measurement, and it should be
+treated as such.
