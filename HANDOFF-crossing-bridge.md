@@ -119,3 +119,35 @@ are clear of trees and bushes`.
    **5.2 m below ground** for ~30 m of its length.
 4. The 81 newly-visible procgen failures are overwhelmingly Rail Race, Sky
    Cruiser, slide, trees and coping stones — the radial conversion's territory.
+
+## The low bridge soffit: measured, and it is NOT the crossing planner
+
+Asked whether "the train drives into its own bridges" shares my root cause.
+It does not, and `scripts/diag-soffit.mts` separates the two candidates.
+
+The crown solve is **not** on a flat datum — `terrain.ts`'s `terrainHeight`
+already includes the sphere (`#511`), and `bridges.ts` samples it across the
+whole crown footprint. So the candidates are:
+
+- **sag model** — the crown misses the terrain's own fall across its span.
+- **radial-up model** — the deck is placed along **world y** while the train's
+  clearance is measured along the **local up**, which on a 220 m sphere tilts
+  `asin(r/220)` from vertical. Reading = `TRAIN_CLEARANCE_Y * cos(tilt)`.
+
+At the near bridge the two are indistinguishable — 3.560 vs 3.562 — which is
+why that measurement could not settle it. **The far one settles it outright:**
+
+| point | r | measured (checks engineer) | radial-up model | sag model |
+|---|---|---|---|---|
+| (-86.0, 26.0) | 89.8 | 3.69 | 3.560 | 3.562 |
+| **(-99.0, 138.1)** | **169.9** | **2.49** | **2.477** | 3.083 |
+
+The radial-up model is out by **0.013 m**; the sag model by **0.59 m**, 45x
+worse. So the defect is `bridges.ts` building along world y and never having
+been converted to radial up — which matches the inventory's own finding that
+`bridges.ts` imports no sphere helper at all.
+
+**Owner: the radial-up conversion, not the crossing planner.** Same cause as the
+steep-ramp failures above (`every railway crossing has a bridge you can walk to,
+onto and across`), whose arithmetic points the same way on 2 of 4 crossings and
+is not yet fully pinned. Both are `bridges.ts` reasoning in world y.
