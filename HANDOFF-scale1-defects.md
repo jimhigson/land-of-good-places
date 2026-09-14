@@ -160,6 +160,39 @@ create two copies to conflict on merge. **This is a sequencing decision for the
 Overseer**, who has said #620 lands first and `eng/flat-primitives-check` behind
 it — which leaves `check:npc-perch` red on #620 in between.
 
+## `check:hotel` — 19 problems, all one constant, nothing falling
+
+Asked for before anyone changes it. **It is the constant, not a hotel defect.**
+
+`scripts/check-hotel.mts:130` `FLOOR_OF_THE_WORLD = -2`, tested at `:157` as
+`character.position.y < FLOOR_OF_THE_WORLD`. On a sphere the ground itself is
+below −2 m from roughly **33 m** out (measured on four bearings at scale 1), and
+the clause sweeps `npcs.all` — outdoor park children, not only hotel residents.
+
+Each flagged character measured against the ground beneath it:
+
+| group | where | clearance above terrain | what they actually are |
+|---|---|---|---|
+| **8** children | d = 38–55 m | **−0.015 to +0.027 m** | standing on the grass |
+| **11** children | d = 78–83 m | **1.966 to 2.173 m** | **riding in the cat bus** |
+
+The second group is the arriving bus-load. The cluster at (0…6, 78…83) sits on
+`cat-bus-floor-pan` (top y −12.01) and `cat-bus-cushion` (−12.78); ~2 m is the
+height of a bus floor, and the uniformity across 11 children is the tell — a
+genuine fall varies and worsens, a floor does not.
+
+So the check reports **every child aboard the arriving cat bus**, plus eight
+standing on grass, as *"falling through the world"*. Its own docblock cites
+family QA finding all seven hotel residents falling; **that capability is gone**
+— a real fall is now indistinguishable from the crowd.
+
+**The fix shape** is `altitudeAt(x, y, z) < −2` rather than a world `y`, per
+`RADIAL-INVENTORY.md` §2.1 — but note the same trap this PR's review turned up:
+`altitude()` measures down the **radial** and lands in a different column than
+`(x, z)` far out. For "is she on the floor she should be on", the honest
+question is her clearance above the surface beneath her, which for the bus-load
+is the bus, not the terrain. Whoever takes this should decide that deliberately.
+
 ## Remaining 18 on the canonical seed — none mine
 
 Rail Race (duck bars, trestles, sleepers, rings), Sky Cruiser (supports, window,
