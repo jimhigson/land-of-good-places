@@ -58,6 +58,7 @@ export {
   rotateGeoAbout,
   tangentTowards,
 } from './geodesic';
+export { riseBetween, riseBetweenWorld } from './step';
 export {
   altitude,
   dropToGround,
