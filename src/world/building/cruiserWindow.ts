@@ -1,6 +1,7 @@
 import { BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_WALL_THICKNESS } from '../../core/constants';
 import { CART_ENVELOPE } from '../coaster/cart';
 import { BUILDING_BASE_Y, BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
+import { terrainHeight } from '../terrain';
 
 /**
  * **The castle, as the Sky Cruiser's route solver sees it** — and the opening
@@ -195,6 +196,40 @@ export function insideCastleFootprint(x: number, z: number, pad: number): boolea
 /** World y of castle-local y. The facade is never rotated, only translated. */
 export function castleY(localY: number): number {
   return BUILDING_BASE_Y + localY;
+}
+
+/**
+ * **How high above the ground castle-local `localY` actually is** — the number
+ * to carve a route to, and the one {@link castleY} cannot give you any more.
+ *
+ * `castleY` is an absolute world `y`, and that was the same thing as a height
+ * while the park was flat. It is not now, and the castle is the worst place in
+ * the park for the difference: `Building.ts` stands it with `standInPlot`, which
+ * leans it **rigidly about its own centre column**, so the whole building is one
+ * clearance above the ground — while `terrainHeight` under its footprint falls
+ * **14.6 m** from the near wall to the far one.
+ *
+ * So in the flat authoring frame the castle reads as buried at its near edge and
+ * floating at its far one, and only becomes correct once drawn. Anything that
+ * compares a castle `y` against the flat terrain is therefore comparing two
+ * things that are not in the same frame. The Sky Cruiser's profile did exactly
+ * that: it carved its castle span to `castleY(WINDOW_TRACK_Y)` and turned that
+ * into a per-column clearance, which put the ride **2.62 m underground** for
+ * about fourteen metres of its circuit and 13.3 m too high at the other end.
+ *
+ * This is the same split the Rail Race made when its ring stopped being one
+ * absolute `y`: the part that is genuinely constant is the **clearance**, and
+ * that is what a thing standing on a sphere holds.
+ *
+ * The approximation in it, stated so nobody has to rediscover it: the castle's
+ * deck is a plane tangent to the sphere at its centre, and a plane departs from
+ * a sphere by `d² / 2R`. Over this footprint's half-width that is about
+ * **0.32 m** at the corners — two orders of magnitude below the fault it
+ * replaces, and it errs by putting the far corners slightly closer to the ground
+ * than this says.
+ */
+export function castleAltitude(localY: number): number {
+  return BUILDING_BASE_Y - terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z) + localY;
 }
 
 /** Castle-local coordinates of a world point, in the plan. */

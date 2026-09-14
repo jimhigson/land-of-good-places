@@ -1,4 +1,4 @@
-import { Group, PointLight, Vector3 } from 'three';
+import { Group, type Object3D, PointLight, Vector3 } from 'three';
 import { clamp01 } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
@@ -12,6 +12,7 @@ import { distanceToRailCorridor, TRAIN_PLAN } from './plan';
 import { buildTrack, type Track } from './track';
 import { Station } from './station';
 import { RideCamera } from '../../core/RideCamera';
+import { rideFrame } from '../rail/sweptRail';
 import { computeCrossings, type LevelCrossing } from './crossings';
 import { buildRailFence } from './fence';
 import { buildBridges, type Bridge } from './bridges';
@@ -112,6 +113,30 @@ interface Seat {
   readonly car: number;
   readonly index: number;
   taken: 'player' | 'npc' | null;
+}
+
+const _planForward = /* @__PURE__ */ new Vector3();
+const _funnel = /* @__PURE__ */ new Vector3();
+
+/**
+ * **Which way a carriage is pointing, seen from above.**
+ *
+ * `root.rotation.y` used to answer this, and stopped being able to the moment
+ * the carriages began leaning with the railway: three.js decomposes the Euler
+ * out of `tilt * yaw`, so all three components carry a share of both and the
+ * `.y` is neither the lean nor the heading. Three separate places read it — the
+ * rider's facing, the funnel's smoke, and the "is the player under this
+ * carriage's roof" test — and all three would have been quietly wrong by the
+ * lean.
+ *
+ * Taking the object's own forward axis and flattening it into the ground plane
+ * is true whatever the carriage is doing, because it asks the matrix rather
+ * than a cached angle. Models in this park face `+Z` (ASSET_MANIFEST), which is
+ * what `getWorldDirection` returns.
+ */
+function planYawOf(object: Object3D): number {
+  object.getWorldDirection(_planForward);
+  return Math.atan2(_planForward.x, _planForward.z);
 }
 
 export class ParkTrain implements GameSystem, TrainService {
@@ -573,7 +598,16 @@ export class ParkTrain implements GameSystem, TrainService {
       this.route.tangentAt(at, this.tangent);
 
       car.root.position.copy(this.point);
-      car.root.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
+      // **Lean with the sleepers.** `track.ts:123` stands every sleeper through
+      // `placeOnSphere`, so the drawn railway lies on the sphere; the carriages
+      // were left upright on it. Only the orientation needs the map here — a
+      // train runs *on* the ground, so `pointAt` already returns a point at
+      // `terrainHeight` and `placeOnSphere` would move it by zero.
+      //
+      // Pitch stays 0, which is what it has always been: these cars do not tip
+      // with the gradient today, and giving them that is a separate change with
+      // its own look to judge.
+      rideFrame(this.point, Math.atan2(this.tangent.x, this.tangent.z), 0, car.root.quaternion);
 
       // Wheels roll off distance travelled, so they never skate.
       for (const wheel of car.wheels) wheel.rotation.x = this.wheelSpin / 0.2;
@@ -588,14 +622,19 @@ export class ParkTrain implements GameSystem, TrainService {
       this.seatWorld.set(0, fallbackY, 0);
       return;
     }
-    const yaw = car.root.rotation.y;
-    const sin = Math.sin(yaw);
-    const cos = Math.cos(yaw);
-    this.seatWorld.set(
-      car.root.position.x + local.x * cos + local.z * sin,
-      car.root.position.y + CAR_FLOOR_Y + lift,
-      car.root.position.z - local.x * sin + local.z * cos,
-    );
+    // **Ask three.js where the seat is, rather than re-deriving it.**
+    //
+    // This used to hand-roll the carriage's yaw (`local.x * cos + local.z * sin`
+    // …) and add the floor height straight up world `+Y`. Both stopped being
+    // true when the carriages began leaning with the railway: the hand-rolled
+    // rotation is a yaw only, so it cannot express the lean, and `+Y` is not the
+    // carriage floor's up any more. A seat is a fixed point in the carriage, and
+    // `localToWorld` is the transform that already knows where the carriage is —
+    // it is the same "one owner" rule as everywhere else, applied to a matrix
+    // three.js is maintaining for us regardless.
+    car.root.updateMatrixWorld();
+    this.seatWorld.set(local.x, CAR_FLOOR_Y + lift, local.z);
+    car.root.localToWorld(this.seatWorld);
   }
 
   // ------------------------------------------------------------ the player
@@ -612,7 +651,8 @@ export class ParkTrain implements GameSystem, TrainService {
     const local = car?.seats[seat?.index ?? 0];
     if (car && local) {
       this.seatMount = new Group();
-      this.seatMount.position.set(local.x, SEAT_Y - CAR_FLOOR_Y + CAR_FLOOR_Y, local.z);
+      // `SEAT_Y`, plainly. This read `SEAT_Y - CAR_FLOOR_Y + CAR_FLOOR_Y`.
+      this.seatMount.position.set(local.x, SEAT_Y, local.z);
       car.root.add(this.seatMount);
       this.rideView = new RideCamera({ startPitch: -0.05 });
       this.rideView.mountOn(this.seatMount, { x: 0, y: 0.62, z: 0 });
@@ -642,7 +682,7 @@ export class ParkTrain implements GameSystem, TrainService {
         this.seatWorld.x,
         this.seatWorld.y,
         this.seatWorld.z,
-        car ? car.root.rotation.y : 0,
+        car ? planYawOf(car.root) : 0,
       );
 
       // First person: the shared look-around runs while she rides, and a
@@ -716,15 +756,14 @@ export class ParkTrain implements GameSystem, TrainService {
     // --- chuffs and smoke ----------------------------------------------------
     if (this.chuffCarry >= CHUFF_INTERVAL) {
       this.chuffCarry -= CHUFF_INTERVAL;
+      // The funnel tip is a fixed point on the locomotive, so ask the
+      // locomotive where it is now. The hand-rolled yaw this replaces could
+      // only express a turn, never the lean the engine now carries.
       const local = this.locomotive.funnelTip;
-      const yaw = this.locomotive.root.rotation.y;
-      const sin = Math.sin(yaw);
-      const cos = Math.cos(yaw);
-      this.puffs.emit(
-        this.locomotive.root.position.x + local.x * cos + local.z * sin,
-        this.locomotive.root.position.y + local.y,
-        this.locomotive.root.position.z - local.x * sin + local.z * cos,
-      );
+      this.locomotive.root.updateMatrixWorld();
+      _funnel.set(local.x, local.y, local.z);
+      this.locomotive.root.localToWorld(_funnel);
+      this.puffs.emit(_funnel.x, _funnel.y, _funnel.z);
       playChuff(clamp01(this.speed / CRUISE_SPEED));
     }
     this.puffs.update(dt);
@@ -760,7 +799,7 @@ function carriageFloor(carriage: TrainCar): MovingPlatform {
     covers(x: number, z: number): boolean {
       const dx = x - carriage.root.position.x;
       const dz = z - carriage.root.position.z;
-      const yaw = carriage.root.rotation.y;
+      const yaw = planYawOf(carriage.root);
       const sin = Math.sin(yaw);
       const cos = Math.cos(yaw);
       const along = dx * sin + dz * cos;

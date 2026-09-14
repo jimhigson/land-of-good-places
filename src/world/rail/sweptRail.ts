@@ -1,5 +1,6 @@
 import {
   CatmullRomCurve3,
+  Euler,
   Quaternion,
   TubeGeometry,
   Vector3,
@@ -85,6 +86,59 @@ export function drawnOnSphere(sampler: RailSampler): RailSampler {
       return target.applyQuaternion(_leanSpin).normalize();
     },
   };
+}
+
+const _rideTilt = /* @__PURE__ */ new Quaternion();
+const _rideSpin = /* @__PURE__ */ new Quaternion();
+const _rideEuler = /* @__PURE__ */ new Euler();
+
+/**
+ * **How a vehicle sits on a route that is drawn on the sphere** — the
+ * orientation half of {@link drawnOnSphere}, and the one owner of it.
+ *
+ * {@link drawnOnSphere} leans the *track*. Nothing leaned the things that ride
+ * it, and for a long time nothing noticed, because a cart placed at the flat
+ * `route.pointAt` with a plain `rotation.y`/`rotation.x` looks perfectly
+ * sensible in isolation. It is only wrong *relative to its own rails* — and
+ * only once the park stopped being flat.
+ *
+ * Measured on seed 428 before this existed: the Sky Cruiser's cart was
+ * **10.83 m from its own rails** at the worst point of a 213.5 m circuit, and
+ * 3.42 m from them on average. Not a subtle lean; the vehicle was flying beside
+ * the track rather than on it. The same fault seated the Rail Race's rider — who
+ * *is* leaned, by `faceOnGround` inside `Player.setRidePose` — inside a tub that
+ * was not, which swung her arms out through its side.
+ *
+ * **The lean is taken about `flat`'s column, not about where the vehicle ends
+ * up.** That is the whole reason this is a shared function rather than a
+ * `faceOnGround` call: `faceOnGround` reads the object's own position, and a
+ * drawn point has already slid `height · sin(tilt)` outwards from the column
+ * the rails were leaned about. Leaning the cart about *that* column tilts it by
+ * a slightly different angle from the rails under it — a small error, but the
+ * same *kind* of error as the large one this replaces, and invisible in exactly
+ * the way that kind always is. `drawnOnSphere` uses the flat point; so does
+ * this; so the two cannot drift.
+ *
+ * **Safe to call every frame**, and that is not incidental. It writes the
+ * quaternion from scratch from the yaw and pitch it is handed, and never reads
+ * what is already there — the trap `world/up.ts`'s `faceOnGround` docblock
+ * describes at length, where a per-frame pre-multiply decomposes back into
+ * `rotation.x`/`rotation.z` and the tilt compounds until the thing tumbles.
+ *
+ * Position is deliberately **not** this function's business, because the two
+ * kinds of route disagree about it: the coaster and the train solve flat and
+ * must map their point through `placeOnSphere`, while the Rail Race's own
+ * `pointAt` already returns a leaned point and must not be leaned twice.
+ */
+export function rideFrame(
+  flat: Readonly<Vector3>,
+  yaw: number,
+  pitch: number,
+  out: Quaternion,
+): Quaternion {
+  tiltToSphere(flat.x, flat.y, flat.z, _rideTilt);
+  _rideSpin.setFromEuler(_rideEuler.set(pitch, yaw, 0));
+  return out.multiplyQuaternions(_rideTilt, _rideSpin);
 }
 
 /**

@@ -14,10 +14,12 @@ import {
   WINDOW_BELOW_TRACK,
   WINDOW_HALF_WIDTH,
   WINDOW_TRACK_Y,
+  castleAltitude,
   toCastleLocal,
 } from '../building/cruiserWindow';
-import { BUILDING_BASE_Y } from '../building/layout';
-import { CART_ENVELOPE } from './cart';
+import { terrainHeight } from '../terrain';
+import { CART_ENVELOPE, cartEnvelopePoint } from './cart';
+import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
 import { COASTER_PLANS } from './plan';
 import type { CoasterRoute } from './route';
 
@@ -129,7 +131,15 @@ export function openingsFor(route: CoasterRoute): WallOpening[] {
       continue;
     }
     const wall: SideWall = lx > 0 ? 'east' : 'west';
-    const ly = point.y - BUILDING_BASE_Y;
+    // **Castle-local height from a clearance, not from a world `y`.**
+    //
+    // `point.y - BUILDING_BASE_Y` reads a castle-local height off the flat
+    // authoring frame, where the castle is a constant-`y` box and the ground
+    // under it falls 14.6 m. The castle is actually leaned rigidly and holds one
+    // clearance all the way round itself, so the height a point sits at *in the
+    // castle* is its clearance above the ground, minus the castle's own. See
+    // `castleAltitude`, which owns that subtraction.
+    const ly = point.y - terrainHeight(point.x, point.z) - castleAltitude(0);
     if (run && run.wall !== wall) close();
     if (!run) {
       run = { wall, minZ: lz, maxZ: lz, sumZ: lz, sumY: ly, n: 1 };
@@ -191,27 +201,30 @@ export function sweptCartHits(route: CoasterRoute, castleRoot: Object3D): string
   root.updateMatrixWorld(true);
 
   const caster = new Raycaster();
-  const point = new Vector3();
-  const tangent = new Vector3();
   const previous = new Map<string, Vector3>();
   const direction = new Vector3();
   const hits: string[] = [];
   const { from, to } = route.castleSpan;
 
+  // The car as it is drawn, at the castle as it is drawn. The castle is stood
+  // by `standInPlot` → `placeOnSphere` and leans with everything else outdoors;
+  // sweeping a flat-frame car at it compares two different worlds. Shared with
+  // `clearance.ts` through `cartEnvelopePoint` so the two sweeps cannot answer
+  // the same question differently — they were byte-identical copies before.
+  const drawn = drawnOnSphere(route);
+  const frame: RailFrame = {
+    position: new Vector3(),
+    forward: new Vector3(),
+    side: new Vector3(),
+    up: new Vector3(),
+  };
+
   for (let d = from; d <= to; d += RAY_STEP) {
-    route.pointAt(d, point);
-    route.tangentAt(d, tangent);
-    const flat = Math.hypot(tangent.x, tangent.z) || 1;
-    const sideX = -tangent.z / flat;
-    const sideZ = tangent.x / flat;
+    railFrameAt(drawn, d, frame);
     for (const lateral of [-CART_ENVELOPE.halfWidth, CART_ENVELOPE.halfWidth]) {
       for (const rise of [-CART_ENVELOPE.below, CART_ENVELOPE.above]) {
         const key = `${lateral},${rise}`;
-        const here = new Vector3(
-          point.x + sideX * lateral,
-          point.y + rise,
-          point.z + sideZ * lateral,
-        );
+        const here = cartEnvelopePoint(frame, lateral, rise, new Vector3());
         const before = previous.get(key);
         previous.set(key, here);
         if (!before) continue;
@@ -303,6 +316,22 @@ export function checkCastleWindows(
   openings: readonly WallOpening[],
 ): string[] {
   const complaints: string[] = [];
+  // **Deliberately the flat frame, unlike `sweptCartHits` above.**
+  //
+  // This check never touches a mesh. It asks whether the car, in the castle's
+  // own local coordinates, is inside stone that `Shell.ts` cut from
+  // `openingsFor` — and `openingsFor`, this, and `Shell.ts` all work from the
+  // same flat route through the same `toCastleLocal`. That is one frame used
+  // consistently, and converting it would break the agreement rather than fix
+  // it: `toCastleLocal` is a flat-frame map and the castle's lean is a rigid
+  // body transform applied to the whole building afterwards, so it cancels out
+  // of a question asked entirely inside the building.
+  //
+  // `sweptCartHits` is the one that has to lean, because it fires real rays at
+  // real leaned meshes. Two sweeps, two frames, and the difference is which
+  // question is being asked — not an oversight in one of them.
+  const point = new Vector3();
+  const tangent = new Vector3();
 
   if (!route.castleSpan) {
     if (openings.length > 0) {
@@ -397,8 +426,6 @@ export function checkCastleWindows(
 
   // 5. The car itself, against the wall that was built. Every corner of the
   //    envelope, every 10 cm of the pass.
-  const point = new Vector3();
-  const tangent = new Vector3();
   let worstInside: { d: number; lx: number; ly: number; lz: number } | null = null;
   const { from, to } = route.castleSpan;
   for (let d = from; d <= to; d += ENVELOPE_STEP) {
@@ -411,7 +438,8 @@ export function checkCastleWindows(
     for (const lateral of [-CART_ENVELOPE.halfWidth, CART_ENVELOPE.halfWidth]) {
       for (const rise of [-CART_ENVELOPE.below, CART_ENVELOPE.above]) {
         const { lx, lz } = toCastleLocal(point.x + sideX * lateral, point.z + sideZ * lateral);
-        const ly = point.y + rise - BUILDING_BASE_Y;
+        // The same conversion as `openingsFor` — see the note there.
+        const ly = point.y + rise - terrainHeight(point.x, point.z) - castleAltitude(0);
         if (castleSolidAt(lx, ly, lz, openings)) {
           worstInside ??= { d, lx, ly, lz };
         }

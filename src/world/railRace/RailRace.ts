@@ -27,6 +27,7 @@ import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
+import { rideFrame } from '../rail/sweptRail';
 import { createSparks, type Sparks } from './sparks';
 import type { RaceLevel } from './hazards';
 import {
@@ -146,6 +147,10 @@ const PRESSING_POSE_THRESHOLD = 0.15;
 
 /** Nobody is racing, so nobody turns — see `faceTurn`. */
 const NO_FACE_TURN: FaceTurn = { body: 0, head: 0 };
+
+/** Scratch for the cart's own up and across, used to seat the rider in it. */
+const SEAT_LIFT = /* @__PURE__ */ new Vector3();
+const SEAT_ACROSS = /* @__PURE__ */ new Vector3();
 
 /**
  * **The one owner of "this rider is having a bad time."**
@@ -297,6 +302,14 @@ interface Cart {
    * {@link SAD_TURN_HALF_LIFE}.
    */
   sad: number;
+  /**
+   * The cart's heading. Read this, never `group.rotation.y` — once the cart's
+   * quaternion carries a lean, the Euler three.js decomposes out of it mixes
+   * the lean, the yaw and the pitch, and its `.y` is none of the three.
+   */
+  yaw: number;
+  /** The cart's pitch with the hill, for the same reason as {@link yaw}. */
+  pitch: number;
 }
 
 /**
@@ -376,6 +389,8 @@ export class RailRace implements GameSystem {
   private readonly rng = new Rng(0x7a11ed);
   private readonly point = new Vector3();
   private readonly tangent = new Vector3();
+  /** The unleaned twin of {@link point}: the column a cart's lean is taken about. */
+  private readonly flatPoint = new Vector3();
 
   private player: Player | null = null;
   /** Cached off `FrameContext` every `update()`, so `requestBoard`/`arrive` — which
@@ -500,7 +515,7 @@ export class RailRace implements GameSystem {
       // No scale here. A cart is sized by the ring it is currently on, and
       // only by `setActiveRing` — see that method for the bug this fixes.
       this.group.add(group);
-      this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid, sad: 0 });
+      this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid, sad: 0, yaw: 0, pitch: 0 });
     });
 
     const playerCart = createCart(LANE_COLOURS[PLAYER_LANE] ?? PALETTE.markerMint);
@@ -513,6 +528,8 @@ export class RailRace implements GameSystem {
       isPlayer: true,
       kid: null,
       sad: 0,
+      yaw: 0,
+      pitch: 0,
     });
   }
 
@@ -930,16 +947,43 @@ export class RailRace implements GameSystem {
     return faceTurnTowardsCamera(cartYaw, at, view.camera.position, sadness);
   }
 
+  /**
+   * **The tub leans with the ring, because the child in it already does.**
+   *
+   * `route.pointAt` has leaned its point onto the sphere since the ring was
+   * converted, so the carts were already in the right *place*. Their
+   * orientation was a plain Euler yaw and pitch, so they stayed bolt upright
+   * over a ring that runs 58-110 m out and leans 15-30 degrees.
+   *
+   * That is what reopened Jim's 7 August report. `Player.setRidePose` ends in
+   * `faceOnGround`, so the **rider** is stood on the local up; the tub she is
+   * sitting in was not, and the difference swung her arms out through its side
+   * — measured at **0.330 m** through, against a historical worst of 0.023 m.
+   * The check's own message sends a reader to `BONK_SWAY` and `duckPose.ts`,
+   * which is the wrong place: no pose value in this game is an order of
+   * magnitude out. **Do not widen the cart.**
+   *
+   * `rideFrame` takes its lean about `flatPointAt`'s column rather than the
+   * leaned point's, so the cart leans by the same amount as the rails under it
+   * rather than by very nearly that amount. It writes the quaternion from
+   * scratch, so this is safe to call every frame — an Euler assignment followed
+   * by a pre-multiplied tilt is the compounding trap that had the player slowly
+   * tumbling, and `world/up.ts` has the numbers.
+   */
   private placeCarts(): void {
     const route = this.activeRing.route;
     for (const cart of this.carts) {
       const at = route.wrap(route.startDistance + cart.rider.travelled);
       route.pointAt(cart.rider.lane, at, this.point);
       route.tangentAt(cart.rider.lane, at, this.tangent);
+      route.flatPointAt(cart.rider.lane, at, this.flatPoint);
       cart.group.position.copy(this.point);
-      cart.group.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
+      const yaw = Math.atan2(this.tangent.x, this.tangent.z);
       // Pitch with the hill it is on — the whole point of the undulation.
-      cart.group.rotation.x = -Math.asin(Math.max(-0.6, Math.min(0.6, this.tangent.y)));
+      const pitch = -Math.asin(Math.max(-0.6, Math.min(0.6, this.tangent.y)));
+      rideFrame(this.flatPoint, yaw, pitch, cart.group.quaternion);
+      cart.yaw = yaw;
+      cart.pitch = pitch;
     }
   }
 
@@ -1006,7 +1050,7 @@ export class RailRace implements GameSystem {
       // face is the one a watching child reads the rule off, so it is no more
       // use in profile than the player's is. `kid.root` is a child of the cart
       // group, so this local yaw simply adds to the cart's own.
-      const turn = this.faceTurn(cart.group.rotation.y, cart.group.position, cart.sad);
+      const turn = this.faceTurn(cart.yaw, cart.group.position, cart.sad);
       kid.root.rotation.y = turn.body;
       kid.head.rotation.y = turn.head;
       // Seated, always — she is aboard a cart whether or not she is ducking.
@@ -1106,18 +1150,35 @@ export class RailRace implements GameSystem {
     // Round towards the camera far enough for her face to be worth painting —
     // see `FACE_TURN_MAX`. Most of it is the body's; the head takes the rest,
     // and is set below because `setRidePose` only owns the root.
-    const turn = this.faceTurn(cart.rotation.y, cart.position, this.me.sad);
+    const cartYaw = this.me.yaw;
+    const turn = this.faceTurn(cartYaw, cart.position, this.me.sad);
     this.player.model.head.rotation.y = turn.head;
+    // **Seat her with the cart's own axes, not the world's.**
+    //
+    // The lift used to be `cart.position.y + SEAT_HEIGHT * rideScale` and the
+    // bonk sway `cart.position.x + wobble` — straight up world `+Y` and
+    // straight along world `+X`. On a flat park those are the tub's own up and
+    // across; on a ring that leans 15-30 degrees they are neither, so she was
+    // lifted out of the seat towards the park's centre and shaken sideways
+    // along an axis the cart does not have. Combined with a tub that did not
+    // lean at all, that is the 0.330 m her arm reached through the side.
+    //
+    // `SEAT_LIFT`/`SEAT_ACROSS` are the cart's local +Y and +X, turned by
+    // whatever `placeCarts` just gave it, so both stay true wherever on the
+    // ring she is.
+    const up = SEAT_LIFT.set(0, 1, 0).applyQuaternion(cart.quaternion);
+    const across = SEAT_ACROSS.set(1, 0, 0).applyQuaternion(cart.quaternion);
+    const lift = SEAT_HEIGHT * rideScale;
     this.player.setRidePose(
-      cart.position.x + wobble,
-      cart.position.y + SEAT_HEIGHT * rideScale,
-      cart.position.z,
-      cart.rotation.y + turn.body,
+      cart.position.x + up.x * lift + across.x * wobble,
+      cart.position.y + up.y * lift + across.y * wobble,
+      cart.position.z + up.z * lift + across.z * wobble,
+      cartYaw + turn.body,
       // Rivals get this for free — `kid.root` is a child of the same group
       // `placeCarts()` pitches — but the player's own model is positioned
       // independently every frame, so it never inherited the cart's tilt on
       // the ring's hills until `setRidePose` grew a pitch parameter to carry it.
-      cart.rotation.x,
+      this.me.pitch,
     );
   }
 

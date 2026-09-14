@@ -1,3 +1,5 @@
+import { Vector3 } from 'three';
+
 /**
  * **The Sky Cruiser's car, as numbers, in exactly one place.**
  *
@@ -50,3 +52,48 @@ export const CART_ENVELOPE = {
   above: CART_EYE_HEIGHT,
   below: CART_TIE_DROP,
 } as const;
+
+/**
+ * **A point on the car's envelope, in the frame the ride is actually drawn in.**
+ *
+ * Two files swept this box against real geometry — `clearance.ts` for the whole
+ * park and `castleWindows.ts` for the castle it threads — with the **same
+ * expression written out twice**:
+ *
+ * ```ts
+ * const sideX = -tangent.z / flat;  const sideZ = tangent.x / flat;
+ * new Vector3(point.x + sideX * lateral, point.y + rise, point.z + sideZ * lateral)
+ * ```
+ *
+ * Byte-identical, and wrong in the same way in both: it builds the car in the
+ * **flat** authoring frame — sideways in the world XZ plane, `rise` straight up
+ * world `+Y` — and then casts it at meshes that have been leaned onto the
+ * sphere. Two frames, one comparison. That is why `check:cruiser-clearance`
+ * reported the cruiser passing through `castle-wall-lower`, the courtyard
+ * floor, the roof deck and bare `terrain` on seed 428: the car it was sweeping
+ * was not the car that gets drawn, and by the far side of the loop the two were
+ * metres apart.
+ *
+ * Taking `frame` rather than a route and a distance is deliberate. `railFrameAt`
+ * is already the park's one owner of "which way is sideways on a rail", it is
+ * what the ties are placed with, and it is built from the **drawn** sampler — so
+ * an envelope built on it is square to the rails a child can see, by
+ * construction rather than by agreement. Wrap the route in `drawnOnSphere`
+ * once, keep one `RailFrame`, and call this for each corner.
+ *
+ * The `side` this returns is the opposite hand from the expression it replaces
+ * (`railSide` is `up × along`). That changes nothing either caller can observe,
+ * because both sweep a cross-section symmetric about the centre line — it
+ * relabels which corner is which, not which points are visited.
+ */
+export function cartEnvelopePoint(
+  frame: { readonly position: Vector3; readonly side: Vector3; readonly up: Vector3 },
+  lateral: number,
+  rise: number,
+  target: Vector3,
+): Vector3 {
+  return target
+    .copy(frame.position)
+    .addScaledVector(frame.side, lateral)
+    .addScaledVector(frame.up, rise);
+}
