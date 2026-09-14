@@ -151,3 +151,71 @@ been converted to radial up — which matches the inventory's own finding that
 steep-ramp failures above (`every railway crossing has a bridge you can walk to,
 onto and across`), whose arithmetic points the same way on 2 of 4 crossings and
 is not yet fully pinned. Both are `bridges.ts` reasoning in world y.
+
+## Bridges to radial up — measurement first, and I was wrong twice on the way
+
+**Read this before trusting any earlier number in this file about clearance.**
+
+### Correction 1 — my `need · cos θ` fit was a fit, not a mechanism
+
+It predicted the checks engineer's 2.49 m at r=169.9 to 13 mm, which is why it
+was believed. The lead then killed the rival candidate from the *code* rather
+than by fitting: `deckMesh` (`bridges.ts:751-769`) is a 0.05 m invisible marker
+composed with `setFromAxisAngle(Vector3(0,1,0), yaw)` — **a yaw about world +Y
+and nothing else, so it never leans** — and there is therefore no
+`halfDiagonal · sin θ` AABB inflation anywhere. Good: but a surviving fit is
+still a fit.
+
+### Correction 2 — my first instrument discarded the evidence
+
+`diag-clearance.mts` initially required **both** rays to hit before counting a
+point. That silently drops exactly the points where the two disagree most. Fixed
+to track A and B independently.
+
+### Correction 3 — and then its denominator was wrong
+
+Sweeping the whole loop, B read "SHORT" at 3.757 / 3.628 m. Those points are
+**not under a bridge deck** — the local-up ray was catching ramp undersides and
+abutment faces, which is not a train-clearance question. On the honest
+denominator (track points a bridge's own `deckCovers` claims), **B clears 3.900
+on every seed measured**: 5.151 (seed 11), 4.381 (canonical), 5.072 (seed 326).
+
+**So I do not reproduce "the train drives into its own bridges" at any point
+genuinely under a deck.** The reported 2.49 at (-99.0, 138.1) is at no crossing
+on seed 11 and may be the same artefact. That wants re-measuring before anyone
+acts on it.
+
+### What IS proven, and it is a different and better finding
+
+| seed | track points under a deck | hit by world-+Y ray | hit by local-up ray |
+|---|---|---|---|
+| 11 | 10 | **10 (100%)** | 6 (60%) |
+| canonical | 25 | **25 (100%)** | 11 (44%) |
+| 326 | 25 | **25 (100%)** | 11 (44%) |
+
+From a point standing directly under the deck, a ray along the **local up**
+leaves the bridge entirely 40-56% of the time. A bridge that leaned with the
+ground would be hit ~100% by that ray. **The bridge is built flat in a leaned
+world** — proven three ways now, independently: this geometry, the lead's grep
+(`bridges.ts` and `bridgeStonework.ts` import zero sphere helpers), and the
+marker's world-`+Y`-only rotation.
+
+That is visible to a child — a flat bridge sitting in tilted ground — and it is
+the fix worth making. The clearance clause is a second, smaller fault on top.
+
+### Scope of the conversion (NOT done — this is the next piece of work)
+
+- `bridges.ts` (1567 lines) + `bridgeStonework.ts` (450) built in the flat frame.
+- Lands in **one commit** with `invariants.ts:5323`, `:6612` and `:6357-6451`,
+  which the lead has assigned to this area — geometry and clause are a pair and
+  either alone turns the other red.
+- Read `up.ts`'s `standHeight` (on `eng/radial-collide`) rather than `walkHeight`
+  for any deck-to-deck or deck-to-fence comparison: `walkHeight` is a radius and
+  cancels the planet only within one column, and two points 1.3 m apart at 90 m
+  out differ by 0.54 m of planet. Guard the `-Infinity` sentinel.
+- Consider **deleting** `deckMesh` rather than leaning it: it is a second
+  definition of the soffit kept in step with the masonry by hand, and its own
+  comment ("the invariants measure the built clearance off this box") is the
+  promise CLAUDE.md says is not a mechanism.
+- Read the rides engineer's "solve flat, draw leaned" (`drawnOnSphere`) before
+  choosing how the shell leans — it may be the cheaper architecture here too.
