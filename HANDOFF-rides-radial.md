@@ -166,11 +166,51 @@ By CLAUDE.md's own rule these are generator bugs — a generator that cannot
 backtrack into a good layout for seed 11 is the thing to fix, not the frame
 correction that revealed it.
 
-## Nothing in this branch has been seen in a browser
+## Seen in a browser, on seed 326, port 5491
 
-I had no browser. Every number here is a headless measurement. CLAUDE.md is
-explicit that this is a stop sign rather than a footnote, so it is the first
-line of the status rather than the last.
+**The Sky Cruiser rides on its rails — confirmed by eye.** First-person from the
+cart, the two rails converge symmetrically ahead with the ties square across
+them and the cart's nose at the bottom of frame. That is what a cart sitting on
+its own track looks like; at 9-10 m off, the rails would not have been in shot.
+`/private/tmp/qa-sky-cruiser-on-rails.jpeg`.
+
+**The Rail Race camera is badly broken, and it is child-visible.** Booted
+`/rail-race`, Level 1, seed 326: the race runs, the standings and lap counter are
+correct — and **the camera is inside the hillside**. The screen is a wall of dark
+green with the rider and all four lanes hidden behind terrain.
+`/private/tmp/qa-rail-race-cart.jpeg`. This is the unconverted flat rig on a ring
+that leans, and it is the same fault `check:rail-race` reports as *"the rider
+sits NaN% across the picture"*.
+
+### The rig conversion works, and needs one more thing before it can land
+
+I converted it to judge it (rider point, `out`/`along`, the rise and
+`camera.up`, one `tiltToSphere` at the rider) and looked:
+**`/private/tmp/qa-rail-race-AFTER-rig-leaned.jpeg`** — the camera comes out of
+the hill, all four lanes run left to right, the rider sits left of centre exactly
+as `RIDER_SCREEN_X` asks, and the park is the backdrop. Night and day.
+
+**But it is not one pass, so I reverted it** (Overseer's ruling was to leave the
+rig alone, and this is why that ruling was right even though the current state is
+broken). `raceCameraNeverRunsBackwards` goes red with **real numbers, not
+`NaN`s**:
+
+```
+the race camera falls to -12.194 m of camera per metre of rider at 1098.5 m
+from the arch ... (167 of 10578 probes actually run backwards), under the 0.05
+floor — with a 116.9 m stand-off ...
+```
+
+A **116.9 m stand-off** where the rig should be about 30. `this.out` is a
+rotation and so preserves length; what does not survive is
+`RaceCamera.measureZoomCeiling`, which solves the ring's carrying capacity in the
+**flat** frame and is then applied to a leaned rig. So the next pass is: convert
+the zoom ceiling with the rig, in the same change, and re-judge in a browser.
+1.6% of probes, all at the hairpins.
+
+**Recommendation:** this deserves its own ticket. The ride is currently
+unplayable-looking on seed 326, the fix is understood, and it is one more file
+(`measureZoomCeiling`) plus a browser pass.
 
 ## The slide — assessed, untouched, and the biggest thing left
 
