@@ -95,6 +95,44 @@ error does **not** occur — so these cannot rot):
 on its first run; they now carry `// flat-ok:` with a reason. The hatch worked
 on its author first, which is the right first customer.
 
+### 4. `check:npc-perch` was RED on the base, and both faults were my category
+
+**Pre-existing**: `pnpm run check:npc-perch` exits 1 on `90e62c5b` with nothing
+of mine applied (verified in a clean worktree at that sha). It is reached from
+`check:crowd`, so the **whole `check` chain was red** on `feat/sphere-combined`.
+
+- **Fault 1** — foliage matched to its seed by a flat 0.05 m plan distance.
+  Measured: tree 0's nearest occluder is **1.965 m radially outward, 0.003 m
+  tangentially**, at 32.6° of lean — i.e. `3.64 m of canopy height × sin(32.6°)`.
+  The tree is correct; the measurement was flat. Fixed by decomposing against
+  the seed's own bearing, tangential tolerance **unchanged** at 0.05 m.
+- **Fault 2**, hidden behind fault 1 and only visible once it was fixed:
+  `headY - lowest`, the body's length projected onto the world vertical. At
+  tree 45 (179.2 m, lean 54.5°, cos 0.580) that reads **0.64 m** against a
+  0.9 m requirement; along her own up it is **1.07 m**. She was never a
+  floating head.
+- The radial allowance is the only loosening, so a **uniqueness guard** fails
+  the run if two seeds ever claim one canopy. Arm-tested: loosening the
+  tolerances alone does *not* trip it (nearest-tangential matching stays
+  correct), so it was armed with a direct mutation — recorded because a
+  reproduction that quietly stops reproducing is how a check rots.
+
+### 5. The check missed that bug, and that hole is now closed
+
+`Y_DIFFERENCE` required a `.y` on both sides, so `headY - lowest` — two plain
+identifiers — was invisible, **while it was red in CI**. A rule that cannot see
+the defect sitting in its own repository is the exact fault this lane exists to
+delete. There is now a fixed-point pass over names holding a `y`
+(`const x = e.y`, `let y = x`, `x = Math.min(x, e.y)`).
+
+Proof on `90e62c5b`'s own copy: before, 1 hit (line 192); after, 2 hits
+including **line 236 `headY - lowest`**. It surfaced 9 more pre-existing sites
+(Y_DIFFERENCE 59 → 66), one of them in the merge-blocking `invariants.ts`.
+Baseline 217 → 226.
+
+**Known residue, stated rather than discovered later**: the pass is local and
+syntactic, so a `y` arriving as a **function parameter** is still invisible.
+
 ## Still to do — the decision the Overseer owns
 
 Nothing here forces adoption. **Migrating a subsystem to `Altitude`/`Up` is
