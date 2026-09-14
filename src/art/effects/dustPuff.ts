@@ -1,7 +1,8 @@
-import { Group, Mesh, MeshBasicMaterial, SphereGeometry } from 'three';
+import { Group, Mesh, MeshBasicMaterial, Quaternion, SphereGeometry, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { clamp01, smoothstep } from '../../core/mathUtils';
 import { decal } from '../style/materials';
+import { tiltFor } from '../../world/up';
 
 /**
  * Little puffs of dust off the player's heels while she runs.
@@ -74,11 +75,15 @@ interface Puff {
   readonly mesh: Mesh;
   readonly material: MeshBasicMaterial;
   /** Where it was dropped, and which way it drifts. Reused, never replaced. */
-  originX: number;
-  originY: number;
-  originZ: number;
-  backX: number;
-  backZ: number;
+  readonly origin: Vector3;
+  /**
+   * Behind the runner, **on the ground she is running on** — the caller's
+   * (`backX`, `backZ`) leaned onto the local frame, so it stays a horizontal
+   * direction instead of cutting into the hillside or lifting off it.
+   */
+  readonly back: Vector3;
+  /** Which way is up where it was dropped: the drift axis and the squash axis. */
+  readonly up: Vector3;
   /** Seconds lived, or `LIFETIME` when the slot is idle. */
   age: number;
 }
@@ -110,17 +115,16 @@ export function createDustPuffs(): DustPuffs {
     puffs.push({
       mesh,
       material,
-      originX: 0,
-      originY: 0,
-      originZ: 0,
-      backX: 0,
-      backZ: 0,
+      origin: new Vector3(),
+      back: new Vector3(),
+      up: new Vector3(0, 1, 0),
       age: LIFETIME,
     });
   }
 
   let next = 0;
   let alive = 0;
+  const _tilt = new Quaternion();
 
   function puff(x: number, y: number, z: number, backX: number, backZ: number): void {
     const slot = puffs[next % puffs.length];
@@ -128,13 +132,18 @@ export function createDustPuffs(): DustPuffs {
     if (!slot) return;
     if (slot.age >= LIFETIME) alive += 1;
 
-    slot.originX = x;
-    slot.originY = y;
-    slot.originZ = z;
-    slot.backX = backX;
-    slot.backZ = backZ;
+    // Everything about a puff — which way it drifts, which way it settles, and
+    // which axis it is squashed on — is written in the frame of the ground it
+    // was kicked off, and outdoors that frame leans by where she is running.
+    const tilt = tiltFor(x, y, z, _tilt);
+    slot.up.set(0, 1, 0).applyQuaternion(tilt);
+    slot.origin.set(x, y, z);
+    slot.back.set(backX, 0, backZ).applyQuaternion(tilt);
     slot.age = 0;
     slot.mesh.position.set(x, y, z);
+    // The blob is squashed on its own Y so it reads as dust settling on the
+    // ground; lean the mesh or the squash flattens it against the wrong plane.
+    slot.mesh.quaternion.copy(tilt);
     slot.mesh.scale.set(START_SCALE, START_SCALE * 0.62, START_SCALE);
     slot.mesh.visible = true;
     slot.material.opacity = 0.75;
@@ -156,11 +165,10 @@ export function createDustPuffs(): DustPuffs {
       // Eased so it leaps away from her heel and then loiters, which is what
       // dust actually does — most of the travel is in the first third.
       const ease = smoothstep(0, 1, t);
-      slot.mesh.position.set(
-        slot.originX + slot.backX * DRIFT_BACK * ease,
-        slot.originY + DRIFT_UP * ease,
-        slot.originZ + slot.backZ * DRIFT_BACK * ease,
-      );
+      slot.mesh.position
+        .copy(slot.origin)
+        .addScaledVector(slot.back, DRIFT_BACK * ease)
+        .addScaledVector(slot.up, DRIFT_UP * ease);
 
       const scale = START_SCALE + (END_SCALE - START_SCALE) * ease;
       slot.mesh.scale.set(scale, scale * 0.62, scale);

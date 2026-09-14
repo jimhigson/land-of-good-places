@@ -8,6 +8,7 @@ import {
   Quaternion,
   Vector3,
 } from 'three';
+import { tiltFor } from '../up';
 
 /**
  * Chuff-chuff: the little clouds out of the funnel.
@@ -46,6 +47,7 @@ export class SmokePuffs {
   private readonly matrix = new Matrix4();
   private readonly scale = new Vector3();
   private readonly rotation = new Quaternion();
+  private readonly tilt = new Quaternion();
   private readonly colour = new Color();
 
   constructor() {
@@ -70,19 +72,29 @@ export class SmokePuffs {
     this.hideAll();
   }
 
-  /** A new puff at the top of the funnel. */
+  /**
+   * A new puff at the top of the funnel.
+   *
+   * "Up" here is the up at the funnel, not world `+Y`. Smoke that leaves the
+   * chimney along `+Y` out in the park is leaving it at up to 45° to the
+   * locomotive, which reads as smoke that does not come out of the top — and
+   * then trails sideways instead of straight back.
+   */
   emit(x: number, y: number, z: number): void {
     const index = this.next;
     this.next = (this.next + 1) % MAX_PUFFS;
 
     this.positions[index]?.set(x, y, z);
     // A gentle random sideways wander, so the trail is not a ruler-straight line
-    // of identical balls.
-    this.drift[index]?.set(
-      (Math.random() - 0.5) * 0.5,
-      RISE_SPEED * (0.85 + Math.random() * 0.3),
-      (Math.random() - 0.5) * 0.5,
-    );
+    // of identical balls. Authored in the flat frame and leaned onto the ground
+    // under the funnel, so the wander stays sideways and the rise stays up.
+    this.drift[index]
+      ?.set(
+        (Math.random() - 0.5) * 0.5,
+        RISE_SPEED * (0.85 + Math.random() * 0.3),
+        (Math.random() - 0.5) * 0.5,
+      )
+      .applyQuaternion(tiltFor(x, y, z, this.tilt));
     this.age[index] = 0;
     this.alive[index] = 1;
   }
