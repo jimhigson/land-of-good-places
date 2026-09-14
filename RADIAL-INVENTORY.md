@@ -175,9 +175,118 @@ The pattern to expect, and the one to grep for when re-running:
 
 ## 3. `src/` sites the first sweep missed
 
-See **§3.1** below (contributed by the `src/` gap sweep) for lighting and
-shadow cameras, raycasting and picking, culling and bounding volumes, screen
-projection for HUD elements, particles, and audio.
+`ALTITUDE-INVENTORY.md` swept geometry, physics and cameras. It did not sweep
+**world UI, effects and lighting**, and that is where the most-seen faults are.
+None of the rows below appear in it.
+
+### 3.1 The flat disc in the XZ plane — the thing a child sees every single tap
+
+A mesh authored flat and `rotation.x = -Math.PI/2`'d is correct **only if
+something leans it downstream**. 92 sites match that pattern in `src/`; these
+are the ones positioned straight into world space with no leaned ancestor.
+
+| file:line | expression | what a six-year-old sees | severity |
+|---|---|---|---|
+| `src/art/models/tapMarker.ts:57,61` | `ring.rotation.x = -Math.PI/2`, `disc.rotation.x = -Math.PI/2`, set once in the constructor; callers only ever `root.position.set(...)` (`TapNavigator.ts:252,281`) and the root goes straight to the scene (`:201`) | **she taps the grass and the pink "I'm going here" ring is half buried in the hillside and half floating**, sliced by the grass. The ring's own 0.62 m radius spans ±0.43 m of ground height across itself at the rim, and the `HOVER = 0.06` z-fight margin becomes 0.043 m. Wrong on every tap beyond ~20 m | **High** — the most-seen piece of world UI in the game |
+| `src/art/effects/rainbowRing.ts:140` (+ the `RISE = 0.34` lift at `:190`) | `mesh.rotation.x = -Math.PI/2`, pool built once, never re-set | two customers, both on open ground: the **hop rainbow on every landing** (`Player.ts:1253,1321` — `world.add`, scene root) and the **tap-confirmation burst** (`Highlights.ts:161`, `scene.add` at `:143`), whose own comment says *"on a phone that burst is the only 'yes, that one' a child gets."* A 1 m rainbow lying in the world XZ plane on ground that leans 45° | **High** |
+| `src/art/effects/rainbowRing.ts:290,317` | `spark.direction.set(cos, 0, sin)` — the star burst plane is world XZ; `setY(origin.y + SPARK_RISE·…)` | half the stars dive into the grass, half shoot at the sky | Medium |
+| `src/world/Highlights.ts:281` (+ `:217` `zone.y + RING_CLEARANCE`) | `this.ring.rotation.x = -Math.PI/2`; `showRing` (`:295-299`) only sets position and scale | the guaranteed-highlight ring for every interactable with no shell mesh, lying at 45° to the ground it marks. **Not covered** by the inventory's `Selection.ts:402,455` row | Medium-high |
+| `src/art/effects/flowerSparkle.ts:147,149,168` | `flightPoint.y += 1.55 // roughly hair height` | 1.55 m of `+Y` is 1.09 m of real height and **1.11 m sideways** at the rim: the picked flower flies past her ear and parks in mid-air beside her head. It is the payoff animation of picking a flower | Medium-low |
+| `src/world/train/puffs.ts:82-84` | `drift.set(…, RISE_SPEED·…, …)`, `RISE_SPEED = 1.15` | the loco leans with the ground but its smoke leaves the chimney at 45° to it and trails sideways. Funny rather than broken, but she notices smoke that does not come out of the top | Low-medium |
+| `src/ui/ActionChips.ts:210` | `projected.set(zone.x, zone.y + lift, zone.z).project(camera)` | the projection is correct; the **anchor** drifts up to `MAX_LIFT·sin θ` towards the park's centre, so "Ride it!" sits beside the ride rather than over it | Low |
+| `src/art/effects/dustPuff.ts:159,164,168` | `originY + DRIFT_UP·ease`; `scale.set(s, s·0.62, s)` — the "settling on the ground" squash is on world `Y` | heel dust reads as a tilted lozenge rather than something lying on the grass, and drifts inward | Low |
+| `src/world/interact.ts:254` | `Math.abs(y − zone.y) > ZONE_HEIGHT_TOLERANCE` in `pickInteractZone` | **a second copy** of the inventory's `Selection.ts:402,455` row, in the path `ui/ParkMap.ts` uses to name an attraction. Two outdoor points 0.6 m apart radially read as different decks | Low — but file it, it is not covered |
+
+### 3.2 Lighting — the sun, the fill and the ambient all use world `+Y`
+
+| file:line | expression | out/in | what breaks | severity |
+|---|---|---|---|---|
+| `src/world/DayNight.ts:784-787` | `fillLight.position.set(-keyDirection.x, 0.55, -keyDirection.z).normalize()` — used raw, nothing rotates it | OUT (`fillLight.visible = !indoors`, `:562`) | `0.55` is `tan 28.8°`. At the rim the local horizon is tilted 45.5°, so the cool fill sits **17° below the local horizon** — which is precisely what its own comment two lines up exists to prevent: *"straight opposite would light the ground from underneath and every toy would glow along its bottom edge."* Benches, stalls and the character herself get rim-lit from below in cool blue across the whole outer park, while the same objects by the fountain look right | **Medium-high**, and a one-line fix |
+| `src/world/DayNight.ts:399` | `new HemisphereLight(...)` with `position` never assigned, so three.js leaves the axis at the default `(0,1,0)` | OUT (`:563`) | a surface whose normal is the **local** up receives `0.5 + 0.5·cos 45.5° = 0.85` sky / `0.15` green ground bounce instead of pure sky. The outer park's ambient goes continuously greener and flatter than the centre's, with no seam to explain it. `followPlayer` already does exactly the right thing for the key light | Medium |
+| `src/world/DayNight.ts:715-718, 760` | one global `sunDirection`; `sunUp = smoothstep(-0.12, 0.12, sunDirection.y)` — elevation above **the park origin's** horizon. `daylight`, `clockNight`, `nightFactorValue`, the fairy-light hysteresis, the fog distances and every lamp descend from that number | OUT | **flagged, not filed as a defect.** On a sphere `N·L` on the ground at 157 m goes negative whenever the sun is below 45° on that side, so for hours either side of noon the outer park is in real geometric shadow while `nightFactorValue` says broad daylight — lamps off, fog at day distances, bright blue sky, dark flat grass at the bus stop. A terminator is what a planet does; nothing in the rig knows about it, so the "it is daytime" decisions and the actual illumination disagree. **This is Jim's call, not an engineer's** | Medium — a conversation, not a patch |
+
+**Adjudicated clean in the same file, so nobody re-files it:** `keyLight.shadow.camera` (`:365-375`, `SHADOW_AREA = 26`) is re-centred on the player every frame by `followPlayer` (`:693-698`) with the light 95 m along `sunDirection`, so its ±94 m depth brackets the target whatever the ground does; the ortho box's own `up` being `+Y` only spins a square box about its own axis. Linear `Fog` (`Engine.ts:77`, `DayNight.ts:820-827`) is a true camera-space distance. `IsoCamera`'s `far = 6000` (`:254`) clears the sphere comfortably — the short `far` is `railRace/camera.ts:517`, already inventoried.
+
+### 3.3 Two more clearance checkers built in the flat frame
+
+| file:line | expression | severity |
+|---|---|---|
+| `src/world/coaster/clearance.ts:336-341` and `src/world/coaster/castleWindows.ts:209-214` — **identical** expression in both | `sideX = -tangent.z/flat; sideZ = tangent.x/flat;` … `new Vector3(point.x + sideX·lateral, point.y + rise, point.z + sideZ·lateral)` — the car envelope swept in the world XZ plane with `rise` straight up `+Y`. Neither file imports any sphere helper | **Medium**, and worse than it sounds |
+
+These two are what stand between a child and the Sky Cruiser's roofline going
+through a castle wall, and at 45° they swing an envelope rotated 45° from the
+car that exists. `ALTITUDE-INVENTORY.md` already has `Coaster.ts:321-329`
+seating the real cart flat while the rails beside it are drawn leaned — so the
+cart, the rails and the two checkers are **three** disagreeing models of one
+thing. `castleWindows.ts:180-186`'s own header is a long correct essay about an
+assert nobody has watched fail being a decoration. Fix all of them from one
+frame, in one change.
+
+### 3.4 A stale constant comment, per CLAUDE.md's "correct it where you find it"
+
+`src/core/constants.ts:20` `TERRAIN_RADIUS = 83.5` — *"where the ground stops"*,
+last moved 2 August (72 → 83.5), while the park now reaches 157 m and the Rail
+Race's rings circle outside the boundary (`:29-30`). The terrain disc ends at
+22° of lean; things stand out at 45°. Whether the mesh actually falls short of
+the props was **not** chased — flagging, not asserting. The doc comment at
+`:12-17` also describes *"an orthographic camera"* the game no longer has, the
+same false assertion `ALTITUDE-INVENTORY.md` flags in `Sky.ts:137-145`.
+
+### 3.5 Checked and clean — do not re-file
+
+- **`src/world/LampPosts.ts:303`** `glowGeometry.rotateX(-Math.PI/2)` looks
+  exactly like §3.1 and is not: the flat plane is authored pre-lean and every
+  instance goes through `instanceAt` (`:691-712`), which calls `placeOnSphere`
+  per lamp. The clearest example in the codebase of flat-literal-leaned-
+  downstream.
+- **`src/art/effects/waterSplash.ts:210`** — same shape as `rainbowRing`, but
+  its only customer is the Fountain, whose `splashEffects.root` hangs off the
+  `standOnSphere`d group and is fed *local* coordinates.
+- **All raycasting.** `Selection.ts:195,487`, `TapNavigator.ts:225`,
+  `FerrisWheelRide.ts:730`, `parade/Parade.ts:455` are all `setFromCamera`
+  against the live camera matrix, tested in world space against `Box3`/`Sphere`
+  — orientation-free. There is **no** `intersectPlane`, no `new Plane`, and
+  exactly one `(0,-1,0)` in `src/` (`DayNight.ts:342`, the moon's initial
+  direction, overwritten at `:776`). **No downward ground ray exists anywhere.**
+- **No spatial audio** (0 hits for `AudioListener|PositionalAudio|panner`), so
+  no listener up vector to get wrong. **No LOD** (0 hits). **No `.y` depth
+  sorting** (0 hits). 34 `frustumCulled = false` are particle pools opting
+  *out*; 24 `computeBoundingSphere` are on local geometry.
+- **No outdoor weather.** `minigames/railRacer/confetti.ts` has its own flat
+  `Scene`. The outdoor particle systems are exactly §3.1's, plus `Fireflies`
+  (leaned) and `ferrisWheel/clouds.ts` (already inventoried).
+- **All minigame and interior lighting** — `waterFight`, `dodgems`,
+  `spookyHouse`, `characterCreationPreview`, `building/InteriorLighting.ts`,
+  `hotel/lighting.ts`, `entrance/BusJourney.ts` — each owns a disjoint space
+  with a flat floor. Same for the ~80 non-world `rotation.x = ±Math.PI/2` sites
+  under `src/minigames/**` and every object-local one under `src/art/models/**`.
+
+---
+
+## 3.6 Ambiguous — flagged, not decided
+
+Jim's ruling keeps one distinction: indoor versus outdoor. These sit on the
+line, and per the brief they are **reported rather than adjudicated.**
+
+- **`SPACE_CASTLE_ROOF` — the roof garden, "open to the sky"**
+  (`src/world/building/floors.ts:83-84,157-165`, `roofed: false`). `spaceAt`
+  makes it an **interior**, so `upFor` there is plain `+Y` — correct, because
+  its origin is `(1200, 600)`, **1341 m** from the park's centre, where the
+  radial formula is meaningless. But a child standing in it can see the sky,
+  wild pets live there, and **the ginormous slide launches from it**. Whatever
+  "everything is radial" means, it cannot mean this space, and somebody has to
+  say so out loud rather than leave it as an accident of a radius test.
+- **The Sky Cruiser and the ginormous slide cross the boundary.** The family
+  asked for the cruiser to fly *through* the castle, so its route spans the
+  radial park and the flat castle spaces. Neither `src/world/coaster/**` nor
+  `src/world/slide/**` mentions `spaceAt`, `castleFloorAt` or any castle space
+  (0 grep hits). A single route in two frames, with no owner of the seam.
+- **Building shells versus their rooms.** The hotel's crystal tower and the
+  castle's exterior stand in `SPACE_GARDEN` (leaning) while every room inside
+  is its own flat space hundreds of metres away. The **doorway** is therefore a
+  discontinuity in orientation, not just in position — the same door band
+  `tapSpacing.ts`'s `bandCrossed` owns. What a child should see walking through
+  it has not been decided anywhere I can find.
 
 ---
 
@@ -217,6 +326,30 @@ grep -rn "new Box3()" --include='*.ts' --include='*.mts' scripts/ test/
 # Fixed y thresholds.
 grep -rnE "(y|Y) *[<>]=? *-?[0-9]" --include='*.mts' scripts/
 ```
+
+### The `src/` gap sweep — patterns `ALTITUDE-INVENTORY.md` never ran
+
+With the hit counts measured on `31d0fb2a`. **The most productive line by a
+distance is the first**: a flat disc rotated into the XZ plane.
+
+| grep (`-rnE --include='*.ts' src/`) | hits | what it found |
+|---|---|---|
+| `rotation\.x = -?Math\.PI ?/ ?2\|rotateX\(-?Math\.PI ?/ ?2\)` | 92 | §3.1 — filtered by hand for meshes positioned straight into world space |
+| `HemisphereLight` | 18 | §3.2 |
+| `DirectionalLight\|shadow\.camera\|Fog\|\.far =\|\.near =` | 62 | §3.2's clean adjudications |
+| `setY\(\|\.y \+=` | 42 | §3.1's lifts |
+| `Raycaster\|intersectPlane\|\.project\(\|\.unproject\(` | 23 | all clean |
+| `0, *-1, *0` | 1 | `DayNight.ts:342` only |
+| `new PerspectiveCamera\|new OrthographicCamera` | 13 | only `railRace/camera.ts:517` is short |
+| `frustumCulled` / `boundingSphere\|computeBounding*` / `renderOrder` | 34 / 24 / 39 | all clean |
+| `new LOD\|addLevel` | **0** | *control:* `distance` returns dozens — no LOD system exists |
+| `AudioListener\|PositionalAudio\|panner` | **0** | *control:* `listener` returns ~20 DOM hits — no three.js audio exists |
+| `sort\(\(.*=>.*\.y` | **0** | *control:* `\.sort\(` alone returns many — no y-sorted draw order |
+
+The three zero rows are the ones that needed a control, and each got a
+deliberately weaker pattern on the same corpus to prove the machinery worked.
+That is the difference between "nothing is wrong" and "my grep is wrong", and
+it is the only reason those three can be written down as absences.
 
 ### How a null result was distinguished from a broken pattern
 
