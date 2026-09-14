@@ -264,3 +264,51 @@ is a decision for the radial lead, not for me alone:
    walk-surface sample.
 
 I have not chosen. (1) looks right and cheap; (2) is what a purist would want.
+
+## STOPPED — Jim halted the instance-by-instance radial conversion
+
+14 Sep: *"trying to fit the new world into the old code."* An architect is
+designing a proper spherical domain (canonical coordinate a 3-vector from the
+planet's centre, flatness as a declared chart with a validity radius, one
+translation layer), ~8 weeks. **No geometry was written**, which is the cheapest
+possible place to be stopped. Nothing here is reverted; Jim asked that it be
+kept.
+
+The ruling that is now moot as an instruction but stands as a record: rigid tilt
+about the crossing centre, tilt owned by the `SpineFrame`, `d·(1−cos θ)` =
+0.027 m innermost / ~1.03 m outermost on `DECK_HALF_LENGTH` 3.2 m.
+
+**One correction to that ruling for whoever picks it up:** `SpineFrame` is purely
+2D — `worldAt` returns `{x, z}` and `project` inverts `{x, z}` → `{along,
+across}`, with no `y` anywhere. A rigid tilt displaces a point in plan as a
+function of its **height**, so the frame as it stands cannot carry the tilt. The
+honest one-owner fix is the other direction: make all four footprint definitions
+read from the **drawn sweep** (`shell.planEdge`), which already produces the true
+polygon and which `insideDrawnStone` already follows.
+
+## `scripts/diag-bridge-solid.mts` — and the false alarm it nearly shipped
+
+The mandated solidity/reachability instrument. **Result on today's flat code, all
+controls passing: 24 of 24 bearings stopped at both bridges, and 125 of 125
+points carried at both.** No present-day defect.
+
+It took three goes to be worth anything, and each failure is the same disease:
+
+1. **Control failed for an unrelated reason.** It marched from a fixed
+   `crossing + (60, 60)` and was stopped — because that spot happened to be
+   inside scenery, not because the probe was broken. A control that fails for a
+   reason unrelated to what it controls for voids the run and teaches nothing.
+   Now the open spot is *searched for*, with `isClearCircle` as the authority.
+2. **The probe was blind to the thing it was measuring.** `WalkSurfaces.sample(x,
+   z, y)` answers "the surface at or below `y`", and it sampled from a fixed
+   `ground + 6`. These decks are 4.73 m at the innermost crossing and **7.34 m**
+   at the outermost — so it could not see the outer deck at all. It reported
+   **64 of 125 points uncarried with an 8.87 m fall**, which reads exactly like a
+   catastrophic bug and was entirely the probe's own blind spot. Sampling from
+   `bridge.heightAt(x, z) + 2` gives 125 of 125.
+
+**The lesson, and it is the one worth carrying into the redesign:** the controls
+that caught 1 could not catch 2, because they were run on open grass where there
+is no deck to be blind to. A control proves the probe can produce both verdicts;
+it does not prove the probe can see the object. Both are needed, and only the
+second would have caught an 8.87 m headline that was pure fiction.
