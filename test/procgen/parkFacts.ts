@@ -15,7 +15,7 @@
  * suite owns the invariants about whether the park's scattered furniture is
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
-import { Box3, Mesh, Vector3 } from 'three';
+import { Box3, Mesh, Quaternion, Vector3 } from 'three';
 import { measureGateArch } from '../../scripts/gate-arch-measure.mts';
 import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
@@ -1512,6 +1512,72 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
   }
 
+/**
+ * **How tall a thing is along ITS OWN up, not the world's.**
+ *
+ * `new Box3().setFromObject(root)` is axis-aligned, so `max.y - min.y` is the
+ * object's extent *projected onto world +Y*. For anything standing level that
+ * is its height. For the cat bus it is not: `ArrivalSequence.placeBus` calls
+ * `faceOnGround`, deliberately, because the road runs far enough out that a
+ * chassis held level to world +Y digs its downhill wheel into the hill. So the
+ * bus is tilted, and an axis-aligned box round a tilted body grows with the
+ * tilt while the body does not.
+ *
+ * Measured on the canonical seed at the park's authored scale:
+ *
+ *   bus lean off world +Y   21.31 deg
+ *   AABB world-Y extent      9.43 m   <- reported as the bus's height, and failed
+ *   along its own up         6.03 m   <- the bus
+ *   along its own right      7.30 m
+ *   along its own forward   14.54 m
+ *   inflation                1.565x
+ *
+ * `TALLEST_CHILD_HEIGHT` is 2.97, so the invariant's band is 4.16-7.72 m: 9.43
+ * is outside it and 6.03 is comfortably inside. The bus never grew; the ruler
+ * was held vertically against a thing that is not.
+ *
+ * The 7.30 and 14.54 are worth keeping here, because they are **exactly** the
+ * numbers `check-swept-bus.mts` collapsed to when it hit this same fault from
+ * the other side — its per-seed boxes of 12.10/13.73/12.00 m became an
+ * identical 14.54 x 7.30 once the yaw was taken out. Two independent
+ * instruments agreeing on the bus's own dimensions is the control on this one.
+ *
+ * Every drawn vertex, in world space, projected onto the object's own axis —
+ * so it is an oriented extent and not a second approximation of one.
+ */
+function heightAlongOwnUp(root: import('three').Object3D): number {
+  const quaternion = new Quaternion();
+  root.getWorldQuaternion(quaternion);
+  const up = new Vector3(0, 1, 0).applyQuaternion(quaternion);
+  const vertex = new Vector3();
+  let lowest = Infinity;
+  let highest = -Infinity;
+  root.updateWorldMatrix(true, true);
+  root.traverse((object) => {
+    // Duck-typed rather than `instanceof Mesh`, which is this file's own idiom
+    // (see the mesh count just below) and is not a style choice: a static
+    // `Mesh` binding is in a circular-import temporal dead zone at the point
+    // this runs, and reaching for it throws
+    // `Cannot access 'Mesh' before initialization` — which vitest reports as
+    // **93 skipped, 0 failed**, the quietest way for a suite to stop checking.
+    const mesh = object as unknown as {
+      isMesh?: boolean;
+      geometry?: { attributes?: Record<string, { count: number } | undefined> };
+      matrixWorld: import('three').Matrix4;
+    };
+    if (!mesh.isMesh) return;
+    const position = mesh.geometry?.attributes?.['position'];
+    if (!position) return;
+    for (let index = 0; index < position.count; index += 1) {
+      vertex.fromBufferAttribute(position as never, index).applyMatrix4(mesh.matrixWorld);
+      const along = vertex.dot(up);
+      if (along < lowest) lowest = along;
+      if (along > highest) highest = along;
+    }
+  });
+  return highest > lowest ? highest - lowest : 0;
+}
+
   // --- the cat bus -----------------------------------------------------------
   // Found by walking the scene, not by asking `world.entrance` whether it built
   // one. Asking the builder is how a feature stays green while being absent
@@ -1527,8 +1593,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       // Narrowed through a local: `scene.traverse`'s callback is not a closure
       // TypeScript can follow, so `busRoot` is still `null`-typed out here.
       const root = busRoot as import('three').Object3D;
-      const box = new Box3().setFromObject(root);
       const where = new Vector3();
+      const busHeight = heightAlongOwnUp(root);
       root.getWorldPosition(where);
       let meshCount = 0;
       let hasDriver = false;
@@ -1562,7 +1628,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         y: where.y,
         z: where.z,
         meshCount,
-        height: Number.isFinite(box.max.y - box.min.y) ? box.max.y - box.min.y : 0,
+        height: Number.isFinite(busHeight) ? busHeight : 0,
         hasDriver,
         kidCount,
       };
