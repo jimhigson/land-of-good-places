@@ -1,6 +1,10 @@
 /**
- * A bench for `geo/bend.ts`, run by hand while building it. Not a check — the
- * shipped assertion lives in `test/procgen/invariants.ts`.
+ * A bench for `geo/bend.ts`, run by hand while building it. Not a check.
+ *
+ * The shipped assertions are `pnpm run check:castle-bend`, which measures the
+ * drawn castle, and `castleTurretsKeepTheirReach` in
+ * `test/procgen/invariants.ts`, which asserts on every seed that a bend leaves
+ * each turret at the reach the castle's plan gives it.
  */
 import { BoxGeometry, CylinderGeometry, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, Object3D, Quaternion, Vector3 } from 'three';
 import { Frame } from '../src/world/geo/Frame.ts';

@@ -57,7 +57,10 @@ import { chartById, curvedChart, flatRadiusFor, type ChartId } from './Chart';
  * it to"*. That is checkable rather than assumable: the anchor's local direction
  * `u = (x, 0, z)/d`, carried through the bent quaternion, must come out as the
  * geodesic's own onward tangent at the arrival point. {@link bendError} returns
- * exactly that residual, in metres of arc, and the invariant asserts it. A bend
+ * exactly that residual, in metres of arc. The shipped assertion is
+ * `castleTurretsKeepTheirReach` in `test/procgen/invariants.ts`, which asserts
+ * the same property end to end — that a bend leaves every part at the reach its
+ * plan gives it — on every seed. A bend
  * that silently transported the wrong basis would still *look* leaned in a
  * screenshot — every part tilted, nothing obviously wrong — and would be found
  * only by a child walking into a wall that is not where it is drawn. Measure
@@ -243,17 +246,21 @@ export interface BendOptions {
   /**
    * Leave this object (and its geometry) exactly as authored.
    *
-   * **For geometry something else rewrites every frame**, and the fountain is
-   * the worked example: its water surface is a vertex animation that assigns
-   * `array[i + 1] = ripple` from a stored flat `waterBase`, so a bend written
-   * into those vertices is overwritten on the first tick and the stored base is
-   * still unbent. Bending it would not be subtly wrong, it would simply not
-   * take — the worst kind, because the build looks like it worked.
+   * **For geometry something else rewrites every frame.** The worked example is
+   * a vertex animation: a surface whose `update()` assigns into its own position
+   * buffer each tick from a stored, unbent base. A bend written into those
+   * vertices is overwritten on the first frame while the stored base stays flat,
+   * so it does not come out subtly wrong — it simply does not take, which is
+   * worse, because the build looks like it worked.
    *
-   * Skipping is only honest when the skipped part is small enough not to need
-   * the bend on its own: the fountain's water disc spans about 2 m, which
-   * departs ~2 cm, inside tolerance. If a skipped part is itself over the
-   * limit, the answer is to make its animation bend-aware, not to skip it.
+   * **Skipping is only honest when the skipped part is inside the tolerance on
+   * its own** — measure it with `scripts/rigid-audit.mts` rather than asserting
+   * it. An earlier version of this comment claimed the park fountain's water
+   * disc "spans about 2 m, ~2 cm"; the fountain is 4.58 m and its water 4.19 m,
+   * and neither number had been measured when it was written. (Both are inside
+   * the 4.69 m limit, so the fountain is left rigid entirely and this option is
+   * not used for it.) If a part that needs the bend is being skipped, the answer
+   * is to make its animation bend-aware, not to skip it.
    */
   skip?(object: Object3D): boolean;
 }

@@ -40,7 +40,13 @@
  * Run: `node --import ./scripts/ts-extension-resolver-register.mjs scripts/rigid-audit.mts`
  */
 import './headless-canvas.mjs';
-import { Box3, Vector3, type Object3D } from 'three';
+import {
+  Matrix4,
+  Vector3,
+  type BufferAttribute,
+  type InterleavedBufferAttribute,
+  type Object3D,
+} from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { flatDeparture, flatRadiusFor } from '../src/world/geo/Chart.ts';
 
@@ -49,25 +55,59 @@ const park = buildHeadlessPark();
 park.scene.updateMatrixWorld(true);
 
 // Every structure in this engineer's lane that takes a single `standOnSphere`.
-const WANTED = [
+// **Exact names only.** A `/arch$/` regex pulled in `railRace:arch` — another
+// lane's object, a 219 m ring — and reported it as a structure needing a bend.
+const WANTED = new Set([
   'fountain', 'bus-shelter', 'welcome-sign', 'keychainShop', 'facePaintStall',
-  'entrance-arch', 'gate-arch', 'building-facade', 'the-land-hotel-outside',
-];
+  'entrance-arch', 'park-gate-arch', 'building-facade', 'the-land-hotel-outside',
+]);
 
-const found: { name: string; radius: number; height: number }[] = [];
+const found: { name: string; radius: number; height: number; points: number }[] = [];
 const seen = new Set<string>();
+const v = new Vector3();
 park.scene.traverse((o: Object3D) => {
-  const match = WANTED.find((w) => o.name === w || o.name.endsWith(`-${w}`) || /arch$/.test(o.name) && w === 'gate-arch');
-  if (!match || seen.has(o.name)) return;
+  if (!WANTED.has(o.name) || seen.has(o.name)) return;
   seen.add(o.name);
   const at = o.getWorldPosition(new Vector3());
-  const box = new Box3().setFromObject(o);
-  if (box.isEmpty()) return;
-  const radius = Math.max(
-    Math.hypot(box.max.x - at.x, box.max.z - at.z),
-    Math.hypot(box.min.x - at.x, box.min.z - at.z),
-  );
-  found.push({ name: o.name, radius, height: box.max.y - box.min.y });
+  // **The true footprint radius: the furthest DRAWN point, not a box corner.**
+  //
+  // This used to take `Box3.setFromObject` and measure to two of its four
+  // corners, which is the circumscribing rectangle's diagonal — **a factor of
+  // √2 too large for anything round**, and wrong for everything else by however
+  // much the object fails to fill its own box. It reported the fountain at
+  // 6.38 m when it is 4.58 m, putting it over a 4.69 m limit it is comfortably
+  // inside, and a whole argument was built on that number.
+  //
+  // Walking the vertices costs more and is the only answer that is actually the
+  // quantity named. Instanced geometry is walked per instance, because an
+  // InstancedMesh's box spans every instance in the park — which is how an
+  // earlier pass called the treeline's 325 m a footprint.
+  let radius = 0;
+  let points = 0;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  o.traverse((child) => {
+    const geometry = (child as unknown as { geometry?: { getAttribute(n: string): BufferAttribute | InterleavedBufferAttribute | undefined } }).geometry;
+    const position = geometry?.getAttribute('position');
+    if (!position) return;
+    const instanced = child as unknown as { isInstancedMesh?: boolean; count?: number; getMatrixAt(i: number, m: Matrix4): void };
+    const count = instanced.isInstancedMesh ? (instanced.count ?? 0) : 1;
+    const m = new Matrix4();
+    for (let i = 0; i < count; i += 1) {
+      if (instanced.isInstancedMesh) instanced.getMatrixAt(i, m);
+      for (let k = 0; k < position.count; k += 1) {
+        v.fromBufferAttribute(position, k);
+        if (instanced.isInstancedMesh) v.applyMatrix4(m);
+        child.localToWorld(v);
+        radius = Math.max(radius, Math.hypot(v.x - at.x, v.z - at.z));
+        minY = Math.min(minY, v.y);
+        maxY = Math.max(maxY, v.y);
+        points += 1;
+      }
+    }
+  });
+  if (points === 0) return;
+  found.push({ name: o.name, radius, height: maxY - minY, points });
 });
 
 found.sort((a, b) => b.radius - a.radius);
@@ -76,7 +116,7 @@ for (const f of found) {
   const over = f.radius > LIMIT;
   console.log(
     `  ${f.radius.toFixed(2).padStart(6)} m radius   departs ${(flatDeparture(f.radius) * 100).toFixed(1).padStart(6)} cm   ` +
-      `${f.name.padEnd(24)} ${over ? '<-- MUST BEND' : 'fine rigid'}`,
+      `${f.name.padEnd(24)} ${String(f.points).padStart(6)} pts  ${over ? '<-- MUST BEND' : 'fine rigid'}`,
   );
 }
 console.log(`\n${found.filter((f) => f.radius > LIMIT).length} of ${found.length} structures exceed the limit`);
