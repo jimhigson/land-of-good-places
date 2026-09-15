@@ -198,8 +198,25 @@ function sweepThisSeed(): Finding[] {
 }
 
 if (isChild) {
-  process.stdout.write(`${JSON.stringify(sweepThisSeed())}\n`);
-  process.exit(0);
+  // **Exit from the write's own callback, never on the line after it.**
+  //
+  // `process.stdout` to a *pipe* is asynchronous in Node, and `process.exit()`
+  // does not flush it — so a child whose JSON is bigger than the pipe buffer
+  // loses everything past it, and the parent's `JSON.parse` below gets a
+  // string cut off mid-object. Measured on this repo: the garden sweep of the
+  // canonical seed and of seed 128 both arrived at **exactly 65536 bytes**,
+  // macOS's pipe buffer to the byte, and the parent died with
+  // `Expected ',' or '}' after property value in JSON at position 65536`.
+  //
+  // `maxBuffer` was never the limit (it is set to 64 MB at the spawn below) and
+  // raising it fixes nothing — the bytes were dropped in the child, before the
+  // parent ever saw them. This check therefore could not pass on any seed with
+  // more than ~64 KB of findings, which today is every seed; it went unnoticed
+  // only because the run died earlier, on an unrelated throw, before reaching
+  // the parse.
+  process.stdout.write(`${JSON.stringify(sweepThisSeed())}\n`, () => {
+    process.exit(0);
+  });
 }
 
 // ------------------------------------------------------------ across the pool
