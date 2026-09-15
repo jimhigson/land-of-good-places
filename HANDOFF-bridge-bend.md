@@ -311,3 +311,114 @@ that quietly stops it being able to see that is worse than the bug.
   geometry change. Currently 24/24 stopped and 125/125 carried at both the
   innermost and outermost bridge, controls passing: the bend did **not** desync
   the stone from its collider.
+
+---
+
+# Continued — the 10 regressions, settled (Opus 5, 1M context; Overseer-assigned)
+
+## 1. `no bridge parapet can be seen through` — FIXED, and the frame hypothesis is DISPROVED
+
+Not the frame. `PROBE_BOTTOM` was a bare `1.5` while
+`PARAPET_HEIGHT + PARAPET_CROWN_LIFT` is **1.17** — the clause probed **0.33 m
+below the bottom of the wall it was probing**, into the spandrel and deck edge
+underneath. The old world-`y` bridge happened to put stone in that band; bending
+it moved that stone.
+
+`scripts/diag-parapet-frame.mts` varies **only the frame**, off the clause's own
+ring data, as this handoff's predecessor designed:
+
+| seed | world-frame misses | all below the 1.17 m wall? | misses at/above wall bottom | world MISS / local HIT |
+|---|---|---|---|---|
+| canonical | 17 | 17 of 17 | **0 of 10,718** | **0** |
+| 11 | 13 | 13 of 13 | **0 of 3,680** | **0** |
+| 24 | 15 | 15 of 15 | **0 of 4,692** | **0** |
+| 131 | 9 | 9 of 9 | **0 of 2,346** | **0** |
+| 326 | 29 | 29 of 29 | **0 of 10,856** | 1 |
+
+Every miss sat at drop 1.38-1.48 m. The deleted instrument's 299-of-28,000
+column was its own contamination — the real figure is zero, at every tilt.
+
+**Proved red against a real hole before being believed green** (CLAUDE.md, and
+this handoff's own warning): with the probe shortened, reintroducing #489's bug
+— `buildCourses(surfaceOuterPlus/Minus, …)` instead of `parapetTopPlus/Minus`,
+`bridges.ts:1417-1418`, canonical seed — gives **1349-1791 places per bridge on
+all five bridges, worst run 1.15 m spanning 0.03-1.13 m below the top**. That is
+the 1.17 m band #489 was written for. Mutation reverted.
+
+Result: `test:procgen` **138 -> 133** failed, 629 total both ways.
+
+## 2. `the park's own paving rides over every bridge` — NOT the check. A REAL geometry bug.
+
+**Do not "fix" this in the invariant. The bridge is wrong.**
+
+`scripts/diag-soffit-point.mts`, canonical seed:
+
+| bridge | plan position | paving above its own road | **road vs the soffit over it** | along the bridge axis |
+|---|---|---|---|---|
+| 590.0 | (20.4, −20.3) | — | **passes** | — |
+| 92.0 | (51.4, 95.8) | +0.030 m | **−0.651 m** | −0.50 m |
+| 748.0 | (−14.0, 121.7) | +0.030 m | **−0.813 m** | −1.10 m |
+| 288.0 | (139.0, −50.8) | +0.030 m | **−1.161 m** | −0.91 m |
+| 326.0 | (138.9, −82.1) | +0.030 m | **−1.895 m** | −1.23 m |
+
+Read that middle column: the **road surface is below the tunnel ceiling above
+it**, by up to 1.90 m. The paving is innocent — it sits a constant 0.030 m on
+its own road on every bridge, so `drapePathsOverBridges` is working perfectly.
+
+And every offending vertex is **within ±1.80 m of the crossing centre along the
+bridge axis** — i.e. **directly over the tunnel opening**, not out on a ramp. A
+train drives into the underside of its own bridge road. The error is **zero near
+the park centre and grows monotonically with radius**, which is the signature of
+two height conversions disagreeing.
+
+### The cause, and the fix this branch's own design already prescribes
+
+Two owners for "how high is this", used on the same rigid object:
+
+- the **road** (`surfaceProfile`) converts with `worldYAtAltitude`, which
+  **follows the terrain column** — it bends;
+- the **arch, slab and clearance marker** convert with `tangentY`, rigid in the
+  crossing's own tangent plane.
+
+They agree exactly at the crown centre and diverge away from it. But this
+handoff's own "The design, and the line it draws" says the crown span is
+**rigid**: *"`ARCH_CLEAR_HALF` is 1.80 m — departure 7.4 mm... The arch, the slab
+and the clearance marker are one rigid object over a hole."* The road over that
+same span was never converted to match, so the rigid arch and the bending road
+pull apart exactly where they must not.
+
+**Fix: over `|along| <= ARCH_CLEAR_HALF` the deck must be rigid too** — i.e.
+`tangentY`, the same conversion the arch under it uses — blending to the bending
+`worldYAtAltitude` form outside it. **The blend is the whole difficulty**: a step
+at the boundary is a trip hazard and would show up immediately in the sprint
+grade clause, so it must be C1, and it must be re-measured against
+`scripts/diag-bridge-grade.mts` (all three controls) afterwards.
+
+### An avenue measured and rejected — do not repeat it
+
+**Leaning the `deck` marker does not work**, though this handoff lists it as
+not-done. Leaned (`setFromUnitVectors(+Y, crownUp)` composed with the yaw, and
+its height via `tangentY`), the paving clause cleared on 4 of 5 seeds — and
+`the clearance over the railway covers the train and everyone riding it` went
+red on **5** seeds, reporting 3.19-3.60 m against the 3.90 m required. Net
+133 -> 134.
+
+The reason is the instrument, not the marker: every clearance invariant reads it
+via `Box3.setFromObject(...).min.y`, and **the axis-aligned bounding box of a
+tilted plate is far taller than the plate** — measured AABB height 0.050 m
+unleaned, which is exactly the slab thickness, against metres once leaned. So
+leaning the marker cannot be done until the invariants stop asking an AABB for
+a height. Reverted.
+
+## Measurement traps hit here
+
+- `mv scripts/diag-*.mts` swept up **9 pre-existing tracked** scripts. Caught by
+  `git status`, restored with `git checkout --`. Remove scratch by exact name.
+- A warp sweep wrapped in `timeout 240` reported **0 failures on every
+  candidate** — the builds were being killed and `grep -c` read empty output as
+  a pass. Re-run honestly, 2 of 5 still failed. Assert the run *completed*,
+  never just that the bad string is absent.
+- My first `diag-soffit-point` used the crossing centre where the clause uses
+  the nearest point on the **rail centreline**, and found nothing at all while
+  the clause failed. The disagreement is what exposed it. An instrument that
+  disagrees with the clause it is explaining is wrong until proven otherwise.
