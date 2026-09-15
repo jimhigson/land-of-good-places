@@ -41,6 +41,7 @@ import { Matrix4, Quaternion, Vector3, type InstancedMesh, type Mesh } from 'thr
 import { buildHeadlessPark } from './park-harness.mts';
 import { Geo, PLANET_RADIUS } from '../src/world/geo/Geo.ts';
 import { flatDeparture, flatRadiusFor } from '../src/world/geo/Chart.ts';
+import { BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_WALL_THICKNESS } from '../src/core/constants.ts';
 
 const UP = new Vector3(0, 1, 0);
 const deg = (radians: number): number => (radians * 180) / Math.PI;
@@ -213,7 +214,25 @@ for (const wall of baseBand) {
   }
 }
 const measuredSpread = maxRadius - minRadius;
-const rigidWouldBe = flatDeparture(dMax) - flatDeparture(dMin);
+/**
+ * **The control comes from the castle's DECLARED extents, never from the reaches
+ * this run measured.**
+ *
+ * It used to read `flatDeparture(dMax) - flatDeparture(dMin)` off the very
+ * vertices under test, which is a control that moves with the thing it is
+ * controlling for: when a bug walked the stonework outward, `dMax` grew with it
+ * and the control inflated from 35.5 cm to 65.3 cm — **the check looked stronger
+ * the further the stone strayed**. It printed the displacement and asserted
+ * nothing about it.
+ *
+ * These two reaches are properties of the castle's own plan and cannot move:
+ * the middle of a wall run stands `outerZ` from the centre, and a corner stands
+ * `hypot(outerX, outerZ)`. Both come off `BUILDING_HALF_X/Z` plus the half wall
+ * that `Shell.ts` builds the ring from.
+ */
+const OUTER_X = BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2;
+const OUTER_Z = BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2;
+const rigidWouldBe = flatDeparture(Math.hypot(OUTER_X, OUTER_Z)) - flatDeparture(OUTER_Z);
 
 note(
   `castle-wall-lower base course: ${baseVertices} vertices reaching ${dMin.toFixed(1)}–${dMax.toFixed(1)} m ` +
@@ -221,7 +240,9 @@ note(
 );
 note(
   `CONTROL: over that same reach a rigid chord of the tangent plane would span ` +
-    `${(rigidWouldBe * 100).toFixed(1)} cm (flatDeparture at each end, on R = ${PLANET_RADIUS} m). ` +
+    `${(rigidWouldBe * 100).toFixed(1)} cm between a run's middle (${OUTER_Z.toFixed(2)} m) and a ` +
+    `corner (${Math.hypot(OUTER_X, OUTER_Z).toFixed(2)} m) on R = ${PLANET_RADIUS} m — both off the ` +
+    `castle's DECLARED plan, so this number cannot drift with the stone. ` +
     `Bent, it goes to ~0. The course is selected on height and judged on radius, so ` +
     `the cut cannot discard its own evidence.`,
 );
@@ -232,10 +253,48 @@ check(
 );
 check(
   rigidWouldBe > 0.1,
-  `the wall clause asserts nothing: the base course reaches ${dMin.toFixed(1)}–${dMax.toFixed(1)} m, ` +
-    `so a rigid wall would only span ${(rigidWouldBe * 100).toFixed(1)} cm and there is no lever arm ` +
-    'to tell the two cases apart',
+  `the wall clause asserts nothing: the castle's declared plan gives a rigid spread of only ` +
+    `${(rigidWouldBe * 100).toFixed(1)} cm, so there is no lever arm to tell the two cases apart`,
 );
+
+// ------------------------------- 3. and the stone has not walked off its plan
+//
+// **The clause that would have caught the bend's own worst bug.** A bend moves a
+// part onto the sphere; it must NOT move it away from the structure's centre.
+// A stale parent matrix did exactly that — a uniform 4.59 m — turning four
+// symmetric turrets into four different distances, while every clause above
+// stayed green and the wall control quietly inflated to match.
+//
+// Geodesic distance from the anchor is the invariant a bend preserves, and the
+// authored distance is a property of the plan, so the two are comparable
+// directly. Measured on the drawn instance matrices, as everything here is.
+{
+  const authored = Math.hypot(OUTER_X, OUTER_Z);
+  const reaches = turrets.map((t) => facadeCentre.arcTo(Geo.fromWorldVector(t.world)));
+  const worstOff = Math.max(...reaches.map((r) => Math.abs(r - authored)));
+  const spread = Math.max(...reaches) - Math.min(...reaches);
+  note(
+    `turret reach from the castle's centre: authored ${authored.toFixed(3)} m, drawn ` +
+      `${reaches.map((r) => r.toFixed(3)).join(' / ')} m`,
+  );
+  note(
+    `CONTROL: the four are symmetric in the plan, so their spread must be ~0 ` +
+      `(measured ${(spread * 100).toFixed(1)} cm) and each must sit at the authored reach ` +
+      `(worst ${(worstOff * 100).toFixed(1)} cm off).`,
+  );
+  check(
+    spread < 0.05,
+    `the four turrets stand at different distances from the castle's centre ` +
+      `(spread ${(spread * 100).toFixed(1)} cm) — a symmetric plan has been made asymmetric, ` +
+      'which is a displacement bug, not a bend',
+  );
+  check(
+    worstOff < 0.25,
+    `a turret stands ${(worstOff * 100).toFixed(1)} cm off its authored reach of ` +
+      `${authored.toFixed(3)} m — bending moves stone onto the sphere, never away from ` +
+      'the structure it belongs to',
+  );
+}
 check(
   measuredSpread < rigidWouldBe / 3,
   `the castle's wall base course spans ${(measuredSpread * 100).toFixed(1)} cm of radius, against ` +
