@@ -126,8 +126,49 @@ import { gameStore, walksInParade } from '../src/state/index.ts';
 import { shopItem } from '../src/world/building/shops/catalogue.ts';
 import { Parade } from '../src/entities/parade/Parade.ts';
 
-/** Deep enough that no floor in the game is near it, shallow enough to catch a fall early. */
-const FLOOR_OF_THE_WORLD = -2;
+/**
+ * **How far BELOW the surface that supports her counts as falling.**
+ *
+ * This replaces `FLOOR_OF_THE_WORLD = -2`, an absolute world `y`, and the
+ * replacement is not a tuning change — the old constant had stopped being able
+ * to detect a fall at all.
+ *
+ * On a sphere the ground itself is below −2 m from about **33 m** out, and this
+ * clause sweeps `npcs.all` — every outdoor park child, not only hotel
+ * residents. Measured on the canonical seed at the park's authored scale, all
+ * **19** of its complaints were children who were perfectly fine:
+ *
+ *   8 children, 38–55 m out, clearance above terrain −0.015 to +0.027 m
+ *     — standing on the grass
+ *   11 children, 78–83 m out, clearance 1.966 to 2.173 m
+ *     — riding in the cat bus (the cluster sits on `cat-bus-floor-pan`,
+ *       top y −12.01, and ~2 m is the height of a bus floor)
+ *
+ * Its own docblock cites family QA finding all seven hotel residents falling
+ * through the world. **That capability was gone**: a real fall was one line
+ * among nineteen, indistinguishable from an entire arriving bus-load.
+ *
+ * ## Why this question, and why it needs no exemptions
+ *
+ * The honest question is not "is she low" but **"is she below the surface that
+ * is holding her up"**, and `WalkSurfaces.sample` is this project's existing
+ * owner of that — it already knows castle floors, ramps, landings, moving
+ * platforms and the terrain, and this very file asks it five other times.
+ * Asking it makes every case fall out without a special case for any of them:
+ *
+ * | who | y vs its surface | verdict |
+ * |---|---|---|
+ * | a child on grass | ≈ 0 | fine |
+ * | a child on a bus, a deck, a bridge | **above** it | fine |
+ * | a child through the floor | far **below** it | **falling** |
+ *
+ * A rider is *above* her surface, so she is quiet here for the same reason a
+ * child on a castle deck is: being held up is what the sign of this number
+ * means. Nothing is exempted, which matters — an exemption for "scripted"
+ * characters would have hidden the bus dropping its passengers, which is
+ * precisely a fall somebody would want to hear about.
+ */
+const FALLEN_BELOW_SURFACE = 1;
 
 /** How long the crowd is run before anybody is asked where they are. */
 const SETTLE_SECONDS = 8;
@@ -152,14 +193,39 @@ for (let frame = 0; frame < 60 * SETTLE_SECONDS; frame += 1) {
 }
 
 let lowest = Infinity;
+let worstBelow = -Infinity;
+let carried = 0;
 for (const character of npcs.all) {
-  lowest = Math.min(lowest, character.position.y);
-  if (character.position.y < FLOOR_OF_THE_WORLD) {
+  const at = character.position;
+  lowest = Math.min(lowest, at.y);
+  const surface = world.building.surfaces.sample(at.x, at.z, at.y);
+  const below = surface - at.y;
+  if (below > worstBelow) worstBelow = below;
+  // Standing clear of her own surface — on a bus, a deck, a bridge, a ramp.
+  if (below < -0.25) carried += 1;
+  if (below > FALLEN_BELOW_SURFACE) {
     problems.push(
-      `${character.name} is at y=${character.position.y.toFixed(2)} m after ${SETTLE_SECONDS} s — ` +
-        `below ${FLOOR_OF_THE_WORLD} m, i.e. falling through the world`,
+      `${character.name} is ${below.toFixed(2)} m BELOW the surface under her after ` +
+        `${SETTLE_SECONDS} s — she is at y=${at.y.toFixed(2)} at ` +
+        `(${at.x.toFixed(1)}, ${at.z.toFixed(1)}), ${Math.hypot(at.x, at.z).toFixed(1)} m out, ` +
+        `and the surface there is ${surface.toFixed(2)} m. She is falling through the world`,
     );
   }
+}
+// What this run actually covered, on every run — a fall detector that has
+// stopped detecting must say so rather than reporting a confident zero.
+process.stderr.write(
+  `[hotel fall] ${npcs.all.length} character(s) measured against the surface beneath each; ` +
+    `worst was ${worstBelow.toFixed(3)} m below its own surface (fails over ${FALLEN_BELOW_SURFACE} m); ` +
+    `${carried} stood clear of theirs, held up by something that is not the ground.\n` +
+    `[hotel fall] NOT COVERED: leaving a vehicle. \`WalkSurfaces\` models floors, ramps, ` +
+    `landings, platforms and terrain — it does not model the cat bus, so a rider who fell ` +
+    `through the bus floor would land above the terrain and read as standing on grass. ` +
+    `This clause answers "is she under the surface that holds her up", not "is she still ` +
+    `in the thing she was riding".\n`,
+);
+if (npcs.all.length === 0) {
+  problems.push('ASSERTS NOTHING: no characters existed to measure, so "nobody fell" is vacuous');
 }
 
 // Every resident should also still be in the room they belong to.
