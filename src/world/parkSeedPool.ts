@@ -121,6 +121,47 @@ export const CANONICAL_PARK_SEED = 20260728;
  * generator has to get this right for 0..15, and that write-up is what it
  * should be checked against.
  *
+ * **451 retired, 15 September 2026 (the park back at `PARK_SURFACE_SCALE` 1).**
+ * It is the one pool seed whose drawn paths cross the railway somewhere no
+ * bridge site exists, and `crossings.ts` fails the build on it rather than
+ * ship a path over live rails.
+ *
+ * **The upstream cause, so whoever re-adds it knows what to re-test.**
+ * `SELF_CLEARANCE` in `train/route.ts` is a bare `3`, so the loop may run back
+ * within 3 m of itself — and on this seed at the park's authored size it does,
+ * closing to **3.95 m** beside station 0. A path needs ~8.4 m to pass between
+ * two limbs, so that pinch is a corridor with a lineside fence down both sides
+ * and no walkable width between them. Everything downstream then fails in
+ * turn: the station's lead stepped across the far limb, the rail-aware street
+ * router correctly refused the leg, and the fallback wove the spur over the
+ * rails **13 times** (proved geometric, not a nearest-limb artefact, by
+ * segment/rail intersection with a parity control — the run starts outside the
+ * loop and ends inside, and 13 is odd).
+ *
+ * **Raising `SELF_CLEARANCE` is a measured dead end, and that is why it is
+ * still `3`.** At the honest game-derived value —
+ * `FENCE_OFFSET * 2 + FENCE_HALF_THICKNESS * 2 + STATION_SPUR_WIDTH +
+ * PLAYER_RADIUS * 2` ~ 8.2 m — seed 451 does come clean, and **seed 24 then
+ * proves no bridge site anywhere at all** and its park is invalid. It trades
+ * one broken seed for another; do not re-derive 8.2 in a fortnight.
+ *
+ * **A warp vector was searched for properly and there is not one.**
+ * `scripts/warp-search.mts 451`: **UNSOLVED after all 35 candidates, 2220 s**,
+ * with **three oracle rejections** — three candidates passed `check:park`
+ * (19/19 attractions routing, 0 rail crossings, 240/240 waypoints) and were
+ * then refused by the unallowanced invariant oracle. That two-gate split is
+ * exactly what `parkWarp.ts`'s own header warns about, and it is why a
+ * hand-probed `layoutRestart` that merely "builds clean" is not evidence:
+ * `check:park` alone cannot see what rejected those three.
+ *
+ * So this is the standing ruling applied, not an assertion weakened: a seed the
+ * **old** generator cannot build is retired while the round-robin rewrite is in
+ * flight, because the pinch is upstream in the generator being replaced. Two
+ * real generator fixes found on the way — a station's lead now backtracks onto
+ * its own side of the railway, and `clearStationDistance` now probes its
+ * approach against the railway and not only against the plots — are kept, and
+ * they change nothing on any other pool seed.
+ *
  * **Seed 18 is deliberately absent**, and it is the reason a pool is not just
  * "the seeds `test/procgen` already uses": it is one of that suite's four
  * sweep seeds, green on all 80 invariants, and it fails `check:park` with
@@ -138,7 +179,6 @@ export const PARK_SEED_POOL: readonly number[] = [
   274,
   326,
   428,
-  451,
 ];
 
 /**
