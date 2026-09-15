@@ -92,6 +92,7 @@ import {
   RIM_OUTSET_START,
   GROUND_SPHERE_RADIUS,
   BUS_MAX_GRADE,
+  gradientAtParkRadius,
   TERRAIN_HEIGHT_SCALE,
 } from '../../src/core/constants.ts';
 import {
@@ -9523,23 +9524,38 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
 };
 
 /**
- * **The ground really is the sphere the constant claims, and it is gentle
- * enough for the bus (#511).**
+ * **The ground really is the sphere the constant claims, and the park fits on
+ * it (#511).**
  *
- * `GROUND_SPHERE_RADIUS` is chosen against `BUS_MAX_GRADE`: on a sphere the
- * gradient at horizontal distance `d` is `d / R`, so a radius is a promise
- * about how steep the ground gets. **A promise is not a mechanism** — this
- * measures the terrain the park was actually built on and holds the pair to
- * each other, so if either constant moves the two are re-proved rather than
- * assumed to still agree.
+ * **What this asserts, and what it only reports — read this before trusting a
+ * green run.**
  *
- * Two clauses, and the first is what stops the second passing vacuously:
+ * It used to hold `GROUND_SPHERE_RADIUS` and `BUS_MAX_GRADE` to each other: a
+ * 10% ceiling on the ground's gradient as far out as the park reaches. That
+ * ceiling is **retired** (Overseer's ruling, 14 September 2026) — it existed to
+ * guarantee the cat bus could drive the whole 117 m of its road, and Jim has
+ * ruled it need not: *"showing the bus coming in a couple meters is fine and
+ * good."* Honouring it would need a planet of about 2460 m against the 220 m he
+ * chose by eye.
+ *
+ * So there is **no gradient assertion here any more**, on the park or on the
+ * road. Both are measured a metre at a time and **printed on every run**,
+ * passing or failing, to `process.stderr`. If you want a ceiling back, add it
+ * with the measurement beside it.
+ *
+ * The one clause that still fouls:
  *
  * 1. **The drawn ground is that sphere.** Sampled against the exact cap, so a
  *    terrain that quietly stopped being spherical — a rim creeping back, a
- *    tuned fudge — fails here rather than being measured as if it were one.
- * 2. **Its gradient stays inside the budget** as far out as the park itself
- *    reaches, which is the ground a bus could be driven on.
+ *    tuned fudge — fails here.
+ *
+ * **And the gradient it reports is `tan θ`, not `d / R`.** `d / R` is `sin θ`.
+ * It under-reports everywhere and **cannot exceed 100%**, so when the park
+ * reached 245 m on a 220 m planet — 25 m past the equator, standing on the
+ * clamp where there is no ground at all — it reported a plausible-looking
+ * `111.36%`. A measure that cannot exceed 100% is a measure that cannot report
+ * the thing it exists for. `gradientAtParkRadius` in `core/constants.ts` is the
+ * real form and returns `Infinity` past the equator, which is the honest answer.
  *
  * `terrainHeight` is imported statically, which was **forbidden until this
  * branch**: it used to reach `parkManifest` through `boundary.ts`, so a static
@@ -9577,7 +9593,9 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
       // cap plus the height at the centre rather than demanding an exact match.
       const shapeError = Math.abs(terrainHeight(x, z) - (terrainHeight(0, 0) - expectedFall));
       if (shapeError > worstShapeError) worstShapeError = shapeError;
-      const grade = d / GROUND_SPHERE_RADIUS;
+      // `tan θ`, via the one owner of it. NOT `d / GROUND_SPHERE_RADIUS`, which
+      // is `sin θ` and saturates at 100% exactly where the ground goes vertical.
+      const grade = gradientAtParkRadius(d);
       if (grade > worstGrade) {
         worstGrade = grade;
         worstGradeAt = d;
@@ -9596,12 +9614,53 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
         'below is measuring something else',
     );
   }
-  if (worstGrade > BUS_MAX_GRADE) {
+  // **The park must at least be ON its planet.** The gradient ceiling is
+  // retired, but "past the equator" is not a steep slope — it is no ground: the
+  // cap has curved through vertical and `terrainHeight`'s `Math.max(0, ...)`
+  // guard clamps the whole outer annulus to a flat plane at `y = -R`. Furniture
+  // out there stands on the clamp. That is the one thing this still refuses,
+  // and it is a fact about the park rather than a budget about the bus.
+  // **This is a limit of the terrain FORMULATION, not of the sphere.**
+  //
+  // Jim, 14 September 2026: *"it also should be possible to make the park any
+  // size so long as it doesn't touch its opposite side by wrapping around the
+  // sphere - no artificial limit please"*, and *"a sphere has no edge, the
+  // worst is that it would touch its own opposite side."* He is right, and the
+  // true bound is the antipode at pi*R (691 m on R = 220), not the equator at
+  // pi*R/2 (345.6 m) — so what is refused below is **exactly half the planet**
+  // that a sphere would happily carry.
+  //
+  // It is still refused, because `terrain.ts` cannot draw it. `terrainHeight`
+  // is written as a height above a plane, so past `d = R` no vertical column
+  // meets the sphere at all and `Math.max(0, R² - d²)` maps **the entire far
+  // half of the planet onto one point**: every `d >= R` reports height -R and a
+  // horizontal up. Measured, on this branch:
+  //
+  //     d=219    capHeight=-199.048   up=(0.9955, 0.0952, 0)
+  //     d=220    capHeight=-220.000   up=(1.0000, 0.0000, 0)
+  //     d=5000   capHeight=-220.000   up=(1.0000, 0.0000, 0)
+  //
+  // So a park out there would be laid on the clamp whatever this clause said,
+  // and permitting it would be an assertion reporting success about something
+  // the renderer cannot draw.
+  //
+  // **The fix is to move the ground onto the core's representation** — a radius
+  // as a function of direction, which `src/world/geo/` already holds and which
+  // has no singularity anywhere on the planet — and only then to re-cut this
+  // clause to what is actually true: the park may not wrap round to meet
+  // itself, i.e. geodesic radius < pi*R. `NOTE-sizing-terrain-onto-geo.md` on
+  // this branch sizes that work. Until it lands, this bound is honest about
+  // being the formulation's and not the sphere's.
+  if (reach >= GROUND_SPHERE_RADIUS) {
     fouls.push(
-      `the ground reaches a gradient of ${(worstGrade * 100).toFixed(2)}% at ${worstGradeAt.toFixed(1)} m ` +
-        `from the centre, past the ${(BUS_MAX_GRADE * 100).toFixed(0)}% BUS_MAX_GRADE budget that ` +
-        `GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS} m) was chosen against — either the radius ` +
-        'shrank or the park grew, and the cat bus now drives a slope steeper than anybody agreed',
+      `the park reaches ${reach.toFixed(1)} m on a ${GROUND_SPHERE_RADIUS} m planet — ` +
+        `${(reach - GROUND_SPHERE_RADIUS).toFixed(1)} m past the equator. This is a limit of ` +
+        "terrain.ts's FORMULATION, not of the sphere: `terrainHeight` is a height above a " +
+        'plane, so past d = R no column meets the sphere and the whole far half of the planet ' +
+        `maps to one point (height -R, horizontal up). A sphere would carry a park out to the ` +
+        `antipode at ${(Math.PI * GROUND_SPHERE_RADIUS).toFixed(0)} m of walking; this refuses ` +
+        'everything past half of it. Fix by moving the ground onto a radius-of-direction ' +
+        '(see NOTE-sizing-terrain-onto-geo.md), not by shrinking the park to suit the formula',
     );
   }
 
@@ -9676,26 +9735,28 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
         'the bus was not measured at all — this clause would have passed vacuously, which is ' +
         'exactly the state BUS_MAX_GRADE\'s doc has been describing as a measurement',
     );
-  } else if (worstRoadGrade > BUS_MAX_GRADE) {
-    fouls.push(
-      `seed ${facts.seed}: the ground under the drawn entrance road reaches a gradient of ` +
-        `${(worstRoadGrade * 100).toFixed(2)}% at (${worstRoadGradeAt.x.toFixed(1)}, ` +
-        `${worstRoadGradeAt.z.toFixed(1)}), past the ${(BUS_MAX_GRADE * 100).toFixed(0)}% ` +
-        `BUS_MAX_GRADE budget that GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS} m) was chosen ` +
-        'against — the cat bus drives a slope steeper than anybody agreed',
-    );
   }
+  // No ceiling clause here any more — see this function's docblock. The number
+  // is reported below on every run instead, so it stays visible without
+  // vetoing a park for a journey the bus no longer makes.
 
+  const grade = (g: number) => (Number.isFinite(g) ? `${(g * 100).toFixed(2)}%` : 'INFINITE');
   process.stderr.write(
     `[ground sphere] ${bearings} bearings to ${reach.toFixed(1)} m: worst departure from the cap ` +
       `${worstShapeError.toFixed(2)} m (tolerance ${undulation.toFixed(2)}), worst gradient ` +
-      `${(worstGrade * 100).toFixed(2)}% at ${worstGradeAt.toFixed(1)} m (budget ` +
-      `${(BUS_MAX_GRADE * 100).toFixed(0)}%).\n` +
+      `${grade(worstGrade)} (tan theta) at ${worstGradeAt.toFixed(1)} m.\n` +
       `[ground sphere] and the bus's own arc: ${roadMetresWalked.toFixed(1)} m of drawn kerb ` +
       `walked every ${ROAD_GRADE_STEP} m, out to ${roadReach.toFixed(1)} m from the centre ` +
       `(past the ${reach.toFixed(1)} m boundary the radial sweep stops at), worst gradient ` +
-      `${(worstRoadGrade * 100).toFixed(2)}% at (${worstRoadGradeAt.x.toFixed(1)}, ` +
+      `${grade(worstRoadGrade)} at (${worstRoadGradeAt.x.toFixed(1)}, ` +
       `${worstRoadGradeAt.z.toFixed(1)}).\n` +
+      `[ground sphere] ASSERTS NO GRADIENT CEILING, on the park or on the road. The ` +
+      `${(BUS_MAX_GRADE * 100).toFixed(0)}% BUS_MAX_GRADE budget was retired on 14 September ` +
+      '2026: it guaranteed the bus could drive all 117 m of its road, and Jim ruled it need ' +
+      'not ("showing the bus coming in a couple meters is fine and good"). Honouring it would ' +
+      'need a 2460 m planet against the 220 m chosen by eye. The two numbers above are ' +
+      'REPORTED, not policed — the only gradient-shaped thing still refused is the park ' +
+      'reaching past its own equator, where there is no ground at all.\n' +
       `[ground sphere] Asserts nothing about the ${(
         facts.roadCorridor.segments.length - busDrives.length
       ).toString()} gateway-approach run(s) in through the arch: a child walks those, the bus ` +
@@ -9999,7 +10060,14 @@ const castleTurretsAreSolid: Invariant = (facts) => {
 };
 
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
-  ['the ground is the sphere it claims to be, and gentle enough for the bus', theGroundIsTheSphereItClaimsToBe],
+  // Renamed 14 Sep 2026: it no longer asserts gentleness, so it must not keep
+  // saying it does. The gradient ceiling is retired and reported instead; what
+  // this refuses now is a terrain that stopped being a sphere, and a park that
+  // reaches past its own equator. A test name is a claim like any other.
+  [
+    'the ground is the sphere it claims to be, and the park fits on it',
+    theGroundIsTheSphereItClaimsToBe,
+  ],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],

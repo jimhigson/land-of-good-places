@@ -56,13 +56,30 @@ export const RIM_DROP = 17;
  * road-versus-ride contention outside the wall dissolve rather than have to be
  * fought (both of the constraints that boxed it were properties of the hill).
  *
- * **Where the number comes from — "big enough that the bus is ok".** On a
- * sphere of radius `R` the ground's gradient at a horizontal distance `d` from
- * the tangent point is `d / R`. Measured on the built road (`roadRoute.ts`),
- * the cat bus drives out to **88.26 m** from the origin and the drawn road
- * reaches **117.08 m**. Taking the road's full reach and a **10% gradient
- * budget** — comfortably drivable, and gentle enough that a bus does not look
- * like it is climbing — gives `117.08 / 0.10 = 1171 m`, rounded up to:
+ * **Where the number comes from: Jim's eye, and nothing else.** It was taken to
+ * 400, then 300, then 220 by looking at the park on screen and deciding which
+ * planet read best. **There is no derivation, and this docblock used to carry
+ * one** — `the drawn road's reach 117.08 / a 10% gradient budget = 1171 m,
+ * rounded up to:` followed by `220`. 1171 is not 220. That arithmetic described
+ * the **1200 m** planet the park's extent was once calibrated against (see
+ * `PARK_SURFACE_SCALE`), and it survived three changes of this number, quietly
+ * explaining a value nobody had computed.
+ *
+ * It is deleted rather than corrected, because the constraint it encoded has
+ * been **retired** (Overseer's ruling, 14 September 2026). That 10% ceiling
+ * existed to guarantee the cat bus could drive the whole 117 m of its road; Jim
+ * has since ruled that it need not — *"showing the bus coming in a couple
+ * meters is fine and good, I don't mind that at all."* A budget derived from a
+ * 117 m journey that no longer happens is not a budget, and sizing a 2460 m
+ * planet around it would undo the toy world he picked by eye.
+ *
+ * So this number is a **look**, and it is allowed to be. What it must not do is
+ * pretend to be a calculation. If it changes again, change it because the park
+ * looks better, and expect `theGroundIsTheSphereItClaimsToBe` to print the new
+ * gradients rather than to veto them.
+ *
+ * See {@link gradientAtParkRadius} for what the ground actually does at a given
+ * reach — and note it is `tan θ`, not the `d / R` the old paragraph asserted.
  */
 export const GROUND_SPHERE_RADIUS = 220;
 
@@ -99,12 +116,56 @@ export const GROUND_SPHERE_RADIUS = 220;
 /**
  * The radius the park's authored extent is calibrated against.
  *
- * **This is 1200 while `GROUND_SPHERE_RADIUS` is 220, so the scale is 2.335 and
- * the park is built 2.335x its authored size.** The sentence that used to stand
- * here said the two were held equal and the scale was exactly 1; that stopped
- * being true the moment the radius moved, and it is corrected rather than
- * deleted because what it said next was a diagnosis, and the diagnosis was
- * wrong.
+ * **Held equal to `GROUND_SPHERE_RADIUS`, so the scale is 1 and the park is
+ * built at its authored size.**
+ *
+ * ## Two engineers changed this docblock in opposite directions. Read both.
+ *
+ * #619 found the paragraph claiming a scale of 1 while the constant was 1200,
+ * and corrected **the paragraph** — keeping 2.335x and demolishing the stale
+ * diagnosis that had been used to justify it. That demolition was right and is
+ * kept in full below; its `paths.ts` fix is real, is untouched here, and took
+ * the pool from 3 of 10 seeds building to 10 of 10.
+ *
+ * This branch corrected **the constant** instead, for a reason #619 did not
+ * measure and could not have seen from the crossing planner: at 2.335x the park
+ * does not fit on its own planet.
+ *
+ * Measured on the rebased tree, **with #619's fix in place**, seed 11:
+ *
+ *     the park reaches 247.0 m on a 220 m planet — 27.0 m PAST ITS OWN EQUATOR
+ *     worst gradient INFINITE (tan theta) at 220.0 m
+ *
+ * Past the equator the cap has curved through vertical and `terrainHeight`'s
+ * `Math.max(0, R² - d²)` guard clamps the ground to a flat plane at `y = -R`.
+ * A tree out there stands on the clamp, not on the planet; on seed 326 one
+ * stood at 216 m on a **1045%** slope, 179.6 m below the park's centre, and a
+ * Rail Race duck bar at 246 m stood on no ground at all.
+ *
+ * **So "the park builds" and "the park is on the planet" are different
+ * questions, and #619 answered the first.** `theGroundIsTheSphereItClaimsToBe`
+ * now asserts the second, which is why 2.335x fails it on every seed.
+ *
+ * Whole-suite counts, diffed by name:
+ *
+ *     scale 2.335 (#619's base)   501 passed  128 failed  0 pending
+ *     scale 1     (this branch)   552 passed   96 failed  0 pending
+ *
+ * ## Settled: scale 1 stands, and it is Jim's decision, not an engineer's
+ *
+ * Ruled 14 September 2026. It is **not** merely that scale 1 passes more tests
+ * — it is what Jim said on seeing the grown park: *"the park now feels too
+ * big/sparse - I don't think the area has been maintained from before, it has
+ * gotten bigger."* A separate engineer then restored the authored area and tied
+ * it to the radius **by a relationship precisely so it could not drift again**.
+ * The expression below is that relationship; this constant being 1200 was the
+ * drift it was built to prevent, quietly reintroduced.
+ *
+ * So the park's area is a **design decision already made**, and this is where it
+ * is kept. Do not restore 2.335x to make a subsystem's tests pass. **If 2.335x
+ * ever comes back, the planet grows with it** — the two numbers are one
+ * decision, which is exactly why they are held in one expression rather than
+ * two.
  *
  * It read: *"the paths router draws a leg across the railway at a radius where
  * no bridge site was ever proven, because the rail loop moved outward
@@ -120,14 +181,62 @@ export const GROUND_SPHERE_RADIUS = 220;
  * length. One constant, in `paths.ts`, given its proper owner: 3 of 10 pool
  * seeds built before, **10 of 10 after**, every crossing on every seed bridged.
  *
- * So this number is no longer what blocks the radius moving. What it costs is
- * still real and still above: the park's own dome steepens as `a` grows and `R`
- * shrinks, and that is a thing to look at on screen.
+ * So the crossing planner is no longer what blocks the radius moving. What
+ * blocks it now is the equator, measured above. What it costs is still real and
+ * still above: the park's own dome steepens as `a` grows and `R` shrinks, and
+ * that is a thing to look at on screen.
  */
-const PARK_REFERENCE_SPHERE_RADIUS = 1200;
+const PARK_REFERENCE_SPHERE_RADIUS = GROUND_SPHERE_RADIUS;
 export const PARK_SURFACE_SCALE = Math.sqrt(
   PARK_REFERENCE_SPHERE_RADIUS / GROUND_SPHERE_RADIUS,
 );
+
+/**
+ * **The park may not reach past its own planet, and this is where that is
+ * stated rather than discovered.**
+ *
+ * The paragraph above this said the reference was *"held equal to
+ * `GROUND_SPHERE_RADIUS`, which makes the scale exactly 1"*, and described a
+ * park *"grown 2.33x"* as the state that is **blocked**. The constant was 1200
+ * against a radius of 220, so the scale was 2.3355 and the blocked state was
+ * the one shipping. Measured consequence, on `feat/sphere-combined` with
+ * `test:procgen` red on 49 assertions across seeds 11 and 326:
+ * `boundary.maxRadius` reached **245.0 m on a 220 m planet** — 25 m past the
+ * equator, where `terrainHeight`'s `Math.max(0, R² - d²)` guard clamps the
+ * ground to a flat plane at `y = -R`. A tree stood at 216 m on a **1045%**
+ * slope 179.6 m below the park's centre; a Rail Race duck bar stood at 246 m
+ * on no ground at all.
+ *
+ * `scripts/park-past-the-horizon.mts` is that measurement, re-runnable.
+ *
+ * So the domain states its own limit. A cap's gradient at horizontal distance
+ * `d` is `tan θ = d / √(R² − d²)` — **not** `d / R`, which is `sin θ` and is
+ * what the invariant had been measuring: it under-reports everywhere and
+ * saturates at a friendly 100% exactly where the ground turns vertical.
+ * Inverting the real gradient gives the radius a budget permits:
+ *
+ *     d = R·g / √(1 + g²)
+ *
+ * This is deliberately **not** wired into `GARDEN_PLAY_RADIUS` as a clamp. A
+ * clamp would silently resize the park and hide the contradiction; the pair is
+ * held to each other by an invariant instead, so that if the planet shrinks
+ * again the park is re-proved rather than quietly trimmed.
+ */
+export const parkRadiusForGradient = (
+  gradient: number,
+  radius: number = GROUND_SPHERE_RADIUS,
+): number => (radius * gradient) / Math.sqrt(1 + gradient * gradient);
+
+/**
+ * The steepest ground anywhere in the park, as a true gradient, at the extent
+ * the park actually reaches. The inverse of {@link parkRadiusForGradient}, and
+ * `Infinity` past the equator — because there is no ground there to have a
+ * gradient.
+ */
+export const gradientAtParkRadius = (
+  d: number,
+  radius: number = GROUND_SPHERE_RADIUS,
+): number => (d >= radius ? Infinity : d / Math.sqrt(radius * radius - d * d));
 
 /** Half-width of the playable garden, in metres. The garden is square. */
 export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
@@ -147,22 +256,33 @@ export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
 export const GARDEN_PLAY_RADIUS = 58 * PARK_SURFACE_SCALE;
 
 /**
- * The steepest the ground is allowed to be anywhere the cat bus drives, as a
- * gradient (rise over run). {@link GROUND_SPHERE_RADIUS} is chosen against it.
+ * The gradient the cat bus is comfortable on, as rise over run.
  *
- * **This is a budget with a check behind it, not a comment promising a
- * number.** `test/procgen/invariants.ts`'s `theGroundIsTheSphereItClaimsToBe`
- * walks the **drawn entrance road** — the bus's own arc, most of which lies
- * outside the park boundary — a metre at a time, and asserts the gradient
- * between consecutive points of the built terrain stays inside this. So if
- * either the radius or the road's reach ever moves, the pair is re-proved
- * rather than assumed to still agree.
+ * **RETIRED as a constraint (Overseer's ruling, 14 September 2026). Nothing
+ * asserts this any more, and that is deliberate.** It is kept because it is a
+ * true fact about the bus, and because `terrain.ts` refers to it when talking
+ * about the slope a rider feels — but it no longer sizes
+ * {@link GROUND_SPHERE_RADIUS} and it no longer vetoes a park.
  *
- * That sentence was here before the clause was, and said the same thing while
- * the invariant in fact sampled radially and stopped at the boundary — printing,
- * honestly, that it asserted nothing beyond it, which is precisely where the
- * road is. The clause exists now; if you weaken it, weaken this paragraph in the
- * same edit rather than leaving a promise standing over nothing.
+ * Why: the ceiling existed to guarantee the bus could drive the whole 117 m of
+ * its road. Jim has ruled that it need not — *"showing the bus coming in a
+ * couple meters is fine and good, I don't mind that at all."* Honouring 10%
+ * against the park's real reach would need a planet of about **2460 m**, eleven
+ * times the one he chose by eye.
+ *
+ * **What replaced it is a report, not a veto.**
+ * `theGroundIsTheSphereItClaimsToBe` still walks the park radially and the drawn
+ * kerb a metre at a time, and prints the worst real gradient it finds on every
+ * run — to `process.stderr`, so a passing run says it too. If a future change
+ * wants a ceiling back, put it there with a measurement beside it; do not
+ * restore a promise in this docblock, which is what the last one was.
+ *
+ * The number this is measured against also changed. The old clause computed
+ * `d / R`, which is `sin θ`; a spherical cap's gradient is `tan θ`
+ * ({@link gradientAtParkRadius}). `sin θ` under-reports everywhere and cannot
+ * exceed 100%, so it reported a plausible-looking 111% for ground that had
+ * curved past vertical and did not exist. A measure that cannot exceed 100% is
+ * a measure that cannot report the thing it exists for.
  */
 export const BUS_MAX_GRADE = 0.1;
 
