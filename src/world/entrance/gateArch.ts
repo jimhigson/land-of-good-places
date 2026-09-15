@@ -6,6 +6,7 @@ import {
 } from '../../art/models/gateArch';
 import { ENTRANCE_GATE_HALF_WIDTH } from './layout';
 import { bendPlacedStructure } from '../geo/bend';
+import { standOnSphere } from '../terrain';
 
 /**
  * **The park's front gate: the authored arch, seated on its gateway.**
@@ -192,7 +193,17 @@ export function buildGateArch(options: GateArchOptions): GateArch {
   // horizontally by `d − R·sin(d/R)` = **1.4 mm** at this radius. The drop onto
   // the sphere is vertical and the collider is a footprint, so the two still
   // describe the same square metre.
-  if (options.onParkSphere) bendPlacedStructure(arch.root);
+  // **Stood on the sphere first, then bent.** Deleting `standOnSphere` here was
+  // a real bug, not a simplification: `bendPlacedStructure` reads its chart off
+  // the root's own world quaternion, so a root carrying only a yaw hands it an
+  // up of world `+Y` instead of the radial at the gateway. The chart's origin
+  // then sits over the park's centre and the whole arch is drawn **148 m** from
+  // its own pier colliders. `standOnSphere` is what puts the radial into that
+  // quaternion; the bend refines it across the footprint afterwards.
+  if (options.onParkSphere) {
+    standOnSphere(arch.root);
+    bendPlacedStructure(arch.root);
+  }
 
   const feet: { x: number; z: number }[] = [];
   for (const side of [-1, 1] as const) {

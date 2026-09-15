@@ -273,7 +273,24 @@ export function bendOntoPlanet(
     worstAt: '',
     worstShift: 0,
   };
-  root.updateMatrixWorld(true);
+  // **`updateWorldMatrix(true, true)`, not `updateMatrixWorld(true)`** — the
+  // first argument is what updates the ANCESTORS, and without it this reads a
+  // stale parent.
+  //
+  // `updateMatrixWorld(true)` recomputes the subtree from `parent.matrixWorld`
+  // as it currently stands, and at the moment a structure is bent that is
+  // routinely out of date: `standInPlot` writes `gardenRoot`'s local transform
+  // *after* its last world update, so the castle's own `matrixWorld` was being
+  // composed against a parent that had not yet moved. Every bent point then
+  // came out offset by the parent's staleness — measured on the castle, a
+  // uniform 4.59 m, which turned four symmetric turret instances into
+  // (-15.915, -6.361), (9.160, -6.358), (-15.913, 12.561), (9.162, 12.564)
+  // where the authored positions are (±12.225, ±9.225).
+  //
+  // The tell was in `BendReport` all along: `worstShift` read **6.005 m** for a
+  // structure whose widest honest bend is about half a metre, and it was
+  // explained away rather than read.
+  root.updateWorldMatrix(true, true);
   _rootInverse.copy(root.matrixWorld).invert();
 
   // **A geometry shared by two meshes cannot be bent.** The bend is a function
@@ -442,6 +459,8 @@ export function segmentsFor(metres: number, tolerance = 0.05): number {
 const _anchorAt = /* @__PURE__ */ new Geo();
 const _anchorPos = /* @__PURE__ */ new Vector3();
 const _anchorQuat = /* @__PURE__ */ new Quaternion();
+const _anchorUp = /* @__PURE__ */ new Vector3();
+const _anchorRadial = /* @__PURE__ */ new Vector3();
 
 /**
  * **Bend a structure that has already been stood on the sphere, deriving its
@@ -472,10 +491,37 @@ export function bendPlacedStructure(
   id?: ChartId,
   options: BendOptions = {},
 ): BendReport {
-  root.updateMatrixWorld(true);
+  // Ancestors too — see `bendOntoPlanet`. The chart is read off `matrixWorld`
+  // here, so a stale parent puts the chart itself in the wrong place.
+  root.updateWorldMatrix(true, true);
   root.getWorldPosition(_anchorPos);
   root.getWorldQuaternion(_anchorQuat);
   _anchorAt.setFromWorldVector(_anchorPos);
+
+  // **The root must already be standing on the sphere, and this refuses to
+  // guess.** The chart's whole basis is read off `root`'s world quaternion, so
+  // a root carrying only a yaw hands over an up of world `+Y`; the chart origin
+  // then lands wherever that direction meets the planet, and the structure is
+  // drawn there instead of where it belongs. That is not subtle — the gate arch
+  // was moved **148 m**, to the park's centre, leaving its own pier colliders at
+  // the gateway — but it is silent, because every individual transform is
+  // well-formed and nothing renders an error.
+  //
+  // So it is a precondition with a mechanism behind it rather than a comment.
+  // `standOnSphere` (or `standInPlot`, or `placeOnSphere`) is what puts the
+  // radial into that quaternion, and must run first.
+  _anchorUp.set(0, 1, 0).applyQuaternion(_anchorQuat);
+  _anchorRadial.set(_anchorAt.cx, _anchorAt.cy, _anchorAt.cz).normalize();
+  const lean = Math.acos(Math.min(1, Math.max(-1, _anchorUp.dot(_anchorRadial))));
+  if (lean > 0.02) {
+    throw new Error(
+      `bendPlacedStructure: "${root.name || root.type}" is not standing on the sphere — ` +
+        `its own up is ${((lean * 180) / Math.PI).toFixed(2)}° from the radial at its position, ` +
+        `which would put its chart origin about ${(lean * PLANET_RADIUS).toFixed(1)} m away and ` +
+        'draw the whole structure there. Call standOnSphere/standInPlot on it first.',
+    );
+  }
+
   const baseAltitude = _anchorAt.radius() - PLANET_RADIUS;
   const chart = id === undefined ? scratchChart() : (chartById(id) ?? curvedChart(id, new Frame()));
   chart.anchor.at.copy(_anchorAt);
