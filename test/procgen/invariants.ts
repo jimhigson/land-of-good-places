@@ -5707,7 +5707,29 @@ const noBridgeParapetCanBeSeenThrough: Invariant = (facts) => {
   const INNER_STANDOFF = 1.2;
   const HIT_SLACK = 0.25;
   const PROBE_STEP = 0.05;
-  const PROBE_BOTTOM = 1.5;
+  /**
+   * **How far below the wall top to probe — the wall's own height, from the
+   * game, never a number typed here.**
+   *
+   * This was a bare `1.5`, and `PARAPET_HEIGHT + PARAPET_CROWN_LIFT` is
+   * **1.17**: it probed 0.33 m *below the bottom of the wall it was probing*,
+   * into the spandrel and deck edge underneath — which this clause is not
+   * about, and which is drawn by different code.
+   *
+   * It survived only because the old, world-`y` bridge happened to put solid
+   * geometry in that band. Bending the bridge moved it, and all ten of the
+   * regressions that appeared were in the overshoot: measured across the five
+   * failing seeds, **every reported hole sat at drop 1.38-1.48 m and every one
+   * was below the wall's own height**, while at or above the wall bottom there
+   * were **0 misses in 32,292 judged samples**.
+   *
+   * The frame hypothesis the previous lane could not settle is **disproved** by
+   * the same run: re-probing every sample with the drop taken along the local
+   * up and the normal projected into that point's own horizontal plane gives
+   * `world MISS / local HIT` of **0** on four seeds and 1 of 10,856 on the
+   * fifth. The lean was never the mechanism. (`scripts/diag-parapet-frame.mts`.)
+   */
+  const PROBE_BOTTOM = facts.maxParapetHeight;
 
   const groups = new Map<string, Object3D>();
   for (const crossing of facts.world.train.crossings) {
