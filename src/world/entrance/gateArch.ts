@@ -5,6 +5,7 @@ import {
   GATE_ARCH_PIER_KEEP_OUT,
 } from '../../art/models/gateArch';
 import { ENTRANCE_GATE_HALF_WIDTH } from './layout';
+import { bendPlacedStructure } from '../geo/bend';
 import { standOnSphere } from '../terrain';
 
 /**
@@ -174,12 +175,35 @@ export function buildGateArch(options: GateArchOptions): GateArch {
   const arch = createGateArch();
   arch.root.position.set(centreX, ground, centreZ);
   arch.root.rotation.y = yaw;
-  // Piers, span and lettering are one authored mesh under this root, so the
-  // whole gate leans as the single object it is. The feet below are the pivot
-  // and do not move, which is what keeps the colliders honest.
-  if (options.onParkSphere) standOnSphere(arch.root);
   if (options.namePrefix !== undefined) arch.root.name = `${options.namePrefix}-arch`;
   group.add(arch.root);
+  // **The gate bends, rather than leaning as one rigid object.**
+  //
+  // Piers, span and lettering are one authored mesh under this root, and the
+  // comment that stood here said the whole gate should therefore lean as the
+  // single object it is. Measured on the built park, that object's footprint
+  // radius is **7.42 m**, and a flat patch on R = 220 m is honest only to
+  // 4.69 m — so one tilt was misplacing its outer piers by **12.5 cm**. Jim's
+  // ruling covers exactly this: anything wider than a bench uses local
+  // horizontal and vertical, not a global one.
+  //
+  // **The colliders stay honest**, which was the original comment's real
+  // concern and is worth keeping the number for: the feet below are computed
+  // from flat `centreX/Z ± halfWidth·axis`, and bending moves a pier foot
+  // horizontally by `d − R·sin(d/R)` = **1.4 mm** at this radius. The drop onto
+  // the sphere is vertical and the collider is a footprint, so the two still
+  // describe the same square metre.
+  // **Stood on the sphere first, then bent.** Deleting `standOnSphere` here was
+  // a real bug, not a simplification: `bendPlacedStructure` reads its chart off
+  // the root's own world quaternion, so a root carrying only a yaw hands it an
+  // up of world `+Y` instead of the radial at the gateway. The chart's origin
+  // then sits over the park's centre and the whole arch is drawn **148 m** from
+  // its own pier colliders. `standOnSphere` is what puts the radial into that
+  // quaternion; the bend refines it across the footprint afterwards.
+  if (options.onParkSphere) {
+    standOnSphere(arch.root);
+    bendPlacedStructure(arch.root);
+  }
 
   const feet: { x: number; z: number }[] = [];
   for (const side of [-1, 1] as const) {

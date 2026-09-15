@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { Quaternion, Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { placedEntry } from '../parkLayout';
 import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
@@ -39,7 +39,11 @@ import {
 } from '../../core/constants';
 import { CASTLE_HALL, CASTLE_MALL, CASTLE_ROOF } from './floors';
 import { TAP_FINGER_METRES } from '../tapSpacing';
-import { terrainHeight, upAt } from '../terrain';
+import { placeOnSphere, terrainHeight, upAt } from '../terrain';
+import { Frame } from '../geo/Frame';
+import { Geo, PLANET_RADIUS } from '../geo/Geo';
+import { curvedChart } from '../geo/Chart';
+import { bentFrame } from '../geo/bend';
 
 /**
  * The floor plan of the big building, as data.
@@ -398,18 +402,82 @@ export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
 );
 
 /**
- * A tower part as a solid of revolution: a vertical span with a radius that
- * varies linearly from bottom to top. A cylinder and a cone are both this.
+ * **The castle facade's own frame on the planet — the single owner of where the
+ * castle stands and which way its ground leans.**
+ *
+ * `placeOnSphere` is the one map from the flat frame everything was authored in
+ * onto the sphere, and `standInPlot` puts the facade's scene graph through it
+ * with exactly these arguments. Reading it here rather than re-deriving it is
+ * the whole point: the drawn stonework and the solids a ride routes around are
+ * bent against **this** frame, so they cannot drift apart. `check:castle-bend`
+ * asserts the scene agrees with it, so a future change to either side is caught
+ * rather than discovered by a child riding through a wall.
+ */
+const _facadePosition = /* @__PURE__ */ new Vector3();
+const _facadeQuaternion = /* @__PURE__ */ new Quaternion();
+placeOnSphere(
+  { x: BUILDING_CENTRE_X, y: BUILDING_BASE_Y, z: BUILDING_CENTRE_Z },
+  0,
+  _facadePosition,
+  _facadeQuaternion,
+);
+
+export const CASTLE_FACADE_FRAME: Frame = /* @__PURE__ */ new Frame(
+  Geo.fromWorldVector(_facadePosition),
+  _facadeQuaternion.clone(),
+);
+
+/** Where the facade's own `y = 0` sits above the sphere. */
+export const CASTLE_FACADE_BASE_ALTITUDE =
+  CASTLE_FACADE_FRAME.at.radius() - PLANET_RADIUS;
+
+/**
+ * The chart the castle's exterior bends against — see `geo/bend.ts`. One chart,
+ * declared here, used by `Building.ts` to bend the drawn mesh and by
+ * {@link CASTLE_TOWERS} below to lean the solids that stand in for it.
+ */
+export const CASTLE_FACADE_CHART = /* @__PURE__ */ curvedChart(
+  'castle-facade',
+  CASTLE_FACADE_FRAME,
+);
+
+/**
+ * A tower part as a solid of revolution: a span along its **own axis**, with a
+ * radius that varies linearly from bottom to top. A cylinder and a cone are
+ * both this.
+ *
+ * **The axis is not `+Y` any more, and that is the point.** The castle bends
+ * across its own footprint, so each turret stands on the radial under its own
+ * foot and leans about 3.9° outward. A vertical solid at the foot stopped
+ * covering the stone: 14.8 m up, a turret's axis has moved roughly a metre. The
+ * ginormous slide, which routes around these solids, was measured passing
+ * **0.47 m inside `tower-bodies[3]`** — a child riding through solid masonry —
+ * and that is what this field fixes.
+ *
+ * A leaning cone is still a solid of revolution, so the closed form survives
+ * intact: the parameter comes off the projection along the axis instead of off
+ * world `y`, and the distance is to the axis line instead of to a vertical one.
+ * With `axis = (0, 1, 0)` it reduces to exactly the old arithmetic.
  */
 export interface TowerSolid {
   readonly name: string;
-  /** Axis position, in world space. */
+  /**
+   * Axis **foot** position, in world space — where the solid's bottom meets its
+   * own axis. Still the right thing to read for a footprint, because a turret's
+   * foot is where it touches the ground.
+   */
   readonly x: number;
   readonly z: number;
   readonly bottomY: number;
   readonly topY: number;
   readonly radiusBottom: number;
   readonly radiusTop: number;
+  /** Unit direction of the axis, foot to top. `(0, 1, 0)` for an unbent tower. */
+  readonly axisX: number;
+  readonly axisY: number;
+  readonly axisZ: number;
+  /** Length along the axis, which is *not* `topY - bottomY` once it leans. */
+  readonly axisLength: number;
 }
 
 
@@ -422,26 +490,60 @@ export interface TowerSolid {
 export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
   const solids: TowerSolid[] = [];
   const corners = CASTLE_TURRET_CORNERS;
+  const foot = new Vector3();
+  const top = new Vector3();
+  const axis = new Vector3();
   corners.forEach(([localX, localZ], index) => {
-    const x = BUILDING_CENTRE_X + localX;
-    const z = BUILDING_CENTRE_Z + localZ;
+    // **Bent against the same chart the drawn turret is bent against**, so the
+    // solid a ride avoids and the mesh a child sees cannot drift apart — which
+    // is what this block has always promised and, for one commit, stopped
+    // delivering. Both ends are taken through the bend and the axis is the line
+    // between them, rather than assuming the lean and trusting it.
+    const solidAxis = (fromY: number, toY: number): void => {
+      bentFrame(
+        CASTLE_FACADE_CHART,
+        new Vector3(localX, CASTLE_FACADE_BASE_ALTITUDE + (fromY - BUILDING_BASE_Y), localZ),
+      ).at.toWorld(foot);
+      bentFrame(
+        CASTLE_FACADE_CHART,
+        new Vector3(localX, CASTLE_FACADE_BASE_ALTITUDE + (toY - BUILDING_BASE_Y), localZ),
+      ).at.toWorld(top);
+      axis.copy(top).sub(foot);
+    };
+
+    solidAxis(BUILDING_BASE_Y, BUILDING_BASE_Y + TOWER_HEIGHT);
+    let length = axis.length();
     solids.push({
       name: `tower-body-${index}`,
-      x,
-      z,
-      bottomY: BUILDING_BASE_Y,
-      topY: BUILDING_BASE_Y + TOWER_HEIGHT,
+      x: foot.x,
+      z: foot.z,
+      bottomY: foot.y,
+      topY: top.y,
       radiusBottom: CASTLE_TURRET_BASE_RADIUS,
       radiusTop: TOWER_RADIUS,
+      axisX: axis.x / length,
+      axisY: axis.y / length,
+      axisZ: axis.z / length,
+      axisLength: length,
     });
+
+    solidAxis(
+      BUILDING_BASE_Y + TOWER_HEIGHT,
+      BUILDING_BASE_Y + TOWER_HEIGHT + TOWER_ROOF_HEIGHT,
+    );
+    length = axis.length();
     solids.push({
       name: `tower-roof-${index}`,
-      x,
-      z,
-      bottomY: BUILDING_BASE_Y + TOWER_HEIGHT,
-      topY: BUILDING_BASE_Y + TOWER_HEIGHT + TOWER_ROOF_HEIGHT,
+      x: foot.x,
+      z: foot.z,
+      bottomY: foot.y,
+      topY: top.y,
       radiusBottom: TOWER_RADIUS + TOWER_ROOF_OVERHANG,
       radiusTop: 0,
+      axisX: axis.x / length,
+      axisY: axis.y / length,
+      axisZ: axis.z / length,
+      axisLength: length,
     });
   });
   return solids;
@@ -461,11 +563,23 @@ export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
  * two: for a cylinder, rays would be strictly less accurate than this.
  */
 export function distanceOutsideTower(tower: TowerSolid, x: number, z: number, y: number): number {
-  if (y < tower.bottomY || y > tower.topY) return Infinity;
-  const span = tower.topY - tower.bottomY;
-  const t = span <= 1e-9 ? 0 : (y - tower.bottomY) / span;
+  // Measured along the tower's **own** axis, because it leans. `(x, z, y)` is
+  // relative to the axis foot; `along` is how far up the axis the point
+  // projects, and everything else follows from that. With a vertical axis this
+  // is identical to the `y`-based arithmetic it replaces, term for term.
+  const dx = x - tower.x;
+  const dy = y - tower.bottomY;
+  const dz = z - tower.z;
+  const along = dx * tower.axisX + dy * tower.axisY + dz * tower.axisZ;
+  if (along < 0 || along > tower.axisLength) return Infinity;
+  const t = tower.axisLength <= 1e-9 ? 0 : along / tower.axisLength;
   const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
-  return Math.hypot(x - tower.x, z - tower.z) - radius;
+  // The component of the offset perpendicular to the axis — the true distance
+  // to the axis line, not a horizontal slice through a leaning solid.
+  const perpX = dx - along * tower.axisX;
+  const perpY = dy - along * tower.axisY;
+  const perpZ = dz - along * tower.axisZ;
+  return Math.hypot(perpX, perpY, perpZ) - radius;
 }
 
 /**

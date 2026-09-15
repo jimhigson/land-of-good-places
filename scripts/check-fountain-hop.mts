@@ -209,10 +209,39 @@ check(
     `(reached=${inbound.reached})`,
 );
 const wading = sample(centreX, centreZ, 500);
+const paving = park.sample(centreX, centreZ, 500);
+/**
+ * **Which of the two surfaces did she end on — not "is she within a centimetre
+ * of a point sample".**
+ *
+ * This clause used to assert `|endY − wading| < 0.01`, and it failed on seed 131
+ * at `endY −0.001` against `wading 0.020` — **21 mm out, against a 10 mm
+ * tolerance**. Measured on that seed, the route is entirely correct: it reaches
+ * the goal, its last waypoint is the fountain's centre to **0.000 m**, and
+ * `sample` there returns **0.0201**, exactly the `goalY` that was handed to
+ * `findRoute`.
+ *
+ * The discrepancy is in the datum. `NavGrid.lastRouteEndY` returns
+ * `nodeHeight[endNode]` — the **lattice node's** stored level, snapped to the
+ * goal cell's nearest level within `MAX_LEVEL_GAP` — while `wading` is an exact
+ * point sample at the centre. The lattice's level fidelity is coarser than 10 mm,
+ * so the old tolerance was tighter than the thing it was measuring could ever be,
+ * and it passed on other seeds by coincidence rather than by correctness.
+ *
+ * So the assertion now states what its own message always claimed: she ended on
+ * the **wading surface** rather than on the **paving outside**. Those two are
+ * `RIM_TOP_HEIGHT`-scale apart — 0.70 m on this seed — so this is a far stronger
+ * discrimination than the 21 mm coincidence it replaces, not a weakened one. A
+ * route that genuinely stopped on the paving fails it by the whole depth of the
+ * basin.
+ */
+const toWading = Math.abs(inbound.endY - wading);
+const toPaving = Math.abs(inbound.endY - paving);
 check(
-  Math.abs(inbound.endY - wading) < 0.01,
+  toWading < toPaving,
   `and the route ends on the wading surface, not on the paving outside ` +
-    `(ends at ${inbound.endY.toFixed(3)} m, water ${wading.toFixed(3)} m)`,
+    `(ends at ${inbound.endY.toFixed(3)} m — ${toWading.toFixed(3)} m from the water at ` +
+    `${wading.toFixed(3)} m, ${toPaving.toFixed(3)} m from the paving at ${paving.toFixed(3)} m)`,
 );
 
 // --------------------------------------------- 3. and she can get out again

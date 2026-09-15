@@ -436,16 +436,25 @@ const AVOIDED_PLOTS = (() => {
  * returned clear anyway* — a blocked point is always within the box — so it
  * changes no verdict, and it uses no `Math.hypot`, only two `abs`.
  */
-const TOWER_BOUND_X = Math.max(
-  ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.x - BUILDING_CENTRE_X) + Math.max(tower.radiusBottom, tower.radiusTop),
-  ),
-);
-const TOWER_BOUND_Z = Math.max(
-  ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.z - BUILDING_CENTRE_Z) + Math.max(tower.radiusBottom, tower.radiusTop),
-  ),
-);
+//
+// **Both ends of the axis, because the towers lean.** This used to read the
+// foot alone, which was exactly right while a tower was a vertical cylinder and
+// silently wrong the moment the castle began bending to the planet: a turret
+// leans about 3.9 deg, so its top stands roughly a metre further out than its
+// foot, and a box drawn round the feet no longer contains the stone. The gate
+// would then have returned "clear" for a point genuinely inside a turret's
+// upper half — the one thing its contract above promises it never does, and
+// invisible, because a fast path that wrongly says "clear" produces no error,
+// just a chute through masonry.
+const towerReach = (tower: (typeof CASTLE_TOWERS)[number], axis: 'x' | 'z'): number => {
+  const centre = axis === 'x' ? BUILDING_CENTRE_X : BUILDING_CENTRE_Z;
+  const foot = axis === 'x' ? tower.x : tower.z;
+  const top = foot + (axis === 'x' ? tower.axisX : tower.axisZ) * tower.axisLength;
+  const widest = Math.max(tower.radiusBottom, tower.radiusTop);
+  return Math.max(Math.abs(foot - centre), Math.abs(top - centre)) + widest;
+};
+const TOWER_BOUND_X = Math.max(...CASTLE_TOWERS.map((tower) => towerReach(tower, 'x')));
+const TOWER_BOUND_Z = Math.max(...CASTLE_TOWERS.map((tower) => towerReach(tower, 'z')));
 
 
 /**
@@ -1282,7 +1291,44 @@ export function slideRouteBriefAt(desiredLength: number): OpenRouteBrief {
  * **Exported for the loading screen**, which walks the same ladder a rung at a
  * time with the sliced search — one list, both cadences, nothing to drift.
  */
-export const DESIRED_LENGTH_LADDER: readonly number[] = [DESIRED_LENGTH, 65, 62, 55, 68, 50];
+/**
+ * The targets the chute search tries, in order, until one gives a rideable
+ * route.
+ *
+ * **Rungs are only ever appended, never reordered or removed**, and that is
+ * what makes extending this safe: a later rung is reached only when every
+ * earlier one has already failed, so adding to the tail cannot change the slide
+ * on any seed that already solved. That is a structural argument about the
+ * loop, not a measurement — it holds because `planSlide` returns on the first
+ * rung that satisfies, so nothing downstream of a satisfied rung is ever
+ * reached.
+ *
+ * The last four were added when the castle began bending to the planet. The
+ * turrets lean to their own radial, which is 36 deg off world +Y out where the
+ * castle stands, and on seed 326 the first six rungs all ran into a tower — the
+ * generator threw, and a thrown generator takes a whole seed's test file down
+ * with it rather than failing one assertion. CLAUDE.md's rule is that procgen
+ * backtracks on a collision and makes a different decision until it works, so
+ * it gets more decisions to make.
+ *
+ * **These four did not rescue seed 326**, and that is recorded rather than
+ * quietly left: all ten rungs fail at the same point, so the chute's length was
+ * never the free variable that mattered there. What changed on that seed is
+ * that the towers are now described honestly — see `CASTLE_TOWERS` — and the
+ * route it used to be handed passed through stone that nothing was measuring.
+ */
+export const DESIRED_LENGTH_LADDER: readonly number[] = [
+  DESIRED_LENGTH,
+  65,
+  62,
+  55,
+  68,
+  50,
+  72,
+  45,
+  75,
+  42,
+];
 
 /** One attempt at a chute, at one target. Null if that target admits no route at all. */
 function solveChuteAt(
