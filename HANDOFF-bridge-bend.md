@@ -410,6 +410,24 @@ unleaned, which is exactly the slab thickness, against metres once leaned. So
 leaning the marker cannot be done until the invariants stop asking an AABB for
 a height. Reverted.
 
+**This is the same disease as the cat bus's 9.43 m, in a different organ.**
+There, a measurement was taken on a convenient origin — a trestle's *foot* —
+rather than on the thing that actually gets drawn, and the check headlined a
+confident, honest, wrong zero (`check:entrance-road`: *"0 legs hit on all
+sixteen seeds"*, against 364 posts once measured along the drawn, leaning
+trunk — 3.40x more). Here the convenient origin is an axis-aligned box around
+an object that is no longer axis-aligned. In both cases the number is real,
+cheap to compute, and describes something other than the question being asked;
+in both cases the tell is that it only goes wrong once the thing being measured
+**leans**. An AABB is a legitimate answer to "what volume does this occupy" and
+never an answer to "how high is this surface", and the moment the bridge bends,
+those two stop coinciding.
+
+So the rule for whoever takes this on: **the invariants must ask for the soffit
+height at a plan point, not for the minimum corner of a marker's bounding box.**
+Until they do, the marker has to stay unleaned — and while it stays unleaned it
+cannot be trusted over a bent bridge either, which is why #632 exists.
+
 ## Measurement traps hit here
 
 - `mv scripts/diag-*.mts` swept up **9 pre-existing tracked** scripts. Caught by
