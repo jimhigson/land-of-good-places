@@ -59,7 +59,10 @@
  *
  * ## The escape hatch, and why it is counted out loud
  *
- * `// flat-ok: <reason>` on the offending line or the line above exempts it.
+ * `// flat-ok: <reason>` on the offending line, or the line **immediately**
+ * above it, exempts it. One line, not "somewhere above" — a two-line reason
+ * puts the marker out of reach and the finding stands; see {@link scan}, which
+ * has the worked example. Put long prose above and the marker inline.
  * Legitimate: a minigame with its own flat scene, a chart's own tangent basis,
  * an object-local transform under an `Anchor`. The reason is mandatory and the
  * total is **printed on every run**, so the hatch cannot quietly become the
@@ -373,8 +376,24 @@ function scan(file: string, source: string): Finding[] {
 
   const add = (node: ts.Node, rule: RuleId): void => {
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
-    // `// flat-ok:` on this line or the one above. A reason is mandatory —
-    // a bare `flat-ok` does not match, so the hatch cannot be used wordlessly.
+    // `// flat-ok:` on this line or the one **immediately** above. A reason is
+    // mandatory — a bare `flat-ok` does not match, so the hatch cannot be used
+    // wordlessly.
+    //
+    // **The footgun, which everyone who uses this hits once.** "The line above"
+    // means exactly one line, so a marker separated from its code by anything —
+    // most easily by writing the reason as two comment lines — is not an
+    // exemption, and the finding stands with no hint as to why:
+    //
+    //     // flat-ok: local +Y rotated by the object's own quaternion,      <- ignored
+    //     // which derives the local up rather than assuming it             <- this is "above"
+    //     const up = new Vector3(0, 1, 0).applyQuaternion(q);               <- still flagged
+    //
+    // This is the same shape as `@ts-expect-error`, and for the same reason:
+    // a directive that scanned upwards past intervening lines would silently
+    // exempt code nobody meant to exempt. So put a long reason *above* as
+    // ordinary prose and the marker **inline** on the code line itself, which
+    // is what `parkFacts.ts`'s `heightAlongOwnUp` does.
     const here = lines[line] ?? '';
     const above = lines[line - 1] ?? '';
     if (/\/\/\s*flat-ok:\s*\S/.test(here) || /^\s*\/\/\s*flat-ok:\s*\S/.test(above)) {
@@ -518,6 +537,18 @@ const ARMING: readonly { rule: RuleId; source: string }[] = [
     source: 'const up = new Vector3(0, 1, 0);\nraycaster.set(origin, up);',
   },
   { rule: 'VERTICAL_RAY', source: 'const up = new Vector3(0, 1, 0);\nconst r = new Raycaster(origin, up);' },
+  // The hatch's own footgun, armed: a reason split over two comment lines puts
+  // the marker off the line immediately above, so this is NOT exempt and the
+  // rule must still fire. If this fixture ever stops firing, the hatch has
+  // started reaching further up the file than anyone documented and is quietly
+  // exempting code nobody marked.
+  {
+    rule: 'HARD_UP',
+    source:
+      '// flat-ok: a reason that runs on\n' +
+      '// to a second comment line\n' +
+      'const up = new Vector3(0, 1, 0);',
+  },
 ];
 
 /** Things that must NOT fire — the false positives a grep cannot dodge. */
@@ -528,6 +559,11 @@ const MUST_NOT_FIRE: readonly string[] = [
   'if (face.y < 0) down += 1;', //           a facing test, not an altitude
   'raycaster.set(origin, tangent);', //      a ray along something derived, not a world axis
   'const lowest = box.min.x;', //            a horizontal extreme is orientation-free here
+  // Both spellings that DO exempt, so the hatch cannot silently stop working —
+  // a check whose escape hatch has failed shut is as broken as one that cannot
+  // fail, and it fails in the direction everybody argues with.
+  'const up = new Vector3(0, 1, 0); // flat-ok: inline, on the code line itself',
+  '// flat-ok: one line, immediately above\nconst up = new Vector3(0, 1, 0);',
 ];
 
 function selfTest(): string[] {
