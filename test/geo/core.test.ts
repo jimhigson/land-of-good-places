@@ -161,7 +161,14 @@ describe('Chart: the curved chart is exact at any distance', () => {
     // The control that proves the test above is measuring something. A flat
     // chart big enough to hold the park gets the radial step right (it is a
     // plane) but puts the point in the wrong place on the planet entirely.
-    const flat = flatChart('control-flat-park', new Frame(new Geo(0, PLANET_RADIUS, 0)), 200);
+    // It has to say what it costs to be allowed to exist — which is the point
+    // of the control: the park-sized flat chart every one of today's bugs is
+    // an implicit instance of cannot now be declared without writing 63.9 m
+    // down. Nobody would sign that off; nobody ever had to before.
+    const flat = flatChart('control-flat-park', new Frame(new Geo(0, PLANET_RADIUS, 0)), 200, {
+      departure: flatDeparture(200),
+      because: 'the control: a deliberately illegitimate chart, to measure how wrong flat is',
+    });
     const curvedAt = new Geo();
     const flatAt = new Geo();
     const local = new Vector3(157, 0, 0);
@@ -203,6 +210,52 @@ describe('Chart: flatness is declared, bounded, and priced', () => {
     const g = new Geo();
     expect(() => bench.toGeo(new Vector3(1, 0, 1), g)).not.toThrow();
     expect(() => bench.toGeo(new Vector3(9, 0, 0), g)).toThrow(/valid for 2\.00 m/);
+  });
+
+  it('asking a flat chart for an UP outside its radius throws — the lie, not the rounding', () => {
+    // `toGeo`/`toLocal` were guarded from the first draft. `upAt` was not, and
+    // it is the worse of the two: a position wrong by the departure is wrong by
+    // centimetres; an up wrong by the lean is the second of the two mistakes
+    // the whole inventory is a list of.
+    const bench = flatChart('bench-up-under-test', new Frame(new Geo(0, PLANET_RADIUS, 0)), 2);
+    const up = new Vector3();
+    expect(() => bench.upAt(new Vector3(1, 0, 1), up)).not.toThrow();
+    expect(() => bench.upAt(new Vector3(60, 0, 0), up)).toThrow(/valid for 2\.00 m/);
+  });
+
+  it('control: how wrong that up would have been had it answered', () => {
+    // The number that makes the throw above worth having. Measured, not quoted.
+    const flat = flatChart('control-up-flat', new Frame(new Geo(0, PLANET_RADIUS, 0)), 400, {
+      departure: flatDeparture(400),
+      because: 'the control: measures the error the upAt guard now refuses to return',
+    });
+    const local = new Vector3(157, 0, 0);
+    const g = new Geo();
+    PARK_CHART.toGeo(local, g);
+    const honest = g.up(new Vector3());
+    const flatUp = flat.upAt(local, new Vector3());
+    const degrees = (Math.acos(Math.min(1, honest.dot(flatUp))) * 180) / Math.PI;
+    process.stderr.write(`[geo] a flat up at 157 m would be ${degrees.toFixed(1)}° off the real one\n`);
+    expect(degrees).toBeGreaterThan(40);
+  });
+
+  it('a flat chart over the 5 cm budget cannot be declared without saying what it costs', () => {
+    const anchor = () => new Frame(new Geo(0, PLANET_RADIUS, 0));
+    // 4.69 m is the budget radius: just inside is silent, just outside is not.
+    expect(() => flatChart('budget-inside', anchor(), 4.6)).not.toThrow();
+    expect(() => flatChart('budget-outside', anchor(), 30)).toThrow(/more than the 0\.05 m budget/);
+  });
+
+  it('an accepted departure that has gone stale is a build failure, not a comment', () => {
+    // The repo's commonest bug is two definitions kept in step by hand. This is
+    // that shape — a signed-off number beside a chart that grew — with a check
+    // behind it instead of a promise.
+    expect(() =>
+      flatChart('stale-acceptance', new Frame(new Geo(0, PLANET_RADIUS, 0)), 30, {
+        departure: flatDeparture(21.2), // signed off when the hall was smaller
+        because: 'a castle floor plate',
+      }),
+    ).toThrow(/accepts a departure of 1\.024 m .* really departs by 2\.055 m/);
   });
 
   it('a constant Field cannot be carried past the chart it claims constancy over', () => {
