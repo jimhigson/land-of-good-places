@@ -16,6 +16,15 @@ Model: Claude Opus 5 (1M), chosen by the Overseer. Branch `eng/walk-reach-radial
   steepest safe local grade 1.4 @20 m, 1.0 @60, 0.67 @94, 0.6 @117, **0.4 @140**
   (a 0.5 ramp, inside the 0.512 planner budget, drops her 13.7 m at 15 fps).
 
+## Done (committed + pushed)
+
+- Cure implemented: `stepCeilingAt`/`stepReferenceFor`/`carryReference` in surfaces.ts; Player,
+  playerSim, NavGrid peel. `check:walk-reach` (own workflow walk-reach.yml): red on base, green here.
+- After: 0 refused / 0 admitted on the real park; synthetic up-ceiling 1.4/1.4/1.2/0.8/0.8/0.67 at r=20..140.
+- check:deck-fallthrough: deck now local-frame, ramp at origin -> 0.512/0.512/0.670/1.670, OK.
+- check:hotel OK (11 carried, worst 0.052); mutation (7 residents -3 m) -> 7 named, exit 1.
+- Next: full `pnpm run check`, then `test:procgen`; then PR against feat/sphere-combined.
+
 ## Plan (the cure)
 
 1. `surfaces.ts`: `stepCeilingAt(x,z,y)` radial outdoors (spaceAt garden), +Y indoors;
