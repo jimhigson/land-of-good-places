@@ -56,9 +56,10 @@ import './headless-canvas.mjs';
 import { Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
-import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN } from '../src/core/constants.ts';
+import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN, GROUND_SPHERE_RADIUS } from '../src/core/constants.ts';
 import { DEG } from '../src/core/mathUtils.ts';
-import { screenBasis3D, screenRightOf, screenUpOf } from '../src/core/screenBasis.ts';
+import { screenBasis3D, screenRightOf, screenUpOf, type ScreenBasis3D } from '../src/core/screenBasis.ts';
+import { screenBasis3DAt } from '../src/world/up.ts';
 import { screenDistance } from '../src/core/contentFrame.ts';
 import { PHONE_VIEWPORT, TAP_FINGER_METRES, TAP_FINGER_PIXELS } from '../src/world/tapSpacing.ts';
 
@@ -95,23 +96,52 @@ shop.openView();
   const camera = new IsoCamera();
   camera.resize(PHONE_VIEWPORT.width, PHONE_VIEWPORT.height);
   camera.snapTo(new Vector3(shop.viewFocus.x, shop.viewFocus.y, shop.viewFocus.z));
-  const analytic = screenBasis3D(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG);
-  const drift = Math.max(
-    Math.abs(analytic.rightX - camera.screenRightAxis.x),
-    Math.abs(analytic.rightY - camera.screenRightAxis.y),
-    Math.abs(analytic.rightZ - camera.screenRightAxis.z),
-    Math.abs(analytic.upX - camera.screenUpAxis.x),
-    Math.abs(analytic.upY - camera.screenUpAxis.y),
-    Math.abs(analytic.upZ - camera.screenUpAxis.z),
+  const driftOf = (analytic: ScreenBasis3D): number =>
+    Math.max(
+      Math.abs(analytic.rightX - camera.screenRightAxis.x),
+      Math.abs(analytic.rightY - camera.screenRightAxis.y),
+      Math.abs(analytic.rightZ - camera.screenRightAxis.z),
+      Math.abs(analytic.upX - camera.screenUpAxis.x),
+      Math.abs(analytic.upY - camera.screenUpAxis.y),
+      Math.abs(analytic.upZ - camera.screenUpAxis.z),
+    );
+  // 1. The analytic owner, asked at the camera's own focus, is the rendered
+  //    rig to floating point. On the sphere that is `screenBasis3DAt`, not the
+  //    flat `screenBasis3D` — which is still printed, so the lean it misses is
+  //    visible on every run.
+  const drift = driftOf(
+    screenBasis3DAt(shop.viewFocus, CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG),
   );
+  const flatDrift = driftOf(screenBasis3D(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG));
   if (drift > 1e-9) {
     problems.push(
-      `screenBasis3D disagrees with IsoCamera's own axes by ${drift.toExponential(2)} — ` +
+      `screenBasis3DAt disagrees with IsoCamera's own axes by ${drift.toExponential(2)} — ` +
         `every framing measurement below is about a camera angle the game does not use. ` +
-        `Re-derive screenBasis3D in src/core/screenBasis.ts.`,
+        `It must solve the same rotation as eyeForFocus in src/world/up.ts.`,
     );
   }
-  notes.push(`screen basis: analytic and rendered agree to ${drift.toExponential(1)}`);
+  // 2. The basis the shop actually frames with is solved at the stall's anchor,
+  //    not at the focus. The up field turns by one radian per sphere radius, so
+  //    the two may differ by at most that angle over the distance between them.
+  const anchorToFocus = Math.hypot(
+    shop.viewFocus.x - shop.group.position.x,
+    shop.viewFocus.y - shop.group.position.y,
+    shop.viewFocus.z - shop.group.position.z,
+  );
+  const shopDrift = driftOf(shop.viewBasis);
+  const allowed = anchorToFocus / GROUND_SPHERE_RADIUS + 1e-9;
+  if (shopDrift > allowed) {
+    problems.push(
+      `KeychainShop.viewBasis disagrees with the rendered axes by ${shopDrift.toExponential(2)}, ` +
+        `more than the ${allowed.toExponential(2)} its anchor sitting ${anchorToFocus.toFixed(2)} m ` +
+        `from the focus can explain — the shop is framing about a camera the game does not render.`,
+    );
+  }
+  notes.push(
+    `screen basis: analytic and rendered agree to ${drift.toExponential(1)}; the shop's own ` +
+      `${shopDrift.toExponential(1)} (anchor ${anchorToFocus.toFixed(2)} m off focus, allowed ` +
+      `${allowed.toExponential(1)}); the flat basis would be ${flatDrift.toExponential(1)} off`,
+  );
 }
 
 // The finger rule's own tie-back: at zoom 1 on the QA phone, the pixel form and
@@ -129,7 +159,7 @@ shop.openView();
   }
 }
 
-const basis = screenBasis3D(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG);
+const basis = shop.viewBasis;
 const focus = shop.viewFocus;
 const focusRight = screenRightOf(basis, focus.x, focus.y, focus.z);
 const focusUp = screenUpOf(basis, focus.x, focus.y, focus.z);
