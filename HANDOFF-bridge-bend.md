@@ -23,6 +23,11 @@ points `theDrawnPathRidesOverEveryBridge` complains about, canonical seed:
 | 288.0 (139.0, -50.8) | 0.909 | -1.131 | **+0.308** | own `wallTop`, 0.99 m up |
 | 326.0 (138.9, -82.1) | 1.078 | -1.865 | **+0.327** | open sky |
 
+**Status: FIXED on this branch.** `Bridge.soffitYAt` (#635). Full suite,
+diffed by name: **133 -> 128 failed, 501 -> 501 passed, 629 total both sides**
+(so nothing skipped). The five gone are exactly the five paving clauses; zero
+new. That is parity with the base `feat/sphere-combined` at 128.
+
 The road stands clear of the drawn stone at every one, and what is over it is
 sky or its own parapet. **Nothing is in a tunnel.** What the clause reads is the
 invisible `deck` marker - a `BoxGeometry` yawed about world `+Y` and nothing
@@ -86,8 +91,42 @@ The reason is that **the invariant measures the world-`y` grade and
 this handoff already prints as "the world-y grade stays large after the fix
 (1.475 at the outermost canonical crossing)" and calls correct. One of the two
 is wrong about what a child's legs feel, and the one that gates the merge is
-the invariant. **That question is open and is the next thing to settle** - it
-is not a scale-1 / #620 question, it is red on this branch's own park.
+the invariant. **SETTLED - the clause measures the planet. Filed as #636.**
+
+`diag-bridge-grade.mts`'s own control 1, all four controls green:
+
+```
+ok   flat grass at r=140 disagrees as it must - world 1.140, local 0.010
+```
+
+**Flat grass reads 1.140 against a budget of 0.512.** No bridge, no ramp. The
+budget is crossed by the dome alone at about r = 100 m; the canonical seed has
+crossings out to 161 m. Per crossing:
+
+| r | world grade (the clause) | local grade | clause |
+|---|---|---|---|
+| 28.7 | 0.518 | 0.376 | passes |
+| 108.7 | **0.720** | 0.377 | fails |
+| 122.5 | **1.144** | 0.348 | fails |
+| 147.9 | **1.475** | 0.464 | fails |
+| 161.3 | **1.203** | 0.453 | fails |
+
+Worst local 0.464 against 0.512 - **0 of 5 over**. The world column matches the
+clause's own complaint text to three decimals, so it is the same measurement.
+
+**So do not pursue the two queued avenues.** Lowering the crown rise and an
+angled/dog-legged approach are both ramp geometry, and no ramp geometry brings
+a world-`y` grade at r=161 under 0.512 when flat ground there is 1.078. That is
+also why the three earlier avenues died: none of them changes `tan(r/R)`.
+
+The budget is stale a second, independent way: `constants.ts` on
+`SPRINT_PEAK_GRADE_BUDGET` says 0.512 "was the shape of a bug rather than a
+fact about ramps", fixed by #358, measured ceiling **1.670** on this park and
+**0.670** park-independent - and the clause's failure message still recites the
+obsolete damped-height arithmetic as its explanation.
+
+Fix: measure the local grade, with `diag-bridge-grade.mts`'s four controls
+carried across. #636 has the arithmetic and the two traps.
 
 ## The brief
 
