@@ -201,14 +201,59 @@ Frames committed to the `qa-screenshots` orphan branch at `000d67be`:
   `PLAYER_RADIUS` and turret `radiusBottom` sat above a function measuring
   neither, and the solidity invariant had none. Moved back.
 
-## Gates, current head
+## STILL OPEN 2b — the slide throw also breaks two out-of-chain gates
+
+Found after the section above was written, and it makes the seed-326 item
+bigger than "one suite is skipped". Neither of these is in `pnpm run check`;
+both have their own workflow.
+
+| check | base `90e62c5b` | this branch |
+|---|---|---|
+| `check:coplanar` | **exit 1** — 54 new/worse seams (pre-existing, unrelated) | **exit 1** — `planSlide` throws before measuring anything |
+| `check:swept-bus` | **exit 0** — "swept 10 seed(s)… none is new" | **exit 1** — `planSlide` throws |
+
+```
+Error: the ginormous slide never solved to a chute a child could ride: after 10
+target lengths (...), the best on offer fouls the Sky Cruiser, only 0.00 m of
+air at (-101.7, -41.3, -55.3) against 5.5 m required (at a 42 m target).
+```
+
+Same root cause as seed 326, different pool seed, different obstacle. So the
+leaning `TowerSolid` takes down **three** gates — `test:procgen`,
+`check:coplanar`, `check:swept-bus` — and **`check:swept-bus` was green
+before**. Recorded on #625.
+
+## Gates, current head — measured, not asserted
 
 - check chain parsed from the `scripts` object (never grepped): base **65**
   steps → branch **66**, `check:castle-bend` added, **zero removed**, no other
   script touched.
-- `pnpm run check` — see the PR body for the failing set by **name**, diffed
-  against the base commit rather than counted.
-- `pnpm run test:procgen` — 109 / 431 / 94 as above.
+- `pnpm run build` — **exit 0**.
+- `pnpm run test:procgen` — exit 1, **109 / 431 / 94 skipped / 634**, 209.57 s.
+  Base: 128 / 501 / 0.
+- `pnpm run check` — exit 1 on **both** commits at the same first failure
+  (`check:crowd` → `check:npc-perch`), so the chain never reaches this PR.
+  Every step run individually on both, failing sets diffed **by name**:
+
+  - **base fails 11**: `crowd, speech-bubbles, park, fountain-hop, hotel,
+    rail-race, tie-frame, cruiser-clearance, castle-window, keyring-view,
+    climb-wave`
+  - **branch fails 12**: `crowd, park, fountain-hop, hotel, path-preference,
+    rail-race, tie-frame, cruiser-clearance, castle-window, keyring-view,
+    climb-wave, park-boot`
+  - branch **adds** `path-preference` (real, bisected) and `park-boot`; branch
+    **fixes** `speech-bubbles`; the other 10 are identical.
+  - `check:park-boot` is **#626** and this run is the flakiness itself: it
+    **passed on base and failed on the branch in the same session**, on a
+    branch previously measured as *faster* than its own base.
+
+  The runner (`scratchpad/stepwise.sh`) **refuses to report below 50 parsed
+  steps**. Its first version used `mapfile`, absent on macOS bash 3.2, and
+  printed "chain has 0 runnable steps" with a failing set of zero — which
+  would have read as a clean sweep. That guard is the only reason it did not.
+
+- `git diff --stat origin/feat/sphere-combined...HEAD` (three dots): **19
+  files, no deletions, no renames** — all accounted for.
 
 ---
 
