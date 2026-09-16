@@ -6457,11 +6457,61 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     };
 
     /**
+     * **The steepest uphill stride on a run, in BOTH directions** — the one
+     * scan the controls and the assertion share, so they cannot disagree.
+     *
+     * A ramp is climbed from whichever end she starts at. The first version of
+     * this clause (and the world-`y` one before it) compared each sample only
+     * with the one a stride *ahead* in `+along` and took the **signed** grade,
+     * so a ramp that climbs towards `-along` — every bridge's far ramp, walked
+     * from the far side — was only ever seen as a descent and never judged.
+     * Found in review of #641: at scale 1, canonical seed, steepening only the
+     * `+along` ramps left the clause green at 0.360 while the same strides
+     * walked the other way read **1.597**. So every window is judged twice:
+     * `a → b` in `a`'s frame, and `b → a` in `b`'s frame (her foot is at the
+     * *start* of the stride she is climbing, so that is whose up counts).
+     *
+     * `include(i, j)` lets the caller skip a window (the exposure gate below);
+     * the world-`y` figure returned is the largest magnitude over the included
+     * windows, for the run note only.
+     */
+    const steepestUphillStride = (
+      run: readonly Vector3[],
+      include: (i: number, j: number) => boolean = () => true,
+    ): {
+      readonly local: number;
+      readonly rise: number;
+      readonly run: number;
+      readonly from: number;
+      readonly backwards: boolean;
+      readonly world: number;
+    } => {
+      let best = { local: 0, rise: 0, run: 0, from: -1, backwards: false };
+      let world = 0;
+      for (let i = 0; i + SAMPLES_PER_STRIDE < run.length; i += 1) {
+        const j = i + SAMPLES_PER_STRIDE;
+        if (!include(i, j)) continue;
+        const a = run[i] as Vector3;
+        const b = run[j] as Vector3;
+        const ahead = gradeOfStep(a, b);
+        const behind = gradeOfStep(b, a);
+        world = Math.max(world, Math.abs(ahead.world));
+        if (ahead.local > best.local) {
+          best = { local: ahead.local, rise: ahead.rise, run: ahead.run, from: i, backwards: false };
+        }
+        if (behind.local > best.local) {
+          best = { local: behind.local, rise: behind.rise, run: behind.run, from: j, backwards: true };
+        }
+      }
+      return { ...best, world };
+    };
+
+    /**
      * **The controls, and the run is void without them.**
      *
      * Two of the instruments written for the sphere migration read clean and
      * decisively wrong, and only a control caught either. These are the same
-     * four `scripts/diag-bridge-grade.mts` carries, moved into the clause that
+     * four `scripts/diag-bridge-grade.mts` carries (plus a fifth, below), moved into the clause that
      * asserts on the measure so the measure cannot drift away from them:
      *
      * 1. **Flat grass, far out.** Ordinary park ground at r = 140 — nothing
@@ -6488,16 +6538,11 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     const controlFailures: string[] = [];
     {
       const CONTROL_SPAN = 25;
-      const worstOf = (run: readonly Vector3[]): { local: number; world: number } => {
-        let local = 0;
-        let world = 0;
-        for (let i = 0; i + SAMPLES_PER_STRIDE < run.length; i += 1) {
-          const g = gradeOfStep(run[i] as Vector3, run[i + SAMPLES_PER_STRIDE] as Vector3);
-          local = Math.max(local, Math.abs(g.local));
-          world = Math.max(world, Math.abs(g.world));
-        }
-        return { local, world };
-      };
+      // The controls read through the very scan the assertion uses — an
+      // `Math.abs` of its own here is what once let the controls see both
+      // directions while the assertion saw one.
+      const worstOf = (run: readonly Vector3[]): { local: number; world: number } =>
+        steepestUphillStride(run);
       const groundRun = (fromX: number, fromZ: number, dirX: number, dirZ: number): Vector3[] => {
         const out: Vector3[] = [];
         const len = Math.hypot(dirX, dirZ) || 1;
@@ -6551,6 +6596,17 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
           `a ${want.toFixed(2)} local ramp at r=140 reads back`,
           Math.abs(g.local - want) < 0.05,
           `local ${g.local.toFixed(3)} (want ${want.toFixed(2)} +/- 0.05), world ${g.world.toFixed(3)}`,
+        );
+      }
+      // 5. **The same 0.50 ramp, marched the other way** — it now *descends*
+      //    along the run, so only a scan that climbs it from its far end can
+      //    read 0.50 back. A one-directional, signed scan reads zero here.
+      {
+        const g = worstOf(declaredRamp(140, 0, 0.5).reverse());
+        control(
+          'a 0.50 local ramp marched downhill is still climbed from its far end',
+          Math.abs(g.local - 0.5) < 0.05,
+          `local ${g.local.toFixed(3)} (want 0.50 +/- 0.05), world ${g.world.toFixed(3)}`,
         );
       }
       process.stderr.write(
@@ -6673,33 +6729,27 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       // **One sprinted clamped frame.** The steepest stride-long window
       // anywhere on the run, measured in her own frame (see the note above),
       // against what the post-#358 sampler actually reaches.
-      let worstGrade = 0;
-      let worstRise = 0;
-      let worstRun = 0;
-      let worstAt = 0;
-      let worstDrop = 0;
-      let worstWorld = 0;
-      for (let i = 0; i + SAMPLES_PER_STRIDE < points.length; i += 1) {
-        const g = gradeOfStep(points[i] as Vector3, points[i + SAMPLES_PER_STRIDE] as Vector3);
-        // Only where losing the surface would genuinely drop her. Below
-        // `FALL_THRESHOLD` the game does not even call it a fall.
-        const drop = Math.min(exposure[i] as number, exposure[i + SAMPLES_PER_STRIDE] as number);
-        if (drop <= FALL_THRESHOLD) continue;
-        // **Signed for the assertion, magnitude for the note.** Only the
-        // *uphill* direction loses her the surface — running down, she simply
-        // steps down, which is what a ramp is for — so `worstGrade` takes the
-        // signed local grade, exactly as the old clause did. `worstWorld` is
-        // reported rather than asserted on, and what it is there to show is how
-        // far the planet moves the number either way, so it takes the size.
-        worstWorld = Math.max(worstWorld, Math.abs(g.world));
-        if (g.local > worstGrade) {
-          worstGrade = g.local;
-          worstRise = g.rise;
-          worstRun = g.run;
-          worstAt = alongs[i] as number;
-          worstDrop = drop;
-        }
-      }
+      // Only where losing the surface would genuinely drop her — below
+      // `FALL_THRESHOLD` the game does not even call it a fall. Both directions
+      // are judged (see `steepestUphillStride`): running *down* a ramp she
+      // simply steps down, but the ramp that is a descent this way is the
+      // climb for a child coming from the other side.
+      const worst = steepestUphillStride(
+        points,
+        (i, j) => Math.min(exposure[i] as number, exposure[j] as number) > FALL_THRESHOLD,
+      );
+      const worstGrade = worst.local;
+      const worstRise = worst.rise;
+      const worstRun = worst.run;
+      const worstWorld = worst.world;
+      const worstAt = worst.from >= 0 ? (alongs[worst.from] as number) : 0;
+      const worstDrop =
+        worst.from >= 0
+          ? Math.min(
+              exposure[worst.from] as number,
+              exposure[worst.from + (worst.backwards ? -SAMPLES_PER_STRIDE : SAMPLES_PER_STRIDE)] as number,
+            )
+          : 0;
       crossingsJudged += 1;
       seenWorstLocal = Math.max(seenWorstLocal, worstGrade);
       seenWorstWorld = Math.max(seenWorstWorld, worstWorld);
@@ -6710,7 +6760,8 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         complaints.push(
           `the crossing at (${fmt([crossing.x, crossing.z])}) climbs at a local grade of ` +
             `${worstGrade.toFixed(3)} over one sprinted stride, ` +
-            `${worstAt.toFixed(1)} m along its own centreline — a child running up it ` +
+            `starting ${worstAt.toFixed(1)} m along its own centreline and running towards ` +
+            `${worst.backwards ? '-along' : '+along'} — a child running up it ` +
             `on a slow device falls through her own deck. That grade is the stride's ` +
             `rise along the local up at her foot (${worstRise.toFixed(3)} m) over the ` +
             `part of it lying in that point's own horizontal plane ` +
