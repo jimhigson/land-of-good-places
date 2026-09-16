@@ -307,3 +307,31 @@ stands her at the crossing's plan position, under the chute.
 
 Nothing a player can see has changed on this branch — it is a corrected
 measurement and three new clauses, all test-side, plus comment edits in `src/`.
+
+## Rebased onto a moved base, 16 Sep
+
+The base `eng/sphere-ground-claims` gained two commits mid-review:
+
+- **#631, `check:flat-primitives`** — a new ratcheted check. It immediately and
+  correctly failed this branch with `BASELINE LOOSE
+  parkFacts.ts::AXIS_ALIGNED_BOX::box.max.y (baseline 5, now 3)`: replacing the
+  castle-masonry `Box3` walk with a radial vertex walk **removed two
+  axis-aligned box reads**, and the ratchet wants the baseline to follow an
+  improvement down. Tightened 5 → 3 in `scripts/flat-primitives-baseline.mts`.
+  That is the check working — it is the only reason anyone knows this branch
+  made the file measurably less flat.
+- **#634, the `check:hotel` fix** — so any inherited-red table written before
+  that landed is stale. Re-measured against the new base.
+
+Chain step **sets** compared after the rebase, not counts: base 66, mine 66,
+**nothing dropped, nothing added** — this branch does not touch the chain.
+Three-dot diff unchanged at 7 files (+ the baseline), no deletions.
+
+## PR
+
+Open as **#637**, base `eng/sphere-ground-claims` (not `main`).
+
+Review verdict on revision 1 was **changes requested**, and it was right: the
+vertex walk dropped all 40 merlons. Revision 2 fixes that, adds the two clauses
+that catch it, re-derives every figure, and corrects the false corroboration
+that had reached `src/world/building/layout.ts`.
