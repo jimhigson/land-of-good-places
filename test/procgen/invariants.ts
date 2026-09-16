@@ -6630,9 +6630,18 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         // ramp foot the deck lies *on* that ground, so losing it is a
         // no-op — which is why the exposure below is part of the question and
         // not a let-off. Sampled with an absurdly low reference so every
-        // built surface is rejected and bare terrain is what comes back
-        // (`terrainHeight` itself must not be imported here — it reaches
-        // `parkManifest` and would pin every seed to the default park).
+        // built surface is rejected and bare terrain is what comes back.
+        //
+        // **Still a world-`y` difference, deliberately, and it is the strict
+        // side of the error** (#636 left this one alone on purpose). At the
+        // same `(x, z)`, raising world `y` by one metre raises the radius by
+        // only `cos θ`, so a world-`y` gap of `d` is a true radial drop of
+        // `d · cos θ` — 0.68 of it at r = 161. The world-`y` figure therefore
+        // *overstates* the drop, which can only ever make this gate include a
+        // stride the honest number would have skipped, never the reverse. It is
+        // used to decide whether a window is worth judging at all; converting
+        // it would be a loosening, and a loosening needs its own measurement
+        // rather than a comment.
         const terrainH = facts.world.building.surfaces.sample(x, z, -1e6);
         exposure.push(h - terrainH);
       }
@@ -6716,8 +6725,9 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
             `BUILDING_STEP_UP / PLAYER_LONGEST_STEP = ` +
             `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)} (SPRINT_LOCAL_GRADE_CEILING), and ` +
             `this one needs ${worstGrade.toFixed(3)}. The deck stands ` +
-            `${worstDrop.toFixed(2)} m over the ground there, so that is how far she drops ` +
-            `— through the deck, into the tunnel`,
+            `${worstDrop.toFixed(2)} m over the ground there in world y (see the exposure ` +
+            `note above — the true radial drop is that times cos of the lean), so that is ` +
+            `the order of how far she falls — through the deck, into the tunnel`,
         );
       }
     }
