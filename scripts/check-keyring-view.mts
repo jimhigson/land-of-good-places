@@ -123,11 +123,7 @@ shop.openView();
   // 2. The basis the shop actually frames with is solved at the stall's anchor,
   //    not at the focus. The up field turns by one radian per sphere radius, so
   //    the two may differ by at most that angle over the distance between them.
-  const anchorToFocus = Math.hypot(
-    shop.viewFocus.x - shop.group.position.x,
-    shop.viewFocus.y - shop.group.position.y,
-    shop.viewFocus.z - shop.group.position.z,
-  );
+  const anchorToFocus = shop.group.position.distanceTo(shop.viewFocus);
   const shopDrift = driftOf(shop.viewBasis);
   const allowed = anchorToFocus / GROUND_SPHERE_RADIUS + 1e-9;
   if (shopDrift > allowed) {
