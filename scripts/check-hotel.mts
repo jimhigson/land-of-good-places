@@ -119,6 +119,7 @@ import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
 // sampler what it fell through to, not a second copy of the arithmetic.
 import { walkableGroundAt } from '../src/world/building/surfaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
+import { HOTEL_LOBBY_Z, HOTEL_ORIGIN_X } from '../src/core/constants.ts';
 import {
   TOWER_DOOR_HALF,
   TOWER_FACADE_ALONG,
@@ -262,6 +263,42 @@ for (let frame = 0; frame < 60 * SETTLE_SECONDS; frame += 1) {
     cameraForward: new Vector3(0, 0, 1),
     frame,
   });
+}
+
+// --------------------------------------------- 1a. a control on the instrument
+//
+// The clause below asks whether `sample`'s answer **is** the terrain, by exact
+// equality — which is sound only because `WalkSurfaces.sample` seeds `best`
+// with `walkableGroundAt(x, z)` verbatim for anything outside the castle, so
+// the two are the same double rather than two derivations that happen to agree.
+//
+// That is an assumption about somebody else's file, and if it ever stops being
+// true this clause fails **open**: the terrain would no longer be recognised as
+// the terrain, every body standing on it inside a room would read as supported,
+// and the seven-residents regression would go quietly green again. So it is
+// asserted here rather than trusted. `check:hotel` goes red naming both numbers.
+{
+  const x = HOTEL_ORIGIN_X + 60;
+  const z = HOTEL_LOBBY_Z;
+  const ground = walkableGroundAt(x, z);
+  if (spaceAt(x, z) === SPACE_GARDEN || world.building.surfaces.floorAt(x, z) !== null) {
+    problems.push(
+      `CONTROL FAILED: (${x}, ${z}) was chosen as a point inside a hotel room, but ` +
+        `spaceAt says "${spaceAt(x, z)}" and floorAt says ` +
+        `"${world.building.surfaces.floorAt(x, z)?.space ?? 'null'}" — the falling clause's ` +
+        `pocket-space test is no longer exercised by anything`,
+    );
+  }
+  const sampled = world.building.surfaces.sample(x, z, ground);
+  if (sampled !== ground) {
+    problems.push(
+      `CONTROL FAILED: WalkSurfaces.sample no longer returns walkableGroundAt verbatim — ` +
+        `at (${x}, ${z}) the ground is ${ground} m and sample answers ${sampled} m ` +
+        `(a difference of ${sampled - ground}). The falling clause recognises "she is standing on the ` +
+        `terrain, which her room does not stand on" by exact equality with that function, ` +
+        `so it has just stopped being able to see a resident at raw terrain height`,
+    );
+  }
 }
 
 let lowest = Infinity;
