@@ -201,3 +201,8 @@ are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
 - procgen by name vs base 80: 4 new (seed 24 load; s11 path stops; s131 tree on railway; s326 detour) — undiagnosed, likely same cascade.
 - Direct checks all exit 0: castle-window, cruiser-clearance, npc-perch, keyring-view, tie-frame, climb-wave.
 - Next: when router fix lands (and when #647 lands: take its camera.ts + check-rail-race.mts), rebase, re-run rail-race + castle checks directly.
+
+### Round 6 — rebased onto 13d85084 (#647 + #651)
+- Took base side of railRace/camera.ts and check-rail-race.mts (now identical to base).
+- Seed 24 builds (#651). Direct: fountain-hop seed 24, rail-race, castle-window, cruiser-clearance, tie-frame all exit 0.
+- PR #650 body updated; CI to run the full chain and procgen.
