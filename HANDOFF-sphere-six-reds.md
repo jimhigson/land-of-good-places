@@ -194,3 +194,10 @@ are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
   0c031a07's hunks there). npc-perch conflicts with #620's bearing matcher: ruling is footX/footZ
   is the one owner; keep #620's claimedBy guard, keep my along-tree-up height conversion.
 - Needs a browser (not owned): the frames of the cruiser under the window / column in path.
+
+### Round 5 — PR #650 open, RED on seed 24 (router bug, routed by Overseer)
+- Rebased onto 585d7709; npc-perch conflict resolved (footX + #620 claim guard + #620 drop-along-head-up).
+- seed 24 build fails: bisect → "castle window height is a plane"; sites 3→2, route 11 seg (25.0,−26.7)→(24.3,−27.7) crosses rail near railD 34. Router lane owns it. Do NOT dig.
+- procgen by name vs base 80: 4 new (seed 24 load; s11 path stops; s131 tree on railway; s326 detour) — undiagnosed, likely same cascade.
+- Direct checks all exit 0: castle-window, cruiser-clearance, npc-perch, keyring-view, tie-frame, climb-wave.
+- Next: when router fix lands (and when #647 lands: take its camera.ts + check-rail-race.mts), rebase, re-run rail-race + castle checks directly.
