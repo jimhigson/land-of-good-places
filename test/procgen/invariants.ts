@@ -4277,11 +4277,11 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  * On the canonical seed the chute crosses the south wall plane (z 21.823) at
  * world **(55.48, 9.69, 21.82)**, which is **17.302 m** above the planet's
  * surface; its underside is `CHUTE_HALF_WIDTH` below that at **16.192 m**, and
- * the tallest stone — a `castle-wall-lintel` vertex at world (35.65, 6.95,
- * 4.22) — reaches **9.770 m**. The air a rider has under them is therefore
- * **6.42 m**. A second instrument sharing none of that arithmetic agrees: the
- * shortest distance from the built chute's centre line to any masonry vertex is
- * **9.450 m**, against a half-width of 1.11 — 8.34 m of daylight.
+ * the tallest stone — a **`crenellations`** merlon at world (35.52, 7.08,
+ * 20.40) — reaches **10.750 m**. The air a rider has under them is therefore
+ * **5.44 m**. A second instrument sharing none of that arithmetic agrees that
+ * there is metres of it: the shortest distance from the built chute's centre
+ * line to any masonry vertex is **9.450 m**, against a half-width of 1.11.
  *
  * ### Why every number in the paragraph above is a radius (issue #625)
  *
@@ -4299,7 +4299,28 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  * measurement of anything. It came from correcting only one side — a radial
  * stone against a plumb underside — and those agree only at the park's origin.
  * Correct both, as the code below now does, and the intrusion is not reduced,
- * it does not exist: +6.42 m clear.
+ * it does not exist: **+5.44 m clear**.
+ *
+ * ### And the second trap, which caught the fix itself
+ *
+ * Replacing `Box3.setFromObject` with a hand-rolled vertex walk quietly dropped
+ * the battlements: `crenellations` is an `InstancedMesh` of 40, the walk
+ * applied only the container's matrix, and all forty collapsed onto the origin.
+ * The tallest surviving stone was the lintel band, and the clearance came out
+ * **6.42 m** — 0.981 m too generous, in the dangerous direction, from a fix
+ * whose entire purpose was to stop under-reporting this number. `Box3` had
+ * been honouring those instance matrices for free.
+ *
+ * Nothing above could see it. The frame guard could not — the number was still
+ * a radius. The clearance clause could not — it was still comfortably positive.
+ * Even the cross-check against `CASTLE_MASONRY_TOP` *appeared* to pass, because
+ * 9.770 sits a tenth of a metre from 9.85 by coincidence, the lintel being
+ * built to `CASTLE_WALL_HEIGHT` 8.8 and the gap being exactly the merlons that
+ * had gone missing.
+ *
+ * That is why two clauses below assert things no earlier draft did: **which
+ * mesh** carries the maximum, and **where that vertex sits in the facade's own
+ * frame**. Either would have caught it on the first run.
  *
  * That is a guarantee worth holding: it is what keeps a child from riding down
  * inside a wall. It fails the moment anyone lowers `START_Y`, raises
@@ -4466,6 +4487,69 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
         'leans, so a plumb line down +Y under-reports its stonework (by 1.73 m on the ' +
         'canonical seed) and this invariant then grants the ginormous slide clearance ' +
         'the battlements do not give it',
+    );
+    return complaints;
+  }
+
+  // **The merlons must be the thing that was measured.** (Review of #625.)
+  // The battlements are the top of the castle by construction, so if anything
+  // else carries the maximum, the merlons have dropped out of the measurement.
+  // That is not hypothetical and it is not cheap insurance: the first draft of
+  // the vertex walk above treated `crenellations` — an `InstancedMesh` of 40 —
+  // as a single mesh, collapsed all forty onto the container's origin at
+  // 0.984 m, and handed this invariant the lintel band's 9.770 m instead of the
+  // true 10.750 m. Every number downstream stayed plausible; the clearance was
+  // simply 0.981 m too generous, in the dangerous direction. This clause is
+  // exact, needs no tolerance, and would have caught it on the first run.
+  if (facts.castleMasonryTopMesh !== 'crenellations') {
+    complaints.push(
+      `the highest castle stonework was found on \`${facts.castleMasonryTopMesh}\`, not on ` +
+        '`crenellations` — the battlements are the top of the castle by construction, so ' +
+        'either they have dropped out of the measurement (an `InstancedMesh` walked without ' +
+        'its per-instance matrices collapses all 40 merlons onto the origin, which is issue ' +
+        "#625's review exactly) or something has grown up through them",
+    );
+    return complaints;
+  }
+
+  // **And it must be at the height the castle is built to.** This is the only
+  // clause here that proves the *value* rather than the frame: the winning
+  // vertex, expressed in the facade's own coordinates, must be
+  // `CASTLE_MASONRY_TOP`. A measurement that is wrong in almost any way — wrong
+  // meshes, dropped instances, a mangled matrix — still looks like a radius and
+  // still passes the units guard below, but it cannot land on 9.85 in the frame
+  // the constant is written in.
+  //
+  // The tolerance is float slack, not a fudge: measured **9.8500** against
+  // 9.85 on the canonical seed. The collapsed walk gave 8.8 — the lintel band's
+  // top, `CASTLE_WALL_HEIGHT` — which is short by exactly
+  // `CASTLE_MERLON_HEIGHT`, because the missing metre *was* the merlons.
+  //
+  // Note it is `CASTLE_MASONRY_TOP`, a facade-local constant, compared against a
+  // facade-local measurement. That is not rules-against-rules: the number under
+  // test is a vertex of the park that was actually built, and the question being
+  // asked is whether it sits where the castle was drawn to put it. Both sides
+  // arrive as *facts* — see `ParkFacts.castleMasonryDesignTopY` for why the
+  // constant cannot be imported here directly.
+  const FACADE_Y_SLACK = 0.01;
+  const designTop = facts.castleMasonryDesignTopY;
+  const measuredTop = facts.castleMasonryTopFacadeY;
+  if (!Number.isFinite(measuredTop)) {
+    complaints.push(
+      "the highest castle stonework could not be expressed in the facade's own frame — " +
+        'no `building-facade` group was found, so the clause that proves this measurement ' +
+        'lands at `CASTLE_MASONRY_TOP` has been silently switched off',
+    );
+    return complaints;
+  }
+  if (Math.abs(measuredTop - designTop) > FACADE_Y_SLACK) {
+    complaints.push(
+      `the highest castle stonework sits at ${measuredTop.toFixed(3)} m in ` +
+        `the facade's own frame, but the castle is built to \`CASTLE_MASONRY_TOP\` = ` +
+        `${designTop.toFixed(3)} m — off by ` +
+        `${Math.abs(measuredTop - designTop).toFixed(3)} m. The ` +
+        'radial measurement is landing somewhere other than the top of the battlements, so ' +
+        'the clearance below it is measured against the wrong stone',
     );
     return complaints;
   }
