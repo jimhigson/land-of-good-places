@@ -4286,7 +4286,7 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  * ### Why every number in the paragraph above is a radius (issue #625)
  *
  * This invariant was green for months while reading a fact that under-reported
- * the stonework by **1.730 m**, because the fact took an axis-aligned box's
+ * the stonework by **2.710 m**, because the fact took an axis-aligned box's
  * `max.y` and the castle *leans* — it stands ~48 m out from the park's origin
  * on a sphere of radius `GROUND_SPHERE_RADIUS`, where a plumb line down world
  * `+Y` is nothing like its own up. The prose this section replaced quoted
@@ -4467,24 +4467,23 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // necessarily much smaller. Anything that puts a `max.y` back in this field —
   // the 8.040 m this used to report, or any other height — fails here
   // immediately and by two orders of magnitude, on every seed, rather than
-  // quietly granting the ride 1.73 m of clearance the battlements do not give.
+  // quietly granting the ride 2.71 m of clearance the battlements do not give.
   //
   // **What it does not cover, stated so nobody inherits a false belief:** it
   // proves the *frame*, not the *value*. A radial measurement that is simply
-  // wrong — the wrong meshes, the wrong matrices — passes this and is caught
-  // only by the clearance clause below and by `check:castle`. The independent
-  // evidence that the value is right is in this function's docblock: the built
-  // radial top (9.770 m above the surface) agrees with `layout.ts`'s
-  // `CASTLE_MASONRY_TOP` (9.85 m up the facade's own axis) to within the
-  // terrain under the castle, where the plumb measurement was 1.73 m short of a
-  // constant the castle is built from.
+  // wrong — the wrong meshes, the wrong matrices, a dropped `InstancedMesh` —
+  // is still a radius and still sails through here. That is not hypothetical:
+  // it is exactly what happened next, and this clause watched it go by.
+  //
+  // The two clauses immediately below are the ones that cover the value, and
+  // they exist because this one could not.
   if (stone <= GROUND_SPHERE_RADIUS) {
     complaints.push(
       `\`parkFacts.castleMasonryTopRadius\` is ${stone.toFixed(3)}, which is not a radius ` +
         `from the planet's centre — every point in the park is at least ` +
         `GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS}) from it. Something has put a ` +
         'world-Y height back in this field, which is issue #625 exactly: the castle ' +
-        'leans, so a plumb line down +Y under-reports its stonework (by 1.73 m on the ' +
+        'leans, so a plumb line down +Y under-reports its stonework (by 2.71 m on the ' +
         'canonical seed) and this invariant then grants the ginormous slide clearance ' +
         'the battlements do not give it',
     );

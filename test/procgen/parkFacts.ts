@@ -914,21 +914,30 @@ export interface ParkFacts {
    *
    * ## Why this is a radius and not a `max.y` (issue #625)
    *
-   * It *was* an AABB's `max.y`, and that was wrong by 1.730 m in the dangerous
-   * direction. The world is a sphere of radius `GROUND_SPHERE_RADIUS`, "up" is
-   * away from its centre, and the castle stands ~48 m out from the park's
-   * origin — so the castle **leans**, and a plumb line dropped down world `+Y`
-   * is not its own up. Measured on the canonical seed:
+   * It *was* an AABB's `max.y`, and that was wrong by **2.710 m** in the
+   * dangerous direction. The world is a sphere of radius `GROUND_SPHERE_RADIUS`,
+   * "up" is away from its centre, and the castle stands ~48 m out from the
+   * park's origin — so the castle **leans**, and a plumb line dropped down world
+   * `+Y` is not its own up. Measured on the canonical seed:
    *
    * | | |
    * |---|---|
    * | AABB `max.y` (what this used to report) | 8.040 m |
-   * | highest stonework by radius, at world (35.65, 6.95, 4.22) | 9.770 m |
-   * | under-report | **1.730 m** |
+   * | highest stonework by radius, a merlon at world (35.52, 7.08, 20.40) | 10.750 m |
+   * | under-report | **2.710 m** |
    *
    * That is `RADIAL-INVENTORY.md`'s first universal mistake exactly — *a `y`
    * difference standing in for a distance* — and it granted the ginormous
-   * slide 1.73 m of clearance the battlements do not give it.
+   * slide 2.71 m of clearance the battlements do not give it.
+   *
+   * **Issue #625 itself reports this as 1.730 m, and that figure is wrong.**
+   * It was produced by a scratch instrument that walked vertices through
+   * `node.matrixWorld` alone, so it had the `InstancedMesh` fault described
+   * below and was reading 9.770 m — the lintel band — as the radial top. The
+   * error was then independently "confirmed" by a second measurement made the
+   * same way, which is worth remembering about independent confirmation: two
+   * instruments sharing a method share its blind spot. The plumb figure 8.040
+   * was always right, because `Box3.setFromObject` honours instance matrices.
    *
    * ## Measured off vertices, not off a box — and every instance of them
    *
@@ -1534,7 +1543,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 
   // The top of the castle's stonework, read off the built meshes — as a
   // **radius from the planet's centre**, because the castle leans (#625). See
-  // `ParkFacts.castleMasonryTopRadius` for the 1.730 m this was wrong by while
+  // `ParkFacts.castleMasonryTopRadius` for the 2.710 m this was wrong by while
   // it was an AABB's `max.y`, and for why a box cannot answer a radius.
   const { Box3 } = await import('three');
   // Dynamic, like every other `src/` import in this function: a static one
