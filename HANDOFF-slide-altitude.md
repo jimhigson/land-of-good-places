@@ -9,3 +9,10 @@ Done:
 - Mutant (world-y profile restored) → red on 326.
 
 Base reds that remain (same names as base CI run 35099046838): 326 & 24 tower-roofs clip, 131 roof garden. Castle rigid transform (#650) is their owner.
+
+Later:
+- cameras.ts: trackside elevation capped at 90° (canonical beat 3 had tipped to 117° onto the near rail once its route changed).
+- Final test:procgen: 79 failed vs base CI 80 (run 35099046838), by name: 0 new, 1 fixed (canonical world-y "goes downhill" clause).
+- Local steepest (2 m window): canonical 27.2°, 131 27.7°, 24 23.3°, 11 15.2°, 326 14.3°.
+- Ran green: tsc, typecheck:test, check:slide-rider, pet-slide, ride-camera, park-boot, solve-cost, castle-towers, park, flat-primitives. Full `check` left to CI.
+- PR open against feat/sphere-combined.
