@@ -206,3 +206,4 @@ are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
 - Took base side of railRace/camera.ts and check-rail-race.mts (now identical to base).
 - Seed 24 builds (#651). Direct: fountain-hop seed 24, rail-race, castle-window, cruiser-clearance, tie-frame all exit 0.
 - PR #650 body updated; CI to run the full chain and procgen.
+- procgen on 13d85084: 67 fail vs base 80 by name. New: s131 tree-on-rail (#653), s326 detour (PR #656) — not ours. 15 fixed.
