@@ -431,9 +431,9 @@ const _spin = /* @__PURE__ */ new Quaternion();
  * the other grazed at 0.48, and both landed on the same screen x.
  *
  * Turning the whole 81.1° would point her face straight down the lens and her
- * shoulders straight out of the cart. This turns **50° of it**, which leaves a
+ * shoulders straight out of the cart. This turned **50° of it**, which leaves a
  * three-quarter view rather than a mugshot, and she still plainly races
- * forwards.
+ * forwards. (55° now — see below.)
  *
  * **And only while she is sad.** Jim, 6 August 2026: *"they need turn their
  * head to the camera only on sad expression, not all the time"* — which is the
@@ -463,26 +463,48 @@ const _spin = /* @__PURE__ */ new Quaternion();
  * A monitor would happily take 60°; a phone runs out of picture. One number
  * serves both, so it is set where the phone still has real room.
  *
+ * **55°, not 50, since the ring was leant onto the sphere.** The table above is
+ * the flat park, measured on an upright kid with no seated pose. Re-measured
+ * on the scale-1 sphere park with the real player leant in the real cart
+ * (`railRace/seat.ts`) and her seated body lean applied — worst of 48 points
+ * (head share 0.42; at 0.47 the 55° row reads 0.422 / 0.479, 0.510 / 0.178):
+ *
+ * ```
+ *          monitor          phone
+ *  45°      0.263 / 0.473    0.351 / 0.212
+ *  50°      0.345 / 0.477    0.433 / 0.194   ← under the 0.35 floor
+ *  55°      0.424 / 0.480    0.511 / 0.176   ← here
+ * ```
+ *
+ * The leant ring gave the phone room back, so the edge no longer sets the limit.
+ *
  * Nothing here touches steering. GAME_DESIGN.md's CONTROL rule governs what a
  * *button* does; this is a pose, and the cart, the rails and the direction she
  * travels are all exactly as they were.
  */
-export const FACE_TURN_MAX = (50 * Math.PI) / 180;
+export const FACE_TURN_MAX = (55 * Math.PI) / 180;
 
 /**
  * Of {@link FACE_TURN_MAX}, the share the **head** contributes rather than the
- * body — so 21° of head on top of 29° of shoulder.
+ * body — so 26° of head on top of 29° of shoulder.
+ *
+ * **0.47, not 0.42, since `FACE_TURN_MAX` went from 50° to 55°** — the extra 5°
+ * is all neck, so the shoulders turn the same 29° they always did. That is on
+ * purpose: turning the body swings her arms across the tub, and a sad rider is
+ * one who has just been bonked, so is shaking and folding at the same time.
+ * Measured with the body turned, her arm already reaches well through the tub
+ * side (see the handoff); more shoulder would make that worse, more neck does not.
  *
  * Split, rather than all neck, because `ferrisWheel/gondola.ts` has already
  * settled this exact question for a seated figure — *"the whole toy turns, not
  * its neck"* — and this kid has no neck to turn: `art/models/kid.ts` puts the
  * head pivot *inside* the top of the torso ("what hides the neck"), so a large
- * yaw on its own is a skull revolving inside a jumper. 21° also keeps the head
+ * yaw on its own is a skull revolving inside a jumper. 26° also keeps the head
  * inside the 20°–35.5° band of head yaws the park already uses elsewhere (the
  * shopkeeper's idle, the backpack pet's peek); nothing in the game had ever
  * yawed a person's head further.
  */
-export const FACE_TURN_HEAD_SHARE = 0.42;
+export const FACE_TURN_HEAD_SHARE = 0.47;
 
 /** A rider's turn towards the camera, split between the two things that turn. */
 export interface FaceTurn {
