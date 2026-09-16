@@ -319,7 +319,16 @@ export function planSlideShots(
     // proved out, on whatever chute this seed grew ("steeper is always
     // safe; shallower is a cliff" — the note above).
     const pitch = Math.atan2(-tangent.y, Math.hypot(tangent.x, tangent.z));
-    const elevation = TRACKSIDE_ELEVATION + Math.max(0, pitch);
+    //
+    // **Never past the chute's own vertical.** Elevation is an angle from `right`
+    // in the plane square to the chute, so beyond 90° the eye crosses over the
+    // top and lands on the *near* side, looking back through the hand-rail it
+    // was lifted to see over. A 75° base leaves only 15° of pitch before that
+    // happens, and a chute running outward far from the park's centre is steep
+    // in world `y` well past it: on the canonical seed, once the chute was held
+    // against the planet (#645), beat 3 pitched 42° in world `y`, its eye was
+    // placed at 117° and the near rail hid the rider at the start of the beat.
+    const elevation = Math.min(Math.PI / 2, TRACKSIDE_ELEVATION + Math.max(0, pitch));
     const eyeAt = (standoff: number): Vector3 =>
       covers
         .clone()

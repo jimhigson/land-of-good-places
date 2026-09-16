@@ -161,6 +161,29 @@ export function worldYAtAltitude(x: number, z: number, metres: number): number {
 }
 
 /**
+ * **The world `y` at a plan column whose distance from the planet's centre is
+ * `radius`** — the column-held inverse of `Geo.radius()`.
+ *
+ * {@link worldYAtAltitude} answers "so many metres above the *ground*", which
+ * follows every wave in the terrain. This answers "so many metres from the
+ * *centre*", which follows none of them — the frame gravity works in. A thing
+ * that must fall monotonically under a rider (the ginormous slide, #645) wants
+ * its heights held here: a profile that never increases in radius never climbs
+ * against the local up, whatever the ground beneath it does, whereas one that
+ * never increases in world `y` climbs wherever it runs outward from the park's
+ * centre, and one held in altitude climbs over every hummock.
+ *
+ * Exact: `x` and `z` are held, so the radius pins `y` outright. Returns the
+ * flat-park seed for a column no sphere of that radius reaches, for the same
+ * no-`NaN` reason as {@link worldYAtAltitude}.
+ */
+export function worldYAtRadius(x: number, z: number, radius: number): number {
+  const above = radius * radius - x * x - z * z;
+  if (above <= 0) return radius - PLANET_RADIUS;
+  return Math.sqrt(above) - PLANET_RADIUS;
+}
+
+/**
  * The ground position on a given bearing. `direction` must be a unit vector;
  * it is a direction, so it is the same in world and planet-centred space.
  */

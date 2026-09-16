@@ -29,7 +29,7 @@ import {
   solveRailRoute,
 } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
-import { terrainHeight } from '../terrain';
+import { Geo, worldYAtAltitude, worldYAtRadius } from '../geo';
 
 /**
  * **The ginormous slide, as a plan.**
@@ -104,7 +104,7 @@ const SELF_CLEARANCE = 6;
  * helter-skelter indoors keeps. 12 m/s is 43 km/h: fine over the gentle indoor
  * curve, watched from outside, and much too fast for this one now that it is
  * ridden from the rider's own eyes round a bend that wraps a castle. 8 m/s is
- * 29 km/h — still a proper rush down a 13.75 m drop, and it is what lets the
+ * 29 km/h — still a proper rush down an 11–17 m drop, and it is what lets the
  * turns be tight enough to fit the park without throwing the camera about.
  */
 export const GIANT_SLIDE_SPEED = 6.5;
@@ -118,13 +118,24 @@ export const GIANT_SLIDE_SPEED = 6.5;
  * only fires when a legal biarc to the pit happens to exist, and grows until it
  * does. Asked for 68 m it produced 140.
  *
- * That is not merely long, it is the wrong ride: the drop is fixed at 13.75 m,
- * so length *is* gradient. Over 140 m the steepest part of the chute was 8°,
+ * That is not merely long, it is the wrong ride: the drop is fixed per seed
+ * (11–17 m against the local up), so length *is* gradient. Over 140 m the
+ * steepest part of the chute was 8°,
  * which is a lazy river with hand-rails. {@link MAX_RIDEABLE_LENGTH} is
  * therefore enforced as a rejection during the search — a piece that would take
  * the chute past it is simply not a legal piece, so the search backtracks
- * instead of wandering — and what survives gives roughly 14° average and 21°
- * steepest, which reads as a slide from the ground and rides like one.
+ * instead of wandering.
+ *
+ * **What survives is not "about 21° steepest"**, which this comment said for a
+ * long time after it stopped being true. Measured against the local up — the
+ * only frame a rider feels — over a 2 m window, once the profile was held
+ * against the planet (#645, 16 September 2026): canonical 27.2°, seed 131
+ * 27.7°, seed 24 23.3°, seeds 11 and 326 14–15°. Before that fix the same
+ * measurement read 36.8° / 36.2° / 26.6° / 28.7° / 28.9°, while world `y`
+ * understated the steepest. Whether those figures are right for a six-year-old
+ * is a ride-feel judgement, and it is Jim's. `theGinormousSlideNeverClimbs`
+ * prints the current figure for every seed it runs, so read it there rather
+ * than trusting this comment.
  */
 const DESIRED_LENGTH = 60;
 
@@ -152,7 +163,7 @@ const DESIRED_LENGTH = 60;
  * Why 75 and not something nearer {@link DESIRED_LENGTH}: an open route
  * overshoots what it is asked for (see there), so a ceiling near 60 would
  * reject nearly everything and put the boot time straight back. The drop is
- * fixed at 13.75 m, so length is gradient — at 87 m the canonical seed's chute
+ * fixed per seed, so length is gradient — at 87 m the canonical seed's chute
  * ran too flat *and* too far to stand on legs, which is why one number cures
  * both complaints.
  */
@@ -190,9 +201,9 @@ const FINAL_RUN_IN = 9;
  * Smoothstep has zero gradient at its own start, so the flat lip meets the drop
  * with no kink: the join is smooth by construction rather than by tuning.
  *
- * It makes the ride better, too. The same 13.75 m of drop now happens over 82%
- * of the chute instead of all of it, so the steep part is steeper — nearer 23°
- * than 19° — and it is a plunge rather than a ramp.
+ * It makes the ride better, too. The same drop now happens over 82% of the
+ * chute instead of all of it, so the steep part is steeper, and it is a plunge
+ * rather than a ramp.
  */
 const LIP_FRACTION = 0.18;
 
@@ -249,10 +260,52 @@ const CRUISER_OVERLAP = CORRIDOR_RADIUS + 0.75;
  */
 const BATTLEMENT_AIR = 4.55;
 
-/** Where the rider's eyeline starts, and where it ends up. */
+/**
+ * Where the rider's eyeline starts, as a world `y`.
+ *
+ * **Still placed flat**, like the door: the castle leans with the planet and
+ * this is measured straight up world `y` from its plinth. The castle's rigid
+ * transform is the proper owner of both and is arriving separately (#650). The
+ * profile below takes this only as *where the chute begins* — it is converted
+ * to a distance from the planet's centre at the start column, and everything
+ * after the start is held in that frame. See {@link heightAt}.
+ */
 const START_Y = BUILDING_BASE_Y + CASTLE_MASONRY_TOP + BATTLEMENT_AIR;
-const END_Y = terrainHeight(BALL_PIT_X, BALL_PIT_Z) + 0.9;
-const SLIDE_DROP = START_Y - END_Y;
+
+/** How far above the ground at the pit the chute's mouth sits, along the local up. */
+const MOUTH_ALTITUDE = 0.9;
+
+/** The mouth's height over the pit, as a world `y` — diagnostic, see {@link END_RADIUS}. */
+const END_Y = worldYAtAltitude(BALL_PIT_X, BALL_PIT_Z, MOUTH_ALTITUDE);
+
+/**
+ * The mouth's distance from the planet's centre: {@link MOUTH_ALTITUDE} above
+ * the ground in the middle of the pit. The profile descends to this radius.
+ */
+const END_RADIUS = Geo.fromWorld(BALL_PIT_X, END_Y, BALL_PIT_Z).radius();
+
+/**
+ * **The distance from the planet's centre the chute's level lip is held at**,
+ * for a start at (x, z) leaving along (headingX, headingZ).
+ *
+ * `START_Y` is a flat world height (see there), and a line held at a flat world
+ * `y` is not level: its distance from the centre changes along it. So which
+ * point of it to take as "the start height" is a real choice, and it is taken
+ * as the **higher** of the stub's two ends — the start pose and the farthest
+ * point carried back through the wall. The radius along a straight line at a
+ * constant `y` is convex, so every point of the old flat stub is at or below
+ * that, and the level stub therefore clears the battlements by at least what
+ * the flat one did at every point. Taking the start pose alone — tried first —
+ * held the lip 0.13 m *inside* seed 11's battlements where its castle stands
+ * further from the park's centre than its door pose.
+ */
+function startRadiusFor(x: number, z: number, headingX: number, headingZ: number): number {
+  const back = doorStubLength(headingZ);
+  return Math.max(
+    Geo.fromWorld(x, START_Y, z).radius(),
+    Geo.fromWorld(x - headingX * back, START_Y, z - headingZ * back).radius(),
+  );
+}
 
 /**
  * Distance the start pose stands off the facade's south wall.
@@ -489,7 +542,17 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
     return true;
   }
   for (const tower of CASTLE_TOWERS) {
-    if (distanceOutsideTower(tower, x, z, y) < radius) return false;
+    // A tower standing on the plinth goes all the way down to the ground, however
+    // far the ground falls away from the plinth's flat height. `TowerSolid` stops
+    // at `bottomY`, so a chute passing *below* that height beside a tower read as
+    // clear of it. Nothing reached there while the chute was held in world `y`;
+    // held against the planet (#645) the run-out drops below the plinth on the
+    // far side of the castle, and seed 131 then ran its last metres through the
+    // foot of `tower-body-1` — 1.22 m inside the built masonry, measured by
+    // `theGinormousSlideMissesTheCastleTowers`. Reading the solid at its own
+    // foot for anything lower is the tower that was built.
+    const atY = tower.bottomY === BUILDING_BASE_Y && y < tower.bottomY ? tower.bottomY : y;
+    if (distanceOutsideTower(tower, x, z, atY) < radius) return false;
   }
   return true;
 }
@@ -717,6 +780,7 @@ function chuteMayPass(
   radius: number,
   distanceAlong: number,
   nominalLength: number,
+  startRadius: number,
 ): boolean {
   // Length is gradient on a ride whose drop is fixed, so an over-long chute is
   // as wrong as one that goes through a wall — but that rule lives on the brief
@@ -725,7 +789,7 @@ function chuteMayPass(
   // against a 75 m verdict), which is what made seed 5 solve 123 routes it was
   // always going to throw away. See {@link MAX_RIDEABLE_LENGTH}.
   if (insideCastle(x, z, radius)) return false;
-  const height = heightAtArc(distanceAlong, nominalLength);
+  const height = heightAtArc(distanceAlong, nominalLength, x, z, startRadius);
   // The castle is a rectangle *plus* four towers. Neither alone is the castle.
   if (!clearsTowers(x, z, height, radius)) return false;
   // Every plot but the two this ride joins, read off the flat arrays. Same test,
@@ -922,7 +986,9 @@ function openGround(x: number, z: number): boolean {
 }
 
 /**
- * Height along the chute: a single smoothstep from the parapet to the pit.
+ * Height along the chute, as a world `y` at plan column (x, z): a single
+ * smoothstep from the parapet to the pit — **in distance from the planet's
+ * centre, not in world `y`.**
  *
  * `u` is the fraction of the way along. Smoothstep is monotone on [0, 1] and
  * flat at both ends, which gives exactly the three things a slide needs and a
@@ -931,20 +997,43 @@ function openGround(x: number, z: number): boolean {
  * flattens into a runout so a child is *delivered* into the ball pit rather
  * than fired into it.
  *
- * That it never rises is a property of the function, not of the seed — which is
- * what makes it something `test/procgen/invariants.ts` can hold every seed to.
+ * ### Why a radius (#645)
+ *
+ * It used to run from `START_Y` to `END_Y` in world `y`. On a planet that is
+ * the wrong axis: "level" and "downhill" are measured along the local up, which
+ * leans away from world `+Y` as the chute runs out from the park's centre. A
+ * run-out that was flat in world `y` was *rising* against the local up, and
+ * every seed climbed 0.8–3.2 m in all — the lip, and the last 5–8 m into the
+ * pit, where a child going 3–13° uphill stops.
+ *
+ * Held as a radius, "never rises" is a property of the frame a rider is in:
+ * a step whose endpoints are at non-increasing distance from the centre has
+ * non-positive projection on the up at its midpoint. It is a radius and not an
+ * altitude above the ground ({@link worldYAtAltitude}) deliberately — that
+ * would copy every hummock of the terrain waves into the chute, and a chute
+ * that follows the ground up a hummock climbs just the same.
+ *
+ * That it never rises is then a property of the function, not of the seed —
+ * which is what `theGinormousSlideNeverClimbs` in `test/procgen/invariants.ts`
+ * holds every seed to, against the local up of the built chute.
  */
-function heightAt(u: number): number {
+function heightAt(u: number, x: number, z: number, startRadius: number): number {
   const clamped = u < 0 ? 0 : u > 1 ? 1 : u;
-  if (clamped <= LIP_FRACTION) return START_Y;
+  if (clamped <= LIP_FRACTION) return worldYAtRadius(x, z, startRadius);
   const after = (clamped - LIP_FRACTION) / (1 - LIP_FRACTION);
   const eased = after * after * (3 - 2 * after);
-  return START_Y - SLIDE_DROP * eased;
+  return worldYAtRadius(x, z, startRadius - (startRadius - END_RADIUS) * eased);
 }
 
 /** {@link heightAt}, addressed by metres travelled rather than by fraction. */
-function heightAtArc(distanceAlong: number, totalLength: number): number {
-  return heightAt(distanceAlong / (totalLength || 1));
+function heightAtArc(
+  distanceAlong: number,
+  totalLength: number,
+  x: number,
+  z: number,
+  startRadius: number,
+): number {
+  return heightAt(distanceAlong / (totalLength || 1), x, z, startRadius);
 }
 
 /**
@@ -1020,8 +1109,8 @@ function crossingOf(
  *
  * **Not a second test: the same one, on the same points.** The points come from
  * {@link stubPoints}, which is also what {@link chutePoints} builds the finished
- * chute's stub from, plus the route's own first point (`heightAt(0)` is
- * `START_Y`). The question is {@link chuteComplaint}, which is also what
+ * chute's stub from, plus the route's own first point (`heightAt(0)`, the
+ * level lip's radius at the pose). The question is {@link chuteComplaint}, which is also what
  * {@link unrideableComplaint} asks of the finished chute. Those points are a
  * subset of every chute that could start from this pose, so a pose refused here
  * is one every route from it would have been refused for — the prune can only
@@ -1029,7 +1118,8 @@ function crossingOf(
  */
 function doorStubIsClear(pose: Pose2): boolean {
   const points = stubPoints(pose.x, pose.z, pose.hx, pose.hz);
-  points.push(new Vector3(pose.x, START_Y, pose.z));
+  const startRadius = startRadiusFor(pose.x, pose.z, pose.hx, pose.hz);
+  points.push(new Vector3(pose.x, worldYAtRadius(pose.x, pose.z, startRadius), pose.z));
   return chuteComplaint(points) === null;
 }
 
@@ -1065,10 +1155,11 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
   points.push(...stubPoints(startX, startZ, flat.x, flat.z));
 
   const steps = Math.max(8, Math.round(route.length / POINT_SPACING));
+  const startRadius = startRadiusFor(startX, startZ, flat.x, flat.z);
   for (let i = 0; i <= steps; i += 1) {
     const u = i / steps;
     route.pointAt(u * route.length, flat);
-    points.push(new Vector3(flat.x, heightAt(u), flat.z));
+    points.push(new Vector3(flat.x, heightAt(u, flat.x, flat.z, startRadius), flat.z));
   }
   return points;
 }
@@ -1076,7 +1167,7 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
 /**
  * **The chute's stub, and the one owner of it**: the points carried back from a
  * start at (`startX`, `startZ`) along the start heading, through the wall, at
- * {@link START_Y} — farthest back first, excluding the start itself.
+ * the start's own distance from the planet's centre — farthest back first, excluding the start itself.
  *
  * {@link chutePoints} builds the finished chute's stub from this and
  * {@link doorStubIsClear} prunes door offers with it, so the line that is judged
@@ -1100,9 +1191,14 @@ function stubPoints(startX: number, startZ: number, headingX: number, headingZ: 
   // flat as `heightAt` says it is instead of needing an allowance for not
   // being. Measured: it is what took seed 18 back under `SLIDE_MAY_RISE`.
   const stubSteps = Math.max(1, Math.round(stub / POINT_SPACING));
+  // Level in the rider's frame, like the lip it leads into: the start's own
+  // distance from the planet's centre, not the start's world `y`.
+  const startRadius = startRadiusFor(startX, startZ, headingX, headingZ);
   for (let i = stubSteps; i >= 1; i -= 1) {
     const back = (stub * i) / stubSteps;
-    points.push(new Vector3(startX - headingX * back, START_Y, startZ - headingZ * back));
+    const x = startX - headingX * back;
+    const z = startZ - headingZ * back;
+    points.push(new Vector3(x, worldYAtRadius(x, z, startRadius), z));
   }
 
   return points;
@@ -1265,6 +1361,17 @@ export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
   // handing over the real spline keeps the chute inside the park with the
   // same clearance the old circle pretended to give (issue #241).
   const boundary = solverBoundary(PARK_BOUNDARY);
+  // The prefilter does not know which of the door's offers a piece descends
+  // from, so it reads the height profile from the square-on offer's start. The
+  // offers sit within 1.8 m of it along the wall, so this is as approximate as
+  // the assumed length beside it — and, like that, it is only a prefilter:
+  // `satisfies` measures the finished chute from its real start.
+  const nominalStartRadius = startRadiusFor(
+    BUILDING_CENTRE_X + doorCentre,
+    SOUTH_WALL_Z + WALL_STANDOFF,
+    0,
+    1,
+  );
   return {
     // A stream of its own, so the slide's shape cannot shift because some
     // other ride changed how many random draws it takes.
@@ -1284,7 +1391,7 @@ export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
     // enough to keep the search away from the castle and out of the coaster's
     // general area; `satisfies` below is what actually decides.
     clear: (x, z, radius, distanceAlong) =>
-      chuteMayPass(x, z, radius, distanceAlong, desiredLength),
+      chuteMayPass(x, z, radius, distanceAlong, desiredLength, nominalStartRadius),
     satisfies: (candidate) => unrideableComplaint(candidate) === null,
     boundary,
     corridorRadius: CORRIDOR_RADIUS,
@@ -1569,9 +1676,14 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
  */
 export function unrideableComplaint(route: SolvedRailRoute): string | null {
   if (route.length > MAX_RIDEABLE_LENGTH) {
+    const start = { x: 0, z: 0 };
+    route.pointAt(0, start);
+    const heading = { x: 0, z: 0 };
+    route.tangentAt(0, heading);
+    const drop = startRadiusFor(start.x, start.z, heading.x, heading.z) - END_RADIUS;
     return (
       `is ${route.length.toFixed(2)} m long against a ${MAX_RIDEABLE_LENGTH} m ` +
-      `ceiling — at that length the drop of ${(START_Y - END_Y).toFixed(2)} m is ` +
+      `ceiling — at that length the drop of ${drop.toFixed(2)} m is ` +
       'spread so thin the ride is a lazy river a child stops halfway down'
     );
   }
