@@ -1340,6 +1340,25 @@ export interface ParkFacts {
    * level; pass a bridge's own `heightAt(x, z)` to ask about its deck.
    */
   readonly reachableFromEntrance: (x: number, z: number, goalY?: number) => boolean;
+  /**
+   * Walks a player-sized body from one point towards another in `step`-metre
+   * strides, through **the real `CollisionWorld.resolveMovement`** — the path
+   * `Player` takes, sub-stepping and all — with her feet kept on the ground the
+   * player's own sampler reports (`WalkSurfaces`, so the ball pit's scooped
+   * floor is a floor). `visit` sees every position she reaches.
+   *
+   * Feet height matters here and `isStandable`'s `y = 0` does not do: a
+   * `topIsAbsolute` collider is compared against the mover's real feet, and on
+   * the sphere the ground 30 m out is metres below world `y` 0.
+   */
+  readonly march: (
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+    step: number,
+    visit: (x: number, z: number) => void,
+  ) => void;
   readonly buildMs: number;
 }
 
@@ -2416,6 +2435,31 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     return Math.hypot(endX - x, endZ - z) < 1.5;
   };
 
+  const marcher = new Vector3();
+  const march = (
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+    step: number,
+    visit: (x: number, z: number) => void,
+  ): void => {
+    const span = Math.hypot(toX - fromX, toZ - fromZ);
+    if (span < 1e-9) return;
+    const ux = (toX - fromX) / span;
+    const uz = (toZ - fromZ) / span;
+    // Stood on whatever is under her start, from just above it, so a start on
+    // the grass beside the pit and one on the pit floor both land on a floor.
+    marcher.set(fromX, sample(fromX, fromZ, terrainHeight(fromX, fromZ) + 0.5), fromZ);
+    for (let travelled = 0; travelled < span; travelled += step) {
+      world.collision.resolveMovement(marcher, ux * step, uz * step, PLAYER_RADIUS, 0, Infinity, (p) => {
+        // A step up she could climb, and any drop: the sampler's own ceiling rule.
+        p.y = sample(p.x, p.z, p.y);
+      });
+      visit(marcher.x, marcher.z);
+    }
+  };
+
   const castlePass = {
     windows: CASTLE_WINDOWS,
     complaints: [
@@ -3309,6 +3353,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     slideLegs: world.building.slideLegs,
     castleFootprint,
     reachableFromEntrance,
+    march,
     routes,
     nearPairs,
     boundary: world.collision.playBounds,
