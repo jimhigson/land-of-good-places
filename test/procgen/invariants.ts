@@ -4437,6 +4437,199 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
 };
 
 /**
+ * **A child cannot walk through the ginormous slide's low run-out** (#664).
+ *
+ * The chute has to come down to its mouth 0.9 m over the ball pit, so on every
+ * seed its last stretch hangs below a child's head. For a long time only its
+ * legs were solid, and a walking child passed straight through the trough.
+ *
+ * So this walks up to it the way a child does — `scripts/check-hotel.mts`
+ * probe 22's shape. Every {@link RUN_OUT_TARGET_SPACING} m along the stretch
+ * of **built** chute whose underside is below {@link TALLEST_CHILD_HEIGHT}
+ * (altitude along the local up, never a world-`y` difference), a player-sized
+ * body is marched at the centre line from both sides, on five bearings each,
+ * **twice**: at 5 cm a stride and at `PLAYER_LONGEST_STEP`, because a gap
+ * closed to a creep can still be tunnelled on a stuttering frame. The march is
+ * the real `CollisionWorld.resolveMovement` with her feet on the real ground,
+ * so a `topIsAbsolute` top is judged against the feet it is meant for. Her
+ * centre must never get inside the trough's own footprint
+ * (`CHUTE_ENVELOPE.halfWidth` of the centre line).
+ *
+ * Two anti-vacuity guards, because a green line here must mean "measured":
+ * a seed with no low chute at all is a complaint (the mouth is 0.9 m up — it
+ * cannot happen honestly), and at least half the marches must actually reach
+ * the chute, or other scenery is doing the stopping and this is not measuring
+ * the slide. The count is written to stderr on every run.
+ *
+ * And the thing solidity must never cost: **she can still leave the pit.** The
+ * spot the ride puts her down is asked of the real nav lattice, as is every
+ * standable metre beside the run-out, so a collider that walled off the pit's
+ * exit or closed a pocket against the castle or a leg goes red here.
+ */
+const RUN_OUT_TARGET_SPACING = 1.6;
+const RUN_OUT_START = 4;
+const RUN_OUT_BEARINGS_DEG: readonly number[] = [-50, -25, 0, 25, 50];
+const RUN_OUT_POCKET_REACH = 3.5;
+
+const theGinormousSlideRunOutIsSolid: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const chute = facts.slideChute;
+  const halfWidth = facts.chuteEnvelope.halfWidth;
+
+  const low = chute.map(
+    (p) => altitudeAt(p[0], p[1], p[2]) - facts.chuteEnvelope.below < TALLEST_CHILD_HEIGHT,
+  );
+  /** Plan-view chords of the low stretch, either end low. */
+  const chords: [number, number, number, number][] = [];
+  for (let i = 1; i < chute.length; i += 1) {
+    const a = chute[i - 1];
+    const b = chute[i];
+    if (!a || !b || !(low[i] || low[i - 1])) continue;
+    chords.push([a[0], a[2], b[0], b[2]]);
+  }
+  if (chords.length === 0) {
+    complaints.push(
+      'no stretch of the ginormous slide hangs below a child — its mouth is 0.9 m over the pit, ' +
+        'so the chute this measured is not the one that was built',
+    );
+    return complaints;
+  }
+  const toLowChute = (x: number, z: number): number => {
+    let best = Infinity;
+    for (const [x1, z1, x2, z2] of chords) {
+      const ax = x2 - x1;
+      const az = z2 - z1;
+      const lengthSquared = ax * ax + az * az;
+      let t = lengthSquared > 1e-12 ? ((x - x1) * ax + (z - z1) * az) / lengthSquared : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const d = Math.hypot(x - (x1 + ax * t), z - (z1 + az * t));
+      if (d < best) best = d;
+    }
+    return best;
+  };
+
+  // --- 1. solid from every bearing, at a creep and at a sprint ---------------
+  let marches = 0;
+  let reached = 0;
+  const spacingSamples = Math.max(1, Math.round(RUN_OUT_TARGET_SPACING / 0.4));
+  for (let i = 0; i < chute.length; i += spacingSamples) {
+    const here = chute[i];
+    if (!here || !low[i]) continue;
+    const before = chute[Math.max(0, i - 1)]!;
+    const after = chute[Math.min(chute.length - 1, i + 1)]!;
+    const run = Math.hypot(after[0] - before[0], after[2] - before[2]);
+    if (run < 1e-6) continue;
+    const normalX = -(after[2] - before[2]) / run;
+    const normalZ = (after[0] - before[0]) / run;
+    for (const side of [-1, 1]) {
+      for (const degrees of RUN_OUT_BEARINGS_DEG) {
+        const angle = (degrees * Math.PI) / 180;
+        const nx = side * normalX;
+        const nz = side * normalZ;
+        const dirX = nx * Math.cos(angle) - nz * Math.sin(angle);
+        const dirZ = nx * Math.sin(angle) + nz * Math.cos(angle);
+        const startX = here[0] + dirX * RUN_OUT_START;
+        const startZ = here[2] + dirZ * RUN_OUT_START;
+        // A start she could not be stood at, or one already against the run-out,
+        // is not an approach to it.
+        if (toLowChute(startX, startZ) < halfWidth + PLAYER_RADIUS + 0.3) continue;
+        if (!facts.isStandable(startX, startZ, PLAYER_RADIUS)) continue;
+        for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+          let closest = Infinity;
+          let closestX = startX;
+          let closestZ = startZ;
+          facts.march(
+            startX,
+            startZ,
+            here[0] - dirX * RUN_OUT_START,
+            here[2] - dirZ * RUN_OUT_START,
+            step,
+            (x, z) => {
+              const d = toLowChute(x, z);
+              if (d < closest) {
+                closest = d;
+                closestX = x;
+                closestZ = z;
+              }
+            },
+          );
+          marches += 1;
+          if (closest < halfWidth + PLAYER_RADIUS + 0.2) reached += 1;
+          if (closest < halfWidth) {
+            complaints.push(
+              `a child walks into the ginormous slide's low run-out: marched at it in ` +
+                `${step.toFixed(2)} m strides from ${fmt([startX, startZ])}, she got ` +
+                `${closest.toFixed(2)} m from the centre line at ${fmt([closestX, closestZ])}, ` +
+                `inside the ${halfWidth.toFixed(2)} m trough — the chute there is ` +
+                `${(altitudeAt(here[0], here[1], here[2]) - facts.chuteEnvelope.below).toFixed(2)} m ` +
+                'off the ground (slide/chuteCollider.ts)',
+            );
+          }
+        }
+      }
+    }
+  }
+  process.stderr.write(
+    `[run-out solid] seed ${facts.seed}: ${chords.length} low chords, ` +
+      `${reached} of ${marches} marches reached the run-out\n`,
+  );
+  if (marches === 0 || reached * 2 < marches) {
+    complaints.push(
+      `only ${reached} of ${marches} marches at the ginormous slide's run-out reached it — ` +
+        'the rest were stopped by other scenery, so this is not measuring the slide',
+    );
+  }
+
+  // --- 2. and she can still get out of the pit --------------------------------
+  const landing = facts.slideLanding;
+  if (!facts.reachableFromEntrance(landing.x, landing.z, landing.groundY)) {
+    complaints.push(
+      `the spot the ginormous slide puts her down, ${fmt([landing.x, landing.z])}, cannot be ` +
+        'walked to from the gate — she cannot walk out of the ball pit',
+    );
+  }
+
+  // --- 3. and no pocket beside the run-out is shut off -----------------------
+  let pockets = 0;
+  let pocketsMeasured = 0;
+  let firstPocket: readonly [number, number] | null = null;
+  const [minX, maxX, minZ, maxZ] = chords.reduce(
+    (box, [x1, z1, x2, z2]) => [
+      Math.min(box[0], x1, x2),
+      Math.max(box[1], x1, x2),
+      Math.min(box[2], z1, z2),
+      Math.max(box[3], z1, z2),
+    ],
+    [Infinity, -Infinity, Infinity, -Infinity],
+  );
+  for (let x = Math.floor(minX - RUN_OUT_POCKET_REACH); x <= maxX + RUN_OUT_POCKET_REACH; x += 1) {
+    for (let z = Math.floor(minZ - RUN_OUT_POCKET_REACH); z <= maxZ + RUN_OUT_POCKET_REACH; z += 1) {
+      const d = toLowChute(x, z);
+      if (d > RUN_OUT_POCKET_REACH || d < halfWidth + PLAYER_RADIUS + 0.1) continue;
+      if (!facts.isStandable(x, z, PLAYER_RADIUS)) continue;
+      pocketsMeasured += 1;
+      if (!facts.reachableFromEntrance(x, z)) {
+        pockets += 1;
+        firstPocket ??= [x, z];
+      }
+    }
+  }
+  process.stderr.write(
+    `[run-out solid] seed ${facts.seed}: ${pocketsMeasured - pockets} of ${pocketsMeasured} ` +
+      `standable metres beside the run-out walkable from the gate\n`,
+  );
+  if (pockets > 0 && firstPocket) {
+    complaints.push(
+      `${pockets} of ${pocketsMeasured} standable metres beside the ginormous slide's run-out ` +
+        `cannot be walked to from the gate, the first at ${fmt(firstPocket)} — a pocket she ` +
+        'could be stuck in, or ground the collider walled off',
+    );
+  }
+
+  return complaints;
+};
+
+/**
  * **The ginormous slide leaves the castle over the top of the battlements**,
  * with real air under it — not through the stone.
  *
@@ -10957,6 +11150,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'the ginormous slide stands on legs a child can walk between',
     theGinormousSlideStandsOnSomething,
+  ],
+  [
+    "a child cannot walk through the ginormous slide's low run-out, and can still leave the pit",
+    theGinormousSlideRunOutIsSolid,
   ],
   [
     'the ginormous slide leaves the castle over the top of the battlements',
