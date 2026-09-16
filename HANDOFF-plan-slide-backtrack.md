@@ -45,3 +45,7 @@ Scratch repro worktree `.claude/worktrees/plan-slide-repro` (branch
   17F/77P (94): "slide does not clip the castle towers" now passes.
 - New clause red at halfX-10: "crosses at world x -40.92, 8.61 m past the end...".
 - check:park-boot green on branch (canonical) and on repro LGP_SEED=326 (74.5629 m both cadences).
+- test:procgen full: base and branch both 85F/575P/0S, identical failing names, 51 s.
+- pnpm run check: stops at check:rail-race (step 49), red with the same 17 FAILs on base.
+  Every step before it passed, including slide-rider, pet-slide, park, castle-towers, solve-cost.
+- Scratch worktrees removed; repro is `git merge origin/eng/bend-exteriors` onto base (only package.json conflicts, take ours).
