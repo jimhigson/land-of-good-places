@@ -175,10 +175,10 @@ const angleBetweenUnits = (a: Readonly<Vector3>, b: Readonly<Vector3>): number =
  * That is not merely approximate, it is measurably wrong in a direction that
  * matters: world `(x, z)` is an **orthographic** projection of this planet
  * (`terrain.ts` puts the ground for `(x, z)` at `√(R² − x² − z²) − R`), so its
- * radial axis compresses by `cos θ`. At the park's reach a flat `hypot` reads a
- * 1 m radial gap as 1 m where a child walks **1.43 m**, and a demand disc of
- * 2 m really spans 2.87 m of ground. `scripts/claim-chart-error.mts` is that
- * measurement.
+ * radial axis compresses by `cos θ`. A flat `hypot` reads a 1 m radial gap as
+ * 1 m where a child walks 1/cos θ — 1.12 m at 100 m from the origin, 1.37 m at
+ * 150 m — and a demand disc is stretched by the same factor.
+ * `scripts/claim-chart-error.mts` prints that table from the constants.
  *
  * ## How it works, and the case that makes it more than one line
  *
