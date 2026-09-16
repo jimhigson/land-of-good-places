@@ -101,6 +101,14 @@ const _bearingUp = /* @__PURE__ */ new Vector3();
  * Indoors `upFor` hands back plain `+Y`, the tilt is the identity, and this
  * returns `bearing` unchanged — which is exactly right, and is why a call site
  * that might be indoors or out can use it unconditionally.
+ *
+ * **A candidate to move into `geo/Frame.ts`.** That is the declared vocabulary
+ * and this file is only where it is because the sphere arrived before `geo/`
+ * did; `Frame.toLocal` is the same idea one step further on. It stays here for
+ * now because every caller so far is a `faceOnGround` call site working in
+ * world `(x, y, z)` rather than in `Geo`, and converting those is a separate
+ * change from fixing what they measure. Do not add a *second* bearing-to-yaw
+ * anywhere — extend this one or move it, which is the whole point of the note.
  */
 export function yawForBearing(x: number, y: number, z: number, bearing: number): number {
   upFor(x, y, z, _bearingUp);

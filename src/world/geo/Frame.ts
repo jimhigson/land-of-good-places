@@ -125,4 +125,54 @@ export class Frame {
   right(target: Vector3): Vector3 {
     return target.set(1, 0, 0).applyQuaternion(this.q);
   }
+
+  /**
+   * **Where a world point is, as far as this frame is concerned** — the one
+   * answer to *"how far in front of / beside / above the thing is that?"*.
+   *
+   * `x` is metres to its right, `y` metres along its own up, `z` metres in
+   * front. A flat park had these for free: `y` was height, `x`/`z` were the
+   * ground, and every measurement in the codebase helped itself. **Outdoors
+   * none of that is true any more**, and the failures all look the same — a
+   * near-zero residue where there should be an exact zero, or a plausible
+   * number that is really the lean.
+   *
+   * The measured cases this exists for, all on the canonical seed:
+   *
+   * - **`check:rail-race`** reports a rider's arm **0.027 m** through the side
+   *   of a cart, and her ducked body **0.53 m** below its own tub floor. The
+   *   cart leans about 15°, and at that lean a plumb comparison across a 1.1 m
+   *   tub manufactures a discrepancy of exactly that size. Ask this instead and
+   *   the question becomes *"is her elbow outside the tub's own half-width"*,
+   *   which is the question somebody meant.
+   * - **The castle** (`cruiserWindow.ts`) describes itself with
+   *   `world y = BUILDING_BASE_Y + localY` and `lx = x − BUILDING_CENTRE_X` —
+   *   two flat formulas standing in for one rigid transform — while its mesh is
+   *   leant by `placeOnSphere`. Its courtyard floor consequently spans
+   *   **6.44 m** of world `y` across its own footprint, and a level route
+   *   solved in that frame flies through the stonework.
+   *
+   * **This is the inverse of the placement, not a second opinion about it.**
+   * `toWorld(toLocal(p)) === p` to the last bit, so converting a call site
+   * cannot move anything; what it changes is only that the question is asked in
+   * the frame the thing was built in.
+   *
+   * **A body's frame is not the ground's frame.** Build it with
+   * {@link setFromBearing} at the body's *own* position and bearing — a cart at
+   * its own place on its own lane — rather than at the ground under it, or the
+   * answer is off by however far the two have leant apart.
+   */
+  toLocal(world: Readonly<Vector3>, target: Vector3): Vector3 {
+    this.at.toWorld(_origin);
+    return target.subVectors(world, _origin).applyQuaternion(_inverse.copy(this.q).invert());
+  }
+
+  /** The inverse of {@link toLocal}: a point in this frame's axes, put back into the world. */
+  toWorld(local: Readonly<Vector3>, target: Vector3): Vector3 {
+    this.at.toWorld(_origin);
+    return target.copy(local).applyQuaternion(this.q).add(_origin);
+  }
 }
+
+const _origin = /* @__PURE__ */ new Vector3();
+const _inverse = /* @__PURE__ */ new Quaternion();
