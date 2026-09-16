@@ -701,7 +701,20 @@ export function climbPose(
   const edgeDistance = tree.trunkRadius + CLIMB_EDGE_GAP;
   const edgeX = tree.x + Math.sin(approachAngle) * edgeDistance;
   const edgeZ = tree.z + Math.cos(approachAngle) * edgeDistance;
-  const topY = tree.canopyTopY - headOffsetY + lift;
+  // **Her perch is a height above the tree's own ground, carried to her column.**
+  // `canopyTopY` is a flat-frame `y`, a height above the ground under the tree's
+  // foot, and `onSphere` reads whatever it is given as a height above the ground
+  // under *her* — the trunk's edge, most of a metre away. On a flat park those
+  // two grounds were one number; on a leaning one they differ by the slope
+  // across that metre, so she sat that much deeper in the leaves on the uphill
+  // side of every tree and that much higher on the downhill side. Measured
+  // (scale 1, canonical seed): tree 27 at r=94.9, ground 0.35 m higher at the
+  // 270° edge than at the foot, and the main canopy blob stood **0.37 m higher
+  // relative to her** than the flat description says; at 90° it stood 0.37 m
+  // lower. `check:climb-wave`'s body clause read 0 px of her below the neck
+  // across 180–345°. The correction is that difference, added back.
+  const edgeGroundLift = terrainHeight(edgeX, edgeZ) - terrainHeight(tree.x, tree.z);
+  const topY = tree.canopyTopY - headOffsetY + lift + edgeGroundLift;
 
   if (phase === 'peek') return onSphere(edgeX, topY, edgeZ, peekFacing);
 
