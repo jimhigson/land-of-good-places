@@ -1,5 +1,17 @@
 /**
- * **Where the park runs off its own planet.**
+ * **HISTORICAL RECORD — not a live instrument.** This is the transcript of the
+ * 2.3355x park (`PARK_REFERENCE_SPHERE_RADIUS` = 1200 against a 220 m planet),
+ * as it stood on `feat/sphere-combined` before #620 returned the park to scale
+ * 1. Its hard-coded figures (the 245.0 m reach, the READING 3 coordinates), the
+ * docblock it quotes ("117.08 / 0.10 = 1171 m"), and READING 4's description of
+ * the invariant's clauses all describe that tree, not this one. The controls
+ * and READING 1 still compute from the constants; nothing else does.
+ *
+ * For what the park reaches now, read the `[ground sphere] on the planet:` line
+ * `theGroundIsTheSphereItClaimsToBe` prints on every `test:procgen` run: it
+ * measures every drawn outdoor vertex on every seed.
+ *
+ * **Where the park ran off its own planet.**
  *
  * `theGroundIsTheSphereItClaimsToBe` fails on seeds 11 and 326 with *"the ground
  * reaches a gradient of 111.36% at 245.0 m from the centre"*. 245 m is
@@ -29,6 +41,8 @@ const control = (label: string, ok: boolean, detail: string): void => {
   say(`  control ${ok ? 'ok  ' : 'FOUL'} ${label} — ${detail}`);
 };
 
+say('HISTORICAL RECORD of the 2.3355x park before #620 — the figures past READING 1 are that park, not this one.');
+say('');
 say(`GROUND_SPHERE_RADIUS = ${R} m, BUS_MAX_GRADE = ${(BUS_MAX_GRADE * 100).toFixed(0)}%`);
 say('');
 say('CONTROLS');
