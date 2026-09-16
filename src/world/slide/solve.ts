@@ -531,7 +531,17 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
     return true;
   }
   for (const tower of CASTLE_TOWERS) {
-    if (distanceOutsideTower(tower, x, z, y) < radius) return false;
+    // A tower standing on the plinth goes all the way down to the ground, however
+    // far the ground falls away from the plinth's flat height. `TowerSolid` stops
+    // at `bottomY`, so a chute passing *below* that height beside a tower read as
+    // clear of it. Nothing reached there while the chute was held in world `y`;
+    // held against the planet (#645) the run-out drops below the plinth on the
+    // far side of the castle, and seed 131 then ran its last metres through the
+    // foot of `tower-body-1` — 1.22 m inside the built masonry, measured by
+    // `theGinormousSlideMissesTheCastleTowers`. Reading the solid at its own
+    // foot for anything lower is the tower that was built.
+    const atY = tower.bottomY === BUILDING_BASE_Y && y < tower.bottomY ? tower.bottomY : y;
+    if (distanceOutsideTower(tower, x, z, atY) < radius) return false;
   }
   return true;
 }
