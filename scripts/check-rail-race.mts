@@ -1738,10 +1738,22 @@ interface FaceView {
 
 function faceView(width: number, height: number, sadness: number): FaceView {
   rig.resize(width, height);
-  const kid = createKid({ outfit: 0xffffff, hairStyle: 'short' });
-  const root = new Group();
-  root.add(kid.root);
-  const crown = kid.hatAnchor.parent;
+  // **The real player, in a cart placed and seated by `railRace/seat.ts`** —
+  // so she leans with the ring exactly as the game draws her. This used to be a
+  // bare kid stood straight up world `+Y` with a plain yaw, which is a rider the
+  // game stopped drawing when the ring was leant onto the sphere.
+  const player = new Player(new CollisionWorld(), new IsoCamera(), new Vector3());
+  player.beginRide();
+  player.model.root.scale.setScalar(RIDE_SCALE);
+  const cart = new Group();
+  const heading: CartHeading = { yaw: 0, pitch: 0 };
+  const faceIdleInput = {
+    isDown: () => false,
+    wasPressed: () => false,
+    moveX: 0,
+    moveY: 0,
+  } as unknown as InputSystem;
+  const crown = player.model.hatAnchor.parent;
   if (!crown) throw new Error('check-rail-race: the kid rig has no crown under its hat anchor');
 
   let worstFacing = 1;
@@ -1757,19 +1769,27 @@ function faceView(width: number, height: number, sadness: number): FaceView {
     const travelled = (i / 48) * route.length;
     rig.reset(travelled);
     const at = route.wrap(route.startDistance + travelled);
-    const point = route.pointAt(PLAYER_LANE, at, new Vector3());
-    const tangent = route.tangentAt(PLAYER_LANE, at, new Vector3());
-    const cartYaw = Math.atan2(tangent.x, tangent.z);
+    placeRaceCart(route, PLAYER_LANE, at, cart, heading);
+    const point = cart.position;
 
     // Exactly `RailRace.poseRider`'s pose: the cart's yaw plus the body's share
     // of the turn on the root, the head's share on the head.
-    const facing = faceTurnTowardsCamera(cartYaw, point, rig.camera.position, sadness);
+    const facing = faceTurnTowardsCamera(heading.yaw, point, rig.camera.position, sadness);
     turn = facing.body + facing.head;
-    root.position.set(point.x, point.y + SEAT_HEIGHT * route.scale, point.z);
-    root.rotation.y = cartYaw + facing.body;
-    root.scale.setScalar(route.scale);
-    kid.head.rotation.y = facing.head;
-    root.updateMatrixWorld(true);
+    seatRaceRider(player, cart, heading, route.scale, 0, facing.body);
+    player.model.head.rotation.y = facing.head;
+    // Through her real update, seated, so the body's own lean in the seat moves
+    // her head the way it does on screen.
+    player.railRaceRide = SEATED;
+    player.update({
+      dt: 1 / 60,
+      elapsed: 1,
+      input: faceIdleInput,
+      playerPosition: player.position,
+      cameraForward: new Vector3(0, 0, 1),
+      frame: i,
+    } satisfies FrameContext);
+    player.group.updateMatrixWorld(true);
 
     crown.getWorldPosition(skull);
     const screenX: number[] = [];
@@ -1784,7 +1804,7 @@ function faceView(width: number, height: number, sadness: number): FaceView {
     }
     eyeSpread = Math.min(eyeSpread, Math.abs((screenX[0] ?? 0) - (screenX[1] ?? 0)));
   }
-  kid.dispose?.();
+  player.dispose();
   return { worstFacing, worstOnScreen, eyeSpread, turn };
 }
 
