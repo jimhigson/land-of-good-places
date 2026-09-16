@@ -182,6 +182,16 @@ function coarse<T>(spec: {
   };
 }
 
+/**
+ * A solver's own message, minus anything that is not a function of the seed:
+ * `RailRouteUnsolvable` reports its elapsed milliseconds, and the trace is
+ * hashed into the park digest, so a timing in a refusal reason would make the
+ * same park hash differently on every run.
+ */
+function timeless(message: string): string {
+  return (message.split('\n')[0] ?? '').replace(/,? in \d+(\.\d+)? ?ms\b/g, '');
+}
+
 function seedFor(feature: string, attempt: number, base: number): number {
   return attempt === 0 ? base : (base ^ decisionSeed(PARK_SEED, feature, 'solve', attempt)) >>> 0;
 }
@@ -225,7 +235,7 @@ function builders(): readonly FeatureBuilder[] {
         route = yield* cruiserRouteSearch(start.briefs);
       } catch (error) {
         if (!(error instanceof RailRouteUnsolvable)) throw error;
-        return refusal(`sky cruiser: ${error.message.split('\n')[0]}`, { consumed: ['layout'] });
+        return refusal(`sky cruiser: ${timeless(error.message)}`, { consumed: ['layout'] });
       }
       return yield* finishCruiserPlanSearch(route, start.rng);
     },
@@ -246,7 +256,7 @@ function builders(): readonly FeatureBuilder[] {
         solvedRoute = yield* trainRouteSearch(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'train', 'solve', attempt));
       } catch (error) {
         if (!(error instanceof RailRouteUnsolvable)) throw error;
-        return refusal(`railway loop: ${error.message.split('\n')[0]}`, { consumed: ['cruiser', 'layout'] });
+        return refusal(`railway loop: ${timeless(error.message)}`, { consumed: ['cruiser', 'layout'] });
       }
       const route = new TrainRoute(solvedRoute);
       return { route, stations: planStations(route) };
