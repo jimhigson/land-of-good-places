@@ -193,14 +193,28 @@ const trainPoint = new Vector3();
 const lanes: LaneFacts[] = [];
 for (let lane = 0; lane < LANE_COUNT; lane += 1) {
   const facts: LaneFacts = { climb: 0, steepest: 0, lowest: Infinity, highest: -Infinity };
-  let previous = route.heightAt(lane, 0);
+  // **Climb is measured as rise above the lane's own base, not as world `y`.**
+  // `heightAt` is `baseAt + undulation`, and `baseAt` is the sphere's cap under
+  // the lane's own column plus the ring's clearance — so a world-`y` sum carries
+  // the planet's curvature inside it, and the outer lanes, whose columns sit
+  // further round the cap, "climb" more for nothing. Measured at scale 1 on the
+  // canonical seed: world `y` gave a spread of **13.758 m** (lanes 34.3–48.1 m);
+  // radius from the planet's centre gives **0.116 m**, the remainder being the
+  // terrain waves, which `terrainHeight` adds along world `y` rather than
+  // radially; this gives the undulation alone, which is also the only thing
+  // `simulate.ts` integrates (`slopeAt`). Every lane rides the same hills.
+  // Before the sphere `baseAt` was the single number `route.base`, so this is the
+  // quantity the clause always measured.
+  let previous = route.heightAt(lane, 0) - route.baseAt(0, lane);
   for (let i = 1; i <= SAMPLES; i += 1) {
     const distance = (i / SAMPLES) * route.length;
     const height = route.heightAt(lane, distance);
-    if (height > previous) facts.climb += height - previous;
-    previous = height;
+    const rise = height - route.baseAt(distance, lane);
+    if (rise > previous) facts.climb += rise - previous;
+    previous = rise;
     facts.steepest = Math.max(facts.steepest, Math.abs(route.slopeAt(lane, distance)));
-    route.pointAt(lane, distance, point);
+    // The flat point, so the ground is asked in the same column as `height`.
+    route.flatPointAt(lane, distance, point);
     const above = height - terrainHeight(point.x, point.z);
     facts.lowest = Math.min(facts.lowest, above);
     facts.highest = Math.max(facts.highest, above);
