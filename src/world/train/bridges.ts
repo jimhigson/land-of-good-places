@@ -487,6 +487,38 @@ export interface Bridge {
    * padded reuse of that one.
    */
   pavingHeightAt(x: number, z: number): number | null;
+  /**
+   * **World `y` of the drawn tunnel soffit in this plan column** — the
+   * underside of the arch a train passes beneath — or `null` where this
+   * bridge has no tunnel over that point (outside the arch mouth, or wider
+   * than the masonry, where what is underfoot is solid abutment or open
+   * park).
+   *
+   * **The single owner of "how high is the soffit here", and it exists
+   * because the old answer could not lean.** Both readers of it used to take
+   * `new Box3().setFromObject(deckMesh).min.y` off the invisible `deck`
+   * marker, which is a `BoxGeometry` carrying a yaw about world `+Y` and
+   * nothing else — a plate lying flat in world `y`. That was a fair
+   * approximation while a bridge was flat in world `y` too. It stopped being
+   * one when the bridge began to bend with the planet: the road beside that
+   * plate now leans at `tan(r / GROUND_SPHERE_RADIUS)`, so over
+   * `TRACK_CLEARANCE` it falls up to 1.4 m past a marker that does not lean
+   * at all, and `the park's own paving rides over every bridge` went red on
+   * all five test seeds against geometry that was measured sound — the road
+   * clearing the drawn stone under it by 0.23–0.33 m with open sky or its
+   * own parapet overhead. Issue #635.
+   *
+   * It is built from `soffitRiseAt` and `tangentY` — the very functions
+   * `buildShellGeometry` draws the soffit from — so the stone a child sees
+   * and the height a check reads cannot be two different arches.
+   *
+   * **Leaning the marker instead is a measured dead end.** Every reader took
+   * `Box3.min.y`, and the AABB of a tilted plate is far taller than the plate
+   * (0.050 m unleaned, exactly `BRIDGE_DECK_SLAB`), so `min.y` became the low
+   * corner rather than the underside and the train-clearance clause went from
+   * green to 3.19–3.60 m against 3.90 m on all five seeds.
+   */
+  soffitYAt(x: number, z: number): number | null;
 }
 
 export interface BuiltBridges {
@@ -841,12 +873,28 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // shell built past this point is the one owner of everything visible,
   // flat crown span included, so a second, separately transformed mesh
   // covering the same span cannot open a seam against it. This box stays
-  // only because `test/procgen/invariants.ts` needs an object literally
-  // named `deck` to measure the built clearance off — `Box3.setFromObject`
-  // and `getObjectByName` both walk the scene graph regardless of
-  // `.visible`, so it still answers that question with the same geometry
-  // the old, rendered version did, at zero draw cost and with nothing left
-  // to fall out of step with the shell beside it.
+  // only because the three raycasting probes across this repo
+  // (`test/procgen/invariants.ts`, `test/procgen/parkFacts.ts`,
+  // `scripts/measure-bridge-parapet.mts`) exclude it **by name**, and a
+  // marker is not stone.
+  //
+  // **Nothing measures a height off it any more, and that is deliberate.**
+  // Two invariants used to take `new Box3().setFromObject(...).min.y` from
+  // it as the soffit over the track. That reading was a plate lying flat in
+  // world `y` — this mesh carries a yaw about world `+Y` and nothing else —
+  // and it stopped being true of a bridge the moment the bridge began to
+  // bend with the planet: over `TRACK_CLEARANCE` the leaning road falls up
+  // to 1.4 m past it, which put `the park's own paving rides over every
+  // bridge` red on all five test seeds against geometry measured sound.
+  // Issue #635. Both now ask {@link Bridge.soffitYAt}, which is built from
+  // the same `soffitRiseAt` and `tangentY` the shell is drawn from.
+  //
+  // **Do not lean this marker to fix that.** Every reader took an AABB, and
+  // the AABB of a tilted plate is far taller than the plate — measured
+  // 0.050 m unleaned, exactly `BRIDGE_DECK_SLAB` — so leaning it took the
+  // train-clearance clause from green to 3.19-3.60 m against 3.90 m on all
+  // five seeds. `scripts/diag-deck-soffit.mts` carries a control that voids
+  // its whole run if this marker's AABB is ever not one slab thick.
   //
   // **And it carries no faces at all** — `setIndex([])` below. Hiding it was
   // not enough: `check:coplanar` buckets triangles by their plane and asks
@@ -861,10 +909,11 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // what the check calls a second seam.
   //
   // Deleting the faces is `ART_DIRECTION.md` §7's own remedy rather than a
-  // dodge, because **nothing wanted them**. Both readers of this object take
-  // `new Box3().setFromObject(...).min.y`, which is computed from the
-  // position attribute and does not look at the index at all, so the box
-  // they measure is unchanged to the bit; and all three places that raycast
+  // dodge, because **nothing wanted them**. The two readers that took
+  // `new Box3().setFromObject(...).min.y` computed it from the position
+  // attribute, which does not look at the index at all, so the box they
+  // measured was unchanged to the bit (they have since moved to
+  // {@link Bridge.soffitYAt} — see above); and all three places that raycast
   // a bridge already exclude this object *by name* (`invariants.ts`,
   // `parkFacts.ts`, `measure-bridge-parapet.mts`), because a marker is not
   // stone. What is left is eight corners and a name — exactly what is
@@ -1076,6 +1125,18 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       // {@link ShellGeometry.planEdge}.
       if (!insideDrawnStone(x, z)) return null;
       return heightAt(x, z);
+    },
+    soffitYAt: (x: number, z: number): number | null => {
+      const projected = frame.project(x, z, shift);
+      // Past the arch mouth along the spine, or outside the masonry across
+      // it, there is no tunnel here — solid abutment, or open park.
+      if (Math.abs(projected.along) >= ARCH_SPAN_HALF) return null;
+      if (Math.abs(projected.across) > halfAcross) return null;
+      // `tangentY`, not `worldYAtAltitude`: the arch is the rigid part of a
+      // bridge, flat in the crossing's own tangent frame and tilted in world
+      // `y`, and this must convert it back exactly the way the shell that
+      // drew it did.
+      return tangentY(x, z, soffitRiseAt(Math.abs(projected.along)));
     },
   };
 

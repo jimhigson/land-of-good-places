@@ -49,7 +49,7 @@
  * pool, went red).
  */
 import { describe, it, beforeAll, expect } from 'vitest';
-import { Box3, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
+import { InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
 import { WIDEST_FLOWER } from '../../src/world/flowerDimensions.ts';
 import {
   buildParkFacts,
@@ -5311,19 +5311,60 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
     // the tier (2 Sep 2026), so nothing is skipped here.
     // The same name `bridges.ts` builds this crossing's own group under —
     // one owner (the crossing's own `railDistance`) for both.
-    const deckMesh = facts.world.train.group.getObjectByName(
-      `bridge-${crossing.railDistance.toFixed(1)}`,
-    )?.getObjectByName('deck');
-    if (!deckMesh) {
+    const bridge = facts.world.train.bridges.find((b) =>
+      b.deckCovers(crossing.x, crossing.z),
+    );
+    if (!bridge) {
       complaints.push(
         `the crossing at (${fmt([crossing.x, crossing.z])}) has no built bridge deck to measure`,
       );
       continue;
     }
-    const soffit = new Box3().setFromObject(deckMesh).min.y;
     const route = facts.world.train.route;
     route.pointAt(route.distanceNear(crossing.x, crossing.z), clearancePoint);
     const groundY = clearancePoint.y;
+    // **The soffit where it binds, asked of the arch itself.**
+    //
+    // This used to read `new Box3().setFromObject(deckMesh).min.y` off the
+    // invisible `deck` marker, a plate lying flat in world `y` sat at
+    // `soffitCrownY − ARCH_CROWN_DIP` — the marker was placed at the binding
+    // height precisely so that one world number stood for the tightest point
+    // of the arch rather than its roomiest. That worked while a bridge was
+    // flat in world `y`. It cannot survive a bridge that leans with the
+    // planet (issue #635), and leaning the marker is worse still, because
+    // `Box3.min.y` of a tilted plate is its low corner rather than its
+    // underside.
+    //
+    // So ask `Bridge.soffitYAt` — built from the same `soffitRiseAt` and
+    // `tangentY` the shell is drawn from — and ask it at the **worst point
+    // across the train's own swept width**, which is what the marker's
+    // `ARCH_CROWN_DIP` offset was standing in for. This is the real arch
+    // profile rather than a constant approximating it, so it is strictly the
+    // more honest reading of the same question.
+    // Copied out to plain numbers: `TrainRoute` hands back a shared scratch
+    // vector, and `soffitYAt` below projects through the bridge's own frame.
+    const railTangent = route.tangentAt(route.distanceNear(crossing.x, crossing.z));
+    const tangentX = railTangent.x;
+    const tangentZ = railTangent.z;
+    let soffit = Infinity;
+    let sampled = 0;
+    for (let lateral = -TRACK_CLEARANCE; lateral <= TRACK_CLEARANCE + 1e-9; lateral += 0.1) {
+      const here = bridge.soffitYAt(
+        crossing.x - tangentZ * lateral,
+        crossing.z + tangentX * lateral,
+      );
+      if (here === null) continue;
+      sampled += 1;
+      soffit = Math.min(soffit, here);
+    }
+    if (sampled === 0) {
+      complaints.push(
+        `the bridge at (${fmt([crossing.x, crossing.z])}) reports no tunnel soffit anywhere ` +
+          `across the train's swept width — there is nothing here to measure the clearance ` +
+          'against, so this crossing was about to pass vacuously',
+      );
+      continue;
+    }
     const clearance = soffit - groundY;
     if (clearance < TRAIN_CLEARANCE_Y) {
       complaints.push(
@@ -6626,12 +6667,12 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
   //    would drive through.
   const railPoint = { x: 0, z: 0 };
   const route = facts.world.train.route;
+  // **How much of this clause actually ran.** A vertex is only judged where
+  // its own bridge reports a tunnel over it, so a geometry change that
+  // narrowed `soffitYAt`'s domain would empty this clause out while leaving
+  // it triumphantly green. The count is announced below, including zero.
+  let judged = 0;
   for (const crossing of facts.world.train.crossings) {
-    const deckMesh = facts.world.train.group
-      .getObjectByName(`bridge-${crossing.railDistance.toFixed(1)}`)
-      ?.getObjectByName('deck');
-    if (!deckMesh) continue;
-    const soffit = new Box3().setFromObject(deckMesh).min.y;
     const bridge = bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
     if (!bridge) continue;
     for (const { name, mesh } of layers) {
@@ -6642,6 +6683,17 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
         if (bridge.pavingHeightAt(x, z) === null) continue;
         route.flatPointAt(route.distanceNear(x, z), railPoint);
         if (Math.hypot(x - railPoint.x, z - railPoint.z) > TRACK_CLEARANCE) continue;
+        // **The soffit in this vertex's own column, not one world height for
+        // the whole crossing.** See `Bridge.soffitYAt` and issue #635: this
+        // read `new Box3().setFromObject(deckMesh).min.y`, and that marker is
+        // a plate lying flat in world `y` while the road beside it leans with
+        // the planet. The disagreement is nil at the park centre and grows
+        // monotonically with radius — 1.865 m at the outermost canonical
+        // crossing, against a road that in fact cleared the drawn stone
+        // beneath it by 0.327 m with open sky overhead.
+        const soffit = bridge.soffitYAt(x, z);
+        if (soffit === null) continue;
+        judged += 1;
         const y = position.getY(i);
         if (y < soffit) {
           complaints.push(
@@ -6654,6 +6706,17 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
       }
     }
   }
+  // CLAUDE.md: "when a check stops covering something, it must say so on every
+  // run". `process.stderr`, not `console.log` — vitest's default reporter
+  // shows console output from failing tests only, which is the exact case a
+  // coverage note is not for.
+  process.stderr.write(
+    judged === 0
+      ? `  theDrawnPathRidesOverEveryBridge: NO path vertex stood under any arch — ` +
+        `the tunnel clause asserted nothing on this seed\n`
+      : `  theDrawnPathRidesOverEveryBridge: ${judged} path vertices judged against their ` +
+        `own column's soffit\n`,
+  );
 
   return complaints;
 };
