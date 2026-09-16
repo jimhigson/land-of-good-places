@@ -272,7 +272,7 @@ export function buildCeilingBeams(deck: number): InstancedMesh | null {
   // invariant that the ginormous slide leaves over the battlements. This mesh
   // was called `castle-wall-plate-N` for one afternoon and fell straight into
   // that pattern: an interior timber 4.5 m higher than the real parapet was
-  // read as the castle's stonework, `castleMasonryTopY` jumped 10.29 → 14.83 m,
+  // read as the castle's stonework, `castleMasonryTopRadius` jumped 10.29 → 14.83 m,
   // and `npm run test:procgen` failed on all five seeds.
   //
   // The fix is this name, not a narrower pattern. That prefix is **deliberately

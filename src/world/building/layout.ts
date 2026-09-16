@@ -343,8 +343,18 @@ export const CASTLE_MERLON_HEIGHT = 1.05;
 
 /**
  * The top of the facade's stonework, facade-local — what the ginormous slide
- * has to clear, and what `test/procgen`'s `castleMasonryTopY` measures off the
+ * has to clear, and what `test/procgen`'s `castleMasonryTopRadius` measures off the
  * built mesh.
+ *
+ * **The two agree, and the agreement is the tell** (issue #625). This constant
+ * is **9.85 m** up the facade's own axis; measured on the built park as a
+ * radius from the planet's centre, the highest stonework stands **9.770 m**
+ * above the planet's surface — the small difference being the terrain the
+ * castle stands on. The same masonry measured with a plumb line down world
+ * `+Y` came out at **8.040 m**, 1.73 m short of a constant it is built from,
+ * because the castle stands ~48 m out from the park's origin and therefore
+ * *leans*. A facade-local number and a radial one are comparable; a facade-local
+ * number and a world `y` are not.
  */
 export const CASTLE_MASONRY_TOP = CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT;
 

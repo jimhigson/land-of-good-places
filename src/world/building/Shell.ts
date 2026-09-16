@@ -1421,7 +1421,7 @@ const FACADE_SCALE = BUILDING_HALF_X / INTERIOR_HALF_X;
  *
  * Two things it has to stay clear of, both measured rather than asserted:
  *
- * - **the battlements stand proud of it**, so `parkFacts.castleMasonryTopY`
+ * - **the battlements stand proud of it**, so `parkFacts.castleMasonryTopRadius`
  *   still measures the crenellations and the ginormous slide's clearance
  *   invariant is unmoved. The deck's top is `CASTLE_MERLON_HEIGHT` below the
  *   merlons' tops;

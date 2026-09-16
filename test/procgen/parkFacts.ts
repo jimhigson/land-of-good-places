@@ -903,21 +903,52 @@ export interface ParkFacts {
     readonly halfZ: number;
   };
   /**
-   * The **top of the castle's stonework**, in world Y: the highest point of the
-   * curtain wall and the battlements standing on it.
+   * The **top of the castle's stonework, as a radius from the planet's
+   * centre**: the highest point of the curtain wall and the battlements
+   * standing on it, measured the way the world is actually shaped.
    *
-   * Measured off the built meshes' world bounding boxes, not off
-   * `CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT`. Only the Y component of an
-   * AABB is used, and for "how tall is the tallest stone" that component is
-   * exact — the box's x/z extent is a gross over-approximation of a hollow ring
-   * of wall and is deliberately not read.
+   * Metres from the planet centre. Compare it only against another radius —
+   * never against a world `y`, which is the very mix this field was created to
+   * end. Subtract `geo.PLANET_RADIUS` if you want a number to *print*, and do
+   * that only in a message.
+   *
+   * ## Why this is a radius and not a `max.y` (issue #625)
+   *
+   * It *was* an AABB's `max.y`, and that was wrong by 1.730 m in the dangerous
+   * direction. The world is a sphere of radius `GROUND_SPHERE_RADIUS`, "up" is
+   * away from its centre, and the castle stands ~48 m out from the park's
+   * origin — so the castle **leans**, and a plumb line dropped down world `+Y`
+   * is not its own up. Measured on the canonical seed:
+   *
+   * | | |
+   * |---|---|
+   * | AABB `max.y` (what this used to report) | 8.040 m |
+   * | highest stonework by radius, at world (35.65, 6.95, 4.22) | 9.770 m |
+   * | under-report | **1.730 m** |
+   *
+   * That is `RADIAL-INVENTORY.md`'s first universal mistake exactly — *a `y`
+   * difference standing in for a distance* — and it granted the ginormous
+   * slide 1.73 m of clearance the battlements do not give it.
+   *
+   * ## Measured off vertices, not off a box
+   *
+   * The old form could use a `Box3` because `max.y` of an axis-aligned box *is*
+   * the greatest `y` of the geometry inside it. No corner of that box is a
+   * point of the mesh, though, so its **radius** is not any vertex's radius —
+   * it is an over-estimate of unbounded size. So this walks the masonry's own
+   * vertices through their world matrices and takes the greatest
+   * `Geo.radius()`, which is a point that genuinely exists in the park.
+   *
+   * `-Infinity` when no masonry mesh matched at all; see
+   * `theGinormousSlideLeavesOverTheBattlements`, which treats that as a
+   * failure rather than as limitless clearance.
    *
    * This replaced a `slideDoor` fact that reported where a hole in the south
    * wall was *planned*. No such hole is ever cut (see
    * `theGinormousSlideLeavesOverTheBattlements`), so the fact described nothing
    * in the park and the invariant reading it could not fail.
    */
-  readonly castleMasonryTopY: number;
+  readonly castleMasonryTopRadius: number;
   /**
    * **The top of everything standing on the castle's own roof** — the paving,
    * the pavilion and the ring of planters `Shell.ts`'s `buildCastleRoofGarden`
@@ -927,7 +958,7 @@ export interface ParkFacts {
    * than a pass: see `theCastleRoofStaysInsideItsBattlements`.
    *
    * It exists because the roof garden is the one thing on the castle that is
-   * **not** matched by {@link castleMasonryTopY}'s name pattern and could still
+   * **not** matched by {@link castleMasonryTopRadius}'s name pattern and could still
    * reach into the ginormous slide's air. The pavilion is a scaled copy of a
    * building sized for a 42 m plate; put it on a 24 m castle with its mast and
    * bobble and it stands 4 m over the parapet.
@@ -1442,15 +1473,32 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // clearance check built on them passes for free.
   scene.updateMatrixWorld(true);
 
-  // The top of the castle's stonework, read off the built meshes.
+  // The top of the castle's stonework, read off the built meshes — as a
+  // **radius from the planet's centre**, because the castle leans (#625). See
+  // `ParkFacts.castleMasonryTopRadius` for the 1.730 m this was wrong by while
+  // it was an AABB's `max.y`, and for why a box cannot answer a radius.
   const { Box3 } = await import('three');
-  let castleMasonryTopY = -Infinity;
+  // Dynamic, like every other `src/` import in this function: a static one
+  // would load at module-evaluation time, before the harness has set the seed.
+  // `Geo` itself reads no seed, but the rule is cheaper to keep than to audit.
+  const { Geo } = await import('../../src/world/geo/Geo.ts');
+  let castleMasonryTopRadius = -Infinity;
   {
-    const box = new Box3();
+    const probe = new Vector3();
+    const geo = new Geo();
     scene.traverse((object) => {
       if (!/^(castle-wall-|crenellations$)/.test(object.name)) return;
-      box.setFromObject(object);
-      if (box.max.y > castleMasonryTopY) castleMasonryTopY = box.max.y;
+      object.traverse((node) => {
+        if (!(node instanceof Mesh)) return;
+        const position = node.geometry.getAttribute('position');
+        if (!position) return;
+        node.updateWorldMatrix(true, false);
+        for (let i = 0; i < position.count; i += 1) {
+          probe.fromBufferAttribute(position, i).applyMatrix4(node.matrixWorld);
+          const radius = geo.setFromWorldVector(probe).radius();
+          if (radius > castleMasonryTopRadius) castleMasonryTopRadius = radius;
+        }
+      });
     });
   }
 
@@ -2984,7 +3032,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     slideCameras,
     slideShotSpans,
     slideLanding,
-    castleMasonryTopY,
+    castleMasonryTopRadius,
     castleRoofGarden,
     parkGateArch,
     castleTowers,

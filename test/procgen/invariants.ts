@@ -60,6 +60,13 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { offAxisGround, recutCarriers, type OffAxisGround } from './gridAxes.ts';
+// A leaf module: `Geo.ts` imports `three` and `core/constants` and nothing
+// else, so a static import here cannot load a seeded module early — the hazard
+// this file's header warns about. It is imported rather than restated because
+// `Geo.radius()` is the one owner of "how far is this from the planet's
+// centre", and a hand-written `Math.hypot(x, y + R, z)` beside it would be the
+// second definition CLAUDE.md's "two definitions of one thing" names.
+import { Geo } from '../../src/world/geo/Geo.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 // Leaf module, safe to import statically: `bridgeSpine.ts`'s ONLY import is
 // a type-only one (from `world/train/crossings`), which erases — no seeded
@@ -4264,17 +4271,35 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  *
  * ### What is true, measured
  *
- * The chute crosses the south wall plane at **y 14.84** on every one of the
- * five seeds, and the tallest stone — the crenellations — tops out at
- * **y 10.29**. What matters is the chute's *underside*, at 14.84 − 1.11 =
- * **13.73 m**, so the air a rider actually has under them is **3.44 m** — not
- * the 4.55 m the centre line clears by, which is the number this was first
- * written up with. (Corrected in review. Two numbers describing one gap is the
- * exact habit this branch has now been bitten by twice; the code below was
- * always right, only the prose was loose.)
- *
  * So the honest guarantee is not "it goes through the hole" but "it goes over
  * the top, and there is air under it", and that is what is asserted here.
+ *
+ * On the canonical seed the chute crosses the south wall plane (z 21.823) at
+ * world **(55.48, 9.69, 21.82)**, which is **17.302 m** above the planet's
+ * surface; its underside is `CHUTE_HALF_WIDTH` below that at **16.192 m**, and
+ * the tallest stone — a `castle-wall-lintel` vertex at world (35.65, 6.95,
+ * 4.22) — reaches **9.770 m**. The air a rider has under them is therefore
+ * **6.42 m**. A second instrument sharing none of that arithmetic agrees: the
+ * shortest distance from the built chute's centre line to any masonry vertex is
+ * **9.450 m**, against a half-width of 1.11 — 8.34 m of daylight.
+ *
+ * ### Why every number in the paragraph above is a radius (issue #625)
+ *
+ * This invariant was green for months while reading a fact that under-reported
+ * the stonework by **1.730 m**, because the fact took an axis-aligned box's
+ * `max.y` and the castle *leans* — it stands ~48 m out from the park's origin
+ * on a sphere of radius `GROUND_SPHERE_RADIUS`, where a plumb line down world
+ * `+Y` is nothing like its own up. The prose this section replaced quoted
+ * "y 14.84" against "y 10.29" and had been honestly measured; both were world
+ * `y`, both were wrong about the park, and the clearance they implied happened
+ * to be in the dangerous direction.
+ *
+ * The trap in fixing it, worth naming because it caught the first attempt: the
+ * issue reported the chute **1.19 m inside the battlements**, which is not a
+ * measurement of anything. It came from correcting only one side — a radial
+ * stone against a plumb underside — and those agree only at the park's origin.
+ * Correct both, as the code below now does, and the intrusion is not reduced,
+ * it does not exist: +6.42 m clear.
  *
  * That is a guarantee worth holding: it is what keeps a child from riding down
  * inside a wall. It fails the moment anyone lowers `START_Y`, raises
@@ -4282,8 +4307,11 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  * far-fetched, and all of which currently pass unnoticed.
  *
  * Measured off the built chute pushed out through the scene graph into world
- * space, against the built masonry's own world bounding boxes — never against
+ * space, against the built masonry's own vertices — never against
  * `slide/plan.ts` or `CASTLE_WALL_HEIGHT`, which are the things under test.
+ * Vertices rather than bounding boxes for the reason in
+ * {@link ParkFacts.castleMasonryTopRadius}: no corner of an axis-aligned box is
+ * a point of the mesh inside it, so the box has no honest radius.
  */
 const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   const complaints: string[] = [];
@@ -4316,7 +4344,12 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // Interpolates across the span that straddles the wall plane rather than
   // taking the nearest sample: at 0.4 m spacing the nearest sample can sit a
   // third of a metre to either side, which is most of the clearance measured.
-  let crossing: { x: number; y: number } | null = null;
+  // `z` is carried as well as `x`/`y` because the clause below needs a *radius*
+  // at this point, and a radius needs all three components. Dropping it and
+  // passing `Math.hypot(x, y + R)` would silently measure a point on the park's
+  // z = 0 meridian instead of this one — a plausible-looking number, ~1 m out
+  // here, and wrong in the same family as the bug this invariant is fixing.
+  let crossing: { x: number; y: number; z: number } | null = null;
   for (let i = 1; i < chute.length; i += 1) {
     const before = chute[i - 1];
     const here = chute[i];
@@ -4331,6 +4364,9 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
     crossing = {
       x: before[0] + (here[0] - before[0]) * t,
       y: before[1] + (here[1] - before[1]) * t,
+      // The wall plane is where this point was interpolated *to*, so its z is
+      // `wallZ` by construction rather than by a third lerp.
+      z: wallZ,
     };
     break;
   }
@@ -4349,10 +4385,27 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // The clause that carries the weight. The underside of the chute — its centre
   // line less the half-envelope a rider sits in — must be above the highest
   // masonry, or the ride passes through the battlements.
-  const underside = crossing.y - CHUTE_HALF_WIDTH;
-  const stone = facts.castleMasonryTopY;
+  //
+  // **Both sides are radii from the planet's centre, and that is the whole
+  // point of issue #625.** "Above" on a sphere means "further from the centre",
+  // not "greater world y", and the castle stands ~48 m out from the park's
+  // origin where the two have visibly parted company. The fact was corrected to
+  // a radius; this side is converted in the same change, because a radial stone
+  // against a plumb underside is not a measurement of anything — it subtracts a
+  // height from a radius-minus-`R` and the two agree only at the origin. That
+  // mix is where the headline "1.19 m inside the battlements" came from, and
+  // there is no such intrusion: converted honestly the chute clears by 6.42 m.
+  //
+  // Subtracting `CHUTE_HALF_WIDTH` from a radius is the right thing rather than
+  // a convenience: a radius decreases by exactly one metre for each metre
+  // travelled straight down towards the centre, which is what "underside" means
+  // here. It is very slightly conservative for a chute banked away from
+  // vertical, which is the safe direction.
+  const crossingRadius = Geo.fromWorld(crossing.x, crossing.y, crossing.z).radius();
+  const underside = crossingRadius - CHUTE_HALF_WIDTH;
+  const stone = facts.castleMasonryTopRadius;
 
-  // **A missing measurement is a failure here, not a pass.** `castleMasonryTopY`
+  // **A missing measurement is a failure here, not a pass.** `castleMasonryTopRadius`
   // is a max seeded with `-Infinity` over meshes picked out by name, so if the
   // castle is ever renamed out from under it the fact arrives as `-Infinity` and
   // `underside < -Infinity` is false for *every conceivable chute* — this
@@ -4375,18 +4428,23 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
     complaints.push(
       'no castle stonework was found in the built park at all, so the check that ' +
         'keeps the ginormous slide out of the battlements measured nothing. Either ' +
-        'the castle is missing, or the mesh names `parkFacts.castleMasonryTopY` ' +
+        'the castle is missing, or the mesh names `parkFacts.castleMasonryTopRadius` ' +
         'looks for have changed and this invariant has been silently switched off',
     );
     return complaints;
   }
 
   if (underside < stone) {
+    // Printed as heights above the planet's surface (`r − R`), because a bare
+    // 236-and-change is unreadable, but note the *gap* is the difference of the
+    // radii themselves — subtracting `R` from both cancels and changes nothing.
     complaints.push(
       `the ginormous slide crosses the castle's south wall at world ` +
-        `(${crossing.x.toFixed(2)}, ${crossing.y.toFixed(2)}) — its underside is at ` +
-        `${underside.toFixed(2)} m and the stonework tops out at ${stone.toFixed(2)} m, so ` +
-        `the chute is ${(stone - underside).toFixed(2)} m inside the battlements. Nothing ` +
+        `(${crossing.x.toFixed(2)}, ${crossing.y.toFixed(2)}, ${crossing.z.toFixed(2)}) — ` +
+        `measured radially, its underside is ${(underside - GROUND_SPHERE_RADIUS).toFixed(2)} m ` +
+        `above the planet's surface and the stonework tops out at ` +
+        `${(stone - GROUND_SPHERE_RADIUS).toFixed(2)} m, so the chute is ` +
+        `${(stone - underside).toFixed(2)} m inside the battlements. Nothing ` +
         'cuts a hole for it: `slideGap` reaches no geometry, so there is solid stone here',
     );
   }
@@ -4405,7 +4463,7 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  * ## Why that needs an invariant of its own
  *
  * Everything else on the castle is matched by
- * {@link ParkFacts.castleMasonryTopY}'s name pattern, and
+ * {@link ParkFacts.castleMasonryTopRadius}'s name pattern, and
  * {@link theGinormousSlideLeavesOverTheBattlements} measures the chute against
  * it. The roof garden deliberately is **not** matched — an interior-ish name
  * falling into that pattern is the fault `castleFabric.ts`'s `castle-timber-`
@@ -4438,7 +4496,7 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  * a pavilion growing into the slide.
  *
  * **Two ways this could assert nothing, both announced rather than passed.** A
- * missing roof garden is a failure, in the tradition of `castleMasonryTopY`'s
+ * missing roof garden is a failure, in the tradition of `castleMasonryTopRadius`'s
  * own guard. And a chute that never crosses the roof's plan box on a given seed
  * is a legitimate pass — but it is a pass over *zero* samples, so the count is
  * reported on every run the way `everyProvenBridgeSiteKeepsItsBridge` reports
@@ -4625,7 +4683,7 @@ const theSlideTracksideCamerasCanSeeTheRide: Invariant = (facts) => {
   const spans = facts.slideShotSpans;
   const cameras = facts.slideCameras;
 
-  // Anti-vacuity first, in the tradition of `castleMasonryTopY`'s guard: an
+  // Anti-vacuity first, in the tradition of `castleMasonryTopRadius`'s guard: an
   // empty plan must be a complaint, not a silent pass over nothing.
   if (spans.length < 2) {
     complaints.push(
@@ -4926,7 +4984,7 @@ const theSlideRiderLandsInTheBalls: Invariant = (facts) => {
   const landing = facts.slideLanding;
   const chute = facts.slideChute;
 
-  // Anti-vacuity, in the tradition of `castleMasonryTopY`'s guard: every clause
+  // Anti-vacuity, in the tradition of `castleMasonryTopRadius`'s guard: every clause
   // below is a comparison, and a comparison against a missing measurement is a
   // pass that measured nothing.
   if (chute.length === 0) {
