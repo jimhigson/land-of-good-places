@@ -7,6 +7,211 @@
   `.claude/worktrees/bend-baseline`, is a detached checkout of the base commit
   kept **only** for baseline measurements — remove it when done.
 
+---
+
+# SECOND AGENT'S PASS (16 Sep) — READ THIS FIRST
+
+The first agent was killed after its last three commits. I verified each of the
+reviewer's five findings **by measurement rather than by reading the commit
+messages**. Everything below this heading supersedes the older sections where
+they disagree; the older sections are kept because their reasoning is still the
+record.
+
+## Resolved, and re-measured on the current head
+
+| review finding | state |
+|---|---|
+| 1 — castle displaced 4.6–4.7 m | **fixed.** `tower-dist.mts`: all four instances at an identical **16.412 m** from the facade anchor. `check:castle-bend`: drawn reach 15.352 m ×4, spread **0.0 cm**, authored 15.315 m. |
+| 1b — the control inflated with the displacement | **fixed, and I proved it.** See below. |
+| 2 — gate arch drawn 148 m away | **fixed.** `arch-where.mts`: root (0, −52.65, 142.80), drawn centre (0, −49.79, 145.17), **3.72 m** apart, matching base. **And now actually seen** — see "Visual QA, 16 Sep". |
+| 3 — `rigid-audit.mts`'s √2 error | **fixed.** Corrected table below; the fountain's verdict flips to *inside* the limit. |
+| 4 — three untrue comments, missing invariant | **fixed, plus two more I found.** See below. |
+| 5 — 93 skipped tests | **NOT fixed, and it is not what the review thought.** See below. |
+| 6 — `check:path-preference` regression | **NOT fixed. Bisected to one line.** See below. |
+| — the "0.6 cm daylight" claim with no instrument | **fixed, and the claim was superseded.** See below. |
+
+## The control genuinely cannot inflate — proved, with the geometry
+
+`rigidWouldBe` now comes from `BUILDING_HALF_X/Z + BUILDING_WALL_THICKNESS/2`,
+which are declared constants, so it cannot move with the stone. I did **not**
+take that on trust. Mutation: in `bentFrame`, displace every part by `local.x +
+0.5` before `chart.toGeo` — a displacement that leaves the angles almost alone,
+so only the new clauses can catch it.
+
+```
+drawn reaches walked to 8.8–15.8 m (from 8.9–15.4)
+CONTROL held at 34.0 cm  <-- did NOT inflate
+turret reach: authored 15.315, drawn 14.955 / 15.755 / 14.955 / 15.755
+check:castle-bend FAILED — spread 80.0 cm, worst 44.0 cm off authored
+```
+
+The same mutation red-proves the new procgen invariant independently:
+`castleTurretsKeepTheirReach` on the canonical seed reported **15.615 / 12.620 /
+12.621 / 15.615 m from the centroid, a spread of 299.5 cm**. Real numbers, no
+`NaN`. `bend.ts` restored byte-identical afterwards.
+
+## The corrected audit table — re-run on the current head
+
+`node --import ./scripts/ts-extension-resolver-register.mjs scripts/rigid-audit.mts`,
+canonical seed. A flat patch is honest to **4.69 m** (5 cm tolerance).
+
+| structure | radius | departs | verdict |
+|---|---|---|---|
+| building-facade | 23.11 m | 121.7 cm | **bent** |
+| the-land-hotel-outside | 22.41 m | 114.4 cm | **bent** |
+| entrance-arch | 10.51 m | 25.1 cm | **bent** (child of the facade) |
+| park-gate-arch | 5.74 m | 7.5 cm | **bent** |
+| fountain | 4.58 m | 4.8 cm | **inside the limit — rigid is correct** |
+| welcome-sign | 2.85 m | 1.9 cm | rigid |
+| bus-shelter | 2.74 m | 1.7 cm | rigid |
+| facePaintStall | 2.46 m | 1.4 cm | rigid |
+| keychainShop | 1.41 m | 0.5 cm | rigid |
+
+4 of 9 exceed the limit. **The fountain is inside it**, so the elaborate
+justification for holding it (in the older section below) is answering a
+question that does not arise. The vertex-animated `waterBase` argument is still
+true and still means a bend would not take — but it is no longer *needed*, and
+the water disc is **4.19 m / 4.0 cm**, not 5.84 m / 7.7 cm.
+
+## The wall's daylight claim — instrument committed, claim superseded
+
+`scripts/wall-underside-probe.mts` (new). Walks each drawn wall body's bottom
+face centre line in its own local space, transforms by its world matrix so
+`standOnSphere` is included, and asks `altitudeAt` — `|p| − groundRadius`, never
+a difference of world `y`.
+
+```
+165 of 165 drawn wall bodies measured, 41 samples each
+worst daylight anywhere: -2.08 cm  (i.e. NO daylight; the shallowest point of
+                                    the shallowest wall is still buried)
+runs showing more than 5 cm of daylight: 0 of 165
+deepest burial: 268.0 cm
+```
+
+**Control** (the probe reports "no daylight", which is exactly the shape that
+can pass by being unable to see any): lift the sampled underside 0.30 m and
+nothing else → worst daylight **+27.87 cm**, 23 of 165 over the 5 cm line. The
+injected 30 cm is recovered to 0.05 cm.
+
+So the PR's "at most 0.6 cm of daylight" is **superseded, not reproduced** —
+measured properly there is none at all. The conclusion it supported (the flat
+datum errs entirely toward burial, which is invisible and solid) is confirmed
+and stronger.
+
+## STILL OPEN 1 — `check:path-preference`, bisected to one line
+
+**It is this branch's regression and it is not the castle displacement** (that
+is fixed and it is still red). Bisected by changing one constant and nothing
+else:
+
+| `parkManifest.ts` `boundingRadius` for `building` | result |
+|---|---|
+| 19.3 (base's value) | **green** — 20/20 junctions standable, 23 routes, mean 83.7% paved |
+| 19.7 (this branch) | **red** — 18/20 standable, 9 routes, "only 6 of 9 probes" |
+
+And the raise is **honest**: `check:park --verbose` on the current head reads
+`anchor:building declares 19.7 m, built out to 19.5 m`. At 19.3 the castle
+breaks its own declared reach by 20 cm, so reverting the constant trades one red
+check for another.
+
+Why the reach grew, measured in both worktrees on the same 214 lumps:
+
+```
+base (rigid)   centroid 135.594 m from park middle, 0.798 m off the declared
+               anchor, furthest lump 18.901 m at (114.44, -102.73)
+branch (bent)  centroid 135.467 m from park middle, 0.666 m off the declared
+               anchor, furthest lump 19.503 m at (114.96, -103.03)
+```
+
+So it is a **spread, not a slide**: the castle as a whole moves 0.13 m *toward*
+the park middle and sits *closer* to its declared point; the 0.60 m is the far
+corner alone, because each corner drops along its own local up and those ups
+differ across a 30 m footprint. (The manifest comment used to claim the opposite
+— "away from the middle of the park". Corrected, with these numbers in it.)
+
+**Dead end, so you do not repeat it.** I hypothesised the flat `hypot(x, z)`
+ruler was the bug and that measuring geodesically would hold the reach at 19.0.
+It does not: the flat projection *under*-reads surface distance everywhere,
+bent or not (building 19.50 flat vs 23.11 arc; **dodgems, which is not bent,
+15.82 flat vs 23.71 arc**), because the ground leans ~43° out there. Every
+consumer of `boundingRadius` plans in the same flat park plan, so the
+projection is self-consistent and is the right number *there*. Do not "fix the
+ruler".
+
+What is actually left: the canonical seed's path network cannot absorb 0.4 m
+more castle. Per CLAUDE.md that is *fix the generator or replace the pool seed,
+and write down why* — and it is the paths lane's generator, not this one.
+**Needs an Overseer decision; I did not guess at it.**
+
+## STILL OPEN 2 — 94 skipped tests, and it is NOT the displacement bug
+
+`pnpm run test:procgen` on the current head: **109 failed | 431 passed | 94
+skipped (634)**, 6 failed files of 20, **209.57s**. Base: 128 failed | 501
+passed | 0 skipped.
+
+`test/procgen/seed-326.test.ts` is **94 tests, all skipped**, because the suite
+throws:
+
+```
+Error: the ginormous slide never solved to a chute a child could ride: after 10
+target lengths (60, 65, 62, 55, 68, 50, 72, 45, 75, 42 m), the best on offer
+runs into a castle tower at (-112.8, -25.1, -23.0), which needs 1.45 m of
+clearance (at a 42 m target).
+  ❯ planSlide src/world/slide/solve.ts:1398:11
+```
+
+**The review guessed this was the 4.6 m displacement. It is not** — the
+displacement is fixed and the throw is unchanged. It is the *other* change on
+this branch: the leaning `TowerSolid`, which makes the collider describe the
+towers that are really drawn (see "THE BIG FINDING" below). The slide is being
+held to real castle geometry for the first time and cannot solve on that seed.
+
+Note what the solver does: it varies **length only**, ten times, and throws.
+CLAUDE.md's standing rule is that a generator backtracks by making *different
+decisions* — a different position or orientation — not by shrinking down a
+ladder. That is the real defect and it is the slide lane's.
+
+## Visual QA, 16 Sep — the gate arch, seen at last
+
+Dev server on **5473** (`vite --port 5473 --strictPort`), canonical seed, one
+page opened in the background and closed straight after.
+
+```
+/view?seed=20260728&camPos=14,-40.5,166&camDir=-14,-9,-21&timeOfDay=12:00   (overhead)
+/view?seed=20260728&camPos=0,-48,158&camDir=0,0.06,-1&timeOfDay=12:00       (eye level)
+```
+
+**Verdict: the arch stands on its own gateway.** Both piers sit flat on the
+paved entrance path, the boundary wall runs into it on both sides, "LAND OF GOOD
+PLACES" reads square to the approach, and the ferris-wheel roundel is upright on
+top. No floating and no sinking. The two piers lean very slightly differently,
+which is the bend doing its job — each stands on the radial under its own foot.
+
+Frames committed to the `qa-screenshots` orphan branch at `000d67be`:
+`pr624-gate-arch-overhead.png`, `pr624-gate-arch-eyelevel.png`.
+
+## Two more untrue comments, found and fixed here
+
+- `gateArch.ts` still quoted **7.42 m / 12.5 cm** as measured fact — the
+  √2-inflated numbers. Corrected to **5.74 m / 7.5 cm**, and the neighbouring
+  pier-foot bound, derived from the same stale radius, from 1.4 mm to
+  **0.65 mm**.
+- `castleTurretsKeepTheirReach` had been inserted **between
+  `castleTurretsAreSolid`'s docblock and its definition**, so a docblock about
+  `PLAYER_RADIUS` and turret `radiusBottom` sat above a function measuring
+  neither, and the solidity invariant had none. Moved back.
+
+## Gates, current head
+
+- check chain parsed from the `scripts` object (never grepped): base **65**
+  steps → branch **66**, `check:castle-bend` added, **zero removed**, no other
+  script touched.
+- `pnpm run check` — see the PR body for the failing set by **name**, diffed
+  against the base commit rather than counted.
+- `pnpm run test:procgen` — 109 / 431 / 94 as above.
+
+---
+
 ## What is done
 
 `src/world/geo/bend.ts` — the primitive. `bentFrame` places a part by the
