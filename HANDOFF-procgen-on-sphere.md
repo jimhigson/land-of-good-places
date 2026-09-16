@@ -67,8 +67,25 @@ engineer's record, PR body draft, merge recipe) and `HANDOFF-poi-totality.md`.
   (`railRaceSupportsAreClaimedAsDrawn`: 100 trestles, 700 struts, worst lean
   0 % of its limit; `theRoadClaimCoversTheBusRun`: 87 samples, 0 outside) pass
   on every seed; `0 bars lost to the road rule` on the canonical seed.
-- Seeds 0..15: table in the final report (built one at a time with
-  `LGP_SEED=<n> pnpm run check:park`).
+- **Seeds 0..15**, each built alone with `LGP_SEED=<n> pnpm run check:park`
+  (logs in the session scratchpad, `seeds/<n>.log`):
+
+  | seeds | result |
+  |---|---|
+  | 2, 5, 7, 11, 13, 14, 15 | **BUILT, check:park green** (19/19 attractions route, 0 rail crossings) |
+  | 4, 6 | built; check:park red on its own ratchet — 4: `poi.nospot` 2 (waypoints at (-16.3, 58.3), (-20.3, 58.7) with nowhere to stand) + `rail.walkable` 1; 6: `rail.walkable` 1 + `anchor.reach:waterFight` 0.1 |
+  | 0, 8, 10 | **not built**: the Sky Cruiser's coaster route is unsolvable (`coaster/route.ts`, every attempt dead-ends) |
+  | 3, 9 | **not built**: the railway loop is unsolvable (`rail/generate.ts`, 96 attempts) |
+  | 1, 12 | **not built**: a drawn path crosses the railway where no bridge site is proven (`train/crossings.ts`, railD 175.2 / 83.8) — the `railD` crossing throw, step 3 of the agreed order |
+
+  No seed is refused by a trestle: on every seed whose ring is built, both
+  rings report "candidates refused by legacy predicates: 0 — the registry
+  decided every slot". Against #596's hill-era baseline
+  (`every-seed-builds-baseline.mts`: 0, 8, 9, 10 rail; 2, 3, 7 crossing; 6,
+  12 reach): **2 and 7 now build**, 12 moved from `anchor.reach` to the
+  crossing throw, 4 newly red on `poi.nospot`/`rail.walkable`. The five
+  unsolvable/crossing seeds are other producers' (coaster, railway, paths) —
+  stage 4 work, not this branch's.
 
 ## Not done / open
 
