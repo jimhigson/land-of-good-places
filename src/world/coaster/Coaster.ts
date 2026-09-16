@@ -433,7 +433,14 @@ export class Coaster implements GameSystem {
       railFrameAt(drawn, d, frame);
       basis.makeBasis(frame.side, frame.up, frame.forward);
       rotation.setFromRotationMatrix(basis);
-      matrix.compose(position.copy(mid).setY(mid.y - 0.12), rotation, one);
+      // **Dropped along the frame's own up, not along world `−Y`.** The 0.12 m
+      // is the tie sitting under the rail so the rail visibly rests on top of
+      // the sleeper — a distance across the track's own cross-section, which is
+      // what `frame.up` is. `setY(mid.y - 0.12)` was the same thing only while
+      // the world was flat; out at the park's edge the track leans by up to 40°
+      // and a plumb drop slides the tie 29 mm sideways off the rails it is
+      // meant to be bolted to.
+      matrix.compose(position.copy(mid).addScaledVector(frame.up, -0.12), rotation, one);
       ties.setMatrixAt(i, matrix);
     }
     ties.instanceMatrix.needsUpdate = true;
