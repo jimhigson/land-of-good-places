@@ -298,14 +298,25 @@ const DOOR_SHOULDER = 0.65;
 export const SLIDE_DOOR_HALF_WIDTH = CORRIDOR_RADIUS + DOOR_SHOULDER;
 
 /**
- * Where along the facade's south wall the door is offered, facade-local.
+ * **Where along the facade's south wall the chute may leave, facade-local — a
+ * decision the search backtracks over, best first.**
  *
- * One position, which every candidate start pose is measured from. This is the
- * constant that pins the slide's exit to a single spot on the wall and so
- * forces the route to contort to reach it — widening it to the whole wall is a
- * separate, visible change, because it relocates a hole in the castle.
+ * This used to be one number, 9.5, and every candidate start pose was measured
+ * from it. That made the door a datum standing in for a decision, and the
+ * length ladder the only thing `planSlide` could vary. When the towers began to
+ * be described honestly (the leaning `TowerSolid`, #624) seed 326 stopped
+ * building: every rung failed **at the door stub**, which is fixed by the start
+ * pose alone, so no length could ever have moved it. Measured on 326 at scale 1:
+ * the stub stood 0.18 m *inside* `tower-roof-3`'s cone against 1.45 m owed —
+ * and a door at 6, 3, 0, −4 or −9.5 instead solved at the first rungs.
+ *
+ * 9.5 stays first, so a seed that builds today builds the identical slide. The
+ * rest walk away from that corner along the wall, then out to the far one.
+ * There is no hole in the masonry to relocate any more — the chute crosses the
+ * wall plane above the battlements (see {@link PlannedSlide.facadeDoorMinX}) —
+ * so moving this moves where the ride leaves, not the stone.
  */
-const DOOR_OFFER_CENTRE = 9.5;
+export const DOOR_OFFER_CENTRES: readonly number[] = [9.5, 6, 3, 0, -3, -6, -9.5];
 
 /**
  * Where a child stands on the **interior** roof terrace to board, and how wide
@@ -771,9 +782,8 @@ const SLIDE_VOCABULARY: readonly SegmentKind[] = turnVocabulary(
  * the slide starts, not which way it then sweeps, and the search needs
  * somewhere to go when the first choice dead-ends.
  */
-function doorPoses(): Pose2[] {
+function doorPoses(centreLocal: number): Pose2[] {
   const poses: Pose2[] = [];
-  const centreLocal = DOOR_OFFER_CENTRE;
   const halfGap = SLIDE_DOOR_HALF_WIDTH;
   // Straight out of the door first, then progressively more angled, alternating
   // sides so the *offers* are generated even-handedly.
@@ -783,7 +793,7 @@ function doorPoses(): Pose2[] {
   // `doorFitsTheWall` made false: of the 45 offers that survive out of 85,
   // measured, **34 have positive yaw against 8 negative** (plus 3 straight), and
   // the widest surviving negative is −36° against +72° the other way. The filter
-  // is right to do it — `DOOR_OFFER_CENTRE` (9.5) sits only 2.5 m from a wall
+  // is right to do it — the first door offer (9.5) sits only 2.5 m from a wall
   // ending at 12, so turning that way runs the opening off the end of the face —
   // but the asymmetry is the filter's, not this loop's, and the search inherits
   // it. Worth knowing before reading anything into which way the chute sweeps.
@@ -803,7 +813,13 @@ function doorPoses(): Pose2[] {
       // An offer whose hole would run off the end of the wall is not an offer.
       // See {@link doorFitsTheWall}: how wide the opening has to be depends on
       // how angled the exit is, so this cannot be decided by spacing alone.
-      if (doorFitsTheWall(pose)) poses.push(pose);
+      //
+      // And an offer whose stub runs through a tower or the Sky Cruiser's air
+      // is not an offer either. The stub and the flat lip are fixed by the pose
+      // alone — no route the search could then find moves them — so a pose that
+      // fouls there would cost a whole search per length rung to learn what
+      // this learns in a few samples. See {@link doorStubIsClear}.
+      if (doorFitsTheWall(pose) && doorStubIsClear(pose)) poses.push(pose);
     }
   }
   return poses;
@@ -999,6 +1015,25 @@ function crossingOf(
 }
 
 /**
+ * Is the start of the chute this pose implies — its stub back through the wall,
+ * and the pose itself — somewhere a finished chute would be allowed to be?
+ *
+ * **Not a second test: the same one, on the same points.** The points come from
+ * {@link stubPoints}, which is also what {@link chutePoints} builds the finished
+ * chute's stub from, plus the route's own first point (`heightAt(0)` is
+ * `START_Y`). The question is {@link chuteComplaint}, which is also what
+ * {@link unrideableComplaint} asks of the finished chute. Those points are a
+ * subset of every chute that could start from this pose, so a pose refused here
+ * is one every route from it would have been refused for — the prune can only
+ * save a search, never lose a slide.
+ */
+function doorStubIsClear(pose: Pose2): boolean {
+  const points = stubPoints(pose.x, pose.z, pose.hx, pose.hz);
+  points.push(new Vector3(pose.x, START_Y, pose.z));
+  return chuteComplaint(points) === null;
+}
+
+/**
  * Would the hole this pose implies fit inside the south wall?
  *
  * The wall runs facade-local ±{@link BUILDING_HALF_X}. A hole that runs past
@@ -1027,10 +1062,32 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
   const startX = flat.x;
   const startZ = flat.z;
   route.tangentAt(0, flat);
+  points.push(...stubPoints(startX, startZ, flat.x, flat.z));
+
+  const steps = Math.max(8, Math.round(route.length / POINT_SPACING));
+  for (let i = 0; i <= steps; i += 1) {
+    const u = i / steps;
+    route.pointAt(u * route.length, flat);
+    points.push(new Vector3(flat.x, heightAt(u), flat.z));
+  }
+  return points;
+}
+
+/**
+ * **The chute's stub, and the one owner of it**: the points carried back from a
+ * start at (`startX`, `startZ`) along the start heading, through the wall, at
+ * {@link START_Y} — farthest back first, excluding the start itself.
+ *
+ * {@link chutePoints} builds the finished chute's stub from this and
+ * {@link doorStubIsClear} prunes door offers with it, so the line that is judged
+ * before search and the line that is built after it cannot differ.
+ */
+function stubPoints(startX: number, startZ: number, headingX: number, headingZ: number): Vector3[] {
+  const points: Vector3[] = [];
   // Extend backwards far enough along the route's own heading to land
   // DOOR_INSET past the wall, however steeply it leaves. Still collinear with
   // the start tangent, so the chute cannot kink at the join.
-  const stub = doorStubLength(flat.z);
+  const stub = doorStubLength(headingZ);
   // Subdivided at the same {@link POINT_SPACING} as the rest of the chute, not
   // emitted as one long jump back to the wall.
   //
@@ -1045,15 +1102,9 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
   const stubSteps = Math.max(1, Math.round(stub / POINT_SPACING));
   for (let i = stubSteps; i >= 1; i -= 1) {
     const back = (stub * i) / stubSteps;
-    points.push(new Vector3(startX - flat.x * back, START_Y, startZ - flat.z * back));
+    points.push(new Vector3(startX - headingX * back, START_Y, startZ - headingZ * back));
   }
 
-  const steps = Math.max(8, Math.round(route.length / POINT_SPACING));
-  for (let i = 0; i <= steps; i += 1) {
-    const u = i / steps;
-    route.pointAt(u * route.length, flat);
-    points.push(new Vector3(flat.x, heightAt(u), flat.z));
-  }
   return points;
 }
 
@@ -1207,7 +1258,8 @@ export interface PlannedSlide {
  * "solve it both ways in one process and compare the hashes" a legitimate proof
  * rather than a coincidence, and `check:park-boot` is built on it.
  */
-export function slideRouteBriefAt(desiredLength: number): OpenRouteBrief {
+export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
+  const { desiredLength, doorCentre } = attempt;
   // The slide's territory is the park itself. `generate.ts` rejects any piece
   // whose corridor comes within `corridorRadius` of this boundary's edge, so
   // handing over the real spline keeps the chute inside the park with the
@@ -1226,7 +1278,7 @@ export function slideRouteBriefAt(desiredLength: number): OpenRouteBrief {
     // replaced, and what it cost seed 5.
     maxLength: MAX_RIDEABLE_LENGTH,
     closed: false,
-    startPoses: doorPoses(),
+    startPoses: doorPoses(doorCentre),
     endPoses: pitPoses(),
     // The cheap per-piece prefilter, on the length the ride asks for. Exact
     // enough to keep the search away from the castle and out of the coaster's
@@ -1284,13 +1336,74 @@ export function slideRouteBriefAt(desiredLength: number): OpenRouteBrief {
  */
 export const DESIRED_LENGTH_LADDER: readonly number[] = [DESIRED_LENGTH, 65, 62, 55, 68, 50];
 
-/** One attempt at a chute, at one target. Null if that target admits no route at all. */
+/** One decision the slide's search is run on: where it leaves, and how long it aims to be. */
+export interface SlideAttempt {
+  /** Facade-local x along the south wall; one of {@link DOOR_OFFER_CENTRES}. */
+  readonly doorCentre: number;
+  /** One rung of {@link DESIRED_LENGTH_LADDER}. */
+  readonly desiredLength: number;
+}
+
+/**
+ * **Every decision the slide backtracks over, in the order it tries them.**
+ *
+ * Door first, then length within each door: the whole length ladder at the
+ * original door before anything moves, so a seed that solves today solves the
+ * identical slide — the added decisions cost nothing on a park that works.
+ *
+ * A door whose every offer is refused before search ({@link doorStubIsClear},
+ * {@link doorFitsTheWall}) is skipped outright rather than run once per rung:
+ * that is what keeps a seed like 326 from paying six whole failed searches to
+ * learn something the door's own stub already said.
+ *
+ * **One list, both cadences.** `planSlide` and the loading screen's sliced
+ * search (`boot/parkGeneration.ts`) both walk exactly this, so they cannot build
+ * two different slides — `check:park-boot` hashes the two against each other.
+ */
+export const SLIDE_ATTEMPTS: readonly SlideAttempt[] = DOOR_OFFER_CENTRES.filter(
+  (doorCentre) => doorPoses(doorCentre).length > 0,
+).flatMap((doorCentre) =>
+  DESIRED_LENGTH_LADDER.map((desiredLength) => ({ doorCentre, desiredLength })),
+);
+
+/** The blocker when every door was refused before search — one string, both cadences. */
+export const NO_CLEAR_DOOR =
+  'had no door on the south wall whose stub clears the towers and the Sky Cruiser';
+
+/** How an attempt is named in a complaint, so a refusal says which decision failed. */
+export function describeSlideAttempt(attempt: SlideAttempt): string {
+  return `at a ${attempt.desiredLength} m target from the door at ${attempt.doorCentre} m along the wall`;
+}
+
+/**
+ * The seed cannot carry a ginormous slide: every decision in
+ * {@link SLIDE_ATTEMPTS} was tried and none gave a chute a child could ride.
+ * `blocker` is the last thing that stood in the way, in words.
+ */
+export interface SlideRefusal {
+  readonly refused: true;
+  readonly attemptsTried: number;
+  readonly blocker: string;
+}
+
+/** The message a refusal is thrown as, by the callers that cannot yet live without a slide. */
+export function slideRefusalMessage(refusal: SlideRefusal): string {
+  return (
+    `the ginormous slide never solved to a chute a child could ride: after ` +
+    `${refusal.attemptsTried} decisions (doors at ${DOOR_OFFER_CENTRES.join(', ')} m ` +
+    `along the south wall, ${DOOR_OFFER_CENTRES.length - new Set(SLIDE_ATTEMPTS.map((a) => a.doorCentre)).size} ` +
+    `refused before search; target lengths ${DESIRED_LENGTH_LADDER.join(', ')} m), ` +
+    `the best on offer ${refusal.blocker}.`
+  );
+}
+
+/** One attempt at a chute. Null if that attempt admits no route at all. */
 function solveChuteAt(
-  desiredLength: number,
+  attempt: SlideAttempt,
 ): { route: SolvedRailRoute; complaint: string | null } | null {
   let route: SolvedRailRoute;
   try {
-    route = solveRailRoute(slideRouteBriefAt(desiredLength));
+    route = solveRailRoute(slideRouteBriefAt(attempt));
   } catch (error) {
     // A target that admits no route at all is a rung that did not work, not a
     // park that cannot be built — the next rung gets its turn.
@@ -1318,6 +1431,23 @@ function solveChuteAt(
  * by running both in one process and comparing a hash of the finished chute.
  */
 export function planSlide(): PlannedSlide {
+  const outcome = solveSlide();
+  if ('refused' in outcome) throw new Error(slideRefusalMessage(outcome));
+  return outcome;
+}
+
+/**
+ * {@link planSlide}, total: a finished plan, or a {@link SlideRefusal} naming
+ * what blocked it — never a throw for a seed that cannot carry the ride.
+ *
+ * **Nothing consumes the refusal yet.** `SLIDE_PLAN` is built by
+ * {@link planSlide}, which throws it, and so does the loading screen — because
+ * 27 modules read the slide unconditionally and a park without one is a visible
+ * design change that is Jim's call, not this solver's. So today every path still
+ * throws on a seed that cannot carry the ride; this is the total function those
+ * paths can move onto once the readers can live without a slide.
+ */
+export function solveSlide(): PlannedSlide | SlideRefusal {
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
   // trade; for a slide through a roller coaster it is not, so what the search
@@ -1331,31 +1461,20 @@ export function planSlide(): PlannedSlide {
   // it is not describing — and it arrived the identical way, by a second copy
   // of a condition drifting from the first. There is now one owner and nothing
   // to keep in step.
-  let route: SolvedRailRoute | null = null;
-  let lastComplaint = 'never solved a route at all';
-  let rungsTried = 0;
-  for (const target of DESIRED_LENGTH_LADDER) {
-    rungsTried += 1;
-    const attempt = solveChuteAt(target);
+  let lastComplaint =
+    SLIDE_ATTEMPTS.length === 0 ? NO_CLEAR_DOOR : 'never solved a route at all';
+  let tried = 0;
+  for (const decision of SLIDE_ATTEMPTS) {
+    tried += 1;
+    const attempt = solveChuteAt(decision);
     if (!attempt) {
-      lastComplaint = `admitted no route at a ${target} m target`;
+      lastComplaint = `admitted no route ${describeSlideAttempt(decision)}`;
       continue;
     }
-    if (attempt.complaint === null) {
-      route = attempt.route;
-      break;
-    }
-    lastComplaint = `${attempt.complaint} (at a ${target} m target)`;
+    if (attempt.complaint === null) return finishSlidePlan(attempt.route);
+    lastComplaint = `${attempt.complaint} (${describeSlideAttempt(decision)})`;
   }
-
-  if (!route) {
-    throw new Error(
-      `the ginormous slide never solved to a chute a child could ride: ` +
-        `after ${rungsTried} target lengths (${DESIRED_LENGTH_LADDER.join(', ')} m), ` +
-        `the best on offer ${lastComplaint}.`,
-    );
-  }
-  return finishSlidePlan(route);
+  return { refused: true, attemptsTried: tried, blocker: lastComplaint };
 }
 
 /**
@@ -1457,7 +1576,16 @@ export function unrideableComplaint(route: SolvedRailRoute): string | null {
     );
   }
 
-  const points = chutePoints(route);
+  return chuteComplaint(chutePoints(route));
+}
+
+/**
+ * The height-sensitive half of {@link unrideableComplaint}: does any of these
+ * chute points foul the Sky Cruiser's air or a castle tower? Split out so
+ * {@link doorStubIsClear} asks exactly this, of exactly the stub's points,
+ * rather than a copy of it.
+ */
+function chuteComplaint(points: readonly Vector3[]): string | null {
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;
   let worstAt: Vector3 | null = null;

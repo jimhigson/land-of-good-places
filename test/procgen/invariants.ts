@@ -4581,6 +4581,25 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
     );
   }
 
+  // --- 4. and it crosses over the wall, not past the end of it --------------
+  //
+  // `planSlide` now backtracks over *where along the south wall* the chute
+  // leaves (`DOOR_OFFER_CENTRES`, 9.5 m down to −9.5 m), because a door pinned
+  // to one spot could not route round a tower on seed 326. The trap in making
+  // that a decision is a door that drifts off the end of the wall — a chute that
+  // starts in the air beside the castle rather than on its roof, which clause 1
+  // cannot see because it only looks at z. So: the whole width of the chute, at
+  // the plane of the wall, must be over the wall's own span.
+  const overhang = Math.abs(crossing.x - castle.x) + CHUTE_HALF_WIDTH - castle.halfX;
+  if (overhang > 0) {
+    complaints.push(
+      `the ginormous slide crosses the castle's south wall at world x ${crossing.x.toFixed(2)}, ` +
+        `${overhang.toFixed(2)} m past the end of a wall spanning ` +
+        `${(castle.x - castle.halfX).toFixed(2)}…${(castle.x + castle.halfX).toFixed(2)} ` +
+        '— it has drifted off the castle roof it is meant to leave from',
+    );
+  }
+
   return complaints;
 };
 
