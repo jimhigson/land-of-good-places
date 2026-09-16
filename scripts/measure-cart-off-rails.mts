@@ -134,8 +134,11 @@ let n = 0;
 const elapsedStep = 1 / 60;
 let elapsed = 0;
 const visited = new Set<number>();
-// Enough frames to carry the cart right round the circuit at ride speed.
-for (let frame = 0; frame < 6000; frame += 1) {
+// Enough frames to carry the cart right round the circuit at ride speed —
+// scaled to the circuit, because these differ by a factor of three between
+// seeds and a fixed count silently measured a third of seed 11's loop.
+const frames = Math.ceil(route.length * 30);
+for (let frame = 0; frame < frames; frame += 1) {
   elapsed += elapsedStep;
   coaster.update({ dt: elapsedStep, elapsed } as unknown as FrameContext);
   coaster.group.updateMatrixWorld(true);
