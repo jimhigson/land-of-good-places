@@ -194,7 +194,21 @@ interface RouteBriefBase {
    * needs to answer a 3D question for itself, rather than teaching the search
    * about height.
    */
-  readonly clear: (x: number, z: number, radius: number, distanceAlong: number) => boolean;
+  readonly clear: (
+    x: number,
+    z: number,
+    radius: number,
+    distanceAlong: number,
+    /**
+     * Straight-line distance from (x, z) to the attempt's finish pose — a lower
+     * bound on the route still to lay from here. With `distanceAlong` it bounds
+     * the finished route's length from below, which is what lets a caller whose
+     * verdict depends on that length (the slide's height profile) reject only
+     * what no finishable route could survive. Callers that do not need it may
+     * ignore it.
+     */
+    toFinish: number,
+  ) => boolean;
   readonly boundary: ParkBoundary;
   /** Half-width of track to keep clear of obstacles and the boundary. */
   readonly corridorRadius: number;
@@ -735,6 +749,19 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
         rejected.tooLong += 1;
         return null;
       }
+      // **And a piece that leaves home out of reach is too long already.** A
+      // route must still get from this piece's end to the finish, and whatever
+      // it lays to do so is never shorter than the straight line; if that line
+      // would carry it over the ceiling, no descendant of this piece can ever
+      // finish. The closer's {@link provablyTooLong} is the same bound.
+      if (!closing && maxLength !== undefined) {
+        const end = endPose(seg);
+        const home = Math.hypot(finishPose.x - end.x, finishPose.z - end.z);
+        if (accumulated + seg.length + home > maxLength + 1e-6) {
+          rejected.tooLong += 1;
+          return null;
+        }
+      }
       const steps = Math.max(2, Math.ceil(seg.length / SAMPLE_STEP));
       const produced: Sample[] = [];
       const point: Vec2 = { x: 0, z: 0 };
@@ -742,7 +769,15 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
         const t = i / steps;
         cubicPoint(seg, t, point);
         const s = accumulated + seg.length * t;
-        if (!brief.clear(point.x, point.z, brief.corridorRadius, s)) {
+        if (
+          !brief.clear(
+            point.x,
+            point.z,
+            brief.corridorRadius,
+            s,
+            Math.hypot(finishPose.x - point.x, finishPose.z - point.z),
+          )
+        ) {
           rejected.collision += 1;
           return null;
         }
@@ -818,6 +853,35 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       return taken;
     };
 
+    /**
+     * **Can no chain from `from` (via `via`, if given) to `to` fit under
+     * {@link RouteBriefBase.maxLength}?** A pure prune for the closer.
+     *
+     * Every closer is built from circular arcs, and an arc is never shorter
+     * than its chord, so the straight-line distance through the poses is a
+     * lower bound on what the chain would add to `accumulated`. When that
+     * bound already crosses the ceiling, `validate` would reject a piece of
+     * every chain `chainFor` could build as `tooLong` — so the biarc
+     * construction, the arc expansion and the validation are skipped and the
+     * answer, null, is the same. No test here draws randomness, so the search
+     * takes the identical path; only the diagnostic `rejected` counts move.
+     *
+     * Measured on seed 11 (#650): the closer fired ~900,000 times in one slide
+     * solve and the biarc/arc construction it ran was a quarter of the whole
+     * search's CPU, overwhelmingly for heads already too far from home to
+     * finish under the 75 m ceiling.
+     *
+     * The margin is for float rounding in the chain's summed lengths: the prune
+     * only fires when the bound clears the ceiling by more than it.
+     */
+    const provablyTooLong = (from: Pose2, via: Pose2 | null, to: Pose2): boolean => {
+      if (maxLength === undefined) return false;
+      const bound = via
+        ? Math.hypot(via.x - from.x, via.z - from.z) + Math.hypot(to.x - via.x, to.z - via.z)
+        : Math.hypot(to.x - from.x, to.z - from.z);
+      return accumulated + bound > maxLength + 1e-6;
+    };
+
     /** Expands a biarc into cubics, if its radii are legal. */
     const chainFor = (from: Pose2, to: Pose2, kind: string): CubicSegment[][] => {
       const out: CubicSegment[][] = [];
@@ -867,9 +931,11 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       const head = headPose();
 
       // A biarc straight home, gentlest first.
-      for (const segs of chainFor(head, finishPose, 'closer')) {
-        const taken = tryChain(segs);
-        if (taken) return taken;
+      if (!provablyTooLong(head, null, finishPose)) {
+        for (const segs of chainFor(head, finishPose, 'closer')) {
+          const taken = tryChain(segs);
+          if (taken) return taken;
+        }
       }
 
       // Nothing direct fits, so swing wide: go via a seeded intermediate pose
@@ -895,6 +961,9 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
           hx,
           hz,
         };
+        // The draws above are made whatever happens, so skipping the geometry
+        // below cannot move the random stream — see {@link provablyTooLong}.
+        if (provablyTooLong(head, via, finishPose)) continue;
         for (const firstHalf of chainFor(head, via, 'closerA')) {
           const takenFirst = tryChain(firstHalf);
           if (!takenFirst) continue;

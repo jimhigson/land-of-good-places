@@ -95,7 +95,7 @@ const REPORT_WITHIN = 6;
  * across the car's beam, which a lamp post or a statue's arm can pass clean
  * through without touching a single ray.
  */
-function crossSection(): readonly (readonly [number, number])[] {
+export function crossSection(): readonly (readonly [number, number])[] {
   const { halfWidth, above, below } = CART_ENVELOPE;
   return [
     [-halfWidth, -below],
