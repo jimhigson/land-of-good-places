@@ -182,3 +182,15 @@ are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
 - **npc-perch #642 converted here** (my perch fix made the world-y clause red): both sides along
   the tree's up. Exit 0; red both ways with --mutate.
 - Next: keyring-view, then full check + test:procgen, then PR.
+
+### Round 4
+- keyring-view FIXED: `screenBasis3DAt` in up.ts beside eyeForFocus; shop `viewBasis` per stall.
+  analytic 1.1e-16, shop 4.3e-4 (allowed 5.4e-3), flat 6.1e-2. Red both ways.
+- Castle drawn car (from 166bb210, drawn-car parts only) + pre-filters on drawn loop +
+  `castleDeckClearanceAt` (window solved for the DRAWN car) + openings/check on drawn route.
+  Both castle checks green; margins sill 1.443 head 0.442 side 0.789. Probe control proves drawn vs flat.
+- **Rebase plan:** #620 merged into base (drop TEMP line). **#647 owns railRace/camera.ts and
+  check-rail-race.mts** — on rebase take base's side of both entirely (drop a4d957b3's and
+  0c031a07's hunks there). npc-perch conflicts with #620's bearing matcher: ruling is footX/footZ
+  is the one owner; keep #620's claimedBy guard, keep my along-tree-up height conversion.
+- Needs a browser (not owned): the frames of the cruiser under the window / column in path.
