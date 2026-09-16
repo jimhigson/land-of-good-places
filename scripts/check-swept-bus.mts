@@ -325,22 +325,20 @@ async function measureOneSeed(): Promise<void> {
     }
   }
 
-  /** The bearing `placeBus` gave it. Read, never restated. */
-  const facing = bus.rotation.y;
-  const forwardX = Math.sin(facing);
-  const forwardZ = Math.cos(facing);
-  const rightX = Math.cos(facing);
-  const rightZ = -Math.sin(facing);
-
   // The drawn extent **in the bus's own frame**: +Z along its length, +X across
   // it, y from the underside of the tyres to the tips of its ears. Taken by
-  // standing the real bus at the origin unrotated for the measurement and
-  // putting it straight back — nothing else has looked at it yet, and the
-  // alternative is re-deriving a dozen private constants in `catBus.ts`.
+  // standing the real bus at the origin, with its WHOLE quaternion cleared, for
+  // the measurement and putting it straight back — nothing else has looked at
+  // it yet, and the alternative is re-deriving a dozen private constants in
+  // `catBus.ts`. The quaternion, not `rotation.y`: on the sphere `placeBus`
+  // stands the bus on the road's own up (`faceOnGround`), so its orientation is
+  // a lean composed with a yaw, and zeroing the Euler's `y` alone left the lean
+  // in — the box of a bus tilted 15-30 degrees read 6.6-8.6 m tall against a
+  // 6.04 m crown, per seed, and the owner assertion below rightly refused it.
   const keptPosition = bus.position.clone();
-  const keptRotationY = bus.rotation.y;
+  const keptQuaternion = bus.quaternion.clone();
   bus.position.set(0, 0, 0);
-  bus.rotation.y = 0;
+  bus.quaternion.identity();
   bus.updateMatrixWorld(true);
   // Vertex-precise (`precise = true`): the default transforms each geometry's
   // own bounding *box*, and a tilted cone's box rises by its radius times the
@@ -384,7 +382,7 @@ async function measureOneSeed(): Promise<void> {
   bus.updateMatrixWorld(true);
   busBox.max.y = drivenTop;
   bus.position.copy(keptPosition);
-  bus.rotation.y = keptRotationY;
+  bus.quaternion.copy(keptQuaternion);
   bus.updateMatrixWorld(true);
   if (!Number.isFinite(busBox.min.x) || busBox.max.y <= busBox.min.y) {
     throw new Error('check:swept-bus: the drawn cat bus has no measurable body');
