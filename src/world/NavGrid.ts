@@ -1,7 +1,7 @@
 import type { ParkBoundary } from './boundary';
 import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
-import type { LevelConnector } from './building/surfaces';
+import { stepReferenceFor, type LevelConnector } from './building/surfaces';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
@@ -821,7 +821,10 @@ export class NavGrid {
         // pass above.
         const onBridge = this.bridgeCovers(x, z);
         for (let level = 1; !onBridge && level < MAX_LEVELS_PER_CELL; level += 1) {
-          const next = sample(x, z, cursor - MAX_STEP - LEVEL_EPSILON);
+          // The reference whose reach stops just under `cursor` — asked of the
+          // reach's owner, because that is no longer `cursor - MAX_STEP` once
+          // the step is measured along the local up (#643).
+          const next = sample(x, z, stepReferenceFor(x, z, cursor - LEVEL_EPSILON));
           if (next >= cursor - LEVEL_EPSILON) break;
           cursor = next;
           if (next < kept - MAX_STEP) {

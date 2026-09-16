@@ -51,6 +51,12 @@ const R = GROUND_SPHERE_RADIUS;
 const radiusOf = (x: number, y: number, z: number): number => Math.hypot(x, y + R, z);
 
 const { world } = quietly(() => buildHeadlessPark());
+const surfacesModule: Record<string, unknown> = await import('../src/world/building/surfaces.ts');
+/** The tree's own reference carry, where it has one (it does not before #643). */
+const carryReferenceIfAny = (fx: number, fz: number, y: number, tx: number, tz: number): number =>
+  typeof surfacesModule['carryReference'] === 'function'
+    ? (surfacesModule['carryReference'] as (a: number, b: number, c: number, d: number, e: number) => number)(fx, fz, y, tx, tz)
+    : y;
 const surfaces = world.building.surfaces;
 
 const DELTAS = [MAX_FRAME_DELTA, 1 / 15, 1 / 20, 1 / 30, 1 / 60];
@@ -97,9 +103,9 @@ interface Tally {
   continuous: number;
   worstWorld: number;
   worstRadial: number;
-  /** Continuous climbs the world-`y` reach refused: a child falling through. */
+  /** Honest climbs (radial rise within a step) the sampler refused. */
   wrongRefusals: number;
-  /** Radial-refused steps the world-`y` reach admitted: climbing a riser. */
+  /** Radially too-tall steps the sampler admitted. */
   wrongAdmissions: number;
   firstWrong: string | null;
 }
@@ -130,11 +136,22 @@ for (const site of sites) {
           // The highest thing there, whatever the reach: the surface she would
           // be on if nothing refused it.
           const top = surfaces.sample(x, z, 1e6);
-          if (last !== null && Math.abs(y - last.y) < 1e-9 && top > y + 1e-6) {
-            const worldDemand = top - y;
+          // Only strides where she is following the surface she stood on — asked
+          // from that height, either as-is (a world-y reach) or carried to this
+          // column at the same radius (the radial one), whichever the tree has.
+          const following =
+            last !== null &&
+            (Math.abs(y - last.y) < 1e-9 ||
+              Math.abs(y - carryReferenceIfAny(last.x, last.z, last.y, x, z)) < 1e-9);
+          // The bare ground is offered unconditionally — a hillside is never
+          // "out of reach" — so a climb onto it is not the reach's decision.
+          const builtTop = top > surfaces.sample(x, z, -1e6) + 1e-6;
+          if (last !== null && following && builtTop && top > y + 1e-6) {
+            const worldDemand = top - last.y;
             const radialDemand = radiusOf(x, top, z) - radiusOf(last.x, last.y, last.z);
             const honest = radialDemand <= BUILDING_STEP_UP;
-            const shipped = worldDemand <= BUILDING_STEP_UP;
+            // What this tree's sampler actually did with it.
+            const shipped = answer >= top - 1e-6;
             // A ramp or a riser? Walk the segment in eight pieces and look for a
             // jump in the highest surface's radius: a riser is one piece holding
             // the whole climb, a ramp spreads it.
@@ -162,7 +179,7 @@ for (const site of sites) {
               else tally.wrongAdmissions += 1;
               tally.firstWrong ??=
                 `at (${x.toFixed(2)}, ${z.toFixed(2)}), ${(1 / delta).toFixed(0)} fps: ` +
-                `surface y=${top.toFixed(3)}, reference y=${y.toFixed(3)} — world demand ` +
+                `surface y=${top.toFixed(3)}, standing y=${last.y.toFixed(3)} — world demand ` +
                 `${worldDemand.toFixed(3)}, radial demand ${radialDemand.toFixed(3)}`;
             }
           }
@@ -210,8 +227,8 @@ console.log(
   `\n  worst world demand ${worstWorld.toFixed(3)} (margin ${(BUILDING_STEP_UP - worstWorld).toFixed(3)} m), ` +
     `worst radial demand ${worstRadial.toFixed(3)} (margin ${(BUILDING_STEP_UP - worstRadial).toFixed(3)} m)`,
 );
-console.log(`  continuous climbs the world-y reach refused: ${refusals}`);
-console.log(`  radial-refused steps the world-y reach admitted: ${admissions}\n`);
+console.log(`  honest climbs (radial rise <= BUILDING_STEP_UP) the sampler refused: ${refusals}`);
+console.log(`  radially over-tall steps the sampler admitted: ${admissions}\n`);
 
 // --- the same physics, on a ramp far from the park's centre -----------------
 // No ramp on this park stands further out than ~53 m, so the real-park table
@@ -238,7 +255,7 @@ function deckRadius(far: number, grade: number, phi: number): number {
 function deckY(far: number, grade: number, x: number, z: number): number {
   const rho = Math.hypot(x, z);
   let radius = deckRadius(far, grade, rho / R);
-  for (let i = 0; i < 6; i += 1) radius = deckRadius(far, grade, Math.asin(Math.min(1, rho / radius)));
+  for (let i = 0; i < 80; i += 1) radius = deckRadius(far, grade, Math.asin(Math.min(1, rho / radius)));
   return Math.sqrt(Math.max(0, radius * radius - rho * rho)) - R;
 }
 

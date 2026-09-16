@@ -1,4 +1,5 @@
-import { BUILDING_STEP_UP } from '../../core/constants';
+import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS } from '../../core/constants';
+import { SPACE_GARDEN, spaceAt } from '../spaces';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { clamp01 } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
@@ -118,13 +119,14 @@ export class WalkSurfaces {
 
   /**
    * Highest walkable surface at (x, z) that is no more than one step above `y`.
-   * Coordinates are world space.
+   * Coordinates are world space; "above" is along the local up — see
+   * {@link stepCeilingAt}, which owns the reach.
    */
   sample(x: number, z: number, y: number): number {
     const floor = castleFloorAt(x, z);
     const localX = x - (floor ? floor.originX : BUILDING_CENTRE_X);
     const localZ = z - (floor ? floor.originZ : BUILDING_CENTRE_Z);
-    const ceiling = y + BUILDING_STEP_UP;
+    const ceiling = stepCeilingAt(x, z, y);
 
     // Inside the castle the ground is either this floor's own plate or, off the
     // edge of it, the plaza disc that floor floats above. Out in the park it is
@@ -181,6 +183,80 @@ export class WalkSurfaces {
   floorAt(x: number, z: number): CastleFloor | null {
     return castleFloorAt(x, z);
   }
+}
+
+// ------------------------------------------------------------------ the reach
+
+/**
+ * **The highest world `y` in column `(x, z)` a walker standing at `(x, y, z)`
+ * can step up to** — the one owner of what "one step up" means (#643).
+ *
+ * Outdoors the world is a sphere, and up is away from its centre, so the step
+ * is measured **radially**: a surface is within reach when its distance from
+ * the planet's centre is no more than `BUILDING_STEP_UP` past hers. It used to
+ * be `y + BUILDING_STEP_UP`, a world-`y` reach, which at lean `θ` counts the
+ * planet's own curvature as climb: a sub-step of `d` towards the park on a
+ * perfectly level deck reads `d·tan θ` of world rise, so the steepest ramp a
+ * sprinting child could run up without falling through fell from 1.4 near the
+ * centre to **0.4 at r = 140 m** — inside the planner's own 0.512 budget
+ * (`scripts/measure-walk-reach.mts`). Indoors up is `+Y`, the castle floors and
+ * hotel rooms are hundreds of metres out where a radial reach would lean by
+ * tens of degrees, so there the reach stays the plain world-`y` step — the same
+ * split `up.ts`'s `upFor` makes, asked of the same `spaceAt`.
+ *
+ * A reference at or below the planet's centre (the `-1e6` "bare ground,
+ * please" some checks ask with) is not a place anyone stands; it keeps the
+ * plain world-`y` arithmetic so it still refuses everything built.
+ */
+export function stepCeilingAt(x: number, z: number, y: number): number {
+  const cy = y + GROUND_SPHERE_RADIUS;
+  if (cy <= 0 || spaceAt(x, z) !== SPACE_GARDEN) return y + BUILDING_STEP_UP;
+  const reach = Math.hypot(x, cy, z) + BUILDING_STEP_UP;
+  return Math.sqrt(reach * reach - x * x - z * z) - GROUND_SPHERE_RADIUS;
+}
+
+/**
+ * **The inverse of {@link stepCeilingAt}**: the reference `y` in column
+ * `(x, z)` whose step ceiling is exactly `ceilingY`. For a caller that wants
+ * "everything at or below this height" out of {@link WalkSurfaces.sample} —
+ * `NavGrid`'s level peel — and used to get it by subtracting
+ * `BUILDING_STEP_UP`, which is only the inverse while the reach is world-`y`.
+ */
+export function stepReferenceFor(x: number, z: number, ceilingY: number): number {
+  const cy = ceilingY + GROUND_SPHERE_RADIUS;
+  if (cy <= 0 || spaceAt(x, z) !== SPACE_GARDEN) return ceilingY - BUILDING_STEP_UP;
+  const radius = Math.hypot(x, cy, z) - BUILDING_STEP_UP;
+  const below = radius * radius - x * x - z * z;
+  if (radius <= 0 || below <= 0) return ceilingY - BUILDING_STEP_UP;
+  return Math.sqrt(below) - GROUND_SPHERE_RADIUS;
+}
+
+/**
+ * **A reference height taken in one column, re-expressed in another at the
+ * same distance from the planet's centre.**
+ *
+ * A walker's sampler reference is the surface she was standing on, and she
+ * moves in plan: asked unchanged in the next column, that `y` is a point lower
+ * (towards the park) or higher (away from it) than her foot by the sub-step
+ * times the sine of the lean, and the reach would spend that on the planet
+ * rather than on the ramp. `Player` and `playerSim.mts` carry the reference
+ * through this between sub-steps, so a level deck asks for no climb at all.
+ * Indoors, or for a reference that is not a place, it is the identity.
+ */
+export function carryReference(
+  fromX: number,
+  fromZ: number,
+  y: number,
+  toX: number,
+  toZ: number,
+): number {
+  const cy = y + GROUND_SPHERE_RADIUS;
+  if (!Number.isFinite(y) || cy <= 0) return y;
+  if (spaceAt(fromX, fromZ) !== SPACE_GARDEN || spaceAt(toX, toZ) !== SPACE_GARDEN) return y;
+  const radius = Math.hypot(fromX, cy, fromZ);
+  const above = radius * radius - toX * toX - toZ * toZ;
+  if (above <= 0) return y;
+  return Math.sqrt(above) - GROUND_SPHERE_RADIUS;
 }
 
 // ------------------------------------------------------------------ helpers

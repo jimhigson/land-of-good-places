@@ -34,6 +34,7 @@
  */
 import { Vector3 } from 'three';
 import type { CollisionWorld } from '../src/world/Collision.ts';
+import { carryReference } from '../src/world/building/surfaces.ts';
 import { damp } from '../src/core/mathUtils.ts';
 import {
   FALL_THRESHOLD,
@@ -239,7 +240,12 @@ export class SimPlayer {
     const following = !this.airborne && !damped;
     let reference = this.airborne || damped ? this.position.y : this.groundHeight;
     let groundY = reference;
+    let fromX = this.position.x;
+    let fromZ = this.position.z;
     const onStep = (at: Vector3): void => {
+      if (following) reference = carryReference(fromX, fromZ, reference, at.x, at.z);
+      fromX = at.x;
+      fromZ = at.z;
       groundY = this.sampleGround(at.x, at.z, reference);
       if (following) reference = groundY;
     };
@@ -297,7 +303,11 @@ export class SimPlayer {
     // The pre-#358 vertical: one sample, at the end of the whole frame's
     // movement, asked from her damped height. This is the control.
     if (!this.groundSubstepping || !this.substepping) {
-      groundY = this.sampleGround(this.position.x, this.position.z, reference);
+      const { x, z } = this.position;
+      const asked = following
+        ? carryReference(this.previousPosition.x, this.previousPosition.z, reference, x, z)
+        : reference;
+      groundY = this.sampleGround(x, z, asked);
     }
     this.groundY = groundY;
 
