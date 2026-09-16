@@ -213,7 +213,17 @@ export interface FoliageOccluder {
   readonly centreY: number;
   /** Radius of that widest blob. */
   readonly radius: number;
-  /** Trunk plus every canopy/cone blob, in world space, for a matching stand-in. */
+  /**
+   * Trunk plus every canopy/cone blob, for a matching stand-in — **in the flat
+   * frame, not in world space.** Each `position` is an `(x, z)` and a height
+   * above the ground in that column, exactly as the tree was rolled; the drawn
+   * instance is that part put through `placeOnSphere` (`makeInstanced`,
+   * `FoliageFade`), which lifts it along the leaning local up and so slides it
+   * outward. Anything that measures these against drawn geometry must map them
+   * the same way first, or it counts the lean zero times or twice — `TreeFact`
+   * did the latter and reported a tree standing on the railway (#653, #661).
+   * For where the tree itself stands, use {@link footX}/{@link footZ}.
+   */
   readonly parts: readonly FoliagePart[];
 }
 
@@ -702,7 +712,9 @@ function buildFoliage(collision: CollisionWorld): {
     const lean = tree.lean;
 
     // Occlusion bookkeeping for this tree (see `FoliageOccluder`/
-    // `world/FoliageFade.ts`): every part that makes it up, in world space,
+    // `world/FoliageFade.ts`): every part that makes it up, in the FLAT frame
+    // (a column and a height above its ground — `placeOnSphere` puts them on
+    // the sphere when drawn; `footX`/`footZ` is where the tree stands),
     // plus a rough bounding sphere (the widest blob's centre and radius) —
     // good enough for a cheap "does the sightline pass near here" test
     // without needing the real silhouette. `fileTreeParts` files each part
