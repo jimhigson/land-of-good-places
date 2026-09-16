@@ -6,6 +6,38 @@ lane has been the same, and a replacement must match it.
 
 ## Status: fixed, reviewed, review addressed. PR #637.
 
+## The lesson
+
+This branch's own audit found and routed out **#638** — planted instance tops
+dropping the instance's rotation — and then made the same class of mistake in
+its own new code. Audit your own diff by the standard you apply to everyone
+else's.
+
+## Third agent, 16 Sep — re-verified from the committed code, not from this file
+
+Replacement engineer (same model). Everything above was re-measured on
+`a248a471` rather than trusted. A temporary `process.stderr` probe in the
+invariant (reverted) on canonical seed 20260728, with
+`pnpm exec vitest run test/procgen/seed-canonical.test.ts -t "over the top of the battlements"`
+(note: `-t theGinormousSlideLeavesOverTheBattlements` matches nothing and
+prints `93 skipped` — the test name is the prose label):
+
+```
+clean:  crossing=(55.48,9.69,21.82) crossingAlt=17.302 underside=16.192 stone=10.750 mesh=crenellations facadeY=9.8500 clearance=5.441   1 passed
+D  instance branch forced off: stone=9.770 mesh=castle-wall-lintel facadeY=8.8000 clearance=6.422  -> mesh clause red
+B  name pattern broken:        stone=-Infinity mesh='' facadeY=NaN                                 -> anti-vacuity red
+C  `- 220` on radius():        stone=-209.250                                                     -> frame guard red ("is 10.750, which is not a radius")
+A  every masonry vertex +8 m radially: stone=18.750 facadeY=17.8347 clearance=-2.559              -> value clause red, off by 7.985 m
+A2 crossing radius - 6 m:      underside=10.192 stone=10.750 clearance=-0.559                     -> clearance clause red, "0.56 m inside"
+```
+
+D reproduces the reviewed bug to the millimetre (9.770 / 8.8 / +6.422), and
+shows the facade-value clause would *also* have caught it independently (8.8
+vs 9.85). A2 is exact: 5.441 − 6 = −0.559. Tree clean after every control.
+
+One stale figure found and fixed: `invariants.ts` still said "converted
+honestly the chute clears by 6.42 m" in the clause-3 comment. Now 5.44.
+
 ## The conclusion, which survived review
 
 **There is no collision. The child was never riding through stone.** The

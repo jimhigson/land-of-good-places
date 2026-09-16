@@ -4425,7 +4425,9 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // against a plumb underside is not a measurement of anything — it subtracts a
   // height from a radius-minus-`R` and the two agree only at the origin. That
   // mix is where the headline "1.19 m inside the battlements" came from, and
-  // there is no such intrusion: converted honestly the chute clears by 6.42 m.
+  // there is no such intrusion: converted honestly the chute clears by 5.44 m
+  // (the 6.42 m once written here was measured with the merlons missing — see
+  // the docblock above).
   //
   // Subtracting `CHUTE_HALF_WIDTH` from a radius is the right thing rather than
   // a convenience: a radius decreases by exactly one metre for each metre
