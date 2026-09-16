@@ -38,6 +38,24 @@ vs 9.85). A2 is exact: 5.441 − 6 = −0.559. Tree clean after every control.
 One stale figure found and fixed: `invariants.ts` still said "converted
 honestly the chute clears by 6.42 m" in the clause-3 comment. Now 5.44.
 
+**Scope of the facade-value clause, corrected in re-review:** it is *not*
+terrain corroboration. The facade frame sits above the castle's placement on
+the terrain, so the clause restates what the castle is built to and proves the
+top stone is a merlon top (alone it catches the collapsed walk, off by 1.050 m).
+The terrain enters only through the clearance clause, measured through the
+castle's real world placement.
+
+**Rebased 16 Sep onto the re-hashed `eng/sphere-ground-claims`** (now on
+`feat/sphere-combined`). The rebase itself raised no conflict; the merge had
+conflicted on `scripts/flat-primitives-baseline.mts`. Resolved by taking the
+base's baseline and regenerating with `--print-baseline`: the output was
+byte-identical to this branch's file. Key sets parsed and compared: 321 = 321,
+nothing added, nothing removed, one count changed —
+`parkFacts.ts::AXIS_ALIGNED_BOX::box.max.y` 5 -> 3, the one removed masonry
+line `if (box.max.y > castleMasonryTopY) castleMasonryTopY = box.max.y;` (two
+reads). `check:flat-primitives` exit 0, no BASELINE LOOSE, no NEW FLAT
+PRIMITIVE. Battlements test on 20260728: 1 passed.
+
 ## The conclusion, which survived review
 
 **There is no collision. The child was never riding through stone.** The
