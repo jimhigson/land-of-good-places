@@ -207,3 +207,10 @@ are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
 - Seed 24 builds (#651). Direct: fountain-hop seed 24, rail-race, castle-window, cruiser-clearance, tie-frame all exit 0.
 - PR #650 body updated; CI to run the full chain and procgen.
 - procgen on 13d85084: 67 fail vs base 80 by name. New: s131 tree-on-rail (#653), s326 detour (PR #656) — not ours. 15 fixed.
+
+### Round 7 — review fix (one castle owner)
+- CASTLE_FRAME = Geo.fromWorld(CX, ground, CZ).lift(BASE_Y − ground); Building places shell via standFrameInPlot(CASTLE_FRAME).
+- check:castle-window asserts drawn shell == CASTLE_FRAME (1.8e-15 m); red with old formula: 6.82 cm canonical, 8.73 cm seed 24.
+- Nits: waveFacingYaw() argless; rigTiltAt shared by eyeForFocus/screenBasis3DAt.
+- CI procgen f1e9f677: 68 fail vs base 80; only new = s131 tree-on-rail (#653). PR body + QA /view link updated.
+- Base has since moved (#656 merged); not rebased.
