@@ -408,7 +408,7 @@ function poseKidAt(
   // not draw her at.
   faceOnGround(
     kid.root,
-    wave > 0.5 ? waveFacingYaw(pose.x, pose.y, pose.z) : pose.facing,
+    wave > 0.5 ? waveFacingYaw() : pose.facing,
   );
   // Nothing is hidden. `TreeClimbing` used to switch off everything but the
   // head and the waving arm, and this loop matched it part for part; the whole

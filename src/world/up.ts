@@ -69,9 +69,23 @@ export function eyeForFocus(
   eye: Vector3,
   up: Vector3,
 ): void {
-  upFor(focus.x, focus.y, focus.z, up);
-  _eyeTilt.setFromUnitVectors(INDOOR_UP, up);
+  rigTiltAt(focus, up, _eyeTilt);
   eye.set(flatOffset.x, flatOffset.y, flatOffset.z).applyQuaternion(_eyeTilt).add(focus);
+}
+
+/**
+ * The rotation a fixed-angle rig is carried through at `focus`, and the up it
+ * carries it to — the one owner shared by {@link eyeForFocus} (where the eye
+ * goes) and {@link screenBasis3DAt} (which way the picture's axes point), so the
+ * two can never solve different rotations.
+ */
+function rigTiltAt(
+  focus: { readonly x: number; readonly y: number; readonly z: number },
+  up: Vector3,
+  tilt: Quaternion,
+): Quaternion {
+  upFor(focus.x, focus.y, focus.z, up);
+  return tilt.setFromUnitVectors(INDOOR_UP, up);
 }
 
 /**
@@ -95,8 +109,7 @@ export function screenBasis3DAt(
   pitch: number,
 ): ScreenBasis3D {
   const flat = screenBasis3D(yaw, pitch);
-  upFor(focus.x, focus.y, focus.z, _basisUp);
-  _basisTilt.setFromUnitVectors(INDOOR_UP, _basisUp);
+  rigTiltAt(focus, _basisUp, _basisTilt);
   const right = _basisRight.set(flat.rightX, flat.rightY, flat.rightZ).applyQuaternion(_basisTilt);
   const up = _basisScreenUp.set(flat.upX, flat.upY, flat.upZ).applyQuaternion(_basisTilt);
   return { rightX: right.x, rightY: right.y, rightZ: right.z, upX: up.x, upY: up.y, upZ: up.z };
