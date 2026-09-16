@@ -194,7 +194,21 @@ interface RouteBriefBase {
    * needs to answer a 3D question for itself, rather than teaching the search
    * about height.
    */
-  readonly clear: (x: number, z: number, radius: number, distanceAlong: number) => boolean;
+  readonly clear: (
+    x: number,
+    z: number,
+    radius: number,
+    distanceAlong: number,
+    /**
+     * Straight-line distance from (x, z) to the attempt's finish pose — a lower
+     * bound on the route still to lay from here. With `distanceAlong` it bounds
+     * the finished route's length from below, which is what lets a caller whose
+     * verdict depends on that length (the slide's height profile) reject only
+     * what no finishable route could survive. Callers that do not need it may
+     * ignore it.
+     */
+    toFinish: number,
+  ) => boolean;
   readonly boundary: ParkBoundary;
   /** Half-width of track to keep clear of obstacles and the boundary. */
   readonly corridorRadius: number;
@@ -755,7 +769,15 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
         const t = i / steps;
         cubicPoint(seg, t, point);
         const s = accumulated + seg.length * t;
-        if (!brief.clear(point.x, point.z, brief.corridorRadius, s)) {
+        if (
+          !brief.clear(
+            point.x,
+            point.z,
+            brief.corridorRadius,
+            s,
+            Math.hypot(finishPose.x - point.x, finishPose.z - point.z),
+          )
+        ) {
           rejected.collision += 1;
           return null;
         }
