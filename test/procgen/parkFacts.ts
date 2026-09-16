@@ -1594,7 +1594,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     const toWorld = new reachThree.Matrix4();
     const vertex = new reachThree.Vector3();
     let radius = 0;
-    let furthestNode: import('three').Object3D | null = null;
+    const furthestNode: { node: import('three').Object3D | null } = { node: null };
     let vertices = 0;
     let objects = 0;
     const visit = (node: import('three').Object3D): void => {
@@ -1617,7 +1617,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
             const d = Math.hypot(vertex.x, vertex.z);
             if (d > radius) {
               radius = d;
-              furthestNode = node;
+              furthestNode.node = node;
             }
           }
         }
@@ -1626,7 +1626,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     };
     visit(scene);
     const path: string[] = [];
-    for (let n: import('three').Object3D | null = furthestNode; n; n = n.parent) {
+    for (let n: import('three').Object3D | null = furthestNode.node; n; n = n.parent) {
       path.push(n.name || n.type);
     }
     return {

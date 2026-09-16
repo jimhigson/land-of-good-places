@@ -100,6 +100,7 @@ import {
   GROUND_SPHERE_RADIUS,
   BUS_MAX_GRADE,
   gradientAtParkRadius,
+  parkRadiusForGradient,
   TERRAIN_HEIGHT_SCALE,
 } from '../../src/core/constants.ts';
 import {
@@ -9724,23 +9725,32 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
  * ceiling is **retired** (Overseer's ruling, 14 September 2026) — it existed to
  * guarantee the cat bus could drive the whole 117 m of its road, and Jim has
  * ruled it need not: *"showing the bus coming in a couple meters is fine and
- * good."* Honouring it would need a planet of about 2460 m against the 220 m he
- * chose by eye.
+ * good."* What honouring it would cost is **computed and printed on every run**
+ * (`planetForBusGrade` below, from the kerb's measured reach) rather than typed
+ * here, because the figure this docblock used to carry — 2460 m — was derived
+ * from a 245 m park that no longer exists and went on being printed as fact.
  *
  * So there is **no gradient assertion here any more**, on the park or on the
  * road. Both are measured a metre at a time and **printed on every run**,
  * passing or failing, to `process.stderr`. If you want a ceiling back, add it
  * with the measurement beside it.
  *
- * The one clause that still fouls:
+ * The clauses that still foul:
  *
  * 1. **The drawn ground is that sphere.** Sampled against the exact cap, so a
  *    terrain that quietly stopped being spherical — a rim creeping back, a
  *    tuned fudge — fails here.
+ * 2. **Everything drawn outdoors is on the planet.** Not the park's outline
+ *    (`boundary.maxRadius`): the treeline, the Rail Race ring and the road
+ *    kerb all stand well past it. Every vertex of every outdoor object in the
+ *    built scene is measured (`ParkFacts.drawnReach`, interiors excluded by
+ *    root), and any at or past the equator fouls — the Rail Race ring is
+ *    exactly what ran off the planet at the 2.3355x scale. What it covers is
+ *    printed on every run.
  *
  * **And the gradient it reports is `tan θ`, not `d / R`.** `d / R` is `sin θ`.
  * It under-reports everywhere and **cannot exceed 100%**, so when the park
- * reached 245 m on a 220 m planet — 25 m past the equator, standing on the
+ * (at the retired 2.3355x scale) reached 245 m on a 220 m planet — 25 m past the equator, standing on the
  * clamp where there is no ground at all — it reported a plausible-looking
  * `111.36%`. A measure that cannot exceed 100% is a measure that cannot report
  * the thing it exists for. `gradientAtParkRadius` in `core/constants.ts` is the
@@ -9840,10 +9850,24 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
   // itself, i.e. geodesic radius < pi*R. `NOTE-sizing-terrain-onto-geo.md` on
   // this branch sizes that work. Until it lands, this bound is honest about
   // being the formulation's and not the sphere's.
-  if (reach >= GROUND_SPHERE_RADIUS) {
+  // Asked of what is DRAWN, not of the outline: the outline is the smallest
+  // thing out there. `reach` stays the radial sweep's extent above.
+  const drawn = facts.drawnReach;
+  if (drawn.vertices === 0) {
     fouls.push(
-      `the park reaches ${reach.toFixed(1)} m on a ${GROUND_SPHERE_RADIUS} m planet — ` +
-        `${(reach - GROUND_SPHERE_RADIUS).toFixed(1)} m past the equator. This is a limit of ` +
+      `seed ${facts.seed}: drawnReach walked 0 vertices, so whether the park is on its planet ` +
+        'was not measured at all and the clause below would pass vacuously',
+    );
+  }
+  const onPlanet = [
+    ['the park outline', reach, 'boundary.maxRadius'],
+    ['the furthest drawn outdoor vertex', drawn.radius, drawn.furthest],
+  ] as const;
+  for (const [what, d, where] of onPlanet) {
+    if (d < GROUND_SPHERE_RADIUS) continue;
+    fouls.push(
+      `${what} reaches ${d.toFixed(1)} m on a ${GROUND_SPHERE_RADIUS} m planet — ` +
+        `${(d - GROUND_SPHERE_RADIUS).toFixed(1)} m past the equator (${where}). This is a limit of ` +
         "terrain.ts's FORMULATION, not of the sphere: `terrainHeight` is a height above a " +
         'plane, so past d = R no column meets the sphere and the whole far half of the planet ' +
         `maps to one point (height -R, horizontal up). A sphere would carry a park out to the ` +
@@ -9866,10 +9890,10 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
   // CLAUDE.md's "two definitions of one thing kept in step by hand" with the
   // second definition being a sentence.
   //
-  // It is also where `GROUND_SPHERE_RADIUS` came from: the radius is
-  // `the drawn road's full reach / BUS_MAX_GRADE`. Measuring the road rather
-  // than the boundary is therefore measuring the thing the number was derived
-  // from, which is the only way the pair can be re-proved instead of assumed.
+  // It is also where the retired budget was spent: `BUS_MAX_GRADE` was sized
+  // against the drawn road's full reach. `GROUND_SPHERE_RADIUS` is no longer
+  // derived from it (it is a look, chosen by eye — see its docblock), so the
+  // road's reach is used below only to print what honouring 10% would cost.
   //
   // **The grade is measured between consecutive points on the drawn road**, not
   // computed as `d / GROUND_SPHERE_RADIUS`. The latter is the sphere's own
@@ -9930,6 +9954,14 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
   // vetoing a park for a journey the bus no longer makes.
 
   const grade = (g: number) => (Number.isFinite(g) ? `${(g * 100).toFixed(2)}%` : 'INFINITE');
+  // The planet on which BUS_MAX_GRADE would hold as far as the bus actually
+  // drives. `parkRadiusForGradient` is linear in the radius, so asking it for a
+  // unit planet and dividing inverts it without a second copy of the formula.
+  const planetForBusGrade = roadReach / parkRadiusForGradient(BUS_MAX_GRADE, 1);
+  // Along the ground, not across the chart: the lean and the walk to the
+  // furthest drawn vertex, and what is left before the equator and the antipode.
+  const drawnLean = Math.asin(Math.min(1, drawn.radius / GROUND_SPHERE_RADIUS));
+  const drawnWalk = drawnLean * GROUND_SPHERE_RADIUS;
   process.stderr.write(
     `[ground sphere] ${bearings} bearings to ${reach.toFixed(1)} m: worst departure from the cap ` +
       `${worstShapeError.toFixed(2)} m (tolerance ${undulation.toFixed(2)}), worst gradient ` +
@@ -9943,13 +9975,21 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
       `${(BUS_MAX_GRADE * 100).toFixed(0)}% BUS_MAX_GRADE budget was retired on 14 September ` +
       '2026: it guaranteed the bus could drive all 117 m of its road, and Jim ruled it need ' +
       'not ("showing the bus coming in a couple meters is fine and good"). Honouring it would ' +
-      'need a 2460 m planet against the 220 m chosen by eye. The two numbers above are ' +
+      `need a ${planetForBusGrade.toFixed(0)} m planet (for the ${roadReach.toFixed(1)} m the kerb ` +
+      `reaches) against the ${GROUND_SPHERE_RADIUS} m chosen by eye. The two numbers above are ` +
       'REPORTED, not policed — the only gradient-shaped thing still refused is the park ' +
       'reaching past its own equator, where there is no ground at all.\n' +
       `[ground sphere] Asserts nothing about the ${(
         facts.roadCorridor.segments.length - busDrives.length
       ).toString()} gateway-approach run(s) in through the arch: a child walks those, the bus ` +
-      'does not, and BUS_MAX_GRADE is a bus budget.\n',
+      'does not, and BUS_MAX_GRADE is a bus budget.\n' +
+      `[ground sphere] on the planet: furthest drawn outdoor vertex ${drawn.radius.toFixed(1)} m ` +
+      `chart (${drawnWalk.toFixed(1)} m along the ground, ${((drawnLean * 180) / Math.PI).toFixed(1)} deg ` +
+      `lean) — ${drawn.furthest}; ${(GROUND_SPHERE_RADIUS - drawn.radius).toFixed(1)} m chart ` +
+      `before the equator, ${(Math.PI * GROUND_SPHERE_RADIUS - drawnWalk).toFixed(0)} m of walking ` +
+      `before the antipode. Covers ${drawn.vertices} vertices of ${drawn.objects} objects in the ` +
+      `built scene; does NOT cover ${drawn.excludedRoots.join(', ')} (interiors, excluded by root), ` +
+      "the bus journey's own lane scene, or anything only added once a frame runs.\n",
   );
   return fouls;
 };
