@@ -4104,25 +4104,10 @@ const theGinormousSlideIsRideable: Invariant = (facts) => {
   }
 
   // --- 1. it goes down, all the way down ------------------------------------
-  let worstRise = 0;
-  let worstRiseAt: readonly [number, number, number] = first;
-  for (let i = 1; i < chute.length; i += 1) {
-    const before = chute[i - 1];
-    const here = chute[i];
-    if (!before || !here) continue;
-    const rise = here[1] - before[1];
-    if (rise > worstRise) {
-      worstRise = rise;
-      worstRiseAt = here;
-    }
-  }
-  if (worstRise > SLIDE_MAY_RISE) {
-    complaints.push(
-      `the ginormous slide climbs ${worstRise.toFixed(3)} m at ` +
-        `(${worstRiseAt[0].toFixed(1)}, ${worstRiseAt[1].toFixed(1)}, ${worstRiseAt[2].toFixed(1)}) ` +
-        '— a slide that goes uphill is one a child stops on',
-    );
-  }
+  //
+  // Measured against the local up, not world `y`, and owned by
+  // {@link theGinormousSlideNeverClimbs} — see there for why the world-`y`
+  // version this clause used to be was reading the wrong frame (#645).
 
   // --- 2. it finishes in the ball pit ---------------------------------------
   //
@@ -4193,6 +4178,93 @@ const theGinormousSlideIsRideable: Invariant = (facts) => {
   }
 
   return complaints;
+};
+
+/**
+ * **The ginormous slide never climbs, measured against the up a rider feels.**
+ * (Issue #645.)
+ *
+ * This was clause 1 of {@link theGinormousSlideIsRideable}, and it compared
+ * world `y` between samples. That is the wrong frame on a planet: the chute's
+ * last metres run out over ground that curves away from the park's centre, so a
+ * chute that falls steadily in world `y` falls *less* than the ground does, and
+ * a child on it goes uphill. Measured before the fix, every profiled seed rose
+ * 3–13° over its last 5–8 m while the world-`y` clause stayed green.
+ *
+ * So the rise is the step between two built samples projected on the local up
+ * at their midpoint — `Geo.up`, the one owner of that direction — which is what
+ * gravity pulls a rider along. The tolerance is {@link SLIDE_MAY_RISE}, the same
+ * spline-overshoot allowance the old clause used.
+ *
+ * It also reports, on stderr, the steepest stretch of chute in that same frame
+ * (over a 2 m window), because that is the number a ride-feel judgement has to
+ * be made on and the world-`y` one understates it.
+ */
+const theGinormousSlideNeverClimbs: Invariant = (facts) => {
+  const chute = facts.slideChute;
+  if (chute.length < 2) return ['the ginormous slide has no chute, so its climb measured nothing'];
+  const up = new Vector3();
+  const geo = new Geo();
+  let worstRise = 0;
+  let worstAt = 0;
+  let climbedMetres = 0;
+  let firstClimbFromEnd = Infinity;
+  const along: number[] = [0];
+  const drop: number[] = [0];
+  for (let i = 1; i < chute.length; i += 1) {
+    const a = chute[i - 1]!;
+    const b = chute[i]!;
+    geo.setFromWorld((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2).up(up);
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const dz = b[2] - a[2];
+    const rise = dx * up.x + dy * up.y + dz * up.z;
+    along.push(along[i - 1]! + Math.hypot(dx, dy, dz));
+    drop.push(drop[i - 1]! - rise);
+    if (rise > SLIDE_MAY_RISE) climbedMetres += rise;
+    if (rise > worstRise) {
+      worstRise = rise;
+      worstAt = i;
+    }
+  }
+  const total = along[along.length - 1]!;
+  for (let i = 1; i < chute.length; i += 1) {
+    if (drop[i]! < drop[i - 1]! - SLIDE_MAY_RISE) {
+      firstClimbFromEnd = Math.min(firstClimbFromEnd, total - along[i - 1]!);
+      break;
+    }
+  }
+  // Steepest in the rider's frame, over a 2 m window so one short sample cannot
+  // stand in for a slope.
+  let steepest = 0;
+  let steepestAt = 0;
+  for (let i = 0, j = 0; i < chute.length; i += 1) {
+    while (j < chute.length - 1 && along[j]! - along[i]! < 2) j += 1;
+    const run = along[j]! - along[i]!;
+    if (run < 1.5) break;
+    const fall = drop[j]! - drop[i]!;
+    const degrees = (Math.asin(Math.min(1, Math.max(-1, fall / run))) * 180) / Math.PI;
+    if (degrees > steepest) {
+      steepest = degrees;
+      steepestAt = along[i]!;
+    }
+  }
+  process.stderr.write(
+    `  the ginormous slide in its own frame: ${total.toFixed(1)} m, falls ` +
+      `${drop[drop.length - 1]!.toFixed(2)} m along local up, steepest ` +
+      `${steepest.toFixed(1)}° at ${steepestAt.toFixed(1)} m, worst climb ` +
+      `${(worstRise * 1000).toFixed(1)} mm per sample, ${climbedMetres.toFixed(3)} m climbed in all\n`,
+  );
+  if (worstRise <= SLIDE_MAY_RISE) return [];
+  const at = chute[worstAt]!;
+  return [
+    `the ginormous slide climbs ${worstRise.toFixed(3)} m between two samples ` +
+      `(${(along[worstAt]! - along[worstAt - 1]!).toFixed(2)} m apart) against the local up at ` +
+      `(${at[0].toFixed(1)}, ${at[1].toFixed(1)}, ${at[2].toFixed(1)}), ` +
+      `${(total - along[worstAt]!).toFixed(1)} m from the end; it climbs ` +
+      `${climbedMetres.toFixed(3)} m in all, starting ${firstClimbFromEnd.toFixed(1)} m ` +
+      'from the end — a slide that goes uphill is one a child stops on',
+  ];
 };
 
 /**
@@ -10785,6 +10857,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the ginormous slide goes downhill all the way, lands in the ball pit, ' +
       'and never runs back inside the castle',
     theGinormousSlideIsRideable,
+  ],
+  [
+    'the ginormous slide never climbs, measured against the local up',
+    theGinormousSlideNeverClimbs,
   ],
   [
     'the ginormous slide stands on legs a child can walk between',
