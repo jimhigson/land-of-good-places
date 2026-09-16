@@ -66,6 +66,35 @@
  * is what says the rig, the camera and the raycast all agree — and if the
  * control ever fails, this script reports itself broken rather than confidently
  * blaming the pose.
+ *
+ * ## The green that was too good — 16 September 2026, on the sphere branch
+ *
+ * **Worth reading before touching anything here, because the failure looked
+ * exactly like a fix.**
+ *
+ * This script died outright on the sphere branch: *"climbable tree 0 has no
+ * foliage occluder"*. `foliageFor` matches a `ClimbableTreeSeed` to its
+ * `FoliageOccluder` by `(x, z)` within 0.05 m, and the two had come apart —
+ * the occluder is the canopy's **drawn** centre, slid outward along the local
+ * up, while the seed is the tree's **flat** foot. Measured on the canonical
+ * seed: **1.67 m apart at a radius of 80 m, 2.94 m at 176 m.**
+ *
+ * Fixing that match alone made this check **green**, reporting **100.0% hand
+ * visible on all 46 trees with a blocker column of nothing but `—`**. That is a
+ * triumphant-looking result and it was worthless: the kid was still posed by
+ * this file's own copy of the perch, in the tree's flat column, while every
+ * foliage stand-in sat metres away in the drawn one. There was no foliage
+ * anywhere near her to block anything, so nothing blocked anything. A check that
+ * had stopped touching its own subject read as a pass.
+ *
+ * The tell was that the number was *too* clean — 100.0% on every tree, and a
+ * head control of 100.0% where QA had measured 95.8–96.4%. Two figures that
+ * should differ, agreeing perfectly, is this repo's oldest smell.
+ *
+ * The cure is the one that generalises: **stop having a copy.** She is posed
+ * through the game's own {@link climbPose} and stood with the game's own
+ * `faceOnGround`, so there is no second perch to keep in step. It then read
+ * 0.0–100.0% and failed honestly.
  */
 import './headless-canvas.mjs';
 import { Group, Mesh, MeshBasicMaterial, Raycaster, SphereGeometry, Vector3 } from 'three';
