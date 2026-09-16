@@ -110,8 +110,11 @@ plus that crosses), local worst 0.477, 0 of 13 crossings over 0.670.
 
 The clause itself at scale 1, canonical seed (`vitest -t "every railway
 crossing has a bridge"`, confirmed `1 passed | 92 skipped`): worst local 0.360
-(the clause skips strides with no fall exposure near the feet; the diag does
-not, hence 0.477 there), world-y 0.641.
+world-y 0.641. **~~I attributed the gap to 0.477 to the exposure skip.~~ Wrong
+— the reviewer removed the skip and still got 0.360.** The real cause: the clause
+scanned only `+along` with a signed grade, while the diag takes `Math.abs`, so
+the gap *was* a defect — a ramp climbed from its far end was never judged. The
+exposure skip is honest. Fixed below.
 
 **Red proof at scale 1**, same geometry mutation as above
 (`bridges.ts` `surfaceProfile`: `const length = (along >= 0 ? lengthPos :
@@ -121,3 +124,29 @@ lengthNeg) / 3;`) plus scale 1: `1 failed`, 3 complaints — local grades
 
 `diag-bridge-grade.mts`'s header gave a run command that fails with
 `ERR_MODULE_NOT_FOUND`; corrected to include the resolver `--import`.
+
+## #641 review: the clause now climbs every ramp from both ends
+
+Rebased onto `origin/feat/sphere-combined` (#628 squash-merged there) with
+`--onto … 37e5d483`; PR retargeted; three-dot diff is the same 4 files, patch
+byte-identical to before the rebase.
+
+`steepestUphillStride` in `invariants.ts` is the one scan both the controls and
+the assertion use: each window judged `a→b` in `a`'s frame and `b→a` in `b`'s.
+**Control 5** marches the declared 0.50 ramp reversed and must read 0.50.
+Constant's doc now points at **#643** (world-y reach, not guarded).
+
+All at scale 1 (`PARK_REFERENCE_SPHERE_RADIUS = GROUND_SPHERE_RADIUS`, uncommitted),
+canonical seed, `vitest -t "every railway crossing has a bridge"`, 5 controls ok
+unless stated:
+
+| geometry (`bridges.ts:836`) | result |
+|---|---|
+| unmutated | pass, worst local 0.472 (was 0.360 one-directional) |
+| `along >= 0 ? lengthPos / 3 : lengthNeg` (reviewer's) | **exit 1**, 3 complaints, worst 1.597 (1.180 m / 0.739 m, towards -along) at (-22.4, 35.4) |
+| `along >= 0 ? lengthPos : lengthNeg / 3` | **exit 1**, 3 complaints, first 0.817 (0.867/…, towards +along) |
+| `(… ) / 3` both sides | **exit 1**, worst 1.597 |
+| unmutated, scan's `behind` branch disabled | **exit 1**, control 5 FAIL (local 0.000), VOID |
+
+At branch scale (1200), clause alone on all 5 CI seed files: `5 passed | 460
+skipped`, worst locals 0.485 / 0.400 / 0.460 / 0.398 / 0.464.

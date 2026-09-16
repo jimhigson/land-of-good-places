@@ -1316,5 +1316,13 @@ export const SPRINT_PEAK_GRADE_BUDGET = 0.5121075476046892;
  * measured headroom (1.670 on this park) covers flat grass at 1.140 and nothing
  * falls through — but that margin is partly spent by the planet now, and making
  * the sampler radial is the physics lane's work, not this constant's.
+ *
+ * **Issue #643 — read this before believing "the grade is guarded".** The
+ * 0.670 above is derived from the sampler's reach, and that reach is measured
+ * in **world `y`**. So the figure that actually decides whether a child falls
+ * through a ramp is the world-`y` grade, and after #636 **no check asserts on
+ * it**. At park scale 1 on the canonical seed the steepest world-`y` stride on a
+ * bridge is 0.641 — 0.029 under this ceiling. This constant guards the ramp's
+ * shape; it does not guard the physics.
  */
 export const SPRINT_LOCAL_GRADE_CEILING = BUILDING_STEP_UP / PLAYER_LONGEST_STEP;
