@@ -263,3 +263,68 @@ They belong to the conversion lanes, not to this one.
   names are prefixes of one another.
 - Read exit codes directly; never pipe a check through `tail`/`head`.
 - Push after every commit.
+
+---
+
+## Review round 1 — both findings taken (picked up by a replacement engineer)
+
+Model: Opus 5 (1M context), same as the original author. Branch and worktree
+unchanged: `.claude/worktrees/eng-flat-types`, already clean and on the PR head
+when taken over.
+
+**Blocker — the new test was a tautology.** `test/geo/types.test.ts`'s
+"altitudeOf and altitude are one computation, not two definitions" compared
+`metresOf(altitudeOf(g))` to itself. Fixed to `.toBe(altitude(g))`, with
+`altitude` added to the import. The rule-less `// eslint-disable-next-line`
+is deleted rather than re-justified: **this repo has no eslint dependency and
+no eslint config**, so it silenced nothing but the reader.
+
+Re-proved rather than taken on trust, with `altitudeOf` drifted 999 m:
+
+| | result |
+|---|---|
+| tautology + drift | 8 passed (8), exit 0 — the failed proof |
+| fixed test + same drift | 1 failed \| 7 passed (8), exit 1 |
+| fixed test, drift reverted | 8 passed (8), exit 0 |
+
+Geometry the red was measured against, so the reproduction can be re-derived
+rather than re-quoted: `g = Geo.fromWorld(100, 6, -40)`, sphere radius 220 m,
+true altitude **30.420551600152123 m**, drifted **1029.420551600152**. If the
+sphere or that position moves, those numbers move.
+
+**Recommended change — `Y_THRESHOLD` now uses `holdsY`.** It was the last
+y-rule matching on `isYAccess` alone. Two new baseline keys, both real:
+
+    + scripts/check-bus-journey.mts::Y_THRESHOLD::steepestClimbNose < 0.02  (1)
+    + scripts/measure-torus-480.mts::Y_THRESHOLD::maxDim < 1.5              (1)
+    319 -> 321 keys, sum 425 -> 427, 0 removed, 0 count changes
+
+Key sets were **parsed from both revisions and diffed**, not read off a diff
+stat — a swap is invisible to a count.
+
+**A trap worth keeping:** the existing `Y_THRESHOLD` fixture uses a direct
+`.y`, so it could not witness the widening — narrowing `holdsY` back to
+`isYAccess` would have left it green. A laundered fixture was added alongside
+it (mirroring `Y_DIFFERENCE`'s), and it is that fixture which makes the
+narrowing print `ARMING FAILURE`. Disarming the rule entirely trips both.
+
+**Verification on the head commit** (exit codes read unpiped; piping vitest
+through `tail` reported tail's 0 and hid the red on the first attempt):
+
+    check:flat-primitives  exit 0   321 entries, Y_THRESHOLD 8 -> 10
+    tsc --noEmit           exit 0
+    typecheck:test         exit 0
+    build                  exit 0   277ms
+    test:procgen           exit 1   85 failed | 575 passed (660), 43.7s
+
+`test:procgen` is **unchanged from the base** — 85+575=660, zero skipped — and
+nothing under `test/procgen/` references any of the three files touched here,
+so the suite cannot have been influenced. Those 85 are the inherited sphere
+failures across the five seed files. The numbers earlier in this document
+(128 failed / 629) predate the rebase and are stale; these are current.
+
+Three-dot diff against the PR base is still **16 files, 6 added / 10 modified,
+0 deleted**.
+
+Inherited reds, not this branch's: `check:rail-race` (#630), `check:hotel`
+(#629, fixed by #634).
