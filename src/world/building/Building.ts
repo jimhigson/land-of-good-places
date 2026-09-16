@@ -17,6 +17,7 @@ import {
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
 import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
+import { registerChuteCollider } from '../slide/chuteCollider';
 import { planSlideShots, SlideShotDirector, type SlideShot } from '../slide/cameras';
 import {
   petSeatOnSlide,
@@ -898,6 +899,11 @@ export class Building implements GameSystem {
     // At park level, not under the castle's plot — the ride spans two plots and
     // its legs stand in the park between them. See `buildSlideSupports`.
     anchorPlots.group.add(buildSlideSupports(this.slideLegs, collision));
+
+    // The low run-out is solid (#664): below a child's head the chute is a wall
+    // she stops at, not a ghost she walks through. After the legs are planned,
+    // so the legs' clear-ground test is not answered by the chute it holds up.
+    registerChuteCollider(this.ginormousSlide, collision);
 
     // The rider's seat hangs off the **same group as the chute** — so the
     // chute's points and the mount's position are the same coordinates and
