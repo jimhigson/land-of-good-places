@@ -12,3 +12,11 @@ Branch `eng/seed131-tree-rail`, off `origin/eng/sphere-six-reds` (PR #650).
 ## Fix
 TreeFact x/z = footX/footZ, footprint about the foot (test/procgen/parkFacts.ts).
 Same fact feeds tree-tree, tree-wall, bush-tree, entrance invariants: check their names before/after.
+
+## Result (all five pool seeds, failing test NAMES)
+- origin/eng/sphere-six-reds locally: 68 failing names, identical to PR #650 CI run 35102671110 (sha 50f7b172).
+- this branch: 54, a strict subset. 14 go green, 0 new:
+  railway (131, canonical); tree-tree and bush-tree (all 5); tree-wall (131, canonical).
+- Control: loosening Scenery's rail/tree-tree/tree-wall/bush-tree gates (then reverted) turns all four red on 131 with real numbers.
+- No src/ change -> scatter RNG and placements byte-identical by construction.
+- typecheck:test exit 0. Status: PR open against eng/sphere-six-reds.
