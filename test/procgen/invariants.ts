@@ -6585,20 +6585,27 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     //
     // ### What this does NOT cover, and says so on every run
     //
-    // `WalkSurfaces.sample`'s own ceiling is still literally world-`y`
-    // (`const ceiling = y + BUILDING_STEP_UP`), so on a sphere it must cover
-    // the planet's fall over a sub-step *as well as* the ramp's local rise.
-    // `check:deck-fallthrough` measures the headroom there (1.670 on this park,
-    // 0.670 park-independent) and it covers flat grass at 1.140 today — so
-    // nothing falls through — but the margin is partly spent by the planet now.
-    // This clause prints the worst world-`y` figure it saw beside the local one
-    // on every run so that fact is never silently inherited, and asserts on the
-    // local one only. Making the sampler radial is the physics lane's work.
+    // `WalkSurfaces.sample`'s ceiling used to be literally world-`y`
+    // (`y + BUILDING_STEP_UP`), so the physics spent the planet's fall over a
+    // sub-step as well as the ramp's rise, and this clause guarded a frame the
+    // sampler did not use (#643). **It is radial now** — `stepCeilingAt` — and
+    // `Player` carries its reference at her own radius between sub-steps, so
+    // the reach spends exactly the local rise this clause measures.
+    // `scripts/measure-walk-reach.mts` shows it: on this park 0 honest climbs
+    // refused (584 before); the carried reference is what stops a 0.5 local
+    // ramp at r = 140 dropping her.
+    // The worst world-`y` figure is still printed beside the local one, as the
+    // number that *used* to decide a fall, so a regression to it is visible.
+    //
+    // **What this still does NOT cover**: locomotion is in plan, so a stride's
+    // ground run is its plan length over `cos θ − g·sin θ` climbing towards the
+    // park — more climb per frame than a tangent stride of the same plan length.
+    // That is the walk metric's lane (#621), not the reach's.
     const SAMPLES_PER_STRIDE = 8;
     const MARCH_STEP = PLAYER_LONGEST_STEP / SAMPLES_PER_STRIDE;
     // `NavGrid.ts`'s own `TOP_REFERENCE`, restated rather than imported —
     // it looks like a leaf (its own direct imports are `core/constants`,
-    // two type-only imports, and `Collision.ts`), but that last one is not
+    // `building/surfaces`, two type-only imports, and `Collision.ts`), but that last one is not
     // safe: `NavGrid.ts` imports `autoHopClears` from it as a real value,
     // and `Collision.ts` imports `GARDEN_PLAY_BOUNDARY` from `boundary.ts`
     // as a real value too, which reads `PARK_SEED` from `parkManifest.ts`
@@ -6980,11 +6987,9 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
           : `; worst LOCAL grade ${seenWorstLocal.toFixed(3)} against ceiling ` +
             `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)}. Steepest world-y grade over the ` +
             `same strides was ${seenWorstWorld.toFixed(3)} — NOT asserted on, and not a ` +
-            `grade: it is the ramp plus the dome. WalkSurfaces.sample's own ceiling is ` +
-            `still literally world-y, and the headroom check:deck-fallthrough measured ` +
-            `there is ${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)} park-independent (1.670 on ` +
-            `this park) — so the planet is spending part of that margin and nothing yet ` +
-            `guards it.\n`),
+            `grade: it is the ramp plus the dome. WalkSurfaces.sample's reach is radial ` +
+            `since #643 (stepCeilingAt), so this figure no longer decides a fall; it is ` +
+            `printed so a reach that regressed to world-y would be seen.\n`),
     );
   }
 

@@ -1309,20 +1309,25 @@ export const SPRINT_PEAK_GRADE_BUDGET = 0.5121075476046892;
  * point's own horizontal plane. `invariants.ts` carries controls that fail the
  * run if its measure ever stops doing that.
  *
- * **One thing this does NOT cover, and the invariant says so on every run:**
- * `WalkSurfaces.sample`'s own ceiling is still literally world-`y`
- * (`const ceiling = y + BUILDING_STEP_UP`), so on a sphere it has to cover the
- * planet's own fall over a sub-step *as well as* the ramp's local rise. Today's
- * measured headroom (1.670 on this park) covers flat grass at 1.140 and nothing
- * falls through — but that margin is partly spent by the planet now, and making
- * the sampler radial is the physics lane's work, not this constant's.
+ * **The sampler measures in the same frame (#643).** `WalkSurfaces.sample`'s
+ * reach used to be literally world-`y` (`y + BUILDING_STEP_UP`), so the physics
+ * that decides a fall-through spent the planet's own fall over each sub-step as
+ * well as the ramp's rise, and this local-frame ceiling guarded a frame the
+ * sampler did not use. The reach is now radial (`stepCeilingAt` in
+ * `world/building/surfaces.ts`) and `Player` carries its sub-step reference at
+ * her own distance from the planet's centre, so `BUILDING_STEP_UP` is spent on
+ * local rise and nothing else. Measured by `scripts/measure-walk-reach.mts`,
+ * and the two halves earn different things. **The carry** is what lifts the
+ * steepest local grade a sprinting child keeps her footing on at r = 140 m
+ * from 0.40 to 0.67 — a world-`y` reach with the carry reads 0.670 there too,
+ * because along a ramp the carried reference is within centimetres of the
+ * deck. **The radial reach** is what fixes the knee-high edges, where the
+ * foot's lean multiplies the whole riser: on the canonical park 584 honest
+ * step-ups refused and 55 over-tall ones admitted went to 0 and 0 — and it is
+ * what `NavGrid` now agrees with pair for pair (`withinStep`).
  *
- * **Issue #643 — read this before believing "the grade is guarded".** The
- * 0.670 above is derived from the sampler's reach, and that reach is measured
- * in **world `y`**. So the figure that actually decides whether a child falls
- * through a ramp is the world-`y` grade, and after #636 **no check asserts on
- * it**. At park scale 1 on the canonical seed the steepest world-`y` stride on a
- * bridge is 0.641 — 0.029 under this ceiling. This constant guards the ramp's
- * shape; it does not guard the physics.
+ * What still bends the figure far out is locomotion, not the reach: she moves
+ * in plan, and climbing towards the park a plan metre is `1 / (cos θ − g sin θ)`
+ * metres of ground. That is the walk metric's work (#621).
  */
 export const SPRINT_LOCAL_GRADE_CEILING = BUILDING_STEP_UP / PLAYER_LONGEST_STEP;
