@@ -13,7 +13,6 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { PALETTE } from '../core/palette';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, PLAYER_RADIUS } from '../core/constants';
-import { screenBasis3D } from '../core/screenBasis';
 import {
   boxCorners,
   contentFrame,
@@ -32,6 +31,7 @@ import { KEYCHAIN_KINDS, createKeychain, type KeychainKind } from '../art/models
 import { pressAction, type InteractZone, type ZoneAction } from './interact';
 import { highlightObject } from './highlight';
 import { standOnSphere, terrainHeight } from './terrain';
+import { screenBasis3DAt } from './up';
 import type { CollisionWorld } from './Collision';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
@@ -499,13 +499,6 @@ const VIEW_CHILD_HEIGHT = TALLEST_CHILD_HEIGHT;
  */
 const TAP_HEADROOM = 1.15;
 
-/**
- * The screen axes this view frames against. Solved once: the park's camera
- * never turns (ARCHITECTURE.md, "One camera angle, forever"), so the basis is
- * as constant as the two angles it comes from — and `screenBasis.ts`'s own
- * header sets out when that assumption is *not* safe to cache.
- */
-const VIEW_BASIS = screenBasis3D(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG);
 
 /**
  * The two things {@link KeychainShop.viewZoom} needs of a camera. `IsoCamera`
@@ -617,16 +610,36 @@ export class KeychainShop implements GameSystem {
   private readonly framedSubjects: FramedSubject[] = [];
 
   /**
-   * {@link framedSubjects} projected onto {@link VIEW_BASIS} — the screen-space
+   * **The screen axes this view frames against — the rig's, over this stall.**
+   *
+   * The camera never turns (ARCHITECTURE.md, "One camera angle, forever"), but
+   * on the sphere it *leans*: `IsoCamera` carries its whole rig through the tilt
+   * at its focus. This was a module constant, `screenBasis3D(yaw, pitch)` — the
+   * flat basis, the shot at the park's centre — and the rack was framed about a
+   * camera angle the game does not render: `check:keyring-view` measured a drift
+   * of **6.07e-2** against `IsoCamera`'s own axes at scale 1.
+   *
+   * Solved once per stall, at the stall's own anchor, because the stall does not
+   * move. The view's focus sits a little off that anchor; the check states the
+   * residual that costs (the up field turns by distance / sphere radius).
+   */
+  readonly viewBasis = screenBasis3DAt(
+    { x: STALL_X, y: terrainHeight(STALL_X, STALL_Z), z: STALL_Z },
+    CAMERA_YAW_DEGREES * DEG,
+    CAMERA_PITCH_DEGREES * DEG,
+  );
+
+  /**
+   * {@link framedSubjects} projected onto {@link viewBasis} — the screen-space
    * box the shot has to hold. See {@link viewContent}.
    */
-  private content: ContentFrame = contentFrame(VIEW_BASIS, []);
+  private content: ContentFrame = contentFrame(this.viewBasis, []);
 
   /**
    * {@link content}, but the six keyrings alone — the part of the shot that may
    * not be cropped, whatever the viewport. See {@link viewZoom}.
    */
-  private requiredContent: ContentFrame = contentFrame(VIEW_BASIS, []);
+  private requiredContent: ContentFrame = contentFrame(this.viewBasis, []);
 
   private closeButton: HTMLElement | null = null;
 
@@ -796,7 +809,7 @@ export class KeychainShop implements GameSystem {
     let closest = Infinity;
     for (let a = 0; a < this.rack.length; a += 1) {
       for (let b = a + 1; b < this.rack.length; b += 1) {
-        const gap = screenDistance(VIEW_BASIS, this.rack[a]!, this.rack[b]!) - KEYRING_PICK_RADIUS;
+        const gap = screenDistance(this.viewBasis, this.rack[a]!, this.rack[b]!) - KEYRING_PICK_RADIUS;
         if (gap < closest) closest = gap;
       }
     }
@@ -1397,8 +1410,8 @@ export class KeychainShop implements GameSystem {
       ),
     });
 
-    this.requiredContent = contentFrame(VIEW_BASIS, this.viewRequiredSubjects);
-    this.content = contentFrame(VIEW_BASIS, this.framedSubjects);
+    this.requiredContent = contentFrame(this.viewBasis, this.viewRequiredSubjects);
+    this.content = contentFrame(this.viewBasis, this.framedSubjects);
 
     // {@link rackFocus}: the world point that centres **the six keyrings** in
     // the frame.
@@ -1424,7 +1437,7 @@ export class KeychainShop implements GameSystem {
     const rackCentreX = sumX / this.rack.length;
     const rackCentreZ = sumZ / this.rack.length;
     focusForFrame(
-      VIEW_BASIS,
+      this.viewBasis,
       this.requiredContent,
       { x: rackCentreX, y: this.groundY + keyringLocalY, z: rackCentreZ },
       this.rackFocus,
