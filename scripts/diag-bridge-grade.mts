@@ -53,8 +53,10 @@
  * needed: the first two together still pass for a measure that returns a
  * constant zero.
  *
- * `LGP_SEED=<n> pnpm exec node scripts/diag-bridge-grade.mts`, or with no seed
- * for the canonical park. **There is no `sweep-bridge-grade.mts`** — this line
+ * `LGP_SEED=<n> node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs
+ * scripts/diag-bridge-grade.mts`, or with no seed for the canonical park. (Plain
+ * `node scripts/diag-bridge-grade.mts` dies with `ERR_MODULE_NOT_FOUND` on the
+ * extensionless imports — the resolver hook is required.) **There is no `sweep-bridge-grade.mts`** — this line
  * used to claim there was; loop `LGP_SEED` over `PARK_SEED_POOL` instead. The
  * assertion itself lives in `test/procgen/invariants.ts` now (#636), which runs
  * on every CI seed and carries these same four controls, so this script is a

@@ -81,3 +81,43 @@ BASELINE LOOSE entries (the re-derive work owned on
 CI on PR 641 agrees with local to the test: per-file failed counts
 1 / 26 / 24 / 25 / 24 / 24 = 124, identical to the local after-run, and all
 five bridge run-notes printed with controls green.
+
+## Re-measured at park scale 1 (replacement agent, 16 Sep)
+
+Every figure above was taken at `PARK_SURFACE_SCALE = 2.3355` (this branch's
+`PARK_REFERENCE_SPHERE_RADIUS = 1200`). PR #620 (open, not in this base)
+restores scale 1. Measured by editing that one line to
+`= GROUND_SPHERE_RADIUS`, **uncommitted, reverted after**:
+
+`diag-bridge-grade.mts`, controls green on every seed run:
+
+| seed | r | world-y | LOCAL |
+|---|---|---|---|
+| canonical | 30.4 / 40.2 / 41.9 | 0.545 / 0.641 / 0.640 | 0.354 / 0.452 / 0.477 |
+| 11 | 46.7 / 49.2 | 0.639 / 0.626 | 0.317 / 0.395 |
+| 24 | 41.1 | 0.444 | 0.363 |
+| 131 | 35.4 | 0.514 | 0.341 |
+| 326 | 49.4 | 0.630 | 0.344 |
+| 128 | 34.5 | 0.600 | 0.359 |
+| 208 | 49.8 | 0.456 | 0.335 |
+| 274 | 39.0 / 49.5 | 0.613 / 0.621 | 0.353 / 0.346 |
+| 428 | 42.0 | 0.635 | 0.333 |
+| 451 | — | killed after 9 min generating (scale-1 park on this base; not the clause) | |
+
+So **the finding survives scale 1**: the world-y reading is still over the old
+0.512 on 8 of 9 seeds (the dome at r≈40 is only ~0.18, but a 0.35–0.48 ramp
+plus that crosses), local worst 0.477, 0 of 13 crossings over 0.670.
+
+The clause itself at scale 1, canonical seed (`vitest -t "every railway
+crossing has a bridge"`, confirmed `1 passed | 92 skipped`): worst local 0.360
+(the clause skips strides with no fall exposure near the feet; the diag does
+not, hence 0.477 there), world-y 0.641.
+
+**Red proof at scale 1**, same geometry mutation as above
+(`bridges.ts` `surfaceProfile`: `const length = (along >= 0 ? lengthPos :
+lengthNeg) / 3;`) plus scale 1: `1 failed`, 3 complaints — local grades
+**0.817** at (-1.3, -30.3) (rise 0.867 m / run 1.062 m, world-y 1.110),
+0.986 at (-38.6, 11.2), 0.973 at (-22.4, 35.4). Both edits reverted.
+
+`diag-bridge-grade.mts`'s header gave a run command that fails with
+`ERR_MODULE_NOT_FOUND`; corrected to include the resolver `--import`.
