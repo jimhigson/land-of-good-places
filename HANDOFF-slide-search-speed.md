@@ -1,12 +1,11 @@
 # HANDOFF — slide search speed (#650 seed-11 timeout)
 
-Branch `fix/slide-search-speed` off `origin/eng/sphere-six-reds`; PR against it.
+Branch `fix/slide-search-speed`, rebased onto `eng/sphere-six-reds` @ c0913c8d (includes #659, #660). PR #663.
 
-Root cause (measured, seed 11): 98.5% of the rail search's joint steps (3.45M of 3.50M) were in states where accumulated + straight-line distance to the finish already exceeded maxLength (75 m) — subtrees that can never finish. 2904 of ~3060 attempts ran out their 1200-step limit there. Which pose pairing first succeeds was luck: 1165/1620 before d2741d5d, none on rung 1 after (so rung 2 too).
+Root cause: 98.5% of search steps were in states already past the 75 m cap. After the rebase (#659 radius profile), seed 11 base = 453 s over 25 attempts, because the cruiser prefilter guessed the height at `desiredLength` and routes that finished then fouled the cruiser.
 
-Commits:
-1. closer skips chains whose chord bound > maxLength — identical draws (candidates/backtracks identical), 25 s -> 12 s.
-2. validate rejects a piece whose end leaves the finish out of reach — changes routes, seed 11 slide search 25 s -> ~2 s, canonical 6 s -> 50 ms.
-3. slide satisfies: chute underside above ground (base seed 326 was 0.54 m under; new routes on 11/24 were under).
-4. invariant for (3), proved red on base seed 326.
-5. check:park-boot frame floor derived from measured work (was a 100 constant from a 3.46 s search); proved red with a lump mutation.
+Commits: closer chord prune (same draws); validate reach prune; ground clause + invariant; park-boot floor derived; interval cruiser prefilter (heights over every finishable length); legs vs the drawn (leaned) car.
+
+Rebased numbers: every seed solves on its first attempt; seed 11 0.6 s. test:procgen 51 failures vs CI 35112992659's 44. The 10 extra are seed 11's tests that CI never ran because of its timeout, and all fail on base seeds. 3 fixed.
+
+Open findings: (a) the chute has no collider. 8–14 m of every seed's run-out (base and branch) has its underside below TALLEST_CHILD_HEIGHT 2.97 m, so a child walks through it. Needs a collider rather than a height clause. (b) The slide's cruiser clearance still compares world chute points with the flat cruiser line, not the drawn one.
