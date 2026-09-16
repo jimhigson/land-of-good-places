@@ -4250,7 +4250,7 @@ const theGinormousSlideNeverClimbs: Invariant = (facts) => {
     }
   }
   process.stderr.write(
-    `  the ginormous slide in its own frame: ${total.toFixed(1)} m, falls ` +
+    `  seed ${facts.seed}: the ginormous slide in its own frame: ${total.toFixed(1)} m, falls ` +
       `${drop[drop.length - 1]!.toFixed(2)} m along local up, steepest ` +
       `${steepest.toFixed(1)}° at ${steepestAt.toFixed(1)} m, worst climb ` +
       `${(worstRise * 1000).toFixed(1)} mm per sample, ${climbedMetres.toFixed(3)} m climbed in all\n`,

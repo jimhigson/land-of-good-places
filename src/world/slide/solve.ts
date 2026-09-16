@@ -104,7 +104,7 @@ const SELF_CLEARANCE = 6;
  * helter-skelter indoors keeps. 12 m/s is 43 km/h: fine over the gentle indoor
  * curve, watched from outside, and much too fast for this one now that it is
  * ridden from the rider's own eyes round a bend that wraps a castle. 8 m/s is
- * 29 km/h — still a proper rush down a 13.75 m drop, and it is what lets the
+ * 29 km/h — still a proper rush down an 11–17 m drop, and it is what lets the
  * turns be tight enough to fit the park without throwing the camera about.
  */
 export const GIANT_SLIDE_SPEED = 6.5;
@@ -118,13 +118,24 @@ export const GIANT_SLIDE_SPEED = 6.5;
  * only fires when a legal biarc to the pit happens to exist, and grows until it
  * does. Asked for 68 m it produced 140.
  *
- * That is not merely long, it is the wrong ride: the drop is fixed at 13.75 m,
- * so length *is* gradient. Over 140 m the steepest part of the chute was 8°,
+ * That is not merely long, it is the wrong ride: the drop is fixed per seed
+ * (11–17 m against the local up), so length *is* gradient. Over 140 m the
+ * steepest part of the chute was 8°,
  * which is a lazy river with hand-rails. {@link MAX_RIDEABLE_LENGTH} is
  * therefore enforced as a rejection during the search — a piece that would take
  * the chute past it is simply not a legal piece, so the search backtracks
- * instead of wandering — and what survives gives roughly 14° average and 21°
- * steepest, which reads as a slide from the ground and rides like one.
+ * instead of wandering.
+ *
+ * **What survives is not "about 21° steepest"**, which this comment said for a
+ * long time after it stopped being true. Measured against the local up — the
+ * only frame a rider feels — over a 2 m window, once the profile was held
+ * against the planet (#645, 16 September 2026): canonical 27.2°, seed 131
+ * 27.7°, seed 24 23.3°, seeds 11 and 326 14–15°. Before that fix the same
+ * measurement read 36.8° / 36.2° / 26.6° / 28.7° / 28.9°, while world `y`
+ * understated the steepest. Whether those figures are right for a six-year-old
+ * is a ride-feel judgement, and it is Jim's. `theGinormousSlideNeverClimbs`
+ * prints the current figure for every seed it runs, so read it there rather
+ * than trusting this comment.
  */
 const DESIRED_LENGTH = 60;
 
@@ -152,7 +163,7 @@ const DESIRED_LENGTH = 60;
  * Why 75 and not something nearer {@link DESIRED_LENGTH}: an open route
  * overshoots what it is asked for (see there), so a ceiling near 60 would
  * reject nearly everything and put the boot time straight back. The drop is
- * fixed at 13.75 m, so length is gradient — at 87 m the canonical seed's chute
+ * fixed per seed, so length is gradient — at 87 m the canonical seed's chute
  * ran too flat *and* too far to stand on legs, which is why one number cures
  * both complaints.
  */
@@ -190,9 +201,9 @@ const FINAL_RUN_IN = 9;
  * Smoothstep has zero gradient at its own start, so the flat lip meets the drop
  * with no kink: the join is smooth by construction rather than by tuning.
  *
- * It makes the ride better, too. The same 13.75 m of drop now happens over 82%
- * of the chute instead of all of it, so the steep part is steeper — nearer 23°
- * than 19° — and it is a plunge rather than a ramp.
+ * It makes the ride better, too. The same drop now happens over 82% of the
+ * chute instead of all of it, so the steep part is steeper, and it is a plunge
+ * rather than a ramp.
  */
 const LIP_FRACTION = 0.18;
 
