@@ -243,7 +243,9 @@ export class SimPlayer {
     let fromX = this.position.x;
     let fromZ = this.position.z;
     const onStep = (at: Vector3): void => {
-      if (following) reference = carryReference(fromX, fromZ, reference, at.x, at.z);
+      // The damped control carries its reference too: it models the damp's
+      // lag, not a world-y reach, and must not start counting the planet.
+      if (!this.airborne) reference = carryReference(fromX, fromZ, reference, at.x, at.z);
       fromX = at.x;
       fromZ = at.z;
       groundY = this.sampleGround(at.x, at.z, reference);
@@ -304,7 +306,7 @@ export class SimPlayer {
     // movement, asked from her damped height. This is the control.
     if (!this.groundSubstepping || !this.substepping) {
       const { x, z } = this.position;
-      const asked = following
+      const asked = !this.airborne
         ? carryReference(this.previousPosition.x, this.previousPosition.z, reference, x, z)
         : reference;
       groundY = this.sampleGround(x, z, asked);

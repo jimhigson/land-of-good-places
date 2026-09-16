@@ -98,6 +98,7 @@ import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import {
   BUILDING_STEP_UP,
+  GROUND_SPHERE_RADIUS,
   MAX_FRAME_DELTA,
   PLAYER_LONGEST_STEP,
   PLAYER_MAX_SPEED,
@@ -117,8 +118,22 @@ import { SimPlayer } from './playerSim.mts';
  */
 const PARK_THINNEST_HALF_WIDTH = 0.18;
 
-/** Where the ramp starts, in the garden and well clear of anything. */
-const RAMP_X0 = -40;
+/**
+ * Where the ramp starts: **at the park's origin, climbing away from it**, in
+ * the garden and clear of anything a bare `WalkSurfaces` carries.
+ *
+ * The shipping configuration does not care where the ramp is — its reach is
+ * radial and its reference is carried at her own radius (#643), so a deck of a
+ * given local {@link deckSurfaceAt} gradient reads the same ceiling anywhere.
+ * The **damped control does care**: it models the pre-#358 player, whose
+ * reference was her damped world-`y` height, and that lag is a world-`y`
+ * quantity which the planet inflates on any climb *towards* the centre. It used
+ * to start at x = -40, which only reproduced 0.512 because the reach counted
+ * the planet too and the two errors were measured together; a ramp starting at
+ * the origin keeps the lean out of the control so it measures the damp and
+ * nothing else — 0.512, the figure `SPRINT_PEAK_GRADE_BUDGET` is frozen at.
+ */
+const RAMP_X0 = 0;
 /** Long enough that a sprint spends several seconds on it at every gradient. */
 const RAMP_LENGTH = 30;
 const RAMP_Z = 0;
@@ -157,10 +172,24 @@ function buildCollision(): CollisionWorld {
   return collision;
 }
 
-/** The deck's own surface, and the ground truth every verdict is read against. */
+/**
+ * The deck's own surface, and the ground truth every verdict is read against.
+ *
+ * **`gradient` is rise along the local up per metre of plan travel** — the
+ * deck's distance from the planet's centre grows by `gradient` for every metre
+ * she moves in `x`. That is exactly the quantity `WalkSurfaces.sample`'s reach
+ * spends (#643: the reach is radial, and `Player` carries its reference at her
+ * own radius between sub-steps), so the prediction below —
+ * `BUILDING_STEP_UP` over the worst sub-step — is a statement about this deck
+ * and nothing else. It used to be a world-`y` rise, which at `x = -40` is the
+ * ramp *minus* the planet's own curvature, and once the reach stopped counting
+ * the planet the measured ceiling drifted off the prediction by that much.
+ */
 function deckSurfaceAt(base: number, gradient: number, x: number): number {
   const along = Math.min(Math.max(x - RAMP_X0, 0), RAMP_LENGTH);
-  return base + gradient * along;
+  const baseRadius = Math.hypot(RAMP_X0, base + GROUND_SPHERE_RADIUS, RAMP_Z);
+  const radius = baseRadius + gradient * along;
+  return Math.sqrt(radius * radius - x * x - RAMP_Z * RAMP_Z) - GROUND_SPHERE_RADIUS;
 }
 
 /**
