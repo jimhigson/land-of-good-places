@@ -30,6 +30,8 @@ import {
 } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { Geo, worldYAtAltitude, worldYAtRadius } from '../geo';
+import { altitudeAt } from '../terrain';
+import { CHUTE_ENVELOPE } from '../building/SlideRide';
 
 /**
  * **The ginormous slide, as a plan.**
@@ -1718,6 +1720,23 @@ function chuteComplaint(points: readonly Vector3[]): string | null {
       `fouls the Sky Cruiser, only ${worst.toFixed(2)} m of air ` +
       `at (${worstAt.x.toFixed(1)}, ${worstAt.y.toFixed(1)}, ${worstAt.z.toFixed(1)}) ` +
       `against ${CRUISER_AIR} m required`
+    );
+  }
+
+  // The trough's underside stays out of the ground. Nothing asked this before,
+  // and the chute's heights are a smoothstep in world `y` chosen without
+  // looking at the ground under the route, so a route that ran out over
+  // rising ground simply went into it: measured on this branch, seed 326's
+  // chute reached 0.48 m *below* the grass 8 m before the pit. A faster search
+  // (it stopped exploring routes that could never finish under the length
+  // ceiling) then found routes on seeds 11 and 24 that did the same, by up to
+  // 1.47 m — so it is asked here, where the search can backtrack over it.
+  for (const point of points) {
+    const underside = altitudeAt(point.x, point.y, point.z) - CHUTE_ENVELOPE.below;
+    if (underside >= 0) continue;
+    return (
+      `runs into the ground at (${point.x.toFixed(1)}, ${point.y.toFixed(1)}, ` +
+      `${point.z.toFixed(1)}), its underside ${(-underside).toFixed(2)} m below the grass`
     );
   }
 
