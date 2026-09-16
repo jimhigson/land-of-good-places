@@ -1,7 +1,12 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
 import { CylinderGeometry, Group, Mesh, Object3D, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
-import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
+import {
+  BUILDING_CENTRE_X,
+  BUILDING_CENTRE_Z,
+  CASTLE_FACADE_BASE_ALTITUDE,
+  CASTLE_FACADE_CHART,
+} from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
 import { SpaceManager } from '../SpaceManager';
 import {
@@ -30,6 +35,8 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
+import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
+import { bendOntoPlanet } from '../geo/bend';
 import { terrainHeight } from '../terrain';
 import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
 
@@ -934,6 +941,28 @@ export class Building implements GameSystem {
       BUILDING_CENTRE_Z,
       BUILDING_BASE_Y - terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z),
     );
+    // **The castle bends across its own footprint.** Jim, 13 September 2026:
+    // *"buildings externals ... need to bend downwards so that they use local
+    // horizontal/vertical, not a global one"*, and, asked directly whether the
+    // four corner towers should still be parallel: they should not.
+    //
+    // Everything above this line is the *rigid* placement — one tilt, taken at
+    // the building's centre, carried by the plot and by `standInPlot`. That is
+    // a flat chart of unbounded extent asserted implicitly, and on R = 220 m it
+    // is worth 5 cm out to 4.69 m. The castle is 24.45 x 18.45 m, so its
+    // corners were 0.51 m out at the foot and 1.14 m out at the top of a
+    // turret. This re-solves every instance matrix and every vertex under the
+    // facade against the curved chart, so each turret stands along the radial
+    // under its *own* foot rather than the centre's.
+    //
+    // It must run after `standInPlot`, because the chart is read off the
+    // facade's own world transform — see `bendPlacedStructure`, which exists so
+    // that the anchor cannot be got wrong here.
+    // **The chart comes from `layout.ts`, not from the scene.** One owner: the
+    // same chart leans `CASTLE_TOWERS`, so the solid the ginormous slide routes
+    // around and the stone a child sees are bent by the same arithmetic rather
+    // than by two derivations that agree until one is edited.
+    bendOntoPlanet(this.facade.group, CASTLE_FACADE_CHART, CASTLE_FACADE_BASE_ALTITUDE);
     anchorPlots.setPlaceholderVisible('building', false);
 
     const pitPlot = anchorPlots.getGroup('ballPit');
@@ -2672,8 +2701,31 @@ function registerCastleTowerCollision(collision: CollisionWorld): void {
     // The roof cones sit on top of the bodies and share their axis, so the body
     // alone is the whole footprint a child can walk into.
     if (!tower.name.startsWith('tower-body-')) continue;
+    // **One circle at the foot is not the shaft any more, because the shaft
+    // leans.** Out where the castle stands, a turret's own up is 36° off world
+    // `+Y`, so by a child's chest the drawn stone has moved over a metre away
+    // from a circle drawn round its foot — she could stand with her head inside
+    // masonry and nothing would stop her. `CollisionWorld` circles are
+    // height-blind, so the honest footprint is the *union* of the shaft's
+    // cross-sections over the height a child's body actually occupies, and a
+    // few circles stepped up the axis give that far more tightly than one
+    // inflated radius would. Inflating instead would keep her out of open air
+    // on the uphill side, which is how a solidity fix costs somebody a place to
+    // stand.
+    //
     // `radiusBottom` is `CASTLE_TURRET_BASE_RADIUS`, which the drawn shaft is
     // also built from — one owner, so the two cannot drift.
-    collision.addCircle(tower.x, tower.z, tower.radiusBottom);
+    const steps = 4;
+    for (let i = 0; i <= steps; i += 1) {
+      const up = (i / steps) * TALLEST_CHILD_HEIGHT;
+      // Where the axis has got to `up` metres above the foot, measured along the
+      // tower's own axis rather than along world `+Y`.
+      const along = tower.axisY <= 1e-6 ? 0 : up / tower.axisY;
+      collision.addCircle(
+        tower.x + tower.axisX * along,
+        tower.z + tower.axisZ * along,
+        tower.radiusBottom,
+      );
+    }
   }
 }

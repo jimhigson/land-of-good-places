@@ -22,6 +22,7 @@ import { mosaicTexture } from '../../core/textures';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
+import { bendPlacedStructure } from '../geo/bend';
 import type { CreatureHandle } from '../../art/style/asset';
 import type { Player } from '../../entities/Player';
 import type { InteriorControls } from '../building';
@@ -1271,6 +1272,19 @@ export class Hotel implements GameSystem {
     // between the plot's anchor and the tower's own spot can leak into height.
     standInPlot(group, this.gardenRoot, plot.x, plot.z, 0, 0);
     group.add(this.gardenRoot);
+    // **And then it bends.** Everything above stands the hotel *rigidly* on one
+    // up, taken at the tower's own centre — right for a lamp post, wrong for a
+    // building, because down varies across a footprint this wide. Jim, 13
+    // September 2026: *"buildings externals and bridges etc need to bend
+    // downwards so that they use local horizontal/vertical, not a global one."*
+    //
+    // **After `group.add`, not before.** `standInPlot` writes `gardenRoot`'s
+    // *local* transform while it is still parented to nothing, so its
+    // `matrixWorld` is stale until the add — and `bendPlacedStructure` reads its
+    // chart straight off that matrix. Bending a beat earlier would anchor the
+    // hotel's chart at the origin and fold the tower towards the middle of the
+    // park.
+    bendPlacedStructure(this.gardenRoot, 'hotel-tower');
     anchorPlots.setPlaceholderVisible('hotel', false);
 
     // Collision: an octagon of walls around the crystal cluster, with the

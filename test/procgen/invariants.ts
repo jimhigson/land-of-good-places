@@ -9900,6 +9900,76 @@ const distancePointToSegment = (
 };
 
 /**
+ * **A bend moves stone onto the sphere; it must never move it away from the
+ * structure it belongs to.**
+ *
+ * The castle's exterior is bent across its own footprint (`geo/bend.ts`), so
+ * each turret stands on the radial under its own foot rather than on the
+ * castle's centre. What that must *not* do is change how far a turret is from
+ * that centre — geodesic reach from the chart anchor is precisely the quantity a
+ * bend preserves.
+ *
+ * This is the invariant that would have caught the bend's worst bug, and it is
+ * here because that bug shipped. `bendOntoPlanet` called
+ * `updateMatrixWorld(true)`, which recomputes an object's subtree from its
+ * parent's world matrix **as it currently stands** — and at bend time that is
+ * routinely stale, because `standInPlot` writes the castle's local transform
+ * after its last world update. Every bent point came out displaced by the
+ * parent's staleness: measured on the canonical seed, a **uniform 4.59 m**, so
+ * the four symmetric turrets ended up **16.726 / 10.876 / 19.792 / 15.172 m**
+ * from the castle's centre against an authored **15.315 m**.
+ *
+ * Nothing caught it. `check:castle-bend` was green throughout, because its own
+ * control was computed from the post-bend reaches and therefore *inflated as the
+ * stone walked* — 35.5 cm to 65.3 cm. `BendReport.worstShift` printed **6.005 m**
+ * and was explained away.
+ *
+ * ## Why the centroid, and not a published castle centre
+ *
+ * The four bodies are symmetric about the castle in its own plan, so their
+ * centroid **is** that centre — which means this needs no new fact and, more to
+ * the point, no import of `layout.ts`, which is seed-dependent and would pin
+ * every seed to the default park. The measurement is therefore entirely of the
+ * park that was built, with nothing taken from the rules that built it.
+ *
+ * It asserts the *spread*, not a fixed distance: a castle that is a different
+ * size on some future seed still has four corners equidistant from its middle,
+ * so this does not have to be re-tuned when the plan changes.
+ */
+const castleTurretsKeepTheirReach: Invariant = (facts) => {
+  const bodies = facts.castleTowers.filter((t) => t.name.startsWith('tower-bodies['));
+  if (bodies.length === 0) {
+    return [
+      `seed ${facts.seed}: the park published no \`tower-bodies\` instances, so nothing about ` +
+        'the castle bend\'s displacement was measured — this clause has stopped covering it ' +
+        'rather than passing',
+    ];
+  }
+  if (bodies.length !== 4) {
+    return [
+      `seed ${facts.seed}: expected 4 \`tower-bodies\` instances and found ${bodies.length}; ` +
+        'this clause reads their symmetry about their own centroid, which means nothing for ' +
+        'any other count',
+    ];
+  }
+  const cx = bodies.reduce((a, t) => a + t.x, 0) / bodies.length;
+  const cz = bodies.reduce((a, t) => a + t.z, 0) / bodies.length;
+  const reaches = bodies.map((t) => Math.hypot(t.x - cx, t.z - cz));
+  const spread = Math.max(...reaches) - Math.min(...reaches);
+  // 5 cm: the same tolerance the whole sphere rebuild works to — `flatDeparture`
+  // is quoted at 5 cm throughout — and two orders of magnitude below the 8.9 m
+  // the real bug produced.
+  if (spread <= 0.05) return [];
+  return [
+    `seed ${facts.seed}: the castle's four turrets stand ${reaches
+      .map((r) => r.toFixed(3))
+      .join(' / ')} m from their own centroid — a spread of ${(spread * 100).toFixed(1)} cm. ` +
+      'They are symmetric in the castle\'s plan, so a bend that leaves them at different ' +
+      'distances has displaced the stone rather than bent it',
+  ];
+};
+
+/**
  * **Every castle corner turret is solid, on every seed.**
  *
  * Issue #549: the facade's collider is a rectangle and the four turrets stand
@@ -10002,6 +10072,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the ground is the sphere it claims to be, and gentle enough for the bus', theGroundIsTheSphereItClaimsToBe],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],
+  ['the castle bend moved its turrets onto the sphere, not away from the castle', castleTurretsKeepTheirReach],
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],

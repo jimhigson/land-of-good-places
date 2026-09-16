@@ -154,10 +154,41 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     // discs are written into the *placed* footprint instead — see
     // `parkLayout.ts`'s `footprintAsPlaced`.
     footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
-    // 19.3: the castle's own masonry reaches 19.0 exactly, and on some seeds
-    // the dressing spills another few centimetres (the reach sweep measured
-    // 19.1 on seed 2). Declared at what stands, plus breathing room.
-    boundingRadius: 19.3,
+    // 19.7: the castle's own masonry reached 19.0 exactly while it stood
+    // rigidly, and on some seeds the dressing spilled another few centimetres
+    // (the reach sweep measured 19.1 on seed 2). Declared at what stands, plus
+    // breathing room.
+    //
+    // **Raised from 19.3 when the facade began bending to the planet.**
+    // Measured on the built park, canonical seed, the same 214 lumps in both
+    // trees: the furthest lump stands **18.90 m** from this declared point
+    // rigid and **19.50 m** bent, so the old 19.3 became a promise the castle
+    // breaks by 20 cm.
+    //
+    // **It is a spread, not a slide, and the difference is worth writing down
+    // because this comment first claimed the opposite.** It said the bend
+    // carried the whole castle "away from the middle of the park". Measured, the
+    // drawn castle's lump centroid moves 0.13 m *toward* the park middle
+    // (135.594 m out rigid, 135.467 m bent) and sits *closer* to this declared
+    // point than it did (0.798 m → 0.666 m). What grows is the far corner
+    // alone — (114.44, −102.73) → (114.96, −103.03), 0.60 m further out —
+    // because each corner drops onto the sphere along **its own** local up, and
+    // out here those ups differ enough across a 30 m footprint to push the
+    // corners apart in the flat `x`/`z` the manifest is written in.
+    //
+    // Note that this flat reach is a projection, not a distance along the
+    // ground: out at the castle the ground leans some 43° from horizontal, so
+    // `hypot(x, z)` under-reads the walk. That is consistent across every
+    // consumer of `boundingRadius`, which all plan in the same flat park plan,
+    // so it is the right number *here* — but it is not a metres-a-child-walks
+    // figure and should not be compared with one.
+    //
+    // This is a re-declaration, not a silencing — the manifest's rule is that
+    // each anchor declares its *measured* build-out so that paths, spurs and
+    // scatter plan around the real edge, and the real edge moved. The RATCHET
+    // entry for `anchor.reach:building` stays at zero, so anything that builds
+    // proud of *this* number still fails.
+    boundingRadius: 19.7,
     band: { min: 26, max: 60 },
   },
   // Bounding radii for these two are the MEASURED build-out (`check:park`'s
