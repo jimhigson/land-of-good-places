@@ -190,7 +190,7 @@ if (climbers.length === 0) {
  * same tree. ({@link drawnDropBelowHead} already measures along the head's own
  * up, from #620.)
  */
-const treeUp = new Vector3(0, 1, 0);
+const treeUp = new Vector3();
 const _blobCentre = new Vector3();
 const _blobSpin = new Quaternion();
 
