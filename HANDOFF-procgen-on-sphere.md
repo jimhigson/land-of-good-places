@@ -87,6 +87,28 @@ engineer's record, PR body draft, merge recipe) and `HANDOFF-poi-totality.md`.
   unsolvable/crossing seeds are other producers' (coaster, railway, paths) —
   stage 4 work, not this branch's.
 
+## CI on PR 667 (base feat/sphere-combined), and what each red is
+
+- **Procgen invariants: red, the base's 51 by name** — per-name counts on the
+  PR run (35130251053) diffed against the base's run (35120529727): identical.
+- **Coplanar faces**: the base's own run (35120529769) is red with 12 seams +
+  4 loose entries; the PR's first run added ONE seam of mine —
+  `garden/terrain | race-ring trestle-legs` (0.026 m², 8.5 mm, seed 24): the
+  race feet sit at their nominal slot now, and a leg's closed foot disc lay in
+  the terrain's plane. Fixed by deleting the foot cap from the cylinder's
+  index (`10719cd9`; the first cut, a merged geometry, lost
+  `geometry.parameters` and turned Entrance road and Swept bus red — reverted
+  to a `CylinderGeometry` with the last cap's triangles dropped). Proved on
+  seed 24's sweep child: closed cap → seam present; cut → gone. The remaining
+  seams are the base's (`fix/coplanar-sphere` is open for them).
+- **Every seed builds**: red against #596's hill-era baseline; re-taken with
+  `--print-baseline` at `LGP_LANES=1` (3d833240) — the classes CI measured.
+- **check:flat-primitives' textual control** did not excuse a `flat-ok`
+  FLAT_DISC (it excused only comments and `PI/2 - angle`), so the first honest
+  hatch of that rule read as "the AST missed one". Fixed in the control.
+- Entrance road, Swept bus, Walk reach, A reload gets the new build, Deploy PR
+  preview: green on b2264eb1; re-running on 10719cd9.
+
 ## Not done / open
 
 - The 40 instrument-fault reds (Rail Race, Sky Cruiser drawn leant vs flat
