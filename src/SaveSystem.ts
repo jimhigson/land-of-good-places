@@ -7,7 +7,8 @@ import {
   type SaveFile,
   type SavedPlace,
 } from './state/save';
-import { spaceAt, worldToLocal, type SpaceId } from './world/spaces';
+import { spaceAt, type SpaceId } from './world/spaces';
+import { worldToLocal } from './world/spaceOrigins';
 
 /**
  * The autosave.

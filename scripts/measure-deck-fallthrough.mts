@@ -106,9 +106,9 @@ import {
   SPACE_HOTEL_LOBBY,
   SPACE_HOTEL_OCEAN,
   SPACE_HOTEL_SUITE,
-  localToWorld,
   spaceAt,
 } from '../src/world/spaces.ts';
+import { localToWorld } from '../src/world/spaceOrigins.ts';
 import {
   BUILDING_STEP_UP,
   GROUND_SPHERE_RADIUS,

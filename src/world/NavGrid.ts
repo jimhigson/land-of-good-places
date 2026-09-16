@@ -1,7 +1,8 @@
 import type { ParkBoundary } from './boundary';
 import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
-import { stepReferenceFor, withinStep, type LevelConnector } from './building/surfaces';
+import type { LevelConnector } from './building/surfaces';
+import { stepReferenceFor, withinStep } from './building/stepReach';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
