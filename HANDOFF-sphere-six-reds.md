@@ -135,3 +135,21 @@ are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
 - **npc-perch (ruling 3)** — exit 0 at scale 1, heads −0.198…0.010 (allowed
   −0.25…0.08). Control: matcher on drawn `x/z` → `tree 0 has no foliage`, exit 1.
   `check:climb-wave` already matched on `footX/footZ`.
+
+### rail-race (ruling 4) — settled, 6 FAIL -> 5, the 5 routed to eng/rides-sphere
+
+- **NaN**: the old copied `onLane` re-applied gives **17 FAIL, 11 NaN** — exactly the
+  `eng/sphere-ground-claims` count. With `riderPoint`: 6 FAIL, 0 NaN, 0 Infinity. Whole-output
+  diff = those 11 + the six-shape table + `ahead 140.0 m` (saturated) + `30/240 Hz 0.0000 m`
+  (two clauses that failed OPEN). One undefined input.
+- **climb spread** — check frame error, FIXED (committed): rise above `baseAt`, 0.0000 m;
+  red at 0.377 m under a per-lane amplitude mutation.
+- **duck through floor ×2, arm through cart** — **game**, the rider leans (`setRidePose` →
+  `faceOnGround`) in a **plumb** cart (`RailRace.placeCarts` sets rotation.y/x only). Proof:
+  suppress the lean in `faceOnGround` → duck 0.29 m clear, arms 0.017 m clear, all three green.
+- **eye facing 0.323 / on-screen −0.176** — sphere-caused: `GROUND_SPHERE_RADIUS = 1e5` →
+  whole check exit 0 (facing 0.382/0.454). Leaning only the check's kid as the game leans the
+  player makes it *worse* (0.157 / −0.358) — needs the rig leant too.
+- **All five are the cure already written on `eng/rides-sphere`** (unmerged, no PR, idle 2 days):
+  `rideFrame` leans both carts (Coaster + RailRace) and the race rig; its own handoff lists the
+  same six remaining. **Do not fix twice** — Overseer to route.
