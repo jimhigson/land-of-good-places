@@ -1015,24 +1015,22 @@ function crossingOf(
 }
 
 /**
- * Is the stub this pose implies — from the pose back through the wall plane,
- * at {@link START_Y} — clear of every tower and of the Sky Cruiser's air?
+ * Is the start of the chute this pose implies — its stub back through the wall,
+ * and the pose itself — somewhere a finished chute would be allowed to be?
  *
- * The same predicates, at the same radius and the same height, that
- * {@link unrideableComplaint} asks of the finished chute's stub: the stub is
- * built by {@link chutePoints} along exactly this line, and the lip holds
- * `START_Y`, so the answer here is the answer that function would give. Asking
- * it before the search is the only change — it is not a looser test.
+ * **Not a second test: the same one, on the same points.** The points come from
+ * {@link stubPoints}, which is also what {@link chutePoints} builds the finished
+ * chute's stub from, plus the route's own first point (`heightAt(0)` is
+ * `START_Y`). The question is {@link chuteComplaint}, which is also what
+ * {@link unrideableComplaint} asks of the finished chute. Those points are a
+ * subset of every chute that could start from this pose, so a pose refused here
+ * is one every route from it would have been refused for — the prune can only
+ * save a search, never lose a slide.
  */
 function doorStubIsClear(pose: Pose2): boolean {
-  const stub = doorStubLength(pose.hz);
-  for (let back = 0; back <= stub + 1e-9; back += POINT_SPACING / 2) {
-    const x = pose.x - pose.hx * back;
-    const z = pose.z - pose.hz * back;
-    if (!clearsTowers(x, z, START_Y, CORRIDOR_RADIUS)) return false;
-    if (!clearsCruiser(x, START_Y, z)) return false;
-  }
-  return true;
+  const points = stubPoints(pose.x, pose.z, pose.hx, pose.hz);
+  points.push(new Vector3(pose.x, START_Y, pose.z));
+  return chuteComplaint(points) === null;
 }
 
 /**
@@ -1064,10 +1062,32 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
   const startX = flat.x;
   const startZ = flat.z;
   route.tangentAt(0, flat);
+  points.push(...stubPoints(startX, startZ, flat.x, flat.z));
+
+  const steps = Math.max(8, Math.round(route.length / POINT_SPACING));
+  for (let i = 0; i <= steps; i += 1) {
+    const u = i / steps;
+    route.pointAt(u * route.length, flat);
+    points.push(new Vector3(flat.x, heightAt(u), flat.z));
+  }
+  return points;
+}
+
+/**
+ * **The chute's stub, and the one owner of it**: the points carried back from a
+ * start at (`startX`, `startZ`) along the start heading, through the wall, at
+ * {@link START_Y} — farthest back first, excluding the start itself.
+ *
+ * {@link chutePoints} builds the finished chute's stub from this and
+ * {@link doorStubIsClear} prunes door offers with it, so the line that is judged
+ * before search and the line that is built after it cannot differ.
+ */
+function stubPoints(startX: number, startZ: number, headingX: number, headingZ: number): Vector3[] {
+  const points: Vector3[] = [];
   // Extend backwards far enough along the route's own heading to land
   // DOOR_INSET past the wall, however steeply it leaves. Still collinear with
   // the start tangent, so the chute cannot kink at the join.
-  const stub = doorStubLength(flat.z);
+  const stub = doorStubLength(headingZ);
   // Subdivided at the same {@link POINT_SPACING} as the rest of the chute, not
   // emitted as one long jump back to the wall.
   //
@@ -1082,15 +1102,9 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
   const stubSteps = Math.max(1, Math.round(stub / POINT_SPACING));
   for (let i = stubSteps; i >= 1; i -= 1) {
     const back = (stub * i) / stubSteps;
-    points.push(new Vector3(startX - flat.x * back, START_Y, startZ - flat.z * back));
+    points.push(new Vector3(startX - headingX * back, START_Y, startZ - headingZ * back));
   }
 
-  const steps = Math.max(8, Math.round(route.length / POINT_SPACING));
-  for (let i = 0; i <= steps; i += 1) {
-    const u = i / steps;
-    route.pointAt(u * route.length, flat);
-    points.push(new Vector3(flat.x, heightAt(u), flat.z));
-  }
   return points;
 }
 
@@ -1352,6 +1366,10 @@ export const SLIDE_ATTEMPTS: readonly SlideAttempt[] = DOOR_OFFER_CENTRES.filter
   DESIRED_LENGTH_LADDER.map((desiredLength) => ({ doorCentre, desiredLength })),
 );
 
+/** The blocker when every door was refused before search — one string, both cadences. */
+export const NO_CLEAR_DOOR =
+  'had no door on the south wall whose stub clears the towers and the Sky Cruiser';
+
 /** How an attempt is named in a complaint, so a refusal says which decision failed. */
 export function describeSlideAttempt(attempt: SlideAttempt): string {
   return `at a ${attempt.desiredLength} m target from the door at ${attempt.doorCentre} m along the wall`;
@@ -1422,10 +1440,12 @@ export function planSlide(): PlannedSlide {
  * {@link planSlide}, total: a finished plan, or a {@link SlideRefusal} naming
  * what blocked it — never a throw for a seed that cannot carry the ride.
  *
- * `SLIDE_PLAN` is still built by {@link planSlide}, which throws the refusal,
- * because 27 modules read the slide unconditionally and a park without one is a
- * visible design change, not this ticket's. Anything that only needs to *know*
- * — a probe, a sweep, the procgen suite — asks this and keeps running.
+ * **Nothing consumes the refusal yet.** `SLIDE_PLAN` is built by
+ * {@link planSlide}, which throws it, and so does the loading screen — because
+ * 27 modules read the slide unconditionally and a park without one is a visible
+ * design change that is Jim's call, not this solver's. So today every path still
+ * throws on a seed that cannot carry the ride; this is the total function those
+ * paths can move onto once the readers can live without a slide.
  */
 export function solveSlide(): PlannedSlide | SlideRefusal {
   // `satisfies` cannot fail a park on its own — the generator hands back the
@@ -1442,9 +1462,7 @@ export function solveSlide(): PlannedSlide | SlideRefusal {
   // of a condition drifting from the first. There is now one owner and nothing
   // to keep in step.
   let lastComplaint =
-    SLIDE_ATTEMPTS.length === 0
-      ? 'had no door on the south wall whose stub clears the towers and the Sky Cruiser'
-      : 'never solved a route at all';
+    SLIDE_ATTEMPTS.length === 0 ? NO_CLEAR_DOOR : 'never solved a route at all';
   let tried = 0;
   for (const decision of SLIDE_ATTEMPTS) {
     tried += 1;
@@ -1558,7 +1576,16 @@ export function unrideableComplaint(route: SolvedRailRoute): string | null {
     );
   }
 
-  const points = chutePoints(route);
+  return chuteComplaint(chutePoints(route));
+}
+
+/**
+ * The height-sensitive half of {@link unrideableComplaint}: does any of these
+ * chute points foul the Sky Cruiser's air or a castle tower? Split out so
+ * {@link doorStubIsClear} asks exactly this, of exactly the stub's points,
+ * rather than a copy of it.
+ */
+function chuteComplaint(points: readonly Vector3[]): string | null {
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;
   let worstAt: Vector3 | null = null;

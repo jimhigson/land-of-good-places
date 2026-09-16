@@ -431,9 +431,7 @@ export class ParkGeneration {
           const solve = self.solveModule as typeof import('../world/slide/solve');
           const attempts = solve.SLIDE_ATTEMPTS;
           let lastComplaint =
-            attempts.length === 0
-              ? 'had no door on the south wall whose stub clears the towers and the Sky Cruiser'
-              : 'never solved a route at all';
+            attempts.length === 0 ? solve.NO_CLEAR_DOOR : 'never solved a route at all';
           for (let rung = 0; ; rung += 1) {
             const attempt = attempts[rung];
             if (attempt === undefined) {
