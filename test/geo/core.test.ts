@@ -336,6 +336,96 @@ describe('Frame: there is no global yaw', () => {
   });
 });
 
+/**
+ * **`toLocal` — "how far in front of / beside / above the thing is that?"**
+ *
+ * The helper the cart, the castle and the coaster all want, and the one the
+ * whole class of near-zero residues comes from not having: `check:rail-race`
+ * reporting an arm 0.027 m through a cart that leans 15°, and the castle
+ * describing itself with two flat formulas while its mesh is leant.
+ *
+ * **Proved red, 16 September 2026**, against `SAMPLE_COLUMNS` on a 220 m
+ * planet (worst column `(157, 0)`):
+ *
+ * - `toLocal` dropping its rotation — i.e. the flat answer — fails **3 of 4**:
+ *   the round trip, the own-forward identity, and the control.
+ * - `toWorld` dropping its rotation fails the round trip alone, as it should.
+ *
+ * Note which one stays **green** under the first mutation: *"at the park origin
+ * it IS the flat answer"*. That is deliberate and is the reason it is written
+ * down — where the ground is level this helper reduces to a subtraction, so a
+ * suite that only measured the origin would pass an implementation that had
+ * forgotten the sphere entirely. The pair is the control; neither half is.
+ */
+describe('Frame: a point in a body\'s own axes', () => {
+  it('round-trips exactly, so converting a call site cannot move anything', () => {
+    const local = new Vector3();
+    const back = new Vector3();
+    for (const [x, z] of SAMPLE_COLUMNS) {
+      const frame = Frame.fromBearing(Geo.fromWorld(x, terrainHeight(x, z) + 2.1, z), 0.8);
+      for (const point of [
+        new Vector3(x + 1.3, terrainHeight(x, z) + 3.4, z - 0.7),
+        new Vector3(0, 0, 0),
+        new Vector3(x - 12, terrainHeight(x, z) - 5, z + 9),
+      ]) {
+        frame.toLocal(point, local);
+        frame.toWorld(local, back);
+        expect(back.distanceTo(point)).toBeLessThan(1e-9);
+      }
+    }
+  });
+
+  it('its own origin is the local origin, and its own forward is local +Z', () => {
+    const at = Geo.fromWorld(96, terrainHeight(96, -40) + 1.8, -40);
+    const frame = Frame.fromBearing(at, -1.9);
+    const origin = new Vector3();
+    expect(frame.toLocal(frame.at.toWorld(new Vector3()), origin).length()).toBeLessThan(1e-9);
+
+    // A metre along its own forward must read as exactly (0, 0, 1).
+    const aheadWorld = frame.at.toWorld(new Vector3()).add(frame.forward(new Vector3()));
+    const ahead = frame.toLocal(aheadWorld, new Vector3());
+    expect(ahead.distanceTo(new Vector3(0, 0, 1))).toBeLessThan(1e-9);
+  });
+
+  it('at the park origin it IS the flat answer — which is why the next test exists', () => {
+    // The control's first half. Everything here reduces to a plain subtraction
+    // where the ground is level, so a test that only measured the origin would
+    // pass against an implementation that had forgotten the sphere entirely.
+    const frame = Frame.fromBearing(Geo.fromWorld(0, terrainHeight(0, 0), 0), 0);
+    const point = new Vector3(3, terrainHeight(0, 0) + 2, 4);
+    const local = frame.toLocal(point, new Vector3());
+    expect(local.distanceTo(new Vector3(3, 2, 4))).toBeLessThan(1e-6);
+  });
+
+  it('control: out in the park it is NOT the flat answer, by metres', () => {
+    // The half that matters. `y` minus `y`, and `x`/`z` differences, are what
+    // every call site this replaces was doing; if those still agreed out here
+    // there would be nothing to fix and this helper would be decoration.
+    let worst = 0;
+    let worstAt = '';
+    for (const [x, z] of SAMPLE_COLUMNS) {
+      const ground = terrainHeight(x, z);
+      const frame = Frame.fromBearing(Geo.fromWorld(x, ground + 1.8, z), 0);
+      // A point 1.1 m to one side and 0.9 m up, as a cart's rim is from its own
+      // middle — expressed the flat way somebody would have written it.
+      const flatPoint = new Vector3(x + 1.1, ground + 1.8 + 0.9, z);
+      const local = frame.toLocal(flatPoint, new Vector3());
+      const gap = local.distanceTo(new Vector3(1.1, 0.9, 0));
+      if (gap > worst) {
+        worst = gap;
+        worstAt = `(${x}, ${z}), r=${Math.hypot(x, z).toFixed(0)} m`;
+      }
+    }
+    process.stderr.write(
+      `[geo] control: the flat reading of a 1.1 m x 0.9 m offset is wrong by up to ` +
+        `${(worst * 1000).toFixed(0)} mm out in the park, worst at ${worstAt}\n`,
+    );
+    // Well above the 27 mm residue `check:rail-race` reports for the arm, which
+    // is the whole point: that residue is this, not an arm through a wall.
+    expect(worst).toBeGreaterThan(0.05);
+  });
+});
+
 describe('geodesic: walking keeps the surface', () => {
   it('advance holds the radius over a long walk, and keeps the heading tangent', () => {
     const g = Geo.fromWorld(0, 0, 0);
