@@ -366,7 +366,7 @@ export const CASTLE_MERLON_HEIGHT = 1.05;
  * become the tallest thing because the measurement walked `crenellations` —
  * an `InstancedMesh` of 40 merlons — without its per-instance matrices,
  * collapsing all forty onto the origin. `9.85 − 8.8 = 1.05`, and the
- * under-report was **0.981 m**: the missing metre *was* the merlons, and the
+ * under-report was **0.9806 m**: the missing metre *was* the merlons, and the
  * near-agreement with 9.85 was the arithmetic of the bug, not evidence
  * against it.
  *

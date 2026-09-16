@@ -4317,7 +4317,7 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  * the battlements: `crenellations` is an `InstancedMesh` of 40, the walk
  * applied only the container's matrix, and all forty collapsed onto the origin.
  * The tallest surviving stone was the lintel band, and the clearance came out
- * **6.42 m** — 0.981 m too generous, in the dangerous direction, from a fix
+ * **6.42 m** — 0.9806 m too generous, in the dangerous direction, from a fix
  * whose entire purpose was to stop under-reporting this number. `Box3` had
  * been honouring those instance matrices for free.
  *
@@ -4508,7 +4508,7 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // as a single mesh, collapsed all forty onto the container's origin at
   // 0.984 m, and handed this invariant the lintel band's 9.770 m instead of the
   // true 10.750 m. Every number downstream stayed plausible; the clearance was
-  // simply 0.981 m too generous, in the dangerous direction. This clause is
+  // simply 0.9806 m too generous, in the dangerous direction. This clause is
   // exact, needs no tolerance, and would have caught it on the first run.
   if (facts.castleMasonryTopMesh !== 'crenellations') {
     complaints.push(

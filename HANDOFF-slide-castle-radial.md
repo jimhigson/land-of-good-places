@@ -55,7 +55,7 @@ the same way.**
   replaced `Box3` with a hand-rolled vertex walk and did not handle
   `InstancedMesh`. `InstancedMesh extends Mesh`, so it passed the type test and
   was then transformed by the container matrix alone: 0.984 m, battlements gone,
-  clearance reported as **+6.42 m** — 0.981 m too generous, in the dangerous
+  clearance reported as **+6.42 m** — 0.9806 m too generous, in the dangerous
   direction, from a change whose entire purpose was to stop under-reporting this
   number. Caught in review, not by me.
 
@@ -63,7 +63,7 @@ the same way.**
 now deleted.** It claimed 9.770 radial corroborated `CASTLE_MASONRY_TOP` 9.85.
 But 9.770 is a `castle-wall-lintel` vertex and that band is built to
 `CASTLE_WALL_HEIGHT` **8.8**, so it cannot corroborate a constant that includes
-the 1.05 m of merlon above it — and `9.85 − 8.8 = 1.05` against a 0.981 m
+the 1.05 m of merlon above it — and `9.85 − 8.8 = 1.05` against a 0.9806 m
 under-report: **the missing metre was the merlons**. A number agreeing to a
 tenth of a metre is not corroboration until you know which mesh it came off.
 That false claim had reached `src/world/building/layout.ts`; it is corrected

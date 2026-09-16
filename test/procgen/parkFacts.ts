@@ -954,7 +954,7 @@ export interface ParkFacts {
    * and was then transformed by the container's matrix alone: all forty
    * collapsed onto the origin at **0.984 m**, the battlements dropped out of
    * the measurement, and the tallest surviving stone was the lintel band at
-   * **9.770 m** against a true **10.750 m**. A **0.981 m under-report, in the
+   * **9.770 m** against a true **10.750 m**. A **0.9806 m under-report, in the
    * dangerous direction** — the same disease as the plumb line it replaced,
    * one layer down, and invisible to the frame guard. `Box3.setFromObject`
    * honours instance matrices for free, which is exactly why replacing it with
@@ -1593,7 +1593,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         // dropped out of the measurement entirely and the tallest thing left
         // was the lintel band at 9.770 m.
         //
-        // That is a 0.981 m under-report in the *dangerous* direction — the
+        // That is a 0.9806 m under-report in the *dangerous* direction — the
         // identical disease this fact was rewritten to cure, one layer down.
         // `Box3.setFromObject`, which this replaced, honours instance matrices
         // for free; a hand-rolled vertex walk has to be told.
