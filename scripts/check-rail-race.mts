@@ -105,7 +105,6 @@ import {
   AHEAD,
   FACE_TURN_MAX,
   RaceCamera,
-  RIDER_RIDE_HEIGHT,
   faceTurnTowardsCamera,
 } from '../src/world/railRace/camera.ts';
 import { SEAT_HEIGHT, WHEEL_RADIUS } from '../src/world/railRace/cart.ts';
@@ -125,7 +124,8 @@ import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
 import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
 import { createCart } from '../src/world/railRace/cart.ts';
 import { PALETTE } from '../src/core/palette.ts';
-import { Box3, DoubleSide, Group, Mesh, Object3D, Raycaster } from 'three';
+import { Box3, DoubleSide, Group, Matrix4, Mesh, Object3D, Raycaster } from 'three';
+import { placeRaceCart, seatRaceRider, type CartHeading } from '../src/world/railRace/seat.ts';
 import { Player } from '../src/entities/Player.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
@@ -140,17 +140,41 @@ import type { InputSystem } from '../src/core/input/index.ts';
  * nobody can see, and could pass a torso that genuinely went through the floor
  * because a hidden foot was lower still.
  */
-function visibleBox(root: Object3D): Box3 {
+function visibleBox(root: Object3D, into: Matrix4 | null = null, visibleOnly = true): Box3 {
   const box = new Box3();
   root.updateWorldMatrix(true, true);
+  const toFrame = new Matrix4();
+  const corner = new Vector3();
   root.traverse((child) => {
-    if (!child.visible) return;
-    let node: Object3D | null = child;
-    while (node && node !== root) {
-      if (!node.visible) return;
-      node = node.parent;
+    if (visibleOnly) {
+      if (!child.visible) return;
+      let node: Object3D | null = child;
+      while (node && node !== root) {
+        if (!node.visible) return;
+        node = node.parent;
+      }
     }
-    if (child instanceof Mesh) box.expandByObject(child);
+    if (!(child instanceof Mesh)) return;
+    const geometry = child.geometry;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const local = geometry.boundingBox;
+    if (!local || local.isEmpty()) return;
+    // The eight corners of the mesh's own box, taken into `into`'s frame —
+    // exactly what `Box3.expandByObject` does into the world frame when `into`
+    // is null, so an upright cart reads the same numbers either way.
+    toFrame.copy(child.matrixWorld);
+    if (into) toFrame.premultiply(into);
+    for (let i = 0; i < 8; i += 1) {
+      corner
+        .set(
+          i & 1 ? local.max.x : local.min.x,
+          // flat-ok: a mesh's own geometry box, in its own frame — the corners are then taken into the cart's frame
+          i & 2 ? local.max.y : local.min.y,
+          i & 4 ? local.max.z : local.min.z,
+        )
+        .applyMatrix4(toFrame);
+      box.expandByPoint(corner);
+    }
   });
   return box;
 }
@@ -193,14 +217,28 @@ const trainPoint = new Vector3();
 const lanes: LaneFacts[] = [];
 for (let lane = 0; lane < LANE_COUNT; lane += 1) {
   const facts: LaneFacts = { climb: 0, steepest: 0, lowest: Infinity, highest: -Infinity };
-  let previous = route.heightAt(lane, 0);
+  // **Climb is measured as rise above the lane's own base, not as world `y`.**
+  // `heightAt` is `baseAt + undulation`, and `baseAt` is the sphere's cap under
+  // the lane's own column plus the ring's clearance — so a world-`y` sum carries
+  // the planet's curvature inside it, and the outer lanes, whose columns sit
+  // further round the cap, "climb" more for nothing. Measured at scale 1 on the
+  // canonical seed: world `y` gave a spread of **13.758 m** (lanes 34.3–48.1 m);
+  // radius from the planet's centre gives **0.116 m**, the remainder being the
+  // terrain waves, which `terrainHeight` adds along world `y` rather than
+  // radially; this gives the undulation alone, which is also the only thing
+  // `simulate.ts` integrates (`slopeAt`). Every lane rides the same hills.
+  // Before the sphere `baseAt` was the single number `route.base`, so this is the
+  // quantity the clause always measured.
+  let previous = route.heightAt(lane, 0) - route.baseAt(0, lane);
   for (let i = 1; i <= SAMPLES; i += 1) {
     const distance = (i / SAMPLES) * route.length;
     const height = route.heightAt(lane, distance);
-    if (height > previous) facts.climb += height - previous;
-    previous = height;
+    const rise = height - route.baseAt(distance, lane);
+    if (rise > previous) facts.climb += rise - previous;
+    previous = rise;
     facts.steepest = Math.max(facts.steepest, Math.abs(route.slopeAt(lane, distance)));
-    route.pointAt(lane, distance, point);
+    // The flat point, so the ground is asked in the same column as `height`.
+    route.flatPointAt(lane, distance, point);
     const above = height - terrainHeight(point.x, point.z);
     facts.lowest = Math.min(facts.lowest, above);
     facts.highest = Math.max(facts.highest, above);
@@ -451,28 +489,27 @@ require(
 // that puts an explicit swing dial back on the rig.
 
 const rig = new RaceCamera(route);
-const RIDER_OFFSET = LANE_OFFSETS[PLAYER_LANE]!;
 const probe = new Vector3();
 
 /**
  * The rider's own lane at `s`, at the height the rider themself rides at.
  *
- * At the rider's height and not the rail's, because that is where the rider is
- * and the promises are about the rider. It is the rig's own constant rather than
- * a second copy of it: measuring the framing at a different height from the one
- * it was solved at reads a different answer (a tilted camera pushes a raised
- * off-centre point further off centre), so a duplicate here would drift out of
- * step with the rig and quietly stop measuring it. Grounded in the running game
- * on 1 August 2026: the player's own object sits 1.2–2.0 m above the rail.
+ * **Asked of the rig, never recomputed here.** This was a copy of
+ * `RaceCamera.ringPoint`'s formula, with a comment promising it stayed in step
+ * with it. It did not: the ring stopped being level, `route.base` became
+ * `route.baseAt(s)`, and the copy went on reading `route.base` — `undefined`.
+ * Every `project` through it returned `NaN`, `NaN >= 1` is false, and so **the
+ * seven assertions below about where the rider sits in the picture reported
+ * `NaN%` and could not fail.** That is CLAUDE.md's two-definitions disease and
+ * its check-that-cannot-fail disease in one place, and the fix is the one that
+ * file prescribes: one owner, everyone else asks.
+ *
+ * Measuring at the rider's height and not the rail's still matters for the
+ * reason it always did — a tilted camera pushes a raised off-centre point
+ * further off centre — but that height is now the rig's business, not this
+ * file's.
  */
-const onLane = (s: number, into: Vector3): Vector3 => {
-  const sample = route.path.sampleAt(s);
-  return into.set(
-    sample.x + sample.normalX * RIDER_OFFSET,
-    route.base + 0.6 + RIDER_RIDE_HEIGHT,
-    sample.z + sample.normalZ * RIDER_OFFSET,
-  );
-};
+const onLane = (s: number, into: Vector3): Vector3 => rig.riderPoint(s, into);
 
 /** Where the track `s` metres along lands across the screen, -1 left, +1 right. */
 const across = (s: number): number => onLane(s, probe).project(rig.camera).x;
@@ -790,6 +827,10 @@ require(
 const forward = new Vector3();
 const inward = new Vector3();
 const travelAtRider = new Vector3();
+/** The rider's own frame at each probe — asked of the rig, never rebuilt here. */
+const localOut = new Vector3();
+const localAlong = new Vector3();
+const localUp = new Vector3();
 
 interface Pose {
   mostAngled: number;
@@ -817,33 +858,45 @@ function sweep(width: number, height: number): Pose {
     rig.reset(travelled);
     const camera = rig.camera;
     camera.getWorldDirection(forward);
-    // Compared flat, so the rig's downward tilt is not mistaken for looking
-    // along the track. The tilt is checked separately.
-    const flat = new Vector3(forward.x, 0, forward.z).normalize();
 
-    // Everything is measured against the rider, who is what the rig is for.
+    // Everything is measured against the rider, who is what the rig is for —
+    // and **in the rider's own frame**, which is what `rigBasis` hands back.
+    //
+    // Every question below used to be asked by setting a `y` to zero. That
+    // projects onto the *world* horizontal, which is the ground's tangent plane
+    // at the middle of the park and nowhere else. Out at the ring the ground
+    // leans, so a rig tilted the intended 20.1 degrees towards its own track
+    // measured 6.6 against world `+Y`, and this check called that too flat and
+    // failed it. The rig makes its promises in the rider's frame; they have to
+    // be read there, and asking the rig itself is what stops the two drifting.
     const at = route.wrap(route.startDistance + travelled);
     route.pointAt(PLAYER_LANE, at, point);
+    rig.rigBasis(at, localOut, localAlong, localUp);
+    // Flattened *in the tangent plane at the rider*, so the rig's downward tilt
+    // is not mistaken for looking along the track. The tilt is checked
+    // separately, below, and against the same up.
+    const flat = forward.clone().addScaledVector(localUp, -forward.dot(localUp)).normalize();
+
     route.tangentAt(PLAYER_LANE, at, travelAtRider);
-    travelAtRider.y = 0;
-    travelAtRider.normalize();
+    travelAtRider.addScaledVector(localUp, -travelAtRider.dot(localUp)).normalize();
     // "Into the park" is the reverse of the ring's own outward normal, not the
     // direction of the origin. Those were the same vector while the ring was a
     // circle centred there; on a ring that follows a spline edge they are not,
     // and pointing at the origin would call a perfectly good side view "not
     // looking into the park" wherever the boundary bulges.
-    const frame = route.path.sampleAt(at);
-    inward.set(-frame.normalX, 0, -frame.normalZ).normalize();
+    inward.copy(localOut).negate();
 
     const angled = flat.dot(travelAtRider);
     worst.mostAngled = Math.max(worst.mostAngled, angled);
     worst.leastAngled = Math.min(worst.leastAngled, angled);
     worst.leastInward = Math.min(worst.leastInward, flat.dot(inward));
-    worst.mostPitch = Math.max(worst.mostPitch, Math.abs(Math.asin(forward.y)));
+    // Tilt below the rider's own horizon, not below the world's.
+    worst.mostPitch = Math.max(worst.mostPitch, Math.abs(Math.asin(-forward.dot(localUp))));
 
     // The rider must cross the screen left to right. Screen-right is the
     // camera's own local +X in world space, which is `matrixWorld`'s first column.
     const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    right.addScaledVector(localUp, -right.dot(localUp)).normalize();
     worst.leastRightward = Math.min(worst.leastRightward, right.dot(travelAtRider));
 
     // Outset, not radius: "is the rig outside the park?" is a question about the
@@ -943,14 +996,35 @@ say('');
     ? -barGeometry.boundingBox.min.y
     : 0;
 
-  const railPoint = route.pointAt(
-    PLAYER_LANE,
-    route.wrap(route.startDistance),
-    new Vector3(),
-  );
+  // **The cart is placed by the game's own `placeRaceCart`, lean and all.**
+  //
+  // This used to build its own group with a position, a scale and no rotation,
+  // and seat the rider straight up world `+Y`. Once the ring was leant onto the
+  // sphere the game's tub leant with it and this one did not — so every clause
+  // below measured an upright tub against a leant rider the game never draws,
+  // and reported her ducking 0.53 m through a floor that was not there. The
+  // placement and the seating now come from `railRace/seat.ts`, the same
+  // functions `RailRace.placeCarts`/`poseRider` call.
   const cartGroup = new Group();
-  cartGroup.position.copy(railPoint);
+  const cartHeading: CartHeading = { yaw: 0, pitch: 0 };
+  placeRaceCart(route, PLAYER_LANE, route.wrap(route.startDistance), cartGroup, cartHeading);
   cartGroup.scale.setScalar(route.scale);
+  const railPoint = cartGroup.position;
+  // **Every height and width below is read in the cart's own frame**: origin at
+  // the rail head, `+Y` the tub's up, `+X` across it, `+Z` along the track. On a
+  // leant ring world `y` is none of those, so "above the tub floor" has to be
+  // asked in the frame the tub is built in or it measures the lean instead.
+  const cartFrame = new Matrix4().compose(
+    cartGroup.position,
+    cartGroup.quaternion,
+    new Vector3(1, 1, 1),
+  );
+  const toCart = cartFrame.clone().invert();
+  say(
+    `pose cart    at ${route.wrap(route.startDistance).toFixed(1)} m, leant ` +
+      // flat-ok: world +Y is the datum the cart's lean is being reported AGAINST
+      `${((new Vector3(0, 1, 0).applyQuaternion(cartGroup.quaternion).angleTo(new Vector3(0, 1, 0)) * 180) / Math.PI).toFixed(1)}° off world +Y`,
+  );
   // A real cart, because the complaint was about her going through *it*.
   const rideCart = createCart(PALETTE.markerPink);
   cartGroup.add(rideCart.root);
@@ -981,7 +1055,12 @@ say('');
   // `route.scale` for the seat and `RIDE_SCALE` for the model is not a slip — it
   // is exactly the split the ride makes, kept so a third ring would show up here
   // as a disagreement rather than as a silent pass.
-  const seatY = railPoint.y + SEAT_HEIGHT * route.scale;
+  const seatLift = SEAT_HEIGHT * route.scale;
+  /** The last sway she was seated at, so the seat assertions know where the seat is. */
+  let seatedSway = 0;
+  /** Where she is sitting, in the cart's frame — should be `(sway, seatLift, 0)`. */
+  const seatInCart = (): Vector3 => player.group.position.clone().applyMatrix4(toCart);
+  const offSeat = (): number => seatInCart().distanceTo(new Vector3(seatedSway, seatLift, 0));
 
   /** A player who is aboard and pressing nothing — the riding branch reads no input. */
   const idleInput = {
@@ -1022,7 +1101,8 @@ say('');
     // assertion below would be asserting the line above it rather than the
     // thing it names. That is the hollow-check disease this whole PR keeps
     // running into.
-    player.setRidePose(railPoint.x + sway, seatY, railPoint.z, 0, 0);
+    seatedSway = sway;
+    seatRaceRider(player, cartGroup, cartHeading, route.scale, sway, 0);
     player.railRaceRide = rider;
     player.update({
       dt: 1 / 60,
@@ -1035,12 +1115,12 @@ say('');
     player.group.updateMatrixWorld(true);
     const head = player.model.head;
     return {
-      headTop: new Box3().setFromObject(head).max.y - railPoint.y,
+      // flat-ok: a box in the cart's own frame (toCart), so +Y is the tub's up
+      headTop: visibleBox(head, toCart, false).max.y,
       headAt: head.getWorldPosition(new Vector3()),
-      // Along the track: the rider's group is positioned and scaled but never
-      // rotated here, so the model's own forward is world +Z.
-      headDepth: new Box3().setFromObject(head).getSize(new Vector3()).z,
-      body: visibleBox(player.model.root),
+      // Along the track, which is the cart frame's +Z.
+      headDepth: visibleBox(head, toCart, false).getSize(new Vector3()).z,
+      body: visibleBox(player.model.root, toCart),
     };
   };
 
@@ -1089,7 +1169,7 @@ say('');
   // bottom of the cart, which is exactly what the translation this replaced
   // did — so the floor is asserted separately from the bar.
   cartGroup.updateMatrixWorld(true);
-  const cartBox = new Box3().setFromObject(rideCart.root);
+  const cartBox = visibleBox(rideCart.root, toCart, false);
   // The tub's own floor, which `cart.ts` builds at the wheels' axle height so
   // the hopper clears them — the real surface she would come through, not the
   // bounding box's bottom (which is the underside of the wheels and would let a
@@ -1114,10 +1194,10 @@ say('');
   // rejected and only one of them is where the old bug lived.
   require(
     Math.abs(player.model.root.position.y) < 1e-6 &&
-      Math.abs(player.group.position.y - seatY) < 1e-6,
+      offSeat() < 1e-6,
     `the duck pose moved the rider off the seat — model root at ` +
       `${player.model.root.position.y.toFixed(3)} (should be 0) and her group at ` +
-      `${player.group.position.y.toFixed(3)} against a seat at ${seatY.toFixed(3)}. That is a ` +
+      `${seatInCart().y.toFixed(3)} against a seat at ${seatLift.toFixed(3)}, ${offSeat().toFixed(3)} m off it. That is a ` +
       'translation, not a duck.',
   );
 
@@ -1255,10 +1335,10 @@ say('');
   );
   require(
     Math.abs(player.model.root.position.y) < 1e-6 &&
-      Math.abs(player.group.position.y - seatY) < 1e-6,
+      offSeat() < 1e-6,
     `the celebration moved the rider off the seat — model root at ` +
       `${player.model.root.position.y.toFixed(3)} (should be 0) and her group at ` +
-      `${player.group.position.y.toFixed(3)} against a seat at ${seatY.toFixed(3)} — the ride ` +
+      `${seatInCart().y.toFixed(3)} against a seat at ${seatLift.toFixed(3)}, ${offSeat().toFixed(3)} m off it — the ride ` +
       'never moves the root.',
   );
 
@@ -1286,16 +1366,22 @@ say('');
       // Both faces must register or a ray leaving the solid is invisible.
       (hopperMesh.material as { side: number }).side = DoubleSide;
       cartGroup.updateMatrixWorld(true);
-      const hopperBox = new Box3().setFromObject(hopperMesh);
+      const hopperBox = visibleBox(hopperMesh, toCart, false);
+      const acrossCart = new Vector3(1, 0, 0).transformDirection(cartFrame);
+      const hitInCart = new Vector3();
       const armCaster = new Raycaster();
       armCaster.far = 500;
 
       /** Where a line straight across the cart at this height and depth meets the tub. */
       const wallAt = (y: number, z: number, x: number): number | null => {
-        armCaster.set(new Vector3(hopperBox.min.x - 10, y, z), new Vector3(1, 0, 0));
+        // A line across the tub in the cart's frame, cast in the world.
+        armCaster.set(
+          new Vector3(hopperBox.min.x - 10, y, z).applyMatrix4(cartFrame),
+          acrossCart,
+        );
         const xs = armCaster
           .intersectObject(hopperMesh, false)
-          .map((hit) => hit.point.x)
+          .map((hit) => hitInCart.copy(hit.point).applyMatrix4(toCart).x)
           .sort((a, b) => a - b);
         if (xs.length < 2) return null;
         // How far past the tub's **outer** skin on this point's own side.
@@ -1375,7 +1461,8 @@ say('');
             for (let i = 0; i < position.count; i += 1) {
               vertex
                 .set(position.getX(i), position.getY(i), position.getZ(i))
-                .applyMatrix4(object.matrixWorld);
+                .applyMatrix4(object.matrixWorld)
+                .applyMatrix4(toCart);
               // Above the rim there is no tub to go through.
               if (vertex.y > hopperBox.max.y) continue;
               beside += 1;
@@ -1516,7 +1603,8 @@ say('');
     setRiderLegsVisible(player.model, riderLegsShow(phase));
     player.group.updateMatrixWorld(true);
     const drawn = legParts.every((part) => part?.visible === true);
-    const reach = visibleBox(player.model.root).min.y;
+    // flat-ok: a box in the cart's own frame (toCart), so +Y is the tub's up
+    const reach = visibleBox(player.model.root, toCart).min.y;
     legReport.push(`${phase} ${drawn ? 'on' : 'off'}`);
     require(
       drawn === WANT_LEGS[phase],
@@ -1535,12 +1623,14 @@ say('');
   const legsRacing = (() => {
     setRiderLegsVisible(player.model, riderLegsShow('racing'));
     player.group.updateMatrixWorld(true);
-    return visibleBox(player.model.root).min.y;
+    // flat-ok: a box in the cart's own frame (toCart), so +Y is the tub's up
+    return visibleBox(player.model.root, toCart).min.y;
   })();
   const legsWinning = (() => {
     setRiderLegsVisible(player.model, riderLegsShow('finishing'));
     player.group.updateMatrixWorld(true);
-    return visibleBox(player.model.root).min.y;
+    // flat-ok: a box in the cart's own frame (toCart), so +Y is the tub's up
+    return visibleBox(player.model.root, toCart).min.y;
   })();
   say(`legs         ${legReport.join('   ')}`);
   say(
@@ -1668,10 +1758,22 @@ interface FaceView {
 
 function faceView(width: number, height: number, sadness: number): FaceView {
   rig.resize(width, height);
-  const kid = createKid({ outfit: 0xffffff, hairStyle: 'short' });
-  const root = new Group();
-  root.add(kid.root);
-  const crown = kid.hatAnchor.parent;
+  // **The real player, in a cart placed and seated by `railRace/seat.ts`** —
+  // so she leans with the ring exactly as the game draws her. This used to be a
+  // bare kid stood straight up world `+Y` with a plain yaw, which is a rider the
+  // game stopped drawing when the ring was leant onto the sphere.
+  const player = new Player(new CollisionWorld(), new IsoCamera(), new Vector3());
+  player.beginRide();
+  player.model.root.scale.setScalar(RIDE_SCALE);
+  const cart = new Group();
+  const heading: CartHeading = { yaw: 0, pitch: 0 };
+  const faceIdleInput = {
+    isDown: () => false,
+    wasPressed: () => false,
+    moveX: 0,
+    moveY: 0,
+  } as unknown as InputSystem;
+  const crown = player.model.hatAnchor.parent;
   if (!crown) throw new Error('check-rail-race: the kid rig has no crown under its hat anchor');
 
   let worstFacing = 1;
@@ -1687,19 +1789,27 @@ function faceView(width: number, height: number, sadness: number): FaceView {
     const travelled = (i / 48) * route.length;
     rig.reset(travelled);
     const at = route.wrap(route.startDistance + travelled);
-    const point = route.pointAt(PLAYER_LANE, at, new Vector3());
-    const tangent = route.tangentAt(PLAYER_LANE, at, new Vector3());
-    const cartYaw = Math.atan2(tangent.x, tangent.z);
+    placeRaceCart(route, PLAYER_LANE, at, cart, heading);
+    const point = cart.position;
 
     // Exactly `RailRace.poseRider`'s pose: the cart's yaw plus the body's share
     // of the turn on the root, the head's share on the head.
-    const facing = faceTurnTowardsCamera(cartYaw, point, rig.camera.position, sadness);
+    const facing = faceTurnTowardsCamera(heading.yaw, point, rig.camera.position, sadness);
     turn = facing.body + facing.head;
-    root.position.set(point.x, point.y + SEAT_HEIGHT * route.scale, point.z);
-    root.rotation.y = cartYaw + facing.body;
-    root.scale.setScalar(route.scale);
-    kid.head.rotation.y = facing.head;
-    root.updateMatrixWorld(true);
+    seatRaceRider(player, cart, heading, route.scale, 0, facing.body);
+    player.model.head.rotation.y = facing.head;
+    // Through her real update, seated, so the body's own lean in the seat moves
+    // her head the way it does on screen.
+    player.railRaceRide = SEATED;
+    player.update({
+      dt: 1 / 60,
+      elapsed: 1,
+      input: faceIdleInput,
+      playerPosition: player.position,
+      cameraForward: new Vector3(0, 0, 1),
+      frame: i,
+    } satisfies FrameContext);
+    player.group.updateMatrixWorld(true);
 
     crown.getWorldPosition(skull);
     const screenX: number[] = [];
@@ -1714,7 +1824,7 @@ function faceView(width: number, height: number, sadness: number): FaceView {
     }
     eyeSpread = Math.min(eyeSpread, Math.abs((screenX[0] ?? 0) - (screenX[1] ?? 0)));
   }
-  kid.dispose?.();
+  player.dispose();
   return { worstFacing, worstOnScreen, eyeSpread, turn };
 }
 

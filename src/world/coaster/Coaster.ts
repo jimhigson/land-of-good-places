@@ -17,7 +17,13 @@ import {
   CART_EYE_HEIGHT,
   CART_SEAT_HEIGHT,
 } from './cart';
-import { drawnOnSphere, railFrameAt, sweptRails, type RailFrame } from '../rail/sweptRail';
+import {
+  drawnOnSphere,
+  railFrameAt,
+  rideFrame,
+  sweptRails,
+  type RailFrame,
+} from '../rail/sweptRail';
 import { planCruiserPylons } from './pylons';
 import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/trestleGeometry';
 import type { PlannedCoaster } from './plan';
@@ -82,6 +88,12 @@ const GRAVITY = 6.5; // gentler than earth; a cosy park has cosy physics
 // disagree with where this actually puts the camera.
 const EYE = { x: 0, y: CART_EYE_HEIGHT - CART_SEAT_HEIGHT, z: 0 };
 
+/** Somewhere for `placeOnSphere`'s rotation to go when only its point is wanted. */
+const DISCARDED_SPIN = /* @__PURE__ */ new Quaternion();
+
+/** Scratch for the cart's own up, used to seat the rider down into the tub. */
+const SEAT_DROP = /* @__PURE__ */ new Vector3();
+
 export interface CoasterOptions {
   /**
    * The solved plan (`coaster/plan.ts`) — route, station stall and exit
@@ -132,6 +144,16 @@ export class Coaster implements GameSystem {
   private phase: 'waiting' | 'chain' | 'coasting' | 'braking' = 'waiting';
   private readonly point = new Vector3();
   private readonly tangent = new Vector3();
+  /**
+   * The cart's heading, kept because `cart.rotation.y` no longer carries it.
+   *
+   * Once the cart's quaternion leans with the track, the Euler three.js
+   * decomposes back out of it is a mixture of the lean, the yaw and the pitch,
+   * and its `.y` is none of the three. Anything wanting "which way is the cart
+   * pointing" — the rider's facing, the face-turn towards the camera — asks
+   * this instead.
+   */
+  private cartYaw = 0;
   private crestDistance = 0;
 
   private readonly options: CoasterOptions;
@@ -199,7 +221,7 @@ export class Coaster implements GameSystem {
     // to look backwards (family report, 28 July).
     //
     // Everything modelled in this park faces **+Z** (ASSET_MANIFEST), and
-    // `placeCart` duly sets `cart.rotation.y = atan2(tangent.x, tangent.z)`,
+    // `placeCart` duly points the cart's +Z along `atan2(tangent.x, tangent.z)`,
     // which points the cart's +Z along the direction of travel. But a three.js
     // `PerspectiveCamera` looks down its own local **−Z**. Bolt an unrotated
     // camera into a seat whose +Z is forward and it faces the way you have just
@@ -214,6 +236,11 @@ export class Coaster implements GameSystem {
     this.eyeMount = new Group();
     this.eyeMount.rotation.y = Math.PI;
     this.cartMount.add(this.eyeMount);
+    // Named so an instrument can find the thing that actually gets drawn,
+    // rather than re-deriving where it thinks the cart ought to be — the
+    // difference `check:swept-bus` was written to make, after a check measured
+    // trestle *feet* and reported a confident, wrong zero.
+    this.cart.name = `${options.plan.name}-cart`;
     this.group.add(this.cart);
     this.placeCart();
   }
@@ -316,7 +343,27 @@ export class Coaster implements GameSystem {
     if (this.riding && this.player) {
       this.rideView?.update(dt, context.elapsed);
       const seat = this.cartMount.getWorldPosition(this.point);
-      this.player.setRidePose(seat.x, seat.y - 0.55, seat.z, this.cart.rotation.y);
+      // Down **into the seat**, along the cart's own up rather than along world
+      // `+Y`. The cart leans with the track now (see `placeCart`), so a bare
+      // `seat.y - 0.55` would drop her 0.55 m vertically out of a tub that is
+      // no longer vertical — sliding her towards the park's centre by
+      // `0.55 · sin(tilt)` and, at the far side of the loop, out through the
+      // side of it.
+      //
+      // The yaw is carried in `cartYaw` rather than read back off
+      // `cart.rotation.y`. That property stopped meaning "the way the cart is
+      // pointing" the moment the cart's quaternion began carrying a lean: the
+      // Euler three.js decomposes out of `tilt * yaw * pitch` mixes all three,
+      // so reading `.y` off it hands her a facing that is wrong by the lean and
+      // wrong in a way that grows as the ride goes round.
+      // flat-ok: local axis, leant by the cart's own quaternion
+      const down = SEAT_DROP.set(0, 1, 0).applyQuaternion(this.cart.quaternion);
+      this.player.setRidePose(
+        seat.x - down.x * 0.55,
+        seat.y - down.y * 0.55,
+        seat.z - down.z * 0.55,
+        this.cartYaw,
+      );
     }
   }
 
@@ -343,14 +390,37 @@ export class Coaster implements GameSystem {
     }
   }
 
+  /**
+   * **On the rails, not merely near them.**
+   *
+   * The route is solved flat and the rails are drawn through `drawnOnSphere`
+   * (see `buildTrack`). The cart has to make the same journey, or it rides a
+   * track that is no longer where it is. It used to make neither half of it —
+   * flat position, flat Euler — and on seed 428 that left it **10.83 m from its
+   * own rails** at the worst point of the 213.5 m circuit, 3.42 m on average.
+   *
+   * So: the position through `placeOnSphere`, exactly as `drawnOnSphere` maps
+   * each drawn rail point, and the orientation through `rideFrame`, which takes
+   * its lean about the same **flat** column. Everything hung off the cart —
+   * `cartMount`, `eyeMount`, and so both ride cameras — inherits this for free,
+   * which is why there is nothing to change in `RideCamera`.
+   */
   private placeCart(): void {
     this.route.pointAt(this.distance, this.point);
     this.route.tangentAt(this.distance, this.tangent);
-    this.cart.position.copy(this.point);
-    this.cart.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
+    const yaw = Math.atan2(this.tangent.x, this.tangent.z);
     // Pitch with the track, gently — the mount (and so the rider's eye and
-    // the cart's nose) follows the hill it is on.
-    this.cart.rotation.x = -Math.asin(Math.max(-0.6, Math.min(0.6, this.tangent.y)));
+    // the cart's nose) follows the hill it is on. Still read off the flat
+    // tangent: `placeOnSphere` is locally a rotation, so a gradient in the flat
+    // frame already *is* the gradient against local gravity.
+    const pitch = -Math.asin(Math.max(-0.6, Math.min(0.6, this.tangent.y)));
+    // `placeOnSphere` is asked only for the position; `rideFrame` owns the
+    // orientation, because it carries the pitch as well as the yaw. The spare
+    // quaternion is thrown away rather than written straight to the cart, so
+    // that nothing reads as though the rotation were set twice.
+    placeOnSphere(this.point, yaw, this.cart.position, DISCARDED_SPIN);
+    rideFrame(this.point, yaw, pitch, this.cart.quaternion);
+    this.cartYaw = yaw;
   }
 
   private buildTrack(collision: CollisionWorld): void {
