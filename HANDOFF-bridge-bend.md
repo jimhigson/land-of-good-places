@@ -34,6 +34,46 @@ not clear the clause: a `tangentY` road leans too, and the marker still would
 not. The fix is in the two invariants that read a world-`y` AABB off a leaning
 object - see #635 for the scoped three-part fix.
 
+### The fix, and both clauses proved red before trusted green
+
+`Bridge.soffitYAt(x, z)` in `bridges.ts` — the world `y` of the drawn soffit
+in a plan column, or `null` where there is no tunnel over that point. Built
+from the same `soffitRiseAt` and `tangentY` the shell is drawn from. Both
+invariants ask it; nothing reads a height off the `deck` marker any more.
+
+**Red-proof 1 — `theDrawnPathRidesOverEveryBridge`.** Geometry: this branch @
+the `soffitYAt` commit, with `drapePathsOverBridges` short-circuited so the
+ribbon stays on the terrain — the exact bug the clause exists for. Output:
+
+```
+the drawn path-kerb passes under the bridge at (51.4, 95.8): a vertex at
+  (50.2, 97.2) sits at -29.04 m, below the -24.30 m soffit standing over the
+  track — the path is draped through the tunnel
+the drawn path-surface passes under the bridge at (139.0, -50.8): a vertex at
+  (137.5, -50.9) sits at -56.30 m, below the -50.62 m soffit — ...
+the drawn path-kerb passes under the bridge at (138.9, -82.1): a vertex at
+  (140.6, -82.5) sits at -72.33 m, below the -66.18 m soffit — ...
+```
+
+6 findings, 4.7-6.2 m below the soffit. Note the soffit differs per vertex at
+one crossing (-24.30 vs -22.97) — that is the leaning arch being read
+honestly, which the flat marker could not do.
+
+**Red-proof 2 — `railwayClearanceCoversTheTrainAndItsRiders`.** Geometry: the
+same tree with `BRIDGE_RISE` reduced by 0.6 m in `clearance.ts` — 0.6 m of
+real headroom taken out of every arch. Output:
+
+```
+the bridge deck at (-2.9, 96.2) leaves only 3.50 m under its own built
+  soffit, against the 3.90 m the train and its riders sweep to
+```
+
+Real numbers, no `NaN`, and the shortfall matches the mutation. **Both
+mutations were reverted**; `git status` clean before the suite run.
+
+Canonical seed, diffed by name: **26 failures -> 25. Exactly one gone (the
+paving clause), zero new.**
+
 ### Second correction: the grade clause is red here too, and always was
 
 PR #628's body says the grade clause is "green on `feat/sphere-combined` and
