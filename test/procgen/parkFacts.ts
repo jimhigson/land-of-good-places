@@ -1482,6 +1482,16 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // would load at module-evaluation time, before the harness has set the seed.
   // `Geo` itself reads no seed, but the rule is cheaper to keep than to audit.
   const { Geo } = await import('../../src/world/geo/Geo.ts');
+  // **`MeshClass`, not the `Mesh` imported at the top of this file.** A
+  // `const { … Mesh … } = await import('three')` further down *this same
+  // function* (the rail-race block) shadows the module-level import for the
+  // whole body, so a bare `Mesh` up here is in its temporal dead zone: it
+  // typechecks, and throws `Cannot access 'Mesh' before initialization` at
+  // runtime. In vitest that kills the suite before any test runs and reports as
+  // **93 skipped**, which reads nothing like a crash — the pass count is the
+  // tell, exactly as CLAUDE.md's "a skipped test is not a passing test" says.
+  // Measured here rather than guessed: it is how this block first failed.
+  const { Mesh: MeshClass } = await import('three');
   let castleMasonryTopRadius = -Infinity;
   {
     const probe = new Vector3();
@@ -1489,7 +1499,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     scene.traverse((object) => {
       if (!/^(castle-wall-|crenellations$)/.test(object.name)) return;
       object.traverse((node) => {
-        if (!(node instanceof Mesh)) return;
+        if (!(node instanceof MeshClass)) return;
         const position = node.geometry.getAttribute('position');
         if (!position) return;
         node.updateWorldMatrix(true, false);
