@@ -179,7 +179,7 @@ interface ImportStep {
  *   re-solves and throws in exactly the place and shape it always did.
  * - The slide catches `RailRouteUnsolvable` *per rung* (a target that admits
  *   no route is a rung that did not work, not a park that cannot be built)
- *   and throws only when the whole `DESIRED_LENGTH_LADDER` is spent.
+ *   and throws only when every one of `SLIDE_ATTEMPTS` is spent.
  */
 export class ParkGeneration {
   private readonly scheduler: SolveScheduler;
@@ -420,7 +420,7 @@ export class ParkGeneration {
         },
       },
       {
-        // The ginormous slide: the `DESIRED_LENGTH_LADDER` walked rung by
+        // The ginormous slide: `SLIDE_ATTEMPTS` (door, then length) walked rung by
         // rung, exactly as `planSlide()` walks it, so the sliced path and the
         // straight-through path are one search (`check:park-boot` hashes the
         // two against each other).
@@ -429,23 +429,28 @@ export class ParkGeneration {
         ready: () => self.solveModule !== null,
         *start() {
           const solve = self.solveModule as typeof import('../world/slide/solve');
-          const ladder = solve.DESIRED_LENGTH_LADDER;
-          let lastComplaint = 'never solved a route at all';
+          const attempts = solve.SLIDE_ATTEMPTS;
+          let lastComplaint =
+            attempts.length === 0
+              ? 'had no door on the south wall whose stub clears the towers and the Sky Cruiser'
+              : 'never solved a route at all';
           for (let rung = 0; ; rung += 1) {
-            const target = ladder[rung];
-            if (target === undefined) {
-              // Every rung tried, none rideable — the same terminal answer
-              // `planSlide()` gives, with the same shape of message.
+            const attempt = attempts[rung];
+            if (attempt === undefined) {
+              // Every decision tried, none rideable — the same terminal answer
+              // `planSlide()` gives, through the same message owner.
               throw new Error(
-                `the ginormous slide never solved to a chute a child could ride: ` +
-                  `after ${ladder.length} target lengths (${ladder.join(', ')} m), ` +
-                  `the best on offer ${lastComplaint}.`,
+                solve.slideRefusalMessage({
+                  refused: true,
+                  attemptsTried: attempts.length,
+                  blocker: lastComplaint,
+                }),
               );
             }
             // The brief gets its own frame: it is pure, but `doorPoses()` and
             // `pitPoses()` both filter through `PARK_BOUNDARY`, and it
             // measured 13.7 ms sharing a frame with the search.
-            const search = railRouteSearch(solve.slideRouteBriefAt(target));
+            const search = railRouteSearch(solve.slideRouteBriefAt(attempt));
             yield 'frame';
             let route: SolvedRailRoute;
             try {
@@ -462,7 +467,7 @@ export class ParkGeneration {
                 // A target that admits no route at all is a rung that did not
                 // work, not a park that cannot be built — the next rung gets
                 // its turn, exactly as `solveChuteAt` treats the same throw.
-                lastComplaint = `admitted no route at a ${target} m target`;
+                lastComplaint = `admitted no route ${solve.describeSlideAttempt(attempt)}`;
                 yield 'frame';
                 continue;
               }
@@ -479,7 +484,7 @@ export class ParkGeneration {
               offerPrewarmedSlide(solve.finishSlidePlan(route));
               return;
             }
-            lastComplaint = `${complaint} (at a ${target} m target)`;
+            lastComplaint = `${complaint} (${solve.describeSlideAttempt(attempt)})`;
             // The next rung's brief must not share the frame that just
             // rebuilt and measured a whole chute — same rule as above.
             yield 'frame';
