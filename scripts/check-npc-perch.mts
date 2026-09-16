@@ -44,7 +44,8 @@
  * question per check, and neither of the two can quietly stop asking its own.
  */
 import './headless-canvas.mjs';
-import { Object3D, Vector3 } from 'three';
+import { Object3D, Quaternion, Vector3 } from 'three';
+import { placeOnSphere, terrainHeight, upAt } from '../src/world/terrain.ts';
 import { buildHeadlessPark } from './park-harness.mts';
 import { CLIMB_PEEK_LIFT, TreeClimbing } from '../src/world/TreeClimbing.ts';
 import { WanderDriver } from '../src/entities/npc/wanderDriver.ts';
@@ -173,6 +174,30 @@ if (climbers.length === 0) {
  * about a number they both got from the same place, and would still pass if
  * both were wrong together.
  */
+
+/**
+ * **The one axis every height on this page is measured along: the tree's own up.**
+ *
+ * Issue #642. `clearance` was `headY − band.top`, a world-`y` difference between
+ * a drawn (leant) head and a canopy band read off the *flat* part positions — a
+ * `y` standing in for a distance, in two different frames. It agreed to 0.03 m
+ * at the park's centre and had the wrong sign at its edge. Both sides are now
+ * heights along this vector: the head as drawn, dotted with it, and each canopy
+ * blob as drawn (`placeOnSphere`, exactly as `makeInstanced` composes it) with
+ * the ellipsoid's own extent along it.
+ *
+ * Set per tree by {@link canopyBandOf}, and read by {@link perchHeadY} for the
+ * same tree. ({@link drawnDropBelowHead} already measures along the head's own
+ * up, from #620.)
+ */
+const treeUp = new Vector3(0, 1, 0);
+const _blobCentre = new Vector3();
+const _blobSpin = new Quaternion();
+
+/** Heights along {@link treeUp}. */
+const alongUp = (point: Readonly<Vector3>): number => point.dot(treeUp);
+
+
 /**
  * Which seed claimed which occluder. Two seeds cannot share one canopy, so if
  * that ever happens the run fails rather than reporting on a fiction — the
@@ -185,6 +210,7 @@ if (climbers.length === 0) {
 const claimedBy = new Map<FoliageOccluder, number>();
 
 function canopyBandOf(tree: ClimbableTreeSeed, index: number): { top: number; bottom: number } | null {
+  upAt(tree.x, terrainHeight(tree.x, tree.z), tree.z, treeUp);
   // **Matched on the foot, not on the canopy's drawn centre.** `x`/`z` is where
   // the widest blob is *drawn*, which `placeOnSphere` slides outward along the
   // local up; `footX`/`footZ` is the column the tree stands in, which is what
@@ -220,8 +246,12 @@ function canopyBandOf(tree: ClimbableTreeSeed, index: number): { top: number; bo
   let bottom = Infinity;
   for (const part of occluder.parts) {
     if (part.kind === 'trunk') continue;
-    top = Math.max(top, part.position.y + part.scale.y);
-    bottom = Math.min(bottom, part.position.y - part.scale.y);
+    placeOnSphere(part.position, part.rotationY, _blobCentre, _blobSpin);
+    // Half-extent of the drawn ellipsoid along `treeUp`: |S·Rᵀ·u|.
+    const local = treeUp.clone().applyQuaternion(_blobSpin.clone().invert());
+    const extent = Math.hypot(local.x * part.scale.x, local.y * part.scale.y, local.z * part.scale.z);
+    top = Math.max(top, alongUp(_blobCentre) + extent);
+    bottom = Math.min(bottom, alongUp(_blobCentre) - extent);
   }
   return top === -Infinity ? null : { top, bottom };
 }
@@ -346,7 +376,7 @@ function perchHeadY(character: NpcCharacter, tree: ClimbableTreeSeed, bearing: n
   const rig = character.avatar.rig;
   rig.root.updateMatrixWorld(true);
   const headPoint = rig.head.getWorldPosition(new Vector3());
-  const headY = headPoint.y;
+  const headY = alongUp(headPoint);
   if (hideBodyMutation) {
     const member = character.avatar.member;
     const head = character.avatar.rig.head;
@@ -440,7 +470,11 @@ console.log(
 const playerRows = trees.map((tree, index) => {
   const band = canopyBandOf(tree, index);
   const canopyHeight = band ? band.top - band.bottom : 1;
-  const clearance = band ? tree.canopyTopY + CLIMB_PEEK_LIFT - band.top : 0;
+  // Her perch top, drawn the way `climbPose` draws it — a height above the tree's
+  // ground, leant — and measured along the same axis as the band.
+  const perch = new Vector3();
+  if (band) placeOnSphere({ x: tree.x, y: tree.canopyTopY + CLIMB_PEEK_LIFT, z: tree.z }, 0, perch, new Quaternion());
+  const clearance = band ? alongUp(perch) - band.top : 0;
   return { index, clearance, fraction: clearance / canopyHeight };
 });
 const playerLow = Math.min(...playerRows.map((r) => r.fraction));
