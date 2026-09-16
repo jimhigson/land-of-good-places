@@ -284,9 +284,8 @@ for (const character of npcs.all) {
   // (all seven residents at the raw terrain height under their y = 0 floors).
   // Derived, not listed: neither the garden nor a castle floor, whatever the
   // room is called, so a room added tomorrow is covered the day it exists.
-  const inAPocketRoom =
+  const terrainIsNotAFloorHere =
     spaceAt(at.x, at.z) !== SPACE_GARDEN && surfaces.floorAt(at.x, at.z) === null;
-  const terrainIsNotAFloorHere = inAPocketRoom;
 
   if (terrainIsNotAFloorHere && column === terrain) {
     // No walkable surface of any kind in her column — the sampler has nothing
