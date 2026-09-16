@@ -1,7 +1,6 @@
 import type { TrainRoute } from './route';
 import { pathCentreline } from '../pathGraph';
-import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
-import { createCrossingScan, siteForFlip } from './crossingPredicate';
+import { createCrossingScan, esplanadeSamples, siteForFlip } from './crossingPredicate';
 
 // Re-exported so existing importers of this module keep working; the owner is
 // `crossingPredicate.ts`, which the router can reach without a cycle.
@@ -314,34 +313,13 @@ export function computeCrossings(
   // measured it. The march still runs its full 32 m when nothing drawn comes
   // near — a seed whose network stops short of the gate is exactly the case
   // the old 32 m was raised to 32 m for.
-  const inX = -ENTRANCE_GATE_X / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
-  const inZ = -ENTRANCE_GATE_Z / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
-  const drawn = pathCentreline();
-  const onDrawnPath = (x: number, z: number): boolean => {
-    for (const sample of drawn) {
-      if (Math.hypot(sample.x - x, sample.z - z) <= sample.halfWidth + 0.4) return true;
-    }
-    return false;
-  };
   //
-  // **The march overlaps the drawn ribbon rather than stopping dead at it.**
-  // A side flip is only ever measured between two *consecutive* samples, and
-  // the drawn ribbon's samples are a different run — so a loop crossing in the
-  // seam between the last esplanade sample and the ribbon's own first point
-  // would be invisible to both, and the fence would seal with no gap where a
-  // child walks. Found on seed 11 before the railway was told to keep off the
-  // walk in (`train/route.ts`): the loop cut `x = 0` at `z = 54.3`, six metres
-  // in from the arch, in exactly that seam.
-  const ESPLANADE_OVERLAP = 4;
-  let sinceDrawn = -1;
-  for (let step = 0; step <= 32; step += 1) {
-    const x = ENTRANCE_GATE_X + inX * step;
-    const z = ENTRANCE_GATE_Z + inZ * step;
-    if (sinceDrawn >= 0) sinceDrawn += 1;
-    else if (step > 0 && onDrawnPath(x, z)) sinceDrawn = 0;
-    if (sinceDrawn > ESPLANADE_OVERLAP) break;
-    consider(x, z);
-  }
+  // **The march itself lives in `crossingPredicate.ts` (`esplanadeSamples`),
+  // beside the flip scan, so the generator's plan-time screen walks the same
+  // metres.** It did not, once: the screen scanned only the drawn curves, so
+  // seed 7's loop cutting `x = 0` at `z = 54.5` — in the un-drawn walk in —
+  // passed the plan and threw here, three systems later, from tree planting.
+  for (const sample of esplanadeSamples(pathCentreline())) consider(sample.x, sample.z);
 
   const flips = scan.flips();
   type BareCrossing = Omit<LevelCrossing, 'pathHalfWidth' | 'spine'>;

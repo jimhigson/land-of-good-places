@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import type { TrainRoute } from './route';
 import { CROSSING_SITES, type CrossingSite } from './crossingPlan';
+import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../entrance/layout';
 
 /**
  * **The crossing predicate, alone, so everyone who needs it can have it.**
@@ -175,9 +176,21 @@ export interface CrossingScreenResult {
 export function screenDrawnPathsForOffSiteCrossings(
   route: TrainRoute,
   samples: readonly { readonly x: number; readonly z: number; readonly run?: number }[],
+  options: {
+    /**
+     * The whole drawn network, when `samples` is it: the walk in from the
+     * arch to wherever that network takes over is then marched too, exactly as
+     * {@link computeCrossings} marches it. Omitted for a partial candidate (one
+     * spur's tail), whose esplanade is not yet knowable.
+     */
+    readonly esplanadeOver?: readonly { readonly x: number; readonly z: number; readonly halfWidth: number }[];
+  } = {},
 ): CrossingScreenResult {
   const scan = createCrossingScan(route);
   for (const sample of samples) scan.consider(sample.x, sample.z, sample.run ?? -1);
+  if (options.esplanadeOver) {
+    for (const sample of esplanadeSamples(options.esplanadeOver)) scan.consider(sample.x, sample.z, -2);
+  }
   const point = new Vector3();
   const fouls: OffSiteCrossing[] = [];
   for (const flip of scan.flipsWithRun()) {
@@ -186,4 +199,57 @@ export function screenDrawnPathsForOffSiteCrossings(
     fouls.push({ railDistance: flip.railDistance, x: point.x, z: point.z, run: flip.run });
   }
   return { fouls, samplesScanned: samples.length };
+}
+
+/**
+ * **The esplanade: the arch to wherever the drawn network takes over.**
+ *
+ * The one owner of the walk-in march that both `computeCrossings` (at build
+ * time) and {@link screenDrawnPathsForOffSiteCrossings} (at plan time) scan
+ * for side flips. Its first sample stands far from the last path sample, so
+ * the RUN_BREAK stride guard keeps the seam between them from ever reading as
+ * a flip.
+ *
+ * This used to march a flat 32 m straight in from the arch on the radial,
+ * regardless of what was drawn there, and that is what put a level crossing
+ * at the park's own front door and kept it there. `paths.ts`'s gate corridor
+ * now stops short of the railway and hands the walk to the street lattice,
+ * which crosses only at a planned site (issue #339) — but a hand-sampled
+ * straight line ploughing on to `z = 28` still flipped sides at the track, so
+ * `computeCrossings` minted the crossing anyway. The honest span is the bit of
+ * the walk that really is un-drawn: from the arch to the first point where the
+ * drawn network is under her feet. The march still runs its full 32 m when
+ * nothing drawn comes near.
+ *
+ * **The march overlaps the drawn ribbon rather than stopping dead at it.** A
+ * side flip is only ever measured between two *consecutive* samples, and the
+ * drawn ribbon's samples are a different run — so a loop crossing in the seam
+ * between the last esplanade sample and the ribbon's own first point would be
+ * invisible to both, and the fence would seal with no gap where a child walks.
+ * Found on seed 11: the loop cut `x = 0` at `z = 54.3`, six metres in from the
+ * arch, in exactly that seam.
+ */
+export function esplanadeSamples(
+  drawn: readonly { readonly x: number; readonly z: number; readonly halfWidth: number }[],
+): { x: number; z: number }[] {
+  const inX = -ENTRANCE_GATE_X / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
+  const inZ = -ENTRANCE_GATE_Z / Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
+  const onDrawnPath = (x: number, z: number): boolean => {
+    for (const sample of drawn) {
+      if (Math.hypot(sample.x - x, sample.z - z) <= sample.halfWidth + 0.4) return true;
+    }
+    return false;
+  };
+  const ESPLANADE_OVERLAP = 4;
+  const out: { x: number; z: number }[] = [];
+  let sinceDrawn = -1;
+  for (let step = 0; step <= 32; step += 1) {
+    const x = ENTRANCE_GATE_X + inX * step;
+    const z = ENTRANCE_GATE_Z + inZ * step;
+    if (sinceDrawn >= 0) sinceDrawn += 1;
+    else if (step > 0 && onDrawnPath(x, z)) sinceDrawn = 0;
+    if (sinceDrawn > ESPLANADE_OVERLAP) break;
+    out.push({ x, z });
+  }
+  return out;
 }
