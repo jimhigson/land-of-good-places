@@ -1,49 +1,60 @@
 # HANDOFF — issue #625, `castleMasonryTopY` measured with a plumb line
 
 Branch `eng/slide-castle-radial`, off `origin/eng/sphere-ground-claims`.
-**Model: Opus 5 (1M context)**, chosen by the Overseer; the first agent on this
-lane was the same, and a replacement must match it.
+**Model: Opus 5 (1M context)**, chosen by the Overseer; every agent on this
+lane has been the same, and a replacement must match it.
 
-## Status: the fix is written, committed and pushed. Controls run.
+## Status: fixed, reviewed, review addressed. PR #637.
 
-## The finding that changes the ticket (first agent's, re-measured by the second)
+## The conclusion, which survived review
 
-**There is no collision.** The issue's headline — *"the chute is 1.19 m inside
-the battlements"* — is itself a frame mix, the exact one the issue's own comment
-warns against, applied in the other direction.
+**There is no collision. The child was never riding through stone.** The
+issue's headline — *"the chute is 1.19 m inside the battlements"* — is a frame
+mix: it subtracts a world-Y height from a radius-minus-`R`, and those agree only
+at the park's origin, ~48 m away. Corrected clearance is **+5.44 m**.
 
-Re-run independently on the canonical seed (`scripts/measure-castle-masonry.mts`),
-at the chute's crossing of the south wall plane `z = 21.823`, crossing world
-`(55.48, 9.69, 21.82)`:
+## The numbers, third time of asking — read the history, it is the lesson
 
 | quantity | value |
 |---|---|
-| masonry AABB `max.y` (what shipped) | **8.040 m** |
-| masonry top radius | **229.770** (`r − R` = 9.770 m) |
-| crossing radius | **237.302** (`r − R` = 17.302 m) |
-| chute underside radius | 237.302 − 1.11 = **236.192** |
-| **clearance, both sides radial** | **+6.422 m — clear** |
+| masonry AABB `max.y` — the plumb measure that shipped | **8.040 m** |
+| **true radial top**, a `crenellations` merlon at world (35.52, 7.08, 20.40) | **10.750 m** |
+| **true under-report of the original bug** | **2.710 m** |
+| chute crossing the south wall plane, world (55.48, 9.69, 21.82) | 17.302 m |
+| chute underside (`− CHUTE_HALF_WIDTH` 1.11) | **16.192 m** |
+| **clearance, both sides radial** | **+5.441 m — clear** |
 | clearance, both sides plumb-y | +0.539 m — clear |
-| clearance, radial stone vs plumb underside (**the issue's 1.19**) | −1.190 m |
+| the issue's 1.19 (radial stone vs plumb underside) | −1.190 m |
 
-The last row is not a measurement of anything: it subtracts a world-Y height
-from a radius-minus-`R`. Those agree only at the park's origin, and the castle
-is ~48 m out.
+**Two figures widely repeated about this ticket are wrong, and both were wrong
+the same way.**
 
-Confirmed by a second instrument sharing none of that arithmetic
-(`scripts/measure-slide-vs-stone.mts`): the shortest distance from the built
-chute's centre line to any masonry triangle vertex is **9.450 m** (chute
-`(55.51, 9.69, 21.67)`, stone `(59.02, 0.92, 22.04)`), against a
-`CHUTE_HALF_WIDTH` of 1.11 — **8.34 m of daylight**.
+- **The issue says the under-report is 1.730 m. It is 2.710 m.** The 1.730 came
+  from a scratch instrument that walked vertices through `node.matrixWorld`
+  alone, so `crenellations` — an `InstancedMesh` of 40 merlons — collapsed onto
+  the container's origin and the "radial top" it reported, 9.770 m, was really
+  the `castle-wall-lintel` band. It was then *independently confirmed* by a
+  second measurement made the same way. **Two instruments sharing a method
+  share its blind spot**; that is what "independently confirmed" bought here.
+  The plumb figure 8.040 was always right, because `Box3.setFromObject` honours
+  instance matrices.
+- **This branch's own first fix reproduced the identical fault**, because it
+  replaced `Box3` with a hand-rolled vertex walk and did not handle
+  `InstancedMesh`. `InstancedMesh extends Mesh`, so it passed the type test and
+  was then transformed by the container matrix alone: 0.984 m, battlements gone,
+  clearance reported as **+6.42 m** — 0.981 m too generous, in the dangerous
+  direction, from a change whose entire purpose was to stop under-reporting this
+  number. Caught in review, not by me.
 
-**A third, independent cross-check found by the second agent, and it is the
-cleanest one.** `layout.ts`'s `CASTLE_MASONRY_TOP` — the constant the facade is
-*built from* — is **9.85 m** up the facade's own axis. The radial measurement
-says **9.770 m** above the planet's surface; the difference is the terrain under
-the castle. The plumb measurement said **8.040 m**, i.e. 1.73 m *short of a
-constant the thing is built from*. That alone identifies which of the two
-frames is the honest one, without any reference to the slide. Recorded in the
-`CASTLE_MASONRY_TOP` docblock.
+**The "cleanest cross-check" in the first write-up was a coincidence and is
+now deleted.** It claimed 9.770 radial corroborated `CASTLE_MASONRY_TOP` 9.85.
+But 9.770 is a `castle-wall-lintel` vertex and that band is built to
+`CASTLE_WALL_HEIGHT` **8.8**, so it cannot corroborate a constant that includes
+the 1.05 m of merlon above it — and `9.85 − 8.8 = 1.05` against a 0.981 m
+under-report: **the missing metre was the merlons**. A number agreeing to a
+tenth of a metre is not corroboration until you know which mesh it came off.
+That false claim had reached `src/world/building/layout.ts`; it is corrected
+there, and the real corroboration is now a **clause** rather than prose.
 
 ## What was actually changed
 
@@ -64,13 +75,30 @@ frames is the honest one, without any reference to the slide. Recorded in the
    `src/world/building/{Shell,layout,castleFabric}.ts`,
    `scripts/check-castle.mts`. `layout.ts` also gained the three-way
    9.85 / 9.770 / 8.040 comparison above.
-4. **A latent runtime landmine removed** (`parkFacts.ts`). The new masonry walk
+4. **`InstancedMesh` handled per instance** — `getMatrixAt` composed onto
+   `matrixWorld`, 40 merlons instead of 1 collapsed container. This is the
+   review fix, and without it everything above is decoration.
+5. **Two new clauses that assert the *value*, not the frame**, because nothing
+   existing could see the instance regression — not the frame guard (still a
+   radius), not the clearance clause (still positive), not the prose
+   cross-check (coincidentally agreeing):
+   - `castleMasonryTopMesh` must be **`crenellations`**. The merlons are the top
+     of the castle by construction. Exact, no tolerance.
+   - `castleMasonryTopFacadeY` — the winning vertex expressed in the
+     `building-facade` group's own frame — must equal `CASTLE_MASONRY_TOP`.
+     Measured **9.8500** against 9.85. The constant crosses as a *fact*
+     (`castleMasonryDesignTopY`) rather than a static import, because
+     `building/layout.ts` reaches `parkLayout` and a static import into `test/`
+     would pin every seed to the default park.
+6. **A latent runtime landmine removed** (`parkFacts.ts`). The masonry walk
    first used the `Mesh` imported at the top of the file. A
    `const { … Mesh … } = await import('three')` in the rail-race block of the
    *same function* shadows that import for the whole body, so the bare `Mesh`
    sat in its temporal dead zone: **typechecked clean, threw at runtime**, and
    vitest reported it as `Tests 93 skipped (93)` — not as a crash. It now uses
-   an alias, with the trap written down beside it.
+   an alias, with the trap written down beside it. `InstancedMeshClass` and
+   `Matrix4` are taken in that same block too; those `tsc` *does* catch, as
+   redeclarations, so they are aliased `…ForMasonry`.
 
 ## Seed 326 / `planSlide` — INDEPENDENT of this work, and the brief is stale
 
@@ -85,50 +113,78 @@ agent reproduced that exact line — from its own TDZ bug (item 4 above), not fr
 `planSlide`. Whatever threw when the report was written is gone from this base.
 The 17 failures on seed 326 are part of the inherited-red ledger, issue #630.
 
-## Controls — both run, both red, with the geometry they were proved against
+## Controls — five, all re-proved against the CORRECTED geometry
 
-Canonical seed **20260728**, chute crossing at world `(55.48, 9.69, 21.82)`,
-masonry top radius `229.770`.
+A red transcript is a measurement and measurements go stale: the first three
+were proved against geometry that has since moved (the instance fix changed the
+stone from 9.770 to 10.750), so all of them were re-run. Canonical seed
+**20260728**, chute crossing world `(55.48, 9.69, 21.82)`, masonry top radius
+**230.750** (`r − R` = 10.750), winning mesh `crenellations`, facade-local
+`9.8500`.
 
-**Control A — the clause can fail.** Every object matching
-`/^(castle-wall-|crenellations$)/` pushed **8 m further from the planet's
-centre** at the scene-graph level, before anything measures it. Temporary patch
-in `parkFacts.ts`, reverted:
+Each is a temporary patch to `test/procgen/parkFacts.ts`, reverted with
+`git checkout` immediately after.
+
+**D — the mesh clause catches the real regression.** `instanceof
+InstancedMeshForMasonry` forced false, i.e. the reviewed bug reintroduced
+exactly:
 
 ```
-FAIL canonical seed 20260728 > the ginormous slide leaves the castle over the top of the battlements
+AssertionError: the highest castle stonework was found on `castle-wall-lintel`,
+not on `crenellations` — the battlements are the top of the castle by
+construction, so either they have dropped out of the measurement (an
+`InstancedMesh` walked without its per-instance matrices collapses all 40
+merlons onto the origin, which is issue #625's review exactly) or something has
+grown up through them
+```
+
+**A — the value clause fires when the stonework moves.** Masonry pushed 8 m
+radially outward at the scene-graph level:
+
+```
+AssertionError: the highest castle stonework sits at 17.662 m in the facade's
+own frame, but the castle is built to `CASTLE_MASONRY_TOP` = 9.850 m — off by
+7.812 m…
+```
+
+Note this now trips *before* the clearance clause — the value check is strictly
+stronger than moving-the-stone, which is why the clearance clause needs its own
+control below. That is a change from the first round and worth knowing.
+
+**A2 — the clearance clause itself, with the stone left alone.** Each chute
+sample pulled 6 m towards the planet's centre:
+
+```
 AssertionError: the ginormous slide crosses the castle's south wall at world
-(55.48, 9.69, 21.82) — measured radially, its underside is 16.19 m above the
-planet's surface and the stonework tops out at 17.67 m, so the chute is 1.48 m
-inside the battlements. Nothing cuts a hole for it: `slideGap` reaches no
-geometry, so there is solid stone here
+(53.99, 3.88, 21.82) — measured radially, its underside is 10.22 m above the
+planet's surface and the stonework tops out at 10.75 m, so the chute is 0.53 m
+inside the battlements…
 ```
 
-Real numbers, no `NaN`, no `Infinity`. (Stone went 9.770 → 17.67, i.e. +7.90
-rather than +8.00, because the push is along each object's own bearing and the
-tallest vertex sits on a slightly different one. Expected.)
+10.75 is the true merlon top, and 6 − 5.441 = 0.56 ≈ the 0.53 reported, which is
+the consistency check on the control itself.
 
-**Control B — the anti-vacuity guard still fires.** Name pattern broken to
-`/^(NOT-A-REAL-castle-wall-|NOT-crenellations$)/`:
+**B — the anti-vacuity guard.** Name pattern broken to `/^(NOT-castle-wall-|NOT-crenellations$)/`:
 
 ```
 AssertionError: no castle stonework was found in the built park at all, so the
 check that keeps the ginormous slide out of the battlements measured nothing…
 ```
 
-**Control C — the new frame guard fires.** `- 220` appended to the fact's
-`geo.setFromWorldVector(probe).radius()`, i.e. the field put back into the
-plumb-height units it used to carry:
+**C — the frame guard.** `- 220` appended to the fact's `radius()`:
 
 ```
-AssertionError: `parkFacts.castleMasonryTopRadius` is 9.770, which is not a
+AssertionError: `parkFacts.castleMasonryTopRadius` is 10.750, which is not a
 radius from the planet's centre — every point in the park is at least
-GROUND_SPHERE_RADIUS (220) from it. Something has put a world-Y height back in
-this field, which is issue #625 exactly…
+GROUND_SPHERE_RADIUS (220) from it…
 ```
 
-All three were reverted with `git checkout test/procgen/parkFacts.ts` and the
-invariant re-run green afterwards (`1 passed | 92 skipped`).
+All five red with real numbers, no `NaN`, no `Infinity`. Reverted, and the
+invariant re-run green (`1 passed | 92 skipped`).
+
+**What the controls could not do, said plainly:** none of A, B or C caught the
+instance regression, and I ran all three while it was live. A control proves the
+clause you aimed it at and nothing else.
 
 ## Test counts, before and after — identical, and that is the correct result
 
@@ -137,12 +193,12 @@ Both runs on this machine, `pnpm run test:procgen`:
 | | files | tests | duration |
 |---|---|---|---|
 | base `5220305b` | 5 failed \| 16 passed (21) | **85 failed \| 563 passed (648)** | 74.68 s |
-| this branch | 5 failed \| 16 passed (21) | **85 failed \| 563 passed (648)** | 74.19 s |
+| this branch, after the instance fix | 5 failed \| 16 passed (21) | **85 failed \| 563 passed (648)** | 83.06 s |
 
 The **failing sets are identical, compared line by line, not just the counts**
 (85 vs 85, `diff` clean) — the swap-not-caught-by-a-count trap. The battlements
 test is in neither set: it was green before (plumb vs plumb, self-consistently,
-+0.539 m) and is green now (radial vs radial, +6.422 m). What changed is that it
++0.539 m) and is green now (radial vs radial, +5.441 m). What changed is that it
 is now green for an honest reason and has been watched go red.
 
 All 85 are the inherited ledger in issue #630.
@@ -236,29 +292,18 @@ before the PR**. Two reasons, and the second is the real one:
 The control they carried is not lost — it is reproduced **inside vitest**, where
 it runs against the same facts the invariant reads, as Control A below.
 
-## For QA — where to stand
+## For QA — where to stand, and against which number
 
-No browser was available to either agent. The thing to watch is the ginormous
-slide leaving the castle roof over the south battlements: there should be
-several metres of air between the chute's underside and the merlons, and no
-part of the chute inside stone. `/slide` boards the ride; for a look from
-outside, a `/view` camera south-east of the castle looking back north-west at
-the south wall at the height of the parapet. Nothing a player can see has
-changed on this branch — it is a corrected measurement, not moved geometry.
+No browser was available to any agent on this lane. The thing to watch is the
+ginormous slide leaving the castle roof over the **south** battlements.
 
-## PR
+**Judge it against 5.44 m of air under the chute, not the 6.42 m the first
+write-up claimed.** That difference is the merlons, and the merlons are exactly
+what a person would be looking at.
 
-Open as **#637**, base `eng/sphere-ground-claims` (not `main`). CI will be red on
-`Checks` and `Procgen invariants` **because the base is red** — see the
-inherited-red table above; every one of the seven failing steps was re-run on
-the base worktree and fails there identically. Nothing on this branch is red
-that is not already red on `eng/sphere-ground-claims`.
+`/slide` boards the ride. For a look from outside, a `/view` camera south-east
+of the castle facing back north-west at the parapet. `/spawn?pos=55.5,21.8`
+stands her at the crossing's plan position, under the chute.
 
-The seven are worth pushing back to #630, whose ledger names only
-`check:rail-race`: `check:hotel` (19 problems, PR #634), `check:rail-race`,
-`check:tie-frame`, `check:cruiser-clearance`, `check:castle-window`,
-`check:keyring-view`, `check:climb-wave`.
-
-`check:coplanar` and `check:swept-bus` were not run locally — they have their own
-workflows on the PR and this branch touches no geometry, only measurements and
-comments.
+Nothing a player can see has changed on this branch — it is a corrected
+measurement and three new clauses, all test-side, plus comment edits in `src/`.
