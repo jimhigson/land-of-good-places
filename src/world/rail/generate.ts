@@ -735,6 +735,19 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
         rejected.tooLong += 1;
         return null;
       }
+      // **And a piece that leaves home out of reach is too long already.** A
+      // route must still get from this piece's end to the finish, and whatever
+      // it lays to do so is never shorter than the straight line; if that line
+      // would carry it over the ceiling, no descendant of this piece can ever
+      // finish. The closer's {@link provablyTooLong} is the same bound.
+      if (!closing && maxLength !== undefined) {
+        const end = endPose(seg);
+        const home = Math.hypot(finishPose.x - end.x, finishPose.z - end.z);
+        if (accumulated + seg.length + home > maxLength + 1e-6) {
+          rejected.tooLong += 1;
+          return null;
+        }
+      }
       const steps = Math.max(2, Math.ceil(seg.length / SAMPLE_STEP));
       const produced: Sample[] = [];
       const point: Vec2 = { x: 0, z: 0 };
