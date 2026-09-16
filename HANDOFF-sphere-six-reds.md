@@ -214,3 +214,10 @@ are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
 - Nits: waveFacingYaw() argless; rigTiltAt shared by eyeForFocus/screenBasis3DAt.
 - CI procgen f1e9f677: 68 fail vs base 80; only new = s131 tree-on-rail (#653). PR body + QA /view link updated.
 - Base has since moved (#656 merged); not rebased.
+
+### Round 8 — comment fix + CI timeout regression (BLOCKER, reported)
+- Pulled #661 (remote was rewritten; local reset to origin, no unique local work). Scenery parts comments fixed → 40bccc14.
+- Procgen CI 35104862588 vs base 34c62e42 (run 35102094331): new names = 2 TIMEOUTS: seed 11 beforeAll (>300 s), scatterDecoupling "can tell two parks apart" (>240 s). 38 fixed.
+- Local: seed-11 file 54.5 s head vs 27.7 s base; buildParkFacts(11) 44.9 s vs 19.9 s.
+- Profile: solveSlide/railRouteSearch 24.9 s head vs 2.2 s base (cruiserStrikes 15.6 vs 14.0).
+- Bisect (threshold 32 s): first bad d2741d5d (drawn car + castleDeckClearanceAt). Slide solve reads COASTER_PLANS.cruiser.route (CRUISER_LINE) — cruiser loop shape change makes the slide search ~11x longer on seed 11. Awaiting ruling.
