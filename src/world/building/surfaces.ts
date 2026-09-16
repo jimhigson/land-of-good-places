@@ -195,11 +195,14 @@ export class WalkSurfaces {
  * is measured **radially**: a surface is within reach when its distance from
  * the planet's centre is no more than `BUILDING_STEP_UP` past hers. It used to
  * be `y + BUILDING_STEP_UP`, a world-`y` reach, which at lean `θ` counts the
- * planet's own curvature as climb: a sub-step of `d` towards the park on a
- * perfectly level deck reads `d·tan θ` of world rise, so the steepest ramp a
- * sprinting child could run up without falling through fell from 1.4 near the
- * centre to **0.4 at r = 140 m** — inside the planner's own 0.512 budget
- * (`scripts/measure-walk-reach.mts`). Indoors up is `+Y`, the castle floors and
+ * planet's lean as climb: a riser `h` tall reads `h / cos θ` plus the
+ * sub-step's own plan travel times `tan θ`, so whether a child could step up a
+ * knee-high edge depended on which way she walked and her frame rate — 584
+ * honest step-ups refused and 55 over-tall ones admitted on the canonical park
+ * (`scripts/measure-walk-reach.mts`). The deeper fall-through far out (a 0.5
+ * ramp at r = 140 m dropping her 13.7 m) is cured mostly by
+ * {@link carryReference}, not by this; the two are one change because a reach
+ * and its reference must be measured in the same frame. Indoors up is `+Y`, the castle floors and
  * hotel rooms are hundreds of metres out where a radial reach would lean by
  * tens of degrees, so there the reach stays the plain world-`y` step — the same
  * split `up.ts`'s `upFor` makes, asked of the same `spaceAt`.

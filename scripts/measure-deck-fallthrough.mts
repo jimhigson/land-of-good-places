@@ -97,6 +97,19 @@ import { circleBoundary } from '../src/world/boundary.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import {
+  SPACE_CASTLE_HALL,
+  SPACE_CASTLE_MALL,
+  SPACE_CASTLE_ROOF,
+  SPACE_HOTEL_BREAKFAST,
+  SPACE_HOTEL_CORRIDOR,
+  SPACE_HOTEL_GARDEN,
+  SPACE_HOTEL_LOBBY,
+  SPACE_HOTEL_OCEAN,
+  SPACE_HOTEL_SUITE,
+  localToWorld,
+  spaceAt,
+} from '../src/world/spaces.ts';
+import {
   BUILDING_STEP_UP,
   GROUND_SPHERE_RADIUS,
   MAX_FRAME_DELTA,
@@ -604,6 +617,47 @@ for (const { x0, byGradient } of shippingElsewhere) {
         (first ? `\n      ${first}` : ''),
     );
   }
+}
+
+// 2c. **Indoors the reach is the plain world-`y` step** (#643 review). The
+//     castle floors and hotel rooms stand hundreds of metres out, where a
+//     radial reach would lean by tens of degrees and let her step up far more
+//     than a step — nothing else in the chain notices if it does. At every
+//     indoor space's own origin, a flat platform just under a step above the
+//     floor must be offered and one just over must not.
+{
+  const indoorSpaces = [SPACE_CASTLE_MALL, SPACE_CASTLE_HALL, SPACE_CASTLE_ROOF, SPACE_HOTEL_LOBBY,
+    SPACE_HOTEL_BREAKFAST, SPACE_HOTEL_CORRIDOR, SPACE_HOTEL_SUITE, SPACE_HOTEL_GARDEN, SPACE_HOTEL_OCEAN];
+  let probed = 0;
+  for (const space of indoorSpaces) {
+    const origin = localToWorld(space, 3, 0, 3);
+    if (!origin || spaceAt(origin.x, origin.z) !== space) {
+      failed = true;
+      console.error(`FAIL: indoor reach control could not find a point inside ${space} — it probes nothing there`);
+      continue;
+    }
+    const floorY = origin.y;
+    for (const [rise, offered] of [[BUILDING_STEP_UP - 0.02, true], [BUILDING_STEP_UP + 0.02, false]] as const) {
+      const walk = new WalkSurfaces();
+      const top = floorY + rise;
+      walk.addPlatform({
+        surfaceY: top,
+        covers: (x, z) => Math.abs(x - origin.x) < 0.5 && Math.abs(z - origin.z) < 0.5,
+      });
+      const got = walk.sample(origin.x, origin.z, floorY);
+      probed += 1;
+      if ((got === top) !== offered) {
+        failed = true;
+        console.error(
+          `FAIL: in ${space} at (${origin.x.toFixed(1)}, ${origin.z.toFixed(1)}) a platform ` +
+            `${rise.toFixed(2)} m above a floor at y=${floorY.toFixed(2)} was ${offered ? 'refused' : 'offered'} ` +
+            `(sample gave ${got.toFixed(3)}) — indoors the step is BUILDING_STEP_UP ` +
+            `(${BUILDING_STEP_UP}) in world y, and the reach is no longer that there`,
+        );
+      }
+    }
+  }
+  console.log(`  indoor reach control: ${probed} probes across ${indoorSpaces.length} indoor spaces`);
 }
 
 // 3. The fix must actually buy something over the control.

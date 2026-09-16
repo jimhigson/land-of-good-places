@@ -6520,7 +6520,8 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     // `Player` carries its reference at her own radius between sub-steps, so
     // the reach spends exactly the local rise this clause measures.
     // `scripts/measure-walk-reach.mts` shows it: on this park 0 honest climbs
-    // refused (584 before), and a 0.5 local ramp at r = 140 no longer drops her.
+    // refused (584 before); the carried reference is what stops a 0.5 local
+    // ramp at r = 140 dropping her.
     // The worst world-`y` figure is still printed beside the local one, as the
     // number that *used* to decide a fall, so a regression to it is visible.
     //

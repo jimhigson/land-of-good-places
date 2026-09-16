@@ -1316,10 +1316,15 @@ export const SPRINT_PEAK_GRADE_BUDGET = 0.5121075476046892;
  * sampler did not use. The reach is now radial (`stepCeilingAt` in
  * `world/building/surfaces.ts`) and `Player` carries its sub-step reference at
  * her own distance from the planet's centre, so `BUILDING_STEP_UP` is spent on
- * local rise and nothing else. Measured by `scripts/measure-walk-reach.mts`:
- * the steepest local grade a sprinting child keeps her footing on at r = 140 m
- * went 0.40 -> 0.67, and on the canonical park 584 honest step-ups the old
- * reach refused (and 55 over-tall ones it admitted) went to 0 and 0.
+ * local rise and nothing else. Measured by `scripts/measure-walk-reach.mts`,
+ * and the two halves earn different things. **The carry** is what lifts the
+ * steepest local grade a sprinting child keeps her footing on at r = 140 m
+ * from 0.40 to 0.67 — a world-`y` reach with the carry reads 0.670 there too,
+ * because along a ramp the carried reference is within centimetres of the
+ * deck. **The radial reach** is what fixes the knee-high edges, where the
+ * foot's lean multiplies the whole riser: on the canonical park 584 honest
+ * step-ups refused and 55 over-tall ones admitted went to 0 and 0 — and it is
+ * what `NavGrid` now agrees with pair for pair (`withinStep`).
  *
  * What still bends the figure far out is locomotion, not the reach: she moves
  * in plan, and climbing towards the park a plan metre is `1 / (cos θ − g sin θ)`
