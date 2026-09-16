@@ -97,12 +97,13 @@
  * 0.0–100.0% and failed honestly.
  */
 import './headless-canvas.mjs';
-import { Group, Mesh, MeshBasicMaterial, Raycaster, SphereGeometry, Vector3 } from 'three';
+import { Group, Mesh, MeshBasicMaterial, Quaternion, Raycaster, SphereGeometry, Vector3 } from 'three';
+import { placeOnSphere } from '../src/world/terrain.ts';
 import { buildHeadlessPark } from './park-harness.mts';
 import { createKid, KID_HEAD_HEIGHT, KID_REST_GAZE_PITCH } from '../src/art/models/kid.ts';
 import { applyRidePose, CLIMB_WAVE_ARM_X, CLIMB_WAVE_LEAN_RATE } from '../src/entities/Player.ts';
 import { CLIMB_PEEK_LIFT, WAVE_RISE, climbPose } from '../src/world/TreeClimbing.ts';
-import { faceOnGround, yawForBearing } from '../src/world/up.ts';
+import { eyeForFocus, faceOnGround, yawForBearing } from '../src/world/up.ts';
 import {
   CAMERA_DISTANCE,
   CAMERA_PITCH_DEGREES,
@@ -148,9 +149,29 @@ const BEARINGS = 12;
 /** Waggle phases sampled. The wave is judged at its BEST moment, not its worst. */
 const WAGGLE_PHASES = 8;
 
-/** The camera looks along this. Orthographic, so it is the same for every ray. */
+/** The rig's offset from its focus, **in the flat frame** — `IsoCamera`'s own. */
 const offset = cameraOffset(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG, CAMERA_DISTANCE);
+
+/**
+ * **The camera looks along this — the camera the game renders, over this kid.**
+ *
+ * Orthographic, so it is the same for every ray *of one pose*; it is not the
+ * same for every pose. It used to be one world constant, `−offset`, which is the
+ * shot at the park's centre and nowhere else: `IsoCamera` rides the ground it
+ * is looking at, rotating that offset into the local frame at its focus
+ * (`eyeForFocus`) and setting `camera.up` to the local up. A leant child seen
+ * down a plumb view is a picture nobody is shown — and it is the picture that
+ * made a flat-frame bearing (`yawForBearing`) look like the right way to face
+ * the camera, when in the frame she and the rig share, the camera sits at
+ * {@link CAMERA_FACING} exactly.
+ *
+ * Set by {@link poseKidAt} from `eyeForFocus` at her own position, the same
+ * owner `IsoCamera.applyTransform` asks. {@link VIEW_UP} is the rig's up there.
+ */
 const VIEW_DIR = new Vector3(-offset.x, -offset.y, -offset.z).normalize();
+const VIEW_UP = new Vector3(0, 1, 0);
+const _viewEye = new Vector3();
+const _viewFocus = new Vector3();
 
 /** Facing the camera is the camera's own yaw — see `TreeClimbing`'s CAMERA_FACING. */
 const CAMERA_FACING = CAMERA_YAW_DEGREES * DEG;
@@ -188,12 +209,13 @@ function sampleSurface(root: Group, fraction: number): Sample[] {
   if (all.length === 0) return all;
   let low = Infinity;
   let high = -Infinity;
+  // "Top" along her own up, not world `y` — see VIEW_UP.
   for (const sample of all) {
-    low = Math.min(low, sample.point.y);
-    high = Math.max(high, sample.point.y);
+    low = Math.min(low, sample.point.dot(VIEW_UP));
+    high = Math.max(high, sample.point.dot(VIEW_UP));
   }
   const cut = high - (high - low) * fraction;
-  return all.filter((sample) => sample.point.y >= cut);
+  return all.filter((sample) => sample.point.dot(VIEW_UP) >= cut);
 }
 
 /** What fraction of `samples` the camera can see, and what blocked the rest. */
@@ -364,6 +386,8 @@ function poseKidAt(
     kid.limbs.rightArm.rotation.z = armOverride.z;
   }
   kid.root.position.set(pose.x, pose.y, pose.z);
+  eyeForFocus(_viewFocus.set(pose.x, pose.y, pose.z), offset, _viewEye, VIEW_UP);
+  VIEW_DIR.subVectors(_viewFocus, _viewEye).normalize();
   // At rest she holds the facing she arrived with (facing away from the trunk);
   // the wave turns her to camera. Both are part of what the eye sees change.
   //
@@ -509,10 +533,11 @@ function rasterise(
   liftOverride: number | null = null,
   hideBody = false,
 ): Picture {
-  const right = new Vector3().crossVectors(VIEW_DIR, new Vector3(0, 1, 0)).normalize();
-  const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const foliage = foliageFor(index, tree);
   const kid = poseKidAt(tree, bearing, elapsed, override, wave, liftOverride, hideBody);
+  // After posing: the view is hers. Screen axes from the rig's own up.
+  const right = new Vector3().crossVectors(VIEW_DIR, VIEW_UP).normalize();
+  const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const arm = new Set(collectMeshes(kid.limbs.rightArm, new Group()));
   const head = new Set(collectMeshes(kid.head, new Group()));
   const all = [...collectMeshes(kid.root, new Group()), ...foliage];
@@ -523,7 +548,8 @@ function rasterise(
   } else {
     // World-anchored on the tree top: the window does not move with her, so
     // any shift of her silhouette here is real motion against the scenery.
-    centre.set(tree.x, tree.canopyTopY, tree.z);
+    // Leant onto the sphere as the canopy itself is, or the window sits beside her.
+    placeOnSphere(centre.set(tree.x, tree.canopyTopY, tree.z), 0, centre, new Quaternion());
   }
 
   const halfW = 30;
@@ -648,10 +674,10 @@ function armDeltaPixels(
   bearing: number,
   elapsed: number,
 ): number {
-  const right = new Vector3().crossVectors(VIEW_DIR, new Vector3(0, 1, 0)).normalize();
-  const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const foliage = foliageFor(index, tree);
   const kid = poseKidAt(tree, bearing, elapsed, null, 1);
+  const right = new Vector3().crossVectors(VIEW_DIR, VIEW_UP).normalize();
+  const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const armMeshes = new Set(collectMeshes(kid.limbs.rightArm, new Group()));
   const withArm = [...collectMeshes(kid.root, new Group()), ...foliage];
   const withoutArm = withArm.filter((mesh) => !armMeshes.has(mesh));
@@ -660,6 +686,7 @@ function armDeltaPixels(
   // wide enough that an arm appearing anywhere around her is inside it. This is
   // the "whole screen, not a crop" part.
   const centre = new Vector3(tree.x, tree.canopyTopY + CLIMB_PEEK_LIFT * 0.5, tree.z);
+  placeOnSphere(centre, 0, centre, new Quaternion());
   const half = 44;
   const raycaster = new Raycaster();
   raycaster.far = RAY_BACKOFF * 2;
