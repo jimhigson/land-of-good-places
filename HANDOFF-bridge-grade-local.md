@@ -150,3 +150,21 @@ unless stated:
 
 At branch scale (1200), clause alone on all 5 CI seed files: `5 passed | 460
 skipped`, worst locals 0.485 / 0.400 / 0.460 / 0.398 / 0.464.
+
+## check:flat-primitives on the rebased base (#620 merged into feat/sphere-combined)
+
+Inherited: `origin/feat/sphere-combined` @ 667e743e is itself red at
+`check:flat-primitives` (its own CI run and a local run in a detached worktree):
+13 NEW + 2 BASELINE LOOSE — #628's diag scripts / marker vs #620's ratchet,
+never measured against each other. Mine added one (`b.y - a.y` in `gradeOfStep`).
+Also the rebase silently duplicated `import { Geo }` in invariants.ts (tsc test
+config caught it) — removed.
+
+Per line: world-y grades in diag + invariants are the contrast → `flat-ok`;
+the step vectors → `subVectors`/`.sub` (not flat at all); diag's pole probe →
+`flat-ok`; the deck marker's yaw about +Y is deliberately flat → `flat-ok`;
+`diag-crown-profile.mts` read the marker AABB as soffit → now `soffitYAt` per
+column; `diag-deck-soffit.mts` and `diag-soffit-point.mts` deleted (finding
+recorded in HANDOFF-bridge-bend.md / #635; nothing reads the marker height).
+Two LOOSE baseline lines removed (tightening only). Result: exit 0, hatch
+count 3 → 7 (exactly the 4 hatched lines); removing one hatch goes red.

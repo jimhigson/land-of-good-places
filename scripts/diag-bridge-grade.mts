@@ -111,6 +111,7 @@ interface Grades {
 }
 
 const _step = /* @__PURE__ */ new Vector3();
+const _from = /* @__PURE__ */ new Vector3();
 
 /**
  * Peak grade over a sliding one-stride window, both ways. A window rather than
@@ -126,10 +127,11 @@ function gradesOf(run: readonly Sample[]): Grades {
     const a = run[i] as Sample;
     const b = run[i + strideSamples] as Sample;
     const plan = Math.hypot(b.x - a.x, b.z - a.z);
+    // flat-ok: the world-y grade is printed only to contrast with the local one below (the dome, not the ramp)
     if (plan > 1e-6) world = Math.max(world, Math.abs(b.y - a.y) / plan);
     // Split the step into the part along `a`'s own up and the part in `a`'s own
     // horizontal plane. No `y` is subtracted anywhere, and no chart is assumed.
-    _step.set(b.x - a.x, b.y - a.y, b.z - a.z);
+    _step.set(b.x, b.y, b.z).sub(_from.set(a.x, a.y, a.z));
     const rise = _step.dot(a.up);
     const run2 = Math.sqrt(Math.max(0, _step.lengthSq() - rise * rise));
     if (run2 > 1e-6) local = Math.max(local, Math.abs(rise) / run2);
@@ -317,6 +319,7 @@ process.stderr.write(
     `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)} — ${overBudget} of ${rows.length} over\n`,
 );
 process.stderr.write(
+  // flat-ok: a fixed probe direction (the pole, world +Y) to print the planet's radius, not anyone's up
   `planet: ground radius straight up = ${groundRadiusToward(new Vector3(0, 1, 0)).toFixed(2)} m\n\n`,
 );
 

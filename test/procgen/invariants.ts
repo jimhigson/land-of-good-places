@@ -76,7 +76,6 @@ import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.
 // second hand-written arc-walk here would be exactly the "two definitions
 // of one thing" disease CLAUDE.md names.
 import { frameFor } from '../../src/world/train/bridgeSpine.ts';
-import { Geo } from '../../src/world/geo/Geo.ts';
 // Leaf module: reaches only core/constants, core/uiScale and (type-only)
 // world/interact — nothing seeded, so a static import cannot fix the park.
 import {
@@ -6444,7 +6443,7 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       b: Readonly<Vector3>,
     ): { readonly local: number; readonly rise: number; readonly run: number; readonly world: number } => {
       const up = Geo.fromWorld(a.x, a.y, a.z).up(new Vector3());
-      const step = new Vector3(b.x - a.x, b.y - a.y, b.z - a.z);
+      const step = new Vector3().subVectors(b, a);
       const rise = step.dot(up);
       const run = Math.sqrt(Math.max(0, step.lengthSq() - rise * rise));
       const plan = Math.hypot(b.x - a.x, b.z - a.z);
@@ -6452,6 +6451,7 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         local: run > 1e-6 ? rise / run : 0,
         rise,
         run,
+        // flat-ok: the world-y grade is reported beside the local one, never asserted — it shows what the dome adds
         world: plan > 1e-6 ? (b.y - a.y) / plan : 0,
       };
     };
