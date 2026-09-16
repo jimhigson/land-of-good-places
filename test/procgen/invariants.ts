@@ -76,6 +76,7 @@ import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.
 // second hand-written arc-walk here would be exactly the "two definitions
 // of one thing" disease CLAUDE.md names.
 import { frameFor } from '../../src/world/train/bridgeSpine.ts';
+import { Geo } from '../../src/world/geo/Geo.ts';
 // Leaf module: reaches only core/constants, core/uiScale and (type-only)
 // world/interact — nothing seeded, so a static import cannot fix the park.
 import {
@@ -92,8 +93,8 @@ import {
   MAX_FRAME_DELTA,
   PATH_KERB_LIFT,
   PATH_SURFACE_LIFT,
-  PLAYER_HEIGHT_DAMP_HALF_LIFE,
   PLAYER_LONGEST_STEP,
+  SPRINT_LOCAL_GRADE_CEILING,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
   RIM_OUTSET_START,
@@ -6344,22 +6345,19 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     //    `PLAYER_MAX_SPEED × PLAYER_SPRINT_MULTIPLIER × MAX_FRAME_DELTA` =
     //    {@link PLAYER_LONGEST_STEP}, 0.925 m. Sampling at 0.5 m measured a
     //    climb she never makes in one piece and reported 54% of the real one.
-    // 2. **`BUILDING_STEP_UP` is not the budget.** `Player.update` passes
-    //    `this.position.y` — *last* frame's damped, lagging height — into the
-    //    ground sample, and `WalkSurfaces.sample` rejects any surface above
-    //    `that + BUILDING_STEP_UP`. Climbing steadily, `damp(y, groundY,
-    //    0.04, dt)` never catches up: it retains
-    //    `2^(-MAX_FRAME_DELTA / 0.04)` = 0.236 of the gap each frame, so the
-    //    lag settles at `retention / (1 - retention)` = 0.309 × the per-frame
-    //    climb. She must clear her *own* climb **plus** her lag, so the real
-    //    budget is `BUILDING_STEP_UP / 1.309` = 0.474 m, not 0.620 m.
+    // 2. **`BUILDING_STEP_UP` alone was not the budget, once.** `Player.update`
+    //    used to pass `this.position.y` — *last* frame's damped, lagging height
+    //    — into the ground sample, and `WalkSurfaces.sample` rejects any
+    //    surface above `that + BUILDING_STEP_UP`. Climbing steadily the damp
+    //    never caught up, so a third of the allowance went on a smoothing
+    //    filter and the real ceiling was `BUILDING_STEP_UP / 1.309` = 0.474 m.
+    //    **#358 deleted that model** — the sample now rides the collision
+    //    sub-steps and is asked from the surface she is standing on — and
+    //    {@link SPRINT_LOCAL_GRADE_CEILING} is what replaced it here (#636).
     //
-    // Miss the lag and a 0.495 m climb reads as 80% of budget and safe; count
-    // it and the same frame needs 0.632 m against 0.620 m and she loses the
-    // surface, goes airborne and drops through her own deck into the tunnel.
-    // That is not hypothetical: browser QA of PR #352 fell through on 6 of 32
-    // sprinted runs, `bridge-262.0` 4 times out of 4 in one direction, ending
-    // 3.85 m under the deck and staying there.
+    // A too-steep ramp is not hypothetical: browser QA of PR #352 fell through
+    // on 6 of 32 sprinted runs, `bridge-262.0` 4 times out of 4 in one
+    // direction, ending 3.85 m under the deck and staying there.
     //
     // **Scanned as a sliding window at a fine step, not marched in strides.**
     // Sampling every 0.925 m would make the answer depend on where the march
@@ -6368,41 +6366,57 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     // ahead of it instead, so a steep metre is caught wherever it falls.
     //
     // The whole term is the game's own: `PLAYER_LONGEST_STEP`,
-    // `MAX_FRAME_DELTA` and `BUILDING_STEP_UP` are the engine's constants, and
-    // 0.04 is `Player.update`'s own damp half-life. None of it is a generator
-    // target, and none of it may be loosened to make a bridge pass — the
-    // bridge is what gives way.
+    // `MAX_FRAME_DELTA` and `BUILDING_STEP_UP` are the engine's constants.
+    // None of it is a generator target, and none of it may be loosened to make
+    // a bridge pass — the bridge is what gives way.
+    //
+    // ## ⛰️ The grade is measured in HER frame, not the planet's (#636)
+    //
+    // **This clause used to measure the planet.** It took the climb as a
+    // world-`y` difference over a plan-distance run, and on a
+    // {@link GROUND_SPHERE_RADIUS} m planet that is not a grade — it is the
+    // grade *plus the dome*, which falls away in world `y` at `tan(r / R)`.
+    // Measured on the canonical seed by `scripts/diag-bridge-grade.mts`: **flat
+    // grass at r = 140, with nothing built on it at all, reads a world-`y`
+    // grade of 1.140**, and the old 0.512 ceiling is crossed by curvature alone
+    // at about r = 100 — while the park puts crossings out to r = 161. All four
+    // of the canonical seed's "too steep" crossings were places where the
+    // *planet* was over budget and the *bridge* was not: worst real grade
+    // 0.464, 0 of 5 over even the old ceiling.
+    //
+    // So a step from `a` to `b` is split in `a`'s **own** frame:
+    //
+    // ```
+    //   rise = (b − a) · up(a)                     — along the local up
+    //   run  = |(b − a) − rise · up(a)|            — in a's own horizontal plane
+    //   grade = rise / run
+    // ```
+    //
+    // No `y` is subtracted and no chart is assumed, which is `geo/index.ts`'s
+    // own first rule. `up(a)` is `Geo.up` — the unit radial — and it is a
+    // *direction*, so it is the same vector in world space and needs no
+    // conversion.
+    //
+    // **`altitude()` is not the local rise**, and it is the trap to avoid here:
+    // it is height *above the ground*, so a march along the ground has
+    // `Δaltitude = 0` at every step, over a hillside as much as over flat
+    // grass. `controlsFor` below is what catches an instrument that has fallen
+    // into that — control 2 reads a real 0.02–0.05 at the park's centre, where
+    // the two measures are obliged to agree, and a zeroed measure cannot.
+    //
+    // ### What this does NOT cover, and says so on every run
+    //
+    // `WalkSurfaces.sample`'s own ceiling is still literally world-`y`
+    // (`const ceiling = y + BUILDING_STEP_UP`), so on a sphere it must cover
+    // the planet's fall over a sub-step *as well as* the ramp's local rise.
+    // `check:deck-fallthrough` measures the headroom there (1.670 on this park,
+    // 0.670 park-independent) and it covers flat grass at 1.140 today — so
+    // nothing falls through — but the margin is partly spent by the planet now.
+    // This clause prints the worst world-`y` figure it saw beside the local one
+    // on every run so that fact is never silently inherited, and asserts on the
+    // local one only. Making the sampler radial is the physics lane's work.
     const SAMPLES_PER_STRIDE = 8;
     const MARCH_STEP = PLAYER_LONGEST_STEP / SAMPLES_PER_STRIDE;
-    /** What `damp` keeps of the gap across one clamped frame. */
-    const DAMP_RETENTION = Math.pow(2, -MAX_FRAME_DELTA / PLAYER_HEIGHT_DAMP_HALF_LIFE);
-    /** Steady-state lag, as a multiple of the per-frame climb. */
-    const DAMP_LAG = DAMP_RETENTION / (1 - DAMP_RETENTION);
-    /** The climb one sprinted clamped frame may make and still be sampled. */
-    const CLIMB_BUDGET = BUILDING_STEP_UP / (1 + DAMP_LAG);
-    // ⚠️ **Since #358 this is deliberately CONSERVATIVE — it is stricter than
-    // the player it describes.** Both terms above were true of the player as
-    // she was: one ground sample per frame, taken at the end of the whole
-    // frame's movement, asked from her damped height. Neither is true now. The
-    // sample rides the same sub-steps `CollisionWorld.resolveMovement` cuts
-    // lateral movement into, and is asked from the surface she is standing on,
-    // so the rule that actually binds is `BUILDING_STEP_UP` per *sub-step*
-    // (0.370 m at worst) rather than per stride, and the damp lag is not in
-    // the arithmetic at all. Measured ceiling 0.512 → 1.670:
-    // `npm run check:deck-fallthrough`.
-    //
-    // It is left as it is on purpose, and it is safe to: a bound stricter than
-    // reality can only ever refuse geometry that would in fact have worked,
-    // never pass geometry that falls. Relaxing it is inseparable from raising
-    // `SPRINT_PEAK_GRADE_BUDGET`, which re-plans every bridge on every seed
-    // (see that constant's own note), and that is separately measured gameplay
-    // work rather than a side effect of a physics fix.
-    //
-    // **Whoever raises the budget: this is the second place the old model is
-    // written down, and it must move in the same PR** — the invariant would
-    // otherwise keep refusing exactly the steeper ramps that change is meant
-    // to allow, and the tell would be a bridge that fails here while
-    // `check:deck-fallthrough` says the same slope is walkable.
     // `NavGrid.ts`'s own `TOP_REFERENCE`, restated rather than imported —
     // it looks like a leaf (its own direct imports are `core/constants`,
     // two type-only imports, and `Collision.ts`), but that last one is not
@@ -6419,6 +6433,144 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     // any `y` comfortably above every real height in the park is exactly
     // as good as `NavGrid`'s own probe — a plain, un-imported number.
     const TOP_REFERENCE = 500;
+
+    /**
+     * The grade of the step from `a` to `b`, **in `a`'s own frame** — see the
+     * note above. Also hands back the world-`y` figure the old clause used, so
+     * the two can be printed side by side and never confused again.
+     */
+    const gradeOfStep = (
+      a: Readonly<Vector3>,
+      b: Readonly<Vector3>,
+    ): { readonly local: number; readonly rise: number; readonly run: number; readonly world: number } => {
+      const up = Geo.fromWorld(a.x, a.y, a.z).up(new Vector3());
+      const step = new Vector3(b.x - a.x, b.y - a.y, b.z - a.z);
+      const rise = step.dot(up);
+      const run = Math.sqrt(Math.max(0, step.lengthSq() - rise * rise));
+      const plan = Math.hypot(b.x - a.x, b.z - a.z);
+      return {
+        local: run > 1e-6 ? rise / run : 0,
+        rise,
+        run,
+        world: plan > 1e-6 ? (b.y - a.y) / plan : 0,
+      };
+    };
+
+    /**
+     * **The controls, and the run is void without them.**
+     *
+     * Two of the instruments written for the sphere migration read clean and
+     * decisively wrong, and only a control caught either. These are the same
+     * four `scripts/diag-bridge-grade.mts` carries, moved into the clause that
+     * asserts on the measure so the measure cannot drift away from them:
+     *
+     * 1. **Flat grass, far out.** Ordinary park ground at r = 140 — nothing
+     *    built. World-`y` must read **large** (that is the dome) and local must
+     *    read **near zero**. If local is large too, the measure is not
+     *    cancelling the planet and every figure below is noise.
+     * 2. **Flat grass at the centre**, where the lean is nil: both must be near
+     *    zero **and agree**. This is what catches a measure that has been
+     *    zeroed by a bug — the `altitude()` trap returns a clean 0.000
+     *    everywhere and passes control 1 on its own.
+     * 3–4. **Two declared slopes**, 0.20 and 0.50, built the way a bent bridge
+     *    must be (a height added along the local up at each foot, accumulated
+     *    against **distance walked along the ground**, not plan distance). The
+     *    local measure must recover the grade each was built with. A measure
+     *    that only ever says "flat" is the same disease as a check that cannot
+     *    fail; two different slopes are what stops a measure that saturates.
+     *
+     * The ground-walked accumulation in 3–4 is not a detail. Declaring the
+     * grade against *plan* distance instead reads back a uniform `cos(39.5°)` =
+     * 0.774 of what was asked for, because the orthographic `(x, z)` chart
+     * compresses radially — a constant-ratio miss that reads like a broken
+     * instrument and was in fact a broken expectation.
+     */
+    const controlFailures: string[] = [];
+    {
+      const CONTROL_SPAN = 25;
+      const worstOf = (run: readonly Vector3[]): { local: number; world: number } => {
+        let local = 0;
+        let world = 0;
+        for (let i = 0; i + SAMPLES_PER_STRIDE < run.length; i += 1) {
+          const g = gradeOfStep(run[i] as Vector3, run[i + SAMPLES_PER_STRIDE] as Vector3);
+          local = Math.max(local, Math.abs(g.local));
+          world = Math.max(world, Math.abs(g.world));
+        }
+        return { local, world };
+      };
+      const groundRun = (fromX: number, fromZ: number, dirX: number, dirZ: number): Vector3[] => {
+        const out: Vector3[] = [];
+        const len = Math.hypot(dirX, dirZ) || 1;
+        for (let d = 0; d <= CONTROL_SPAN + 1e-6; d += MARCH_STEP) {
+          const x = fromX + (dirX / len) * d;
+          const z = fromZ + (dirZ / len) * d;
+          out.push(new Vector3(x, terrainHeight(x, z), z));
+        }
+        return out;
+      };
+      const declaredRamp = (fromX: number, fromZ: number, grade: number): Vector3[] => {
+        const out: Vector3[] = [];
+        const len = Math.hypot(fromX, fromZ) || 1;
+        const dirX = fromX / len;
+        const dirZ = fromZ / len;
+        const here = new Vector3();
+        const previous = new Vector3();
+        let walked = 0;
+        for (let d = 0; d <= CONTROL_SPAN + 1e-6; d += MARCH_STEP) {
+          const x = fromX + dirX * d;
+          const z = fromZ + dirZ * d;
+          const foot = Geo.fromWorld(x, terrainHeight(x, z), z);
+          foot.toWorld(here);
+          if (d > 0) walked += here.distanceTo(previous);
+          previous.copy(here);
+          out.push(foot.setRadius(foot.radius() + grade * walked).toWorld(new Vector3()));
+        }
+        return out;
+      };
+      const controlNotes: string[] = [];
+      const control = (name: string, ok: boolean, detail: string): void => {
+        controlNotes.push(`  ${ok ? 'ok  ' : 'FAIL'} ${name} — ${detail}`);
+        if (!ok) controlFailures.push(`${name} (${detail})`);
+      };
+
+      const far = worstOf(groundRun(140, 0, 1, 0));
+      control(
+        'flat grass at r=140 disagrees as it must',
+        far.world > 0.5 && far.local < 0.1,
+        `world ${far.world.toFixed(3)} (want > 0.5, the dome), local ${far.local.toFixed(3)} (want < 0.1)`,
+      );
+      const near = worstOf(groundRun(-10, 0, 1, 0));
+      control(
+        'flat grass at the park centre agrees as it must',
+        near.world < 0.1 && near.local < 0.1 && Math.abs(near.world - near.local) < 0.05,
+        `world ${near.world.toFixed(3)}, local ${near.local.toFixed(3)} (want both < 0.1 and within 0.05)`,
+      );
+      for (const want of [0.2, 0.5]) {
+        const g = worstOf(declaredRamp(140, 0, want));
+        control(
+          `a ${want.toFixed(2)} local ramp at r=140 reads back`,
+          Math.abs(g.local - want) < 0.05,
+          `local ${g.local.toFixed(3)} (want ${want.toFixed(2)} +/- 0.05), world ${g.world.toFixed(3)}`,
+        );
+      }
+      process.stderr.write(
+        `bridge sprint-grade controls (local-frame measure, #636):\n${controlNotes.join('\n')}\n`,
+      );
+      if (controlFailures.length > 0) {
+        complaints.push(
+          `the bridge sprint-grade instrument FAILED ITS OWN CONTROL — ` +
+            `${controlFailures.join('; ')}. Every grade this clause would have ` +
+            `reported is VOID: no crossing's steepness has been judged at all ` +
+            `on this seed, whatever else this clause says`,
+        );
+      }
+    }
+
+    /** Worst local and world-`y` stride grades seen anywhere, for the run note. */
+    let seenWorstLocal = 0;
+    let seenWorstWorld = 0;
+    let crossingsJudged = 0;
+
     for (const crossing of facts.world.train.crossings) {
       const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
       if (!bridge) continue;
@@ -6447,6 +6599,12 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       const alongs: number[] = [];
       const heights: number[] = [];
       const exposure: number[] = [];
+      /**
+       * The same samples as world positions, kept because a grade in her own
+       * frame needs the whole point, not its height — `heights` alone cannot
+       * tell the ramp from the planet.
+       */
+      const points: Vector3[] = [];
       for (let along = -farNeg; along <= farPos + 1e-6; along += MARCH_STEP) {
         const p = frame.pointAt(along);
         const x = p.x;
@@ -6463,6 +6621,7 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         }
         alongs.push(along);
         heights.push(h);
+        points.push(new Vector3(x, h, z));
         // **How far she would actually drop if she lost this surface.**
         // `WalkSurfaces.sample` starts from the terrain and only ever raises
         // its answer with decks, ramps and platforms — the terrain itself is
@@ -6484,57 +6643,101 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       // near-identical complaints obscures the one real finding.
       let reportedStep = false;
       for (let i = 1; i < heights.length; i += 1) {
-        const step = Math.abs((heights[i] as number) - (heights[i - 1] as number));
+        // **Measured along the local up, like the grade below** (#636). A
+        // world-`y` difference out at the park's reach is the riser plus the
+        // planet's own fall across the sample, which is a different quantity
+        // from the one a foot has to climb.
+        const step = Math.abs(gradeOfStep(points[i - 1] as Vector3, points[i] as Vector3).rise);
         if (step > BUILDING_STEP_UP && !reportedStep) {
           reportedStep = true;
           complaints.push(
             `the crossing at (${fmt([crossing.x, crossing.z])}) has a ${step.toFixed(2)} m step ` +
               `between ${(alongs[i - 1] as number).toFixed(1)} m and ` +
               `${(alongs[i] as number).toFixed(1)} m along its own ` +
-              `centreline — too tall for a real walk (BUILDING_STEP_UP is ` +
+              `centreline, measured along the local up there — too tall for a real ` +
+              `walk (BUILDING_STEP_UP is ` +
               `${BUILDING_STEP_UP.toFixed(2)} m); this is not a walkable crossing, ground to ground`,
           );
         }
       }
 
-      // **One sprinted clamped frame.** The worst climb over any stride-long
-      // window, wherever it falls, against the budget her own damp lag leaves
-      // her.
-      let worstClimb = 0;
+      // **One sprinted clamped frame.** The steepest stride-long window
+      // anywhere on the run, measured in her own frame (see the note above),
+      // against what the post-#358 sampler actually reaches.
+      let worstGrade = 0;
+      let worstRise = 0;
+      let worstRun = 0;
       let worstAt = 0;
       let worstDrop = 0;
-      for (let i = 0; i + SAMPLES_PER_STRIDE < heights.length; i += 1) {
-        const climb = (heights[i + SAMPLES_PER_STRIDE] as number) - (heights[i] as number);
+      let worstWorld = 0;
+      for (let i = 0; i + SAMPLES_PER_STRIDE < points.length; i += 1) {
+        const g = gradeOfStep(points[i] as Vector3, points[i + SAMPLES_PER_STRIDE] as Vector3);
         // Only where losing the surface would genuinely drop her. Below
         // `FALL_THRESHOLD` the game does not even call it a fall.
         const drop = Math.min(exposure[i] as number, exposure[i + SAMPLES_PER_STRIDE] as number);
         if (drop <= FALL_THRESHOLD) continue;
-        if (climb > worstClimb) {
-          worstClimb = climb;
+        // The *uphill* direction is the one that loses the surface; a descent
+        // she simply falls a few centimetres down, which is what the ramp is
+        // for. Kept as the old clause had it.
+        worstWorld = Math.max(worstWorld, g.world);
+        if (g.local > worstGrade) {
+          worstGrade = g.local;
+          worstRise = g.rise;
+          worstRun = g.run;
           worstAt = alongs[i] as number;
           worstDrop = drop;
         }
       }
-      if (worstClimb > CLIMB_BUDGET) {
-        const needed = worstClimb * (1 + DAMP_LAG);
+      crossingsJudged += 1;
+      seenWorstLocal = Math.max(seenWorstLocal, worstGrade);
+      seenWorstWorld = Math.max(seenWorstWorld, worstWorld);
+      // A control failure voids every grade — see `controlFailures` above. The
+      // complaint is already raised there; this is what stops a void number
+      // being reported as a finding about a bridge.
+      if (controlFailures.length === 0 && worstGrade > SPRINT_LOCAL_GRADE_CEILING) {
         complaints.push(
-          `the crossing at (${fmt([crossing.x, crossing.z])}) climbs ` +
-            `${worstClimb.toFixed(3)} m in one sprinted frame, ` +
+          `the crossing at (${fmt([crossing.x, crossing.z])}) climbs at a local grade of ` +
+            `${worstGrade.toFixed(3)} over one sprinted stride, ` +
             `${worstAt.toFixed(1)} m along its own centreline — a child running up it ` +
-            `on a slow device falls through her own deck. One clamped frame ` +
-            `(${MAX_FRAME_DELTA.toFixed(4)} s) carries her ` +
-            `${PLAYER_LONGEST_STEP.toFixed(3)} m, and WalkSurfaces.sample only reaches ` +
-            `BUILDING_STEP_UP (${BUILDING_STEP_UP.toFixed(2)} m) above her own damped ` +
-            `height, which lags ${DAMP_LAG.toFixed(3)} x the climb behind her — so she ` +
-            `needs ${needed.toFixed(3)} m of a ${BUILDING_STEP_UP.toFixed(2)} m reach and ` +
-            `loses the surface. The budget is ${CLIMB_BUDGET.toFixed(3)} m per frame ` +
-            `(peak grade ${(CLIMB_BUDGET / PLAYER_LONGEST_STEP).toFixed(3)}); this one ` +
-            `needs grade ${(worstClimb / PLAYER_LONGEST_STEP).toFixed(3)}. The deck stands ` +
+            `on a slow device falls through her own deck. That grade is the stride's ` +
+            `rise along the local up at her foot (${worstRise.toFixed(3)} m) over the ` +
+            `part of it lying in that point's own horizontal plane ` +
+            `(${worstRun.toFixed(3)} m), so the planet's own fall is not counted as a ` +
+            `climb (the world-y figure for the same crossing is ` +
+            `${worstWorld.toFixed(3)}, and flat grass out here reads over 1.0 that way). ` +
+            `One clamped frame (${MAX_FRAME_DELTA.toFixed(4)} s) carries her ` +
+            `${PLAYER_LONGEST_STEP.toFixed(3)} m, and WalkSurfaces.sample reaches ` +
+            `BUILDING_STEP_UP (${BUILDING_STEP_UP.toFixed(2)} m) above the surface she is ` +
+            `standing on — so the steepest she can run up and still be sampled is ` +
+            `BUILDING_STEP_UP / PLAYER_LONGEST_STEP = ` +
+            `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)} (SPRINT_LOCAL_GRADE_CEILING), and ` +
+            `this one needs ${worstGrade.toFixed(3)}. The deck stands ` +
             `${worstDrop.toFixed(2)} m over the ground there, so that is how far she drops ` +
             `— through the deck, into the tunnel`,
         );
       }
     }
+
+    // **What this clause covered on this seed, said out loud on every run.**
+    // Two things the next reader must not have to guess: how much was actually
+    // judged, and — because the engine's own step-up ceiling is still
+    // world-`y` while this assertion is not — what the planet is spending of
+    // the headroom `check:deck-fallthrough` measured. `process.stderr`, not
+    // `console.log`: vitest's default reporter shows console output from
+    // failing tests only, so the obvious way to write this is invisible in
+    // exactly the case it exists for.
+    process.stderr.write(
+      `bridge sprint-grade: ${crossingsJudged} crossing(s) judged on this seed` +
+        (crossingsJudged === 0
+          ? ' — this clause asserts nothing about steepness here\n'
+          : `; worst LOCAL grade ${seenWorstLocal.toFixed(3)} against ceiling ` +
+            `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)}. Worst world-y grade over the same ` +
+            `strides was ${seenWorstWorld.toFixed(3)} — NOT asserted on, and not a grade: ` +
+            `it is the ramp plus the dome. WalkSurfaces.sample's own ceiling is still ` +
+            `world-y, with 0.670 of park-independent headroom (1.670 measured on this ` +
+            `park) — so the planet is spending part of that margin and nothing yet ` +
+            `guards it.\n`),
+    );
   }
 
   return complaints;
