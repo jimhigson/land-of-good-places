@@ -1341,6 +1341,36 @@ const rideExitsAreUsable: Invariant = (facts) => {
 };
 
 /**
+ * **Every doormat in the park can be walked to from the gate** — every anchor
+ * entrance and every stall's stand point, routed on the real nav lattice.
+ *
+ * The railway fences the park into pieces a child can only cross by bridge,
+ * and a loop that pinches back on itself can fence a doormat into a pocket no
+ * bridge reaches. Seed 24 on eng/sphere-six-reds did exactly that to
+ * `stall.spookyHouse` (a 545 m2 lobe behind a 4.0 m neck, both bridge sites
+ * on the far side), and seed 451 did it to the Rail Race stall. Neither was
+ * caught here only because `crossings.ts` refused the illegal path first; this
+ * asks the question of the built park directly, so a pocket whose path was
+ * simply never drawn is caught too. `train/route.ts`'s
+ * `loopLeavesEveryDestinationOnTheCrossing` is what keeps it green.
+ */
+const everyDoormatIsReachableFromTheGate: Invariant = (facts) => {
+  const complaints: string[] = [];
+  for (const entrance of facts.entrances) {
+    if (!facts.reachableFromEntrance(entrance.x, entrance.z)) {
+      complaints.push(
+        `${entrance.id} at ${fmt([entrance.x, entrance.z])} cannot be walked to from the park entrance`,
+      );
+    }
+  }
+  process.stderr.write(
+    `everyDoormatIsReachableFromTheGate: routed to ${facts.entrances.length} doormat(s) on seed ${facts.seed}\n`,
+  );
+  if (facts.entrances.length === 0) complaints.push('the built park has no doormats — this asserted nothing');
+  return complaints;
+};
+
+/**
  * The Rail Race's exit has room for the whole **party** that arrives on it, not
  * just for one child.
  *
@@ -10746,6 +10776,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     everyPostIsSolidAllTheWayUpAChild,
   ],
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
+  ['every doormat in the park can be walked to from the gate', everyDoormatIsReachableFromTheGate],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
