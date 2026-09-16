@@ -335,7 +335,7 @@ export class TreeClimbing implements GameSystem {
       this.playerFacingNow = turnTowards(
         this.playerFacingNow,
         wave > WAVE_TURN_THRESHOLD
-          ? waveFacingYaw(pose.x, pose.y, pose.z)
+          ? waveFacingYaw()
           : this.playerPeekFacing,
         PEEK_TURN_SPEED * dt,
       );
@@ -636,10 +636,10 @@ const CAMERA_FACING = CAMERA_YAW_DEGREES * DEG;
  * ```
  *
  * Hand visibility and body pixels are identical between the two, so the aim is
- * the only thing that tells them apart, and it says this one. The position
- * arguments are kept so a call site states where she is standing.
+ * the only thing that tells them apart, and it says this one. It takes no
+ * position because in her own frame the answer does not depend on one.
  */
-export function waveFacingYaw(_x: number, _y: number, _z: number): number {
+export function waveFacingYaw(): number {
   return CAMERA_FACING;
 }
 
