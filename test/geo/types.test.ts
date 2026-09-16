@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ON_THE_GROUND,
   PLANET_RADIUS,
+  altitude,
   altitudeOf,
   altitudeOfMetres,
   clearanceBetween,
@@ -73,10 +74,7 @@ describe('an altitude cannot be confused with a coordinate', () => {
     // The repo's commonest bug is two owners kept in step by hand. These are
     // the same number by construction; this asserts it stays that way.
     const g = Geo.fromWorld(100, 6, -40);
-    expect(metresOf(altitudeOf(g))).toBe(
-      // eslint-disable-next-line
-      metresOf(altitudeOf(g)),
-    );
+    expect(metresOf(altitudeOf(g))).toBe(altitude(g));
     expect(Number.isFinite(metresOf(altitudeOf(g)))).toBe(true);
   });
 });
