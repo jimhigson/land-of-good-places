@@ -569,6 +569,29 @@ export interface CastleTurretFact {
   readonly radiusBottom: number;
 }
 
+/**
+ * The furthest drawn outdoor vertex from the park's centre, measured as chart
+ * distance `hypot(x, z)` — the quantity `terrainHeight`'s cap runs out of at
+ * `GROUND_SPHERE_RADIUS`.
+ *
+ * **What it covers**: every object in the built `scene` carrying a `position`
+ * attribute (meshes, instanced meshes per instance, points, lines, sprites),
+ * every vertex, transformed to world space. **What it does not**: the subtrees
+ * named in {@link excludedRoots} (the castle's and hotel's interiors, which
+ * stand hundreds of metres from the garden by design), and anything not in
+ * this scene — the bus journey's own `lane.scene`, and whatever is only added
+ * once a frame runs. The invariant prints this on every run.
+ */
+export interface DrawnReachFact {
+  /** Chart distance of the furthest vertex, metres. */
+  readonly radius: number;
+  /** Scene path of the object that vertex belongs to, leaf first. */
+  readonly furthest: string;
+  readonly vertices: number;
+  readonly objects: number;
+  readonly excludedRoots: readonly string[];
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
@@ -1187,6 +1210,17 @@ export interface ParkFacts {
    */
   readonly boundary: ParkBoundary;
   /**
+   * **How far out the park is actually drawn** — every vertex of every
+   * outdoor object in the built scene, see {@link DrawnReachFact}.
+   *
+   * {@link boundary} is the park's *outline*; the furthest things drawn — the
+   * treeline, the Rail Race ring, the road kerb — stand well past it (126-135 m
+   * against a 101-107 m outline on the five CI seeds when this was written).
+   * A clause asking "is the park on its planet?" of the outline alone is asking
+   * a smaller question than its name.
+   */
+  readonly drawnReach: DrawnReachFact;
+  /**
    * What "twice the park" was asked to be, in square metres — the target
    * `generateParkBoundary` was handed (#115 asked for area-within-tolerance
    * and it was never checked until issue #241).
@@ -1540,6 +1574,69 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // park is never rendered, so they are all still the identity otherwise, and a
   // clearance check built on them passes for free.
   scene.updateMatrixWorld(true);
+
+  // How far out the park is drawn. Walked by hand rather than with
+  // `scene.traverse` so the two interior roots can be skipped whole: their
+  // rooms stand hundreds of metres from the garden on purpose, and filtering
+  // them by position (`spaceAt`) would also hide an outdoor object that had
+  // wandered out to the same place — the exact thing this exists to see.
+  //
+  // Its three.js classes are bound under names of its own, from its own dynamic
+  // import: later blocks of this same function destructure `Matrix4` and
+  // `Mesh` out of `await import('three')`, which shadows the module-level
+  // imports for the whole body and would put a bare `Matrix4` here in its
+  // temporal dead zone (see the `MeshClass` note below).
+  const reachThree = await import('three');
+  const drawnReach = ((): DrawnReachFact => {
+    const ReachInstancedMesh = reachThree.InstancedMesh;
+    const excluded = [world.building.interiorRoot, world.hotel.hotelRoot];
+    const instance = new reachThree.Matrix4();
+    const toWorld = new reachThree.Matrix4();
+    const vertex = new reachThree.Vector3();
+    let radius = 0;
+    let furthestNode: import('three').Object3D | null = null;
+    let vertices = 0;
+    let objects = 0;
+    const visit = (node: import('three').Object3D): void => {
+      if (excluded.includes(node as never)) return;
+      const geometry = (node as { geometry?: import('three').BufferGeometry }).geometry;
+      const position = geometry?.getAttribute('position');
+      if (position) {
+        objects += 1;
+        const copies = node instanceof ReachInstancedMesh ? node.count : 1;
+        for (let copy = 0; copy < copies; copy += 1) {
+          if (node instanceof ReachInstancedMesh) {
+            node.getMatrixAt(copy, instance);
+            toWorld.multiplyMatrices(node.matrixWorld, instance);
+          } else {
+            toWorld.copy(node.matrixWorld);
+          }
+          for (let i = 0; i < position.count; i += 1) {
+            vertex.fromBufferAttribute(position, i).applyMatrix4(toWorld);
+            vertices += 1;
+            const d = Math.hypot(vertex.x, vertex.z);
+            if (d > radius) {
+              radius = d;
+              furthestNode = node;
+            }
+          }
+        }
+      }
+      for (const child of node.children) visit(child);
+    };
+    visit(scene);
+    const path: string[] = [];
+    for (let n: import('three').Object3D | null = furthestNode; n; n = n.parent) {
+      path.push(n.name || n.type);
+    }
+    return {
+      radius,
+      furthest: path.join(' < '),
+      vertices,
+      objects,
+      excludedRoots: excluded.map((root) => root.name || root.type),
+    };
+  })();
 
   // The top of the castle's stonework, read off the built meshes — as a
   // **radius from the planet's centre**, because the castle leans (#625). See
@@ -3180,6 +3277,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     routes,
     nearPairs,
     boundary: world.collision.playBounds,
+    drawnReach,
     boundaryTargetArea: CIRCULAR_PARK_AREA * PARK_AREA_MULTIPLIER,
     masonryHalfWidth: BOUNDARY_MASONRY_HALF_WIDTH,
     boundaryBlockWidth: BOUNDARY_BLOCK_WIDTH,
