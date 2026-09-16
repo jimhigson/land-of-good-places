@@ -284,14 +284,25 @@ function collectMeshes(root: Group, exclude: Group): Mesh[] {
   return out;
 }
 
-/** Stand-in meshes for one tree's canopy blobs, as the real ellipsoids. */
+/**
+ * Stand-in meshes for one tree's canopy blobs, as the real ellipsoids.
+ *
+ * **Composed the way `makeInstanced` composes the drawn instance** — through
+ * `placeOnSphere`, because a `part.position` is a height above the ground under
+ * its own column, not a world point. This copied it straight in, which put
+ * every stand-in blob upright at the flat position while the tree it stood for
+ * leant: measured against the drawn `tree-canopies`/`tree-cones` instance
+ * centres (`getMatrixAt`), the worst of 160 parts was **1.9590 m** away that way
+ * and **0.000004 m** this way. `FoliageFade` builds its look-alikes the same way
+ * for the same reason.
+ */
 function canopyMeshes(tree: FoliageOccluder): Mesh[] {
   const out: Mesh[] = [];
   for (const part of tree.parts) {
     if (part.kind === 'trunk') continue;
     const mesh = new Mesh(new SphereGeometry(1, 24, 16), new MeshBasicMaterial());
     mesh.name = `foliage.${part.kind}`;
-    mesh.position.copy(part.position);
+    placeOnSphere(part.position, part.rotationY, mesh.position, mesh.quaternion);
     mesh.scale.copy(part.scale);
     mesh.updateMatrixWorld(true);
     out.push(mesh);
