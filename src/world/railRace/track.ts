@@ -3,7 +3,6 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
-  CircleGeometry,
   Color,
   CylinderGeometry,
   Group,
@@ -14,7 +13,6 @@ import {
   Quaternion,
   Vector3,
 } from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../../core/palette';
 import { clamp01, lerp } from '../../core/mathUtils';
 import { hazardTapeTexture } from '../../core/textures';
@@ -855,16 +853,25 @@ export function buildRailRaceTrack(
   // leg at its nominal slot). A face under the ground is a hidden face, and
   // ART_DIRECTION §7 says delete it, never nudge the foot. The top cap stays:
   // the two lower branches leave it thinner than it is (`BRANCH_TAPER`), so an
-  // open trunk top would show from above.
-  const trunkTopCap = new CircleGeometry(STRUT_RADII.legs.to, 8);
-  // flat-ok: geometry-local cap on a unit trunk; every instance is leant by leanTrestleTree
-  trunkTopCap.rotateX(-Math.PI / 2);
-  trunkTopCap.translate(0, 0.5, 0);
-  const legGeometry = mergeGeometries(
-    [new CylinderGeometry(STRUT_RADII.legs.to, STRUT_RADII.legs.from, 1, 8, 1, true), trunkTopCap],
-    false,
-  );
-  if (!legGeometry) throw new Error('railRace/track.ts: the trunk cylinder and its top cap did not merge');
+  // open trunk top would show from above. It is still a `CylinderGeometry` —
+  // `check:entrance-road` and `check:swept-bus` read the post's radii off
+  // `geometry.parameters` — with the bottom cap's triangles dropped from the
+  // index: three.js builds the torso, then the top cap, then the bottom cap,
+  // one triangle per radial segment.
+  const LEG_RADIAL_SEGMENTS = 8;
+  const legGeometry = new CylinderGeometry(STRUT_RADII.legs.to, STRUT_RADII.legs.from, 1, LEG_RADIAL_SEGMENTS);
+  {
+    const index = legGeometry.getIndex();
+    const capIndices = LEG_RADIAL_SEGMENTS * 3;
+    const torsoIndices = LEG_RADIAL_SEGMENTS * 6;
+    if (!index || index.count !== torsoIndices + 2 * capIndices) {
+      throw new Error(
+        `railRace/track.ts: the trunk cylinder has ${index?.count ?? 0} indices, not the ` +
+          `${torsoIndices + 2 * capIndices} (torso + two caps) its foot cap is cut from`,
+      );
+    }
+    legGeometry.setIndex(Array.from(index.array.subarray(0, index.count - capIndices)));
+  }
   const lowerBranchGeometry = new CylinderGeometry(
     STRUT_RADII['branches-lower'].to,
     STRUT_RADII['branches-lower'].from,
