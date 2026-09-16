@@ -9900,31 +9900,6 @@ const distancePointToSegment = (
 };
 
 /**
- * **Every castle corner turret is solid, on every seed.**
- *
- * Issue #549: the facade's collider is a rectangle and the four turrets stand
- * outside it, so about 2.3 m of drawn stone at each corner had nothing behind
- * it and a child walked into a turret and out the other side. `check:castle-towers`
- * proves the fix thoroughly — 48 bearings, two strides, both controls — but it
- * runs on **the canonical seed only**. This is the clause that covers the other
- * pool seeds, and it matters here because the turrets' world position is a
- * function of the seed: `BUILDING_CENTRE_X/Z` comes from `placedEntry`, so a
- * seed that moves the castle moves all four turrets with it.
- *
- * Two questions, cheap enough to run per seed:
- *
- * 1. **The axis is occupied.** A player-sized body cannot stand on a turret's
- *    centre. `isClearCircle` answers this in O(1) and is decisive for the
- *    regression that actually threatens — a collider deleted, or a turret moved
- *    somewhere its collider did not follow.
- * 2. **It is solid from every approach**, marched at `PLAYER_LONGEST_STEP`,
- *    which is the stride that tunnels. Eight bearings rather than the check's
- *    48: this runs on seven parks and the check owns the exhaustive sweep.
- *
- * The threshold is the game's own — `PLAYER_RADIUS` against the turret's drawn
- * `radiusBottom`, read off the built park rather than from the generator.
- */
-/**
  * **A bend moves stone onto the sphere; it must never move it away from the
  * structure it belongs to.**
  *
@@ -9994,6 +9969,31 @@ const castleTurretsKeepTheirReach: Invariant = (facts) => {
   ];
 };
 
+/**
+ * **Every castle corner turret is solid, on every seed.**
+ *
+ * Issue #549: the facade's collider is a rectangle and the four turrets stand
+ * outside it, so about 2.3 m of drawn stone at each corner had nothing behind
+ * it and a child walked into a turret and out the other side. `check:castle-towers`
+ * proves the fix thoroughly — 48 bearings, two strides, both controls — but it
+ * runs on **the canonical seed only**. This is the clause that covers the other
+ * pool seeds, and it matters here because the turrets' world position is a
+ * function of the seed: `BUILDING_CENTRE_X/Z` comes from `placedEntry`, so a
+ * seed that moves the castle moves all four turrets with it.
+ *
+ * Two questions, cheap enough to run per seed:
+ *
+ * 1. **The axis is occupied.** A player-sized body cannot stand on a turret's
+ *    centre. `isClearCircle` answers this in O(1) and is decisive for the
+ *    regression that actually threatens — a collider deleted, or a turret moved
+ *    somewhere its collider did not follow.
+ * 2. **It is solid from every approach**, marched at `PLAYER_LONGEST_STEP`,
+ *    which is the stride that tunnels. Eight bearings rather than the check's
+ *    48: this runs on seven parks and the check owns the exhaustive sweep.
+ *
+ * The threshold is the game's own — `PLAYER_RADIUS` against the turret's drawn
+ * `radiusBottom`, read off the built park rather than from the generator.
+ */
 const castleTurretsAreSolid: Invariant = (facts) => {
   const wrong: string[] = [];
   const turrets = facts.castleTurrets;

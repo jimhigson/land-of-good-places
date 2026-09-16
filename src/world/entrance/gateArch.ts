@@ -181,18 +181,28 @@ export function buildGateArch(options: GateArchOptions): GateArch {
   //
   // Piers, span and lettering are one authored mesh under this root, and the
   // comment that stood here said the whole gate should therefore lean as the
-  // single object it is. Measured on the built park, that object's footprint
-  // radius is **7.42 m**, and a flat patch on R = 220 m is honest only to
-  // 4.69 m — so one tilt was misplacing its outer piers by **12.5 cm**. Jim's
-  // ruling covers exactly this: anything wider than a bench uses local
-  // horizontal and vertical, not a global one.
+  // single object it is. Measured on the built park by `scripts/rigid-audit.mts`
+  // — the furthest *drawn* vertex, 3600 of them, not a box corner — that
+  // object's footprint radius is **5.74 m**, and a flat patch on R = 220 m is
+  // honest only to 4.69 m, so one tilt was misplacing its outer piers by
+  // **7.5 cm**. Jim's ruling covers exactly this: anything wider than a bench
+  // uses local horizontal and vertical, not a global one.
+  //
+  // **7.42 m / 12.5 cm is what this comment said first, and it was wrong.** The
+  // audit then measured to two corners of a `Box3`, which is the circumscribing
+  // rectangle's half-diagonal — a factor of √2 too large for anything that does
+  // not fill its own box. The verdict survives the correction; the numbers did
+  // not, and they were quoted here as measured fact.
   //
   // **The colliders stay honest**, which was the original comment's real
   // concern and is worth keeping the number for: the feet below are computed
-  // from flat `centreX/Z ± halfWidth·axis`, and bending moves a pier foot
-  // horizontally by `d − R·sin(d/R)` = **1.4 mm** at this radius. The drop onto
-  // the sphere is vertical and the collider is a footprint, so the two still
-  // describe the same square metre.
+  // from flat `centreX/Z ± halfWidth·axis`, and bending moves a point at
+  // distance `d` horizontally by `d − R·sin(d/R)`, which at the gate's widest
+  // drawn reach of 5.74 m is **0.65 mm** — an upper bound on any pier foot,
+  // which stands nearer the middle than that. (This read 1.4 mm while the
+  // radius was the √2-inflated 7.42 m.) The drop onto the sphere is vertical
+  // and the collider is a footprint, so the two still describe the same square
+  // metre.
   // **Stood on the sphere first, then bent.** Deleting `standOnSphere` here was
   // a real bug, not a simplification: `bendPlacedStructure` reads its chart off
   // the root's own world quaternion, so a root carrying only a yaw hands it an
