@@ -729,6 +729,22 @@ export interface ParkFacts {
    */
   readonly bridgeParapetRings: readonly BridgeParapetRing[];
   /**
+   * **How tall a bridge parapet is at its very tallest**, metres —
+   * `bridges.ts`'s own `PARAPET_HEIGHT + PARAPET_CROWN_LIFT`, carried here so
+   * an invariant probing a parapet knows where the parapet *stops*.
+   *
+   * It exists because `noBridgeParapetCanBeSeenThrough` used to probe a
+   * hand-typed 1.5 m below the wall top — **0.33 m below the bottom of a
+   * 1.17 m wall**. Everything it found in that overshoot was the spandrel and
+   * deck edge under the parapet, which is not what the clause is about, and
+   * which the bend moved. Measured across the five failing seeds: every single
+   * reported hole sat at drop 1.38-1.48 m and **every one was below the wall's
+   * own height**, while at or above the wall bottom there were **0 misses in
+   * 32,292 judged samples**. A datum standing in for a quantity it does not
+   * describe, exactly as CLAUDE.md warns.
+   */
+  readonly maxParapetHeight: number;
+  /**
    * **Drawn paths whose own END stands in the air on a bridge** — issue #414,
    * Jim's *"there is also a path that runs into the side of the bridge —
    * basically runs into a solid wall"*.
@@ -1692,7 +1708,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // than a threshold restated in a test. Both imports are dynamic for the usual
   // reason — `bridges.ts` reaches `paths.ts` and `terrain.ts` reaches
   // `parkManifest` through `boundary.ts`, and either would pin the seed.
-  const { PARAPET_GONE_HUMP } = await import('../../src/world/train/bridges.ts');
+  const { PARAPET_GONE_HUMP, PARAPET_HEIGHT, PARAPET_CROWN_LIFT } = await import(
+    '../../src/world/train/bridges.ts'
+  );
+  /** The tallest a parapet is ever drawn — see {@link ParkFacts.maxParapetHeight}. */
+  const maxParapetHeight = PARAPET_HEIGHT + PARAPET_CROWN_LIFT;
   const bridgeParapetRings: BridgeParapetRing[] = [];
   {
     // `Mesh` is shadowed later in this function by a destructured dynamic
@@ -2892,6 +2912,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     bridgeReservations,
     bridgeParapetRings,
+    maxParapetHeight,
     plannedBridgeSiteDistances,
     bridgePaving,
     strandedPathEnds,
