@@ -634,7 +634,23 @@ export class RaceCamera {
     this.place();
   }
 
-  /** The rider's lane at arc distance `s`, at the level the lanes undulate about. */
+  /**
+   * The rider's lane at arc distance `s`, at the level the lanes undulate about.
+   *
+   * **Public because `scripts/check-rail-race.mts` needs exactly this point**,
+   * and had its own copy of it. That copy read `route.base` — a single number
+   * that stopped existing when the ring was held a constant height above the
+   * *sphere* and `baseAt(distance, lane)` replaced it. `undefined + 0.6 + 1.9`
+   * is `NaN`, every projection through the camera went `NaN`, and `NaN >= 1` is
+   * false — so **ten** of that script's assertions printed `NaN%` and passed
+   * for as long as they were reached at all. A check that re-derives the rig's
+   * own geometry can only ever prove it agrees with itself; this way there is
+   * one definition and nothing to keep in step.
+   */
+  riderPoint(s: number, into: Vector3): Vector3 {
+    return this.ringPoint(s, into);
+  }
+
   private ringPoint(s: number, into: Vector3): Vector3 {
     const sample = this.route.path.sampleAt(s);
     const offset = riderOffset(this.route);

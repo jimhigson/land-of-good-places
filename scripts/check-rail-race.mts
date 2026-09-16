@@ -465,14 +465,7 @@ const probe = new Vector3();
  * step with the rig and quietly stop measuring it. Grounded in the running game
  * on 1 August 2026: the player's own object sits 1.2–2.0 m above the rail.
  */
-const onLane = (s: number, into: Vector3): Vector3 => {
-  const sample = route.path.sampleAt(s);
-  return into.set(
-    sample.x + sample.normalX * RIDER_OFFSET,
-    route.base + 0.6 + RIDER_RIDE_HEIGHT,
-    sample.z + sample.normalZ * RIDER_OFFSET,
-  );
-};
+const onLane = (s: number, into: Vector3): Vector3 => rig.riderPoint(s, into);
 
 /** Where the track `s` metres along lands across the screen, -1 left, +1 right. */
 const across = (s: number): number => onLane(s, probe).project(rig.camera).x;
