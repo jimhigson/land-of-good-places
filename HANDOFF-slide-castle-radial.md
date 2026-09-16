@@ -245,3 +245,20 @@ part of the chute inside stone. `/slide` boards the ride; for a look from
 outside, a `/view` camera south-east of the castle looking back north-west at
 the south wall at the height of the parapet. Nothing a player can see has
 changed on this branch — it is a corrected measurement, not moved geometry.
+
+## PR
+
+Open as **#637**, base `eng/sphere-ground-claims` (not `main`). CI will be red on
+`Checks` and `Procgen invariants` **because the base is red** — see the
+inherited-red table above; every one of the seven failing steps was re-run on
+the base worktree and fails there identically. Nothing on this branch is red
+that is not already red on `eng/sphere-ground-claims`.
+
+The seven are worth pushing back to #630, whose ledger names only
+`check:rail-race`: `check:hotel` (19 problems, PR #634), `check:rail-race`,
+`check:tie-frame`, `check:cruiser-clearance`, `check:castle-window`,
+`check:keyring-view`, `check:climb-wave`.
+
+`check:coplanar` and `check:swept-bus` were not run locally — they have their own
+workflows on the PR and this branch touches no geometry, only measurements and
+comments.
