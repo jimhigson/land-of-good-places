@@ -14,6 +14,7 @@ import {
 } from './parkManifest';
 import { lazyView } from '../boot/lazyView';
 import { planPart } from './parkPlan';
+import { registerPlanCache } from '../boot/planCaches';
 import { layoutRestartBase, layoutStreamBump } from './parkWarp';
 import { PARK_BOUNDARY } from './boundary';
 import { ENTRANCE_GATE_X, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
@@ -1294,3 +1295,16 @@ export function placedEntry(id: string): PlacedEntry {
   if (!entry) throw new Error(`park layout: no entry '${id}' in the manifest`);
   return entry;
 }
+
+// The plot memos below are derived from the decided layout. Under
+// backtracking the layout can be re-decided (decision zero); every reader of
+// `plots()`, `clearOfPlots` and the plot grid — the cruiser, the loop, the
+// crossing sites, the paths — must then see the new plots, or the whole park
+// is solved against a layout that no longer exists. That is exactly what
+// happened before this registration: seed 8 produced two different parks from
+// two entry points, and a bridge site was "proven" through the hotel's walls.
+registerPlanCache(() => {
+  plotColumns = null;
+  exceptIndices.clear();
+  plotGridCache = null;
+});

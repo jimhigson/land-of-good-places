@@ -301,7 +301,13 @@ function walkReachable(x: number, z: number): boolean {
 }
 
 function isStandable(x: number, z: number, radius = PLAYER_RADIUS): boolean {
-  const probe = new Vector3(x, 0, z);
+  // Probed at the ground, not at y = 0. On the sphere the ground is metres
+  // below y = 0 over most of the park, and `resolve` clears a wall whose
+  // absolute top is below the probe — so a probe at 0 walked straight through
+  // every fence seam under a bridge deck and called the rail beside it
+  // standable (`rail.walkable: 1` on seeds 4, 6, 9; 3 after the seam was
+  // fixed). `walkReachable` below already stands at `park.sample`.
+  const probe = new Vector3(x, park.sample(x, z, 0), z);
   collision.resolve(probe, radius);
   const dx = probe.x - x;
   const dz = probe.z - z;
