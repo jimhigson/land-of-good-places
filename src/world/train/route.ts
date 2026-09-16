@@ -495,11 +495,21 @@ function boundaryMask(): NonNullable<typeof insideBoundaryMask> {
  * at all, and the path router — handed a leg that cannot exist — drew one over
  * the rails anyway, which `crossings.ts` then refuses.
  *
+ * **How the figures below were measured**, so they can be re-run rather than
+ * trusted: the same question this function asks, as a scratch flood fill on a
+ * 0.25 m grid — a cell is walkable when it is inside `PARK_BOUNDARY` and more
+ * than {@link FENCED_GROUND_REACH} from every rail sample — with each region's
+ * area summed from its cells. (This function floods at
+ * {@link FENCED_GROUND_CELL}, so its own areas differ by rounding; only which
+ * region a point is in is asked here, never an area.)
+ *
  * Measured on seed 24 (eng/sphere-six-reds, 16 Sep 2026): a loop whose neck
  * between railD ~36 and ~151 has its centre lines **4.0 m** apart cut the
- * ground into three regions (65100 / 702 / 545 m2); both bridge sites the
- * planner kept joined outside to the 702 m2 lobe, and `stall.spookyHouse` sat
- * alone in the other — no bridge fits anywhere on that lobe's rail. So a loop
+ * ground into three regions (18594 / 684 / 528 m2); both bridge sites the
+ * planner kept (railD 0 and 180) joined the 18594 m2 park to the 684 m2 lobe,
+ * and `stall.spookyHouse` sat alone in the 528 m2 one — no bridge fits anywhere
+ * on that lobe's rail. Control: the same fill at 0.3 m clearance opens the neck
+ * and the 528 m2 lobe merges, so the fill can see connectivity. So a loop
  * that walls a destination off like that is refused here, and the search goes
  * on to its next start pose — the backtracking rule, asked of the real loop,
  * not a tolerance widened until the crossing throw stops.
@@ -507,7 +517,7 @@ function boundaryMask(): NonNullable<typeof insideBoundaryMask> {
  * The same clause is what seed 451 was missing (retired on
  * eng/sphere-crossing-and-coping after a warp search failed): its loop ran
  * within 3.95 m of itself beside station 0 and, **measured against the real
- * boundary wall**, cut a 773 m2 rim strip (the Rail Race stall and its exit)
+ * boundary wall** by the same fill, cut a 773 m2 rim strip (the Rail Race stall and its exit)
  * and a 2384 m2 lobe (dodgems) off from the 15737 m2 main park, with its only
  * bridge site joining the two cut-off pieces to each other. Refused here, the
  * search's next loop builds. The boundary matters: flooded without it, the

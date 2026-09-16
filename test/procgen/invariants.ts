@@ -1347,7 +1347,7 @@ const rideExitsAreUsable: Invariant = (facts) => {
  * The railway fences the park into pieces a child can only cross by bridge,
  * and a loop that pinches back on itself can fence a doormat into a pocket no
  * bridge reaches. Seed 24 on eng/sphere-six-reds did exactly that to
- * `stall.spookyHouse` (a 545 m2 lobe behind a 4.0 m neck, both bridge sites
+ * `stall.spookyHouse` (a 528 m2 lobe behind a 4.0 m neck, both bridge sites
  * on the far side), and seed 451 did it to the Rail Race stall. Neither was
  * caught here only because `crossings.ts` refused the illegal path first; this
  * asks the question of the built park directly, so a pocket whose path was
