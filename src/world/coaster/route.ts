@@ -1,4 +1,7 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
+
+/** Scratch for asking the castle's own frame where its window sits. */
+const _windowProbe = /* @__PURE__ */ new Vector3();
 import { Rng, TAU } from '../../core/mathUtils';
 import { PARK_SEED } from '../parkManifest';
 import { CART_ENVELOPE } from './cart';
@@ -24,7 +27,7 @@ import {
   WINDOW_HALF_WIDTH,
   WINDOW_TRACK_Y,
   castleClear,
-  castleY,
+  fromCastleLocal,
   crossingBand,
   insideCastleFootprint,
 } from '../building/cruiserWindow';
@@ -1381,7 +1384,11 @@ export function* coasterProfileSearch(
   const castleSpan = spanInsideCastle((d, into) => plan.pointAt(d, into), plan.length);
   yield 0;
   if (castleSpan) {
-    const windowY = castleY(WINDOW_TRACK_Y);
+    // The window's own height, taken through the castle's real transform
+    // rather than as `BUILDING_BASE_Y + WINDOW_TRACK_Y`. On a shell leaning
+    // 12.44° those differ, and the loop was being solved to the second one
+    // while the hole was cut in the first.
+    const windowY = fromCastleLocal(0, WINDOW_TRACK_Y, 0, _windowProbe).y;
     for (let i = 0; i < controls; i += 1) {
       const s = (i / controls) * plan.length;
       const away = outsideSpan(castleSpan, s, plan.length);

@@ -16,7 +16,6 @@ import {
   WINDOW_TRACK_Y,
   toCastleLocal,
 } from '../building/cruiserWindow';
-import { BUILDING_BASE_Y } from '../building/layout';
 import { CART_ENVELOPE } from './cart';
 import { COASTER_PLANS } from './plan';
 import type { CoasterRoute } from './route';
@@ -29,6 +28,9 @@ const MERLON_HEIGHT = 1.05;
 const ENVELOPE_STEP = 0.1;
 /** Hop length for the swept ray test. Short enough that nothing is stepped over. */
 const RAY_STEP = 0.2;
+
+/** Scratch for the envelope corner being asked about. */
+const _corner = /* @__PURE__ */ new Vector3();
 
 /**
  * **The holes the Sky Cruiser makes in the castle** — measured off the solved
@@ -122,14 +124,16 @@ export function openingsFor(route: CoasterRoute): WallOpening[] {
 
   for (let d = from; d <= to; d += SLAB_STEP) {
     route.pointAt(d, point);
-    const { lx, lz } = toCastleLocal(point.x, point.z);
+    // **One transform, all three components.** This was `toCastleLocal(point.x,
+    // point.z)` for the plan and `point.y - BUILDING_BASE_Y` for the height —
+    // two flat formulas describing a castle that leans 12.44°.
+    const { lx, ly, lz } = toCastleLocal(point);
     const depth = Math.abs(lx);
     if (depth < CASTLE_INNER_X || depth > CASTLE_OUTER_X) {
       close();
       continue;
     }
     const wall: SideWall = lx > 0 ? 'east' : 'west';
-    const ly = point.y - BUILDING_BASE_Y;
     if (run && run.wall !== wall) close();
     if (!run) {
       run = { wall, minZ: lz, maxZ: lz, sumZ: lz, sumY: ly, n: 1 };
@@ -410,8 +414,12 @@ export function checkCastleWindows(
     const sideZ = tangent.x / flat;
     for (const lateral of [-CART_ENVELOPE.halfWidth, CART_ENVELOPE.halfWidth]) {
       for (const rise of [-CART_ENVELOPE.below, CART_ENVELOPE.above]) {
-        const { lx, lz } = toCastleLocal(point.x + sideX * lateral, point.z + sideZ * lateral);
-        const ly = point.y + rise - BUILDING_BASE_Y;
+        // Same one transform as above. The envelope's own corner is built in
+        // world space first and then asked where it is in the castle's axes,
+        // rather than having its plan and its height converted by two formulas
+        // that disagree the moment the building leans.
+        _corner.set(point.x + sideX * lateral, point.y + rise, point.z + sideZ * lateral);
+        const { lx, ly, lz } = toCastleLocal(_corner);
         if (castleSolidAt(lx, ly, lz, openings)) {
           worstInside ??= { d, lx, ly, lz };
         }
