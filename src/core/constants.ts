@@ -70,8 +70,10 @@ export const RIM_DROP = 17;
  * existed to guarantee the cat bus could drive the whole 117 m of its road; Jim
  * has since ruled that it need not — *"showing the bus coming in a couple
  * meters is fine and good, I don't mind that at all."* A budget derived from a
- * 117 m journey that no longer happens is not a budget, and sizing a 2460 m
- * planet around it would undo the toy world he picked by eye.
+ * 117 m journey that no longer happens is not a budget, and sizing a planet
+ * around it — `theGroundIsTheSphereItClaimsToBe` computes and prints how big,
+ * from the kerb's measured reach, on every run —
+ * would undo the toy world he picked by eye.
  *
  * So this number is a **look**, and it is allowed to be. What it must not do is
  * pretend to be a calculation. If it changes again, change it because the park
@@ -84,7 +86,11 @@ export const RIM_DROP = 17;
 export const GROUND_SPHERE_RADIUS = 220;
 
 /**
- * **The park grows as the world shrinks.**
+ * **The park grows as the world shrinks — SUPERSEDED, kept as the record of a
+ * ruling that was later reversed.** The reference below is now held equal to
+ * the planet, so the relationship this describes evaluates to 1 and the park
+ * is its authored size; the figures in this block (316 m, 22 m, 41 m) describe
+ * the relationship as proposed, not anything this code computes.
  *
  * Jim, 13 September 2026: *"since this makes the park smaller in terms of
  * surface area, as we decrease the radius, increase the size of the park in
@@ -146,10 +152,9 @@ export const GROUND_SPHERE_RADIUS = 220;
  * questions, and #619 answered the first.** `theGroundIsTheSphereItClaimsToBe`
  * now asserts the second, which is why 2.335x fails it on every seed.
  *
- * Whole-suite counts, diffed by name:
- *
- *     scale 2.335 (#619's base)   501 passed  128 failed  0 pending
- *     scale 1     (this branch)   552 passed   96 failed  0 pending
+ * (Whole-suite counts, diffed by name, are in the PR and in
+ * `NOTE-scale-1-fallout-and-the-rebase-collision.md` — not here, where they
+ * went stale on the next commit.)
  *
  * ## Settled: scale 1 stands, and it is Jim's decision, not an engineer's
  *
@@ -195,19 +200,15 @@ export const PARK_SURFACE_SCALE = Math.sqrt(
  * **The park may not reach past its own planet, and this is where that is
  * stated rather than discovered.**
  *
- * The paragraph above this said the reference was *"held equal to
- * `GROUND_SPHERE_RADIUS`, which makes the scale exactly 1"*, and described a
- * park *"grown 2.33x"* as the state that is **blocked**. The constant was 1200
- * against a radius of 220, so the scale was 2.3355 and the blocked state was
- * the one shipping. Measured consequence, on `feat/sphere-combined` with
- * `test:procgen` red on 49 assertions across seeds 11 and 326:
- * `boundary.maxRadius` reached **245.0 m on a 220 m planet** — 25 m past the
- * equator, where `terrainHeight`'s `Math.max(0, R² - d²)` guard clamps the
- * ground to a flat plane at `y = -R`. A tree stood at 216 m on a **1045%**
- * slope 179.6 m below the park's centre; a Rail Race duck bar stood at 246 m
- * on no ground at all.
- *
- * `scripts/park-past-the-horizon.mts` is that measurement, re-runnable.
+ * History, so the next reader knows why this exists: on `feat/sphere-combined`
+ * before #620 the reference above was 1200 m against a radius of 220, a scale
+ * of 2.3355, while its docblock claimed a scale of 1. `boundary.maxRadius`
+ * reached **245.0 m on a 220 m planet** — 25 m past the equator, where
+ * `terrainHeight`'s `Math.max(0, R² - d²)` guard clamps the ground to a flat
+ * plane at `y = -R`. A tree stood at 216 m on a **1045%** slope 179.6 m below
+ * the park's centre; a Rail Race duck bar stood at 246 m on no ground at all.
+ * `scripts/park-past-the-horizon.mts` is the transcript of that park. The
+ * reference is now the planet itself, so the paragraph above is true.
  *
  * So the domain states its own limit. A cap's gradient at horizontal distance
  * `d` is `tan θ = d / √(R² − d²)` — **not** `d / R`, which is `sin θ` and is
@@ -266,9 +267,9 @@ export const GARDEN_PLAY_RADIUS = 58 * PARK_SURFACE_SCALE;
  *
  * Why: the ceiling existed to guarantee the bus could drive the whole 117 m of
  * its road. Jim has ruled that it need not — *"showing the bus coming in a
- * couple meters is fine and good, I don't mind that at all."* Honouring 10%
- * against the park's real reach would need a planet of about **2460 m**, eleven
- * times the one he chose by eye.
+ * couple meters is fine and good, I don't mind that at all."* What honouring
+ * 10% would cost in planet is not typed here: the invariant below computes it
+ * from the kerb's measured reach and prints it on every run.
  *
  * **What replaced it is a report, not a veto.**
  * `theGroundIsTheSphereItClaimsToBe` still walks the park radially and the drawn
