@@ -124,7 +124,8 @@ import { duckBarAssetGeometry } from '../src/art/models/duckBarAsset.ts';
 import { createKid, kidEyeCentre } from '../src/art/models/kid.ts';
 import { createCart } from '../src/world/railRace/cart.ts';
 import { PALETTE } from '../src/core/palette.ts';
-import { Box3, DoubleSide, Group, Mesh, Object3D, Raycaster } from 'three';
+import { Box3, DoubleSide, Group, Matrix4, Mesh, Object3D, Raycaster } from 'three';
+import { placeRaceCart, seatRaceRider, type CartHeading } from '../src/world/railRace/seat.ts';
 import { Player } from '../src/entities/Player.ts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
@@ -139,17 +140,40 @@ import type { InputSystem } from '../src/core/input/index.ts';
  * nobody can see, and could pass a torso that genuinely went through the floor
  * because a hidden foot was lower still.
  */
-function visibleBox(root: Object3D): Box3 {
+function visibleBox(root: Object3D, into: Matrix4 | null = null, visibleOnly = true): Box3 {
   const box = new Box3();
   root.updateWorldMatrix(true, true);
+  const toFrame = new Matrix4();
+  const corner = new Vector3();
   root.traverse((child) => {
-    if (!child.visible) return;
-    let node: Object3D | null = child;
-    while (node && node !== root) {
-      if (!node.visible) return;
-      node = node.parent;
+    if (visibleOnly) {
+      if (!child.visible) return;
+      let node: Object3D | null = child;
+      while (node && node !== root) {
+        if (!node.visible) return;
+        node = node.parent;
+      }
     }
-    if (child instanceof Mesh) box.expandByObject(child);
+    if (!(child instanceof Mesh)) return;
+    const geometry = child.geometry;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const local = geometry.boundingBox;
+    if (!local || local.isEmpty()) return;
+    // The eight corners of the mesh's own box, taken into `into`'s frame —
+    // exactly what `Box3.expandByObject` does into the world frame when `into`
+    // is null, so an upright cart reads the same numbers either way.
+    toFrame.copy(child.matrixWorld);
+    if (into) toFrame.premultiply(into);
+    for (let i = 0; i < 8; i += 1) {
+      corner
+        .set(
+          i & 1 ? local.max.x : local.min.x,
+          i & 2 ? local.max.y : local.min.y,
+          i & 4 ? local.max.z : local.min.z,
+        )
+        .applyMatrix4(toFrame);
+      box.expandByPoint(corner);
+    }
   });
   return box;
 }
@@ -957,14 +981,34 @@ say('');
     ? -barGeometry.boundingBox.min.y
     : 0;
 
-  const railPoint = route.pointAt(
-    PLAYER_LANE,
-    route.wrap(route.startDistance),
-    new Vector3(),
-  );
+  // **The cart is placed by the game's own `placeRaceCart`, lean and all.**
+  //
+  // This used to build its own group with a position, a scale and no rotation,
+  // and seat the rider straight up world `+Y`. Once the ring was leant onto the
+  // sphere the game's tub leant with it and this one did not — so every clause
+  // below measured an upright tub against a leant rider the game never draws,
+  // and reported her ducking 0.53 m through a floor that was not there. The
+  // placement and the seating now come from `railRace/seat.ts`, the same
+  // functions `RailRace.placeCarts`/`poseRider` call.
   const cartGroup = new Group();
-  cartGroup.position.copy(railPoint);
+  const cartHeading: CartHeading = { yaw: 0, pitch: 0 };
+  placeRaceCart(route, PLAYER_LANE, route.wrap(route.startDistance), cartGroup, cartHeading);
   cartGroup.scale.setScalar(route.scale);
+  const railPoint = cartGroup.position;
+  // **Every height and width below is read in the cart's own frame**: origin at
+  // the rail head, `+Y` the tub's up, `+X` across it, `+Z` along the track. On a
+  // leant ring world `y` is none of those, so "above the tub floor" has to be
+  // asked in the frame the tub is built in or it measures the lean instead.
+  const cartFrame = new Matrix4().compose(
+    cartGroup.position,
+    cartGroup.quaternion,
+    new Vector3(1, 1, 1),
+  );
+  const toCart = cartFrame.clone().invert();
+  say(
+    `pose cart    at ${route.wrap(route.startDistance).toFixed(1)} m, leant ` +
+      `${((new Vector3(0, 1, 0).applyQuaternion(cartGroup.quaternion).angleTo(new Vector3(0, 1, 0)) * 180) / Math.PI).toFixed(1)}° off world +Y`,
+  );
   // A real cart, because the complaint was about her going through *it*.
   const rideCart = createCart(PALETTE.markerPink);
   cartGroup.add(rideCart.root);
@@ -995,7 +1039,12 @@ say('');
   // `route.scale` for the seat and `RIDE_SCALE` for the model is not a slip — it
   // is exactly the split the ride makes, kept so a third ring would show up here
   // as a disagreement rather than as a silent pass.
-  const seatY = railPoint.y + SEAT_HEIGHT * route.scale;
+  const seatLift = SEAT_HEIGHT * route.scale;
+  /** The last sway she was seated at, so the seat assertions know where the seat is. */
+  let seatedSway = 0;
+  /** Where she is sitting, in the cart's frame — should be `(sway, seatLift, 0)`. */
+  const seatInCart = (): Vector3 => player.group.position.clone().applyMatrix4(toCart);
+  const offSeat = (): number => seatInCart().distanceTo(new Vector3(seatedSway, seatLift, 0));
 
   /** A player who is aboard and pressing nothing — the riding branch reads no input. */
   const idleInput = {
@@ -1036,7 +1085,8 @@ say('');
     // assertion below would be asserting the line above it rather than the
     // thing it names. That is the hollow-check disease this whole PR keeps
     // running into.
-    player.setRidePose(railPoint.x + sway, seatY, railPoint.z, 0, 0);
+    seatedSway = sway;
+    seatRaceRider(player, cartGroup, cartHeading, route.scale, sway, 0);
     player.railRaceRide = rider;
     player.update({
       dt: 1 / 60,
@@ -1049,12 +1099,11 @@ say('');
     player.group.updateMatrixWorld(true);
     const head = player.model.head;
     return {
-      headTop: new Box3().setFromObject(head).max.y - railPoint.y,
+      headTop: visibleBox(head, toCart, false).max.y,
       headAt: head.getWorldPosition(new Vector3()),
-      // Along the track: the rider's group is positioned and scaled but never
-      // rotated here, so the model's own forward is world +Z.
-      headDepth: new Box3().setFromObject(head).getSize(new Vector3()).z,
-      body: visibleBox(player.model.root),
+      // Along the track, which is the cart frame's +Z.
+      headDepth: visibleBox(head, toCart, false).getSize(new Vector3()).z,
+      body: visibleBox(player.model.root, toCart),
     };
   };
 
@@ -1103,7 +1152,7 @@ say('');
   // bottom of the cart, which is exactly what the translation this replaced
   // did — so the floor is asserted separately from the bar.
   cartGroup.updateMatrixWorld(true);
-  const cartBox = new Box3().setFromObject(rideCart.root);
+  const cartBox = visibleBox(rideCart.root, toCart, false);
   // The tub's own floor, which `cart.ts` builds at the wheels' axle height so
   // the hopper clears them — the real surface she would come through, not the
   // bounding box's bottom (which is the underside of the wheels and would let a
@@ -1128,10 +1177,10 @@ say('');
   // rejected and only one of them is where the old bug lived.
   require(
     Math.abs(player.model.root.position.y) < 1e-6 &&
-      Math.abs(player.group.position.y - seatY) < 1e-6,
+      offSeat() < 1e-6,
     `the duck pose moved the rider off the seat — model root at ` +
       `${player.model.root.position.y.toFixed(3)} (should be 0) and her group at ` +
-      `${player.group.position.y.toFixed(3)} against a seat at ${seatY.toFixed(3)}. That is a ` +
+      `${seatInCart().y.toFixed(3)} against a seat at ${seatLift.toFixed(3)}, ${offSeat().toFixed(3)} m off it. That is a ` +
       'translation, not a duck.',
   );
 
@@ -1269,10 +1318,10 @@ say('');
   );
   require(
     Math.abs(player.model.root.position.y) < 1e-6 &&
-      Math.abs(player.group.position.y - seatY) < 1e-6,
+      offSeat() < 1e-6,
     `the celebration moved the rider off the seat — model root at ` +
       `${player.model.root.position.y.toFixed(3)} (should be 0) and her group at ` +
-      `${player.group.position.y.toFixed(3)} against a seat at ${seatY.toFixed(3)} — the ride ` +
+      `${seatInCart().y.toFixed(3)} against a seat at ${seatLift.toFixed(3)}, ${offSeat().toFixed(3)} m off it — the ride ` +
       'never moves the root.',
   );
 
@@ -1300,16 +1349,22 @@ say('');
       // Both faces must register or a ray leaving the solid is invisible.
       (hopperMesh.material as { side: number }).side = DoubleSide;
       cartGroup.updateMatrixWorld(true);
-      const hopperBox = new Box3().setFromObject(hopperMesh);
+      const hopperBox = visibleBox(hopperMesh, toCart, false);
+      const acrossCart = new Vector3(1, 0, 0).transformDirection(cartFrame);
+      const hitInCart = new Vector3();
       const armCaster = new Raycaster();
       armCaster.far = 500;
 
       /** Where a line straight across the cart at this height and depth meets the tub. */
       const wallAt = (y: number, z: number, x: number): number | null => {
-        armCaster.set(new Vector3(hopperBox.min.x - 10, y, z), new Vector3(1, 0, 0));
+        // A line across the tub in the cart's frame, cast in the world.
+        armCaster.set(
+          new Vector3(hopperBox.min.x - 10, y, z).applyMatrix4(cartFrame),
+          acrossCart,
+        );
         const xs = armCaster
           .intersectObject(hopperMesh, false)
-          .map((hit) => hit.point.x)
+          .map((hit) => hitInCart.copy(hit.point).applyMatrix4(toCart).x)
           .sort((a, b) => a - b);
         if (xs.length < 2) return null;
         // How far past the tub's **outer** skin on this point's own side.
@@ -1389,7 +1444,8 @@ say('');
             for (let i = 0; i < position.count; i += 1) {
               vertex
                 .set(position.getX(i), position.getY(i), position.getZ(i))
-                .applyMatrix4(object.matrixWorld);
+                .applyMatrix4(object.matrixWorld)
+                .applyMatrix4(toCart);
               // Above the rim there is no tub to go through.
               if (vertex.y > hopperBox.max.y) continue;
               beside += 1;
@@ -1530,7 +1586,7 @@ say('');
     setRiderLegsVisible(player.model, riderLegsShow(phase));
     player.group.updateMatrixWorld(true);
     const drawn = legParts.every((part) => part?.visible === true);
-    const reach = visibleBox(player.model.root).min.y;
+    const reach = visibleBox(player.model.root, toCart).min.y;
     legReport.push(`${phase} ${drawn ? 'on' : 'off'}`);
     require(
       drawn === WANT_LEGS[phase],
@@ -1549,12 +1605,12 @@ say('');
   const legsRacing = (() => {
     setRiderLegsVisible(player.model, riderLegsShow('racing'));
     player.group.updateMatrixWorld(true);
-    return visibleBox(player.model.root).min.y;
+    return visibleBox(player.model.root, toCart).min.y;
   })();
   const legsWinning = (() => {
     setRiderLegsVisible(player.model, riderLegsShow('finishing'));
     player.group.updateMatrixWorld(true);
-    return visibleBox(player.model.root).min.y;
+    return visibleBox(player.model.root, toCart).min.y;
   })();
   say(`legs         ${legReport.join('   ')}`);
   say(
