@@ -6676,10 +6676,13 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         // `FALL_THRESHOLD` the game does not even call it a fall.
         const drop = Math.min(exposure[i] as number, exposure[i + SAMPLES_PER_STRIDE] as number);
         if (drop <= FALL_THRESHOLD) continue;
-        // The *uphill* direction is the one that loses the surface; a descent
-        // she simply falls a few centimetres down, which is what the ramp is
-        // for. Kept as the old clause had it.
-        worstWorld = Math.max(worstWorld, g.world);
+        // **Signed for the assertion, magnitude for the note.** Only the
+        // *uphill* direction loses her the surface — running down, she simply
+        // steps down, which is what a ramp is for — so `worstGrade` takes the
+        // signed local grade, exactly as the old clause did. `worstWorld` is
+        // reported rather than asserted on, and what it is there to show is how
+        // far the planet moves the number either way, so it takes the size.
+        worstWorld = Math.max(worstWorld, Math.abs(g.world));
         if (g.local > worstGrade) {
           worstGrade = g.local;
           worstRise = g.rise;
@@ -6703,8 +6706,9 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
             `rise along the local up at her foot (${worstRise.toFixed(3)} m) over the ` +
             `part of it lying in that point's own horizontal plane ` +
             `(${worstRun.toFixed(3)} m), so the planet's own fall is not counted as a ` +
-            `climb (the world-y figure for the same crossing is ` +
-            `${worstWorld.toFixed(3)}, and flat grass out here reads over 1.0 that way). ` +
+            `climb (the steepest world-y figure over the same strides is ` +
+            `${worstWorld.toFixed(3)}, and flat grass at r=140 reads 1.140 that way with ` +
+            `nothing built on it at all). ` +
             `One clamped frame (${MAX_FRAME_DELTA.toFixed(4)} s) carries her ` +
             `${PLAYER_LONGEST_STEP.toFixed(3)} m, and WalkSurfaces.sample reaches ` +
             `BUILDING_STEP_UP (${BUILDING_STEP_UP.toFixed(2)} m) above the surface she is ` +
@@ -6733,11 +6737,12 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         (crossingsJudged === 0
           ? ' — this clause asserts nothing about steepness here\n'
           : `; worst LOCAL grade ${seenWorstLocal.toFixed(3)} against ceiling ` +
-            `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)}. Worst world-y grade over the same ` +
-            `strides was ${seenWorstWorld.toFixed(3)} — NOT asserted on, and not a grade: ` +
-            `it is the ramp plus the dome. WalkSurfaces.sample's own ceiling is still ` +
-            `world-y, with 0.670 of park-independent headroom (1.670 measured on this ` +
-            `park) — so the planet is spending part of that margin and nothing yet ` +
+            `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)}. Steepest world-y grade over the ` +
+            `same strides was ${seenWorstWorld.toFixed(3)} — NOT asserted on, and not a ` +
+            `grade: it is the ramp plus the dome. WalkSurfaces.sample's own ceiling is ` +
+            `still literally world-y, and the headroom check:deck-fallthrough measured ` +
+            `there is ${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)} park-independent (1.670 on ` +
+            `this park) — so the planet is spending part of that margin and nothing yet ` +
             `guards it.\n`),
     );
   }
