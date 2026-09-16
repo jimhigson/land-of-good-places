@@ -6727,7 +6727,9 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     // failing tests only, so the obvious way to write this is invisible in
     // exactly the case it exists for.
     process.stderr.write(
-      `bridge sprint-grade: ${crossingsJudged} crossing(s) judged on this seed` +
+      `bridge sprint-grade: ` +
+        (controlFailures.length > 0 ? 'VOID (controls failed) — ' : '') +
+        `${crossingsJudged} crossing(s) judged on this seed` +
         (crossingsJudged === 0
           ? ' — this clause asserts nothing about steepness here\n'
           : `; worst LOCAL grade ${seenWorstLocal.toFixed(3)} against ceiling ` +
