@@ -150,6 +150,109 @@ export function geodesicLerp(a: Readonly<Geo>, b: Readonly<Geo>, t: number, targ
   );
 }
 
+const _ua = /* @__PURE__ */ new Vector3();
+const _ub = /* @__PURE__ */ new Vector3();
+const _up2 = /* @__PURE__ */ new Vector3();
+const _normal = /* @__PURE__ */ new Vector3();
+const _proj = /* @__PURE__ */ new Vector3();
+
+/** The angle between two unit vectors, clamped so acos cannot hand back NaN. */
+const angleBetweenUnits = (a: Readonly<Vector3>, b: Readonly<Vector3>): number => {
+  const dot = a.x * b.x + a.y * b.y + a.z * b.z;
+  return Math.acos(dot < -1 ? -1 : dot > 1 ? 1 : dot);
+};
+
+/**
+ * **How far `p` is from the geodesic arc running from `a` to `b`, along the
+ * surface, in metres.**
+ *
+ * The sphere's answer to point-to-segment distance, and the missing half of the
+ * claims registry: `boot/groundClaims.ts`'s `Capsule` — the shape of every
+ * path, rail run, road, wall and bridge deck in the park — is a segment with a
+ * half-width, and its distance kernel was `distPointSegment`, plane geometry
+ * over world `(x, z)`.
+ *
+ * That is not merely approximate, it is measurably wrong in a direction that
+ * matters: world `(x, z)` is an **orthographic** projection of this planet
+ * (`terrain.ts` puts the ground for `(x, z)` at `√(R² − x² − z²) − R`), so its
+ * radial axis compresses by `cos θ`. A flat `hypot` reads a 1 m radial gap as
+ * 1 m where a child walks 1/cos θ — 1.12 m at 100 m from the origin, 1.37 m at
+ * 150 m — and a demand disc is stretched by the same factor.
+ * `scripts/claim-chart-error.mts` prints that table from the constants.
+ *
+ * ## How it works, and the case that makes it more than one line
+ *
+ * The arc from `a` to `b` lies on the great circle whose normal is `â × b̂`. The
+ * **cross-track** distance from `p` to that whole great circle is
+ * `R · |asin(p̂ · n̂)|` — exact, closed form, no iteration.
+ *
+ * But a great circle is not a segment. The cross-track answer is only right
+ * where `p` projects *onto the arc itself*; beyond either end the nearest point
+ * is that end, and using cross-track there gives a distance to a piece of
+ * circle the claim does not occupy — which on a closed loop means the far side
+ * of the planet. So `p` is projected onto the great circle and the projection
+ * is tested for lying between the endpoints (the angles sum), falling back to
+ * the nearer endpoint when it does not. That is the spherical form of the `t`
+ * clamp in the planar version, and skipping it is the bug that makes a ring
+ * claim appear to cover ground it is nowhere near.
+ *
+ * Degenerate pairs are handled rather than producing NaN: endpoints that
+ * coincide (no great circle is defined) reduce to a point distance, which is
+ * also the right answer.
+ *
+ * Radii are ignored — this is a distance **along the ground**, and both the
+ * claims registry and everything that asks it care about bearing, not height.
+ */
+export function arcToSegment(
+  p: Readonly<Geo>,
+  a: Readonly<Geo>,
+  b: Readonly<Geo>,
+  radius: number,
+): number {
+  const rp = p.radius();
+  const ra = a.radius();
+  const rb = b.radius();
+  if (rp === 0 || ra === 0 || rb === 0) return 0;
+  _up2.set(p.cx / rp, p.cy / rp, p.cz / rp);
+  _ua.set(a.cx / ra, a.cy / ra, a.cz / ra);
+  _ub.set(b.cx / rb, b.cy / rb, b.cz / rb);
+
+  const toA = radius * angleBetweenUnits(_up2, _ua);
+  const toB = radius * angleBetweenUnits(_up2, _ub);
+  const ends = toA < toB ? toA : toB;
+
+  _normal.crossVectors(_ua, _ub);
+  const nl = _normal.length();
+  // Coincident or antipodal endpoints: there is no unique great circle through
+  // them, and the honest answer is the distance to the ends themselves.
+  if (nl < 1e-12) return ends;
+  _normal.multiplyScalar(1 / nl);
+
+  // Signed cross-track: how far off the great circle's plane `p` sits.
+  const offPlane = _up2.dot(_normal);
+  // The projection of `p` onto the great circle, normalised back to the sphere.
+  _proj.set(
+    _up2.x - _normal.x * offPlane,
+    _up2.y - _normal.y * offPlane,
+    _up2.z - _normal.z * offPlane,
+  );
+  const pl = _proj.length();
+  // `p` sits exactly on the great circle's own axis — every point of the arc is
+  // equidistant, and the endpoints give that distance correctly.
+  if (pl < 1e-12) return ends;
+  _proj.multiplyScalar(1 / pl);
+
+  // Is the projection *on the arc*, rather than on the far side of the circle?
+  // The angles sum to the whole only between the endpoints.
+  const span = angleBetweenUnits(_ua, _ub);
+  const viaProjection = angleBetweenUnits(_ua, _proj) + angleBetweenUnits(_proj, _ub);
+  if (viaProjection > span + 1e-9) return ends;
+
+  const crossTrack = radius * Math.abs(Math.asin(offPlane < -1 ? -1 : offPlane > 1 ? 1 : offPlane));
+  // The clamp cannot make the answer larger than going round by an end.
+  return crossTrack < ends ? crossTrack : ends;
+}
+
 /** Scratch-free convenience: a new `Geo` `metres` along `heading` from `g`. */
 export function advancedFrom(
   g: Readonly<Geo>,

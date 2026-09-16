@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { terrainHeight } from '../terrain';
+import { altitudeOfMetres, type Altitude } from './Altitude';
 import { Geo, PLANET_RADIUS } from './Geo';
 
 const _dir = /* @__PURE__ */ new Vector3();
@@ -76,6 +77,22 @@ export function groundRadiusUnder(g: Readonly<Geo>): number {
  */
 export function altitude(g: Readonly<Geo>): number {
   return g.radius() - groundRadiusUnder(g);
+}
+
+/**
+ * **The same quantity, typed so it cannot be compared with a coordinate.**
+ *
+ * {@link altitude} and this are one computation with two spellings — this one
+ * delegates, so there is no second definition to drift. Prefer this at every
+ * new call site; `altitude` stays because three subsystems are mid-migration
+ * and breaking them to rename a function would buy nothing.
+ *
+ * The difference is entirely in the type: `altitude(a) < g.cy` compiles and is
+ * meaningless, `isBelow(altitudeOf(a), …)` will not accept a coordinate at all.
+ * See `Altitude.ts` for why that required an opaque type rather than a brand.
+ */
+export function altitudeOf(g: Readonly<Geo>): Altitude {
+  return altitudeOfMetres(altitude(g));
 }
 
 /**

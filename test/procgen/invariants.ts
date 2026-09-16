@@ -60,6 +60,13 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { offAxisGround, recutCarriers, type OffAxisGround } from './gridAxes.ts';
+// A leaf module: `Geo.ts` imports `three` and `core/constants` and nothing
+// else, so a static import here cannot load a seeded module early — the hazard
+// this file's header warns about. It is imported rather than restated because
+// `Geo.radius()` is the one owner of "how far is this from the planet's
+// centre", and a hand-written `Math.hypot(x, y + R, z)` beside it would be the
+// second definition CLAUDE.md's "two definitions of one thing" names.
+import { Geo } from '../../src/world/geo/Geo.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 // Leaf module, safe to import statically: `bridgeSpine.ts`'s ONLY import is
 // a type-only one (from `world/train/crossings`), which erases — no seeded
@@ -92,6 +99,8 @@ import {
   RIM_OUTSET_START,
   GROUND_SPHERE_RADIUS,
   BUS_MAX_GRADE,
+  gradientAtParkRadius,
+  parkRadiusForGradient,
   TERRAIN_HEIGHT_SCALE,
 } from '../../src/core/constants.ts';
 import {
@@ -4263,17 +4272,66 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  *
  * ### What is true, measured
  *
- * The chute crosses the south wall plane at **y 14.84** on every one of the
- * five seeds, and the tallest stone — the crenellations — tops out at
- * **y 10.29**. What matters is the chute's *underside*, at 14.84 − 1.11 =
- * **13.73 m**, so the air a rider actually has under them is **3.44 m** — not
- * the 4.55 m the centre line clears by, which is the number this was first
- * written up with. (Corrected in review. Two numbers describing one gap is the
- * exact habit this branch has now been bitten by twice; the code below was
- * always right, only the prose was loose.)
- *
  * So the honest guarantee is not "it goes through the hole" but "it goes over
  * the top, and there is air under it", and that is what is asserted here.
+ *
+ * On the canonical seed the chute crosses the south wall plane (z 21.823) at
+ * world **(55.48, 9.69, 21.82)**, which is **17.302 m** above the planet's
+ * surface; its underside is `CHUTE_HALF_WIDTH` below that at **16.192 m**, and
+ * the tallest stone — a **`crenellations`** merlon at world (35.52, 7.08,
+ * 20.40) — reaches **10.750 m**. The air a rider has under them is therefore
+ * **5.44 m**.
+ *
+ * A second instrument agrees, by a different route: the shortest distance from
+ * the built chute's centre line to any masonry vertex is **6.788 m** (chute
+ * (55.38, 9.69, 22.46), a `crenellations` vertex at (54.04, 3.04, 22.34)), so
+ * beyond the 1.11 half-width there is **5.678 m** of daylight. Two methods that
+ * share only the built scene, agreeing to within a quarter of a metre.
+ *
+ * That figure was **9.450 m** in an earlier draft, and it was wrong for the
+ * same reason everything else here was: the instrument that produced it walked
+ * masonry vertices without their per-instance matrices, so it was measuring
+ * distance to a castle with no battlements. Corroboration from a second
+ * instrument is worth only as much as the independence of its *method*.
+ *
+ * ### Why every number in the paragraph above is a radius (issue #625)
+ *
+ * This invariant was green for months while reading a fact that under-reported
+ * the stonework by **2.710 m**, because the fact took an axis-aligned box's
+ * `max.y` and the castle *leans* — it stands ~48 m out from the park's origin
+ * on a sphere of radius `GROUND_SPHERE_RADIUS`, where a plumb line down world
+ * `+Y` is nothing like its own up. The prose this section replaced quoted
+ * "y 14.84" against "y 10.29" and had been honestly measured; both were world
+ * `y`, both were wrong about the park, and the clearance they implied happened
+ * to be in the dangerous direction.
+ *
+ * The trap in fixing it, worth naming because it caught the first attempt: the
+ * issue reported the chute **1.19 m inside the battlements**, which is not a
+ * measurement of anything. It came from correcting only one side — a radial
+ * stone against a plumb underside — and those agree only at the park's origin.
+ * Correct both, as the code below now does, and the intrusion is not reduced,
+ * it does not exist: **+5.44 m clear**.
+ *
+ * ### And the second trap, which caught the fix itself
+ *
+ * Replacing `Box3.setFromObject` with a hand-rolled vertex walk quietly dropped
+ * the battlements: `crenellations` is an `InstancedMesh` of 40, the walk
+ * applied only the container's matrix, and all forty collapsed onto the origin.
+ * The tallest surviving stone was the lintel band, and the clearance came out
+ * **6.42 m** — 0.9806 m too generous, in the dangerous direction, from a fix
+ * whose entire purpose was to stop under-reporting this number. `Box3` had
+ * been honouring those instance matrices for free.
+ *
+ * Nothing above could see it. The frame guard could not — the number was still
+ * a radius. The clearance clause could not — it was still comfortably positive.
+ * Even the cross-check against `CASTLE_MASONRY_TOP` *appeared* to pass, because
+ * 9.770 sits a tenth of a metre from 9.85 by coincidence, the lintel being
+ * built to `CASTLE_WALL_HEIGHT` 8.8 and the gap being exactly the merlons that
+ * had gone missing.
+ *
+ * That is why two clauses below assert things no earlier draft did: **which
+ * mesh** carries the maximum, and **where that vertex sits in the facade's own
+ * frame**. Either would have caught it on the first run.
  *
  * That is a guarantee worth holding: it is what keeps a child from riding down
  * inside a wall. It fails the moment anyone lowers `START_Y`, raises
@@ -4281,8 +4339,11 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  * far-fetched, and all of which currently pass unnoticed.
  *
  * Measured off the built chute pushed out through the scene graph into world
- * space, against the built masonry's own world bounding boxes — never against
+ * space, against the built masonry's own vertices — never against
  * `slide/plan.ts` or `CASTLE_WALL_HEIGHT`, which are the things under test.
+ * Vertices rather than bounding boxes for the reason in
+ * {@link ParkFacts.castleMasonryTopRadius}: no corner of an axis-aligned box is
+ * a point of the mesh inside it, so the box has no honest radius.
  */
 const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   const complaints: string[] = [];
@@ -4315,7 +4376,12 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // Interpolates across the span that straddles the wall plane rather than
   // taking the nearest sample: at 0.4 m spacing the nearest sample can sit a
   // third of a metre to either side, which is most of the clearance measured.
-  let crossing: { x: number; y: number } | null = null;
+  // `z` is carried as well as `x`/`y` because the clause below needs a *radius*
+  // at this point, and a radius needs all three components. Dropping it and
+  // passing `Math.hypot(x, y + R)` would silently measure a point on the park's
+  // z = 0 meridian instead of this one — a plausible-looking number, ~1 m out
+  // here, and wrong in the same family as the bug this invariant is fixing.
+  let crossing: { x: number; y: number; z: number } | null = null;
   for (let i = 1; i < chute.length; i += 1) {
     const before = chute[i - 1];
     const here = chute[i];
@@ -4330,6 +4396,9 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
     crossing = {
       x: before[0] + (here[0] - before[0]) * t,
       y: before[1] + (here[1] - before[1]) * t,
+      // The wall plane is where this point was interpolated *to*, so its z is
+      // `wallZ` by construction rather than by a third lerp.
+      z: wallZ,
     };
     break;
   }
@@ -4348,10 +4417,29 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // The clause that carries the weight. The underside of the chute — its centre
   // line less the half-envelope a rider sits in — must be above the highest
   // masonry, or the ride passes through the battlements.
-  const underside = crossing.y - CHUTE_HALF_WIDTH;
-  const stone = facts.castleMasonryTopY;
+  //
+  // **Both sides are radii from the planet's centre, and that is the whole
+  // point of issue #625.** "Above" on a sphere means "further from the centre",
+  // not "greater world y", and the castle stands ~48 m out from the park's
+  // origin where the two have visibly parted company. The fact was corrected to
+  // a radius; this side is converted in the same change, because a radial stone
+  // against a plumb underside is not a measurement of anything — it subtracts a
+  // height from a radius-minus-`R` and the two agree only at the origin. That
+  // mix is where the headline "1.19 m inside the battlements" came from, and
+  // there is no such intrusion: converted honestly the chute clears by 5.44 m
+  // (the 6.42 m once written here was measured with the merlons missing — see
+  // the docblock above).
+  //
+  // Subtracting `CHUTE_HALF_WIDTH` from a radius is the right thing rather than
+  // a convenience: a radius decreases by exactly one metre for each metre
+  // travelled straight down towards the centre, which is what "underside" means
+  // here. It is very slightly conservative for a chute banked away from
+  // vertical, which is the safe direction.
+  const crossingRadius = Geo.fromWorld(crossing.x, crossing.y, crossing.z).radius();
+  const underside = crossingRadius - CHUTE_HALF_WIDTH;
+  const stone = facts.castleMasonryTopRadius;
 
-  // **A missing measurement is a failure here, not a pass.** `castleMasonryTopY`
+  // **A missing measurement is a failure here, not a pass.** `castleMasonryTopRadius`
   // is a max seeded with `-Infinity` over meshes picked out by name, so if the
   // castle is ever renamed out from under it the fact arrives as `-Infinity` and
   // `underside < -Infinity` is false for *every conceivable chute* — this
@@ -4374,18 +4462,121 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
     complaints.push(
       'no castle stonework was found in the built park at all, so the check that ' +
         'keeps the ginormous slide out of the battlements measured nothing. Either ' +
-        'the castle is missing, or the mesh names `parkFacts.castleMasonryTopY` ' +
+        'the castle is missing, or the mesh names `parkFacts.castleMasonryTopRadius` ' +
         'looks for have changed and this invariant has been silently switched off',
     );
     return complaints;
   }
 
+  // **And it must still be a radius.** (Issue #625.) This clause exists only to
+  // catch a reversion: `castleMasonryTopRadius` was an AABB's `max.y` for
+  // months, and the whole invariant stayed green the entire time because the
+  // other side of the comparison was a world `y` too. Two plumb numbers are
+  // self-consistent and say nothing about a park built on a sphere.
+  //
+  // The guard is deliberately the crudest one that cannot be satisfied by
+  // accident and needs no tolerance to tune: a radius from the planet's centre
+  // is necessarily larger than the planet, and a height above the ground is
+  // necessarily much smaller. Anything that puts a `max.y` back in this field —
+  // the 8.040 m this used to report, or any other height — fails here
+  // immediately and by two orders of magnitude, on every seed, rather than
+  // quietly granting the ride 2.71 m of clearance the battlements do not give.
+  //
+  // **What it does not cover, stated so nobody inherits a false belief:** it
+  // proves the *frame*, not the *value*. A radial measurement that is simply
+  // wrong — the wrong meshes, the wrong matrices, a dropped `InstancedMesh` —
+  // is still a radius and still sails through here. That is not hypothetical:
+  // it is exactly what happened next, and this clause watched it go by.
+  //
+  // The two clauses immediately below are the ones that cover the value, and
+  // they exist because this one could not.
+  if (stone <= GROUND_SPHERE_RADIUS) {
+    complaints.push(
+      `\`parkFacts.castleMasonryTopRadius\` is ${stone.toFixed(3)}, which is not a radius ` +
+        `from the planet's centre — every point in the park is at least ` +
+        `GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS}) from it. Something has put a ` +
+        'world-Y height back in this field, which is issue #625 exactly: the castle ' +
+        'leans, so a plumb line down +Y under-reports its stonework (by 2.71 m on the ' +
+        'canonical seed) and this invariant then grants the ginormous slide clearance ' +
+        'the battlements do not give it',
+    );
+    return complaints;
+  }
+
+  // **The merlons must be the thing that was measured.** (Review of #625.)
+  // The battlements are the top of the castle by construction, so if anything
+  // else carries the maximum, the merlons have dropped out of the measurement.
+  // That is not hypothetical and it is not cheap insurance: the first draft of
+  // the vertex walk above treated `crenellations` — an `InstancedMesh` of 40 —
+  // as a single mesh, collapsed all forty onto the container's origin at
+  // 0.984 m, and handed this invariant the lintel band's 9.770 m instead of the
+  // true 10.750 m. Every number downstream stayed plausible; the clearance was
+  // simply 0.9806 m too generous, in the dangerous direction. This clause is
+  // exact, needs no tolerance, and would have caught it on the first run.
+  if (facts.castleMasonryTopMesh !== 'crenellations') {
+    complaints.push(
+      `the highest castle stonework was found on \`${facts.castleMasonryTopMesh}\`, not on ` +
+        '`crenellations` — the battlements are the top of the castle by construction, so ' +
+        'either they have dropped out of the measurement (an `InstancedMesh` walked without ' +
+        'its per-instance matrices collapses all 40 merlons onto the origin, which is issue ' +
+        "#625's review exactly) or something has grown up through them",
+    );
+    return complaints;
+  }
+
+  // **And it must be at the height the castle is built to.** This is the only
+  // clause here that proves the *value* rather than the frame: the winning
+  // vertex, expressed in the facade's own coordinates, must be
+  // `CASTLE_MASONRY_TOP`. A measurement that is wrong in almost any way — wrong
+  // meshes, dropped instances, a mangled matrix — still looks like a radius and
+  // still passes the units guard below, but it cannot land on 9.85 in the frame
+  // the constant is written in.
+  //
+  // The tolerance is float slack, not a fudge: measured **9.8500** against
+  // 9.85 on the canonical seed. The collapsed walk gave 8.8 — the lintel band's
+  // top, `CASTLE_WALL_HEIGHT` — which is short by exactly
+  // `CASTLE_MERLON_HEIGHT`, because the missing metre *was* the merlons.
+  //
+  // Note it is `CASTLE_MASONRY_TOP`, a facade-local constant, compared against a
+  // facade-local measurement. That is not rules-against-rules: the number under
+  // test is a vertex of the park that was actually built, and the question being
+  // asked is whether it sits where the castle was drawn to put it. Both sides
+  // arrive as *facts* — see `ParkFacts.castleMasonryDesignTopY` for why the
+  // constant cannot be imported here directly.
+  const FACADE_Y_SLACK = 0.01;
+  const designTop = facts.castleMasonryDesignTopY;
+  const measuredTop = facts.castleMasonryTopFacadeY;
+  if (!Number.isFinite(measuredTop)) {
+    complaints.push(
+      "the highest castle stonework could not be expressed in the facade's own frame — " +
+        'no `building-facade` group was found, so the clause that proves this measurement ' +
+        'lands at `CASTLE_MASONRY_TOP` has been silently switched off',
+    );
+    return complaints;
+  }
+  if (Math.abs(measuredTop - designTop) > FACADE_Y_SLACK) {
+    complaints.push(
+      `the highest castle stonework sits at ${measuredTop.toFixed(3)} m in ` +
+        `the facade's own frame, but the castle is built to \`CASTLE_MASONRY_TOP\` = ` +
+        `${designTop.toFixed(3)} m — off by ` +
+        `${Math.abs(measuredTop - designTop).toFixed(3)} m. The ` +
+        'radial measurement is landing somewhere other than the top of the battlements, so ' +
+        'the clearance below it is measured against the wrong stone',
+    );
+    return complaints;
+  }
+
   if (underside < stone) {
+    // Printed as heights above the planet's surface (`r − R`), because a bare
+    // 236-and-change is unreadable, but note the *gap* is the difference of the
+    // radii themselves — subtracting `R` from both cancels and changes nothing.
     complaints.push(
       `the ginormous slide crosses the castle's south wall at world ` +
-        `(${crossing.x.toFixed(2)}, ${crossing.y.toFixed(2)}) — its underside is at ` +
-        `${underside.toFixed(2)} m and the stonework tops out at ${stone.toFixed(2)} m, so ` +
-        `the chute is ${(stone - underside).toFixed(2)} m inside the battlements. Nothing ` +
+        `(${crossing.x.toFixed(2)}, ${crossing.y.toFixed(2)}, ${crossing.z.toFixed(2)}) — ` +
+        `measured radially, its underside is ${(underside - GROUND_SPHERE_RADIUS).toFixed(2)} m ` +
+        `above the planet's surface and the stonework tops out at ` +
+        `${(stone - GROUND_SPHERE_RADIUS).toFixed(2)} m, so the chute is ` +
+        `${(stone - underside).toFixed(2)} m inside the battlements. Nothing ` +
         'cuts a hole for it: `slideGap` reaches no geometry, so there is solid stone here',
     );
   }
@@ -4404,7 +4595,7 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  * ## Why that needs an invariant of its own
  *
  * Everything else on the castle is matched by
- * {@link ParkFacts.castleMasonryTopY}'s name pattern, and
+ * {@link ParkFacts.castleMasonryTopRadius}'s name pattern, and
  * {@link theGinormousSlideLeavesOverTheBattlements} measures the chute against
  * it. The roof garden deliberately is **not** matched — an interior-ish name
  * falling into that pattern is the fault `castleFabric.ts`'s `castle-timber-`
@@ -4437,7 +4628,7 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  * a pavilion growing into the slide.
  *
  * **Two ways this could assert nothing, both announced rather than passed.** A
- * missing roof garden is a failure, in the tradition of `castleMasonryTopY`'s
+ * missing roof garden is a failure, in the tradition of `castleMasonryTopRadius`'s
  * own guard. And a chute that never crosses the roof's plan box on a given seed
  * is a legitimate pass — but it is a pass over *zero* samples, so the count is
  * reported on every run the way `everyProvenBridgeSiteKeepsItsBridge` reports
@@ -4624,7 +4815,7 @@ const theSlideTracksideCamerasCanSeeTheRide: Invariant = (facts) => {
   const spans = facts.slideShotSpans;
   const cameras = facts.slideCameras;
 
-  // Anti-vacuity first, in the tradition of `castleMasonryTopY`'s guard: an
+  // Anti-vacuity first, in the tradition of `castleMasonryTopRadius`'s guard: an
   // empty plan must be a complaint, not a silent pass over nothing.
   if (spans.length < 2) {
     complaints.push(
@@ -4925,7 +5116,7 @@ const theSlideRiderLandsInTheBalls: Invariant = (facts) => {
   const landing = facts.slideLanding;
   const chute = facts.slideChute;
 
-  // Anti-vacuity, in the tradition of `castleMasonryTopY`'s guard: every clause
+  // Anti-vacuity, in the tradition of `castleMasonryTopRadius`'s guard: every clause
   // below is a comparison, and a comparison against a missing measurement is a
   // pass that measured nothing.
   if (chute.length === 0) {
@@ -9608,23 +9799,47 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
 };
 
 /**
- * **The ground really is the sphere the constant claims, and it is gentle
- * enough for the bus (#511).**
+ * **The ground really is the sphere the constant claims, and the park fits on
+ * it (#511).**
  *
- * `GROUND_SPHERE_RADIUS` is chosen against `BUS_MAX_GRADE`: on a sphere the
- * gradient at horizontal distance `d` is `d / R`, so a radius is a promise
- * about how steep the ground gets. **A promise is not a mechanism** — this
- * measures the terrain the park was actually built on and holds the pair to
- * each other, so if either constant moves the two are re-proved rather than
- * assumed to still agree.
+ * **What this asserts, and what it only reports — read this before trusting a
+ * green run.**
  *
- * Two clauses, and the first is what stops the second passing vacuously:
+ * It used to hold `GROUND_SPHERE_RADIUS` and `BUS_MAX_GRADE` to each other: a
+ * 10% ceiling on the ground's gradient as far out as the park reaches. That
+ * ceiling is **retired** (Overseer's ruling, 14 September 2026) — it existed to
+ * guarantee the cat bus could drive the whole 117 m of its road, and Jim has
+ * ruled it need not: *"showing the bus coming in a couple meters is fine and
+ * good."* What honouring it would cost is **computed and printed on every run**
+ * (`planetForBusGrade` below, from the kerb's measured reach) rather than typed
+ * here, because the figure this docblock used to carry — 2460 m — was derived
+ * from a 245 m park that no longer exists and went on being printed as fact.
+ *
+ * So there is **no gradient assertion here any more**, on the park or on the
+ * road. Both are measured a metre at a time and **printed on every run**,
+ * passing or failing, to `process.stderr`. If you want a ceiling back, add it
+ * with the measurement beside it.
+ *
+ * The clauses that still foul:
  *
  * 1. **The drawn ground is that sphere.** Sampled against the exact cap, so a
  *    terrain that quietly stopped being spherical — a rim creeping back, a
- *    tuned fudge — fails here rather than being measured as if it were one.
- * 2. **Its gradient stays inside the budget** as far out as the park itself
- *    reaches, which is the ground a bus could be driven on.
+ *    tuned fudge — fails here.
+ * 2. **Everything drawn outdoors is on the planet.** Not the park's outline
+ *    (`boundary.maxRadius`): the treeline, the Rail Race ring and the road
+ *    kerb all stand well past it. Every vertex of every outdoor object in the
+ *    built scene is measured (`ParkFacts.drawnReach`, interiors excluded by
+ *    root), and any at or past the equator fouls — the Rail Race ring is
+ *    exactly what ran off the planet at the 2.3355x scale. What it covers is
+ *    printed on every run.
+ *
+ * **And the gradient it reports is `tan θ`, not `d / R`.** `d / R` is `sin θ`.
+ * It under-reports everywhere and **cannot exceed 100%**, so when the park
+ * (at the retired 2.3355x scale) reached 245 m on a 220 m planet — 25 m past the equator, standing on the
+ * clamp where there is no ground at all — it reported a plausible-looking
+ * `111.36%`. A measure that cannot exceed 100% is a measure that cannot report
+ * the thing it exists for. `gradientAtParkRadius` in `core/constants.ts` is the
+ * real form and returns `Infinity` past the equator, which is the honest answer.
  *
  * `terrainHeight` is imported statically, which was **forbidden until this
  * branch**: it used to reach `parkManifest` through `boundary.ts`, so a static
@@ -9662,7 +9877,9 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
       // cap plus the height at the centre rather than demanding an exact match.
       const shapeError = Math.abs(terrainHeight(x, z) - (terrainHeight(0, 0) - expectedFall));
       if (shapeError > worstShapeError) worstShapeError = shapeError;
-      const grade = d / GROUND_SPHERE_RADIUS;
+      // `tan θ`, via the one owner of it. NOT `d / GROUND_SPHERE_RADIUS`, which
+      // is `sin θ` and saturates at 100% exactly where the ground goes vertical.
+      const grade = gradientAtParkRadius(d);
       if (grade > worstGrade) {
         worstGrade = grade;
         worstGradeAt = d;
@@ -9681,12 +9898,67 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
         'below is measuring something else',
     );
   }
-  if (worstGrade > BUS_MAX_GRADE) {
+  // **The park must at least be ON its planet.** The gradient ceiling is
+  // retired, but "past the equator" is not a steep slope — it is no ground: the
+  // cap has curved through vertical and `terrainHeight`'s `Math.max(0, ...)`
+  // guard clamps the whole outer annulus to a flat plane at `y = -R`. Furniture
+  // out there stands on the clamp. That is the one thing this still refuses,
+  // and it is a fact about the park rather than a budget about the bus.
+  // **This is a limit of the terrain FORMULATION, not of the sphere.**
+  //
+  // Jim, 14 September 2026: *"it also should be possible to make the park any
+  // size so long as it doesn't touch its opposite side by wrapping around the
+  // sphere - no artificial limit please"*, and *"a sphere has no edge, the
+  // worst is that it would touch its own opposite side."* He is right, and the
+  // true bound is the antipode at pi*R (691 m on R = 220), not the equator at
+  // pi*R/2 (345.6 m) — so what is refused below is **exactly half the planet**
+  // that a sphere would happily carry.
+  //
+  // It is still refused, because `terrain.ts` cannot draw it. `terrainHeight`
+  // is written as a height above a plane, so past `d = R` no vertical column
+  // meets the sphere at all and `Math.max(0, R² - d²)` maps **the entire far
+  // half of the planet onto one point**: every `d >= R` reports height -R and a
+  // horizontal up. Measured, on this branch:
+  //
+  //     d=219    capHeight=-199.048   up=(0.9955, 0.0952, 0)
+  //     d=220    capHeight=-220.000   up=(1.0000, 0.0000, 0)
+  //     d=5000   capHeight=-220.000   up=(1.0000, 0.0000, 0)
+  //
+  // So a park out there would be laid on the clamp whatever this clause said,
+  // and permitting it would be an assertion reporting success about something
+  // the renderer cannot draw.
+  //
+  // **The fix is to move the ground onto the core's representation** — a radius
+  // as a function of direction, which `src/world/geo/` already holds and which
+  // has no singularity anywhere on the planet — and only then to re-cut this
+  // clause to what is actually true: the park may not wrap round to meet
+  // itself, i.e. geodesic radius < pi*R. `NOTE-sizing-terrain-onto-geo.md` on
+  // this branch sizes that work. Until it lands, this bound is honest about
+  // being the formulation's and not the sphere's.
+  // Asked of what is DRAWN, not of the outline: the outline is the smallest
+  // thing out there. `reach` stays the radial sweep's extent above.
+  const drawn = facts.drawnReach;
+  if (drawn.vertices === 0) {
     fouls.push(
-      `the ground reaches a gradient of ${(worstGrade * 100).toFixed(2)}% at ${worstGradeAt.toFixed(1)} m ` +
-        `from the centre, past the ${(BUS_MAX_GRADE * 100).toFixed(0)}% BUS_MAX_GRADE budget that ` +
-        `GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS} m) was chosen against — either the radius ` +
-        'shrank or the park grew, and the cat bus now drives a slope steeper than anybody agreed',
+      `seed ${facts.seed}: drawnReach walked 0 vertices, so whether the park is on its planet ` +
+        'was not measured at all and the clause below would pass vacuously',
+    );
+  }
+  const onPlanet = [
+    ['the park outline', reach, 'boundary.maxRadius'],
+    ['the furthest drawn outdoor vertex', drawn.radius, drawn.furthest],
+  ] as const;
+  for (const [what, d, where] of onPlanet) {
+    if (d < GROUND_SPHERE_RADIUS) continue;
+    fouls.push(
+      `${what} reaches ${d.toFixed(1)} m on a ${GROUND_SPHERE_RADIUS} m planet — ` +
+        `${(d - GROUND_SPHERE_RADIUS).toFixed(1)} m past the equator (${where}). This is a limit of ` +
+        "terrain.ts's FORMULATION, not of the sphere: `terrainHeight` is a height above a " +
+        'plane, so past d = R no column meets the sphere and the whole far half of the planet ' +
+        `maps to one point (height -R, horizontal up). A sphere would carry a park out to the ` +
+        `antipode at ${(Math.PI * GROUND_SPHERE_RADIUS).toFixed(0)} m of walking; this refuses ` +
+        'everything past half of it. Fix by moving the ground onto a radius-of-direction ' +
+        '(see NOTE-sizing-terrain-onto-geo.md), not by shrinking the park to suit the formula',
     );
   }
 
@@ -9703,10 +9975,10 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
   // CLAUDE.md's "two definitions of one thing kept in step by hand" with the
   // second definition being a sentence.
   //
-  // It is also where `GROUND_SPHERE_RADIUS` came from: the radius is
-  // `the drawn road's full reach / BUS_MAX_GRADE`. Measuring the road rather
-  // than the boundary is therefore measuring the thing the number was derived
-  // from, which is the only way the pair can be re-proved instead of assumed.
+  // It is also where the retired budget was spent: `BUS_MAX_GRADE` was sized
+  // against the drawn road's full reach. `GROUND_SPHERE_RADIUS` is no longer
+  // derived from it (it is a look, chosen by eye — see its docblock), so the
+  // road's reach is used below only to print what honouring 10% would cost.
   //
   // **The grade is measured between consecutive points on the drawn road**, not
   // computed as `d / GROUND_SPHERE_RADIUS`. The latter is the sphere's own
@@ -9761,30 +10033,48 @@ const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
         'the bus was not measured at all — this clause would have passed vacuously, which is ' +
         'exactly the state BUS_MAX_GRADE\'s doc has been describing as a measurement',
     );
-  } else if (worstRoadGrade > BUS_MAX_GRADE) {
-    fouls.push(
-      `seed ${facts.seed}: the ground under the drawn entrance road reaches a gradient of ` +
-        `${(worstRoadGrade * 100).toFixed(2)}% at (${worstRoadGradeAt.x.toFixed(1)}, ` +
-        `${worstRoadGradeAt.z.toFixed(1)}), past the ${(BUS_MAX_GRADE * 100).toFixed(0)}% ` +
-        `BUS_MAX_GRADE budget that GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS} m) was chosen ` +
-        'against — the cat bus drives a slope steeper than anybody agreed',
-    );
   }
+  // No ceiling clause here any more — see this function's docblock. The number
+  // is reported below on every run instead, so it stays visible without
+  // vetoing a park for a journey the bus no longer makes.
 
+  const grade = (g: number) => (Number.isFinite(g) ? `${(g * 100).toFixed(2)}%` : 'INFINITE');
+  // The planet on which BUS_MAX_GRADE would hold as far as the bus actually
+  // drives. `parkRadiusForGradient` is linear in the radius, so asking it for a
+  // unit planet and dividing inverts it without a second copy of the formula.
+  const planetForBusGrade = roadReach / parkRadiusForGradient(BUS_MAX_GRADE, 1);
+  // Along the ground, not across the chart: the lean and the walk to the
+  // furthest drawn vertex, and what is left before the equator and the antipode.
+  const drawnLean = Math.asin(Math.min(1, drawn.radius / GROUND_SPHERE_RADIUS));
+  const drawnWalk = drawnLean * GROUND_SPHERE_RADIUS;
   process.stderr.write(
     `[ground sphere] ${bearings} bearings to ${reach.toFixed(1)} m: worst departure from the cap ` +
       `${worstShapeError.toFixed(2)} m (tolerance ${undulation.toFixed(2)}), worst gradient ` +
-      `${(worstGrade * 100).toFixed(2)}% at ${worstGradeAt.toFixed(1)} m (budget ` +
-      `${(BUS_MAX_GRADE * 100).toFixed(0)}%).\n` +
+      `${grade(worstGrade)} (tan theta) at ${worstGradeAt.toFixed(1)} m.\n` +
       `[ground sphere] and the bus's own arc: ${roadMetresWalked.toFixed(1)} m of drawn kerb ` +
       `walked every ${ROAD_GRADE_STEP} m, out to ${roadReach.toFixed(1)} m from the centre ` +
       `(past the ${reach.toFixed(1)} m boundary the radial sweep stops at), worst gradient ` +
-      `${(worstRoadGrade * 100).toFixed(2)}% at (${worstRoadGradeAt.x.toFixed(1)}, ` +
+      `${grade(worstRoadGrade)} at (${worstRoadGradeAt.x.toFixed(1)}, ` +
       `${worstRoadGradeAt.z.toFixed(1)}).\n` +
+      `[ground sphere] ASSERTS NO GRADIENT CEILING, on the park or on the road. The ` +
+      `${(BUS_MAX_GRADE * 100).toFixed(0)}% BUS_MAX_GRADE budget was retired on 14 September ` +
+      '2026: it guaranteed the bus could drive all 117 m of its road, and Jim ruled it need ' +
+      'not ("showing the bus coming in a couple meters is fine and good"). Honouring it would ' +
+      `need a ${planetForBusGrade.toFixed(0)} m planet (for the ${roadReach.toFixed(1)} m the kerb ` +
+      `reaches) against the ${GROUND_SPHERE_RADIUS} m chosen by eye. The two numbers above are ` +
+      'REPORTED, not policed — the only gradient-shaped thing still refused is the park ' +
+      'reaching past its own equator, where there is no ground at all.\n' +
       `[ground sphere] Asserts nothing about the ${(
         facts.roadCorridor.segments.length - busDrives.length
       ).toString()} gateway-approach run(s) in through the arch: a child walks those, the bus ` +
-      'does not, and BUS_MAX_GRADE is a bus budget.\n',
+      'does not, and BUS_MAX_GRADE is a bus budget.\n' +
+      `[ground sphere] on the planet: furthest drawn outdoor vertex ${drawn.radius.toFixed(1)} m ` +
+      `chart (${drawnWalk.toFixed(1)} m along the ground, ${((drawnLean * 180) / Math.PI).toFixed(1)} deg ` +
+      `lean) — ${drawn.furthest}; ${(GROUND_SPHERE_RADIUS - drawn.radius).toFixed(1)} m chart ` +
+      `before the equator, ${(Math.PI * GROUND_SPHERE_RADIUS - drawnWalk).toFixed(0)} m of walking ` +
+      `before the antipode. Covers ${drawn.vertices} vertices of ${drawn.objects} objects in the ` +
+      `built scene; does NOT cover ${drawn.excludedRoots.join(', ')} (interiors, excluded by root), ` +
+      "the bus journey's own lane scene, or anything only added once a frame runs.\n",
   );
   return fouls;
 };
@@ -10084,7 +10374,14 @@ const castleTurretsAreSolid: Invariant = (facts) => {
 };
 
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
-  ['the ground is the sphere it claims to be, and gentle enough for the bus', theGroundIsTheSphereItClaimsToBe],
+  // Renamed 14 Sep 2026: it no longer asserts gentleness, so it must not keep
+  // saying it does. The gradient ceiling is retired and reported instead; what
+  // this refuses now is a terrain that stopped being a sphere, and a park that
+  // reaches past its own equator. A test name is a claim like any other.
+  [
+    'the ground is the sphere it claims to be, and the park fits on it',
+    theGroundIsTheSphereItClaimsToBe,
+  ],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],

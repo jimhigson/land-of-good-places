@@ -15,7 +15,7 @@
  * suite owns the invariants about whether the park's scattered furniture is
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
-import { Box3, Mesh, Vector3 } from 'three';
+import { Box3, Mesh, Quaternion, Vector3 } from 'three';
 import { measureGateArch } from '../../scripts/gate-arch-measure.mts';
 import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
@@ -569,6 +569,29 @@ export interface CastleTurretFact {
   readonly radiusBottom: number;
 }
 
+/**
+ * The furthest drawn outdoor vertex from the park's centre, measured as chart
+ * distance `hypot(x, z)` — the quantity `terrainHeight`'s cap runs out of at
+ * `GROUND_SPHERE_RADIUS`.
+ *
+ * **What it covers**: every object in the built `scene` carrying a `position`
+ * attribute (meshes, instanced meshes per instance, points, lines, sprites),
+ * every vertex, transformed to world space. **What it does not**: the subtrees
+ * named in {@link excludedRoots} (the castle's and hotel's interiors, which
+ * stand hundreds of metres from the garden by design), and anything not in
+ * this scene — the bus journey's own `lane.scene`, and whatever is only added
+ * once a frame runs. The invariant prints this on every run.
+ */
+export interface DrawnReachFact {
+  /** Chart distance of the furthest vertex, metres. */
+  readonly radius: number;
+  /** Scene path of the object that vertex belongs to, leaf first. */
+  readonly furthest: string;
+  readonly vertices: number;
+  readonly objects: number;
+  readonly excludedRoots: readonly string[];
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
@@ -919,21 +942,120 @@ export interface ParkFacts {
     readonly halfZ: number;
   };
   /**
-   * The **top of the castle's stonework**, in world Y: the highest point of the
-   * curtain wall and the battlements standing on it.
+   * The **top of the castle's stonework, as a radius from the planet's
+   * centre**: the highest point of the curtain wall and the battlements
+   * standing on it, measured the way the world is actually shaped.
    *
-   * Measured off the built meshes' world bounding boxes, not off
-   * `CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT`. Only the Y component of an
-   * AABB is used, and for "how tall is the tallest stone" that component is
-   * exact — the box's x/z extent is a gross over-approximation of a hollow ring
-   * of wall and is deliberately not read.
+   * Metres from the planet centre. Compare it only against another radius —
+   * never against a world `y`, which is the very mix this field was created to
+   * end. Subtract `geo.PLANET_RADIUS` if you want a number to *print*, and do
+   * that only in a message.
+   *
+   * ## Why this is a radius and not a `max.y` (issue #625)
+   *
+   * It *was* an AABB's `max.y`, and that was wrong by **2.710 m** in the
+   * dangerous direction. The world is a sphere of radius `GROUND_SPHERE_RADIUS`,
+   * "up" is away from its centre, and the castle stands ~48 m out from the
+   * park's origin — so the castle **leans**, and a plumb line dropped down world
+   * `+Y` is not its own up. Measured on the canonical seed:
+   *
+   * | | |
+   * |---|---|
+   * | AABB `max.y` (what this used to report) | 8.040 m |
+   * | highest stonework by radius, a merlon at world (35.52, 7.08, 20.40) | 10.750 m |
+   * | under-report | **2.710 m** |
+   *
+   * That is `RADIAL-INVENTORY.md`'s first universal mistake exactly — *a `y`
+   * difference standing in for a distance* — and it granted the ginormous
+   * slide 2.71 m of clearance the battlements do not give it.
+   *
+   * **Issue #625 itself reports this as 1.730 m, and that figure is wrong.**
+   * It was produced by a scratch instrument that walked vertices through
+   * `node.matrixWorld` alone, so it had the `InstancedMesh` fault described
+   * below and was reading 9.770 m — the lintel band — as the radial top. The
+   * error was then independently "confirmed" by a second measurement made the
+   * same way, which is worth remembering about independent confirmation: two
+   * instruments sharing a method share its blind spot. The plumb figure 8.040
+   * was always right, because `Box3.setFromObject` honours instance matrices.
+   *
+   * ## Measured off vertices, not off a box — and every instance of them
+   *
+   * The old form could use a `Box3` because `max.y` of an axis-aligned box *is*
+   * the greatest `y` of the geometry inside it. No corner of that box is a
+   * point of the mesh, though, so its **radius** is not any vertex's radius —
+   * it is an over-estimate of unbounded size. So this walks the masonry's own
+   * vertices through their world matrices and takes the greatest
+   * `Geo.radius()`, which is a point that genuinely exists in the park.
+   *
+   * **A hand-rolled vertex walk has to be told about `InstancedMesh`, and this
+   * one was not, for one review cycle.** `crenellations` is an `InstancedMesh`
+   * of 40 merlons and `InstancedMesh extends Mesh`, so it passed the type test
+   * and was then transformed by the container's matrix alone: all forty
+   * collapsed onto the origin at **0.984 m**, the battlements dropped out of
+   * the measurement, and the tallest surviving stone was the lintel band at
+   * **9.770 m** against a true **10.750 m**. A **0.9806 m under-report, in the
+   * dangerous direction** — the same disease as the plumb line it replaced,
+   * one layer down, and invisible to the frame guard. `Box3.setFromObject`
+   * honours instance matrices for free, which is exactly why replacing it with
+   * a manual walk needed this care.
+   *
+   * `-Infinity` when no masonry mesh matched at all; see
+   * `theGinormousSlideLeavesOverTheBattlements`, which treats that as a
+   * failure rather than as limitless clearance.
    *
    * This replaced a `slideDoor` fact that reported where a hole in the south
    * wall was *planned*. No such hole is ever cut (see
    * `theGinormousSlideLeavesOverTheBattlements`), so the fact described nothing
    * in the park and the invariant reading it could not fail.
    */
-  readonly castleMasonryTopY: number;
+  readonly castleMasonryTopRadius: number;
+  /**
+   * **Which named masonry object carries that maximum**, e.g. `crenellations`.
+   *
+   * It exists so an invariant can assert the answer is the merlons, which are
+   * the top of the castle *by construction*. That is the one clause that would
+   * have caught the `InstancedMesh` collapse described above on its first run:
+   * with the forty merlons silently absent, the winner became
+   * `castle-wall-lintel`, and every downstream number stayed plausible.
+   *
+   * Empty string when nothing matched, which pairs with `-Infinity` above.
+   */
+  readonly castleMasonryTopMesh: string;
+  /**
+   * The same top point's height **in the facade's own frame** (`building-facade`
+   * local Y) — the frame `layout.ts`'s `CASTLE_MASONRY_TOP` is written in.
+   *
+   * This is the fact that proves the **value** rather than the frame. A radial
+   * measurement that is simply wrong — wrong meshes, dropped instances, wrong
+   * matrices — still looks like a radius and still passes a units check; what
+   * it cannot do is land on 9.8500 in the facade's own coordinates. Measured
+   * exactly that on the canonical seed, against `CASTLE_MASONRY_TOP` = 9.85.
+   *
+   * The collapsed walk gave **8.8** here (the lintel band's top, built to
+   * `CASTLE_WALL_HEIGHT`), which is off by precisely `CASTLE_MERLON_HEIGHT` —
+   * the missing metre *was* the merlons.
+   *
+   * `NaN` when nothing matched, or when no `building-facade` group was found.
+   */
+  readonly castleMasonryTopFacadeY: number;
+  /**
+   * What {@link castleMasonryTopFacadeY} is *supposed* to be — `layout.ts`'s
+   * `CASTLE_MASONRY_TOP`, which is `CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT`.
+   *
+   * It is carried here rather than imported by the invariant for a mechanical
+   * reason, not a stylistic one: `building/layout.ts` reaches `parkLayout`, so
+   * a **static** import of it into `test/` would load a seeded module before
+   * the harness sets the seed and pin every seed to the default park — this
+   * file's own header warns about exactly that, and the 76-silent-skips
+   * incident is what it is warning about. `buildParkFacts` already imports
+   * `layout.ts` dynamically, after the park is built, so the constant can come
+   * across safely here and nowhere else.
+   *
+   * Pairing a measurement with the design figure it must match is deliberate:
+   * a comparison of two facts is a comparison of two numbers **the invariant
+   * did not choose**, which is what stops it drifting into rules-against-rules.
+   */
+  readonly castleMasonryDesignTopY: number;
   /**
    * **The top of everything standing on the castle's own roof** — the paving,
    * the pavilion and the ring of planters `Shell.ts`'s `buildCastleRoofGarden`
@@ -943,7 +1065,7 @@ export interface ParkFacts {
    * than a pass: see `theCastleRoofStaysInsideItsBattlements`.
    *
    * It exists because the roof garden is the one thing on the castle that is
-   * **not** matched by {@link castleMasonryTopY}'s name pattern and could still
+   * **not** matched by {@link castleMasonryTopRadius}'s name pattern and could still
    * reach into the ginormous slide's air. The pavilion is a scaled copy of a
    * building sized for a 42 m plate; put it on a 24 m castle with its mast and
    * bobble and it stands 4 m over the parapet.
@@ -1103,6 +1225,17 @@ export interface ParkFacts {
    * reaches an invariant through `ParkFacts`, never through a static import.
    */
   readonly boundary: ParkBoundary;
+  /**
+   * **How far out the park is actually drawn** — every vertex of every
+   * outdoor object in the built scene, see {@link DrawnReachFact}.
+   *
+   * {@link boundary} is the park's *outline*; the furthest things drawn — the
+   * treeline, the Rail Race ring, the road kerb — stand well past it (126-135 m
+   * against a 101-107 m outline on the five CI seeds when this was written).
+   * A clause asking "is the park on its planet?" of the outline alone is asking
+   * a smaller question than its name.
+   */
+  readonly drawnReach: DrawnReachFact;
   /**
    * What "twice the park" was asked to be, in square metres — the target
    * `generateParkBoundary` was handed (#115 asked for area-within-tolerance
@@ -1442,7 +1575,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // world matrix and every one of them is still the identity. Sampling without
   // this yields the chute's *local* coordinates while looking exactly like
   // world ones, and every clearance test built on them would quietly pass.
-  const { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } = await import(
+  const { BUILDING_CENTRE_X, BUILDING_CENTRE_Z, CASTLE_MASONRY_TOP } = await import(
     '../../src/world/building/layout.ts'
   );
   const { BUILDING_HALF_X, BUILDING_HALF_Z } = await import('../../src/core/constants.ts');
@@ -1458,16 +1591,162 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // clearance check built on them passes for free.
   scene.updateMatrixWorld(true);
 
-  // The top of the castle's stonework, read off the built meshes.
+  // How far out the park is drawn. Walked by hand rather than with
+  // `scene.traverse` so the two interior roots can be skipped whole: their
+  // rooms stand hundreds of metres from the garden on purpose, and filtering
+  // them by position (`spaceAt`) would also hide an outdoor object that had
+  // wandered out to the same place — the exact thing this exists to see.
+  //
+  // Its three.js classes are bound under names of its own, from its own dynamic
+  // import: later blocks of this same function destructure `Matrix4` and
+  // `Mesh` out of `await import('three')`, which shadows the module-level
+  // imports for the whole body and would put a bare `Matrix4` here in its
+  // temporal dead zone (see the `MeshClass` note below).
+  const reachThree = await import('three');
+  const drawnReach = ((): DrawnReachFact => {
+    const ReachInstancedMesh = reachThree.InstancedMesh;
+    const excluded = [world.building.interiorRoot, world.hotel.hotelRoot];
+    const instance = new reachThree.Matrix4();
+    const toWorld = new reachThree.Matrix4();
+    const vertex = new reachThree.Vector3();
+    let radius = 0;
+    const furthestNode: { node: import('three').Object3D | null } = { node: null };
+    let vertices = 0;
+    let objects = 0;
+    const visit = (node: import('three').Object3D): void => {
+      if (excluded.includes(node as never)) return;
+      const geometry = (node as { geometry?: import('three').BufferGeometry }).geometry;
+      const position = geometry?.getAttribute('position');
+      if (position) {
+        objects += 1;
+        const copies = node instanceof ReachInstancedMesh ? node.count : 1;
+        for (let copy = 0; copy < copies; copy += 1) {
+          if (node instanceof ReachInstancedMesh) {
+            node.getMatrixAt(copy, instance);
+            toWorld.multiplyMatrices(node.matrixWorld, instance);
+          } else {
+            toWorld.copy(node.matrixWorld);
+          }
+          for (let i = 0; i < position.count; i += 1) {
+            vertex.fromBufferAttribute(position, i).applyMatrix4(toWorld);
+            vertices += 1;
+            const d = Math.hypot(vertex.x, vertex.z);
+            if (d > radius) {
+              radius = d;
+              furthestNode.node = node;
+            }
+          }
+        }
+      }
+      for (const child of node.children) visit(child);
+    };
+    visit(scene);
+    const path: string[] = [];
+    for (let n: import('three').Object3D | null = furthestNode.node; n; n = n.parent) {
+      path.push(n.name || n.type);
+    }
+    return {
+      radius,
+      furthest: path.join(' < '),
+      vertices,
+      objects,
+      excludedRoots: excluded.map((root) => root.name || root.type),
+    };
+  })();
+
+  // The top of the castle's stonework, read off the built meshes — as a
+  // **radius from the planet's centre**, because the castle leans (#625). See
+  // `ParkFacts.castleMasonryTopRadius` for the 2.710 m this was wrong by while
+  // it was an AABB's `max.y`, and for why a box cannot answer a radius.
   const { Box3 } = await import('three');
-  let castleMasonryTopY = -Infinity;
+  // Dynamic, like every other `src/` import in this function: a static one
+  // would load at module-evaluation time, before the harness has set the seed.
+  // `Geo` itself reads no seed, but the rule is cheaper to keep than to audit.
+  const { Geo } = await import('../../src/world/geo/Geo.ts');
+  // **`MeshClass`, not the `Mesh` imported at the top of this file.** A
+  // `const { … Mesh … } = await import('three')` further down *this same
+  // function* (the rail-race block) shadows the module-level import for the
+  // whole body, so a bare `Mesh` up here is in its temporal dead zone: it
+  // typechecks, and throws `Cannot access 'Mesh' before initialization` at
+  // runtime. In vitest that kills the suite before any test runs and reports as
+  // **93 skipped**, which reads nothing like a crash — the pass count is the
+  // tell, exactly as CLAUDE.md's "a skipped test is not a passing test" says.
+  // Measured here rather than guessed: it is how this block first failed.
+  // Aliased `…ForMasonry` because `InstancedMeshClass` and `Matrix4` are both
+  // already taken further down this same function (the arriving-bus block), and
+  // in one function scope that is a redeclaration — which `tsc` catches, unlike
+  // the `Mesh` shadow noted just above, which it does not. Renaming here rather
+  // than there keeps the change inside the block that introduced the clash.
+  const {
+    Mesh: MeshClass,
+    InstancedMesh: InstancedMeshForMasonry,
+    Matrix4: MatrixForMasonry,
+  } = await import('three');
+  let castleMasonryTopRadius = -Infinity;
+  let castleMasonryTopMesh = '';
+  let castleMasonryTopFacadeY = Number.NaN;
   {
-    const box = new Box3();
+    const probe = new Vector3();
+    const geo = new Geo();
+    const instanceMatrix = new MatrixForMasonry();
+    const composed = new MatrixForMasonry();
+    const topAt = new Vector3();
     scene.traverse((object) => {
       if (!/^(castle-wall-|crenellations$)/.test(object.name)) return;
-      box.setFromObject(object);
-      if (box.max.y > castleMasonryTopY) castleMasonryTopY = box.max.y;
+      object.traverse((node) => {
+        if (!(node instanceof MeshClass)) return;
+        const position = node.geometry.getAttribute('position');
+        if (!position) return;
+        node.updateWorldMatrix(true, false);
+        // **`crenellations` is an `InstancedMesh` of 40 merlons, and
+        // `InstancedMesh extends Mesh`** — so it passes the test above, and a
+        // walk that then applies only `node.matrixWorld` collapses all forty
+        // onto the container's origin. Measured: 0.984 m that way against
+        // 10.750 m honouring the per-instance matrices, i.e. the battlements
+        // dropped out of the measurement entirely and the tallest thing left
+        // was the lintel band at 9.770 m.
+        //
+        // That is a 0.9806 m under-report in the *dangerous* direction — the
+        // identical disease this fact was rewritten to cure, one layer down.
+        // `Box3.setFromObject`, which this replaced, honours instance matrices
+        // for free; a hand-rolled vertex walk has to be told.
+        const matrices: InstanceType<typeof MatrixForMasonry>[] = [];
+        if (node instanceof InstancedMeshForMasonry) {
+          for (let k = 0; k < node.count; k += 1) {
+            node.getMatrixAt(k, instanceMatrix);
+            matrices.push(composed.multiplyMatrices(node.matrixWorld, instanceMatrix).clone());
+          }
+        } else {
+          matrices.push(node.matrixWorld.clone());
+        }
+        for (const matrix of matrices) {
+          for (let i = 0; i < position.count; i += 1) {
+            probe.fromBufferAttribute(position, i).applyMatrix4(matrix);
+            const radius = geo.setFromWorldVector(probe).radius();
+            if (radius > castleMasonryTopRadius) {
+              castleMasonryTopRadius = radius;
+              castleMasonryTopMesh = object.name;
+              topAt.copy(probe);
+            }
+          }
+        }
+      });
     });
+    // The same point expressed in the facade's own frame, which is the frame
+    // `layout.ts`'s `CASTLE_MASONRY_TOP` is written in. It is what lets an
+    // invariant check the *value* rather than only the frame — see
+    // `theGinormousSlideLeavesOverTheBattlements`.
+    if (castleMasonryTopRadius > -Infinity) {
+      let facade: import('three').Object3D | null = null;
+      scene.traverse((object) => {
+        if (object.name === 'building-facade') facade = object;
+      });
+      if (facade) {
+        castleMasonryTopFacadeY = (facade as import('three').Object3D).worldToLocal(
+          topAt.clone(),
+        ).y;
+      }
+    }
   }
 
   // Everything standing on the castle's own roof (#462), as one box in world
@@ -1528,6 +1807,76 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     }
   }
 
+/**
+ * **How tall a thing is along ITS OWN up, not the world's.**
+ *
+ * `new Box3().setFromObject(root)` is axis-aligned, so `max.y - min.y` is the
+ * object's extent *projected onto world +Y*. For anything standing level that
+ * is its height. For the cat bus it is not: `ArrivalSequence.placeBus` calls
+ * `faceOnGround`, deliberately, because the road runs far enough out that a
+ * chassis held level to world +Y digs its downhill wheel into the hill. So the
+ * bus is tilted, and an axis-aligned box round a tilted body grows with the
+ * tilt while the body does not.
+ *
+ * Measured on the canonical seed at the park's authored scale:
+ *
+ *   bus lean off world +Y   21.31 deg
+ *   AABB world-Y extent      9.43 m   <- reported as the bus's height, and failed
+ *   along its own up         6.03 m   <- the bus
+ *   along its own right      7.30 m
+ *   along its own forward   14.54 m
+ *   inflation                1.565x
+ *
+ * `TALLEST_CHILD_HEIGHT` is 2.97, so the invariant's band is 4.16-7.72 m: 9.43
+ * is outside it and 6.03 is comfortably inside. The bus never grew; the ruler
+ * was held vertically against a thing that is not.
+ *
+ * The 7.30 and 14.54 are worth keeping here, because they are **exactly** the
+ * numbers `check-swept-bus.mts` collapsed to when it hit this same fault from
+ * the other side — its per-seed boxes of 12.10/13.73/12.00 m became an
+ * identical 14.54 x 7.30 once the yaw was taken out. Two independent
+ * instruments agreeing on the bus's own dimensions is the control on this one.
+ *
+ * Every drawn vertex, in world space, projected onto the object's own axis —
+ * so it is an oriented extent and not a second approximation of one.
+ */
+function heightAlongOwnUp(root: import('three').Object3D): number {
+  const quaternion = new Quaternion();
+  root.getWorldQuaternion(quaternion);
+  // The canonical LOCAL +Y, rotated by the object's own quaternion: this
+  // derives the local up rather than assuming it, the same shape as `Frame`'s
+  // own `LOCAL_UP`. Marked so `check:flat-primitives` does not read it as a
+  // world axis standing in for a local one, which is the opposite of what it is.
+  const up = new Vector3(0, 1, 0).applyQuaternion(quaternion); // flat-ok: local axis, leaned by the object's own quaternion
+  const vertex = new Vector3();
+  let lowest = Infinity;
+  let highest = -Infinity;
+  root.updateWorldMatrix(true, true);
+  root.traverse((object) => {
+    // Duck-typed rather than `instanceof Mesh`, which is this file's own idiom
+    // (see the mesh count just below) and is not a style choice: a static
+    // `Mesh` binding is in a circular-import temporal dead zone at the point
+    // this runs, and reaching for it throws
+    // `Cannot access 'Mesh' before initialization` — which vitest reports as
+    // **93 skipped, 0 failed**, the quietest way for a suite to stop checking.
+    const mesh = object as unknown as {
+      isMesh?: boolean;
+      geometry?: { attributes?: Record<string, { count: number } | undefined> };
+      matrixWorld: import('three').Matrix4;
+    };
+    if (!mesh.isMesh) return;
+    const position = mesh.geometry?.attributes?.['position'];
+    if (!position) return;
+    for (let index = 0; index < position.count; index += 1) {
+      vertex.fromBufferAttribute(position as never, index).applyMatrix4(mesh.matrixWorld);
+      const along = vertex.dot(up);
+      if (along < lowest) lowest = along;
+      if (along > highest) highest = along;
+    }
+  });
+  return highest > lowest ? highest - lowest : 0;
+}
+
   // --- the cat bus -----------------------------------------------------------
   // Found by walking the scene, not by asking `world.entrance` whether it built
   // one. Asking the builder is how a feature stays green while being absent
@@ -1543,8 +1892,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       // Narrowed through a local: `scene.traverse`'s callback is not a closure
       // TypeScript can follow, so `busRoot` is still `null`-typed out here.
       const root = busRoot as import('three').Object3D;
-      const box = new Box3().setFromObject(root);
       const where = new Vector3();
+      const busHeight = heightAlongOwnUp(root);
       root.getWorldPosition(where);
       let meshCount = 0;
       let hasDriver = false;
@@ -1578,7 +1927,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         y: where.y,
         z: where.z,
         meshCount,
-        height: Number.isFinite(box.max.y - box.min.y) ? box.max.y - box.min.y : 0,
+        height: Number.isFinite(busHeight) ? busHeight : 0,
         hasDriver,
         kidCount,
       };
@@ -2935,7 +3284,10 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     slideCameras,
     slideShotSpans,
     slideLanding,
-    castleMasonryTopY,
+    castleMasonryTopRadius,
+    castleMasonryTopMesh,
+    castleMasonryTopFacadeY,
+    castleMasonryDesignTopY: CASTLE_MASONRY_TOP,
     castleRoofGarden,
     parkGateArch,
     castleTowers,
@@ -2946,6 +3298,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     routes,
     nearPairs,
     boundary: world.collision.playBounds,
+    drawnReach,
     boundaryTargetArea: CIRCULAR_PARK_AREA * PARK_AREA_MULTIPLIER,
     masonryHalfWidth: BOUNDARY_MASONRY_HALF_WIDTH,
     boundaryBlockWidth: BOUNDARY_BLOCK_WIDTH,
