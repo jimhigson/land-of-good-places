@@ -20,6 +20,9 @@ import { TAU } from '../../core/mathUtils';
 import { PARK_LAYOUT } from '../parkLayout';
 import { PARK_SEED } from '../parkManifest';
 import { COASTER_PLANS } from '../coaster/plan';
+import { cartEnvelopePoint } from '../coaster/cart';
+import { crossSection } from '../coaster/clearance';
+import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
 import { PARK_BOUNDARY, solverBoundary } from '../boundary';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from '../train/plan';
 import {
@@ -648,6 +651,89 @@ export function cruiserCrossesColumn(
     const dz = point.z - z;
     if (dx * dx + dz * dz > CRUISER_OVERLAP * CRUISER_OVERLAP) continue;
     if (point.y > low - CRUISER_AIR && point.y < high + CRUISER_AIR) return true;
+  }
+  return false;
+}
+
+/**
+ * Metres between the drawn car's sampled positions along the loop, for
+ * {@link carSweepsColumn}.
+ */
+const CAR_SWEEP_STEP = 0.5;
+
+/**
+ * **The Sky Cruiser's car as it is drawn**, sampled once: the cross-section
+ * points `coaster/clearance.ts` sweeps (`crossSection`), placed with the same
+ * `drawnOnSphere` + `railFrameAt` + `cartEnvelopePoint` that sweep uses, every
+ * {@link CAR_SWEEP_STEP} metres. Flat `x, y, z` triples.
+ *
+ * Built lazily: only the slide's legs ask, once the chute is planned.
+ */
+let drawnCarPoints: Float64Array | null = null;
+function drawnCar(): Float64Array {
+  if (drawnCarPoints) return drawnCarPoints;
+  const route = COASTER_PLANS.cruiser.route;
+  const drawn = drawnOnSphere(route);
+  const section = crossSection();
+  const frame: RailFrame = {
+    position: new Vector3(),
+    forward: new Vector3(),
+    side: new Vector3(),
+    up: new Vector3(),
+  };
+  const out: number[] = [];
+  const point = new Vector3();
+  for (let d = 0; d < route.length; d += CAR_SWEEP_STEP) {
+    railFrameAt(drawn, d, frame);
+    for (const [lateral, rise] of section) {
+      cartEnvelopePoint(frame, lateral, rise, point);
+      out.push(point.x, point.y, point.z);
+    }
+  }
+  drawnCarPoints = Float64Array.from(out);
+  return drawnCarPoints;
+}
+
+/**
+ * The most any point of the car's surface can be from its nearest sample: half
+ * a {@link CAR_SWEEP_STEP} along the loop, and half the widest gap between
+ * neighbouring cross-section points across and up it (0.75 m and 0.85 m).
+ */
+const CAR_SAMPLE_PAD = Math.hypot(CAR_SWEEP_STEP / 2, 0.75 / 2, 0.85 / 2);
+
+/**
+ * **Would the Sky Cruiser's drawn car pass through a post of `radius` standing
+ * at (x, z) from `bottomY` to `topY`?**
+ *
+ * {@link cruiserCrossesColumn} asks the question of the route's *flat* centre
+ * line, and the ride is drawn leant onto the sphere — the car's top swings
+ * sideways by its height times the lean, a third of a metre and more out where
+ * the slide lands. On seed 131 (#663) that let a leg stand 2.12 m from the flat
+ * line and the car still ran through it (`the Sky Cruiser flies clear of the
+ * whole park`). This asks of the car that is drawn, the same sweep the invariant
+ * makes, padded by {@link CAR_SAMPLE_PAD} so the sampling cannot step past a
+ * post.
+ */
+export function carSweepsColumn(
+  x: number,
+  z: number,
+  bottomY: number,
+  topY: number,
+  radius: number,
+): boolean {
+  const points = drawnCar();
+  const reach = radius + CAR_SAMPLE_PAD;
+  const reach2 = reach * reach;
+  const low = Math.min(bottomY, topY) - CAR_SAMPLE_PAD;
+  const high = Math.max(bottomY, topY) + CAR_SAMPLE_PAD;
+  for (let i = 0; i < points.length; i += 3) {
+    const dx = (points[i] as number) - x;
+    if (dx > reach || dx < -reach) continue;
+    const dz = (points[i + 2] as number) - z;
+    if (dz > reach || dz < -reach) continue;
+    if (dx * dx + dz * dz > reach2) continue;
+    const y = points[i + 1] as number;
+    if (y >= low && y <= high) return true;
   }
   return false;
 }
