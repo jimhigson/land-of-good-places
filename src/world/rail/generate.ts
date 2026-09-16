@@ -818,6 +818,35 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       return taken;
     };
 
+    /**
+     * **Can no chain from `from` (via `via`, if given) to `to` fit under
+     * {@link RouteBriefBase.maxLength}?** A pure prune for the closer.
+     *
+     * Every closer is built from circular arcs, and an arc is never shorter
+     * than its chord, so the straight-line distance through the poses is a
+     * lower bound on what the chain would add to `accumulated`. When that
+     * bound already crosses the ceiling, `validate` would reject a piece of
+     * every chain `chainFor` could build as `tooLong` — so the biarc
+     * construction, the arc expansion and the validation are skipped and the
+     * answer, null, is the same. No test here draws randomness, so the search
+     * takes the identical path; only the diagnostic `rejected` counts move.
+     *
+     * Measured on seed 11 (#650): the closer fired ~900,000 times in one slide
+     * solve and the biarc/arc construction it ran was a quarter of the whole
+     * search's CPU, overwhelmingly for heads already too far from home to
+     * finish under the 75 m ceiling.
+     *
+     * The margin is for float rounding in the chain's summed lengths: the prune
+     * only fires when the bound clears the ceiling by more than it.
+     */
+    const provablyTooLong = (from: Pose2, via: Pose2 | null, to: Pose2): boolean => {
+      if (maxLength === undefined) return false;
+      const bound = via
+        ? Math.hypot(via.x - from.x, via.z - from.z) + Math.hypot(to.x - via.x, to.z - via.z)
+        : Math.hypot(to.x - from.x, to.z - from.z);
+      return accumulated + bound > maxLength + 1e-6;
+    };
+
     /** Expands a biarc into cubics, if its radii are legal. */
     const chainFor = (from: Pose2, to: Pose2, kind: string): CubicSegment[][] => {
       const out: CubicSegment[][] = [];
@@ -867,9 +896,11 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       const head = headPose();
 
       // A biarc straight home, gentlest first.
-      for (const segs of chainFor(head, finishPose, 'closer')) {
-        const taken = tryChain(segs);
-        if (taken) return taken;
+      if (!provablyTooLong(head, null, finishPose)) {
+        for (const segs of chainFor(head, finishPose, 'closer')) {
+          const taken = tryChain(segs);
+          if (taken) return taken;
+        }
       }
 
       // Nothing direct fits, so swing wide: go via a seeded intermediate pose
@@ -895,6 +926,9 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
           hx,
           hz,
         };
+        // The draws above are made whatever happens, so skipping the geometry
+        // below cannot move the random stream — see {@link provablyTooLong}.
+        if (provablyTooLong(head, via, finishPose)) continue;
         for (const firstHalf of chainFor(head, via, 'closerA')) {
           const takenFirst = tryChain(firstHalf);
           if (!takenFirst) continue;
