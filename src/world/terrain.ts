@@ -373,3 +373,42 @@ export function placeOnSphere(
     .setFromAxisAngle(INDOOR_UP, yaw)
     .premultiply(_tilt.setFromUnitVectors(INDOOR_UP, _up));
 }
+
+
+/**
+ * **The inverse of {@link placeOnSphere}: where a drawn point was authored.**
+ *
+ * `placeOnSphere` takes an `(x, z)` and a height above the ground there, and
+ * leans the height along the local up. So a drawn point lies on the ray from the
+ * planet's centre through its own foot, and the foot is where that ray meets the
+ * ground. This finds the foot and hands back `(foot.x, ground + altitude,
+ * foot.z)` — the flat-frame point every ride planner in this park solves in.
+ *
+ * It exists for measurement. A built mesh is drawn leant; the plan it was built
+ * from is flat. Comparing the one against the other's `(x, z)` reads the lean
+ * itself as an error — `height · sin(tilt)`, several metres at a ride's height
+ * out at the boundary — and that one mix accounted for most of a day's red
+ * procgen invariants. Unlean the drawn point, then compare like with like.
+ *
+ * Exact at convergence: `placeOnSphere(unplaceFromSphere(p))` returns `p`. The
+ * foot is solved by the same fixed point `geo/ground.ts`'s `groundRadiusToward`
+ * uses (only the waves move between steps, so it contracts fast).
+ */
+export function unplaceFromSphere(
+  drawn: { readonly x: number; readonly y: number; readonly z: number },
+  target = new Vector3(),
+): Vector3 {
+  const cy = drawn.y + GROUND_SPHERE_RADIUS;
+  const radius = Math.hypot(drawn.x, cy, drawn.z);
+  const dx = drawn.x / radius;
+  const dz = drawn.z / radius;
+  let ground = GROUND_SPHERE_RADIUS;
+  for (let step = 0; step < 6; step += 1) {
+    const x = dx * ground;
+    const z = dz * ground;
+    ground = Math.hypot(x, terrainHeight(x, z) + GROUND_SPHERE_RADIUS, z);
+  }
+  const footX = dx * ground;
+  const footZ = dz * ground;
+  return target.set(footX, terrainHeight(footX, footZ) + (radius - ground), footZ);
+}
