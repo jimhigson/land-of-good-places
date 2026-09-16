@@ -14,6 +14,21 @@ the castle wall, a pylon off its track, an 8.21 m cat bus, unseated coping
 stones) and this PR cannot go green until those land. It moves the number
 down by 33 and takes 279 silent skips to zero; it does not clear the board.
 
+## Review round 1 (16 Sep 2026) — changes requested, being addressed
+
+Worktree now `.claude/worktrees/ground-claims-review` (local branch
+`eng/ground-claims-review`, pushed to `eng/sphere-ground-claims`). Rebased onto
+`feat/sphere-combined`, then onto #637 (squash-merged onto this branch).
+
+Done: `ParkFacts.drawnReach` (every outdoor vertex, interiors excluded by root)
+and the planet clause now asserts on it, proved red by pushing `railRace` +100 m
+on seed 326 (227.8 m, fouls naming `railRace:duck-bar-posts`); green 326 prints
+134.9 m chart / 145.2 m ground / 37.8 deg. The bus-grade planet is computed from
+`parkRadiusForGradient` (1192 m on 326), no 2460 anywhere. Old-scale prose
+(1.43 m, 40%) now quotes the claim-chart-error table. `park-past-the-horizon`
+labelled historical. Suite counts removed from constants.ts.
+Remaining: full-suite name diff, `pnpm run check`.
+
 ## State
 
 `tsc` clean. `check:ground-claims` passes. 67 unit tests green
