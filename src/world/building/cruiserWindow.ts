@@ -1,6 +1,7 @@
 import { BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_WALL_THICKNESS } from '../../core/constants';
 import { CART_ENVELOPE } from '../coaster/cart';
 import { Vector3 } from 'three';
+import { terrainHeight, upAt } from '../terrain';
 import {
   BUILDING_BASE_Y,
   BUILDING_CENTRE_X,
@@ -244,40 +245,49 @@ export function toCastleLocal(
 }
 
 /**
- * **The world `y` at which the column at `(x, z)` stands `localY` above the
- * castle's ground-floor deck.**
+ * **How far above the ground in the column at `(x, z)` a route point must be
+ * authored so that, once drawn, it stands `localY` above the castle's deck.**
  *
- * The frame-correct replacement for `castleY(localY)`, which returned one
- * number for the whole building. That was right while the shell stood plumb —
- * a level deck has one height — and wrong the moment it leant: the deck is a
- * **plane with the local up as its normal**, so its world `y` falls away across
- * the footprint. At this castle's 12.44° it drops about **0.22 m per metre**
- * travelled along the lean, which over the ~20 m the Sky Cruiser's loop spends
- * crossing the building is **4.3 m** — the difference between flying through
- * the window and flying through the lintel.
+ * The route is solved flat — an `(x, z)` and a height above the ground there —
+ * and drawn through `placeOnSphere`, which stands that height up along the local
+ * up at its own column. The castle is a rigid body leant by {@link CASTLE_FRAME}.
+ * So the question the solver has to ask is not "what world `y` is the deck
+ * here" but "what authored height lands the *drawn* car at the window", and it
+ * is linear in that height:
  *
- * This is the same plane `layout.ts`'s `deckClearanceOverFootprint` already
- * solves against, and deliberately so: that function was fixed when Jim found
- * the castle *"floating in space above the earth"*, and this is the other half
- * of the same correction, for everything that asks the deck a height rather
- * than asks it for clearance.
+ * ```
+ * drawn = G + u·h          (G the ground point, u its up)
+ * ly(h) = (G − O)·U + h (u·U)   (O, U the castle's origin and up)
+ * h     = (localY − (G − O)·U) / (u·U)
+ * ```
  *
- * Keeps `(x, z)` fixed, so it answers *"how high, in this column"* rather than
- * *"where does this point go"* — the same distinction `terrain.ts` draws
- * between `yAtAltitude` and `liftFromGround`, and for the same reason: a route
- * solved on the plan has already chosen its column.
+ * History, both measured at scale 1 on the canonical seed, castle leaning
+ * 12.44°:
+ *
+ * - `castleY(localY)` returned one world `y` for the whole building — a level
+ *   slice through a leaning shell, **4.3 m** out over the ~20 m crossing.
+ * - `castleDeckYAt` then asked the deck plane per column in world `y`, which
+ *   put the **flat** route point on the plane. The drawn car it becomes sat
+ *   **0.144 m** higher and up to **0.403 m** along the facade from it, so the
+ *   window was cut round a car nobody sees.
+ *
+ * This answers for the drawn car, which is the one `check:castle-window` and
+ * `check:cruiser-clearance` now sweep.
  */
-export function castleDeckYAt(localY: number, x: number, z: number): number {
+export function castleDeckClearanceAt(localY: number, x: number, z: number): number {
   CASTLE_FRAME.up(_deckUp);
   CASTLE_FRAME.at.toWorld(_deckOrigin);
-  return (
-    _deckOrigin.y +
-    (localY - _deckUp.x * (x - _deckOrigin.x) - _deckUp.z * (z - _deckOrigin.z)) / _deckUp.y
-  );
+  _deckGround.set(x, terrainHeight(x, z), z);
+  upAt(_deckGround.x, _deckGround.y, _deckGround.z, _groundUp);
+  const groundLocal = _deckRel.subVectors(_deckGround, _deckOrigin).dot(_deckUp);
+  return (localY - groundLocal) / _groundUp.dot(_deckUp);
 }
 
 const _deckUp = /* @__PURE__ */ new Vector3();
 const _deckOrigin = /* @__PURE__ */ new Vector3();
+const _deckGround = /* @__PURE__ */ new Vector3();
+const _groundUp = /* @__PURE__ */ new Vector3();
+const _deckRel = /* @__PURE__ */ new Vector3();
 
 /** The inverse of {@link toCastleLocal}: castle-local metres, in world space. */
 export function fromCastleLocal(lx: number, ly: number, lz: number, target: Vector3): Vector3 {
