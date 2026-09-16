@@ -1,7 +1,7 @@
 # HANDOFF — plan-slide-backtrack
 
-Model: Claude Opus 5 (1M), chosen by the Overseer. Branch `eng/plan-slide-backtrack`
-off `origin/eng/sphere-ground-claims`. Worktree `.claude/worktrees/plan-slide-backtrack`.
+Model: Claude Opus 5 (1M), chosen by the Overseer. Branch `eng/plan-slide-backtrack`,
+rebased onto `origin/feat/sphere-combined` (PR #644, base retargeted after #620 squashed). Worktree `.claude/worktrees/plan-slide-backtrack`.
 Scratch repro worktree `.claude/worktrees/plan-slide-repro` (branch
 `scratch/plan-slide-repro`, never pushed) = base + uncommitted merge of
 `origin/eng/bend-exteriors` (the leaning TowerSolid), scale 1 kept.
@@ -37,8 +37,12 @@ Scratch repro worktree `.claude/worktrees/plan-slide-repro` (branch
 
 ## Proof
 - Chute SHA identical base vs branch on all 10 pool seeds (base, vertical towers).
-- Repro (base+bend-exteriors, scale 1): 326 builds 74.56 m from door 6 in 9.3 s
-  (was: throw after 71 s); 451 builds 59.15 m in 35.7 s (was: throw after 147 s).
+- Repro recipe: worktree at this branch, `git merge origin/eng/bend-exteriors`, take ours
+  for package.json. That merge brings #624's **10-rung** ladder. On it: 326 builds 74.56 m
+  from door 6 (facade door 3.90..8.10) in 9.6 s, 2.40 m off the towers, steepest 20.7 deg
+  world-y; 451 builds **72.85 m, steepest 25.7 deg**, facade door 2.96..8.37, 17.3 s.
+  (The earlier 59.15 m / 30.7 deg for 451 came from a cherry-pick that kept this branch's
+  6-rung ladder — right for this branch's code on a leaning castle, not for the recipe.)
 - Mutation A (one door, no prune) on repro 326: REFUSED, no throw, same stub blocker.
 - Mutation B (no prune): same 74.56 m route, 45.8 s — prune is speed only.
 - seed-326 procgen: base 17F/76P/0S; branch identical fail names; repro+fix
@@ -49,3 +53,15 @@ Scratch repro worktree `.claude/worktrees/plan-slide-repro` (branch
 - pnpm run check: stops at check:rail-race (step 49), red with the same 17 FAILs on base.
   Every step before it passed, including slide-rider, pet-slide, park, castle-towers, solve-cost.
 - Scratch worktrees removed; repro is `git merge origin/eng/bend-exteriors` onto base (only package.json conflicts, take ours).
+
+## Review round 1 (#644, changes requested) — addressed
+- Rebased `--onto origin/feat/sphere-combined 2691d4b2`; three-dot = 4 files.
+- `stubPoints()` is the one owner of the stub line (chutePoints + prune);
+  `chuteComplaint(points)` is the cruiser/tower half of `unrideableComplaint`, and
+  the prune asks it of stub points + start point. Same test, subset of points.
+- Chute SHA unchanged: canonical c606885a, 11 10f29fbc, 24 0dab29af, 131 f2d6ee38.
+  Control (first door 9.4) on canonical moves CHUTE to 8f4a9750. Reverted.
+- Refusal docs/title reworded: nothing consumes `solveSlide` yet. Follow-up ticket filed
+  for the 27 unconditional SLIDE_PLAN readers.
+- Not ours (Overseer ticketing): flat door/START_Y, hand-named obstacles, #624 ladder
+  conflict, world-y slide heights climbing radially at the end.
