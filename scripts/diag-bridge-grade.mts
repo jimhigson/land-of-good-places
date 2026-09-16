@@ -17,7 +17,7 @@
  *   over the part of it that lies in that point's own horizontal plane. In
  *   other words `((B−A)·up(A)) / |(B−A) − ((B−A)·up(A))·up(A)|`. That is the
  *   steepness a child's legs feel, and it is the number
- *   `SPRINT_PEAK_GRADE_BUDGET` was ever about.
+ *   `SPRINT_LOCAL_GRADE_CEILING` is about (#636).
  *
  * **`altitude()` is NOT the local rise, and reaching for it is the trap this
  * instrument fell into first.** `geo/ground.ts`'s `altitude()` is height *above
@@ -62,7 +62,7 @@ import { Vector3 } from 'three';
 const { buildHeadlessPark } = await import('./park-harness.mts');
 const park = buildHeadlessPark();
 
-const { SPRINT_PEAK_GRADE_BUDGET, PLAYER_LONGEST_STEP } = await import('../src/core/constants.ts');
+const { SPRINT_LOCAL_GRADE_CEILING, PLAYER_LONGEST_STEP } = await import('../src/core/constants.ts');
 const { terrainHeight } = await import('../src/world/terrain.ts');
 const { computeCrossings } = await import('../src/world/train/crossings.ts');
 const { TRAIN_PLAN } = await import('../src/world/train/plan.ts');
@@ -283,7 +283,10 @@ for (const crossing of crossings) {
   });
 }
 
-process.stderr.write(`\nbudget: SPRINT_PEAK_GRADE_BUDGET = ${SPRINT_PEAK_GRADE_BUDGET.toFixed(4)}\n`);
+// One owner for the ceiling: the same constant `test/procgen/invariants.ts`
+// asserts against (#636). This script must never carry its own copy — a
+// diagnostic that disagrees with the check it diagnoses is worse than none.
+process.stderr.write(`\nceiling: SPRINT_LOCAL_GRADE_CEILING = ${SPRINT_LOCAL_GRADE_CEILING.toFixed(4)}\n`);
 process.stderr.write(`bridges measured: ${rows.length} of ${crossings.length} crossings\n`);
 if (rows.length === 0) {
   process.stderr.write('  (asserts nothing — this seed built no bridge this instrument could march)\n');
@@ -294,7 +297,7 @@ process.stderr.write(
 let worstLocal = 0;
 let overBudget = 0;
 for (const row of rows.sort((a, b) => a.r - b.r)) {
-  const over = row.grades.local > SPRINT_PEAK_GRADE_BUDGET;
+  const over = row.grades.local > SPRINT_LOCAL_GRADE_CEILING;
   if (over) overBudget += 1;
   worstLocal = Math.max(worstLocal, row.grades.local);
   process.stderr.write(
@@ -304,8 +307,8 @@ for (const row of rows.sort((a, b) => a.r - b.r)) {
   );
 }
 process.stderr.write(
-  `\nworst local grade ${worstLocal.toFixed(3)} against budget ` +
-    `${SPRINT_PEAK_GRADE_BUDGET.toFixed(3)} — ${overBudget} of ${rows.length} over\n`,
+  `\nworst local grade ${worstLocal.toFixed(3)} against ceiling ` +
+    `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)} — ${overBudget} of ${rows.length} over\n`,
 );
 process.stderr.write(
   `planet: ground radius straight up = ${groundRadiusToward(new Vector3(0, 1, 0)).toFixed(2)} m\n\n`,
