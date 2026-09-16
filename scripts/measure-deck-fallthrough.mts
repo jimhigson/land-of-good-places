@@ -134,6 +134,20 @@ const PARK_THINNEST_HALF_WIDTH = 0.18;
  * nothing else — 0.512, the figure `SPRINT_PEAK_GRADE_BUDGET` is frozen at.
  */
 const RAMP_X0 = 0;
+
+/**
+ * **Where the shipping configuration is also measured — off the origin, both
+ * ways** (#643 review). With the ramp at the origin the planet is out of the
+ * picture, which is what the damped control wants and exactly what makes the
+ * shipping row unable to see the reference carry: remove `carryReference` and
+ * x0 = 0 still reads 1.670. At -60 the ramp climbs towards the park, at +60
+ * away from it, so a reach or a carry that counts the planet moves the ceiling
+ * off the prediction in one direction or the other.
+ */
+const SHIPPING_ALSO_AT = [-60, 60];
+
+/** The ramp origin every function below reads; {@link RAMP_X0} except while measuring elsewhere. */
+let rampX0 = RAMP_X0;
 /** Long enough that a sprint spends several seconds on it at every gradient. */
 const RAMP_LENGTH = 30;
 const RAMP_Z = 0;
@@ -186,8 +200,8 @@ function buildCollision(): CollisionWorld {
  * the planet the measured ceiling drifted off the prediction by that much.
  */
 function deckSurfaceAt(base: number, gradient: number, x: number): number {
-  const along = Math.min(Math.max(x - RAMP_X0, 0), RAMP_LENGTH);
-  const baseRadius = Math.hypot(RAMP_X0, base + GROUND_SPHERE_RADIUS, RAMP_Z);
+  const along = Math.min(Math.max(x - rampX0, 0), RAMP_LENGTH);
+  const baseRadius = Math.hypot(rampX0, base + GROUND_SPHERE_RADIUS, RAMP_Z);
   const radius = baseRadius + gradient * along;
   return Math.sqrt(radius * radius - x * x - RAMP_Z * RAMP_Z) - GROUND_SPHERE_RADIUS;
 }
@@ -231,9 +245,9 @@ const HOLE_AT = RAMP_LENGTH * 0.5;
 
 function coversWith(holeWidth: number, x: number, z: number): boolean {
   if (Math.abs(z - RAMP_Z) > RAMP_HALF_WIDTH) return false;
-  if (x < RAMP_X0 - 0.001 || x > RAMP_X0 + RAMP_LENGTH + 0.001) return false;
+  if (x < rampX0 - 0.001 || x > rampX0 + RAMP_LENGTH + 0.001) return false;
   if (holeWidth > 0) {
-    const along = x - RAMP_X0;
+    const along = x - rampX0;
     if (along >= HOLE_AT && along < HOLE_AT + holeWidth) return false;
   }
   return true;
@@ -285,7 +299,7 @@ function run(config: Config, outcome: Outcome): void {
 
   // The deck sits clear above the terrain, so losing it is unambiguous: the
   // only thing under it is ground several metres down.
-  const base = terrainHeight(RAMP_X0, RAMP_Z) + 6;
+  const base = terrainHeight(rampX0, RAMP_Z) + 6;
 
   const surfaces = new WalkSurfaces();
   surfaces.addPlatform({
@@ -305,7 +319,7 @@ function run(config: Config, outcome: Outcome): void {
   // Start a phase-shifted fraction of one long step back from the ramp's foot
   // (or its head, going down), so the frame boundaries land everywhere.
   const offset = phase * PLAYER_LONGEST_STEP;
-  const startX = uphill ? RAMP_X0 + offset : RAMP_X0 + RAMP_LENGTH - offset;
+  const startX = uphill ? rampX0 + offset : rampX0 + RAMP_LENGTH - offset;
   player.placeOnGround(startX, RAMP_Z);
 
   const dirX = uphill ? 1 : -1;
@@ -318,7 +332,7 @@ function run(config: Config, outcome: Outcome): void {
     // Walked off the end of the deck. Over a hole she is still "on" the deck
     // as far as this loop is concerned, which is the point: the question is
     // whether the surface is found again on the far side.
-    if (x < RAMP_X0 || x > RAMP_X0 + RAMP_LENGTH) break;
+    if (x < rampX0 || x > rampX0 + RAMP_LENGTH) break;
     if (!covers(x, z)) continue;
 
     const deck = deckSurfaceAt(base, gradient, x);
@@ -406,6 +420,12 @@ function ceiling(results: Map<number, Outcome>): number {
 }
 
 const results = VARIANTS.map((variant) => ({ variant, byGradient: measure(variant) }));
+const shippingElsewhere = SHIPPING_ALSO_AT.map((x0) => {
+  rampX0 = x0;
+  const byGradient = measure(VARIANTS[3]!);
+  rampX0 = RAMP_X0;
+  return { x0, byGradient };
+});
 const before = results[0]!.byGradient;
 const after = results[3]!.byGradient;
 
@@ -566,6 +586,24 @@ if (!(afterCeiling <= predicted && predicted < nextAbove)) {
       `predicted ${predicted.toFixed(3)} (next gradient tried: ${nextAbove.toFixed(3)}). ` +
       `The ground sample is no longer following the movement sub-steps.`,
   );
+}
+
+// 2b. The same bracket with the ramp off the origin, both ways — the only
+//     rows that can see the reference carry and the radial reach (#643).
+for (const { x0, byGradient } of shippingElsewhere) {
+  const measured = ceiling(byGradient);
+  const next = GRADIENTS.find((g) => g > measured) ?? Infinity;
+  console.log(`  shipping configuration with the ramp at x0 = ${x0}: ceiling ${measured.toFixed(3)}`);
+  if (!(measured <= predicted && predicted < next)) {
+    failed = true;
+    const first = GRADIENTS.map((g) => byGradient.get(g)!.firstMessage).find((m) => m !== null);
+    console.error(
+      `FAIL: with the ramp at x0 = ${x0} the measured ceiling ${measured.toFixed(3)} does not bracket ` +
+        `the predicted ${predicted.toFixed(3)} (next gradient tried: ${next.toFixed(3)}). Off the ` +
+        `origin the planet is in play, so the reach or the reference carry is counting it.` +
+        (first ? `\n      ${first}` : ''),
+    );
+  }
 }
 
 // 3. The fix must actually buy something over the control.
