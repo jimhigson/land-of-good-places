@@ -7,7 +7,8 @@ import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { bridgeableCrossingPosesSearch } from './crossingPoses';
-import { fitBridgeAcross, railCorridorBlocked } from './bridgeFit';
+import { fitBridgeAcross, railCorridorBlocked, SITE_RAMP_FLOOR } from './bridgeFit';
+import { DECK_HALF_LENGTH } from './bridgeFootprint';
 import { chosenCrossingCorridor, crossingSurvivesStationAt } from './crossingKeepOut';
 import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from './clearance';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -503,6 +504,15 @@ function boundaryMask(): NonNullable<typeof insideBoundaryMask> {
  * on to its next start pose — the backtracking rule, asked of the real loop,
  * not a tolerance widened until the crossing throw stops.
  *
+ * The same clause is what seed 451 was missing (retired on
+ * eng/sphere-crossing-and-coping after a warp search failed): its loop ran
+ * within 3.95 m of itself beside station 0 and, **measured against the real
+ * boundary wall**, cut a 773 m2 rim strip (the Rail Race stall and its exit)
+ * and a 2384 m2 lobe (dodgems) off from the 15737 m2 main park, with its only
+ * bridge site joining the two cut-off pieces to each other. Refused here, the
+ * search's next loop builds. The boundary matters: flooded without it, the
+ * rim strip reconnects round the outside of the wall and the defect vanishes.
+ *
  * Deliberately **not** "the loop makes exactly two regions": a pinched-off
  * pocket of lawn nobody is sent to is harmless, and refusing it would re-roll
  * parks that build today for nothing.
@@ -578,12 +588,15 @@ function loopLeavesEveryDestinationOnTheCrossing(
     return label[found] as number;
   };
 
-  // The two regions the start-pose bridge lands in: step off the deck along
-  // its own direction until the ground is walkable (the ramps are proved at
-  // least `SITE_RAMP_FLOOR` long, so this is always found well inside that).
+  // The two regions the start-pose bridge lands in, read where a child steps
+  // off it: the foot of the shortest ramp clause 1 proved on each side
+  // (`DECK_HALF_LENGTH + SITE_RAMP_FLOOR` out along the bridge's own
+  // direction). Not the first walkable cell past the fence — between two
+  // limbs' fence stamps that can be a speck of a region nobody can stand in,
+  // and asking a speck refused loops that were fine (seed 451, measured).
   const landing = (sign: 1 | -1): number => {
-    for (let step = FENCED_GROUND_REACH; step <= FENCED_GROUND_REACH + 6; step += cell) {
-      const region = regionAt(centre.x + dirX * sign * step, centre.z + dirZ * sign * step);
+    for (let along = DECK_HALF_LENGTH + SITE_RAMP_FLOOR; along >= FENCED_GROUND_REACH; along -= cell) {
+      const region = regionAt(centre.x + dirX * sign * along, centre.z + dirZ * sign * along);
       if (region >= 0) return region;
     }
     return -1;
