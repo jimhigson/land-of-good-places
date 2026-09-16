@@ -903,21 +903,120 @@ export interface ParkFacts {
     readonly halfZ: number;
   };
   /**
-   * The **top of the castle's stonework**, in world Y: the highest point of the
-   * curtain wall and the battlements standing on it.
+   * The **top of the castle's stonework, as a radius from the planet's
+   * centre**: the highest point of the curtain wall and the battlements
+   * standing on it, measured the way the world is actually shaped.
    *
-   * Measured off the built meshes' world bounding boxes, not off
-   * `CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT`. Only the Y component of an
-   * AABB is used, and for "how tall is the tallest stone" that component is
-   * exact — the box's x/z extent is a gross over-approximation of a hollow ring
-   * of wall and is deliberately not read.
+   * Metres from the planet centre. Compare it only against another radius —
+   * never against a world `y`, which is the very mix this field was created to
+   * end. Subtract `geo.PLANET_RADIUS` if you want a number to *print*, and do
+   * that only in a message.
+   *
+   * ## Why this is a radius and not a `max.y` (issue #625)
+   *
+   * It *was* an AABB's `max.y`, and that was wrong by **2.710 m** in the
+   * dangerous direction. The world is a sphere of radius `GROUND_SPHERE_RADIUS`,
+   * "up" is away from its centre, and the castle stands ~48 m out from the
+   * park's origin — so the castle **leans**, and a plumb line dropped down world
+   * `+Y` is not its own up. Measured on the canonical seed:
+   *
+   * | | |
+   * |---|---|
+   * | AABB `max.y` (what this used to report) | 8.040 m |
+   * | highest stonework by radius, a merlon at world (35.52, 7.08, 20.40) | 10.750 m |
+   * | under-report | **2.710 m** |
+   *
+   * That is `RADIAL-INVENTORY.md`'s first universal mistake exactly — *a `y`
+   * difference standing in for a distance* — and it granted the ginormous
+   * slide 2.71 m of clearance the battlements do not give it.
+   *
+   * **Issue #625 itself reports this as 1.730 m, and that figure is wrong.**
+   * It was produced by a scratch instrument that walked vertices through
+   * `node.matrixWorld` alone, so it had the `InstancedMesh` fault described
+   * below and was reading 9.770 m — the lintel band — as the radial top. The
+   * error was then independently "confirmed" by a second measurement made the
+   * same way, which is worth remembering about independent confirmation: two
+   * instruments sharing a method share its blind spot. The plumb figure 8.040
+   * was always right, because `Box3.setFromObject` honours instance matrices.
+   *
+   * ## Measured off vertices, not off a box — and every instance of them
+   *
+   * The old form could use a `Box3` because `max.y` of an axis-aligned box *is*
+   * the greatest `y` of the geometry inside it. No corner of that box is a
+   * point of the mesh, though, so its **radius** is not any vertex's radius —
+   * it is an over-estimate of unbounded size. So this walks the masonry's own
+   * vertices through their world matrices and takes the greatest
+   * `Geo.radius()`, which is a point that genuinely exists in the park.
+   *
+   * **A hand-rolled vertex walk has to be told about `InstancedMesh`, and this
+   * one was not, for one review cycle.** `crenellations` is an `InstancedMesh`
+   * of 40 merlons and `InstancedMesh extends Mesh`, so it passed the type test
+   * and was then transformed by the container's matrix alone: all forty
+   * collapsed onto the origin at **0.984 m**, the battlements dropped out of
+   * the measurement, and the tallest surviving stone was the lintel band at
+   * **9.770 m** against a true **10.750 m**. A **0.9806 m under-report, in the
+   * dangerous direction** — the same disease as the plumb line it replaced,
+   * one layer down, and invisible to the frame guard. `Box3.setFromObject`
+   * honours instance matrices for free, which is exactly why replacing it with
+   * a manual walk needed this care.
+   *
+   * `-Infinity` when no masonry mesh matched at all; see
+   * `theGinormousSlideLeavesOverTheBattlements`, which treats that as a
+   * failure rather than as limitless clearance.
    *
    * This replaced a `slideDoor` fact that reported where a hole in the south
    * wall was *planned*. No such hole is ever cut (see
    * `theGinormousSlideLeavesOverTheBattlements`), so the fact described nothing
    * in the park and the invariant reading it could not fail.
    */
-  readonly castleMasonryTopY: number;
+  readonly castleMasonryTopRadius: number;
+  /**
+   * **Which named masonry object carries that maximum**, e.g. `crenellations`.
+   *
+   * It exists so an invariant can assert the answer is the merlons, which are
+   * the top of the castle *by construction*. That is the one clause that would
+   * have caught the `InstancedMesh` collapse described above on its first run:
+   * with the forty merlons silently absent, the winner became
+   * `castle-wall-lintel`, and every downstream number stayed plausible.
+   *
+   * Empty string when nothing matched, which pairs with `-Infinity` above.
+   */
+  readonly castleMasonryTopMesh: string;
+  /**
+   * The same top point's height **in the facade's own frame** (`building-facade`
+   * local Y) — the frame `layout.ts`'s `CASTLE_MASONRY_TOP` is written in.
+   *
+   * This is the fact that proves the **value** rather than the frame. A radial
+   * measurement that is simply wrong — wrong meshes, dropped instances, wrong
+   * matrices — still looks like a radius and still passes a units check; what
+   * it cannot do is land on 9.8500 in the facade's own coordinates. Measured
+   * exactly that on the canonical seed, against `CASTLE_MASONRY_TOP` = 9.85.
+   *
+   * The collapsed walk gave **8.8** here (the lintel band's top, built to
+   * `CASTLE_WALL_HEIGHT`), which is off by precisely `CASTLE_MERLON_HEIGHT` —
+   * the missing metre *was* the merlons.
+   *
+   * `NaN` when nothing matched, or when no `building-facade` group was found.
+   */
+  readonly castleMasonryTopFacadeY: number;
+  /**
+   * What {@link castleMasonryTopFacadeY} is *supposed* to be — `layout.ts`'s
+   * `CASTLE_MASONRY_TOP`, which is `CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT`.
+   *
+   * It is carried here rather than imported by the invariant for a mechanical
+   * reason, not a stylistic one: `building/layout.ts` reaches `parkLayout`, so
+   * a **static** import of it into `test/` would load a seeded module before
+   * the harness sets the seed and pin every seed to the default park — this
+   * file's own header warns about exactly that, and the 76-silent-skips
+   * incident is what it is warning about. `buildParkFacts` already imports
+   * `layout.ts` dynamically, after the park is built, so the constant can come
+   * across safely here and nowhere else.
+   *
+   * Pairing a measurement with the design figure it must match is deliberate:
+   * a comparison of two facts is a comparison of two numbers **the invariant
+   * did not choose**, which is what stops it drifting into rules-against-rules.
+   */
+  readonly castleMasonryDesignTopY: number;
   /**
    * **The top of everything standing on the castle's own roof** — the paving,
    * the pavilion and the ring of planters `Shell.ts`'s `buildCastleRoofGarden`
@@ -927,7 +1026,7 @@ export interface ParkFacts {
    * than a pass: see `theCastleRoofStaysInsideItsBattlements`.
    *
    * It exists because the roof garden is the one thing on the castle that is
-   * **not** matched by {@link castleMasonryTopY}'s name pattern and could still
+   * **not** matched by {@link castleMasonryTopRadius}'s name pattern and could still
    * reach into the ginormous slide's air. The pavilion is a scaled copy of a
    * building sized for a 42 m plate; put it on a 24 m castle with its mast and
    * bobble and it stands 4 m over the parapet.
@@ -1426,7 +1525,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // world matrix and every one of them is still the identity. Sampling without
   // this yields the chute's *local* coordinates while looking exactly like
   // world ones, and every clearance test built on them would quietly pass.
-  const { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } = await import(
+  const { BUILDING_CENTRE_X, BUILDING_CENTRE_Z, CASTLE_MASONRY_TOP } = await import(
     '../../src/world/building/layout.ts'
   );
   const { BUILDING_HALF_X, BUILDING_HALF_Z } = await import('../../src/core/constants.ts');
@@ -1442,16 +1541,99 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // clearance check built on them passes for free.
   scene.updateMatrixWorld(true);
 
-  // The top of the castle's stonework, read off the built meshes.
+  // The top of the castle's stonework, read off the built meshes — as a
+  // **radius from the planet's centre**, because the castle leans (#625). See
+  // `ParkFacts.castleMasonryTopRadius` for the 2.710 m this was wrong by while
+  // it was an AABB's `max.y`, and for why a box cannot answer a radius.
   const { Box3 } = await import('three');
-  let castleMasonryTopY = -Infinity;
+  // Dynamic, like every other `src/` import in this function: a static one
+  // would load at module-evaluation time, before the harness has set the seed.
+  // `Geo` itself reads no seed, but the rule is cheaper to keep than to audit.
+  const { Geo } = await import('../../src/world/geo/Geo.ts');
+  // **`MeshClass`, not the `Mesh` imported at the top of this file.** A
+  // `const { … Mesh … } = await import('three')` further down *this same
+  // function* (the rail-race block) shadows the module-level import for the
+  // whole body, so a bare `Mesh` up here is in its temporal dead zone: it
+  // typechecks, and throws `Cannot access 'Mesh' before initialization` at
+  // runtime. In vitest that kills the suite before any test runs and reports as
+  // **93 skipped**, which reads nothing like a crash — the pass count is the
+  // tell, exactly as CLAUDE.md's "a skipped test is not a passing test" says.
+  // Measured here rather than guessed: it is how this block first failed.
+  // Aliased `…ForMasonry` because `InstancedMeshClass` and `Matrix4` are both
+  // already taken further down this same function (the arriving-bus block), and
+  // in one function scope that is a redeclaration — which `tsc` catches, unlike
+  // the `Mesh` shadow noted just above, which it does not. Renaming here rather
+  // than there keeps the change inside the block that introduced the clash.
+  const {
+    Mesh: MeshClass,
+    InstancedMesh: InstancedMeshForMasonry,
+    Matrix4: MatrixForMasonry,
+  } = await import('three');
+  let castleMasonryTopRadius = -Infinity;
+  let castleMasonryTopMesh = '';
+  let castleMasonryTopFacadeY = Number.NaN;
   {
-    const box = new Box3();
+    const probe = new Vector3();
+    const geo = new Geo();
+    const instanceMatrix = new MatrixForMasonry();
+    const composed = new MatrixForMasonry();
+    const topAt = new Vector3();
     scene.traverse((object) => {
       if (!/^(castle-wall-|crenellations$)/.test(object.name)) return;
-      box.setFromObject(object);
-      if (box.max.y > castleMasonryTopY) castleMasonryTopY = box.max.y;
+      object.traverse((node) => {
+        if (!(node instanceof MeshClass)) return;
+        const position = node.geometry.getAttribute('position');
+        if (!position) return;
+        node.updateWorldMatrix(true, false);
+        // **`crenellations` is an `InstancedMesh` of 40 merlons, and
+        // `InstancedMesh extends Mesh`** — so it passes the test above, and a
+        // walk that then applies only `node.matrixWorld` collapses all forty
+        // onto the container's origin. Measured: 0.984 m that way against
+        // 10.750 m honouring the per-instance matrices, i.e. the battlements
+        // dropped out of the measurement entirely and the tallest thing left
+        // was the lintel band at 9.770 m.
+        //
+        // That is a 0.9806 m under-report in the *dangerous* direction — the
+        // identical disease this fact was rewritten to cure, one layer down.
+        // `Box3.setFromObject`, which this replaced, honours instance matrices
+        // for free; a hand-rolled vertex walk has to be told.
+        const matrices: InstanceType<typeof MatrixForMasonry>[] = [];
+        if (node instanceof InstancedMeshForMasonry) {
+          for (let k = 0; k < node.count; k += 1) {
+            node.getMatrixAt(k, instanceMatrix);
+            matrices.push(composed.multiplyMatrices(node.matrixWorld, instanceMatrix).clone());
+          }
+        } else {
+          matrices.push(node.matrixWorld.clone());
+        }
+        for (const matrix of matrices) {
+          for (let i = 0; i < position.count; i += 1) {
+            probe.fromBufferAttribute(position, i).applyMatrix4(matrix);
+            const radius = geo.setFromWorldVector(probe).radius();
+            if (radius > castleMasonryTopRadius) {
+              castleMasonryTopRadius = radius;
+              castleMasonryTopMesh = object.name;
+              topAt.copy(probe);
+            }
+          }
+        }
+      });
     });
+    // The same point expressed in the facade's own frame, which is the frame
+    // `layout.ts`'s `CASTLE_MASONRY_TOP` is written in. It is what lets an
+    // invariant check the *value* rather than only the frame — see
+    // `theGinormousSlideLeavesOverTheBattlements`.
+    if (castleMasonryTopRadius > -Infinity) {
+      let facade: import('three').Object3D | null = null;
+      scene.traverse((object) => {
+        if (object.name === 'building-facade') facade = object;
+      });
+      if (facade) {
+        castleMasonryTopFacadeY = (facade as import('three').Object3D).worldToLocal(
+          topAt.clone(),
+        ).y;
+      }
+    }
   }
 
   // Everything standing on the castle's own roof (#462), as one box in world
@@ -2984,7 +3166,10 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     slideCameras,
     slideShotSpans,
     slideLanding,
-    castleMasonryTopY,
+    castleMasonryTopRadius,
+    castleMasonryTopMesh,
+    castleMasonryTopFacadeY,
+    castleMasonryDesignTopY: CASTLE_MASONRY_TOP,
     castleRoofGarden,
     parkGateArch,
     castleTowers,

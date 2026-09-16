@@ -337,7 +337,7 @@ export const FLAT_PRIMITIVE_BASELINE: Readonly<Record<string, BaselineEntry>> = 
   "test/procgen/invariants.ts::Y_OVER_GROUND::hit.point.y - ground": { count: 1, rule: 'Y_OVER_GROUND' },
   "test/procgen/invariants.ts::Y_OVER_GROUND::soffit - groundY": { count: 1, rule: 'Y_OVER_GROUND' },
   "test/procgen/parkFacts.ts::AXIS_ALIGNED_BOX::bounds.max.y": { count: 1, rule: 'AXIS_ALIGNED_BOX' },
-  "test/procgen/parkFacts.ts::AXIS_ALIGNED_BOX::box.max.y": { count: 5, rule: 'AXIS_ALIGNED_BOX' },
+  "test/procgen/parkFacts.ts::AXIS_ALIGNED_BOX::box.max.y": { count: 3, rule: 'AXIS_ALIGNED_BOX' },
   "test/procgen/parkFacts.ts::AXIS_ALIGNED_BOX::box.min.y": { count: 1, rule: 'AXIS_ALIGNED_BOX' },
   "test/procgen/parkFacts.ts::AXIS_ALIGNED_BOX::busBox.setFromObject(node).max.y": { count: 1, rule: 'AXIS_ALIGNED_BOX' },
   "test/procgen/parkFacts.ts::AXIS_ALIGNED_BOX::new Box3().setFromObject(child).min.y": { count: 1, rule: 'AXIS_ALIGNED_BOX' },

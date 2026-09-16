@@ -343,8 +343,42 @@ export const CASTLE_MERLON_HEIGHT = 1.05;
 
 /**
  * The top of the facade's stonework, facade-local — what the ginormous slide
- * has to clear, and what `test/procgen`'s `castleMasonryTopY` measures off the
+ * has to clear, and what `test/procgen`'s `castleMasonryTopRadius` measures off the
  * built mesh.
+ *
+ * **`test/procgen` now asserts this equality rather than asserting it in
+ * prose** — `theGinormousSlideLeavesOverTheBattlements` takes the highest
+ * masonry vertex in the built park, expresses it in the `building-facade`
+ * group's own frame, and requires it to be this number. Measured: **9.8500**
+ * against 9.85, on the canonical seed. That is the only check in this area
+ * that proves the *value* rather than the frame, and it earns its place —
+ * see below.
+ *
+ * ## The first draft of that note was wrong, which is why the check exists
+ *
+ * It claimed this constant was corroborated by a built measurement of
+ * **9.770 m** (radial). It is not, and the agreement was a coincidence: 9.770
+ * is a vertex of **`castle-wall-lintel`**, a band built from `WINDOW_HEAD_Y`
+ * to {@link CASTLE_WALL_HEIGHT} = **8.8**, so it cannot corroborate a constant
+ * that includes the 1.05 m of merlon above it.
+ *
+ * The real top is **10.750 m** radial, on `crenellations`. The lintel had only
+ * become the tallest thing because the measurement walked `crenellations` —
+ * an `InstancedMesh` of 40 merlons — without its per-instance matrices,
+ * collapsing all forty onto the origin. `9.85 − 8.8 = 1.05`, and the
+ * under-report was **0.9806 m**: the missing metre *was* the merlons, and the
+ * near-agreement with 9.85 was the arithmetic of the bug, not evidence
+ * against it.
+ *
+ * Two things worth keeping from that:
+ *
+ * - **A number that agrees to a tenth of a metre is not corroboration until
+ *   you know which mesh it came off.** The check now names the mesh as well as
+ *   the height, precisely so this cannot recur.
+ * - The plumb-line measurement this whole issue was about gave **8.040 m**,
+ *   1.81 m below this constant, because the castle stands ~48 m out from the
+ *   park's origin and therefore *leans*. A facade-local number and a radial
+ *   one are comparable; a facade-local number and a world `y` are not.
  */
 export const CASTLE_MASONRY_TOP = CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT;
 

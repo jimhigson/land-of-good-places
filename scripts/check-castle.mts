@@ -382,7 +382,7 @@ const EXTERIOR_MASONRY_PATTERN = /^(castle-wall-|crenellations$)/;
  * pattern across the *whole scene*, and the ginormous-slide clearance invariant
  * is built on the result. The wall-plate was called `castle-wall-plate-N` for
  * one afternoon: an interior timber 4.5 m above the real parapet was read as
- * the battlements, `castleMasonryTopY` jumped 10.29 → 14.83 m, and
+ * the battlements, `castleMasonryTopRadius` jumped 10.29 → 14.83 m, and
  * `test:procgen` failed on all five seeds — while `npm run build` stayed green,
  * because that suite is gated separately in CI and is not in the build chain.
  *
