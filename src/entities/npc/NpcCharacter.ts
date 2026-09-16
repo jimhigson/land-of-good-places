@@ -8,6 +8,7 @@ import {
 import { clamp01, damp, lerp, TAU, turnTowards } from '../../core/mathUtils';
 import type { CollisionWorld } from '../../world/Collision';
 import { terrainHeight } from '../../world/terrain';
+import { faceOnGround } from '../../world/up';
 import type { GroundSampler } from '../Player';
 import type { Expression } from '../../art/style/faces';
 import { createIntent, clearIntent, type CharacterDriver, type CharacterIntent } from './driver';
@@ -157,7 +158,21 @@ export class NpcCharacter {
     this.position.set(x, terrainHeight(x, z), z);
     this.previousPosition.copy(this.position);
     avatar.rig.root.position.copy(this.position);
-    avatar.rig.root.rotation.y = facing;
+    faceOnGround(avatar.rig.root, facing);
+  }
+
+  /**
+   * Which way this child is pointing, in radians — the same convention
+   * `Player.facing` uses.
+   *
+   * Exposed because `NpcSystem` used to read it back off
+   * `avatar.rig.root.rotation.y`, and that stopped being the yaw the moment the
+   * rig started leaning with the ground: the euler now carries the sphere's
+   * tilt as well. This field is the only thing that ever meant "which way is
+   * she facing", so it is the thing to ask.
+   */
+  get facingAngle(): number {
+    return this.facing;
   }
 
   get isAirborne(): boolean {
@@ -183,7 +198,7 @@ export class NpcCharacter {
     this.previousPosition.copy(this.position);
     this.facing = facing;
     this.avatar.rig.root.position.copy(this.position);
-    this.avatar.rig.root.rotation.y = facing;
+    faceOnGround(this.avatar.rig.root, facing);
   }
 
   /**
@@ -209,7 +224,7 @@ export class NpcCharacter {
     this.airborne = false;
     this.facing = facing;
     this.avatar.rig.root.position.copy(this.position);
-    this.avatar.rig.root.rotation.y = facing;
+    faceOnGround(this.avatar.rig.root, facing);
   }
 
   /** Gives the character back to the wander driver, standing wherever it now is. */
@@ -251,7 +266,7 @@ export class NpcCharacter {
     this.previousPosition.copy(this.position);
     this.facing = facing;
     this.avatar.rig.root.position.copy(this.position);
-    this.avatar.rig.root.rotation.y = facing;
+    faceOnGround(this.avatar.rig.root, facing);
     this.scriptedGait = clamp01(speed / NPC_WALK_SPEED);
     this.walkPhase += stepped * PLAYER_BOB_CYCLES_PER_METRE * TAU;
     if (this.walkPhase > TAU) this.walkPhase -= TAU;
@@ -534,7 +549,7 @@ export class NpcCharacter {
 
     const root = this.avatar.rig.root;
     root.position.copy(this.position);
-    root.rotation.y = this.facing;
+    faceOnGround(root, this.facing);
 
     // Standing, holding on. `animate` reads `gait`, so easing it down is what
     // stops the legs from walking on the spot for a second after boarding.
@@ -679,7 +694,7 @@ export class NpcCharacter {
 
     const root = this.avatar.rig.root;
     root.position.copy(this.position);
-    root.rotation.y = this.facing;
+    faceOnGround(root, this.facing);
 
     this.gait = damp(this.gait, clamp01(planarSpeed / NPC_WALK_SPEED), 0.07, dt);
     this.walkPhase += planarSpeed * PLAYER_BOB_CYCLES_PER_METRE * TAU * dt;

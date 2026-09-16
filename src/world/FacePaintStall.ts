@@ -1,12 +1,15 @@
 import {
   CylinderGeometry,
   Group,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   OctahedronGeometry,
   RingGeometry,
+  Quaternion,
   SphereGeometry,
   TorusGeometry,
+  Vector3,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
@@ -26,7 +29,7 @@ import {
 import { attachFacePaint } from '../art/models/kid';
 import { pressZone, type InteractZone } from './interact';
 import { highlightObject } from './highlight';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, standOnSphere, terrainHeight } from './terrain';
 import type { CollisionWorld } from './Collision';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Player } from '../entities/Player';
@@ -99,6 +102,13 @@ const NPC_DECAL_RADIUS = 0.6;
 /** Rough head height above the feet for an average-scaled background child. */
 const NPC_HEAD_OFFSET = 1.3;
 
+/** Scratch for `updateNpcDecals` — one set for the whole module, never for a caller to keep. */
+const _fromWorld = /* @__PURE__ */ new Matrix4();
+const _groupQuaternion = /* @__PURE__ */ new Quaternion();
+const _flat = /* @__PURE__ */ new Vector3();
+const _decalPosition = /* @__PURE__ */ new Vector3();
+const _decalQuaternion = /* @__PURE__ */ new Quaternion();
+
 /** How long the world-side cutscene (painter leans in, sparkles) lasts. */
 const PAINTING_DURATION = 1.6;
 const SPARKLE_COUNT = 7;
@@ -153,6 +163,11 @@ export class FacePaintStall implements GameSystem {
     const ground = terrainHeight(STALL_X, STALL_Z);
     this.group.position.set(STALL_X, ground, STALL_Z);
     this.group.rotation.y = STALL_FACING;
+    // Back wall, counter, awning, posts, mirror and painter are all children of
+    // this one group, so the whole booth leans as one rigid piece. Leaning any
+    // part on its own would rotate it about its own centre and tear the booth
+    // apart — the awning would part company with the posts holding it up.
+    standOnSphere(this.group);
 
     const stand = STALL_STANDS_BY_ID.get('facePaint');
     if (!stand) throw new Error('FacePaintStall: no stand point in STALL_PLACEMENTS.facePaint');
@@ -389,18 +404,30 @@ export class FacePaintStall implements GameSystem {
    * Positions the small pool of painted-NPC decals from `wanderDriver.ts`'s
    * registry.
    *
-   * The decals hang off `this.group`, which is not just translated to the
-   * booth but **turned** (`rotation.y = STALL_FACING`), so a painted child's
-   * world position has to come back through that rotation as well as the
-   * offset — `stallToLocal`. Subtracting the group's position alone left every
-   * decal swung a few degrees around the booth: harmless next to the counter,
-   * but metres adrift for a child painted earlier who has since wandered off
-   * across the park, which is where they spend nearly all their time. The yaw
-   * needs the same treatment, or the decal faces `STALL_FACING` away from the
-   * child it belongs to.
+   * **These are the one thing here that is not near the booth.** The decals
+   * hang off `this.group` — cheaper than a pool of their own — but each one
+   * belongs to a painted child who has since wandered anywhere in the park, so
+   * its place is a *world* position that has to be brought back into the
+   * booth's frame. That frame is now translated, turned **and leaned onto the
+   * sphere**, and the lean is what makes the old hand-written inverse
+   * (`stallToLocal` plus a subtraction of the group's height) unusable: a few
+   * degrees of tilt applied to an offset tens of metres long throws the decal
+   * metres off the head it belongs to, which is exactly the bug the yaw
+   * version of this caused before it was fixed. So invert the group's real
+   * world matrix instead of re-deriving it by hand — one owner, no copy to
+   * keep in step.
+   *
+   * The head itself stands along *its own* local up, not the booth's, which is
+   * why the world transform comes from `placeOnSphere` at the child's own
+   * (x, z) before being pulled back into the group's frame.
    */
   private updateNpcDecals(): void {
     const faces = paintedNpcFaces();
+    this.group.updateWorldMatrix(true, false);
+    _fromWorld.copy(this.group.matrixWorld).invert();
+    this.group.getWorldQuaternion(_groupQuaternion);
+    _groupQuaternion.invert();
+
     for (let i = 0; i < this.npcDecals.length; i += 1) {
       const slot = this.npcDecals[i];
       const face = faces[i];
@@ -409,10 +436,10 @@ export class FacePaintStall implements GameSystem {
         slot.mesh.visible = false;
         continue;
       }
-      const groundY = terrainHeight(face.x, face.z);
-      const [localX, localZ] = stallToLocal(face.x, face.z);
-      slot.mesh.position.set(localX, groundY + NPC_HEAD_OFFSET - this.group.position.y, localZ);
-      slot.mesh.rotation.set(0, face.yaw - STALL_FACING, 0);
+      _flat.set(face.x, terrainHeight(face.x, face.z) + NPC_HEAD_OFFSET, face.z);
+      placeOnSphere(_flat, face.yaw, _decalPosition, _decalQuaternion);
+      slot.mesh.position.copy(_decalPosition).applyMatrix4(_fromWorld);
+      slot.mesh.quaternion.copy(_groupQuaternion).multiply(_decalQuaternion);
       slot.setDesign(face.design);
     }
   }
@@ -709,19 +736,6 @@ function playerLook(): FacePaintLook {
     // the small drift GAME_DESIGN.md's PREVIEW RULE exists to prevent.
     keychainId: keychain?.id ?? '',
   };
-}
-
-/**
- * A world position in the stall group's own space — the exact inverse of the
- * `toWorld` helper inside `buildCollision`, which is the one place the booth's
- * position-and-facing convention is spelled out.
- */
-function stallToLocal(worldX: number, worldZ: number): [number, number] {
-  const sin = Math.sin(STALL_FACING);
-  const cos = Math.cos(STALL_FACING);
-  const dx = worldX - STALL_X;
-  const dz = worldZ - STALL_Z;
-  return [dx * cos - dz * sin, dx * sin + dz * cos];
 }
 
 function addNpcDecalPoolInto(group: Group, out: FacePaintOverlayHandle[]): void {

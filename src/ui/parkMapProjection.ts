@@ -1,4 +1,39 @@
 import { PARK_BOUNDARY, type BoundaryExtent } from '../world/boundary';
+import { busStopOnMap } from './parkMapContent';
+
+/**
+ * **The rectangle the map frames and lets the child pan around** — the park's
+ * own extent, grown to hold everything the map draws outside it.
+ *
+ * This used to be `PARK_BOUNDARY.extent` on its own, and that was right while
+ * the only thing outside the wall was a bus stop pressed against it. #498's
+ * curved kerb runs at its own outset from the park's edge, which put the cat
+ * bus **outside the framed rectangle** — and outside is not merely cropped, it
+ * is unreachable: the pan clamp keeps the view inside this same rectangle, so
+ * `check:park-map` reported the bus stranded 3 to 35 px off the canvas at every
+ * one of five viewports and every zoom, with no view in which a child could see
+ * it. The map's only fixed point of reference, and the thing she arrives on.
+ *
+ * Growing it here rather than widening {@link MAP_EDGE_MARGIN_M} keeps the two
+ * separate: the margin is a band of lawn drawn round the park for the look of
+ * it, and this is a statement about what the map *contains*. A number tuned
+ * until the bus fitted would be a stand-off — right today, stale the next time
+ * the road moves — where this follows the road by construction.
+ *
+ * Recomputed on every call rather than cached, because `entranceRoadAt` is a
+ * function of the seed and a cached extent would frame the previous park's road
+ * in a test harness that builds two.
+ */
+export function mapFramedExtent(): BoundaryExtent {
+  const { extent } = PARK_BOUNDARY;
+  const bus = busStopOnMap();
+  return {
+    minX: Math.min(extent.minX, bus.x),
+    maxX: Math.max(extent.maxX, bus.x),
+    minZ: Math.min(extent.minZ, bus.z),
+    maxZ: Math.max(extent.maxZ, bus.z),
+  };
+}
 
 /**
  * **World metres to map pixels, and back.** The one owner of the park map's
@@ -145,7 +180,7 @@ export const MAP_MAX_ZOOM = 4;
 
 /** The default view: the whole park, centred as #334 framed it. */
 export function defaultMapView(canvasWidth: number, canvasHeight: number): MapView {
-  const base = frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+  const base = frameExtent(mapFramedExtent(), canvasWidth, canvasHeight);
   const [centreX, centreZ] = base.toPlane(base.canvasWidth / 2, base.canvasHeight / 2);
   return { zoom: MAP_MIN_ZOOM, centreX, centreZ };
 }
@@ -166,7 +201,7 @@ export function clampMapView(
   canvasWidth: number,
   canvasHeight: number,
 ): MapView {
-  const base = frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+  const base = frameExtent(mapFramedExtent(), canvasWidth, canvasHeight);
   const zoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, view.zoom));
 
   // **The park, not the framing.** This used to clamp against the world
@@ -180,10 +215,11 @@ export function clampMapView(
   // The region the child may explore is the **park's own extent** plus the
   // lawn margin the map draws, which is the same rectangle `frameExtent` is
   // given and contains no letterbox by construction.
-  const contentMinX = PARK_BOUNDARY.extent.minX - MAP_EDGE_MARGIN_M;
-  const contentMaxX = PARK_BOUNDARY.extent.maxX + MAP_EDGE_MARGIN_M;
-  const contentMinZ = PARK_BOUNDARY.extent.minZ - MAP_EDGE_MARGIN_M;
-  const contentMaxZ = PARK_BOUNDARY.extent.maxZ + MAP_EDGE_MARGIN_M;
+  const framed = mapFramedExtent();
+  const contentMinX = framed.minX - MAP_EDGE_MARGIN_M;
+  const contentMaxX = framed.maxX + MAP_EDGE_MARGIN_M;
+  const contentMinZ = framed.minZ - MAP_EDGE_MARGIN_M;
+  const contentMaxZ = framed.maxZ + MAP_EDGE_MARGIN_M;
 
   // Half the world span still visible once magnified.
   const halfX = base.canvasWidth / 2 / (base.scale * zoom);
@@ -258,7 +294,7 @@ export function zoomedAboutPoint(
   const before = outdoorParkMapProjection(canvasWidth, canvasHeight, view);
   const [worldX, worldZ] = before.toPlane(focalPxX, focalPxY);
 
-  const base = frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+  const base = frameExtent(mapFramedExtent(), canvasWidth, canvasHeight);
   const zoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, nextZoom));
   const scale = base.scale * zoom;
 
@@ -293,7 +329,7 @@ export function outdoorParkMapProjection(
   canvasHeight: number,
   view?: MapView,
 ): MapProjection {
-  const base = frameExtent(PARK_BOUNDARY.extent, canvasWidth, canvasHeight);
+  const base = frameExtent(mapFramedExtent(), canvasWidth, canvasHeight);
   if (!view) return base;
 
   // Zoom and pan reach the transform *only* here, and only by multiplying the

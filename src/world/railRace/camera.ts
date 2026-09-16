@@ -1,6 +1,8 @@
-import { PerspectiveCamera, Vector3 } from 'three';
+import { PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import { angleDelta, clamp, damp } from '../../core/mathUtils';
 import { PLAYER_LANE, type RailRaceRoute } from './route';
+import { placeOnSphere, tiltToSphere } from '../terrain';
+
 
 /**
  * **The Rail Race's side-on camera.**
@@ -392,7 +394,24 @@ function riderOffset(route: RailRaceRoute): number {
  */
 export const RIDER_RIDE_HEIGHT = 1.9;
 
-const UP = new Vector3(0, 1, 0);
+/**
+ * **The authoring up — the one the rig's three offsets are written in, and not
+ * a direction in the park.**
+ *
+ * The rig is `out` metres outward, `along` metres down the track and `rise`
+ * metres up *from the rider*, and all three of those are statements about the
+ * ground the rider is on. On a ring that runs out past 210 m of a 220 m sphere
+ * that ground leans by more than seventy degrees, so `rise` metres along world
+ * `+Y` is not "up" from anywhere on it. {@link RaceCamera.rigBasis} turns this
+ * triple into the three real directions at the rider; nothing else may use it.
+ */
+const AUTHORED_UP = new Vector3(0, 1, 0);
+
+/** Scratch for the one lean that takes the authored basis to the rider's own. */
+const _lean = /* @__PURE__ */ new Quaternion();
+const _spin = /* @__PURE__ */ new Quaternion();
+
+
 
 /**
  * **How far a rider turns towards this camera so her face can be seen at all.**
@@ -412,9 +431,9 @@ const UP = new Vector3(0, 1, 0);
  * the other grazed at 0.48, and both landed on the same screen x.
  *
  * Turning the whole 81.1° would point her face straight down the lens and her
- * shoulders straight out of the cart. This turns **50° of it**, which leaves a
+ * shoulders straight out of the cart. This turned **50° of it**, which leaves a
  * three-quarter view rather than a mugshot, and she still plainly races
- * forwards.
+ * forwards. (55° now — see below.)
  *
  * **And only while she is sad.** Jim, 6 August 2026: *"they need turn their
  * head to the camera only on sad expression, not all the time"* — which is the
@@ -444,26 +463,48 @@ const UP = new Vector3(0, 1, 0);
  * A monitor would happily take 60°; a phone runs out of picture. One number
  * serves both, so it is set where the phone still has real room.
  *
+ * **55°, not 50, since the ring was leant onto the sphere.** The table above is
+ * the flat park, measured on an upright kid with no seated pose. Re-measured
+ * on the scale-1 sphere park with the real player leant in the real cart
+ * (`railRace/seat.ts`) and her seated body lean applied — worst of 48 points
+ * (head share 0.42; at 0.47 the 55° row reads 0.422 / 0.479, 0.510 / 0.178):
+ *
+ * ```
+ *          monitor          phone
+ *  45°      0.263 / 0.473    0.351 / 0.212
+ *  50°      0.345 / 0.477    0.433 / 0.194   ← under the 0.35 floor
+ *  55°      0.424 / 0.480    0.511 / 0.176   ← here
+ * ```
+ *
+ * The leant ring gave the phone room back, so the edge no longer sets the limit.
+ *
  * Nothing here touches steering. GAME_DESIGN.md's CONTROL rule governs what a
  * *button* does; this is a pose, and the cart, the rails and the direction she
  * travels are all exactly as they were.
  */
-export const FACE_TURN_MAX = (50 * Math.PI) / 180;
+export const FACE_TURN_MAX = (55 * Math.PI) / 180;
 
 /**
  * Of {@link FACE_TURN_MAX}, the share the **head** contributes rather than the
- * body — so 21° of head on top of 29° of shoulder.
+ * body — so 26° of head on top of 29° of shoulder.
+ *
+ * **0.47, not 0.42, since `FACE_TURN_MAX` went from 50° to 55°** — the extra 5°
+ * is all neck, so the shoulders turn the same 29° they always did. That is on
+ * purpose: turning the body swings her arms across the tub, and a sad rider is
+ * one who has just been bonked, so is shaking and folding at the same time.
+ * Measured with the body turned, her arm already reaches well through the tub
+ * side (see the handoff); more shoulder would make that worse, more neck does not.
  *
  * Split, rather than all neck, because `ferrisWheel/gondola.ts` has already
  * settled this exact question for a seated figure — *"the whole toy turns, not
  * its neck"* — and this kid has no neck to turn: `art/models/kid.ts` puts the
  * head pivot *inside* the top of the torso ("what hides the neck"), so a large
- * yaw on its own is a skull revolving inside a jumper. 21° also keeps the head
+ * yaw on its own is a skull revolving inside a jumper. 26° also keeps the head
  * inside the 20°–35.5° band of head yaws the park already uses elsewhere (the
  * shopkeeper's idle, the backpack pet's peek); nothing in the game had ever
  * yawed a person's head further.
  */
-export const FACE_TURN_HEAD_SHARE = 0.42;
+export const FACE_TURN_HEAD_SHARE = 0.47;
 
 /** A rider's turn towards the camera, split between the two things that turn. */
 export interface FaceTurn {
@@ -514,7 +555,17 @@ function ramp(t: number, lo: number, hi: number, a: number, b: number): number {
 }
 
 export class RaceCamera {
-  readonly camera = new PerspectiveCamera(45, 1, 1, 400);
+  /**
+   * `far` was **400**, which was comfortably past the far side of a flat park
+   * and is not past the far side of a round one. The ground is a sphere of
+   * radius 220 now (`GROUND_SPHERE_RADIUS`), so from a rig standing off the rim
+   * the opposite limb is upwards of 440 m away and was being clipped out of the
+   * backdrop — on the one camera in the game whose entire brief is *"looking
+   * into the park"*, with the park as the thing you are looking at.
+   *
+   * 3200 is what `core/RideCamera.ts` uses for the same reason.
+   */
+  readonly camera = new PerspectiveCamera(45, 1, 1, 3200);
 
   private readonly route: RailRaceRoute;
 
@@ -564,6 +615,8 @@ export class RaceCamera {
   private readonly rider = new Vector3();
   private readonly out = new Vector3();
   private readonly along = new Vector3();
+  /** The local up at the rider — see {@link rigBasis}. Never world `+Y`. */
+  private readonly up = new Vector3();
   private readonly aim = new Vector3();
 
   constructor(route: RailRaceRoute) {
@@ -577,20 +630,26 @@ export class RaceCamera {
   private measureLookahead(): { readonly along: number; readonly out: number }[] {
     const rider = new Vector3();
     const ahead = new Vector3();
+    const out = new Vector3();
+    const along = new Vector3();
+    const up = new Vector3();
+    const delta = new Vector3();
     const table: { along: number; out: number }[] = [];
     for (let i = 0; i < LOOKAHEAD_STATIONS; i += 1) {
       const station = (i / LOOKAHEAD_STATIONS) * this.route.path.length;
-      // The rig's own frame — the smoothed one, so `solve` decomposes the
-      // look-ahead in exactly the frame `place` will rebuild the rig against.
-      const frame = this.route.path.guideAt(station);
+      // The rig's own frame — `rigBasis`, so `solve` decomposes the look-ahead
+      // in exactly the frame `place` will rebuild the rig against. It is the
+      // smoothed (guide) tangent and normal, leaned onto the sphere.
+      this.rigBasis(station, out, along, up);
       this.ringPoint(station, rider);
       this.ringPoint(station + AHEAD, ahead);
-      const dx = ahead.x - rider.x;
-      const dz = ahead.z - rider.z;
-      table.push({
-        along: dx * frame.tangentX + dz * frame.tangentZ,
-        out: dx * frame.normalX + dz * frame.normalZ,
-      });
+      // The full 3-vector between two leaned points, not its `x`/`z` shadow.
+      // Out here the ground tilts past 70°, so "the two are a metre apart
+      // horizontally" and "a metre apart along the ground" stopped being the
+      // same sentence — and the rise the difference carries is real: the
+      // look-ahead point genuinely is further round the curve than the rider.
+      delta.subVectors(ahead, rider);
+      table.push({ along: delta.dot(along), out: delta.dot(out) });
     }
     return table;
   }
@@ -634,15 +693,110 @@ export class RaceCamera {
     this.place();
   }
 
-  /** The rider's lane at arc distance `s`, at the level the lanes undulate about. */
-  private ringPoint(s: number, into: Vector3): Vector3 {
+  /**
+   * **Public because `scripts/check-rail-race.mts` needs exactly this point**,
+   * and had its own copy of it. That copy read `route.base` — a single number
+   * that stopped existing when the ring was held a constant height above the
+   * *sphere* and `baseAt(distance, lane)` replaced it. `undefined + 0.6 + 1.9`
+   * is `NaN`, every projection through the camera went `NaN`, and `NaN >= 1` is
+   * false — so **ten** of that script's assertions printed `NaN%` and passed
+   * for as long as they were reached at all. A check that re-derives the rig's
+   * own geometry can only ever prove it agrees with itself; this way there is
+   * one definition and nothing to keep in step.
+   */
+  riderPoint(s: number, into: Vector3): Vector3 {
+    return this.ringPoint(s, into);
+  }
+
+  /**
+   * The rider's lane at arc distance `s`, at the level the lanes undulate about.
+   *
+   * **Public, and the one owner of that question.** `check:rail-race` used to
+   * keep its own copy of this formula, reading a `route.base` that had been
+   * replaced by `route.baseAt` when the ring stopped being level — so the copy
+   * evaluated to `undefined`, every projection through it came out `NaN`, and
+   * **seven of the check's assertions reported `NaN%` rather than failing**. A
+   * comment in the copy promised it tracked the rig. It did not, and nothing
+   * announced when it stopped. The check now calls this.
+   *
+   * **Leaned onto the sphere, because that is where the child is drawn.**
+   * `route.pointAt` has leaned the rails since the ring was converted and
+   * `RailRace.placeCarts` puts the tub on them, so a flat point here aimed the
+   * whole rig at a ghost of the rider: measured on the canonical seed,
+   * **31.9 m** from where she actually sits.
+   *
+   * The lean is taken exactly as `route.pointAt` takes it — the flat `(x, z)`,
+   * the height above the ground in that column, then one `placeOnSphere` — so
+   * the rig's rider and the rails under her come off the same map rather than
+   * two that agree until one of them moves.
+   *
+   * Leaning this **alone** was tried twice before and reverted twice, and the
+   * reason is worth keeping: it leaves the rig standing at flat-frame offsets
+   * from a leaned rider, which is the same two-frames-in-one-expression fault
+   * one step further on. The rider point, the `out`/`along`/`up` basis, the
+   * `lookahead` table, `camera.up` and `measureZoomCeiling` are one change.
+   * {@link rigBasis} is what makes it one: every one of them asks it.
+   */
+  ringPoint(s: number, into: Vector3): Vector3 {
     const sample = this.route.path.sampleAt(s);
     const offset = riderOffset(this.route);
-    return into.set(
+    into.set(
       sample.x + sample.normalX * offset,
-      this.route.base + 0.6 + RIDER_RIDE_HEIGHT,
+      // **`PLAYER_LANE`, not the default lane 0.** This read `baseAt(s)` while
+      // offsetting sideways to the player's own lane — the height from one lane
+      // and the place from another. On a level ring the two agreed; on a ring
+      // whose base follows the sphere they do not, and 4.1 m of lateral offset
+      // out at the rim is **21.1 m** of world height. Measured on the canonical
+      // seed: lane 0 base -125.07, player lane -146.21.
+      this.route.baseAt(s, PLAYER_LANE) + 0.6 + RIDER_RIDE_HEIGHT,
       sample.z + sample.normalZ * offset,
     );
+    placeOnSphere(into, 0, into, _spin);
+    return into;
+  }
+
+  /**
+   * **The three directions the rig's three offsets mean, at arc distance `s`.**
+   *
+   * `out`, `along` and `up` are the authored basis leaned by the ground's own
+   * tilt in the rider's column — one quaternion, applied to all three, so they
+   * stay orthonormal and the rig stays a rigid body. Rigidity is the property
+   * the whole design rests on: {@link solve}'s closed forms and
+   * {@link measureZoomCeiling}'s affine-in-zoom argument are both statements
+   * about a rig expressed in an orthonormal frame at the rider, and both remain
+   * exactly true in a leaned one. What changes is only which way the frame
+   * points, and that is the bug being fixed.
+   *
+   * **The lean is taken at the rider's flat column, not at her leaned
+   * position.** Same choice `sweptRail.ts`'s `rideFrame` makes, for the same
+   * reason: the rails, the tub and the camera then lean by the *same* angle
+   * rather than by three nearly-equal ones, and "nearly equal" is what a child
+   * sees as a cart floating beside its own track.
+   *
+   * The tangent and the normal come from the **guide** frame, as they always
+   * did — see {@link place} for why the smoothed one and not the faithful one.
+   *
+   * **Public, and `check:rail-race` measures in it.** Five of that check's
+   * questions — is the view angled down the track, does it point into the park,
+   * how far does it tilt, does the rider cross the screen rightward — were all
+   * asked by setting a `y` to zero, which projects onto the *world* horizontal.
+   * That is the right plane at the middle of the park and nowhere else: out at
+   * the ring the ground leans, so a rig tilted the intended 20.1° towards its
+   * own track measured **6.6°** against world `+Y` and the check called it flat.
+   * A promise made in a frame has to be read in that frame.
+   */
+  rigBasis(s: number, out: Vector3, along: Vector3, up: Vector3): void {
+    const sample = this.route.path.sampleAt(s);
+    const offset = riderOffset(this.route);
+    const flatX = sample.x + sample.normalX * offset;
+    const flatZ = sample.z + sample.normalZ * offset;
+    // `tiltToSphere` wants a world point and reads the up beneath it; the
+    // height is irrelevant to the direction, so the ground itself will do.
+    tiltToSphere(flatX, 0, flatZ, _lean);
+    const guide = this.route.path.guideAt(s);
+    out.set(guide.normalX, 0, guide.normalZ).applyQuaternion(_lean);
+    along.set(guide.tangentX, 0, guide.tangentZ).applyQuaternion(_lean);
+    up.copy(AUTHORED_UP).applyQuaternion(_lean);
   }
 
   private place(): void {
@@ -657,9 +811,17 @@ export class RaceCamera {
     // The rider still comes from `ringPoint`, which is exact, and the rider sits
     // at the origin of this frame — so smoothing it rotates the whole rig about
     // her and leaves her screen position untouched. See `CAMERA_GUIDE_WINDOW`.
-    const sample = this.route.path.guideAt(s);
-    this.out.set(sample.normalX, 0, sample.normalZ);
-    this.along.set(sample.tangentX, 0, sample.tangentZ);
+    //
+    // And **leaned**: on the sphere `out` is not horizontal, `along` is not
+    // horizontal, and up is not `+Y`. See `rigBasis`.
+    this.rigBasis(s, this.out, this.along, this.up);
+
+    // `lookAt` builds the orientation against `camera.up`, so leaving it at
+    // world `+Y` over ground that leans 72° would roll the picture by 72° —
+    // that is the "tipping down into a map" an earlier attempt at this
+    // conversion measured, and it was the roll rather than the tilt. A
+    // side-scroller's horizon is the local horizon.
+    this.camera.up.copy(this.up);
 
     // One factor on both, which is a uniform scaling of the rig about the rider:
     // every direction survives it untouched and only the distances grow. See
@@ -675,12 +837,12 @@ export class RaceCamera {
       .copy(this.rider)
       .addScaledVector(this.out, this.stand.out * zoom)
       .addScaledVector(this.along, this.stand.along * zoom)
-      .addScaledVector(UP, this.stand.rise * zoom);
+      .addScaledVector(this.up, this.stand.rise * zoom);
     this.aim
       .copy(this.rider)
       .addScaledVector(this.out, this.look.out * zoom)
       .addScaledVector(this.along, this.look.along * zoom)
-      .addScaledVector(UP, this.look.rise * zoom);
+      .addScaledVector(this.up, this.look.rise * zoom);
     this.camera.lookAt(this.aim);
     this.camera.updateMatrixWorld();
   }
@@ -900,25 +1062,34 @@ export class RaceCamera {
     const step = this.route.path.length / CEILING_STATIONS;
     const here = new Vector3();
     const next = new Vector3();
+    const aOut = new Vector3();
+    const aAlong = new Vector3();
+    const bOut = new Vector3();
+    const bAlong = new Vector3();
+    const scratchUp = new Vector3();
+    const travel = new Vector3();
+    const va = new Vector3();
+    const vb = new Vector3();
     const raw: number[] = [];
     for (let i = 0; i < CEILING_STATIONS; i += 1) {
       const s = i * step;
       // The rider's own tangent, from the faithful frame — the same direction
       // "forwards" means everywhere else in this ride.
-      const sample = this.route.path.sampleAt(s);
       this.ringPoint(s, here);
       this.ringPoint(s + step, next);
-      const a = this.route.path.guideAt(s);
-      const b = this.route.path.guideAt(s + step);
-      // V(s), the horizontal offset the zoom scales.
-      const vax = a.normalX * this.stand.out + a.tangentX * this.stand.along;
-      const vaz = a.normalZ * this.stand.out + a.tangentZ * this.stand.along;
-      const vbx = b.normalX * this.stand.out + b.tangentX * this.stand.along;
-      const vbz = b.normalZ * this.stand.out + b.tangentZ * this.stand.along;
-      const riderTerm =
-        ((next.x - here.x) * sample.tangentX + (next.z - here.z) * sample.tangentZ) / step;
-      const zoomTerm =
-        ((vbx - vax) * sample.tangentX + (vbz - vaz) * sample.tangentZ) / step;
+      // "Forwards" is the rider's own tangent, from the faithful frame leaned
+      // onto the sphere — the same direction `place` will be standing against.
+      this.rigBasis(s, aOut, aAlong, scratchUp);
+      this.route.tangentAt(PLAYER_LANE, s, travel);
+      this.rigBasis(s + step, bOut, bAlong, scratchUp);
+      // V(s), the offset the zoom scales — now a full 3-vector, because the
+      // basis it is built in leans. Its radial part is exactly what a flat
+      // `x`/`z` decomposition was throwing away, and out at the rim that part
+      // is most of it.
+      va.set(0, 0, 0).addScaledVector(aOut, this.stand.out).addScaledVector(aAlong, this.stand.along);
+      vb.set(0, 0, 0).addScaledVector(bOut, this.stand.out).addScaledVector(bAlong, this.stand.along);
+      const riderTerm = next.sub(here).dot(travel) / step;
+      const zoomTerm = vb.sub(va).dot(travel) / step;
       // progress = riderTerm + zoom * zoomTerm, and we want it >= FORWARD_MARGIN.
       //
       // Clamped into [1, the most the rig would ever ask for] rather than left

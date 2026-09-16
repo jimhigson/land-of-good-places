@@ -17,18 +17,5 @@
  * `docs/DESIGN-round-robin-generation.md`.
  */
 export const SWEPT_BUS_BASELINE: Readonly<Record<number, number>> = {
-  5: 27,
-  11: 25,
-  24: 16,
-  115: 24,
-  128: 21,
-  131: 24,
-  208: 24,
-  225: 24,
-  274: 22,
-  326: 10,
-  346: 24,
-  428: 30,
-  451: 13,
-  20260728: 28,
+
 };

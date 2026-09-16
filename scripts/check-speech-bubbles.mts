@@ -324,6 +324,7 @@ import { SpeechBubble, BUBBLE_EDGE_MARGIN_PX } from '../src/ui/SpeechBubble.ts';
 import { LABEL_MAX_DISTANCE } from '../src/ui/NameLabel.ts';
 import { VISIBLE_LABEL_CAP } from '../src/entities/npc/NpcSystem.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
+import { terrainHeight } from '../src/world/terrain.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
 const mutate = process.argv.includes('--mutate');
@@ -367,6 +368,39 @@ const FRAMES = Math.ceil(RUN_SECONDS / DT);
 const WALK_FROM = Math.floor(FRAMES / 2);
 const WALK_RADIUS = 7;
 const WALK_PERIOD_S = 20;
+
+/**
+ * **The walk goes in from the gate and back out, and she stands on the ground.**
+ *
+ * Two faults, both found while this check was the chain's first honest failure.
+ *
+ * 1. The rig circled the entrance at `WALK_RADIUS`. That was calibrated on a
+ *    58 m garden — `MIN_SIGHTINGS`' own note records *"twenty-two were seen in
+ *    48 s of the real game at this crowd size"*. It is fine again at the park's
+ *    authored size, but an orbit of the gate is a needlessly thin slice of the
+ *    park to judge bubbles on, and it is the reason a park-size regression
+ *    could empty this check completely: measured on a 135.5 m garden, the
+ *    nearest speaking child was **51.4 m** from the camera focus against
+ *    `BUBBLE_MAX_DISTANCE` of 40, and the run saw nothing at all. Walking in to
+ *    the middle and back out is both more representative of how a child plays
+ *    and much harder to starve.
+ * 2. The player was held at `y = 0` while the entrance ground is metres below
+ *    it, so the whole frame — camera included — floated over the park it was
+ *    measuring (`RADIAL-INVENTORY.md` section 2.4 #15).
+ *
+ * The old circle is superimposed on the traverse so bubbles are still judged on
+ * a *moving* speaker, which is what issue #415 was about. The sweep is
+ * expressed against the entrance's own position, so it follows the park if the
+ * park is ever resized again.
+ */
+const walkAt = (t: number, target: Vector3): Vector3 => {
+  // 0 at the gate, 1 at the middle of the garden, and back.
+  const sweep = (1 - Math.cos(t)) / 2;
+  const swirl = t * 3;
+  const x = ENTRANCE_PLAYER_X * (1 - sweep) + Math.cos(swirl) * WALK_RADIUS;
+  const z = ENTRANCE_PLAYER_Z * (1 - sweep) + Math.sin(swirl) * WALK_RADIUS;
+  return target.set(x, terrainHeight(x, z), z);
+};
 
 /** How many drawn-bubble sightings make the run worth believing. Twenty-two
  *  were seen in 48 s of the real game at this crowd size; the run here is
@@ -419,7 +453,11 @@ const park = quietly(() => buildHeadlessPark());
 const { world, scene, camera } = park;
 
 camera.resize(VIEW_WIDTH, VIEW_HEIGHT);
-const playerPosition = new Vector3(ENTRANCE_PLAYER_X, 0, ENTRANCE_PLAYER_Z);
+const playerPosition = new Vector3(
+  ENTRANCE_PLAYER_X,
+  terrainHeight(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z),
+  ENTRANCE_PLAYER_Z,
+);
 const playerVelocity = new Vector3();
 const cameraForward = new Vector3(0, 0, 1);
 camera.snapTo(playerPosition);
@@ -573,11 +611,7 @@ function overshootOf(anchor: Vector3, bubble: SpeechBubble): number {
 for (let frame = 0; frame < FRAMES; frame += 1) {
   if (frame >= WALK_FROM) {
     const t = ((frame - WALK_FROM) * DT * 2 * Math.PI) / WALK_PERIOD_S;
-    const next = new Vector3(
-      ENTRANCE_PLAYER_X + Math.cos(t) * WALK_RADIUS,
-      0,
-      ENTRANCE_PLAYER_Z + Math.sin(t) * WALK_RADIUS,
-    );
+    const next = walkAt(t, new Vector3());
     playerVelocity.copy(next).sub(playerPosition).divideScalar(DT);
     playerPosition.copy(next);
   }

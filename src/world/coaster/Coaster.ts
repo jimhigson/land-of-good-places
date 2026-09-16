@@ -17,7 +17,13 @@ import {
   CART_EYE_HEIGHT,
   CART_SEAT_HEIGHT,
 } from './cart';
-import { railFrameAt, sweptRails, type RailFrame } from '../rail/sweptRail';
+import {
+  drawnOnSphere,
+  railFrameAt,
+  rideFrame,
+  sweptRails,
+  type RailFrame,
+} from '../rail/sweptRail';
 import { planCruiserPylons } from './pylons';
 import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/trestleGeometry';
 import type { PlannedCoaster } from './plan';
@@ -25,7 +31,7 @@ import { RideCamera } from '../../core/RideCamera';
 import { toonMaterial } from '../../art/style/materials';
 import { addOutline } from '../../art/style/materials';
 import { PALETTE } from '../../core/palette';
-import { terrainHeight } from '../terrain';
+import { placeOnSphere, terrainHeight } from '../terrain';
 import type { CollisionWorld } from '../Collision';
 import { resolveDismount } from '../dismount';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -82,6 +88,12 @@ const GRAVITY = 6.5; // gentler than earth; a cosy park has cosy physics
 // disagree with where this actually puts the camera.
 const EYE = { x: 0, y: CART_EYE_HEIGHT - CART_SEAT_HEIGHT, z: 0 };
 
+/** Somewhere for `placeOnSphere`'s rotation to go when only its point is wanted. */
+const DISCARDED_SPIN = /* @__PURE__ */ new Quaternion();
+
+/** Scratch for the cart's own up, used to seat the rider down into the tub. */
+const SEAT_DROP = /* @__PURE__ */ new Vector3();
+
 export interface CoasterOptions {
   /**
    * The solved plan (`coaster/plan.ts`) — route, station stall and exit
@@ -132,6 +144,16 @@ export class Coaster implements GameSystem {
   private phase: 'waiting' | 'chain' | 'coasting' | 'braking' = 'waiting';
   private readonly point = new Vector3();
   private readonly tangent = new Vector3();
+  /**
+   * The cart's heading, kept because `cart.rotation.y` no longer carries it.
+   *
+   * Once the cart's quaternion leans with the track, the Euler three.js
+   * decomposes back out of it is a mixture of the lean, the yaw and the pitch,
+   * and its `.y` is none of the three. Anything wanting "which way is the cart
+   * pointing" — the rider's facing, the face-turn towards the camera — asks
+   * this instead.
+   */
+  private cartYaw = 0;
   private crestDistance = 0;
 
   private readonly options: CoasterOptions;
@@ -163,11 +185,18 @@ export class Coaster implements GameSystem {
     this.buildTrack(collision);
 
     // Find the highest crest's distance, for the chain phase.
-    let bestY = -Infinity;
+    //
+    // **Highest above the ground, not highest `y`** — same fault as the energy
+    // drop in `update`, and worse in its way. A bare `y` over a loop that spans
+    // 100 m of park finds the point where the sphere's *cap* is highest, which
+    // is simply whichever part of the circuit passes nearest the park's origin.
+    // The chain then hauls the cart to there and lets go, rather than letting go
+    // at the top of the lift hill.
+    let bestClearance = -Infinity;
     for (let d = 0; d < this.route.length; d += 1) {
-      const y = this.route.pointAt(d, this.point).y;
-      if (y > bestY) {
-        bestY = y;
+      const clearance = this.route.clearanceAt(d);
+      if (clearance > bestClearance) {
+        bestClearance = clearance;
         this.crestDistance = d;
       }
     }
@@ -192,7 +221,7 @@ export class Coaster implements GameSystem {
     // to look backwards (family report, 28 July).
     //
     // Everything modelled in this park faces **+Z** (ASSET_MANIFEST), and
-    // `placeCart` duly sets `cart.rotation.y = atan2(tangent.x, tangent.z)`,
+    // `placeCart` duly points the cart's +Z along `atan2(tangent.x, tangent.z)`,
     // which points the cart's +Z along the direction of travel. But a three.js
     // `PerspectiveCamera` looks down its own local **−Z**. Bolt an unrotated
     // camera into a seat whose +Z is forward and it faces the way you have just
@@ -207,6 +236,11 @@ export class Coaster implements GameSystem {
     this.eyeMount = new Group();
     this.eyeMount.rotation.y = Math.PI;
     this.cartMount.add(this.eyeMount);
+    // Named so an instrument can find the thing that actually gets drawn,
+    // rather than re-deriving where it thinks the cart ought to be — the
+    // difference `check:swept-bus` was written to make, after a check measured
+    // trestle *feet* and reported a confident, wrong zero.
+    this.cart.name = `${options.plan.name}-cart`;
     this.group.add(this.cart);
     this.placeCart();
   }
@@ -263,8 +297,26 @@ export class Coaster implements GameSystem {
     const { dt } = context;
 
     if (this.phase !== 'waiting') {
-      const height = this.route.pointAt(this.distance, this.point).y;
-      const crestHeight = this.route.pointAt(this.crestDistance, this.point).y;
+      // **Height above the GROUND, not world `y`** — the cart's energy is a fact
+      // about how far it has fallen, and since #511 those two are different
+      // numbers by tens of metres.
+      //
+      // The route is authored in the flat frame, where a point's `y` is
+      // `terrainHeight(x, z)` plus its clearance — so it carries the sphere's
+      // own cap inside it. The loop reaches about 100 m from the park's origin,
+      // where the cap alone is 23 m down. Differencing two `y`s across it
+      // therefore handed the cart 23 m of drop it had not fallen on the way out
+      // (straight to `MAX_SPEED`, for free) and took the same 23 m away coming
+      // back, where it stalled at `MIN_SPEED`. Nothing to do with the lean; it
+      // is the cap, and it was invisible while the park was flat.
+      //
+      // `clearanceAt` is the route's own name for the right quantity and had
+      // **zero readers** — it subtracts the terrain under each point, which is
+      // exactly what removes the cap. It is also what survives `placeOnSphere`:
+      // that map preserves a height above the ground, so the flat frame's
+      // clearance *is* the drawn cart's real altitude.
+      const height = this.route.clearanceAt(this.distance);
+      const crestHeight = this.route.clearanceAt(this.crestDistance);
       if (this.phase === 'chain') {
         this.speed = CHAIN_SPEED;
         const pastCrest =
@@ -291,7 +343,27 @@ export class Coaster implements GameSystem {
     if (this.riding && this.player) {
       this.rideView?.update(dt, context.elapsed);
       const seat = this.cartMount.getWorldPosition(this.point);
-      this.player.setRidePose(seat.x, seat.y - 0.55, seat.z, this.cart.rotation.y);
+      // Down **into the seat**, along the cart's own up rather than along world
+      // `+Y`. The cart leans with the track now (see `placeCart`), so a bare
+      // `seat.y - 0.55` would drop her 0.55 m vertically out of a tub that is
+      // no longer vertical — sliding her towards the park's centre by
+      // `0.55 · sin(tilt)` and, at the far side of the loop, out through the
+      // side of it.
+      //
+      // The yaw is carried in `cartYaw` rather than read back off
+      // `cart.rotation.y`. That property stopped meaning "the way the cart is
+      // pointing" the moment the cart's quaternion began carrying a lean: the
+      // Euler three.js decomposes out of `tilt * yaw * pitch` mixes all three,
+      // so reading `.y` off it hands her a facing that is wrong by the lean and
+      // wrong in a way that grows as the ride goes round.
+      // flat-ok: local axis, leant by the cart's own quaternion
+      const down = SEAT_DROP.set(0, 1, 0).applyQuaternion(this.cart.quaternion);
+      this.player.setRidePose(
+        seat.x - down.x * 0.55,
+        seat.y - down.y * 0.55,
+        seat.z - down.z * 0.55,
+        this.cartYaw,
+      );
     }
   }
 
@@ -318,14 +390,37 @@ export class Coaster implements GameSystem {
     }
   }
 
+  /**
+   * **On the rails, not merely near them.**
+   *
+   * The route is solved flat and the rails are drawn through `drawnOnSphere`
+   * (see `buildTrack`). The cart has to make the same journey, or it rides a
+   * track that is no longer where it is. It used to make neither half of it —
+   * flat position, flat Euler — and on seed 428 that left it **10.83 m from its
+   * own rails** at the worst point of the 213.5 m circuit, 3.42 m on average.
+   *
+   * So: the position through `placeOnSphere`, exactly as `drawnOnSphere` maps
+   * each drawn rail point, and the orientation through `rideFrame`, which takes
+   * its lean about the same **flat** column. Everything hung off the cart —
+   * `cartMount`, `eyeMount`, and so both ride cameras — inherits this for free,
+   * which is why there is nothing to change in `RideCamera`.
+   */
   private placeCart(): void {
     this.route.pointAt(this.distance, this.point);
     this.route.tangentAt(this.distance, this.tangent);
-    this.cart.position.copy(this.point);
-    this.cart.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
+    const yaw = Math.atan2(this.tangent.x, this.tangent.z);
     // Pitch with the track, gently — the mount (and so the rider's eye and
-    // the cart's nose) follows the hill it is on.
-    this.cart.rotation.x = -Math.asin(Math.max(-0.6, Math.min(0.6, this.tangent.y)));
+    // the cart's nose) follows the hill it is on. Still read off the flat
+    // tangent: `placeOnSphere` is locally a rotation, so a gradient in the flat
+    // frame already *is* the gradient against local gravity.
+    const pitch = -Math.asin(Math.max(-0.6, Math.min(0.6, this.tangent.y)));
+    // `placeOnSphere` is asked only for the position; `rideFrame` owns the
+    // orientation, because it carries the pitch as well as the yaw. The spare
+    // quaternion is thrown away rather than written straight to the cart, so
+    // that nothing reads as though the rotation were set twice.
+    placeOnSphere(this.point, yaw, this.cart.position, DISCARDED_SPIN);
+    rideFrame(this.point, yaw, pitch, this.cart.quaternion);
+    this.cartYaw = yaw;
   }
 
   private buildTrack(collision: CollisionWorld): void {
@@ -347,7 +442,13 @@ export class Coaster implements GameSystem {
     // a **half**-offset, while the shared helper (and `train/track.ts` before
     // it) take `gauge` to mean the railway's own centre-to-centre. Hence 1.1
     // here: the same rails, the standard name for the number.
-    const railGeometries = sweptRails(this.route, {
+    // **Drawn on the sphere, solved flat.** `drawnOnSphere` leans every sampled
+    // point as it is drawn; the route object itself stays in the flat frame,
+    // which is where its clearance solve, its physics and its invariants all
+    // want to be. See that function for why the two frames give the same
+    // answers to every question except "where does this get drawn".
+    const drawn = drawnOnSphere(this.route);
+    const railGeometries = sweptRails(drawn, {
       gauge: RAIL_GAUGE,
       radius: 0.075,
       // Denser than the 1.4 m this used to sample at, and a real fix rather than
@@ -399,10 +500,17 @@ export class Coaster implements GameSystem {
 
     for (let i = 0; i < segments; i += 1) {
       const d = i * step;
-      railFrameAt(this.route, d, frame);
+      railFrameAt(drawn, d, frame);
       basis.makeBasis(frame.side, frame.up, frame.forward);
       rotation.setFromRotationMatrix(basis);
-      matrix.compose(position.copy(mid).setY(mid.y - 0.12), rotation, one);
+      // **Dropped along the frame's own up, not along world `−Y`.** The 0.12 m
+      // is the tie sitting under the rail so the rail visibly rests on top of
+      // the sleeper — a distance across the track's own cross-section, which is
+      // what `frame.up` is. `setY(mid.y - 0.12)` was the same thing only while
+      // the world was flat; out at the park's edge the track leans by up to 40°
+      // and a plumb drop slides the tie 29 mm sideways off the rails it is
+      // meant to be bolted to.
+      matrix.compose(position.copy(mid).addScaledVector(frame.up, -0.12), rotation, one);
       ties.setMatrixAt(i, matrix);
     }
     ties.instanceMatrix.needsUpdate = true;
@@ -457,6 +565,11 @@ export class Coaster implements GameSystem {
     pylons.name = 'skyCruiser:pylons';
     pylons.count = pylonSpots.length;
     const stretch = new Vector3();
+    const PYLON_UP = new Vector3(0, 1, 0);
+    const pylonFoot = new Vector3();
+    const pylonFlatTop = new Vector3();
+    const pylonTop = new Vector3();
+    const pylonSpan = new Vector3();
     pylonSpots.forEach((spot, index) => {
       // Top at `ground + height` exactly, which `pylons.ts` derives as
       // `route.pointAt(d).y` — **the middle of the track**, the same rule the
@@ -469,9 +582,23 @@ export class Coaster implements GameSystem {
       // no overlap at all. A support whose contact with what it carries is
       // measured in millimetres and varies by pylon is not joined on purpose —
       // it is joined by luck, which is the fault Jim reported on the Rail Race.
-      position.set(spot.x, spot.ground + spot.height / 2, spot.z);
-      stretch.set(1, spot.height, 1);
-      matrix.compose(position, rotation.identity(), stretch);
+      // **A strut from its foot to where the track now is**, not a vertical
+      // cylinder. The track is drawn leant onto the sphere, so its centre line
+      // out at the ride's radius stands metres further out than the flat frame
+      // put it; a pylon left plumb to world `+Y` would no longer reach the
+      // thing it carries. The foot stays exactly where the planner found clear
+      // ground — `tryPlace` checked *that* square metre against the paving and
+      // the plots — and the lean falls out of the two ends, which is also how
+      // the Rail Race's trestles are drawn.
+      pylonFoot.set(spot.x, spot.ground, spot.z);
+      pylonFlatTop.set(spot.x, spot.ground + spot.height, spot.z);
+      placeOnSphere(pylonFlatTop, 0, pylonTop, rotation);
+      pylonSpan.subVectors(pylonTop, pylonFoot);
+      const pylonLength = pylonSpan.length() || spot.height;
+      position.copy(pylonFoot).addScaledVector(pylonSpan, 0.5);
+      rotation.setFromUnitVectors(PYLON_UP, pylonSpan.divideScalar(pylonLength));
+      stretch.set(1, pylonLength, 1);
+      matrix.compose(position, rotation, stretch);
       pylons.setMatrixAt(index, matrix);
       // Registered here rather than inside the planner, so a pure function stays
       // pure and the collision world gains a post exactly once.

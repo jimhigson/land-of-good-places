@@ -4,7 +4,12 @@
 set -u
 out="$1"
 mkdir -p "$out"
-seeds="20260728 5 11 24 115 128 131 208 225 267 274 288 326 346 428 451"
+# **Derived, not listed.** A hand-typed seed list goes stale the moment the pool
+# changes -- this copy still named 267 and 288 after #589 retired them, so a
+# sweep would have measured two parks that no longer exist and missed none that
+# do. PARK_SEED_POOL is the owner; ask it.
+seeds="$(node --import ./scripts/ts-extension-resolver-register.mjs --input-type=module \
+  -e "import { PARK_SEED_POOL } from './src/world/parkSeedPool.ts'; console.log(PARK_SEED_POOL.join(' '));")"
 for seed in $seeds; do
   LGP_SEED="$seed" node --import ./scripts/ts-extension-resolver-register.mjs \
     scripts/park-digest.mts > "$out/$seed.txt" 2> "$out/$seed.err"

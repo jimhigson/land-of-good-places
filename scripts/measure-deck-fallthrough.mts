@@ -97,7 +97,21 @@ import { circleBoundary } from '../src/world/boundary.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
 import {
+  SPACE_CASTLE_HALL,
+  SPACE_CASTLE_MALL,
+  SPACE_CASTLE_ROOF,
+  SPACE_HOTEL_BREAKFAST,
+  SPACE_HOTEL_CORRIDOR,
+  SPACE_HOTEL_GARDEN,
+  SPACE_HOTEL_LOBBY,
+  SPACE_HOTEL_OCEAN,
+  SPACE_HOTEL_SUITE,
+  localToWorld,
+  spaceAt,
+} from '../src/world/spaces.ts';
+import {
   BUILDING_STEP_UP,
+  GROUND_SPHERE_RADIUS,
   MAX_FRAME_DELTA,
   PLAYER_LONGEST_STEP,
   PLAYER_MAX_SPEED,
@@ -117,8 +131,36 @@ import { SimPlayer } from './playerSim.mts';
  */
 const PARK_THINNEST_HALF_WIDTH = 0.18;
 
-/** Where the ramp starts, in the garden and well clear of anything. */
-const RAMP_X0 = -40;
+/**
+ * Where the ramp starts: **at the park's origin, climbing away from it**, in
+ * the garden and clear of anything a bare `WalkSurfaces` carries.
+ *
+ * The shipping configuration does not care where the ramp is — its reach is
+ * radial and its reference is carried at her own radius (#643), so a deck of a
+ * given local {@link deckSurfaceAt} gradient reads the same ceiling anywhere.
+ * The **damped control does care**: it models the pre-#358 player, whose
+ * reference was her damped world-`y` height, and that lag is a world-`y`
+ * quantity which the planet inflates on any climb *towards* the centre. It used
+ * to start at x = -40, which only reproduced 0.512 because the reach counted
+ * the planet too and the two errors were measured together; a ramp starting at
+ * the origin keeps the lean out of the control so it measures the damp and
+ * nothing else — 0.512, the figure `SPRINT_PEAK_GRADE_BUDGET` is frozen at.
+ */
+const RAMP_X0 = 0;
+
+/**
+ * **Where the shipping configuration is also measured — off the origin, both
+ * ways** (#643 review). With the ramp at the origin the planet is out of the
+ * picture, which is what the damped control wants and exactly what makes the
+ * shipping row unable to see the reference carry: remove `carryReference` and
+ * x0 = 0 still reads 1.670. At -60 the ramp climbs towards the park, at +60
+ * away from it, so a reach or a carry that counts the planet moves the ceiling
+ * off the prediction in one direction or the other.
+ */
+const SHIPPING_ALSO_AT = [-60, 60];
+
+/** The ramp origin every function below reads; {@link RAMP_X0} except while measuring elsewhere. */
+let rampX0 = RAMP_X0;
 /** Long enough that a sprint spends several seconds on it at every gradient. */
 const RAMP_LENGTH = 30;
 const RAMP_Z = 0;
@@ -157,10 +199,24 @@ function buildCollision(): CollisionWorld {
   return collision;
 }
 
-/** The deck's own surface, and the ground truth every verdict is read against. */
+/**
+ * The deck's own surface, and the ground truth every verdict is read against.
+ *
+ * **`gradient` is rise along the local up per metre of plan travel** — the
+ * deck's distance from the planet's centre grows by `gradient` for every metre
+ * she moves in `x`. That is exactly the quantity `WalkSurfaces.sample`'s reach
+ * spends (#643: the reach is radial, and `Player` carries its reference at her
+ * own radius between sub-steps), so the prediction below —
+ * `BUILDING_STEP_UP` over the worst sub-step — is a statement about this deck
+ * and nothing else. It used to be a world-`y` rise, which at `x = -40` is the
+ * ramp *minus* the planet's own curvature, and once the reach stopped counting
+ * the planet the measured ceiling drifted off the prediction by that much.
+ */
 function deckSurfaceAt(base: number, gradient: number, x: number): number {
-  const along = Math.min(Math.max(x - RAMP_X0, 0), RAMP_LENGTH);
-  return base + gradient * along;
+  const along = Math.min(Math.max(x - rampX0, 0), RAMP_LENGTH);
+  const baseRadius = Math.hypot(rampX0, base + GROUND_SPHERE_RADIUS, RAMP_Z);
+  const radius = baseRadius + gradient * along;
+  return Math.sqrt(radius * radius - x * x - RAMP_Z * RAMP_Z) - GROUND_SPHERE_RADIUS;
 }
 
 /**
@@ -202,9 +258,9 @@ const HOLE_AT = RAMP_LENGTH * 0.5;
 
 function coversWith(holeWidth: number, x: number, z: number): boolean {
   if (Math.abs(z - RAMP_Z) > RAMP_HALF_WIDTH) return false;
-  if (x < RAMP_X0 - 0.001 || x > RAMP_X0 + RAMP_LENGTH + 0.001) return false;
+  if (x < rampX0 - 0.001 || x > rampX0 + RAMP_LENGTH + 0.001) return false;
   if (holeWidth > 0) {
-    const along = x - RAMP_X0;
+    const along = x - rampX0;
     if (along >= HOLE_AT && along < HOLE_AT + holeWidth) return false;
   }
   return true;
@@ -256,7 +312,7 @@ function run(config: Config, outcome: Outcome): void {
 
   // The deck sits clear above the terrain, so losing it is unambiguous: the
   // only thing under it is ground several metres down.
-  const base = terrainHeight(RAMP_X0, RAMP_Z) + 6;
+  const base = terrainHeight(rampX0, RAMP_Z) + 6;
 
   const surfaces = new WalkSurfaces();
   surfaces.addPlatform({
@@ -276,7 +332,7 @@ function run(config: Config, outcome: Outcome): void {
   // Start a phase-shifted fraction of one long step back from the ramp's foot
   // (or its head, going down), so the frame boundaries land everywhere.
   const offset = phase * PLAYER_LONGEST_STEP;
-  const startX = uphill ? RAMP_X0 + offset : RAMP_X0 + RAMP_LENGTH - offset;
+  const startX = uphill ? rampX0 + offset : rampX0 + RAMP_LENGTH - offset;
   player.placeOnGround(startX, RAMP_Z);
 
   const dirX = uphill ? 1 : -1;
@@ -289,7 +345,7 @@ function run(config: Config, outcome: Outcome): void {
     // Walked off the end of the deck. Over a hole she is still "on" the deck
     // as far as this loop is concerned, which is the point: the question is
     // whether the surface is found again on the far side.
-    if (x < RAMP_X0 || x > RAMP_X0 + RAMP_LENGTH) break;
+    if (x < rampX0 || x > rampX0 + RAMP_LENGTH) break;
     if (!covers(x, z)) continue;
 
     const deck = deckSurfaceAt(base, gradient, x);
@@ -377,6 +433,12 @@ function ceiling(results: Map<number, Outcome>): number {
 }
 
 const results = VARIANTS.map((variant) => ({ variant, byGradient: measure(variant) }));
+const shippingElsewhere = SHIPPING_ALSO_AT.map((x0) => {
+  rampX0 = x0;
+  const byGradient = measure(VARIANTS[3]!);
+  rampX0 = RAMP_X0;
+  return { x0, byGradient };
+});
 const before = results[0]!.byGradient;
 const after = results[3]!.byGradient;
 
@@ -537,6 +599,65 @@ if (!(afterCeiling <= predicted && predicted < nextAbove)) {
       `predicted ${predicted.toFixed(3)} (next gradient tried: ${nextAbove.toFixed(3)}). ` +
       `The ground sample is no longer following the movement sub-steps.`,
   );
+}
+
+// 2b. The same bracket with the ramp off the origin, both ways — the only
+//     rows that can see the reference carry and the radial reach (#643).
+for (const { x0, byGradient } of shippingElsewhere) {
+  const measured = ceiling(byGradient);
+  const next = GRADIENTS.find((g) => g > measured) ?? Infinity;
+  console.log(`  shipping configuration with the ramp at x0 = ${x0}: ceiling ${measured.toFixed(3)}`);
+  if (!(measured <= predicted && predicted < next)) {
+    failed = true;
+    const first = GRADIENTS.map((g) => byGradient.get(g)!.firstMessage).find((m) => m !== null);
+    console.error(
+      `FAIL: with the ramp at x0 = ${x0} the measured ceiling ${measured.toFixed(3)} does not bracket ` +
+        `the predicted ${predicted.toFixed(3)} (next gradient tried: ${next.toFixed(3)}). Off the ` +
+        `origin the planet is in play, so the reach or the reference carry is counting it.` +
+        (first ? `\n      ${first}` : ''),
+    );
+  }
+}
+
+// 2c. **Indoors the reach is the plain world-`y` step** (#643 review). The
+//     castle floors and hotel rooms stand hundreds of metres out, where a
+//     radial reach would lean by tens of degrees and let her step up far more
+//     than a step — nothing else in the chain notices if it does. At every
+//     indoor space's own origin, a flat platform just under a step above the
+//     floor must be offered and one just over must not.
+{
+  const indoorSpaces = [SPACE_CASTLE_MALL, SPACE_CASTLE_HALL, SPACE_CASTLE_ROOF, SPACE_HOTEL_LOBBY,
+    SPACE_HOTEL_BREAKFAST, SPACE_HOTEL_CORRIDOR, SPACE_HOTEL_SUITE, SPACE_HOTEL_GARDEN, SPACE_HOTEL_OCEAN];
+  let probed = 0;
+  for (const space of indoorSpaces) {
+    const origin = localToWorld(space, 3, 0, 3);
+    if (!origin || spaceAt(origin.x, origin.z) !== space) {
+      failed = true;
+      console.error(`FAIL: indoor reach control could not find a point inside ${space} — it probes nothing there`);
+      continue;
+    }
+    const floorY = origin.y;
+    for (const [rise, offered] of [[BUILDING_STEP_UP - 0.02, true], [BUILDING_STEP_UP + 0.02, false]] as const) {
+      const walk = new WalkSurfaces();
+      const top = floorY + rise;
+      walk.addPlatform({
+        surfaceY: top,
+        covers: (x, z) => Math.abs(x - origin.x) < 0.5 && Math.abs(z - origin.z) < 0.5,
+      });
+      const got = walk.sample(origin.x, origin.z, floorY);
+      probed += 1;
+      if ((got === top) !== offered) {
+        failed = true;
+        console.error(
+          `FAIL: in ${space} at (${origin.x.toFixed(1)}, ${origin.z.toFixed(1)}) a platform ` +
+            `${rise.toFixed(2)} m above a floor at y=${floorY.toFixed(2)} was ${offered ? 'refused' : 'offered'} ` +
+            `(sample gave ${got.toFixed(3)}) — indoors the step is BUILDING_STEP_UP ` +
+            `(${BUILDING_STEP_UP}) in world y, and the reach is no longer that there`,
+        );
+      }
+    }
+  }
+  console.log(`  indoor reach control: ${probed} probes across ${indoorSpaces.length} indoor spaces`);
 }
 
 // 3. The fix must actually buy something over the control.

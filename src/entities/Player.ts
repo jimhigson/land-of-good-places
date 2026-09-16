@@ -20,6 +20,8 @@ import type { FrameContext, GameSystem } from '../core/types';
 import type { IsoCamera } from '../core/IsoCamera';
 import type { CollisionWorld } from '../world/Collision';
 import { terrainHeight } from '../world/terrain';
+import { carryReference } from '../world/building/surfaces';
+import { faceOnGround } from '../world/up';
 import { CharacterModel } from './CharacterModel';
 import { createGlasses } from '../art/models/glasses';
 import { createFaceLife, type FaceLife } from '../art/style/faceLife';
@@ -707,7 +709,7 @@ export class Player implements GameSystem {
     this.escorting = false;
     if (facing !== undefined) this.facingAngle = facing;
     this.group.position.copy(this.position);
-    this.group.rotation.y = this.facingAngle;
+    faceOnGround(this.group, this.facingAngle);
   }
 
   /** True while a ride is driving the character instead of the player. */
@@ -861,8 +863,7 @@ export class Player implements GameSystem {
     this.groundHeight = y;
     this.facingAngle = facing;
     this.group.position.copy(this.position);
-    this.group.rotation.y = facing;
-    this.group.rotation.x = pitch;
+    faceOnGround(this.group, facing, pitch);
   }
 
   /**
@@ -1033,9 +1034,18 @@ export class Player implements GameSystem {
     // Airborne she is not following any surface, so the reference stays her
     // own height and the last sub-step's answer is the one used — identical to
     // the single end-of-frame sample this replaced.
+    //
+    // **The reference travels with her at her own distance from the planet's
+    // centre** (#643). It is a height in the column she was standing in; asked
+    // unchanged in the next column it would be a point below or above her foot
+    // by the sub-step times the sine of the lean, and the step-up reach would
+    // spend that on the planet instead of the ramp. `carryReference` is the
+    // identity indoors, so the castle and the hotel are untouched.
     const following = !this.airborne;
     let reference = following ? this.groundHeight : this.position.y;
     let groundY = reference;
+    let fromX = this.position.x;
+    let fromZ = this.position.z;
     const { clearedWall, escorting, corrected } = this.collision.resolveMovement(
       this.position,
       this.velocity.x * dt,
@@ -1044,6 +1054,9 @@ export class Player implements GameSystem {
       this.hopClearance,
       dt,
       (at) => {
+        if (following) reference = carryReference(fromX, fromZ, reference, at.x, at.z);
+        fromX = at.x;
+        fromZ = at.z;
         groundY = this.groundAt(at.x, at.z, reference);
         if (following) reference = groundY;
       },
@@ -1206,7 +1219,13 @@ export class Player implements GameSystem {
       const target = Math.atan2(this.velocity.x, this.velocity.z);
       this.facingAngle = turnTowards(this.facingAngle, target, PLAYER_TURN_SPEED * dt);
     }
-    this.group.rotation.y = this.facingAngle;
+    // She stands perpendicular to the ground she is on, which out in the park
+    // means leaning away from its centre. `facingAngle` is still the only thing
+    // that means "which way is she pointing" — the trig at `forwardX`/`forwardZ`
+    // and the camera's screen basis both read it, and neither can read it back
+    // off `group.rotation` any more. Indoors this is a plain yaw and nothing
+    // else.
+    faceOnGround(this.group, this.facingAngle);
 
     // --- animation ----------------------------------------------------------
     this.gait = damp(this.gait, clamp01(planarSpeed / PLAYER_MAX_SPEED), 0.07, dt);

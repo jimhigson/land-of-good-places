@@ -57,6 +57,9 @@ export class ShopUnits {
 
       const anchor = new Group();
       anchor.name = shopGroupName(unit.id);
+      // Local to a castle floor group, and a yaw about plain +Y: these units
+      // are inside an interior space at its own far-off origin, so they are
+      // not on the park's ground sphere and do not lean with it.
       anchor.position.set(unit.x, 0, unit.z);
       anchor.rotation.y = unit.yaw;
       floor.add(anchor);

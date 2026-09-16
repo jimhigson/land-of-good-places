@@ -3,6 +3,7 @@ import { createKid, type KidHandle } from '../../art/models/kid';
 import { applyWalk } from '../../art/style/asset';
 import { PLAYER_RADIUS } from '../../core/constants';
 import { terrainHeight } from '../terrain';
+import { faceOnGround } from '../up';
 import { resolveDismountGroup, type OccupiedSpot } from '../dismount';
 import type { CollisionWorld } from '../Collision';
 
@@ -182,7 +183,7 @@ export function createRailRaceExitCrowd(collision: CollisionWorld): RailRaceExit
         });
 
         // Face the player while they are standing about.
-        group.rotation.y = Math.atan2(playerX - spot.x, playerZ - spot.z);
+        faceOnGround(group, Math.atan2(playerX - spot.x, playerZ - spot.z));
       });
     },
 
@@ -229,7 +230,7 @@ export function createRailRaceExitCrowd(collision: CollisionWorld): RailRaceExit
           const x = walker.startX + walker.dirX * distance;
           const z = walker.startZ + walker.dirZ * distance;
           group.position.set(x, terrainHeight(x, z), z);
-          group.rotation.y = Math.atan2(walker.dirX, walker.dirZ);
+          faceOnGround(group, Math.atan2(walker.dirX, walker.dirZ));
           handle.head.rotation.x = 0;
           applyWalk(handle.limbs, handle.body, distance * STRIDE_PER_METRE, 1);
 

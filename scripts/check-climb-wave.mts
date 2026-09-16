@@ -46,8 +46,19 @@
  * forearm — the part a wave is made of), casts a ray along the camera's view
  * direction and asks whether anything else is in front of it.
  *
- * The camera is orthographic (`CAMERA_IS_ORTHOGRAPHIC`), so every ray is
- * parallel and the view direction is one constant: `-cameraOffset(yaw, pitch)`.
+ * **The view direction is taken as one constant**, `-cameraOffset(yaw, pitch)`,
+ * and that is an approximation now rather than an identity. It was exact while
+ * the park camera was orthographic; since 11 September 2026 the rig is a
+ * perspective one, so rays converge on the eye. The error is small enough to
+ * ignore here and the number is worth writing down rather than waving at: the
+ * rig stands `CAMERA_DISTANCE` (90 m) back at about a 9.5° lens, so a point a
+ * metre off the view axis is `atan(1/90)` = **0.64°** away from it, and an arm
+ * is about a metre. That moves the ray by roughly a centimetre over the length
+ * of the hand — far under the sampling this check does.
+ *
+ * If the shot this measures ever moves in close (the arrival's door beat stands
+ * 6.5 m off its subject, where the same point is 8.7° off axis), this
+ * approximation stops being free and the rays have to be cast at the eye.
  *
  * A **control** is measured alongside: the head's visibility, by the identical
  * method. A method that reports 0% for everything proves nothing. QA measured
@@ -55,13 +66,44 @@
  * is what says the rig, the camera and the raycast all agree — and if the
  * control ever fails, this script reports itself broken rather than confidently
  * blaming the pose.
+ *
+ * ## The green that was too good — 16 September 2026, on the sphere branch
+ *
+ * **Worth reading before touching anything here, because the failure looked
+ * exactly like a fix.**
+ *
+ * This script died outright on the sphere branch: *"climbable tree 0 has no
+ * foliage occluder"*. `foliageFor` matches a `ClimbableTreeSeed` to its
+ * `FoliageOccluder` by `(x, z)` within 0.05 m, and the two had come apart —
+ * the occluder is the canopy's **drawn** centre, slid outward along the local
+ * up, while the seed is the tree's **flat** foot. Measured on the canonical
+ * seed: **1.67 m apart at a radius of 80 m, 2.94 m at 176 m.**
+ *
+ * Fixing that match alone made this check **green**, reporting **100.0% hand
+ * visible on all 46 trees with a blocker column of nothing but `—`**. That is a
+ * triumphant-looking result and it was worthless: the kid was still posed by
+ * this file's own copy of the perch, in the tree's flat column, while every
+ * foliage stand-in sat metres away in the drawn one. There was no foliage
+ * anywhere near her to block anything, so nothing blocked anything. A check that
+ * had stopped touching its own subject read as a pass.
+ *
+ * The tell was that the number was *too* clean — 100.0% on every tree, and a
+ * head control of 100.0% where QA had measured 95.8–96.4%. Two figures that
+ * should differ, agreeing perfectly, is this repo's oldest smell.
+ *
+ * The cure is the one that generalises: **stop having a copy.** She is posed
+ * through the game's own {@link climbPose} and stood with the game's own
+ * `faceOnGround`, so there is no second perch to keep in step. It then read
+ * 0.0–100.0% and failed honestly.
  */
 import './headless-canvas.mjs';
-import { Group, Mesh, MeshBasicMaterial, Raycaster, SphereGeometry, Vector3 } from 'three';
+import { Group, Mesh, MeshBasicMaterial, Quaternion, Raycaster, SphereGeometry, Vector3 } from 'three';
+import { placeOnSphere } from '../src/world/terrain.ts';
 import { buildHeadlessPark } from './park-harness.mts';
 import { createKid, KID_HEAD_HEIGHT, KID_REST_GAZE_PITCH } from '../src/art/models/kid.ts';
 import { applyRidePose, CLIMB_WAVE_ARM_X, CLIMB_WAVE_LEAN_RATE } from '../src/entities/Player.ts';
-import { CLIMB_EDGE_GAP, CLIMB_PEEK_LIFT, WAVE_RISE } from '../src/world/TreeClimbing.ts';
+import { CLIMB_PEEK_LIFT, WAVE_RISE, climbPose, waveFacingYaw } from '../src/world/TreeClimbing.ts';
+import { eyeForFocus, faceOnGround } from '../src/world/up.ts';
 import {
   CAMERA_DISTANCE,
   CAMERA_PITCH_DEGREES,
@@ -107,9 +149,29 @@ const BEARINGS = 12;
 /** Waggle phases sampled. The wave is judged at its BEST moment, not its worst. */
 const WAGGLE_PHASES = 8;
 
-/** The camera looks along this. Orthographic, so it is the same for every ray. */
+/** The rig's offset from its focus, **in the flat frame** — `IsoCamera`'s own. */
 const offset = cameraOffset(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG, CAMERA_DISTANCE);
+
+/**
+ * **The camera looks along this — the camera the game renders, over this kid.**
+ *
+ * Orthographic, so it is the same for every ray *of one pose*; it is not the
+ * same for every pose. It used to be one world constant, `−offset`, which is the
+ * shot at the park's centre and nowhere else: `IsoCamera` rides the ground it
+ * is looking at, rotating that offset into the local frame at its focus
+ * (`eyeForFocus`) and setting `camera.up` to the local up. A leant child seen
+ * down a plumb view is a picture nobody is shown — and it is the picture that
+ * made a flat-frame bearing (`yawForBearing`) look like the right way to face
+ * the camera, when in the frame she and the rig share, the camera sits at
+ * {@link CAMERA_FACING} exactly.
+ *
+ * Set by {@link poseKidAt} from `eyeForFocus` at her own position, the same
+ * owner `IsoCamera.applyTransform` asks. {@link VIEW_UP} is the rig's up there.
+ */
 const VIEW_DIR = new Vector3(-offset.x, -offset.y, -offset.z).normalize();
+const VIEW_UP = new Vector3(0, 1, 0);
+const _viewEye = new Vector3();
+const _viewFocus = new Vector3();
 
 /** Facing the camera is the camera's own yaw — see `TreeClimbing`'s CAMERA_FACING. */
 const CAMERA_FACING = CAMERA_YAW_DEGREES * DEG;
@@ -147,12 +209,13 @@ function sampleSurface(root: Group, fraction: number): Sample[] {
   if (all.length === 0) return all;
   let low = Infinity;
   let high = -Infinity;
+  // "Top" along her own up, not world `y` — see VIEW_UP.
   for (const sample of all) {
-    low = Math.min(low, sample.point.y);
-    high = Math.max(high, sample.point.y);
+    low = Math.min(low, sample.point.dot(VIEW_UP));
+    high = Math.max(high, sample.point.dot(VIEW_UP));
   }
   const cut = high - (high - low) * fraction;
-  return all.filter((sample) => sample.point.y >= cut);
+  return all.filter((sample) => sample.point.dot(VIEW_UP) >= cut);
 }
 
 /** What fraction of `samples` the camera can see, and what blocked the rest. */
@@ -221,14 +284,25 @@ function collectMeshes(root: Group, exclude: Group): Mesh[] {
   return out;
 }
 
-/** Stand-in meshes for one tree's canopy blobs, as the real ellipsoids. */
+/**
+ * Stand-in meshes for one tree's canopy blobs, as the real ellipsoids.
+ *
+ * **Composed the way `makeInstanced` composes the drawn instance** — through
+ * `placeOnSphere`, because a `part.position` is a height above the ground under
+ * its own column, not a world point. This copied it straight in, which put
+ * every stand-in blob upright at the flat position while the tree it stood for
+ * leant: measured against the drawn `tree-canopies`/`tree-cones` instance
+ * centres (`getMatrixAt`), the worst of 160 parts was **1.9590 m** away that way
+ * and **0.000004 m** this way. `FoliageFade` builds its look-alikes the same way
+ * for the same reason.
+ */
 function canopyMeshes(tree: FoliageOccluder): Mesh[] {
   const out: Mesh[] = [];
   for (const part of tree.parts) {
     if (part.kind === 'trunk') continue;
     const mesh = new Mesh(new SphereGeometry(1, 24, 16), new MeshBasicMaterial());
     mesh.name = `foliage.${part.kind}`;
-    mesh.position.copy(part.position);
+    placeOnSphere(part.position, part.rotationY, mesh.position, mesh.quaternion);
     mesh.scale.copy(part.scale);
     mesh.updateMatrixWorld(true);
     out.push(mesh);
@@ -254,10 +328,17 @@ interface TreeResult {
 
 /** The foliage stand-ins for the tree at `index`, or exits if there are none. */
 function foliageFor(index: number, tree: (typeof trees)[number]): Mesh[] {
+  // **Matched on the foot, not on the canopy's drawn centre.** `FoliageOccluder`
+  // publishes both since the trees started leaning: `x`/`z` is where the widest
+  // blob is *drawn* (slid outward along the local up), `footX`/`footZ` is the
+  // column the tree stands in — which is exactly what `ClimbableTreeSeed`
+  // records. Measured on the canonical seed, the two are 1.67 m apart at a
+  // radius of 80 m and 2.94 m at 176 m, so the old `x`/`z` match inside a 0.05 m
+  // tolerance found nothing at all and this check died on tree 0.
   let occluder: FoliageOccluder | null = null;
   let nearest = 0.05;
   for (const candidate of occluders) {
-    const distance = Math.hypot(candidate.x - tree.x, candidate.z - tree.z);
+    const distance = Math.hypot(candidate.footX - tree.x, candidate.footZ - tree.z);
     if (distance < nearest) {
       occluder = candidate;
       nearest = distance;
@@ -288,22 +369,47 @@ function poseKidAt(
   /** Re-creates the retired head-and-arm-only climb, for `--thin-canopy`. */
   hideBody = false,
 ): ReturnType<typeof createKid> {
-  const perch = tree.trunkRadius + CLIMB_EDGE_GAP;
+  // **Posed through the game's own `climbPose`**, not beside it. This used to
+  // set the perch here — `tree.x + sin(bearing) * (trunkRadius +
+  // CLIMB_EDGE_GAP)`, at `canopyTopY - KID_HEAD_HEIGHT + CLIMB_PEEK_LIFT` — a
+  // faithful copy while both were flat, and wrong the moment `climbPose` began
+  // leaning onto the sphere. The copy left her in the tree's flat column while
+  // the canopy she is climbing into was drawn up to 2.94 m further out, so this
+  // check reported **100.0% hand visible with no blocker at all on all 46
+  // trees**: there was simply no foliage anywhere near her to block anything.
+  //
+  // The hoist rides in the lift for the same reason the game puts it there —
+  // it is a height above the canopy, and out here that height leans.
+  const pose = climbPose(
+    tree,
+    tree.x + Math.sin(bearing) * 10,
+    tree.z + Math.cos(bearing) * 10,
+    KID_HEAD_HEIGHT,
+    'peek',
+    0,
+    bearing + Math.PI,
+    (liftOverride ?? CLIMB_PEEK_LIFT) + WAVE_RISE * wave,
+  );
   const kid = createKid();
   applyRidePose({ root: kid.root, body: kid.body, head: kid.head, ...kid.limbs }, wave, elapsed);
   if (armOverride) {
     kid.limbs.rightArm.rotation.x = armOverride.x;
     kid.limbs.rightArm.rotation.z = armOverride.z;
   }
-  kid.root.position.set(
-    tree.x + Math.sin(bearing) * perch,
-    tree.canopyTopY - KID_HEAD_HEIGHT + (liftOverride ?? CLIMB_PEEK_LIFT) + WAVE_RISE * wave,
-    tree.z + Math.cos(bearing) * perch,
-  );
+  kid.root.position.set(pose.x, pose.y, pose.z);
+  eyeForFocus(_viewFocus.set(pose.x, pose.y, pose.z), offset, _viewEye, VIEW_UP);
+  VIEW_DIR.subVectors(_viewFocus, _viewEye).normalize();
   // At rest she holds the facing she arrived with (facing away from the trunk);
   // the wave turns her to camera. Both are part of what the eye sees change.
-  const peekFacing = bearing + Math.PI;
-  kid.root.rotation.y = wave > 0.5 ? CAMERA_FACING : peekFacing;
+  //
+  // **Stood on the ground she is actually on**, through the same `faceOnGround`
+  // `Player.animate` uses — a child up a tree at the park's edge leans with her
+  // tree, and a kid left plumb here would be measured at an angle the game does
+  // not draw her at.
+  faceOnGround(
+    kid.root,
+    wave > 0.5 ? waveFacingYaw() : pose.facing,
+  );
   // Nothing is hidden. `TreeClimbing` used to switch off everything but the
   // head and the waving arm, and this loop matched it part for part; the whole
   // child is drawn up a tree now, so hiding anything here would measure a pose
@@ -438,10 +544,11 @@ function rasterise(
   liftOverride: number | null = null,
   hideBody = false,
 ): Picture {
-  const right = new Vector3().crossVectors(VIEW_DIR, new Vector3(0, 1, 0)).normalize();
-  const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const foliage = foliageFor(index, tree);
   const kid = poseKidAt(tree, bearing, elapsed, override, wave, liftOverride, hideBody);
+  // After posing: the view is hers. Screen axes from the rig's own up.
+  const right = new Vector3().crossVectors(VIEW_DIR, VIEW_UP).normalize();
+  const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const arm = new Set(collectMeshes(kid.limbs.rightArm, new Group()));
   const head = new Set(collectMeshes(kid.head, new Group()));
   const all = [...collectMeshes(kid.root, new Group()), ...foliage];
@@ -452,7 +559,8 @@ function rasterise(
   } else {
     // World-anchored on the tree top: the window does not move with her, so
     // any shift of her silhouette here is real motion against the scenery.
-    centre.set(tree.x, tree.canopyTopY, tree.z);
+    // Leant onto the sphere as the canopy itself is, or the window sits beside her.
+    placeOnSphere(centre.set(tree.x, tree.canopyTopY, tree.z), 0, centre, new Quaternion());
   }
 
   const halfW = 30;
@@ -577,10 +685,10 @@ function armDeltaPixels(
   bearing: number,
   elapsed: number,
 ): number {
-  const right = new Vector3().crossVectors(VIEW_DIR, new Vector3(0, 1, 0)).normalize();
-  const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const foliage = foliageFor(index, tree);
   const kid = poseKidAt(tree, bearing, elapsed, null, 1);
+  const right = new Vector3().crossVectors(VIEW_DIR, VIEW_UP).normalize();
+  const up = new Vector3().crossVectors(right, VIEW_DIR).normalize();
   const armMeshes = new Set(collectMeshes(kid.limbs.rightArm, new Group()));
   const withArm = [...collectMeshes(kid.root, new Group()), ...foliage];
   const withoutArm = withArm.filter((mesh) => !armMeshes.has(mesh));
@@ -589,6 +697,7 @@ function armDeltaPixels(
   // wide enough that an arm appearing anywhere around her is inside it. This is
   // the "whole screen, not a crop" part.
   const centre = new Vector3(tree.x, tree.canopyTopY + CLIMB_PEEK_LIFT * 0.5, tree.z);
+  placeOnSphere(centre, 0, centre, new Quaternion());
   const half = 44;
   const raycaster = new Raycaster();
   raycaster.far = RAY_BACKOFF * 2;
@@ -727,13 +836,21 @@ if (process.argv.includes('--picture')) {
       ? { x: Number(process.argv[argX + 1]), z: Number(process.argv[argZ + 1]) }
       : null;
 
-  const tree = trees[0];
+  // `--tree N --bearing DEG` pick the shot, and draw it head-anchored exactly as
+  // the body clause rasterises it; with neither, tree 0 at 45° tree-anchored.
+  const treeArg = process.argv.indexOf('--tree');
+  const bearingArg = process.argv.indexOf('--bearing');
+  const treeIndex = treeArg > 0 ? Number(process.argv[treeArg + 1]) : 0;
+  const tree = trees[treeIndex];
   if (!tree) process.exit(1);
   const liftArg = process.argv.indexOf('--lift');
   const liftOverride = liftArg > 0 ? Number(process.argv[liftArg + 1]) : null;
-  const picture = rasterise(tree, 0, override, 1, 'tree', Math.PI * 0.25, 0, liftOverride);
+  const picture =
+    bearingArg > 0
+      ? rasterise(tree, treeIndex, override, 1, 'head', (Number(process.argv[bearingArg + 1]) * Math.PI) / 180, 0, liftOverride)
+      : rasterise(tree, treeIndex, override, 1, 'tree', Math.PI * 0.25, 0, liftOverride);
   console.log(
-    `\nTree 0 at play scale (kid = ${FIGURE_PX}px tall, ` +
+    `\nTree ${treeIndex} at play scale (kid = ${FIGURE_PX}px tall, ` +
       `${(UNITS_PER_PIXEL * 1000).toFixed(0)} mm/px)` +
       `${override ? `, arm override x=${override.x} z=${override.z}` : ', shipped pose'}.` +
       '\nH = waving arm, # = head, + = other body, . = leaves',
@@ -949,24 +1066,58 @@ if (worstModelError > 0.01) {
 // twice a cycle and leans off it in between; both are wanted, so both are
 // measured — the best says she is genuinely aimed at you, the worst says the
 // rock never throws her wildly off.
-let bestAim = Infinity;
+//
+// **On every real tree, posed by the game's own `climbPose` and
+// `waveFacingYaw`, under the camera `eyeForFocus` builds over her.** This used
+// to be one upright kid at the origin looking down the flat offset — a picture
+// in which every choice of facing that agrees at the park's centre reads
+// identically, so a clause named for where she faces could not tell two facings
+// apart. Out on the sphere they differ by the ground's lean, and this is the
+// clause that has to see it.
+//
+// Per tree and approach: the best over the rock (does she pass through the
+// camera?) and the worst (does the rock throw her off it?). Reported as the
+// worst tree for each.
+const AIM_BEARINGS = 4;
+let bestAim = 0;
+let bestAimAt = '';
 let worstAim = 0;
-for (let r = 0; r < 16; r += 1) {
-  const elapsed = (r / 16) * ((Math.PI * 2) / CLIMB_WAVE_LEAN_RATE);
-  const off = degreesOff(gazeOf(wavingKid(elapsed)));
-  bestAim = Math.min(bestAim, off);
-  worstAim = Math.max(worstAim, off);
+let worstAimAt = '';
+const toCameraHere = new Vector3();
+for (const [index, tree] of trees.entries()) {
+  for (let b = 0; b < AIM_BEARINGS; b += 1) {
+    const bearing = (b / AIM_BEARINGS) * Math.PI * 2;
+    let best = Infinity;
+    for (let r = 0; r < 16; r += 1) {
+      const elapsed = (r / 16) * ((Math.PI * 2) / CLIMB_WAVE_LEAN_RATE);
+      const kid = poseKidAt(tree, bearing, elapsed, null, 1);
+      toCameraHere.copy(VIEW_DIR).negate();
+      const off = Math.acos(Math.min(1, gazeOf(kid).dot(toCameraHere))) / DEG;
+      best = Math.min(best, off);
+      if (off > worstAim) {
+        worstAim = off;
+        worstAimAt = `tree ${index} @${((bearing * 180) / Math.PI).toFixed(0)}°`;
+      }
+    }
+    if (best > bestAim) {
+      bestAim = best;
+      bestAimAt = `tree ${index} @${((bearing * 180) / Math.PI).toFixed(0)}°`;
+    }
+  }
 }
 
 /**
  * How near dead-on she must get at the rock's crossing.
  *
  * She measures 0.00° — the angle is solved, not tuned, so anything but ~0 means
- * the derivation is broken rather than the pose being slightly off. 1.5° is
- * loose enough to survive floating point and a nudge to the rig, and nowhere
- * near loose enough to pass the 40.14° she scored before this existed.
+ * the derivation is broken rather than the pose being slightly off. It was
+ * 1.5°, set while this measured one upright kid at the origin; posed on the
+ * real trees it also has to catch a facing solved in the wrong frame, and the
+ * one that was briefly shipped (`yawForBearing`, a flat-frame bearing) reads
+ * **1.43°** at scale 1 — inside the old bar, and growing with the ground's lean.
+ * 0.5° still leaves floating point a thousand times its due.
  */
-const REQUIRED_AIM_DEGREES = 1.5;
+const REQUIRED_AIM_DEGREES = 0.5;
 
 /**
  * And how far the rock may then swing her off it.
@@ -979,8 +1130,9 @@ const ALLOWED_ROCK_SWING_DEGREES = 12;
 
 const wasOff = degreesOff(gazeOf(wavingKid(0, 0)));
 console.log(
-  `  aim: her gaze passes ${bestAim.toFixed(2)}° from the camera at the rock's crossing ` +
-    `(needs ${REQUIRED_AIM_DEGREES}°), and never more than ${worstAim.toFixed(2)}° off it ` +
+  `  aim (${trees.length} trees x ${AIM_BEARINGS} approaches, posed in place): her gaze passes within ` +
+    `${bestAim.toFixed(2)}° of the camera at the rock's crossing on the worst tree (${bestAimAt}) ` +
+    `(needs ${REQUIRED_AIM_DEGREES}°), and never more than ${worstAim.toFixed(2)}° off it (${worstAimAt}) ` +
     `(allowed ${ALLOWED_ROCK_SWING_DEGREES}°). With no head pitch at all it would be ` +
     `${wasOff.toFixed(2)}°.`,
 );

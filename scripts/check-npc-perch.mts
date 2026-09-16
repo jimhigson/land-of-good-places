@@ -44,10 +44,12 @@
  * question per check, and neither of the two can quietly stop asking its own.
  */
 import './headless-canvas.mjs';
-import { Object3D, Vector3 } from 'three';
+import { Object3D, Quaternion, Vector3 } from 'three';
+import { placeOnSphere, terrainHeight, upAt } from '../src/world/terrain.ts';
 import { buildHeadlessPark } from './park-harness.mts';
 import { CLIMB_PEEK_LIFT, TreeClimbing } from '../src/world/TreeClimbing.ts';
 import { WanderDriver } from '../src/entities/npc/wanderDriver.ts';
+import { Geo } from '../src/world/geo/index.ts';
 import type { NpcCharacter } from '../src/entities/npc/NpcCharacter.ts';
 import type { ClimbableTreeSeed, FoliageOccluder } from '../src/world/Scenery.ts';
 import type { FrameContext } from '../src/core/types.ts';
@@ -172,30 +174,106 @@ if (climbers.length === 0) {
  * about a number they both got from the same place, and would still pass if
  * both were wrong together.
  */
-function canopyBandOf(tree: ClimbableTreeSeed): { top: number; bottom: number } | null {
+
+/**
+ * **The one axis every height on this page is measured along: the tree's own up.**
+ *
+ * Issue #642. `clearance` was `headY − band.top`, a world-`y` difference between
+ * a drawn (leant) head and a canopy band read off the *flat* part positions — a
+ * `y` standing in for a distance, in two different frames. It agreed to 0.03 m
+ * at the park's centre and had the wrong sign at its edge. Both sides are now
+ * heights along this vector: the head as drawn, dotted with it, and each canopy
+ * blob as drawn (`placeOnSphere`, exactly as `makeInstanced` composes it) with
+ * the ellipsoid's own extent along it.
+ *
+ * Set per tree by {@link canopyBandOf}, and read by {@link perchHeadY} for the
+ * same tree. ({@link drawnDropBelowHead} already measures along the head's own
+ * up, from #620.)
+ */
+const treeUp = new Vector3();
+const _blobCentre = new Vector3();
+const _blobSpin = new Quaternion();
+
+/** Heights along {@link treeUp}. */
+const alongUp = (point: Readonly<Vector3>): number => point.dot(treeUp);
+
+
+/**
+ * Which seed claimed which occluder. Two seeds cannot share one canopy, so if
+ * that ever happens the run fails rather than reporting on a fiction — the
+ * check green while measuring a neighbour's tree. Kept from #620's matcher; the
+ * matcher itself is now `footX`/`footZ` (see below).
+ *
+ * To arm-test it, make the matcher take whatever it last looked at
+ * (`if (distance < nearest)` -> `if (true)`).
+ */
+const claimedBy = new Map<FoliageOccluder, number>();
+
+function canopyBandOf(tree: ClimbableTreeSeed, index: number): { top: number; bottom: number } | null {
+  upAt(tree.x, terrainHeight(tree.x, tree.z), tree.z, treeUp);
+  // **Matched on the foot, not on the canopy's drawn centre.** `x`/`z` is where
+  // the widest blob is *drawn*, which `placeOnSphere` slides outward along the
+  // local up; `footX`/`footZ` is the column the tree stands in, which is what
+  // `ClimbableTreeSeed` records, and `Scenery` owns it. This replaces #620's
+  // bearing matcher (tangential 0.05 m, radial up to canopy height x sin lean),
+  // which answered the same question by reconstructing the lean the owner
+  // already records. Measured over all 46 trees at the time: on `footX`/`footZ`
+  // the worst distance is **0.000000 m** and all 46 claim a distinct occluder;
+  // on the drawn `x`/`z` it was **3.2942 m**.
   let occluder: FoliageOccluder | null = null;
   let nearest = 0.05;
   for (const candidate of occluders) {
-    const distance = Math.hypot(candidate.x - tree.x, candidate.z - tree.z);
+    const distance = Math.hypot(candidate.footX - tree.x, candidate.footZ - tree.z);
     if (distance < nearest) {
       occluder = candidate;
       nearest = distance;
     }
   }
   if (!occluder) return null;
+  const alreadyClaimedBy = claimedBy.get(occluder);
+  if (alreadyClaimedBy !== undefined && alreadyClaimedBy !== index) {
+    console.error(
+      `check:npc-perch FAILED — trees ${alreadyClaimedBy} and ${index} both matched the same ` +
+        `foliage at (${occluder.x.toFixed(2)}, ${occluder.z.toFixed(2)}). The matcher ` +
+        `is matching across trees, so at least one row would be measured ` +
+        `against a canopy that is not its own.`,
+    );
+    process.exit(1);
+  }
+  claimedBy.set(occluder, index);
 
   let top = -Infinity;
   let bottom = Infinity;
   for (const part of occluder.parts) {
     if (part.kind === 'trunk') continue;
-    top = Math.max(top, part.position.y + part.scale.y);
-    bottom = Math.min(bottom, part.position.y - part.scale.y);
+    placeOnSphere(part.position, part.rotationY, _blobCentre, _blobSpin);
+    // Half-extent of the drawn ellipsoid along `treeUp`: |S·Rᵀ·u|.
+    const local = treeUp.clone().applyQuaternion(_blobSpin.clone().invert());
+    const extent = Math.hypot(local.x * part.scale.x, local.y * part.scale.y, local.z * part.scale.z);
+    top = Math.max(top, alongUp(_blobCentre) + extent);
+    bottom = Math.min(bottom, alongUp(_blobCentre) - extent);
   }
   return top === -Infinity ? null : { top, bottom };
 }
 
 /**
- * **How far below the head an NPC climber is actually drawn**, in metres.
+ * **How far below the head an NPC climber is actually drawn**, in metres,
+ * measured **along the local up** rather than along world `+Y`.
+ *
+ * That distinction is the whole of the second bug this check was carrying. It
+ * used to return `headY - lowest`: a difference of two world `y` values, which
+ * is the body's extent *projected onto the world vertical*. A child standing on
+ * the sphere leans with the ground, so her body's real length reads short by
+ * `cos(lean)`:
+ *
+ *   tree 45, 179.2 m out, ground lean 54.5 deg, cos = 0.580
+ *   measured along world +Y: 0.64 m   -> FAILED, "it is a floating head"
+ *   measured along her own up: 1.10 m -> comfortably over the 0.9 m required
+ *
+ * She was never a floating head. The check was measuring a leaning body with a
+ * plumb line, and it only ever fired at the park's edge, where the lean is
+ * biggest and nothing else looks wrong — which is the exact signature
+ * `RADIAL-INVENTORY.md` catalogues ~95 times.
  *
  * The NPC half of the body guard. `check:climb-wave` measures the *player's*
  * body in pixels from the play camera; this is the same question asked of the
@@ -212,16 +290,22 @@ function canopyBandOf(tree: ClimbableTreeSeed): { top: number; bottom: number } 
  * Returns the drop from the head joint to the lowest drawn part. Head-only
  * gives ~0; a whole child gives most of {@link NpcAvatar.headBaseY}.
  */
-function drawnDropBelowHead(character: NpcCharacter, headY: number): number {
+function drawnDropBelowHead(character: NpcCharacter, head: Vector3): number {
   const { avatar } = character;
   const member = avatar.member;
   const scratch = new Vector3();
-  let lowest = headY;
+  // How far below the head a point is, measured **along the local up** — which
+  // is the direction the child's body actually runs in. See the docblock above
+  // for why the world-Y version of this was wrong by 1/cos(lean).
+  const up = Geo.fromWorldVector(head).up(new Vector3());
+  const along = new Vector3();
+  const dropOf = (point: Vector3): number => along.copy(head).sub(point).dot(up);
+  let drop = 0;
 
   if (member) {
     member.proxies.forEach((proxy, index) => {
       if (!member.shown[index]) return;
-      lowest = Math.min(lowest, proxy.getWorldPosition(scratch).y);
+      drop = Math.max(drop, dropOf(proxy.getWorldPosition(scratch)));
     });
   } else {
     avatar.rig.root.traverse((node) => {
@@ -230,10 +314,10 @@ function drawnDropBelowHead(character: NpcCharacter, headY: number): number {
         if (!current.visible) return;
         current = current.parent;
       }
-      lowest = Math.min(lowest, node.getWorldPosition(scratch).y);
+      drop = Math.max(drop, dropOf(node.getWorldPosition(scratch)));
     });
   }
-  return headY - lowest;
+  return drop;
 }
 
 /** Set by {@link perchHeadY}, so the body measurement rides along with it. */
@@ -291,7 +375,8 @@ function perchHeadY(character: NpcCharacter, tree: ClimbableTreeSeed, bearing: n
 
   const rig = character.avatar.rig;
   rig.root.updateMatrixWorld(true);
-  const headY = rig.head.getWorldPosition(new Vector3()).y;
+  const headPoint = rig.head.getWorldPosition(new Vector3());
+  const headY = alongUp(headPoint);
   if (hideBodyMutation) {
     const member = character.avatar.member;
     const head = character.avatar.rig.head;
@@ -305,7 +390,7 @@ function perchHeadY(character: NpcCharacter, tree: ClimbableTreeSeed, bearing: n
       }
     }
   }
-  lastDrawnDrop = drawnDropBelowHead(character, headY);
+  lastDrawnDrop = drawnDropBelowHead(character, headPoint);
 
   // Put the child back on the ground so the next tree starts clean.
   for (const name of ['climbing', 'climbTree', 'climbGroundSpot', 'climbPhase', 'climbProgress']) {
@@ -328,7 +413,7 @@ interface Row {
 
 const rows: Row[] = [];
 for (const [index, tree] of trees.entries()) {
-  const band = canopyBandOf(tree);
+  const band = canopyBandOf(tree, index);
   if (!band) {
     console.error(`check:npc-perch FAILED — climbable tree ${index} has no foliage to measure.`);
     process.exit(1);
@@ -383,9 +468,13 @@ console.log(
 // climbing NPC she picks up no hop term, because `Player.update`'s riding branch
 // passes a hop height of 0 into `animate`.
 const playerRows = trees.map((tree, index) => {
-  const band = canopyBandOf(tree);
+  const band = canopyBandOf(tree, index);
   const canopyHeight = band ? band.top - band.bottom : 1;
-  const clearance = band ? tree.canopyTopY + CLIMB_PEEK_LIFT - band.top : 0;
+  // Her perch top, drawn the way `climbPose` draws it — a height above the tree's
+  // ground, leant — and measured along the same axis as the band.
+  const perch = new Vector3();
+  if (band) placeOnSphere({ x: tree.x, y: tree.canopyTopY + CLIMB_PEEK_LIFT, z: tree.z }, 0, perch, new Quaternion());
+  const clearance = band ? alongUp(perch) - band.top : 0;
   return { index, clearance, fraction: clearance / canopyHeight };
 });
 const playerLow = Math.min(...playerRows.map((r) => r.fraction));

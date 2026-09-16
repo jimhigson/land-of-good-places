@@ -1,7 +1,7 @@
 import type { ParkBoundary } from './boundary';
 import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
-import type { LevelConnector } from './building/surfaces';
+import { stepReferenceFor, withinStep, type LevelConnector } from './building/surfaces';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
@@ -207,6 +207,8 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  * the long way about.
  */
 const CELL = 0.5;
+/** The lattice pitch, for instruments that walk the grid (`measure-walk-reach.mts`). */
+export const NAV_CELL_SIZE = CELL;
 const INVERSE_CELL = 1 / CELL;
 
 /** Metres of lattice built beyond the soft play boundary, for elbow room. */
@@ -821,10 +823,13 @@ export class NavGrid {
         // pass above.
         const onBridge = this.bridgeCovers(x, z);
         for (let level = 1; !onBridge && level < MAX_LEVELS_PER_CELL; level += 1) {
-          const next = sample(x, z, cursor - MAX_STEP - LEVEL_EPSILON);
+          // The reference whose reach stops just under `cursor` — asked of the
+          // reach's owner, because that is no longer `cursor - MAX_STEP` once
+          // the step is measured along the local up (#643).
+          const next = sample(x, z, stepReferenceFor(x, z, cursor - LEVEL_EPSILON));
           if (next >= cursor - LEVEL_EPSILON) break;
           cursor = next;
-          if (next < kept - MAX_STEP) {
+          if (!withinStep(x, kept, z, x, next, z, MAX_STEP)) {
             this.nodeHeight[nodes] = next;
             this.nodeCell[nodes] = index;
             kept = next;
@@ -908,7 +913,7 @@ export class NavGrid {
     if (cell < 0 || this.blocked[cell] === 1) return -1;
     const node = this.nodeNearest(cell, y);
     if (node < 0) return -1;
-    return Math.abs((this.nodeHeight[node] ?? 0) - y) <= MAX_LEVEL_GAP ? node : -1;
+    return withinStep(x, y, z, x, this.nodeHeight[node] ?? 0, z, MAX_LEVEL_GAP) ? node : -1;
   }
 
   /** The node of `cell` whose surface is nearest `y`, or -1 for a blocked cell. */
@@ -1046,7 +1051,6 @@ export class NavGrid {
       const cell = this.nodeCell[node] ?? 0;
       const cx = cell % this.cells;
       const cz = (cell - cx) / this.cells;
-      const nodeHeight = this.nodeHeight[node] ?? 0;
       const nodeCost = this.gScore[node] ?? 0;
       const onBand = this.hopBand[cell] === 1;
 
@@ -1097,7 +1101,7 @@ export class NavGrid {
         const from = this.levelStart[neighbourCell] ?? 0;
         const to = this.levelStart[neighbourCell + 1] ?? 0;
         for (let neighbour = from; neighbour < to; neighbour += 1) {
-          if (Math.abs((this.nodeHeight[neighbour] ?? 0) - nodeHeight) > rise) continue;
+          if (!this.stepAdmits(node, neighbour, rise)) continue;
           this.relax(node, neighbour, nodeCost + step, 0, goalX, goalZ, goalY);
         }
       }
@@ -1111,6 +1115,29 @@ export class NavGrid {
     }
 
     return this.searchBestNode;
+  }
+
+  /**
+   * Can a foot go between these two nodes within `rise`? Asked of
+   * `surfaces.ts`'s `withinStep`, the same owner the physics' reach agrees
+   * with, so the lattice never routes her up a step the sampler refuses (#643).
+   * Also what `scripts/measure-walk-reach.mts` asks, so its nav-versus-physics
+   * count is about this grid rather than a copy of its rule.
+   */
+  private stepAdmits(a: number, b: number, rise: number = MAX_STEP): boolean {
+    const cellA = this.nodeCell[a] ?? 0;
+    const cellB = this.nodeCell[b] ?? 0;
+    const axc = cellA % this.cells;
+    const bxc = cellB % this.cells;
+    return withinStep(
+      this.originX + axc * CELL,
+      this.nodeHeight[a] ?? 0,
+      this.originZ + ((cellA - axc) / this.cells) * CELL,
+      this.originX + bxc * CELL,
+      this.nodeHeight[b] ?? 0,
+      this.originZ + ((cellB - bxc) / this.cells) * CELL,
+      rise,
+    );
   }
 
   /** One A* relaxation, tracking the best fallback ending as it goes. */
@@ -1384,6 +1411,8 @@ export class NavGrid {
     // the answer is directly comparable with the search's own g-scores.
     const slice = distance / steps / CELL;
     let previousHeight = aHeight;
+    let previousX = ax;
+    let previousZ = az;
     let cost = 0;
 
     for (let i = 1; i <= steps; i += 1) {
@@ -1393,8 +1422,12 @@ export class NavGrid {
       const node = this.nodeNearest(cell, previousHeight);
       if (node < 0) return -1;
       const height = this.nodeHeight[node] ?? 0;
-      if (Math.abs(height - previousHeight) > MAX_STEP) return -1;
+      const px = ax + (bx - ax) * t;
+      const pz = az + (bz - az) * t;
+      if (!withinStep(previousX, previousHeight, previousZ, px, height, pz, MAX_STEP)) return -1;
       previousHeight = height;
+      previousX = px;
+      previousZ = pz;
       cost += slice * this.costOf(cell);
     }
     return cost;

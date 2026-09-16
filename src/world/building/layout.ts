@@ -1,3 +1,4 @@
+import { Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
 import { placedEntry } from '../parkLayout';
 import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
@@ -38,7 +39,8 @@ import {
 } from '../../core/constants';
 import { CASTLE_HALL, CASTLE_MALL, CASTLE_ROOF } from './floors';
 import { TAP_FINGER_METRES } from '../tapSpacing';
-import { terrainHeight } from '../terrain';
+import { terrainHeight, upAt } from '../terrain';
+import { Frame, Geo } from '../geo';
 
 /**
  * The floor plan of the big building, as data.
@@ -80,7 +82,7 @@ import { terrainHeight } from '../terrain';
 // --------------------------------------------------------------- geometry
 
 /** Ground-floor deck height in world units. Deck 0 is level; the site is not. */
-export const BUILDING_BASE_Y = highestTerrainUnderFootprint() + BUILDING_PLINTH;
+export const BUILDING_BASE_Y = deckClearanceOverFootprint() + BUILDING_PLINTH;
 
 /**
  * The interior's own ground, a little below its ground-floor deck.
@@ -169,24 +171,109 @@ export function onPlate(authored: number): number {
   return authored * INTERIOR_PLATE_SHRINK;
 }
 
-/** Facade-local (the shell in the garden) -> world on the ground plane. */
+/**
+ * **The one transform the castle's shell stands at — `Building.ts` places the
+ * shell from this, so there is nothing for it to disagree with.**
+ *
+ * Stood on the ground under the facade's centre and lifted to `BUILDING_BASE_Y`
+ * **along the local up** — `Geo.fromWorld(x, ground, z).lift(h)`, the form
+ * `test/geo` proves equal to `placeOnSphere`. An earlier version built it as
+ * `Geo.fromWorld(x, BUILDING_BASE_Y, z)`, which reads the base height as a
+ * literal world `y` rather than a height up the leaning local vertical, while
+ * the shell was still placed separately through `standInPlot`/`placeOnSphere`.
+ * Measured against the drawn castle's `matrixWorld`: **6.82 cm / 3.1e-4 rad on
+ * the canonical seed, 8.73 cm / 3.9e-4 rad on seed 24** — the window cut that
+ * far from the stone it sits in. `check:castle-window` now asserts the drawn
+ * shell equals this frame.
+ *
+ * Use {@link worldToCastle} and {@link castleToWorld} for anything that asks
+ * where a **world** point is relative to the castle. The two flat formulas they
+ * replace — `world y = BUILDING_BASE_Y + localY` and `lx = x −
+ * BUILDING_CENTRE_X` — described a castle standing plumb; its courtyard floor
+ * in fact spans **6.44 m of world `y`** across its footprint at scale 1, and the
+ * Sky Cruiser's loop was solved through a level slice of a leaning building.
+ */
+export const CASTLE_FRAME = /* @__PURE__ */ Frame.fromBearing(
+  Geo.fromWorld(
+    BUILDING_CENTRE_X,
+    terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z),
+    BUILDING_CENTRE_Z,
+  ).lift(BUILDING_BASE_Y - terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z)),
+  0,
+);
+
+/** A castle-local point, in world space. The inverse of {@link worldToCastle}. */
+export function castleToWorld(local: Readonly<Vector3>, target: Vector3): Vector3 {
+  return CASTLE_FRAME.toWorld(local, target);
+}
+
+/** A world point, in the castle's own axes. The inverse of {@link castleToWorld}. */
+export function worldToCastle(world: Readonly<Vector3>, target: Vector3): Vector3 {
+  return CASTLE_FRAME.toLocal(world, target);
+}
+
+/**
+ * Facade-local -> world **on the plan alone**, ignoring the castle's lean.
+ *
+ * Kept because every caller is a ground-plane question — a collision wall, an
+ * interact zone's stand point, an NPC's landing spot — where the answer is a
+ * pair of world `(x, z)` and there is nowhere to put the height the tilt would
+ * produce. At this castle's 12.44° lean a point 9 m out is displaced about
+ * 0.21 m by that, which is inside the slack those call sites already carry.
+ *
+ * **Do not reach for these for anything with a height in it.** Use
+ * {@link castleToWorld} / {@link worldToCastle}, which are the inverse of the
+ * transform the shell is genuinely standing at; these two are not, and cannot
+ * be, because a scalar cannot carry a rotation.
+ */
 export function facadeX(localX: number): number {
   return BUILDING_CENTRE_X + localX;
 }
 
+/** See {@link facadeX}. */
 export function facadeZ(localZ: number): number {
   return BUILDING_CENTRE_Z + localZ;
 }
 
-function highestTerrainUnderFootprint(): number {
-  let highest = -Infinity;
+/**
+ * How high the castle's ground-floor deck has to sit so that no corner of it is
+ * buried in the grass — measured **in the deck's own tilted frame**.
+ *
+ * It used to be "the highest terrain anywhere under the footprint", which was
+ * right while the deck was a level plane on a nearly level park: the worst
+ * corner was simply the highest ground. Since the deck leans to the local
+ * surface normal with everything else outdoors, that rule **double-counts the
+ * sphere's own fall** — the ground drops 4 m across a 24 m footprint at this
+ * distance from the park's centre, and every millimetre of that drop is already
+ * taken out by the tilt. Taking the maximum anyway left the castle hanging
+ * roughly two metres over the grass, which is what Jim saw: *"the castle and
+ * hotel, and maybe some others are now floating in space above the earth."*
+ *
+ * So the question is asked against the deck rather than against world `+Y`. The
+ * deck is the plane through the footprint's centre with the local up as its
+ * normal; `residual` is how far the real ground at a sample stands **proud of
+ * that plane**, which on a bare cap is zero everywhere and in practice is just
+ * the rolling waves. The largest residual is what the deck must clear.
+ *
+ * The samples are of the terrain that gets drawn, not of the rule that draws
+ * it, and the centre is included, so the answer can never be below the ground
+ * at the point the building is anchored to.
+ */
+function deckClearanceOverFootprint(): number {
+  const centre = terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z);
+  const up = upAt(BUILDING_CENTRE_X, centre, BUILDING_CENTRE_Z, new Vector3());
+  let worst = 0;
   for (let x = -BUILDING_HALF_X; x <= BUILDING_HALF_X; x += 1.5) {
     for (let z = -BUILDING_HALF_Z; z <= BUILDING_HALF_Z; z += 1.5) {
-      const h = terrainHeight(BUILDING_CENTRE_X + x, BUILDING_CENTRE_Z + z);
-      if (h > highest) highest = h;
+      const ground = terrainHeight(BUILDING_CENTRE_X + x, BUILDING_CENTRE_Z + z);
+      // Where the tilted deck sits over this sample: the plane through the
+      // centre with `up` as its normal, solved for y.
+      const deck = centre - (up.x * x + up.z * z) / up.y;
+      const residual = ground - deck;
+      if (residual > worst) worst = residual;
     }
   }
-  return highest;
+  return centre + worst;
 }
 
 // ------------------------------------------------------------------ holes
@@ -312,8 +399,42 @@ export const CASTLE_MERLON_HEIGHT = 1.05;
 
 /**
  * The top of the facade's stonework, facade-local — what the ginormous slide
- * has to clear, and what `test/procgen`'s `castleMasonryTopY` measures off the
+ * has to clear, and what `test/procgen`'s `castleMasonryTopRadius` measures off the
  * built mesh.
+ *
+ * **`test/procgen` now asserts this equality rather than asserting it in
+ * prose** — `theGinormousSlideLeavesOverTheBattlements` takes the highest
+ * masonry vertex in the built park, expresses it in the `building-facade`
+ * group's own frame, and requires it to be this number. Measured: **9.8500**
+ * against 9.85, on the canonical seed. That is the only check in this area
+ * that proves the *value* rather than the frame, and it earns its place —
+ * see below.
+ *
+ * ## The first draft of that note was wrong, which is why the check exists
+ *
+ * It claimed this constant was corroborated by a built measurement of
+ * **9.770 m** (radial). It is not, and the agreement was a coincidence: 9.770
+ * is a vertex of **`castle-wall-lintel`**, a band built from `WINDOW_HEAD_Y`
+ * to {@link CASTLE_WALL_HEIGHT} = **8.8**, so it cannot corroborate a constant
+ * that includes the 1.05 m of merlon above it.
+ *
+ * The real top is **10.750 m** radial, on `crenellations`. The lintel had only
+ * become the tallest thing because the measurement walked `crenellations` —
+ * an `InstancedMesh` of 40 merlons — without its per-instance matrices,
+ * collapsing all forty onto the origin. `9.85 − 8.8 = 1.05`, and the
+ * under-report was **0.9806 m**: the missing metre *was* the merlons, and the
+ * near-agreement with 9.85 was the arithmetic of the bug, not evidence
+ * against it.
+ *
+ * Two things worth keeping from that:
+ *
+ * - **A number that agrees to a tenth of a metre is not corroboration until
+ *   you know which mesh it came off.** The check now names the mesh as well as
+ *   the height, precisely so this cannot recur.
+ * - The plumb-line measurement this whole issue was about gave **8.040 m**,
+ *   1.81 m below this constant, because the castle stands ~48 m out from the
+ *   park's origin and therefore *leans*. A facade-local number and a radial
+ *   one are comparable; a facade-local number and a world `y` are not.
  */
 export const CASTLE_MASONRY_TOP = CASTLE_WALL_HEIGHT + CASTLE_MERLON_HEIGHT;
 

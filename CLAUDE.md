@@ -539,6 +539,26 @@ nothing announced when it stopped being.
   `Infinity` and the threshold never fired.
 - **Quote the count off the screen, never the one you expected.** "All three
   tests fail" was reported while the terminal said `2 failed | 1 passed`.
+- **Count the same thing a second way, and account for every difference.** A
+  new check matched **57 of 93** flat discs and said nothing about the other
+  36, because `-Math.PI / 2` parses as `(-Math.PI) / 2` — the minus binds to
+  `Math.PI`, not to the division — so stripping the sign at the outer level
+  matched every `Math.PI / 2` and no negative one. Among the 36 it could not
+  see was `art/models/tapMarker.ts`, which `RADIAL-INVENTORY.md` ranks as the
+  worst-felt defect in the game. **Nothing would have gone red**: the scan
+  would simply have returned less, on a plausible-looking baseline, and the
+  category would have been declared closed. It was caught only by re-counting
+  the same corpus with the old grep and refusing a smaller number without an
+  explanation. A second, dumber measurement of the same thing is the cheapest
+  control there is, and a scan that returns *fewer* findings than you expected
+  is a result to explain, never a result to accept.
+- **Run your new check against the bug you just fixed by hand.** The same check
+  then failed to catch a live, chain-failing defect **in its own repository**:
+  `headY - lowest` in `scripts/check-npc-perch.mts`, because the rule wanted a
+  `.y` on both sides and those are two plain identifiers. A `y` laundered
+  through a variable is still a `y`. If a rule cannot see the instance sitting
+  in the tree in front of it, it is decoration — so point it at the last thing
+  you repaired before believing it.
 
 ## The browser
 

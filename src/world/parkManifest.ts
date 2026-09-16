@@ -1,5 +1,6 @@
 import type { AnchorFootprint } from './anchors';
 import { resolveParkSeed } from './parkSeedPool';
+import { PARK_SURFACE_SCALE } from '../core/constants';
 
 /**
  * The park manifest — the single editable input to the layout generator.
@@ -136,7 +137,7 @@ export const BOUNDARY_CLEARANCE = 2.5;
  * middle legible (the plaza stays a plaza); a generous `max` is what lets
  * the solver use the park that now exists.
  */
-export const PARK_MANIFEST: readonly ManifestEntry[] = [
+const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
   // The fountain plaza: the park's social middle. Held near the centre so
   // the park stays legible to a six-year-old.
   {
@@ -359,3 +360,31 @@ export const PARK_MANIFEST: readonly ManifestEntry[] = [
     near: { id: 'fountain', min: 21.5, max: 25 },
   },
 ];
+
+/**
+ * The attractions, with every **band** scaled to the park the sphere actually
+ * has — see `PARK_SURFACE_SCALE`.
+ *
+ * A band says *where in the park* a thing belongs: the fountain in the middle,
+ * the castle a third of the way out, the little stalls anywhere. Those are
+ * proportions of the park, written as metres because for a long time the park
+ * was one fixed size. The moment `GARDEN_PLAY_RADIUS` started moving with the
+ * sphere they became a **second definition of how big the park is**, kept in
+ * step with the first by hand — this repo's commonest bug, and it failed
+ * exactly as that bug always does: measured on three seeds, the layout solver
+ * went *unsolvable in 240 restarts* on every one of them, because the whole
+ * manifest was still crowded into the middle 100 m of a 225 m park.
+ *
+ * **`footprint` and `boundingRadius` are deliberately not scaled.** They are
+ * how big the thing physically *is* — a castle is 19.3 m across whatever the
+ * park does — and scaling them would grow the buildings along with the lawn.
+ * Only "where does it go" is a proportion; "how big is it" is a fact.
+ */
+export const PARK_MANIFEST: readonly ManifestEntry[] = AUTHORED_MANIFEST.map((entry) => ({
+  ...entry,
+  band: {
+    min: entry.band.min * PARK_SURFACE_SCALE,
+    max: entry.band.max * PARK_SURFACE_SCALE,
+  },
+}));
+

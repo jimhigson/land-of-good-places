@@ -19,7 +19,7 @@ import { PALETTE } from '../core/palette';
 import { glowTexture } from '../core/textures';
 import { toonMaterial, outlineGeometry, inkTint } from '../art/style/materials';
 import { clamp01, smoothstep } from '../core/mathUtils';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, terrainHeight } from './terrain';
 import { distanceToPath, ROUTES, routeCurve } from './pathGraph';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
@@ -681,10 +681,11 @@ function offsetFromCurve(
 
 // ------------------------------------------------------------------ helpers
 
-const IDENTITY_QUATERNION = new Quaternion();
 const UNIT_SCALE = new Vector3(1, 1, 1);
 const scratchMatrix = new Matrix4();
 const scratchPosition = new Vector3();
+const scratchFlat = new Vector3();
+const scratchQuaternion = new Quaternion();
 
 /** One InstancedMesh, upright, at every lamp base plus a fixed Y offset. */
 function instanceAt(
@@ -696,8 +697,14 @@ function instanceAt(
 ): InstancedMesh {
   const mesh = new InstancedMesh(geometry, material, count);
   bases.forEach((base, index) => {
-    scratchPosition.set(base.x, base.y + yOffset, base.z);
-    scratchMatrix.compose(scratchPosition, IDENTITY_QUATERNION, UNIT_SCALE);
+    // "Upright" now means along the local up, so a lamp at the boundary leans
+    // away from the park's centre with the ground it is planted in rather than
+    // standing at an angle to it. Every piece of a lamp — pole, hood, bulb,
+    // finial — comes through here with its own `yOffset`, so the whole post
+    // leans as one piece: see `placeOnSphere`'s note on measuring from the foot.
+    scratchFlat.set(base.x, base.y + yOffset, base.z);
+    placeOnSphere(scratchFlat, 0, scratchPosition, scratchQuaternion);
+    scratchMatrix.compose(scratchPosition, scratchQuaternion, UNIT_SCALE);
     mesh.setMatrixAt(index, scratchMatrix);
   });
   mesh.instanceMatrix.needsUpdate = true;
@@ -716,8 +723,13 @@ function instanceCurl(
 ): InstancedMesh {
   const mesh = new InstancedMesh(geometry, material, count);
   bases.forEach((base, index) => {
-    scratchPosition.set(base.x, base.y + yOffset, base.z);
-    scratchMatrix.compose(scratchPosition, CURL_QUATERNION, UNIT_SCALE);
+    scratchFlat.set(base.x, base.y + yOffset, base.z);
+    placeOnSphere(scratchFlat, 0, scratchPosition, scratchQuaternion);
+    scratchMatrix.compose(
+      scratchPosition,
+      scratchQuaternion.multiply(CURL_QUATERNION),
+      UNIT_SCALE,
+    );
     mesh.setMatrixAt(index, scratchMatrix);
   });
   mesh.instanceMatrix.needsUpdate = true;

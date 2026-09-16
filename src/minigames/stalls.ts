@@ -3,7 +3,7 @@ import { PALETTE } from '../core/palette';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from '../world/Collision';
 import { pressZone, type InteractZone } from '../world/interact';
-import { terrainHeight } from '../world/terrain';
+import { standOnSphere, terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
 import { createDodgems } from './dodgems/Dodgems';
 import { createSpookyHouse } from './spookyHouse/SpookyHouse';
@@ -208,6 +208,11 @@ export class MiniGameStalls implements GameSystem {
       const prop = createStallProp(definition);
       prop.root.position.set(x, ground, z);
       prop.root.rotation.y = definition.facing;
+      // Counter, canopy, posts and sign are all children of this one root, so
+      // leaning the root is what keeps the booth a rigid object. The booth's
+      // collision (below) and its stand point stay in plain world (x, z) — the
+      // lean is what the child *sees*, not where she may walk.
+      standOnSphere(prop.root);
       this.group.add(prop.root);
       this.props.push(prop);
 

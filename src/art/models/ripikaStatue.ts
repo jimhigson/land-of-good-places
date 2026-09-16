@@ -85,10 +85,17 @@ const STONE_PALETTE: RipikaPalette = {
  * is already standing in". **That reasoning is wrong and the comment has been
  * corrected rather than quietly deleted, because it is a tempting mistake.**
  *
- * The camera is **orthographic** (`CAMERA_IS_ORTHOGRAPHIC`). An orthographic
- * projection has no parallax, so the occluded wedge is **fixed in world space**:
- * moving the camera changes whether that patch is on screen, not *what* is
- * hidden behind the statue. The player can therefore stand in it, and does.
+ * The rig never rotates and never changes its pitch, so the occluded wedge is
+ * **very nearly fixed in world space**: moving the camera changes whether that
+ * patch is on screen, not meaningfully *what* is hidden behind the statue. The
+ * player can therefore stand in it, and does.
+ *
+ * This used to be stated as an identity, on the park camera being orthographic
+ * — a projection with no parallax at all. It is perspective since 11 September
+ * 2026, so there is parallax now; at the rig's 90 m stand-back it is 0.64° per
+ * metre off the view axis, which shifts the wedge by centimetres over the
+ * plaza, not by the metres that would make the conclusion below wrong. The
+ * survey figures are unchanged.
  *
  * Surveyed on the built park at this height: a 2.12 m player is fully hidden
  * anywhere within **10.60 m** of the fountain centre — past the 9.4 m plaza

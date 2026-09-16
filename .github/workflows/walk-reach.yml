@@ -1,0 +1,51 @@
+name: Walk reach
+
+# `scripts/measure-walk-reach.mts` (#643): does `WalkSurfaces.sample`'s step-up
+# reach count along the local up, and does a sprinting child keep her footing on
+# a ramp far from the park's centre? Proved red on the pre-#643 sampler (584
+# honest climbs refused, 55 over-tall steps admitted, a 0.5 local ramp at
+# r = 140 m dropping her 13.7 m) and green on the radial one.
+#
+# Its own workflow for the same reason as `swept-bus.yml`: `checks.yml` is at
+# ~25 minutes against a 30-minute cap, and a job killed by `timeout-minutes`
+# reports as `cancelled`, not red. Measured locally at ~25 s (one park build
+# plus a synthetic sweep).
+#
+# **Not yet a required status check** — that is a repository setting only Jim
+# can add. **Do not rename this job**: required checks are matched by name.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: walk-reach-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  walk-reach:
+    name: Walk reach
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Measure the step-up reach against the planet
+        run: pnpm run check:walk-reach

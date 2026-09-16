@@ -37,8 +37,8 @@ import {
   entranceRoadClaims,
   entranceRoadSegments,
 } from '../src/world/entrance/roadCorridor.ts';
-import { ROAD_HALF_WIDTH } from '../src/world/entrance/road.ts';
 import type { Capsule, Claim } from '../src/boot/groundClaims.ts';
+import { FLOAT32_SLACK, collectRoadRibbons, measureRoadRibbons } from './road-ribbon-measure.mts';
 
 const fouls: string[] = [];
 const said: string[] = [];
@@ -123,7 +123,8 @@ if (notCorridor.length > 0) {
 }
 said.push(
   `the built park's registry holds ${roadClaims.length} corridor run(s) for "${ROAD_FEATURE}" ` +
-    '(two: the road turns a corner at the gate, and a capsule is a straight segment)',
+    '(one per pair of the arc\'s own stations, plus the gateway approach: a capsule is a ' +
+    'straight segment, and the kerb is a curve)',
 );
 
 // ---------------------------------------------------------------------------
@@ -142,7 +143,7 @@ said.push(
   // segment `i` because `entranceRoadClaims()` maps one to one over it. A
   // geometric guess quietly stops finding the spur the moment anything moves,
   // which is exactly when this probe matters most.
-  const spurIndex = entranceRoadSegments().findIndex((s) => s.name === 'entrance-road-gateway');
+  const spurIndex = entranceRoadSegments().findIndex((s) => s.name === 'entrance-gateway-path');
   const spurAtGeneration = claimedDuringGeneration[spurIndex]?.shape as Capsule | undefined;
   const spurAtBuild = roadClaims[spurIndex]?.shape as Capsule | undefined;
   if (!spurAtGeneration || !spurAtBuild) {
@@ -200,115 +201,53 @@ if (ownerKeys.length !== registryKeys.length || ownerKeys.some((k, i) => k !== r
       '    They must be the same call, not two definitions kept in step by hand',
   );
 } else {
-  said.push(`the registry's corridor is byte-identical to entranceRoadClaims(): ${ownerKeys.join('  ')}`);
+  // Summarised, not listed. The arc is sampled at its own station spacing, so
+  // this is 143 capsules on the canonical seed; printing them all buried every
+  // other line of this check's output. The equality above is over the whole
+  // list — what is printed is evidence of the shape of it, not the comparison.
+  said.push(
+    `the registry's corridor is byte-identical to entranceRoadClaims(), all ${ownerKeys.length} ` +
+      `run(s) — first ${ownerKeys[0]}, last ${ownerKeys[ownerKeys.length - 1]}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Probe 5: the owner's output IS the road that was drawn.
 //
 // Probe 4 proves the registry and the owner agree; on its own that would be
-// satisfied by an owner nothing draws from. This measures the **ribbon in the
-// scene**: its world-space extents, which are the centreline swept
-// `ROAD_HALF_WIDTH` either side.
+// satisfied by an owner nothing draws from. This measures the **ribbons in the
+// scene**, vertex by vertex, against the claims' own geometry.
 //
-// **The one tolerance in this file, and why it is not a fudge.** Mesh positions
-// are a `Float32Array`, so a metre value read back off geometry carries about
-// seven significant digits and cannot be compared byte-for-byte with the
-// owner's float64. The residual is reported on every run rather than merely
-// bounded, so a drift that grows shows up as a number changing long before it
-// crosses the threshold.
+// **It used to be a bounding-box comparison, and #498's curve ended that.**
+// When the road was two axis-aligned runs, "the claim is the ribbon" could be
+// settled by comparing four numbers. The bounding box of an arc is mostly
+// ground the arc does not hold, so on a curve that comparison measures a
+// different shape — and it would have gone on passing while saying so. The
+// measurement now lives in `road-ribbon-measure.mts`, shared with the procgen
+// invariant that asks the same question on every other pool seed, and its
+// header sets out why exactly one of the two directions is an equality.
 // ---------------------------------------------------------------------------
-const FLOAT32_SLACK = 1e-3;
-let measuredRibbons = 0;
-let worstResidual = 0;
-let worstResidualNote = '';
-
 park.scene.updateMatrixWorld(true);
 const segments = entranceRoadSegments();
-for (const [index, claim] of roadClaims.entries()) {
-  const shape = claim.shape as Capsule;
-  // Which ribbon this claim is, taken from the owner's own ordering rather
-  // than inferred from the numbers — see probe 2b.
-  const segment = segments[index];
-  if (!segment) {
-    fouls.push(
-      `the registry holds a corridor claim at index ${index} that the owner does not produce — ` +
-        'the registry and `entranceRoadSegments()` no longer describe the same road',
-    );
-    continue;
-  }
-  const name = segment.name;
-  const alongX = segment.along === 'x';
-  const mesh = park.scene.getObjectByName(name);
-  if (!mesh || !('geometry' in mesh)) {
-    fouls.push(
-      `the registry claims a corridor for "${name}" but no such mesh is in the scene — the ` +
-        'claim describes a road nobody drew',
-    );
-    continue;
-  }
-  const geometry = (mesh as { geometry: { getAttribute: (n: string) => { count: number; getX: (i: number) => number; getZ: (i: number) => number } } }).geometry;
-  const position = geometry.getAttribute('position');
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (let i = 0; i < position.count; i += 1) {
-    minX = Math.min(minX, position.getX(i));
-    maxX = Math.max(maxX, position.getX(i));
-    minZ = Math.min(minZ, position.getZ(i));
-    maxZ = Math.max(maxZ, position.getZ(i));
-  }
-  if (!Number.isFinite(minX) || !Number.isFinite(minZ)) {
-    fouls.push(`"${name}" has no finite vertices — nothing was measured, so nothing was proved`);
-    continue;
-  }
-  measuredRibbons += 1;
-
-  // What the claim says the ribbon's own bounding box must be.
-  const expected = alongX
-    ? {
-        minX: Math.min(shape.x1, shape.x2),
-        maxX: Math.max(shape.x1, shape.x2),
-        minZ: shape.z1 - ROAD_HALF_WIDTH,
-        maxZ: shape.z1 + ROAD_HALF_WIDTH,
-      }
-    : {
-        minX: shape.x1 - ROAD_HALF_WIDTH,
-        maxX: shape.x1 + ROAD_HALF_WIDTH,
-        minZ: Math.min(shape.z1, shape.z2),
-        maxZ: Math.max(shape.z1, shape.z2),
-      };
-  for (const [edge, drawn, claimed] of [
-    ['minX', minX, expected.minX],
-    ['maxX', maxX, expected.maxX],
-    ['minZ', minZ, expected.minZ],
-    ['maxZ', maxZ, expected.maxZ],
-  ] as const) {
-    const residual = Math.abs(drawn - claimed);
-    if (residual > worstResidual) {
-      worstResidual = residual;
-      worstResidualNote = `${name}.${edge}: drawn ${drawn.toFixed(6)} vs claimed ${claimed.toFixed(6)}`;
-    }
-    if (residual > FLOAT32_SLACK) {
-      fouls.push(
-        `the road's claim does not describe the road that was drawn — "${name}" ${edge} is ` +
-          `${drawn.toFixed(4)} in the scene and the corridor claims ${claimed.toFixed(4)}, ` +
-          `${residual.toFixed(4)} m apart. A child walks on the mesh; every later placer ` +
-          'negotiates against the claim',
-      );
-    }
-  }
-}
-if (measuredRibbons !== roadClaims.length) {
+const ribbons = collectRoadRibbons(park.scene, segments);
+const measurement = measureRoadRibbons(segments, roadClaims, ribbons);
+fouls.push(...measurement.fouls);
+if (measurement.verticesTested === 0) {
   fouls.push(
-    `only ${measuredRibbons} of ${roadClaims.length} claimed corridor runs were measured ` +
-      'against a real mesh — the rest asserted nothing',
+    'no ribbon vertices were tested at all, so probe 5 proved nothing — the road claims ground ' +
+      'and nothing was found drawn on it',
   );
 }
 said.push(
-  `both ribbons measured against their claim; worst edge residual ${worstResidual.toExponential(2)} m ` +
-    `(${worstResidualNote}) — float32 mesh positions, slack ${FLOAT32_SLACK}`,
+  `${measurement.runsMeasured} of ${roadClaims.length} claimed runs are backed by a drawn ` +
+    `ribbon, over ${ribbons.length} mesh(es) and ${measurement.verticesTested} vertices; the ` +
+    `worst any drawn vertex lies outside every claim is ${measurement.worstOutside.toExponential(2)} m ` +
+    `(${measurement.worstOutsideNote}) against a float32 slack of ${FLOAT32_SLACK}`,
+);
+said.push(
+  `the claim reaches at most ${measurement.worstOvershoot.toFixed(3)} m past the ribbon at a run's ` +
+    `own end (${measurement.worstOvershootNote}) — reported, not thresholded: the gateway ` +
+    "approach's claim is deliberately the envelope round a staircase of trimmed columns",
 );
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
 import { pathTexture, woodTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
-import { terrainHeight, terrainNormal } from '../terrain';
+import { placeOnSphere, terrainHeight, terrainNormal } from '../terrain';
 import type { TrainRoute } from './route';
 
 /**
@@ -46,10 +46,17 @@ const SLEEPER_LENGTH = 1.5;
 const SLEEPER_WIDTH = 0.26;
 const SLEEPER_THICKNESS = 0.12;
 
-/** Half-width of the sandy ballast strip under the sleepers. */
-const BALLAST_HALF_WIDTH = 1.05;
+/**
+ * Half-width of the sandy ballast strip under the sleepers.
+ *
+ * Exported because the entrance's gateway path has to stop short of it: two
+ * sandy surfaces drawn on the same ground within a centimetre of each other is
+ * a coplanar seam, and on seed 288 the railway crosses the gate's own approach
+ * 4.5 m inside the wall. Asked for rather than restated — a 1.05 written down
+ * in `Entrance.ts` would be the second definition this repo pays for most.
+ */
+export const BALLAST_HALF_WIDTH = 1.05;
 
-const UP = new Vector3(0, 1, 0);
 
 export interface Track {
   readonly group: Group;
@@ -96,6 +103,7 @@ export function buildTrack(route: TrainRoute): Track {
   const position = new Vector3();
   const rotation = new Quaternion();
   const scale = new Vector3(1, 1, 1);
+  const flat = new Vector3();
   const point = new Vector3();
   const tangent = new Vector3();
   const colour = new Color();
@@ -106,10 +114,13 @@ export function buildTrack(route: TrainRoute): Track {
     route.pointAt(distance, point);
     route.tangentAt(distance, tangent);
 
-    position.set(point.x, terrainHeight(point.x, point.z) + SLEEPER_THICKNESS * 0.5, point.z);
+    flat.set(point.x, terrainHeight(point.x, point.z) + SLEEPER_THICKNESS * 0.5, point.z);
     // The box's long axis is X and has to lie *across* the track, so the yaw is
-    // the tangent's bearing turned a quarter turn.
-    rotation.setFromAxisAngle(UP, Math.atan2(tangent.x, tangent.z) + Math.PI / 2);
+    // the tangent's bearing turned a quarter turn. `placeOnSphere` then lies it
+    // flat on the ground it is bedded in rather than flat to world Y, which out
+    // near the boundary is a visibly different plane — a sleeper left on the
+    // old frame digs one end into the ballast and lifts the other clear of it.
+    placeOnSphere(flat, Math.atan2(tangent.x, tangent.z) + Math.PI / 2, position, rotation);
     matrix.compose(position, rotation, scale);
     sleepers.setMatrixAt(i, matrix);
 

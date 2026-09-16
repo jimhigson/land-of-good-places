@@ -238,6 +238,47 @@ type DeepLink =
    */
   | { readonly kind: 'bridge' }
   /**
+   * `/arrive` — **the cat bus arrival itself**, from the first frame, on any
+   * profile.
+   *
+   * The one deep link that opts *into* the bus rather than out of it, and the
+   * only reason it has to exist: the arrival plays **once per save** and then
+   * never again, so without this the only way to watch it is to throw the
+   * profile away and make a character. That is not a thing to ask of anybody
+   * judging whether the camera reads right, and it is the whole of why the
+   * three-beat sequence (#480's follow-on) had no URL to look at it with.
+   *
+   * Deliberately ignores `save.place` and `arrivedByBus` alike, exactly as
+   * `/spawn` ignores `save.place`: a save that has already arrived would
+   * otherwise refuse to show the thing the URL names.
+   */
+  | {
+      readonly kind: 'arrive';
+      /**
+       * `?at=<beat>` — open on a beat of the arrival instead of at the kerb.
+       *
+       * Jim asked twice for two links in particular: **`/arrive?at=stepping-down`**,
+       * which lands on her getting off the bus, and **`/arrive?at=park`**, which
+       * lands on the end state after the arrival has handed her the controls.
+       * Without them, judging either means sitting through the nine seconds
+       * first — a cost paid again on every round of feedback.
+       *
+       * **Carried as the raw string, and resolved by `Game`.** The beats and
+       * their times are `ArrivalSequence`'s `ARRIVAL_BEATS`, summed from
+       * `ARRIVAL_TIMELINE` rather than typed — but this file may not import
+       * that module at all: doing so pulls in `terrain`, `entrance/layout` and
+       * `boundary`, solving `PARK_BOUNDARY` at module scope and paying for a
+       * chunk of the very generation the bus ride exists to hide. That is the
+       * whole reason `arrivalIsDue` was moved to `arrivalFlag.ts`, and
+       * validating a beat name here would quietly undo it.
+       *
+       * So the name travels as typed and `Game.fastForwardArrival` — which
+       * already has the module — both validates and resolves it. Omitted, the
+       * beat is absent and `/arrive` behaves exactly as it always has.
+       */
+      readonly beat?: string;
+    }
+  /**
    * `/castle`, `/castle?deck=N` — inside the castle, on that storey (#363).
    *
    * Its own kind for the same reason `/bridge` is: there is nothing to board,
@@ -277,8 +318,27 @@ function parseDeepLink(pathname: string, search: string): DeepLink | null {
   if (view) return { kind: 'view', view };
   if (pathname === '/spawn') return { kind: 'spawn', spawn: parseDebugSpawn(search) };
   if (pathname === '/bridge') return { kind: 'bridge' };
+  if (pathname === '/arrive') return parseArriveLink(search);
   if (pathname === '/castle') return parseCastleLink(search);
   return null;
+}
+
+/**
+ * `/arrive`, and `/arrive?at=<beat>` — which beat of the arrival to open on.
+ *
+ * Does **not** check the name against the list of beats, and that is
+ * deliberate: the list lives in `ArrivalSequence.ts`, which this file may not
+ * import (see the `beat` field's own note). `Game.fastForwardArrival` rejects
+ * an unknown name and the caller warns, so a misspelt beat opens the arrival
+ * at the kerb rather than failing the boot in front of whoever was sent the
+ * link — the same way `parseDebugSpawn` treats a bad coordinate.
+ */
+function parseArriveLink(search: string): DeepLink {
+  const raw = new URLSearchParams(search).get('at');
+  // Assigned rather than spread — under `exactOptionalPropertyTypes` an
+  // optional property may be missing but never explicitly `undefined`.
+  if (raw === null || raw === '') return { kind: 'arrive' };
+  return { kind: 'arrive', beat: raw };
 }
 
 /**
@@ -534,7 +594,9 @@ function continueGame(
   if (deepLink?.kind === 'ride') grantRideCompanion();
   // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
   const options: GameOptions =
-    save.place && deepLink?.kind !== 'spawn' ? { startPlace: save.place } : {};
+    save.place && deepLink?.kind !== 'spawn' && deepLink?.kind !== 'arrive'
+      ? { startPlace: save.place }
+      : {};
   launchGame(canvas, uiRoot, splash, options, deepLink);
 }
 
@@ -715,8 +777,18 @@ function launchGame(
   // no bus at all, which nobody did for twelve days. Asking the union once,
   // rather than testing each kind, is what means a fourth link added later
   // cannot forget to opt out. See `world/entrance/ArrivalSequence.ts`.
+  //
+  // **`/arrive` is the single exception, and it is an exception to the value,
+  // not to the rule.** The union is still asked exactly once — a fifth link
+  // added tomorrow still cannot forget to opt out, because the default arm is
+  // still "any deep link means no bus". `/arrive` names the bus, so for it the
+  // answer is `true` rather than absent: absent would defer to
+  // `arrivalIsDue()`, and on a profile that has already arrived that is
+  // `false`, so the one URL whose entire purpose is to show the arrival would
+  // silently show a park instead.
+  const wantsTheBus = deepLink?.kind === 'arrive';
   const gameOptions: GameOptions =
-    deepLink !== undefined ? { ...options, arriveByBus: false } : options;
+    deepLink !== undefined ? { ...options, arriveByBus: wantsTheBus } : options;
 
   // **`?pets=N` — arrive already owning N companions (#582).** Here, and
   // nowhere else, because this is the one funnel every boot path reaches
@@ -742,7 +814,43 @@ function launchGame(
   // straight to the park exactly as before. `arrivalIsDue()` is the same one
   // question `Entrance` asks — asked here too rather than answered a second
   // way, so a journey without an arrival behind it is not expressible.
-  if (gameOptions.arriveByBus !== false && arrivalIsDue()) {
+  // `/arrive` forces the journey outright: `arrivalIsDue()` reads the save flag,
+  // which is false for everyone who has already arrived once — i.e. for nearly
+  // every profile this link will ever be typed on.
+  if (gameOptions.arriveByBus === true || (gameOptions.arriveByBus !== false && arrivalIsDue())) {
+    // **`/arrive?at=<beat>` does not take the ride at all.** Jim, 11 September
+    // 2026: *"it just shouldn't show that part at all."*
+    //
+    // **The bus he was sitting through is not the arrival.** There are two
+    // cat-bus sequences here and four rounds of feedback conflated them: the
+    // *arrival* (`ArrivalSequence`, the bus pulling up at the gate — the thing
+    // `?at=` names, which `runTo` has always landed on instantly), and the
+    // *ride* (`BusJourney`, the loading screen: an interior shot of a bus full
+    // of children that runs `MIN_LOOP_SECONDS + SETTLE_SECONDS` = 20 s whatever
+    // the machine). Every "close-up of her face between seat backs" reported on
+    // this workstream was the ride, not a camera anybody had aimed.
+    //
+    // So a beat link takes the same route `/spawn` does: build the park behind
+    // the ordinary boot splash and hand straight over, with `arriveByBus` still
+    // true so `Entrance` builds the arrival for `fastForwardArrival` to run
+    // forward.
+    //
+    // **Why not simply shorten the ride.** That was built and measured first:
+    // dropping its two minimum waits and drawing none of it still took **14.8 s**
+    // to reach the park on this machine, against **4.4 s** this way, because the
+    // ride's import ladder loads one module per frame by design and no frame
+    // budget can make that quick. A mechanism that is three times slower than
+    // the route already in the file is not worth keeping for the loading card
+    // it would show.
+    if (deepLink?.kind === 'arrive' && deepLink.beat !== undefined) {
+      // `boot()` hid the splash because a deep link normally has its own
+      // backdrop; this one has several seconds of park-building in front of it
+      // and nothing else to show, so put the card back. `finishLaunch` hides it
+      // again on the first rendered frame.
+      splash?.classList.remove('hidden');
+      void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
+      return;
+    }
     rideInThenPlay(engine, uiRoot, splash, gameOptions, () => {
       void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
     });
@@ -1103,6 +1211,33 @@ async function finishLaunch(
               '"every crossing on a site the planner proved bridgeable still carries its bridge".',
           );
         }
+        break;
+      case 'arrive':
+        // **`?at=` is the one thing this arm does.** It runs the sequence
+        // forward to the named beat by *playing* it — see
+        // `ArrivalSequence.runTo` — so the frame he opens on is the frame a
+        // child gets, not a pose built to resemble it.
+        if (deepLink.beat !== undefined && !game.fastForwardArrival(deepLink.beat)) {
+          console.error(
+            `Land of Good Places: /arrive?at=${deepLink.beat} did nothing — either it names no ` +
+              'beat of the arrival (see ARRIVAL_BEATS in world/entrance/ArrivalSequence.ts), or ' +
+              'there was no arrival to run forward. `launchGame` opted into the bus, so ' +
+              '`Entrance` should have built one for `arriveByBus: true`; if it did not, that is ' +
+              'its own bug. The arrival opens at the kerb instead.',
+          );
+        }
+        // **Otherwise nothing to do, and that is the whole arm.** Every other link has to
+        // put her somewhere once the park exists; this one's subject is the
+        // thing that was already playing before the park was handed over —
+        // `launchGame` opted into the bus, so by here she is aboard it and the
+        // sequence is running. Written out rather than left to fall through, so
+        // that "this link does nothing here" is a decision on the page instead
+        // of a gap somebody later reads as an oversight and fills in.
+        //
+        // It deliberately does **not** verify anything: `arrivalIsDue` was
+        // bypassed on purpose, so there is no failure mode of the `/bridge`
+        // kind to shout about. If no bus appears, the fault is in `Entrance`
+        // building no arrival for `arriveByBus: true`, which is its own bug.
         break;
       case 'castle':
         // Loud, like `/bridge` and `/rail-race`: a deck that does not exist

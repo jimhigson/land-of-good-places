@@ -666,23 +666,6 @@ said.push(
     `against the reference ${REFERENCE_CALIBRATION_MS.toFixed(2)} ms — ${slowness.toFixed(2)}x`,
 );
 
-// --- it is SPREAD, not merely done -----------------------------------------
-// The whole ask is "amortised over many small tasks over many frames". One
-// frame doing 3.46 s of work would satisfy "the park generated during the ride"
-// and be exactly the failure this exists to prevent.
-//
-// The floor is derived, not observed: 3.46 s of slide search at
-// GENERATION_BUDGET_MS a frame cannot take fewer than ~430 frames, so 100 is a
-// long way below anything a working implementation produces and a long way
-// above what a broken one does.
-const MIN_WORKING_FRAMES = 100;
-if (frames < MIN_WORKING_FRAMES) {
-  fouls.push(
-    `the park generated in only ${frames} frames — Jim asked for it "amortised over many small ` +
-      'tasks over many frames", and this is a lump with a bus in front of it',
-  );
-}
-
 // --- no frame is allowed to hitch ------------------------------------------
 // A slice stops the moment the clock says its budget is gone, so the most it
 // can overrun by is **the one unit it was in the middle of**. That is the whole
@@ -828,6 +811,35 @@ if (frames < MIN_WORKING_FRAMES) {
 // comforting sentence.
 const WORST_UNIT_GRACE_MS = 12;
 const ADVANCE_CEILING_MS = GENERATION_BUDGET_MS + WORST_UNIT_GRACE_MS * slowness;
+
+// --- it is SPREAD, not merely done -----------------------------------------
+// The whole ask is "amortised over many small tasks over many frames". One
+// frame doing all the work would satisfy "the park generated during the ride"
+// and be exactly the failure this exists to prevent.
+//
+// **The floor is derived from the work actually measured**, because it used to
+// be a constant — 100 frames, reasoned from a 3.46 s slide search that could not
+// take fewer than ~430. When the slide's search stopped exploring routes that
+// could never finish under its length ceiling (seed 11: 25 s -> 2 s), the whole
+// park came to 0.63 s inside `advance()` and 92 honest frames, and the constant
+// called that a lump. What cannot be true of a spread generation is that it
+// did more work than its frames could hold: every slice is held to
+// ADVANCE_CEILING_MS below, so N frames carry at most N x that. A lump — the
+// whole solve inside one call — does 0.6 s in 1 frame against a floor of ~32,
+// so this still goes red on the thing it guards.
+const MIN_WORKING_FRAMES = Math.ceil(totalAdvanceMs / ADVANCE_CEILING_MS);
+said.push(
+  `spread: ${frames} frames for ${totalAdvanceMs.toFixed(0)} ms inside advance(), ` +
+    `which cannot fit in fewer than ${MIN_WORKING_FRAMES} at ${ADVANCE_CEILING_MS.toFixed(1)} ms a slice`,
+);
+if (frames < MIN_WORKING_FRAMES) {
+  fouls.push(
+    `the park generated in only ${frames} frames for ${totalAdvanceMs.toFixed(0)} ms of work — at most ` +
+      `${ADVANCE_CEILING_MS.toFixed(1)} ms a slice that needs ${MIN_WORKING_FRAMES} — Jim asked for it ` +
+      '"amortised over many small tasks over many frames", and this is a lump with a bus in front of it',
+  );
+}
+
 said.push(
   `so one slice may spend ${ADVANCE_CEILING_MS.toFixed(1)} ms of ${BUSY_LABEL} ` +
     `(${GENERATION_BUDGET_MS} ms budget + ${WORST_UNIT_GRACE_MS} ms of grace x ${slowness.toFixed(2)})`,

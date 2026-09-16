@@ -11,7 +11,7 @@
  */
 import './headless-canvas.mjs';
 import { createHash } from 'node:crypto';
-import { Mesh, type BufferAttribute } from 'three';
+import { InstancedMesh, Mesh, type BufferAttribute } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 
 const park = buildHeadlessPark();
@@ -35,6 +35,24 @@ park.scene.traverse((object) => {
       hash.update(
         `${position.getX(i).toFixed(6)},${position.getY(i).toFixed(6)},${position.getZ(i).toFixed(6)};`,
       );
+    }
+  }
+  // **An `InstancedMesh` keeps where its instances stand in `instanceMatrix`,
+  // not in `matrixWorld` or its geometry** — so without this the digest of
+  // `railRace:trestle-legs` was the same number whether the legs moved or not.
+  // Found on 6 Sep 2026 by the control this instrument is supposed to be: the
+  // whole-park digest read byte-identical while `check:swept-bus` on the same
+  // park went 28 → 0 posts. Every instance's matrix (and colour) is hashed,
+  // over `count` — the instances actually drawn.
+  if (object instanceof InstancedMesh) {
+    const instances = object.instanceMatrix.array;
+    const drawn = Math.min(object.count, object.instanceMatrix.count) * 16;
+    hash.update(`instances=${object.count};`);
+    for (let i = 0; i < drawn; i += 1) hash.update(`${(instances[i] ?? 0).toFixed(6)},`);
+    const colours = object.instanceColor?.array;
+    if (colours) {
+      const drawnColours = Math.min(object.count, object.instanceColor?.count ?? 0) * 3;
+      for (let i = 0; i < drawnColours; i += 1) hash.update(`${(colours[i] ?? 0).toFixed(6)},`);
     }
   }
   const digest = hash.digest('hex');

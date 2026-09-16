@@ -3,10 +3,10 @@ import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../world/building/layout';
 import { STALL_PLACEMENTS } from '../minigames/stallPlacement';
 import {
   ENTRANCE_BUS_DOOR_X,
-  ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
 } from '../world/entrance/layout';
+import { entranceRoadAt } from '../world/entrance/roadRoute';
 
 /**
  * **What is on the park map, and where.** GitHub issues #334 and #234.
@@ -103,6 +103,28 @@ export const STALLS_DUPLICATING_A_RIDE: ReadonlySet<string> = new Set([
  * that would land on one already drawn, so whatever is listed first keeps its
  * label when the park gets crowded. Big landmarks first, small furniture last.
  */
+/**
+ * **Where the map draws the cat bus** — the one owner, because two different
+ * questions need it and they must not answer differently.
+ *
+ * `parkMapFeatures` draws a bus here, and `parkMapProjection` has to *frame* a
+ * rectangle that contains it: the map's viewport used to be
+ * `PARK_BOUNDARY.extent` alone, on the stated grounds that the stop "lands on
+ * the road just outside the boundary wall... still inside the map's viewport".
+ * That sentence was true of a straight road hard against the wall and stopped
+ * being true when #498's kerb moved out to its own outset — measured, the bus
+ * ended up 3 to 35 px off the canvas at **every** viewport and zoom in
+ * `check:park-map`, with no pan that could reach it. A child could not find on
+ * the map the vehicle she arrives on.
+ *
+ * Asked of `roadRoute.ts` rather than written down, for the reason the caller
+ * below already gives: the kerb follows the park's edge now, so where the bus
+ * stands is `entranceRoadAt(0)`.
+ */
+export function busStopOnMap(): { readonly x: number; readonly z: number } {
+  return { x: ENTRANCE_BUS_DOOR_X, z: entranceRoadAt(0).z };
+}
+
 export function parkMapFeatures(facts: ParkMapFacts): readonly MapFeature[] {
   const features: MapFeature[] = [];
 
@@ -147,13 +169,15 @@ export function parkMapFeatures(facts: ParkMapFacts): readonly MapFeature[] {
    * the fixed target and `ArrivalSequence` works the vehicle's centre back from
    * it through `bus.doorDrop`, so a longer bus still stops with its door here.
    *
-   * This lands 9 m *outside* the boundary wall, on the road, which is correct
+   * This lands on the road just outside the boundary wall, which is correct
    * and deliberate: a bus is not a park vehicle, and it parking inside the park
    * is the exact thing Jim objected to on 7 August 2026 (#195). It is still
    * inside the map's viewport, which frames `PARK_BOUNDARY.extent` — the
    * boundary bulges past z = 71 either side of the gate.
    */
-  features.push({ id: 'catBus', kind: 'catBus', x: ENTRANCE_BUS_DOOR_X, z: ENTRANCE_BUS_STOP_Z });
+  // Asked of the road, not of a coordinate that used to describe it: the kerb
+  // follows the park's edge now, so where the bus stands is `entranceRoadAt(0)`.
+  features.push({ id: 'catBus', kind: 'catBus', ...busStopOnMap() });
 
   for (const anchor of ANCHORS) {
     if (anchor.id === 'building') continue;

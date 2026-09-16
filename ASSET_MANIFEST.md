@@ -165,6 +165,7 @@ only question asked is whether the bytes still match.
 | `hotel.glb` | `npm run blend:hotel` | 640 KB | the hotel's 19 interior factories |
 | `bridgeStones.glb` | `npm run blend:bridge-stones` | 9.2 KB | the railway bridges' coping, voussoirs and keystone |
 | `castle.glb` | `npm run blend:castle` | 128 KB | the castle interior, batch 1 — 23 nodes, 4 342 triangles |
+| `gateArch.glb` | `pnpm run blend:gate-arch` | 63 KB | the park's entrance arch — 5 nodes, 2 492 triangles |
 
 **Two shapes of kit, and the difference matters.** Some are *models* a placer
 puts down whole (the castle's furniture, the hotel's fittings); some are **kits
@@ -259,3 +260,58 @@ is the right shape.
 6. **Instancing.** Trees/bushes/wall segments are the only high-count items.
    Should the Artist author them as `InstancedMesh`-friendly (one geometry, one
    material, per-instance colour) or is per-object fine at current counts?
+
+### 34 — The park entrance arch (`src/art/models/gateArch.ts`)
+
+Nodes: `gate-arch-piers`, `gate-arch-band`, `gate-arch-bobbles`,
+`gate-arch-sign`, `gate-arch-medallion`. The gate over the park's main entrance
+— Jim, 2026-09-03: *"a decorative arch, designed in Blender, with a project
+logo of a ferris wheel and 'LAND OF GOOD PLACES' written onto it"*, and on the
+logo: *"yeah it is fine to just be a texture for the design"*.
+
+`art/blend/gate_arch_build.py` → `art/blend/gateArch.blend` →
+`art/blend/gate_arch_export.py` → `src/art/assets/gateArch.glb` →
+`gateArchGlb.ts`. `createGateArch()` assembles all five nodes at one origin —
+**the middle of the gateway, on the ground**, facing **+Z, which is out of the
+park at the arriving child**. Renders: `art/renders/gate-arch-{walk-up,
+walk-up-near,iso,three-quarter,logo,under,from-inside}.png`, by
+`pnpm run render:gate-arch`.
+
+Measured on the built mesh, printed by every build run: **8.16 m** to the top
+of the roundel, a **7.00 m** clear opening between the piers, and **0.630 m**
+of headroom over `TALLEST_CHILD_HEIGHT` under the sign plank.
+
+**Collider: two circles, one per pier, radius 0.80 m at
+`x = ±ENTRANCE_GATE_HALF_WIDTH`, and nothing else.** Everything else in the
+asset is over 3.5 m up. `GATE_ARCH_PIER_KEEP_OUT` and `GATE_ARCH_CLEAR_WIDTH`
+are derived from the shipped vertices so a placer never types either.
+
+Three things this kit is built to:
+
+- **The gateway's numbers belong to the game.** `ENTRANCE_GATE_HALF_WIDTH`,
+  `ENTRANCE_GATE_POST_HEIGHT` and `TALLEST_CHILD_HEIGHT` are read with
+  `ts_const` at build time, and `gateArch.ts` re-measures the shipped mesh
+  against the same constants **at load** and throws. A rigid `.glb` of a gateway
+  the park sizes for itself can go stale; it must not go stale quietly.
+- **The lettering and the logo are painted into the arch's own UV space**, on
+  the only two nodes that carry UVs. No second mesh tracking a first one's
+  surface (`src/art/models/CLAUDE.md`).
+- **One renderer, of the real thing.** `scripts/render-gate-arch.mts` drives
+  headless Chromium over `gate-arch.html`, which imports `createGateArch()` and
+  a real `createKid()` for scale. A Blender render could only show the shape, or
+  else keep a second copy of the painting code — which is §32's bug exactly.
+
+**Two traps found by looking at the picture, both invisible to every
+assertion.** Worth knowing before painting the next authored surface:
+
+- **UVs authored in Blender arrive with `v` inverted.** The exporter writes
+  `1 − v`, because glTF's texture origin is top-left and Blender's is
+  bottom-left. The sign shipped upside down and the mesh, the canvas and the UV
+  layout were each individually correct.
+- **`blendkit.revolve` cannot carry a painted surface.** Its profile closes on
+  the axis, leaving degenerate faces at each pole; `Part.emit`'s
+  `remove_doubles` collapses them, the polygon indices shift, and `Part`'s
+  per-face UV table — keyed by index — lands on the wrong polygons. The roundel
+  smeared into radial wedges. The fix is `paint_planar_uvs()`, which computes
+  UVs from **where each vertex is**, after emit: a UV that is a function of
+  position cannot be given to the wrong face.

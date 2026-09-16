@@ -7,7 +7,8 @@ import { RAIL_OVER_RAIL_AIR } from '../coaster/route';
 import { PARK_LAYOUT } from '../parkLayout';
 import { terrainHeight } from '../terrain';
 import { bridgeableCrossingPosesSearch } from './crossingPoses';
-import { fitBridgeAcross, railCorridorBlocked } from './bridgeFit';
+import { fitBridgeAcross, railCorridorBlocked, SITE_RAMP_FLOOR } from './bridgeFit';
+import { DECK_HALF_LENGTH } from './bridgeFootprint';
 import { chosenCrossingCorridor, crossingSurvivesStationAt } from './crossingKeepOut';
 import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from './clearance';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -443,7 +444,190 @@ function loopKeepsItsCrossing(route: SolvedRailRoute): boolean {
     if (!crossingSurvivesStationAt(target, route.length, corridor, flatPointAt)) return false;
   }
 
+  // 3. Is every destination on ground the crossing just proved joins up?
+  if (!loopLeavesEveryDestinationOnTheCrossing(xs, zs, centre, fit.dirX, fit.dirZ)) return false;
+
   return true;
+}
+
+/**
+ * Ground within this of a rail centre line is fenced: the fence stands
+ * `FENCE_OFFSET` out, is `FENCE_HALF_THICKNESS` thick, and a child needs
+ * `PLAYER_RADIUS` of room beside it. Read from the owners, never copied —
+ * the same sum {@link GATE_WALK_RAIL_CLEARANCE} is built from.
+ */
+const FENCED_GROUND_REACH = FENCE_OFFSET + FENCE_HALF_THICKNESS + PLAYER_RADIUS;
+
+/** Cell size of the fenced-ground flood fill, metres. The loop is sampled every
+ * ~0.5 m (720 samples of a 220-360 m loop), so a finer cell buys nothing. */
+const FENCED_GROUND_CELL = 0.5;
+
+/** Which grid cells lie inside the park boundary — the same for every loop,
+ * so built once. */
+let insideBoundaryMask: { readonly mask: Uint8Array; readonly nx: number; readonly nz: number; readonly minX: number; readonly minZ: number } | null = null;
+
+function boundaryMask(): NonNullable<typeof insideBoundaryMask> {
+  if (insideBoundaryMask) return insideBoundaryMask;
+  const { minX, maxX, minZ, maxZ } = PARK_BOUNDARY.extent;
+  const nx = Math.ceil((maxX - minX) / FENCED_GROUND_CELL) + 1;
+  const nz = Math.ceil((maxZ - minZ) / FENCED_GROUND_CELL) + 1;
+  const mask = new Uint8Array(nx * nz);
+  for (let i = 0; i < nx; i += 1) {
+    for (let j = 0; j < nz; j += 1) {
+      if (PARK_BOUNDARY.contains(minX + i * FENCED_GROUND_CELL, minZ + j * FENCED_GROUND_CELL)) {
+        mask[i * nz + j] = 1;
+      }
+    }
+  }
+  insideBoundaryMask = { mask, nx, nz, minX, minZ };
+  return insideBoundaryMask;
+}
+
+/**
+ * **Does this loop leave every destination on ground its crossing joins?**
+ *
+ * A closed loop cuts the park into regions a child cannot walk between except
+ * over a bridge. For a simple, roomy loop that is two — inside and outside —
+ * and the bridge clause 1 proved joins exactly those. But `SELF_CLEARANCE`
+ * lets a loop come back within 3 m of itself, and where it does the two
+ * limbs' fences meet and the inside is pinched into separate **lobes**. A
+ * destination alone in a lobe with no bridge into it has no legal path to it
+ * at all, and the path router — handed a leg that cannot exist — drew one over
+ * the rails anyway, which `crossings.ts` then refuses.
+ *
+ * **How the figures below were measured**, so they can be re-run rather than
+ * trusted: the same question this function asks, as a scratch flood fill on a
+ * 0.25 m grid — a cell is walkable when it is inside `PARK_BOUNDARY` and more
+ * than {@link FENCED_GROUND_REACH} from every rail sample — with each region's
+ * area summed from its cells. (This function floods at
+ * {@link FENCED_GROUND_CELL}, so its own areas differ by rounding; only which
+ * region a point is in is asked here, never an area.)
+ *
+ * Measured on seed 24 (eng/sphere-six-reds, 16 Sep 2026): a loop whose neck
+ * between railD ~36 and ~151 has its centre lines **4.0 m** apart cut the
+ * ground into three regions (18594 / 684 / 528 m2); both bridge sites the
+ * planner kept (railD 0 and 180) joined the 18594 m2 park to the 684 m2 lobe,
+ * and `stall.spookyHouse` sat alone in the 528 m2 one — no bridge fits anywhere
+ * on that lobe's rail. Control: the same fill at 0.3 m clearance opens the neck
+ * and the 528 m2 lobe merges, so the fill can see connectivity. So a loop
+ * that walls a destination off like that is refused here, and the search goes
+ * on to its next start pose — the backtracking rule, asked of the real loop,
+ * not a tolerance widened until the crossing throw stops.
+ *
+ * The same clause is what seed 451 was missing (retired on
+ * eng/sphere-crossing-and-coping after a warp search failed): its loop ran
+ * within 3.95 m of itself beside station 0 and, **measured against the real
+ * boundary wall** by the same fill, cut a 773 m2 rim strip (the Rail Race stall and its exit)
+ * and a 2384 m2 lobe (dodgems) off from the 15737 m2 main park, with its only
+ * bridge site joining the two cut-off pieces to each other. Refused here, the
+ * search's next loop builds. The boundary matters: flooded without it, the
+ * rim strip reconnects round the outside of the wall and the defect vanishes.
+ *
+ * Deliberately **not** "the loop makes exactly two regions": a pinched-off
+ * pocket of lawn nobody is sent to is harmless, and refusing it would re-roll
+ * parks that build today for nothing.
+ *
+ * Destinations are every placed plot's doormat, the Sky Cruiser's dismount
+ * point and the gate — everything that exists before the railway does.
+ */
+function loopLeavesEveryDestinationOnTheCrossing(
+  xs: Float64Array,
+  zs: Float64Array,
+  centre: Vec2,
+  dirX: number,
+  dirZ: number,
+): boolean {
+  const { mask, nx, nz, minX, minZ } = boundaryMask();
+  const cell = FENCED_GROUND_CELL;
+  const walkable = mask.slice();
+  const reachCells = Math.ceil(FENCED_GROUND_REACH / cell) + 1;
+  for (let s = 0; s < xs.length; s += 1) {
+    const x = xs[s] as number;
+    const z = zs[s] as number;
+    const ci = Math.round((x - minX) / cell);
+    const cj = Math.round((z - minZ) / cell);
+    for (let i = Math.max(0, ci - reachCells); i <= Math.min(nx - 1, ci + reachCells); i += 1) {
+      for (let j = Math.max(0, cj - reachCells); j <= Math.min(nz - 1, cj + reachCells); j += 1) {
+        if (Math.hypot(minX + i * cell - x, minZ + j * cell - z) < FENCED_GROUND_REACH) {
+          walkable[i * nz + j] = 0;
+        }
+      }
+    }
+  }
+
+  const label = new Int32Array(nx * nz).fill(-1);
+  const stack: number[] = [];
+  const regionAt = (x: number, z: number): number => {
+    const ci = Math.round((x - minX) / cell);
+    const cj = Math.round((z - minZ) / cell);
+    // The nearest walkable cell within a metre: a doormat on a plot's edge can
+    // round onto a boundary cell, and that is the same ground.
+    let found = -1;
+    let best = Infinity;
+    const r = Math.ceil(1 / cell);
+    for (let i = ci - r; i <= ci + r; i += 1) {
+      for (let j = cj - r; j <= cj + r; j += 1) {
+        if (i < 0 || j < 0 || i >= nx || j >= nz || !walkable[i * nz + j]) continue;
+        const d = Math.hypot(i - ci, j - cj);
+        if (d < best) {
+          best = d;
+          found = i * nz + j;
+        }
+      }
+    }
+    if (found < 0) return -1;
+    if ((label[found] as number) < 0) {
+      // Flood lazily, one region per first ask.
+      label[found] = found;
+      stack.push(found);
+      while (stack.length) {
+        const c = stack.pop() as number;
+        const i = Math.floor(c / nz);
+        const j = c - i * nz;
+        const visit = (n: number): void => {
+          if (!walkable[n] || (label[n] as number) >= 0) return;
+          label[n] = found;
+          stack.push(n);
+        };
+        if (i > 0) visit(c - nz);
+        if (i < nx - 1) visit(c + nz);
+        if (j > 0) visit(c - 1);
+        if (j < nz - 1) visit(c + 1);
+      }
+    }
+    return label[found] as number;
+  };
+
+  // The two regions the start-pose bridge lands in, read where a child steps
+  // off it: the foot of the shortest ramp clause 1 proved on each side
+  // (`DECK_HALF_LENGTH + SITE_RAMP_FLOOR` out along the bridge's own
+  // direction). Not the first walkable cell past the fence — between two
+  // limbs' fence stamps that can be a speck of a region nobody can stand in,
+  // and asking a speck refused loops that were fine (seed 451, measured).
+  const landing = (sign: 1 | -1): number => {
+    for (let along = DECK_HALF_LENGTH + SITE_RAMP_FLOOR; along >= FENCED_GROUND_REACH; along -= cell) {
+      const region = regionAt(centre.x + dirX * sign * along, centre.z + dirZ * sign * along);
+      if (region >= 0) return region;
+    }
+    return -1;
+  };
+  const joined = new Set([landing(1), landing(-1)]);
+  joined.delete(-1);
+  if (joined.size === 0) return false;
+
+  const onTheCrossing = (x: number, z: number): boolean => joined.has(regionAt(x, z));
+  for (const entry of PARK_LAYOUT.entries.values()) {
+    if (!onTheCrossing(entry.entranceX, entry.entranceZ)) return false;
+  }
+  if (!onTheCrossing(COASTER_PLANS.cruiser.exitX, COASTER_PLANS.cruiser.exitZ)) return false;
+  // The gate stands on the boundary itself; its walk in is the destination.
+  const gateRadius = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z);
+  for (let inward = 1; inward <= 8; inward += 1) {
+    const f = 1 - inward / gateRadius;
+    const region = regionAt(ENTRANCE_GATE_X * f, ENTRANCE_GATE_Z * f);
+    if (region >= 0) return joined.has(region);
+  }
+  return false;
 }
 
 /** One ladder rung's brief: the shared context aimed at a particular length. */

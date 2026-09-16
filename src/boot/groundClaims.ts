@@ -48,6 +48,15 @@
  * backjumping search behaves identically on every run.
  */
 
+import {
+  arcBetween,
+  arcToRun,
+  boundsOfRun,
+  eachRunSample,
+  runsCross,
+  CLAIM_BROAD_PHASE_SLACK,
+} from './claimSurface';
+
 /** A circular claim shape: trees, lamps, plot discs, stand spots. */
 export interface Disc {
   readonly shape: 'disc';
@@ -142,6 +151,28 @@ export interface Refusal {
   readonly kind: ClaimKind;
 }
 
+/**
+ * **Distance on the ground, not in the chart.**
+ *
+ * Every one of these was plane geometry over world `(x, z)` until the sphere
+ * landed. World `(x, z)` is an orthographic projection of the planet, so
+ * `Math.hypot` over it under-reads radial separation by `cos θ`. How much
+ * depends on how far out: the table in `claimSurface.ts` (printed by
+ * `scripts/claim-chart-error.mts`) has a 1 m radial gap walking 1.12 m at
+ * 100 m from the origin, 1.22 m at 125 m and 1.37 m at 150 m — and the park's
+ * outline and its furthest drawn geometry stand between those rows
+ * (`theGroundIsTheSphereItClaimsToBe` prints the latter on every run). That
+ * file carries the measurement and the reasoning; these three lines are where
+ * the registry stopped believing the shadow.
+ *
+ * The kinds of error it was making were not symmetric. Under-reading distance
+ * makes an overlap refusal *stricter* than it needs to be — a cost, not a
+ * hazard. But {@link Demand} is served by a corridor **ending within a
+ * radius**, and there under-reading means calling a door served by paving that
+ * stops further away than the registry believes — by the same factor, so 12%
+ * at 100 m out and 37% at 150 m — which is a child walking to a door down a
+ * path that runs out.
+ */
 const distPointSegment = (
   px: number,
   pz: number,
@@ -149,27 +180,14 @@ const distPointSegment = (
   z1: number,
   x2: number,
   z2: number,
-): number => {
-  const dx = x2 - x1;
-  const dz = z2 - z1;
-  const lenSq = dx * dx + dz * dz;
-  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (pz - z1) * dz) / lenSq));
-  return Math.hypot(px - (x1 + t * dx), pz - (z1 + t * dz));
-};
+): number => arcToRun(px, pz, x1, z1, x2, z2);
 
-const segmentsCross = (a: Capsule, b: Capsule): boolean => {
-  const d = (ax: number, az: number, bx: number, bz: number, cx: number, cz: number) =>
-    (bx - ax) * (cz - az) - (bz - az) * (cx - ax);
-  const d1 = d(b.x1, b.z1, b.x2, b.z2, a.x1, a.z1);
-  const d2 = d(b.x1, b.z1, b.x2, b.z2, a.x2, a.z2);
-  const d3 = d(a.x1, a.z1, a.x2, a.z2, b.x1, b.z1);
-  const d4 = d(a.x1, a.z1, a.x2, a.z2, b.x2, b.z2);
-  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
-};
+const segmentsCross = (a: Capsule, b: Capsule): boolean =>
+  runsCross(a.x1, a.z1, a.x2, a.z2, b.x1, b.z1, b.x2, b.z2);
 
 /** The shortest distance between two shapes' cores (centres/segments). */
 const coreDistance = (a: ClaimShape, b: ClaimShape): number => {
-  if (a.shape === 'disc' && b.shape === 'disc') return Math.hypot(a.x - b.x, a.z - b.z);
+  if (a.shape === 'disc' && b.shape === 'disc') return arcBetween(a.x, a.z, b.x, b.z);
   if (a.shape === 'disc' && b.shape === 'capsule') {
     return distPointSegment(a.x, a.z, b.x1, b.z1, b.x2, b.z2);
   }
@@ -193,20 +211,82 @@ const reachOf = (s: ClaimShape): number => (s.shape === 'disc' ? s.radius : s.ha
  * disc's centre, or a march along the capsule's segment including both ends. */
 const coreSamples = (s: ClaimShape, step: number): { x: number; z: number }[] => {
   if (s.shape === 'disc') return [{ x: s.x, z: s.z }];
-  const length = Math.hypot(s.x2 - s.x1, s.z2 - s.z1);
+  // The GEODESIC's own samples, not the chord's. On the ground the two are
+  // different curves, and a crossing zone is judged by where the shapes really
+  // share ground — so marching the chart's straight line would test points the
+  // claim does not occupy.
+  const length = arcBetween(s.x1, s.z1, s.x2, s.z2);
   const count = Math.max(1, Math.ceil(length / step));
   const out: { x: number; z: number }[] = [];
-  for (let i = 0; i <= count; i += 1) {
-    const t = i / count;
-    out.push({ x: s.x1 + t * (s.x2 - s.x1), z: s.z1 + t * (s.z2 - s.z1) });
-  }
+  eachRunSample(s.x1, s.z1, s.x2, s.z2, (x, z) => out.push({ x, z }), count);
   return out;
 };
 
 const distToCore = (px: number, pz: number, s: ClaimShape): number =>
   s.shape === 'disc'
-    ? Math.hypot(px - s.x, pz - s.z)
-    : distPointSegment(px, pz, s.x1, s.z1, s.x2, s.z2);
+    ? arcBetween(px, pz, s.x, s.z)
+    : arcToRun(px, pz, s.x1, s.z1, s.x2, s.z2);
+
+/**
+ * **How far outside a claim's ground a point lies**, in metres — zero or
+ * negative when the point is on it.
+ *
+ * Exported because it is the one honest way to ask "is this vertex of the
+ * drawn mesh on the ground the registry claims?", and two measurement sites
+ * need to ask it: `scripts/check-ground-claims.mts` on the canonical seed and
+ * `test/procgen/invariants.ts` on every pool seed. Asking it here rather than
+ * re-deriving the point-to-capsule distance in each is the difference between
+ * one owner and this repo's most expensive habit.
+ *
+ * It is also the reason the curved road can be checked at all. An axis-aligned
+ * ribbon can be compared by its bounding box; an arc's cannot, because the
+ * box of a bent capsule is mostly ground the capsule does not hold. This
+ * measures the claim's own shape instead of a box around it.
+ *
+ * ## Why this one stayed in the chart when the registry moved to the sphere
+ *
+ * **Because it compares a claim against a MESH, and the mesh is still authored
+ * in the chart.** Every other distance in this file compares one claim with
+ * another, and those are the registry's own decisions — they moved to geodesic
+ * arithmetic, and `claimSurface.ts` says why. This one answers a different
+ * question, and answering it in arc metres would compare two different metrics.
+ *
+ * Measured, on the canonical seed, when it was briefly switched over: the road
+ * is drawn **3.89 m wide in chart metres**, and at the kerb's reach of 108.7 m
+ * from the park's centre that is **4.50 m of real ground** — so a vertex lying
+ * exactly on the drawn kerb reads 0.611 m outside an arc-metre claim, and
+ * `check:ground-claims` failed at 0.5155 m on a road that had not moved.
+ *
+ * The check was right and the kernel was right; the mesh is the thing that is
+ * wrong. `Entrance.ts` builds the ribbon from chart coordinates with a constant
+ * chart half-width, so **the drawn road silently widens as it runs outward** —
+ * about 16% at the kerb's reach. That is a real artefact of drawing on the
+ * planet's shadow, it belongs to the road's own lane rather than to the
+ * registry, and it is not something to hide by loosening a tolerance here.
+ *
+ * **So this is a stated, temporary split, not a permanent one.** When the road
+ * (and every other ribbon) is drawn on the sphere — geodesic centreline,
+ * arc-metre width — this must move to `distToCore` with the rest, and the two
+ * metrics become one again. Until then, mixing them would make every drawn-mesh
+ * check disagree with the ground it measures by a margin that grows with radius.
+ */
+export const distanceOutside = (px: number, pz: number, s: ClaimShape): number =>
+  chartDistToCore(px, pz, s) - reachOf(s);
+
+/**
+ * The chart-space form of {@link distToCore}, for {@link distanceOutside} only.
+ * Plane geometry on purpose — see that function's docblock for the measurement
+ * that says why, and for what has to happen before it can go.
+ */
+const chartDistToCore = (px: number, pz: number, s: ClaimShape): number => {
+  if (s.shape === 'disc') return Math.hypot(px - s.x, pz - s.z);
+  const dx = s.x2 - s.x1;
+  const dz = s.z2 - s.z1;
+  const lenSq = dx * dx + dz * dz;
+  const t =
+    lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - s.x1) * dx + (pz - s.z1) * dz) / lenSq));
+  return Math.hypot(px - (s.x1 + t * dx), pz - (s.z1 + t * dz));
+};
 
 /**
  * Is the shared ground of two overlapping shapes confined to the crossing's
@@ -233,7 +313,7 @@ const overlapConfinedToZone = (
   ] as const) {
     for (const p of coreSamples(self, step)) {
       if (distToCore(p.x, p.z, other) >= reach) continue; // no shared ground here
-      if (Math.hypot(p.x - zone.x, p.z - zone.z) > zone.radius) return false;
+      if (arcBetween(p.x, p.z, zone.x, zone.z) > zone.radius) return false;
     }
   }
   return true;
@@ -246,13 +326,13 @@ export const shapesOverlap = (a: ClaimShape, b: ClaimShape): boolean =>
 /** Cheap per-axis bounds, so most pairs are dismissed without a hypot. */
 const bounds = (s: ClaimShape): readonly [number, number, number, number] =>
   s.shape === 'disc'
-    ? [s.x - s.radius, s.z - s.radius, s.x + s.radius, s.z + s.radius]
-    : [
-        Math.min(s.x1, s.x2) - s.halfWidth,
-        Math.min(s.z1, s.z2) - s.halfWidth,
-        Math.max(s.x1, s.x2) + s.halfWidth,
-        Math.max(s.z1, s.z2) + s.halfWidth,
-      ];
+    ? [
+        s.x - s.radius - CLAIM_BROAD_PHASE_SLACK,
+        s.z - s.radius - CLAIM_BROAD_PHASE_SLACK,
+        s.x + s.radius + CLAIM_BROAD_PHASE_SLACK,
+        s.z + s.radius + CLAIM_BROAD_PHASE_SLACK,
+      ]
+    : boundsOfRun(s.x1, s.z1, s.x2, s.z2, s.halfWidth);
 
 interface Contribution {
   readonly claims: readonly Claim[];
@@ -376,7 +456,7 @@ export class GroundClaims {
                 [claim.shape.x2, claim.shape.z2] as const,
               ];
         for (const [x, z] of ends) {
-          if (Math.hypot(x - demand.x, z - demand.z) < demand.radius) return true;
+          if (arcBetween(x, z, demand.x, demand.z) < demand.radius) return true;
         }
       }
     }

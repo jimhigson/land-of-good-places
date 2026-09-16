@@ -5,11 +5,19 @@
  * npm run check:sky-view
  * ```
  *
- * `world/Sky.ts` draws the sky as a full-screen quad, because the park's camera
- * is orthographic and a dome would render as one flat colour (its header
- * explains why at length). That works right up until something *else* draws the
- * world — a ride's first-person `RideCamera`, `/view`'s debug camera, a
- * first-person walking mode later — and turns.
+ * `world/Sky.ts` draws the sky as a full-screen quad rather than a dome. The
+ * reason given for that was the park camera being orthographic — a dome seen
+ * through parallel rays renders as one flat colour (Sky's own header explains
+ * it at length). **The park camera has been perspective since 11 September
+ * 2026**, so that argument no longer holds on its own; what keeps the quad is
+ * that the rig is a 9.5° lens at 90 m, which is near enough parallel that a
+ * dome would still be a nearly flat patch, and that the quad mapping is what
+ * every clause below is written against. Worth a deliberate look rather than an
+ * assumption — see HANDOFF-arrival-door-shot.md.
+ *
+ * Either way the quad works right up until something *else* draws the world —
+ * a ride's first-person `RideCamera`, `/view`'s debug camera, a first-person
+ * walking mode later — and turns.
  *
  * ## What went wrong the first time, and what this now checks
  *
@@ -98,7 +106,7 @@ function aimPark(groundYaw: number): void {
 // imported: the whole point is that it is an independent copy of what shipped.
 const LEGACY_HALF_FOV_X = Math.PI / 3;
 
-console.log('the park camera: the orthographic mapping is unchanged');
+console.log('the park camera: the full-screen-quad mapping is unchanged');
 for (let groundYaw = -Math.PI; groundYaw <= Math.PI; groundYaw += 0.37) {
   aimPark(groundYaw);
   check(!sky.viewIsPerspective, 'the park rig must not report a perspective view');

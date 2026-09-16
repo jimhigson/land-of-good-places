@@ -49,7 +49,7 @@
  * pool, went red).
  */
 import { describe, it, beforeAll, expect } from 'vitest';
-import { Box3, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
+import { InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
 import { WIDEST_FLOWER } from '../../src/world/flowerDimensions.ts';
 import {
   buildParkFacts,
@@ -60,6 +60,13 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { offAxisGround, recutCarriers, type OffAxisGround } from './gridAxes.ts';
+// A leaf module: `Geo.ts` imports `three` and `core/constants` and nothing
+// else, so a static import here cannot load a seeded module early — the hazard
+// this file's header warns about. It is imported rather than restated because
+// `Geo.radius()` is the one owner of "how far is this from the planet's
+// centre", and a hand-written `Math.hypot(x, y + R, z)` beside it would be the
+// second definition CLAUDE.md's "two definitions of one thing" names.
+import { Geo } from '../../src/world/geo/Geo.ts';
 import { resolveDismount, resolveDismountGroup } from '../../src/world/dismount.ts';
 // Leaf module, safe to import statically: `bridgeSpine.ts`'s ONLY import is
 // a type-only one (from `world/train/crossings`), which erases — no seeded
@@ -85,15 +92,18 @@ import {
   MAX_FRAME_DELTA,
   PATH_KERB_LIFT,
   PATH_SURFACE_LIFT,
-  PLAYER_HEIGHT_DAMP_HALF_LIFE,
   PLAYER_LONGEST_STEP,
+  SPRINT_LOCAL_GRADE_CEILING,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
   RIM_OUTSET_START,
+  GROUND_SPHERE_RADIUS,
+  BUS_MAX_GRADE,
+  gradientAtParkRadius,
+  parkRadiusForGradient,
+  TERRAIN_HEIGHT_SCALE,
 } from '../../src/core/constants.ts';
 import {
-  ENTRANCE_BUS_ARRIVE_X,
-  ENTRANCE_BUS_STOP_Z,
   ENTRANCE_GATE_HALF_WIDTH,
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
@@ -108,11 +118,12 @@ import {
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
-import {
-  GATE_FOOT_TOLERANCE,
-  GATE_POST_PROBE_INSET,
-  GATE_POST_REACH,
-} from '../../src/world/entrance/gateArch.ts';
+import { GATE_POST_COLLIDER_RADIUS } from '../../src/world/entrance/gateArch.ts';
+import { altitudeAt, terrainHeight } from '../../src/world/terrain.ts';
+// The road corridor's measurement, shared with `check:ground-claims` so the two
+// sites that ask "is the claim the road?" cannot answer it differently. Pure
+// geometry over what it is handed — nothing seed-dependent is imported here.
+import { collectRoadRibbons, measureRoadRibbons } from '../../scripts/road-ribbon-measure.mts';
 import { visibleTop } from '../../src/art/style/measure.ts';
 import { COPING_SINK, bridgeStoneGeometry } from '../../src/art/models/bridgeStones.ts';
 import {
@@ -807,49 +818,93 @@ const plotsDoNotOverlap: Invariant = (facts) => {
  *    green for a reason that has nothing to do with the gate, which is
  *    exactly how the first draft of this invariant passed the *broken*
  *    arch's own geometry. See `scripts/measure-gate-480.mts`.
- * 3. **Nothing hangs into that gap.** The lowest point of the arch clears
- *    {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child, party
- *    hat and all, taken from the game rather than from the gate's own design.
- *    The broken arch reached below ground and failed this by 4.31 m.
+ * 3. **Nothing hangs into that gap.** The lowest thing *over the opening*
+ *    clears {@link TALLEST_CHILD_HEIGHT} — the park's tallest possible child,
+ *    party hat and all, taken from the game rather than from the gate's own
+ *    design. The broken arch reached below ground and failed this by 4.31 m.
  *
- * The arch itself is deliberately **not** solid: its feet are the posts,
+ *    **Measured by raycasting up through the opening, not off the bounding
+ *    box**, and that is not a refinement — it is the difference between the
+ *    clause working and the clause lying. `arch.minY - groundY` was right only
+ *    while the gate was a half-torus crossbar held up by two *separate* post
+ *    meshes, so the box's floor really was the underside of the span. The
+ *    authored arch is one asset whose piers come down to the paving: the same
+ *    expression reports **0.00 m of headroom** under a gate a child walks
+ *    through on every arrival. It would have failed loudly for a correct arch
+ *    having passed quietly for a broken one, which is this repo's own
+ *    definition of a check that is not describing what it claims.
+ *    See `scripts/gate-arch-measure.mts`.
+ *
+ * The arch itself is deliberately **not** solid: its feet are the piers,
  * which are, and the span is headroom over a child walking under it.
  */
-/** The cover this invariant does not give, said the same way every time. */
-const GATE_UNCOVERED =
-  'the park gate arch invariant asserts nothing about whether a child can walk through the gateway ' +
-  '— that is theWalkInFromTheGateIsWalkable (#481, #485); this one covers only the arch pointing the ' +
-  'right way, the posts being solid, and the headroom';
+/**
+ * How far off its own pier an arch end may land and still be standing on it.
+ *
+ * **Derived from the asset, not chosen.** The gate's bounding box overshoots
+ * each pier's centre by exactly that pier's own keep-out radius, by
+ * construction — the widest thing on the pier is what
+ * {@link GATE_POST_COLLIDER_RADIUS} is measured from — so the tolerance is
+ * that plus a hand's width. It moved from 0.6 to 1.1 when the authored arch
+ * replaced the half-torus, because the piers are wider than the old 0.28 m
+ * tube, and it will move again by itself if the asset changes.
+ *
+ * Nothing about it is delicately chosen: the arch turned a quarter-turn out of
+ * the gate plane put its ends **6.11 m** from the nearest post.
+ */
+const GATE_FOOT_TOLERANCE = GATE_POST_COLLIDER_RADIUS + 0.3;
+
+/**
+ * How far off square to the way out the gate may sit, as |cos| of the angle
+ * between its long axis and the outward radial.
+ *
+ * 0.2 is about 11.5 degrees of lean, which is far more than a correctly built
+ * gate ever has (it measures 0.00 on the canonical seed) and far less than the
+ * 1.00 a gate laid flat along the path measures.
+ */
+const GATE_SQUARENESS_TOLERANCE = 0.2;
+
+/**
+ * How nearly the lettered face must point out of the park, as the cosine of
+ * the angle between them. 0.8 is about 37 degrees of slop — generous, because
+ * the failure this exists for is a **180 degree** one, which measures -1.00.
+ */
+const GATE_FACING_TOLERANCE = 0.8;
+
+/**
+ * How far inside the park the gate probe stands, in metres.
+ *
+ * Derived from the reach a gate post has over a child — `PLAYER_RADIUS` (0.62)
+ * + {@link GATE_POST_COLLIDER_RADIUS} (0.55) = 1.17 m. `solid` is **inside**
+ * that reach, so a child there must be pushed out, which is what proves the
+ * posts carry colliders at all and is the control on the probe.
+ *
+ * It must not be pointed at the gate line itself: the park boundary keeps a
+ * child *inside* the park, so a `PLAYER_RADIUS` body standing on the line
+ * overlaps the outside and every probe along it comes back blocked — 33 of 33
+ * across the gate on the canonical seed, whatever the gate is doing.
+ *
+ * `open` (1.5 m, outside the posts' reach and clear of the boundary) is what
+ * the withheld walkability clause used, kept here for whoever lands it with
+ * issue #481's fix.
+ */
+const GATE_POST_PROBE_INSET = { solid: 1.0, open: 1.5 } as const;
+
+/**
+ * How much further than its own reach a pier may hold a child before we
+ * conclude something else is holding her.
+ *
+ * The pier resolves a child to exactly `PLAYER_RADIUS +
+ * GATE_POST_COLLIDER_RADIUS` = 1.42 m from its centre. On the canonical seed
+ * the *left* pier's probe comes to rest at 1.53 m — the boundary wall, whose
+ * end sits alongside that pier and pushes the same way. 0.05 m is well inside
+ * that 0.11 m gap and well outside float noise.
+ */
+const GATE_MASK_TOLERANCE = 0.05;
 
 const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
-  // **What this invariant does not assert.** Written before the early returns
-  // below, not after, so a park with no gate in it at all still says what is
-  // uncovered rather than falling silent at the one moment that matters.
-  //
-  // There is no clause here that the gateway is *walkable* — that a child can
-  // actually get from outside the gate to inside it. That clause was written
-  // on this branch, it worked, and it found a defect that is not this one: the
-  // park boundary is a seed-dependent spline while the gate is a fixed
-  // constant at (0, 60), so on some seeds the boundary wall ran *across* the
-  // opening — pool seed 288 (a chain of 0.18 m walls through (0.01, 57.76))
-  // and sweep seed 18 (through (-1.13, 59.87), shut but for a 1 m slot at
-  // x = 3.5). It was withheld rather than weakened, to land with that fix.
-  //
-  // **It has since landed, and not here.** #481 was fixed by #485, which moved
-  // the boundary masonry out of the opening and brought its own invariant,
-  // `theWalkInFromTheGateIsWalkable`, over `gatewayWalk.ts`'s full-width flood
-  // fill. So the clause is no longer withheld — it exists, it is simply owned
-  // by the check next door, and this one stays about the arch. The note above
-  // says which, because "asserts nothing about X" is only useful to the next
-  // reader if it also says who does.
-  //
-  // On `process.stderr`, because Vitest shows `console.log` from *failing*
-  // tests only and this note exists for the passing runs.
-  const say = (line: string): void => process.stderr.write(`${line}\n`);
-
   const arch = facts.parkGateArch;
   if (!arch) {
-    say(GATE_UNCOVERED + ' — and there is no gate in the scene at all, so it covers nothing else either');
     return [
       'NO SCENE OBJECT "park-gate-arch": the park has no front gate to measure. ' +
         'Either the entrance stopped building one or the crossbar lost its name, ' +
@@ -857,7 +912,6 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
     ];
   }
   if (arch.posts.length !== 2) {
-    say(GATE_UNCOVERED + ` — and the gate has ${arch.posts.length} named posts, so clause 1 covers nothing`);
     return [
       `the park gate has ${arch.posts.length} named posts in the built scene, not 2 — ` +
         'clause 1 below has nothing to measure the arch against',
@@ -877,7 +931,9 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
   const along = (t: number): readonly [number, number] =>
     alongX ? [arch.centreX + t * half, arch.centreZ] : [arch.centreX, arch.centreZ + t * half];
 
-  // 1. Each end of the arch comes down on a post.
+  // 1. Each end of the arch comes down on a post. `GATE_FOOT_TOLERANCE` is
+  // the arch's own tube plus a hand's width — a foot further off its post
+  // than that is not standing on it.
   for (const t of [-1, 1] as const) {
     const [x, z] = along(t);
     let nearest = Infinity;
@@ -890,81 +946,175 @@ const theParkGateArchStandsOverItsGateway: Invariant = (facts) => {
           `${nearest.toFixed(2)} m from the nearest post — it is not standing on the gate, so it is ` +
           `pointing somewhere the gate does not go (it spans ${span.toFixed(2)} m along ` +
           `${alongX ? 'X' : 'Z'}, posts at ` +
-          arch.posts.map((post) => `(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`).join(' and ') +
-          ')',
+          arch.posts.map((post) => `(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`).join(' and '),
       );
     }
   }
 
-  // 2. The gate is solid where a child bumps into it — and the probe proves
-  // itself at each post before it is believed there.
+  // 1b. **The gate spans its own gateway, and faces out of the park.**
   //
-  // **Why per-post and not once:** on the canonical seed, with the colliders
-  // removed, the *east* post's probe flips to standable — a clean control —
-  // while the west post's stays blocked, because something other than the post
-  // occupies that ground. A clause that quietly covers one post while reading
-  // as though it covers two is the disease this file is most often about. So
-  // each post is asked twice: outside the post's reach (must be open, or
-  // nothing here is being answered by the gate) and inside it (must be
-  // closed), and the stderr note below reports how many posts survived that.
+  // Clause 1 above can no longer see either of these, and that is worth
+  // stating plainly rather than leaving as cover it does not give. It caught
+  // #480 because the crossbar carried a rotation its posts did not — a
+  // *disagreement* between two meshes. The authored arch is one asset, and
+  // `gateArch.ts` derives the pier markers from the very rotation it turns
+  // that asset by, so mesh and markers now turn together by construction:
+  // clause 1 is green for a gate laid flat along the path, which was proved by
+  // turning `outward` 90 degrees and watching it stay green.
   //
-  // **What the count is, measured on the rebased tree** (`test:procgen`, five
-  // seeds, 541 tests, exit 0): **9 of 10 post-probes live** — four seeds at 2
-  // of 2, one seed masked at (-4.30, 60.00) — and no seed where it asserts
-  // nothing. Before the rebase onto #485 it was 5 of 10 with two seeds
-  // covering nothing at all; moving the boundary masonry out of the opening is
-  // what freed the other four. Both numbers were true when taken, which is the
-  // reason this one is dated to the tree it was read off rather than left as a
-  // bare figure for the next reader to trust.
+  // So these two ask the questions that survived. Both are measured against
+  // the arch's own world position on the boundary rather than against
+  // `ENTRANCE_ANGLE`, which is the constant the builder already used.
+  const outwardLength = Math.hypot(arch.centreX, arch.centreZ);
+  if (outwardLength < 1e-6) {
+    fouls.push('the park gate stands at the middle of the park, so there is no outward direction to check it against');
+  } else {
+    const outX = arch.centreX / outwardLength;
+    const outZ = arch.centreZ / outwardLength;
+
+    // The gate must span *across* the way out, not along it: its long
+    // horizontal axis is perpendicular to the outward radial.
+    const alongX2 = arch.maxX - arch.minX >= arch.maxZ - arch.minZ;
+    const spanDotOut = Math.abs(alongX2 ? outX : outZ);
+    if (spanDotOut > GATE_SQUARENESS_TOLERANCE) {
+      fouls.push(
+        `the gate arch's long axis runs along ${alongX2 ? 'X' : 'Z'}, which is ${spanDotOut.toFixed(2)} of the ` +
+          `way parallel to the outward direction (${outX.toFixed(2)}, ${outZ.toFixed(2)}) out of the park — ` +
+          'the gate is lying along the path rather than spanning it, so there is nothing to walk under',
+      );
+    }
+
+    // ...and the lettering faces the child arriving, not the fountain. The
+    // *only* clause that can see a gate installed 180 degrees out: the box,
+    // the piers, the headroom and the colliders are all identical either way.
+    const facingOut = arch.forwardX * outX + arch.forwardZ * outZ;
+    if (facingOut < GATE_FACING_TOLERANCE) {
+      fouls.push(
+        `the gate arch's lettered face points (${arch.forwardX.toFixed(2)}, ${arch.forwardZ.toFixed(2)}), only ` +
+          `${facingOut.toFixed(2)} of the way towards the outward direction (${outX.toFixed(2)}, ` +
+          `${outZ.toFixed(2)}) — LAND OF GOOD PLACES and the ferris-wheel roundel are turned in at the park ` +
+          'instead of out at the child getting off the bus. Nothing about the arch\'s shape can catch this: ' +
+          'an arch 180 degrees out has an identical bounding box.',
+      );
+    }
+  }
+
+  // 2. The gate is solid where a child bumps into it: a stride in front of
+  // each post, inside the reach the post is supposed to have over her. This
+  // is the clause that fails if the gate loses its colliders, and it is also
+  // this probe's control — it must be able to answer "no" before an answer of
+  // "yes" anywhere else is worth anything.
   const toMiddle = Math.hypot(arch.centreX, arch.centreZ);
   const inward: readonly [number, number] =
     toMiddle > 1e-6 ? [-arch.centreX / toMiddle, -arch.centreZ / toMiddle] : [0, 0];
-  const reach = GATE_POST_REACH;
-  let postsCovered = 0;
+  //
+  // **A probe is only worth reading where the pier is the only thing that
+  // could have blocked it**, and on the canonical seed one of the two is not.
+  // The boundary wall runs close in on the left of the gate: at (-4.30, 59.00)
+  // a child is pushed to z 58.47 by the wall whatever the pier does, so
+  // deleting the left pier's collider left this clause **green** — proved, by
+  // deleting it. Half a clause, silently, on the gate that is the whole point
+  // of the check.
+  //
+  // So each pier is first asked whether it *can* be measured: is the ground
+  // just outside its reach free? If not, the pier is masked, and this clause
+  // says so on stderr rather than reporting a solidity it never established.
+  let covered = 0;
   const masked: string[] = [];
-
+  const pierReach = PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS;
   for (const post of arch.posts) {
-    const at = (inset: number): readonly [number, number] => [
-      post.x + inward[0] * inset,
-      post.z + inward[1] * inset,
-    ];
-    const [clearX, clearZ] = at(GATE_POST_PROBE_INSET.clear);
-    if (!facts.isStandable(clearX, clearZ)) {
-      // Something that is not this post is answering here, so the reading a
-      // stride closer cannot be attributed to the post's collider.
-      masked.push(`(${post.x.toFixed(2)}, ${post.z.toFixed(2)})`);
+    // **Is this pier's probe decisive?** Put a child inside the pier's reach
+    // and see *where she is held*. A pier can only ever hold her at exactly
+    // its own reach; if she comes to rest further out than that, something
+    // else is doing the holding and deleting the pier would not move her — so
+    // the probe below cannot see the pier at all.
+    //
+    // Asking "was she pushed?" instead is what failed: the boundary wall and
+    // the left pier push in the *same direction* on the canonical seed, so the
+    // clause stayed green with that pier's collider deleted.
+    const at = facts.pushedTo(
+      post.x + inward[0] * GATE_POST_PROBE_INSET.solid,
+      post.z + inward[1] * GATE_POST_PROBE_INSET.solid,
+    );
+    const held = Math.hypot(at.x - post.x, at.z - post.z);
+    if (held > pierReach + GATE_MASK_TOLERANCE) {
+      masked.push(
+        `(${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — a child probing it is held ${held.toFixed(2)} m out, ` +
+          `beyond the pier's own ${pierReach.toFixed(2)} m reach, so something that is not the gate owns ` +
+          'that ground and deleting this pier would change nothing here',
+      );
       continue;
     }
-    postsCovered += 1;
-    const [solidX, solidZ] = at(GATE_POST_PROBE_INSET.solid);
-    if (facts.isStandable(solidX, solidZ)) {
+    covered += 1;
+    const x = post.x + inward[0] * GATE_POST_PROBE_INSET.solid;
+    const z = post.z + inward[1] * GATE_POST_PROBE_INSET.solid;
+    if (facts.isStandable(x, z)) {
       fouls.push(
-        `a child can stand at (${solidX.toFixed(2)}, ${solidZ.toFixed(2)}), ${GATE_POST_PROBE_INSET.solid} m ` +
-          `in front of the gate post at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
-          `${reach.toFixed(2)} m the post is supposed to hold her off, so the gate is not solid`,
+        `a child can stand at (${x.toFixed(2)}, ${z.toFixed(2)}), ${GATE_POST_PROBE_INSET.solid} m in front of ` +
+          `the gate pier at (${post.x.toFixed(2)}, ${post.z.toFixed(2)}) — inside the ` +
+          `${(PLAYER_RADIUS + GATE_POST_COLLIDER_RADIUS).toFixed(2)} m the pier is supposed to hold her ` +
+          'off, so the gate is not solid',
       );
     }
   }
-
-  say(
-    `${GATE_UNCOVERED}; its solidity clause is live on ${postsCovered} of ${arch.posts.length} gate posts` +
-      (masked.length > 0
-        ? ` — masked at ${masked.join(' and ')}, where something that is not the post already blocks ` +
-          `${GATE_POST_PROBE_INSET.clear.toFixed(2)} m out, past the ${reach.toFixed(2)} m the post ` +
-          `itself reaches, so the reading a stride closer proves nothing there`
-        : ''),
-  );
-  if (postsCovered === 0) {
-    say('  ...so the gate-is-solid clause asserts NOTHING on this seed');
+  if (masked.length > 0) {
+    process.stderr.write(
+      `the park gate's solidity clause could measure ${covered} of ${arch.posts.length} piers on this seed; ` +
+        `masked: ${masked.join('; ')}\n`,
+    );
+  }
+  // A clause that measured neither pier is not a passing clause.
+  if (covered === 0) {
+    fouls.push(
+      'neither gate pier could be measured for solidity: the ground in front of both is blocked by ' +
+        'something that is not the gate, so this clause established nothing at all about whether the ' +
+        'gate is solid. It must not report success about something it is not describing.',
+    );
   }
 
-  // 3. Nothing of it hangs into that gap.
-  const headroom = arch.minY - arch.groundY;
-  if (headroom < TALLEST_CHILD_HEIGHT) {
+  // **What this invariant deliberately does NOT assert, and why.** There is no
+  // clause here that the gateway is *walkable* — that a child can actually get
+  // from outside the gate to inside it — and that gap is real cover this check
+  // does not give.
+  //
+  // It was written, it worked, and it found a defect that is not this one: the
+  // park boundary is a seed-dependent spline while the gate is a fixed
+  // constant at (0, 60), so on some seeds the boundary wall runs *across* the
+  // opening. Measured 1.5 m inside the gate, the middle of the way in is
+  // blocked on pool seed 288 (a chain of 0.18 m walls through (0.01, 57.76))
+  // and on sweep seed 18 (through (-1.13, 59.87), the opening shut but for a
+  // 1 m slot at x = 3.5). That is the two-definitions disease and it predates
+  // this file's interest in the gate; it is issue #481, and the walkability
+  // clause lands with its fix rather than being weakened to go green here.
+  //
+  // Announced on stderr on every run, passing or failing, because a green line
+  // that implies cover it does not give is how the next agent inherits a false
+  // belief — and Vitest only shows `console.log` from *failing* tests.
+  process.stderr.write(
+    'the park gate arch invariant asserts nothing about whether a child can walk through the gateway ' +
+      '— the boundary crosses it on some seeds (#481); it covers only the arch spanning and facing its ' +
+      'gateway, the piers being solid, and the headroom.\n' +
+      'Its foot clause no longer covers a whole-gate rotation: mesh and pier markers are derived from one ' +
+      'rotation in gateArch.ts, so they turn together and the clause stays green for a gate laid along the ' +
+      'path. That case is covered by the squareness and facing clauses instead; the foot clause now only ' +
+      'proves the markers the colliders use agree with the mesh that is drawn.\n',
+  );
+
+  // 3. Nothing of it hangs into that gap. Raycast up through the opening —
+  // see the note on clause 3 above for why the bounding box cannot answer this.
+  if (!(arch.headroom < Infinity)) {
     fouls.push(
-      `the gate arch reaches down to ${arch.minY.toFixed(2)} m, ${headroom.toFixed(2)} m over ground at ` +
-        `${arch.groundY.toFixed(2)} m — less than the ${TALLEST_CHILD_HEIGHT} m of the tallest child the ` +
-        'park can make, so she walks through it',
+      'nothing at all overhangs the park gateway: rays cast up through the opening hit no part of the ' +
+        'arch, so there is no arch over the way in — and every headroom number below would have been ' +
+        'vacuously generous',
+    );
+  } else if (arch.headroom < TALLEST_CHILD_HEIGHT) {
+    const where = arch.lowestOverheadAt;
+    fouls.push(
+      `the gate arch comes down to ${arch.headroom.toFixed(2)} m over the opening` +
+        (where ? ` at (${where.x.toFixed(2)}, ${where.z.toFixed(2)})` : '') +
+        ` — less than the ${TALLEST_CHILD_HEIGHT} m of the tallest child the park can make, so she ` +
+        'walks through it',
     );
   }
 
@@ -1191,6 +1341,36 @@ const rideExitsAreUsable: Invariant = (facts) => {
 };
 
 /**
+ * **Every doormat in the park can be walked to from the gate** — every anchor
+ * entrance and every stall's stand point, routed on the real nav lattice.
+ *
+ * The railway fences the park into pieces a child can only cross by bridge,
+ * and a loop that pinches back on itself can fence a doormat into a pocket no
+ * bridge reaches. Seed 24 on eng/sphere-six-reds did exactly that to
+ * `stall.spookyHouse` (a 528 m2 lobe behind a 4.0 m neck, both bridge sites
+ * on the far side), and seed 451 did it to the Rail Race stall. Neither was
+ * caught here only because `crossings.ts` refused the illegal path first; this
+ * asks the question of the built park directly, so a pocket whose path was
+ * simply never drawn is caught too. `train/route.ts`'s
+ * `loopLeavesEveryDestinationOnTheCrossing` is what keeps it green.
+ */
+const everyDoormatIsReachableFromTheGate: Invariant = (facts) => {
+  const complaints: string[] = [];
+  for (const entrance of facts.entrances) {
+    if (!facts.reachableFromEntrance(entrance.x, entrance.z)) {
+      complaints.push(
+        `${entrance.id} at ${fmt([entrance.x, entrance.z])} cannot be walked to from the park entrance`,
+      );
+    }
+  }
+  process.stderr.write(
+    `everyDoormatIsReachableFromTheGate: routed to ${facts.entrances.length} doormat(s) on seed ${facts.seed}\n`,
+  );
+  if (facts.entrances.length === 0) complaints.push('the built park has no doormats — this asserted nothing');
+  return complaints;
+};
+
+/**
  * The Rail Race's exit has room for the whole **party** that arrives on it, not
  * just for one child.
  *
@@ -1332,6 +1512,65 @@ const noPathEndsNowhere: Invariant = (facts) => {
     }
   }
   return strays;
+};
+
+/**
+ * How far a branching ribbon's end may sit from the centre line of the paving
+ * it joins: half `parkFacts.ts`'s ~0.5 m resampling pitch, so the sampling
+ * itself can never be the gap, and well under the 0.42-0.80 m by which a
+ * filleted corner used to miss the junction built on it.
+ */
+const JUNCTION_ON_CENTRELINE = 0.25;
+
+/**
+ * **A spur starts on the drawn centre line of the path it branches from.**
+ *
+ * {@link noPathEndsNowhere} asks whether a ribbon's end lands on paving, and a
+ * wide ribbon forgives most of a metre. This asks the stricter question the
+ * junction itself poses: is the point the router joined at a point of the path
+ * that was built? Before `paths.ts`'s `squareJunctionCorners`, every pool seed
+ * had 3-16 spurs starting on another route's *control* corner while the drawn
+ * ribbon rounded that corner 0.62 m inside it — overlap by luck, and on
+ * eng/sphere-six-reds seed 326 the router and
+ * {@link detourRatiosStayReasonable} measured the same walk as 28.4 m and
+ * 157.5 m.
+ */
+const everySpurStartsOnTheDrawnCentreLine: Invariant = (facts) => {
+  const complaints: string[] = [];
+  let judged = 0;
+  for (const edge of facts.pathEdges) {
+    if (edge.backbone) continue;
+    const ends = [
+      ['start', edge.from, edge.points[0]],
+      ['end', edge.to, edge.points[edge.points.length - 1]],
+    ] as const;
+    for (const [which, id, point] of ends) {
+      if (id !== 'ring' || !point) continue;
+      judged += 1;
+      let best = Infinity;
+      for (const other of facts.pathEdges) {
+        if (other.name === edge.name) continue;
+        const count = other.backbone ? other.points.length : other.points.length - 1;
+        for (let i = 0; i < count; i += 1) {
+          const a = other.points[i]!;
+          const b = other.points[(i + 1) % other.points.length]!;
+          best = Math.min(best, pointToSegment(point, a, b));
+        }
+      }
+      for (const node of facts.pathNodes) {
+        if (node.reach > 0) best = Math.min(best, Math.max(0, Math.hypot(point[0] - node.x, point[1] - node.z) - node.reach));
+      }
+      if (best > JUNCTION_ON_CENTRELINE) {
+        complaints.push(
+          `${edge.name}'s ${which} at ${fmt(point)} is ${best.toFixed(2)} m from the centre line of ` +
+            'any other drawn path — it joins at a point that was never built',
+        );
+      }
+    }
+  }
+  process.stderr.write(`everySpurStartsOnTheDrawnCentreLine: judged ${judged} junction end(s) on seed ${facts.seed}\n`);
+  if (judged === 0) complaints.push('no branching ribbon end was judged — this asserted nothing');
+  return complaints;
 };
 
 /**
@@ -2811,6 +3050,108 @@ const DROPPER_RAIL_TOLERANCE = 0.25;
  *    the classic "walked into a rail that is not drawn" bug. Checked by asking
  *    the real collision world what is at each measured leg position.
  */
+/**
+ * **A post a child can see is solid at every height she can touch it.**
+ *
+ * `railRaceRingsStandOutsideThePark`'s solidity clause asks whether a collider
+ * sits under each leg's **foot**. That is the right question about the foot and
+ * it is not the whole question about the post: it was moved midpoint→foot
+ * precisely because legs had begun to lean, which fixed the *collider* question
+ * and left the **mesh-versus-collider** one unasked — and unasked, it was
+ * answerable "no". A leg leans because `trunkFoot` is the nudged spot while
+ * `trunkTop` comes from the lane tops, which are never nudged; with a single
+ * circle at the foot, the drawn post at a child's chest stood up to 0.91 m from
+ * the centre of a 0.272 m collider, and she walked through it.
+ *
+ * So this walks the drawn post upward from its foot and asks, at each step,
+ * whether that point is inside something solid — stopping at
+ * {@link TALLEST_CHILD_HEIGHT}, because above that nothing that walks can reach
+ * it and `keepOutsFor` would rather have the ground.
+ *
+ * **Only the walk-past ring.** The race ring deliberately registers no
+ * colliders (it is hidden except mid-race), so asking this of it would demand
+ * the exact bug the sibling invariant forbids.
+ */
+const everyPostIsSolidAllTheWayUpAChild: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const solid: { x: number; z: number; radius: number }[] = [];
+  facts.world.collision.forEachCircle((x, z, radius) => {
+    solid.push({ x, z, radius });
+  });
+
+  const ring = builtRings(facts).find((candidate) => candidate.label === 'walk-past');
+  if (!ring) {
+    complaints.push('there is no walk-past ring in the built scene to measure posts on');
+    return complaints;
+  }
+  const legs = ring.group.getObjectByName('railRace:trestle-legs');
+  if (!(legs instanceof InstancedMesh)) {
+    complaints.push('the walk-past ring has no trestle legs in the built scene to measure');
+    return complaints;
+  }
+
+  const matrix = new Matrix4();
+  const centre = new Vector3();
+  const axis = new Vector3();
+  let leaning = 0;
+  let worstGap = 0;
+  let worstAt = '';
+  /** Finer than the collider chain's own spacing, so it can see between links. */
+  const STEP = 0.05;
+
+  for (let i = 0; i < legs.count; i += 1) {
+    legs.getMatrixAt(i, matrix);
+    centre.setFromMatrixPosition(matrix);
+    axis.setFromMatrixColumn(matrix, 1);
+    const length = axis.length() || 1;
+    axis.divideScalar(length);
+    // Foot and top from the instance's own matrix, the same derivation the
+    // sibling clause uses — measured off the mesh that is drawn, never from the
+    // spot the generator meant to put it at.
+    const footX = centre.x - (axis.x * length) / 2;
+    const footZ = centre.z - (axis.z * length) / 2;
+    const lean = Math.hypot(axis.x, axis.z) * length;
+    if (lean > STEP) leaning += 1;
+
+    // How far up this post a child can still walk into it, as a length along
+    // the post rather than a height, because a leaning post covers less height
+    // per metre of itself.
+    const rise = Math.abs(axis.y) * length;
+    const reachable = rise > 0 ? Math.min(length, (TALLEST_CHILD_HEIGHT / rise) * length) : 0;
+    for (let along = 0; along <= reachable; along += STEP) {
+      const x = footX + axis.x * along;
+      const z = footZ + axis.z * along;
+      let gap = Infinity;
+      for (const circle of solid) gap = Math.min(gap, Math.hypot(circle.x - x, circle.z - z) - circle.radius);
+      if (gap > 0 && gap > worstGap) {
+        worstGap = gap;
+        worstAt = `${fmt([x, z])} at ${(Math.abs(axis.y) * along).toFixed(2)} m up`;
+      }
+    }
+  }
+
+  // Says what it covered on every run, passing or failing — a park whose legs
+  // all stand straight asserts far less than one whose legs lean, and a reader
+  // has no way to tell those apart from a bare green line.
+  process.stderr.write(
+    `[post solidity] ${legs.count} walk-past posts, ${leaning} of them leaning, ` +
+      `swept to ${TALLEST_CHILD_HEIGHT} m at ${STEP} m\n`,
+  );
+  if (leaning === 0) {
+    process.stderr.write('[post solidity] no post leans on this seed — asserts nothing beyond the foot\n');
+  }
+
+  if (worstGap > 0) {
+    complaints.push(
+      `a walk-past trestle post is drawn ${worstGap.toFixed(2)} m outside anything solid at ` +
+        `${worstAt} — a child can see the post there and walk straight through it. The collider ` +
+        'is registered along the post in `track.ts`\'s `addPostCollider`; a leaning post whose ' +
+        'collider is a single circle at its foot is the fault this exists to catch',
+    );
+  }
+  return complaints;
+};
+
 const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   const complaints: string[] = [];
   const rings = builtRings(facts);
@@ -2917,6 +3258,7 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   });
   const matrix = new Matrix4();
   const at = new Vector3();
+  const legAxis = new Vector3();
   for (const ring of rings) {
     const legs = ring.group.getObjectByName('railRace:trestle-legs');
     if (!(legs instanceof InstancedMesh)) {
@@ -2926,7 +3268,28 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
     const wantsSolid = ring.label === 'walk-past';
     for (let i = 0; i < legs.count; i += 1) {
       legs.getMatrixAt(i, matrix);
+      // **The foot, not the instance centre.** `track.ts`'s `strut` composes a
+      // leg's matrix about the *midpoint* of foot-to-top, and registers its
+      // collider at the foot — so on a leg that leans (a trestle whose spot was
+      // nudged sideways to find clear ground, while its branch tops stay under
+      // the rails) the two are different places. Measured on the canonical seed:
+      // the centre drifts up to **2.00 m** horizontally from the foot, and at
+      // that lean this test reported four perfectly solid legs as "not solid".
+      //
+      // This was always the wrong point to ask about, and the reason it read
+      // green for so long is that legs barely leaned: the collider is at the
+      // foot, which is the only place a child's feet can meet a post, and the
+      // centre is four metres in the air. Asking about the foot is also
+      // strictly stronger — the old form would have passed a leg whose foot had
+      // no collider at all if its midpoint happened to overhang a neighbour's
+      // circle. Control run when this was changed: of 100 legs, 50 (the whole
+      // race ring, which registers nothing) have no collider under the foot and
+      // 50 (the whole walk-past ring) do, so the test still separates the two
+      // rings exactly as it is written to.
       at.setFromMatrixPosition(matrix);
+      legAxis.setFromMatrixColumn(matrix, 1);
+      const legLength = legAxis.length() || 1;
+      at.addScaledVector(legAxis.divideScalar(legLength), -legLength / 2);
       const found = solid.some(
         (circle) => Math.hypot(circle.x - at.x, circle.z - at.z) < circle.radius,
       );
@@ -3800,24 +4163,36 @@ const theGinormousSlideIsRideable: Invariant = (facts) => {
   }
 
   // --- 1. it goes down, all the way down ------------------------------------
-  let worstRise = 0;
-  let worstRiseAt: readonly [number, number, number] = first;
-  for (let i = 1; i < chute.length; i += 1) {
-    const before = chute[i - 1];
-    const here = chute[i];
-    if (!before || !here) continue;
-    const rise = here[1] - before[1];
-    if (rise > worstRise) {
-      worstRise = rise;
-      worstRiseAt = here;
+  //
+  // Measured against the local up, not world `y`, and owned by
+  // {@link theGinormousSlideNeverClimbs} — see there for why the world-`y`
+  // version this clause used to be was reading the wrong frame (#645).
+
+  // --- 1b. it stays out of the ground ---------------------------------------
+  //
+  // The trough's underside, measured against the ground along the local up
+  // (`altitudeAt`), at every built sample. Nothing asked this, and seed 326's
+  // chute ran 0.48 m under the grass 8 m before the pit; a faster search then
+  // found routes on seeds 11 and 24 that went 1.47 m and 0.06 m under.
+  {
+    let deepest = 0;
+    let deepestAt: readonly [number, number, number] = first;
+    let buried = 0;
+    for (const point of chute) {
+      const underside = altitudeAt(point[0], point[1], point[2]) - facts.chuteEnvelope.below;
+      if (underside < 0) buried += 1;
+      if (underside < deepest) {
+        deepest = underside;
+        deepestAt = point;
+      }
     }
-  }
-  if (worstRise > SLIDE_MAY_RISE) {
-    complaints.push(
-      `the ginormous slide climbs ${worstRise.toFixed(3)} m at ` +
-        `(${worstRiseAt[0].toFixed(1)}, ${worstRiseAt[1].toFixed(1)}, ${worstRiseAt[2].toFixed(1)}) ` +
-        '— a slide that goes uphill is one a child stops on',
-    );
+    if (buried > 0) {
+      complaints.push(
+        `the ginormous slide runs into the ground: ${buried} of ${chute.length} samples have ` +
+          `the trough's underside below the grass, deepest ${(-deepest).toFixed(2)} m at ` +
+          `(${deepestAt[0].toFixed(1)}, ${deepestAt[1].toFixed(1)}, ${deepestAt[2].toFixed(1)})`,
+      );
+    }
   }
 
   // --- 2. it finishes in the ball pit ---------------------------------------
@@ -3889,6 +4264,93 @@ const theGinormousSlideIsRideable: Invariant = (facts) => {
   }
 
   return complaints;
+};
+
+/**
+ * **The ginormous slide never climbs, measured against the up a rider feels.**
+ * (Issue #645.)
+ *
+ * This was clause 1 of {@link theGinormousSlideIsRideable}, and it compared
+ * world `y` between samples. That is the wrong frame on a planet: the chute's
+ * last metres run out over ground that curves away from the park's centre, so a
+ * chute that falls steadily in world `y` falls *less* than the ground does, and
+ * a child on it goes uphill. Measured before the fix, every profiled seed rose
+ * 3–13° over its last 5–8 m while the world-`y` clause stayed green.
+ *
+ * So the rise is the step between two built samples projected on the local up
+ * at their midpoint — `Geo.up`, the one owner of that direction — which is what
+ * gravity pulls a rider along. The tolerance is {@link SLIDE_MAY_RISE}, the same
+ * spline-overshoot allowance the old clause used.
+ *
+ * It also reports, on stderr, the steepest stretch of chute in that same frame
+ * (over a 2 m window), because that is the number a ride-feel judgement has to
+ * be made on and the world-`y` one understates it.
+ */
+const theGinormousSlideNeverClimbs: Invariant = (facts) => {
+  const chute = facts.slideChute;
+  if (chute.length < 2) return ['the ginormous slide has no chute, so its climb measured nothing'];
+  const up = new Vector3();
+  const geo = new Geo();
+  let worstRise = 0;
+  let worstAt = 0;
+  let climbedMetres = 0;
+  let firstClimbFromEnd = Infinity;
+  const along: number[] = [0];
+  const drop: number[] = [0];
+  for (let i = 1; i < chute.length; i += 1) {
+    const a = chute[i - 1]!;
+    const b = chute[i]!;
+    geo.setFromWorld((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2).up(up);
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const dz = b[2] - a[2];
+    const rise = dx * up.x + dy * up.y + dz * up.z;
+    along.push(along[i - 1]! + Math.hypot(dx, dy, dz));
+    drop.push(drop[i - 1]! - rise);
+    if (rise > SLIDE_MAY_RISE) climbedMetres += rise;
+    if (rise > worstRise) {
+      worstRise = rise;
+      worstAt = i;
+    }
+  }
+  const total = along[along.length - 1]!;
+  for (let i = 1; i < chute.length; i += 1) {
+    if (drop[i]! < drop[i - 1]! - SLIDE_MAY_RISE) {
+      firstClimbFromEnd = Math.min(firstClimbFromEnd, total - along[i - 1]!);
+      break;
+    }
+  }
+  // Steepest in the rider's frame, over a 2 m window so one short sample cannot
+  // stand in for a slope.
+  let steepest = 0;
+  let steepestAt = 0;
+  for (let i = 0, j = 0; i < chute.length; i += 1) {
+    while (j < chute.length - 1 && along[j]! - along[i]! < 2) j += 1;
+    const run = along[j]! - along[i]!;
+    if (run < 1.5) break;
+    const fall = drop[j]! - drop[i]!;
+    const degrees = (Math.asin(Math.min(1, Math.max(-1, fall / run))) * 180) / Math.PI;
+    if (degrees > steepest) {
+      steepest = degrees;
+      steepestAt = along[i]!;
+    }
+  }
+  process.stderr.write(
+    `  seed ${facts.seed}: the ginormous slide in its own frame: ${total.toFixed(1)} m, falls ` +
+      `${drop[drop.length - 1]!.toFixed(2)} m along local up, steepest ` +
+      `${steepest.toFixed(1)}° at ${steepestAt.toFixed(1)} m, worst climb ` +
+      `${(worstRise * 1000).toFixed(1)} mm per sample, ${climbedMetres.toFixed(3)} m climbed in all\n`,
+  );
+  if (worstRise <= SLIDE_MAY_RISE) return [];
+  const at = chute[worstAt]!;
+  return [
+    `the ginormous slide climbs ${worstRise.toFixed(3)} m between two samples ` +
+      `(${(along[worstAt]! - along[worstAt - 1]!).toFixed(2)} m apart) against the local up at ` +
+      `(${at[0].toFixed(1)}, ${at[1].toFixed(1)}, ${at[2].toFixed(1)}), ` +
+      `${(total - along[worstAt]!).toFixed(1)} m from the end; it climbs ` +
+      `${climbedMetres.toFixed(3)} m in all, starting ${firstClimbFromEnd.toFixed(1)} m ` +
+      'from the end — a slide that goes uphill is one a child stops on',
+  ];
 };
 
 /**
@@ -3998,17 +4460,66 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  *
  * ### What is true, measured
  *
- * The chute crosses the south wall plane at **y 14.84** on every one of the
- * five seeds, and the tallest stone — the crenellations — tops out at
- * **y 10.29**. What matters is the chute's *underside*, at 14.84 − 1.11 =
- * **13.73 m**, so the air a rider actually has under them is **3.44 m** — not
- * the 4.55 m the centre line clears by, which is the number this was first
- * written up with. (Corrected in review. Two numbers describing one gap is the
- * exact habit this branch has now been bitten by twice; the code below was
- * always right, only the prose was loose.)
- *
  * So the honest guarantee is not "it goes through the hole" but "it goes over
  * the top, and there is air under it", and that is what is asserted here.
+ *
+ * On the canonical seed the chute crosses the south wall plane (z 21.823) at
+ * world **(55.48, 9.69, 21.82)**, which is **17.302 m** above the planet's
+ * surface; its underside is `CHUTE_HALF_WIDTH` below that at **16.192 m**, and
+ * the tallest stone — a **`crenellations`** merlon at world (35.52, 7.08,
+ * 20.40) — reaches **10.750 m**. The air a rider has under them is therefore
+ * **5.44 m**.
+ *
+ * A second instrument agrees, by a different route: the shortest distance from
+ * the built chute's centre line to any masonry vertex is **6.788 m** (chute
+ * (55.38, 9.69, 22.46), a `crenellations` vertex at (54.04, 3.04, 22.34)), so
+ * beyond the 1.11 half-width there is **5.678 m** of daylight. Two methods that
+ * share only the built scene, agreeing to within a quarter of a metre.
+ *
+ * That figure was **9.450 m** in an earlier draft, and it was wrong for the
+ * same reason everything else here was: the instrument that produced it walked
+ * masonry vertices without their per-instance matrices, so it was measuring
+ * distance to a castle with no battlements. Corroboration from a second
+ * instrument is worth only as much as the independence of its *method*.
+ *
+ * ### Why every number in the paragraph above is a radius (issue #625)
+ *
+ * This invariant was green for months while reading a fact that under-reported
+ * the stonework by **2.710 m**, because the fact took an axis-aligned box's
+ * `max.y` and the castle *leans* — it stands ~48 m out from the park's origin
+ * on a sphere of radius `GROUND_SPHERE_RADIUS`, where a plumb line down world
+ * `+Y` is nothing like its own up. The prose this section replaced quoted
+ * "y 14.84" against "y 10.29" and had been honestly measured; both were world
+ * `y`, both were wrong about the park, and the clearance they implied happened
+ * to be in the dangerous direction.
+ *
+ * The trap in fixing it, worth naming because it caught the first attempt: the
+ * issue reported the chute **1.19 m inside the battlements**, which is not a
+ * measurement of anything. It came from correcting only one side — a radial
+ * stone against a plumb underside — and those agree only at the park's origin.
+ * Correct both, as the code below now does, and the intrusion is not reduced,
+ * it does not exist: **+5.44 m clear**.
+ *
+ * ### And the second trap, which caught the fix itself
+ *
+ * Replacing `Box3.setFromObject` with a hand-rolled vertex walk quietly dropped
+ * the battlements: `crenellations` is an `InstancedMesh` of 40, the walk
+ * applied only the container's matrix, and all forty collapsed onto the origin.
+ * The tallest surviving stone was the lintel band, and the clearance came out
+ * **6.42 m** — 0.9806 m too generous, in the dangerous direction, from a fix
+ * whose entire purpose was to stop under-reporting this number. `Box3` had
+ * been honouring those instance matrices for free.
+ *
+ * Nothing above could see it. The frame guard could not — the number was still
+ * a radius. The clearance clause could not — it was still comfortably positive.
+ * Even the cross-check against `CASTLE_MASONRY_TOP` *appeared* to pass, because
+ * 9.770 sits a tenth of a metre from 9.85 by coincidence, the lintel being
+ * built to `CASTLE_WALL_HEIGHT` 8.8 and the gap being exactly the merlons that
+ * had gone missing.
+ *
+ * That is why two clauses below assert things no earlier draft did: **which
+ * mesh** carries the maximum, and **where that vertex sits in the facade's own
+ * frame**. Either would have caught it on the first run.
  *
  * That is a guarantee worth holding: it is what keeps a child from riding down
  * inside a wall. It fails the moment anyone lowers `START_Y`, raises
@@ -4016,8 +4527,11 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  * far-fetched, and all of which currently pass unnoticed.
  *
  * Measured off the built chute pushed out through the scene graph into world
- * space, against the built masonry's own world bounding boxes — never against
+ * space, against the built masonry's own vertices — never against
  * `slide/plan.ts` or `CASTLE_WALL_HEIGHT`, which are the things under test.
+ * Vertices rather than bounding boxes for the reason in
+ * {@link ParkFacts.castleMasonryTopRadius}: no corner of an axis-aligned box is
+ * a point of the mesh inside it, so the box has no honest radius.
  */
 const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   const complaints: string[] = [];
@@ -4050,7 +4564,12 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // Interpolates across the span that straddles the wall plane rather than
   // taking the nearest sample: at 0.4 m spacing the nearest sample can sit a
   // third of a metre to either side, which is most of the clearance measured.
-  let crossing: { x: number; y: number } | null = null;
+  // `z` is carried as well as `x`/`y` because the clause below needs a *radius*
+  // at this point, and a radius needs all three components. Dropping it and
+  // passing `Math.hypot(x, y + R)` would silently measure a point on the park's
+  // z = 0 meridian instead of this one — a plausible-looking number, ~1 m out
+  // here, and wrong in the same family as the bug this invariant is fixing.
+  let crossing: { x: number; y: number; z: number } | null = null;
   for (let i = 1; i < chute.length; i += 1) {
     const before = chute[i - 1];
     const here = chute[i];
@@ -4065,6 +4584,9 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
     crossing = {
       x: before[0] + (here[0] - before[0]) * t,
       y: before[1] + (here[1] - before[1]) * t,
+      // The wall plane is where this point was interpolated *to*, so its z is
+      // `wallZ` by construction rather than by a third lerp.
+      z: wallZ,
     };
     break;
   }
@@ -4083,10 +4605,29 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
   // The clause that carries the weight. The underside of the chute — its centre
   // line less the half-envelope a rider sits in — must be above the highest
   // masonry, or the ride passes through the battlements.
-  const underside = crossing.y - CHUTE_HALF_WIDTH;
-  const stone = facts.castleMasonryTopY;
+  //
+  // **Both sides are radii from the planet's centre, and that is the whole
+  // point of issue #625.** "Above" on a sphere means "further from the centre",
+  // not "greater world y", and the castle stands ~48 m out from the park's
+  // origin where the two have visibly parted company. The fact was corrected to
+  // a radius; this side is converted in the same change, because a radial stone
+  // against a plumb underside is not a measurement of anything — it subtracts a
+  // height from a radius-minus-`R` and the two agree only at the origin. That
+  // mix is where the headline "1.19 m inside the battlements" came from, and
+  // there is no such intrusion: converted honestly the chute clears by 5.44 m
+  // (the 6.42 m once written here was measured with the merlons missing — see
+  // the docblock above).
+  //
+  // Subtracting `CHUTE_HALF_WIDTH` from a radius is the right thing rather than
+  // a convenience: a radius decreases by exactly one metre for each metre
+  // travelled straight down towards the centre, which is what "underside" means
+  // here. It is very slightly conservative for a chute banked away from
+  // vertical, which is the safe direction.
+  const crossingRadius = Geo.fromWorld(crossing.x, crossing.y, crossing.z).radius();
+  const underside = crossingRadius - CHUTE_HALF_WIDTH;
+  const stone = facts.castleMasonryTopRadius;
 
-  // **A missing measurement is a failure here, not a pass.** `castleMasonryTopY`
+  // **A missing measurement is a failure here, not a pass.** `castleMasonryTopRadius`
   // is a max seeded with `-Infinity` over meshes picked out by name, so if the
   // castle is ever renamed out from under it the fact arrives as `-Infinity` and
   // `underside < -Infinity` is false for *every conceivable chute* — this
@@ -4109,19 +4650,141 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
     complaints.push(
       'no castle stonework was found in the built park at all, so the check that ' +
         'keeps the ginormous slide out of the battlements measured nothing. Either ' +
-        'the castle is missing, or the mesh names `parkFacts.castleMasonryTopY` ' +
+        'the castle is missing, or the mesh names `parkFacts.castleMasonryTopRadius` ' +
         'looks for have changed and this invariant has been silently switched off',
     );
     return complaints;
   }
 
+  // **And it must still be a radius.** (Issue #625.) This clause exists only to
+  // catch a reversion: `castleMasonryTopRadius` was an AABB's `max.y` for
+  // months, and the whole invariant stayed green the entire time because the
+  // other side of the comparison was a world `y` too. Two plumb numbers are
+  // self-consistent and say nothing about a park built on a sphere.
+  //
+  // The guard is deliberately the crudest one that cannot be satisfied by
+  // accident and needs no tolerance to tune: a radius from the planet's centre
+  // is necessarily larger than the planet, and a height above the ground is
+  // necessarily much smaller. Anything that puts a `max.y` back in this field —
+  // the 8.040 m this used to report, or any other height — fails here
+  // immediately and by two orders of magnitude, on every seed, rather than
+  // quietly granting the ride 2.71 m of clearance the battlements do not give.
+  //
+  // **What it does not cover, stated so nobody inherits a false belief:** it
+  // proves the *frame*, not the *value*. A radial measurement that is simply
+  // wrong — the wrong meshes, the wrong matrices, a dropped `InstancedMesh` —
+  // is still a radius and still sails through here. That is not hypothetical:
+  // it is exactly what happened next, and this clause watched it go by.
+  //
+  // The two clauses immediately below are the ones that cover the value, and
+  // they exist because this one could not.
+  if (stone <= GROUND_SPHERE_RADIUS) {
+    complaints.push(
+      `\`parkFacts.castleMasonryTopRadius\` is ${stone.toFixed(3)}, which is not a radius ` +
+        `from the planet's centre — every point in the park is at least ` +
+        `GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS}) from it. Something has put a ` +
+        'world-Y height back in this field, which is issue #625 exactly: the castle ' +
+        'leans, so a plumb line down +Y under-reports its stonework (by 2.71 m on the ' +
+        'canonical seed) and this invariant then grants the ginormous slide clearance ' +
+        'the battlements do not give it',
+    );
+    return complaints;
+  }
+
+  // **The merlons must be the thing that was measured.** (Review of #625.)
+  // The battlements are the top of the castle by construction, so if anything
+  // else carries the maximum, the merlons have dropped out of the measurement.
+  // That is not hypothetical and it is not cheap insurance: the first draft of
+  // the vertex walk above treated `crenellations` — an `InstancedMesh` of 40 —
+  // as a single mesh, collapsed all forty onto the container's origin at
+  // 0.984 m, and handed this invariant the lintel band's 9.770 m instead of the
+  // true 10.750 m. Every number downstream stayed plausible; the clearance was
+  // simply 0.9806 m too generous, in the dangerous direction. This clause is
+  // exact, needs no tolerance, and would have caught it on the first run.
+  if (facts.castleMasonryTopMesh !== 'crenellations') {
+    complaints.push(
+      `the highest castle stonework was found on \`${facts.castleMasonryTopMesh}\`, not on ` +
+        '`crenellations` — the battlements are the top of the castle by construction, so ' +
+        'either they have dropped out of the measurement (an `InstancedMesh` walked without ' +
+        'its per-instance matrices collapses all 40 merlons onto the origin, which is issue ' +
+        "#625's review exactly) or something has grown up through them",
+    );
+    return complaints;
+  }
+
+  // **And it must be at the height the castle is built to.** This is the only
+  // clause here that proves the *value* rather than the frame: the winning
+  // vertex, expressed in the facade's own coordinates, must be
+  // `CASTLE_MASONRY_TOP`. A measurement that is wrong in almost any way — wrong
+  // meshes, dropped instances, a mangled matrix — still looks like a radius and
+  // still passes the units guard below, but it cannot land on 9.85 in the frame
+  // the constant is written in.
+  //
+  // The tolerance is float slack, not a fudge: measured **9.8500** against
+  // 9.85 on the canonical seed. The collapsed walk gave 8.8 — the lintel band's
+  // top, `CASTLE_WALL_HEIGHT` — which is short by exactly
+  // `CASTLE_MERLON_HEIGHT`, because the missing metre *was* the merlons.
+  //
+  // Note it is `CASTLE_MASONRY_TOP`, a facade-local constant, compared against a
+  // facade-local measurement. That is not rules-against-rules: the number under
+  // test is a vertex of the park that was actually built, and the question being
+  // asked is whether it sits where the castle was drawn to put it. Both sides
+  // arrive as *facts* — see `ParkFacts.castleMasonryDesignTopY` for why the
+  // constant cannot be imported here directly.
+  const FACADE_Y_SLACK = 0.01;
+  const designTop = facts.castleMasonryDesignTopY;
+  const measuredTop = facts.castleMasonryTopFacadeY;
+  if (!Number.isFinite(measuredTop)) {
+    complaints.push(
+      "the highest castle stonework could not be expressed in the facade's own frame — " +
+        'no `building-facade` group was found, so the clause that proves this measurement ' +
+        'lands at `CASTLE_MASONRY_TOP` has been silently switched off',
+    );
+    return complaints;
+  }
+  if (Math.abs(measuredTop - designTop) > FACADE_Y_SLACK) {
+    complaints.push(
+      `the highest castle stonework sits at ${measuredTop.toFixed(3)} m in ` +
+        `the facade's own frame, but the castle is built to \`CASTLE_MASONRY_TOP\` = ` +
+        `${designTop.toFixed(3)} m — off by ` +
+        `${Math.abs(measuredTop - designTop).toFixed(3)} m. The ` +
+        'radial measurement is landing somewhere other than the top of the battlements, so ' +
+        'the clearance below it is measured against the wrong stone',
+    );
+    return complaints;
+  }
+
   if (underside < stone) {
+    // Printed as heights above the planet's surface (`r − R`), because a bare
+    // 236-and-change is unreadable, but note the *gap* is the difference of the
+    // radii themselves — subtracting `R` from both cancels and changes nothing.
     complaints.push(
       `the ginormous slide crosses the castle's south wall at world ` +
-        `(${crossing.x.toFixed(2)}, ${crossing.y.toFixed(2)}) — its underside is at ` +
-        `${underside.toFixed(2)} m and the stonework tops out at ${stone.toFixed(2)} m, so ` +
-        `the chute is ${(stone - underside).toFixed(2)} m inside the battlements. Nothing ` +
+        `(${crossing.x.toFixed(2)}, ${crossing.y.toFixed(2)}, ${crossing.z.toFixed(2)}) — ` +
+        `measured radially, its underside is ${(underside - GROUND_SPHERE_RADIUS).toFixed(2)} m ` +
+        `above the planet's surface and the stonework tops out at ` +
+        `${(stone - GROUND_SPHERE_RADIUS).toFixed(2)} m, so the chute is ` +
+        `${(stone - underside).toFixed(2)} m inside the battlements. Nothing ` +
         'cuts a hole for it: `slideGap` reaches no geometry, so there is solid stone here',
+    );
+  }
+
+  // --- 4. and it crosses over the wall, not past the end of it --------------
+  //
+  // `planSlide` now backtracks over *where along the south wall* the chute
+  // leaves (`DOOR_OFFER_CENTRES`, 9.5 m down to −9.5 m), because a door pinned
+  // to one spot could not route round a tower on seed 326. The trap in making
+  // that a decision is a door that drifts off the end of the wall — a chute that
+  // starts in the air beside the castle rather than on its roof, which clause 1
+  // cannot see because it only looks at z. So: the whole width of the chute, at
+  // the plane of the wall, must be over the wall's own span.
+  const overhang = Math.abs(crossing.x - castle.x) + CHUTE_HALF_WIDTH - castle.halfX;
+  if (overhang > 0) {
+    complaints.push(
+      `the ginormous slide crosses the castle's south wall at world x ${crossing.x.toFixed(2)}, ` +
+        `${overhang.toFixed(2)} m past the end of a wall spanning ` +
+        `${(castle.x - castle.halfX).toFixed(2)}…${(castle.x + castle.halfX).toFixed(2)} ` +
+        '— it has drifted off the castle roof it is meant to leave from',
     );
   }
 
@@ -4139,7 +4802,7 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  * ## Why that needs an invariant of its own
  *
  * Everything else on the castle is matched by
- * {@link ParkFacts.castleMasonryTopY}'s name pattern, and
+ * {@link ParkFacts.castleMasonryTopRadius}'s name pattern, and
  * {@link theGinormousSlideLeavesOverTheBattlements} measures the chute against
  * it. The roof garden deliberately is **not** matched — an interior-ish name
  * falling into that pattern is the fault `castleFabric.ts`'s `castle-timber-`
@@ -4172,7 +4835,7 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  * a pavilion growing into the slide.
  *
  * **Two ways this could assert nothing, both announced rather than passed.** A
- * missing roof garden is a failure, in the tradition of `castleMasonryTopY`'s
+ * missing roof garden is a failure, in the tradition of `castleMasonryTopRadius`'s
  * own guard. And a chute that never crosses the roof's plan box on a given seed
  * is a legitimate pass — but it is a pass over *zero* samples, so the count is
  * reported on every run the way `everyProvenBridgeSiteKeepsItsBridge` reports
@@ -4359,7 +5022,7 @@ const theSlideTracksideCamerasCanSeeTheRide: Invariant = (facts) => {
   const spans = facts.slideShotSpans;
   const cameras = facts.slideCameras;
 
-  // Anti-vacuity first, in the tradition of `castleMasonryTopY`'s guard: an
+  // Anti-vacuity first, in the tradition of `castleMasonryTopRadius`'s guard: an
   // empty plan must be a complaint, not a silent pass over nothing.
   if (spans.length < 2) {
     complaints.push(
@@ -4660,7 +5323,7 @@ const theSlideRiderLandsInTheBalls: Invariant = (facts) => {
   const landing = facts.slideLanding;
   const chute = facts.slideChute;
 
-  // Anti-vacuity, in the tradition of `castleMasonryTopY`'s guard: every clause
+  // Anti-vacuity, in the tradition of `castleMasonryTopRadius`'s guard: every clause
   // below is a comparison, and a comparison against a missing measurement is a
   // pass that measured nothing.
   if (chute.length === 0) {
@@ -5046,19 +5709,60 @@ const railwayClearanceCoversTheTrainAndItsRiders: Invariant = (facts) => {
     // the tier (2 Sep 2026), so nothing is skipped here.
     // The same name `bridges.ts` builds this crossing's own group under —
     // one owner (the crossing's own `railDistance`) for both.
-    const deckMesh = facts.world.train.group.getObjectByName(
-      `bridge-${crossing.railDistance.toFixed(1)}`,
-    )?.getObjectByName('deck');
-    if (!deckMesh) {
+    const bridge = facts.world.train.bridges.find((b) =>
+      b.deckCovers(crossing.x, crossing.z),
+    );
+    if (!bridge) {
       complaints.push(
         `the crossing at (${fmt([crossing.x, crossing.z])}) has no built bridge deck to measure`,
       );
       continue;
     }
-    const soffit = new Box3().setFromObject(deckMesh).min.y;
     const route = facts.world.train.route;
     route.pointAt(route.distanceNear(crossing.x, crossing.z), clearancePoint);
     const groundY = clearancePoint.y;
+    // **The soffit where it binds, asked of the arch itself.**
+    //
+    // This used to read `new Box3().setFromObject(deckMesh).min.y` off the
+    // invisible `deck` marker, a plate lying flat in world `y` sat at
+    // `soffitCrownY − ARCH_CROWN_DIP` — the marker was placed at the binding
+    // height precisely so that one world number stood for the tightest point
+    // of the arch rather than its roomiest. That worked while a bridge was
+    // flat in world `y`. It cannot survive a bridge that leans with the
+    // planet (issue #635), and leaning the marker is worse still, because
+    // `Box3.min.y` of a tilted plate is its low corner rather than its
+    // underside.
+    //
+    // So ask `Bridge.soffitYAt` — built from the same `soffitRiseAt` and
+    // `tangentY` the shell is drawn from — and ask it at the **worst point
+    // across the train's own swept width**, which is what the marker's
+    // `ARCH_CROWN_DIP` offset was standing in for. This is the real arch
+    // profile rather than a constant approximating it, so it is strictly the
+    // more honest reading of the same question.
+    // Copied out to plain numbers: `TrainRoute` hands back a shared scratch
+    // vector, and `soffitYAt` below projects through the bridge's own frame.
+    const railTangent = route.tangentAt(route.distanceNear(crossing.x, crossing.z));
+    const tangentX = railTangent.x;
+    const tangentZ = railTangent.z;
+    let soffit = Infinity;
+    let sampled = 0;
+    for (let lateral = -TRACK_CLEARANCE; lateral <= TRACK_CLEARANCE + 1e-9; lateral += 0.1) {
+      const here = bridge.soffitYAt(
+        crossing.x - tangentZ * lateral,
+        crossing.z + tangentX * lateral,
+      );
+      if (here === null) continue;
+      sampled += 1;
+      soffit = Math.min(soffit, here);
+    }
+    if (sampled === 0) {
+      complaints.push(
+        `the bridge at (${fmt([crossing.x, crossing.z])}) reports no tunnel soffit anywhere ` +
+          `across the train's swept width — there is nothing here to measure the clearance ` +
+          'against, so this crossing was about to pass vacuously',
+      );
+      continue;
+    }
     const clearance = soffit - groundY;
     if (clearance < TRAIN_CLEARANCE_Y) {
       complaints.push(
@@ -5442,7 +6146,29 @@ const noBridgeParapetCanBeSeenThrough: Invariant = (facts) => {
   const INNER_STANDOFF = 1.2;
   const HIT_SLACK = 0.25;
   const PROBE_STEP = 0.05;
-  const PROBE_BOTTOM = 1.5;
+  /**
+   * **How far below the wall top to probe — the wall's own height, from the
+   * game, never a number typed here.**
+   *
+   * This was a bare `1.5`, and `PARAPET_HEIGHT + PARAPET_CROWN_LIFT` is
+   * **1.17**: it probed 0.33 m *below the bottom of the wall it was probing*,
+   * into the spandrel and deck edge underneath — which this clause is not
+   * about, and which is drawn by different code.
+   *
+   * It survived only because the old, world-`y` bridge happened to put solid
+   * geometry in that band. Bending the bridge moved it, and all ten of the
+   * regressions that appeared were in the overshoot: measured across the five
+   * failing seeds, **every reported hole sat at drop 1.38-1.48 m and every one
+   * was below the wall's own height**, while at or above the wall bottom there
+   * were **0 misses in 32,292 judged samples**.
+   *
+   * The frame hypothesis the previous lane could not settle is **disproved** by
+   * the same run: re-probing every sample with the drop taken along the local
+   * up and the normal projected into that point's own horizontal plane gives
+   * `world MISS / local HIT` of **0** on four seeds and 1 of 10,856 on the
+   * fifth. The lean was never the mechanism. (`scripts/diag-parapet-frame.mts`.)
+   */
+  const PROBE_BOTTOM = facts.maxParapetHeight;
 
   const groups = new Map<string, Object3D>();
   for (const crossing of facts.world.train.crossings) {
@@ -5825,22 +6551,19 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     //    `PLAYER_MAX_SPEED × PLAYER_SPRINT_MULTIPLIER × MAX_FRAME_DELTA` =
     //    {@link PLAYER_LONGEST_STEP}, 0.925 m. Sampling at 0.5 m measured a
     //    climb she never makes in one piece and reported 54% of the real one.
-    // 2. **`BUILDING_STEP_UP` is not the budget.** `Player.update` passes
-    //    `this.position.y` — *last* frame's damped, lagging height — into the
-    //    ground sample, and `WalkSurfaces.sample` rejects any surface above
-    //    `that + BUILDING_STEP_UP`. Climbing steadily, `damp(y, groundY,
-    //    0.04, dt)` never catches up: it retains
-    //    `2^(-MAX_FRAME_DELTA / 0.04)` = 0.236 of the gap each frame, so the
-    //    lag settles at `retention / (1 - retention)` = 0.309 × the per-frame
-    //    climb. She must clear her *own* climb **plus** her lag, so the real
-    //    budget is `BUILDING_STEP_UP / 1.309` = 0.474 m, not 0.620 m.
+    // 2. **`BUILDING_STEP_UP` alone was not the budget, once.** `Player.update`
+    //    used to pass `this.position.y` — *last* frame's damped, lagging height
+    //    — into the ground sample, and `WalkSurfaces.sample` rejects any
+    //    surface above `that + BUILDING_STEP_UP`. Climbing steadily the damp
+    //    never caught up, so a third of the allowance went on a smoothing
+    //    filter and the real ceiling was `BUILDING_STEP_UP / 1.309` = 0.474 m.
+    //    **#358 deleted that model** — the sample now rides the collision
+    //    sub-steps and is asked from the surface she is standing on — and
+    //    {@link SPRINT_LOCAL_GRADE_CEILING} is what replaced it here (#636).
     //
-    // Miss the lag and a 0.495 m climb reads as 80% of budget and safe; count
-    // it and the same frame needs 0.632 m against 0.620 m and she loses the
-    // surface, goes airborne and drops through her own deck into the tunnel.
-    // That is not hypothetical: browser QA of PR #352 fell through on 6 of 32
-    // sprinted runs, `bridge-262.0` 4 times out of 4 in one direction, ending
-    // 3.85 m under the deck and staying there.
+    // A too-steep ramp is not hypothetical: browser QA of PR #352 fell through
+    // on 6 of 32 sprinted runs, `bridge-262.0` 4 times out of 4 in one
+    // direction, ending 3.85 m under the deck and staying there.
     //
     // **Scanned as a sliding window at a fine step, not marched in strides.**
     // Sampling every 0.925 m would make the answer depend on where the march
@@ -5849,44 +6572,67 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     // ahead of it instead, so a steep metre is caught wherever it falls.
     //
     // The whole term is the game's own: `PLAYER_LONGEST_STEP`,
-    // `MAX_FRAME_DELTA` and `BUILDING_STEP_UP` are the engine's constants, and
-    // 0.04 is `Player.update`'s own damp half-life. None of it is a generator
-    // target, and none of it may be loosened to make a bridge pass — the
-    // bridge is what gives way.
+    // `MAX_FRAME_DELTA` and `BUILDING_STEP_UP` are the engine's constants.
+    // None of it is a generator target, and none of it may be loosened to make
+    // a bridge pass — the bridge is what gives way.
+    //
+    // ## ⛰️ The grade is measured in HER frame, not the planet's (#636)
+    //
+    // **This clause used to measure the planet.** It took the climb as a
+    // world-`y` difference over a plan-distance run, and on a
+    // {@link GROUND_SPHERE_RADIUS} m planet that is not a grade — it is the
+    // grade *plus the dome*, which falls away in world `y` at `tan(r / R)`.
+    // Measured on the canonical seed by `scripts/diag-bridge-grade.mts`: **flat
+    // grass at r = 140, with nothing built on it at all, reads a world-`y`
+    // grade of 1.140**, and the old 0.512 ceiling is crossed by curvature alone
+    // at about r = 100 — while the park puts crossings out to r = 161. All four
+    // of the canonical seed's "too steep" crossings were places where the
+    // *planet* was over budget and the *bridge* was not: worst real grade
+    // 0.464, 0 of 5 over even the old ceiling.
+    //
+    // So a step from `a` to `b` is split in `a`'s **own** frame:
+    //
+    // ```
+    //   rise = (b − a) · up(a)                     — along the local up
+    //   run  = |(b − a) − rise · up(a)|            — in a's own horizontal plane
+    //   grade = rise / run
+    // ```
+    //
+    // No `y` is subtracted and no chart is assumed, which is `geo/index.ts`'s
+    // own first rule. `up(a)` is `Geo.up` — the unit radial — and it is a
+    // *direction*, so it is the same vector in world space and needs no
+    // conversion.
+    //
+    // **`altitude()` is not the local rise**, and it is the trap to avoid here:
+    // it is height *above the ground*, so a march along the ground has
+    // `Δaltitude = 0` at every step, over a hillside as much as over flat
+    // grass. `controlsFor` below is what catches an instrument that has fallen
+    // into that — control 2 reads a real 0.02–0.05 at the park's centre, where
+    // the two measures are obliged to agree, and a zeroed measure cannot.
+    //
+    // ### What this does NOT cover, and says so on every run
+    //
+    // `WalkSurfaces.sample`'s ceiling used to be literally world-`y`
+    // (`y + BUILDING_STEP_UP`), so the physics spent the planet's fall over a
+    // sub-step as well as the ramp's rise, and this clause guarded a frame the
+    // sampler did not use (#643). **It is radial now** — `stepCeilingAt` — and
+    // `Player` carries its reference at her own radius between sub-steps, so
+    // the reach spends exactly the local rise this clause measures.
+    // `scripts/measure-walk-reach.mts` shows it: on this park 0 honest climbs
+    // refused (584 before); the carried reference is what stops a 0.5 local
+    // ramp at r = 140 dropping her.
+    // The worst world-`y` figure is still printed beside the local one, as the
+    // number that *used* to decide a fall, so a regression to it is visible.
+    //
+    // **What this still does NOT cover**: locomotion is in plan, so a stride's
+    // ground run is its plan length over `cos θ − g·sin θ` climbing towards the
+    // park — more climb per frame than a tangent stride of the same plan length.
+    // That is the walk metric's lane (#621), not the reach's.
     const SAMPLES_PER_STRIDE = 8;
     const MARCH_STEP = PLAYER_LONGEST_STEP / SAMPLES_PER_STRIDE;
-    /** What `damp` keeps of the gap across one clamped frame. */
-    const DAMP_RETENTION = Math.pow(2, -MAX_FRAME_DELTA / PLAYER_HEIGHT_DAMP_HALF_LIFE);
-    /** Steady-state lag, as a multiple of the per-frame climb. */
-    const DAMP_LAG = DAMP_RETENTION / (1 - DAMP_RETENTION);
-    /** The climb one sprinted clamped frame may make and still be sampled. */
-    const CLIMB_BUDGET = BUILDING_STEP_UP / (1 + DAMP_LAG);
-    // ⚠️ **Since #358 this is deliberately CONSERVATIVE — it is stricter than
-    // the player it describes.** Both terms above were true of the player as
-    // she was: one ground sample per frame, taken at the end of the whole
-    // frame's movement, asked from her damped height. Neither is true now. The
-    // sample rides the same sub-steps `CollisionWorld.resolveMovement` cuts
-    // lateral movement into, and is asked from the surface she is standing on,
-    // so the rule that actually binds is `BUILDING_STEP_UP` per *sub-step*
-    // (0.370 m at worst) rather than per stride, and the damp lag is not in
-    // the arithmetic at all. Measured ceiling 0.512 → 1.670:
-    // `npm run check:deck-fallthrough`.
-    //
-    // It is left as it is on purpose, and it is safe to: a bound stricter than
-    // reality can only ever refuse geometry that would in fact have worked,
-    // never pass geometry that falls. Relaxing it is inseparable from raising
-    // `SPRINT_PEAK_GRADE_BUDGET`, which re-plans every bridge on every seed
-    // (see that constant's own note), and that is separately measured gameplay
-    // work rather than a side effect of a physics fix.
-    //
-    // **Whoever raises the budget: this is the second place the old model is
-    // written down, and it must move in the same PR** — the invariant would
-    // otherwise keep refusing exactly the steeper ramps that change is meant
-    // to allow, and the tell would be a bridge that fails here while
-    // `check:deck-fallthrough` says the same slope is walkable.
     // `NavGrid.ts`'s own `TOP_REFERENCE`, restated rather than imported —
     // it looks like a leaf (its own direct imports are `core/constants`,
-    // two type-only imports, and `Collision.ts`), but that last one is not
+    // `building/surfaces`, two type-only imports, and `Collision.ts`), but that last one is not
     // safe: `NavGrid.ts` imports `autoHopClears` from it as a real value,
     // and `Collision.ts` imports `GARDEN_PLAY_BOUNDARY` from `boundary.ts`
     // as a real value too, which reads `PARK_SEED` from `parkManifest.ts`
@@ -5900,6 +6646,201 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
     // any `y` comfortably above every real height in the park is exactly
     // as good as `NavGrid`'s own probe — a plain, un-imported number.
     const TOP_REFERENCE = 500;
+
+    /**
+     * The grade of the step from `a` to `b`, **in `a`'s own frame** — see the
+     * note above. Also hands back the world-`y` figure the old clause used, so
+     * the two can be printed side by side and never confused again.
+     */
+    const gradeOfStep = (
+      a: Readonly<Vector3>,
+      b: Readonly<Vector3>,
+    ): { readonly local: number; readonly rise: number; readonly run: number; readonly world: number } => {
+      const up = Geo.fromWorld(a.x, a.y, a.z).up(new Vector3());
+      const step = new Vector3().subVectors(b, a);
+      const rise = step.dot(up);
+      const run = Math.sqrt(Math.max(0, step.lengthSq() - rise * rise));
+      const plan = Math.hypot(b.x - a.x, b.z - a.z);
+      return {
+        local: run > 1e-6 ? rise / run : 0,
+        rise,
+        run,
+        // flat-ok: the world-y grade is reported beside the local one, never asserted — it shows what the dome adds
+        world: plan > 1e-6 ? (b.y - a.y) / plan : 0,
+      };
+    };
+
+    /**
+     * **The steepest uphill stride on a run, in BOTH directions** — the one
+     * scan the controls and the assertion share, so they cannot disagree.
+     *
+     * A ramp is climbed from whichever end she starts at. The first version of
+     * this clause (and the world-`y` one before it) compared each sample only
+     * with the one a stride *ahead* in `+along` and took the **signed** grade,
+     * so a ramp that climbs towards `-along` — every bridge's far ramp, walked
+     * from the far side — was only ever seen as a descent and never judged.
+     * Found in review of #641: at scale 1, canonical seed, steepening only the
+     * `+along` ramps left the clause green at 0.360 while the same strides
+     * walked the other way read **1.597**. So every window is judged twice:
+     * `a → b` in `a`'s frame, and `b → a` in `b`'s frame (her foot is at the
+     * *start* of the stride she is climbing, so that is whose up counts).
+     *
+     * `include(i, j)` lets the caller skip a window (the exposure gate below);
+     * the world-`y` figure returned is the largest magnitude over the included
+     * windows, for the run note only.
+     */
+    const steepestUphillStride = (
+      run: readonly Vector3[],
+      include: (i: number, j: number) => boolean = () => true,
+    ): {
+      readonly local: number;
+      readonly rise: number;
+      readonly run: number;
+      readonly from: number;
+      readonly backwards: boolean;
+      readonly world: number;
+    } => {
+      let best = { local: 0, rise: 0, run: 0, from: -1, backwards: false };
+      let world = 0;
+      for (let i = 0; i + SAMPLES_PER_STRIDE < run.length; i += 1) {
+        const j = i + SAMPLES_PER_STRIDE;
+        if (!include(i, j)) continue;
+        const a = run[i] as Vector3;
+        const b = run[j] as Vector3;
+        const ahead = gradeOfStep(a, b);
+        const behind = gradeOfStep(b, a);
+        world = Math.max(world, Math.abs(ahead.world));
+        if (ahead.local > best.local) {
+          best = { local: ahead.local, rise: ahead.rise, run: ahead.run, from: i, backwards: false };
+        }
+        if (behind.local > best.local) {
+          best = { local: behind.local, rise: behind.rise, run: behind.run, from: j, backwards: true };
+        }
+      }
+      return { ...best, world };
+    };
+
+    /**
+     * **The controls, and the run is void without them.**
+     *
+     * Two of the instruments written for the sphere migration read clean and
+     * decisively wrong, and only a control caught either. These are the same
+     * four `scripts/diag-bridge-grade.mts` carries (plus a fifth, below), moved into the clause that
+     * asserts on the measure so the measure cannot drift away from them:
+     *
+     * 1. **Flat grass, far out.** Ordinary park ground at r = 140 — nothing
+     *    built. World-`y` must read **large** (that is the dome) and local must
+     *    read **near zero**. If local is large too, the measure is not
+     *    cancelling the planet and every figure below is noise.
+     * 2. **Flat grass at the centre**, where the lean is nil: both must be near
+     *    zero **and agree**. This is what catches a measure that has been
+     *    zeroed by a bug — the `altitude()` trap returns a clean 0.000
+     *    everywhere and passes control 1 on its own.
+     * 3–4. **Two declared slopes**, 0.20 and 0.50, built the way a bent bridge
+     *    must be (a height added along the local up at each foot, accumulated
+     *    against **distance walked along the ground**, not plan distance). The
+     *    local measure must recover the grade each was built with. A measure
+     *    that only ever says "flat" is the same disease as a check that cannot
+     *    fail; two different slopes are what stops a measure that saturates.
+     *
+     * The ground-walked accumulation in 3–4 is not a detail. Declaring the
+     * grade against *plan* distance instead reads back a uniform `cos(39.5°)` =
+     * 0.774 of what was asked for, because the orthographic `(x, z)` chart
+     * compresses radially — a constant-ratio miss that reads like a broken
+     * instrument and was in fact a broken expectation.
+     */
+    const controlFailures: string[] = [];
+    {
+      const CONTROL_SPAN = 25;
+      // The controls read through the very scan the assertion uses — an
+      // `Math.abs` of its own here is what once let the controls see both
+      // directions while the assertion saw one.
+      const worstOf = (run: readonly Vector3[]): { local: number; world: number } =>
+        steepestUphillStride(run);
+      const groundRun = (fromX: number, fromZ: number, dirX: number, dirZ: number): Vector3[] => {
+        const out: Vector3[] = [];
+        const len = Math.hypot(dirX, dirZ) || 1;
+        for (let d = 0; d <= CONTROL_SPAN + 1e-6; d += MARCH_STEP) {
+          const x = fromX + (dirX / len) * d;
+          const z = fromZ + (dirZ / len) * d;
+          out.push(new Vector3(x, terrainHeight(x, z), z));
+        }
+        return out;
+      };
+      const declaredRamp = (fromX: number, fromZ: number, grade: number): Vector3[] => {
+        const out: Vector3[] = [];
+        const len = Math.hypot(fromX, fromZ) || 1;
+        const dirX = fromX / len;
+        const dirZ = fromZ / len;
+        const here = new Vector3();
+        const previous = new Vector3();
+        let walked = 0;
+        for (let d = 0; d <= CONTROL_SPAN + 1e-6; d += MARCH_STEP) {
+          const x = fromX + dirX * d;
+          const z = fromZ + dirZ * d;
+          const foot = Geo.fromWorld(x, terrainHeight(x, z), z);
+          foot.toWorld(here);
+          if (d > 0) walked += here.distanceTo(previous);
+          previous.copy(here);
+          out.push(foot.setRadius(foot.radius() + grade * walked).toWorld(new Vector3()));
+        }
+        return out;
+      };
+      const controlNotes: string[] = [];
+      const control = (name: string, ok: boolean, detail: string): void => {
+        controlNotes.push(`  ${ok ? 'ok  ' : 'FAIL'} ${name} — ${detail}`);
+        if (!ok) controlFailures.push(`${name} (${detail})`);
+      };
+
+      const far = worstOf(groundRun(140, 0, 1, 0));
+      control(
+        'flat grass at r=140 disagrees as it must',
+        far.world > 0.5 && far.local < 0.1,
+        `world ${far.world.toFixed(3)} (want > 0.5, the dome), local ${far.local.toFixed(3)} (want < 0.1)`,
+      );
+      const near = worstOf(groundRun(-10, 0, 1, 0));
+      control(
+        'flat grass at the park centre agrees as it must',
+        near.world < 0.1 && near.local < 0.1 && Math.abs(near.world - near.local) < 0.05,
+        `world ${near.world.toFixed(3)}, local ${near.local.toFixed(3)} (want both < 0.1 and within 0.05)`,
+      );
+      for (const want of [0.2, 0.5]) {
+        const g = worstOf(declaredRamp(140, 0, want));
+        control(
+          `a ${want.toFixed(2)} local ramp at r=140 reads back`,
+          Math.abs(g.local - want) < 0.05,
+          `local ${g.local.toFixed(3)} (want ${want.toFixed(2)} +/- 0.05), world ${g.world.toFixed(3)}`,
+        );
+      }
+      // 5. **The same 0.50 ramp, marched the other way** — it now *descends*
+      //    along the run, so only a scan that climbs it from its far end can
+      //    read 0.50 back. A one-directional, signed scan reads zero here.
+      {
+        const g = worstOf(declaredRamp(140, 0, 0.5).reverse());
+        control(
+          'a 0.50 local ramp marched downhill is still climbed from its far end',
+          Math.abs(g.local - 0.5) < 0.05,
+          `local ${g.local.toFixed(3)} (want 0.50 +/- 0.05), world ${g.world.toFixed(3)}`,
+        );
+      }
+      process.stderr.write(
+        `bridge sprint-grade controls (local-frame measure, #636):\n${controlNotes.join('\n')}\n`,
+      );
+      if (controlFailures.length > 0) {
+        complaints.push(
+          `the bridge sprint-grade instrument FAILED ITS OWN CONTROL — ` +
+            `${controlFailures.join('; ')}. Every grade this clause would have ` +
+            `reported is VOID: no crossing's steepness has been judged at all ` +
+            `on this seed, whatever else this clause says`,
+        );
+      }
+    }
+
+    /** Worst local and world-`y` stride grades seen anywhere, for the run note. */
+    let seenWorstLocal = 0;
+    let seenWorstWorld = 0;
+    let crossingsJudged = 0;
+
     for (const crossing of facts.world.train.crossings) {
       const bridge = facts.world.train.bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
       if (!bridge) continue;
@@ -5928,6 +6869,12 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       const alongs: number[] = [];
       const heights: number[] = [];
       const exposure: number[] = [];
+      /**
+       * The same samples as world positions, kept because a grade in her own
+       * frame needs the whole point, not its height — `heights` alone cannot
+       * tell the ramp from the planet.
+       */
+      const points: Vector3[] = [];
       for (let along = -farNeg; along <= farPos + 1e-6; along += MARCH_STEP) {
         const p = frame.pointAt(along);
         const x = p.x;
@@ -5944,6 +6891,7 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         }
         alongs.push(along);
         heights.push(h);
+        points.push(new Vector3(x, h, z));
         // **How far she would actually drop if she lost this surface.**
         // `WalkSurfaces.sample` starts from the terrain and only ever raises
         // its answer with decks, ramps and platforms — the terrain itself is
@@ -5952,9 +6900,18 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
         // ramp foot the deck lies *on* that ground, so losing it is a
         // no-op — which is why the exposure below is part of the question and
         // not a let-off. Sampled with an absurdly low reference so every
-        // built surface is rejected and bare terrain is what comes back
-        // (`terrainHeight` itself must not be imported here — it reaches
-        // `parkManifest` and would pin every seed to the default park).
+        // built surface is rejected and bare terrain is what comes back.
+        //
+        // **Still a world-`y` difference, deliberately, and it is the strict
+        // side of the error** (#636 left this one alone on purpose). At the
+        // same `(x, z)`, raising world `y` by one metre raises the radius by
+        // only `cos θ`, so a world-`y` gap of `d` is a true radial drop of
+        // `d · cos θ` — 0.68 of it at r = 161. The world-`y` figure therefore
+        // *overstates* the drop, which can only ever make this gate include a
+        // stride the honest number would have skipped, never the reverse. It is
+        // used to decide whether a window is worth judging at all; converting
+        // it would be a loosening, and a loosening needs its own measurement
+        // rather than a comment.
         const terrainH = facts.world.building.surfaces.sample(x, z, -1e6);
         exposure.push(h - terrainH);
       }
@@ -5965,57 +6922,102 @@ const everyBridgeIsWalkableAndReachable: Invariant = (facts) => {
       // near-identical complaints obscures the one real finding.
       let reportedStep = false;
       for (let i = 1; i < heights.length; i += 1) {
-        const step = Math.abs((heights[i] as number) - (heights[i - 1] as number));
+        // **Measured along the local up, like the grade below** (#636). A
+        // world-`y` difference out at the park's reach is the riser plus the
+        // planet's own fall across the sample, which is a different quantity
+        // from the one a foot has to climb.
+        const step = Math.abs(gradeOfStep(points[i - 1] as Vector3, points[i] as Vector3).rise);
         if (step > BUILDING_STEP_UP && !reportedStep) {
           reportedStep = true;
           complaints.push(
             `the crossing at (${fmt([crossing.x, crossing.z])}) has a ${step.toFixed(2)} m step ` +
               `between ${(alongs[i - 1] as number).toFixed(1)} m and ` +
               `${(alongs[i] as number).toFixed(1)} m along its own ` +
-              `centreline — too tall for a real walk (BUILDING_STEP_UP is ` +
+              `centreline, measured along the local up there — too tall for a real ` +
+              `walk (BUILDING_STEP_UP is ` +
               `${BUILDING_STEP_UP.toFixed(2)} m); this is not a walkable crossing, ground to ground`,
           );
         }
       }
 
-      // **One sprinted clamped frame.** The worst climb over any stride-long
-      // window, wherever it falls, against the budget her own damp lag leaves
-      // her.
-      let worstClimb = 0;
-      let worstAt = 0;
-      let worstDrop = 0;
-      for (let i = 0; i + SAMPLES_PER_STRIDE < heights.length; i += 1) {
-        const climb = (heights[i + SAMPLES_PER_STRIDE] as number) - (heights[i] as number);
-        // Only where losing the surface would genuinely drop her. Below
-        // `FALL_THRESHOLD` the game does not even call it a fall.
-        const drop = Math.min(exposure[i] as number, exposure[i + SAMPLES_PER_STRIDE] as number);
-        if (drop <= FALL_THRESHOLD) continue;
-        if (climb > worstClimb) {
-          worstClimb = climb;
-          worstAt = alongs[i] as number;
-          worstDrop = drop;
-        }
-      }
-      if (worstClimb > CLIMB_BUDGET) {
-        const needed = worstClimb * (1 + DAMP_LAG);
+      // **One sprinted clamped frame.** The steepest stride-long window
+      // anywhere on the run, measured in her own frame (see the note above),
+      // against what the post-#358 sampler actually reaches.
+      // Only where losing the surface would genuinely drop her — below
+      // `FALL_THRESHOLD` the game does not even call it a fall. Both directions
+      // are judged (see `steepestUphillStride`): running *down* a ramp she
+      // simply steps down, but the ramp that is a descent this way is the
+      // climb for a child coming from the other side.
+      const worst = steepestUphillStride(
+        points,
+        (i, j) => Math.min(exposure[i] as number, exposure[j] as number) > FALL_THRESHOLD,
+      );
+      const worstGrade = worst.local;
+      const worstRise = worst.rise;
+      const worstRun = worst.run;
+      const worstWorld = worst.world;
+      const worstAt = worst.from >= 0 ? (alongs[worst.from] as number) : 0;
+      const worstDrop =
+        worst.from >= 0
+          ? Math.min(
+              exposure[worst.from] as number,
+              exposure[worst.from + (worst.backwards ? -SAMPLES_PER_STRIDE : SAMPLES_PER_STRIDE)] as number,
+            )
+          : 0;
+      crossingsJudged += 1;
+      seenWorstLocal = Math.max(seenWorstLocal, worstGrade);
+      seenWorstWorld = Math.max(seenWorstWorld, worstWorld);
+      // A control failure voids every grade — see `controlFailures` above. The
+      // complaint is already raised there; this is what stops a void number
+      // being reported as a finding about a bridge.
+      if (controlFailures.length === 0 && worstGrade > SPRINT_LOCAL_GRADE_CEILING) {
         complaints.push(
-          `the crossing at (${fmt([crossing.x, crossing.z])}) climbs ` +
-            `${worstClimb.toFixed(3)} m in one sprinted frame, ` +
-            `${worstAt.toFixed(1)} m along its own centreline — a child running up it ` +
-            `on a slow device falls through her own deck. One clamped frame ` +
-            `(${MAX_FRAME_DELTA.toFixed(4)} s) carries her ` +
-            `${PLAYER_LONGEST_STEP.toFixed(3)} m, and WalkSurfaces.sample only reaches ` +
-            `BUILDING_STEP_UP (${BUILDING_STEP_UP.toFixed(2)} m) above her own damped ` +
-            `height, which lags ${DAMP_LAG.toFixed(3)} x the climb behind her — so she ` +
-            `needs ${needed.toFixed(3)} m of a ${BUILDING_STEP_UP.toFixed(2)} m reach and ` +
-            `loses the surface. The budget is ${CLIMB_BUDGET.toFixed(3)} m per frame ` +
-            `(peak grade ${(CLIMB_BUDGET / PLAYER_LONGEST_STEP).toFixed(3)}); this one ` +
-            `needs grade ${(worstClimb / PLAYER_LONGEST_STEP).toFixed(3)}. The deck stands ` +
-            `${worstDrop.toFixed(2)} m over the ground there, so that is how far she drops ` +
-            `— through the deck, into the tunnel`,
+          `the crossing at (${fmt([crossing.x, crossing.z])}) climbs at a local grade of ` +
+            `${worstGrade.toFixed(3)} over one sprinted stride, ` +
+            `starting ${worstAt.toFixed(1)} m along its own centreline and running towards ` +
+            `${worst.backwards ? '-along' : '+along'} — a child running up it ` +
+            `on a slow device falls through her own deck. That grade is the stride's ` +
+            `rise along the local up at her foot (${worstRise.toFixed(3)} m) over the ` +
+            `part of it lying in that point's own horizontal plane ` +
+            `(${worstRun.toFixed(3)} m), so the planet's own fall is not counted as a ` +
+            `climb (the steepest world-y figure over the same strides is ` +
+            `${worstWorld.toFixed(3)}, and flat grass at r=140 reads 1.140 that way with ` +
+            `nothing built on it at all). ` +
+            `One clamped frame (${MAX_FRAME_DELTA.toFixed(4)} s) carries her ` +
+            `${PLAYER_LONGEST_STEP.toFixed(3)} m, and WalkSurfaces.sample reaches ` +
+            `BUILDING_STEP_UP (${BUILDING_STEP_UP.toFixed(2)} m) above the surface she is ` +
+            `standing on — so the steepest she can run up and still be sampled is ` +
+            `BUILDING_STEP_UP / PLAYER_LONGEST_STEP = ` +
+            `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)} (SPRINT_LOCAL_GRADE_CEILING), and ` +
+            `this one needs ${worstGrade.toFixed(3)}. The deck stands ` +
+            `${worstDrop.toFixed(2)} m over the ground there in world y (see the exposure ` +
+            `note above — the true radial drop is that times cos of the lean), so that is ` +
+            `the order of how far she falls — through the deck, into the tunnel`,
         );
       }
     }
+
+    // **What this clause covered on this seed, said out loud on every run.**
+    // Two things the next reader must not have to guess: how much was actually
+    // judged, and — because the engine's own step-up ceiling is still
+    // world-`y` while this assertion is not — what the planet is spending of
+    // the headroom `check:deck-fallthrough` measured. `process.stderr`, not
+    // `console.log`: vitest's default reporter shows console output from
+    // failing tests only, so the obvious way to write this is invisible in
+    // exactly the case it exists for.
+    process.stderr.write(
+      `bridge sprint-grade: ` +
+        (controlFailures.length > 0 ? 'VOID (controls failed) — ' : '') +
+        `${crossingsJudged} crossing(s) judged on this seed` +
+        (crossingsJudged === 0
+          ? ' — this clause asserts nothing about steepness here\n'
+          : `; worst LOCAL grade ${seenWorstLocal.toFixed(3)} against ceiling ` +
+            `${SPRINT_LOCAL_GRADE_CEILING.toFixed(3)}. Steepest world-y grade over the ` +
+            `same strides was ${seenWorstWorld.toFixed(3)} — NOT asserted on, and not a ` +
+            `grade: it is the ramp plus the dome. WalkSurfaces.sample's reach is radial ` +
+            `since #643 (stepCeilingAt), so this figure no longer decides a fall; it is ` +
+            `printed so a reach that regressed to world-y would be seen.\n`),
+    );
   }
 
   return complaints;
@@ -6150,7 +7152,38 @@ const bridgesMatchTheirPathAndKeepTheRailClear: Invariant = (facts) => {
         raycaster.set(rayOrigin, up);
         raycaster.far = TRAIN_CLEARANCE_Y + 6;
         const hits = raycaster.intersectObject(bridgesGroup, true);
-        const first = hits[0];
+        // **The train is stopped by drawn stone, not by a claim about it.**
+        //
+        // `deck` is the invisible marker `bridges.ts` keeps so a couple of
+        // readers have something named `deck` to take a `Box3.min.y` off, and
+        // `intersectObject` does not consult `.visible` — so without this
+        // filter the first hit over the track can be the marker rather than the
+        // soffit a locomotive would actually hit. The two sibling raycasts in
+        // this file (the standable-air probe and the parapet face probe) have
+        // filtered it by name all along, each with a comment saying why;
+        // **this call site did not, and that was an oversight rather than a
+        // decision.**
+        //
+        // Measured on the built park at `feat/sphere-combined`, casting these
+        // exact rays and comparing the raw first hit against the first
+        // non-`deck` hit: on the canonical seed, **85 comparable points, the
+        // stone reading higher at 79 of them, worst 0.1800 m**. (#614's review
+        // reports 57 of 71 on its own sample; the samples differ, the 0.18 m
+        // worst case agrees, and the direction is the same on both.) The marker
+        // sits *below* the soffit, so reading it understated the headroom.
+        //
+        // Stone is the correct reading — nothing can collide with an invisible
+        // marker — so this clause is now slightly more permissive than it was,
+        // and that is the honest direction rather than a relaxation.
+        //
+        // It is written here explicitly rather than left to the fact that the
+        // marker currently carries no faces at all (`setIndex([])`, so that it
+        // cannot share a plane with the abutments). **That is a property of the
+        // geometry and this is a property of the question being asked**; an
+        // invariant that is only correct because another module happens to have
+        // emptied an index is one geometry change away from silently measuring
+        // the wrong thing again.
+        const first = hits.find((candidate) => candidate.object.name !== 'deck');
         if (!first) continue;
         const clearance = first.point.y - routePoint.y;
         if (Math.abs(offset) <= 1.5) anyHitOverCrossing = true;
@@ -6308,12 +7341,12 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
   //    would drive through.
   const railPoint = { x: 0, z: 0 };
   const route = facts.world.train.route;
+  // **How much of this clause actually ran.** A vertex is only judged where
+  // its own bridge reports a tunnel over it, so a geometry change that
+  // narrowed `soffitYAt`'s domain would empty this clause out while leaving
+  // it triumphantly green. The count is announced below, including zero.
+  let judged = 0;
   for (const crossing of facts.world.train.crossings) {
-    const deckMesh = facts.world.train.group
-      .getObjectByName(`bridge-${crossing.railDistance.toFixed(1)}`)
-      ?.getObjectByName('deck');
-    if (!deckMesh) continue;
-    const soffit = new Box3().setFromObject(deckMesh).min.y;
     const bridge = bridges.find((b) => b.deckCovers(crossing.x, crossing.z));
     if (!bridge) continue;
     for (const { name, mesh } of layers) {
@@ -6324,6 +7357,17 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
         if (bridge.pavingHeightAt(x, z) === null) continue;
         route.flatPointAt(route.distanceNear(x, z), railPoint);
         if (Math.hypot(x - railPoint.x, z - railPoint.z) > TRACK_CLEARANCE) continue;
+        // **The soffit in this vertex's own column, not one world height for
+        // the whole crossing.** See `Bridge.soffitYAt` and issue #635: this
+        // read `new Box3().setFromObject(deckMesh).min.y`, and that marker is
+        // a plate lying flat in world `y` while the road beside it leans with
+        // the planet. The disagreement is nil at the park centre and grows
+        // monotonically with radius — 1.865 m at the outermost canonical
+        // crossing, against a road that in fact cleared the drawn stone
+        // beneath it by 0.327 m with open sky overhead.
+        const soffit = bridge.soffitYAt(x, z);
+        if (soffit === null) continue;
+        judged += 1;
         const y = position.getY(i);
         if (y < soffit) {
           complaints.push(
@@ -6336,6 +7380,17 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
       }
     }
   }
+  // CLAUDE.md: "when a check stops covering something, it must say so on every
+  // run". `process.stderr`, not `console.log` — vitest's default reporter
+  // shows console output from failing tests only, which is the exact case a
+  // coverage note is not for.
+  process.stderr.write(
+    judged === 0
+      ? `  theDrawnPathRidesOverEveryBridge: NO path vertex stood under any arch — ` +
+        `the tunnel clause asserted nothing on this seed\n`
+      : `  theDrawnPathRidesOverEveryBridge: ${judged} path vertices judged against their ` +
+        `own column's soffit\n`,
+  );
 
   return complaints;
 };
@@ -7249,7 +8304,19 @@ const theRoadArrivesAtTheParkAndGoesIn: Invariant = (facts) => {
   const at = new Vector3();
   facts.world.entrance.group.traverse((object: Object3D) => {
     if (!(object instanceof Mesh)) return;
-    if (!object.name.startsWith('entrance-road')) return;
+    // **The road and the path that carries on from it**, because what this
+    // asserts is that a made surface runs from the kerb through the arch and
+    // into the park — not that any one mesh does. Since 3 September the run in
+    // through the gate is ordinary park paving rather than road (Jim: *"the
+    // small run of path from the road into the park should be just a normal
+    // path"*), and a filter that named only the road would have gone on
+    // asserting the road's own end while the thing it exists to prove — that
+    // you can walk in on something — had moved into a differently-named mesh.
+    // It went red the moment the spur was renamed, which is what an invariant
+    // measuring the park rather than the code is for.
+    const road = object.name.startsWith('entrance-road');
+    const gateway = object.name.startsWith('entrance-gateway-path');
+    if (!road && !gateway) return;
     const position = object.geometry.getAttribute('position');
     for (let i = 0; i < position.count; i += 1) {
       at.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(object.matrixWorld);
@@ -7412,13 +8479,25 @@ const theCatBusIsInThePark: Invariant = (facts) => {
     );
   }
 
-  // Waiting on the kerb outside the gate, where the sequence starts. A bus left
+  // Waiting on the road outside the gate, where the sequence starts. A bus left
   // at the origin is in the middle of the ball pit.
-  const kerbGap = Math.hypot(bus.x - ENTRANCE_BUS_ARRIVE_X, bus.z - ENTRANCE_BUS_STOP_Z);
+  //
+  // **Asked of the road, not of a coordinate.** This used to compare against
+  // `ENTRANCE_BUS_ARRIVE_X`/`ENTRANCE_BUS_STOP_Z`, two hand-measured points on a
+  // straight kerb that no longer exists — the road follows the park's edge now,
+  // and the bus comes on at the brow. `bus.startsAt*` is `entranceRoadAt(
+  // entranceBusArriveAt())`, where the sequence itself starts the bus, so this
+  // cannot drift from it.
+  //
+  // **Read off the facts, not imported.** Calling `roadRoute.ts` from this file
+  // loaded the seeded park manifest at module load, before `buildParkFacts` set
+  // the seed — see `CatBusFact.startsAtX`.
+  const start = { x: bus.startsAtX, z: bus.startsAtZ };
+  const kerbGap = Math.hypot(bus.x - start.x, bus.z - start.z);
   if (kerbGap > 1) {
     fouls.push(
-      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the kerb ` +
-        `${fmt([ENTRANCE_BUS_ARRIVE_X, ENTRANCE_BUS_STOP_Z])} it is supposed to pull in from`,
+      `the cat bus starts at ${fmt([bus.x, bus.z])}, ${kerbGap.toFixed(2)} m from the point on the ` +
+        `entrance road ${fmt([start.x, start.z])} it is supposed to drive on from`,
     );
   }
 
@@ -7558,6 +8637,63 @@ const nothingPlantedHidesTheArrivingBus: Invariant = (facts) => {
       `arriving cat bus — she cannot see the bus she is arriving on. Worst: ` +
       worst
         .map((thing) => `${thing.what} at ${fmt([thing.x, thing.z])} reaching ${thing.top.toFixed(1)} m`)
+        .join('; '),
+  ];
+};
+
+/**
+ * **Nothing is planted in the road the cat bus drives.**
+ *
+ * Jim, 3 September 2026: *"the bus drives through trees on its final
+ * approach"*. It did, and on every seed — measured on the built park before the
+ * fix, **64 to 106 treeline instances per seed** stood inside the corridor the
+ * bus sweeps, at outsets of 13.7 to 21.1 m. That is structural, not luck:
+ * `Scenery.ts`'s treeline band runs from 11.5 m outside the boundary to
+ * `TERRAIN_APRON - 1.5`, and the road's tails climb from the kerb to
+ * `ENTRANCE_ROAD_TAIL_OUTSET` straight through it.
+ *
+ * ## Why the trees are the ones that move
+ *
+ * Because the road cannot. Its outset is pinned between the pavement the bus's
+ * door needs and `RIM_OUTSET_START`, two bounds that **cross by 0.15 m**
+ * (`roadRoute.ts`), so there is no offset at which a road along this wall
+ * misses anything — the same impossibility `check:entrance-road` was built
+ * around for the Rail Race's supports. And the corridor is derived from
+ * `PARK_BOUNDARY` alone, so it is solved before a single tree exists, exactly
+ * as the train's route is in `Scenery.ts`'s own `onRailway` note. The road
+ * claims its corridor and the woodland gives way, which is what pylon placement
+ * already does when it fells foliage.
+ *
+ * ## What is measured
+ *
+ * The **built park's instance matrices**, not the scatter's rules — the same
+ * distinction {@link nothingPlantedHidesTheArrivingBus} earned twice. The
+ * threshold is the game's: `distanceToEntranceCorridor` is the bus's own swept
+ * body (a `CAT_BUS_LENGTH` box at every sample, sampled at 0.2 m so the bulge
+ * between samples cannot hide anything), against each instance's own drawn
+ * reach. Nothing here restates the keep-out `buildTreeline` applies; if that
+ * keep-out were sized off the ribbon rather than the sweep, this would still
+ * fail.
+ */
+const nothingIsPlantedInTheBusRoad: Invariant = (facts) => {
+  // Coverage on every run, passing or not — `process.stderr`, because vitest's
+  // default reporter shows console output from failing tests only, so the note
+  // would be invisible in exactly the case it exists for.
+  process.stderr.write(
+    `[bus road cover] ${facts.plantedInstancesSwept} planted instances swept against the ` +
+      `bus's corridor, ${facts.treesInTheBusRoad.length} inside it\n`,
+  );
+  if (facts.treesInTheBusRoad.length === 0) return [];
+  const worst = [...facts.treesInTheBusRoad].sort((a, b) => b.inside - a.inside).slice(0, 3);
+  return [
+    `${facts.treesInTheBusRoad.length} planted thing(s) stand in the road the cat bus drives — ` +
+      `it drives through them on its way in. Worst: ` +
+      worst
+        .map(
+          (tree) =>
+            `${tree.what} at ${fmt([tree.x, tree.z])} reaching ${tree.reach.toFixed(2)} m, ` +
+            `${tree.inside.toFixed(2)} m inside the bus`,
+        )
         .join('; '),
   ];
 };
@@ -9112,7 +10248,10 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
 
   for (const thing of facts.laneGreenery) {
     if (thing.parkTreeGeometry !== null) continue;
-    if (LANE_FURNITURE.has(thing.population)) continue;
+    // *Any* named ancestor being declared is enough — see `populations` in
+    // `parkFacts.ts`. An authored asset names its own parts, so the declared
+    // name is often one level out from the mesh that draws.
+    if (thing.populations.some((name) => LANE_FURNITURE.has(name))) continue;
     fouls.push(
       `\`${thing.population}\`${thing.node && thing.node !== thing.population ? ` (${thing.node})` : ''} ` +
         `draws ${thing.instances} instance(s) of a \`${thing.geometryType}\` that is not one of the ` +
@@ -9143,43 +10282,335 @@ const nothingGrowsInTheLaneButTheParksOwnTrees: Invariant = (facts) => {
 };
 
 /**
+ * **The ground really is the sphere the constant claims, and the park fits on
+ * it (#511).**
+ *
+ * **What this asserts, and what it only reports — read this before trusting a
+ * green run.**
+ *
+ * It used to hold `GROUND_SPHERE_RADIUS` and `BUS_MAX_GRADE` to each other: a
+ * 10% ceiling on the ground's gradient as far out as the park reaches. That
+ * ceiling is **retired** (Overseer's ruling, 14 September 2026) — it existed to
+ * guarantee the cat bus could drive the whole 117 m of its road, and Jim has
+ * ruled it need not: *"showing the bus coming in a couple meters is fine and
+ * good."* What honouring it would cost is **computed and printed on every run**
+ * (`planetForBusGrade` below, from the kerb's measured reach) rather than typed
+ * here, because the figure this docblock used to carry — 2460 m — was derived
+ * from a 245 m park that no longer exists and went on being printed as fact.
+ *
+ * So there is **no gradient assertion here any more**, on the park or on the
+ * road. Both are measured a metre at a time and **printed on every run**,
+ * passing or failing, to `process.stderr`. If you want a ceiling back, add it
+ * with the measurement beside it.
+ *
+ * The clauses that still foul:
+ *
+ * 1. **The drawn ground is that sphere.** Sampled against the exact cap, so a
+ *    terrain that quietly stopped being spherical — a rim creeping back, a
+ *    tuned fudge — fails here.
+ * 2. **Everything drawn outdoors is on the planet.** Not the park's outline
+ *    (`boundary.maxRadius`): the treeline, the Rail Race ring and the road
+ *    kerb all stand well past it. Every vertex of every outdoor object in the
+ *    built scene is measured (`ParkFacts.drawnReach`, interiors excluded by
+ *    root), and any at or past the equator fouls — the Rail Race ring is
+ *    exactly what ran off the planet at the 2.3355x scale. What it covers is
+ *    printed on every run.
+ *
+ * **And the gradient it reports is `tan θ`, not `d / R`.** `d / R` is `sin θ`.
+ * It under-reports everywhere and **cannot exceed 100%**, so when the park
+ * (at the retired 2.3355x scale) reached 245 m on a 220 m planet — 25 m past the equator, standing on the
+ * clamp where there is no ground at all — it reported a plausible-looking
+ * `111.36%`. A measure that cannot exceed 100% is a measure that cannot report
+ * the thing it exists for. `gradientAtParkRadius` in `core/constants.ts` is the
+ * real form and returns `Infinity` past the equator, which is the honest answer.
+ *
+ * `terrainHeight` is imported statically, which was **forbidden until this
+ * branch**: it used to reach `parkManifest` through `boundary.ts`, so a static
+ * import pinned every seed to the default park (CLAUDE.md's 76-silent-skips
+ * trap). The sphere removed that edge — `terrain.ts` imports nothing but
+ * constants now — so the ground is no longer seed-dependent and this is safe.
+ * If a later change gives terrain a seeded input again, this import must go
+ * back to being read from `ParkFacts`.
+ */
+const theGroundIsTheSphereItClaimsToBe: Invariant = (facts) => {
+  const fouls: string[] = [];
+  const reach = facts.boundary.maxRadius;
+  if (!Number.isFinite(reach) || reach <= 0) {
+    return [
+      `the park boundary reports maxRadius ${reach}, so there is no extent to ` +
+        'sample the ground over and both clauses below would pass vacuously',
+    ];
+  }
+
+  // Sample on several bearings: a cap is the same on all of them, and a fault
+  // that is only on one bearing is exactly what a single ray would miss.
+  const bearings = 12;
+  let worstShapeError = 0;
+  let worstGrade = 0;
+  let worstGradeAt = 0;
+  for (let b = 0; b < bearings; b += 1) {
+    const angle = (b / bearings) * Math.PI * 2;
+    for (let d = 5; d <= reach; d += 5) {
+      const x = Math.cos(angle) * d;
+      const z = Math.sin(angle) * d;
+      const expectedFall =
+        GROUND_SPHERE_RADIUS -
+        Math.sqrt(Math.max(0, GROUND_SPHERE_RADIUS * GROUND_SPHERE_RADIUS - d * d));
+      // The rolling sine waves ride on top of the cap, so compare against the
+      // cap plus the height at the centre rather than demanding an exact match.
+      const shapeError = Math.abs(terrainHeight(x, z) - (terrainHeight(0, 0) - expectedFall));
+      if (shapeError > worstShapeError) worstShapeError = shapeError;
+      // `tan θ`, via the one owner of it. NOT `d / GROUND_SPHERE_RADIUS`, which
+      // is `sin θ` and saturates at 100% exactly where the ground goes vertical.
+      const grade = gradientAtParkRadius(d);
+      if (grade > worstGrade) {
+        worstGrade = grade;
+        worstGradeAt = d;
+      }
+    }
+  }
+
+  // The sine waves' own amplitude is the honest tolerance for clause 1: they
+  // are the park's gentle undulation and they are supposed to be there.
+  const undulation = TERRAIN_HEIGHT_SCALE * 1.3;
+  if (worstShapeError > undulation) {
+    fouls.push(
+      `the drawn ground departs from its own spherical cap by ${worstShapeError.toFixed(2)} m, ` +
+        `past the ${undulation.toFixed(2)} m the rolling sine waves account for — the terrain ` +
+        'has stopped being the sphere GROUND_SPHERE_RADIUS says it is, so the gradient clause ' +
+        'below is measuring something else',
+    );
+  }
+  // **The park must at least be ON its planet.** The gradient ceiling is
+  // retired, but "past the equator" is not a steep slope — it is no ground: the
+  // cap has curved through vertical and `terrainHeight`'s `Math.max(0, ...)`
+  // guard clamps the whole outer annulus to a flat plane at `y = -R`. Furniture
+  // out there stands on the clamp. That is the one thing this still refuses,
+  // and it is a fact about the park rather than a budget about the bus.
+  // **This is a limit of the terrain FORMULATION, not of the sphere.**
+  //
+  // Jim, 14 September 2026: *"it also should be possible to make the park any
+  // size so long as it doesn't touch its opposite side by wrapping around the
+  // sphere - no artificial limit please"*, and *"a sphere has no edge, the
+  // worst is that it would touch its own opposite side."* He is right, and the
+  // true bound is the antipode at pi*R (691 m on R = 220), not the equator at
+  // pi*R/2 (345.6 m) — so what is refused below is **exactly half the planet**
+  // that a sphere would happily carry.
+  //
+  // It is still refused, because `terrain.ts` cannot draw it. `terrainHeight`
+  // is written as a height above a plane, so past `d = R` no vertical column
+  // meets the sphere at all and `Math.max(0, R² - d²)` maps **the entire far
+  // half of the planet onto one point**: every `d >= R` reports height -R and a
+  // horizontal up. Measured, on this branch:
+  //
+  //     d=219    capHeight=-199.048   up=(0.9955, 0.0952, 0)
+  //     d=220    capHeight=-220.000   up=(1.0000, 0.0000, 0)
+  //     d=5000   capHeight=-220.000   up=(1.0000, 0.0000, 0)
+  //
+  // So a park out there would be laid on the clamp whatever this clause said,
+  // and permitting it would be an assertion reporting success about something
+  // the renderer cannot draw.
+  //
+  // **The fix is to move the ground onto the core's representation** — a radius
+  // as a function of direction, which `src/world/geo/` already holds and which
+  // has no singularity anywhere on the planet — and only then to re-cut this
+  // clause to what is actually true: the park may not wrap round to meet
+  // itself, i.e. geodesic radius < pi*R. `NOTE-sizing-terrain-onto-geo.md` on
+  // this branch sizes that work. Until it lands, this bound is honest about
+  // being the formulation's and not the sphere's.
+  // Asked of what is DRAWN, not of the outline: the outline is the smallest
+  // thing out there. `reach` stays the radial sweep's extent above.
+  const drawn = facts.drawnReach;
+  if (drawn.vertices === 0) {
+    fouls.push(
+      `seed ${facts.seed}: drawnReach walked 0 vertices, so whether the park is on its planet ` +
+        'was not measured at all and the clause below would pass vacuously',
+    );
+  }
+  const onPlanet = [
+    ['the park outline', reach, 'boundary.maxRadius'],
+    ['the furthest drawn outdoor vertex', drawn.radius, drawn.furthest],
+  ] as const;
+  for (const [what, d, where] of onPlanet) {
+    if (d < GROUND_SPHERE_RADIUS) continue;
+    fouls.push(
+      `${what} reaches ${d.toFixed(1)} m on a ${GROUND_SPHERE_RADIUS} m planet — ` +
+        `${(d - GROUND_SPHERE_RADIUS).toFixed(1)} m past the equator (${where}). This is a limit of ` +
+        "terrain.ts's FORMULATION, not of the sphere: `terrainHeight` is a height above a " +
+        'plane, so past d = R no column meets the sphere and the whole far half of the planet ' +
+        `maps to one point (height -R, horizontal up). A sphere would carry a park out to the ` +
+        `antipode at ${(Math.PI * GROUND_SPHERE_RADIUS).toFixed(0)} m of walking; this refuses ` +
+        'everything past half of it. Fix by moving the ground onto a radius-of-direction ' +
+        '(see NOTE-sizing-terrain-onto-geo.md), not by shrinking the park to suit the formula',
+    );
+  }
+
+  // --- the bus's own arc, which is mostly outside the boundary above --------
+  //
+  // **This clause exists because a comment promised it and nothing delivered
+  // it.** `BUS_MAX_GRADE`'s doc in `core/constants.ts` said *"`invariants.ts`
+  // walks the bus's own arc on the built park and asserts the real gradient
+  // under it stays inside this"*. It did not: the sweep above is radial, it
+  // stops at `facts.boundary.maxRadius`, and it printed — correctly — that it
+  // asserted nothing beyond the boundary, *which is where the road and the bus
+  // actually are*. So the one place the budget is spent was the one place
+  // nothing measured it, and the constant's own doc said otherwise. That is
+  // CLAUDE.md's "two definitions of one thing kept in step by hand" with the
+  // second definition being a sentence.
+  //
+  // It is also where the retired budget was spent: `BUS_MAX_GRADE` was sized
+  // against the drawn road's full reach. `GROUND_SPHERE_RADIUS` is no longer
+  // derived from it (it is a look, chosen by eye — see its docblock), so the
+  // road's reach is used below only to print what honouring 10% would cost.
+  //
+  // **The grade is measured between consecutive points on the drawn road**, not
+  // computed as `d / GROUND_SPHERE_RADIUS`. The latter is the sphere's own
+  // formula and would pass by restating the model; this asks the built terrain
+  // how far it actually falls from one metre of road to the next, so the rolling
+  // sine waves that ride on top of the cap are included — they are ground the
+  // bus really drives over.
+  const ROAD_GRADE_STEP = 1;
+  let worstRoadGrade = 0;
+  let worstRoadGradeAt = { x: 0, z: 0 };
+  let roadMetresWalked = 0;
+  let roadReach = 0;
+  // **The kerb only — the ground the bus actually drives on.**
+  //
+  // `roadCorridor.segments` also carries the ~5 m gateway approach, the run
+  // from the kerb in through the arch. A child walks that; the bus never does
+  // (it stops outside the wall — #195). Including it made this clause harmlessly
+  // stricter, but a foul landing there would have been *mis-worded*: it would
+  // have said "the cat bus drives a slope steeper than anybody agreed" about
+  // ground no bus has ever been on, and `BUS_MAX_GRADE` is a bus budget. A
+  // measurement is only as good as the sentence it will print when it fails.
+  const busDrives = facts.roadCorridor.segments.filter(
+    (segment) => segment.name === 'entrance-road-kerb',
+  );
+  for (const segment of busDrives) {
+    const runLength = Math.hypot(segment.to.x - segment.from.x, segment.to.z - segment.from.z);
+    if (runLength < 1e-6) continue;
+    const steps = Math.max(1, Math.ceil(runLength / ROAD_GRADE_STEP));
+    let previous: { x: number; z: number; y: number } | null = null;
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      const x = segment.from.x + (segment.to.x - segment.from.x) * t;
+      const z = segment.from.z + (segment.to.z - segment.from.z) * t;
+      const y = terrainHeight(x, z);
+      roadReach = Math.max(roadReach, Math.hypot(x, z));
+      if (previous) {
+        const run = Math.hypot(x - previous.x, z - previous.z);
+        roadMetresWalked += run;
+        const grade = run < 1e-6 ? 0 : Math.abs(y - previous.y) / run;
+        if (grade > worstRoadGrade) {
+          worstRoadGrade = grade;
+          worstRoadGradeAt = { x, z };
+        }
+      }
+      previous = { x, z, y };
+    }
+  }
+
+  if (roadMetresWalked === 0) {
+    fouls.push(
+      `seed ${facts.seed}: the road corridor reports no kerb run, so the gradient under ` +
+        'the bus was not measured at all — this clause would have passed vacuously, which is ' +
+        'exactly the state BUS_MAX_GRADE\'s doc has been describing as a measurement',
+    );
+  }
+  // No ceiling clause here any more — see this function's docblock. The number
+  // is reported below on every run instead, so it stays visible without
+  // vetoing a park for a journey the bus no longer makes.
+
+  const grade = (g: number) => (Number.isFinite(g) ? `${(g * 100).toFixed(2)}%` : 'INFINITE');
+  // The planet on which BUS_MAX_GRADE would hold as far as the bus actually
+  // drives. `parkRadiusForGradient` is linear in the radius, so asking it for a
+  // unit planet and dividing inverts it without a second copy of the formula.
+  const planetForBusGrade = roadReach / parkRadiusForGradient(BUS_MAX_GRADE, 1);
+  // Along the ground, not across the chart: the lean and the walk to the
+  // furthest drawn vertex, and what is left before the equator and the antipode.
+  const drawnLean = Math.asin(Math.min(1, drawn.radius / GROUND_SPHERE_RADIUS));
+  const drawnWalk = drawnLean * GROUND_SPHERE_RADIUS;
+  process.stderr.write(
+    `[ground sphere] ${bearings} bearings to ${reach.toFixed(1)} m: worst departure from the cap ` +
+      `${worstShapeError.toFixed(2)} m (tolerance ${undulation.toFixed(2)}), worst gradient ` +
+      `${grade(worstGrade)} (tan theta) at ${worstGradeAt.toFixed(1)} m.\n` +
+      `[ground sphere] and the bus's own arc: ${roadMetresWalked.toFixed(1)} m of drawn kerb ` +
+      `walked every ${ROAD_GRADE_STEP} m, out to ${roadReach.toFixed(1)} m from the centre ` +
+      `(past the ${reach.toFixed(1)} m boundary the radial sweep stops at), worst gradient ` +
+      `${grade(worstRoadGrade)} at (${worstRoadGradeAt.x.toFixed(1)}, ` +
+      `${worstRoadGradeAt.z.toFixed(1)}).\n` +
+      `[ground sphere] ASSERTS NO GRADIENT CEILING, on the park or on the road. The ` +
+      `${(BUS_MAX_GRADE * 100).toFixed(0)}% BUS_MAX_GRADE budget was retired on 14 September ` +
+      '2026: it guaranteed the bus could drive all 117 m of its road, and Jim ruled it need ' +
+      'not ("showing the bus coming in a couple meters is fine and good"). Honouring it would ' +
+      `need a ${planetForBusGrade.toFixed(0)} m planet (for the ${roadReach.toFixed(1)} m the kerb ` +
+      `reaches) against the ${GROUND_SPHERE_RADIUS} m chosen by eye. The two numbers above are ` +
+      'REPORTED, not policed — the only gradient-shaped thing still refused is the park ' +
+      'reaching past its own equator, where there is no ground at all.\n' +
+      `[ground sphere] Asserts nothing about the ${(
+        facts.roadCorridor.segments.length - busDrives.length
+      ).toString()} gateway-approach run(s) in through the arch: a child walks those, the bus ` +
+      'does not, and BUS_MAX_GRADE is a bus budget.\n' +
+      `[ground sphere] on the planet: furthest drawn outdoor vertex ${drawn.radius.toFixed(1)} m ` +
+      `chart (${drawnWalk.toFixed(1)} m along the ground, ${((drawnLean * 180) / Math.PI).toFixed(1)} deg ` +
+      `lean) — ${drawn.furthest}; ${(GROUND_SPHERE_RADIUS - drawn.radius).toFixed(1)} m chart ` +
+      `before the equator, ${(Math.PI * GROUND_SPHERE_RADIUS - drawnWalk).toFixed(0)} m of walking ` +
+      `before the antipode. Covers ${drawn.vertices} vertices of ${drawn.objects} objects in the ` +
+      `built scene; does NOT cover ${drawn.excludedRoots.join(', ')} (interiors, excluded by root), ` +
+      "the bus journey's own lane scene, or anything only added once a frame runs.\n",
+  );
+  return fouls;
+};
+
+/**
  * **The road the bus arrives on is the road the registry claims — on every
  * seed, and it goes where it says it goes.**
  *
  * Stage 3, step 1 of the round-robin rework makes the entrance road the first
  * production placer: `entrance/roadCorridor.ts` is the one owner of its
  * centreline, `Entrance.ts` draws its ribbons from that, and the same owner's
- * output is committed to `World.groundClaims` as two `corridor` claims. Every
+ * output is committed to `World.groundClaims` as `corridor` claims. Every
  * later placer will negotiate against those claims rather than against the
  * mesh, so a claim that has drifted from the road is a placer politely keeping
  * out of ground the road does not occupy — and walking into ground it does.
  *
  * `check:ground-claims` proves the same thing far more thoroughly, **but only
  * on the canonical seed**, and only there because it drives a whole
- * `ParkGeneration` first. This is the clause that covers the other fifteen
- * (issue #510: both required checks can be green while fourteen of sixteen
- * pool seeds are unmeasured), and it is the reason it is worth having twice.
+ * `ParkGeneration` first. This is the clause that covers the other thirteen
+ * (issue #510: both required checks can be green while most of the pool is
+ * unmeasured), and it is the reason it is worth having twice.
+ *
+ * ## The road is an arc now, and that changed what "the claim is the road" can
+ * mean
+ *
+ * When this invariant was written the road was two axis-aligned runs, so
+ * clause 2 compared four numbers — the ribbon's bounding box against the
+ * capsule swept by its half-width. #498's curve ended that: **the bounding box
+ * of an arc is mostly ground the arc does not hold**, so a box comparison on a
+ * curve is not imprecise, it is measuring a different shape, and it would have
+ * gone on passing while saying so. The comparison is now made against the
+ * claim's own geometry, per vertex, by `scripts/road-ribbon-measure.mts` —
+ * shared with `check:ground-claims` so the two cannot drift apart.
  *
  * Three clauses, and only the third has a threshold in it:
  *
  * 1. **The registry holds exactly the owner's output**, compared number for
  *    number with no tolerance. These must be one call, not two calculations
  *    that agree to some number of places.
- * 2. **Each claim describes the ribbon that was drawn.** Measured off the
- *    ribbon's own world-space vertices, which is the park that was built
- *    rather than the rules that built it. The only slack here is `float32`:
- *    mesh positions are a `Float32Array` and cannot carry the owner's
- *    `float64`, so a metre value read back off geometry is good to about
- *    seven significant digits. That is a property of the mesh format, not a
- *    tuned number, and the worst residual is reported on every run so drift
- *    shows as a number changing long before it crosses anything.
+ * 2. **The claims describe the ribbons that were drawn**, measured off the
+ *    ribbons' own world-space vertices — the park that was built rather than
+ *    the rules that built it. Exactly one of the two directions is an
+ *    equality, and `road-ribbon-measure.mts` says at length why: nothing drawn
+ *    may be unclaimed, while the gateway approach's claim is honestly a
+ *    conservative envelope round a staircase of individually trimmed columns.
  * 3. **The road is continuous, and it reaches the arch.** Jim, 7 August 2026:
  *    *"it doesn't actually drive up to the park, the road needs to actually go
- *    to the park."* The kerb and the spur are separate ribbons that must abut,
- *    and the spur must arrive at the gateway. The gap threshold is
- *    `PLAYER_RADIUS` — taken from the game, not from the generator's target,
- *    because the thing that matters is whether a six-year-old stepping off the
- *    bus can walk in without her feet leaving the road.
+ *    to the park."* The kerb is now many runs sampled off the arc's own
+ *    stations, so continuity is asserted run to run as well as between the
+ *    kerb and the approach. The gap threshold is `PLAYER_RADIUS` — taken from
+ *    the game, not from the generator's target, because the thing that matters
+ *    is whether a six-year-old stepping off the bus can walk in without her
+ *    feet leaving the road.
  */
 const theRoadsCorridorIsTheRoadItDrew: Invariant = (facts) => {
   const wrong: string[] = [];
@@ -9205,10 +10636,7 @@ const theRoadsCorridorIsTheRoadItDrew: Invariant = (facts) => {
   };
   const registryKeys = claims.map(key);
   const ownerKeys = fromOwner.map(key);
-  if (
-    registryKeys.length !== ownerKeys.length ||
-    registryKeys.some((k, i) => k !== ownerKeys[i])
-  ) {
+  if (registryKeys.length !== ownerKeys.length || registryKeys.some((k, i) => k !== ownerKeys[i])) {
     wrong.push(
       `seed ${facts.seed}: the road corridor in the registry is not what ` +
         `entranceRoadClaims() returns — registry [${registryKeys.join(' ')}] vs owner ` +
@@ -9216,158 +10644,118 @@ const theRoadsCorridorIsTheRoadItDrew: Invariant = (facts) => {
     );
   }
 
-  // --- 2. each claim describes the ribbon that was drawn ---------------------
-  // float32 mesh positions; see the header. Not a tuned tolerance.
-  const FLOAT32_SLACK = 1e-3;
-  let measured = 0;
-  let worstResidual = 0;
-  let worstNote = 'nothing measured';
+  // --- 2. the claims describe the ribbons that were drawn --------------------
   facts.world.entrance.group.updateMatrixWorld(true);
-  for (const [index, claim] of claims.entries()) {
-    const shape = claim.shape;
-    const segment = segments[index];
-    if (shape.shape !== 'capsule' || !segment) {
+  const ribbons = collectRoadRibbons(facts.world.entrance.group, segments);
+  const measured = measureRoadRibbons(segments, claims, ribbons);
+  for (const foul of measured.fouls) wrong.push(`seed ${facts.seed}: ${foul}`);
+
+  // --- 3. the road is continuous, and it reaches the arch --------------------
+  // The kerb's runs come off one list of stations, so consecutive runs share an
+  // endpoint exactly; anything else means the sampling has been re-derived
+  // somewhere rather than read.
+  for (let i = 1; i < segments.length; i += 1) {
+    const previous = segments[i - 1];
+    const here = segments[i];
+    if (!previous || !here || previous.name !== here.name) continue;
+    const step = Math.hypot(here.from.x - previous.to.x, here.from.z - previous.to.z);
+    if (step > 0) {
       wrong.push(
-        `seed ${facts.seed}: claim ${index} is not a capsule the owner also produces — the ` +
-          'registry and entranceRoadSegments() no longer describe the same road',
+        `seed ${facts.seed}: "${here.name}" run ${i} starts ${step.toFixed(4)} m from where run ` +
+          `${i - 1} ended — the runs of one ribbon must share their endpoints exactly, because ` +
+          'they are consecutive pairs of one list of stations',
       );
-      continue;
-    }
-    let mesh: { geometry: { getAttribute: (n: string) => unknown } } | null = null;
-    facts.world.entrance.group.traverse((object) => {
-      if (object.name === segment.name && 'geometry' in object) {
-        mesh = object as unknown as typeof mesh;
-      }
-    });
-    if (mesh === null) {
-      wrong.push(
-        `seed ${facts.seed}: the registry claims a corridor for "${segment.name}" but no such ` +
-          'ribbon is in the entrance group — the claim describes a road nobody drew',
-      );
-      continue;
-    }
-    const position = (mesh as { geometry: { getAttribute: (n: string) => PositionLike } }).geometry.getAttribute(
-      'position',
-    );
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    for (let i = 0; i < position.count; i += 1) {
-      minX = Math.min(minX, position.getX(i));
-      maxX = Math.max(maxX, position.getX(i));
-      minZ = Math.min(minZ, position.getZ(i));
-      maxZ = Math.max(maxZ, position.getZ(i));
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minZ)) {
-      wrong.push(`seed ${facts.seed}: "${segment.name}" has no finite vertices — nothing measured`);
-      continue;
-    }
-    measured += 1;
-    const half = shape.halfWidth;
-    const alongX = segment.along === 'x';
-    const expected = alongX
-      ? {
-          minX: Math.min(shape.x1, shape.x2),
-          maxX: Math.max(shape.x1, shape.x2),
-          minZ: shape.z1 - half,
-          maxZ: shape.z1 + half,
-        }
-      : {
-          minX: shape.x1 - half,
-          maxX: shape.x1 + half,
-          minZ: Math.min(shape.z1, shape.z2),
-          maxZ: Math.max(shape.z1, shape.z2),
-        };
-    for (const [edge, drawn, claimed] of [
-      ['minX', minX, expected.minX],
-      ['maxX', maxX, expected.maxX],
-      ['minZ', minZ, expected.minZ],
-      ['maxZ', maxZ, expected.maxZ],
-    ] as const) {
-      const residual = Math.abs(drawn - claimed);
-      if (residual > worstResidual) {
-        worstResidual = residual;
-        worstNote = `${segment.name}.${edge} drawn ${drawn.toFixed(4)} vs claimed ${claimed.toFixed(4)}`;
-      }
-      if (residual > FLOAT32_SLACK) {
-        wrong.push(
-          `seed ${facts.seed}: the road's claim does not describe the road that was drawn — ` +
-            `"${segment.name}" ${edge} is ${drawn.toFixed(4)} in the scene and the corridor ` +
-            `claims ${claimed.toFixed(4)}, ${residual.toFixed(4)} m apart. A child walks on ` +
-            'the mesh; every later placer negotiates against the claim',
-        );
-      }
     }
   }
 
-  // --- 3. the road is continuous, and it reaches the arch --------------------
-  const kerb = claims[segments.findIndex((s) => s.name === 'entrance-road-kerb')]?.shape;
-  const spur = claims[segments.findIndex((s) => s.name === 'entrance-road-gateway')]?.shape;
-  if (kerb?.shape === 'capsule' && spur?.shape === 'capsule') {
-    // The spur's OUTER end is the one that meets the kerb.
-    const outerZ = Math.max(spur.z1, spur.z2);
-    const gap = Math.abs(outerZ - (kerb.z1 - kerb.halfWidth));
-    if (gap > PLAYER_RADIUS) {
-      wrong.push(
-        `seed ${facts.seed}: the gateway spur starts ${gap.toFixed(2)} m from the kerb's inner ` +
-          `edge (spur at z=${outerZ.toFixed(2)}, kerb edge at ` +
-          `${(kerb.z1 - kerb.halfWidth).toFixed(2)}) — wider than a child (PLAYER_RADIUS ` +
-          `${PLAYER_RADIUS}), so she steps off the road between the bus and the gate`,
+  const kerbRuns = segments.filter((segment) => segment.name === 'entrance-road-kerb');
+  const gateway = segments.find((segment) => segment.name === 'entrance-gateway-path');
+  if (kerbRuns.length === 0 || !gateway) {
+    wrong.push(
+      `seed ${facts.seed}: the road did not claim both a kerb and a gateway approach ` +
+        `(${kerbRuns.length} kerb run(s), gateway ${gateway ? 'present' : 'absent'}), so its ` +
+        'continuity was not checked at all',
+    );
+  } else {
+    // The approach leaves the kerb at its outer end. How far is that from the
+    // kerb's own inner edge? Measured against the polyline rather than against
+    // one run, because the arc's nearest point is not necessarily on the run
+    // whose x-range contains the gate.
+    let toKerb = Infinity;
+    for (const run of kerbRuns) {
+      toKerb = Math.min(
+        toKerb,
+        distancePointToSegment(gateway.from.x, gateway.from.z, run.from.x, run.from.z, run.to.x, run.to.z) -
+          run.halfWidth,
       );
     }
-    // The spur's outer end must be within the kerb's own run, or the two are
-    // two roads that happen to be near each other.
-    const kerbMinX = Math.min(kerb.x1, kerb.x2);
-    const kerbMaxX = Math.max(kerb.x1, kerb.x2);
-    if (spur.x1 < kerbMinX || spur.x1 > kerbMaxX) {
+    if (toKerb > PLAYER_RADIUS) {
       wrong.push(
-        `seed ${facts.seed}: the gateway spur leaves the kerb at x=${spur.x1.toFixed(2)}, which ` +
-          `is outside the kerb's own run ${kerbMinX.toFixed(2)}..${kerbMaxX.toFixed(2)} — the ` +
-          'bus stops on a road that does not meet the one going in',
+        `seed ${facts.seed}: the gateway approach starts ${toKerb.toFixed(2)} m clear of the ` +
+          `kerb's inner edge (at ${gateway.from.x.toFixed(2)}, ${gateway.from.z.toFixed(2)}) — ` +
+          `wider than a child (PLAYER_RADIUS ${PLAYER_RADIUS}), so she steps off the road ` +
+          'between the bus and the gate',
       );
     }
-    // …and the spur must actually arrive at the arch.
-    const innerZ = Math.min(spur.z1, spur.z2);
-    if (!isInEntranceGateway(spur.x1, ENTRANCE_GATE_Z) || innerZ > ENTRANCE_GATE_Z) {
+    // …and the approach must actually arrive at the arch.
+    if (!isInEntranceGateway(gateway.to.x, ENTRANCE_GATE_Z) || gateway.to.z > ENTRANCE_GATE_Z) {
       wrong.push(
-        `seed ${facts.seed}: the gateway spur does not pass through the arch — it runs x=` +
-          `${spur.x1.toFixed(2)}, z=${outerZ.toFixed(2)}..${innerZ.toFixed(2)} and the gate is ` +
-          `at (${ENTRANCE_GATE_X.toFixed(2)}, ${ENTRANCE_GATE_Z.toFixed(2)}). Jim, 7 Aug 2026: ` +
+        `seed ${facts.seed}: the gateway approach does not pass through the arch — it runs ` +
+          `(${gateway.from.x.toFixed(2)}, ${gateway.from.z.toFixed(2)}) to ` +
+          `(${gateway.to.x.toFixed(2)}, ${gateway.to.z.toFixed(2)}) and the gate is at ` +
+          `(${ENTRANCE_GATE_X.toFixed(2)}, ${ENTRANCE_GATE_Z.toFixed(2)}). Jim, 7 Aug 2026: ` +
           '"the road needs to actually go to the park"',
       );
     }
-  } else {
-    wrong.push(
-      `seed ${facts.seed}: the road did not claim both a kerb and a gateway spur, so its ` +
-        'continuity was not checked at all',
-    );
   }
 
   // What this clause actually covered, said out loud on every run — including
   // the passing ones, which is the only case the note exists for. stderr,
   // because vitest's default reporter hides console.log on a passing test.
   process.stderr.write(
-    `    seed ${facts.seed}: road corridor — ${measured} of ${claims.length} claimed ribbons ` +
-      `measured against drawn geometry, worst edge residual ${worstResidual.toExponential(2)} m ` +
-      `(${worstNote})\n`,
+    `    seed ${facts.seed}: road corridor — ${measured.runsMeasured} of ${claims.length} ` +
+      `claimed runs backed by a drawn ribbon, ${measured.verticesTested} ribbon vertices tested ` +
+      `against the claims (worst ${measured.worstOutside.toExponential(2)} m outside: ` +
+      `${measured.worstOutsideNote}); claim overshoots the ribbon by at most ` +
+      `${measured.worstOvershoot.toFixed(3)} m (${measured.worstOvershootNote})\n`,
   );
-  if (measured !== claims.length) {
+  if (measured.runsMeasured !== claims.length) {
     wrong.push(
-      `seed ${facts.seed}: only ${measured} of ${claims.length} claimed corridor runs were ` +
-        'measured against a real ribbon — the rest asserted nothing',
+      `seed ${facts.seed}: only ${measured.runsMeasured} of ${claims.length} claimed corridor ` +
+        'runs were measured against a real ribbon — the rest asserted nothing',
+    );
+  }
+  if (measured.verticesTested === 0) {
+    wrong.push(
+      `seed ${facts.seed}: no ribbon vertices were tested at all, so clause 2 proved nothing — ` +
+        'the road claims ground and nothing was found drawn on it',
     );
   }
 
   return wrong;
 };
 
-/** The slice of `BufferAttribute` this file reads off a ribbon. */
-interface PositionLike {
-  readonly count: number;
-  getX(index: number): number;
-  getZ(index: number): number;
-}
+/**
+ * Distance from a point to a segment in plan. The same arithmetic
+ * `groundClaims.ts` keeps privately for its own shapes; used here on the
+ * corridor's *centrelines*, which are not claims, to ask how far the approach
+ * starts from the kerb it leaves.
+ */
+const distancePointToSegment = (
+  px: number,
+  pz: number,
+  x1: number,
+  z1: number,
+  x2: number,
+  z2: number,
+): number => {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const lengthSquared = dx * dx + dz * dz;
+  if (lengthSquared === 0) return Math.hypot(px - x1, pz - z1);
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (pz - z1) * dz) / lengthSquared));
+  return Math.hypot(px - (x1 + t * dx), pz - (z1 + t * dz));
+};
 
 /**
  * **Every castle corner turret is solid, on every seed.**
@@ -9469,9 +10857,17 @@ const castleTurretsAreSolid: Invariant = (facts) => {
 };
 
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
-  ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
+  // Renamed 14 Sep 2026: it no longer asserts gentleness, so it must not keep
+  // saying it does. The gradient ceiling is retired and reported instead; what
+  // this refuses now is a terrain that stopped being a sphere, and a park that
+  // reaches past its own equator. A test name is a claim like any other.
+  [
+    'the ground is the sphere it claims to be, and the park fits on it',
+    theGroundIsTheSphereItClaimsToBe,
+  ],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],
+  ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
   ["nothing grows in the lane but the park's own trees", nothingGrowsInTheLaneButTheParksOwnTrees],
@@ -9504,6 +10900,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
+  ['every spur starts on the drawn centre line of the path it branches from', everySpurStartsOnTheDrawnCentreLine],
   ['every plot faces exactly the camera axis', buildingsFaceTheCameraAxis],
   ['every paved path runs on grid axes', pathsRunOnGridAxes],
   ['the grid verdict does not depend on which route object carries the paving', gridAxisVerdictsIgnoreTheCarrier],
@@ -9538,7 +10935,12 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
       'and only the walk-past one is solid',
     railRaceRingsStandOutsideThePark,
   ],
+  [
+    'every Rail Race post is solid all the way up a child',
+    everyPostIsSolidAllTheWayUpAChild,
+  ],
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
+  ['every doormat in the park can be walked to from the gate', everyDoormatIsReachableFromTheGate],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
@@ -9547,6 +10949,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'the ginormous slide goes downhill all the way, lands in the ball pit, ' +
       'and never runs back inside the castle',
     theGinormousSlideIsRideable,
+  ],
+  [
+    'the ginormous slide never climbs, measured against the local up',
+    theGinormousSlideNeverClimbs,
   ],
   [
     'the ginormous slide stands on legs a child can walk between',
@@ -9629,6 +11035,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theEntranceIsClearEnoughToArriveAt,
   ],
   ['you can see the cat bus she arrives on', nothingPlantedHidesTheArrivingBus],
+  ['nothing is planted in the road the cat bus drives', nothingIsPlantedInTheBusRoad],
 ];
 
 /**

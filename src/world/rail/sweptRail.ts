@@ -1,4 +1,13 @@
-import { CatmullRomCurve3, TubeGeometry, Vector3, type BufferGeometry } from 'three';
+import {
+  CatmullRomCurve3,
+  Euler,
+  Quaternion,
+  TubeGeometry,
+  Vector3,
+  type BufferGeometry,
+} from 'three';
+import { upFor } from '../up';
+import { placeOnSphere, tiltToSphere } from '../terrain';
 
 /**
  * **Sweeping a pair of rails along a route.** The park's one way of turning a
@@ -39,24 +48,125 @@ export interface RailSampler {
   tangentAt(distance: number, target: Vector3): Vector3;
 }
 
+const _railUp = /* @__PURE__ */ new Vector3();
+const _leanAt = /* @__PURE__ */ new Vector3();
+const _leanSpin = /* @__PURE__ */ new Quaternion();
+
 /**
- * The rails' one convention for "which way is sideways": horizontal, and
- * perpendicular to the tangent's horizontal projection — never rolled, since
- * no track in this park banks (see the file header). Written once so nothing
- * that needs to sit square across both rails — a tie, say — can reimplement
- * it and quietly disagree with where the rails actually are.
+ * The same route, **as it is drawn** — every point leant onto the sphere.
  *
- * Provably perpendicular to `along` itself, not just its horizontal
- * projection: `dot((along.z, 0, -along.x), along) = along.z*along.x +
- * 0*along.y - along.x*along.z = 0` for any `along.y`. So `along`, this
- * `side`, and their cross product always form a valid orthonormal frame,
- * however steeply the route climbs or dives.
+ * A ride is solved in the flat frame the park was authored in: an (x, z) and a
+ * height above the ground there. Keep it that way. `placeOnSphere` is locally a
+ * rotation, so a height above the ground and a gradient are both *preserved* by
+ * it — which means every clearance solve, every physics step and every
+ * invariant is already asking its question in the right frame, and mapping the
+ * route itself would move all of them for nothing.
+ *
+ * What does have to move is the geometry a child sees. Wrap the route in this
+ * at the point of drawing, and the rails, the ties and anything hung off
+ * `railFrameAt` lean with the world while nothing that reasons about the ride
+ * shifts by a millimetre.
+ *
+ * The rail race does not need this: its own `pointAt` already returns the leant
+ * point and `flatPointAt` is its unleant twin. Do not wrap it, or it leans
+ * twice.
  */
-function horizontalSide(along: Vector3, target: Vector3): Vector3 {
-  const sideX = along.z;
-  const sideZ = -along.x;
-  const norm = Math.hypot(sideX, sideZ) || 1;
-  return target.set(sideX / norm, 0, sideZ / norm);
+export function drawnOnSphere(sampler: RailSampler): RailSampler {
+  return {
+    length: sampler.length,
+    pointAt(distance: number, target: Vector3): Vector3 {
+      sampler.pointAt(distance, target);
+      placeOnSphere(target, 0, target, _leanSpin);
+      return target;
+    },
+    tangentAt(distance: number, target: Vector3): Vector3 {
+      sampler.pointAt(distance, _leanAt);
+      sampler.tangentAt(distance, target);
+      tiltToSphere(_leanAt.x, _leanAt.y, _leanAt.z, _leanSpin);
+      return target.applyQuaternion(_leanSpin).normalize();
+    },
+  };
+}
+
+const _rideTilt = /* @__PURE__ */ new Quaternion();
+const _rideSpin = /* @__PURE__ */ new Quaternion();
+const _rideEuler = /* @__PURE__ */ new Euler();
+
+/**
+ * **How a vehicle sits on a route that is drawn on the sphere** — the
+ * orientation half of {@link drawnOnSphere}, and the one owner of it.
+ *
+ * {@link drawnOnSphere} leans the *track*. Nothing leaned the things that ride
+ * it, and for a long time nothing noticed, because a cart placed at the flat
+ * `route.pointAt` with a plain `rotation.y`/`rotation.x` looks perfectly
+ * sensible in isolation. It is only wrong *relative to its own rails* — and
+ * only once the park stopped being flat.
+ *
+ * Measured on seed 428 before this existed: the Sky Cruiser's cart was
+ * **10.83 m from its own rails** at the worst point of a 213.5 m circuit, and
+ * 3.42 m from them on average. Not a subtle lean; the vehicle was flying beside
+ * the track rather than on it. The same fault seated the Rail Race's rider — who
+ * *is* leaned, by `faceOnGround` inside `Player.setRidePose` — inside a tub that
+ * was not, which swung her arms out through its side.
+ *
+ * **The lean is taken about `flat`'s column, not about where the vehicle ends
+ * up.** That is the whole reason this is a shared function rather than a
+ * `faceOnGround` call: `faceOnGround` reads the object's own position, and a
+ * drawn point has already slid `height · sin(tilt)` outwards from the column
+ * the rails were leaned about. Leaning the cart about *that* column tilts it by
+ * a slightly different angle from the rails under it — a small error, but the
+ * same *kind* of error as the large one this replaces, and invisible in exactly
+ * the way that kind always is. `drawnOnSphere` uses the flat point; so does
+ * this; so the two cannot drift.
+ *
+ * **Safe to call every frame**, and that is not incidental. It writes the
+ * quaternion from scratch from the yaw and pitch it is handed, and never reads
+ * what is already there — the trap `world/up.ts`'s `faceOnGround` docblock
+ * describes at length, where a per-frame pre-multiply decomposes back into
+ * `rotation.x`/`rotation.z` and the tilt compounds until the thing tumbles.
+ *
+ * Position is deliberately **not** this function's business, because the two
+ * kinds of route disagree about it: the coaster and the train solve flat and
+ * must map their point through `placeOnSphere`, while the Rail Race's own
+ * `pointAt` already returns a leaned point and must not be leaned twice.
+ */
+export function rideFrame(
+  flat: Readonly<Vector3>,
+  yaw: number,
+  pitch: number,
+  out: Quaternion,
+): Quaternion {
+  tiltToSphere(flat.x, flat.y, flat.z, _rideTilt);
+  _rideSpin.setFromEuler(_rideEuler.set(pitch, yaw, 0));
+  return out.multiplyQuaternions(_rideTilt, _rideSpin);
+}
+
+/**
+ * The rails' one convention for "which way is sideways": **level with the
+ * ground under the track**, and perpendicular to the tangent. Written once so
+ * nothing that needs to sit square across both rails — a tie, say — can
+ * reimplement it and quietly disagree with where the rails actually are.
+ *
+ * `normalize(up × along)`, which is perpendicular to `along` itself rather than
+ * only to its horizontal projection, so `along`, this `side` and their cross
+ * product always form a valid orthonormal frame however steeply the route
+ * climbs or dives.
+ *
+ * **`up` is the local up, not world `+Y`.** This used to return a strictly
+ * horizontal vector — `(along.z, 0, -along.x)` — and `sweptRail` offset the two
+ * rails in `x`/`z` alone, leaving them at one world height. That is right on a
+ * flat park and wrong on a sphere: out at the boundary the ground leans by
+ * fourteen degrees, so a track held level to world `+Y` is tilted against the
+ * ground it runs over, and its ties are no longer square to it. Reduces exactly
+ * to the old formula when `up` is `+Y`, which is what the interiors still get.
+ *
+ * No track in this park banks *deliberately*; this is not banking, it is the
+ * track lying flat on a world that curves.
+ */
+function railSide(along: Vector3, up: Vector3, target: Vector3): Vector3 {
+  target.crossVectors(up, along);
+  const norm = target.length() || 1;
+  return target.divideScalar(norm);
 }
 
 /**
@@ -81,7 +191,7 @@ export interface RailFrame {
 export function railFrameAt(sampler: RailSampler, distance: number, out: RailFrame): RailFrame {
   sampler.pointAt(distance, out.position);
   sampler.tangentAt(distance, out.forward).normalize();
-  horizontalSide(out.forward, out.side);
+  railSide(out.forward, upFor(out.position.x, out.position.y, out.position.z, _railUp), out.side);
   out.up.crossVectors(out.forward, out.side).normalize();
   return out;
 }
@@ -137,9 +247,16 @@ export function sweptRail(
     const distance = (i / samples) * sampler.length;
     sampler.pointAt(distance, centre);
     sampler.tangentAt(distance, along);
-    horizontalSide(along, side);
+    railSide(along, upFor(centre.x, centre.y, centre.z, _railUp), side);
+    // Offset along the whole `side`, `y` included. Offsetting in `x`/`z` alone
+    // held both rails at one world height, which puts the track at an angle to
+    // a ground that leans.
     points.push(
-      new Vector3(centre.x + side.x * offset, centre.y, centre.z + side.z * offset),
+      new Vector3(
+        centre.x + side.x * offset,
+        centre.y + side.y * offset,
+        centre.z + side.z * offset,
+      ),
     );
   }
 

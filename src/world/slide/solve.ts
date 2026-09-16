@@ -20,6 +20,9 @@ import { TAU } from '../../core/mathUtils';
 import { PARK_LAYOUT } from '../parkLayout';
 import { PARK_SEED } from '../parkManifest';
 import { COASTER_PLANS } from '../coaster/plan';
+import { cartEnvelopePoint } from '../coaster/cart';
+import { crossSection } from '../coaster/clearance';
+import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
 import { PARK_BOUNDARY, solverBoundary } from '../boundary';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from '../train/plan';
 import {
@@ -29,7 +32,9 @@ import {
   solveRailRoute,
 } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
-import { terrainHeight } from '../terrain';
+import { Geo, worldYAtAltitude, worldYAtRadius } from '../geo';
+import { altitudeAt } from '../terrain';
+import { CHUTE_ENVELOPE } from '../building/SlideRide';
 
 /**
  * **The ginormous slide, as a plan.**
@@ -104,7 +109,7 @@ const SELF_CLEARANCE = 6;
  * helter-skelter indoors keeps. 12 m/s is 43 km/h: fine over the gentle indoor
  * curve, watched from outside, and much too fast for this one now that it is
  * ridden from the rider's own eyes round a bend that wraps a castle. 8 m/s is
- * 29 km/h — still a proper rush down a 13.75 m drop, and it is what lets the
+ * 29 km/h — still a proper rush down an 11–17 m drop, and it is what lets the
  * turns be tight enough to fit the park without throwing the camera about.
  */
 export const GIANT_SLIDE_SPEED = 6.5;
@@ -118,13 +123,24 @@ export const GIANT_SLIDE_SPEED = 6.5;
  * only fires when a legal biarc to the pit happens to exist, and grows until it
  * does. Asked for 68 m it produced 140.
  *
- * That is not merely long, it is the wrong ride: the drop is fixed at 13.75 m,
- * so length *is* gradient. Over 140 m the steepest part of the chute was 8°,
+ * That is not merely long, it is the wrong ride: the drop is fixed per seed
+ * (11–17 m against the local up), so length *is* gradient. Over 140 m the
+ * steepest part of the chute was 8°,
  * which is a lazy river with hand-rails. {@link MAX_RIDEABLE_LENGTH} is
  * therefore enforced as a rejection during the search — a piece that would take
  * the chute past it is simply not a legal piece, so the search backtracks
- * instead of wandering — and what survives gives roughly 14° average and 21°
- * steepest, which reads as a slide from the ground and rides like one.
+ * instead of wandering.
+ *
+ * **What survives is not "about 21° steepest"**, which this comment said for a
+ * long time after it stopped being true. Measured against the local up — the
+ * only frame a rider feels — over a 2 m window, once the profile was held
+ * against the planet (#645, 16 September 2026): canonical 27.2°, seed 131
+ * 27.7°, seed 24 23.3°, seeds 11 and 326 14–15°. Before that fix the same
+ * measurement read 36.8° / 36.2° / 26.6° / 28.7° / 28.9°, while world `y`
+ * understated the steepest. Whether those figures are right for a six-year-old
+ * is a ride-feel judgement, and it is Jim's. `theGinormousSlideNeverClimbs`
+ * prints the current figure for every seed it runs, so read it there rather
+ * than trusting this comment.
  */
 const DESIRED_LENGTH = 60;
 
@@ -152,7 +168,7 @@ const DESIRED_LENGTH = 60;
  * Why 75 and not something nearer {@link DESIRED_LENGTH}: an open route
  * overshoots what it is asked for (see there), so a ceiling near 60 would
  * reject nearly everything and put the boot time straight back. The drop is
- * fixed at 13.75 m, so length is gradient — at 87 m the canonical seed's chute
+ * fixed per seed, so length is gradient — at 87 m the canonical seed's chute
  * ran too flat *and* too far to stand on legs, which is why one number cures
  * both complaints.
  */
@@ -190,9 +206,9 @@ const FINAL_RUN_IN = 9;
  * Smoothstep has zero gradient at its own start, so the flat lip meets the drop
  * with no kink: the join is smooth by construction rather than by tuning.
  *
- * It makes the ride better, too. The same 13.75 m of drop now happens over 82%
- * of the chute instead of all of it, so the steep part is steeper — nearer 23°
- * than 19° — and it is a plunge rather than a ramp.
+ * It makes the ride better, too. The same drop now happens over 82% of the
+ * chute instead of all of it, so the steep part is steeper, and it is a plunge
+ * rather than a ramp.
  */
 const LIP_FRACTION = 0.18;
 
@@ -249,10 +265,52 @@ const CRUISER_OVERLAP = CORRIDOR_RADIUS + 0.75;
  */
 const BATTLEMENT_AIR = 4.55;
 
-/** Where the rider's eyeline starts, and where it ends up. */
+/**
+ * Where the rider's eyeline starts, as a world `y`.
+ *
+ * **Still placed flat**, like the door: the castle leans with the planet and
+ * this is measured straight up world `y` from its plinth. The castle's rigid
+ * transform is the proper owner of both and is arriving separately (#650). The
+ * profile below takes this only as *where the chute begins* — it is converted
+ * to a distance from the planet's centre at the start column, and everything
+ * after the start is held in that frame. See {@link heightAt}.
+ */
 const START_Y = BUILDING_BASE_Y + CASTLE_MASONRY_TOP + BATTLEMENT_AIR;
-const END_Y = terrainHeight(BALL_PIT_X, BALL_PIT_Z) + 0.9;
-const SLIDE_DROP = START_Y - END_Y;
+
+/** How far above the ground at the pit the chute's mouth sits, along the local up. */
+const MOUTH_ALTITUDE = 0.9;
+
+/** The mouth's height over the pit, as a world `y` — diagnostic, see {@link END_RADIUS}. */
+const END_Y = worldYAtAltitude(BALL_PIT_X, BALL_PIT_Z, MOUTH_ALTITUDE);
+
+/**
+ * The mouth's distance from the planet's centre: {@link MOUTH_ALTITUDE} above
+ * the ground in the middle of the pit. The profile descends to this radius.
+ */
+const END_RADIUS = Geo.fromWorld(BALL_PIT_X, END_Y, BALL_PIT_Z).radius();
+
+/**
+ * **The distance from the planet's centre the chute's level lip is held at**,
+ * for a start at (x, z) leaving along (headingX, headingZ).
+ *
+ * `START_Y` is a flat world height (see there), and a line held at a flat world
+ * `y` is not level: its distance from the centre changes along it. So which
+ * point of it to take as "the start height" is a real choice, and it is taken
+ * as the **higher** of the stub's two ends — the start pose and the farthest
+ * point carried back through the wall. The radius along a straight line at a
+ * constant `y` is convex, so every point of the old flat stub is at or below
+ * that, and the level stub therefore clears the battlements by at least what
+ * the flat one did at every point. Taking the start pose alone — tried first —
+ * held the lip 0.13 m *inside* seed 11's battlements where its castle stands
+ * further from the park's centre than its door pose.
+ */
+function startRadiusFor(x: number, z: number, headingX: number, headingZ: number): number {
+  const back = doorStubLength(headingZ);
+  return Math.max(
+    Geo.fromWorld(x, START_Y, z).radius(),
+    Geo.fromWorld(x - headingX * back, START_Y, z - headingZ * back).radius(),
+  );
+}
 
 /**
  * Distance the start pose stands off the facade's south wall.
@@ -298,14 +356,25 @@ const DOOR_SHOULDER = 0.65;
 export const SLIDE_DOOR_HALF_WIDTH = CORRIDOR_RADIUS + DOOR_SHOULDER;
 
 /**
- * Where along the facade's south wall the door is offered, facade-local.
+ * **Where along the facade's south wall the chute may leave, facade-local — a
+ * decision the search backtracks over, best first.**
  *
- * One position, which every candidate start pose is measured from. This is the
- * constant that pins the slide's exit to a single spot on the wall and so
- * forces the route to contort to reach it — widening it to the whole wall is a
- * separate, visible change, because it relocates a hole in the castle.
+ * This used to be one number, 9.5, and every candidate start pose was measured
+ * from it. That made the door a datum standing in for a decision, and the
+ * length ladder the only thing `planSlide` could vary. When the towers began to
+ * be described honestly (the leaning `TowerSolid`, #624) seed 326 stopped
+ * building: every rung failed **at the door stub**, which is fixed by the start
+ * pose alone, so no length could ever have moved it. Measured on 326 at scale 1:
+ * the stub stood 0.18 m *inside* `tower-roof-3`'s cone against 1.45 m owed —
+ * and a door at 6, 3, 0, −4 or −9.5 instead solved at the first rungs.
+ *
+ * 9.5 stays first, so a seed that builds today builds the identical slide. The
+ * rest walk away from that corner along the wall, then out to the far one.
+ * There is no hole in the masonry to relocate any more — the chute crosses the
+ * wall plane above the battlements (see {@link PlannedSlide.facadeDoorMinX}) —
+ * so moving this moves where the ride leaves, not the stone.
  */
-const DOOR_OFFER_CENTRE = 9.5;
+export const DOOR_OFFER_CENTRES: readonly number[] = [9.5, 6, 3, 0, -3, -6, -9.5];
 
 /**
  * Where a child stands on the **interior** roof terrace to board, and how wide
@@ -478,7 +547,17 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
     return true;
   }
   for (const tower of CASTLE_TOWERS) {
-    if (distanceOutsideTower(tower, x, z, y) < radius) return false;
+    // A tower standing on the plinth goes all the way down to the ground, however
+    // far the ground falls away from the plinth's flat height. `TowerSolid` stops
+    // at `bottomY`, so a chute passing *below* that height beside a tower read as
+    // clear of it. Nothing reached there while the chute was held in world `y`;
+    // held against the planet (#645) the run-out drops below the plinth on the
+    // far side of the castle, and seed 131 then ran its last metres through the
+    // foot of `tower-body-1` — 1.22 m inside the built masonry, measured by
+    // `theGinormousSlideMissesTheCastleTowers`. Reading the solid at its own
+    // foot for anything lower is the tower that was built.
+    const atY = tower.bottomY === BUILDING_BASE_Y && y < tower.bottomY ? tower.bottomY : y;
+    if (distanceOutsideTower(tower, x, z, atY) < radius) return false;
   }
   return true;
 }
@@ -577,6 +656,89 @@ export function cruiserCrossesColumn(
 }
 
 /**
+ * Metres between the drawn car's sampled positions along the loop, for
+ * {@link carSweepsColumn}.
+ */
+const CAR_SWEEP_STEP = 0.5;
+
+/**
+ * **The Sky Cruiser's car as it is drawn**, sampled once: the cross-section
+ * points `coaster/clearance.ts` sweeps (`crossSection`), placed with the same
+ * `drawnOnSphere` + `railFrameAt` + `cartEnvelopePoint` that sweep uses, every
+ * {@link CAR_SWEEP_STEP} metres. Flat `x, y, z` triples.
+ *
+ * Built lazily: only the slide's legs ask, once the chute is planned.
+ */
+let drawnCarPoints: Float64Array | null = null;
+function drawnCar(): Float64Array {
+  if (drawnCarPoints) return drawnCarPoints;
+  const route = COASTER_PLANS.cruiser.route;
+  const drawn = drawnOnSphere(route);
+  const section = crossSection();
+  const frame: RailFrame = {
+    position: new Vector3(),
+    forward: new Vector3(),
+    side: new Vector3(),
+    up: new Vector3(),
+  };
+  const out: number[] = [];
+  const point = new Vector3();
+  for (let d = 0; d < route.length; d += CAR_SWEEP_STEP) {
+    railFrameAt(drawn, d, frame);
+    for (const [lateral, rise] of section) {
+      cartEnvelopePoint(frame, lateral, rise, point);
+      out.push(point.x, point.y, point.z);
+    }
+  }
+  drawnCarPoints = Float64Array.from(out);
+  return drawnCarPoints;
+}
+
+/**
+ * The most any point of the car's surface can be from its nearest sample: half
+ * a {@link CAR_SWEEP_STEP} along the loop, and half the widest gap between
+ * neighbouring cross-section points across and up it (0.75 m and 0.85 m).
+ */
+const CAR_SAMPLE_PAD = Math.hypot(CAR_SWEEP_STEP / 2, 0.75 / 2, 0.85 / 2);
+
+/**
+ * **Would the Sky Cruiser's drawn car pass through a post of `radius` standing
+ * at (x, z) from `bottomY` to `topY`?**
+ *
+ * {@link cruiserCrossesColumn} asks the question of the route's *flat* centre
+ * line, and the ride is drawn leant onto the sphere — the car's top swings
+ * sideways by its height times the lean, a third of a metre and more out where
+ * the slide lands. On seed 131 (#663) that let a leg stand 2.12 m from the flat
+ * line and the car still ran through it (`the Sky Cruiser flies clear of the
+ * whole park`). This asks of the car that is drawn, the same sweep the invariant
+ * makes, padded by {@link CAR_SAMPLE_PAD} so the sampling cannot step past a
+ * post.
+ */
+export function carSweepsColumn(
+  x: number,
+  z: number,
+  bottomY: number,
+  topY: number,
+  radius: number,
+): boolean {
+  const points = drawnCar();
+  const reach = radius + CAR_SAMPLE_PAD;
+  const reach2 = reach * reach;
+  const low = Math.min(bottomY, topY) - CAR_SAMPLE_PAD;
+  const high = Math.max(bottomY, topY) + CAR_SAMPLE_PAD;
+  for (let i = 0; i < points.length; i += 3) {
+    const dx = (points[i] as number) - x;
+    if (dx > reach || dx < -reach) continue;
+    const dz = (points[i + 2] as number) - z;
+    if (dz > reach || dz < -reach) continue;
+    if (dx * dx + dz * dz > reach2) continue;
+    const y = points[i + 1] as number;
+    if (y >= low && y <= high) return true;
+  }
+  return false;
+}
+
+/**
  * A uniform grid over the cruiser's segments, so a clearance query looks at the
  * two or three that could possibly be near instead of all 144.
  *
@@ -599,7 +761,7 @@ const CRUISER_CELL = 4;
  * The cruiser's segments filed into a **dense flat grid**, indexed by cell.
  *
  * This used to be a `Map<number, number[]>` keyed by a packed integer. The
- * lookup is the hottest thing `clearsCruiser` does — one per sample of every
+ * lookup is the hottest thing `cruiserFoulsEveryHeight` does — one per sample of every
  * candidate piece, millions of times — and a `Map.get` hashes the key on every
  * one. A flat array indexed `(cx - minCx) * depth + (cz - minCz)` reads the same
  * bucket with an integer multiply-add and no hashing. Same segments, filed from
@@ -656,42 +818,6 @@ const CRUISER_GRID: CruiserGrid = (() => {
   return { minCx, minCz, depth, buckets };
 })();
 
-/** Does a point at (x, y, z) keep {@link CRUISER_AIR} from the Sky Cruiser? */
-function clearsCruiser(x: number, y: number, z: number): boolean {
-  const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
-  const reach2 = reach * reach;
-  const air = CRUISER_AIR + CRUISER_SAGITTA;
-  const cx = Math.floor(x / CRUISER_CELL) - CRUISER_GRID.minCx;
-  const cz = Math.floor(z / CRUISER_CELL) - CRUISER_GRID.minCz;
-  const depth = CRUISER_GRID.depth;
-  // Out of the grid's extent is out of every segment's reach — nothing to check.
-  if (cx < 0 || cz < 0 || cz >= depth || cx * depth + cz >= CRUISER_GRID.buckets.length) {
-    return true;
-  }
-  const nearby = CRUISER_GRID.buckets[cx * depth + cz];
-  if (!nearby) return true;
-  const count = CRUISER_LINE.length;
-  for (let n = 0; n < nearby.length; n += 1) {
-    const i = nearby[n] as number;
-    const a = CRUISER_LINE[i]!;
-    // The cruiser is a closed loop, so the last sample joins back to the first.
-    // Leaving that segment out puts a 1.5 m blind spot in the ride's own air.
-    const b = CRUISER_LINE[(i + 1) % count]!;
-    const abx = b.x - a.x;
-    const abz = b.z - a.z;
-    const len2 = abx * abx + abz * abz;
-    let t = len2 <= 1e-12 ? 0 : ((x - a.x) * abx + (z - a.z) * abz) / len2;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    const dx = a.x + abx * t - x;
-    const dz = a.z + abz * t - z;
-    if (dx * dx + dz * dz > reach2) continue;
-    // Height interpolated to the same place along the segment, so a climbing
-    // stretch is not read at the height of whichever end happened to be sampled.
-    if (Math.abs(a.y + (b.y - a.y) * t - y) < air) return false;
-  }
-  return true;
-}
-
 /**
  * Is a corridor of `radius` about (x, z), `distanceAlong` metres into the ride,
  * somewhere the chute may go?
@@ -706,6 +832,9 @@ function chuteMayPass(
   radius: number,
   distanceAlong: number,
   nominalLength: number,
+  startRadius: number,
+  toFinish: number,
+  startRadiusRange: { readonly low: number; readonly high: number },
 ): boolean {
   // Length is gradient on a ride whose drop is fixed, so an over-long chute is
   // as wrong as one that goes through a wall — but that rule lives on the brief
@@ -714,7 +843,7 @@ function chuteMayPass(
   // against a 75 m verdict), which is what made seed 5 solve 123 routes it was
   // always going to throw away. See {@link MAX_RIDEABLE_LENGTH}.
   if (insideCastle(x, z, radius)) return false;
-  const height = heightAtArc(distanceAlong, nominalLength);
+  const height = heightAtArc(distanceAlong, nominalLength, x, z, startRadius);
   // The castle is a rectangle *plus* four towers. Neither alone is the castle.
   if (!clearsTowers(x, z, height, radius)) return false;
   // Every plot but the two this ride joins, read off the flat arrays. Same test,
@@ -742,7 +871,64 @@ function chuteMayPass(
   // the top of it; forbidding the crossing outright would leave about 2 m
   // between the castle's east wall and the cruiser to thread a 3.4 m chute
   // through, which is no route at all.
-  return clearsCruiser(x, height, z);
+  // The Sky Cruiser's air, as an **interval** question (#650, seed 11). The
+  // height here depends on the finished route's length, which is not known yet
+  // — but it is bounded: at least `distanceAlong + toFinish` (the rest is never
+  // shorter than the straight line home) and at most `MAX_RIDEABLE_LENGTH`.
+  // The profile falls monotonically in `distanceAlong / length`, so the chute's
+  // height at this sample lies between the two, widened by which of the door's
+  // offers it started from. A piece is refused only if the cruiser fouls
+  // *every* height in that band: nothing the search could go on to build from
+  // here would clear it.
+  //
+  // The single guess this replaced — the height at `desiredLength` — was wrong
+  // both ways: routes finish 10-15 m longer than they ask for, so it refused
+  // crossings the finished chute clears and passed ones it fouls, which
+  // `satisfies` then threw away whole. Measured on seed 11 once the profile was
+  // held against the planet (#659): every one of 25 attempts ran all 1620
+  // pairings, the few routes that finished fouled the cruiser ~22 m before the
+  // pit, and the slide took 453 s to build.
+  const lengthLow = Math.min(MAX_RIDEABLE_LENGTH, distanceAlong + toFinish);
+  const highest = heightAtArc(distanceAlong, MAX_RIDEABLE_LENGTH, x, z, startRadiusRange.high);
+  const lowest = heightAtArc(distanceAlong, lengthLow, x, z, startRadiusRange.low);
+  return !cruiserFoulsEveryHeight(x, z, Math.min(lowest, height), Math.max(highest, height));
+}
+
+/**
+ * Does the Sky Cruiser foul a chute at (x, z) **whatever** its height in
+ * [`low`, `high`]? The interval form of the point test the prefilter
+ * used to make, over the same grid and segments: a segment fouls every height in the band when the
+ * band sits wholly inside that segment's air.
+ */
+function cruiserFoulsEveryHeight(x: number, z: number, low: number, high: number): boolean {
+  const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
+  const reach2 = reach * reach;
+  const air = CRUISER_AIR + CRUISER_SAGITTA;
+  const cx = Math.floor(x / CRUISER_CELL) - CRUISER_GRID.minCx;
+  const cz = Math.floor(z / CRUISER_CELL) - CRUISER_GRID.minCz;
+  const depth = CRUISER_GRID.depth;
+  if (cx < 0 || cz < 0 || cz >= depth || cx * depth + cz >= CRUISER_GRID.buckets.length) {
+    return false;
+  }
+  const nearby = CRUISER_GRID.buckets[cx * depth + cz];
+  if (!nearby) return false;
+  const count = CRUISER_LINE.length;
+  for (let n = 0; n < nearby.length; n += 1) {
+    const i = nearby[n] as number;
+    const a = CRUISER_LINE[i]!;
+    const b = CRUISER_LINE[(i + 1) % count]!;
+    const abx = b.x - a.x;
+    const abz = b.z - a.z;
+    const len2 = abx * abx + abz * abz;
+    let t = len2 <= 1e-12 ? 0 : ((x - a.x) * abx + (z - a.z) * abz) / len2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const dx = a.x + abx * t - x;
+    const dz = a.z + abz * t - z;
+    if (dx * dx + dz * dz > reach2) continue;
+    const cy = a.y + (b.y - a.y) * t;
+    if (cy - air < low && high < cy + air) return true;
+  }
+  return false;
 }
 
 /**
@@ -771,9 +957,8 @@ const SLIDE_VOCABULARY: readonly SegmentKind[] = turnVocabulary(
  * the slide starts, not which way it then sweeps, and the search needs
  * somewhere to go when the first choice dead-ends.
  */
-function doorPoses(): Pose2[] {
+function doorPoses(centreLocal: number): Pose2[] {
   const poses: Pose2[] = [];
-  const centreLocal = DOOR_OFFER_CENTRE;
   const halfGap = SLIDE_DOOR_HALF_WIDTH;
   // Straight out of the door first, then progressively more angled, alternating
   // sides so the *offers* are generated even-handedly.
@@ -783,7 +968,7 @@ function doorPoses(): Pose2[] {
   // `doorFitsTheWall` made false: of the 45 offers that survive out of 85,
   // measured, **34 have positive yaw against 8 negative** (plus 3 straight), and
   // the widest surviving negative is −36° against +72° the other way. The filter
-  // is right to do it — `DOOR_OFFER_CENTRE` (9.5) sits only 2.5 m from a wall
+  // is right to do it — the first door offer (9.5) sits only 2.5 m from a wall
   // ending at 12, so turning that way runs the opening off the end of the face —
   // but the asymmetry is the filter's, not this loop's, and the search inherits
   // it. Worth knowing before reading anything into which way the chute sweeps.
@@ -803,7 +988,13 @@ function doorPoses(): Pose2[] {
       // An offer whose hole would run off the end of the wall is not an offer.
       // See {@link doorFitsTheWall}: how wide the opening has to be depends on
       // how angled the exit is, so this cannot be decided by spacing alone.
-      if (doorFitsTheWall(pose)) poses.push(pose);
+      //
+      // And an offer whose stub runs through a tower or the Sky Cruiser's air
+      // is not an offer either. The stub and the flat lip are fixed by the pose
+      // alone — no route the search could then find moves them — so a pose that
+      // fouls there would cost a whole search per length rung to learn what
+      // this learns in a few samples. See {@link doorStubIsClear}.
+      if (doorFitsTheWall(pose) && doorStubIsClear(pose)) poses.push(pose);
     }
   }
   return poses;
@@ -906,7 +1097,9 @@ function openGround(x: number, z: number): boolean {
 }
 
 /**
- * Height along the chute: a single smoothstep from the parapet to the pit.
+ * Height along the chute, as a world `y` at plan column (x, z): a single
+ * smoothstep from the parapet to the pit — **in distance from the planet's
+ * centre, not in world `y`.**
  *
  * `u` is the fraction of the way along. Smoothstep is monotone on [0, 1] and
  * flat at both ends, which gives exactly the three things a slide needs and a
@@ -915,20 +1108,43 @@ function openGround(x: number, z: number): boolean {
  * flattens into a runout so a child is *delivered* into the ball pit rather
  * than fired into it.
  *
- * That it never rises is a property of the function, not of the seed — which is
- * what makes it something `test/procgen/invariants.ts` can hold every seed to.
+ * ### Why a radius (#645)
+ *
+ * It used to run from `START_Y` to `END_Y` in world `y`. On a planet that is
+ * the wrong axis: "level" and "downhill" are measured along the local up, which
+ * leans away from world `+Y` as the chute runs out from the park's centre. A
+ * run-out that was flat in world `y` was *rising* against the local up, and
+ * every seed climbed 0.8–3.2 m in all — the lip, and the last 5–8 m into the
+ * pit, where a child going 3–13° uphill stops.
+ *
+ * Held as a radius, "never rises" is a property of the frame a rider is in:
+ * a step whose endpoints are at non-increasing distance from the centre has
+ * non-positive projection on the up at its midpoint. It is a radius and not an
+ * altitude above the ground ({@link worldYAtAltitude}) deliberately — that
+ * would copy every hummock of the terrain waves into the chute, and a chute
+ * that follows the ground up a hummock climbs just the same.
+ *
+ * That it never rises is then a property of the function, not of the seed —
+ * which is what `theGinormousSlideNeverClimbs` in `test/procgen/invariants.ts`
+ * holds every seed to, against the local up of the built chute.
  */
-function heightAt(u: number): number {
+function heightAt(u: number, x: number, z: number, startRadius: number): number {
   const clamped = u < 0 ? 0 : u > 1 ? 1 : u;
-  if (clamped <= LIP_FRACTION) return START_Y;
+  if (clamped <= LIP_FRACTION) return worldYAtRadius(x, z, startRadius);
   const after = (clamped - LIP_FRACTION) / (1 - LIP_FRACTION);
   const eased = after * after * (3 - 2 * after);
-  return START_Y - SLIDE_DROP * eased;
+  return worldYAtRadius(x, z, startRadius - (startRadius - END_RADIUS) * eased);
 }
 
 /** {@link heightAt}, addressed by metres travelled rather than by fraction. */
-function heightAtArc(distanceAlong: number, totalLength: number): number {
-  return heightAt(distanceAlong / (totalLength || 1));
+function heightAtArc(
+  distanceAlong: number,
+  totalLength: number,
+  x: number,
+  z: number,
+  startRadius: number,
+): number {
+  return heightAt(distanceAlong / (totalLength || 1), x, z, startRadius);
 }
 
 /**
@@ -999,6 +1215,26 @@ function crossingOf(
 }
 
 /**
+ * Is the start of the chute this pose implies — its stub back through the wall,
+ * and the pose itself — somewhere a finished chute would be allowed to be?
+ *
+ * **Not a second test: the same one, on the same points.** The points come from
+ * {@link stubPoints}, which is also what {@link chutePoints} builds the finished
+ * chute's stub from, plus the route's own first point (`heightAt(0)`, the
+ * level lip's radius at the pose). The question is {@link chuteComplaint}, which is also what
+ * {@link unrideableComplaint} asks of the finished chute. Those points are a
+ * subset of every chute that could start from this pose, so a pose refused here
+ * is one every route from it would have been refused for — the prune can only
+ * save a search, never lose a slide.
+ */
+function doorStubIsClear(pose: Pose2): boolean {
+  const points = stubPoints(pose.x, pose.z, pose.hx, pose.hz);
+  const startRadius = startRadiusFor(pose.x, pose.z, pose.hx, pose.hz);
+  points.push(new Vector3(pose.x, worldYAtRadius(pose.x, pose.z, startRadius), pose.z));
+  return chuteComplaint(points) === null;
+}
+
+/**
  * Would the hole this pose implies fit inside the south wall?
  *
  * The wall runs facade-local ±{@link BUILDING_HALF_X}. A hole that runs past
@@ -1027,10 +1263,33 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
   const startX = flat.x;
   const startZ = flat.z;
   route.tangentAt(0, flat);
+  points.push(...stubPoints(startX, startZ, flat.x, flat.z));
+
+  const steps = Math.max(8, Math.round(route.length / POINT_SPACING));
+  const startRadius = startRadiusFor(startX, startZ, flat.x, flat.z);
+  for (let i = 0; i <= steps; i += 1) {
+    const u = i / steps;
+    route.pointAt(u * route.length, flat);
+    points.push(new Vector3(flat.x, heightAt(u, flat.x, flat.z, startRadius), flat.z));
+  }
+  return points;
+}
+
+/**
+ * **The chute's stub, and the one owner of it**: the points carried back from a
+ * start at (`startX`, `startZ`) along the start heading, through the wall, at
+ * the start's own distance from the planet's centre — farthest back first, excluding the start itself.
+ *
+ * {@link chutePoints} builds the finished chute's stub from this and
+ * {@link doorStubIsClear} prunes door offers with it, so the line that is judged
+ * before search and the line that is built after it cannot differ.
+ */
+function stubPoints(startX: number, startZ: number, headingX: number, headingZ: number): Vector3[] {
+  const points: Vector3[] = [];
   // Extend backwards far enough along the route's own heading to land
   // DOOR_INSET past the wall, however steeply it leaves. Still collinear with
   // the start tangent, so the chute cannot kink at the join.
-  const stub = doorStubLength(flat.z);
+  const stub = doorStubLength(headingZ);
   // Subdivided at the same {@link POINT_SPACING} as the rest of the chute, not
   // emitted as one long jump back to the wall.
   //
@@ -1043,17 +1302,16 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
   // flat as `heightAt` says it is instead of needing an allowance for not
   // being. Measured: it is what took seed 18 back under `SLIDE_MAY_RISE`.
   const stubSteps = Math.max(1, Math.round(stub / POINT_SPACING));
+  // Level in the rider's frame, like the lip it leads into: the start's own
+  // distance from the planet's centre, not the start's world `y`.
+  const startRadius = startRadiusFor(startX, startZ, headingX, headingZ);
   for (let i = stubSteps; i >= 1; i -= 1) {
     const back = (stub * i) / stubSteps;
-    points.push(new Vector3(startX - flat.x * back, START_Y, startZ - flat.z * back));
+    const x = startX - headingX * back;
+    const z = startZ - headingZ * back;
+    points.push(new Vector3(x, worldYAtRadius(x, z, startRadius), z));
   }
 
-  const steps = Math.max(8, Math.round(route.length / POINT_SPACING));
-  for (let i = 0; i <= steps; i += 1) {
-    const u = i / steps;
-    route.pointAt(u * route.length, flat);
-    points.push(new Vector3(flat.x, heightAt(u), flat.z));
-  }
   return points;
 }
 
@@ -1207,12 +1465,30 @@ export interface PlannedSlide {
  * "solve it both ways in one process and compare the hashes" a legitimate proof
  * rather than a coincidence, and `check:park-boot` is built on it.
  */
-export function slideRouteBriefAt(desiredLength: number): OpenRouteBrief {
+export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
+  const { desiredLength, doorCentre } = attempt;
   // The slide's territory is the park itself. `generate.ts` rejects any piece
   // whose corridor comes within `corridorRadius` of this boundary's edge, so
   // handing over the real spline keeps the chute inside the park with the
   // same clearance the old circle pretended to give (issue #241).
   const boundary = solverBoundary(PARK_BOUNDARY);
+  // The prefilter does not know which of the door's offers a piece descends
+  // from, so it reads the height profile from the square-on offer's start. The
+  // offers sit within 1.8 m of it along the wall, so this is as approximate as
+  // the assumed length beside it — and, like that, it is only a prefilter:
+  // `satisfies` measures the finished chute from its real start.
+  const nominalStartRadius = startRadiusFor(
+    BUILDING_CENTRE_X + doorCentre,
+    SOUTH_WALL_Z + WALL_STANDOFF,
+    0,
+    1,
+  );
+  const startPoses = doorPoses(doorCentre);
+  const startRadii = startPoses.map((pose) => startRadiusFor(pose.x, pose.z, pose.hx, pose.hz));
+  const startRadiusRange = {
+    low: Math.min(nominalStartRadius, ...startRadii),
+    high: Math.max(nominalStartRadius, ...startRadii),
+  };
   return {
     // A stream of its own, so the slide's shape cannot shift because some
     // other ride changed how many random draws it takes.
@@ -1226,13 +1502,22 @@ export function slideRouteBriefAt(desiredLength: number): OpenRouteBrief {
     // replaced, and what it cost seed 5.
     maxLength: MAX_RIDEABLE_LENGTH,
     closed: false,
-    startPoses: doorPoses(),
+    startPoses,
     endPoses: pitPoses(),
     // The cheap per-piece prefilter, on the length the ride asks for. Exact
     // enough to keep the search away from the castle and out of the coaster's
     // general area; `satisfies` below is what actually decides.
-    clear: (x, z, radius, distanceAlong) =>
-      chuteMayPass(x, z, radius, distanceAlong, desiredLength),
+    clear: (x, z, radius, distanceAlong, toFinish) =>
+      chuteMayPass(
+        x,
+        z,
+        radius,
+        distanceAlong,
+        desiredLength,
+        nominalStartRadius,
+        toFinish,
+        startRadiusRange,
+      ),
     satisfies: (candidate) => unrideableComplaint(candidate) === null,
     boundary,
     corridorRadius: CORRIDOR_RADIUS,
@@ -1284,13 +1569,74 @@ export function slideRouteBriefAt(desiredLength: number): OpenRouteBrief {
  */
 export const DESIRED_LENGTH_LADDER: readonly number[] = [DESIRED_LENGTH, 65, 62, 55, 68, 50];
 
-/** One attempt at a chute, at one target. Null if that target admits no route at all. */
+/** One decision the slide's search is run on: where it leaves, and how long it aims to be. */
+export interface SlideAttempt {
+  /** Facade-local x along the south wall; one of {@link DOOR_OFFER_CENTRES}. */
+  readonly doorCentre: number;
+  /** One rung of {@link DESIRED_LENGTH_LADDER}. */
+  readonly desiredLength: number;
+}
+
+/**
+ * **Every decision the slide backtracks over, in the order it tries them.**
+ *
+ * Door first, then length within each door: the whole length ladder at the
+ * original door before anything moves, so a seed that solves today solves the
+ * identical slide — the added decisions cost nothing on a park that works.
+ *
+ * A door whose every offer is refused before search ({@link doorStubIsClear},
+ * {@link doorFitsTheWall}) is skipped outright rather than run once per rung:
+ * that is what keeps a seed like 326 from paying six whole failed searches to
+ * learn something the door's own stub already said.
+ *
+ * **One list, both cadences.** `planSlide` and the loading screen's sliced
+ * search (`boot/parkGeneration.ts`) both walk exactly this, so they cannot build
+ * two different slides — `check:park-boot` hashes the two against each other.
+ */
+export const SLIDE_ATTEMPTS: readonly SlideAttempt[] = DOOR_OFFER_CENTRES.filter(
+  (doorCentre) => doorPoses(doorCentre).length > 0,
+).flatMap((doorCentre) =>
+  DESIRED_LENGTH_LADDER.map((desiredLength) => ({ doorCentre, desiredLength })),
+);
+
+/** The blocker when every door was refused before search — one string, both cadences. */
+export const NO_CLEAR_DOOR =
+  'had no door on the south wall whose stub clears the towers and the Sky Cruiser';
+
+/** How an attempt is named in a complaint, so a refusal says which decision failed. */
+export function describeSlideAttempt(attempt: SlideAttempt): string {
+  return `at a ${attempt.desiredLength} m target from the door at ${attempt.doorCentre} m along the wall`;
+}
+
+/**
+ * The seed cannot carry a ginormous slide: every decision in
+ * {@link SLIDE_ATTEMPTS} was tried and none gave a chute a child could ride.
+ * `blocker` is the last thing that stood in the way, in words.
+ */
+export interface SlideRefusal {
+  readonly refused: true;
+  readonly attemptsTried: number;
+  readonly blocker: string;
+}
+
+/** The message a refusal is thrown as, by the callers that cannot yet live without a slide. */
+export function slideRefusalMessage(refusal: SlideRefusal): string {
+  return (
+    `the ginormous slide never solved to a chute a child could ride: after ` +
+    `${refusal.attemptsTried} decisions (doors at ${DOOR_OFFER_CENTRES.join(', ')} m ` +
+    `along the south wall, ${DOOR_OFFER_CENTRES.length - new Set(SLIDE_ATTEMPTS.map((a) => a.doorCentre)).size} ` +
+    `refused before search; target lengths ${DESIRED_LENGTH_LADDER.join(', ')} m), ` +
+    `the best on offer ${refusal.blocker}.`
+  );
+}
+
+/** One attempt at a chute. Null if that attempt admits no route at all. */
 function solveChuteAt(
-  desiredLength: number,
+  attempt: SlideAttempt,
 ): { route: SolvedRailRoute; complaint: string | null } | null {
   let route: SolvedRailRoute;
   try {
-    route = solveRailRoute(slideRouteBriefAt(desiredLength));
+    route = solveRailRoute(slideRouteBriefAt(attempt));
   } catch (error) {
     // A target that admits no route at all is a rung that did not work, not a
     // park that cannot be built — the next rung gets its turn.
@@ -1318,6 +1664,23 @@ function solveChuteAt(
  * by running both in one process and comparing a hash of the finished chute.
  */
 export function planSlide(): PlannedSlide {
+  const outcome = solveSlide();
+  if ('refused' in outcome) throw new Error(slideRefusalMessage(outcome));
+  return outcome;
+}
+
+/**
+ * {@link planSlide}, total: a finished plan, or a {@link SlideRefusal} naming
+ * what blocked it — never a throw for a seed that cannot carry the ride.
+ *
+ * **Nothing consumes the refusal yet.** `SLIDE_PLAN` is built by
+ * {@link planSlide}, which throws it, and so does the loading screen — because
+ * 27 modules read the slide unconditionally and a park without one is a visible
+ * design change that is Jim's call, not this solver's. So today every path still
+ * throws on a seed that cannot carry the ride; this is the total function those
+ * paths can move onto once the readers can live without a slide.
+ */
+export function solveSlide(): PlannedSlide | SlideRefusal {
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
   // trade; for a slide through a roller coaster it is not, so what the search
@@ -1331,31 +1694,20 @@ export function planSlide(): PlannedSlide {
   // it is not describing — and it arrived the identical way, by a second copy
   // of a condition drifting from the first. There is now one owner and nothing
   // to keep in step.
-  let route: SolvedRailRoute | null = null;
-  let lastComplaint = 'never solved a route at all';
-  let rungsTried = 0;
-  for (const target of DESIRED_LENGTH_LADDER) {
-    rungsTried += 1;
-    const attempt = solveChuteAt(target);
+  let lastComplaint =
+    SLIDE_ATTEMPTS.length === 0 ? NO_CLEAR_DOOR : 'never solved a route at all';
+  let tried = 0;
+  for (const decision of SLIDE_ATTEMPTS) {
+    tried += 1;
+    const attempt = solveChuteAt(decision);
     if (!attempt) {
-      lastComplaint = `admitted no route at a ${target} m target`;
+      lastComplaint = `admitted no route ${describeSlideAttempt(decision)}`;
       continue;
     }
-    if (attempt.complaint === null) {
-      route = attempt.route;
-      break;
-    }
-    lastComplaint = `${attempt.complaint} (at a ${target} m target)`;
+    if (attempt.complaint === null) return finishSlidePlan(attempt.route);
+    lastComplaint = `${attempt.complaint} (${describeSlideAttempt(decision)})`;
   }
-
-  if (!route) {
-    throw new Error(
-      `the ginormous slide never solved to a chute a child could ride: ` +
-        `after ${rungsTried} target lengths (${DESIRED_LENGTH_LADDER.join(', ')} m), ` +
-        `the best on offer ${lastComplaint}.`,
-    );
-  }
-  return finishSlidePlan(route);
+  return { refused: true, attemptsTried: tried, blocker: lastComplaint };
 }
 
 /**
@@ -1437,7 +1789,7 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
  * ride rideable rather than a lazy river, and it is checked here so that the
  * answer has one home. See {@link MAX_RIDEABLE_LENGTH}.
  *
- * **Cruiser air** and **tower clearance** qualify because both `clearsCruiser`
+ * **Cruiser air** and **tower clearance** qualify because both `cruiserFoulsEveryHeight`
  * and `clearsTowers` take the height as an argument, so during the search both
  * were answered against an *estimated* length. Everything else the search checks
  * — the castle rectangle, the park's other plots, the boundary, the chute
@@ -1450,14 +1802,28 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
  */
 export function unrideableComplaint(route: SolvedRailRoute): string | null {
   if (route.length > MAX_RIDEABLE_LENGTH) {
+    const start = { x: 0, z: 0 };
+    route.pointAt(0, start);
+    const heading = { x: 0, z: 0 };
+    route.tangentAt(0, heading);
+    const drop = startRadiusFor(start.x, start.z, heading.x, heading.z) - END_RADIUS;
     return (
       `is ${route.length.toFixed(2)} m long against a ${MAX_RIDEABLE_LENGTH} m ` +
-      `ceiling — at that length the drop of ${(START_Y - END_Y).toFixed(2)} m is ` +
+      `ceiling — at that length the drop of ${drop.toFixed(2)} m is ` +
       'spread so thin the ride is a lazy river a child stops halfway down'
     );
   }
 
-  const points = chutePoints(route);
+  return chuteComplaint(chutePoints(route));
+}
+
+/**
+ * The height-sensitive half of {@link unrideableComplaint}: does any of these
+ * chute points foul the Sky Cruiser's air or a castle tower? Split out so
+ * {@link doorStubIsClear} asks exactly this, of exactly the stub's points,
+ * rather than a copy of it.
+ */
+function chuteComplaint(points: readonly Vector3[]): string | null {
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;
   let worstAt: Vector3 | null = null;
@@ -1478,6 +1844,23 @@ export function unrideableComplaint(route: SolvedRailRoute): string | null {
       `fouls the Sky Cruiser, only ${worst.toFixed(2)} m of air ` +
       `at (${worstAt.x.toFixed(1)}, ${worstAt.y.toFixed(1)}, ${worstAt.z.toFixed(1)}) ` +
       `against ${CRUISER_AIR} m required`
+    );
+  }
+
+  // The trough's underside stays out of the ground. Nothing asked this before,
+  // and the chute's heights are a smoothstep in world `y` chosen without
+  // looking at the ground under the route, so a route that ran out over
+  // rising ground simply went into it: measured on this branch, seed 326's
+  // chute reached 0.48 m *below* the grass 8 m before the pit. A faster search
+  // (it stopped exploring routes that could never finish under the length
+  // ceiling) then found routes on seeds 11 and 24 that did the same, by up to
+  // 1.47 m — so it is asked here, where the search can backtrack over it.
+  for (const point of points) {
+    const underside = altitudeAt(point.x, point.y, point.z) - CHUTE_ENVELOPE.below;
+    if (underside >= 0) continue;
+    return (
+      `runs into the ground at (${point.x.toFixed(1)}, ${point.y.toFixed(1)}, ` +
+      `${point.z.toFixed(1)}), its underside ${(-underside).toFixed(2)} m below the grass`
     );
   }
 

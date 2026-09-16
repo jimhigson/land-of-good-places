@@ -32,20 +32,34 @@
  * provably sitting where the rail is, not just close by construction.
  *
  * Comparison is 3-D (not just horizontal): the tie is deliberately dropped
- * 0.12 m below the rail centre line (`Coaster.ts`: `mid.y - 0.12`, so the
- * rail visually rests on top of the sleeper), and the expected point below
- * accounts for exactly that offset, so the epsilon only has to cover real
- * geometric slop, not the ride's own art direction.
+ * 0.12 m below the rail centre line **along that frame's own up**
+ * (`Coaster.ts`: `addScaledVector(frame.up, -0.12)`, so the rail visually rests
+ * on top of the sleeper), and the expected point below accounts for exactly
+ * that offset, so the epsilon only has to cover real geometric slop, not the
+ * ride's own art direction.
  *
  * Mutation-tested 1 August 2026: reverting the fix (going back to
  * `setFromUnitVectors`) fails this check — see HANDOFF-tie-frame-fix.md for
  * the measured before/after.
+ *
+ * **Re-proved red 16 September 2026, on the sphere.** Two mutations, both on
+ * the canonical seed of `feat/sphere-combined` (geometry: 287 ties on a 286.3 m
+ * loop whose flat and drawn frames diverge by up to 10.07 m):
+ *
+ * - putting `Coaster.ts`'s tie drop back to the plumb `setY(mid.y - 0.12)` →
+ *   **worst deviation 184.5 mm** at s=77.0 m, past the 50 mm epsilon;
+ * - reverting the tie's basis to `setFromUnitVectors` → **1099.9 mm** at s=189.0 m, the
+ *   original #112 sleeper bug, still caught.
+ *
+ * Keep that geometry with the numbers: a later change that moves the loop moves
+ * both figures, and a replacement re-running these against a different park
+ * would reasonably conclude the check had rotted.
  */
 import './headless-canvas.mjs';
 import { InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { RAIL_GAUGE, TIE_STEP } from '../src/world/coaster/Coaster.ts';
-import { railFrameAt, type RailFrame } from '../src/world/rail/sweptRail.ts';
+import { drawnOnSphere, railFrameAt, type RailFrame } from '../src/world/rail/sweptRail.ts';
 
 // How far a tie's rail-gauge point may sit from the rail centre line it is
 // meant to be bolted to. The rails' own sweep is not perfectly on the
@@ -58,6 +72,20 @@ const EPSILON_M = 0.05;
 
 const park = buildHeadlessPark();
 const coaster = park.world.coaster;
+
+/**
+ * **The route as the ties are actually built on, not the one the ride is solved
+ * in.**
+ *
+ * `Coaster.buildTrack` wraps its route in `drawnOnSphere` before it lays a
+ * single tie — the ride is *solved* in the flat frame the park is authored in
+ * and *drawn* leant onto the sphere, and those two are a long way apart out
+ * here: measured on the canonical seed, up to **10.07 m** at s=127 m. Asking
+ * `railFrameAt` for the unleant route and comparing it against the leant ties
+ * this check reads off the real `InstancedMesh` reported a worst deviation of
+ * **10419.0 mm** — a check measuring one track against a different one.
+ */
+const drawn = drawnOnSphere(coaster.route);
 
 const ties = coaster.group.children.find(
   (child): child is InstancedMesh => child.name === 'ties',
@@ -93,7 +121,7 @@ for (let i = 0; i < ties.count; i += 1) {
   instanceMatrix.decompose(position, quaternion, scale);
 
   const d = i * TIE_STEP;
-  railFrameAt(coaster.route, d, frame);
+  railFrameAt(drawn, d, frame);
 
   for (const side of [1, -1] as const) {
     // Where the tie itself says its rail-gauge point is: its own local X
@@ -106,7 +134,12 @@ for (let i = 0; i < ties.count; i += 1) {
     // computed independently via the same horizontal convention the rails
     // are swept with — not read back off the tie.
     expected.copy(frame.position).addScaledVector(frame.side, side * halfGauge);
-    expected.y -= 0.12; // the tie's own deliberate drop below rail height
+    // The tie's own deliberate drop below rail height, **along the frame's own
+    // up**. It was `expected.y -= 0.12`, a plumb drop — which agreed with
+    // `Coaster.ts`'s own `setY(mid.y - 0.12)` only because both were wrong the
+    // same way, and stopped agreeing with the *rails*, which are offset along
+    // the whole leaning `side`.
+    expected.addScaledVector(frame.up, -0.12);
 
     const deviation = actual.distanceTo(expected);
     checked += 1;

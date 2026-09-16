@@ -11,9 +11,11 @@ import {
   Quaternion,
   TorusGeometry,
   Vector3,
+  type Object3D,
 } from 'three';
 import { TAU } from '../core/mathUtils';
-import { terrainHeight } from './terrain';
+import type { Frame } from './geo';
+import { placeOnSphere, standOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
 import { ANCHORS, anchorGroupName, type AnchorDefinition, type AnchorId } from './anchors';
 import { createFerrisWheelProp, type FerrisWheelProp } from '../minigames/ferrisWheel/wheelProp';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -43,6 +45,92 @@ import type { CollisionWorld } from './Collision';
  * The group sits at the plot centre with its origin on the ground, so children
  * can be authored around (0, 0, 0).
  */
+const _standWorld = /* @__PURE__ */ new Vector3();
+const _standQuat = /* @__PURE__ */ new Quaternion();
+const _plotQuat = /* @__PURE__ */ new Quaternion();
+const _standFlat = /* @__PURE__ */ new Vector3();
+
+/**
+ * Stand a building's own root **on the ground at a world coordinate**, inside a
+ * plot group that is already positioned and already leaning.
+ *
+ * The obvious line — `root.position.set(worldX - plot.position.x, someY -
+ * plot.position.y, worldZ - plot.position.z)` — is wrong twice over now, and
+ * both mistakes shipped:
+ *
+ * - **A local offset is read in the plot's rotated frame.** Subtracting world
+ *   positions gives a world-space vector, and handing that to a tilted parent
+ *   turns it by the tilt. The castle's facade is nudged 3.54 m off its anchor,
+ *   and at the park's edge that leaked about half a metre straight into its
+ *   height.
+ * - **Cancelling the plot's own `y` pins the thing to world zero.** That is the
+ *   old flat park's ground plane and nothing at all on a sphere. It is exactly
+ *   how the hotel came to be hanging 1.75 m over the grass.
+ *
+ * So the world transform is solved first — `placeOnSphere` at the building's
+ * real (x, z), which is the same map every tree and lamp post goes through —
+ * and then carried back through the plot's inverse. Same pattern as the plot
+ * pegs above, and for the same reason.
+ */
+export function standInPlot(
+  plot: Object3D,
+  root: Object3D,
+  worldX: number,
+  worldZ: number,
+  heightAboveGround: number,
+  yaw = 0,
+): void {
+  _standFlat.set(worldX, terrainHeight(worldX, worldZ) + heightAboveGround, worldZ);
+  placeOnSphere(_standFlat, yaw, _standWorld, _standQuat);
+  plot.updateMatrixWorld(true);
+  root.position.copy(plot.worldToLocal(_standWorld));
+  root.quaternion.copy(plot.getWorldQuaternion(_plotQuat).invert().multiply(_standQuat));
+}
+
+/**
+ * {@link standInPlot}, for something whose world transform is already owned by a
+ * {@link Frame} — the castle's `CASTLE_FRAME`. The frame is the placement, so
+ * nothing else can describe where the thing stands differently from where it is
+ * drawn.
+ */
+export function standFrameInPlot(plot: Object3D, root: Object3D, frame: Readonly<Frame>): void {
+  frame.at.toWorld(_standWorld);
+  plot.updateMatrixWorld(true);
+  root.position.copy(plot.worldToLocal(_standWorld));
+  root.quaternion.copy(plot.getWorldQuaternion(_plotQuat).invert().multiply(frame.q));
+}
+
+const _plotUp = /* @__PURE__ */ new Vector3();
+
+/**
+ * How high the real ground stands under a point in a plot, **in that plot's own
+ * leaning frame** — the number a prop authored around the plot's origin wants
+ * for its local `y`.
+ *
+ * The obvious `terrainHeight(world) - terrainHeight(centre)` is wrong now, and
+ * wrong by a lot. A plot group's `+Y` is already the local up, so the sphere's
+ * fall across the plot has been taken out by the parent's rotation; subtracting
+ * two world heights hands it back, and the prop is pushed into the ground by
+ * twice the cap's drop. Measured on the bare cap by the agent that found this
+ * on the plot pegs: a point 9 m out from a centre 50 m from the origin wants
+ * local `y` **+0.18** and the old expression asks for **−0.73**.
+ *
+ * What is left after the tilt is the part that is genuinely bumpy — the rolling
+ * waves — which is exactly what a prop should be following. On a bare cap this
+ * returns zero everywhere, and that is the control to check it against.
+ */
+export function groundInPlot(
+  centreX: number,
+  centreZ: number,
+  localX: number,
+  localZ: number,
+): number {
+  const centre = terrainHeight(centreX, centreZ);
+  upAt(centreX, centre, centreZ, _plotUp);
+  const rise = terrainHeight(centreX + localX, centreZ + localZ) - centre;
+  return _plotUp.x * localX + _plotUp.y * rise + _plotUp.z * localZ;
+}
+
 export class AnchorPlots implements GameSystem {
   readonly name = 'anchorPlots';
   readonly group = new Group();
@@ -63,6 +151,13 @@ export class AnchorPlots implements GameSystem {
       const content = new Group();
       content.name = anchorGroupName(anchor.id);
       content.position.set(x, ground, z);
+      // **The plot's whole frame leans, not the things standing in it.** The
+      // group's origin is already on the ground at the plot centre, so tilting
+      // it there keeps that point put and takes everything built into it — the
+      // placeholder, and the ferris wheel below — with it as one rigid piece.
+      // It also means a ride authored around (0, 0, 0) needs to know nothing
+      // about the sphere: local `+Y` in here *is* the local up.
+      standOnSphere(content);
       content.userData.anchor = anchor;
       this.group.add(content);
       this.contentGroups.set(anchor.id, content);
@@ -161,10 +256,27 @@ function buildPlaceholder(anchor: AnchorDefinition): Group {
   const pegPosition = new Vector3();
   const pegRotation = new Quaternion();
   const pegScale = new Vector3(1, 1, 1);
+  // **A peg is placed in the world and then carried back into the plot's own
+  // frame — it is not offset in world Y.** The old line added
+  // `terrainHeight(peg) − terrainHeight(centre)`, which on a sphere is mostly
+  // the plot's *own* tilt: the parent group now applies that tilt, so adding
+  // it again would count it twice and bury the far pegs: measured on the bare
+  // cap, a peg 9 m out from a plot centre 50 m from the park's origin wants
+  // local y +0.18 and the old line asks for −0.73. Asking
+  // {@link placeOnSphere} where the peg really stands and undoing the parent's
+  // rotation leaves only the bumps, which is all this line ever meant.
+  const plotCentre = new Vector3(cx, ground, cz);
+  const intoPlot = tiltToSphere(cx, ground, cz).invert();
+  const pegFlat = new Vector3();
+  const pegWorld = new Vector3();
+  const pegLean = new Quaternion();
   outline.forEach((point, index) => {
     const worldX = cx + point.x;
     const worldZ = cz + point.z;
-    pegPosition.set(point.x, terrainHeight(worldX, worldZ) - ground + 0.28, point.z);
+    pegFlat.set(worldX, terrainHeight(worldX, worldZ) + 0.28, worldZ);
+    placeOnSphere(pegFlat, 0, pegWorld, pegLean);
+    pegPosition.copy(pegWorld).sub(plotCentre).applyQuaternion(intoPlot);
+    pegRotation.copy(intoPlot).multiply(pegLean);
     pegMatrix.compose(pegPosition, pegRotation, pegScale);
     pegs.setMatrixAt(index, pegMatrix);
   });

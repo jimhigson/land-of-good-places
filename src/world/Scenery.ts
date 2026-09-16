@@ -6,6 +6,7 @@ import {
   IcosahedronGeometry,
   InstancedMesh,
   Matrix4,
+  Quaternion,
   Mesh,
   SphereGeometry,
   Vector3,
@@ -35,7 +36,7 @@ import {
   RAIL_CORRIDOR_CLEARANCE,
 } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, standOnSphere, terrainHeight } from './terrain';
 import { PLAZA } from './paths';
 import {
   distanceToPath,
@@ -52,6 +53,7 @@ import {
   ENTRANCE_CLEAR_Z,
 } from './entrance/layout';
 import { hidesTheArrivingBus } from './entrance/arrivalSightline';
+import { distanceToEntranceCorridor } from './entrance/roadRoute';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
@@ -186,11 +188,42 @@ export type FoliagePart = TreePart;
 export interface FoliageOccluder {
   readonly x: number;
   readonly z: number;
+  /**
+   * **The flat-frame column this tree stands in** — the very `(x, z)` its trunk
+   * collider was registered at, and the one {@link ClimbableTreeSeed} records.
+   *
+   * {@link x}/{@link z} are *not* that, and have not been since the trees
+   * started leaning: they are the **drawn** centre of the widest canopy blob,
+   * which `placeOnSphere` slides outward along the local up. Measured on the
+   * canonical seed, the two are **1.67 m apart at a radius of 80 m and 2.94 m
+   * at 176 m** — so any code that used `x`/`z` as "where this tree is on the
+   * ground" silently stopped finding it.
+   *
+   * Two live bugs came from exactly that, both found by `check:climb-wave`
+   * going red on the sphere branch: {@link Scenery.clearTreesNear} matched a
+   * felled tree against {@link climbableTrees} by `x`/`z` and so **never**
+   * matched — a felled tree stayed climbable — and the fell search itself
+   * probed the canopy's slid centre against the trunk's own radius. Both ask
+   * about the foot, so both ask this.
+   */
+  readonly footX: number;
+  /** See {@link footX}. */
+  readonly footZ: number;
   /** Vertical centre of the tree's widest canopy blob — the occlusion test's reference point. */
   readonly centreY: number;
   /** Radius of that widest blob. */
   readonly radius: number;
-  /** Trunk plus every canopy/cone blob, in world space, for a matching stand-in. */
+  /**
+   * Trunk plus every canopy/cone blob, for a matching stand-in — **in the flat
+   * frame, not in world space.** Each `position` is an `(x, z)` and a height
+   * above the ground in that column, exactly as the tree was rolled; the drawn
+   * instance is that part put through `placeOnSphere` (`makeInstanced`,
+   * `FoliageFade`), which lifts it along the leaning local up and so slides it
+   * outward. Anything that measures these against drawn geometry must map them
+   * the same way first, or it counts the lean zero times or twice — `TreeFact`
+   * did the latter and reported a tree standing on the railway (#653, #661).
+   * For where the tree itself stands, use {@link footX}/{@link footZ}.
+   */
   readonly parts: readonly FoliagePart[];
 }
 
@@ -231,6 +264,15 @@ interface BushCollider {
 
 /** Degenerate matrix that renders an instance as nothing — cheaper than touching instance count. */
 const HIDDEN_MATRIX = new Matrix4().makeScale(0, 0, 0);
+
+/** Scratch for leaning a tree's sightline sphere onto the sphere. */
+const occluderFlat = new Vector3();
+const occluderCentre = new Vector3();
+const occluderSpin = new Quaternion();
+/** Scratches for testing the treeline's corridor gate where the canopy is *drawn*. */
+const canopyFlat = new Vector3();
+const canopyDrawn = new Vector3();
+const canopySpin = new Quaternion();
 
 /**
  * A wall run as actually built — the run plus the half-width it occupies.
@@ -380,8 +422,10 @@ export class Scenery {
    * loops walk from the end backwards so an earlier splice never invalidates
    * a later index still to be checked. A felled tree that happened to be
    * climbable also comes out of {@link climbableTreesMutable} (matched by
-   * position, since that list is a *subset* of the trees and does not share
-   * their indices).
+   * `footX`/`footZ`, since that list is a *subset* of the trees and does not
+   * share their indices — and **not** by `x`/`z`, which is the canopy's drawn
+   * centre and is metres away from the foot on the sphere; see
+   * {@link FoliageOccluder.footX}).
    *
    * Must run before anything reads these lists and keeps its own copy of an
    * index into them — `World.ts` builds the Sky Cruiser (and so calls this)
@@ -413,7 +457,9 @@ export class Scenery {
     for (let i = 0; i < this.occludersMutable.length; i += 1) {
       const tree = this.occludersMutable[i]!;
       const trunk = this.treeColliders[i]!;
-      if (Math.hypot(tree.x - x, tree.z - z) < radius + trunk.radius) return true;
+      // The **foot**, not the canopy's drawn centre: `trunk.radius` is the
+      // radius of the collider standing at `(footX, footZ)`. See `footX`.
+      if (Math.hypot(tree.footX - x, tree.footZ - z) < radius + trunk.radius) return true;
     }
     for (let i = 0; i < this.bushesMutable.length; i += 1) {
       const bush = this.bushesMutable[i]!;
@@ -427,11 +473,11 @@ export class Scenery {
     for (let i = this.occludersMutable.length - 1; i >= 0; i -= 1) {
       const tree = this.occludersMutable[i]!;
       const trunk = this.treeColliders[i]!;
-      if (Math.hypot(tree.x - x, tree.z - z) >= radius + trunk.radius) continue;
+      if (Math.hypot(tree.footX - x, tree.footZ - z) >= radius + trunk.radius) continue;
       this.setTreeHidden(i, true);
       this.collision.removeCircle(trunk.id);
       const climbableIndex = this.climbableTreesMutable.findIndex(
-        (seed) => seed.x === tree.x && seed.z === tree.z,
+        (seed) => seed.x === tree.footX && seed.z === tree.footZ,
       );
       if (climbableIndex !== -1) this.climbableTreesMutable.splice(climbableIndex, 1);
       this.occludersMutable.splice(i, 1);
@@ -650,7 +696,7 @@ function buildFoliage(collision: CollisionWorld): {
     // guessing at the tallest tree the scatter can produce, and a keep-out sized
     // for a tree that never grows there is the same disease as a 10 m disc sized
     // for an 11 m bus. See `entrance/arrivalSightline.ts`.
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind])) return false;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind], reach)) return false;
     planted.push({ x, z, reach });
     const y = terrainHeight(x, z);
 
@@ -666,7 +712,9 @@ function buildFoliage(collision: CollisionWorld): {
     const lean = tree.lean;
 
     // Occlusion bookkeeping for this tree (see `FoliageOccluder`/
-    // `world/FoliageFade.ts`): every part that makes it up, in world space,
+    // `world/FoliageFade.ts`): every part that makes it up, in the FLAT frame
+    // (a column and a height above its ground — `placeOnSphere` puts them on
+    // the sphere when drawn; `footX`/`footZ` is where the tree stands),
     // plus a rough bounding sphere (the widest blob's centre and radius) —
     // good enough for a cheap "does the sightline pass near here" test
     // without needing the real silhouette. `fileTreeParts` files each part
@@ -717,7 +765,28 @@ function buildFoliage(collision: CollisionWorld): {
       climbableTrees.push({ x, z, canopyTopY: tree.topBallTopY, trunkRadius: 0.55 * lean });
     }
 
-    occluders.push({ x, z, centreY: tree.wideCentreY, radius: tree.wideRadius, parts });
+    // **The sightline sphere goes where the canopy actually is**, which since
+    // the trees started leaning is not above the trunk any more. `wideCentreY`
+    // is a flat-frame height above the ground at (x, z); the same map
+    // `treeModel.ts` draws the canopy through puts the sphere on it. At the
+    // park's edge that is over a metre sideways — more than `SIGHTLINE_MARGIN`
+    // — so left flat, a tree near the boundary would fade at the wrong moment
+    // or not at all.
+    //
+    // This does **not** double up with `FoliageFade`'s own `placeOnSphere`
+    // call: that one composes the stand-in mesh from `part.position`, a
+    // different record, and the two never meet.
+    occluderFlat.set(x, tree.wideCentreY, z);
+    placeOnSphere(occluderFlat, 0, occluderCentre, occluderSpin);
+    occluders.push({
+      x: occluderCentre.x,
+      z: occluderCentre.z,
+      footX: x,
+      footZ: z,
+      centreY: occluderCentre.y,
+      radius: tree.wideRadius,
+      parts,
+    });
     occluderRefs.push(refs);
 
     const trunkRadius = 0.55 * lean;
@@ -947,7 +1016,7 @@ function buildFoliage(collision: CollisionWorld): {
     // check on the next line already uses for exactly this reach.
     if (!isPlantable(x, z, BUSH_REACH)) continue;
     if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP)) continue;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP, BUSH_REACH)) continue;
     // **...and then the same three questions every other plant here asks, of
     // the same three owners.** Issue #500: until this branch the bush
     // scatter's whole idea of an obstacle was `isPlantable` — paving, plots,
@@ -1162,14 +1231,83 @@ function buildTreeline(): Group {
     // the lower-left of the bus in every captured frame from t = 3 to t = 6.
     //
     // Refused rather than moved: an outset nudged along the same bearing is
-    // still on the same bearing, and the whole point is to be off it. Every draw
-    // above happens first, so the RNG stream is untouched and the other 500-odd
-    // trees stand exactly where they always did.
+    // still on the same bearing, and the whole point is to be off it.
+    //
+    // **This does shift the RNG stream, and an earlier version of this comment
+    // claimed it did not.** The `continue` sits above the draws that finish a
+    // tree, so a refused one leaves them untaken and every tree after it reads
+    // the stream one tree out of step. Measured on the sibling clause below:
+    // 436 trunks against 494, and only 115 of the 436 survivors stand where
+    // they did — they diverge from the second tree onward. That is cosmetic
+    // rather than a fault (the woodland is scattered either way, and the seed
+    // still determines it exactly), but it is not what the old sentence
+    // promised, and a promise about determinism is worth more than the
+    // convenience of leaving it unread.
     //
     // The canopy's own top, not the trunk's: `top = ground + height + radius *
     // 0.35` is where the blob's centre goes and it stands `radius * 1.15` up
     // from there at its tallest roll.
-    if (hidesTheArrivingBus(x, z, ground + height + radius * 1.5)) continue;
+    if (hidesTheArrivingBus(x, z, ground + height + radius * 1.5, radius)) continue;
+
+    // **And nothing stands in the road.** Jim, 3 September 2026: the bus drives
+    // through trees on its final approach. It does, and structurally rather
+    // than by bad luck on one seed — measured on the built park
+    // (`scripts/probe-road-trees.mts`), **64 to 106 of these instances per seed
+    // reach into the corridor the bus sweeps**, standing at outsets of 13.7 to
+    // 21.1 m. That is not a coincidence: this band runs from 11.5 m out to
+    // `TERRAIN_APRON - 1.5`, and the road's tails climb from the kerb to
+    // `ENTRANCE_ROAD_TAIL_OUTSET` right through it, so the road and the
+    // woodland occupy the same annulus by construction.
+    //
+    // **The trees give way, not the road**, and which way round that goes is a
+    // measurement rather than a preference: `roadRoute.ts` derives the corridor
+    // from `PARK_BOUNDARY` alone — no scenery, no rides, nothing built — so it
+    // is a pure pre-scene plan in exactly the sense {@link onRailway} describes
+    // for the train's route, and at the moment it solves, not one tree exists to
+    // avoid. The road also has nowhere to go: `check:entrance-road`'s own
+    // impossibility proof pins its outset between the bus door's pavement and
+    // the rim, with the two bounds crossing by 0.15 m. So the road claims its
+    // corridor and the woodland respects it, which is the same move pylon
+    // placement makes when it fells foliage.
+    //
+    // Refused rather than moved, for the reason above. **It shifts the RNG
+    // stream**, though — the `continue` is above the draws that finish a tree,
+    // so every tree after a refused one reads the stream one tree out of step.
+    // Measured: 436 trunks against 494 (so 58 felled is right), and only 115 of
+    // the 436 survivors stand where they did, diverging from the second tree.
+    // Cosmetic — the woodland is still exactly determined by the seed — but the
+    // old sentence here claimed the opposite and was simply false.
+    // What a player sees is a cleared run through the woodland where the road
+    // comes over the brow, which is what a road through woodland looks like.
+    // **One owner for where this canopy's centre sits.** It is used twice — to
+    // ask the corridor about the canopy's drawn position, and to place the
+    // canopy itself six lines below — and two copies of one expression kept in
+    // step by hand is this repo's commonest bug by a distance. It was two
+    // copies in the very commit that fixed a variant of the same disease.
+    const canopyCentreY = ground + height + radius * 0.35;
+
+    // **Tested where the canopy is DRAWN, not where its trunk stands.**
+    //
+    // `makeInstanced` puts every instance through `placeOnSphere`, which
+    // re-measures a part's authored height along the *local* up — so a canopy,
+    // being metres above the ground, is drawn further out than the trunk it
+    // grew from. Gating on the trunk's `(x, z)` therefore asks the corridor
+    // about a patch of ground the canopy does not occupy.
+    //
+    // Measured on the canonical seed at the park's authored scale: every one of
+    // the 460 surviving treeline instances is displaced outward between plant
+    // time and draw time — **median 1.80 m, worst 3.21 m** — and 18 canopies
+    // landed in the bus's corridor with the gate reporting them clear. The
+    // worst sat 0.49 m from the corridor while reaching 2.86 m, so it was
+    // 2.37 m into a road the bus drives down.
+    //
+    // This is the same correction the occluder above already makes, for the
+    // same reason and with the same call; its comment has said "at the park's
+    // edge that is over a metre sideways" all along. The gate simply never had
+    // it.
+    canopyFlat.set(x, canopyCentreY, z);
+    placeOnSphere(canopyFlat, 0, canopyDrawn, canopySpin);
+    if (distanceToEntranceCorridor(canopyDrawn.x, canopyDrawn.z) < radius) continue;
 
     trunks.push({
       position: new Vector3(x, ground + height / 2, z),
@@ -1179,7 +1317,7 @@ function buildTreeline(): Group {
       shade: rng.range(0.8, 1),
     });
     canopies.push({
-      position: new Vector3(x, ground + height + radius * 0.35, z),
+      position: new Vector3(x, canopyCentreY, z),
       scale: new Vector3(radius, radius * rng.range(0.85, 1.15), radius),
       rotationY: rng.range(0, TAU),
       colour: rng.pick(colours),
@@ -2136,6 +2274,11 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
     const boards = new Mesh(geometry, boardMaterial);
     boards.position.set(midX, base + run.height / 2, midZ);
     boards.rotation.y = -angle;
+    // Leant at the run's midpoint, while its two corner posts below lean at
+    // their own feet. Over a fence run that is metres rather than tens of
+    // metres the two tilts differ by well under a degree, which is cheaper
+    // than bending the boards.
+    standOnSphere(boards);
     boards.castShadow = true;
     boards.receiveShadow = true;
     group.add(boards);
@@ -2164,6 +2307,7 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
     const postHeight = corner.top - corner.base;
     const post = new Mesh(postGeometry, postMaterial);
     post.position.set(corner.x, corner.base + postHeight / 2, corner.z);
+    standOnSphere(post);
     post.scale.y = postHeight;
     post.castShadow = true;
     post.receiveShadow = true;
@@ -2171,6 +2315,7 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
 
     const cap = new Mesh(capGeometry, capMaterial);
     cap.position.set(corner.x, corner.top, corner.z);
+    standOnSphere(cap);
     cap.scale.set(1, 0.8, 1);
     cap.castShadow = true;
     group.add(cap);
@@ -2217,6 +2362,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gro
     const wall = new Mesh(geometry, wallMaterial);
     wall.position.set(midX, base + run.height / 2, midZ);
     wall.rotation.y = -angle;
+    standOnSphere(wall);
     wall.castShadow = true;
     wall.receiveShadow = true;
     group.add(wall);
@@ -2225,6 +2371,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gro
     const coping = new Mesh(new BoxGeometry(length + 0.2, 0.16, 0.72), copingMaterial);
     coping.position.set(midX, base + run.height + 0.08, midZ);
     coping.rotation.y = -angle;
+    standOnSphere(coping);
     coping.castShadow = true;
     coping.receiveShadow = true;
     group.add(coping);

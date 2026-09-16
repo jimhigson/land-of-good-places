@@ -1,0 +1,603 @@
+# HANDOFF — the bridge bends to the curvature of the earth
+
+- Branch: `eng/bridge-bend` off `feat/sphere-combined`
+- Worktree: `.claude/worktrees/eng-bridge-bend`
+- **Model: Opus 5 (1M context)**, chosen by the Overseer (Engineer default).
+  A replacement runs the same model.
+- Reports to: the Overseer session `landofgoodplaces-fc`.
+
+## !! CORRECTION, second agent, 16 Sep 2026 — read this before the rest
+
+**The "road passes below its own tunnel soffit" diagnosis below and on PR #628
+is DISPROVED.** The built geometry is sound. Filed as issue **#635** with the
+full table.
+
+Measured with `scripts/diag-deck-soffit.mts` (committed), at the exact plan
+points `theDrawnPathRidesOverEveryBridge` complains about, canonical seed:
+
+| bridge | lean | road vs the **marker** | road vs the **drawn stone** | overhead |
+|---|---|---|---|---|
+| 590.0 (20.4, -20.3) | 0.132 | passes | - | - |
+| 92.0 (51.4, 95.8) | 0.569 | -0.621 | **+0.226** | own `wallTop`, 0.99 m up |
+| 748.0 (-14.0, 121.7) | 0.670 | -0.783 | **+0.300** | open sky |
+| 288.0 (139.0, -50.8) | 0.909 | -1.131 | **+0.308** | own `wallTop`, 0.99 m up |
+| 326.0 (138.9, -82.1) | 1.078 | -1.865 | **+0.327** | open sky |
+
+**Status: FIXED on this branch.** `Bridge.soffitYAt` (#635). Full suite,
+diffed by name: **133 -> 128 failed, 501 -> 501 passed, 629 total both sides**
+(so nothing skipped). The five gone are exactly the five paving clauses; zero
+new. That is parity with the base `feat/sphere-combined` at 128.
+
+The road stands clear of the drawn stone at every one, and what is over it is
+sky or its own parapet. **Nothing is in a tunnel.** What the clause reads is the
+invisible `deck` marker - a `BoxGeometry` yawed about world `+Y` and nothing
+else, so a plate flat in world `y` while the road beside it leans at
+`tan(r/R)`. Over `TRACK_CLEARANCE` that is 1.4 m of pure frame disagreement.
+
+**So do NOT "make the deck rigid over `|along| <= ARCH_CLEAR_HALF`".** It would
+not clear the clause: a `tangentY` road leans too, and the marker still would
+not. The fix is in the two invariants that read a world-`y` AABB off a leaning
+object - see #635 for the scoped three-part fix.
+
+### The fix, and both clauses proved red before trusted green
+
+`Bridge.soffitYAt(x, z)` in `bridges.ts` — the world `y` of the drawn soffit
+in a plan column, or `null` where there is no tunnel over that point. Built
+from the same `soffitRiseAt` and `tangentY` the shell is drawn from. Both
+invariants ask it; nothing reads a height off the `deck` marker any more.
+
+**Red-proof 1 — `theDrawnPathRidesOverEveryBridge`.** Geometry: this branch @
+the `soffitYAt` commit, with `drapePathsOverBridges` short-circuited so the
+ribbon stays on the terrain — the exact bug the clause exists for. Output:
+
+```
+the drawn path-kerb passes under the bridge at (51.4, 95.8): a vertex at
+  (50.2, 97.2) sits at -29.04 m, below the -24.30 m soffit standing over the
+  track — the path is draped through the tunnel
+the drawn path-surface passes under the bridge at (139.0, -50.8): a vertex at
+  (137.5, -50.9) sits at -56.30 m, below the -50.62 m soffit — ...
+the drawn path-kerb passes under the bridge at (138.9, -82.1): a vertex at
+  (140.6, -82.5) sits at -72.33 m, below the -66.18 m soffit — ...
+```
+
+6 findings, 4.7-6.2 m below the soffit. Note the soffit differs per vertex at
+one crossing (-24.30 vs -22.97) — that is the leaning arch being read
+honestly, which the flat marker could not do.
+
+**Red-proof 2 — `railwayClearanceCoversTheTrainAndItsRiders`.** Geometry: the
+same tree with `BRIDGE_RISE` reduced by 0.6 m in `clearance.ts` — 0.6 m of
+real headroom taken out of every arch. Output:
+
+```
+the bridge deck at (-2.9, 96.2) leaves only 3.50 m under its own built
+  soffit, against the 3.90 m the train and its riders sweep to
+```
+
+Real numbers, no `NaN`, and the shortfall matches the mutation. **Both
+mutations were reverted**; `git status` clean before the suite run.
+
+Canonical seed, diffed by name: **26 failures -> 25. Exactly one gone (the
+paving clause), zero new.**
+
+### Second correction: the grade clause is red here too, and always was
+
+PR #628's body says the grade clause is "green on `feat/sphere-combined` and
+green here". **Measured on this tree today it is red on 4 of 5 seeds**
+(canonical, 11, 24, 326) - `every railway crossing has a bridge you can walk
+to, onto and across`, grades **0.720 / 1.475 / 1.203 / 1.144** against 0.512.
+
+The reason is that **the invariant measures the world-`y` grade and
+`diag-bridge-grade.mts` measures the local one.** 1.475 is the *same number*
+this handoff already prints as "the world-y grade stays large after the fix
+(1.475 at the outermost canonical crossing)" and calls correct. One of the two
+is wrong about what a child's legs feel, and the one that gates the merge is
+the invariant. **SETTLED - the clause measures the planet. Filed as #636.**
+
+`diag-bridge-grade.mts`'s own control 1, all four controls green:
+
+```
+ok   flat grass at r=140 disagrees as it must - world 1.140, local 0.010
+```
+
+**Flat grass reads 1.140 against a budget of 0.512.** No bridge, no ramp. The
+budget is crossed by the dome alone at about r = 100 m; the canonical seed has
+crossings out to 161 m. Per crossing:
+
+| r | world grade (the clause) | local grade | clause |
+|---|---|---|---|
+| 28.7 | 0.518 | 0.376 | passes |
+| 108.7 | **0.720** | 0.377 | fails |
+| 122.5 | **1.144** | 0.348 | fails |
+| 147.9 | **1.475** | 0.464 | fails |
+| 161.3 | **1.203** | 0.453 | fails |
+
+Worst local 0.464 against 0.512 - **0 of 5 over**. The world column matches the
+clause's own complaint text to three decimals, so it is the same measurement.
+
+**So do not pursue the two queued avenues.** Lowering the crown rise and an
+angled/dog-legged approach are both ramp geometry, and no ramp geometry brings
+a world-`y` grade at r=161 under 0.512 when flat ground there is 1.078. That is
+also why the three earlier avenues died: none of them changes `tan(r/R)`.
+
+The budget is stale a second, independent way: `constants.ts` on
+`SPRINT_PEAK_GRADE_BUDGET` says 0.512 "was the shape of a bug rather than a
+fact about ramps", fixed by #358, measured ceiling **1.670** on this park and
+**0.670** park-independent - and the clause's failure message still recites the
+obsolete damped-height arithmetic as its explanation.
+
+Fix: measure the local grade, with `diag-bridge-grade.mts`'s four controls
+carried across. #636 has the arithmetic and the two traps.
+
+## Gate state, measured on this tree (second agent, 16 Sep)
+
+| gate | base `feat/sphere-combined` @ `90e62c5b` | this branch | verdict |
+|---|---|---|---|
+| `test:procgen` | 128 failed / 501 passed / 629 | **128 / 501 / 629** | **0 new, 0 gone** |
+| `check:coplanar` | 54 new-or-worse | **53** | **0 new; one gone** (`archRing`/`shell`) |
+| `check` | fails `check:npc-perch`, *"climbable tree 0 has no foliage to measure"* | same step, same message | **pre-existing**, run on the base to confirm |
+| `build` | — | **exit 0** | |
+
+`package.json` is untouched by this branch, so the check chain is intact by
+construction. Three-dot diff is 12 files: the handoff, five diag scripts,
+`geo/ground.ts` + its barrel line, the two bridge modules, `invariants.ts`,
+`parkFacts.ts`. No deletion of anyone else's work.
+
+**Both red CI checks on #628 are the base being red, not this branch.** The
+base has no CI of its own (`gh pr checks 600` — "no checks reported"), which is
+why it went unnoticed. Posted as a comment on #628.
+
+**Open, and filed so they outlive this branch:**
+
+- **#635** — the `deck` marker's frame. **Fixed here** by `Bridge.soffitYAt`.
+- **#636** — the ramp-grade clause measures the planet. **Not fixable here and
+  not caused here**; it is red on the base too. This is the item the lane brief
+  called "the actual open problem", and the answer is that there is no ramp
+  geometry to find.
+
+**Loose ends from the previous handoff, both closed:**
+
+- `check:coplanar`'s 64 KiB truncation (`e72133f2` on
+  `eng/sphere-crossing-and-coping`): the fix is committed there — exit from the
+  write's own callback. That branch is **not** in this one's base, so the
+  53 seams here were measured with the truncating child; the honest backlog may
+  be larger once that lands, and per that commit's own note the baseline must
+  be **re-derived**, never topped up.
+- Seed 451's retirement note in `parkSeedPool.ts` is complete: it names
+  `SELF_CLEARANCE = 3`, the **3.95 m** pinch beside station 0, that **8.2
+  kills seed 24**, and the warp verdict (UNSOLVED, 35 candidates, 2220 s,
+  three oracle rejections). Nothing to add.
+
+## The brief
+
+Jim, 14 September 2026: *"whatever 'down' is in the mesh of the bridge needs to
+be adjusted so that down is variable along the length of the bridge, effectively
+it needs to be bent to cover the curvature of the earth. Just like all meshes
+that are not tiny. Trees and flowers are fine, but buildings externals and
+bridges etc need to bend downwards so that they use local horizontal/vertical,
+not a global one."*
+
+## Result so far — the headline, measured
+
+**Ramp grade, the live defect: 18 of 23 bridges over budget across the pool →
+0 of 23.** Worst local grade 1.124 → 0.464 against `SPRINT_PEAK_GRADE_BUDGET`
+0.512. Every pool seed was affected; every pool seed is now clear.
+
+The Overseer's claim — *"a bridge that bends meets the ground at the same grade
+at both ends, so the problem stops existing"* — is **verified, not assumed**.
+The ramp-lengthening avenue stays closed and is not needed.
+
+## Root cause, in one term
+
+`surfaceProfile` read
+
+```
+ground + (crownY - ground) * (1 - drop)
+```
+
+which expands to `crownY·(1-drop) + ground·drop`. That second term drags the
+**ground's own world-y slope** into the deck's height above the ground — and on
+this planet that slope *is* the planet, up to 1.02 at the boundary. Differentiate
+and the deck picks up `g'·(drop-1)`.
+
+Stated in altitudes the term does not exist at all: the grade is
+`crownAlt · drop'`, which is what the planner asked for and has nothing to do
+with where on the dome the bridge stands.
+
+## The measurement, and its controls
+
+`scripts/diag-bridge-grade.mts`. **Run the controls; the run is void without
+them.** It reports each bridge's grade twice — world-y (`Δy/Δplan`, what every
+existing check in this repo measures) and local (the step's rise along the local
+up at its start, over the part of the step in that point's own horizontal
+plane).
+
+Three controls, and all three are needed:
+
+1. flat grass at r=140 must **disagree** — world large (the dome), local ~0;
+2. flat grass at the park centre must **agree** — both small and within 0.05;
+3. a synthetic ramp of declared grade must **read back** — a measure that only
+   ever says "flat" is a check that cannot fail.
+
+**Two of my own errors died on those controls. Both are written up in the file
+and both are the kind that read clean:**
+
+- **`altitude()` is NOT the local rise.** It is height *above the ground*, so a
+  march along the ground has `Δaltitude = 0` at every step — over a hillside as
+  much as over flat grass. My first version measured exactly that and printed a
+  decisive `local 0.000` for the park's own slopes. Control 2 caught it.
+- **Control 3 then read back a uniform 0.774** of the grade it asked for, on
+  both 0.20 and 0.50. That is `cos(39.5°)` — the *control's* ramp declared its
+  grade against plan distance while the orthographic `(x, z)` chart compresses
+  radially by `cos θ`. The control was wrong and the measure it was doubting was
+  right. **A constant-ratio miss reads like a broken instrument and is very
+  often a broken expectation.**
+
+## The design, and the line it draws
+
+**What bends and what stays rigid is decided by a measured threshold, not by
+taste.** `geo/Chart.ts` puts a flat patch's departure from this 220 m planet at
+5 cm for a 4.69 m radius.
+
+- **The crown span is rigid.** `ARCH_CLEAR_HALF` is 1.80 m — departure
+  **7.4 mm**. It is a declarable flat chart. The arch, the slab and the
+  clearance marker are one rigid object over a hole.
+- **Rigid means flat in the LOCAL frame and tilted in world `y`.** They were
+  flat in *world y*, which over their own 3.6 m span at the park's reach puts
+  one haunch 3.9 m out of place. `tangentY(x, z, rise)` is the conversion, and
+  it is deliberately **not** `worldYAtAltitude` — a rigid object must not follow
+  the terrain under it, or it is not rigid.
+- **The ramps bend.** At 14–18 m they are nowhere near qualifying for a flat
+  chart. `worldYAtAltitude` is their conversion.
+
+## New shared primitive
+
+`src/world/geo/ground.ts` → **`worldYAtAltitude(x, z, metres)`**, exported from
+`geo/index.ts`. The one owner of *"how high in this column is this altitude"*.
+
+It is **not** `terrainHeight(x, z) + metres`: stepping up the world `y` axis by
+`δ` at a point leaning `θ` gains only `δ·cos θ` of altitude. Asking for 4.60 m:
+
+| plan point | `worldYAtAltitude` → altitude | `terrainHeight+4.60` → altitude |
+|---|---|---|
+| (0, 0) | 4.600 | 4.600 |
+| (100, 0) | 4.600 | 4.112 |
+| (139, −51) | 4.600 | 3.409 |
+| (−99, 138) | 4.600 | **2.932** |
+
+Exact to ~1 µm, and identical to the flat answer at the park's origin, so
+converting a centre-of-park call site can never make it worse.
+
+**That right-hand column is a live defect wherever it appears, and it is not
+only bridges.** Anything built by adding metres to `terrainHeight` has up to
+**36 % less real clearance than it asked for** at the park's reach. That is the
+shape of the "train drives into its own bridges" report. `BRIDGE_RISE` is now an
+altitude, so the train gets the air it was promised.
+
+## What is done
+
+- `surfaceProfile` states the hump in altitudes — the road bends. (commit 3)
+- The crown solve measures a rise above the crossing's own tangent plane rather
+  than a world `y`. In world `y` that loop was measuring the planet: over its
+  3.6 m span the dome alone falls 3.9 m, twenty times the terrain wave the
+  worst-case was ever about. (commit 3)
+- The arch is built in the tangent frame; `archCurve` returns rises and each
+  reader converts at its own plan point. `ArchPlacement` carries both halves of
+  putting it back — the rise-to-world-`y` conversion **and** the rotation taking
+  world `+Y` to the local up, because the voussoir ring and the imposts need
+  their basis vectors leaned as well as their positions. (commit 4)
+- The parapet hump measure (`parapetHeightFor`'s taper, and `PARAPET_MIN_HUMP`'s
+  decision whether a collider wall stands at all) uses the altitude, not the
+  world-`y` difference that over-reported it by up to 1.47×. A wall standing
+  where the hump is really below a step severs the path junctions a ramp foot
+  lands in. (commit 4)
+- Wall bottoms bury 0.5 m along the local up rather than down the world `y`
+  axis, which buried only 0.34 m at the park's reach. (commit 4)
+
+## What is NOT done — read this before claiming the bridge is converted
+
+- **The parapet/spandrel verticals still stand along world `y`.** A parapet is
+  ~1.2 m, so its top is displaced ~0.92 m from where the local up would put it
+  at 45° of lean; a spandrel wall runs ~5.5 m from deck to buried bottom and is
+  sheared much further. This is the largest remaining piece of Jim's brief.
+- **`courseLevels` steps the masonry coursing in world `y`**, so courses are
+  horizontal in world space rather than parallel to the deck they belong to.
+- **`deckMesh`'s rotation is still `setFromAxisAngle(Vector3(0,1,0), yaw)`** — a
+  yaw about world `+Y` and nothing else, so it never leans. It is an invisible
+  marker with no faces, read only via `Box3.setFromObject(...).min.y`, so this
+  is a measurement question rather than a visible one — but the invariants read
+  their clearance off it, so leaning it and leaning the arch must land together.
+- **The whole-bridge lean question is deliberately NOT reopened.** The previous
+  engineer measured that a per-vertex `placeOnSphere` moves the deck up to
+  5.38 m and the parapet top up to 6.12 m off their own colliders, against a
+  0.62 m `PLAYER_RADIUS`. Nothing here leans a plan footprint: every query,
+  collider, `MovingPlatform` and `planEdge` keys off the same `(x, z)` it always
+  did, which is why no desync is possible from these commits. **If you lean a
+  footprint, you own inverting every `(x, z)` query with it** — and the honest
+  framing of that is the orthographic-chart problem `geo/Chart.ts`'s curved
+  chart exists to solve, which is the architect's work, not a bridge patch.
+
+## Instruments
+
+- `scripts/diag-bridge-grade.mts` — the grade, both ways, with its three
+  controls. `LGP_SEED=<n>`; exit 1 if any bridge is over budget, exit 2 if a
+  control failed (in which case every number it printed is void).
+- `scripts/diag-bridge-solid.mts` (pre-existing, previous engineer's) — the
+  solidity/reachability instrument. Re-run it before claiming the drawn stone
+  is still solid; its own header records the 8.87 m false alarm it nearly
+  shipped and why controls that pass on open grass cannot catch a probe that is
+  blind to the object.
+
+## Pool sweep — before and after, all controls green on every run
+
+| seed | before | after |
+|---|---|---|
+| canonical | 3 of 5 over, worst 1.124 | **0 of 5, 0.464** |
+| 11 | 1 of 2 over, 0.800 | **0 of 2, 0.464** |
+| 24 | 2 of 2 over, 0.817 | **0 of 2, 0.405** |
+| 128 | 1 of 2 over, 0.553 | **0 of 2, 0.356** |
+| 131 | 1 of 1 over, 0.685 | **0 of 1, 0.398** |
+| 208 | 1 of 1 over, 0.844 | **0 of 1, 0.364** |
+| 274 | 1 of 1 over, 0.573 | **0 of 1, 0.338** |
+| 326 | 5 of 5 over, 0.783 | **0 of 5, 0.489** |
+| 428 | 1 of 1 over, 0.538 | **0 of 1, 0.345** |
+| 451 | 2 of 3 over, 0.852 | **0 of 3, 0.364** |
+
+Bridge counts are unchanged on every seed, so nothing was lost to get this.
+
+**The world-y grade stays large after the fix** (1.475 at the outermost
+canonical crossing, down from 2.179). That is correct and is the tell that the
+bridge genuinely leans with the dome now; it is the grade her legs feel that
+came into budget.
+
+## `test:procgen` parity — diffed by name, not by count
+
+Base `feat/sphere-combined` @ `90e62c5b`: **128 failed**.
+After the profile commit alone: **146 failed** — 18 new, 0 gone, all four
+clauses bridge-related and all four caused by the arch still being flat in world
+`y` while the road had started to bend. Those are what commit 4 addresses; the
+re-run is the current state of play (see below). **Diff the names — the count
+alone cannot see a swap.**
+
+The four clauses to watch, per seed:
+
+- `every bridge is as wide as its own path, with the rail corridor open beneath`
+- `no bridge parapet can be seen through — its outer face reaches the wall top`
+- `nothing a bridge builds hangs into its own tunnel, measured by ray from the rail`
+- `the park's own paving rides over every bridge, and none is left in a tunnel`
+
+## `test:procgen` — the honest state, diffed by name
+
+Base `feat/sphere-combined` @ `90e62c5b`: **128 failed**, 122.55 s.
+This branch after the arch conversion: **139 failed**, 101.99 s.
+**12 new, 1 gone.** Diff the names — the count alone cannot see a swap.
+
+Gone: `seed 11 > every modelled coping stone sits on the wall it caps`.
+
+New — four clauses, across five seeds:
+
+| clause | seeds |
+|---|---|
+| `no bridge parapet can be seen through — its outer face reaches the wall top` | canonical, 11, 24, 131, 326 |
+| `the park's own paving rides over every bridge, and none is left in a tunnel` | canonical, 11, 24, 131, 326 |
+| `every bridge is as wide as its own path, with the rail corridor open beneath` | 326 |
+| `nothing a bridge builds hangs into its own tunnel, measured by ray from the rail` | 326 |
+
+The arch conversion took this from **18 new to 12** and cleared the tunnel
+clauses on every seed but 326.
+
+**These are mine and they are the work now.** Nothing here is "pre-existing" or
+"unrelated" — the road bent and the drawn stone has not fully caught up.
+
+### Three hypotheses tried, all measured, none of them it
+
+Recorded so the next person does not spend the same hour. Each was plausible,
+each was tested by changing it and re-running, and each left the numbers
+essentially unmoved (canonical parapet counts 24/25/58/3/9 before, 24/27/58/3/10
+after):
+
+1. **`humpAbove` — the parapet taper reading an altitude instead of a world-`y`
+   difference.** Reverted that one line alone; both clauses still failed. Not it.
+   (The change is right on its own merits and was kept.)
+2. **The course ladder stepping in world `y`.** Converted it to a ladder of
+   rises in the tangent frame. Numbers unmoved. **Reverted** — an unproven
+   change does not belong in the diff, however good the argument for it. The
+   argument, for whoever wants it: masonry courses are laid *level*, and level
+   on this planet is the local horizontal, so a world-`y` ladder under a leaning
+   parapet cannot reach its top. It reduces to the present ladder exactly on
+   flat ground. It is simply not what these clauses are complaining about.
+3. **The cross-section taking one centre-derived height across its width.**
+   Fixed, and **kept** — it is a real one-owner correction and it is verified
+   neutral-or-better on solidity and grade. But it did not clear the clauses.
+
+### What I could NOT settle, and why you should not trust my guess
+
+My leading remaining hypothesis is that
+`noBridgeParapetCanBeSeenThrough` **measures in a stale frame**: it drops down a
+**world vertical** from the wall top (`y = top - drop`) and fires a ray with a
+zero `y` component (`direction.set(ux, 0, uz)`) at a face that now leans by up
+to 50°. Its own inner "is there masonry here" control is fired from 1.2 m in
+over the roadway and has more room, so it can keep hitting while the outer ray
+walks off the tilted face — which would produce exactly this report.
+
+**I wrote an instrument to test that and it came back inconclusive, so the
+hypothesis is unsupported and must not be acted on as if it were proven.** The
+instrument fired the clause's own outer ray and a local-frame one at the same
+samples. Result:
+
+```
+  bridge          tilt    both hit   world MISS/local HIT   world hit/local miss   both miss
+  bridge-590.0    11.8°       5245                     48                    112        865
+  bridge-92.0     32.9°       5190                     57                    462        321
+  bridge-748.0    39.6°       5054                     23                    499        454
+  bridge-288.0    47.1°       3898                    153                    495        284
+  bridge-326.0    50.4°       4109                     18                    700        243
+```
+
+The column that would support the hypothesis (`world MISS / local HIT`) is 299
+of ~28,000 and **does not grow with tilt** — 48, 57, 23, 153, 18. A frame error
+must scale with the lean, and this does not.
+
+**The instrument is the thing at fault, not the finding.** It aimed both rays
+along the crude outward *radial* rather than along the wall's own normal, so
+every column is contaminated — and the 243–865 samples where **both** rays miss
+say plainly that its sample points are often not on a parapet at all. It was
+deleted rather than committed: an instrument that cannot answer its question
+should not be left lying about looking like one that can.
+
+**Do this properly instead:** take the clause's own ring/normal data
+(`ShellGeometry.planEdge` and `parapetLine`, which is what it already walks),
+and vary *only* the frame — drop along the local up and project the existing
+normal into that point's own horizontal plane. Then it is a one-variable
+experiment. And whichever way it comes out, **the clause must still be proved
+red against a real hole** before it is believed green: it was written for a
+genuine 1.17 m see-through band (#489, Jim standing on one), and a frame change
+that quietly stops it being able to see that is worse than the bug.
+
+## Still to do
+
+1. Settle the four red clauses — read the section above first.
+2. `pnpm run check`, `check:coplanar`, `check:swept-bus`.
+3. The parapet/spandrel verticals (see "What is NOT done").
+4. Browser QA: a bridge at an outer crossing, seen from the side. `/spawn`
+   coordinates that stand on one — canonical seed, outermost first:
+   `/spawn?pos=138.9,-82.1`, `/spawn?pos=139.0,-50.8`, `/spawn?pos=-14.0,121.7`.
+   The preview on 5412 is Jim's; do not take it.
+
+## Instruments left behind
+
+- `scripts/diag-bridge-grade.mts` — the grade, both ways, three controls.
+  `LGP_SEED=<n>`; exit 1 if any bridge is over budget, **exit 2 if a control
+  failed**, in which case every number it printed is void.
+- `scripts/diag-bridge-solid.mts` (previous engineer's) — re-run after any
+  geometry change. Currently 24/24 stopped and 125/125 carried at both the
+  innermost and outermost bridge, controls passing: the bend did **not** desync
+  the stone from its collider.
+
+---
+
+# Continued — the 10 regressions, settled (Opus 5, 1M context; Overseer-assigned)
+
+## 1. `no bridge parapet can be seen through` — FIXED, and the frame hypothesis is DISPROVED
+
+Not the frame. `PROBE_BOTTOM` was a bare `1.5` while
+`PARAPET_HEIGHT + PARAPET_CROWN_LIFT` is **1.17** — the clause probed **0.33 m
+below the bottom of the wall it was probing**, into the spandrel and deck edge
+underneath. The old world-`y` bridge happened to put stone in that band; bending
+it moved that stone.
+
+`scripts/diag-parapet-frame.mts` varies **only the frame**, off the clause's own
+ring data, as this handoff's predecessor designed:
+
+| seed | world-frame misses | all below the 1.17 m wall? | misses at/above wall bottom | world MISS / local HIT |
+|---|---|---|---|---|
+| canonical | 17 | 17 of 17 | **0 of 10,718** | **0** |
+| 11 | 13 | 13 of 13 | **0 of 3,680** | **0** |
+| 24 | 15 | 15 of 15 | **0 of 4,692** | **0** |
+| 131 | 9 | 9 of 9 | **0 of 2,346** | **0** |
+| 326 | 29 | 29 of 29 | **0 of 10,856** | 1 |
+
+Every miss sat at drop 1.38-1.48 m. The deleted instrument's 299-of-28,000
+column was its own contamination — the real figure is zero, at every tilt.
+
+**Proved red against a real hole before being believed green** (CLAUDE.md, and
+this handoff's own warning): with the probe shortened, reintroducing #489's bug
+— `buildCourses(surfaceOuterPlus/Minus, …)` instead of `parapetTopPlus/Minus`,
+`bridges.ts:1417-1418`, canonical seed — gives **1349-1791 places per bridge on
+all five bridges, worst run 1.15 m spanning 0.03-1.13 m below the top**. That is
+the 1.17 m band #489 was written for. Mutation reverted.
+
+Result: `test:procgen` **138 -> 133** failed, 629 total both ways.
+
+## 2. `the park's own paving rides over every bridge` — NOT the check. A REAL geometry bug.
+
+**Do not "fix" this in the invariant. The bridge is wrong.**
+
+`scripts/diag-soffit-point.mts`, canonical seed:
+
+| bridge | plan position | paving above its own road | **road vs the soffit over it** | along the bridge axis |
+|---|---|---|---|---|
+| 590.0 | (20.4, −20.3) | — | **passes** | — |
+| 92.0 | (51.4, 95.8) | +0.030 m | **−0.651 m** | −0.50 m |
+| 748.0 | (−14.0, 121.7) | +0.030 m | **−0.813 m** | −1.10 m |
+| 288.0 | (139.0, −50.8) | +0.030 m | **−1.161 m** | −0.91 m |
+| 326.0 | (138.9, −82.1) | +0.030 m | **−1.895 m** | −1.23 m |
+
+Read that middle column: the **road surface is below the tunnel ceiling above
+it**, by up to 1.90 m. The paving is innocent — it sits a constant 0.030 m on
+its own road on every bridge, so `drapePathsOverBridges` is working perfectly.
+
+And every offending vertex is **within ±1.80 m of the crossing centre along the
+bridge axis** — i.e. **directly over the tunnel opening**, not out on a ramp. A
+train drives into the underside of its own bridge road. The error is **zero near
+the park centre and grows monotonically with radius**, which is the signature of
+two height conversions disagreeing.
+
+### The cause, and the fix this branch's own design already prescribes
+
+Two owners for "how high is this", used on the same rigid object:
+
+- the **road** (`surfaceProfile`) converts with `worldYAtAltitude`, which
+  **follows the terrain column** — it bends;
+- the **arch, slab and clearance marker** convert with `tangentY`, rigid in the
+  crossing's own tangent plane.
+
+They agree exactly at the crown centre and diverge away from it. But this
+handoff's own "The design, and the line it draws" says the crown span is
+**rigid**: *"`ARCH_CLEAR_HALF` is 1.80 m — departure 7.4 mm... The arch, the slab
+and the clearance marker are one rigid object over a hole."* The road over that
+same span was never converted to match, so the rigid arch and the bending road
+pull apart exactly where they must not.
+
+**Fix: over `|along| <= ARCH_CLEAR_HALF` the deck must be rigid too** — i.e.
+`tangentY`, the same conversion the arch under it uses — blending to the bending
+`worldYAtAltitude` form outside it. **The blend is the whole difficulty**: a step
+at the boundary is a trip hazard and would show up immediately in the sprint
+grade clause, so it must be C1, and it must be re-measured against
+`scripts/diag-bridge-grade.mts` (all three controls) afterwards.
+
+### An avenue measured and rejected — do not repeat it
+
+**Leaning the `deck` marker does not work**, though this handoff lists it as
+not-done. Leaned (`setFromUnitVectors(+Y, crownUp)` composed with the yaw, and
+its height via `tangentY`), the paving clause cleared on 4 of 5 seeds — and
+`the clearance over the railway covers the train and everyone riding it` went
+red on **5** seeds, reporting 3.19-3.60 m against the 3.90 m required. Net
+133 -> 134.
+
+The reason is the instrument, not the marker: every clearance invariant reads it
+via `Box3.setFromObject(...).min.y`, and **the axis-aligned bounding box of a
+tilted plate is far taller than the plate** — measured AABB height 0.050 m
+unleaned, which is exactly the slab thickness, against metres once leaned. So
+leaning the marker cannot be done until the invariants stop asking an AABB for
+a height. Reverted.
+
+**This is the same disease as the cat bus's 9.43 m, in a different organ.**
+There, a measurement was taken on a convenient origin — a trestle's *foot* —
+rather than on the thing that actually gets drawn, and the check headlined a
+confident, honest, wrong zero (`check:entrance-road`: *"0 legs hit on all
+sixteen seeds"*, against 364 posts once measured along the drawn, leaning
+trunk — 3.40x more). Here the convenient origin is an axis-aligned box around
+an object that is no longer axis-aligned. In both cases the number is real,
+cheap to compute, and describes something other than the question being asked;
+in both cases the tell is that it only goes wrong once the thing being measured
+**leans**. An AABB is a legitimate answer to "what volume does this occupy" and
+never an answer to "how high is this surface", and the moment the bridge bends,
+those two stop coinciding.
+
+So the rule for whoever takes this on: **the invariants must ask for the soffit
+height at a plan point, not for the minimum corner of a marker's bounding box.**
+Until they do, the marker has to stay unleaned — and while it stays unleaned it
+cannot be trusted over a bent bridge either, which is why #632 exists.
+
+## Measurement traps hit here
+
+- `mv scripts/diag-*.mts` swept up **9 pre-existing tracked** scripts. Caught by
+  `git status`, restored with `git checkout --`. Remove scratch by exact name.
+- A warp sweep wrapped in `timeout 240` reported **0 failures on every
+  candidate** — the builds were being killed and `grep -c` read empty output as
+  a pass. Re-run honestly, 2 of 5 still failed. Assert the run *completed*,
+  never just that the bad string is absent.
+- My first `diag-soffit-point` used the crossing centre where the clause uses
+  the nearest point on the **rail centreline**, and found nothing at all while
+  the clause failed. The disagreement is what exposed it. An instrument that
+  disagrees with the clause it is explaining is wrong until proven otherwise.

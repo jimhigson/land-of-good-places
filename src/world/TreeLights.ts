@@ -19,7 +19,7 @@ import { CAMERA_PITCH_DEGREES } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { glowTexture } from '../core/textures';
 import { clamp01, lerp, Rng, smoothstep } from '../core/mathUtils';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, terrainHeight, tiltToSphere } from './terrain';
 import { isOnPath } from './pathGraph';
 import { ANCHORS } from './anchors';
 import { COASTER_PLANS } from './coaster/plan';
@@ -322,16 +322,36 @@ export class TreeLights implements GameSystem {
       const to = posts[b] as Post;
       const segments = Math.max(6, Math.min(22, Math.round(span / METRES_PER_BULB)));
 
-      const path: Vector3[] = [new Vector3(from.x, from.y, from.z)];
+      // **A post's `y` is a height above the ground under its own tree, not a
+      // world Y**, and so is every point interpolated between two of them —
+      // which is exactly the flat frame `placeOnSphere` expects. Converting
+      // point by point (rather than converting the two ends and lerping the
+      // results) is what makes the wire follow the ground's curve, and it puts
+      // the sag and the bulb's drop along the local down, so a garland out at
+      // the park's edge still hangs from the canopies it is tied to instead of
+      // swinging out from under them.
+      const flat = new Vector3();
+      const hung = new Vector3();
+      const lean = new Quaternion();
+      const tie = (fx: number, fy: number, fz: number): Vector3 => {
+        flat.set(fx, fy, fz);
+        placeOnSphere(flat, 0, hung, lean);
+        return hung.clone();
+      };
+
+      const path: Vector3[] = [tie(from.x, from.y, from.z)];
       for (let s = 1; s <= segments; s += 1) {
         const t = s / segments;
         const x = lerp(from.x, to.x, t);
         const z = lerp(from.z, to.z, t);
         const y = lerp(from.y, to.y, t) - sag * catenaryShape(t);
-        path.push(new Vector3(x, y, z));
+        path.push(tie(x, y, z));
         // A bulb hangs off every interior joint. Never off the two ends, where
         // it would sit inside the canopy it is tied to.
-        if (s < segments) bulbPoints.push(x, y - BULB_DROP, z);
+        if (s < segments) {
+          const bulb = tie(x, y - BULB_DROP, z);
+          bulbPoints.push(bulb.x, bulb.y, bulb.z);
+        }
       }
 
       // A Catmull-Rom through points that already lie on the catenary stays on
@@ -388,6 +408,11 @@ export class TreeLights implements GameSystem {
         bulbPoints[i * 3 + 1] as number,
         bulbPoints[i * 3 + 2] as number,
       );
+      // The 1.25 stretch is along the bead's own long axis, so that axis has
+      // to be the local up; stretched along world Y it would read as leaning
+      // against the string it hangs from. `bulbPoints` already holds leaned
+      // world positions, so the tilt comes straight off each one.
+      tiltToSphere(position.x, position.y, position.z, rotation);
       matrix.compose(position, rotation, scale);
       this.bulbs.setMatrixAt(i, matrix);
 

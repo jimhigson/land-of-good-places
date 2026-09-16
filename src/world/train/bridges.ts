@@ -29,6 +29,7 @@ import {
 import { TRACK_CLEARANCE } from './route';
 import { BUILDING_STEP_UP, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
 import { terrainHeight } from '../terrain';
+import { Geo, altitude, scratchGeo, worldYAtAltitude } from '../geo';
 import { PALETTE } from '../../core/palette';
 import { archStoneTexture, pinkStoneTexture } from '../../core/textures';
 import { toonMaterial } from '../../art/style/materials';
@@ -353,6 +354,56 @@ export const COURSE_HEIGHT = 0.7;
  */
 export const COURSE_RECESS = 0.06;
 
+/**
+ * **A course boundary this close under a ring's own wall top is that wall
+ * top** — the ladder snaps to it, so no sliver of a course is ever laid at
+ * the top of a wall.
+ *
+ * The coursing is one ladder per bridge, struck from `highestTop` — the
+ * tallest wall top anywhere on it. Every *other* ring's wall top therefore
+ * falls at an arbitrary point between two rungs, and the topmost course there
+ * is clamped to whatever is left: a stone of any height from zero to a full
+ * `COURSE_HEIGHT`, decided by nothing but where the ladder happened to land.
+ * Where that leftover is a hair, the reveal under it is a horizontal shelf a
+ * hair below the `wallTop` cap, in the cap's plane to within the depth buffer's
+ * ability to tell them apart — 0.052 m² of it on pool seed 326's `bridge-0.0`,
+ * 7.6 mm under the cap, found by `check:coplanar` the day the sphere ground
+ * moved the terrain under these walls.
+ *
+ * **This is deliberately not another threshold on the reveal-deletion clause
+ * below, and the measurement is why.** Instrumented across all ten pool seeds,
+ * 16856 reveals, 3372 of them where no coping stone is laid, the height of the
+ * course above the reveal comes out as a *continuum* — 2723 at exactly zero (a
+ * course collapsed clean onto the wall top), then 1 in 4–7 mm, 3 in 7–10 mm, 5
+ * in 10–20 mm, 13 in 20–40 mm, 14 in 40–60 mm, and on up through 206 between
+ * 0.4 and 0.7 m. The two populations that clause's own comment separated ("the
+ * strays sat 16–77 mm below the wall top, a reveal actually fighting the cap
+ * sits 1.5 mm under it") **no longer have a gap between them**, so no line
+ * drawn through them is a measurement — it is a number tuned to today's park.
+ * Two such lines were tried and rejected on the numbers: making the clause an
+ * OR over the ring pair would newly delete 82 reveals whose other end is a real
+ * ledge up to 0.549 m tall, and raising its sink to `COURSE_RECESS` would delete
+ * 35 more with open slots up to 60 mm — both of them reopening the see-through
+ * holes #489 was reported for.
+ *
+ * Snapping the ladder instead removes the sliver rather than arguing about it.
+ * The leftover course collapses to nothing, so the existing clause deletes its
+ * reveal by the rule it already had; the course *below* grows to reach the wall
+ * top, so the wall stays closed and no slot is opened. That makes this number
+ * benign in both directions — too large and a course reads up to 9% taller than
+ * its neighbours, too small and the seam comes back — which is exactly what a
+ * threshold on the deletion clause could not be.
+ *
+ * `COURSE_RECESS` is the size to use, and it is the same argument the
+ * `revealInGround` clause below already makes for the same constant: a shelf
+ * standing less than its own depth out of anything is not reading as masonry to
+ * anybody. A stone shallower than the reveal beneath it is deep is not a course;
+ * it is where the ladder fell.
+ */
+function snapToWallTop(level: number, topY: number): number {
+  return level < topY && topY - level < COURSE_RECESS ? topY : level;
+}
+
 /** Pitch of the parapet collision-wall segments, metres. */
 const WALL_SEGMENT = 2.0;
 
@@ -436,6 +487,38 @@ export interface Bridge {
    * padded reuse of that one.
    */
   pavingHeightAt(x: number, z: number): number | null;
+  /**
+   * **World `y` of the drawn tunnel soffit in this plan column** — the
+   * underside of the arch a train passes beneath — or `null` where this
+   * bridge has no tunnel over that point (outside the arch mouth, or wider
+   * than the masonry, where what is underfoot is solid abutment or open
+   * park).
+   *
+   * **The single owner of "how high is the soffit here", and it exists
+   * because the old answer could not lean.** Both readers of it used to take
+   * `new Box3().setFromObject(deckMesh).min.y` off the invisible `deck`
+   * marker, which is a `BoxGeometry` carrying a yaw about world `+Y` and
+   * nothing else — a plate lying flat in world `y`. That was a fair
+   * approximation while a bridge was flat in world `y` too. It stopped being
+   * one when the bridge began to bend with the planet: the road beside that
+   * plate now leans at `tan(r / GROUND_SPHERE_RADIUS)`, so over
+   * `TRACK_CLEARANCE` it falls up to 1.4 m past a marker that does not lean
+   * at all, and `the park's own paving rides over every bridge` went red on
+   * all five test seeds against geometry that was measured sound — the road
+   * clearing the drawn stone under it by 0.23–0.33 m with open sky or its
+   * own parapet overhead. Issue #635.
+   *
+   * It is built from `soffitRiseAt` and `tangentY` — the very functions
+   * `buildShellGeometry` draws the soffit from — so the stone a child sees
+   * and the height a check reads cannot be two different arches.
+   *
+   * **Leaning the marker instead is a measured dead end.** Every reader took
+   * `Box3.min.y`, and the AABB of a tilted plate is far taller than the plate
+   * (0.050 m unleaned, exactly `BRIDGE_DECK_SLAB`), so `min.y` became the low
+   * corner rather than the underside and the train-clearance clause went from
+   * green to 3.19–3.60 m against 3.90 m on all five seeds.
+   */
+  soffitYAt(x: number, z: number): number | null;
 }
 
 export interface BuiltBridges {
@@ -586,17 +669,81 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // any real route may cross the rail anywhere within this corridor, so
   // every point of the crown span has to clear `BRIDGE_RISE` over the worst
   // of it, not just the crossing's own centre point.
-  let worstGroundY = -Infinity;
-  let lowestCrownEdgeGroundY = Infinity;
+  //
+  // **Measured as a rise above the crossing's own tangent plane, not as a world
+  // `y`.** The crown span is the one genuinely rigid part of a bridge — a flat
+  // slab, because the train needs its full height across its whole width — and
+  // it is also small enough to be allowed to be rigid: `ARCH_CLEAR_HALF` is
+  // 1.80 m, where `geo/Chart.ts`'s own table puts the departure of a flat patch
+  // from this planet at **7.4 mm**. That is the declared flat chart this solve
+  // works in. The ramps, at 14–18 m, are nowhere near qualifying and are bent
+  // instead — see {@link surfaceProfile}.
+  //
+  // In world `y` this loop measured the planet rather than the ground: over a
+  // 3.6 m span at the park's reach the dome alone falls 3.9 m, which is
+  // twenty times the terrain wave the worst-case was ever about.
+  const crownCentre = frame.worldAt(0, 0, shift);
+  const crownCentreGeo = Geo.fromWorld(
+    crownCentre.x,
+    terrainHeight(crownCentre.x, crownCentre.z),
+    crownCentre.z,
+  );
+  const crownUp = crownCentreGeo.up(new Vector3());
+  const crownOrigin = crownCentreGeo.toWorld(new Vector3());
+  const sampled = new Vector3();
+  /** How far the ground at a plan point stands above the crossing's own
+   * tangent plane. The planet cancels; what is left is the terrain wave. */
+  const localRise = (x: number, z: number): number =>
+    sampled.set(x, terrainHeight(x, z), z).sub(crownOrigin).dot(crownUp);
+
+  /**
+   * **World `y` at a plan point, `rise` metres above the crossing's own tangent
+   * plane** — the conversion for the one genuinely *rigid* part of a bridge.
+   *
+   * The arch, the slab and the clearance marker are a single rigid object over
+   * a hole, and rigid on this planet means **flat in the local frame, tilted in
+   * world `y`** — not flat in world `y`, which is what they were. They may be
+   * rigid at all only because they are small: `ARCH_CLEAR_HALF` is 1.80 m,
+   * where `geo/Chart.ts` puts a flat patch's departure from this planet at
+   * 7.4 mm. That is the declared chart, and it is why there is no
+   * `worldYAtAltitude` here — a rigid object must *not* follow the terrain
+   * under it, or it is not rigid.
+   *
+   * `rise / crownUp.y` rather than `rise`, because the height wanted is the
+   * perpendicular distance from the plane, and stepping up the world `y` axis
+   * by `δ` gains only `δ · crownUp.y` of it.
+   */
+  const tangentY = (x: number, z: number, rise: number): number =>
+    crownOrigin.y -
+    ((x - crownOrigin.x) * crownUp.x + (z - crownOrigin.z) * crownUp.z) / crownUp.y +
+    rise / crownUp.y;
+
+  /**
+   * **How far a built surface stands above the ground beneath it, along the
+   * local up** — the honest form of the world-`y` `surface − terrainHeight(x, z)`
+   * this file used to write.
+   *
+   * The two are not the same number: a world-`y` difference over-reports the
+   * real hump by `1 / cos θ`, up to 1.47× at the park's reach. Both readers
+   * care: {@link parapetHeightFor} tapers a parapet away as the hump gets
+   * small, and `PARAPET_MIN_HUMP` decides whether a collider wall stands there
+   * at all — and a wall that stands where the hump is really below a step is
+   * the thing that severs the path junctions a ramp foot lands in.
+   */
+  const humpAbove = (x: number, z: number, surfaceY: number): number =>
+    altitude(scratchGeo().setFromWorld(x, surfaceY, z));
+
+  let worstGroundRise = -Infinity;
+  let lowestCrownEdgeRise = Infinity;
   const alongStep = Math.min(GROUND_SAMPLE_STEP, ARCH_CLEAR_HALF);
   const acrossStep = Math.min(GROUND_SAMPLE_STEP, halfAcross);
   for (let along = -ARCH_CLEAR_HALF; along <= ARCH_CLEAR_HALF + 1e-6; along += alongStep) {
     for (let across = -halfAcross; across <= halfAcross + 1e-6; across += acrossStep) {
       const { x, z } = frame.worldAt(along, across, shift);
-      const ground = terrainHeight(x, z);
-      worstGroundY = Math.max(worstGroundY, ground);
+      const rise = localRise(x, z);
+      worstGroundRise = Math.max(worstGroundRise, rise);
       if (ARCH_CLEAR_HALF - Math.abs(along) < alongStep) {
-        lowestCrownEdgeGroundY = Math.min(lowestCrownEdgeGroundY, ground);
+        lowestCrownEdgeRise = Math.min(lowestCrownEdgeRise, rise);
       }
     }
   }
@@ -606,8 +753,13 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // much below its own crown. Without this term a genuine arch would have
   // eaten the clearance it was drawn inside. See `bridgeStonework.ts` for what
   // the three candidate arch shapes cost.
-  const crownBase = worstGroundY + BRIDGE_RISE + HEIGHT_MARGIN + ARCH_CROWN_DIP;
-  const soffitCrownY = crownBase - BRIDGE_DECK_DEPTH;
+  //
+  // **An altitude now, not a world `y`** — how far the crown stands above the
+  // ground measured from the planet's centre, which is the air the train
+  // actually has. Adding these metres to a world `y` instead delivers only
+  // `cos θ` of them: measured, an asked-for 4.60 m arrives as 2.93 m at
+  // (−99, 138). See `geo/ground.ts`'s `worldYAtAltitude`.
+  const crownAltBase = worstGroundRise + BRIDGE_RISE + HEIGHT_MARGIN + ARCH_CROWN_DIP;
   // The hump's own surface has already begun to fall away by the far edge of
   // the flat crown span (±ARCH_CLEAR_HALF), and the slab under it does not:
   // it is flat, because the train needs full height across its whole width.
@@ -618,27 +770,72 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // only kept the shell's thinnest pinch over the *soffit* and knew nothing
   // about the slab's own thickness or the road bed under the paving.)
   //
-  //   surface(edge) = crown − (crown − ground)·dip  ≥  soffitCrownY + BRIDGE_DECK_DEPTH
+  //   surface(edge) = crown − (crown − ground)·dip  ≥  soffit + BRIDGE_DECK_DEPTH
   //
-  // solved for `crown`. Note this is the same height `crownBase` would put
+  // solved for `crown`. Note this is the same height `crownAltBase` would put
   // the crown at if the road were flat — the dip is the whole reason a real
   // hump stands higher than the published `BRIDGE_RISE`, and the shorter the
-  // ramps, the more it costs.
+  // ramps, the more it costs. Every term is a local rise, so the algebra is
+  // unchanged from the world-`y` version it replaces.
   const shorterLength = Math.min(lengthPos, lengthNeg);
   const dipFraction = profileDrop(ARCH_CLEAR_HALF / Math.max(shorterLength, ARCH_CLEAR_HALF + 0.1));
-  const needed = (crownBase - lowestCrownEdgeGroundY * dipFraction) / (1 - dipFraction);
-  const crownY = Math.max(crownBase, needed);
+  const needed = (crownAltBase - lowestCrownEdgeRise * dipFraction) / (1 - dipFraction);
+  /** The crown's own height above the ground beneath it, along the local up. */
+  const crownAlt = Math.max(crownAltBase, needed);
+  /** The crown's world `y` at the crossing point — what the rigid arch, the
+   * slab and the clearance marker are all built from, unchanged. */
+  const crownY = worldYAtAltitude(crownCentre.x, crownCentre.z, crownAlt);
+  /** The soffit's crown, as a rise in the crossing's own tangent frame — the
+   * rigid arch is built and swept in that frame, never in world `y`. */
+  const soffitCrownRise = crownAlt - BRIDGE_DECK_DEPTH;
+  const soffitCrownY = tangentY(crownCentre.x, crownCentre.z, soffitCrownRise);
 
   // --- the surface profile — the ONE owner of the hump's shape -------------
+  /**
+   * **The hump bends with the planet, because its shape is stated in
+   * altitudes.**
+   *
+   * Jim, 14 September 2026: *"down is variable along the length of the bridge,
+   * effectively it needs to be bent to cover the curvature of the earth."*
+   * This is that sentence as arithmetic. The blend it performs is exactly the
+   * one it always performed — *lerp from the crown plane down to the ground,
+   * by the hump profile* — but every term in it is now a height above the
+   * ground measured from the planet's centre, and only the last step turns
+   * the answer back into a world `y`.
+   *
+   * **What was wrong with the world-`y` version, precisely.** It read
+   * `ground + (crownY − ground)·(1 − drop)`, which expands to
+   * `crownY·(1 − drop) + ground·drop`. That second term drags the *ground's own
+   * world-`y` slope* into the deck: differentiate it and the deck's height
+   * above the ground picks up `g′·(drop − 1)`, where `g′` is how fast the park's
+   * dome falls away in world `y` — up to 1.02 at the boundary. So a ramp
+   * planned at a grade of 0.09 was built at 0.98–2.18 against a peak budget of
+   * 0.512, and a sprinting child lost the deck under her feet and dropped
+   * through it into the tunnel. Measured on the pool before this change:
+   * **18 of 23 bridges over budget, worst 1.124**, every seed affected.
+   *
+   * Stated in altitudes the ground term is not there at all — the grade is
+   * `crownAlt · drop′`, which is the grade the planner asked for and has
+   * nothing to do with where on the dome the bridge stands. **That is why this
+   * is a bug fix and not a beautification**: a bridge that bends meets the
+   * ground at the same grade at both ends, so the ramp-length problem a
+   * previous engineer could only solve by lengthening ramps (which left eight
+   * parks in ten with no valid bridge site at all) stops existing.
+   *
+   * Both guarantees the old formula was built around survive intact:
+   *
+   * - **`q = 1` is the ground, exactly** — altitude zero is the ground by
+   *   definition, so the feet still blend to the *local* ground rather than to
+   *   a single "low end" reference.
+   * - **`q = 0` is the rigid crown plane.** `crownAlt − localRise` is the
+   *   height of that flat slab above whatever ground happens to be under it, so
+   *   the flat crown stays flat and the worst-ground clearance solved for above
+   *   is still what gets built.
+   */
   const surfaceProfile = (x: number, z: number, along: number): number => {
     const length = along >= 0 ? lengthPos : lengthNeg;
     const q = length > 0 ? clamp01(Math.abs(along) / length) : 1;
-    const ground = terrainHeight(x, z);
-    // Blends to the *local* ground at the feet by construction (q = 1 →
-    // ground exactly), the same guarantee the old ramp geometry made — see
-    // its note on why blending to a single "low end" reference misled a
-    // poiGraph probe at the ramp's own low edge.
-    return ground + (crownY - ground) * (1 - profileDrop(q));
+    return worldYAtAltitude(x, z, (crownAlt - localRise(x, z)) * (1 - profileDrop(q)));
   };
   const heightAt = (x: number, z: number): number => {
     const projected = frame.project(x, z, shift);
@@ -654,9 +851,17 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // It replaces a flat crown span with quarter-round haunches, which had a
   // tangent break at the join and read flat from the mouth. Jim,
   // 2026-08-29: *"a genuine arch-shaped tunnel"*.
-  const arch = archCurve(ARCH_CLEAR_HALF, ARCH_SPAN_HALF, soffitCrownY);
-  const springY = arch.springY;
-  const soffitAt = (alongAbs: number): number => arch.soffitAt(alongAbs);
+  //
+  // **Built in the crossing's own tangent frame**, so every `y` it returns is a
+  // *rise* above that plane rather than a world height — `tangentY` is what
+  // turns one into the other, at the plan point that is asking. The arch is
+  // rigid and it is allowed to be (`ARCH_CLEAR_HALF` 1.80 m, 7.4 mm of
+  // departure), but rigid on this planet means flat in the local frame and
+  // *tilted* in world `y`. It used to be flat in world `y`, which over a 3.6 m
+  // span at the park's reach leaves one haunch 3.9 m out of place.
+  const arch = archCurve(ARCH_CLEAR_HALF, ARCH_SPAN_HALF, soffitCrownRise);
+  const springRise = arch.springY;
+  const soffitRiseAt = (alongAbs: number): number => arch.soffitAt(alongAbs);
 
   // --- meshes ---------------------------------------------------------------
   const bridgeGroup = new Group();
@@ -668,21 +873,62 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // shell built past this point is the one owner of everything visible,
   // flat crown span included, so a second, separately transformed mesh
   // covering the same span cannot open a seam against it. This box stays
-  // only because `test/procgen/invariants.ts` needs an object literally
-  // named `deck` to measure the built clearance off — `Box3.setFromObject`
-  // and `getObjectByName` both walk the scene graph regardless of
-  // `.visible`, so it still answers that question with the same geometry
-  // the old, rendered version did, at zero draw cost and with nothing left
-  // to fall out of step with the shell beside it.
+  // only because the three raycasting probes across this repo
+  // (`test/procgen/invariants.ts`, `test/procgen/parkFacts.ts`,
+  // `scripts/measure-bridge-parapet.mts`) exclude it **by name**, and a
+  // marker is not stone.
+  //
+  // **Nothing measures a height off it any more, and that is deliberate.**
+  // Two invariants used to take `new Box3().setFromObject(...).min.y` from
+  // it as the soffit over the track. That reading was a plate lying flat in
+  // world `y` — this mesh carries a yaw about world `+Y` and nothing else —
+  // and it stopped being true of a bridge the moment the bridge began to
+  // bend with the planet: over `TRACK_CLEARANCE` the leaning road falls up
+  // to 1.4 m past it, which put `the park's own paving rides over every
+  // bridge` red on all five test seeds against geometry measured sound.
+  // Issue #635. Both now ask {@link Bridge.soffitYAt}, which is built from
+  // the same `soffitRiseAt` and `tangentY` the shell is drawn from.
+  //
+  // **Do not lean this marker to fix that.** Every reader took an AABB, and
+  // the AABB of a tilted plate is far taller than the plate — measured
+  // 0.050 m unleaned, exactly `BRIDGE_DECK_SLAB` — so leaning it took the
+  // train-clearance clause from green to 3.19-3.60 m against 3.90 m on all
+  // five seeds. (`scripts/diag-deck-soffit.mts` once carried a control on
+  // this marker's thickness; it was retired with its finding recorded in
+  // `HANDOFF-bridge-bend.md` and #635, because nothing reads a height off the
+  // marker any more.)
+  //
+  // **And it carries no faces at all** — `setIndex([])` below. Hiding it was
+  // not enough: `check:coplanar` buckets triangles by their plane and asks
+  // what a *modeller drew*, and it has never consulted `.visible` (it cannot
+  // — the hotel's rooms and the castle's floors are whole subtrees held
+  // hidden until you walk into them, so a visibility test there would blind
+  // the sweep to three and a half thousand meshes). So this marker's four
+  // upright sides went on being reported against the shell's abutment
+  // faces they sit exactly in the plane of, on 13 of the 16 pool seeds —
+  // 0.0173 m² of "shared plane" between a drawn wall and a box nothing
+  // renders, and on seed 208's `bridge-0.0` at *both* ends at once, which is
+  // what the check calls a second seam.
+  //
+  // Deleting the faces is `ART_DIRECTION.md` §7's own remedy rather than a
+  // dodge, because **nothing wanted them**. The two readers that took
+  // `new Box3().setFromObject(...).min.y` computed it from the position
+  // attribute, which does not look at the index at all, so the box they
+  // measured was unchanged to the bit (they have since moved to
+  // {@link Bridge.soffitYAt} — see above); and all three places that raycast
+  // a bridge already exclude this object *by name* (`invariants.ts`,
+  // `parkFacts.ts`, `measure-bridge-parapet.mts`), because a marker is not
+  // stone. What is left is eight corners and a name — exactly what is
+  // actually read.
   const at0 = frame.pointAt(0);
   const origin0 = frame.worldAt(0, 0, shift);
-  const deckMesh = new Mesh(
-    new BoxGeometry(halfAcross * 2, BRIDGE_DECK_SLAB, ARCH_CLEAR_HALF * 2),
-    bridgeMaterials().stone,
-  );
+  const deckGeometry = new BoxGeometry(halfAcross * 2, BRIDGE_DECK_SLAB, ARCH_CLEAR_HALF * 2);
+  deckGeometry.setIndex([]);
+  const deckMesh = new Mesh(deckGeometry, bridgeMaterials().stone);
   deckMesh.name = 'deck';
   deckMesh.visible = false;
   const yaw = Math.atan2(at0.dirX, at0.dirZ);
+  // flat-ok: the marker deliberately stays a flat plate (yaw only) so its AABB is one slab thick — see above; nothing reads a height off it
   const rotation = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw);
   // Sat at the arch's **binding** height — its crown less `ARCH_CROWN_DIP`,
   // the lowest the soffit gets anywhere over the train's swept width — not at
@@ -708,7 +954,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // The arc is the pronounced hump, put on the one part of the bridge nobody
   // walks on — see `PARAPET_CROWN_LIFT`.
   const parapetTopFor = (surface: number, outerX: number, outerZ: number): number =>
-    surface + parapetHeightFor(surface - terrainHeight(outerX, outerZ));
+    surface + parapetHeightFor(humpAbove(outerX, outerZ, surface));
 
   const shell = buildShellGeometry(
     frame,
@@ -718,8 +964,9 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
     roadHalf,
     halfAcross,
     surfaceProfile,
-    soffitAt,
-    springY,
+    soffitRiseAt,
+    springRise,
+    tangentY,
     parapetTopFor,
   );
   // Two materials, one geometry: group 0 (everything but the soffit) reads
@@ -749,7 +996,12 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // into one geometry apiece, so a bridge wearing sixty-odd stones still costs
   // two draw calls rather than sixty.
   const ringMesh = new Mesh(
-    buildVoussoirRing(frame, shift, halfAcross, arch),
+    // The arch was built in the crossing's tangent frame, so the ring is placed
+    // back into the world through the same lean — see `ArchPlacement`.
+    buildVoussoirRing(frame, shift, halfAcross, arch, {
+      y: tangentY,
+      lean: new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), crownUp),
+    }),
     bridgeMaterials().coping,
   );
   ringMesh.name = 'archRing';
@@ -780,8 +1032,8 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       const point = frame.worldAt(clamped, wallLine * side, shift);
       const topA = surfaceProfile(previous.x, previous.z, previousAlong);
       const topB = surfaceProfile(point.x, point.z, clamped);
-      const humpA = topA - terrainHeight(previous.x, previous.z);
-      const humpB = topB - terrainHeight(point.x, point.z);
+      const humpA = humpAbove(previous.x, previous.z, topA);
+      const humpB = humpAbove(point.x, point.z, topB);
       if (Math.max(humpA, humpB) > PARAPET_MIN_HUMP) {
         walls.push({
           x1: previous.x,
@@ -877,6 +1129,18 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
       if (!insideDrawnStone(x, z)) return null;
       return heightAt(x, z);
     },
+    soffitYAt: (x: number, z: number): number | null => {
+      const projected = frame.project(x, z, shift);
+      // Past the arch mouth along the spine, or outside the masonry across
+      // it, there is no tunnel here — solid abutment, or open park.
+      if (Math.abs(projected.along) >= ARCH_SPAN_HALF) return null;
+      if (Math.abs(projected.across) > halfAcross) return null;
+      // `tangentY`, not `worldYAtAltitude`: the arch is the rigid part of a
+      // bridge, flat in the crossing's own tangent frame and tilted in world
+      // `y`, and this must convert it back exactly the way the shell that
+      // drew it did.
+      return tangentY(x, z, soffitRiseAt(Math.abs(projected.along)));
+    },
   };
 
   return { bridge, platform, walls, group: bridgeGroup };
@@ -950,8 +1214,9 @@ function buildShellGeometry(
   roadHalf: number,
   halfAcross: number,
   surfaceProfile: (x: number, z: number, along: number) => number,
-  soffitAt: (alongAbs: number) => number,
-  springY: number,
+  soffitRiseAt: (alongAbs: number) => number,
+  springRise: number,
+  tangentY: (x: number, z: number, rise: number) => number,
   parapetTopFor: (surface: number, outerX: number, outerZ: number) => number,
 ): ShellGeometry {
   const positions: number[] = [];
@@ -1100,17 +1365,17 @@ function buildShellGeometry(
   let highestTop = -Infinity;
   let lowestBottom = Infinity;
   for (const along of alongs) {
-    const centre = frame.pointAt(along);
-    const cx = centre.x + centre.acrossX * shift;
-    const cz = centre.z + centre.acrossZ * shift;
-    const surface = surfaceProfile(cx, cz, along);
     for (const side of [1, -1] as const) {
       const outer = frame.worldAt(along, halfAcross * side, shift);
-      highestTop = Math.max(highestTop, parapetTopFor(surface, outer.x, outer.z));
-      lowestBottom = Math.min(lowestBottom, terrainHeight(outer.x, outer.z) - 0.5);
+      const outerSurface = surfaceProfile(outer.x, outer.z, along);
+      highestTop = Math.max(highestTop, parapetTopFor(outerSurface, outer.x, outer.z));
+      lowestBottom = Math.min(lowestBottom, worldYAtAltitude(outer.x, outer.z, -0.5));
     }
   }
-  lowestBottom = Math.min(lowestBottom, soffitAt(0) - 0.5);
+  {
+    const mouth = frame.worldAt(0, 0, shift);
+    lowestBottom = Math.min(lowestBottom, tangentY(mouth.x, mouth.z, soffitRiseAt(0) - 0.5));
+  }
   const courseLevels: number[] = [];
   for (let y = highestTop; y > lowestBottom - COURSE_HEIGHT; y -= COURSE_HEIGHT) {
     courseLevels.push(y);
@@ -1140,19 +1405,47 @@ function buildShellGeometry(
     // `BRIDGE_DECK_DEPTH` is now derived from. The parapets' inner faces
     // start here too,
     // so no gap opens between the bed and the wall beside it.
-    const roadBed = surface - BRIDGE_ROAD_BED_DROP;
+    //
+    // **Each point of the cross-section gets the surface at its OWN plan point,
+    // not the centreline's.** A deck is flat across its width only on flat
+    // ground; on this planet the ground leans across the bridge as well as
+    // along it, so one centre-derived world `y` stretched across `2·halfAcross`
+    // of leaning ground draws a road that is level in world space while the
+    // walk surface under it is not. `heightAt` already answers per plan point,
+    // so a shell built off the centre alone is the drawn stone disagreeing with
+    // the surface a child actually stands on — this repo's "two definitions of
+    // one thing", across the width instead of along the length.
+    const surfaceRoadPlus = surfaceProfile(roadPlus.x, roadPlus.z, along);
+    const surfaceRoadMinus = surfaceProfile(roadMinus.x, roadMinus.z, along);
+    const surfaceOuterPlus = surfaceProfile(outerPlus.x, outerPlus.z, along);
+    const surfaceOuterMinus = surfaceProfile(outerMinus.x, outerMinus.z, along);
+    const roadBedPlus = surfaceRoadPlus - BRIDGE_ROAD_BED_DROP;
+    const roadBedMinus = surfaceRoadMinus - BRIDGE_ROAD_BED_DROP;
     const inTunnel = Math.abs(along) < ARCH_SPAN_HALF;
-    const soffit = soffitAt(Math.abs(along));
+    // A rise in the tangent frame; each reader converts it at its own plan
+    // point, so the soffit leans with the ground the way the arch really does.
+    const soffitRise = soffitRiseAt(Math.abs(along));
+    const soffitPlus = tangentY(outerPlus.x, outerPlus.z, soffitRise);
+    const soffitMinus = tangentY(outerMinus.x, outerMinus.z, soffitRise);
+    // Buried half a metre along the LOCAL up, not down the world `y` axis —
+    // `terrainHeight(x, z) - 0.5` buries only `0.5 · cos θ`, which at the
+    // park's reach is 0.34 m and leaves a wall hovering over its own ground.
     const bottomPlus = inTunnel
-      ? soffit
-      : Math.min(terrainHeight(outerPlus.x, outerPlus.z), terrainHeight(roadPlus.x, roadPlus.z)) - 0.5;
+      ? soffitPlus
+      : Math.min(
+          worldYAtAltitude(outerPlus.x, outerPlus.z, -0.5),
+          worldYAtAltitude(roadPlus.x, roadPlus.z, -0.5),
+        );
     const bottomMinus = inTunnel
-      ? soffit
-      : Math.min(terrainHeight(outerMinus.x, outerMinus.z), terrainHeight(roadMinus.x, roadMinus.z)) - 0.5;
+      ? soffitMinus
+      : Math.min(
+          worldYAtAltitude(outerMinus.x, outerMinus.z, -0.5),
+          worldYAtAltitude(roadMinus.x, roadMinus.z, -0.5),
+        );
     // The parapet tapers out where the hump is barely above the ground —
     // see `parapetHeightFor`; the collision walls follow the same rule.
-    const parapetTopPlus = parapetTopFor(surface, outerPlus.x, outerPlus.z);
-    const parapetTopMinus = parapetTopFor(surface, outerMinus.x, outerMinus.z);
+    const parapetTopPlus = parapetTopFor(surfaceOuterPlus, outerPlus.x, outerPlus.z);
+    const parapetTopMinus = parapetTopFor(surfaceOuterMinus, outerMinus.x, outerMinus.z);
     const u = along / TEXTURE_METRES;
 
     // The coursed outer face for this ring — two vertices per course, at that
@@ -1168,8 +1461,8 @@ function buildShellGeometry(
       for (let course = 0; course < courseCount; course += 1) {
         const recess = course % 2 === 0 ? 0 : COURSE_RECESS;
         const face = frame.worldAt(along, (halfAcross - recess) * side, shift);
-        const levelTop = courseLevels[course] as number;
-        const levelBottom = courseLevels[course + 1] as number;
+        const levelTop = snapToWallTop(courseLevels[course] as number, topY);
+        const levelBottom = snapToWallTop(courseLevels[course + 1] as number, topY);
         const yTop = Math.min(topY, Math.max(bottomY, levelTop));
         const yBottom = Math.min(topY, Math.max(bottomY, levelBottom));
         column.push(
@@ -1201,15 +1494,15 @@ function buildShellGeometry(
         ? [-Infinity, -Infinity]
         : [terrainHeight(outerPlus.x, outerPlus.z), terrainHeight(outerMinus.x, outerMinus.z)],
       innerBottom: [
-        vertex(roadPlus.x, roadBed, roadPlus.z, u, roadBed / TEXTURE_METRES),
-        vertex(roadMinus.x, roadBed, roadMinus.z, u, roadBed / TEXTURE_METRES),
+        vertex(roadPlus.x, roadBedPlus, roadPlus.z, u, roadBedPlus / TEXTURE_METRES),
+        vertex(roadMinus.x, roadBedMinus, roadMinus.z, u, roadBedMinus / TEXTURE_METRES),
       ],
       innerTop: [
         vertex(roadPlus.x, parapetTopPlus, roadPlus.z, u, parapetTopPlus / TEXTURE_METRES),
         vertex(roadMinus.x, parapetTopMinus, roadMinus.z, u, parapetTopMinus / TEXTURE_METRES),
       ],
-      roadA: vertex(roadPlus.x, roadBed, roadPlus.z, u, roadHalf / TEXTURE_METRES),
-      roadB: vertex(roadMinus.x, roadBed, roadMinus.z, u, -roadHalf / TEXTURE_METRES),
+      roadA: vertex(roadPlus.x, roadBedPlus, roadPlus.z, u, roadHalf / TEXTURE_METRES),
+      roadB: vertex(roadMinus.x, roadBedMinus, roadMinus.z, u, -roadHalf / TEXTURE_METRES),
       // `v` spans a flat 0..1 across the whole tunnel width, never scaled by
       // `TEXTURE_METRES` the way every other surface's `v` is: a voussoir is
       // ONE course, uninterrupted for the tunnel's full depth, so
@@ -1217,8 +1510,8 @@ function buildShellGeometry(
       // itself here regardless of how wide the tunnel is — a scaled `v`
       // reintroduced a phantom horizontal joint partway across every stone
       // the moment the width exceeded one texture tile.
-      soffitA: inTunnel ? vertex(outerPlus.x, soffit, outerPlus.z, u, 1) : null,
-      soffitB: inTunnel ? vertex(outerMinus.x, soffit, outerMinus.z, u, 0) : null,
+      soffitA: inTunnel ? vertex(outerPlus.x, soffitPlus, outerPlus.z, u, 1) : null,
+      soffitB: inTunnel ? vertex(outerMinus.x, soffitMinus, outerMinus.z, u, 0) : null,
       // Flush with the parapet top, not 6 cm proud of it: this is the wall's
       // own top *face* now, and the coping that stands on it is modelled
       // stone (`bridgeStonework.ts`), not this strip.
@@ -1457,8 +1750,10 @@ function buildShellGeometry(
         const groundB = terrainHeight(bx, bz) - 0.5;
         const v0 = vertex(ax, groundA, az, 0, groundA / TEXTURE_METRES);
         const v1 = vertex(bx, groundB, bz, halfAcross / TEXTURE_METRES, groundB / TEXTURE_METRES);
-        const v2 = vertex(bx, springY, bz, halfAcross / TEXTURE_METRES, springY / TEXTURE_METRES);
-        const v3 = vertex(ax, springY, az, 0, springY / TEXTURE_METRES);
+        const springB = tangentY(bx, bz, springRise);
+        const springA = tangentY(ax, az, springRise);
+        const v2 = vertex(bx, springB, bz, halfAcross / TEXTURE_METRES, springB / TEXTURE_METRES);
+        const v3 = vertex(ax, springA, az, 0, springA / TEXTURE_METRES);
         if (face > 0) quad(indices, v0, v1, v2, v3);
         else quad(indices, v0, v3, v2, v1);
       }

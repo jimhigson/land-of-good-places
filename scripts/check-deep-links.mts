@@ -46,6 +46,7 @@
  */
 import { chromium, type Page } from 'playwright-core';
 import { worldX, worldZ } from '../src/world/building/layout.ts';
+import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
 
 const BASE = (process.env.CHECK_DEEP_LINKS_URL ?? 'http://127.0.0.1:5173').replace(/\/$/, '');
 const SHOT_DIR = process.env.CHECK_DEEP_LINKS_SHOTS ?? '/tmp/check-deep-links';
@@ -58,6 +59,29 @@ type DeepLinkCheck = {
   path: string;
   /** Reads game state and reports whether the deep link's effect actually happened. */
   assert: (page: Page) => Promise<CheckResult>;
+  /**
+   * **Stop the clock the instant `window.game` appears, before asserting.**
+   *
+   * For a link whose effect is a *moment* rather than a state — `/arrive?at=`
+   * lands on a beat of a sequence that then keeps playing, so a read taken a
+   * second later measures how busy the machine was. Off by default, and it
+   * must stay off for `/castle`, whose `changeSpace` iris needs the clock to
+   * run before the assertion can see anything at all.
+   */
+  freezeBeforeAssert?: boolean;
+  /**
+   * **A different URL to create the save with**, for the `continueGame` path.
+   *
+   * That path primes a save by booting the link once, pressing Escape and
+   * waiting for the autosave. That works for a link that lands her in the park
+   * immediately, and **cannot** work for `/arrive?at=`: the save is written
+   * when she arrives, Escape opens the pause menu, the pause menu takes `dt`
+   * to zero, and a paused arrival never arrives — so the wait times out having
+   * proved nothing about the link under test. Measured: 15 s, every time.
+   *
+   * Defaults to the check's own path, which is right for every other link.
+   */
+  primerPath?: string;
 };
 
 // `uiOpen`/`.keychain-panel` were the 2D list picker (`ui/KeychainPanel.ts`),
@@ -87,6 +111,48 @@ const CASTLE_AT = { x: 10, z: -15 };
 
 /** How far from the asked-for spot still counts as having arrived. */
 const CASTLE_TOLERANCE = 1.5;
+
+/**
+ * **How long to wait for `window.game`, and why it is not 30 s any more.**
+ *
+ * It was 30 s, and that made the check flaky in a way that had nothing to do
+ * with deep links: `/keychain-stall (startFresh)` and `/arrive?at=stepping-down
+ * (startFresh)` each timed out once in two runs, alternately, on a machine
+ * where both were otherwise green. CLAUDE.md is explicit that flaky is failing
+ * and that the fix is to remove the root non-determinism rather than retry.
+ *
+ * So the boot was measured rather than guessed — three fresh Chromium
+ * processes per link against a warm dev server, timed from `goto` to
+ * `window.game`:
+ *
+ * | link | runs |
+ * |---|---|
+ * | `/keychain-stall` | 8.3 s, 5.7 s, 8.6 s |
+ * | `/castle?deck=0&at=10,-15` | 11.8 s, 12.8 s, 6.2 s |
+ * | `/arrive?at=stepping-down` | 22.0 s, 22.0 s, 21.7 s |
+ *
+ * `/arrive` is slow **by design** — it is the one link that opts *into* the
+ * bus, so the park builds while the ride plays and `window.game` cannot appear
+ * until both are done. 22 s against a 30 s budget is not a margin, and a
+ * machine running other agents' checks eats it. The check was therefore
+ * asserting on dev-server latency as well as on the thing it names, which is
+ * this repo's "a check reporting about something it is not describing" in its
+ * mildest form.
+ *
+ * 120 s is far past the slowest observed boot and asserts nothing about speed,
+ * which is correct: **this check's question is whether the link did the thing,
+ * never how fast the machine is.** A link that genuinely never boots still
+ * fails, two minutes later.
+ */
+const GAME_READY_TIMEOUT_MS = 120000;
+
+/**
+ * How long the `continueGame` path waits for the autosave it just primed.
+ * Raised from 15 s for the reason above — it timed out on a run whose every
+ * executed assertion was green, which is a flake in the harness rather than a
+ * finding about a link.
+ */
+const AUTOSAVE_TIMEOUT_MS = 60000;
 
 const CHECKS: DeepLinkCheck[] = [
   {
@@ -159,7 +225,73 @@ const CHECKS: DeepLinkCheck[] = [
       return { ok: true, detail: `zoomed view open, player at ${JSON.stringify(s.playerPos)}` };
     },
   },
+  {
+    // **`/arrive?at=` — that it really runs the sequence, and really stops.**
+    //
+    // `stepping-down` rather than `park` deliberately: it is the stricter of
+    // the two, because it is the only one that can catch an overshoot. A
+    // `runTo` that ran the whole timeline regardless would still satisfy
+    // `?at=park`, and the link would look perfect while being wrong about
+    // every other beat.
+    //
+    // **The clock is stopped the instant `window.game` appears**, in the wait
+    // itself. The deep-link switch in `main.ts` runs *before* that assignment,
+    // so the fast-forward is already done by then and the beat is still where
+    // `runTo` left it. Reading it a second later instead would measure
+    // whatever the sequence had walked on to, which is a check that passes or
+    // fails on how busy the machine is.
+    path: '/arrive?at=stepping-down',
+    freezeBeforeAssert: true,
+    // `/spawn` puts her in the park on the first frame, so the autosave lands
+    // at once — see `primerPath`. `/arrive` deliberately ignores the
+    // already-arrived flag, so a primed save does not stop it replaying.
+    primerPath: '/spawn?pos=0,0',
+    assert: async (page) => {
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        const a = g?.world?.entrance?.arrival;
+        return a ? { elapsed: a.elapsed as number, phase: a.phase as string } : null;
+      });
+      if (!s) return { ok: false, detail: 'no arrival on the world — /arrive did not opt into the bus' };
+      if (s.phase !== 'stepping-down') {
+        return {
+          ok: false,
+          detail:
+            `the arrival is in "${s.phase}" at ${s.elapsed.toFixed(2)}s, not "stepping-down". ` +
+            `?at= should have run it to ${ARRIVAL_BEATS['stepping-down'].toFixed(2)}s and stopped: ` +
+            'a phase before that means it never ran, one after means it overshot the beat.',
+        };
+      }
+      return { ok: true, detail: `stopped in stepping-down at ${s.elapsed.toFixed(2)}s` };
+    },
+  },
 ];
+
+/**
+ * `/arrive?at=`'s wait doubles as the freeze — see that check's own note. It
+ * is a separate function rather than a flag on {@link waitForGame} because the
+ * side effect is the point, and a boolean parameter would hide it.
+ */
+async function waitForGameReady(
+  check: DeepLinkCheck,
+  page: Page,
+  timeoutMs: number,
+): Promise<void> {
+  if (check.freezeBeforeAssert !== true) {
+    await waitForGame(page, timeoutMs);
+    return;
+  }
+  await page.waitForFunction(
+    () => {
+      const g = (window as unknown as { game?: { timeScale: number } }).game;
+      if (!g) return false;
+      g.timeScale = 0;
+      return true;
+    },
+    undefined,
+    { timeout: timeoutMs },
+  );
+}
 
 async function waitForGame(page: Page, timeoutMs: number): Promise<void> {
   await page.waitForFunction(() => !!(window as unknown as { game?: unknown }).game, undefined, {
@@ -233,7 +365,7 @@ for (const check of CHECKS) {
   try {
     const pageErrors = await runInFreshBrowser(async (page) => {
       await page.goto(`${BASE}${check.path}`, { waitUntil: 'domcontentloaded' });
-      await waitForGame(page, 30000);
+      await waitForGameReady(check, page, GAME_READY_TIMEOUT_MS);
       // Both `boardRide`/`open` and the panel's own `openWith` run synchronously
       // inside the same tick that produces `window.game` — no further wait needed
       // for the *state* (the CSS transition settling visually is a separate,
@@ -255,15 +387,22 @@ for (const check of CHECKS) {
     const pageErrors = await runInFreshBrowser(async (page) => {
       // Create the save fast, through the deep link itself (skips the bus),
       // then close whatever it opened and let the autosave land.
-      await page.goto(`${BASE}${check.path}`, { waitUntil: 'domcontentloaded' });
-      await waitForGame(page, 30000);
+      await page.goto(`${BASE}${check.primerPath ?? check.path}`, { waitUntil: 'domcontentloaded' });
+      await waitForGame(page, GAME_READY_TIMEOUT_MS);
       await page.keyboard.press('Escape');
-      await page.waitForFunction(() => !!localStorage.getItem('lgp:save'), undefined, { timeout: 15000 });
+      // Same reasoning as {@link GAME_READY_TIMEOUT_MS}: this wait is for the
+      // autosave to land, and how long that takes is a fact about the machine,
+      // not about the deep link. It was 15 s and timed out on
+      // `/keychain-stall (continueGame)` on a run where every assertion that
+      // did execute was green.
+      await page.waitForFunction(() => !!localStorage.getItem('lgp:save'), undefined, {
+        timeout: AUTOSAVE_TIMEOUT_MS,
+      });
 
       // Now the actual case under test: reload at the same deep link with a
       // save already present — this is `continueGame`, not `startFresh`.
       await page.goto(`${BASE}${check.path}`, { waitUntil: 'domcontentloaded' });
-      await waitForGame(page, 30000);
+      await waitForGameReady(check, page, GAME_READY_TIMEOUT_MS);
       const result = await check.assert(page);
       said.push(`  [continueGame] ${result.ok ? 'OK' : 'FAILED'}: ${result.detail}`);
       if (!result.ok) fouls.push(`${check.path} (continueGame): ${result.detail}`);

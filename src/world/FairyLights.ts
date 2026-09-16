@@ -16,7 +16,7 @@ import {
 } from 'three';
 import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
 import { PLAZA } from './paths';
 import { isOnPath } from './pathGraph';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -109,6 +109,10 @@ export class FairyLights implements GameSystem {
     // the loop indexed an undefined pole.)
     const ring: (Vector3 | null)[] = new Array<Vector3 | null>(poleCount).fill(null);
 
+    const flat = new Vector3();
+    const scratchLean = new Quaternion();
+    const up = new Vector3();
+
     const poleMaterial = new MeshStandardMaterial({
       color: PALETTE.woodDark,
       roughness: 0.9,
@@ -136,18 +140,28 @@ export class FairyLights implements GameSystem {
       if (isOnPath(x, z, 1.2)) continue;
       const ground = terrainHeight(x, z);
 
+      // Pole, knob and the string's anchor are three parts of one post, so all
+      // three take their height from the ground under the *same* (x, z). That
+      // is what keeps the post rigid as it leans away from the park's centre —
+      // a knob that stayed at its old world height would hang off the side of a
+      // pole that had tipped out from under it.
       const pole = new Mesh(poleGeometry, poleMaterial);
-      pole.position.set(x, ground + poleHeight / 2, z);
+      flat.set(x, ground + poleHeight / 2, z);
+      placeOnSphere(flat, 0, pole.position, pole.quaternion);
       pole.castShadow = true;
       pole.receiveShadow = true;
       this.group.add(pole);
 
       const knob = new Mesh(knobGeometry, knobMaterial);
-      knob.position.set(x, ground + poleHeight + 0.12, z);
+      flat.set(x, ground + poleHeight + 0.12, z);
+      placeOnSphere(flat, 0, knob.position, knob.quaternion);
       knob.castShadow = true;
       this.group.add(knob);
 
-      ring[i] = new Vector3(x, ground + poleHeight - 0.25, z);
+      const anchor = new Vector3();
+      flat.set(x, ground + poleHeight - 0.25, z);
+      placeOnSphere(flat, 0, anchor, scratchLean);
+      ring[i] = anchor;
       collision.addCircle(x, z, 0.28);
     }
 
@@ -187,10 +201,16 @@ export class FairyLights implements GameSystem {
         // Catenary-ish sag: a parabola is close enough and much cheaper.
         const sag = Math.sin(t * Math.PI) * 1.15;
         const point = new Vector3().lerpVectors(from, to, t);
-        point.y -= sag;
+        // The cable hangs along the **local** down, and so does the bulb under
+        // it. Sagging along world -Y instead would be right at the plaza's
+        // middle and progressively wrong out from it: the poles lean, so a
+        // string dropped straight down would swing away from the knobs it is
+        // supposedly tied to.
+        upAt(point.x, point.y, point.z, up);
+        point.addScaledVector(up, -sag);
         points.push(point);
         if (s > 0 && s <= bulbsPerString) {
-          bulbPositions.push(point.clone().add(new Vector3(0, -0.18, 0)));
+          bulbPositions.push(point.clone().addScaledVector(up, -0.18));
         }
       }
 
@@ -236,8 +256,14 @@ export class FairyLights implements GameSystem {
     this.bulbs.name = 'fairy-bulbs';
 
     const quaternion = new Quaternion();
+    // A bulb is a sphere stretched 1.25 along its own long axis, so that axis
+    // has to be the local up — stretched along world Y it would read as
+    // leaning the opposite way to the string it hangs from. The positions are
+    // already the leaned ones, so the tilt is read straight off each of them
+    // rather than re-derived from a flat height.
     const scale = new Vector3(1, 1.25, 1);
     bulbPositions.forEach((position, index) => {
+      tiltToSphere(position.x, position.y, position.z, quaternion);
       this.bulbMatrix.compose(position, quaternion, scale);
       this.bulbs.setMatrixAt(index, this.bulbMatrix);
       const base = new Color(bulbColours[index % bulbColours.length] as number);

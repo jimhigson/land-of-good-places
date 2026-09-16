@@ -11,8 +11,7 @@ import { PALETTE } from '../../core/palette';
 import { Rng } from '../../core/mathUtils';
 import { addOutline, decal, softMaterial, solid, toonMaterial } from '../../art/style/materials';
 import { ANCHORS_BY_ID } from '../../world/anchors';
-import { terrainHeight } from '../../world/terrain';
-import type { AnchorPlots } from '../../world/AnchorPlots';
+import { groundInPlot, type AnchorPlots } from '../../world/AnchorPlots';
 import type { CollisionWorld } from '../../world/Collision';
 
 /**
@@ -50,7 +49,6 @@ const LAWN_TOP = LAWN_MID + LAWN_THICKNESS / 2;
 export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorld): void {
   const anchor = ANCHORS_BY_ID.waterFight;
   const [centreX, centreZ] = anchor.position;
-  const ground = terrainHeight(centreX, centreZ);
   const rng = new Rng(0x77a7e5);
 
   const root = new Group();
@@ -74,9 +72,17 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
     board: toonMaterial(PALETTE.woodLight),
   };
 
-  /** Local height of the ground under a plot-local point. */
-  const localGround = (x: number, z: number): number =>
-    terrainHeight(centreX + x, centreZ + z) - ground;
+  /**
+   * Local height of the ground under a plot-local point.
+   *
+   * Asked of `groundInPlot` rather than differenced out of two world heights:
+   * the plot's group now leans to the local up, so the sphere's fall across it
+   * has already been taken out by the parent, and subtracting world heights
+   * hands it straight back — the prop ends up pushed into the ground by twice
+   * the cap's drop. What survives is the rolling waves, which is what a paddling
+   * pool should be following anyway.
+   */
+  const localGround = (x: number, z: number): number => groundInPlot(centreX, centreZ, x, z);
 
   /**
    * The height a **paddling pool** stands at: whichever of the ground and the

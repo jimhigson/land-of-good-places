@@ -10,6 +10,7 @@ import type { PetBedSpot } from '../../world/hotel/Hotel';
 import { BED_POSE_X, BED_POSE_Y, posedBox, sleepingBox } from '../../world/hotel/petBedFit';
 import type { SlideSeat } from '../../world/slide/petRiders';
 import { RIDE_RECLINE } from '../ridePose';
+import { faceOnGround } from '../../world/up';
 
 /**
  * One cute thing walking behind you.
@@ -523,7 +524,7 @@ export class ParadeMember {
     this.velocity.set(0, 0, 0);
     this.facing = facing;
     this.root.position.copy(this.position);
-    this.root.rotation.y = facing;
+    faceOnGround(this.root, facing);
   }
 
   /** Starts the poof-out. The member keeps updating until {@link gone}. */
@@ -657,7 +658,11 @@ export class ParadeMember {
       this.position.y + hopLift + styleLift,
       this.position.z,
     );
-    this.root.rotation.y = this.facing;
+    // Standing on the ground she is on. The bed pose below is deliberately not
+    // routed through here: a bed is indoors, `faceOnGround` would be a no-op
+    // there anyway, and that branch reads its own yaw back off `root.rotation`
+    // — which only stays honest while nothing has leant it.
+    faceOnGround(this.root, this.facing);
     this.handle.update?.(dt, elapsed);
     // Flickers the flames. Only while lit — see `createJetpack`.
     if (this.flying) this.jetpack?.update?.(dt, elapsed);

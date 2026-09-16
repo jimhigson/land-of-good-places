@@ -8,12 +8,6 @@
 
 // ------------------------------------------------------------------ world
 
-/** Half-width of the playable garden, in metres. The garden is square. */
-export const GARDEN_HALF_SIZE = 62;
-
-/** Player is pushed back inside this radius from the centre (soft boundary). */
-export const GARDEN_PLAY_RADIUS = 58;
-
 /**
  * Where the ground stops.
  *
@@ -45,6 +39,253 @@ export const TERRAIN_RADIUS = 83.5;
  * at a horizon a metre past the masonry.
  */
 export const RIM_DROP = 17;
+
+/**
+ * **The radius of the sphere the ground is a piece of, in metres (#511).**
+ *
+ * Jim, 4 September 2026: *"I think the answer there is to just not make the
+ * park on a hill. Let the land spread out in all directions for a long way but
+ * low poly"*, and then the shape: *"make the ground bend down like the surface
+ * of a sphere but big enough that the bus is ok"*. And, ruling out the
+ * alternative that was put to him: *"there should be no 'flat ground' it is a
+ * sphere"*.
+ *
+ * So the ground is a spherical cap, tangent to horizontal at the park's centre,
+ * and it curves away on every bearing. There is no rim, no crest and no flat
+ * apron: the fall is the same gentle fall everywhere, which is what makes the
+ * road-versus-ride contention outside the wall dissolve rather than have to be
+ * fought (both of the constraints that boxed it were properties of the hill).
+ *
+ * **Where the number comes from: Jim's eye, and nothing else.** It was taken to
+ * 400, then 300, then 220 by looking at the park on screen and deciding which
+ * planet read best. **There is no derivation, and this docblock used to carry
+ * one** — `the drawn road's reach 117.08 / a 10% gradient budget = 1171 m,
+ * rounded up to:` followed by `220`. 1171 is not 220. That arithmetic described
+ * the **1200 m** planet the park's extent was once calibrated against (see
+ * `PARK_SURFACE_SCALE`), and it survived three changes of this number, quietly
+ * explaining a value nobody had computed.
+ *
+ * It is deleted rather than corrected, because the constraint it encoded has
+ * been **retired** (Overseer's ruling, 14 September 2026). That 10% ceiling
+ * existed to guarantee the cat bus could drive the whole 117 m of its road; Jim
+ * has since ruled that it need not — *"showing the bus coming in a couple
+ * meters is fine and good, I don't mind that at all."* A budget derived from a
+ * 117 m journey that no longer happens is not a budget, and sizing a planet
+ * around it — `theGroundIsTheSphereItClaimsToBe` computes and prints how big,
+ * from the kerb's measured reach, on every run —
+ * would undo the toy world he picked by eye.
+ *
+ * So this number is a **look**, and it is allowed to be. What it must not do is
+ * pretend to be a calculation. If it changes again, change it because the park
+ * looks better, and expect `theGroundIsTheSphereItClaimsToBe` to print the new
+ * gradients rather than to veto them.
+ *
+ * See {@link gradientAtParkRadius} for what the ground actually does at a given
+ * reach — and note it is `tan θ`, not the `d / R` the old paragraph asserted.
+ */
+export const GROUND_SPHERE_RADIUS = 220;
+
+/**
+ * **The park grows as the world shrinks — SUPERSEDED, kept as the record of a
+ * ruling that was later reversed.** The reference below is now held equal to
+ * the planet, so the relationship this describes evaluates to 1 and the park
+ * is its authored size; the figures in this block (316 m, 22 m, 41 m) describe
+ * the relationship as proposed, not anything this code computes.
+ *
+ * Jim, 13 September 2026: *"since this makes the park smaller in terms of
+ * surface area, as we decrease the radius, increase the size of the park in
+ * other ways eg increase the target radius of the park on the surface of the
+ * sphere."*
+ *
+ * A smaller ball does not make the park smaller in metres — nothing about the
+ * park's own extent depends on the radius. What shrinks is the *world around
+ * it*: the horizon comes closer and less ground is visible past the boundary,
+ * so the park stops reading as a place in a landscape and starts reading as a
+ * lid on a knoll. This is the compensation, and it is a relationship rather
+ * than a second hand-set number so that the next radius change carries it along
+ * instead of needing the conversation again.
+ *
+ * **Square root, not linear.** The park's extent and the sphere's are two
+ * lengths. Holding their *ratio* fixed would shrink the park exactly as fast as
+ * the world and compensate for nothing; inverting it outright grows the park
+ * absurdly — 58 m becomes 316 m at a radius of 220. The geometric mean of the
+ * two is the middle course.
+ *
+ * **What it costs, stated plainly, because it is the trade being made.** The
+ * drop from the park's centre to its edge is about `a² / 2R`, so growing `a`
+ * while shrinking `R` steepens the park's *own* dome on both counts. Across the
+ * play radius that is 1.4 m at the reference, 22 m at 300, and 41 m at 220.
+ * Past some point the boundary wall falls below the horizon seen from the
+ * middle of the park — which is a thing to look at on screen, not to settle in
+ * a comment.
+ */
+/**
+ * The radius the park's authored extent is calibrated against.
+ *
+ * **Held equal to `GROUND_SPHERE_RADIUS`, so the scale is 1 and the park is
+ * built at its authored size.**
+ *
+ * ## Two engineers changed this docblock in opposite directions. Read both.
+ *
+ * #619 found the paragraph claiming a scale of 1 while the constant was 1200,
+ * and corrected **the paragraph** — keeping 2.335x and demolishing the stale
+ * diagnosis that had been used to justify it. That demolition was right and is
+ * kept in full below; its `paths.ts` fix is real, is untouched here, and took
+ * the pool from 3 of 10 seeds building to 10 of 10.
+ *
+ * This branch corrected **the constant** instead, for a reason #619 did not
+ * measure and could not have seen from the crossing planner: at 2.335x the park
+ * does not fit on its own planet.
+ *
+ * Measured on the rebased tree, **with #619's fix in place**, seed 11:
+ *
+ *     the park reaches 247.0 m on a 220 m planet — 27.0 m PAST ITS OWN EQUATOR
+ *     worst gradient INFINITE (tan theta) at 220.0 m
+ *
+ * Past the equator the cap has curved through vertical and `terrainHeight`'s
+ * `Math.max(0, R² - d²)` guard clamps the ground to a flat plane at `y = -R`.
+ * A tree out there stands on the clamp, not on the planet; on seed 326 one
+ * stood at 216 m on a **1045%** slope, 179.6 m below the park's centre, and a
+ * Rail Race duck bar at 246 m stood on no ground at all.
+ *
+ * **So "the park builds" and "the park is on the planet" are different
+ * questions, and #619 answered the first.** `theGroundIsTheSphereItClaimsToBe`
+ * now asserts the second, which is why 2.335x fails it on every seed.
+ *
+ * (Whole-suite counts, diffed by name, are in the PR and in
+ * `NOTE-scale-1-fallout-and-the-rebase-collision.md` — not here, where they
+ * went stale on the next commit.)
+ *
+ * ## Settled: scale 1 stands, and it is Jim's decision, not an engineer's
+ *
+ * Ruled 14 September 2026. It is **not** merely that scale 1 passes more tests
+ * — it is what Jim said on seeing the grown park: *"the park now feels too
+ * big/sparse - I don't think the area has been maintained from before, it has
+ * gotten bigger."* A separate engineer then restored the authored area and tied
+ * it to the radius **by a relationship precisely so it could not drift again**.
+ * The expression below is that relationship; this constant being 1200 was the
+ * drift it was built to prevent, quietly reintroduced.
+ *
+ * So the park's area is a **design decision already made**, and this is where it
+ * is kept. Do not restore 2.335x to make a subsystem's tests pass. **If 2.335x
+ * ever comes back, the planet grows with it** — the two numbers are one
+ * decision, which is exactly why they are held in one expression rather than
+ * two.
+ *
+ * It read: *"the paths router draws a leg across the railway at a radius where
+ * no bridge site was ever proven, because the rail loop moved outward
+ * underneath it... a real piece of work in `train/crossings.ts` and the bridge
+ * planner"*. Measured, it was neither. **Every drawn leg crossed at a proven
+ * site, on every seed, to within 0.4 m.** The seventh crossing was not drawn at
+ * all: it was `crossings.ts`'s hand-sampled esplanade march, which walks in
+ * from the arch until it finds paving underfoot — and it found none, because
+ * `paths.ts` placed the authored gate corridor from a hard-coded `z = 54` that
+ * was a copy of `ENTRANCE_GATE_Z - 6` taken while the arch stood at 60. At this
+ * scale the arch stands at 142.8, so the corridor began 88.8 m inside the
+ * doorway and the walk in from the gate was undrawn ground for its whole
+ * length. One constant, in `paths.ts`, given its proper owner: 3 of 10 pool
+ * seeds built before, **10 of 10 after**, every crossing on every seed bridged.
+ *
+ * So the crossing planner is no longer what blocks the radius moving. What
+ * blocks it now is the equator, measured above. What it costs is still real and
+ * still above: the park's own dome steepens as `a` grows and `R` shrinks, and
+ * that is a thing to look at on screen.
+ */
+const PARK_REFERENCE_SPHERE_RADIUS = GROUND_SPHERE_RADIUS;
+export const PARK_SURFACE_SCALE = Math.sqrt(
+  PARK_REFERENCE_SPHERE_RADIUS / GROUND_SPHERE_RADIUS,
+);
+
+/**
+ * **The park may not reach past its own planet, and this is where that is
+ * stated rather than discovered.**
+ *
+ * History, so the next reader knows why this exists: on `feat/sphere-combined`
+ * before #620 the reference above was 1200 m against a radius of 220, a scale
+ * of 2.3355, while its docblock claimed a scale of 1. `boundary.maxRadius`
+ * reached **245.0 m on a 220 m planet** — 25 m past the equator, where
+ * `terrainHeight`'s `Math.max(0, R² - d²)` guard clamps the ground to a flat
+ * plane at `y = -R`. A tree stood at 216 m on a **1045%** slope 179.6 m below
+ * the park's centre; a Rail Race duck bar stood at 246 m on no ground at all.
+ * `scripts/park-past-the-horizon.mts` is the transcript of that park. The
+ * reference is now the planet itself, so the paragraph above is true.
+ *
+ * So the domain states its own limit. A cap's gradient at horizontal distance
+ * `d` is `tan θ = d / √(R² − d²)` — **not** `d / R`, which is `sin θ` and is
+ * what the invariant had been measuring: it under-reports everywhere and
+ * saturates at a friendly 100% exactly where the ground turns vertical.
+ * Inverting the real gradient gives the radius a budget permits:
+ *
+ *     d = R·g / √(1 + g²)
+ *
+ * This is deliberately **not** wired into `GARDEN_PLAY_RADIUS` as a clamp. A
+ * clamp would silently resize the park and hide the contradiction; the pair is
+ * held to each other by an invariant instead, so that if the planet shrinks
+ * again the park is re-proved rather than quietly trimmed.
+ */
+export const parkRadiusForGradient = (
+  gradient: number,
+  radius: number = GROUND_SPHERE_RADIUS,
+): number => (radius * gradient) / Math.sqrt(1 + gradient * gradient);
+
+/**
+ * The steepest ground anywhere in the park, as a true gradient, at the extent
+ * the park actually reaches. The inverse of {@link parkRadiusForGradient}, and
+ * `Infinity` past the equator — because there is no ground there to have a
+ * gradient.
+ */
+export const gradientAtParkRadius = (
+  d: number,
+  radius: number = GROUND_SPHERE_RADIUS,
+): number => (d >= radius ? Infinity : d / Math.sqrt(radius * radius - d * d));
+
+/** Half-width of the playable garden, in metres. The garden is square. */
+export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
+
+/**
+ * Player is pushed back inside this radius from the centre (soft boundary).
+ *
+ * **The one owner of how big the park is.** `boundary.ts`'s
+ * `CIRCULAR_PARK_AREA` is `pi * this²`, the generated outline's target area is
+ * that times `PARK_AREA_MULTIPLIER`, and the masonry, the terrain disc, the
+ * treeline band and every keep-out follow the outline. The gate follows too,
+ * through `GARDEN_HALF_SIZE` above — which matters, because `boundary.ts` warns
+ * that the gap between the outline's mean radius and a *pinned* gate is what
+ * the shell has to swell to cover. Scaling both together keeps the gate on the
+ * wall rather than stranding it inside a park that grew around it.
+ */
+export const GARDEN_PLAY_RADIUS = 58 * PARK_SURFACE_SCALE;
+
+/**
+ * The gradient the cat bus is comfortable on, as rise over run.
+ *
+ * **RETIRED as a constraint (Overseer's ruling, 14 September 2026). Nothing
+ * asserts this any more, and that is deliberate.** It is kept because it is a
+ * true fact about the bus, and because `terrain.ts` refers to it when talking
+ * about the slope a rider feels — but it no longer sizes
+ * {@link GROUND_SPHERE_RADIUS} and it no longer vetoes a park.
+ *
+ * Why: the ceiling existed to guarantee the bus could drive the whole 117 m of
+ * its road. Jim has ruled that it need not — *"showing the bus coming in a
+ * couple meters is fine and good, I don't mind that at all."* What honouring
+ * 10% would cost in planet is not typed here: the invariant below computes it
+ * from the kerb's measured reach and prints it on every run.
+ *
+ * **What replaced it is a report, not a veto.**
+ * `theGroundIsTheSphereItClaimsToBe` still walks the park radially and the drawn
+ * kerb a metre at a time, and prints the worst real gradient it finds on every
+ * run — to `process.stderr`, so a passing run says it too. If a future change
+ * wants a ceiling back, put it there with a measurement beside it; do not
+ * restore a promise in this docblock, which is what the last one was.
+ *
+ * The number this is measured against also changed. The old clause computed
+ * `d / R`, which is `sin θ`; a spherical cap's gradient is `tan θ`
+ * ({@link gradientAtParkRadius}). `sin θ` under-reports everywhere and cannot
+ * exceed 100%, so it reported a plausible-looking 111% for ground that had
+ * curved past vertical and did not exist. A measure that cannot exceed 100% is
+ * a measure that cannot report the thing it exists for.
+ */
+export const BUS_MAX_GRADE = 0.1;
 
 /**
  * The hilltop crest, as a distance **outside the park's edge** rather than as a
@@ -557,12 +798,13 @@ export const BALL_PIT_COUNT = 900;
 
 // ----------------------------------------------------------------- camera
 
-/**
- * Pseudo-isometric rig, Theme Park style: an orthographic camera at one fixed
- * downward pitch and one fixed compass angle. It never rotates, in 90° steps
- * or otherwise — see ARCHITECTURE.md, "One camera angle, forever".
- */
-export const CAMERA_IS_ORTHOGRAPHIC = true;
+// `CAMERA_IS_ORTHOGRAPHIC = true` stood here until 11 September 2026, when Jim
+// ruled *"ALL cameras EVERYWHERE perspective."* It is deleted rather than set
+// to `false`, because **nothing in the game ever read it** — it was cited only
+// in prose, which is the worst possible shape for a fact: a second definition
+// of the projection that no code could contradict and no check could catch
+// going stale. `IsoCamera` builds the rig and is the only owner of what it is.
+// The pitch and the yaw below are unchanged; only the projection moved.
 
 /** Downward pitch of the camera in degrees. Theme Park sat around 35–40°. */
 export const CAMERA_PITCH_DEGREES = 38;
@@ -611,6 +853,33 @@ export const CAMERA_VIEW_HEIGHT = 15;
  * already wins and this number does nothing.
  */
 export const CAMERA_MIN_VIEW_WIDTH = 11;
+
+/**
+ * **Half the view's height in world metres at zoom 1, for a given aspect — the
+ * one owner of the framing formula.**
+ *
+ * Height-led framing with a minimum width: the height wins on any landscape
+ * screen, and {@link CAMERA_MIN_VIEW_WIDTH}'s floor takes over on a portrait
+ * phone, where it makes the view *taller* rather than stretching anything.
+ * The half-height at an arbitrary zoom is this divided by that zoom.
+ *
+ * **Why it is a function here rather than a line inside `IsoCamera`.** It had
+ * two definitions: `IsoCamera.frustumBase()` and a hand-copied `Math.max` in
+ * `world/tapSpacing.ts`, whose comment promised the tap radius "follows
+ * automatically" when the camera framing changes. It did not follow
+ * automatically — it followed because two places happened to still agree, which
+ * is the single most common bug in this repo (CLAUDE.md, "Two definitions of one
+ * thing, kept in step by hand"). Whoever changes the framing now changes it
+ * once.
+ *
+ * The cost of the drift, had it happened, was not cosmetic: `tapSpacing` sizes
+ * the world-space radius by which a child's tap is allowed to miss what she
+ * aimed at, so a stale copy would have quietly mis-sized every interact zone on
+ * a phone while every check stayed green.
+ */
+export function cameraViewHalfHeight(aspect: number): number {
+  return Math.max(CAMERA_VIEW_HEIGHT / 2, CAMERA_MIN_VIEW_WIDTH / 2 / aspect);
+}
 
 /**
  * Zoom bounds. Rebalanced around the closer default: the old 0.55 floor now
@@ -962,5 +1231,103 @@ export const FALL_THRESHOLD = 0.5;
  * Change this number when you mean to change the park, and measure the bridges
  * when you do — that is issue #382's job, not something to arrive at by
  * arithmetic drift.
+ *
+ * ### This is a planner target, not a check's ceiling (#636)
+ *
+ * The note above used to warn that "this is the second place the old model is
+ * written down" — `test/procgen/invariants.ts` recomputed the obsolete damp
+ * arithmetic for itself and refused any ramp above 0.512. It no longer does:
+ * that ceiling is now {@link SPRINT_LOCAL_GRADE_CEILING}, derived from what the
+ * post-#358 sampler actually permits, and it lives beside this one so the two
+ * can be read together. **The check being looser than the planner is correct**
+ * — the park is *built* to 0.512 and *refused* above 0.670, and the gap is the
+ * margin a generator is allowed to be conservative in.
  */
 export const SPRINT_PEAK_GRADE_BUDGET = 0.5121075476046892;
+
+/**
+ * **The steepest slope a check may let stand** — the ceiling
+ * `test/procgen/invariants.ts` refuses a built ramp above, as opposed to
+ * {@link SPRINT_PEAK_GRADE_BUDGET}, which is the *target the planner aims at*.
+ *
+ * Two different jobs, and conflating them is what made this constant necessary
+ * (#636). A planner target may be as conservative as you like — building
+ * gentler than you have to costs nothing. A *check* may not: one that refuses
+ * geometry the game in fact walks perfectly well is a check that will eventually
+ * be argued down rather than believed, and one that recites an obsolete model in
+ * its failure message teaches the next reader something untrue.
+ *
+ * ### The derivation, from the game and nothing else
+ *
+ * One clamped frame ({@link MAX_FRAME_DELTA}, 1/12 s — the ceiling the engine
+ * itself clamps to, i.e. a slow phone) carries a sprinting child
+ * {@link PLAYER_LONGEST_STEP} = 0.925 m of travel. Since #358 `Player` samples
+ * the walking surface once per **collision sub-step**, asked from the surface
+ * she is standing on — not once per frame from her damped, lagging draw height
+ * — and `WalkSurfaces.sample` will not return a surface more than
+ * {@link BUILDING_STEP_UP} above what it is asked from.
+ *
+ * So the climb one frame may make and still be sampled is `BUILDING_STEP_UP`,
+ * over a horizontal run of at most `PLAYER_LONGEST_STEP`:
+ *
+ * ```
+ * BUILDING_STEP_UP / PLAYER_LONGEST_STEP = 0.62 / 0.925 = 0.670
+ * ```
+ *
+ * **That is not only derived, it is measured.** `measure-deck-fallthrough.mts`
+ * (`pnpm run check:deck-fallthrough`) drives the real `WalkSurfaces.sample`
+ * through 27 gradients x 5 frame rates x 64 start phases x walk/sprint x
+ * up/down, and its `true-surface reference only` row — the configuration with
+ * no sub-stepping help at all — reads **0.670**. The shipping configuration
+ * reads 1.670, but that figure is a function of the park's thinnest collider
+ * forcing a short sub-step, so it would fall if that collider ever got fatter.
+ * **An invariant must lean on the park-independent floor, not on the park.**
+ *
+ * ### The old arithmetic this replaces, and why it had to go
+ *
+ * The invariant used to compute its own ceiling as
+ * `BUILDING_STEP_UP / (1 + dampLag) / PLAYER_LONGEST_STEP` = 0.512 — the exact
+ * expression {@link SPRINT_PEAK_GRADE_BUDGET}'s own note calls **obsolete**,
+ * because #358 made both halves of its model untrue. It was the second place
+ * that model was written down, and that note already asked for both to move
+ * together. This is that move, for the check half only: nothing plans geometry
+ * from this constant, so raising it re-plans **no** bridge on **any** seed.
+ *
+ * It is live arithmetic rather than a frozen literal for exactly that reason —
+ * the freeze on `SPRINT_PEAK_GRADE_BUDGET` exists to stop a feel tweak silently
+ * re-planning a park, and there is no park downstream of this one to re-plan.
+ * If `BUILDING_STEP_UP` or the sprint speed ever changes, what a child can run
+ * up changes with it and this should follow.
+ *
+ * ### It is a grade **in her own frame**, and that word is load-bearing
+ *
+ * The world is a sphere ({@link GROUND_SPHERE_RADIUS}), so a world-`y` rise
+ * over a plan-distance run is *the grade plus the planet*: flat grass at r = 140
+ * reads 1.140 that way, and the dome alone crosses 0.512 at about r = 100. A
+ * grade compared against this number must therefore be measured as the rise
+ * along the **local up at her foot** over the part of the step lying in that
+ * point's own horizontal plane. `invariants.ts` carries controls that fail the
+ * run if its measure ever stops doing that.
+ *
+ * **The sampler measures in the same frame (#643).** `WalkSurfaces.sample`'s
+ * reach used to be literally world-`y` (`y + BUILDING_STEP_UP`), so the physics
+ * that decides a fall-through spent the planet's own fall over each sub-step as
+ * well as the ramp's rise, and this local-frame ceiling guarded a frame the
+ * sampler did not use. The reach is now radial (`stepCeilingAt` in
+ * `world/building/surfaces.ts`) and `Player` carries its sub-step reference at
+ * her own distance from the planet's centre, so `BUILDING_STEP_UP` is spent on
+ * local rise and nothing else. Measured by `scripts/measure-walk-reach.mts`,
+ * and the two halves earn different things. **The carry** is what lifts the
+ * steepest local grade a sprinting child keeps her footing on at r = 140 m
+ * from 0.40 to 0.67 — a world-`y` reach with the carry reads 0.670 there too,
+ * because along a ramp the carried reference is within centimetres of the
+ * deck. **The radial reach** is what fixes the knee-high edges, where the
+ * foot's lean multiplies the whole riser: on the canonical park 584 honest
+ * step-ups refused and 55 over-tall ones admitted went to 0 and 0 — and it is
+ * what `NavGrid` now agrees with pair for pair (`withinStep`).
+ *
+ * What still bends the figure far out is locomotion, not the reach: she moves
+ * in plan, and climbing towards the park a plan metre is `1 / (cos θ − g sin θ)`
+ * metres of ground. That is the walk metric's work (#621).
+ */
+export const SPRINT_LOCAL_GRADE_CEILING = BUILDING_STEP_UP / PLAYER_LONGEST_STEP;

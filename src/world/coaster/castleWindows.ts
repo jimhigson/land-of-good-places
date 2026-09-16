@@ -16,8 +16,8 @@ import {
   WINDOW_TRACK_Y,
   toCastleLocal,
 } from '../building/cruiserWindow';
-import { BUILDING_BASE_Y } from '../building/layout';
-import { CART_ENVELOPE } from './cart';
+import { CART_ENVELOPE, cartEnvelopePoint } from './cart';
+import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
 import { COASTER_PLANS } from './plan';
 import type { CoasterRoute } from './route';
 
@@ -29,6 +29,9 @@ const MERLON_HEIGHT = 1.05;
 const ENVELOPE_STEP = 0.1;
 /** Hop length for the swept ray test. Short enough that nothing is stepped over. */
 const RAY_STEP = 0.2;
+
+/** Scratch for the envelope corner being asked about. */
+const _corner = /* @__PURE__ */ new Vector3();
 
 /**
  * **The holes the Sky Cruiser makes in the castle** — measured off the solved
@@ -120,16 +123,20 @@ export function openingsFor(route: CoasterRoute): WallOpening[] {
     run = null;
   };
 
+  // Cut round the car that is drawn. See `castleDeckClearanceAt`.
+  const drawnRoute = drawnOnSphere(route);
   for (let d = from; d <= to; d += SLAB_STEP) {
-    route.pointAt(d, point);
-    const { lx, lz } = toCastleLocal(point.x, point.z);
+    drawnRoute.pointAt(d, point);
+    // **One transform, all three components.** This was `toCastleLocal(point.x,
+    // point.z)` for the plan and `point.y - BUILDING_BASE_Y` for the height —
+    // two flat formulas describing a castle that leans 12.44°.
+    const { lx, ly, lz } = toCastleLocal(point);
     const depth = Math.abs(lx);
     if (depth < CASTLE_INNER_X || depth > CASTLE_OUTER_X) {
       close();
       continue;
     }
     const wall: SideWall = lx > 0 ? 'east' : 'west';
-    const ly = point.y - BUILDING_BASE_Y;
     if (run && run.wall !== wall) close();
     if (!run) {
       run = { wall, minZ: lz, maxZ: lz, sumZ: lz, sumY: ly, n: 1 };
@@ -191,27 +198,30 @@ export function sweptCartHits(route: CoasterRoute, castleRoot: Object3D): string
   root.updateMatrixWorld(true);
 
   const caster = new Raycaster();
-  const point = new Vector3();
-  const tangent = new Vector3();
   const previous = new Map<string, Vector3>();
   const direction = new Vector3();
   const hits: string[] = [];
   const { from, to } = route.castleSpan;
 
+  // The car as it is drawn, at the castle as it is drawn. The castle is stood
+  // by `standInPlot` → `placeOnSphere` and leans with everything else outdoors;
+  // sweeping a flat-frame car at it compares two different worlds. Shared with
+  // `clearance.ts` through `cartEnvelopePoint` so the two sweeps cannot answer
+  // the same question differently — they were byte-identical copies before.
+  const drawn = drawnOnSphere(route);
+  const frame: RailFrame = {
+    position: new Vector3(),
+    forward: new Vector3(),
+    side: new Vector3(),
+    up: new Vector3(),
+  };
+
   for (let d = from; d <= to; d += RAY_STEP) {
-    route.pointAt(d, point);
-    route.tangentAt(d, tangent);
-    const flat = Math.hypot(tangent.x, tangent.z) || 1;
-    const sideX = -tangent.z / flat;
-    const sideZ = tangent.x / flat;
+    railFrameAt(drawn, d, frame);
     for (const lateral of [-CART_ENVELOPE.halfWidth, CART_ENVELOPE.halfWidth]) {
       for (const rise of [-CART_ENVELOPE.below, CART_ENVELOPE.above]) {
         const key = `${lateral},${rise}`;
-        const here = new Vector3(
-          point.x + sideX * lateral,
-          point.y + rise,
-          point.z + sideZ * lateral,
-        );
+        const here = cartEnvelopePoint(frame, lateral, rise, new Vector3());
         const before = previous.get(key);
         previous.set(key, here);
         if (!before) continue;
@@ -303,6 +313,13 @@ export function checkCastleWindows(
   openings: readonly WallOpening[],
 ): string[] {
   const complaints: string[] = [];
+  // **The same drawn car as `sweptCartHits`, asked in the castle's own axes.**
+  //
+  // This check never touches a mesh: it asks whether the car is inside stone
+  // `Shell.ts` cut from `openingsFor`. All three now work from the drawn route
+  // through `toCastleLocal`, the inverse of the transform the shell stands at —
+  // one frame, the one a child sees. (It once said the flat frame was right here
+  // because `toCastleLocal` was a flat map; it is not any more.)
 
   if (!route.castleSpan) {
     if (openings.length > 0) {
@@ -397,21 +414,23 @@ export function checkCastleWindows(
 
   // 5. The car itself, against the wall that was built. Every corner of the
   //    envelope, every 10 cm of the pass.
-  const point = new Vector3();
-  const tangent = new Vector3();
   let worstInside: { d: number; lx: number; ly: number; lz: number } | null = null;
   const { from, to } = route.castleSpan;
+  const drawnCar = drawnOnSphere(route);
+  const carFrame: RailFrame = {
+    position: new Vector3(),
+    forward: new Vector3(),
+    side: new Vector3(),
+    up: new Vector3(),
+  };
   for (let d = from; d <= to; d += ENVELOPE_STEP) {
-    route.pointAt(d, point);
-    route.tangentAt(d, tangent);
-    const flat = Math.hypot(tangent.x, tangent.z) || 1;
-    // The car's beam is square to travel, in the horizontal plane.
-    const sideX = -tangent.z / flat;
-    const sideZ = tangent.x / flat;
+    railFrameAt(drawnCar, d, carFrame);
     for (const lateral of [-CART_ENVELOPE.halfWidth, CART_ENVELOPE.halfWidth]) {
       for (const rise of [-CART_ENVELOPE.below, CART_ENVELOPE.above]) {
-        const { lx, lz } = toCastleLocal(point.x + sideX * lateral, point.z + sideZ * lateral);
-        const ly = point.y + rise - BUILDING_BASE_Y;
+        // The drawn car's own corner, the same `cartEnvelopePoint` the ray
+        // sweeps use, then asked where it is in the castle's axes.
+        cartEnvelopePoint(carFrame, lateral, rise, _corner);
+        const { lx, ly, lz } = toCastleLocal(_corner);
         if (castleSolidAt(lx, ly, lz, openings)) {
           worstInside ??= { d, lx, ly, lz };
         }
