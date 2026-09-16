@@ -26,6 +26,19 @@ at the park's origin, ~48 m away. Corrected clearance is **+5.44 m**.
 | clearance, both sides plumb-y | +0.539 m — clear |
 | the issue's 1.19 (radial stone vs plumb underside) | −1.190 m |
 
+**Corroborated by a second method, once that method was also fixed.** Shortest
+distance from the built chute's centre line to any masonry vertex: **6.788 m**
+— chute `(55.38, 9.69, 22.46)`, a `crenellations` vertex at
+`(54.04, 3.04, 22.34)` — leaving **5.678 m** beyond the 1.11 half-width, against
+the **5.441 m** the radial crossing gives. Two methods sharing only the built
+scene, agreeing to within a quarter of a metre.
+
+That figure was published as **9.450 m**, and it was wrong for the same reason
+as everything else here: the instrument walked masonry vertices without their
+per-instance matrices, so it measured the distance to a castle with no
+battlements. **Corroboration from a second instrument is worth only the
+independence of its method.**
+
 **Two figures widely repeated about this ticket are wrong, and both were wrong
 the same way.**
 

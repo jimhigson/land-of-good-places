@@ -4279,9 +4279,19 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  * surface; its underside is `CHUTE_HALF_WIDTH` below that at **16.192 m**, and
  * the tallest stone — a **`crenellations`** merlon at world (35.52, 7.08,
  * 20.40) — reaches **10.750 m**. The air a rider has under them is therefore
- * **5.44 m**. A second instrument sharing none of that arithmetic agrees that
- * there is metres of it: the shortest distance from the built chute's centre
- * line to any masonry vertex is **9.450 m**, against a half-width of 1.11.
+ * **5.44 m**.
+ *
+ * A second instrument agrees, by a different route: the shortest distance from
+ * the built chute's centre line to any masonry vertex is **6.788 m** (chute
+ * (55.38, 9.69, 22.46), a `crenellations` vertex at (54.04, 3.04, 22.34)), so
+ * beyond the 1.11 half-width there is **5.678 m** of daylight. Two methods that
+ * share only the built scene, agreeing to within a quarter of a metre.
+ *
+ * That figure was **9.450 m** in an earlier draft, and it was wrong for the
+ * same reason everything else here was: the instrument that produced it walked
+ * masonry vertices without their per-instance matrices, so it was measuring
+ * distance to a castle with no battlements. Corroboration from a second
+ * instrument is worth only as much as the independence of its *method*.
  *
  * ### Why every number in the paragraph above is a radius (issue #625)
  *
