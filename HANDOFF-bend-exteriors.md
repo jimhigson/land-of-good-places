@@ -223,6 +223,41 @@ leaning `TowerSolid` takes down **three** gates — `test:procgen`,
 `check:coplanar`, `check:swept-bus` — and **`check:swept-bus` was green
 before**. Recorded on #625.
 
+### `check:swept-bus`: the cure is the throw, and the measurement says so
+
+The check forks **one child per seed** and a single throwing child kills the
+parent's `Promise.all`, so one unbuildable seed turns the whole check red
+whatever the other nine say. Ran each child directly, on this branch:
+
+| seed | 11 | 24 | 128 | 131 | 208 | 274 | **326** | 428 | **451** | 20260728 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| result | `posts:0` | `posts:0` | `posts:0` | `posts:0` | `posts:0` | `posts:0` | **throws** | `posts:0` | **throws** | `posts:0` |
+
+**Eight of ten report `posts: 0` — the same value the base commit reports for
+those seeds** (base's own table reads 0 across all 10). The two that fail do
+not fail the bus-versus-post measurement at all; they fail to *build a park*,
+both inside `planSlide`:
+
+```
+seed 326: ...the best on offer runs into a castle tower at (-112.8, -25.1, -23.0),
+          which needs 1.45 m of clearance (at a 42 m target).
+seed 451: ...the best on offer fouls the Sky Cruiser, only 0.00 m of air at
+          (-101.7, -41.3, -55.3) against 5.5 m required (at a 42 m target).
+```
+
+**So the bus's own subject is untouched by this lane.** `check:swept-bus` is
+red here for exactly one reason and its cure is `planSlide`'s backtracking.
+
+**On attribution, so nobody splits the difference wrongly:** this branch is the
+*trigger* — the leaning `TowerSolid` is what makes those two seeds unsolvable,
+and on seed 451 it does so at one remove, by pushing the solver onto a route
+that then fouls the Sky Cruiser. It is not the *cure*. Reverting the collider
+correction would put back a collider that does not describe the towers, which
+is the very bug #625 is about (the slide passing through solid battlement), so
+the branch would be trading a red check for a child walking through stone. The
+fix is the solver varying something other than length, or the seeds leaving the
+pool with a reason written down.
+
 ## Gates, current head — measured, not asserted
 
 - check chain parsed from the `scripts` object (never grepped): base **65**
@@ -248,9 +283,12 @@ before**. Recorded on #625.
     branch previously measured as *faster* than its own base.
 
   The runner (`scratchpad/stepwise.sh`) **refuses to report below 50 parsed
-  steps**. Its first version used `mapfile`, absent on macOS bash 3.2, and
-  printed "chain has 0 runnable steps" with a failing set of zero — which
-  would have read as a clean sweep. That guard is the only reason it did not.
+  steps**. Its first version used `mapfile`, **absent on macOS bash 3.2**, so
+  it reported *"0 runnable steps / failing set of zero"* — **which reads as a
+  clean sweep**. It now refuses below 50 parsed steps. That is a check that
+  cannot fail, in a shell script, produced by a tool version difference — the
+  same disease this repo keeps finding in its own instruments, one layer out.
+  If you reuse it, keep the guard.
 
 - `git diff --stat origin/feat/sphere-combined...HEAD` (three dots): **19
   files, no deletions, no renames** — all accounted for.
