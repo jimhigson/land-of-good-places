@@ -116,3 +116,22 @@ Check by check at scale 1:
   seen from the middle of the park."* With `GARDEN_PLAY_RADIUS = 58 × 2.3355 =
   135.5 m` and the race ring out to 238.9 m, that point is past. This is #620
   territory, not mine to settle.
+
+## Second agent (replacement), 16 Sep — verified at scale 1
+
+Scratch scripts `scripts/_castle.mts`, `scripts/_drawnsweep.mts`, `scripts/_cartoff.mts`
+are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
+
+- **Castle (ruling 2) — done and verified.** At `8048e181`: `check:castle-window`
+  exit 0 (east 3.20 m at z −0.70, west 3.28 m at z 0.60, sill 3.94, head 7.65),
+  `check:cruiser-clearance` exit 0. **Controls:** castle files from `e7eb815f` →
+  both red, 6 strikes each; only `route.ts` from `51c81d14` (constant window y) →
+  both red, `inside castle masonry at castle-local (12.20, 9.76, −0.17)`.
+  Drawn-frame sweep (each flat envelope corner through `placeOnSphere`): HEAD 0 hits,
+  worst margins sill 1.586 / head 0.299 / side 0.367 m; pre-fix 12 hits.
+- **Found, not fixed, not in any lane:** `Coaster.placeCart` puts the cart at the
+  **flat** route point while the rails are drawn through `drawnOnSphere` — the cart
+  flies up to **3.039 m** off its own rails (d=295, r=76.0, clearance 8.65).
+- **npc-perch (ruling 3)** — exit 0 at scale 1, heads −0.198…0.010 (allowed
+  −0.25…0.08). Control: matcher on drawn `x/z` → `tree 0 has no foliage`, exit 1.
+  `check:climb-wave` already matched on `footX/footZ`.
