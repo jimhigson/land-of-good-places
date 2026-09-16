@@ -11,6 +11,7 @@ import type { Hud } from '../ui/Hud';
 import { pressZone, type InteractZone } from './interact';
 import type { ClimbableTreeSeed } from './Scenery';
 import { placeOnSphere, terrainHeight } from './terrain';
+import { yawForBearing } from './up';
 
 /**
  * Tree climbing (family design feedback: NPCs — and the player — climb trees,
@@ -330,9 +331,19 @@ export class TreeClimbing implements GameSystem {
       // She turns to the camera to wave and drifts back to her peek facing
       // afterwards. This is a *scripted pose*, not a control — the CONTROL RULE
       // bans the stick rotating her, and nothing here reads the stick.
+      // **The camera-facing turn is a bearing, so it has to be converted into
+      // a yaw before `faceOnGround` is given it** — see `up.ts`'s
+      // `yawForBearing`. `CAMERA_FACING` is a compass bearing in the flat
+      // frame; handed straight over it was read as a yaw in *her* frame, which
+      // out in the park is up to 40° away from it, so she turned to something
+      // that was not the camera and her raised hand landed behind her own head.
+      // `check:climb-wave` measured the result: 0.0% of the waving hand visible
+      // on the worst trees.
       this.playerFacingNow = turnTowards(
         this.playerFacingNow,
-        wave > WAVE_TURN_THRESHOLD ? CAMERA_FACING : this.playerPeekFacing,
+        wave > WAVE_TURN_THRESHOLD
+          ? yawForBearing(pose.x, pose.y, pose.z, CAMERA_FACING)
+          : this.playerPeekFacing,
         PEEK_TURN_SPEED * dt,
       );
       // The hoist. Her arm cannot reach above her own head (shoulder 0.72 +

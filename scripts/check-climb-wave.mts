@@ -72,7 +72,8 @@ import { Group, Mesh, MeshBasicMaterial, Raycaster, SphereGeometry, Vector3 } fr
 import { buildHeadlessPark } from './park-harness.mts';
 import { createKid, KID_HEAD_HEIGHT, KID_REST_GAZE_PITCH } from '../src/art/models/kid.ts';
 import { applyRidePose, CLIMB_WAVE_ARM_X, CLIMB_WAVE_LEAN_RATE } from '../src/entities/Player.ts';
-import { CLIMB_EDGE_GAP, CLIMB_PEEK_LIFT, WAVE_RISE } from '../src/world/TreeClimbing.ts';
+import { CLIMB_PEEK_LIFT, WAVE_RISE, climbPose } from '../src/world/TreeClimbing.ts';
+import { faceOnGround, yawForBearing } from '../src/world/up.ts';
 import {
   CAMERA_DISTANCE,
   CAMERA_PITCH_DEGREES,
@@ -265,10 +266,17 @@ interface TreeResult {
 
 /** The foliage stand-ins for the tree at `index`, or exits if there are none. */
 function foliageFor(index: number, tree: (typeof trees)[number]): Mesh[] {
+  // **Matched on the foot, not on the canopy's drawn centre.** `FoliageOccluder`
+  // publishes both since the trees started leaning: `x`/`z` is where the widest
+  // blob is *drawn* (slid outward along the local up), `footX`/`footZ` is the
+  // column the tree stands in — which is exactly what `ClimbableTreeSeed`
+  // records. Measured on the canonical seed, the two are 1.67 m apart at a
+  // radius of 80 m and 2.94 m at 176 m, so the old `x`/`z` match inside a 0.05 m
+  // tolerance found nothing at all and this check died on tree 0.
   let occluder: FoliageOccluder | null = null;
   let nearest = 0.05;
   for (const candidate of occluders) {
-    const distance = Math.hypot(candidate.x - tree.x, candidate.z - tree.z);
+    const distance = Math.hypot(candidate.footX - tree.x, candidate.footZ - tree.z);
     if (distance < nearest) {
       occluder = candidate;
       nearest = distance;
@@ -299,22 +307,45 @@ function poseKidAt(
   /** Re-creates the retired head-and-arm-only climb, for `--thin-canopy`. */
   hideBody = false,
 ): ReturnType<typeof createKid> {
-  const perch = tree.trunkRadius + CLIMB_EDGE_GAP;
+  // **Posed through the game's own `climbPose`**, not beside it. This used to
+  // set the perch here — `tree.x + sin(bearing) * (trunkRadius +
+  // CLIMB_EDGE_GAP)`, at `canopyTopY - KID_HEAD_HEIGHT + CLIMB_PEEK_LIFT` — a
+  // faithful copy while both were flat, and wrong the moment `climbPose` began
+  // leaning onto the sphere. The copy left her in the tree's flat column while
+  // the canopy she is climbing into was drawn up to 2.94 m further out, so this
+  // check reported **100.0% hand visible with no blocker at all on all 46
+  // trees**: there was simply no foliage anywhere near her to block anything.
+  //
+  // The hoist rides in the lift for the same reason the game puts it there —
+  // it is a height above the canopy, and out here that height leans.
+  const pose = climbPose(
+    tree,
+    tree.x + Math.sin(bearing) * 10,
+    tree.z + Math.cos(bearing) * 10,
+    KID_HEAD_HEIGHT,
+    'peek',
+    0,
+    bearing + Math.PI,
+    (liftOverride ?? CLIMB_PEEK_LIFT) + WAVE_RISE * wave,
+  );
   const kid = createKid();
   applyRidePose({ root: kid.root, body: kid.body, head: kid.head, ...kid.limbs }, wave, elapsed);
   if (armOverride) {
     kid.limbs.rightArm.rotation.x = armOverride.x;
     kid.limbs.rightArm.rotation.z = armOverride.z;
   }
-  kid.root.position.set(
-    tree.x + Math.sin(bearing) * perch,
-    tree.canopyTopY - KID_HEAD_HEIGHT + (liftOverride ?? CLIMB_PEEK_LIFT) + WAVE_RISE * wave,
-    tree.z + Math.cos(bearing) * perch,
-  );
+  kid.root.position.set(pose.x, pose.y, pose.z);
   // At rest she holds the facing she arrived with (facing away from the trunk);
   // the wave turns her to camera. Both are part of what the eye sees change.
-  const peekFacing = bearing + Math.PI;
-  kid.root.rotation.y = wave > 0.5 ? CAMERA_FACING : peekFacing;
+  //
+  // **Stood on the ground she is actually on**, through the same `faceOnGround`
+  // `Player.animate` uses — a child up a tree at the park's edge leans with her
+  // tree, and a kid left plumb here would be measured at an angle the game does
+  // not draw her at.
+  faceOnGround(
+    kid.root,
+    wave > 0.5 ? yawForBearing(pose.x, pose.y, pose.z, CAMERA_FACING) : pose.facing,
+  );
   // Nothing is hidden. `TreeClimbing` used to switch off everything but the
   // head and the waving arm, and this loop matched it part for part; the whole
   // child is drawn up a tree now, so hiding anything here would measure a pose
