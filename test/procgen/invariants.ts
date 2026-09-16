@@ -119,7 +119,7 @@ import {
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { GATE_POST_COLLIDER_RADIUS } from '../../src/world/entrance/gateArch.ts';
-import { terrainHeight } from '../../src/world/terrain.ts';
+import { altitudeAt, terrainHeight } from '../../src/world/terrain.ts';
 // The road corridor's measurement, shared with `check:ground-claims` so the two
 // sites that ask "is the claim the road?" cannot answer it differently. Pure
 // geometry over what it is handed — nothing seed-dependent is imported here.
@@ -4167,6 +4167,33 @@ const theGinormousSlideIsRideable: Invariant = (facts) => {
   // Measured against the local up, not world `y`, and owned by
   // {@link theGinormousSlideNeverClimbs} — see there for why the world-`y`
   // version this clause used to be was reading the wrong frame (#645).
+
+  // --- 1b. it stays out of the ground ---------------------------------------
+  //
+  // The trough's underside, measured against the ground along the local up
+  // (`altitudeAt`), at every built sample. Nothing asked this, and seed 326's
+  // chute ran 0.48 m under the grass 8 m before the pit; a faster search then
+  // found routes on seeds 11 and 24 that went 1.47 m and 0.06 m under.
+  {
+    let deepest = 0;
+    let deepestAt: readonly [number, number, number] = first;
+    let buried = 0;
+    for (const point of chute) {
+      const underside = altitudeAt(point[0], point[1], point[2]) - facts.chuteEnvelope.below;
+      if (underside < 0) buried += 1;
+      if (underside < deepest) {
+        deepest = underside;
+        deepestAt = point;
+      }
+    }
+    if (buried > 0) {
+      complaints.push(
+        `the ginormous slide runs into the ground: ${buried} of ${chute.length} samples have ` +
+          `the trough's underside below the grass, deepest ${(-deepest).toFixed(2)} m at ` +
+          `(${deepestAt[0].toFixed(1)}, ${deepestAt[1].toFixed(1)}, ${deepestAt[2].toFixed(1)})`,
+      );
+    }
+  }
 
   // --- 2. it finishes in the ball pit ---------------------------------------
   //
