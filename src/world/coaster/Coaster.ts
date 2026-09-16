@@ -356,6 +356,7 @@ export class Coaster implements GameSystem {
       // Euler three.js decomposes out of `tilt * yaw * pitch` mixes all three,
       // so reading `.y` off it hands her a facing that is wrong by the lean and
       // wrong in a way that grows as the ride goes round.
+      // flat-ok: local axis, leant by the cart's own quaternion
       const down = SEAT_DROP.set(0, 1, 0).applyQuaternion(this.cart.quaternion);
       this.player.setRidePose(
         seat.x - down.x * 0.55,

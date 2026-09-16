@@ -32,6 +32,7 @@ let failed = false;
   const flat = { x: 0, y: terrainHeight(0, 0) + 6.2, z: 0 };
   const p = new Vector3();
   placeOnSphere(flat, 0, p, new Quaternion());
+  // flat-ok: a 3D distance, one component of which is y
   const moved = Math.hypot(p.x - flat.x, p.y - flat.y, p.z - flat.z);
   console.log(`control 1  placeOnSphere at the origin is the identity: ${moved.toFixed(4)} m`);
   if (moved > 1e-6) {
@@ -54,6 +55,7 @@ for (const r of [0, 40, 100, 157]) {
   const flat = { x: r, y: terrainHeight(r, 0) + 6.2, z: 0 };
   const p = new Vector3();
   placeOnSphere(flat, 0, p, new Quaternion());
+  // flat-ok: a 3D distance, one component of which is y
   const moved = Math.hypot(p.x - flat.x, p.y - flat.y, p.z - flat.z);
   console.log(`             r = ${String(r).padStart(3)} m -> ${moved.toFixed(3)} m`);
 }

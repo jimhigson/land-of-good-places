@@ -168,6 +168,7 @@ function visibleBox(root: Object3D, into: Matrix4 | null = null, visibleOnly = t
       corner
         .set(
           i & 1 ? local.max.x : local.min.x,
+          // flat-ok: a mesh's own geometry box, in its own frame — the corners are then taken into the cart's frame
           i & 2 ? local.max.y : local.min.y,
           i & 4 ? local.max.z : local.min.z,
         )
@@ -1007,6 +1008,7 @@ say('');
   const toCart = cartFrame.clone().invert();
   say(
     `pose cart    at ${route.wrap(route.startDistance).toFixed(1)} m, leant ` +
+      // flat-ok: world +Y is the datum the cart's lean is being reported AGAINST
       `${((new Vector3(0, 1, 0).applyQuaternion(cartGroup.quaternion).angleTo(new Vector3(0, 1, 0)) * 180) / Math.PI).toFixed(1)}° off world +Y`,
   );
   // A real cart, because the complaint was about her going through *it*.
@@ -1099,6 +1101,7 @@ say('');
     player.group.updateMatrixWorld(true);
     const head = player.model.head;
     return {
+      // flat-ok: a box in the cart's own frame (toCart), so +Y is the tub's up
       headTop: visibleBox(head, toCart, false).max.y,
       headAt: head.getWorldPosition(new Vector3()),
       // Along the track, which is the cart frame's +Z.
@@ -1586,6 +1589,7 @@ say('');
     setRiderLegsVisible(player.model, riderLegsShow(phase));
     player.group.updateMatrixWorld(true);
     const drawn = legParts.every((part) => part?.visible === true);
+    // flat-ok: a box in the cart's own frame (toCart), so +Y is the tub's up
     const reach = visibleBox(player.model.root, toCart).min.y;
     legReport.push(`${phase} ${drawn ? 'on' : 'off'}`);
     require(
@@ -1605,11 +1609,13 @@ say('');
   const legsRacing = (() => {
     setRiderLegsVisible(player.model, riderLegsShow('racing'));
     player.group.updateMatrixWorld(true);
+    // flat-ok: a box in the cart's own frame (toCart), so +Y is the tub's up
     return visibleBox(player.model.root, toCart).min.y;
   })();
   const legsWinning = (() => {
     setRiderLegsVisible(player.model, riderLegsShow('finishing'));
     player.group.updateMatrixWorld(true);
+    // flat-ok: a box in the cart's own frame (toCart), so +Y is the tub's up
     return visibleBox(player.model.root, toCart).min.y;
   })();
   say(`legs         ${legReport.join('   ')}`);

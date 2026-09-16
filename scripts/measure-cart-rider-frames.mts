@@ -17,6 +17,7 @@ import { RAIL_RACE_PLAN } from '../src/world/railRace/plan';
 import { terrainHeight } from '../src/world/terrain';
 import { upFor } from '../src/world/up';
 
+// flat-ok: world +Y is the datum the instrument measures leans AGAINST
 const WORLD_UP = new Vector3(0, 1, 0);
 
 function degreesBetween(a: Vector3, b: Vector3): number {
@@ -27,6 +28,7 @@ function degreesBetween(a: Vector3, b: Vector3): number {
 {
   const q = new Quaternion();
   rideFrame(new Vector3(0, 0, 0), 0, 0, q);
+  // flat-ok: local axis, leant by the quaternion under test
   const up = new Vector3(0, 1, 0).applyQuaternion(q);
   console.log(`control 1  at the origin, cart up vs world up: ${degreesBetween(up, WORLD_UP).toFixed(3)}°`);
 }
@@ -42,6 +44,7 @@ function degreesBetween(a: Vector3, b: Vector3): number {
   const q = new Quaternion();
   const ground = terrainHeight(157, 0);
   rideFrame(new Vector3(157, ground, 0), 0, 0, q);
+  // flat-ok: local axis, leant by the quaternion under test
   const up = new Vector3(0, 1, 0).applyQuaternion(q);
   console.log(
     `control 2  on the ground at r=157 (y ${ground.toFixed(2)}), cart up vs world up: ` +
@@ -67,6 +70,7 @@ for (let d = 0; d < route.length; d += 1) {
 
     // The cart, as `placeCarts` now builds it: leaned about the FLAT column.
     rideFrame(flat, 0, 0, cartSpin);
+    // flat-ok: local axis, leant by the cart's own quaternion
     cartUp.set(0, 1, 0).applyQuaternion(cartSpin);
 
     // The rider, as `Player.setRidePose` -> `faceOnGround` builds her: leaned

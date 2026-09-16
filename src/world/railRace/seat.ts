@@ -81,6 +81,7 @@ export function seatRaceRider(
   wobble: number,
   turnBody: number,
 ): void {
+  // flat-ok: local axis, leant by the cart's own quaternion
   const up = _up.set(0, 1, 0).applyQuaternion(cart.quaternion);
   const across = _across.set(1, 0, 0).applyQuaternion(cart.quaternion);
   const lift = SEAT_HEIGHT * rideScale;
