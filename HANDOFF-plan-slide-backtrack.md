@@ -27,3 +27,21 @@ Scratch repro worktree `.claude/worktrees/plan-slide-repro` (branch
    seeds that solve today are unchanged).
 2. Prune door offers whose stub fouls a tower/cruiser before any search.
 3. `solveSlide()` returns a refusal instead of throwing.
+
+## Done (pushed)
+- `solve.ts`: `DOOR_OFFER_CENTRES` [9.5, 6, 3, 0, -3, -6, -9.5]; `doorStubIsClear`
+  prunes offers before search; `SLIDE_ATTEMPTS` (door x length); `solveSlide()`
+  returns `SlideRefusal`; `planSlide()` throws its message (SLIDE_PLAN has 27 readers).
+- `parkGeneration.ts` walks `SLIDE_ATTEMPTS`.
+- Invariant clause 4 in `theGinormousSlideLeavesOverTheBattlements`: crossing within wall span.
+
+## Proof
+- Chute SHA identical base vs branch on all 10 pool seeds (base, vertical towers).
+- Repro (base+bend-exteriors, scale 1): 326 builds 74.56 m from door 6 in 9.3 s
+  (was: throw after 71 s); 451 builds 59.15 m in 35.7 s (was: throw after 147 s).
+- Mutation A (one door, no prune) on repro 326: REFUSED, no throw, same stub blocker.
+- Mutation B (no prune): same 74.56 m route, 45.8 s — prune is speed only.
+- seed-326 procgen: base 17F/76P/0S; branch identical fail names; repro+fix
+  17F/77P (94): "slide does not clip the castle towers" now passes.
+- New clause red at halfX-10: "crosses at world x -40.92, 8.61 m past the end...".
+- check:park-boot green on branch (canonical) and on repro LGP_SEED=326 (74.5629 m both cadences).
