@@ -30,7 +30,6 @@
  * Only outdoors: indoors up is `+Y` and the two measures are identical.
  */
 import './headless-canvas.mjs';
-import { Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { CollisionWorld } from '../src/world/Collision.ts';
 import { circleBoundary } from '../src/world/boundary.ts';
@@ -39,6 +38,7 @@ import {
   BUILDING_STEP_UP,
   GROUND_SPHERE_RADIUS,
   MAX_FRAME_DELTA,
+  SPRINT_PEAK_GRADE_BUDGET,
 } from '../src/core/constants.ts';
 import {
   BUILDING_CENTRE_X,
@@ -324,3 +324,25 @@ for (const far of SYNTH_RADII) {
 }
 if (firstFalls.length) console.log(`\n    first fall-through at each radius:\n      ${firstFalls.join('\n      ')}`);
 console.log();
+
+// --- verdicts -----------------------------------------------------------------
+const failures: string[] = [];
+for (const { site, tally } of report) {
+  // A site the marches never climbed onto measured nothing; say so loudly
+  // rather than counting its zeros as agreement.
+  if (tally.continuous === 0) failures.push(`VOID: no climb onto ${site.label} was measured at all`);
+}
+if (refusals > 0) failures.push(`${refusals} honest climb(s) (radial rise within BUILDING_STEP_UP) were refused by the sampler`);
+if (admissions > 0) failures.push(`${admissions} radially over-tall step(s) were admitted by the sampler`);
+for (const [far, up] of synthCeilings) {
+  if (up < SPRINT_PEAK_GRADE_BUDGET) {
+    failures.push(
+      `at r=${Math.max(far, DECK_LENGTH)} m a sprinting child falls through a ramp of local grade ` +
+        `${up === 0 ? SYNTH_GRADES[0] : SYNTH_GRADES[SYNTH_GRADES.indexOf(up) + 1]} — inside the planner's own ` +
+        `SPRINT_PEAK_GRADE_BUDGET (${SPRINT_PEAK_GRADE_BUDGET.toFixed(3)})`,
+    );
+  }
+}
+for (const f of failures) console.error(`FAIL: ${f}`);
+if (failures.length === 0) console.log('  walk reach OK\n');
+process.exit(failures.length > 0 ? 1 : 0);
