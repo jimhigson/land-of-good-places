@@ -128,6 +128,45 @@ obsolete damped-height arithmetic as its explanation.
 Fix: measure the local grade, with `diag-bridge-grade.mts`'s four controls
 carried across. #636 has the arithmetic and the two traps.
 
+## Gate state, measured on this tree (second agent, 16 Sep)
+
+| gate | base `feat/sphere-combined` @ `90e62c5b` | this branch | verdict |
+|---|---|---|---|
+| `test:procgen` | 128 failed / 501 passed / 629 | **128 / 501 / 629** | **0 new, 0 gone** |
+| `check:coplanar` | 54 new-or-worse | **53** | **0 new; one gone** (`archRing`/`shell`) |
+| `check` | fails `check:npc-perch`, *"climbable tree 0 has no foliage to measure"* | same step, same message | **pre-existing**, run on the base to confirm |
+| `build` | — | **exit 0** | |
+
+`package.json` is untouched by this branch, so the check chain is intact by
+construction. Three-dot diff is 12 files: the handoff, five diag scripts,
+`geo/ground.ts` + its barrel line, the two bridge modules, `invariants.ts`,
+`parkFacts.ts`. No deletion of anyone else's work.
+
+**Both red CI checks on #628 are the base being red, not this branch.** The
+base has no CI of its own (`gh pr checks 600` — "no checks reported"), which is
+why it went unnoticed. Posted as a comment on #628.
+
+**Open, and filed so they outlive this branch:**
+
+- **#635** — the `deck` marker's frame. **Fixed here** by `Bridge.soffitYAt`.
+- **#636** — the ramp-grade clause measures the planet. **Not fixable here and
+  not caused here**; it is red on the base too. This is the item the lane brief
+  called "the actual open problem", and the answer is that there is no ramp
+  geometry to find.
+
+**Loose ends from the previous handoff, both closed:**
+
+- `check:coplanar`'s 64 KiB truncation (`e72133f2` on
+  `eng/sphere-crossing-and-coping`): the fix is committed there — exit from the
+  write's own callback. That branch is **not** in this one's base, so the
+  53 seams here were measured with the truncating child; the honest backlog may
+  be larger once that lands, and per that commit's own note the baseline must
+  be **re-derived**, never topped up.
+- Seed 451's retirement note in `parkSeedPool.ts` is complete: it names
+  `SELF_CLEARANCE = 3`, the **3.95 m** pinch beside station 0, that **8.2
+  kills seed 24**, and the warp verdict (UNSOLVED, 35 candidates, 2220 s,
+  three oracle rejections). Nothing to add.
+
 ## The brief
 
 Jim, 14 September 2026: *"whatever 'down' is in the mesh of the bridge needs to
