@@ -114,6 +114,10 @@ import { cameraOffset } from '../src/core/cameraRig.ts';
 import { segmentsMinusGaps } from '../src/world/wallRuns.ts';
 import { BUFFET_TOP, SOFA_SEAT_TOP } from '../src/world/hotel/dressing.ts';
 import { spaceAt, SPACE_GARDEN } from '../src/world/spaces.ts';
+// The one owner of "the natural ground at this point" — `WalkSurfaces.sample`
+// bases its own answer on this same function, so asking it here is asking the
+// sampler what it fell through to, not a second copy of the arithmetic.
+import { walkableGroundAt } from '../src/world/building/surfaces.ts';
 import { placedEntry } from '../src/world/parkLayout.ts';
 import {
   TOWER_DOOR_HALF,
@@ -167,8 +171,76 @@ import { Parade } from '../src/entities/parade/Parade.ts';
  * means. Nothing is exempted, which matters — an exemption for "scripted"
  * characters would have hidden the bus dropping its passengers, which is
  * precisely a fall somebody would want to hear about.
+ *
+ * ## Which surface, though — the one under her feet is not always the one she
+ * ## fell through
+ *
+ * Asking `sample(x, z, at.y)` alone is **not enough, and that version of this
+ * clause could not see the very fall the check was written for.** `sample` is
+ * ceiling-gated: it only offers a ramp or a platform within `BUILDING_STEP_UP`
+ * (0.62 m) **above** `y`. So the instant a child drops more than a knee-height
+ * through a platform, *her own floor leaves the sampler's answer*, and what
+ * comes back is the ungated fallthrough underneath it. The surface she fell
+ * through is by construction the one `sample(x, z, at.y)` will not name.
+ *
+ * Measured on `d913616`, canonical seed 20260728, all seven hotel residents
+ * dropped 3 m through their y = 0 room floors: `sample` answered −220.00 (the
+ * terrain, 220 m below a room that does not stand on it), `below` came out
+ * **negative**, and all seven were counted into `carried` — "held up by
+ * something that is not the ground" — while the run printed `check:hotel OK`.
+ * Seven children under the floor, absorbed by the reassuring bucket.
+ *
+ * So this clause asks **two** questions of the sampler and picks between them:
+ *
+ * - `underfoot` — `sample(x, z, at.y)`, the gated answer: what she could step
+ *   up onto from where she is. This is what "holding her up" means.
+ * - `column` — `sample(x, z, ABOVE_EVERY_SURFACE)`, ungated: the **highest**
+ *   walkable surface anywhere in her column, including the floor she has
+ *   already fallen past.
+ *
+ * She is judged against `underfoot` when `underfoot` is genuinely at her feet,
+ * and against `column` when it is not. That single choice, and not a list of
+ * exceptions, is what makes every case come out right:
+ *
+ * | who | underfoot | judged against | verdict |
+ * |---|---|---|---|
+ * | a child on grass | at her feet | underfoot, ≈ 0 | fine |
+ * | a child on a bus, a deck, a bridge | 2 m below her | column, ≈ −2 | carried |
+ * | a child on the ground **under** a bridge deck | at her feet | underfoot, ≈ 0 | **fine** |
+ * | a child through a platform | the terrain far below | column = her floor | **falling** |
+ *
+ * Row three is the reason the gated question is asked first rather than
+ * discarded. Judging everybody against `column` alone is simpler and it is
+ * wrong: measured on the canonical seed, **67 of 40401 swept garden points
+ * (0.17%) have a column top more than 1 m above the ground a body standing
+ * there would be offered** — the railway bridge decks, worst 5.09 m at
+ * (−24, 36), gated −4.12 / column 0.97. Every child standing on the grass
+ * under one of those would be reported as falling. That is nineteen false
+ * positives all over again, and this check has already died of those once.
+ *
+ * ## `carried` cannot be a hiding place any more
+ *
+ * A body is `carried` only when she is above `column` — above *everything*
+ * `WalkSurfaces` knows about in her column. A child who has fallen through her
+ * floor is by definition **below** her column top, so she can no longer land
+ * there; the bucket is now exactly "something the sampler does not model is
+ * holding her up", which is the bus, and which is #633.
  */
 const FALLEN_BELOW_SURFACE = 1;
+
+/**
+ * How far a body may float above the surface under her before that surface has
+ * stopped being what holds her up. A rider sits ~2 m above the terrain.
+ */
+const CLEAR_OF_SURFACE = 0.25;
+
+/**
+ * A `y` no walk surface in this game can be above, so that
+ * `WalkSurfaces.sample(x, z, ABOVE_EVERY_SURFACE)` returns the **whole
+ * column** rather than only what a body could step up onto. The park's
+ * highest walkable anything is tens of metres; this is a million.
+ */
+const ABOVE_EVERY_SURFACE = 1e6;
 
 /** How long the crowd is run before anybody is asked where they are. */
 const SETTLE_SECONDS = 8;
@@ -193,22 +265,63 @@ for (let frame = 0; frame < 60 * SETTLE_SECONDS; frame += 1) {
 }
 
 let lowest = Infinity;
-let worstBelow = -Infinity;
+/** `null` until somebody has been measured — never `-Infinity` in a printed line. */
+let worstBelow: number | null = null;
 let carried = 0;
+const surfaces = world.building.surfaces;
 for (const character of npcs.all) {
   const at = character.position;
   lowest = Math.min(lowest, at.y);
-  const surface = world.building.surfaces.sample(at.x, at.z, at.y);
+  const underfoot = surfaces.sample(at.x, at.z, at.y);
+  const column = surfaces.sample(at.x, at.z, ABOVE_EVERY_SURFACE);
+  const terrain = walkableGroundAt(at.x, at.z);
+
+  // **A hotel room is a pocket space that does not stand on the terrain.**
+  // `WalkSurfaces.sample` bases its answer on `walkableGroundAt` for anything
+  // outside the castle, so a point in a room that is off every platform gets
+  // the terrain back — and out at the hotel's coordinates on the sphere that
+  // is −220 m. A body "standing" on it is precisely what family QA reported
+  // (all seven residents at the raw terrain height under their y = 0 floors).
+  // Derived, not listed: neither the garden nor a castle floor, whatever the
+  // room is called, so a room added tomorrow is covered the day it exists.
+  const inAPocketRoom =
+    spaceAt(at.x, at.z) !== SPACE_GARDEN && surfaces.floorAt(at.x, at.z) === null;
+  const terrainIsNotAFloorHere = inAPocketRoom;
+
+  if (terrainIsNotAFloorHere && column === terrain) {
+    // No walkable surface of any kind in her column — the sampler has nothing
+    // to offer but a terrain her room does not stand on. Reported rather than
+    // filed under `carried`, which is what let seven falling residents pass.
+    problems.push(
+      `${character.name} has no floor anywhere in her column after ${SETTLE_SECONDS} s — ` +
+        `she is at y=${at.y.toFixed(2)} in ${spaceAt(at.x, at.z)} at ` +
+        `(${at.x.toFixed(1)}, ${at.z.toFixed(1)}), and the only surface there is the ` +
+        `terrain at ${terrain.toFixed(2)} m, which her room does not stand on`,
+    );
+    continue;
+  }
+
+  // Is the gated answer actually holding her up? Only if it is at her feet —
+  // and, in a pocket room, only if it is not the terrain showing through.
+  const holdsHerUp =
+    !(terrainIsNotAFloorHere && underfoot === terrain) &&
+    underfoot - at.y >= -CLEAR_OF_SURFACE;
+  // When nothing is at her feet, the honest surface is the highest in her
+  // column: the floor she fell through, which the step-up gate hides.
+  const surface = holdsHerUp ? underfoot : column;
   const below = surface - at.y;
-  if (below > worstBelow) worstBelow = below;
-  // Standing clear of her own surface — on a bus, a deck, a bridge, a ramp.
-  if (below < -0.25) carried += 1;
+  if (worstBelow === null || below > worstBelow) worstBelow = below;
+  // Above everything `WalkSurfaces` knows — on a bus, held up by something it
+  // does not model. A body *below* her column top can never land here.
+  if (below < -CLEAR_OF_SURFACE) carried += 1;
   if (below > FALLEN_BELOW_SURFACE) {
     problems.push(
       `${character.name} is ${below.toFixed(2)} m BELOW the surface under her after ` +
         `${SETTLE_SECONDS} s — she is at y=${at.y.toFixed(2)} at ` +
         `(${at.x.toFixed(1)}, ${at.z.toFixed(1)}), ${Math.hypot(at.x, at.z).toFixed(1)} m out, ` +
-        `and the surface there is ${surface.toFixed(2)} m. She is falling through the world`,
+        `and the surface there is ${surface.toFixed(2)} m` +
+        `${holdsHerUp ? '' : ` (the highest in her column; the gated sample offers only ${underfoot.toFixed(2)} m, ` +
+          `which is not under her feet)`}. She is falling through the world`,
     );
   }
 }
@@ -216,8 +329,11 @@ for (const character of npcs.all) {
 // stopped detecting must say so rather than reporting a confident zero.
 process.stderr.write(
   `[hotel fall] ${npcs.all.length} character(s) measured against the surface beneath each; ` +
-    `worst was ${worstBelow.toFixed(3)} m below its own surface (fails over ${FALLEN_BELOW_SURFACE} m); ` +
-    `${carried} stood clear of theirs, held up by something that is not the ground.\n` +
+    `worst was ${worstBelow === null ? 'nothing measured' : `${worstBelow.toFixed(3)} m`} below its own surface ` +
+    `(fails over ${FALLEN_BELOW_SURFACE} m); ` +
+    `${carried} stood clear of theirs, held up by something that is not the ground — ` +
+    `which here means above the HIGHEST surface in their own column, so a body that has ` +
+    `fallen through a floor cannot be counted among them.\n` +
     `[hotel fall] NOT COVERED: leaving a vehicle. \`WalkSurfaces\` models floors, ramps, ` +
     `landings, platforms and terrain — it does not model the cat bus, so a rider who fell ` +
     `through the bus floor would land above the terrain and read as standing on grass. ` +
