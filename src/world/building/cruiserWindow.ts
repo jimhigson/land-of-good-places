@@ -243,6 +243,42 @@ export function toCastleLocal(
   return { lx: _local.x, ly: _local.y, lz: _local.z };
 }
 
+/**
+ * **The world `y` at which the column at `(x, z)` stands `localY` above the
+ * castle's ground-floor deck.**
+ *
+ * The frame-correct replacement for `castleY(localY)`, which returned one
+ * number for the whole building. That was right while the shell stood plumb —
+ * a level deck has one height — and wrong the moment it leant: the deck is a
+ * **plane with the local up as its normal**, so its world `y` falls away across
+ * the footprint. At this castle's 12.44° it drops about **0.22 m per metre**
+ * travelled along the lean, which over the ~20 m the Sky Cruiser's loop spends
+ * crossing the building is **4.3 m** — the difference between flying through
+ * the window and flying through the lintel.
+ *
+ * This is the same plane `layout.ts`'s `deckClearanceOverFootprint` already
+ * solves against, and deliberately so: that function was fixed when Jim found
+ * the castle *"floating in space above the earth"*, and this is the other half
+ * of the same correction, for everything that asks the deck a height rather
+ * than asks it for clearance.
+ *
+ * Keeps `(x, z)` fixed, so it answers *"how high, in this column"* rather than
+ * *"where does this point go"* — the same distinction `terrain.ts` draws
+ * between `yAtAltitude` and `liftFromGround`, and for the same reason: a route
+ * solved on the plan has already chosen its column.
+ */
+export function castleDeckYAt(localY: number, x: number, z: number): number {
+  CASTLE_FRAME.up(_deckUp);
+  CASTLE_FRAME.at.toWorld(_deckOrigin);
+  return (
+    _deckOrigin.y +
+    (localY - _deckUp.x * (x - _deckOrigin.x) - _deckUp.z * (z - _deckOrigin.z)) / _deckUp.y
+  );
+}
+
+const _deckUp = /* @__PURE__ */ new Vector3();
+const _deckOrigin = /* @__PURE__ */ new Vector3();
+
 /** The inverse of {@link toCastleLocal}: castle-local metres, in world space. */
 export function fromCastleLocal(lx: number, ly: number, lz: number, target: Vector3): Vector3 {
   return castleToWorld(_local.set(lx, ly, lz), target);
