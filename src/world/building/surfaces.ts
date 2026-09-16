@@ -212,7 +212,52 @@ export function stepCeilingAt(x: number, z: number, y: number): number {
   const cy = y + GROUND_SPHERE_RADIUS;
   if (cy <= 0 || spaceAt(x, z) !== SPACE_GARDEN) return y + BUILDING_STEP_UP;
   const reach = Math.hypot(x, cy, z) + BUILDING_STEP_UP;
-  return Math.sqrt(reach * reach - x * x - z * z) - GROUND_SPHERE_RADIUS;
+  const above = reach * reach - x * x - z * z;
+  // Past the horizon no column reaches that radius. Unreachable while `reach`
+  // exceeds her own radius, which is never less than the column's plan
+  // distance — guarded anyway, for symmetry with the inverse.
+  if (above <= 0) return y + BUILDING_STEP_UP;
+  return Math.sqrt(above) - GROUND_SPHERE_RADIUS;
+}
+
+/**
+ * **How far `b` stands above `a` along the local up** — the one owner of "is
+ * this rise within a step", for everything that decides steps without asking
+ * {@link WalkSurfaces.sample} itself (`NavGrid`'s edges, its line walk and its
+ * level separation).
+ *
+ * Outdoors, the difference of the two points' distances from the planet's
+ * centre — exactly what {@link stepCeilingAt} spends, once a walker's reference
+ * has been carried to the next column by {@link carryReference}, so a nav edge
+ * and a real foot can never disagree about the same pair of heights (#643).
+ * Indoors, or when either end is not in the garden, the plain `y` difference.
+ */
+export function riseBetween(
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+): number {
+  const acy = ay + GROUND_SPHERE_RADIUS;
+  const bcy = by + GROUND_SPHERE_RADIUS;
+  if (acy <= 0 || bcy <= 0) return by - ay;
+  if (spaceAt(ax, az) !== SPACE_GARDEN || spaceAt(bx, bz) !== SPACE_GARDEN) return by - ay;
+  return Math.hypot(bx, bcy, bz) - Math.hypot(ax, acy, az);
+}
+
+/** True when `b` is no more than `limit` above or below `a` along the local up. */
+export function withinStep(
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+  limit: number = BUILDING_STEP_UP,
+): boolean {
+  return Math.abs(riseBetween(ax, ay, az, bx, by, bz)) <= limit;
 }
 
 /**

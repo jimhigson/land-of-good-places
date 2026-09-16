@@ -38,6 +38,7 @@ import {
   BUILDING_STEP_UP,
   GROUND_SPHERE_RADIUS,
   MAX_FRAME_DELTA,
+  PLAYER_RADIUS,
   SPRINT_PEAK_GRADE_BUDGET,
 } from '../src/core/constants.ts';
 import {
@@ -46,6 +47,8 @@ import {
   ENTRANCE_RAMP,
 } from '../src/world/building/layout.ts';
 import { isOutdoors } from '../src/world/up.ts';
+import { NavGrid, NAV_CELL_SIZE as navCellSize } from '../src/world/NavGrid.ts';
+import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 
 const R = GROUND_SPHERE_RADIUS;
 const radiusOf = (x: number, y: number, z: number): number => Math.hypot(x, y + R, z);
@@ -58,6 +61,72 @@ const carryReferenceIfAny = (fx: number, fz: number, y: number, tx: number, tz: 
     ? (surfacesModule['carryReference'] as (a: number, b: number, c: number, d: number, e: number) => number)(fx, fz, y, tx, tz)
     : y;
 const surfaces = world.building.surfaces;
+
+// --- nav against physics ------------------------------------------------------
+// `NavGrid` decides steps without calling the sampler: its edges, its line walk
+// and its level separation compare two heights against `BUILDING_STEP_UP`. If
+// that comparison is world-`y` while the reach is radial, a tapped route walks
+// her up a step her feet refuse (or round one they would take). Every pair of
+// 8-neighbour nodes on the garden lattice is asked of the grid's own
+// `stepAdmits` and compared with the physics' rule — the radial rise between the
+// two, which is what the reach spends once the reference is carried.
+const navGrid = new NavGrid(world.collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, () => surfaces.connectors);
+navGrid.canStandAt(0, 0, 0, (x, z, y) => surfaces.sample(x, z, y));
+const grid = navGrid as unknown as {
+  cells: number;
+  originX: number;
+  originZ: number;
+  blocked: Uint8Array;
+  hopBand: Uint8Array;
+  levelStart: Int32Array;
+  nodeHeight: Float32Array;
+  stepAdmits?: (a: number, b: number, rise?: number) => boolean;
+};
+let navPairs = 0;
+let navDisagree = 0;
+let navUpRefused = 0;
+let worldDisagree = 0;
+let firstNav: string | null = null;
+for (let cz = 0; cz < grid.cells; cz += 1) {
+  for (let cx = 0; cx < grid.cells; cx += 1) {
+    const cell = cz * grid.cells + cx;
+    if (grid.blocked[cell] === 1 || grid.hopBand[cell] === 1) continue;
+    for (const [dx, dz] of [[1, 0], [0, 1], [1, 1], [1, -1]] as const) {
+      const nx = cx + dx;
+      const nz = cz + dz;
+      if (nx < 0 || nz < 0 || nx >= grid.cells || nz >= grid.cells) continue;
+      const other = nz * grid.cells + nx;
+      if (grid.blocked[other] === 1 || grid.hopBand[other] === 1) continue;
+      for (let a = grid.levelStart[cell]!; a < grid.levelStart[cell + 1]!; a += 1) {
+        for (let b = grid.levelStart[other]!; b < grid.levelStart[other + 1]!; b += 1) {
+          const ha = grid.nodeHeight[a]!;
+          const hb = grid.nodeHeight[b]!;
+          const cellSize = navCellSize;
+          const pax = grid.originX + cx * cellSize;
+          const paz = grid.originZ + cz * cellSize;
+          const pbx = grid.originX + nx * cellSize;
+          const pbz = grid.originZ + nz * cellSize;
+          const radial = radiusOf(pbx, hb, pbz) - radiusOf(pax, ha, paz);
+          const physics = Math.abs(radial) <= BUILDING_STEP_UP;
+          const worldRule = Math.abs(hb - ha) <= BUILDING_STEP_UP;
+          // The grid's own verdict; a tree without `stepAdmits` (before #643's
+          // review) decided with the world-`y` rule, so that is what it did.
+          const nav = grid.stepAdmits ? grid.stepAdmits.call(navGrid, a, b) : worldRule;
+          navPairs += 1;
+          if (worldRule !== physics) worldDisagree += 1;
+          if (nav !== physics) {
+            navDisagree += 1;
+            if (nav && !physics) navUpRefused += 1;
+            firstNav ??=
+              `(${pax.toFixed(1)}, ${paz.toFixed(1)}) y=${ha.toFixed(3)} -> (${pbx.toFixed(1)}, ` +
+              `${pbz.toFixed(1)}) y=${hb.toFixed(3)}: world dy ${(hb - ha).toFixed(3)}, radial ` +
+              `${radial.toFixed(3)} — nav ${nav ? 'admits' : 'refuses'}, physics ${physics ? 'admits' : 'refuses'}`;
+          }
+        }
+      }
+    }
+  }
+}
 
 const DELTAS = [MAX_FRAME_DELTA, 1 / 15, 1 / 20, 1 / 30, 1 / 60];
 const PHASES = Array.from({ length: 16 }, (_, i) => i / 16);
@@ -227,6 +296,12 @@ console.log(
   `\n  worst world demand ${worstWorld.toFixed(3)} (margin ${(BUILDING_STEP_UP - worstWorld).toFixed(3)} m), ` +
     `worst radial demand ${worstRadial.toFixed(3)} (margin ${(BUILDING_STEP_UP - worstRadial).toFixed(3)} m)`,
 );
+console.log(
+  `  nav lattice: ${navPairs} neighbour node pairs; ${navDisagree} where NavGrid's step verdict ` +
+    `disagrees with the physics (${navUpRefused} routed over a rise the feet refuse); control: a ` +
+    `world-y rule would disagree on ${worldDisagree}`,
+);
+if (firstNav) console.log(`      first: ${firstNav}`);
 console.log(`  honest climbs (radial rise <= BUILDING_STEP_UP) the sampler refused: ${refusals}`);
 console.log(`  radially over-tall steps the sampler admitted: ${admissions}\n`);
 
@@ -332,6 +407,9 @@ for (const { site, tally } of report) {
   // rather than counting its zeros as agreement.
   if (tally.continuous === 0) failures.push(`VOID: no climb onto ${site.label} was measured at all`);
 }
+if (navPairs === 0) failures.push('VOID: the nav lattice had no neighbour pairs to compare');
+if (worldDisagree === 0) failures.push('VOID: control — a world-y step rule agrees with the radial one on every pair, so this park cannot tell them apart');
+if (navDisagree > 0) failures.push(`${navDisagree} nav lattice pair(s) disagree with the physics about a step (${navUpRefused} route her up a rise her feet refuse)`);
 if (refusals > 0) failures.push(`${refusals} honest climb(s) (radial rise within BUILDING_STEP_UP) were refused by the sampler`);
 if (admissions > 0) failures.push(`${admissions} radially over-tall step(s) were admitted by the sampler`);
 for (const [far, up] of synthCeilings) {
