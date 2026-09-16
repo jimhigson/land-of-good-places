@@ -1,3 +1,4 @@
+import { Quaternion, Vector3 } from 'three';
 import { CAMERA_YAW_DEGREES } from '../core/constants';
 import { clamp01, damp, DEG, lerp, smoothstep, turnTowards } from '../core/mathUtils';
 import { isTouchDevice } from '../core/device';
@@ -9,7 +10,7 @@ import type { NpcSystem } from '../entities/npc';
 import type { Hud } from '../ui/Hud';
 import { pressZone, type InteractZone } from './interact';
 import type { ClimbableTreeSeed } from './Scenery';
-import { terrainHeight } from './terrain';
+import { placeOnSphere, terrainHeight } from './terrain';
 
 /**
  * Tree climbing (family design feedback: NPCs — and the player — climb trees,
@@ -308,6 +309,14 @@ export class TreeClimbing implements GameSystem {
       // and off that way" a few lines below. Pressing a direction up a tree
       // now means exactly what it means everywhere else: go there. The
       // scramble down happens first, and then she walks.
+      const wave = this.updatePlayerWave(dt);
+      // **The hoist goes into the lift, not onto `pose.y`.** It used to be
+      // `pose.y + WAVE_RISE * wave`, added after the pose was leant onto the
+      // sphere — a world `+Y` rise out of a canopy that is itself tilted by up
+      // to 40° at the park's edge, which slid her sideways out of the leaves
+      // instead of hauling her up through them. Passed as part of the lift it
+      // is a height above the canopy top, which is what it always meant, and
+      // `climbPose` leans it with everything else.
       const pose = climbPose(
         tree,
         this.playerStartX,
@@ -316,9 +325,8 @@ export class TreeClimbing implements GameSystem {
         'peek',
         0,
         this.playerPeekFacing,
-        CLIMB_PEEK_LIFT,
+        CLIMB_PEEK_LIFT + WAVE_RISE * wave,
       );
-      const wave = this.updatePlayerWave(dt);
       // She turns to the camera to wave and drifts back to her peek facing
       // afterwards. This is a *scripted pose*, not a control — the CONTROL RULE
       // bans the stick rotating her, and nothing here reads the stick.
@@ -331,12 +339,7 @@ export class TreeClimbing implements GameSystem {
       // reach 0.455 against a 1.36 head), so raising the arm alone leaves the
       // hand inside the leaves — the whole child has to come up, which is what
       // a child hauling herself up to be seen actually does. See WAVE_RISE.
-      this.player.setRidePose(
-        pose.x,
-        pose.y + WAVE_RISE * wave,
-        pose.z,
-        this.playerFacingNow,
-      );
+      this.player.setRidePose(pose.x, pose.y, pose.z, this.playerFacingNow);
       // The arm pose itself belongs to `Player`: its riding branch rewrites both
       // arms from scratch every frame (a ride's "holding on" pose), so an arm
       // posed from out here would survive exactly one tick.
@@ -603,7 +606,7 @@ const PEEK_TURN_SPEED = 2.6;
  */
 const CAMERA_FACING = CAMERA_YAW_DEGREES * DEG;
 
-interface ClimbPose {
+export interface ClimbPose {
   readonly x: number;
   readonly y: number;
   readonly z: number;
@@ -626,8 +629,15 @@ interface ClimbPose {
  * whatever "look around" means for a player or an NPC); `up`/`down` always
  * face the trunk, because a body sliding up or down a tree looking anywhere
  * else would look broken.
+ *
+ * **Exported so `scripts/check-climb-wave.mts` can pose its kid through this
+ * rather than beside it.** It had its own copy of the perch — trunk radius plus
+ * `CLIMB_EDGE_GAP`, at `canopyTopY - headHeight + CLIMB_PEEK_LIFT` — which was
+ * right while both were flat and stopped being right the moment this one leant
+ * onto the sphere. A check that re-implements a pose is a check that can pass a
+ * pose the game never renders.
  */
-function climbPose(
+export function climbPose(
   tree: ClimbableTreeSeed,
   startX: number,
   startZ: number,
@@ -656,7 +666,7 @@ function climbPose(
   const edgeZ = tree.z + Math.cos(approachAngle) * edgeDistance;
   const topY = tree.canopyTopY - headOffsetY + lift;
 
-  if (phase === 'peek') return { x: edgeX, y: topY, z: edgeZ, facing: peekFacing };
+  if (phase === 'peek') return onSphere(edgeX, topY, edgeZ, peekFacing);
 
   const t = clamp01(progress);
   const eased = smoothstep(0, 1, t);
@@ -666,12 +676,46 @@ function climbPose(
   const climbingUp = phase === 'up';
   const groundY = terrainHeight(startX, startZ);
 
-  return {
-    x: lerp(climbingUp ? startX : edgeX, climbingUp ? edgeX : startX, eased) + wiggle,
-    z: lerp(climbingUp ? startZ : edgeZ, climbingUp ? edgeZ : startZ, eased) + wiggle * 0.6,
-    y: lerp(climbingUp ? groundY : topY, climbingUp ? topY : groundY, eased),
-    facing: approachAngle + Math.PI,
-  };
+  return onSphere(
+    lerp(climbingUp ? startX : edgeX, climbingUp ? edgeX : startX, eased) + wiggle,
+    lerp(climbingUp ? groundY : topY, climbingUp ? topY : groundY, eased),
+    lerp(climbingUp ? startZ : edgeZ, climbingUp ? edgeZ : startZ, eased) + wiggle * 0.6,
+    approachAngle + Math.PI,
+  );
+}
+
+const _climbFlat = { x: 0, y: 0, z: 0 };
+const _climbPosition = /* @__PURE__ */ new Vector3();
+const _climbSpin = /* @__PURE__ */ new Quaternion();
+
+/**
+ * **Lean a climbing pose onto the sphere.**
+ *
+ * Everything above this line is authored the way the whole park is authored —
+ * an `(x, z)` and a height above the ground there — and that description is
+ * still exactly what is meant. What has changed is that "above" leans, and a
+ * tree's canopy leans with it: `Scenery` maps every canopy blob through
+ * `placeOnSphere`, so at the park's edge the leaves a child is climbing into
+ * sit metres further out than the column their trunk stands in.
+ *
+ * Left flat, she was placed in that column and the canopy was not, so she
+ * perched in clear air beside her own tree. Measured on the canonical seed, the
+ * gap between a `ClimbableTreeSeed`'s foot and its drawn canopy centre runs
+ * from **1.67 m at a radius of 80 m to 2.94 m at 176 m** — and
+ * `check:climb-wave`, which asks whether the leaves get in the way of her wave,
+ * was reporting **100.0% visible with no blocker at all on every one of 46
+ * trees**, because there was no longer any foliage anywhere near her.
+ *
+ * The same map `Scenery` used, so the two cannot disagree about where a tree
+ * is. The facing is untouched: a yaw is a turn about her own up, and
+ * `Player`/`Character` already stand her on the ground they are on.
+ */
+function onSphere(x: number, y: number, z: number, facing: number): ClimbPose {
+  _climbFlat.x = x;
+  _climbFlat.y = y;
+  _climbFlat.z = z;
+  placeOnSphere(_climbFlat, 0, _climbPosition, _climbSpin);
+  return { x: _climbPosition.x, y: _climbPosition.y, z: _climbPosition.z, facing };
 }
 
 function descendPrompt(): string {

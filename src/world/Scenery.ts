@@ -188,6 +188,27 @@ export type FoliagePart = TreePart;
 export interface FoliageOccluder {
   readonly x: number;
   readonly z: number;
+  /**
+   * **The flat-frame column this tree stands in** — the very `(x, z)` its trunk
+   * collider was registered at, and the one {@link ClimbableTreeSeed} records.
+   *
+   * {@link x}/{@link z} are *not* that, and have not been since the trees
+   * started leaning: they are the **drawn** centre of the widest canopy blob,
+   * which `placeOnSphere` slides outward along the local up. Measured on the
+   * canonical seed, the two are **1.67 m apart at a radius of 80 m and 2.94 m
+   * at 176 m** — so any code that used `x`/`z` as "where this tree is on the
+   * ground" silently stopped finding it.
+   *
+   * Two live bugs came from exactly that, both found by `check:climb-wave`
+   * going red on the sphere branch: {@link Scenery.clearTreesNear} matched a
+   * felled tree against {@link climbableTrees} by `x`/`z` and so **never**
+   * matched — a felled tree stayed climbable — and the fell search itself
+   * probed the canopy's slid centre against the trunk's own radius. Both ask
+   * about the foot, so both ask this.
+   */
+  readonly footX: number;
+  /** See {@link footX}. */
+  readonly footZ: number;
   /** Vertical centre of the tree's widest canopy blob — the occlusion test's reference point. */
   readonly centreY: number;
   /** Radius of that widest blob. */
@@ -391,8 +412,10 @@ export class Scenery {
    * loops walk from the end backwards so an earlier splice never invalidates
    * a later index still to be checked. A felled tree that happened to be
    * climbable also comes out of {@link climbableTreesMutable} (matched by
-   * position, since that list is a *subset* of the trees and does not share
-   * their indices).
+   * `footX`/`footZ`, since that list is a *subset* of the trees and does not
+   * share their indices — and **not** by `x`/`z`, which is the canopy's drawn
+   * centre and is metres away from the foot on the sphere; see
+   * {@link FoliageOccluder.footX}).
    *
    * Must run before anything reads these lists and keeps its own copy of an
    * index into them — `World.ts` builds the Sky Cruiser (and so calls this)
@@ -424,7 +447,9 @@ export class Scenery {
     for (let i = 0; i < this.occludersMutable.length; i += 1) {
       const tree = this.occludersMutable[i]!;
       const trunk = this.treeColliders[i]!;
-      if (Math.hypot(tree.x - x, tree.z - z) < radius + trunk.radius) return true;
+      // The **foot**, not the canopy's drawn centre: `trunk.radius` is the
+      // radius of the collider standing at `(footX, footZ)`. See `footX`.
+      if (Math.hypot(tree.footX - x, tree.footZ - z) < radius + trunk.radius) return true;
     }
     for (let i = 0; i < this.bushesMutable.length; i += 1) {
       const bush = this.bushesMutable[i]!;
@@ -438,11 +463,11 @@ export class Scenery {
     for (let i = this.occludersMutable.length - 1; i >= 0; i -= 1) {
       const tree = this.occludersMutable[i]!;
       const trunk = this.treeColliders[i]!;
-      if (Math.hypot(tree.x - x, tree.z - z) >= radius + trunk.radius) continue;
+      if (Math.hypot(tree.footX - x, tree.footZ - z) >= radius + trunk.radius) continue;
       this.setTreeHidden(i, true);
       this.collision.removeCircle(trunk.id);
       const climbableIndex = this.climbableTreesMutable.findIndex(
-        (seed) => seed.x === tree.x && seed.z === tree.z,
+        (seed) => seed.x === tree.footX && seed.z === tree.footZ,
       );
       if (climbableIndex !== -1) this.climbableTreesMutable.splice(climbableIndex, 1);
       this.occludersMutable.splice(i, 1);
@@ -744,6 +769,8 @@ function buildFoliage(collision: CollisionWorld): {
     occluders.push({
       x: occluderCentre.x,
       z: occluderCentre.z,
+      footX: x,
+      footZ: z,
       centreY: occluderCentre.y,
       radius: tree.wideRadius,
       parts,
