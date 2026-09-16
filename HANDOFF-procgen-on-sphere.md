@@ -101,6 +101,16 @@ engineer's record, PR body draft, merge recipe) and `HANDOFF-poi-totality.md`.
   to a `CylinderGeometry` with the last cap's triangles dropped). Proved on
   seed 24's sweep child: closed cap → seam present; cut → gone. The remaining
   seams are the base's (`fix/coplanar-sphere` is open for them).
+- **Coplanar faces died twice more (3d833240, d136ec4a) with only
+  `<anonymous_script>:1` in the log** — Node's print for `JSON.parse('')`: a
+  sweep child exited 0 with EMPTY stdout, because the child did
+  `process.stdout.write(json); process.exit(0)` on a pipe and exit beat the
+  flush of a 100–150 KB line. All nine pool-seed children ran clean locally,
+  one at a time, each last line valid JSON — timing, not geometry. Fixed in
+  `c9569d61`: the child exits in the write callback; the parent names the seed
+  and byte counts on a parse failure. Verified on the final head: Procgen
+  invariants still exactly the base's 51 names; Entrance road, Swept bus,
+  Every seed builds, Walk reach, reload, preview green.
 - **Every seed builds**: red against #596's hill-era baseline; re-taken with
   `--print-baseline` at `LGP_LANES=1` (3d833240) — the classes CI measured.
 - **check:flat-primitives' textual control** did not excuse a `flat-ok`
