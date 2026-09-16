@@ -60,3 +60,24 @@ spends part of the 1.670 headroom `check:deck-fallthrough` measured. Seed 326
 already shows a world-`y` stride grade of **1.650** at r = 176.8 against that
 1.670 — 1.2 % of margin, on a figure that is park-dependent. Nothing asserts on
 it. The clause prints it on every run so it cannot be silently inherited.
+
+## The inherited red, measured rather than assumed
+
+All 64 `check` steps run individually on this branch: **12 red**, and every one
+of them also red on the untouched base (`origin/eng/bridge-bend` @ `37e5d483`,
+detached, no edits):
+
+```
+check:crowd  check:speech-bubbles  check:park  check:fountain-hop
+check:hotel  check:rail-race  check:tie-frame  check:cruiser-clearance
+check:castle-window  check:keyring-view  check:climb-wave  check:park-boot
+```
+
+`check:park` and `check:park-boot` were **not** on #630's table; both are now
+measured on the base and posted there. `Coplanar faces` is red on stale
+BASELINE LOOSE entries (the re-derive work owned on
+`eng/sphere-crossing-and-coping`).
+
+CI on PR 641 agrees with local to the test: per-file failed counts
+1 / 26 / 24 / 25 / 24 / 24 = 124, identical to the local after-run, and all
+five bridge run-notes printed with controls green.
