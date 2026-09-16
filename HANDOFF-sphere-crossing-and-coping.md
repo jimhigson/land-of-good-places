@@ -1,158 +1,120 @@
-# HANDOFF — unbridged rail crossing, bridge ramp grade, coping seating
+# HANDOFF — unbridged rail crossing, seed 451, coplanar child truncation
 
 Branch `eng/sphere-crossing-and-coping`, off `origin/eng/sphere-ground-claims` (PR #620).
 PR target: **`eng/sphere-ground-claims`**, not `main`.
 
-**Model: Opus 5 (1M context). Chosen by the Overseer's dispatch (Engineer default).**
+**Model: Opus 5 (1M context).** Chosen by the Overseer's dispatch (Engineer
+default), and carried forward unchanged through two agent deaths — third agent
+on this lane. Per CLAUDE.md, a replacement runs the same model; do not re-apply
+a default here.
 
-## Scope
+**Worktree:** `.claude/worktrees/sphere-crossings` (adopted from the second
+agent, found clean and exactly at `origin` HEAD).
 
-Three of PR #620's five red checks. Everything else on that branch is somebody else's.
+## Scope, as it ended up
 
-1. Unbridged rail crossing — blocks `Coplanar faces`, `Entrance road`, `Swept bus` (one throw)
-2. Bridge ramp grade — `Procgen invariants`
-3. Coping blocks not seated — `Procgen invariants`
+Originally three of PR #620's five red checks. (2) bridge ramp grade and (3)
+coping seating turned out to be **fixed on `eng/bridge-bend` and absent from
+this base** — proved by `merge-base --is-ancestor` on `0c37d151` and
+`9c3fc274`, neither an ancestor of `eng/sphere-ground-claims`. They are not
+this branch's work and are not in this branch's diff; #628/#636 own them.
 
-## (1) Unbridged crossing — ROOT CAUSE FOUND, fix in progress
+What this branch actually carries is (1) plus two things found on the way.
 
-Reproduces on **seed 451 only** (1 of the 10 pool seeds). All other seeds clean.
-The CI throw: `railD 133.9 (37.9, -40.1) ... snaps to no proven bridge site`.
+## (1) The station lead — VERIFIED, with one figure corrected
 
-**It is a routing fault, not a siting fault.** Proved two independent ways:
-- segment/rail-polyline intersection: the station-0 `lead -> approach` leg
-  crosses the rail centreline exactly once, at railD 133.6;
-- point-in-polygon on the loop: `lead` is OUTSIDE the loop while `approach`
-  and `stand` are INSIDE.
+Root cause, unchanged and re-confirmed: the station spur's lead was
+`standX + parkX * 6`, a bare 6 m step resting on `crossingPlan.ts`'s stated
+premise that "the loop is simple (never self-crossing), so the sign is stable
+park-wide". On seed 451 the loop runs back within **3.95 m of itself** beside
+station 0, so the step landed across the far limb, 0.76 m from a rail centre
+line, and the spur drew `lead -> approach` over live rails at railD 133.6
+where no bridge site exists.
 
-The router is **`spur-station-0`** (run 16), built in `paths.ts` ~line 4086. Its
-`points` append `approach` and `stand` as RAW points after the street route —
-neither goes through the rail-aware `routeLeg`.
+Two fixes, both kept:
 
-The bad datum: `plan.ts`'s `leadX: standX + parkX * 6` — a bare **6 m** step
-"straight out into the park". Seed 451's loop runs back **within 3.95 m of
-itself** beside station 0, so the platform's park side is an isthmus narrower
-than 6 m and the step lands across the other limb (perp 0.76 from a rail
-centreline, wrong side of the railway from its own platform).
+- `planStationLead` (`plan.ts`) — keeps the 6 m reach and **turns the
+  bearing** into the platform's empty half until both drawn legs clear every
+  foreign limb by `FENCE_OFFSET + STATION_SPUR_WIDTH / 2`.
+- `clearStationDistance` (`plan.ts`) — its park-side approach probe knew only
+  about `clearOfPlots`, the hand-picked obstacle list CLAUDE.md's procgen rule
+  warns about, and was blind to the loop's own other limb. It now also demands
+  `distanceToForeignRail >= STATION_LEAD_RAIL_MARGIN`.
+- `STATION_SPUR_WIDTH` moved to `clearance.ts` so `paths.ts` (which paves) and
+  `plan.ts` (which sizes against half of it) cannot drift.
 
-`crossingPlan.ts` states the now-false premise in as many words: *"the loop is
-simple (never self-crossing), so the sign is stable park-wide."*
+### !! The "18 of 20 stations keep their lead" control was STALE
 
-### Measurements (whole pool, before)
+Re-measured on the branch as it stands, over eleven seeds (the ten in
+`PARK_SEED_POOL` plus `CANONICAL_PARK_SEED`), two stations each:
 
-| | stations affected |
-|---|---|
-| `stand->lead@6m` crosses the rail | seed 451 st0 only (1 crossing) |
-| furthest clear park-ward step | 451 st0 **5.00 m**; 24 st0 8.00 m; all others >=12 (sweep ceiling) |
-| min swing keeping the full 6 m, margin `FENCE_OFFSET + spur/2` = 3.30 | 18 of 20 stations **0 deg (unchanged)**; seed 24 st0 **35 deg**; seed 451 st0 **50 deg** |
+**22 of 22 stations keep exactly the lead they had — swing 0 deg, reach
+6.000 m. The swing never fires on any seed in the pool.**
 
-### Done so far
+The 18-of-20 figure was honest when written and describes an intermediate
+state: it was measured when `planStationLead` existed but
+`clearStationDistance` had not yet gained its rail probe. Once the station
+itself is sited off the pinch, its park-ward lead clears unaided. Proved both
+ways on the same builds:
 
-- `clearance.ts`: new `STATION_SPUR_WIDTH = 2.6` (one owner; `paths.ts` paves
-  with it, `plan.ts` sizes the lead against half of it).
-- `plan.ts`: `planStationLead()` — keeps the 6 m reach and **turns the bearing**
-  into the platform's empty half until both drawn legs clear every *foreign*
-  limb by `FENCE_OFFSET + STATION_SPUR_WIDTH/2`. Park-ward is tried first, so a
-  station with room keeps exactly the lead it always had.
-- Verified: seed 451 st0 lead is now side +1, matching its approach and stand
-  (perp 3.60); unchanged stations still read the old perp 8.15 exactly.
+| state | seed 24 st0 | seed 451 st0 | all other stations |
+|---|---|---|---|
+| branch as it stands | 0 deg | 0 deg | 0 deg |
+| `clearStationDistance` rail probe suppressed | **35 deg** | **50 deg** | 0 deg |
+| `STATION_LEAD_RAIL_MARGIN` forced to 999 (instrument control) | 80 deg | 75 deg | 0 deg |
 
-### !! OPEN — the fix moved the defect, did not remove it
+Row 2 reproduces the old note's numbers exactly, which is what identifies it
+as a measurement of the earlier state rather than a disagreement. Row 3 is the
+control on the instrument, run before trusting row 1: it proves the swing
+*can* be reported non-zero, so the zeros are a measurement and not a mechanism
+incapable of moving.
 
-Seed 451 went from **1** unbridged crossing to **12**. With the lead now on the
-platform's side, `streetRoute` (which IS rail-aware and refuses a side change)
-returns null, and `fallbackSpurRoute` weaves run 16 across the pinch 12 times
-around (46-51, -26..-34). `fallbackSpurRoute` does call `routeLeg`, so it is
-rail-aware in principle — but at a 3.95 m pinch "which side am I on" is decided
-by NEAREST LIMB, so the side sign flips without anything crossing, and every
-side-holding screen downstream is confused.
+**Consequence for review:** `planStationLead`'s swing is **armed and
+unexercised**. It asserts nothing about any seed shipping today; the station
+siting fix is what carries the pool. That is now written into `plan.ts`'s own
+doc comments rather than left for the next agent to discover — the old
+comments claimed the 18-of-20 split and were corrected in place.
 
-**Next step being tested: `SELF_CLEARANCE` in `train/route.ts`.** It is still a
-bare `3`, and CLAUDE.md already names it as this family of bug ("lets the rail
-loop run back within 3 m of itself while a path needs 8.4 m to pass — it walled
-off part of the park on seed 451"). Deriving it from the game
-(`FENCE_OFFSET*2 + FENCE_HALF_THICKNESS*2 + STATION_SPUR_WIDTH + PLAYER_RADIUS*2`
-~ 8.2 m) should remove the pinch, and with no pinch the lead's plain 6 m step
-may well clear on its own. **Blast radius is the whole rail loop on every seed**
-— must re-measure all 10 seeds build + close.
+Instrument used: `scripts/zz-lead-control.mts`, scratch, **deleted** before the
+PR. It read `TRAIN_PLAN`, recomputed the old bare formula from
+`route.pointAt(distance)`, and printed moved-distance / swing / reach per
+station. Re-create it from this table if you need it again.
 
-If raising it makes seeds fail to close, fall back to reporting the pinch as an
-upstream defect rather than forcing it.
+## (2) Seed 451 retired — reason recorded where it will be read
 
-## (2) and (3) — NOT MINE TO FIX: the fix exists on another branch
+`parkSeedPool.ts` carries the full account: `SELF_CLEARANCE = 3` in
+`train/route.ts` is the upstream cause; the honest game-derived value ~8.2
+(`FENCE_OFFSET*2 + FENCE_HALF_THICKNESS*2 + STATION_SPUR_WIDTH +
+PLAYER_RADIUS*2`) fixes 451 and leaves **seed 24 with no bridge site anywhere**;
+and `scripts/warp-search.mts 451` came back **UNSOLVED after 35 candidates /
+2220 s with three oracle rejections**. Retirement under the standing ruling
+(a seed the *old* generator cannot build is retired while the round-robin
+rewrite is in flight), not an assertion weakened.
 
-**`eng/bridge-bend` is not in PR #620's base.** Checked with
-`git merge-base --is-ancestor`:
+## (3) `check:coplanar` lost every finding past 64 KiB
 
-- `0c37d151` "The hump bends with the planet: state its shape in altitudes,
-  not in world y" — **NOT an ancestor of `eng/sphere-ground-claims`**
-- `9c3fc274` "The arch is rigid in the tangent frame, not flat in world y" —
-  **NOT an ancestor either**
-- `git branch -r --contains 0c37d151` lists exactly one branch:
-  `origin/eng/bridge-bend`
+`e72133f2` moves the child's `process.exit(0)` into the write's own callback.
+`process.stdout` to a pipe is async and `process.exit` does not flush it.
 
-So PR #620 is failing (2) and (3) against code that predates the bend fix.
-`surfaceProfile` on this base is still the world-y form the brief names as the
-root cause:
+**Numbers:** the previously reported backlog (~53–54 new-or-worse seams) was
+measured **with the truncating child**, so it is a floor, not the backlog. Per
+that commit's own note the baseline must be **re-derived, never topped up**.
 
-```ts
-return ground + (crownY - ground) * (1 - profileDrop(q));   // this base
-```
+## Gate status
 
-and on `eng/bridge-bend` it is the altitude form:
+See the PR description — it states every red plainly, including the base
+branch's own known reds (#630 owns those on `eng/sphere-six-reds`).
 
-```ts
-return worldYAtAltitude(x, z, (crownAlt - localRise(x, z)) * (1 - profileDrop(q)));
-```
-
-`git diff HEAD origin/eng/bridge-bend -- src/world/train/` is **+264/-… in
-`bridges.ts` and +52 in `bridgeStonework.ts`** (the module that lays the
-coping). The brief said to build on that lane's result rather than redo it —
-the result simply is not on this branch.
-
-**Recommendation: merge `eng/bridge-bend` into the sphere stack rather than
-reimplementing.** Reimplementing would duplicate ~300 lines and conflict
-head-on when the lane lands. Both (2) and (3) should be re-measured after that
-merge; only what still fails then is real new work.
-
-## Where (1) stands
-
-Committed and pushed:
-- `planStationLead` — lead backtracks onto its own side of the railway
-- rail-aware station approach siting in `clearStationDistance`
-
-`tsc --noEmit` exit **0**.
-
-Pool sweep after both: **9 of 10 seeds have zero unbridged crossings.**
-Seed 451 still fails — 12 flips, and they are **real**, not nearest-limb
-phantoms: a segment/rail-polyline intersection counts **13 genuine crossings
-of the rail centreline** by run 16, and the parity control holds (run starts
-outside the loop, ends inside, 13 is odd).
-
-Root cause of the residue is upstream of anything I own: **`SELF_CLEARANCE = 3`
-in `train/route.ts`** lets the loop close to 3.95 m of itself, and CLAUDE.md
-already names this constant for this exact seed. Measured remedies:
-
-- **Raise it to 8.2** (derived: `FENCE_OFFSET*2 + FENCE_HALF_THICKNESS*2 +
-  STATION_SPUR_WIDTH + PLAYER_RADIUS*2`): fixes 451, but **seed 24 then proves
-  NO bridge site anywhere** and the park is invalid. Rejected, reverted.
-- **A warp vector** (`parkWarp.ts`, the documented cure). Hand-probed
-  `layoutRestart: 2` and `layoutRestart: 8` both build seed 451 with zero
-  unbridged crossings. **Do not bake a hand-probed vector** — the module says
-  vectors come from `scripts/warp-search.mts` and must clear both gates
-  (`check:park` + the invariant oracle); the file records three vectors that
-  passed one gate and failed the other. `scripts/warp-search.mts 451` was
-  running when this was written; its result is the thing to bake.
-- **Replace 451 in the pool** — explicitly sanctioned by CLAUDE.md ("fix the
-  generator or replace the seed in the pool — and write down why").
-
-### Measurement traps hit, for whoever follows
+## Measurement traps hit, for whoever follows
 
 - `mv scripts/diag-*.mts` swept up **9 pre-existing tracked** diag scripts.
-  Caught by `git status` and restored with `git checkout -- scripts/`. Remove
-  scratch by exact filename.
-- A warp sweep wrapped in `timeout 240` reported **0 unbridged on every
-  vector**; the builds were being killed and `grep -c` read the empty output as
-  a pass. Re-run without the timeout, two of five vectors still failed. Always
-  assert the build actually completed, not just that the bad string is absent.
-- `nohup ... &` inside a backgrounded tool call dies with its wrapper shell —
-  the first warp search logged one line and stopped.
+  Remove scratch by exact filename.
+- A warp sweep wrapped in `timeout 240` reported 0 unbridged on every vector;
+  the builds were being killed and `grep -c` read the empty output as a pass.
+  Assert the build completed, not just that the bad string is absent.
+- `nohup ... &` inside a backgrounded tool call dies with its wrapper shell.
+- Scripts here need `--import ./scripts/ts-extension-resolver-register.mjs`;
+  plain `node scripts/foo.mts` dies on `src`'s extensionless imports.
+- **`git stash` is banned in this repo** (shared across worktrees). To set a
+  measurement mutation aside, `cp` the file and `cp` it back, then confirm
+  `git status` is clean before believing the next reading.

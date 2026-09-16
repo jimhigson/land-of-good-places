@@ -319,9 +319,29 @@ const STATION_SEPARATION = PLATFORM_LENGTH + STATION_GAP * 2;
  * bridge site exists, and `crossings.ts` failed the build exactly as it
  * should have ("find the router that drew this leg" — this one).
  *
- * Measured over the whole pool: 18 of 20 stations are clear on the plain
- * park-ward bearing and keep the lead they always had; seed 24's station 0
- * and seed 451's station 0 are the two that turn.
+ * **Measured on this branch as it stands: every station keeps the plain
+ * park-ward lead — the swing never fires on any seed in the pool.** 22 of 22
+ * (eleven seeds — the ten in `PARK_SEED_POOL` plus `CANONICAL_PARK_SEED` —
+ * two stations each) come out at swing 0 deg and reach 6.000 m, identical to
+ * the bare formula this replaced.
+ *
+ * That is **not** the same claim an earlier note here made ("18 of 20 … seed
+ * 24's station 0 and seed 451's station 0 are the two that turn"), and the
+ * difference is worth keeping because it is the whole reason this file has
+ * two fixes in it rather than one. Those two stations turned when the lead
+ * was the *only* thing that had been taught about the railway. Once
+ * {@link clearStationDistance} also began probing a station's approach
+ * against foreign rail, the affected stations were **sited off the pinch in
+ * the first place**, and their park-ward leads cleared unaided. Measured both
+ * ways, on the same builds: with that probe suppressed, seed 24 station 0
+ * turns **35 deg** and seed 451 station 0 **50 deg**, both at the full 6 m
+ * reach; with it in place, both turn **0 deg**.
+ *
+ * So this swing is **armed and unexercised** — a backstop, not the mechanism
+ * carrying the pool today. It is proved capable of firing rather than assumed
+ * to be: forcing {@link STATION_LEAD_RAIL_MARGIN} to an unsatisfiable value
+ * makes seed 24 station 0 swing 80 deg and seed 451 station 0 75 deg, so the
+ * zeros above are a real measurement and not a mechanism that cannot move.
  */
 const STATION_LEAD_REACH = 6;
 
@@ -410,8 +430,17 @@ function distanceToForeignRail(
  * (`stand -> lead` and `lead -> approach`) clear every foreign limb of the
  * loop by {@link STATION_LEAD_RAIL_MARGIN}. Turning rather than shortening
  * is deliberate: shortening trades the defect for a lead too close to the
- * platform to do its job, and on both affected stations a turn keeps the
- * full reach (seed 24 station 0 at 35 deg, seed 451 station 0 at 50 deg).
+ * platform to do its job, and on the two stations that ever needed it a turn
+ * kept the full 6 m reach (seed 24 station 0 at 35 deg, seed 451 station 0
+ * at 50 deg — measured with {@link clearStationDistance}'s rail probe
+ * suppressed, which is the only state in which either turns; see
+ * {@link STATION_LEAD_REACH} for why, and for the 22-of-22 zero this
+ * measures on the branch as it stands).
+ *
+ * **It asserts nothing about any seed in the pool today**, because the first
+ * bearing tried — park-ward — clears on all 22 of them. It is here as the
+ * backtrack the standing procgen rule requires, so that a pool change or a
+ * layout change cannot reinstate the bare 6 m step silently.
  *
  * If no bearing clears — no seed in the pool does this — it returns the
  * roomiest one rather than a known-bad ideal, and `crossings.ts` stays the
