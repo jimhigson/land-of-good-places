@@ -6,6 +6,49 @@
   A replacement runs the same model.
 - Reports to: the Overseer session `landofgoodplaces-fc`.
 
+## !! CORRECTION, second agent, 16 Sep 2026 — read this before the rest
+
+**The "road passes below its own tunnel soffit" diagnosis below and on PR #628
+is DISPROVED.** The built geometry is sound. Filed as issue **#635** with the
+full table.
+
+Measured with `scripts/diag-deck-soffit.mts` (committed), at the exact plan
+points `theDrawnPathRidesOverEveryBridge` complains about, canonical seed:
+
+| bridge | lean | road vs the **marker** | road vs the **drawn stone** | overhead |
+|---|---|---|---|---|
+| 590.0 (20.4, -20.3) | 0.132 | passes | - | - |
+| 92.0 (51.4, 95.8) | 0.569 | -0.621 | **+0.226** | own `wallTop`, 0.99 m up |
+| 748.0 (-14.0, 121.7) | 0.670 | -0.783 | **+0.300** | open sky |
+| 288.0 (139.0, -50.8) | 0.909 | -1.131 | **+0.308** | own `wallTop`, 0.99 m up |
+| 326.0 (138.9, -82.1) | 1.078 | -1.865 | **+0.327** | open sky |
+
+The road stands clear of the drawn stone at every one, and what is over it is
+sky or its own parapet. **Nothing is in a tunnel.** What the clause reads is the
+invisible `deck` marker - a `BoxGeometry` yawed about world `+Y` and nothing
+else, so a plate flat in world `y` while the road beside it leans at
+`tan(r/R)`. Over `TRACK_CLEARANCE` that is 1.4 m of pure frame disagreement.
+
+**So do NOT "make the deck rigid over `|along| <= ARCH_CLEAR_HALF`".** It would
+not clear the clause: a `tangentY` road leans too, and the marker still would
+not. The fix is in the two invariants that read a world-`y` AABB off a leaning
+object - see #635 for the scoped three-part fix.
+
+### Second correction: the grade clause is red here too, and always was
+
+PR #628's body says the grade clause is "green on `feat/sphere-combined` and
+green here". **Measured on this tree today it is red on 4 of 5 seeds**
+(canonical, 11, 24, 326) - `every railway crossing has a bridge you can walk
+to, onto and across`, grades **0.720 / 1.475 / 1.203 / 1.144** against 0.512.
+
+The reason is that **the invariant measures the world-`y` grade and
+`diag-bridge-grade.mts` measures the local one.** 1.475 is the *same number*
+this handoff already prints as "the world-y grade stays large after the fix
+(1.475 at the outermost canonical crossing)" and calls correct. One of the two
+is wrong about what a child's legs feel, and the one that gates the merge is
+the invariant. **That question is open and is the next thing to settle** - it
+is not a scale-1 / #620 question, it is red on this branch's own park.
+
 ## The brief
 
 Jim, 14 September 2026: *"whatever 'down' is in the mesh of the bridge needs to
