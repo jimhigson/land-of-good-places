@@ -893,8 +893,10 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   // the AABB of a tilted plate is far taller than the plate — measured
   // 0.050 m unleaned, exactly `BRIDGE_DECK_SLAB` — so leaning it took the
   // train-clearance clause from green to 3.19-3.60 m against 3.90 m on all
-  // five seeds. `scripts/diag-deck-soffit.mts` carries a control that voids
-  // its whole run if this marker's AABB is ever not one slab thick.
+  // five seeds. (`scripts/diag-deck-soffit.mts` once carried a control on
+  // this marker's thickness; it was retired with its finding recorded in
+  // `HANDOFF-bridge-bend.md` and #635, because nothing reads a height off the
+  // marker any more.)
   //
   // **And it carries no faces at all** — `setIndex([])` below. Hiding it was
   // not enough: `check:coplanar` buckets triangles by their plane and asks
@@ -926,6 +928,7 @@ function buildOneBridge(crossing: LevelCrossing, footprint: BridgeFootprint): On
   deckMesh.name = 'deck';
   deckMesh.visible = false;
   const yaw = Math.atan2(at0.dirX, at0.dirZ);
+  // flat-ok: the marker deliberately stays a flat plate (yaw only) so its AABB is one slab thick — see above; nothing reads a height off it
   const rotation = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw);
   // Sat at the arch's **binding** height — its crown less `ARCH_CROWN_DIP`,
   // the lowest the soffit gets anywhere over the train's swept width — not at

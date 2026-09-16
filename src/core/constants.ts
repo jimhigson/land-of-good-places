@@ -1231,5 +1231,98 @@ export const FALL_THRESHOLD = 0.5;
  * Change this number when you mean to change the park, and measure the bridges
  * when you do — that is issue #382's job, not something to arrive at by
  * arithmetic drift.
+ *
+ * ### This is a planner target, not a check's ceiling (#636)
+ *
+ * The note above used to warn that "this is the second place the old model is
+ * written down" — `test/procgen/invariants.ts` recomputed the obsolete damp
+ * arithmetic for itself and refused any ramp above 0.512. It no longer does:
+ * that ceiling is now {@link SPRINT_LOCAL_GRADE_CEILING}, derived from what the
+ * post-#358 sampler actually permits, and it lives beside this one so the two
+ * can be read together. **The check being looser than the planner is correct**
+ * — the park is *built* to 0.512 and *refused* above 0.670, and the gap is the
+ * margin a generator is allowed to be conservative in.
  */
 export const SPRINT_PEAK_GRADE_BUDGET = 0.5121075476046892;
+
+/**
+ * **The steepest slope a check may let stand** — the ceiling
+ * `test/procgen/invariants.ts` refuses a built ramp above, as opposed to
+ * {@link SPRINT_PEAK_GRADE_BUDGET}, which is the *target the planner aims at*.
+ *
+ * Two different jobs, and conflating them is what made this constant necessary
+ * (#636). A planner target may be as conservative as you like — building
+ * gentler than you have to costs nothing. A *check* may not: one that refuses
+ * geometry the game in fact walks perfectly well is a check that will eventually
+ * be argued down rather than believed, and one that recites an obsolete model in
+ * its failure message teaches the next reader something untrue.
+ *
+ * ### The derivation, from the game and nothing else
+ *
+ * One clamped frame ({@link MAX_FRAME_DELTA}, 1/12 s — the ceiling the engine
+ * itself clamps to, i.e. a slow phone) carries a sprinting child
+ * {@link PLAYER_LONGEST_STEP} = 0.925 m of travel. Since #358 `Player` samples
+ * the walking surface once per **collision sub-step**, asked from the surface
+ * she is standing on — not once per frame from her damped, lagging draw height
+ * — and `WalkSurfaces.sample` will not return a surface more than
+ * {@link BUILDING_STEP_UP} above what it is asked from.
+ *
+ * So the climb one frame may make and still be sampled is `BUILDING_STEP_UP`,
+ * over a horizontal run of at most `PLAYER_LONGEST_STEP`:
+ *
+ * ```
+ * BUILDING_STEP_UP / PLAYER_LONGEST_STEP = 0.62 / 0.925 = 0.670
+ * ```
+ *
+ * **That is not only derived, it is measured.** `measure-deck-fallthrough.mts`
+ * (`pnpm run check:deck-fallthrough`) drives the real `WalkSurfaces.sample`
+ * through 27 gradients x 5 frame rates x 64 start phases x walk/sprint x
+ * up/down, and its `true-surface reference only` row — the configuration with
+ * no sub-stepping help at all — reads **0.670**. The shipping configuration
+ * reads 1.670, but that figure is a function of the park's thinnest collider
+ * forcing a short sub-step, so it would fall if that collider ever got fatter.
+ * **An invariant must lean on the park-independent floor, not on the park.**
+ *
+ * ### The old arithmetic this replaces, and why it had to go
+ *
+ * The invariant used to compute its own ceiling as
+ * `BUILDING_STEP_UP / (1 + dampLag) / PLAYER_LONGEST_STEP` = 0.512 — the exact
+ * expression {@link SPRINT_PEAK_GRADE_BUDGET}'s own note calls **obsolete**,
+ * because #358 made both halves of its model untrue. It was the second place
+ * that model was written down, and that note already asked for both to move
+ * together. This is that move, for the check half only: nothing plans geometry
+ * from this constant, so raising it re-plans **no** bridge on **any** seed.
+ *
+ * It is live arithmetic rather than a frozen literal for exactly that reason —
+ * the freeze on `SPRINT_PEAK_GRADE_BUDGET` exists to stop a feel tweak silently
+ * re-planning a park, and there is no park downstream of this one to re-plan.
+ * If `BUILDING_STEP_UP` or the sprint speed ever changes, what a child can run
+ * up changes with it and this should follow.
+ *
+ * ### It is a grade **in her own frame**, and that word is load-bearing
+ *
+ * The world is a sphere ({@link GROUND_SPHERE_RADIUS}), so a world-`y` rise
+ * over a plan-distance run is *the grade plus the planet*: flat grass at r = 140
+ * reads 1.140 that way, and the dome alone crosses 0.512 at about r = 100. A
+ * grade compared against this number must therefore be measured as the rise
+ * along the **local up at her foot** over the part of the step lying in that
+ * point's own horizontal plane. `invariants.ts` carries controls that fail the
+ * run if its measure ever stops doing that.
+ *
+ * **One thing this does NOT cover, and the invariant says so on every run:**
+ * `WalkSurfaces.sample`'s own ceiling is still literally world-`y`
+ * (`const ceiling = y + BUILDING_STEP_UP`), so on a sphere it has to cover the
+ * planet's own fall over a sub-step *as well as* the ramp's local rise. Today's
+ * measured headroom (1.670 on this park) covers flat grass at 1.140 and nothing
+ * falls through — but that margin is partly spent by the planet now, and making
+ * the sampler radial is the physics lane's work, not this constant's.
+ *
+ * **Issue #643 — read this before believing "the grade is guarded".** The
+ * 0.670 above is derived from the sampler's reach, and that reach is measured
+ * in **world `y`**. So the figure that actually decides whether a child falls
+ * through a ramp is the world-`y` grade, and after #636 **no check asserts on
+ * it**. At park scale 1 on the canonical seed the steepest world-`y` stride on a
+ * bridge is 0.641 — 0.029 under this ceiling. This constant guards the ramp's
+ * shape; it does not guard the physics.
+ */
+export const SPRINT_LOCAL_GRADE_CEILING = BUILDING_STEP_UP / PLAYER_LONGEST_STEP;
