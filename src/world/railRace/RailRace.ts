@@ -27,7 +27,7 @@ import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
-import { rideFrame } from '../rail/sweptRail';
+import { placeRaceCart, seatRaceRider } from './seat';
 import { createSparks, type Sparks } from './sparks';
 import type { RaceLevel } from './hazards';
 import {
@@ -147,10 +147,6 @@ const PRESSING_POSE_THRESHOLD = 0.15;
 
 /** Nobody is racing, so nobody turns — see `faceTurn`. */
 const NO_FACE_TURN: FaceTurn = { body: 0, head: 0 };
-
-/** Scratch for the cart's own up and across, used to seat the rider in it. */
-const SEAT_LIFT = /* @__PURE__ */ new Vector3();
-const SEAT_ACROSS = /* @__PURE__ */ new Vector3();
 
 /**
  * **The one owner of "this rider is having a bad time."**
@@ -387,10 +383,6 @@ export class RailRace implements GameSystem {
   private readonly sparks: Sparks;
   private readonly carts: Cart[] = [];
   private readonly rng = new Rng(0x7a11ed);
-  private readonly point = new Vector3();
-  private readonly tangent = new Vector3();
-  /** The unleaned twin of {@link point}: the column a cart's lean is taken about. */
-  private readonly flatPoint = new Vector3();
 
   private player: Player | null = null;
   /** Cached off `FrameContext` every `update()`, so `requestBoard`/`arrive` — which
@@ -963,7 +955,8 @@ export class RailRace implements GameSystem {
    * which is the wrong place: no pose value in this game is an order of
    * magnitude out. **Do not widen the cart.**
    *
-   * `rideFrame` takes its lean about `flatPointAt`'s column rather than the
+   * `placeRaceCart` (`seat.ts`, which the check asks too) leans it with
+   * `rideFrame`, which takes its lean about `flatPointAt`'s column rather than the
    * leaned point's, so the cart leans by the same amount as the rails under it
    * rather than by very nearly that amount. It writes the quaternion from
    * scratch, so this is safe to call every frame — an Euler assignment followed
@@ -974,16 +967,7 @@ export class RailRace implements GameSystem {
     const route = this.activeRing.route;
     for (const cart of this.carts) {
       const at = route.wrap(route.startDistance + cart.rider.travelled);
-      route.pointAt(cart.rider.lane, at, this.point);
-      route.tangentAt(cart.rider.lane, at, this.tangent);
-      route.flatPointAt(cart.rider.lane, at, this.flatPoint);
-      cart.group.position.copy(this.point);
-      const yaw = Math.atan2(this.tangent.x, this.tangent.z);
-      // Pitch with the hill it is on — the whole point of the undulation.
-      const pitch = -Math.asin(Math.max(-0.6, Math.min(0.6, this.tangent.y)));
-      rideFrame(this.flatPoint, yaw, pitch, cart.group.quaternion);
-      cart.yaw = yaw;
-      cart.pitch = pitch;
+      placeRaceCart(route, cart.rider.lane, at, cart.group, cart);
     }
   }
 
@@ -1153,33 +1137,9 @@ export class RailRace implements GameSystem {
     const cartYaw = this.me.yaw;
     const turn = this.faceTurn(cartYaw, cart.position, this.me.sad);
     this.player.model.head.rotation.y = turn.head;
-    // **Seat her with the cart's own axes, not the world's.**
-    //
-    // The lift used to be `cart.position.y + SEAT_HEIGHT * rideScale` and the
-    // bonk sway `cart.position.x + wobble` — straight up world `+Y` and
-    // straight along world `+X`. On a flat park those are the tub's own up and
-    // across; on a ring that leans 15-30 degrees they are neither, so she was
-    // lifted out of the seat towards the park's centre and shaken sideways
-    // along an axis the cart does not have. Combined with a tub that did not
-    // lean at all, that is the 0.330 m her arm reached through the side.
-    //
-    // `SEAT_LIFT`/`SEAT_ACROSS` are the cart's local +Y and +X, turned by
-    // whatever `placeCarts` just gave it, so both stay true wherever on the
-    // ring she is.
-    const up = SEAT_LIFT.set(0, 1, 0).applyQuaternion(cart.quaternion);
-    const across = SEAT_ACROSS.set(1, 0, 0).applyQuaternion(cart.quaternion);
-    const lift = SEAT_HEIGHT * rideScale;
-    this.player.setRidePose(
-      cart.position.x + up.x * lift + across.x * wobble,
-      cart.position.y + up.y * lift + across.y * wobble,
-      cart.position.z + up.z * lift + across.z * wobble,
-      cartYaw + turn.body,
-      // Rivals get this for free — `kid.root` is a child of the same group
-      // `placeCarts()` pitches — but the player's own model is positioned
-      // independently every frame, so it never inherited the cart's tilt on
-      // the ring's hills until `setRidePose` grew a pitch parameter to carry it.
-      this.me.pitch,
-    );
+    // Along the cart's own axes, not the world's — see `seat.ts`, which the
+    // check seats her through too.
+    seatRaceRider(this.player, cart, this.me, rideScale, wobble, turn.body);
   }
 
   private arrive(): void {
