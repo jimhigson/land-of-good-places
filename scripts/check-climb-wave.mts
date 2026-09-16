@@ -102,8 +102,8 @@ import { placeOnSphere } from '../src/world/terrain.ts';
 import { buildHeadlessPark } from './park-harness.mts';
 import { createKid, KID_HEAD_HEIGHT, KID_REST_GAZE_PITCH } from '../src/art/models/kid.ts';
 import { applyRidePose, CLIMB_WAVE_ARM_X, CLIMB_WAVE_LEAN_RATE } from '../src/entities/Player.ts';
-import { CLIMB_PEEK_LIFT, WAVE_RISE, climbPose } from '../src/world/TreeClimbing.ts';
-import { eyeForFocus, faceOnGround, yawForBearing } from '../src/world/up.ts';
+import { CLIMB_PEEK_LIFT, WAVE_RISE, climbPose, waveFacingYaw } from '../src/world/TreeClimbing.ts';
+import { eyeForFocus, faceOnGround } from '../src/world/up.ts';
 import {
   CAMERA_DISTANCE,
   CAMERA_PITCH_DEGREES,
@@ -397,7 +397,7 @@ function poseKidAt(
   // not draw her at.
   faceOnGround(
     kid.root,
-    wave > 0.5 ? yawForBearing(pose.x, pose.y, pose.z, CAMERA_FACING) : pose.facing,
+    wave > 0.5 ? waveFacingYaw(pose.x, pose.y, pose.z) : pose.facing,
   );
   // Nothing is hidden. `TreeClimbing` used to switch off everything but the
   // head and the waving arm, and this loop matched it part for part; the whole
@@ -1047,24 +1047,58 @@ if (worstModelError > 0.01) {
 // twice a cycle and leans off it in between; both are wanted, so both are
 // measured — the best says she is genuinely aimed at you, the worst says the
 // rock never throws her wildly off.
-let bestAim = Infinity;
+//
+// **On every real tree, posed by the game's own `climbPose` and
+// `waveFacingYaw`, under the camera `eyeForFocus` builds over her.** This used
+// to be one upright kid at the origin looking down the flat offset — a picture
+// in which every choice of facing that agrees at the park's centre reads
+// identically, so a clause named for where she faces could not tell two facings
+// apart. Out on the sphere they differ by the ground's lean, and this is the
+// clause that has to see it.
+//
+// Per tree and approach: the best over the rock (does she pass through the
+// camera?) and the worst (does the rock throw her off it?). Reported as the
+// worst tree for each.
+const AIM_BEARINGS = 4;
+let bestAim = 0;
+let bestAimAt = '';
 let worstAim = 0;
-for (let r = 0; r < 16; r += 1) {
-  const elapsed = (r / 16) * ((Math.PI * 2) / CLIMB_WAVE_LEAN_RATE);
-  const off = degreesOff(gazeOf(wavingKid(elapsed)));
-  bestAim = Math.min(bestAim, off);
-  worstAim = Math.max(worstAim, off);
+let worstAimAt = '';
+const toCameraHere = new Vector3();
+for (const [index, tree] of trees.entries()) {
+  for (let b = 0; b < AIM_BEARINGS; b += 1) {
+    const bearing = (b / AIM_BEARINGS) * Math.PI * 2;
+    let best = Infinity;
+    for (let r = 0; r < 16; r += 1) {
+      const elapsed = (r / 16) * ((Math.PI * 2) / CLIMB_WAVE_LEAN_RATE);
+      const kid = poseKidAt(tree, bearing, elapsed, null, 1);
+      toCameraHere.copy(VIEW_DIR).negate();
+      const off = Math.acos(Math.min(1, gazeOf(kid).dot(toCameraHere))) / DEG;
+      best = Math.min(best, off);
+      if (off > worstAim) {
+        worstAim = off;
+        worstAimAt = `tree ${index} @${((bearing * 180) / Math.PI).toFixed(0)}°`;
+      }
+    }
+    if (best > bestAim) {
+      bestAim = best;
+      bestAimAt = `tree ${index} @${((bearing * 180) / Math.PI).toFixed(0)}°`;
+    }
+  }
 }
 
 /**
  * How near dead-on she must get at the rock's crossing.
  *
  * She measures 0.00° — the angle is solved, not tuned, so anything but ~0 means
- * the derivation is broken rather than the pose being slightly off. 1.5° is
- * loose enough to survive floating point and a nudge to the rig, and nowhere
- * near loose enough to pass the 40.14° she scored before this existed.
+ * the derivation is broken rather than the pose being slightly off. It was
+ * 1.5°, set while this measured one upright kid at the origin; posed on the
+ * real trees it also has to catch a facing solved in the wrong frame, and the
+ * one that was briefly shipped (`yawForBearing`, a flat-frame bearing) reads
+ * **1.43°** at scale 1 — inside the old bar, and growing with the ground's lean.
+ * 0.5° still leaves floating point a thousand times its due.
  */
-const REQUIRED_AIM_DEGREES = 1.5;
+const REQUIRED_AIM_DEGREES = 0.5;
 
 /**
  * And how far the rock may then swing her off it.
@@ -1077,8 +1111,9 @@ const ALLOWED_ROCK_SWING_DEGREES = 12;
 
 const wasOff = degreesOff(gazeOf(wavingKid(0, 0)));
 console.log(
-  `  aim: her gaze passes ${bestAim.toFixed(2)}° from the camera at the rock's crossing ` +
-    `(needs ${REQUIRED_AIM_DEGREES}°), and never more than ${worstAim.toFixed(2)}° off it ` +
+  `  aim (${trees.length} trees x ${AIM_BEARINGS} approaches, posed in place): her gaze passes within ` +
+    `${bestAim.toFixed(2)}° of the camera at the rock's crossing on the worst tree (${bestAimAt}) ` +
+    `(needs ${REQUIRED_AIM_DEGREES}°), and never more than ${worstAim.toFixed(2)}° off it (${worstAimAt}) ` +
     `(allowed ${ALLOWED_ROCK_SWING_DEGREES}°). With no head pitch at all it would be ` +
     `${wasOff.toFixed(2)}°.`,
 );

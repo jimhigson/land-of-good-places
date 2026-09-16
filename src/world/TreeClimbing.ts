@@ -11,7 +11,6 @@ import type { Hud } from '../ui/Hud';
 import { pressZone, type InteractZone } from './interact';
 import type { ClimbableTreeSeed } from './Scenery';
 import { placeOnSphere, terrainHeight } from './terrain';
-import { yawForBearing } from './up';
 
 /**
  * Tree climbing (family design feedback: NPCs — and the player — climb trees,
@@ -331,18 +330,12 @@ export class TreeClimbing implements GameSystem {
       // She turns to the camera to wave and drifts back to her peek facing
       // afterwards. This is a *scripted pose*, not a control — the CONTROL RULE
       // bans the stick rotating her, and nothing here reads the stick.
-      // **The camera-facing turn is a bearing, so it has to be converted into
-      // a yaw before `faceOnGround` is given it** — see `up.ts`'s
-      // `yawForBearing`. `CAMERA_FACING` is a compass bearing in the flat
-      // frame; handed straight over it was read as a yaw in *her* frame, which
-      // out in the park is up to 40° away from it, so she turned to something
-      // that was not the camera and her raised hand landed behind her own head.
-      // `check:climb-wave` measured the result: 0.0% of the waving hand visible
-      // on the worst trees.
+      // Which way "to the camera" is lives in `waveFacingYaw`, shared with
+      // `check:climb-wave` so the check poses the facing the game draws.
       this.playerFacingNow = turnTowards(
         this.playerFacingNow,
         wave > WAVE_TURN_THRESHOLD
-          ? yawForBearing(pose.x, pose.y, pose.z, CAMERA_FACING)
+          ? waveFacingYaw(pose.x, pose.y, pose.z)
           : this.playerPeekFacing,
         PEEK_TURN_SPEED * dt,
       );
@@ -616,6 +609,39 @@ const PEEK_TURN_SPEED = 2.6;
  * reads the stick.
  */
 const CAMERA_FACING = CAMERA_YAW_DEGREES * DEG;
+
+/**
+ * **The yaw that turns a waving climber, standing at `(x, y, z)`, to the camera.**
+ *
+ * The one owner of that answer: `TreeClimbing` turns her with it and
+ * `check:climb-wave` poses its kid with it, so the check measures the facing the
+ * game draws rather than a copy of it.
+ *
+ * **In her own frame, which is the camera's frame too.** `IsoCamera` rotates its
+ * flat offset by the local up at its focus (`eyeForFocus`), and `faceOnGround`
+ * leans her by the local up at her feet — the same rotation, a few centimetres
+ * apart. So the camera sits at local yaw {@link CAMERA_FACING} from her,
+ * exactly as it did on a flat park, and no conversion is wanted.
+ *
+ * This was briefly `yawForBearing(x, y, z, CAMERA_FACING)`, which turns her to
+ * the *flat-frame* bearing — right only for an upright camera the game never
+ * renders, which is what `check:climb-wave` used to look down. Measured by that
+ * check's aim clause once it posed a real child on every real tree under the
+ * camera `eyeForFocus` builds (scale 1, canonical seed, 41 trees x 4 approaches):
+ *
+ * ```
+ *                        gaze at rock crossing   worst rock swing
+ *   CAMERA_FACING              0.00°                 7.52°  (the rock's own design value)
+ *   yawForBearing              1.43° (tree 14)       9.03°
+ * ```
+ *
+ * Hand visibility and body pixels are identical between the two, so the aim is
+ * the only thing that tells them apart, and it says this one. The position
+ * arguments are kept so a call site states where she is standing.
+ */
+export function waveFacingYaw(_x: number, _y: number, _z: number): number {
+  return CAMERA_FACING;
+}
 
 export interface ClimbPose {
   readonly x: number;

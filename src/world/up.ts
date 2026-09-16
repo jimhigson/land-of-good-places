@@ -76,52 +76,6 @@ export function eyeForFocus(
 const _tilt = /* @__PURE__ */ new Quaternion();
 const _euler = /* @__PURE__ */ new Euler();
 
-const _bearingTilt = /* @__PURE__ */ new Quaternion();
-const _bearingWant = /* @__PURE__ */ new Vector3();
-const _bearingUp = /* @__PURE__ */ new Vector3();
-
-/**
- * **The yaw to hand {@link faceOnGround} so a thing standing at `(x, y, z)`
- * really points along the flat-frame bearing `bearing`.**
- *
- * A yaw is not a bearing any more, and the difference is the whole of this
- * function. {@link faceOnGround} builds `tilt · yaw`, so the yaw is measured in
- * the object's **own** tangent frame; the bearing somebody wants — "face the
- * camera", "face the gate", "face down the track" — is measured in the flat
- * frame the park is authored in. Those agreed exactly while every character
- * stood plumb, and they come apart by the ground's own lean: **40° at a radius
- * of 142 m** on this planet.
- *
- * Found by `check:climb-wave`. `TreeClimbing` turns a child to the camera to
- * wave by passing `CAMERA_YAW_DEGREES` straight to `faceOnGround` — a flat
- * bearing used as a local yaw — so out in the park she turned to a bearing that
- * was not the camera's, her raised hand swung round behind her own head, and
- * the wave the whole feature exists for became invisible on most trees.
- *
- * Indoors `upFor` hands back plain `+Y`, the tilt is the identity, and this
- * returns `bearing` unchanged — which is exactly right, and is why a call site
- * that might be indoors or out can use it unconditionally.
- *
- * **A candidate to move into `geo/Frame.ts`.** That is the declared vocabulary
- * and this file is only where it is because the sphere arrived before `geo/`
- * did; `Frame.toLocal` is the same idea one step further on. It stays here for
- * now because every caller so far is a `faceOnGround` call site working in
- * world `(x, y, z)` rather than in `Geo`, and converting those is a separate
- * change from fixing what they measure. Do not add a *second* bearing-to-yaw
- * anywhere — extend this one or move it, which is the whole point of the note.
- */
-export function yawForBearing(x: number, y: number, z: number, bearing: number): number {
-  upFor(x, y, z, _bearingUp);
-  _bearingTilt.setFromUnitVectors(INDOOR_UP, _bearingUp);
-  // The direction wanted, in the flat frame, carried back into the object's own
-  // frame — where `faceOnGround`'s yaw is measured. `atan2(x, z)` because that
-  // is the convention `facingAngle` and `rotation.y` share; see `screenBasis.ts`.
-  _bearingWant
-    .set(Math.sin(bearing), 0, Math.cos(bearing))
-    .applyQuaternion(_bearingTilt.invert());
-  return Math.atan2(_bearingWant.x, _bearingWant.z);
-}
-
 /**
  * Point an object along a yaw (and optionally a pitch) **and** stand it on the
  * ground it is on — written from scratch, so it is safe to call every frame.
