@@ -578,6 +578,28 @@ pick your own and pass it explicitly (`vite --port <yours> --strictPort`).
 Vite just picks the next free port for you and every note you take about
 "my server is on 5260" quietly goes stale.
 
+**Never hand Jim a dev-server URL. Build it and serve the build.**
+
+Jim, 13 September 2026, after a run of localhost links: *"the live reload
+keeps stopping my game - only give me stable urls with vite preview and a
+build."* He was mid-play each time; every push by the agent triggered HMR, the
+page reloaded under him, and whatever he was doing was lost. A link he cannot
+finish looking at is worse than no link.
+
+So a link that goes to Jim comes from `pnpm run build` served by `pnpm exec
+vite preview` on **its own port**, separate from the dev server you are
+iterating on, with `--strictPort`. Leave it up and **do not restart it while he
+is looking** — a stale-but-stable URL beats a live one that reloads under him.
+`build` is only `vite build` here, about 200 ms, so the separation costs
+nothing; rebuild and tell him when there is something new worth seeing.
+
+Your own dev server is still the right tool for your own iteration. It is
+simply not what he gets.
+
+(If a *built preview* ever serves something old, that is the update bug in
+"How a deployed park notices it is out of date", not a cache for anyone to
+clear by hand.)
+
 **Never tell the user to open a URL in a private or incognito window.**
 Jim's standing rule: *the user, including devs, is required to do NO SPECIAL
 ACTION EVER to get the new version.* A reload getting stale content is a bug

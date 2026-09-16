@@ -1655,6 +1655,20 @@ export const SUITE_BED_SPOTS: readonly (readonly [number, number])[] = [
   [11.0, -5.2],
 ];
 
+/**
+ * Which of {@link SUITE_BED_SPOTS} is the **middle** bedroom — the wide one
+ * issue #274 doubled the suite's width for, and therefore the only bedroom
+ * with floor for more than a couple of pet beds.
+ *
+ * It is `1` in three places that must agree: {@link petBedSlots}'s default
+ * `bedIndex`, and — since 6 Sep 2026 (issue #582) — `Hotel.sendPetsToBed`,
+ * which sends a companion with no bed in the room she napped in to its bed
+ * **here** instead. A bare `1` written out at each of those is exactly the
+ * "two definitions of one thing" CLAUDE.md opens with, and the middle bedroom
+ * is a thing a future layout change could genuinely move.
+ */
+export const MIDDLE_BEDROOM_INDEX = 1;
+
 /** Where the bedside tables stand — beside each bed, same reasoning as above. */
 export const SUITE_BEDSIDE_X: readonly number[] = [-9.2, 1.1, 12.5];
 export const SUITE_BEDSIDE_Z = -5.2;
@@ -1833,7 +1847,7 @@ function clearsDoorways(x: number, z: number, doors: readonly DoorwayZone[]): bo
  */
 export function petBedSlots(
   count: number,
-  bedIndex = 1,
+  bedIndex = MIDDLE_BEDROOM_INDEX,
 ): readonly { readonly x: number; readonly z: number }[] {
   const keepOut = humanFurnitureKeepOutX(bedIndex);
   const bedX = (SUITE_BED_SPOTS[bedIndex] ?? [0, 0])[0];
