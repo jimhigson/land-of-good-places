@@ -14,6 +14,7 @@ import {
   type Object3D,
 } from 'three';
 import { TAU } from '../core/mathUtils';
+import type { Frame } from './geo';
 import { placeOnSphere, standOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
 import { ANCHORS, anchorGroupName, type AnchorDefinition, type AnchorId } from './anchors';
 import { createFerrisWheelProp, type FerrisWheelProp } from '../minigames/ferrisWheel/wheelProp';
@@ -84,6 +85,19 @@ export function standInPlot(
   plot.updateMatrixWorld(true);
   root.position.copy(plot.worldToLocal(_standWorld));
   root.quaternion.copy(plot.getWorldQuaternion(_plotQuat).invert().multiply(_standQuat));
+}
+
+/**
+ * {@link standInPlot}, for something whose world transform is already owned by a
+ * {@link Frame} — the castle's `CASTLE_FRAME`. The frame is the placement, so
+ * nothing else can describe where the thing stands differently from where it is
+ * drawn.
+ */
+export function standFrameInPlot(plot: Object3D, root: Object3D, frame: Readonly<Frame>): void {
+  frame.at.toWorld(_standWorld);
+  plot.updateMatrixWorld(true);
+  root.position.copy(plot.worldToLocal(_standWorld));
+  root.quaternion.copy(plot.getWorldQuaternion(_plotQuat).invert().multiply(frame.q));
 }
 
 const _plotUp = /* @__PURE__ */ new Vector3();
