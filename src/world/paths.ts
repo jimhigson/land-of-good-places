@@ -3906,6 +3906,14 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
   ): void => {
     nodes.push({ id, kind, x: ex, z: ez });
     const already = distanceToRouteNetwork(network(), ex, ez) < 4;
+    // An unpaved spur is never drawn, so the street paving its routing commits
+    // must not outlive it: a later spur would branch off paving nobody laid.
+    // Measured on seed 11 (eng/sphere-six-reds): stall.spaceFerrisWheel stood
+    // on the network already, its street route still marked lattice paving,
+    // and spur-stall.keychain then started at (21.2, -17.1) — 10.15 m from
+    // any drawn ribbon. The same phantom-paving rule `latticeStateSnapshot`'s
+    // own note records for rejected candidates.
+    const beforeUnpaved = already ? latticeStateSnapshot() : null;
     const l = Math.hypot(towardX - ex, towardZ - ez);
     // `past` used to walk a flat 2 m towards the destination regardless of
     // how far the doormat actually stands from the plot's own edge. For a
@@ -4016,6 +4024,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         points: [...routed, ...past],
       },
     });
+    if (beforeUnpaved) restoreLatticeState(beforeUnpaved);
   };
 
   yield (progress += 1); // the ring is solved; each destination now gets its own slice
