@@ -273,9 +273,27 @@ const END_Y = worldYAtAltitude(BALL_PIT_X, BALL_PIT_Z, MOUTH_ALTITUDE);
  */
 const END_RADIUS = Geo.fromWorld(BALL_PIT_X, END_Y, BALL_PIT_Z).radius();
 
-/** The chute's starting distance from the planet's centre, for a start at (x, z). */
-function startRadiusAt(x: number, z: number): number {
-  return Geo.fromWorld(x, START_Y, z).radius();
+/**
+ * **The distance from the planet's centre the chute's level lip is held at**,
+ * for a start at (x, z) leaving along (headingX, headingZ).
+ *
+ * `START_Y` is a flat world height (see there), and a line held at a flat world
+ * `y` is not level: its distance from the centre changes along it. So which
+ * point of it to take as "the start height" is a real choice, and it is taken
+ * as the **higher** of the stub's two ends — the start pose and the farthest
+ * point carried back through the wall. The radius along a straight line at a
+ * constant `y` is convex, so every point of the old flat stub is at or below
+ * that, and the level stub therefore clears the battlements by at least what
+ * the flat one did at every point. Taking the start pose alone — tried first —
+ * held the lip 0.13 m *inside* seed 11's battlements where its castle stands
+ * further from the park's centre than its door pose.
+ */
+function startRadiusFor(x: number, z: number, headingX: number, headingZ: number): number {
+  const back = doorStubLength(headingZ);
+  return Math.max(
+    Geo.fromWorld(x, START_Y, z).radius(),
+    Geo.fromWorld(x - headingX * back, START_Y, z - headingZ * back).radius(),
+  );
 }
 
 /**
@@ -1070,8 +1088,8 @@ function crossingOf(
  *
  * **Not a second test: the same one, on the same points.** The points come from
  * {@link stubPoints}, which is also what {@link chutePoints} builds the finished
- * chute's stub from, plus the route's own first point (`heightAt(0)` is
- * `START_Y`). The question is {@link chuteComplaint}, which is also what
+ * chute's stub from, plus the route's own first point (`heightAt(0)`, the
+ * level lip's radius at the pose). The question is {@link chuteComplaint}, which is also what
  * {@link unrideableComplaint} asks of the finished chute. Those points are a
  * subset of every chute that could start from this pose, so a pose refused here
  * is one every route from it would have been refused for — the prune can only
@@ -1079,7 +1097,8 @@ function crossingOf(
  */
 function doorStubIsClear(pose: Pose2): boolean {
   const points = stubPoints(pose.x, pose.z, pose.hx, pose.hz);
-  points.push(new Vector3(pose.x, START_Y, pose.z));
+  const startRadius = startRadiusFor(pose.x, pose.z, pose.hx, pose.hz);
+  points.push(new Vector3(pose.x, worldYAtRadius(pose.x, pose.z, startRadius), pose.z));
   return chuteComplaint(points) === null;
 }
 
@@ -1115,7 +1134,7 @@ function chutePoints(route: SolvedRailRoute): Vector3[] {
   points.push(...stubPoints(startX, startZ, flat.x, flat.z));
 
   const steps = Math.max(8, Math.round(route.length / POINT_SPACING));
-  const startRadius = startRadiusAt(startX, startZ);
+  const startRadius = startRadiusFor(startX, startZ, flat.x, flat.z);
   for (let i = 0; i <= steps; i += 1) {
     const u = i / steps;
     route.pointAt(u * route.length, flat);
@@ -1153,7 +1172,7 @@ function stubPoints(startX: number, startZ: number, headingX: number, headingZ: 
   const stubSteps = Math.max(1, Math.round(stub / POINT_SPACING));
   // Level in the rider's frame, like the lip it leads into: the start's own
   // distance from the planet's centre, not the start's world `y`.
-  const startRadius = startRadiusAt(startX, startZ);
+  const startRadius = startRadiusFor(startX, startZ, headingX, headingZ);
   for (let i = stubSteps; i >= 1; i -= 1) {
     const back = (stub * i) / stubSteps;
     const x = startX - headingX * back;
@@ -1326,9 +1345,11 @@ export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
   // offers sit within 1.8 m of it along the wall, so this is as approximate as
   // the assumed length beside it — and, like that, it is only a prefilter:
   // `satisfies` measures the finished chute from its real start.
-  const nominalStartRadius = startRadiusAt(
+  const nominalStartRadius = startRadiusFor(
     BUILDING_CENTRE_X + doorCentre,
     SOUTH_WALL_Z + WALL_STANDOFF,
+    0,
+    1,
   );
   return {
     // A stream of its own, so the slide's shape cannot shift because some
@@ -1636,7 +1657,9 @@ export function unrideableComplaint(route: SolvedRailRoute): string | null {
   if (route.length > MAX_RIDEABLE_LENGTH) {
     const start = { x: 0, z: 0 };
     route.pointAt(0, start);
-    const drop = startRadiusAt(start.x, start.z) - END_RADIUS;
+    const heading = { x: 0, z: 0 };
+    route.tangentAt(0, heading);
+    const drop = startRadiusFor(start.x, start.z, heading.x, heading.z) - END_RADIUS;
     return (
       `is ${route.length.toFixed(2)} m long against a ${MAX_RIDEABLE_LENGTH} m ` +
       `ceiling — at that length the drop of ${drop.toFixed(2)} m is ` +
