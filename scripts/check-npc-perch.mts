@@ -44,13 +44,12 @@
  * question per check, and neither of the two can quietly stop asking its own.
  */
 import './headless-canvas.mjs';
-import { Object3D, Vector3 } from 'three';
+import { Object3D, Quaternion, Vector3 } from 'three';
+import { placeOnSphere, terrainHeight, upAt } from '../src/world/terrain.ts';
 import { buildHeadlessPark } from './park-harness.mts';
 import { CLIMB_PEEK_LIFT, TreeClimbing } from '../src/world/TreeClimbing.ts';
 import { WanderDriver } from '../src/entities/npc/wanderDriver.ts';
-import { GROUND_SPHERE_RADIUS } from '../src/core/constants.ts';
 import { Geo } from '../src/world/geo/index.ts';
-import { terrainHeight } from '../src/world/terrain.ts';
 import type { NpcCharacter } from '../src/entities/npc/NpcCharacter.ts';
 import type { ClimbableTreeSeed, FoliageOccluder } from '../src/world/Scenery.ts';
 import type { FrameContext } from '../src/core/types.ts';
@@ -175,129 +174,59 @@ if (climbers.length === 0) {
  * about a number they both got from the same place, and would still pass if
  * both were wrong together.
  */
-/**
- * **Match the drawn foliage to its seed by BEARING, not by plan distance.**
- *
- * This matcher used to ask for an occluder within 0.05 m of the seed in
- * `(x, z)`. On a flat park that was the same question as "is this the same
- * tree". On a sphere it is not, and the check had gone **red on every run**:
- *
- *   tree 0, seed (25.21, -115.97), 118.68 m out
- *   nearest of 77 occluders: 1.965 m away, against a 0.05 m tolerance
- *   decomposed: 1.965 m radially outward, 0.003 m tangentially
- *   ground lean there 32.6 deg; 3.64 m of canopy height x sin(32.6) = 1.965 m
- *
- * The tree is not misplaced. It is standing correctly on the sphere, so its
- * canopy — which is metres *above* the ground — is displaced outward in plan by
- * `height x sin(lean)`. A plan distance between a seed at ground level and
- * foliage overhead is a flat measurement of a leaning world, which is the same
- * mistake `check:flat-primitives` exists to stop people writing.
- *
- * So the offset is decomposed against the seed's own outward bearing:
- *
- * - **tangentially** the tolerance is unchanged at 0.05 m. That is the axis
- *   that discriminates one tree from its neighbours, and it must stay tight —
- *   loosening it is how this check would start measuring the wrong tree and
- *   stay green about it.
- * - **radially** the lean is expected, so it is allowed up to what the tallest
- *   plausible canopy can produce. It is still bounded: an occluder genuinely
- *   belonging to a different tree does not sit on this one's exact bearing.
- *
- * Near the park's origin there is no bearing and no lean, and the radial
- * allowance collapses to the tangential one, which is the old behaviour exactly.
- */
-const TANGENTIAL_TOLERANCE = 0.05;
 
 /**
- * **The tallest canopy in THIS park, measured, not guessed.**
+ * **The one axis every height on this page is measured along: the tree's own up.**
  *
- * The radial allowance below is `canopyHeight x sin(lean)`, so it needs a bound
- * on how high a canopy sits above the ground. The first version of this fix
- * hard-coded 12 m, and a hard-coded distance is precisely the thing that goes
- * stale when the park is resized. So it is read off the built park's own seeds.
+ * Issue #642. `clearance` was `headY − band.top`, a world-`y` difference between
+ * a drawn (leant) head and a canopy band read off the *flat* part positions — a
+ * `y` standing in for a distance, in two different frames. It agreed to 0.03 m
+ * at the park's centre and had the wrong sign at its edge. Both sides are now
+ * heights along this vector: the head as drawn, dotted with it, and each canopy
+ * blob as drawn (`placeOnSphere`, exactly as `makeInstanced` composes it) with
+ * the ellipsoid's own extent along it.
  *
- * **In the frame `placeOnSphere` actually consumes, which is the whole point.**
- * An earlier version of this line read
- * `altitude(Geo.fromWorld(tree.x, tree.canopyTopY, tree.z))` and its comment
- * claimed that was "a radial height and therefore already right on a leaning
- * world". It is not, and the claim was the worse half of the mistake — a
- * sentence promising a frame the code does not have is how the next lane
- * inherits a false belief.
- *
- * The quantity wanted here is the one `placeOnSphere` leans by, and its own
- * source says what that is: `height = flat.y - terrainHeight(flat.x, flat.z)` —
- * the authored height above the ground **in the canopy's own column**. That is
- * a flat-frame number *on purpose*, because it is the input to the transform,
- * not an output of it. `altitude()` answers a different question: it measures
- * down the **radial**, which at 78 m out lands in a different column than
- * `(x, z)` and under-reads. Measured over the 42 climbable trees:
- *
- *   max canopyTopY (a bare world y)            5.19 m
- *   max height above its OWN column            6.81 m   <- what placeOnSphere leans by
- *   max altitude(Geo.fromWorld(...))           6.39 m   <- what this used to say
- *
- * Worth noting which mistake each number is: comparing the 5.19 against the
- * 6.39 to judge this line is itself comparing a **coordinate** to a **height**,
- * and they differ because the worst tree stands where the ground is -14.54 m.
- * All three numbers are different questions; only 6.81 is this one.
- *
- * It is printed on every run, so a park that grows a taller tree shows the
- * allowance growing with it rather than silently widening the match.
+ * Set per tree by {@link canopyBandOf}, and read by {@link perchHeadY} for the
+ * same tree. ({@link drawnDropBelowHead} already measures along the head's own
+ * up, from #620.)
  */
-const tallestCanopy = trees.reduce(
-  (tallest, tree) => Math.max(tallest, tree.canopyTopY - terrainHeight(tree.x, tree.z)),
-  0,
-);
-process.stderr.write(
-  `[npc-perch] tallest canopy in this park: ${tallestCanopy.toFixed(2)} m above ground, ` +
-    `over ${trees.length} climbable trees; the radial match allowance is that x sin(lean).\n`,
-);
+const treeUp = new Vector3();
+const _blobCentre = new Vector3();
+const _blobSpin = new Quaternion();
+
+/** Heights along {@link treeUp}. */
+const alongUp = (point: Readonly<Vector3>): number => point.dot(treeUp);
+
 
 /**
- * Which seed claimed which occluder. The radial allowance is the only thing
- * this fix loosened, so the risk it introduces is a seed claiming a *neighbour's*
- * canopy — which would leave the check green while measuring the wrong tree,
- * this repo's favourite failure. Two seeds cannot share one canopy, so if that
- * ever happens the run fails rather than reporting on a fiction.
+ * Which seed claimed which occluder. Two seeds cannot share one canopy, so if
+ * that ever happens the run fails rather than reporting on a fiction — the
+ * check green while measuring a neighbour's tree. Kept from #620's matcher; the
+ * matcher itself is now `footX`/`footZ` (see below).
  *
- * **To arm-test this guard, delete the TANGENTIAL test, not the radial one.**
- * The distinction is not pedantry and it cost a reviewer a cycle: widening or
- * removing the **radial** bound alone leaves the check green, because
- * nearest-tangential matching still picks each tree's own canopy. Only
- * `if (tangential < nearestTangential)` decides *which* occluder is taken, so
- * that is the line to break:
- *
- *     if (tangential < nearestTangential)  ->  if (true)
- *
- * which makes the matcher take whatever it last looked at and produces
- * "trees 13 and 15 both matched the same foliage at (76.74, 18.81)", exit 1,
- * on seed 20260728 at the park's authored scale. Loosening the tolerances
- * instead (tangential 6 m, canopy 400 m) exits **0** — a reproduction that
- * quietly proves nothing.
+ * To arm-test it, make the matcher take whatever it last looked at
+ * (`if (distance < nearest)` -> `if (true)`).
  */
 const claimedBy = new Map<FoliageOccluder, number>();
 
 function canopyBandOf(tree: ClimbableTreeSeed, index: number): { top: number; bottom: number } | null {
-  const plan = Math.hypot(tree.x, tree.z);
-  // sin(lean) at this plan radius on the ground sphere. The radial slack a
-  // correctly-leaned canopy can account for, and no more.
-  const sinLean = Math.min(1, plan / GROUND_SPHERE_RADIUS);
-  const radialAllowance = TANGENTIAL_TOLERANCE + tallestCanopy * sinLean;
-  const ux = plan === 0 ? 0 : tree.x / plan;
-  const uz = plan === 0 ? 0 : tree.z / plan;
-
+  upAt(tree.x, terrainHeight(tree.x, tree.z), tree.z, treeUp);
+  // **Matched on the foot, not on the canopy's drawn centre.** `x`/`z` is where
+  // the widest blob is *drawn*, which `placeOnSphere` slides outward along the
+  // local up; `footX`/`footZ` is the column the tree stands in, which is what
+  // `ClimbableTreeSeed` records, and `Scenery` owns it. This replaces #620's
+  // bearing matcher (tangential 0.05 m, radial up to canopy height x sin lean),
+  // which answered the same question by reconstructing the lean the owner
+  // already records. Measured over all 46 trees at the time: on `footX`/`footZ`
+  // the worst distance is **0.000000 m** and all 46 claim a distinct occluder;
+  // on the drawn `x`/`z` it was **3.2942 m**.
   let occluder: FoliageOccluder | null = null;
-  let nearestTangential = TANGENTIAL_TOLERANCE;
+  let nearest = 0.05;
   for (const candidate of occluders) {
-    const dx = candidate.x - tree.x;
-    const dz = candidate.z - tree.z;
-    const radial = dx * ux + dz * uz;
-    const tangential = Math.abs(dx * -uz + dz * ux);
-    // Outward only: a canopy leans away from the planet's axis, never towards it.
-    if (radial < -TANGENTIAL_TOLERANCE || radial > radialAllowance) continue;
-    if (tangential < nearestTangential) {
+    const distance = Math.hypot(candidate.footX - tree.x, candidate.footZ - tree.z);
+    if (distance < nearest) {
       occluder = candidate;
-      nearestTangential = tangential;
+      nearest = distance;
     }
   }
   if (!occluder) return null;
@@ -305,8 +234,8 @@ function canopyBandOf(tree: ClimbableTreeSeed, index: number): { top: number; bo
   if (alreadyClaimedBy !== undefined && alreadyClaimedBy !== index) {
     console.error(
       `check:npc-perch FAILED — trees ${alreadyClaimedBy} and ${index} both matched the same ` +
-        `foliage at (${occluder.x.toFixed(2)}, ${occluder.z.toFixed(2)}). The radial allowance ` +
-        `for the sphere's lean is matching across trees, so at least one row would be measured ` +
+        `foliage at (${occluder.x.toFixed(2)}, ${occluder.z.toFixed(2)}). The matcher ` +
+        `is matching across trees, so at least one row would be measured ` +
         `against a canopy that is not its own.`,
     );
     process.exit(1);
@@ -317,8 +246,12 @@ function canopyBandOf(tree: ClimbableTreeSeed, index: number): { top: number; bo
   let bottom = Infinity;
   for (const part of occluder.parts) {
     if (part.kind === 'trunk') continue;
-    top = Math.max(top, part.position.y + part.scale.y);
-    bottom = Math.min(bottom, part.position.y - part.scale.y);
+    placeOnSphere(part.position, part.rotationY, _blobCentre, _blobSpin);
+    // Half-extent of the drawn ellipsoid along `treeUp`: |S·Rᵀ·u|.
+    const local = treeUp.clone().applyQuaternion(_blobSpin.clone().invert());
+    const extent = Math.hypot(local.x * part.scale.x, local.y * part.scale.y, local.z * part.scale.z);
+    top = Math.max(top, alongUp(_blobCentre) + extent);
+    bottom = Math.min(bottom, alongUp(_blobCentre) - extent);
   }
   return top === -Infinity ? null : { top, bottom };
 }
@@ -443,7 +376,7 @@ function perchHeadY(character: NpcCharacter, tree: ClimbableTreeSeed, bearing: n
   const rig = character.avatar.rig;
   rig.root.updateMatrixWorld(true);
   const headPoint = rig.head.getWorldPosition(new Vector3());
-  const headY = headPoint.y;
+  const headY = alongUp(headPoint);
   if (hideBodyMutation) {
     const member = character.avatar.member;
     const head = character.avatar.rig.head;
@@ -537,7 +470,11 @@ console.log(
 const playerRows = trees.map((tree, index) => {
   const band = canopyBandOf(tree, index);
   const canopyHeight = band ? band.top - band.bottom : 1;
-  const clearance = band ? tree.canopyTopY + CLIMB_PEEK_LIFT - band.top : 0;
+  // Her perch top, drawn the way `climbPose` draws it — a height above the tree's
+  // ground, leant — and measured along the same axis as the band.
+  const perch = new Vector3();
+  if (band) placeOnSphere({ x: tree.x, y: tree.canopyTopY + CLIMB_PEEK_LIFT, z: tree.z }, 0, perch, new Quaternion());
+  const clearance = band ? alongUp(perch) - band.top : 0;
   return { index, clearance, fraction: clearance / canopyHeight };
 });
 const playerLow = Math.min(...playerRows.map((r) => r.fraction));

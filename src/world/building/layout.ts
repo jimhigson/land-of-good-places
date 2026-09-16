@@ -40,6 +40,7 @@ import {
 import { CASTLE_HALL, CASTLE_MALL, CASTLE_ROOF } from './floors';
 import { TAP_FINGER_METRES } from '../tapSpacing';
 import { terrainHeight, upAt } from '../terrain';
+import { Frame, Geo } from '../geo';
 
 /**
  * The floor plan of the big building, as data.
@@ -170,11 +171,66 @@ export function onPlate(authored: number): number {
   return authored * INTERIOR_PLATE_SHRINK;
 }
 
-/** Facade-local (the shell in the garden) -> world on the ground plane. */
+/**
+ * **The one transform the castle's shell stands at — `Building.ts` places the
+ * shell from this, so there is nothing for it to disagree with.**
+ *
+ * Stood on the ground under the facade's centre and lifted to `BUILDING_BASE_Y`
+ * **along the local up** — `Geo.fromWorld(x, ground, z).lift(h)`, the form
+ * `test/geo` proves equal to `placeOnSphere`. An earlier version built it as
+ * `Geo.fromWorld(x, BUILDING_BASE_Y, z)`, which reads the base height as a
+ * literal world `y` rather than a height up the leaning local vertical, while
+ * the shell was still placed separately through `standInPlot`/`placeOnSphere`.
+ * Measured against the drawn castle's `matrixWorld`: **6.82 cm / 3.1e-4 rad on
+ * the canonical seed, 8.73 cm / 3.9e-4 rad on seed 24** — the window cut that
+ * far from the stone it sits in. `check:castle-window` now asserts the drawn
+ * shell equals this frame.
+ *
+ * Use {@link worldToCastle} and {@link castleToWorld} for anything that asks
+ * where a **world** point is relative to the castle. The two flat formulas they
+ * replace — `world y = BUILDING_BASE_Y + localY` and `lx = x −
+ * BUILDING_CENTRE_X` — described a castle standing plumb; its courtyard floor
+ * in fact spans **6.44 m of world `y`** across its footprint at scale 1, and the
+ * Sky Cruiser's loop was solved through a level slice of a leaning building.
+ */
+export const CASTLE_FRAME = /* @__PURE__ */ Frame.fromBearing(
+  Geo.fromWorld(
+    BUILDING_CENTRE_X,
+    terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z),
+    BUILDING_CENTRE_Z,
+  ).lift(BUILDING_BASE_Y - terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z)),
+  0,
+);
+
+/** A castle-local point, in world space. The inverse of {@link worldToCastle}. */
+export function castleToWorld(local: Readonly<Vector3>, target: Vector3): Vector3 {
+  return CASTLE_FRAME.toWorld(local, target);
+}
+
+/** A world point, in the castle's own axes. The inverse of {@link castleToWorld}. */
+export function worldToCastle(world: Readonly<Vector3>, target: Vector3): Vector3 {
+  return CASTLE_FRAME.toLocal(world, target);
+}
+
+/**
+ * Facade-local -> world **on the plan alone**, ignoring the castle's lean.
+ *
+ * Kept because every caller is a ground-plane question — a collision wall, an
+ * interact zone's stand point, an NPC's landing spot — where the answer is a
+ * pair of world `(x, z)` and there is nowhere to put the height the tilt would
+ * produce. At this castle's 12.44° lean a point 9 m out is displaced about
+ * 0.21 m by that, which is inside the slack those call sites already carry.
+ *
+ * **Do not reach for these for anything with a height in it.** Use
+ * {@link castleToWorld} / {@link worldToCastle}, which are the inverse of the
+ * transform the shell is genuinely standing at; these two are not, and cannot
+ * be, because a scalar cannot carry a rotation.
+ */
 export function facadeX(localX: number): number {
   return BUILDING_CENTRE_X + localX;
 }
 
+/** See {@link facadeX}. */
 export function facadeZ(localZ: number): number {
   return BUILDING_CENTRE_Z + localZ;
 }

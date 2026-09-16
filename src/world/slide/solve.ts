@@ -20,6 +20,9 @@ import { TAU } from '../../core/mathUtils';
 import { PARK_LAYOUT } from '../parkLayout';
 import { PARK_SEED } from '../parkManifest';
 import { COASTER_PLANS } from '../coaster/plan';
+import { cartEnvelopePoint } from '../coaster/cart';
+import { crossSection } from '../coaster/clearance';
+import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
 import { PARK_BOUNDARY, solverBoundary } from '../boundary';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from '../train/plan';
 import {
@@ -30,6 +33,8 @@ import {
 } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { Geo, worldYAtAltitude, worldYAtRadius } from '../geo';
+import { altitudeAt } from '../terrain';
+import { CHUTE_ENVELOPE } from '../building/SlideRide';
 
 /**
  * **The ginormous slide, as a plan.**
@@ -651,6 +656,89 @@ export function cruiserCrossesColumn(
 }
 
 /**
+ * Metres between the drawn car's sampled positions along the loop, for
+ * {@link carSweepsColumn}.
+ */
+const CAR_SWEEP_STEP = 0.5;
+
+/**
+ * **The Sky Cruiser's car as it is drawn**, sampled once: the cross-section
+ * points `coaster/clearance.ts` sweeps (`crossSection`), placed with the same
+ * `drawnOnSphere` + `railFrameAt` + `cartEnvelopePoint` that sweep uses, every
+ * {@link CAR_SWEEP_STEP} metres. Flat `x, y, z` triples.
+ *
+ * Built lazily: only the slide's legs ask, once the chute is planned.
+ */
+let drawnCarPoints: Float64Array | null = null;
+function drawnCar(): Float64Array {
+  if (drawnCarPoints) return drawnCarPoints;
+  const route = COASTER_PLANS.cruiser.route;
+  const drawn = drawnOnSphere(route);
+  const section = crossSection();
+  const frame: RailFrame = {
+    position: new Vector3(),
+    forward: new Vector3(),
+    side: new Vector3(),
+    up: new Vector3(),
+  };
+  const out: number[] = [];
+  const point = new Vector3();
+  for (let d = 0; d < route.length; d += CAR_SWEEP_STEP) {
+    railFrameAt(drawn, d, frame);
+    for (const [lateral, rise] of section) {
+      cartEnvelopePoint(frame, lateral, rise, point);
+      out.push(point.x, point.y, point.z);
+    }
+  }
+  drawnCarPoints = Float64Array.from(out);
+  return drawnCarPoints;
+}
+
+/**
+ * The most any point of the car's surface can be from its nearest sample: half
+ * a {@link CAR_SWEEP_STEP} along the loop, and half the widest gap between
+ * neighbouring cross-section points across and up it (0.75 m and 0.85 m).
+ */
+const CAR_SAMPLE_PAD = Math.hypot(CAR_SWEEP_STEP / 2, 0.75 / 2, 0.85 / 2);
+
+/**
+ * **Would the Sky Cruiser's drawn car pass through a post of `radius` standing
+ * at (x, z) from `bottomY` to `topY`?**
+ *
+ * {@link cruiserCrossesColumn} asks the question of the route's *flat* centre
+ * line, and the ride is drawn leant onto the sphere — the car's top swings
+ * sideways by its height times the lean, a third of a metre and more out where
+ * the slide lands. On seed 131 (#663) that let a leg stand 2.12 m from the flat
+ * line and the car still ran through it (`the Sky Cruiser flies clear of the
+ * whole park`). This asks of the car that is drawn, the same sweep the invariant
+ * makes, padded by {@link CAR_SAMPLE_PAD} so the sampling cannot step past a
+ * post.
+ */
+export function carSweepsColumn(
+  x: number,
+  z: number,
+  bottomY: number,
+  topY: number,
+  radius: number,
+): boolean {
+  const points = drawnCar();
+  const reach = radius + CAR_SAMPLE_PAD;
+  const reach2 = reach * reach;
+  const low = Math.min(bottomY, topY) - CAR_SAMPLE_PAD;
+  const high = Math.max(bottomY, topY) + CAR_SAMPLE_PAD;
+  for (let i = 0; i < points.length; i += 3) {
+    const dx = (points[i] as number) - x;
+    if (dx > reach || dx < -reach) continue;
+    const dz = (points[i + 2] as number) - z;
+    if (dz > reach || dz < -reach) continue;
+    if (dx * dx + dz * dz > reach2) continue;
+    const y = points[i + 1] as number;
+    if (y >= low && y <= high) return true;
+  }
+  return false;
+}
+
+/**
  * A uniform grid over the cruiser's segments, so a clearance query looks at the
  * two or three that could possibly be near instead of all 144.
  *
@@ -673,7 +761,7 @@ const CRUISER_CELL = 4;
  * The cruiser's segments filed into a **dense flat grid**, indexed by cell.
  *
  * This used to be a `Map<number, number[]>` keyed by a packed integer. The
- * lookup is the hottest thing `clearsCruiser` does — one per sample of every
+ * lookup is the hottest thing `cruiserFoulsEveryHeight` does — one per sample of every
  * candidate piece, millions of times — and a `Map.get` hashes the key on every
  * one. A flat array indexed `(cx - minCx) * depth + (cz - minCz)` reads the same
  * bucket with an integer multiply-add and no hashing. Same segments, filed from
@@ -730,42 +818,6 @@ const CRUISER_GRID: CruiserGrid = (() => {
   return { minCx, minCz, depth, buckets };
 })();
 
-/** Does a point at (x, y, z) keep {@link CRUISER_AIR} from the Sky Cruiser? */
-function clearsCruiser(x: number, y: number, z: number): boolean {
-  const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
-  const reach2 = reach * reach;
-  const air = CRUISER_AIR + CRUISER_SAGITTA;
-  const cx = Math.floor(x / CRUISER_CELL) - CRUISER_GRID.minCx;
-  const cz = Math.floor(z / CRUISER_CELL) - CRUISER_GRID.minCz;
-  const depth = CRUISER_GRID.depth;
-  // Out of the grid's extent is out of every segment's reach — nothing to check.
-  if (cx < 0 || cz < 0 || cz >= depth || cx * depth + cz >= CRUISER_GRID.buckets.length) {
-    return true;
-  }
-  const nearby = CRUISER_GRID.buckets[cx * depth + cz];
-  if (!nearby) return true;
-  const count = CRUISER_LINE.length;
-  for (let n = 0; n < nearby.length; n += 1) {
-    const i = nearby[n] as number;
-    const a = CRUISER_LINE[i]!;
-    // The cruiser is a closed loop, so the last sample joins back to the first.
-    // Leaving that segment out puts a 1.5 m blind spot in the ride's own air.
-    const b = CRUISER_LINE[(i + 1) % count]!;
-    const abx = b.x - a.x;
-    const abz = b.z - a.z;
-    const len2 = abx * abx + abz * abz;
-    let t = len2 <= 1e-12 ? 0 : ((x - a.x) * abx + (z - a.z) * abz) / len2;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    const dx = a.x + abx * t - x;
-    const dz = a.z + abz * t - z;
-    if (dx * dx + dz * dz > reach2) continue;
-    // Height interpolated to the same place along the segment, so a climbing
-    // stretch is not read at the height of whichever end happened to be sampled.
-    if (Math.abs(a.y + (b.y - a.y) * t - y) < air) return false;
-  }
-  return true;
-}
-
 /**
  * Is a corridor of `radius` about (x, z), `distanceAlong` metres into the ride,
  * somewhere the chute may go?
@@ -781,6 +833,8 @@ function chuteMayPass(
   distanceAlong: number,
   nominalLength: number,
   startRadius: number,
+  toFinish: number,
+  startRadiusRange: { readonly low: number; readonly high: number },
 ): boolean {
   // Length is gradient on a ride whose drop is fixed, so an over-long chute is
   // as wrong as one that goes through a wall — but that rule lives on the brief
@@ -817,7 +871,64 @@ function chuteMayPass(
   // the top of it; forbidding the crossing outright would leave about 2 m
   // between the castle's east wall and the cruiser to thread a 3.4 m chute
   // through, which is no route at all.
-  return clearsCruiser(x, height, z);
+  // The Sky Cruiser's air, as an **interval** question (#650, seed 11). The
+  // height here depends on the finished route's length, which is not known yet
+  // — but it is bounded: at least `distanceAlong + toFinish` (the rest is never
+  // shorter than the straight line home) and at most `MAX_RIDEABLE_LENGTH`.
+  // The profile falls monotonically in `distanceAlong / length`, so the chute's
+  // height at this sample lies between the two, widened by which of the door's
+  // offers it started from. A piece is refused only if the cruiser fouls
+  // *every* height in that band: nothing the search could go on to build from
+  // here would clear it.
+  //
+  // The single guess this replaced — the height at `desiredLength` — was wrong
+  // both ways: routes finish 10-15 m longer than they ask for, so it refused
+  // crossings the finished chute clears and passed ones it fouls, which
+  // `satisfies` then threw away whole. Measured on seed 11 once the profile was
+  // held against the planet (#659): every one of 25 attempts ran all 1620
+  // pairings, the few routes that finished fouled the cruiser ~22 m before the
+  // pit, and the slide took 453 s to build.
+  const lengthLow = Math.min(MAX_RIDEABLE_LENGTH, distanceAlong + toFinish);
+  const highest = heightAtArc(distanceAlong, MAX_RIDEABLE_LENGTH, x, z, startRadiusRange.high);
+  const lowest = heightAtArc(distanceAlong, lengthLow, x, z, startRadiusRange.low);
+  return !cruiserFoulsEveryHeight(x, z, Math.min(lowest, height), Math.max(highest, height));
+}
+
+/**
+ * Does the Sky Cruiser foul a chute at (x, z) **whatever** its height in
+ * [`low`, `high`]? The interval form of the point test the prefilter
+ * used to make, over the same grid and segments: a segment fouls every height in the band when the
+ * band sits wholly inside that segment's air.
+ */
+function cruiserFoulsEveryHeight(x: number, z: number, low: number, high: number): boolean {
+  const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
+  const reach2 = reach * reach;
+  const air = CRUISER_AIR + CRUISER_SAGITTA;
+  const cx = Math.floor(x / CRUISER_CELL) - CRUISER_GRID.minCx;
+  const cz = Math.floor(z / CRUISER_CELL) - CRUISER_GRID.minCz;
+  const depth = CRUISER_GRID.depth;
+  if (cx < 0 || cz < 0 || cz >= depth || cx * depth + cz >= CRUISER_GRID.buckets.length) {
+    return false;
+  }
+  const nearby = CRUISER_GRID.buckets[cx * depth + cz];
+  if (!nearby) return false;
+  const count = CRUISER_LINE.length;
+  for (let n = 0; n < nearby.length; n += 1) {
+    const i = nearby[n] as number;
+    const a = CRUISER_LINE[i]!;
+    const b = CRUISER_LINE[(i + 1) % count]!;
+    const abx = b.x - a.x;
+    const abz = b.z - a.z;
+    const len2 = abx * abx + abz * abz;
+    let t = len2 <= 1e-12 ? 0 : ((x - a.x) * abx + (z - a.z) * abz) / len2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const dx = a.x + abx * t - x;
+    const dz = a.z + abz * t - z;
+    if (dx * dx + dz * dz > reach2) continue;
+    const cy = a.y + (b.y - a.y) * t;
+    if (cy - air < low && high < cy + air) return true;
+  }
+  return false;
 }
 
 /**
@@ -1372,6 +1483,12 @@ export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
     0,
     1,
   );
+  const startPoses = doorPoses(doorCentre);
+  const startRadii = startPoses.map((pose) => startRadiusFor(pose.x, pose.z, pose.hx, pose.hz));
+  const startRadiusRange = {
+    low: Math.min(nominalStartRadius, ...startRadii),
+    high: Math.max(nominalStartRadius, ...startRadii),
+  };
   return {
     // A stream of its own, so the slide's shape cannot shift because some
     // other ride changed how many random draws it takes.
@@ -1385,13 +1502,22 @@ export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
     // replaced, and what it cost seed 5.
     maxLength: MAX_RIDEABLE_LENGTH,
     closed: false,
-    startPoses: doorPoses(doorCentre),
+    startPoses,
     endPoses: pitPoses(),
     // The cheap per-piece prefilter, on the length the ride asks for. Exact
     // enough to keep the search away from the castle and out of the coaster's
     // general area; `satisfies` below is what actually decides.
-    clear: (x, z, radius, distanceAlong) =>
-      chuteMayPass(x, z, radius, distanceAlong, desiredLength, nominalStartRadius),
+    clear: (x, z, radius, distanceAlong, toFinish) =>
+      chuteMayPass(
+        x,
+        z,
+        radius,
+        distanceAlong,
+        desiredLength,
+        nominalStartRadius,
+        toFinish,
+        startRadiusRange,
+      ),
     satisfies: (candidate) => unrideableComplaint(candidate) === null,
     boundary,
     corridorRadius: CORRIDOR_RADIUS,
@@ -1663,7 +1789,7 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
  * ride rideable rather than a lazy river, and it is checked here so that the
  * answer has one home. See {@link MAX_RIDEABLE_LENGTH}.
  *
- * **Cruiser air** and **tower clearance** qualify because both `clearsCruiser`
+ * **Cruiser air** and **tower clearance** qualify because both `cruiserFoulsEveryHeight`
  * and `clearsTowers` take the height as an argument, so during the search both
  * were answered against an *estimated* length. Everything else the search checks
  * — the castle rectangle, the park's other plots, the boundary, the chute
@@ -1718,6 +1844,23 @@ function chuteComplaint(points: readonly Vector3[]): string | null {
       `fouls the Sky Cruiser, only ${worst.toFixed(2)} m of air ` +
       `at (${worstAt.x.toFixed(1)}, ${worstAt.y.toFixed(1)}, ${worstAt.z.toFixed(1)}) ` +
       `against ${CRUISER_AIR} m required`
+    );
+  }
+
+  // The trough's underside stays out of the ground. Nothing asked this before,
+  // and the chute's heights are a smoothstep in world `y` chosen without
+  // looking at the ground under the route, so a route that ran out over
+  // rising ground simply went into it: measured on this branch, seed 326's
+  // chute reached 0.48 m *below* the grass 8 m before the pit. A faster search
+  // (it stopped exploring routes that could never finish under the length
+  // ceiling) then found routes on seeds 11 and 24 that did the same, by up to
+  // 1.47 m — so it is asked here, where the search can backtrack over it.
+  for (const point of points) {
+    const underside = altitudeAt(point.x, point.y, point.z) - CHUTE_ENVELOPE.below;
+    if (underside >= 0) continue;
+    return (
+      `runs into the ground at (${point.x.toFixed(1)}, ${point.y.toFixed(1)}, ` +
+      `${point.z.toFixed(1)}), its underside ${(-underside).toFixed(2)} m below the grass`
     );
   }
 

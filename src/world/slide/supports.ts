@@ -9,7 +9,7 @@ import { terrainHeight } from '../terrain';
 // `./solve`, not `./plan`: these two are plan-view geometry helpers, and
 // importing them has no business triggering the three-and-a-half-second solve
 // that `plan.ts` runs to initialise `SLIDE_PLAN`. See `slide/plan.ts`.
-import { cruiserCrossesColumn, insideCastle } from './solve';
+import { carSweepsColumn, cruiserCrossesColumn, insideCastle } from './solve';
 
 /**
  * **Legs to stand the ginormous slide on.**
@@ -170,6 +170,8 @@ export function planSlideLegs(
       // The column, not the top of it: the chute flies over the coaster and a
       // leg dropped from there would go straight through it.
       if (cruiserCrossesColumn(point.x, point.z, ground, point.y)) continue;
+      // ...and of the car as it is drawn, leant onto the sphere. See there.
+      if (carSweepsColumn(point.x, point.z, ground, point.y, FOOT_RADIUS)) continue;
       if (!isClear(point.x, point.z, GROUND_CLEARANCE)) continue;
       if (distanceToPath(point.x, point.z) < PATH_CLEARANCE) continue;
       // The coaster's lesson: a post in the gap between two plots pinches shut

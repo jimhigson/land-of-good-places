@@ -188,11 +188,42 @@ export type FoliagePart = TreePart;
 export interface FoliageOccluder {
   readonly x: number;
   readonly z: number;
+  /**
+   * **The flat-frame column this tree stands in** — the very `(x, z)` its trunk
+   * collider was registered at, and the one {@link ClimbableTreeSeed} records.
+   *
+   * {@link x}/{@link z} are *not* that, and have not been since the trees
+   * started leaning: they are the **drawn** centre of the widest canopy blob,
+   * which `placeOnSphere` slides outward along the local up. Measured on the
+   * canonical seed, the two are **1.67 m apart at a radius of 80 m and 2.94 m
+   * at 176 m** — so any code that used `x`/`z` as "where this tree is on the
+   * ground" silently stopped finding it.
+   *
+   * Two live bugs came from exactly that, both found by `check:climb-wave`
+   * going red on the sphere branch: {@link Scenery.clearTreesNear} matched a
+   * felled tree against {@link climbableTrees} by `x`/`z` and so **never**
+   * matched — a felled tree stayed climbable — and the fell search itself
+   * probed the canopy's slid centre against the trunk's own radius. Both ask
+   * about the foot, so both ask this.
+   */
+  readonly footX: number;
+  /** See {@link footX}. */
+  readonly footZ: number;
   /** Vertical centre of the tree's widest canopy blob — the occlusion test's reference point. */
   readonly centreY: number;
   /** Radius of that widest blob. */
   readonly radius: number;
-  /** Trunk plus every canopy/cone blob, in world space, for a matching stand-in. */
+  /**
+   * Trunk plus every canopy/cone blob, for a matching stand-in — **in the flat
+   * frame, not in world space.** Each `position` is an `(x, z)` and a height
+   * above the ground in that column, exactly as the tree was rolled; the drawn
+   * instance is that part put through `placeOnSphere` (`makeInstanced`,
+   * `FoliageFade`), which lifts it along the leaning local up and so slides it
+   * outward. Anything that measures these against drawn geometry must map them
+   * the same way first, or it counts the lean zero times or twice — `TreeFact`
+   * did the latter and reported a tree standing on the railway (#653, #661).
+   * For where the tree itself stands, use {@link footX}/{@link footZ}.
+   */
   readonly parts: readonly FoliagePart[];
 }
 
@@ -391,8 +422,10 @@ export class Scenery {
    * loops walk from the end backwards so an earlier splice never invalidates
    * a later index still to be checked. A felled tree that happened to be
    * climbable also comes out of {@link climbableTreesMutable} (matched by
-   * position, since that list is a *subset* of the trees and does not share
-   * their indices).
+   * `footX`/`footZ`, since that list is a *subset* of the trees and does not
+   * share their indices — and **not** by `x`/`z`, which is the canopy's drawn
+   * centre and is metres away from the foot on the sphere; see
+   * {@link FoliageOccluder.footX}).
    *
    * Must run before anything reads these lists and keeps its own copy of an
    * index into them — `World.ts` builds the Sky Cruiser (and so calls this)
@@ -424,7 +457,9 @@ export class Scenery {
     for (let i = 0; i < this.occludersMutable.length; i += 1) {
       const tree = this.occludersMutable[i]!;
       const trunk = this.treeColliders[i]!;
-      if (Math.hypot(tree.x - x, tree.z - z) < radius + trunk.radius) return true;
+      // The **foot**, not the canopy's drawn centre: `trunk.radius` is the
+      // radius of the collider standing at `(footX, footZ)`. See `footX`.
+      if (Math.hypot(tree.footX - x, tree.footZ - z) < radius + trunk.radius) return true;
     }
     for (let i = 0; i < this.bushesMutable.length; i += 1) {
       const bush = this.bushesMutable[i]!;
@@ -438,11 +473,11 @@ export class Scenery {
     for (let i = this.occludersMutable.length - 1; i >= 0; i -= 1) {
       const tree = this.occludersMutable[i]!;
       const trunk = this.treeColliders[i]!;
-      if (Math.hypot(tree.x - x, tree.z - z) >= radius + trunk.radius) continue;
+      if (Math.hypot(tree.footX - x, tree.footZ - z) >= radius + trunk.radius) continue;
       this.setTreeHidden(i, true);
       this.collision.removeCircle(trunk.id);
       const climbableIndex = this.climbableTreesMutable.findIndex(
-        (seed) => seed.x === tree.x && seed.z === tree.z,
+        (seed) => seed.x === tree.footX && seed.z === tree.footZ,
       );
       if (climbableIndex !== -1) this.climbableTreesMutable.splice(climbableIndex, 1);
       this.occludersMutable.splice(i, 1);
@@ -677,7 +712,9 @@ function buildFoliage(collision: CollisionWorld): {
     const lean = tree.lean;
 
     // Occlusion bookkeeping for this tree (see `FoliageOccluder`/
-    // `world/FoliageFade.ts`): every part that makes it up, in world space,
+    // `world/FoliageFade.ts`): every part that makes it up, in the FLAT frame
+    // (a column and a height above its ground — `placeOnSphere` puts them on
+    // the sphere when drawn; `footX`/`footZ` is where the tree stands),
     // plus a rough bounding sphere (the widest blob's centre and radius) —
     // good enough for a cheap "does the sightline pass near here" test
     // without needing the real silhouette. `fileTreeParts` files each part
@@ -744,6 +781,8 @@ function buildFoliage(collision: CollisionWorld): {
     occluders.push({
       x: occluderCentre.x,
       z: occluderCentre.z,
+      footX: x,
+      footZ: z,
       centreY: occluderCentre.y,
       radius: tree.wideRadius,
       parts,

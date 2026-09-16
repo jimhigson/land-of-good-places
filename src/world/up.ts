@@ -1,5 +1,6 @@
 import { Euler, Quaternion, Vector3, type Object3D } from 'three';
 import { SPACE_GARDEN, spaceAt } from './spaces';
+import { screenBasis3D, type ScreenBasis3D } from '../core/screenBasis';
 import { INDOOR_UP, tiltToSphere, upAt } from './terrain';
 
 /**
@@ -68,10 +69,56 @@ export function eyeForFocus(
   eye: Vector3,
   up: Vector3,
 ): void {
-  upFor(focus.x, focus.y, focus.z, up);
-  _eyeTilt.setFromUnitVectors(INDOOR_UP, up);
+  rigTiltAt(focus, up, _eyeTilt);
   eye.set(flatOffset.x, flatOffset.y, flatOffset.z).applyQuaternion(_eyeTilt).add(focus);
 }
+
+/**
+ * The rotation a fixed-angle rig is carried through at `focus`, and the up it
+ * carries it to — the one owner shared by {@link eyeForFocus} (where the eye
+ * goes) and {@link screenBasis3DAt} (which way the picture's axes point), so the
+ * two can never solve different rotations.
+ */
+function rigTiltAt(
+  focus: { readonly x: number; readonly y: number; readonly z: number },
+  up: Vector3,
+  tilt: Quaternion,
+): Quaternion {
+  upFor(focus.x, focus.y, focus.z, up);
+  return tilt.setFromUnitVectors(INDOOR_UP, up);
+}
+
+/**
+ * **The screen's right and up, in world space, for the rig {@link eyeForFocus}
+ * builds over `focus`.**
+ *
+ * `core/screenBasis.ts`'s `screenBasis3D(yaw, pitch)` is the flat-frame answer —
+ * the camera at the park's centre. `IsoCamera` rotates its whole rig by the tilt
+ * at its focus (the offset *and* `camera.up`), so the axes it renders with are
+ * that flat basis carried through the same rotation. This is that, and it is
+ * here beside `eyeForFocus` so the two cannot solve different rotations.
+ *
+ * Found by `check:keyring-view`: `KeychainShop` cached the flat basis as a
+ * module constant and framed its rack about it, while the rendered axes leant
+ * with the stall — a drift of **6.07e-2** at scale 1 (1.81e-1 at 2.34x). Indoors
+ * the tilt is the identity and this is exactly `screenBasis3D`.
+ */
+export function screenBasis3DAt(
+  focus: { readonly x: number; readonly y: number; readonly z: number },
+  yaw: number,
+  pitch: number,
+): ScreenBasis3D {
+  const flat = screenBasis3D(yaw, pitch);
+  rigTiltAt(focus, _basisUp, _basisTilt);
+  const right = _basisRight.set(flat.rightX, flat.rightY, flat.rightZ).applyQuaternion(_basisTilt);
+  const up = _basisScreenUp.set(flat.upX, flat.upY, flat.upZ).applyQuaternion(_basisTilt);
+  return { rightX: right.x, rightY: right.y, rightZ: right.z, upX: up.x, upY: up.y, upZ: up.z };
+}
+
+const _basisUp = /* @__PURE__ */ new Vector3();
+const _basisTilt = /* @__PURE__ */ new Quaternion();
+const _basisRight = /* @__PURE__ */ new Vector3();
+const _basisScreenUp = /* @__PURE__ */ new Vector3();
 
 const _tilt = /* @__PURE__ */ new Quaternion();
 const _euler = /* @__PURE__ */ new Euler();

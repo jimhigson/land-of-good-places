@@ -24,7 +24,7 @@ import {
   WINDOW_HALF_WIDTH,
   WINDOW_TRACK_Y,
   castleClear,
-  castleY,
+  castleDeckClearanceAt,
   crossingBand,
   insideCastleFootprint,
 } from '../building/cruiserWindow';
@@ -1381,12 +1381,21 @@ export function* coasterProfileSearch(
   const castleSpan = spanInsideCastle((d, into) => plan.pointAt(d, into), plan.length);
   yield 0;
   if (castleSpan) {
-    const windowY = castleY(WINDOW_TRACK_Y);
+    // **The window's height is a plane, not a number.** This was one
+    // `windowY = BUILDING_BASE_Y + WINDOW_TRACK_Y` held across the whole
+    // traverse — "level, not merely low", which is still exactly what is
+    // wanted, but *level* now means level **with the castle's own deck**
+    // rather than with world `+Y`. The shell leans 12.44°, so a constant
+    // world `y` rises out of the window over the ~20 m the loop spends inside
+    // the building, by up to 4.3 m: out through the lintel on one side and
+    // into the stonework on the other. Asked per column, both openings sit at
+    // the same castle-local height and the surround stays a plain rectangle,
+    // which is what the paragraph above asked for in the first place.
     for (let i = 0; i < controls; i += 1) {
       const s = (i / controls) * plan.length;
       const away = outsideSpan(castleSpan, s, plan.length);
       const spot = flat[i]!;
-      const wanted = windowY - terrainHeight(spot.x, spot.z);
+      const wanted = castleDeckClearanceAt(WINDOW_TRACK_Y, spot.x, spot.z);
       if (away < WINDOW_FLAT) heights[i] = wanted;
       else if (away < WINDOW_FLAT + WINDOW_RAMP) {
         const t = (away - WINDOW_FLAT) / WINDOW_RAMP;

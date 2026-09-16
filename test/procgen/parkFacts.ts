@@ -175,7 +175,9 @@ export interface WallFact {
  * from and taking the furthest that any of them reaches.
  */
 export interface TreeFact {
+  /** The tree's foot, in the flat frame: `FoliageOccluder.footX`, never its drawn canopy centre. */
   readonly x: number;
+  /** See {@link x}. */
   readonly z: number;
   readonly footprint: number;
 }
@@ -1531,15 +1533,27 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     kind: run.kind,
   }));
 
+  // **Measured in the flat frame, about the foot** — issue #653. A tree's
+  // `parts` are flat-frame authoring positions (`FoliageFade` puts them on the
+  // sphere with `placeOnSphere`), while `tree.x`/`tree.z` is the canopy's
+  // *drawn* centre, slid outward along the local up. Reading one against the
+  // other inflated the footprint by that slide (1.69 m on the seed-131 tree
+  // beside the railway) *and* moved the centre by it, so a tree whose trunk
+  // stands 5.40 m off the rail, canopy reaching 2.25 m, was reported 0.20 m
+  // past the rail's centre line. The rails, the walls, the bushes and the
+  // paving are all placed through the same map from the same flat frame, so
+  // the foot is the honest centre to measure them from: a rigid lean moves a
+  // canopy and the carriage passing it by the same amount at the same height.
+  // `FoliageOccluder.footX`/`footZ` is the one owner of where that foot is.
   const trees: TreeFact[] = world.scenery.foliageOccluders.map((tree) => {
     let footprint = 0;
     for (const part of tree.parts) {
       if (part.kind === 'trunk') continue;
-      const offset = Math.hypot(part.position.x - tree.x, part.position.z - tree.z);
+      const offset = Math.hypot(part.position.x - tree.footX, part.position.z - tree.footZ);
       const reach = offset + Math.max(part.scale.x, part.scale.z);
       if (reach > footprint) footprint = reach;
     }
-    return { x: tree.x, z: tree.z, footprint };
+    return { x: tree.footX, z: tree.footZ, footprint };
   });
 
   const bushes: BushFact[] = world.scenery.bushes.map((bush) => ({

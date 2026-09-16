@@ -1,6 +1,15 @@
 import { BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_WALL_THICKNESS } from '../../core/constants';
 import { CART_ENVELOPE } from '../coaster/cart';
-import { BUILDING_BASE_Y, BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
+import { Vector3 } from 'three';
+import { terrainHeight, upAt } from '../terrain';
+import {
+  BUILDING_BASE_Y,
+  BUILDING_CENTRE_X,
+  BUILDING_CENTRE_Z,
+  CASTLE_FRAME,
+  castleToWorld,
+  worldToCastle,
+} from './layout';
 
 /**
  * **The castle, as the Sky Cruiser's route solver sees it** — and the opening
@@ -186,21 +195,107 @@ export const CROSSING_MAX_Y = CASTLE_WALL_HEIGHT - WINDOW_ABOVE_TRACK - 0.7;
  */
 export const WINDOW_TRACK_Y = 5.6;
 
-/** Is a world plan point inside the castle's outer footprint, plus `pad`? */
+/**
+ * Is a world plan point inside the castle's outer footprint, plus `pad`?
+ *
+ * Asked **on the castle's own deck plane**, because a plan question has no
+ * height in it and the deck is where everything that asks this — the coaster's
+ * castle span, above all — actually passes through the building. See
+ * {@link toCastleLocal} for why a plan alone stopped being enough.
+ */
 export function insideCastleFootprint(x: number, z: number, pad: number): boolean {
-  const { lx, lz } = toCastleLocal(x, z);
+  _probe.set(x, BUILDING_BASE_Y, z);
+  const { lx, lz } = toCastleLocal(_probe);
   return Math.abs(lx) <= CASTLE_OUTER_X + pad && Math.abs(lz) <= CASTLE_OUTER_Z + pad;
 }
 
-/** World y of castle-local y. The facade is never rotated, only translated. */
-export function castleY(localY: number): number {
-  return BUILDING_BASE_Y + localY;
+/**
+ * **A world point in the castle's own axes** — `lx` across the side walls,
+ * `ly` up from the ground-floor deck, `lz` along the facade.
+ *
+ * This used to be two flat formulas kept in step by hand, and its docblock said
+ * *"the facade is never rotated, only translated"*: `castleY(localY) =
+ * BUILDING_BASE_Y + localY`, and `toCastleLocal(x, z) = { x −
+ * BUILDING_CENTRE_X, z − BUILDING_CENTRE_Z }` with the height worked out
+ * separately at every call site. That sentence stopped being true when the
+ * castle's plot began to lean: measured on the canonical seed, **every mesh in
+ * the castle is rotated 12.44°**, and its own courtyard floor spans **6.44 m of
+ * world `y`** across a footprint the flat formulas call level.
+ *
+ * What it cost: the Sky Cruiser's loop is *solved* against this description and
+ * its window is *cut* from it, so a level slice was being taken through a
+ * leaning building. `check:cruiser-clearance` and `check:castle-window` each
+ * reported the car inside real stonework — `cruiser-window-stones`,
+ * `castle-wall-lintel`, `crenellations`, `castle-roof-deck`,
+ * `castle-roof-planters` and both wall bands.
+ *
+ * It is now the inverse of {@link CASTLE_FRAME}, which **is** the transform
+ * `AnchorPlots.standInPlot` stands the shell at rather than a second opinion
+ * about it — so the described castle and the drawn castle cannot disagree.
+ *
+ * Takes the whole point, not an `(x, z)`, because on a leaning body the three
+ * components mix: there is no `lx` that does not depend on `y`. That is also
+ * why the old pair could not simply be corrected in place.
+ */
+export function toCastleLocal(
+  world: Readonly<Vector3>,
+): { lx: number; ly: number; lz: number } {
+  worldToCastle(world, _local);
+  return { lx: _local.x, ly: _local.y, lz: _local.z };
 }
 
-/** Castle-local coordinates of a world point, in the plan. */
-export function toCastleLocal(x: number, z: number): { lx: number; lz: number } {
-  return { lx: x - BUILDING_CENTRE_X, lz: z - BUILDING_CENTRE_Z };
+/**
+ * **How far above the ground in the column at `(x, z)` a route point must be
+ * authored so that, once drawn, it stands `localY` above the castle's deck.**
+ *
+ * The route is solved flat — an `(x, z)` and a height above the ground there —
+ * and drawn through `placeOnSphere`, which stands that height up along the local
+ * up at its own column. The castle is a rigid body leant by {@link CASTLE_FRAME}.
+ * So the question the solver has to ask is not "what world `y` is the deck
+ * here" but "what authored height lands the *drawn* car at the window", and it
+ * is linear in that height:
+ *
+ * ```
+ * drawn = G + u·h          (G the ground point, u its up)
+ * ly(h) = (G − O)·U + h (u·U)   (O, U the castle's origin and up)
+ * h     = (localY − (G − O)·U) / (u·U)
+ * ```
+ *
+ * History, both measured at scale 1 on the canonical seed, castle leaning
+ * 12.44°:
+ *
+ * - `castleY(localY)` returned one world `y` for the whole building — a level
+ *   slice through a leaning shell, **4.3 m** out over the ~20 m crossing.
+ * - `castleDeckYAt` then asked the deck plane per column in world `y`, which
+ *   put the **flat** route point on the plane. The drawn car it becomes sat
+ *   **0.144 m** higher and up to **0.403 m** along the facade from it, so the
+ *   window was cut round a car nobody sees.
+ *
+ * This answers for the drawn car, which is the one `check:castle-window` and
+ * `check:cruiser-clearance` now sweep.
+ */
+export function castleDeckClearanceAt(localY: number, x: number, z: number): number {
+  CASTLE_FRAME.up(_deckUp);
+  CASTLE_FRAME.at.toWorld(_deckOrigin);
+  _deckGround.set(x, terrainHeight(x, z), z);
+  upAt(_deckGround.x, _deckGround.y, _deckGround.z, _groundUp);
+  const groundLocal = _deckRel.subVectors(_deckGround, _deckOrigin).dot(_deckUp);
+  return (localY - groundLocal) / _groundUp.dot(_deckUp);
 }
+
+const _deckUp = /* @__PURE__ */ new Vector3();
+const _deckOrigin = /* @__PURE__ */ new Vector3();
+const _deckGround = /* @__PURE__ */ new Vector3();
+const _groundUp = /* @__PURE__ */ new Vector3();
+const _deckRel = /* @__PURE__ */ new Vector3();
+
+/** The inverse of {@link toCastleLocal}: castle-local metres, in world space. */
+export function fromCastleLocal(lx: number, ly: number, lz: number, target: Vector3): Vector3 {
+  return castleToWorld(_local.set(lx, ly, lz), target);
+}
+
+const _probe = /* @__PURE__ */ new Vector3();
+const _local = /* @__PURE__ */ new Vector3();
 
 /** World coordinates of a castle-local plan point. */
 export function toWorld(lx: number, lz: number): { x: number; z: number } {
