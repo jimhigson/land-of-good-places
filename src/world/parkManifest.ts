@@ -169,9 +169,13 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
   {
     id: 'waterFight',
     footprint: { kind: 'rect', halfX: 12, halfZ: 11 },
-    // The pools and hedges are seeded per park and the worst sweep measured
-    // 18.4 (seed 5); 16.3 was only ever the canonical seed's number.
-    boundingRadius: 18.5,
+    // The pools and hedges are seeded per park. The worst sweep measured 18.4
+    // (seed 5) on the flat park; on the sphere the rim dressing leans outward
+    // and the worst of seeds 0–15 built out to 18.8 (seed 12; 18.6 on seed 6),
+    // so the declaration follows what is built — 16.3 was only ever the
+    // canonical seed's number. `check:park`'s `anchor.reach:waterFight` holds
+    // this at zero allowance.
+    boundingRadius: 19,
     band: { min: 24, max: 80 },
   },
   {

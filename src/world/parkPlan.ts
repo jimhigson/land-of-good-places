@@ -61,6 +61,8 @@ import { drawnSamplesFor } from './pathGraph';
 import { entranceRoadClaims, ROAD_FEATURE } from './entrance/roadCorridor';
 import { offerPrewarmedGroundClaims } from '../boot/groundClaimsPrewarm';
 import { Rng } from '../core/mathUtils';
+import { PARK_BOUNDARY } from './boundary';
+import { PLAYER_RADIUS } from '../core/constants';
 
 export interface TrainDecision {
   readonly route: TrainRoute;
@@ -311,7 +313,21 @@ function builders(): readonly FeatureBuilder[] {
       state.pathGraph = graph;
       const train = planPart('train');
       const routes = graph.edges.filter((edge) => edge.paved).map((edge) => edge.route);
-      const screen = screenDrawnPathsForOffSiteCrossings(train.route, drawnSamplesFor(routes));
+      const drawn = drawnSamplesFor(routes);
+      // A drawn path must stay inside the park. On seed 4 `spur-waterFight`
+      // was routed 1.8 m OUTSIDE the boundary wall, and its waypoint seeds
+      // had nowhere to stand (`poi.nospot`). That is a plot standing too near
+      // the wall for its spur — the layout's decision, so the refusal names it.
+      const outside = drawn.find((sample) => PARK_BOUNDARY.distanceToEdge(sample.x, sample.z) < PLAYER_RADIUS);
+      if (outside) {
+        delete state.pathGraph;
+        return refusal(
+          `paths: a drawn path leaves the park at (${outside.x.toFixed(1)}, ${outside.z.toFixed(1)}), ` +
+            `${(-PARK_BOUNDARY.distanceToEdge(outside.x, outside.z)).toFixed(2)} m past the boundary wall`,
+          { consumed: ['layout'] },
+        );
+      }
+      const screen = screenDrawnPathsForOffSiteCrossings(train.route, drawn);
       if (screen.fouls.length > 0) {
         delete state.pathGraph;
         const foul = screen.fouls[0] as (typeof screen.fouls)[number];
