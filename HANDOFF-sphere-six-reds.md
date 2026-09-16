@@ -153,3 +153,20 @@ are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
 - **All five are the cure already written on `eng/rides-sphere`** (unmerged, no PR, idle 2 days):
   `rideFrame` leans both carts (Coaster + RailRace) and the race rig; its own handoff lists the
   same six remaining. **Do not fix twice** — Overseer to route.
+
+### climb-wave (ruling 5) — the 29.6% was the instrument
+
+- The check viewed a leant child down a **plumb** camera (`VIEW_DIR = −cameraOffset`, world
+  constant). The game's `IsoCamera` rotates the offset by the local up (`eyeForFocus`). Committed:
+  view per pose from `eyeForFocus`. Result: **hand 100.0% on 41/41**. Instrument control at
+  `GROUND_SPHERE_RADIUS = 1e5`: hand 100% 42/42, body 13–60 px, exit 0.
+- **No arm swing-out was needed or tried** — the population split (≥50%: 36, <50%: 5 at
+  29.6–35.3%) was a plumb-camera artefact.
+- **Consequence for the game:** in the frame she and the rig share, the camera sits at local yaw
+  `CAMERA_FACING`. `yawForBearing` (predecessor's `TreeClimbing` change) was validated against the
+  plumb camera. A (yawForBearing) and B (CAMERA_FACING) give identical hand/body numbers at scale 1,
+  so it is not decided by this check; the aim clause measures a plumb kid at the origin. **Open.**
+- **New red:** body 0 px at tree 0 @270°, 1 px tree 13 @90°, 8 px tree 34 @0° (needs 12), in both A
+  and B. Suspect: `canopyMeshes` stands in each blob with `position`/`scale` only; drawn instances
+  may carry the sphere lean in their matrix (`makeInstanced`) — compare against `getMatrixAt`.
+  Undiagnosed.
