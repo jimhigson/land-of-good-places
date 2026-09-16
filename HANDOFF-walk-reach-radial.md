@@ -23,7 +23,9 @@ Model: Claude Opus 5 (1M), chosen by the Overseer. Branch `eng/walk-reach-radial
 - After: 0 refused / 0 admitted on the real park; synthetic up-ceiling 1.4/1.4/1.2/0.8/0.8/0.67 at r=20..140.
 - check:deck-fallthrough: deck now local-frame, ramp at origin -> 0.512/0.512/0.670/1.670, OK.
 - check:hotel OK (11 carried, worst 0.052); mutation (7 residents -3 m) -> 7 named, exit 1.
-- Next: full `pnpm run check`, then `test:procgen`; then PR against feat/sphere-combined.
+- Full check: only failures are pre-existing on base with identical messages: tie-frame, cruiser-clearance,
+  castle-window, keyring-view, climb-wave. test:procgen: 80 failed / 590 passed, names identical to base.
+- PR opened against feat/sphere-combined.
 
 ## Plan (the cure)
 
