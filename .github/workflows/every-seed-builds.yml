@@ -1,0 +1,65 @@
+name: Every seed builds
+
+# Builds seeds 0–15 through the real `check:park`, one process each, and
+# ratchets against `scripts/every-seed-builds-baseline.mts`: today's unbuilt
+# seeds by class, keyed on seed number. Red if a further seed stops building,
+# red if a seed starts building without the baseline being re-taken, red on an
+# orphaned entry. The endpoint is an empty baseline — every seed builds, Jim's
+# totality requirement (6 Sep 2026, "fix it properly") mechanised. See the
+# script's header and `docs/DESIGN-round-robin-generation.md`, "Totality,
+# ruled and mechanised".
+#
+# ## Why this is its own workflow rather than a step in `checks.yml`
+#
+# The same reason as `swept-bus.yml` and `coplanar.yml`: `checks.yml` last ran
+# 25m56s against its own 30-minute cap, and this builds sixteen parks (measured
+# locally: ~10 s a seed on a 14-core Mac, ~65 s wall on 4 lanes; expect several
+# minutes on a runner). A job killed by `timeout-minutes` reports as `cancelled`
+# — nothing goes red — which is how a deploy was lost on 29 August.
+#
+# ## This must be made a required status check on `main`
+#
+# It is not one automatically, and adding it needs a repository setting only Jim
+# can make — CLAUDE.md's "report, do not act". Until it is added, this workflow
+# runs and goes red but **does not block a merge**.
+#
+# **Do not rename this job.** A required status check is matched by name, so a
+# rename stops it gating merges with nothing going red.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: every-seed-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  every-seed-builds:
+    name: Every seed builds
+    runs-on: ubuntu-latest
+    # Generous: a runner having a slow day should say so by being slow, not by
+    # being cancelled. Re-decide from the measured number once there is one.
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build every seed
+        run: pnpm run check:every-seed-builds

@@ -15,7 +15,7 @@
  * suite owns the invariants about whether the park's scattered furniture is
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
-import { Box3, Mesh, Quaternion, Vector3 } from 'three';
+import { Box3, InstancedMesh, Mesh, Quaternion, Vector3 } from 'three';
 import { measureGateArch } from '../../scripts/gate-arch-measure.mts';
 import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
@@ -594,6 +594,38 @@ export interface DrawnReachFact {
   readonly excludedRoots: readonly string[];
 }
 
+/**
+ * **One Rail Race ring's supports, as the registry holds them and as they were
+ * drawn** — stage 3, step 2: the trestle legs are `footprint` claims.
+ *
+ * `fromDrawn` is rebuilt from the instance buffers of the three trestle meshes
+ * (`railRace:trestle-legs`, `-branches-lower`, `-branches-upper`), pairing each
+ * trunk with its two lower and four upper branches by the index order
+ * `track.ts` draws them in, and run through `track.ts`'s own `trestleClaims` —
+ * the one function the search asked with and the builder committed. Gathered
+ * here, after the world is built, for the reason `RoadCorridorFacts` is:
+ * `track.ts` reaches `parkLayout.ts`, and a static import of it into a test
+ * file would pin every seed to the canonical park.
+ */
+export interface RailRaceSupportFacts {
+  readonly label: 'walk-past' | 'race';
+  /** The feature name the ring committed under — its group name. */
+  readonly feature: string;
+  /** What the built park's registry actually holds for it. */
+  readonly claimed: readonly Claim[];
+  /** The same claims, rebuilt from the drawn struts through the one owner. */
+  readonly fromDrawn: readonly Claim[];
+  /** How many drawn struts (trunks and branches) went into `fromDrawn`. */
+  readonly struts: number;
+  /** One entry per drawn trunk: how far its foot stands from under its top, and how tall it is. */
+  readonly trees: readonly {
+    readonly footX: number;
+    readonly footZ: number;
+    readonly lean: number;
+    readonly trunkHeight: number;
+  }[];
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
@@ -601,6 +633,24 @@ export interface ParkFacts {
   readonly roadCorridor: RoadCorridorFacts;
   /** The castle's four corner turrets — see {@link CastleTurretFact}. */
   readonly castleTurrets: readonly CastleTurretFact[];
+  /** Each Rail Race ring's supports, claimed and drawn — see {@link RailRaceSupportFacts}. */
+  readonly railRaceSupports: readonly RailRaceSupportFacts[];
+  /**
+   * The run the cat bus actually drives, sampled: from where its body first
+   * appears to where it vanishes along the road's own arc
+   * (`entranceBusArriveAt()` to `entranceBusVanishAt()`, half a bus beyond
+   * each), a point every `PLAYER_RADIUS` at the bus's centre line and both
+   * sides, each with the road's facing there. Read from the arrival's own
+   * owners (`entrance/roadRoute.ts`, `entrance/catBus.ts`), never restated, so
+   * an invariant can ask whether the road's corridor claim covers every metre
+   * of it. Chart coordinates, like the claims.
+   */
+  readonly busRun: {
+    readonly samples: readonly { readonly x: number; readonly z: number }[];
+    /** Metres of arc sampled, for the coverage line. */
+    readonly length: number;
+    readonly halfWidth: number;
+  };
   /**
    * Headroom under the finish rainbow, per ring per lane — see
    * {@link ArchClearanceFact}.
@@ -1497,6 +1547,106 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     z: tower.z,
     radiusBottom: tower.radiusBottom,
   }));
+
+  // The Rail Race's supports, as claimed and as drawn — see
+  // {@link RailRaceSupportFacts}. `track.ts` reaches `parkLayout.ts`, so it is
+  // imported here, after this seed's world exists, never at the top of a test.
+  const { trestleClaims } = await import('../../src/world/railRace/track.ts');
+  const { unplaceFromSphere } = await import('../../src/world/terrain.ts');
+  const railRaceSupports: RailRaceSupportFacts[] = [];
+  {
+    const railRace = world.railRace;
+    // Aliased: a later block in this function destructures `Matrix4` from its
+    // own dynamic import, which would shadow a top-level one into the TDZ here.
+    const { Matrix4: StrutMatrix4 } = await import('three');
+    const matrix = new StrutMatrix4();
+    const centre = new Vector3();
+    const axis = new Vector3();
+    /**
+     * Both ends of drawn strut `i` of an instanced cylinder stood by `track.ts`'s
+     * `strut` — **mapped back to the flat frame the tree was solved in.** The
+     * struts are drawn leant onto the sphere (`leanTrestleTree`); the claims
+     * and the lean bound are made on the flat solve, in chart coordinates. So
+     * each drawn end goes through `unplaceFromSphere` (the exact inverse of the
+     * lean, round trip 9e-14 m) before it is compared with anything the
+     * registry holds. Read straight as flat, a rail-height point 100 m out is
+     * metres off its own plan — the lean itself, not an error.
+     */
+    const ends = (mesh: InstancedMesh, i: number): { from: Vector3; to: Vector3 } => {
+      mesh.getMatrixAt(i, matrix);
+      centre.setFromMatrixPosition(matrix);
+      axis.setFromMatrixColumn(matrix, 1);
+      return {
+        from: unplaceFromSphere(centre.clone().addScaledVector(axis, -0.5)),
+        to: unplaceFromSphere(centre.clone().addScaledVector(axis, 0.5)),
+      };
+    };
+    for (const [label, feature, scale] of [
+      ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute.scale],
+      ['race', 'railRace:race-ring', railRace.raceRoute.scale],
+    ] as const) {
+      const group = railRace.group.getObjectByName(feature);
+      const legs = group?.getObjectByName('railRace:trestle-legs');
+      const lower = group?.getObjectByName('railRace:trestle-branches-lower');
+      const upper = group?.getObjectByName('railRace:trestle-branches-upper');
+      if (
+        !(legs instanceof InstancedMesh) ||
+        !(lower instanceof InstancedMesh) ||
+        !(upper instanceof InstancedMesh)
+      ) {
+        railRaceSupports.push({
+          label,
+          feature,
+          claimed: label === 'walk-past' ? railRace.supportClaims.walkPast : railRace.supportClaims.race,
+          fromDrawn: [],
+          struts: 0,
+          trees: [],
+        });
+        continue;
+      }
+      const fromDrawn: Claim[] = [];
+      const trees: RailRaceSupportFacts['trees'][number][] = [];
+      let struts = 0;
+      // `track.ts` draws trestle `i`'s trunk as leg `i`, its two lower branches
+      // as `2i, 2i+1` and its four upper ones as `4i..4i+3` — the tree is
+      // rebuilt from the drawn struts by that order, then run through the one
+      // owner of what a support claims.
+      for (let i = 0; i < legs.count; i += 1) {
+        const trunk = ends(legs, i);
+        const forkNodes = [ends(lower, 2 * i).to, ends(lower, 2 * i + 1).to];
+        const laneTops = [0, 1, 2, 3].map((lane) => ends(upper, 4 * i + lane).to);
+        struts += 7;
+        fromDrawn.push(
+          ...trestleClaims(
+            {
+              laneTops,
+              forkNodes,
+              trunkTop: trunk.to,
+              trunkFoot: trunk.from,
+              ground: trunk.from.y,
+            },
+            scale / railRace.raceRoute.scale,
+          ),
+        );
+        trees.push({
+          footX: trunk.from.x,
+          footZ: trunk.from.z,
+          lean: Math.hypot(trunk.to.x - trunk.from.x, trunk.to.z - trunk.from.z),
+          // flat-ok: both ends were mapped back to the chart by unplaceFromSphere above; y is chart height
+          trunkHeight: trunk.to.y - trunk.from.y,
+        });
+      }
+      railRaceSupports.push({
+        label,
+        feature,
+        // The ring's own slice of the one `railRace` feature — see `RailRace.supportClaims`.
+        claimed: label === 'walk-past' ? railRace.supportClaims.walkPast : railRace.supportClaims.race,
+        fromDrawn,
+        struts,
+        trees,
+      });
+    }
+  }
 
   const { CROSSING_SITES } = await import('../../src/world/train/crossingPlan.ts');
   const { SITE_SNAP_TOLERANCE } = await import('../../src/world/train/crossings.ts');
@@ -3252,9 +3402,41 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     }
   }
 
+  // The bus's run, from the same owners `ArrivalSequence.placeBus` and
+  // `check:swept-bus` read: it drives the road's arc from `entranceBusArriveAt()`
+  // to `entranceBusVanishAt()`, its body reaching half its own length beyond
+  // each, as wide as the bus. Beyond the road's own ends a station is clamped,
+  // so the overhang is carried on straight along the facing there.
+  const { entranceBusArriveAt, entranceBusVanishAt, entranceRoadAt, entranceRoadFacing } =
+    await import('../../src/world/entrance/roadRoute.ts');
+  const { CAT_BUS_LENGTH, CAT_BUS_WIDTH } = await import('../../src/world/entrance/catBus.ts');
+  const busRun = ((): ParkFacts['busRun'] => {
+    const from = entranceBusArriveAt() + CAT_BUS_LENGTH / 2;
+    const to = entranceBusVanishAt() - CAT_BUS_LENGTH / 2;
+    const halfWidth = CAT_BUS_WIDTH / 2;
+    const samples: { x: number; z: number }[] = [];
+    for (let at = from; at >= to; at -= PLAYER_RADIUS) {
+      const station = entranceRoadAt(at);
+      const facing = entranceRoadFacing(at);
+      // The bus's nose points down decreasing `at`: forward is (sin, cos) of
+      // the facing, and its right-hand side is (cos, -sin).
+      const forwardX = Math.sin(facing);
+      const forwardZ = Math.cos(facing);
+      const over = at - station.at;
+      const cx = station.x - forwardX * over;
+      const cz = station.z - forwardZ * over;
+      for (const across of [-halfWidth, 0, halfWidth]) {
+        samples.push({ x: cx + Math.cos(facing) * across, z: cz - Math.sin(facing) * across });
+      }
+    }
+    return { samples, length: from - to, halfWidth };
+  })();
+
   return {
     roadCorridor,
     castleTurrets,
+    railRaceSupports,
+    busRun,
     laneCarriageway,
     laneGreenery,
     laneRoadHalfWidth: ROAD_HALF_WIDTH,

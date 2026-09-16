@@ -175,11 +175,15 @@ import {
   BAR_HALF_SPAN_AT_PARK_SCALE,
   BEAM_DROP,
   forkPlan,
+  maxTrunkLean,
   LEGACY_LEG_FOOT_RADIUS,
   RAIL_GAUGE_AT_PARK_SCALE,
   RAIL_RADIUS_AT_PARK_SCALE,
   SLEEPER_THICKNESS,
+  POST_FOOT_RADIUS,
 } from '../../src/world/railRace/trestleGeometry.ts';
+import { CLAIM_COMPATIBILITY, distanceOutside, shapesOverlap, type Claim } from '../../src/boot/groundClaims.ts';
+import { RAIL_RACE_FEATURE } from '../../src/world/railRace/feature.ts';
 
 /**
  * The narrowest gap a child can actually use.
@@ -3252,6 +3256,15 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   });
 
   // --- 4. only the walk-past ring is solid ----------------------------------
+  // The two rings are ONE rail race drawn at two scales (`railRace/feature.ts`),
+  // and since 7 Sep 2026 they stand on the same slots — so "is there a circle
+  // under this leg" cannot tell a walk-past post from a race post, and a
+  // clause that asked it paid for co-presence exactly as the placer once did.
+  // What is actually meant, measured: every walk-past leg has a collider
+  // centred on its foot at ITS OWN foot radius; and no collider of the RACE
+  // ring's radius stands on a race leg. The radii differ by the ride's scale
+  // (2.5x), so an invisible race post is still detectable — by what it is,
+  // not by where it is.
   const solid: { x: number; z: number; radius: number }[] = [];
   facts.world.collision.forEachCircle((x, z, radius) => {
     solid.push({ x, z, radius });
@@ -3259,6 +3272,28 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
   const matrix = new Matrix4();
   const at = new Vector3();
   const legAxis = new Vector3();
+  const RADIUS_SLACK = 1e-3;
+  const CENTRE_SLACK = 1e-3;
+  // **Precondition, asserted before anything is measured**: the clause tells
+  // the rings apart by foot radius alone, and the two radii differ ONLY by the
+  // ride's own scale (`POST_FOOT_RADIUS × sizeVsRace`, one owner). Were
+  // `RIDE_SCALE` ever 1, a registered race ring would pass here without a
+  // word — so say so, in those terms, rather than pass.
+  {
+    const radii = rings.map((ring) => POST_FOOT_RADIUS * ring.sizeVsRace);
+    for (let a = 0; a < radii.length; a += 1) {
+      for (let b = a + 1; b < radii.length; b += 1) {
+        if (Math.abs((radii[a] as number) - (radii[b] as number)) <= RADIUS_SLACK) {
+          complaints.push(
+            `this clause cannot tell the rings apart: the ${rings[a]?.label} and ${rings[b]?.label} rings' ` +
+              `foot radii are ${(radii[a] as number).toFixed(3)} and ${(radii[b] as number).toFixed(3)} m, within ` +
+              `the ${RADIUS_SLACK} m it discriminates by — it would pass a registered race ring in silence`,
+          );
+          return complaints;
+        }
+      }
+    }
+  }
   for (const ring of rings) {
     const legs = ring.group.getObjectByName('railRace:trestle-legs');
     if (!(legs instanceof InstancedMesh)) {
@@ -3266,6 +3301,7 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
       continue;
     }
     const wantsSolid = ring.label === 'walk-past';
+    const footRadius = POST_FOOT_RADIUS * ring.sizeVsRace;
     for (let i = 0; i < legs.count; i += 1) {
       legs.getMatrixAt(i, matrix);
       // **The foot, not the instance centre.** `track.ts`'s `strut` composes a
@@ -3291,17 +3327,21 @@ const railRaceRingsStandOutsideThePark: Invariant = (facts) => {
       const legLength = legAxis.length() || 1;
       at.addScaledVector(legAxis.divideScalar(legLength), -legLength / 2);
       const found = solid.some(
-        (circle) => Math.hypot(circle.x - at.x, circle.z - at.z) < circle.radius,
+        (circle) =>
+          Math.hypot(circle.x - at.x, circle.z - at.z) < CENTRE_SLACK &&
+          Math.abs(circle.radius - footRadius) < RADIUS_SLACK,
       );
       if (found === wantsSolid) continue;
       complaints.push(
         wantsSolid
-          ? `the walk-past ring's trestle leg at ${fmt([at.x, at.z])} is not solid — it is the ` +
-            `ring that is standing there while a child is on foot, so it has to be something ` +
-            `she bumps into rather than walks through`
-          : `the race ring's trestle leg at ${fmt([at.x, at.z])} registered a collider. That ring ` +
-            `is hidden except mid-race, and CollisionWorld cannot un-register anything, so this ` +
-            `is an invisible solid post standing in the park for the rest of the session`,
+          ? `the walk-past ring's trestle leg at ${fmt([at.x, at.z])} is not solid — no collider of its ` +
+            `own foot radius ${footRadius.toFixed(3)} m is centred on its foot; it is the ring that is ` +
+            'standing there while a child is on foot, so it has to be something she bumps into rather ' +
+            'than walks through'
+          : `the race ring's trestle leg at ${fmt([at.x, at.z])} registered a collider of its own ` +
+            `radius ${footRadius.toFixed(3)} m. That ring is hidden except mid-race, and CollisionWorld ` +
+            'cannot un-register anything, so this is an invisible solid post standing in the park for ' +
+            'the rest of the session',
       );
     }
   }
@@ -9559,6 +9599,18 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
  * time distributed around the track so that each racer has the same total number
  * but not always at the same spots".
  *
+ * **Fairness is a property of the race, and the race happens on the ride-scale
+ * ring only** (ruled 7 Sep 2026): on the walk-past ring "nobody is racing, but
+ * the rivals do not know that" — no standings, no winner, no player. So
+ * equal-per-racer is asserted on the race ring; the walk-past ring, which by
+ * Jim's road rule skips its legs over the bus's road, is held to a different
+ * object, not a weaker number: **each lane's bar count equals the race ring's
+ * count for that lane minus the bars whose slot the road rule did not build on
+ * that ring** — those are named by slot (`RailRace.barsLostToRoad`) and said to
+ * stderr on every seed, so a bar missing for any OTHER reason is still caught,
+ * and the road rule's cost is stated out loud rather than tolerated. The ride
+ * ring may lose none. No-two-touch holds on both rings.
+ *
  * Two claims and two assertions, both read off the built bars rather than off
  * `planHazards`: which lane a bar is on is decided here by which lane's rails it
  * is nearest to, the same technique the dropper check uses — **not** by its
@@ -9572,8 +9624,11 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
  */
 const duckBarsAreOnePerLaneAndNeverTouch: Invariant = (facts) => {
   const complaints: string[] = [];
+  const countsByRing = new Map<string, number[]>();
 
-  for (const ring of builtRings(facts)) {
+  // Race ring first: the walk-past ring is compared against it.
+  const rings = [...builtRings(facts)].sort((a, b) => (a.label === 'race' ? -1 : 0) - (b.label === 'race' ? -1 : 0));
+  for (const ring of rings) {
     const bars = ring.group.getObjectByName('railRace:duck-bars');
     if (!(bars instanceof InstancedMesh)) {
       complaints.push(`the ${ring.label} ring has no duck bars in the built scene to measure`);
@@ -9595,12 +9650,42 @@ const duckBarsAreOnePerLaneAndNeverTouch: Invariant = (facts) => {
     }
 
     const counts = Array.from({ length: lanes }, (_unused, lane) => perLane.get(lane) ?? 0);
-    if (new Set(counts).size !== 1) {
-      complaints.push(
-        `the ${ring.label} ring gives its four racers ${counts.join('/')} duck bars — they must meet ` +
-          'the same number each, which is what makes the race fair now that they no longer meet ' +
-          'them in the same places',
+    countsByRing.set(ring.label, counts);
+    const lost = ring.label === 'race' ? facts.world.railRace.barsLostToRoad.race : facts.world.railRace.barsLostToRoad.walkPast;
+    if (ring.label === 'race') {
+      if (lost.length > 0) {
+        complaints.push(
+          `the race ring lost ${lost.length} duck bar(s) to the road rule (slots ${lost.map((b) => b.slot).join(', ')}) — ` +
+            'the ride-scale ring keeps every leg; it exists only mid-race, when the bus is gone',
+        );
+      }
+      if (new Set(counts).size !== 1) {
+        complaints.push(
+          `the race ring gives its four racers ${counts.join('/')} duck bars — they must meet ` +
+            'the same number each, which is what makes the race fair now that they no longer meet ' +
+            'them in the same places',
+        );
+      }
+    } else {
+      process.stderr.write(
+        lost.length === 0
+          ? `  walk-past ring seed ${facts.seed}: 0 bars lost to the road rule\n`
+          : `  walk-past ring seed ${facts.seed}: ${lost.length} bar(s) lost to the road rule at slot ` +
+              `${lost.map((b) => `${b.slot} (lane ${b.lane})`).join(', ')}\n`,
       );
+      const race = countsByRing.get('race');
+      if (!race) {
+        complaints.push('the walk-past ring was measured before the race ring — the comparison needs the race ring first');
+      } else {
+        const expected = race.map((n, lane) => n - lost.filter((b) => b.lane === lane).length);
+        if (counts.some((n, lane) => n !== expected[lane])) {
+          complaints.push(
+            `the walk-past ring gives its lanes ${counts.join('/')} duck bars, but the race ring gives ` +
+              `${race.join('/')} and the road rule accounts for ${lost.length} on this ring ` +
+              `(expected ${expected.join('/')}) — a bar is missing for a reason the road rule does not explain`,
+          );
+        }
+      }
     }
 
     const barWidth = 2 * BAR_HALF_SPAN_AT_PARK_SCALE * ring.scale;
@@ -10856,6 +10941,217 @@ const castleTurretsAreSolid: Invariant = (facts) => {
   return wrong;
 };
 
+/**
+ * **Every Rail Race support is claimed exactly as it is drawn** — stage 3,
+ * step 2 of `docs/DESIGN-round-robin-generation.md`: the trestle legs are
+ * `footprint` claims asked of and committed to the park's one registry.
+ *
+ * Three things must hold, and each is measured off the built park rather than
+ * off the rules that built it:
+ *
+ * 1. **The registry holds, for each ring, exactly the claims the drawn struts
+ *    produce** through the one owner (`track.ts`'s `trestleClaims`), compared
+ *    number for number with no tolerance. `ParkFacts` decodes every drawn
+ *    trunk and branch back out of the instance buffers, rebuilds each trestle's
+ *    tree from them, and runs it through that same function; if the search had
+ *    asked with one geometry and the builder drawn another (a foot disc for the
+ *    query, a leaning trunk for the picture — the #504 variant), the two lists
+ *    would differ here. Every leg accounted for is the acceptance test's
+ *    "claim count == built-leg count", made stronger: the claims are equal,
+ *    not merely as many.
+ * 2. **No trunk leans further than a trunk may.** The old nudge lists could
+ *    stand a foot 5–8 m from the point under its top; the bound is now the
+ *    support's own `maxTrunkLean` (`trestleGeometry.ts`: no steeper than its
+ *    branches), and every drawn trunk is measured against it. The threshold is
+ *    the geometry's, not the placer's — the placer reads the same function, so
+ *    a placer that quietly stopped obeying it is exactly what this would see.
+ * 3. **Nothing in the registry shares ground it may not.** Every claim of
+ *    every feature against every claim of every other feature, under
+ *    `CLAIM_COMPATIBILITY` — the universal-overlap sweep the design asks for,
+ *    on the registry's own terms. Today that is the road's corridor against
+ *    the rail race's supports — both rings are ONE feature (there is one rail
+ *    race, shown at one scale at a time — `railRace/feature.ts`), so the two
+ *    rings are never a pair here by design, and the registry's `railRace`
+ *    claims are checked to be exactly the walk-past slice followed by the race
+ *    slice, so a ring's slice can never be a private story; the next placer is
+ *    covered without a line changing here.
+ *
+ * Coverage is printed on every run (how many struts, trees and claim pairs were
+ * compared), to stderr so it is visible on a passing run.
+ */
+const railRaceSupportsAreClaimedAsDrawn: Invariant = (facts) => {
+  const wrong: string[] = [];
+  const key = (claim: Claim): string => {
+    const s = claim.shape;
+    return s.shape === 'capsule'
+      ? `${claim.kind}:capsule(${s.x1},${s.z1},${s.x2},${s.z2},${s.halfWidth})`
+      : `${claim.kind}:disc(${s.x},${s.z},${s.radius})`;
+  };
+
+  let struts = 0;
+  let trees = 0;
+  let worstLeanRatio = 0;
+  for (const ring of facts.railRaceSupports) {
+    if (ring.trees.length === 0) {
+      wrong.push(
+        `seed ${facts.seed}: the ${ring.label} ring drew no trestle legs at all — nothing to ` +
+          'claim and nothing measured',
+      );
+      continue;
+    }
+    trees += ring.trees.length;
+    struts += ring.struts;
+
+    // --- 1. the registry is the drawn geometry -------------------------------
+    // Kind, count and order exact; each number within float32 of the other.
+    // The registry holds the search's float64 and the instance buffers hold
+    // float32, so a metre read back off a drawn strut is good to about seven
+    // significant digits — the mesh format's slack, the same one
+    // `theRoadsCorridorIsTheRoadItDrew` allows, not a tuned tolerance.
+    const FLOAT32_SLACK = 1e-3;
+    const same = (a: Claim, b: Claim): boolean => {
+      if (a.kind !== b.kind || a.shape.shape !== b.shape.shape) return false;
+      const na = Object.values(a.shape).filter((v): v is number => typeof v === 'number');
+      const nb = Object.values(b.shape).filter((v): v is number => typeof v === 'number');
+      return na.length === nb.length && na.every((v, i) => Math.abs(v - (nb[i] as number)) <= FLOAT32_SLACK);
+    };
+    const firstDiff = ring.claimed.findIndex((claim, i) => {
+      const drawn = ring.fromDrawn[i];
+      return drawn === undefined || !same(claim, drawn);
+    });
+    if (ring.claimed.length !== ring.fromDrawn.length || firstDiff !== -1) {
+      const at = firstDiff === -1 ? ring.claimed.length : firstDiff;
+      wrong.push(
+        `seed ${facts.seed}: the ${ring.label} ring's registry claims are not what its drawn ` +
+          `supports produce — ${ring.claimed.length} claimed vs ${ring.fromDrawn.length} from the ` +
+          `${ring.trees.length} drawn trestles; first difference at claim ${at}: ` +
+          `registry ${ring.claimed[at] ? key(ring.claimed[at]!) : '(none)'} vs drawn ` +
+          `${ring.fromDrawn[at] ? key(ring.fromDrawn[at]!) : '(none)'}. ` +
+          'The search asked with one geometry and the builder drew another',
+      );
+    }
+
+    // --- 2. no trunk leans further than a trunk may --------------------------
+    for (const [i, tree] of ring.trees.entries()) {
+      const allowed = maxTrunkLean(tree.trunkHeight);
+      if (allowed > 0) worstLeanRatio = Math.max(worstLeanRatio, tree.lean / allowed);
+      // float32 instance matrices; the same slack `theRoadsCorridorIsTheRoadItDrew` allows.
+      if (tree.lean > allowed + 1e-3) {
+        wrong.push(
+          `seed ${facts.seed}: trestle ${i} on the ${ring.label} ring leans ${tree.lean.toFixed(2)} m ` +
+            `on a ${tree.trunkHeight.toFixed(2)} m trunk, past the ${allowed.toFixed(2)} m ` +
+            `maxTrunkLean allows (foot ${fmt([tree.footX, tree.footZ])})`,
+        );
+      }
+    }
+  }
+
+  // --- 2b. the one feature is the two slices, in order ----------------------
+  // `RailRace.ts` commits walk-past then race under RAIL_RACE_FEATURE; each
+  // ring above was compared to its own slice, so the registry must hold
+  // exactly those slices concatenated or a ring's "claimed" was not what the
+  // park claimed.
+  const registry = facts.world.groundClaims;
+  {
+    const union = registry.claimsOf(RAIL_RACE_FEATURE);
+    const slices = facts.railRaceSupports.flatMap((ring) => ring.claimed);
+    if (union.length !== slices.length || union.some((claim, i) => claim !== slices[i])) {
+      wrong.push(
+        `seed ${facts.seed}: the registry holds ${union.length} "${RAIL_RACE_FEATURE}" claims but the ` +
+          `two rings' slices total ${slices.length} (walk-past then race) — the slices a ring was ` +
+          'compared to are not the claims the park committed',
+      );
+    }
+  }
+
+  // --- 3. nothing in the registry shares ground it may not -------------------
+  const features = registry.committedFeatures();
+  let pairs = 0;
+  for (let a = 0; a < features.length; a += 1) {
+    for (let b = a + 1; b < features.length; b += 1) {
+      const featureA = features[a]!;
+      const featureB = features[b]!;
+      for (const claimA of registry.claimsOf(featureA)) {
+        for (const claimB of registry.claimsOf(featureB)) {
+          pairs += 1;
+          const rule = CLAIM_COMPATIBILITY[claimA.kind][claimB.kind];
+          if (rule === true) continue;
+          if (!shapesOverlap(claimA.shape, claimB.shape)) continue;
+          // `'crossing'` needs a declared crossing, which `allows` knows how to
+          // judge; ask it rather than re-deriving the crossing rule here.
+          if (rule === 'crossing' && registry.allows(featureA, claimA)) continue;
+          wrong.push(
+            `seed ${facts.seed}: "${featureA}" claim ${key(claimA)} shares ground with ` +
+              `"${featureB}" claim ${key(claimB)}, which ${claimA.kind}×${claimB.kind} forbids — ` +
+              'a placer stood on ground the registry should have refused',
+          );
+        }
+      }
+    }
+  }
+
+  process.stderr.write(
+    `  railRaceSupportsAreClaimedAsDrawn seed ${facts.seed}: ${trees} trestles, ${struts} drawn ` +
+      `struts rebuilt into claims; worst lean ${(worstLeanRatio * 100).toFixed(0)}% of its ` +
+      `limit; ${pairs} registry claim pairs across ${features.length} features checked\n`,
+  );
+  return wrong;
+};
+
+/**
+ * **The road's corridor claim covers the whole run the bus drives.**
+ *
+ * Found on pool seed 14, 6 September 2026: the kerb's claim ran x −14.5 … 14.9
+ * (`kerbReach` clips the kerb where the road's inner edge re-enters the park
+ * boundary) while the bus drove to x = −22 with its body reaching −29.3, and
+ * every one of the five trestle posts `check:swept-bus` found inside the bus
+ * stood at x −17 … −20 — past the end of the claimed road. The registry had
+ * answered honestly about ground nobody claimed: the trestle placer asked, was
+ * allowed, and the bus then drove off the road and through the support.
+ *
+ * So the rule, measured here on every seed: every point of the bus's run —
+ * as wide as the bus, from where its body first appears to where it vanishes,
+ * read from the arrival's own owners — lies inside the road's committed
+ * corridor claims. Sampled along the run at every `PLAYER_RADIUS`, across it at
+ * both edges and the centre; the threshold is the game's (a child's half-width
+ * is the finest thing the road is ever asked to carry), not the generator's.
+ * A run that leaves the claim is reported with the first metre that does.
+ */
+const theRoadClaimCoversTheBusRun: Invariant = (facts) => {
+  const { claimed } = facts.roadCorridor;
+  const run = facts.busRun;
+  const corridors = claimed.filter((claim) => claim.kind === 'corridor');
+  if (corridors.length === 0) {
+    return [`seed ${facts.seed}: the road claimed no corridor, so nothing covers the bus's run`];
+  }
+  // Asked through the registry's own `distanceOutside` — the one owner of
+  // "how far outside a claim's ground is this point" — never a restated
+  // point-to-segment here.
+  const inside = (x: number, z: number): boolean =>
+    corridors.some((claim) => distanceOutside(x, z, claim.shape) <= 0);
+  let samples = 0;
+  let uncovered = 0;
+  let first: readonly [number, number] | null = null;
+  for (const { x, z } of run.samples) {
+    samples += 1;
+    if (inside(x, z)) continue;
+    uncovered += 1;
+    if (first === null) first = [x, z];
+  }
+  const length = run.length;
+  process.stderr.write(
+    `  theRoadClaimCoversTheBusRun seed ${facts.seed}: ${samples} samples along a ` +
+      `${length.toFixed(1)} m run, ${uncovered} outside the road's claim\n`,
+  );
+  if (uncovered === 0) return [];
+  return [
+    `seed ${facts.seed}: the bus drives ${uncovered} of ${samples} sampled points outside the ` +
+      `road's corridor claim, first at ${fmt(first as readonly [number, number])} — the bus ` +
+      `leaves the road, and whatever the registry allowed on that ground (a trestle, a tree) ` +
+      `the bus then drives through. The claim must cover the run the vehicle drives.`,
+  ];
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   // Renamed 14 Sep 2026: it no longer asserts gentleness, so it must not keep
   // saying it does. The gradient ceiling is retired and reported instead; what
@@ -10868,6 +11164,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
   ['every castle corner turret is solid', castleTurretsAreSolid],
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
+  ['every Rail Race support is claimed exactly as it is drawn', railRaceSupportsAreClaimedAsDrawn],
+  ["the road's corridor claim covers the whole run the bus drives", theRoadClaimCoversTheBusRun],
   ['the ginormous slide clears the garden on the castle roof', theSlideClearsTheCastleRoofGarden],
   ['nothing stands in the journey lane carriageway', nothingStandsInTheLanesCarriageway],
   ["nothing grows in the lane but the park's own trees", nothingGrowsInTheLaneButTheParksOwnTrees],

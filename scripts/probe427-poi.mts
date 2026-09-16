@@ -1,6 +1,9 @@
 import './headless-canvas.mjs';
 import { Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
+import { NavGrid } from '../src/world/NavGrid.ts';
+import { PLAYER_RADIUS } from '../src/core/constants.ts';
+import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
 import { bridgeHeightAt } from '../src/world/train/bridges.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
@@ -9,7 +12,15 @@ import { CROSSING_SITES } from '../src/world/train/crossingPlan.ts';
 
 const park = buildHeadlessPark();
 const collision = park.world.collision;
-const graph = quietly(() => new PoiGraph(collision, (x, z) => bridgeHeightAt(park.world.train.bridges, x, z)));
+const graph = quietly(
+  () =>
+    new PoiGraph({
+      grid: new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, undefined, (x, z) =>
+        park.world.train.bridges.some((bridge) => bridge.covers(x, z)),
+      ),
+      sample: park.sample,
+    }),
+);
 const stranded = graph.nodes.filter((n) => !n.reachable);
 const route = TRAIN_PLAN.route;
 console.log(`seed ${PARK_SEED}: ${graph.nodes.length}/${SEEDS.length} placed, ${stranded.length} stranded, loop ${route.length.toFixed(1)} m`);

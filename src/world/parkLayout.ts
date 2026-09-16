@@ -16,7 +16,11 @@ import {
 import { cachedSolve } from '../core/solveCache';
 import { layoutRestartBase, layoutStreamBump } from './parkWarp';
 import { PARK_BOUNDARY } from './boundary';
-import { ENTRANCE_GATE_X } from './entrance/layout';
+import { ENTRANCE_GATE_X, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
+import { CollisionWorld } from './Collision';
+import { NAV_CELL, NavGrid, STAND_SEARCH_REACH, type ReachSet } from './NavGrid';
+import { PLAYER_RADIUS } from '../core/constants';
+import { ARRIVAL_EXEMPT_NEAR } from './streetRules';
 import type { AnchorFootprint } from './anchors';
 
 /**
@@ -247,18 +251,523 @@ function footprintAsPlaced(entry: ManifestEntry, x: number, z: number): AnchorFo
   };
 }
 
+/**
+ * **The layout's unwind trace** — one line per decision the restart loop
+ * took, in the order it took them (design doc, "Totality, ruled and
+ * mechanised": *the unwind trace is printed to stderr on every build and
+ * its hash is folded into the park digest*).
+ *
+ * `restart r` is **decision zero**: the whole park re-drawn from the same
+ * seed. A trace that reads `solved restart=0` needed no unwinding; one that
+ * reads `dead-end restart=0 entry=hotel … solved restart=3` reached decision
+ * zero three times, and that number is a *quality* measurement
+ * (`check:every-seed-builds`'s "built well" line), never a buildability
+ * verdict. It is a pure function of the seed and the fixed entry order — no
+ * timing, no map iteration — so two processes print the same lines, which is
+ * what lets `scripts/park-digest.mts` hash them.
+ *
+ * Empty when the layout came out of `cachedSolve`'s store rather than being
+ * solved, and says so — an empty trace must never read as "no unwinding".
+ */
+const layoutTrace: string[] = [];
+export const LAYOUT_TRACE: readonly string[] = layoutTrace;
+
+function traceLine(text: string): void {
+  const line = `layout-trace: seed=${PARK_SEED} ${text}`;
+  layoutTrace.push(line);
+  // stderr, not console.log: vitest shows stdout from failing tests only,
+  // and this line exists precisely for the passing run (CLAUDE.md).
+  try {
+    const nodeProcess = (globalThis as { process?: { stderr?: { write: (s: string) => void } } })
+      .process;
+    nodeProcess?.stderr?.write(`${line}\n`);
+  } catch {
+    /* browser: the trace is still readable from LAYOUT_TRACE */
+  }
+}
+
+/**
+ * **The unwind ladder** (design doc, "Totality, ruled and mechanised"): a
+ * point of interest whose doormat no child could reach is a *refusal*, never
+ * a throw, and the answer to a refusal is a different decision —
+ *
+ * 1. **the refused entry redraws** — its next-best candidate (see
+ *    {@link buildOnce}: the budget is the candidates it already drew);
+ * 2. **the entries it collided with redraw**, most recently placed first —
+ *    named by {@link footprintsBlocking}, from the same plot table every
+ *    other clearance question reads, never a hand-picked list;
+ * 3. **decision zero** — `restart + 1`, the whole park drawn again from the
+ *    same seed. Counted, in the trace, never silent.
+ *
+ * Every attempt is a pure function of `(seed, entry, restart, attempt)` and
+ * the refusal order is the placement order, so the trace replays exactly in
+ * another process — `scripts/park-digest.mts` hashes it. The one legal throw
+ * is the whole budget spent, and it carries the whole trace.
+ */
 function solve(): ParkLayout {
   // The warp vector may start the loop above zero (a whole-park re-roll the
   // offline search chose); with no warp this is the same `0` as ever.
   const base = layoutRestartBase();
+  let rungOneFired = 0;
   for (let restart = base; restart < base + PARK_RESTARTS; restart += 1) {
-    const built = buildOnce(restart);
-    if (built) return built;
+    const attempts = new Map<string, number>();
+    for (;;) {
+      const outcome = buildOnce(restart, attempts);
+      if (outcome.kind === 'dead-end') {
+        traceLine(`dead-end restart=${restart} entry=${outcome.entry} draws=${MAX_TRIES}`);
+        break;
+      }
+      if (outcome.kind === 'exhausted') {
+        traceLine(`exhausted restart=${restart} entry=${outcome.entry} supply=${outcome.supply}`);
+        break;
+      }
+      const refusals = doormatRefusals(outcome.placed);
+      // `LGP_LAYOUT_RUNG=off` (Node only, same gating as the refuse hook):
+      // probe and trace, never unwind — the scratch flag the brief asks for,
+      // so a seed can be built exactly as the base built it while the trace
+      // still says what the rung would have refused.
+      if (refusals.length > 0 && rungDisabled()) {
+        for (const refusal of refusals) {
+          ignoredRefusals.push(refusal);
+          traceLine(
+            `refusal-ignored (LGP_LAYOUT_RUNG=off) restart=${restart} kind=${refusal.kind} entry=${refusal.entry} ` +
+              `blockers=${refusal.blockers.join(',') || '-'} at=${refusal.at.x.toFixed(1)},${refusal.at.z.toFixed(1)}`,
+          );
+        }
+      }
+      if (refusals.length === 0 || rungDisabled()) {
+        traceLine(
+          `solved restart=${restart} decision-zero-reached=${restart - base} ` +
+            `rung-1-fired=${rungOneFired} doormats=${outcome.placed.length}/${outcome.placed.length} ` +
+            `probed-alone=${lastProbedAlone}`,
+        );
+        if (rungOneFired === 0) {
+          // Said out loud, on every solve where it is true: a rung that never
+          // fires is indistinguishable from one that cannot, unless it says so.
+          traceLine(
+            `rung-1 never fired: every doormat reachable at layout time on the first draw`,
+          );
+        }
+        return outcome.layout;
+      }
+      // Fixed order — placement order — so the same seed refuses the same
+      // entry first in every process.
+      const refusal = refusals[0] as LayoutRefusal;
+      traceLine(
+        `refusal restart=${restart} kind=${refusal.kind} entry=${refusal.entry} ` +
+          `attempt=${attempts.get(refusal.entry) ?? 0} blockers=${refusal.blockers.join(',') || '-'} ` +
+          `non-plot=${refusal.nonPlotBlockers.join(',') || '-'} at=${refusal.at.x.toFixed(1)},${refusal.at.z.toFixed(1)}`,
+      );
+      rungOneFired += 1;
+      // Rung 1: the refused entry's own next candidate.
+      if (redraw(refusal.entry, attempts, outcome.supply, restart, 1)) continue;
+      // Rung 2: the plots that stood in its way, most recently placed first.
+      const placementIndex = new Map(outcome.placed.map((entry, index) => [entry.id, index]));
+      const blockers = [...refusal.blockers].sort(
+        (a, b) => (placementIndex.get(b) ?? -1) - (placementIndex.get(a) ?? -1),
+      );
+      if (blockers.some((blocker) => redraw(blocker, attempts, outcome.supply, restart, 2))) continue;
+      // Rung 3: decision zero.
+      traceLine(`decision-zero restart=${restart} after=${refusal.entry} — no attempt left on it or its blockers`);
+      break;
+    }
   }
   throw new Error(
     `park layout: unsolvable in ${PARK_RESTARTS} restarts (seed ${PARK_SEED}) — ` +
-      `loosen bands, shrink the manifest, or bump the seed`,
+      `loosen bands, shrink the manifest, or bump the seed. Trace:\n${layoutTrace.join('\n')}`,
   );
+}
+
+/** Takes `entry`'s next candidate if it has one, and says so on the trace. */
+function redraw(
+  entry: string,
+  attempts: Map<string, number>,
+  supply: ReadonlyMap<string, number>,
+  restart: number,
+  rung: 1 | 2,
+): boolean {
+  const next = (attempts.get(entry) ?? 0) + 1;
+  const have = supply.get(entry) ?? 0;
+  if (next >= have) return false;
+  attempts.set(entry, next);
+  traceLine(`redraw restart=${restart} rung=${rung} entry=${entry} attempt=${next} of=${have}`);
+  return true;
+}
+
+// ------------------------------------------------- the doormat probe (rung 1)
+
+/**
+ * What a placement is refused for — one shape, the design doc's.
+ *
+ * `blockers` are manifest ids from {@link footprintsBlocking}, the plots whose
+ * footprints stand within a waypoint's search reach of the door (the ones a
+ * boxed-in door is boxed in by); `nonPlotBlockers` names what this rung
+ * cannot move — the boundary, today — so the trace says when a refusal is
+ * not this rung's to answer.
+ */
+export interface LayoutRefusal {
+  readonly kind: 'poi.stranded' | 'poi.nospot';
+  readonly entry: string;
+  readonly blockers: readonly string[];
+  readonly nonPlotBlockers: readonly ('boundary' | string)[];
+  readonly at: { readonly x: number; readonly z: number };
+}
+
+/**
+ * **Can a child reach every doormat, on the park as it stands at this
+ * moment?** — plots and the boundary, which is everything the layout has
+ * decided. Asked of `NavGrid`, the grid the children walk, flooded from the
+ * entrance (the one thing that never moves) exactly as `PoiGraph` asks it
+ * once the park is built — one question, one owner, so the two cannot
+ * disagree about the same door. One lattice and one flood for the whole
+ * park when no door is refused (~8 ms, the layout stage's `check:solve-cost`
+ * budget is 250 ms); a door that fails that shared world gets its own —
+ * see the body for why a pass on the shared world is a pass on the door's.
+ *
+ * Exploration with the commit's own function on a partial world: the paths'
+ * later commit is the check, and a stranding it finds that this could not —
+ * a lane laid on the railway, a spur through a bridge's side — is the next
+ * rung's, named there by coordinate. What this sees, this answers, by
+ * redrawing a plot rather than moving anything to satisfy a measurement.
+ *
+ * `LGP_LAYOUT_REFUSE=<id>[:<n>|always]` forces that entry's next `n` probes
+ * to be refused — the red proof that the ladder above moves. **The hook's
+ * text ships** (it is in `dist/assets/parkLayout-*.js`); what makes it inert
+ * for a player is that nothing in the bundle defines a `process` global and
+ * the read is `globalThis.process?.env?.[…]` under a `try`, so it resolves to
+ * `null` — exactly as `paths.ts`'s `LGP_DEBUG_STREETS` and `parkWarp.ts`'s
+ * `LGP_WARP`. Anything that ever introduces a `process` global in the browser
+ * would arm every one of these hooks at once; that is the thing to check for.
+ */
+function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
+  const forced = forcedRefusal();
+  const columns = columnsOf(placed);
+  const flat = (): number => 0;
+  const refusals: LayoutRefusal[] = [];
+  // **One world for the common case, then one per door that needs it.** Each
+  // door's own world (below) differs from every other's only in which plots
+  // are exempt near it, and the lattice-and-flood over the whole park is the
+  // entire cost of asking (~8 ms here; profiled 6 Sep 2026: 14 doors x their
+  // own flood was 112 of the layout stage's 117 ms, on a seed where no door
+  // was refused). So every door is first asked on the STRICTEST world any
+  // door sees — every plot but the fountain, plus the boundary. A door whose
+  // doormat stands, reachably, with every plot solid still stands with fewer
+  // of them (taking obstacles out of a `CollisionWorld` only grows NavGrid's
+  // free and reached cells), so a pass here is a pass on its own world and
+  // needs no second look. A door that fails here is asked again on its own
+  // world, exactly as before — the refusal, and what it names, come only
+  // from that world, never from this one. The trace's `probed-alone` count
+  // is how many took the second look.
+  const strict = strictGrid(placed);
+  let probedAlone = 0;
+  for (const entry of placed) {
+    const forcedHere = forced !== null && forced.entry === entry.id && forced.remaining > 0;
+    if (!forcedHere && strict && standsReachably(strict.grid, strict.reachable, entry, flat)) continue;
+    probedAlone += 1;
+    // **What this world may contain, and the principle behind it.** The probe
+    // explores an OVER-APPROXIMATE world: a footprint is where a plot is
+    // placed, not ground a child cannot stand on. The ball pit's footprint is
+    // walkable — the slide exits into it, and the castle's doormat stands
+    // inside it by design (the near pair). Seed 1, 6 Sep 2026: a probe that
+    // counted every footprint as solid refused that door as `nospot`, redrew
+    // the castle, and broke a seed the built park had been building (its
+    // real spot was 0.07 m from the door, the only real collider 1.30 m
+    // clear). So this world holds exactly the plots the router itself would
+    // refuse to draw an arriving stub past — every plot but those within
+    // {@link ARRIVAL_EXEMPT_NEAR} of this door (the router's own arrival
+    // exemption, one owner in `streetRules.ts`) and the door's own — plus the
+    // boundary. A refusal here is one the paths' commit would make too;
+    // anything else is the commit's to find, and `check:park`'s
+    // `layout.falseRefusal` proves every refusal against the built park.
+    const world = worldForDoor(entry, placed);
+    // A flat park (nothing here has a height yet) and no hop: a plot's
+    // footprint is not something a child hops, so the apex is moot and the
+    // player's own figure would only mean importing `Player` into the layout.
+    const grid = new NavGrid(world, PLAYER_RADIUS, 0);
+    const reachable = grid.reachableFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0, flat);
+    if (!reachable) {
+      // A plot over the entrance is forbidden by `inGateCorridor`, so this is
+      // a programming error, not a park.
+      throw new Error(
+        `park layout: nowhere to stand at the entrance (${ENTRANCE_PLAYER_X}, ${ENTRANCE_PLAYER_Z}) ` +
+          'on the plots-and-boundary world — the gate corridor rule should make this impossible',
+      );
+    }
+    const spot = grid.nearestStandable(
+      entry.entranceX,
+      entry.entranceZ,
+      0,
+      flat,
+      STAND_SEARCH_REACH,
+      reachable,
+    );
+    if (spot && reachable(spot.x, spot.z, spot.y) && !forcedHere) continue;
+    if (forcedHere && forced) {
+      // The test hook: the door is in fact reachable, so its pocket is the
+      // whole park and naming that would be noise. It names the plot nearest
+      // the door as a pretend blocker instead — enough for rung 2 to be
+      // watched moving — and says so, so no trace reads it as geometry.
+      forced.remaining -= 1;
+      refusals.push({
+        kind: 'poi.stranded',
+        entry: entry.id,
+        blockers: nearestPlot(entry.entranceX, entry.entranceZ, columns, entry.id),
+        nonPlotBlockers: ['forced'],
+        at: { x: entry.entranceX, z: entry.entranceZ },
+      });
+      continue;
+    }
+    // What boxes the door in, derived from the geometry that does it:
+    // - nowhere to stand (`nospot`): the plots whose stamped footprints
+    //   cover the door, and the boundary if the door is within a walker of it;
+    // - somewhere to stand but no way there (`stranded`): flood the pocket
+    //   from that spot and name whatever bounds it — every plot the pocket
+    //   presses against, the boundary if the pocket reaches it. A plot twelve
+    //   metres off that closes the box is named exactly as one on the door.
+    // Only plots this door's world holds can be named: an exempt plot was
+    // never an obstacle to it.
+    const exempt = exemptFor(entry, placed);
+    const named = spot
+      ? pocketBlockers(grid.floodFrom(spot.x, spot.z, spot.y, flat), columns, entry.id, exempt)
+      : coveringBlockers(entry.entranceX, entry.entranceZ, columns, entry.id, exempt);
+    refusals.push({
+      kind: spot ? 'poi.stranded' : 'poi.nospot',
+      entry: entry.id,
+      blockers: named.plots,
+      nonPlotBlockers: named.boundary ? ['boundary'] : [],
+      at: { x: entry.entranceX, z: entry.entranceZ },
+    });
+  }
+  lastProbedAlone = probedAlone;
+  return refusals;
+}
+
+/** How many doors the last {@link doormatRefusals} had to probe on their own
+ * world — for the trace, so the shared world's coverage is said out loud. */
+let lastProbedAlone = 0;
+
+/**
+ * Does `door`'s doormat have somewhere to stand that the entrance reaches, on
+ * `grid`? The same two questions the per-door probe asks, on whatever world
+ * `grid` was built over. Only ever a "yes" on the strict world: a "no" there
+ * is not a refusal, it is the cue to ask again on the door's own world.
+ */
+function standsReachably(
+  grid: NavGrid,
+  reachable: (x: number, z: number, y: number) => boolean,
+  door: PlacedEntry,
+  flat: () => number,
+): boolean {
+  const spot = grid.nearestStandable(door.entranceX, door.entranceZ, 0, flat, STAND_SEARCH_REACH, reachable);
+  return spot !== null && reachable(spot.x, spot.z, spot.y);
+}
+
+/**
+ * The strictest world any door is probed on — every plot but
+ * {@link ALWAYS_EXEMPT}, plus the boundary — with its one flood from the
+ * entrance. `null` if the entrance itself has nowhere to stand on it, in
+ * which case every door takes the per-door probe, where that is a thrown
+ * error rather than a quiet fall-through.
+ */
+function strictGrid(
+  placed: readonly PlacedEntry[],
+): { grid: NavGrid; reachable: (x: number, z: number, y: number) => boolean } | null {
+  const world = plotsWorld(placed, ALWAYS_EXEMPT);
+  const grid = new NavGrid(world, PLAYER_RADIUS, 0);
+  const reachable = grid.reachableFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0, (): number => 0);
+  return reachable ? { grid, reachable } : null;
+}
+
+/**
+ * The plots no door's probe world ever holds: the fountain, whose rim a child
+ * hops rather than walks round (`check:fountain-hop`), so its footprint is not
+ * a wall. One owner for the strict world ({@link strictGrid}) and every
+ * per-door world ({@link exemptFor}) — the fast path rests on the strict world
+ * holding a superset of every door's obstacles, and that holds only while
+ * both read this set.
+ */
+const ALWAYS_EXEMPT: ReadonlySet<string> = new Set(['fountain']);
+
+/** The plots `door`'s probe world leaves out: its own, and any the router's
+ * arrival exemption would let its stub pass — see {@link doormatRefusals}. */
+function exemptFor(door: PlacedEntry, placed: readonly PlacedEntry[]): ReadonlySet<string> {
+  const exempt = new Set<string>([door.id, ...ALWAYS_EXEMPT]);
+  const columns = columnsOf(placed);
+  for (let i = 0; i < columns.count; i += 1) {
+    if (footprintWithin(columns, i, door.entranceX, door.entranceZ, ARRIVAL_EXEMPT_NEAR)) {
+      exempt.add(columns.ids[i] as string);
+    }
+  }
+  return exempt;
+}
+
+/** The plots-and-boundary world one door is probed on. */
+function worldForDoor(door: PlacedEntry, placed: readonly PlacedEntry[]): CollisionWorld {
+  return plotsWorld(placed, exemptFor(door, placed));
+}
+
+/** Every placed plot's footprint but the `exempt` ones, inside the boundary —
+ * the one builder behind both the strict world and each door's own. */
+function plotsWorld(placed: readonly PlacedEntry[], exempt: ReadonlySet<string>): CollisionWorld {
+  const world = new CollisionWorld();
+  for (const entry of placed) {
+    if (exempt.has(entry.id)) continue;
+    if (entry.footprint.kind === 'circle') world.addCircle(entry.x, entry.z, entry.footprint.radius);
+    else world.addRectangle(entry.x, entry.z, entry.footprint.halfX, entry.footprint.halfZ);
+    // Corner solids past the rectangle — the castle's turrets (#549), declared
+    // on the placed footprint by `footprintAsPlaced`.
+    if (entry.footprint.kind === 'rect' && entry.footprint.corners) {
+      const { radius, at } = entry.footprint.corners;
+      for (const [cx, cz] of at) world.addCircle(entry.x + cx, entry.z + cz, radius);
+    }
+  }
+  world.setPlayBounds(PARK_BOUNDARY);
+  return world;
+}
+
+/**
+ * The half-thickness `CollisionWorld.addRectangle` gives a plot's walls,
+ * and so the band `NavGrid` stamps round a plot beyond the walker's own
+ * radius. Read here so {@link pocketBlockers} samples one cell outside the
+ * *stamped* footprint, where a pocket that presses on the plot has cells.
+ */
+const RECT_WALL_HALF_THICKNESS = 0.35;
+
+/**
+ * What bounds a pocket: every plot with a pocket cell just outside its
+ * stamped footprint, and the boundary if a pocket cell lies within a
+ * walker of it. The plots are read from the same columns every clearance
+ * question reads ({@link footprintWithin}), never from a list of things a
+ * door tends to hit.
+ */
+function pocketBlockers(
+  pocket: ReachSet | null,
+  columns: PlotColumns,
+  exceptId: string,
+  exempt: ReadonlySet<string> = new Set(),
+): { plots: string[]; boundary: boolean } {
+  if (!pocket) return { plots: [], boundary: false };
+  // One cell past the stamp: the walker's radius (NavGrid fattens every
+  // collider by it), a rectangle's wall, and a cell so the sample lands in
+  // the first free cell rather than on the stamp's edge.
+  const reach = PLAYER_RADIUS + RECT_WALL_HALF_THICKNESS + NAV_CELL;
+  const plots: string[] = [];
+  let boundary = false;
+  pocket.forEachCell((x, z) => {
+    if (!boundary && PARK_BOUNDARY.distanceToEdge(x, z) < PLAYER_RADIUS + NAV_CELL) boundary = true;
+    for (let i = 0; i < columns.count; i += 1) {
+      const id = columns.ids[i] as string;
+      if (id === exceptId || ALWAYS_EXEMPT.has(id) || exempt.has(id) || plots.includes(id)) continue;
+      if (footprintWithin(columns, i, x, z, reach)) plots.push(id);
+    }
+  });
+  // Placement order, not discovery order: the ladder redraws the most
+  // recently placed blocker first, and this keeps the trace's list stable.
+  const order = new Map(columns.ids.map((id, index) => [id, index]));
+  plots.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  return { plots, boundary };
+}
+
+/** The plots whose stamped footprints cover `(x, z)` — a `nospot` door's blockers. */
+function coveringBlockers(
+  x: number,
+  z: number,
+  columns: PlotColumns,
+  exceptId: string,
+  exempt: ReadonlySet<string> = new Set(),
+): { plots: string[]; boundary: boolean } {
+  const reach = PLAYER_RADIUS + RECT_WALL_HALF_THICKNESS;
+  const plots: string[] = [];
+  for (let i = 0; i < columns.count; i += 1) {
+    const id = columns.ids[i] as string;
+    if (id === exceptId || ALWAYS_EXEMPT.has(id) || exempt.has(id)) continue;
+    if (footprintWithin(columns, i, x, z, reach)) plots.push(id);
+  }
+  return { plots, boundary: PARK_BOUNDARY.distanceToEdge(x, z) < PLAYER_RADIUS };
+}
+
+/** The one plot nearest `(x, z)` by footprint, for the test hook's pretend blocker. */
+function nearestPlot(x: number, z: number, columns: PlotColumns, exceptId: string): string[] {
+  let best = '';
+  let bestReach = Infinity;
+  // Widen a margin until the footprint test admits exactly the nearest — a
+  // bisection on `footprintWithin` keeps this on the one footprint rule.
+  for (let i = 0; i < columns.count; i += 1) {
+    const id = columns.ids[i] as string;
+    if (id === exceptId || ALWAYS_EXEMPT.has(id)) continue;
+    let lo = 0;
+    let hi = 400;
+    for (let step = 0; step < 24; step += 1) {
+      const mid = (lo + hi) / 2;
+      if (footprintWithin(columns, i, x, z, mid)) hi = mid;
+      else lo = mid;
+    }
+    if (hi < bestReach) {
+      bestReach = hi;
+      best = id;
+    }
+  }
+  return best ? [best] : [];
+}
+
+/**
+ * The refusals the rung would have unwound on but did not, because
+ * `LGP_LAYOUT_RUNG=off` — for `check:park`'s `layout.falseRefusal`: every
+ * one of these must be a door the BUILT park cannot reach either, or the
+ * probe refused something real that the real park allows (seed 1's ball
+ * pit), which is the rung's one failure mode and the one this catches.
+ */
+const ignoredRefusals: LayoutRefusal[] = [];
+export const LAYOUT_REFUSALS_IGNORED: readonly LayoutRefusal[] = ignoredRefusals;
+
+/**
+ * `LGP_LAYOUT_RUNG=off`: see {@link solve}. Like `LGP_LAYOUT_REFUSE`, its
+ * text ships in the bundle; it is inert for a player because nothing in the
+ * bundle defines a `process` global and the read is optional-chained —
+ * present and disarmed, not absent. Anything that ever introduces a
+ * `process` global in the browser arms both hooks at once.
+ */
+function rungDisabled(): boolean {
+  try {
+    const nodeProcess = (globalThis as { process?: { env?: Record<string, string> } }).process;
+    return nodeProcess?.env?.['LGP_LAYOUT_RUNG'] === 'off';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The `LGP_LAYOUT_REFUSE=<id>[:<count>]` hook, parsed once: refuse `<id>`'s
+ * doormat the first `<count>` times it is probed (default 1; `always` for
+ * every time). `null` wherever `globalThis.process` is undefined — a browser
+ * with no `process` global defined by anything in the bundle, which is the
+ * shipped park today (see {@link doormatRefusals}).
+ */
+function forcedRefusal(): { entry: string; remaining: number } | null {
+  return forcedRefusalState;
+}
+const forcedRefusalState = ((): { entry: string; remaining: number } | null => {
+  try {
+    const nodeProcess = (globalThis as { process?: { env?: Record<string, string> } }).process;
+    const raw = nodeProcess?.env?.['LGP_LAYOUT_REFUSE'];
+    if (!raw) return null;
+    const [entry, mode] = raw.split(':');
+    const remaining = mode === undefined ? 1 : mode === 'always' ? Infinity : Number(mode);
+    return { entry: entry ?? '', remaining: Number.isFinite(remaining) || remaining === Infinity ? remaining : 1 };
+  } catch {
+    return null;
+  }
+})();
+
+/**
+ * The doormat probe, exposed for `scripts/check-layout-rung.mts` to run on a
+ * *synthetic* placement — a doormat boxed in by plots that exist only in the
+ * check — so the geometry side of the rung is proved red by a check rather
+ * than by a transcript that goes stale. Never called by the game outside
+ * {@link solve}.
+ */
+export function probeDoormats(placed: readonly PlacedEntry[]): LayoutRefusal[] {
+  return doormatRefusals(placed);
 }
 
 /**
@@ -287,9 +796,29 @@ interface Candidate {
   readonly spread: number;
 }
 
-function buildOnce(restart: number): ParkLayout | null {
+/**
+ * What one whole-park attempt came to.
+ *
+ * - `placed`: every entry stands somewhere legal, with the candidate supply
+ *   each one drew (how many further attempts it has, see {@link solve});
+ * - `dead-end`: an entry drew no legal candidate at all — the layout is
+ *   painted into a corner and the caller takes decision zero;
+ * - `exhausted`: the caller asked an entry for a candidate past its supply.
+ */
+type BuildOutcome =
+  | {
+      readonly kind: 'placed';
+      readonly layout: ParkLayout;
+      readonly placed: readonly PlacedEntry[];
+      readonly supply: ReadonlyMap<string, number>;
+    }
+  | { readonly kind: 'dead-end'; readonly entry: string }
+  | { readonly kind: 'exhausted'; readonly entry: string; readonly supply: number };
+
+function buildOnce(restart: number, attempts: ReadonlyMap<string, number>): BuildOutcome {
   const placed: PlacedEntry[] = [];
   const byId = new Map<string, PlacedEntry>();
+  const supply = new Map<string, number>();
 
   // Largest first: the manifest is sorted here rather than trusting file
   // order, so adding an entry never changes packing feasibility by accident.
@@ -323,15 +852,29 @@ function buildOnce(restart: number): ParkLayout | null {
       if (entry.pin) break; // a pin is one candidate, validated
     }
 
-    if (candidates.length === 0) return null; // dead end; the caller restarts
+    if (candidates.length === 0) {
+      // Dead end; the caller restarts (decision zero). Named, so the trace
+      // says which entry could not be placed and how much of its budget went.
+      return { kind: 'dead-end', entry: entry.id };
+    }
 
     // Maximin: of the legal spots, the one furthest from its nearest
-    // neighbour. Ties keep draw order, which keeps the choice seeded.
-    let best = candidates[0] as Candidate;
-    for (const candidate of candidates) {
-      if (candidate.spread > best.spread) best = candidate;
-    }
-    const { x, z } = best;
+    // neighbour. Ties keep draw order, which keeps the choice seeded. Ranked
+    // rather than picked, because **the ranking is this entry's attempt
+    // budget**: attempt `k` (see {@link solve}) takes the k-th best of the
+    // candidates it already drew, so the supply of attempts is the supply of
+    // legal spots — derived from the search, never a typed "try 5 times".
+    // A stable sort by descending spread keeps attempt 0 exactly the old
+    // strict-greater-than scan: the first of the equal-best in draw order.
+    const ranked = candidates
+      .map((candidate, order) => ({ candidate, order }))
+      .sort((a, b) => b.candidate.spread - a.candidate.spread || a.order - b.order)
+      .map((item) => item.candidate);
+    supply.set(entry.id, ranked.length);
+    const attempt = attempts.get(entry.id) ?? 0;
+    const chosen = ranked[attempt];
+    if (!chosen) return { kind: 'exhausted', entry: entry.id, supply: ranked.length };
+    const { x, z } = chosen;
 
     // Entrance: on the plot edge. Camera-facing entries (the stall booths,
     // whose counters obey GAME_DESIGN #16's absolute readability rule) get
@@ -387,9 +930,14 @@ function buildOnce(restart: number): ParkLayout | null {
   }
 
   return {
-    seed: PARK_SEED,
-    fountain: { x: fountain.x, z: fountain.z, radius: fountain.footprint.radius },
-    entries: byId,
+    kind: 'placed',
+    layout: {
+      seed: PARK_SEED,
+      fountain: { x: fountain.x, z: fountain.z, radius: fountain.footprint.radius },
+      entries: byId,
+    },
+    placed,
+    supply,
   };
 }
 
@@ -512,6 +1060,11 @@ export const PARK_LAYOUT: ParkLayout = cachedSolve(
   },
 );
 
+// A layout handed back from the cache ran no solve, so it has no trace. Say
+// so on the trace itself rather than leaving an empty list that reads like
+// "solved first time" — the same disease as a check that asserts nothing.
+if (layoutTrace.length === 0) traceLine('cached — no solve ran in this process');
+
 /**
  * The plots as a flat array, built once.
  *
@@ -541,7 +1094,17 @@ let plotColumns: PlotColumns | null = null;
 
 function plots(): PlotColumns {
   if (plotColumns) return plotColumns;
-  const entries = [...PARK_LAYOUT.entries.values()];
+  plotColumns = columnsOf([...PARK_LAYOUT.entries.values()]);
+  return plotColumns;
+}
+
+/**
+ * The columns for any list of placed entries — {@link plots} for the solved
+ * park, and {@link doormatRefusals} for a *candidate* park still inside the
+ * solver, which must never read the memoised table (it does not exist yet,
+ * and a redraw would not invalidate it).
+ */
+function columnsOf(entries: readonly PlacedEntry[]): PlotColumns {
   const count = entries.length;
   const columns: PlotColumns = {
     count,
@@ -567,7 +1130,6 @@ function plots(): PlotColumns {
       columns.halfZ[i] = entry.footprint.halfZ;
     }
   }
-  plotColumns = columns;
   return columns;
 }
 
@@ -711,38 +1273,42 @@ export function clearOfPlots(x: number, z: number, radius: number): boolean {
 export function clearOfFootprints(x: number, z: number, margin: number, exceptId?: string): boolean {
   const plot = plots();
   const skip = exceptIndex(exceptId);
-  const px = plot.x;
-  const pz = plot.z;
-  const hx = plot.halfX;
-  const hz = plot.halfZ;
-  const rect = plot.isRect;
   const shortlist = shortlistFor(x, z, margin);
   const count = shortlist ? shortlist.length : plot.count;
   for (let at = 0; at < count; at += 1) {
     const i = shortlist ? (shortlist[at] as number) : at;
     if (i === skip) continue;
-    if (rect[i] === 0) {
-      const reach = (hx[i] as number) + margin;
-      // Axis prefilters, exact rather than approximate: `hypot(a, b) >= |a|`,
-      // so either axis alone exceeding the reach settles the hypot too.
-      const dx = x - (px[i] as number);
-      if (dx >= reach || -dx >= reach) continue;
-      const dz = z - (pz[i] as number);
-      if (dz >= reach || -dz >= reach) continue;
-      if (Math.hypot(dx, dz) < reach) return false;
-      continue;
-    }
-    const dx = Math.abs(x - (px[i] as number)) - (hx[i] as number);
-    // Same argument on the rectangle: `outside >= max(dx, 0)`, so a `dx` at or
-    // past the margin cannot be inside it, and `dx > 0` rules out the
-    // both-negative case as well.
-    if (dx >= margin) continue;
-    const dz = Math.abs(z - (pz[i] as number)) - (hz[i] as number);
-    if (dz >= margin) continue;
-    const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
-    if ((dx <= 0 && dz <= 0) || outside < margin) return false;
+    if (footprintWithin(plot, i, x, z, margin)) return false;
   }
   return true;
+}
+
+/** Is plot `i`'s footprint within `margin` of `(x, z)`? The one owner of the
+ * footprint distance test, for the boolean and the naming form alike. */
+function footprintWithin(plot: PlotColumns, i: number, x: number, z: number, margin: number): boolean {
+  const px = plot.x;
+  const pz = plot.z;
+  const hx = plot.halfX;
+  const hz = plot.halfZ;
+  if (plot.isRect[i] === 0) {
+    const reach = (hx[i] as number) + margin;
+    // Axis prefilters, exact rather than approximate: `hypot(a, b) >= |a|`,
+    // so either axis alone exceeding the reach settles the hypot too.
+    const dx = x - (px[i] as number);
+    if (dx >= reach || -dx >= reach) return false;
+    const dz = z - (pz[i] as number);
+    if (dz >= reach || -dz >= reach) return false;
+    return Math.hypot(dx, dz) < reach;
+  }
+  const dx = Math.abs(x - (px[i] as number)) - (hx[i] as number);
+  // Same argument on the rectangle: `outside >= max(dx, 0)`, so a `dx` at or
+  // past the margin cannot be inside it, and `dx > 0` rules out the
+  // both-negative case as well.
+  if (dx >= margin) return false;
+  const dz = Math.abs(z - (pz[i] as number)) - (hz[i] as number);
+  if (dz >= margin) return false;
+  const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
+  return (dx <= 0 && dz <= 0) || outside < margin;
 }
 
 /** Convenience: the placed entry, or a loud failure naming the id. */

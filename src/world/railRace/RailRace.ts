@@ -25,6 +25,8 @@ import {
 } from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
+import type { Claim, GroundClaims } from '../../boot/groundClaims';
+import { RAIL_RACE_FEATURE } from './feature';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { placeRaceCart, seatRaceRider } from './seat';
@@ -343,6 +345,22 @@ export class RailRace implements GameSystem {
    */
   readonly walkPastRoute = RAIL_RACE_PLAN.walkPastRing;
   readonly raceRoute = RAIL_RACE_PLAN.raceRing;
+  /**
+   * Each ring's support claims, in the order they were committed under
+   * {@link RAIL_RACE_FEATURE} (walk-past first): `test/procgen/parkFacts.ts`
+   * compares a ring's drawn supports to its own slice of the one feature.
+   */
+  readonly supportClaims: { readonly walkPast: readonly Claim[]; readonly race: readonly Claim[] };
+  /**
+   * The duck bars each ring lost to the road rule (slot and lane) — see
+   * `RailRaceTrack.barsLostToRoad`. The fairness invariant reads it: the race
+   * happens on the ride-scale ring, which loses none; the walk-past ring's
+   * count per lane is the race ring's minus exactly these, each said aloud.
+   */
+  readonly barsLostToRoad: {
+    readonly walkPast: readonly { readonly slot: number; readonly lane: number }[];
+    readonly race: readonly { readonly slot: number; readonly lane: number }[];
+  };
   readonly laneCount = LANE_COUNT;
   /** The side-on view leaves her model on screen: watching her duck is the game. */
   readonly playerStaysVisible = true;
@@ -411,7 +429,7 @@ export class RailRace implements GameSystem {
   /** The running order last sent to the HUD, so it is only sent on a change. */
   private standings: number[] = [];
 
-  constructor(collision: CollisionWorld) {
+  constructor(collision: CollisionWorld, groundClaims: GroundClaims) {
     this.collision = collision;
     this.group.name = 'railRace';
 
@@ -420,16 +438,34 @@ export class RailRace implements GameSystem {
     // hazard geometry is built once, in full, whichever level ends up chosen;
     // `setHazardLevel` only ever toggles its visibility.
     //
-    // The walk-past ring goes up **first**, and it is the one that registers
-    // collision. The race ring's own trestle search then sees those posts as
-    // occupied ground and stands its legs clear of them for free, so the two
-    // rings' supports never land on the same square metre even though the
-    // rings are concentric.
+    // **One rail race, two scales, one feature.** Jim, 7 Sep 2026: *"either
+    // the small one or the big one is shown — it is purely a visual trick,
+    // they never occupy the world at the same time."* So each ring's supports
+    // ask the park's one registry where they may stand as `RAIL_RACE_FEATURE`
+    // (stage 3, step 2 of `docs/DESIGN-round-robin-generation.md`), which
+    // means neither ring is ever an obstacle to the other, and both rings'
+    // claims are committed together, once, below — the road and anything
+    // placed later see the union. Order matters for one thing only: the
+    // walk-past ring's *colliders* (what a child on foot walks into) are
+    // registered after BOTH rings have found their ground, so the race ring's
+    // search never meets them through the unmigrated collision predicate.
+    //
+    // **The two rings differ in whether they respect the road**, and that is
+    // sound rather than an exemption for the same reason the one feature is:
+    // they are never in the world together. Jim, 7 Sep 2026: "make the big
+    // version have all its legs, but the normal version can have them
+    // selectively." The walk-past ring is there while the bus drives, so it
+    // skips its legs over the road; the ride ring exists only mid-race, when
+    // the bus is gone, so it keeps every leg (`RailRaceTrackOptions.
+    // respectsRoad`). If the rings were ever co-present, both changes would be
+    // wrong together — and `check:swept-bus` sweeps the walk-past ring alone,
+    // by name, for the same reason.
     this.walkPastRing = {
       route: RAIL_RACE_PLAN.walkPastRing,
       track: buildRailRaceTrack(RAIL_RACE_PLAN.walkPastRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:walk-past-ring',
-        registerCollision: true,
+        respectsRoad: true,
+        groundClaims,
         // No finish rainbow here — see `RailRaceTrackOptions.showArch` (#299).
         showArch: false,
       }),
@@ -438,10 +474,23 @@ export class RailRace implements GameSystem {
       route: RAIL_RACE_PLAN.raceRing,
       track: buildRailRaceTrack(RAIL_RACE_PLAN.raceRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:race-ring',
-        registerCollision: false,
+        respectsRoad: false,
+        groundClaims,
         showArch: true,
       }),
     };
+    this.supportClaims = {
+      walkPast: this.walkPastRing.track.claims,
+      race: this.raceRing.track.claims,
+    };
+    this.barsLostToRoad = {
+      walkPast: this.walkPastRing.track.barsLostToRoad,
+      race: this.raceRing.track.barsLostToRoad,
+    };
+    groundClaims.commit(RAIL_RACE_FEATURE, {
+      claims: [...this.supportClaims.walkPast, ...this.supportClaims.race],
+    });
+    this.walkPastRing.track.registerCollision();
     for (const ring of [this.walkPastRing, this.raceRing]) {
       ring.track.setHazardLevel(this.activeLevel);
       this.group.add(ring.track.group);

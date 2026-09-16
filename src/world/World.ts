@@ -231,11 +231,8 @@ export class World implements GameSystem {
     // It registers no collision itself; the wires hang overhead.
     this.treeLights = new TreeLights(this.scenery.foliageOccluders, this.train.route);
 
-    // The Rail Race is no longer a coaster at all (reform of 31 July 2026): it
-    // is four parallel rails round the park's rim, raced side-on with the park
-    // itself as the backdrop. Its own module owns the route, the physics, the
-    // geometry and the camera — see `railRace/RailRace.ts`.
-    this.railRace = new RailRace(this.collision);
+    // The Rail Race used to be built here. It is built below, after the
+    // entrance — see the note there.
 
     // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
     // and the fake wooden tree, visible from right across the garden. Built
@@ -313,6 +310,29 @@ export class World implements GameSystem {
     // own stations just above: tell the meadow after the fact and let it
     // replant anything that landed underneath.
     this.flowers.keepClearOfTapZones(this.entrance.interactZones());
+
+    // The Rail Race is no longer a coaster at all (reform of 31 July 2026): it
+    // is four parallel rails round the park's rim, raced side-on with the park
+    // itself as the backdrop. Its own module owns the route, the physics, the
+    // geometry and the camera — see `railRace/RailRace.ts`.
+    //
+    // **Built after the road's realised claim, on purpose** (stage 3, step 2).
+    // Its trestle legs are claims asked of `groundClaims`, and the road's
+    // corridor is the thing they most need to see. It was built above, before
+    // the entrance, until step 2 — but a headless park (the harness behind
+    // every check and invariant) takes no registry from the generator, so at
+    // that point its registry held nothing and the legs would have stood in a
+    // road the played park's legs avoid: two different parks, one of them the
+    // one every instrument measures. Here, in both the played and the headless
+    // park, the registry holds the road exactly as drawn — the spur trimmed to
+    // the plaza's paving — so the legs answer to the same road in both. The
+    // brief's alternative was to prove the spur's 3.9 m end move reaches no
+    // foot; this makes the question moot instead.
+    //
+    // Still before the NPCs, for the reason everything above is: the walk-past
+    // ring registers its posts with `this.collision`, and the waypoint graph is
+    // validated against the finished collision world.
+    this.railRace = new RailRace(this.collision, this.groundClaims);
 
     // The other children in the park. Built last, because the waypoint graph
     // they wander is validated against the finished collision world — every
