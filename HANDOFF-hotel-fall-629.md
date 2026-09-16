@@ -44,6 +44,16 @@ railway bridge decks, worst 5.09 m at (−24, 36) (gated −4.12, column 0.97).
 A child on the grass under one would read as fallen. Proved by standing Hugo
 there: `check:hotel OK`, exit 0, `carried` still 11.
 
+## A control on the instrument
+
+The pocket-space rule recognises the terrain by **exact equality** with
+`walkableGroundAt`. That holds only because `WalkSurfaces.sample` seeds `best`
+with that function verbatim outside the castle — and if it stopped holding, this
+clause would fail **open** (the seven-residents regression would go green again).
+So `check:hotel` asserts it at `(HOTEL_ORIGIN_X + 60, HOTEL_LOBBY_Z)`, a point
+inside `hotel.lobby` off every platform, plus a second clause asserting that
+probe point is still in a room. Both proved red.
+
 ## Mutations (all on canonical seed 20260728) — full transcripts in the PR body
 
 | mutation | result |
@@ -56,6 +66,8 @@ there: `check:hotel OK`, exit 0, `carried` still 11.
 | Hugo standing under the worst bridge deck | **exit 0** — correctly not reported |
 | reverted, honest park | exit 0, worst 0.050 m, 11 carried |
 
+All five re-run against the shipped head `07a0b9c`, not only against the first cut.
+
 Mutations were made by a temporary block inserted before `let lowest = Infinity;`
 that moves characters after the settle loop, driven by `MUT634=a|b|c|ola|under|hugo`,
 then `git checkout -- scripts/check-hotel.mts`. Nothing of it is committed.
@@ -67,8 +79,14 @@ then `git checkout -- scripts/check-hotel.mts`. Nothing of it is committed.
 `Tests 85 failed | 563 passed (648)`, 49.83s. **Inherited from the base**,
 identical counts, 85+563 = 648 so nothing skipped; issue #630 owns it.
 
-Diff: one file, `scripts/check-hotel.mts` +188/−6. `package.json` untouched —
+Diff: `scripts/check-hotel.mts` +230/−6 and this file. `package.json` untouched —
 script step sets parsed both sides, 122 and 122, none added, none missing.
+
+## CI
+
+Head repeats the base's failing set exactly — `Coplanar faces`, `Entrance road`,
+`Procgen invariants`, `Swept bus` red on both; `Deploy PR preview` and
+`A reload gets the new build` green on both. Issue #630 owns the ledger.
 
 ## Do not
 
