@@ -156,17 +156,22 @@ export interface Refusal {
  *
  * Every one of these was plane geometry over world `(x, z)` until the sphere
  * landed. World `(x, z)` is an orthographic projection of the planet, so
- * `Math.hypot` over it under-reads radial separation by `cos θ` — 1 m reads as
- * 1.43 m of real walking at the park's reach. `claimSurface.ts` carries the
- * measurement and the reasoning; these three lines are where the registry
- * stopped believing the shadow.
+ * `Math.hypot` over it under-reads radial separation by `cos θ`. How much
+ * depends on how far out: the table in `claimSurface.ts` (printed by
+ * `scripts/claim-chart-error.mts`) has a 1 m radial gap walking 1.12 m at
+ * 100 m from the origin, 1.22 m at 125 m and 1.37 m at 150 m — and the park's
+ * outline and its furthest drawn geometry stand between those rows
+ * (`theGroundIsTheSphereItClaimsToBe` prints the latter on every run). That
+ * file carries the measurement and the reasoning; these three lines are where
+ * the registry stopped believing the shadow.
  *
  * The kinds of error it was making were not symmetric. Under-reading distance
  * makes an overlap refusal *stricter* than it needs to be — a cost, not a
  * hazard. But {@link Demand} is served by a corridor **ending within a
  * radius**, and there under-reading means calling a door served by paving that
- * stops 40% further away than the registry believes, which is a child walking
- * to a door down a path that runs out.
+ * stops further away than the registry believes — by the same factor, so 12%
+ * at 100 m out and 37% at 150 m — which is a child walking to a door down a
+ * path that runs out.
  */
 const distPointSegment = (
   px: number,

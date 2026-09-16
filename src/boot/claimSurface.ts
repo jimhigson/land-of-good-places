@@ -19,6 +19,7 @@
  * |---|---|---|
  * | 0 m | 0.0° | 1.000 m |
  * | 100 m | 27.0° | 1.124 m |
+ * | 125 m | 34.6° | 1.218 m |
  * | 150 m | 43.0° | 1.371 m |
  * | 200 m | 65.4° | 2.430 m |
  *
@@ -29,8 +30,9 @@
  * solidity. For {@link GroundClaims.unservedDemands} it is the opposite and it
  * is a real defect: a demand is served when a corridor **ends inside its
  * radius**, so under-reading distance marks a door served by a road that stops
- * 40% further away than the registry believes. A child walks to the door and
- * the paving runs out.
+ * further away than the registry believes, by the factor in the table above
+ * for wherever that door stands. A child walks to the door and the paving runs
+ * out.
  *
  * (Between a point and a *run* the bound does not hold at all, which is the
  * next section and was very nearly a much worse bug.)
@@ -108,7 +110,7 @@ const _proj = /* @__PURE__ */ new Vector3();
  * being at the horizon instead of poisoning every comparison it takes part in.
  * A park reaching that far is a fault to be reported by
  * `theGroundIsTheSphereItClaimsToBe`, not something to be papered over here —
- * see `scripts/park-past-the-horizon.mts`.
+ * and `scripts/park-past-the-horizon.mts` is the record of the one time it did.
  */
 export const bearingOf = (x: number, z: number, target: Vector3): Vector3 => {
   const d2 = x * x + z * z;
