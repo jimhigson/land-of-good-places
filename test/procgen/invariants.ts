@@ -4462,14 +4462,17 @@ const theGinormousSlideStandsOnSomething: Invariant = (facts) => {
  * the slide. The count is written to stderr on every run.
  *
  * And the thing solidity must never cost: **she can still leave the pit.** The
- * spot the ride puts her down is asked of the real nav lattice, as is every
- * standable metre beside the run-out, so a collider that walled off the pit's
- * exit or closed a pocket against the castle or a leg goes red here.
+ * spot the ride puts her down is asked of the real nav lattice, and every
+ * standable metre beside the run-out is walked away from by the real mover, so a
+ * collider that walled off the pit's exit or closed a pocket against the castle
+ * or a leg goes red here.
  */
 const RUN_OUT_TARGET_SPACING = 1.6;
 const RUN_OUT_START = 4;
 const RUN_OUT_BEARINGS_DEG: readonly number[] = [-50, -25, 0, 25, 50];
 const RUN_OUT_POCKET_REACH = 3.5;
+const RUN_OUT_ESCAPE = 3;
+const RUN_OUT_ESCAPE_BEARINGS = 16;
 
 const theGinormousSlideRunOutIsSolid: Invariant = (facts) => {
   const complaints: string[] = [];
@@ -4589,7 +4592,17 @@ const theGinormousSlideRunOutIsSolid: Invariant = (facts) => {
     );
   }
 
-  // --- 3. and no pocket beside the run-out is shut off -----------------------
+  // --- 3. and nowhere beside it is a pocket she cannot leave ------------------
+  //
+  // Asked of the **real mover**, not the nav lattice. The lattice fattens every
+  // collider by her radius on a coarse grid, and on seed 24 it calls three
+  // metres between a row of bushes, a tree and a slide leg unreachable **with
+  // or without this collider** — while a body stood there walks out on a third
+  // of all bearings. That is the lattice being conservative, not a child being
+  // stuck, and an instrument that cannot tell the two apart would blame the
+  // chute for it. So: from every standable metre beside the run-out, walk
+  // straight out on {@link RUN_OUT_ESCAPE_BEARINGS} bearings; at least one must
+  // carry her {@link RUN_OUT_ESCAPE} m clear of the run-out.
   let pockets = 0;
   let pocketsMeasured = 0;
   let firstPocket: readonly [number, number] | null = null;
@@ -4608,7 +4621,15 @@ const theGinormousSlideRunOutIsSolid: Invariant = (facts) => {
       if (d > RUN_OUT_POCKET_REACH || d < halfWidth + PLAYER_RADIUS + 0.1) continue;
       if (!facts.isStandable(x, z, PLAYER_RADIUS)) continue;
       pocketsMeasured += 1;
-      if (!facts.reachableFromEntrance(x, z)) {
+      let escapes = false;
+      for (let b = 0; b < RUN_OUT_ESCAPE_BEARINGS && !escapes; b += 1) {
+        const bearing = (b / RUN_OUT_ESCAPE_BEARINGS) * Math.PI * 2;
+        const reach = RUN_OUT_POCKET_REACH + RUN_OUT_ESCAPE + 2;
+        facts.march(x, z, x + Math.cos(bearing) * reach, z + Math.sin(bearing) * reach, 0.25, (px, pz) => {
+          if (toLowChute(px, pz) > RUN_OUT_POCKET_REACH + RUN_OUT_ESCAPE) escapes = true;
+        });
+      }
+      if (!escapes) {
         pockets += 1;
         firstPocket ??= [x, z];
       }
@@ -4616,13 +4637,16 @@ const theGinormousSlideRunOutIsSolid: Invariant = (facts) => {
   }
   process.stderr.write(
     `[run-out solid] seed ${facts.seed}: ${pocketsMeasured - pockets} of ${pocketsMeasured} ` +
-      `standable metres beside the run-out walkable from the gate\n`,
+      `standable metres beside the run-out can walk away from it\n`,
   );
+  if (pocketsMeasured === 0) {
+    complaints.push('no standable ground beside the ginormous slide\'s run-out was measured at all');
+  }
   if (pockets > 0 && firstPocket) {
     complaints.push(
       `${pockets} of ${pocketsMeasured} standable metres beside the ginormous slide's run-out ` +
-        `cannot be walked to from the gate, the first at ${fmt(firstPocket)} — a pocket she ` +
-        'could be stuck in, or ground the collider walled off',
+        `are a pocket no straight walk leaves, the first at ${fmt(firstPocket)} — a child there ` +
+        'is stuck',
     );
   }
 
