@@ -41,7 +41,22 @@
   Controls 2, 3 and 4 went FAIL, control 1 still passed as documented, and
   the run was declared VOID with no bridge judged. Reverted.
 
-## State
+## State — PR 641 open against `eng/bridge-bend`
 
-Baseline (`origin/eng/bridge-bend`) procgen: 128 failed / 501 passed, 196 s.
-Failing set saved. Full after-run pending / see PR body.
+- procgen before: **128 failed / 501 passed** (629), 196.18 s.
+- procgen after: **124 failed / 505 passed** (629), 106.55 s.
+- Failing-set diff: exactly the four `every railway crossing has a bridge...`
+  tests (seeds 11, 24, 326, canonical) fixed; **zero new**, zero swaps.
+- All ten pool seeds clear, worst local grade 0.489 against the 0.670 ceiling
+  — and under the old 0.512 too, so the threshold change made nothing pass.
+- `pnpm run build` exit 0. `pnpm run check` red only at `check:crowd` and
+  `check:speech-bubbles`, both on #630's inherited ledger.
+
+## Left for someone else (reported to the Overseer, not fixed here)
+
+`WalkSurfaces.sample`'s own ceiling is still literally world-`y`
+(`const ceiling = y + BUILDING_STEP_UP`), so the planet's fall over a sub-step
+spends part of the 1.670 headroom `check:deck-fallthrough` measured. Seed 326
+already shows a world-`y` stride grade of **1.650** at r = 176.8 against that
+1.670 — 1.2 % of margin, on a figure that is park-dependent. Nothing asserts on
+it. The clause prints it on every run so it cannot be silently inherited.
