@@ -836,13 +836,21 @@ if (process.argv.includes('--picture')) {
       ? { x: Number(process.argv[argX + 1]), z: Number(process.argv[argZ + 1]) }
       : null;
 
-  const tree = trees[0];
+  // `--tree N --bearing DEG` pick the shot, and draw it head-anchored exactly as
+  // the body clause rasterises it; with neither, tree 0 at 45° tree-anchored.
+  const treeArg = process.argv.indexOf('--tree');
+  const bearingArg = process.argv.indexOf('--bearing');
+  const treeIndex = treeArg > 0 ? Number(process.argv[treeArg + 1]) : 0;
+  const tree = trees[treeIndex];
   if (!tree) process.exit(1);
   const liftArg = process.argv.indexOf('--lift');
   const liftOverride = liftArg > 0 ? Number(process.argv[liftArg + 1]) : null;
-  const picture = rasterise(tree, 0, override, 1, 'tree', Math.PI * 0.25, 0, liftOverride);
+  const picture =
+    bearingArg > 0
+      ? rasterise(tree, treeIndex, override, 1, 'head', (Number(process.argv[bearingArg + 1]) * Math.PI) / 180, 0, liftOverride)
+      : rasterise(tree, treeIndex, override, 1, 'tree', Math.PI * 0.25, 0, liftOverride);
   console.log(
-    `\nTree 0 at play scale (kid = ${FIGURE_PX}px tall, ` +
+    `\nTree ${treeIndex} at play scale (kid = ${FIGURE_PX}px tall, ` +
       `${(UNITS_PER_PIXEL * 1000).toFixed(0)} mm/px)` +
       `${override ? `, arm override x=${override.x} z=${override.z}` : ', shipped pose'}.` +
       '\nH = waving arm, # = head, + = other body, . = leaves',
