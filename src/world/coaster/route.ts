@@ -24,7 +24,7 @@ import {
   WINDOW_HALF_WIDTH,
   WINDOW_TRACK_Y,
   castleClear,
-  castleDeckYAt,
+  castleDeckClearanceAt,
   crossingBand,
   insideCastleFootprint,
 } from '../building/cruiserWindow';
@@ -1395,7 +1395,7 @@ export function* coasterProfileSearch(
       const s = (i / controls) * plan.length;
       const away = outsideSpan(castleSpan, s, plan.length);
       const spot = flat[i]!;
-      const wanted = castleDeckYAt(WINDOW_TRACK_Y, spot.x, spot.z) - terrainHeight(spot.x, spot.z);
+      const wanted = castleDeckClearanceAt(WINDOW_TRACK_Y, spot.x, spot.z);
       if (away < WINDOW_FLAT) heights[i] = wanted;
       else if (away < WINDOW_FLAT + WINDOW_RAMP) {
         const t = (away - WINDOW_FLAT) / WINDOW_RAMP;
