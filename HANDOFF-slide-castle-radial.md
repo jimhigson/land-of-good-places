@@ -116,6 +116,20 @@ AssertionError: no castle stonework was found in the built park at all, so the
 check that keeps the ginormous slide out of the battlements measured nothing…
 ```
 
+**Control C — the new frame guard fires.** `- 220` appended to the fact's
+`geo.setFromWorldVector(probe).radius()`, i.e. the field put back into the
+plumb-height units it used to carry:
+
+```
+AssertionError: `parkFacts.castleMasonryTopRadius` is 9.770, which is not a
+radius from the planet's centre — every point in the park is at least
+GROUND_SPHERE_RADIUS (220) from it. Something has put a world-Y height back in
+this field, which is issue #625 exactly…
+```
+
+All three were reverted with `git checkout test/procgen/parkFacts.ts` and the
+invariant re-run green afterwards (`1 passed | 92 skipped`).
+
 ## Test counts, before and after — identical, and that is the correct result
 
 Both runs on this machine, `pnpm run test:procgen`:
@@ -138,27 +152,89 @@ All 85 are the inherited ledger in issue #630.
 (Note: `src/world/parkFacts.ts` does not exist; the file is
 `test/procgen/parkFacts.ts`.)
 
+Re-done from scratch by the second agent (the first agent's table is superseded;
+two of its verdicts moved). Every row traced to the code that *builds and
+places* the geometry, not inferred from the fact's name.
+
 | line | what | verdict |
 |---|---|---|
-| 1305 | cat-bus occupant fit, `box.max.y − shell.max.y` | **clean** — `createCatBus()` is built off-scene and never placed, so this is model space. |
+| 1305 | cat-bus occupant fit, `box.max.y − shell.max.y` | **clean** — `measureCatBusFit()` calls `createCatBus()`/`createKid()` directly, never touches `scene`, `placeOnSphere` or a plot, and disposes the bus. Both boxes come off the same unplaced root, so it is a difference inside one model frame. |
 | ~1484 | `castleMasonryTopRadius` | **was the bug**, fixed here |
-| 1532 | `castleRoofGarden.topY` | **same disease** — world-Y over the leaning castle. AABB `max.y` **9.575**, radial top **12.366**, under-reports by **2.79 m**. Its reader compares it against chute world-`y`, so both sides are plumb — self-consistent, not honest. Its invariant is already red at baseline (#630). **Reported, not fixed here** — converting it means converting a plan *box*, which is a bigger job than a scalar and belongs with whoever fixes its red. |
-| 1733 | planted instance top, `at.y + bounds.max.y * scale.y` | world-Y on tilted instances; feeds the bus-grazing ray. Same class. Reported. |
-| 2490 / 2520–2521 | Rail Race arch legs | world-Y against `terrainHeight`; already red at baseline (#630). |
-| 2588 | `busTop` | **clean** — `BusJourney`'s own private flat lane, never on the sphere. |
+| 1532 | `castleRoofGarden.topY` | **self-consistent, not honest.** The group *is* tilted (`Building.ts` `standInPlot`; its own comment says "the plot leans now"). AABB `max.y` **9.575**, radial top **12.366** — under-reports by **2.79 m**. But its only reader compares it against `slideChute` world-`y`, and it is the *maximum* world y over the whole roof box, so it is a conservative separating bound: a real intersection still fails it. **Not fixed here** — converting it means converting a plan *box*, not a scalar. Its invariant is already red at baseline (#630), so it belongs with whoever fixes that. **The hazard is the name**: `topY` reads like "how tall the roof is"; the day anyone compares it to a radius it is silently 2.79 m wrong. |
+| 1733 | planted instance top, `at.y + bounds.max.y * scale.y` | **SUSPECT — a genuine frame mix, and the one live find of the audit.** See below. |
+| 2490 / 2520–2521 | Rail Race arch legs | **clean** — and not for the reason previously recorded. `track.ts`'s `buildArch` builds the legs with **no rotation at all** (`leg.position.set(footX, bottom + height/2, footZ)`, `bottom = terrainHeight(…) − tube`), so they are genuinely plumb world-y cylinders and comparing them to `terrainHeight` is like with like. The *geometry* is arguably the thing that should lean; the *measurement* is honest about what was built. |
+| 2588 | `busTop` | **clean on frames** — `BusJourney.ts` contains no `placeOnSphere`, `tiltToSphere`, `terrainHeight` or `GROUND_SPHERE_RADIUS`; it is a genuinely private flat lane. **But a separate bug found underneath it** — see below. |
 
-## Instruments
+### Live find 1 — planted instance tops are a frame mix (line 1733)
 
-`scripts/measure-castle-masonry.mts`, `scripts/measure-slide-vs-stone.mts`.
-Both carry a control that pushes the masonry radially outward until it must
-clip (`measure-slide-vs-stone` prints the ladder: 0 m clear → +8 m CLIP). Run
-them with:
+`Scenery.ts`'s own comment (line 1252) states it: *"`makeInstanced` puts every
+instance through `placeOnSphere`, which re-measures a part's authored height
+along the local up — so a canopy, being metres above the ground, is drawn
+further out than the trunk it grew from"*, with measured displacement of median
+1.80 m and worst 3.21 m on the canonical seed.
 
-```
-node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/measure-castle-masonry.mts
-```
+The fact takes `at` from the instance matrix (world, tilted — fine) and then
+adds `bounds.max.y * scale.y`, the geometry's **local** top, straight onto the
+world `y`, **discarding the instance's rotation**. The true world-y top is
+`at.y + h·cos θ`, displaced `h·sin θ` sideways; at the treeline radius
+(~70–80 m, θ ≈ 18–20°) a 9 m tree's reported top is ~0.5 m too high and is
+attributed to the *trunk's* `(x, z)` rather than the canopy's.
 
-**Scratch — delete both before the PR opens** unless a reviewer wants them kept.
+It matters because the consumer is `hidesTheArrivingBus(at.x, at.z, top)`
+(`src/world/entrance/arrivalSightline.ts`), which traces a grazing ray from
+`top` and compares against `BUS_GROUND_Y = terrainHeight(…)`, a world y, then
+asks `distanceToEntranceCorridor` about a plan position derived from the trunk.
+This is exactly the bug `Scenery.ts` documents and fixed **for its own gate**
+(`canopyFlat` → `placeOnSphere` → test the *drawn* canopy) and which
+`parkFacts.ts` has not adopted. The same `at`/`bounds` mix feeds `reach` and
+`treesInTheBusRoad` two lines above.
+
+**Not fixed here** — it is the arrival-sightline subsystem, not the castle, and
+fixing it means re-deriving the canopy position the way `Scenery.ts` already
+does. Worth its own ticket.
+
+### Live find 2 — `busTop` double-counts the lane height (line 2588)
+
+Independently confirmed by the second agent, not taken on trust:
+
+- `BusJourney`'s constructor calls `this.place(0)` (line 868).
+- `place(z)` sets `this.bus.root.position.set(0, laneHeight(z), z)` (line 1585).
+- `laneHeight(0)` evaluates to **3.0737** (run directly).
+
+So `busTop = busBox.setFromObject(node).max.y` is an **absolute lane-y**
+— 3.0737 m of lane plus the bus's own height — while the comment above it says
+it is "the bus's own height", and the ceiling test at line 2601 reads
+`if (p.y > laneHeight(p.z) + busTop) return;`. The lane height is therefore
+counted twice and the "what a bus would hit" ceiling sits about **3.07 m too
+high** (wobbling with the lane wave, since the double-counted term is
+`laneHeight(0)` while the first term is `laneHeight(p.z)`).
+
+The direction is the *safe* one — `return` means "not recorded", so a ceiling
+that is too high records **more** obstacles than a bus could really hit, not
+fewer. So `laneCarriageway` is over-inclusive rather than blind. Still wrong,
+and the fix is one term: measure the bus in its own frame, or subtract
+`laneHeight(0)` where `busTop` is read. **Not fixed here** — different
+subsystem, and it deserves its own before/after count rather than a drive-by.
+
+## Instruments — deleted on purpose, and where the evidence went instead
+
+`scripts/measure-castle-masonry.mts` and `scripts/measure-slide-vs-stone.mts`
+were the first agent's scratch; both were re-run by the second agent (the
+numbers in the table above are that re-run, not a copy) and then **deleted
+before the PR**. Two reasons, and the second is the real one:
+
+- Every figure they produced is now written into the docblocks of
+  `ParkFacts.castleMasonryTopRadius`,
+  `theGinormousSlideLeavesOverTheBattlements` and `CASTLE_MASONRY_TOP`,
+  beside the code that has to stay true to it.
+- They each re-stated `CHUTE_HALF_WIDTH = 1.11` by hand. `invariants.ts` owns
+  that number and owns a docblock explaining why it is derived from the built
+  cross-section rather than imported from the generator; a third hand-written
+  copy in a script nobody runs is precisely the "two definitions of one thing"
+  fault, and a scratch file is the likeliest of the three to drift unnoticed.
+
+The control they carried is not lost — it is reproduced **inside vitest**, where
+it runs against the same facts the invariant reads, as Control A below.
 
 ## For QA — where to stand
 
