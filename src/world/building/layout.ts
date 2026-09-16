@@ -172,30 +172,33 @@ export function onPlate(authored: number): number {
 }
 
 /**
- * **The one transform the castle's shell is actually standing at.**
+ * **The one transform the castle's shell stands at — `Building.ts` places the
+ * shell from this, so there is nothing for it to disagree with.**
  *
- * `AnchorPlots.standInPlot` puts the facade in the world with
- * `placeOnSphere` at `(BUILDING_CENTRE_X, BUILDING_BASE_Y, BUILDING_CENTRE_Z)`,
- * and `Frame.fromBearing` reproduces `placeOnSphere` exactly — `test/geo`
- * asserts it, to 1e-9 in position and 1e-6 in angle — so this **is** that
- * transform rather than a second opinion about it. Measured on the canonical
- * seed at scale 1: the castle stands at r=47.4 m and every one of its meshes
- * leans **12.44°**, the local up to the last hundredth.
+ * Stood on the ground under the facade's centre and lifted to `BUILDING_BASE_Y`
+ * **along the local up** — `Geo.fromWorld(x, ground, z).lift(h)`, the form
+ * `test/geo` proves equal to `placeOnSphere`. An earlier version built it as
+ * `Geo.fromWorld(x, BUILDING_BASE_Y, z)`, which reads the base height as a
+ * literal world `y` rather than a height up the leaning local vertical, while
+ * the shell was still placed separately through `standInPlot`/`placeOnSphere`.
+ * Measured against the drawn castle's `matrixWorld`: **6.82 cm / 3.1e-4 rad on
+ * the canonical seed, 8.73 cm / 3.9e-4 rad on seed 24** — the window cut that
+ * far from the stone it sits in. `check:castle-window` now asserts the drawn
+ * shell equals this frame.
  *
  * Use {@link worldToCastle} and {@link castleToWorld} for anything that asks
  * where a **world** point is relative to the castle. The two flat formulas they
  * replace — `world y = BUILDING_BASE_Y + localY` and `lx = x −
- * BUILDING_CENTRE_X` — described a castle standing plumb, and stopped being
- * true when the plot began to lean. What that cost, measured: the castle's own
- * courtyard floor spans **6.44 m of world `y`** across its footprint, the Sky
- * Cruiser's loop is solved through a *level* slice of a leaning building, and
- * `check:cruiser-clearance` and `check:castle-window` both report the car
- * inside the stonework — six strikes on `cruiser-window-stones`,
- * `castle-wall-lintel`, `crenellations`, `castle-roof-deck`,
- * `castle-roof-planters` and the wall bands.
+ * BUILDING_CENTRE_X` — described a castle standing plumb; its courtyard floor
+ * in fact spans **6.44 m of world `y`** across its footprint at scale 1, and the
+ * Sky Cruiser's loop was solved through a level slice of a leaning building.
  */
 export const CASTLE_FRAME = /* @__PURE__ */ Frame.fromBearing(
-  Geo.fromWorld(BUILDING_CENTRE_X, BUILDING_BASE_Y, BUILDING_CENTRE_Z),
+  Geo.fromWorld(
+    BUILDING_CENTRE_X,
+    terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z),
+    BUILDING_CENTRE_Z,
+  ).lift(BUILDING_BASE_Y - terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z)),
   0,
 );
 

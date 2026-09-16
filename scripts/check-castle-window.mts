@@ -1,4 +1,6 @@
+import { Quaternion, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
+import { CASTLE_FRAME } from '../src/world/building/layout';
 import {
   CASTLE_WINDOWS,
   WINDOW_HEAD_Y,
@@ -29,7 +31,31 @@ if (!castleRoot) {
   console.error('check:castle-window: could not find the garden castle in the built scene');
   process.exitCode = 1;
 } else {
+  // **The drawn shell IS `CASTLE_FRAME`.** The route solve and the window cut
+  // describe the castle through that frame; if the shell stood anywhere else the
+  // hole would be cut off the stone it sits in. It once did, by 6.82 cm /
+  // 3.1e-4 rad on the canonical seed, because the frame read the base height as a
+  // world `y` while `standInPlot` stood it up the leaning local vertical.
+  castleRoot.updateWorldMatrix(true, false);
+  const drawnAt = new Vector3();
+  const drawnSpin = new Quaternion();
+  castleRoot.matrixWorld.decompose(drawnAt, drawnSpin, new Vector3());
+  const frameAt = CASTLE_FRAME.at.toWorld(new Vector3());
+  const offMetres = drawnAt.distanceTo(frameAt);
+  const offRadians = drawnSpin.angleTo(CASTLE_FRAME.q);
+  const frameComplaints =
+    offMetres > 1e-6 || offRadians > 1e-6
+      ? [
+          `the drawn castle stands ${(offMetres * 100).toFixed(2)} cm / ${offRadians.toExponential(1)} rad ` +
+            'from CASTLE_FRAME, the transform its window was solved and cut in — two definitions of ' +
+            "where the castle is. Building.ts must place the shell from CASTLE_FRAME.",
+        ]
+      : [];
+  console.log(
+    `check:castle-window: drawn shell vs CASTLE_FRAME ${offMetres.toExponential(1)} m, ${offRadians.toExponential(1)} rad`,
+  );
   const complaints = [
+    ...frameComplaints,
     ...checkCastleWindows(route, CASTLE_WINDOWS),
     ...sweptCartHits(route, castleRoot),
   ];
