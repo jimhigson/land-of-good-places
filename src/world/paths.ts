@@ -35,6 +35,14 @@ export interface RouteDefinition {
   readonly points: readonly (readonly [number, number])[];
   readonly width: number;
   readonly closed: boolean;
+  /**
+   * Interior corners another paved route starts or ends on — **junctions**,
+   * which {@link routeCurve} draws square instead of filleting. Decision 3:
+   * "rounded corners, 1.5-2 m fillets; square junctions otherwise". Filled in
+   * by {@link squareJunctionCorners}; omitted on a route nothing joins at a
+   * corner.
+   */
+  readonly squareCorners?: readonly (readonly [number, number])[];
 }
 
 /**
@@ -3876,8 +3884,10 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
   // "already on the network" is measured against them. An unpaved edge is a
   // connectivity fact, not a ribbon — branching off one paved from a booth's
   // doormat once, and the junction waypoint seeded inside the booth.
-  const network = (): readonly RouteDefinition[] =>
-    edges.filter((edge) => edge.paved).map((edge) => edge.route);
+  const network = (): readonly RouteDefinition[] => {
+    squareJunctionCorners(edges);
+    return edges.filter((edge) => edge.paved).map((edge) => edge.route);
+  };
 
   /**
    * How far short of a plot's own edge the "past the doormat" extension below
@@ -4161,6 +4171,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
   // the invariant's own arithmetic).
   if (!DISABLE_INTERCONNECTS) yield* addInterconnects(nodes, edges, progress);
 
+  squareJunctionCorners(edges);
   return { nodes, edges, ring };
 }
 
@@ -5156,6 +5167,55 @@ function pushClearOfRail(
  * 1.5-2 m fillets; square junctions otherwise". */
 const CORNER_FILLET = 1.75;
 
+/** How close another route's end must be to a corner to be a junction on it.
+ * Junctions are the same lattice coordinate reached by two plans, so they
+ * agree to rounding, not to a tolerance anyone should tune. */
+const JUNCTION_SNAP = 0.05;
+
+/**
+ * **A junction on a corner is drawn square, so the junction exists.**
+ *
+ * The street lattice hands a later spur a paved lattice node to start from,
+ * and that node can be a corner of the route that paved it. {@link routeCurve}
+ * used to fillet every corner, so the drawn ribbon passed 0.62 m inside the
+ * point the new spur started on (a 1.75 m fillet round a right angle): a
+ * junction on geometry that was never built. Measured on eng/sphere-six-reds
+ * seed 326: `spur-exit-ferrisWheel` and `spur-stall.railRacer` both started on
+ * `spur-building`'s corner (11.1, -32), the router measured ferrisWheel to its
+ * exit as 28.4 m along that imagined junction, the built paving as 157.5 m, and
+ * no connector was planned. Every pool seed carried 3-16 such ends.
+ *
+ * Mutates `edges` in place (replacing a route object, never editing one —
+ * route identity keys the drawn-sample cache). Idempotent; call it whenever
+ * the network is about to be read as drawn.
+ */
+function squareJunctionCorners(edges: PathEdge[]): void {
+  const ends: (readonly [number, number])[] = [];
+  for (const edge of edges) {
+    if (!edge.paved || edge.route.closed) continue;
+    const points = edge.route.points;
+    if (points.length === 0) continue;
+    ends.push(points[0] as readonly [number, number], points[points.length - 1] as readonly [number, number]);
+  }
+  for (let i = 0; i < edges.length; i += 1) {
+    const edge = edges[i] as PathEdge;
+    if (!edge.paved || edge.route.closed) continue;
+    const points = edge.route.points;
+    const own = [points[0], points[points.length - 1]];
+    const corners: (readonly [number, number])[] = [];
+    for (let k = 1; k < points.length - 1; k += 1) {
+      const c = points[k] as readonly [number, number];
+      const joined = ends.some(
+        (end) => !own.includes(end) && Math.hypot(end[0] - c[0], end[1] - c[1]) <= JUNCTION_SNAP,
+      );
+      if (joined) corners.push(c);
+    }
+    const before = edge.route.squareCorners ?? [];
+    if (corners.length === before.length) continue;
+    edges[i] = { ...edge, route: { ...edge.route, squareCorners: corners } };
+  }
+}
+
 /** Sampling pitches for {@link drawnPolyline}: dense enough that the
  * Catmull-Rom the ribbon extruder sweeps hugs the polyline (a Catmull-Rom
  * through collinear points *is* the straight line), coarse enough to cost
@@ -5177,6 +5237,7 @@ const ARC_SAMPLE = 0.6;
  */
 function drawnPolyline(
   points: readonly (readonly [number, number])[],
+  squareCorners: readonly (readonly [number, number])[],
 ): (readonly [number, number])[] {
   // Collapse near-duplicates first — a zero-length leg is a NaN tangent.
   const src: [number, number][] = [];
@@ -5210,7 +5271,7 @@ function drawnPolyline(
     const dirOutX = (b[0] - c[0]) / lenOut;
     const dirOutZ = (b[1] - c[1]) / lenOut;
     const turn = Math.abs(Math.atan2(dirInX * dirOutZ - dirInZ * dirOutX, dirInX * dirOutX + dirInZ * dirOutZ));
-    if (turn < 0.05) {
+    if (turn < 0.05 || squareCorners.some((q) => Math.hypot(q[0] - c[0], q[1] - c[1]) <= JUNCTION_SNAP)) {
       emitStraightTo(c);
       continue;
     }
@@ -5248,7 +5309,7 @@ function drawnPolyline(
  * bearings, and filleting a circle's own samples would only dent it.
  */
 export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
-  const points = route.closed ? route.points : drawnPolyline(route.points);
+  const points = route.closed ? route.points : drawnPolyline(route.points, route.squareCorners ?? []);
   const vectors = points.map(([x, z]) => new Vector3(x, 0, z));
   return new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
 }

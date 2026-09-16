@@ -1515,6 +1515,65 @@ const noPathEndsNowhere: Invariant = (facts) => {
 };
 
 /**
+ * How far a branching ribbon's end may sit from the centre line of the paving
+ * it joins: half `parkFacts.ts`'s ~0.5 m resampling pitch, so the sampling
+ * itself can never be the gap, and well under the 0.42-0.80 m by which a
+ * filleted corner used to miss the junction built on it.
+ */
+const JUNCTION_ON_CENTRELINE = 0.25;
+
+/**
+ * **A spur starts on the drawn centre line of the path it branches from.**
+ *
+ * {@link noPathEndsNowhere} asks whether a ribbon's end lands on paving, and a
+ * wide ribbon forgives most of a metre. This asks the stricter question the
+ * junction itself poses: is the point the router joined at a point of the path
+ * that was built? Before `paths.ts`'s `squareJunctionCorners`, every pool seed
+ * had 3-16 spurs starting on another route's *control* corner while the drawn
+ * ribbon rounded that corner 0.62 m inside it — overlap by luck, and on
+ * eng/sphere-six-reds seed 326 the router and
+ * {@link detourRatiosStayReasonable} measured the same walk as 28.4 m and
+ * 157.5 m.
+ */
+const everySpurStartsOnTheDrawnCentreLine: Invariant = (facts) => {
+  const complaints: string[] = [];
+  let judged = 0;
+  for (const edge of facts.pathEdges) {
+    if (edge.backbone) continue;
+    const ends = [
+      ['start', edge.from, edge.points[0]],
+      ['end', edge.to, edge.points[edge.points.length - 1]],
+    ] as const;
+    for (const [which, id, point] of ends) {
+      if (id !== 'ring' || !point) continue;
+      judged += 1;
+      let best = Infinity;
+      for (const other of facts.pathEdges) {
+        if (other.name === edge.name) continue;
+        const count = other.backbone ? other.points.length : other.points.length - 1;
+        for (let i = 0; i < count; i += 1) {
+          const a = other.points[i]!;
+          const b = other.points[(i + 1) % other.points.length]!;
+          best = Math.min(best, pointToSegment(point, a, b));
+        }
+      }
+      for (const node of facts.pathNodes) {
+        if (node.reach > 0) best = Math.min(best, Math.max(0, Math.hypot(point[0] - node.x, point[1] - node.z) - node.reach));
+      }
+      if (best > JUNCTION_ON_CENTRELINE) {
+        complaints.push(
+          `${edge.name}'s ${which} at ${fmt(point)} is ${best.toFixed(2)} m from the centre line of ` +
+            'any other drawn path — it joins at a point that was never built',
+        );
+      }
+    }
+  }
+  process.stderr.write(`everySpurStartsOnTheDrawnCentreLine: judged ${judged} junction end(s) on seed ${facts.seed}\n`);
+  if (judged === 0) complaints.push('no branching ribbon end was judged — this asserted nothing');
+  return complaints;
+};
+
+/**
  * **Every plot's sign faces exactly the camera's own fixed diagonal**
  * (issue #269).
  *
@@ -10737,6 +10796,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['no lamp stands in anything', lampsTouchNothing],
   ['every path is lit end to end', everyPathIsLit],
   ['no paved path stops anywhere but a destination', noPathEndsNowhere],
+  ['every spur starts on the drawn centre line of the path it branches from', everySpurStartsOnTheDrawnCentreLine],
   ['every plot faces exactly the camera axis', buildingsFaceTheCameraAxis],
   ['every paved path runs on grid axes', pathsRunOnGridAxes],
   ['the grid verdict does not depend on which route object carries the paving', gridAxisVerdictsIgnoreTheCarrier],
