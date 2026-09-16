@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { placedEntry } from '../parkLayout';
+import type { ParkLayout } from '../parkLayout';
+import { lazyArrayView, lazyView } from '../../boot/lazyView';
 import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
 
 /**
@@ -11,12 +12,37 @@ import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
  * old authored coordinates while its plot, its rail avoidance and its
  * keep-outs had all moved: 85 m of 'building' at seed 7.
  */
-const FACADE_ANCHOR = placedEntry('building');
-const FACADE_LENGTH = Math.hypot(FACADE_ANCHOR.x, FACADE_ANCHOR.z) || 1;
-export const BUILDING_CENTRE_X =
-  FACADE_ANCHOR.x - (FACADE_ANCHOR.x / FACADE_LENGTH) * BUILDING_CENTRE_NUDGE;
-export const BUILDING_CENTRE_Z =
-  FACADE_ANCHOR.z - (FACADE_ANCHOR.z / FACADE_LENGTH) * BUILDING_CENTRE_NUDGE;
+/**
+ * **Live bindings, rebound by the park's backtracking driver** every time the
+ * layout is decided (`parkPlan.ts` → {@link bindCastlePlacement}). They used
+ * to be constants computed here at import from `placedEntry('building')`;
+ * under backtracking the layout can be re-drawn (decision zero) after this
+ * module has loaded, and a hundred consumers read these as plain numbers, so
+ * the numbers themselves move. ESM live bindings make every consumer's read
+ * the current value with no change to the consumer. Before the first layout
+ * decision they are NaN — loud in any arithmetic, never silently stale.
+ */
+export let BUILDING_CENTRE_X = Number.NaN;
+export let BUILDING_CENTRE_Z = Number.NaN;
+export let BALL_PIT_X = Number.NaN;
+export let BALL_PIT_Z = Number.NaN;
+
+/** Bind the castle's and ball pit's placement from a decided layout. The driver's, not a consumer's. */
+export function bindCastlePlacement(layout: ParkLayout): void {
+  const anchor = layout.entries.get('building');
+  const pit = layout.entries.get('ballPit');
+  if (!anchor || !pit) throw new Error("park layout: no 'building' or 'ballPit' entry in the decided layout");
+  const length = Math.hypot(anchor.x, anchor.z) || 1;
+  BUILDING_CENTRE_X = anchor.x - (anchor.x / length) * BUILDING_CENTRE_NUDGE;
+  BUILDING_CENTRE_Z = anchor.z - (anchor.z / length) * BUILDING_CENTRE_NUDGE;
+  BALL_PIT_X = pit.x;
+  BALL_PIT_Z = pit.z;
+  BALL_PIT_FLOOR_Y = terrainHeight(pit.x, pit.z) - BALL_PIT_DEPTH;
+  BUILDING_BASE_Y = deckClearanceOverFootprint() + BUILDING_PLINTH;
+  INTERIOR_GROUND_Y = BUILDING_BASE_Y - INTERIOR_PLAZA_DROP;
+  castleTowersMemo = null;
+  castleFrameMemo = null;
+}
 import {
   BUILDING_FLOOR_HEIGHT,
   BUILDING_HALF_X,
@@ -82,7 +108,8 @@ import { Frame, Geo } from '../geo';
 // --------------------------------------------------------------- geometry
 
 /** Ground-floor deck height in world units. Deck 0 is level; the site is not. */
-export const BUILDING_BASE_Y = deckClearanceOverFootprint() + BUILDING_PLINTH;
+/** Live, like the castle's centre it is measured under: rebound by {@link bindCastlePlacement}. */
+export let BUILDING_BASE_Y = Number.NaN;
 
 /**
  * The interior's own ground, a little below its ground-floor deck.
@@ -92,7 +119,8 @@ export const BUILDING_BASE_Y = deckClearanceOverFootprint() + BUILDING_PLINTH;
  * at, gives the roof terrace a "we are very high up" drop, and gives anybody who
  * walks off the edge of deck zero somewhere to land.
  */
-export const INTERIOR_GROUND_Y = BUILDING_BASE_Y - INTERIOR_PLAZA_DROP;
+/** Live, with {@link BUILDING_BASE_Y}. */
+export let INTERIOR_GROUND_Y = Number.NaN;
 
 /**
  * The three floors by name, so nothing has to type a bare `0`, `1` or `2`.
@@ -193,7 +221,9 @@ export function onPlate(authored: number): number {
  * in fact spans **6.44 m of world `y`** across its footprint at scale 1, and the
  * Sky Cruiser's loop was solved through a level slice of a leaning building.
  */
-export const CASTLE_FRAME = /* @__PURE__ */ Frame.fromBearing(
+let castleFrameMemo: Frame | null = null;
+function castleFrameNow(): Frame {
+  return Frame.fromBearing(
   Geo.fromWorld(
     BUILDING_CENTRE_X,
     terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z),
@@ -201,6 +231,12 @@ export const CASTLE_FRAME = /* @__PURE__ */ Frame.fromBearing(
   ).lift(BUILDING_BASE_Y - terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z)),
   0,
 );
+}
+/**
+ * A view of the castle's rigid transform, which follows the layout the park's
+ * driver decided (see {@link bindCastlePlacement}, which forgets the memo).
+ */
+export const CASTLE_FRAME: Frame = lazyView(() => (castleFrameMemo ??= castleFrameNow()));
 
 /** A castle-local point, in world space. The inverse of {@link worldToCastle}. */
 export function castleToWorld(local: Readonly<Vector3>, target: Vector3): Vector3 {
@@ -509,7 +545,9 @@ export interface TowerSolid {
  * Derived from the same numbers `Shell.ts` composes its instance matrices from,
  * so the solid a ride avoids and the mesh a child sees cannot drift apart.
  */
-export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
+let castleTowersMemo: readonly TowerSolid[] | null = null;
+export const CASTLE_TOWERS: readonly TowerSolid[] = lazyArrayView(() => (castleTowersMemo ??= castleTowersNow()));
+function castleTowersNow(): readonly TowerSolid[] {
   const solids: TowerSolid[] = [];
   const corners = CASTLE_TURRET_CORNERS;
   corners.forEach(([localX, localZ], index) => {
@@ -535,7 +573,7 @@ export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
     });
   });
   return solids;
-})();
+}
 
 /**
  * Horizontal distance from a tower's surface at height `y`, or `Infinity` where
@@ -1534,9 +1572,8 @@ export function shopForecourtRegion(unit: ShopUnitDefinition): RectRegion {
 // --------------------------------------------------------------- ball pit
 
 /** Centre of the ball pit, in world coordinates (the `ballPit` anchor). */
-export const BALL_PIT_X = placedEntry('ballPit').x;
-export const BALL_PIT_Z = placedEntry('ballPit').z;
 export const BALL_PIT_RADIUS = 6;
 /** How far the pit floor sits below the surrounding grass. */
 export const BALL_PIT_DEPTH = 0.5;
-export const BALL_PIT_FLOOR_Y = terrainHeight(BALL_PIT_X, BALL_PIT_Z) - BALL_PIT_DEPTH;
+/** Live, like the pit's position: rebound by {@link bindCastlePlacement}. */
+export let BALL_PIT_FLOOR_Y = Number.NaN;

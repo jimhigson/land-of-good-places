@@ -9,6 +9,7 @@
  */
 
 import { HOTEL_FLOOR_Y, HOTEL_ORIGIN_X } from '../core/constants';
+import { registerPlanCache } from '../boot/planCaches';
 import { CASTLE_FLOORS } from './building/floors';
 import { BUILDING_BASE_Y } from './building/layout';
 import { HOTEL_ROOM_Z, SPACE_GARDEN, type SpaceId } from './spaces';
@@ -19,7 +20,8 @@ interface SpaceOrigin {
   readonly z: number;
 }
 
-const ORIGINS: Readonly<Record<SpaceId, SpaceOrigin>> = {
+function originsNow(): Readonly<Record<SpaceId, SpaceOrigin>> {
+  return {
   [SPACE_GARDEN]: { x: 0, y: 0, z: 0 },
   // Every castle floor stands at the same height — they are not stacked any
   // more, so `BUILDING_BASE_Y` is simply the floor you walk on, on all three.
@@ -32,7 +34,16 @@ const ORIGINS: Readonly<Record<SpaceId, SpaceOrigin>> = {
   ...Object.fromEntries(
     HOTEL_ROOM_Z.map(([space, z]) => [space, { x: HOTEL_ORIGIN_X, y: HOTEL_FLOOR_Y, z }]),
   ),
-};
+  };
+}
+let originsMemo: Readonly<Record<SpaceId, SpaceOrigin>> | null = null;
+/** Built on first use: the castle's floor height is decided by the park's driver, not at import. */
+function origins(): Readonly<Record<SpaceId, SpaceOrigin>> {
+  return (originsMemo ??= originsNow());
+}
+registerPlanCache(() => {
+  originsMemo = null;
+});
 
 /** World position -> the offset a save records, relative to its space. */
 export function worldToLocal(
@@ -41,8 +52,8 @@ export function worldToLocal(
   y: number,
   z: number,
 ): { x: number; y: number; z: number } {
-  const origin = ORIGINS[space] ?? ORIGINS[SPACE_GARDEN];
-  // `SPACE_GARDEN` is a literal key of ORIGINS, so this cannot actually be
+  const origin = origins()[space] ?? origins()[SPACE_GARDEN];
+  // `SPACE_GARDEN` is a literal key of the origins table, so this cannot actually be
   // undefined; the fallback is for a caller that invented an id.
   if (!origin) return { x, y, z };
   return { x: x - origin.x, y: y - origin.y, z: z - origin.z };
@@ -60,7 +71,7 @@ export function localToWorld(
   y: number,
   z: number,
 ): { x: number; y: number; z: number } | null {
-  const origin = ORIGINS[space];
+  const origin = origins()[space];
   if (!origin) return null;
   return { x: x + origin.x, y: y + origin.y, z: z + origin.z };
 }

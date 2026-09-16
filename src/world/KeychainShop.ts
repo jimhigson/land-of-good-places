@@ -9,6 +9,7 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
+import { lazyView } from '../boot/lazyView';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
@@ -230,7 +231,8 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
 
 // ---------------------------------------------------------------- placement
 
-const KEYCHAIN_PLACEMENT = STALL_PLACEMENTS.keychain;
+/** A view: the stall follows the layout the park's driver decided. */
+const KEYCHAIN_PLACEMENT: (typeof STALL_PLACEMENTS)['keychain'] = lazyView(() => STALL_PLACEMENTS.keychain);
 const [STALL_X, STALL_Z] = KEYCHAIN_PLACEMENT.position;
 const STALL_FACING = KEYCHAIN_PLACEMENT.facing;
 

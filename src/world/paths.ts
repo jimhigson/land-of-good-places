@@ -1,4 +1,5 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
+import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
 import { PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
@@ -10,6 +11,7 @@ import { FENCE_OFFSET } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
 import { CROSSING_SITES, type CrossingSite } from './train/crossingPlan';
 import { screenDrawnPathsForOffSiteCrossings } from './train/crossingPredicate';
+import { registerPlanCache } from '../boot/planCaches';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -126,11 +128,11 @@ function numberFromEnv(name: string): number {
 }
 
 /** Fountain plaza — wherever the layout put it. Paths converge here. */
-export const PLAZA = {
+export const PLAZA: { readonly x: number; readonly z: number; readonly radius: number } = lazyView(() => ({
   x: PARK_LAYOUT.fountain.x,
   z: PARK_LAYOUT.fountain.z,
   radius: PARK_LAYOUT.fountain.radius,
-};
+}));
 
 // ------------------------------------------------------------ generation
 
@@ -200,14 +202,22 @@ const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4 + RIBBON_HALF_WIDTH_CEILING;
  * footprints out of the paving costs nothing and means the walk-past ring's
  * feet stay excluded even if a future change makes it draw one again.
  */
-const BLOCKERS: readonly Blocker[] = [
+let blockersMemo: readonly Blocker[] | null = null;
+/** A view: the plots and arch feet follow the layout and ring the park's driver decided. */
+const BLOCKERS: readonly Blocker[] = lazyArrayView(() => (blockersMemo ??= blockersNow()));
+registerPlanCache(() => {
+  blockersMemo = null;
+});
+function blockersNow(): readonly Blocker[] {
+  return [
   ...[...PARK_LAYOUT.entries.values()]
     .filter((e) => e.id !== 'fountain')
     .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2, kind: 'plot' as const })),
   ...[RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
     .flatMap((ring) => archFeet(ring))
     .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius + ARCH_FOOT_MARGIN, kind: 'archFoot' as const })),
-];
+  ];
+}
 
 
 
@@ -296,12 +306,22 @@ const TAU_PATH = Math.PI * 2;
  * the circle reads as a deliberate landmark with four gateways rather than
  * a loop nibbled at from every direction.
  */
-const RING_COMPASS_POINTS: readonly (readonly [number, number])[] = [
+function ringCompassPointsNow(): readonly (readonly [number, number])[] {
+  return [
   [PLAZA.x + RING_RADIUS, PLAZA.z],
   [PLAZA.x - RING_RADIUS, PLAZA.z],
   [PLAZA.x, PLAZA.z + RING_RADIUS],
   [PLAZA.x, PLAZA.z - RING_RADIUS],
-];
+  ];
+}
+let ringCompassPointsMemo: readonly (readonly [number, number])[] | null = null;
+/** A view: the plaza follows the layout the park's driver decided. */
+const RING_COMPASS_POINTS: readonly (readonly [number, number])[] = lazyArrayView(
+  () => (ringCompassPointsMemo ??= ringCompassPointsNow()),
+);
+registerPlanCache(() => {
+  ringCompassPointsMemo = null;
+});
 
 function nearestCompassPoint(x: number, z: number): readonly [number, number] {
   let best = RING_COMPASS_POINTS[0] as readonly [number, number];
@@ -5730,3 +5750,28 @@ function distanceToRouteNetwork(
   return best;
 }
 
+/**
+ * **Forget everything this module accumulated for the last path graph.** The
+ * four lattice accumulators are process-lifetime state the router reads as
+ * inputs (a second `pathGraphSearch` in one process would otherwise return a
+ * different graph), and the memo caches derive from decisions the park's
+ * driver may have just unwound. Called by the paths builder before every
+ * solve and whenever it backs out.
+ */
+export function resetPathsState(): void {
+  pavedLatticeNodes.clear();
+  pavedLatticeEdges.clear();
+  usedTaps.clear();
+  tapRimsDrawn.clear();
+  latticeCache = null;
+  streetStubsCache.clear();
+  railInfoCache.clear();
+  streetPlotsCache = null;
+  archFootBlockersCache = null;
+  boundaryDistanceCache.clear();
+  slideTrackSamplesCache = null;
+  gateCorridorDeepestCache = null;
+  rideCorridorSamplesCache = null;
+  railCorridorSamplesCache = null;
+}
+registerPlanCache(resetPathsState);

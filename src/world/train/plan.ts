@@ -1,5 +1,7 @@
 import { Vector3 } from 'three';
-import { TrainRoute } from './route';
+import { registerPlanCache } from '../../boot/planCaches';
+import type { TrainRoute } from './route';
+import { planPart } from '../parkPlan';
 import { COASTER_PLANS } from '../coaster/plan';
 import { terrainHeight } from '../terrain';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
@@ -283,7 +285,7 @@ function nearCruiserLowCorridor(x: number, z: number, reach: number): boolean {
  */
 const STATION_SEPARATION = PLATFORM_LENGTH + STATION_GAP * 2;
 
-function planStations(route: TrainRoute): readonly PlannedStation[] {
+export function planStations(route: TrainRoute): readonly PlannedStation[] {
   // Sequential, not `map`: each station is scored against the stands already
   // chosen, which is what stops two of them landing in the same place. See the
   // `crowding` term in `clearStationDistance`.
@@ -394,7 +396,20 @@ function ensureCorridorSamples(): void {
 export const TRAIN_PLAN: {
   readonly route: TrainRoute;
   readonly stations: readonly PlannedStation[];
-} = (() => {
-  const route = new TrainRoute();
-  return { route, stations: planStations(route) };
-})();
+} = {
+  /** A view: the park's driver decides the loop (and may re-decide it); the stations follow. */
+  get route(): TrainRoute {
+    return planPart('train').route;
+  },
+  get stations(): readonly PlannedStation[] {
+    return planPart('train').stations;
+  },
+};
+
+// Derived from a decision the park's driver may unwind: forgotten with it.
+registerPlanCache(() => {
+  cruiserLowXs = null;
+  cruiserLowZs = null;
+  corridorX = null;
+  corridorZ = null;
+});

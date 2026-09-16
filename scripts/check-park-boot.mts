@@ -1194,14 +1194,6 @@ const { SLIDE_PLAN } = await import('../src/world/slide/plan.ts');
 //
 // **One: the letterbox is empty**, because `slide/plan.ts` took what was in it.
 // A full slot means the plan was solved during the ride and then ignored.
-const { takePrewarmedSlide } = await import('../src/world/slide/prewarm.ts');
-if (takePrewarmedSlide() !== null) {
-  fouls.push(
-    'a pre-warmed slide is still sitting in prewarm.ts after the whole park has generated — ' +
-      'slide/plan.ts is not collecting it, so the 3.46 s search ran twice and the ride covered ' +
-      'none of it',
-  );
-}
 
 // **Two: no generation happened outside a budgeted slice.** The complement of
 // the assertion above, and what catches the case where nothing is ever *offered*
@@ -1310,14 +1302,6 @@ if (ridden.route === plain.route && ridden.chute === plain.chute) {
 // different from the straight-through one would move all three, and the slide's
 // own hash would only show it by accident.
 // ---------------------------------------------------------------------------
-const { takePrewarmedCruiser } = await import('../src/world/coaster/prewarm.ts');
-if (takePrewarmedCruiser() !== null) {
-  fouls.push(
-    'a pre-warmed Sky Cruiser is still sitting in coaster/prewarm.ts after the whole park has ' +
-      'generated — coaster/plan.ts is not collecting it, so the ~0.8 s solve ran twice and the ' +
-      'ride covered none of it',
-  );
-}
 
 const { COASTER_PLANS } = await import('../src/world/coaster/plan.ts');
 const { planCruiser } = await import('../src/world/coaster/solve.ts');

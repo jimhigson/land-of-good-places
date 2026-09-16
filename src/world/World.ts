@@ -38,8 +38,8 @@ import { ARRIVAL_KID_COUNT } from './entrance/ArrivalSequence';
 import { terrainHeight } from './terrain';
 import { bridgeHeightAt, bridgePavingHeightAt } from './train/bridges';
 import { drapePathsOverBridges } from './pathGraph';
-import { GroundClaims } from '../boot/groundClaims';
-import { takePrewarmedGroundClaims } from '../boot/groundClaimsPrewarm';
+import type { GroundClaims } from '../boot/groundClaims';
+import { parkPlanClaims } from './parkPlan';
 import { ROAD_FEATURE, entranceRoadClaims } from './entrance/roadCorridor';
 
 export interface WorldOptions {
@@ -82,7 +82,7 @@ export class World implements GameSystem {
    * That is the honest result either way: the registry describes the park in
    * this `World`, never a previous one.
    */
-  readonly groundClaims: GroundClaims = takePrewarmedGroundClaims() ?? new GroundClaims();
+  readonly groundClaims: GroundClaims = parkPlanClaims();
 
   readonly garden: Garden;
   readonly scenery: Scenery;

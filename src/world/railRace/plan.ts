@@ -1,3 +1,5 @@
+import { lazyView } from '../../boot/lazyView';
+import { registerPlanCache } from '../../boot/planCaches';
 import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
 import { COASTER_PLANS } from '../coaster/plan';
@@ -152,7 +154,16 @@ function planExit(): { exitX: number; exitZ: number } {
 }
 
 /** The plan. Import this; never re-solve — the same rule as `TRAIN_PLAN`. */
-export const RAIL_RACE_PLAN: PlannedRailRace = (() => {
+let railRacePlanMemo: PlannedRailRace | null = null;
+/**
+ * A view: the rings are derived from the decided layout and cruiser, so when
+ * the park's driver re-decides either, this follows on the next read.
+ */
+export const RAIL_RACE_PLAN: PlannedRailRace = lazyView(() => (railRacePlanMemo ??= planRailRace()));
+registerPlanCache(() => {
+  railRacePlanMemo = null;
+});
+function planRailRace(): PlannedRailRace {
   // **The exit is solved BEFORE the rings, and that ordering is load-bearing.**
   // `slideArchClear` slides the finish arch off anything its feet must not come
   // down on, and the ride's own exit is one of those things — the paving is
@@ -191,4 +202,4 @@ export const RAIL_RACE_PLAN: PlannedRailRace = (() => {
     exitX,
     exitZ,
   };
-})();
+}

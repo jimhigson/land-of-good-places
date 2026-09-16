@@ -1,4 +1,5 @@
 import { TRAIN_PLAN } from './plan';
+import { registerPlanCache } from '../../boot/planCaches';
 import { computeCrossings } from './crossings';
 import { planBridgeFootprints, type PlannedFootprint } from './bridgeFootprint';
 
@@ -82,3 +83,8 @@ export function isInBridgeFootprint(x: number, z: number, margin = KEEPOUT_MARGI
   }
   return false;
 }
+
+// Derived from a decision the park's driver may unwind: forgotten with it.
+registerPlanCache(() => {
+  footprintsCache = null;
+});

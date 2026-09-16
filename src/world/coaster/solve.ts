@@ -209,9 +209,12 @@ export function cruiserBriefs(): CruiserSearchStart {
  * mechanism as the searches either side of it rather than the ceiling being
  * moved: eleven yields, ~1.8 ms apiece.
  */
-export function* cruiserStartSearch(): Generator<number, CruiserSearchStart, void> {
+export function* cruiserStartSearch(
+  /** The park driver's retry stream; omitted, the search the park always made. */
+  retryRng?: Rng,
+): Generator<number, CruiserSearchStart, void> {
   const options = cruiserOptions();
-  const rng = new Rng(PARK_SEED ^ options.salt);
+  const rng = retryRng ?? new Rng(PARK_SEED ^ options.salt);
   const briefs = yield* coasterRouteBriefSearch(options, rng);
   return { briefs, rng };
 }

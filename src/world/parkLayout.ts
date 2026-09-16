@@ -8,12 +8,12 @@ import {
 import {
   BOUNDARY_CLEARANCE,
   GATE_CORRIDOR_HALF_WIDTH,
-  LAYOUT_VERSION,
   PARK_MANIFEST,
   PARK_SEED,
   type ManifestEntry,
 } from './parkManifest';
-import { cachedSolve } from '../core/solveCache';
+import { lazyView } from '../boot/lazyView';
+import { planPart } from './parkPlan';
 import { layoutRestartBase, layoutStreamBump } from './parkWarp';
 import { PARK_BOUNDARY } from './boundary';
 import { ENTRANCE_GATE_X, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
@@ -145,7 +145,7 @@ const SPREAD_CHOICES = 12;
  * restart `r` is as deterministic as restart 0 and no entry ever inherits
  * another's draws.
  */
-const PARK_RESTARTS = 240;
+export const PARK_RESTARTS = 240;
 
 /**
  * The gate sits on the boundary wall; the corridor runs from it to centre.
@@ -304,81 +304,74 @@ function traceLine(text: string): void {
  * another process — `scripts/park-digest.mts` hashes it. The one legal throw
  * is the whole budget spent, and it carries the whole trace.
  */
-function solve(): ParkLayout {
-  // The warp vector may start the loop above zero (a whole-park re-roll the
-  // offline search chose); with no warp this is the same `0` as ever.
+/** What one restart of the layout solve produced — a layout, or the reason this restart could not. */
+export type LayoutRestartOutcome =
+  | { readonly kind: 'layout'; readonly layout: ParkLayout }
+  | { readonly kind: 'refused'; readonly reason: string };
+
+/**
+ * **One restart of the layout solve** — the layout's own rungs (redraw the
+ * refused entry, then its blockers) run inside it; when they are spent the
+ * restart is refused and the caller (the park's backtracking driver,
+ * `parkPlan.ts`) draws the next one. This is decision zero: each restart is a
+ * different park from the same seed.
+ */
+export function solveLayoutRestart(restart: number): LayoutRestartOutcome {
   const base = layoutRestartBase();
   let rungOneFired = 0;
-  for (let restart = base; restart < base + PARK_RESTARTS; restart += 1) {
-    const attempts = new Map<string, number>();
-    for (;;) {
-      const outcome = buildOnce(restart, attempts);
-      if (outcome.kind === 'dead-end') {
-        traceLine(`dead-end restart=${restart} entry=${outcome.entry} draws=${MAX_TRIES}`);
-        break;
-      }
-      if (outcome.kind === 'exhausted') {
-        traceLine(`exhausted restart=${restart} entry=${outcome.entry} supply=${outcome.supply}`);
-        break;
-      }
-      const refusals = doormatRefusals(outcome.placed);
-      // `LGP_LAYOUT_RUNG=off` (Node only, same gating as the refuse hook):
-      // probe and trace, never unwind — the scratch flag the brief asks for,
-      // so a seed can be built exactly as the base built it while the trace
-      // still says what the rung would have refused.
-      if (refusals.length > 0 && rungDisabled()) {
-        for (const refusal of refusals) {
-          ignoredRefusals.push(refusal);
-          traceLine(
-            `refusal-ignored (LGP_LAYOUT_RUNG=off) restart=${restart} kind=${refusal.kind} entry=${refusal.entry} ` +
-              `blockers=${refusal.blockers.join(',') || '-'} at=${refusal.at.x.toFixed(1)},${refusal.at.z.toFixed(1)}`,
-          );
-        }
-      }
-      if (refusals.length === 0 || rungDisabled()) {
-        traceLine(
-          `solved restart=${restart} decision-zero-reached=${restart - base} ` +
-            `rung-1-fired=${rungOneFired} doormats=${outcome.placed.length}/${outcome.placed.length} ` +
-            `probed-alone=${lastProbedAlone}`,
-        );
-        if (rungOneFired === 0) {
-          // Said out loud, on every solve where it is true: a rung that never
-          // fires is indistinguishable from one that cannot, unless it says so.
-          traceLine(
-            `rung-1 never fired: every doormat reachable at layout time on the first draw`,
-          );
-        }
-        return outcome.layout;
-      }
-      // Fixed order — placement order — so the same seed refuses the same
-      // entry first in every process.
-      const refusal = refusals[0] as LayoutRefusal;
-      traceLine(
-        `refusal restart=${restart} kind=${refusal.kind} entry=${refusal.entry} ` +
-          `attempt=${attempts.get(refusal.entry) ?? 0} blockers=${refusal.blockers.join(',') || '-'} ` +
-          `non-plot=${refusal.nonPlotBlockers.join(',') || '-'} at=${refusal.at.x.toFixed(1)},${refusal.at.z.toFixed(1)}`,
-      );
-      rungOneFired += 1;
-      // Rung 1: the refused entry's own next candidate.
-      if (redraw(refusal.entry, attempts, outcome.supply, restart, 1)) continue;
-      // Rung 2: the plots that stood in its way, most recently placed first.
-      const placementIndex = new Map(outcome.placed.map((entry, index) => [entry.id, index]));
-      const blockers = [...refusal.blockers].sort(
-        (a, b) => (placementIndex.get(b) ?? -1) - (placementIndex.get(a) ?? -1),
-      );
-      if (blockers.some((blocker) => redraw(blocker, attempts, outcome.supply, restart, 2))) continue;
-      // Rung 3: decision zero.
-      traceLine(`decision-zero restart=${restart} after=${refusal.entry} — no attempt left on it or its blockers`);
-      break;
+  const attempts = new Map<string, number>();
+  for (;;) {
+    const outcome = buildOnce(restart, attempts);
+    if (outcome.kind === 'dead-end') {
+      traceLine(`dead-end restart=${restart} entry=${outcome.entry} draws=${MAX_TRIES}`);
+      return { kind: 'refused', reason: `entry ${outcome.entry} drew no legal candidate in ${MAX_TRIES} draws` };
     }
+    if (outcome.kind === 'exhausted') {
+      traceLine(`exhausted restart=${restart} entry=${outcome.entry} supply=${outcome.supply}`);
+      return { kind: 'refused', reason: `entry ${outcome.entry} exhausted its ${outcome.supply} candidates` };
+    }
+    const refusals = doormatRefusals(outcome.placed);
+    if (refusals.length > 0 && rungDisabled()) {
+      for (const refusal of refusals) {
+        ignoredRefusals.push(refusal);
+        traceLine(
+          `refusal-ignored (LGP_LAYOUT_RUNG=off) restart=${restart} kind=${refusal.kind} entry=${refusal.entry} ` +
+            `blockers=${refusal.blockers.join(',') || '-'} at=${refusal.at.x.toFixed(1)},${refusal.at.z.toFixed(1)}`,
+        );
+      }
+    }
+    if (refusals.length === 0 || rungDisabled()) {
+      traceLine(
+        `solved restart=${restart} decision-zero-reached=${restart - base} ` +
+          `rung-1-fired=${rungOneFired} doormats=${outcome.placed.length}/${outcome.placed.length} ` +
+          `probed-alone=${lastProbedAlone}`,
+      );
+      if (rungOneFired === 0) {
+        traceLine(`rung-1 never fired: every doormat reachable at layout time on the first draw`);
+      }
+      return { kind: 'layout', layout: outcome.layout };
+    }
+    const refusal = refusals[0] as LayoutRefusal;
+    traceLine(
+      `refusal restart=${restart} kind=${refusal.kind} entry=${refusal.entry} ` +
+        `attempt=${attempts.get(refusal.entry) ?? 0} blockers=${refusal.blockers.join(',') || '-'} ` +
+        `non-plot=${refusal.nonPlotBlockers.join(',') || '-'} at=${refusal.at.x.toFixed(1)},${refusal.at.z.toFixed(1)}`,
+    );
+    rungOneFired += 1;
+    if (redraw(refusal.entry, attempts, outcome.supply, restart, 1)) continue;
+    const placementIndex = new Map(outcome.placed.map((entry, index) => [entry.id, index]));
+    const blockers = [...refusal.blockers].sort(
+      (a, b) => (placementIndex.get(b) ?? -1) - (placementIndex.get(a) ?? -1),
+    );
+    if (blockers.some((blocker) => redraw(blocker, attempts, outcome.supply, restart, 2))) continue;
+    traceLine(`decision-zero restart=${restart} after=${refusal.entry} — no attempt left on it or its blockers`);
+    return {
+      kind: 'refused',
+      reason: `doormat of ${refusal.entry} unreachable (blockers ${refusal.blockers.join(',') || '-'}) and no attempt left on it or its blockers`,
+    };
   }
-  throw new Error(
-    `park layout: unsolvable in ${PARK_RESTARTS} restarts (seed ${PARK_SEED}) — ` +
-      `loosen bands, shrink the manifest, or bump the seed. Trace:\n${layoutTrace.join('\n')}`,
-  );
 }
 
-/** Takes `entry`'s next candidate if it has one, and says so on the trace. */
 function redraw(
   entry: string,
   attempts: Map<string, number>,
@@ -1036,29 +1029,13 @@ function validate(
  * The solved park. Import this; never re-run the solver — one canonical
  * layout per build is the whole point.
  */
-export const PARK_LAYOUT: ParkLayout = cachedSolve(
-  'layout',
-  `${PARK_SEED}:${LAYOUT_VERSION}`,
-  solve,
-  (layout) => ({
-    seed: layout.seed,
-    fountain: layout.fountain,
-    entries: [...layout.entries.values()],
-  }),
-  (raw) => {
-    const packed = raw as {
-      seed: number;
-      fountain: ParkLayout['fountain'];
-      entries: PlacedEntry[];
-    };
-    if (packed.seed !== PARK_SEED) throw new Error('stale seed');
-    return {
-      seed: packed.seed,
-      fountain: packed.fountain,
-      entries: new Map(packed.entries.map((entry) => [entry.id, entry])),
-    };
-  },
-);
+/**
+ * **The layout, as the park's backtracking driver decided it** — a view of
+ * `parkPlan.ts`'s state. Every consumer reads it exactly as before; what
+ * changed is that the decision behind it can be re-made (decision zero) when
+ * a later feature refuses, and this constant follows.
+ */
+export const PARK_LAYOUT: ParkLayout = lazyView(() => planPart('layout'));
 
 // A layout handed back from the cache ran no solve, so it has no trace. Say
 // so on the trace itself rather than leaving an empty list that reads like

@@ -1,4 +1,6 @@
 import { Vector3 } from 'three';
+import { lazyArrayView } from '../../boot/lazyView';
+import { registerPlanCache } from '../../boot/planCaches';
 import {
   BUILDING_HALF_X,
   BUILDING_HALF_Z,
@@ -165,7 +167,12 @@ const MERGE_DISTANCE = 1.2;
  *
  * Exported for `scripts/check-waypoints.mts` and `scripts/check-park.mts`.
  */
-export const SEEDS: readonly NodeSeed[] = buildSeeds();
+let seedsMemo: readonly NodeSeed[] | null = null;
+/** A view: the waypoint seeds follow the park the driver decided, and a re-decision. */
+export const SEEDS: readonly NodeSeed[] = lazyArrayView(() => (seedsMemo ??= buildSeeds()));
+registerPlanCache(() => {
+  seedsMemo = null;
+});
 
 function buildSeeds(): NodeSeed[] {
   const seeds: NodeSeed[] = [];

@@ -1,6 +1,6 @@
 import type { PlannedSlide } from './solve';
-import { planSlide } from './solve';
-import { takePrewarmedSlide } from './prewarm';
+import { lazyView } from '../../boot/lazyView';
+import { planPart } from '../parkPlan';
 
 /**
  * **The ginormous slide's solved plan, and nothing else.**
@@ -54,4 +54,5 @@ export * from './solve';
  * `check:park-boot`, which runs both in one process and compares a SHA over the
  * built chute.
  */
-export const SLIDE_PLAN: PlannedSlide = takePrewarmedSlide() ?? planSlide();
+/** A view: the park's driver decides the slide, and may re-decide it. */
+export const SLIDE_PLAN: PlannedSlide = lazyView(() => planPart('slide'));

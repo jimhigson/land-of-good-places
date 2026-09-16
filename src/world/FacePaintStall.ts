@@ -11,6 +11,7 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three';
+import { lazyView } from '../boot/lazyView';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
@@ -80,7 +81,8 @@ import { paintedNpcFaces, registerFacePaintStall } from '../entities/npc/wanderD
  * booth whose stand point only it knows about is a booth the path network
  * cannot lead to — the bug behind issue #114. One table, one formula.
  */
-const FACE_PAINT_PLACEMENT = STALL_PLACEMENTS.facePaint;
+/** A view: the stall follows the layout the park's driver decided. */
+const FACE_PAINT_PLACEMENT: (typeof STALL_PLACEMENTS)['facePaint'] = lazyView(() => STALL_PLACEMENTS.facePaint);
 const [STALL_X, STALL_Z] = FACE_PAINT_PLACEMENT.position;
 const STALL_FACING = FACE_PAINT_PLACEMENT.facing;
 

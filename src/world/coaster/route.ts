@@ -1,4 +1,5 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
+import { lazyView } from '../../boot/lazyView';
 import { Rng, TAU } from '../../core/mathUtils';
 import { PARK_SEED } from '../parkManifest';
 import { CART_ENVELOPE } from './cart';
@@ -321,7 +322,7 @@ const CROSSING_BAND = crossingBand(WINDOW_HALF_WIDTH);
  * built curve is measured; the influence only changes which routes the search
  * is likely to find first.
  */
-const CASTLE_INFLUENCE: RouteInfluence = {
+const CASTLE_INFLUENCE: RouteInfluence = lazyView(() => ({
   name: 'the castle',
   x: BUILDING_CENTRE_X,
   z: BUILDING_CENTRE_Z,
@@ -333,7 +334,7 @@ const CASTLE_INFLUENCE: RouteInfluence = {
   // across the five CI seeds at 0.55 the backstop still fires (so the weight
   // is not doing the satisfies' job alone), and every seed crosses.
   weight: 0.55,
-};
+}));
 
 /**
  * Does this solved plan actually pass through the castle?

@@ -82,6 +82,8 @@ export interface SolveStats {
   decisionZero: number;
   /** Highest attempt any decision was made at, by feature. */
   worstAttempt: Record<string, number>;
+  /** Turns each feature has taken — the boot's per-phase work count. */
+  turnsByFeature: Record<string, number>;
 }
 
 export class ParkSolve {
@@ -98,6 +100,7 @@ export class ParkSolve {
     deepestUnwind: 0,
     decisionZero: 0,
     worstAttempt: {},
+    turnsByFeature: {},
   };
   private readonly builders: readonly FeatureBuilder[];
   private readonly index: ReadonlyMap<string, number>;
@@ -153,6 +156,11 @@ export class ParkSolve {
     return this.ledger;
   }
 
+  /** The features placed so far, in ledger order — what the boot screen's stage line reads. */
+  get placedFeatures(): readonly string[] {
+    return this.ledger.map((entry) => entry.feature);
+  }
+
   /**
    * Drive to completion. Yields after every turn so a browser can slice it
    * across frames; a headless caller just drains it.
@@ -161,6 +169,7 @@ export class ParkSolve {
     while (this.finished.size < this.builders.length) {
       const builder = this.nextRunnable();
       this.stats.turns += 1;
+      this.stats.turnsByFeature[builder.name] = (this.stats.turnsByFeature[builder.name] ?? 0) + 1;
       yield* this.turn(builder);
       yield this.stats.turns;
     }
@@ -305,7 +314,11 @@ export class ParkSolve {
       );
     }
     // Walk back until a decision with attempts left is found; each one passed
-    // over is popped and will be re-chosen fresh.
+    // over is popped and will be re-chosen fresh. Conflict-directed: the next
+    // target is the next most recent decision among the NAMED ones while any
+    // remain (re-choosing an unrelated decision in between cannot clear a
+    // refusal that did not consume it), and only then the chronologically
+    // previous one — which is what carries the unwind all the way to zero.
     for (;;) {
       const entry = this.ledger[target] as LedgerEntry;
       const builder = this.builders[this.index.get(entry.feature) as number] as FeatureBuilder;
@@ -324,7 +337,14 @@ export class ParkSolve {
         return;
       }
       this.note(`exhausted ${entry.feature}#${entry.section} supply=${cap}; unwinding further`);
-      target -= 1;
+      let next = -1;
+      for (let i = target - 1; i >= 0; i -= 1) {
+        if (named.has((this.ledger[i] as LedgerEntry).feature)) {
+          next = i;
+          break;
+        }
+      }
+      target = next >= 0 ? next : target - 1;
       if (target < 0) {
         throw new Error(
           `park solve: seed ${this.seed}: decision zero exhausted (${cap} attempts) — the one remaining failure. Trace:\n${this.lines.join('\n')}`,

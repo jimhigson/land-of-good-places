@@ -12,7 +12,6 @@ import {
 } from './pathSurface';
 import { terrainHeight } from './terrain';
 import {
-  buildGraph,
   curvePoints,
   pathDivisions,
   PLAZA,
@@ -29,7 +28,9 @@ import {
  * answered every geometric question against the control polyline instead).
  */
 export { routeCurve };
-import { takePrewarmedPathGraph } from './pathsPrewarm';
+import { lazyArrayView, lazyView } from '../boot/lazyView';
+import { registerPlanCache } from '../boot/planCaches';
+import { planPart } from './parkPlan';
 import { publishDrawnPath, publishPaving } from './paving';
 
 /**
@@ -46,16 +47,24 @@ import { publishDrawnPath, publishPaving } from './paving';
  */
 
 /** The solved graph — nodes, edges, backbone. One per build, like the park. */
-export const PATH_GRAPH: PathGraph = takePrewarmedPathGraph() ?? buildGraph();
+/** A view: the park's driver decides the graph, and may re-decide it. */
+export const PATH_GRAPH: PathGraph = lazyView(() => planPart('pathGraph'));
 
 /**
  * The ribbons actually drawn — the graph's paved edges. Exported so anything
  * that wants to *draw* the network — the park map — can rebuild the same
  * centreline from the same generated control points.
  */
-export const ROUTES: readonly RouteDefinition[] = PATH_GRAPH.edges
-  .filter((edge) => edge.paved)
-  .map((edge) => edge.route);
+let routesMemo: readonly RouteDefinition[] | null = null;
+export const ROUTES: readonly RouteDefinition[] = lazyArrayView(
+  () =>
+    (routesMemo ??= planPart('pathGraph')
+      .edges.filter((edge) => edge.paved)
+      .map((edge) => edge.route)),
+);
+registerPlanCache(() => {
+  routesMemo = null;
+});
 
 /**
  * One straight, grid-axis-aligned stretch of a paved route, long enough to
@@ -564,3 +573,9 @@ function addDisc(
   }
 }
 
+// Derived from a decision the park's driver may unwind: forgotten with it.
+registerPlanCache(() => {
+  cachedBorderSegments = null;
+  drawnLayers = [];
+  nextRun = 0;
+});
