@@ -213,4 +213,97 @@ console.log(
 console.log(`  continuous climbs the world-y reach refused: ${refusals}`);
 console.log(`  radial-refused steps the world-y reach admitted: ${admissions}\n`);
 
-void Vector3;
+// --- the same physics, on a ramp far from the park's centre -----------------
+// No ramp on this park stands further out than ~53 m, so the real-park table
+// above cannot say what happens where the lean is large. This builds one: a
+// deck whose **local** grade is exactly `g` (its distance from the planet's
+// centre rises `g` metres per metre of ground), `DECK_LIFT` over the sphere,
+// laid along the -x axis and climbing towards the park, registered with a real
+// `WalkSurfaces`, and sprinted up and down by the same `SimPlayer`.
+
+const DECK_LIFT = 6;
+const DECK_LENGTH = 20;
+const DECK_HALF_WIDTH = 3;
+const SYNTH_GRADES = [0.1, 0.2, 0.3, 0.357, 0.4, 0.5, 0.512, 0.6, 0.67, 0.8, 1.0, 1.2, 1.4, 1.6];
+const SYNTH_RADII = [0, 30, 60, 94, 117, 140];
+
+/** The ramp's radius at arc-angle `phi`, rising towards the park. */
+function deckRadius(far: number, grade: number, phi: number): number {
+  const phiFar = far / R;
+  const climbed = Math.min(Math.max((phiFar - phi) * R, 0), DECK_LENGTH);
+  return R + DECK_LIFT + grade * climbed;
+}
+
+/** World `y` of that deck over plan point `(x, z)` — solved, since phi depends on it. */
+function deckY(far: number, grade: number, x: number, z: number): number {
+  const rho = Math.hypot(x, z);
+  let radius = deckRadius(far, grade, rho / R);
+  for (let i = 0; i < 6; i += 1) radius = deckRadius(far, grade, Math.asin(Math.min(1, rho / radius)));
+  return Math.sqrt(Math.max(0, radius * radius - rho * rho)) - R;
+}
+
+function syntheticLosses(far: number, grade: number, inward: boolean): { lost: number; runs: number; first: string | null } {
+  const { WalkSurfaces } = walkSurfacesModule;
+  // Plan extent of the deck: from the far end inwards by DECK_LENGTH of arc.
+  const xFar = -R * Math.sin((far / R));
+  const xNear = -R * Math.sin(((far - DECK_LENGTH) / R));
+  const covers = (x: number, z: number): boolean => Math.abs(z) <= DECK_HALF_WIDTH && x >= Math.min(xFar, xNear) && x <= Math.max(xFar, xNear);
+  const walk = new WalkSurfaces();
+  walk.addPlatform({ surfaceY: 0, covers, surfaceYAt: (x, z) => deckY(far, grade, x, z) });
+  let lost = 0;
+  let runs = 0;
+  let first: string | null = null;
+  for (const delta of DELTAS) {
+    for (const phase of PHASES) {
+      runs += 1;
+      const player = new SimPlayer(collisionWorld(), { ground: (x, z, y) => walk.sample(x, z, y) });
+      const offset = phase * 0.925 + 0.05;
+      const startX = inward ? Math.min(xFar, xNear) + offset : Math.max(xFar, xNear) - offset;
+      player.placeOnGround(startX, 0);
+      const dir = inward ? 1 : -1;
+      const frames = Math.ceil((DECK_LENGTH * 1.2) / (5.5 * delta));
+      for (let f = 0; f < frames; f += 1) {
+        player.step(delta, dir, 0, true);
+        const { x, z } = player.position;
+        if (!covers(x, z)) break;
+        const deck = deckY(far, grade, x, z);
+        if (deck - player.groundY > 0.05) {
+          lost += 1;
+          first ??=
+            `r=${far} local grade ${grade} ${inward ? 'up (towards the park)' : 'down'} at ${(1 / delta).toFixed(0)} fps: ` +
+            `deck y=${deck.toFixed(3)}, sampler gave ${player.groundY.toFixed(3)} at x=${x.toFixed(2)} — she falls ${(deck - player.groundY).toFixed(2)} m`;
+          break;
+        }
+      }
+    }
+  }
+  return { lost, runs, first };
+}
+
+const walkSurfacesModule = await import('../src/world/building/surfaces.ts');
+
+console.log('  A deck of known LOCAL grade, sprinted up towards the park, far from its centre:\n');
+console.log('    r(m)  lean   steepest local grade with no fall-through (up / down)');
+const firstFalls: string[] = [];
+const synthCeilings = new Map<number, number>();
+for (const far of SYNTH_RADII) {
+  const ceilingFor = (inward: boolean): number => {
+    let best = 0;
+    for (const g of SYNTH_GRADES) {
+      const out = syntheticLosses(Math.max(far, DECK_LENGTH), g, inward);
+      if (out.lost > 0) {
+        if (out.first) firstFalls.push(out.first);
+        break;
+      }
+      best = g;
+    }
+    return best;
+  };
+  const up = ceilingFor(true);
+  const down = ceilingFor(false);
+  synthCeilings.set(far, up);
+  const lean = (Math.asin(Math.max(far, DECK_LENGTH) / R) * 180) / Math.PI;
+  console.log(`    ${String(Math.max(far, DECK_LENGTH)).padStart(4)} ${lean.toFixed(1).padStart(5)}   ${up.toFixed(3)} / ${down.toFixed(3)}`);
+}
+if (firstFalls.length) console.log(`\n    first fall-through at each radius:\n      ${firstFalls.join('\n      ')}`);
+console.log();
