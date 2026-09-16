@@ -170,3 +170,15 @@ are **untracked, never commit**. `constants.ts` TEMP still uncommitted.
   and B. Suspect: `canopyMeshes` stands in each blob with `position`/`scale` only; drawn instances
   may carry the sphere lean in their matrix (`makeInstanced`) — compare against `getMatrixAt`.
   Undiagnosed.
+
+### Round 3 (Overseer rulings) — done
+- **Wave facing decided by measurement:** aim clause poses real child on 41 trees x 4 under
+  `eyeForFocus`. CAMERA_FACING 0.00°/7.52°; yawForBearing 1.43°/9.03°. `waveFacingYaw` in
+  TreeClimbing owns it; `yawForBearing` deleted (no callers). Aim bar 1.5° → 0.5°, proved red.
+- **Body clause:** two causes. (a) check's canopy stand-ins at flat `part.position` (1.959 m off
+  drawn; fixed). (b) **game**: `climbPose` perch height referenced to ground at her edge column,
+  not the tree foot — sank 0.37 m uphill. Fixed. climb-wave exit 0 (body 14 px).
+  Pre-existing blind spot: body at 225–240° reads 10 px on flat control too; check samples 4 approaches.
+- **npc-perch #642 converted here** (my perch fix made the world-y clause red): both sides along
+  the tree's up. Exit 0; red both ways with --mutate.
+- Next: keyring-view, then full check + test:procgen, then PR.
