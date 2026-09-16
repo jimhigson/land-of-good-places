@@ -1,5 +1,6 @@
 import { Quaternion, Vector3 } from 'three';
 import { Geo } from './Geo';
+import type { Up } from './Up';
 
 const _up = /* @__PURE__ */ new Vector3();
 const _tilt = /* @__PURE__ */ new Quaternion();
@@ -111,7 +112,7 @@ export class Frame {
   }
 
   /** The local up — a unit world-space direction, away from the planet's centre. */
-  up(target: Vector3): Vector3 {
+  up(target: Vector3): Up {
     return this.at.up(target);
   }
 

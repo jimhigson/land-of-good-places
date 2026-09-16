@@ -1548,7 +1548,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
 function heightAlongOwnUp(root: import('three').Object3D): number {
   const quaternion = new Quaternion();
   root.getWorldQuaternion(quaternion);
-  const up = new Vector3(0, 1, 0).applyQuaternion(quaternion);
+  // The canonical LOCAL +Y, rotated by the object's own quaternion: this
+  // derives the local up rather than assuming it, the same shape as `Frame`'s
+  // own `LOCAL_UP`. Marked so `check:flat-primitives` does not read it as a
+  // world axis standing in for a local one, which is the opposite of what it is.
+  const up = new Vector3(0, 1, 0).applyQuaternion(quaternion); // flat-ok: local axis, leaned by the object's own quaternion
   const vertex = new Vector3();
   let lowest = Infinity;
   let highest = -Infinity;

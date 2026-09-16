@@ -38,6 +38,8 @@
 export { Geo, PLANET_CENTRE_WORLD_Y, PLANET_RADIUS, scratchGeo } from './Geo';
 export { Frame } from './Frame';
 export {
+  FLAT_BUDGET_RADIUS,
+  FLAT_DEPARTURE_BUDGET,
   PARK_CHART,
   allCharts,
   chartById,
@@ -48,9 +50,24 @@ export {
   resetCharts,
   type Chart,
   type ChartId,
+  type DepartureAccepted,
 } from './Chart';
 export { constantOver, field, unboundedConstant, type Field } from './Field';
 export { Anchor } from './Anchor';
+export {
+  ON_THE_GROUND,
+  altitudeOfMetres,
+  clearanceBetween,
+  formatAltitude,
+  isAbove,
+  isBelow,
+  metresOf,
+  raisedBy,
+  type Altitude,
+} from './Altitude';
+// `asUp` is deliberately NOT re-exported: Geo.up, Frame.up and Chart.upAt are
+// the only honest suppliers of an `Up`, and they live inside this directory.
+export { type Up } from './Up';
 export {
   advance,
   advancedFrom,
@@ -60,6 +77,7 @@ export {
 } from './geodesic';
 export {
   altitude,
+  altitudeOf,
   dropToGround,
   groundAt,
   groundRadiusToward,

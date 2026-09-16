@@ -258,8 +258,24 @@ class FlatChart implements Chart {
     return target;
   }
 
-  /** Constant, by definition — that is what being flat *is*. */
-  upAt(_local: Readonly<Vector3>, target: Vector3): Vector3 {
+  /**
+   * Constant, by definition — that is what being flat *is*, and **that is
+   * exactly why this has to be bounded.**
+   *
+   * `toGeo` and `toLocal` were guarded from the first draft; this was not, and
+   * it is the more dangerous of the three. A position that is wrong by the
+   * departure is wrong by centimetres and looks nearly right. An *up* that is
+   * wrong is the second of the two mistakes `RADIAL-INVENTORY.md` is a list of
+   * — a world `+Y` axis standing in for a local up — and a flat chart read
+   * beyond its radius hands one back with a straight face. At 157 m a flat
+   * park chart would return an up 45.5° from the real one, and every prop
+   * oriented by it leans into the hillside.
+   *
+   * So the unbounded read is the lie, and it crashes here rather than being
+   * found by a child.
+   */
+  upAt(local: Readonly<Vector3>, target: Vector3): Vector3 {
+    assertInside(this, local);
     basis(this.anchor);
     return target.copy(_n);
   }
@@ -280,14 +296,77 @@ export function curvedChart(id: ChartId, anchor: Frame): Chart {
 }
 
 /**
+ * **The departure a flat chart may cost before somebody has to say so out
+ * loud.** 5 cm — the measured threshold the design settled on, which on this
+ * planet buys a flat patch of {@link FLAT_BUDGET_RADIUS} metres' radius.
+ *
+ * Under it a bench, a flower, a counter top or a stair tread may be flat
+ * silently. Over it nothing may be flat silently.
+ */
+export const FLAT_DEPARTURE_BUDGET = 0.05;
+
+/** The largest flat patch inside {@link FLAT_DEPARTURE_BUDGET}: **4.69 m** on R = 220. */
+export const FLAT_BUDGET_RADIUS = /* @__PURE__ */ flatRadiusFor(FLAT_DEPARTURE_BUDGET);
+
+/**
+ * **A knowing acceptance of a flat chart that costs more than the budget.**
+ *
+ * Both fields are mandatory, and that is the mechanism. `departure` is a number
+ * the author had to look up and write down, so it goes stale *loudly* — if the
+ * chart is widened and the number is not, construction throws with both values
+ * in the message. A comment promising that two numbers agree is not a
+ * mechanism; this is the same promise with a check behind it.
+ */
+export interface DepartureAccepted {
+  /**
+   * The departure the author has looked at and accepted, in metres. Must be at
+   * least the chart's real departure — a stale one is a build failure, not a
+   * rounding difference.
+   */
+  readonly departure: number;
+  /** Why this patch is allowed to be flat. Read by whoever inherits it. */
+  readonly because: string;
+}
+
+/**
  * A tangent plane, valid for a declared radius, with a computed departure.
  *
- * Legitimate — a 3 m bench, a stall's counter top, a stair tread — and Jim has
- * ruled that interiors are one too. Illegitimate above about 4.7 m of radius
- * unless somebody has decided knowingly, which is what `departure` being
- * printed on every run is for.
+ * Legitimate and silent below {@link FLAT_DEPARTURE_BUDGET} — a 3 m bench, a
+ * stall's counter top, a stair tread. Above it, **legitimate only with an
+ * explicit {@link DepartureAccepted}**, which is how Jim's interior exception
+ * (a 60 m hall departs by 2.06 m) stays a decision somebody made rather than
+ * an assumption nobody noticed.
+ *
+ * This is the constructor half of the same rule `assertInside` enforces on
+ * reads. A chart declared too large used to be caught only if somebody happened
+ * to read near its rim; now it cannot be *written*.
  */
-export function flatChart(id: ChartId, anchor: Frame, validFor: number): Chart {
+export function flatChart(
+  id: ChartId,
+  anchor: Frame,
+  validFor: number,
+  accepted?: DepartureAccepted,
+): Chart {
+  const departure = flatDeparture(validFor);
+  if (departure > FLAT_DEPARTURE_BUDGET) {
+    if (!accepted) {
+      throw new Error(
+        `Chart "${id}" asks to be flat over ${validFor.toFixed(2)} m, which departs from the ` +
+          `sphere by ${departure.toFixed(3)} m — more than the ${FLAT_DEPARTURE_BUDGET} m budget ` +
+          `(flat is silent only out to ${FLAT_BUDGET_RADIUS.toFixed(2)} m on R = ${PLANET_RADIUS}). ` +
+          `Either use curvedChart, or pass { departure: ${departure.toFixed(3)}, because: '…' } ` +
+          `to say why this one is allowed to be flat.`,
+      );
+    }
+    if (accepted.departure < departure) {
+      throw new Error(
+        `Chart "${id}" accepts a departure of ${accepted.departure.toFixed(3)} m but is flat over ` +
+          `${validFor.toFixed(2)} m, which really departs by ${departure.toFixed(3)} m. ` +
+          `The chart has grown past what was signed off (${accepted.because}). ` +
+          `Re-read the number and accept the real one, or shrink the chart.`,
+      );
+    }
+  }
   return register(new FlatChart(id, anchor, validFor));
 }
 
