@@ -3,6 +3,7 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CircleGeometry,
   Color,
   CylinderGeometry,
   Group,
@@ -13,6 +14,7 @@ import {
   Quaternion,
   Vector3,
 } from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../../core/palette';
 import { clamp01, lerp } from '../../core/mathUtils';
 import { hazardTapeTexture } from '../../core/textures';
@@ -846,7 +848,23 @@ export function buildRailRaceTrack(
   // Radii from `STRUT_RADII`, the same table `trestleClaims` reads: a
   // `CylinderGeometry` takes its top radius first, and `strut` stands the
   // cylinder from `from` (its bottom) to `to` (its top).
-  const legGeometry = new CylinderGeometry(STRUT_RADII.legs.to, STRUT_RADII.legs.from, 1, 8);
+  //
+  // **The trunk has no foot cap.** Its foot stands exactly on the terrain, so a
+  // closed bottom disc lies in the ground's own plane and fights it
+  // (`check:coplanar`: 0.026 m² at an 8.5 mm stand-off on seed 24, a race-ring
+  // leg at its nominal slot). A face under the ground is a hidden face, and
+  // ART_DIRECTION §7 says delete it, never nudge the foot. The top cap stays:
+  // the two lower branches leave it thinner than it is (`BRANCH_TAPER`), so an
+  // open trunk top would show from above.
+  const trunkTopCap = new CircleGeometry(STRUT_RADII.legs.to, 8);
+  // flat-ok: geometry-local cap on a unit trunk; every instance is leant by leanTrestleTree
+  trunkTopCap.rotateX(-Math.PI / 2);
+  trunkTopCap.translate(0, 0.5, 0);
+  const legGeometry = mergeGeometries(
+    [new CylinderGeometry(STRUT_RADII.legs.to, STRUT_RADII.legs.from, 1, 8, 1, true), trunkTopCap],
+    false,
+  );
+  if (!legGeometry) throw new Error('railRace/track.ts: the trunk cylinder and its top cap did not merge');
   const lowerBranchGeometry = new CylinderGeometry(
     STRUT_RADII['branches-lower'].to,
     STRUT_RADII['branches-lower'].from,
