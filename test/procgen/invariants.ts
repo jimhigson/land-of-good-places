@@ -4434,6 +4434,42 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
     return complaints;
   }
 
+  // **And it must still be a radius.** (Issue #625.) This clause exists only to
+  // catch a reversion: `castleMasonryTopRadius` was an AABB's `max.y` for
+  // months, and the whole invariant stayed green the entire time because the
+  // other side of the comparison was a world `y` too. Two plumb numbers are
+  // self-consistent and say nothing about a park built on a sphere.
+  //
+  // The guard is deliberately the crudest one that cannot be satisfied by
+  // accident and needs no tolerance to tune: a radius from the planet's centre
+  // is necessarily larger than the planet, and a height above the ground is
+  // necessarily much smaller. Anything that puts a `max.y` back in this field —
+  // the 8.040 m this used to report, or any other height — fails here
+  // immediately and by two orders of magnitude, on every seed, rather than
+  // quietly granting the ride 1.73 m of clearance the battlements do not give.
+  //
+  // **What it does not cover, stated so nobody inherits a false belief:** it
+  // proves the *frame*, not the *value*. A radial measurement that is simply
+  // wrong — the wrong meshes, the wrong matrices — passes this and is caught
+  // only by the clearance clause below and by `check:castle`. The independent
+  // evidence that the value is right is in this function's docblock: the built
+  // radial top (9.770 m above the surface) agrees with `layout.ts`'s
+  // `CASTLE_MASONRY_TOP` (9.85 m up the facade's own axis) to within the
+  // terrain under the castle, where the plumb measurement was 1.73 m short of a
+  // constant the castle is built from.
+  if (stone <= GROUND_SPHERE_RADIUS) {
+    complaints.push(
+      `\`parkFacts.castleMasonryTopRadius\` is ${stone.toFixed(3)}, which is not a radius ` +
+        `from the planet's centre — every point in the park is at least ` +
+        `GROUND_SPHERE_RADIUS (${GROUND_SPHERE_RADIUS}) from it. Something has put a ` +
+        'world-Y height back in this field, which is issue #625 exactly: the castle ' +
+        'leans, so a plumb line down +Y under-reports its stonework (by 1.73 m on the ' +
+        'canonical seed) and this invariant then grants the ginormous slide clearance ' +
+        'the battlements do not give it',
+    );
+    return complaints;
+  }
+
   if (underside < stone) {
     // Printed as heights above the planet's surface (`r − R`), because a bare
     // 236-and-change is unreadable, but note the *gap* is the difference of the
