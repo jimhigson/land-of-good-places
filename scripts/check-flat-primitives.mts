@@ -467,6 +467,12 @@ function scan(file: string, source: string): Finding[] {
       }
 
       // 4. Y_THRESHOLD — `character.position.y < -2`, and its mirror.
+      //
+      // `holdsY`, not `isYAccess`, so that a y laundered through a variable is
+      // still a y: `const yy = a.position.y; if (yy < -2)` is the same altitude
+      // mistake written in two statements. Y_DIFFERENCE and Y_OVER_GROUND have
+      // followed names since they were written; this rule was the last one that
+      // did not, and the hole was real — it hid two sites in scripts/.
       const COMPARISON = [
         ts.SyntaxKind.LessThanToken,
         ts.SyntaxKind.LessThanEqualsToken,
@@ -479,8 +485,8 @@ function scan(file: string, source: string): Finding[] {
         // A literal on exactly one side, a `.y` on the other. `0` is exempt:
         // `if (face.y < 0)` is a facing test, and the inventory files those
         // separately as a direction question rather than an altitude one.
-        if (isYAccess(node.left) && rightNum !== undefined && rightNum !== 0) add(node, 'Y_THRESHOLD');
-        else if (isYAccess(node.right) && leftNum !== undefined && leftNum !== 0) add(node, 'Y_THRESHOLD');
+        if (holdsY(node.left) && rightNum !== undefined && rightNum !== 0) add(node, 'Y_THRESHOLD');
+        else if (holdsY(node.right) && leftNum !== undefined && leftNum !== 0) add(node, 'Y_THRESHOLD');
       }
     }
 
@@ -529,6 +535,13 @@ const ARMING: readonly { rule: RuleId; source: string }[] = [
   },
   { rule: 'Y_OVER_GROUND', source: 'const h = p.y - terrainHeight(p.x, p.z);' },
   { rule: 'Y_THRESHOLD', source: 'if (character.position.y < -2) fall();' },
+  // The laundered form, the same hole `Y_DIFFERENCE` had above. Without this
+  // fixture the rule could quietly narrow back to `isYAccess` and the direct
+  // fixture on the line above would still pass, which is how a widening rots.
+  {
+    rule: 'Y_THRESHOLD',
+    source: 'const yy = a.position.y;\nif (yy < -2) fall();',
+  },
   { rule: 'FLAT_DISC', source: 'disc.rotation.x = -Math.PI / 2;' },
   { rule: 'FLAT_DISC', source: 'geometry.rotateX(Math.PI / 2);' },
   { rule: 'AXIS_ALIGNED_BOX', source: 'const soffit = new Box3().setFromObject(deck).min.y;' },
