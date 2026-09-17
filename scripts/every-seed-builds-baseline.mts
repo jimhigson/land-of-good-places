@@ -23,15 +23,15 @@ export const UNBUILT_BASELINE: Readonly<Record<number, string>> = {};
  * too, until re-taken.
  */
 export const DECISION_ZERO_BASELINE: Readonly<Record<number, number>> = {
-  0: 1,
+  0: 0,
   1: 0,
   2: 0,
   3: 0,
-  4: 1,
+  4: 0,
   5: 0,
   6: 0,
-  7: 2,
-  8: 1,
+  7: 0,
+  8: 0,
   9: 0,
   10: 0,
   11: 0,
