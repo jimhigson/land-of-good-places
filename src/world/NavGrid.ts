@@ -213,6 +213,8 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  * (`measure-walk-reach.mts`).
  */
 export const NAV_CELL = 0.5;
+/** Nodes popped per piece of a sliced flood ({@link NavGrid.floodFromSearch}). */
+const FLOOD_PIECE = 4096;
 const CELL = NAV_CELL;
 const INVERSE_CELL = 1 / CELL;
 
@@ -1093,7 +1095,37 @@ export class NavGrid {
    * derived from the pocket's own geometry rather than from any radius.
    */
   floodFrom(startX: number, startZ: number, startY: number, sample: GroundSampler): ReachSet | null {
+    const steps = this.floodFromSearch(startX, startZ, startY, sample);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+    }
+  }
+
+  /** {@link reachableFrom} in pieces, for a boot that stops between frames. */
+  *reachableFromSearch(
+    startX: number,
+    startZ: number,
+    startY: number,
+    sample: GroundSampler,
+  ): Generator<number, ((x: number, z: number, y: number) => boolean) | null, void> {
+    const flood = yield* this.floodFromSearch(startX, startZ, startY, sample);
+    return flood ? flood.has : null;
+  }
+
+  /**
+   * {@link floodFrom} in pieces: one after the lattice is built, then one
+   * every {@link FLOOD_PIECE} nodes popped. The layout's doormat probe floods
+   * a whole-park lattice and was the boot's one 48 ms step.
+   */
+  *floodFromSearch(
+    startX: number,
+    startZ: number,
+    startY: number,
+    sample: GroundSampler,
+  ): Generator<number, ReachSet | null, void> {
     if (!this.ensureLattice(sample)) return null;
+    yield 0;
     let startCell = this.cellAt(startX, startZ);
     if (startCell < 0) return null;
     if (this.blocked[startCell] === 1) {
@@ -1113,9 +1145,12 @@ export class NavGrid {
       reached[neighbour] = 1;
       stack[top++] = neighbour;
     };
+    let popped = 0;
     while (top > 0) {
       const node = stack[--top] ?? 0;
       this.forEachStep(node, visit);
+      popped += 1;
+      if (popped % FLOOD_PIECE === 0) yield popped;
     }
 
     const revision = this.builtRevision;

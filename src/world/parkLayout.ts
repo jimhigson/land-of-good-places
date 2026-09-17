@@ -474,8 +474,7 @@ function* doormatRefusalsSearch(placed: readonly PlacedEntry[]): Generator<numbe
   // world, exactly as before — the refusal, and what it names, come only
   // from that world, never from this one. The trace's `probed-alone` count
   // is how many took the second look.
-  const strict = strictGrid(placed);
-  yield 0;
+  const strict = yield* strictGridSearch(placed);
   let probedAlone = 0;
   for (const entry of placed) {
     yield 0;
@@ -590,9 +589,21 @@ function standsReachably(
 function strictGrid(
   placed: readonly PlacedEntry[],
 ): { grid: NavGrid; reachable: (x: number, z: number, y: number) => boolean } | null {
+  const steps = strictGridSearch(placed);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/** {@link strictGrid} in pieces: the plots' world, then the lattice, then the flood a few thousand nodes at a time. */
+function* strictGridSearch(
+  placed: readonly PlacedEntry[],
+): Generator<number, { grid: NavGrid; reachable: (x: number, z: number, y: number) => boolean } | null, void> {
   const world = plotsWorld(placed, ALWAYS_EXEMPT);
+  yield 0;
   const grid = new NavGrid(world, PLAYER_RADIUS, 0);
-  const reachable = grid.reachableFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0, (): number => 0);
+  const reachable = yield* grid.reachableFromSearch(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0, (): number => 0);
   return reachable ? { grid, reachable } : null;
 }
 
