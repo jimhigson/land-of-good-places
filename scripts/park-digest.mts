@@ -14,6 +14,8 @@ import { createHash } from 'node:crypto';
 import { InstancedMesh, Mesh, type BufferAttribute } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { LAYOUT_TRACE } from '../src/world/parkLayout.ts';
+import { parkSolveTrace } from '../src/world/parkPlan.ts';
+import { worldSolveTrace } from '../src/world/worldPhase.ts';
 
 const park = buildHeadlessPark();
 
@@ -80,10 +82,16 @@ for (const mesh of perMesh) {
 // "Totality, ruled and mechanised" — determinism). The text is on stderr
 // already; this is the number a before/after diff compares.
 const trace = createHash('sha256').update(LAYOUT_TRACE.join('\n')).digest('hex').slice(0, 16);
+// The two drivers' traces (plan phase, world phase): every refusal, retry,
+// accommodation and unwind in order. Two processes on one seed must agree.
+const planTrace = createHash('sha256').update(parkSolveTrace().join('\n')).digest('hex').slice(0, 16);
+const worldTrace = createHash('sha256').update(worldSolveTrace().join('\n')).digest('hex').slice(0, 16);
 
 const seed = process.env['LGP_SEED'] ?? 'canonical';
 console.log(`seed ${seed}: meshes=${perMesh.length} park=${whole.digest('hex').slice(0, 16)}`);
 console.log(`  trace ${trace} (${LAYOUT_TRACE.length} line(s))`);
+console.log(`  plan-trace ${planTrace} (${parkSolveTrace().length} line(s))`);
+console.log(`  world-trace ${worldTrace} (${worldSolveTrace().length} line(s))`);
 for (const [name, h] of [...byName.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
   console.log(`  ${name} ${h.digest('hex').slice(0, 16)}`);
 }

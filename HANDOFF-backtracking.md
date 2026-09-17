@@ -132,7 +132,7 @@ loosened; deterministic; different parks than today are fine.
     are mid-import when `parkPlan.ts` evaluates — read their constants inside
     functions only.
 
-## The world phase (landing now; patch scripts in the session scratchpad `wp/`)
+## The world phase (landed: 5c510148, 9e0a639b)
 
 Every remaining feature — fountain, walls, trees, bushes, fairy-light poles,
 lamp posts, rail-race trestles — decides through `FeatureBuilder` in a
@@ -152,6 +152,25 @@ fountain, walls, trees, bushes, fairyLights, lamps, railRace. Flowers stay
 out (no collider, respawn at runtime, self-seating) and are constructed
 after the phase's colliders exist. `ParkTrain`/`Coaster` felling closures
 are no-ops now (no tree exists when they build; trees avoid the bridges).
+
+**Measured.** Canonical seed: 16 s end to end, `check:park` 245/245, world
+phase 626 increments, 7 accommodations (two wall runs stood down, five bush
+clumps moved for lamps), 0 forgone, 72 trees, 429 bushes, 39/41 walls,
+82/109 lamp slots (the base placed 80), 0 fairy poles — **pre-existing on
+this branch**: the fairy ring (radius 13.5 round the plaza) stands exactly
+on the main loop (plaza radius 9.4 + 4), so every pole is "on a path" and
+skipped, on the base too (measured at 3d797f67). `test:procgen` name-diff
+against the base at 3d797f67: **identical failure set** (55, all
+pre-existing instrument-fault reds; none new, none fixed), and all five CI
+seeds build their base parks with zero refusals.
+
+The lane rule cost three rounds to get honest: slack asked once across the
+band (not per side); the fence rule waived *along the rail* within a
+crossing's gap (14 m) and beside a station (platform/2 + gap) — a bridge
+approach or a platform spur lies beside the rail by design, and a radial
+waiver re-rolled seeds 11/131 onto worse parks; the lane window reaches 3 m
+onto the lawn (the grid walks lawn). `LGP_TRACE_LIVE=1` prints the driver's
+trace as it happens — use it for any seed over a minute.
 
 ## Not yet built (in order)
 
