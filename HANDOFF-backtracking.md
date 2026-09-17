@@ -192,6 +192,30 @@ structural seams are its zero-valued yields (8). `scripts/_probe-steps.mts`
 times every `next()` of the plan drive and names the slowest — use it before
 `check:park-boot` when a slice is over the ceiling. Worst slice now 21 ms.
 
+## Final proofs (326de78a)
+
+- `check:park` 0..15: 16/16 green, one process each; 15 seeds in 4–199 s,
+  seed 7 in 1003 s (42 refusals, 31 unwinds, 2 decision zeros; the cost is
+  the train's dead-end searches at ~20 s each). World phase per seed: 72
+  trees, 159–628 bushes, 22–56 walls, 66–90 lamps; bush and wall
+  relocations on 14 seeds, tree relocations on seed 11 (three, for lamps).
+- `check:every-seed-builds` (one lane, 1538 s): built 16/16, none unbuilt;
+  baseline emptied of unbuilt seeds; its decision-zero measure reads the
+  first `layout-trace` line (0 on every seed) — the driver's own counts are
+  in `park-solve:` (0:1 4:1 7:2 8:1 on the earlier sweep, 0 on the final
+  every-seed run for seed 7: a different park, same seed, because the lane
+  rule's waivers changed between the runs).
+- Determinism: two processes agree on park / plan-trace / world-trace
+  hashes (canonical `74191f6d7f3f5257`, and seeds 0, 8 earlier).
+- `test:procgen` name-diff against the base (3d797f67): identical failure
+  set (55, all pre-existing instrument reds; none new, none fixed).
+- `check:park-boot` passes (worst slice 21 ms).
+- Deploy preview `pr-667-9a4fcb0…/spawn?pos=0,62&facing=0&seed=0` opened in
+  a headless system Chrome by the agent: park built, no console errors,
+  screenshot in the session scratchpad.
+- Relocation is **local** (24 m trees, 20 m bushes) — `scatterDecoupling`
+  holds scenery >30 m from a bowed spur exactly where it was.
+
 ## Not yet built (in order)
 
 - Stalls' `accommodate` (heavier shifts) — only if a seed needs it.
