@@ -41,6 +41,7 @@ import { drapePathsOverBridges } from './pathGraph';
 import type { GroundClaims } from '../boot/groundClaims';
 import { parkPlanClaims } from './parkPlan';
 import { solveWorldPhase } from './worldPhase';
+import { ROAD_FEATURE, entranceRoadClaims } from './entrance/roadCorridor';
 
 export interface WorldOptions {
   /** Passed straight to {@link Entrance} — see `EntranceOptions.arriveByBus`. */
@@ -299,7 +300,11 @@ export class World implements GameSystem {
     // What it buys is that the registry a built park carries describes the
     // road that was actually drawn, rather than a snapshot taken before the
     // paths existed.
-    // The road's claim is the plan's `road` decision (`parkPlan.ts`), already in the registry.
+    // The road as the Entrance actually drew it replaces the plan's `road`
+    // decision in the registry (`parkPlan.ts` committed the same corridor at
+    // plan time for the plan's own askers); `test/procgen`'s
+    // theRoadClaimIsTheRoadItDrew holds the registry to the drawn road.
+    this.groundClaims.commit(ROAD_FEATURE, { claims: entranceRoadClaims() });
     // The welcome sign's spot is chosen dynamically against the *solved*
     // train route (see above), which the meadow — planted long before this
     // line — could not have known about either. Same pattern as the train's

@@ -340,6 +340,40 @@ export function planStations(route: TrainRoute): readonly PlannedStation[] {
  * route used to bend around trees at build time; the pure plan made the
  * approximation — and its caveats — unnecessary.)
  */
+/**
+ * Metres along the loop of the rail point nearest `(x, z)` — the same 2 m
+ * corridor samples {@link distanceToRailCorridor} measures against, so the
+ * two agree about which point is nearest.
+ */
+export function nearestRailDistanceAlong(x: number, z: number): number {
+  ensureCorridorSamples();
+  const xs = corridorX as Float64Array;
+  const zs = corridorZ as Float64Array;
+  const route = TRAIN_PLAN.route;
+  let best = Infinity;
+  let along = 0;
+  for (let i = 0; i < xs.length; i += 1) {
+    const j = (i + 1) % xs.length;
+    const ax = xs[i] ?? 0;
+    const az = zs[i] ?? 0;
+    const bx = xs[j] ?? 0;
+    const bz = zs[j] ?? 0;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const lengthSquared = dx * dx + dz * dz;
+    const t =
+      lengthSquared < 1e-12
+        ? 0
+        : Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSquared));
+    const gap = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+    if (gap < best) {
+      best = gap;
+      along = ((i + t) / xs.length) * route.length;
+    }
+  }
+  return along;
+}
+
 export function distanceToRailCorridor(x: number, z: number): number {
   ensureCorridorSamples();
   let best = Infinity;

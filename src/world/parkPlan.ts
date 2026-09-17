@@ -63,8 +63,8 @@ import { offerPrewarmedGroundClaims } from '../boot/groundClaimsPrewarm';
 import { Rng } from '../core/mathUtils';
 import { PARK_BOUNDARY } from './boundary';
 import { BOUNDARY_WALL_COLLISION_HALF } from './Garden';
-import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from './train/clearance';
-import { distanceToRailCorridor } from './train/plan';
+import { FENCE_HALF_THICKNESS, FENCE_OFFSET, PLATFORM_LENGTH, STATION_GAP } from './train/clearance';
+import { distanceToRailCorridor, nearestRailDistanceAlong } from './train/plan';
 import { PLAYER_RADIUS } from '../core/constants';
 import type { PathSample } from './pathGraph';
 import { NAV_CELL } from './NavGrid';
@@ -217,8 +217,16 @@ function seedFor(feature: string, attempt: number, base: number): number {
 const wallKeep = (): number => BOUNDARY_WALL_COLLISION_HALF + PLAYER_RADIUS;
 /** ...and this much from the rail centreline: the fence stands `FENCE_OFFSET` off it. */
 const fenceKeep = (): number => FENCE_OFFSET + FENCE_HALF_THICKNESS + PLAYER_RADIUS;
-/** Within this of a proven site the fence has its gap and the bridge's ramps run, so the rail rule is waived there. */
-const SITE_REACH = 14;
+/**
+ * Along the rail, a crossing's fence gap reaches at most this far either side
+ * of its site (`computeCrossings`' cap on `halfGap`); within it there is no
+ * fence for a lane to be pinched against, so the rail rule is waived there and
+ * only the wall rule stands. Measured along the RAIL, not from the site's
+ * centre: seeds 11 and 131 approach their bridges obliquely, and a radial
+ * waiver read the approach beside the open gap as a pinch and re-rolled parks
+ * that passed every invariant.
+ */
+const FENCE_GAP_REACH = 14;
 /**
  * The lane must be a band wider than the child by one NavGrid cell, or the
  * children's own grid (`NavGrid.ts`, `NAV_CELL`) can miss it: seed 7's gate
@@ -227,8 +235,13 @@ const SITE_REACH = 14;
  * unreachable from the entrance (measured: `route.unreachable` 17).
  */
 const laneSlack = (): number => NAV_CELL;
-/** How far beyond the ribbon's edge a lane may lie — she may walk the lawn beside a path. */
-const LANE_OVERHANG = 1;
+/**
+ * How far beyond the ribbon's edge a lane may lie — she may walk the lawn
+ * beside a path, and the children's grid routes over lawn too. A metre was
+ * too little: seed 131 reported a sample "pinched" whose passing band sat at
+ * the very edge of the window, 3.15 m from the rail with the wall 43 m off.
+ */
+const LANE_OVERHANG = 3;
 
 /**
  * The first drawn sample with no walkable lane across it — no point across the
@@ -237,7 +250,9 @@ const LANE_OVERHANG = 1;
  */
 function pinchedSample(
   drawn: readonly PathSample[],
-  sites: readonly { readonly x: number; readonly z: number }[],
+  sites: readonly { readonly railDistance: number }[],
+  stations: readonly { readonly distance: number }[],
+  loopLength: number,
 ): { sample: PathSample; wall: number; fence: number } | null {
   const WALL_KEEP = wallKeep();
   const FENCE_KEEP = fenceKeep();
@@ -254,7 +269,17 @@ function pinchedSample(
     if (length < 1e-6) continue;
     dx /= length;
     dz /= length;
-    const nearSite = sites.some((site) => Math.hypot(site.x - sample.x, site.z - sample.z) < SITE_REACH);
+    const along = nearestRailDistanceAlong(sample.x, sample.z);
+    const alongApart = (at: number): number => {
+      const apart = Math.abs(along - at);
+      return Math.min(apart, loopLength - apart);
+    };
+    // No fence to be pinched against within a crossing's gap — nor beside a
+    // station, where the platform spur runs along the rail by design (seeds
+    // 5 and 131 paid seven and eight re-rolls for their platform spurs).
+    const nearSite =
+      sites.some((site) => alongApart(site.railDistance) <= FENCE_GAP_REACH) ||
+      stations.some((station) => alongApart(station.distance) <= PLATFORM_LENGTH / 2 + STATION_GAP);
     const span = sample.halfWidth + LANE_OVERHANG;
     // A lane is a BAND of passing offsets at least one NavGrid cell wide —
     // the slack is asked for once, across the band, not once per side.
@@ -444,7 +469,7 @@ function builders(): readonly FeatureBuilder[] {
       // a site, and the whole park was unreachable from the entrance — the
       // path was squeezed shut between the wall and the fence. The loop is
       // the decision that pinched it.
-      const pinched = pinchedSample(drawn, planPart('crossings').bridges);
+      const pinched = pinchedSample(drawn, planPart('crossings').bridges, train.stations, train.route.length);
       if (pinched) {
         delete state.pathGraph;
         return refusal(
