@@ -105,10 +105,57 @@ loosened; deterministic; different parks than today are fine.
   drift #414: the real search sees World colliders). Probing each
   (`scripts/_probe-residue.mts`, untracked).
 
+- **Seeds 0..15, third sweep (af63abee + the three screens below):** 0, 1, 2,
+  3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15 green (seed 4 in 172 s: train
+  attempts to 4 then decision zero; the rest 5–51 s). Seed 7 red twice, each
+  time a fault the plan could not see; each is now a plan-time refusal:
+  - the plan's crossing screen scanned the drawn curves but not the
+    **esplanade march** (the walk in from the arch) that `computeCrossings`
+    scans at build time, so a loop cutting `x=0` at `z=54.5` passed the plan
+    and threw from tree planting — `crossingPredicate.esplanadeSamples` is
+    now the one march both askers scan;
+  - the boundary screen refused samples up to 0.55 m *inside* the wall (seeds
+    3, 5, 7 took an unnecessary decision zero); it refuses only samples
+    outside it now (`< 0`);
+  - **the lane pinch**: seed 7's gate approach ran 0.35–0.47 m inside the
+    boundary wall with the railway's fence 2–3 m in from it: inside the park,
+    every crossing on a site, and a 0.5 m clear band that no NavGrid column
+    (`NAV_CELL` 0.5) could thread — 17 routes unreachable, 314 waypoints
+    stranded. `parkPlan.pinchedSample` now refuses a drawn run with no lane
+    band one cell wider than the child, clear of the wall
+    (`BOUNDARY_WALL_COLLISION_HALF + PLAYER_RADIUS`) and of the fence
+    (`FENCE_OFFSET + FENCE_HALF_THICKNESS + PLAYER_RADIUS`), waived within a
+    bridge's ramp reach (14 m) of a proven site; consumed `train, layout`.
+    Probes: `scripts/_probe-gate.mts`, `_probe-points.mts`, `_probe-lane.mts`,
+    `_probe-graph.mts` (untracked).
+  - Two module-scope TDZ traps met on the way: `Garden.ts` and `NavGrid.ts`
+    are mid-import when `parkPlan.ts` evaluates — read their constants inside
+    functions only.
+
+## The world phase (landing now; patch scripts in the session scratchpad `wp/`)
+
+Every remaining feature — fountain, walls, trees, bushes, fairy-light poles,
+lamp posts, rail-race trestles — decides through `FeatureBuilder` in a
+**second `ParkSolve`** (`src/world/worldPhase.ts`) run inside the `World`
+constructor after the fixed structures (castle, hotel, stalls, railway,
+coaster, entrance) have registered their colliders; the classes then draw
+from the decisions (`Scenery(collision, decisions)`, `LampPosts(collision,
+positions)`, `FairyLights(collision, poles)`). Interface additions:
+`accommodate(claimIndex, attempt, keepClearOf)` (the asker's refused claims
+are not in the registry) and `Refusal.optional` + `forgo()` — a lamp slot or
+a pole nothing can clear is left out *after* retry and accommodation, never
+unwinding a structure. Correction: a tree or bush asked to step aside is
+re-planted through its own acceptance gate (near first, anywhere after, cover
+trees stay climbable); a wall run steps aside by standing down (its slot
+stays `null` so `back()` is exact); a lamp re-climbs its own ladder. Order:
+fountain, walls, trees, bushes, fairyLights, lamps, railRace. Flowers stay
+out (no collider, respawn at runtime, self-seating) and are constructed
+after the phase's colliders exist. `ParkTrain`/`Coaster` felling closures
+are no-ops now (no tree exists when they build; trees avoid the bridges).
+
 ## Not yet built (in order)
 
-- Accommodation levels only as the sweep demands them (trees/lamps/walls as
-  movable builders; stalls' `accommodate`).
+- Stalls' `accommodate` (heavier shifts) — only if a seed needs it.
 - The post-build `check:park` residue (seeds 4, 6: `poi.nospot`,
   `rail.walkable`, `anchor.reach`) as plan-time refusals if the sweep still
   shows them.

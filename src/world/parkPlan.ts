@@ -62,6 +62,12 @@ import { entranceRoadClaims, ROAD_FEATURE } from './entrance/roadCorridor';
 import { offerPrewarmedGroundClaims } from '../boot/groundClaimsPrewarm';
 import { Rng } from '../core/mathUtils';
 import { PARK_BOUNDARY } from './boundary';
+import { BOUNDARY_WALL_COLLISION_HALF } from './Garden';
+import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from './train/clearance';
+import { distanceToRailCorridor } from './train/plan';
+import { PLAYER_RADIUS } from '../core/constants';
+import type { PathSample } from './pathGraph';
+import { NAV_CELL } from './NavGrid';
 
 export interface TrainDecision {
   readonly route: TrainRoute;
@@ -203,6 +209,76 @@ function seedFor(feature: string, attempt: number, base: number): number {
  * time would throw. The build order is fixed, and it is also the
  * accommodation precedence (earlier needs the space more).
  */
+// The two keep distances are computed inside `pinchedSample`, not here:
+// `Garden.ts` (the wall half's owner) is mid-import when this module
+// evaluates — the pathGraph → paths → parkPlan → Garden cycle — so a
+// module-scope read of it is a TDZ crash on every seed (measured).
+/** A child's lane needs this much from the boundary's collision face. */
+const wallKeep = (): number => BOUNDARY_WALL_COLLISION_HALF + PLAYER_RADIUS;
+/** ...and this much from the rail centreline: the fence stands `FENCE_OFFSET` off it. */
+const fenceKeep = (): number => FENCE_OFFSET + FENCE_HALF_THICKNESS + PLAYER_RADIUS;
+/** Within this of a proven site the fence has its gap and the bridge's ramps run, so the rail rule is waived there. */
+const SITE_REACH = 14;
+/**
+ * The lane must be a band wider than the child by one NavGrid cell, or the
+ * children's own grid (`NavGrid.ts`, `NAV_CELL`) can miss it: seed 7's gate
+ * approach had a 0.5 m clear band between the boundary wall and the railway's
+ * fence — a child fits, no lattice column did, and the whole park was
+ * unreachable from the entrance (measured: `route.unreachable` 17).
+ */
+const laneSlack = (): number => NAV_CELL;
+/** How far beyond the ribbon's edge a lane may lie — she may walk the lawn beside a path. */
+const LANE_OVERHANG = 1;
+
+/**
+ * The first drawn sample with no walkable lane across it — no point across the
+ * ribbon (plus a metre of lawn each side) clear of both the boundary wall and
+ * the railway's fence. Null when every sample has one.
+ */
+function pinchedSample(
+  drawn: readonly PathSample[],
+  sites: readonly { readonly x: number; readonly z: number }[],
+): { sample: PathSample; wall: number; fence: number } | null {
+  const WALL_KEEP = wallKeep();
+  const FENCE_KEEP = fenceKeep();
+  const LANE_SLACK = laneSlack();
+  for (let i = 0; i < drawn.length; i += 1) {
+    const sample = drawn[i] as PathSample;
+    const before = drawn[i - 1];
+    const after = drawn[i + 1];
+    const a = before && before.run === sample.run ? before : sample;
+    const b = after && after.run === sample.run ? after : sample;
+    let dx = b.x - a.x;
+    let dz = b.z - a.z;
+    const length = Math.hypot(dx, dz);
+    if (length < 1e-6) continue;
+    dx /= length;
+    dz /= length;
+    const nearSite = sites.some((site) => Math.hypot(site.x - sample.x, site.z - sample.z) < SITE_REACH);
+    const span = sample.halfWidth + LANE_OVERHANG;
+    let lane = false;
+    let bestWall = -Infinity;
+    let bestFence = -Infinity;
+    for (let o = -span; o <= span + 1e-9; o += 0.5) {
+      const x = sample.x - dz * o;
+      const z = sample.z + dx * o;
+      const wall = PARK_BOUNDARY.distanceToEdge(x, z);
+      const fence = nearSite ? Infinity : distanceToRailCorridor(x, z);
+      // Report the point that came nearest to having a lane.
+      if (Math.min(wall - WALL_KEEP, fence - FENCE_KEEP) > Math.min(bestWall - WALL_KEEP, bestFence - FENCE_KEEP)) {
+        bestWall = wall;
+        bestFence = fence;
+      }
+      if (wall >= WALL_KEEP + LANE_SLACK && fence >= FENCE_KEEP + LANE_SLACK) {
+        lane = true;
+        break;
+      }
+    }
+    if (!lane) return { sample, wall: bestWall, fence: bestFence };
+  }
+  return null;
+}
+
 function builders(): readonly FeatureBuilder[] {
   const layoutBuilder = coarse<ParkLayout>({
     name: 'layout',
@@ -346,6 +422,22 @@ function builders(): readonly FeatureBuilder[] {
             `(${foul.x.toFixed(1)}, ${foul.z.toFixed(1)}) by drawn run ${foul.run}; sites at railD ${sites}`,
           // Not the slide: a spur crossing the rail off-site is the loop's and the sites'.
           { consumed: ['crossings', 'train', 'cruiser', 'layout'] },
+        );
+      }
+      // A drawn ribbon must leave a child a lane. Seed 7's gate approach ran
+      // 0.35-0.47 m inside the boundary wall with the railway's fence 2-3 m
+      // in from it: every sample was inside the park and no crossing was off
+      // a site, and the whole park was unreachable from the entrance — the
+      // path was squeezed shut between the wall and the fence. The loop is
+      // the decision that pinched it.
+      const pinched = pinchedSample(drawn, planPart('crossings').bridges);
+      if (pinched) {
+        delete state.pathGraph;
+        return refusal(
+          `paths: drawn run ${pinched.sample.run} is pinched shut at (${pinched.sample.x.toFixed(1)}, ${pinched.sample.z.toFixed(1)}): ` +
+            `nearest lane point is ${pinched.wall.toFixed(2)} m from the boundary edge (needs ${(wallKeep() + laneSlack()).toFixed(2)}) ` +
+            `and ${pinched.fence.toFixed(2)} m from the rail centreline (needs ${(fenceKeep() + laneSlack()).toFixed(2)})`,
+          { consumed: ['train', 'layout'] },
         );
       }
       return graph;
