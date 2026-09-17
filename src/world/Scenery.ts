@@ -628,8 +628,16 @@ const BUSH_COLLIDER = 0.85;
  * Every try is a handful of distance checks; 4000 is a few milliseconds.
  */
 const RELOCATE_TRIES = 4000;
-/** The first tries look near the old spot, so the park keeps its look. */
-const RELOCATE_NEAR_TRIES = 400;
+/**
+ * A tree or bush steps aside only within this of where it stood — a small
+ * movement (Jim, 16 Sep 2026: *"accommodate small movements if required"*),
+ * never a jump across the park. `test/procgen/scatterDecoupling` bows one
+ * spur by 2 m and holds every tree, bush and wall more than 30 m from it
+ * exactly where it was; the lamp slot the longer spur gained asked a tree to
+ * move and the old anywhere-fallback sent it 56 m away. If no spot within
+ * reach passes, the builder refuses and the optional asker is forgone.
+ */
+const RELOCATE_REACH = { tree: 24, bush: 20 } as const;
 const TREE_MOVE_SALT = 0x7e3e0e ^ PARK_SEED;
 const BUSH_MOVE_SALT = 0xb0511e ^ PARK_SEED;
 const TARGET_TREES = 72;
@@ -800,17 +808,9 @@ export function treeBuilder(
       for (let k = 0; k < RELOCATE_TRIES; k += 1) {
         const rng = candidateRng(TREE_MOVE_SALT ^ section, attempt * RELOCATE_TRIES + k);
         const angle = rng.range(0, TAU);
-        let x: number;
-        let z: number;
-        if (k < RELOCATE_NEAR_TRIES) {
-          const r = rng.range(4, 16);
-          x = old.x + Math.cos(angle) * r;
-          z = old.z + Math.sin(angle) * r;
-        } else {
-          const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
-          x = Math.cos(angle) * distance;
-          z = Math.sin(angle) * distance;
-        }
+        const r = 4 + Math.sqrt(rng.unit()) * (RELOCATE_REACH.tree - 4);
+        const x = old.x + Math.cos(angle) * r;
+        const z = old.z + Math.sin(angle) * r;
         if (!isPlantable(x, z, 2.6)) continue;
         const tree = accept(rng, old.kind, x, z, old.climbable, section, keepClearOf);
         if (!tree) continue;
@@ -818,7 +818,7 @@ export function treeBuilder(
         out[section] = moved;
         return increment(moved, `moved from (${old.x.toFixed(1)}, ${old.z.toFixed(1)}) to`);
       }
-      return refusal(`trees: tree ${section} at (${old.x.toFixed(1)}, ${old.z.toFixed(1)}) found nowhere to move in ${RELOCATE_TRIES} tries`);
+      return refusal(`trees: tree ${section} at (${old.x.toFixed(1)}, ${old.z.toFixed(1)}) found nowhere to move within ${RELOCATE_REACH.tree} m in ${RELOCATE_TRIES} tries`);
     },
     reset() {
       out.length = 0;
@@ -920,23 +920,15 @@ export function bushBuilder(
       for (let k = 0; k < RELOCATE_TRIES; k += 1) {
         const rng = candidateRng(BUSH_MOVE_SALT ^ section, attempt * RELOCATE_TRIES + k);
         const angle = rng.range(0, TAU);
-        let x: number;
-        let z: number;
-        if (k < RELOCATE_NEAR_TRIES) {
-          const r = rng.range(3, 12);
-          x = old.x + Math.cos(angle) * r;
-          z = old.z + Math.sin(angle) * r;
-        } else {
-          const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 5);
-          x = Math.cos(angle) * distance;
-          z = Math.sin(angle) * distance;
-        }
+        const r = 3 + Math.sqrt(rng.unit()) * (RELOCATE_REACH.bush - 3);
+        const x = old.x + Math.cos(angle) * r;
+        const z = old.z + Math.sin(angle) * r;
         if (!accept(x, z, keepClearOf)) continue;
         const moved: BushDecision = { ...old, x, z, blobs: roll(rng, x, z) };
         out[section] = moved;
         return increment(moved, `moved from (${old.x.toFixed(1)}, ${old.z.toFixed(1)}) to`);
       }
-      return refusal(`bushes: clump ${section} found nowhere to move in ${RELOCATE_TRIES} tries`);
+      return refusal(`bushes: clump ${section} found nowhere to move within ${RELOCATE_REACH.bush} m in ${RELOCATE_TRIES} tries`);
     },
     reset() {
       out.length = 0;
