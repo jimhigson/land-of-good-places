@@ -256,10 +256,14 @@ function pinchedSample(
     dz /= length;
     const nearSite = sites.some((site) => Math.hypot(site.x - sample.x, site.z - sample.z) < SITE_REACH);
     const span = sample.halfWidth + LANE_OVERHANG;
+    // A lane is a BAND of passing offsets at least one NavGrid cell wide —
+    // the slack is asked for once, across the band, not once per side.
     let lane = false;
     let bestWall = -Infinity;
     let bestFence = -Infinity;
-    for (let o = -span; o <= span + 1e-9; o += 0.5) {
+    let bandStart: number | null = null;
+    const STEP = 0.25;
+    for (let o = -span; o <= span + 1e-9; o += STEP) {
       const x = sample.x - dz * o;
       const z = sample.z + dx * o;
       const wall = PARK_BOUNDARY.distanceToEdge(x, z);
@@ -269,9 +273,15 @@ function pinchedSample(
         bestWall = wall;
         bestFence = fence;
       }
-      if (wall >= WALL_KEEP + LANE_SLACK && fence >= FENCE_KEEP + LANE_SLACK) {
-        lane = true;
-        break;
+      const passes = wall >= WALL_KEEP && fence >= FENCE_KEEP;
+      if (passes) {
+        bandStart ??= o;
+        if (o - bandStart + 1e-9 >= LANE_SLACK) {
+          lane = true;
+          break;
+        }
+      } else {
+        bandStart = null;
       }
     }
     if (!lane) return { sample, wall: bestWall, fence: bestFence };
@@ -403,7 +413,11 @@ function builders(): readonly FeatureBuilder[] {
       // was routed 1.8 m OUTSIDE the boundary wall, and its waypoint seeds
       // had nowhere to stand (`poi.nospot`). That is a plot standing too near
       // the wall for its spur — the layout's decision, so the refusal names it.
-      const outside = drawn.find((sample) => PARK_BOUNDARY.distanceToEdge(sample.x, sample.z) < 0);
+      // Refused only when the whole ribbon is outside: a centreline a few
+      // tens of centimetres past the edge still has paving inside the wall,
+      // and whether a child can walk it is the lane rule's question below.
+      // Seed 7 paid a decision zero apiece for 0.24 m and 0.33 m.
+      const outside = drawn.find((sample) => PARK_BOUNDARY.distanceToEdge(sample.x, sample.z) < -sample.halfWidth);
       if (outside) {
         delete state.pathGraph;
         return refusal(
@@ -435,8 +449,8 @@ function builders(): readonly FeatureBuilder[] {
         delete state.pathGraph;
         return refusal(
           `paths: drawn run ${pinched.sample.run} is pinched shut at (${pinched.sample.x.toFixed(1)}, ${pinched.sample.z.toFixed(1)}): ` +
-            `nearest lane point is ${pinched.wall.toFixed(2)} m from the boundary edge (needs ${(wallKeep() + laneSlack()).toFixed(2)}) ` +
-            `and ${pinched.fence.toFixed(2)} m from the rail centreline (needs ${(fenceKeep() + laneSlack()).toFixed(2)})`,
+            `nearest lane point is ${pinched.wall.toFixed(2)} m from the boundary edge (needs ${wallKeep().toFixed(2)}) ` +
+            `and ${pinched.fence.toFixed(2)} m from the rail centreline (needs ${fenceKeep().toFixed(2)}, in a band ${laneSlack().toFixed(2)} m wide)`,
           { consumed: ['train', 'layout'] },
         );
       }

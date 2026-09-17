@@ -284,6 +284,23 @@ export interface RailRaceTrackOptions {
   readonly showArch: boolean;
 }
 
+/**
+ * **A duck bar with no support, as a refusal the park's driver can answer.**
+ * Carries the features whose claims refused the candidates and those
+ * candidates' claims, so a movable blocker (a tree, a bush) can be asked to
+ * step aside (`worldPhase.ts`) instead of the build dying here.
+ */
+export class TrestleRefusal extends Error {
+  readonly refusedBy: readonly string[];
+  readonly refusedClaims: readonly Claim[];
+  constructor(refusedBy: readonly string[], refusedClaims: readonly Claim[], message: string) {
+    super(message);
+    this.name = 'TrestleRefusal';
+    this.refusedBy = refusedBy;
+    this.refusedClaims = refusedClaims;
+  }
+}
+
 export function buildRailRaceTrack(
   route: RailRaceRoute,
   layout: HazardLayout,
@@ -1806,6 +1823,8 @@ function trestleSpots(
     let leanExhausted = false;
     /** The registry's refusers, for the message if nothing serves. */
     const refusedBy = new Set<string>();
+    /** The claims of every candidate the registry refused — what a blocker is asked to clear. */
+    const refusedClaims: Claim[] = [];
 
     search: for (const lean of nearestFirst(leanGuard)) {
       let admissible = false;
@@ -1837,6 +1856,7 @@ function trestleSpots(
         const blockers = groundClaims.blockers(feature, claims);
         if (blockers.length > 0) {
           for (const blocker of blockers) refusedBy.add(blocker.feature);
+          if (refusedClaims.length < 64) refusedClaims.push(...claims);
           continue;
         }
         const legacy = legacyRefuser(x, z, collision);
@@ -1864,7 +1884,9 @@ function trestleSpots(
       // support's next decision would be a different *shape* (a trunk rising
       // vertically to the headroom before it forks — design ruling point 3),
       // which does not exist yet. Say exactly what refused it.
-      throw new Error(
+      throw new TrestleRefusal(
+        [...refusedBy].sort(),
+        refusedClaims,
         `railRace/track.ts: no support can stand for the duck bar at slot ${i} of ` +
           `${ringName} (arch-relative at=${atArch0.toFixed(1)}): ` +
           (leanExhausted

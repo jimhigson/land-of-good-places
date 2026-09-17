@@ -40,7 +40,7 @@ import { bridgeHeightAt, bridgePavingHeightAt } from './train/bridges';
 import { drapePathsOverBridges } from './pathGraph';
 import type { GroundClaims } from '../boot/groundClaims';
 import { parkPlanClaims } from './parkPlan';
-import { ROAD_FEATURE, entranceRoadClaims } from './entrance/roadCorridor';
+import { solveWorldPhase } from './worldPhase';
 
 export interface WorldOptions {
   /** Passed straight to {@link Entrance} — see `EntranceOptions.arriveByBus`. */
@@ -121,18 +121,11 @@ export class World implements GameSystem {
     options: WorldOptions = {},
   ) {
     this.garden = new Garden(this.collision);
-    this.scenery = new Scenery(this.collision);
-    // Living, pickable flowers — no collision (you walk straight through
-    // them, same as the old decorative scatter), so it needs nothing from
-    // the world to be built.
-    this.flowers = new Flowers(this.collision);
-    this.fountain = new Fountain(this.collision, PLAZA.x, PLAZA.z);
-    this.fairyLights = new FairyLights(this.collision);
-    // Lamp posts along the paths — the family's "night is too dark" feedback.
-    // Built after FairyLights (which rings the fountain plaza) and before
-    // AnchorPlots so it only needs the static ANCHORS list, not the built
-    // plots themselves, to keep its lamps out of the reserved ride footprints.
-    this.lampPosts = new LampPosts(this.collision);
+    // The scenery, fountain, fairy lights and lamp posts are decided by the
+    // world phase below, after every fixed structure has registered its
+    // colliders, and drawn from those decisions; the flowers come after them.
+    // Tap zones the flowers must keep clear of are collected meanwhile.
+    const tapZones: { x: number; z: number; pickRadius: number }[] = [];
     // Drifting sparks over the lawn after dark. Depends on nothing but the
     // terrain and the reserved plots it keeps out of.
     this.fireflies = new Fireflies();
@@ -164,7 +157,7 @@ export class World implements GameSystem {
     // stations and the welcome sign (#303): tell the meadow after the fact
     // and let it replant anything caught underneath, rather than shrinking
     // the zone back down and losing the pin's reachability fix.
-    this.flowers.keepClearOfTapZones(this.hotel.interactZones());
+    tapZones.push(...this.hotel.interactZones());
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
     // a sprinkler and a rack of very big water guns. The fight itself is a
@@ -181,10 +174,13 @@ export class World implements GameSystem {
     // world, so a tree planted across the park edge bends the track rather than
     // growing through it (see `train/route.ts`). Built before the NPCs, so the
     // waypoint graph is validated against its station posts too.
+    // No tree exists yet when the railway builds — the world phase plants
+    // them afterwards, against the bridges' footprints — so there is nothing
+    // to fell and nothing fellable.
     this.train = new ParkTrain(
       this.collision,
-      (x, z, radius) => this.scenery.clearTreesNear(x, z, radius),
-      (x, z, radius) => this.scenery.hasFellableTreeNear(x, z, radius),
+      () => 0,
+      () => false,
     );
     // The path goes up and over each bridge, rather than a bridge growing its
     // own separate floor (Jim, 2026-08-24) — and rather than the ground ribbon
@@ -199,7 +195,7 @@ export class World implements GameSystem {
     // …and they are tap targets, which the meadow — planted before the loop
     // was solved — must keep its pickable blooms out of (the tap-spacing
     // rule, `world/tapSpacing.ts`). Any flower already inside is replanted.
-    this.flowers.keepClearOfTapZones(this.train.stationTapAreas());
+    tapZones.push(...this.train.stationTapAreas());
 
     // Two rollercoasters (family ruling, 28 July): the Sky Cruiser, a
     // serene first-person ride, and the Rail Race, third person with
@@ -219,7 +215,7 @@ export class World implements GameSystem {
     this.coaster = new Coaster(this.collision, this.train, {
       plan: COASTER_PLANS.cruiser,
       camera: 'firstPerson',
-      clearTreesNear: (x, z, radius) => this.scenery.clearTreesNear(x, z, radius),
+      clearTreesNear: () => 0,
     });
 
     // Garlands of lights strung tree to tree. Nothing about them is authored:
@@ -229,7 +225,7 @@ export class World implements GameSystem {
     // puts it here — it needs the train's route, and the train does not have
     // one until it has solved for it against the finished collision world.
     // It registers no collision itself; the wires hang overhead.
-    this.treeLights = new TreeLights(this.scenery.foliageOccluders, this.train.route);
+    // (Constructed after the world phase below, which plants the trees.)
 
     // The Rail Race used to be built here. It is built below, after the
     // entrance — see the note there.
@@ -303,13 +299,13 @@ export class World implements GameSystem {
     // What it buys is that the registry a built park carries describes the
     // road that was actually drawn, rather than a snapshot taken before the
     // paths existed.
-    this.groundClaims.commit(ROAD_FEATURE, { claims: entranceRoadClaims() });
+    // The road's claim is the plan's `road` decision (`parkPlan.ts`), already in the registry.
     // The welcome sign's spot is chosen dynamically against the *solved*
     // train route (see above), which the meadow — planted long before this
     // line — could not have known about either. Same pattern as the train's
     // own stations just above: tell the meadow after the fact and let it
     // replant anything that landed underneath.
-    this.flowers.keepClearOfTapZones(this.entrance.interactZones());
+    tapZones.push(...this.entrance.interactZones());
 
     // The Rail Race is no longer a coaster at all (reform of 31 July 2026): it
     // is four parallel rails round the park's rim, raced side-on with the park
@@ -332,7 +328,21 @@ export class World implements GameSystem {
     // Still before the NPCs, for the reason everything above is: the walk-past
     // ring registers its posts with `this.collision`, and the waypoint graph is
     // validated against the finished collision world.
-    this.railRace = new RailRace(this.collision, this.groundClaims);
+    // **The world phase** (`worldPhase.ts`): the fountain, walls, trees,
+    // bushes, fairy-light poles, lamp posts and the rail race's trestles each
+    // decide through the one driver against the registry — now that every
+    // fixed structure has registered its colliders — and are then drawn.
+    const phase = solveWorldPhase(this.collision, this.groundClaims);
+    this.scenery = new Scenery(this.collision, phase.scenery);
+    this.fountain = new Fountain(this.collision, PLAZA.x, PLAZA.z);
+    this.fairyLights = new FairyLights(this.collision, phase.fairyPoles);
+    this.lampPosts = new LampPosts(this.collision, phase.lamps);
+    this.railRace = phase.railRace;
+    // Living, pickable flowers — no collision, and they re-seat themselves
+    // against the finished park below, so they come after everything solid.
+    this.flowers = new Flowers(this.collision);
+    this.flowers.keepClearOfTapZones(tapZones);
+    this.treeLights = new TreeLights(this.scenery.foliageOccluders, this.train.route);
 
     // The other children in the park. Built last, because the waypoint graph
     // they wander is validated against the finished collision world — every

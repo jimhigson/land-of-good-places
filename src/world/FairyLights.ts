@@ -21,6 +21,66 @@ import { PLAZA } from './paths';
 import { isOnPath } from './pathGraph';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
+import type { Claim, GroundClaims } from '../boot/groundClaims';
+import { refusal, type FeatureBuilder } from '../boot/featureBuilder';
+
+/** One of the ten pole slots round the plaza: where it stands, or `null` where it was left out. */
+export type FairyPole = { readonly x: number; readonly z: number } | null;
+
+export const FAIRY_POLE_COUNT = 10;
+export const FAIRY_RING_RADIUS = 13.5;
+/** The collider a pole registers, and so the ground it claims. */
+const POLE_RADIUS = 0.28;
+
+/**
+ * **Fairy-light poles, as a feature builder.** One increment is one pole on
+ * the ring round the plaza. A pole on paving is left out at once (as it always
+ * was); a pole refused by the registry — a tree trunk, a bush, a wall —
+ * returns an **optional** refusal naming the blockers, so the driver first
+ * asks them to step aside and only then leaves the pole out.
+ */
+export function fairyPoleBuilder(claims: GroundClaims, out: FairyPole[]): FeatureBuilder {
+  const claimOf = (x: number, z: number): Claim => ({ kind: 'footprint', shape: { shape: 'disc', x, z, radius: POLE_RADIUS } });
+  return {
+    name: 'fairyLights',
+    deps: ['fountain'],
+    *advance() {
+      while (out.length < FAIRY_POLE_COUNT) {
+        const i = out.length;
+        const angle = (i / FAIRY_POLE_COUNT) * TAU;
+        const x = PLAZA.x + Math.cos(angle) * FAIRY_RING_RADIUS;
+        const z = PLAZA.z + Math.sin(angle) * FAIRY_RING_RADIUS;
+        if (isOnPath(x, z, 1.2)) {
+          out.push(null);
+          continue;
+        }
+        const claim = claimOf(x, z);
+        const blockers = claims.blockers('fairyLights', [claim]).map((b) => b.feature);
+        if (blockers.length > 0) {
+          return refusal(`fairyLights: pole ${i} at (${x.toFixed(1)}, ${z.toFixed(1)}) refused by ${blockers.join(', ')}`, {
+            blockers,
+            claims: [claim],
+            optional: true,
+          });
+        }
+        out.push({ x, z });
+        return { claims: [claim], label: `pole ${i} at (${x.toFixed(1)}, ${z.toFixed(1)})` };
+      }
+      return 'done';
+    },
+    back() {
+      while (out.length > 0 && out[out.length - 1] === null) out.pop();
+      out.pop();
+    },
+    forgo() {
+      out.push(null);
+    },
+    supply: () => 1,
+    reset() {
+      out.length = 0;
+    },
+  };
+}
 
 /**
  * Strings of fairy lights slung between wooden poles around the plaza.
@@ -93,13 +153,13 @@ export class FairyLights implements GameSystem {
   private readonly bulbMatrix = new Matrix4();
   private readonly scratchColour = new Color();
 
-  constructor(collision: CollisionWorld) {
+  /** Draws the poles the world phase decided ({@link fairyPoleBuilder}). */
+  constructor(collision: CollisionWorld, poles: readonly FairyPole[]) {
     this.group.name = 'fairy-lights';
     const rng = new Rng(0x11a17);
 
     // --- poles, arranged in a ring around the fountain plaza --------------
-    const poleCount = 10;
-    const ringRadius = 13.5;
+    const poleCount = FAIRY_POLE_COUNT;
     const poleHeight = 4.4;
     // A ring slot per bearing, `null` where a pole was skipped for standing on a
     // path. Kept sparse rather than compacted so a skip leaves a *gap* in the
@@ -127,7 +187,8 @@ export class FairyLights implements GameSystem {
     });
 
     for (let i = 0; i < poleCount; i += 1) {
-      const angle = (i / poleCount) * TAU;
+      const slot = poles[i];
+      if (!slot) continue;
       // Around the PLAZA, not the origin: the fountain is solver-placed now
       // (issue #241), and a ring about the origin marched its poles across
       // whatever paths happened to pass there — three seeds stranded NPC
@@ -135,9 +196,7 @@ export class FairyLights implements GameSystem {
       // that would stand on paving are skipped rather than nudged: a gap in
       // a fairy-light ring reads as a gateway, which is what a path through
       // it is.
-      const x = PLAZA.x + Math.cos(angle) * ringRadius;
-      const z = PLAZA.z + Math.sin(angle) * ringRadius;
-      if (isOnPath(x, z, 1.2)) continue;
+      const { x, z } = slot;
       const ground = terrainHeight(x, z);
 
       // Pole, knob and the string's anchor are three parts of one post, so all
@@ -162,7 +221,7 @@ export class FairyLights implements GameSystem {
       flat.set(x, ground + poleHeight - 0.25, z);
       placeOnSphere(flat, 0, anchor, scratchLean);
       ring[i] = anchor;
-      collision.addCircle(x, z, 0.28);
+      collision.addCircle(x, z, POLE_RADIUS);
     }
 
     // --- the strings themselves -------------------------------------------

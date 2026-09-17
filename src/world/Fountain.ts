@@ -96,13 +96,16 @@ const GLOW_DISTANCE = 27;
  */
 const WATER_HEIGHT = 0.82;
 
+/** The basin's rim radius — the ground the fountain claims, plus its rim collider's half. */
+export const FOUNTAIN_RIM_RADIUS = 4.2;
+
 export class Fountain implements GameSystem {
   readonly name = 'fountain';
   readonly group = new Group();
 
   /** Centre of the fountain in world space. */
   readonly centre: Vector3;
-  readonly rimRadius = 4.2;
+  readonly rimRadius = FOUNTAIN_RIM_RADIUS;
   /** World Y of the water surface **at the fountain's centre** — see {@link waterSurfaceY}. */
   readonly waterLevel: number;
 

@@ -26,7 +26,6 @@ import {
 import { RAIL_RACE_PLAN } from './plan';
 import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
 import type { Claim, GroundClaims } from '../../boot/groundClaims';
-import { RAIL_RACE_FEATURE } from './feature';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { placeRaceCart, seatRaceRider } from './seat';
@@ -487,9 +486,8 @@ export class RailRace implements GameSystem {
       walkPast: this.walkPastRing.track.barsLostToRoad,
       race: this.raceRing.track.barsLostToRoad,
     };
-    groundClaims.commit(RAIL_RACE_FEATURE, {
-      claims: [...this.supportClaims.walkPast, ...this.supportClaims.race],
-    });
+    // The claims are committed by the world phase's builder (`worldPhase.ts`),
+    // as the increment this ride is — not here, so `back()` can withdraw them.
     this.walkPastRing.track.registerCollision();
     for (const ring of [this.walkPastRing, this.raceRing]) {
       ring.track.setHazardLevel(this.activeLevel);

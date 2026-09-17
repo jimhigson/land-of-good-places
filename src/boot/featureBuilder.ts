@@ -53,19 +53,34 @@ export interface Refusal {
   readonly consumed?: readonly string[];
   /** The claims that were refused, so a blocker can be asked about the increment actually in the way. */
   readonly claims?: readonly Claim[];
+  /**
+   * **This increment may be left out.** A lamp slot nothing can clear, a
+   * fairy pole standing on paving: the park is whole without it, and leaving
+   * it out is what the old placers did silently. The driver still climbs the
+   * ladder — retry, then ask the blockers to move — and only then calls the
+   * builder's {@link FeatureBuilder.forgo} instead of unwinding, so a
+   * decoration never unwinds a structure.
+   */
+  readonly optional?: boolean;
   /** Why, for the trace and for the one remaining failure's message. */
   readonly reason: string;
 }
 
 export function refusal(
   reason: string,
-  by: { blockers?: readonly string[]; consumed?: readonly string[]; claims?: readonly Claim[] } = {},
+  by: {
+    blockers?: readonly string[];
+    consumed?: readonly string[];
+    claims?: readonly Claim[];
+    optional?: boolean;
+  } = {},
 ): Refusal {
   return {
     refused: true,
     blockers: by.blockers ?? [],
     consumed: by.consumed ?? [],
     ...(by.claims ? { claims: by.claims } : {}),
+    ...(by.optional ? { optional: true } : {}),
     reason,
   };
 }
@@ -105,13 +120,21 @@ export interface FeatureBuilder {
    * the stall placement to decide"*). Re-place the increment that owns
    * `claimIndex` (an index into this feature's committed claims) somewhere
    * every current claim allows — within this builder's own rules, carrying its
-   * own dependants — or refuse. It never displaces anything else, and the
+   * own dependants — and clear of `keepClearOf`, the claims the asker was
+   * refused (they are not in the registry: a refused increment is never
+   * committed), or refuse. It never displaces anything else, and the
    * driver never asks it twice for one refusal, so accommodation cannot
    * cascade. Which feature needs the space more is the driver's precedence:
    * a feature earlier in the fixed build order; a later one accommodates it.
    * Optional: a feature that cannot shift simply has none, and is unwound.
    */
-  accommodate?(claimIndex: number, attempt: number): Increment | Refusal;
+  accommodate?(claimIndex: number, attempt: number, keepClearOf: readonly Claim[]): Increment | Refusal;
+  /**
+   * Leave the increment just refused out and move on to the next one. Only
+   * called after a refusal marked {@link Refusal.optional}, and only once the
+   * ladder above it has failed. A builder without it is unwound instead.
+   */
+  forgo?(): void;
   /** Forget everything: the driver is unwinding through this feature's first increment. */
   reset(): void;
 }

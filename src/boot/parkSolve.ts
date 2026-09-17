@@ -24,6 +24,9 @@
  *    order than the refused one — the earlier feature needs the space more.
  *    Bounded: one ask per blocker per refusal, {@link MAX_ACCOMMODATIONS}
  *    per increment, never recursive;
+ * 2b. **forgo** — an increment its builder marked optional (a lamp slot, a
+ *    fairy pole) is left out once the two rungs above have failed, and the
+ *    builder moves on; a decoration never unwinds a structure;
  * 3. **unwind** — pop the ledger back to the most recent decision among the
  *    blockers (or the decisions the refused search consumed), `back` every
  *    increment after it in reverse, redraw that decision at its next attempt
@@ -54,6 +57,11 @@ import type { GroundClaims } from './groundClaims';
 import { isRefusal, type FeatureBuilder, type Increment, type Refusal } from './featureBuilder';
 import { resetPlanCaches } from './planCaches';
 
+const LIVE = ((): { write: (s: string) => unknown } | null => {
+  const nodeProcess = (globalThis as { process?: { env?: Record<string, string | undefined>; stderr?: { write: (s: string) => unknown } } }).process;
+  return nodeProcess?.env?.['LGP_TRACE_LIVE'] === '1' && nodeProcess.stderr ? nodeProcess.stderr : null;
+})();
+
 /** A coarse solver re-seeds on retry; its `supply()` is this, so a decision is unwound past after this many re-seeds. */
 export const COARSE_ATTEMPT_CAP = 6;
 /** Accommodations one increment may ask for across all its retries. */
@@ -80,6 +88,8 @@ export interface SolveStats {
   /** The most ledger entries popped in one unwind. */
   deepestUnwind: number;
   decisionZero: number;
+  /** Optional increments left out after the ladder failed to clear them. */
+  forgone: number;
   /** Highest attempt any decision was made at, by feature. */
   worstAttempt: Record<string, number>;
   /** Turns each feature has taken — the boot's per-phase work count. */
@@ -99,6 +109,7 @@ export class ParkSolve {
     unwinds: 0,
     deepestUnwind: 0,
     decisionZero: 0,
+    forgone: 0,
     worstAttempt: {},
     turnsByFeature: {},
   };
@@ -176,7 +187,7 @@ export class ParkSolve {
     this.note(
       `solved increments=${this.stats.increments} refusals=${this.stats.refusals} retries=${this.stats.retries} ` +
         `accommodations=${this.stats.accommodations}/${this.stats.accommodationRefusals}-refused unwinds=${this.stats.unwinds} ` +
-        `deepest-unwind=${this.stats.deepestUnwind} decision-zero=${this.stats.decisionZero}`,
+        `deepest-unwind=${this.stats.deepestUnwind} decision-zero=${this.stats.decisionZero} forgone=${this.stats.forgone}`,
     );
   }
 
@@ -217,6 +228,15 @@ export class ParkSolve {
     // Rung 2 — accommodate.
     if (this.accommodate(builder, outcome)) {
       this.nextAttempt.set(builder.name, 0);
+      return;
+    }
+    // An optional increment is left out rather than unwinding a structure for it.
+    if (outcome.optional && builder.forgo) {
+      builder.forgo();
+      this.stats.forgone += 1;
+      this.nextAttempt.set(builder.name, 0);
+      this.accommodationsSpent.set(builder.name, 0);
+      this.note(`forgone ${builder.name}#${this.placed.get(builder.name) ?? 0}: ${outcome.reason}`);
       return;
     }
     // Rungs 3 and 4 — unwind, to decision zero if need be.
@@ -269,7 +289,11 @@ export class ParkSolve {
       const section = this.claims.sectionOfClaim(name, claimIndex);
       const entry = entries.find((e) => e.section === section);
       if (!entry) continue;
-      const outcome = (blocker.accommodate as NonNullable<FeatureBuilder['accommodate']>)(claimIndex, entry.attempt + 1);
+      const outcome = (blocker.accommodate as NonNullable<FeatureBuilder['accommodate']>)(
+        claimIndex,
+        entry.attempt + 1,
+        refusal.claims ?? [],
+      );
       if (isRefusal(outcome)) {
         this.stats.accommodationRefusals += 1;
         this.note(`accommodate-refused ${name}#${section} for ${asker.name}: ${outcome.reason}`);
@@ -388,5 +412,8 @@ export class ParkSolve {
 
   private note(line: string): void {
     this.lines.push(line);
+    // `LGP_TRACE_LIVE=1`: print each event as it happens, for watching a long
+    // headless solve rather than reading its trace when it ends.
+    if (LIVE) LIVE.write(`park-solve~ ${line.slice(0, 220)}\n`);
   }
 }
