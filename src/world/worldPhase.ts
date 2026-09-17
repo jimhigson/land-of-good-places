@@ -155,7 +155,7 @@ export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims)
   const builders: FeatureBuilder[] = [
     fountainBuilder(claims),
     wallBuilder(claims, walls),
-    treeBuilder(collision, claims, () => walls, trees),
+    treeBuilder(collision, claims, () => walls, () => bushes, trees),
     bushBuilder(collision, claims, () => walls, () => trees, bushes),
     fairyPoleBuilder(claims, poles),
     lampBuilder(collision, claims, lamps),

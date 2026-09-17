@@ -662,6 +662,7 @@ export function treeBuilder(
   collision: CollisionWorld,
   claims: GroundClaims,
   walls: () => readonly (WallRun | null)[],
+  bushes: () => readonly BushDecision[],
   out: TreeDecision[],
 ): FeatureBuilder {
   let attempts = 0;
@@ -695,6 +696,14 @@ export function treeBuilder(
       if (Math.hypot(x - tree.x, z - tree.z) < TREE_REACH[tree.kind] + reach) return null;
     }
     if (!clearOfWalls(x, z, reach, TREE_WALL_GAP, runs())) return null;
+    // The bushes decide after the trees and keep their footprint out of every
+    // canopy's reach; a tree moved later must keep the same distance from
+    // them, by reach, which the registry (trunk claims) cannot see. Seed 11:
+    // a tree moved for a lamp landed 0.40 m over a clump, and the invariant
+    // "no bush grows out of a tree" caught it.
+    for (const bush of bushes()) {
+      if (Math.hypot(x - bush.x, z - bush.z) < reach + BUSH_COLLIDER) return null;
+    }
     if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) return null;
     if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind], reach)) return null;
     // The real world as it stands: fixed structures' colliders (a bridge ramp,
