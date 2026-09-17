@@ -109,6 +109,7 @@ import {
   spaceAt,
 } from '../src/world/spaces.ts';
 import { localToWorld } from '../src/world/spaceOrigins.ts';
+import { solveParkPlanNow } from '../src/world/parkPlan.ts';
 import {
   BUILDING_STEP_UP,
   GROUND_SPHERE_RADIUS,
@@ -628,6 +629,10 @@ for (const { x0, byGradient } of shippingElsewhere) {
 {
   const indoorSpaces = [SPACE_CASTLE_MALL, SPACE_CASTLE_HALL, SPACE_CASTLE_ROOF, SPACE_HOTEL_LOBBY,
     SPACE_HOTEL_BREAKFAST, SPACE_HOTEL_CORRIDOR, SPACE_HOTEL_SUITE, SPACE_HOTEL_GARDEN, SPACE_HOTEL_OCEAN];
+  // A castle floor stands at `BUILDING_BASE_Y`, which the park's driver decides
+  // (#667) — it is NaN until the plan is solved, and every castle probe would
+  // then compare against NaN and read as a refusal. Solve the canonical park.
+  solveParkPlanNow();
   let probed = 0;
   for (const space of indoorSpaces) {
     const origin = localToWorld(space, 3, 0, 3);
@@ -637,6 +642,11 @@ for (const { x0, byGradient } of shippingElsewhere) {
       continue;
     }
     const floorY = origin.y;
+    if (!Number.isFinite(floorY)) {
+      failed = true;
+      console.error(`FAIL: indoor reach control: ${space}'s floor height is ${floorY} — the park plan has not placed it, so nothing there is probed`);
+      continue;
+    }
     for (const [rise, offered] of [[BUILDING_STEP_UP - 0.02, true], [BUILDING_STEP_UP + 0.02, false]] as const) {
       const walk = new WalkSurfaces();
       const top = floorY + rise;
