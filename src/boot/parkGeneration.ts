@@ -272,13 +272,16 @@ export class ParkGeneration {
   get unitCounts(): Readonly<
     Record<'brief' | 'cruiserSearch' | 'cruiserFinish' | 'trainSearch' | 'slideSearch', number>
   > {
-    const turns = this.planModule?.parkSolveStats()?.turnsByFeature ?? {};
+    // Pieces: the yields each feature's advance made, not its turns — the
+    // count a boot that stops between frames can actually use.
+    const pieces = this.planModule?.parkSolveStats()?.piecesByFeature ?? {};
+    const finish = this.planModule?.parkPlanCruiserFinishPieces() ?? 0;
     return {
-      brief: turns['layout'] ?? 0,
-      cruiserSearch: turns['cruiser'] ?? 0,
-      cruiserFinish: 0,
-      trainSearch: turns['train'] ?? 0,
-      slideSearch: turns['slide'] ?? 0,
+      brief: pieces['layout'] ?? 0,
+      cruiserSearch: Math.max(0, (pieces['cruiser'] ?? 0) - finish),
+      cruiserFinish: finish,
+      trainSearch: pieces['train'] ?? 0,
+      slideSearch: pieces['slide'] ?? 0,
     };
   }
 
@@ -287,7 +290,7 @@ export class ParkGeneration {
   }
 
   get cruiserFinishSeamCount(): number {
-    return 0;
+    return this.planModule?.parkPlanCruiserFinishSeams() ?? 0;
   }
 
   advance(budgetMs: number): void {

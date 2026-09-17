@@ -15,17 +15,7 @@
  * builds (Jim, 6 Sep 2026: "fix it properly"). See
  * `docs/DESIGN-round-robin-generation.md`, "Totality, ruled and mechanised".
  */
-export const UNBUILT_BASELINE: Readonly<Record<number, string>> = {
-  0: 'rail.unsolvable',
-  1: 'crossing.nosite',
-  3: 'rail.unsolvable',
-  4: 'poi.nospot+rail.walkable',
-  6: 'anchor.reach:waterFight+rail.walkable',
-  8: 'rail.unsolvable',
-  9: 'rail.unsolvable',
-  10: 'rail.unsolvable',
-  12: 'crossing.nosite',
-};
+export const UNBUILT_BASELINE: Readonly<Record<number, string>> = {};
 
 /**
  * Times decision zero (a whole-park layout restart) was reached, per seed that
@@ -33,10 +23,19 @@ export const UNBUILT_BASELINE: Readonly<Record<number, string>> = {
  * too, until re-taken.
  */
 export const DECISION_ZERO_BASELINE: Readonly<Record<number, number>> = {
+  0: 1,
+  1: 0,
   2: 0,
+  3: 0,
+  4: 1,
   5: 0,
-  7: 0,
+  6: 0,
+  7: 2,
+  8: 1,
+  9: 0,
+  10: 0,
   11: 0,
+  12: 0,
   13: 0,
   14: 0,
   15: 0,

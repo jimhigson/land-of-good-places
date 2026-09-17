@@ -30,7 +30,7 @@ import {
   type OpenRouteBrief,
   RailRouteUnsolvable,
   type SolvedRailRoute,
-  solveRailRoute,
+  railRouteSearch,
 } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { Geo, worldYAtAltitude, worldYAtRadius } from '../geo';
@@ -1681,13 +1681,15 @@ export function slideRefusalMessage(refusal: SlideRefusal): string {
 }
 
 /** One attempt at a chute. Null if that attempt admits no route at all. */
-function solveChuteAt(
+function* solveChuteAt(
   attempt: SlideAttempt,
   seedSalt: number,
-): { route: SolvedRailRoute; complaint: string | null } | null {
+): Generator<number, { route: SolvedRailRoute; complaint: string | null } | null, void> {
   let route: SolvedRailRoute;
   try {
-    route = solveRailRoute(slideRouteBriefAt(attempt, seedSalt));
+    // The same solver the train yields through, a few pieces at a time —
+    // synchronously it was the boot's one 2.9 s lump.
+    route = yield* railRouteSearch(slideRouteBriefAt(attempt, seedSalt));
   } catch (error) {
     // A target that admits no route at all is a rung that did not work, not a
     // park that cannot be built — the next rung gets its turn.
@@ -1732,6 +1734,19 @@ export function planSlide(): PlannedSlide {
  * paths can move onto once the readers can live without a slide.
  */
 export function solveSlide(seedSalt = 0): PlannedSlide | SlideRefusal {
+  const steps = slideSearch(seedSalt);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * The same search, offered up one attempt at a time so the park's driver can
+ * stop between frames: `check:park-boot` measured the whole slide solve as one
+ * 2.9 s lump (0 pieces) when it ran synchronously inside a boot slice.
+ */
+export function* slideSearch(seedSalt = 0): Generator<number, PlannedSlide | SlideRefusal, void> {
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
   // trade; for a slide through a roller coaster it is not, so what the search
@@ -1750,7 +1765,8 @@ export function solveSlide(seedSalt = 0): PlannedSlide | SlideRefusal {
   let tried = 0;
   for (const decision of slideAttempts()) {
     tried += 1;
-    const attempt = solveChuteAt(decision, seedSalt);
+    yield tried;
+    const attempt = yield* solveChuteAt(decision, seedSalt);
     if (!attempt) {
       lastComplaint = `admitted no route ${describeSlideAttempt(decision)}`;
       continue;

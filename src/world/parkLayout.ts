@@ -318,11 +318,20 @@ export type LayoutRestartOutcome =
  * different park from the same seed.
  */
 export function solveLayoutRestart(restart: number): LayoutRestartOutcome {
+  const steps = layoutRestartSearch(restart);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/** The same solve, yielding once per candidate draw so a boot can stop between frames. */
+export function* layoutRestartSearch(restart: number): Generator<number, LayoutRestartOutcome, void> {
   const base = layoutRestartBase();
   let rungOneFired = 0;
   const attempts = new Map<string, number>();
   for (;;) {
-    const outcome = buildOnce(restart, attempts);
+    const outcome = yield* buildOnce(restart, attempts);
     if (outcome.kind === 'dead-end') {
       traceLine(`dead-end restart=${restart} entry=${outcome.entry} draws=${MAX_TRIES}`);
       return { kind: 'refused', reason: `entry ${outcome.entry} drew no legal candidate in ${MAX_TRIES} draws` };
@@ -809,7 +818,7 @@ type BuildOutcome =
   | { readonly kind: 'dead-end'; readonly entry: string }
   | { readonly kind: 'exhausted'; readonly entry: string; readonly supply: number };
 
-function buildOnce(restart: number, attempts: ReadonlyMap<string, number>): BuildOutcome {
+function* buildOnce(restart: number, attempts: ReadonlyMap<string, number>): Generator<number, BuildOutcome, void> {
   const placed: PlacedEntry[] = [];
   const byId = new Map<string, PlacedEntry>();
   const supply = new Map<string, number>();
@@ -839,6 +848,7 @@ function buildOnce(restart: number, attempts: ReadonlyMap<string, number>): Buil
 
     const candidates: Candidate[] = [];
     for (let attempt = 0; attempt < MAX_TRIES && candidates.length < SPREAD_CHOICES; attempt += 1) {
+      yield attempt;
       const drawn = drawCandidate(entry, near, rng);
       const valid = validate(entry, near, drawn.x, drawn.z, placed);
       if (valid === null) continue;

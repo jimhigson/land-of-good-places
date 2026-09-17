@@ -83,8 +83,13 @@ import { paintedNpcFaces, registerFacePaintStall } from '../entities/npc/wanderD
  */
 /** A view: the stall follows the layout the park's driver decided. */
 const FACE_PAINT_PLACEMENT: (typeof STALL_PLACEMENTS)['facePaint'] = lazyView(() => STALL_PLACEMENTS.facePaint);
-const [STALL_X, STALL_Z] = FACE_PAINT_PLACEMENT.position;
-const STALL_FACING = FACE_PAINT_PLACEMENT.facing;
+// Read inside functions only, never at module scope: a plan-view read while
+// this module is being imported forces the whole plan to solve synchronously
+// inside whatever boot slice imported it — measured by `check:park-boot` as
+// one 3031 ms lump (181 dropped frames) before these became functions.
+const stallX = (): number => FACE_PAINT_PLACEMENT.position[0];
+const stallZ = (): number => FACE_PAINT_PLACEMENT.position[1];
+const stallFacing = (): number => FACE_PAINT_PLACEMENT.facing;
 
 const STALL_WIDTH = 3.1;
 const STALL_DEPTH = 2.1;
@@ -162,9 +167,9 @@ export class FacePaintStall implements GameSystem {
   constructor(collision: CollisionWorld) {
     this.group.name = 'facePaintStall';
 
-    const ground = terrainHeight(STALL_X, STALL_Z);
-    this.group.position.set(STALL_X, ground, STALL_Z);
-    this.group.rotation.y = STALL_FACING;
+    const ground = terrainHeight(stallX(), stallZ());
+    this.group.position.set(stallX(), ground, stallZ());
+    this.group.rotation.y = stallFacing();
     // Back wall, counter, awning, posts, mirror and painter are all children of
     // this one group, so the whole booth leans as one rigid piece. Leaning any
     // part on its own would rotate it about its own centre and tear the booth
@@ -181,7 +186,7 @@ export class FacePaintStall implements GameSystem {
     addNpcDecalPoolInto(this.group, this.npcDecals);
     this.buildSparklePool();
 
-    registerFacePaintStall(STALL_X, STALL_Z, this.standX, this.standZ);
+    registerFacePaintStall(stallX(), stallZ(), this.standX, this.standZ);
   }
 
   /**
@@ -241,9 +246,9 @@ export class FacePaintStall implements GameSystem {
         {
           id: 'stall:facePaint',
           label: 'Face Painting!',
-          x: STALL_X,
-          y: terrainHeight(STALL_X, STALL_Z),
-          z: STALL_Z,
+          x: stallX(),
+          y: terrainHeight(stallX(), stallZ()),
+          z: stallZ(),
           pickRadius: REACH,
           standX: this.standX,
           standZ: this.standZ,
@@ -674,11 +679,11 @@ export class FacePaintStall implements GameSystem {
     const halfWidth = STALL_WIDTH / 2 + 0.1;
     const front = 1.0;
     const back = -1.0;
-    const sin = Math.sin(STALL_FACING);
-    const cos = Math.cos(STALL_FACING);
+    const sin = Math.sin(stallFacing());
+    const cos = Math.cos(stallFacing());
     const toWorld = (lx: number, lz: number): [number, number] => [
-      STALL_X + lx * cos + lz * sin,
-      STALL_Z - lx * sin + lz * cos,
+      stallX() + lx * cos + lz * sin,
+      stallZ() - lx * sin + lz * cos,
     ];
 
     const frontLeft = toWorld(-halfWidth, front);

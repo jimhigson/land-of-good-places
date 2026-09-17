@@ -54,8 +54,11 @@
  */
 
 import type { GroundClaims } from './groundClaims';
-import { isRefusal, type FeatureBuilder, type Increment, type Refusal } from './featureBuilder';
+import { isRefusal, type Advance, type FeatureBuilder, type Increment, type Refusal } from './featureBuilder';
 import { resetPlanCaches } from './planCaches';
+
+const now = (): number =>
+  typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
 
 const LIVE = ((): { write: (s: string) => unknown } | null => {
   const nodeProcess = (globalThis as { process?: { env?: Record<string, string | undefined>; stderr?: { write: (s: string) => unknown } } }).process;
@@ -92,8 +95,16 @@ export interface SolveStats {
   forgone: number;
   /** Highest attempt any decision was made at, by feature. */
   worstAttempt: Record<string, number>;
-  /** Turns each feature has taken — the boot's per-phase work count. */
+  /** Turns each feature has taken. */
   turnsByFeature: Record<string, number>;
+  /**
+   * Yields each feature's `advance` made — the pieces its work was offered up
+   * in, which is what a boot that must stop between frames can actually use
+   * (`check:park-boot` asserts floors on these, per phase).
+   */
+  piecesByFeature: Record<string, number>;
+  /** Wall-clock milliseconds spent inside each feature's `advance`, summed over turns. Headless diagnostics only. */
+  msByFeature: Record<string, number>;
 }
 
 export class ParkSolve {
@@ -112,6 +123,8 @@ export class ParkSolve {
     forgone: 0,
     worstAttempt: {},
     turnsByFeature: {},
+    piecesByFeature: {},
+    msByFeature: {},
   };
   private readonly builders: readonly FeatureBuilder[];
   private readonly index: ReadonlyMap<string, number>;
@@ -204,7 +217,19 @@ export class ParkSolve {
 
   private *turn(builder: FeatureBuilder): Generator<number, void, void> {
     const attempt = this.nextAttempt.get(builder.name) ?? 0;
-    const outcome = yield* builder.advance(attempt);
+    const began = now();
+    const steps = builder.advance(attempt);
+    let outcome: Advance;
+    for (;;) {
+      const step = steps.next();
+      if (step.done) {
+        outcome = step.value;
+        break;
+      }
+      this.stats.piecesByFeature[builder.name] = (this.stats.piecesByFeature[builder.name] ?? 0) + 1;
+      yield step.value;
+    }
+    this.stats.msByFeature[builder.name] = (this.stats.msByFeature[builder.name] ?? 0) + (now() - began);
     if (outcome === 'done') {
       this.finished.add(builder.name);
       this.note(`done ${builder.name} increments=${this.placed.get(builder.name) ?? 0}`);

@@ -620,8 +620,16 @@ export interface SceneryDecisions {
 const TREE_TRUNK_CLAIM = 0.6;
 /** Radius of the collider a clump registers, and so the ground it occupies. */
 const BUSH_COLLIDER = 0.85;
-/** How many spots a tree or bush tries when asked to step aside. */
-const RELOCATE_TRIES = 48;
+/**
+ * How many spots a tree or bush tries when asked to step aside. The scatter
+ * itself needs ~2500 attempts per accepted tree on a tight lawn (180 000 for
+ * 72), so 48 was no budget at all: on seed 11 both trees asked to move
+ * "found nowhere in 48 tries" and two lamp slots were forgone instead.
+ * Every try is a handful of distance checks; 4000 is a few milliseconds.
+ */
+const RELOCATE_TRIES = 4000;
+/** The first tries look near the old spot, so the park keeps its look. */
+const RELOCATE_NEAR_TRIES = 400;
 const TREE_MOVE_SALT = 0x7e3e0e ^ PARK_SEED;
 const BUSH_MOVE_SALT = 0xb0511e ^ PARK_SEED;
 const TARGET_TREES = 72;
@@ -785,8 +793,7 @@ export function treeBuilder(
         const angle = rng.range(0, TAU);
         let x: number;
         let z: number;
-        if (k < RELOCATE_TRIES / 2) {
-          // Nearby first: the park keeps its look.
+        if (k < RELOCATE_NEAR_TRIES) {
           const r = rng.range(4, 16);
           x = old.x + Math.cos(angle) * r;
           z = old.z + Math.sin(angle) * r;
@@ -906,7 +913,7 @@ export function bushBuilder(
         const angle = rng.range(0, TAU);
         let x: number;
         let z: number;
-        if (k < RELOCATE_TRIES / 2) {
+        if (k < RELOCATE_NEAR_TRIES) {
           const r = rng.range(3, 12);
           x = old.x + Math.cos(angle) * r;
           z = old.z + Math.sin(angle) * r;

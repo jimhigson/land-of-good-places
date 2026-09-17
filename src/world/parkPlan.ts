@@ -40,7 +40,7 @@ import { GroundClaims } from '../boot/groundClaims';
 import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveStats } from '../boot/parkSolve';
 import { decisionSeed, refusal, type Advance, type FeatureBuilder, type Refusal } from '../boot/featureBuilder';
 import { PARK_SEED } from './parkManifest';
-import { PARK_RESTARTS, solveLayoutRestart, type ParkLayout } from './parkLayout';
+import { PARK_RESTARTS, layoutRestartSearch, type ParkLayout } from './parkLayout';
 import { layoutRestartBase } from './parkWarp';
 import { bindCastlePlacement } from './building/layout';
 import {
@@ -53,7 +53,7 @@ import { cruiserRouteSearch } from './coaster/route';
 import { RailRouteUnsolvable, type SolvedRailRoute } from './rail/generate';
 import { TrainRoute, trainRouteSearch } from './train/route';
 import { planStations, type PlannedStation } from './train/plan';
-import { solveSlide, type PlannedSlide } from './slide/solve';
+import { slideSearch, type PlannedSlide } from './slide/solve';
 import { crossingSitesSearch, type SolvedCrossingSites } from './train/crossingPlanSolve';
 import { pathGraphSearch, resetPathsState, type PathGraph } from './paths';
 import { screenDrawnPathsForOffSiteCrossings } from './train/crossingPredicate';
@@ -314,6 +314,30 @@ function pinchedSample(
   return null;
 }
 
+/**
+ * The cruiser finish's yields, for the boot's piece counts: the **structural
+ * seams** are the yields that carry zero (a fixed property of
+ * `coasterProfileSearch`; `check:park-boot` asserts exactly eight), the rest
+ * are its vertical repair passes (`pass + 1`), which are data.
+ */
+var cruiserFinishSeams = 0;
+var cruiserFinishPieces = 0;
+function* countingSeams<T>(steps: Generator<number, T, void>): Generator<number, T, void> {
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+    cruiserFinishPieces += 1;
+    if (step.value === 0) cruiserFinishSeams += 1;
+    yield step.value;
+  }
+}
+export function parkPlanCruiserFinishSeams(): number {
+  return cruiserFinishSeams;
+}
+export function parkPlanCruiserFinishPieces(): number {
+  return cruiserFinishPieces;
+}
+
 function builders(): readonly FeatureBuilder[] {
   const layoutBuilder = coarse<ParkLayout>({
     name: 'layout',
@@ -321,7 +345,7 @@ function builders(): readonly FeatureBuilder[] {
     supply: PARK_RESTARTS,
     *solve(attempt) {
       const restart = layoutRestartBase() + attempt;
-      const outcome = solveLayoutRestart(restart);
+      const outcome = yield* layoutRestartSearch(restart);
       if (outcome.kind === 'layout') return outcome.layout;
       return refusal(`layout restart ${restart}: ${outcome.reason}`);
     },
@@ -347,7 +371,7 @@ function builders(): readonly FeatureBuilder[] {
         if (!(error instanceof RailRouteUnsolvable)) throw error;
         return refusal(`sky cruiser: ${timeless(error.message)}`, { consumed: ['layout'] });
       }
-      return yield* finishCruiserPlanSearch(route, start.rng);
+      return yield* countingSeams(finishCruiserPlanSearch(route, start.rng));
     },
     set(cruiser) {
       state.cruiser = cruiser;
@@ -383,7 +407,7 @@ function builders(): readonly FeatureBuilder[] {
     name: 'slide',
     deps: ['layout', 'cruiser', 'train'],
     *solve(attempt) {
-      const outcome = solveSlide(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'slide', 'solve', attempt));
+      const outcome = yield* slideSearch(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'slide', 'solve', attempt));
       if ('refused' in outcome) {
         return refusal(`ginormous slide: ${outcome.blocker}`, { consumed: ['cruiser', 'layout'] });
       }
@@ -528,6 +552,10 @@ function finish(): void {
         `accommodations=${stats.accommodations} unwinds=${stats.unwinds} deepest-unwind=${stats.deepestUnwind} ` +
         `decision-zero=${stats.decisionZero} worst-attempt=${JSON.stringify(stats.worstAttempt)}\n`,
     );
+    const ms = Object.entries(stats.msByFeature)
+      .map(([name, value]) => `${name}=${value.toFixed(0)}ms/${stats.piecesByFeature[name] ?? 0}p`)
+      .join(' ');
+    nodeProcess?.stderr?.write(`park-solve: seed=${PARK_SEED} time/pieces ${ms} cruiser-finish-seams=${cruiserFinishSeams}\n`);
   } catch {
     // Not Node: the trace is still on `parkSolveTrace()`.
   }
