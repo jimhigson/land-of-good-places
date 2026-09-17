@@ -172,6 +172,26 @@ waiver re-rolled seeds 11/131 onto worse parks; the lane window reaches 3 m
 onto the lawn (the grid walks lawn). `LGP_TRACE_LIVE=1` prints the driver's
 trace as it happens — use it for any seed over a minute.
 
+## `check:park-boot` (passes at 751ba550)
+
+The boot measured one 3067 ms lump inside a `parkPlan` slice. Causes, each
+fixed at its source and each visible only with an instrument: (1)
+`KeychainShop.ts`/`FacePaintStall.ts` read a plan view at module scope —
+the whole plan solved synchronously inside the slice that imported them
+(`_scan-plan-reads.mts` is at 0 sites now); (2) the slide's route solve, its
+finish, its door pre-check and the layout's doormat flood ran synchronously
+— all generators now (`slideSearch`, `finishSlideSearch`,
+`slideAttemptsSearch`, `layoutRestartSearch`, `doormatRefusalsSearch`,
+`NavGrid.floodFromSearch`), with synchronous wrappers kept for other
+callers. **Trap met on the way:** `doorStubIsClear` compares
+`chuteComplaint(points) === null`; turning that function into a generator
+made every door on every seed refuse for an hour, invisibly to tsc — keep
+`chuteComplaint` synchronous, slice `chuteComplaintSearch`. Piece counts are
+the driver's `piecesByFeature` (yields, not turns); the cruiser finish's
+structural seams are its zero-valued yields (8). `scripts/_probe-steps.mts`
+times every `next()` of the plan drive and names the slowest — use it before
+`check:park-boot` when a slice is over the ceiling. Worst slice now 21 ms.
+
 ## Not yet built (in order)
 
 - Stalls' `accommodate` (heavier shifts) — only if a seed needs it.
