@@ -1645,6 +1645,24 @@ let slideAttemptsMemo: readonly SlideAttempt[] | null = null;
 export function slideAttempts(): readonly SlideAttempt[] {
   return (slideAttemptsMemo ??= slideAttemptsNow());
 }
+/**
+ * The same offers, one door per piece: each door's stubs are judged against
+ * the towers and the Sky Cruiser (hundreds of short chutes), and all seven
+ * doors in one step was the boot's worst single step (58.8 ms).
+ */
+export function* slideAttemptsSearch(): Generator<number, readonly SlideAttempt[], void> {
+  if (slideAttemptsMemo) return slideAttemptsMemo;
+  const found: SlideAttempt[] = [];
+  let door = 0;
+  for (const doorCentre of DOOR_OFFER_CENTRES) {
+    door += 1;
+    yield door;
+    if (doorPoses(doorCentre).length === 0) continue;
+    for (const desiredLength of DESIRED_LENGTH_LADDER) found.push({ doorCentre, desiredLength });
+  }
+  slideAttemptsMemo = found;
+  return found;
+}
 registerPlanCache(() => {
   slideAttemptsMemo = null;
 });
@@ -1696,7 +1714,7 @@ function* solveChuteAt(
     if (error instanceof RailRouteUnsolvable) return null;
     throw error;
   }
-  return { route, complaint: unrideableComplaint(route) };
+  return { route, complaint: yield* unrideableComplaintSearch(route) };
 }
 
 /**
@@ -1760,10 +1778,10 @@ export function* slideSearch(seedSalt = 0): Generator<number, PlannedSlide | Sli
   // it is not describing — and it arrived the identical way, by a second copy
   // of a condition drifting from the first. There is now one owner and nothing
   // to keep in step.
-  let lastComplaint =
-    slideAttempts().length === 0 ? NO_CLEAR_DOOR : 'never solved a route at all';
+  const attempts = yield* slideAttemptsSearch();
+  let lastComplaint = attempts.length === 0 ? NO_CLEAR_DOOR : 'never solved a route at all';
   let tried = 0;
-  for (const decision of slideAttempts()) {
+  for (const decision of attempts) {
     tried += 1;
     yield tried;
     const attempt = yield* solveChuteAt(decision, seedSalt);
@@ -1771,7 +1789,7 @@ export function* slideSearch(seedSalt = 0): Generator<number, PlannedSlide | Sli
       lastComplaint = `admitted no route ${describeSlideAttempt(decision)}`;
       continue;
     }
-    if (attempt.complaint === null) return finishSlidePlan(attempt.route);
+    if (attempt.complaint === null) return yield* finishSlideSearch(attempt.route);
     lastComplaint = `${attempt.complaint} (${describeSlideAttempt(decision)})`;
   }
   return { refused: true, attemptsTried: tried, blocker: lastComplaint };
@@ -1788,7 +1806,21 @@ export function* slideSearch(seedSalt = 0): Generator<number, PlannedSlide | Sli
  * sequence means there is no second one to drift.
  */
 export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
+  const steps = finishSlideSearch(route);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * The finish in pieces: the chute's points, the rideability judge (which
+ * walks every point against the cruiser), the exit and the door, each its own
+ * piece — `check:park-boot` measured the finish as one 80 ms slice.
+ */
+export function* finishSlideSearch(route: SolvedRailRoute): Generator<number, PlannedSlide, void> {
   const points = chutePoints(route);
+  yield 0;
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
   // trade; for a slide through a roller coaster it is not, so what the search
@@ -1802,7 +1834,8 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
   // it is not describing — and it arrived the identical way, by a second copy
   // of a condition drifting from the first. There is now one owner and nothing
   // to keep in step.
-  const complaint = unrideableComplaint(route);
+  const complaint = yield* unrideableComplaintSearch(route, points);
+  yield 0;
   if (complaint) {
     throw new Error(
       `the ginormous slide never solved to a chute a child could ride: ` +
@@ -1812,6 +1845,7 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
   }
 
   const { exitX, exitZ } = planExit();
+  yield 0;
 
   // Where the chute actually goes through the wall, read back off the solved
   // route. Asking the route rather than re-deriving the pose is the whole
@@ -1868,6 +1902,18 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
  * than the sampled polyline the search uses for speed.
  */
 export function unrideableComplaint(route: SolvedRailRoute): string | null {
+  const steps = unrideableComplaintSearch(route);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/** The same judge, yielding every {@link JUDGE_PIECE} chute points. `points` may be handed in when the caller already has them. */
+export function* unrideableComplaintSearch(
+  route: SolvedRailRoute,
+  points?: readonly Vector3[],
+): Generator<number, string | null, void> {
   if (route.length > MAX_RIDEABLE_LENGTH) {
     const start = { x: 0, z: 0 };
     route.pointAt(0, start);
@@ -1881,7 +1927,9 @@ export function unrideableComplaint(route: SolvedRailRoute): string | null {
     );
   }
 
-  return chuteComplaint(chutePoints(route));
+  const chute = points ?? chutePoints(route);
+  yield 0;
+  return yield* chuteComplaintSearch(chute);
 }
 
 /**
@@ -1891,10 +1939,25 @@ export function unrideableComplaint(route: SolvedRailRoute): string | null {
  * rather than a copy of it.
  */
 function chuteComplaint(points: readonly Vector3[]): string | null {
+  // Synchronous on purpose: `doorStubIsClear` compares this with `null`, and a
+  // generator object never is — for an hour every door on every seed was
+  // refused that way, invisibly to tsc and visibly only in the live trace.
+  const steps = chuteComplaintSearch(points);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+/** Chute points judged per piece of the rideability walk. */
+const JUDGE_PIECE = 32;
+function* chuteComplaintSearch(points: readonly Vector3[]): Generator<number, string | null, void> {
+  let judged = 0;
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;
   let worstAt: Vector3 | null = null;
   for (const point of points) {
+    judged += 1;
+    if (judged % JUDGE_PIECE === 0) yield judged;
     const near = cruiser.nearestPoint(point.x, point.z);
     const horizontal = Math.hypot(near.x - point.x, near.z - point.z);
     const vertical = Math.abs(near.y - point.y);

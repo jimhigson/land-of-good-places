@@ -340,7 +340,11 @@ export function* layoutRestartSearch(restart: number): Generator<number, LayoutR
       traceLine(`exhausted restart=${restart} entry=${outcome.entry} supply=${outcome.supply}`);
       return { kind: 'refused', reason: `entry ${outcome.entry} exhausted its ${outcome.supply} candidates` };
     }
-    const refusals = doormatRefusals(outcome.placed);
+    // Its own piece: probing fourteen doormats' reachability is tens of
+    // milliseconds, and it sat in the same step as the last candidate draw.
+    yield 0;
+    const refusals = yield* doormatRefusalsSearch(outcome.placed);
+    yield 0;
     if (refusals.length > 0 && rungDisabled()) {
       for (const refusal of refusals) {
         ignoredRefusals.push(refusal);
@@ -443,6 +447,15 @@ export interface LayoutRefusal {
  * would arm every one of these hooks at once; that is the thing to check for.
  */
 function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
+  const steps = doormatRefusalsSearch(placed);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/** The same probe, one piece for the grid and one per doormat — it was the boot's 52 ms step. */
+function* doormatRefusalsSearch(placed: readonly PlacedEntry[]): Generator<number, LayoutRefusal[], void> {
   const forced = forcedRefusal();
   const columns = columnsOf(placed);
   const flat = (): number => 0;
@@ -462,8 +475,10 @@ function doormatRefusals(placed: readonly PlacedEntry[]): LayoutRefusal[] {
   // from that world, never from this one. The trace's `probed-alone` count
   // is how many took the second look.
   const strict = strictGrid(placed);
+  yield 0;
   let probedAlone = 0;
   for (const entry of placed) {
+    yield 0;
     const forcedHere = forced !== null && forced.entry === entry.id && forced.remaining > 0;
     if (!forcedHere && strict && standsReachably(strict.grid, strict.reachable, entry, flat)) continue;
     probedAlone += 1;
