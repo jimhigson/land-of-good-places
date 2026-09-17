@@ -12,3 +12,10 @@ pushed onto `feat/procgen-on-sphere` (the PR #667 head).
 
 ## Next
 - Rerun CI; find any later Checks red; timeouts on Entrance road / Every seed builds.
+
+## STOPPED (Jim halted all work)
+Stopped after pushing 6ee0c95c to `feat/procgen-on-sphere`. Nothing merged.
+Not yet done: confirm the rest of Checks on CI past deck-fallthrough; the
+Entrance road / Every seed builds timeouts (seed 7 ~1003 s, railway dead-end
+searches) untouched; procgen/coplanar name-diff not re-verified; #667 merge,
+sphere-combined -> main PR, deploy, production verification all not started.
