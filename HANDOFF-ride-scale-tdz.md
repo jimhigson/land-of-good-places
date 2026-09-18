@@ -255,3 +255,26 @@ step 48 `check:rail-race` (43 s), which is the step most exposed to moving the
 ride's constants, and step 32 `check:park` (24 s).
 
 Per-step results: `/tmp/rest-results.txt`; per-step logs `/tmp/step-NN.log`.
+
+## `test:procgen` — identical failure set, by name
+
+Both runs in their own worktrees, same command:
+
+```
+branch (fix/ride-scale-tdz)   Tests  55 failed | 636 passed (691)   exit 1
+base   (ae20b9fc)             Tests  55 failed | 636 passed (691)   exit 1
+
+diff of failing test NAMES: empty — none added, none fixed
+```
+
+The count matching is not the evidence — a count cannot see a swap. The names
+were extracted from both logs and diffed, and the diff is empty.
+
+**Control on that extraction**, because an empty diff is also what "extracted
+nothing, twice" looks like: the extractor captured **55** names carrying a
+`test/` path, against the **55** failures the reporter announced. They agree, so
+the diff was over the real set. Sample: `test/procgen/seed-11.test.ts > seed 11
+> every Rail Race duck bar stands over a real trestle leg`.
+
+These 55 are the pre-existing instrument-fault reds `HANDOFF-backtracking.md`
+already records at 55.
