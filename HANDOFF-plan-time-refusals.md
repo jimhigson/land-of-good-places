@@ -139,6 +139,15 @@ input, watch the finding come back, then restore:
 Paste the geometry each was proved against alongside the transcript — a
 red-run transcript goes stale (CLAUDE.md).
 
+**The control harness itself has been controlled.** It is
+`<scratchpad>/control.sh <on|off> <fence|manifest|outside>`, and all three
+were applied and reverted with `git diff --stat` empty afterwards — an
+instrument that leaves residue in the tree would poison every run after it.
+The `manifest` one was additionally checked to hit **waterFight**'s
+`boundingRadius: 19` and not **dodgems**', which carries the identical
+number six lines later; anchored on the following `id: 'dodgems'`, and the
+diff confirms dodgems' 19 is untouched.
+
 ## The shape of the deliverable if the residue is gone
 
 The brief anticipates this case. Then the work is:
