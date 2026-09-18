@@ -1,0 +1,156 @@
+# Handoff — the RIDE_SCALE / NOMINAL_OUTSET temporal dead zone
+
+**Model: Opus 5 (1M context), the Engineer default; the Overseer did not
+override it.** Branch `fix/ride-scale-tdz`, PR against
+`feat/procgen-on-sphere` (base commit `ae20b9fc`), worktree
+`.claude/worktrees/ride-scale-tdz`. Do not merge. Never the shared checkout;
+never `git stash`; kill node by PID, filtered on working directory.
+
+## The task
+
+`feat/procgen-on-sphere`'s `check` chain stopped at step 24 of 67, so steps
+25–67 had never been run on it. Two of the newly-visible failures were this
+slice, and they are one bug:
+
+```
+check:cart-shape     ReferenceError: Cannot access 'RIDE_SCALE' before initialization
+                       at src/world/railRace/hazards.ts:171
+check:ground-claims  (same)
+```
+
+Both reproduce on `ae20b9fc`, so neither is anyone's current work.
+
+## Root cause, and why the obvious fix is the wrong one
+
+`hazards.ts` computed `DUCK_CLEARANCE` at module scope from `RIDE_SCALE`,
+imported from `./route`; `route.ts` imports `parkLayout`, which comes back
+round to `hazards.ts`. Inside an import cycle there is no "first" module —
+evaluation order is a post-order walk from whichever side the entry point
+reaches — so a module-scope const computed from a binding imported out of the
+same cycle can be evaluated while that binding is still in its temporal dead
+zone. It fails for one set of entry points and works for every other.
+
+**Fixed structurally, not one const at a time.** The ride's dimensional
+literals moved verbatim into `src/world/railRace/dimensions.ts`, which
+**imports nothing**: `LANE_COUNT`, `PLAYER_LANE`, `NOMINAL_OUTSET`,
+`CART_WIDTH_AT_PARK_SCALE`, `LANE_SPACING_AT_PARK_SCALE`, `RIDE_SCALE`,
+`BASE_HEIGHT`. A leaf is always evaluated before anything importing it,
+whatever the entry point and whatever order the import statements are in.
+
+**Two things measured, both load-bearing, both easy to get wrong:**
+
+1. **A re-export does not escape the cycle.** `export { RIDE_SCALE } from
+   './dimensions'` in `route.ts` still leaves a *module-scope* reader in the
+   dead zone — the indirect binding resolves through `route.ts`, whose own
+   imports are walked first. Proved with a four-module experiment before
+   relying on it. So a module-scope reader **must import `./dimensions`
+   directly**. `route.ts` re-exports them anyway, which is why no other file
+   changed: everyone else reads them inside function bodies, which do not run
+   at import time.
+2. **Import statement order does not matter** once the constant is in a leaf.
+   Also proved, both orders and both entry sides.
+
+Making each offending const lazy was the other option and is worse: it fixes
+one const and pushes laziness onto its callers. `ENTRANCE_ROAD_OUTSET` is the
+worked example — eager, reading an eager thing, reading the leaf.
+
+`DUCK_CLEARANCE` was **deleted**, not made lazy. Nothing read it (only prose,
+now repointed). It held `DUCK_CLEARANCE_AT_PARK_SCALE * RIDE_SCALE` while
+`track.ts` derives every ring's clearance from that ring's own scale and says
+so in as many words — a second definition of one thing whose only cost was
+needing `RIDE_SCALE` at module scope.
+
+## The instrument
+
+`scripts/scan-cycle-tdz.mts` (committed, not wired into any chain — it is an
+instrument, `--strict` makes it exit 1). Walks `src/`'s **value**-import graph
+(a type-only edge is erased and cannot cycle), Tarjan for the
+strongly-connected components, then lists every module-scope initialiser
+reading a binding from its own component. Function/arrow/class initialisers
+are skipped — those bodies do not run at import time.
+
+Static on purpose: the crash only happens on the entry orders that reach the
+cycle from the wrong side, so running a check and watching it pass proves
+nothing about the others.
+
+```
+pnpm exec node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/scan-cycle-tdz.mts
+```
+
+It predicted `supportGround.ts` before `check:cart-shape` got far enough to
+hit it. **On the base it found 10 sites in a largest cycle of 30 modules; on
+this branch, 7 in a largest cycle of 26:**
+
+```
+415 modules, 3 value-import cycle(s) (largest 26 modules).
+7 module-scope initialiser(s) reading a binding from their own cycle:
+  src/world/coaster/plan.ts:70              COASTER_PLANS           <- planPart                     [src/world/parkPlan.ts]
+  src/world/paths.ts:1244                   RAIL_CLAMP_DISTANCE     <- RAIL_CORRIDOR_CLEARANCE_PLAN [src/world/train/plan.ts]
+  src/world/paths.ts:4953                   RAIL_STATION_GAP_MARGIN <- STATION_GAP                  [src/world/train/fence.ts]
+  src/world/train/bridgeFit.ts:120          SITE_RAMP_FLOOR         <- MIN_RAMP_RUN                 [src/world/train/bridgeFootprint.ts]
+  src/world/train/bridgeFit.ts:123          SITE_RAMP_IDEAL         <- BRIDGE_RAMP_GRADIENT         [src/world/train/bridgeFootprint.ts]
+  src/world/train/crossingPlanSolve.ts:268  corridorBlocked         <- railCorridorBlocked          [src/world/train/bridgeFit.ts]
+  src/world/train/plan.ts:430               TRAIN_PLAN              <- planPart                     [src/world/parkPlan.ts]
+```
+
+Three went, for two fixes. `hazards.ts`’s `DUCK_CLEARANCE` and
+`supportGround.ts`’s `SUPPORT_GROUND_BAND` are the two that were fixed;
+`roadRoute.ts:172`’s `ENTRANCE_ROAD_OUTSET <- outsetClearOfSupports` fell off
+for free, because `supportGround.ts` no longer imports `./route` and so is no
+longer in the cycle at all. That is the shape of the fix working: moving a
+literal to a leaf does not merely rescue its reader, it can cut the cycle.
+
+The two `planPart` sites are the `lazyView` idiom and are believed safe —
+`planPart` is reached before `parkPlan.ts`’s `let`s exist, which is exactly
+why that module’s state is `var` (HANDOFF-backtracking rule 2). **The other
+five are live risks of the same shape as the two fixed here**: each is one new
+import edge away from crashing, and none crashes today only because of where
+the current entry points happen to enter their cycle. They were left alone
+because they are not in this slice; the fix for each is the same move to a
+leaf.
+
+## `check:ground-claims` had a second failure behind the crash
+
+With the TDZ gone it runs to the end for the first time on this branch, and
+probe 2 fouled honestly:
+
+```
+the registry on the built park holds features [layout, cruiser, train, slide,
+crossings, pathGraph, road, fountain, walls, trees, bushes, lamps, railRace]
+— the production placers, in commit order, are exactly [road, railRace]
+```
+
+That is the backtracking rework: every feature now claims ground through a
+`FeatureBuilder` in one of two `ParkSolve` drivers. Widened deliberately, as
+the probe's own message asks. It is now a **subsequence** test — no undeclared
+placer, and declared ones in declared order — because a placer that
+legitimately places nothing commits nothing (`fairyLights` builds 0 poles on
+the canonical seed, pre-existing, true on the base). It therefore cannot see a
+placer that has silently stopped claiming, so it **names those on every run**:
+`13 of 14 declared placers committed ground…; this probe asserts NOTHING about
+[fairyLights]`.
+
+Both clauses proved red, against that registry: dropping `'lamps'` from the
+roster → `feature(s) [lamps] that are not declared placers`; swapping
+`'walls'`/`'trees'` → `committed out of the declared build order: [trees]`.
+
+## State
+
+- `check:cart-shape` green, exit 0, real numbers (hopper ±0.5500 vs
+  `CART_WIDTH_AT_PARK_SCALE`/2 0.5500; wheel radius 0.3840; no NaN/Infinity).
+- `check:ground-claims` green, exit 0, real numbers (143/143 corridor runs,
+  worst drawn vertex 4.08e-6 m outside its claim against 0.001 slack).
+- `tsc --noEmit` exit 0.
+- `package.json` **not touched**: 126 scripts before and after, added `[]`,
+  removed `[]`, parsed not grepped. `check` chain is 67 steps.
+- Full `check` chain, `test:procgen` name-diff, seed sweep: see below /
+  in progress.
+
+## Not done
+
+- The five remaining at-risk constants above (the seven listed, less the two
+  `planPart` lazyView sites).
+- `scan-cycle-tdz.mts` is not wired into any chain. It probably should be
+  (`--strict`, after the two `planPart` sites are understood or allow-listed),
+  but `checks.yml` is at ~25 min against a 30 min cap, so it belongs beside the
+  chain rather than in it.
