@@ -13,6 +13,12 @@ import { lazyView } from '../boot/lazyView';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
+import {
+  addBoothCollision,
+  KEYCHAIN_BOOTH_BOX,
+  KEYCHAIN_STALL_DEPTH,
+  KEYCHAIN_STALL_WIDTH,
+} from '../minigames/boothFootprint';
 import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, PLAYER_RADIUS } from '../core/constants';
 import {
   boxCorners,
@@ -241,8 +247,9 @@ const stallZ = (): number => KEYCHAIN_PLACEMENT.position[1];
 const stallFacing = (): number => KEYCHAIN_PLACEMENT.facing;
 
 /** A garden cart, not a walk-in booth — smaller than the face-paint counter. */
-const STALL_WIDTH = 2.1;
-const STALL_DEPTH = 1.5;
+/** The booth's body, owned by `boothFootprint.ts` — the collider, the claim and the mesh all read the same two numbers. */
+const STALL_WIDTH = KEYCHAIN_STALL_WIDTH;
+const STALL_DEPTH = KEYCHAIN_STALL_DEPTH;
 /** How close counts as "at the stall" for the proximity/interact check. */
 const REACH = 3.1;
 
@@ -1457,20 +1464,14 @@ export class KeychainShop implements GameSystem {
     this.facingTable = Math.atan2(rackCentreX - this.viewStandX, rackCentreZ - this.viewStandZ);
   }
 
+  /**
+   * The booth's four walls, through `boothFootprint.ts` — the one owner of
+   * every booth's box, its rotation and its registration, so the collider a
+   * child bumps into and the claim the `stalls` feature builder commits are
+   * built from the same answer.
+   */
   private buildCollision(collision: CollisionWorld): void {
-    const halfWidth = STALL_WIDTH / 2 + 0.08;
-    const front = STALL_DEPTH / 2 + 0.08;
-    const back = -STALL_DEPTH / 2 - 0.08;
-
-    const frontLeft = this.toWorld(-halfWidth, front);
-    const frontRight = this.toWorld(halfWidth, front);
-    const backLeft = this.toWorld(-halfWidth, back);
-    const backRight = this.toWorld(halfWidth, back);
-
-    collision.addWall(frontLeft[0], frontLeft[1], frontRight[0], frontRight[1], 0.25);
-    collision.addWall(backLeft[0], backLeft[1], backRight[0], backRight[1], 0.25);
-    collision.addWall(frontLeft[0], frontLeft[1], backLeft[0], backLeft[1], 0.25);
-    collision.addWall(frontRight[0], frontRight[1], backRight[0], backRight[1], 0.25);
+    addBoothCollision(collision, stallX(), stallZ(), stallFacing(), KEYCHAIN_BOOTH_BOX);
   }
 
   /**
