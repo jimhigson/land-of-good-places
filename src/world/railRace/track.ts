@@ -960,7 +960,7 @@ export function buildRailRaceTrack(
     } as const;
     // Leant onto the sphere here, at draw time, and nowhere earlier: the tree
     // the search, the claims and the road rule read is the flat one.
-    for (const piece of trestleStruts(leanTrestleTree(spot.tree, drawnTree))) {
+    for (const piece of trestleStruts(leanTrestleTree(route, spot.at, spot.tree, drawnTree))) {
       const mesh = meshes[piece.part];
       const slot = piece.part === 'legs' ? index : piece.part === 'branches-lower' ? lowerIndex++ : upperIndex++;
       strut(mesh, slot, piece.from, piece.to);
@@ -1007,7 +1007,7 @@ export function buildRailRaceTrack(
   // form the draw loop stood up.
   const registerCollision = (): void => {
     for (const spot of spots) {
-      const drawn = leanTrestleTree(spot.tree, drawnTree);
+      const drawn = leanTrestleTree(route, spot.at, spot.tree, drawnTree);
       addPostCollider(collision, drawn.trunkFoot, drawn.trunkTop, ringSizeVsRace);
     }
   };
@@ -1453,7 +1453,8 @@ interface TrestleSpot {
  * straight radial trunk 100 m out has a 2–4 m world-`xz` offset between foot
  * and top; that is the planet, not a lean, and reading it as one would refuse
  * every slot on the ring. {@link leanTrestleTree} is the drawn form, and the
- * invariant maps drawn struts back with `unplaceFromSphere` before comparing.
+ * invariant maps drawn struts back with the ring's own `unlean` before
+ * comparing — the exact inverse of the one turn the tree was drawn through.
  *
  * `y` in this tree is height in the chart: `terrainHeight`'s value, the same
  * number `placeOnSphere` takes as its `flat.y`.
@@ -1561,14 +1562,26 @@ function trunkRise(tree: TrestleTree): { readonly height: number; readonly lean:
  * Only the draw loop and the collider read this form; the search, the claims
  * and the road rule read the flat tree — see {@link TrestleTree} for why.
  */
-function leanTrestleTree(flat: TrestleTree, into: TrestleTree): TrestleTree {
+function leanTrestleTree(
+  route: RailRaceRoute,
+  at: number,
+  flat: TrestleTree,
+  into: TrestleTree,
+): TrestleTree {
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-    placeOnSphere(flat.laneTops[lane]!, 0, into.laneTops[lane]!, treeSpin);
+    route.lean(at, flat.laneTops[lane]!, into.laneTops[lane]!);
   }
   for (let half = 0; half < 2; half += 1) {
-    placeOnSphere(flat.forkNodes[half]!, 0, into.forkNodes[half]!, treeSpin);
+    route.lean(at, flat.forkNodes[half]!, into.forkNodes[half]!);
   }
-  placeOnSphere(flat.trunkTop, 0, into.trunkTop, treeSpin);
+  route.lean(at, flat.trunkTop, into.trunkTop);
+  // **The foot is put on the ground, not on the station's plane.** Every other
+  // node is a point in the air and wants the one rigid turn; the foot is the
+  // one node that has to touch the terrain it was found clear ground on, and
+  // the station's plane leaves the sphere behind by `u^2 / 2R` — up to 0.18 m
+  // out at the race ring's own half-span, which is a post visibly floating.
+  // `placeOnSphere` on a height-0 point is the identity, so this is exactly
+  // where `trestleSpots` found it.
   placeOnSphere(flat.trunkFoot, 0, into.trunkFoot, treeSpin);
   into.ground = flat.ground;
   return into;
