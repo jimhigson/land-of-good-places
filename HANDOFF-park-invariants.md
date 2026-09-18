@@ -357,3 +357,37 @@ time. `node --cpu-prof` on an idle box is the next step, and the honest state is
 **the regression is real, disclosed, and unfixed**. It is not a reason to go
 back to judging control points: that is what drew a child 1.7 m through a
 turret and within 3 cm of the Sky Cruiser.
+
+## `check:park` on all sixteen pool seeds — 16/16 green
+
+Run on the rebased head (`76224f91` base), one process at a time. The pool is
+the set that has to be good, and `test:procgen`'s five seeds are not it — this
+is the run that covers the rest.
+
+| seed | time | attractions routed | waypoints connected | |
+|---|---|---|---|---|
+| 0 | 10 s | 19/19 | 250/250 | ok |
+| 1 | 7 s | 19/19 | 229/229 | ok |
+| 2 | 10 s | 19/19 | 231/231 | ok |
+| 3 | 53 s | 19/19 | 240/240 | ok |
+| 4 | 47 s | 19/19 | 260/260 | ok |
+| 5 | 18 s | 19/19 | 236/236 | ok |
+| 6 | 8 s | 19/19 | 241/241 | ok |
+| 7 | 269 s | 19/19 | 263/263 | ok |
+| 8 | 10 s | 19/19 | 295/295 | ok |
+| 9 | 7 s | 19/19 | 242/242 | ok |
+| 10 | 9 s | 19/19 | 262/262 | ok |
+| 11 | 7 s | 19/19 | 314/314 | ok |
+| 12 | 7 s | 19/19 | 288/288 | ok |
+| 13 | 7 s | 19/19 | 251/251 | ok |
+| 14 | 10 s | 19/19 | 216/216 | ok |
+| 15 | 24 s | 19/19 | 268/268 | ok |
+
+**16 of 16 exit 0**, every attraction routed from the entrance, **every
+waypoint connected on every seed**, all six of `check:park`'s own invariants
+holding throughout. Nothing was stranded by the path-graph, slide-route or
+castle-frame changes, and the larger slide search did not land any seed on a
+route that breaks the park.
+
+Seed 7 is the slow one at 269 s (it was ~1000 s before #670); seeds 3 and 4 at
+53 s and 47 s; the other thirteen are 6-24 s.
