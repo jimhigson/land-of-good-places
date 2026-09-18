@@ -154,3 +154,29 @@ roster → `feature(s) [lamps] that are not declared placers`; swapping
   (`--strict`, after the two `planPart` sites are understood or allow-listed),
   but `checks.yml` is at ~25 min against a 30 min cap, so it belongs beside the
   chain rather than in it.
+
+## The chain's step-24 blocker is `check:slide-rider`, and it is not the TDZ
+
+Running the whole chain on this branch stops at **step 24 of 67**, which is the
+number the brief carried — but the step that stops it is `check:slide-rider`,
+not either of the two import crashes. Those are steps 48 (`check:cart-shape`)
+and 64 (`check:ground-claims`), which the chain had never reached.
+
+```
+check:slide-rider FAILED
+  - the child's body is 0.13% of the frame on beat 1's trackside camera
+    (ridden frame 240), against 0.40% required — 1 of 6 trackside samples are
+    under it. The trackside camera is the one that has to show her whole self;
+    if it cannot, nothing in this ride does
+```
+
+**Pre-existing, proved by running it on the base commit** `ae20b9fc` in its own
+detached worktree: exit 1, and byte-identical numbers — beat 1 trackside frame
+240, head 1592 px, body 42 px, 0.13% of frame, 1 of 6 samples under 0.40%. The
+other five trackside samples pass (2.58, 2.18, 1.22, 2.75, 1.53%). Nothing in
+this branch touches the slide or its cameras.
+
+It is a real red check and someone has to own it, but it is a visible framing
+judgement about the ginormous slide's trackside camera — a different slice from
+this one. **It blocks every step after 24**, so the remaining steps were run
+individually to enumerate what else is behind it; results below.
