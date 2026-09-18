@@ -166,6 +166,29 @@ returns **nothing**. Not one of the three residue classes appears on any seed.
 
 (The seconds are contended — see the warning above. The verdicts are not.)
 
+## CONTROL 1 DID NOT FIRE — read before trusting the green sweep
+
+`control.sh on fence` was applied (the run's own transcript shows
+`src/world/train/fence.ts | 2 +-` before the sweep started, so the mutation
+was really in the tree), and **seed 9 still passed, `rc=0`, in 11 s**.
+
+Reverting the `deckSpanAt` guard does **not** reproduce `rail.walkable` at
+this head. That is CLAUDE.md's "a red-run transcript is a measurement, and
+measurements go stale" happening in front of us: the note in `fence.ts` was
+written against a different park (pre-sphere geometry), and the mutation no
+longer reaches the case on the parks these seeds now build.
+
+**Consequence: a green sweep plus a control that did not fire proves
+nothing.** The `rail.walkable` finding has not been shown to be armed, so
+"the class is closed" is not yet a claim this branch may make. An
+independent arming proof is needed — the obvious one is to stop
+`buildRailFence` placing any collider at all, which should make a large
+number of centre-line points standable; if *that* does not go red, the
+finding itself is broken and that is the bug to fix.
+
+Do not delete this section if a later control succeeds. The fact that the
+documented reproduction rotted is itself the finding.
+
 ## The three controls this slice owes (planned before running)
 
 If the residue is gone, the claim "gone" is worth nothing until the
