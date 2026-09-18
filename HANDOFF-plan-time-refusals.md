@@ -189,6 +189,53 @@ finding itself is broken and that is the bug to fix.
 Do not delete this section if a later control succeeds. The fact that the
 documented reproduction rotted is itself the finding.
 
+**Confirmed on all three of its documented seeds.** With the mutation in the
+tree: seed 9 `rc=0` 11 s, seed 6 `rc=0` 31 s, seed 4 `rc=0` 253 s. The
+reproduction is dead, not merely unlucky on one seed.
+
+## The findings ARE armed — proved independently
+
+Having established that the *documented* mutation no longer reaches the case,
+each finding was armed by a mutation chosen to reach it directly.
+
+**`rail.walkable` — armed.** `control.sh on nofence` makes `addFenceWall` and
+`linkCentre` return before adding any collider (i.e. the railway gets no
+exclusion fence at all). Seed 13, which passes in 6 s normally:
+
+```
+rail: 383 m of loop, 323 m unflanked, 338/383 centre-line points standable
+check:park: 3 invariant regression(s):
+  route.crossesRail: 16 (no allowance — this is new)
+  rail.exclusion: 323.4 (no allowance — this is new)
+  rail.walkable: 338 (no allowance — this is new)
+```
+
+`rc=1`. Real numbers, no `NaN`, no `Infinity`. Geometry it was proved
+against: seed 13's park at `ae20b9fc`, 383 m loop.
+
+**`anchor.reach:waterFight` — armed.** `control.sh on manifest` puts the
+declaration back to the pre-sphere 16.3 m. Seed 6:
+
+```
+check:park: 1 invariant regression(s):
+  anchor.reach:waterFight: 2.3, recorded at 0 — it has got worse
+```
+
+`rc=1`. Geometry: seed 6's park at `ae20b9fc`, waterFight built out to 18.6 m
+against a 16.3 m declaration.
+
+**A second thing that control turned up, and it matters.** On **seed 12** the
+same 16.3 m declaration produced an overrun of **0** — *"declares a bounding
+radius of 16.3 m but has built out to 16.3 m"*. The base handoff records seed
+12 as the **worst** seed at 18.8 m, which is the number `parkManifest.ts`'s
+comment cites to justify declaring 19. Seed 12 now builds out to 16.3.
+
+So the parks have moved under that constant: the comment's evidence is stale
+in the same way the `fence.ts` one was. The margin between what is built and
+what is declared is therefore **not** the 0.2 m the comment implies, and
+nobody currently knows what it is — which is what the margin sweep below is
+for.
+
 ## The three controls this slice owes (planned before running)
 
 If the residue is gone, the claim "gone" is worth nothing until the
