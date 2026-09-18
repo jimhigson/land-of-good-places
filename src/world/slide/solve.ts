@@ -8,7 +8,7 @@ import {
   BUILDING_CENTRE_Z,
   CASTLE_MASONRY_TOP,
   CASTLE_TOWERS,
-  distanceOutsideTower,
+  distanceOutsideTowerLocal,
   worldToCastle,
 } from '../building/layout';
 import {
@@ -574,6 +574,9 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
   // never changes the answer, only avoids eight `distanceOutsideTower` calls for
   // the many samples out over the ball pit and the park's edge. See
   // {@link towerBoundX()}.
+  // **One conversion, not nine.** The transform depends on the point alone, so
+  // the gate below and all eight solids share it; `distanceOutsideTower` would
+  // redo it per tower, on the hottest loop in this search.
   worldToCastle(towerGate.set(x, y, z), towerGate);
   if (
     Math.abs(towerGate.x) > towerBoundX() + radius ||
@@ -587,10 +590,13 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
     // so it is stated once beside the solid it is about rather than copied into
     // each caller. Found by seed 131 running its last metres through the foot
     // of `tower-body-1`, 1.22 m inside the built masonry.
-    if (distanceOutsideTower(tower, x, z, y) < radius) return false;
+    if (distanceOutsideTowerLocal(tower, towerGate) < radius) return false;
   }
   return true;
 }
+
+/** Scratch for {@link clearsTowers}' one world-to-castle conversion per call. */
+const towerGate = new Vector3();
 
 /**
  * The same question at ground level, for the landing run-in and the exit.
@@ -599,8 +605,6 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
  * ground, where a tower is at its widest. Taking the widest radius of each
  * solid is therefore both correct and the conservative direction to err in.
  */
-const towerGate = new Vector3();
-
 function clearsTowersOnTheGround(x: number, z: number, radius: number): boolean {
   for (const tower of CASTLE_TOWERS) {
     const widest = Math.max(tower.radiusBottom, tower.radiusTop);

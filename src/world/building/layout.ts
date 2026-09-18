@@ -654,7 +654,23 @@ export function distanceOutsideTower(tower: TowerSolid, x: number, z: number, y:
   // asking this in world `x`/`z`/`y` measures a castle standing plumb, which is
   // not the one that is drawn. See {@link TowerSolid}.
   worldToCastle(towerProbe.set(x, y, z), towerProbe);
-  const local = towerProbe;
+  return distanceOutsideTowerLocal(tower, towerProbe);
+}
+
+/**
+ * {@link distanceOutsideTower} with the conversion already done — for a caller
+ * asking about **one point against several towers**.
+ *
+ * The transform depends only on the point, not on the tower, so a caller that
+ * walks all eight solids should pay for it once rather than eight times over:
+ * `clearsTowers` was doing nine per sample, on the hottest loop in the slide's
+ * search. Same arithmetic either way; this is only about where the conversion
+ * sits.
+ */
+export function distanceOutsideTowerLocal(
+  tower: TowerSolid,
+  local: Readonly<Vector3>,
+): number {
   // A part standing on the plinth reaches down to whatever ground is under it,
   // so anything below its foot is measured at the foot.
   const atY =
