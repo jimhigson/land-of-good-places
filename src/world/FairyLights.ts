@@ -306,14 +306,11 @@ export function fairyPoleBuilder(
       // This is inside the candidate loop on purpose: a pole refused overhead
       // slides along its own run or swaps sides like any other refusal, and is
       // only left out when every candidate fails.
-      if (cruiserRoute) {
-        const ground = terrainHeight(x, z);
-        if (
-          cruiserClearanceForPost(cruiserRoute, x, z, ground, POLE_HEIGHT, POLE_RADIUS) <
-          POLE_RIDE_CLEARANCE
-        ) {
-          continue;
-        }
+      if (
+        cruiserRoute &&
+        cruiserClearanceForPost(cruiserRoute, x, z, POLE_HEIGHT, POLE_RADIUS) < POLE_RIDE_CLEARANCE
+      ) {
+        continue;
       }
       const claim = claimOf(x, z);
       if (keepClearOf.some((other) => claimsOverlap(claim, other))) continue;

@@ -2,6 +2,7 @@ import { Box3, type InstancedMesh, Matrix4, type Mesh, type Object3D, Raycaster,
 import { CART_BODY_LENGTH, CART_ENVELOPE, cartEnvelopePoint } from './cart';
 import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
 import type { CoasterRoute } from './route';
+import { terrainHeight, upAt } from '../terrain';
 
 /**
  * **What the Sky Cruiser actually flies past, discovered rather than declared.**
@@ -422,40 +423,89 @@ export function cruiserStrikes(
  * The post is sampled along its axis rather than treated as a point, because a
  * pole is tall and the loop dives: the tip can foul where the foot is clear.
  */
+/**
+ * The loop's frames, resolved once per route.
+ *
+ * **This memo is load-bearing, not a micro-optimisation.** The caller asks per
+ * *candidate* position — a hundred-odd poles with up to ten candidates each —
+ * and `drawnOnSphere` plus a full walk of the loop per call turned a question
+ * that should cost microseconds into millions of frame resolutions. The world
+ * phase is sliced a frame at a time in the browser and `check:park-boot`
+ * polices the slice ceiling, so the expensive thing has to happen once.
+ *
+ * Keyed by the route object: a new solve produces a new route, so a stale entry
+ * cannot be read for a park it does not describe.
+ */
+const postFrameMemo = new WeakMap<CoasterRoute, { frames: RailFrame[]; centre: Vector3; reach: number }>();
+
+function framesForPostQueries(route: CoasterRoute): { frames: RailFrame[]; centre: Vector3; reach: number } {
+  const cached = postFrameMemo.get(route);
+  if (cached) return cached;
+  const drawn = drawnOnSphere(route);
+  const frames: RailFrame[] = [];
+  const centre = new Vector3();
+  for (let d = 0; d < route.length; d += SAMPLE_STEP) {
+    const frame = railFrameAt(drawn, d, {
+      position: new Vector3(),
+      forward: new Vector3(),
+      side: new Vector3(),
+      up: new Vector3(),
+    });
+    frames.push(frame);
+    centre.add(frame.position);
+  }
+  if (frames.length > 0) centre.multiplyScalar(1 / frames.length);
+  // A sphere round the whole loop, so a pole on the far side of the park is
+  // rejected in one distance test instead of several hundred.
+  let reach = 0;
+  for (const frame of frames) reach = Math.max(reach, frame.position.distanceTo(centre));
+  const resolved = { frames, centre, reach };
+  postFrameMemo.set(route, resolved);
+  return resolved;
+}
+
 export function cruiserClearanceForPost(
   route: CoasterRoute,
   x: number,
   z: number,
-  baseY: number,
   height: number,
   radius: number,
 ): number {
   const { halfWidth, above, below } = CART_ENVELOPE;
   const halfLength = CART_BODY_LENGTH / 2;
-  const drawn = drawnOnSphere(route);
+  const { frames, centre, reach } = framesForPostQueries(route);
+  const envelope = halfLength + halfWidth + Math.max(above, below);
+
+  const ground = terrainHeight(x, z);
+  const lean = upAt(x, ground, z, new Vector3());
+
+  // Whole-loop reject first: a post far outside the loop's bounding sphere
+  // cannot reach it, and most of the park's poles are exactly that.
+  const foot = new Vector3(
+    x + lean.x * (height / 2),
+    ground + lean.y * (height / 2),
+    z + lean.z * (height / 2),
+  );
+  const far = foot.distanceTo(centre) - reach - envelope - radius - height;
+  if (far > 0) return far;
 
   // The post's axis, sampled. `SAMPLE_STEP` is the loop's own sampling; using
   // it here too keeps the two resolutions in step rather than inventing a
   // second number that would drift from it.
   const axis: Vector3[] = [];
-  for (let h = 0; h <= height; h += SAMPLE_STEP) axis.push(new Vector3(x, baseY + h, z));
-  axis.push(new Vector3(x, baseY + height, z));
+  const at = (h: number): Vector3 =>
+    new Vector3(x + lean.x * h, ground + lean.y * h, z + lean.z * h);
+  for (let h = 0; h <= height; h += SAMPLE_STEP) axis.push(at(h));
+  axis.push(at(height));
 
-  const frame: RailFrame = {
-    position: new Vector3(),
-    forward: new Vector3(),
-    side: new Vector3(),
-    up: new Vector3(),
-  };
   const offset = new Vector3();
   let best = Infinity;
 
-  for (let d = 0; d < route.length; d += SAMPLE_STEP) {
-    railFrameAt(drawn, d, frame);
+  for (const frame of frames) {
     for (const point of axis) {
       offset.subVectors(point, frame.position);
       // Cheap reject: nothing this far out can beat the running minimum.
-      if (offset.length() - halfLength - Math.max(above, below) - halfWidth > best) continue;
+      if (offset.length() - envelope > best) continue;
       const alongCar = offset.dot(frame.forward);
       const acrossCar = offset.dot(frame.side);
       const upCar = offset.dot(frame.up);
