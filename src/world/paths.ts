@@ -4624,7 +4624,29 @@ function* addInterconnects(
       stale = false;
     }
     const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
-    if (!Number.isFinite(paved)) continue; // not actually connected — a different bug, not this pass's job
+    // **An unreachable pair is the strongest case for a connector, not a
+    // reason to decline one.** This used to `continue` on a non-finite
+    // distance, with the note "not actually connected — a different bug, not
+    // this pass's job". It is this pass's job: two destinations a child can
+    // see across 22 m of grass, with no paved way between them at all, is
+    // precisely "close but unlinked". Measured on seed 11, where the note was
+    // costing the park two connectors:
+    //
+    //   [cand] hotel-stall.skyCruiser: straight 22.2 paved Infinity
+    //   [cand] hotel-exit-skyCruiser:  straight 33.5 paved Infinity
+    //
+    // and `detourRatiosStayReasonable` then found the built park walking
+    // **359.3 m to cover 22.2 m** (16.16x) between the first pair, because
+    // the built network does eventually join them — the long way round, via
+    // whatever paving happens to touch both. The generator's own oracle and
+    // the built park disagreed about connectivity, and the disagreement was
+    // being read as permission to do nothing.
+    //
+    // Everything downstream already handles it correctly: an infinite `paved`
+    // clears both thresholds below, and `detourIsDisproportionate` is true, so
+    // the structure screens yield exactly as they do for a 238 m walk. The
+    // ride-corridor and slide-corridor screens still apply, so a pair that
+    // genuinely must not be linked still is not.
     if (paved < straight * CONNECTOR_RATIO_THRESHOLD) continue;
     if (paved - straight < minWaste) continue;
 
