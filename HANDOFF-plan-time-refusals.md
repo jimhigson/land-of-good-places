@@ -230,11 +230,60 @@ radius of 16.3 m but has built out to 16.3 m"*. The base handoff records seed
 12 as the **worst** seed at 18.8 m, which is the number `parkManifest.ts`'s
 comment cites to justify declaring 19. Seed 12 now builds out to 16.3.
 
-So the parks have moved under that constant: the comment's evidence is stale
-in the same way the `fence.ts` one was. The margin between what is built and
-what is declared is therefore **not** the 0.2 m the comment implies, and
-nobody currently knows what it is — which is what the margin sweep below is
-for.
+## That second control was measuring a park it had itself changed
+
+Worth reading before anyone reuses it. `boundingRadius` is **not a yardstick,
+it is an input**: `parkLayout.ts` consumes it in the plot-admissibility test
+(edge gap, gate corridor, ring clearance, plot-to-plot gap, lines 1028–1055),
+and `LampPosts`, `Flowers`, `TreeLights` and `Scenery` all keep out of it.
+
+So lowering it to 16.3 m builds a **different park**, and the 18.6 m it
+measured is that other park's reach, not this one's. Proved rather than
+assumed — same seed 6, same commit, `--verbose` both ways:
+
+```
+control (16.3):  anchor:waterFight  routed in 4 waypoint(s) ... built out to 18.6 m
+normal  (19):    anchor:waterFight  routed in 6 waypoint(s) ... built out to 16.4 m
+```
+
+Different waypoint counts: the park moved. (The plan trace is identical —
+`increments=7 refusals=0` both ways — so a plan-trace comparison would have
+missed this entirely. That is worth remembering: equal driver counts do not
+mean equal parks.)
+
+**What that control does and does not prove.** It proves the
+`anchor.reach:waterFight` finding is armed and reports real numbers. It
+proves **nothing** about how much margin the real 19 m declaration has. For
+that, measure the unmutated park — below.
+
+## The real margin: `anchor:waterFight` built-out reach, 13 seeds
+
+`LGP_SEED=n pnpm run check:park -- --verbose`, unmutated, read off the
+check's own anchor table:
+
+| built out to | seeds |
+|---|---|
+| 16.2 m | 10 |
+| 16.3 m | 1 |
+| 16.4 m | 2, 6, 8, 9, 11, 12, 13, 14, 15 |
+| 16.6 m | 0 |
+| 17.4 m | 5 |
+
+Against a declared **19 m**: the worst seed measured leaves **1.6 m** of
+margin and the typical one **2.6 m**. Not 0.2 m. The class is closed with
+real room, not by luck.
+
+**Seeds 3, 4 and 7 are not in this table** — they cost ~230 s, ~250 s and
+~1330 s each and the sweep was already long. They passed the ordinary
+enforced-ratchet sweep, so their reach is under 19 m; their exact figure is
+simply unmeasured. Say that rather than implying sixteen.
+
+**The stale numbers to correct in `parkManifest.ts` if this lands.** Its
+comment says *"the pools and hedges are seeded per park"* (they are not — a
+fixed `Rng(0x77a7e5)`), and *"the worst of seeds 0–15 built out to 18.8 (seed
+12; 18.6 on seed 6)"*. Seed 12 now builds out to **16.4** and seed 6 to
+**16.4**. Both cited figures are stale, in the same way `fence.ts`'s
+reproduction was.
 
 ## The three controls this slice owes (planned before running)
 
