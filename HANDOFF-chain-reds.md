@@ -81,34 +81,14 @@ identical zeroes:
   rung-1, 39 rung-2, 1 decision zero, restarts [0,1], solved=1`; **1 failure**,
   exactly the rung-1 clause.
 
-## 3. `check:solve-cost` — fixed, root cause was the instrument
+## 3. `check:solve-cost` — REWRITTEN; five of seven rows could not fail
 
-Every reading was `performance.now()` around a dynamic `import()` — wall clock,
-which charges a descheduled process for time it did not compute in. Now gated
-on `min(wall, threadCpuUsage)`.
+Two faults, not one. The flake was the smaller of them.
 
-**One owner, not a copy.** `check:park-boot` had already solved this (issue
-#606) including the measured finding that it must be `process.threadCpuUsage()`
-and not `process.cpuUsage()`. That instrument, its three controls and its prose
-moved to **`scripts/lib/cpuClock.mts`**; both checks import it. `check:park-boot`
-verified unchanged by running it (exit 0 — `scripts/` is in no tsconfig
-project, so running is the only proof).
-
-**Proved both directions by mutation, on the `layout` stage (budget 250 ms):**
-
-| mutation | wall | attested CPU | verdict |
-|---|---|---|---|
-| 400 ms of pure `Atomics.wait` deschedule | **574.6 ms** | 101.1 ms | **green** |
-| 400 ms of real arithmetic | 500.7 ms | **466.3 ms** | **red** |
-
-The first *is* the old flake, reproduced at 2.3× the budget and no longer able
-to redden the check; the second is a real regression still caught. Ordinary
-run shows the gap live: `layout … [wall 137.1 ms, cpu 83.1 ms]`.
-
-### Finding, NOT fixed — five of seven clauses cannot fail
-
-Under backtracking nothing solves at module scope, so five stages now measure
-module *parse* only:
+**Fault A — the rows measured a module parse.** They timed a dynamic `import()`
+of each solver module, on the premise that importing solved it. Under
+backtracking every plan is a `lazyView` over `parkPlan.ts`'s driver, so
+importing decides nothing. Measured before the rewrite:
 
 ```
 cruiser   0.1 ms vs  6304 ms   (57,309x under)
@@ -118,55 +98,121 @@ railRace  0.0 ms vs   250 ms    (5,556x under)
 paths     0.0 ms vs  2744 ms   (60,978x under)
 ```
 
-Only `boundary` (54–60 ms, a real `cachedSolve`) and `layout` (83–122 ms of
-module-graph evaluation, against the coarse 250 ms floor — and it is the one
-that flaked) read anything. Those five now **say so on stderr on every run**
-with their real numbers. Re-deriving the budgets is a threshold decision and is
-deliberately left un-taken: the work they used to measure now lives in the
-driver, which `check:park-boot` gates per-slice and `parkPlan.ts` reports
-per-feature (`time/pieces layout=64ms cruiser=3333ms train=7157ms slide=3305ms
-crossings=12ms pathGraph=57ms road=0ms`). This is the reconciliation
-`check-solve-cost.mts`'s own header has asked for since it was written.
+A reviewer's independent proof of the cost: a slide regression from **3206 ms
+to 16641 ms**, pieces 597k → 3,008k, whole park build 15.1 s → 29.9 s, reported
+`ok`.
 
-## 4. `check:park-boot` — green, and says on every run that it should not be
+**Fault B — wall clock.** `layout` read 90 / 96.1 / 96.6 / 97.4 / 98.0 / 99.3 /
+102.2 / 110 / 117 / 216.5 / 260.3 / 275.1 ms against a 250 ms budget across two
+agents, the reds at load average 14.82.
 
-Green on every run taken (6 so far, 18–22 s each). But most runs print the same
-NOTE naming the same task:
+### The rewrite
 
-| run | ceiling | worst slice | units | of slices |
-|---|---|---|---|---|
-| 1 | 20.0 ms | 22.8 ms busy / 22.9 ms wall | 21 | 1 of 1690 |
-| 2 | 20.5 ms | 22.5 / 22.6 | 21 | 1 of 1656 |
-| 3 | 20.1 ms | 23.1 / 23.1 | 21 | 1 of 1687 |
-| 4 | 20.1 ms | 22.4 / 22.4 | 21 | 1 of 1674 |
-| 5 (post-extraction) | ~20 | 18.1 busy | — | no note |
+Rows now read **`parkSolveStats().cpuMsByFeature`** after forcing a real solve:
+the driver times its own features as it runs them and the check only asserts.
+`ParkSolve` gains `cpuMsByFeature` beside `msByFeature`, on
+`process.threadCpuUsage()` (0 in a browser — no such clock, nothing reads it).
+`scripts/lib/cpuClock.mts` is the checks' shared owner of that reading,
+extracted from `check-park-boot.mts` rather than copied.
 
-Always `parkPlan x21`, during **"joining up the paths"**. The check's own words:
-*"If you see this line run after run, naming the same task, that is the check
-telling you it IS the code."* Two breaching slices is a foul (#606), which is
-very likely the red seen on `ae20b9fc`.
+**Best-of-N was considered and rejected** — sound reasoning (contention only
+adds time) but redundant once the clock ignores contention, and it would cost N
+full park solves.
 
-**Note the busy ≈ wall equality** — this is real computation, not contention,
-so the CPU-time fix does not touch it.
+**Multiplier cut 8x → 3x**, which is the dividend of gating on CPU: the old 8x
+absorbed CI hardware (~2-3x) *and* parallel load (~2x), and contention no
+longer reaches the reading. This matters — 8 x 3305 = 26440 ms would have waved
+the 16641 ms slide regression straight through.
 
-**Mechanism, from reading `solveScheduler.advance`** (`src/boot/solveScheduler.ts`):
-the loop checks `now() >= deadline` *after* each slice, so it can begin a unit
-just under an 8 ms deadline and then run that unit to completion. 21 units in
-22.8 ms is ~1.1 ms average, so the shape that fits is ~20 cheap units reaching
-the deadline plus one fat final unit of ~14–15 ms. `advance`'s own doc comment
-claims "the overrun counter is therefore 0 on correct code", while the run
-reports `steps begun after their slice's deadline: 4 (parkPlan 4)`.
+**Budgets re-derived**, median of three quiet-box runs, all three readings kept
+in the file beside each row:
 
-**Next step (not yet run — the chain was occupying the box):**
-`scripts/_probe-plan-steps.mts` times every `next()` of the plan drive on
-attested CPU and names the fattest, plus counts how many single steps exceed
-the 8 ms budget and the 20 ms ceiling on their own. Run it, find the fat unit,
-and slice it (add a `yield` inside it) — that is the cause; the ceiling is not
-to be widened.
+| feature | runs (ms CPU) | median | budget (3x, floor 250) |
+|---|---|---|---|
+| boundary | 45.0 / 45.3 / 46.9 | 45 | 250 |
+| layout | 58.2 / 56.6 / 62.0 | 58 | 250 |
+| cruiser | 3021.9 / 3070.2 / 3102.5 | 3070 | 9210 |
+| train | 6652.0 / 6926.1 / 7570.5 | 6926 | 20778 |
+| slide | 3180.4 / 3196.5 / 3604.8 | 3197 | 9591 |
+| crossings | 11.5 / 11.3 / 10.4 | 11 | 250 |
+| pathGraph | 53.9 / 54.0 / 67.8 | 54 | 250 |
+| road | 0.4 / 0.4 / 0.5 | 1 | 250 |
 
-## State
+Green run, real numbers: `13283 ms of CPU over 7 features, 14 turns`.
 
-- Committed and pushed: layout-rung fix, cpuClock extraction, solve-cost fix.
-- Full `pnpm run check` running end to end — see below when it lands.
-- Still to do: park-boot fat unit; `LGP_SEED=n check:park` sweep;
-  `test:procgen` name-diff vs base; PR.
+### Proved red — every row, four ways
+
+1. **Every row armed** (multiplier 0.5, floor 1): **7 of 8 OVER**. `road` stayed
+   ok at 0.5 ms — it genuinely costs 0.4 ms, so only real work can arm it:
+2. **Real work, production budgets.** `LGP_BURN=road:400` → road **801.4 ms vs
+   250 ms, OVER**. All eight rows now proved armed.
+3. **The real regression class.** `LGP_BURN=slide:6700` → slide **17966.9 ms vs
+   9591 ms, OVER** — the 3206→16641 ms regression reproduced and caught.
+4. **The instrument.** `cpuNow()` → 0: the control fires — *"0 feature(s) above
+   zero, 0.0 ms in total, over 7 increment(s)... Every budget below would pass
+   on an absence"*. And a budgeted feature renamed to `roadway` → *"never run by
+   the driver and so were never priced"*.
+
+(`LGP_BURN` was a temporary mutation in `parkSolve.ts`, reverted — it is not in
+the branch. Re-create it by burning CPU for a named builder inside `turn()`.)
+
+## 4. `check:park-boot` — the recurring over-ceiling slice, FIXED
+
+Green throughout, but it named the same slice on 4 of 4 runs: `parkPlan x21`,
+21 work units, **22.4-23.1 ms** of attested busy against a ~20 ms ceiling,
+during "joining up the paths". Busy ≈ wall, so real computation, not
+contention. The check's own words: *"If you see this line run after run, naming
+the same task, that is the check telling you it IS the code."*
+
+**Measured, not guessed.** `scripts/_probe-plan-steps.mts` (untracked) times
+every step of the plan drive on attested CPU. The whole overrun was **one
+step** — and the *last* step of the drive:
+
+```
+step 1672422     15.57 ms busy (15.59 ms wall)  after 5 feature(s) placed, latest=pathGraph
+```
+
+Everything after `yield* pathGraphSearch()` in `parkPlan.ts`'s pathGraph
+builder ran unbroken: `drawnSamplesFor`, the boundary `find`, the off-site
+crossing screen, the lane-pinch check — four independent passes over the same
+samples in a single `next()`. `solveScheduler.advance` checks its deadline
+*after* each unit, so a slice beginning that step just under its 8 ms budget
+runs to 8 + 15.57 ms = the 22.5 ms reported.
+
+**Fix:** four passes, four pieces (three added `yield 0`).
+
+| | before | after |
+|---|---|---|
+| fattest pathGraph step | 15.57 ms | 10.77 ms |
+| worst slice | `x21`, 21 units, 22.4-23.1 ms | `x778`, 778 units, 19.3-20.4 ms |
+| over-ceiling note | 4 of 4 runs | 1 of 3 runs |
+
+The worst slice is no longer a fat unit at all — it is 778 cheap units filling
+a budget, which is what a well-sliced generator looks like.
+
+**No decision change:** `check:park` canonical is **245/245 waypoints, 19/19
+attractions, all six invariants** — unchanged; plan pieces move by exactly the
+four yields (1672427 → 1672431).
+
+**Residue for whoever picks this up:** 9 single steps still exceed the 8 ms
+budget on their own (a cluster of 8-11 ms steps in `train`, one 11 ms step
+before any feature is placed). None exceeds the 20 ms ceiling alone, so none is
+prosecutable today, but each is a slice overrun waiting for the wrong deadline.
+Same probe, same fix shape.
+
+## Verification still outstanding
+
+- Full `pnpm run check` end to end on the final tree. One run was started and
+  **killed deliberately** — I was still editing the tree under it, so it was
+  measuring a moving target. It had reached step ~23 (`check:speech-bubbles`)
+  green. Must be re-run.
+- `LGP_SEED=n pnpm run check:park` sweep.
+- `test:procgen` name-diff against base (base has 55 failures).
+- PR against `feat/procgen-on-sphere`.
+
+## Housekeeping
+
+- `package.json` **not touched** — verified by parsing, not grep: step sets
+  identical to base (67 vs 67, none added, none removed).
+- Remove the probe worktree `.claude/worktrees/chain-reds-probe`.
+- `scripts/_probe-plan-steps.mts` is untracked on purpose — do not commit.
