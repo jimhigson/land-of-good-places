@@ -2,7 +2,6 @@ import { Box3, type InstancedMesh, Matrix4, type Mesh, type Object3D, Raycaster,
 import { CART_BODY_LENGTH, CART_ENVELOPE, cartEnvelopePoint } from './cart';
 import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
 import type { CoasterRoute } from './route';
-import { terrainHeight, upAt } from '../terrain';
 
 /**
  * **What the Sky Cruiser actually flies past, discovered rather than declared.**
@@ -509,57 +508,3 @@ export function cruiserClearanceForPoints(
   return best;
 }
 
-export function cruiserClearanceForPost(
-  route: CoasterRoute,
-  x: number,
-  z: number,
-  height: number,
-  radius: number,
-): number {
-  const { halfWidth, above, below } = CART_ENVELOPE;
-  const halfLength = CART_BODY_LENGTH / 2;
-  const { frames, centre, reach } = framesForPostQueries(route);
-  const envelope = halfLength + halfWidth + Math.max(above, below);
-
-  const ground = terrainHeight(x, z);
-  const lean = upAt(x, ground, z, new Vector3());
-
-  // Whole-loop reject first: a post far outside the loop's bounding sphere
-  // cannot reach it, and most of the park's poles are exactly that.
-  const foot = new Vector3(
-    x + lean.x * (height / 2),
-    ground + lean.y * (height / 2),
-    z + lean.z * (height / 2),
-  );
-  const far = foot.distanceTo(centre) - reach - envelope - radius - height;
-  if (far > 0) return far;
-
-  // The post's axis, sampled. `SAMPLE_STEP` is the loop's own sampling; using
-  // it here too keeps the two resolutions in step rather than inventing a
-  // second number that would drift from it.
-  const axis: Vector3[] = [];
-  const at = (h: number): Vector3 =>
-    new Vector3(x + lean.x * h, ground + lean.y * h, z + lean.z * h);
-  for (let h = 0; h <= height; h += SAMPLE_STEP) axis.push(at(h));
-  axis.push(at(height));
-
-  const offset = new Vector3();
-  let best = Infinity;
-
-  for (const frame of frames) {
-    for (const point of axis) {
-      offset.subVectors(point, frame.position);
-      // Cheap reject: nothing this far out can beat the running minimum.
-      if (offset.length() - envelope > best) continue;
-      const alongCar = offset.dot(frame.forward);
-      const acrossCar = offset.dot(frame.side);
-      const upCar = offset.dot(frame.up);
-      const dx = Math.max(0, Math.abs(alongCar) - halfLength);
-      const dz = Math.max(0, Math.abs(acrossCar) - halfWidth);
-      const dy = upCar > 0 ? Math.max(0, upCar - above) : Math.max(0, -upCar - below);
-      const gap = Math.hypot(dx, dy, dz) - radius;
-      if (gap < best) best = gap;
-    }
-  }
-  return best;
-}

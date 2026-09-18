@@ -116,6 +116,18 @@ const BULB_DROP = 0.18;
 const BULBS_PER_STRING = 9;
 
 /**
+ * Extra points interpolated along each cable segment **for the clearance test
+ * only** — the drawn cable needs no more than its bulb stations.
+ *
+ * A span is ~7.1 m over ten stations, so the drawn samples sit ~0.71 m apart
+ * while the post is sampled every 0.5 m. Against a 0.62 m clearance threshold
+ * that understates a grazing intrusion by up to half the gap between samples,
+ * which is the same "a coarse zero is not a proof" caveat `check:swept-bus`
+ * prints about its own post stepping.
+ */
+const CABLE_TEST_SUBDIVISIONS = 2;
+
+/**
  * **Where a pole's cable is tied**, in drawn world space.
  *
  * The post leans with the park, so its anchor is not `(x, ground + h, z)` —
@@ -198,6 +210,15 @@ export function fairyOccupiedPoints(
     const there = fairyAnchorAt(other.x, other.z, new Vector3());
     const span = fairySpan(here, there);
     points.push(...span.cable, ...span.bulbs);
+    // Interpolate between the cable's own stations so the test samples it at
+    // least as finely as it samples the post.
+    for (let i = 1; i < span.cable.length; i += 1) {
+      const a = span.cable[i - 1] as Vector3;
+      const b = span.cable[i] as Vector3;
+      for (let k = 1; k <= CABLE_TEST_SUBDIVISIONS; k += 1) {
+        points.push(new Vector3().lerpVectors(a, b, k / (CABLE_TEST_SUBDIVISIONS + 1)));
+      }
+    }
   }
   return points;
 }
@@ -384,11 +405,19 @@ export function fairyPoleBuilder(
 
   /** The first candidate of `slot` that is off the paving and unrefused, with who refused the rest. */
   /**
-   * The poles this one will be strung to, of those already standing.
+   * The poles this one will be strung to, of those already standing — **on
+   * both sides**.
    *
-   * Slots are placed in order, so that is the previous placed slot of the same
-   * chain — plus, for the ring's last slot, the chain's first, because a closed
-   * chain strings its end back to its start.
+   * At `advance` time only the previous slot can be standing, so looking
+   * backwards is complete. At **`accommodate`** time it is not: slot `i + 1`
+   * may already be up, and moving slot `i` re-draws *its* cable too. Checking
+   * only backwards left that cable re-hung to a new position and never
+   * re-tested against the ride — the same defect as the bulbs, one level in,
+   * and the driver's trace shows dozens of `accommodated fairyLights#N for
+   * lamps` per seed, so it is exercised rather than theoretical.
+   *
+   * A closed chain also strings its last slot back to its first, in both
+   * directions.
    */
   const standingNeighbours = (index: number): { x: number; z: number }[] => {
     const { chains, slots } = ensurePlan();
@@ -404,7 +433,11 @@ export function fairyPoleBuilder(
       if (p) out2.push({ x: p[0], z: p[1] });
     };
     take(mine[at - 1]);
-    if (chains[slot.chain]?.closed && at === mine.length - 1) take(mine[0]);
+    take(mine[at + 1]);
+    if (chains[slot.chain]?.closed) {
+      if (at === mine.length - 1) take(mine[0]);
+      if (at === 0) take(mine[mine.length - 1]);
+    }
     return out2;
   };
 
@@ -604,15 +637,20 @@ const LIGHT_DECAY = 1.0;
 const LIGHT_DISTANCE = 63;
 
 /**
- * How many of the ten strings carry a real light — down from five.
+ * How many real {@link PointLight}s the **whole park's** fairy lights carry —
+ * three, spread across every string there is, not three per run.
  *
- * This is what pays for `LampPosts` going 3 → 5, so the park's total
- * point-light count does not move. It is the right side of the trade: these
- * five sit on a ring barely a dozen metres across ({@link fairyRingRadius})
- * and each now washes about 40 m, so
- * they were lighting the same plaza five times over, while the lamp posts are
- * strung out along a ring road well over a hundred metres round and genuinely
- * needed the reach.
+ * It was three of the plaza ring's ten, which paid for `LampPosts` going
+ * 3 → 5 without moving the park's total light count. Now that the lights
+ * follow two thirds of the paths there are ninety-odd strings, and the
+ * ration is the same three: a point light costs every lit fragment in the
+ * scene, so one per chain would have multiplied the park's light count by
+ * the number of runs.
+ *
+ * What carries the look instead is the bulbs, which are unlit emissive
+ * geometry and cost nothing per-fragment — the real lights exist only so the
+ * ground catches a warm pool somewhere, and three pools across the park is
+ * what the frame budget buys.
  */
 const REAL_LIGHTS = 3;
 
@@ -682,8 +720,6 @@ export class FairyLights implements GameSystem {
      */
     const yawRng = new Rng(0x9a17e);
     const flat = new Vector3();
-    const scratchLean = new Quaternion();
-    const up = new Vector3();
 
     const poleMaterial = new MeshStandardMaterial({
       color: PALETTE.woodDark,
@@ -723,7 +759,6 @@ export class FairyLights implements GameSystem {
       fog: true,
     });
 
-    const bulbsPerString = 9;
     const bulbPositions: Vector3[] = [];
     let poleNumber = 0;
     let stringNumber = 0;
@@ -759,10 +794,11 @@ export class FairyLights implements GameSystem {
         knob.castShadow = true;
         this.group.add(knob);
 
-        const anchor = new Vector3();
-        flat.set(x, ground + poleHeight - 0.25, z);
-        placeOnSphere(flat, 0, anchor, scratchLean);
-        anchors[i] = anchor;
+        // **Asked for, not re-derived.** `fairyAnchorAt` is the one owner of
+        // where a cable is tied, and the ride-clearance test measures against
+        // the points it returns — so the drawing must come from the same call
+        // or the guard is measuring a cable the park does not hang.
+        anchors[i] = fairyAnchorAt(x, z, new Vector3());
         // **A pole is solid, in the same place it is drawn.** Nothing derives a
         // collider from a mesh here, so the two are only ever together on purpose.
         collision.addCircle(x, z, POLE_RADIUS);
@@ -779,25 +815,16 @@ export class FairyLights implements GameSystem {
         // Either end missing means a skipped pole — the gateway gap. No string
         // spans it, on either side, so the opening stays open.
         if (!from || !to) continue;
-        const points: Vector3[] = [];
-
-        for (let sp = 0; sp <= bulbsPerString + 1; sp += 1) {
-          const t = sp / (bulbsPerString + 1);
-          // Catenary-ish sag: a parabola is close enough and much cheaper.
-          const sag = Math.sin(t * Math.PI) * 1.15;
-          const point = new Vector3().lerpVectors(from, to, t);
-          // The cable hangs along the **local** down, and so does the bulb under
-          // it. Sagging along world -Y instead would be right at the plaza's
-          // middle and progressively wrong out from it: the poles lean, so a
-          // string dropped straight down would swing away from the knobs it is
-          // supposedly tied to.
-          upAt(point.x, point.y, point.z, up);
-          point.addScaledVector(up, -sag);
-          points.push(point);
-          if (sp > 0 && sp <= bulbsPerString) {
-            bulbPositions.push(point.clone().addScaledVector(up, -0.18));
-          }
-        }
+        // **The drawn cable and bulbs are `fairySpan`'s own output**, the same
+        // call the Sky Cruiser clearance test measures against. They were two
+        // implementations of one shape until a reviewer mutated `CABLE_SAG` to
+        // 3.0 and found the guarded cable moving 1.85 m while the drawn one
+        // stayed at a hard-coded 1.15 — agreeing at the committed values only
+        // because the numbers had been copied, which is the two-definitions bug
+        // this branch exists to kill, in the code written to kill it.
+        const span = fairySpan(from, to);
+        const points = span.cable;
+        bulbPositions.push(...span.bulbs);
 
         const geometry = new TubeGeometry(
           new CatmullRomCurve3(points),
