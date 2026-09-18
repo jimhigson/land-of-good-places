@@ -625,10 +625,19 @@ checking:
    headline is `worst single advance() 16.7 ms ... parkPlan x3662`; the `0.0 ms`
    is a **looping-overrun** line near the bottom.
 3. `check:npc-dispersal` / `check:npc-presence` grepped out of the `check` chain
-   log and read as the step then running — so the chain was reported as having
-   passed `check:slide-rider`. **It had stopped there.** Those names are not in
-   the chain at all: they come from `check:chain-coverage`'s **inventory of all
-   85 `check:*` scripts**, which the *first* step prints.
+   log and read as top-level steps far down the list — so the chain was reported
+   as having passed `check:slide-rider`. **It had stopped there.** Those names
+   are **sub-steps of `check:crowd`**, which is step **20** and is an aggregate:
+   `trace-npc-driver && check:npc-perch && check:npc-separation &&
+   check:npc-dispersal && check:npc-presence`. The chain was at step 20, not
+   past 60.
+
+   Worth noting how this one went wrong *twice*: having caught the misreading,
+   I then explained it as coming from `check:chain-coverage`'s inventory — also
+   without checking, also wrong. The conclusion (the chain stopped at
+   `slide-rider`) was right and independently confirmed by the explicit
+   `check:slide-rider FAILED` line and `exit=1`; the story about *why* was
+   invented twice before being measured once.
 
 The fix is not "be careful". It is: **before quoting any line, establish what
 part of the log it belongs to.** A chain log opens with an inventory; a boot log
