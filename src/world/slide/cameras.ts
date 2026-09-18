@@ -201,7 +201,7 @@ const ELEVATION_STEP = (2.5 * Math.PI) / 180;
  * off-centre, and there is no reason for the generator to assume otherwise.
  * Even, so the midpoint is always among the candidates.
  */
-const ANCHOR_CANDIDATES = 4;
+const ANCHOR_CANDIDATES = 8;
 
 /**
  * How far short of the rider a sight-line probe stops, in metres.
@@ -228,10 +228,13 @@ const MAX_PROBED_PLACEMENTS = 200;
  * How many moments of the beat each candidate is scored against.
  *
  * The score is the **worst** of them, so this is really "how finely is the
- * worst moment resolved". Eleven puts a sample about every 1.2 m of chute on
- * the canonical seed's beats, which is a good deal finer than the shot changes.
+ * worst moment resolved" — and it must be resolved at least as finely as
+ * anything that will later measure the same beat, or the search optimises a
+ * worst moment that is not the real one. `parkFacts.ts` samples a trackside
+ * beat 41 times; twenty-one here is the same order, and coarser than that let
+ * seed 24's beat 1 slip a genuinely end-on moment between two samples.
  */
-const BEAT_SAMPLES = 10;
+const BEAT_SAMPLES = 20;
 
 /**
  * The trackside camera's field of view, in degrees, before the portrait phone
