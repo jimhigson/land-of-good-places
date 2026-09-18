@@ -1151,7 +1151,7 @@ export class RailRace implements GameSystem {
     // Scaled by RIDE_SCALE — her own model is too (`requestBoard()`), so an
     // unscaled drop stayed the same fixed 0.5m while her seated head height
     // grew with everything else, and duck bars ended up sitting well below
-    // her head in *both* held and ducked states (see DUCK_CLEARANCE in
+    // her head in *both* held and ducked states (see DUCK_CLEARANCE_AT_PARK_SCALE in
     // hazards.ts). This and that value were picked together against her real
     // measured head height in both states, live, on 1 August 2026.
     //
