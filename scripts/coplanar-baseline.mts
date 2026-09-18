@@ -217,10 +217,17 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   // pool: `vet:seeds --pool` goes from 8/10 to 1/10, and five of the eight
   // regressing seeds carry no warp vector to re-bake. See that issue.
   //
-  // **A visible flicker remains where the fence meets the wall until #612
-  // lands.** This entry records that honestly rather than hiding it: the
-  // ratchet exists so a fault cannot worsen *silently*, and nothing about this
-  // is silent.
+  // **The entry this paragraph used to introduce is gone**, deleted when
+  // `check:coplanar` reported it BASELINE LOOSE: the block/rail seam no longer
+  // reproduces on any seed in `PARK_SEED_POOL`. The analysis above is kept
+  // because **#612 is not thereby closed** — what the sweep stopped seeing is
+  // the shared *plane*, not the interpenetration it measures, and both mesh
+  // names (`boundary-blocks`, `rail-fence`) still exist in `src/`, so this is a
+  // seam that went away rather than a #520 rename orphaning its own entry. If
+  // the two solids are made to stop overlapping, the reasoning above is why.
+  //
+  // Nothing below this line belongs to it.
+
   "garden|railRace/railRace:cart/hopper/<Mesh:BufferGeometry>|railRace/railRace:cart/pet-seat/<Mesh:BufferGeometry>": { area: 0.0504, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.right/stair-right-stringer/<Mesh:BufferGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.right/stair-right-tread/<Mesh:BufferGeometry>": { area: 0.0503, seams: 2, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.left/stair-left-stringer/<Mesh:BufferGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.left/stair-left-tread/<Mesh:BufferGeometry>": { area: 0.0503, seams: 3, fighting: false },
