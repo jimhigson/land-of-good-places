@@ -127,12 +127,56 @@ function numberFromEnv(name: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+/**
+ * **The main loop's drawn width — the one owner.**
+ *
+ * It was the literal `3.6` in the ring's own {@link RouteDefinition} plus a
+ * restatement of it in `RIBBON_HALF_WIDTH_CEILING`, and now a third asker
+ * needs it: {@link plazaVerge} has to know where the loop's inner paving
+ * stops before it can say where the lawn between it and the plaza begins.
+ * Three hand-kept copies of one number is the disease CLAUDE.md names as the
+ * most common bug in this repo, so there is one constant and everybody asks.
+ */
+export const MAIN_LOOP_WIDTH = 3.6;
+
 /** Fountain plaza — wherever the layout put it. Paths converge here. */
 export const PLAZA: { readonly x: number; readonly z: number; readonly radius: number } = lazyView(() => ({
   x: PARK_LAYOUT.fountain.x,
   z: PARK_LAYOUT.fountain.z,
   radius: PARK_LAYOUT.fountain.radius,
 }));
+
+/**
+ * **The ring of lawn between the plaza's paving and the main loop's.**
+ *
+ * `inner` is the plaza disc's own paved edge; `outer` is where the main
+ * loop's inner paving starts; `middle` is the bearing-independent circle
+ * halfway between them, which is the furthest a ring of props can stand from
+ * *both* kinds of paving at once.
+ *
+ * **This exists because two numbers were being kept in step by hand and had
+ * collided.** `FairyLights.ts` carried `FAIRY_RING_RADIUS = 13.5` — a literal,
+ * chosen once against a plaza radius of 9.4 — while the main loop runs at
+ * `RING_RADIUS` (the fountain's own radius + 5.5, so 14.9) and paves
+ * `MAIN_LOOP_WIDTH / 2` either side of that. Its inner kerb therefore lands at
+ * 13.1, and every one of the ten fairy poles stood 0.36–0.41 m *inside* the
+ * promenade's paving. Each was duly skipped for standing on a path, and the
+ * park drew **no fairy lights at all** — on this branch and on every branch
+ * before it, with nothing saying so.
+ *
+ * So nobody writes the fairy ring's radius down any more: it is asked for
+ * here, from the two owners that already exist ({@link PLAZA}, `RING_RADIUS`),
+ * and it follows them if either ever moves.
+ *
+ * A function, not a constant: `PLAZA` is a plan view, and reading one at
+ * module scope forces the solver mid-evaluation (see this branch's handoff,
+ * "the two import-order rules").
+ */
+export function plazaVerge(): { readonly inner: number; readonly outer: number; readonly middle: number } {
+  const inner = PLAZA.radius;
+  const outer = RING_RADIUS - MAIN_LOOP_WIDTH / 2;
+  return { inner, outer, middle: (inner + outer) / 2 };
+}
 
 // ------------------------------------------------------------ generation
 
@@ -177,7 +221,7 @@ interface Blocker {
  * from there. `RIBBON_HALF_WIDTH_CEILING` is the largest half-width plus kerb
  * any route in {@link ROUTES}/{@link solveRing} is ever built with.
  */
-const RIBBON_HALF_WIDTH_CEILING = 3.6 / 2 + 0.85;
+const RIBBON_HALF_WIDTH_CEILING = MAIN_LOOP_WIDTH / 2 + 0.85;
 const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4 + RIBBON_HALF_WIDTH_CEILING;
 
 /**
@@ -3877,7 +3921,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
   // See {@link streetLatticeSearch}.
   yield* streetLatticeSearch();
   const ringPoints = solveRing();
-  const ring: RouteDefinition = { name: 'main-loop', width: 3.6, closed: true, points: ringPoints };
+  const ring: RouteDefinition = { name: 'main-loop', width: MAIN_LOOP_WIDTH, closed: true, points: ringPoints };
 
   const nodes: PathNode[] = [
     { id: 'gate', kind: 'gate', x: 0, z: 54 },

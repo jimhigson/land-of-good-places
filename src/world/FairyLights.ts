@@ -17,7 +17,8 @@ import {
 import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
-import { PLAZA } from './paths';
+import { PLAZA, plazaVerge } from './paths';
+import { PLAYER_RADIUS } from '../core/constants';
 import { isOnPath } from './pathGraph';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
@@ -28,9 +29,44 @@ import { refusal, type FeatureBuilder } from '../boot/featureBuilder';
 export type FairyPole = { readonly x: number; readonly z: number } | null;
 
 export const FAIRY_POLE_COUNT = 10;
-export const FAIRY_RING_RADIUS = 13.5;
+
 /** The collider a pole registers, and so the ground it claims. */
 const POLE_RADIUS = 0.28;
+
+/**
+ * **Where the ring of poles stands — asked for, never written down.**
+ *
+ * This was `FAIRY_RING_RADIUS = 13.5`, a literal picked once to sit between
+ * the plaza and the promenade. The promenade moved (it is `RING_RADIUS`, the
+ * fountain's own radius + 5.5) and the literal did not, so the whole ring
+ * ended up 0.36–0.41 m *inside* the main loop's paving: every pole tested as
+ * standing on a path, every pole was skipped, and the park had no fairy
+ * lights at all. Nobody saw it, because nothing asserted that any were
+ * placed.
+ *
+ * {@link plazaVerge} is the one owner of "the lawn between the plaza and the
+ * loop" and this is its middle — the furthest a ring can be from both kinds
+ * of paving at once. If either the plaza or the loop moves, the ring follows.
+ */
+function fairyRingRadius(): number {
+  return plazaVerge().middle;
+}
+
+/**
+ * How much clear ground a pole wants between itself and the nearest paving.
+ *
+ * **Taken from the game, not from the ring's own geometry**: the pole's own
+ * collider plus the width a child genuinely needs to walk past it, which is
+ * `PLAYER_RADIUS * 2` — the same `WALKABLE_GAP` `test/procgen/invariants.ts`
+ * uses, and the width `NavGrid` fattens every collider by before it will call
+ * a cell walkable. A pole closer to the kerb than this is a pole pinching the
+ * promenade, whatever the drawing looks like.
+ *
+ * It replaces a bare `1.2` that was neither of those things. It is *stricter*
+ * than the number it replaces (1.52 m against 1.20 m), so no pole that used to
+ * be refused is now allowed through.
+ */
+const POLE_PAVING_CLEARANCE = POLE_RADIUS + PLAYER_RADIUS * 2;
 
 /**
  * **Fairy-light poles, as a feature builder.** One increment is one pole on
@@ -45,12 +81,13 @@ export function fairyPoleBuilder(claims: GroundClaims, out: FairyPole[]): Featur
     name: 'fairyLights',
     deps: ['fountain'],
     *advance() {
+      const radius = fairyRingRadius();
       while (out.length < FAIRY_POLE_COUNT) {
         const i = out.length;
         const angle = (i / FAIRY_POLE_COUNT) * TAU;
-        const x = PLAZA.x + Math.cos(angle) * FAIRY_RING_RADIUS;
-        const z = PLAZA.z + Math.sin(angle) * FAIRY_RING_RADIUS;
-        if (isOnPath(x, z, 1.2)) {
+        const x = PLAZA.x + Math.cos(angle) * radius;
+        const z = PLAZA.z + Math.sin(angle) * radius;
+        if (isOnPath(x, z, POLE_PAVING_CLEARANCE)) {
           out.push(null);
           continue;
         }
@@ -114,7 +151,8 @@ const LIGHT_DISTANCE = 63;
  *
  * This is what pays for `LampPosts` going 3 → 5, so the park's total
  * point-light count does not move. It is the right side of the trade: these
- * five sit on a ring only 13.5 m across and each now washes about 40 m, so
+ * five sit on a ring barely a dozen metres across ({@link fairyRingRadius})
+ * and each now washes about 40 m, so
  * they were lighting the same plaza five times over, while the lamp posts are
  * strung out along a ring road well over a hundred metres round and genuinely
  * needed the reach.
@@ -204,7 +242,11 @@ export class FairyLights implements GameSystem {
       // is what keeps the post rigid as it leans away from the park's centre —
       // a knob that stayed at its old world height would hang off the side of a
       // pole that had tipped out from under it.
+      // Named so `test/procgen/parkFacts.ts` can count the poles that were
+      // actually *drawn*, off the built scene, rather than re-reading the
+      // decision list that produced them — see `everyScatteredFeaturePlacesSomething`.
       const pole = new Mesh(poleGeometry, poleMaterial);
+      pole.name = `fairy-pole-${i}`;
       flat.set(x, ground + poleHeight / 2, z);
       placeOnSphere(flat, 0, pole.position, pole.quaternion);
       pole.castShadow = true;
@@ -284,6 +326,9 @@ export class FairyLights implements GameSystem {
         false,
       );
       const cable = new Mesh(geometry, cableMaterial);
+      // Named for the same reason the poles are: a string is the thing a child
+      // actually sees lit, so the invariant counts strings, not just posts.
+      cable.name = `fairy-string-${i}`;
       cable.castShadow = false;
       cable.receiveShadow = false;
       this.group.add(cable);
