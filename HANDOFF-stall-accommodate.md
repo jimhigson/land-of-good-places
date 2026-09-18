@@ -120,11 +120,65 @@ accommodations (two wall runs, five bush clumps) the base made.
       relocation (`MiniGameStalls.boothPlacement`). The face-paint and keychain
       booths answer `null` — they do not move — which `stallsFeature.ts` turns
       into an ordinary refusal; six of the eight move.
-- [ ] Seeds 0..15: does any of them ask a stall to move?
-- [ ] Reachability instrument **with a control run first**.
-- [ ] Invariant in `test/procgen/invariants.ts`, proved red.
+- [x] Reachability instrument **with its control run first**
+      (`scripts/check-stall-accommodate.mts`).
+- [x] Invariant in `test/procgen/invariants.ts`, proved red twice — see
+      **Proved red** below.
+- [x] `check:stall-accommodate` in the `check` chain (67 → 68 steps, nothing
+      lost; step sets compared by parsing the scripts object).
+- [ ] Seeds 0..15: does any of them ask a stall to move? (digest sweep running)
 - [ ] 16 seeds of `check:park`; `test:procgen` name-diff vs
       `origin/feat/procgen-on-sphere`; two-process determinism digest.
+
+## The constructed scenario (`pnpm run check:stall-accommodate`)
+
+No seed refuses anything against a stall, so the mechanism would otherwise
+ship unexercised. The check drives the **real** builder the world phase just
+used (`worldSolveStallBuilder()`), against the real registry and the real
+collision world, with the synthetic refused claim the driver would hand it.
+Canonical seed, run 2026-09-18:
+
+```
+check:stall-accommodate — seed canonical
+ok    control: the reachability instrument says yes to the entrance and no to 400 m outside the park
+ok    'railRacer' stepped aside 0.90 m: (-30.14, -51.69) → (-29.31, -51.35)
+ok    'railRacer' is clear of the asker's claim it was refused against
+ok    'railRacer': all 4 new wall claims have a matching collider in the built world
+ok    'railRacer': the world still has 1032 walls — the old four were taken back
+ok    'railRacer': the registry describes the booth at its new spot
+ok    'railRacer': its counter at (-27.11, -49.16) still has room to stand and is still walkable to from the entrance
+ok    'facePaint' refuses and stays put: stalls: facePaint is built from world coordinates and does not move
+ok    'keychain' refuses and stays put: stalls: keychain is built from world coordinates and does not move
+check:stall-accommodate seed canonical: PASS
+```
+
+## Proved red
+
+Geometry each was proved against: the **canonical seed (20260728)** park at
+commit `boothFootprint.ts` unmodified — `railRacer` booth drawn at
+(−30.14, −51.69), `skyCruiser` at (30.11, −1.59); eight booths, 32 walls.
+
+1. **The invariant, clause "solid exactly where claimed".** Edit:
+   `addBoothCollision` registers its four walls from `boothCorners(x + 0.5, …)`
+   — the mesh where it is, the collider half a metre off.
+   `vitest run test/procgen/seed-canonical.test.ts -t "every stall is drawn"`
+   → `1 failed`, **32 complaints**, e.g.
+   `the 'railRacer' booth claims a wall (-30.67, -49.25)-(-27.70, -52.22) that
+   no collider in the built world matches`.
+   Worth knowing: the `isClearCircle` midpoint probe did **not** fire at
+   0.5 m — the wall still covers its own midpoint at that offset. The
+   claim-to-collider match is the clause that sees this one.
+2. **The same invariant, clause "open air".** Edit: the front wall registered
+   as a zero-length segment. → `the 'railRacer' booth's wall at (-29.18,
+   -50.74) is open air — a child walks straight through the booth she can
+   see`, on every booth.
+3. **`check:stall-accommodate`, clause 3.** Edit: `MiniGameStalls`'
+   `placeAt` moves the prop and does not re-register the walls. →
+   `FAIL 'railRacer' moved and 4 of its four new walls have no collider`
+   and `FAIL … the world went from 1032 walls to 1028 — old walls left
+   behind`, exit 1.
+
+All three edits reverted; `git diff --stat` clean afterwards.
 
 ## Environment notes
 
