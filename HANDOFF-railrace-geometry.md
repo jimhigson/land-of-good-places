@@ -26,40 +26,61 @@ paved detour, bushes count, bridge mid-air path.
 
 ## Root cause — one defect, six symptoms
 
-**The ring's lanes cross over each other on the walk-past ring.** Measured
-(`scripts/_probe-lanes.mts`, canonical seed):
+**The ring's cross-section was sheared by the planet, not leant by it.**
+
+`route.pointAt` was `flatPointAt` followed by `placeOnSphere` **at the lane's
+own column**. `placeOnSphere` displaces a point outward by `height x up.x`, and
+`up.x = r / GROUND_SPHERE_RADIUS` = 0.32-0.46 out at the ring. The four lanes
+undulate on their own phases and stand up to 4.38 m apart in height at one
+station, so they were displaced outward by up to `4.38 x 0.46 = 2.0 m`
+*relative to each other* -- against a walk-past lane spacing of 1.1 m.
+
+Measured with the ring's own inverse (`scripts/_probe-lanes.mts`, canonical
+seed), reading each drawn lane's chart offset back off the built geometry:
 
 ```
-walk-past min drawn lateral gap -0.284 m at s=518.0  (lane 2 -> 3)
-          46 of ~690 sampled (station,pair) readings have gap <= 0
-          nominal laneSpacing 1.1
-race      min drawn lateral gap  1.412 m   nominal laneSpacing 2.75
-closest drawn lane centres between the two rings: 0.302 m
+                       worst lane-offset error   unleant outset span (laneSpan)
+before (per column)    walk-past 0.329 m               3.953   (3.300)
+                       race      0.877 m               9.885   (8.250)
+after  (rigid frame)   walk-past 2.7e-14 m             3.303   (3.300)
+                       race      2.6e-14 m             8.256   (8.250)
 ```
 
-Why: `route.pointAt` is `flatPointAt` followed by `placeOnSphere` **at the
-lane's own column**. `placeOnSphere` displaces a point outward by
-`height × up.x`, and `up.x = r / GROUND_SPHERE_RADIUS` = 0.32–0.46 out at the
-ring. The four lanes undulate on their own phases and stand up to 4.38 m apart
-in height at one station, so they are displaced outward by up to
-`4.38 × 0.46 = 2.0 m` *relative to each other* — against a 1.1 m lane spacing.
-The cross-section is **sheared**, not leant.
+So the walk-past lanes wandered **30% of their own 1.1 m pitch** and the race
+lanes 0.88 m. In **plan view** -- which is the question `nearestLane` and a
+trestle branch both ask -- that is enough for a high lane to be pushed outward
+past a low neighbour and the two to swap order, which is why a trestle's four
+branch tops landed over only three distinct lanes. In 3D they stay apart (the
+control reads 1.192 m closest approach on the broken geometry), because what
+separates them there is the very height difference doing the shearing.
+
+**Correction to this file's first draft**, which claimed a "-0.284 m drawn
+lateral gap". That number came from projecting drawn points onto the *flat*
+outward normal, which double-counts the lean -- the instrument re-introduced
+exactly the term the fix removes. The frame-correct numbers are the table
+above. Same defect, and the fix is unchanged; the first measurement of it was
+not one to quote.
 
 Everything follows from that one shear:
 
-- trestle branch tops land over the wrong lane (`nearestLane` is a plan-view
-  question and the lanes have swapped order) — "carries only 3 of 4 lanes";
-- a sleeper's gauge point measures to the wrong lane's rail — 0.53–0.57 m;
+- trestle branch tops land over the wrong lane in plan -- "carries only 3 of 4
+  lanes";
+- a sleeper's gauge point measures to the wrong lane's rail -- 0.53-0.57 m;
 - duck bars and their supporting legs disagree;
-- the two rings interleave, so `race-ring/rail-1` and `walk-past-ring/rail-1`
-  share a plane (`check:coplanar` NEW seams).
+- the two rings interleave (closest drawn lane centres 0.300 m), so
+  `race-ring/rail-1` and `walk-past-ring/rail-1` share a plane.
 
 **No map that displaces a point outward in proportion to its height can avoid
-this** — that is the trap I circled three times. Applying the undulation along
+this** -- that is the trap I circled three times. Applying the undulation along
 the local up afterwards shears exactly the same amount, because the undulation
 *is* the height difference. The only fix is a **rigid station frame**: at each
 arc length the whole cross-section is rotated as one piece about the centre
-line's own column.
+line's own column. `RailRaceRoute.lean` / `.unlean` are that map and its exact
+inverse.
+
+**Control run** (the instrument proved able to fail): reverting `pointAt` to
+`placeOnSphere` at the lane's own column and re-running the same probe gives
+the "before" row above -- 0.329 / 0.877 m of offset error against 2.7e-14 after.
 
 ## Second, separate defect — an instrument fault
 
