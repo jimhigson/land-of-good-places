@@ -282,3 +282,58 @@ person does not have to rediscover them.
 Everything else in the 66-step chain passed, including `check:park`
 (19/19 attractions, 256/256 waypoints, all six invariants) and
 `check:castle-towers`.
+
+## The slide solver got 5.2x dearer, and I could not make it cheaper
+
+**Disclosed because a reviewer found it, not I.** Judging the swept
+Catmull-Rom instead of the control polygon — the right fix, and the standing
+"backtrack against real geometry" rule — makes the slide search work five times
+harder and roughly doubles a whole park build, on the very base whose headline
+was making park builds fast (#670, 1538 s -> 299.7 s).
+
+Reviewer's back-to-back build of the canonical park, base vs head at identical
+load:
+
+| stage | base | head | ratio | pieces |
+|---|---|---|---|---|
+| cruiser | 3058 ms | 3493 ms | 1.14x | identical (771,062) |
+| train | 6797 ms | 7971 ms | 1.17x | identical (302,918) |
+| **slide** | **3206 ms** | **16641 ms** | **5.19x** | **597k -> 3,008k** |
+| whole park | 15.1 s | 29.9 s | 1.98x | |
+
+Cruiser and train explore byte-identical piece counts, which calibrates their
+1.14x as pure load and proves the slide's 5.19x is algorithmic. I reproduced
+the head figure independently: **3,007,891 pieces**, exactly.
+
+**Where the 5.2x comes from**, which is also why none of the obvious fixes work:
+
+- ~2.1x is **points per judge** — the control polygon is ~90 points, the curve
+  sampled at the 0.4 m `parkFacts.ts` measures at is ~189.
+- ~2.4x is **routes explored** — the dense test refuses routes the polygon
+  accepted, so the search keeps looking.
+
+### Three levers tried, all measured, none kept
+
+1. **Early-out in the cruiser clause** (stop at the first fouling point instead
+   of scanning on for the worst). Pieces **unchanged at 3,007,891** — it never
+   fires on this seed, so nothing is being rejected by that clause. Reverted.
+2. **Two-phase judge: cheap control-polygon pass first, dense curve only if it
+   passes.** Pieces **3,007,891 -> 3,007,895**, i.e. the cheap pass rejects
+   *nothing*. That is the fix restating itself: the control polygon is precisely
+   what does pass. It adds a wasted 90-point pass. Reverted.
+3. **Caching `CoasterRoute.nearestPoint`'s plan-view samples.** It walks the
+   whole loop calling `getPointAt` (an arc-length lookup with a binary search)
+   every 2 m, per query, on a curve that has not moved since its constructor —
+   which looked like the dominant cost. Interleaved A/B, six builds, using the
+   untouched cruiser stage to calibrate load: `slide/cruiser` **5.05 walking vs
+   5.45 with the table**. No win. Reverted rather than shipped unproven.
+
+### What is left to try
+
+Nothing I can justify without a profile, and a profile wants a quiet machine —
+every measurement above was taken with four other agents' worktrees busy (load
+12-15), which is why I leaned on piece counts and stage ratios rather than wall
+time. `node --cpu-prof` on an idle box is the next step, and the honest state is
+**the regression is real, disclosed, and unfixed**. It is not a reason to go
+back to judging control points: that is what drew a child 1.7 m through a
+turret and within 3 cm of the Sky Cruiser.
