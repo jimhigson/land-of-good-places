@@ -644,6 +644,21 @@ part of the log it belongs to.** A chain log opens with an inventory; a boot log
 ends with subsidiary budgets; a summary line's fields mean what the emitting
 code says they mean and not what the name suggests.
 
+### A catalogue that logs only failures cannot tell you where it is
+
+The per-step runner prints a line only when a step goes **red**, so `0 reds`
+means either "nothing has failed" or "nothing has run" and there is no way to
+tell them apart from its output. Twenty minutes in I read `0 reds` while
+`check:slide-rider` — which fails standalone on both branches — was supposedly
+long past, and had to test the runner's own exit-code logic before discovering
+it was simply still *on* that step. The `check-park.mts` process visible at the
+time was a **child** `slide-rider` had spawned to build a park, so
+`pgrep -n node` was answering a different question than the one I asked it.
+
+Whatever it was, `/tmp/step-out.log` held the answer: it is the current step's
+output, so its contents name the step. **A long unattended run wants a progress
+signal, not only a failure signal** — otherwise silence is unreadable.
+
 ### `check:slide-rider` is NOT park-sensitive — measured, both sides
 
 ```
