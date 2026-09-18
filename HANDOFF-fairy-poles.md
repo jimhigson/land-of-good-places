@@ -558,6 +558,42 @@ bounding-sphere reject answers most poles in one distance test. Without those
 it would have been `drawnOnSphere` plus a full loop walk **per candidate**,
 ~112 slots x up to 10 candidates.
 
+## Two more defects, both mine, both caught by gates I had already run once
+
+**1. The cruiser went through the BULBS** (seed 326, after the pole fix):
+`the Sky Cruiser's car passes through 'fairy-bulbs' at 152.0 m along the loop`.
+
+The overhead test guarded the 4.4 m **post**. The rig also hangs cables between
+poles, sagging 1.15 m, with bulbs 0.18 m under those — **air where there is no
+pole at all**, so the car passed cleanly between two poles, cleared both, and
+hit the lights strung between them.
+
+I had written the three names of the rig's parts that morning —
+`fairy-pole-*`, `fairy-string-*`, `fairy-bulbs` — to count them in an
+invariant, and then wrote a clearance test covering one of the three.
+
+**The fix is generic on purpose.** `fairyOccupiedPoints` returns the rig's
+**drawn** world geometry for a pole and its spans; the drawing is built from
+the same calls (`fairyAnchorAt`, `fairySpan`); `cruiserClearanceForPoints`
+takes those points. **Sharing the constants would not have been enough** —
+constants shared with geometry re-derived is still two definitions of one
+thing, and the next person to tune the sag would have silently un-guarded the
+ride. A part added to the rig is covered the day it is added, not when somebody
+remembers this test exists.
+
+**2. Nine new coplanar seams, all fairy.** `check:coplanar` 19 → 28 against
+base: `fairy-pole-0`/`fairy-pole-10`, `fairy-pole-20`/`21`,
+`fairy-pole-20`/`50`, the knobs against each other. A pole is an eight-sided
+cylinder and a knob a sphere, both from one shared geometry, **all placed at
+yaw 0** — so every post's facets pointed the same way, and two posts offset
+along a direction parallel to a facet put that facet in the *same plane*. Ten
+poles in one verge never showed it; a hundred across the park is arithmetic.
+
+Fixed by giving each post its own seeded bearing, which removes the shared
+plane **at its cause** — no stand-off, no number to maintain, the faces simply
+stop being parallel. Its own `Rng`: the existing one draws the strings' light
+colours and consuming it would have re-coloured them.
+
 ## When two measurements disagree, re-read your own log first
 
 Twice in one session I quoted a number, built a theory on what I assumed it
