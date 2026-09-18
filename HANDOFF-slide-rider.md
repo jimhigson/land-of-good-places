@@ -108,3 +108,113 @@ that `check:slide-rider` (canonical seed only) cannot.
   `playwright-core` + `vite preview` on your own port, headless, WebGL works.
 - The 0.40% threshold (`TRACKSIDE_BODY_FLOOR`) is untouched, and `scripts/` has
   no diff against the base at all.
+
+
+---
+
+# Round 2 — Jim rode it: "camera all jittery, player clips into the slide"
+
+## Both defects were PRE-EXISTING. Hard control
+
+Same instrumented ride on branch and on base: `deepest body point: -0.676 m in
+the trough frame (head, frame 489)` — **byte-identical**, same value, same part,
+same frame. Camera motion likewise (worst within-beat turn 1.13 vs 0.95
+deg/frame). Jim's "this used to be almost perfect before spherical world" was
+right.
+
+## Root cause — three notions of "up" over 95 m of one chute
+
+| thing | its "up" |
+|---|---|
+| centre line (`solve.ts` `heightAt`/`worldYAtRadius`) | radius-held, per column |
+| trough cross-section (`SlideRide.sampleFrames`) | world `(0,1,0)`, per sample |
+| **the rider** (`advanceRide`->`setRidePose`->`faceOnGround`) | **the sphere normal** |
+
+`faceOnGround` premultiplies `tiltToSphere`. She was leant onto the planet
+inside a trough that is not. Measured at the worst frame: chute slope 28.4 deg,
+her `rotation.x` **-15.7 deg**, and as the slope fell 29.1->27.9 her pitch moved
+the OPPOSITE way. Head at `up=-0.655` where a reclining child belongs at `+0.51`.
+
+## Second defect: `up.ts` built a YXZ intent from an XYZ euler
+
+`_euler` was `new Euler()` (XYZ). `setFromEuler` ignores the object's own
+`rotation.order`, so `Building.ts:1649`'s `rotation.order = 'YXZ'` — with a
+docblock explaining why it is load-bearing — could never take effect.
+
+**Wider survey, as asked:** of every `faceOnGround` caller in the game, only
+**two** pass a non-zero pitch — `railRace/seat.ts:88` and the slide. With
+`pitch = 0` the two orders are identical (one turn about Y), so the parade, the
+NPCs, the pets, the bus and the exit crowd were never affected. The rail race
+**was**, and its engineer should know.
+
+## The fix
+
+`SlideRide.frameAt(t)` is now the single owner of the chute's cross-section, and
+`sampleFrames` — the sweep that draws the trough — is written in terms of it.
+The rider, the chase seat, the grown-up and the pets all read it; each had been
+rebuilding its own from a yaw and a `slopeOf`. Lifts go along the frame's `up`,
+not world `+Y`. Orientation is handed over as a **basis**, not euler angles,
+because angles need an order and the order was the second bug.
+
+`Player.setRideFrame` is the new door for a ride that owns its frame;
+`setRidePose` (which ends in `faceOnGround`) stays for anything whose floor is
+the actual ground.
+
+    deepest body point in the trough frame   -0.676 m  ->  +0.237 m   (floor -0.06)
+
+## Two new clauses, both proved red
+
+1. **Rider inside the trough surface**, in the chute's own frame via `frameAt`.
+   The old clause measures distance to the centre LINE and allows 1.90 m — it
+   reported a comfortable "worst 0.26 m off the chute" while her head was 0.62 m
+   through the floor. **A distance to a line cannot tell you which side of a
+   surface you are on.** Keep that as the cautionary note.
+2. **How the shot MOVES** — a trackside eye may not drift within its beat
+   (bolted to the ground), and the turn rate may not change abruptly. Within a
+   beat only: the cut BETWEEN beats is a deliberate 128-deg hard cut.
+
+Red transcripts (geometry: canonical seed 20260728, base `76224f91`):
+
+    both bugs restored: head -0.659 m, frame 490  (reproduces the original -0.676)
+    frame fix only reverted: head -0.147 m, frame 605
+    eye re-solved per frame: trackside drift 0.000222 m (allowed 0.000001)
+    aim alternating between two candidates: turn rate change 43.652 deg/frame^2 (allowed 1)
+
+Green: drift 0.000000, turn-rate change 0.021, deepest +0.237.
+
+## The jitter — measured in a real browser, and NOT reproduced by the harness
+
+Fixed-dt stepping shows perfect smoothness, which is itself the finding: the
+defect is dt-dependent. Real Chrome, built bundle, `vite preview`:
+
+- frame pacing mid-ride is **good** — mean 7.31 ms, p50 6.1 ms;
+- **67 of 70 stalls fall in the first 5.4 s** (park generation / lazy imports),
+  several of 180-237 ms, and that window overlaps the start of the ride;
+- only two ~59 ms stalls land inside the ride proper.
+
+`MAX_FRAME_DELTA` is **1/12 s (83 ms)**, so a 59 ms frame passes through
+unclamped: `ride.distance += 6.5 * 0.059` moves her **0.38 m in one frame**
+against 0.04 m normally — a ~10x jump, and the trackside camera aims at her
+every frame, so the shot snaps with her. The 237 ms generation stalls clamp to
+83 ms, which is still a 0.54 m jump.
+
+`damp` is a proper exponential half-life (`2^(-dt/halfLife)`), so it is
+frame-rate independent and is **not** a continuous-jitter source. Ruled out.
+
+**Jim rode a preview built before #670** (park solve 1538 s -> 299.7 s), which
+is why his load was slow — so he got the generation stalls at their worst,
+overlapping the opening beats. This branch is now rebased onto a base that
+includes #670.
+
+**Still unproven:** whether that fully accounts for what he saw. The honest next
+step is for him to ride a fresh preview of this branch and say whether it is
+better. If it is still juddery, the fix is to clamp `dt` far tighter for a ride
+that integrates distance, or to integrate the ride on a fixed step.
+
+## State
+
+- rebased onto `76224f91`; `test:procgen` 55 failures — **identical to the
+  pre-existing baseline**, none added; trackside extents unchanged, confirming
+  the trough geometry did not move.
+- `check:slide-rider` green with both new clauses.
+- Browser page closed, preview server killed by PID, port 5419 free.
