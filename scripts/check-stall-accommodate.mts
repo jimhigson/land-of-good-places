@@ -206,11 +206,21 @@ function askerClaimOn(wall: Claim): Claim {
 
 // The six mini-game booths are the ones that move; `facePaint` and `keychain`
 // are built from world coordinates in too many places and answer "no" by
-// design, which clause 5 below covers. Try each in turn: the proof needs one
-// booth that says yes, and which one it is is a property of the seed.
+// design, which clause 5 below covers.
+//
+// **Every one of the six is asked, not just the first that says yes.** The
+// first cut stopped at the first booth that moved, which meant the ferris
+// kiosk — the one booth placed by relation to the wheel rather than on a plot
+// of its own, and so the one whose spur end is found by a different route —
+// was never exercised at all. Asking all six also reaches the branch where a
+// booth tries every ring and refuses, which is the one place a booth could be
+// left with its mesh and its colliders apart.
 const movableIds = Object.keys(STALL_PLACEMENTS).filter((id) => id !== 'facePaint' && id !== 'keychain');
 
 let proved = false;
+let movedCount = 0;
+let refusedAfterSearch = 0;
+const standsToRecheck: string[] = [];
 for (const id of movableIds) {
   const before = drawnAt(id);
   const mine = wallClaimsOf(id);
@@ -224,6 +234,7 @@ for (const id of movableIds) {
 
   const outcome = accommodate(front.index, 1, [asker]);
   if (isRefusal(outcome)) {
+    refusedAfterSearch += 1;
     console.log(`      '${id}' refused: ${outcome.reason}`);
     // A refusal must leave the booth exactly as it was — clause 5, run here
     // because a refusal is what we have in hand.
@@ -287,30 +298,22 @@ for (const id of movableIds) {
     pass(`'${id}': the registry describes the booth at its new spot`);
   }
 
-  // 4. the counter still works, on a lattice rebuilt over the moved booth
+  // 4a. room to stand at the new counter, now; the walk to it is asked once
+  // at the end, over the world every booth has finished moving in.
   const stand = STALL_STANDS_BY_ID.get(id);
   if (!stand) {
     fail(`'${id}' moved and has no stand point at all`);
+  } else if (!collision.isClearCircle(stand.x, stand.z, PLAYER_RADIUS)) {
+    fail(
+      `'${id}' moved and its stand point (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) has no room ` +
+        `for a ${PLAYER_RADIUS} m body`,
+    );
   } else {
-    if (!collision.isClearCircle(stand.x, stand.z, PLAYER_RADIUS)) {
-      fail(
-        `'${id}' moved and its stand point (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) has no room ` +
-          `for a ${PLAYER_RADIUS} m body`,
-      );
-    } else if (!reachabilityFromEntrance()(stand.x, stand.z)) {
-      fail(
-        `'${id}' moved and its stand point (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) can no longer ` +
-          'be walked to from the park entrance',
-      );
-    } else {
-      pass(
-        `'${id}': its counter at (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) still has room to stand ` +
-          'and is still walkable to from the entrance',
-      );
-    }
+    pass(`'${id}': its counter at (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) has room to stand`);
+    standsToRecheck.push(id);
   }
+  movedCount += 1;
   proved = true;
-  break;
 }
 
 if (!proved) {
@@ -319,6 +322,46 @@ if (!proved) {
       'mechanism is unexercised, so nothing above proves it works',
   );
 }
+
+// 4b. **Every stall's counter is still walkable to**, on one lattice rebuilt
+// over the world as all the moves left it — not per booth, because a lattice
+// is a snapshot and the interesting question is the finished park.
+{
+  const reachable = reachabilityFromEntrance();
+  for (const id of Object.keys(STALL_PLACEMENTS)) {
+    const stand = STALL_STANDS_BY_ID.get(id);
+    if (!stand) {
+      fail(`'${id}' has no stand point at all`);
+      continue;
+    }
+    if (!reachable(stand.x, stand.z)) {
+      fail(
+        `'${id}': its counter at (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) can no longer be ` +
+          'walked to from the park entrance after the booths moved',
+      );
+    }
+  }
+  pass(
+    `every one of the ${Object.keys(STALL_PLACEMENTS).length} counters is still walkable to from the ` +
+      `entrance with ${movedCount} booth(s) moved`,
+  );
+}
+
+// **Coverage, said out loud on every run** — CLAUDE.md: a check that stops
+// covering something must say so, on stderr, where a passing run still shows
+// it. `refusedAfterSearch` is the branch where a booth tried every ring, found
+// nothing and put itself back; it is the one place a booth could be left with
+// its mesh and its colliders apart, so a run where it never fired must not
+// read as though it proved that path.
+process.stderr.write(
+  `  check:stall-accommodate seed ${seed}: ${movedCount} of ${movableIds.length} movable booths ` +
+    `stepped aside; ${refusedAfterSearch} exhausted every ring and restored itself` +
+    (refusedAfterSearch === 0
+      ? ' — so the EXHAUSTED-SEARCH RESTORE PATH WAS NOT EXERCISED by this run, and nothing above ' +
+        'covers it. It needs a test of its own.'
+      : '.') +
+    '\n',
+);
 
 // ------------------------------------------- clause 5: the two that say no
 
