@@ -100,9 +100,11 @@ the boundary scan was inside.
 
 ### `check:every-seed-builds`, the whole thing, on the branch
 
-Quoted off the screen. **All sixteen seeds, 299.7 s against the workflow's
-25-minute cap** — and taken on a box whose load average was 15–40, with four
-other agents' park builds running, so it is a ceiling rather than a best case.
+Quoted off the screen. **All sixteen seeds, in two independent full sweeps: 299.7 s and 332.1 s,
+against the workflow's 25-minute cap.** Both were taken with other agents'
+park builds running (load average 10–40), so both are ceilings rather than
+best cases — which is the useful direction: contention only ever makes this
+number worse, and it still lands at a fifth of the cap twice over.
 
 ```
   seed   0: built      14.4s  19/19 attractions … 254/254 waypoints connected. All six invariants hold.
@@ -214,6 +216,33 @@ needs its own sweep. Note also that it is now worth about a quarter of what it
 looked like — the railway searches it avoids cost ~9 s each on this branch, not
 ~35 s — so **re-measure before sizing it**.
 
+### `check:park-boot` — measured seven times, because one run said nothing
+
+`check:park-boot` derives its own ceiling from how slow it finds the box
+(`8 ms budget + 12 ms of grace x slowness`), so the scale-free number is
+**worst slice ÷ that run's own ceiling**, not the milliseconds:
+
+| build | worst slice | its ceiling | ratio |
+|---|---|---|---|
+| base | 19.1 ms | 22.1 ms | 0.86 |
+| base | 25.5 ms | 20.5 ms | **1.24** |
+| base | 23.4 ms | 21.2 ms | **1.10** |
+| branch | 26.1 ms | 22.7 ms | **1.15** |
+| branch | 23.0 ms | 23.6 ms | 0.97 |
+| branch | 22.9 ms | 23.6 ms | 0.97 |
+| branch | 23.5 ms | 24.0 ms | 0.98 |
+
+**All seven passed.** The base breaches its own ceiling on two runs of three,
+by a wider margin than the branch ever does; the branch sits at 0.97–0.98 on
+three runs of four. So the lazily built candidate grid is **not** putting a
+lump in a boot slice, and the first branch run's 26.1 ms was the box, not the
+diff.
+
+The honest generalisation, which is the reason for the table: **the first run I
+took (base 19.1 / 22.1) was the lucky one, and quoting it as the base's
+behaviour would have made my own change look like a regression it is not.** One
+sample of a contended measurement is not a measurement.
+
 ## Determinism: the park is unchanged, not merely deterministic
 
 `scripts/park-digest.mts`, canonical seed, base worktree vs this branch —
@@ -239,10 +268,10 @@ nothing announced when it stopped being.
       reference (`scripts/_probe-boundary-exact.mts`, untracked)
 - [x] canonical park digest unchanged against the base
 - [x] before/after per-seed timings for seeds 3, 4, 7
-- [x] `check:every-seed-builds` green, 16/16, 299.7 s
-- [x] `check:park-boot passed`
+- [x] `check:every-seed-builds` green, 16/16, twice: 299.7 s and 332.1 s
+- [x] `check:park-boot` passed on all seven runs, base and branch — see table
 - [x] `test:procgen` name-diff against the base: **identical failure sets**
-- [ ] PR against `feat/procgen-on-sphere`
+- [x] PR against `feat/procgen-on-sphere` — **#670**
 
 ### `test:procgen` name-diff
 
