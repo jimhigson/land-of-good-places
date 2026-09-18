@@ -99,7 +99,8 @@ process per seed, all ten pool seeds:
 | 428 | 4026fa879ce5bbe3 | 4026fa879ce5bbe3 |
 | 451 | 9c5c9504db51c63c | 9c5c9504db51c63c |
 
-Identical, every one — mesh counts too. That is the property the design was
+Re-taken at final HEAD (875453e1) after every source change: **identical
+again, all ten**. Identical, every one — mesh counts too. That is the property the design was
 built for: attempt 0 of every stall is the spot the layout drew, and the
 claims are the colliders' own geometry, so nothing that was allowed before is
 refused now.
