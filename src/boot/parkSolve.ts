@@ -60,6 +60,36 @@ import { resetPlanCaches } from './planCaches';
 const now = (): number =>
   typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
 
+/**
+ * **Thread CPU time, in milliseconds, where the runtime has it; otherwise 0.**
+ *
+ * `msByFeature` is wall clock, and wall clock on this machine is a measurement
+ * of what every *other* agent is doing as much as of what the park costs — it
+ * is what made `check:solve-cost` flake at 260.3 ms against a 250 ms budget on
+ * a loaded box and read 96-99 ms on a quiet one, same commit. A CPU clock does
+ * not advance while its thread is descheduled, so it prices the work rather
+ * than the contention, and a budget built on it means the same thing on
+ * whatever box happens to run it.
+ *
+ * It is `threadCpuUsage`, not `cpuUsage`: the latter is `getrusage(RUSAGE_SELF)`
+ * — every thread, including V8's concurrent marker — so an allocation-heavy
+ * feature gets charged work done on another core. `check:park-boot` found that
+ * by measurement (25.2 ms wall, 44.7 ms process CPU, 18.9 ms thread CPU) and
+ * `scripts/lib/cpuClock.mts` is the checks' owner of the same reading.
+ *
+ * **0 in a browser, and that is deliberate**: nothing in the shipped bundle
+ * defines `process`, `cpuMsByFeature` is headless diagnostics exactly as
+ * `msByFeature` is, and a zero is honestly "not measured here" rather than a
+ * wall-clock number wearing a CPU label.
+ */
+const cpuNow = (): number => {
+  const nodeProcess = (
+    globalThis as { process?: { threadCpuUsage?: () => { user: number; system: number } } }
+  ).process;
+  const used = nodeProcess?.threadCpuUsage?.();
+  return used ? (used.user + used.system) / 1000 : 0;
+};
+
 const LIVE = ((): { write: (s: string) => unknown } | null => {
   const nodeProcess = (globalThis as { process?: { env?: Record<string, string | undefined>; stderr?: { write: (s: string) => unknown } } }).process;
   return nodeProcess?.env?.['LGP_TRACE_LIVE'] === '1' && nodeProcess.stderr ? nodeProcess.stderr : null;
@@ -105,6 +135,13 @@ export interface SolveStats {
   piecesByFeature: Record<string, number>;
   /** Wall-clock milliseconds spent inside each feature's `advance`, summed over turns. Headless diagnostics only. */
   msByFeature: Record<string, number>;
+  /**
+   * The same span priced in **thread CPU time** rather than wall clock — see
+   * {@link cpuNow}. This is what `check:solve-cost` budgets against, because a
+   * descheduled solve accrues no CPU and so cannot redden a check for something
+   * no commit caused. 0 throughout in a browser, where there is no such clock.
+   */
+  cpuMsByFeature: Record<string, number>;
 }
 
 export class ParkSolve {
@@ -125,6 +162,7 @@ export class ParkSolve {
     turnsByFeature: {},
     piecesByFeature: {},
     msByFeature: {},
+    cpuMsByFeature: {},
   };
   private readonly builders: readonly FeatureBuilder[];
   private readonly index: ReadonlyMap<string, number>;
@@ -218,6 +256,7 @@ export class ParkSolve {
   private *turn(builder: FeatureBuilder): Generator<number, void, void> {
     const attempt = this.nextAttempt.get(builder.name) ?? 0;
     const began = now();
+    const cpuBegan = cpuNow();
     const steps = builder.advance(attempt);
     let outcome: Advance;
     for (;;) {
@@ -230,6 +269,8 @@ export class ParkSolve {
       yield step.value;
     }
     this.stats.msByFeature[builder.name] = (this.stats.msByFeature[builder.name] ?? 0) + (now() - began);
+    this.stats.cpuMsByFeature[builder.name] =
+      (this.stats.cpuMsByFeature[builder.name] ?? 0) + (cpuNow() - cpuBegan);
     if (outcome === 'done') {
       this.finished.add(builder.name);
       this.note(`done ${builder.name} increments=${this.placed.get(builder.name) ?? 0}`);

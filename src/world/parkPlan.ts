@@ -457,7 +457,16 @@ function builders(): readonly FeatureBuilder[] {
       state.pathGraph = graph;
       const train = planPart('train');
       const routes = graph.edges.filter((edge) => edge.paved).map((edge) => edge.route);
+      // Each screen below is its own piece. Together they were one unbroken
+      // 15.57 ms `next()` — the fattest single step of the whole plan drive,
+      // measured — and it is the LAST one, so the slice that began it had
+      // already spent most of its 8 ms budget on the steps before it. That is
+      // the 22.4-23.1 ms `parkPlan` slice `check:park-boot` named on run after
+      // run, against a ~20 ms ceiling: not a fat park, a fat piece. Four
+      // independent passes over the same samples split into four pieces.
+      yield 0;
       const drawn = drawnSamplesFor(routes);
+      yield 0;
       // A drawn path must stay inside the park. On seed 4 `spur-waterFight`
       // was routed 1.8 m OUTSIDE the boundary wall, and its waypoint seeds
       // had nowhere to stand (`poi.nospot`). That is a plot standing too near
@@ -475,6 +484,7 @@ function builders(): readonly FeatureBuilder[] {
           { consumed: ['layout'] },
         );
       }
+      yield 0;
       const screen = screenDrawnPathsForOffSiteCrossings(train.route, drawn, { esplanadeOver: drawn });
       if (screen.fouls.length > 0) {
         delete state.pathGraph;
@@ -493,6 +503,7 @@ function builders(): readonly FeatureBuilder[] {
       // a site, and the whole park was unreachable from the entrance — the
       // path was squeezed shut between the wall and the fence. The loop is
       // the decision that pinched it.
+      yield 0;
       const pinched = pinchedSample(drawn, planPart('crossings').bridges, train.stations, train.route.length);
       if (pinched) {
         delete state.pathGraph;
