@@ -4997,7 +4997,14 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  */
 const theSlideClearsTheCastleRoofGarden: Invariant = (facts) => {
   const complaints: string[] = [];
-  const roof = facts.castleRoofGarden;
+  // **In the castle's own axes, with the chute taken there too.** A world-axis
+  // box round the roof garden is an axis-aligned box round a body leaning
+  // 12.44 degrees, so its `max.y` is the highest world `y` any corner of it
+  // reaches — a corner that on seed 131 is nowhere near where the chute passes.
+  // Measured there it reported the ride 0.22 m *inside* a roof "topping out at
+  // 8.06 m"; measured in the frame the roof is actually drawn in, the same ride
+  // clears the same roof by **5.02 m**. See `ParkFacts.castleRoofGardenInCastleFrame`.
+  const roof = facts.castleRoofGardenInCastleFrame;
 
   if (roof === null) {
     complaints.push(
@@ -5014,7 +5021,7 @@ const theSlideClearsTheCastleRoofGarden: Invariant = (facts) => {
   const reach = facts.chuteEnvelope.halfWidth;
   let over = 0;
   let worst = Infinity;
-  for (const [x, y, z] of facts.slideChute) {
+  for (const [x, y, z] of facts.slideChuteInCastleFrame) {
     if (x < roof.minX - reach || x > roof.maxX + reach) continue;
     if (z < roof.minZ - reach || z > roof.maxZ + reach) continue;
     over += 1;

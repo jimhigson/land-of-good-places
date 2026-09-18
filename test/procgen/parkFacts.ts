@@ -1156,6 +1156,35 @@ export interface ParkFacts {
     readonly topY: number;
   } | null;
   /**
+   * **The same box, in the castle's own axes, built from the drawn vertices.**
+   *
+   * A world-axis `Box3` round the roof garden is an axis-aligned box round a
+   * body leaning **12.44 degrees**, so its `max.y` is the highest world `y` any
+   * corner reaches and has nothing to do with the height of the roof where the
+   * chute actually passes. Measured on seed 131 it read the roof at 8.06 m and
+   * reported the ginormous slide 0.22 m *inside* it; asked in the castle's own
+   * frame, with the chute taken there too, the same ride clears the same roof
+   * by **5.02 m**.
+   *
+   * So this is the honest box, and {@link theSlideClearsTheCastleRoofGarden}
+   * asks it. Built by putting every drawn vertex of the roof-garden group
+   * through `worldToCastle`, not by rotating the world box's eight corners —
+   * that would only be a bigger box round a wrong one.
+   */
+  /**
+   * {@link slideChute}, put through `worldToCastle` — the chute in the same
+   * axes the castle and everything standing on it is drawn in, so a clearance
+   * against the roof garden compares like with like.
+   */
+  readonly slideChuteInCastleFrame: readonly (readonly [number, number, number])[];
+  readonly castleRoofGardenInCastleFrame: {
+    readonly minX: number;
+    readonly maxX: number;
+    readonly minZ: number;
+    readonly maxZ: number;
+    readonly topY: number;
+  } | null;
+  /**
    * The castle's four corner towers, as the solids of revolution they were
    * actually built as, in **world space**.
    *
@@ -1982,6 +2011,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // than by asking the builder whether it built one — the same discipline the
   // cat bus below is found with, and for the same reason.
   let castleRoofGarden: ParkFacts['castleRoofGarden'] = null;
+  let castleRoofGardenInCastleFrame: ParkFacts['castleRoofGardenInCastleFrame'] = null;
   {
     let roofRoot: import('three').Object3D | null = null;
     scene.traverse((object) => {
@@ -1996,6 +2026,33 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         maxZ: box.max.z,
         topY: box.max.y,
       };
+      // ...and the same thing in the castle's own axes. See the field's
+      // docblock: an axis-aligned box round a leaning building is not the
+      // building.
+      const { worldToCastle } = await import('../../src/world/building/layout.ts');
+      const local = new Box3();
+      const corner = new Vector3();
+      (roofRoot as import('three').Object3D).traverse((object) => {
+        if (!(object instanceof MeshClass)) return;
+        const attribute = object.geometry.getAttribute('position');
+        if (!attribute) return;
+        for (let i = 0; i < attribute.count; i += 1) {
+          corner
+            .set(attribute.getX(i), attribute.getY(i), attribute.getZ(i))
+            .applyMatrix4(object.matrixWorld);
+          worldToCastle(corner, corner);
+          local.expandByPoint(corner);
+        }
+      });
+      if (!local.isEmpty()) {
+        castleRoofGardenInCastleFrame = {
+          minX: local.min.x,
+          maxX: local.max.x,
+          minZ: local.min.z,
+          maxZ: local.max.z,
+          topY: local.max.y,
+        };
+      }
     }
   }
 
@@ -2278,6 +2335,17 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       slide.pointAt(i / steps, probe);
       slide.group.localToWorld(probe);
       slideChute.push([probe.x, probe.y, probe.z]);
+    }
+  }
+
+  // The same chute in the castle's own axes — see `slideChuteInCastleFrame`.
+  const slideChuteInCastleFrame: (readonly [number, number, number])[] = [];
+  {
+    const { worldToCastle } = await import('../../src/world/building/layout.ts');
+    const probe = new Vector3();
+    for (const [x, y, z] of slideChute) {
+      worldToCastle(probe.set(x, y, z), probe);
+      slideChuteInCastleFrame.push([probe.x, probe.y, probe.z]);
     }
   }
 
@@ -3555,6 +3623,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     pathEdges,
     pathConnectivityEdges,
     slideChute,
+    slideChuteInCastleFrame,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
     slideChuteBands,
     slideCameras,
@@ -3565,6 +3634,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     castleMasonryTopFacadeY,
     castleMasonryDesignTopY: CASTLE_MASONRY_TOP,
     castleRoofGarden,
+    castleRoofGardenInCastleFrame,
     parkGateArch,
     castleTowers,
     chuteEnvelope: CHUTE_ENVELOPE,
