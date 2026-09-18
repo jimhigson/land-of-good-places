@@ -112,6 +112,42 @@ Base seeds 3 and 4 measured the same way (`check:every-seed-builds` with
 `LGP_SEEDS=3,4,7`); seed 7's base is the solo `check:park` quoted above, which
 is the kinder of the two measurements for the base.
 
+### Seed 428 — the pool seed the `check:entrance-road` engineer root-caused
+
+It measured seed 428 on the base at 185 s with
+`train=177585ms/6167553p`. The same seed on this branch:
+
+```
+park-solve: seed=428 time/pieces layout=82ms/789p cruiser=855ms/112707p
+  train=39551ms/6167553p slide=4772ms/787956p crossings=54ms/427p pathGraph=316ms/601p
+check:park: 19/19 attractions route from the entrance, 0 rail crossing(s),
+  240/240 waypoints connected. All six invariants hold. 49555 ms.
+```
+
+**`6167553p` on both.** The piece count is byte-for-byte what it was — the
+search makes precisely the same decisions and tries precisely the same
+candidates — and the time for them fell from 177585 ms to 39551 ms, **4.49×**.
+The whole park: 185 s → 49.6 s.
+
+That identical piece count is the strongest evidence in this branch that the
+change is a pure cost fix. A different park would not try the same 6,167,553
+pieces.
+
+It also answers that engineer's caution that a fix proven on seeds 0..15 might
+leave `PARK_SEED_POOL` slow: the win is in the inner loop of the rail search,
+so it is indifferent to which seed is being solved.
+
+**What it does *not* fix, and should not be reported as fixed:** the driver
+still solves seed 428's railway five times. `crossings` has `supply: 1`, so a
+`pathGraph` refusal naming `crossings, train, cruiser, layout` finds
+`crossings` exhausted at once and unwinds onto the train's ladder — spending a
+whole railway search where a different crossings decision would cost 54 ms.
+That lever is real and it is the right next ticket, but it is **not this one**:
+it changes the search's decisions, so it re-draws every park on every seed and
+needs its own sweep. Note also that it is now worth about a quarter of what it
+looked like — the railway searches it avoids cost ~9 s each on this branch, not
+~35 s — so **re-measure before sizing it**.
+
 ## Determinism: the park is unchanged, not merely deterministic
 
 `scripts/park-digest.mts`, canonical seed, base worktree vs this branch —
