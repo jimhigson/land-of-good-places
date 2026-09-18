@@ -111,6 +111,13 @@ const worldRegistry = park.world.groundClaims;
 // fountain, walls, trees, bushes, lamps, railRace]`: dropping `'lamps'` from
 // the roster fouls it as an undeclared placer, and swapping `'walls'` and
 // `'trees'` in the roster fouls `trees` as committing out of order.
+//
+// Re-proved the same two ways when `'stalls'` was added: dropping it fouls
+// `stalls` as an undeclared placer, and moving it after `'fountain'` fouls it
+// as committing out of order. This probe caught the stalls feature the first
+// time it was ever able to run — it had been blocked by the `railRace/hazards.ts`
+// module-scope TDZ until #682 — which is the whole argument for a roster
+// written out by hand.
 // ---------------------------------------------------------------------------
 // One rail race at two scales is one feature — see `src/world/railRace/feature.ts`.
 //
@@ -145,6 +152,16 @@ const EXPECTED_FEATURES = [
   'pathGraph',
   ROAD_FEATURE,
   // world/worldPhase.ts's builders, in order.
+  //
+  // **`stalls` is first, and it is new.** Until the stalls feature builder
+  // (`world/stallsFeature.ts`) landed, a booth was the one thing in the park
+  // that put something on the ground without claiming it: its spot came from
+  // the layout, its body became four wall colliders, and the registry never
+  // heard of it — so nothing could ever name a stall as the thing in its way.
+  // It claims now (four wall capsules per booth plus its stand spot), which is
+  // exactly the "a later step has added a placer" this roster's own comment
+  // asks to be widened by hand for.
+  'stalls',
   'fountain',
   'walls',
   'trees',

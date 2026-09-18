@@ -42,6 +42,7 @@ import {
 } from './Scenery';
 import { lampBuilder, type LampDecision } from './LampPosts';
 import { fairyPoleBuilder, type FairyPole } from './FairyLights';
+import { stallBuilder, type BoothRelocator } from './stallsFeature';
 import { RailRace } from './railRace/RailRace';
 import { TrestleRefusal } from './railRace/track';
 import { RAIL_RACE_FEATURE } from './railRace/feature';
@@ -58,6 +59,7 @@ export interface WorldPhase {
 
 let lastTrace: readonly string[] = [];
 let lastStats: SolveStats | null = null;
+let lastStallBuilder: FeatureBuilder | null = null;
 
 /** The world phase's trace, for the digest and the boot's stats. Empty until a World has been built. */
 export function worldSolveTrace(): readonly string[] {
@@ -68,12 +70,27 @@ export function worldSolveStats(): SolveStats | null {
   return lastStats;
 }
 
-/** The fountain: one increment, the basin's footprint at the plaza. It is first in order and never moves. */
+/**
+ * The stalls builder the last world phase used — **the same object the driver
+ * drove**, not a copy of it.
+ *
+ * `scripts/check-stall-accommodate.mts` needs it: no seed in the pool ever
+ * refuses anything against a stall, so the only way to prove the mechanism
+ * works is to ask a real booth, in a real built park, against the real
+ * registry and the real collision world. A transcript of a hand-run would go
+ * stale the moment the geometry moved (CLAUDE.md: "a red-run transcript is a
+ * measurement, and measurements go stale"); a check cannot.
+ */
+export function worldSolveStallBuilder(): FeatureBuilder | null {
+  return lastStallBuilder;
+}
+
+/** The fountain: one increment, the basin's footprint at the plaza. It never moves. */
 function fountainBuilder(claims: GroundClaims): FeatureBuilder {
   let placed = false;
   return {
     name: 'fountain',
-    deps: [],
+    deps: ['stalls'],
     *advance() {
       if (placed) return 'done';
       const claim: Claim = {
@@ -113,7 +130,7 @@ function railRaceBuilder(
   let built = false;
   return {
     name: RAIL_RACE_FEATURE,
-    deps: ['fountain', 'walls', 'trees', 'bushes', 'fairyLights', 'lamps'],
+    deps: ['stalls', 'fountain', 'walls', 'trees', 'bushes', 'fairyLights', 'lamps'],
     *advance() {
       if (built) return 'done';
       let ride: RailRace;
@@ -144,8 +161,15 @@ function railRaceBuilder(
   };
 }
 
-/** Decide every world-time feature. Synchronous: the World constructor drains it. */
-export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims): WorldPhase {
+/**
+ * Decide every world-time feature. Synchronous: the World constructor drains it.
+ *
+ * `booths` is how a stall steps aside: the `World` hands in a way to reach the
+ * booths it has already built, and `stallsFeature.ts` drives it. A caller with
+ * no booths to move (there is none today) passes one that answers `null`, and
+ * every stall then simply refuses to accommodate.
+ */
+export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims, booths: BoothRelocator): WorldPhase {
   const trees: TreeDecision[] = [];
   const bushes: BushDecision[] = [];
   const walls: (WallRun | null)[] = [];
@@ -153,6 +177,12 @@ export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims)
   const poles: FairyPole[] = [];
   let railRace: RailRace | null = null;
   const builders: FeatureBuilder[] = [
+    // **Stalls first.** Their ground is the most constrained in this phase and
+    // everything after wants to know where it is; and, being first, the
+    // driver's own precedence would let nothing ask one to move — which is why
+    // the stalls builder is `movable` and decides for itself (Jim: "this would
+    // be on the class that does the stall placement to decide").
+    stallBuilder(collision, claims, booths),
     fountainBuilder(claims),
     wallBuilder(claims, walls),
     treeBuilder(collision, claims, () => walls, () => bushes, trees),
@@ -163,6 +193,7 @@ export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims)
       railRace = ride;
     }),
   ];
+  lastStallBuilder = builders[0] as FeatureBuilder;
   const solve = new ParkSolve(PARK_SEED, builders, claims);
   for (const _turn of solve.run()) {
     // drained

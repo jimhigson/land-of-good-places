@@ -3,7 +3,8 @@ import { lazyArrayView } from '../boot/lazyView';
 import { registerPlanCache } from '../boot/planCaches';
 import { PALETTE } from '../core/palette';
 import type { FrameContext, GameSystem } from '../core/types';
-import type { CollisionWorld } from '../world/Collision';
+import type { CollisionWorld, WallCollider } from '../world/Collision';
+import { addBoothCollision, MINI_GAME_BOOTH_BOX } from './boothFootprint';
 import { pressZone, type InteractZone } from '../world/interact';
 import { standOnSphere, terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
@@ -172,15 +173,23 @@ registerPlanCache(() => {
   stallsMemo = null;
 });
 
-/** A stall as built into the world: its definition plus where to stand. */
+/**
+ * A stall as built into the world: its definition plus where to stand.
+ *
+ * The four coordinates are **not** `readonly`: a booth may step aside during
+ * the world phase (`world/stallsFeature.ts`), and when it does the thing a
+ * child sees, the thing she bumps into and the thing she taps all move
+ * together. They are written by {@link MiniGameStalls.boothPlacement} and by
+ * nothing else.
+ */
 export interface StallInstance {
   readonly definition: StallDefinition;
   /** World position of the booth itself. */
-  readonly x: number;
-  readonly z: number;
+  x: number;
+  z: number;
   /** Where a child stands to be served. */
-  readonly standX: number;
-  readonly standZ: number;
+  standX: number;
+  standZ: number;
   /**
    * The booth's own geometry. Here so the thing and its tap target cannot
    * drift apart — the HIGHLIGHT RULE outlines this exact group when the stall
@@ -195,6 +204,9 @@ export class MiniGameStalls implements GameSystem {
   readonly stalls: readonly StallInstance[];
 
   private readonly props: StallProp[] = [];
+  /** The four wall colliders each booth registered, so exactly those can be taken back if it moves. */
+  private readonly walls = new Map<string, WallCollider[]>();
+  private readonly collision: CollisionWorld;
 
   /**
    * "Open this booth" — wired by `Game` to `MiniGameHost.enter`, which either
@@ -209,6 +221,7 @@ export class MiniGameStalls implements GameSystem {
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'stalls';
+    this.collision = collision;
 
     const instances: StallInstance[] = [];
     for (const definition of STALLS) {
@@ -228,7 +241,7 @@ export class MiniGameStalls implements GameSystem {
 
       // The booth is solid; the paved apron in front of it is not, so a child
       // can run right up to the counter.
-      addBoothCollision(collision, x, z, definition.facing);
+      this.walls.set(definition.id, addMiniGameBoothCollision(collision, x, z, definition.facing));
 
       // Taken from `STALL_STANDS`, not recomputed here. This used to derive its
       // own from `STALL_STAND_DISTANCE`, which was harmless only for as long as
@@ -249,6 +262,42 @@ export class MiniGameStalls implements GameSystem {
       });
     }
     this.stalls = instances;
+  }
+
+  /**
+   * **This booth, as something that can step aside** — the handle
+   * `world/stallsFeature.ts` drives when a feature that needs the space more
+   * asks a stall to move.
+   *
+   * `withdrawCollision` takes back exactly the four walls this booth
+   * registered (not a blanket removal), so a candidate spot can be tested
+   * without the booth refusing itself. `placeAt` then moves the prop, its
+   * stand point and four fresh walls in one call — CLAUDE.md's rule that a
+   * mesh and its collider are only ever kept together on purpose.
+   */
+  boothPlacement(id: string): { withdrawCollision(): void; placeAt(x: number, z: number): void } | null {
+    const stall = this.stalls.find((candidate) => candidate.definition.id === id);
+    const prop = stall ? this.props[this.stalls.indexOf(stall)] : undefined;
+    if (!stall || !prop) return null;
+    return {
+      withdrawCollision: () => {
+        for (const wall of this.walls.get(id) ?? []) this.collision.removeWall(wall);
+        this.walls.set(id, []);
+      },
+      placeAt: (x: number, z: number) => {
+        for (const wall of this.walls.get(id) ?? []) this.collision.removeWall(wall);
+        stall.x = x;
+        stall.z = z;
+        const stand = STALL_STANDS_BY_ID.get(id);
+        if (!stand) throw new Error(`MiniGameStalls: no stand point for '${id}' after it moved`);
+        stall.standX = stand.x;
+        stall.standZ = stand.z;
+        prop.root.position.set(x, terrainHeight(x, z), z);
+        prop.root.rotation.y = stall.definition.facing;
+        standOnSphere(prop.root);
+        this.walls.set(id, addMiniGameBoothCollision(this.collision, x, z, stall.definition.facing));
+      },
+    };
   }
 
   /**
@@ -302,28 +351,14 @@ export class MiniGameStalls implements GameSystem {
 /**
  * Four walls around the booth body, rotated with it.
  *
- * `CollisionWorld.addRectangle` is axis-aligned and these booths are not, so
- * the corners are rotated by hand. Collision is height-blind (see
- * `Collision.ts`), which is fine here: the whole thing is one storey.
+ * The box, the rotation and the registration all live in
+ * `boothFootprint.ts` now — one owner, because the same ground is also a
+ * **claim** the stalls feature builder commits, and a claim derived
+ * separately from the collider is a booth that is in two places at once.
+ * `CollisionWorld.addRectangle` is axis-aligned and these booths are not,
+ * which is why the corners are rotated by hand there. Collision is
+ * height-blind (see `Collision.ts`), which is fine here: one storey.
  */
-function addBoothCollision(collision: CollisionWorld, x: number, z: number, yaw: number): void {
-  const halfWidth = 2.1;
-  const front = 1.35;
-  const back = -1.3;
-  const sin = Math.sin(yaw);
-  const cos = Math.cos(yaw);
-  const toWorld = (lx: number, lz: number): [number, number] => [
-    x + lx * cos + lz * sin,
-    z - lx * sin + lz * cos,
-  ];
-
-  const frontLeft = toWorld(-halfWidth, front);
-  const frontRight = toWorld(halfWidth, front);
-  const backLeft = toWorld(-halfWidth, back);
-  const backRight = toWorld(halfWidth, back);
-
-  collision.addWall(frontLeft[0], frontLeft[1], frontRight[0], frontRight[1], 0.3);
-  collision.addWall(backLeft[0], backLeft[1], backRight[0], backRight[1], 0.3);
-  collision.addWall(frontLeft[0], frontLeft[1], backLeft[0], backLeft[1], 0.3);
-  collision.addWall(frontRight[0], frontRight[1], backRight[0], backRight[1], 0.3);
+function addMiniGameBoothCollision(collision: CollisionWorld, x: number, z: number, yaw: number): WallCollider[] {
+  return addBoothCollision(collision, x, z, yaw, MINI_GAME_BOOTH_BOX);
 }
