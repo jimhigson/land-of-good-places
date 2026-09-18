@@ -59,13 +59,17 @@ import { ROAD_FEATURE } from '../entrance/roadCorridor';
 // Re-exported: these used to be defined here, and `cart.ts` and
 // `scripts/check-rail-race.mts` import them from this module.
 export { BAR_HALF_SPAN_AT_PARK_SCALE, RAIL_GAUGE_AT_PARK_SCALE } from './trestleGeometry';
-import {
-  LANE_COUNT,
-  PLAYER_LANE,
-  RIDE_SCALE,
-  UNDULATION_REACH,
-  type RailRaceRoute,
-} from './route';
+import { UNDULATION_REACH, type RailRaceRoute } from './route';
+// The dimensions come from the leaf, not through `./route`'s re-export, because
+// `RAIL_GAUGE` below is computed at **module scope**. `track.ts` is not in the
+// `route -> parkLayout -> ... -> hazards` cycle today — measured, `route.ts`
+// cannot reach `track.ts`, so it is strictly downstream and its imports are
+// fully evaluated before its body runs. This import is therefore hardening, not
+// a repair: the moment anything inside that cycle imports `track.ts`, a
+// module-scope read through `./route` would land in `RIDE_SCALE`'s temporal
+// dead zone, and the leaf cannot. See `dimensions.ts` for why a re-export does
+// not escape a cycle and a direct leaf import does.
+import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE } from './dimensions';
 
 /**
  * **Everything the Rail Race runs through**: four rails, the trestles holding

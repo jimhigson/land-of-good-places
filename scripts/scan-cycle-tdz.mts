@@ -34,18 +34,42 @@
  * verbatim; the last two are the *same read of the same binding* moved somewhere
  * that does not run at import time, which it must not report.
  *
- * | control | mutation to `railRace/hazards.ts` | sites |
+ * | control | mutation | sites |
  * |---|---|---|
- * | A | none — the copy as committed | **7** |
- * | B | `export const DUCK_CLEARANCE = DUCK_CLEARANCE_AT_PARK_SCALE * RIDE_SCALE;` re-imported from `./route` | **8**, naming `hazards.ts:186 DUCK_CLEARANCE <- RIDE_SCALE` |
- * | C | the same expression inside `function duckClearance()` | **7** — not reported |
- * | D | the same expression as an arrow-function initialiser | **7** — not reported |
+ * | A | none — the copy as committed | **8** |
+ * | B | `hazards.ts`: `DUCK_CLEARANCE = … * RIDE_SCALE` restored, imported from `./route` | **9**, naming `hazards.ts:186 DUCK_CLEARANCE <- RIDE_SCALE` |
+ * | C | `hazards.ts`: the same expression inside `function duckClearance()` | **8** — not reported |
+ * | D | `hazards.ts`: the same expression as an arrow-function initialiser | **8** — not reported |
+ * | E1 | `route.ts` gains `import './track'`, pulling `track.ts` into the cycle; `RAIL_GAUGE` imports the leaf (as shipped) | **8** — not reported |
+ * | E2 | the same cycle, but `RAIL_GAUGE` reads `RIDE_SCALE` back through `./route` | **9**, naming `track.ts:94 RAIL_GAUGE <- RIDE_SCALE` |
  *
  * B is the point: pointed at the defect that was repaired by hand, it finds it.
- * C and D are the point too — they are what stops "8" in B being a scan that
- * simply matches the identifier wherever it appears. It discriminates on *when
- * the expression is evaluated*, which is the only thing that decides whether a
- * read is in a dead zone.
+ * C and D are the point too — they are what stops B's 9 being a scan that simply
+ * matches the identifier wherever it appears. It discriminates on *when the
+ * expression is evaluated*, which is the only thing that decides whether a read
+ * is in a dead zone.
+ *
+ * **E is why `track.ts` imports `./dimensions` rather than `./route`.**
+ * `RAIL_GAUGE` is computed at module scope but `track.ts` is *not* in the cycle
+ * today (measured: `route.ts` cannot reach `track.ts`), so it cannot fail now.
+ * E1/E2 add the one import that would change that, and show the leaf version
+ * staying quiet while the `./route` version reports. The hardening is therefore
+ * load-bearing against a future edge rather than decoration.
+ *
+ * ## Two blind spots these controls caught, both real
+ *
+ * Both were found by a control rather than by reading the code, and each was
+ * silently shrinking the strongly-connected components — the failure mode where
+ * a scan returns *fewer* findings and looks like a clean repo:
+ *
+ * 1. **`export { X } from './y'` was not an edge.** 84 of them across `src/`.
+ *    Adding them took the cycle count 3 → 4 and surfaced
+ *    `artPalette.ts ART <- PALETTE`, which had never been listed.
+ * 2. **A bare `import './x'` was not an edge.** It binds no names, so the
+ *    original code skipped it with the type-only imports — but it still *forces
+ *    evaluation*, which is the whole question here. Control E was written
+ *    expecting a 9, got an 8, and that gap was this bug rather than the
+ *    mutation failing to bite.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -98,13 +122,37 @@ for (const file of allFiles) {
   const valueImports = new Map<string, Map<string, string>>();
   const edges = new Set<string>();
   for (const statement of source.statements) {
+    // `export { X } from './y'` is a value edge exactly as an import is — the
+    // re-exporting module still has to be evaluated, and its own imports walked
+    // first. Missing these shrank the strongly-connected components and hid
+    // `railRace/track.ts`'s `RAIL_GAUGE` (84 such edges across `src/`).
+    if (ts.isExportDeclaration(statement)) {
+      if (statement.isTypeOnly) continue;
+      const specifier = statement.moduleSpecifier;
+      if (specifier === undefined || !ts.isStringLiteral(specifier)) continue;
+      const target = resolveSpecifier(file, specifier.text);
+      if (target === undefined) continue;
+      edges.add(target);
+      // The re-exported names are not read by this module, so they cannot be
+      // the *subject* of a dead-zone read here; the edge is what matters.
+      if (!valueImports.has(target)) valueImports.set(target, new Map());
+      continue;
+    }
     if (!ts.isImportDeclaration(statement)) continue;
     if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
     const target = resolveSpecifier(file, statement.moduleSpecifier.text);
     if (target === undefined) continue;
     edges.add(target);
     const clause = statement.importClause;
-    if (clause === undefined || clause.isTypeOnly) continue;
+    // A bare `import './x'` binds no names but still **forces evaluation**, so
+    // it is an evaluation-order edge and belongs in the graph. Dropping it hid
+    // a cycle; found by a control that pulled `track.ts` into the cycle with
+    // exactly such an import and watched the scan stay quiet.
+    if (clause === undefined) {
+      if (!valueImports.has(target)) valueImports.set(target, new Map());
+      continue;
+    }
+    if (clause.isTypeOnly) continue;
     const names = valueImports.get(target) ?? new Map<string, string>();
     if (clause.name !== undefined) names.set(clause.name.text, 'default');
     const bindings = clause.namedBindings;
@@ -117,7 +165,7 @@ for (const file of allFiles) {
     if (bindings !== undefined && ts.isNamespaceImport(bindings)) {
       names.set(bindings.name.text, '*');
     }
-    if (names.size > 0) valueImports.set(target, names);
+    if (names.size > 0) valueImports.set(target, new Map([...(valueImports.get(target) ?? []), ...names]));
   }
   parsed.set(file, { file, source, valueImports, edges });
 }
