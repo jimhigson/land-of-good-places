@@ -489,3 +489,16 @@ Base gained three commits over `ae20b9fc`:
 
 And they are the same literal hashes as before the rebase
 (`a1b5c16077708bc0`, `528eebcd274a31a6`, …), so nothing moved on either axis.
+
+### `test:procgen` name-diff, re-taken against the new base
+
+The baseline had to be re-taken: the base moved, and a name-diff against a
+stale baseline is exactly the "measurements go stale" fault. New base
+`881cb158`: **55 failed | 638 passed (693)**. My rebased head: **55 failed |
+643 passed (698)**. Failure **set identical** — none added, none fixed; the
+five extra passes are my invariant on the five seed files.
+
+Also worth recording: the base's own failure set is **unchanged** by #669,
+#674 and #670 — same 55 names as at `ae20b9fc`. So those three commits fixed
+a check script (`check:waypoints`) and a solver's cost without moving a single
+invariant.
