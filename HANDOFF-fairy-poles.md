@@ -148,6 +148,33 @@ of measured. Seed 8 corrected it. Measure, do not derive.)
 The new invariant passes on both: 9/8 and 8/7 are non-zero. It refuses
 **silence**, not the gateway gap — which is the distinction it exists for.
 
+## Browser QA done (browser was allocated by the Overseer, now released)
+
+Built bundle served by `vite preview --port 5417 --strictPort` (PID noted and
+**killed by PID** when finished; port confirmed free of my node process).
+Canonical seed, plaza at **(-9.07, 7.38)**, ring radius 11.25.
+
+Three frames, in the session scratchpad
+(`/private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/92acae52-e71b-43c9-a76b-92e2c76ea5d3/scratchpad/`):
+
+| file | URL | what it shows |
+|---|---|---|
+| `fairy-lights-spawn-daytime.png` | `/spawn?pos=-9.07,-6.62&facing=0` | **the best one.** The character on the path with the pole ring and its bulb strings running past her at child scale — and clearly *beside* the paving, not on it |
+| `fairy-dusk-ring.png` | `/view?camPos=-9.07,26,-28&camDir=0,-0.78,1&timeOfDay=21:00` | the fountain with the lit ring arcing round it at dusk |
+| `fairy-dusk.png` | `/view?camPos=-9.07,11.5,-14.6&camDir=0,-0.52,1&timeOfDay=21:00` | closer on the strings: poles, finials, coloured bulbs lit |
+
+Bulbs read pink / yellow / mint / blue on a dark cable, poles dark brown with
+pink finials — visibly distinct from the pink lamp posts beside them.
+
+**Console: no errors.** One pre-existing warning unrelated to this change
+(`skyCruiser: the station platform is 4.5 m of track from the castle's level
+run`).
+
+Two discarded frames (`fairy-dusk-probe.png`, `fairy-lights-dusk-FINAL.png`)
+are badly aimed cameras, not defects — ignore them. Camera aiming on the
+sphere is not intuitive: `camDir` toward the plaza did not centre it, so the
+frames were found by iterating, not by computing.
+
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
 - `test:procgen` name-diff against the base (base has 55 known failures).
