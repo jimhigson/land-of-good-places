@@ -3539,12 +3539,23 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
 
   // See `ParkFacts.cruiserPylonTops`: the drawn top of each pylon, unleant back
   // into the flat frame `coaster.route` is solved in, so an invariant compares
-  // like with like. `unplaceFromSphere` is already imported above for the Rail
-  // Race's struts, which have the identical problem.
+  // like with like.
+  //
+  // **This block imports `unplaceFromSphere` itself, and must keep doing so.**
+  // It used to lean on the binding the Rail Race's strut block destructured a
+  // few hundred lines up, with a comment saying as much. #684 then stopped the
+  // Rail Race needing it ("Not `unplaceFromSphere`, which this used to call"),
+  // the binding went with it, and a rebase left this reaching for a name that
+  // no longer existed. The tell was not a red test: every seed suite threw in
+  // `buildParkFacts` and vitest reported **203 passed | 490 skipped**, zero
+  // failures — CLAUDE.md's "a skipped test is not a passing test", where the
+  // pass count is the only thing that gives it away. One block, one import, no
+  // shared binding to lose.
   const cruiserPylonTops: { x: number; y: number; z: number }[] = [];
   {
     const pylons = world.coaster.group.getObjectByName('skyCruiser:pylons');
     if (pylons instanceof InstancedMesh) {
+      const { unplaceFromSphere } = await import('../../src/world/terrain.ts');
       const { Matrix4: PylonMatrix4 } = await import('three');
       const matrix = new PylonMatrix4();
       const drawn = new Vector3();
