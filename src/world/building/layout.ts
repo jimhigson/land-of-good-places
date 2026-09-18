@@ -553,9 +553,20 @@ export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
 export interface TowerSolid {
   readonly name: string;
   /**
-   * World `x`/`z` of the **drawn foot** — where this part actually meets the
-   * park in plan. For the collider under it and for keep-outs; it carries no
-   * height and must not be used for one.
+   * World `x`/`z` on the **plan**, `BUILDING_CENTRE + local` — unchanged, and
+   * deliberately not the drawn foot.
+   *
+   * Every consumer of this is a ground-plane question: the collider
+   * `Building.registerCastleTowerCollision` puts under the tower,
+   * `check:castle-towers`' march, `parkFacts`' turret list. Moving it to the
+   * drawn foot was tried and reverted: the two differ by the lean, and
+   * `check:castle-towers` then measured "tower-body-0 stops a child at 2.66 m
+   * from its axis but its collider should hold her at 2.83 m". Both numbers
+   * come from this field, so the mismatch was the memo moving under one of its
+   * two readers — `CASTLE_FRAME` depends on `BUILDING_BASE_Y` and the terrain,
+   * which this used not to. The plan position has no such dependency, and at
+   * these radii it is what the `castleFlatToWorld` docblock already calls
+   * accurate enough for a ground-plane answer.
    */
   readonly x: number;
   readonly z: number;
@@ -591,13 +602,10 @@ export const CASTLE_TOWERS: readonly TowerSolid[] = lazyArrayView(() => (castleT
 function castleTowersNow(): readonly TowerSolid[] {
   const solids: TowerSolid[] = [];
   const corners = CASTLE_TURRET_CORNERS;
-  const foot = new Vector3();
   corners.forEach(([localX, localZ], index) => {
-    // The drawn foot, through the castle's own transform — the same one the
-    // turret group hangs on, so the collider and the mesh cannot drift.
-    castleToWorld(foot.set(localX, 0, localZ), foot);
-    const x = foot.x;
-    const z = foot.z;
+    // Plan position, not the drawn foot — see {@link TowerSolid.x}.
+    const x = BUILDING_CENTRE_X + localX;
+    const z = BUILDING_CENTRE_Z + localZ;
     solids.push({
       name: `tower-body-${index}`,
       x,
