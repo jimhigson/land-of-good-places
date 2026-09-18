@@ -89,6 +89,34 @@ Not fixed, both written up below:
 - [ ] **bushes, seed 11** — 175 against a floor of 180; a budget question that
       changes the park's look, so it is Jim's call (see below)
 
+## The one trap in the tower fix, for whoever touches it next
+
+`TowerSolid` now carries **two** descriptions on purpose, and they are not a
+duplication:
+
+- `localX/localZ/localBottomY/localTopY` — the solid, in the castle's own axes,
+  which is where it is drawn. `distanceOutsideTower` takes a world point through
+  `worldToCastle` and measures here. This is the half that fixes the slide.
+- `x`/`z` — the **plan** position, `BUILDING_CENTRE + local`, exactly as before.
+  Every ground-plane consumer reads this: the collider
+  `Building.registerCastleTowerCollision` registers, `check:castle-towers`'
+  march, `parkFacts`' turret list.
+
+Moving `x`/`z` to the drawn foot was tried and **reverted**, because it reaches
+the colliders. `pnpm run check` caught it:
+
+    check:castle-towers FAILED — 1 problem(s):
+      - tower-body-0 stops a child at 2.66 m from its axis but its collider
+        should hold her at 2.83 m — she is 0.17 m inside the drawn stone
+
+Both of those numbers come from the same field, so the 0.17 m is the memo
+moving under one of its two readers: `castleToWorld` pulls in `CASTLE_FRAME`,
+which depends on `BUILDING_BASE_Y` and the terrain, and the plan position never
+did. A collider registered from it can therefore go stale where it could not
+before. If you do want the colliders under the drawn feet, that is its own
+piece of work with its own ordering guarantee — not a side effect of a
+measurement change.
+
 ## The rule that found most of them
 
 **Every one of these was the sphere, in one of two shapes**: a measurement
