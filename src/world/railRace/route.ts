@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
 import { capHeight, terrainHeight, upAt } from '../terrain';
 import { PARK_LAYOUT, placedEntry } from '../parkLayout';
-import { RingPath } from './ringPath';
+import { RingPath, type RingSample } from './ringPath';
 import {
   BASE_HEIGHT,
   CART_WIDTH_AT_PARK_SCALE,
@@ -263,6 +263,8 @@ const _out = /* @__PURE__ */ new Vector3();
 const _along = /* @__PURE__ */ new Vector3();
 const _chart = /* @__PURE__ */ new Vector3();
 const _station = /* @__PURE__ */ new Vector3();
+/** Terrain height at the station `frameAt` last built, its fourth output. */
+let _ground = 0;
 
 export class RailRaceRoute {
   /**
@@ -535,21 +537,50 @@ export class RailRaceRoute {
    * `placeOnSphere`, which is what the ride has always done there.
    */
   lean(distance: number, chart: { x: number; y: number; z: number }, target: Vector3): Vector3 {
+    const sample = this.frameAt(distance);
+    const ground = _ground;
+    return target
+      .set(sample.x, ground, sample.z)
+      .addScaledVector(_out, (chart.x - sample.x) * sample.normalX + (chart.z - sample.z) * sample.normalZ)
+      .addScaledVector(_along, (chart.x - sample.x) * sample.tangentX + (chart.z - sample.z) * sample.tangentZ)
+      .addScaledVector(_up, chart.y - ground);
+  }
+
+  /**
+   * The station's frame, into `_up` / `_out` / `_along`, and its origin.
+   *
+   * **Orthonormal, and built by a cross product rather than by projecting both
+   * horizontals.** The first draft took `out` and `along` as the outward normal
+   * and the tangent each with their `up` component removed, which looks
+   * symmetric and is not a frame: `out . along` comes out at `-(N.up)(T.up)`,
+   * and out here `N.up` is about 0.45 while `T.up` is whatever the ring's
+   * normal misses the radial by. The map was therefore a shear rather than a
+   * turn, and it cost exactly what a shear costs — measured, every drawn lane
+   * top came back **9.1% of its own lane offset** away from where it was
+   * authored, 0.38 m on the race ring's outer lane, which is what was left of
+   * the fork angles being 2.3 deg out and the trestle claims disagreeing with
+   * the registry at 13 mm.
+   *
+   * The tangent is the axis worth keeping true — the ring has to run along its
+   * own path — so `along` is the projected tangent and `out` is the cross
+   * product, which is perpendicular to both by construction rather than by
+   * hope.
+   */
+  private frameAt(distance: number): RingSample {
     const sample = RING_PATH.sampleAt(distance);
     const ground = terrainHeight(sample.x, sample.z);
     upAt(sample.x, ground, sample.z, _up);
-    _out.set(sample.normalX, 0, sample.normalZ).addScaledVector(_up, -(sample.normalX * _up.x + sample.normalZ * _up.z)).normalize();
-    _along.set(sample.tangentX, 0, sample.tangentZ).addScaledVector(_up, -(sample.tangentX * _up.x + sample.tangentZ * _up.z)).normalize();
-    const dx = chart.x - sample.x;
-    const dz = chart.z - sample.z;
-    const across = dx * sample.normalX + dz * sample.normalZ;
-    const along = dx * sample.tangentX + dz * sample.tangentZ;
-    const rise = chart.y - ground;
-    return target
-      .set(sample.x, ground, sample.z)
-      .addScaledVector(_out, across)
-      .addScaledVector(_along, along)
-      .addScaledVector(_up, rise);
+    _along
+      .set(sample.tangentX, 0, sample.tangentZ)
+      .addScaledVector(_up, -(sample.tangentX * _up.x + sample.tangentZ * _up.z))
+      .normalize();
+    _out.crossVectors(_along, _up).normalize();
+    // The cross product's sign follows the winding, which is decided in
+    // `ringPath.ts` and not worth re-deriving here: ask the outward normal
+    // which way it meant, once, and flip if they disagree.
+    if (_out.x * sample.normalX + _out.z * sample.normalZ < 0) _out.negate();
+    _ground = ground;
+    return sample;
   }
 
   /**
@@ -563,11 +594,8 @@ export class RailRaceRoute {
    * boundary needs.
    */
   unlean(distance: number, drawn: { x: number; y: number; z: number }, target: Vector3): Vector3 {
-    const sample = RING_PATH.sampleAt(distance);
-    const ground = terrainHeight(sample.x, sample.z);
-    upAt(sample.x, ground, sample.z, _up);
-    _out.set(sample.normalX, 0, sample.normalZ).addScaledVector(_up, -(sample.normalX * _up.x + sample.normalZ * _up.z)).normalize();
-    _along.set(sample.tangentX, 0, sample.tangentZ).addScaledVector(_up, -(sample.tangentX * _up.x + sample.tangentZ * _up.z)).normalize();
+    const sample = this.frameAt(distance);
+    const ground = _ground;
     const dx = drawn.x - sample.x;
     const dy = drawn.y - ground;
     const dz = drawn.z - sample.z;
@@ -580,6 +608,7 @@ export class RailRaceRoute {
       sample.z + sample.normalZ * across + sample.tangentZ * along,
     );
   }
+
 
   /**
    * A point on a lane's rail.
