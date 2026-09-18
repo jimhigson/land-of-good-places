@@ -191,7 +191,46 @@ seed (13–35 posts), 145.7 m of 145.7 m road swept.
 - [x] fix (one queue, `LGP_LANES`/`cpus()`, per-park streaming, completeness guard)
 - [x] `pnpm run check:entrance-road` green, 221 s
 - [x] `LGP_LANES=4` run (CI-shaped), green, 288 s
-- [ ] PR / CI green
+- [x] PR #669 against `feat/procgen-on-sphere`
+- [x] **`Entrance road` CI: PASS, 11m22s** (run 35361203366), was `cancelled` at 15m15s
+
+## The CI proof (run 35361203366, head of `fix/entrance-road`)
+
+Step "Entrance road sweep" 15:14:56 → 15:25:51 = **10m55s** against the
+15-minute cap. On `ae20b9fc` the same step was killed at 14m56s.
+
+```
+check:entrance-road: 20 parks (10 seeds x real/control), 4 at a time on 4 cpu(s)
+  [17/20] seed      451 real    built in  15.2 s (233.6 s elapsed)
+  [18/20] seed      451 control built in  14.9 s (234.0 s elapsed)
+  [19/20] seed      428 real    built in 438.6 s (653.2 s elapsed)
+  [20/20] seed      428 control built in 436.4 s (654.5 s elapsed)
+entrance road OK — ... all 10 pool seeds; the tightest anywhere is 6.05 m (seed 24)
+```
+
+A CI core is 2.4× this Mac (428: 438.6 s there, 185 s here). **Eighteen of the
+twenty parks are finished at 234 s; the remaining 420 s is one seed-428 park.**
+
+**Read the headroom honestly.** Total CPU across the twenty parks is ~1776 s;
+over four cores that floor is ~444 s, and the longest single park is 439 s — the
+two bounds have met, so **no amount of further scheduling buys anything**. The
+only lever left is making seed 428 cheaper, i.e. the solver. At 10m55s of a 15
+min cap the margin is about one slow seed wide: a second 428-like seed entering
+the pool, or 428 getting 35% worse, times this out again.
+
+## The other red checks on this PR are the base's, byte for byte
+
+Compared against PR #667's runs on `ae20b9fc`, from CI on both heads:
+
+- **Procgen invariants**: 16 distinct failing test names on each,
+  **identical sets** — none added, none fixed. (5 test files failed, 17
+  passed, on both.)
+- **Checks**: `check:slide-rider FAILED` on both, and nothing else.
+- **Coplanar faces / Every seed builds**: red on the base too; `Every seed
+  builds` is the sibling engineer's slice and shares this root cause.
+
+`Entrance road` is the only one this PR moves, and it moves it from red to
+green.
 
 ## The `LGP_LANES=4` run — the CI-shaped one
 
