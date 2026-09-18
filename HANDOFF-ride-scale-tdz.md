@@ -308,3 +308,32 @@ this spread.
 | `check:park` seeds 0, 4, 8, 12, 15 | all green, counts above |
 | `package.json` | untouched; 126 scripts before and after, added `[]`, removed `[]`, parsed not grepped |
 | `scan-cycle-tdz.mts` | 10 at-risk sites on base → 7 here; 4 controls, 2 of them negative |
+
+## Rebased onto `86f9a513` — and `check:waypoints` is fixed
+
+The base moved on two commits while this was in flight, and one of them is the
+bug this handoff reported above:
+
+```
+86f9a513 check:waypoints solves the park before reading the facade's edges
+         (was comparing every waypoint against NaN..NaN) (#674)
+78d25b40 check:entrance-road: one queue of parks, and a line per park as it lands (#669)
+```
+
+So the `NaN..NaN` diagnosis was right and someone else has already landed the
+fix. Re-run after rebasing, `check:waypoints` now **passes**, and prints a real
+facade instead of a NaN one:
+
+```
+seed=20260728 waypoints=245 facade=(33.66,3.82)..(57.66,21.82) centre=(45.66,12.82)
+```
+
+Same 245 waypoints; they were never bad, the bound was. Rebase touched none of
+this branch's files (the two commits are `scripts/check-waypoints.mts`,
+`scripts/check-entrance-road.mts` and two handoffs), the three-dot diff is
+byte-identical before and after, and all four re-run green on the new base:
+`tsc --noEmit` 0, `check:cart-shape` 0, `check:ground-claims` 0,
+`check:waypoints` 0.
+
+**So the chain's outstanding failures are down to two**, both still
+pre-existing: step 24 `check:slide-rider` and step 66 `check:layout-rung`.
