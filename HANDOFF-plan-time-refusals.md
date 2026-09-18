@@ -40,6 +40,44 @@ The precedent to copy: `pathGraphBuilder.solve` in `src/world/parkPlan.ts`
 `pinchedSample`). The trap recorded there: a screen that asks a *different*
 question from the build-time check is worse than no screen.
 
+## Two at-source fixes already on the base that may have closed residue
+
+Found by reading, before the sweep landed — both postdate the handoff table
+they would invalidate, which is why step 1 is "measure, don't quote":
+
+- **`rail.walkable`** — `src/world/train/fence.ts` ~line 118 records the exact
+  fault: `deckSpanAt`'s offset probes were allowed to vote from *off* the
+  deck's end, reading ground level beside the deck and pinning the seam's top
+  there, leaving "a half-metre of bare rail a child could stand on,
+  `check:park`'s `rail.walkable: 1` on seeds 4, 6 and 9 (one sample each,
+  always the sample just before a deck begins)". The fix — only a probe the
+  bridge actually covers may vote — is in the file.
+- **`anchor.reach:waterFight`** — `src/world/parkManifest.ts` ~line 170 now
+  declares `boundingRadius: 19`, raised from 16.3 because "the worst of seeds
+  0–15 built out to 18.8 (seed 12; 18.6 on seed 6), so the declaration follows
+  what is built". That closes the finding by **declaring what is built**, not
+  by refusing anything.
+
+So the live question for both is whether the class is genuinely dead or
+merely absent from 0..15 — hence the planned wider sweep.
+
+## Screenability, per class (analysis, before data)
+
+- `poi.nospot` — **screenable**. A waypoint seed with nowhere to stand is a
+  seed inside a *planned solid*; the claims registry holds those at plan
+  time. Both recorded root causes (a spur routed outside the boundary; a seed
+  inside castle turret stone) are plan-visible.
+- `rail.walkable` — **not honestly screenable as written**. The build-time
+  asker is `isStandable`/`walkReachable` against the `CollisionWorld`, and the
+  fence that answers it (`buildRailFence`) needs a `CollisionWorld` and
+  `Bridge[]` — both World-time. A plan-time screen would ask a *different*
+  question (fence-segment coverage), which is exactly the `computeCrossings`
+  trap the brief warns about.
+- `anchor.reach:*` — **not a plan decision at all**. It compares an anchor's
+  built lumps against its declared `boundingRadius`; no decision the solver
+  makes changes it. The honest fix is the declaration tracking the build, and
+  that is what the base now does.
+
 ## Status
 
 - [x] Worktree, `pnpm install --frozen-lockfile`, Node 26.5.0.
