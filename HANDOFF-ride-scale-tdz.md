@@ -278,3 +278,33 @@ the diff was over the real set. Sample: `test/procgen/seed-11.test.ts > seed 11
 
 These 55 are the pre-existing instrument-fault reds `HANDOFF-backtracking.md`
 already records at 55.
+
+## `check:park` across a spread of seeds — all green
+
+```
+PASS seed 0    11s  254/254 waypoints
+PASS seed 4   227s  237/237 waypoints
+PASS seed 8    15s  278/278 waypoints
+PASS seed 12   14s  275/275 waypoints
+PASS seed 15   44s  263/263 waypoints
+```
+
+Every waypoint reachable on every seed tried; counts read off the screen, not
+expected. Seed 4 is the slow one (227 s here against the 172 s
+`HANDOFF-backtracking.md` records — another agent's `check:park` was competing
+for the CPU in `review-677` at the time, so the difference is load, not the
+park). Seed 7, which that handoff records at 1003 s, was deliberately not in
+this spread.
+
+## Final state of this branch
+
+| verification | result |
+|---|---|
+| `check:cart-shape` | **green**, standalone and at chain step 49 |
+| `check:ground-claims` | **green**, standalone and at chain step 64 |
+| `tsc --noEmit` | exit 0 |
+| chain steps 25–67 | 64 pass; 3 fail (24, 29, 66), **all three reproduced on `ae20b9fc`** |
+| `test:procgen` | 55 failed / 636 passed — failing **names** identical to base, none added |
+| `check:park` seeds 0, 4, 8, 12, 15 | all green, counts above |
+| `package.json` | untouched; 126 scripts before and after, added `[]`, removed `[]`, parsed not grepped |
+| `scan-cycle-tdz.mts` | 10 at-risk sites on base → 7 here; 4 controls, 2 of them negative |
