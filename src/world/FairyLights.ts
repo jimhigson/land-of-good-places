@@ -90,8 +90,49 @@ const PATH_POLE_SPACING = 7.1;
  */
 const MIN_LIT_RUN_LENGTH = PATH_POLE_SPACING * 2;
 
-/** The collider a pole registers, and so the ground it claims. */
+/**
+ * **What the rig actually draws on a post.** Owned here because the ride
+ * guard has to inflate by it, and a literal in the drawing that the guard
+ * cannot see is the whole bug this file keeps re-learning.
+ */
+const POLE_DRAWN_TOP_RADIUS = 0.11;
+const POLE_DRAWN_BOTTOM_RADIUS = 0.17;
+const KNOB_RADIUS = 0.22;
+/** How far the knob's centre sits above the post's top. */
+const KNOB_RISE = 0.12;
+
+/**
+ * The widest thing a post puts in the air — **derived, so widening the post
+ * widens the guard with it.**
+ *
+ * The clearance test samples a post's *axis* and inflates by this. Inflating
+ * by the collider radius instead would have been a tolerance masquerading as
+ * ownership: draw a fatter post and the guard would quietly under-cover it
+ * with nothing to say so.
+ */
+const WIDEST_DRAWN_RADIUS = Math.max(POLE_DRAWN_BOTTOM_RADIUS, KNOB_RADIUS);
+
+/**
+ * The collider a pole registers, and so the ground it claims.
+ *
+ * Deliberately **not** the same number as {@link WIDEST_DRAWN_RADIUS}: this is
+ * how much ground the pole owns, which is a little more than the wood, and it
+ * is also what {@link POLE_PAVING_CLEARANCE} is built from. It was doing three
+ * unrelated jobs — collider, guard inflation, paving clearance — and the guard
+ * has been given its own owner above.
+ */
 const POLE_RADIUS = 0.28;
+
+// **A pole must not be drawn wider than the ground it claims.** Anything a
+// child can see and lean on has a collider that covers it (CLAUDE.md), and a
+// knob fatter than the collider would be a visible thing she could walk
+// through the edge of. A constant comparison, so if it ever fires the code is
+// wrong before it ever runs.
+if (POLE_RADIUS < WIDEST_DRAWN_RADIUS) {
+  throw new Error(
+    `fairy pole: collider radius ${POLE_RADIUS} is narrower than the widest drawn part ${WIDEST_DRAWN_RADIUS}`,
+  );
+}
 
 /** How tall a pole stands. The drawing and the overhead test must agree, so both ask here. */
 const POLE_HEIGHT = 4.4;
@@ -126,6 +167,32 @@ const BULBS_PER_STRING = 9;
  * prints about its own post stepping.
  */
 const CABLE_TEST_SUBDIVISIONS = 2;
+
+/**
+ * How finely the clearance test walks a post's axis — **derived so the guard
+ * genuinely contains the drawn cylinder, rather than to within a tolerance.**
+ *
+ * The test samples the axis and inflates each sample by
+ * {@link WIDEST_DRAWN_RADIUS}. A vertex on the cylinder wall exactly midway
+ * between two samples is `hypot(step / 2, POLE_DRAWN_BOTTOM_RADIUS)` from the
+ * nearest of them, so covering it needs
+ *
+ *   `hypot(step / 2, bottomRadius) <= widestDrawnRadius`
+ *
+ * At 0.5 m that is `hypot(0.25, 0.17) = 0.302` against `0.22` — the wall was
+ * standing 0.082 m outside its own guard, and the honest form of the promise
+ * would have been "covered to within 0.082 m". The step below satisfies the
+ * inequality instead, so the promise is simply true and no tolerance has to be
+ * quoted or maintained.
+ */
+const POST_AXIS_STEP = 0.25;
+
+if (Math.hypot(POST_AXIS_STEP / 2, POLE_DRAWN_BOTTOM_RADIUS) > WIDEST_DRAWN_RADIUS) {
+  throw new Error(
+    `fairy pole: axis step ${POST_AXIS_STEP} leaves the cylinder wall outside the guard ` +
+      `(${Math.hypot(POST_AXIS_STEP / 2, POLE_DRAWN_BOTTOM_RADIUS).toFixed(3)} > ${WIDEST_DRAWN_RADIUS})`,
+  );
+}
 
 /**
  * **Where a pole's cable is tied**, in drawn world space.
@@ -186,9 +253,19 @@ export function fairySpan(from: Vector3, to: Vector3): { cable: Vector3[]; bulbs
  * duly built a park whose Sky Cruiser passed clean between two poles, cleared
  * both, and went through the **bulbs** hanging between them.
  *
- * Adding a part to the rig — a lantern, a pennant, a second string — means
- * adding it here, where the test sees it for free, instead of remembering that
- * a test exists somewhere that needs widening.
+ * **What it covers, precisely.** The post's axis (inflated by
+ * {@link WIDEST_DRAWN_RADIUS}, at a step derived so the cylinder wall is
+ * genuinely inside the guard), the knob, and every cable and bulb slung to a
+ * standing neighbour. A **second string** hung between the same poles is
+ * covered for free, because it comes from {@link fairySpan}.
+ *
+ * **A part bolted to the post itself is not** — a pennant, a lantern on a
+ * bracket, anything reaching further out than the knob. Such a part must be
+ * added *here*, and if it is wider than {@link WIDEST_DRAWN_RADIUS} that
+ * constant must learn about it. The check at the top of this file makes a
+ * collider narrower than the drawing fail loudly; nothing yet makes a *guard*
+ * narrower than the drawing fail, and that is the honest limit of this
+ * function.
  */
 export function fairyOccupiedPoints(
   x: number,
@@ -199,10 +276,12 @@ export function fairyOccupiedPoints(
   const ground = terrainHeight(x, z);
   const up = upAt(x, ground, z, new Vector3());
   // the post itself, sampled up its leaning axis, and its knob on top
-  for (let h = 0; h <= POLE_HEIGHT; h += 0.5) {
+  for (let h = 0; h <= POLE_HEIGHT; h += POST_AXIS_STEP) {
     points.push(new Vector3(x + up.x * h, ground + up.y * h, z + up.z * h));
   }
-  const top = POLE_HEIGHT + 0.12;
+  // The very top, in case POLE_HEIGHT is not a whole number of steps.
+  points.push(new Vector3(x + up.x * POLE_HEIGHT, ground + up.y * POLE_HEIGHT, z + up.z * POLE_HEIGHT));
+  const top = POLE_HEIGHT + KNOB_RISE;
   points.push(new Vector3(x + up.x * top, ground + up.y * top, z + up.z * top));
   // every cable and bulb slung from it to a neighbour that is already standing
   const here = fairyAnchorAt(x, z, new Vector3());
@@ -472,7 +551,7 @@ export function fairyPoleBuilder(
         cruiserClearanceForPoints(
           cruiserRoute,
           fairyOccupiedPoints(x, z, neighbours),
-          POLE_RADIUS,
+          WIDEST_DRAWN_RADIUS,
         ) < POLE_RIDE_CLEARANCE
       ) {
         continue;
@@ -738,8 +817,8 @@ export class FairyLights implements GameSystem {
     // it (knob radius 0.22 against a 0.12 rise), and the bottom is at ground
     // level. ART_DIRECTION.md section 7 says to delete the hidden face rather
     // than hold surfaces apart, and that is exactly what this is.
-    const poleGeometry = new CylinderGeometry(0.11, 0.17, poleHeight, 8, 1, true);
-    const knobGeometry = new SphereGeometry(0.22, 10, 8);
+    const poleGeometry = new CylinderGeometry(POLE_DRAWN_TOP_RADIUS, POLE_DRAWN_BOTTOM_RADIUS, poleHeight, 8, 1, true);
+    const knobGeometry = new SphereGeometry(KNOB_RADIUS, 10, 8);
     const knobMaterial = new MeshStandardMaterial({
       color: PALETTE.stonePink,
       roughness: 0.6,
@@ -789,7 +868,7 @@ export class FairyLights implements GameSystem {
         this.group.add(pole);
 
         const knob = new Mesh(knobGeometry, knobMaterial);
-        flat.set(x, ground + poleHeight + 0.12, z);
+        flat.set(x, ground + poleHeight + KNOB_RISE, z);
         placeOnSphere(flat, yaw + 0.7, knob.position, knob.quaternion);
         knob.castShadow = true;
         this.group.add(knob);
