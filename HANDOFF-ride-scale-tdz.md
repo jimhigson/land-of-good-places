@@ -410,3 +410,57 @@ is a plain Node script whose stdout is shown on every run — confirmed by
 reading the note off a **green** run — and all eight of the script's other
 notes go the same way. Moving only this one to stderr would interleave it out
 of order with the rest for no gain.
+
+## `check:cycle-tdz` — the scanner is now in the chain
+
+A scanner nobody runs is a scanner that rots, and this one had already proved
+it could silently under-report. Chain position **5 of 68**, beside the other
+static AST scan (`check:flat-primitives`). **1.86 s** — which matters, because
+`checks.yml` is at ~25 min against a 30-min cap.
+
+It ratchets against `scripts/cycle-tdz-baseline.mts` rather than failing on its
+own 8 findings, the way `check:coplanar` does. Two deliberate differences from
+that one:
+
+- **Keyed on `file::name`, never on line number.** A line moves on every edit
+  above it, and a baseline that churns on unrelated edits is one people
+  regenerate wholesale rather than read — which is how #520 orphaned coplanar
+  entries by renaming a mesh.
+- **It ratchets both ways.** A new site fails, obviously; a site that has
+  *gone* also fails, demanding its baseline entry be deleted in the same
+  commit. That is what makes the number able only to go down. A baseline you
+  may quietly leave stale is a baseline that grows.
+
+Proved red in both directions against the 8-site baseline, then green:
+
+```
+new site (DUCK_CLEARANCE restored), exit 1:
+  NEW module-scope read inside an import cycle:
+  src/world/railRace/hazards.ts::DUCK_CLEARANCE at line 186 reads RIDE_SCALE
+  from src/world/railRace/route.ts
+
+stale entry (a ghost added to the baseline), exit 1:
+  STALE baseline entry: src/world/nonexistent.ts::GHOST is no longer a
+  module-scope read inside a cycle
+
+unmutated, exit 0:
+  check:cycle-tdz ok — the same 8 site(s) as the baseline, none added, none stale
+```
+
+**It states its own blind spot on every run, pass or fail**, to stderr: it says
+nothing about a constant that is safe today only because its module sits
+*outside* every cycle. That is a property of the import graph rather than of the
+constant, and one new edge changes it silently — which is exactly `RAIL_GAUGE`.
+
+Chain verified by **parsing the scripts object and comparing sets, not sizes**:
+67 → 68 steps, 126 → 127 names, **dropped `[]` both times**, added exactly
+`['pnpm run check:cycle-tdz']` and `['check:cycle-tdz']`.
+`check:chain-coverage` accounts for it (86 defined, 80 reachable leaves, not in
+the orphan list, which stays at the same 5). Chain steps 1–6 run in order, 0.
+
+## The count going 7 → 8 is not a regression
+
+Worth stating loudly because it reads as one. `artPalette.ts::ART` was always
+there; the scanner could not see it while `export … from` was not an edge.
+Fixing the instrument made it honest, not worse. Sites were 10 on the base
+before any of this. The number is now gated and can only go down.
