@@ -6,7 +6,14 @@ import { COASTER_PLANS } from '../coaster/plan';
 import { EXIT_INSIDE_EDGE, PARK_BOUNDARY } from '../boundary';
 import { placedEntry } from '../parkLayout';
 import { RAIL_CORRIDOR_CLEARANCE, clearOfPlots, distanceToRailCorridor } from '../train/plan';
-import { type KeepOff, RailRaceRoute, RIDE_SCALE } from './route';
+import { type KeepOff, RailRaceRoute } from './route';
+// **Straight from the leaf, not through `route.ts`'s re-export.** The read
+// below is inside a function today, so the re-export would serve it — but a
+// re-export does not rescue a module-scope reader, and it is order-*dependent*:
+// it works until somebody reorders an import. Importing the leaf is
+// order-independent by construction, so the next `const` added to this file
+// cannot quietly reintroduce `Cannot access 'RIDE_SCALE' before initialization`.
+import { RIDE_SCALE } from './dimensions';
 
 /**
  * The Rail Race as *data*, solved at module load from the park layout alone —

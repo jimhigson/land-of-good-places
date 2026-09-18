@@ -19,7 +19,7 @@ import { hazardTapeTexture } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
-import { placeOnSphere, terrainHeight, tiltToSphere } from '../terrain';
+import { terrainHeight, tiltToSphere } from '../terrain';
 import { distanceToPath } from '../pathGraph';
 import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
@@ -440,7 +440,13 @@ export function buildRailRaceTrack(
       sleeperBasis.makeBasis(sleeperFrame.side, sleeperFrame.up, sleeperFrame.forward);
       sleeperRotation.setFromRotationMatrix(sleeperBasis);
       matrix.compose(
-        point.copy(sleeperMid).setY(sleeperMid.y - sleeperDrop),
+        // **Sunk along the track's own up, not along world `+Y`.** The sleeper
+        // is turned onto `sleeperFrame` and then lowered so the rails rest on
+        // it; lowering it in world `y` on ground that leans 27 deg slides it
+        // `sleeperDrop * sin(tilt)` sideways out from under the rails it is
+        // bolted to — measured at 0.086 m of the 0.116 m a gauge point was
+        // missing by. The frame already carries the direction; use it.
+        point.copy(sleeperMid).addScaledVector(sleeperFrame.up, -sleeperDrop),
         sleeperRotation,
         sleeperScale,
       );
@@ -960,7 +966,7 @@ export function buildRailRaceTrack(
     } as const;
     // Leant onto the sphere here, at draw time, and nowhere earlier: the tree
     // the search, the claims and the road rule read is the flat one.
-    for (const piece of trestleStruts(leanTrestleTree(spot.tree, drawnTree))) {
+    for (const piece of trestleStruts(leanTrestleTree(route, spot.at, spot.tree, drawnTree))) {
       const mesh = meshes[piece.part];
       const slot = piece.part === 'legs' ? index : piece.part === 'branches-lower' ? lowerIndex++ : upperIndex++;
       strut(mesh, slot, piece.from, piece.to);
@@ -1007,7 +1013,7 @@ export function buildRailRaceTrack(
   // form the draw loop stood up.
   const registerCollision = (): void => {
     for (const spot of spots) {
-      const drawn = leanTrestleTree(spot.tree, drawnTree);
+      const drawn = leanTrestleTree(route, spot.at, spot.tree, drawnTree);
       addPostCollider(collision, drawn.trunkFoot, drawn.trunkTop, ringSizeVsRace);
     }
   };
@@ -1453,7 +1459,8 @@ interface TrestleSpot {
  * straight radial trunk 100 m out has a 2–4 m world-`xz` offset between foot
  * and top; that is the planet, not a lean, and reading it as one would refuse
  * every slot on the ring. {@link leanTrestleTree} is the drawn form, and the
- * invariant maps drawn struts back with `unplaceFromSphere` before comparing.
+ * invariant maps drawn struts back with the ring's own `unlean` before
+ * comparing — the exact inverse of the one turn the tree was drawn through.
  *
  * `y` in this tree is height in the chart: `terrainHeight`'s value, the same
  * number `placeOnSphere` takes as its `flat.y`.
@@ -1495,7 +1502,6 @@ function cloneTrestleTree(tree: TrestleTree): TrestleTree {
 const barTilt = new Quaternion();
 const barOffset = new Vector3();
 const treeScratch = new Vector3();
-const treeSpin = new Quaternion();
 
 /**
  * Solves the tree for a foot at `(footX, footZ)` under the ring at `at` (a raw
@@ -1561,15 +1567,34 @@ function trunkRise(tree: TrestleTree): { readonly height: number; readonly lean:
  * Only the draw loop and the collider read this form; the search, the claims
  * and the road rule read the flat tree — see {@link TrestleTree} for why.
  */
-function leanTrestleTree(flat: TrestleTree, into: TrestleTree): TrestleTree {
+function leanTrestleTree(
+  route: RailRaceRoute,
+  at: number,
+  flat: TrestleTree,
+  into: TrestleTree,
+): TrestleTree {
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-    placeOnSphere(flat.laneTops[lane]!, 0, into.laneTops[lane]!, treeSpin);
+    route.lean(at, flat.laneTops[lane]!, into.laneTops[lane]!);
   }
   for (let half = 0; half < 2; half += 1) {
-    placeOnSphere(flat.forkNodes[half]!, 0, into.forkNodes[half]!, treeSpin);
+    route.lean(at, flat.forkNodes[half]!, into.forkNodes[half]!);
   }
-  placeOnSphere(flat.trunkTop, 0, into.trunkTop, treeSpin);
-  placeOnSphere(flat.trunkFoot, 0, into.trunkFoot, treeSpin);
+  route.lean(at, flat.trunkTop, into.trunkTop);
+  // **The foot goes through the same one turn as everything else**, and it
+  // still lands on the ground. It is worth knowing why, because the obvious
+  // worry is that a station's frame is a *plane* and the ground is a sphere, so
+  // a foot several metres out along that plane should hover by `u^2 / 2R`. It
+  // does not: the foot's chart height is `terrainHeight`, which already carries
+  // the cap's own drop over that same `u`, so the two cancel and the drawn foot
+  // sits on the terrain. Measured on the canonical seed rather than argued —
+  // see `scripts/_probe-feet.mts` in the branch's handoff.
+  //
+  // Leaning it any other way is what it cost to find that out: a foot placed by
+  // `placeOnSphere` while its trunk top was turned rigidly made the drawn tree
+  // stop being the inverse of the chart tree, and `railRaceSupportsAreClaimedAsDrawn`
+  // caught it immediately — a degenerate capsule in the registry against a
+  // 0.02 m leaning one read back off the mesh.
+  route.lean(at, flat.trunkFoot, into.trunkFoot);
   into.ground = flat.ground;
   return into;
 }
@@ -2060,6 +2085,27 @@ function buildArch(
       keep(legGeometry);
       const leg = solid(new Mesh(legGeometry, material));
       leg.position.set(footX, bottom + height / 2, footZ);
+      // **Neighbouring legs get opposite facet phases, so no two of their
+      // faces lie in one plane.**
+      //
+      // The bands are `band` apart and each leg's tube is `band / 2`, so
+      // consecutive legs stand exactly tangent — six touching posts making one
+      // rainbow's leg, which is the look. Eight-sided prisms standing tangent
+      // present each other a long flat facet the height of the whole leg, and
+      // `check:coplanar` found eight such pairs on the canonical seed, the
+      // worst 0.562 m² of shared plane fighting at 6 mm. Nothing there is
+      // visible — the faces are buried between two posts that touch — so this
+      // is ART_DIRECTION §7's "delete the hidden face" rather than a stand-off:
+      // half a facet of spin on every other leg leaves a facet of one post
+      // facing a *vertex* of the next, 22.5° apart, and two faces 22.5° apart
+      // cannot share a plane however close they stand. Nothing moves, so the
+      // rainbow is drawn exactly where it was.
+      //
+      // The better fix is one merged leg stack per side with the band colours
+      // as vertex colours, which would delete the buried faces outright and
+      // give the six posts a single silhouette; it changes what a child sees,
+      // so it is Jim's call rather than this ticket's.
+      leg.rotation.y = (i % 2) * (Math.PI / 8);
       leg.name = `railRace:finish-rainbow-leg-${i}-${side < 0 ? 'inner' : 'outer'}`;
       leg.frustumCulled = false;
       group.add(leg);

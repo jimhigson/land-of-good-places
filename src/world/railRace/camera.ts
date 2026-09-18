@@ -1,7 +1,7 @@
 import { PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import { angleDelta, clamp, damp } from '../../core/mathUtils';
 import { PLAYER_LANE, type RailRaceRoute } from './route';
-import { placeOnSphere, tiltToSphere } from '../terrain';
+import { tiltToSphere } from '../terrain';
 
 
 /**
@@ -409,7 +409,7 @@ const AUTHORED_UP = new Vector3(0, 1, 0);
 
 /** Scratch for the one lean that takes the authored basis to the rider's own. */
 const _lean = /* @__PURE__ */ new Quaternion();
-const _spin = /* @__PURE__ */ new Quaternion();
+const _ringChart = /* @__PURE__ */ new Vector3();
 
 
 
@@ -740,19 +740,20 @@ export class RaceCamera {
   ringPoint(s: number, into: Vector3): Vector3 {
     const sample = this.route.path.sampleAt(s);
     const offset = riderOffset(this.route);
-    into.set(
+    // **Leant by the ring's own `lean`, not by `placeOnSphere` at this
+    // column.** The rig is offset sideways to the player's lane, and leaning a
+    // laterally-offset point at its own column is the shear that made the four
+    // lanes cross (`route.ts`'s `lean`). The rig has to end up beside the rails
+    // it is filming, so it is turned by the same one frame they are — and
+    // `baseAt` is now the centre line's for every lane, which is what removes
+    // the earlier "height from one lane, place from another" fault this line
+    // used to carry a `PLAYER_LANE` argument for.
+    _ringChart.set(
       sample.x + sample.normalX * offset,
-      // **`PLAYER_LANE`, not the default lane 0.** This read `baseAt(s)` while
-      // offsetting sideways to the player's own lane — the height from one lane
-      // and the place from another. On a level ring the two agreed; on a ring
-      // whose base follows the sphere they do not, and 4.1 m of lateral offset
-      // out at the rim is **21.1 m** of world height. Measured on the canonical
-      // seed: lane 0 base -125.07, player lane -146.21.
-      this.route.baseAt(s, PLAYER_LANE) + 0.6 + RIDER_RIDE_HEIGHT,
+      this.route.baseAt(s) + 0.6 + RIDER_RIDE_HEIGHT,
       sample.z + sample.normalZ * offset,
     );
-    placeOnSphere(into, 0, into, _spin);
-    return into;
+    return this.route.lean(s, _ringChart, into);
   }
 
   /**

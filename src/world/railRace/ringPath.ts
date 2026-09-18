@@ -374,6 +374,52 @@ export class RingPath {
     };
   }
 
+  /**
+   * The arc length of the point on the centre line nearest `(x, z)`.
+   *
+   * **The station a drawn point belongs to.** The ring is drawn by turning a
+   * whole cross-section about its station's own column
+   * (`RailRaceRoute.lean`), and a cross-section lies in the plane normal to
+   * the path — so the nearest point on the centre line *is* that station, and
+   * is exactly so wherever the path is locally circular, however far out
+   * across the lanes the drawn point sits. That is what makes this the right
+   * inverse lookup for `RailRaceRoute.unlean`, which needs a station before it
+   * can say anything.
+   *
+   * A full scan of {@link SAMPLES}, then one lerp between the winner and
+   * whichever neighbour the point falls toward. `distanceAtBearing` scans the
+   * same table and is the polar question; this is the metric one, and a point
+   * ten metres off the line answers this correctly and that one only roughly.
+   */
+  distanceNear(x: number, z: number): number {
+    let best = 0;
+    let bestGap = Infinity;
+    for (let i = 0; i < SAMPLES; i += 1) {
+      const sample = this.samples[i] as RingSample;
+      const gap = (sample.x - x) ** 2 + (sample.z - z) ** 2;
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = i;
+      }
+    }
+    // Project onto whichever of the two neighbouring segments the point lies
+    // along, so the answer is continuous rather than quantised to a sample.
+    const here = this.samples[best] as RingSample;
+    const step = this.length / SAMPLES;
+    const ahead = this.samples[(best + 1) % SAMPLES] as RingSample;
+    const behind = this.samples[(best - 1 + SAMPLES) % SAMPLES] as RingSample;
+    const along = (a: RingSample, b: RingSample): number => {
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const len = dx * dx + dz * dz;
+      return len > 1e-12 ? ((x - a.x) * dx + (z - a.z) * dz) / len : 0;
+    };
+    const forward = along(here, ahead);
+    if (forward >= 0) return this.wrap(here.at + Math.min(1, forward) * step);
+    const back = along(here, behind);
+    return this.wrap(here.at - Math.min(1, Math.max(0, back)) * step);
+  }
+
   /** Compass bearing of the point at this arc length, for anything still polar. */
   bearingAt(distance: number): number {
     const sample = this.sampleAt(distance);

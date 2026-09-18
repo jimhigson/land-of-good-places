@@ -1,8 +1,8 @@
-import { Quaternion, Vector3 } from 'three';
+import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
-import { capHeight, placeOnSphere, terrainHeight } from '../terrain';
+import { capHeight, terrainHeight, upAt } from '../terrain';
 import { PARK_LAYOUT, placedEntry } from '../parkLayout';
-import { RingPath } from './ringPath';
+import { RingPath, type RingSample } from './ringPath';
 import {
   BASE_HEIGHT,
   CART_WIDTH_AT_PARK_SCALE,
@@ -257,7 +257,14 @@ function undulation(lane: number, phase: number): number {
  * `pointAt`/`tangentAt`/`length`/`wrap` shape the other two routes expose, which
  * is what "our standard track path following" actually means here.
  */
-const spin = /* @__PURE__ */ new Quaternion();
+/** Scratch for {@link RailRaceRoute.lean} and its inverse — both are on hot paths. */
+const _up = /* @__PURE__ */ new Vector3();
+const _out = /* @__PURE__ */ new Vector3();
+const _along = /* @__PURE__ */ new Vector3();
+const _chart = /* @__PURE__ */ new Vector3();
+const _station = /* @__PURE__ */ new Vector3();
+/** Terrain height at the station `frameAt` last built, its fourth output. */
+let _ground = 0;
 
 export class RailRaceRoute {
   /**
@@ -296,6 +303,18 @@ export class RailRaceRoute {
 
   /** Distance from the innermost lane's centre to the outermost lane's. */
   readonly laneSpan: number;
+
+  /**
+   * How far the undulation can carry a lane from its base, either way.
+   *
+   * The same {@link UNDULATION_REACH} `track.ts` solves the trestles' fork
+   * plane against, published on the ring so a measurement can ask the *built*
+   * object rather than importing the module (which pins the seed) or keeping a
+   * second copy of the number. It is a bound, not a maximum that is attained —
+   * the three harmonics do not peak together — so it cannot be recovered by
+   * sampling the built ring, which is exactly why it has to be published.
+   */
+  readonly undulationReach = UNDULATION_REACH;
 
   /** One lap, in metres of shared arc length. Identical on both rings. */
   readonly length = RING_PATH.length;
@@ -368,6 +387,57 @@ export class RailRaceRoute {
     this.startDistance = slideArchClear(this, atBooth, stall, keepArchOff);
   }
 
+  /**
+   * **Where a drawn point of this ride was authored** — {@link unlean} without
+   * having to know the station first.
+   *
+   * A measurement holds a vertex or an instance matrix, not an arc length, so
+   * this has to find the station the point belongs to before it can invert the
+   * turn there.
+   *
+   * **It searches in the chart, not in the drawn world, and that is the whole
+   * of the difficulty.** A drawn point stands up to twelve metres outside the
+   * centre line once the lean has pushed it out, and the ring follows a spline
+   * whose curvature varies — so the nearest point of the *curve* to it can
+   * belong to a different part of the loop altogether. Measured on the
+   * canonical seed: asking `distanceNear` of a drawn lane top answered 2.4 m of
+   * arc away from the trestle it belongs to, which unleant its four tops to
+   * heights up to 0.57 m wrong and made a perfectly well-built fork read as
+   * 2.3 deg off its plan. Unleaning at *any* station gives a chart point within
+   * a lane offset of the line, though, and at that range the projection is
+   * unambiguous — no lane sits further from the centre line than a fraction of
+   * the tightest bend. So: one guess, then three refinements in the chart,
+   * which is a fixed point rather than a limit and settles on the first.
+   */
+  chartOf(drawn: { x: number; y: number; z: number }, target: Vector3): Vector3 {
+    return this.unlean(this.stationOf(drawn, target), drawn, target);
+  }
+
+  /**
+   * The arc length a drawn point belongs to — {@link chartOf}'s first half,
+   * exposed because a shape made of several nodes has **one** station and must
+   * be unleant at that one.
+   *
+   * Nearest-point-on-the-curve is the normal-plane condition, and on a curve
+   * whose bend tightens there can be more than one station whose normal plane
+   * holds a given point: an outer lane top is genuinely in two of them, and the
+   * nearest is not always the one it was authored at. So a trestle asks this of
+   * its **trunk top** — the one node that sits on the centre line itself, where
+   * the projection is unambiguous — and unleans the whole tree there, rather
+   * than letting each of its seven nodes find a station of its own and reading
+   * the ring's own curvature as a bent tree. Measured before that was done: up
+   * to 0.08 m of spurious height per node, which is eighty times the float32
+   * slack `railRaceSupportsAreClaimedAsDrawn` compares claims to.
+   */
+  stationOf(drawn: { x: number; y: number; z: number }, scratch = _station): number {
+    let at = RING_PATH.distanceNear(drawn.x, drawn.z);
+    for (let step = 0; step < 3; step += 1) {
+      this.unlean(at, drawn, scratch);
+      at = RING_PATH.distanceNear(scratch.x, scratch.z);
+    }
+    return at;
+  }
+
   /** Brings any arc length into `[0, length)`. */
   wrap(distance: number): number {
     const wrapped = distance % this.length;
@@ -411,20 +481,136 @@ export class RailRaceRoute {
    * above the *sphere*, so its world `y` falls away round the loop exactly as
    * the world does. Anything that used to read `route.base` as "the height of
    * the ride" wants this instead, asked at its own arc length.
+   *
+   * **Asked at the centre line, for every lane.** It used to sample the cap
+   * under each lane's own column, which reads as "a constant height above the
+   * sphere" and is right for a point but wrong for a *cross-section*: the cap
+   * falls 2.1 m across the race ring's 8.25 m of lanes out at the bulge, so
+   * four lanes each measured from their own column are a chart shape that is
+   * already tilted before the ring is leant at all — the planet counted twice.
+   * The ring is one rigid section turned as a piece about this one column (see
+   * {@link lean}), so the datum is this one column's too.
    */
-  baseAt(distance: number, lane = 0): number {
+  baseAt(distance: number): number {
     const sample = RING_PATH.sampleAt(distance);
-    const offset = this.laneOffsets[lane] ?? 0;
-    return (
-      capHeight(sample.x + sample.normalX * offset, sample.z + sample.normalZ * offset) +
-      this.clearance
+    return capHeight(sample.x, sample.z) + this.clearance;
+  }
+
+  /** Height of a lane's rail head, in **chart** metres — see {@link lean}. */
+  heightAt(lane: number, distance: number): number {
+    return this.baseAt(distance) + undulation(lane, this.phaseAt(distance));
+  }
+
+  /**
+   * **The chart-to-world map for the whole ring: one rigid turn per station.**
+   *
+   * ## The bug this replaces, measured
+   *
+   * Every point of this ride used to be leant by `placeOnSphere` *at its own
+   * column*, which displaces it outward by `height x up.x` — and `up.x` is
+   * `r / GROUND_SPHERE_RADIUS`, 0.32 to 0.46 out here. The four lanes undulate
+   * on their own phases and stand up to **4.38 m apart in height at one
+   * station**, so they were displaced outward by up to `4.38 x 0.46 = 2.0 m`
+   * *relative to each other* — against a walk-past lane spacing of 1.1 m. The
+   * cross-section was **sheared**, not leant, and the lanes crossed over one
+   * another: measured on the canonical seed, a minimum drawn lateral gap of
+   * **-0.284 m** where 1.1 m is nominal, with the order of lanes 2 and 3
+   * swapped at 46 of 690 sampled stations. Four "parallel tracks" that pass
+   * through each other.
+   *
+   * It is worth writing down what does *not* fix it, because it is the obvious
+   * thing and it is wrong: applying the undulation along the local up *after*
+   * the lean shears by exactly the same amount, because the undulation **is**
+   * the height difference. Any map that moves a point outward in proportion to
+   * its height shears a section that has height variation across it.
+   *
+   * ## What this does instead
+   *
+   * At each arc length the ring has one frame — the centre line's own ground
+   * column, the local up there, and the two horizontals perpendicular to that
+   * up. A chart point is decomposed against the *chart's* axes (the outward
+   * normal, world `+Y`, the tangent) and rebuilt against that frame. It is an
+   * isometry, so a cross-section keeps its shape exactly: lanes stay
+   * `laneSpacing` apart, measured square to the up they are leant along.
+   *
+   * At the centre line with no lateral offset it is bit-for-bit
+   * `placeOnSphere`, which is what the ride has always done there.
+   */
+  lean(distance: number, chart: { x: number; y: number; z: number }, target: Vector3): Vector3 {
+    const sample = this.frameAt(distance);
+    const ground = _ground;
+    return target
+      .set(sample.x, ground, sample.z)
+      .addScaledVector(_out, (chart.x - sample.x) * sample.normalX + (chart.z - sample.z) * sample.normalZ)
+      .addScaledVector(_along, (chart.x - sample.x) * sample.tangentX + (chart.z - sample.z) * sample.tangentZ)
+      // flat-ok: chart height over chart ground, the number placeOnSphere takes as flat.y
+      .addScaledVector(_up, chart.y - ground);
+  }
+
+  /**
+   * The station's frame, into `_up` / `_out` / `_along`, and its origin.
+   *
+   * **Orthonormal, and built by a cross product rather than by projecting both
+   * horizontals.** The first draft took `out` and `along` as the outward normal
+   * and the tangent each with their `up` component removed, which looks
+   * symmetric and is not a frame: `out . along` comes out at `-(N.up)(T.up)`,
+   * and out here `N.up` is about 0.45 while `T.up` is whatever the ring's
+   * normal misses the radial by. The map was therefore a shear rather than a
+   * turn, and it cost exactly what a shear costs — measured, every drawn lane
+   * top came back **9.1% of its own lane offset** away from where it was
+   * authored, 0.38 m on the race ring's outer lane, which is what was left of
+   * the fork angles being 2.3 deg out and the trestle claims disagreeing with
+   * the registry at 13 mm.
+   *
+   * The tangent is the axis worth keeping true — the ring has to run along its
+   * own path — so `along` is the projected tangent and `out` is the cross
+   * product, which is perpendicular to both by construction rather than by
+   * hope.
+   */
+  private frameAt(distance: number): RingSample {
+    const sample = RING_PATH.sampleAt(distance);
+    const ground = terrainHeight(sample.x, sample.z);
+    upAt(sample.x, ground, sample.z, _up);
+    _along
+      .set(sample.tangentX, 0, sample.tangentZ)
+      .addScaledVector(_up, -(sample.tangentX * _up.x + sample.tangentZ * _up.z))
+      .normalize();
+    _out.crossVectors(_along, _up).normalize();
+    // The cross product's sign follows the winding, which is decided in
+    // `ringPath.ts` and not worth re-deriving here: ask the outward normal
+    // which way it meant, once, and flip if they disagree.
+    if (_out.x * sample.normalX + _out.z * sample.normalZ < 0) _out.negate();
+    _ground = ground;
+    return sample;
+  }
+
+  /**
+   * The inverse of {@link lean}: where a drawn point was authored.
+   *
+   * `terrain.ts`'s `unplaceFromSphere` is the general form of this and answers
+   * to within a few centimetres out here, but it assumes a point lies on the
+   * ray through its own foot — which is true of everything leant per column and
+   * only nearly true of a ring leant as a rigid section. This is exact, and it
+   * is what a check measuring a drawn rail against the park's own *chart*
+   * boundary needs.
+   */
+  unlean(distance: number, drawn: { x: number; y: number; z: number }, target: Vector3): Vector3 {
+    const sample = this.frameAt(distance);
+    const ground = _ground;
+    const dx = drawn.x - sample.x;
+    // flat-ok: not a height — a displacement's y, decomposed against the frame below
+    const dy = drawn.y - ground;
+    const dz = drawn.z - sample.z;
+    const across = dx * _out.x + dy * _out.y + dz * _out.z;
+    const along = dx * _along.x + dy * _along.y + dz * _along.z;
+    const rise = dx * _up.x + dy * _up.y + dz * _up.z;
+    return target.set(
+      sample.x + sample.normalX * across + sample.tangentX * along,
+      ground + rise,
+      sample.z + sample.normalZ * across + sample.tangentZ * along,
     );
   }
 
-  /** Height of a lane's rail head, in world metres. */
-  heightAt(lane: number, distance: number): number {
-    return this.baseAt(distance, lane) + undulation(lane, this.phaseAt(distance));
-  }
 
   /**
    * A point on a lane's rail.
@@ -437,11 +623,13 @@ export class RailRaceRoute {
    * for, and it is what makes a trestle drawn from its foot up to the rail lean
    * away from the park's centre instead of standing at an angle to its own
    * ground.
+   *
+   * **Leant by {@link lean}, not by `placeOnSphere` at the lane's own column.**
+   * The two agree exactly on the centre line and differ by up to two metres
+   * sideways on an outer lane — see {@link lean} for the lanes that crossed.
    */
   pointAt(lane: number, distance: number, target: Vector3 = this.scratch): Vector3 {
-    this.flatPointAt(lane, distance, target);
-    placeOnSphere(target, 0, target, spin);
-    return target;
+    return this.lean(distance, this.flatPointAt(lane, distance, _chart), target);
   }
 
   /**

@@ -119,7 +119,7 @@ import {
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
 import { GATE_POST_COLLIDER_RADIUS } from '../../src/world/entrance/gateArch.ts';
-import { altitudeAt, terrainHeight } from '../../src/world/terrain.ts';
+import { altitudeAt, terrainHeight, unplaceFromSphere } from '../../src/world/terrain.ts';
 // The road corridor's measurement, shared with `check:ground-claims` so the two
 // sites that ask "is the claim the road?" cannot answer it differently. Pure
 // geometry over what it is handed — nothing seed-dependent is imported here.
@@ -2870,7 +2870,22 @@ function builtRings(facts: ParkFacts): readonly BuiltRing[] {
  * file's first commandment is to measure the thing that was built. The lane
  * centre line would also miss half a gauge of real structure either side of it,
  * which is exactly the margin these checks are about.
+ *
+ * **Every vertex is put back on the ground under it first, and that is the
+ * whole question.** The boundary is a flat-chart object; a drawn rail is nine
+ * metres up and leant onto the sphere, so its raw `(x, z)` carries
+ * `height x sin(tilt)` of planet — measured on the canonical seed, 1.9 to 6.5 m
+ * of it, which read straight is simply the lean reported as outset. Both
+ * clauses below are about *ground*: whether stone runs between the rails, and
+ * whether there is anywhere flat under them to stand a trestle. So each vertex
+ * goes through `unplaceFromSphere`, which answers exactly that — where a plumb
+ * line from this rail meets the terrain — and the boundary is asked about
+ * that spot. `terrain.ts`'s own doc calls this mix out as having accounted for
+ * most of a day's red invariants; this was another.
  */
+const _outsetVertex = new Vector3();
+const _outsetFoot = new Vector3();
+
 function railOutsetRange(
   ring: BuiltRing,
   boundary: ParkFacts['boundary'],
@@ -2883,10 +2898,15 @@ function railOutsetRange(
     if (!child.name.startsWith('railRace:rail-')) return;
     const position = child.geometry.getAttribute('position');
     if (!position) return;
+    child.updateWorldMatrix(true, false);
     for (let i = 0; i < position.count; i += 1) {
       // Outset, not radius. `distanceToEdge` is positive inside the park, so a
       // rail out beyond the wall — where both rings belong — reads positive here.
-      const outset = -boundary.distanceToEdge(position.getX(i), position.getZ(i));
+      _outsetVertex
+        .set(position.getX(i), position.getY(i), position.getZ(i))
+        .applyMatrix4(child.matrixWorld);
+      unplaceFromSphere(_outsetVertex, _outsetFoot);
+      const outset = -boundary.distanceToEdge(_outsetFoot.x, _outsetFoot.z);
       if (outset < min) min = outset;
       if (outset > max) max = outset;
       vertices += 1;
@@ -2895,8 +2915,26 @@ function railOutsetRange(
   return { min, max, vertices };
 }
 
+/*
+ * **The rail centre lines are measured in three dimensions, not in plan.**
+ *
+ * These grids were `[ax, az, bx, bz]`, a plan-view segment, which is a question
+ * the ring can no longer be asked: the ride is drawn leant onto the sphere, so a
+ * rail's plan position carries `height x sin(tilt)` of the planet in it — up to
+ * two metres out here — and a lane riding high really is further out *in plan*
+ * than a lower neighbour 1.1 m away from it. Measured on the canonical seed,
+ * that is enough for the four lanes to swap order seen from above, so "which
+ * lane is this under" had a wrong answer available to it for perfectly good
+ * geometry. In three dimensions there is no such crossing: neighbouring lanes
+ * hold 1.100 m and 2.750 m apart the whole way round, which is their own
+ * spacing, so the question resolves cleanly and needs no frame, no unleaning
+ * and no arc length. {@link Segment3} and {@link pointToSegment3}, already in
+ * this file for the Sky Cruiser, are the one owner of that arithmetic.
+ */
+
 /**
- * Every rail's true centre line, as segments in a 1 m lookup grid.
+ * Every rail's true centre line, as {@link RailSegment}s in a 1 m lookup grid,
+ * **kept apart by lane**.
  *
  * **This used to be `railRadii`, and that was a circle-era test.** It averaged
  * each rail mesh's vertices into a single *radius* and asked how far a
@@ -2923,60 +2961,77 @@ function railOutsetRange(
  *    and called half of a healthy ring broken, with a median sitting exactly on
  *    the tolerance, which is what a resolution limit looks like when it is
  *    mistaken for a result.
+ *
+ * It was two near-identical functions — this and a lane-blind `railCentreLines`
+ * — with one copy of the `uv.x` averaging in each, and nothing asked the
+ * lane-blind one anything. There is one now.
  */
-function railCentreLines(ring: BuiltRing): Map<string, [number, number, number, number][]> {
-  const grid = new Map<string, [number, number, number, number][]>();
-  const point = new Vector3();
+const _railProbe = new Vector3();
 
-  const add = (key: string, segment: [number, number, number, number]): void => {
-    const cell = grid.get(key);
-    if (cell) cell.push(segment);
-    else grid.set(key, [segment]);
-  };
+function railCentreLinesByLane(ring: BuiltRing): Map<number, Map<string, Segment3[]>> {
+  const byLane = new Map<number, Map<string, Segment3[]>>();
+  const point = new Vector3();
 
   ring.group.traverse((child) => {
     if (!(child instanceof Mesh)) return;
-    if (!child.name.startsWith('railRace:rail-')) return;
+    const match = /^railRace:rail-(\d+)$/.exec(child.name);
+    if (!match) return;
+    const lane = Number(match[1]);
     const position = child.geometry.getAttribute('position');
     const uv = child.geometry.getAttribute('uv');
     if (!position || !uv) return;
     child.updateWorldMatrix(true, false);
 
     // One entry per cross-section ring, keyed by the `uv.x` they share.
-    const rings = new Map<number, { x: number; z: number; n: number }>();
+    const rings = new Map<number, { x: number; y: number; z: number; n: number }>();
     for (let i = 0; i < position.count; i += 1) {
-      point.set(position.getX(i), 0, position.getZ(i)).applyMatrix4(child.matrixWorld);
+      point
+        .set(position.getX(i), position.getY(i), position.getZ(i))
+        .applyMatrix4(child.matrixWorld);
       const key = Math.round(uv.getX(i) * 1e6);
       const entry = rings.get(key);
       if (entry) {
         entry.x += point.x;
+        entry.y += point.y;
         entry.z += point.z;
         entry.n += 1;
       } else {
-        rings.set(key, { x: point.x, z: point.z, n: 1 });
+        rings.set(key, { x: point.x, y: point.y, z: point.z, n: 1 });
       }
     }
 
     const centres = [...rings.entries()]
       .sort((a, b) => a[0] - b[0])
-      .map(([, e]) => [e.x / e.n, e.z / e.n] as const);
+      .map(([, e]) => [e.x / e.n, e.y / e.n, e.z / e.n] as const);
 
+    let grid = byLane.get(lane);
+    if (!grid) {
+      grid = new Map();
+      byLane.set(lane, grid);
+    }
     for (let i = 0; i < centres.length; i += 1) {
       const a = centres[i]!;
       const b = centres[(i + 1) % centres.length]!;
-      const segment: [number, number, number, number] = [a[0], a[1], b[0], b[1]];
-      // Both ends, so a lookup from either side of a segment finds it.
-      add(`${Math.floor(a[0])},${Math.floor(a[1])}`, segment);
-      add(`${Math.floor(b[0])},${Math.floor(b[1])}`, segment);
+      const segment: Segment3 = [a[0], a[1], a[2], b[0], b[1], b[2]];
+      // Both ends, so a lookup from either side of a segment finds it. The cell
+      // is still a plan-view square: the grid is only a way of not testing
+      // every segment, and the distance it narrows down to is the 3D one.
+      for (const end of [a, b]) {
+        const key = `${Math.floor(end[0])},${Math.floor(end[2])}`;
+        const cell = grid.get(key);
+        if (cell) cell.push(segment);
+        else grid.set(key, [segment]);
+      }
     }
   });
-  return grid;
+  return byLane;
 }
 
-/** Distance from `(x, z)` to the nearest rail centre line, searching outwards. */
+/** Distance from a point to the nearest centre line in one lane's grid. */
 function nearestRail(
-  grid: Map<string, [number, number, number, number][]>,
+  grid: Map<string, Segment3[]>,
   x: number,
+  y: number,
   z: number,
 ): number {
   const cx = Math.floor(x);
@@ -2986,8 +3041,8 @@ function nearestRail(
     for (let dx = -radius; dx <= radius; dx += 1) {
       for (let dz = -radius; dz <= radius; dz += 1) {
         if (radius > 0 && Math.abs(dx) !== radius && Math.abs(dz) !== radius) continue;
-        for (const [ax, az, bx, bz] of grid.get(`${cx + dx},${cz + dz}`) ?? []) {
-          const d = pointToSegment([x, z], [ax, az], [bx, bz]);
+        for (const segment of grid.get(`${cx + dx},${cz + dz}`) ?? []) {
+          const d = pointToSegment3(_railProbe.set(x, y, z), segment);
           if (d < nearest) nearest = d;
         }
       }
@@ -2996,6 +3051,55 @@ function nearestRail(
   }
   return nearest;
 }
+
+/**
+ * The nearest point of one lane's centre lines to `probe`, written into `into`.
+ *
+ * {@link nearestRail} answers "how far"; this answers "from where", which is
+ * what a measurement needs when only part of the offset is a fault — a sleeper
+ * is *deliberately* sunk under its rails so they rest on it rather than in it,
+ * and a check that could not tell that component apart from a sideways drift
+ * would be reporting the design as a defect.
+ */
+function nearestRailPoint(
+  grid: Map<string, Segment3[]>,
+  probe: Vector3,
+  into: Vector3,
+): number {
+  const cx = Math.floor(probe.x);
+  const cz = Math.floor(probe.z);
+  let nearest = Infinity;
+  const candidate = new Vector3();
+  for (let radius = 0; radius <= 40; radius += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      for (let dz = -radius; dz <= radius; dz += 1) {
+        if (radius > 0 && Math.abs(dx) !== radius && Math.abs(dz) !== radius) continue;
+        for (const [ax, ay, az, bx, by, bz] of grid.get(`${cx + dx},${cz + dz}`) ?? []) {
+          const ex = bx - ax;
+          const ey = by - ay;
+          const ez = bz - az;
+          const len = ex * ex + ey * ey + ez * ez;
+          const t =
+            len > 1e-12
+              ? Math.max(
+                  0,
+                  Math.min(1, ((probe.x - ax) * ex + (probe.y - ay) * ey + (probe.z - az) * ez) / len),
+                )
+              : 0;
+          candidate.set(ax + ex * t, ay + ey * t, az + ez * t);
+          const d = candidate.distanceTo(probe);
+          if (d < nearest) {
+            nearest = d;
+            into.copy(candidate);
+          }
+        }
+      }
+    }
+    if (nearest <= radius) return nearest;
+  }
+  return nearest;
+}
+
 
 /**
  * How far a dropper may stand from the nearest rail and still be holding it up.
@@ -3407,15 +3511,24 @@ const duckBarsStandOnRealSupports: Invariant = (facts) => {
       continue;
     }
 
+    // **In the chart, not in plan.** A bar hangs a rider's height above rails
+    // that are already nine metres up and leant onto the sphere; a leg's foot
+    // is on the ground. Their raw plan positions therefore differ by the lean
+    // over that whole height — about five metres out here — which is most of a
+    // tolerance meant to cover a trestle's arc nudge. Both go back through the
+    // ring's own `chartOf` so the distance being measured is the one a person
+    // would point at: how far along and across the ring the bar is from the
+    // support under it.
+    const route = ring.label === 'race' ? facts.world.railRace.raceRoute : facts.world.railRace.walkPastRoute;
     const legPositions: Vector3[] = [];
     for (let i = 0; i < legsMesh.count; i += 1) {
       legsMesh.getMatrixAt(i, matrix);
-      legPositions.push(new Vector3().setFromMatrixPosition(matrix));
+      legPositions.push(route.chartOf(new Vector3().setFromMatrixPosition(matrix), new Vector3()));
     }
 
     for (let i = 0; i < barsMesh.count; i += 1) {
       barsMesh.getMatrixAt(i, matrix);
-      barPosition.setFromMatrixPosition(matrix);
+      route.chartOf(new Vector3().setFromMatrixPosition(matrix), barPosition);
       let nearest = Infinity;
       for (const leg of legPositions) {
         const d = Math.hypot(barPosition.x - leg.x, barPosition.z - leg.z);
@@ -8772,7 +8885,7 @@ function samplePolyline(
  * The middle of a lane's track, **in three dimensions**, taken from the built
  * rails.
  *
- * {@link railCentreLines} and {@link railCentreLinesByLane} both flatten to the
+ * {@link railCentreLinesByLane} flattens to the
  * ground — `point.set(x, 0, z)` — and that is not a detail. **Every support
  * check in this file was a plan-view measurement**, and in plan view a post that
  * stops four metres under the track is indistinguishable from one welded to it.
@@ -9168,74 +9281,63 @@ const raceCameraNeverRunsBackwards: Invariant = (facts) => {
 // ---------------------------------------------------------- supports & sleepers
 
 /**
- * Every lane's rail centre lines, kept apart by lane.
+ * Which lane a drawn thing belongs to, **by its offset across the ring**.
  *
- * {@link railCentreLines} flattens all four lanes into one spatial grid, which
- * is right for "is this post under *a* rail" and useless for "is this thing
- * under **lane 2**". Both rails of a lane share the mesh name
- * `railRace:rail-{lane}`, so the lane is recoverable; the geometry walk is
- * otherwise identical.
+ * The question {@link nearestLane} cannot answer for anything that is not
+ * *on* the rails. A duck bar hangs a rider's height above its lane, so the
+ * nearest rail centre line to it in space is whichever lane happens to be
+ * riding highest nearby — the lanes undulate on their own phases and stand up
+ * to 4.38 m apart in height at one station, which is further than they are
+ * apart sideways. Measured on the canonical seed, that filed the race ring's
+ * 40 bars as 6/13/15/6 across four lanes when the ring lays **10 a lane**, and
+ * the fairness clause faithfully reported a race that is in fact fair.
+ *
+ * Two quantities, and they are easy to mix up — 6+13+15+6 is 40, so any
+ * per-lane figure the clause quotes has to divide 40. **10 bars a lane per
+ * lap** is what this counts, off the drawn ring. `barCrossingsByLane` is the
+ * other one, 20 a lane, because it is the whole race and `RACE_LAPS` is 2.
+ * Both were measured on the base, all five seeds, before this clause changed:
+ * the race was already fair in the plan, in the schedule and in the geometry.
+ *
+ * Unleaning removes the height from the question: in the chart every part of
+ * a bar's gantry sits at its own lane's offset from the centre line, whatever
+ * it does in the air.
  */
-function railCentreLinesByLane(ring: BuiltRing): Map<number, Map<string, [number, number, number, number][]>> {
-  const byLane = new Map<number, Map<string, [number, number, number, number][]>>();
-  const point = new Vector3();
-
-  ring.group.traverse((child) => {
-    if (!(child instanceof Mesh)) return;
-    const match = /^railRace:rail-(\d+)$/.exec(child.name);
-    if (!match) return;
-    const lane = Number(match[1]);
-    const position = child.geometry.getAttribute('position');
-    const uv = child.geometry.getAttribute('uv');
-    if (!position || !uv) return;
-    child.updateWorldMatrix(true, false);
-
-    const rings = new Map<number, { x: number; z: number; n: number }>();
-    for (let i = 0; i < position.count; i += 1) {
-      point.set(position.getX(i), 0, position.getZ(i)).applyMatrix4(child.matrixWorld);
-      const key = Math.round(uv.getX(i) * 1e6);
-      const entry = rings.get(key);
-      if (entry) {
-        entry.x += point.x;
-        entry.z += point.z;
-        entry.n += 1;
-      } else {
-        rings.set(key, { x: point.x, z: point.z, n: 1 });
-      }
+function laneAcrossTheRing(
+  route: ParkFacts['world']['railRace']['raceRoute'],
+  drawn: Vector3,
+  lanes: number,
+): number {
+  const at = route.stationOf(drawn);
+  const chart = route.unlean(at, drawn, new Vector3());
+  const station = route.path.sampleAt(at);
+  const offset =
+    (chart.x - station.x) * station.normalX + (chart.z - station.z) * station.normalZ;
+  let best = 0;
+  let nearest = Infinity;
+  for (let lane = 0; lane < lanes; lane += 1) {
+    const d = Math.abs(offset - (route.laneOffsets[lane] ?? 0));
+    if (d < nearest) {
+      nearest = d;
+      best = lane;
     }
-    const centres = [...rings.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([, e]) => [e.x / e.n, e.z / e.n] as const);
-
-    let grid = byLane.get(lane);
-    if (!grid) {
-      grid = new Map();
-      byLane.set(lane, grid);
-    }
-    for (let i = 0; i < centres.length; i += 1) {
-      const a = centres[i]!;
-      const b = centres[(i + 1) % centres.length]!;
-      const segment: [number, number, number, number] = [a[0], a[1], b[0], b[1]];
-      for (const end of [a, b]) {
-        const key = `${Math.floor(end[0])},${Math.floor(end[1])}`;
-        const cell = grid.get(key);
-        if (cell) cell.push(segment);
-        else grid.set(key, [segment]);
-      }
-    }
-  });
-  return byLane;
+  }
+  return best;
 }
 
-/** Which lane's rails `(x, z)` is nearest to, and how far. */
+/**
+ * Which lane's rails a point is nearest to, and how far — **in three
+ * dimensions**, see {@link RailSegment} for why it cannot be asked in plan.
+ */
 function nearestLane(
-  byLane: Map<number, Map<string, [number, number, number, number][]>>,
+  byLane: Map<number, Map<string, Segment3[]>>,
   x: number,
+  y: number,
   z: number,
 ): { lane: number; distance: number } {
   let best = { lane: -1, distance: Infinity };
   for (const [lane, grid] of byLane) {
-    const d = nearestRail(grid, x, z);
+    const d = nearestRail(grid, x, y, z);
     if (d < best.distance) best = { lane, distance: d };
   }
   return best;
@@ -9354,22 +9456,22 @@ const railRaceTrestlesCarryEveryTrack: Invariant = (facts) => {
       );
     }
 
-    // The plane `forkPlan` is solved against, rebuilt from the built route the
-    // same way `track.ts` does — the lowest any lane ever gets, less BEAM_DROP.
-    // Sampled off `route` rather than re-deriving `UNDULATION_REACH`, so it is
-    // the ring that was actually built that answers.
-    let lowestRailY = Infinity;
-    {
-      const probe = new Vector3();
-      const SAMPLES = 720;
-      for (let lane = 0; lane < lanes; lane += 1) {
-        for (let k = 0; k < SAMPLES; k += 1) {
-          route.pointAt(lane, (k / SAMPLES) * route.length, probe);
-          lowestRailY = Math.min(lowestRailY, probe.y);
-        }
-      }
-    }
-    const beamY = lowestRailY - BEAM_DROP;
+    // **The plane `forkPlan` is solved against, asked of the built ring.**
+    //
+    // This took a global minimum of drawn world `y` over the whole lap, which
+    // was a flat-park reading: the ring is held a constant height above a
+    // sphere, so its world `y` falls 24 m from the park's pinch to its bulge
+    // and the lap's lowest point is simply its furthest-out one. A post at the
+    // pinch was then handed a *negative* height to solve from, `forkPlan`
+    // returned a negative fork, and `atan(spacing / negative)` gave a plan
+    // angle of about -90 deg — reported, honestly, as being 145 deg away from a
+    // perfectly ordinary 55 deg branch.
+    //
+    // The deck is a local, chart quantity: this bearing's own base, less how
+    // far the undulation can dig below it. The ring publishes that reach
+    // (`route.undulationReach`) because it is a bound the three harmonics never
+    // all reach at once, so sampling the built ring recovers a *shallower*
+    // number and not this one.
 
     const byLane = railCentreLinesByLane(ring);
     if (byLane.size !== lanes) {
@@ -9389,7 +9491,7 @@ const railRaceTrestlesCarryEveryTrack: Invariant = (facts) => {
       let worstLaneMiss = 0;
       for (let k = 0; k < lanes; k += 1) {
         const { top } = strutEnds(upper, trestle * lanes + k);
-        const near = nearestLane(byLane, top.x, top.z);
+        const near = nearestLane(byLane, top.x, top.y, top.z);
         covered.add(near.lane);
         // On the lane's centre line: half a gauge from either of its rails.
         const halfGauge = (RAIL_GAUGE_AT_PARK_SCALE * ring.scale) / 2;
@@ -9436,10 +9538,33 @@ const railRaceTrestlesCarryEveryTrack: Invariant = (facts) => {
       // Note "widest" is the branch carrying the **lower** lane. `angleOf`
       // measures from vertical, so a branch that has to climb further to a
       // higher lane makes a *smaller* angle, not a larger one.
-      const post = strutEnds(legs, trestle);
+      // **Angles are measured in the chart, because that is where the plan
+      // lives.** A drawn strut has the planet's own lean in it — 14 to 27 deg
+      // out here — so its angle from world `+Y` is its fork angle plus however
+      // far the ground tilts under it, and comparing that with `forkPlan` is
+      // comparing two different quantities. `route.chartOf` is the exact
+      // inverse of the one rigid turn `track.ts` drew the tree through, so it
+      // hands back the very tree the plan was solved for, read off the mesh.
+      //
+      // **One station for the whole tree.** A trestle is one cross-section, so
+      // its seven nodes share an arc length; letting each find its own (which
+      // is what `chartOf` does for a lone point) bends the tree by the ring's
+      // own curvature — measured at up to 0.08 m of spurious height per node.
+      // `stationOf` is asked of the trunk top, the one node standing on the
+      // centre line, where the projection cannot be ambiguous.
+      const at = route.stationOf(strutEnds(legs, trestle).top);
+      const chartEnds = (mesh: InstancedMesh, index: number): { foot: Vector3; top: Vector3 } => {
+        const { foot, top } = strutEnds(mesh, index);
+        return {
+          foot: route.unlean(at, foot, new Vector3()),
+          top: route.unlean(at, top, new Vector3()),
+        };
+      };
+      const post = chartEnds(legs, trestle);
+      const beamY = route.baseAt(at) - route.undulationReach - BEAM_DROP;
       const plan = forkPlan(beamY - post.foot.y, route.laneSpacing);
       const angleOf = (mesh: InstancedMesh, index: number): number => {
-        const { foot, top } = strutEnds(mesh, index);
+        const { foot, top } = chartEnds(mesh, index);
         const span = top.clone().sub(foot);
         return Math.atan2(Math.hypot(span.x, span.z), span.y);
       };
@@ -9523,15 +9648,27 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
       sleepers.getMatrixAt(i, matrix);
       const centre = new Vector3().setFromMatrixPosition(matrix);
       // The sleeper's own local X, normalised — the axis it bridges along.
-      const across = new Vector3(1, 0, 0)
-        .applyMatrix4(new Matrix4().extractRotation(matrix))
-        .normalize();
-      const near = nearestLane(byLane, centre.x, centre.z);
+      const rotation = new Matrix4().extractRotation(matrix);
+      const across = new Vector3(1, 0, 0).applyMatrix4(rotation).normalize();
+      // The sleeper's own up, which is the direction it is deliberately sunk
+      // along so the rails rest **on** it. That component of the offset is the
+      // design (`track.ts`'s `sleeperDrop`) and not a miss, so it is projected
+      // out — what is left is the sideways drift this clause exists to catch,
+      // the `check:tie-frame` roll (#112) in a second ride. Measuring the raw
+      // 3D distance instead reports the sink itself, which on the walk-past
+      // ring is 0.103 m against a 0.098 m tolerance: a check failing on a
+      // healthy ring for doing what it was built to do.
+      // flat-ok: local +Y rotated by the sleeper's own instance matrix — its own up
+      const sleeperUp = new Vector3(0, 1, 0).applyMatrix4(rotation).normalize();
+      const near = nearestLane(byLane, centre.x, centre.y, centre.z);
+      const onRail = new Vector3();
       for (const side of [-1, 1] as const) {
         const gaugePoint = centre.clone().addScaledVector(across, side * halfGauge);
         const grid = byLane.get(near.lane);
         if (!grid) continue;
-        const miss = nearestRail(grid, gaugePoint.x, gaugePoint.z);
+        nearestRailPoint(grid, gaugePoint, onRail);
+        const offset = onRail.clone().sub(gaugePoint);
+        const miss = offset.addScaledVector(sleeperUp, -offset.dot(sleeperUp)).length();
         if (miss > worstReach) {
           worstReach = miss;
           worstAt = [gaugePoint.x, gaugePoint.z];
@@ -9636,7 +9773,7 @@ const duckBarsAreOnePerLaneAndNeverTouch: Invariant = (facts) => {
     }
     if (bars.count === 0) continue;
     const lanes = facts.world.railRace.laneCount;
-    const byLane = railCentreLinesByLane(ring);
+    const route = ring.label === 'race' ? facts.world.railRace.raceRoute : facts.world.railRace.walkPastRoute;
 
     const matrix = new Matrix4();
     const centres: Vector3[] = [];
@@ -9645,8 +9782,8 @@ const duckBarsAreOnePerLaneAndNeverTouch: Invariant = (facts) => {
       bars.getMatrixAt(i, matrix);
       const centre = new Vector3().setFromMatrixPosition(matrix);
       centres.push(centre);
-      const near = nearestLane(byLane, centre.x, centre.z);
-      perLane.set(near.lane, (perLane.get(near.lane) ?? 0) + 1);
+      const lane = laneAcrossTheRing(route, centre, lanes);
+      perLane.set(lane, (perLane.get(lane) ?? 0) + 1);
     }
 
     const counts = Array.from({ length: lanes }, (_unused, lane) => perLane.get(lane) ?? 0);

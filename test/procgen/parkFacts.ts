@@ -21,6 +21,7 @@ import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
 import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
+import type { RailRaceRoute } from '../../src/world/railRace/route.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 import type { Claim } from '../../src/boot/groundClaims.ts';
 import type { RoadSegment } from '../../src/world/entrance/roadCorridor.ts';
@@ -1552,7 +1553,6 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // {@link RailRaceSupportFacts}. `track.ts` reaches `parkLayout.ts`, so it is
   // imported here, after this seed's world exists, never at the top of a test.
   const { trestleClaims } = await import('../../src/world/railRace/track.ts');
-  const { unplaceFromSphere } = await import('../../src/world/terrain.ts');
   const railRaceSupports: RailRaceSupportFacts[] = [];
   {
     const railRace = world.railRace;
@@ -1567,24 +1567,45 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
      * `strut` — **mapped back to the flat frame the tree was solved in.** The
      * struts are drawn leant onto the sphere (`leanTrestleTree`); the claims
      * and the lean bound are made on the flat solve, in chart coordinates. So
-     * each drawn end goes through `unplaceFromSphere` (the exact inverse of the
-     * lean, round trip 9e-14 m) before it is compared with anything the
-     * registry holds. Read straight as flat, a rail-height point 100 m out is
-     * metres off its own plan — the lean itself, not an error.
+     * each drawn end goes back through the ring's own `chartOf` — the exact
+     * inverse of the one rigid turn it was drawn through — before it is
+     * compared with anything the registry holds. Read straight as flat, a
+     * rail-height point 100 m out is metres off its own plan: the lean itself,
+     * not an error.
+     *
+     * **Not `unplaceFromSphere`, which this used to call.** That answers a
+     * different question — where a plumb line from the point meets the ground —
+     * and it was the exact inverse only while every node was leant at its own
+     * column, which is the shear `route.ts`'s `lean` exists to undo. It now
+     * differs by about 0.13 m out here, three times this clause's own
+     * float32 slack.
      */
-    const ends = (mesh: InstancedMesh, i: number): { from: Vector3; to: Vector3 } => {
+    const ends = (
+      mesh: InstancedMesh,
+      i: number,
+      ring: RailRaceRoute,
+      at: number,
+    ): { from: Vector3; to: Vector3 } => {
       mesh.getMatrixAt(i, matrix);
       centre.setFromMatrixPosition(matrix);
       axis.setFromMatrixColumn(matrix, 1);
       return {
-        from: unplaceFromSphere(centre.clone().addScaledVector(axis, -0.5)),
-        to: unplaceFromSphere(centre.clone().addScaledVector(axis, 0.5)),
+        from: ring.unlean(at, centre.clone().addScaledVector(axis, -0.5), new Vector3()),
+        to: ring.unlean(at, centre.clone().addScaledVector(axis, 0.5), new Vector3()),
       };
     };
-    for (const [label, feature, scale] of [
-      ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute.scale],
-      ['race', 'railRace:race-ring', railRace.raceRoute.scale],
+    /** Where a drawn trunk's top stands on the ring — the tree's one station. */
+    const stationOfTrunk = (legs: InstancedMesh, i: number, ring: RailRaceRoute): number => {
+      legs.getMatrixAt(i, matrix);
+      centre.setFromMatrixPosition(matrix);
+      axis.setFromMatrixColumn(matrix, 1);
+      return ring.stationOf(centre.clone().addScaledVector(axis, 0.5));
+    };
+    for (const [label, feature, ringRoute] of [
+      ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute],
+      ['race', 'railRace:race-ring', railRace.raceRoute],
     ] as const) {
+      const scale = ringRoute.scale;
       const group = railRace.group.getObjectByName(feature);
       const legs = group?.getObjectByName('railRace:trestle-legs');
       const lower = group?.getObjectByName('railRace:trestle-branches-lower');
@@ -1612,9 +1633,13 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       // rebuilt from the drawn struts by that order, then run through the one
       // owner of what a support claims.
       for (let i = 0; i < legs.count; i += 1) {
-        const trunk = ends(legs, i);
-        const forkNodes = [ends(lower, 2 * i).to, ends(lower, 2 * i + 1).to];
-        const laneTops = [0, 1, 2, 3].map((lane) => ends(upper, 4 * i + lane).to);
+        // One station for the whole tree — see `RailRaceRoute.stationOf`. Per
+        // node, each of the seven would find a station of its own and the
+        // ring's curvature would read back as a bent tree.
+        const at = stationOfTrunk(legs, i, ringRoute);
+        const trunk = ends(legs, i, ringRoute, at);
+        const forkNodes = [ends(lower, 2 * i, ringRoute, at).to, ends(lower, 2 * i + 1, ringRoute, at).to];
+        const laneTops = [0, 1, 2, 3].map((lane) => ends(upper, 4 * i + lane, ringRoute, at).to);
         struts += 7;
         fromDrawn.push(
           ...trestleClaims(
@@ -1632,7 +1657,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
           footX: trunk.from.x,
           footZ: trunk.from.z,
           lean: Math.hypot(trunk.to.x - trunk.from.x, trunk.to.z - trunk.from.z),
-          // flat-ok: both ends were mapped back to the chart by unplaceFromSphere above; y is chart height
+          // flat-ok: both ends were mapped back to the chart by the ring's own chartOf above; y is chart height
           trunkHeight: trunk.to.y - trunk.from.y,
         });
       }
@@ -2593,67 +2618,34 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
   const raceRoute = world.railRace.raceRoute;
 
   /**
-   * Arc distance from the arch of the ring point nearest `(x, z)`.
+   * A drawn thing's distance from the start/finish arch, in metres of the
+   * shared arc length everything in this ride is addressed by.
    *
-   * **Inverted against the path itself, not against a formula for it.** This
-   * used to invert `angleAt(s) = -s / NOMINAL_RADIUS` in closed form, which was
-   * exact while the ring was a circle and became meaningless the moment #216
-   * made it follow the park boundary — `NOMINAL_RADIUS` is not even exported
-   * any more, so the closed form silently produced `NaN` and every bar deduped
-   * to a single phantom. Walking `route.path`'s own samples works for whatever
-   * shape the ring is next, which is the point.
-   *
-   * The samples sit ~0.25 m apart, which is half the distance a rider covers in
-   * a frame — too coarse to compare against on its own — so the nearest one is
-   * refined by projecting onto the polyline either side of it. That lands well
-   * inside a centimetre.
+   * **Through the ring's own `stationOf`, not by nearest point in plan.** A
+   * duck bar hangs ten metres above the rails and the whole ride is leant onto
+   * the sphere, so the bar's plan position stands metres outside the centre
+   * line — and on a spline whose bend varies, the nearest point of that line
+   * can belong to a quite different part of the loop. Measured on the canonical
+   * seed, that read a bar 12.8 m from where it is: the invariant below
+   * faithfully reported the bonk landing "after the bar", and the bar was
+   * exactly where it should be. `stationOf` refines in the chart, where the
+   * projection is unambiguous.
    */
-  const archRelative = (x: number, z: number): number => {
-    const samples = raceRoute.path.samples;
-    let nearest = 0;
-    let nearestD2 = Infinity;
-    for (let i = 0; i < samples.length; i += 1) {
-      const s = samples[i]!;
-      const d2 = (s.x - x) * (s.x - x) + (s.z - z) * (s.z - z);
-      if (d2 < nearestD2) {
-        nearestD2 = d2;
-        nearest = i;
-      }
-    }
-    let bestAt = samples[nearest]!.at;
-    let bestD2 = nearestD2;
-    for (const step of [-1, 1]) {
-      const a = samples[nearest]!;
-      const b = samples[(nearest + step + samples.length) % samples.length]!;
-      const ex = b.x - a.x;
-      const ez = b.z - a.z;
-      const len2 = ex * ex + ez * ez;
-      if (len2 === 0) continue;
-      const t = Math.max(0, Math.min(1, ((x - a.x) * ex + (z - a.z) * ez) / len2));
-      const px = a.x + ex * t;
-      const pz = a.z + ez * t;
-      const d2 = (px - x) * (px - x) + (pz - z) * (pz - z);
-      if (d2 < bestD2) {
-        bestD2 = d2;
-        // `samples` are evenly spaced in arc length, so `t` interpolates it.
-        bestAt = raceRoute.wrap(a.at + step * t * (raceRoute.length / samples.length));
-      }
-    }
-    return raceRoute.wrap(bestAt - raceRoute.startDistance);
-  };
+  const archRelative = (drawn: { x: number; y: number; z: number }): number =>
+    raceRoute.wrap(raceRoute.stationOf(drawn) - raceRoute.startDistance);
+
   const raceRing = world.railRace.group.getObjectByName('railRace:race-ring');
   const barsMesh = raceRing?.getObjectByName('railRace:duck-bars');
   const builtBarDistances: number[] = [];
   if (barsMesh instanceof Instanced) {
     const matrix = new Mat4();
     const at = new Vec3();
-    const laneProbe = new Vec3();
     for (let i = 0; i < barsMesh.count; i += 1) {
       barsMesh.getMatrixAt(i, matrix);
       at.setFromMatrixPosition(matrix);
       // The bar's real arc position, read off its own matrix rather than off
       // the rule that placed it.
-      const arch = archRelative(at.x, at.z);
+      const arch = archRelative(at);
 
       // **Which lane is it on?** Since 7 August a duck bar crosses one lane
       // rather than all four (`hazards.ts`'s `DuckBar.lane`), so the rider
@@ -2663,15 +2655,31 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       // and is false now, and left in place it made the invariant demand that a
       // rider be bonked by three other people's bars.
       //
-      // Decided by measuring the bar against each lane's own centre point at its
-      // own arc distance — not by its distance from the origin, which stopped
-      // meaning anything when #216 made this ring a spline whose radius varies
-      // by 40 m.
+      // **Asked in the chart, by lane offset.** It compared the bar's plan
+      // position with each lane's plan position, and a bar hangs a rider's
+      // height above the rails on a ride leant onto the sphere — so it stands
+      // further out in plan than the rail it straddles and lands squarely over
+      // the *next lane out*. Measured on the canonical seed: 34 of the ring's
+      // 40 bars were filed one lane too far out, and the rider on lane 3 was
+      // then held to bars belonging to lane 2. That is the whole of the "bonks
+      // 12.5 m after the bar" failure — the bonk was the next real lane-3 bar
+      // along, and the bar it was blamed on was somebody else's.
+      //
+      // Unleaning removes the height entirely: in the chart a bar sits at
+      // exactly its own lane's offset from the centre line, whatever it does
+      // in the air.
+      const across = raceRoute.unlean(
+        raceRoute.wrap(raceRoute.startDistance + arch),
+        at,
+        new Vec3(),
+      );
+      const station = raceRoute.path.sampleAt(raceRoute.wrap(raceRoute.startDistance + arch));
+      const offset =
+        (across.x - station.x) * station.normalX + (across.z - station.z) * station.normalZ;
       let onLane = 0;
       let nearest = Infinity;
       for (let lane = 0; lane < world.railRace.laneCount; lane += 1) {
-        raceRoute.pointAt(lane, raceRoute.wrap(raceRoute.startDistance + arch), laneProbe);
-        const d = Math.hypot(laneProbe.x - at.x, laneProbe.z - at.z);
+        const d = Math.abs(offset - (raceRoute.laneOffsets[lane] ?? 0));
         if (d < nearest) {
           nearest = d;
           onLane = lane;
