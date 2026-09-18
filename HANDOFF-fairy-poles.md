@@ -518,6 +518,34 @@ sides and a bare name diff reads "identical". Vitest reports one instance per
 `ancestorTitles.concat(title)` — seed included — and then two extra instances
 show up as two extra keys.
 
+## When two measurements disagree, re-read your own log first
+
+Twice in one session I quoted a number, built a theory on what I assumed it
+counted, and reported the theory:
+
+- `38 -> 37` wall slots, taken as proof of an upstream computation. It was not.
+- `worst advance 0.0 ms` from `check:park-boot`, taken as proof the
+  attested-busy mechanism cannot measure headless — reported to the Overseer as
+  worth filing. **It measures fine.** The headline in that log is
+  `worst single advance() 16.7 ms ... that worst slice was parkPlan x3662`,
+  against a 20.0 ms ceiling. The `0.0 ms` is a *subsidiary* line counting
+  looping-overrun frames, near the bottom, which is where I was looking.
+
+The second one was caught only because **another agent's run of the same check
+on the same base produced real numbers**. Faced with their result contradicting
+mine, the comfortable move — the one I made — was to reach for a story in which
+both could be true ("it must behave differently in my environment"). The right
+move is the cheap one: **re-read your own log before theorising about anyone
+else's.** When two measurements of one thing disagree, one is wrong, and the
+one you can check for free is yours.
+
+`check:park-boot`'s real coverage limit, separately and genuinely: every sliced
+work unit is a **plan-phase** solver (`brief`, `cruiser search`,
+`cruiser finish`, `slide search`). The **world phase runs outside any budgeted
+slice** — the log's own `162 ms of generation happened outside a budgeted
+slice`. So that gate is blind to everything `worldPhase.ts` does, including
+this file's per-candidate ride query. Filed as **#694**; not a fairy-lights fix.
+
 ## A build order here is a PRECEDENCE order, not a completion order
 
 **This is the most useful thing learned in this work, and every wrong theory
