@@ -173,15 +173,23 @@ registerPlanCache(() => {
   stallsMemo = null;
 });
 
-/** A stall as built into the world: its definition plus where to stand. */
+/**
+ * A stall as built into the world: its definition plus where to stand.
+ *
+ * The four coordinates are **not** `readonly`: a booth may step aside during
+ * the world phase (`world/stallsFeature.ts`), and when it does the thing a
+ * child sees, the thing she bumps into and the thing she taps all move
+ * together. They are written by {@link MiniGameStalls.boothPlacement} and by
+ * nothing else.
+ */
 export interface StallInstance {
   readonly definition: StallDefinition;
   /** World position of the booth itself. */
-  readonly x: number;
-  readonly z: number;
+  x: number;
+  z: number;
   /** Where a child stands to be served. */
-  readonly standX: number;
-  readonly standZ: number;
+  standX: number;
+  standZ: number;
   /**
    * The booth's own geometry. Here so the thing and its tap target cannot
    * drift apart — the HIGHLIGHT RULE outlines this exact group when the stall
@@ -196,6 +204,9 @@ export class MiniGameStalls implements GameSystem {
   readonly stalls: readonly StallInstance[];
 
   private readonly props: StallProp[] = [];
+  /** The four wall colliders each booth registered, so exactly those can be taken back if it moves. */
+  private readonly walls = new Map<string, WallCollider[]>();
+  private readonly collision: CollisionWorld;
 
   /**
    * "Open this booth" — wired by `Game` to `MiniGameHost.enter`, which either
@@ -210,6 +221,7 @@ export class MiniGameStalls implements GameSystem {
 
   constructor(collision: CollisionWorld) {
     this.group.name = 'stalls';
+    this.collision = collision;
 
     const instances: StallInstance[] = [];
     for (const definition of STALLS) {
@@ -229,7 +241,7 @@ export class MiniGameStalls implements GameSystem {
 
       // The booth is solid; the paved apron in front of it is not, so a child
       // can run right up to the counter.
-      addMiniGameBoothCollision(collision, x, z, definition.facing);
+      this.walls.set(definition.id, addMiniGameBoothCollision(collision, x, z, definition.facing));
 
       // Taken from `STALL_STANDS`, not recomputed here. This used to derive its
       // own from `STALL_STAND_DISTANCE`, which was harmless only for as long as
@@ -250,6 +262,42 @@ export class MiniGameStalls implements GameSystem {
       });
     }
     this.stalls = instances;
+  }
+
+  /**
+   * **This booth, as something that can step aside** — the handle
+   * `world/stallsFeature.ts` drives when a feature that needs the space more
+   * asks a stall to move.
+   *
+   * `withdrawCollision` takes back exactly the four walls this booth
+   * registered (not a blanket removal), so a candidate spot can be tested
+   * without the booth refusing itself. `placeAt` then moves the prop, its
+   * stand point and four fresh walls in one call — CLAUDE.md's rule that a
+   * mesh and its collider are only ever kept together on purpose.
+   */
+  boothPlacement(id: string): { withdrawCollision(): void; placeAt(x: number, z: number): void } | null {
+    const stall = this.stalls.find((candidate) => candidate.definition.id === id);
+    const prop = stall ? this.props[this.stalls.indexOf(stall)] : undefined;
+    if (!stall || !prop) return null;
+    return {
+      withdrawCollision: () => {
+        for (const wall of this.walls.get(id) ?? []) this.collision.removeWall(wall);
+        this.walls.set(id, []);
+      },
+      placeAt: (x: number, z: number) => {
+        for (const wall of this.walls.get(id) ?? []) this.collision.removeWall(wall);
+        stall.x = x;
+        stall.z = z;
+        const stand = STALL_STANDS_BY_ID.get(id);
+        if (!stand) throw new Error(`MiniGameStalls: no stand point for '${id}' after it moved`);
+        stall.standX = stand.x;
+        stall.standZ = stand.z;
+        prop.root.position.set(x, terrainHeight(x, z), z);
+        prop.root.rotation.y = stall.definition.facing;
+        standOnSphere(prop.root);
+        this.walls.set(id, addMiniGameBoothCollision(this.collision, x, z, stall.definition.facing));
+      },
+    };
   }
 
   /**
