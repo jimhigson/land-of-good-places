@@ -1,5 +1,5 @@
 import { Rng } from '../../core/mathUtils';
-import { LANE_COUNT, RIDE_SCALE } from './route';
+import { LANE_COUNT } from './dimensions';
 
 /**
  * **The two things you have to let go for.**
@@ -159,16 +159,29 @@ const DUCK_BAR_HALF_DEPTH_AT_PARK_SCALE = 0.15;
 const DUCK_BAR_UNDERSIDE_AT_PARK_SCALE =
   (RIDER_HEAD_TOP_AT_PARK_SCALE + RIDER_DUCKED_HEAD_TOP_AT_PARK_SCALE) / 2;
 
+/**
+ * **The one owner of how much air a duck bar leaves under it**, expressed at
+ * park scale. A ring multiplies it by its own {@link RailRaceRoute.scale}
+ * (`track.ts`'s `duckClearance`) and nothing else does, so the walk-past ring's
+ * bars are proportioned to the park-scale kids under them rather than hanging
+ * at race height over half-size carts.
+ *
+ * There used to be a second export here, `DUCK_CLEARANCE`, holding this same
+ * number already multiplied by `RIDE_SCALE` — the race ring's case, pre-baked.
+ * Nothing read it: `track.ts` derives every ring's clearance from its own
+ * scale, and says so ("there is no `RIDE_SCALE` below this line"). It was the
+ * second definition of one thing, and it cost more than a stale comment could
+ * have: computing it needed `RIDE_SCALE` **at module scope**, and this module
+ * and `./route` are in the same import cycle (`hazards` → `route` →
+ * `parkLayout` → … → `hazards`), so on the entry orders that reach `route`
+ * first the read landed in `RIDE_SCALE`'s temporal dead zone and threw
+ * `Cannot access 'RIDE_SCALE' before initialization` at import time. That took
+ * `check:cart-shape` and `check:ground-claims` down before either could check
+ * anything. `scripts/scan-cycle-tdz.mts` lists every initialiser still shaped
+ * like that one.
+ */
 export const DUCK_CLEARANCE_AT_PARK_SCALE =
   DUCK_BAR_UNDERSIDE_AT_PARK_SCALE + DUCK_BAR_HALF_DEPTH_AT_PARK_SCALE;
-
-/**
- * The clearance on the ring a child actually races on. A ring builds its own
- * bars at `DUCK_CLEARANCE_AT_PARK_SCALE * route.scale` (`track.ts`), so the
- * walk-past ring's bars are proportioned to the park-scale kids under them
- * rather than hanging at race height over half-size carts.
- */
-export const DUCK_CLEARANCE = DUCK_CLEARANCE_AT_PARK_SCALE * RIDE_SCALE;
 
 /**
  * How far ahead a hazard starts warning, in metres.
