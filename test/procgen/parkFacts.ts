@@ -738,6 +738,25 @@ export interface ParkFacts {
    * default seed.
    */
   readonly cruiserRouteGroundClearance: readonly number[];
+  /**
+   * **The top of every Sky Cruiser pylon as it is drawn, mapped back to the
+   * flat frame the route was planned in.**
+   *
+   * `Coaster.ts` stands each pylon from the foot the planner found to the
+   * track's *drawn* top — `placeOnSphere` of the flat top — so the post leans
+   * with the planet, which is how it reaches the thing it carries. The route
+   * an invariant compares it against (`coaster.route`) is the **flat** plan.
+   * Read the drawn top straight against that plan and the lean itself reads as
+   * error: `height · sin(tilt)`, which on the canonical seed is **2.94 m** of
+   * pure bookkeeping on a pylon whose real gap to its track is **0.034 m**.
+   *
+   * So every top goes through `unplaceFromSphere` here — the exact inverse of
+   * the lean, the same treatment {@link RailRaceSupportFacts} already gives the
+   * Rail Race's drawn struts, and for the same reason. Measured off the built
+   * instance buffer, never re-derived from `pylons.ts`: the whole point of
+   * these two invariants is to catch a post that does not arrive.
+   */
+  readonly cruiserPylonTops: readonly { readonly x: number; readonly y: number; readonly z: number }[];
   readonly walls: readonly WallFact[];
   readonly trees: readonly TreeFact[];
   /** Every bush clump standing in the park. See {@link BushFact}. */
@@ -3419,6 +3438,27 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     }
   }
 
+  // See `ParkFacts.cruiserPylonTops`: the drawn top of each pylon, unleant back
+  // into the flat frame `coaster.route` is solved in, so an invariant compares
+  // like with like. `unplaceFromSphere` is already imported above for the Rail
+  // Race's struts, which have the identical problem.
+  const cruiserPylonTops: { x: number; y: number; z: number }[] = [];
+  {
+    const pylons = world.coaster.group.getObjectByName('skyCruiser:pylons');
+    if (pylons instanceof InstancedMesh) {
+      const { Matrix4: PylonMatrix4 } = await import('three');
+      const matrix = new PylonMatrix4();
+      const drawn = new Vector3();
+      for (let i = 0; i < pylons.count; i += 1) {
+        pylons.getMatrixAt(i, matrix);
+        // The top of a unit-height cylinder, which is where the post ends.
+        drawn.set(0, 0.5, 0).applyMatrix4(matrix);
+        const flat = unplaceFromSphere(drawn, new Vector3());
+        cruiserPylonTops.push({ x: flat.x, y: flat.y, z: flat.z });
+      }
+    }
+  }
+
   // The bus's run, from the same owners `ArrivalSequence.placeBus` and
   // `check:swept-bus` read: it drives the road's arc from `entranceBusArriveAt()`
   // to `entranceBusVanishAt()`, its body reaching half its own length beyond
@@ -3465,6 +3505,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
     cruiserRouteGroundClearance,
+    cruiserPylonTops,
     seed,
     world,
     walls,

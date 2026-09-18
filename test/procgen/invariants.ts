@@ -9185,9 +9185,20 @@ const supportsMeetWhatTheyCarry: Invariant = (facts) => {
     // top of this post touching any part of the track at all?
     const SAMPLES = 4000;
     const step = coaster.route.length / SAMPLES;
-    for (let i = 0; i < pylons.count; i += 1) {
-      pylons.getMatrixAt(i, matrix);
-      const top = new Vector3(0, 0.5, 0).applyMatrix4(matrix);
+    // **The drawn top, unleant back into the route's own flat frame** —
+    // `facts.cruiserPylonTops`, which is the one owner of that mapping. The
+    // post is drawn leaning with the planet so that it reaches the track;
+    // `coaster.route` is the flat plan. Compared raw, the lean reads as error:
+    // 2.94 m on the canonical seed against a real gap of 0.034 m, and all five
+    // seeds fouled on it.
+    if (facts.cruiserPylonTops.length !== pylons.count) {
+      complaints.push(
+        `${facts.cruiserPylonTops.length} Sky Cruiser pylon tops were measured off the built scene ` +
+          `but ${pylons.count} pylons are drawn — this clause is not describing the posts in the park`,
+      );
+    }
+    for (const flatTop of facts.cruiserPylonTops) {
+      const top = new Vector3(flatTop.x, flatTop.y, flatTop.z);
       let gap = Infinity;
       for (let k = 0; k < SAMPLES; k += 1) {
         coaster.route.pointAt(k * step, on);
@@ -10003,15 +10014,23 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
     return ['the Sky Cruiser built no supports at all — the whole ride is in the air'];
   }
 
-  const matrix = new Matrix4();
   const point = new Vector3();
   const ats: number[] = [];
   let worstReach = 0;
   let worstAt: readonly [number, number] = [0, 0];
 
-  for (let i = 0; i < pylons.count; i += 1) {
-    pylons.getMatrixAt(i, matrix);
-    const top = new Vector3(0, 0.5, 0).applyMatrix4(matrix);
+  if (facts.cruiserPylonTops.length !== pylons.count) {
+    complaints.push(
+      `${facts.cruiserPylonTops.length} Sky Cruiser pylon tops were measured off the built scene ` +
+        `but ${pylons.count} pylons are drawn — this clause is not describing the posts in the park`,
+    );
+  }
+  // Each top as drawn, **unleant back into the flat frame `coaster.route` is
+  // solved in** — `facts.cruiserPylonTops` owns that mapping. See its docblock:
+  // read raw, a leaning post is several metres from its own plan by
+  // construction, which is the lean and not a fault.
+  for (const flatTop of facts.cruiserPylonTops) {
+    const top = new Vector3(flatTop.x, flatTop.y, flatTop.z);
 
     // Its top is under the track, not under fresh air. `nearestPoint` is the
     // route's own answer, so this is the built post against the built route.
