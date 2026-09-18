@@ -107,6 +107,24 @@ merely absent from 0..15 — hence the planned wider sweep.
 - [ ] Step 3 — proofs: trace evidence each screen fires; control-first honesty
       proof; two-process determinism; `test:procgen` name-diff; `check:park-boot`.
 
+## The timings in the table below are CONTAMINATED — read this first
+
+Caught with `ps` while seed 7 was running: **three other `check-park.mts`
+processes** (PIDs 1248/1249/1250, another agent's worktree, started together)
+were running at the same time as mine. So the wall-clock seconds per seed
+below are four-way-contended numbers, not clean ones, and seed 7 overrunning
+the 1003 s the previous sweep recorded is at least partly that rather than a
+regression.
+
+**Do not quote these seconds as a solve-time baseline**, and do not compare
+them against the sibling engineer's 574 s / 846 s figures — those were taken
+under different load. The pass/fail column is unaffected (the park a seed
+builds is deterministic; only how long it takes is not), so the residue
+answer this slice exists to give still stands. If a clean timing baseline is
+wanted, it has to be re-taken with the machine to itself.
+
+I did **not** kill those processes: they are another agent's live work.
+
 ## Measurements (re-taken at this head)
 
 Baseline sweep, `ae20b9fc` + nothing: **in progress**, table below filled as
