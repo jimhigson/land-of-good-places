@@ -148,12 +148,23 @@ export const BEATS = 6;
 
 /**
  * The lowest a trackside eye may sit above the chute's own side plane, in
- * radians — **the hand-rail cut, and nothing else**.
+ * radians — **the guard for what cannot be probed at plan time**.
  *
  * 50° is where the occlusion sweep in the table above first reaches 100% beat
  * coverage; this is that plus a flat 5° of margin. It is a **floor the search
- * may not go under**, not a placement: it answers "does a ray to her clear the
- * near rail", which is a yes/no about geometry the placement score cannot see.
+ * may not go under**, not a placement.
+ *
+ * The rail itself no longer needs it — {@link chuteBlocksView} measures that
+ * against the built chute. What it still guards is **the castle and the
+ * hillside**, and the reason is an ordering one worth knowing before anybody
+ * lowers it to widen the search: the shot plan is made in `Building`'s
+ * constructor *before* `gardenRoot` is stood in its plot, so its world
+ * transform is not yet set and a ray fired at it there would measure a castle
+ * that is not where the castle is. That is a wrong measurement rather than a
+ * missing one, which is worse, so the castle is not probed and this angle
+ * stands in for it. `check:slide-rider` and the trackside invariant both ray
+ * against the built castle afterwards, when it *is* placed, and would catch a
+ * floor set too low.
  *
  * It is not the answer to "how much of her does the frame show". **75° used to
  * be**, and that is the number this change deletes: it was read off one
@@ -421,9 +432,8 @@ function chuteBlocksView(sight: Raycaster, eye: Vector3, at: Vector3, chute: Obj
  * Two hard constraints survive from the measurements that earned them, because
  * neither is something this score can see:
  *
- * - **{@link TRACKSIDE_ELEVATION_FLOOR}**, the hand-rail cut. Occlusion, not
- *   legibility: a ray either clears the near rail or it does not, and the score
- *   above is about how big she reads once it has.
+ * - **{@link TRACKSIDE_ELEVATION_FLOOR}**, standing in for the castle and the
+ *   hillside, which are not yet placed when this runs and so cannot be probed.
  * - **{@link TRACKSIDE_STANDOFF_FLOOR}**, the pan whip. A shot that reads as a
  *   lurch is a bad shot at any body fraction.
  */
