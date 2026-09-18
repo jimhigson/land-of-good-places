@@ -770,6 +770,96 @@ if (worstOffChute > ON_CHUTE) {
       'slide, not on it',
   );
 }
+// **Is she inside the slide?** The clause above measures her distance to the
+// chute's centre LINE and allows 1.90 m of it, which cannot tell one side of a
+// surface from the other: it reported a comfortable 0.26 m while her head was
+// 0.62 m below the trough floor. This asks the child's question, in the
+// trough's own cross-section.
+if (!Number.isFinite(deepestInTrough)) {
+  complaints.push(
+    'no part of the child was ever measured against the trough, so nothing below ' +
+      'proves she was in it rather than through it',
+  );
+} else if (deepestInTrough < TROUGH_FLOOR) {
+  complaints.push(
+    `the child's ${deepestPart} reached ${deepestInTrough.toFixed(3)} m in the chute's own ` +
+      `frame on frame ${deepestFrame} of ${ridingFrames}, where the trough floor is ` +
+      `${TROUGH_FLOOR.toFixed(2)} m — she is ${(TROUGH_FLOOR - deepestInTrough).toFixed(2)} m ` +
+      'inside the slide she is riding, which is drawn geometry a child can see. If this is ' +
+      "the rider's frame disagreeing with the trough's, `SlideRide.frameAt` is the single " +
+      'owner of that cross-section and everything on the ride must be placed by it',
+  );
+}
+
+// --------------------------------------------------- how the shot MOVES
+//
+// **Every clause above samples the shot; none of them watches it move.** A
+// camera that snaps, swims, or fights between two candidates frame to frame
+// scores perfectly on "how big is she in this frame" and is horrible to ride —
+// which is exactly what came back from a real play-test while this check was
+// green. Motion is its own question and needs its own measurement.
+{
+  let worstDrift = 0;
+  let worstDriftAt = -1;
+  let worstTurnAccel = 0;
+  let worstTurnAccelAt = -1;
+  let withinBeat = 0;
+  for (let i = 1; i < shotEye.length; i += 1) {
+    // Within a beat only. The cut BETWEEN beats is a deliberate hard cut with
+    // no blend — 128 degrees in one frame, three documented reasons — so
+    // measuring across it would be asserting against the feature.
+    if (shotBeat[i] !== shotBeat[i - 1]) continue;
+    withinBeat += 1;
+    if (shotIsTrackside[i] === true) {
+      // Bolted to the ground: it may not move at all while its beat is live.
+      const drift = shotEye[i]!.distanceTo(shotEye[i - 1]!);
+      if (drift > worstDrift) {
+        worstDrift = drift;
+        worstDriftAt = i;
+      }
+    }
+    if (i >= 2 && shotBeat[i - 1] === shotBeat[i - 2]) {
+      const turn = Math.acos(Math.max(-1, Math.min(1, shotAim[i]!.dot(shotAim[i - 1]!))));
+      const before = Math.acos(Math.max(-1, Math.min(1, shotAim[i - 1]!.dot(shotAim[i - 2]!))));
+      const accel = (Math.abs(turn - before) * 180) / Math.PI;
+      if (accel > worstTurnAccel) {
+        worstTurnAccel = accel;
+        worstTurnAccelAt = i;
+      }
+    }
+  }
+
+  if (withinBeat < 60) {
+    complaints.push(
+      `only ${withinBeat} frame pairs fell inside a single beat, so the shot's motion was ` +
+        'never really measured',
+    );
+  }
+  if (worstDrift > TRACKSIDE_DRIFT) {
+    complaints.push(
+      `a trackside camera moved ${worstDrift.toFixed(4)} m in one frame (frame ` +
+        `${worstDriftAt}) without the beat changing — it is meant to be bolted to the ` +
+        'ground and to move only on a cut, so this is a shot that swims',
+    );
+  }
+  if (worstTurnAccel > SHOT_TURN_ACCELERATION) {
+    complaints.push(
+      `the shot's turn rate changed by ${worstTurnAccel.toFixed(2)} deg/frame^2 within one ` +
+        `beat (frame ${worstTurnAccelAt}), against ${SHOT_TURN_ACCELERATION} allowed — the ` +
+        'camera is juddering rather than panning, which no still frame can show',
+    );
+  }
+  process.stderr.write(
+    `  the shot, in motion: ${withinBeat} frame pairs inside a beat; worst trackside drift ` +
+      `${worstDrift.toFixed(6)} m (allowed ${TRACKSIDE_DRIFT}); worst change in turn rate ` +
+      `${worstTurnAccel.toFixed(3)} deg/frame^2 (allowed ${SHOT_TURN_ACCELERATION})\n`,
+  );
+  process.stderr.write(
+    `  deepest any part of her reached into the trough: ${deepestInTrough.toFixed(3)} m ` +
+      `(${deepestPart}, frame ${deepestFrame}); floor is ${TROUGH_FLOOR.toFixed(2)} m\n`,
+  );
+}
+
 // --------------------------------------------------- the cut, camera by camera
 //
 // **Every ridden frame has a camera.** A stretch of chute the plan does not

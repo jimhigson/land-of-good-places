@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { RIDE_RECLINE } from '../../entities/ridePose';
-import type { SlideRide } from '../building/SlideRide';
+import { SlideFrame, type SlideRide } from '../building/SlideRide';
 
 /**
  * **Where the pets ride while she goes down the ginormous slide** — issue #468.
@@ -255,7 +255,8 @@ export function slopeOf(tangent: Vector3): number {
 const point = new Vector3();
 const tangent = new Vector3();
 const across = new Vector3();
-const UP = new Vector3(0, 1, 0);
+/** Scratch cross-section, refilled by `chutePointAt` on every read. */
+const frame = new SlideFrame();
 const ahead = new Vector3();
 const trial = new Vector3();
 
@@ -325,8 +326,14 @@ const BEND_STEP = 0.05;
  */
 function chutePointAt(slide: SlideRide, distance: number, out: Vector3): void {
   const t = Math.min(1, Math.max(0, distance) / slide.length);
-  slide.pointAt(t, out);
-  slide.tangentAt(t, tangent);
+  // **The chute's own cross-section, from its one owner.** This used to read
+  // `pointAt`/`tangentAt` and then rebuild `across` out of `tangent x UP` — a
+  // second copy of the sweep's formula, which is how the child's frame and the
+  // trough's came to disagree by 0.62 m of head. Asking `frameAt` means a
+  // companion cannot drift from the trough even if that formula changes.
+  slide.frameAt(t, frame);
+  out.copy(frame.position);
+  tangent.copy(frame.tangent);
   // Behind the lip: carry on along the entry tangent, backwards. `distance` is
   // negative here, so this subtracts.
   if (distance < 0) out.addScaledVector(tangent, distance);
@@ -336,11 +343,10 @@ function chutePointAt(slide: SlideRide, distance: number, out: Vector3): void {
 function seatPointFor(slide: SlideRide, distance: number, slot: number, out: Vector3): void {
   chutePointAt(slide, distance, out);
 
-  // Left, right, left — see PET_SIDE_STEP. Across the chute is the tangent
-  // crossed with world up, which is the same "up is always world up" the chute
-  // itself is swept with (`SlideRide`), so a companion stays in the trough
-  // through a corkscrew instead of being rolled up its wall by a Frenet frame.
-  across.crossVectors(tangent, UP);
+  // Left, right, left — see PET_SIDE_STEP. Across the chute is the frame's own
+  // sideways axis, so a companion stays in the trough through a corkscrew
+  // instead of being rolled up its wall by a Frenet frame.
+  across.copy(frame.right);
   if (across.lengthSq() > 1e-6) {
     across.normalize();
     out.addScaledVector(across, slot % 2 === 0 ? PET_SIDE_STEP : -PET_SIDE_STEP);
@@ -465,9 +471,12 @@ export function petSeatOnSlide(
   // `seatPointFor` left `tangent` at this companion's own place on the chute,
   // which is what facing and pitch below want.
 
-  seat.x = point.x;
-  seat.y = point.y + PET_RIDE_LIFT;
-  seat.z = point.z;
+  // Lifted along the **trough's** up, not world `+Y`: on the steep middle of
+  // the chute those differ by most of the lift, and lifting along the wrong one
+  // is half of what put the child's head through the floor.
+  seat.x = point.x + frame.up.x * PET_RIDE_LIFT;
+  seat.y = point.y + frame.up.y * PET_RIDE_LIFT;
+  seat.z = point.z + frame.up.z * PET_RIDE_LIFT;
   seat.facing = Math.atan2(tangent.x, tangent.z);
   seat.pitch = slopeOf(tangent);
   // **On its back, feet first, exactly as she is.** The child's own recline,
