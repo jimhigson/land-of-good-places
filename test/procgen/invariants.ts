@@ -5180,7 +5180,7 @@ const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
  * That split is deliberate — the pixel check is far too slow to run five times,
  * and a placement fault shows up in geometry long before it needs a rider.
  *
- * Four clauses, and the first is the one the brief called for:
+ * Five clauses, and the first is the one the brief called for:
  *
  * 1. **Every part of the ride is covered by some camera.** Measured as
  *    arithmetic on the built plan: the spans must start at 0, end at 1, and
@@ -5192,7 +5192,47 @@ const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
  * 3. **No camera is underground.** A lens below the hills renders dirt.
  * 4. **There is more than one shot.** A plan that collapsed to a single chase
  *    beat would satisfy 1–3 vacuously while quietly undoing the whole feature.
+ * 5. **She is not viewed end-on.** Clause 2 asks whether a ray *reaches* her,
+ *    which is binary and cannot see a rider who is unoccluded and still only a
+ *    head, because the shot has swung round to look straight down her body.
+ *    That is what took beat 1 of the canonical seed to 0.13% of frame on
+ *    `feat/procgen-on-sphere` while every ray to her was clear. See
+ *    {@link TRACKSIDE_EXTENT_FLOOR}.
  */
+/**
+ * **How much of her a trackside eye must be able to show, at the worst moment
+ * of its own beat** — the angular extent of her body, `sin(theta) / distance`.
+ *
+ * Calibrated against `check:slide-rider`'s pixel floor rather than chosen, by
+ * measuring both on the same frames of the same ride. Walking beat 1 of the
+ * canonical seed on `feat/procgen-on-sphere`, with the placement that failed:
+ *
+ * ```
+ *   frame 170  |cos| 0.002  d 6.89 m   extent 0.145   body 2.57% of frame
+ *   frame 210  |cos| 0.655  d 6.97 m   extent 0.108   body 1.42%
+ *   frame 220  |cos| 0.799  d 7.46 m   extent 0.081   body 0.71%
+ *   frame 230  |cos| 0.879  d 8.12 m   extent 0.059   body 0.29%  <- under the
+ *   frame 240  |cos| 0.910  d 8.89 m   extent 0.047   body 0.13%     0.40% floor
+ * ```
+ *
+ * So the check's 0.40% of frame lands at an extent of about 0.064, and this
+ * sits just under it. **It is a floor under the failure, not a target**: the
+ * pixel measurement is the real gate and it is stricter, because it also sees
+ * her own arms and the trough wall, which this cannot. What this buys is the
+ * other fifteen seeds, where riding a real `Player` for 700 frames is far too
+ * slow to run — a seed whose chute turns hard enough that the placement search
+ * can only find an end-on eye goes red here rather than at a child.
+ *
+ * Measured across the five registered seeds once the placement search landed,
+ * worst beat first: 0.0662 (seed 24), 0.0695 (canonical), 0.0709 (11), 0.0743
+ * (326), 0.0852 (131). The tightest is seed 24's beat 1 at **0.0662**, which is
+ * 10% of headroom — thin, and deliberately not widened by dropping the floor,
+ * because the floor is where the pixel measurement says a child stops being
+ * visible. If a seed comes in under it, the answer is a wider placement search
+ * (or a seed out of the pool), not a smaller number here.
+ */
+const TRACKSIDE_EXTENT_FLOOR = 0.06;
+
 const theSlideTracksideCamerasCanSeeTheRide: Invariant = (facts) => {
   const complaints: string[] = [];
   const spans = facts.slideShotSpans;
@@ -5280,7 +5320,33 @@ const theSlideTracksideCamerasCanSeeTheRide: Invariant = (facts) => {
           'renders dirt',
       );
     }
+
+    // 5. She is not viewed end-on. See TRACKSIDE_EXTENT_FLOOR.
+    if (!Number.isFinite(camera.worstExtent)) {
+      complaints.push(
+        `the trackside camera on beat ${camera.beat} never measured how much of the rider ` +
+          'it can show — every sample was degenerate, so its framing proves nothing',
+      );
+    } else if (camera.worstExtent < TRACKSIDE_EXTENT_FLOOR) {
+      complaints.push(
+        `the trackside camera on beat ${camera.beat} shows the rider at ` +
+          `${camera.worstExtent.toFixed(4)} of body extent at its worst moment, against ` +
+          `${TRACKSIDE_EXTENT_FLOOR} required — it looks ${(camera.worstEndOn * 100).toFixed(0)}% ` +
+          'of the way down her own body there, so her head hides the rest of her and a ' +
+          'child watching sees a floating face rather than herself',
+      );
+    }
   }
+
+  // What this actually covered, on every run — a green line that implied more
+  // than it measured is how the last agent inherited a false belief about this
+  // very placement. `stderr`, because vitest hides `console.log` on a pass.
+  process.stderr.write(
+    `  seed ${facts.seed}: ${cameras.length} trackside eyes; worst body extent ` +
+      `${cameras
+        .map((c) => `beat ${c.beat} ${c.worstExtent.toFixed(4)} (${c.worstEndOn.toFixed(2)} end-on)`)
+        .join(', ')} — floor ${TRACKSIDE_EXTENT_FLOOR}\n`,
+  );
 
   return complaints;
 };
