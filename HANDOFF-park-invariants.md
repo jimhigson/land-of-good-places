@@ -61,11 +61,30 @@ vacuous since the sphere landed (`667e743e` / `cb76ac1c` on
 
 ## Status
 
-- [x] worktree, install, baseline run
-- [ ] gate arch
-- [ ] sky cruiser pylons
-- [ ] detour ratios
-- [ ] path ends on bridge
-- [ ] bushes on seed 11
-- [ ] bridge coping
-- [ ] slide vs roof garden / towers
+- [x] worktree, install, baseline run (55 failed | 636 passed)
+- [x] gate arch — headroom rays along the planet's up; headroom computed once
+- [x] sky cruiser pylons (both invariants) — drawn tops unleant to the flat frame
+- [x] slide vs castle towers — `CASTLE_TOWERS` moved onto `CASTLE_FRAME`;
+      invariant measures each turret's own axis; solver judges the built curve
+- [ ] detour ratios (seeds 11, 131)
+- [ ] a path ends on a bridge (canonical)
+- [ ] bridge coping (seeds 11, 131)
+- [ ] slide vs roof garden (seed 131)
+- [ ] bushes on seed 11 (159 < 180)
+
+Now at `Tests 38 failed | 653 passed (691)`; 17 of my 19 gone, none new.
+Remaining 38 = 36 rail-race (another engineer's) + my 5 kinds below, minus
+overlap — see the name lists in the scratchpad (`n1.txt` baseline, `n3.txt` now).
+
+## The one thing worth carrying forward
+
+**Every failure so far has been the sphere, in one of two shapes**: a
+measurement taken along world `+Y` where the park's up is radial, or a
+plan-frame description compared against a drawn one. `unplaceFromSphere` and
+`worldToCastle` are the two inverses that exist for it. Before assuming a red
+invariant means broken geometry, ask which frame each side of the comparison is
+in — but *measure* the answer, because on the towers the frames were genuinely
+inconsistent and the geometry genuinely wrong.
+
+Probes (untracked, in this worktree): `scripts/_probe-arch.mts`,
+`_probe-pylons.mts`, `_probe-slide-castle.mts`.
