@@ -304,14 +304,25 @@ it:
   the base, zero only on the branch** (`comm` over the sorted findings, not a
   count — a count cannot see a swap).
 
-  **This is the strongest park-identity evidence in the branch, and it covers
-  what the park digest could not.** `check:coplanar` sweeps the garden across
-  **all sixteen `PARK_SEED_POOL` seeds** and buckets every world-space triangle
-  by its plane. An identical finding set, down to each shared area and
-  stand-off, means the drawn geometry is unchanged on all sixteen — closing the
-  gap that the digest (canonical seed only) left open, and answering the
-  `check:entrance-road` engineer's caution that a fix proven on 0..15 might not
-  hold on the pool.
+  `check:coplanar` sweeps the garden across **`PARK_SEED_POOL`, which is TEN
+  seeds** — canonical, 11, 24, 128, 131, 208, 274, 326, 428, 451 — and buckets
+  every world-space triangle by its plane. An identical finding set, down to
+  each shared area and stand-off, means the drawn geometry is unchanged on
+  those ten.
+
+  **Corrected: an earlier draft of this file and of the PR body said "all
+  sixteen", and `scripts/check-coplanar.mts`'s own header still advertises "the
+  sixteen parks a child can actually be given (#426)".** The pool is ten
+  (`PARK_SEED_POOL.length === 10`, measured, not read off the header). Claiming
+  sixteen overstated my own cover on the very line where I was offering this as
+  my strongest evidence, which is precisely the fault this branch exists to
+  clean up. The stale header is filed separately, not fixed here.
+
+  It is still the broadest geometry evidence in the branch — the park digest
+  covers the canonical seed alone — but the **reviewer's own three-seed
+  mesh-level digest identity, including seed 274's full refusal trace (5
+  unwinds and a decision zero, byte-identical), is stronger**, and it is
+  independent of me.
 
 ## Determinism: the park is unchanged, not merely deterministic
 

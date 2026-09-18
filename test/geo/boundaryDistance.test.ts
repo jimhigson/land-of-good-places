@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { profileBoundary } from '../../src/world/boundary.ts';
+import { profileBoundary, REFINE } from '../../src/world/boundary.ts';
 import { TAU } from '../../src/core/mathUtils.ts';
 
 /**
@@ -33,7 +33,15 @@ import { TAU } from '../../src/core/mathUtils.ts';
 
 const SAMPLES = 512;
 
-/** The pre-acceleration coarse pass: the nearest vertex by a full scan. */
+/**
+ * The pre-acceleration coarse pass: the nearest vertex by a full scan.
+ *
+ * `REFINE` is **imported, never re-typed**. A hand-copied `2` here would keep
+ * passing the day `boundary.ts` changed its window — both oracles would have
+ * moved together and agreed with each other about the wrong thing — which is
+ * CLAUDE.md's "two definitions of one thing, kept in step by hand", the most
+ * reported bug shape in this repo.
+ */
 function fullScanDistance(points: readonly (readonly [number, number])[], radii: readonly number[]) {
   const count = points.length;
   const radiusAt = (bearing: number): number => {
@@ -59,7 +67,7 @@ function fullScanDistance(points: readonly (readonly [number, number])[], radii:
       }
     }
     let best = Infinity;
-    for (let step = -2; step <= 2; step += 1) {
+    for (let step = -REFINE; step <= REFINE; step += 1) {
       const i = (((coarse + step) % count) + count) % count;
       const [ax, az] = points[i] as readonly [number, number];
       const [bx, bz] = points[(i + 1) % count] as readonly [number, number];

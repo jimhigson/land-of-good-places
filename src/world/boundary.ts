@@ -168,6 +168,19 @@ export function* insetBoundarySearch(
 const PROFILE_SAMPLES = 512;
 
 /**
+ * Segments either side of the nearest vertex that get real point-to-segment
+ * work in {@link profileBoundary}'s `distanceToEdge`.
+ *
+ * **Exported because the test needs the same number, and a second copy of it
+ * would be this repo's most-reported bug** (CLAUDE.md, "Two definitions of one
+ * thing, kept in step by hand"): `test/geo/boundaryDistance.test.ts` builds two
+ * oracles that must refine over exactly this window, and a hand-copied `2` in
+ * them would silently stop describing this function the day it changed — while
+ * still passing, because both oracles would have moved together.
+ */
+export const REFINE = 2;
+
+/**
  * A boundary given as a radius per bearing.
  *
  * Representing the park's edge as `r(theta)` is the thing Decision 4 warns
@@ -290,8 +303,6 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
    * profiles including a circle and including the degenerate query at the
    * origin.
    */
-  const REFINE = 2;
-
   // The vertices again as two flat arrays. The coarse pass below reads them a
   // few hundred thousand times a build and `points[i]` is a pointer chase to a
   // two-element JS array per vertex; these are the same doubles in the same
@@ -369,13 +380,28 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
       const far = fx * fx + fz * fz;
       if (far < bound) bound = far;
     }
+    // **The margin is for rounding, not for slack.** In real arithmetic the
+    // superset property is exact: `bound` is a distance some vertex certainly
+    // achieves everywhere in the cell, the test is non-strict so every exact
+    // minimiser survives, and the rect is closed so a vertex on a cell edge is
+    // kept. In floating point both `near²` and the `x0 <= px <= x1`
+    // containment are rounded, which makes that "exact" ulp-approximate rather
+    // than proven. Widening the bound by one part in 10^12 restores the proof
+    // and can only ever admit a vertex, never drop one — and admitting a
+    // vertex that cannot win costs a squared distance and changes no answer.
+    //
+    // It is free because the real slack is enormous: a mutation sweep keeps
+    // every one of 244,205 queries bit-identical at `bound * 0.99` and at
+    // `bound * 0.999999`, so the margin being taken here is ten orders of
+    // magnitude inside what the geometry actually needs.
+    const keepBound = bound * (1 + 1e-12);
     const keep: number[] = [];
     for (let i = 0; i < count; i += 1) {
       const px = vertexX[i] as number;
       const pz = vertexZ[i] as number;
       const nx = px < x0 ? x0 - px : px > x1 ? px - x1 : 0;
       const nz = pz < z0 ? z0 - pz : pz > z1 ? pz - z1 : 0;
-      if (nx * nx + nz * nz <= bound) keep.push(i);
+      if (nx * nx + nz * nz <= keepBound) keep.push(i);
     }
     if (keep.length > candidateCap) return null;
     const list = Int32Array.from(keep);
@@ -456,11 +482,17 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
 /**
  * A fast read-only view of a star-shaped boundary, for the ride solvers.
  *
- * `profileBoundary`'s `distanceToEdge` scans all 512 vertices per query so a
- * one-off ask (a lamp, a plot candidate) is exact even at the eccentric
- * near-tie its comment documents. A route search is a different customer: it
- * asks per CANDIDATE PIECE — measured at 776k pieces on one seed, the scan
- * was most of a 31-second solve. This view answers in O(1) from two lookup
+ * `profileBoundary`'s `distanceToEdge` is **exact** — including at the
+ * eccentric near-tie its comment documents — and since 18 September 2026 it is
+ * no longer a 512-vertex scan either: a per-cell candidate list narrows it to a
+ * handful of squared distances without changing an answer. (This paragraph used
+ * to say it "scans all 512 vertices per query", which stopped being true in the
+ * same commit that added the list; it is corrected here rather than left to
+ * decay, which is the fault that change was itself cleaning up.)
+ *
+ * So the reason to prefer this view is no longer the scan. It is that a route
+ * search asks per CANDIDATE PIECE — measured at 776k pieces on one seed, and at
+ * 36 million on seed 7's railway — and this answers in O(1) from two lookup
  * tables: the radius per bearing, and the cosine of the angle between the
  * radial and the edge NORMAL per bearing (the obliquity), so
  * `distance ≈ (radiusAt(θ) − |p|) · cosAt(θ)` — exact on a circle, and on
