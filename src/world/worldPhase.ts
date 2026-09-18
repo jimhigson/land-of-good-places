@@ -28,6 +28,7 @@ import type { GroundClaims, Claim } from '../boot/groundClaims';
 import { ParkSolve, type SolveStats } from '../boot/parkSolve';
 import { refusal, type FeatureBuilder } from '../boot/featureBuilder';
 import { PARK_SEED } from './parkManifest';
+import type { CoasterRoute } from './coaster/route';
 import { PLAZA } from './paths';
 import { FOUNTAIN_RIM_RADIUS } from './Fountain';
 import { FOUNTAIN_RIM_COLLIDER_HALF } from '../core/constants';
@@ -145,7 +146,11 @@ function railRaceBuilder(
 }
 
 /** Decide every world-time feature. Synchronous: the World constructor drains it. */
-export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims): WorldPhase {
+export function solveWorldPhase(
+  collision: CollisionWorld,
+  claims: GroundClaims,
+  cruiserRoute: CoasterRoute | null,
+): WorldPhase {
   const trees: TreeDecision[] = [];
   const bushes: BushDecision[] = [];
   const walls: (WallRun | null)[] = [];
@@ -157,7 +162,7 @@ export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims)
     wallBuilder(claims, walls),
     treeBuilder(collision, claims, () => walls, () => bushes, trees),
     bushBuilder(collision, claims, () => walls, () => trees, bushes),
-    fairyPoleBuilder(claims, poles),
+    fairyPoleBuilder(claims, poles, cruiserRoute),
     lampBuilder(collision, claims, lamps),
     railRaceBuilder(collision, claims, (ride) => {
       railRace = ride;

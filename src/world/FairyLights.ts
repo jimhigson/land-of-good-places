@@ -18,6 +18,8 @@ import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
 import { PLAZA, plazaVerge } from './paths';
+import { cruiserClearanceForPost } from './coaster/clearance';
+import type { CoasterRoute } from './coaster/route';
 import { PLAYER_RADIUS } from '../core/constants';
 import { isOnPath, pathCentreline } from './pathGraph';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -90,6 +92,19 @@ const MIN_LIT_RUN_LENGTH = PATH_POLE_SPACING * 2;
 
 /** The collider a pole registers, and so the ground it claims. */
 const POLE_RADIUS = 0.28;
+
+/** How tall a pole stands. The drawing and the overhead test must agree, so both ask here. */
+const POLE_HEIGHT = 4.4;
+
+/**
+ * Clear air a pole keeps between itself and the Sky Cruiser's swept car.
+ *
+ * `PLAYER_RADIUS` rather than nothing, because "does not quite touch" is not a
+ * clearance — the ride is drawn from a sampled centreline and the pole from a
+ * sampled axis, and two samplings that merely fail to overlap can still look
+ * like contact from the seat.
+ */
+const POLE_RIDE_CLEARANCE = PLAYER_RADIUS;
 
 /**
  * **Where the ring of poles stands — asked for, never written down.**
@@ -237,7 +252,11 @@ function planPoleSlots(): { chains: { closed: boolean; count: number }[]; slots:
  * returns an **optional** refusal naming the blockers, so the driver first
  * asks them to step aside and only then leaves the pole out.
  */
-export function fairyPoleBuilder(claims: GroundClaims, out: FairyChain[]): FeatureBuilder {
+export function fairyPoleBuilder(
+  claims: GroundClaims,
+  out: FairyChain[],
+  cruiserRoute: CoasterRoute | null,
+): FeatureBuilder {
   const claimOf = (x: number, z: number): Claim => ({ kind: 'footprint', shape: { shape: 'disc', x, z, radius: POLE_RADIUS } });
 
   /** The plan, built once per solve and thrown away on `reset`. */
@@ -279,6 +298,23 @@ export function fairyPoleBuilder(claims: GroundClaims, out: FairyChain[]): Featu
       // Beside the paving, never on it — and never so close that the pole
       // pinches the lane a child walks down.
       if (isOnPath(x, z, POLE_PAVING_CLEARANCE)) continue;
+      // **Ask the ride, before standing anything up.** A pole is 4.4 m tall and
+      // the claims registry is a ground-footprint system — it cannot see what
+      // sweeps through the air above a square metre. Seed 24 built a park whose
+      // Sky Cruiser passed through `fairy-pole-84` because nothing asked.
+      //
+      // This is inside the candidate loop on purpose: a pole refused overhead
+      // slides along its own run or swaps sides like any other refusal, and is
+      // only left out when every candidate fails.
+      if (cruiserRoute) {
+        const ground = terrainHeight(x, z);
+        if (
+          cruiserClearanceForPost(cruiserRoute, x, z, ground, POLE_HEIGHT, POLE_RADIUS) <
+          POLE_RIDE_CLEARANCE
+        ) {
+          continue;
+        }
+      }
       const claim = claimOf(x, z);
       if (keepClearOf.some((other) => claimsOverlap(claim, other))) continue;
       const refused = claims.blockers('fairyLights', [claim]).map((b) => b.feature);
@@ -301,19 +337,29 @@ export function fairyPoleBuilder(claims: GroundClaims, out: FairyChain[]): Featu
         const slot = slots[index]!;
         const chosen = chooseSpot(slot, 0, []);
         if ('blockers' in chosen) {
-          if (chosen.blockers.length === 0) {
-            // Nothing refused it; it simply stands on paving everywhere it
-            // could go. That is the gateway gap, and it is not a refusal —
-            // there is nobody to ask to move.
-            placed.push(null);
-            publish();
-            continue;
-          }
-          return refusal(`fairyLights: ${slot.label} refused by ${chosen.blockers.join(', ')}`, {
-            blockers: chosen.blockers,
-            claims: [claimOf(slot.candidates[0]![0], slot.candidates[0]![1])],
-            optional: true,
-          });
+          // **A fairy pole never asks anything to move.** It is left out.
+          //
+          // Everything that can block one — the fountain, a wall, a tree, a
+          // bush — is *earlier* in the world phase's build order than
+          // `fairyLights`, and the driver's precedence is that earlier means
+          // "needs the space more". A pole that named its blockers would have
+          // the driver ask one of them to step aside for a decoration, which
+          // is the wrong way round.
+          //
+          // It is not a theoretical wrong way round. Lighting two thirds of
+          // the paths and letting poles name blockers took seed 131 from 182
+          // bushes to 177 and tripped the park's own floor of 180 — measured
+          // against the base with the layout proved unmoved and `unwinds=0` on
+          // both sides, so it was displacement through accommodation and
+          // nothing else. Yielding costs a handful of poles out of ~100 and
+          // costs the park none of its greenery.
+          //
+          // The same line therefore covers the two ways a slot goes empty, and
+          // they look identical from here by design: standing on paving (the
+          // gateway gap) and standing where something older already is.
+          placed.push(null);
+          publish();
+          continue;
         }
         placed.push(chosen.spot);
         sectionOfSlot.push(index);
@@ -460,7 +506,7 @@ export class FairyLights implements GameSystem {
     this.group.name = 'fairy-lights';
     const rng = new Rng(0x11a17);
 
-    const poleHeight = 4.4;
+    const poleHeight = POLE_HEIGHT;
     const flat = new Vector3();
     const scratchLean = new Quaternion();
     const up = new Vector3();

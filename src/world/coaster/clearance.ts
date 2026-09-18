@@ -389,3 +389,82 @@ export function cruiserStrikes(
   }
   return complaints;
 }
+
+/**
+ * **How much room the Sky Cruiser leaves for a post standing at (x, z).**
+ *
+ * Returns the smallest gap, in metres, between the car's swept envelope and an
+ * upright post of `radius` rising `height` from `baseY`. Zero or less means the
+ * ride passes through it.
+ *
+ * ### Why this exists
+ *
+ * Fairy-light poles are 4.4 m tall and are placed by a builder that knew only
+ * about paving and about *ground* claims. The claims registry answers "who else
+ * wants this square metre"; it says nothing about what sweeps through the air
+ * above it. Ten poles in the plaza verge never met the loop. Ninety-odd strung
+ * along two thirds of the path network did, and seed 24 built a park where
+ * **the car passed through `fairy-pole-84`** at 17.0 m along the loop.
+ *
+ * That is the standing rule in this codebase — a generator that checks itself
+ * against the obstacle classes it happens to know by name will silently miss
+ * whatever a sibling system put there — so a pole now asks the ride directly,
+ * before it is placed, instead of the ride discovering the pole afterwards.
+ *
+ * ### It asks the ride for its own envelope
+ *
+ * Not a bounding box round the route. The gap is measured in **the frame the
+ * ride is drawn in** (`drawnOnSphere` + `railFrameAt`) against
+ * {@link CART_ENVELOPE}, exactly as {@link thingsTheCruiserPasses} does — a box
+ * round a leaning ride is neither the real gap nor a consistent over-estimate
+ * of it, and this park leans everywhere.
+ *
+ * The post is sampled along its axis rather than treated as a point, because a
+ * pole is tall and the loop dives: the tip can foul where the foot is clear.
+ */
+export function cruiserClearanceForPost(
+  route: CoasterRoute,
+  x: number,
+  z: number,
+  baseY: number,
+  height: number,
+  radius: number,
+): number {
+  const { halfWidth, above, below } = CART_ENVELOPE;
+  const halfLength = CART_BODY_LENGTH / 2;
+  const drawn = drawnOnSphere(route);
+
+  // The post's axis, sampled. `SAMPLE_STEP` is the loop's own sampling; using
+  // it here too keeps the two resolutions in step rather than inventing a
+  // second number that would drift from it.
+  const axis: Vector3[] = [];
+  for (let h = 0; h <= height; h += SAMPLE_STEP) axis.push(new Vector3(x, baseY + h, z));
+  axis.push(new Vector3(x, baseY + height, z));
+
+  const frame: RailFrame = {
+    position: new Vector3(),
+    forward: new Vector3(),
+    side: new Vector3(),
+    up: new Vector3(),
+  };
+  const offset = new Vector3();
+  let best = Infinity;
+
+  for (let d = 0; d < route.length; d += SAMPLE_STEP) {
+    railFrameAt(drawn, d, frame);
+    for (const point of axis) {
+      offset.subVectors(point, frame.position);
+      // Cheap reject: nothing this far out can beat the running minimum.
+      if (offset.length() - halfLength - Math.max(above, below) - halfWidth > best) continue;
+      const alongCar = offset.dot(frame.forward);
+      const acrossCar = offset.dot(frame.side);
+      const upCar = offset.dot(frame.up);
+      const dx = Math.max(0, Math.abs(alongCar) - halfLength);
+      const dz = Math.max(0, Math.abs(acrossCar) - halfWidth);
+      const dy = upCar > 0 ? Math.max(0, upCar - above) : Math.max(0, -upCar - below);
+      const gap = Math.hypot(dx, dy, dz) - radius;
+      if (gap < best) best = gap;
+    }
+  }
+  return best;
+}

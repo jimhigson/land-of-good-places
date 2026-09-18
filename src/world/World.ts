@@ -337,7 +337,7 @@ export class World implements GameSystem {
     // bushes, fairy-light poles, lamp posts and the rail race's trestles each
     // decide through the one driver against the registry — now that every
     // fixed structure has registered its colliders — and are then drawn.
-    const phase = solveWorldPhase(this.collision, this.groundClaims);
+    const phase = solveWorldPhase(this.collision, this.groundClaims, this.coaster.route);
     this.scenery = new Scenery(this.collision, phase.scenery);
     this.fountain = new Fountain(this.collision, PLAZA.x, PLAZA.z);
     this.fairyLights = new FairyLights(this.collision, phase.fairyPoles);
