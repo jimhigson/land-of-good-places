@@ -180,3 +180,34 @@ It is a real red check and someone has to own it, but it is a visible framing
 judgement about the ginormous slide's trackside camera — a different slice from
 this one. **It blocks every step after 24**, so the remaining steps were run
 individually to enumerate what else is behind it; results below.
+
+## Behind step 24: what the rest of the chain actually does
+
+Steps 25–67 run individually (the chain cannot reach them while step 24 is
+red). Every failure is reproduced on the base commit `ae20b9fc` in its own
+worktree before being called pre-existing.
+
+### step 29 `check:waypoints` — FAIL, pre-existing, **and its own message is NaN**
+
+```
+245 waypoint(s) are somewhere no child could stand:
+  (-34.76581804208908, 19.34785748357826) — inside the facade
+    (x NaN..NaN, z NaN..NaN), which is solid scenery.
+    The building's inside is not here — it is 600 m away.
+```
+
+Branch and base agree exactly: **245 waypoints, 245 `NaN..NaN` lines, exit 1
+on both**. Not caused by anything here.
+
+**Worth more than its pre-existence, though: the bound it is failing against is
+`NaN`.** `NaN..NaN` is not a facade anyone measured — every comparison against
+it is false, so this check cannot be describing the thing it names, and the 245
+is a count of something else. This is the *second* failure mode of
+HANDOFF-backtracking's import-order rule 1, the one this slice did not hit:
+rule 1 says a module-scope plan read either lands in a temporal dead zone **or
+bakes NaN** (`BUILDING_CENTRE_X` before the layout has been solved). This slice
+was the dead-zone half; this looks like the NaN half, in the check rather than
+in the game. Whoever takes it should find where the facade bounds are read and
+when, rather than treating 245 as a real number of bad waypoints —
+`scripts/scan-cycle-tdz.mts` and `_scan-nan.mts` are both pointed at this
+class.
