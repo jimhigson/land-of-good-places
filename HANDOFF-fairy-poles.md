@@ -529,15 +529,23 @@ So the world-solve summary now prints `ms=`, and the measurement is of the
 phase itself, on **fast seeds** where it is the whole number rather than
 rounding error:
 
-| seed | base | branch | ms per increment |
-|---|---|---|---|
-| 6 | 719 inc / **423 ms** | 808 inc / **361 ms** | 0.588 -> 0.447 |
-| 14 | 709 inc / **292 ms** | 788 inc / **306 ms** | 0.412 -> 0.388 |
-| 7 (insensitive) | 469 inc / 231 s build | 571 inc / 244 s build | whole-build, plan-dominated |
+| seed | base | branch |
+|---|---|---|
+| 6 | 719 inc / 423 ms | 808 inc / 361 ms |
+| 14 | 709 inc / 292 ms | 788 inc / 306 ms |
+| 7 (insensitive) | 469 inc / 231 s build | 571 inc / 244 s build |
 
-**Faster per increment on both fast seeds**, and seed 6 is faster in absolute
-terms while doing 89 more increments. The extra wall time on seed 14 is +14 ms
-for +79 poles.
+**The honest claim is "no measurable cost", not "faster".** Seed 14 is the
+clean result: **+14 ms for +79 increments**. Seed 6 came out 62 ms *faster*
+while doing 89 more increments, which this diff cannot explain and is almost
+certainly run-to-run variance on a shared machine — two runs is not a sample.
+
+**Do not quote `ms per increment`.** It falls on both seeds mainly because ~80
+**cheap** increments were added: placing a pole is not the same unit of work as
+placing a wall run or a bush clump, so the average drops without anything being
+faster. That figure measures a change in increment *mix*, not in speed. It is
+exactly the shape of confounded derived metric this file keeps warning about,
+and I wrote it down before catching it.
 
 **Increments rise by roughly the pole count, innocently** — every placed pole
 *is* an increment — and the query is invisible to that metric by construction,
