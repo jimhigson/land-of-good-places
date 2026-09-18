@@ -35,6 +35,38 @@
  *   reachable simply says no, and the asker — a lamp slot, a fairy pole — is
  *   forgone exactly as it is today. Losing a lamp is cheaper than moving a
  *   shop a child cannot then walk up to.
+ *
+ * ## Which askers can actually reach it, and why none does today
+ *
+ * Measured across the ten pool seeds and 0..15: **no seed asks a booth to
+ * move.** That is not luck, and it is worth knowing before anyone concludes
+ * this is dead code:
+ *
+ * - The **layout** keeps `CORRIDOR_GAP` (5 m) of walkable ground between every
+ *   pair of plots, and a stall is a plot. So nothing the plan phase decides
+ *   ever wants a booth's square metre.
+ * - **Trees, bushes and wall runs never refuse at all** — a candidate the
+ *   registry rejects is simply the next candidate — so they can never ask.
+ * - **Lamps cannot name a stall**, for a reason specific to how they climb:
+ *   `lampBuilder` tries `lampFits(...collision)` *before* it asks the
+ *   registry, and only a spot that passed the collision world is ever put to
+ *   `claims.blockers`. A booth's claims are **exactly** its wall colliders
+ *   (`boothClaims` is built from the same box as `addBoothCollision`),
+ *   so every spot a booth's claim would refuse was already dropped by
+ *   `lampFits` one line earlier. Keeping the two geometries identical is worth
+ *   far more than making this reachable would be — a claim drawn larger than
+ *   its collider would take spots away from lamps for nothing.
+ * - **Fairy-light poles and rail-race trestles are the askers that can reach
+ *   it.** `fairyPoleBuilder` asks the registry and nothing else;
+ *   `TrestleRefusal.refusedBy` comes straight out of the registry. Neither
+ *   happens to stand on a booth on any seed in the pool today — and the fairy
+ *   ring is skipped entirely on this branch for an unrelated, pre-existing
+ *   reason (its radius coincides with the main loop).
+ *
+ * So the mechanism is reachable but unexercised, which is exactly the shape of
+ * a thing that rots unnoticed. `scripts/check-stall-accommodate.mts` drives it
+ * on every run of the `check` chain against a constructed refusal, so it
+ * cannot.
  */
 
 import { PLAYER_RADIUS } from '../core/constants';
@@ -265,6 +297,11 @@ export function stallBuilder(
         return refusal(`stalls: ${id} is built from world coordinates and does not move`);
       }
       const from = placementOf(id);
+      // Rings are measured from where the **layout** drew the booth, not from
+      // wherever it has already shifted to, so however many times a booth is
+      // asked its total distance from its plot never exceeds
+      // {@link STALL_SHIFT_REACH} — a booth cannot walk across the park one
+      // accommodation at a time.
       const [baseDx, baseDz] = stallShift(id);
       const originX = from.position[0] - baseDx;
       const originZ = from.position[1] - baseDz;
