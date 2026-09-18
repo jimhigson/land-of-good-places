@@ -268,6 +268,30 @@ Run: two separate processes per seed, on **seed 8** (exercises the skip branch,
 so more of this change's decision-making is in its world trace than a plain
 10/10 seed) and the **canonical** seed.
 
+### Result: deterministic on both
+
+| seed | meshes | park | layout trace | plan trace | world trace | two processes |
+|---|---|---|---|---|---|---|
+| 8 | 5540 | `f8401a3ac5fbfe25` | `a8aa5373dd2f20a0` (5 lines) | `49869f8feb01a3f6` (24) | `1c4959d525f5a48e` (**651**) | **identical** |
+| canonical 20260728 | 5566 | `dded3a667ddf6e1d` | `a4e2cf23fc5b3676` (3) | `530be81588feb072` (15) | `c6438340824af51a` (**659**) | **identical** (all 386 lines byte-for-byte) |
+
+The **world trace** matching matters more than the park hash: 651 and 659 lines
+of every refusal, retry, accommodation and unwind in order, reproduced exactly.
+That is the same *route* to the park, not merely the same park by luck.
+
+### The instrument sees this change — confirmed, not assumed
+
+The digest contains `fairy-pole-*`, `fairy-string-*` **and `fairy-bulbs`** (the
+`InstancedMesh`). Counts read straight off it agree with the scene-graph
+counts measured independently: canonical 20 entries (10 poles + 10 strings);
+seed 8 seventeen.
+
+**And seed 8's digest independently reproduces the gateway gap.** Its pole list
+is 0, 1, 2, **4**, 5, 6, 7, 8, 9 — pole 3 absent — and its strings are 0, 1,
+**4**, 5, 6, 7, 8, 9, with 2 and 3 absent. One skipped pole drops the string on
+either side of it: 9 poles, 8 strings. A completely different instrument
+arriving at the same answer as the mesh count.
+
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
 - `test:procgen` name-diff against the base (base has 55 known failures).
