@@ -5099,22 +5099,38 @@ const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
   let worstAt: readonly [number, number, number] = chute[0] ?? [0, 0, 0];
   let buried = 0;
 
+  // **Against each turret's own axis, not against a world-Y window.** The
+  // castle is drawn leaning 12.44 degrees onto the planet, so a turret's axis
+  // is not world `+Y`: on seed 24 the four bodies' feet span 6 m of world `y`
+  // between them while all four stand on the same plinth. Asked the old way —
+  // plan `hypot` plus `centre.y ± height/2` — this both missed intrusions and
+  // invented them. A solid of revolution against a point is exact in closed
+  // form, which is why this is still not a ring of probe rays.
+  const axis = new Vector3();
+  const toPoint = new Vector3();
+  const onAxis = new Vector3();
+  const here = new Vector3();
   for (const point of chute) {
     const [px, py, pz] = point;
+    here.set(px, py, pz);
     for (const tower of towers) {
-      // The chute occupies a band around its centre line, so it fouls the
-      // tower's height range if either edge of that band is inside it.
-      if (py + envelope.above < tower.bottomY) continue;
-      if (py - envelope.below > tower.topY) continue;
-
-      // Radius where the two actually meet in height, so a cone is measured at
-      // the height the chute passes it rather than at its widest.
-      const clamped = Math.min(Math.max(py, tower.bottomY), tower.topY);
-      const span = tower.topY - tower.bottomY;
-      const t = span <= 1e-9 ? 0 : (clamped - tower.bottomY) / span;
+      axis.set(tower.tipX - tower.footX, tower.tipY - tower.footY, tower.tipZ - tower.footZ);
+      const span = axis.length();
+      if (span <= 1e-9) continue;
+      toPoint.set(px - tower.footX, py - tower.footY, pz - tower.footZ);
+      const along = toPoint.dot(axis) / (span * span);
+      // The chute is a tube, so it reaches `envelope` beyond its own centre
+      // line along the axis too — past that, this tower is simply not there.
+      const overhang = Math.max(envelope.above, envelope.below) / span;
+      if (along < -overhang || along > 1 + overhang) continue;
+      const t = Math.min(Math.max(along, 0), 1);
+      // Radius where the two actually meet, so a cone is measured at the height
+      // the chute passes it rather than at its widest.
       const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
-
-      const gap = Math.hypot(px - tower.x, pz - tower.z) - radius - envelope.halfWidth;
+      onAxis
+        .set(tower.footX, tower.footY, tower.footZ)
+        .addScaledVector(axis, t);
+      const gap = onAxis.distanceTo(here) - radius - envelope.halfWidth;
       if (gap < worstGap) {
         worstGap = gap;
         worstTower = tower.name;

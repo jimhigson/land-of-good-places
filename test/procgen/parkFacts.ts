@@ -1175,10 +1175,22 @@ export interface ParkFacts {
    */
   readonly castleTowers: readonly {
     readonly name: string;
-    readonly x: number;
-    readonly z: number;
-    readonly bottomY: number;
-    readonly topY: number;
+    /**
+     * The two ends of the drawn part's **own axis**, in world space, foot
+     * first.
+     *
+     * Not a world-Y window and a plan position: the castle is drawn leaning
+     * **12.44 degrees** onto the planet, so a turret's axis is not world `+Y`
+     * and `centre.y ± height/2` is not its extent. Measured on seed 24 the
+     * four tower bodies' feet span 6 m of world `y` between them while every
+     * one of them stands on the same plinth.
+     */
+    readonly footX: number;
+    readonly footY: number;
+    readonly footZ: number;
+    readonly tipX: number;
+    readonly tipY: number;
+    readonly tipZ: number;
     readonly radiusBottom: number;
     readonly radiusTop: number;
   }[];
@@ -2213,8 +2225,10 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
 
   const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
   const castleTowers: {
-    name: string; x: number; z: number;
-    bottomY: number; topY: number; radiusBottom: number; radiusTop: number;
+    name: string;
+    footX: number; footY: number; footZ: number;
+    tipX: number; tipY: number; tipZ: number;
+    radiusBottom: number; radiusTop: number;
   }[] = [];
   scene.traverse((object) => {
     if (!(object instanceof InstancedMeshClass)) return;
@@ -2229,16 +2243,24 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     const local = new Matrix4();
     const composed = new Matrix4();
     const centre = new Vector3();
+    const axis = new Vector3();
     for (let i = 0; i < object.count; i += 1) {
       object.getMatrixAt(i, local);
       composed.multiplyMatrices(object.matrixWorld, local);
       centre.setFromMatrixPosition(composed);
+      // The part's own axis, read off the composed matrix: its local `+Y`
+      // column carries both the direction it stands in and its scale.
+      axis.setFromMatrixColumn(composed, 1);
+      const length = axis.length() * params.height;
+      axis.normalize();
       castleTowers.push({
         name: `${object.name}[${i}]`,
-        x: centre.x,
-        z: centre.z,
-        bottomY: centre.y - params.height / 2,
-        topY: centre.y + params.height / 2,
+        footX: centre.x - (axis.x * length) / 2,
+        footY: centre.y - (axis.y * length) / 2,
+        footZ: centre.z - (axis.z * length) / 2,
+        tipX: centre.x + (axis.x * length) / 2,
+        tipY: centre.y + (axis.y * length) / 2,
+        tipZ: centre.z + (axis.z * length) / 2,
         radiusBottom,
         radiusTop,
       });

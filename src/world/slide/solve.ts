@@ -9,6 +9,7 @@ import {
   CASTLE_MASONRY_TOP,
   CASTLE_TOWERS,
   distanceOutsideTower,
+  worldToCastle,
 } from '../building/layout';
 import {
   BUILDING_HALF_X,
@@ -35,7 +36,7 @@ import {
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { Geo, worldYAtAltitude, worldYAtRadius } from '../geo';
 import { altitudeAt } from '../terrain';
-import { CHUTE_ENVELOPE } from '../building/SlideRide';
+import { CHUTE_ENVELOPE, chuteCentreLine } from '../building/SlideRide';
 
 /**
  * **The ginormous slide, as a plan.**
@@ -525,11 +526,18 @@ registerPlanCache(() => {
  * returned clear anyway* — a blocked point is always within the box — so it
  * changes no verdict, and it uses no `Math.hypot`, only two `abs`.
  */
-/** Read live: the towers stand where the layout the park's driver decided. */
+/**
+ * Read live: the towers stand where the layout the park's driver decided.
+ *
+ * **In the castle's own axes**, because that is where the solids are — see
+ * `TowerSolid`. The gate below converts its query point the same way, so the
+ * two are comparing like with like and the skip still only ever skips work that
+ * would have returned clear.
+ */
 function towerBoundX(): number {
   return Math.max(
   ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.x - BUILDING_CENTRE_X) + Math.max(tower.radiusBottom, tower.radiusTop),
+    (tower) => Math.abs(tower.localX) + Math.max(tower.radiusBottom, tower.radiusTop),
   ),
 );
 }
@@ -537,7 +545,7 @@ function towerBoundX(): number {
 function towerBoundZ(): number {
   return Math.max(
   ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.z - BUILDING_CENTRE_Z) + Math.max(tower.radiusBottom, tower.radiusTop),
+    (tower) => Math.abs(tower.localZ) + Math.max(tower.radiusBottom, tower.radiusTop),
   ),
 );
 }
@@ -566,24 +574,20 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
   // never changes the answer, only avoids eight `distanceOutsideTower` calls for
   // the many samples out over the ball pit and the park's edge. See
   // {@link towerBoundX()}.
+  worldToCastle(towerGate.set(x, y, z), towerGate);
   if (
-    Math.abs(x - BUILDING_CENTRE_X) > towerBoundX() + radius ||
-    Math.abs(z - BUILDING_CENTRE_Z) > towerBoundZ() + radius
+    Math.abs(towerGate.x) > towerBoundX() + radius ||
+    Math.abs(towerGate.z) > towerBoundZ() + radius
   ) {
     return true;
   }
   for (const tower of CASTLE_TOWERS) {
-    // A tower standing on the plinth goes all the way down to the ground, however
-    // far the ground falls away from the plinth's flat height. `TowerSolid` stops
-    // at `bottomY`, so a chute passing *below* that height beside a tower read as
-    // clear of it. Nothing reached there while the chute was held in world `y`;
-    // held against the planet (#645) the run-out drops below the plinth on the
-    // far side of the castle, and seed 131 then ran its last metres through the
-    // foot of `tower-body-1` — 1.22 m inside the built masonry, measured by
-    // `theGinormousSlideMissesTheCastleTowers`. Reading the solid at its own
-    // foot for anything lower is the tower that was built.
-    const atY = tower.bottomY === BUILDING_BASE_Y && y < tower.bottomY ? tower.bottomY : y;
-    if (distanceOutsideTower(tower, x, z, atY) < radius) return false;
+    // The plinth rule — a tower standing on it reaches down to whatever ground
+    // is under it — moved into `distanceOutsideTower` with `standsOnThePlinth`,
+    // so it is stated once beside the solid it is about rather than copied into
+    // each caller. Found by seed 131 running its last metres through the foot
+    // of `tower-body-1`, 1.22 m inside the built masonry.
+    if (distanceOutsideTower(tower, x, z, y) < radius) return false;
   }
   return true;
 }
@@ -595,6 +599,8 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
  * ground, where a tower is at its widest. Taking the widest radius of each
  * solid is therefore both correct and the conservative direction to err in.
  */
+const towerGate = new Vector3();
+
 function clearsTowersOnTheGround(x: number, z: number, radius: number): boolean {
   for (const tower of CASTLE_TOWERS) {
     const widest = Math.max(tower.radiusBottom, tower.radiusTop);
@@ -1950,7 +1956,16 @@ function chuteComplaint(points: readonly Vector3[]): string | null {
 }
 /** Chute points judged per piece of the rideability walk. */
 const JUDGE_PIECE = 32;
-function* chuteComplaintSearch(points: readonly Vector3[]): Generator<number, string | null, void> {
+function* chuteComplaintSearch(
+  controls: readonly Vector3[],
+): Generator<number, string | null, void> {
+  // **Judge the line that gets built, not the controls it is threaded through.**
+  // `SlideRide` sweeps a Catmull-Rom through these points and that curve sags
+  // between them: on seed 11 the built chute came within 5.47 m of the Sky
+  // Cruiser where the control polygon kept 5.50 m, so this passed a ride the
+  // park then drew too close. `chuteCentreLine` is the same curve `SlideRide`
+  // builds, at the same 0.4 m `parkFacts.ts` measures it at.
+  const points = chuteCentreLine(controls);
   let judged = 0;
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;

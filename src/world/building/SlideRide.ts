@@ -102,6 +102,46 @@ export interface SlideOptions {
  * The ride itself is a scripted trip along the same curve — see `Building` — so
  * the geometry and the path a child travels can never disagree.
  */
+/**
+ * **The curve the chute is actually built on** — the one owner of it.
+ *
+ * `SlideRide` sweeps its trough along this, and `slide/solve.ts` judges *this*
+ * rather than the control points it is threaded through. Those are not the same
+ * line: a Catmull-Rom sags between its controls, and on seed 11 that sag put
+ * the built chute 5.47 m from the Sky Cruiser where the control polygon had
+ * 5.50 m and the solver was satisfied. Three centimetres, and exactly the shape
+ * of fault this repo keeps paying for — a check honestly measuring something
+ * other than the thing that gets drawn.
+ */
+export function chuteCurve(points: readonly Vector3[]): CatmullRomCurve3 {
+  return new CatmullRomCurve3(points.map((p) => p.clone()), false, 'catmullrom', 0.5);
+}
+
+/**
+ * The built chute's centre line, sampled the way a measurement wants it:
+ * every {@link CHUTE_JUDGE_SPACING} metres along the curve above.
+ */
+export function chuteCentreLine(points: readonly Vector3[]): Vector3[] {
+  if (points.length < 2) return points.map((p) => p.clone());
+  const curve = chuteCurve(points);
+  const length = curve.getLength();
+  const steps = Math.max(points.length, Math.round(length / CHUTE_JUDGE_SPACING));
+  const line: Vector3[] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    line.push(curve.getPointAt(i / steps, new Vector3()));
+  }
+  return line;
+}
+
+/**
+ * How finely the built chute is sampled when it is judged.
+ *
+ * 0.4 m, matching `test/procgen/parkFacts.ts`'s own sampling of the drawn ride,
+ * so the line the generator accepts and the line the invariants measure are the
+ * same line at the same resolution.
+ */
+const CHUTE_JUDGE_SPACING = 0.4;
+
 export class SlideRide {
   readonly group = new Group();
   readonly curve: CatmullRomCurve3;
@@ -116,7 +156,7 @@ export class SlideRide {
 
   constructor(points: readonly Vector3[], options: SlideOptions) {
     this.group.name = options.name;
-    this.curve = new CatmullRomCurve3(points.map((p) => p.clone()), false, 'catmullrom', 0.5);
+    this.curve = chuteCurve(points);
     this.length = this.curve.getLength();
 
     const steps = Math.max(24, Math.round(this.length * SEGMENTS_PER_METRE));
