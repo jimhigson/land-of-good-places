@@ -412,3 +412,34 @@ seeds 20260728 (`a1b5c16077708bc0`), 128 (`528eebcd274a31a6`) and 274
 2. **A shifted counter can land off its own paving.** `accepts` proves the
    stand point collision-clear and walkable-to; it does not prove it still
    *paved*. Cosmetic, and unreachable while no seed moves a booth.
+
+
+## Round 3 — three review fixes
+
+1. **A summary line that could claim cover it had not got.** `4b`'s
+   `every one of the 8 counters is still walkable` printed unconditionally
+   after its loop, so a stranded counter produced the `FAIL` *and* that `ok`
+   together. Counted now; prints only when all pass, and otherwise
+   `7 of 8 counters are still walkable`. **Proved** by stranding `dodgems`
+   deliberately: the `ok` disappears, the honest count appears,
+   `1 FAILURE(S)`.
+2. **`standsToRecheck` deleted** — written, never read. Note for whoever is
+   near this next: **`tsc` cannot see dead code in `scripts/`**, because that
+   directory is in no tsconfig project (filed as **#672**). Do not assume a
+   green `tsc` says anything about a `scripts/*.mts` file beyond what the
+   check's own run proves.
+3. **The withdraw-then-throw coupling is written down** in
+   `stallsFeature.ts`. Between `booth.withdrawCollision()` and the `placeAt`
+   on either exit the booth is **drawn but not solid**. `accepts` can throw —
+   `spurEndFor` does, by design — and that is safe *only* because
+   `parkSolve.ts` has no `try`/`catch` at all, so the throw kills the build
+   outright. **Verified by reading `parkSolve.ts`, not by grepping**: a naive
+   `grep 'try'` matches `retry` and `entry`, and its only `catch` is a word
+   inside a message string, so the grep answer and the real answer differ.
+   The comment says what to do: anyone wrapping the driver's `accommodate`
+   call in a `catch` must wrap this search in `try`/`finally` in the same
+   change, or a swallowed exception ships a stall a child walks through.
+
+Deliberately **not** in this PR, at the Overseer's direction: a shifted
+booth's counter can land off its own paving (`accepts` proves collision-clear
+and walkable, not still *paved*) — filed as its own issue.
