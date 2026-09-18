@@ -689,6 +689,23 @@ latent shape this bug had. Not fixed here: changing another builder's deps
 re-rolls parks on seeds nobody has looked at, and a fairy-lights PR is the
 wrong place for it.
 
+## Gate results on the final code (rebased onto `881cb158`)
+
+| gate | result |
+|---|---|
+| `check:park` 0–15 | **16/16 GREEN**, every waypoint denominator unchanged |
+| `test:procgen` name-diff | **55 vs 55, ADDED none, GONE none** (+5 total = the new invariant on five seed files) |
+| determinism | **identical** — seed 8 `d6e22e7a32dbb69e`, canonical `a47b312c6846961c` |
+| `check:coplanar` | **NEW 19, same as base, zero fairy seams**, both set differences empty |
+| `check:swept-bus` | **pass**, both controls held |
+| `check:park-boot` | **pass**, worst slice 16.7 ms against a 20.0 ms ceiling |
+| world-phase cost | **no measurable cost** — seed 14: +14 ms for +79 increments |
+
+**The digest is re-run LAST, after the final edit.** Its hashes moved three
+times on this branch as geometry changed (yaw, then cap removal); any hash
+quoted before the last edit describes a park that no longer exists. Two sets of
+superseded hashes nearly reached the PR body.
+
 ### Round-2 gates — ALL must be re-run on the rebased base
 
 ## PR raised: #677 against `feat/procgen-on-sphere`
