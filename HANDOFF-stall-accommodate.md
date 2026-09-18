@@ -126,9 +126,16 @@ accommodations (two wall runs, five bush clumps) the base made.
       **Proved red** below.
 - [x] `check:stall-accommodate` in the `check` chain (67 → 68 steps, nothing
       lost; step sets compared by parsing the scripts object).
+- [x] `test:procgen` name-diff vs `origin/feat/procgen-on-sphere` (ae20b9fc):
+      **55 failures on the base, 55 on this branch, identical names and
+      identical counts** — none added, none fixed. Passes 636 → 641 (the new
+      invariant on five seeds). Strip the `NNNms` suffix before diffing or the
+      timings make the diff unreadable; BSD `sed` needs `-E`.
+- [x] Determinism: two separate processes run `check:stall-accommodate` and
+      produce byte-identical output — same booth, same 0.90 m shift, same
+      destination. Canonical park digest `a1b5c16077708bc0` in two processes.
 - [ ] Seeds 0..15: does any of them ask a stall to move? (digest sweep running)
-- [ ] 16 seeds of `check:park`; `test:procgen` name-diff vs
-      `origin/feat/procgen-on-sphere`; two-process determinism digest.
+- [ ] 16 seeds of `check:park` (running).
 
 ## The constructed scenario (`pnpm run check:stall-accommodate`)
 
