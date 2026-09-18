@@ -315,6 +315,42 @@ is 0, 1, 2, **4**, 5, 6, 7, 8, 9 — pole 3 absent — and its strings are 0, 1,
 either side of it: 9 poles, 8 strings. A completely different instrument
 arriving at the same answer as the mesh count.
 
+## The knock-on is bigger than first reported — measured, seed 8
+
+The canonical seed loses **one** lamp (82 -> 81). Seed 8 loses **three**, and
+gains a wall. Measured from the world-phase summary line in both worktrees:
+
+| | walls | lamps | poles | trees | bushes | forgone |
+|---|---|---|---|---|---|---|
+| base `ae20b9fc` | 34/39 | **90**/131 | 0 | 72 | 404 | 0 |
+| mine | 35/39 | **87**/131 | 9 | 72 | 404 | 2 |
+
+So "lamps 82 -> 81" is **not** the whole story and must not be quoted as if it
+were: the effect is per-seed, it can reach -3, and it can move walls *up*.
+The cause is the same and is correct — fairy poles are earlier in the world
+phase order than lamps and walls, so they claim ground first and the later
+features solve against a slightly different park. Trees and bushes are
+untouched on this seed.
+
+`forgone=2` on mine against `0` on base is the driver leaving two increments
+out after retry and accommodation both failed. Note this is **not** the same
+mechanism as the gateway gap: a pole standing on paving is pushed as `null`
+directly by the builder and never reaches `forgo()`.
+
+### Accounting for the mesh delta, 5512 -> 5540 (+28)
+
+- **+26 fairy meshes**: 9 poles + 9 knobs + 8 cables. (`fairy-bulbs` is not
+  new — the base already has it, with zero instances.)
+- **+2 from the extra wall run** (34 -> 35).
+- **Lamps contribute nothing to the mesh count** despite dropping 90 -> 87,
+  because `lamp-bulbs` and `lamp-ground-glow` are `InstancedMesh`es — the
+  change is in their instance counts, which is why their group hashes differ
+  while the mesh total does not move.
+
+**Honest limit on this one**: the "+2 per wall run" closes the arithmetic
+exactly but is *inferred from it*, not independently measured. Everything else
+in the table above was read off the world-phase summary in each worktree.
+
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
 - `test:procgen` name-diff against the base (base has 55 known failures).
