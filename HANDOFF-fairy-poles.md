@@ -286,6 +286,29 @@ The digest contains `fairy-pole-*`, `fairy-string-*` **and `fairy-bulbs`** (the
 counts measured independently: canonical 20 entries (10 poles + 10 strings);
 seed 8 seventeen.
 
+### The control on the instrument — run *before* trusting the green
+
+The determinism runs above only prove two processes agree. They would agree
+just as happily if the digest could not see this change at all. So the same
+digest was run on the **base worktree** for seed 8 and compared:
+
+| | meshes | park hash | `fairy-(pole\|string)` meshes |
+|---|---|---|---|
+| base `ae20b9fc` | 5512 | `8d08e91238c68924` | **0** |
+| mine | 5540 | `f8401a3ac5fbfe25` | **17** |
+
+**They differ, so the instrument can see the change.** And this is the
+strongest evidence for the bug itself: the base park contains **zero** fairy
+meshes, confirmed by a third independent instrument rather than inferred from
+the mutation.
+
+One subtlety found here and worth keeping: **`fairy-bulbs` exists on the base
+too**, because `FairyLights` always constructs the `InstancedMesh` — with
+`bulbPositions.length` of zero. A rig with no bulbs was therefore structurally
+indistinguishable from a healthy one at the object level. Only the *instance
+count* told the truth, which is exactly why a digest that ignored
+`instanceMatrix` would have been blind.
+
 **And seed 8's digest independently reproduces the gateway gap.** Its pole list
 is 0, 1, 2, **4**, 5, 6, 7, 8, 9 — pole 3 absent — and its strings are 0, 1,
 **4**, 5, 6, 7, 8, 9, with 2 and 3 absent. One skipped pole drops the string on
