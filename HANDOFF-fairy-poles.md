@@ -125,13 +125,18 @@ Measured directly on the canonical seed by the red-run mutation below (0/10
 poles, 0 strings at r=13.5); `scripts/_probe-fairy-before.mts` measures both
 rings against one built park if a per-seed BEFORE column is wanted.
 
-### One visual consequence worth flagging to Jim
+### The gateway gap still works — seed 8 proves it
 
-Every slot now stands, so the ring is a **complete circle of ten poles and ten
-strings**. The skip-a-pole-on-paving branch is still live and still correct —
-it is what leaves a "gateway" gap where a path crosses the ring — it simply
-never fires now, because the ring no longer lies on the promenade. If a seed's
-spur ever does cross the verge, the gap reappears by itself.
+On most seeds every slot stands, so the ring is a complete circle of ten poles
+and ten strings. **Seed 8 is the exception and it is the useful one**: a spur
+crosses the verge there (nearest paving **-0.17 m**, i.e. actually on paving),
+so one pole is skipped and the two strings either side of it are dropped —
+**9 poles, 8 strings**. That is the designed "gateway" behaviour firing on a
+real park, which also means the skip branch is live code and not dead code.
+
+(An earlier revision of this handoff said the branch "never fires now". That
+was wrong, and it was wrong because it was reasoned from the geometry instead
+of measured. Seed 8 corrected it.)
 
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
