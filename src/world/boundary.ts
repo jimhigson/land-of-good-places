@@ -274,13 +274,21 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
    * close, 108 vertices apart, and the strided pass simply picked the wrong
    * one, after which refining around it can never reach the other.
    *
-   * So every vertex is scanned, but cheaply: squared distances, no `hypot` and
-   * no projection. Only the handful of segments beside the winner get the real
-   * point-to-segment treatment. That is 512 multiply-adds plus 5 projections
-   * rather than 512 projections — this is called from `terrainHeight`, which
-   * runs hundreds of thousands of times a build, so the constant matters. The
-   * invariant suite checks it against a brute-force search over every segment,
-   * including the degenerate query at the origin, so it stays measured.
+   * So a vertex is only ever compared cheaply: squared distances, no `hypot`
+   * and no projection. Only the handful of segments beside the winner get the
+   * real point-to-segment treatment — 5 projections rather than 512.
+   *
+   * **Which vertices get compared at all is the candidate list below**, and
+   * that is the change of 18 September 2026: every vertex used to be scanned,
+   * and scanning them was 80.7% of the park solve.
+   *
+   * *This paragraph used to claim the invariant suite held it to a brute-force
+   * search over every segment, and no such test existed* — a rule with no
+   * command beside it, decaying quietly. It does now:
+   * `test/geo/boundaryDistance.test.ts`, which pins this bit-for-bit against
+   * the old full scan and to a micrometre against brute force, over five
+   * profiles including a circle and including the degenerate query at the
+   * origin.
    */
   const REFINE = 2;
 
