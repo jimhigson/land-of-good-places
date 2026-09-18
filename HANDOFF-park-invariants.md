@@ -88,3 +88,39 @@ inconsistent and the geometry genuinely wrong.
 
 Probes (untracked, in this worktree): `scripts/_probe-arch.mts`,
 `_probe-pylons.mts`, `_probe-slide-castle.mts`.
+
+## Bridge coping — diagnosed, not yet fixed
+
+`scripts/_probe-coping.mts` (untracked), seed 11:
+
+```
+bridge-14.0: identity matrix true; COPING_SINK 0.08
+  block  0/81 lowEdge n=8 (16.18, -7.06, 55.40): world-y gap 0.0307
+              | along-normal 0.0484 | along-up 0.0411
+              block y span -7.064..-6.265; wallTop there -7.015
+  block 40/81 lowEdge n=8 (11.82, -6.76, 55.40): world-y gap 0.0307  (same numbers)
+bridge-330.0: block 0/82 and 41/82, 0.0316 / 0.0318
+```
+
+**It is not a frame artefact.** Measured three ways — along world `y`, along the
+wall-top triangle's own normal, and along the planet's local up — the seat error
+stays 0.03–0.05 m. None of them is zero, so unleaning does not explain it.
+
+**It is always the first block of each of the two parapet runs** (block 0 and
+block 40/41 of ~81, which is one per side), on every failing bridge. The blocks'
+bottom faces are flat (8 vertices at one height to within 1e-3), so the stone is
+level there and its base should be exactly `COPING_SINK` below the cap.
+
+Where to look next. `bridges.ts` pushes `parapetLine[i].top = [parapetTopPlus,
+parapetTopMinus]` and builds the `wallTop` cap quads from the *same* two
+numbers, so per ring they agree by construction — which means the disagreement
+is in the **lookup**, not the data. `wallTopAt` in the invariant returns the
+**first** triangle whose plan projection contains the point; at a ramp foot the
+cap strip's plan projection can double back on itself as the parapet tapers, so
+an earlier triangle can win at a different height. Test that before touching
+`bridgeStonework.ts`: collect every containing triangle rather than the first
+and print how many there are at those four plan points. If there is more than
+one, the instrument is picking wrong; if there is exactly one, the seam is real
+and lives in `buildCopingRun`'s first segment.
+
+Do **not** widen the 0.02 m tolerance.
