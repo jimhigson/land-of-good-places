@@ -286,9 +286,19 @@ it:
   rider's framing is measured off the built park, so a park that had moved
   could not land on 0.13% at frame 240 twice.
 - **Procgen invariants** — failing test *name sets* proved identical locally.
-- **Coplanar faces** — red on both; the finding-set diff is the outstanding
-  item. Red-and-red is not proof of sameness (a different defect hides under
-  the same red), so this is not called pre-existing until that diff is in.
+- **Coplanar faces** — red on both, and the **finding sets are identical**:
+  28 `NEW`/`WORSE`/`MORE`/`BASELINE LOOSE` lines on each side, **zero only on
+  the base, zero only on the branch** (`comm` over the sorted findings, not a
+  count — a count cannot see a swap).
+
+  **This is the strongest park-identity evidence in the branch, and it covers
+  what the park digest could not.** `check:coplanar` sweeps the garden across
+  **all sixteen `PARK_SEED_POOL` seeds** and buckets every world-space triangle
+  by its plane. An identical finding set, down to each shared area and
+  stand-off, means the drawn geometry is unchanged on all sixteen — closing the
+  gap that the digest (canonical seed only) left open, and answering the
+  `check:entrance-road` engineer's caution that a fix proven on 0..15 might not
+  hold on the pool.
 
 ## Determinism: the park is unchanged, not merely deterministic
 
