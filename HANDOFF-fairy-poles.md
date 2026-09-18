@@ -408,15 +408,15 @@ and no baseline entry was added to silence it — `coplanar-baseline.mts` is
 untouched by this branch, which the diff confirms (five files, none of them
 that one).
 
-## Still to do
-- `LGP_SEED=n pnpm run check:park` on 0..15.
-- `test:procgen` name-diff against the base (base has 55 known failures).
-- Determinism, two processes on a changed seed.
-- Screenshot of the lit park for Jim (needs the browser — ask the Overseer).
+## PR raised: #677 against `feat/procgen-on-sphere`
 
-## This worktree's CLAUDE.md is newer than the shared checkout's
+All four gates run and reported. Coplanar is red **and reported as red**, with
+the base control proving the set is identical to the base's.
 
-It adds rules worth knowing: **never `git stash`** (shared across worktrees);
-`pnpm run check:coplanar` and `pnpm run check:swept-bus` are their own
-workflows and must be run before pushing; `fnm use --install-if-missing` reads
-`.node-version` and nothing does it for you.
+**Next, deliberately not done yet:** rebase onto `feat/procgen-on-sphere`, which
+has moved (entrance-road and waypoints fixes merged; solve-time #670 in review).
+Held off on the Overseer's instruction so the PR's numbers describe the base
+they were actually measured against. **After rebasing, the measurements above
+describe a different base** — re-run at minimum `check:park` on a couple of
+seeds and `test:procgen`, and re-check the coplanar NEW set against the new
+base, before anyone treats the numbers here as current.
