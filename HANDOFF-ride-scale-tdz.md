@@ -211,3 +211,47 @@ in the game. Whoever takes it should find where the facade bounds are read and
 when, rather than treating 245 as a real number of bad waypoints —
 `scripts/scan-cycle-tdz.mts` and `_scan-nan.mts` are both pointed at this
 class.
+
+### step 66 `check:layout-rung` — FAIL, pre-existing
+
+```
+check:layout-rung: 5 failure(s):
+  expected at least 30 forced refusals of the hotel, saw 0
+  expected the pretend blocker to be redrawn on rung 2 once the hotel ran out
+  expected the hotel to exhaust its candidates on rung 1 (11 redraws), saw 0
+  expected decision zero to be reached after the hotel exhausted its supply
+  expected exactly one solved line, saw 0
+```
+
+Identical on base `ae20b9fc` — same five clauses, exit 1. The check drives the
+old layout machinery through `LGP_LAYOUT_REFUSE=hotel:40` and measures its
+rungs; it reports `machinery (LGP_LAYOUT_REFUSE=hotel:40, seed 20260728): 0
+refusal(s), 0 rung-1 redraw(s), 0 rung-2 redraw(s), 0 decision zero(s),
+solved=0`. Nothing is being injected any more.
+
+Its **first four clauses still pass and still measure real things** (a door 20 m
+outside the boundary refuses `poi.nospot`; four walls ringing the hotel doormat
+refuse `poi.stranded`), so this is not a dead check — it is a live check whose
+machinery clause has been disconnected by the backtracking rework, which
+replaced those rungs with `ParkSolve`'s ladder. Whoever owns the rework should
+decide whether `LGP_LAYOUT_REFUSE` is re-pointed at the new driver or the clause
+is rewritten against it; it must not simply be deleted, because those five
+clauses are the only cover the layout's own backtracking has.
+
+### The complete sweep, steps 25–67
+
+**64 of 67 steps pass. Three fail, all three reproduced on `ae20b9fc`, none
+caused by this branch:**
+
+| step | check | note |
+|---|---|---|
+| 24 | `check:slide-rider` | body 0.13% of frame vs 0.40% required — the blocker that stops the chain |
+| 29 | `check:waypoints` | 245 waypoints, bound prints `x NaN..NaN` |
+| 66 | `check:layout-rung` | 5 clauses, machinery injects nothing |
+
+Both of this slice's own steps pass **in chain position**: step 49
+`check:cart-shape` (13 s) and step 64 `check:ground-claims` (16 s). So does
+step 48 `check:rail-race` (43 s), which is the step most exposed to moving the
+ride's constants, and step 32 `check:park` (24 s).
+
+Per-step results: `/tmp/rest-results.txt`; per-step logs `/tmp/step-NN.log`.
