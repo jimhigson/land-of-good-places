@@ -29,8 +29,24 @@
  * hits is the answer. That cannot be fooled by where the piers reach, and it
  * still catches an arch hanging upside down — #480's own failure — because
  * such an arch puts geometry directly over the middle of the way in.
+ *
+ * ## "Up" is the planet's, not the world's
+ *
+ * The park is a cap of a 220 m sphere, and the gate stands 60 m out from its
+ * centre, so the local up at the gate is **15.84 degrees** off world `+Y`
+ * (measured, canonical seed). The arch is built standing on that local up, and
+ * a ray fired along world `+Y` from the middle of the opening leans out of the
+ * crossbar and out through the open air beside it: **0 of 13 rays hit any part
+ * of the arch**, `lowestOverheadY` came back `Infinity`, and the
+ * `headroom < TALLEST_CHILD_HEIGHT` clause underneath it could never fire.
+ * Along the local up the same 13 rays all hit, at 3.55 m. That is the exact
+ * disease CLAUDE.md names first — an assertion reporting success about
+ * something it is not describing — and it is why the ray direction and the
+ * spread of ray origins both come from {@link Geo} here rather than from a
+ * world axis.
  */
 import { Box3, Raycaster, Vector3, type Object3D, type Scene } from 'three';
+import { Geo, PLANET_CENTRE_WORLD_Y } from '../src/world/geo/Geo.ts';
 
 export interface GateArchMeasurement {
   /** World bounding box of the whole gate. */
@@ -63,7 +79,25 @@ export interface GateArchMeasurement {
    */
   readonly lowestOverheadY: number;
   /** Where that lowest overhead thing is, for a failure message with a place in it. */
-  readonly lowestOverheadAt: { readonly x: number; readonly z: number } | null;
+  readonly lowestOverheadAt: { readonly x: number; readonly y: number; readonly z: number } | null;
+  /**
+   * **How much room a child has under the arch, in metres**, and the one owner
+   * of that number.
+   *
+   * `Infinity` if nothing overhangs the gateway at all — a gate with no arch
+   * on it, which a caller must treat as a failure rather than as generous
+   * headroom.
+   *
+   * It used to be computed by each caller as `lowestOverheadY − groundY`, in
+   * `test/procgen/parkFacts.ts` and again in `scripts/probe-gate-pool.mts` —
+   * two definitions of one thing kept in step by hand, and **both** wrong on
+   * the sphere, because a difference of world `y` is not a height anywhere but
+   * the exact middle of the park. It is an altitude difference now: two radii
+   * from the planet's centre, subtracted. The ground comes in through
+   * `groundY` because only the caller knows whether a child is standing on the
+   * terrain or on the road's own surface.
+   */
+  readonly headroom: number;
   /**
    * Which way the arch's **lettered face** looks, in world XZ — its local `+Z`
    * put through its world matrix, normalised.
@@ -78,6 +112,14 @@ export interface GateArchMeasurement {
    */
   readonly forwardX: number;
   readonly forwardZ: number;
+}
+
+/**
+ * How far a world point is from the planet's centre. Altitudes here are
+ * differences between two of these, which is what makes them heights.
+ */
+function radiusOf(x: number, y: number, z: number): number {
+  return Math.hypot(x, y - PLANET_CENTRE_WORLD_Y, z);
 }
 
 /** How far apart the headroom rays are, across the opening. */
@@ -95,7 +137,16 @@ const HEADROOM_RAY_SPACING = 0.5;
  */
 const HEADROOM_RAY_REACH = 0.6;
 
-export function measureGateArch(scene: Scene): GateArchMeasurement | null {
+/**
+ * @param groundY the world height of the ground a child stands on, at an
+ * `(x, z)` in the gateway. The terrain, for the park's own gate. Passed in
+ * rather than imported so this module stays free of anything that reads the
+ * seed at load — see the head of the file.
+ */
+export function measureGateArch(
+  scene: Scene,
+  groundY: (x: number, z: number) => number,
+): GateArchMeasurement | null {
   scene.updateMatrixWorld(true);
 
   let arch: Object3D | null = null;
@@ -125,7 +176,14 @@ export function measureGateArch(scene: Scene): GateArchMeasurement | null {
 
   // --- headroom -------------------------------------------------------------
   const raycaster = new Raycaster();
-  const up = new Vector3(0, 1, 0);
+  // **The planet's up at the gate, not the world's.** See the module docblock:
+  // world `+Y` is 15.84 degrees out here and every ray missed the arch.
+  const up = Geo.fromWorld(centre.x, centre.y, centre.z).up(new Vector3());
+  // The gate spans *across* the opening, and that span is tangent to the
+  // planet at the gate — so the ray origins are spread along the arch's own
+  // span axis projected into the tangent plane, never along a world axis.
+  const spread = new Vector3(alongX ? 1 : 0, 0, alongX ? 0 : 1);
+  spread.addScaledVector(up, -spread.dot(up)).normalize();
   const from = new Vector3();
   // **Upward, from a child's toes — not downward from the sky.** A ray going
   // down hits the *top* of the sign plank and reports the plank's own
@@ -133,32 +191,47 @@ export function measureGateArch(scene: Scene): GateArchMeasurement | null {
   // a downward ray cannot see an underside at all. Going up, the first thing
   // hit is exactly the surface a child would knock her hat on.
   const toes = 0.05;
+  let lowestOverheadRadius = Infinity;
   let lowestOverheadY = Infinity;
-  let lowestOverheadAt: { x: number; z: number } | null = null;
+  let lowestOverheadAt: { x: number; y: number; z: number } | null = null;
 
   const reach = half * HEADROOM_RAY_REACH;
   const steps = Math.max(1, Math.round(reach / HEADROOM_RAY_SPACING));
   for (let i = -steps; i <= steps; i += 1) {
     const t = (i / steps) * reach;
-    const x = alongX ? centre.x + t : centre.x;
-    const z = alongX ? centre.z : centre.z + t;
-    from.set(x, centre.y + toes, z);
+    from.copy(centre).addScaledVector(spread, t).addScaledVector(up, toes);
     raycaster.set(from, up);
     // `true` — the arch's parts are children of its root, and each one's
     // outline hull is a child of that.
     const hits = raycaster.intersectObject(archNode, true);
     if (hits.length === 0) continue;
-    const y = hits[0]!.point.y;
-    if (y < lowestOverheadY) {
-      lowestOverheadY = y;
-      lowestOverheadAt = { x, z };
+    const hit = hits[0]!.point;
+    // Lowest by **altitude off the planet**, not by world Y: two points across
+    // a 6 m opening on a 220 m sphere differ in world Y by more than the
+    // centimetres that separate one part of a crossbar from another, so a `y`
+    // comparison here would pick the wrong point on a tilted gate.
+    const radius = radiusOf(hit.x, hit.y, hit.z);
+    if (radius < lowestOverheadRadius) {
+      lowestOverheadRadius = radius;
+      lowestOverheadY = hit.y;
+      lowestOverheadAt = { x: hit.x, y: hit.y, z: hit.z };
     }
   }
+
+  // **Headroom is an altitude difference, not a `y` difference.** The radius of
+  // the lowest overhead point, less the radius of the ground a child stands on
+  // in the middle of the opening. Against the *terrain*, never against the
+  // arch's own base: an arch sunk into the paving takes its base down with it
+  // and a base-relative number cannot see that. Proved by sinking it.
+  const standingRadius = radiusOf(centre.x, groundY(centre.x, centre.z), centre.z);
+  const headroom =
+    lowestOverheadRadius < Infinity ? lowestOverheadRadius - standingRadius : Infinity;
 
   const forward = new Vector3(0, 0, 1).transformDirection(archNode.matrixWorld);
   const flat = Math.hypot(forward.x, forward.z);
 
   return {
+    headroom,
     forwardX: flat > 1e-6 ? forward.x / flat : 0,
     forwardZ: flat > 1e-6 ? forward.z / flat : 0,
     minX: box.min.x,

@@ -1356,10 +1356,18 @@ export interface ParkFacts {
      * `Infinity` if nothing overhangs the gateway at all, which is a gate with
      * no arch on it and which the invariant treats as a failure rather than as
      * generous headroom.
+     *
+     * **Taken whole from `measureGateArch`, never recomputed here.** It used to
+     * be `lowestOverheadY - terrainHeight(centreX, centreZ)` on this line and
+     * the identical expression in `scripts/probe-gate-pool.mts` — one number
+     * with two definitions, and a difference of world `y` is not a height on a
+     * sphere.
      */
     readonly headroom: number;
     /** Where that lowest overhead thing is, so a failure names a place. */
-    readonly lowestOverheadAt: { readonly x: number; readonly z: number } | null;
+    readonly lowestOverheadAt:
+      | { readonly x: number; readonly y: number; readonly z: number }
+      | null;
     /**
      * Which way the arch's lettered face looks, in world XZ. See
      * `scripts/gate-arch-measure.mts`: the gate's *shape* cannot answer this,
@@ -1971,9 +1979,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     // questions of the sixteen pool seeds and must get its answers the same
     // way. It imports nothing but `three`, so it is safe here: nothing in it
     // reads the seed at module load.
-    const measured = measureGateArch(scene);
+    const { terrainHeight: groundAt } = await import('../../src/world/terrain.ts');
+    const measured = measureGateArch(scene, groundAt);
     if (measured) {
-      const { terrainHeight: groundAt } = await import('../../src/world/terrain.ts');
       parkGateArch = {
         minX: measured.minX,
         maxX: measured.maxX,
@@ -1987,8 +1995,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         posts: measured.posts,
         // Against the terrain, never against the arch's own base: an arch
         // sunk into the paving takes its base down with it and a
-        // base-relative number cannot see that.
-        headroom: measured.lowestOverheadY - groundAt(measured.centreX, measured.centreZ),
+        // base-relative number cannot see that. `measureGateArch` owns the
+        // subtraction — see the field's docblock.
+        headroom: measured.headroom,
         lowestOverheadAt: measured.lowestOverheadAt,
         forwardX: measured.forwardX,
         forwardZ: measured.forwardZ,
