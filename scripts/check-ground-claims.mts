@@ -97,15 +97,20 @@ const park = buildHeadlessPark();
 const worldRegistry = park.world.groundClaims;
 
 // ---------------------------------------------------------------------------
-// Probe 2: exactly the production placers have claimed ground — the road
-// (step 1) and the two Rail Race rings (step 2) — and every claim the road
-// made is a corridor.
+// Probe 2: only declared production placers have claimed ground, in the order
+// they are declared to commit in, and every claim the road made is a corridor.
 //
-// **What this covers, honestly**: this is the whole list of placers, in the
-// order they commit, and it is deliberately exact. Step 1 asserted `[road]`
-// alone; step 2 widened it to the three below, on purpose, in its own diff.
-// The next placer widens it again the same way — a check that quietly accepts
+// **What this covers, honestly**: the list below is the whole roster of
+// placers. Step 1 asserted `[road]` alone; step 2 widened it to `[road,
+// railRace]`; the backtracking rework widened it to all fourteen. The next
+// placer widens it again the same way, by hand — a check that quietly accepts
 // more than it was written for is how the next agent inherits a false belief.
+//
+// Proved red both ways at the commit that widened it, against the canonical
+// seed's registry `[layout, cruiser, train, slide, crossings, pathGraph, road,
+// fountain, walls, trees, bushes, lamps, railRace]`: dropping `'lamps'` from
+// the roster fouls it as an undeclared placer, and swapping `'walls'` and
+// `'trees'` in the roster fouls `trees` as committing out of order.
 // ---------------------------------------------------------------------------
 // One rail race at two scales is one feature — see `src/world/railRace/feature.ts`.
 //
