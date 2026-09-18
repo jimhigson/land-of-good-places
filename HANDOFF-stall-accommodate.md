@@ -235,3 +235,31 @@ that is not mine**:
 - **No natural seed exercises the mechanism** — see the header of
   `stallsFeature.ts` for exactly why, which is a property of how each asker
   climbs rather than an accident.
+
+
+## A red on the base, found on the way (NOT mine — needs an owner)
+
+`pnpm run check` stops at **step 24 of 68, `check:slide-rider`**, on this
+branch **and identically on `origin/feat/procgen-on-sphere` (ae20b9fc)** —
+same clause, same numbers, to the digit:
+
+```
+check:slide-rider FAILED
+  - the child's body is 0.13% of the frame on beat 1's trackside camera
+    (ridden frame 240), against 0.40% required — 1 of 6 trackside samples are
+    under it. The trackside camera is the one that has to show her whole self;
+    if it cannot, nothing in this ride does
+```
+
+Nothing in this PR touches the slide, the ride cameras or the child model, and
+the base reproduces it exactly, so it is a **pre-existing red on the procgen
+branch**, not a regression here. It is reported rather than worked around:
+CLAUDE.md's zero-tolerance rule makes it somebody's next job, and the Overseer
+should give it one. It also **masks the other 44 chain steps**, which is the
+more urgent half — a chain that stops at step 24 has not run `check:park`,
+`check:hotel`, `check:ground-claims` or anything else after it on that branch.
+
+Steps 1..23 are green on this branch, `check:stall-shape` and
+`check:shop-spacing` among them. The 44 steps after `check:slide-rider` were
+run separately here so this PR's own work is not left unproven behind
+somebody else's failure.
