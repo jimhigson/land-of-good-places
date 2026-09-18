@@ -169,6 +169,18 @@ export function stallBuilder(
     const wanted = claimsFor(id, candidate);
     if (claims.blockers('stalls', wanted).length > 0) return false;
     if (wanted.some((claim) => keepClearOf.some((other) => shapesOverlap(claim.shape, other.shape)))) return false;
+    // **The registry cannot answer this one.** Every booth is a section of the
+    // one `stalls` feature, and the registry never refuses a feature by its
+    // own claims — a street may branch from itself — so `blockers` above is
+    // blind to the other seven booths. Their bodies are caught by the
+    // collision sweep below (their walls are registered; only this booth's
+    // have been withdrawn), but their **stand points** are not solid and
+    // would be walked onto silently. Asked explicitly.
+    for (const other of committed) {
+      if (other === id) continue;
+      const theirs = claimsFor(other, placementOf(other));
+      if (wanted.some((claim) => theirs.some((their) => shapesOverlap(claim.shape, their.shape)))) return false;
+    }
     for (const [px, pz] of bodyPoints(x, z, candidate.facing, box)) {
       if (!collision.isClearCircle(px, pz, box.wallHalfThickness)) return false;
     }
