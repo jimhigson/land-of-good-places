@@ -206,6 +206,42 @@ structured output**, never on a count and never on grepped text.
 
 Remember to `git worktree remove .claude/worktrees/fairy-poles-base` when done.
 
+### Result: clean, and the control held
+
+| | total | passed | failed | skipped |
+|---|---|---|---|---|
+| mine | 696 | 641 | 55 | 0 |
+| base `ae20b9fc` | 691 | 636 | 55 | 0 |
+
+- **0 failing names added, 0 removed** — the failing sets are identical by name,
+  compared as sets from JSON output.
+- **Total delta +5**, exactly one new test per seed file. This was written down
+  as a prediction *before* the base run finished, as a control: had the total
+  come out anything other than 691, something besides my invariant would have
+  changed the suite's shape and that would have needed chasing first.
+- **0 skipped on both sides.** Worth checking separately — the silent-skip
+  failure mode hides behind a healthy fail count and the tell is the *pass*
+  count, not the fail count.
+- My invariant was confirmed present in the **passed** list by name on all five
+  seed files, rather than inferred from the absence of a failure. An invariant
+  that never ran would also produce no failure.
+
+### The coverage line on the five CI seeds
+
+| seed | walls | trees | bushes | lamps | poles | strings |
+|---|---|---|---|---|---|---|
+| canonical 20260728 | 39 | 72 | 429 | 81 | 10 | 10 |
+| 11 | 26 | 72 | 159 | 88 | 10 | 10 |
+| 24 | 34 | 72 | 497 | 81 | 10 | 10 |
+| 131 | 33 | 72 | 182 | 69 | **8** | **6** |
+| 326 | 46 | 72 | 533 | 77 | 10 | 10 |
+
+All five CI seeds have fairy lights; all five had none before.
+
+**Seed 131 is the most informative gateway case so far**: 6 strings against 8
+poles. One gap in a ring of 8 would leave 7 strings, so 6 means **two separate
+gaps** — two non-adjacent poles skipped where spurs cross the verge.
+
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
 - `test:procgen` name-diff against the base (base has 55 known failures).
