@@ -179,7 +179,7 @@ export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims)
       `world-solve: seed=${PARK_SEED} increments=${stats.increments} refusals=${stats.refusals} ` +
         `accommodations=${stats.accommodations}/${stats.accommodationRefusals}-refused forgone=${stats.forgone} ` +
         `unwinds=${stats.unwinds} trees=${trees.length} bushes=${bushes.length} walls=${walls.filter(Boolean).length}/${walls.length} ` +
-        `lamps=${lamps.filter((l) => l !== 'forgone').length}/${lamps.length} poles=${poles.filter(Boolean).length}\n`,
+        `lamps=${lamps.filter((l) => l !== 'forgone').length}/${lamps.length} poles=${poles.reduce((n, chain) => n + chain.slots.filter(Boolean).length, 0)}/${poles.reduce((n, chain) => n + chain.slots.length, 0)} chains=${poles.length}\n`,
     );
   } catch {
     // no stderr in a browser
