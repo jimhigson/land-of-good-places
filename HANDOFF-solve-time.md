@@ -74,6 +74,44 @@ check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 253/2
 **97.8% of seed 7's 1234.6 s is the train's rail search**, which is the thing
 the boundary scan was inside.
 
+### `check:every-seed-builds`, the whole thing, on the branch
+
+Quoted off the screen. **All sixteen seeds, 299.7 s against the workflow's
+25-minute cap** — and taken on a box whose load average was 15–40, with four
+other agents' park builds running, so it is a ceiling rather than a best case.
+
+```
+  seed   0: built      14.4s  19/19 attractions … 254/254 waypoints connected. All six invariants hold.
+  seed   1: built       8.4s  … 228/228          seed   2: built      14.1s  … 233/233
+  seed   3: built      30.7s  … 237/237          seed   4: built      59.5s  … 237/237
+  seed   5: built        12s  … 242/242          seed   6: built       8.3s  … 230/230
+  seed   7: built       277s  … 253/253          seed   8: built      10.7s  … 278/278
+  seed   9: built       8.2s  … 235/235          seed  10: built         8s  … 216/216
+  seed  11: built       8.9s  … 308/308          seed  12: built       7.1s  … 275/275
+  seed  13: built       5.3s  … 246/246          seed  14: built       8.4s  … 214/214
+  seed  15: built      15.8s  … 263/263
+  every seed: built well? decision-zero=0 rung-fired=0
+
+check:every-seed-builds: built 16/16; by class: none unbuilt
+check:every-seed-builds OK — 16 seed(s) swept; 16 build, 0 do not, all within
+the baseline … Every swept seed builds. 299.7 s.
+```
+
+This **is** `LGP_SEED=n pnpm run check:park` on 0..15 — the script runs exactly
+that, one process each, and the counts above are its output.
+
+### Per-seed, before and after
+
+| seed | base | with the fix | |
+|---|---|---|---|
+| 3 | 119.4 s | 30.7 s | 3.9× |
+| 4 | 232.1 s | 59.5 s | 3.9× |
+| 7 | 1234.6 s (solo) | 277 s | 4.5× |
+
+Base seeds 3 and 4 measured the same way (`check:every-seed-builds` with
+`LGP_SEEDS=3,4,7`); seed 7's base is the solo `check:park` quoted above, which
+is the kinder of the two measurements for the base.
+
 ## Determinism: the park is unchanged, not merely deterministic
 
 `scripts/park-digest.mts`, canonical seed, base worktree vs this branch —
@@ -98,6 +136,22 @@ nothing announced when it stopped being.
       five profiles, and the comparison watched go red against a mutated
       reference (`scripts/_probe-boundary-exact.mts`, untracked)
 - [x] canonical park digest unchanged against the base
-- [ ] before/after per-seed timings for seeds 3, 4, 7
-- [ ] `check:every-seed-builds` green end to end inside 25 min
-- [ ] `check:park` 0..15, `test:procgen` name-diff, `check:park-boot`
+- [x] before/after per-seed timings for seeds 3, 4, 7
+- [x] `check:every-seed-builds` green, 16/16, 299.7 s
+- [x] `check:park-boot passed`
+- [ ] `test:procgen` name-diff against the base (base has 55 known failures)
+- [ ] PR against `feat/procgen-on-sphere`
+
+## For whoever takes this over
+
+Worktrees: `.claude/worktrees/solve-time` (the branch) and
+`.claude/worktrees/solve-time-base` (a detached checkout of
+`origin/feat/procgen-on-sphere`, purely for before/after measurement — remove
+it when done). Untracked probes in `scripts/`:
+`_probe-solve-time.mts` (drive the plan, print slow turns, stop after
+`LGP_PROBE_MS`) and `_probe-boundary-exact.mts` (the bit-identity control,
+`--mutate` to watch it fail).
+
+**The box is shared.** Load average ran 15–40 with four other agents building
+parks throughout. Kill your own node by PID, matched on working directory
+(`lsof -a -p $p -d cwd`), never `pkill -f`.

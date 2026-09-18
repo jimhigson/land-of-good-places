@@ -12,10 +12,24 @@ name: Every seed builds
 # ## Why this is its own workflow rather than a step in `checks.yml`
 #
 # The same reason as `swept-bus.yml` and `coplanar.yml`: `checks.yml` last ran
-# 25m56s against its own 30-minute cap, and this builds sixteen parks (measured
-# locally: ~10 s a seed on a 14-core Mac, ~65 s wall on 4 lanes; expect several
-# minutes on a runner). A job killed by `timeout-minutes` reports as `cancelled`
-# — nothing goes red — which is how a deploy was lost on 29 August.
+# 25m56s against its own 30-minute cap, and this builds sixteen parks. A job
+# killed by `timeout-minutes` reports as `cancelled` — nothing goes red — which
+# is how a deploy was lost on 29 August.
+#
+# **The cost, re-measured 18 September 2026** (the line that stood here — "~10 s
+# a seed on a 14-core Mac, ~65 s wall on 4 lanes" — was out by two orders of
+# magnitude, and a stale measurement is the reason nobody expected this job to
+# reach its cap): **299.7 s wall on 4 lanes on a 14-core Mac, on a box carrying
+# four other agents.** Fifteen seeds come in at 5–60 s; **seed 7 is 277 s on its
+# own** and is the critical path, because its railway dead-ends and the driver
+# walks six train attempts against each of six cruiser attempts before reaching
+# decision zero. A runner is roughly 3–5× slower than this box.
+#
+# Before the boundary-distance fix of the same day the same sweep was
+# **1538 s** — past this cap, which is what was actually happening when CI
+# reported `cancelled` at 24m57s with seed 7 unfinished. If this job starts
+# approaching the cap again, profile before adding minutes: last time 80.7% of
+# the whole solve was one call site.
 #
 # ## This must be made a required status check on `main`
 #
