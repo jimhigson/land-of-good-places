@@ -436,7 +436,7 @@ function placeTracksideEye(
 ): PlacedEye {
   // Where she will be, and which way she will be lying, across the beat — one
   // sweep, reused by every candidate.
-  const riders: { at: Vector3; axis: Vector3; right: Vector3; up: Vector3 }[] = [];
+  const riders: { at: Vector3; axis: Vector3 }[] = [];
   for (let i = 0; i <= BEAT_SAMPLES; i += 1) {
     const t = from + ((to - from) * i) / BEAT_SAMPLES;
     const at = curve.pointAt(t, new Vector3()).clone();
@@ -445,7 +445,7 @@ function placeTracksideEye(
     if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
     right.normalize();
     const up = new Vector3().crossVectors(right, tangent).normalize();
-    riders.push({ at, axis: riderAxisAt(tangent, up, new Vector3()), right, up });
+    riders.push({ at, axis: riderAxisAt(tangent, up, new Vector3()) });
   }
 
   // **Two questions, in order, and the order is the point.** An eye that hides
