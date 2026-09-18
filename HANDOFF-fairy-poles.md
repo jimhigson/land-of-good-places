@@ -351,6 +351,44 @@ directly by the builder and never reaches `forgo()`.
 exactly but is *inferred from it*, not independently measured. Everything else
 in the table above was read off the world-phase summary in each worktree.
 
+## Gate 4
+
+### `check:swept-bus` — PASS
+
+Exit 0, 215.3 s, **10 of 10** `PARK_SEED_POOL` seeds built and swept, both
+controls held (feet-only vs drawn post differed on 0 of 10; bus lifted 200 m
+read zero everywhere).
+
+The script warns that a zero at `POST_STEP=0.2 m` is a **lower bound** and must
+be re-run at 0.02 m *if the supports or the road have moved*. **They have not.**
+The seed-8 digest comparison against base lists every group whose hash changed:
+`(unnamed)`, `fairy-bulbs`, `lamp-bulbs`, `lamp-ground-glow`,
+`living-flower-{heads,petals,stems}`, `wall-collars`, `wall-finials`,
+`world-trace` — **no `railRace` group appears**, so the rail race's geometry is
+byte-identical between base and this branch. The caveat does not bite.
+
+### `check:coplanar` — RED, 19 NEW findings, none of them fairy
+
+Exit 1. Classified:
+
+- **12** rail-race `finish-rainbow-leg-*` pairs, **2** rail-race rails
+- **5** others: `stone-walls`/`stone-walls`, `path-kerb`/`path-surface`,
+  `fountain`/`path-surface`, `entrance-gateway-path`/`entrance-road-kerb`,
+  two `entrance-door-*`/`terrain`, `ear-l`/`ear-r`
+
+**Zero involve `fairy-pole-*`, `fairy-string-*`, `fairy-bulbs`, or any lamp,
+wall or flower** — i.e. nothing this diff adds or moves.
+
+**A trap worth recording**: `grep -c "^NEW:"` returned **0** because the lines
+are indented two spaces. Nineteen findings nearly got reported as none. A scan
+returning fewer findings than expected is a result to explain, never to accept
+— CLAUDE.md says exactly this and it still very nearly worked.
+
+**Name-matching is not evidence**, and the rail race *is* downstream of
+`fairyLights` in the world-phase order, so it could in principle have moved. So
+`check:coplanar` is being run on the **base worktree** and the NEW sets
+compared. Any finding present on mine and absent on base is mine.
+
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
 - `test:procgen` name-diff against the base (base has 55 known failures).
