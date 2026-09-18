@@ -765,6 +765,21 @@ export interface ParkFacts {
   readonly climbableTrees: readonly ClimbableTreeFact[];
   readonly lamps: readonly (readonly [number, number])[];
   /**
+   * The fairy-light rig round the plaza, **counted off the drawn scene** —
+   * the `fairy-pole-*` and `fairy-string-*` meshes `FairyLights.ts` actually
+   * put in the world, not the decision list the builder produced.
+   *
+   * It is counted rather than re-derived because the bug it exists for was
+   * invisible to every other kind of check: the ring's radius had drifted onto
+   * the main loop's paving, every pole was legitimately skipped for standing
+   * on a path, and the park drew **none at all** — a correct generator
+   * producing nothing, which no rule-reading assertion could have seen.
+   *
+   * `strings` matters on its own: a pole with no neighbour carries no cable
+   * and no bulbs, so poles alone do not mean a child sees any lights.
+   */
+  readonly fairyLights: { readonly poles: number; readonly strings: number; readonly slots: number };
+  /**
    * The early, conservative reservation `bridgeKeepout.ts` computes for
    * every railway crossing (`train/bridgeFootprint.ts`'s `planConservative`
    * — the same thing `Scenery.ts` and `LampPosts.ts` both ask
@@ -3568,6 +3583,19 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       }
     }
   }
+  // The fairy-light rig, counted off the scene it drew. `FAIRY_POLE_COUNT` is
+  // imported for the denominator only — "how many slots were offered" is not
+  // the measurement, it is the context for it; the numerators are meshes.
+  const { FAIRY_POLE_COUNT } = await import('../../src/world/FairyLights.ts');
+  const fairyLightsDrawn = ((): ParkFacts['fairyLights'] => {
+    let poles = 0;
+    let strings = 0;
+    world.fairyLights.group.traverse((object) => {
+      if (object.name.startsWith('fairy-pole-')) poles += 1;
+      else if (object.name.startsWith('fairy-string-')) strings += 1;
+    });
+    return { poles, strings, slots: FAIRY_POLE_COUNT };
+  })();
 
   // The bus's run, from the same owners `ArrivalSequence.placeBus` and
   // `check:swept-bus` read: it drives the road's arc from `entranceBusArriveAt()`
@@ -3623,6 +3651,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     bushes,
     climbableTrees,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
+    fairyLights: fairyLightsDrawn,
     bridgeReservations,
     bridgeParapetRings,
     maxParapetHeight,
