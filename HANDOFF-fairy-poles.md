@@ -518,6 +518,54 @@ sides and a bare name diff reads "identical". Vitest reports one instance per
 `ancestorTitles.concat(title)` — seed included — and then two extra instances
 show up as two extra keys.
 
+## A build order here is a PRECEDENCE order, not a completion order
+
+**This is the most useful thing learned in this work, and every wrong theory
+about the bush loss rested on not knowing it.**
+
+`ParkSolve` is a **round-robin**: `nextRunnable()` rotates a cursor and a
+builder is gated **only by the `deps` it declares**. The list order in
+`solveWorldPhase` sets *precedence* — who is asked to accommodate whom — it does
+**not** mean one feature finishes before the next begins.
+
+So `deps: ['fountain']` on `fairyPoleBuilder` meant poles began claiming ground
+as soon as the fountain was done, **interleaved with the walls, the trees and
+the bushes**. Honest when the feature was ten poles in the plaza verge; false
+the moment it spanned the park, with nothing announcing the change.
+
+The tell was that **nothing was refused**. Accommodations went *down*, not up;
+unwinds were 0; the layout was proved unmoved three separate ways. An
+under-declared builder does not displace anything — it simply **gets there
+first**, which looks like no mechanism at all.
+
+Bisected to be certain, same build, one env flag apart:
+
+```
+poles disabled: bushes=182 walls=33/38   <- byte-identical to base 881cb158
+poles enabled:  bushes=177 walls=32/37
+```
+
+Fixed by declaring the real dependency,
+`['fountain', 'walls', 'trees', 'bushes']` — where the driver can enforce it
+rather than where somebody has to remember it.
+
+### The same shape in three other builders — reported, not fixed
+
+| builder | declared deps | gap |
+|---|---|---|
+| `fountain` | `[]` | none (first, single increment) |
+| `walls` | `[]` | **no `fountain`** |
+| `trees` | `['walls']` | **no `fountain`** |
+| `bushes` | `['walls', 'trees']` | **no `fountain`** |
+| `lamps` | `['walls','trees','bushes','fountain','fairyLights']` | fully declared |
+| `fairyLights` | `['fountain','walls','trees','bushes']` | fully declared |
+
+Walls, trees and bushes can race the fountain's basin claim. Low risk today —
+the fountain is one increment and first in the list — but it is exactly the
+latent shape this bug had. Not fixed here: changing another builder's deps
+re-rolls parks on seeds nobody has looked at, and a fairy-lights PR is the
+wrong place for it.
+
 ### Round-2 gates — ALL must be re-run on the rebased base
 
 ## PR raised: #677 against `feat/procgen-on-sphere`
