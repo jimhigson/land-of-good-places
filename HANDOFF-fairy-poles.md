@@ -48,12 +48,74 @@ Seed 0 after: `poles drawn 10/10, strings drawn 10 | verge inner 9.40 outer
 The collider is unchanged and was already there: `collision.addCircle(x, z,
 POLE_RADIUS)` per drawn pole.
 
+**Model: Opus 5 (1M context)**, the Engineer default; nobody chose otherwise
+for this task.
+
+## The invariant (commit 2 on the branch)
+
+`everyScatteredFeaturePlacesSomething` in `test/procgen/invariants.ts`, first
+in the `INVARIANTS` list. It covers the **class**, not just the fairy poles:
+the five world-phase features that scatter individually-`optional` things and
+so can be forgone down to nothing — walls, trees, bushes, lamps, fairy poles —
+plus a sixth clause for **fairy strings**, because poles are not lights (a
+cable needs two *adjacent* poles, so a ring of isolated posts draws nothing
+while the pole count looks healthy).
+
+Thresholds are deliberately the weakest honest ones, "at least one". A real
+minimum count would be the suite measuring the generator's own target rather
+than the park. What is refused is **silence**, not sparseness — the real
+numbers go to the stderr coverage line on every run either way.
+
+`ParkFacts.fairyLights` counts `fairy-pole-*` / `fairy-string-*` **meshes off
+the drawn scene**, not the decision list that produced them.
+
+### Proved red, and the geometry it was proved against
+
+Mutation: `fairyRingRadius()` forced to `return 13.5` (the old literal).
+Park geometry at the time: `PLAZA.radius 9.40`, `RING_RADIUS 14.9`,
+`MAIN_LOOP_WIDTH 3.6`, so the verge is `9.40..13.10` and the loop's inner
+paving starts at 13.10. Probe under the mutation:
+`seed 0: poles drawn 0/10, strings drawn 0`.
+
+```
+  everyScatteredFeaturePlacesSomething seed 20260728: walls 39, trees 72,
+    bushes 429, lamps 82, fairy poles 0, fairy strings 0 (out of 10 slots)
+ x every scattered feature actually puts something in the park
+AssertionError: seed 20260728: the park has 0 fairy poles. ...
+AssertionError: seed 20260728: the park has 0 fairy strings. ...
+ Test Files  1 failed (1)
+      Tests  1 failed | 98 skipped (99)
+```
+
+Real numbers, no `NaN`/`Infinity`. Mutation reverted; same command green:
+
+```
+  everyScatteredFeaturePlacesSomething seed 20260728: walls 39, trees 72,
+    bushes 429, lamps 81, fairy poles 10, fairy strings 10 (out of 10 slots)
+      Tests  1 passed | 98 skipped (99)
+```
+
+Note the stderr line is visible **without** `--reporter=verbose` — confirmed by
+running it, not assumed.
+
+**Lamps 82 -> 81 on the canonical seed** is expected and is the only knock-on:
+the ten poles now claim ground, and one lamp slot that used to fit no longer
+does. Nothing else moved (walls 39, trees 72, bushes 429 unchanged).
+
+`tsc --noEmit` and `typecheck:test` both exit 0.
+
 ## Still to do
 
-- The invariant (`test/procgen/invariants.ts`) covering the whole class of
-  features that can silently place zero of themselves.
-- Pole counts + `check:park` on seeds 0..15.
+- Pole counts per seed 0..15 (probe running; `scripts/_probe-fairy.mts`,
+  untracked, prints BEFORE(13.5) and AFTER off the same built park).
+- `LGP_SEED=n pnpm run check:park` on 0..15.
 - `test:procgen` name-diff against the base (base has 55 known failures).
-- Deliberate red proof of the new invariant.
-- Determinism, two processes.
-- Screenshot of the lit park for Jim.
+- Determinism, two processes on a changed seed.
+- Screenshot of the lit park for Jim (needs the browser — ask the Overseer).
+
+## This worktree's CLAUDE.md is newer than the shared checkout's
+
+It adds rules worth knowing: **never `git stash`** (shared across worktrees);
+`pnpm run check:coplanar` and `pnpm run check:swept-bus` are their own
+workflows and must be run before pushing; `fnm use --install-if-missing` reads
+`.node-version` and nothing does it for you.
