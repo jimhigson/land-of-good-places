@@ -48,7 +48,6 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   "castle.roof|the-big-building-inside/building-shell/building-shell-floor-2/deck-2|the-big-building-inside/building-shell/building-shell-floor-2/lift-alcove/hotel.liftCar/lift-car-floor": { area: 5.2882, seams: 1, fighting: true },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.wall|the-land-hotel-inside/hotel:hotel.lobby/hotel.wall": { area: 4.4500, seams: 3, fighting: true },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.artwork/<Mesh:BoxGeometry>/<Mesh:BoxGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.wall": { area: 3.7500, seams: 1, fighting: false },
-  "garden|garden/path-surface|park-train/train-track/track-ballast": { area: 3.0323, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.column/<Mesh:CylinderGeometry>/<Mesh:CylinderGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.column/<Mesh:CylinderGeometry>/<Mesh:CylinderGeometry>": { area: 3.0179, seams: 1, fighting: false },
   "castle.roof|the-big-building-inside/building-shell/building-shell-floor-2/castle-decor-2/castle-roof-burrows-2/castle-roof-burrow-mounds-2|the-big-building-inside/building-shell/building-shell-floor-2/castle-decor-2/castle-roof-burrows-2/castle-roof-burrow-mouths-2": { area: 2.9668, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.artwork/<Mesh:BoxGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.artwork/<Mesh:PlaneGeometry>": { area: 2.2800, seams: 1, fighting: false },
@@ -153,7 +152,6 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   "garden|park-train/train-carriage-2/<Mesh:BoxGeometry>|park-train/train-carriage-2/<Mesh:BoxGeometry>": { area: 0.0616, seams: 2, fighting: true },
   "garden|park-train/train-carriage-1/<Mesh:BoxGeometry>|park-train/train-carriage-1/<Mesh:BoxGeometry>": { area: 0.0616, seams: 2, fighting: true },
   "garden|park-train/train-carriage-0/<Mesh:BoxGeometry>|park-train/train-carriage-0/<Mesh:BoxGeometry>": { area: 0.0616, seams: 2, fighting: true },
-  "garden|scenery/wooden-walls/<Mesh:BoxGeometry>|scenery/wooden-walls/<Mesh:BoxGeometry>": { area: 0.0588, seams: 1, fighting: true },
   "hotel.ocean|the-land-hotel-inside/hotel:hotel.ocean/hotel.sconce/<Mesh:CylinderGeometry>|the-land-hotel-inside/hotel:hotel.ocean/hotel.wall": { area: 0.0566, seams: 1, fighting: false },
   "hotel.garden|the-land-hotel-inside/hotel:hotel.garden/hotel.artwork/<Mesh:BoxGeometry>/<Mesh:BoxGeometry>|the-land-hotel-inside/hotel:hotel.garden/hotel.sconce/<Mesh:BoxGeometry>/<Mesh:BoxGeometry>": { area: 0.0550, seams: 1, fighting: true },
   "hotel.suite|the-land-hotel-inside/hotel:hotel.suite/hotel.breakfastTable/table-top|the-land-hotel-inside/hotel:hotel.suite/hotel.gameBoy/gameboy-body/<Mesh:BufferGeometry>": { area: 0.0538, seams: 1, fighting: false },
@@ -233,7 +231,6 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   // lands.** This entry records that honestly rather than hiding it: the
   // ratchet exists so a fault cannot worsen *silently*, and nothing about this
   // is silent.
-  "garden|garden/boundary-wall/boundary-blocks|park-train/rail-fence/<Mesh:BoxGeometry>": { area: 0.2802, seams: 2, fighting: false },
   "garden|railRace/railRace:cart/hopper/<Mesh:BufferGeometry>|railRace/railRace:cart/pet-seat/<Mesh:BufferGeometry>": { area: 0.0504, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.right/stair-right-stringer/<Mesh:BufferGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.right/stair-right-tread/<Mesh:BufferGeometry>": { area: 0.0503, seams: 2, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.left/stair-left-stringer/<Mesh:BufferGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.left/stair-left-tread/<Mesh:BufferGeometry>": { area: 0.0503, seams: 3, fighting: false },
@@ -255,7 +252,6 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.right/stair-right-stringer|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.right/stair-right-tread": { area: 0.0164, seams: 1, fighting: true },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.wall|the-land-hotel-inside/hotel:hotel.lobby/hotel:lobby/overhang/hotel.landingNosing/landing-nose": { area: 0.0163, seams: 1, fighting: true },
   "garden|facePaintStall/<Group>/<Mesh:CylinderGeometry>|facePaintStall/<Group>/<Mesh:RoundedBoxGeometry>": { area: 0.0162, seams: 2, fighting: false },
-  "garden|railRace/railRace:race-ring/railRace:sleepers|railRace/railRace:walk-past-ring/<Mesh:BoxGeometry>": { area: 0.0149, seams: 1, fighting: false },
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/shop:toy/shop-stage:toy/kiosk:toy/stall-dress:toy/<Group>/<Mesh:BoxGeometry>|the-big-building-inside/building-shell/building-shell-floor-0/shop:toy/shop-stage:toy/kiosk:toy/stall-dress:toy/<Group>/<Mesh:BoxGeometry>": { area: 0.0126, seams: 1, fighting: true },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.right/stair-right-newel/<Mesh:BufferGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel:lobby/overhang/hotel.bridgeRailing/bridge-rail-plinth/<Mesh:BufferGeometry>": { area: 0.0113, seams: 1, fighting: false },
   "hotel.lobby|the-land-hotel-inside/hotel:hotel.lobby/hotel.grandStaircase.left/stair-left-newel/<Mesh:BufferGeometry>|the-land-hotel-inside/hotel:hotel.lobby/hotel:lobby/overhang/hotel.bridgeRailing/bridge-rail-plinth/<Mesh:BufferGeometry>": { area: 0.0113, seams: 1, fighting: false },
@@ -316,7 +312,6 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   "garden|keychainShop/<Group>/keychain.rumi/<Group>/<Mesh:SphereGeometry>/<Mesh:SphereGeometry>|keychainShop/<Group>/keychain.rumi/<Group>/<Mesh:SphereGeometry>/<Mesh:SphereGeometry>": { area: 0.0003, seams: 7, fighting: false },
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/shop:toy/shop-stage:toy/shop-detail:toy/biscuit/<Group>/<Mesh:ExtrudeGeometry>|the-big-building-inside/building-shell/building-shell-floor-0/shop:toy/shop-stage:toy/shop-detail:toy/biscuit/<Group>/<Mesh:ExtrudeGeometry>/<Mesh:ExtrudeGeometry>": { area: 0.0003, seams: 2, fighting: false },
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/shop:hat/shop-stage:hat/shop-detail:hat/hat.ripikaHat/hat.ripikaHat:fit/<Mesh:BufferGeometry>|the-big-building-inside/building-shell/building-shell-floor-0/shop:hat/shop-stage:hat/shop-detail:hat/hat.ripikaHat/hat.ripikaHat:fit/<Mesh:BufferGeometry>": { area: 0.0003, seams: 1, fighting: false },
-  "garden|railRace/railRace:walk-past-ring/railRace:trestle-branches-lower|railRace/railRace:walk-past-ring/railRace:trestle-branches-upper": { area: 0.0003, seams: 2, fighting: false },
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/shop:hat/shop-stage:hat/shop-detail:hat/hat.cap/hat.cap:fit/<Mesh:BufferGeometry>|the-big-building-inside/building-shell/building-shell-floor-0/shop:hat/shop-stage:hat/shop-detail:hat/hat.cap/hat.cap:fit/<Mesh:BufferGeometry>": { area: 0.0002, seams: 3, fighting: false },
   "castle.hall|the-big-building-inside/building-shell/building-shell-floor-1/lift-alcove/hotel.liftCar/lift-car|the-big-building-inside/building-shell/building-shell-floor-1/lift-alcove/hotel.liftCar/lift-car-rail": { area: 0.0001, seams: 1, fighting: false },
   "castle.mall|the-big-building-inside/building-shell/building-shell-floor-0/lift-alcove/hotel.liftCar/lift-car|the-big-building-inside/building-shell/building-shell-floor-0/lift-alcove/hotel.liftCar/lift-car-rail": { area: 0.0001, seams: 1, fighting: false },
