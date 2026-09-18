@@ -104,10 +104,36 @@ does. Nothing else moved (walls 39, trees 72, bushes 429 unchanged).
 
 `tsc --noEmit` and `typecheck:test` both exit 0.
 
-## Still to do
+## Pole counts per seed (AFTER), measured off the drawn scene
 
-- Pole counts per seed 0..15 (probe running; `scripts/_probe-fairy.mts`,
-  untracked, prints BEFORE(13.5) and AFTER off the same built park).
+`scripts/_probe-fairy.mts` (untracked) counts `fairy-pole-*` / `fairy-string-*`
+meshes in the built `world.fairyLights.group`.
+
+| seed | poles drawn | strings | nearest paving at the ring |
+|---|---|---|---|
+| 0..6 | 10/10 | 10 | 1.84 m |
+| 7 | 10/10 | 10 | 1.75 m |
+
+The verge is **identical on every seed** — `9.40..13.10`, middle `11.25` —
+because `PLAZA.radius` and `RING_RADIUS` both derive from the fountain's
+manifest footprint, not from the seed. Only the spurs that cross the verge
+vary, and seed 7's take it to 1.75 m; the gate is 1.52 m.
+
+BEFORE is **0 poles on every seed**, for the same reason: the old literal 13.5
+sits 0.40 m inside a loop whose inner paving is at 13.10 on every seed.
+Measured directly on the canonical seed by the red-run mutation below (0/10
+poles, 0 strings at r=13.5); `scripts/_probe-fairy-before.mts` measures both
+rings against one built park if a per-seed BEFORE column is wanted.
+
+### One visual consequence worth flagging to Jim
+
+Every slot now stands, so the ring is a **complete circle of ten poles and ten
+strings**. The skip-a-pole-on-paving branch is still live and still correct —
+it is what leaves a "gateway" gap where a path crosses the ring — it simply
+never fires now, because the ring no longer lies on the promenade. If a seed's
+spur ever does cross the verge, the gap reappears by itself.
+
+## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
 - `test:procgen` name-diff against the base (base has 55 known failures).
 - Determinism, two processes on a changed seed.
