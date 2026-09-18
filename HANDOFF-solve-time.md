@@ -53,18 +53,51 @@ CI's slower cores and 4-way lane contention are what made it visible.
 
 ## Measurements
 
-Throughput probe (pieces yielded by the driver in a fixed 90 s), seed 7:
+Throughput probe — driver pieces yielded in a fixed 90 s, seed 7
+(`LGP_SEED=7 LGP_PROBE_MS=90000 … scripts/_probe-solve-time.mts`, untracked):
 
 | build | turns in 90 s |
 |---|---|
 | base `ae20b9fc` | 3,007,377 |
+| with the fix | 11,280,080 |
 
-(to be filled in)
+**3.75×.**
+
+Seed 7, base, one `check:park` process alone, quoted off the screen:
+
+```
+park-solve: seed=7 increments=58 refusals=42 retries=23 accommodations=0 unwinds=31 deepest-unwind=5 decision-zero=2 worst-attempt={"cruiser":5,"train":5,"layout":2}
+park-solve: seed=7 time/pieces layout=187ms/2429p cruiser=13344ms/2347637p train=1207376ms/35960103p slide=9636ms/755401p crossings=255ms/2054p pathGraph=1120ms/2129p road=0ms/0p
+check:park: 19/19 attractions route from the entrance, 0 rail crossing(s), 253/253 waypoints connected. All six invariants hold. 1234623 ms.
+```
+
+**97.8% of seed 7's 1234.6 s is the train's rail search**, which is the thing
+the boundary scan was inside.
+
+## Determinism: the park is unchanged, not merely deterministic
+
+`scripts/park-digest.mts`, canonical seed, base worktree vs this branch —
+identical on all four digests:
+
+```
+seed canonical: meshes=5536 park=a1b5c16077708bc0
+  trace a4e2cf23fc5b3676 (3 line(s))
+  plan-trace 530be81588feb072 (15 line(s))
+  world-trace 69f4ec1f24c20397 (648 line(s))
+```
+
+**The handoff's recorded canonical hash `74191f6d7f3f5257` is stale**: the base
+commit `ae20b9fc` itself prints `a1b5c16077708bc0`, measured in a clean
+worktree of `origin/feat/procgen-on-sphere`. The number was right once and
+nothing announced when it stopped being.
 
 ## Status
 
 - [x] root cause found and profiled
-- [ ] fast exact boundary implemented
+- [x] fast exact boundary implemented; bit-identical over 244,205 points on
+      five profiles, and the comparison watched go red against a mutated
+      reference (`scripts/_probe-boundary-exact.mts`, untracked)
+- [x] canonical park digest unchanged against the base
 - [ ] before/after per-seed timings for seeds 3, 4, 7
-- [ ] determinism (canonical hash `74191f6d7f3f5257`), `check:park` 0..15,
-      `test:procgen` name-diff, `check:park-boot`
+- [ ] `check:every-seed-builds` green end to end inside 25 min
+- [ ] `check:park` 0..15, `test:procgen` name-diff, `check:park-boot`
