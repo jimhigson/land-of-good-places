@@ -125,6 +125,14 @@ wanted, it has to be re-taken with the machine to itself.
 
 I did **not** kill those processes: they are another agent's live work.
 
+**Proof that the slowdown is load and not a regression**, which is worth
+more than the caveat: seed 7's driver counts came out **42 refusals, 31
+unwinds, 2 decision zeros** — *exactly* the numbers `HANDOFF-backtracking.md`
+records for it. Same park, same search, same decisions; only the wall clock
+moved (1334 s here against 1003 s there). The driver's own counts are the
+load-independent measure of solve cost, and they are unchanged. Use those,
+not seconds, when comparing solve cost across agents.
+
 ## Measurements (re-taken at this head)
 
 Baseline sweep, `ae20b9fc` + nothing: **in progress**, table below filled as
