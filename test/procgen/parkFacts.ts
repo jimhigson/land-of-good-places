@@ -1580,14 +1580,26 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
      * differs by about 0.13 m out here, three times this clause's own
      * float32 slack.
      */
-    const ends = (mesh: InstancedMesh, i: number, ring: RailRaceRoute): { from: Vector3; to: Vector3 } => {
+    const ends = (
+      mesh: InstancedMesh,
+      i: number,
+      ring: RailRaceRoute,
+      at: number,
+    ): { from: Vector3; to: Vector3 } => {
       mesh.getMatrixAt(i, matrix);
       centre.setFromMatrixPosition(matrix);
       axis.setFromMatrixColumn(matrix, 1);
       return {
-        from: ring.chartOf(centre.clone().addScaledVector(axis, -0.5), new Vector3()),
-        to: ring.chartOf(centre.clone().addScaledVector(axis, 0.5), new Vector3()),
+        from: ring.unlean(at, centre.clone().addScaledVector(axis, -0.5), new Vector3()),
+        to: ring.unlean(at, centre.clone().addScaledVector(axis, 0.5), new Vector3()),
       };
+    };
+    /** Where a drawn trunk's top stands on the ring — the tree's one station. */
+    const stationOfTrunk = (legs: InstancedMesh, i: number, ring: RailRaceRoute): number => {
+      legs.getMatrixAt(i, matrix);
+      centre.setFromMatrixPosition(matrix);
+      axis.setFromMatrixColumn(matrix, 1);
+      return ring.stationOf(centre.clone().addScaledVector(axis, 0.5));
     };
     for (const [label, feature, ringRoute] of [
       ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute],
@@ -1621,9 +1633,13 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       // rebuilt from the drawn struts by that order, then run through the one
       // owner of what a support claims.
       for (let i = 0; i < legs.count; i += 1) {
-        const trunk = ends(legs, i, ringRoute);
-        const forkNodes = [ends(lower, 2 * i, ringRoute).to, ends(lower, 2 * i + 1, ringRoute).to];
-        const laneTops = [0, 1, 2, 3].map((lane) => ends(upper, 4 * i + lane, ringRoute).to);
+        // One station for the whole tree — see `RailRaceRoute.stationOf`. Per
+        // node, each of the seven would find a station of its own and the
+        // ring's curvature would read back as a bent tree.
+        const at = stationOfTrunk(legs, i, ringRoute);
+        const trunk = ends(legs, i, ringRoute, at);
+        const forkNodes = [ends(lower, 2 * i, ringRoute, at).to, ends(lower, 2 * i + 1, ringRoute, at).to];
+        const laneTops = [0, 1, 2, 3].map((lane) => ends(upper, 4 * i + lane, ringRoute, at).to);
         struts += 7;
         fromDrawn.push(
           ...trestleClaims(

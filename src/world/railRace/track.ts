@@ -19,7 +19,7 @@ import { hazardTapeTexture } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
-import { placeOnSphere, terrainHeight, tiltToSphere } from '../terrain';
+import { terrainHeight, tiltToSphere } from '../terrain';
 import { distanceToPath } from '../pathGraph';
 import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
@@ -1496,7 +1496,6 @@ function cloneTrestleTree(tree: TrestleTree): TrestleTree {
 const barTilt = new Quaternion();
 const barOffset = new Vector3();
 const treeScratch = new Vector3();
-const treeSpin = new Quaternion();
 
 /**
  * Solves the tree for a foot at `(footX, footZ)` under the ring at `at` (a raw
@@ -1575,14 +1574,21 @@ function leanTrestleTree(
     route.lean(at, flat.forkNodes[half]!, into.forkNodes[half]!);
   }
   route.lean(at, flat.trunkTop, into.trunkTop);
-  // **The foot is put on the ground, not on the station's plane.** Every other
-  // node is a point in the air and wants the one rigid turn; the foot is the
-  // one node that has to touch the terrain it was found clear ground on, and
-  // the station's plane leaves the sphere behind by `u^2 / 2R` — up to 0.18 m
-  // out at the race ring's own half-span, which is a post visibly floating.
-  // `placeOnSphere` on a height-0 point is the identity, so this is exactly
-  // where `trestleSpots` found it.
-  placeOnSphere(flat.trunkFoot, 0, into.trunkFoot, treeSpin);
+  // **The foot goes through the same one turn as everything else**, and it
+  // still lands on the ground. It is worth knowing why, because the obvious
+  // worry is that a station's frame is a *plane* and the ground is a sphere, so
+  // a foot several metres out along that plane should hover by `u^2 / 2R`. It
+  // does not: the foot's chart height is `terrainHeight`, which already carries
+  // the cap's own drop over that same `u`, so the two cancel and the drawn foot
+  // sits on the terrain. Measured on the canonical seed rather than argued —
+  // see `scripts/_probe-feet.mts` in the branch's handoff.
+  //
+  // Leaning it any other way is what it cost to find that out: a foot placed by
+  // `placeOnSphere` while its trunk top was turned rigidly made the drawn tree
+  // stop being the inverse of the chart tree, and `railRaceSupportsAreClaimedAsDrawn`
+  // caught it immediately — a degenerate capsule in the registry against a
+  // 0.02 m leaning one read back off the mesh.
+  route.lean(at, flat.trunkFoot, into.trunkFoot);
   into.ground = flat.ground;
   return into;
 }

@@ -9366,22 +9366,22 @@ const railRaceTrestlesCarryEveryTrack: Invariant = (facts) => {
       );
     }
 
-    // The plane `forkPlan` is solved against, rebuilt from the built route the
-    // same way `track.ts` does — the lowest any lane ever gets, less BEAM_DROP.
-    // Sampled off `route` rather than re-deriving `UNDULATION_REACH`, so it is
-    // the ring that was actually built that answers.
-    let lowestRailY = Infinity;
-    {
-      const probe = new Vector3();
-      const SAMPLES = 720;
-      for (let lane = 0; lane < lanes; lane += 1) {
-        for (let k = 0; k < SAMPLES; k += 1) {
-          route.pointAt(lane, (k / SAMPLES) * route.length, probe);
-          lowestRailY = Math.min(lowestRailY, probe.y);
-        }
-      }
-    }
-    const beamY = lowestRailY - BEAM_DROP;
+    // **The plane `forkPlan` is solved against, asked of the built ring.**
+    //
+    // This took a global minimum of drawn world `y` over the whole lap, which
+    // was a flat-park reading: the ring is held a constant height above a
+    // sphere, so its world `y` falls 24 m from the park's pinch to its bulge
+    // and the lap's lowest point is simply its furthest-out one. A post at the
+    // pinch was then handed a *negative* height to solve from, `forkPlan`
+    // returned a negative fork, and `atan(spacing / negative)` gave a plan
+    // angle of about -90 deg — reported, honestly, as being 145 deg away from a
+    // perfectly ordinary 55 deg branch.
+    //
+    // The deck is a local, chart quantity: this bearing's own base, less how
+    // far the undulation can dig below it. The ring publishes that reach
+    // (`route.undulationReach`) because it is a bound the three harmonics never
+    // all reach at once, so sampling the built ring recovers a *shallower*
+    // number and not this one.
 
     const byLane = railCentreLinesByLane(ring);
     if (byLane.size !== lanes) {
@@ -9448,10 +9448,33 @@ const railRaceTrestlesCarryEveryTrack: Invariant = (facts) => {
       // Note "widest" is the branch carrying the **lower** lane. `angleOf`
       // measures from vertical, so a branch that has to climb further to a
       // higher lane makes a *smaller* angle, not a larger one.
-      const post = strutEnds(legs, trestle);
+      // **Angles are measured in the chart, because that is where the plan
+      // lives.** A drawn strut has the planet's own lean in it — 14 to 27 deg
+      // out here — so its angle from world `+Y` is its fork angle plus however
+      // far the ground tilts under it, and comparing that with `forkPlan` is
+      // comparing two different quantities. `route.chartOf` is the exact
+      // inverse of the one rigid turn `track.ts` drew the tree through, so it
+      // hands back the very tree the plan was solved for, read off the mesh.
+      //
+      // **One station for the whole tree.** A trestle is one cross-section, so
+      // its seven nodes share an arc length; letting each find its own (which
+      // is what `chartOf` does for a lone point) bends the tree by the ring's
+      // own curvature — measured at up to 0.08 m of spurious height per node.
+      // `stationOf` is asked of the trunk top, the one node standing on the
+      // centre line, where the projection cannot be ambiguous.
+      const at = route.stationOf(strutEnds(legs, trestle).top);
+      const chartEnds = (mesh: InstancedMesh, index: number): { foot: Vector3; top: Vector3 } => {
+        const { foot, top } = strutEnds(mesh, index);
+        return {
+          foot: route.unlean(at, foot, new Vector3()),
+          top: route.unlean(at, top, new Vector3()),
+        };
+      };
+      const post = chartEnds(legs, trestle);
+      const beamY = route.baseAt(at) - route.undulationReach - BEAM_DROP;
       const plan = forkPlan(beamY - post.foot.y, route.laneSpacing);
       const angleOf = (mesh: InstancedMesh, index: number): number => {
-        const { foot, top } = strutEnds(mesh, index);
+        const { foot, top } = chartEnds(mesh, index);
         const span = top.clone().sub(foot);
         return Math.atan2(Math.hypot(span.x, span.z), span.y);
       };

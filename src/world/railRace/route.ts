@@ -262,6 +262,7 @@ const _up = /* @__PURE__ */ new Vector3();
 const _out = /* @__PURE__ */ new Vector3();
 const _along = /* @__PURE__ */ new Vector3();
 const _chart = /* @__PURE__ */ new Vector3();
+const _station = /* @__PURE__ */ new Vector3();
 
 export class RailRaceRoute {
   /**
@@ -300,6 +301,18 @@ export class RailRaceRoute {
 
   /** Distance from the innermost lane's centre to the outermost lane's. */
   readonly laneSpan: number;
+
+  /**
+   * How far the undulation can carry a lane from its base, either way.
+   *
+   * The same {@link UNDULATION_REACH} `track.ts` solves the trestles' fork
+   * plane against, published on the ring so a measurement can ask the *built*
+   * object rather than importing the module (which pins the seed) or keeping a
+   * second copy of the number. It is a bound, not a maximum that is attained —
+   * the three harmonics do not peak together — so it cannot be recovered by
+   * sampling the built ring, which is exactly why it has to be published.
+   */
+  readonly undulationReach = UNDULATION_REACH;
 
   /** One lap, in metres of shared arc length. Identical on both rings. */
   readonly length = RING_PATH.length;
@@ -377,16 +390,50 @@ export class RailRaceRoute {
    * having to know the station first.
    *
    * A measurement holds a vertex or an instance matrix, not an arc length, so
-   * this finds the station the point belongs to ({@link RingPath.distanceNear},
-   * which is exact for a cross-section turned about the path's own normal
-   * plane) and then inverts the turn there. `terrain.ts`'s `unplaceFromSphere`
-   * is the general answer to a *different* question — where a plumb line from
-   * this point meets the ground — and differs from this by about 0.13 m out at
-   * the ring, which is more than a sleeper's own tolerance. Use whichever
-   * question you actually mean.
+   * this has to find the station the point belongs to before it can invert the
+   * turn there.
+   *
+   * **It searches in the chart, not in the drawn world, and that is the whole
+   * of the difficulty.** A drawn point stands up to twelve metres outside the
+   * centre line once the lean has pushed it out, and the ring follows a spline
+   * whose curvature varies — so the nearest point of the *curve* to it can
+   * belong to a different part of the loop altogether. Measured on the
+   * canonical seed: asking `distanceNear` of a drawn lane top answered 2.4 m of
+   * arc away from the trestle it belongs to, which unleant its four tops to
+   * heights up to 0.57 m wrong and made a perfectly well-built fork read as
+   * 2.3 deg off its plan. Unleaning at *any* station gives a chart point within
+   * a lane offset of the line, though, and at that range the projection is
+   * unambiguous — no lane sits further from the centre line than a fraction of
+   * the tightest bend. So: one guess, then three refinements in the chart,
+   * which is a fixed point rather than a limit and settles on the first.
    */
   chartOf(drawn: { x: number; y: number; z: number }, target: Vector3): Vector3 {
-    return this.unlean(RING_PATH.distanceNear(drawn.x, drawn.z), drawn, target);
+    return this.unlean(this.stationOf(drawn, target), drawn, target);
+  }
+
+  /**
+   * The arc length a drawn point belongs to — {@link chartOf}'s first half,
+   * exposed because a shape made of several nodes has **one** station and must
+   * be unleant at that one.
+   *
+   * Nearest-point-on-the-curve is the normal-plane condition, and on a curve
+   * whose bend tightens there can be more than one station whose normal plane
+   * holds a given point: an outer lane top is genuinely in two of them, and the
+   * nearest is not always the one it was authored at. So a trestle asks this of
+   * its **trunk top** — the one node that sits on the centre line itself, where
+   * the projection is unambiguous — and unleans the whole tree there, rather
+   * than letting each of its seven nodes find a station of its own and reading
+   * the ring's own curvature as a bent tree. Measured before that was done: up
+   * to 0.08 m of spurious height per node, which is eighty times the float32
+   * slack `railRaceSupportsAreClaimedAsDrawn` compares claims to.
+   */
+  stationOf(drawn: { x: number; y: number; z: number }, scratch = _station): number {
+    let at = RING_PATH.distanceNear(drawn.x, drawn.z);
+    for (let step = 0; step < 3; step += 1) {
+      this.unlean(at, drawn, scratch);
+      at = RING_PATH.distanceNear(scratch.x, scratch.z);
+    }
+    return at;
   }
 
   /** Brings any arc length into `[0, length)`. */
