@@ -613,6 +613,46 @@ removed the shared plane *"at its cause"*, when it had removed two thirds of
 one cause. The gate disagreeing with the commit message is the only reason I
 knew.
 
+## The extraction was NOT wired — review caught it, and my comments asserted it was
+
+The worst error on this branch. `fairyAnchorAt` and `fairySpan` were extracted
+as "the one owner", and then called **only from the test path**
+(`fairyOccupiedPoints`). The constructor went on re-implementing both from its
+own literals:
+
+| | guarded | drawn |
+|---|---|---|
+| bulbs per string | `BULBS_PER_STRING` | `const bulbsPerString = 9` |
+| sag | `CABLE_SAG` | `* 1.15` |
+| bulb drop | `BULB_DROP` | `-0.18` |
+| anchor drop | `ANCHOR_DROP` | `poleHeight - 0.25` |
+
+**They agreed only because the numbers had been copied.** Three docstrings on
+the diff asserted the opposite — "the drawing is built from the same calls, so
+a part cannot be guarded in one place and drawn in another" — and I reported it
+upward as done.
+
+The reviewer proved it by **mutation rather than by reading**: `CABLE_SAG = 3.0`
+moved the guarded cable 1.85 m while the drawing stayed at `1.15`. At committed
+values the disagreement is `0.000e+0`.
+
+Fixed by wiring the code to the promise. The proof, now on the **drawn**
+geometry:
+
+```
+CABLE_SAG 1.15 -> lowest drawn cable vertex y = -15.3704
+CABLE_SAG 3.0  -> lowest drawn cable vertex y = -17.0406   (moved 1.6702 m)
+```
+
+`tsc` then reported `bulbsPerString`, `scratchLean` and `up` as unused — **the
+compiler confirming the drawing no longer re-derives anything**, which is a
+better check than reading it.
+
+**The lesson is not "wire it up".** It is that *extracting* a shared owner and
+*consuming* it are two separate jobs, and doing the first while believing you
+have done both produces code that looks exactly like the fix. The only way to
+tell them apart is to move the shared value and watch the drawn thing move.
+
 ## Read the log's STRUCTURE before quoting any line from it
 
 Three separate misreadings of a log in one session, all the same shape — **a
