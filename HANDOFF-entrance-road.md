@@ -137,11 +137,17 @@ was that mistake). Instead:
 - **stream a line per finished job to stderr** with its wall time, so a slow
   run says which seed it is on and a timeout names it.
 
-The irreducible critical path afterwards is one seed-428 park build. Reducing
-*that* means changing how the driver answers a `pathGraph` refusal (the cheap
-decision is a different `crossings` decision — prove a site at the fouled rail
-distance — rather than re-rolling the whole railway), which is solver work that
-belongs with the backtracking/every-seed-builds engineer, not here.
+Two things still sit above that floor afterwards, and neither is fixed here:
+
+1. **Scheduling.** The queue dispatches in `PARK_SEED_POOL` order, so the
+   longest park goes almost last and 208 s of tail remains — see "Headroom"
+   below. Longest-first is the fix and is its own issue (the queue has no cost
+   hint to sort on).
+2. **The solver.** The floor itself is one seed-428 park. Lowering it means
+   changing how the driver answers a `pathGraph` refusal — the cheap decision
+   is a different `crossings` decision (prove a site at the fouled rail
+   distance) rather than re-rolling the whole railway — which belongs with the
+   backtracking/every-seed-builds engineer, not here.
 
 ## The control on the measurement
 
@@ -156,30 +162,27 @@ BASE seed=428 rc=0 elapsed=10s      # vs 185 s on this branch — 18.5x
 So seed 428 is not an inherently expensive park; it is one that the new driver
 solves the railway for five times instead of once.
 
-## Proofs
+## Proofs (local)
 
-`pnpm run check:entrance-road` on `fix/entrance-road`, quoted off the screen:
+`pnpm run check:entrance-road` on head `6cd4d7f4`, quoted off the screen:
 
 ```
-FULL rc=0 elapsed=221s        # 14 lanes on 14 cpus (this Mac)
+HEAD-FULL rc=0 elapsed=243s   # 14 lanes on 14 cpus (this Mac)
+LANES4    rc=0 elapsed=288s   # LGP_LANES=4, the CI-shaped run
 entrance road OK — the bus's swept body clears every trestle post along the
 whole 145.7 m road on all 10 pool seeds; the tightest anywhere is 6.05 m (seed 24)
 ```
 
-Per-park lines from that run (the new streaming output), all twenty:
+(An earlier `FULL rc=0 elapsed=221s` in this file was measured *before* the
+completeness-guard commit `81bfb286` and so was not of the merge candidate.
+`243s` replaces it, on the head. The `LGP_LANES=4` run is after that commit and
+stands.)
 
-```
-  [ 1/20] seed      131 control built in 13.7 s (13.7 s elapsed)
-  ...
-  [17/20] seed      274 control built in 46.3 s (46.3 s elapsed)
-  [18/20] seed      274 real    built in 46.6 s (46.7 s elapsed)
-  [19,20/20] seed  428 real + control — together, not one behind the other
-```
-
-Eighteen of twenty parks are done at 47 s; the whole wall clock is one seed-428
-park, which is exactly the intended shape. The verdict table is unchanged from
-before the fix: 0 posts in the bus on every seed, control non-zero on every
-seed (13–35 posts), 145.7 m of 145.7 m road swept.
+Shape of the four-lane run: eighteen of twenty parks are done at 89.6 s, and
+the remaining 199 s is seed 428's two parks **running beside each other rather
+than one behind the other** — which is the change. The verdict table is
+unchanged from before the fix: 0 posts in the bus on every seed, control
+non-zero on every seed (13–35 posts), 145.7 m of 145.7 m road swept.
 
 ## Status
 
@@ -189,34 +192,84 @@ seed (13–35 posts), 145.7 m of 145.7 m road swept.
 - [x] root cause
 - [x] control: seed 428 on `origin/feat/sphere-combined` — 10 s vs 185 s
 - [x] fix (one queue, `LGP_LANES`/`cpus()`, per-park streaming, completeness guard)
-- [x] `pnpm run check:entrance-road` green, 221 s
+- [x] `pnpm run check:entrance-road` green — **243 s on head `6cd4d7f4`** (14 lanes)
 - [x] `LGP_LANES=4` run (CI-shaped), green, 288 s
 - [x] PR #669 against `feat/procgen-on-sphere`
-- [x] **`Entrance road` CI: PASS, 11m22s** (run 35361203366), was `cancelled` at 15m15s
+- [x] **`Entrance road` CI: PASS, sweep 11m53s** (run `35362790212`, head
+      `6cd4d7f4`), was `cancelled` at 14m56s on `ae20b9fc`
 
-## The CI proof (run 35361203366, head of `fix/entrance-road`)
+## The CI proof — run `35362790212`, on head `6cd4d7f4`
 
-Step "Entrance road sweep" 15:14:56 → 15:25:51 = **10m55s** against the
-15-minute cap. On `ae20b9fc` the same step was killed at 14m56s.
+**Read the commit before you read the numbers.** An earlier version of this
+file quoted run `35361203366` — which is on `5d59f323`, *superseded by the very
+handoff commits that recorded the measurement*. Exactly CLAUDE.md's "a
+measurement goes stale" trap, with the extra sting that writing the note is
+what staled it. **Every number below is off the head being merged.** If you
+push to this branch, re-read them off the new run.
+
+Sweep step 15:30:27 → 15:42:20 = **11m53s (713.1 s)** against the 900 s cap.
 
 ```
 check:entrance-road: 20 parks (10 seeds x real/control), 4 at a time on 4 cpu(s)
-  [17/20] seed      451 real    built in  15.2 s (233.6 s elapsed)
-  [18/20] seed      451 control built in  14.9 s (234.0 s elapsed)
-  [19/20] seed      428 real    built in 438.6 s (653.2 s elapsed)
-  [20/20] seed      428 control built in 436.4 s (654.5 s elapsed)
+  [17/20] seed      451 real    built in  14.6 s (226.4 s elapsed)
+  [18/20] seed      451 control built in  12.5 s (230.3 s elapsed)
+  [19/20] seed      428 control built in 501.7 s (711.5 s elapsed)
+  [20/20] seed      428 real    built in 505.0 s (713.1 s elapsed)
 entrance road OK — ... all 10 pool seeds; the tightest anywhere is 6.05 m (seed 24)
 ```
 
-A CI core is 2.4× this Mac (428: 438.6 s there, 185 s here). **Eighteen of the
-twenty parks are finished at 234 s; the remaining 420 s is one seed-428 park.**
+A CI core is ~2.7× this Mac (428: 505.0 s there, 185 s here).
 
-**Read the headroom honestly.** Total CPU across the twenty parks is ~1776 s;
-over four cores that floor is ~444 s, and the longest single park is 439 s — the
-two bounds have met, so **no amount of further scheduling buys anything**. The
-only lever left is making seed 428 cheaper, i.e. the solver. At 10m55s of a 15
-min cap the margin is about one slow seed wide: a second 428-like seed entering
-the pool, or 428 getting 35% worse, times this out again.
+## Headroom: a scheduling lever REMAINS, and it is a large one
+
+Derived from that run's own per-park lines:
+
+| | |
+|---|---|
+| total CPU over the 20 parks | **1881.3 s** |
+| four-core lower bound (CPU / 4) | **470.3 s** |
+| longest single park (seed 428 real) | **505.0 s** |
+| **achieved wall clock** | **713.1 s** |
+| cap | 900 s |
+| **margin** | **187 s — 3m07s** |
+
+**713.1 s achieved against a 505.0 s longest-park floor is 208 s of pure
+scheduling loss** — nearly a third of the wall clock still sitting in the
+scheduler.
+
+**An earlier version of this section said the opposite, and it was wrong.** It
+compared the two *lower* bounds (470.3 s and 505.0 s) to each other, observed
+they had converged, and concluded "no amount of further scheduling buys
+anything". Neither bound was ever compared to what was actually *achieved*, and
+that gap is the entire question. Do not inherit that sentence.
+
+The cause is in the run. Seed 428's two jobs **start at 208.1 s and 209.8 s**,
+because `PARK_SEED_POOL` puts 428 ninth of ten, so its pair sits at queue
+positions 17 and 18 behind nineteen cheaper parks on four lanes — the longest
+job dispatched last, the classic tail. Dispatching longest-first would land it
+at about 505–525 s and take the margin from 3m07s to roughly **6m30s**.
+
+**Deliberately not done in this PR**: the queue has no cost hint to sort on,
+and inventing one is a number somebody then has to maintain. Filed as its own
+issue by the Overseer.
+
+Two sensitivities, because they are easy to conflate:
+
+- **the runner, or everything, ~26% slower** (900 / 713.1 = 1.26) times this
+  out;
+- **seed 428 alone ~37% slower** times it out — its jobs start at ~208 s
+  whatever they cost, so 208 + 505 × 1.37 ≈ 900.
+
+Either way the margin is about one slow seed wide. The lever that closes it for
+good is the solver.
+
+## Nothing was weakened — the reviewer's control
+
+Both scripts run over all twenty parks in one worktree: base `727.09s user /
+7:20.84 total` against this branch's `734.80s user / 3:56.91 total`, stdout
+verdict **byte-identical**. **User CPU within noise is the decisive number** —
+identical total work, so no seed skipped and no threshold relaxed; the 1.86× is
+purely arrangement.
 
 ## The other red checks on this PR are the base's, byte for byte
 
@@ -251,11 +304,11 @@ seed-428 parks, and they now run *beside* each other rather than one behind the
 other — which is the whole change. The wall clock is one seed-428 park, where
 before it was two.
 
-On a CI core that is roughly 2.5× slower this projects to ~8 minutes against
-the 15-minute cap, from ~15 minutes before. **Say plainly that the margin is
-one slow seed wide**: the check is now honest and inside its budget, but the
-thing actually making it expensive is the solver, and until seed 428 stops
-costing five railway solves this workflow sits at about half its cap.
+**This four-lane local run is a good predictor and worth keeping as one**:
+288 s × the ~2.5 core ratio = ~720 s, against the 713.1 s CI actually measured.
+(An earlier note here projected "~8 minutes" from the same run — arithmetic
+error, not a bad proxy. The measured figure is **11m53s**; see the headroom
+section above, which is the one to read.)
 
 ## Two things a successor should not re-derive
 
