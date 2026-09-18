@@ -613,6 +613,40 @@ removed the shared plane *"at its cause"*, when it had removed two thirds of
 one cause. The gate disagreeing with the commit message is the only reason I
 knew.
 
+## Read the log's STRUCTURE before quoting any line from it
+
+Three separate misreadings of a log in one session, all the same shape — **a
+subsidiary listing read as the primary result** — and all three reported before
+checking:
+
+1. `38 -> 37` wall slots, quoted as proof of an upstream computation, theorising
+   on what the figure counted rather than checking.
+2. `worst advance 0.0 ms` from `check:park-boot`, quoted as the worst slice. The
+   headline is `worst single advance() 16.7 ms ... parkPlan x3662`; the `0.0 ms`
+   is a **looping-overrun** line near the bottom.
+3. `check:npc-dispersal` / `check:npc-presence` grepped out of the `check` chain
+   log and read as the step then running — so the chain was reported as having
+   passed `check:slide-rider`. **It had stopped there.** Those names are not in
+   the chain at all: they come from `check:chain-coverage`'s **inventory of all
+   85 `check:*` scripts**, which the *first* step prints.
+
+The fix is not "be careful". It is: **before quoting any line, establish what
+part of the log it belongs to.** A chain log opens with an inventory; a boot log
+ends with subsidiary budgets; a summary line's fields mean what the emitting
+code says they mean and not what the name suggests.
+
+### `check:slide-rider` is NOT park-sensitive — measured, both sides
+
+```
+BASE   exit=1  body 0.13% of frame vs 0.40% required, 1 of 6 samples under
+BRANCH exit=1  identical text, identical numbers
+```
+
+Known #680 failure, unmoved by ~100 new poles. **`pnpm run check` stops at
+step 24 of 67 on this base**, so the 43 steps after it are never reached by the
+chain — they must be run individually, which is how the base's known-bad set
+was catalogued in the first place.
+
 ## When two measurements disagree, re-read your own log first
 
 Twice in one session I quoted a number, built a theory on what I assumed it
