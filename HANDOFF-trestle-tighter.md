@@ -74,6 +74,32 @@ would be a second definition of the same rule.
   surface by under a millimetre. Script restored afterwards.
 - `pnpm run build`: exit 0.
 
+## Three-strut nodes — asked in review, answered with numbers
+
+The roll separates the two *generations*, so a node where **three** struts meet
+could have had a pair left unseparated. The tree meets three-at-a-time twice:
+`trunkTop` = leg + 2 lower, `forkNode` = lower + 2 upper. Measured across five
+seeds, both rings — every pair is covered, each by an independent mechanism:
+
+| node | pair | separated by | measured |
+|---|---|---|---|
+| `trunkTop` | leg ↔ lower | radius step | **0.18256 m**, 18× the sweep's 1 cm `near` threshold |
+| `trunkTop` | lower ↔ lower | angle | **≥ 41.12°** (tolerance 0.5°) |
+| `forkNode` | lower ↔ upper | **the half-facet roll** | radius step is **0.00000 m**, so nothing else could |
+| `forkNode` | upper ↔ upper | angle | **≥ 37.85°** |
+
+**The exposure was ~20× what the check reported.** Counting the fork pairs that
+are actually in line: **~28 of ~200 per ring are within 0.5°, and 27–28 of those
+are _exactly_ in line (< 0.0005°)**, with a 0.00000 m radius step, on every seed
+and on both rings — so **~56 joints per park** had their faces in one plane.
+`check:coplanar` reported three of them because of its overlap-area and
+visibility filters.
+
+That also settles fixed-offset vs random phase for good: against ~56 exactly
+collinear pairs, a random phase would be expected to leave ~`56 × 8 / 360` ≈
+**1.2 strobing joints per park**. The 2% I quoted was *per pair*; against the
+real population it is not a small residual.
+
 ## Traps met on this task
 
 - **`Vector3.transformDirection()` normalises.** Taking `.length()` off it to
