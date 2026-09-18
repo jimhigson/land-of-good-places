@@ -1156,6 +1156,12 @@ export interface ParkFacts {
     readonly topY: number;
   } | null;
   /**
+   * {@link slideChute}, put through `worldToCastle` — the chute in the same
+   * axes the castle and everything standing on it is drawn in, so a clearance
+   * against the roof garden compares like with like.
+   */
+  readonly slideChuteInCastleFrame: readonly (readonly [number, number, number])[];
+  /**
    * **The same box, in the castle's own axes, built from the drawn vertices.**
    *
    * A world-axis `Box3` round the roof garden is an axis-aligned box round a
@@ -1171,12 +1177,6 @@ export interface ParkFacts {
    * through `worldToCastle`, not by rotating the world box's eight corners —
    * that would only be a bigger box round a wrong one.
    */
-  /**
-   * {@link slideChute}, put through `worldToCastle` — the chute in the same
-   * axes the castle and everything standing on it is drawn in, so a clearance
-   * against the roof garden compares like with like.
-   */
-  readonly slideChuteInCastleFrame: readonly (readonly [number, number, number])[];
   readonly castleRoofGardenInCastleFrame: {
     readonly minX: number;
     readonly maxX: number;
@@ -2050,14 +2050,14 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
           maxX: local.max.x,
           minZ: local.min.z,
           maxZ: local.max.z,
-          // flat-ok: `local` is a box in the CASTLE's own axes, built by putting
-          // every drawn vertex through `worldToCastle` — so its `+Y` is the
-          // castle's own up, and `max.y` is the top of the roof garden measured
-          // along the direction the castle actually stands in. It is the fix for
-          // an axis-aligned box round a leaning body, not an instance of one:
-          // the world-axis version of this very number read 8.06 m where this
-          // reads 11.80 m, and reported the ginormous slide 0.22 m inside a roof
-          // it in fact clears by 5.02 m.
+          // `local` is a box in the CASTLE's own axes, built by putting every
+          // drawn vertex through `worldToCastle` — so its `+Y` is the castle's
+          // own up, and `max.y` is the top of the roof garden measured along
+          // the direction the castle actually stands in. It is the fix for an
+          // axis-aligned box round a leaning body, not an instance of one: the
+          // world-axis version of this very number read 8.06 m where this reads
+          // 11.80 m, and reported the ginormous slide 0.22 m inside a roof it
+          // in fact clears by 5.02 m.
           // flat-ok: `local` is in the castle's own axes, so +Y is the castle's up
           topY: local.max.y,
         };

@@ -52,11 +52,15 @@ So the arch **is** there and **is** 3.55 m over a child's toes. Every ray
 missed it by leaning; `lowestOverheadY` was `Infinity`; the
 `headroom < TALLEST_CHILD_HEIGHT` clause under it could never fire.
 
-**What the vacuous clause was excusing: nothing, on these five seeds.** The
-real headroom is 3.55 m against a `TALLEST_CHILD_HEIGHT` of ~1.5 m, so the
-gate was in fact fine — but the clause had stopped being able to say so, and
-would equally have passed an arch lowered to a child's knees. It has been
-vacuous since the sphere landed (`667e743e` / `cb76ac1c` on
+**What the vacuous clause was excusing: nothing, on these five seeds** — but by
+less room than you would think. The real headroom is 3.55 m against
+`TALLEST_CHILD_HEIGHT`, which is **2.97 m** (`src/art/models/kid.ts:227`, read
+rather than remembered — an earlier draft of this file guessed it at ~1.5 m and
+so reported the margin as roughly 2 m). The true margin is **0.58 m**. So the
+gate is fine today and not by a wide enough margin to be uninteresting: the
+clause had stopped being able to say so either way, and would equally have
+passed an arch lowered to a child's knees. It has been vacuous since the sphere
+landed (`667e743e` / `cb76ac1c` on
 `feat/sphere-combined`), i.e. for the whole life of that branch.
 
 ## Status
