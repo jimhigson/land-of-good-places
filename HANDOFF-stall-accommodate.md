@@ -80,13 +80,47 @@ A `stalls` `FeatureBuilder` in `worldPhase.ts`, **first** in the order
   in the same commit, so the thing a child sees and the thing she bumps into
   move together.
 
+## Measured
+
+**Adding stall claims changed no park.** `scripts/park-digest-sweep.sh` on the
+base (`origin/feat/procgen-on-sphere`, ae20b9fc) and on this branch, one
+process per seed, all ten pool seeds:
+
+| seed | base | branch |
+|---|---|---|
+| 20260728 | a1b5c16077708bc0 | a1b5c16077708bc0 |
+| 11 | cff174dae3575aff | cff174dae3575aff |
+| 24 | d0bc7e0fcba4d73a | d0bc7e0fcba4d73a |
+| 128 | 528eebcd274a31a6 | 528eebcd274a31a6 |
+| 131 | 84627b8d3eb9d3a7 | 84627b8d3eb9d3a7 |
+| 208 | 9248414212c4d8de | 9248414212c4d8de |
+| 274 | a7918b629da40cc1 | a7918b629da40cc1 |
+| 326 | 24190286f59c7f99 | 24190286f59c7f99 |
+| 428 | 4026fa879ce5bbe3 | 4026fa879ce5bbe3 |
+| 451 | 9c5c9504db51c63c | 9c5c9504db51c63c |
+
+Identical, every one — mesh counts too. That is the property the design was
+built for: attempt 0 of every stall is the spot the layout drew, and the
+claims are the colliders' own geometry, so nothing that was allowed before is
+refused now.
+
+Canonical seed's world phase: 634 increments (626 before, plus the eight
+stalls), 7 refusals, 7 accommodations, 0 refused, 0 forgone — the same seven
+accommodations (two wall runs, five bush clumps) the base made.
+
+**No pool seed asks a stall to move.** `grep stalls` over every seed's
+`world-solve` trace finds only `placed stalls#0..7`: no refusal anywhere names
+`stalls` as a blocker.
+
 ## Status
 
 - [x] Worktree + install (pnpm 12.1.0 via the pin).
-- [ ] Baseline measurement: add stall claims with **no** accommodate, run the
-      seeds, and read off the trace how often a world-phase feature is refused
-      by `stalls`. This answers "does any seed in 0..15 actually need it".
-- [ ] The builder, the accommodate, the relocation.
+- [x] Baseline measurement — see **Measured** above. No pool seed needs it.
+- [x] The builder (`src/world/stallsFeature.ts`), its `accommodate`, and the
+      relocation (`MiniGameStalls.boothPlacement`). The face-paint and keychain
+      booths answer `null` — they do not move — which `stallsFeature.ts` turns
+      into an ordinary refusal; six of the eight move.
+- [ ] Seeds 0..15: does any of them ask a stall to move?
 - [ ] Reachability instrument **with a control run first**.
 - [ ] Invariant in `test/procgen/invariants.ts`, proved red.
 - [ ] 16 seeds of `check:park`; `test:procgen` name-diff vs
