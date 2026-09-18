@@ -135,6 +135,12 @@ input, watch the finding come back, then restore:
 3. `poi.nospot` — disable `parkPlan.ts`'s `outside` boundary refusal in
    `pathGraphBuilder`, re-run seed 4. This one doubles as proof that an
    existing plan-time screen is load-bearing.
+4. `poi.nospot`, fallback — `control.sh on nudge` sets `NUDGE_REACH` to
+   0.01 m so no waypoint seed can find a spot. Control 3 proves the *screen*
+   is load-bearing; if it comes back silent (the park may simply no longer
+   route a spur outside on seed 4) that proves nothing about the **finding**
+   being armed, and this one does. Run it only if 3 is silent, and say which
+   of the two the evidence came from.
 
 Paste the geometry each was proved against alongside the transcript — a
 red-run transcript goes stale (CLAUDE.md).
