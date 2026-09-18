@@ -17,6 +17,7 @@ import { toonMaterial } from '../art/style/materials';
 import { createFlowerPickEffect, type FlowerPickEffect } from '../art/effects/flowerSparkle';
 import { placeOnSphere, terrainHeight } from './terrain';
 import { isOnPath } from './pathGraph';
+import { PATH_KERB_OVERHANG } from '../core/constants';
 import { clearOfCruiser, clearOfRailway } from './Scenery';
 import type { CollisionWorld } from './Collision';
 import {
@@ -578,6 +579,59 @@ export class Flowers implements GameSystem {
    * Somewhere clear of paths, every reserved anchor plot, every booth's tap
    * area, the Sky Cruiser's low passes and the railway.
    */
+  /**
+   * **Every reason a flower may not stand somewhere, in one place.**
+   *
+   * Both {@link pickSpawnPoint} and {@link settleAgainstTheFinishedPark} ask
+   * exactly this. They used to ask different questions — sowing refused
+   * paving, anchors, tap zones, the cruiser's air, the railway and anything
+   * solid, while the settle pass re-asked **only** `isClearCircle`. So a
+   * flower that became unacceptable for any of the other five reasons after
+   * the park finished building was never replanted, and the one the settle
+   * pass exists for is the one it could not see.
+   *
+   * Found by `check:coplanar` on seed 11 of this branch:
+   * `garden|flowers/living-flower-stems|garden/path-kerb`, 0.001 m² of shared
+   * plane. Paving is laid *after* the meadow is sown, and this branch gives
+   * seed 11 two connectors it did not have, so a flower that was on open lawn
+   * when it was sown found a kerb built under it. Nothing was standing off
+   * anything; the acceptance test simply had two definitions.
+   */
+  private acceptableSpot(x: number, z: number): boolean {
+    // **The flower's own reach plus the kerb's**, not a hand-typed 0.5.
+    // `distanceToPath` measures from the paved *surface*, whose half-width is
+    // what `recordSamples` records — and `buildPaths` draws the kerb a further
+    // `PATH_KERB_OVERHANG` (0.425 m) outboard of it. So a flower cleared at
+    // 0.5 m stood clear of the surface and could still be planted squarely on
+    // the kerb, which is what `check:coplanar` found on seed 11 of this branch:
+    // `garden|flowers/living-flower-stems|garden/path-kerb`.
+    //
+    // Every other gate below already passes `WIDEST_FLOWER` as its clearance
+    // radius — `flowerDimensions.ts` says in as many words that it is "the
+    // number every caller here passes". This was the one that did not, and it
+    // was also the one that had forgotten the kerb is drawn wider than the
+    // paving it edges.
+    if (isOnPath(x, z, WIDEST_FLOWER + PATH_KERB_OVERHANG)) return false;
+    if (this.insideAnyAnchor(x, z, 0.5)) return false;
+    if (this.insideAnyTapKeepOut(x, z)) return false;
+    // Under the Sky Cruiser's car where it flies low — see
+    // {@link TALLEST_FLOWER}. The same gate, and the same grid, every other
+    // scattered thing in the park already passes through.
+    if (!clearOfCruiser(x, z, WIDEST_FLOWER, TALLEST_FLOWER)) return false;
+    // And the train's own ground: the corridor, the platforms and every
+    // bridge's deck and ramps, asked of `Scenery`'s `onRailway`, which is
+    // the single owner of that question for every other scatter in the park.
+    // The meadow never asked it, and a flower duly grew out of the ballast
+    // on pool seed 225 — see {@link clearOfRailway}.
+    if (!clearOfRailway(x, z, WIDEST_FLOWER)) return false;
+    // And anything solid already standing here — see {@link collision}. A
+    // refusal drops the candidate rather than nudging it: a flower is
+    // decoration and has no claim on ground something solid already holds
+    // (#502's words, for the bushes this follows).
+    if (!this.collision.isClearCircle(x, z, WIDEST_FLOWER)) return false;
+    return true;
+  }
+
   private pickSpawnPoint(): { x: number; z: number } {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const angle = this.rng.range(0, TAU);
@@ -587,24 +641,7 @@ export class Flowers implements GameSystem {
         Math.sqrt(this.rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - FLOWER_MARGIN);
       const x = Math.cos(angle) * distance;
       const z = Math.sin(angle) * distance;
-      if (isOnPath(x, z, 0.5)) continue;
-      if (this.insideAnyAnchor(x, z, 0.5)) continue;
-      if (this.insideAnyTapKeepOut(x, z)) continue;
-      // Under the Sky Cruiser's car where it flies low — see
-      // {@link TALLEST_FLOWER}. The same gate, and the same grid, every other
-      // scattered thing in the park already passes through.
-      if (!clearOfCruiser(x, z, WIDEST_FLOWER, TALLEST_FLOWER)) continue;
-      // And the train's own ground: the corridor, the platforms and every
-      // bridge's deck and ramps, asked of `Scenery`'s `onRailway`, which is
-      // the single owner of that question for every other scatter in the park.
-      // The meadow never asked it, and a flower duly grew out of the ballast
-      // on pool seed 225 — see {@link clearOfRailway}.
-      if (!clearOfRailway(x, z, WIDEST_FLOWER)) continue;
-      // And anything solid already standing here — see {@link collision}. A
-      // refusal drops the candidate rather than nudging it: a flower is
-      // decoration and has no claim on ground something solid already holds
-      // (#502's words, for the bushes this follows).
-      if (!this.collision.isClearCircle(x, z, WIDEST_FLOWER)) continue;
+      if (!this.acceptableSpot(x, z)) continue;
       return { x, z };
     }
     // Fell through every attempt (shouldn't happen with this much open lawn) —
@@ -681,7 +718,11 @@ export class Flowers implements GameSystem {
     for (let i = 0; i < this.count; i += 1) {
       const x = this.posX[i] ?? 0;
       const z = this.posZ[i] ?? 0;
-      if (this.collision.isClearCircle(x, z, WIDEST_FLOWER)) continue;
+      // **The same question the sowing asked**, not a subset of it — see
+      // {@link acceptableSpot}. Paving in particular is laid after the meadow,
+      // so `isClearCircle` alone (paving carries no collider, a child walks on
+      // it) could never see a kerb built under a flower.
+      if (this.acceptableSpot(x, z)) continue;
       this.spawnAt(i, true);
       this.writeMatrix(i);
     }
