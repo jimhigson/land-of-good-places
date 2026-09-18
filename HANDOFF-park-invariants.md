@@ -391,3 +391,53 @@ route that breaks the park.
 
 Seed 7 is the slow one at 269 s (it was ~1000 s before #670); seeds 3 and 4 at
 53 s and 47 s; the other thirteen are 6-24 s.
+
+## Two things the rebase chain taught, both worth keeping
+
+### 1. `check:park-boot` is the low-noise instrument for the slide cost
+
+The 5.2x showed up where a **player** would feel it — the boot hitching — and
+`check:park-boot` caught it where three wall-clock experiments could not:
+
+| | worst slice | units | verdict |
+|---|---|---|---|
+| base | 17.5 ms | 4 | ok |
+| branch, before | 34.0 ms | 3 | **FAILED**, "shaping the ginormous slide" |
+| branch, after | 15.6 ms | 2884 | ok, "laying the railway" |
+
+Three fixes got it there, all pure slicing or caching, none changing a verdict
+(the check confirms identical route/chute/loop SHAs each time):
+
+- the judge's **ground and tower walks never yielded** — three passes' work on
+  one frame's budget;
+- **`chuteCentreLine` is itself a unit of work** (a fresh Catmull-Rom plus its
+  arc length) and landed unyielded in the caller's slice;
+- **`JUDGE_PIECE` 32 -> 8**, since it was sized for ~90 control points and now
+  judges ~189 costlier samples;
+- and **`CoasterRoute.nearestPoint` reads a table** instead of re-walking an
+  immutable curve with `getPointAt` every 2 m, ~140 curve evaluations per query,
+  3,007,891 queries.
+
+**I reverted that last one earlier, wrongly.** An interleaved wall-clock A/B of
+six park builds at load 12-15 read `slide/cruiser` 5.05 walking vs 5.45 cached
+and I called it no-win. The stage's *wall time* is dominated by the route
+search; the *worst single slice* is dominated by `nearestPoint`, and those are
+different questions. Per-slice attested busy time could tell them apart; a
+loaded box's wall clock could not. **When a wall-clock A/B says "no effect" on a
+busy machine, that is not a result.**
+
+### 2. A rebase broke this branch and reported zero failures
+
+#684 stopped the Rail Race needing `unplaceFromSphere` and its destructuring
+went with it. My `cruiserPylonTops` block had borrowed that binding — with a
+comment saying "already imported above" — so every seed suite threw
+`ReferenceError` inside `buildParkFacts`. Vitest reported:
+
+    Tests  203 passed | 490 skipped (693)
+
+**Zero failures.** The only tell was the pass count, 203 against the base's 668.
+That is CLAUDE.md's "a skipped test is not a passing test", met in the wild, and
+it is why the name-diff has to be read alongside the pass count and not instead
+of it. Borrowing another block's binding is the two-definitions disease in
+another hat: the owner moved and the borrower could not know. Each block owns
+its import now.
