@@ -9289,9 +9289,15 @@ const raceCameraNeverRunsBackwards: Invariant = (facts) => {
  * riding highest nearby — the lanes undulate on their own phases and stand up
  * to 4.38 m apart in height at one station, which is further than they are
  * apart sideways. Measured on the canonical seed, that filed the race ring's
- * 40 bars as 6/13/15/6 across four lanes when the schedule gives every lane
- * exactly 20, and the fairness clause faithfully reported a race that is in
- * fact fair.
+ * 40 bars as 6/13/15/6 across four lanes when the ring lays **10 a lane**, and
+ * the fairness clause faithfully reported a race that is in fact fair.
+ *
+ * Two quantities, and they are easy to mix up — 6+13+15+6 is 40, so any
+ * per-lane figure the clause quotes has to divide 40. **10 bars a lane per
+ * lap** is what this counts, off the drawn ring. `barCrossingsByLane` is the
+ * other one, 20 a lane, because it is the whole race and `RACE_LAPS` is 2.
+ * Both were measured on the base, all five seeds, before this clause changed:
+ * the race was already fair in the plan, in the schedule and in the geometry.
  *
  * Unleaning removes the height from the question: in the chart every part of
  * a bar's gantry sits at its own lane's offset from the centre line, whatever

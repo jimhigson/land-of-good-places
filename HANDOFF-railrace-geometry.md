@@ -260,7 +260,14 @@ was miscounting. Proved **on the base** (`881cb158`), using only base code and
 per-column lean, so nothing of this branch is assumed
 (`scripts/_probe-fair.mts`, in the base worktree):
 
-| seed | schedule crossings/lane | plan bars/lane | race ring **drawn** bars/lane |
+**Two quantities, and mixing them up is how a correct finding gets read as
+wrong.** The clause counts **bars on one lap** — 40 drawn, so 10 a lane.
+`barCrossingsByLane` counts **crossings over the whole race**, 20 a lane,
+because `RACE_LAPS` is 2. An earlier draft of this file and of the PR body said
+"the schedule gives every lane exactly 20" while describing 40 bars across four
+lanes, which contradicts itself. Corrected.
+
+| seed | schedule crossings/lane (whole race) | plan bars/lane (per lap) | race ring **drawn** bars/lane (per lap) |
 |---|---|---|---|
 | 20260728 | 20/20/20/20 | 10/10/10/10 | **10/10/10/10** |
 | 11 | 20/20/20/20 | 10/10/10/10 | **10/10/10/10** |
@@ -283,3 +290,55 @@ The walk-past ring is scenery; nobody races it.
 **No softness in this finding.** The one thing it does *not* say is that the
 race felt fair to play: nobody has ridden it. It says the bars are dealt out
 equally, which is what the assertion claims.
+
+
+## Rebased onto #682 (base `76224f91`)
+
+My duplicate leaf commit is **dropped**; `dimensions.ts` in this branch is
+upstream's byte for byte (`diff` against `origin/feat/procgen-on-sphere` is
+empty), and `hazards.ts`, `supportGround.ts` and `track.ts` have fallen out of
+my diff entirely — #682 owns that plumbing now. Where their comment and mine
+said the same thing I kept theirs; theirs is also more accurate about
+`track.ts`, which is strictly downstream of `route.ts` and so was **never**
+crashing. I had implied otherwise in an earlier commit message on this branch
+and have corrected it.
+
+What I kept from my own version: the two lines pointing `plan.ts` and `arch.ts`
+at `./dimensions`.
+
+**Swept rather than searched.** `check:cycle-tdz` (chain step 5) reports
+`the same 8 site(s) as the baseline, none added, none stale` — and **not one of
+the eight is in `src/world/railRace/`**. They are the art palette, the coaster
+plan, two in `paths.ts`, two in `bridgeFit.ts`, `crossingPlanSolve.ts` and the
+train plan. So the ride has no module-scope reader left through the re-export,
+which is the thing a file-by-file search would have had to prove and could not.
+
+### Numbers re-taken on the new base
+
+| | base `76224f91` | this branch |
+|---|---|---|
+| `test:procgen` | `55 failed \| 638 passed (693)` | `25 failed \| 668 passed (693)` |
+| name-diff | — | **30 fixed, 0 new** |
+| `check:coplanar` | **23** new-or-worse, 5 loose | **11** new-or-worse, **0** loose |
+| `build` | — | exit 0 |
+
+The earlier `693 → 691` wobble was #670 adding `test/geo/boundaryDistance.test.ts`;
+both sides are 693 now and it is gone.
+
+### The fifteen deleted baseline entries, split honestly
+
+The base's own run names **five** entries as `BASELINE LOOSE`, so five of my
+fifteen deletions were dead before I touched anything:
+
+1. `garden/path-surface | park-train/train-track/track-ballast`
+2. `scenery/wooden-walls | scenery/wooden-walls`
+3. `garden/boundary-wall/boundary-blocks | park-train/rail-fence`
+4. `railRace:race-ring/sleepers | railRace:walk-past-ring/<Mesh:BoxGeometry>`
+5. `railRace:walk-past-ring/trestle-branches-lower | …-upper`
+
+**Three of those five are not rail-race** (1–3) — that is the "already dead,
+not your scope" the reviewer found, and the count matches once the two
+rail-race ones are set aside as properly mine. The remaining **ten** are the
+rainbow-leg entries, which died because the facet-phase fix removed the seams
+they were allowing for. Deleting can only tighten the check, and the run now
+reports zero loose entries on this branch.
