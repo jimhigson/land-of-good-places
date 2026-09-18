@@ -150,7 +150,15 @@ number of bars, bars stand over a real leg, bars slow you where they stand.
 - [x] controls recorded for every changed clause
 - [x] all 67 `check` steps run individually and each failure classified
       against the branch point in `.claude/worktrees/railrace-base`
-- [ ] `RIDE_SCALE` TDZ crash (below) — fixing
+- [x] `RIDE_SCALE` / `NOMINAL_OUTSET` TDZ crash — fixed, and **duplicated by
+      PR #682** (`fix/ride-scale-tdz`, `dimensions.ts`). Same diagnosis, same
+      shape of fix, found independently. **Drop my `ringDimensions.ts` commit
+      in favour of theirs when #682 lands** — it is one self-contained commit
+      and nothing else on this branch depends on the file's name. Mine also
+      re-points `track.ts` at the leaf directly, which theirs does not need to
+      if `RAIL_GAUGE` is still a module-scope read of `RIDE_SCALE`: a
+      re-export does **not** escape the cycle, so that one line is worth
+      keeping whichever leaf wins.
 
 
 
@@ -211,10 +219,10 @@ each red was re-run at the branch point (`ae20b9fc`) in a detached worktree.
 |---|---|---|---|
 | `check:slide-rider` | FAIL | FAIL | **identical text**, same 0.13% on beat 1 frame 240 |
 | `check:waypoints` | FAIL | FAIL | output diff is one timing line; the message itself reads `x NaN..NaN` |
-| `check:cart-shape` | FAIL | FAIL | same crash, differs only by worktree path |
-| `check:ground-claims` | FAIL | FAIL | same crash |
+| `check:cart-shape` | FAIL | FAIL | same crash, differs only by worktree path — **now passes** |
+| `check:ground-claims` | FAIL | FAIL | same crash; now reaches a real assertion — its probe still expects the placers to be exactly `[road, railRace]` and the world phase has added fountain, walls, trees, bushes, lamps. The world phase's to widen. |
 | `check:layout-rung` | FAIL | FAIL | identical |
-| `check:arrival-camera` | FAIL | FAIL | same crash |
+| `check:arrival-camera` | FAIL | FAIL | same crash — **now passes** |
 | the other 61 | PASS | — | |
 
 **Three of those are one bug, and it is in this slice**: `railRace/hazards.ts`
@@ -227,3 +235,15 @@ documents. Fixing it here.
 `check:waypoints`'s message printing `x NaN..NaN` is worth somebody's
 attention on its own terms — a check describing a facade whose bounds do not
 exist — but it is the castle's, not the rail race's.
+
+
+## Rebased onto 86f9a513
+
+The base moved by two commits (#669, #674) and **neither touches any file this
+branch touches**, so the rebase was clean for the right reason rather than
+quietly. Re-measured on the new base head rather than assuming: `test:procgen`
+there is still **55 failed | 636 passed**, so the 30-fixed / 0-new diff stands
+against the current base.
+
+`check:waypoints`'s `x NaN..NaN` — flagged here at the checkpoint — is what
+#674 fixed, independently.
