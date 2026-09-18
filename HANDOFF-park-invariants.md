@@ -111,6 +111,26 @@ block 40/41 of ~81, which is one per side), on every failing bridge. The blocks'
 bottom faces are flat (8 vertices at one height to within 1e-3), so the stone is
 level there and its base should be exactly `COPING_SINK` below the cap.
 
+**Tested, and the instrument is exonerated.** At all four failing plan points
+the cap has **exactly one** containing triangle, at exactly the height
+`wallTopAt` returns:
+
+```
+block  0/81 ... wallTop first -7.015; containing triangles 1: [-7.015]
+block 40/81 ... wallTop first -6.713; containing triangles 1: [-6.713]
+block  0/82 ... wallTop first -6.332; containing triangles 1: [-6.332]
+block 41/82 ... wallTop first -6.515; containing triangles 1: [-6.515]
+```
+
+So the seam is real and lives in `buildCopingRun`. The arithmetic that should
+make it exact: the block's centre goes to `(topA + topB) / 2 - COPING_SINK`
+with its base plane perpendicular to `trueY` and therefore parallel to the
+chord, so the base is the chord translated down `COPING_SINK` in `y` and its
+low end should be `topA - COPING_SINK`. It measures `topA - 0.049` instead, on
+the **first laid block of a run and no other**. The taper filter
+(`Math.min(parapetA, parapetB) < COPING_HEIGHT`) is what decides which segment
+is first, so start there.
+
 Where to look next. `bridges.ts` pushes `parapetLine[i].top = [parapetTopPlus,
 parapetTopMinus]` and builds the `wallTop` cap quads from the *same* two
 numbers, so per ring they agree by construction — which means the disagreement
