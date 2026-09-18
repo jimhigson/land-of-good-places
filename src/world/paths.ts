@@ -1994,11 +1994,42 @@ const RAMP_SCREEN_MARGIN = 0.5;
  * bridges from the start"* — which is its own ticket.
  */
 export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
+  return standsOnSomeBridge(x, z, margin, true);
+}
+
+/**
+ * **The one owner of "is this point inside a bridge's footprint".**
+ *
+ * Both questions below are this loop with one clause different — the site
+ * sweep, the `across` projection onto the crossing's normal, and the `along`
+ * bounds that reach `DECK_HALF_LENGTH` plus each ramp's own measured reach.
+ * They were written out twice and a third copy was very nearly added; that is
+ * this repo's most-cited bug, and the two would have drifted the first time
+ * anybody touched `rampReachPos`.
+ *
+ * `deckCounts` is the whole difference. A bridge's footprint is a road with a
+ * wall down each side: `across <= halfWidth` is the surface a child walks on,
+ * and only the ring outside it is parapet.
+ *
+ * - `true` — the bridge's ground **at all**, deck included. The right question
+ *   for starting or branching something there.
+ * - `false` — the **masonry only**. The right question for routing through,
+ *   because a street crossing a bridge is what a bridge is for.
+ */
+function standsOnSomeBridge(
+  x: number,
+  z: number,
+  margin: number,
+  deckCounts: boolean,
+): boolean {
   for (const site of CROSSING_SITES) {
     const dx = x - site.x;
     const dz = z - site.z;
-    const across = -dx * site.dirZ + dz * site.dirX;
-    if (Math.abs(across) > site.halfWidth + margin) continue;
+    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
+    if (across > site.halfWidth + margin) continue;
+    // Inside the deck's own width is road, not wall — keep going, another
+    // site's masonry may still claim this point.
+    if (!deckCounts && across <= site.halfWidth) continue;
     const along = dx * site.dirX + dz * site.dirZ;
     if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
         along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
@@ -2046,54 +2077,7 @@ export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCR
  * is for.
  */
 function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
-  for (const site of CROSSING_SITES) {
-    const dx = x - site.x;
-    const dz = z - site.z;
-    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
-    // Inside the deck's own width is road, not wall — keep going, another
-    // site's masonry may still claim this point.
-    if (across <= site.halfWidth || across > site.halfWidth + margin) continue;
-    const along = dx * site.dirX + dz * site.dirZ;
-    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
-        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * **Does this point stand on a bridge at all — its deck as well as its walls?**
- *
- * {@link pointStandsOnBridgeMasonry} deliberately lets the deck through, and
- * says why: a crossing's own approach runs over the deck, and refusing it cost
- * seed 24 its only bridge. That is right for deciding whether a lattice node
- * may exist, because a street *crossing* a bridge is the whole point of one.
- *
- * It is not right for deciding where a **spur may branch**. A junction on a
- * deck sends a ribbon off the side of the bridge, and the drawn route then ends
- * in mid-air: measured on the canonical seed, `spur-exit-railRace` branched at
- * (-33.07, -40.62), **1.73 m above the ground beneath it**, against a child's
- * own step-up of 0.62 m — she walks the ring onto the bridge, turns off towards
- * the rail-race exit, and the paving stops at a drop. That is
- * `noDrawnPathEndsStrandedOnABridge`, and the node was valid by every test the
- * lattice had.
- *
- * So this is the wider question, asked only where the narrower one is wrong.
- */
-function pointStandsOnABridge(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
-  for (const site of CROSSING_SITES) {
-    const dx = x - site.x;
-    const dz = z - site.z;
-    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
-    if (across > site.halfWidth + margin) continue;
-    const along = dx * site.dirX + dz * site.dirZ;
-    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
-        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
-      return true;
-    }
-  }
-  return false;
+  return standsOnSomeBridge(x, z, margin, false);
 }
 
 /** The Sky Cruiser's pylons have the same relationship to streets as the
@@ -2592,8 +2576,9 @@ function computeStreetStubs(p: readonly [number, number], arrival: boolean): Str
         // **A junction on a bridge is not a junction.** The node is valid —
         // `nodeOk` deliberately admits a deck so a street may cross one — but a
         // spur branching off it leaves the bridge sideways and its paving stops
-        // at a drop. See {@link pointStandsOnABridge}.
-        if (pointStandsOnABridge(lattice.xs[index] as number, lattice.zs[index] as number)) {
+        // at a drop. `pointStandsOnABridgeRamp` is the deck-included question
+        // and already existed — see {@link standsOnSomeBridge}.
+        if (pointStandsOnABridgeRamp(lattice.xs[index] as number, lattice.zs[index] as number)) {
           if (verbose) {
             // eslint-disable-next-line no-console
             console.log(
