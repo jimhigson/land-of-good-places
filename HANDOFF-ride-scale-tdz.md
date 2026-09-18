@@ -337,3 +337,76 @@ byte-identical before and after, and all four re-run green on the new base:
 
 **So the chain's outstanding failures are down to two**, both still
 pre-existing: step 24 `check:slide-rider` and step 66 `check:layout-rung`.
+
+## Follow-up: `RAIL_GAUGE`, and two real scanner blind spots
+
+Raised by the coordinator: `track.ts`'s `RAIL_GAUGE` is a module-scope read of
+`RIDE_SCALE` through `./route`'s re-export, which by this branch's own finding
+does not escape a cycle — so why was it not in the 7?
+
+**Because it genuinely is not in the cycle, and that is measured, not assumed:**
+
+```
+route.ts can reach track.ts : false
+track.ts can reach route.ts : true
+=> same cycle (mutually reachable): false
+```
+
+`track.ts` is strictly **downstream** of the cycle, so all of its imports —
+including `route.ts` and everything in `route`'s component — are fully
+evaluated before its body runs. No entry order can catch it. The scanner was
+right to omit it, and it was never crashing.
+
+**Changed anyway, as hardening**, because it is exactly one import away, and
+`import { … } from './dimensions'` costs nothing. Control E proves the change
+does something rather than being decoration: add `import './track'` to
+`route.ts` (the one edge that would pull it in) and the shipped leaf version
+stays at 8 sites, while the old `./route` version goes to 9, naming
+`track.ts:94 RAIL_GAUGE <- RIDE_SCALE`.
+
+### The coordinator was right that the scanner had a blind spot — two, and neither was `RAIL_GAUGE`
+
+Both silently shrank the strongly-connected components, which is the failure
+mode where a scan returns *fewer* findings and reads as a clean repo:
+
+1. **`export { X } from './y'` was not an edge.** 84 of them across `src/`. A
+   re-exporting module still has to be evaluated and its own imports walked
+   first. Adding them took the cycle count **3 → 4** and surfaced
+   `src/art/style/artPalette.ts:13 ART <- PALETTE [src/art/style/bridge.ts]`,
+   which had never been listed.
+2. **A bare `import './x'` was not an edge.** It binds no names, so it was
+   skipped alongside the type-only imports — but it *forces evaluation*, which
+   is the entire question here. Found because control E was written expecting a
+   9, got an 8, and the gap turned out to be this bug rather than the mutation
+   failing to bite.
+
+**Sites are 7 → 8**, and the extra is a real one the blind spot was hiding, not
+a regression. Controls A–D were re-run against the fixed scanner and still
+hold (A 8, B 9 naming `hazards.ts`, C 8, D 8).
+
+`src/art/style/artPalette.ts`'s `ART` is the new one and is **not fixed here** —
+same class as the other five, one edge from live, and it is the art system's
+central palette rather than this slice.
+
+## `check:arrival-camera` — cleared by this fix
+
+It was failing on base `86f9a513` with the identical crash:
+
+```
+file:///…/tdz-base2/src/world/railRace/hazards.ts:171
+ReferenceError: Cannot access 'RIDE_SCALE' before initialization
+```
+
+and passes on this branch. **So this PR clears three checks, not two**:
+`check:cart-shape`, `check:ground-claims` and `check:arrival-camera`. If
+`check:arrival-camera` is on someone's list as an unowned red, it can come off.
+
+## On the `check:ground-claims` coverage note
+
+It is kept, and it is visible. It goes to `console.log` rather than
+`process.stderr`, deliberately: CLAUDE.md's stderr rule exists because
+**Vitest's** default reporter hides console output from *passing* tests. This
+is a plain Node script whose stdout is shown on every run — confirmed by
+reading the note off a **green** run — and all eight of the script's other
+notes go the same way. Moving only this one to stderr would interleave it out
+of order with the rest for no gain.
