@@ -10,8 +10,13 @@ failures.** Do not touch `duckBars*`, `railRaceTrestles*`,
 
 ## Baseline, quoted off the screen
 
-`pnpm run test:procgen` at `ae20b9fc` (branch head as created):
-`Test Files 5 failed | 17 passed (22)`, `Tests 55 failed | 636 passed (691)`.
+`pnpm run test:procgen` **re-derived at the rebase target `881cb158`** (the
+branch was rebased off `ae20b9fc` after #670/#674/#669 landed, and #670 changed
+park solving, so the old baseline could not be carried over):
+`Test Files 5 failed | 18 passed (23)`, `Tests 55 failed | 638 passed (693)`.
+
+The pre-rebase figures, for the record, were `55 failed | 636 passed (691)` at
+`ae20b9fc` — the same 55, against two fewer tests.
 Full name list: `scratchpad/names-head.txt`.
 
 My slice, 19 of those 55:
@@ -68,8 +73,8 @@ landed (`667e743e` / `cb76ac1c` on
 Model: **Opus 5 (1M context)**, chosen by the Overseer's dispatch (the default
 for an Engineer). A replacement runs the same model.
 
-Baseline at branch base `ae20b9fc`: `Tests 55 failed | 636 passed (691)`.
-Now: `Tests 35 failed | 656 passed (691)`. **None new** at any step — every run
+Baseline at branch base `881cb158`: `Tests 55 failed | 638 passed (693)`.
+Now: `Tests 35 failed | 658 passed (693)`. **None new** at any step — every run
 name-diffed, not counted (`n1.txt` baseline vs `n7.txt` now, in the scratchpad).
 
 Fixed (6 of my 8 kinds, 15 of my 19 test instances):
