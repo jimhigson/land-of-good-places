@@ -67,9 +67,14 @@ So the honest comparison here is the **deterministic** part of the trace:
   candidates the search actually tried.
 
 Those cannot move unless a decision moved. Every seconds figure below is a
-**ceiling** (contention only ever makes it worse), and the one number that had
-to be clean — the sweep's wall clock, because the cap is in minutes — is
-re-taken on a quiet machine and labelled as such.
+**ceiling** — contention only ever makes it worse.
+
+**A quiet machine was offered and never actually arrived**, so nothing here is
+labelled clean. The sweep's wall clock is the one figure that had to be in
+minutes, so it was taken **twice, at different contention levels** (299.7 s at
+load 15–40, 332.1 s at load 12–25) and both are ceilings. Two ceilings a fifth
+of the cap apart from it is a better answer than one number claiming to be
+clean, and it is the honest one.
 
 The base side of the CI argument needs no re-measurement: **CI itself is the
 base measurement** (24m57s, `cancelled`, seed 7 unfinished), corroborated by
@@ -137,6 +142,12 @@ that, one process each, and the counts above are its output.
 Base seeds 3 and 4 measured the same way (`check:every-seed-builds` with
 `LGP_SEEDS=3,4,7`); seed 7's base is the solo `check:park` quoted above, which
 is the kinder of the two measurements for the base.
+
+**Treat these ratios as indicative and the piece counts below as the proof.**
+The second full sweep put the same branch seeds at 52.6 s, 82.2 s and 290.9 s
+— every one slower than the first sweep's 30.7 / 59.5 / 277, on identical code,
+purely because the box was busier. That spread is exactly why the counts, not
+the seconds, carry the claim.
 
 ### Seed 7 — the same decision path, byte for byte
 
