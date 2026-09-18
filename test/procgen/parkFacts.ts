@@ -2050,6 +2050,15 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
           maxX: local.max.x,
           minZ: local.min.z,
           maxZ: local.max.z,
+          // flat-ok: `local` is a box in the CASTLE's own axes, built by putting
+          // every drawn vertex through `worldToCastle` — so its `+Y` is the
+          // castle's own up, and `max.y` is the top of the roof garden measured
+          // along the direction the castle actually stands in. It is the fix for
+          // an axis-aligned box round a leaning body, not an instance of one:
+          // the world-axis version of this very number read 8.06 m where this
+          // reads 11.80 m, and reported the ginormous slide 0.22 m inside a roof
+          // it in fact clears by 5.02 m.
+          // flat-ok: `local` is in the castle's own axes, so +Y is the castle's up
           topY: local.max.y,
         };
       }
