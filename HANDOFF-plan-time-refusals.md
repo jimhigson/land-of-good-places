@@ -84,6 +84,18 @@ merely absent from 0..15 — hence the planned wider sweep.
   refusal can consume. The ratchet note in `parkManifest.ts` saying "the pools
   and hedges are seeded per park" is **stale** — correct it if this lands.
 
+  Traced the whole chain to be sure: `AnchorPlots`' constructor puts each plot
+  group at `(x, terrainHeight(x,z), z)` and leans it with `standOnSphere`, and
+  `groundInPlot` derives every prop's local `y` from the plot centre. So an
+  anchor's world-space reach is a **pure function of its plot centre plus a
+  fixed local model** — no World state in it, which is why a plan-time asker
+  is possible at all. The one-owner shape, if it is needed: the dressing
+  publishes its local lumps once, and one function projects them through the
+  plot transform for a candidate centre; `check:park` and the plan screen both
+  call it, the way `crossingPredicate.ts` is one predicate with three askers.
+  A second hand-written reach formula beside it would be the exact fault this
+  repo keeps paying for.
+
 ## Status
 
 - [x] Worktree, `pnpm install --frozen-lockfile`, Node 26.5.0.
