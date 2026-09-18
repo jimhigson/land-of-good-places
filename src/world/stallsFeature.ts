@@ -27,7 +27,11 @@
  *   capped at {@link STALL_SHIFT_REACH}, and — the part that actually matters —
  *   every candidate is *measured*: the stand point must still be standable,
  *   clear, and walkable to in a straight line from the spur's own end. The cap
- *   makes the move small; the measurement is what makes it safe.
+ *   makes the move small; the measurement is what makes it safe. That march is
+ *   asked of **every** booth — {@link spurEndFor} is total and throws rather
+ *   than letting one skip it, because the first cut guarded it with `if (plot)`
+ *   and the one booth placed by relation instead of by plot quietly got a
+ *   weaker gate than the other seven.
  * - **The booth and its collider move together, in one call.** `placeAt` moves
  *   the mesh and re-registers the four walls. Nothing derives a collider from a
  *   mesh in this codebase, so the only way they stay together is on purpose.
@@ -83,6 +87,7 @@ import {
   type StallPlacement,
 } from '../minigames/stallPlacement';
 import { clearOfFootprints, placedEntry } from './parkLayout';
+import { ANCHORS_BY_ID } from './anchors';
 import type { CollisionWorld } from './Collision';
 import { PARK_BOUNDARY } from './boundary';
 
@@ -170,6 +175,41 @@ function* bodyPoints(x: number, z: number, yaw: number, box: BoothBox): Generato
   }
 }
 
+/**
+ * **Where the paving that serves this booth ends** — the point a child walks
+ * to the counter *from*, and so the point the straight-line gate in
+ * {@link stallBuilder}'s `accepts` marches from.
+ *
+ * Total on purpose. Seven booths have a plot of their own and it is that
+ * plot's doormat. The ferris kiosk has no plot — `ferrisKiosk()` places it
+ * *by relation*, five metres to the side of the wheel's own entrance — so its
+ * spur end is that entrance, which is a plot doormat too
+ * (`anchors.ts` builds `entrance` from a `placedEntry`'s `entranceX/entranceZ`,
+ * and `paths.ts` paves to it). Same question, same kind of answer, asked of
+ * the same owner that decided where the kiosk stands.
+ *
+ * **It throws rather than returning null**, and that is the point of it. The
+ * first cut guarded the march with `if (layoutId)`, which meant the one booth
+ * with no plot silently skipped the test this class calls the one that
+ * decides — reachable by nothing today, which is exactly how a silent skip
+ * survives long enough to matter. A stall added later with neither a plot nor
+ * a stated relation now fails loudly, here, instead of quietly getting a
+ * weaker gate than every other booth.
+ */
+function spurEndFor(id: string): readonly [number, number] {
+  const layoutId = STALL_LAYOUT_IDS[id];
+  if (layoutId) {
+    const entry = placedEntry(layoutId);
+    return [entry.entranceX, entry.entranceZ];
+  }
+  if (id === 'spaceFerrisWheel') return ANCHORS_BY_ID.ferrisWheel.entrance;
+  throw new Error(
+    `stalls: '${id}' has no plot in STALL_LAYOUT_IDS and no stated relation, so there is no spur ` +
+      'end to measure its counter from. Give it one, or it gets a weaker acceptance gate than ' +
+      'every other booth and nothing says so — see spurEndFor in world/stallsFeature.ts.',
+  );
+}
+
 export function stallBuilder(
   collision: CollisionWorld,
   claims: GroundClaims,
@@ -221,10 +261,10 @@ export function stallBuilder(
     // path-find (`minigames/stalls.ts`), so "straight" is the real test.
     const [standX, standZ] = standOf(candidate);
     if (!collision.isClearCircle(standX, standZ, PLAYER_RADIUS)) return false;
-    if (layoutId) {
-      const entry = placedEntry(layoutId);
-      if (!walkableStraightLine(collision, entry.entranceX, entry.entranceZ, standX, standZ)) return false;
-    }
+    // **Every booth, with no exception.** `spurEndFor` is total — see its own
+    // comment for why the ferris kiosk is not the exception it looks like.
+    const [spurX, spurZ] = spurEndFor(id);
+    if (!walkableStraightLine(collision, spurX, spurZ, standX, standZ)) return false;
     return true;
   };
 
