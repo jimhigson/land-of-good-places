@@ -111,32 +111,42 @@ meshes in the built `world.fairyLights.group`.
 
 | seed | poles drawn | strings | nearest paving at the ring |
 |---|---|---|---|
-| 0..6 | 10/10 | 10 | 1.84 m |
+| 0, 1, 2, 3, 4, 5, 6 | 10/10 | 10 | 1.84 m |
 | 7 | 10/10 | 10 | 1.75 m |
+| **8** | **9/10** | **8** | **-0.17 m** |
+| 9, 10, 11 | 10/10 | 10 | 1.84 m |
+| **12** | **8/10** | **7** | **1.15 m** |
+| 13, 14, 15 | 10/10 | 10 | 1.84 m |
+
+**147 poles across the sixteen seeds. BEFORE: 0 on every seed.**
 
 The verge is **identical on every seed** — `9.40..13.10`, middle `11.25` —
 because `PLAZA.radius` and `RING_RADIUS` both derive from the fountain's
 manifest footprint, not from the seed. Only the spurs that cross the verge
-vary, and seed 7's take it to 1.75 m; the gate is 1.52 m.
+vary.
 
-BEFORE is **0 poles on every seed**, for the same reason: the old literal 13.5
+BEFORE is 0 poles on every seed for that same reason: the old literal 13.5
 sits 0.40 m inside a loop whose inner paving is at 13.10 on every seed.
 Measured directly on the canonical seed by the red-run mutation below (0/10
 poles, 0 strings at r=13.5); `scripts/_probe-fairy-before.mts` measures both
-rings against one built park if a per-seed BEFORE column is wanted.
+rings against one built park if a per-seed BEFORE column is ever wanted.
 
-### The gateway gap still works — seed 8 proves it
+### The gateway gap still works — seeds 8 and 12 prove it
 
 On most seeds every slot stands, so the ring is a complete circle of ten poles
-and ten strings. **Seed 8 is the exception and it is the useful one**: a spur
-crosses the verge there (nearest paving **-0.17 m**, i.e. actually on paving),
-so one pole is skipped and the two strings either side of it are dropped —
-**9 poles, 8 strings**. That is the designed "gateway" behaviour firing on a
-real park, which also means the skip branch is live code and not dead code.
+and ten strings. **Seeds 8 and 12 are the exceptions and they are the useful
+ones**: a spur crosses the verge (seed 8 at **-0.17 m**, i.e. actually on the
+paving; seed 12 at 1.15 m, inside the 1.52 m gate), so a pole is skipped and
+the strings either side of it are dropped. That is the designed "gateway"
+behaviour firing on a real park, which also means the skip branch is live code
+rather than dead code.
 
 (An earlier revision of this handoff said the branch "never fires now". That
 was wrong, and it was wrong because it was reasoned from the geometry instead
-of measured. Seed 8 corrected it.)
+of measured. Seed 8 corrected it. Measure, do not derive.)
+
+The new invariant passes on both: 9/8 and 8/7 are non-zero. It refuses
+**silence**, not the gateway gap — which is the distinction it exists for.
 
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
