@@ -120,3 +120,23 @@ input, watch the finding come back, then restore:
 
 Paste the geometry each was proved against alongside the transcript — a
 red-run transcript goes stale (CLAUDE.md).
+
+## The shape of the deliverable if the residue is gone
+
+The brief anticipates this case. Then the work is:
+
+1. The sweep table above, taken at this head, as the evidence.
+2. The three controls, so "gone" means "the instrument still fires and the
+   class is closed **at source**", not "this seed drew a different park".
+3. A **wide sweep past the pool** (16..39, `LGP_RATCHET=off --verbose`, which
+   reports drift rather than failing and prints each anchor's built-out
+   margin) to answer "absent by luck?" — a class that returns off-pool is not
+   closed, only hidden.
+4. The one fragility already visible by reading: `anchor.reach:waterFight` is
+   held at zero by a **hand-declared constant** (`boundingRadius: 19`) that
+   somebody re-measured against seeds 0–15 and typed in. That is the repo's
+   most expensive habit — two definitions of one thing kept in step by hand —
+   and the margin is 0.2 m (seed 12 built to 18.8). If the wide sweep puts
+   any seed past 19, the honest fix is a **refusal in the world phase** (the
+   ride's own dressing builder retries when its lumps exceed its declared
+   reach), not another re-typed number.
