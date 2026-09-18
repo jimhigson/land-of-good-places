@@ -284,25 +284,142 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
    */
   const REFINE = 2;
 
-  const distanceToEdge = (x: number, z: number): number => {
+  // The vertices again as two flat arrays. The coarse pass below reads them a
+  // few hundred thousand times a build and `points[i]` is a pointer chase to a
+  // two-element JS array per vertex; these are the same doubles in the same
+  // order, so every arithmetic result is bit-identical.
+  const vertexX = new Float64Array(count);
+  const vertexZ = new Float64Array(count);
+  for (let i = 0; i < count; i += 1) {
+    const [x, z] = points[i] as [number, number];
+    vertexX[i] = x;
+    vertexZ[i] = z;
+  }
+
+  /**
+   * **The coarse pass's 512-vertex scan, made exact and cheap.**
+   *
+   * The scan below finds the nearest *vertex* so the refinement can do real
+   * point-to-segment work on the five segments beside it. It was **80.7% of
+   * the whole park solve's CPU** (profiled on seed 7, 2026-09-18): the rail
+   * generator's `validate` asks `distanceToEdge` once per sample of every
+   * candidate piece — hundreds of thousands of pieces on a seed whose railway
+   * dead-ends — and each ask walked all 512.
+   *
+   * So the plane is diced into cells, and each cell remembers **every vertex
+   * that could be the nearest one for any point inside it**. For a cell, let
+   * `U` be the smallest "furthest corner" distance any vertex has to that
+   * cell; a vertex whose *nearest* approach to the cell exceeds `U` can never
+   * win anywhere in it, and everything else is kept. So the candidate list
+   * provably contains the true nearest vertex for every point in the cell.
+   *
+   * **It is exact, not an approximation, and that is the whole point** —
+   * `solverBoundary` below is the approximate answer, and adopting it for the
+   * train would have re-drawn every park on every seed. The list is held in
+   * ascending vertex order and scanned with the same strictly-less-than test
+   * as the full scan, so a tie is broken towards the same index the full scan
+   * would have picked; the distances themselves are the same `dx*dx + dz*dz`
+   * on the same doubles. A park built before this change is built identically
+   * after it (proved: the canonical park digest is unchanged).
+   *
+   * **A cell's list is computed the first time a query lands in it**, not up
+   * front. Filling the whole grid is a ~17 M-operation lump, and the browser
+   * boot runs this inside a sliced frame whose worst slice `check:park-boot`
+   * holds to 21 ms — a one-off cost in the wrong place is how a speed fix
+   * becomes a stutter. Per cell it is two passes over the vertices, about two
+   * microseconds, paid by whichever query got there first and by no other.
+   *
+   * A cell that would keep more than half the vertices keeps none instead and
+   * its queries fall back to the full scan — near a near-circular park's
+   * centre every vertex genuinely can be the nearest one, and a list of 512 is
+   * the scan with an allocation on top.
+   */
+  const GRID_CELLS_ACROSS = 128;
+  const gridWidth = Math.max(maxX - minX, 1e-6);
+  const gridDepth = Math.max(maxZ - minZ, 1e-6);
+  const cellSize = Math.max(gridWidth, gridDepth) / GRID_CELLS_ACROSS;
+  const gridWide = Math.floor(gridWidth / cellSize) + 1;
+  const gridDeep = Math.floor(gridDepth / cellSize) + 1;
+  const cellCandidates: (Int32Array | null)[] = new Array(gridWide * gridDeep).fill(null);
+  const cellComputed = new Uint8Array(gridWide * gridDeep);
+  const candidateCap = count >> 1;
+
+  const candidatesFor = (gx: number, gz: number, index: number): Int32Array | null => {
+    cellComputed[index] = 1;
+    const x0 = minX + gx * cellSize;
+    const x1 = x0 + cellSize;
+    const z0 = minZ + gz * cellSize;
+    const z1 = z0 + cellSize;
+    // The tightest "some vertex is certainly this close, everywhere in the
+    // cell" bound: the smallest furthest-corner distance over all vertices.
+    let bound = Infinity;
+    for (let i = 0; i < count; i += 1) {
+      const px = vertexX[i] as number;
+      const pz = vertexZ[i] as number;
+      const fx = Math.max(px - x0, x1 - px);
+      const fz = Math.max(pz - z0, z1 - pz);
+      const far = fx * fx + fz * fz;
+      if (far < bound) bound = far;
+    }
+    const keep: number[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const px = vertexX[i] as number;
+      const pz = vertexZ[i] as number;
+      const nx = px < x0 ? x0 - px : px > x1 ? px - x1 : 0;
+      const nz = pz < z0 ? z0 - pz : pz > z1 ? pz - z1 : 0;
+      if (nx * nx + nz * nz <= bound) keep.push(i);
+    }
+    if (keep.length > candidateCap) return null;
+    const list = Int32Array.from(keep);
+    cellCandidates[index] = list;
+    return list;
+  };
+
+  const nearestVertex = (x: number, z: number): number => {
+    const gx = Math.floor((x - minX) / cellSize);
+    const gz = Math.floor((z - minZ) / cellSize);
     let coarse = 0;
     let coarseBest = Infinity;
+    if (gx >= 0 && gz >= 0 && gx < gridWide && gz < gridDeep) {
+      const index = gx * gridDeep + gz;
+      const list = cellComputed[index] === 1 ? cellCandidates[index] : candidatesFor(gx, gz, index);
+      if (list) {
+        for (let k = 0; k < list.length; k += 1) {
+          const i = list[k] as number;
+          const dx = x - (vertexX[i] as number);
+          const dz = z - (vertexZ[i] as number);
+          const d = dx * dx + dz * dz;
+          if (d < coarseBest) {
+            coarseBest = d;
+            coarse = i;
+          }
+        }
+        return coarse;
+      }
+    }
     for (let i = 0; i < count; i += 1) {
-      const [px, pz] = points[i] as [number, number];
-      const dx = x - px;
-      const dz = z - pz;
+      const dx = x - (vertexX[i] as number);
+      const dz = z - (vertexZ[i] as number);
       const d = dx * dx + dz * dz;
       if (d < coarseBest) {
         coarseBest = d;
         coarse = i;
       }
     }
+    return coarse;
+  };
+
+  const distanceToEdge = (x: number, z: number): number => {
+    const coarse = nearestVertex(x, z);
 
     let best = Infinity;
     for (let step = -REFINE; step <= REFINE; step += 1) {
       const i = (((coarse + step) % count) + count) % count;
-      const [ax, az] = points[i] as [number, number];
-      const [bx, bz] = points[(i + 1) % count] as [number, number];
+      const j = (i + 1) % count;
+      const ax = vertexX[i] as number;
+      const az = vertexZ[i] as number;
+      const bx = vertexX[j] as number;
+      const bz = vertexZ[j] as number;
       const dx = bx - ax;
       const dz = bz - az;
       const lengthSq = dx * dx + dz * dz;
