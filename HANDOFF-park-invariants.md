@@ -239,3 +239,42 @@ one, the instrument is picking wrong; if there is exactly one, the seam is real
 and lives in `buildCopingRun`'s first segment.
 
 Do **not** widen the 0.02 m tolerance.
+
+## `check:solve-cost` is flaky on a shared Mac — measured, not asserted
+
+`pnpm run check` went red once on this branch at:
+
+    layout stage cost 275.1 ms against a 250 ms budget (8 x its measured 9 ms)
+
+**It is not this branch's doing, and here is the evidence rather than the
+claim.** `parkLayout.ts` — the stage being timed — imports nothing this branch
+touches (`grep` for `distanceOutsideTower|CASTLE_TOWERS|worldToCastle|
+pointStandsOnABridge|chuteCentreLine` in it returns nothing), and the commit
+immediately before the red run made `castleTowersNow` **cheaper**, not dearer.
+
+Five measurements of the same stage on the same code:
+
+| run | machine | layout |
+|---|---|---|
+| full `check` #1 | contending with a stray second `check` | 99.8 ms — ok |
+| full `check` #2 | load avg **14.82**, four other agents' worktrees busy | **275.1 ms — FAIL** |
+| alone | load ~14 | 216.5 ms — ok |
+| alone | load 13.33 | 102.2 ms — ok |
+| alone | load 13.33 | 97.4 ms — ok |
+| alone | load 12.74 | 96.1 ms — ok |
+
+The budget is `8 x 9 ms measured, floor 250`, so the **floor** is carrying the
+whole check: the stage's own median is 9 ms and every real reading is 10-30x
+that. What the number actually measures on this machine is contention, not the
+solver.
+
+Per CLAUDE.md flaky *is* failing, so this wants root-causing — but the root
+cause is a wall-clock budget on a box running five agents at once, and the fix
+is to measure CPU time rather than wall time (or to serialise the check), not
+to widen 250 until it stops going red. **Do not widen it.** Left for whoever
+owns `scripts/check-solve-cost.mts`; raised here with the numbers so the next
+person does not have to rediscover them.
+
+Everything else in the 66-step chain passed, including `check:park`
+(19/19 attractions, 256/256 waypoints, all six invariants) and
+`check:castle-towers`.
