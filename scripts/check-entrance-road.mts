@@ -725,6 +725,18 @@ async function sweepThePool(): Promise<void> {
       }
     }),
   );
+  // **Every park the queue promised is a park the queue delivered.** A `Map`
+  // read with `as SeedReport` behind it is a cast, not a fact: lose a job and
+  // `pairs` would carry `undefined`s that every clause below would then read
+  // `.hits` off — `undefined` compared against a threshold is never greater, so
+  // the sweep would pass while describing nothing. Asked out loud instead.
+  const missing = jobs.filter((job) => !built.has(keyOf(job.seed, job.asControl)));
+  if (missing.length > 0) {
+    throw new Error(
+      `check:entrance-road: ${missing.length} of ${jobs.length} parks never came back — ` +
+        missing.map((job) => `${job.seed}${job.asControl ? ' (control)' : ''}`).join(', '),
+    );
+  }
   const pairs = PARK_SEED_POOL.map((seed) => ({
     real: built.get(keyOf(seed, false)) as SeedReport,
     control: built.get(keyOf(seed, true)) as SeedReport,
