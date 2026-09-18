@@ -61,9 +61,33 @@ that `check:slide-rider` (canonical seed only) cannot.
       floor)
 - [x] `test:procgen` failure set **identical** to the base branch — 55 on both,
       none added, none fixed. The base branch is already red here.
-- [ ] dense per-frame pixel sweep (the check samples only 2 frames per beat)
+- [x] dense per-frame pixel sweep — the check samples only 2 frames per beat, so
+      every trackside frame was rastered at 5-frame resolution. **True worst
+      across the whole ride: 0.59% of frame** (beat 1, frame 240), against the
+      0.40% floor. Next worst 0.68%, 0.73%, 0.79%. No frame dips under.
+      Beat 3 reaches `endOn` 0.99 and still reads 0.68% — viewed end-on from her
+      **feet**, where there is no head to hide the body; the extent measure
+      treats both ends alike, which is conservative, not wrong.
 - [ ] `pnpm run check` end to end
-- [ ] deliberate break of both assertions, transcripts pasted
+- [x] deliberate break. `git checkout origin/feat/procgen-on-sphere --
+      src/world/slide/cameras.ts src/world/building/Building.ts` (keeping the new
+      test clause) puts the **original** placement back, and the new invariant
+      clause goes red on the exact defect:
+
+      ```
+        seed 20260728: worst body extent beat 1 0.0445 (0.90 end-on), beat 3
+          0.0614 (0.81), beat 5 0.0854 (0.66) — floor 0.06
+        × the ginormous slide's cameras cover the whole ride and can see it
+        AssertionError: the trackside camera on beat 1 shows the rider at 0.0445
+        of body extent at its worst moment, against 0.06 required — it looks 90%
+        of the way down her own body there
+      ```
+
+      0.90 end-on matches the 0.910 measured frame by frame at ridden frame 240,
+      so the clause is armed against the thing it was written for, not merely
+      against a moved threshold. With the fix restored the same seed reads
+      0.0695. **Geometry this was proved against: base commit `ae20b9fc`,
+      canonical seed 20260728, slide length 78.94 m.**
 - [ ] PR
 
 ## Notes for whoever takes this over
