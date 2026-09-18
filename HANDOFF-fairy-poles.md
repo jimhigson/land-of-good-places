@@ -175,25 +175,28 @@ are badly aimed cameras, not defects — ignore them. Camera aiming on the
 sphere is not intuitive: `camDir` toward the plaza did not centre it, so the
 frames were found by iterating, not by computing.
 
-## check:park — 7 of 16 green, then deliberately paused
+## check:park — 16 of 16 GREEN
 
-| seed | result |
-|---|---|
-| 0 | GREEN 254/254 waypoints |
-| 1 | GREEN 228/228 |
-| 2 | GREEN 233/233 |
-| 3 | GREEN 237/237 |
-| 4 | GREEN 237/237 |
-| 5 | GREEN 242/242 |
-| 6 | GREEN 230/230 |
+| seed | waypoints | seed | waypoints |
+|---|---|---|---|
+| 0 | 254/254 | 8 | **278/278** |
+| 1 | 228/228 | 9 | 235/235 |
+| 2 | 233/233 | 10 | 216/216 |
+| 3 | 237/237 | 11 | 308/308 |
+| 4 | 237/237 | 12 | **275/275** |
+| 5 | 242/242 | 13 | 246/246 |
+| 6 | 230/230 | 14 | 214/214 |
+| 7 | 253/253 | 15 | 263/263 |
 
-**Paused at seed 7 on purpose**, on the Overseer's advice: the sweep was
-six-for-six with low remaining risk and about to sit behind seed 7 (~1000 s,
-and longer under sibling load), whereas the `test:procgen` name-diff had never
-been run against this diff at all and is where an unpleasant surprise would
-come from. **Resume with seeds 7..15** — the loop is in this file's history,
-or re-run `LGP_SEED=n pnpm run check:park` per seed. No orphan node processes
-were left; killed by cwd match on the worktree.
+One process per seed. **Seeds 8 and 12 are the load-bearing ones**: they are
+the seeds where a spur crosses the verge and a pole is skipped, and both reach
+every waypoint. A skipped pole costs nothing in reachability — the gateway gap
+does not block anywhere a child has to stand, which is the thing `keepOutsFor`
+and the claims registry exist to protect.
+
+(The sweep ran 0–6, was paused at seed 7 to run the name-diff first on the
+Overseer's advice, then resumed 7–15. Seed 7 came in green at 253/253 without
+stalling, so the contention worry did not materialise.)
 
 ## The name-diff, and how it is being done honestly
 
