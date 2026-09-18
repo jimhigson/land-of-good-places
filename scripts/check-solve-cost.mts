@@ -52,8 +52,58 @@
  *
  * Never tighten a budget to what your machine printed today; re-derive it
  * from a fresh median and the formula, and write both down here.
+ *
+ * ### It gates on CPU time, not wall clock (the flake, root-caused)
+ *
+ * This check read **260.3 ms against a 250 ms budget** once, and 96.6 / 98.0 /
+ * 99.3 ms on the same commit when the box was quiet; a second agent measured
+ * 96.1 / 97.4 / 102.2 / **216.5** / **275.1** / 99.8 ms, with both reds taken
+ * at load average 14.82 with four other worktrees busy. Every reading was of
+ * `performance.now()` around a dynamic `import()` — wall clock, which charges a
+ * descheduled process for time it did not compute in. A budget whose verdict
+ * depends on what else is running is non-deterministic by construction, and
+ * CLAUDE.md is explicit that the fix is to remove the non-determinism rather
+ * than to widen the budget or retry.
+ *
+ * So each stage is now gated on `min(wall, thread CPU)` — `scripts/lib/cpuClock.mts`,
+ * the same instrument and the same three controls `check:park-boot` uses, for
+ * the same reason (issue #606). A stage that is descheduled accrues no CPU time
+ * and drops straight out of the minimum. Both numbers are printed, so a large
+ * gap between them is visible as the contention it is. If the instrument fails
+ * its control the gate falls back to raw wall clock and says so, loudly: the
+ * old flaky check rather than a check that passes everything.
+ *
+ * ### What this check no longer covers, and why it says so on every run
+ *
+ * Under the backtracking rework nothing solves at module scope any more — every
+ * plan is a `lazyView` over `parkPlan.ts`'s driver, and reading one is what
+ * forces the work. So five of the seven stages below now measure module *parse*
+ * and nothing else. Measured on this branch:
+ *
+ *     cruiser   0.3 ms vs a  6304 ms budget
+ *     train     0.2 ms vs a 12000 ms budget
+ *     slide     0.1 ms vs a 32560 ms budget
+ *     paths     0.1 ms vs a  2744 ms budget
+ *     railRace  0.1 ms vs a   250 ms budget
+ *
+ * Those clauses are four to five orders of magnitude from their thresholds:
+ * they cannot fail, and a green line from them means nothing. Only `boundary`
+ * (54.5 ms, still a real `cachedSolve` at module scope) and `layout` (122.5 ms
+ * of module graph evaluation, against the coarse 250 ms floor — and it is the
+ * one that flaked) still read anything.
+ *
+ * That is not something to leave implied by a quiet green line, so
+ * {@link ASSERTS_NOTHING_HEADROOM} names every such stage on stderr on every
+ * run, with its real numbers. **Re-deriving those five budgets is a threshold
+ * decision, deliberately not taken here** — the work they used to measure now
+ * lives in the driver, which `check:park-boot` gates per-slice and
+ * `parkPlan.ts` reports per-feature on every build, so the honest resolution is
+ * the reconciliation this file's header has always asked for, not a number
+ * invented in passing.
  */
 import { performance } from 'node:perf_hooks';
+
+import { busyLabel, busyMsOf, controlOfCpuClock, cpuMs, describeControl } from './lib/cpuClock.mts';
 
 interface Stage {
   readonly stage: string;
@@ -94,29 +144,76 @@ const STAGES: readonly Stage[] = [
   { stage: 'paths', load: () => import('../src/world/pathGraph.ts'), measuredMs: 343 },
 ];
 
+/**
+ * A stage whose reading is this many times under its budget is reported as
+ * asserting nothing. It is a reporting threshold, never a gate: nothing passes
+ * or fails because of it, so it cannot be tuned to make a run green.
+ */
+const ASSERTS_NOTHING_HEADROOM = 100;
+
+// The control runs before anything is measured, because this check's own
+// subject is a budget that was measuring the machine rather than the code.
+const cpuClock = controlOfCpuClock();
+console.log(`  ${describeControl(cpuClock)}`);
+
 await import('three'); // parse cost lands here, not on the first stage to touch it
 
 const fouls: string[] = [];
-console.log('solver stage cost vs budget (canonical seed):');
+const assertsNothing: string[] = [];
+console.log(`solver stage cost vs budget (canonical seed), gated on ${busyLabel(cpuClock)}:`);
 for (const { stage, load, measuredMs } of STAGES) {
-  const at = performance.now();
+  const wallAt = performance.now();
+  const cpuAt = cpuMs();
   await load();
-  const ms = performance.now() - at;
+  const wallMs = performance.now() - wallAt;
+  const cpuDeltaMs = cpuMs() - cpuAt;
+  const ms = busyMsOf(cpuClock, wallMs, cpuDeltaMs);
   const budget = budgetMs(measuredMs);
   const verdict = ms <= budget ? 'ok' : 'OVER';
   console.log(
     `  ${stage.padEnd(10)} ${ms.toFixed(1).padStart(9)} ms   budget ${budget
       .toFixed(0)
-      .padStart(6)} ms (8 x ${measuredMs} ms measured, floor 250)   ${verdict}`,
+      .padStart(6)} ms (8 x ${measuredMs} ms measured, floor 250)   ${verdict}` +
+      `   [wall ${wallMs.toFixed(1)} ms, cpu ${cpuDeltaMs.toFixed(1)} ms]`,
   );
   if (ms > budget) {
     fouls.push(
-      `${stage} stage cost ${ms.toFixed(1)} ms against a ${budget.toFixed(0)} ms budget ` +
-        `(8 x its measured ${measuredMs} ms) — a regression of this size is structural, not noise; `
-        + `profile it (node --cpu-prof) and fix the stage, or re-derive the budget from a fresh ` +
+      `${stage} stage cost ${ms.toFixed(1)} ms of ${busyLabel(cpuClock)} against a ` +
+        `${budget.toFixed(0)} ms budget (8 x its measured ${measuredMs} ms) — a regression of this ` +
+        `size is structural, not noise, and it is not contention either, because a descheduled ` +
+        `stage accrues no CPU time (wall was ${wallMs.toFixed(1)} ms, CPU ${cpuDeltaMs.toFixed(1)} ms); ` +
+        `profile it (node --cpu-prof) and fix the stage, or re-derive the budget from a fresh ` +
         `median if the stage legitimately grew and say so in scripts/check-solve-cost.mts`,
     );
   }
+  if (ms > 0 && budget / ms >= ASSERTS_NOTHING_HEADROOM) {
+    assertsNothing.push(
+      `${stage} (${ms.toFixed(1)} ms against ${budget.toFixed(0)} ms — ${Math.round(budget / ms)}x under)`,
+    );
+  }
+}
+
+// stderr, not console.log: a coverage note written to stdout is invisible in
+// exactly the case it exists for, a passing run (CLAUDE.md).
+if (!cpuClock.usable) {
+  process.stderr.write(
+    "check:solve-cost NOTE: this runtime's CPU clock failed its control — " +
+      `${cpuClock.failures.join('; ')}. Every budget in this run was therefore compared against ` +
+      'RAW WALL CLOCK, so a busy machine can redden it for reasons no commit caused. Fix the clock ' +
+      'reading, do not raise the budgets.\n',
+  );
+}
+if (assertsNothing.length > 0) {
+  process.stderr.write(
+    `check:solve-cost NOTE: ${assertsNothing.length} of ${STAGES.length} stages ASSERT NOTHING on ` +
+      `this run — ${assertsNothing.join(', ')}. Under backtracking these stages no longer solve at ` +
+      'module scope (every plan is a lazyView over parkPlan.ts\'s driver, and reading one is what ' +
+      'forces the work), so what is measured here is module parse and the budget is four to five ' +
+      'orders of magnitude away from it. A green line from those stages means nothing. The work ' +
+      'itself is gated per-slice by check:park-boot and reported per-feature by parkPlan.ts\'s ' +
+      '"time/pieces" line; re-pointing these budgets at that is the reconciliation this file\'s ' +
+      'header asks for and is a threshold decision for whoever takes it, not a number to invent.\n',
+  );
 }
 
 if (fouls.length > 0) {
