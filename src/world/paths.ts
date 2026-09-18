@@ -2062,6 +2062,40 @@ function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_M
   return false;
 }
 
+/**
+ * **Does this point stand on a bridge at all — its deck as well as its walls?**
+ *
+ * {@link pointStandsOnBridgeMasonry} deliberately lets the deck through, and
+ * says why: a crossing's own approach runs over the deck, and refusing it cost
+ * seed 24 its only bridge. That is right for deciding whether a lattice node
+ * may exist, because a street *crossing* a bridge is the whole point of one.
+ *
+ * It is not right for deciding where a **spur may branch**. A junction on a
+ * deck sends a ribbon off the side of the bridge, and the drawn route then ends
+ * in mid-air: measured on the canonical seed, `spur-exit-railRace` branched at
+ * (-33.07, -40.62), **1.73 m above the ground beneath it**, against a child's
+ * own step-up of 0.62 m — she walks the ring onto the bridge, turns off towards
+ * the rail-race exit, and the paving stops at a drop. That is
+ * `noDrawnPathEndsStrandedOnABridge`, and the node was valid by every test the
+ * lattice had.
+ *
+ * So this is the wider question, asked only where the narrower one is wrong.
+ */
+function pointStandsOnABridge(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
+  for (const site of CROSSING_SITES) {
+    const dx = x - site.x;
+    const dz = z - site.z;
+    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
+    if (across > site.halfWidth + margin) continue;
+    const along = dx * site.dirX + dz * site.dirZ;
+    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
+        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** The Sky Cruiser's pylons have the same relationship to streets as the
  * slide's legs: `LampPosts.ts` lights every ribbon, and a lamp is exactly
  * what steals a pylon's spot (`skyCruiserStandsOnItsOwnSupports`, and
@@ -2555,6 +2589,19 @@ function computeStreetStubs(p: readonly [number, number], arrival: boolean): Str
         const j = cj + dj;
         if (Math.abs(i) > LATTICE_HALF_CELLS || Math.abs(j) > LATTICE_HALF_CELLS) continue;
         const index = lattice.indexOf(i, j);
+        // **A junction on a bridge is not a junction.** The node is valid —
+        // `nodeOk` deliberately admits a deck so a street may cross one — but a
+        // spur branching off it leaves the bridge sideways and its paving stops
+        // at a drop. See {@link pointStandsOnABridge}.
+        if (pointStandsOnABridge(lattice.xs[index] as number, lattice.zs[index] as number)) {
+          if (verbose) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[stubs]   node ${(lattice.xs[index] as number).toFixed(1)},${(lattice.zs[index] as number).toFixed(1)}: on a bridge`,
+            );
+          }
+          continue;
+        }
         if (!lattice.nodeOk[index] || lattice.side[index] !== pSide) {
           if (verbose) {
             // eslint-disable-next-line no-console
