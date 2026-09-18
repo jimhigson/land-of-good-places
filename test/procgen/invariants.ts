@@ -60,7 +60,6 @@ import {
   type ParkFacts,
 } from './parkFacts.ts';
 import { offAxisGround, recutCarriers, type OffAxisGround } from './gridAxes.ts';
-import { boothClaims } from '../../src/minigames/boothFootprint.ts';
 // A leaf module: `Geo.ts` imports `three` and `core/constants` and nothing
 // else, so a static import here cannot load a seeded module early — the hazard
 // this file's header warns about. It is imported rather than restated because
@@ -11476,54 +11475,115 @@ const stallsAreDrawnClaimedAndSolidTogether: Invariant = (facts) => {
   const FLOAT32_SLACK = 1e-3;
   const near = (a: number, b: number): boolean => Math.abs(a - b) <= FLOAT32_SLACK;
 
+  /** Every wall in the built collision world, so a claim can be matched to one. */
+  const walls: { x1: number; z1: number; x2: number; z2: number; halfThickness: number }[] = [];
+  collision.forEachWall((x1, z1, x2, z2, halfThickness) => {
+    walls.push({ x1, z1, x2, z2, halfThickness });
+  });
+
   let wallsProbed = 0;
   let moved = 0;
   let worstShift = 0;
+  let worstCentreGap = 0;
   for (const stall of facts.stalls) {
     if (stall.steppedAside > 0) moved += 1;
     worstShift = Math.max(worstShift, stall.steppedAside);
     const at = `(${stall.drawnX.toFixed(2)}, ${stall.drawnZ.toFixed(2)})`;
+    const box = stall.box;
+    const halfDiagonal = Math.hypot(box.halfWidth, Math.max(box.front, -box.back));
 
-    // --- 2. claimed where drawn ------------------------------------------
-    const fromDrawn = boothClaims(stall.drawnX, stall.drawnZ, stall.drawnYaw, stall.box);
-    for (const want of fromDrawn) {
-      const shape = want.shape;
-      if (shape.shape !== 'capsule') continue;
-      const found = claimed.some((claim) => {
-        const other = claim.shape;
-        return (
-          claim.kind === want.kind &&
-          other.shape === 'capsule' &&
-          near(other.x1, shape.x1) &&
-          near(other.z1, shape.z1) &&
-          near(other.x2, shape.x2) &&
-          near(other.z2, shape.z2) &&
-          near(other.halfWidth, shape.halfWidth)
-        );
-      });
-      if (!found) {
-        wrong.push(
-          `seed ${facts.seed}: the '${stall.id}' booth is drawn at ${at} but the registry holds no ` +
-            `"stalls" claim for its wall (${shape.x1.toFixed(2)}, ${shape.z1.toFixed(2)})-` +
-            `(${shape.x2.toFixed(2)}, ${shape.z2.toFixed(2)}) — the booth moved and its claim did ` +
-            'not, or the claim moved and the booth did not',
-        );
-        break;
-      }
-    }
-
-    // --- 3. solid where drawn --------------------------------------------
-    for (const wall of fromDrawn) {
-      const shape = wall.shape;
-      if (shape.shape !== 'capsule') continue;
-      wallsProbed += 1;
+    // --- 1. this booth's four claimed walls ------------------------------
+    // Found by proximity to where the booth is *drawn*, never by index: the
+    // whole question is whether the registry describes the booth that is on
+    // screen, so the claims have to be looked up by the drawn position.
+    const mine = claimed.filter((claim) => {
+      const shape = claim.shape;
+      if (claim.kind !== 'footprint' || shape.shape !== 'capsule') return false;
       const midX = (shape.x1 + shape.x2) / 2;
       const midZ = (shape.z1 + shape.z2) / 2;
+      return Math.hypot(midX - stall.drawnX, midZ - stall.drawnZ) <= halfDiagonal + FLOAT32_SLACK;
+    });
+    if (mine.length !== 4) {
+      wrong.push(
+        `seed ${facts.seed}: the '${stall.id}' booth is drawn at ${at} and the registry holds ` +
+          `${mine.length} "stalls" wall claim(s) within its own body, not 4 — the booth and its ` +
+          'claim are not in the same place',
+      );
+      continue;
+    }
+
+    // Its four walls are that booth's box: two of the counter's width, two of
+    // its depth. Taken from `boothFootprint.ts`'s box, not from a number typed
+    // here, so a booth that is resized stays checked.
+    const sides = mine
+      .map((claim) => {
+        const shape = claim.shape as { x1: number; z1: number; x2: number; z2: number };
+        return Math.hypot(shape.x2 - shape.x1, shape.z2 - shape.z1);
+      })
+      .sort((a, b) => a - b);
+    const wantSides = [box.front - box.back, box.front - box.back, box.halfWidth * 2, box.halfWidth * 2].sort(
+      (a, b) => a - b,
+    );
+    if (sides.some((side, i) => !near(side, wantSides[i] as number))) {
+      wrong.push(
+        `seed ${facts.seed}: the '${stall.id}' booth's claimed walls measure ` +
+          `${sides.map((v) => v.toFixed(2)).join(', ')} m but its body is ` +
+          `${wantSides.map((v) => v.toFixed(2)).join(', ')} m — the registry is describing some ` +
+          'other shape than the booth that was drawn',
+      );
+    }
+
+    // --- 2. drawn where claimed ------------------------------------------
+    // The eight endpoints average to the box's centre (each corner appears in
+    // two walls), and the box's centre sits `(front + back) / 2` ahead of the
+    // booth's own origin — the only offset there is, and it comes off the box
+    // rather than being a tolerance somebody tuned.
+    let sumX = 0;
+    let sumZ = 0;
+    for (const claim of mine) {
+      const shape = claim.shape as { x1: number; z1: number; x2: number; z2: number };
+      sumX += shape.x1 + shape.x2;
+      sumZ += shape.z1 + shape.z2;
+    }
+    const centreGap = Math.hypot(sumX / 8 - stall.drawnX, sumZ / 8 - stall.drawnZ);
+    const allowed = Math.abs((box.front + box.back) / 2) + FLOAT32_SLACK;
+    worstCentreGap = Math.max(worstCentreGap, centreGap);
+    if (centreGap > allowed) {
+      wrong.push(
+        `seed ${facts.seed}: the '${stall.id}' booth is drawn at ${at} but the middle of its ` +
+          `claimed body is ${centreGap.toFixed(3)} m away (at most ${allowed.toFixed(3)} m is its ` +
+          'own box offset) — the booth moved and its claim did not, or the claim moved and the ' +
+          'booth did not',
+      );
+    }
+
+    // --- 3. solid exactly where claimed ----------------------------------
+    for (const claim of mine) {
+      const shape = claim.shape as { x1: number; z1: number; x2: number; z2: number; halfWidth: number };
+      wallsProbed += 1;
+      const collider = walls.find(
+        (wall) =>
+          near(wall.halfThickness, shape.halfWidth) &&
+          ((near(wall.x1, shape.x1) && near(wall.z1, shape.z1) && near(wall.x2, shape.x2) && near(wall.z2, shape.z2)) ||
+            (near(wall.x1, shape.x2) && near(wall.z1, shape.z2) && near(wall.x2, shape.x1) && near(wall.z2, shape.z1))),
+      );
+      const midX = (shape.x1 + shape.x2) / 2;
+      const midZ = (shape.z1 + shape.z2) / 2;
+      if (!collider) {
+        wrong.push(
+          `seed ${facts.seed}: the '${stall.id}' booth claims a wall ` +
+            `(${shape.x1.toFixed(2)}, ${shape.z1.toFixed(2)})-(${shape.x2.toFixed(2)}, ` +
+            `${shape.z2.toFixed(2)}) that no collider in the built world matches — the claim says ` +
+            'solid and nothing stops a child there',
+        );
+      }
+      // And it really is solid, asked of the world rather than of the list:
+      // a collider that exists but has been left with nothing behind it fails
+      // here. This is the clause that has to be able to say no.
       if (collision.isClearCircle(midX, midZ, shape.halfWidth / 2)) {
         wrong.push(
-          `seed ${facts.seed}: the '${stall.id}' booth is drawn at ${at} but its wall at ` +
-            `(${midX.toFixed(2)}, ${midZ.toFixed(2)}) is open air — a child walks straight through ` +
-            'the booth she can see',
+          `seed ${facts.seed}: the '${stall.id}' booth's wall at (${midX.toFixed(2)}, ` +
+            `${midZ.toFixed(2)}) is open air — a child walks straight through the booth she can see`,
         );
       }
     }
@@ -11555,10 +11615,12 @@ const stallsAreDrawnClaimedAndSolidTogether: Invariant = (facts) => {
 
   process.stderr.write(
     `  stallsAreDrawnClaimedAndSolidTogether seed ${facts.seed}: ${facts.stalls.length} booths ` +
-      `measured (${facts.stallsMissing.length} unmeasurable), ${wallsProbed} walls probed against ` +
-      `the real collision world; ${moved} booth(s) stepped aside` +
+      `measured (${facts.stallsMissing.length} unmeasurable), ${wallsProbed} claimed walls matched ` +
+      `to colliders and probed in the real collision world; worst drawn-to-claimed gap ` +
+      `${worstCentreGap.toFixed(4)} m; ${moved} booth(s) stepped aside` +
       (moved === 0
-        ? ' — NO accommodation ran on this seed, so this run proves the resting case only'
+        ? ' — NO accommodation ran on this seed, so this run proves the resting case only ' +
+          '(scripts/check-stall-accommodate.mts is what proves the move)'
         : `, worst ${worstShift.toFixed(2)} m`) +
       '\n',
   );

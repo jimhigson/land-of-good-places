@@ -259,8 +259,6 @@ export interface StallFact {
   /** The booth group's world position, off `matrixWorld`. */
   readonly drawnX: number;
   readonly drawnZ: number;
-  /** The yaw the booth was built at, off the same matrix. */
-  readonly drawnYaw: number;
   /** Its body, from `boothFootprint.ts` — the one owner of every booth's box. */
   readonly box: BoothBox;
   /** Where the built interact zone sends a child to be served. */
@@ -2674,10 +2672,6 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       id,
       drawnX: at.x,
       drawnZ: at.z,
-      // The booth's yaw is set on the group before `standOnSphere` leans it,
-      // so it is `rotation.y` on the group itself rather than anything the
-      // leaned world matrix can be trusted for.
-      drawnYaw: group.rotation.y,
       box: boothBoxFor(id),
       standX: zone.standX,
       standZ: zone.standZ,
