@@ -3583,6 +3583,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       }
     }
   }
+
   // The fairy-light rig, counted off the scene it drew.
   //
   // **Poles and strings only, and both are meshes.** This used to carry a

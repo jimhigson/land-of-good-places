@@ -653,6 +653,48 @@ better check than reading it.
 have done both produces code that looks exactly like the fix. The only way to
 tell them apart is to move the shared value and watch the drawn thing move.
 
+## The right owner exposed a gap the wrong one was papering over
+
+The ride guard inflated a post's sampled axis by `POLE_RADIUS` (0.28) — the
+**collider** radius. That is a tolerance masquerading as ownership: widen the
+drawn post and the guard silently under-covers, with nothing to say so. So the
+drawn radii got an owner and `WIDEST_DRAWN_RADIUS` (0.22) is derived from them.
+
+**Switching to the correct owner made the cover worse**, because 0.28 had been
+accidentally compensating for a *sampling* gap. A vertex on the cylinder wall
+midway between two axis samples is `hypot(step / 2, bottomRadius)` from the
+nearest:
+
+| axis step | inflation | worst wall vertex | outside the guard by |
+|---|---|---|---|
+| 0.5 m | 0.28 (collider) | 0.302 | 0.022 m |
+| 0.5 m | 0.22 (drawn) | 0.302 | **0.082 m** |
+| **0.25 m** | **0.22 (drawn)** | **0.211** | **none** |
+
+The honest form of the old promise was "covered to within 0.082 m". Rather than
+quote a tolerance, `POST_AXIS_STEP` is **derived from the inequality that has to
+hold** — `hypot(step / 2, bottomRadius) <= widestDrawnRadius` — with a
+module-scope check that fails loudly if either number moves. **The promise is
+true instead of true-to-within-X**, and there is no number for anyone to
+maintain or to find stale later.
+
+Two constants were also live duplicates: the knob rise `0.12` (guard and
+drawing) and the drawn radii, which existed *only* in the drawing.
+`POLE_RADIUS` had been doing three unrelated jobs — collider, guard inflation,
+paving clearance — and now does two.
+
+### What `fairyOccupiedPoints` covers, and what it does not
+
+Covers: the post's axis, the knob, every cable and bulb to a standing
+neighbour. A **second string** between the same poles is free, because it comes
+from `fairySpan`.
+
+**Does not cover:** a part bolted to the post — a pennant, a lantern on a
+bracket — reaching further out than the knob. Nothing yet makes a *guard*
+narrower than the drawing fail; only a *collider* narrower than the drawing
+does. **That limit is written into the docstring** because this file has twice
+carried a comment promising cover it did not give.
+
 ## Read the log's STRUCTURE before quoting any line from it
 
 Three separate misreadings of a log in one session, all the same shape — **a
