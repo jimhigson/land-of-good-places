@@ -25,6 +25,27 @@
  *
  * Exits 0 always: it is an instrument, not a gate. `--strict` makes it exit 1
  * when it finds anything, for wiring into a chain later.
+ *
+ * ## Controlled, because a scan that cannot find anything reads exactly like a
+ * clean repo
+ *
+ * Run against a throwaway copy of `src/` at the commit that added this file,
+ * one mutation at a time. The first is the bug this was written for, put back
+ * verbatim; the last two are the *same read of the same binding* moved somewhere
+ * that does not run at import time, which it must not report.
+ *
+ * | control | mutation to `railRace/hazards.ts` | sites |
+ * |---|---|---|
+ * | A | none — the copy as committed | **7** |
+ * | B | `export const DUCK_CLEARANCE = DUCK_CLEARANCE_AT_PARK_SCALE * RIDE_SCALE;` re-imported from `./route` | **8**, naming `hazards.ts:186 DUCK_CLEARANCE <- RIDE_SCALE` |
+ * | C | the same expression inside `function duckClearance()` | **7** — not reported |
+ * | D | the same expression as an arrow-function initialiser | **7** — not reported |
+ *
+ * B is the point: pointed at the defect that was repaired by hand, it finds it.
+ * C and D are the point too — they are what stops "8" in B being a scan that
+ * simply matches the identifier wherever it appears. It discriminates on *when
+ * the expression is evaluated*, which is the only thing that decides whether a
+ * read is in a dead zone.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
