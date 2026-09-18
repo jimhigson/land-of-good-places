@@ -140,12 +140,31 @@ it lands.
 
 | seed | rc | secs | residue |
 |---|---|---|---|
-| 0 | 0 | 11 | — (1 unwind, decision-zero 1) |
-| 1 | 0 | 11 | — (0 refusals) |
-| 2 | 0 | 27 | — (0 refusals) |
-| 3 | 0 | 116 | — (6 unwinds, train attempt 3) |
-| 4 | 0 | 231 | — (14 refusals, 5 unwinds, decision-zero 1) |
-| 5 | 0 | 11 | — (0 refusals) |
+**COMPLETE. 16/16 green, ratchet enforced, one process per seed.** Quoted off
+the screen: every seed `rc=0`, and grepping all sixteen logs for
+`no allowance — this is new` / `it has got worse` / `invariant regression`
+returns **nothing**. Not one of the three residue classes appears on any seed.
+
+| seed | rc | secs | notes |
+|---|---|---|---|
+| 0 | 0 | 11 | 6 refusals, 1 unwind, decision-zero 1 |
+| 1 | 0 | 11 | 0 refusals |
+| 2 | 0 | 27 | 0 refusals |
+| 3 | 0 | 116 | 3 refusals, 6 unwinds, train attempt 3 |
+| 4 | 0 | 231 | 14 refusals, 5 unwinds, decision-zero 1 — **was `poi.nospot` 2 + `rail.walkable` 1** |
+| 5 | 0 | 11 | 0 refusals |
+| 6 | 0 | 27 | 0 refusals — **was `rail.walkable` 1 + `anchor.reach:waterFight`** |
+| 7 | 0 | 1334 | 42 refusals, 31 unwinds, decision-zero 2 — identical to the base handoff |
+| 8 | 0 | 13 | **was a World throw at `buildBridges` after a 330 s plan** |
+| 9 | 0 | 10 | **was `rail.walkable` 1** |
+| 10 | 0 | 17 | |
+| 11 | 0 | 9 | |
+| 12 | 0 | 12 | **was `anchor.reach:waterFight` 0.3** |
+| 13 | 0 | 6 | |
+| 14 | 0 | 44 | |
+| 15 | 0 | 44 | |
+
+(The seconds are contended — see the warning above. The verdicts are not.)
 
 ## The three controls this slice owes (planned before running)
 
