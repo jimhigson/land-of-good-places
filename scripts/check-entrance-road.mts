@@ -117,6 +117,7 @@
 import './headless-canvas.mjs';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { cpus } from 'node:os';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { InstancedMesh, Matrix4, type Object3D, Vector3 } from 'three';
@@ -641,19 +642,93 @@ async function sweepThePool(): Promise<void> {
   const measure = async (seed: number, asControl: boolean): Promise<SeedReport> => {
     const argv = ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', HERE, '--one'];
     if (asControl) argv.push('--control');
-    const { stdout } = await run(process.execPath, argv, {
-      env: { ...process.env, LGP_SEED: String(seed) },
-      maxBuffer: 1 << 26,
-    });
-    return JSON.parse(stdout.trim().split('\n').pop() as string) as SeedReport;
+    try {
+      const { stdout } = await run(process.execPath, argv, {
+        env: { ...process.env, LGP_SEED: String(seed) },
+        maxBuffer: 1 << 26,
+      });
+      return JSON.parse(stdout.trim().split('\n').pop() as string) as SeedReport;
+    } catch (cause) {
+      // Name the park. An `execFile` rejection says "Command failed" and lists
+      // an argv in which the seed appears nowhere (it travels in the env), so
+      // an unadorned one leaves the reader with 20 candidates.
+      throw new Error(
+        `check:entrance-road: the ${asControl ? 'control' : 'real'} park for seed ${seed} did not build`,
+        { cause },
+      );
+    }
   };
 
-  const pairs = await Promise.all(
-    PARK_SEED_POOL.map(async (seed) => ({
-      real: await measure(seed, false),
-      control: await measure(seed, true),
-    })),
+  /**
+   * **One queue of parks, `lanes` at a time — never a lane per seed.**
+   *
+   * This was `Promise.all(PARK_SEED_POOL.map(async seed => ({ real: await
+   * measure(seed, false), control: await measure(seed, true) })))`, and both
+   * halves of that were wrong on a runner:
+   *
+   * - **it launched a lane per seed**, ten unbounded park builds at once
+   *   against a four-vCPU runner, and
+   * - **it serialised each seed's control behind its own real park**, so the
+   *   slowest seed in the pool set the wall clock at *twice* its own cost
+   *   while nine lanes sat finished.
+   *
+   * That is what timed the workflow out (15-minute cap, killed at 14m56s) once
+   * seed 428 grew to 185 s a park: its lane alone was 370 s of local time,
+   * which is about 15 minutes of a CI core. The twenty parks are independent,
+   * so they go through **one** queue and the wall clock is the longest single
+   * park plus what the other nineteen cost spread over the cores that exist.
+   * `check-every-seed-builds.mts` has taken lanes from `LGP_LANES` and `cpus()`
+   * for the same reason since it was written; this is the same shape.
+   */
+  const jobs = PARK_SEED_POOL.flatMap((seed) => [
+    { seed, asControl: false },
+    { seed, asControl: true },
+  ]);
+  const lanes = Math.max(
+    1,
+    Math.min(Number(process.env['LGP_LANES'] ?? cpus().length), cpus().length, jobs.length),
   );
+  const built = new Map<string, SeedReport>();
+  const keyOf = (seed: number, asControl: boolean): string => `${seed}:${asControl ? 'c' : 'r'}`;
+  const queue = [...jobs];
+  let finished = 0;
+  const sweepStarted = Date.now();
+  /**
+   * **A line per park, as it lands, on stderr.**
+   *
+   * Every word this check printed used to be printed *after* the last park
+   * finished, so a sweep that was merely slow and a sweep that was genuinely
+   * hung were indistinguishable from outside. CI's record of the timeout is
+   * the command echo, fifteen minutes of nothing, and `The operation was
+   * canceled` — with no way to tell which of ten seeds it died on. Now the
+   * slow one names itself while it is still running, and the last line before
+   * a kill is the park that was outstanding.
+   */
+  process.stderr.write(
+    `check:entrance-road: ${jobs.length} parks (${PARK_SEED_POOL.length} seeds x real/control), ` +
+      `${lanes} at a time on ${cpus().length} cpu(s)\n`,
+  );
+  await Promise.all(
+    Array.from({ length: lanes }, async () => {
+      for (;;) {
+        const job = queue.shift();
+        if (!job) return;
+        const started = Date.now();
+        const report = await measure(job.seed, job.asControl);
+        built.set(keyOf(job.seed, job.asControl), report);
+        finished += 1;
+        process.stderr.write(
+          `  [${String(finished).padStart(2)}/${jobs.length}] seed ${String(job.seed).padStart(8)} ` +
+            `${job.asControl ? 'control' : 'real   '} built in ${((Date.now() - started) / 1000).toFixed(1)} s ` +
+            `(${((Date.now() - sweepStarted) / 1000).toFixed(1)} s elapsed)\n`,
+        );
+      }
+    }),
+  );
+  const pairs = PARK_SEED_POOL.map((seed) => ({
+    real: built.get(keyOf(seed, false)) as SeedReport,
+    control: built.get(keyOf(seed, true)) as SeedReport,
+  }));
   const reports = pairs.map((pair) => pair.real);
 
   // **The control is read first, and it gates everything.** An instrument that
