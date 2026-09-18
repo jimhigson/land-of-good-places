@@ -20,7 +20,7 @@ import { PARK_BOUNDARY } from './boundary';
 import { ENTRANCE_GATE_X, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
 import { CollisionWorld } from './Collision';
 import { NAV_CELL, NavGrid, STAND_SEARCH_REACH, type ReachSet } from './NavGrid';
-import { PLAYER_RADIUS } from '../core/constants';
+import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
 import { ARRIVAL_EXEMPT_NEAR } from './streetRules';
 import type { AnchorFootprint } from './anchors';
 
@@ -115,14 +115,26 @@ export const RING_RADIUS = (() => {
   return fountain.footprint.radius + 5.5;
 })();
 
-/** Clear ground kept either side of {@link RING_RADIUS}: the ribbon's own
- * half-width (1.8), its kerb (0.85) and a walker's stride (0.7) past the
- * paving. Deliberately no more: a plot standing right off the ring's kerb
- * is a plot *facing the circle*, which is what a park promenade looks
- * like — and every half-metre added here multiplies across the ring's
- * whole circumference into ground the big anchors (and then the railway,
- * squeezed outward behind them) no longer have. */
-export const RING_PLOT_CLEARANCE = 3.35;
+/**
+ * Clear ground kept either side of {@link RING_RADIUS}: the ribbon's own
+ * half-width, its kerb, and a walker's stride past the paving. Deliberately
+ * no more: a plot standing right off the ring's kerb is a plot *facing the
+ * circle*, which is what a park promenade looks like — and every half-metre
+ * added here multiplies across the ring's whole circumference into ground the
+ * big anchors (and then the railway, squeezed outward behind them) no longer
+ * have.
+ *
+ * **Asked for, not written down.** This was the literal `3.35`, with a comment
+ * asserting it was 1.8 + 0.85 + 0.7 — a promise that three numbers agree,
+ * which is not a mechanism. The first two now come from their owners
+ * (`MAIN_LOOP_WIDTH`, `PATH_KERB_OVERHANG`), so a change to the loop's width
+ * or its kerb moves this with it instead of silently disagreeing. Only the
+ * stride is a judgement of this file's own, so only the stride is a literal
+ * here.
+ */
+const RING_PLOT_WALKING_STRIDE = 0.7;
+export const RING_PLOT_CLEARANCE =
+  MAIN_LOOP_WIDTH / 2 + PATH_KERB_OVERHANG * 2 + RING_PLOT_WALKING_STRIDE;
 
 /** Candidate draws per entry before this whole-park attempt is abandoned. */
 const MAX_TRIES = 3000;

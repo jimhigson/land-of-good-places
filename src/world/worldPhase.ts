@@ -41,7 +41,7 @@ import {
   type WallRun,
 } from './Scenery';
 import { lampBuilder, type LampDecision } from './LampPosts';
-import { fairyPoleBuilder, type FairyPole } from './FairyLights';
+import { fairyPoleBuilder, type FairyChain } from './FairyLights';
 import { RailRace } from './railRace/RailRace';
 import { TrestleRefusal } from './railRace/track';
 import { RAIL_RACE_FEATURE } from './railRace/feature';
@@ -50,7 +50,7 @@ import { ROAD_FEATURE } from './entrance/roadCorridor';
 export interface WorldPhase {
   readonly scenery: SceneryDecisions;
   readonly lamps: readonly (readonly [number, number])[];
-  readonly fairyPoles: readonly FairyPole[];
+  readonly fairyPoles: readonly FairyChain[];
   readonly railRace: RailRace;
   readonly stats: SolveStats;
   readonly trace: readonly string[];
@@ -150,7 +150,7 @@ export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims)
   const bushes: BushDecision[] = [];
   const walls: (WallRun | null)[] = [];
   const lamps: LampDecision[] = [];
-  const poles: FairyPole[] = [];
+  const poles: FairyChain[] = [];
   let railRace: RailRace | null = null;
   const builders: FeatureBuilder[] = [
     fountainBuilder(claims),

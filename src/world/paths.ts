@@ -1,7 +1,7 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
 import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
-import { PLAYER_RADIUS } from '../core/constants';
+import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
@@ -127,17 +127,7 @@ function numberFromEnv(name: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
-/**
- * **The main loop's drawn width — the one owner.**
- *
- * It was the literal `3.6` in the ring's own {@link RouteDefinition} plus a
- * restatement of it in `RIBBON_HALF_WIDTH_CEILING`, and now a third asker
- * needs it: {@link plazaVerge} has to know where the loop's inner paving
- * stops before it can say where the lawn between it and the plaza begins.
- * Three hand-kept copies of one number is the disease CLAUDE.md names as the
- * most common bug in this repo, so there is one constant and everybody asks.
- */
-export const MAIN_LOOP_WIDTH = 3.6;
+export { MAIN_LOOP_WIDTH };
 
 /** Fountain plaza — wherever the layout put it. Paths converge here. */
 export const PLAZA: { readonly x: number; readonly z: number; readonly radius: number } = lazyView(() => ({
@@ -221,7 +211,7 @@ interface Blocker {
  * from there. `RIBBON_HALF_WIDTH_CEILING` is the largest half-width plus kerb
  * any route in {@link ROUTES}/{@link solveRing} is ever built with.
  */
-const RIBBON_HALF_WIDTH_CEILING = MAIN_LOOP_WIDTH / 2 + 0.85;
+const RIBBON_HALF_WIDTH_CEILING = MAIN_LOOP_WIDTH / 2 + PATH_KERB_OVERHANG * 2;
 const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4 + RIBBON_HALF_WIDTH_CEILING;
 
 /**

@@ -11387,6 +11387,22 @@ const everyScatteredFeaturePlacesSomething: Invariant = (facts) => {
   );
 
   const complaints: string[] = [];
+
+  // **Poles are not lights.** A cable needs two *adjacent* poles, so a park
+  // whose poles all stand alone draws nothing while the pole count looks
+  // healthy. On the plaza ring that was a theoretical worry; along the path
+  // runs it is a real one, because a run long enough for one pole and no more
+  // would contribute a post and no cable. Asserting there are more strings
+  // than chains is the weakest form of "the poles were actually strung
+  // together" that still cannot be satisfied by isolated posts.
+  if (facts.fairyLights.poles > 0 && facts.fairyLights.strings === 0) {
+    complaints.push(
+      `seed ${facts.seed}: the park has ${facts.fairyLights.poles} fairy poles but ${facts.fairyLights.strings} ` +
+        `strings between them. Poles are not lights — a cable needs two adjacent poles, so this is a park ` +
+        `full of bare posts with a healthy-looking pole count.`,
+    );
+  }
+
   for (const [name, n] of counts) {
     if (n > 0) continue;
     complaints.push(
