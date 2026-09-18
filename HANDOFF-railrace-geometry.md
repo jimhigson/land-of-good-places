@@ -98,12 +98,52 @@ So the ring is authored exactly right and the check was reading the planet.
 `terrain.ts`'s `unplaceFromSphere` exists for precisely this and says so in its
 own doc. Unleant, the ratio is 10.18 / 4.07 = **2.500**, the scales' own claim.
 
+## Result on `test:procgen`
+
+Name-diffed against the branch point, never counted:
+
+```
+base ae20b9fc   55 failed | 636 passed (691)
+now             25 failed | 666 passed (691)
+FIXED 30    NEW 0
+```
+
+All 30 are the rail-race cluster, every seed: trestles carry all four tracks,
+sleepers bridge both rails, rings stand outside the park, racers meet the same
+number of bars, bars stand over a real leg, bars slow you where they stand.
+
+### Still red, and why each is not this ticket's geometry
+
+- `the Rail Race finish rainbow stands on the ground`, **seed 326 only** — a
+  real defect, and it is in the **path router**, not in the ring. `paths.ts`
+  already treats every arch foot as a blocker of radius
+  `foot.radius + ARCH_FOOT_MARGIN` = 0.275 + 4.29 = **4.57 m**, and the drawn
+  legs agree with `archFeet`'s claimed positions to the centimetre (measured;
+  `scripts/_probe-rainbow.mts`). Yet path **run 22** — the last-but-one route
+  drawn — puts its centreline **2.08 m** from a foot, half-width 1.30, so
+  0.78 m of clear ground where `WALKABLE_GAP` wants 1.24. Six inner legs, all
+  against the same run. So either that route does not consult `blockersNow()`,
+  or the driver re-decided the rings after the paving went down and the arch
+  moved under it. Both live in `paths.ts`/`parkSolve.ts`.
+  `scripts/_probe-arch-path.mts` names the run.
+- `every support meets the track it carries` / `the Sky Cruiser stands on its
+  own supports` (all 5 seeds), `the park gate arch stands over its gateway`
+  (all 5), coping stones, slide vs towers/roof, paved detour, bushes count,
+  bridge mid-air path — all present at the branch point, none touched here.
+  **The two Sky Cruiser ones look like this ticket's disease in another ride**
+  (a pylon "2.49–3.77 m from the middle of the track" is the right order for a
+  lean read as an error out at that radius); worth pointing whoever owns the
+  cruiser at `RailRaceRoute.lean`/`unlean` before they start.
+
 ## Status
+
 
 - [x] baseline `test:procgen` captured, failures named
 - [x] root cause measured, both defects
-- [ ] rigid station frame in `route.ts`
-- [ ] `leanTrestleTree` follows
-- [ ] `railOutsetRange` unleans
-- [ ] coplanar baseline stale entries
-- [ ] re-run, name-diff
+- [x] rigid station frame in `route.ts` (`lean`/`unlean`/`stationOf`/`chartOf`)
+- [x] `leanTrestleTree` follows; feet still land on the terrain (0.0000 m)
+- [x] every rail-race instrument asks in a frame that exists
+- [x] `test:procgen` re-run and name-diffed: 30 fixed, 0 new
+- [ ] `check:coplanar`
+- [ ] `check:park` on 451, 20260728, 11, 24
+- [ ] controls: break each changed check and watch it go red
