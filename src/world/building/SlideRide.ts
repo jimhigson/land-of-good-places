@@ -4,7 +4,9 @@ import {
   CatmullRomCurve3,
   DoubleSide,
   Group,
+  Matrix4,
   Mesh,
+  Quaternion,
   TubeGeometry,
   Vector3,
 } from 'three';
@@ -244,33 +246,117 @@ export class SlideRide {
   tangentAt(t: number, target = new Vector3()): Vector3 {
     return this.curve.getTangentAt(clamp01(t), target).normalize();
   }
+
+  /**
+   * **The trough's own cross-section at `t` — the one owner of "which way is up
+   * in the slide".**
+   *
+   * Everything that rides, sits in, films or is carried by this chute has to
+   * agree about the frame it is in, and before this existed nothing did. The
+   * chute was swept about one notion of up ({@link sampleFrames}, world `+Y`),
+   * the rider was leant onto a second (the sphere normal, via `faceOnGround`
+   * inside `Player.setRidePose`), and the chase seat and the trackside cameras
+   * each re-derived a third and fourth copy of the sweep's formula. Three
+   * notions of up over 95 m of one chute is the bug this repo files most often,
+   * and the child paid for it: measured on the canonical seed, her **head rode
+   * 0.62 m below the trough floor** — `-0.676 m` in this frame against a floor
+   * at `-0.06` — for a stretch of the descent, because she was pitched onto the
+   * planet inside a trough that is not.
+   *
+   * So: ask here, never re-derive. {@link sampleFrames} is itself written in
+   * terms of this, so the geometry a child sits in and the frame she is placed
+   * in cannot drift apart — they are the same function.
+   *
+   * `previousRight` carries the sideways direction across a vertical tangent,
+   * where `tangent x up` collapses. A caller sampling one `t` on its own has no
+   * previous frame to offer and passes nothing, which is right for a slide: the
+   * chute never goes vertical, and `theGinormousSlideNeverClimbs` is what keeps
+   * that true.
+   */
+  frameAt(t: number, target = new SlideFrame(), previousRight?: Vector3): SlideFrame {
+    this.pointAt(t, target.position);
+    this.tangentAt(t, target.tangent);
+    buildFrame(target, previousRight);
+    return target;
+  }
+}
+
+/**
+ * A cross-section of the chute: where it is, and the three axes a body lying in
+ * it is turned by. `tangent` is the way she travels, `up` is out of the trough
+ * towards the sky, `right` is across it.
+ */
+export class SlideFrame {
+  readonly position = new Vector3();
+  readonly tangent = new Vector3();
+  readonly right = new Vector3();
+  readonly up = new Vector3();
+
+  /**
+   * The turn that takes a model's own axes onto this frame's.
+   *
+   * A model faces `+Z`, so its forward goes to `tangent` and its up to `up`.
+   * The `x` axis is then `up x tangent`, which is `-right` — the sweep names
+   * its sideways axis `tangent x UP`, and that points the other way. Worth
+   * stating because getting it backwards mirrors a rider rather than failing.
+   *
+   * Taken as a basis rather than as yaw-and-pitch euler angles on purpose:
+   * angles need an order, an order needs everyone to agree on it, and that
+   * agreement is exactly what broke here (`world/up.ts`'s `faceOnGround` built
+   * a `YXZ` intent out of an `XYZ` euler for a year). A basis has no order to
+   * get wrong.
+   */
+  orientation(target = new Quaternion()): Quaternion {
+    _basisX.copy(this.right).multiplyScalar(-1);
+    _basis.makeBasis(_basisX, this.up, this.tangent);
+    return target.setFromRotationMatrix(_basis);
+  }
+}
+
+const _basis = /* @__PURE__ */ new Matrix4();
+const _basisX = /* @__PURE__ */ new Vector3();
+
+/**
+ * Fill in `right` and `up` from a frame that already has its `tangent`.
+ *
+ * **Here "up" is always world up** — see the class header. However the slide
+ * loops, the bit you sit in faces the sky.
+ */
+function buildFrame(frame: SlideFrame, previousRight?: Vector3): void {
+  frame.right.crossVectors(frame.tangent, UP);
+  // Straight up or straight down: keep whatever sideways we had last time.
+  if (frame.right.lengthSq() < 1e-6) {
+    if (previousRight) frame.right.copy(previousRight);
+    else frame.right.set(1, 0, 0);
+  }
+  frame.right.normalize();
+  frame.up.crossVectors(frame.right, frame.tangent).normalize();
 }
 
 // ------------------------------------------------------------------ sweeping
 
-interface Frame {
-  readonly position: Vector3;
-  readonly right: Vector3;
-  readonly up: Vector3;
-}
+type Frame = SlideFrame;
 
+/**
+ * The frames the trough is swept along.
+ *
+ * **Built out of {@link SlideFrame} and {@link buildFrame}, which is what a
+ * rider is placed by too** — one definition, so the shape a child sits in and
+ * the frame she is turned by are the same arithmetic rather than two copies of
+ * it kept in step by hand.
+ */
 function sampleFrames(curve: CatmullRomCurve3, steps: number): Frame[] {
   const frames: Frame[] = [];
   const previousRight = new Vector3(1, 0, 0);
 
   for (let i = 0; i <= steps; i += 1) {
     const t = i / steps;
-    const position = curve.getPointAt(t, new Vector3());
-    const tangent = curve.getTangentAt(t, new Vector3()).normalize();
-
-    const right = new Vector3().crossVectors(tangent, UP);
-    // Straight up or straight down: keep whatever sideways we had last time.
-    if (right.lengthSq() < 1e-6) right.copy(previousRight);
-    right.normalize();
-    previousRight.copy(right);
-
-    const up = new Vector3().crossVectors(right, tangent).normalize();
-    frames.push({ position, right, up });
+    const frame = new SlideFrame();
+    curve.getPointAt(t, frame.position);
+    curve.getTangentAt(t, frame.tangent).normalize();
+    buildFrame(frame, previousRight);
+    previousRight.copy(frame.right);
+    frames.push(frame);
   }
   return frames;
 }

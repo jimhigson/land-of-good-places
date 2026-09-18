@@ -1,4 +1,4 @@
-import { Group, Vector3 } from 'three';
+import { Group, Quaternion, Vector3 } from 'three';
 import {
   CAMERA_YAW_DEGREES,
   PLAYER_ACCELERATION,
@@ -864,6 +864,30 @@ export class Player implements GameSystem {
     this.facingAngle = facing;
     this.group.position.copy(this.position);
     faceOnGround(this.group, facing, pitch);
+  }
+
+  /**
+   * **Ride in a vehicle's own frame, rather than on the ground's.**
+   *
+   * {@link setRidePose} ends in `faceOnGround`, which leans her onto the
+   * **sphere normal under her feet**. That is exactly right for anything whose
+   * floor is the ground, and exactly wrong for a rider inside a tube that was
+   * not built on the sphere: she is then leant onto the planet inside a trough
+   * that is not, and the two disagree by more the further out the ride runs.
+   * Measured on the ginormous slide, canonical seed: **her head 0.62 m below
+   * the trough floor**, through geometry a child can see.
+   *
+   * So a ride that owns a frame hands it over whole, as a turn, and nothing
+   * here re-derives it. `facing` is still recorded because the rest of the game
+   * asks which way she is pointing; it does not steer the model.
+   */
+  setRideFrame(position: Vector3, orientation: Quaternion, facing: number): void {
+    this.position.copy(position);
+    this.previousPosition.copy(this.position);
+    this.groundHeight = position.y;
+    this.facingAngle = facing;
+    this.group.position.copy(this.position);
+    this.group.quaternion.copy(orientation);
   }
 
   /**
