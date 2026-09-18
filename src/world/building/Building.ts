@@ -1,5 +1,5 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { CylinderGeometry, Group, Mesh, Object3D, Vector3, type PerspectiveCamera } from 'three';
+import { CylinderGeometry, Group, Mesh, Object3D, Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
@@ -20,7 +20,6 @@ import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/suppo
 import { planSlideShots, SlideShotDirector, type SlideShot } from '../slide/cameras';
 import {
   petSeatOnSlide,
-  slopeOf,
   type PetSlideLink,
   type SlideSeat,
   type SlideSeatFor,
@@ -43,7 +42,7 @@ import { CASTLE_TURRET_FOOTPRINT_RADIUS } from './castleMasonry';
 import { ROOF_EDGE_Z, ROOF_PARAPET_THICKNESS, roofTurretSpots } from './layout';
 import { ShopUnits } from './ShopUnits';
 import { Shops } from './shops/Shops';
-import { SlideRide } from './SlideRide';
+import { SlideFrame, SlideRide } from './SlideRide';
 import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
 import { WalkSurfaces, type MovingPlatform } from './surfaces';
@@ -442,6 +441,23 @@ export class Building implements GameSystem {
   /** Follows the chute: position and heading. */
   private readonly rideMount = new Group();
 
+  /**
+   * Scratch for the chute's cross-section and the turn it implies, so the ride
+   * allocates nothing per frame. Both are refilled from `SlideRide.frameAt`
+   * every frame — never read one expecting last frame's value.
+   */
+  private readonly rideFrame = new SlideFrame();
+  private readonly rideTurn = new Quaternion();
+  /**
+   * The grown-up's recline, as a turn about his own left-right axis. Built once
+   * from {@link GROWN_UP_RECLINE} — the one owner of how far back he lies — and
+   * composed onto the chute's frame rather than written into a world-referenced
+   * `rotation.x`.
+   */
+  private readonly grownUpRecline = new Quaternion().setFromAxisAngle(
+    new Vector3(1, 0, 0),
+    GROWN_UP_RECLINE,
+  );
   /** Scratch for {@link ridePointToWorld}, so the ride allocates nothing per frame. */
   private readonly riderPoint = new Vector3();
 
@@ -1722,29 +1738,48 @@ export class Building implements GameSystem {
     // showed, because until 5 August nobody could see her — the camera was
     // inside her head. Turning on the chase view is what made it visible, so
     // the fix belongs with it.
-    const pitch = ride.giant ? slopeOf(this.tangent) : 0;
-    player.setRidePose(
-      this.riderPoint.x,
-      this.riderPoint.y + (ride.giant ? RIDER_LIFT + RECLINED_LIFT : RIDER_LIFT),
-      this.riderPoint.z,
-      Math.atan2(this.tangent.x, this.tangent.z),
-      pitch,
-    );
+    if (ride.giant) {
+      // **In the trough's frame, not on the ground's.** `setRidePose` ends in
+      // `faceOnGround`, which leans her onto the sphere normal under her feet —
+      // right for anything standing on the park, wrong inside a tube swept
+      // about world up. She was pitched onto the planet inside a chute that is
+      // not, and her head rode 0.62 m below the trough floor (`-0.676 m` in the
+      // chute's own frame, against a floor at `-0.06`) through the middle of
+      // the descent. `SlideRide.frameAt` is the single owner of that frame and
+      // the sweep that drew the trough is written in terms of it, so the shape
+      // she lies in and the turn she is given are now the same arithmetic.
+      const frame = ride.slide.frameAt(t, this.rideFrame);
+      // Lifted along the trough's own up, not world `+Y` — on a 28 degree pitch
+      // those differ by the whole of the lift.
+      this.riderPoint.addScaledVector(frame.up, RIDER_LIFT + RECLINED_LIFT);
+      player.setRideFrame(
+        this.riderPoint,
+        frame.orientation(this.rideTurn),
+        Math.atan2(this.tangent.x, this.tangent.z),
+      );
+    } else {
+      player.setRidePose(
+        this.riderPoint.x,
+        this.riderPoint.y + RIDER_LIFT,
+        this.riderPoint.z,
+        Math.atan2(this.tangent.x, this.tangent.z),
+        0,
+      );
+    }
 
     // The seat the chase camera hangs off, following the same curve the rider
     // does, so what you see and where you are can never disagree.
     if (ride.giant) {
-      ride.slide.pointAt(t, this.point);
-      this.rideMount.position.copy(this.point);
-      this.rideMount.position.y += RIDER_LIFT;
-      this.rideMount.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
-      // The mount leans with the chute so the camera rides *in the tube's own
-      // frame*. Left level (as it was for first person, where it did not
-      // matter) a camera 4.1 m behind sits 1.4 m off the chute floor on a 20°
+      // The same frame the rider is in, asked of the same owner rather than
+      // rebuilt out of a yaw and a `slopeOf` — which is how the seat and the
+      // rider came to be in different frames in the first place. The mount
+      // leans with the chute so the camera rides *in the tube's own frame*:
+      // left level (as it was for first person, where it did not matter) a
+      // camera 4.1 m behind sits 1.4 m off the chute floor on a 20 degree
       // pitch, and the trough's uphill side wall swings through the lens.
-      // `rotation.order` is `YXZ` — set in the constructor, for the same reason
-      // `GROWN_UP_RECLINE` needs it: yaw first, then pitch in the yawed frame.
-      this.rideMount.rotation.x = slopeOf(this.tangent);
+      const frame = ride.slide.frameAt(t, this.rideFrame);
+      this.rideMount.position.copy(frame.position).addScaledVector(frame.up, RIDER_LIFT);
+      this.rideMount.quaternion.copy(frame.orientation(this.rideTurn));
 
       // **Solve where the lens goes, against the ride that was actually built**
       // (#514, #516). `CHASE_EYE` was a fixed offset picked for a rider with
@@ -1824,12 +1859,20 @@ export class Building implements GameSystem {
       // In front, and lying down. Clamped to the end of the chute so the
       // grown-up never runs off the far end while the child is still aboard.
       const lead = Math.min(ride.slide.length, ride.distance + GROWN_UP_LEAD) / ride.slide.length;
-      ride.slide.pointAt(lead, this.point);
-      ride.slide.tangentAt(lead, this.tangent);
-      this.grownUp.root.position.copy(this.point);
-      this.grownUp.root.position.y += RIDER_LIFT;
-      this.grownUp.root.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
-      this.grownUp.root.rotation.x = GROWN_UP_RECLINE;
+      // The same frame the child rides in, from the same owner. Before this he
+      // was lifted along world `+Y` and reclined against the world horizon, so
+      // on the steep middle of the chute he sank into the trough exactly as she
+      // did — the identical defect, one body ahead.
+      const frame = ride.slide.frameAt(lead, this.rideFrame);
+      this.grownUp.root.position
+        .copy(frame.position)
+        .addScaledVector(frame.up, RIDER_LIFT);
+      // Reclined about his own left-right axis *within* the chute's frame, so
+      // "lying back" means lying back along the slide rather than against a
+      // horizon the slide does not share.
+      this.grownUp.root.quaternion
+        .copy(frame.orientation(this.rideTurn))
+        .multiply(this.grownUpRecline);
     }
   }
 
