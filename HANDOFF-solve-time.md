@@ -139,8 +139,27 @@ nothing announced when it stopped being.
 - [x] before/after per-seed timings for seeds 3, 4, 7
 - [x] `check:every-seed-builds` green, 16/16, 299.7 s
 - [x] `check:park-boot passed`
-- [ ] `test:procgen` name-diff against the base (base has 55 known failures)
+- [x] `test:procgen` name-diff against the base: **identical failure sets**
 - [ ] PR against `feat/procgen-on-sphere`
+
+### `test:procgen` name-diff
+
+```
+base    Test Files  5 failed | 17 passed (22)      Tests  55 failed | 636 passed (691)
+branch  Test Files  5 failed | 18 passed (23)      Tests  55 failed | 638 passed (693)
+
+only on base (fixed):  (none)
+only on branch (NEW):  (none)
+```
+
+Failing **names** diffed, not counts — a count cannot see a swap. The `+1` file
+and `+2` tests are `test/geo/boundaryDistance.test.ts`, both passing; every
+other number is unmoved.
+
+**`tsc --noEmit` is not evidence about `scripts/`** (it sits outside every
+tsconfig project). Nothing in this diff is a check script — it is
+`src/world/boundary.ts`, a test under `tsconfig.test.json`, a workflow comment
+and this file — and the test was run, not merely typechecked.
 
 ## For whoever takes this over
 
