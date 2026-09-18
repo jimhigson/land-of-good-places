@@ -479,6 +479,45 @@ label saying one thing and reporting another — the same disease as the fairy
 ring itself, in the instrument instead of the park. Fixed to print
 placed/total poles and the chain count separately.
 
+### Parsing GitHub Actions logs — the escapes are LITERAL `^[`, not ESC bytes
+
+`gh run view --log-failed` does **not** emit real escape bytes. It emits the
+two literal characters `^` and `[` followed by `[31m`. Three separate strip
+attempts — `perl -pe 's/\e\[[0-9;]*m//g'`, the same with `\x1b`, and
+`tr -d '\033'` — all exited 0 and removed **nothing**, because there were no
+ESC bytes to remove.
+
+Worse, the check meant to catch that could not fail: `grep -c $'\x1b'` in
+**fish**, which does not support `$'...'` syntax, so it searched for a literal
+string, found none, and read as confirmation. A vacuous check guarding a
+vacuous strip.
+
+The visible symptom was a **distinct-name count of 46** where the truth was
+**17** — the per-line *durations* were still embedded in each string, so
+`sort -u` was uniquing on `... 48ms` vs `... 49ms`.
+
+**The form that works:**
+
+```
+sed -E 's/\^\[\[[0-9;]*m//g' raw.txt
+```
+
+And the unit matters: on CI run 35373640335 (sha `d5fa436e`) the suite showed
+**57 failed instances / 17 distinct names**. Report which one you mean, every
+time — the same confusion is how "57 distinct" got reported once already.
+
+### Comparing failures: diff PER SEED, not only by name
+
+A name-set diff cannot see a regression that adds a failure of an
+*already-failing name* on a *different seed*. `every modelled coping stone sits
+on the wall it caps` was already red on seeds 11 and 131 before this branch
+existed (`bridge-14.0: 2 of its 81 coping blocks are not seated on their own
+parapet, worst 0.031 m above where it should sit`), so the name appears on both
+sides and a bare name diff reads "identical". Vitest reports one instance per
+*(seed file, test name)*, so the comparison key must be
+`ancestorTitles.concat(title)` — seed included — and then two extra instances
+show up as two extra keys.
+
 ### Round-2 gates — ALL must be re-run on the rebased base
 
 ## PR raised: #677 against `feat/procgen-on-sphere`
