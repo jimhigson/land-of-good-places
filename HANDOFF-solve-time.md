@@ -255,6 +255,19 @@ behaviour would have made my own change look like a regression it is not.** One
 sample of a contended measurement is not a measurement.
 
 
+## THE RESULT: `check:every-seed-builds` is green on a runner
+
+```
+check:every-seed-builds: built 16/16; by class: none unbuilt
+check:every-seed-builds OK — 16 seed(s) swept; 16 build, 0 do not, all within
+the baseline ... Every swept seed builds. 430.9 s.
+```
+
+**488 s of a 1500 s cap**, against the base's **cancelled at 1525 s with seed 7
+never finishing**. Per seed on the runner: seed 7 384.5 s, seed 4 124 s, seed 3
+62.4 s, everything else 12.6–29.4 s; `decision-zero=0 rung-fired=0` on all
+sixteen; every seed 19/19 attractions, 0 rail crossings, all six invariants.
+
 ## CI on a real runner — and the base branch's own health
 
 Local numbers are contended ceilings; **CI is the measurement that settles
@@ -267,7 +280,7 @@ this**, and it also shows the base is unhealthy independently of this work.
 | Coplanar faces | failure 670s | failure 235s | 2.85× |
 | Checks | failure 809s (12m55s of work) | failure 454s (5m48s of work) | 2.2× |
 | Procgen invariants | failure 268s | failure 306s | same red |
-| Every seed builds | **cancelled at 1525s** (its 25m cap) | *see below* | |
+| **Every seed builds** | **cancelled at 1525s** (its 25m cap) | **success at 488s** | **timeout → pass, at 33% of the cap** |
 | Walk reach / Update adoption / PR preview | success | success | |
 
 **`check:entrance-road`'s hang is fixed by this PR** — cancelled at its full cap
