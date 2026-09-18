@@ -518,6 +518,38 @@ sides and a bare name diff reads "identical". Vitest reports one instance per
 `ancestorTitles.concat(title)` — seed included — and then two extra instances
 show up as two extra keys.
 
+## The per-candidate ride query is free — measured on the phase itself
+
+`check:park-boot` cannot answer this: every work unit it slices is a
+**plan-phase** solver, and the world phase runs outside any budgeted slice
+(#694). Timing a whole park build cannot answer it either — on seed 7 the plan
+phase is minutes and averages any world-phase change to nothing.
+
+So the world-solve summary now prints `ms=`, and the measurement is of the
+phase itself, on **fast seeds** where it is the whole number rather than
+rounding error:
+
+| seed | base | branch | ms per increment |
+|---|---|---|---|
+| 6 | 719 inc / **423 ms** | 808 inc / **361 ms** | 0.588 -> 0.447 |
+| 14 | 709 inc / **292 ms** | 788 inc / **306 ms** | 0.412 -> 0.388 |
+| 7 (insensitive) | 469 inc / 231 s build | 571 inc / 244 s build | whole-build, plan-dominated |
+
+**Faster per increment on both fast seeds**, and seed 6 is faster in absolute
+terms while doing 89 more increments. The extra wall time on seed 14 is +14 ms
+for +79 poles.
+
+**Increments rise by roughly the pole count, innocently** — every placed pole
+*is* an increment — and the query is invisible to that metric by construction,
+since it runs inside one increment's candidate loop. `ms=` is the only number
+that can see it.
+
+What keeps it cheap: the loop's frames are memoised per route (`WeakMap`, keyed
+by the route object so a new solve cannot read a stale entry) and a whole-loop
+bounding-sphere reject answers most poles in one distance test. Without those
+it would have been `drawnOnSphere` plus a full loop walk **per candidate**,
+~112 slots x up to 10 candidates.
+
 ## When two measurements disagree, re-read your own log first
 
 Twice in one session I quoted a number, built a theory on what I assumed it
