@@ -51,6 +51,30 @@ solver. The handoff that recorded the "final proofs" also recorded
 the workflow's `timeout-minutes: 25`*. The check has never fitted its cap;
 CI's slower cores and 4-way lane contention are what made it visible.
 
+## Read the counts, not the seconds
+
+**Wall-clock seconds on this Mac are contaminated and must not be quoted as a
+clean before/after.** Load average ran 15–55 against 14 cores throughout, with
+seven other agents building parks. Another engineer measured seed 7 at 1334 s
+where the handoff records 1003 s, *with the driver counts identical* — so the
+whole 331 s was sibling agents.
+
+So the honest comparison here is the **deterministic** part of the trace:
+
+- the driver's own counts (`refusals`, `retries`, `unwinds`, `decision-zero`,
+  `worst-attempt`), and
+- **the per-solver piece counts in `park-solve: … time/pieces`** — how many
+  candidates the search actually tried.
+
+Those cannot move unless a decision moved. Every seconds figure below is a
+**ceiling** (contention only ever makes it worse), and the one number that had
+to be clean — the sweep's wall clock, because the cap is in minutes — is
+re-taken on a quiet machine and labelled as such.
+
+The base side of the CI argument needs no re-measurement: **CI itself is the
+base measurement** (24m57s, `cancelled`, seed 7 unfinished), corroborated by
+`HANDOFF-backtracking.md`'s own recorded 1538 s.
+
 ## Measurements
 
 Throughput probe — driver pieces yielded in a fixed 90 s, seed 7
@@ -114,24 +138,34 @@ is the kinder of the two measurements for the base.
 
 ### Seed 428 — the pool seed the `check:entrance-road` engineer root-caused
 
-It measured seed 428 on the base at 185 s with
-`train=177585ms/6167553p`. The same seed on this branch:
+**Base and branch measured in two processes started together and running
+side by side**, so both carried the same sibling load — the fairest comparison
+this machine allows:
 
 ```
-park-solve: seed=428 time/pieces layout=82ms/789p cruiser=855ms/112707p
-  train=39551ms/6167553p slide=4772ms/787956p crossings=54ms/427p pathGraph=316ms/601p
-check:park: 19/19 attractions route from the entrance, 0 rail crossing(s),
-  240/240 waypoints connected. All six invariants hold. 49555 ms.
+BASE    layout=91ms/789p cruiser=982ms/112707p train=237670ms/6167553p
+        slide=4046ms/787956p crossings=57ms/427p pathGraph=326ms/601p road=0ms/0p seams=16
+        check:park: 19/19 attractions, 0 rail crossing(s), 240/240 waypoints. 246214 ms.
+
+BRANCH  layout=82ms/789p cruiser=855ms/112707p train=39551ms/6167553p
+        slide=4772ms/787956p crossings=54ms/427p pathGraph=316ms/601p road=0ms/0p seams=16
+        check:park: 19/19 attractions, 0 rail crossing(s), 240/240 waypoints. 49555 ms.
 ```
 
-**`6167553p` on both.** The piece count is byte-for-byte what it was — the
-search makes precisely the same decisions and tries precisely the same
-candidates — and the time for them fell from 177585 ms to 39551 ms, **4.49×**.
-The whole park: 185 s → 49.6 s.
+**Every piece count is identical, in all seven solvers**: 789, 112707,
+**6167553**, 787956, 427, 601, and 16 cruiser-finish seams. The search makes
+precisely the same decisions and tries precisely the same candidates. Only the
+time for them moved: **train 237670 ms → 39551 ms, 6.01×**; the whole park
+246214 ms → 49555 ms, 4.97×.
 
-That identical piece count is the strongest evidence in this branch that the
-change is a pure cost fix. A different park would not try the same 6,167,553
-pieces.
+**That identical piece count is the load-bearing evidence on this branch, and
+it does not depend on wall clock at all.** A different park would not try the
+same 6,167,553 candidates.
+
+It also shows how contaminated the seconds are: the same base seed measured
+`train=177585ms` for the `check:entrance-road` engineer and `train=237670ms`
+for me, on the same commit, for the same 6,167,553 pieces. Same work, 34% more
+seconds. Quote the counts.
 
 It also answers that engineer's caution that a fix proven on seeds 0..15 might
 leave `PARK_SEED_POOL` slow: the win is in the inner loop of the rail search,
