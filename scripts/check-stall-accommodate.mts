@@ -220,7 +220,6 @@ const movableIds = Object.keys(STALL_PLACEMENTS).filter((id) => id !== 'facePain
 let proved = false;
 let movedCount = 0;
 let refusedAfterSearch = 0;
-const standsToRecheck: string[] = [];
 for (const id of movableIds) {
   const before = drawnAt(id);
   const mine = wallClaimsOf(id);
@@ -310,7 +309,6 @@ for (const id of movableIds) {
     );
   } else {
     pass(`'${id}': its counter at (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) has room to stand`);
-    standsToRecheck.push(id);
   }
   movedCount += 1;
   proved = true;
@@ -328,23 +326,37 @@ if (!proved) {
 // is a snapshot and the interesting question is the finished park.
 {
   const reachable = reachabilityFromEntrance();
-  for (const id of Object.keys(STALL_PLACEMENTS)) {
+  const ids = Object.keys(STALL_PLACEMENTS);
+  // Counted, not assumed: the summary line below may only claim the counters
+  // it actually reached. It used to be printed unconditionally after the loop,
+  // so a run with a stranded counter said both "FAIL … can no longer be walked
+  // to" and "ok every one of the 8 counters is still walkable" — a green line
+  // claiming cover it had not got, which is the fault CLAUDE.md gives a whole
+  // section to.
+  let walkable = 0;
+  for (const id of ids) {
     const stand = STALL_STANDS_BY_ID.get(id);
     if (!stand) {
       fail(`'${id}' has no stand point at all`);
       continue;
     }
-    if (!reachable(stand.x, stand.z)) {
-      fail(
-        `'${id}': its counter at (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) can no longer be ` +
-          'walked to from the park entrance after the booths moved',
-      );
+    if (reachable(stand.x, stand.z)) {
+      walkable += 1;
+      continue;
     }
+    fail(
+      `'${id}': its counter at (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) can no longer be ` +
+        'walked to from the park entrance after the booths moved',
+    );
   }
-  pass(
-    `every one of the ${Object.keys(STALL_PLACEMENTS).length} counters is still walkable to from the ` +
-      `entrance with ${movedCount} booth(s) moved`,
-  );
+  if (walkable === ids.length) {
+    pass(
+      `every one of the ${ids.length} counters is still walkable to from the entrance with ` +
+        `${movedCount} booth(s) moved`,
+    );
+  } else {
+    console.log(`      ${walkable} of ${ids.length} counters are still walkable to from the entrance`);
+  }
 }
 
 // **Coverage, said out loud on every run** — CLAUDE.md: a check that stops

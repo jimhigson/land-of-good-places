@@ -347,6 +347,17 @@ export function stallBuilder(
       const originZ = from.position[1] - baseDz;
       // The booth's own walls come out of the world first, or every candidate
       // overlapping where it currently stands refuses itself.
+      //
+      // **From here to the `placeAt` on either exit, this booth is drawn but
+      // not solid, and the only thing that makes that safe is that nothing
+      // catches.** `accepts` below can throw (`spurEndFor` does, by design),
+      // and `parkSolve.ts` has no `try`/`catch` anywhere — so a throw kills the
+      // build outright and no child ever meets the half-built booth. **If you
+      // ever wrap the driver's `accommodate` call in a `catch`, wrap this
+      // search in `try`/`finally` in the same change** and re-place the booth
+      // in the `finally`; otherwise a swallowed exception leaves a stall a
+      // child can see and walk straight through, which is the one thing this
+      // file exists to prevent.
       booth.withdrawCollision();
       for (let ring = 1; ring * SHIFT_RING_STEP <= STALL_SHIFT_REACH + 1e-9; ring += 1) {
         const radius = ring * SHIFT_RING_STEP;
