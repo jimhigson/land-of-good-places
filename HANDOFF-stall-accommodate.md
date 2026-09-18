@@ -502,3 +502,69 @@ Also worth recording: the base's own failure set is **unchanged** by #669,
 #674 and #670 — same 55 names as at `ae20b9fc`. So those three commits fixed
 a check script (`check:waypoints`) and a solver's cost without moving a single
 invariant.
+
+
+## Round 5 — rebased onto `76224f91` (#682), and a check that finally ran
+
+#682 moved the rail race's dimensional literals into a leaf module
+(`railRace/dimensions.ts`), deleted `DUCK_CLEARANCE` as a true no-op, and added
+a ratcheted chain step `check:cycle-tdz` at position 5. That is the fix for the
+`railRace/hazards.ts` module-scope TDZ I root-caused in round 1.
+
+### The package.json conflict, resolved deterministically
+
+`#682` touches `package.json`, so the rebase conflicted on the chain — the one
+place CLAUDE.md says never to accept what git hands back. **Rebuilt from the
+base's own file**: took `origin/feat/procgen-on-sphere:package.json` whole and
+re-inserted my script definition and my chain step after `check:layout-rung`,
+the same two edits as the original commit. Then verified by parsing:
+
+- base **68 steps / 127 scripts** → mine **69 / 128**
+- **lost: none**; gained: exactly `pnpm run check:stall-accommodate` and
+  `check:stall-accommodate`
+- **relative order preserved**: strip my one step and the list is the base's,
+  element for element
+- `check:cycle-tdz` still present, still at **position 5**
+
+Note the trap this avoided: before the rebase my head and the base were **both
+68 steps** — but different 68s, mine with `check:stall-accommodate` and the
+base's with `check:cycle-tdz`. A count would have said "no change".
+
+### `check:ground-claims` ran for the first time — and caught the stalls feature
+
+In round 1 I reported this check as having no cover on either branch, blocked
+by the TDZ. #682 unblocked it, and on its first run it refused my work:
+
+```
+the registry on the built park holds feature(s) [stalls] that are not declared
+placers — the declared list, in commit order, is [layout, cruiser, train,
+slide, crossings, pathGraph, road, fountain, walls, trees, bushes, fairyLights,
+lamps, railRace]. If a later step has added a placer, widen this probe
+deliberately rather than deleting it
+```
+
+Widened by hand as its roster comment asks, `'stalls'` first among the world
+phase's builders. **Proved red both ways**, canonical seed:
+
+- drop `'stalls'` → *"holds feature(s) [stalls] that are not declared placers"*
+- move it after `'fountain'` → *"these placers committed out of the declared
+  build order: [fountain] … the registry holds [… road, stalls, fountain …]
+  against a declared order of [… road, fountain, stalls …]"*
+
+`check:ground-claims passed` afterwards. **The gap I reported in round 1 is
+closed**, and by the check itself rather than by my say-so.
+
+### Also verified on the rebased head
+
+- `tsc --noEmit` + `typecheck:test` clean.
+- **`check:cycle-tdz` passes: 8 sites, same as the baseline, none added** — so
+  `stallsFeature.ts` (which imports `parkLayout`, `boundary`, `anchors`) added
+  no module-scope cycle of its own. Worth knowing, because that is exactly the
+  trap #682 existed to fix.
+- `check:stall-accommodate` PASSes, 40 `ok` lines, 6 of 6 booths.
+- Three-dot diff: 14 files, +2030/−87; the **only** file overlapping #682's is
+  `package.json`, resolved as above.
+- `rerere.enabled` still `false`, so nothing was replayed.
+
+Per the Overseer: the sixteen-seed sweep was **not** re-run — nothing since the
+last verification touches what this diff can reach.
