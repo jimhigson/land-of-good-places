@@ -3,7 +3,8 @@ import { lazyArrayView } from '../boot/lazyView';
 import { registerPlanCache } from '../boot/planCaches';
 import { PALETTE } from '../core/palette';
 import type { FrameContext, GameSystem } from '../core/types';
-import type { CollisionWorld } from '../world/Collision';
+import type { CollisionWorld, WallCollider } from '../world/Collision';
+import { addBoothCollision, MINI_GAME_BOOTH_BOX } from './boothFootprint';
 import { pressZone, type InteractZone } from '../world/interact';
 import { standOnSphere, terrainHeight } from '../world/terrain';
 import { highlightObject } from '../world/highlight';
@@ -228,7 +229,7 @@ export class MiniGameStalls implements GameSystem {
 
       // The booth is solid; the paved apron in front of it is not, so a child
       // can run right up to the counter.
-      addBoothCollision(collision, x, z, definition.facing);
+      addMiniGameBoothCollision(collision, x, z, definition.facing);
 
       // Taken from `STALL_STANDS`, not recomputed here. This used to derive its
       // own from `STALL_STAND_DISTANCE`, which was harmless only for as long as
@@ -302,28 +303,14 @@ export class MiniGameStalls implements GameSystem {
 /**
  * Four walls around the booth body, rotated with it.
  *
- * `CollisionWorld.addRectangle` is axis-aligned and these booths are not, so
- * the corners are rotated by hand. Collision is height-blind (see
- * `Collision.ts`), which is fine here: the whole thing is one storey.
+ * The box, the rotation and the registration all live in
+ * `boothFootprint.ts` now — one owner, because the same ground is also a
+ * **claim** the stalls feature builder commits, and a claim derived
+ * separately from the collider is a booth that is in two places at once.
+ * `CollisionWorld.addRectangle` is axis-aligned and these booths are not,
+ * which is why the corners are rotated by hand there. Collision is
+ * height-blind (see `Collision.ts`), which is fine here: one storey.
  */
-function addBoothCollision(collision: CollisionWorld, x: number, z: number, yaw: number): void {
-  const halfWidth = 2.1;
-  const front = 1.35;
-  const back = -1.3;
-  const sin = Math.sin(yaw);
-  const cos = Math.cos(yaw);
-  const toWorld = (lx: number, lz: number): [number, number] => [
-    x + lx * cos + lz * sin,
-    z - lx * sin + lz * cos,
-  ];
-
-  const frontLeft = toWorld(-halfWidth, front);
-  const frontRight = toWorld(halfWidth, front);
-  const backLeft = toWorld(-halfWidth, back);
-  const backRight = toWorld(halfWidth, back);
-
-  collision.addWall(frontLeft[0], frontLeft[1], frontRight[0], frontRight[1], 0.3);
-  collision.addWall(backLeft[0], backLeft[1], backRight[0], backRight[1], 0.3);
-  collision.addWall(frontLeft[0], frontLeft[1], backLeft[0], backLeft[1], 0.3);
-  collision.addWall(frontRight[0], frontRight[1], backRight[0], backRight[1], 0.3);
+function addMiniGameBoothCollision(collision: CollisionWorld, x: number, z: number, yaw: number): WallCollider[] {
+  return addBoothCollision(collision, x, z, yaw, MINI_GAME_BOOTH_BOX);
 }

@@ -15,6 +15,12 @@ import { lazyView } from '../boot/lazyView';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
+import {
+  addBoothCollision,
+  FACE_PAINT_BOOTH_BOX,
+  FACE_PAINT_STALL_DEPTH,
+  FACE_PAINT_STALL_WIDTH,
+} from '../minigames/boothFootprint';
 import { Rng } from '../core/mathUtils';
 import { ART } from '../art/style/artPalette';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
@@ -91,8 +97,9 @@ const stallX = (): number => FACE_PAINT_PLACEMENT.position[0];
 const stallZ = (): number => FACE_PAINT_PLACEMENT.position[1];
 const stallFacing = (): number => FACE_PAINT_PLACEMENT.facing;
 
-const STALL_WIDTH = 3.1;
-const STALL_DEPTH = 2.1;
+/** The booth's body, owned by `boothFootprint.ts` — the collider, the claim and the mesh all read the same two numbers. */
+const STALL_WIDTH = FACE_PAINT_STALL_WIDTH;
+const STALL_DEPTH = FACE_PAINT_STALL_DEPTH;
 /** How close counts as "at the stall" for the proximity/interact check. */
 const REACH = 3.2;
 
@@ -675,26 +682,14 @@ export class FacePaintStall implements GameSystem {
     return upper;
   }
 
+  /**
+   * The booth's four walls, through `boothFootprint.ts` — the one owner of
+   * every booth's box, its rotation and its registration, so the collider a
+   * child bumps into and the claim the `stalls` feature builder commits are
+   * built from the same answer.
+   */
   private buildCollision(collision: CollisionWorld): void {
-    const halfWidth = STALL_WIDTH / 2 + 0.1;
-    const front = 1.0;
-    const back = -1.0;
-    const sin = Math.sin(stallFacing());
-    const cos = Math.cos(stallFacing());
-    const toWorld = (lx: number, lz: number): [number, number] => [
-      stallX() + lx * cos + lz * sin,
-      stallZ() - lx * sin + lz * cos,
-    ];
-
-    const frontLeft = toWorld(-halfWidth, front);
-    const frontRight = toWorld(halfWidth, front);
-    const backLeft = toWorld(-halfWidth, back);
-    const backRight = toWorld(halfWidth, back);
-
-    collision.addWall(frontLeft[0], frontLeft[1], frontRight[0], frontRight[1], 0.25);
-    collision.addWall(backLeft[0], backLeft[1], backRight[0], backRight[1], 0.25);
-    collision.addWall(frontLeft[0], frontLeft[1], backLeft[0], backLeft[1], 0.25);
-    collision.addWall(frontRight[0], frontRight[1], backRight[0], backRight[1], 0.25);
+    addBoothCollision(collision, stallX(), stallZ(), stallFacing(), FACE_PAINT_BOOTH_BOX);
   }
 }
 
