@@ -313,4 +313,58 @@ for (const finding of findings) {
 }
 if (findings.length === 0) console.log('  (none)');
 
-if (process.argv.includes('--strict') && findings.length > 0) process.exitCode = 1;
+// ---------------------------------------------------------------------------
+// `--check`: ratchet against the baseline, for the `check` chain.
+//
+// Keyed on file and constant **name**, never on line number — a line moves on
+// every edit above it, and a baseline that churns is one people regenerate
+// wholesale instead of reading.
+//
+// It ratchets **both** ways on purpose. A new site fails, obviously. A site
+// that has gone also fails, demanding its baseline entry be deleted in the same
+// commit — which is what makes this number able only to go down. A baseline you
+// may leave stale is a baseline that grows.
+// ---------------------------------------------------------------------------
+if (process.argv.includes('--check')) {
+  const { CYCLE_TDZ_BASELINE } = await import('./cycle-tdz-baseline.mts');
+  const key = (f: Finding): string => `${relative(repoRoot, f.file)}::${f.name}`;
+  const found = new Map(findings.map((f) => [key(f), f]));
+  const baseline = new Set(CYCLE_TDZ_BASELINE);
+
+  const added = [...found.keys()].filter((k) => !baseline.has(k));
+  const gone = [...baseline].filter((k) => !found.has(k));
+
+  process.stderr.write(
+    `\ncheck:cycle-tdz — ${found.size} site(s) against a baseline of ${baseline.size}.\n` +
+      'What this does NOT cover: a constant that is safe today only because its module sits\n' +
+      'outside every cycle. That is a property of the import graph, not of the constant, and\n' +
+      'one new edge changes it silently — this check will report it the day that edge lands,\n' +
+      'and says nothing about it before.\n',
+  );
+
+  if (added.length === 0 && gone.length === 0) {
+    console.log(
+      `\ncheck:cycle-tdz ok — the same ${found.size} site(s) as the baseline, none added, none stale.`,
+    );
+  } else {
+    console.error(`\ncheck:cycle-tdz FAILED — ${added.length + gone.length} problem(s):`);
+    for (const k of added) {
+      const f = found.get(k);
+      console.error(
+        `  - NEW module-scope read inside an import cycle: ${k} at line ${f?.line} ` +
+          `reads ${f?.reads.join(', ')} from ${f?.from.join(', ')}. This is one import edge from ` +
+          "`Cannot access 'X' before initialization` at import time. Move the constant to a module " +
+          'that imports nothing (railRace/dimensions.ts is the worked example), or move the read ' +
+          'inside a function. Do NOT add it to the baseline to make this pass',
+      );
+    }
+    for (const k of gone) {
+      console.error(
+        `  - STALE baseline entry: ${k} is no longer a module-scope read inside a cycle. ` +
+          'Delete it from scripts/cycle-tdz-baseline.mts in the same commit that fixed it — ' +
+          'that is what stops this number drifting back up',
+      );
+    }
+    process.exit(1);
+  }
+}
