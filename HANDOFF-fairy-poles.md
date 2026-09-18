@@ -386,8 +386,27 @@ returning fewer findings than expected is a result to explain, never to accept
 
 **Name-matching is not evidence**, and the rail race *is* downstream of
 `fairyLights` in the world-phase order, so it could in principle have moved. So
-`check:coplanar` is being run on the **base worktree** and the NEW sets
-compared. Any finding present on mine and absent on base is mine.
+`check:coplanar` was run on the **base worktree** and the NEW sets compared.
+
+### Control result: all 19 are pre-existing
+
+| | exit | NEW findings |
+|---|---|---|
+| base `ae20b9fc` | 1 | **19** |
+| this branch | 1 | **19** |
+
+- NEW on mine and **not** on base: **none**.
+- NEW on base and **not** on mine: **none**.
+- The two sets are **identical**.
+
+So this branch neither causes nor fixes any coplanar finding. `check:coplanar`
+is **red on the base**, and the rail-race seams are another engineer's known
+work on this same base.
+
+**This gate is red and is reported as red.** It is not claimed green anywhere,
+and no baseline entry was added to silence it — `coplanar-baseline.mts` is
+untouched by this branch, which the diff confirms (five files, none of them
+that one).
 
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
