@@ -254,6 +254,42 @@ took (base 19.1 / 22.1) was the lucky one, and quoting it as the base's
 behaviour would have made my own change look like a regression it is not.** One
 sample of a contended measurement is not a measurement.
 
+
+## CI on a real runner — and the base branch's own health
+
+Local numbers are contended ceilings; **CI is the measurement that settles
+this**, and it also shows the base is unhealthy independently of this work.
+
+| workflow | base `ae20b9fc` | this branch `e050c7a8` | |
+|---|---|---|---|
+| **Entrance road** | **cancelled at 922s** (its 15m cap) | **success at 363s** | **timeout → pass** |
+| Swept bus | success 535s | success 215s | 2.5× |
+| Coplanar faces | failure 670s | failure 235s | 2.85× |
+| Checks | failure 809s (12m55s of work) | failure 454s (5m48s of work) | 2.2× |
+| Procgen invariants | failure 268s | failure 306s | same red |
+| Every seed builds | **cancelled at 1525s** (its 25m cap) | *see below* | |
+| Walk reach / Update adoption / PR preview | success | success | |
+
+**`check:entrance-road`'s hang is fixed by this PR** — cancelled at its full cap
+on the base, green in 363 s here. That was the sibling engineer's ticket and
+the shared root cause; proved on a runner, not argued.
+
+**The base commit everyone branches from is red on three workflows and
+cancelled-at-cap on two.** That is not this PR's doing and this PR adds none of
+it:
+
+- **Checks** — *identical* failure, base and branch:
+  `check:slide-rider FAILED — the child's body is 0.13% of the frame on beat
+  1's trackside camera (ridden frame 240), against 0.40% required — 1 of 6
+  trackside samples are under it.` Same step, same frame, same percentage.
+  **That identity is itself further proof the park is unchanged**: the slide
+  rider's framing is measured off the built park, so a park that had moved
+  could not land on 0.13% at frame 240 twice.
+- **Procgen invariants** — failing test *name sets* proved identical locally.
+- **Coplanar faces** — red on both; the finding-set diff is the outstanding
+  item. Red-and-red is not proof of sameness (a different defect hides under
+  the same red), so this is not called pre-existing until that diff is in.
+
 ## Determinism: the park is unchanged, not merely deterministic
 
 `scripts/park-digest.mts`, canonical seed, base worktree vs this branch —
