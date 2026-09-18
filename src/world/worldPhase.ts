@@ -59,6 +59,7 @@ export interface WorldPhase {
 
 let lastTrace: readonly string[] = [];
 let lastStats: SolveStats | null = null;
+let lastStallBuilder: FeatureBuilder | null = null;
 
 /** The world phase's trace, for the digest and the boot's stats. Empty until a World has been built. */
 export function worldSolveTrace(): readonly string[] {
@@ -67,6 +68,21 @@ export function worldSolveTrace(): readonly string[] {
 
 export function worldSolveStats(): SolveStats | null {
   return lastStats;
+}
+
+/**
+ * The stalls builder the last world phase used — **the same object the driver
+ * drove**, not a copy of it.
+ *
+ * `scripts/check-stall-accommodate.mts` needs it: no seed in the pool ever
+ * refuses anything against a stall, so the only way to prove the mechanism
+ * works is to ask a real booth, in a real built park, against the real
+ * registry and the real collision world. A transcript of a hand-run would go
+ * stale the moment the geometry moved (CLAUDE.md: "a red-run transcript is a
+ * measurement, and measurements go stale"); a check cannot.
+ */
+export function worldSolveStallBuilder(): FeatureBuilder | null {
+  return lastStallBuilder;
 }
 
 /** The fountain: one increment, the basin's footprint at the plaza. It never moves. */
@@ -177,6 +193,7 @@ export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims,
       railRace = ride;
     }),
   ];
+  lastStallBuilder = builders[0] as FeatureBuilder;
   const solve = new ParkSolve(PARK_SEED, builders, claims);
   for (const _turn of solve.run()) {
     // drained
