@@ -543,6 +543,7 @@ export class RailRaceRoute {
       .set(sample.x, ground, sample.z)
       .addScaledVector(_out, (chart.x - sample.x) * sample.normalX + (chart.z - sample.z) * sample.normalZ)
       .addScaledVector(_along, (chart.x - sample.x) * sample.tangentX + (chart.z - sample.z) * sample.tangentZ)
+      // flat-ok: chart height over chart ground, the number placeOnSphere takes as flat.y
       .addScaledVector(_up, chart.y - ground);
   }
 
@@ -597,6 +598,7 @@ export class RailRaceRoute {
     const sample = this.frameAt(distance);
     const ground = _ground;
     const dx = drawn.x - sample.x;
+    // flat-ok: not a height — a displacement's y, decomposed against the frame below
     const dy = drawn.y - ground;
     const dz = drawn.z - sample.z;
     const across = dx * _out.x + dy * _out.y + dz * _out.z;

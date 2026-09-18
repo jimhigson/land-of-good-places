@@ -9652,6 +9652,7 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
       // 3D distance instead reports the sink itself, which on the walk-past
       // ring is 0.103 m against a 0.098 m tolerance: a check failing on a
       // healthy ring for doing what it was built to do.
+      // flat-ok: local +Y rotated by the sleeper's own instance matrix — its own up
       const sleeperUp = new Vector3(0, 1, 0).applyMatrix4(rotation).normalize();
       const near = nearestLane(byLane, centre.x, centre.y, centre.z);
       const onRail = new Vector3();
