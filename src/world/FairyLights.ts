@@ -690,7 +690,19 @@ export class FairyLights implements GameSystem {
       roughness: 0.9,
       metalness: 0,
     });
-    const poleGeometry = new CylinderGeometry(0.11, 0.17, poleHeight, 8);
+    // **Open-ended: the caps are hidden faces, so they are deleted rather than
+    // nudged.** Turning each post to its own bearing (below) stops their SIDE
+    // facets sharing a plane, but a cylinder's end caps are flat discs
+    // perpendicular to its axis, and yaw cannot rotate a disc out of its own
+    // plane. Two posts on similar ground therefore kept coplanar caps whatever
+    // their bearing — which is why the first attempt at this only took
+    // `check:coplanar`'s fairy seams from 9 to 6.
+    //
+    // Neither cap is ever seen: the top is inside the knob sphere that sits on
+    // it (knob radius 0.22 against a 0.12 rise), and the bottom is at ground
+    // level. ART_DIRECTION.md section 7 says to delete the hidden face rather
+    // than hold surfaces apart, and that is exactly what this is.
+    const poleGeometry = new CylinderGeometry(0.11, 0.17, poleHeight, 8, 1, true);
     const knobGeometry = new SphereGeometry(0.22, 10, 8);
     const knobMaterial = new MeshStandardMaterial({
       color: PALETTE.stonePink,
