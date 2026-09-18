@@ -778,7 +778,7 @@ export interface ParkFacts {
    * `strings` matters on its own: a pole with no neighbour carries no cable
    * and no bulbs, so poles alone do not mean a child sees any lights.
    */
-  readonly fairyLights: { readonly poles: number; readonly strings: number; readonly slots: number };
+  readonly fairyLights: { readonly poles: number; readonly strings: number };
   /**
    * The early, conservative reservation `bridgeKeepout.ts` computes for
    * every railway crossing (`train/bridgeFootprint.ts`'s `planConservative`
@@ -3583,10 +3583,16 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       }
     }
   }
-  // The fairy-light rig, counted off the scene it drew. `FAIRY_POLE_COUNT` is
-  // imported for the denominator only — "how many slots were offered" is not
-  // the measurement, it is the context for it; the numerators are meshes.
-  const { FAIRY_POLE_COUNT } = await import('../../src/world/FairyLights.ts');
+  // The fairy-light rig, counted off the scene it drew.
+  //
+  // **Poles and strings only, and both are meshes.** This used to carry a
+  // `slots` field taken from `FAIRY_POLE_COUNT`, which was honest while the
+  // plaza ring was the only chain and became a lie the moment the poles also
+  // followed the paths: the coverage line read "fairy poles 105 (out of 10
+  // slots offered)". A slot is a thing the *builder* planned and never draws,
+  // so it cannot be measured off the built park at all — and a denominator
+  // that cannot be measured has no business in a line that reports
+  // measurements. It is gone rather than corrected.
   const fairyLightsDrawn = ((): ParkFacts['fairyLights'] => {
     let poles = 0;
     let strings = 0;
@@ -3594,7 +3600,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       if (object.name.startsWith('fairy-pole-')) poles += 1;
       else if (object.name.startsWith('fairy-string-')) strings += 1;
     });
-    return { poles, strings, slots: FAIRY_POLE_COUNT };
+    return { poles, strings };
   })();
 
   // The bus's run, from the same owners `ArrivalSequence.placeBus` and

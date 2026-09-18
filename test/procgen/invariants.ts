@@ -11383,7 +11383,7 @@ const everyScatteredFeaturePlacesSomething: Invariant = (facts) => {
   process.stderr.write(
     `  everyScatteredFeaturePlacesSomething seed ${facts.seed}: ` +
       counts.map(([name, n]) => `${name} ${n}`).join(', ') +
-      ` (fairy poles out of ${facts.fairyLights.slots} slots offered)\n`,
+      '\n',
   );
 
   const complaints: string[] = [];
