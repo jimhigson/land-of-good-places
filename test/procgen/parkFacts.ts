@@ -21,6 +21,7 @@ import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
 import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
+import type { RailRaceRoute } from '../../src/world/railRace/route.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 import type { Claim } from '../../src/boot/groundClaims.ts';
 import type { RoadSegment } from '../../src/world/entrance/roadCorridor.ts';
@@ -1552,7 +1553,6 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // {@link RailRaceSupportFacts}. `track.ts` reaches `parkLayout.ts`, so it is
   // imported here, after this seed's world exists, never at the top of a test.
   const { trestleClaims } = await import('../../src/world/railRace/track.ts');
-  const { unplaceFromSphere } = await import('../../src/world/terrain.ts');
   const railRaceSupports: RailRaceSupportFacts[] = [];
   {
     const railRace = world.railRace;
@@ -1567,24 +1567,33 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
      * `strut` — **mapped back to the flat frame the tree was solved in.** The
      * struts are drawn leant onto the sphere (`leanTrestleTree`); the claims
      * and the lean bound are made on the flat solve, in chart coordinates. So
-     * each drawn end goes through `unplaceFromSphere` (the exact inverse of the
-     * lean, round trip 9e-14 m) before it is compared with anything the
-     * registry holds. Read straight as flat, a rail-height point 100 m out is
-     * metres off its own plan — the lean itself, not an error.
+     * each drawn end goes back through the ring's own `chartOf` — the exact
+     * inverse of the one rigid turn it was drawn through — before it is
+     * compared with anything the registry holds. Read straight as flat, a
+     * rail-height point 100 m out is metres off its own plan: the lean itself,
+     * not an error.
+     *
+     * **Not `unplaceFromSphere`, which this used to call.** That answers a
+     * different question — where a plumb line from the point meets the ground —
+     * and it was the exact inverse only while every node was leant at its own
+     * column, which is the shear `route.ts`'s `lean` exists to undo. It now
+     * differs by about 0.13 m out here, three times this clause's own
+     * float32 slack.
      */
-    const ends = (mesh: InstancedMesh, i: number): { from: Vector3; to: Vector3 } => {
+    const ends = (mesh: InstancedMesh, i: number, ring: RailRaceRoute): { from: Vector3; to: Vector3 } => {
       mesh.getMatrixAt(i, matrix);
       centre.setFromMatrixPosition(matrix);
       axis.setFromMatrixColumn(matrix, 1);
       return {
-        from: unplaceFromSphere(centre.clone().addScaledVector(axis, -0.5)),
-        to: unplaceFromSphere(centre.clone().addScaledVector(axis, 0.5)),
+        from: ring.chartOf(centre.clone().addScaledVector(axis, -0.5), new Vector3()),
+        to: ring.chartOf(centre.clone().addScaledVector(axis, 0.5), new Vector3()),
       };
     };
-    for (const [label, feature, scale] of [
-      ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute.scale],
-      ['race', 'railRace:race-ring', railRace.raceRoute.scale],
+    for (const [label, feature, ringRoute] of [
+      ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute],
+      ['race', 'railRace:race-ring', railRace.raceRoute],
     ] as const) {
+      const scale = ringRoute.scale;
       const group = railRace.group.getObjectByName(feature);
       const legs = group?.getObjectByName('railRace:trestle-legs');
       const lower = group?.getObjectByName('railRace:trestle-branches-lower');
@@ -1612,9 +1621,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
       // rebuilt from the drawn struts by that order, then run through the one
       // owner of what a support claims.
       for (let i = 0; i < legs.count; i += 1) {
-        const trunk = ends(legs, i);
-        const forkNodes = [ends(lower, 2 * i).to, ends(lower, 2 * i + 1).to];
-        const laneTops = [0, 1, 2, 3].map((lane) => ends(upper, 4 * i + lane).to);
+        const trunk = ends(legs, i, ringRoute);
+        const forkNodes = [ends(lower, 2 * i, ringRoute).to, ends(lower, 2 * i + 1, ringRoute).to];
+        const laneTops = [0, 1, 2, 3].map((lane) => ends(upper, 4 * i + lane, ringRoute).to);
         struts += 7;
         fromDrawn.push(
           ...trestleClaims(
@@ -1632,7 +1641,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
           footX: trunk.from.x,
           footZ: trunk.from.z,
           lean: Math.hypot(trunk.to.x - trunk.from.x, trunk.to.z - trunk.from.z),
-          // flat-ok: both ends were mapped back to the chart by unplaceFromSphere above; y is chart height
+          // flat-ok: both ends were mapped back to the chart by the ring's own chartOf above; y is chart height
           trunkHeight: trunk.to.y - trunk.from.y,
         });
       }

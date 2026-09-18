@@ -372,6 +372,23 @@ export class RailRaceRoute {
     this.startDistance = slideArchClear(this, atBooth, stall, keepArchOff);
   }
 
+  /**
+   * **Where a drawn point of this ride was authored** — {@link unlean} without
+   * having to know the station first.
+   *
+   * A measurement holds a vertex or an instance matrix, not an arc length, so
+   * this finds the station the point belongs to ({@link RingPath.distanceNear},
+   * which is exact for a cross-section turned about the path's own normal
+   * plane) and then inverts the turn there. `terrain.ts`'s `unplaceFromSphere`
+   * is the general answer to a *different* question — where a plumb line from
+   * this point meets the ground — and differs from this by about 0.13 m out at
+   * the ring, which is more than a sleeper's own tolerance. Use whichever
+   * question you actually mean.
+   */
+  chartOf(drawn: { x: number; y: number; z: number }, target: Vector3): Vector3 {
+    return this.unlean(RING_PATH.distanceNear(drawn.x, drawn.z), drawn, target);
+  }
+
   /** Brings any arc length into `[0, length)`. */
   wrap(distance: number): number {
     const wrapped = distance % this.length;
