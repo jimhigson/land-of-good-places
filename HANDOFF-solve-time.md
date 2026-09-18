@@ -136,6 +136,38 @@ Base seeds 3 and 4 measured the same way (`check:every-seed-builds` with
 `LGP_SEEDS=3,4,7`); seed 7's base is the solo `check:park` quoted above, which
 is the kinder of the two measurements for the base.
 
+### Seed 7 — the same decision path, byte for byte
+
+The hardest seed in the sweep, base vs branch, both `LGP_SEED=7 check:park`:
+
+```
+BASE    increments=58 refusals=42 retries=23 accommodations=0 unwinds=31
+        deepest-unwind=5 decision-zero=2 worst-attempt={"cruiser":5,"train":5,"layout":2}
+        layout=187ms/2429p cruiser=13344ms/2347637p train=1207376ms/35960103p
+        slide=9636ms/755401p crossings=255ms/2054p pathGraph=1120ms/2129p seams=64
+        19/19 attractions, 0 rail crossing(s), 253/253 waypoints. 1234623 ms.
+
+BRANCH  increments=58 refusals=42 retries=23 accommodations=0 unwinds=31
+        deepest-unwind=5 decision-zero=2 worst-attempt={"cruiser":5,"train":5,"layout":2}
+        layout=221ms/2429p cruiser=14518ms/2347637p train=273196ms/35960103p
+        slide=11090ms/755401p crossings=257ms/2054p pathGraph=1076ms/2129p seams=64
+        19/19 attractions, 0 rail crossing(s), 253/253 waypoints. 305449 ms.
+```
+
+**Every driver count and every piece count identical** — 58 increments, 42
+refusals, 23 retries, 31 unwinds, 2 decision zeros, the same worst attempt per
+feature, and **35,960,103 train candidates on both**. Those base counts are
+also exactly what `HANDOFF-backtracking.md` records and what a second engineer
+measured independently, so all three runs are the same park.
+
+Train **1207376 ms → 273196 ms, 4.42×**; the park 1234623 ms → 305449 ms.
+
+**The handoff's line "the cost is the train's dead-end searches at ~20 s each"
+is not made false by this, only cheaper** — those searches are still where seed
+7's time goes, at roughly a quarter of the price. Making that line stop being
+true means re-solving the railway fewer times, which is the `crossings` supply
+question below, not this change.
+
 ### Seed 428 — the pool seed the `check:entrance-road` engineer root-caused
 
 **Base and branch measured in two processes started together and running
