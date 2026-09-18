@@ -90,8 +90,10 @@ Controls: see the PR body — both pasted with their geometry.
       1`, `poi.stranded: 57`. **Pre-existing**: proved by running it in a
       detached worktree at base `ae20b9fc`, which gives the identical 3/1/57.
       Not this branch's, and not this slice's — reported to the Overseer.
-- [ ] `test:procgen` name diff vs base
-- [ ] PR against `feat/procgen-on-sphere`
+- [x] `test:procgen` name diff vs base `ae20b9fc`: both `55 failed | 636 passed
+      (691)`, and `comm` on the sorted failing-name sets is **empty in both
+      directions** — no name added, none removed.
+- [x] PR #674 open against `feat/procgen-on-sphere`
 
 ## Not my cause
 
