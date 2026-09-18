@@ -2085,6 +2085,27 @@ function buildArch(
       keep(legGeometry);
       const leg = solid(new Mesh(legGeometry, material));
       leg.position.set(footX, bottom + height / 2, footZ);
+      // **Neighbouring legs get opposite facet phases, so no two of their
+      // faces lie in one plane.**
+      //
+      // The bands are `band` apart and each leg's tube is `band / 2`, so
+      // consecutive legs stand exactly tangent — six touching posts making one
+      // rainbow's leg, which is the look. Eight-sided prisms standing tangent
+      // present each other a long flat facet the height of the whole leg, and
+      // `check:coplanar` found eight such pairs on the canonical seed, the
+      // worst 0.562 m² of shared plane fighting at 6 mm. Nothing there is
+      // visible — the faces are buried between two posts that touch — so this
+      // is ART_DIRECTION §7's "delete the hidden face" rather than a stand-off:
+      // half a facet of spin on every other leg leaves a facet of one post
+      // facing a *vertex* of the next, 22.5° apart, and two faces 22.5° apart
+      // cannot share a plane however close they stand. Nothing moves, so the
+      // rainbow is drawn exactly where it was.
+      //
+      // The better fix is one merged leg stack per side with the band colours
+      // as vertex colours, which would delete the buried faces outright and
+      // give the six posts a single silhouette; it changes what a child sees,
+      // so it is Jim's call rather than this ticket's.
+      leg.rotation.y = (i % 2) * (Math.PI / 8);
       leg.name = `railRace:finish-rainbow-leg-${i}-${side < 0 ? 'inner' : 'outer'}`;
       leg.frustumCulled = false;
       group.add(leg);
