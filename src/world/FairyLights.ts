@@ -18,7 +18,7 @@ import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
 import { PLAZA, plazaVerge } from './paths';
-import { cruiserClearanceForPost } from './coaster/clearance';
+import { cruiserClearanceForPoints } from './coaster/clearance';
 import type { CoasterRoute } from './coaster/route';
 import { PLAYER_RADIUS } from '../core/constants';
 import { isOnPath, pathCentreline } from './pathGraph';
@@ -105,6 +105,102 @@ const POLE_HEIGHT = 4.4;
  * like contact from the seat.
  */
 const POLE_RIDE_CLEARANCE = PLAYER_RADIUS;
+
+/** How far below the pole's top the cable is tied on. */
+const ANCHOR_DROP = 0.25;
+/** How far a cable sags at mid-span. */
+const CABLE_SAG = 1.15;
+/** How far a bulb hangs under the cable. */
+const BULB_DROP = 0.18;
+/** Bulbs on one string. */
+const BULBS_PER_STRING = 9;
+
+/**
+ * **Where a pole's cable is tied**, in drawn world space.
+ *
+ * The post leans with the park, so its anchor is not `(x, ground + h, z)` —
+ * it is that point carried along the local up, exactly as `placeOnSphere`
+ * carries the pole itself.
+ */
+export function fairyAnchorAt(x: number, z: number, into: Vector3): Vector3 {
+  const ground = terrainHeight(x, z);
+  const up = upAt(x, ground, z, new Vector3());
+  const h = POLE_HEIGHT - ANCHOR_DROP;
+  return into.set(x + up.x * h, ground + up.y * h, z + up.z * h);
+}
+
+/**
+ * **The sampled cable slung between two poles, bulbs included — the one owner.**
+ *
+ * Both the drawing and the ride-clearance test read this. They must, and the
+ * reason is a defect this PR shipped and had to fix: the overhead test guarded
+ * the 4.4 m *post* and nothing else, so on seed 326 the Sky Cruiser passed
+ * clean between two poles, cleared both, and went **through `fairy-bulbs`** —
+ * the lights strung between them, which hang in air where there is no pole at
+ * all.
+ *
+ * The sag, the anchor drop and the bulb drop used to be literals inside the
+ * constructor. Re-deriving them in the builder would have been the very
+ * two-definitions bug this branch exists to kill: the next person to tune the
+ * sag would have silently un-guarded the ride, and nothing would have said so.
+ *
+ * Returns the cable points; `withBulbs` adds the bulb positions hanging under
+ * it, which are what the ride actually strikes first.
+ */
+export function fairySpan(from: Vector3, to: Vector3): { cable: Vector3[]; bulbs: Vector3[] } {
+  const cable: Vector3[] = [];
+  const bulbs: Vector3[] = [];
+  const up = new Vector3();
+  for (let s = 0; s <= BULBS_PER_STRING + 1; s += 1) {
+    const t = s / (BULBS_PER_STRING + 1);
+    const sag = Math.sin(t * Math.PI) * CABLE_SAG;
+    const point = new Vector3().lerpVectors(from, to, t);
+    upAt(point.x, point.y, point.z, up);
+    point.addScaledVector(up, -sag);
+    cable.push(point);
+    if (s > 0 && s <= BULBS_PER_STRING) bulbs.push(point.clone().addScaledVector(up, -BULB_DROP));
+  }
+  return { cable, bulbs };
+}
+
+/**
+ * **Every world point the rig occupies for one pole and its spans — what the
+ * clearance test asks about.**
+ *
+ * It returns the *drawn* geometry rather than a description of it, and the
+ * drawing is built from the same calls, so a part cannot be guarded in one
+ * place and drawn in another. That is the point: the first version of the
+ * ride-clearance test covered the 4.4 m post and nothing else, and seed 326
+ * duly built a park whose Sky Cruiser passed clean between two poles, cleared
+ * both, and went through the **bulbs** hanging between them.
+ *
+ * Adding a part to the rig — a lantern, a pennant, a second string — means
+ * adding it here, where the test sees it for free, instead of remembering that
+ * a test exists somewhere that needs widening.
+ */
+export function fairyOccupiedPoints(
+  x: number,
+  z: number,
+  neighbours: readonly { readonly x: number; readonly z: number }[],
+): Vector3[] {
+  const points: Vector3[] = [];
+  const ground = terrainHeight(x, z);
+  const up = upAt(x, ground, z, new Vector3());
+  // the post itself, sampled up its leaning axis, and its knob on top
+  for (let h = 0; h <= POLE_HEIGHT; h += 0.5) {
+    points.push(new Vector3(x + up.x * h, ground + up.y * h, z + up.z * h));
+  }
+  const top = POLE_HEIGHT + 0.12;
+  points.push(new Vector3(x + up.x * top, ground + up.y * top, z + up.z * top));
+  // every cable and bulb slung from it to a neighbour that is already standing
+  const here = fairyAnchorAt(x, z, new Vector3());
+  for (const other of neighbours) {
+    const there = fairyAnchorAt(other.x, other.z, new Vector3());
+    const span = fairySpan(here, there);
+    points.push(...span.cable, ...span.bulbs);
+  }
+  return points;
+}
 
 /**
  * **Where the ring of poles stands — asked for, never written down.**
@@ -287,11 +383,38 @@ export function fairyPoleBuilder(
   };
 
   /** The first candidate of `slot` that is off the paving and unrefused, with who refused the rest. */
+  /**
+   * The poles this one will be strung to, of those already standing.
+   *
+   * Slots are placed in order, so that is the previous placed slot of the same
+   * chain — plus, for the ring's last slot, the chain's first, because a closed
+   * chain strings its end back to its start.
+   */
+  const standingNeighbours = (index: number): { x: number; z: number }[] => {
+    const { chains, slots } = ensurePlan();
+    const slot = slots[index];
+    if (!slot) return [];
+    const mine = slots
+      .map((s, i) => ({ s, i }))
+      .filter((e) => e.s.chain === slot.chain);
+    const at = mine.findIndex((e) => e.i === index);
+    const out2: { x: number; z: number }[] = [];
+    const take = (e: { i: number } | undefined): void => {
+      const p = e ? placed[e.i] : undefined;
+      if (p) out2.push({ x: p[0], z: p[1] });
+    };
+    take(mine[at - 1]);
+    if (chains[slot.chain]?.closed && at === mine.length - 1) take(mine[0]);
+    return out2;
+  };
+
   const chooseSpot = (
     slot: PoleSlot,
+    index: number,
     from: number,
     keepClearOf: readonly Claim[],
   ): { spot: readonly [number, number]; claim: Claim } | { blockers: string[] } => {
+    const neighbours = standingNeighbours(index);
     const blockers = new Set<string>();
     for (let c = from; c < slot.candidates.length; c += 1) {
       const [x, z] = slot.candidates[c]!;
@@ -306,9 +429,18 @@ export function fairyPoleBuilder(
       // This is inside the candidate loop on purpose: a pole refused overhead
       // slides along its own run or swaps sides like any other refusal, and is
       // only left out when every candidate fails.
+      // **Ask the ride about everything this pole will put in the air**, not
+      // just the post: the cables slung to its standing neighbours and the
+      // bulbs hanging under them. `fairyOccupiedPoints` returns the drawn
+      // geometry, and the drawing is built from the same calls, so a part
+      // cannot be guarded here and drawn differently there.
       if (
         cruiserRoute &&
-        cruiserClearanceForPost(cruiserRoute, x, z, POLE_HEIGHT, POLE_RADIUS) < POLE_RIDE_CLEARANCE
+        cruiserClearanceForPoints(
+          cruiserRoute,
+          fairyOccupiedPoints(x, z, neighbours),
+          POLE_RADIUS,
+        ) < POLE_RIDE_CLEARANCE
       ) {
         continue;
       }
@@ -351,7 +483,7 @@ export function fairyPoleBuilder(
       while (placed.length < slots.length) {
         const index = placed.length;
         const slot = slots[index]!;
-        const chosen = chooseSpot(slot, 0, []);
+        const chosen = chooseSpot(slot, index, 0, []);
         if ('blockers' in chosen) {
           // **A fairy pole never asks anything to move.** It is left out.
           //
@@ -413,7 +545,7 @@ export function fairyPoleBuilder(
       const slot = slots[index];
       const current = placed[index];
       if (!slot || !current) return refusal(`fairyLights: no pole owns claim ${claimIndex}`);
-      const moved = chooseSpot(slot, 1, keepClearOf);
+      const moved = chooseSpot(slot, index, 1, keepClearOf);
       if ('blockers' in moved) {
         return refusal(`fairyLights: ${slot.label} has nowhere else on its run to stand`);
       }
@@ -523,6 +655,32 @@ export class FairyLights implements GameSystem {
     const rng = new Rng(0x11a17);
 
     const poleHeight = POLE_HEIGHT;
+    /**
+     * **Each post is turned to its own bearing.**
+     *
+     * A pole is an eight-sided cylinder and a knob is a sphere, both built from
+     * one shared geometry and, until now, all placed at yaw 0 — so every post
+     * in the park had its facets pointing the same way. Two posts offset along
+     * a direction parallel to one of those facets put that facet in the *same
+     * plane*, which is a depth-buffer fight the moment both are on screen.
+     *
+     * With ten poles in one verge it never came up. With a hundred strung
+     * along the paths `check:coplanar` found nine such pairs
+     * (`fairy-pole-0`/`fairy-pole-10`, `fairy-pole-20`/`fairy-pole-21`, the
+     * knobs against each other, and so on) — all of them new, all of them
+     * mine.
+     *
+     * Turning each post to its own seeded bearing removes the shared plane at
+     * its cause. ART_DIRECTION.md §7's rule is to delete the hidden face
+     * rather than hold surfaces apart with a stand-off, and this is the same
+     * spirit: no stand-off is introduced and no number has to be maintained —
+     * the faces simply stop being parallel. A post is a rough wooden thing and
+     * reads identically at any bearing, so nothing is lost.
+     *
+     * Its own `Rng`, not the one below: that one draws the strings' light
+     * colours, and consuming it here would silently re-colour them.
+     */
+    const yawRng = new Rng(0x9a17e);
     const flat = new Vector3();
     const scratchLean = new Quaternion();
     const up = new Vector3();
@@ -574,17 +732,18 @@ export class FairyLights implements GameSystem {
         // is what keeps the post rigid as it leans away from the park's centre —
         // a knob that stayed at its old world height would hang off the side of a
         // pole that had tipped out from under it.
+        const yaw = yawRng.range(0, TAU);
         const pole = new Mesh(poleGeometry, poleMaterial);
         pole.name = `fairy-pole-${poleNumber}`;
         flat.set(x, ground + poleHeight / 2, z);
-        placeOnSphere(flat, 0, pole.position, pole.quaternion);
+        placeOnSphere(flat, yaw, pole.position, pole.quaternion);
         pole.castShadow = true;
         pole.receiveShadow = true;
         this.group.add(pole);
 
         const knob = new Mesh(knobGeometry, knobMaterial);
         flat.set(x, ground + poleHeight + 0.12, z);
-        placeOnSphere(flat, 0, knob.position, knob.quaternion);
+        placeOnSphere(flat, yaw + 0.7, knob.position, knob.quaternion);
         knob.castShadow = true;
         this.group.add(knob);
 

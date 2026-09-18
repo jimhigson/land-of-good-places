@@ -464,6 +464,51 @@ function framesForPostQueries(route: CoasterRoute): { frames: RailFrame[]; centr
   return resolved;
 }
 
+/**
+ * The smallest gap between the car's swept envelope and any of `points`.
+ *
+ * Takes the **drawn world points of the thing itself** rather than a shape
+ * description, so whatever the caller draws is what gets tested — see
+ * `FairyLights.fairyOccupiedPoints`, which exists because a version of this
+ * guarded a post and missed the bulbs hanging beside it.
+ */
+export function cruiserClearanceForPoints(
+  route: CoasterRoute,
+  points: readonly Vector3[],
+  radius: number,
+): number {
+  const { halfWidth, above, below } = CART_ENVELOPE;
+  const halfLength = CART_BODY_LENGTH / 2;
+  const { frames, centre, reach } = framesForPostQueries(route);
+  const envelope = halfLength + halfWidth + Math.max(above, below);
+  if (points.length === 0) return Infinity;
+
+  // Whole-loop reject: a cluster far outside the loop's bounding sphere cannot
+  // reach it, and most of the park's poles are exactly that.
+  let nearest = Infinity;
+  for (const p of points) nearest = Math.min(nearest, p.distanceTo(centre));
+  const far = nearest - reach - envelope - radius;
+  if (far > 0) return far;
+
+  const offset = new Vector3();
+  let best = Infinity;
+  for (const frame of frames) {
+    for (const point of points) {
+      offset.subVectors(point, frame.position);
+      if (offset.length() - envelope > best) continue;
+      const alongCar = offset.dot(frame.forward);
+      const acrossCar = offset.dot(frame.side);
+      const upCar = offset.dot(frame.up);
+      const dx = Math.max(0, Math.abs(alongCar) - halfLength);
+      const dz = Math.max(0, Math.abs(acrossCar) - halfWidth);
+      const dy = upCar > 0 ? Math.max(0, upCar - above) : Math.max(0, -upCar - below);
+      const gap = Math.hypot(dx, dy, dz) - radius;
+      if (gap < best) best = gap;
+    }
+  }
+  return best;
+}
+
 export function cruiserClearanceForPost(
   route: CoasterRoute,
   x: number,
