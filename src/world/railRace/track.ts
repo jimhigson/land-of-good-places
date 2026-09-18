@@ -72,6 +72,18 @@ import { UNDULATION_REACH, type RailRaceRoute } from './route';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE } from './dimensions';
 
 /**
+ * How many sides a trestle branch is drawn with.
+ *
+ * One owner because two things must agree about it: both branch geometries are
+ * built with it, and the half-facet roll that keeps a fork from putting two
+ * faces in one plane is `PI / this` — half of the `2 * PI / this` a facet
+ * spans. It was written as a bare `8` twice, and a roll derived from a third
+ * copy of the number is exactly the "two definitions kept in step by hand"
+ * CLAUDE.md warns about.
+ */
+const BRANCH_RADIAL_SEGMENTS = 8;
+
+/**
  * **Everything the Rail Race runs through**: four rails, the trestles holding
  * them up, the bars you duck and the black stretches you must not power over.
  *
@@ -903,14 +915,42 @@ export function buildRailRaceTrack(
     STRUT_RADII['branches-lower'].to,
     STRUT_RADII['branches-lower'].from,
     1,
-    8,
+    BRANCH_RADIAL_SEGMENTS,
   );
   const upperBranchGeometry = new CylinderGeometry(
     STRUT_RADII['branches-upper'].to,
     STRUT_RADII['branches-upper'].from,
     1,
-    8,
+    BRANCH_RADIAL_SEGMENTS,
   );
+  // **The upper generation is rolled half a facet, so a fork cannot make two
+  // faces share a plane.** A branch and the branch continuing from it are very
+  // nearly in line — measured on the canonical seed, 0.14° to 1.15° apart at
+  // the fork — and `strut` below turns every cylinder with
+  // `setFromUnitVectors(UP, direction)`, which adds no roll of its own. So the
+  // facet phase of a strut is a pure function of its direction, and two struts
+  // pointing the same way come out phased alike.
+  //
+  // That alone would only make their faces parallel. What puts them in *one*
+  // plane is that `STRUT_RADII` tapers the tree continuously, so
+  // `branches-lower.to` and `branches-upper.from` are the same expression and
+  // the two cylinders are exactly as fat as each other where they meet. Equal
+  // radius plus equal phase plus a shared axis is a shared plane, and
+  // `check:coplanar` found one at 7.6e-5 m — inside the depth buffer's
+  // resolution, so it strobed.
+  //
+  // Half a facet is the whole fix and it is exact rather than lucky: the
+  // upper's faces sit at the midpoints of the lower's, so no face of one is
+  // ever coincident with a face of the other, at any joint angle, on any seed.
+  // A per-strut random phase was the other candidate and is weaker — it leaves
+  // every near-collinear pair a ~2% chance of landing within the sweep's 0.5°
+  // tolerance anyway, which is a seam waiting for a seed nobody has drawn yet.
+  //
+  // It cannot change the silhouette: an N-gon rolled about its own axis is the
+  // same N-gon, and the instance scale is equal in x and z, so the roll
+  // commutes with it. Nothing reads the phase — the claims, the collider and
+  // `check:swept-bus` all measure the strut's endpoints and radii.
+  upperBranchGeometry.rotateY(Math.PI / BRANCH_RADIAL_SEGMENTS);
   keep(legGeometry);
   keep(lowerBranchGeometry);
   keep(upperBranchGeometry);
