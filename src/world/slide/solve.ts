@@ -1954,8 +1954,21 @@ function chuteComplaint(points: readonly Vector3[]): string | null {
     if (step.done) return step.value;
   }
 }
-/** Chute points judged per piece of the rideability walk. */
-const JUDGE_PIECE = 32;
+/**
+ * Chute points judged per piece of the rideability walk.
+ *
+ * **8, down from 32.** The number was chosen when this judged the ~90 control
+ * points; it now judges the ~189 samples of the swept curve, and each one costs
+ * a `cruiser.nearestPoint` that walks the Sky Cruiser's whole loop. Measured by
+ * `check:park-boot` at 32: one slice doing **3 work units in 30.1 ms** of
+ * attested busy time against a 20.2 ms allowance — about 10 ms per piece, which
+ * is a frame and a quarter for one of them. At 8 a piece is a quarter of that
+ * and the boot stops hitching.
+ *
+ * It changes no verdict: the generator yields more often and judges exactly the
+ * same points in exactly the same order.
+ */
+const JUDGE_PIECE = 8;
 function* chuteComplaintSearch(
   controls: readonly Vector3[],
 ): Generator<number, string | null, void> {
@@ -1966,6 +1979,15 @@ function* chuteComplaintSearch(
   // park then drew too close. `chuteCentreLine` is the same curve `SlideRide`
   // builds, at the same 0.4 m `parkFacts.ts` measures it at.
   const points = chuteCentreLine(controls);
+  // **Building that curve is itself a unit of work.** `chuteCentreLine` threads
+  // a fresh Catmull-Rom through ~90 controls and measures its arc length, which
+  // is a couple of hundred curve evaluations before a single point has been
+  // judged. Left unyielded it landed in whichever slice the caller was in the
+  // middle of, and `check:park-boot` caught the result: one slice, **one work
+  // unit, 27.5 ms** of attested busy time against a 23.0 ms allowance, "during
+  // shaping the ginormous slide". Yield first so the frame that pays for the
+  // curve pays for nothing else.
+  yield 0;
   let judged = 0;
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;
@@ -2000,7 +2022,13 @@ function* chuteComplaintSearch(
   // (it stopped exploring routes that could never finish under the length
   // ceiling) then found routes on seeds 11 and 24 that did the same, by up to
   // 1.47 m — so it is asked here, where the search can backtrack over it.
+  // These last two walks used to run to completion without yielding once, so
+  // the whole ground pass and the whole tower pass fell inside whatever slice
+  // the cruiser walk happened to end in — three passes' work, one frame's
+  // budget. They are sliced on the same `JUDGE_PIECE` as the first.
   for (const point of points) {
+    judged += 1;
+    if (judged % JUDGE_PIECE === 0) yield judged;
     const underside = altitudeAt(point.x, point.y, point.z) - CHUTE_ENVELOPE.below;
     if (underside >= 0) continue;
     return (
@@ -2010,6 +2038,8 @@ function* chuteComplaintSearch(
   }
 
   for (const point of points) {
+    judged += 1;
+    if (judged % JUDGE_PIECE === 0) yield judged;
     if (clearsTowers(point.x, point.z, point.y, CORRIDOR_RADIUS)) continue;
     return (
       `runs into a castle tower at (${point.x.toFixed(1)}, ${point.y.toFixed(1)}, ` +
