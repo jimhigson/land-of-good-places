@@ -318,6 +318,61 @@ The `manifest` one was additionally checked to hit **waterFight**'s
 number six lines later; anchored on the following `id: 'dodgems'`, and the
 diff confirms dodgems' 19 is untouched.
 
+## `poi.nospot` is armed too
+
+`control.sh on nudge` sets `NUDGE_REACH` to 0.01 m, so no waypoint seed can
+find a spot. Seed 13, which passes in 6 s normally:
+
+```
+check:park: 1 invariant regression(s):
+  poi.nospot: 246 (no allowance — this is new)
+```
+
+`rc=1`. Geometry: seed 13's park at `ae20b9fc`, 246 waypoint seeds.
+
+Control 3 (disabling the `outside` boundary screen) was **not** run: the
+trace evidence below shows that screen firing on real seeds, which is a
+stronger and cheaper demonstration that it is load-bearing than mutating it
+would have been.
+
+## The existing plan-time screens DO fire — trace evidence
+
+Pulled from the sixteen sweep logs (the driver prints its whole trace to
+stderr on every headless build), so this is the ordinary run, not a
+contrivance. Refusals by screen:
+
+| screen | firings | seeds |
+|---|---|---|
+| `screenDrawnPathsForOffSiteCrossings` | 15 | 3 (×3), 4 (×1), 7 (×10), 15 (×1) |
+| ...of which the **esplanade march** (drawn run −2) | 12 | mostly 7 |
+| `parkPlan.pinchedSample` (the lane pinch) | 4 | 7 (×3), 15 (×1) |
+| the `outside` boundary screen | 2 | 4 (×1), 7 (×1) |
+
+Two verbatim excerpts, each showing the screen refusing and the driver
+unwinding to the decision it consumed:
+
+```
+refused pathGraph#0 attempt=0 blockers=- consumed=train,layout: paths: drawn run 4 is
+  pinched shut at (9.1, -41.2): nearest lane point is 30.27 m from the boundary edge
+  (needs 1.07) and 2.77 m from the rail centreline (needs 2.80, in a band 0.50 m wide)
+unwind to train#0 attempt=1 popped=3 for pathGraph: ...
+```
+
+```
+refused pathGraph#0 attempt=0 blockers=- consumed=layout: paths: a drawn path leaves
+  the park at (77.9, -14.8), 1.62 m outside the boundary wall
+unwind to layout#0 attempt=1 popped=5 DECISION-ZERO for pathGraph: ...
+```
+
+Both consume the right decision and unwind to it — the lane pinch to the
+`train`, the boundary escape to the `layout` (a decision zero, correctly:
+nothing short of a different park fixes a plot whose spur cannot stay
+inside the wall).
+
+The coarse solvers refuse far more often than the screens do: 40 `train`
+refusals and 12 `cruiser` refusals across the sweep, against 21 screen
+refusals. The backtracking is doing real work on these seeds, not idling.
+
 ## The shape of the deliverable if the residue is gone
 
 The brief anticipates this case. Then the work is:
