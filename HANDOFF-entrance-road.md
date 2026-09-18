@@ -200,12 +200,17 @@ non-zero on every seed (13–35 posts), 145.7 m of 145.7 m road swept.
 
 ## The CI proof — run `35362790212`, on head `6cd4d7f4`
 
-**Read the commit before you read the numbers.** An earlier version of this
-file quoted run `35361203366` — which is on `5d59f323`, *superseded by the very
-handoff commits that recorded the measurement*. Exactly CLAUDE.md's "a
-measurement goes stale" trap, with the extra sting that writing the note is
-what staled it. **Every number below is off the head being merged.** If you
-push to this branch, re-read them off the new run.
+**Anchor the numbers on the script, not on a SHA.**
+`scripts/check-entrance-road.mts` — the only file in this diff that runs — has
+not changed since **`81bfb286`**; every commit after it touches this handoff
+and nothing else (`git log --name-only 81bfb286..HEAD`). So these figures
+describe the code being merged whichever handoff commit is at the tip.
+
+That framing exists because an earlier version of this file quoted run
+`35361203366`, which is on `5d59f323` — *superseded by the very handoff commits
+that recorded the measurement*. CLAUDE.md's "a measurement goes stale", with
+the sting that writing the note is what staled it. **Re-quoting against a SHA
+would have staled itself again on the next push**; the invariant does not.
 
 Sweep step 15:30:27 → 15:42:20 = **11m53s (713.1 s)** against the 900 s cap.
 
@@ -236,6 +241,23 @@ Derived from that run's own per-park lines:
 **713.1 s achieved against a 505.0 s longest-park floor is 208 s of pure
 scheduling loss** — nearly a third of the wall clock still sitting in the
 scheduler.
+
+### The margin is a range, not a number
+
+A second green run of the **identical script** (`35365849843`, head
+`4bdc8fae` — handoff-only commit, script untouched since `81bfb286`):
+
+| | `35362790212` | `35365849843` |
+|---|---|---|
+| total CPU | 1881.3 s | 1778.2 s |
+| longest park (seed 428) | 505.0 s | 440.3 s |
+| achieved wall clock | **713.1 s (11m53s)** | **653.5 s (10m54s)** |
+| margin under the 900 s cap | **3m07s** | **4m06s** |
+
+**9.1% spread run to run, 14.7% on seed 428 alone, from runner variance
+alone** — about a third of the margin. Quote the worse run when planning, and
+do not treat a single green run as the number. A third data point would be
+worth having before anyone argues this is comfortable.
 
 **An earlier version of this section said the opposite, and it was wrong.** It
 compared the two *lower* bounds (470.3 s and 505.0 s) to each other, observed
