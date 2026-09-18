@@ -82,7 +82,11 @@ A `stalls` `FeatureBuilder` in `worldPhase.ts`, **first** in the order
 
 ## Measured
 
-**Adding stall claims changed no park.** `scripts/park-digest-sweep.sh` on the
+**Adding stall claims changed no park.** (The **park** hash, precisely — not
+the whole digest *file*. `world-trace` gains 9 lines on every seed: the eight
+stall increments plus `done stalls`. The park those decisions build is
+byte-identical; the record of how it was decided is one feature longer, which
+is the honest description.) `scripts/park-digest-sweep.sh` on the
 base (`origin/feat/procgen-on-sphere`, ae20b9fc) and on this branch, one
 process per seed, all ten pool seeds:
 
@@ -99,7 +103,7 @@ process per seed, all ten pool seeds:
 | 428 | 4026fa879ce5bbe3 | 4026fa879ce5bbe3 |
 | 451 | 9c5c9504db51c63c | 9c5c9504db51c63c |
 
-Re-taken at final HEAD (875453e1) after every source change: **identical
+Re-taken at final HEAD after every source change: **identical
 again, all ten**. Identical, every one — mesh counts too. That is the property the design was
 built for: attempt 0 of every stall is the spot the layout drew, and the
 claims are the colliders' own geometry, so nothing that was allowed before is
@@ -349,3 +353,62 @@ step of all 68 passed**, including `check:stall-shape`, `check:shop-spacing`,
 `tsc --noEmit`, `typecheck:test`, `check:park`, `check:park-boot` (worst slice
 inside budget), `check:hotel`, `check:tap-spacing`, `check:nav-routes` and
 `check:rail-race`. `check:stall-accommodate` passes.
+
+
+## Round 2 — the reviewer's finding, fixed
+
+**The silent skip.** `spaceFerrisWheel` has no `STALL_LAYOUT_IDS` entry, so
+`accepts` guarded its walk-to-the-counter march with `if (layoutId)`: the one
+*movable* booth placed by relation rather than on a plot quietly got a weaker
+acceptance gate than the other seven — the very test this class calls "the one
+that decides" — and nothing announced it. No seed can reach it today, which is
+exactly how a silent skip survives.
+
+**Fixed by making the question total, not by adding a second branch.**
+`spurEndFor(id)` returns the plot's own doormat for the seven that have one,
+and for the kiosk the **wheel's entrance** — which is a plot doormat too
+(`anchors.ts` builds `entrance` from a `placedEntry`'s `entranceX/entranceZ`,
+and `paths.ts` paves a spur to it) and is the same point `ferrisKiosk()`
+positions the booth from. One owner, same question, same kind of answer.
+It **throws** for a stall with neither, so the next one added cannot inherit a
+weaker gate in silence.
+
+**`check:stall-accommodate` now asks all six movable booths** instead of
+stopping at the first that says yes — which is what left the kiosk unexercised
+in the first place. Canonical seed: 6 of 6 step aside 0.90 m each, all four
+new wall claims matched to colliders each time, 1032 walls throughout, and all
+**eight** counters still walkable to from the entrance afterwards, on one
+lattice rebuilt over the finished world. 17.8 s.
+
+### Proved both ways (geometry: canonical seed, kiosk drawn at (−47.29, −15.45), spur end (−45.1, −18.4))
+
+- Point the kiosk's spur end at `(200, 200)` — a place no straight line
+  reaches — and it **refuses**: `stalls: spaceFerrisWheel at (-47.3, -15.5)
+  found no spot within 1.5 m that keeps its counter reachable`, and the check
+  confirms `refused and is exactly where it was: 1032 walls, all four still
+  solid`. So the gate is armed for that booth specifically, not passing
+  vacuously.
+- Delete the relation branch and it **throws** by name rather than skipping:
+  `stalls: 'spaceFerrisWheel' has no plot in STALL_LAYOUT_IDS and no stated
+  relation…`.
+
+Both mutations reverted. Park hashes re-confirmed unchanged after the fix on
+seeds 20260728 (`a1b5c16077708bc0`), 128 (`528eebcd274a31a6`) and 274
+(`a7918b629da40cc1`) — the fix lives in `accommodate`, which no build reaches.
+
+## Filed, deliberately not fixed in this PR
+
+1. **The exhausted-search restore path has no standing test.** On the happy
+   path all six booths move, so the branch where a booth tries every ring,
+   finds nothing and puts itself back never fires. `check:stall-accommodate`
+   now **says so on stderr on every run**: *"0 exhausted every ring and
+   restored itself — so the EXHAUSTED-SEARCH RESTORE PATH WAS NOT EXERCISED by
+   this run, and nothing above covers it. It needs a test of its own."*
+   **Whoever takes the ticket: the cover already exists in miniature** — the
+   `(200, 200)` mutation above drives exactly that path and the check's
+   existing refusal clause verifies it (`1032 walls, all four still solid`).
+   Making it permanent is a test-only hook that forces one booth's search to
+   fail, not new production code.
+2. **A shifted counter can land off its own paving.** `accepts` proves the
+   stand point collision-clear and walkable-to; it does not prove it still
+   *paved*. Cosmetic, and unreachable while no seed moves a booth.
