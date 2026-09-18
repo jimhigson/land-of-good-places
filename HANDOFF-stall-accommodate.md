@@ -443,3 +443,49 @@ seeds 20260728 (`a1b5c16077708bc0`), 128 (`528eebcd274a31a6`) and 274
 Deliberately **not** in this PR, at the Overseer's direction: a shifted
 booth's counter can land off its own paving (`accepts` proves collision-clear
 and walkable, not still *paved*) — filed as its own issue.
+
+
+## Round 4 — rebased onto `881cb158`
+
+`Every seed builds` was **cancelled at its cap** on the old head, which in this
+repo means a timeout and therefore a failure. Not the diff: the branch's merge
+base predated **#670**, which stopped the railway's boundary test walking all
+512 polygon vertices per candidate sample (80.7% of the solve). Rebased.
+
+Base gained three commits over `ae20b9fc`:
+
+- `881cb158` #670 — the park-solve boundary-scan fix (the one that matters here)
+- `86f9a513` #674 — **`check:waypoints` solves the park before reading the
+  facade's edges**, i.e. the `NaN..NaN` red I reported in round 1 is fixed
+- `78d25b40` #669 — `check:entrance-road` queue/reporting
+
+### Verified after the rebase, not assumed
+
+- **Chain step sets compared by parsing `package.json`, never grepped.** New
+  base 67 steps / 126 scripts → mine **68 / 127**. Lost: **none**. Gained:
+  exactly `pnpm run check:stall-accommodate` and `check:stall-accommodate`.
+  And the **order** is preserved: strip my one step and the list is the base's,
+  element for element. (`package.json` is untouched by all three base commits,
+  so there was no chain conflict to mis-resolve.)
+- **`rerere` could not have replayed anything: it is `false`.**
+  `git config --local --get rerere.enabled` → `false`. **CLAUDE.md's statement
+  that it is `true` in this repo is stale** — worth correcting there. The
+  `.git/rr-cache` still holds **90 resolutions** behind the disabled flag, so
+  anyone re-enabling it inherits all of them at once.
+- **Three-dot diff unchanged**: same 14 files, +1971/−87, no whole-file
+  deletion, and **zero overlap** between the files the base changed and the
+  files I touch — so no silent revert.
+- `tsc --noEmit` and `typecheck:test` clean.
+- `check:stall-accommodate` PASSes on the rebased head, with the **same
+  coordinates** as before the rebase (railRacer (−30.14, −51.69) → (−29.31,
+  −51.35), 0.90 m; 6 of 6 booths).
+
+### Park digests — checked in both directions
+
+| comparison | result |
+|---|---|
+| new base `881cb158` vs old base `ae20b9fc` | **all ten pool seeds identical** — #670's "same parks" claim independently confirmed |
+| my rebased head vs new base `881cb158` | **all ten identical**, mesh counts too |
+
+And they are the same literal hashes as before the rebase
+(`a1b5c16077708bc0`, `528eebcd274a31a6`, …), so nothing moved on either axis.
