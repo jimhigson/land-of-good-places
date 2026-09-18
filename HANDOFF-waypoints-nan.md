@@ -79,6 +79,22 @@ Controls: see the PR body — both pasted with their geometry.
 - [x] Fix committed and pushed
 - [x] Control 1 (plant waypoints in the facade) — red with real numbers
 - [x] Control 2 (remove the solve) — finite guard fires
-- [ ] Seed-pool sweep of `check:waypoints` and `check:park`
+- [x] Seed-pool sweep of `check:waypoints` — **all 10 pool seeds exit 0**, each
+      with a different real rectangle (the facade genuinely moves per seed now),
+      222–308 waypoints each. So the 245 complaints were **artefacts of the
+      NaN, not hidden defects**.
+- [x] `check:park` on 5 seeds: `20260728`, `11`, `274`, `451` exit 0
+      (canonical: `19/19 attractions route from the entrance, 0 rail
+      crossing(s), 245/245 waypoints connected. All six invariants hold.`).
+      **`LGP_SEED=128` exits 1** — `route.unreachable: 3`, `route.crossesRail:
+      1`, `poi.stranded: 57`. **Pre-existing**: proved by running it in a
+      detached worktree at base `ae20b9fc`, which gives the identical 3/1/57.
+      Not this branch's, and not this slice's — reported to the Overseer.
 - [ ] `test:procgen` name diff vs base
 - [ ] PR against `feat/procgen-on-sphere`
+
+## Not my cause
+
+The sibling engineer's `RIDE_SCALE` temporal-dead-zone crash is a **different
+bug**. This one is an unbound module `let` read before the solve; that one is a
+TDZ throw. No overlap, no duplicate work.
