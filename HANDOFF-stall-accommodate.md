@@ -192,3 +192,45 @@ All three edits reverted; `git diff --stat` clean afterwards.
 - `fnm use --install-if-missing` in every fresh shell (this branch's CLAUDE.md
   adds `.node-version`; pnpm does not switch node for you).
 - Never `git stash` (shared across worktrees). Never `git add -A`.
+
+
+## The diff, file by file (`git diff --stat origin/feat/procgen-on-sphere...HEAD`)
+
+Three dots, not two. 14 files, 1614 insertions, 87 deletions, **no deletion
+that is not mine**:
+
+| file | what |
+|---|---|
+| `src/minigames/boothFootprint.ts` | **new.** One owner of every booth's box, its four corners, its collider and its claim. |
+| `src/world/stallsFeature.ts` | **new.** The stalls `FeatureBuilder` and its `accommodate`. |
+| `scripts/check-stall-accommodate.mts` | **new.** The constructed scenario, control first. |
+| `src/minigames/stalls.ts` | booth collision through `boothFootprint`; `boothPlacement(id)` relocates prop + walls + stand point; `StallInstance`'s four coordinates are no longer `readonly`. |
+| `src/minigames/stallPlacement.ts` | owns the shift (`stallShift`/`setStallShift`/`clearStallShifts`), `STALL_LAYOUT_IDS`. |
+| `src/world/FacePaintStall.ts`, `KeychainShop.ts` | their `buildCollision` is now one call; their `STALL_WIDTH`/`DEPTH` come from `boothFootprint` instead of being local literals. |
+| `src/world/worldPhase.ts` | the stalls builder is first; `solveWorldPhase` takes a `BoothRelocator`; `worldSolveStallBuilder()`. |
+| `src/world/World.ts` | passes the relocator. |
+| `src/world/Scenery.ts` | `walls` gains `deps: ['stalls']` (one line). |
+| `test/procgen/parkFacts.ts` | `StallFact`, `stalls`, `stallsMissing`. |
+| `test/procgen/invariants.ts` | the new invariant. |
+| `package.json` | `check:stall-accommodate`, defined and in the chain. |
+| `HANDOFF-stall-accommodate.md` | this file. |
+
+## Known limits, stated rather than hidden
+
+- **The face-paint and keychain booths do not move.** Both are single groups
+  and could be relocated the same way, but both also derive geometry from
+  world coordinates in several places (the face-paint stall's NPC decals, the
+  keychain rack's per-keyring transforms and view basis), so moving them is
+  more than a group translate. They answer `null`, which becomes an ordinary
+  refusal, and `check:stall-accommodate` proves they refuse *and stay exactly
+  where they were*. Six of eight move. Jim's "only add various levels of
+  accommodations as required to get the parks building" is the reason to stop
+  here: no seed needs even one.
+- **`STALL_SHIFT_REACH` (1.5 m) is a cap on the search, not the safety
+  argument.** What makes a shift safe is measured per candidate: the stand
+  point must be standable, clear, off every other booth's stand point, and
+  walkable to in a straight line from where the path spur ends. The cap exists
+  because the spur is paved at plan time and cannot follow a booth that jumps.
+- **No natural seed exercises the mechanism** — see the header of
+  `stallsFeature.ts` for exactly why, which is a property of how each asker
+  climbs rather than an accident.
