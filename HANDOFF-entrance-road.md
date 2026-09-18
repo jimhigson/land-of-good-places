@@ -143,12 +143,52 @@ decision is a different `crossings` decision — prove a site at the fouled rail
 distance — rather than re-rolling the whole railway), which is solver work that
 belongs with the backtracking/every-seed-builds engineer, not here.
 
+## The control on the measurement
+
+Seed 428 built through the **same script** on `origin/feat/sphere-combined`
+(the base this branch forked from, worktree
+`.claude/worktrees/entrance-road-base`, detached at `5c322a5b`):
+
+```
+BASE seed=428 rc=0 elapsed=10s      # vs 185 s on this branch — 18.5x
+```
+
+So seed 428 is not an inherently expensive park; it is one that the new driver
+solves the railway for five times instead of once.
+
+## Proofs
+
+`pnpm run check:entrance-road` on `fix/entrance-road`, quoted off the screen:
+
+```
+FULL rc=0 elapsed=221s        # 14 lanes on 14 cpus (this Mac)
+entrance road OK — the bus's swept body clears every trestle post along the
+whole 145.7 m road on all 10 pool seeds; the tightest anywhere is 6.05 m (seed 24)
+```
+
+Per-park lines from that run (the new streaming output), all twenty:
+
+```
+  [ 1/20] seed      131 control built in 13.7 s (13.7 s elapsed)
+  ...
+  [17/20] seed      274 control built in 46.3 s (46.3 s elapsed)
+  [18/20] seed      274 real    built in 46.6 s (46.7 s elapsed)
+  [19,20/20] seed  428 real + control — together, not one behind the other
+```
+
+Eighteen of twenty parks are done at 47 s; the whole wall clock is one seed-428
+park, which is exactly the intended shape. The verdict table is unchanged from
+before the fix: 0 posts in the bus on every seed, control non-zero on every
+seed (13–35 posts), 145.7 m of 145.7 m road swept.
+
 ## Status
 
 - [x] worktree, install
 - [x] located the regression commit from CI history (3d797f67)
 - [x] local per-seed timings
 - [x] root cause
-- [ ] control: seed 428 on `origin/feat/sphere-combined` (pre-backtracking)
-- [ ] fix
-- [ ] proofs
+- [x] control: seed 428 on `origin/feat/sphere-combined` — 10 s vs 185 s
+- [x] fix (one queue, `LGP_LANES`/`cpus()`, per-park streaming, completeness guard)
+- [x] `pnpm run check:entrance-road` green, 221 s
+- [ ] `LGP_LANES=4` run (CI-shaped)
+- [ ] PR
