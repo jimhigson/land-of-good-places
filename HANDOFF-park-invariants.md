@@ -73,9 +73,24 @@ landed (`667e743e` / `cb76ac1c` on
 Model: **Opus 5 (1M context)**, chosen by the Overseer's dispatch (the default
 for an Engineer). A replacement runs the same model.
 
-Baseline at branch base `881cb158`: `Tests 55 failed | 638 passed (693)`.
-Now: `Tests 35 failed | 658 passed (693)`. **None new** at any step — every run
-name-diffed, not counted (`n1.txt` baseline vs `n7.txt` now, in the scratchpad).
+Rebased onto **`76224f91`** (#682's `check:cycle-tdz`; the chain parses to
+**68 steps** with it at position 5). Baseline re-derived there, because #670
+changed park solving and the older figures could not be carried over:
+
+| | base `76224f91` | head |
+|---|---|---|
+| `test:procgen` | `55 failed \| 638 passed (693)` | `35 failed \| 658 passed (693)` |
+
+**None new** at any step — every run name-diffed, not counted
+(`nbase76.txt` vs `nhead76.txt` in the scratchpad).
+
+Earlier bases, for the record: `ae20b9fc` `55 | 636 (691)`, `881cb158`
+`55 | 638 (693)` — the same 55 throughout.
+
+The branch no longer carries its own `check:waypoints` NaN fix: that is #674's,
+which landed on the base first, and the rebase **takes the base's version**
+because it calls `solveParkPlanNow()` explicitly where mine relied on the side
+effect of touching `SEEDS.length`.
 
 Fixed (6 of my 8 kinds, 15 of my 19 test instances):
 
