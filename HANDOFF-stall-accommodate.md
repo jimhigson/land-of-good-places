@@ -136,7 +136,7 @@ accommodations (two wall runs, five bush clumps) the base made.
       produce byte-identical output — same booth, same 0.90 m shift, same
       destination. Canonical park digest `a1b5c16077708bc0` in two processes.
 - [ ] Seeds 0..15: does any of them ask a stall to move? (digest sweep running)
-- [ ] 16 seeds of `check:park` (running).
+- [x] **16 seeds of `check:park`: 16/16 green** — see the table below.
 
 ## The constructed scenario (`pnpm run check:stall-accommodate`)
 
@@ -247,7 +247,27 @@ two more reds, each reproduced **identically on the base**:
 |---|---|---|
 | 24 `check:slide-rider` | body 0.13% of frame vs 0.40% required | identical, same numbers |
 | ~30 `check:waypoints` | **245** waypoints "inside the facade (x NaN..NaN, z NaN..NaN)" | identical, same 245 complaints |
-| ~50 `check:cart-shape` | `ReferenceError: Cannot access 'RIDE_SCALE' before initialization` at `railRace/hazards.ts:171` — a module-scope TDZ, the trap class `HANDOFF-backtracking.md` warns about | identical |
+| ~50 `check:cart-shape` | `ReferenceError: Cannot access 'RIDE_SCALE' before initialization` at `railRace/hazards.ts:171` | identical |
+| ~66 `check:ground-claims` | the **same** TDZ, same line | identical |
+
+**Root cause of the TDZ, so it is actionable:** `hazards.ts:171` computes
+`DUCK_CLEARANCE = DUCK_CLEARANCE_AT_PARK_SCALE * RIDE_SCALE` at **module
+scope**, importing `RIDE_SCALE` from `./route`; `route.ts` imports
+`../parkLayout`, which the procgen rework's graph brings back round to
+`hazards.ts`. So `hazards.ts` evaluates while `route.ts` is still in its
+temporal dead zone. It is precisely rule 1 of `HANDOFF-backtracking.md`'s
+"two import-order rules" — *nothing may read a value from the solver graph at
+module scope* — applied to a constant rather than to a plan view. The fix is
+to make `DUCK_CLEARANCE` lazy (a function, as `parkPlan.ts` does for every
+constant in that cycle) rather than to move the import. **Not done here**: it
+is a rail-race change, and folding it into a stalls PR would make the diff
+un-reviewable as either.
+
+`check:ground-claims` is the check most directly relevant to *this* PR, and it
+cannot run on either branch. Its cover is not lost, though: `test:procgen`'s
+`railRaceSupportsAreClaimedAsDrawn` clause 3 sweeps **every pair of claims
+across every committed feature** against `CLAIM_COMPATIBILITY`, stalls
+included, and that suite does run — 641 passes.
 
 The `NaN..NaN` one is worth the Overseer's attention on its own: a facade
 whose bounds are `NaN` means the check is comparing against `NaN`, which is
@@ -287,3 +307,45 @@ Steps 1..23 are green on this branch, `check:stall-shape` and
 `check:shop-spacing` among them. The 44 steps after `check:slide-rider` were
 run separately here so this PR's own work is not left unproven behind
 somebody else's failure.
+
+
+## `check:park`, seeds 0..15 — 16/16 green
+
+One process per seed, one seed at a time, at HEAD `875453e1`. Counts quoted
+off the screen:
+
+| seed | waypoints connected | attractions | ms |
+|---|---|---|---|
+| 0 | 254/254 | 19/19 | 10989 |
+| 1 | 228/228 | 19/19 | 10218 |
+| 2 | 233/233 | 19/19 | 29194 |
+| 3 | 237/237 | 19/19 | 132964 |
+| 4 | 237/237 | 19/19 | 277116 |
+| 5 | 242/242 | 19/19 | 14446 |
+| 6 | 230/230 | 19/19 | 38313 |
+| 7 | 253/253 | 19/19 | 1405756 |
+| 8 | 278/278 | 19/19 | 10949 |
+| 9 | 235/235 | 19/19 | 7746 |
+| 10 | 216/216 | 19/19 | 14210 |
+| 11 | 308/308 | 19/19 | 8145 |
+| 12 | 275/275 | 19/19 | 11092 |
+| 13 | 246/246 | 19/19 | 4674 |
+| 14 | 214/214 | 19/19 | 42517 |
+| 15 | 263/263 | 19/19 | 44945 |
+
+Every one: `19/19 attractions route from the entrance`, `0 rail crossing(s)`,
+`All six invariants hold`, exit 0. Seed 7 is the expensive one on this branch
+already (the base's own handoff records 1003 s for it).
+
+**And across all sixteen seeds' `world-solve` traces, the number of refusals
+naming `stalls` as a blocker is 0.** The world phase made 0–15 accommodations
+per seed (trees, bushes, wall runs, as before); not one of them was a booth.
+
+## Chain coverage, honestly
+
+`pnpm run check` cannot run to the end on either branch. Run in four
+segments here, skipping only the four pre-existing reds above, **every other
+step of all 68 passed**, including `check:stall-shape`, `check:shop-spacing`,
+`tsc --noEmit`, `typecheck:test`, `check:park`, `check:park-boot` (worst slice
+inside budget), `check:hotel`, `check:tap-spacing`, `check:nav-routes` and
+`check:rail-race`. `check:stall-accommodate` passes.
