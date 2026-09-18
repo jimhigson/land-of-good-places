@@ -589,10 +589,29 @@ yaw 0** — so every post's facets pointed the same way, and two posts offset
 along a direction parallel to a facet put that facet in the *same plane*. Ten
 poles in one verge never showed it; a hundred across the park is arithmetic.
 
-Fixed by giving each post its own seeded bearing, which removes the shared
-plane **at its cause** — no stand-off, no number to maintain, the faces simply
-stop being parallel. Its own `Rng`: the existing one draws the strings' light
-colours and consuming it would have re-coloured them.
+Fixed in **two** steps, and the first was not enough:
+
+- **Each post takes its own seeded bearing.** This misaligns the cylinders'
+  *side* facets and fixed **three** of the nine, including the knob-vs-knob
+  pair (the knob takes `yaw + 0.7`, so a post and its knob do not turn as one
+  rigid piece). Verified present before and absent after, not assumed.
+- **The pole geometry is open-ended.** Yaw can do nothing about a cylinder's
+  **end caps**: they are flat discs perpendicular to the axis, and rotating a
+  disc about its own normal leaves it in the same plane. Two posts on similar
+  ground kept coplanar caps whatever their bearing — the tell was in the pairs
+  (`20/21`, `73/74`, `88/89` are *adjacent* poles 7.1 m apart, where ground
+  height is most nearly equal) and I did not read it. Neither cap is ever seen:
+  the top is inside the knob sphere (radius 0.22 against a 0.12 rise), the
+  bottom is at ground level. ART_DIRECTION.md §7 says **delete the hidden
+  face**, so they are deleted rather than nudged.
+
+Result: `check:coplanar` NEW **19**, identical to base, **zero fairy seams**,
+both set differences empty.
+
+**The tally line for this one:** the first commit message asserted the fix
+removed the shared plane *"at its cause"*, when it had removed two thirds of
+one cause. The gate disagreeing with the commit message is the only reason I
+knew.
 
 ## When two measurements disagree, re-read your own log first
 
