@@ -3475,15 +3475,24 @@ const duckBarsStandOnRealSupports: Invariant = (facts) => {
       continue;
     }
 
+    // **In the chart, not in plan.** A bar hangs a rider's height above rails
+    // that are already nine metres up and leant onto the sphere; a leg's foot
+    // is on the ground. Their raw plan positions therefore differ by the lean
+    // over that whole height — about five metres out here — which is most of a
+    // tolerance meant to cover a trestle's arc nudge. Both go back through the
+    // ring's own `chartOf` so the distance being measured is the one a person
+    // would point at: how far along and across the ring the bar is from the
+    // support under it.
+    const route = ring.label === 'race' ? facts.world.railRace.raceRoute : facts.world.railRace.walkPastRoute;
     const legPositions: Vector3[] = [];
     for (let i = 0; i < legsMesh.count; i += 1) {
       legsMesh.getMatrixAt(i, matrix);
-      legPositions.push(new Vector3().setFromMatrixPosition(matrix));
+      legPositions.push(route.chartOf(new Vector3().setFromMatrixPosition(matrix), new Vector3()));
     }
 
     for (let i = 0; i < barsMesh.count; i += 1) {
       barsMesh.getMatrixAt(i, matrix);
-      barPosition.setFromMatrixPosition(matrix);
+      route.chartOf(new Vector3().setFromMatrixPosition(matrix), barPosition);
       let nearest = Infinity;
       for (const leg of legPositions) {
         const d = Math.hypot(barPosition.x - leg.x, barPosition.z - leg.z);

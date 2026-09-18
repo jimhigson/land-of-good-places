@@ -440,7 +440,13 @@ export function buildRailRaceTrack(
       sleeperBasis.makeBasis(sleeperFrame.side, sleeperFrame.up, sleeperFrame.forward);
       sleeperRotation.setFromRotationMatrix(sleeperBasis);
       matrix.compose(
-        point.copy(sleeperMid).setY(sleeperMid.y - sleeperDrop),
+        // **Sunk along the track's own up, not along world `+Y`.** The sleeper
+        // is turned onto `sleeperFrame` and then lowered so the rails rest on
+        // it; lowering it in world `y` on ground that leans 27 deg slides it
+        // `sleeperDrop * sin(tilt)` sideways out from under the rails it is
+        // bolted to — measured at 0.086 m of the 0.116 m a gauge point was
+        // missing by. The frame already carries the direction; use it.
+        point.copy(sleeperMid).addScaledVector(sleeperFrame.up, -sleeperDrop),
         sleeperRotation,
         sleeperScale,
       );

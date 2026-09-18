@@ -2618,67 +2618,34 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
   const raceRoute = world.railRace.raceRoute;
 
   /**
-   * Arc distance from the arch of the ring point nearest `(x, z)`.
+   * A drawn thing's distance from the start/finish arch, in metres of the
+   * shared arc length everything in this ride is addressed by.
    *
-   * **Inverted against the path itself, not against a formula for it.** This
-   * used to invert `angleAt(s) = -s / NOMINAL_RADIUS` in closed form, which was
-   * exact while the ring was a circle and became meaningless the moment #216
-   * made it follow the park boundary — `NOMINAL_RADIUS` is not even exported
-   * any more, so the closed form silently produced `NaN` and every bar deduped
-   * to a single phantom. Walking `route.path`'s own samples works for whatever
-   * shape the ring is next, which is the point.
-   *
-   * The samples sit ~0.25 m apart, which is half the distance a rider covers in
-   * a frame — too coarse to compare against on its own — so the nearest one is
-   * refined by projecting onto the polyline either side of it. That lands well
-   * inside a centimetre.
+   * **Through the ring's own `stationOf`, not by nearest point in plan.** A
+   * duck bar hangs ten metres above the rails and the whole ride is leant onto
+   * the sphere, so the bar's plan position stands metres outside the centre
+   * line — and on a spline whose bend varies, the nearest point of that line
+   * can belong to a quite different part of the loop. Measured on the canonical
+   * seed, that read a bar 12.8 m from where it is: the invariant below
+   * faithfully reported the bonk landing "after the bar", and the bar was
+   * exactly where it should be. `stationOf` refines in the chart, where the
+   * projection is unambiguous.
    */
-  const archRelative = (x: number, z: number): number => {
-    const samples = raceRoute.path.samples;
-    let nearest = 0;
-    let nearestD2 = Infinity;
-    for (let i = 0; i < samples.length; i += 1) {
-      const s = samples[i]!;
-      const d2 = (s.x - x) * (s.x - x) + (s.z - z) * (s.z - z);
-      if (d2 < nearestD2) {
-        nearestD2 = d2;
-        nearest = i;
-      }
-    }
-    let bestAt = samples[nearest]!.at;
-    let bestD2 = nearestD2;
-    for (const step of [-1, 1]) {
-      const a = samples[nearest]!;
-      const b = samples[(nearest + step + samples.length) % samples.length]!;
-      const ex = b.x - a.x;
-      const ez = b.z - a.z;
-      const len2 = ex * ex + ez * ez;
-      if (len2 === 0) continue;
-      const t = Math.max(0, Math.min(1, ((x - a.x) * ex + (z - a.z) * ez) / len2));
-      const px = a.x + ex * t;
-      const pz = a.z + ez * t;
-      const d2 = (px - x) * (px - x) + (pz - z) * (pz - z);
-      if (d2 < bestD2) {
-        bestD2 = d2;
-        // `samples` are evenly spaced in arc length, so `t` interpolates it.
-        bestAt = raceRoute.wrap(a.at + step * t * (raceRoute.length / samples.length));
-      }
-    }
-    return raceRoute.wrap(bestAt - raceRoute.startDistance);
-  };
+  const archRelative = (drawn: { x: number; y: number; z: number }): number =>
+    raceRoute.wrap(raceRoute.stationOf(drawn) - raceRoute.startDistance);
+
   const raceRing = world.railRace.group.getObjectByName('railRace:race-ring');
   const barsMesh = raceRing?.getObjectByName('railRace:duck-bars');
   const builtBarDistances: number[] = [];
   if (barsMesh instanceof Instanced) {
     const matrix = new Mat4();
     const at = new Vec3();
-    const laneProbe = new Vec3();
     for (let i = 0; i < barsMesh.count; i += 1) {
       barsMesh.getMatrixAt(i, matrix);
       at.setFromMatrixPosition(matrix);
       // The bar's real arc position, read off its own matrix rather than off
       // the rule that placed it.
-      const arch = archRelative(at.x, at.z);
+      const arch = archRelative(at);
 
       // **Which lane is it on?** Since 7 August a duck bar crosses one lane
       // rather than all four (`hazards.ts`'s `DuckBar.lane`), so the rider
@@ -2688,15 +2655,31 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       // and is false now, and left in place it made the invariant demand that a
       // rider be bonked by three other people's bars.
       //
-      // Decided by measuring the bar against each lane's own centre point at its
-      // own arc distance — not by its distance from the origin, which stopped
-      // meaning anything when #216 made this ring a spline whose radius varies
-      // by 40 m.
+      // **Asked in the chart, by lane offset.** It compared the bar's plan
+      // position with each lane's plan position, and a bar hangs a rider's
+      // height above the rails on a ride leant onto the sphere — so it stands
+      // further out in plan than the rail it straddles and lands squarely over
+      // the *next lane out*. Measured on the canonical seed: 34 of the ring's
+      // 40 bars were filed one lane too far out, and the rider on lane 3 was
+      // then held to bars belonging to lane 2. That is the whole of the "bonks
+      // 12.5 m after the bar" failure — the bonk was the next real lane-3 bar
+      // along, and the bar it was blamed on was somebody else's.
+      //
+      // Unleaning removes the height entirely: in the chart a bar sits at
+      // exactly its own lane's offset from the centre line, whatever it does
+      // in the air.
+      const across = raceRoute.unlean(
+        raceRoute.wrap(raceRoute.startDistance + arch),
+        at,
+        new Vec3(),
+      );
+      const station = raceRoute.path.sampleAt(raceRoute.wrap(raceRoute.startDistance + arch));
+      const offset =
+        (across.x - station.x) * station.normalX + (across.z - station.z) * station.normalZ;
       let onLane = 0;
       let nearest = Infinity;
       for (let lane = 0; lane < world.railRace.laneCount; lane += 1) {
-        raceRoute.pointAt(lane, raceRoute.wrap(raceRoute.startDistance + arch), laneProbe);
-        const d = Math.hypot(laneProbe.x - at.x, laneProbe.z - at.z);
+        const d = Math.abs(offset - (raceRoute.laneOffsets[lane] ?? 0));
         if (d < nearest) {
           nearest = d;
           onLane = lane;
