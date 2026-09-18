@@ -1240,6 +1240,27 @@ export interface ParkFacts {
     /** How near and far the chute gets from this eye across its own beat. */
     readonly nearest: number;
     readonly farthest: number;
+    /**
+     * **The least of her this eye can show anywhere in its own beat**, as the
+     * angular extent of her body: `sin(theta) / distance`, theta being between
+     * the line of sight and the axis she lies along. Her length is left out —
+     * it scales every beat equally and restating how big a child is would be a
+     * second definition of her.
+     *
+     * Distance alone cannot see the failure this exists for. On
+     * `feat/procgen-on-sphere`'s chute, beat 1's rider stayed 6.6–8.9 m from
+     * her eye — inside every allowance the placement code had — while the shot
+     * swung round to look straight down her, and her own head took her body
+     * from 2.58% of the frame to **0.13%** against a 0.40% floor.
+     */
+    readonly worstExtent: number;
+    /**
+     * How nearly end-on that worst moment is: `|cos(theta)|`, 1 being straight
+     * down her body and 0 square across it. Carried beside
+     * {@link worstExtent} because it is the half of it a person can picture,
+     * and a complaint that quotes both says which way a beat went wrong.
+     */
+    readonly worstEndOn: number;
   }[];
   /**
    * The shot plan as spans of the ride, in order — so "every part of the ride is
@@ -2270,6 +2291,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     samples: number;
     nearest: number;
     farthest: number;
+    worstExtent: number;
+    worstEndOn: number;
   }[] = [];
   const slideShotSpans = world.building.slideShots.shots.map((shot) => ({
     kind: shot.kind,
@@ -2282,6 +2305,14 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     // trough floor itself would be a harder test than the game ever asks for.
     const RIDER_ABOVE_FLOOR = 0.24;
     const SAMPLES = 40;
+    // How a reclining rider lies along the chute, from the one owner of it —
+    // `ridePose.ts`, the same angle `Building` poses her at and every pet
+    // follows her down at. Needed because how much of her a camera can show
+    // depends on the angle between its line of sight and the axis she is lying
+    // along, not on distance alone.
+    const { RIDE_RECLINE } = await import('../../src/entities/ridePose.ts');
+    const LEAN = Math.abs(RIDE_RECLINE);
+    const bodyAxis = new Vector3();
     const caster = new RaycasterClass();
     const occluders = [slide.group, world.building.gardenRoot];
     const eye = new Vector3();
@@ -2298,6 +2329,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       let blocked = 0;
       let nearest = Infinity;
       let farthest = 0;
+      let worstExtent = Infinity;
+      let worstEndOn = 0;
       for (let i = 0; i <= SAMPLES; i += 1) {
         const t = shot.from + ((shot.to - shot.from) * i) / SAMPLES;
         slide.pointAt(t, point);
@@ -2320,6 +2353,22 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
         // not counted as something standing in the way.
         caster.far = reach - 0.12;
         if (caster.intersectObjects(occluders, true).length > 0) blocked += 1;
+
+        // **How much of her this eye can show here**, as the angular extent of
+        // her body: `sin(theta) / distance`, where theta is between the line of
+        // sight and the axis she lies along. Her length is deliberately left
+        // out — it would be a second description of how big a child is, and it
+        // scales every beat equally anyway. `toRider` is already normalised by
+        // the raycast above.
+        bodyAxis
+          .copy(up)
+          .multiplyScalar(Math.cos(LEAN))
+          .addScaledVector(tangent.clone().normalize(), -Math.sin(LEAN))
+          .normalize();
+        const endOn = Math.abs(toRider.dot(bodyAxis));
+        const sin = Math.sqrt(Math.max(0, 1 - endOn * endOn));
+        worstExtent = Math.min(worstExtent, sin / reach);
+        worstEndOn = Math.max(worstEndOn, endOn);
       }
       slideCameras.push({
         beat,
@@ -2330,6 +2379,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
         samples: SAMPLES + 1,
         nearest,
         farthest,
+        worstExtent,
+        worstEndOn,
       });
     }
   }

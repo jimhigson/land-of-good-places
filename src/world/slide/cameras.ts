@@ -1,5 +1,6 @@
-import { PerspectiveCamera, Vector3 } from 'three';
+import { Object3D, PerspectiveCamera, Raycaster, Vector3 } from 'three';
 import { fitCameraToViewport } from '../../core/RideCamera';
+import { RIDE_RECLINE } from '../../entities/ridePose';
 
 /**
  * **The ginormous slide is cut like a real on-ride video**: trackside cameras
@@ -30,7 +31,7 @@ import { fitCameraToViewport } from '../../core/RideCamera';
  * **Hard cut. No blend, ever.** Three reasons, in order of how much they matter:
  *
  * 1. The jump is enormous. The chase eye is 4.35 m behind her and moving at
- *    {@link GIANT_SLIDE_SPEED}; the trackside eye is {@link TRACKSIDE_STANDOFF}
+ *    {@link GIANT_SLIDE_SPEED}; the trackside eye is {@link TRACKSIDE_STANDOFF_FLOOR}–{@link TRACKSIDE_STANDOFF_CEILING}
  *    metres away, well above the chute, and bolted to the ground. A blend across
  *    that is a camera **flying through the air**, which reads as a mistake
  *    rather than as an edit.
@@ -146,57 +147,105 @@ import { fitCameraToViewport } from '../../core/RideCamera';
 export const BEATS = 6;
 
 /**
- * How high above the chute's own side plane a trackside eye sits, in radians.
+ * The lowest a trackside eye may sit above the chute's own side plane, in
+ * radians — **the guard for what cannot be probed at plan time**.
  *
- * **50° is measured against occlusion — see the table above — but 75° is what
- * the actual pixel-fraction floor (`check:slide-rider`'s trackside clause)
- * needs**, see the "55° cleared occlusion and still failed legibility" section
- * above. 55° (occlusion's 50° plus a flat 5° margin) shipped for a month and
- * then failed on the canonical seed's beat 1, at the far end of its span,
- * where the beat is nearly flat *and* turns hard — the one combination the
- * occlusion sweep could not see because it only asks whether a single ray
- * reaches her, not how much of her the frame can actually show. Re-measured
- * directly against the pixel floor by rendering the worst frame while sweeping
- * elevation and standoff together: 75° at the existing 7 m standoff turns that
- * frame's 0.11% into 0.48% (floor is 0.40%), and raises the other two trackside
- * beats' own worst samples too rather than trading one for another. Steeper is
- * still always safe; shallower is still a cliff.
+ * 50° is where the occlusion sweep in the table above first reaches 100% beat
+ * coverage; this is that plus a flat 5° of margin. It is a **floor the search
+ * may not go under**, not a placement.
+ *
+ * The rail itself no longer needs it — {@link chuteBlocksView} measures that
+ * against the built chute. What it still guards is **the castle and the
+ * hillside**, and the reason is an ordering one worth knowing before anybody
+ * lowers it to widen the search: the shot plan is made in `Building`'s
+ * constructor *before* `gardenRoot` is stood in its plot, so its world
+ * transform is not yet set and a ray fired at it there would measure a castle
+ * that is not where the castle is. That is a wrong measurement rather than a
+ * missing one, which is worse, so the castle is not probed and this angle
+ * stands in for it. `check:slide-rider` and the trackside invariant both ray
+ * against the built castle afterwards, when it *is* placed, and would catch a
+ * floor set too low.
+ *
+ * It is not the answer to "how much of her does the frame show". **75° used to
+ * be**, and that is the number this change deletes: it was read off one
+ * rendered frame of one beat of one seed, and it did not survive the chute this
+ * branch grows — the same beat 1 came back at 0.13% of frame. How big she reads
+ * is now *measured across the whole beat*, by {@link placeTracksideEye}, rather
+ * than hoped for from a constant. Elevation is one of the things it sweeps, so
+ * a beat that genuinely wants 75° still gets it — by measurement.
  */
-const TRACKSIDE_ELEVATION = (75 * Math.PI) / 180;
+const TRACKSIDE_ELEVATION_FLOOR = (55 * Math.PI) / 180;
 
 /**
- * How far a trackside eye stands from the chute, in metres.
+ * How close a trackside eye may stand to the chute, in metres — **the pan
+ * whip, and nothing else**.
  *
- * Free to choose against the **occlusion** sweep, which proved distance has no
- * effect at all on whether a ray reaches her — see the table above. It is not
- * free against the **legibility** floor `check:slide-rider` actually gates on;
- * see {@link TRACKSIDE_ELEVATION}'s "cleared occlusion and still failed
- * legibility" note. 7 m happens to already sit at the sweet spot the later
- * elevation/standoff sweep found, so this number did not need to move — only
- * {@link TRACKSIDE_ELEVATION} did. So it is chosen for the two things it *does*
- * set:
- *
- * - **How big she reads.** At 7 m she is 6.8–10.5 m away across a beat, which
- *   with {@link TRACKSIDE_FOV} puts a reclining child at roughly a quarter of
- *   the frame's height in landscape and a seventh of it on a portrait phone.
- * - **How hard the camera whips as she passes.** The pan rate at closest
- *   approach is `GIANT_SLIDE_SPEED / standoff` — about 53°/s here. She stays
- *   centred, so it is the *background* that sweeps, which is the shot reading as
- *   speed. Closer than this and it starts to read as a lurch.
+ * The pan rate at closest approach is `GIANT_SLIDE_SPEED / standoff`, about
+ * 83°/s here. Nearer than this and the shot reads as a lurch rather than as
+ * speed, which is a bad shot however much of the frame she fills — so the
+ * legibility search may not buy pixels with it.
  */
-const TRACKSIDE_STANDOFF = 7;
-
-/**
- * The worst eye-to-rider distance a beat may reach before its eye steps in.
- *
- * 10.2 m is the far end of the 6.8–10.5 m band the framing above was tuned
- * on, taken just inside it: at {@link TRACKSIDE_FOV} it is where a reclining
- * child grazes `check:slide-rider`'s 0.40% body floor with a whisker over it.
- */
-const TRACKSIDE_MAX_RIDER_DISTANCE = 10.2;
-
-/** How close the eye may step in — under this the pan whips as she passes. */
 const TRACKSIDE_STANDOFF_FLOOR = 4.5;
+
+/**
+ * How far out the search may stand an eye, in metres.
+ *
+ * Nothing physical stops it going further; she simply reads smaller, so the
+ * score settles it and this only bounds the sweep. Twelve is comfortably past
+ * the 6–8 m the canonical seed's beats actually choose, so the optimum is
+ * interior rather than pinned to the edge — if a seed ever pins to it, that is
+ * a sign to widen this rather than a silent clamp.
+ */
+const TRACKSIDE_STANDOFF_CEILING = 12;
+
+/** Standoffs tried, in metres. Half a metre is well under what reads. */
+const STANDOFF_STEP = 0.5;
+
+/** Elevations tried, in radians — 2.5°, finer than the eye can tell. */
+const ELEVATION_STEP = (2.5 * Math.PI) / 180;
+
+/**
+ * How many points along its own beat an eye is anchored at, in turn.
+ *
+ * The midpoint is the obvious anchor and on the canonical seed it wins; it is
+ * swept anyway because a beat that turns asymmetrically has its best vantage
+ * off-centre, and there is no reason for the generator to assume otherwise.
+ * Even, so the midpoint is always among the candidates.
+ */
+const ANCHOR_CANDIDATES = 8;
+
+/**
+ * How far short of the rider a sight-line probe stops, in metres.
+ *
+ * She lies **in** the trough, so a ray that ran the whole way to her would end
+ * by striking the chute she is lying in and report every placement blocked. A
+ * fifth of a metre is well inside {@link CHUTE_ENVELOPE}'s own half-width, so
+ * it cannot skip past a wall that is genuinely in the way.
+ */
+const RIDER_RAY_BACKOFF = 0.2;
+
+/**
+ * How many placements may be probed against the built chute before the search
+ * settles for the least blocked one it found.
+ *
+ * The probe is the only expensive part — the candidates are ranked by how big
+ * she reads first, so the answer is usually the first one tried, and this is a
+ * ceiling on the pathological case rather than a budget anybody spends. Two
+ * hundred × eleven rays is a few milliseconds against a park build.
+ */
+const MAX_PROBED_PLACEMENTS = 200;
+
+/**
+ * How many moments of the beat each candidate is scored against.
+ *
+ * The score is the **worst** of them, so this is really "how finely is the
+ * worst moment resolved" — and it must be resolved at least as finely as
+ * anything that will later measure the same beat, or the search optimises a
+ * worst moment that is not the real one. `parkFacts.ts` samples a trackside
+ * beat 41 times; twenty-one here is the same order, and coarser than that let
+ * seed 24's beat 1 slip a genuinely end-on moment between two samples.
+ */
+const BEAT_SAMPLES = 20;
 
 /**
  * The trackside camera's field of view, in degrees, before the portrait phone
@@ -272,23 +321,156 @@ export interface SlideShot {
  * castle **behind her**, so a child watching can see where she has just come
  * from.
  */
-export function planSlideShots(
+/**
+ * **How much of her a given eye can actually show, at one instant.**
+ *
+ * The apparent angular extent of her body: how long she looks from there,
+ * divided by how far away she is. Two things can shrink her to a sliver and
+ * this is the one quantity that sees both —
+ *
+ * - **distance**, which the old placement code was the only thing measuring;
+ * - **angle**, `sin(theta)` between the line of sight and the axis she lies
+ *   along. Viewed end-on down the trough she is a head and nothing else,
+ *   whatever the distance. That is the 0.13%-of-frame failure this replaced.
+ *
+ * Her actual length is left out on purpose. It scales every candidate equally,
+ * so it cannot change which one wins — and putting it in would be a second
+ * description of how big a child is, which is the bug shape CLAUDE.md's "two
+ * definitions of one thing" section is about. What she reads as in *pixels* is
+ * `check:slide-rider`'s question, measured on the built ride; this is only the
+ * ordering the placement search steers by.
+ */
+function apparentBodyExtent(eye: Vector3, at: Vector3, bodyAxis: Vector3): number {
+  const toRider = at.clone().sub(eye);
+  const distance = toRider.length();
+  if (distance < 1e-4) return 0;
+  const cos = Math.abs(toRider.divideScalar(distance).dot(bodyAxis));
+  const sin = Math.sqrt(Math.max(0, 1 - cos * cos));
+  return sin / distance;
+}
+
+/**
+ * Which way a rider lies at `t`, feet to head, in world space.
+ *
+ * She lies **feet first** in the chute's own frame, tipped back by
+ * {@link RIDE_RECLINE} — so her head is up-slope and slightly raised, which is
+ * why this is `-tangent` and `+up` mixed by the recline rather than either one
+ * alone. The angle is imported rather than restated: `ridePose.ts` is the one
+ * description of how a body lies on this chute, and `Building` poses her, the
+ * pets follow her and `ParadeMember` turns by the very same number.
+ */
+function riderAxisAt(tangent: Vector3, up: Vector3, target: Vector3): Vector3 {
+  const lean = Math.abs(RIDE_RECLINE);
+  return target
+    .copy(up)
+    .multiplyScalar(Math.cos(lean))
+    .addScaledVector(tangent, -Math.sin(lean))
+    .normalize();
+}
+
+/** One candidate eye, and the point on the chute its frame was built at. */
+interface PlacedEye {
+  readonly eye: Vector3;
+  readonly covers: Vector3;
+}
+
+/**
+ * **Is anything of the chute between this eye and the child?**
+ *
+ * Asked of the **built chute**, by raycast, at the moment the shot plan is made
+ * — not of a model of it. That is the difference this replaced, and it is the
+ * rule CLAUDE.md states for every generator here: backtrack against the real
+ * world as it stands, never against the two or three obstacle shapes a
+ * generator happens to know by name.
+ *
+ * An analytic version of this was written first and was wrong in a way worth
+ * recording, because it looked right. It projected the eye into the rider's own
+ * cross-section and asked whether it cleared *that* section's wall — which is
+ * the whole of the 40°/50° table above, and it is sound as far as it goes. It
+ * cannot see the wall that is actually in the way: on the canonical seed's beat
+ * 5 the chute **bends back** between the eye and the rider, so what blocked the
+ * shot for 31 frames was a length of trough 1.4 m in front of her belonging to
+ * a different part of the curve entirely. A cross-section test is blind to that
+ * by construction — it drops the along-chute component, which is exactly where
+ * the offending geometry was. The real chute is right there; ask it.
+ *
+ * The ray stops just short of her so that the trough she is lying in cannot
+ * count as blocking the view of her.
+ */
+function chuteBlocksView(sight: Raycaster, eye: Vector3, at: Vector3, chute: Object3D): boolean {
+  const toRider = at.clone().sub(eye);
+  const reach = toRider.length();
+  if (reach < 1e-4) return false;
+  sight.set(eye, toRider.divideScalar(reach));
+  sight.far = reach - RIDER_RAY_BACKOFF;
+  if (sight.far <= 0) return false;
+  return sight.intersectObject(chute, true).length > 0;
+}
+
+/**
+ * **Stand the eye where it can see her for the whole beat — searched, not
+ * constructed.**
+ *
+ * The old version built one eye out of the beat's **midpoint** frame at a fixed
+ * elevation, then stepped the standoff in while the worst *distance* across the
+ * beat was too big. Distance was never the thing that failed. On the canonical
+ * seed's beat 1 the rider stayed 6.6–8.9 m away all the way through — inside
+ * every allowance — while the line of sight swung from square across her
+ * (`|cos| = 0.00`, body 2.58% of frame) to straight down her (`|cos| = 0.91`,
+ * body **0.13%**), because the chute *turns* inside a beat and a midpoint-
+ * anchored eye is broadside only at the midpoint. The chute stretches with the
+ * park (#241), so beats get longer and this gets worse, not better; 75° of
+ * elevation was a hand-tune against the same symptom on the old chute and did
+ * not survive a new one.
+ *
+ * So this does what every other generator in this codebase does: it tries
+ * different decisions and **measures the result**. Anchor along the beat,
+ * elevation and standoff are swept together, each candidate is scored by the
+ * **worst** {@link apparentBodyExtent} across its own beat — the worst moment is
+ * what the check gates on, so it is what is optimised — and the best is taken.
+ *
+ * Two hard constraints survive from the measurements that earned them, because
+ * neither is something this score can see:
+ *
+ * - **{@link TRACKSIDE_ELEVATION_FLOOR}**, standing in for the castle and the
+ *   hillside, which are not yet placed when this runs and so cannot be probed.
+ * - **{@link TRACKSIDE_STANDOFF_FLOOR}**, the pan whip. A shot that reads as a
+ *   lurch is a bad shot at any body fraction.
+ */
+function placeTracksideEye(
   curve: RideCurve,
   awayFrom: { readonly x: number; readonly z: number },
-): SlideShot[] {
-  const shots: SlideShot[] = [];
-  for (let beat = 0; beat < BEATS; beat += 1) {
-    const from = beat / BEATS;
-    const to = (beat + 1) / BEATS;
-    // Odd beats are trackside, so the ride opens on the chase and — because
-    // `BEATS` is even — closes trackside. See the rhythm note.
-    if (beat % 2 === 0) {
-      shots.push({ kind: 'chase', from, to, eye: null, covers: null });
-      continue;
-    }
-    const mid = (from + to) / 2;
-    const covers = curve.pointAt(mid, new Vector3()).clone();
-    const tangent = curve.tangentAt(mid, new Vector3());
+  chute: Object3D,
+  from: number,
+  to: number,
+): PlacedEye {
+  // Where she will be, and which way she will be lying, across the beat — one
+  // sweep, reused by every candidate.
+  const riders: { at: Vector3; axis: Vector3 }[] = [];
+  for (let i = 0; i <= BEAT_SAMPLES; i += 1) {
+    const t = from + ((to - from) * i) / BEAT_SAMPLES;
+    const at = curve.pointAt(t, new Vector3()).clone();
+    const tangent = curve.tangentAt(t, new Vector3()).normalize();
+    const right = new Vector3().crossVectors(tangent, UP);
+    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+    right.normalize();
+    const up = new Vector3().crossVectors(right, tangent).normalize();
+    riders.push({ at, axis: riderAxisAt(tangent, up, new Vector3()) });
+  }
+
+  // **Two questions, in order, and the order is the point.** An eye that hides
+  // her behind the chute is not a candidate at all, however much of the frame
+  // she would have filled — so every placement is *scored* on how big she reads
+  // and then *tried* against the built geometry in that order, taking the first
+  // that is actually clear. Ranking first and probing in rank order is what
+  // keeps this cheap: the winner is usually found in the first handful of
+  // probes, and a raycast is only ever spent on a candidate worth having.
+  const candidates: { eye: Vector3; covers: Vector3; score: number }[] = [];
+
+  for (let a = 0; a <= ANCHOR_CANDIDATES; a += 1) {
+    const anchorT = from + ((to - from) * a) / ANCHOR_CANDIDATES;
+    const covers = curve.pointAt(anchorT, new Vector3()).clone();
+    const tangent = curve.tangentAt(anchorT, new Vector3()).normalize();
 
     // The chute's own frame, built exactly as `SlideRide.sampleFrames` builds
     // it — so "beside the chute" and "above the chute" mean here what they mean
@@ -304,54 +486,90 @@ export function planSlideShots(
     const outward = new Vector3(covers.x - awayFrom.x, 0, covers.z - awayFrom.z);
     const side = outward.dot(right) >= 0 ? 1 : -1;
 
-    // The standoff yields to the beat itself. Seven metres frames her at a
-    // quarter of the shot at the OLD chute's beat spans; the generated chute
-    // now stretches with the park (issue #241) and a long or bendy beat can
-    // carry her past the distance at which the body-fraction floor holds
-    // (`check:slide-rider`'s 0.40%). So the eye is placed, MEASURED against
-    // every point of its own beat, and stepped closer until the worst
-    // eye-to-rider distance across the beat fits the allowance the framing
-    // maths was built for — on a short beat nothing changes at all.
-    // The 55° floor was measured against the OLD chute's pitches: the rail
-    // cut is about the eye's elevation in the TROUGH'S OWN tilted frame, so
-    // a steeper beat eats the margin degree for degree. Adding the beat's
-    // own downhill pitch back on keeps the relative elevation the tuning
-    // proved out, on whatever chute this seed grew ("steeper is always
-    // safe; shallower is a cliff" — the note above).
-    const pitch = Math.atan2(-tangent.y, Math.hypot(tangent.x, tangent.z));
+    // The beat's own downhill pitch is added to the floor, so the floor means
+    // on this chute what it meant on the one it was measured against: a steeper
+    // beat tilts the trough's frame and eats the margin degree for degree.
     //
-    // **Never past the chute's own vertical.** Elevation is an angle from `right`
-    // in the plane square to the chute, so beyond 90° the eye crosses over the
-    // top and lands on the *near* side, looking back through the hand-rail it
-    // was lifted to see over. A 75° base leaves only 15° of pitch before that
-    // happens, and a chute running outward far from the park's centre is steep
-    // in world `y` well past it: on the canonical seed, once the chute was held
-    // against the planet (#645), beat 3 pitched 42° in world `y`, its eye was
-    // placed at 117° and the near rail hid the rider at the start of the beat.
-    const elevation = Math.min(Math.PI / 2, TRACKSIDE_ELEVATION + Math.max(0, pitch));
-    const eyeAt = (standoff: number): Vector3 =>
-      covers
-        .clone()
-        .addScaledVector(right, side * standoff * Math.cos(elevation))
-        .addScaledVector(up, standoff * Math.sin(elevation));
-    const probe = new Vector3();
-    const worstFrom = (eyePoint: Vector3): number => {
-      let worst = 0;
-      for (let i = 0; i <= 10; i += 1) {
-        curve.pointAt(from + ((to - from) * i) / 10, probe);
-        const d = eyePoint.distanceTo(probe);
-        if (d > worst) worst = d;
-      }
-      return worst;
-    };
-    let standoff = TRACKSIDE_STANDOFF;
-    let eye = eyeAt(standoff);
-    while (standoff > TRACKSIDE_STANDOFF_FLOOR && worstFrom(eye) > TRACKSIDE_MAX_RIDER_DISTANCE) {
-      standoff -= 0.25;
-      eye = eyeAt(standoff);
-    }
+    // **Never past the chute's own vertical.** Elevation is an angle from
+    // `right` in the plane square to the chute, so beyond 90° the eye crosses
+    // over the top and lands on the *near* side, looking back through the
+    // hand-rail it was lifted to see over. On the canonical seed, once the
+    // chute was held against the planet (#645), beat 3 pitched 42° in world `y`
+    // and an unclamped eye was placed at 117°, with the near rail hiding the
+    // rider at the start of the beat.
+    const pitch = Math.atan2(-tangent.y, Math.hypot(tangent.x, tangent.z));
+    const floor = Math.min(Math.PI / 2, TRACKSIDE_ELEVATION_FLOOR + Math.max(0, pitch));
 
-    shots.push({ kind: 'trackside', from, to, eye, covers });
+    for (let elevation = floor; elevation <= Math.PI / 2 + 1e-9; elevation += ELEVATION_STEP) {
+      const cosE = Math.cos(elevation);
+      const sinE = Math.sin(elevation);
+      for (
+        let standoff = TRACKSIDE_STANDOFF_FLOOR;
+        standoff <= TRACKSIDE_STANDOFF_CEILING + 1e-9;
+        standoff += STANDOFF_STEP
+      ) {
+        const eye = covers
+          .clone()
+          .addScaledVector(right, side * standoff * cosE)
+          .addScaledVector(up, standoff * sinE);
+        let score = Infinity;
+        for (const rider of riders) {
+          const extent = apparentBodyExtent(eye, rider.at, rider.axis);
+          if (extent < score) score = extent;
+        }
+        candidates.push({ eye, covers, score });
+      }
+    }
+  }
+
+  candidates.sort((x, y) => y.score - x.score);
+
+  const sight = new Raycaster();
+  let best: PlacedEye | null = null;
+  let fewestBlocked = Infinity;
+  const probes = Math.min(candidates.length, MAX_PROBED_PLACEMENTS);
+  for (let i = 0; i < probes; i += 1) {
+    const candidate = candidates[i]!;
+    let blocked = 0;
+    for (const rider of riders) {
+      if (chuteBlocksView(sight, candidate.eye, rider.at, chute)) blocked += 1;
+    }
+    if (blocked === 0) return { eye: candidate.eye, covers: candidate.covers };
+    // Nothing clear yet — remember the least bad, so a beat the chute wraps
+    // round itself still gets the best eye there is rather than an arbitrary
+    // one. `check:slide-rider` fails on any blocked frame, so this is a floor
+    // under the failure, never a way to pass with one.
+    if (blocked < fewestBlocked) {
+      fewestBlocked = blocked;
+      best = { eye: candidate.eye, covers: candidate.covers };
+    }
+  }
+
+  // Non-null by construction — the sweep always produces at least one
+  // candidate, since the elevation floor is clamped to 90° and the standoff
+  // floor is below its ceiling — but asserted rather than assumed, because a
+  // beat silently getting no eye is a camera nobody has ever looked through.
+  if (!best) throw new Error(`no trackside eye could be placed for the beat ${from}..${to}`);
+  return best;
+}
+
+export function planSlideShots(
+  curve: RideCurve,
+  awayFrom: { readonly x: number; readonly z: number },
+  chute: Object3D,
+): SlideShot[] {
+  const shots: SlideShot[] = [];
+  for (let beat = 0; beat < BEATS; beat += 1) {
+    const from = beat / BEATS;
+    const to = (beat + 1) / BEATS;
+    // Odd beats are trackside, so the ride opens on the chase and — because
+    // `BEATS` is even — closes trackside. See the rhythm note.
+    if (beat % 2 === 0) {
+      shots.push({ kind: 'chase', from, to, eye: null, covers: null });
+      continue;
+    }
+    const placed = placeTracksideEye(curve, awayFrom, chute, from, to);
+    shots.push({ kind: 'trackside', from, to, eye: placed.eye, covers: placed.covers });
   }
   return shots;
 }
