@@ -96,5 +96,27 @@ it lands.
 
 | seed | rc | secs | residue |
 |---|---|---|---|
-| 0 | 0 | 11 | — |
-| 1 | 0 | 11 | — |
+| 0 | 0 | 11 | — (1 unwind, decision-zero 1) |
+| 1 | 0 | 11 | — (0 refusals) |
+| 2 | 0 | 27 | — (0 refusals) |
+| 3 | 0 | 116 | — (6 unwinds, train attempt 3) |
+| 4 | 0 | 231 | — (14 refusals, 5 unwinds, decision-zero 1) |
+| 5 | 0 | 11 | — (0 refusals) |
+
+## The three controls this slice owes (planned before running)
+
+If the residue is gone, the claim "gone" is worth nothing until the
+instrument is shown able to fire, and shown to be closed **at source** rather
+than by a differently-drawn park. So, one control per class — restore the old
+input, watch the finding come back, then restore:
+
+1. `rail.walkable` — revert `fence.ts`'s `deckSpanAt` guard (*"Only a probe
+   the bridge actually covers may vote"*), re-run seeds 4, 6, 9.
+2. `anchor.reach:waterFight` — put `parkManifest.ts`'s `boundingRadius` back
+   to 16.3, re-run seed 12 (and 6).
+3. `poi.nospot` — disable `parkPlan.ts`'s `outside` boundary refusal in
+   `pathGraphBuilder`, re-run seed 4. This one doubles as proof that an
+   existing plan-time screen is load-bearing.
+
+Paste the geometry each was proved against alongside the transcript — a
+red-run transcript goes stale (CLAUDE.md).
