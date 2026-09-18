@@ -237,7 +237,31 @@ that is not mine**:
   climbs rather than an accident.
 
 
-## A red on the base, found on the way (NOT mine — needs an owner)
+## Three reds on the base, found on the way (NONE mine — they need an owner)
+
+**`feat/procgen-on-sphere`'s `check` chain stops at step 24 of 68**, so
+nobody had seen steps 25..68 on that branch at all. Running them here found
+two more reds, each reproduced **identically on the base**:
+
+| step | what | on the base? |
+|---|---|---|
+| 24 `check:slide-rider` | body 0.13% of frame vs 0.40% required | identical, same numbers |
+| ~30 `check:waypoints` | **245** waypoints "inside the facade (x NaN..NaN, z NaN..NaN)" | identical, same 245 complaints |
+| ~50 `check:cart-shape` | `ReferenceError: Cannot access 'RIDE_SCALE' before initialization` at `railRace/hazards.ts:171` — a module-scope TDZ, the trap class `HANDOFF-backtracking.md` warns about | identical |
+
+The `NaN..NaN` one is worth the Overseer's attention on its own: a facade
+whose bounds are `NaN` means the check is comparing against `NaN`, which is
+CLAUDE.md's "green can mean incapable of failing" wearing its other face —
+here it is red for a reason that may have nothing to do with the waypoints it
+is naming.
+
+Nothing in this PR touches slides, ride cameras, the child model, waypoint
+seeding or the rail race's hazards, and the base reproduces all three exactly.
+They are reported rather than worked around or quietly skipped.
+
+### The original note
+
+
 
 `pnpm run check` stops at **step 24 of 68, `check:slide-rider`**, on this
 branch **and identically on `origin/feat/procgen-on-sphere` (ae20b9fc)** —
