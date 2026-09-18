@@ -92,17 +92,6 @@ export interface SlideOptions {
 }
 
 /**
- * A slide you ride down.
- *
- * The chute is swept by hand rather than with `ExtrudeGeometry`'s `extrudePath`,
- * because Frenet frames roll through a corkscrew and would tip the open side of
- * the slide over. Here "up" is always world up, so however the slide loops, the
- * bit you sit in faces the sky.
- *
- * The ride itself is a scripted trip along the same curve — see `Building` — so
- * the geometry and the path a child travels can never disagree.
- */
-/**
  * **The curve the chute is actually built on** — the one owner of it.
  *
  * `SlideRide` sweeps its trough along this, and `slide/solve.ts` judges *this*
@@ -142,6 +131,17 @@ export function chuteCentreLine(points: readonly Vector3[]): Vector3[] {
  */
 const CHUTE_JUDGE_SPACING = 0.4;
 
+/**
+ * A slide you ride down.
+ *
+ * The chute is swept by hand rather than with `ExtrudeGeometry`'s `extrudePath`,
+ * because Frenet frames roll through a corkscrew and would tip the open side of
+ * the slide over. Here "up" is always world up, so however the slide loops, the
+ * bit you sit in faces the sky.
+ *
+ * The ride itself is a scripted trip along the same curve — see `Building` — so
+ * the geometry and the path a child travels can never disagree.
+ */
 export class SlideRide {
   readonly group = new Group();
   readonly curve: CatmullRomCurve3;
