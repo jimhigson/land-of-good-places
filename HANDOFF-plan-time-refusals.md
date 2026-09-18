@@ -73,10 +73,16 @@ merely absent from 0..15 — hence the planned wider sweep.
   `Bridge[]` — both World-time. A plan-time screen would ask a *different*
   question (fence-segment coverage), which is exactly the `computeCrossings`
   trap the brief warns about.
-- `anchor.reach:*` — **not a plan decision at all**. It compares an anchor's
-  built lumps against its declared `boundingRadius`; no decision the solver
-  makes changes it. The honest fix is the declaration tracking the build, and
-  that is what the base now does.
+- `anchor.reach:waterFight` — **screenable after all, and this corrects my
+  own first reading above.** `src/minigames/waterFight/plot.ts` dresses the
+  plot from `new Rng(0x77a7e5)` — a **fixed** stream, not the park seed — so
+  the dressing is geometrically *identical in plot-local metres on every
+  seed*. What varies is the world-space reach, because the plot group "leans
+  to the local up" on the sphere, so how far the dressing throws out depends
+  on **where the layout put the plot**. That makes the measured reach a
+  function of a plan decision (`layout`), which is precisely what a plan-time
+  refusal can consume. The ratchet note in `parkManifest.ts` saying "the pools
+  and hedges are seeded per park" is **stale** — correct it if this lands.
 
 ## Status
 
