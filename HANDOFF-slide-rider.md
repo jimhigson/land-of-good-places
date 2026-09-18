@@ -68,7 +68,15 @@ that `check:slide-rider` (canonical seed only) cannot.
       Beat 3 reaches `endOn` 0.99 and still reads 0.68% — viewed end-on from her
       **feet**, where there is no head to hide the body; the extent measure
       treats both ends alike, which is conservative, not wrong.
-- [ ] `pnpm run check` end to end
+- [x] `pnpm run check` — `check:slide-rider` **passes inside the chain**. The
+      chain still exits 1, for six steps that fail **identically on the base
+      commit** `ae20b9fc`: `check:waypoints` (245 identical findings),
+      `check:cart-shape` (TDZ on `RIDE_SCALE`), `check:park-boot`,
+      `check:ground-claims`, `check:layout-rung`, `check:arrival-camera`. Plus
+      `check:solve-cost`, which is flaky under load (260.3 ms once after a
+      30-step batch; 96.6/98.0/99.3 ms clean here vs 110/117 ms on base).
+      **The brief's "exactly one of 65 steps fails" is stale** — it is seven of
+      67, and six are not this slice's.
 - [x] deliberate break. `git checkout origin/feat/procgen-on-sphere --
       src/world/slide/cameras.ts src/world/building/Building.ts` (keeping the new
       test clause) puts the **original** placement back, and the new invariant
@@ -88,12 +96,15 @@ that `check:slide-rider` (canonical seed only) cannot.
       against a moved threshold. With the fix restored the same seed reads
       0.0695. **Geometry this was proved against: base commit `ae20b9fc`,
       canonical seed 20260728, slide length 78.94 m.**
-- [ ] PR
+- [x] PR #680, against `feat/procgen-on-sphere`
 
 ## Notes for whoever takes this over
 
 - `scripts/` is outside every tsconfig project, so `tsc --noEmit` proves
   **nothing** about `check-slide-rider.mts`. Running the check is the only proof.
-- `scripts/diag-*.mts` in the worktree are scratch and must not be committed.
+- `scripts/diag-*.mts` written during this work were scratch and have been
+  deleted; the repo's own pre-existing `diag-*.mts` are untouched.
+- Real rendered frames are possible **without** the shared Chrome profile:
+  `playwright-core` + `vite preview` on your own port, headless, WebGL works.
 - The 0.40% threshold (`TRACKSIDE_BODY_FLOOR`) is untouched, and `scripts/` has
   no diff against the base at all.
