@@ -175,6 +175,37 @@ are badly aimed cameras, not defects — ignore them. Camera aiming on the
 sphere is not intuitive: `camDir` toward the plaza did not centre it, so the
 frames were found by iterating, not by computing.
 
+## check:park — 7 of 16 green, then deliberately paused
+
+| seed | result |
+|---|---|
+| 0 | GREEN 254/254 waypoints |
+| 1 | GREEN 228/228 |
+| 2 | GREEN 233/233 |
+| 3 | GREEN 237/237 |
+| 4 | GREEN 237/237 |
+| 5 | GREEN 242/242 |
+| 6 | GREEN 230/230 |
+
+**Paused at seed 7 on purpose**, on the Overseer's advice: the sweep was
+six-for-six with low remaining risk and about to sit behind seed 7 (~1000 s,
+and longer under sibling load), whereas the `test:procgen` name-diff had never
+been run against this diff at all and is where an unpleasant surprise would
+come from. **Resume with seeds 7..15** — the loop is in this file's history,
+or re-run `LGP_SEED=n pnpm run check:park` per seed. No orphan node processes
+were left; killed by cwd match on the worktree.
+
+## The name-diff, and how it is being done honestly
+
+A name-diff needs **both** sides, so there is a second worktree at the merge
+base: `.claude/worktrees/fairy-poles-base`, detached at **ae20b9fc**, which
+`git merge-base origin/feat/procgen-on-sphere HEAD` confirms is exactly my
+merge base. `test:procgen` runs in each with
+`--reporter=json --outputFile=...`, so the comparison is on **test names from
+structured output**, never on a count and never on grepped text.
+
+Remember to `git worktree remove .claude/worktrees/fairy-poles-base` when done.
+
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
 - `test:procgen` name-diff against the base (base has 55 known failures).
