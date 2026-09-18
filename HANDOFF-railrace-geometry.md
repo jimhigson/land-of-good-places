@@ -151,14 +151,17 @@ number of bars, bars stand over a real leg, bars slow you where they stand.
 - [x] all 67 `check` steps run individually and each failure classified
       against the branch point in `.claude/worktrees/railrace-base`
 - [x] `RIDE_SCALE` / `NOMINAL_OUTSET` TDZ crash — fixed, and **duplicated by
-      PR #682** (`fix/ride-scale-tdz`, `dimensions.ts`). Same diagnosis, same
-      shape of fix, found independently. **Drop my `ringDimensions.ts` commit
-      in favour of theirs when #682 lands** — it is one self-contained commit
-      and nothing else on this branch depends on the file's name. Mine also
-      re-points `track.ts` at the leaf directly, which theirs does not need to
-      if `RAIL_GAUGE` is still a module-scope read of `RIDE_SCALE`: a
-      re-export does **not** escape the cycle, so that one line is worth
-      keeping whichever leaf wins.
+      PR #682** (`fix/ride-scale-tdz`), found independently, same diagnosis and
+      same shape of fix. **#682's version is the one to keep.** My leaf is now
+      named `dimensions.ts` at the same path with the same exports, so when
+      #682 lands the only conflict is that one file and the resolution is
+      *take theirs* — every consumer on this branch already imports
+      `./dimensions` and needs no further change. If theirs does not export
+      `NOMINAL_OUTSET`, `supportGround.ts` is the one import to re-point.
+      Correction to an earlier note here: **`track.ts`'s `RAIL_GAUGE` was
+      never a live bug** — `route.ts` cannot reach `track.ts`, so `track.ts`
+      is strictly downstream and its imports are fully evaluated before its
+      body runs. The direct leaf import there is hardening, not a fix.
 
 
 
@@ -247,3 +250,36 @@ against the current base.
 
 `check:waypoints`'s `x NaN..NaN` — flagged here at the checkpoint — is what
 #674 fixed, independently.
+
+
+## Was the race ever unfair? No — measured on the base
+
+Jim was told the duck bars were unfair `0/10/9/21`. They were not; the check
+was miscounting. Proved **on the base** (`881cb158`), using only base code and
+`unplaceFromSphere` — which *is* the exact inverse of the base's own
+per-column lean, so nothing of this branch is assumed
+(`scripts/_probe-fair.mts`, in the base worktree):
+
+| seed | schedule crossings/lane | plan bars/lane | race ring **drawn** bars/lane |
+|---|---|---|---|
+| 20260728 | 20/20/20/20 | 10/10/10/10 | **10/10/10/10** |
+| 11 | 20/20/20/20 | 10/10/10/10 | **10/10/10/10** |
+| 131 | 20/20/20/20 | 10/10/10/10 | **10/10/10/10** |
+| 24 | 20/20/20/20 | 10/10/10/10 | **10/10/10/10** |
+| 326 | 20/20/20/20 | 10/10/10/10 | **10/10/10/10** |
+
+Fair in the plan, fair in the schedule the game actually races, and fair in the
+geometry drawn — on every seed, before this branch. The `0/10/9/21` came
+entirely from the invariant deciding a bar's lane by the nearest rail *in
+space*, and a bar hangs a rider's height above its own lane while the lanes
+stand further apart in height (up to 4.38 m) than they do sideways (2.75 m).
+
+The walk-past ring reads 39 bars on seeds 11 and 131 rather than 40. That is
+the **road rule** declining to build a slot whose foot is over the entrance
+road, which is deliberate, and it is exactly what the invariant's
+`barsLostToRoad` clause accounts for — that clause passes on all five seeds.
+The walk-past ring is scenery; nobody races it.
+
+**No softness in this finding.** The one thing it does *not* say is that the
+race felt fair to play: nobody has ridden it. It says the bars are dealt out
+equally, which is what the assertion claims.
