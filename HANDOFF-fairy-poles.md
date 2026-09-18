@@ -408,6 +408,79 @@ and no baseline entry was added to silence it — `coplanar-baseline.mts` is
 untouched by this branch, which the diff confirms (five files, none of them
 that one).
 
+## ROUND 2 — fairy lights along the paths (Jim, 18 Sep 2026)
+
+*"the fairy lights look good but they should be all over the park as well, not
+just in around the centre - put them around a large proportion of the paths
+too."*
+
+**Rebased onto `881cb158`** first (#670's boundary-distance fix, which is also
+why Jim's preview was slow to load). Rebase verified rather than trusted:
+identical diff shape before and after, merge-base moved to `881cb158`, and the
+only deletions in `paths.ts` are the two lines I intentionally replaced. **Every
+round-1 measurement in PR #677 was taken against `ae20b9fc` and is now stale.**
+
+### What changed
+
+- **Poles are planned as chains.** Chain 0 is the plaza ring (closed, exactly
+  as approved); the rest are path runs (open, strung neighbour to neighbour).
+  Slots stay sparse — `null` where a pole was left out — so no cable spans a
+  gap. `FairyPole` is unchanged; the new type is `FairyChain`.
+- **`planPoleSlots()` reads the drawn centreline** (`pathCentreline`), so each
+  pole is offset by that sample's **own** `halfWidth` plus its clearance. No
+  path width is restated anywhere in `FairyLights.ts`.
+- **`LIT_PATH_FRACTION = 2/3`**, longest-run-first, so the lights read as
+  avenues rather than scattered fragments. Two thirds because poles claim
+  ground before lamps and walls.
+- **`PATH_POLE_SPACING = 7.1 m`**, matched to the approved ring (10 poles on
+  radius 11.25 is a 7.1 m span, which is what the cable's sag is tuned to).
+- **`MIN_LIT_RUN_LENGTH`** — a run with room for one pole gets none, because a
+  lone pole draws no cable.
+- **`fairyLights` now accommodates.** It was `movable: false` in effect — a
+  lamp refused by a pole went straight to `forgone`. A path pole can slide
+  along its run or swap sides, so it now does. A ring pole still has exactly
+  one candidate and correctly refuses, which is what preserves the gateway gap.
+- **Real point lights stay rationed across the whole park**, not per chain —
+  otherwise lighting the paths would have multiplied the park's point-light
+  count by the number of runs.
+
+### `MAIN_LOOP_WIDTH` — the fourth copy closed
+
+Moved to `core/constants.ts`, a leaf both `paths.ts` and `parkLayout.ts` can
+read (`paths.ts` imports `parkLayout.ts`, so ownership could live in neither).
+`RING_PLOT_CLEARANCE` was the literal `3.35` with a comment asserting it was
+`1.8 + 0.85 + 0.7`; it now derives the first two from `MAIN_LOOP_WIDTH` and
+`PATH_KERB_OVERHANG`, leaving only the walking stride as a literal.
+
+**Watch this one.** `RING_PLOT_CLEARANCE` is now `3.3499999999999996`, not
+`3.35`, and it feeds a `<` in the layout solver — a plot sitting exactly on
+that boundary could move. Deliberately **not** rounded to hide it; park
+digests are the check.
+
+### Measured so far (seed 0, canonical park)
+
+`poles=96 strings=88 pointLights=3 lamps=77 runs=26 pathLen=1024m` — 2/3 of
+1024 m at 7.1 m spacing is ~86 path poles plus the ring's 10, which is exactly
+what was drawn.
+
+**Reachability holds and the totals did not shrink**: seed 0 `254/254` and
+seed 8 `278/278`, the *same totals* as round 1. A `check:park` that reads
+`N/N` can still hide a loss if the denominator falls, so compare totals, not
+just green.
+
+**Lamp cost is smaller than feared**: seed 8 goes base 90 -> ring-only 87 ->
+ring+paths **86**. Eighty-six extra poles cost **one** more lamp.
+
+### A bug caught by disbelieving a number
+
+The world-phase trace printed `poles=7` on seed 0 while the park had drawn 96:
+the counter was `out.filter(Boolean).length`, and `out` is now **chains**. A
+label saying one thing and reporting another — the same disease as the fairy
+ring itself, in the instrument instead of the park. Fixed to print
+placed/total poles and the chain count separately.
+
+### Round-2 gates — ALL must be re-run on the rebased base
+
 ## PR raised: #677 against `feat/procgen-on-sphere`
 
 All four gates run and reported. Coplanar is red **and reported as red**, with
