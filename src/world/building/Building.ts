@@ -886,7 +886,13 @@ export class Building implements GameSystem {
     // one ever is not. three.js supports this directly: `WebGLRenderer.render`
     // updates a camera with no parent itself.
     this.slideShots = new SlideShotDirector(
-      planSlideShots(this.ginormousSlide, { x: BUILDING_CENTRE_X, z: BUILDING_CENTRE_Z }),
+      planSlideShots(
+        this.ginormousSlide,
+        { x: BUILDING_CENTRE_X, z: BUILDING_CENTRE_Z },
+        // The chute as **built**, so the placement search probes the real
+        // geometry it has to see past rather than a model of it.
+        this.ginormousSlide.group,
+      ),
     );
 
     // Something to stand it on. ~95 m of chute with nothing under it reads as
