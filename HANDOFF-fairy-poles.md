@@ -242,6 +242,29 @@ All five CI seeds have fairy lights; all five had none before.
 poles. One gap in a ring of 8 would leave 7 strings, so 6 means **two separate
 gaps** — two non-adjacent poles skipped where spurs cross the verge.
 
+## Determinism: why `scripts/park-digest.mts` is the right instrument
+
+**A digest blind to `InstancedMesh` instance matrices would be structurally
+incapable of seeing this change**, because the fairy bulbs *are* an instanced
+mesh — the poles and cables are ordinary `Mesh`es, but every bulb is an
+instance. `park-digest.mts` hashes `instanceMatrix` and `instanceColor` over
+`count`, so it can see them.
+
+That is not a hypothetical. The script's own comment records the bug being
+caught **by its own control** on 6 Sep 2026: a whole-park digest read
+byte-identical while `check:swept-bus` on the same park went 28 posts to 0,
+because the digest was reading `matrixWorld` and geometry only. Choosing an
+instrument that *can* see your change is the whole game — an instrument that
+cannot is a check that cannot fail.
+
+It also prints the layout, plan and world driver traces as separate hashes, so
+a disagreement between two processes can be told apart: a different park
+versus a different route to the same park.
+
+Run: two separate processes per seed, on **seed 8** (exercises the skip branch,
+so more of this change's decision-making is in its world trace than a plain
+10/10 seed) and the **canonical** seed.
+
 ## Still to do
 - `LGP_SEED=n pnpm run check:park` on 0..15.
 - `test:procgen` name-diff against the base (base has 55 known failures).
