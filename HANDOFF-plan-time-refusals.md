@@ -96,16 +96,73 @@ merely absent from 0..15 — hence the planned wider sweep.
   A second hand-written reach formula beside it would be the exact fault this
   repo keeps paying for.
 
+## PAUSED BY THE OVERSEER — state at the stop, and what to do next
+
+Stopped on the Overseer's throttle (Jim's Mac at load 40–49 against 14 cores,
+eight engineers building parks; four on merge-blocking checks, this slice is
+a goal item). **I hold no processes** — checked with
+`lsof -a -p <pid> -d cwd` against every `node`/`vite`/`pnpm` pid, none has
+this worktree as its cwd. Nothing to kill, nothing left running.
+
+**The branch touches ONE file — this one.** `git diff --stat
+origin/feat/procgen-on-sphere...HEAD` is `HANDOFF-plan-time-refusals.md |
+394 +`, no deletions, working tree clean. Every one of the four controls
+reverted. Three consequences, all free:
+
+- **My effect on per-seed build time is exactly zero.** No screen was added,
+  so nothing narrows the search. (The Overseer's warning about screen cost —
+  seed 428 going 10 s → 185 s, pinned to `3d797f67`'s esplanade march, 96% of
+  it the railway solver re-running because `pathGraph` refusals unwind onto
+  the train's ladder — is a constraint on the *next* step, not on this one.
+  It is also strong corroboration of what the trace evidence above shows: of
+  21 screen refusals across the sweep, 15 are the off-site crossing screen
+  and 12 of those are the esplanade march.)
+- `test:procgen`'s failure set cannot differ from base. Not run; saying so
+  rather than implying it was.
+- `check:park-boot` cannot differ from base. Not run; same.
+
+### What I was about to do, in order
+
+1. **Off-pool sweep, seeds 16–23**, to answer "is the residue absent by luck
+   or closed?". **My first attempt did nothing at all** — the loop used
+   `timeout`, which macOS does not have, so all eight seeds returned
+   `rc=127` in 0 s while the wrapper still exited 0 and printed `DONE`. Use
+   `gtimeout`, or no timeout, and **read the per-seed rc**, not the DONE.
+   (That near-miss is itself this repo's favourite bug: a green run that
+   measured nothing.)
+2. `check:park-boot` and a `test:procgen` name-diff — only once something
+   real is on the branch; today they are provably identical to base.
+3. Only then, if the off-pool sweep shows a class returning, build the screen
+   for it — and measure per-seed time as each screen goes in, not at the end.
+
+### The honest answer to "is this work needed?"
+
+**On the sixteen pool seeds, no.** All three classes are gone and all three
+findings are armed. The branch's own CLAUDE.md sets the bar at sixteen good
+seeds, and that bar is met without any new screen.
+
+**Off the pool, unknown** — that is the one measurement I did not get.
+
+Given the solve-cost evidence, my recommendation is to **not** add screens
+speculatively. A screen that never fires is pure search-space narrowing with
+no benefit, and the entrance-road engineer's 10 s → 185 s is what that costs.
+
 ## Status
 
 - [x] Worktree, `pnpm install --frozen-lockfile`, Node 26.5.0.
-- [ ] **Step 1 — measure.** Baseline sweep `LGP_SEED=0..15 pnpm run check:park`,
-      one process at a time, running now into
-      `<scratchpad>/sweep-base/`. Handoff numbers are from an earlier commit
-      and are treated as stale.
-- [ ] Step 2 — screens for whatever residue is still there.
-- [ ] Step 3 — proofs: trace evidence each screen fires; control-first honesty
-      proof; two-process determinism; `test:procgen` name-diff; `check:park-boot`.
+- [x] **Step 1 — measure.** Baseline sweep 0..15, one process at a time,
+      ratchet enforced. **16/16 green, no residue of any class.**
+- [x] Controls: all three findings proved armed; the documented `fence.ts`
+      reproduction proved rotted; the `manifest` control proved to change the
+      park it measures.
+- [x] Trace evidence that the three existing plan screens fire and unwind onto
+      the right decision.
+- [x] Real margin for `anchor.reach:waterFight` measured on 13 seeds.
+- [ ] Off-pool sweep (16–23) — **attempted, measured nothing, see above**.
+- [ ] Screens — **not built, and on this evidence should not be built
+      speculatively**.
+- [ ] `check:park-boot`, `test:procgen` name-diff, two-process determinism —
+      all provably identical to base while the branch has no source change.
 
 ## The timings in the table below are CONTAMINATED — read this first
 
