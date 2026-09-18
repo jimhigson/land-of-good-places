@@ -190,5 +190,46 @@ seed (13–35 posts), 145.7 m of 145.7 m road swept.
 - [x] control: seed 428 on `origin/feat/sphere-combined` — 10 s vs 185 s
 - [x] fix (one queue, `LGP_LANES`/`cpus()`, per-park streaming, completeness guard)
 - [x] `pnpm run check:entrance-road` green, 221 s
-- [ ] `LGP_LANES=4` run (CI-shaped)
-- [ ] PR
+- [x] `LGP_LANES=4` run (CI-shaped), green, 288 s
+- [ ] PR / CI green
+
+## The `LGP_LANES=4` run — the CI-shaped one
+
+A four-vCPU runner is what the workflow gets, so the honest local shape is four
+lanes:
+
+```
+LANES4 rc=0 elapsed=288s
+  [17/20] seed      451 real    built in 4.8 s (89.0 s elapsed)
+  [18/20] seed      451 control built in 4.8 s (89.6 s elapsed)
+  [19/20] seed      428 real    built in 203.3 s (287.2 s elapsed)
+  [20/20] seed      428 control built in 203.3 s (287.5 s elapsed)
+entrance road OK — ... all 10 pool seeds; the tightest anywhere is 6.05 m (seed 24)
+```
+
+**Eighteen of twenty parks are finished at 89.6 s.** The other 199 s is the two
+seed-428 parks, and they now run *beside* each other rather than one behind the
+other — which is the whole change. The wall clock is one seed-428 park, where
+before it was two.
+
+On a CI core that is roughly 2.5× slower this projects to ~8 minutes against
+the 15-minute cap, from ~15 minutes before. **Say plainly that the margin is
+one slow seed wide**: the check is now honest and inside its budget, but the
+thing actually making it expensive is the solver, and until seed 428 stops
+costing five railway solves this workflow sits at about half its cap.
+
+## Two things a successor should not re-derive
+
+- **`scripts/` is deliberately outside every tsconfig project** (see the
+  comment in `tsconfig.test.json`), and there is no `@types/node` installed, so
+  `tsc --noEmit` passing says **nothing** about this file. Tried and proved: a
+  scratch project over the script bailed with `TS2688: Cannot find type
+  definition file for 'node'`, and an appended `const x: number = "no"` went
+  **unreported** — a typecheck that could not fail. The proof for a change here
+  is running it.
+- The `--control` second park (`setEntranceCorridorHonoured(false)`) is **not a
+  gate** — the check says so itself, and prints "ASSERTS NOTHING" when the
+  clause is inert, which it is on all ten pool seeds today. Dropping it would
+  halve the check's total CPU, but it would **not** shorten the wall clock,
+  because the critical path is a single seed-428 park either way. So it stays:
+  removing a measurement that costs nothing on the clock buys nothing.
