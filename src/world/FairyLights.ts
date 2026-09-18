@@ -323,7 +323,26 @@ export function fairyPoleBuilder(
 
   return {
     name: 'fairyLights',
-    deps: ['fountain'],
+    // **Poles go up only once the park's own greenery and walls have theirs.**
+    //
+    // The driver is a round-robin: `nextRunnable` rotates a cursor and a
+    // builder is gated only by the deps it declares. This said `['fountain']`
+    // — inherited from when the feature was ten poles in the plaza verge,
+    // where racing anything for ground was harmless.
+    //
+    // Lighting two thirds of the paths made it ninety-odd poles spread across
+    // the whole park, all of them claiming ground *interleaved with* the walls,
+    // the trees and the bushes. Measured on seed 131: with the poles disabled
+    // the park builds 182 bush clumps and 33/38 walls, byte-identical to the
+    // base; with them enabled it builds 177 and 32/37, and 177 is under the
+    // 180 the park's own invariant requires. The poles were not displacing the
+    // greenery — nothing was refused — they were simply getting there first.
+    //
+    // Declaring the real dependency fixes it structurally rather than by
+    // hoping: a decoration waits for the things the park is actually made of.
+    // It is the same precedence the `advance` below already honours by never
+    // naming a blocker, expressed where the driver can enforce it.
+    deps: ['fountain', 'walls', 'trees', 'bushes'],
     // A pole is cheap to move: no dependants, nothing derived from where it
     // stands. The driver may ask it to step aside before anything heavier.
     movable: true,
