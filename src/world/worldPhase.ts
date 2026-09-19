@@ -28,6 +28,7 @@ import type { GroundClaims, Claim } from '../boot/groundClaims';
 import { ParkSolve, type SolveStats } from '../boot/parkSolve';
 import { refusal, type FeatureBuilder } from '../boot/featureBuilder';
 import { PARK_SEED } from './parkManifest';
+import type { CoasterRoute } from './coaster/route';
 import { PLAZA } from './paths';
 import { FOUNTAIN_RIM_RADIUS } from './Fountain';
 import { FOUNTAIN_RIM_COLLIDER_HALF } from '../core/constants';
@@ -41,7 +42,7 @@ import {
   type WallRun,
 } from './Scenery';
 import { lampBuilder, type LampDecision } from './LampPosts';
-import { fairyPoleBuilder, type FairyPole } from './FairyLights';
+import { fairyPoleBuilder, type FairyChain } from './FairyLights';
 import { RailRace } from './railRace/RailRace';
 import { TrestleRefusal } from './railRace/track';
 import { RAIL_RACE_FEATURE } from './railRace/feature';
@@ -50,7 +51,7 @@ import { ROAD_FEATURE } from './entrance/roadCorridor';
 export interface WorldPhase {
   readonly scenery: SceneryDecisions;
   readonly lamps: readonly (readonly [number, number])[];
-  readonly fairyPoles: readonly FairyPole[];
+  readonly fairyPoles: readonly FairyChain[];
   readonly railRace: RailRace;
   readonly stats: SolveStats;
   readonly trace: readonly string[];
@@ -145,28 +146,43 @@ function railRaceBuilder(
 }
 
 /** Decide every world-time feature. Synchronous: the World constructor drains it. */
-export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims): WorldPhase {
+export function solveWorldPhase(
+  collision: CollisionWorld,
+  claims: GroundClaims,
+  cruiserRoute: CoasterRoute | null,
+): WorldPhase {
   const trees: TreeDecision[] = [];
   const bushes: BushDecision[] = [];
   const walls: (WallRun | null)[] = [];
   const lamps: LampDecision[] = [];
-  const poles: FairyPole[] = [];
+  const poles: FairyChain[] = [];
   let railRace: RailRace | null = null;
   const builders: FeatureBuilder[] = [
     fountainBuilder(claims),
     wallBuilder(claims, walls),
     treeBuilder(collision, claims, () => walls, () => bushes, trees),
     bushBuilder(collision, claims, () => walls, () => trees, bushes),
-    fairyPoleBuilder(claims, poles),
+    fairyPoleBuilder(claims, poles, cruiserRoute),
     lampBuilder(collision, claims, lamps),
     railRaceBuilder(collision, claims, (ride) => {
       railRace = ride;
     }),
   ];
   const solve = new ParkSolve(PARK_SEED, builders, claims);
+  // **How long this phase took, printed with what it produced.**
+  //
+  // The line below has always carried the phase's *counts* and never its
+  // *cost*, which made a builder getting slower invisible at the point it was
+  // paid — `check:park-boot` cannot see it either, because every work unit it
+  // slices is a plan-phase solver and the world phase runs outside any
+  // budgeted slice (#694). Measuring a world-phase change therefore meant
+  // timing a whole park build, in which seed 7's plan phase alone is minutes
+  // and would average any regression away to nothing.
+  const startedAt = Date.now();
   for (const _turn of solve.run()) {
     // drained
   }
+  const elapsedMs = Date.now() - startedAt;
   lastTrace = solve.trace;
   lastStats = solve.stats;
   try {
@@ -178,8 +194,8 @@ export function solveWorldPhase(collision: CollisionWorld, claims: GroundClaims)
     nodeProcess?.stderr?.write(
       `world-solve: seed=${PARK_SEED} increments=${stats.increments} refusals=${stats.refusals} ` +
         `accommodations=${stats.accommodations}/${stats.accommodationRefusals}-refused forgone=${stats.forgone} ` +
-        `unwinds=${stats.unwinds} trees=${trees.length} bushes=${bushes.length} walls=${walls.filter(Boolean).length}/${walls.length} ` +
-        `lamps=${lamps.filter((l) => l !== 'forgone').length}/${lamps.length} poles=${poles.filter(Boolean).length}\n`,
+        `unwinds=${stats.unwinds} ms=${elapsedMs} trees=${trees.length} bushes=${bushes.length} walls=${walls.filter(Boolean).length}/${walls.length} ` +
+        `lamps=${lamps.filter((l) => l !== 'forgone').length}/${lamps.length} poles=${poles.reduce((n, chain) => n + chain.slots.filter(Boolean).length, 0)}/${poles.reduce((n, chain) => n + chain.slots.length, 0)} chains=${poles.length}\n`,
     );
   } catch {
     // no stderr in a browser

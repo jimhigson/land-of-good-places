@@ -11331,7 +11331,95 @@ const theRoadClaimCoversTheBusRun: Invariant = (facts) => {
   ];
 };
 
+/**
+ * **Every scattered feature actually put something in the park.**
+ *
+ * This exists because the fairy lights were *absent for months* and nothing
+ * said so. The ring's radius (a literal, 13.5) had drifted onto the main
+ * loop's inner paving (13.1), so every one of the ten poles tested as standing
+ * on a path and was correctly skipped — a generator behaving exactly as
+ * designed and producing **zero** of itself. No rule-reading check could see
+ * it; `check:park` was green, because a park with no fairy lights is a
+ * perfectly walkable park; and every existing invariant here asks whether the
+ * things that *are* placed are placed sanely, which is vacuously true of
+ * nothing.
+ *
+ * So this one asks the opposite question, and it asks it of the whole class:
+ * **which features can silently place none of themselves?** The world phase
+ * (`src/world/worldPhase.ts`) decides seven, and five of them scatter many
+ * small things that are individually `optional` — a lamp slot, a pole, a wall
+ * run — and so can individually be forgone right down to nothing. Those five
+ * are the list below. (The fountain is a single non-optional increment and the
+ * rail race refuses rather than forgoes; neither can reach zero unnoticed.)
+ *
+ * **The thresholds are the weakest honest ones — "at least one" — on purpose.**
+ * A real minimum count would be this file measuring the generator's own target
+ * rather than the park, and it would turn every future tuning change into a
+ * failure. What is being refused here is *silence*, not sparseness. Real
+ * numbers go to the coverage line either way, so a feature quietly collapsing
+ * from 82 lamps to 3 is visible to a human reading a passing run even though
+ * it does not fail.
+ *
+ * The fairy lights get the extra clause, because they are the case that
+ * happened: poles alone are not lights. A cable and its bulbs need **two
+ * adjacent** poles, so a ring of ten isolated posts would draw no strings at
+ * all, and a child would see no fairy lights in a park whose pole count looked
+ * healthy.
+ */
+const everyScatteredFeaturePlacesSomething: Invariant = (facts) => {
+  const counts: readonly (readonly [string, number])[] = [
+    ['walls', facts.walls.length],
+    ['trees', facts.trees.length],
+    ['bushes', facts.bushes.length],
+    ['lamps', facts.lamps.length],
+    ['fairy poles', facts.fairyLights.poles],
+    ['fairy strings', facts.fairyLights.strings],
+  ];
+
+  // A passing run must still say what it covered, and with real numbers —
+  // CLAUDE.md's "a check that stops covering something must say so on every
+  // run". stderr, because vitest's default reporter shows console output from
+  // failing tests only, which is exactly the run this line exists for.
+  process.stderr.write(
+    `  everyScatteredFeaturePlacesSomething seed ${facts.seed}: ` +
+      counts.map(([name, n]) => `${name} ${n}`).join(', ') +
+      '\n',
+  );
+
+  const complaints: string[] = [];
+
+  // **Poles are not lights.** A cable needs two *adjacent* poles, so a park
+  // whose poles all stand alone draws nothing while the pole count looks
+  // healthy. On the plaza ring that was a theoretical worry; along the path
+  // runs it is a real one, because a run long enough for one pole and no more
+  // would contribute a post and no cable. Asserting there are more strings
+  // than chains is the weakest form of "the poles were actually strung
+  // together" that still cannot be satisfied by isolated posts.
+  if (facts.fairyLights.poles > 0 && facts.fairyLights.strings === 0) {
+    complaints.push(
+      `seed ${facts.seed}: the park has ${facts.fairyLights.poles} fairy poles but ${facts.fairyLights.strings} ` +
+        `strings between them. Poles are not lights — a cable needs two adjacent poles, so this is a park ` +
+        `full of bare posts with a healthy-looking pole count.`,
+    );
+  }
+
+  for (const [name, n] of counts) {
+    if (n > 0) continue;
+    complaints.push(
+      `seed ${facts.seed}: the park has ${n} ${name}. A feature that places none of itself ` +
+        `is invisible to every other check here — they all ask whether what was placed was ` +
+        `placed sanely, which is vacuously true of nothing. Either the feature is being ` +
+        `refused everywhere it tries, or it was never asked.`,
+    );
+  }
+  return complaints;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
+  [
+    'every scattered feature actually puts something in the park',
+    everyScatteredFeaturePlacesSomething,
+  ],
   // Renamed 14 Sep 2026: it no longer asserts gentleness, so it must not keep
   // saying it does. The gradient ceiling is retired and reported instead; what
   // this refuses now is a terrain that stopped being a sphere, and a park that
