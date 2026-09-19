@@ -738,6 +738,25 @@ export interface ParkFacts {
    * default seed.
    */
   readonly cruiserRouteGroundClearance: readonly number[];
+  /**
+   * **The top of every Sky Cruiser pylon as it is drawn, mapped back to the
+   * flat frame the route was planned in.**
+   *
+   * `Coaster.ts` stands each pylon from the foot the planner found to the
+   * track's *drawn* top — `placeOnSphere` of the flat top — so the post leans
+   * with the planet, which is how it reaches the thing it carries. The route
+   * an invariant compares it against (`coaster.route`) is the **flat** plan.
+   * Read the drawn top straight against that plan and the lean itself reads as
+   * error: `height · sin(tilt)`, which on the canonical seed is **2.94 m** of
+   * pure bookkeeping on a pylon whose real gap to its track is **0.034 m**.
+   *
+   * So every top goes through `unplaceFromSphere` here — the exact inverse of
+   * the lean, the same treatment {@link RailRaceSupportFacts} already gives the
+   * Rail Race's drawn struts, and for the same reason. Measured off the built
+   * instance buffer, never re-derived from `pylons.ts`: the whole point of
+   * these two invariants is to catch a post that does not arrive.
+   */
+  readonly cruiserPylonTops: readonly { readonly x: number; readonly y: number; readonly z: number }[];
   readonly walls: readonly WallFact[];
   readonly trees: readonly TreeFact[];
   /** Every bush clump standing in the park. See {@link BushFact}. */
@@ -1137,6 +1156,35 @@ export interface ParkFacts {
     readonly topY: number;
   } | null;
   /**
+   * {@link slideChute}, put through `worldToCastle` — the chute in the same
+   * axes the castle and everything standing on it is drawn in, so a clearance
+   * against the roof garden compares like with like.
+   */
+  readonly slideChuteInCastleFrame: readonly (readonly [number, number, number])[];
+  /**
+   * **The same box, in the castle's own axes, built from the drawn vertices.**
+   *
+   * A world-axis `Box3` round the roof garden is an axis-aligned box round a
+   * body leaning **12.44 degrees**, so its `max.y` is the highest world `y` any
+   * corner reaches and has nothing to do with the height of the roof where the
+   * chute actually passes. Measured on seed 131 it read the roof at 8.06 m and
+   * reported the ginormous slide 0.22 m *inside* it; asked in the castle's own
+   * frame, with the chute taken there too, the same ride clears the same roof
+   * by **5.02 m**.
+   *
+   * So this is the honest box, and {@link theSlideClearsTheCastleRoofGarden}
+   * asks it. Built by putting every drawn vertex of the roof-garden group
+   * through `worldToCastle`, not by rotating the world box's eight corners —
+   * that would only be a bigger box round a wrong one.
+   */
+  readonly castleRoofGardenInCastleFrame: {
+    readonly minX: number;
+    readonly maxX: number;
+    readonly minZ: number;
+    readonly maxZ: number;
+    readonly topY: number;
+  } | null;
+  /**
    * The castle's four corner towers, as the solids of revolution they were
    * actually built as, in **world space**.
    *
@@ -1156,10 +1204,22 @@ export interface ParkFacts {
    */
   readonly castleTowers: readonly {
     readonly name: string;
-    readonly x: number;
-    readonly z: number;
-    readonly bottomY: number;
-    readonly topY: number;
+    /**
+     * The two ends of the drawn part's **own axis**, in world space, foot
+     * first.
+     *
+     * Not a world-Y window and a plan position: the castle is drawn leaning
+     * **12.44 degrees** onto the planet, so a turret's axis is not world `+Y`
+     * and `centre.y ± height/2` is not its extent. Measured on seed 24 the
+     * four tower bodies' feet span 6 m of world `y` between them while every
+     * one of them stands on the same plinth.
+     */
+    readonly footX: number;
+    readonly footY: number;
+    readonly footZ: number;
+    readonly tipX: number;
+    readonly tipY: number;
+    readonly tipZ: number;
     readonly radiusBottom: number;
     readonly radiusTop: number;
   }[];
@@ -1356,10 +1416,18 @@ export interface ParkFacts {
      * `Infinity` if nothing overhangs the gateway at all, which is a gate with
      * no arch on it and which the invariant treats as a failure rather than as
      * generous headroom.
+     *
+     * **Taken whole from `measureGateArch`, never recomputed here.** It used to
+     * be `lowestOverheadY - terrainHeight(centreX, centreZ)` on this line and
+     * the identical expression in `scripts/probe-gate-pool.mts` — one number
+     * with two definitions, and a difference of world `y` is not a height on a
+     * sphere.
      */
     readonly headroom: number;
     /** Where that lowest overhead thing is, so a failure names a place. */
-    readonly lowestOverheadAt: { readonly x: number; readonly z: number } | null;
+    readonly lowestOverheadAt:
+      | { readonly x: number; readonly y: number; readonly z: number }
+      | null;
     /**
      * Which way the arch's lettered face looks, in world XZ. See
      * `scripts/gate-arch-measure.mts`: the gate's *shape* cannot answer this,
@@ -1943,6 +2011,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // than by asking the builder whether it built one — the same discipline the
   // cat bus below is found with, and for the same reason.
   let castleRoofGarden: ParkFacts['castleRoofGarden'] = null;
+  let castleRoofGardenInCastleFrame: ParkFacts['castleRoofGardenInCastleFrame'] = null;
   {
     let roofRoot: import('three').Object3D | null = null;
     scene.traverse((object) => {
@@ -1957,6 +2026,42 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         maxZ: box.max.z,
         topY: box.max.y,
       };
+      // ...and the same thing in the castle's own axes. See the field's
+      // docblock: an axis-aligned box round a leaning building is not the
+      // building.
+      const { worldToCastle } = await import('../../src/world/building/layout.ts');
+      const local = new Box3();
+      const corner = new Vector3();
+      (roofRoot as import('three').Object3D).traverse((object) => {
+        if (!(object instanceof MeshClass)) return;
+        const attribute = object.geometry.getAttribute('position');
+        if (!attribute) return;
+        for (let i = 0; i < attribute.count; i += 1) {
+          corner
+            .set(attribute.getX(i), attribute.getY(i), attribute.getZ(i))
+            .applyMatrix4(object.matrixWorld);
+          worldToCastle(corner, corner);
+          local.expandByPoint(corner);
+        }
+      });
+      if (!local.isEmpty()) {
+        castleRoofGardenInCastleFrame = {
+          minX: local.min.x,
+          maxX: local.max.x,
+          minZ: local.min.z,
+          maxZ: local.max.z,
+          // `local` is a box in the CASTLE's own axes, built by putting every
+          // drawn vertex through `worldToCastle` — so its `+Y` is the castle's
+          // own up, and `max.y` is the top of the roof garden measured along
+          // the direction the castle actually stands in. It is the fix for an
+          // axis-aligned box round a leaning body, not an instance of one: the
+          // world-axis version of this very number read 8.06 m where this reads
+          // 11.80 m, and reported the ginormous slide 0.22 m inside a roof it
+          // in fact clears by 5.02 m.
+          // flat-ok: `local` is in the castle's own axes, so +Y is the castle's up
+          topY: local.max.y,
+        };
+      }
     }
   }
 
@@ -1971,9 +2076,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     // questions of the sixteen pool seeds and must get its answers the same
     // way. It imports nothing but `three`, so it is safe here: nothing in it
     // reads the seed at module load.
-    const measured = measureGateArch(scene);
+    const { terrainHeight: groundAt } = await import('../../src/world/terrain.ts');
+    const measured = measureGateArch(scene, groundAt);
     if (measured) {
-      const { terrainHeight: groundAt } = await import('../../src/world/terrain.ts');
       parkGateArch = {
         minX: measured.minX,
         maxX: measured.maxX,
@@ -1987,8 +2092,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         posts: measured.posts,
         // Against the terrain, never against the arch's own base: an arch
         // sunk into the paving takes its base down with it and a
-        // base-relative number cannot see that.
-        headroom: measured.lowestOverheadY - groundAt(measured.centreX, measured.centreZ),
+        // base-relative number cannot see that. `measureGateArch` owns the
+        // subtraction — see the field's docblock.
+        headroom: measured.headroom,
         lowestOverheadAt: measured.lowestOverheadAt,
         forwardX: measured.forwardX,
         forwardZ: measured.forwardZ,
@@ -2185,8 +2291,10 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
 
   const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
   const castleTowers: {
-    name: string; x: number; z: number;
-    bottomY: number; topY: number; radiusBottom: number; radiusTop: number;
+    name: string;
+    footX: number; footY: number; footZ: number;
+    tipX: number; tipY: number; tipZ: number;
+    radiusBottom: number; radiusTop: number;
   }[] = [];
   scene.traverse((object) => {
     if (!(object instanceof InstancedMeshClass)) return;
@@ -2201,16 +2309,24 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     const local = new Matrix4();
     const composed = new Matrix4();
     const centre = new Vector3();
+    const axis = new Vector3();
     for (let i = 0; i < object.count; i += 1) {
       object.getMatrixAt(i, local);
       composed.multiplyMatrices(object.matrixWorld, local);
       centre.setFromMatrixPosition(composed);
+      // The part's own axis, read off the composed matrix: its local `+Y`
+      // column carries both the direction it stands in and its scale.
+      axis.setFromMatrixColumn(composed, 1);
+      const length = axis.length() * params.height;
+      axis.normalize();
       castleTowers.push({
         name: `${object.name}[${i}]`,
-        x: centre.x,
-        z: centre.z,
-        bottomY: centre.y - params.height / 2,
-        topY: centre.y + params.height / 2,
+        footX: centre.x - (axis.x * length) / 2,
+        footY: centre.y - (axis.y * length) / 2,
+        footZ: centre.z - (axis.z * length) / 2,
+        tipX: centre.x + (axis.x * length) / 2,
+        tipY: centre.y + (axis.y * length) / 2,
+        tipZ: centre.z + (axis.z * length) / 2,
         radiusBottom,
         radiusTop,
       });
@@ -2228,6 +2344,17 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       slide.pointAt(i / steps, probe);
       slide.group.localToWorld(probe);
       slideChute.push([probe.x, probe.y, probe.z]);
+    }
+  }
+
+  // The same chute in the castle's own axes — see `slideChuteInCastleFrame`.
+  const slideChuteInCastleFrame: (readonly [number, number, number])[] = [];
+  {
+    const { worldToCastle } = await import('../../src/world/building/layout.ts');
+    const probe = new Vector3();
+    for (const [x, y, z] of slideChute) {
+      worldToCastle(probe.set(x, y, z), probe);
+      slideChuteInCastleFrame.push([probe.x, probe.y, probe.z]);
     }
   }
 
@@ -3410,6 +3537,38 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     }
   }
 
+  // See `ParkFacts.cruiserPylonTops`: the drawn top of each pylon, unleant back
+  // into the flat frame `coaster.route` is solved in, so an invariant compares
+  // like with like.
+  //
+  // **This block imports `unplaceFromSphere` itself, and must keep doing so.**
+  // It used to lean on the binding the Rail Race's strut block destructured a
+  // few hundred lines up, with a comment saying as much. #684 then stopped the
+  // Rail Race needing it ("Not `unplaceFromSphere`, which this used to call"),
+  // the binding went with it, and a rebase left this reaching for a name that
+  // no longer existed. The tell was not a red test: every seed suite threw in
+  // `buildParkFacts` and vitest reported **203 passed | 490 skipped**, zero
+  // failures — CLAUDE.md's "a skipped test is not a passing test", where the
+  // pass count is the only thing that gives it away. One block, one import, no
+  // shared binding to lose.
+  const cruiserPylonTops: { x: number; y: number; z: number }[] = [];
+  {
+    const pylons = world.coaster.group.getObjectByName('skyCruiser:pylons');
+    if (pylons instanceof InstancedMesh) {
+      const { unplaceFromSphere } = await import('../../src/world/terrain.ts');
+      const { Matrix4: PylonMatrix4 } = await import('three');
+      const matrix = new PylonMatrix4();
+      const drawn = new Vector3();
+      for (let i = 0; i < pylons.count; i += 1) {
+        pylons.getMatrixAt(i, matrix);
+        // The top of a unit-height cylinder, which is where the post ends.
+        drawn.set(0, 0.5, 0).applyMatrix4(matrix);
+        const flat = unplaceFromSphere(drawn, new Vector3());
+        cruiserPylonTops.push({ x: flat.x, y: flat.y, z: flat.z });
+      }
+    }
+  }
+
   // The bus's run, from the same owners `ArrivalSequence.placeBus` and
   // `check:swept-bus` read: it drives the road's arc from `entranceBusArriveAt()`
   // to `entranceBusVanishAt()`, its body reaching half its own length beyond
@@ -3456,6 +3615,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
     cruiserRouteGroundClearance,
+    cruiserPylonTops,
     seed,
     world,
     walls,
@@ -3483,6 +3643,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     pathEdges,
     pathConnectivityEdges,
     slideChute,
+    slideChuteInCastleFrame,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
     slideChuteBands,
     slideCameras,
@@ -3493,6 +3654,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     castleMasonryTopFacadeY,
     castleMasonryDesignTopY: CASTLE_MASONRY_TOP,
     castleRoofGarden,
+    castleRoofGardenInCastleFrame,
     parkGateArch,
     castleTowers,
     chuteEnvelope: CHUTE_ENVELOPE,

@@ -828,22 +828,65 @@ export class CoasterRoute {
     return point.y - terrainHeight(point.x, point.z);
   }
 
-  /** Nearest point on this loop to (x, z), for the other coaster's solve. */
-  nearestPoint(x: number, z: number): Vector3 {
+  /**
+   * The loop sampled every {@link NEAREST_POINT_STEP} metres, as flat
+   * `x, y, z` triples — built once, on first use.
+   *
+   * `curve` and `length` are assigned in the constructor and never reassigned,
+   * so these samples cannot go stale and there is nothing to invalidate.
+   */
+  private nearestSamples: Float64Array | null = null;
+
+  private planSamples(): Float64Array {
+    if (this.nearestSamples) return this.nearestSamples;
+    const count = Math.max(1, Math.ceil(this.length / NEAREST_POINT_STEP));
+    const samples = new Float64Array(count * 3);
     const probe = new Vector3();
+    for (let i = 0; i < count; i += 1) {
+      this.pointAt(i * NEAREST_POINT_STEP, probe);
+      samples[i * 3] = probe.x;
+      samples[i * 3 + 1] = probe.y;
+      samples[i * 3 + 2] = probe.z;
+    }
+    this.nearestSamples = samples;
+    return samples;
+  }
+
+  /**
+   * Nearest point on this loop to (x, z), for the other coaster's solve.
+   *
+   * **Reads a table rather than re-walking the curve.** This used to call
+   * `pointAt` — `CatmullRomCurve3.getPointAt`, an arc-length lookup with a
+   * binary search in it — at every 2 m of the loop, on *every query*: about a
+   * hundred and forty curve evaluations to answer one question about one point.
+   * The ginormous slide's search asks it once per chute sample, which on the
+   * canonical seed is **3,007,891 questions**, so the loop was re-walked some
+   * four hundred million times to re-derive a line that had not moved since the
+   * constructor. Same step, same samples, same answer; the walking happens once.
+   */
+  nearestPoint(x: number, z: number): Vector3 {
+    const samples = this.planSamples();
     const best = new Vector3();
     let bestDistance = Infinity;
-    for (let d = 0; d < this.length; d += 2) {
-      this.pointAt(d, probe);
-      const gap = Math.hypot(probe.x - x, probe.z - z);
+    for (let i = 0; i < samples.length; i += 3) {
+      const dx = (samples[i] as number) - x;
+      const dz = (samples[i + 2] as number) - z;
+      const gap = dx * dx + dz * dz;
       if (gap < bestDistance) {
         bestDistance = gap;
-        best.copy(probe);
+        best.set(samples[i] as number, samples[i + 1] as number, samples[i + 2] as number);
       }
     }
     return best;
   }
 }
+
+/**
+ * How finely {@link CoasterRoute.nearestPoint} samples the loop. 2 m, which is
+ * the step it has always walked — named so the table and the walk it replaced
+ * cannot drift apart.
+ */
+const NEAREST_POINT_STEP = 2;
 
 /**
  * A loop somebody else already searched, ready to be finished.

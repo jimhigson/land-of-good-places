@@ -1994,11 +1994,42 @@ const RAMP_SCREEN_MARGIN = 0.5;
  * bridges from the start"* — which is its own ticket.
  */
 export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
+  return standsOnSomeBridge(x, z, margin, true);
+}
+
+/**
+ * **The one owner of "is this point inside a bridge's footprint".**
+ *
+ * Both questions below are this loop with one clause different — the site
+ * sweep, the `across` projection onto the crossing's normal, and the `along`
+ * bounds that reach `DECK_HALF_LENGTH` plus each ramp's own measured reach.
+ * They were written out twice and a third copy was very nearly added; that is
+ * this repo's most-cited bug, and the two would have drifted the first time
+ * anybody touched `rampReachPos`.
+ *
+ * `deckCounts` is the whole difference. A bridge's footprint is a road with a
+ * wall down each side: `across <= halfWidth` is the surface a child walks on,
+ * and only the ring outside it is parapet.
+ *
+ * - `true` — the bridge's ground **at all**, deck included. The right question
+ *   for starting or branching something there.
+ * - `false` — the **masonry only**. The right question for routing through,
+ *   because a street crossing a bridge is what a bridge is for.
+ */
+function standsOnSomeBridge(
+  x: number,
+  z: number,
+  margin: number,
+  deckCounts: boolean,
+): boolean {
   for (const site of CROSSING_SITES) {
     const dx = x - site.x;
     const dz = z - site.z;
-    const across = -dx * site.dirZ + dz * site.dirX;
-    if (Math.abs(across) > site.halfWidth + margin) continue;
+    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
+    if (across > site.halfWidth + margin) continue;
+    // Inside the deck's own width is road, not wall — keep going, another
+    // site's masonry may still claim this point.
+    if (!deckCounts && across <= site.halfWidth) continue;
     const along = dx * site.dirX + dz * site.dirZ;
     if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
         along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
@@ -2046,20 +2077,7 @@ export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCR
  * is for.
  */
 function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
-  for (const site of CROSSING_SITES) {
-    const dx = x - site.x;
-    const dz = z - site.z;
-    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
-    // Inside the deck's own width is road, not wall — keep going, another
-    // site's masonry may still claim this point.
-    if (across <= site.halfWidth || across > site.halfWidth + margin) continue;
-    const along = dx * site.dirX + dz * site.dirZ;
-    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
-        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
-      return true;
-    }
-  }
-  return false;
+  return standsOnSomeBridge(x, z, margin, false);
 }
 
 /** The Sky Cruiser's pylons have the same relationship to streets as the
@@ -2555,6 +2573,20 @@ function computeStreetStubs(p: readonly [number, number], arrival: boolean): Str
         const j = cj + dj;
         if (Math.abs(i) > LATTICE_HALF_CELLS || Math.abs(j) > LATTICE_HALF_CELLS) continue;
         const index = lattice.indexOf(i, j);
+        // **A junction on a bridge is not a junction.** The node is valid —
+        // `nodeOk` deliberately admits a deck so a street may cross one — but a
+        // spur branching off it leaves the bridge sideways and its paving stops
+        // at a drop. `pointStandsOnABridgeRamp` is the deck-included question
+        // and already existed — see {@link standsOnSomeBridge}.
+        if (pointStandsOnABridgeRamp(lattice.xs[index] as number, lattice.zs[index] as number)) {
+          if (verbose) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[stubs]   node ${(lattice.xs[index] as number).toFixed(1)},${(lattice.zs[index] as number).toFixed(1)}: on a bridge`,
+            );
+          }
+          continue;
+        }
         if (!lattice.nodeOk[index] || lattice.side[index] !== pSide) {
           if (verbose) {
             // eslint-disable-next-line no-console
@@ -4624,7 +4656,29 @@ function* addInterconnects(
       stale = false;
     }
     const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
-    if (!Number.isFinite(paved)) continue; // not actually connected — a different bug, not this pass's job
+    // **An unreachable pair is the strongest case for a connector, not a
+    // reason to decline one.** This used to `continue` on a non-finite
+    // distance, with the note "not actually connected — a different bug, not
+    // this pass's job". It is this pass's job: two destinations a child can
+    // see across 22 m of grass, with no paved way between them at all, is
+    // precisely "close but unlinked". Measured on seed 11, where the note was
+    // costing the park two connectors:
+    //
+    //   [cand] hotel-stall.skyCruiser: straight 22.2 paved Infinity
+    //   [cand] hotel-exit-skyCruiser:  straight 33.5 paved Infinity
+    //
+    // and `detourRatiosStayReasonable` then found the built park walking
+    // **359.3 m to cover 22.2 m** (16.16x) between the first pair, because
+    // the built network does eventually join them — the long way round, via
+    // whatever paving happens to touch both. The generator's own oracle and
+    // the built park disagreed about connectivity, and the disagreement was
+    // being read as permission to do nothing.
+    //
+    // Everything downstream already handles it correctly: an infinite `paved`
+    // clears both thresholds below, and `detourIsDisproportionate` is true, so
+    // the structure screens yield exactly as they do for a 238 m walk. The
+    // ride-corridor and slide-corridor screens still apply, so a pair that
+    // genuinely must not be linked still is not.
     if (paved < straight * CONNECTOR_RATIO_THRESHOLD) continue;
     if (paved - straight < minWaste) continue;
 

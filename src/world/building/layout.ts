@@ -524,18 +524,70 @@ export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
 );
 
 /**
- * A tower part as a solid of revolution: a vertical span with a radius that
- * varies linearly from bottom to top. A cylinder and a cone are both this.
+ * A tower part as a solid of revolution: a span along its own axis with a
+ * radius that varies linearly from bottom to top. A cylinder and a cone are
+ * both this.
+ *
+ * **The solid is described in the castle's own axes, because that is the frame
+ * it is drawn in.** `Shell.ts`'s `buildCornerTowers` stands the four turrets at
+ * `(±outerX, ±outerZ)`, `baseY: 0`, inside the castle's group, and that group
+ * hangs on {@link CASTLE_FRAME} — which leans **12.44 degrees** onto the
+ * planet. This used to be `BUILDING_CENTRE_X + localX` and `BUILDING_BASE_Y +
+ * localY`, which is a castle standing plumb, and is the last instance of the
+ * two flat formulas {@link worldToCastle}'s own docblock exists to replace.
+ *
+ * What that cost, measured on seed 24: `slide/solve.ts` cleared every solid
+ * here by **2.599 m** against the 1.45 m it demands, 0 samples inside — and the
+ * built chute then ran **1.703 m inside the drawn `tower-roof-3`**, 10 of 198
+ * samples, a child riding through solid masonry. The slide is drawn at its plan
+ * coordinates exactly (`Building.ts`: "the chute hangs at park level, whose
+ * group is the identity"); the castle is not. Two maps out of one flat frame,
+ * disagreeing by metres at the corners the ride passes closest to.
+ *
+ * So: {@link localX}/{@link localZ}/{@link localBottomY}/{@link localTopY} are
+ * the solid, and {@link distanceOutsideTower} takes a **world** point through
+ * {@link worldToCastle} before it measures. {@link x}/{@link z} are the drawn
+ * foot in world plan, which is what a collider and a keep-out want and all they
+ * want.
  */
 export interface TowerSolid {
   readonly name: string;
-  /** Axis position, in world space. */
+  /**
+   * World `x`/`z` on the **plan**, `BUILDING_CENTRE + local` — unchanged, and
+   * deliberately not the drawn foot.
+   *
+   * Every consumer of this is a ground-plane question: the collider
+   * `Building.registerCastleTowerCollision` puts under the tower,
+   * `check:castle-towers`' march, `parkFacts`' turret list. Moving it to the
+   * drawn foot was tried and reverted: the two differ by the lean, and
+   * `check:castle-towers` then measured "tower-body-0 stops a child at 2.66 m
+   * from its axis but its collider should hold her at 2.83 m". Both numbers
+   * come from this field, so the mismatch was the memo moving under one of its
+   * two readers — `CASTLE_FRAME` depends on `BUILDING_BASE_Y` and the terrain,
+   * which this used not to. The plan position has no such dependency, and at
+   * these radii it is what the `castleFlatToWorld` docblock already calls
+   * accurate enough for a ground-plane answer.
+   */
   readonly x: number;
   readonly z: number;
-  readonly bottomY: number;
-  readonly topY: number;
+  /** The axis, in the castle's own axes. */
+  readonly localX: number;
+  readonly localZ: number;
+  readonly localBottomY: number;
+  readonly localTopY: number;
   readonly radiusBottom: number;
   readonly radiusTop: number;
+  /**
+   * Does this part stand on the plinth — is its foot the castle's own base?
+   *
+   * A tower standing on the plinth goes all the way down to the ground, however
+   * far the ground falls away from the plinth. The solid stops at its foot, so
+   * a chute passing *below* that height beside a tower read as clear of it;
+   * seed 131 ran its last metres through the foot of `tower-body-1`, 1.22 m
+   * inside the built masonry. {@link distanceOutsideTower} reads the solid at
+   * its own foot for anything lower, which is the tower that was built.
+   */
+  readonly standsOnThePlinth: boolean;
 }
 
 
@@ -551,25 +603,32 @@ function castleTowersNow(): readonly TowerSolid[] {
   const solids: TowerSolid[] = [];
   const corners = CASTLE_TURRET_CORNERS;
   corners.forEach(([localX, localZ], index) => {
+    // Plan position, not the drawn foot — see {@link TowerSolid.x}.
     const x = BUILDING_CENTRE_X + localX;
     const z = BUILDING_CENTRE_Z + localZ;
     solids.push({
       name: `tower-body-${index}`,
       x,
       z,
-      bottomY: BUILDING_BASE_Y,
-      topY: BUILDING_BASE_Y + TOWER_HEIGHT,
+      localX,
+      localZ,
+      localBottomY: 0,
+      localTopY: TOWER_HEIGHT,
       radiusBottom: CASTLE_TURRET_BASE_RADIUS,
       radiusTop: TOWER_RADIUS,
+      standsOnThePlinth: true,
     });
     solids.push({
       name: `tower-roof-${index}`,
       x,
       z,
-      bottomY: BUILDING_BASE_Y + TOWER_HEIGHT,
-      topY: BUILDING_BASE_Y + TOWER_HEIGHT + TOWER_ROOF_HEIGHT,
+      localX,
+      localZ,
+      localBottomY: TOWER_HEIGHT,
+      localTopY: TOWER_HEIGHT + TOWER_ROOF_HEIGHT,
       radiusBottom: TOWER_RADIUS + TOWER_ROOF_OVERHANG,
       radiusTop: 0,
+      standsOnThePlinth: false,
     });
   });
   return solids;
@@ -588,12 +647,39 @@ function castleTowersNow(): readonly TowerSolid[] {
  * between the rays that a thin obstacle can slip through. Do not "unify" the
  * two: for a cylinder, rays would be strictly less accurate than this.
  */
+const towerProbe = new Vector3();
+
 export function distanceOutsideTower(tower: TowerSolid, x: number, z: number, y: number): number {
-  if (y < tower.bottomY || y > tower.topY) return Infinity;
-  const span = tower.topY - tower.bottomY;
-  const t = span <= 1e-9 ? 0 : (y - tower.bottomY) / span;
+  // **Into the castle's own axes first.** The solid leans with the building;
+  // asking this in world `x`/`z`/`y` measures a castle standing plumb, which is
+  // not the one that is drawn. See {@link TowerSolid}.
+  worldToCastle(towerProbe.set(x, y, z), towerProbe);
+  return distanceOutsideTowerLocal(tower, towerProbe);
+}
+
+/**
+ * {@link distanceOutsideTower} with the conversion already done — for a caller
+ * asking about **one point against several towers**.
+ *
+ * The transform depends only on the point, not on the tower, so a caller that
+ * walks all eight solids should pay for it once rather than eight times over:
+ * `clearsTowers` was doing nine per sample, on the hottest loop in the slide's
+ * search. Same arithmetic either way; this is only about where the conversion
+ * sits.
+ */
+export function distanceOutsideTowerLocal(
+  tower: TowerSolid,
+  local: Readonly<Vector3>,
+): number {
+  // A part standing on the plinth reaches down to whatever ground is under it,
+  // so anything below its foot is measured at the foot.
+  const atY =
+    tower.standsOnThePlinth && local.y < tower.localBottomY ? tower.localBottomY : local.y;
+  if (atY < tower.localBottomY || atY > tower.localTopY) return Infinity;
+  const span = tower.localTopY - tower.localBottomY;
+  const t = span <= 1e-9 ? 0 : (atY - tower.localBottomY) / span;
   const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
-  return Math.hypot(x - tower.x, z - tower.z) - radius;
+  return Math.hypot(local.x - tower.localX, local.z - tower.localZ) - radius;
 }
 
 /**

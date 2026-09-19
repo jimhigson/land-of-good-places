@@ -8,7 +8,8 @@ import {
   BUILDING_CENTRE_Z,
   CASTLE_MASONRY_TOP,
   CASTLE_TOWERS,
-  distanceOutsideTower,
+  distanceOutsideTowerLocal,
+  worldToCastle,
 } from '../building/layout';
 import {
   BUILDING_HALF_X,
@@ -35,7 +36,7 @@ import {
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { Geo, worldYAtAltitude, worldYAtRadius } from '../geo';
 import { altitudeAt } from '../terrain';
-import { CHUTE_ENVELOPE } from '../building/SlideRide';
+import { CHUTE_ENVELOPE, chuteCentreLine } from '../building/SlideRide';
 
 /**
  * **The ginormous slide, as a plan.**
@@ -525,11 +526,18 @@ registerPlanCache(() => {
  * returned clear anyway* — a blocked point is always within the box — so it
  * changes no verdict, and it uses no `Math.hypot`, only two `abs`.
  */
-/** Read live: the towers stand where the layout the park's driver decided. */
+/**
+ * Read live: the towers stand where the layout the park's driver decided.
+ *
+ * **In the castle's own axes**, because that is where the solids are — see
+ * `TowerSolid`. The gate below converts its query point the same way, so the
+ * two are comparing like with like and the skip still only ever skips work that
+ * would have returned clear.
+ */
 function towerBoundX(): number {
   return Math.max(
   ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.x - BUILDING_CENTRE_X) + Math.max(tower.radiusBottom, tower.radiusTop),
+    (tower) => Math.abs(tower.localX) + Math.max(tower.radiusBottom, tower.radiusTop),
   ),
 );
 }
@@ -537,7 +545,7 @@ function towerBoundX(): number {
 function towerBoundZ(): number {
   return Math.max(
   ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.z - BUILDING_CENTRE_Z) + Math.max(tower.radiusBottom, tower.radiusTop),
+    (tower) => Math.abs(tower.localZ) + Math.max(tower.radiusBottom, tower.radiusTop),
   ),
 );
 }
@@ -566,27 +574,29 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
   // never changes the answer, only avoids eight `distanceOutsideTower` calls for
   // the many samples out over the ball pit and the park's edge. See
   // {@link towerBoundX()}.
+  // **One conversion, not nine.** The transform depends on the point alone, so
+  // the gate below and all eight solids share it; `distanceOutsideTower` would
+  // redo it per tower, on the hottest loop in this search.
+  worldToCastle(towerGate.set(x, y, z), towerGate);
   if (
-    Math.abs(x - BUILDING_CENTRE_X) > towerBoundX() + radius ||
-    Math.abs(z - BUILDING_CENTRE_Z) > towerBoundZ() + radius
+    Math.abs(towerGate.x) > towerBoundX() + radius ||
+    Math.abs(towerGate.z) > towerBoundZ() + radius
   ) {
     return true;
   }
   for (const tower of CASTLE_TOWERS) {
-    // A tower standing on the plinth goes all the way down to the ground, however
-    // far the ground falls away from the plinth's flat height. `TowerSolid` stops
-    // at `bottomY`, so a chute passing *below* that height beside a tower read as
-    // clear of it. Nothing reached there while the chute was held in world `y`;
-    // held against the planet (#645) the run-out drops below the plinth on the
-    // far side of the castle, and seed 131 then ran its last metres through the
-    // foot of `tower-body-1` — 1.22 m inside the built masonry, measured by
-    // `theGinormousSlideMissesTheCastleTowers`. Reading the solid at its own
-    // foot for anything lower is the tower that was built.
-    const atY = tower.bottomY === BUILDING_BASE_Y && y < tower.bottomY ? tower.bottomY : y;
-    if (distanceOutsideTower(tower, x, z, atY) < radius) return false;
+    // The plinth rule — a tower standing on it reaches down to whatever ground
+    // is under it — moved into `distanceOutsideTower` with `standsOnThePlinth`,
+    // so it is stated once beside the solid it is about rather than copied into
+    // each caller. Found by seed 131 running its last metres through the foot
+    // of `tower-body-1`, 1.22 m inside the built masonry.
+    if (distanceOutsideTowerLocal(tower, towerGate) < radius) return false;
   }
   return true;
 }
+
+/** Scratch for {@link clearsTowers}' one world-to-castle conversion per call. */
+const towerGate = new Vector3();
 
 /**
  * The same question at ground level, for the landing run-in and the exit.
@@ -1948,9 +1958,40 @@ function chuteComplaint(points: readonly Vector3[]): string | null {
     if (step.done) return step.value;
   }
 }
-/** Chute points judged per piece of the rideability walk. */
-const JUDGE_PIECE = 32;
-function* chuteComplaintSearch(points: readonly Vector3[]): Generator<number, string | null, void> {
+/**
+ * Chute points judged per piece of the rideability walk.
+ *
+ * **8, down from 32.** The number was chosen when this judged the ~90 control
+ * points; it now judges the ~189 samples of the swept curve, and each one costs
+ * a `cruiser.nearestPoint` that walks the Sky Cruiser's whole loop. Measured by
+ * `check:park-boot` at 32: one slice doing **3 work units in 30.1 ms** of
+ * attested busy time against a 20.2 ms allowance — about 10 ms per piece, which
+ * is a frame and a quarter for one of them. At 8 a piece is a quarter of that
+ * and the boot stops hitching.
+ *
+ * It changes no verdict: the generator yields more often and judges exactly the
+ * same points in exactly the same order.
+ */
+const JUDGE_PIECE = 8;
+function* chuteComplaintSearch(
+  controls: readonly Vector3[],
+): Generator<number, string | null, void> {
+  // **Judge the line that gets built, not the controls it is threaded through.**
+  // `SlideRide` sweeps a Catmull-Rom through these points and that curve sags
+  // between them: on seed 11 the built chute came within 5.47 m of the Sky
+  // Cruiser where the control polygon kept 5.50 m, so this passed a ride the
+  // park then drew too close. `chuteCentreLine` is the same curve `SlideRide`
+  // builds, at the same 0.4 m `parkFacts.ts` measures it at.
+  const points = chuteCentreLine(controls);
+  // **Building that curve is itself a unit of work.** `chuteCentreLine` threads
+  // a fresh Catmull-Rom through ~90 controls and measures its arc length, which
+  // is a couple of hundred curve evaluations before a single point has been
+  // judged. Left unyielded it landed in whichever slice the caller was in the
+  // middle of, and `check:park-boot` caught the result: one slice, **one work
+  // unit, 27.5 ms** of attested busy time against a 23.0 ms allowance, "during
+  // shaping the ginormous slide". Yield first so the frame that pays for the
+  // curve pays for nothing else.
+  yield 0;
   let judged = 0;
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;
@@ -1985,7 +2026,13 @@ function* chuteComplaintSearch(points: readonly Vector3[]): Generator<number, st
   // (it stopped exploring routes that could never finish under the length
   // ceiling) then found routes on seeds 11 and 24 that did the same, by up to
   // 1.47 m — so it is asked here, where the search can backtrack over it.
+  // These last two walks used to run to completion without yielding once, so
+  // the whole ground pass and the whole tower pass fell inside whatever slice
+  // the cruiser walk happened to end in — three passes' work, one frame's
+  // budget. They are sliced on the same `JUDGE_PIECE` as the first.
   for (const point of points) {
+    judged += 1;
+    if (judged % JUDGE_PIECE === 0) yield judged;
     const underside = altitudeAt(point.x, point.y, point.z) - CHUTE_ENVELOPE.below;
     if (underside >= 0) continue;
     return (
@@ -1995,6 +2042,8 @@ function* chuteComplaintSearch(points: readonly Vector3[]): Generator<number, st
   }
 
   for (const point of points) {
+    judged += 1;
+    if (judged % JUDGE_PIECE === 0) yield judged;
     if (clearsTowers(point.x, point.z, point.y, CORRIDOR_RADIUS)) continue;
     return (
       `runs into a castle tower at (${point.x.toFixed(1)}, ${point.y.toFixed(1)}, ` +

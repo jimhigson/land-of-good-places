@@ -4997,7 +4997,14 @@ const theGinormousSlideLeavesOverTheBattlements: Invariant = (facts) => {
  */
 const theSlideClearsTheCastleRoofGarden: Invariant = (facts) => {
   const complaints: string[] = [];
-  const roof = facts.castleRoofGarden;
+  // **In the castle's own axes, with the chute taken there too.** A world-axis
+  // box round the roof garden is an axis-aligned box round a body leaning
+  // 12.44 degrees, so its `max.y` is the highest world `y` any corner of it
+  // reaches — a corner that on seed 131 is nowhere near where the chute passes.
+  // Measured there it reported the ride 0.22 m *inside* a roof "topping out at
+  // 8.06 m"; measured in the frame the roof is actually drawn in, the same ride
+  // clears the same roof by **5.02 m**. See `ParkFacts.castleRoofGardenInCastleFrame`.
+  const roof = facts.castleRoofGardenInCastleFrame;
 
   if (roof === null) {
     complaints.push(
@@ -5014,7 +5021,7 @@ const theSlideClearsTheCastleRoofGarden: Invariant = (facts) => {
   const reach = facts.chuteEnvelope.halfWidth;
   let over = 0;
   let worst = Infinity;
-  for (const [x, y, z] of facts.slideChute) {
+  for (const [x, y, z] of facts.slideChuteInCastleFrame) {
     if (x < roof.minX - reach || x > roof.maxX + reach) continue;
     if (z < roof.minZ - reach || z > roof.maxZ + reach) continue;
     over += 1;
@@ -5099,22 +5106,38 @@ const theGinormousSlideMissesTheCastleTowers: Invariant = (facts) => {
   let worstAt: readonly [number, number, number] = chute[0] ?? [0, 0, 0];
   let buried = 0;
 
+  // **Against each turret's own axis, not against a world-Y window.** The
+  // castle is drawn leaning 12.44 degrees onto the planet, so a turret's axis
+  // is not world `+Y`: on seed 24 the four bodies' feet span 6 m of world `y`
+  // between them while all four stand on the same plinth. Asked the old way —
+  // plan `hypot` plus `centre.y ± height/2` — this both missed intrusions and
+  // invented them. A solid of revolution against a point is exact in closed
+  // form, which is why this is still not a ring of probe rays.
+  const axis = new Vector3();
+  const toPoint = new Vector3();
+  const onAxis = new Vector3();
+  const here = new Vector3();
   for (const point of chute) {
     const [px, py, pz] = point;
+    here.set(px, py, pz);
     for (const tower of towers) {
-      // The chute occupies a band around its centre line, so it fouls the
-      // tower's height range if either edge of that band is inside it.
-      if (py + envelope.above < tower.bottomY) continue;
-      if (py - envelope.below > tower.topY) continue;
-
-      // Radius where the two actually meet in height, so a cone is measured at
-      // the height the chute passes it rather than at its widest.
-      const clamped = Math.min(Math.max(py, tower.bottomY), tower.topY);
-      const span = tower.topY - tower.bottomY;
-      const t = span <= 1e-9 ? 0 : (clamped - tower.bottomY) / span;
+      axis.set(tower.tipX - tower.footX, tower.tipY - tower.footY, tower.tipZ - tower.footZ);
+      const span = axis.length();
+      if (span <= 1e-9) continue;
+      toPoint.set(px - tower.footX, py - tower.footY, pz - tower.footZ);
+      const along = toPoint.dot(axis) / (span * span);
+      // The chute is a tube, so it reaches `envelope` beyond its own centre
+      // line along the axis too — past that, this tower is simply not there.
+      const overhang = Math.max(envelope.above, envelope.below) / span;
+      if (along < -overhang || along > 1 + overhang) continue;
+      const t = Math.min(Math.max(along, 0), 1);
+      // Radius where the two actually meet, so a cone is measured at the height
+      // the chute passes it rather than at its widest.
       const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
-
-      const gap = Math.hypot(px - tower.x, pz - tower.z) - radius - envelope.halfWidth;
+      onAxis
+        .set(tower.footX, tower.footY, tower.footZ)
+        .addScaledVector(axis, t);
+      const gap = onAxis.distanceTo(here) - radius - envelope.halfWidth;
       if (gap < worstGap) {
         worstGap = gap;
         worstTower = tower.name;
@@ -9185,9 +9208,20 @@ const supportsMeetWhatTheyCarry: Invariant = (facts) => {
     // top of this post touching any part of the track at all?
     const SAMPLES = 4000;
     const step = coaster.route.length / SAMPLES;
-    for (let i = 0; i < pylons.count; i += 1) {
-      pylons.getMatrixAt(i, matrix);
-      const top = new Vector3(0, 0.5, 0).applyMatrix4(matrix);
+    // **The drawn top, unleant back into the route's own flat frame** —
+    // `facts.cruiserPylonTops`, which is the one owner of that mapping. The
+    // post is drawn leaning with the planet so that it reaches the track;
+    // `coaster.route` is the flat plan. Compared raw, the lean reads as error:
+    // 2.94 m on the canonical seed against a real gap of 0.034 m, and all five
+    // seeds fouled on it.
+    if (facts.cruiserPylonTops.length !== pylons.count) {
+      complaints.push(
+        `${facts.cruiserPylonTops.length} Sky Cruiser pylon tops were measured off the built scene ` +
+          `but ${pylons.count} pylons are drawn — this clause is not describing the posts in the park`,
+      );
+    }
+    for (const flatTop of facts.cruiserPylonTops) {
+      const top = new Vector3(flatTop.x, flatTop.y, flatTop.z);
       let gap = Infinity;
       for (let k = 0; k < SAMPLES; k += 1) {
         coaster.route.pointAt(k * step, on);
@@ -10003,15 +10037,23 @@ const skyCruiserStandsOnItsOwnSupports: Invariant = (facts) => {
     return ['the Sky Cruiser built no supports at all — the whole ride is in the air'];
   }
 
-  const matrix = new Matrix4();
   const point = new Vector3();
   const ats: number[] = [];
   let worstReach = 0;
   let worstAt: readonly [number, number] = [0, 0];
 
-  for (let i = 0; i < pylons.count; i += 1) {
-    pylons.getMatrixAt(i, matrix);
-    const top = new Vector3(0, 0.5, 0).applyMatrix4(matrix);
+  if (facts.cruiserPylonTops.length !== pylons.count) {
+    complaints.push(
+      `${facts.cruiserPylonTops.length} Sky Cruiser pylon tops were measured off the built scene ` +
+        `but ${pylons.count} pylons are drawn — this clause is not describing the posts in the park`,
+    );
+  }
+  // Each top as drawn, **unleant back into the flat frame `coaster.route` is
+  // solved in** — `facts.cruiserPylonTops` owns that mapping. See its docblock:
+  // read raw, a leaning post is several metres from its own plan by
+  // construction, which is the lean and not a fault.
+  for (const flatTop of facts.cruiserPylonTops) {
+    const top = new Vector3(flatTop.x, flatTop.y, flatTop.z);
 
     // Its top is under the track, not under fresh air. `nearestPoint` is the
     // route's own answer, so this is the built post against the built route.
