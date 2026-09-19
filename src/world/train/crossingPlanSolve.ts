@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { registerPlanCache } from '../../boot/planCaches';
 import { TRAIN_PLAN } from './plan';
 import {
   CROSSING_STATION_CLEARANCE,
@@ -142,12 +143,12 @@ function railDistanceAt(x: number, z: number): number {
  * out of that window *along the loop*, but the loop bends back past itself:
  * on seed 2 a provably-feasible site 190 m away along the rail stood 11 m
  * from a station's canopy post in space, and the post killed the real
- * bridge search at the very last half-metre of required ramp. Sampled once,
- * at module load, from the same plan the stations are built from.
+ * bridge search at the very last half-metre of required ramp. Sampled once
+ * per decided loop, from the same plan the stations are built from.
  */
 const STATION_STRUCTURE_CLEARANCE = CROSSING_STATION_STRUCTURE_CLEARANCE;
 
-const stationWindowPoints: readonly (readonly [number, number])[] = (() => {
+function stationWindowPointsNow(): readonly (readonly [number, number])[] {
   const route = TRAIN_PLAN.route;
   const points: (readonly [number, number])[] = [];
   const p = new Vector3();
@@ -158,10 +159,18 @@ const stationWindowPoints: readonly (readonly [number, number])[] = (() => {
     }
   }
   return points;
-})();
+}
+let stationWindowPointsMemo: readonly (readonly [number, number])[] | null = null;
+/** Memoised per decided loop; forgotten when the park's driver re-decides it. */
+function stationWindowPoints(): readonly (readonly [number, number])[] {
+  return (stationWindowPointsMemo ??= stationWindowPointsNow());
+}
+registerPlanCache(() => {
+  stationWindowPointsMemo = null;
+});
 
 function nearStationStructure(x: number, z: number): boolean {
-  for (const [px, pz] of stationWindowPoints) {
+  for (const [px, pz] of stationWindowPoints()) {
     if (Math.hypot(x - px, z - pz) < STATION_STRUCTURE_CLEARANCE) return true;
   }
   return false;
@@ -487,3 +496,8 @@ export function solveCrossingSites(): SolvedCrossingSites {
     if (step.done) return step.value;
   }
 }
+
+// Derived from a decision the park's driver may unwind: forgotten with it.
+registerPlanCache(() => {
+  railDistanceCache.clear();
+});

@@ -1,4 +1,6 @@
 import { Group } from 'three';
+import { lazyArrayView } from '../boot/lazyView';
+import { registerPlanCache } from '../boot/planCaches';
 import { PALETTE } from '../core/palette';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from '../world/Collision';
@@ -35,7 +37,8 @@ import type { StallDefinition } from './types';
  *   seconds of scraping along the side of a booth.
  */
 
-export const STALLS: readonly StallDefinition[] = [
+function stallsNow(): readonly StallDefinition[] {
+  return [
   {
     id: 'skyCruiser',
     title: 'Sky Cruiser',
@@ -160,7 +163,14 @@ export const STALLS: readonly StallDefinition[] = [
 
     create: createDodgems,
   },
-];
+  ];
+}
+let stallsMemo: readonly StallDefinition[] | null = null;
+/** A view: the stalls stand where the layout the park's driver decided put them. */
+export const STALLS: readonly StallDefinition[] = lazyArrayView(() => (stallsMemo ??= stallsNow()));
+registerPlanCache(() => {
+  stallsMemo = null;
+});
 
 /** A stall as built into the world: its definition plus where to stand. */
 export interface StallInstance {

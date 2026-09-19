@@ -1,3 +1,5 @@
+import { lazyArrayView, lazyView } from '../boot/lazyView';
+import { registerPlanCache } from '../boot/planCaches';
 import { CAMERA_FACING_YAW } from '../core/constants';
 import { ANCHORS_BY_ID } from '../world/anchors';
 import { counterFacing, placedEntry } from '../world/parkLayout';
@@ -119,16 +121,33 @@ function facePaintStall(): StallPlacement {
  * already sets `cameraFacing: true`, so `counterFacing(p.signYaw)` gives a
  * camera-legible counter with no bespoke constant to keep in step.
  */
-export const STALL_PLACEMENTS = {
-  railRacer: placedStall('stall.railRacer'),
-  skyCruiser: placedStall('stall.skyCruiser'),
-  spookyHouse: placedStall('stall.spookyHouse'),
-  waterFight: placedStall('stall.waterFight'),
-  spaceFerrisWheel: ferrisKiosk(),
-  dodgems: placedStall('stall.dodgems'),
-  facePaint: facePaintStall(),
-  keychain: placedStall('stall.keychain'),
-} as const satisfies Record<string, StallPlacement>;
+function stallPlacementsNow() {
+  return {
+    railRacer: placedStall('stall.railRacer'),
+    skyCruiser: placedStall('stall.skyCruiser'),
+    spookyHouse: placedStall('stall.spookyHouse'),
+    waterFight: placedStall('stall.waterFight'),
+    spaceFerrisWheel: ferrisKiosk(),
+    dodgems: placedStall('stall.dodgems'),
+    facePaint: facePaintStall(),
+    keychain: placedStall('stall.keychain'),
+  } as const satisfies Record<string, StallPlacement>;
+}
+type StallPlacements = ReturnType<typeof stallPlacementsNow>;
+let stallsMemo: { placements: StallPlacements; stands: readonly StallStand[]; byId: ReadonlyMap<string, StallStand> } | null = null;
+function stalls(): NonNullable<typeof stallsMemo> {
+  if (stallsMemo) return stallsMemo;
+  const placements = stallPlacementsNow();
+  const stands = standsFor(placements);
+  stallsMemo = { placements, stands, byId: new Map(stands.map((stand) => [stand.id, stand])) };
+  return stallsMemo;
+}
+registerPlanCache(() => {
+  stallsMemo = null;
+});
+/** Views of the decided layout — the park's driver may re-decide it, and these follow. */
+export const STALL_PLACEMENTS: StallPlacements = lazyView(() => stalls().placements);
+
 
 /** Where a child stands to be served at a stall. */
 export interface StallStand {
@@ -146,7 +165,8 @@ export interface StallStand {
  * stale the moment a stall moved — and, after Decision 5, the moment the park
  * regenerated.
  */
-export const STALL_STANDS: readonly StallStand[] = Object.entries(STALL_PLACEMENTS).map(
+function standsFor(placements: StallPlacements): readonly StallStand[] {
+  return Object.entries(placements).map(
   ([id, placement]) => {
     const reach = placement.standDistance ?? STALL_STAND_DISTANCE;
     return {
@@ -156,11 +176,11 @@ export const STALL_STANDS: readonly StallStand[] = Object.entries(STALL_PLACEMEN
     };
   },
 );
+}
+export const STALL_STANDS: readonly StallStand[] = lazyArrayView(() => stalls().stands);
 
 /** The same stands, by id — for the one-off booths that build themselves. */
-export const STALL_STANDS_BY_ID: ReadonlyMap<string, StallStand> = new Map(
-  STALL_STANDS.map((stand) => [stand.id, stand]),
-);
+export const STALL_STANDS_BY_ID: ReadonlyMap<string, StallStand> = lazyView(() => stalls().byId);
 
 /**
  * How close a tap must land to a booth to select it — the pick radius every

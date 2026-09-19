@@ -1,4 +1,6 @@
 import { placedEntry } from '../../world/parkLayout';
+import { lazyView } from '../../boot/lazyView';
+import { registerPlanCache } from '../../boot/planCaches';
 import { clearOfPlots } from '../../world/train/plan';
 
 /**
@@ -52,4 +54,9 @@ function planFerrisExit(): FerrisExit {
 }
 
 /** The one exit point. Import this; never re-solve. */
-export const FERRIS_WHEEL_EXIT: FerrisExit = planFerrisExit();
+let ferrisExitMemo: FerrisExit | null = null;
+/** A view: the wheel stands where the layout the park's driver decided put it, and the exit follows. */
+export const FERRIS_WHEEL_EXIT: FerrisExit = lazyView(() => (ferrisExitMemo ??= planFerrisExit()));
+registerPlanCache(() => {
+  ferrisExitMemo = null;
+});

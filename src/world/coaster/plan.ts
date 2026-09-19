@@ -1,6 +1,5 @@
 import type { PlannedCoaster } from './solve';
-import { planCruiser } from './solve';
-import { takePrewarmedCruiser } from './prewarm';
+import { planPart } from '../parkPlan';
 
 /**
  * **The Sky Cruiser's solved plan, and nothing else.**
@@ -70,4 +69,9 @@ export * from './solve';
  */
 export const COASTER_PLANS: {
   readonly cruiser: PlannedCoaster;
-} = { cruiser: takePrewarmedCruiser() ?? planCruiser() };
+} = {
+  /** A view: the park's driver decides the cruiser, and may re-decide it. */
+  get cruiser(): PlannedCoaster {
+    return planPart('cruiser');
+  },
+};

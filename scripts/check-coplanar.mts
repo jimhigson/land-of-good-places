@@ -198,9 +198,16 @@ function sweepThisSeed(): Finding[] {
 }
 
 if (isChild) {
-  process.stdout.write(`${JSON.stringify(sweepThisSeed())}\n`);
-  process.exit(0);
-}
+  // Exit only once the write has been flushed. stdout is a PIPE here, and on
+  // POSIX a pipe write is asynchronous: `process.exit()` straight after a
+  // 100–150 KB write can drop it, so the parent reads an EMPTY stdout from a
+  // child that exited 0 and dies in `JSON.parse('')` — which Node prints as
+  // `<anonymous_script>:1` and nothing else. That is what the CI run on the
+  // procgen-on-sphere branch showed, twice, while every child ran clean
+  // locally: timing, not geometry.
+  process.stdout.write(`${JSON.stringify(sweepThisSeed())}\n`, () => process.exit(0));
+} else {
+
 
 // ------------------------------------------------------------ across the pool
 
@@ -252,7 +259,18 @@ await Promise.all(
           maxBuffer: 64 * 1024 * 1024,
         },
       );
-      findings.push(...(JSON.parse(stdout.trim().split('\n').at(-1) as string) as Finding[]));
+      const last = stdout.trim().split('\n').at(-1) ?? '';
+      let parsed: Finding[];
+      try {
+        parsed = JSON.parse(last) as Finding[];
+      } catch (error) {
+        throw new Error(
+          `check:coplanar: seed ${seed}'s sweep child exited 0 but its last stdout line is not JSON ` +
+            `(${stdout.length} bytes of stdout, last line ${last.length} bytes: ${JSON.stringify(last.slice(0, 120))}) — ` +
+            `${(error as Error).message}`,
+        );
+      }
+      findings.push(...parsed);
     }
   }),
 );
@@ -600,3 +618,4 @@ console.log(
         : `${regressions.length} new or worse, listed above and NOT enforced because LGP_RATCHET=off.`
     } ${((performance.now() - started) / 1000).toFixed(1)} s.`,
 );
+}

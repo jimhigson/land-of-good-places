@@ -37,6 +37,8 @@ import {
   entranceRoadClaims,
   entranceRoadSegments,
 } from '../src/world/entrance/roadCorridor.ts';
+import { RAIL_RACE_FEATURE } from '../src/world/railRace/feature.ts';
+import { ROAD_HALF_WIDTH } from '../src/world/entrance/road.ts';
 import type { Capsule, Claim } from '../src/boot/groundClaims.ts';
 import { FLOAT32_SLACK, collectRoadRibbons, measureRoadRibbons } from './road-ribbon-measure.mts';
 
@@ -95,23 +97,97 @@ const park = buildHeadlessPark();
 const worldRegistry = park.world.groundClaims;
 
 // ---------------------------------------------------------------------------
-// Probe 2: exactly one feature has claimed ground, it is the road, and every
-// claim it made is a corridor.
+// Probe 2: only declared production placers have claimed ground, in the order
+// they are declared to commit in, and every claim the road made is a corridor.
 //
-// **What this covers, honestly**: at step 1 the road is the ONLY production
-// placer, so "one feature" is the whole registry. It will stop being one the
-// moment step 2 lands, and the assertion below is written to fail loudly then
-// rather than silently widen — a check that quietly accepts more than it was
-// written for is how the next agent inherits a false belief.
+// **What this covers, honestly**: the list below is the whole roster of
+// placers. Step 1 asserted `[road]` alone; step 2 widened it to `[road,
+// railRace]`; the backtracking rework widened it to all fourteen. The next
+// placer widens it again the same way, by hand — a check that quietly accepts
+// more than it was written for is how the next agent inherits a false belief.
+//
+// Proved red both ways at the commit that widened it, against the canonical
+// seed's registry `[layout, cruiser, train, slide, crossings, pathGraph, road,
+// fountain, walls, trees, bushes, lamps, railRace]`: dropping `'lamps'` from
+// the roster fouls it as an undeclared placer, and swapping `'walls'` and
+// `'trees'` in the roster fouls `trees` as committing out of order.
 // ---------------------------------------------------------------------------
+// One rail race at two scales is one feature — see `src/world/railRace/feature.ts`.
+//
+// **Widened for the backtracking rework**, which is what a "later step has
+// added a placer" looks like. Every park feature now decides through a
+// `FeatureBuilder` in one of two `ParkSolve` drivers, and each of them claims
+// ground: the plan solve (`world/parkPlan.ts`) runs during generation, then the
+// world solve (`world/worldPhase.ts`) runs inside the `World` constructor. So
+// the list below is those two drivers' build orders, concatenated — written out
+// by hand, deliberately, rather than read back off either driver, because a
+// probe that asks the code under test what to expect cannot fail.
+//
+// **Why this is a subsequence test and not an equality test, and what that
+// costs.** A placer that legitimately places *nothing* commits nothing and so
+// does not appear: on the canonical seed `fairyLights` builds 0 poles, because
+// the fairy ring (radius 13.5 round the plaza) lands exactly on the main loop,
+// so every pole is "on a path" and skipped. That is pre-existing and true on
+// the base too. Asserting exact equality would therefore fail on a seed for a
+// reason that is not a fault, and asserting nothing would accept a stranger.
+// So: **no feature may appear that is not on the list, and the ones that do
+// appear must be in the list's order** — an unknown placer and a placer
+// committing out of order are both still fouls. The price is that this probe
+// cannot see a placer that has silently stopped claiming anything at all, so it
+// says on every run which declared placers committed nothing, by name.
+const EXPECTED_FEATURES = [
+  // world/parkPlan.ts's coarse builders, in order.
+  'layout',
+  'cruiser',
+  'train',
+  'slide',
+  'crossings',
+  'pathGraph',
+  ROAD_FEATURE,
+  // world/worldPhase.ts's builders, in order.
+  'fountain',
+  'walls',
+  'trees',
+  'bushes',
+  'fairyLights',
+  'lamps',
+  RAIL_RACE_FEATURE,
+];
 const features = worldRegistry.committedFeatures();
-if (features.length !== 1 || features[0] !== ROAD_FEATURE) {
+const strangers = features.filter((feature) => !EXPECTED_FEATURES.includes(feature));
+if (strangers.length > 0) {
   fouls.push(
-    `the registry on the built park holds features [${features.join(', ')}] — step 1 makes the ` +
-      `road the one and only production placer, so this should be exactly ["${ROAD_FEATURE}"]. ` +
+    `the registry on the built park holds feature(s) [${strangers.join(', ')}] that are not ` +
+      `declared placers — the declared list, in commit order, is [${EXPECTED_FEATURES.join(', ')}]. ` +
       'If a later step has added a placer, widen this probe deliberately rather than deleting it',
   );
 }
+let previous = -1;
+const outOfOrder: string[] = [];
+for (const feature of features) {
+  const at = EXPECTED_FEATURES.indexOf(feature);
+  if (at === -1) continue;
+  if (at < previous) outOfOrder.push(feature);
+  previous = at;
+}
+if (outOfOrder.length > 0) {
+  fouls.push(
+    `these placers committed out of the declared build order: [${outOfOrder.join(', ')}] — ` +
+      `the registry holds [${features.join(', ')}] against a declared order of ` +
+      `[${EXPECTED_FEATURES.join(', ')}]. Commit order is load-bearing: a feature that claims ` +
+      'ground before the one it was meant to defer to has skipped the negotiation',
+  );
+}
+const silent = EXPECTED_FEATURES.filter((feature) => !features.includes(feature));
+said.push(
+  `${features.length} of ${EXPECTED_FEATURES.length} declared placers committed ground, in ` +
+    `declared order` +
+    (silent.length === 0
+      ? ' — every declared placer is covered on this seed'
+      : `; this probe asserts NOTHING about [${silent.join(', ')}], which committed no claim at ` +
+        'all on this seed (a placer that places nothing is indistinguishable here from one that ' +
+        'has silently stopped claiming)'),
+);
 const roadClaims = worldRegistry.claimsOf(ROAD_FEATURE);
 const notCorridor = roadClaims.filter((claim) => claim.kind !== 'corridor');
 if (notCorridor.length > 0) {

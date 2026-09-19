@@ -1,10 +1,19 @@
+import { lazyView } from '../../boot/lazyView';
+import { registerPlanCache } from '../../boot/planCaches';
 import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
 import { COASTER_PLANS } from '../coaster/plan';
 import { EXIT_INSIDE_EDGE, PARK_BOUNDARY } from '../boundary';
 import { placedEntry } from '../parkLayout';
 import { RAIL_CORRIDOR_CLEARANCE, clearOfPlots, distanceToRailCorridor } from '../train/plan';
-import { type KeepOff, RailRaceRoute, RIDE_SCALE } from './route';
+import { type KeepOff, RailRaceRoute } from './route';
+// **Straight from the leaf, not through `route.ts`'s re-export.** The read
+// below is inside a function today, so the re-export would serve it — but a
+// re-export does not rescue a module-scope reader, and it is order-*dependent*:
+// it works until somebody reorders an import. Importing the leaf is
+// order-independent by construction, so the next `const` added to this file
+// cannot quietly reintroduce `Cannot access 'RIDE_SCALE' before initialization`.
+import { RIDE_SCALE } from './dimensions';
 
 /**
  * The Rail Race as *data*, solved at module load from the park layout alone —
@@ -152,7 +161,16 @@ function planExit(): { exitX: number; exitZ: number } {
 }
 
 /** The plan. Import this; never re-solve — the same rule as `TRAIN_PLAN`. */
-export const RAIL_RACE_PLAN: PlannedRailRace = (() => {
+let railRacePlanMemo: PlannedRailRace | null = null;
+/**
+ * A view: the rings are derived from the decided layout and cruiser, so when
+ * the park's driver re-decides either, this follows on the next read.
+ */
+export const RAIL_RACE_PLAN: PlannedRailRace = lazyView(() => (railRacePlanMemo ??= planRailRace()));
+registerPlanCache(() => {
+  railRacePlanMemo = null;
+});
+function planRailRace(): PlannedRailRace {
   // **The exit is solved BEFORE the rings, and that ordering is load-bearing.**
   // `slideArchClear` slides the finish arch off anything its feet must not come
   // down on, and the ride's own exit is one of those things — the paving is
@@ -191,4 +209,4 @@ export const RAIL_RACE_PLAN: PlannedRailRace = (() => {
     exitX,
     exitZ,
   };
-})();
+}

@@ -9,6 +9,7 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
+import { lazyView } from '../boot/lazyView';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PALETTE } from '../core/palette';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../minigames/stallPlacement';
@@ -230,9 +231,14 @@ import { keychainItems, type ShopItem } from './building/shops/catalogue';
 
 // ---------------------------------------------------------------- placement
 
-const KEYCHAIN_PLACEMENT = STALL_PLACEMENTS.keychain;
-const [STALL_X, STALL_Z] = KEYCHAIN_PLACEMENT.position;
-const STALL_FACING = KEYCHAIN_PLACEMENT.facing;
+/** A view: the stall follows the layout the park's driver decided. */
+const KEYCHAIN_PLACEMENT: (typeof STALL_PLACEMENTS)['keychain'] = lazyView(() => STALL_PLACEMENTS.keychain);
+// Read inside functions only, never at module scope: this was the one read
+// that forced the whole plan to solve synchronously inside the boot slice
+// that imported it — `check:park-boot`'s 3 s lump (see FacePaintStall.ts).
+const stallX = (): number => KEYCHAIN_PLACEMENT.position[0];
+const stallZ = (): number => KEYCHAIN_PLACEMENT.position[1];
+const stallFacing = (): number => KEYCHAIN_PLACEMENT.facing;
 
 /** A garden cart, not a walk-in booth — smaller than the face-paint counter. */
 const STALL_WIDTH = 2.1;
@@ -624,7 +630,7 @@ export class KeychainShop implements GameSystem {
    * residual that costs (the up field turns by distance / sphere radius).
    */
   readonly viewBasis = screenBasis3DAt(
-    { x: STALL_X, y: terrainHeight(STALL_X, STALL_Z), z: STALL_Z },
+    { x: stallX(), y: terrainHeight(stallX(), stallZ()), z: stallZ() },
     CAMERA_YAW_DEGREES * DEG,
     CAMERA_PITCH_DEGREES * DEG,
   );
@@ -691,9 +697,9 @@ export class KeychainShop implements GameSystem {
   constructor(collision: CollisionWorld) {
     this.group.name = 'keychainShop';
 
-    this.groundY = terrainHeight(STALL_X, STALL_Z);
-    this.group.position.set(STALL_X, this.groundY, STALL_Z);
-    this.group.rotation.y = STALL_FACING;
+    this.groundY = terrainHeight(stallX(), stallZ());
+    this.group.position.set(stallX(), this.groundY, stallZ());
+    this.group.rotation.y = stallFacing();
     // The cart, its canopy, the rack, the sparkle pool and the pop-up backdrop
     // are all children of this one group, so leaning the group is what keeps
     // them a single rigid object. Tilting any of them individually would swing
@@ -1019,9 +1025,9 @@ export class KeychainShop implements GameSystem {
     return {
       id: 'stall:keychain',
       label: 'Keyring Rack!',
-      x: STALL_X,
+      x: stallX(),
       y: this.groundY,
-      z: STALL_Z,
+      z: stallZ(),
       pickRadius: REACH,
       standX: this.standX,
       standZ: this.standZ,
@@ -1221,17 +1227,17 @@ export class KeychainShop implements GameSystem {
    * per-keyring zone positions, rather than the same trig written out twice.
    */
   private toWorld(localX: number, localZ: number): [number, number] {
-    const sin = Math.sin(STALL_FACING);
-    const cos = Math.cos(STALL_FACING);
-    return [STALL_X + localX * cos + localZ * sin, STALL_Z - localX * sin + localZ * cos];
+    const sin = Math.sin(stallFacing());
+    const cos = Math.cos(stallFacing());
+    return [stallX() + localX * cos + localZ * sin, stallZ() - localX * sin + localZ * cos];
   }
 
   /** {@link toWorld}'s inverse — used once, to read {@link standLocalZ} off the stall's own proven-reachable stand point. */
   private toLocal(worldX: number, worldZ: number): [number, number] {
-    const sin = Math.sin(STALL_FACING);
-    const cos = Math.cos(STALL_FACING);
-    const dx = worldX - STALL_X;
-    const dz = worldZ - STALL_Z;
+    const sin = Math.sin(stallFacing());
+    const cos = Math.cos(stallFacing());
+    const dx = worldX - stallX();
+    const dz = worldZ - stallZ();
     return [cos * dx - sin * dz, sin * dx + cos * dz];
   }
 
@@ -1517,7 +1523,7 @@ export class KeychainShop implements GameSystem {
    * not an invisible one.
    */
   private buildViewBackdrop(): void {
-    const awayFromCameraLocalAngle = CAMERA_YAW_DEGREES * DEG + Math.PI - STALL_FACING;
+    const awayFromCameraLocalAngle = CAMERA_YAW_DEGREES * DEG + Math.PI - stallFacing();
     const awayX = Math.sin(awayFromCameraLocalAngle);
     const awayZ = Math.cos(awayFromCameraLocalAngle);
 

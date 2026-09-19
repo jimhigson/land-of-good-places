@@ -32,6 +32,8 @@ import { REAL_PROBE_RADIUS } from './train/bridgeFootprint';
 import { STALL_STANDS } from '../minigames/stallPlacement';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
+import { shapesOverlap, type Claim, type GroundClaims } from '../boot/groundClaims';
+import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../boot/featureBuilder';
 
 /**
  * Cute curly cast-iron-style lamp posts, standing just off the paths.
@@ -207,10 +209,10 @@ export class LampPosts implements GameSystem {
   /** How many of {@link lights} `assignNearestLights` actually placed this frame. */
   private assigned = 0;
 
-  constructor(collision: CollisionWorld) {
+  /** Draws the lamps the world phase decided (`worldPhase.ts`, {@link lampBuilder}). */
+  constructor(collision: CollisionWorld, positions: readonly (readonly [number, number])[]) {
     this.group.name = 'lamp-posts';
 
-    const positions = placeLampPosts(collision);
     for (const [x, z] of positions) {
       const ground = terrainHeight(x, z);
       this.lampPositions.push(new Vector3(x, ground, z));
@@ -495,61 +497,158 @@ const LAMP_TOP = 3.6;
  * Deterministic: no rng at all, just the solved routes, so one seed is one
  * lighting plan.
  */
-function placeLampPosts(collision: CollisionWorld): (readonly [number, number])[] {
-  const positions: [number, number][] = [];
-  // Alternates across the whole park rather than per route, so the two ends of
-  // a spur meeting the ring road do not both land on the same side.
-  let side = 0;
+/** One lamp slot the world phase decided: where it stands, or that it was left out. */
+export type LampDecision = { readonly x: number; readonly z: number } | 'forgone';
 
+interface LampSlot {
+  readonly curve: ReturnType<typeof routeCurve>;
+  readonly closed: boolean;
+  readonly t: number;
+  readonly preferred: 1 | -1;
+  readonly nudge: number;
+  readonly offset: number;
+}
+
+function lampSlots(): LampSlot[] {
+  const slots: LampSlot[] = [];
+  let side = 0;
   for (const route of ROUTES) {
     const curve = routeCurve(route);
     const length = curve.getLength();
     if (length < LAMP_SPACING * 0.5) continue;
-
     const count = Math.max(1, Math.round(length / LAMP_SPACING));
     const offset = route.width / 2 + EDGE_GAP;
     for (let i = 0; i < count; i += 1) {
-      // A closed loop divides evenly; an open spur is sampled off both of its
-      // ends, because a lamp exactly on a spur's mouth stands in the junction.
       const t = route.closed ? i / count : (i + 0.5) / count;
       side += 1;
       const preferred: 1 | -1 = side % 2 === 0 ? 1 : -1;
-      // Try the preferred verge, then the other one, then a quarter-span
-      // either way along the path. None of that is *forcing* a lamp — every
-      // one of these is an equally good place for a lamp post, and the rule
-      // that matters (`lampFits`) is unchanged for all of them. What it avoids
-      // is a lamp being skipped because the one spot it was first offered
-      // happened to be a plot corner. Measured on the canonical seed: the
-      // preferred verge alone left a 23 m unlit stretch of ring road.
-      const nudge = (route.closed ? 1 / count : 1 / count) * 0.25;
-      let stood = false;
-      // The widened offsets are for verges the Sky Cruiser's low ramp flies
-      // along (issue #241 let the two land together): a lamp three metres
-      // off the kerb clears the car's swept corridor and still lights the
-      // path many times over (LAMP_REACH is 15). Tried last, so the kerbside
-      // look wins everywhere the ride allows it.
-      for (const reach of [offset, offset + 2.2, offset + 3.4]) {
-        for (const along of [0, nudge, -nudge]) {
-          for (const trySide of [preferred, -preferred as 1 | -1]) {
-            const at = route.closed ? (t + along + 1) % 1 : Math.min(1, Math.max(0, t + along));
-            const candidate = offsetFromCurve(curve, at, reach, trySide);
-            if (!candidate) continue;
-            if (!lampFits(candidate[0], candidate[1], positions, collision)) continue;
-            positions.push(candidate);
-            stood = true;
-            break;
-          }
-          if (stood) break;
-        }
-        if (stood) break;
+      const nudge = (1 / count) * 0.25;
+      slots.push({ curve, closed: route.closed, t, preferred, nudge, offset });
+    }
+  }
+  return slots;
+}
+
+/** The ladder of spots one slot tries, nearest the path first — the order the placer always used. */
+function* slotCandidates(slot: LampSlot): Generator<readonly [number, number], void, void> {
+  for (const reach of [slot.offset, slot.offset + 2.2, slot.offset + 3.4]) {
+    for (const along of [0, slot.nudge, -slot.nudge]) {
+      for (const trySide of [slot.preferred, -slot.preferred as 1 | -1]) {
+        const at = slot.closed ? (slot.t + along + 1) % 1 : Math.min(1, Math.max(0, slot.t + along));
+        const candidate = offsetFromCurve(slot.curve, at, reach, trySide);
+        if (candidate) yield candidate;
       }
     }
   }
-
-  return positions;
 }
 
-/** Everything a lamp has to stand clear of. Skip it rather than force it. */
+function lampClaim(x: number, z: number, radius: number): Claim {
+  return { kind: 'footprint', shape: { shape: 'disc', x, z, radius } };
+}
+
+/**
+ * **Lamp posts, as a feature builder.** One increment is one slot along a
+ * drawn route (`LAMP_SPACING` apart); its ladder of spots is the one the placer
+ * always climbed, and a spot must pass {@link lampFits} against the real
+ * collision world *and* be clear, with the placer's own `SOLID_CLEARANCE`, of
+ * every claim in the registry — a tree's trunk, a bush, a fairy pole, a wall.
+ *
+ * A slot whose every spot is refused only by claims returns an **optional**
+ * refusal naming the blockers, so the driver first asks them to step aside (a
+ * tree moves rather than a lamp being lost) and only then leaves the slot out,
+ * which is what the old placer did silently. Correction the other way: a lamp
+ * asked to step aside re-climbs its own ladder, clear of the asker.
+ */
+export function lampBuilder(collision: CollisionWorld, claims: GroundClaims, out: LampDecision[]): FeatureBuilder {
+  let slots: LampSlot[] | null = null;
+  /** Slot index per committed section, so a claim index maps back to a slot. */
+  const sections: number[] = [];
+  const placed = (): (readonly [number, number])[] =>
+    out.flatMap((lamp) => (lamp === 'forgone' ? [] : [[lamp.x, lamp.z] as const]));
+  const probe = (x: number, z: number): Claim => lampClaim(x, z, LAMP_RADIUS + SOLID_CLEARANCE);
+  const increment = (x: number, z: number, verb: string): Increment => ({
+    claims: [lampClaim(x, z, LAMP_RADIUS)],
+    label: `lamp ${verb} (${x.toFixed(1)}, ${z.toFixed(1)})`,
+  });
+
+  /** Try a slot's ladder; the first spot both worlds allow, or the first registry refusal. */
+  const climb = (
+    slot: LampSlot,
+    exclude: number,
+    keepClearOf: readonly Claim[],
+  ): { spot: readonly [number, number] } | { blockers: readonly string[]; claim: Claim } | null => {
+    const others = placed().filter((_, i) => i !== exclude);
+    let refused: { blockers: readonly string[]; claim: Claim } | null = null;
+    for (const [x, z] of slotCandidates(slot)) {
+      if (!lampFits(x, z, others, collision)) continue;
+      const claim = probe(x, z);
+      const blockers = claims.blockers('lamps', [claim]).map((b) => b.feature);
+      if (blockers.length > 0 || keepClearOf.some((other) => shapesOverlap(claim.shape, other.shape))) {
+        refused ??= { blockers, claim };
+        continue;
+      }
+      return { spot: [x, z] };
+    }
+    return refused;
+  };
+
+  return {
+    name: 'lamps',
+    deps: ['walls', 'trees', 'bushes', 'fountain', 'fairyLights'],
+    movable: true,
+    *advance() {
+      slots ??= lampSlots();
+      while (out.length < slots.length) {
+        const slot = slots[out.length] as LampSlot;
+        const found = climb(slot, -1, []);
+        if (found && 'spot' in found) {
+          const [x, z] = found.spot;
+          sections.push(out.length);
+          out.push({ x, z });
+          return increment(x, z, 'at');
+        }
+        if (found) {
+          return refusal(
+            `lamps: slot ${out.length} refused at every spot; first by ${found.blockers.join(', ')}`,
+            { blockers: found.blockers, claims: [found.claim], optional: true },
+          );
+        }
+        // Nothing fixed lets a lamp stand here: left out, as the placer always did.
+        out.push('forgone');
+      }
+      return 'done';
+    },
+    back() {
+      const slot = sections.pop();
+      if (slot === undefined) return;
+      out.length = slot;
+    },
+    forgo() {
+      out.push('forgone');
+    },
+    supply: () => 1,
+    accommodate(claimIndex: number, _attempt: number, keepClearOf: readonly Claim[]): Increment | Refusal {
+      const section = claims.sectionOfClaim('lamps', claimIndex);
+      const slot = sections[section];
+      const lamp = slot === undefined ? undefined : out[slot];
+      if (slot === undefined || !lamp || lamp === 'forgone' || !slots) return refusal(`lamps: no lamp owns claim ${claimIndex}`);
+      const placedIndex = placed().findIndex(([x, z]) => x === lamp.x && z === lamp.z);
+      const found = climb(slots[slot] as LampSlot, placedIndex, keepClearOf);
+      if (found && 'spot' in found && (found.spot[0] !== lamp.x || found.spot[1] !== lamp.z)) {
+        const [x, z] = found.spot;
+        out[slot] = { x, z };
+        return increment(x, z, `moved from (${lamp.x.toFixed(1)}, ${lamp.z.toFixed(1)}) to`);
+      }
+      return refusal(`lamps: slot ${slot} has no other spot to move to`);
+    },
+    reset() {
+      out.length = 0;
+      sections.length = 0;
+      slots = null;
+    },
+  };
+}
+
 function lampFits(
   x: number,
   z: number,

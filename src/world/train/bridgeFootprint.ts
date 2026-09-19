@@ -1019,7 +1019,8 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
           const { x, z } = frame.worldAt(along * sign, halfAcross * t, shift);
           if (!searchClear(x, z) || nearOtherGuardRail(siblingDecks, x, z, GUARD_RAIL_MARGIN)) {
             debugBridge?.(
-              `  ramp ${sign > 0 ? '+' : '-'} blocked at along=${along.toFixed(1)} t=${t.toFixed(2)} (${x.toFixed(1)},${z.toFixed(1)}): ` +
+              `  ramp ${sign > 0 ? '+' : '-'} blocked at along=${along.toFixed(1)} t=${t.toFixed(2)} (${x.toFixed(1)},${z.toFixed(1)}) ` +
+              `[${collision.describeNear(x, z, REAL_PROBE_RADIUS, 0.5).join('; ') || 'nothing within 0.5 m — bounds or gateway'}]: ` +
                 (!collision.isClearCircle(x, z, REAL_PROBE_RADIUS)
                   ? 'collider'
                   : collision.playBounds.distanceToEdge(x, z) < REAL_PROBE_RADIUS

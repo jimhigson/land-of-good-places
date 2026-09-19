@@ -1,5 +1,7 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
-import { PLAYER_RADIUS } from '../core/constants';
+import { lazyArrayView, lazyView } from '../boot/lazyView';
+import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
+import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
 import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
@@ -8,6 +10,8 @@ import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
 import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
 import { CROSSING_SITES, type CrossingSite } from './train/crossingPlan';
+import { screenDrawnPathsForOffSiteCrossings } from './train/crossingPredicate';
+import { registerPlanCache } from '../boot/planCaches';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
@@ -123,12 +127,46 @@ function numberFromEnv(name: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+export { MAIN_LOOP_WIDTH };
+
 /** Fountain plaza — wherever the layout put it. Paths converge here. */
-export const PLAZA = {
+export const PLAZA: { readonly x: number; readonly z: number; readonly radius: number } = lazyView(() => ({
   x: PARK_LAYOUT.fountain.x,
   z: PARK_LAYOUT.fountain.z,
   radius: PARK_LAYOUT.fountain.radius,
-};
+}));
+
+/**
+ * **The ring of lawn between the plaza's paving and the main loop's.**
+ *
+ * `inner` is the plaza disc's own paved edge; `outer` is where the main
+ * loop's inner paving starts; `middle` is the bearing-independent circle
+ * halfway between them, which is the furthest a ring of props can stand from
+ * *both* kinds of paving at once.
+ *
+ * **This exists because two numbers were being kept in step by hand and had
+ * collided.** `FairyLights.ts` carried `FAIRY_RING_RADIUS = 13.5` — a literal,
+ * chosen once against a plaza radius of 9.4 — while the main loop runs at
+ * `RING_RADIUS` (the fountain's own radius + 5.5, so 14.9) and paves
+ * `MAIN_LOOP_WIDTH / 2` either side of that. Its inner kerb therefore lands at
+ * 13.1, and every one of the ten fairy poles stood 0.36–0.41 m *inside* the
+ * promenade's paving. Each was duly skipped for standing on a path, and the
+ * park drew **no fairy lights at all** — on this branch and on every branch
+ * before it, with nothing saying so.
+ *
+ * So nobody writes the fairy ring's radius down any more: it is asked for
+ * here, from the two owners that already exist ({@link PLAZA}, `RING_RADIUS`),
+ * and it follows them if either ever moves.
+ *
+ * A function, not a constant: `PLAZA` is a plan view, and reading one at
+ * module scope forces the solver mid-evaluation (see this branch's handoff,
+ * "the two import-order rules").
+ */
+export function plazaVerge(): { readonly inner: number; readonly outer: number; readonly middle: number } {
+  const inner = PLAZA.radius;
+  const outer = RING_RADIUS - MAIN_LOOP_WIDTH / 2;
+  return { inner, outer, middle: (inner + outer) / 2 };
+}
 
 // ------------------------------------------------------------ generation
 
@@ -173,7 +211,7 @@ interface Blocker {
  * from there. `RIBBON_HALF_WIDTH_CEILING` is the largest half-width plus kerb
  * any route in {@link ROUTES}/{@link solveRing} is ever built with.
  */
-const RIBBON_HALF_WIDTH_CEILING = 3.6 / 2 + 0.85;
+const RIBBON_HALF_WIDTH_CEILING = MAIN_LOOP_WIDTH / 2 + PATH_KERB_OVERHANG * 2;
 const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4 + RIBBON_HALF_WIDTH_CEILING;
 
 /**
@@ -198,14 +236,22 @@ const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4 + RIBBON_HALF_WIDTH_CEILING;
  * footprints out of the paving costs nothing and means the walk-past ring's
  * feet stay excluded even if a future change makes it draw one again.
  */
-const BLOCKERS: readonly Blocker[] = [
+let blockersMemo: readonly Blocker[] | null = null;
+/** A view: the plots and arch feet follow the layout and ring the park's driver decided. */
+const BLOCKERS: readonly Blocker[] = lazyArrayView(() => (blockersMemo ??= blockersNow()));
+registerPlanCache(() => {
+  blockersMemo = null;
+});
+function blockersNow(): readonly Blocker[] {
+  return [
   ...[...PARK_LAYOUT.entries.values()]
     .filter((e) => e.id !== 'fountain')
     .map((e) => ({ x: e.x, z: e.z, radius: e.boundingRadius + 2.2, kind: 'plot' as const })),
   ...[RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
     .flatMap((ring) => archFeet(ring))
     .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius + ARCH_FOOT_MARGIN, kind: 'archFoot' as const })),
-];
+  ];
+}
 
 
 
@@ -294,12 +340,22 @@ const TAU_PATH = Math.PI * 2;
  * the circle reads as a deliberate landmark with four gateways rather than
  * a loop nibbled at from every direction.
  */
-const RING_COMPASS_POINTS: readonly (readonly [number, number])[] = [
+function ringCompassPointsNow(): readonly (readonly [number, number])[] {
+  return [
   [PLAZA.x + RING_RADIUS, PLAZA.z],
   [PLAZA.x - RING_RADIUS, PLAZA.z],
   [PLAZA.x, PLAZA.z + RING_RADIUS],
   [PLAZA.x, PLAZA.z - RING_RADIUS],
-];
+  ];
+}
+let ringCompassPointsMemo: readonly (readonly [number, number])[] | null = null;
+/** A view: the plaza follows the layout the park's driver decided. */
+const RING_COMPASS_POINTS: readonly (readonly [number, number])[] = lazyArrayView(
+  () => (ringCompassPointsMemo ??= ringCompassPointsNow()),
+);
+registerPlanCache(() => {
+  ringCompassPointsMemo = null;
+});
 
 function nearestCompassPoint(x: number, z: number): readonly [number, number] {
   let best = RING_COMPASS_POINTS[0] as readonly [number, number];
@@ -1972,11 +2028,42 @@ const RAMP_SCREEN_MARGIN = 0.5;
  * bridges from the start"* — which is its own ticket.
  */
 export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
+  return standsOnSomeBridge(x, z, margin, true);
+}
+
+/**
+ * **The one owner of "is this point inside a bridge's footprint".**
+ *
+ * Both questions below are this loop with one clause different — the site
+ * sweep, the `across` projection onto the crossing's normal, and the `along`
+ * bounds that reach `DECK_HALF_LENGTH` plus each ramp's own measured reach.
+ * They were written out twice and a third copy was very nearly added; that is
+ * this repo's most-cited bug, and the two would have drifted the first time
+ * anybody touched `rampReachPos`.
+ *
+ * `deckCounts` is the whole difference. A bridge's footprint is a road with a
+ * wall down each side: `across <= halfWidth` is the surface a child walks on,
+ * and only the ring outside it is parapet.
+ *
+ * - `true` — the bridge's ground **at all**, deck included. The right question
+ *   for starting or branching something there.
+ * - `false` — the **masonry only**. The right question for routing through,
+ *   because a street crossing a bridge is what a bridge is for.
+ */
+function standsOnSomeBridge(
+  x: number,
+  z: number,
+  margin: number,
+  deckCounts: boolean,
+): boolean {
   for (const site of CROSSING_SITES) {
     const dx = x - site.x;
     const dz = z - site.z;
-    const across = -dx * site.dirZ + dz * site.dirX;
-    if (Math.abs(across) > site.halfWidth + margin) continue;
+    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
+    if (across > site.halfWidth + margin) continue;
+    // Inside the deck's own width is road, not wall — keep going, another
+    // site's masonry may still claim this point.
+    if (!deckCounts && across <= site.halfWidth) continue;
     const along = dx * site.dirX + dz * site.dirZ;
     if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
         along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
@@ -2024,20 +2111,7 @@ export function pointStandsOnABridgeRamp(x: number, z: number, margin = RAMP_SCR
  * is for.
  */
 function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
-  for (const site of CROSSING_SITES) {
-    const dx = x - site.x;
-    const dz = z - site.z;
-    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
-    // Inside the deck's own width is road, not wall — keep going, another
-    // site's masonry may still claim this point.
-    if (across <= site.halfWidth || across > site.halfWidth + margin) continue;
-    const along = dx * site.dirX + dz * site.dirZ;
-    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
-        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
-      return true;
-    }
-  }
-  return false;
+  return standsOnSomeBridge(x, z, margin, false);
 }
 
 /** The Sky Cruiser's pylons have the same relationship to streets as the
@@ -2507,7 +2581,8 @@ function computeStreetStubs(p: readonly [number, number], arrival: boolean): Str
   // Sized to cover a doormat's stand-off (1.4 m), its 3.5 m arrival lead
   // and a plot's own frontage wobble — the ball-pit's slide exit measured
   // 5.7 m from the plot edge, just past the first (5.6 m) version of this.
-  const exemptNear = arrival ? 7 : 0.5;
+  // One owner with the layout's doormat probe: `streetRules.ts`.
+  const exemptNear = arrival ? ARRIVAL_EXEMPT_NEAR : DEPARTURE_EXEMPT_NEAR;
   const legClear = (ax: number, az: number, bx: number, bz: number): boolean =>
     streetSegmentClear(ax, az, bx, bz, p, exemptNear) &&
     segmentClearOfRing(ax, az, bx, bz) &&
@@ -2532,6 +2607,20 @@ function computeStreetStubs(p: readonly [number, number], arrival: boolean): Str
         const j = cj + dj;
         if (Math.abs(i) > LATTICE_HALF_CELLS || Math.abs(j) > LATTICE_HALF_CELLS) continue;
         const index = lattice.indexOf(i, j);
+        // **A junction on a bridge is not a junction.** The node is valid —
+        // `nodeOk` deliberately admits a deck so a street may cross one — but a
+        // spur branching off it leaves the bridge sideways and its paving stops
+        // at a drop. `pointStandsOnABridgeRamp` is the deck-included question
+        // and already existed — see {@link standsOnSomeBridge}.
+        if (pointStandsOnABridgeRamp(lattice.xs[index] as number, lattice.zs[index] as number)) {
+          if (verbose) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[stubs]   node ${(lattice.xs[index] as number).toFixed(1)},${(lattice.zs[index] as number).toFixed(1)}: on a bridge`,
+            );
+          }
+          continue;
+        }
         if (!lattice.nodeOk[index] || lattice.side[index] !== pSide) {
           if (verbose) {
             // eslint-disable-next-line no-console
@@ -3822,7 +3911,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
   // See {@link streetLatticeSearch}.
   yield* streetLatticeSearch();
   const ringPoints = solveRing();
-  const ring: RouteDefinition = { name: 'main-loop', width: 3.6, closed: true, points: ringPoints };
+  const ring: RouteDefinition = { name: 'main-loop', width: MAIN_LOOP_WIDTH, closed: true, points: ringPoints };
 
   const nodes: PathNode[] = [
     { id: 'gate', kind: 'gate', x: 0, z: 54 },
@@ -4101,7 +4190,79 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     // so the incoming leg can arrive from any bearing without paving through
     // the canopy posts on the furnished half (see `PlannedStation.leadX`).
     const stationLead: readonly [number, number] = [station.leadX, station.leadZ];
-    const stationStreets = streetRoute(stationLead);
+    const approach: readonly [number, number] = [station.approachX, station.approachZ];
+    const stand: readonly [number, number] = [station.standX, station.standZ];
+
+    // **The approach and the stand are appended, so they must be screened.**
+    //
+    // Everything before them is routed by `streetRoute`, which knows about the
+    // railway; these two points were simply tacked on the end, and a producer
+    // that draws without asking the world is the disease CLAUDE.md names. On
+    // seed 288 that tail slipped across the rail at railD 35.1, (-36.2, 2.8),
+    // with no proven bridge site — the park then failed to build, three systems
+    // later, from scenery planting.
+    //
+    // The screen is the leg's own (`railInfoAt` / `segmentHoldsRailSide`), not a
+    // new one. A station stands beside the track, so its approach has a definite
+    // rail side; the tail is legal exactly when it reaches that approach without
+    // ever changing side.
+    // **Asked of the DRAWN curve, not the control polyline.** The polyline test
+    // (`segmentHoldsRailSide` on the straight segments) was tried first and is
+    // structurally unable to see this fault: on seed 288 the control points held
+    // their rail side while the Catmull-Rom through them bulged across it, and
+    // the screen changed not one of 1342 samples. So the candidate route is
+    // curved and sampled exactly as `buildPaths` will draw it — same
+    // `routeCurve`, same `pathDivisions` — and the shared crossing predicate is
+    // asked whether that curve crosses anywhere no bridge was proven.
+    const tailHolds = (points: readonly (readonly [number, number])[]): boolean => {
+      const candidate: RouteDefinition = {
+        name: `spur-${id}`,
+        width: 2.6,
+        closed: false,
+        points,
+      };
+      const curve = routeCurve(candidate);
+      const drawn = curvePoints(curve, pathDivisions(curve));
+      return (
+        screenDrawnPathsForOffSiteCrossings(TRAIN_PLAN.route, drawn).fouls.length === 0
+      );
+    };
+
+    // **Planned, not routed, until one is chosen.** `streetRoute` *commits* its
+    // plan into the shared street network as a side effect, so asking it for two
+    // candidates would lay both. `planStreetToNetwork` is the same search
+    // without the commit.
+    const leadPlan = planStreetToNetwork(stationLead);
+    const leadEnd = leadPlan?.points[leadPlan.points.length - 1] ?? stationLead;
+
+    let chosen = leadPlan;
+    let tail: (readonly [number, number])[] = [approach, stand];
+    // **Screen the route that will actually be drawn, not a stand-in for it.**
+    // When `leadPlan` is null the committed route falls back to
+    // `fallbackSpurRoute`, so testing `[stationLead, ...]` would be asking about
+    // geometry nobody lays — a screen measuring something it is not describing,
+    // which is the fault this whole branch exists to remove. Caught by
+    // instrumenting rather than by reading: station-0 takes exactly that path.
+    const leadPoints = [
+      ...(leadPlan?.points ?? fallbackSpurRoute(network(), stationLead)),
+      approach,
+      stand,
+    ];
+    void leadEnd;
+    if (!tailHolds(leadPoints)) {
+      // **Bend the appendage rather than shorten it**: route to the approach
+      // itself, which the rail-aware street search will reach on the correct
+      // side, instead of hanging it off a lead that sits on the wrong one.
+      const approachPlan = planStreetToNetwork(approach);
+      const approachEnd = approachPlan?.points[approachPlan.points.length - 1] ?? approach;
+      void approachEnd;
+      if (approachPlan && tailHolds([...approachPlan.points, stand])) {
+        chosen = approachPlan;
+        tail = [stand];
+      }
+    }
+    if (chosen) commitStreetPlan(chosen);
+
     edges.push({
       from: 'ring',
       to: id,
@@ -4110,11 +4271,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: `spur-${id}`,
         width: 2.6,
         closed: false,
-        points: [
-          ...(stationStreets ?? fallbackSpurRoute(network(), stationLead)),
-          [station.approachX, station.approachZ],
-          [station.standX, station.standZ],
-        ],
+        points: [...(chosen?.points ?? fallbackSpurRoute(network(), stationLead)), ...tail],
       },
     });
     yield (progress += 1);
@@ -4533,7 +4690,29 @@ function* addInterconnects(
       stale = false;
     }
     const paved = graph.distanceBetween(a.x, a.z, b.x, b.z);
-    if (!Number.isFinite(paved)) continue; // not actually connected — a different bug, not this pass's job
+    // **An unreachable pair is the strongest case for a connector, not a
+    // reason to decline one.** This used to `continue` on a non-finite
+    // distance, with the note "not actually connected — a different bug, not
+    // this pass's job". It is this pass's job: two destinations a child can
+    // see across 22 m of grass, with no paved way between them at all, is
+    // precisely "close but unlinked". Measured on seed 11, where the note was
+    // costing the park two connectors:
+    //
+    //   [cand] hotel-stall.skyCruiser: straight 22.2 paved Infinity
+    //   [cand] hotel-exit-skyCruiser:  straight 33.5 paved Infinity
+    //
+    // and `detourRatiosStayReasonable` then found the built park walking
+    // **359.3 m to cover 22.2 m** (16.16x) between the first pair, because
+    // the built network does eventually join them — the long way round, via
+    // whatever paving happens to touch both. The generator's own oracle and
+    // the built park disagreed about connectivity, and the disagreement was
+    // being read as permission to do nothing.
+    //
+    // Everything downstream already handles it correctly: an infinite `paved`
+    // clears both thresholds below, and `detourIsDisproportionate` is true, so
+    // the structure screens yield exactly as they do for a 238 m walk. The
+    // ride-corridor and slide-corridor screens still apply, so a pair that
+    // genuinely must not be linked still is not.
     if (paved < straight * CONNECTOR_RATIO_THRESHOLD) continue;
     if (paved - straight < minWaste) continue;
 
@@ -5308,6 +5487,49 @@ function drawnPolyline(
  * The closed backbone ring keeps its raw points: it is a circle through 32
  * bearings, and filleting a circle's own samples would only dent it.
  */
+/**
+ * **How finely a route's curve is drawn — the one owner.**
+ *
+ * Beside {@link routeCurve} because the two go together: the curve is what gets
+ * drawn and this is how densely. `pathGraph.ts`'s `buildPaths` divides the
+ * ribbon, the kerb and its samples by it; the router asks it to reproduce
+ * exactly the geometry a decision will lay down, *before* committing to that
+ * decision.
+ *
+ * **Nobody reimplements this.** A second `max(24, len / 0.8)` beside either
+ * caller would be two definitions of "how smooth is a path", and it would drift
+ * the first time somebody tuned smoothness — with the screen then measuring a
+ * slightly different curve from the one drawn, which is this work's own disease
+ * one level down.
+ */
+export function pathDivisions(curve: CatmullRomCurve3): number {
+  return Math.max(24, Math.round(curve.getLength() / 0.8));
+}
+
+/**
+ * **The points a curve actually lays down when drawn** — post fillet and
+ * Catmull-Rom.
+ *
+ * This is the geometry a child walks and the only geometry worth asking the
+ * railway about. **The control polyline is not this**, and the difference is
+ * not academic: on seed 288 the control points held their side of the rail
+ * while the drawn curve bulged across it, so a screen written against the
+ * polyline (`segmentHoldsRailSide` on the straight segments) was structurally
+ * unable to see the fault — measured, it changed not one of 1342 samples.
+ */
+export function curvePoints(
+  curve: CatmullRomCurve3,
+  divisions: number,
+): { readonly x: number; readonly z: number }[] {
+  const point = new Vector3();
+  const out: { x: number; z: number }[] = [];
+  for (let i = 0; i <= divisions; i += 1) {
+    curve.getPoint(i / divisions, point);
+    out.push({ x: point.x, z: point.z });
+  }
+  return out;
+}
+
 export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
   const points = route.closed ? route.points : drawnPolyline(route.points, route.squareCorners ?? []);
   const vectors = points.map(([x, z]) => new Vector3(x, 0, z));
@@ -5616,3 +5838,28 @@ function distanceToRouteNetwork(
   return best;
 }
 
+/**
+ * **Forget everything this module accumulated for the last path graph.** The
+ * four lattice accumulators are process-lifetime state the router reads as
+ * inputs (a second `pathGraphSearch` in one process would otherwise return a
+ * different graph), and the memo caches derive from decisions the park's
+ * driver may have just unwound. Called by the paths builder before every
+ * solve and whenever it backs out.
+ */
+export function resetPathsState(): void {
+  pavedLatticeNodes.clear();
+  pavedLatticeEdges.clear();
+  usedTaps.clear();
+  tapRimsDrawn.clear();
+  latticeCache = null;
+  streetStubsCache.clear();
+  railInfoCache.clear();
+  streetPlotsCache = null;
+  archFootBlockersCache = null;
+  boundaryDistanceCache.clear();
+  slideTrackSamplesCache = null;
+  gateCorridorDeepestCache = null;
+  rideCorridorSamplesCache = null;
+  railCorridorSamplesCache = null;
+}
+registerPlanCache(resetPathsState);

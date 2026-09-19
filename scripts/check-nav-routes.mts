@@ -49,8 +49,9 @@ import './headless-canvas.mjs';
 import { Ray, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
+import { CollisionWorld } from '../src/world/Collision.ts';
 import { pickWalkablePoint } from '../src/world/pickWalkable.ts';
-import { circleBoundary } from '../src/world/boundary.ts';
+import { circleBoundary, PARK_BOUNDARY, type ParkBoundary } from '../src/world/boundary.ts';
 import {
   CAMERA_PITCH_DEGREES,
   HOTEL_PLAY_RADIUS,
@@ -357,6 +358,64 @@ function isoRayAt(target: Vector3): Ray {
     found && Math.abs(hit.y - FLOOR_Y) <= 0.3 && Math.hypot(hit.x - archPoint.x, hit.z - archPoint.z) <= 1.2,
     `pick through the arch lands on the walk-through floor (hit ${found ? `(${hit.x.toFixed(1)}, ${hit.y.toFixed(2)}, ${hit.z.toFixed(1)})` : 'nothing'}, wanted y ≈ 0)`,
   );
+}
+
+// ---------------------------------------------------------- the boundary band
+//
+// `NavGrid.rebuild` blocks the boundary band by stamping `outline()`'s
+// segments at the walker's radius rather than asking `distanceToEdge` per
+// cell (189 ms of every lattice build, measured). That rewrite decides where
+// a child may walk, so it is held to the per-cell rule here on every run: a
+// lattice on a colliders-free world, every cell centre (the lattice's own,
+// via `forEachCellCentre` — a re-derived layout compared different points and
+// reported 104 phantom disagreements once), against
+// `!contains || distanceToEdge < walkerRadius`. Exact on the park's spline,
+// whose outline IS the table `distanceToEdge` reads; on a circle boundary the
+// outline is an inscribed 512-gon, so a cell may legitimately fall within
+// r(1 - cos(pi/512)) of the radius on the other side — 0.57 mm at r = 30 —
+// and only a disagreement outside that chord error is a fault.
+{
+  const bandCases: { name: string; boundary: ParkBoundary; tolerance: number }[] = [
+    { name: 'park spline', boundary: PARK_BOUNDARY, tolerance: 0 },
+    {
+      name: 'circle r=30',
+      boundary: circleBoundary(30),
+      tolerance: 30 * (1 - Math.cos(Math.PI / 512)),
+    },
+  ];
+  for (const { name, boundary, tolerance } of bandCases) {
+    const empty = new CollisionWorld();
+    empty.setPlayBounds(boundary);
+    const grid = new NavGrid(empty, PLAYER_RADIUS, JUMP_APEX_HEIGHT);
+    let cells = 0;
+    let blockedByRule = 0;
+    const bad: string[] = [];
+    grid.forEachCellCentre(
+      () => 0,
+      (x, z, blocked) => {
+        cells += 1;
+        const d = boundary.distanceToEdge(x, z);
+        const ruleBlocked = !boundary.contains(x, z) || d < PLAYER_RADIUS;
+        if (ruleBlocked) blockedByRule += 1;
+        if (ruleBlocked !== blocked && Math.abs(d - PLAYER_RADIUS) > tolerance) {
+          bad.push(`(${x.toFixed(2)}, ${z.toFixed(2)}) d=${d.toFixed(4)} rule=${ruleBlocked} lattice=${blocked}`);
+        }
+      },
+    );
+    const verdict = bad.length === 0 && cells > 0 && blockedByRule > 0;
+    console.log(
+      `  ${verdict ? 'ok  ' : 'FAIL'} boundary band, ${name}: ${cells} cell centres, ${blockedByRule} blocked by the ` +
+        `per-cell rule, ${bad.length} disagree beyond ${tolerance.toFixed(4)} m` +
+        (bad.length > 0 ? ` — first: ${bad.slice(0, 3).join('; ')}` : ''),
+    );
+    if (!verdict) {
+      failures.push(
+        cells === 0 || blockedByRule === 0
+          ? `boundary band (${name}): the control saw nothing (${cells} cells, ${blockedByRule} blocked) — it cannot be trusted green`
+          : `boundary band (${name}): ${bad.length} cell(s) differ from the per-cell rule: ${bad.slice(0, 3).join('; ')}`,
+      );
+    }
+  }
 }
 
 if (failures.length > 0) {

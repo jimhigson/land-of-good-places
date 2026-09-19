@@ -205,7 +205,20 @@ export function entranceRoadSegments(): readonly RoadSegment[] {
  *
  * `corridor` rather than `footprint` because a road is a thing that travels:
  * paths and stand spots are welcome on it, another corridor may only meet it at
- * a declared crossing, and nothing solid may share it.
+ * a declared crossing, and nothing solid may share it. Two claims rather than
+ * one because the road turns a corner at the gate, and a capsule is a straight
+ * segment.
+ *
+ * **The claim carries no height.** It did for a day (stage 3 step 2's first
+ * cut: the bus's driven top as `headroom`, so a leaning trestle claimed
+ * everything of itself the bus could meet). Jim, 7 Sep 2026: *"just skip all
+ * the legs over the road, otherwise keep them — one simple rule is all we
+ * need here."* So a Rail Race slot whose foot disc lies on this corridor is
+ * simply not built (`railRace/track.ts`, `trestleSpots`), every other slot is
+ * placed as before, and `check:swept-bus` — sweeping the drawn bus posed at
+ * its highest against the drawn posts — is the guard that a kept branch never
+ * hangs where the bus drives. The corridor's `halfWidth` is the drawn
+ * carriageway, so "over the road" has one definition.
  */
 export function entranceRoadClaims(): readonly Claim[] {
   return entranceRoadSegments().map((segment) => ({

@@ -386,6 +386,40 @@ export class CollisionWorld {
    * building somewhere — so it reads whatever has been registered at the
    * time it is called, exactly like the boot asserts do.
    */
+  /**
+   * **Name what is near a point** — every collider within `reach` of a probe
+   * of `radius` at `(x, z)`, as text. A diagnostic, for a placer that was
+   * refused and wants to say by what (the bridge search's `LGP_DEBUG_BRIDGE`
+   * line said "collider" and nothing else). Colliders carry no names, so
+   * this describes their shape: a circle's radius says tree trunk (0.3–0.5)
+   * from lamp post (0.2) from stall (metres); a wall its length and height.
+   */
+  describeNear(x: number, z: number, radius: number, reach = 1): string[] {
+    const out: string[] = [];
+    for (const circle of this.circles) {
+      const gap = Math.hypot(circle.x - x, circle.z - z) - circle.radius - radius;
+      if (gap <= reach) {
+        out.push(
+          `circle#${circle.id} at (${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}) r=${circle.radius.toFixed(2)} gap=${gap.toFixed(2)}`,
+        );
+      }
+    }
+    for (const wall of this.walls) {
+      const dx = wall.x2 - wall.x1;
+      const dz = wall.z2 - wall.z1;
+      const lengthSq = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((x - wall.x1) * dx + (z - wall.z1) * dz) / lengthSq));
+      const gap = Math.hypot(wall.x1 + t * dx - x, wall.z1 + t * dz - z) - wall.halfThickness - radius;
+      if (gap <= reach) {
+        out.push(
+          `wall (${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)})-(${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}) ` +
+            `half=${wall.halfThickness.toFixed(2)} top=${wall.topHeight.toFixed(1)} gap=${gap.toFixed(2)}`,
+        );
+      }
+    }
+    return out;
+  }
+
   isClearCircle(x: number, z: number, radius: number): boolean {
     for (const circle of this.circles) {
       // A ground-plane planning query: a banded collider (baseHeight above the
