@@ -440,3 +440,43 @@ not disturb it.
 
 Seed 7 is the slow one at 237 s (~1000 s before #670), seeds 3 and 4 at 50 s
 and 46 s, the other thirteen 5-32 s.
+
+## The known-remaining list, complete this time
+
+I handed over three unfixed failures last round and the head was red on four:
+**the seed-326 finish rainbow was missing from my list.** It costs nothing to
+name — it is byte-identical on the base — and a list of known-remaining that is
+missing one is worth less than no list at all.
+
+Measured on `e32393bd`, base vs head:
+
+| | base | head |
+|---|---|---|
+| `test:procgen` | `28 failed \| 665 passed (693)` | `5 failed \| 688 passed (693)` |
+
+**Seven** invariant kinds eliminated (one more than I had been claiming — the
+bridge-parapet one came along with the others), **none new**, nothing skipped on
+either side.
+
+The four that remain, all four:
+
+1. **`built the park it was asked for`** (seed 11) — 175 bushes against a floor
+   of 180. A budget question that changes how dense every park looks, so it is
+   Jim's call. Do not lower the floor.
+2. **`every modelled coping stone sits on the wall it caps`** (seeds 11, 131) —
+   real, 3 cm, the first block of each parapet run. Instrument exonerated three
+   ways; root cause is in `buildCopingRun`.
+3. **`no two close destinations are left with a wildly disproportionate paved
+   detour`** (seed 131) — a pocket cut off by the Sky Cruiser's corridor screen,
+   the one screen with no disproportion escape. One attempt tried and reverted.
+4. **`the Rail Race finish rainbow stands on the ground`** (seed 326) —
+   **pre-existing, and not mine.** Byte-identical on both sides:
+
+   ```
+   railRace:finish-rainbow-leg-0-inner on the race ring comes down 0.84 m from
+   a path (needs 1.24 m, two player radii) — it lands in the way of somebody
+   walking
+   ```
+
+   It belongs to the rail-race slice, not this one, but it is red on the head
+   and so it is named.
