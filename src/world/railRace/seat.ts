@@ -45,6 +45,7 @@ const _behind = /* @__PURE__ */ new Vector3();
 const DRAWN_STEP = 0.05;
 const _turnBody = /* @__PURE__ */ new Quaternion();
 const _seat = /* @__PURE__ */ new Vector3();
+// flat-ok: the tub's own local up, the axis her face turn is taken about
 const _yAxis = /* @__PURE__ */ new Vector3(0, 1, 0);
 const _up = /* @__PURE__ */ new Vector3();
 const _across = /* @__PURE__ */ new Vector3();

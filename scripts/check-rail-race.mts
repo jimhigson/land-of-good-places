@@ -2364,6 +2364,7 @@ require(
       seatRaceRider(lapRider, lapCart, lapHeading, route.scale, 0, 0);
       // flat-ok: local axes, carried into the world by each body's own quaternion
       riderUp.set(0, 1, 0).applyQuaternion(lapRider.group.quaternion);
+      // flat-ok: the cart's local up, carried into the world by its quaternion
       cartUp.set(0, 1, 0).applyQuaternion(lapCart.quaternion);
       riderNose.set(0, 0, 1).applyQuaternion(lapRider.group.quaternion);
       cartNose.set(0, 0, 1).applyQuaternion(lapCart.quaternion);
