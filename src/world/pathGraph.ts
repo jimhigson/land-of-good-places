@@ -1,4 +1,4 @@
-import { type BufferAttribute, CatmullRomCurve3, Mesh, Vector3 } from 'three';
+import { type BufferAttribute, CatmullRomCurve3, Mesh } from 'three';
 import {
   PATH_KERB_LIFT,
   PATH_KERB_OVERHANG,
@@ -6,9 +6,11 @@ import {
 } from '../core/constants';
 import {
   addPathRibbon,
+  addRibbonStrip,
   GeometryBuilder,
   pathKerbMaterial,
   pathSurfaceMaterial,
+  ribbonStations,
 } from './pathSurface';
 import { terrainHeight } from './terrain';
 import {
@@ -431,7 +433,6 @@ export function drawnSamplesFor(routes: readonly RouteDefinition[]): PathSample[
   return out;
 }
 
-/** Sweeps a flat ribbon of `width` along the curve, draped onto the terrain. */
 /**
  * **The kerb, as the two bands you can actually see.**
  *
@@ -463,55 +464,14 @@ function addRibbonKerb(
   lift: number,
 ): void {
   // Inner edge exactly where the surface's own edge falls: both ribbons walk
-  // the same curve at the same `divisions`, so the two edges share their
-  // stations and there is no hairline between them to fill.
-  addRibbonBand(builder, curve, width / 2, width / 2 + overhang, divisions, lift);
-  addRibbonBand(builder, curve, -width / 2 - overhang, -width / 2, divisions, lift);
-}
-
-/** One band of a ribbon, between two signed offsets from its centre line. */
-function addRibbonBand(
-  builder: GeometryBuilder,
-  curve: CatmullRomCurve3,
-  fromOffset: number,
-  toOffset: number,
-  divisions: number,
-  lift: number,
-): void {
-  const point = new Vector3();
-  const tangent = new Vector3();
-  let travelled = 0;
-  let previousX = 0;
-  let previousZ = 0;
-
-  for (let i = 0; i <= divisions; i += 1) {
-    const t = i / divisions;
-    curve.getPoint(t, point);
-    curve.getTangent(t, tangent);
-    const nx = -tangent.z;
-    const nz = tangent.x;
-    const length = Math.hypot(nx, nz) || 1;
-
-    if (i > 0) travelled += Math.hypot(point.x - previousX, point.z - previousZ);
-    previousX = point.x;
-    previousZ = point.z;
-
-    const ax = point.x + (nx / length) * fromOffset;
-    const az = point.z + (nz / length) * fromOffset;
-    const bx = point.x + (nx / length) * toOffset;
-    const bz = point.z + (nz / length) * toOffset;
-
-    // Same winding rule as `addRibbon`: the lower offset first, so the quads
-    // wind anticlockwise seen from above and the band faces the sky.
-    const v = travelled / Math.max(1, toOffset - fromOffset);
-    builder.vertex(ax, terrainHeight(ax, az) + lift, az, 0, v);
-    builder.vertex(bx, terrainHeight(bx, bz) + lift, bz, 1, v);
-
-    if (i > 0) {
-      const base = builder.vertexCount - 4;
-      builder.quad(base, base + 1, base + 2, base + 3);
-    }
-  }
+  // the same stations and ask `ribbonEdge` for the same offset, so the two
+  // edges are one line — trimmed at a tight corner identically — and there is
+  // no hairline between them to fill.
+  const stations = ribbonStations(curve, divisions);
+  const half = width / 2;
+  const vAt = (travelled: number): number => travelled / Math.max(1, overhang);
+  addRibbonStrip(builder, stations, half, half + overhang, lift, vAt);
+  addRibbonStrip(builder, stations, -half - overhang, -half, lift, vAt);
 }
 
 /** The plaza's kerb: the same idea round a disc, so its middle is not buried. */
