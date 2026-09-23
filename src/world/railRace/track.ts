@@ -5,11 +5,14 @@ import {
   BufferGeometry,
   Color,
   CylinderGeometry,
+  DynamicDrawUsage,
   Group,
+  InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  type MeshToonMaterial,
   Quaternion,
   Vector3,
 } from 'three';
@@ -215,6 +218,49 @@ export interface SparkingSegment {
 }
 
 /** The colours a warning runs through: calm cream, amber warning, mint safe. */
+/** The alert's size at rest and right on top of a bar — the old sleeve's own scale range. */
+const ALERT_SIZE_CALM = 0.9;
+const ALERT_SIZE_FULL = 1.3;
+/** How strongly the stripe paints over the tape — the old sleeve's opacity. */
+const ALERT_STRENGTH = 0.92;
+
+/**
+ * **Paint the duck-bar alert stripe into the bar's own material.**
+ *
+ * Reads a per-instance `alert` attribute — `rgb` the stripe's colour (linear),
+ * `a` how much of the bar's length it covers, 0 to 1 — and mixes that colour
+ * over the lit, tone-mapped result, so it glows flat whatever the light is
+ * doing, exactly as the unlit sleeve it replaces did. The stripe is measured
+ * along the bar's own length (`position.x`, the asset's long axis, against its
+ * half-length), spreading out from the middle.
+ */
+function paintAlertStripe(material: MeshToonMaterial, halfLength: number): void {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['barHalfLength'] = { value: halfLength };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nattribute vec4 alert;\nvarying vec4 vAlert;\nvarying float vAlong;',
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvAlert = alert;\nvAlong = position.x;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nvarying vec4 vAlert;\nvarying float vAlong;\nuniform float barHalfLength;',
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        [
+          'float alertEdge = vAlert.a * barHalfLength;',
+          'float alertBand = vAlert.a <= 0.0 ? 0.0 : 1.0 - smoothstep(alertEdge - 0.02, alertEdge, abs(vAlong));',
+          `gl_FragColor.rgb = mix(gl_FragColor.rgb, linearToOutputTexel(vec4(vAlert.rgb, 1.0)).rgb, alertBand * ${ALERT_STRENGTH.toFixed(2)});`,
+          '#include <dithering_fragment>',
+        ].join('\n'),
+      );
+  };
+  material.customProgramCacheKey = () => 'duck-bar-alert-stripe';
+}
+
 const CALM = new Color(PALETTE.signBoard);
 const WARN = new Color(PALETTE.fairyWarm);
 const SAFE = new Color(PALETTE.markerMint);
@@ -353,7 +399,6 @@ export function buildRailRaceTrack(
   const matrix = new Matrix4();
   const rotation = new Quaternion();
   const position = new Vector3();
-  const one = new Vector3(1, 1, 1);
   /** The duck-bar asset's own size on this ring — see {@link ringSizeVsRace}. */
   const assetScale = new Vector3(ringSizeVsRace, ringSizeVsRace, ringSizeVsRace);
   const scale = new Vector3();
@@ -673,7 +718,11 @@ export function buildRailRaceTrack(
   // — unlike `sleeveGeometry` below — these must never be pushed to
   // `disposables`: see `dispose()`'s own note.
   const postGeometry = duckBarAssetGeometry('post');
-  const barGeometry = duckBarAssetGeometry('bar');
+  // The bar is **cloned** per ring, unlike the post: it carries this ring's own
+  // per-instance alert attribute (see `alertAttribute` below), and two rings
+  // writing their alerts into one shared buffer would light each other's bars.
+  const barGeometry = duckBarAssetGeometry('bar').clone();
+  keep(barGeometry);
   /**
    * **How much the posts have to be stretched to reach the bar they hold up.**
    *
@@ -701,36 +750,41 @@ export function buildRailRaceTrack(
     ringSizeVsRace * postStretch,
     ringSizeVsRace,
   );
-  // The bar itself is the warning light. Lamps on the posts were legible at a
-  // standstill and invisible at fourteen metres a second; a stripe of amber
-  // right where the thing you must duck under is cannot be missed. A sleeve
-  // around the bar rather than the bar's own material, so the toon shading
-  // underneath still shapes it. Kept procedural (not part of the asset): its
-  // whole job is to be resized and recoloured every frame by `setAlerts`,
-  // which is exactly the "appearance from code" half of the split — a fixed
-  // authored shape has nothing to offer a part that never looks the same way
-  // twice.
-  const sleeveGeometry = new BoxGeometry(
-    barHalfSpan * 2 - 0.04 * ringScale,
-    0.28 * ringScale,
-    0.32 * ringScale,
-  );
-  keep(sleeveGeometry);
+  // **The bar itself is the warning light**, painted onto its own surface.
+  // Lamps on the posts were legible at a standstill and invisible at fourteen
+  // metres a second; a stripe of amber right where the thing you must duck
+  // under is cannot be missed.
+  //
+  // It used to be a sleeve — a second, slightly bigger box around the bar,
+  // swollen and recoloured every frame. A second mesh positioned to track the
+  // first one's surface is the disease `src/art/models/CLAUDE.md` names, and it
+  // showed: at rest the sleeve's faces sat a centimetre off the bar's, in one
+  // plane with them (`check:coplanar`, `walk-past-ring` Box|`duck-bars`). Jim,
+  // on the choice: *"make it into a texture."* So the stripe now lives on the
+  // bar itself — one surface, and nothing to keep in step.
+  //
+  // The tape is a shared canvas texture and every bar in the ring is one
+  // `InstancedMesh`, so a per-bar stripe cannot be a per-bar canvas. It is the
+  // bar material's own paint instead: {@link paintAlertStripe} adds a
+  // per-instance `alert` attribute (colour, and how much of the bar's length
+  // is lit) and mixes that colour over the tape in the fragment shader, unlit,
+  // the way the sleeve's `MeshBasicMaterial` was. `setAlerts` writes that
+  // attribute exactly where it used to write the sleeve's colour and scale:
+  // the colour is the same tint, and the sleeve's swelling is the stripe
+  // spreading out from the middle of the bar towards its ends, pulse and all.
+  barGeometry.computeBoundingBox();
+  const barHalfLength = barGeometry.boundingBox?.max.x ?? 1;
+  const alertAttribute = new InstancedBufferAttribute(new Float32Array(Math.max(1, barCount) * 4), 4);
+  alertAttribute.setUsage(DynamicDrawUsage);
+  barGeometry.setAttribute('alert', alertAttribute);
+  paintAlertStripe(barMaterial, barHalfLength);
 
   const posts = new InstancedMesh(postGeometry, frameMaterial, Math.max(1, barCount * 2));
   const bars = new InstancedMesh(barGeometry, barMaterial, Math.max(1, barCount));
-  const sleeveMaterial = new MeshBasicMaterial({
-    color: PALETTE.signBoard,
-    toneMapped: false,
-    transparent: true,
-    opacity: 0.92,
-  });
-  keep(sleeveMaterial);
-  const sleeves = new InstancedMesh(sleeveGeometry, sleeveMaterial, Math.max(1, barCount));
 
   let postIndex = 0;
   let barIndex = 0;
-  // Where each bar's sleeve instance lives, so `setAlerts` can find them again:
+  // Where each bar's instance lives, so `setAlerts` can find them again:
   // `barSlots[b]` holds the instance id of bar `b`. A list per bar rather than a
   // bare number because a bar whose trestle was never placed contributes no
   // instance at all, and `setAlerts` must skip it rather than shift every id
@@ -749,9 +803,8 @@ export function buildRailRaceTrack(
    * around the lap instead of stacked four abreast, its colour is the only thing
    * that answers "is that one mine?" at fourteen metres a second.
    *
-   * Per-instance colour on one shared `InstancedMesh`, the same trick `sleeves`
-   * uses for its alert state — one draw call for every post in the ring, four
-   * lane colours and all.
+   * Per-instance colour on one shared `InstancedMesh` — one draw call for every
+   * post in the ring, four lane colours and all.
    */
   const postLaneColour = new Color();
 
@@ -821,12 +874,6 @@ export function buildRailRaceTrack(
     position.copy(point).add(barOffset);
     matrix.compose(position, rotation, assetScale);
     bars.setMatrixAt(barIndex, matrix);
-    // The sleeve's own geometry is already built at this ring's size (see
-    // `sleeveGeometry`), so it must not take the asset scale on top — and
-    // `setAlerts` below decomposes this matrix and re-composes it with
-    // `(1, size, size)`, which assumes exactly that.
-    matrix.compose(position, rotation, one);
-    sleeves.setMatrixAt(barIndex, matrix);
     slots.push(barIndex);
     barIndex += 1;
     barSlots.push(slots);
@@ -834,13 +881,12 @@ export function buildRailRaceTrack(
 
   posts.count = postIndex;
   bars.count = barIndex;
-  sleeves.count = barIndex;
   // Named so `test/procgen/invariants.ts` can find the bars in the built
   // scene and measure them against the trestle legs directly, the same
   // reason the trestle meshes below are named.
   posts.name = 'railRace:duck-bar-posts';
   bars.name = 'railRace:duck-bars';
-  for (const mesh of [posts, bars, sleeves]) {
+  for (const mesh of [posts, bars]) {
     mesh.instanceMatrix.needsUpdate = true;
     // The bars stand nine metres up on a ring that is mostly out of shot; per
     // instance culling is not worth the bounds maths.
@@ -851,10 +897,6 @@ export function buildRailRaceTrack(
   // live once, the same way the matrix update above is one flip after every
   // instance is written rather than one per instance.
   posts.instanceColor!.needsUpdate = true;
-  // Per-instance colour is what lets one draw call hold four lanes' worth of
-  // warning lamps at four different states of alarm.
-  sleeves.setColorAt(0, CALM);
-  sleeves.instanceColor!.needsUpdate = true;
 
   // --- the trestles ----------------------------------------------------------
 
@@ -1065,8 +1107,6 @@ export function buildRailRaceTrack(
     group,
 
     setAlerts(lapOffset: number, safe: boolean, elapsed: number): void {
-      const colour = sleeves.instanceColor;
-      if (!colour) return;
       layout.bars.forEach((bar, index) => {
         // How close the player is to this bar, going forwards. Bars behind are
         // calm; the one coming up swells and colours.
@@ -1084,20 +1124,17 @@ export function buildRailRaceTrack(
         const closeness = ahead < 0 || !mine ? 0 : clamp01(1 - ahead / ALERT_RANGE);
         tint.copy(CALM).lerp(safe ? SAFE : WARN, closeness);
         const pulse = 1 + Math.sin(elapsed * (safe ? 7 : 13)) * 0.16 * closeness;
-        const size = lerp(0.9, 1.3, closeness) * pulse;
+        const size = lerp(ALERT_SIZE_CALM, ALERT_SIZE_FULL, closeness) * pulse;
+        // Size is the second channel: how far along the bar the stripe has
+        // spread, from nothing at rest to end to end up close. Painted, not
+        // scaled, so the thing you actually collide with never changes size —
+        // the alert only changes how loudly it shouts.
+        const spread = clamp01((size - ALERT_SIZE_CALM) / (ALERT_SIZE_FULL - ALERT_SIZE_CALM));
         for (const slot of barSlots[index] ?? []) {
-          colour.setXYZ(slot, tint.r, tint.g, tint.b);
-          // Size is the second channel. Scaling the sleeve rather than the bar
-          // keeps the thing you actually collide with a fixed size — the alert
-          // must never change the hitbox, only how loudly it shouts.
-          sleeves.getMatrixAt(slot, matrix);
-          matrix.decompose(position, rotation, scale);
-          matrix.compose(position, rotation, scale.set(1, size, size));
-          sleeves.setMatrixAt(slot, matrix);
+          alertAttribute.setXYZW(slot, tint.r, tint.g, tint.b, spread);
         }
       });
-      colour.needsUpdate = true;
-      sleeves.instanceMatrix.needsUpdate = true;
+      alertAttribute.needsUpdate = true;
     },
 
     setSparking(active: readonly SparkingSegment[], elapsed: number): void {
@@ -1194,16 +1231,14 @@ export function buildRailRaceTrack(
       const barsLive = level >= BARS_FROM_LEVEL;
       posts.visible = barsLive;
       bars.visible = barsLive;
-      sleeves.visible = barsLive;
     },
 
     dispose(): void {
-      // `postGeometry`/`barGeometry` are deliberately never in `disposables`
-      // — they come from `duckBarAsset.ts`'s shared, `markShared` cache, the
-      // same one every other trestle span's posts and bars point at, so
-      // freeing them here would corrupt the rest of the ring. Everything
-      // else this track built for itself (rails, spark ribbons, the sleeve
-      // geometry, every material) is.
+      // `postGeometry` is deliberately never in `disposables` — it comes from
+      // `duckBarAsset.ts`'s shared, `markShared` cache, the same one every
+      // other trestle span's posts point at, so freeing it here would corrupt
+      // the rest of the ring. Everything else this track built for itself
+      // (rails, spark ribbons, the bar's own clone, every material) is.
       for (const item of disposables) item.dispose();
     },
   };
