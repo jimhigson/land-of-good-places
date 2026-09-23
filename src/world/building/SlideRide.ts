@@ -41,6 +41,41 @@ export const CHUTE_ENVELOPE = {
   below: -Math.min(...PROFILE.map(([, up]) => up)),
 } as const;
 
+/**
+ * **How far a point sits above the drawn trough surface**, given its place in
+ * the chute's own cross-section (`across` along {@link SlideFrame.right}, `up`
+ * along {@link SlideFrame.up}). Negative is inside the slide's geometry.
+ *
+ * Read straight off {@link PROFILE}, the polyline the sweep draws, so the
+ * surface a rider is measured against and the surface a child sees are one
+ * definition. Between the lips it is the height above the floor under that
+ * point; beyond a side wall and below its lip it is how far through the wall the
+ * point has gone; above the lip it is clear, whatever the distance.
+ *
+ * Exported for the rider's lift (`Player.lowestBelowSeat` and
+ * `Building.advanceRide`) and for `check:slide-rider`, which asks it of every
+ * vertex of her drawn body — so the lift and the check that proves it cannot
+ * hold two different ideas of where the floor is.
+ */
+export function troughClearance(across: number, up: number): number {
+  const a = Math.abs(across);
+  if (a > CHUTE_ENVELOPE.halfWidth) {
+    return up >= CHUTE_ENVELOPE.above ? Infinity : CHUTE_ENVELOPE.halfWidth - a;
+  }
+  let floor = Infinity;
+  for (let k = 0; k < PROFILE.length - 1; k += 1) {
+    const [a0, u0] = PROFILE[k]!;
+    const [a1, u1] = PROFILE[k + 1]!;
+    if (a0 === a1) continue; // a side wall: the floor is the sloped and flat runs
+    const lo = Math.min(a0, a1);
+    const hi = Math.max(a0, a1);
+    if (across < lo || across > hi) continue;
+    const at = u0 + ((u1 - u0) * (across - a0)) / (a1 - a0);
+    if (at < floor) floor = at;
+  }
+  return up - floor;
+}
+
 const SEGMENTS_PER_METRE = 2.2;
 const UP = new Vector3(0, 1, 0);
 

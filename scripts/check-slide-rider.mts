@@ -109,7 +109,9 @@ const { Scene } = await import('three');
 const { World } = await import('../src/world/World.ts');
 const { Sky } = await import('../src/world/Sky.ts');
 const { Player } = await import('../src/entities/Player.ts');
-const { CHUTE_ENVELOPE } = await import('../src/world/building/SlideRide.ts');
+const { CHUTE_ENVELOPE, SlideFrame, troughClearance } = await import(
+  '../src/world/building/SlideRide.ts'
+);
 const { PLAYER_RADIUS } = await import('../src/core/constants.ts');
 const { IsoCamera } = await import('../src/core/IsoCamera.ts');
 const { Raycaster, Box3 } = await import('three');
@@ -140,6 +142,16 @@ const camera = new IsoCamera();
 const player = new Player(world.collision, camera, new Vector3(0, 0, 0));
 scene.add(player.group);
 building.attachPlayer(player);
+
+// **Dressed for the clause that measures her against the trough.** The default
+// look wears no hat, and the deepest point of her in the reviewer's ride of
+// #680 was a party hat's tip — so a bare-headed rider would pass a clause the
+// child in the game fails. Worn the way `WornHat` wears one: on `hatAnchor`.
+// `HAT_TO_WEAR` is overridable so every hat can be put through it by hand.
+const { createHat, HAT_KINDS } = await import('../src/art/models/hats.ts');
+const HAT_TO_WEAR = (process.env['SLIDE_RIDER_HAT'] ?? 'party') as (typeof HAT_KINDS)[number];
+if (!HAT_KINDS.includes(HAT_TO_WEAR)) throw new Error(`no hat called ${HAT_TO_WEAR}`);
+player.model.hatAnchor.add(createHat(HAT_TO_WEAR).root);
 
 // The chase camera decides whether she is drawn, so ask the ride the same
 // question `Game.ts` asks and apply the same rule — rather than hard-coding
@@ -181,6 +193,66 @@ function nearestT(point: Vector3): number {
     }
   }
   return best;
+}
+
+/**
+ * **The deepest any drawn vertex of `root` reaches into the trough**, in metres
+ * above the drawn surface (negative = inside the slide), and which mesh it was.
+ *
+ * Each vertex is put into the chute's own cross-section at **its own** place
+ * along the chute — a few Newton steps along the tangent from `seedT` — rather
+ * than at the rider's, because a body 1.3 m long on a bending chute is not in
+ * one cross-section. Then `troughClearance`, the drawn profile, decides.
+ *
+ * Every vertex, no striding: a stride is how a hat brim slips between samples.
+ */
+const vertexProbe = new Vector3();
+const vertexOffset = new Vector3();
+const vertexFrame = new SlideFrame();
+function deepestVertex(
+  root: { traverseVisible(fn: (o: unknown) => void): void; updateMatrixWorld(force: boolean): void },
+  seedT: number,
+): { clearance: number; part: string } {
+  root.updateMatrixWorld(true);
+  let clearance = Infinity;
+  let part = '';
+  root.traverseVisible((node) => {
+    const mesh = node as {
+      isMesh?: boolean;
+      isInstancedMesh?: boolean;
+      name: string;
+      parent: { name: string } | null;
+      matrixWorld: import('three').Matrix4;
+      geometry?: { attributes: { position?: import('three').BufferAttribute } };
+    };
+    if (!mesh.isMesh || mesh.isInstancedMesh) return;
+    const position = mesh.geometry?.attributes.position;
+    if (!position) return;
+    for (let i = 0; i < position.count; i += 1) {
+      vertexProbe.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
+      slide.group.worldToLocal(vertexProbe);
+      let t = seedT;
+      for (let step = 0; step < 4; step += 1) {
+        slide.frameAt(t, vertexFrame);
+        vertexOffset.subVectors(vertexProbe, vertexFrame.position);
+        t = Math.min(1, Math.max(0, t + vertexOffset.dot(vertexFrame.tangent) / slide.length));
+      }
+      slide.frameAt(t, vertexFrame);
+      vertexOffset.subVectors(vertexProbe, vertexFrame.position);
+      const c = troughClearance(vertexOffset.dot(vertexFrame.right), vertexOffset.dot(vertexFrame.up));
+      if (c < clearance) {
+        clearance = c;
+        part = mesh.name || mesh.parent?.name || 'unnamed mesh';
+      }
+    }
+  });
+  return { clearance, part };
+}
+
+function median(values: readonly number[]): number {
+  if (values.length === 0) return NaN;
+  const sorted = [...values].sort((x, y) => x - y);
+  return sorted[Math.floor(sorted.length / 2)]!;
 }
 
 function drawn(object: { visible: boolean; parent: unknown } | null): boolean {
@@ -437,12 +509,14 @@ let worstHeadOffChute = 0;
 let deepestInTrough = Infinity;
 let deepestPart = '';
 let deepestFrame = -1;
+/** Ridden frames with any vertex of her inside the trough, and each frame's worst. */
+let framesInside = 0;
+const perFrameDeepest: number[] = [];
 /** The shot, frame by frame, so motion can be asked about rather than assumed. */
 const shotEye: Vector3[] = [];
 const shotAim: Vector3[] = [];
 const shotBeat: number[] = [];
 const shotIsTrackside: boolean[] = [];
-const frameProbe = new Vector3();
 
 // The slide is ~65-75 m at 6.5 m/s, so 20 s is generous headroom for it to end.
 const MAX_FRAMES = 20 * 60;
@@ -524,24 +598,23 @@ const TRACKSIDE_DRIFT = 1e-6;
 const SHOT_TURN_ACCELERATION = 1;
 
 /**
- * **How deep into the trough any part of her may reach, in metres.**
+ * **How far above the drawn trough surface every vertex of her must stay, in
+ * metres: zero — no part of her inside the slide.**
  *
- * The trough's floor, from the chute's own drawn profile — `CHUTE_ENVELOPE` is
- * derived from `PROFILE`, so this is the surface she is lying on rather than a
- * number anybody chose. Below it is inside the geometry.
+ * The surface is `troughClearance`, read off the chute's own drawn `PROFILE`,
+ * so this is the geometry a child can see rather than a number anybody chose.
  *
  * This clause exists because the one above it could never have caught the
  * defect Jim found by riding. `ON_CHUTE` measures her distance to the chute's
  * **centre line** and allows 1.90 m of it, which is frame-blind: it reported a
  * comfortable "worst 0.26 m off the chute" while her **head was 0.62 m below
- * the floor** (`-0.676 m` in the trough's own frame) because she was leant onto
- * the sphere inside a trough swept about world up. A distance to a line cannot
- * see which side of a surface you are on. This asks the child's question
- * instead — *is any part of me inside the slide?* — in the chute's own
- * cross-section, and it is the clause that turns red if the rider's frame and
- * the trough's ever drift apart again.
+ * the floor** because she was leant onto the sphere inside a trough swept about
+ * world up. A distance to a line cannot see which side of a surface you are on.
+ * Its successor measured each body part's *origin* and was blind the same way
+ * one level down — see the note where it is measured. This asks the child's
+ * question instead — *is any of me inside the slide?* — of every drawn vertex.
  */
-const TROUGH_FLOOR = -CHUTE_ENVELOPE.below;
+const TROUGH_CLEARANCE_FLOOR = 0;
 
 while (frames < MAX_FRAMES) {
   const context = {
@@ -579,23 +652,29 @@ while (frames < MAX_FRAMES) {
     }
   }
 
-  // **Is any part of her inside the chute she is riding?** Asked in the
-  // trough's own cross-section, through `SlideRide.frameAt` — the single owner
-  // of that frame, the same one the sweep that drew the trough is built from.
-  // Nothing here re-derives it, which is the whole point: a second copy of the
-  // frame formula is how the rider and the trough came to disagree.
+  // **Is any part of her inside the chute she is riding?** Asked of every
+  // vertex of every visible mesh she is drawn with — hair, hat, backpack and
+  // all — in the trough's own cross-section *at that vertex's own place along
+  // the chute*, against the drawn profile (`troughClearance`).
+  //
+  // **Vertices, not part origins.** The first version of this clause measured
+  // `getWorldPosition` of each body part, which is the part's *origin*: the
+  // head's is at her neck, so a skull reaching 0.6 m below it and a party hat
+  // below that were invisible to it, and it reported +0.237 m while the
+  // reviewer measured the hat 0.72 m through the floor on 743 of 743 frames.
+  // A point that stands for a body is the "distance to a line" mistake one
+  // level down; the only honest question is about the surface she is drawn
+  // with.
   {
-    const nearest = nearestT(player.position);
-    const frame = slide.frameAt(nearest);
-    for (const [name, part] of bodyParts(player.model as never)) {
-      (part as { getWorldPosition(v: Vector3): Vector3 }).getWorldPosition(frameProbe);
-      const depth = frameProbe.sub(frame.position).dot(frame.up);
-      if (depth < deepestInTrough) {
-        deepestInTrough = depth;
-        deepestPart = name;
-        deepestFrame = ridingFrames;
-      }
+    const seedT = nearestT(player.position);
+    const worst = deepestVertex(player.group, seedT);
+    if (worst.clearance < deepestInTrough) {
+      deepestInTrough = worst.clearance;
+      deepestPart = worst.part;
+      deepestFrame = ridingFrames;
     }
+    if (worst.clearance < 0) framesInside += 1;
+    perFrameDeepest.push(worst.clearance);
   }
 
   const off = distanceToChute(player.position);
@@ -780,14 +859,15 @@ if (!Number.isFinite(deepestInTrough)) {
     'no part of the child was ever measured against the trough, so nothing below ' +
       'proves she was in it rather than through it',
   );
-} else if (deepestInTrough < TROUGH_FLOOR) {
+} else if (deepestInTrough < TROUGH_CLEARANCE_FLOOR) {
   complaints.push(
-    `the child's ${deepestPart} reached ${deepestInTrough.toFixed(3)} m in the chute's own ` +
-      `frame on frame ${deepestFrame} of ${ridingFrames}, where the trough floor is ` +
-      `${TROUGH_FLOOR.toFixed(2)} m — she is ${(TROUGH_FLOOR - deepestInTrough).toFixed(2)} m ` +
-      'inside the slide she is riding, which is drawn geometry a child can see. If this is ' +
-      "the rider's frame disagreeing with the trough's, `SlideRide.frameAt` is the single " +
-      'owner of that cross-section and everything on the ride must be placed by it',
+    `the child's ${deepestPart} reached ${(-deepestInTrough).toFixed(3)} m inside the drawn ` +
+      `trough on ridden frame ${deepestFrame} of ${ridingFrames}, and ${framesInside} of ` +
+      `${ridingFrames} frames had some vertex of her inside it (median frame's deepest ` +
+      `${median(perFrameDeepest).toFixed(3)} m) — that is drawn geometry a child can see her ` +
+      'through. `Building.advanceRide` lifts her by `Player.lowestBelowSeat`, measured off her ' +
+      'own posed vertices against the same profile; if this fires, the lift and her body ' +
+      'disagree, or `SlideRide.frameAt` has stopped being the one owner of the cross-section',
   );
 }
 
@@ -855,8 +935,10 @@ if (!Number.isFinite(deepestInTrough)) {
       `${worstTurnAccel.toFixed(3)} deg/frame^2 (allowed ${SHOT_TURN_ACCELERATION})\n`,
   );
   process.stderr.write(
-    `  deepest any part of her reached into the trough: ${deepestInTrough.toFixed(3)} m ` +
-      `(${deepestPart}, frame ${deepestFrame}); floor is ${TROUGH_FLOOR.toFixed(2)} m\n`,
+    `  her drawn vertices against the drawn trough: nearest ${deepestInTrough.toFixed(3)} m ` +
+      `(${deepestPart}, frame ${deepestFrame}), median frame's nearest ` +
+      `${median(perFrameDeepest).toFixed(3)} m, ${framesInside} of ${ridingFrames} frames with ` +
+      `any vertex inside (allowed ${TROUGH_CLEARANCE_FLOOR} m)\n`,
   );
 }
 
