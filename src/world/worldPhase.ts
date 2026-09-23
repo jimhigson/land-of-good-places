@@ -3,8 +3,8 @@
  *
  * The plan phase (`parkPlan.ts`) decides the layout, the rides' routes, the
  * crossings, the paths and the road. Everything else that stands on the lawn
- * — the fountain, the walls, the trees and bushes, the fairy-light poles, the
- * lamp posts, the rail race's trestles — is decided here, by a second
+ * — {@link WORLD_PHASE_FEATURES}, which is the one list of what that is — is
+ * decided here, by a second
  * {@link ParkSolve} over the same claims registry, after the fixed structures
  * (castle, hotel, stalls, railway, coaster, entrance) have registered their
  * colliders. Jim, 16 Sep 2026: *"each feature being based around a generic
@@ -170,6 +170,26 @@ function railRaceBuilder(
  * no booths to move (there is none today) passes one that answers `null`, and
  * every stall then simply refuses to accommodate.
  */
+/**
+ * **What the world phase builds, in order — the one owner of that list.**
+ *
+ * Anything that describes the world phase reads this rather than typing its own
+ * copy. `check:solve-cost` used to print a hand-typed list, which went stale
+ * the day #673 moved `stalls` into this phase. {@link solveWorldPhase} throws if
+ * its builders ever disagree with it, so the list cannot drift from the code
+ * that it names.
+ */
+export const WORLD_PHASE_FEATURES = [
+  'stalls',
+  'fountain',
+  'walls',
+  'trees',
+  'bushes',
+  'fairyLights',
+  'lamps',
+  RAIL_RACE_FEATURE,
+] as const;
+
 export function solveWorldPhase(
   collision: CollisionWorld,
   claims: GroundClaims,
@@ -199,6 +219,13 @@ export function solveWorldPhase(
       railRace = ride;
     }),
   ];
+  const built = builders.map((builder) => builder.name);
+  if (built.join(',') !== WORLD_PHASE_FEATURES.join(',')) {
+    throw new Error(
+      `world phase: builds [${built.join(', ')}] but WORLD_PHASE_FEATURES says ` +
+        `[${WORLD_PHASE_FEATURES.join(', ')}] — update the one list, not a copy of it`,
+    );
+  }
   lastStallBuilder = builders[0] as FeatureBuilder;
   const solve = new ParkSolve(PARK_SEED, builders, claims);
   // **How long this phase took, printed with what it produced.**

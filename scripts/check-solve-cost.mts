@@ -112,8 +112,8 @@
  *
  * ### What this check does not cover, and says so on every run
  *
- * The **world phase** (`src/world/worldPhase.ts` — fountain, walls, trees,
- * bushes, fairy poles, lamps, rail-race trestles) is a second `ParkSolve` run
+ * The **world phase** (`src/world/worldPhase.ts`; what it builds is
+ * `WORLD_PHASE_FEATURES`, printed from there) is a second `ParkSolve` run
  * inside the `World` constructor and is not measured here; nor is anything that
  * happens after the plan. Only the seven coarse plan features and the boundary
  * are budgeted.
@@ -121,6 +121,7 @@
 import { performance } from 'node:perf_hooks';
 
 import { busyLabel, busyMsOf, controlOfCpuClock, cpuMs, describeControl } from './lib/cpuClock.mts';
+import { WORLD_PHASE_FEATURES } from '../src/world/worldPhase.ts';
 
 /** One owner for the budget formula: 3x measured CPU, floored at 250 ms. */
 const BUDGET_MULTIPLIER = 3;
@@ -267,8 +268,8 @@ if (!cpuClock.usable) {
 }
 process.stderr.write(
   'check:solve-cost NOTE: this check covers the seven coarse PLAN features and the boundary only. ' +
-    'The world phase (src/world/worldPhase.ts — fountain, walls, trees, bushes, fairy poles, lamps, ' +
-    'rail-race trestles) is a second ParkSolve inside the World constructor and is NOT budgeted here, ' +
+    `The world phase (src/world/worldPhase.ts — ${WORLD_PHASE_FEATURES.join(', ')}) is a second ` +
+    'ParkSolve inside the World constructor and is NOT budgeted here, ' +
     'nor is anything after the plan. A green run says nothing about those.\n',
 );
 
