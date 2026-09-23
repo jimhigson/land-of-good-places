@@ -2264,19 +2264,24 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
 
     const geometry = new BoxGeometry(length, run.height, 0.55);
     scaleUvs(geometry, length / 3, run.height / 1.2);
+    // **Wall and coping lean as one piece: both measured up from the same
+    // foot, along the same up** — `placeOnSphere`, the way every tree's trunk
+    // and canopy are placed. They used to be leant each about its own centre
+    // (`standOnSphere`), and those centres are at different heights, so the
+    // lean slid the coping sideways off the wall by its height times the tilt:
+    // about 9 cm on the canonical seed, which ate its 8.5 cm overhang on one
+    // side and put its face 8 mm from the wall's, same way round —
+    // `check:coplanar` `stone-walls` Box|Box, 0.152 m². Measured from one foot
+    // the coping sits centred on its wall wherever the park leans.
     const wall = new Mesh(geometry, wallMaterial);
-    wall.position.set(midX, base + run.height / 2, midZ);
-    wall.rotation.y = -angle;
-    standOnSphere(wall);
+    placeOnSphere(new Vector3(midX, base + run.height / 2, midZ), -angle, wall.position, wall.quaternion);
     wall.castShadow = true;
     wall.receiveShadow = true;
     group.add(wall);
 
     // A rounded coping stone along the top — reads as "sit on me".
     const coping = new Mesh(new BoxGeometry(length + 0.2, 0.16, 0.72), copingMaterial);
-    coping.position.set(midX, base + run.height + 0.08, midZ);
-    coping.rotation.y = -angle;
-    standOnSphere(coping);
+    placeOnSphere(new Vector3(midX, base + run.height + 0.08, midZ), -angle, coping.position, coping.quaternion);
     coping.castShadow = true;
     coping.receiveShadow = true;
     group.add(coping);
