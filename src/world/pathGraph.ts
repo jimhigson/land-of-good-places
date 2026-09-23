@@ -11,6 +11,9 @@ import {
   pathSurfaceMaterial,
 } from './pathSurface';
 import { terrainHeight } from './terrain';
+import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../core/constants';
+import { cameraOffset } from '../core/cameraRig';
+import { DEG } from '../core/mathUtils';
 import {
   curvePoints,
   pathDivisions,
@@ -201,6 +204,8 @@ interface DrawnLayer {
   readonly lift: number;
 }
 let drawnLayers: DrawnLayer[] = [];
+/** Decides which kerb triangles are buried — rebuilt with the paths, re-asked after a drape. */
+let kerbCover: KerbCover | null = null;
 
 /**
  * Builds the whole path network as two meshes: a cream kerb and the sandy
@@ -213,16 +218,27 @@ export function buildPaths(): Mesh[] {
   const surface = new GeometryBuilder();
   const kerb = new GeometryBuilder();
 
-  for (const route of ROUTES) {
+  // Every triangle of paving is filed by the route that laid it, so the kerb
+  // can later leave out what another route's paving buries — see `KerbCover`.
+  const surfaceOwners: number[] = [];
+  const kerbOwners: number[] = [];
+  const own = (list: number[], builder: GeometryBuilder, owner: number): void => {
+    while (list.length < builder.triangleCount) list.push(owner);
+  };
+  ROUTES.forEach((route, owner) => {
     const curve = routeCurve(route);
     const divisions = pathDivisions(curve);
     addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT);
+    own(surfaceOwners, surface, owner);
     addRibbonKerb(kerb, curve, route.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
+    own(kerbOwners, kerb, owner);
     recordSamples(curve, divisions, route.width / 2);
-  }
+  });
 
   addDisc(surface, PLAZA.x, PLAZA.z, PLAZA.radius, 48, 5, PATH_SURFACE_LIFT);
+  own(surfaceOwners, surface, PLAZA_OWNER);
   addAnnulusKerb(kerb, PLAZA.x, PLAZA.z, PLAZA.radius, PLAZA.radius + PATH_KERB_OVERHANG * 2, 48, PATH_KERB_LIFT);
+  own(kerbOwners, kerb, PLAZA_OWNER);
 
   const surfaceMesh = new Mesh(surface.build(), pathSurfaceMaterial());
   surfaceMesh.name = 'path-surface';
@@ -236,6 +252,8 @@ export function buildPaths(): Mesh[] {
     { mesh: kerbMesh, lift: PATH_KERB_LIFT },
     { mesh: surfaceMesh, lift: PATH_SURFACE_LIFT },
   ];
+  kerbCover = new KerbCover(surface, surfaceOwners, kerb, kerbOwners, kerbMesh, surfaceMesh);
+  kerbCover.apply();
 
   // Tell the router where the paving went (issue #416, `world/paving.ts`).
   // The same `samples` and the same `PLAZA` disc `distanceToPath` answers
@@ -363,6 +381,9 @@ export function drapePathsOverBridges(
     normal.needsUpdate = true;
     mesh.geometry.computeBoundingSphere();
   }
+  // The drape moves paving and kerb apart in height, so what is buried has to
+  // be asked again of the heights as they now stand.
+  kerbCover?.apply();
 }
 
 // ---------------------------------------------------------------- internals
@@ -573,9 +594,364 @@ function addDisc(
   }
 }
 
+// ------------------------------------------------------ the kerb's cover
+
+/** A convex polygon in plan, `(x, z)` corners in order. */
+type PlanPolygon = readonly (readonly [number, number])[];
+
+/** The owner id the plaza's disc and annulus are filed under. */
+const PLAZA_OWNER = -1;
+
+/** Pieces smaller than this in plan are dropped, m². A kerb sliver this thin is float noise. */
+const KERB_SLIVER_AREA = 1e-6;
+
+/**
+ * **How far above the kerb paving may lie and still bury it**, metres: twice
+ * the drawn difference between the two lifts (`PATH_SURFACE_LIFT -
+ * PATH_KERB_LIFT`, 25 mm).
+ *
+ * Buried means *laid on top of it*, not *somewhere above it*. The paving is a
+ * ribbon with no thickness and no skirt, so kerb under it is hidden only where
+ * the gap is too thin to see into from the one camera: at its ~38° elevation a
+ * gap of `h` shows kerb up to `h / tan 38°` in from the paving's edge — 3 cm
+ * at the drawn 25 mm. Paving a metre overhead (a route carried over a bridge
+ * across another route's kerb) hides nothing, and kerb *above* paving (a kerb
+ * carried onto a deck over paving left on the ground) is the visible surface.
+ * Both happen: #701's first version tested plan alone and dropped kerb up to
+ * 2.03 m *above* its "cover" on the canonical seed, visible on 9 of 10 seeds.
+ */
+const KERB_BURY_MAX = 2 * (PATH_SURFACE_LIFT - PATH_KERB_LIFT);
+
+/** Float noise in a height compared between two meshes laid by the same maths, metres. */
+const KERB_FLOAT = 1e-4;
+
+/** A kerb triangle whose plan another route's paving covers, and by what. */
+interface KerbCandidate {
+  /** Its triangle number in the kerb's full index. */
+  readonly triangle: number;
+  /** Its three kerb vertex indices. */
+  readonly corners: readonly [number, number, number];
+  readonly plan: [number, number][];
+  /** The triangle and its {@link sightShadow} — what has to be covered for it to be out of sight. */
+  readonly sight: [number, number][];
+  /** Every other-owner paving triangle overlapping `sight` in plan, with the overlap polygon. */
+  readonly covers: readonly {
+    readonly corners: readonly [number, number, number];
+    readonly plan: PlanPolygon;
+    readonly overlap: PlanPolygon;
+  }[];
+}
+
+/**
+ * **Where the paving lies on top of the kerb, so the kerb is not drawn there.**
+ *
+ * Each route's kerb is two bands along its own edges, and at a junction those
+ * bands run on under the *other* route's surface, 25 mm down. That is a buried
+ * face, invisible only while 25 mm stays 25 mm: over a bridge the drape lifts
+ * vertices one by one, and the triangles straddling the deck's edge become
+ * steep ramps — two routes' ramps meeting at a junction there come out within
+ * a centimetre of one plane, same way up. `check:coplanar`:
+ * `path-kerb|path-surface`, 0.651 m² at 7.7 mm on seed 24 and 0.200 m² at
+ * 9.9 mm on the canonical seed. `ART_DIRECTION.md` §7's cure is to delete the
+ * face nobody can see.
+ *
+ * A kerb triangle is dropped only when other routes' face-up paving covers
+ * **all** of it in plan — and the strip its sight-lines cross on the way to the
+ * camera, {@link sightShadow} — **and** lies on top of it — between 0 and {@link KERB_BURY_MAX}
+ * above it — over every part of the overlap. Both are exact: the plan test is a
+ * convex polygon difference (never a capsule, which overstates the ribbon), and
+ * the height test compares the two triangles' planes at every corner of their
+ * overlap polygon, which bounds it everywhere between (both are linear there).
+ * Only paving that passes the height test counts towards the cover.
+ *
+ * The plan half is decided once, when the paths are drawn — plan never moves.
+ * The height half is decided by {@link apply}, which reads the meshes' current
+ * vertices, so it is asked again after `drapePathsOverBridges` has moved them:
+ * before a drape every route lies on the ground and 25 mm is 25 mm everywhere.
+ * `apply` rewrites the kerb's index only; every vertex stays where it was laid,
+ * so per-vertex measures of the kerb (the bridge-carrying invariant counts
+ * them) are unchanged. A route's own surface is never subtracted from its own
+ * kerb: the two share an edge by construction.
+ *
+ * **Whole triangles only.** Cutting partly covered triangles down to their
+ * uncovered part was tried and is worse: `check:coplanar` measures a pair of
+ * triangles by their furthest vertices, so small pieces of kerb that were
+ * always within a few millimetres of the coarse terrain mesh became findings
+ * the whole triangle had hidden (0.755 m² of `path-kerb|terrain` on seed 11).
+ */
+class KerbCover {
+  private readonly all: number[];
+  private readonly candidates: KerbCandidate[] = [];
+  private readonly kerbMesh: Mesh;
+  private readonly surfaceMesh: Mesh;
+
+  constructor(
+    surface: GeometryBuilder,
+    surfaceOwners: readonly number[],
+    kerb: GeometryBuilder,
+    kerbOwners: readonly number[],
+    kerbMesh: Mesh,
+    surfaceMesh: Mesh,
+  ) {
+    this.kerbMesh = kerbMesh;
+    this.surfaceMesh = surfaceMesh;
+    this.all = Array.from(kerbMesh.geometry.index?.array ?? []);
+
+    // The paving, in a plan grid.
+    const paving: { owner: number; corners: [number, number, number]; plan: PlanPolygon; box: Box }[] = [];
+    const grid = new Map<string, number[]>();
+    for (let t = 0; t < surface.triangleCount; t += 1) {
+      const corners = surface.triangleAt(t);
+      const plan = corners.map((i) => surface.planAt(i));
+      // Only paving the camera sees the top of can hide anything. A ribbon
+      // that folds back on itself (a hairpin tighter than its own half-width)
+      // lays some triangles wound face-down, and `FrontSide` culls them: kerb
+      // under one of those is on screen. Pool seed 451 has one, at (-9.0, -4.4).
+      if (facesUp(plan) <= 0) continue;
+      const box = boxOf(plan);
+      const id = paving.push({ owner: surfaceOwners[t] as number, corners, plan, box }) - 1;
+      for (const key of cellsOf(box)) {
+        const list = grid.get(key);
+        if (list) list.push(id);
+        else grid.set(key, [id]);
+      }
+    }
+
+    // Every kerb triangle that the union of other routes' paving covers in plan.
+    for (let t = 0; t < kerb.triangleCount; t += 1) {
+      const corners = kerb.triangleAt(t);
+      const plan = corners.map((i) => kerb.planAt(i));
+      const sight = sightShadow(plan);
+      const box = boxOf(sight);
+      const owner = kerbOwners[t] as number;
+      const seen = new Set<number>();
+      const covers: KerbCandidate['covers'][number][] = [];
+      let uncovered: [number, number][][] = [sight];
+      for (const key of cellsOf(box)) {
+        for (const id of grid.get(key) ?? []) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const cover = paving[id]!;
+          if (cover.owner === owner || !boxesOverlap(cover.box, box)) continue;
+          const overlap = intersectConvex(sight, cover.plan);
+          if (overlap.length < 3 || Math.abs(signedArea(overlap)) < KERB_SLIVER_AREA) continue;
+          covers.push({ corners: cover.corners, plan: cover.plan, overlap });
+          uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
+        }
+      }
+      if (uncovered.length === 0) this.candidates.push({ triangle: t, corners, plan, sight, covers });
+    }
+  }
+
+  /** Re-decide which candidates are buried, from the meshes' current heights, and rewrite the kerb's index. */
+  apply(): void {
+    const kerbY = this.kerbMesh.geometry.getAttribute('position');
+    const surfaceY = this.surfaceMesh.geometry.getAttribute('position');
+    const kerbAt = (corners: readonly [number, number, number], plan: PlanPolygon) =>
+      planeHeight(plan, corners.map((i) => kerbY.getY(i)) as [number, number, number]);
+    const dropped = new Set<number>();
+    for (const candidate of this.candidates) {
+      const kerbHeight = kerbAt(candidate.corners, candidate.plan);
+      let uncovered: [number, number][][] = [candidate.sight];
+      for (const cover of candidate.covers) {
+        const coverHeight = planeHeight(
+          cover.plan,
+          cover.corners.map((i) => surfaceY.getY(i)) as [number, number, number],
+        );
+        const onTop = cover.overlap.every(([x, z]) => {
+          const gap = coverHeight(x, z) - kerbHeight(x, z);
+          return gap >= -KERB_FLOAT && gap <= KERB_BURY_MAX;
+        });
+        if (!onTop) continue;
+        uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
+        if (uncovered.length === 0) break;
+      }
+      if (uncovered.length === 0) dropped.add(candidate.triangle);
+    }
+    const index: number[] = [];
+    for (let t = 0; t < this.all.length / 3; t += 1) {
+      if (dropped.has(t)) continue;
+      index.push(this.all[t * 3] as number, this.all[t * 3 + 1] as number, this.all[t * 3 + 2] as number);
+    }
+    this.kerbMesh.geometry.setIndex(index);
+  }
+}
+
+/**
+ * The camera's direction, unit length — the same derivation `IsoCamera` and
+ * `check:coplanar` use, from the one yaw and pitch this game has.
+ */
+const EYE = cameraOffset(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG, 1);
+
+/**
+ * **A kerb triangle together with the ground its sight-lines to the camera
+ * cross while they are still under paving {@link KERB_BURY_MAX} above it.**
+ *
+ * Paving is a ribbon with no skirt, so kerb under it is hidden only if every
+ * line from the kerb to the camera meets the paving before it climbs out from
+ * under its edge. A sight-line rises `EYE.y` per unit and runs `EYE.xz` across
+ * the ground, so by the time it is `KERB_BURY_MAX` up it has moved
+ * `KERB_BURY_MAX · EYE.xz / EYE.y` in plan — about 3 cm at 38°. Requiring the
+ * paving to cover the triangle swept that far towards the camera, not just the
+ * triangle, is what keeps a kerb triangle hard against a paving edge from
+ * being dropped while it still shows through the slot under it (one such, on
+ * pool seed 451, 22 mm under paving and in view).
+ */
+function sightShadow(plan: readonly [number, number][]): [number, number][] {
+  const reach = KERB_BURY_MAX / EYE.y;
+  const shifted = plan.map(([x, z]) => [x + EYE.x * reach, z + EYE.z * reach] as [number, number]);
+  return convexHull([...plan, ...shifted]);
+}
+
+/** Andrew's monotone chain; anticlockwise in (x, z). */
+function convexHull(points: readonly [number, number][]): [number, number][] {
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (list: [number, number][]): [number, number][] => {
+    const out: [number, number][] = [];
+    for (const p of list) {
+      while (out.length >= 2 && cross(out[out.length - 2]!, out[out.length - 1]!, p) <= 0) out.pop();
+      out.push(p);
+    }
+    out.pop();
+    return out;
+  };
+  return [...half(sorted), ...half([...sorted].reverse())];
+}
+
+interface Box {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
+function boxOf(plan: readonly (readonly [number, number])[]): Box {
+  const xs = plan.map((p) => p[0]);
+  const zs = plan.map((p) => p[1]);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+}
+
+function boxesOverlap(a: Box, b: Box): boolean {
+  return a.maxX > b.minX && a.minX < b.maxX && a.maxZ > b.minZ && a.minZ < b.maxZ;
+}
+
+/** The height of the plane through a triangle's three corners, as a function of plan position. */
+function planeHeight(
+  plan: PlanPolygon,
+  heights: readonly [number, number, number],
+): (x: number, z: number) => number {
+  const [[x0, z0], [x1, z1], [x2, z2]] = plan as [[number, number], [number, number], [number, number]];
+  const det = (x1 - x0) * (z2 - z0) - (x2 - x0) * (z1 - z0);
+  const [h0, h1, h2] = heights;
+  if (Math.abs(det) < 1e-12) return () => Math.max(h0, h1, h2);
+  return (x, z) => {
+    const w1 = ((x - x0) * (z2 - z0) - (x2 - x0) * (z - z0)) / det;
+    const w2 = ((x1 - x0) * (z - z0) - (x - x0) * (z1 - z0)) / det;
+    return (1 - w1 - w2) * h0 + w1 * h1 + w2 * h2;
+  };
+}
+
+/**
+ * Positive when a triangle given in plan, in its index order, is wound to face
+ * the sky — the `y` of `(b - a) × (c - a)`.
+ */
+function facesUp(plan: readonly (readonly [number, number])[]): number {
+  const [[ax, az], [bx, bz], [cx, cz]] = plan as [[number, number], [number, number], [number, number]];
+  return (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+}
+
+/** The intersection of two convex polygons in plan. */
+function intersectConvex(piece: readonly [number, number][], cover: PlanPolygon): [number, number][] {
+  const orientation = Math.sign(signedArea(cover));
+  if (orientation === 0) return [];
+  let rest: [number, number][] = [...piece];
+  for (let k = 0; k < cover.length && rest.length >= 3; k += 1) {
+    const [ax, az] = cover[k]!;
+    const [bx, bz] = cover[(k + 1) % cover.length]!;
+    rest = clipToSide(rest, ([x, z]) => orientation * ((bx - ax) * (z - az) - (bz - az) * (x - ax)));
+  }
+  return rest;
+}
+
+/** Grid cell side for {@link KerbCover}'s lookup, metres. */
+const KERB_COVER_CELL = 4;
+
+function cellsOf(box: Box): string[] {
+  const keys: string[] = [];
+  for (let i = Math.floor(box.minX / KERB_COVER_CELL); i <= Math.floor(box.maxX / KERB_COVER_CELL); i += 1) {
+    for (let j = Math.floor(box.minZ / KERB_COVER_CELL); j <= Math.floor(box.maxZ / KERB_COVER_CELL); j += 1) {
+      keys.push(`${i},${j}`);
+    }
+  }
+  return keys;
+}
+
+function signedArea(polygon: readonly (readonly [number, number])[]): number {
+  let area = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const [ax, az] = polygon[i]!;
+    const [bx, bz] = polygon[(i + 1) % polygon.length]!;
+    area += ax * bz - bx * az;
+  }
+  return area / 2;
+}
+
+/**
+ * `piece` minus the convex `cover`, as convex pieces in `piece`'s own winding
+ * — or `null` if the cover takes nothing measurable from it.
+ *
+ * The standard split: walking the cover's edges, whatever of the piece lies
+ * outside edge *k* but inside edges *0..k-1* is one piece of the answer, and
+ * whatever is inside every edge is the part covered.
+ */
+function subtractConvex(
+  piece: readonly [number, number][],
+  cover: PlanPolygon,
+): [number, number][][] | null {
+  const orientation = Math.sign(signedArea(cover));
+  if (orientation === 0) return null;
+  const out: [number, number][][] = [];
+  let rest: [number, number][] = [...piece];
+  for (let k = 0; k < cover.length && rest.length >= 3; k += 1) {
+    const [ax, az] = cover[k]!;
+    const [bx, bz] = cover[(k + 1) % cover.length]!;
+    // > 0 inside this edge's half-plane, for either winding of the cover.
+    const side = ([x, z]: [number, number]): number =>
+      orientation * ((bx - ax) * (z - az) - (bz - az) * (x - ax));
+    const outside = clipToSide(rest, (p) => -side(p));
+    if (outside.length >= 3 && Math.abs(signedArea(outside)) >= KERB_SLIVER_AREA) out.push(outside);
+    rest = clipToSide(rest, side);
+  }
+  if (rest.length < 3 || Math.abs(signedArea(rest)) < KERB_SLIVER_AREA) return null;
+  return out;
+}
+
+/** Sutherland–Hodgman against one half-plane: keeps where `side(p) >= 0`. */
+function clipToSide(
+  polygon: readonly [number, number][],
+  side: (p: [number, number]) => number,
+): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < polygon.length; i += 1) {
+    const p = polygon[i]!;
+    const q = polygon[(i + 1) % polygon.length]!;
+    const sp = side(p);
+    const sq = side(q);
+    if (sp >= 0) out.push(p);
+    if ((sp > 0 && sq < 0) || (sp < 0 && sq > 0)) {
+      const t = sp / (sp - sq);
+      out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+    }
+  }
+  return out;
+}
+
 // Derived from a decision the park's driver may unwind: forgotten with it.
 registerPlanCache(() => {
   cachedBorderSegments = null;
   drawnLayers = [];
+  kerbCover = null;
   nextRun = 0;
 });

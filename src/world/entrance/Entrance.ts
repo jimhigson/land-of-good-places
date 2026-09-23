@@ -896,7 +896,7 @@ function buildGatewayPath(
     const road = densify(
       entranceRoadInnerEdgeAcross((fromX + toX) / 2, Math.abs(toX - fromX) / 2),
       GATEWAY_PATH_COLUMN,
-    );
+    ).map((point) => ({ ...point, y: entranceRoadEdgeHeight(point.x, point.z) }));
     if (road.length < 2) return null;
     // **Each column stops where the paving under *it* starts**, so the far end
     // follows the edge of what it meets instead of cutting across it.
@@ -1034,6 +1034,51 @@ function densify(
 const ROAD_COLUMNS = 16;
 
 /**
+ * How far the curved road is laid above the terrain, metres. Its own number,
+ * not the park paths' `PATH_SURFACE_LIFT` (0.055): this used to be a literal
+ * whose comment said it was "the same lift the park's own paths take", and it
+ * was not. Nothing needs the two to agree now — the gateway path's road end
+ * takes its height from {@link entranceRoadEdgeHeight}, which reads this.
+ */
+const ROAD_LIFT = 0.06;
+
+/**
+ * **The height of the drawn road's inner edge, at a point on that edge.**
+ *
+ * The road's column 0 is `entranceRoadInnerEdgeRing()`, each vertex at
+ * `terrainHeight + ROAD_LIFT`, and between two of them the drawn edge is the
+ * straight chord. A point anywhere on the edge — a ring vertex, a band edge
+ * cut into a chord, a point `densify` added along one — therefore has exactly
+ * one height on the road: the chord's, not the terrain's. The gateway path's
+ * road end is laid at these heights so it meets the road on the road's own
+ * edge. Laid at `terrainHeight + PATH_SURFACE_LIFT` instead it sat 5 mm below
+ * the road at every shared vertex and off the chord between them, and
+ * `check:coplanar` read that step as an overlap: 0.003 m² at 7.9 mm on seed
+ * 131, `entrance-gateway-path|entrance-road-kerb`.
+ */
+function entranceRoadEdgeHeight(x: number, z: number): number {
+  const ring = entranceRoadInnerEdgeRing();
+  let best = terrainHeight(x, z) + ROAD_LIFT;
+  let bestOff = Infinity;
+  for (let i = 1; i < ring.length; i += 1) {
+    const a = ring[i - 1] as { x: number; z: number };
+    const b = ring[i] as { x: number; z: number };
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const lengthSquared = dx * dx + dz * dz;
+    if (lengthSquared === 0) continue;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / lengthSquared));
+    const off = Math.hypot(a.x + dx * t - x, a.z + dz * t - z);
+    if (off >= bestOff) continue;
+    bestOff = off;
+    const ha = terrainHeight(a.x, a.z) + ROAD_LIFT;
+    const hb = terrainHeight(b.x, b.z) + ROAD_LIFT;
+    best = ha + (hb - ha) * t;
+  }
+  return best;
+}
+
+/**
  * **One curved ribbon of road, swept along the route's own stations.**
  *
  * The straight {@link roadRibbon} below cannot lay this: it builds an
@@ -1080,9 +1125,8 @@ function curvedRoadRibbon(
       const x = inner.x - normal.x * offset;
       const z = inner.z - normal.z * offset;
       const index = row * (across + 1) + column;
-      // A hand's breadth up, so it never z-fights the lawn — the same lift the
-      // park's own paths take.
-      position.setXYZ(index, x, terrainHeight(x, z) + 0.06, z);
+      // A hand's breadth up, so it never z-fights the lawn.
+      position.setXYZ(index, x, terrainHeight(x, z) + ROAD_LIFT, z);
       uv.setXY(index, t, station.at / ROAD_TILE_METRES);
     }
   }
