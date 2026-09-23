@@ -78,6 +78,7 @@ import { STATION_GAP } from '../src/world/train/fence.ts';
 import { BRIDGE_RISE } from '../src/world/train/clearance.ts';
 import { bridgeHeightAt } from '../src/world/train/bridges.ts';
 import type { InteractZone } from '../src/world/interact.ts';
+import { distanceToPath } from '../src/world/pathGraph.ts';
 import { LAYOUT_REFUSALS_IGNORED } from '../src/world/parkLayout.ts';
 
 // ---------------------------------------------------------------- the ratchet
@@ -962,6 +963,48 @@ function lumpsUnder(root: import('three').Object3D): Lump[] {
   }
 }
 
+// ------------------------------- 3b. no finish-rainbow leg stands in the way
+//
+// `test:procgen`'s `finishRainbowStandsOnTheGround` asks this on its five seeds;
+// this asks it on **every seed this script is run for** — which, through
+// `check:every-seed-builds`, is the sixteen-seed sweep. Seed 6 drew
+// `spur-exit-railRace` 0.08 m from a race-ring leg and nothing saw it, because
+// seed 6 is not a procgen seed. Measured off the **drawn** legs (their world
+// position) against the drawn paving (`distanceToPath`, the ribbon's own edge),
+// with the game's bar: `WALKABLE_GAP`, two player radii.
+{
+  const WALKABLE_GAP = PLAYER_RADIUS * 2;
+  const legPosition = new Vector3();
+  let legs = 0;
+  let closest = Infinity;
+  for (const groupName of ['railRace:race-ring', 'railRace:walk-past-ring']) {
+    const group = world.railRace.group.getObjectByName(groupName);
+    if (!group) continue;
+    group.updateMatrixWorld(true);
+    group.traverse((child) => {
+      if (!/^railRace:finish-rainbow-leg-\d+-(inner|outer)$/.test(child.name)) return;
+      legs += 1;
+      child.getWorldPosition(legPosition);
+      const gap = distanceToPath(legPosition.x, legPosition.z);
+      closest = Math.min(closest, gap);
+      if (gap < WALKABLE_GAP) {
+        report({
+          invariant: 3,
+          key: 'rainbow.inPath',
+          measured: 1,
+          detail:
+            `${child.name} (${groupName}) stands ${gap.toFixed(2)} m from paving at ` +
+            `(${legPosition.x.toFixed(1)}, ${legPosition.z.toFixed(1)}) — a child needs ${WALKABLE_GAP.toFixed(2)} m to walk past`,
+        });
+      }
+    });
+  }
+  table.push(`rainbow legs: ${legs} drawn, closest to paving ${closest.toFixed(2)} m`);
+  if (legs === 0) {
+    process.stderr.write('check:park rainbow.inPath: no finish-rainbow legs drawn on this seed — the clause asserted nothing\n');
+  }
+}
+
 // ------------------------------------------------------------------- summary
 
 const elapsed = performance.now() - started;
@@ -980,8 +1023,8 @@ for (const finding of findings) {
 // prefer. The canonical park is held to all of them.
 const HARD_KEYS = new Set(
   ratchetEnforced
-    ? ['route.unreachable', 'route.crossesRail', 'poi.nospot', 'poi.stranded', 'poi.split', 'boot.asserts', 'layout.falseRefusal']
-    : ['route.unreachable', 'route.crossesRail', 'boot.asserts', 'layout.falseRefusal'],
+    ? ['route.unreachable', 'route.crossesRail', 'poi.nospot', 'poi.stranded', 'poi.split', 'boot.asserts', 'layout.falseRefusal', 'rainbow.inPath']
+    : ['route.unreachable', 'route.crossesRail', 'boot.asserts', 'layout.falseRefusal', 'rainbow.inPath'],
 );
 const regressions: string[] = [];
 for (const [key, amount] of measured) {
