@@ -148,14 +148,61 @@ const stripYamlComments = (text: string): string =>
     .map((line) => line.replace(/\s#.*$/, ''))
     .join('\n');
 
+/** A workflow's `pnpm run <name> <args>`, with any matrix template expanded. */
+interface Invocation {
+  readonly name: string;
+  readonly args: readonly string[];
+  readonly file: string;
+}
+
+/** Instrument failures found while reading the workflows; reported with the rest. */
+const instrumentFailures: string[] = [];
+
+/**
+ * **Expand `${{ matrix.KEY }}` into one invocation per value of `KEY: [..]`.**
+ *
+ * `checks.yml` runs the chain as a matrix — `pnpm run check:watchdog
+ * check:shard-${{ matrix.shard }}` over `shard: [1, 2, ...]` — so the script a
+ * shard runs is only written down as a template. Reading the template
+ * literally would see `check:shard-` and nothing else, and every step would
+ * look orphaned; ignoring the argument would fall back to the watchdog's
+ * default (`check`, the whole chain) and every step would look covered **even
+ * if a shard were dropped from the matrix** — the silent direction. So the
+ * matrix is read, and a template whose key has no list, or two lists, is an
+ * instrument failure rather than a guess.
+ */
+const expandMatrix = (text: string, line: string, file: string): string[] => {
+  const template = /\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}/.exec(line);
+  if (!template) return [line];
+  const key = template[1]!;
+  const lists = [...text.matchAll(new RegExp(`^\\s*${key}:\\s*\\[([^\\]]*)\\]\\s*$`, 'gm'))];
+  if (lists.length !== 1) {
+    instrumentFailures.push(
+      `instrument: ${file} uses \${{ matrix.${key} }} but declares ${lists.length} \`${key}: [...]\` lists — ` +
+        'cannot tell which scripts it runs. Keep the matrix as one inline list per key',
+    );
+    return [];
+  }
+  const values = lists[0]![1]!
+    .split(',')
+    .map((v) => v.trim().replace(/^["']|["']$/g, ''))
+    .filter(Boolean);
+  return values.flatMap((value) => expandMatrix(text, line.replace(template[0], value), file));
+};
+
 /** Every `pnpm run X` / `npm run X` a workflow invokes: CI's real entry points. */
 const workflowDir = join(REPO, '.github', 'workflows');
-const entryPoints = new Set<string>();
+const invocations: Invocation[] = [];
 const workflowFiles = readdirSync(workflowDir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
 for (const file of workflowFiles) {
   const text = stripYamlComments(readFileSync(join(workflowDir, file), 'utf8'));
-  for (const m of text.matchAll(/(?:pnpm|npm)\s+run\s+([A-Za-z0-9:_-]+)/g)) entryPoints.add(m[1]!);
+  for (const m of text.matchAll(/(?:pnpm|npm)\s+run\s+([A-Za-z0-9:_-]+)([^\n&|;]*)/g)) {
+    for (const expanded of expandMatrix(text, m[2] ?? '', file)) {
+      invocations.push({ name: m[1]!, args: expanded.trim().split(/\s+/).filter(Boolean), file });
+    }
+  }
 }
+const entryPoints = new Set(invocations.map((i) => i.name));
 
 /**
  * **Runners: scripts that run another script named as a bare argument.**
@@ -187,42 +234,81 @@ for (const file of workflowFiles) {
  * explicitly, and the list is **ratcheted**: a listed runner that matches no
  * script body fails this check rather than rotting into a lie.
  */
-const RUNNERS: ReadonlyArray<{ file: string; argIndex: number; why: string }> = [
+const RUNNERS: ReadonlyArray<{
+  file: string;
+  /** Which positional argument names the script to run. */
+  argIndex: number;
+  /** Flags that take a value, so the value is not mistaken for a positional. */
+  valueFlags: readonly string[];
+  /** What the runner runs when given no script at all. */
+  defaultTarget: string;
+  why: string;
+}> = [
   {
     file: 'scripts/check-watchdog.mts',
     argIndex: 0,
+    valueFlags: ['--job'],
+    defaultTarget: 'check',
     why: '#523 — runs the named script under a clock set inside the job timeout, so a chain overrun goes red naming its step instead of reporting as cancelled',
   },
 ];
 
-/** Script names a runner is given as an argument, e.g. `check` and `test:procgen`. */
-const runnerTargets = (body: string): string[] => {
+/**
+ * Script names a runner is given, e.g. `check:shard-3` and `test:procgen`.
+ *
+ * The arguments are the script body's own **followed by whatever the caller
+ * passed** — pnpm appends `pnpm run check:watchdog check:shard-3`'s
+ * `check:shard-3` to the body, which is how one `check:watchdog` entry serves
+ * every shard. A runner given no script at all runs its default, and that is
+ * reported as reached too: it is what would really execute.
+ */
+const runnerTargets = (body: string, passed: readonly string[]): string[] => {
   const found: string[] = [];
   for (const runner of RUNNERS) {
     const at = body.indexOf(runner.file);
     if (at < 0) continue;
-    const args = body
-      .slice(at + runner.file.length)
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-    const target = args[runner.argIndex];
-    if (target !== undefined) found.push(target);
+    const args = [
+      ...body
+        .slice(at + runner.file.length)
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean),
+      ...passed,
+    ];
+    const positional: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (runner.valueFlags.includes(args[i]!)) i++;
+      else if (args[i] !== '--') positional.push(args[i]!);
+    }
+    found.push(positional[runner.argIndex] ?? runner.defaultTarget);
   }
   return found;
 };
 
 /** Expand through the scripts object: a step that calls a step is covered too. */
 const reachable = new Set<string>();
-const visit = (name: string, depth: number): void => {
-  if (depth > 16 || reachable.has(name)) return;
+/** Scripts a workflow runs *directly* — itself, or as a runner's target. */
+const directlyRunByCi: string[] = [];
+const seen = new Set<string>();
+const visit = (name: string, depth: number, passed: readonly string[] = []): void => {
+  const key = `${name} ${passed.join(' ')}`;
+  if (depth > 16 || seen.has(key)) return;
   const body = scripts[name];
   if (body === undefined) return;
+  seen.add(key);
   reachable.add(name);
   for (const m of body.matchAll(/(?:pnpm|npm)\s+run\s+([A-Za-z0-9:_-]+)/g)) visit(m[1]!, depth + 1);
-  for (const target of runnerTargets(body)) visit(target, depth + 1);
+  for (const target of runnerTargets(body, passed)) {
+    if (depth === 0) directlyRunByCi.push(target);
+    visit(target, depth + 1);
+  }
 };
-for (const entry of entryPoints) visit(entry, 0);
+for (const invocation of invocations) {
+  if (scripts[invocation.name] !== undefined && !RUNNERS.some((r) => scripts[invocation.name]!.includes(r.file))) {
+    directlyRunByCi.push(invocation.name);
+  }
+  visit(invocation.name, 0, invocation.args);
+}
 
 /**
  * An **aggregate** is a `check:*` script whose body is nothing but other `run`
@@ -277,17 +363,87 @@ for (const runner of RUNNERS) {
   }
 }
 
-const chainSteps = [...(scripts['check'] ?? '').matchAll(/(?:pnpm|npm)\s+run\s+([A-Za-z0-9:_-]+)/g)];
-if (chainSteps.length < 20) {
-  failures.push(`instrument: the "check" chain parsed to only ${chainSteps.length} steps, which is far fewer than this repo has — the chain regex has stopped matching`);
+failures.push(...instrumentFailures);
+
+/**
+ * ## The shards: every step of the gate runs, exactly once, in CI
+ *
+ * The chain outgrew one runner, so `check` is a list of `check:shard-N`
+ * scripts and `checks.yml` runs one per runner. That split is exactly where a
+ * step can go quiet: a shard missing from the matrix, a step pasted into two
+ * shards (run twice, harmless but a sign the map is being edited by hand), or
+ * a step left in `check` itself where only a local run would ever see it. So:
+ *
+ * 1. `check` is **nothing but** `pnpm run check:shard-N` parts, naming every
+ *    defined shard exactly once — the shards *are* the chain, not a copy of it;
+ * 2. every step (each `&&` part, `tsc --noEmit` included) is in **exactly
+ *    one** shard;
+ * 3. every shard is run **directly** by a workflow, exactly once — not merely
+ *    reachable through `check`, which no workflow runs.
+ *
+ * Steps are compared as **sets of parsed parts**, never by count (a count
+ * cannot see a swap) and never by grep (script names are prefixes of each
+ * other).
+ */
+const parts = (body: string): string[] =>
+  body
+    .split('&&')
+    .map((part) => part.trim())
+    .filter(Boolean);
+const SHARD = /^check:shard-\d+$/;
+const shardNames = Object.keys(scripts).filter((k) => SHARD.test(k));
+const checkParts = parts(scripts['check'] ?? '');
+const inCheck: string[] = [];
+for (const part of checkParts) {
+  const m = /^(?:pnpm|npm)\s+run\s+(\S+)$/.exec(part);
+  if (!m || !SHARD.test(m[1]!)) {
+    failures.push(
+      `"check" contains \`${part}\`, which is not a shard — CI runs shards, not "check", so this step ` +
+        'would run locally and never in CI. Move it into a check:shard-N',
+    );
+  } else inCheck.push(m[1]!);
+}
+for (const shard of shardNames) {
+  const n = inCheck.filter((s) => s === shard).length;
+  if (n !== 1) failures.push(`${shard} appears ${n} times in "check" — every shard must be in it exactly once`);
+}
+for (const shard of inCheck) {
+  if (!shardNames.includes(shard)) failures.push(`"check" runs ${shard}, which is not defined`);
+}
+const owner = new Map<string, string[]>();
+for (const shard of shardNames) {
+  for (const step of parts(scripts[shard]!)) owner.set(step, [...(owner.get(step) ?? []), shard]);
+}
+for (const [step, owners] of owner) {
+  if (owners.length > 1) failures.push(`\`${step}\` is in ${owners.length} shards (${owners.join(', ')}) — each step belongs to exactly one`);
+  if (/(?:pnpm|npm)\s+run\s+check(?::shard-\d+)?$/.test(step)) {
+    failures.push(`${owners.join(', ')} runs \`${step}\` — a shard must hold steps, not other shards or the whole chain`);
+  }
+}
+for (const shard of shardNames) {
+  const n = directlyRunByCi.filter((s) => s === shard).length;
+  if (n !== 1) {
+    failures.push(
+      `${shard} is run directly by ${n} workflow invocation(s) — it must be exactly 1 (checks.yml's ` +
+        `\`shard: [...]\` matrix). ${n === 0 ? 'Its steps never run in CI' : 'It runs more than once'}`,
+    );
+  }
+}
+const chainSteps = [...owner.keys()];
+if (shardNames.length === 0 || chainSteps.length < 20) {
+  failures.push(
+    `instrument: ${shardNames.length} check:shard-N scripts holding ${chainSteps.length} steps, which is far ` +
+      'fewer than this repo has — the shard or step parsing has stopped matching',
+  );
 }
 
 console.log(
   `  ${defined.length} check:* scripts defined (${leaves.length} leaves, ` +
     `${defined.length - leaves.length} aggregate); ${leaves.length - orphans.length} of the leaves ` +
     `reachable from ${entryPoints.size} workflow entry point(s) across ${workflowFiles.length} ` +
-    `workflow file(s); "check" chain parses to ${chainSteps.length} steps`,
+    `workflow file(s); "check" is ${shardNames.length} shard(s) holding ${chainSteps.length} distinct steps`,
 );
+for (const shard of shardNames) console.log(`    ${shard}: ${parts(scripts[shard]!).length} steps`);
 
 // **Say what is not covered, on every run.** This is the line that stops a green
 // exit code from implying cover this repo does not have.
