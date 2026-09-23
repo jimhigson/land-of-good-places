@@ -17,3 +17,11 @@ Goal: `pnpm run check:coplanar` green, each finding fixed at its cause. Never ad
 - trestle-branches: not present in base run.
 
 Probe scripts (untracked, do not commit): scripts/_probe.mts, _probe2.mts, _door.mts, _stall.mts
+
+## Update 2 (after kerb + baseline commits)
+- path-kerb: FIXED by dropping kerb triangles wholly under other routes' paving (exact convex difference). Partial cutting was tried and REVEALED kerb|terrain (0.755 m2 @2mm seed 11) and kerb|bridge shell (seed 128) — metric is per triangle pair, furthest vertex; smaller triangles reveal. Whole-triangle-only cannot reveal.
+- Baseline: 8 LOOSE entries deleted (6 stalls, 2 keychain).
+- stone walls: fix on side branch `fix/coplanar-clear-stone-walls` (placeOnSphere for wall+coping). HELD: visible recentre ~9 cm.
+- Remaining on PR branch, run4: headline 3 = MORE duck-bars (held), NEW stone-walls (held), NEW path-kerb|path-surface 0.0001 m2 @8.1mm seed 131.
+- Seed 131 kerb|surface cause: a route along z at x~0 passes through bridge-56's footprint (bridge long in x); the drape lifts it onto the deck: pavingHeightAt 0.4-1.0 vs terrain -3.6..-4.0 at x=0,z=38.5..42 -> 4.4 m curtains of paving. Out of scope (bridge drape), report.
+- Verification in progress: test:procgen base (worktree coplanar-clear-base @ e982430b) -> then branch; swept-bus; park digest; check.
