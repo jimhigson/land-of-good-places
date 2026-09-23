@@ -5711,7 +5711,27 @@ function nearestPointOnRoute(
 ): readonly [number, number] | null {
   let best: readonly [number, number] | null = null;
   let bestDistance = Infinity;
-  for (const sample of drawnSamplesOf(route)) {
+  // **Never branch from a fillet; branch from its corner.** A corner is drawn
+  // rounded only until another route ends on it — then `squareJunctionCorners`
+  // squares it and the arc a spur branched from is no longer drawn. Seed 274:
+  // `spur-dodgems` took its junction on `gate-approach`'s fillet at
+  // (-10.54, 21.18); `spur-station-0` later ended on that corner, squared it,
+  // and left spur-dodgems starting 0.37 m off any drawn path. A sample on a
+  // fillet is therefore offered as the corner itself: ending there makes it a
+  // junction, which squares it, which draws the ribbon through the corner —
+  // so the start is on the drawn line however many routes join there later.
+  const filletCorners: (readonly [number, number])[] = [];
+  if (!route.closed) {
+    const square = route.squareCorners ?? [];
+    for (let k = 1; k < route.points.length - 1; k += 1) {
+      const c = route.points[k] as readonly [number, number];
+      if (square.some((q) => Math.hypot(q[0] - c[0], q[1] - c[1]) <= JUNCTION_SNAP)) continue;
+      filletCorners.push(c);
+    }
+  }
+  for (const drawn of drawnSamplesOf(route)) {
+    const corner = filletCorners.find((c) => Math.hypot(drawn[0] - c[0], drawn[1] - c[1]) < CORNER_FILLET + 0.01);
+    const sample = corner ?? drawn;
     const px = sample[0];
     const pz = sample[1];
     // Never branch from inside a plot's blocker circle: every spur's last
