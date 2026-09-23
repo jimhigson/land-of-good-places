@@ -66,7 +66,7 @@ import './headless-canvas.mjs';
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { NavGrid, MAX_ROUTE_WAYPOINTS, TOP_REFERENCE } from '../src/world/NavGrid.ts';
-import { PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
+import { PLAYER_LONGEST_STEP, PLAYER_RADIUS, WALKABLE_GAP } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { ANCHORS, anchorGroupName } from '../src/world/anchors.ts';
 import { NUDGE_REACH, PoiGraph, SEEDS } from '../src/entities/npc/poiGraph.ts';
@@ -973,7 +973,6 @@ function lumpsUnder(root: import('three').Object3D): Lump[] {
 // position) against the drawn paving (`distanceToPath`, the ribbon's own edge),
 // with the game's bar: `WALKABLE_GAP`, two player radii.
 {
-  const WALKABLE_GAP = PLAYER_RADIUS * 2;
   const legPosition = new Vector3();
   let legs = 0;
   let closest = Infinity;

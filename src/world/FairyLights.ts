@@ -20,7 +20,7 @@ import { placeOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
 import { PLAZA, plazaVerge, pointStandsOnABridgeRamp } from './paths';
 import { cruiserClearanceForPoints } from './coaster/clearance';
 import type { CoasterRoute } from './coaster/route';
-import { PLAYER_RADIUS } from '../core/constants';
+import { PLAYER_RADIUS, WALKABLE_GAP } from '../core/constants';
 import { nearADoormat, onRideExit } from './Scenery';
 import { isOnPath, pathCentreline } from './pathGraph';
 import type { FrameContext, GameSystem } from '../core/types';
@@ -139,7 +139,7 @@ export const FAIRY_POLE_RADIUS = POLE_RADIUS;
  * collider (0.087 m, 0.204 m, 0.291 m on the same seed). A pole refused this
  * way slides along its run like any other refusal.
  */
-export const FAIRY_POLE_SPACING = POLE_RADIUS * 2 + PLAYER_RADIUS * 2;
+export const FAIRY_POLE_SPACING = POLE_RADIUS * 2 + WALKABLE_GAP;
 
 // **A pole must not be drawn wider than the ground it claims.** Anything a
 // child can see and lean on has a collider that covers it (CLAUDE.md), and a
@@ -566,7 +566,7 @@ export function fairyPoleBuilder(
       // child standing there 0.12 m. The owners the lamps and the scenery
       // already ask: `onRideExit` with the room to walk past the pole, and
       // `nearADoormat`.
-      if (onRideExit(x, z, POLE_RADIUS + PLAYER_RADIUS * 2)) continue;
+      if (onRideExit(x, z, POLE_RADIUS + WALKABLE_GAP)) continue;
       if (nearADoormat(x, z)) continue;
       // **Ask the ride, before standing anything up.** A pole is 4.4 m tall and
       // the claims registry is a ground-footprint system — it cannot see what

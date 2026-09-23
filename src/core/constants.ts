@@ -353,6 +353,13 @@ export const PLAYER_TURN_SPEED = 13;
 export const PLAYER_RADIUS = 0.62;
 
 /**
+ * The narrowest gap a child can actually use: two player radii. `NavGrid`
+ * fattens every collider by `PLAYER_RADIUS` before calling a cell walkable, so
+ * anything narrower is a solid wall with a visible slot in it.
+ */
+export const WALKABLE_GAP = PLAYER_RADIUS * 2;
+
+/**
  * Half-thickness of the collider under a **hoppable** wall — one entry per
  * wall the park registers with `autoHoppable: true`, and there are exactly
  * three of them.

@@ -96,6 +96,7 @@ import {
   SPRINT_LOCAL_GRADE_CEILING,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
+  WALKABLE_GAP,
   RIM_OUTSET_START,
   GROUND_SPHERE_RADIUS,
   BUS_MAX_GRADE,
@@ -184,15 +185,6 @@ import {
 } from '../../src/world/railRace/trestleGeometry.ts';
 import { CLAIM_COMPATIBILITY, distanceOutside, shapesOverlap, type Claim } from '../../src/boot/groundClaims.ts';
 import { RAIL_RACE_FEATURE } from '../../src/world/railRace/feature.ts';
-
-/**
- * The narrowest gap a child can actually use.
- *
- * `PLAYER_RADIUS` is 0.62 and `NavGrid` fattens every collider by it before
- * deciding a cell is walkable, so anything narrower than this is not a gap at
- * all — it is a solid wall with a visible slot in it.
- */
-const WALKABLE_GAP = 1.24;
 
 /**
  * Half the track's width plus a little — `train/route.ts`'s own number.
