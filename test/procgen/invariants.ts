@@ -7591,7 +7591,18 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
  * (`upAt`), not world `+Y` — the park is a cap of a sphere, and at its rim
  * `+Y` is 40° off the ground's own up. A triangle of zero area (a collapsed
  * corner's fan) has no facing and is not judged.
+ *
+ * **Nor is a triangle standing steeper than {@link PAVING_WALL_COS}'s 60°.**
+ * A fold lies in the ground it folded on; a triangle standing up on end is
+ * paving hung as a sheet — a route whose vertices a bridge's drape lifted on
+ * one side of it and not the other (seed 24, (9.8, -39.9): 2.2 m² kerb at
+ * 87° from up). Its sign against `up` says which way a wall leans, not which
+ * way it was wound, so it is not this invariant's question; it is the sheet
+ * one's. How many were set aside is printed on every run.
  */
+/** Cosine of 60°: a paving triangle steeper than this from the planet's up is standing, not lying. */
+const PAVING_WALL_COS = 0.5;
+
 const noDrawnPavingFacesTheGround: Invariant = (facts) => {
   const complaints: string[] = [];
   const layers: Mesh[] = [];
@@ -7620,6 +7631,7 @@ const noDrawnPavingFacesTheGround: Invariant = (facts) => {
     const count = index ? index.count : position.count;
     const at = (slot: number): number => (index ? index.getX(slot) : slot);
     let judged = 0;
+    let walls = 0;
     let down = 0;
     let downArea = 0;
     let first: Vector3 | null = null;
@@ -7631,14 +7643,18 @@ const noDrawnPavingFacesTheGround: Invariant = (facts) => {
       const area = normal.length() / 2;
       // Float noise on a collapsed fan corner, not a face anyone can see.
       if (area < 1e-8) continue;
-      judged += 1;
       upAt((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3, up);
+      if (Math.abs(normal.dot(up)) < PAVING_WALL_COS * normal.length()) {
+        walls += 1;
+        continue;
+      }
+      judged += 1;
       if (normal.dot(up) >= 0) continue;
       down += 1;
       downArea += area;
       first ??= new Vector3().addVectors(a, b).add(c).divideScalar(3);
     }
-    coverage.push(`${mesh.name} ${judged} triangles`);
+    coverage.push(`${mesh.name} ${judged} triangles (${walls} standing steeper than 60° set aside)`);
     if (judged === 0) {
       complaints.push(`the drawn ${mesh.name} has no triangles to judge — this measured nothing`);
     } else if (down > 0 && first) {
