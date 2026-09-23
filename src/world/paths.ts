@@ -213,15 +213,17 @@ interface Blocker {
  */
 const RIBBON_HALF_WIDTH_CEILING = MAIN_LOOP_WIDTH / 2 + PATH_KERB_OVERHANG * 2;
 /**
- * How far a ribbon's centreline must stay from a finish-rainbow foot, beyond
- * the foot's own radius, for the paving's edge (kerb included) to leave a
- * child `WALKABLE_GAP` — two player radii — to walk past the leg. **The one
- * owner of that formula**: {@link ARCH_FOOT_MARGIN} is it at the widest ribbon
- * plus routing slack, and {@link routeClearsArchFeet} is it at the width of
+ * How far a ribbon's centreline must stay from a finish-rainbow leg for the
+ * paving's edge (`halfWidth` out) to leave a child `WALKABLE_GAP` — two player
+ * radii — to walk past it. **The one owner of that formula**, and the same
+ * bar the built park is held to (`finishRainbowStandsOnTheGround` and
+ * `check:park`'s `rainbow.inPath` both ask `distanceToPath` of the leg, which
+ * is exactly this). {@link ARCH_FOOT_MARGIN} is it at the widest ribbon plus
+ * kerb and routing slack; {@link routeClearsArchFeet} is it at the width of
  * the route actually being judged.
  */
-function archFootMarginFor(halfWidthWithKerb: number): number {
-  return PLAYER_RADIUS * 2 + halfWidthWithKerb;
+function archFootMarginFor(halfWidth: number): number {
+  return PLAYER_RADIUS * 2 + halfWidth;
 }
 const ARCH_FOOT_MARGIN = archFootMarginFor(RIBBON_HALF_WIDTH_CEILING) + 0.4;
 
@@ -4964,15 +4966,17 @@ function routeClearsArchFeet(
   points: readonly (readonly [number, number])[],
   width: number,
 ): boolean {
-  // The feet themselves, at the margin a ribbon of *this* width needs — not
-  // BLOCKERS' routing radius, which is sized for the widest ribbon in the park
-  // plus slack. Judging a 2.6 m connector by the 3.6 m main loop's radius
-  // refused seed 451's `stall.railRacer` link at its very first point: the
-  // stall's own lead, which its own spur already paves.
-  const reach = archFootMarginFor(width / 2 + PATH_KERB_OVERHANG * 2);
+  // The legs themselves, at the bar a ribbon of *this* width is held to in the
+  // built park — not BLOCKERS' routing radius, which is sized for the widest
+  // ribbon in the park plus kerb and slack. Judging a 2.6 m connector by the
+  // 3.6 m main loop's radius refused seed 451's `stall.railRacer` link at its
+  // very first point (the stall's own lead, which its own spur already paves
+  // 3.3 m from a leg), and pushed seed 15's exit spur off a clear line onto a
+  // 20.9 m diagonal.
+  const reach = archFootMarginFor(width / 2);
   const feet = BLOCKERS.filter((blocker) => blocker.kind === 'archFoot').map((blocker) => ({
     ...blocker,
-    radius: blocker.radius - ARCH_FOOT_MARGIN + reach,
+    radius: reach,
   }));
   if (feet.length === 0 || points.length < 2) return true;
   for (let i = 1; i < points.length; i += 1) {
