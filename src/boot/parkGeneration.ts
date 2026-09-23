@@ -1,5 +1,6 @@
 import { SolveScheduler } from './solveScheduler';
 import type { GroundClaims } from './groundClaims';
+import { loadPrebuiltPark } from './prebuiltPark';
 
 /**
  * **Building the park a few milliseconds at a time, while a bus is on screen.**
@@ -185,10 +186,19 @@ export class ParkGeneration {
   private slicesSeen = 0;
   /**
    * The import ladder. `world/parkPlan.ts` imports every solver the park's
-   * driver needs, so the ladder is two rungs: the plan (solvers), then the
-   * graph and world modules that read the decided plan.
+   * driver needs, so the ladder is three rungs: the prebuilt park file, the
+   * plan (solvers), then the graph and world modules that read the decided
+   * plan.
    */
   private readonly importLadder: readonly ImportStep[] = [
+    // **First, this park's prebuilt decisions** (`boot/prebuiltPark.ts`): the
+    // plan's driver reads the offered file once, when it starts, so the fetch
+    // has to have settled — found, refused or given up on — before the plan
+    // task can be ready. On an installed game it is a precache hit.
+    {
+      name: 'prebuiltPark',
+      begin: () => loadPrebuiltPark(),
+    },
     {
       name: 'parkPlan',
       begin: () =>

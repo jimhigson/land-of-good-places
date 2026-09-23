@@ -22,3 +22,24 @@ export const PARK_FILE_DIR = 'parks';
 export function parkFileName(seed: number): string {
   return `${PARK_FILE_DIR}/${seed}.json`;
 }
+
+/**
+ * Where `pnpm run build:parks` writes park files, relative to the repository
+ * root, for `vite build` to ship. Not tracked: a committed copy of the
+ * generator's output would be a second definition of every park, kept in step
+ * by hand.
+ */
+export const PREBUILT_PARKS_OUT = '.parks';
+
+/** The manifest `build:parks` writes beside the files — see {@link PrebuiltParksManifest}. */
+export const PREBUILT_PARKS_MANIFEST = 'manifest.json';
+
+/** What `build:parks` solved, and from what source. */
+export interface PrebuiltParksManifest {
+  readonly format: number;
+  /** `scripts/lib/park-source-hash.mjs` of the tree the parks were solved from. */
+  readonly sourceHash: string;
+  readonly seeds: readonly number[];
+  /** Each seed's proven whole-park digest (`scripts/lib/parkDigest.mts`). */
+  readonly digests: Readonly<Record<string, string>>;
+}

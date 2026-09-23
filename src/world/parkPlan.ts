@@ -78,6 +78,7 @@ import {
   readSlide,
   readTrain,
   type ParkFile,
+  PARK_FILE_FEATURES,
 } from './prebuilt/parkFile';
 
 export interface TrainDecision {
@@ -622,6 +623,15 @@ export function parkPlanFile(build?: string): ParkFile {
 function finish(): void {
   solved = true;
   offerPrewarmedGroundClaims((driver as ParkSolve).claims);
+  // One line in the browser console saying which it was: a boot that should
+  // have hydrated and searched instead is otherwise invisible, only slow.
+  if (typeof (globalThis as { process?: unknown }).process === 'undefined') {
+    console.info(
+      hydrateFrom
+        ? `Park plan: seed ${PARK_SEED} hydrated from its prebuilt file (${PARK_FILE_FEATURES.join(', ')}).`
+        : `Park plan: seed ${PARK_SEED} solved on this device.`,
+    );
+  }
   try {
     const nodeProcess = (globalThis as { process?: { stderr?: { write: (s: string) => unknown } } }).process;
     const stats = (driver as ParkSolve).stats;

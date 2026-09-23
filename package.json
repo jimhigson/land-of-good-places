@@ -19,6 +19,7 @@
     "check:shard-6": "pnpm run check:climb-wave && pnpm run check:cat-bus",
     "check:shard-7": "pnpm run check:cat-bus-suspension && pnpm run check:bus-journey && pnpm run check:park-boot && pnpm run check:ground-claims && pnpm run check:arrival-completes && pnpm run check:layout-rung && pnpm run check:stall-accommodate && pnpm run check:arrival-camera",
     "build": "vite build",
+    "build:parks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/build-parks.mts",
     "check:flat-primitives": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-flat-primitives.mts",
     "check:cycle-tdz": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/scan-cycle-tdz.mts --check",
     "check:node": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-node.mts",
@@ -144,7 +145,8 @@
     "check:ground-claims": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-ground-claims.mts",
     "check:every-seed-builds": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-every-seed-builds.mts",
     "check:layout-rung": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-layout-rung.mts",
-    "check:stall-accommodate": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-stall-accommodate.mts"
+    "check:stall-accommodate": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-stall-accommodate.mts",
+    "check:prebuilt-park": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-prebuilt-park.mts"
   },
   "dependencies": {
     "three": "^0.185.1",

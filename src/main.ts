@@ -21,6 +21,7 @@ import {
   OVERRUN_GENERATION_BUDGET_MS,
   ParkGeneration,
 } from './boot/parkGeneration';
+import { loadPrebuiltPark } from './boot/prebuiltPark';
 import { OVERRUN_WARMUP_BUDGET_MS, ShaderWarmup, WARMUP_BUDGET_MS } from './boot/shaderWarmup';
 import { JourneySkip } from './ui/JourneySkip';
 import { JourneyTitle } from './ui/JourneyTitle';
@@ -1120,6 +1121,11 @@ async function finishLaunch(
   // module-scope solving when nothing has — a continued save, a ride deep link,
   // `/view` or `/spawn`, none of which play an arrival. Those are exactly the paths that
   // paid it before this change too, so none of them got slower.
+  // The prebuilt park first (`boot/prebuiltPark.ts`): `new Game` forces the
+  // plan, and the plan's driver reads the offered file once, when it starts.
+  // Already settled when the ride built the park; on a continued save, a deep
+  // link, `/view` or `/spawn` this is where the whole search is saved.
+  await loadPrebuiltPark();
   const GameClass = await loadGame();
   const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
   handOverGame = null;
