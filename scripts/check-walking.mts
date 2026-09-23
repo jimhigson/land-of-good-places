@@ -453,7 +453,8 @@ async function tapToMove(page: Page, label: string): Promise<void> {
  * the game's own pickers — `Selection`'s zone pick and the parade's pets, the
  * two things `Game`'s tap handler asks before it lets `TapNavigator` walk — and
  * the first whose whole neighbourhood (±0.06 NDC, a metre or two either side)
- * is clear, and whose ground is 2.5-12 m away, is the one tapped. The margin is
+ * is clear, and whose walkable ground (by `TapNavigator`'s own
+ * `pickWalkablePoint`) is 2.5-12 m away, is the one tapped. The margin is
  * what keeps a pet trotting into the spot between choosing and clicking from
  * turning into a flake.
  *
@@ -461,7 +462,8 @@ async function tapToMove(page: Page, label: string): Promise<void> {
  * still measured the same way, by her position.
  */
 async function findOpenGround(page: Page): Promise<{ ndcX: number; ndcY: number } | null> {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
+    const { pickWalkablePoint } = await import(/* @vite-ignore */ '/src/world/pickWalkable.ts' as string);
     const g = (window as unknown as { game?: any }).game;
     const selection = g?.selection;
     const camera = g?.camera?.camera;
@@ -474,15 +476,18 @@ async function findOpenGround(page: Page): Promise<{ ndcX: number; ndcY: number 
       if (g.parade?.group && raycaster.intersectObject(g.parade.group, true).length > 0) return false;
       return true;
     };
+    // Where a tap there would send her, asked of the same function
+    // `TapNavigator` uses (loaded from the dev server, so it is the very module
+    // the game runs) — the park is a sphere, and a flat-plane intersection
+    // here would be a second, wrong answer to "where is the ground".
+    const hit = g.player.position.clone();
     const groundDistance = (x: number, y: number): number => {
       ndc.set(x, y);
       raycaster.setFromCamera(ndc, camera);
-      const { origin, direction } = raycaster.ray;
-      if (direction.y >= -1e-6) return Infinity;
-      const t = (g.player.position.y - origin.y) / direction.y;
-      const hx = origin.x + direction.x * t;
-      const hz = origin.z + direction.z * t;
-      return Math.hypot(hx - g.player.position.x, hz - g.player.position.z);
+      const sampler = g.player.groundSampler;
+      if (!sampler) return Infinity;
+      if (!pickWalkablePoint(raycaster.ray, sampler, g.tapNavigator.visibleCeiling(), hit)) return Infinity;
+      return hit.distanceTo(g.player.position);
     };
     const offsets = [-0.06, 0, 0.06];
     for (const y of [-0.4, -0.55, -0.25, -0.7]) {
