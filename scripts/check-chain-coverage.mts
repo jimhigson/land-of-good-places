@@ -86,16 +86,26 @@ const REPO = new URL('..', import.meta.url).pathname;
  * Checks that are defined, unreachable, and known to be so — each with the
  * reason it is not merely a missing line, and the ticket that owns wiring it.
  *
- * **Empty, and meant to stay that way (#693).** It held five for weeks and was
- * printed on every run, which turned out to be the same as holding nothing: a
- * list that is merely stable is a list of checks nobody runs. They were
- * resolved rather than carried — `check:wall-tunnelling` given a failure path
- * and put in a shard; `check:walking` and `check:deep-links` put behind
- * `scripts/with-dev-server.mts` in a shard; the two that need a real GPU
- * renamed out of `check:` into {@link GPU_ONLY}. An entry here now needs the
- * same bar: a reason it cannot run yet, and a ticket that owns making it run.
+ * **Two left, and both were run for real before being put back here (#693).**
+ * It held five for weeks and was printed on every run, which turned out to be
+ * the same as holding nothing: a list that is merely stable is a list of checks
+ * nobody runs. So each was resolved or measured: `check:wall-tunnelling` given
+ * a failure path and put in a shard; the two that need a real GPU renamed out of
+ * `check:` into {@link GPU_ONLY}; and these two served through
+ * `scripts/with-dev-server.mts` and run on CI — where they proved **flaky**, so
+ * wiring them in would have made the required gate flaky. Their entries carry
+ * the measurement and the ticket; the wiring is one line in a shard once that
+ * ticket is closed.
  */
-const KNOWN_ORPHANS: Record<string, string> = {};
+const KNOWN_ORPHANS: Record<string, string> = {
+  'check:walking':
+    'FLAKY on the hosted runner — run 35882256634: tap-to-move after the keychain view moved 0.000 m (keys fine); ' +
+    'passed on 35879741766. Served by `pnpm run with-dev-server pnpm run check:walking`; ~10 min on CI, so it wants ' +
+    'a shard of its own. Orphaned since #342. Fix and wire: #699',
+  'check:deep-links':
+    'FLAKY — /keychain-stall (continueGame) timed out at 60 s on 1 of 2 local runs; passed on CI run 35879741766 ' +
+    '(5m06s). Served by `pnpm run with-dev-server pnpm run check:deep-links`. Orphaned since #314. Fix and wire: #700',
+};
 
 /**
  * **Checks that cannot run on a GitHub-hosted runner at all, and so are not

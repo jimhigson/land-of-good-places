@@ -2,8 +2,13 @@
  * **Serve the game, run some checks against it, stop the server.**
  *
  * ```
- * node ... scripts/with-dev-server.mts pnpm run check:walking -- pnpm run check:deep-links
+ * pnpm run with-dev-server pnpm run check:walking -- pnpm run check:deep-links
  * ```
+ *
+ * **Not yet in the gate.** Both checks were run through this on CI for #693 and
+ * both proved flaky (#699, #700), so they sit in `check:chain-coverage`'s
+ * `KNOWN_ORPHANS` rather than a shard. When they are fixed, wiring one in is a
+ * `check:served-<name>` script calling this and one line in a `check:shard-N`.
  *
  * Some checks drive a real page: `check:walking` presses arrow keys at a
  * running park, `check:deep-links` opens every deep link. They were written to

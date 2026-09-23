@@ -91,7 +91,7 @@ jobs:
       matrix:
         # Must name every `check:shard-N` in package.json, each once —
         # `check:chain-coverage` fails if it does not.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -114,14 +114,6 @@ jobs:
         # Registry hiccups are common enough to be worth retrying; the counts
         # live in `.npmrc`, which pnpm reads.
         run: pnpm install --frozen-lockfile
-
-      # `check:served-walking` and `check:served-deep-links` drive a real page.
-      # `playwright-core` ships the driver but not the browser binaries.
-      # Installed on every shard rather than only the one that holds
-      # those today: tying it to a shard number would be a second
-      # definition of where that step lives, kept in step by hand.
-      - name: Install Chromium
-        run: pnpm exec playwright-core install --with-deps chromium
 
       # One shard of the gate, **under a watchdog, not directly.** The
       # watchdog runs `pnpm run check:shard-N` under a clock set inside this
