@@ -13,7 +13,8 @@ import { type KeepOff, RailRaceRoute } from './route';
 // it works until somebody reorders an import. Importing the leaf is
 // order-independent by construction, so the next `const` added to this file
 // cannot quietly reintroduce `Cannot access 'RIDE_SCALE' before initialization`.
-import { RIDE_SCALE } from './dimensions';
+import { RAIL_RACE_FOOT_RAIL_CLEARANCE, RIDE_SCALE } from './dimensions';
+import { archFeet } from './arch';
 
 /**
  * The Rail Race as *data*, solved at module load from the park layout alone —
@@ -198,8 +199,18 @@ function planRailRace(): PlannedRailRace {
     keepArchOff.push({ x: point.x, z: point.z, radius: 5 });
   }
 
-  const walkPastRing = new RailRaceRoute(STATION_STALL_ID, 1, keepArchOff);
-  const raceRing = new RailRaceRoute(STATION_STALL_ID, RIDE_SCALE, keepArchOff);
+  // **And never on the railway.** Seed 208 stood a race-ring leg 1.09 m from
+  // the train's centre line (the invariant wants 1.3 m, `TRACK_CLEARANCE`):
+  // the list above named the exit and the cruiser and nothing asked about the
+  // train. Not a third named keep-off disc — the legs are asked where
+  // `archFeet` really puts them, against the railway's own distance and the
+  // clearance every Rail Race foot keeps (`RAIL_RACE_FOOT_RAIL_CLEARANCE`,
+  // shared with the trestle feet), and a finish line that fails slides on,
+  // as for everything else.
+  const archStandsAt = (route: RailRaceRoute, at: number): boolean =>
+    archFeet(route, at).every((foot) => distanceToRailCorridor(foot.x, foot.z) >= RAIL_RACE_FOOT_RAIL_CLEARANCE);
+  const walkPastRing = new RailRaceRoute(STATION_STALL_ID, 1, keepArchOff, archStandsAt);
+  const raceRing = new RailRaceRoute(STATION_STALL_ID, RIDE_SCALE, keepArchOff, archStandsAt);
   return {
     name: 'railRace',
     walkPastRing,

@@ -167,3 +167,14 @@ export const RIDE_SCALE = 2.5;
  * against the ground it crosses by `scripts/check-rail-race.mts`.
  */
 export const BASE_HEIGHT = 9.5;
+
+/**
+ * **How far anything of the Rail Race's that stands on the ground — a trestle
+ * foot, a finish-arch leg — keeps its centre from the railway's centre line.**
+ * The one figure both ask: `track.ts`'s trestle predicate and `plan.ts`'s arch
+ * search. The train's corridor is not a ground claim yet (stage 5 of
+ * `docs/DESIGN-round-robin-generation.md`), so this is the railway's own
+ * published distance, asked by value; when the corridor becomes a claim both
+ * callers move together.
+ */
+export const RAIL_RACE_FOOT_RAIL_CLEARANCE = 2.4;

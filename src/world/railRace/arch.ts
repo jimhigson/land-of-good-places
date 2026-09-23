@@ -51,11 +51,10 @@ export interface ArchFoot {
  * `buildArch` calls it rather than repeating it — two copies of this formula is
  * precisely the bug class that put the legs on the path in the first place.
  */
-export function archFeet(route: RailRaceRoute): ArchFoot[] {
+export function archFeet(route: RailRaceRoute, at: number = route.startDistance): ArchFoot[] {
   // Derived from the route rather than passed in, so a caller cannot hand in
   // the wrong ring's scale — `track.ts` computes the identical quotient.
   const ringSizeVsRace = route.scale / RIDE_SCALE;
-  const at = route.startDistance;
   const outward = route.outwardAt(at, new Vector3());
   const sample = route.path.sampleAt(at);
 

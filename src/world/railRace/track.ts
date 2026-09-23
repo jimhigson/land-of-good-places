@@ -69,7 +69,7 @@ import { UNDULATION_REACH, type RailRaceRoute } from './route';
 // module-scope read through `./route` would land in `RIDE_SCALE`'s temporal
 // dead zone, and the leaf cannot. See `dimensions.ts` for why a re-export does
 // not escape a cycle and a direct leaf import does.
-import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE } from './dimensions';
+import { LANE_COUNT, PLAYER_LANE, RAIL_RACE_FOOT_RAIL_CLEARANCE, RIDE_SCALE } from './dimensions';
 
 /**
  * How many sides a trestle branch is drawn with.
@@ -1716,7 +1716,7 @@ function addPostCollider(collision: CollisionWorld, foot: Vector3, top: Vector3,
 function legacyRefuser(x: number, z: number, collision: CollisionWorld): LegacyPredicate | null {
   if (!collision.isClearCircle(x, z, 1.1)) return 'legacy:collision';
   if (distanceToPath(x, z) < 2.8) return 'legacy:distanceToPath';
-  if (distanceToRailCorridor(x, z) < 2.4) return 'legacy:distanceToRailCorridor';
+  if (distanceToRailCorridor(x, z) < RAIL_RACE_FOOT_RAIL_CLEARANCE) return 'legacy:distanceToRailCorridor';
   const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
     (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
   );

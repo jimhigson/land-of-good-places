@@ -335,7 +335,14 @@ export class RailRaceRoute {
 
   private readonly scratch = new Vector3();
 
-  constructor(stationStallId: string, scale: number, keepArchOff: readonly KeepOff[] = []) {
+  constructor(
+    stationStallId: string,
+    scale: number,
+    keepArchOff: readonly KeepOff[] = [],
+    /** Whether the arch may stand with its finish line at `at` — asked of the
+     * feet `archFeet` would actually place there. See {@link slideArchClear}. */
+    archStandsAt: (route: RailRaceRoute, at: number) => boolean = () => true,
+  ) {
     this.scale = scale;
     this.laneSpacing = LANE_SPACING_AT_PARK_SCALE * scale;
     this.laneOffsets = Array.from(
@@ -384,7 +391,7 @@ export class RailRaceRoute {
     const atBooth = this.wrap(RING_PATH.distanceAtBearing(bearing));
     // ...and then off the doormat it would otherwise land on. See
     // {@link slideArchClear}: on most seeds this returns `atBooth` untouched.
-    this.startDistance = slideArchClear(this, atBooth, stall, keepArchOff);
+    this.startDistance = slideArchClear(this, atBooth, stall, keepArchOff, (at) => archStandsAt(this, at));
   }
 
   /**
@@ -765,6 +772,7 @@ function slideArchClear(
   atBooth: number,
   stall: { readonly entranceX: number; readonly entranceZ: number },
   keepOff: readonly KeepOff[],
+  archStandsAt: (at: number) => boolean,
 ): number {
   const probe = new Vector3();
   const outward = new Vector3();
@@ -785,7 +793,9 @@ function slideArchClear(
         if (Math.hypot(probe.x - item.x, probe.z - item.z) < item.radius) return false;
       }
     }
-    return true;
+    // And the feet themselves, where they would really stand, against what
+    // only the caller can see (the railway — see `plan.ts`).
+    return archStandsAt(at);
   };
   if (clears(atBooth)) return atBooth;
   for (let step = 1; step <= 60; step += 1) {
