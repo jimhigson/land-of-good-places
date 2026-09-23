@@ -4853,6 +4853,30 @@ function* addInterconnects(
       restoreLatticeState(beforeConnector);
       continue;
     }
+    // **An optional connector never comes down on the finish rainbow's feet.**
+    // The arch cannot move and the paving can (see {@link BLOCKERS}), and the
+    // lattice plan and every elbow `routeLeg` tries already route round the
+    // feet — but `routeLeg`'s last resort, when no clear elbow exists, is a
+    // raw diagonal kept "so the route stays connected". For a spur that is
+    // the right trade; a connector is a shortcut the park can do without,
+    // so it gets the other decision instead: not drawn. Measured on seed
+    // 326, `connector-stall.railRacer-station-1` fell back to a 17.8 m
+    // diagonal (28.61, 50.49)→(29.62, 32.73) whose centreline passed 2.06 m
+    // from six race-ring legs (0.78 m from the paved edge, against
+    // `WALKABLE_GAP`'s 1.24 m) — escaping every other screen because the
+    // pair was judged disproportionate (19.7 m apart, 73.6 m paved). No
+    // escape reaches this one: a connector is never worth a leg in the way.
+    //
+    // Judged on the curve that will be drawn as well as its control
+    // polygon, because a Catmull-Rom swings past its polygon at a bend.
+    if (!connectorClearsArchFeet(points)) {
+      if (DEBUG_STREETS) {
+        // eslint-disable-next-line no-console
+        console.log(`[connect] ${a.id}-${b.id}: rejected, comes down on the finish rainbow's feet`);
+      }
+      restoreLatticeState(beforeConnector);
+      continue;
+    }
     if (plan) commitStreetPlan(plan);
 
     edges.push({
@@ -4864,6 +4888,29 @@ function* addInterconnects(
     stale = true;
   }
   return progress;
+}
+
+/**
+ * True if a connector's paving stays clear of every finish-rainbow foot by the
+ * same margin {@link BLOCKERS} holds every route to — on its control polygon
+ * and on the Catmull-Rom actually drawn through it. See the screen in
+ * {@link addInterconnects} for why this one has no escape.
+ */
+function connectorClearsArchFeet(points: readonly (readonly [number, number])[]): boolean {
+  const feet = BLOCKERS.filter((blocker) => blocker.kind === 'archFoot');
+  if (feet.length === 0 || points.length < 2) return true;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1] as readonly [number, number];
+    const b = points[i] as readonly [number, number];
+    if (!segmentClearOfBlockers(a[0], a[1], b[0], b[1], 0, feet)) return false;
+  }
+  const curve = routeCurve({ name: 'connector-screen', width: CONNECTOR_WIDTH, closed: false, points });
+  for (const p of curvePoints(curve, pathDivisions(curve))) {
+    for (const foot of feet) {
+      if (Math.hypot(foot.x - p.x, foot.z - p.z) < foot.radius) return false;
+    }
+  }
+  return true;
 }
 
 /**
