@@ -2430,7 +2430,15 @@ function repairRouteOffBridges(
         grid,
       ];
       for (const make of detours) {
-        const detour = make();
+        const raw = make();
+        const detour = raw.filter((point, index) => {
+          if (index === 0) return true;
+          const previous = raw[index - 1] as readonly [number, number];
+          return Math.hypot(point[0] - previous[0], point[1] - previous[1]) > 0.05;
+        });
+        // A detour that collapses to one point draws nothing to judge — and a
+        // one-point Catmull-Rom throws when asked its length.
+        if (detour.length < 2) continue;
         if (polylineCrossesRail(detour)) {
           say('the detour crosses the railway');
           continue;
