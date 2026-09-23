@@ -32,3 +32,12 @@ Per-step CI durations extracted with scratch `durations.mjs` from runs 353951504
 - Local: check:walking passed; check:deep-links FLAKY locally — 1 of 2 runs timed out on /keychain-stall
   (continueGame) at 60 s. Waiting on CI run 35879741766 to see it on the hosted runner.
 - Still to do: deliberate failing-shard throwaway commit (+revert), PR body.
+
+## Status (checkpoint 3) — work complete, PR #697 to be marked ready
+- walking/deep-links proved FLAKY (#699 CI tap-to-move 0 m; #700 local 60 s timeout) -> back in KNOWN_ORPHANS
+  with measurements; harness kept as `pnpm run with-dev-server <cmd>`. Shard 8 + Chromium install removed.
+- Aggregator proof: run 35883986053 (throwaway 5861e9e4: shard 6 fails on purpose, base reds neutralised) ->
+  only shard 6 red, Checks red. Run 35885377469 (b25e028c, injection removed) -> attempt 1 shard 7 red on
+  check:park-boot (known base flake, #687/#346/#456); attempt 2 all green, Checks green. Throwaways reverted.
+- Known base reds, all fixed by unmerged #687: layout-rung (shard 7, deterministic), solve-cost (shard 3, flaky at
+  250 ms budget), park-boot (shard 7, flaky). slide-rider passed on every sharded run.
