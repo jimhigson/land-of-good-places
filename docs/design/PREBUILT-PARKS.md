@@ -123,9 +123,37 @@ what proves nothing else is lost.
 | world phase | ~400 | its decisions live inside builders that also build meshes; step 4 |
 | mesh + collider construction | ~1200 | this is building, not solving — it stays on the client for good |
 
-So the plan's 7.8 s becomes ~60 ms; a whole boot goes from ~9.4 s to ~1.7 s on
-this Mac (estimate: the sum of measured parts; the implementation PR measures
-it end to end).
+So the plan's 7.8 s becomes ~60 ms. **Measured on the implementation**
+(`scripts/park-file-probe.mts`, thread CPU, M-series): the hydrated plan costs
+**61–118 ms** across all 26 seeds built (pool and 0..15), almost all of it
+`pathGraph`; the `World` constructor is unchanged at ~1.6 s. In a headless
+Chromium (SwiftShader), `/spawn?seed=20260728` had its plan decided **0.94 s**
+after navigation; `/spawn?seed=3`, which has no file, took **24 s** to solve.
+
+### Measured per seed (implementation, `pnpm run build:parks`)
+
+Every row proven: hydrated digest equal to the fresh solve's, hydrate process
+ran zero search pieces, perturbed-file control differs. Sizes are the file as
+written; `vite build` reports gzip for the shipped copy within 0.1 KB of these.
+
+| seed | raw | gzip -9 | brotli 11 | plan searched (CPU) | plan hydrated (CPU) |
+|---:|---:|---:|---:|---:|---:|
+| 20260728 | 24.0 KB | 10.6 KB | 9.5 KB | 8126 ms | 69 ms |
+| 11 | 24.5 KB | 10.7 KB | 9.4 KB | 712 ms | 71 ms |
+| 24 | 24.5 KB | 10.8 KB | 9.5 KB | 1745 ms | 100 ms |
+| 128 | 21.0 KB | 9.2 KB | 8.1 KB | 1460 ms | 77 ms |
+| 131 | 22.1 KB | 9.6 KB | 8.4 KB | 2620 ms | 70 ms |
+| 208 | 29.8 KB | 13.5 KB | 11.8 KB | 2518 ms | 79 ms |
+| 274 | 24.4 KB | 10.9 KB | 9.6 KB | 8041 ms | 75 ms |
+| 326 | 24.3 KB | 10.8 KB | 9.5 KB | 8105 ms | 69 ms |
+| 428 | 21.7 KB | 9.6 KB | 8.5 KB | 34596 ms | 81 ms |
+| 451 | 33.1 KB | 14.8 KB | 12.9 KB | 676 ms | 109 ms |
+| **pool total** | **249.5 KB** | **110.5 KB** | **97.2 KB** | | |
+
+Seeds 0..15 (`check:every-seed-builds`' sweep, `LGP_SEEDS=0,…,15`) total
+**397.3 KB raw, 176.3 KB gzip, 155.6 KB brotli**, 21.4–29.1 KB each. The
+searches there are where the real spread is: **seed 7 takes 217 s** of CPU to
+solve on this Mac, seed 4 40 s, seed 3 26 s — each hydrates in under 0.1 s.
 
 ## 2. Which parks
 
@@ -183,9 +211,9 @@ fresh draw from `PARK_SEED_POOL` (10 seeds; `CANONICAL_PARK_SEED` =
   without them.
 - **CI**: `deploy.yml` and `pr-preview.yml` run `build:parks` before `build`,
   cached with `actions/cache` keyed on the same inputs as `sourceHash`.
-  Estimated cost on a 4-vCPU runner: ~17 s solve + ~5 s verify per seed at
-  CI's 2x, ten seeds over four lanes ≈ **1 minute** on a cache miss, zero on a
-  hit (docs- or CI-only commits). Both well inside the 10- and 30-minute
+  Measured locally: the pool builds and verifies in **57 s** over four lanes
+  (seed 428's 35 s solve is the long pole). At CI's ~2x that is ~2 minutes on
+  a cache miss, zero on a hit (docs- or CI-only commits). Both well inside the 10- and 30-minute
   timeouts. Committed artefacts were rejected: they are a second copy of the
   generator's output kept in step by hand, which is this repo's most common
   bug.
@@ -215,7 +243,9 @@ fresh draw from `PARK_SEED_POOL` (10 seeds; `CANONICAL_PARK_SEED` =
   `ParkGeneration`'s import ladder; an `await` before `loadGame()` on the
   deep-link / continued-save path). A fetch that fails or takes longer than
   **3 s** is abandoned for the client solve, so a bad network can never hang
-  the boot.
+  the boot. A seed with no file gets the app's own HTML page back with a 200
+  (the service worker's `navigateFallback`, and `vite preview`, both do this);
+  anything not served as JSON counts as "no file".
 - What the child sees: the same cat-bus ride. It stops being a loading screen
   that is doing 8 s of work and becomes a ride with ~2 s of work behind it —
   the minimum ride length still holds. The continued-save path, which today
@@ -229,7 +259,7 @@ Each step ships green on its own.
    `build:parks`, the plugin, the client fetch, `check:prebuilt-park`. The
    solver stays as fallback. *(Implemented on `feat/prebuilt-parks`.)*
 2. **CI wiring**: `build:parks` + cache in `deploy.yml` / `pr-preview.yml`,
-   `LGP_REQUIRE_PARKS=1`. Small enough to land with step 1.
+   `LGP_REQUIRE_PARKS=1`. *(Implemented with step 1.)*
 3. **Crossings and pathGraph** into the file, once `paths.ts`'s side state
    is captured as data rather than left behind by the search.
 4. **World phase decisions** (trees, bushes, walls, lamps, fairy poles, stall
