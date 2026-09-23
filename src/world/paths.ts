@@ -4735,8 +4735,35 @@ function* addInterconnects(
     // legs; a rejected connector's paving must not stand — every rejection
     // path restores this snapshot (see {@link latticeStateSnapshot}).
     const beforeConnector = latticeStateSnapshot();
-    const plan = straight > 10 ? planStreetBetween(fromPoint, toPoint, true, true) : null;
-    const points: (readonly [number, number])[] = [
+    // **A lattice plan that is itself the long way round is tried last, not
+    // first.** The lattice search finds *a* street between the two
+    // doorsteps, and where the grid has no nodes between them (two plots'
+    // footprints eat the block) that street is the same circuit of the park
+    // the pair already walks — seed 131's `ferrisWheel`/`stall.dodgems`,
+    // 19.8 m apart, got a 391 m lattice "connector" that the ride-corridor
+    // screen then refused for crossing the Sky Cruiser on the far side of the
+    // park, leaving a 385 m walk; drawn, it would have fixed nothing either.
+    // The longest walk the lattice can honestly ask for is the Manhattan
+    // distance plus a pitch of dog-leg at each end (the disproportion escape
+    // below). A plan longer than that is not the first decision: the pair
+    // tries the continuous router first, exactly as when no plan exists, and
+    // only if every screen refuses *that* does it backtrack to the lattice
+    // plan — so a pair the long plan used to serve is never left worse off.
+    const latticeHonestWalk = Math.abs(a.x - b.x) + Math.abs(a.z - b.z) + 2 * STREET_PITCH;
+    const latticePlan = straight > 10 ? planStreetBetween(fromPoint, toPoint, true, true) : null;
+    const latticePlanIsTheLongWay =
+      latticePlan !== null && polylineLength(latticePlan.points) > latticeHonestWalk;
+    if (DEBUG_STREETS && latticePlanIsTheLongWay && latticePlan) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[connect] ${a.id}-${b.id}: lattice plan ${polylineLength(latticePlan.points).toFixed(1)} m is longer ` +
+          `than a lattice-honest ${latticeHonestWalk.toFixed(1)} m — trying the continuous router first`,
+      );
+    }
+    const decisions: readonly (StreetPlan | null)[] = latticePlanIsTheLongWay
+      ? [null, latticePlan]
+      : [latticePlan];
+    const pointsFor = (plan: StreetPlan | null): (readonly [number, number])[] => [
       ...(leadA.length ? [[a.x, a.z] as [number, number]] : []),
       ...(plan
         ? plan.points
@@ -4746,19 +4773,6 @@ function* addInterconnects(
       ...(leadB.length ? [[b.x, b.z] as [number, number]] : []),
     ];
 
-    // A doorstep-to-doorstep link (the ferris wheel and its own kiosk are
-    // 2.3 m apart) is exempt from the corridor screen: both ends' spurs
-    // already carry lamps there, so the marginal lamp risk is nil, while a
-    // cross-park shortcut under a ride's track is exactly the measured
-    // pylon-starvation case the screen exists for.
-    if (straight > 8 && routeCrossesARideCorridor(points)) {
-      if (DEBUG_STREETS) {
-        // eslint-disable-next-line no-console
-        console.log(`[connect] ${a.id}-${b.id}: rejected, crosses a ride corridor`);
-      }
-      restoreLatticeState(beforeConnector);
-      continue;
-    }
     // **The disproportion escape** (issue #361). Both screens below drop
     // paving on the principle that a *shortcut* never outranks the park's
     // own structure. That principle holds right up to the point where the
@@ -4782,7 +4796,6 @@ function* addInterconnects(
     // reach here at all, and by construction this bound is far tighter
     // than `detourRatiosStayReasonable`'s own 15x trip — so every pair
     // that invariant would flag is a pair this escape reaches first.
-    const latticeHonestWalk = Math.abs(a.x - b.x) + Math.abs(a.z - b.z) + 2 * STREET_PITCH;
     const detourIsDisproportionate = paved > latticeHonestWalk;
     if (DEBUG_STREETS && detourIsDisproportionate) {
       // eslint-disable-next-line no-console
@@ -4793,90 +4806,104 @@ function* addInterconnects(
       );
     }
 
-    // A fallback connector that would draw its own private street line is
-    // dropped rather than drawn: it is optional paving, and the lattice
-    // rule outranks a shortcut (see {@link carriesAnOffLatticeStreetRun}).
-    // Unless the walk it saves is disproportionate, above — a single 15 m
-    // line off the lattice reads as a shortcut through a corner; 238 m of
-    // walking reads as a broken park. The one it draws is still held to
-    // `streetsShareLatticeLines`' own exemptions in the built park, which
-    // is what proves the escape stayed the size of a shortcut.
-    if (!plan && !detourIsDisproportionate && carriesAnOffLatticeStreetRun(points)) {
+    /** Why this decision's paving is refused, or null if it may be drawn. */
+    const refusal = (plan: StreetPlan | null, points: readonly (readonly [number, number])[]): string | null => {
+      // A doorstep-to-doorstep link (the ferris wheel and its own kiosk are
+      // 2.3 m apart) is exempt from the corridor screen: both ends' spurs
+      // already carry lamps there, so the marginal lamp risk is nil, while a
+      // cross-park shortcut under a ride's track is exactly the measured
+      // pylon-starvation case the screen exists for.
+      if (straight > 8 && routeCrossesARideCorridor(points)) {
+        return 'crosses a ride corridor';
+      }
+      // A fallback connector that would draw its own private street line is
+      // dropped rather than drawn: it is optional paving, and the lattice
+      // rule outranks a shortcut (see {@link carriesAnOffLatticeStreetRun}).
+      // Unless the walk it saves is disproportionate, above — a single 15 m
+      // line off the lattice reads as a shortcut through a corner; 238 m of
+      // walking reads as a broken park. The one it draws is still held to
+      // `streetsShareLatticeLines`' own exemptions in the built park, which
+      // is what proves the escape stayed the size of a shortcut.
+      if (!plan && !detourIsDisproportionate && carriesAnOffLatticeStreetRun(points)) {
+        return 'off-lattice street run';
+      }
+      // A connector running along the ginormous slide's leg corridor starves
+      // the chute of standable ground (`slide/supports.ts`) — an optional
+      // shortcut never outranks the slide's own legs. Measured on seed 11:
+      // with this connector drawn the 72 m chute could stand only 2 legs.
+      let slideOverlap = 0;
+      for (let i = 1; i < points.length && slideOverlap <= 8; i += 1) {
+        const p = points[i - 1] as readonly [number, number];
+        const q = points[i] as readonly [number, number];
+        slideOverlap += slideCorridorOverlap(p[0], p[1], q[0], q[1]);
+      }
+      // ...with the same escape, and only where the corridor is not something
+      // this connector *chose* to run along. When a destination stands inside
+      // the leg corridor, that ground is already paved and lamped by its own
+      // mandatory spur, so a connector arriving there adds no marginal risk —
+      // the doorstep exemption the ride-corridor screen above already grants,
+      // held here to pairs the escape has judged disproportionate. A
+      // cross-park shortcut that merely *ends* at the slide exit still gets
+      // nothing (seed 2's `building`-`exit-ginormousSlide` clears the escape
+      // and is refused here, because neither end is in the corridor).
+      //
+      // Which destinations those are is **measured, never assumed**. Where
+      // the exit lands relative to the chute is a per-seed fact: seed 11 puts
+      // `exit-ginormousSlide` inside the corridor, with 20.3 m of a 23.4 m
+      // connector in it because *both* ends are; seed 2 puts it outside. So
+      // this asks `pointInSlideCorridor` about the park that was built rather
+      // than reasoning from where a slide exit "must" be.
+      //
+      // The proof it is safe is likewise measured on the built park:
+      // `theGinormousSlideStandsOnSomething` counts the legs that actually
+      // got placed, on all five seeds. **Read that margin before widening
+      // this**: on the #352 base seed 11's chute stands on 3 legs against a
+      // floor of 3, with and without this exemption. It costs no leg — and
+      // there is none spare.
+      const corridorIsADoorstep =
+        detourIsDisproportionate &&
+        (pointInSlideCorridor(a.x, a.z) || pointInSlideCorridor(b.x, b.z));
+      if (slideOverlap > 8 && !corridorIsADoorstep) {
+        return 'runs along the slide corridor';
+      }
+      // **An optional connector never comes down on the finish rainbow's feet.**
+      // The arch cannot move and the paving can (see {@link BLOCKERS}), and the
+      // lattice plan and every elbow `routeLeg` tries already route round the
+      // feet — but `routeLeg`'s last resort, when no clear elbow exists, is a
+      // raw diagonal kept "so the route stays connected". For a spur that is
+      // the right trade; a connector is a shortcut the park can do without,
+      // so it gets the other decision instead: not drawn. Measured on seed
+      // 326, `connector-stall.railRacer-station-1` fell back to a 17.8 m
+      // diagonal (28.61, 50.49)→(29.62, 32.73) whose centreline passed 2.06 m
+      // from six race-ring legs (0.78 m from the paved edge, against
+      // `WALKABLE_GAP`'s 1.24 m) — escaping every other screen because the
+      // pair was judged disproportionate (19.7 m apart, 73.6 m paved). No
+      // escape reaches this one: a connector is never worth a leg in the way.
+      //
+      // Judged on the curve that will be drawn as well as its control
+      // polygon, because a Catmull-Rom swings past its polygon at a bend.
+      if (!connectorClearsArchFeet(points)) {
+        return "comes down on the finish rainbow's feet";
+      }
+      return null;
+    };
+
+    let chosen: { plan: StreetPlan | null; points: (readonly [number, number])[] } | null = null;
+    for (const decision of decisions) {
+      const points = pointsFor(decision);
+      const why = refusal(decision, points);
+      if (why === null) {
+        chosen = { plan: decision, points };
+        break;
+      }
       if (DEBUG_STREETS) {
         // eslint-disable-next-line no-console
-        console.log(`[connect] ${a.id}-${b.id}: rejected, off-lattice street run`);
+        console.log(`[connect] ${a.id}-${b.id}: rejected (${decision ? 'lattice' : 'continuous'}), ${why}`);
       }
       restoreLatticeState(beforeConnector);
-      continue;
     }
-    // A connector running along the ginormous slide's leg corridor starves
-    // the chute of standable ground (`slide/supports.ts`) — an optional
-    // shortcut never outranks the slide's own legs. Measured on seed 11:
-    // with this connector drawn the 72 m chute could stand only 2 legs.
-    let slideOverlap = 0;
-    for (let i = 1; i < points.length && slideOverlap <= 8; i += 1) {
-      const a = points[i - 1] as readonly [number, number];
-      const b = points[i] as readonly [number, number];
-      slideOverlap += slideCorridorOverlap(a[0], a[1], b[0], b[1]);
-    }
-    // ...with the same escape, and only where the corridor is not something
-    // this connector *chose* to run along. When a destination stands inside
-    // the leg corridor, that ground is already paved and lamped by its own
-    // mandatory spur, so a connector arriving there adds no marginal risk —
-    // the doorstep exemption the ride-corridor screen above already grants,
-    // held here to pairs the escape has judged disproportionate. A
-    // cross-park shortcut that merely *ends* at the slide exit still gets
-    // nothing (seed 2's `building`-`exit-ginormousSlide` clears the escape
-    // and is refused here, because neither end is in the corridor).
-    //
-    // Which destinations those are is **measured, never assumed**. Where
-    // the exit lands relative to the chute is a per-seed fact: seed 11 puts
-    // `exit-ginormousSlide` inside the corridor, with 20.3 m of a 23.4 m
-    // connector in it because *both* ends are; seed 2 puts it outside. So
-    // this asks `pointInSlideCorridor` about the park that was built rather
-    // than reasoning from where a slide exit "must" be.
-    //
-    // The proof it is safe is likewise measured on the built park:
-    // `theGinormousSlideStandsOnSomething` counts the legs that actually
-    // got placed, on all five seeds. **Read that margin before widening
-    // this**: on the #352 base seed 11's chute stands on 3 legs against a
-    // floor of 3, with and without this exemption. It costs no leg — and
-    // there is none spare.
-    const corridorIsADoorstep =
-      detourIsDisproportionate &&
-      (pointInSlideCorridor(a.x, a.z) || pointInSlideCorridor(b.x, b.z));
-    if (slideOverlap > 8 && !corridorIsADoorstep) {
-      if (DEBUG_STREETS) {
-        // eslint-disable-next-line no-console
-        console.log(`[connect] ${a.id}-${b.id}: rejected, runs along the slide corridor`);
-      }
-      restoreLatticeState(beforeConnector);
-      continue;
-    }
-    // **An optional connector never comes down on the finish rainbow's feet.**
-    // The arch cannot move and the paving can (see {@link BLOCKERS}), and the
-    // lattice plan and every elbow `routeLeg` tries already route round the
-    // feet — but `routeLeg`'s last resort, when no clear elbow exists, is a
-    // raw diagonal kept "so the route stays connected". For a spur that is
-    // the right trade; a connector is a shortcut the park can do without,
-    // so it gets the other decision instead: not drawn. Measured on seed
-    // 326, `connector-stall.railRacer-station-1` fell back to a 17.8 m
-    // diagonal (28.61, 50.49)→(29.62, 32.73) whose centreline passed 2.06 m
-    // from six race-ring legs (0.78 m from the paved edge, against
-    // `WALKABLE_GAP`'s 1.24 m) — escaping every other screen because the
-    // pair was judged disproportionate (19.7 m apart, 73.6 m paved). No
-    // escape reaches this one: a connector is never worth a leg in the way.
-    //
-    // Judged on the curve that will be drawn as well as its control
-    // polygon, because a Catmull-Rom swings past its polygon at a bend.
-    if (!connectorClearsArchFeet(points)) {
-      if (DEBUG_STREETS) {
-        // eslint-disable-next-line no-console
-        console.log(`[connect] ${a.id}-${b.id}: rejected, comes down on the finish rainbow's feet`);
-      }
-      restoreLatticeState(beforeConnector);
-      continue;
-    }
+    if (!chosen) continue;
+    const { plan, points } = chosen;
     if (plan) commitStreetPlan(plan);
 
     edges.push({
