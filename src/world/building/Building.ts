@@ -1,4 +1,5 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
+import { damp } from '../../core/mathUtils';
 import { CylinderGeometry, Group, Mesh, Object3D, Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
@@ -131,6 +132,19 @@ const RIDER_LIFT = 0.06;
  * measures every vertex of her against the bent chute and holds it at zero.
  */
 const TROUGH_REST_MARGIN = 0.02;
+
+/**
+ * How quickly the chase lens eases to where `solveChaseEye` puts it: the
+ * half-life, in seconds, of **each of two** easing stages in a row.
+ *
+ * One stage turns the solve's 0.1 m flick into a 1.1 cm step in the lens's
+ * *speed* on the next frame — still a kink, measured at 11.8 mm/frame² on the
+ * canonical ride. Two in a row start from rest and ease out again, so the lens
+ * never changes speed abruptly at all; a real change — a companion arriving in
+ * shot — is still most of the way there in under half a second, while the
+ * chute carries her about three metres.
+ */
+const CHASE_EASE_HALF_LIFE = 0.08;
 
 /**
  * How long a stretch of her body one underside point stands for, in metres.
@@ -538,6 +552,17 @@ export class Building implements GameSystem {
   private readonly chaseUp = new Vector3();
   private readonly chaseBehind = new Vector3();
   private readonly chaseEye = new Vector3();
+  /**
+   * The chase lens's distance back and up from the seat **as drawn** — eased
+   * towards what `solveChaseEye` asks for rather than jumped to it. See
+   * {@link CHASE_EASE_HALF_LIFE}. `NaN` until the first frame of a descent,
+   * which takes the solve's answer outright.
+   */
+  private chaseBack = Number.NaN;
+  private chaseHigh = Number.NaN;
+  /** The first of the two easing stages — see {@link CHASE_EASE_HALF_LIFE}. */
+  private chaseBackEasing = Number.NaN;
+  private chaseHighEasing = Number.NaN;
   private readonly chaseAim = new Vector3();
   private readonly chasePet = new Vector3();
   /** The body centre the near bound used this frame (#518), and whether it is set. */
@@ -1730,6 +1755,12 @@ export class Building implements GameSystem {
     // child who goes down the slide twice would have.
     this.chaseGaveUp = 0;
     this.chaseCompanions = 0;
+    // A fresh descent opens on the solve's own answer, not eased in from where
+    // the last one ended.
+    this.chaseBack = Number.NaN;
+    this.chaseHigh = Number.NaN;
+    this.chaseBackEasing = Number.NaN;
+    this.chaseHighEasing = Number.NaN;
     // The near bound's counters describe this descent too (#518), and they live
     // on the solver's module rather than here because the solver is where the
     // rejection happens. Same reasoning as the two above: a counter whose doc
@@ -1815,7 +1846,17 @@ export class Building implements GameSystem {
       // left level (as it was for first person, where it did not matter) a
       // camera 4.1 m behind sits 1.4 m off the chute floor on a 20 degree
       // pitch, and the trough's uphill side wall swings through the lens.
-      const frame = ride.slide.frameAt(t, this.rideFrame);
+      //
+      // **Along the chord back to the lens, not the tangent at her feet** —
+      // `SlideRide.lyingFrameAt`, as she is laid. The lens hangs 4.35 m behind
+      // on a boom; turned by the tangent at the seat, every knot of the chute's
+      // Catmull-Rom (continuous in direction, not in curvature) swung it by the
+      // curvature's jump times that lever — 47-54 mm in one frame at the top
+      // bend, on the canonical ride, once the solve's own flicker was gone. On
+      // the chord, the lens runs along the chute itself behind her and moves as
+      // smoothly as she does.
+      const chord = Number.isNaN(this.chaseBack) ? CHASE_EYE.z : this.chaseBack;
+      const frame = ride.slide.lyingFrameAt(t, chord, this.rideFrame);
       this.rideMount.position.copy(frame.position).addScaledVector(frame.up, RIDER_LIFT);
       this.rideMount.quaternion.copy(frame.orientation(this.rideTurn));
 
@@ -1859,7 +1900,23 @@ export class Building implements GameSystem {
         this.rideView!.camera.aspect,
       );
       if (solved.gaveUp) this.chaseGaveUp += 1;
-      this.eyeBoom.position.set(0, solved.up, solved.back);
+      // **Eased, not jumped.** The solve walks 0.1 m steps and takes the first
+      // that frames her and the pets; where a companion sits on the edge of its
+      // near bound the answer flicks between two neighbouring steps from one
+      // frame to the next, and the lens went out and back 10 cm in a single
+      // frame eight times down the canonical ride — the judder Jim felt. The
+      // solve still decides where the lens belongs; this decides how it gets
+      // there.
+      if (Number.isNaN(this.chaseBack)) {
+        this.chaseBack = this.chaseBackEasing = solved.back;
+        this.chaseHigh = this.chaseHighEasing = solved.up;
+      } else {
+        this.chaseBackEasing = damp(this.chaseBackEasing, solved.back, CHASE_EASE_HALF_LIFE, dt);
+        this.chaseHighEasing = damp(this.chaseHighEasing, solved.up, CHASE_EASE_HALF_LIFE, dt);
+        this.chaseBack = damp(this.chaseBack, this.chaseBackEasing, CHASE_EASE_HALF_LIFE, dt);
+        this.chaseHigh = damp(this.chaseHigh, this.chaseHighEasing, CHASE_EASE_HALF_LIFE, dt);
+      }
+      this.eyeBoom.position.set(0, this.chaseHigh, this.chaseBack);
 
       // **Aim by vectors, never by an angle in a guessed frame.** The lens's
       // unpitched forward is `-behind`; the wanted forward is the direction to
@@ -1870,8 +1927,8 @@ export class Building implements GameSystem {
       // carries it on top of whatever the boom does.
       this.chaseEye
         .copy(this.rideMount.position)
-        .addScaledVector(this.chaseBehind, solved.back)
-        .addScaledVector(this.chaseUp, solved.up);
+        .addScaledVector(this.chaseBehind, this.chaseBack)
+        .addScaledVector(this.chaseUp, this.chaseHigh);
       this.chaseAim.copy(solved.aimAt).sub(this.chaseEye).normalize();
       const forward = -this.chaseAim.dot(this.chaseBehind);
       const rise = this.chaseAim.dot(this.chaseUp);
