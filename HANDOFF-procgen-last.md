@@ -33,5 +33,26 @@ Proved red: lifting the first block of each run 0.03 m in `buildCopingRun`
 gives `0.030 m above` on bridge-14.0 (50° block) and on 164/232/330 (shallow
 blocks) — seed 11, geometry as at `e982430b`.
 
-## 3. Detour s131 — TODO
-## 4. Rainbow s326 — TODO
+## 4. Rainbow s326 — FIXED in `paths.ts` addInterconnects
+
+Culprit (probe `scripts/_probe-rainbow.mts`, untracked): not a spur and not
+`pushClearOfRail` — `connector-stall.railRacer-station-1`, `routeLeg` fallback
+(no lattice plan), last segment a raw diagonal (28.61,50.49)->(29.62,32.73),
+centreline 2.06 m from six race-ring feet. It escaped the off-lattice screen as
+disproportionate (19.7 m apart, 73.6 m paved). New screen
+`connectorClearsArchFeet` (control polygon + drawn Catmull-Rom vs BLOCKERS'
+archFoot radius), no escape. After: no route within 6 m of any foot.
+
+## 3. Detour s131 — FIXED in `paths.ts` addInterconnects
+
+The corridor screen was a red herring: the *lattice plan* for ferrisWheel ->
+stall.dodgems was itself 391 m (the grid has no ok nodes between the two plot
+footprints), crossing the Sky Cruiser on the far side of the park. So: a lattice
+plan longer than `latticeHonestWalk` becomes the *second* decision; the
+continuous router (`routeLeg`) is tried first; screens run per decision (now a
+`refusal()` closure); backtrack to the lattice plan if the continuous one is
+refused. Debug: `LGP_DEBUG_STREETS=1`.
+
+## Status
+- commits pushed: coping instrument, arch-feet screen, long-lattice-plan backtrack
+- running: full test:procgen (head1)
