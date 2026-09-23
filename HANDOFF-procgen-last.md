@@ -80,7 +80,17 @@ s11 fairy-pole-88 on bridge at (2.8,-20.2)).
 - swept-bus OK, entrance-road OK (round 1). Base coplanar is itself red
   (2 MORE, 6 NEW, 2 WORSE); head differed only by the fairy knob finding.
 
+## Round 2 (after fairy fixes), all on head
+- check:park 0..15 all green; waypoint totals = base except s3 239 (240), s6 238 (241), explained above.
+- coplanar: finding keys identical to base as sets (10); only a stand-off detail differs on one stone-wall entry.
+- swept-bus OK, entrance-road OK, digests agree (11/131/326).
+- `pnpm run check`: every step green except `check:layout-rung`, which was red on the
+  base too — its child imported parkLayout.ts without touching the lazy PARK_LAYOUT,
+  so no solve ran. Fixed (7d637b03); now 40 refusals / 22 / 17 / 1 / solved=1.
+- Base CI "Checks" times out at 27m of 30m (not this branch's doing; flag to Overseer).
+
 ## Status
-- running: round 2 (check:park 0..15, coplanar, swept, entrance, digests) after fairy fix
-- then: before/after plot of s131 ferris pocket (`scripts/_probe-plot.mts`,
-  untracked; before = scratchpad s131.svg.png), PR against feat/procgen-on-sphere
+- PR #698 open against feat/procgen-on-sphere. Before/after plan plots of s131 pocket:
+  scratchpad `pocket-procgen-last-base.svg.png` / `pocket-procgen-last.svg.png`.
+- Probes moved out of the tree (they tripped check:flat-primitives) to scratchpad
+  `probes-procgen-last/`.
