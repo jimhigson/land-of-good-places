@@ -5,7 +5,7 @@ import {
   CROSSING_STATION_CLEARANCE,
   CROSSING_STATION_STRUCTURE_CLEARANCE,
 } from './clearance';
-import { MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
+import { DECK_HALF_LENGTH, MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import { isInEntranceGateway } from '../entrance/layout';
 import { crossingSiteBanned } from '../parkWarp';
@@ -306,10 +306,11 @@ function bridgeCandidateAt(railDistance: number): Candidate | null {
  * clutter rule and cannot answer this: the railway winds, so two crossings a
  * long way apart around the loop can be a few metres apart in the park.
  *
- * Each site is treated as the oriented rectangle its bridge will really fill:
- * {@link MIN_BRIDGE_HALF_LENGTH} along the crossing direction (deck plus the
- * ramp every accepted bridge must achieve, asked of `bridgeFootprint.ts` rather
- * than restated here) by its own proven `halfWidth` across. Overlap is the
+ * Each site is treated as the oriented rectangle its bridge will really fill,
+ * with room to land: {@link siteHalfLengthWithLanding} along the crossing
+ * direction (deck plus its own proven ramp reach, never less than the ramp
+ * every accepted bridge must achieve, plus a landing) by its own proven
+ * `halfWidth` across. Overlap is the
  * separating-axis test on the four face normals — exact for two rectangles, and
  * it costs nothing at this scale.
  *
@@ -334,6 +335,29 @@ function bridgeCandidateAt(railDistance: number): Candidate | null {
  * carries the re-scoped question — why seed 2 proves no bridge sites at all,
  * which is the defect that actually let two bridges collide.
  */
+/**
+ * How far along its axis a site's ground reaches, landing included: the deck,
+ * the longer of the two ramps it *proved* (the reach every path router plants
+ * its feet from), and {@link SITE_LANDING} past it.
+ *
+ * This read {@link MIN_BRIDGE_HALF_LENGTH} — the shortest ramp any bridge may
+ * have — and that let two proven sites stand end to end. Seed 131 kept sites
+ * at (-2.2, 40.3) and (-37.7, 47.7) whose proven ramps met at their feet, 1.6 m
+ * apart: every path leaving the one foot started inside the other bridge's
+ * ramp, the routers had nowhere to put a leg, and paving hung off both ramps.
+ */
+function siteHalfLengthWithLanding(c: Candidate): number {
+  return Math.max(MIN_BRIDGE_HALF_LENGTH, DECK_HALF_LENGTH + Math.max(c.rampReachPos, c.rampReachNeg)) + SITE_LANDING;
+}
+
+/**
+ * Ground each end of a bridge keeps clear past its ramp foot: the metre the
+ * routers set a crossing's foot past the ramp (`paths.ts`'s `crossingFeet`),
+ * plus a street's own half-width and kerb, so a path can land on the foot and
+ * turn away from it without standing on anything.
+ */
+const SITE_LANDING = 3;
+
 function footprintsOverlap(a: Candidate, b: Candidate): boolean {
   const axes = [
     [a.dirX, a.dirZ],
@@ -346,7 +370,7 @@ function footprintsOverlap(a: Candidate, b: Candidate): boolean {
   for (const [axX, axZ] of axes) {
     // Each rectangle's own extent on this axis, and the gap between centres.
     const extent = (c: Candidate): number =>
-      Math.abs((c.dirX * axX + c.dirZ * axZ) * MIN_BRIDGE_HALF_LENGTH) +
+      Math.abs((c.dirX * axX + c.dirZ * axZ) * siteHalfLengthWithLanding(c)) +
       Math.abs((-c.dirZ * axX + c.dirX * axZ) * c.halfWidth);
     // A single axis on which they are apart proves they do not overlap.
     if (Math.abs(dx * axX + dz * axZ) >= extent(a) + extent(b)) return false;
