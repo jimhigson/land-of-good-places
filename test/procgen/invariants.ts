@@ -91,6 +91,7 @@ import {
   FALL_THRESHOLD,
   MAX_FRAME_DELTA,
   PATH_KERB_LIFT,
+  PATH_KERB_OVERHANG,
   PATH_SURFACE_LIFT,
   PLAYER_LONGEST_STEP,
   SPRINT_LOCAL_GRADE_CEILING,
@@ -1908,6 +1909,15 @@ const streetsShareLatticeLines: Invariant = (facts) => {
       const ARCH_FOOT_REACH = PLAYER_RADIUS * 2 + 0.4 + (3.6 / 2 + 0.85) - 0.02;
       for (const foot of facts.railRaceArchFeet) {
         if (Math.hypot(x - foot.x, z - foot.z) < foot.radius + ARCH_FOOT_REACH) return true;
+      }
+      // A bridge's own stone blocks a street that does not cross on it: its
+      // paving would be lifted onto the ramp where it overlaps the masonry
+      // and hang off it where it does not (`noDrawnPavingStandsUpAsASheet`),
+      // so the generator keeps every such street off it. Measured off the
+      // built masonry, padded by the widest street's half-width and kerb
+      // (the avenue's, 1.6 + 0.425) a hair under.
+      for (const bridge of facts.world.train.bridges) {
+        if (bridge.footprintNear(x, z, 1.6 + PATH_KERB_OVERHANG - 0.02)) return true;
       }
     }
     return false;

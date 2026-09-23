@@ -18,7 +18,7 @@ import { archFeet } from './railRace/arch';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 import { STALL_STANDS } from '../minigames/stallPlacement';
-import { ENTRANCE_GATE_Z } from './entrance/layout';
+import { ENTRANCE_GATE_HALF_WIDTH, ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from './entrance/layout';
 
 /**
  * The winding path network.
@@ -507,8 +507,22 @@ function segmentIsWalkable(ax: number, az: number, bx: number, bz: number, pad: 
   return (
     segmentClearOfBlockers(ax, az, bx, bz, pad) &&
     segmentClearOfBoundary(ax, az, bx, bz) &&
-    !segmentEntersABridge(ax, az, bx, bz)
+    !segmentEntersABridge(ax, az, bx, bz) &&
+    !segmentPassesTheGate(ax, az, bx, bz)
   );
+}
+
+/**
+ * True when a leg would pass through the park's own front gate. The wall test
+ * ({@link segmentClearOfBoundary}) sees the gateway as an opening, so a search
+ * that went round an obstacle by hugging the wall walked straight across it:
+ * measured on seed 131, `spur-stall.waterFight` ran 68 m along z = 60.4 through
+ * the arch, and the entrance's own gateway path then stopped on that paving
+ * outside the gate. Only the walk in from the gate belongs there, and it is
+ * authored, never routed through here.
+ */
+function segmentPassesTheGate(ax: number, az: number, bx: number, bz: number): boolean {
+  return distanceToSegmentXZ(ENTRANCE_GATE_X, ENTRANCE_GATE_Z, ax, az, bx, bz) < ENTRANCE_GATE_HALF_WIDTH;
 }
 
 /**
@@ -767,6 +781,7 @@ function gridDetourAttempt(
     segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) &&
     segmentClearOfBoundary(ax, az, bx, bz) &&
     !segmentEntersABridge(ax, az, bx, bz) &&
+    !segmentPassesTheGate(ax, az, bx, bz) &&
     // Half the lattice's clamp: enough to keep the search off the rails and
     // on its side, while still letting it squeeze past a pocket the lattice
     // would refuse — `pushClearOfRail` restores the full clamp afterwards.
@@ -2302,6 +2317,7 @@ function keepRouteOffBridges(
         edge: (ax, az, bx, bz) =>
           streetSegmentClear(ax, az, bx, bz, destination, 7, PLAYER_RADIUS + 0.5) &&
           !segmentEntersABridge(ax, az, bx, bz) &&
+          !segmentPassesTheGate(ax, az, bx, bz) &&
           segmentHoldsRailSide(ax, az, bx, bz, side, RAIL_CLAMP_DISTANCE / 2),
         entry: (ax, az, bx, bz) =>
           streetSegmentClear(ax, az, bx, bz, destination, 7, PLAYER_RADIUS + 0.5, 0.6) &&
