@@ -8,6 +8,8 @@ import {
   BUILDING_CENTRE_Z,
   CASTLE_MASONRY_TOP,
   CASTLE_TOWERS,
+  castleTowerSolids,
+  type TowerSolid,
   distanceOutsideTowerLocal,
   worldToCastle,
 } from '../building/layout';
@@ -296,8 +298,26 @@ function endY(): number {
  * the ground in the middle of the pit. The profile descends to this radius.
  */
 function endRadius(): number {
-  return Geo.fromWorld(BALL_PIT_X, endY(), BALL_PIT_Z).radius();
+  // **Memoised on the pit it is a function of.** {@link heightAt} asks this for
+  // every sample of every candidate piece the chute search tries, and each ask
+  // was a `worldYAtAltitude` solve — nine terrain evaluations — for a number
+  // that only moves when the ball pit does. Measured on the canonical seed
+  // (22 Sep 2026, `--cpu-prof` of `check:solve-cost`): **12.1 s of the slide's
+  // 17.6 s of CPU** was this one constant, recomputed three million times.
+  // Keyed on the pit's own coordinates (live bindings the driver rebinds), so a
+  // re-decided layout can never be answered from the old pit; the terrain it
+  // reads is a pure function of the seed. Same inputs, same arithmetic, same
+  // bits — it changes no decision, only how often the question is asked.
+  if (endRadiusPitX !== BALL_PIT_X || endRadiusPitZ !== BALL_PIT_Z) {
+    endRadiusPitX = BALL_PIT_X;
+    endRadiusPitZ = BALL_PIT_Z;
+    endRadiusMemo = Geo.fromWorld(BALL_PIT_X, endY(), BALL_PIT_Z).radius();
+  }
+  return endRadiusMemo;
 }
+let endRadiusPitX = Number.NaN;
+let endRadiusPitZ = Number.NaN;
+let endRadiusMemo = Number.NaN;
 
 /**
  * **The distance from the planet's centre the chute's level lip is held at**,
@@ -535,20 +555,39 @@ registerPlanCache(() => {
  * would have returned clear.
  */
 function towerBoundX(): number {
-  return Math.max(
-  ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.localX) + Math.max(tower.radiusBottom, tower.radiusTop),
-  ),
-);
+  return towerBounds().x;
 }
 /** Read live: the towers stand where the layout the park's driver decided. */
 function towerBoundZ(): number {
-  return Math.max(
-  ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.localZ) + Math.max(tower.radiusBottom, tower.radiusTop),
-  ),
-);
+  return towerBounds().z;
 }
+/**
+ * Both bounds, **memoised on the identity of the solids they are derived from**.
+ *
+ * {@link clearsTowers} is on the chute search's hottest loop and asked for these
+ * on every call, each time mapping all eight towers through the layout's lazy
+ * view: 0.65 s of the slide's CPU on the canonical seed. `castleTowerSolids()`
+ * hands back the layout's own memoised array, which is replaced — a new
+ * identity — whenever the castle is re-placed, so a bound can never outlive the
+ * towers it was taken from. Same towers, same arithmetic, same answer.
+ */
+function towerBounds(): { readonly x: number; readonly z: number } {
+  const towers = castleTowerSolids();
+  if (towerBoundsFor !== towers || !towerBoundsMemo) {
+    towerBoundsFor = towers;
+    towerBoundsMemo = {
+      x: Math.max(
+        ...towers.map((tower) => Math.abs(tower.localX) + Math.max(tower.radiusBottom, tower.radiusTop)),
+      ),
+      z: Math.max(
+        ...towers.map((tower) => Math.abs(tower.localZ) + Math.max(tower.radiusBottom, tower.radiusTop)),
+      ),
+    };
+  }
+  return towerBoundsMemo;
+}
+let towerBoundsFor: readonly TowerSolid[] | null = null;
+let towerBoundsMemo: { readonly x: number; readonly z: number } | null = null;
 
 
 /**
@@ -584,7 +623,9 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
   ) {
     return true;
   }
-  for (const tower of CASTLE_TOWERS) {
+  // The array itself rather than the `CASTLE_TOWERS` view: the same eight
+  // solids, without the view's forwarding on every read of this hot loop.
+  for (const tower of castleTowerSolids()) {
     // The plinth rule — a tower standing on it reaches down to whatever ground
     // is under it — moved into `distanceOutsideTower` with `standsOnThePlinth`,
     // so it is stated once beside the solid it is about rather than copied into
