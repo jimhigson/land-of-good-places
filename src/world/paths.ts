@@ -4081,7 +4081,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
     const routed = [
-      ...(streets ?? fallbackSpurRoute(network(), routeTarget)),
+      ...(streets ?? fallbackSpurRoute(network(), routeTarget, [...(lead.length ? [[ex, ez] as const] : []), ...past])),
       ...(lead.length ? [[ex, ez] as readonly [number, number]] : []),
     ];
     if (SPUR_STRETCH > 0 && id === SPUR_STRETCH_ID && routed.length >= 2) {
@@ -4882,7 +4882,7 @@ function* addInterconnects(
       //
       // Judged on the curve that will be drawn as well as its control
       // polygon, because a Catmull-Rom swings past its polygon at a bend.
-      if (!connectorClearsArchFeet(points)) {
+      if (!routeClearsArchFeet(points)) {
         return "comes down on the finish rainbow's feet";
       }
       return null;
@@ -4918,12 +4918,15 @@ function* addInterconnects(
 }
 
 /**
- * True if a connector's paving stays clear of every finish-rainbow foot by the
+ * True if a route's paving stays clear of every finish-rainbow foot by the
  * same margin {@link BLOCKERS} holds every route to — on its control polygon
- * and on the Catmull-Rom actually drawn through it. See the screen in
- * {@link addInterconnects} for why this one has no escape.
+ * and on the Catmull-Rom actually drawn through it. **The one owner of that
+ * question** for both kinds of optional-shape routing: a connector that fails
+ * it is not drawn (see the screen in {@link addInterconnects}), and a spur's
+ * fallback candidate that fails it is passed over for the next
+ * ({@link fallbackSpurRoute}).
  */
-function connectorClearsArchFeet(points: readonly (readonly [number, number])[]): boolean {
+function routeClearsArchFeet(points: readonly (readonly [number, number])[]): boolean {
   const feet = BLOCKERS.filter((blocker) => blocker.kind === 'archFoot');
   if (feet.length === 0 || points.length < 2) return true;
   for (let i = 1; i < points.length; i += 1) {
@@ -4931,7 +4934,7 @@ function connectorClearsArchFeet(points: readonly (readonly [number, number])[])
     const b = points[i] as readonly [number, number];
     if (!segmentClearOfBlockers(a[0], a[1], b[0], b[1], 0, feet)) return false;
   }
-  const curve = routeCurve({ name: 'connector-screen', width: CONNECTOR_WIDTH, closed: false, points });
+  const curve = routeCurve({ name: 'arch-feet-screen', width: CONNECTOR_WIDTH, closed: false, points });
   for (const p of curvePoints(curve, pathDivisions(curve))) {
     for (const foot of feet) {
       if (Math.hypot(foot.x - p.x, foot.z - p.z) < foot.radius) return false;
@@ -5809,6 +5812,8 @@ function bestBranchPoint(
 function fallbackSpurRoute(
   routes: readonly RouteDefinition[],
   target: readonly [number, number],
+  /** Points the caller will append past `target` (a lead's doormat), judged with it. */
+  extra: readonly (readonly [number, number])[] = [],
 ): (readonly [number, number])[] {
   const allCandidates: (readonly [number, number])[] = [];
   for (const route of routes) {
@@ -5843,9 +5848,21 @@ function fallbackSpurRoute(
   let best: (readonly [number, number])[] | null = null;
   let bestScore = Infinity;
   let bestState: LatticeStateSnapshot | null = null;
-  for (const { candidate } of candidates.slice(0, 4)) {
+  // **A candidate whose route comes down on the finish rainbow's feet is not
+  // priced, it is passed over** — the arch cannot move and the paving can,
+  // and `routeLeg`'s last resort is a raw diagonal that never asked. Seed 6:
+  // `spur-exit-railRace` took such a diagonal (-49.76, -29.02)→(-49.72,
+  // -38.03) straight through six race-ring legs, the worst 0.69 m *inside*
+  // the paving. So the four nearest are tried first as before, and if none
+  // clears the feet the search backtracks down the rest of the list, the
+  // standing rule for every generator here, rather than accepting one.
+  // `extra` is the doormat tail the caller appends, judged with the route.
+  for (let index = 0; index < candidates.length; index += 1) {
+    if (index >= 4 && best) break;
+    const { candidate } = candidates[index] as (typeof candidates)[number];
     restoreLatticeState(before);
     const points = snapRunsToLattice(routeLeg(candidate, target));
+    if (!routeClearsArchFeet([...points, ...extra])) continue;
     const worst = longestOffAxisRun(points);
     // Metres spent hugging the rail corridor count double: a fence-follow
     // is exempt from every shape metric, which otherwise makes it read as
@@ -5886,6 +5903,14 @@ function fallbackSpurRoute(
     return best;
   }
   restoreLatticeState(before);
+  // Every candidate came down on the rainbow's feet (or none existed). Not
+  // silently accepted: `check:park`'s `rainbow.inPath` is a hard key across
+  // the sixteen-seed sweep, so a park that reaches here with a leg in the way
+  // fails loudly rather than shipping.
+  if (DEBUG_STREETS) {
+    // eslint-disable-next-line no-console
+    console.log(`[streets] fallback for (${target[0].toFixed(1)}, ${target[1].toFixed(1)}): no candidate clears the rainbow's feet`);
+  }
   return snapRunsToLattice(routeLeg(bestBranchPoint(routes, target[0], target[1]), target));
 }
 
