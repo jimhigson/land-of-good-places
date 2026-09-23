@@ -587,7 +587,12 @@ function detourAroundBlockers(
  * failing the whole build.
  */
 function elbowLeg(a: readonly [number, number], b: readonly [number, number]): (readonly [number, number])[] {
-  if (Math.abs(a[0] - b[0]) < 1e-6 || Math.abs(a[1] - b[1]) < 1e-6) return [b]; // already axis-aligned
+  if (Math.abs(a[0] - b[0]) < 1e-6 || Math.abs(a[1] - b[1]) < 1e-6) {
+    // Already axis-aligned — kept as it is, unless it runs over a bridge it
+    // does not cross (every leg here is a same-side leg; see
+    // {@link segmentIsWalkable}), which only a search can get round.
+    return segmentEntersABridge(a[0], a[1], b[0], b[1]) ? gridDetour(a, b) : [b];
+  }
   const cornerX: readonly [number, number] = [b[0], a[1]]; // horizontal, then vertical
   const cornerZ: readonly [number, number] = [a[0], b[1]]; // vertical, then horizontal
   const clearVia = (corner: readonly [number, number]): boolean =>
@@ -695,6 +700,10 @@ function gridDetour(a: readonly [number, number], b: readonly [number, number]):
     const found = gridDetourAttempt(a, b, reach);
     if (found) return found;
   }
+  if (DEBUG_STREETS) {
+    // eslint-disable-next-line no-console
+    console.log(`[gridDetour] no route (${a[0].toFixed(1)},${a[1].toFixed(1)}) -> (${b[0].toFixed(1)},${b[1].toFixed(1)}) at any reach`);
+  }
   // Every reach failed: the direct diagonal is the one leg
   // `detourAroundBlockers` already proved clear, so this keeps the route
   // connected rather than failing the build. `test/procgen/invariants.ts`'s
@@ -742,7 +751,10 @@ function gridDetourAttempt(
     segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) &&
     segmentClearOfBoundary(ax, az, bx, bz) &&
     !segmentEntersABridge(ax, az, bx, bz) &&
-    (railSide === null || segmentHoldsRailSide(ax, az, bx, bz, railSide, RAIL_CLAMP_DISTANCE - 0.1));
+    // Half the lattice's clamp: enough to keep the search off the rails and
+    // on its side, while still letting it squeeze past a pocket the lattice
+    // would refuse — `pushClearOfRail` restores the full clamp afterwards.
+    (railSide === null || segmentHoldsRailSide(ax, az, bx, bz, railSide, RAIL_CLAMP_DISTANCE / 2));
   // The connector into the *true* endpoint gets a little more slack on the
   // "arriving at a destination" exemption than an ordinary mid-search edge
   // does: a doormat typically stands `standOff` (1.4 m, `parkLayout.ts`) plus
@@ -2213,25 +2225,69 @@ function keepRouteOffBridges(
     const segments = [...bad].sort((a, b) => a - b);
     let improved = false;
     // Latest stretch first, so earlier indices stay valid as later ones change.
+    // A run of trespassing segments is split wherever the point joining two of
+    // them stands clear of every bridge: a crossing's own feet are such points,
+    // so the carried deck run between them is never folded into a stretch
+    // with the trespass either side of it.
+    const joinedAt = (index: number): boolean =>
+      (segments[index] as number) - (segments[index - 1] as number) <= 1 &&
+      pointNearBridgeStone(current[segments[index] as number] as readonly [number, number], reach);
     let s1 = segments.length - 1;
     while (s1 >= 0) {
       let s0 = s1;
-      while (s0 > 0 && (segments[s0] as number) - (segments[s0 - 1] as number) <= 1) s0 -= 1;
+      while (s0 > 0 && joinedAt(s0)) s0 -= 1;
       let a = segments[s0] as number;
       let b = (segments[s1] as number) + 1;
       s1 = s0 - 1;
       while (a > 0 && pointNearBridgeStone(current[a] as readonly [number, number], reach)) a -= 1;
       while (b < current.length - 1 && pointNearBridgeStone(current[b] as readonly [number, number], reach)) b += 1;
-      const from = current[a] as readonly [number, number];
-      const to = current[b] as readonly [number, number];
-      if (pointNearBridgeStone(from, reach) || pointNearBridgeStone(to, reach)) continue;
+      // Try the tightest clear anchors first, then widen by a control point
+      // either side at a time: an anchor can be clear of the stone and still
+      // stand in a pocket between a ramp and the fence that no detour leaves.
+      let repaired = false;
+      const anchors: [number, number][] = [];
+      for (let widen = 0; widen <= 4; widen += 1) {
+        for (let back = 0; back <= widen; back += 1) {
+          const wa = a - back;
+          const wb = b + (widen - back);
+          if (wa >= 0 && wb <= current.length - 1) anchors.push([wa, wb]);
+        }
+      }
+      for (const [wa, wb] of anchors) {
+      if (repaired) break;
+      const from = current[wa] as readonly [number, number];
+      const to = current[wb] as readonly [number, number];
+      const say = (why: string): void => {
+        if (!DEBUG_STREETS) return;
+        // eslint-disable-next-line no-console
+        console.log(
+          `[bridge-repair] ${trespass.metres.toFixed(1)} m on a bridge, stretch ` +
+            `(${from[0].toFixed(1)},${from[1].toFixed(1)})..(${to[0].toFixed(1)},${to[1].toFixed(1)}): ${why}`,
+        );
+      };
+      if (pointNearBridgeStone(from, reach) || pointNearBridgeStone(to, reach)) {
+        say('an end of the route itself stands on a bridge');
+        continue;
+      }
       const side = railInfoAt(from[0], from[1]).side;
-      if (railInfoAt(to[0], to[1]).side !== side) continue;
+      if (railInfoAt(to[0], to[1]).side !== side) {
+        say('the stretch crosses the railway');
+        continue;
+      }
       const detour = enforceRailSide(manhattanRoute(from, to), side);
-      if (polylineCrossesRail(detour)) continue;
-      const candidate = [...current.slice(0, a), ...detour, ...current.slice(b + 1)];
-      if (drawnMetresOnABridgeUncarried(candidate, width) < trespass.metres) {
+      if (polylineCrossesRail(detour)) {
+        say('the detour crosses the railway');
+        continue;
+      }
+      const candidate = [...current.slice(0, wa), ...detour, ...current.slice(wb + 1)];
+      const after = drawnMetresOnABridgeUncarried(candidate, width);
+      say(`detour ${detour.map((q) => `(${q[0].toFixed(1)},${q[1].toFixed(1)})`).join(' ')} leaves ${after.toFixed(1)} m`);
+      if (after < trespass.metres) {
         current = collapseCollinear(candidate);
+        repaired = true;
+      }
+      }
+      if (repaired) {
         improved = true;
         break;
       }

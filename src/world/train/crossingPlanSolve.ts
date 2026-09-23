@@ -9,6 +9,7 @@ import { DECK_HALF_LENGTH, MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import { isInEntranceGateway } from '../entrance/layout';
 import { crossingSiteBanned } from '../parkWarp';
+import { PARK_LAYOUT, RING_PLOT_CLEARANCE, RING_RADIUS } from '../parkLayout';
 import {
   NARROW_HALF_WIDTH,
   SITE_ANGLE_OFFSETS,
@@ -358,6 +359,35 @@ function siteHalfLengthWithLanding(c: Candidate): number {
  */
 const SITE_LANDING = 3;
 
+/**
+ * **Would this bridge's ramp land on the main loop?** The ring is a fixed
+ * circle of paving round the plaza (`paths.ts`'s `solveRing`), drawn before any
+ * path is routed and never re-routed round anything, so a ramp reaching it puts
+ * the loop's own paving on the ramp — lifted onto the hump where it overlaps
+ * the stone and left on the lawn beside it. Measured on seed 131: the ring
+ * crossed the west end of the ramp at (24.3, -20.5) and hung 1.0 m sheets of
+ * paving either side of it. The loop cannot move, so the site is refused.
+ *
+ * Asked of the site's whole ground with its landing
+ * ({@link siteHalfLengthWithLanding}) against the ring's annulus padded by the
+ * clearance plots already keep from it (`RING_PLOT_CLEARANCE`).
+ */
+function siteReachesTheRing(c: Candidate): boolean {
+  const plaza = PARK_LAYOUT.fountain;
+  const halfLength = siteHalfLengthWithLanding(c);
+  const halfWidth = c.halfWidth;
+  // The plaza's centre in the site's own frame.
+  const dx = plaza.x - c.x;
+  const dz = plaza.z - c.z;
+  const along = dx * c.dirX + dz * c.dirZ;
+  const across = -dx * c.dirZ + dz * c.dirX;
+  const outsideAlong = Math.max(0, Math.abs(along) - halfLength);
+  const outsideAcross = Math.max(0, Math.abs(across) - halfWidth);
+  const nearest = Math.hypot(outsideAlong, outsideAcross);
+  const farthest = Math.hypot(Math.abs(along) + halfLength, Math.abs(across) + halfWidth);
+  return nearest <= RING_RADIUS + RING_PLOT_CLEARANCE && farthest >= RING_RADIUS - RING_PLOT_CLEARANCE;
+}
+
 function footprintsOverlap(a: Candidate, b: Candidate): boolean {
   const axes = [
     [a.dirX, a.dirZ],
@@ -491,7 +521,7 @@ export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, v
     // picks the next-best spacing. Unwarped, nothing is ever banned.
     if (crossingSiteBanned(d)) continue;
     const bridge = bridgeCandidateAt(d);
-    if (bridge) bridgeCandidates.push(bridge);
+    if (bridge && !siteReachesTheRing(bridge)) bridgeCandidates.push(bridge);
   }
   const bridges = selectSpaced(bridgeCandidates);
   // Zero bridge sites is an invalid park, full stop — there is no level
