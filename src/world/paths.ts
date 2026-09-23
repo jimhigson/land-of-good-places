@@ -490,10 +490,25 @@ function segmentClearOfBoundary(ax: number, az: number, bx: number, bz: number):
   return true;
 }
 
-/** Combines {@link segmentClearOfBlockers} and {@link segmentClearOfBoundary}
- * — every axis-aligned candidate leg has to satisfy both. */
+/** Combines {@link segmentClearOfBlockers}, {@link segmentClearOfBoundary}
+ * and {@link segmentEntersABridge} — every axis-aligned candidate leg has to
+ * satisfy all three.
+ *
+ * **Why a bridge is an obstacle here.** Every leg this router draws is a
+ * same-side leg — `routeLeg` emits a crossing's own axis itself, never through
+ * here — so a leg inside a planned bridge's ground is a street walking up a
+ * ramp it does not cross, or through its parapet. Measured on seed 131's walk
+ * in from the gate, aiming for the east foot of the bridge at (-2.2, 40.3):
+ * the only elbow the blockers allowed turned on the crown and ran 15 m down
+ * the ramp to the foot, and the avenue then turned round to cross — with 4.5 m
+ * sheets of paving where it came in over the parapet, because
+ * `drapePathsOverBridges` lifts whatever stands inside the stone. */
 function segmentIsWalkable(ax: number, az: number, bx: number, bz: number, pad: number): boolean {
-  return segmentClearOfBlockers(ax, az, bx, bz, pad) && segmentClearOfBoundary(ax, az, bx, bz);
+  return (
+    segmentClearOfBlockers(ax, az, bx, bz, pad) &&
+    segmentClearOfBoundary(ax, az, bx, bz) &&
+    !segmentEntersABridge(ax, az, bx, bz)
+  );
 }
 
 /**
@@ -713,8 +728,12 @@ function gridDetourAttempt(
       (Math.hypot(a[0] - blocker.x, a[1] - blocker.z) >= blocker.radius &&
         Math.hypot(b[0] - blocker.x, b[1] - blocker.z) >= blocker.radius),
   );
+  // Bridges are obstacles to this search for the reason {@link segmentIsWalkable}
+  // gives: it only ever draws same-side legs.
   const walkable = (ax: number, az: number, bx: number, bz: number, pad: number): boolean =>
-    segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) && segmentClearOfBoundary(ax, az, bx, bz);
+    segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) &&
+    segmentClearOfBoundary(ax, az, bx, bz) &&
+    !segmentEntersABridge(ax, az, bx, bz);
   // The connector into the *true* endpoint gets a little more slack on the
   // "arriving at a destination" exemption than an ordinary mid-search edge
   // does: a doormat typically stands `standOff` (1.4 m, `parkLayout.ts`) plus
@@ -730,7 +749,8 @@ function gridDetourAttempt(
   // ordinary edges the A* search walks between them.
   const walkableToEndpoint = (ax: number, az: number, bx: number, bz: number): boolean =>
     segmentClearOfBlockers(ax, az, bx, bz, ROUTE_WALKER_PAD, localBlockers, DESTINATION_ARRIVAL_MARGIN) &&
-    segmentClearOfBoundary(ax, az, bx, bz);
+    segmentClearOfBoundary(ax, az, bx, bz) &&
+    !segmentEntersABridge(ax, az, bx, bz);
 
   const touching = (p: readonly [number, number]): [number, number][] => {
     const fx = Math.floor(p[0] / step);
@@ -1915,19 +1935,88 @@ function pointInSlideCorridor(x: number, z: number): boolean {
  * sites carry it.
  */
 function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number): boolean {
-  const length = Math.hypot(bx - ax, bz - az);
-  // 1.5 m is coarser than the 3 m parapet band is thick, so a transverse
-  // segment cannot step over the masonry between two samples.
-  const steps = Math.max(1, Math.ceil(length / 1.5));
-  for (let s = 0; s <= steps; s += 1) {
-    const t = s / steps;
-    // The masonry, not the whole footprint — see
-    // {@link pointStandsOnBridgeMasonry}. A street may run along a bridge's
-    // deck (that is what the crossing leg itself does); it may not run into
-    // the parapet flanking it.
-    if (pointStandsOnBridgeMasonry(ax + (bx - ax) * t, az + (bz - az) * t)) return true;
+  // **Exact, not sampled.** This used to march the segment at 1.5 m and ask
+  // {@link pointStandsOnBridgeMasonry} at each stop, on the claim that 1.5 m
+  // "is coarser than the 3 m parapet band is thick" — but the band it asks
+  // about is {@link RAMP_SCREEN_MARGIN} wide, 0.5 m since #414, so a street
+  // crossing a ramp square-on stepped clean over it. Measured on seed 131: the
+  // lattice edge (-14.3, 40.1) -> (-14.3, 29.3) sampled z = 36.05 (on the
+  // deck) then 34.70 (0.1 m past the band) and was passed, and the avenue
+  // walked back up the bridge's west ramp and off its side through the
+  // parapet — a 1.3 m sheet of paving once the drape lifted the stretch on
+  // the ramp. Clipped in each site's own frame instead, where both `along`
+  // and `across` are linear in the segment's parameter, so the answer is the
+  // band itself rather than a guess at it.
+  for (const site of CROSSING_SITES) {
+    const piece = clipToSiteFootprint(site, ax, az, bx, bz, RAMP_SCREEN_MARGIN);
+    if (!piece) continue;
+    // `|across|` is convex along the clipped piece, so its largest value is
+    // at one end — and anywhere past the deck's own half-width is masonry.
+    if (Math.max(Math.abs(piece.acrossAt0), Math.abs(piece.acrossAt1)) > site.halfWidth) return true;
   }
   return false;
+}
+
+/**
+ * True when the segment enters **any** planned bridge's ground at all — deck,
+ * ramps or parapet, padded by `margin`. The segment twin of
+ * {@link pointStandsOnABridgeRamp}, exact rather than sampled.
+ *
+ * For a leg that is not the crossing's own axis: a same-side leg never crosses
+ * the railway, so it has no business on a bridge, and any of it inside one is
+ * paving `drapePathsOverBridges` will lift onto the hump while its neighbours
+ * stay on the lawn — a wall of paving (seed 131's walk in from the gate).
+ */
+function segmentEntersABridge(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  margin = RAMP_SCREEN_MARGIN,
+): boolean {
+  for (const site of CROSSING_SITES) {
+    if (clipToSiteFootprint(site, ax, az, bx, bz, margin)) return true;
+  }
+  return false;
+}
+
+/**
+ * The part of segment `a`-`b` inside one site's padded footprint, as the
+ * parameter range and the signed `across` at each end of it — or `null` if
+ * the segment misses it. Clipped in the site's own frame, where `along` and
+ * `across` are both linear in the parameter (Liang–Barsky), so it is exact.
+ */
+function clipToSiteFootprint(
+  site: CrossingSite,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  margin: number,
+): { t0: number; t1: number; acrossAt0: number; acrossAt1: number } | null {
+  const bounds = siteFootprint(site, margin);
+  const a = siteFrame(site, ax, az);
+  const b = siteFrame(site, bx, bz);
+  let t0 = 0;
+  let t1 = 1;
+  const clip = (from: number, to: number, low: number, high: number): boolean => {
+    const delta = to - from;
+    if (Math.abs(delta) < 1e-12) return from >= low && from <= high;
+    let enter = (low - from) / delta;
+    let leave = (high - from) / delta;
+    if (enter > leave) [enter, leave] = [leave, enter];
+    t0 = Math.max(t0, enter);
+    t1 = Math.min(t1, leave);
+    return t0 <= t1;
+  };
+  if (!clip(a.along, b.along, bounds.alongMin, bounds.alongMax)) return null;
+  if (!clip(a.across, b.across, -bounds.acrossHalf, bounds.acrossHalf)) return null;
+  return {
+    t0,
+    t1,
+    acrossAt0: a.across + (b.across - a.across) * t0,
+    acrossAt1: a.across + (b.across - a.across) * t1,
+  };
 }
 
 /**
@@ -2070,20 +2159,38 @@ function standsOnSomeBridge(
   deckCounts: boolean,
 ): boolean {
   for (const site of CROSSING_SITES) {
-    const dx = x - site.x;
-    const dz = z - site.z;
-    const across = Math.abs(-dx * site.dirZ + dz * site.dirX);
-    if (across > site.halfWidth + margin) continue;
+    const bounds = siteFootprint(site, margin);
+    const { along, across: signedAcross } = siteFrame(site, x, z);
+    const across = Math.abs(signedAcross);
+    if (across > bounds.acrossHalf) continue;
     // Inside the deck's own width is road, not wall — keep going, another
     // site's masonry may still claim this point.
     if (!deckCounts && across <= site.halfWidth) continue;
-    const along = dx * site.dirX + dz * site.dirZ;
-    if (along <= DECK_HALF_LENGTH + site.rampReachPos + margin &&
-        along >= -(DECK_HALF_LENGTH + site.rampReachNeg + margin)) {
-      return true;
-    }
+    if (along <= bounds.alongMax && along >= bounds.alongMin) return true;
   }
   return false;
+}
+
+/** A point in a crossing site's own frame: `along` its axis from the crossing,
+ * `across` it (signed). The one owner of that projection in this file. */
+function siteFrame(site: CrossingSite, x: number, z: number): { along: number; across: number } {
+  const dx = x - site.x;
+  const dz = z - site.z;
+  return { along: dx * site.dirX + dz * site.dirZ, across: -dx * site.dirZ + dz * site.dirX };
+}
+
+/** The ground a planned bridge will stand on, padded by `margin`, in its own
+ * frame — deck plus each ramp's proven reach along, the proven half-width
+ * across. Shared by the point and segment screens so they cannot disagree. */
+function siteFootprint(
+  site: CrossingSite,
+  margin: number,
+): { alongMin: number; alongMax: number; acrossHalf: number } {
+  return {
+    alongMin: -(DECK_HALF_LENGTH + site.rampReachNeg + margin),
+    alongMax: DECK_HALF_LENGTH + site.rampReachPos + margin,
+    acrossHalf: site.halfWidth + margin,
+  };
 }
 
 /**
@@ -3614,15 +3721,34 @@ const GATE_CORRIDOR_START_Z = ENTRANCE_GATE_Z - GATE_CORRIDOR_ARCH_INSET;
 
 const GATE_CORRIDOR_INNER_Z = ENTRANCE_GATE_Z - GATE_CORRIDOR_DEPTH;
 
+/** The avenue's drawn width — the one owner, read by the edge that draws it
+ * and by every clearance below that has to know where its edge stands. */
+const GATE_APPROACH_WIDTH = 3.2;
+
 /**
  * Daylight the corridor's mouth keeps from the rail centre line.
  *
- * Not a taste number: the corridor is a 3.2 m ribbon, so its own edge stands
- * 1.6 m off its centre, and `RAIL_CLAMP_DISTANCE` (4.2 m) is how close the
- * lattice lets any street's centre come to the track. A mouth inside that is
- * a path drawn on the railway.
+ * Not a taste number: the corridor is a {@link GATE_APPROACH_WIDTH} ribbon, so
+ * its own edge stands half that off its centre, and `RAIL_CLAMP_DISTANCE`
+ * (4.2 m) is how close the lattice lets any street's centre come to the track.
+ * A mouth inside that is a path drawn on the railway.
  */
-const GATE_CORRIDOR_RAIL_STANDOFF = RAIL_CLAMP_DISTANCE + 1.6;
+const GATE_CORRIDOR_RAIL_STANDOFF = RAIL_CLAMP_DISTANCE + GATE_APPROACH_WIDTH / 2;
+
+/**
+ * **May the authored corridor's ribbon stand at `(0, z)`?** Clear of the track
+ * by {@link GATE_CORRIDOR_RAIL_STANDOFF}, and off every planned bridge's ground
+ * by its own half-width — {@link pointStandsOnABridgeRamp}, the router's one
+ * owner of that ground, padded by the ribbon so its *edge* keeps off, not just
+ * its centre line. The corridor never crosses the railway, so it is never the
+ * leg a bridge carries: any of it inside a bridge's footprint is paving the
+ * bridge will either bury or, once `drapePathsOverBridges` lifts it, hold up
+ * in the air as a sheet.
+ */
+function gateCorridorClearAt(z: number): boolean {
+  if (railInfoAt(0, z).dist < GATE_CORRIDOR_RAIL_STANDOFF) return false;
+  return !pointStandsOnABridgeRamp(0, z, RAMP_SCREEN_MARGIN + GATE_APPROACH_WIDTH / 2);
+}
 
 /** Cached so the callers below cannot disagree, and so the stub search is
  * not repeated. */
@@ -3655,23 +3781,34 @@ function gateCorridorDeepestMouth(): readonly [number, number] {
   // three of the five swept seeds build precisely the park they built before
   // this change — the fix is for the walk that meets the railway, and a seed
   // whose walk does not meet it has nothing here to fix.
-  let crossesAt = -1;
+  //
+  // **"Cuts across" includes running alongside, and it includes a bridge.**
+  // Seed 131's loop never crosses `x = 0` north of the corridor's inner end, so
+  // the corridor kept its full authored length — and for 20 m of it the rail
+  // ran 2.25–3.4 m from its centre line, which puts the 3.2 m ribbon's edge
+  // 0.65 m from the rail: a path drawn on the railway, through the arch of the
+  // bridge at (-2.2, 40.3) and across both of that bridge's parapets. The
+  // drape then lifted the stretch inside the stone onto the deck and left the
+  // stretch outside it on the lawn, and the paving between hung as a 4.5 m
+  // sheet either side of the deck. A corridor that clears the track by the
+  // standoff and keeps off every bridge's ground is still left exactly as
+  // authored, so a seed whose walk comes nowhere near either is unchanged.
+  let cutAt = -1;
   for (let step = 0; step <= steps; step += 1) {
     const z = GATE_CORRIDOR_START_Z - step * 0.2;
-    if (railInfoAt(0, z).side !== gateSide) {
-      crossesAt = z;
+    if (railInfoAt(0, z).side !== gateSide || !gateCorridorClearAt(z)) {
+      cutAt = z;
       break;
     }
   }
-  if (crossesAt < 0) {
+  if (cutAt < 0) {
     gateCorridorDeepestCache = full;
     return full;
   }
   let deepest: readonly [number, number] = [0, GATE_CORRIDOR_START_Z] as const;
   for (let step = 0; step <= steps; step += 1) {
     const z = GATE_CORRIDOR_START_Z - step * 0.2;
-    if (z <= crossesAt) break;
-    if (railInfoAt(0, z).dist < GATE_CORRIDOR_RAIL_STANDOFF) break;
+    if (z <= cutAt) break;
     deepest = [0, z] as const;
   }
   gateCorridorDeepestCache = deepest;
@@ -3959,7 +4096,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       paved: true,
       route: {
         name: 'gate-approach',
-        width: 3.2,
+        width: GATE_APPROACH_WIDTH,
         closed: false,
         points: gateApproach.points,
       },

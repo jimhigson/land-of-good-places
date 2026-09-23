@@ -274,7 +274,23 @@ function spineThrough(
   if ((tangentTo.x - tangentFrom.x) * dirX + (tangentTo.z - tangentFrom.z) * dirZ < 0) {
     spine.reverse();
   }
-  const halfWidth = (samples[bestIndex] as { halfWidth: number }).halfWidth;
+  // **The widest path this deck carries, not the one whose centreline it took.**
+  // Two routes can cross the railway at one planned site — `routeLeg` sends
+  // every leg that straddles the loop through the cheapest site, so the walk
+  // in from the gate and a stall spur can share a deck — and they need not be
+  // one width. Sized for the narrower, the wider one's kerb stands outside the
+  // stone: `drapePathsOverBridges` lifts the half of it over the masonry and
+  // leaves the half past it on the lawn, a sheet of kerb 4.5 m tall down the
+  // whole deck (seed 131: the 3.2 m avenue on a deck built for a 2.6 m spur).
+  // So every run that is as straight across here as the chosen one counts.
+  let halfWidth = (samples[bestIndex] as { halfWidth: number }).halfWidth;
+  for (let i = 0; i < samples.length; i += 1) {
+    const sample = samples[i] as { x: number; z: number; halfWidth: number };
+    if (sample.halfWidth <= halfWidth) continue;
+    if (Math.hypot(sample.x - x, sample.z - z) >= SPINE_ADOPT_DISTANCE) continue;
+    if (straightnessAt(i) < bestStraightness - SPINE_STRAIGHTNESS_TIE) continue;
+    halfWidth = sample.halfWidth;
+  }
   return { spine, halfWidth };
 }
 
