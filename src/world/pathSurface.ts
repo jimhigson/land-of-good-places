@@ -80,6 +80,22 @@ export class GeometryBuilder {
     this.indices.push(a, b, c, b, d, c);
   }
 
+  /** One triangle, wound as given. */
+  triangle(a: number, b: number, c: number): void {
+    this.indices.push(a, b, c);
+  }
+
+  /** Where vertex `index` was laid, and its `(u, v)`. */
+  vertexAt(index: number): { x: number; y: number; z: number; u: number; v: number } {
+    return {
+      x: this.positions[index * 3] as number,
+      y: this.positions[index * 3 + 1] as number,
+      z: this.positions[index * 3 + 2] as number,
+      u: this.uvs[index * 2] as number,
+      v: this.uvs[index * 2 + 1] as number,
+    };
+  }
+
   build(): BufferGeometry {
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(new Float32Array(this.positions), 3));
@@ -98,7 +114,10 @@ export function addPathRibbon(
   width: number,
   divisions: number,
   lift: number,
-): void {
+): PlanTriangle[] {
+  /** The triangles laid, in plan — see {@link PlanTriangle}. */
+  const laid: PlanTriangle[] = [];
+  let previous: readonly [number, number, number, number] | null = null;
   const half = width / 2;
   const point = new Vector3();
   const tangent = new Vector3();
@@ -134,8 +153,25 @@ export function addPathRibbon(
       const base = builder.vertexCount - 4;
       builder.quad(base, base + 1, base + 2, base + 3);
     }
+    // The same two triangles `quad` just indexed, (a, b, c) and (b, d, c).
+    if (previous) {
+      const [prx, prz, plx, plz] = previous;
+      laid.push([[prx, prz], [plx, plz], [rx, rz]], [[plx, plz], [lx, lz], [rx, rz]]);
+    }
+    previous = [rx, rz, lx, lz];
   }
+  return laid;
 }
+
+/**
+ * One triangle of drawn paving, in plan — `(x, z)` corners. What a ribbon
+ * hands back so a layer drawn *under* it can leave out exactly what it covers.
+ */
+export type PlanTriangle = readonly [
+  readonly [number, number],
+  readonly [number, number],
+  readonly [number, number],
+];
 
 /**
  * How far the paving texture has run, in tiles, `travelled` metres along a

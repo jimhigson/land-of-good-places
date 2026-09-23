@@ -213,16 +213,31 @@ export function buildPaths(): Mesh[] {
   const surface = new GeometryBuilder();
   const kerb = new GeometryBuilder();
 
-  for (const route of ROUTES) {
+  // The surface first, every route of it, so each kerb can be drawn knowing
+  // where every *other* route's paving lies over it — see `KerbCover`.
+  const cover = new KerbCover();
+  const drawn = ROUTES.map((route, owner) => {
     const curve = routeCurve(route);
     const divisions = pathDivisions(curve);
-    addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT);
-    addRibbonKerb(kerb, curve, route.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
+    cover.add(owner, addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT));
     recordSamples(curve, divisions, route.width / 2);
-  }
+    return { route, curve, divisions };
+  });
+  cover.add(PLAZA_OWNER, [addDisc(surface, PLAZA.x, PLAZA.z, PLAZA.radius, 48, 5, PATH_SURFACE_LIFT)]);
 
-  addDisc(surface, PLAZA.x, PLAZA.z, PLAZA.radius, 48, 5, PATH_SURFACE_LIFT);
-  addAnnulusKerb(kerb, PLAZA.x, PLAZA.z, PLAZA.radius, PLAZA.radius + PATH_KERB_OVERHANG * 2, 48, PATH_KERB_LIFT);
+  drawn.forEach(({ route, curve, divisions }, owner) => {
+    addRibbonKerb(kerb, curve, route.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT, cover.drawerFor(owner));
+  });
+  addAnnulusKerb(
+    kerb,
+    PLAZA.x,
+    PLAZA.z,
+    PLAZA.radius,
+    PLAZA.radius + PATH_KERB_OVERHANG * 2,
+    48,
+    PATH_KERB_LIFT,
+    cover.drawerFor(PLAZA_OWNER),
+  );
 
   const surfaceMesh = new Mesh(surface.build(), pathSurfaceMaterial());
   surfaceMesh.name = 'path-surface';
@@ -461,12 +476,13 @@ function addRibbonKerb(
   overhang: number,
   divisions: number,
   lift: number,
+  draw: KerbQuad,
 ): void {
   // Inner edge exactly where the surface's own edge falls: both ribbons walk
   // the same curve at the same `divisions`, so the two edges share their
   // stations and there is no hairline between them to fill.
-  addRibbonBand(builder, curve, width / 2, width / 2 + overhang, divisions, lift);
-  addRibbonBand(builder, curve, -width / 2 - overhang, -width / 2, divisions, lift);
+  addRibbonBand(builder, curve, width / 2, width / 2 + overhang, divisions, lift, draw);
+  addRibbonBand(builder, curve, -width / 2 - overhang, -width / 2, divisions, lift, draw);
 }
 
 /** One band of a ribbon, between two signed offsets from its centre line. */
@@ -477,6 +493,7 @@ function addRibbonBand(
   toOffset: number,
   divisions: number,
   lift: number,
+  draw: KerbQuad,
 ): void {
   const point = new Vector3();
   const tangent = new Vector3();
@@ -509,7 +526,7 @@ function addRibbonBand(
 
     if (i > 0) {
       const base = builder.vertexCount - 4;
-      builder.quad(base, base + 1, base + 2, base + 3);
+      draw(builder, base, base + 1, base + 2, base + 3);
     }
   }
 }
@@ -523,6 +540,7 @@ function addAnnulusKerb(
   outerRadius: number,
   segments: number,
   lift: number,
+  draw: KerbQuad,
 ): void {
   const first = builder.vertexCount;
   for (let r = 0; r <= 1; r += 1) {
@@ -537,7 +555,7 @@ function addAnnulusKerb(
   const stride = segments + 1;
   for (let s = 0; s < segments; s += 1) {
     const a = first + s;
-    builder.quad(a, a + 1, a + stride, a + stride + 1);
+    draw(builder, a, a + 1, a + stride, a + stride + 1);
   }
 }
 
@@ -550,8 +568,10 @@ function addDisc(
   segments: number,
   rings: number,
   lift: number,
-): void {
+): PlanPolygon {
   const first = builder.vertexCount;
+  /** The outer ring, in plan — the disc's whole footprint, convex. */
+  const outline: [number, number][] = [];
   for (let r = 0; r <= rings; r += 1) {
     const radiusAt = (r / rings) * radius;
     for (let s = 0; s <= segments; s += 1) {
@@ -559,6 +579,7 @@ function addDisc(
       const x = cx + Math.cos(angle) * radiusAt;
       const z = cz + Math.sin(angle) * radiusAt;
       builder.vertex(x, terrainHeight(x, z) + lift, z, x / 6, z / 6);
+      if (r === rings && s < segments) outline.push([x, z]);
     }
   }
   const stride = segments + 1;
@@ -571,6 +592,192 @@ function addDisc(
       builder.quad(a, b, c, d);
     }
   }
+  return outline;
+}
+
+// ------------------------------------------------------ the kerb's cover
+
+/** A convex polygon in plan, `(x, z)` corners in order. */
+type PlanPolygon = readonly (readonly [number, number])[];
+
+/** How a kerb quad is handed over to be drawn: `quad`'s own (a, b) (c, d). */
+type KerbQuad = (builder: GeometryBuilder, a: number, b: number, c: number, d: number) => void;
+
+/** The owner id the plaza's disc and annulus are filed under. */
+const PLAZA_OWNER = -1;
+
+/** Pieces smaller than this in plan are dropped, m². A kerb sliver this thin is float noise. */
+const KERB_SLIVER_AREA = 1e-6;
+
+/**
+ * **Where the paving lies over the kerb, so the kerb is not drawn there.**
+ *
+ * Each route's kerb is two bands along its own edges, and at a junction those
+ * bands run on under the *other* route's surface, 25 mm down. That is a buried
+ * face, and it was only invisible while 25 mm stayed 25 mm. Over a bridge the
+ * drape lifts both layers vertex by vertex, and the triangles that straddle
+ * the bridge's edge turn into steep ramps between deck and ground — two
+ * routes' ramps meeting at a junction there come out within a centimetre of
+ * one plane, same way up. `check:coplanar`: `path-kerb|path-surface`, 0.651 m²
+ * at 7.7 mm on seed 24 and 0.200 m² at 9.9 mm on the canonical seed, both at
+ * junctions on bridges. `ART_DIRECTION.md` §7's cure is to delete the face
+ * nobody can see, which also means there is no gap left for a slope to eat.
+ *
+ * So the surface is drawn first, every triangle of it filed here by the route
+ * that laid it, and a kerb triangle that other routes' paving covers
+ * **entirely** is not drawn. Covered is an exact polygon difference in plan,
+ * never a distance test, because a capsule round the centreline overstates the
+ * ribbon and would cut kerb a child can see. A route's own surface is never
+ * subtracted from its own kerb: the two share an edge by construction.
+ *
+ * **Whole triangles only, deliberately.** Cutting a partly covered triangle
+ * down to its uncovered part was tried first and is worse: the pieces are
+ * small, and `check:coplanar` measures a pair of triangles by their furthest
+ * vertices, so small pieces of kerb that were always within a few millimetres
+ * of the coarse terrain mesh became findings that the whole triangle had
+ * hidden — 0.755 m² of `path-kerb|terrain` at 2 mm on seed 11, and a bridge's
+ * shell on seed 128. Those are real, and they are the terrain mesh's chords,
+ * not this. Dropping only whole triangles cannot make any remaining pair
+ * closer than it was, and on the canonical seed and seeds 11, 24 and 128 it
+ * clears every `path-kerb` finding. The partly covered triangles keep their
+ * buried share, 25 mm down, where it was harmless before a slope got to it.
+ * Vertices are still laid for a dropped triangle — only its index goes — so
+ * every per-vertex measure of the kerb (the bridge-carrying invariant counts
+ * them) is unchanged.
+ */
+class KerbCover {
+  private readonly polygons: { owner: number; polygon: PlanPolygon; minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
+  private readonly grid = new Map<string, number[]>();
+
+  add(owner: number, polygons: readonly PlanPolygon[]): void {
+    for (const polygon of polygons) {
+      const xs = polygon.map((p) => p[0]);
+      const zs = polygon.map((p) => p[1]);
+      const entry = {
+        owner,
+        polygon,
+        minX: Math.min(...xs),
+        maxX: Math.max(...xs),
+        minZ: Math.min(...zs),
+        maxZ: Math.max(...zs),
+      };
+      const id = this.polygons.push(entry) - 1;
+      for (const key of cellsOf(entry.minX, entry.maxX, entry.minZ, entry.maxZ)) {
+        const list = this.grid.get(key);
+        if (list) list.push(id);
+        else this.grid.set(key, [id]);
+      }
+    }
+  }
+
+  /** The {@link KerbQuad} for one owner's kerb. */
+  drawerFor(owner: number): KerbQuad {
+    return (builder, a, b, c, d) => {
+      // `quad`'s own split, so an uncut quad is exactly what it always was.
+      this.triangle(builder, owner, a, b, c);
+      this.triangle(builder, owner, b, d, c);
+    };
+  }
+
+  private triangle(builder: GeometryBuilder, owner: number, i0: number, i1: number, i2: number): void {
+    const plan = [i0, i1, i2].map((index) => {
+      const { x, z } = builder.vertexAt(index);
+      return [x, z] as [number, number];
+    });
+    const minX = Math.min(...plan.map((p) => p[0]));
+    const maxX = Math.max(...plan.map((p) => p[0]));
+    const minZ = Math.min(...plan.map((p) => p[1]));
+    const maxZ = Math.max(...plan.map((p) => p[1]));
+
+    // What of this triangle no other route's paving covers, as convex pieces.
+    const seen = new Set<number>();
+    let uncovered: [number, number][][] = [plan];
+    for (const key of cellsOf(minX, maxX, minZ, maxZ)) {
+      for (const id of this.grid.get(key) ?? []) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const cover = this.polygons[id]!;
+        if (cover.owner === owner) continue;
+        if (cover.maxX <= minX || cover.minX >= maxX || cover.maxZ <= minZ || cover.minZ >= maxZ) continue;
+        uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.polygon) ?? [piece]);
+        if (uncovered.length === 0) return; // buried whole: not drawn
+      }
+    }
+    builder.triangle(i0, i1, i2);
+  }
+}
+
+/** Grid cell side for {@link KerbCover}'s lookup, metres. */
+const KERB_COVER_CELL = 4;
+
+function cellsOf(minX: number, maxX: number, minZ: number, maxZ: number): string[] {
+  const keys: string[] = [];
+  for (let i = Math.floor(minX / KERB_COVER_CELL); i <= Math.floor(maxX / KERB_COVER_CELL); i += 1) {
+    for (let j = Math.floor(minZ / KERB_COVER_CELL); j <= Math.floor(maxZ / KERB_COVER_CELL); j += 1) {
+      keys.push(`${i},${j}`);
+    }
+  }
+  return keys;
+}
+
+function signedArea(polygon: readonly (readonly [number, number])[]): number {
+  let area = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const [ax, az] = polygon[i]!;
+    const [bx, bz] = polygon[(i + 1) % polygon.length]!;
+    area += ax * bz - bx * az;
+  }
+  return area / 2;
+}
+
+/**
+ * `piece` minus the convex `cover`, as convex pieces in `piece`'s own winding
+ * — or `null` if the cover takes nothing measurable from it.
+ *
+ * The standard split: walking the cover's edges, whatever of the piece lies
+ * outside edge *k* but inside edges *0..k-1* is one piece of the answer, and
+ * whatever is inside every edge is the part covered.
+ */
+function subtractConvex(
+  piece: readonly [number, number][],
+  cover: PlanPolygon,
+): [number, number][][] | null {
+  const orientation = Math.sign(signedArea(cover));
+  if (orientation === 0) return null;
+  const out: [number, number][][] = [];
+  let rest: [number, number][] = [...piece];
+  for (let k = 0; k < cover.length && rest.length >= 3; k += 1) {
+    const [ax, az] = cover[k]!;
+    const [bx, bz] = cover[(k + 1) % cover.length]!;
+    // > 0 inside this edge's half-plane, for either winding of the cover.
+    const side = ([x, z]: [number, number]): number =>
+      orientation * ((bx - ax) * (z - az) - (bz - az) * (x - ax));
+    const outside = clipToSide(rest, (p) => -side(p));
+    if (outside.length >= 3 && Math.abs(signedArea(outside)) >= KERB_SLIVER_AREA) out.push(outside);
+    rest = clipToSide(rest, side);
+  }
+  if (rest.length < 3 || Math.abs(signedArea(rest)) < KERB_SLIVER_AREA) return null;
+  return out;
+}
+
+/** Sutherland–Hodgman against one half-plane: keeps where `side(p) >= 0`. */
+function clipToSide(
+  polygon: readonly [number, number][],
+  side: (p: [number, number]) => number,
+): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < polygon.length; i += 1) {
+    const p = polygon[i]!;
+    const q = polygon[(i + 1) % polygon.length]!;
+    const sp = side(p);
+    const sq = side(q);
+    if (sp >= 0) out.push(p);
+    if ((sp > 0 && sq < 0) || (sp < 0 && sq > 0)) {
+      const t = sp / (sp - sq);
+      out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+    }
+  }
+  return out;
 }
 
 // Derived from a decision the park's driver may unwind: forgotten with it.
