@@ -29,11 +29,20 @@ places, so paving hung as sheets up to 4.6 m tall. Base sweep (e982430b, seeds 0
 - Planner: shared deck sized to widest path (crossings.ts); proven sites keep a 3 m landing apart on their
   proven reach; sites whose ramps reach the ring are refused (crossingPlanSolve.ts).
 
-## Status
-- Sheets on the five test seeds at head: none.
-- Running: test:procgen head (scratch head-procgen-2.log); then base (698 head) for the name+message diff.
-- Still to run: check:park (affected seeds), check:coplanar, check:swept-bus, check:entrance-road,
-  determinism, 0..199 head sweep, after frames, PR.
+## Status (STOPPED by Overseer, mid-work)
+- Sheets: none on the five test seeds (invariant green on all five).
+- Last full run (head before the last commit's siblings — see scratch head2-*.log):
+  test:procgen 2 failed | 706 passed (lattice: seed 11 spur-building x=42; seed 131 gate-approach z=46.16),
+  caused by relaxing gridDetour's rail clearance to side-only (commit "gridDetour holds only its rail side").
+  Base (#698 head b1ea1f6a): 1 failed | 702 passed (bushes seed 11).
+- check:park-pool PASS 10/10 (base FAILS seed 128); every-seed-builds 16/16; gateway, swept-bus,
+  entrance-road, walk-reach exit 0.
+- check:coplanar exit 1 on head AND base: head 10 new/worse vs base 10; head drops base's path-kerb|path-surface,
+  adds entrance-gateway-path-kerb-left|path-kerb, and reports BASELINE LOOSE (bridge wallTop|terrain gone).
+- Not yet done: fix the two lattice fails (idea: snap gate-approach gateway solvers / grid detours onto the
+  lattice), determinism digest x2, head 0..199 sweep, planted control for the test diff, pnpm run check, PR.
+- Site-level changes alter parks: seed 326 re-solves its train (ring/landing rules leave first loops no site);
+  seed 11 re-plans crossings without the site at railD 236 (walled-in rule). Canonical: no unwinds.
 
 ## Tools (scratch: /private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/92acae52-e71b-43c9-a76b-92e2c76ea5d3/scratchpad/paving-drape/)
 sheet-measure.mts, classify.mts, diag5.mts, lattice-plot.mts, sweep.sh <worktree> <from> <to> <out>,
