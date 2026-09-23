@@ -212,7 +212,18 @@ interface Blocker {
  * any route in {@link ROUTES}/{@link solveRing} is ever built with.
  */
 const RIBBON_HALF_WIDTH_CEILING = MAIN_LOOP_WIDTH / 2 + PATH_KERB_OVERHANG * 2;
-const ARCH_FOOT_MARGIN = PLAYER_RADIUS * 2 + 0.4 + RIBBON_HALF_WIDTH_CEILING;
+/**
+ * How far a ribbon's centreline must stay from a finish-rainbow foot, beyond
+ * the foot's own radius, for the paving's edge (kerb included) to leave a
+ * child `WALKABLE_GAP` — two player radii — to walk past the leg. **The one
+ * owner of that formula**: {@link ARCH_FOOT_MARGIN} is it at the widest ribbon
+ * plus routing slack, and {@link routeClearsArchFeet} is it at the width of
+ * the route actually being judged.
+ */
+function archFootMarginFor(halfWidthWithKerb: number): number {
+  return PLAYER_RADIUS * 2 + halfWidthWithKerb;
+}
+const ARCH_FOOT_MARGIN = archFootMarginFor(RIBBON_HALF_WIDTH_CEILING) + 0.4;
 
 /**
  * Everything the ring road and the spurs must steer around: every plot, and
@@ -4081,7 +4092,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
     const routed = [
-      ...(streets ?? fallbackSpurRoute(network(), routeTarget, [...(lead.length ? [[ex, ez] as const] : []), ...past])),
+      ...(streets ?? fallbackSpurRoute(network(), routeTarget, [...(lead.length ? [[ex, ez] as const] : []), ...past], width)),
       ...(lead.length ? [[ex, ez] as readonly [number, number]] : []),
     ];
     if (SPUR_STRETCH > 0 && id === SPUR_STRETCH_ID && routed.length >= 2) {
@@ -4760,14 +4771,36 @@ function* addInterconnects(
           `than a lattice-honest ${latticeHonestWalk.toFixed(1)} m — trying the continuous router first`,
       );
     }
-    const decisions: readonly (StreetPlan | null)[] = latticePlanIsTheLongWay
-      ? [null, latticePlan]
-      : [latticePlan];
-    const pointsFor = (plan: StreetPlan | null): (readonly [number, number])[] => [
+    type Decision = { readonly kind: 'lattice'; readonly plan: StreetPlan } | { readonly kind: 'routeLeg' | 'sameSide' };
+    const continuous: Decision = { kind: straight > 10 ? 'routeLeg' : 'sameSide' };
+    const primary: Decision[] = latticePlan
+      ? latticePlanIsTheLongWay
+        ? [continuous, { kind: 'lattice', plan: latticePlan }]
+        : [{ kind: 'lattice', plan: latticePlan }]
+      : [continuous];
+    // **Then every other way of drawing the same link, before giving up on
+    // it.** The screens below refuse a *shape*, not a pair: seed 451's
+    // `stall.railRacer`/`exit-railRace`, 9.0 m apart, had one decision (the
+    // short same-side leg), the arch-feet screen refused it, and the pair was
+    // left 227.4 m apart by paving. CLAUDE.md's rule is to backtrack to a
+    // different decision, so the blocker-aware continuous router, the lattice
+    // plan (asked for even on a short pair) and the short leg are all tried in
+    // turn. A park whose first decision is accepted is untouched — these are
+    // only ever reached after a refusal.
+    const alternatives = function* (): Generator<Decision> {
+      yield* primary;
+      if (!primary.some((d) => d.kind === 'routeLeg')) yield { kind: 'routeLeg' };
+      if (!primary.some((d) => d.kind === 'lattice')) {
+        const plan = latticePlan ?? planStreetBetween(fromPoint, toPoint, true, true);
+        if (plan) yield { kind: 'lattice', plan };
+      }
+      if (!primary.some((d) => d.kind === 'sameSide')) yield { kind: 'sameSide' };
+    };
+    const pointsFor = (decision: Decision): (readonly [number, number])[] => [
       ...(leadA.length ? [[a.x, a.z] as [number, number]] : []),
-      ...(plan
-        ? plan.points
-        : straight > 10
+      ...(decision.kind === 'lattice'
+        ? decision.plan.points
+        : decision.kind === 'routeLeg'
           ? snapRunsToLattice(routeLeg(fromPoint, toPoint))
           : sameSideLeg(fromPoint, toPoint, railInfoAt(a.x, a.z).side)),
       ...(leadB.length ? [[b.x, b.z] as [number, number]] : []),
@@ -4882,23 +4915,24 @@ function* addInterconnects(
       //
       // Judged on the curve that will be drawn as well as its control
       // polygon, because a Catmull-Rom swings past its polygon at a bend.
-      if (!routeClearsArchFeet(points)) {
+      if (!routeClearsArchFeet(points, CONNECTOR_WIDTH)) {
         return "comes down on the finish rainbow's feet";
       }
       return null;
     };
 
     let chosen: { plan: StreetPlan | null; points: (readonly [number, number])[] } | null = null;
-    for (const decision of decisions) {
+    for (const decision of alternatives()) {
       const points = pointsFor(decision);
-      const why = refusal(decision, points);
+      const plan = decision.kind === 'lattice' ? decision.plan : null;
+      const why = refusal(plan, points);
       if (why === null) {
-        chosen = { plan: decision, points };
+        chosen = { plan, points };
         break;
       }
       if (DEBUG_STREETS) {
         // eslint-disable-next-line no-console
-        console.log(`[connect] ${a.id}-${b.id}: rejected (${decision ? 'lattice' : 'continuous'}), ${why}`);
+        console.log(`[connect] ${a.id}-${b.id}: rejected (${decision.kind}), ${why}`);
       }
       restoreLatticeState(beforeConnector);
     }
@@ -4926,15 +4960,27 @@ function* addInterconnects(
  * fallback candidate that fails it is passed over for the next
  * ({@link fallbackSpurRoute}).
  */
-function routeClearsArchFeet(points: readonly (readonly [number, number])[]): boolean {
-  const feet = BLOCKERS.filter((blocker) => blocker.kind === 'archFoot');
+function routeClearsArchFeet(
+  points: readonly (readonly [number, number])[],
+  width: number,
+): boolean {
+  // The feet themselves, at the margin a ribbon of *this* width needs — not
+  // BLOCKERS' routing radius, which is sized for the widest ribbon in the park
+  // plus slack. Judging a 2.6 m connector by the 3.6 m main loop's radius
+  // refused seed 451's `stall.railRacer` link at its very first point: the
+  // stall's own lead, which its own spur already paves.
+  const reach = archFootMarginFor(width / 2 + PATH_KERB_OVERHANG * 2);
+  const feet = BLOCKERS.filter((blocker) => blocker.kind === 'archFoot').map((blocker) => ({
+    ...blocker,
+    radius: blocker.radius - ARCH_FOOT_MARGIN + reach,
+  }));
   if (feet.length === 0 || points.length < 2) return true;
   for (let i = 1; i < points.length; i += 1) {
     const a = points[i - 1] as readonly [number, number];
     const b = points[i] as readonly [number, number];
     if (!segmentClearOfBlockers(a[0], a[1], b[0], b[1], 0, feet)) return false;
   }
-  const curve = routeCurve({ name: 'arch-feet-screen', width: CONNECTOR_WIDTH, closed: false, points });
+  const curve = routeCurve({ name: 'arch-feet-screen', width, closed: false, points });
   for (const p of curvePoints(curve, pathDivisions(curve))) {
     for (const foot of feet) {
       if (Math.hypot(foot.x - p.x, foot.z - p.z) < foot.radius) return false;
@@ -5814,6 +5860,8 @@ function fallbackSpurRoute(
   target: readonly [number, number],
   /** Points the caller will append past `target` (a lead's doormat), judged with it. */
   extra: readonly (readonly [number, number])[] = [],
+  /** The drawn width of the spur, for the arch-feet screen. */
+  width: number = MAIN_LOOP_WIDTH,
 ): (readonly [number, number])[] {
   const allCandidates: (readonly [number, number])[] = [];
   for (const route of routes) {
@@ -5862,7 +5910,7 @@ function fallbackSpurRoute(
     const { candidate } = candidates[index] as (typeof candidates)[number];
     restoreLatticeState(before);
     const points = snapRunsToLattice(routeLeg(candidate, target));
-    if (!routeClearsArchFeet([...points, ...extra])) continue;
+    if (!routeClearsArchFeet([...points, ...extra], width)) continue;
     const worst = longestOffAxisRun(points);
     // Metres spent hugging the rail corridor count double: a fence-follow
     // is exempt from every shape metric, which otherwise makes it read as
