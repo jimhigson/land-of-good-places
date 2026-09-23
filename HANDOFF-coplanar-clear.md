@@ -25,3 +25,12 @@ Probe scripts (untracked, do not commit): scripts/_probe.mts, _probe2.mts, _door
 - Remaining on PR branch, run4: headline 3 = MORE duck-bars (held), NEW stone-walls (held), NEW path-kerb|path-surface 0.0001 m2 @8.1mm seed 131.
 - Seed 131 kerb|surface cause: a route along z at x~0 passes through bridge-56's footprint (bridge long in x); the drape lifts it onto the deck: pavingHeightAt 0.4-1.0 vs terrain -3.6..-4.0 at x=0,z=38.5..42 -> 4.4 m curtains of paving. Out of scope (bridge drape), report.
 - Verification in progress: test:procgen base (worktree coplanar-clear-base @ e982430b) -> then branch; swept-bus; park digest; check.
+
+## Update 3 — verification done, PR opened
+- check:coplanar (PR branch): exit 1, "3 new or worse" = MORE duck-bars (held), NEW stone-walls (held; fixed on side branch), NEW path-kerb|path-surface seed 131 (bridge-drape curtain, out of scope). 0 LOOSE.
+- side branch fix/coplanar-clear-stone-walls: "2 new or worse" (duck-bars, kerb seed 131); test:procgen identical to base.
+- test:procgen: base 5 failed | 693 passed (698), branch identical names+messages (control moved diff by one). 0 skipped.
+- check:swept-bus OK (no supports/road moved). check:entrance-road OK, check:gateway OK. build OK.
+- pnpm run check: every step passes except check:layout-rung, which fails IDENTICALLY on base e982430b (5 failures, "saw 0" forced refusals) — pre-existing, reported.
+- Determinism: park-digest seed 11 identical across two processes; kerb index sha identical across two processes (digest does not hash indices).
+- NOTE: the shared scratchpad is shared with another agent (procgen-last) — use scratchpad/coplanar-clear/ for logs.
