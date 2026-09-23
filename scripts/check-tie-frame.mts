@@ -186,10 +186,9 @@ if (worstDeviation > EPSILON_M) {
 // Proved on the canonical seed (loop 288 m): with the cart on `rideFrame` and
 // the heading composed `XYZ`, nose 29.37° / up 40.64° off; composed `YXZ`, up
 // right but nose 17.25° off at s=63 m, because `rideFrame` leans a flat tangent
-// that already runs along the drawn rails (0.26° apart). **`drawnOnSphere`'s
-// own `tangentAt` has the same double lean**, and `railFrameAt` — so the ties —
-// inherit it: a tie is pitched up to 17° about its long axis here. That is not
-// this clause's to fix, and the gauge points above do not see it.
+// that already runs along the drawn rails (0.26° apart). `drawnOnSphere`'s own
+// `tangentAt` had the same double lean, and the ties inherited it — the sleeper
+// clause below, and `rail/sweptRail.ts`'s `drawnDirection`, are the fix.
 {
   /**
    * The cart against its rails, in degrees. The flat heading is carried onto
@@ -226,9 +225,9 @@ if (worstDeviation > EPSILON_M) {
     const along = ahead.sub(behind).normalize();
     const noseOff = (nose.angleTo(along) * 180) / Math.PI;
     // Square to the rails: perpendicular to the way they run AND to the way
-    // they are spread apart. Not `railFrame.up`, which is built on
-    // `drawnOnSphere`'s `tangentAt` — the flat tangent turned by the tilt — and
-    // that is pitched up to 17° off the drawn rails here (see the note below).
+    // they are spread apart — built here from the difference above rather than
+    // read off `railFrame.up`, so the clause does not take the frame's word for
+    // the thing it is checking.
     const squareUp = railUp.crossVectors(along, railFrame.side).normalize();
     const upOff = (up.angleTo(squareUp) * 180) / Math.PI;
     if (noseOff > worstNose.value) worstNose = { value: noseOff, at: d };

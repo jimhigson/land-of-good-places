@@ -26,7 +26,7 @@ import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import type { CollisionWorld } from '../Collision';
-import { railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
+import { drawnDirection, railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
 import {
   ALERT_RANGE,
   BARS_FROM_LEVEL,
@@ -445,7 +445,14 @@ export function buildRailRaceTrack(
     const sampler: RailSampler = {
       length: route.length,
       pointAt: (distance, target) => route.pointAt(lane, distance, target),
-      tangentAt: (distance, target) => route.tangentAt(lane, distance, target),
+      // **The direction the rails are drawn in, not the route's `tangentAt`**,
+      // which is the unleant chart tangent the physics runs on: laid along it,
+      // the sleepers ran up to 14.9° across the rails over them, and the rails'
+      // own side offset leant the same way. `drawnDirection` reads it off the
+      // drawn points this very sampler returns.
+      tangentAt(distance, target) {
+        return drawnDirection(this, distance, target);
+      },
     };
     for (let i = 0; i < sleepersPerLane; i += 1) {
       railFrameAt(sampler, i * SLEEPER_SPACING, sleeperFrame);

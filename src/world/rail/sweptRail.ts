@@ -50,7 +50,6 @@ export interface RailSampler {
 }
 
 const _railUp = /* @__PURE__ */ new Vector3();
-const _leanAt = /* @__PURE__ */ new Vector3();
 const _leanSpin = /* @__PURE__ */ new Quaternion();
 
 /**
@@ -80,14 +79,50 @@ export function drawnOnSphere(sampler: RailSampler): RailSampler {
       placeOnSphere(target, 0, target, _leanSpin);
       return target;
     },
+    // The direction the drawn rails actually run — see `drawnDirection`. This
+    // used to be the flat tangent turned by the sphere's tilt at the point,
+    // which leans it twice wherever the flat route already follows the ground:
+    // the Sky Cruiser's sleepers were tipped 17.25° against their rails at
+    // s=63 m on the canonical seed.
     tangentAt(distance: number, target: Vector3): Vector3 {
-      sampler.pointAt(distance, _leanAt);
-      sampler.tangentAt(distance, target);
-      tiltToSphere(_leanAt.x, _leanAt.y, _leanAt.z, _leanSpin);
-      return target.applyQuaternion(_leanSpin).normalize();
+      return drawnDirection(this, distance, target);
     },
   };
 }
+
+/**
+ * **Which way the rails are actually drawn at `distance`: the one owner of that
+ * question.** A central difference of the sampler's own drawn points, ±5 cm.
+ *
+ * Not any route's `tangentAt`, because two routes in this park have a
+ * `tangentAt` that is a different thing from the direction of their drawn
+ * rails, and both were built on as if it were:
+ *
+ * - the Sky Cruiser's flat route, turned onto the sphere by the tilt at the
+ *   point (`drawnOnSphere`), which leans a tangent that already follows the
+ *   ground a second time — sleepers tipped 17.25° off their rails;
+ * - the Rail Race's route, whose `tangentAt` is the unleant *chart* tangent the
+ *   physics wants — sleepers laid up to 14.9° across the rails over them.
+ *
+ * A difference of the drawn points cannot disagree with the rails, because it
+ * is read off the same points the rails are swept through. Five centimetres is
+ * far inside the tightest bend on either ride and far above float noise.
+ * `check:tie-frame` measures every sleeper and both carts against this, taken
+ * independently.
+ */
+export function drawnDirection(
+  sampler: Pick<RailSampler, 'pointAt'>,
+  distance: number,
+  target: Vector3,
+): Vector3 {
+  sampler.pointAt(distance - DRAWN_STEP, _drawnBehind);
+  sampler.pointAt(distance + DRAWN_STEP, target);
+  return target.sub(_drawnBehind).normalize();
+}
+
+/** Half the span of {@link drawnDirection}'s difference, in metres. */
+const DRAWN_STEP = 0.05;
+const _drawnBehind = /* @__PURE__ */ new Vector3();
 
 const _rideTilt = /* @__PURE__ */ new Quaternion();
 const _rideSpin = /* @__PURE__ */ new Quaternion();

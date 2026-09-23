@@ -23,6 +23,7 @@ import {
   railTurn,
   sweptRails,
   type RailFrame,
+  type RailSampler,
 } from '../rail/sweptRail';
 import { planCruiserPylons } from './pylons';
 import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/trestleGeometry';
@@ -90,10 +91,7 @@ const EYE = { x: 0, y: CART_EYE_HEIGHT - CART_SEAT_HEIGHT, z: 0 };
 
 /** Somewhere for `placeOnSphere`'s rotation to go when only its point is wanted. */
 const DISCARDED_SPIN = /* @__PURE__ */ new Quaternion();
-/** Half the span, in metres, the rails' drawn direction is read across. */
-const DRAWN_STEP = 0.05;
-const DRAWN_AHEAD = /* @__PURE__ */ new Vector3();
-const DRAWN_BEHIND = /* @__PURE__ */ new Vector3();
+const DRAWN_ALONG = /* @__PURE__ */ new Vector3();
 
 /** Scratch for the cart's own up, used to seat the rider down into the tub. */
 const SEAT_DROP = /* @__PURE__ */ new Vector3();
@@ -128,6 +126,8 @@ export class Coaster implements GameSystem {
   readonly playerStaysVisible: boolean;
   readonly group = new Group();
   readonly route: CoasterRoute;
+  /** The route as drawn — what the rails are swept through and the cart sits on. */
+  private readonly drawn: RailSampler;
 
   rideView: RideCamera | null = null;
   onRideChange: ((riding: boolean) => void) | null = null;
@@ -172,6 +172,7 @@ export class Coaster implements GameSystem {
     // Solved already, at module load (`coaster/plan.ts`) — built here, not
     // re-solved. Mirrors `ParkTrain` taking `TRAIN_PLAN.route` as given.
     this.route = options.plan.route;
+    this.drawn = drawnOnSphere(this.route);
     this.distance = this.route.stationDistance;
 
     // Boot assert, in the claim-versus-fact tradition: report loudly and
@@ -408,7 +409,8 @@ export class Coaster implements GameSystem {
    *
    * So: the position through `placeOnSphere`, exactly as `drawnOnSphere` maps
    * each drawn rail point, and the orientation from **the direction the rails
-   * are drawn in there** — two more drawn points either side — stood up by
+   * are drawn in there** (`drawnOnSphere`'s `tangentAt`, which is
+   * `drawnDirection`) — stood up by
    * `railTurn`, the side/up convention the rails and ties are swept with.
    * Everything hung off the cart — `cartMount`, `eyeMount`, and so both ride
    * cameras — inherits this for free, which is why there is nothing to change
@@ -432,11 +434,10 @@ export class Coaster implements GameSystem {
     // thrown away rather than written to the cart, so nothing reads as though
     // the rotation were set twice.
     placeOnSphere(this.point, yaw, this.cart.position, DISCARDED_SPIN);
-    this.route.pointAt(this.route.wrap(this.distance + DRAWN_STEP), DRAWN_AHEAD);
-    placeOnSphere(DRAWN_AHEAD, 0, DRAWN_AHEAD, DISCARDED_SPIN);
-    this.route.pointAt(this.route.wrap(this.distance - DRAWN_STEP), DRAWN_BEHIND);
-    placeOnSphere(DRAWN_BEHIND, 0, DRAWN_BEHIND, DISCARDED_SPIN);
-    railTurn(this.cart.position, DRAWN_AHEAD.sub(DRAWN_BEHIND).normalize(), this.cart.quaternion);
+    // The rails as drawn, from the one owner of their direction — the same
+    // `drawnOnSphere` sampler `buildTrack` sweeps them and lays the ties from.
+    this.drawn.tangentAt(this.distance, DRAWN_ALONG);
+    railTurn(this.cart.position, DRAWN_ALONG, this.cart.quaternion);
     this.cartYaw = yaw;
   }
 
@@ -464,7 +465,7 @@ export class Coaster implements GameSystem {
     // which is where its clearance solve, its physics and its invariants all
     // want to be. See that function for why the two frames give the same
     // answers to every question except "where does this get drawn".
-    const drawn = drawnOnSphere(this.route);
+    const drawn = this.drawn;
     const railGeometries = sweptRails(drawn, {
       gauge: RAIL_GAUGE,
       radius: 0.075,
