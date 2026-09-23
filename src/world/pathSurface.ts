@@ -1,5 +1,5 @@
 import { BufferAttribute, BufferGeometry, CatmullRomCurve3, MeshStandardMaterial, Vector3 } from 'three';
-import { PATH_KERB_LIFT, PATH_SURFACE_LIFT } from '../core/constants';
+import { PATH_KERB_LIFT, PATH_KERB_OVERHANG, PATH_SURFACE_LIFT } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { pathTexture } from '../core/textures';
 import { terrainHeight, terrainNormal } from './terrain';
@@ -110,10 +110,22 @@ export function addPathRibbon(
   divisions: number,
   lift: number,
 ): void {
+  const stations = ribbonStations(curve, divisions);
+  const edges = ribbonEdges(stations, pathCrossSection(width));
+  addRibbonStrip(builder, stations, edges[1]!, edges[2]!, lift, (travelled) => pathRibbonV(travelled, width));
+}
+
+/**
+ * **Where a path's four edges run, as signed offsets from its centreline** —
+ * outer kerb, paving, paving, outer kerb, left to right ascending. The one
+ * owner of a path's cross-section: the paving is the middle strip and the
+ * kerb the two outer ones, and all three are swept from these four edges
+ * together by {@link ribbonEdges}, so the kerb's inner edge *is* the paving's
+ * edge wherever a corner has trimmed it.
+ */
+export function pathCrossSection(width: number): readonly number[] {
   const half = width / 2;
-  addRibbonStrip(builder, ribbonStations(curve, divisions), -half, half, lift, (travelled) =>
-    pathRibbonV(travelled, width),
-  );
+  return [-half - PATH_KERB_OVERHANG, -half, half, half + PATH_KERB_OVERHANG];
 }
 
 /**
@@ -217,47 +229,100 @@ export function ribbonStations(curve: CatmullRomCurve3, divisions: number): Ribb
 }
 
 /**
- * **One edge of a swept ribbon, `offset` metres to the left of the centreline
- * (negative: to the right) — as an edge, not as a fold.**
+ * **The edges of a swept ribbon, one per offset (ascending), as edges — not
+ * as folds.**
  *
  * Offsetting every station along its across direction is exact on a straight
- * and wrong wherever the ribbon turns tighter than `offset`: past that radius
- * the offset curve runs *backwards* between two cusps (a swallowtail), and the
- * quads laid between those stations are wound face-down — culled, so a hole
- * in the path. Every filleted corner in the park is ~1 m in radius against a
- * path half-width of 1.3-1.6 m, so this is the ordinary case, not a corner
- * case: 189 face-down paving triangles on the canonical seed.
+ * and wrong wherever the ribbon turns tighter than the offset: past that
+ * radius the offset curve runs *backwards* between two cusps (a swallowtail),
+ * and the quads laid between those stations are wound face-down — culled, so
+ * a hole in the path. Every filleted corner in the park is ~1 m in radius
+ * against a path half-width of 1.3-1.6 m, so this is the ordinary case, not a
+ * corner case: 189 face-down paving triangles on the canonical seed, 243 on
+ * seed 24.
  *
- * The true edge of the swept band there is the offset curve with its
- * swallowtail cut off at the point where it crosses itself. So each run of
- * backward segments is found, the forward segment before it and the forward
- * segment after it are intersected, and every station in between takes that
- * one point: the inside of the corner becomes a fan about the corner of the
- * paving, which is what a paved corner is. Where the two do not cross (a
- * backtrack that is collinear, or runs off the end of the route) the edge
- * holds at the cusp until the curve comes out ahead of it again.
+ * Two passes:
  *
- * Both the paving and the kerb ask this for their shared edge, with the same
- * stations and the same offset, so they still share it exactly.
+ * 1. **Each edge is cut at its own swallowtail.** The true edge of a swept
+ *    band round a tight corner is the offset curve with the loop cut off where
+ *    it crosses itself. Each run of backward segments is found, the forward
+ *    segment before it and the forward segment after it are intersected, and
+ *    every station in between takes that one point: the inside of the corner
+ *    becomes a fan about the paving's own corner, which is what a paved corner
+ *    is.
+ * 2. **Then every strip between neighbouring edges is made to face the sky,
+ *    station by station.** A cut is not always available — a backtrack that is
+ *    collinear, or one that runs off the end of a route — and two edges cut
+ *    independently can still disagree about which cross-section is ahead. So
+ *    wherever a triangle of any strip would be wound face-down, the edge vertex
+ *    that has fallen behind is held where it was at the station before, which
+ *    turns that triangle into a line and the strip into a fan about the held
+ *    point. Holding is decided across **all** the edges at once, which is why
+ *    this takes the whole cross-section: an edge two strips share is held for
+ *    both or for neither, so the paving and its kerb still meet on one line.
  */
-export function ribbonEdge(stations: readonly RibbonStation[], offset: number): [number, number][] {
+export function ribbonEdges(
+  stations: readonly RibbonStation[],
+  offsets: readonly number[],
+): [number, number][][] {
+  const edges = offsets.map((offset) => cutSwallowtails(stations, offset));
+  const last = stations.length - 1;
+  for (let i = 0; i < last; i += 1) {
+    // Each pass either finds nothing wrong or makes one vertex equal its
+    // predecessor, which cannot be undone — so this ends within one pass per edge.
+    for (let pass = 0; pass <= edges.length; pass += 1) {
+      let held = false;
+      for (let s = 0; s + 1 < edges.length; s += 1) {
+        const low = edges[s] as [number, number][];
+        const high = edges[s + 1] as [number, number][];
+        if (facesSky(low[i]!, high[i]!, low[i + 1]!) < -FACING_NOISE) {
+          low[i + 1] = [low[i]![0], low[i]![1]];
+          held = true;
+        }
+        if (facesSky(high[i]!, high[i + 1]!, low[i + 1]!) < -FACING_NOISE) {
+          high[i + 1] = [high[i]![0], high[i]![1]];
+          held = true;
+        }
+      }
+      if (!held) break;
+    }
+  }
+  return edges;
+}
+
+/** Twice the signed plan area below which a triangle's facing is float noise, m². */
+const FACING_NOISE = 1e-12;
+
+/**
+ * Positive when the plan triangle `a, b, c`, in that order, is wound to face
+ * the sky under the winding this builder emits (see {@link addRibbonStrip}).
+ */
+function facesSky(
+  a: readonly [number, number],
+  b: readonly [number, number],
+  c: readonly [number, number],
+): number {
+  return (b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1]);
+}
+
+/** One edge, `offset` to the left of the centreline, with each swallowtail cut at its crossing. */
+function cutSwallowtails(stations: readonly RibbonStation[], offset: number): [number, number][] {
   const edge = stations.map((s): [number, number] => [s.x + s.acrossX * offset, s.z + s.acrossZ * offset]);
   const last = edge.length - 1;
-  /** Forward progress of the segment from `a` to `b`, judged by the travel direction at stations `i` and `j`. */
-  const progress = (a: readonly [number, number], b: readonly [number, number], i: number, j: number): number => {
-    const si = stations[i] as RibbonStation;
-    const sj = stations[j] as RibbonStation;
-    // Travel direction is the across direction turned back a quarter.
-    const fx = si.acrossZ + sj.acrossZ;
-    const fz = -si.acrossX - sj.acrossX;
-    return (b[0] - a[0]) * fx + (b[1] - a[1]) * fz;
-  };
   const moves = (i: number): boolean => {
     const a = edge[i] as [number, number];
     const b = edge[i + 1] as [number, number];
     return Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]) > 1e-12;
   };
-  const backward = (i: number): boolean => moves(i) && progress(edge[i]!, edge[i + 1]!, i, i + 1) <= 0;
+  const backward = (i: number): boolean => {
+    if (!moves(i)) return false;
+    const si = stations[i] as RibbonStation;
+    const sj = stations[i + 1] as RibbonStation;
+    // Travel direction is the across direction turned back a quarter.
+    const fx = si.acrossZ + sj.acrossZ;
+    const fz = -si.acrossX - sj.acrossX;
+    return (edge[i + 1]![0] - edge[i]![0]) * fx + (edge[i + 1]![1] - edge[i]![1]) * fz <= 0;
+  };
 
   let i = 0;
   while (i < last) {
@@ -279,18 +344,13 @@ export function ribbonEdge(stations: readonly RibbonStation[], offset: number): 
         if (at) cut = { before, after, at };
       }
     }
-    if (cut) {
-      for (let k = cut.before + 1; k <= cut.after; k += 1) edge[k] = [cut.at[0], cut.at[1]];
-      i = cut.after;
+    if (!cut) {
+      // Nothing to cut against: `ribbonEdges`' second pass holds this one.
+      i = end + 1;
       continue;
     }
-
-    // No crossing: hold at the cusp until the edge is ahead of it again.
-    const cusp = edge[start] as [number, number];
-    let release = end + 1;
-    while (release <= last && progress(cusp, edge[release]!, release - 1, release) <= 0) release += 1;
-    for (let k = start + 1; k < release && k <= last; k += 1) edge[k] = [cusp[0], cusp[1]];
-    i = Math.max(start + 1, release - 1);
+    for (let k = cut.before + 1; k <= cut.after; k += 1) edge[k] = [cut.at[0], cut.at[1]];
+    i = cut.after;
   }
   return edge;
 }
@@ -320,30 +380,27 @@ function segmentCrossing(
 }
 
 /**
- * **A strip of ribbon between two signed offsets from the centreline**, draped
- * on the terrain `lift` above it — the paving (`-half` to `half`) and each band
- * of the kerb are all one of these.
+ * **A strip of ribbon between two of {@link ribbonEdges}' edges**, draped on
+ * the terrain `lift` above it — the paving and each band of the kerb are all
+ * one of these.
  *
- * Both edges come from {@link ribbonEdge}, so neither folds. The lower offset
- * is laid first in each cross-section, which winds the quads anticlockwise seen
- * from above so the strip faces the sky. A triangle two of whose corners
- * collapsed onto one point (the fan at a tight corner) has no area and is not
- * emitted.
+ * The lower offset's edge is laid first in each cross-section, which winds the
+ * quads anticlockwise seen from above so the strip faces the sky. A triangle
+ * two of whose corners were held onto one point (a fan at a tight corner) has
+ * no area and is not emitted.
  */
 export function addRibbonStrip(
   builder: GeometryBuilder,
   stations: readonly RibbonStation[],
-  fromOffset: number,
-  toOffset: number,
+  low: readonly (readonly [number, number])[],
+  high: readonly (readonly [number, number])[],
   lift: number,
   vAt: (travelled: number) => number,
 ): void {
-  const low = ribbonEdge(stations, fromOffset);
-  const high = ribbonEdge(stations, toOffset);
   for (let i = 0; i < stations.length; i += 1) {
     const v = vAt((stations[i] as RibbonStation).travelled);
-    const [ax, az] = low[i] as [number, number];
-    const [bx, bz] = high[i] as [number, number];
+    const [ax, az] = low[i] as readonly [number, number];
+    const [bx, bz] = high[i] as readonly [number, number];
     builder.vertex(ax, terrainHeight(ax, az) + lift, az, 0, v);
     builder.vertex(bx, terrainHeight(bx, bz) + lift, bz, 1, v);
     if (i > 0) {

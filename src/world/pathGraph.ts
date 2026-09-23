@@ -9,7 +9,9 @@ import {
   addRibbonStrip,
   GeometryBuilder,
   pathKerbMaterial,
+  pathCrossSection,
   pathSurfaceMaterial,
+  ribbonEdges,
   ribbonStations,
 } from './pathSurface';
 import { terrainHeight } from './terrain';
@@ -463,15 +465,15 @@ function addRibbonKerb(
   divisions: number,
   lift: number,
 ): void {
-  // Inner edge exactly where the surface's own edge falls: both ribbons walk
-  // the same stations and ask `ribbonEdge` for the same offset, so the two
-  // edges are one line — trimmed at a tight corner identically — and there is
-  // no hairline between them to fill.
+  // Inner edge exactly where the surface's own edge falls: both are swept from
+  // one cross-section (`pathCrossSection`) by one call, so the two edges are
+  // one line — trimmed at a tight corner identically — with no hairline
+  // between them to fill.
   const stations = ribbonStations(curve, divisions);
-  const half = width / 2;
+  const [outerRight, right, left, outerLeft] = ribbonEdges(stations, pathCrossSection(width));
   const vAt = (travelled: number): number => travelled / Math.max(1, overhang);
-  addRibbonStrip(builder, stations, half, half + overhang, lift, vAt);
-  addRibbonStrip(builder, stations, -half - overhang, -half, lift, vAt);
+  addRibbonStrip(builder, stations, left!, outerLeft!, lift, vAt);
+  addRibbonStrip(builder, stations, outerRight!, right!, lift, vAt);
 }
 
 /** The plaza's kerb: the same idea round a disc, so its middle is not buried. */
