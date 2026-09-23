@@ -68,6 +68,17 @@ import { distanceToRailCorridor, nearestRailDistanceAlong } from './train/plan';
 import { PLAYER_RADIUS } from '../core/constants';
 import type { PathSample } from './pathGraph';
 import { NAV_CELL } from './NavGrid';
+import { offeredParkFile } from './prebuilt/parkFileStore';
+import {
+  encodeParkFile,
+  parkFileProblem,
+  readCruiser,
+  readCrossings,
+  readLayout,
+  readSlide,
+  readTrain,
+  type ParkFile,
+} from './prebuilt/parkFile';
 
 export interface TrainDecision {
   readonly route: TrainRoute;
@@ -94,6 +105,11 @@ var state: PlanState = {};
 var driver: ParkSolve | null = null;
 var solved = false;
 var forcing = false;
+/**
+ * The prebuilt park this driver hydrates from, or null to search — decided
+ * once, when the driver starts (`docs/design/PREBUILT-PARKS.md`).
+ */
+var hydrateFrom: ParkFile | null = null;
 /* eslint-enable no-var */
 
 /**
@@ -150,11 +166,17 @@ export function parkPlanClaims(): GroundClaims {
 /**
  * A feature that is one solve: one increment, placed or refused. `solve` runs
  * at the given attempt; `set`/`clear` hold the decision in {@link state}.
+ *
+ * `hydrate`, where a feature has one, reads the decision from a prebuilt park
+ * file instead of searching for it. It is used for attempt 0 only: if a
+ * hydrated decision were ever refused downstream, the unwind asks for attempt
+ * 1, which searches — so a wrong file can cost time but cannot wedge the park.
  */
 function coarse<T>(spec: {
   readonly name: string;
   readonly deps: readonly string[];
   readonly supply?: number;
+  hydrate?(file: ParkFile): T;
   solve(attempt: number): Generator<number, T | Refusal, void>;
   set(value: T): void;
   clear(): void;
@@ -166,14 +188,15 @@ function coarse<T>(spec: {
     deps: spec.deps,
     *advance(attempt) {
       if (placed) return 'done';
-      const outcome = yield* spec.solve(attempt);
+      const file = attempt === 0 ? hydrateFrom : null;
+      const outcome = file && spec.hydrate ? spec.hydrate(file) : yield* spec.solve(attempt);
       if (typeof outcome === 'object' && outcome !== null && (outcome as Refusal).refused === true) {
         return outcome as Refusal;
       }
       spec.set(outcome as T);
       placed = true;
       const increment = spec.claims ? spec.claims(outcome as T) : { claims: [] };
-      return { ...increment, label: `attempt=${attempt}` };
+      return { ...increment, label: `attempt=${attempt}${file && spec.hydrate ? ' hydrated' : ''}` };
     },
     back() {
       placed = false;
@@ -343,6 +366,7 @@ function builders(): readonly FeatureBuilder[] {
     name: 'layout',
     deps: [],
     supply: PARK_RESTARTS,
+    hydrate: (file) => readLayout(file.features.layout),
     *solve(attempt) {
       const restart = layoutRestartBase() + attempt;
       const outcome = yield* layoutRestartSearch(restart);
@@ -361,6 +385,7 @@ function builders(): readonly FeatureBuilder[] {
   const cruiserBuilder = coarse<PlannedCoaster>({
     name: 'cruiser',
     deps: ['layout'],
+    hydrate: (file) => readCruiser(file.features.cruiser),
     *solve(attempt) {
       const rng = attempt === 0 ? undefined : new Rng(seedFor('cruiser', attempt, 0));
       const start: CruiserSearchStart = yield* cruiserStartSearch(rng);
@@ -384,6 +409,7 @@ function builders(): readonly FeatureBuilder[] {
   const trainBuilder = coarse<TrainDecision>({
     name: 'train',
     deps: ['layout', 'cruiser'],
+    hydrate: (file) => readTrain(file.features.train),
     *solve(attempt) {
       let solvedRoute: SolvedRailRoute;
       try {
@@ -406,6 +432,7 @@ function builders(): readonly FeatureBuilder[] {
   const slideBuilder = coarse<PlannedSlide>({
     name: 'slide',
     deps: ['layout', 'cruiser', 'train'],
+    hydrate: (file) => readSlide(file.features.slide),
     *solve(attempt) {
       const outcome = yield* slideSearch(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'slide', 'solve', attempt));
       if ('refused' in outcome) {
@@ -425,6 +452,7 @@ function builders(): readonly FeatureBuilder[] {
     name: 'crossings',
     deps: ['train'],
     supply: 1,
+    hydrate: (file) => readCrossings(file.features.crossings),
     *solve() {
       try {
         return yield* crossingSitesSearch();
@@ -547,8 +575,48 @@ function builders(): readonly FeatureBuilder[] {
 
 function startDriver(): ParkSolve {
   if (driver) return driver;
+  hydrateFrom = acceptedParkFile();
   driver = new ParkSolve(PARK_SEED, builders(), new GroundClaims());
   return driver;
+}
+
+/**
+ * The offered prebuilt park, if it is a park file for this seed in this
+ * format; otherwise null, with the reason said once — a discarded file means
+ * a slow boot, which somebody should be able to find out about.
+ */
+function acceptedParkFile(): ParkFile | null {
+  const file = offeredParkFile();
+  if (!file) return null;
+  const problem = parkFileProblem(file, PARK_SEED);
+  if (problem) {
+    console.warn(`park plan: ignoring the prebuilt park file (${problem}); solving seed ${PARK_SEED} instead`);
+    return null;
+  }
+  return file;
+}
+
+/** Whether this park's plan was hydrated from a prebuilt file rather than searched. */
+export function parkPlanHydrated(): boolean {
+  return hydrateFrom !== null;
+}
+
+/**
+ * The decided plan as a prebuilt park file — what `scripts/build-parks.mts`
+ * writes. Forces the solve if nothing has.
+ */
+export function parkPlanFile(build?: string): ParkFile {
+  return encodeParkFile(
+    PARK_SEED,
+    {
+      layout: planPart('layout'),
+      cruiser: planPart('cruiser'),
+      train: planPart('train'),
+      slide: planPart('slide'),
+      crossings: planPart('crossings'),
+    },
+    build,
+  );
 }
 
 function finish(): void {

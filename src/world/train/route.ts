@@ -745,6 +745,15 @@ export class TrainRoute {
   private readonly scratch = new Vector3();
   private readonly scratch2: Vec2 = { x: 0, z: 0 };
 
+  /**
+   * The searched loop this route was built from — what a prebuilt park
+   * (`world/prebuilt/parkFile.ts`) writes down, so that it can hand the same
+   * loop back to this constructor and get the same route.
+   */
+  get solvedRoute(): SolvedRailRoute {
+    return this.solved;
+  }
+
   /** Built from the loop the park's driver decided (`parkPlan.ts`'s train builder); never solves itself. */
   constructor(solved: SolvedRailRoute) {
     this.solved = solved;

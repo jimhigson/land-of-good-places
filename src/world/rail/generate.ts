@@ -1336,8 +1336,13 @@ function pickKind(
  * interpolate `t` between neighbours and then evaluate the real cubic. Sampling
  * the curve rather than lerping between cached points keeps tangents exact,
  * which matters because the swept rail geometry is built from them.
+ *
+ * Exported for one other caller: a prebuilt park (`world/prebuilt/parkFile.ts`)
+ * ships only the chosen segments and rebuilds the route through this same
+ * function, so a hydrated route and a searched one share every line after the
+ * search.
  */
-function buildRoute(
+export function buildRoute(
   segments: readonly CubicSegment[],
   closed: boolean,
   report: SolveReport,

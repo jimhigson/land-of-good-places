@@ -898,8 +898,12 @@ const NEAREST_POINT_STEP = 2;
 export interface PresolvedCoaster {
   /** The plan view a driver already searched, a slice at a time. */
   readonly plan: SolvedRailRoute;
-  /** The stream that driver's own {@link coasterRouteBriefs} call advanced. */
-  readonly rng: Rng;
+  /**
+   * The stream that driver's own {@link coasterRouteBriefs} call advanced.
+   * Read only to build a profile, so a caller handing in a finished
+   * {@link profile} (a prebuilt park, `world/prebuilt/parkFile.ts`) omits it.
+   */
+  readonly rng?: Rng;
   /**
    * The finished profile, if the driver built that a slice at a time too.
    *
@@ -1281,6 +1285,18 @@ export function checkCoasterClearances(
   return complaints;
 }
 
+/**
+ * The loop's curve through its control points — the one owner of how a
+ * profile's points become a curve (closed, 'catmullrom' type, tension 0.5,
+ * 1600 arc-length divisions). `coasterProfileSearch` builds with it, and so
+ * does a prebuilt park (`world/prebuilt/parkFile.ts`) that ships only the
+ * points: a curve rebuilt any other way would sample differently.
+ */
+export function coasterCurve(points: Vector3[]): CatmullRomCurve3 {
+  const curve = new CatmullRomCurve3(points, true, 'catmullrom', 0.5);
+  curve.arcLengthDivisions = 1600;
+  return curve;
+}
 
 /** Everything about the built loop that is not the plan view it came from. */
 export interface CoasterProfile {
@@ -1458,9 +1474,7 @@ export function* coasterProfileSearch(
         new Vector3(spot.x, terrainHeight(spot.x, spot.z) + (heights[i] ?? CRUISE_FLOOR), spot.z),
       );
     }
-    const curve = new CatmullRomCurve3(points, true, 'catmullrom', 0.5);
-    curve.arcLengthDivisions = 1600;
-    return curve;
+    return coasterCurve(points);
   };
 
   const stationOn = (curve: CatmullRomCurve3, length: number): number => {

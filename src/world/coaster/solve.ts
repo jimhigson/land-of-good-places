@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import {
   type CoasterBriefs,
+  type CoasterProfile,
   CoasterRoute,
   type CoasterRouteOptions,
   coasterProfileSearch,
@@ -262,6 +263,28 @@ export function* finishCruiserPlanSearch(
     stationStallId: CRUISER_SEED.stationStallId,
     exitX,
     exitZ,
+  };
+}
+
+/**
+ * The finished cruiser plan from decisions a prebuilt park carries
+ * (`world/prebuilt/parkFile.ts`): the searched plan view, the finished
+ * profile, and the exit {@link planExit} chose. Built through the same
+ * `CoasterRoute` constructor {@link finishCruiserPlanSearch} uses, handed the
+ * same three things, so nothing after the search has a second definition.
+ */
+export function cruiserPlanFromDecisions(
+  plan: SolvedRailRoute,
+  profile: CoasterProfile,
+  exit: { readonly exitX: number; readonly exitZ: number },
+): PlannedCoaster {
+  const route = new CoasterRoute(cruiserOptions(), { plan, profile });
+  return {
+    name: CRUISER_SEED.name,
+    route,
+    stationStallId: CRUISER_SEED.stationStallId,
+    exitX: exit.exitX,
+    exitZ: exit.exitZ,
   };
 }
 
