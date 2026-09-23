@@ -49,6 +49,9 @@ export function pathKerbMaterial(): MeshStandardMaterial {
   });
 }
 
+/** Narrower than this in plan, metres, a triangle is a hairline nobody can see — see `GeometryBuilder.triangle`. */
+const SLIVER_WIDTH = 1e-3;
+
 /**
  * Minimal geometry accumulator so the whole path network collapses into a
  * single draw call per layer.
@@ -81,13 +84,26 @@ export class GeometryBuilder {
   }
 
   /**
-   * One triangle — unless two of its corners were laid on the same point in
-   * plan, when it has no area, no facing and nothing to draw.
+   * One triangle — unless it is **narrower in plan than {@link SLIVER_WIDTH}**:
+   * two corners laid on one point (a fan at a tight corner), or three laid on
+   * one line. Such a triangle has no area anyone can see from above, and no
+   * facing either: its plan area is below what `Float32Array` keeps of these
+   * coordinates, so the sign that decides whether it is culled is rounding,
+   * and a sliver standing on a sloping line comes out a vertical wall whose
+   * normal is sideways. Measured, before this: 11 such slivers on the canonical
+   * seed, none wider than a hair, every one read as face-down by the facing
+   * invariant.
    */
   triangle(a: number, b: number, c: number): void {
-    const same = (i: number, j: number): boolean =>
-      this.positions[i * 3] === this.positions[j * 3] && this.positions[i * 3 + 2] === this.positions[j * 3 + 2];
-    if (same(a, b) || same(b, c) || same(a, c)) return;
+    const x = (i: number): number => this.positions[i * 3] as number;
+    const z = (i: number): number => this.positions[i * 3 + 2] as number;
+    const twiceArea = Math.abs((z(b) - z(a)) * (x(c) - x(a)) - (x(b) - x(a)) * (z(c) - z(a)));
+    const longest = Math.max(
+      Math.hypot(x(b) - x(a), z(b) - z(a)),
+      Math.hypot(x(c) - x(b), z(c) - z(b)),
+      Math.hypot(x(a) - x(c), z(a) - z(c)),
+    );
+    if (longest === 0 || twiceArea / longest < SLIVER_WIDTH) return;
     this.indices.push(a, b, c);
   }
 
@@ -267,28 +283,199 @@ export function ribbonEdges(
 ): [number, number][][] {
   const edges = offsets.map((offset) => cutSwallowtails(stations, offset));
   const last = stations.length - 1;
-  for (let i = 0; i < last; i += 1) {
-    // Each pass either finds nothing wrong or makes one vertex equal its
-    // predecessor, which cannot be undone — so this ends within one pass per edge.
-    for (let pass = 0; pass <= edges.length; pass += 1) {
-      let held = false;
-      for (let s = 0; s + 1 < edges.length; s += 1) {
-        const low = edges[s] as [number, number][];
-        const high = edges[s + 1] as [number, number][];
-        if (facesSky(low[i]!, high[i]!, low[i + 1]!) < -FACING_NOISE) {
-          low[i + 1] = [low[i]![0], low[i]![1]];
-          held = true;
-        }
-        if (facesSky(high[i]!, high[i + 1]!, low[i + 1]!) < -FACING_NOISE) {
-          high[i + 1] = [high[i]![0], high[i]![1]];
-          held = true;
-        }
-      }
-      if (!held) break;
+
+  /** The first triangle of quad `i`, in any strip, that would be wound face-down. */
+  const firstInverted = (i: number): { low: number; high: number; which: 1 | 2 } | null => {
+    for (let s = 0; s + 1 < edges.length; s += 1) {
+      const low = edges[s] as [number, number][];
+      const high = edges[s + 1] as [number, number][];
+      if (facesSky(low[i]!, high[i]!, low[i + 1]!) < -FACING_NOISE) return { low: s, high: s + 1, which: 1 };
+      if (facesSky(high[i]!, high[i + 1]!, low[i + 1]!) < -FACING_NOISE) return { low: s, high: s + 1, which: 2 };
     }
+    return null;
+  };
+  /** Whether triangle `which` of the strip `low..high` in quad `i` is wound face-down. */
+  const inverted = (i: number, low: number, high: number, which: 1 | 2): boolean => {
+    const l = edges[low] as [number, number][];
+    const h = edges[high] as [number, number][];
+    return which === 1
+      ? facesSky(l[i]!, h[i]!, l[i + 1]!) < -FACING_NOISE
+      : facesSky(h[i]!, h[i + 1]!, l[i + 1]!) < -FACING_NOISE;
+  };
+  /**
+   * Draws the vertices of edges `which` at station `j` in towards the
+   * centreline (or `towards`) together, as far out as they can stay while
+   * `ok()` holds. False, untouched, if not even the centreline itself will do.
+   */
+  const drawIn = (
+    which: readonly number[],
+    j: number,
+    ok: () => boolean,
+    towards: readonly [number, number] = [(stations[j] as RibbonStation).x, (stations[j] as RibbonStation).z],
+  ): boolean => {
+    const station = { x: towards[0], z: towards[1] };
+    const was = which.map((e) => (edges[e] as [number, number][])[j] as [number, number]);
+    const place = (t: number): void => {
+      which.forEach((e, k) => {
+        const [ox, oz] = was[k] as [number, number];
+        (edges[e] as [number, number][])[j] = [station.x + (ox - station.x) * t, station.z + (oz - station.z) * t];
+      });
+    };
+    place(0);
+    if (!ok()) {
+      which.forEach((e, k) => {
+        (edges[e] as [number, number][])[j] = was[k] as [number, number];
+      });
+      return false;
+    }
+    let good = 0;
+    let bad = 1;
+    for (let step = 0; step < DRAW_IN_STEPS; step += 1) {
+      const t = (good + bad) / 2;
+      place(t);
+      if (ok()) good = t;
+      else bad = t;
+    }
+    place(good);
+    return true;
+  };
+
+  /** Every edge at station `j` drawn all the way in to the centreline. */
+  const pinch = (j: number): void => {
+    const station = stations[j] as RibbonStation;
+    for (const edge of edges) edge[j] = [station.x, station.z];
+  };
+
+  /** How many triangles of quads `from..to` are wound face-down. */
+  const invertedIn = (from: number, to: number): number => {
+    let count = 0;
+    for (let i = Math.max(0, from); i <= Math.min(last - 1, to); i += 1) {
+      for (let s = 0; s + 1 < edges.length; s += 1) {
+        if (inverted(i, s, s + 1, 1)) count += 1;
+        if (inverted(i, s, s + 1, 2)) count += 1;
+      }
+    }
+    return count;
+  };
+
+  // Swept until a whole pass finds nothing to mend: drawing a corner in at
+  // one station can disturb the quad before it, so a mend is allowed to reach
+  // back one station and the sweep then comes round again.
+  for (let pass = 0; pass < REPAIR_PASSES; pass += 1) {
+    let mended = false;
+    for (let i = 0; i < last; i += 1) {
+      for (let attempt = 0; attempt < 4 * edges.length; attempt += 1) {
+        const wrong = firstInverted(i);
+        if (!wrong) break;
+        mended = true;
+        const { low, high, which } = wrong;
+        const dbg = (globalThis as { RIBBON_DEBUG?: boolean }).RIBBON_DEBUG === true;
+        if (dbg) console.log(`pass ${pass} quad ${i} strip ${low}-${high} T${which}`);
+        const before = invertedIn(i - 1, i);
+        const ok = (): boolean => !inverted(i, low, high, which) && invertedIn(i - 1, i) < before;
+        // Which side is the inside of this turn: the one the next station's
+        // travel leans towards.
+        const here = stations[i] as RibbonStation;
+        const next = stations[i + 1] as RibbonStation;
+        const leftTurn = next.acrossZ * here.acrossX - next.acrossX * here.acrossZ > 0;
+        const inside = (e: number): boolean => ((offsets[e] as number) > 0) === leftTurn;
+        // The inside half of the cross-section gives first — both of its
+        // edges together, so the kerb band on that side shrinks with the
+        // paving rather than folding against it — at the far station, then
+        // the near one, then both. The inside of a turn tighter than the path
+        // is wide is the part that cannot be where the offset puts it, and the
+        // centreline is the last point on it that still advances.
+        const insideEdges = offsets.map((_, e) => e).filter(inside);
+        const outsideEdges = offsets.map((_, e) => e).filter((e) => !inside(e));
+        const groups: [readonly number[], number][] = [
+          [insideEdges, i + 1],
+          [insideEdges, i],
+        ];
+        let fixed = false;
+        for (const [group, j] of groups) {
+          if (drawIn(group, j, ok)) {
+            if (dbg) console.log(`   drew in ${group.join(',')} at ${j}`);
+            fixed = true;
+            break;
+          }
+        }
+        // The inside kerb alone, folded onto the paving edge it borders: on
+        // the inside of a hairpin the two are cut at different corners, and
+        // a kerb band of no width there is one nobody could have seen.
+        for (const j of [i + 1, i]) {
+          if (fixed) break;
+          for (const e of [0, edges.length - 1]) {
+            if (!inside(e) || edges.length < 2) continue;
+            const neighbour = (edges[e === 0 ? 1 : edges.length - 2] as [number, number][])[j] as [number, number];
+            if (drawIn([e], j, ok, neighbour)) {
+              if (dbg) console.log(`   folded kerb ${e} at ${j}`);
+              fixed = true;
+              break;
+            }
+          }
+        }
+        for (const [group, j] of [
+          [outsideEdges, i + 1],
+          [outsideEdges, i],
+        ] as [readonly number[], number][]) {
+          if (fixed) break;
+          if (drawIn(group, j, ok)) {
+            if (dbg) console.log(`   drew in ${group.join(',')} at ${j}`);
+            fixed = true;
+          }
+        }
+        if (!fixed) {
+          // The inside half at the near station all the way in to the
+          // centreline, and the far one as far out as will then do.
+          const near = stations[i] as RibbonStation;
+          const was = insideEdges.map((e) => (edges[e] as [number, number][])[i] as [number, number]);
+          for (const e of insideEdges) (edges[e] as [number, number][])[i] = [near.x, near.z];
+          if (drawIn(insideEdges, i + 1, ok)) {
+            if (dbg) console.log(`   drew in ${insideEdges.join(',')} at ${i} fully and ${i + 1}`);
+            fixed = true;
+          } else {
+            insideEdges.forEach((e, k) => {
+              (edges[e] as [number, number][])[i] = was[k] as [number, number];
+            });
+          }
+        }
+        if (fixed) continue;
+        // Nothing short of the centreline will do: pinch this cross-section
+        // to its centreline point, and the one before it too if the
+        // centreline itself steps backwards here (a jog in the control
+        // points). A pinched station is a point, so every triangle it makes
+        // with its neighbours is either empty or faces the way the
+        // centreline goes — and the next station is its own cross-section
+        // again, so the pinch is one station long rather than a hold that
+        // goes stale as the route turns.
+        if (dbg) {
+          console.log(`   PINCH ${i + 1} before=${before}`);
+          for (const j of [i, i + 1]) console.log(`     st${j} C ${stations[j]!.x.toFixed(3)},${stations[j]!.z.toFixed(3)} | ${edges.map((e) => e[j]!.map((v) => v.toFixed(3)).join(',')).join(' | ')}`);
+          for (let q = i - 1; q <= i; q += 1) for (let s2 = 0; s2 + 1 < edges.length; s2 += 1) for (const w of [1, 2] as const) if (q >= 0 && inverted(q, s2, s2 + 1, w)) console.log(`     inverted quad ${q} strip ${s2} T${w}`);
+        }
+        pinch(i + 1);
+        if (firstInverted(i)) pinch(i);
+        break;
+      }
+    }
+    if (!mended) break;
+  }
+  // Whatever the sweeps left, pinched away. Every pinch empties the quads
+  // either side of it and a pinched station stays pinched, so this ends.
+  for (let i = 0; i < last; i += 1) {
+    if (!firstInverted(i)) continue;
+    pinch(i);
+    pinch(i + 1);
+    i = Math.max(-1, i - 2);
   }
   return edges;
 }
+
+/** Most sweeps of {@link ribbonEdges}' repair; one or two is the ordinary case. */
+const REPAIR_PASSES = 16;
+
+/** Bisection steps when drawing an edge vertex in — 2^-24 of a path's half-width is far below anything drawn. */
+const DRAW_IN_STEPS = 24;
 
 /** Twice the signed plan area below which a triangle's facing is float noise, m². */
 const FACING_NOISE = 1e-12;
@@ -336,9 +523,19 @@ function cutSwallowtails(stations: readonly RibbonStation[], offset: number): [n
 
     // The swallowtail's own crossing: the nearest pair of segments, one
     // before the run and one after it, that intersect.
+    //
+    // Only a swallowtail's own reach is searched: a turn of the offset curve
+    // folds back over at most about twice the offset of centreline either side
+    // of where it runs backwards. Past that, a crossing is not this corner's
+    // loop but the route coming back past itself — a spur that doubles back
+    // (seed 20260728 route 17 turns through 180° and returns along its own
+    // outbound leg) — and cutting there would delete everything in between.
+    const reach = 2 * Math.abs(offset) + EDGE_REACH_SLACK;
+    const from = (stations[start] as RibbonStation).travelled - reach;
+    const to = (stations[end + 1] as RibbonStation).travelled + reach;
     let cut: { before: number; after: number; at: [number, number] } | null = null;
-    for (let after = end + 1; after < last && after <= end + EDGE_SEARCH; after += 1) {
-      for (let before = start - 1; before >= 0 && before >= start - EDGE_SEARCH; before -= 1) {
+    for (let after = end + 1; after < last && (stations[after] as RibbonStation).travelled <= to; after += 1) {
+      for (let before = start - 1; before >= 0 && (stations[before + 1] as RibbonStation).travelled >= from; before -= 1) {
         if (cut && after - before >= cut.after - cut.before) break;
         const at = segmentCrossing(edge[before]!, edge[before + 1]!, edge[after]!, edge[after + 1]!);
         if (at) cut = { before, after, at };
@@ -355,8 +552,8 @@ function cutSwallowtails(stations: readonly RibbonStation[], offset: number): [n
   return edge;
 }
 
-/** How many segments either side of a backward run are searched for its crossing. */
-const EDGE_SEARCH = 48;
+/** Centreline, metres, searched for a swallowtail's crossing beyond twice its offset. */
+const EDGE_REACH_SLACK = 0.5;
 
 /** Where segment `a0-a1` properly crosses segment `b0-b1` in plan, or `null`. */
 function segmentCrossing(
