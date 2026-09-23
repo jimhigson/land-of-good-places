@@ -53,6 +53,34 @@ continuous router (`routeLeg`) is tried first; screens run per decision (now a
 `refusal()` closure); backtrack to the lattice plan if the continuous one is
 refused. Debug: `LGP_DEBUG_STREETS=1`.
 
+## 5. Fairy poles (knock-on, found by check:coplanar) — FIXED in FairyLights.ts
+
+My path changes moved seed 208's fairy poles and `check:coplanar` gained one
+NEW finding (two knobs z-fighting). Root cause pre-exists in the base: the
+claims registry never refuses a feature for its own claims, so poles of two
+runs overlapped (base s208: 0.087/0.204/0.291 m pairs; head had 0.032 m).
+Fix: `FAIRY_POLE_SPACING` = 2*POLE_RADIUS + 2*PLAYER_RADIUS, refused in
+`chooseSpot` (slides along run). That exposed a second base bug: poles on a
+bridge deck (isOnPath cannot see bridge paving) — seed 11 fairy-pole-88 on the
+(1.5,-31.6) walkway broke `every railway crossing has a bridge you can walk…`.
+Fix: `pointStandsOnABridgeRamp(x, z, POLE_RADIUS)` refusal. New invariant
+`fairyPolesStandWalkablyApart` (spacing + built-bridge covers); both clauses
+proved red with the refusals disabled (s131/canonical 0.699 m pairs;
+s11 fairy-pole-88 on bridge at (2.8,-20.2)).
+
+## Results so far
+- test:procgen head3: `1 failed | 702 passed (703)` (5 new fairy tests), 0
+  skipped; name diff vs base = exactly the four removed, bushes identical.
+- check:park 0..15 round 1 (before fairy fix): all green; waypoints differ only
+  s3 240->239, s6 241->238 = `stall.railRacer-exit-railRace` connector refused
+  by the arch-feet screen (s6 base ran it 0.12 m from a foot; s3 3.10 m ctl).
+- Pre-existing, not fixed, report: s6 `spur-exit-railRace` runs 0.08 m from a
+  race-ring foot (spur, not connector; s6 not a test:procgen seed).
+- digests agree across two processes for 11/131/326.
+- swept-bus OK, entrance-road OK (round 1). Base coplanar is itself red
+  (2 MORE, 6 NEW, 2 WORSE); head differed only by the fairy knob finding.
+
 ## Status
-- commits pushed: coping instrument, arch-feet screen, long-lattice-plan backtrack
-- running: full test:procgen (head1)
+- running: round 2 (check:park 0..15, coplanar, swept, entrance, digests) after fairy fix
+- then: before/after plot of s131 ferris pocket (`scripts/_probe-plot.mts`,
+  untracked; before = scratchpad s131.svg.png), PR against feat/procgen-on-sphere
