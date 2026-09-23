@@ -57,6 +57,7 @@ import { distanceToEntranceCorridor } from './entrance/roadRoute';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
+import { STALL_STANDS } from '../minigames/stallPlacement';
 import { CART_ENVELOPE } from './coaster/cart';
 import type { CollisionWorld } from './Collision';
 // **The trees are not this file's to define.** See `world/treeModel.ts`: the
@@ -1301,6 +1302,30 @@ export function onRideExit(x: number, z: number, clearance: number): boolean {
   ];
   for (const exit of exits) {
     if (Math.hypot(x - exit.exitX, z - exit.exitZ) < RIDE_EXIT_CLEAR + clearance) return true;
+  }
+  return false;
+}
+
+/**
+ * Doormats and stand points are sacred.
+ *
+ * A waypoint at a stall counter or an anchor's entrance has to stay reachable,
+ * and a lamp standing in front of one pockets it exactly the way the dodgems
+ * arch did. Generous on purpose: there is always another lamp 10 m along, and
+ * skipping one costs nothing. Moved here from `LampPosts.ts` so the fairy poles
+ * ask the same owner rather than keeping a copy — a pole slid along its run
+ * onto seed 428's rail-race exit once poles began to slide.
+ */
+export const DOORMAT_CLEARANCE = 2.6;
+
+/** Is (x, z) within `clearance` of an anchor's doorway or a stall's stand point? */
+export function nearADoormat(x: number, z: number, clearance = DOORMAT_CLEARANCE): boolean {
+  for (const anchor of ANCHORS) {
+    const [ex, ez] = anchor.entrance;
+    if (Math.hypot(x - ex, z - ez) < clearance) return true;
+  }
+  for (const stand of STALL_STANDS) {
+    if (Math.hypot(x - stand.x, z - stand.z) < clearance) return true;
   }
   return false;
 }
