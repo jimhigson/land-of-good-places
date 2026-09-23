@@ -2323,14 +2323,27 @@ function keepRouteOffBridges(
           streetSegmentClear(ax, az, bx, bz, destination, 7, PLAYER_RADIUS + 0.5, 0.6) &&
           !segmentEntersABridge(ax, az, bx, bz),
       };
+      // Each tried snapped onto the street lattice first — a detour is a
+      // street like any other, and one on a private line is what
+      // `every street sits on the shared 12 m lattice` refuses. The snap never
+      // moves a run onto a bridge, so it cannot undo what the detour is for.
+      const manhattan = (): (readonly [number, number])[] => enforceRailSide(manhattanRoute(from, to), side);
+      const grid = (): (readonly [number, number])[] => [from, ...gridDetour(from, to, streetGrade)];
       const detours = [
-        () => enforceRailSide(manhattanRoute(from, to), side),
-        () => [from, ...gridDetour(from, to, streetGrade)],
+        () => snapRunsToLattice(manhattan()),
+        manhattan,
+        () => snapRunsToLattice(grid()),
+        grid,
       ];
       for (const make of detours) {
         const detour = make();
         if (polylineCrossesRail(detour)) {
           say('the detour crosses the railway');
+          continue;
+        }
+        // Held to the finish rainbow's feet the same way every other route is.
+        if (!routeClearsArchFeet(detour, width)) {
+          say("the detour comes down on the finish rainbow's feet");
           continue;
         }
         const candidate = [...current.slice(0, wa), ...detour, ...current.slice(wb + 1)];
