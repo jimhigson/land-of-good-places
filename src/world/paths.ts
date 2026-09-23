@@ -2068,7 +2068,6 @@ function drawnMetresOnABridgeUncarried(
       const alongAxis =
         heading > 1e-9 && Math.abs((headingX * site.dirX + headingZ * site.dirZ) / heading) >= BRIDGE_CARRIED_COSINE;
       if (alongAxis && Math.abs(across) <= BRIDGE_CARRIED_OFFSET) continue;
-      if (DEBUG_STREETS && bridgeDebugTMP) console.log(`[foulTMP] (${here.x.toFixed(1)},${here.z.toFixed(1)}) site (${site.x.toFixed(1)},${site.z.toFixed(1)}) along ${along.toFixed(1)} [${bounds.alongMin.toFixed(1)},${bounds.alongMax.toFixed(1)}] across ${across.toFixed(1)} hw ${site.halfWidth} alongAxis ${alongAxis}`);
       metres += stride;
       break;
     }
@@ -2080,7 +2079,6 @@ function drawnMetresOnABridgeUncarried(
  * bridge to count as carrying it — cos 25°. A crossing leg is pinned dead
  * straight over the deck (`routeLeg`), so anything carried is well inside
  * this; a street turning off a ramp is well outside it. */
-let bridgeDebugTMP = false;
 
 /**
  * **The widest a bridge's drawn stone can stand either side of its axis.** A
@@ -4451,8 +4449,6 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     }
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
-    if (DEBUG_STREETS && id === (process.env.LGP_DBG_ID ?? '')) { bridgeDebugTMP = true; drawnMetresOnABridgeUncarried([...(streets ?? fallback ?? []), [ex, ez]], width); bridgeDebugTMP = false; console.log(`[pointsTMP] ${(streets ?? fallback ?? []).map((q) => `(${q[0].toFixed(1)},${q[1].toFixed(1)})`).join(' ')}`); }
-    if (DEBUG_STREETS) console.log(`[bridgeTMP] ${id} streets=${streets ? drawnMetresOnABridgeUncarried([...streets, [ex, ez]], width).toFixed(1) : 'none'} fallback=${fallback ? drawnMetresOnABridgeUncarried([...fallback, [ex, ez]], width).toFixed(1) : '-'}`);
     const routed = [
       ...(streets ?? fallback ?? fallbackSpurRoute(network(), routeTarget, spurTail, width)),
       ...(lead.length ? [[ex, ez] as readonly [number, number]] : []),
