@@ -2253,11 +2253,81 @@ function keepRouteOffBridges(
   points: readonly (readonly [number, number])[],
   width: number,
 ): (readonly [number, number])[] {
+  return repairRouteOffBridges(points, width);
+}
+
+/**
+ * **A bridge site that walls a path in**, as the committed routes found it —
+ * read by `parkPlan.ts`'s path-graph screen, which refuses the graph and has
+ * the crossing plan re-drawn without the site. Reset with the rest of this
+ * module's state.
+ */
+export interface BridgeWallsAPathIn {
+  readonly route: string;
+  readonly railDistance: number;
+  /** Metres of the route's paving still on the bridge after the repair. */
+  readonly stillOn: number;
+  /** Metres the repair added to reach the route's end off the bridge. */
+  readonly added: number;
+  readonly length: number;
+}
+let bridgeWallsIn: BridgeWallsAPathIn[] = [];
+
+/** Every committed route that could not be kept off a bridge honestly. */
+export function bridgesThatWallPathsIn(): readonly BridgeWallsAPathIn[] {
+  return bridgeWallsIn;
+}
+
+/**
+ * {@link keepRouteOffBridges} for a route that is being **committed** to the
+ * graph, which also judges the answer. A route the repair could not take off a
+ * bridge, or could only take off it by more than doubling the walk (and by more
+ * than two street pitches), was walled in by the bridge: seed 11's building
+ * entrance stood between its own plot and a ramp, and the repaired spur walked
+ * 135 m round the building to reach a door 20 m from the ramp's foot. That is
+ * the site's fault, not the router's — so it is recorded here, and the plan
+ * backtracks to a crossing plan without that site (see `parkPlan.ts`).
+ */
+function commitRouteOffBridges(
+  name: string,
+  points: readonly (readonly [number, number])[],
+  width: number,
+): (readonly [number, number])[] {
+  const before = drawnBridgeTrespass(points, width);
+  if (before.metres === 0) return [...points];
+  const repaired = keepRouteOffBridges(points, width);
+  const stillOn = drawnMetresOnABridgeUncarried(repaired, width);
+  const length = polylineLength(points);
+  const added = polylineLength(repaired) - length;
+  // Trespass left over is not by itself a verdict: the zone the repair keeps
+  // routes out of is conservative (the widest stone any bridge can have, plus
+  // a margin), and the sheets it exists to prevent are judged on the built
+  // park by `noDrawnPavingStandsUpAsASheet`. A doubled walk is the verdict.
+  if (added > Math.max(2 * STREET_PITCH, length)) {
+    const first = before.at[0] as { x: number; z: number };
+    let site: CrossingSite | null = null;
+    for (const candidate of CROSSING_SITES) {
+      const bounds = siteFootprint(candidate, RAMP_SCREEN_MARGIN);
+      const { along } = siteFrame(candidate, first.x, first.z);
+      if (along >= bounds.alongMin && along <= bounds.alongMax && pointNearBridgeStone([first.x, first.z], width / 2 + PATH_KERB_OVERHANG)) {
+        site = candidate;
+        break;
+      }
+    }
+    if (site) bridgeWallsIn.push({ route: name, railDistance: site.railDistance, stillOn, added, length });
+  }
+  return repaired;
+}
+
+function repairRouteOffBridges(
+  points: readonly (readonly [number, number])[],
+  width: number,
+): (readonly [number, number])[] {
   let current: (readonly [number, number])[] = [...points];
   const reach = width / 2 + PATH_KERB_OVERHANG;
   for (let pass = 0; pass < 6; pass += 1) {
     const trespass = drawnBridgeTrespass(current, width);
-    if (trespass.metres === 0) return current;
+    if (trespass.metres === 0) return pass === 0 ? [...points] : current;
     // Which control segments the trespassing drawn samples belong to.
     const bad = new Set<number>();
     for (const p of trespass.at) {
@@ -4106,7 +4176,7 @@ function ensureCompassTaps(edges: PathEdge[]): void {
       from: 'ring',
       to: 'ring',
       paved: true,
-      route: { name: `street-tap-${name}`, width: 3.0, closed: false, points: keepRouteOffBridges(points, 3.0) },
+      route: { name: `street-tap-${name}`, width: 3.0, closed: false, points: commitRouteOffBridges(`street-tap-${name}`, points, 3.0) },
     });
   }
 }
@@ -4616,7 +4686,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: 'gate-approach',
         width: GATE_APPROACH_WIDTH,
         closed: false,
-        points: keepRouteOffBridges(gateApproach.points, GATE_APPROACH_WIDTH),
+        points: commitRouteOffBridges('gate-approach', gateApproach.points, GATE_APPROACH_WIDTH),
       },
     },
     // From the ring to the plaza edge nearest the gate side, so the two
@@ -4815,7 +4885,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: `spur-${id}`,
         width,
         closed: false,
-        points: keepRouteOffBridges([...routed, ...past], width),
+        points: commitRouteOffBridges(`spur-${id}`, [...routed, ...past], width),
       },
     });
     if (beforeUnpaved) restoreLatticeState(beforeUnpaved);
@@ -4967,7 +5037,8 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: `spur-${id}`,
         width: 2.6,
         closed: false,
-        points: keepRouteOffBridges(
+        points: commitRouteOffBridges(
+          `spur-${id}`,
           [...(chosen?.points ?? fallbackSpurRoute(network(), stationLead)), ...tail],
           2.6,
         ),
@@ -6737,6 +6808,7 @@ export function resetPathsState(): void {
   boundaryDistanceCache.clear();
   slideTrackSamplesCache = null;
   gateCorridorDeepestCache = null;
+  bridgeWallsIn = [];
   rideCorridorSamplesCache = null;
   railCorridorSamplesCache = null;
 }

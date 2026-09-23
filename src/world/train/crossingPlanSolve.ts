@@ -511,11 +511,18 @@ export interface SolvedCrossingSites {
  * between candidates cannot change the result: every candidate is a pure
  * function of its own rail distance and the already-solved layout.
  */
-export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, void> {
+export function* crossingSitesSearch(attempt = 0): Generator<number, SolvedCrossingSites, void> {
   const route = TRAIN_PLAN.route;
+  // A fresh draw forgets every ban: they were measured against a loop that
+  // may no longer be the one being planned.
+  if (attempt === 0) sitesThatWalledPathsIn.length = 0;
+  const bans = sitesThatWalledPathsIn.slice(0, attempt);
   const bridgeCandidates: Candidate[] = [];
   for (let d = 0; d < route.length; d += MARCH_STEP) {
     yield d;
+    if (bans.some((banned) => Math.abs(route.wrap(d - banned + route.length / 2) - route.length / 2) < SITE_SPACING / 2)) {
+      continue;
+    }
     // The warp vector may ban a site the paths could not use well; the
     // march then simply never sees a candidate there and `selectSpaced`
     // picks the next-best spacing. Unwarped, nothing is ever banned.
@@ -540,6 +547,22 @@ export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, v
   return { bridges };
 }
 
+
+/**
+ * **Bridge sites the path graph found walling a path in**, by rail distance,
+ * in the order it found them — see `paths.ts`'s `commitRouteOffBridges`. The
+ * path-graph step records one here and refuses; the crossing plan's next
+ * attempt then plans without every site recorded so far, and no candidate
+ * within half a site spacing of one (a neighbouring candidate would stand on
+ * the same ground and wall the same path in). The procgen's own backtracking
+ * (CLAUDE.md): a different decision, not a shrunk one.
+ */
+const sitesThatWalledPathsIn: number[] = [];
+
+/** Record a site the path graph was walled in by, for the next crossing plan. */
+export function refuseBridgeSiteForPaths(railDistance: number): void {
+  sitesThatWalledPathsIn.push(railDistance);
+}
 
 /** The same search, driven straight through — Node, the harness and any
  * boot that did not pre-warm. */
