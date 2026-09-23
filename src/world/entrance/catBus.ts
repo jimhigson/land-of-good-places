@@ -235,6 +235,12 @@ const ROW_END_MARGIN = Math.max(0, WIDEST_CHILD_FOOTPRINT - SEAT_PITCH) / 2;
 const CABIN_LENGTH_FROM_SEATS = SEAT_ROWS * SEAT_PITCH + ROW_END_MARGIN * 2;
 const DRIVER_AREA_LENGTH = 1.45;
 const FACE_RADIUS = BODY_WIDTH * 0.52;
+/** How the face sphere is squashed: full width, a little shorter, flattened toward the windscreen. */
+const FACE_SQUASH = [1, 0.92, 0.6] as const;
+/** The face's outline hull, pushed out along its normals by this much before the squash. */
+const FACE_OUTLINE = 0.02 * DETAIL;
+/** Where the face sphere's centre sits above the bus's origin — see `createCatBus`. */
+const FACE_Y = BODY_BOTTOM_Y + BODY_HEIGHT * 0.62;
 const BODY_LENGTH = CABIN_LENGTH_FROM_SEATS + DRIVER_AREA_LENGTH + FACE_RADIUS * 1.1;
 
 /**
@@ -632,6 +638,20 @@ export const CAT_BUS_MAX_PITCH = 0.042;
 export const CAT_BUS_MAX_ROLL = 0.05;
 
 /**
+ * **How far the suspension can move a point of the sprung body**, up or down,
+ * from where it rests — the one owner of that sum. Full heave, plus the pitch
+ * contribution at the point's distance along the bus, plus the roll
+ * contribution at its distance across it (small angles: the three limits are
+ * radians and metres, so this is metres). Every derivation from the limits
+ * reads this — the ride height (at the chin), the mudguard gap (at a wheel),
+ * the step (at the door), and the driven top (at the crown of the face) — so
+ * raising a limit moves all of them together and none can be restated stale.
+ */
+function suspensionTravelAt(z: number, x: number): number {
+  return CAT_BUS_MAX_HEAVE + CAT_BUS_MAX_PITCH * Math.abs(z) + CAT_BUS_MAX_ROLL * Math.abs(x);
+}
+
+/**
  * **How much higher the sprung body rests than it is drawn** — the ride height
  * the doubled wheels bought.
  *
@@ -656,9 +676,10 @@ export const CAT_BUS_MAX_ROLL = 0.05;
  * pavement, from 0.51 m to 0.78 m — which is the honest consequence of fitting
  * wheels twice the size, and is what a bus with big wheels looks like.
  */
-const NOSE_Z = BODY_LENGTH / 2 - FACE_RADIUS * 0.62 + FACE_RADIUS * 0.6;
-export const CAT_BUS_RIDE_LIFT =
-  (CAT_BUS_MAX_HEAVE + CAT_BUS_MAX_PITCH * NOSE_Z + CAT_BUS_MAX_ROLL * FACE_RADIUS) * 1.15;
+/** Where the face sphere's centre sits along the bus — see `createCatBus`. */
+const FACE_Z = BODY_LENGTH / 2 - FACE_RADIUS * 0.62;
+const NOSE_Z = FACE_Z + FACE_RADIUS * 0.6;
+export const CAT_BUS_RIDE_LIFT = suspensionTravelAt(NOSE_Z, FACE_RADIUS) * 1.15;
 
 /**
  * The gap between a tyre and the mudguard over it, **at rest**.
@@ -680,10 +701,7 @@ export const CAT_BUS_RIDE_LIFT =
  * the derivation promised 0.071 — a small number, but the derivation being
  * wrong is the interesting part, not the size of the error.
  */
-const WORST_BODY_DROP_AT_A_WHEEL =
-  CAT_BUS_MAX_HEAVE +
-  CAT_BUS_MAX_PITCH * Math.max(...WHEEL_Z.map(Math.abs)) +
-  CAT_BUS_MAX_ROLL * WHEEL_X;
+const WORST_BODY_DROP_AT_A_WHEEL = suspensionTravelAt(Math.max(...WHEEL_Z.map(Math.abs)), WHEEL_X);
 export const CAT_BUS_ARCH_GAP =
   WORST_BODY_DROP_AT_A_WHEEL * 1.35 + FENDER_OUTLINE_THICKNESS;
 
@@ -799,15 +817,71 @@ function roadHeightAt(distance: number): number {
 }
 
 /**
- * The top of the bus above its own origin — **ear tips included**, per
+ * The top of the bus above its own origin — **the drawn top**, per
  * ART_DIRECTION §7's asset contract, not the roof (which would crop a name
- * label, and here would let a tree stand in front of the cat's ears).
+ * label, and would let a tree stand in front of the cat's face).
+ *
+ * The drawn top is the **face sphere's crown, outline hull included** — the
+ * squashed sphere at the front stands 6 cm above the ear tips (measured
+ * vertex-precisely on 6 Sep 2026: face 6.043 m, ears 5.985 m). This used to
+ * be a second, hand-copied statement of the ears' geometry ("ear tips
+ * included"), 6.8 cm under the thing actually drawn — the two-definitions
+ * disease, ruled out by the Architect's ruling 3 on step 2. It is now derived
+ * from the same constants the face is built from, and `check:swept-bus`
+ * asserts on every run that it equals the drawn bounding box's top within
+ * float slack, so it can never drift from the mesh again.
+ *
  * `createCatBus` returns exactly this as `CatBusHandle.height`; it is a module
- * constant so that something deciding what may stand in front of the bus can
- * ask before there is a bus to ask.
+ * constant so that something deciding what may stand in front of the bus, or
+ * what may lean over the road it drives (the road's corridor claim carries it
+ * as `headroom`), can ask before there is a bus to ask.
  */
-export const CAT_BUS_TOP =
-  CAT_BUS_RIDE_LIFT + BODY_BOTTOM_Y + BODY_HEIGHT + (0.28 + 0.56 / 2) * DETAIL;
+/** The face's up semi-axis, outline hull included: the pushed-out sphere, squashed. */
+const FACE_SEMI_Y = (FACE_RADIUS + FACE_OUTLINE) * FACE_SQUASH[1];
+export const CAT_BUS_TOP = CAT_BUS_RIDE_LIFT + FACE_Y + FACE_SEMI_Y;
+
+/**
+ * How high the face's crown stands above the chassis origin when the chassis
+ * is pitched nose-up by `pitch` — the crown of the *drawn* face, not of an
+ * ideal ellipsoid. The centre rides the rotation (`FACE_Y cos + FACE_Z sin`,
+ * front up); the crown is the sphere's pole vertex, which rides it too
+ * (`FACE_SEMI_Y cos`). The face is a 38-segment sphere, so its pole stays the
+ * highest vertex for any pitch under half the ring spacing (π/38 ≈ 0.083 rad,
+ * twice `CAT_BUS_MAX_PITCH`); the smooth ellipsoid's support function,
+ * `hypot(b cos, c sin)`, overstates that polygonal crown by 0.9 mm at full
+ * pitch — measured, and enough to fail the millimetre the check holds.
+ *
+ * **Not `suspensionTravelAt`.** That linear sum is right for the chin, a
+ * wheel and the step, which are off-axis points; a crown is the top of a
+ * rotated body, and `pitch × FACE_Z` overstates it by the crown's own
+ * shortening. Found by the Architect on step 2 (6 Sep 2026), by posing the
+ * mesh: the linear form gave 6.64 m for a drawn 6.50.
+ */
+function crownHeightUnderPitch(pitch: number): number {
+  const c = Math.cos(pitch);
+  const s = Math.sin(pitch);
+  return FACE_Y * c + FACE_Z * s + FACE_SEMI_Y * c;
+}
+
+/**
+ * **The top of the bus as it drives** — the face's crown at full heave and
+ * full nose-up pitch, from {@link crownHeightUnderPitch}. {@link CAT_BUS_TOP}
+ * stays the rest top for the name label and the asset contract; this one is
+ * what `check:swept-bus` sweeps — the guard for Jim's road rule (trestle
+ * slots over the road are not built) against the drawn park.
+ *
+ * **Roll is deliberately absent.** The crown sits on the bus's centreline,
+ * where roll has no first-order lift; to second order it *lowers* the crown
+ * (the centre drops by `FACE_Y (1 − cos roll)`, more than the wider x-axis
+ * raises the extent) — 4.8 mm at full roll, measured on the posed mesh. So
+ * the highest pose is heave + pitch with no roll, and that is what this is.
+ * `check:swept-bus` poses the drawn bus at full heave, full pitch (both
+ * signs) and roll 0 / ±full, and asserts this equals the highest of them
+ * within a millimetre — the same assertion the rest top gets — so a derived
+ * number here can never again describe a bus that is not drawn.
+ */
+export const CAT_BUS_DRIVEN_TOP =
+  CAT_BUS_RIDE_LIFT + CAT_BUS_MAX_HEAVE + crownHeightUnderPitch(CAT_BUS_MAX_PITCH);
 
 /**
  * The doorway, sized by the child who walks down out of it.
@@ -1315,19 +1389,19 @@ export function createCatBus(): CatBusHandle {
   // A big squashed sphere at the front, flattened toward the windscreen — the
   // same "nose" trick `dodgems/car.ts` uses, just scaled up to be the whole
   // front of the bus.
-  const faceZ = BODY_LENGTH / 2 - FACE_RADIUS * 0.62;
-  const faceY = BODY_BOTTOM_Y + BODY_HEIGHT * 0.62;
+  const faceZ = FACE_Z;
+  const faceY = FACE_Y;
   // 38 segments, matching the kid's own skull (`kid.ts`), because this sphere is
   // now the surface the face is *printed on* rather than a blank the face hangs
   // in front of — the UV remap below is exact at every vertex, so how finely the
   // sphere is divided is how finely the eyes are drawn.
-  const faceSphere = blob(FACE_RADIUS, bodyMaterial, [1, 0.92, 0.6], 38);
+  const faceSphere = blob(FACE_RADIUS, bodyMaterial, [...FACE_SQUASH], 38);
   faceSphere.name = 'cat-bus-face';
   faceSphere.position.set(0, faceY, faceZ);
   chassis.add(faceSphere);
   // Before the bake, so the outline takes its tint from the bodywork's own
   // colour rather than from the white the baked material carries.
-  addOutline(faceSphere, 0.02 * DETAIL);
+  addOutline(faceSphere, FACE_OUTLINE);
 
   // **The face is painted into the head's own UV map. There is no second mesh.**
   //
@@ -1596,10 +1670,7 @@ export function createCatBus(): CatBusHandle {
   // out 0.05 m optimistic and the check duly reported the bodywork reaching
   // y=0.010 where 0.06 was intended: not a failure, but the derivation being
   // wrong is the interesting part, exactly as it was for the arch gap.
-  const worstDropAtDoor =
-    CAT_BUS_MAX_HEAVE +
-    CAT_BUS_MAX_PITCH * (Math.abs(stepZ) + stepDepth / 2) +
-    CAT_BUS_MAX_ROLL * (Math.abs(stepX) + stepWidth / 2);
+  const worstDropAtDoor = suspensionTravelAt(Math.abs(stepZ) + stepDepth / 2, Math.abs(stepX) + stepWidth / 2);
   const lowestTreadUnderside =
     STEP_ROAD_CLEARANCE + worstDropAtDoor - CAT_BUS_RIDE_LIFT;
   const stepGeometry = new RoundedBoxGeometry(

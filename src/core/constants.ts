@@ -439,6 +439,23 @@ export const PATH_KERB_LIFT = 0.03;
 export const PATH_KERB_OVERHANG = 0.425;
 
 /**
+ * **The main loop's drawn width — the one owner.**
+ *
+ * The promenade circling the fountain plaza is paved this wide, so its paving
+ * reaches `MAIN_LOOP_WIDTH / 2` either side of `RING_RADIUS`.
+ *
+ * It lives here, in a leaf module, because **four** places need it and two of
+ * them cannot import each other: `paths.ts` draws the ring and imports
+ * `parkLayout.ts`, so `parkLayout.ts` cannot import back. It was previously
+ * the literal `3.6` in the ring's own route, a restatement of `3.6 / 2` in
+ * `paths.ts`'s `RIBBON_HALF_WIDTH_CEILING`, a third restatement inside
+ * `parkLayout.ts`'s `RING_PLOT_CLEARANCE`, and — once the fairy ring had to
+ * know where the loop's paving stopped — nearly a fourth. A comment promising
+ * that several numbers agree is not a mechanism; this is.
+ */
+export const MAIN_LOOP_WIDTH = 3.6;
+
+/**
  * Slack a carrier of the path adds on top of {@link PATH_KERB_OVERHANG}
  * before deciding a kerb vertex is its own to lift.
  *

@@ -1,5 +1,7 @@
 import { Vector3 } from 'three';
-import { TrainRoute } from './route';
+import { registerPlanCache } from '../../boot/planCaches';
+import type { TrainRoute } from './route';
+import { planPart } from '../parkPlan';
 import { COASTER_PLANS } from '../coaster/plan';
 import { terrainHeight } from '../terrain';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
@@ -283,7 +285,7 @@ function nearCruiserLowCorridor(x: number, z: number, reach: number): boolean {
  */
 const STATION_SEPARATION = PLATFORM_LENGTH + STATION_GAP * 2;
 
-function planStations(route: TrainRoute): readonly PlannedStation[] {
+export function planStations(route: TrainRoute): readonly PlannedStation[] {
   // Sequential, not `map`: each station is scored against the stands already
   // chosen, which is what stops two of them landing in the same place. See the
   // `crowding` term in `clearStationDistance`.
@@ -338,6 +340,40 @@ function planStations(route: TrainRoute): readonly PlannedStation[] {
  * route used to bend around trees at build time; the pure plan made the
  * approximation — and its caveats — unnecessary.)
  */
+/**
+ * Metres along the loop of the rail point nearest `(x, z)` — the same 2 m
+ * corridor samples {@link distanceToRailCorridor} measures against, so the
+ * two agree about which point is nearest.
+ */
+export function nearestRailDistanceAlong(x: number, z: number): number {
+  ensureCorridorSamples();
+  const xs = corridorX as Float64Array;
+  const zs = corridorZ as Float64Array;
+  const route = TRAIN_PLAN.route;
+  let best = Infinity;
+  let along = 0;
+  for (let i = 0; i < xs.length; i += 1) {
+    const j = (i + 1) % xs.length;
+    const ax = xs[i] ?? 0;
+    const az = zs[i] ?? 0;
+    const bx = xs[j] ?? 0;
+    const bz = zs[j] ?? 0;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const lengthSquared = dx * dx + dz * dz;
+    const t =
+      lengthSquared < 1e-12
+        ? 0
+        : Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSquared));
+    const gap = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+    if (gap < best) {
+      best = gap;
+      along = ((i + t) / xs.length) * route.length;
+    }
+  }
+  return along;
+}
+
 export function distanceToRailCorridor(x: number, z: number): number {
   ensureCorridorSamples();
   let best = Infinity;
@@ -394,7 +430,20 @@ function ensureCorridorSamples(): void {
 export const TRAIN_PLAN: {
   readonly route: TrainRoute;
   readonly stations: readonly PlannedStation[];
-} = (() => {
-  const route = new TrainRoute();
-  return { route, stations: planStations(route) };
-})();
+} = {
+  /** A view: the park's driver decides the loop (and may re-decide it); the stations follow. */
+  get route(): TrainRoute {
+    return planPart('train').route;
+  },
+  get stations(): readonly PlannedStation[] {
+    return planPart('train').stations;
+  },
+};
+
+// Derived from a decision the park's driver may unwind: forgotten with it.
+registerPlanCache(() => {
+  cruiserLowXs = null;
+  cruiserLowZs = null;
+  corridorX = null;
+  corridorZ = null;
+});

@@ -73,9 +73,12 @@ import {
   pickTreeKind,
   rollTree,
   type InstanceItem,
+  type RolledTree,
   type TreeKind,
   type TreePart,
 } from './treeModel';
+import { shapesOverlap, type Claim, type GroundClaims } from '../boot/groundClaims';
+import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../boot/featureBuilder';
 
 /**
  * Everything scattered across the lawn: lollipop trees, bushes, flowers, the
@@ -92,7 +95,7 @@ import {
 type WallKind = 'wood' | 'stone';
 
 /** One straight length of wall, in world metres. */
-interface WallRun {
+export interface WallRun {
   readonly from: readonly [number, number];
   readonly to: readonly [number, number];
   readonly height: number;
@@ -350,10 +353,15 @@ export class Scenery {
   private readonly bushMesh: InstancedMesh;
   private readonly collision: CollisionWorld;
 
-  constructor(collision: CollisionWorld) {
+  /**
+   * Draws the decisions the world phase made (`worldPhase.ts`): every tree,
+   * bush and wall run here was placed by its own {@link FeatureBuilder}
+   * against the claims registry, and nothing is decided in this constructor.
+   */
+  constructor(collision: CollisionWorld, decisions: SceneryDecisions) {
     this.group.name = 'scenery';
     this.collision = collision;
-    const foliage = buildFoliage(collision);
+    const foliage = buildFoliage(collision, decisions);
     this.group.add(foliage.group);
     this.climbableTreesMutable = foliage.climbableTrees;
     this.occludersMutable = foliage.occluders;
@@ -363,12 +371,10 @@ export class Scenery {
     this.bushColliders = foliage.bushColliders;
     this.bushMesh = foliage.bushMesh;
     this.group.add(buildTreeline());
-    // Collected as they are built, from the already-trimmed `wallPlan`, so
-    // what is published is what is standing — and is what `buildFoliage`
-    // above has just planted its trees around.
     const built: PlacedWallRun[] = [];
-    this.group.add(buildWoodenWalls(collision, built));
-    this.group.add(buildStoneWalls(collision, built));
+    const runs = decisions.walls.filter((run): run is WallRun => run !== null);
+    this.group.add(buildWoodenWalls(collision, built, runs.filter((run) => run.kind === 'wood')));
+    this.group.add(buildStoneWalls(collision, built, runs.filter((run) => run.kind === 'stone')));
     this.wallRuns = built;
   }
 
@@ -583,7 +589,421 @@ const TREE_SALT = 0xc0ffee ^ PARK_SEED;
 const BUSH_SALT = 0xb115e5 ^ PARK_SEED;
 const MAZE_SALT = 0x77a115 ^ PARK_SEED;
 
-function buildFoliage(collision: CollisionWorld): {
+/** One tree the world phase decided. */
+export interface TreeDecision {
+  readonly x: number;
+  readonly z: number;
+  readonly kind: TreeKind;
+  readonly tree: RolledTree;
+  /** Planted by the climb-cover pass, so it must stay climbable if it is ever moved. */
+  readonly climbable: boolean;
+  /** The scatter's state before this tree's search — `back()` restores it exactly. */
+  readonly resume: { readonly attempts: number; readonly phase: 'scatter' | 'cover'; readonly cell: number };
+}
+
+/** One bush clump the world phase decided: its blobs, rolled once, drawn later. */
+export interface BushDecision {
+  readonly x: number;
+  readonly z: number;
+  readonly blobs: readonly InstanceItem[];
+  readonly resume: number;
+}
+
+export interface SceneryDecisions {
+  readonly trees: readonly TreeDecision[];
+  readonly bushes: readonly BushDecision[];
+  /** A run the walls builder placed, or `null` where one stepped aside for a later feature. */
+  readonly walls: readonly (WallRun | null)[];
+}
+
+/** The ground a tree claims: its trunk, which is what a child walks into. */
+const TREE_TRUNK_CLAIM = 0.6;
+/** Radius of the collider a clump registers, and so the ground it occupies. */
+const BUSH_COLLIDER = 0.85;
+/**
+ * How many spots a tree or bush tries when asked to step aside. The scatter
+ * itself needs ~2500 attempts per accepted tree on a tight lawn (180 000 for
+ * 72), so 48 was no budget at all: on seed 11 both trees asked to move
+ * "found nowhere in 48 tries" and two lamp slots were forgone instead.
+ * Every try is a handful of distance checks; 4000 is a few milliseconds.
+ */
+const RELOCATE_TRIES = 4000;
+/**
+ * A tree or bush steps aside only within this of where it stood — a small
+ * movement (Jim, 16 Sep 2026: *"accommodate small movements if required"*),
+ * never a jump across the park. `test/procgen/scatterDecoupling` bows one
+ * spur by 2 m and holds every tree, bush and wall more than 30 m from it
+ * exactly where it was; the lamp slot the longer spur gained asked a tree to
+ * move and the old anywhere-fallback sent it 56 m away. If no spot within
+ * reach passes, the builder refuses and the optional asker is forgone.
+ */
+const RELOCATE_REACH = { tree: 24, bush: 20 } as const;
+const TREE_MOVE_SALT = 0x7e3e0e ^ PARK_SEED;
+const BUSH_MOVE_SALT = 0xb0511e ^ PARK_SEED;
+const TARGET_TREES = 72;
+const TREE_BUDGET = 180000;
+const BUSH_BUDGET = 4200;
+
+function disc(x: number, z: number, radius: number): Claim {
+  return { kind: 'footprint', shape: { shape: 'disc', x, z, radius } };
+}
+
+function clearOfClaims(claim: Claim, keepClearOf: readonly Claim[]): boolean {
+  return !keepClearOf.some((other) => shapesOverlap(claim.shape, other.shape));
+}
+
+/**
+ * **Trees, as a feature builder** (Jim, 16 Sep 2026: every park feature goes
+ * through the generic interface). One increment is one tree. The scatter is the
+ * one the park always made — same salts, same candidate order, same budget —
+ * then the climb-cover pass, cell by cell; each accepted tree is an increment
+ * claiming its trunk. The builder never refuses: a spot that fails is simply
+ * the next candidate, exactly as before.
+ *
+ * **Correction**: when a later feature (a lamp, a fairy pole, a trestle) is
+ * refused by a tree, the driver asks this builder to `accommodate`, and the
+ * tree is moved — near its old spot first, anywhere plantable after — through
+ * the same acceptance every tree goes through, clear of the asker's refused
+ * claims. A cover-pass tree stays climbable when it moves.
+ */
+export function treeBuilder(
+  collision: CollisionWorld,
+  claims: GroundClaims,
+  walls: () => readonly (WallRun | null)[],
+  bushes: () => readonly BushDecision[],
+  out: TreeDecision[],
+): FeatureBuilder {
+  let attempts = 0;
+  let phase: 'scatter' | 'cover' = 'scatter';
+  let cell = 0;
+  let cells: { key: number; x: number; z: number }[] | null = null;
+  const CLIMB_COVER_TARGET = PLAYER_MAX_SPEED * 7;
+  const CLIMB_COVER_SALT = 0xc11f0b ^ PARK_SEED;
+  const CLIMB_COVER_CELL = 8;
+  const runs = (): readonly WallRun[] => walls().filter((run): run is WallRun => run !== null);
+  const claimOf = (tree: TreeDecision): Claim => disc(tree.x, tree.z, TREE_TRUNK_CLAIM);
+
+  /**
+   * Every check one accepted tree needs — the scatter, the cover pass and a
+   * relocation all plant through this one gate. `exclude` is the tree being
+   * moved, which must not refuse its own new spot.
+   */
+  const accept = (
+    rng: Rng,
+    kind: TreeKind,
+    x: number,
+    z: number,
+    requireClimbable: boolean,
+    exclude: number,
+    keepClearOf: readonly Claim[],
+  ): RolledTree | null => {
+    const reach = TREE_REACH[kind];
+    for (let i = 0; i < out.length; i += 1) {
+      if (i === exclude) continue;
+      const tree = out[i] as TreeDecision;
+      if (Math.hypot(x - tree.x, z - tree.z) < TREE_REACH[tree.kind] + reach) return null;
+    }
+    if (!clearOfWalls(x, z, reach, TREE_WALL_GAP, runs())) return null;
+    // The bushes decide after the trees and keep their footprint out of every
+    // canopy's reach; a tree moved later must keep the same distance from
+    // them, by reach, which the registry (trunk claims) cannot see. Seed 11:
+    // a tree moved for a lamp landed 0.40 m over a clump, and the invariant
+    // "no bush grows out of a tree" caught it.
+    for (const bush of bushes()) {
+      if (Math.hypot(x - bush.x, z - bush.z) < reach + BUSH_COLLIDER) return null;
+    }
+    if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) return null;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind], reach)) return null;
+    // The real world as it stands: fixed structures' colliders (a bridge ramp,
+    // a stall) and every claim any feature has committed.
+    if (!collision.isClearCircle(x, z, TREE_TRUNK_CLAIM)) return null;
+    const claim = disc(x, z, TREE_TRUNK_CLAIM);
+    if (claims.blockers('trees', [claim]).length > 0) return null;
+    if (!clearOfClaims(claim, keepClearOf)) return null;
+    const tree = rollTree(rng, kind, x, terrainHeight(x, z), z);
+    if (requireClimbable && tree.topBallRadius < CLIMBABLE_MIN_CANOPY_RADIUS) return null;
+    return tree;
+  };
+
+  const coverCells = (): { key: number; x: number; z: number }[] => {
+    const found = new Map<number, { x: number; z: number }>();
+    for (const sample of pathCentreline()) {
+      const cellX = Math.round(sample.x / CLIMB_COVER_CELL);
+      const cellZ = Math.round(sample.z / CLIMB_COVER_CELL);
+      const cellKey = (cellX + 512) * 4096 + (cellZ + 512);
+      if (!found.has(cellKey)) found.set(cellKey, { x: cellX * CLIMB_COVER_CELL, z: cellZ * CLIMB_COVER_CELL });
+    }
+    return [...found.entries()].sort((a, b) => a[0] - b[0]).map(([key, at]) => ({ key, ...at }));
+  };
+
+  const increment = (tree: TreeDecision, verb: string): Increment => ({
+    claims: [claimOf(tree)],
+    label: `${tree.kind} ${verb} (${tree.x.toFixed(1)}, ${tree.z.toFixed(1)})`,
+  });
+
+  return {
+    name: 'trees',
+    deps: ['walls'],
+    movable: true,
+    *advance() {
+      if (phase === 'scatter') {
+        while (out.length < TARGET_TREES && attempts < TREE_BUDGET) {
+          const resume = { attempts, phase, cell };
+          attempts += 1;
+          const rng = candidateRng(TREE_SALT, attempts);
+          const angle = rng.range(0, TAU);
+          const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
+          const x = Math.cos(angle) * distance;
+          const z = Math.sin(angle) * distance;
+          if (!isPlantable(x, z, 2.6)) continue;
+          const kind = pickTreeKind(rng);
+          const tree = accept(rng, kind, x, z, false, -1, []);
+          if (!tree) continue;
+          const decision: TreeDecision = { x, z, kind, tree, climbable: false, resume };
+          out.push(decision);
+          return increment(decision, 'at');
+        }
+        phase = 'cover';
+        cell = 0;
+      }
+      cells ??= coverCells();
+      while (cell < cells.length) {
+        const at = cells[cell] as { key: number; x: number; z: number };
+        const resume = { attempts, phase, cell };
+        cell += 1;
+        const covered = out.some(
+          (tree) =>
+            tree.tree.topBallRadius >= CLIMBABLE_MIN_CANOPY_RADIUS &&
+            Math.hypot(tree.x - at.x, tree.z - at.z) < CLIMB_COVER_TARGET,
+        );
+        if (covered) continue;
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          const rng = candidateRng(CLIMB_COVER_SALT ^ at.key, attempt);
+          const angle = rng.range(0, TAU);
+          const radius = rng.range(6, CLIMB_COVER_TARGET * 0.55);
+          const x = at.x + Math.cos(angle) * radius;
+          const z = at.z + Math.sin(angle) * radius;
+          if (!isPlantable(x, z, 2.6)) continue;
+          const tree = accept(rng, 'lollipop', x, z, true, -1, []);
+          if (!tree) continue;
+          const decision: TreeDecision = { x, z, kind: 'lollipop', tree, climbable: true, resume };
+          out.push(decision);
+          return increment(decision, 'for climb cover at');
+        }
+      }
+      return 'done';
+    },
+    back() {
+      const tree = out.pop();
+      if (!tree) return;
+      attempts = tree.resume.attempts;
+      phase = tree.resume.phase;
+      cell = tree.resume.cell;
+    },
+    supply: () => 1,
+    accommodate(claimIndex: number, attempt: number, keepClearOf: readonly Claim[]): Increment | Refusal {
+      const section = claims.sectionOfClaim('trees', claimIndex);
+      const old = out[section];
+      if (!old) return refusal(`trees: no tree owns claim ${claimIndex}`);
+      for (let k = 0; k < RELOCATE_TRIES; k += 1) {
+        const rng = candidateRng(TREE_MOVE_SALT ^ section, attempt * RELOCATE_TRIES + k);
+        const angle = rng.range(0, TAU);
+        const r = 4 + Math.sqrt(rng.unit()) * (RELOCATE_REACH.tree - 4);
+        const x = old.x + Math.cos(angle) * r;
+        const z = old.z + Math.sin(angle) * r;
+        if (!isPlantable(x, z, 2.6)) continue;
+        const tree = accept(rng, old.kind, x, z, old.climbable, section, keepClearOf);
+        if (!tree) continue;
+        const moved: TreeDecision = { ...old, x, z, tree };
+        out[section] = moved;
+        return increment(moved, `moved from (${old.x.toFixed(1)}, ${old.z.toFixed(1)}) to`);
+      }
+      return refusal(`trees: tree ${section} at (${old.x.toFixed(1)}, ${old.z.toFixed(1)}) found nowhere to move within ${RELOCATE_REACH.tree} m in ${RELOCATE_TRIES} tries`);
+    },
+    reset() {
+      out.length = 0;
+      attempts = 0;
+      phase = 'scatter';
+      cell = 0;
+      cells = null;
+    },
+  };
+}
+
+/**
+ * **Bushes, as a feature builder.** One increment is one clump, claiming the
+ * ground its collider occupies ({@link BUSH_COLLIDER}). Same salt, same
+ * candidate order, same budget as the scatter always had. A clump does not see
+ * its siblings as obstacles (a run of touching clumps is a hedge — the
+ * registry never refuses a feature by its own claims); it does see every tree
+ * and every wall, and the real collision world. Correction: a clump asked to
+ * step aside is re-placed through the same gate, clear of the asker.
+ */
+export function bushBuilder(
+  collision: CollisionWorld,
+  claims: GroundClaims,
+  walls: () => readonly (WallRun | null)[],
+  trees: () => readonly TreeDecision[],
+  out: BushDecision[],
+): FeatureBuilder {
+  let attempts = 0;
+  const runs = (): readonly WallRun[] => walls().filter((run): run is WallRun => run !== null);
+
+  const accept = (x: number, z: number, keepClearOf: readonly Claim[]): boolean => {
+    if (!isPlantable(x, z, BUSH_REACH)) return false;
+    if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) return false;
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP, BUSH_REACH)) return false;
+    if (!collision.isClearCircle(x, z, BUSH_COLLIDER)) return false;
+    if (!clearOfWalls(x, z, BUSH_COLLIDER, 0, runs())) return false;
+    for (const tree of trees()) {
+      if (Math.hypot(x - tree.x, z - tree.z) < TREE_REACH[tree.kind] + BUSH_COLLIDER) return false;
+    }
+    const claim = disc(x, z, BUSH_COLLIDER);
+    if (claims.blockers('bushes', [claim]).length > 0) return false;
+    return clearOfClaims(claim, keepClearOf);
+  };
+
+  const roll = (rng: Rng, x: number, z: number): InstanceItem[] => {
+    const blobs = rng.int(2, 3);
+    const colour = rng.pick(CANOPY_GREENS);
+    const y = terrainHeight(x, z);
+    const items: InstanceItem[] = [];
+    for (let i = 0; i < blobs; i += 1) {
+      const radius = rng.range(0.7, 1.3);
+      const offset = rng.range(0, TAU);
+      const spread = i === 0 ? 0 : rng.range(0.4, 0.85);
+      items.push({
+        position: new Vector3(x + Math.cos(offset) * spread, y + radius * 0.72, z + Math.sin(offset) * spread),
+        scale: new Vector3(radius, radius * rng.range(0.72, 0.9), radius),
+        rotationY: rng.range(0, TAU),
+        colour,
+        shade: rng.range(0.9, 1.1),
+      });
+    }
+    return items;
+  };
+
+  const increment = (bush: BushDecision, verb: string): Increment => ({
+    claims: [disc(bush.x, bush.z, BUSH_COLLIDER)],
+    label: `clump ${verb} (${bush.x.toFixed(1)}, ${bush.z.toFixed(1)})`,
+  });
+
+  return {
+    name: 'bushes',
+    deps: ['walls', 'trees'],
+    movable: true,
+    *advance() {
+      while (attempts < BUSH_BUDGET) {
+        const resume = attempts;
+        attempts += 1;
+        const rng = candidateRng(BUSH_SALT, attempts);
+        const angle = rng.range(0, TAU);
+        const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 5);
+        const x = Math.cos(angle) * distance;
+        const z = Math.sin(angle) * distance;
+        if (!accept(x, z, [])) continue;
+        const decision: BushDecision = { x, z, blobs: roll(rng, x, z), resume };
+        out.push(decision);
+        return increment(decision, 'at');
+      }
+      return 'done';
+    },
+    back() {
+      const bush = out.pop();
+      if (bush) attempts = bush.resume;
+    },
+    supply: () => 1,
+    accommodate(claimIndex: number, attempt: number, keepClearOf: readonly Claim[]): Increment | Refusal {
+      const section = claims.sectionOfClaim('bushes', claimIndex);
+      const old = out[section];
+      if (!old) return refusal(`bushes: no clump owns claim ${claimIndex}`);
+      for (let k = 0; k < RELOCATE_TRIES; k += 1) {
+        const rng = candidateRng(BUSH_MOVE_SALT ^ section, attempt * RELOCATE_TRIES + k);
+        const angle = rng.range(0, TAU);
+        const r = 3 + Math.sqrt(rng.unit()) * (RELOCATE_REACH.bush - 3);
+        const x = old.x + Math.cos(angle) * r;
+        const z = old.z + Math.sin(angle) * r;
+        if (!accept(x, z, keepClearOf)) continue;
+        const moved: BushDecision = { ...old, x, z, blobs: roll(rng, x, z) };
+        out[section] = moved;
+        return increment(moved, `moved from (${old.x.toFixed(1)}, ${old.z.toFixed(1)}) to`);
+      }
+      return refusal(`bushes: clump ${section} found nowhere to move within ${RELOCATE_REACH.bush} m in ${RELOCATE_TRIES} tries`);
+    },
+    reset() {
+      out.length = 0;
+      attempts = 0;
+    },
+  };
+}
+
+/**
+ * **Walls, as a feature builder.** The maze arms and stone bench runs are
+ * planned as they always were (`wallPlan`: pure, seeded); this builder commits
+ * them one run per increment, each claiming its own capsule, skipping a run the
+ * registry already refuses (a fixed structure stands there). Correction: a run
+ * asked to step aside for a later feature is taken out — its slot stays as
+ * `null` so `back()` restores exactly — because a maze arm re-placed elsewhere
+ * would no longer be an arm of its piece.
+ */
+export function wallBuilder(claims: GroundClaims, out: (WallRun | null)[]): FeatureBuilder {
+  let next = 0;
+  const planIndex: number[] = [];
+  const capsuleOf = (run: WallRun): Claim => ({
+    kind: 'footprint',
+    shape: {
+      shape: 'capsule',
+      x1: run.from[0],
+      z1: run.from[1],
+      x2: run.to[0],
+      z2: run.to[1],
+      halfWidth: WALL_HALF_WIDTH[run.kind],
+    },
+  });
+  return {
+    name: 'walls',
+    deps: ['stalls'],
+    movable: true,
+    *advance() {
+      const plan = wallPlan().all;
+      while (next < plan.length) {
+        const index = next;
+        const run = plan[index] as WallRun;
+        next += 1;
+        const claim = capsuleOf(run);
+        if (claims.blockers('walls', [claim]).length > 0) continue;
+        out.push(run);
+        planIndex.push(index);
+        return { claims: [claim], label: `${run.kind} piece ${run.piece}` };
+      }
+      return 'done';
+    },
+    back() {
+      out.pop();
+      const index = planIndex.pop();
+      if (index !== undefined) next = index;
+    },
+    supply: () => 1,
+    accommodate(claimIndex: number): Increment | Refusal {
+      const section = claims.sectionOfClaim('walls', claimIndex);
+      const run = out[section];
+      if (!run) return refusal(`walls: no run owns claim ${claimIndex}`);
+      out[section] = null;
+      return { claims: [], label: `${run.kind} piece ${run.piece} stepped aside` };
+    },
+    reset() {
+      out.length = 0;
+      planIndex.length = 0;
+      next = 0;
+    },
+  };
+}
+
+/** Draw the decided foliage: instanced meshes, colliders, occluders and climbable seeds. */
+function buildFoliage(
+  collision: CollisionWorld,
+  decisions: SceneryDecisions,
+): {
   group: Group;
   climbableTrees: ClimbableTreeSeed[];
   occluders: FoliageOccluder[];
@@ -602,180 +1022,16 @@ function buildFoliage(collision: CollisionWorld): {
   const bushes: InstanceItem[] = [];
   const climbableTrees: ClimbableTreeSeed[] = [];
   const occluders: FoliageOccluder[] = [];
-  // Parallel to `occluders`: which (kind, index-into-that-kind's-array) pairs
-  // make up each tree. Resolved into real `HideableInstance`s once the
-  // `InstancedMesh`es below exist — kept as plain indices until then because
-  // the meshes don't exist yet while this loop is still filling the arrays.
   const occluderRefs: { kind: 'trunk' | 'round' | 'cone'; index: number }[][] = [];
-  // Parallel to `occluders` too: each tree's own collision registration, so
-  // `Scenery.clearTreesNear` can take a single tree's circle back out again
-  // without touching any other collider. See {@link TreeCollider}.
   const treeColliders: TreeCollider[] = [];
 
-  // --- trees ---------------------------------------------------------------
-  let attempts = 0;
-  let treeCount = 0;
-  // Counts went up with the cartoon pass: the camera now shows about half the
-  // ground it used to, so the old scatter left the near view looking bare. These
-  // are all InstancedMesh, so the extra plants cost vertices and nothing else.
-  const targetTrees = 72;
-  // Where the trees already are, and how far each reaches — the scatter used
-  // to keep no such record, and so planted 72 trees that knew about the paths
-  // and the plots and nothing whatever about each other. Fifty-three pairs of
-  // canopies grew through one another on the canonical seed, the worst by
-  // 4.32 m, which at a 2.5 m canopy is one tree standing inside another.
-  const planted: { x: number; z: number; reach: number }[] = [];
-  // Attempts raised with each new refusal: the original budget was sized for a
-  // test that almost never said no.
-  //
-  // `targetTrees` has not actually been reachable for some time — the lawn is
-  // tight enough that the budget runs out first, and the canonical seed was
-  // already settling for 30 before the wall refusal was added. Adding it took
-  // that to 19 at the old 26 000, which is a visibly thinner park, so the
-  // budget goes up to buy the trees back: 26 on the canonical seed and 26-30
-  // across the sweep seeds, for about 400 ms of extra headless build.
-  //
-  // Raised again to 180 000 for the castle pass (#113), and the reason is a
-  // knock-on rather than anything this branch plants: the Sky Cruiser now
-  // threads the castle, which moves its station exit, and `paths.ts` routes the
-  // walk network to that exit. #196 separately lengthened every stall spur. Two
-  // independently-green changes each took a bite out of the same lawn, and seed
-  // 5 came out at exactly 24 against a floor of `> 24`.
-  //
-  // The budget is bounded on *both* sides, and both bounds were measured. Below
-  // it the tree floor reds; at 150 000 `check:park` reds instead, because the
-  // scatter's arrangement at that density walls in a waypoint nothing can then
-  // walk to (`poi.stranded`, no allowance). Trees across the five CI seeds:
-  //
-  //   120 000 -> 29 / 29 / 24 / 27 / 26   tree floor red (seed 5 at 24)
-  //   150 000 -> 29 / 30 / 25 / 27 / 26   check:park red (waypoint walled in)
-  //   180 000 -> 29 / 30 / 26 / 28 / 27   both green
-  //   210 000 -> 31 / 31 / 28 / 30 / 29   both green, +0.3 s for trees nobody
-  //                                       counts — and red on the stacked #198
-  //                                       branch, whose scatter arranges
-  //                                       differently and strands a waypoint
-  //
-  // So this is the *smallest* budget at which both guards pass, which is the
-  // rule worth keeping: the extra attempts are load time a child waits through.
-  // The honest fix for the shortfall is still a scatter that does not
-  // rejection-sample a tight lawn at all, which is a bigger job than this one.
-  //
-  // `clearOfCruiser` below then costs **one more tree on seed 5** — 26 becomes
-  // 25 — which still clears the floor but leaves only one tree of slack. That
-  // is thin, and the slack is not this refusal's to give back: two of seed 5's
-  // three lost trees are the castle-and-#196 knock-on above. Note also that
-  // 210 000 is *not* available as headroom here even though it is on the castle
-  // branch alone: this scatter arranges differently and strands a waypoint at
-  // (-13.8, 15.6), which `check:park` refuses with no allowance. Isolated
-  // rather than guessed — trees and walls use separate RNG streams, and
-  // disabling the wall keep-out left the stranding in place while reverting the
-  // budget alone cleared it.
-  /**
-   * Every check and every piece of bookkeeping one accepted tree needs —
-   * extracted so the climbable-coverage pass below plants through exactly
-   * the same gate as the main scatter (same spacing, walls, cruiser and
-   * sightline rules, same collider/occluder filing), rather than a second,
-   * driftable copy. `requireClimbable` additionally refuses a rolled tree
-   * whose top ball is too small to climb out of, before any bookkeeping.
-   */
-  const tryPlantTree = (rng: Rng, kind: TreeKind, x: number, z: number, requireClimbable: boolean): boolean => {
-    const reach = TREE_REACH[kind];
-    if (planted.some((tree) => Math.hypot(x - tree.x, z - tree.z) < tree.reach + reach)) return false;
-    // The walls are decided before any of this runs, so a tree that would grow
-    // into one is simply refused the spot. See `clearOfWalls`/`TREE_WALL_GAP`.
-    if (!clearOfWalls(x, z, reach)) return false;
-    // ...and so is the Sky Cruiser's loop, which dips to boarding height beside
-    // its station and would otherwise fly straight through this canopy (#198).
-    // Asked here rather than in `isPlantable` because it wants the kind, which
-    // is already picked above — so no RNG draw moves to make room for it.
-    if (!clearOfCruiser(x, z, reach, TREE_TOP[kind])) return false;
-    // ...and nor may it stand between the camera and the arriving cat bus. Asked
-    // here rather than in `isPlantable` for exactly the reason `clearOfCruiser`
-    // above is: it needs the tree's *height*, and the kind — which is what
-    // decides the height — has already been rolled. Asking earlier would mean
-    // guessing at the tallest tree the scatter can produce, and a keep-out sized
-    // for a tree that never grows there is the same disease as a 10 m disc sized
-    // for an 11 m bus. See `entrance/arrivalSightline.ts`.
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + TREE_TOP[kind], reach)) return false;
-    planted.push({ x, z, reach });
-    const y = terrainHeight(x, z);
-
-    // **The tree itself is not built here.** `world/treeModel.ts` owns what a
-    // tree of each kind is, down to the order it draws its randoms in, and the
-    // cat bus's lane plants the very same ones — so a new kind, or a wider
-    // canopy, reaches both scenes at once instead of only this one.
-    const tree = rollTree(rng, kind, x, y, z);
-    if (requireClimbable && tree.topBallRadius < CLIMBABLE_MIN_CANOPY_RADIUS) {
-      planted.pop();
-      return false;
-    }
+  for (const { x, z, tree } of decisions.trees) {
     const lean = tree.lean;
-
-    // Occlusion bookkeeping for this tree (see `FoliageOccluder`/
-    // `world/FoliageFade.ts`): every part that makes it up, in the FLAT frame
-    // (a column and a height above its ground — `placeOnSphere` puts them on
-    // the sphere when drawn; `footX`/`footZ` is where the tree stands),
-    // plus a rough bounding sphere (the widest blob's centre and radius) —
-    // good enough for a cheap "does the sightline pass near here" test
-    // without needing the real silhouette. `fileTreeParts` files each part
-    // into the instance array for its geometry and hands back where it went.
     const parts = tree.parts;
-    const refs = fileTreeParts(parts, {
-      trunk: trunks,
-      round: roundCanopies,
-      cone: coneCanopies,
-    });
-
-    // **Climbable: any tree whose topmost canopy is a ball big enough to come
-    // out of.** Asked here, of the finished tree, rather than inside one
-    // branch of the three above — which is how the old rule
-    // (`kind === 'lollipop' && radius >= 2.05`) came to be answering a
-    // question about *kinds* when the thing that matters is *geometry*. A new
-    // tree kind now inherits the right answer instead of silently inheriting
-    // "no".
-    //
-    // Jim, 6 August: *"we need more climbable trees, it takes a long time to
-    // find one."* He was right, and the measured park was worse than it
-    // sounds: **2 climbable trees on the canonical seed, and 1, 2, 2, 3 and 5
-    // across the five CI seeds** — a whole park with a single climbable tree
-    // in it. Half the median walk to the nearest one, and the far corners of
-    // the park had none within 68 m.
-    //
-    // The old rule cost trees twice over. The kind test threw away `blossom`,
-    // which is *the same branch of this very function* as `lollipop` and
-    // differs from it only in the colour of the ball; and the 2.05 bar then
-    // took two thirds of what survived, guarding "plenty of canopy to hide a
-    // body in".
-    //
-    // **That 2.05 was doing real work for a reason its own comment got wrong,
-    // and this is the cautionary tale of the whole change.** The body was
-    // hidden outright while climbing, so the canopy was not concealing her
-    // torso — it was concealing the *hole where her torso would have been*.
-    // Dropping the bar let thinner canopies qualify, the hole stopped being
-    // covered, and Jim asked why the children up trees no longer had a body.
-    // Disproving a comment is not the same as disproving the constant it sits
-    // above. The bar stays down only because he then chose the other fix:
-    // `TreeClimbing` now draws the **whole child**, so there is no hole left
-    // for a canopy to hide and nothing here has to be wide enough to hide one.
-    //
-    // What remains required is that her *head* reads as coming out of foliage
-    // rather than balancing on a pea, so the bar is set against the head —
-    // see {@link CLIMBABLE_MIN_CANOPY_RADIUS}.
+    const refs = fileTreeParts(parts, { trunk: trunks, round: roundCanopies, cone: coneCanopies });
     if (tree.topBallRadius >= CLIMBABLE_MIN_CANOPY_RADIUS) {
       climbableTrees.push({ x, z, canopyTopY: tree.topBallTopY, trunkRadius: 0.55 * lean });
     }
-
-    // **The sightline sphere goes where the canopy actually is**, which since
-    // the trees started leaning is not above the trunk any more. `wideCentreY`
-    // is a flat-frame height above the ground at (x, z); the same map
-    // `treeModel.ts` draws the canopy through puts the sphere on it. At the
-    // park's edge that is over a metre sideways — more than `SIGHTLINE_MARGIN`
-    // — so left flat, a tree near the boundary would fade at the wrong moment
-    // or not at all.
-    //
-    // This does **not** double up with `FoliageFade`'s own `placeOnSphere`
-    // call: that one composes the stand-in mesh from `part.position`, a
-    // different record, and the two never meet.
     occluderFlat.set(x, tree.wideCentreY, z);
     placeOnSphere(occluderFlat, 0, occluderCentre, occluderSpin);
     occluders.push({
@@ -788,374 +1044,28 @@ function buildFoliage(collision: CollisionWorld): {
       parts,
     });
     occluderRefs.push(refs);
-
     const trunkRadius = 0.55 * lean;
     const colliderId = collision.addCircle(x, z, trunkRadius);
     treeColliders.push({ id: colliderId, radius: trunkRadius });
-    treeCount += 1;
-    return true;
-  };
-
-
-  while (treeCount < targetTrees && attempts < 180000) {
-    attempts += 1;
-    // This candidate's own stream. Everything below draws from it and nothing
-    // else, so what this attempt proposes depends on `attempts` and the seed —
-    // never on how many earlier candidates happened to be accepted.
-    const rng = candidateRng(TREE_SALT, attempts);
-    const angle = rng.range(0, TAU);
-    // Scaled to the park's reach on the bearing picked, so the lawn is seeded
-    // evenly whether that bearing runs 57 m to the edge or 110 m. A fixed
-    // radius would crowd every tree into the middle of a park this shape.
-    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
-    const x = Math.cos(angle) * distance;
-    const z = Math.sin(angle) * distance;
-    if (!isPlantable(x, z, 2.6)) continue;
-
-    if (!tryPlantTree(rng, pickTreeKind(rng), x, z, false)) continue;
   }
 
-
-  // --- climbable coverage along the paths (Jim, 6 August: "it takes a long
-  // time to find one") ------------------------------------------------------
-  //
-  // The scatter above rolls climbability out of random geometry, so nothing
-  // guarantees the far reaches of the path network end up near a tree a
-  // child can climb — a re-rolled park measured one spur corner 67.6 m from
-  // the nearest (2026-08-23), just past the nine-flat-out-seconds bar the
-  // procgen invariant walks. So: walk the drawn network, and wherever no
-  // climbable tree is within reach, plant one nearby through the exact same
-  // gate as every other tree (`tryPlantTree`), forced to a big-canopy kind
-  // and refused unless the rolled top ball is genuinely climbable.
-  //
-  // The target is deliberately STRICTER than the check: the invariant allows
-  // `PLAYER_MAX_SPEED` x 9 s of walk; the generator aims for 7 s, so ordinary
-  // seed-to-seed wobble lands inside the bar rather than on it.
-  const CLIMB_COVER_TARGET = PLAYER_MAX_SPEED * 7;
-  const CLIMB_COVER_SALT = 0xc11f0b ^ PARK_SEED;
-  {
-    // Walked as **fixed ground cells the network passes through**, never as
-    // "every 12th sample of the concatenated centreline": a sample index
-    // slides whenever any earlier route's length changes by half a metre,
-    // which re-rolled cover trees on the far side of the park from a 2 m
-    // spur bow (`test/procgen/scatterDecoupling.test.ts` caught trees
-    // "moving" 90 m). An 8 m cell of absolute ground is the same cell
-    // whatever order or length the routes come in, so a local paving change
-    // can only ever touch the cells it actually runs through.
-    const CLIMB_COVER_CELL = 8;
-    const coverCells = new Map<number, { x: number; z: number }>();
-    for (const sample of pathCentreline()) {
-      const cellX = Math.round(sample.x / CLIMB_COVER_CELL);
-      const cellZ = Math.round(sample.z / CLIMB_COVER_CELL);
-      const cellKey = (cellX + 512) * 4096 + (cellZ + 512);
-      if (!coverCells.has(cellKey)) {
-        coverCells.set(cellKey, { x: cellX * CLIMB_COVER_CELL, z: cellZ * CLIMB_COVER_CELL });
-      }
-    }
-    // Sorted by cell key so even the ORDER cells are considered in is a
-    // function of position alone — planting consults the trees already
-    // planted, so an order that followed the walk would leak route order
-    // into the outcome.
-    for (const [cellKey, cell] of [...coverCells.entries()].sort((a, b) => a[0] - b[0])) {
-      const covered = climbableTrees.some(
-        (tree) => Math.hypot(tree.x - cell.x, tree.z - cell.z) < CLIMB_COVER_TARGET,
-      );
-      if (covered) continue;
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        const rng = candidateRng(CLIMB_COVER_SALT ^ cellKey, attempt);
-        const angle = rng.range(0, TAU);
-        const radius = rng.range(6, CLIMB_COVER_TARGET * 0.55);
-        const x = cell.x + Math.cos(angle) * radius;
-        const z = cell.z + Math.sin(angle) * radius;
-        if (!isPlantable(x, z, 2.6)) continue;
-        // 'lollipop' is the classic big-ball silhouette — the kind whose
-        // rolled top ball most often clears CLIMBABLE_MIN_CANOPY_RADIUS —
-        // but the roll still decides, and tryPlantTree refuses a runt.
-        if (tryPlantTree(rng, 'lollipop', x, z, true)) break;
-      }
-    }
-  }
-
-  // --- bushes --------------------------------------------------------------
-  /** Where each clump stands, published as {@link PlacedBush}. */
   const bushClumps: PlacedBush[] = [];
-  /**
-   * Parallel to `bushClumps`: each clump's own collision registration and
-   * which instances of the shared `bushes` `InstancedMesh` its blobs are —
-   * everything {@link Scenery.clearTreesNear} needs to fell a clump exactly
-   * the way it fells a tree. See {@link TreeCollider}, whose shape this
-   * mirrors with one addition: a clump is several blob *instances*, not one.
-   */
   const bushColliders: BushCollider[] = [];
-  /** Radius of the collider a clump registers, and so the ground it occupies. */
-  const BUSH_COLLIDER = 0.85;
-  /**
-   * **The ground one clump claims**, and therefore the radius every
-   * obstacle question below is asked with.
-   *
-   * The same number as {@link BUSH_COLLIDER}, and named separately only so
-   * the two readings stay one owner rather than one literal used for two
-   * jobs: this is the footprint `PlacedBush.radius` publishes, the footprint
-   * `ParkFacts` measures a violation against, and the footprint a walking
-   * child actually meets. Not {@link BUSH_REACH} — that is the wider figure
-   * (2.15 m, the farthest a blob's leaf can hang) which the *paving* rules
-   * want, because a blob overhanging a path is something you trip on, while a
-   * blob overhanging a metre of open lawn beside a fence is just a bush.
-   *
-   * Stated because it is a real under-approximation and somebody will meet
-   * it: a clump's drawn blobs reach further than the ground it claims, so a
-   * leaf may still hang over a wall it does not stand in. That is the same
-   * plan-view/3D gap `PlacedBush.radius` has always carried and it belongs to
-   * whoever gives a bush a truthful published footprint, not here.
-   */
-  const BUSH_GROUND_CLAIM = BUSH_COLLIDER;
-  /**
-   * Accepted clumps, held back from `collision` until the loop is done.
-   *
-   * **A bush must not see its own siblings as obstacles.** The world query
-   * below is deny-by-default against everything else in the park, and if a
-   * clump's own collider went in as it was accepted then clump *k* would be
-   * refused by clump *k-1* — the scatter would starve itself, and what
-   * survived would depend on the order candidates happen to be drawn in
-   * rather than on the park. Foliage legitimately abuts foliage: a run of
-   * touching clumps is a hedge, which is the look this park wants, and
-   * within-feature spacing is a different question from "does this grow
-   * through something else" (the universal overlap invariant excludes it for
-   * the same reason).
-   *
-   * So registration is deferred to one batch after the loop. Locality is
-   * untouched — candidate *k*'s fate still depends only on its own roll and
-   * on the world as it stood before any bush — and it is in fact *stronger*
-   * than before, because no earlier bush can now move a later one.
-   */
-  const acceptedClumps: { x: number; z: number; instanceStart: number; blobs: number }[] = [];
-  attempts = 0;
-  // **A fixed budget, and no target count — the two are not compatible.**
-  //
-  // This loop used to run `while (bushCount < 108 && attempts < 5200)`, and a
-  // "keep going until you have 108" loop is a coupling all of its own, quite
-  // separate from the shared-generator one. Refuse one clump because a path
-  // grew under it and the loop simply runs one attempt longer, admitting a
-  // candidate at the tail that was never in the park before. Measured on this
-  // branch before the change: bowing one spur by 2 m refused 4 clumps near the
-  // bow and conjured 4 unrelated ones at the far end of the sequence.
-  //
-  // So the count is now whatever passes. Wanting *exactly* N and wanting a
-  // change here to leave things over there alone are genuinely incompatible
-  // aims, and locality is the one that unblocks moving a booth (#216, #117).
-  //
-  // **The budget is set by the worst seed, not by the canonical one.** That
-  // distinction was got wrong once and is the whole reason this paragraph is
-  // here. The first value tried, 1050, was tuned until the canonical seed
-  // landed on exactly the 108 clumps it had before — which looked like a
-  // perfect no-change result and hid the fact that seed 2 came out at 86, a
-  // fifth of its ground cover gone. A single seed standing in for five will
-  // always flatter whichever seed it is.
-  //
-  // Every seed used to get 108, because the old fill-to-N loop had 4-5x the
-  // candidates it needed on all of them. So the bar is: **no seed plants fewer
-  // than the 108 it used to** — and, since #500, no seed plants fewer than it
-  // did the day before #500 either.
-  //
-  // **The table that used to sit here was stale and read as authoritative.**
-  // It quoted seeds 2 and 18, which have not been in the pool since #426
-  // swapped the sweep to 5 / 11 / 24 / 131, and counts (149 / 128 / 137 / 142
-  // / 140) that the park had long since left behind — the same budget of 1400
-  // actually planted **286 / 263 / 203 / 358 / 354** on `main` the day #500
-  // was fixed, because every path, plot and wall change since had moved the
-  // accept rate. Re-measured from scratch rather than extended.
-  //
-  // Refusing walls and trees (#500) costs roughly two candidates in three, so
-  // the budget has to buy them back. Measured on the current five CI seeds,
-  // clump counts, every row proved to have **zero** wall or tree
-  // interpenetration:
-  //
-  //   budget   canonical    s5   s11   s24  s131   worst
-  //     1400          83    96    65   161   155      65   <- under the floor
-  //     3000         204   195   140   342   322     140
-  //     4200         295   266   201   483   456     201   <- chosen
-  //     5000         355   305   232   582   536     232
-  //
-  // 4200 is the smallest of these at which **no seed is thinner than it was
-  // before #500** (295 >= 286, 266 >= 263, 201 ~ 203, and s24/s131 well up),
-  // which is the honest bar: a fix for bushes growing through fences should
-  // not also quietly strip a fifth of the park's ground cover.
-  //
-  // **What it costs, stated as measured rather than as hoped.** Headless
-  // `buildMs`, one sample either side, so indicative only: seed 11 came out at
-  // 2.38 s and 1.78 s at 4200 against 2.47 s and 2.00 s at 1400 — no
-  // regression, faster on one run — and three other seeds likewise moved
-  // within noise. **One seed did not: 1888 ms to 2291 ms, +21%.** So the
-  // honest summary is "no measured regression on four parks and about a fifth
-  // of a second on the fifth", and the first draft of this comment said
-  // "nothing measurable", which was true of four parks and false of the one
-  // that mattered. Nobody has taken repeated samples. If that fifth of a
-  // second ever matters, the lever is this number and the table above says
-  // what each value buys.
-  //
-  // It is not more draw calls either way: bushes are a single `InstancedMesh`,
-  // so extra clumps cost vertices and nothing else. The extra work per
-  // candidate is a bounded scan, and the bush colliders are registered after
-  // the loop rather than inside it, so the scan does not grow as clumps land.
-  //
-  // Locality is unaffected by the number: candidate k is evaluated if and only
-  // if k < budget, whatever the budget is.
-  const BUSH_BUDGET = 4200;
-  while (attempts < BUSH_BUDGET) {
-    attempts += 1;
-    const rng = candidateRng(BUSH_SALT, attempts);
-    const angle = rng.range(0, TAU);
-    const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 5);
-    const x = Math.cos(angle) * distance;
-    const z = Math.sin(angle) * distance;
-    // BUSH_REACH, not the old 1.6: a clump's blobs spread up to 0.85 m off
-    // the accepted centre with radii up to 1.3 m, so the farthest leaf can
-    // stand 2.15 m out — clearing the centre by less lets a blob overlap
-    // the paving by up to 0.55 m (seed 18, 2026-08-23: 0.54 m, caught by
-    // `bushesStandOnOpenGround`). One owner: the same constant the cruiser
-    // check on the next line already uses for exactly this reach.
-    if (!isPlantable(x, z, BUSH_REACH)) continue;
-    if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) continue;
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP, BUSH_REACH)) continue;
-    // **...and then the same three questions every other plant here asks, of
-    // the same three owners.** Issue #500: until this branch the bush
-    // scatter's whole idea of an obstacle was `isPlantable` — paving, plots,
-    // the railway, ride exits, the plaza — so *walls and trees were invisible
-    // to it*, and had been for as long as both existed. Measured on the
-    // built park, five CI seeds: **64 clumps standing inside a wall run**
-    // (worst 1.17 m, on a 0.1 m-thick wooden fence a child can see straight
-    // through) and **653 standing inside a tree's own footprint** (worst
-    // 3.89 m, a clump growing out of a trunk). A player sees bushes sprouting
-    // through fence rails and out of tree trunks.
-    //
-    // The fix is deliberately *not* "add walls and trees to the list" — that
-    // buys today's two pairings and leaves the next sibling system just as
-    // invisible, which is the private-obstacle-list disease
-    // `docs/DESIGN-round-robin-generation.md` exists to end. Instead a
-    // candidate is put to the three things that actually know what ground is
-    // taken, none of them a list this loop owns:
-    //
-    // 1. `collision` — **the real collision world as it stands at this
-    //    moment**, which is the standing rule from CLAUDE.md's "Procgen
-    //    backtracks on collision, always". Deny-by-default: whatever any
-    //    sibling system has registered by now refuses this spot without this
-    //    loop having to know the sibling exists.
-    //
-    //    **Be clear about how little that is today, because the shape of the
-    //    query flatters it.** `Scenery` is built early — `World`'s
-    //    constructor stands up the hotel, the stalls, the lamps, the rides,
-    //    the keychain shop and the entrance *after* it — so at this instant
-    //    the world holds the garden's boundary masonry and the tree trunks
-    //    planted a few dozen lines above, and almost nothing else. This is
-    //    not a query that currently catches much; it is a query that cannot
-    //    go blind. A list would have to be edited by whoever adds the next
-    //    system, and would not be; this gets it for free the day `Scenery`
-    //    moves later in the order, or the day something moves before it.
-    // 2. `wallPlan()`, via `clearOfWalls` — the walls are *not* in the
-    //    collision world yet (`Scenery`'s constructor stands them up after
-    //    `buildFoliage` returns), but they are a fully-solved pre-scene plan,
-    //    which is exactly why `tryPlantTree` asks it rather than the world.
-    //    Same owner, same call, so a wall the trees avoid is a wall the
-    //    bushes avoid.
-    // 3. `planted` — a tree's *canopy*, which the collision world does not
-    //    hold either: a tree registers only its trunk (`0.55 * lean`), while
-    //    what a player sees is a ball reaching up to `TREE_REACH` out. This
-    //    is the same array, holding the same reach, that every tree is
-    //    already refused against by its neighbours; bushes now go through the
-    //    identical gate rather than a second copy of the rule.
-    //
-    // Cleared against {@link BUSH_COLLIDER} — the clump's own published
-    // footprint (`PlacedBush.radius`), which is what `ParkFacts` measures and
-    // what a walker actually meets — rather than `BUSH_REACH`, which is the
-    // wider figure the *paving* rules want because a stray blob hanging over
-    // a path is a thing you trip on. One owner either way; the two answer
-    // different questions.
-    //
-    // And on a refusal this **drops the candidate** rather than nudging it or
-    // relaxing a clearance: a bush is decoration and has no claim on ground
-    // something solid already holds. The budget below is what buys the count
-    // back, exactly as the tree scatter's attempt budget does.
-    if (!collision.isClearCircle(x, z, BUSH_GROUND_CLAIM)) continue;
-    if (!clearOfWalls(x, z, BUSH_GROUND_CLAIM, 0)) continue;
-    if (
-      planted.some((tree) => Math.hypot(x - tree.x, z - tree.z) < tree.reach + BUSH_GROUND_CLAIM)
-    ) {
-      continue;
-    }
-
-    // Bushes come in clumps of two or three overlapping blobs.
-    const blobs = rng.int(2, 3);
-    const colour = rng.pick(CANOPY_GREENS);
-    const y = terrainHeight(x, z);
+  for (const clump of decisions.bushes) {
     const instanceStart = bushes.length;
-    for (let i = 0; i < blobs; i += 1) {
-      const radius = rng.range(0.7, 1.3);
-      const offset = rng.range(0, TAU);
-      const spread = i === 0 ? 0 : rng.range(0.4, 0.85);
-      bushes.push({
-        position: new Vector3(
-          x + Math.cos(offset) * spread,
-          y + radius * 0.72,
-          z + Math.sin(offset) * spread,
-        ),
-        scale: new Vector3(radius, radius * rng.range(0.72, 0.9), radius),
-        rotationY: rng.range(0, TAU),
-        colour,
-        shade: rng.range(0.9, 1.1),
-      });
-    }
-    acceptedClumps.push({ x, z, instanceStart, blobs });
-  }
-
-  // The deferred batch — see {@link acceptedClumps}. Order is the order the
-  // candidates were accepted in, so `bushColliders` and `bushClumps` stay
-  // index-parallel exactly as `Scenery.clearTreesNear` requires.
-  for (const clump of acceptedClumps) {
+    for (const blob of clump.blobs) bushes.push(blob);
     const bushColliderId = collision.addCircle(clump.x, clump.z, BUSH_COLLIDER);
-    bushColliders.push({
-      id: bushColliderId,
-      instanceStart: clump.instanceStart,
-      instanceCount: clump.blobs,
-    });
+    bushColliders.push({ id: bushColliderId, instanceStart, instanceCount: clump.blobs.length });
     bushClumps.push({ x: clump.x, z: clump.z, radius: BUSH_COLLIDER });
   }
 
-  // Flowers used to be scattered here too, as static decoration. They are now
-  // a living, pickable population — see `world/Flowers.ts` — built and owned
-  // separately so this file stays about the things that never move.
-
-  // Subdivision 2 rather than 1: still faceted enough to look hand-made, but
-  // rounded rather than spiky — a bush, not a lump of quartz.
   const bushGeometry = facetted(new IcosahedronGeometry(1, 2));
-
-  const trunkMesh = makeInstanced(
-    'tree-trunks',
-    FOLIAGE_GEOMETRY.trunk,
-    foliageMaterial(0.95),
-    trunks,
-    true,
-  );
-  const canopyMesh = makeInstanced(
-    'tree-canopies',
-    FOLIAGE_GEOMETRY.round,
-    foliageMaterial(0.85),
-    roundCanopies,
-    true,
-  );
-  const coneMesh = makeInstanced(
-    'tree-cones',
-    FOLIAGE_GEOMETRY.cone,
-    foliageMaterial(0.85),
-    coneCanopies,
-    true,
-  );
+  const trunkMesh = makeInstanced('tree-trunks', FOLIAGE_GEOMETRY.trunk, foliageMaterial(0.95), trunks, true);
+  const canopyMesh = makeInstanced('tree-canopies', FOLIAGE_GEOMETRY.round, foliageMaterial(0.85), roundCanopies, true);
+  const coneMesh = makeInstanced('tree-cones', FOLIAGE_GEOMETRY.cone, foliageMaterial(0.85), coneCanopies, true);
   const bushMesh = makeInstanced('bushes', bushGeometry, foliageMaterial(0.9), bushes, true);
   group.add(trunkMesh, canopyMesh, coneMesh, bushMesh);
 
-  // Resolve every tree's `occluderRefs` into real `HideableInstance`s now
-  // that the meshes they point into actually exist. `getMatrixAt` reads back
-  // exactly the matrix `makeInstanced` just composed, so there is no second
-  // place that has to agree with its position/rotation/scale maths.
   const scratchMatrix = new Matrix4();
   const hideableInstances: HideableInstance[][] = occluderRefs.map((refs) =>
     refs.map(({ kind, index }) => {
@@ -1165,16 +1075,7 @@ function buildFoliage(collision: CollisionWorld): {
     }),
   );
 
-  return {
-    group,
-    climbableTrees,
-    occluders,
-    bushes: bushClumps,
-    hideableInstances,
-    treeColliders,
-    bushColliders,
-    bushMesh,
-  };
+  return { group, climbableTrees, occluders, bushes: bushClumps, hideableInstances, treeColliders, bushColliders, bushMesh };
 }
 
 /**
@@ -1761,8 +1662,14 @@ function wallPlan(): WallPlan {
  * pre-scene plan, and the walls are a pure pre-scene plan too. Neither needs
  * the collision world, so both are known before a single tree is planted.
  */
-function clearOfWalls(x: number, z: number, reach: number, gap: number = TREE_WALL_GAP): boolean {
-  for (const run of wallPlan().all) {
+function clearOfWalls(
+  x: number,
+  z: number,
+  reach: number,
+  gap: number = TREE_WALL_GAP,
+  runs: readonly WallRun[] = wallPlan().all,
+): boolean {
+  for (const run of runs) {
     const needed = WALL_HALF_WIDTH[run.kind] + reach + gap;
     if (pointToSegment([x, z], run.from, run.to) < needed) return false;
   }
@@ -2213,7 +2120,7 @@ function generateStoneRuns(placed: WallRun[]): WallRun[] {
  * around and hide behind", so these are laid out as a loose, open maze rather
  * than a fence line.
  */
-function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Group {
+function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], runs: readonly WallRun[]): Group {
   const group = new Group();
   group.name = 'wooden-walls';
 
@@ -2223,7 +2130,6 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
   // 1.0-1.5 m band: `checkHoppableColliders` proved the jump clears 1.0 m
   // and strands on anything up to ~1.43 m, so a wall is either honestly
   // hoppable or honestly solid, never in the trap between.
-  const runs: readonly WallRun[] = wallPlan().wood;
 
   const boardMaterial = toonMaterial(0xffffff, { map: woodTexture(1, 1) });
   const postMaterial = toonMaterial(PALETTE.woodDark);
@@ -2326,7 +2232,7 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gr
 
 /** Low pink stone walls: garden-bed edging around the plaza and a few benches
  *  of stonework out on the lawn. */
-function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Group {
+function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs: readonly WallRun[]): Group {
   const group = new Group();
   group.name = 'stone-walls';
 
@@ -2335,7 +2241,6 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gro
   // hoppable (<= 1.0 m): the first generated roll put 1.2 m benches in the
   // 1.0-1.43 m trap band and the boot assert refused the park, which is
   // that assert doing exactly its job.
-  const runs: readonly WallRun[] = wallPlan().stone;
 
   const wallMaterial = toonMaterial(0xffffff, { map: pinkStoneTexture(1, 1) });
   const copingMaterial = toonMaterial(PALETTE.stonePinkLight);
@@ -2359,19 +2264,24 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[]): Gro
 
     const geometry = new BoxGeometry(length, run.height, 0.55);
     scaleUvs(geometry, length / 3, run.height / 1.2);
+    // **Wall and coping lean as one piece: both measured up from the same
+    // foot, along the same up** — `placeOnSphere`, the way every tree's trunk
+    // and canopy are placed. They used to be leant each about its own centre
+    // (`standOnSphere`), and those centres are at different heights, so the
+    // lean slid the coping sideways off the wall by its height times the tilt:
+    // about 9 cm on the canonical seed, which ate its 8.5 cm overhang on one
+    // side and put its face 8 mm from the wall's, same way round —
+    // `check:coplanar` `stone-walls` Box|Box, 0.152 m². Measured from one foot
+    // the coping sits centred on its wall wherever the park leans.
     const wall = new Mesh(geometry, wallMaterial);
-    wall.position.set(midX, base + run.height / 2, midZ);
-    wall.rotation.y = -angle;
-    standOnSphere(wall);
+    placeOnSphere(new Vector3(midX, base + run.height / 2, midZ), -angle, wall.position, wall.quaternion);
     wall.castShadow = true;
     wall.receiveShadow = true;
     group.add(wall);
 
     // A rounded coping stone along the top — reads as "sit on me".
     const coping = new Mesh(new BoxGeometry(length + 0.2, 0.16, 0.72), copingMaterial);
-    coping.position.set(midX, base + run.height + 0.08, midZ);
-    coping.rotation.y = -angle;
-    standOnSphere(coping);
+    placeOnSphere(new Vector3(midX, base + run.height + 0.08, midZ), -angle, coping.position, coping.quaternion);
     coping.castShadow = true;
     coping.receiveShadow = true;
     group.add(coping);

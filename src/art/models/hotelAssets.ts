@@ -1,4 +1,4 @@
-import { Group, Mesh } from 'three';
+import { BufferAttribute, Group, Mesh } from 'three';
 import { HOTEL_GLB_BASE64 } from '../assets/hotelGlb';
 import { PALETTE } from '../style/bridge';
 import { ART } from '../style/artPalette';
@@ -707,6 +707,11 @@ function slidingDoors(
   const { root, meshes } = assemble(key, [`${prefix}-door-left`, `${prefix}-door-right`]);
   const left = required(meshes, `${prefix}-door-left`);
   const right = required(meshes, `${prefix}-door-right`);
+  for (const leaf of [left, right]) {
+    for (const child of leaf.children) {
+      if (child instanceof Mesh) dropOutlineFoot(child, leaf);
+    }
+  }
   return {
     root,
     height: measuredHeight(root),
@@ -721,6 +726,55 @@ function slidingDoors(
     },
     dispose: () => disposeTree(root),
   };
+}
+
+/**
+ * **A sliding leaf's outline has no underside.**
+ *
+ * The leaves stand on their floor, so the inverted hull's bottom — pushed the
+ * outline's thickness *below* the leaf's foot — is under the floor, or under
+ * the leaf itself, from every angle the one camera has. It is not nothing,
+ * though: outside the hotel the floor is the park's terrain, and on pool seed
+ * 11 the terrain passes within 9 mm of it, same way round, which
+ * `check:coplanar` reported as a seam on both entrance leaves. A buried face
+ * is deleted rather than held apart (`ART_DIRECTION.md` §7), so this drops the
+ * hull's downward faces at the leaf's own foot and nothing else. The outline
+ * round the leaf's sides and top — the part a child sees — is untouched.
+ */
+function dropOutlineFoot(outline: Mesh, leaf: Mesh): void {
+  leaf.geometry.computeBoundingBox();
+  // flat-ok: the leaf's own authored geometry, upright in its object-local frame — the foot of the door, not a world height
+  const foot = leaf.geometry.boundingBox?.min.y;
+  if (foot === undefined) return;
+  const source = outline.geometry.index ? outline.geometry.toNonIndexed() : outline.geometry;
+  const position = source.getAttribute('position');
+  const kept: number[] = [];
+  for (let first = 0; first < position.count; first += 3) {
+    let buried = true;
+    for (let corner = first; corner < first + 3; corner += 1) {
+      if (position.getY(corner) > foot) buried = false;
+    }
+    if (!buried) kept.push(first);
+  }
+  if (kept.length * 3 === position.count) return;
+  const geometry = source.clone();
+  for (const name of Object.keys(geometry.attributes)) {
+    const attribute = source.getAttribute(name);
+    const size = attribute.itemSize;
+    const out = new Float32Array(kept.length * 3 * size);
+    kept.forEach((first, triangle) => {
+      for (let corner = 0; corner < 3; corner += 1) {
+        for (let k = 0; k < size; k += 1) {
+          out[(triangle * 3 + corner) * size + k] = attribute.getComponent(first + corner, k);
+        }
+      }
+    });
+    geometry.setAttribute(name, new BufferAttribute(out, size));
+  }
+  geometry.computeBoundingSphere();
+  if (source !== outline.geometry) source.dispose();
+  outline.geometry.dispose();
+  outline.geometry = geometry;
 }
 
 /** Each lift leaf is 0.90 m wide, so that is exactly how far it has to slide. */

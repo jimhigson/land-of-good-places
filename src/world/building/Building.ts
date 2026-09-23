@@ -1,5 +1,6 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
-import { CylinderGeometry, Group, Mesh, Object3D, Vector3, type PerspectiveCamera } from 'three';
+import { damp } from '../../core/mathUtils';
+import { CylinderGeometry, Group, Mesh, Object3D, Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { bandContains, type PortalBand } from '../tapSpacing';
@@ -20,7 +21,6 @@ import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/suppo
 import { planSlideShots, SlideShotDirector, type SlideShot } from '../slide/cameras';
 import {
   petSeatOnSlide,
-  slopeOf,
   type PetSlideLink,
   type SlideSeat,
   type SlideSeatFor,
@@ -30,7 +30,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standFrameInPlot, type AnchorPlots } from '../AnchorPlots';
-import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
+import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint } from '../../entities/Player';
 
 import { BallPit } from './BallPit';
 import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
@@ -43,7 +43,7 @@ import { CASTLE_TURRET_FOOTPRINT_RADIUS } from './castleMasonry';
 import { ROOF_EDGE_Z, ROOF_PARAPET_THICKNESS, roofTurretSpots } from './layout';
 import { ShopUnits } from './ShopUnits';
 import { Shops } from './shops/Shops';
-import { SlideRide } from './SlideRide';
+import { SlideFrame, SlideRide, troughFloorAt } from './SlideRide';
 import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
 import { WalkSurfaces, type MovingPlatform } from './surfaces';
@@ -118,16 +118,40 @@ import {
 const RIDER_LIFT = 0.06;
 
 /**
- * Extra height for a rider lying on her back, in metres.
+ * How far clear of the trough's drawn floor the **lowest vertex** of a child
+ * lying in the ginormous slide rests, in metres.
  *
- * `RIDER_LIFT` was set for a child *sitting* on the chute, whose contact with
- * it is the soles of her shoes. Lying down she meets the trough along her whole
- * back, and the model's origin is at her feet — so at the seated lift her back,
- * and more to the point her **backpack**, sit inside the floor rather than on
- * it. Worn things are where a reclining pose shows first, and a rucksack half
- * through the slide is the obvious one.
+ * This replaced `RECLINED_LIFT` (0.18 m on top of `RIDER_LIFT`), a constant set
+ * for a backpack and never measured against the rest of her: on the canonical
+ * ride a party hat's tip was 0.72 m through the trough and some vertex of her
+ * was inside it on every one of 743 frames. The lift is now measured off her
+ * own posed body at boarding (`Player.restingUnderside`), whatever she is
+ * wearing, and lifted clear of the chute where each part of her actually is
+ * (`SlideRide.restLift`) — so this is the only number left: two centimetres,
+ * so she lies *on* the slide rather than hovering over it. `check:slide-rider`
+ * measures every vertex of her against the bent chute and holds it at zero.
  */
-const RECLINED_LIFT = 0.18;
+const TROUGH_REST_MARGIN = 0.02;
+
+/**
+ * How quickly the chase lens eases to where `solveChaseEye` puts it: the
+ * half-life, in seconds, of **each of two** easing stages in a row.
+ *
+ * One stage turns the solve's 0.1 m flick into a 1.1 cm step in the lens's
+ * *speed* on the next frame — still a kink, measured at 11.8 mm/frame² on the
+ * canonical ride. Two in a row start from rest and ease out again, so the lens
+ * never changes speed abruptly at all; a real change — a companion arriving in
+ * shot — is still most of the way there in under half a second, while the
+ * chute carries her about three metres.
+ */
+const CHASE_EASE_HALF_LIFE = 0.08;
+
+/**
+ * How long a stretch of her body one underside point stands for, in metres.
+ * A tenth of a metre of a 1.3 m child is thirteen or so points along her,
+ * which is what `SlideRide.restLift` walks every frame.
+ */
+const REST_BIN = 0.1;
 
 /**
  * How far **ahead** of you the grown-up rides, in metres of slide.
@@ -144,11 +168,12 @@ const GROWN_UP_LEAD = 2.6;
 /**
  * The angle a grown-up lies back at, riding in front.
  *
- * A quarter turn about their own left-right axis, applied after the heading, so
- * they end up on their back with their feet pointing the way they are going.
- * `rotation.order` is set to `YXZ` on the model's root for exactly this: yaw
- * first, then pitch in the yawed frame. In the default `XYZ` order the two
- * compose the other way round and a grown-up lying down on a turn corkscrews.
+ * A quarter turn about their own left-right axis, composed onto the chute's own
+ * frame (`SlideRide.frameAt`) as a quaternion, so they end up on their back with
+ * their feet pointing the way they are going. It used to be a `rotation.x` with
+ * the root's `rotation.order` set to `YXZ` — an order that three.js's
+ * `setFromEuler` paths ignored where it mattered; a turn composed onto a frame
+ * has no order to get wrong.
  */
 const GROWN_UP_RECLINE = -Math.PI / 2;
 
@@ -442,6 +467,35 @@ export class Building implements GameSystem {
   /** Follows the chute: position and heading. */
   private readonly rideMount = new Group();
 
+  /**
+   * Scratch for the chute's cross-section and the turn it implies, so the ride
+   * allocates nothing per frame. Both are refilled from `SlideRide.frameAt`
+   * every frame — never read one expecting last frame's value.
+   */
+  private readonly rideFrame = new SlideFrame();
+  private readonly rideTurn = new Quaternion();
+  /**
+   * The underside of her body as she rides, measured at boarding by
+   * `Player.restingUnderside` — what `SlideRide.restLift` lifts clear of the
+   * trough every frame. See {@link TROUGH_REST_MARGIN}.
+   */
+  private riderUnderside: readonly RestPoint[] = [];
+  /**
+   * How far back up the slide her underside reaches from her feet, in metres —
+   * the chord `SlideRide.lyingFrameAt` lays her along. Taken from the same
+   * points, so it is her length as drawn and not a number about her.
+   */
+  private riderSpan = 0;
+  /**
+   * The grown-up's recline, as a turn about his own left-right axis. Built once
+   * from {@link GROWN_UP_RECLINE} — the one owner of how far back he lies — and
+   * composed onto the chute's frame rather than written into a world-referenced
+   * `rotation.x`.
+   */
+  private readonly grownUpRecline = new Quaternion().setFromAxisAngle(
+    new Vector3(1, 0, 0),
+    GROWN_UP_RECLINE,
+  );
   /** Scratch for {@link ridePointToWorld}, so the ride allocates nothing per frame. */
   private readonly riderPoint = new Vector3();
 
@@ -499,13 +553,24 @@ export class Building implements GameSystem {
   private readonly chaseUp = new Vector3();
   private readonly chaseBehind = new Vector3();
   private readonly chaseEye = new Vector3();
+  /**
+   * The chase lens's distance back and up from the seat **as drawn** — eased
+   * towards what `solveChaseEye` asks for rather than jumped to it. See
+   * {@link CHASE_EASE_HALF_LIFE}. `NaN` until the first frame of a descent,
+   * which takes the solve's answer outright.
+   */
+  private chaseBack = Number.NaN;
+  private chaseHigh = Number.NaN;
+  /** The first of the two easing stages — see {@link CHASE_EASE_HALF_LIFE}. */
+  private chaseBackEasing = Number.NaN;
+  private chaseHighEasing = Number.NaN;
   private readonly chaseAim = new Vector3();
   private readonly chasePet = new Vector3();
   /** The body centre the near bound used this frame (#518), and whether it is set. */
   private readonly chaseBody = new Vector3();
   private chaseBodyValid = false;
   private readonly chaseSeat: SlideSeat = {
-    x: 0, y: 0, z: 0, facing: 0, pitch: 0, recline: 0,
+    x: 0, y: 0, z: 0, facing: 0, turn: new Quaternion(), recline: 0,
   };
   /**
    * How many companions rode last frame, from `ridePetsDownSlide`'s own return.
@@ -886,7 +951,14 @@ export class Building implements GameSystem {
     // one ever is not. three.js supports this directly: `WebGLRenderer.render`
     // updates a camera with no parent itself.
     this.slideShots = new SlideShotDirector(
-      planSlideShots(this.ginormousSlide, { x: BUILDING_CENTRE_X, z: BUILDING_CENTRE_Z }),
+      planSlideShots(
+        this.ginormousSlide,
+        { x: BUILDING_CENTRE_X, z: BUILDING_CENTRE_Z },
+        // The chute as **built**, so the placement search probes the real
+        // geometry it has to see past rather than a model of it.
+        this.ginormousSlide.group,
+        GIANT_SLIDE_SPEED,
+      ),
     );
 
     // Something to stand it on. ~95 m of chute with nothing under it reads as
@@ -906,13 +978,8 @@ export class Building implements GameSystem {
     // grown-up and the player teleport below, and any of them left behind in
     // the castle's frame would sit a castle's-width off the chute.
     this.eyeMount.rotation.y = Math.PI;
-    // Yaw first, then pitch in the yawed frame. The mount now leans with the
-    // chute as well as turning with it (see `advanceRide`), and in the default
-    // `XYZ` order those two compose the other way round: the pitch would be
-    // taken about the *world* X axis, so it would read as nose-down only while
-    // the ride happened to be heading north, and as a barrel roll a quarter of
-    // the way round the castle. Exactly the trap `GROWN_UP_RECLINE` documents.
-    this.rideMount.rotation.order = 'YXZ';
+    // The mount is turned by the chute's own frame, handed over as a quaternion
+    // in `advanceRide` — no euler, so no composition order to get wrong.
     this.rideMount.add(this.eyeMount);
     this.parkRoot.add(this.rideMount);
 
@@ -1630,16 +1697,13 @@ export class Building implements GameSystem {
       // The chute is in world coordinates now, so there is nothing to add back.
       this.ginormousSlide.pointAt(0, this.point);
       player.teleportTo(this.point.x, this.point.y + RIDER_LIFT, this.point.z);
-      // Lying down in front, so set the composition order before the first
-      // frame places them — see `GROWN_UP_RECLINE`.
-      this.grownUp.root.rotation.order = 'YXZ';
-      // And the same for the child, who is pitched down the slope now that the
-      // chase camera means you can see her. Set here and put back in
-      // `finishRide` rather than left on permanently: with a pitch of zero the
-      // two orders are identical, so no other ride can tell the difference —
-      // but the Rail Race *does* pass a non-zero pitch, and quietly changing
-      // the frame it composes in would alter a ride the family has already
-      // signed off, in a PR that is not about the Rail Race.
+      // **Not for composing her turn** — the ride hands that over whole, as a
+      // quaternion (`Player.setRideFrame`), and no euler order touches it. This
+      // is for the readers that take `group.rotation.y` as the way she faces
+      // (`HeldBalloon`, the parade, the park map): three.js decomposes the
+      // quaternion in this order when they read, and only `YXZ` hands back the
+      // chute's heading as `.y` — `XYZ` folds any heading past 90° back into
+      // ±90° once she is pitched. Put back in `finishRide`.
       player.group.rotation.order = 'YXZ';
       this.startRide(this.ginormousSlide, true, player);
       // **On her back, feet first** (Jim, 6 August 2026) — the way a child
@@ -1653,6 +1717,13 @@ export class Building implements GameSystem {
       // which is the whole reason that check asserts her *body* rather than
       // that a ride is running.
       player.ridePosture = 'reclined';
+      // **Lying on the slide, measured off her.** Her underside — the lowest
+      // vertex of her posed body, hat, hair, backpack and all, per stretch of
+      // her length — is taken once, here, because nothing about her shape
+      // changes mid-descent; after the posture, because that is the shape
+      // asked about. `advanceRide` lifts those points clear of the chute.
+      this.riderUnderside = player.restingUnderside(troughFloorAt, REST_BIN);
+      this.riderSpan = Math.max(0, ...this.riderUnderside.map((point) => -point.along));
       this.rideView?.board();
       // Back to before the cut, so this ride opens on its plan's first shot
       // rather than inheriting whichever one the last ride ended on.
@@ -1677,6 +1748,12 @@ export class Building implements GameSystem {
     // child who goes down the slide twice would have.
     this.chaseGaveUp = 0;
     this.chaseCompanions = 0;
+    // A fresh descent opens on the solve's own answer, not eased in from where
+    // the last one ended.
+    this.chaseBack = Number.NaN;
+    this.chaseHigh = Number.NaN;
+    this.chaseBackEasing = Number.NaN;
+    this.chaseHighEasing = Number.NaN;
     // The near bound's counters describe this descent too (#518), and they live
     // on the solver's module rather than here because the solver is where the
     // rejection happens. Same reasoning as the two above: a counter whose doc
@@ -1716,29 +1793,65 @@ export class Building implements GameSystem {
     // showed, because until 5 August nobody could see her — the camera was
     // inside her head. Turning on the chase view is what made it visible, so
     // the fix belongs with it.
-    const pitch = ride.giant ? slopeOf(this.tangent) : 0;
-    player.setRidePose(
-      this.riderPoint.x,
-      this.riderPoint.y + (ride.giant ? RIDER_LIFT + RECLINED_LIFT : RIDER_LIFT),
-      this.riderPoint.z,
-      Math.atan2(this.tangent.x, this.tangent.z),
-      pitch,
-    );
+    if (ride.giant) {
+      // **In the trough's frame, not on the ground's.** `setRidePose` ends in
+      // `faceOnGround`, which leans her onto the sphere normal under her feet —
+      // right for anything standing on the park, wrong inside a tube swept
+      // about world up. She was pitched onto the planet inside a chute that is
+      // not, and her head rode 0.62 m below the trough floor (`-0.676 m` in the
+      // chute's own frame, against a floor at `-0.06`) through the middle of
+      // the descent. `SlideRide.frameAt` is the single owner of that frame and
+      // the sweep that drew the trough is written in terms of it, so the shape
+      // she lies in and the turn she is given are now the same arithmetic.
+      // Laid along the chord from her feet back to her head rather than along
+      // the tangent at her feet, so a bend does not swing her head into the
+      // wall — see `SlideRide.lyingFrameAt`.
+      const frame = ride.slide.lyingFrameAt(t, this.riderSpan, this.rideFrame);
+      // Lifted along the trough's own up, not world `+Y` — on a 28 degree pitch
+      // those differ by the whole of the lift — and by exactly enough for the
+      // lowest of her to clear the drawn trough where it actually is.
+      this.riderPoint.addScaledVector(
+        frame.up,
+        ride.slide.restLift(frame, t, this.riderUnderside, TROUGH_REST_MARGIN),
+      );
+      player.setRideFrame(
+        this.riderPoint,
+        frame.orientation(this.rideTurn),
+        Math.atan2(this.tangent.x, this.tangent.z),
+      );
+    } else {
+      player.setRidePose(
+        this.riderPoint.x,
+        this.riderPoint.y + RIDER_LIFT,
+        this.riderPoint.z,
+        Math.atan2(this.tangent.x, this.tangent.z),
+        0,
+      );
+    }
 
     // The seat the chase camera hangs off, following the same curve the rider
     // does, so what you see and where you are can never disagree.
     if (ride.giant) {
-      ride.slide.pointAt(t, this.point);
-      this.rideMount.position.copy(this.point);
-      this.rideMount.position.y += RIDER_LIFT;
-      this.rideMount.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
-      // The mount leans with the chute so the camera rides *in the tube's own
-      // frame*. Left level (as it was for first person, where it did not
-      // matter) a camera 4.1 m behind sits 1.4 m off the chute floor on a 20°
+      // The same frame the rider is in, asked of the same owner rather than
+      // rebuilt out of a yaw and a `slopeOf` — which is how the seat and the
+      // rider came to be in different frames in the first place. The mount
+      // leans with the chute so the camera rides *in the tube's own frame*:
+      // left level (as it was for first person, where it did not matter) a
+      // camera 4.1 m behind sits 1.4 m off the chute floor on a 20 degree
       // pitch, and the trough's uphill side wall swings through the lens.
-      // `rotation.order` is `YXZ` — set in the constructor, for the same reason
-      // `GROWN_UP_RECLINE` needs it: yaw first, then pitch in the yawed frame.
-      this.rideMount.rotation.x = slopeOf(this.tangent);
+      //
+      // **Along the chord back to the lens, not the tangent at her feet** —
+      // `SlideRide.lyingFrameAt`, as she is laid. The lens hangs 4.35 m behind
+      // on a boom; turned by the tangent at the seat, every knot of the chute's
+      // Catmull-Rom (continuous in direction, not in curvature) swung it by the
+      // curvature's jump times that lever — 47-54 mm in one frame at the top
+      // bend, on the canonical ride, once the solve's own flicker was gone. On
+      // the chord, the lens runs along the chute itself behind her and moves as
+      // smoothly as she does.
+      const chord = Number.isNaN(this.chaseBack) ? CHASE_EYE.z : this.chaseBack;
+      const frame = ride.slide.lyingFrameAt(t, chord, this.rideFrame);
+      this.rideMount.position.copy(frame.position).addScaledVector(frame.up, RIDER_LIFT);
+      this.rideMount.quaternion.copy(frame.orientation(this.rideTurn));
 
       // **Solve where the lens goes, against the ride that was actually built**
       // (#514, #516). `CHASE_EYE` was a fixed offset picked for a rider with
@@ -1780,7 +1893,23 @@ export class Building implements GameSystem {
         this.rideView!.camera.aspect,
       );
       if (solved.gaveUp) this.chaseGaveUp += 1;
-      this.eyeBoom.position.set(0, solved.up, solved.back);
+      // **Eased, not jumped.** The solve walks 0.1 m steps and takes the first
+      // that frames her and the pets; where a companion sits on the edge of its
+      // near bound the answer flicks between two neighbouring steps from one
+      // frame to the next, and the lens went out and back 10 cm in a single
+      // frame eight times down the canonical ride — the judder Jim felt. The
+      // solve still decides where the lens belongs; this decides how it gets
+      // there.
+      if (Number.isNaN(this.chaseBack)) {
+        this.chaseBack = this.chaseBackEasing = solved.back;
+        this.chaseHigh = this.chaseHighEasing = solved.up;
+      } else {
+        this.chaseBackEasing = damp(this.chaseBackEasing, solved.back, CHASE_EASE_HALF_LIFE, dt);
+        this.chaseHighEasing = damp(this.chaseHighEasing, solved.up, CHASE_EASE_HALF_LIFE, dt);
+        this.chaseBack = damp(this.chaseBack, this.chaseBackEasing, CHASE_EASE_HALF_LIFE, dt);
+        this.chaseHigh = damp(this.chaseHigh, this.chaseHighEasing, CHASE_EASE_HALF_LIFE, dt);
+      }
+      this.eyeBoom.position.set(0, this.chaseHigh, this.chaseBack);
 
       // **Aim by vectors, never by an angle in a guessed frame.** The lens's
       // unpitched forward is `-behind`; the wanted forward is the direction to
@@ -1791,8 +1920,8 @@ export class Building implements GameSystem {
       // carries it on top of whatever the boom does.
       this.chaseEye
         .copy(this.rideMount.position)
-        .addScaledVector(this.chaseBehind, solved.back)
-        .addScaledVector(this.chaseUp, solved.up);
+        .addScaledVector(this.chaseBehind, this.chaseBack)
+        .addScaledVector(this.chaseUp, this.chaseHigh);
       this.chaseAim.copy(solved.aimAt).sub(this.chaseEye).normalize();
       const forward = -this.chaseAim.dot(this.chaseBehind);
       const rise = this.chaseAim.dot(this.chaseUp);
@@ -1818,12 +1947,20 @@ export class Building implements GameSystem {
       // In front, and lying down. Clamped to the end of the chute so the
       // grown-up never runs off the far end while the child is still aboard.
       const lead = Math.min(ride.slide.length, ride.distance + GROWN_UP_LEAD) / ride.slide.length;
-      ride.slide.pointAt(lead, this.point);
-      ride.slide.tangentAt(lead, this.tangent);
-      this.grownUp.root.position.copy(this.point);
-      this.grownUp.root.position.y += RIDER_LIFT;
-      this.grownUp.root.rotation.y = Math.atan2(this.tangent.x, this.tangent.z);
-      this.grownUp.root.rotation.x = GROWN_UP_RECLINE;
+      // The same frame the child rides in, from the same owner. Before this he
+      // was lifted along world `+Y` and reclined against the world horizon, so
+      // on the steep middle of the chute he sank into the trough exactly as she
+      // did — the identical defect, one body ahead.
+      const frame = ride.slide.frameAt(lead, this.rideFrame);
+      this.grownUp.root.position
+        .copy(frame.position)
+        .addScaledVector(frame.up, RIDER_LIFT);
+      // Reclined about his own left-right axis *within* the chute's frame, so
+      // "lying back" means lying back along the slide rather than against a
+      // horizon the slide does not share.
+      this.grownUp.root.quaternion
+        .copy(frame.orientation(this.rideTurn))
+        .multiply(this.grownUpRecline);
     }
   }
 
@@ -1986,8 +2123,8 @@ export class Building implements GameSystem {
         spot.z,
         Math.atan2(this.tangent.x, this.tangent.z),
       );
-      // Back to the default composition order now the slope no longer applies
-      // (see `startGiantSlide`), and level: she arrives feet first.
+      // Back to the default order (see `startGiantSlide`), and level: she
+      // arrives feet first.
       player.group.rotation.order = 'XYZ';
       player.group.rotation.x = 0;
       // Handed back still moving, so the last thing the slide does is deliver
@@ -2005,7 +2142,10 @@ export class Building implements GameSystem {
       this.grownUpComing = false;
       // Back up onto the roof, to wait for the next one.
       this.interiorRoot.add(this.grownUp.root);
-      this.grownUp.root.rotation.x = 0;
+      // All three, not `.x` alone: he was turned by a quaternion down the chute,
+      // and zeroing one euler component of it leaves the other two as whatever
+      // three.js decomposed — a lean he would keep standing on the roof.
+      this.grownUp.root.rotation.set(0, 0, 0);
       this.placeGrownUp();
       this.spaces.holdOff();
       this.slideShots.reset();

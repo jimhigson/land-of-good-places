@@ -109,10 +109,12 @@ const { Scene } = await import('three');
 const { World } = await import('../src/world/World.ts');
 const { Sky } = await import('../src/world/Sky.ts');
 const { Player } = await import('../src/entities/Player.ts');
-const { CHUTE_ENVELOPE } = await import('../src/world/building/SlideRide.ts');
+const { CHUTE_ENVELOPE, SlideFrame, troughClearance } = await import(
+  '../src/world/building/SlideRide.ts'
+);
 const { PLAYER_RADIUS } = await import('../src/core/constants.ts');
 const { IsoCamera } = await import('../src/core/IsoCamera.ts');
-const { Raycaster, Box3 } = await import('three');
+const { Raycaster, Box3, Quaternion } = await import('three');
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
 
 // **Not `park-harness`'s `inertInteriorControls`.** That one throws on every
@@ -141,6 +143,16 @@ const player = new Player(world.collision, camera, new Vector3(0, 0, 0));
 scene.add(player.group);
 building.attachPlayer(player);
 
+// **Dressed for the clause that measures her against the trough.** The default
+// look wears no hat, and the deepest point of her in the reviewer's ride of
+// #680 was a party hat's tip — so a bare-headed rider would pass a clause the
+// child in the game fails. Worn the way `WornHat` wears one: on `hatAnchor`.
+// `HAT_TO_WEAR` is overridable so every hat can be put through it by hand.
+const { createHat, HAT_KINDS } = await import('../src/art/models/hats.ts');
+const HAT_TO_WEAR = (process.env['SLIDE_RIDER_HAT'] ?? 'party') as (typeof HAT_KINDS)[number];
+if (!HAT_KINDS.includes(HAT_TO_WEAR)) throw new Error(`no hat called ${HAT_TO_WEAR}`);
+player.model.hatAnchor.add(createHat(HAT_TO_WEAR).root);
+
 // The chase camera decides whether she is drawn, so ask the ride the same
 // question `Game.ts` asks and apply the same rule — rather than hard-coding
 // `true` here, which would stop testing the thing that decides it.
@@ -167,6 +179,80 @@ function distanceToChute(point: Vector3): number {
     if (d < best) best = d;
   }
   return best;
+}
+
+/** Which `t` along the chute a world point is nearest, from the same samples. */
+function nearestT(point: Vector3): number {
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < chute.length; i += 1) {
+    const d = point.distanceToSquared(chute[i]!);
+    if (d < bestD) {
+      bestD = d;
+      best = i / (chute.length - 1);
+    }
+  }
+  return best;
+}
+
+/**
+ * **The deepest any drawn vertex of `root` reaches into the trough**, in metres
+ * above the drawn surface (negative = inside the slide), and which mesh it was.
+ *
+ * Each vertex is put into the chute's own cross-section at **its own** place
+ * along the chute — a few Newton steps along the tangent from `seedT` — rather
+ * than at the rider's, because a body 1.3 m long on a bending chute is not in
+ * one cross-section. Then `troughClearance`, the drawn profile, decides.
+ *
+ * Every vertex, no striding: a stride is how a hat brim slips between samples.
+ */
+const vertexProbe = new Vector3();
+const vertexOffset = new Vector3();
+const vertexFrame = new SlideFrame();
+function deepestVertex(
+  root: { traverseVisible(fn: (o: unknown) => void): void; updateMatrixWorld(force: boolean): void },
+  seedT: number,
+): { clearance: number; part: string } {
+  root.updateMatrixWorld(true);
+  let clearance = Infinity;
+  let part = '';
+  root.traverseVisible((node) => {
+    const mesh = node as {
+      isMesh?: boolean;
+      isInstancedMesh?: boolean;
+      name: string;
+      parent: { name: string } | null;
+      matrixWorld: import('three').Matrix4;
+      geometry?: { attributes: { position?: import('three').BufferAttribute } };
+    };
+    if (!mesh.isMesh || mesh.isInstancedMesh) return;
+    const position = mesh.geometry?.attributes.position;
+    if (!position) return;
+    for (let i = 0; i < position.count; i += 1) {
+      vertexProbe.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
+      slide.group.worldToLocal(vertexProbe);
+      let t = seedT;
+      for (let step = 0; step < 4; step += 1) {
+        slide.frameAt(t, vertexFrame);
+        vertexOffset.subVectors(vertexProbe, vertexFrame.position);
+        t = Math.min(1, Math.max(0, t + vertexOffset.dot(vertexFrame.tangent) / slide.length));
+      }
+      slide.frameAt(t, vertexFrame);
+      vertexOffset.subVectors(vertexProbe, vertexFrame.position);
+      const c = troughClearance(vertexOffset.dot(vertexFrame.right), vertexOffset.dot(vertexFrame.up));
+      if (c < clearance) {
+        clearance = c;
+        part = mesh.name || mesh.parent?.name || 'unnamed mesh';
+      }
+    }
+  });
+  return { clearance, part };
+}
+
+function median(values: readonly number[]): number {
+  if (values.length === 0) return NaN;
+  const sorted = [...values].sort((x, y) => x - y);
+  return sorted[Math.floor(sorted.length / 2)]!;
 }
 
 function drawn(object: { visible: boolean; parent: unknown } | null): boolean {
@@ -419,6 +505,20 @@ let headForwardFrames = 0;
 let worstHeadRise = 0;
 let worstAlong = -1;
 let worstHeadOffChute = 0;
+/** Deepest any part of her reaches into the trough, in the chute's own frame. */
+let deepestInTrough = Infinity;
+let deepestPart = '';
+let deepestFrame = -1;
+/** Ridden frames with any vertex of her inside the trough, and each frame's worst. */
+let framesInside = 0;
+const perFrameDeepest: number[] = [];
+/** The shot, frame by frame, so motion can be asked about rather than assumed. */
+const shotEye: Vector3[] = [];
+const shotAim: Vector3[] = [];
+const shotBeat: number[] = [];
+const shotIsTrackside: boolean[] = [];
+/** The live camera's world turn, frame by frame — what the roll clause reads. */
+const shotTurn: import('three').Quaternion[] = [];
 
 // The slide is ~65-75 m at 6.5 m/s, so 20 s is generous headroom for it to end.
 const MAX_FRAMES = 20 * 60;
@@ -464,6 +564,74 @@ const RECLINED_ALONG_CHUTE = -0.6;
  */
 const TRACKSIDE_BODY_FLOOR = 0.004;
 
+/**
+ * **How far a trackside eye may drift within its own beat, in metres.**
+ *
+ * Zero, to floating-point noise — and that is not a strict tolerance, it is the
+ * definition of the shot. A trackside camera is *bolted to the ground*
+ * (`slide/cameras.ts`: "the trackside eye is … bolted to the ground"), so it
+ * moves exactly once, on the cut. Anything that re-solves its position while a
+ * beat is live is a camera that swims, and the clause below is how that becomes
+ * visible instead of merely unpleasant.
+ *
+ * Measured across all 363 trackside frames of the canonical ride: **0.000**.
+ */
+const TRACKSIDE_DRIFT = 1e-6;
+
+/**
+ * **How far a trackside picture may roll about its own centre in one frame, in
+ * degrees — half a degree, 30°/s at 60 Hz.**
+ *
+ * Proved red against #680's first placement search (canonical seed, chute
+ * 77.09 m, `180af164`'s `slide/cameras.ts`), which put beat 1's eye 0.37-0.67°
+ * from straight above her and panned it about world up: **86.15° in one frame**
+ * here (118.7-146.8° in the reviewer's browser ride). With the pan axis the
+ * worst is 0.217°/frame. Half a degree is still slower than
+ * the pan itself at closest approach (~1.4°/frame), so a roll this clause lets
+ * through is never the thing a child notices first.
+ */
+const TRACKSIDE_ROLL_PER_FRAME = 0.5;
+
+/**
+ * **How hard the shot may change its turn rate, in degrees per frame squared.**
+ *
+ * Not how fast it turns — a trackside camera whipping to follow a child at
+ * 6.5 m/s is the shot working — but how abruptly that rate *changes*, which is
+ * what reads as judder rather than as speed.
+ *
+ * Taken **within a beat only**. The cut between beats is a deliberate hard cut
+ * with no blend (`slide/cameras.ts` gives three reasons), and it measures 128
+ * degrees in one frame; asserting against it would be asserting against the
+ * feature.
+ *
+ * One degree is roughly fifty times the canonical ride's worst — measured
+ * 0.021 deg/frame^2 — and that headroom is the point rather than an
+ * embarrassment: this is a guard against a *class* (a camera that snaps,
+ * swims, or fights between two candidate shots frame to frame), not a tuning
+ * knob, and a snap is tens of degrees, not hundredths. Proved capable of
+ * failing rather than trusted: see the transcript on the PR.
+ */
+const SHOT_TURN_ACCELERATION = 1;
+
+/**
+ * **How far above the drawn trough surface every vertex of her must stay, in
+ * metres: zero — no part of her inside the slide.**
+ *
+ * The surface is `troughClearance`, read off the chute's own drawn `PROFILE`,
+ * so this is the geometry a child can see rather than a number anybody chose.
+ *
+ * This clause exists because the one above it could never have caught the
+ * defect Jim found by riding. `ON_CHUTE` measures her distance to the chute's
+ * **centre line** and allows 1.90 m of it, which is frame-blind: it reported a
+ * comfortable "worst 0.26 m off the chute" while her **head was 0.62 m below
+ * the floor** because she was leant onto the sphere inside a trough swept about
+ * world up. A distance to a line cannot see which side of a surface you are on.
+ * Its successor measured each body part's *origin* and was blind the same way
+ * one level down — see the note where it is measured. This asks the child's
+ * question instead — *is any of me inside the slide?* — of every drawn vertex.
+ */
+const TROUGH_CLEARANCE_FLOOR = 0;
+
 while (frames < MAX_FRAMES) {
   const context = {
     dt,
@@ -498,6 +666,31 @@ while (frames < MAX_FRAMES) {
       hiddenFrames += 1;
       hiddenPartNames.add(name);
     }
+  }
+
+  // **Is any part of her inside the chute she is riding?** Asked of every
+  // vertex of every visible mesh she is drawn with — hair, hat, backpack and
+  // all — in the trough's own cross-section *at that vertex's own place along
+  // the chute*, against the drawn profile (`troughClearance`).
+  //
+  // **Vertices, not part origins.** The first version of this clause measured
+  // `getWorldPosition` of each body part, which is the part's *origin*: the
+  // head's is at her neck, so a skull reaching 0.6 m below it and a party hat
+  // below that were invisible to it, and it reported +0.237 m while the
+  // reviewer measured the hat 0.72 m through the floor on 743 of 743 frames.
+  // A point that stands for a body is the "distance to a line" mistake one
+  // level down; the only honest question is about the surface she is drawn
+  // with.
+  {
+    const seedT = nearestT(player.position);
+    const worst = deepestVertex(player.group, seedT);
+    if (worst.clearance < deepestInTrough) {
+      deepestInTrough = worst.clearance;
+      deepestPart = worst.part;
+      deepestFrame = ridingFrames;
+    }
+    if (worst.clearance < 0) framesInside += 1;
+    perFrameDeepest.push(worst.clearance);
   }
 
   const off = distanceToChute(player.position);
@@ -572,6 +765,21 @@ while (frames < MAX_FRAMES) {
     beatsSampled.add(beat);
   }
 
+  if (liveCamera) {
+    const eye = new Vector3();
+    (liveCamera as { getWorldPosition(v: Vector3): Vector3 }).getWorldPosition(eye);
+    shotEye.push(eye);
+    shotAim.push(
+      new Vector3(0, 0, -1).applyQuaternion((liveCamera as { quaternion: never }).quaternion),
+    );
+    shotTurn.push(
+      (liveCamera as { getWorldQuaternion(q: import('three').Quaternion): import('three').Quaternion })
+        .getWorldQuaternion(new Quaternion()),
+    );
+    shotBeat.push(beat);
+    shotIsTrackside.push(liveShot?.kind === 'trackside');
+  }
+
   const seat = building.rideSeatWorldPosition(new Vector3());
   const seatGap = seat.distanceTo(player.position);
   if (seatGap > worstSeatGap) worstSeatGap = seatGap;
@@ -593,13 +801,10 @@ while (frames < MAX_FRAMES) {
   // The way she is travelling, reconstructed from the rotation the ride itself
   // set (`YXZ`: yaw then slope), so this asks about the pose actually applied
   // rather than re-sampling the curve and hoping the two agree.
-  const yaw = player.group.rotation.y;
-  const pitch = player.group.rotation.x;
-  const travel = new Vector3(
-    Math.sin(yaw) * Math.cos(pitch),
-    -Math.sin(pitch),
-    Math.cos(yaw) * Math.cos(pitch),
-  );
+  // Her own forward, off the quaternion the renderer uses — not rebuilt from
+  // `rotation.y`/`.x`, which is a decomposition and only means yaw and pitch in
+  // one euler order.
+  const travel = new Vector3(0, 0, 1).applyQuaternion(player.group.quaternion);
   const bodyAxis = head.clone().sub(player.position);
   const rise = bodyAxis.y;
   if (rise > worstHeadRise) worstHeadRise = rise;
@@ -661,6 +866,135 @@ if (worstOffChute > ON_CHUTE) {
       'slide, not on it',
   );
 }
+// **Is she inside the slide?** The clause above measures her distance to the
+// chute's centre LINE and allows 1.90 m of it, which cannot tell one side of a
+// surface from the other: it reported a comfortable 0.26 m while her head was
+// 0.62 m below the trough floor. This asks the child's question, in the
+// trough's own cross-section.
+if (!Number.isFinite(deepestInTrough)) {
+  complaints.push(
+    'no part of the child was ever measured against the trough, so nothing below ' +
+      'proves she was in it rather than through it',
+  );
+} else if (deepestInTrough < TROUGH_CLEARANCE_FLOOR) {
+  complaints.push(
+    `the child's ${deepestPart} reached ${(-deepestInTrough).toFixed(3)} m inside the drawn ` +
+      `trough on ridden frame ${deepestFrame} of ${ridingFrames}, and ${framesInside} of ` +
+      `${ridingFrames} frames had some vertex of her inside it (median frame's deepest ` +
+      `${median(perFrameDeepest).toFixed(3)} m) — that is drawn geometry a child can see her ` +
+      'through. `Building.advanceRide` lifts her by `SlideRide.restLift` over her ' +
+      '`Player.restingUnderside`, measured off her own posed vertices against the same profile; if this fires, the lift and her body ' +
+      'disagree, or `SlideRide.frameAt` has stopped being the one owner of the cross-section',
+  );
+}
+
+// --------------------------------------------------- how the shot MOVES
+//
+// **Every clause above samples the shot; none of them watches it move.** A
+// camera that snaps, swims, or fights between two candidates frame to frame
+// scores perfectly on "how big is she in this frame" and is horrible to ride —
+// which is exactly what came back from a real play-test while this check was
+// green. Motion is its own question and needs its own measurement.
+{
+  let worstDrift = 0;
+  let worstDriftAt = -1;
+  let worstTurnAccel = 0;
+  let worstTurnAccelAt = -1;
+  let worstTracksideRoll = 0;
+  let worstTracksideRollAt = -1;
+  let worstChaseRoll = 0;
+  const rollDelta = new Quaternion();
+  let withinBeat = 0;
+  for (let i = 1; i < shotEye.length; i += 1) {
+    // Within a beat only. The cut BETWEEN beats is a deliberate hard cut with
+    // no blend — 128 degrees in one frame, three documented reasons — so
+    // measuring across it would be asserting against the feature.
+    if (shotBeat[i] !== shotBeat[i - 1]) continue;
+    withinBeat += 1;
+    if (shotIsTrackside[i] === true) {
+      // Bolted to the ground: it may not move at all while its beat is live.
+      const drift = shotEye[i]!.distanceTo(shotEye[i - 1]!);
+      if (drift > worstDrift) {
+        worstDrift = drift;
+        worstDriftAt = i;
+      }
+    }
+    {
+      // **Roll: how far the picture turned about its own centre**, the twist
+      // about the lens axis of the turn from last frame to this one. The aim
+      // clause below cannot see it — a camera can point smoothly at her while
+      // the image spins round her, and that is exactly what #680's first
+      // trackside search did.
+      rollDelta.copy(shotTurn[i - 1]!).invert().multiply(shotTurn[i]!);
+      let roll = Math.abs(2 * Math.atan2(rollDelta.z, rollDelta.w));
+      if (roll > Math.PI) roll = 2 * Math.PI - roll;
+      const rollDegrees = (roll * 180) / Math.PI;
+      if (shotIsTrackside[i] === true) {
+        if (rollDegrees > worstTracksideRoll) {
+          worstTracksideRoll = rollDegrees;
+          worstTracksideRollAt = i;
+        }
+      } else if (rollDegrees > worstChaseRoll) {
+        worstChaseRoll = rollDegrees;
+      }
+    }
+    if (i >= 2 && shotBeat[i - 1] === shotBeat[i - 2]) {
+      const turn = Math.acos(Math.max(-1, Math.min(1, shotAim[i]!.dot(shotAim[i - 1]!))));
+      const before = Math.acos(Math.max(-1, Math.min(1, shotAim[i - 1]!.dot(shotAim[i - 2]!))));
+      const accel = (Math.abs(turn - before) * 180) / Math.PI;
+      if (accel > worstTurnAccel) {
+        worstTurnAccel = accel;
+        worstTurnAccelAt = i;
+      }
+    }
+  }
+
+  if (withinBeat < 60) {
+    complaints.push(
+      `only ${withinBeat} frame pairs fell inside a single beat, so the shot's motion was ` +
+        'never really measured',
+    );
+  }
+  if (worstDrift > TRACKSIDE_DRIFT) {
+    complaints.push(
+      `a trackside camera moved ${worstDrift.toFixed(4)} m in one frame (frame ` +
+        `${worstDriftAt}) without the beat changing — it is meant to be bolted to the ` +
+        'ground and to move only on a cut, so this is a shot that swims',
+    );
+  }
+  if (worstTurnAccel > SHOT_TURN_ACCELERATION) {
+    complaints.push(
+      `the shot's turn rate changed by ${worstTurnAccel.toFixed(2)} deg/frame^2 within one ` +
+        `beat (frame ${worstTurnAccelAt}), against ${SHOT_TURN_ACCELERATION} allowed — the ` +
+        'camera is juddering rather than panning, which no still frame can show',
+    );
+  }
+  if (worstTracksideRoll > TRACKSIDE_ROLL_PER_FRAME) {
+    complaints.push(
+      `a trackside picture rolled ${worstTracksideRoll.toFixed(2)}° about its own centre in one ` +
+        `frame (frame ${worstTracksideRollAt}), against ${TRACKSIDE_ROLL_PER_FRAME}° allowed — the ` +
+        'image is turning over as she passes, which reads as the camera falling. The pan axis in ' +
+        '`slide/cameras.ts` (`panAxisFor`) is what keeps it steady',
+    );
+  }
+  process.stderr.write(
+    `  the shot's roll: trackside worst ${worstTracksideRoll.toFixed(3)}°/frame (allowed ` +
+      `${TRACKSIDE_ROLL_PER_FRAME}), chase worst ${worstChaseRoll.toFixed(3)}°/frame (banks with the ` +
+      'chute; reported, not gated)\n',
+  );
+  process.stderr.write(
+    `  the shot, in motion: ${withinBeat} frame pairs inside a beat; worst trackside drift ` +
+      `${worstDrift.toFixed(6)} m (allowed ${TRACKSIDE_DRIFT}); worst change in turn rate ` +
+      `${worstTurnAccel.toFixed(3)} deg/frame^2 (allowed ${SHOT_TURN_ACCELERATION})\n`,
+  );
+  process.stderr.write(
+    `  her drawn vertices against the drawn trough: nearest ${deepestInTrough.toFixed(3)} m ` +
+      `(${deepestPart}, frame ${deepestFrame}), median frame's nearest ` +
+      `${median(perFrameDeepest).toFixed(3)} m, ${framesInside} of ${ridingFrames} frames with ` +
+      `any vertex inside (allowed ${TROUGH_CLEARANCE_FLOOR} m)\n`,
+  );
+}
+
 // --------------------------------------------------- the cut, camera by camera
 //
 // **Every ridden frame has a camera.** A stretch of chute the plan does not

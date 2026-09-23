@@ -2306,6 +2306,109 @@ require(
     'rarely to read as "makes mistakes" rather than "plays perfectly". Lower RIVAL_SKILL.',
 );
 
+// --- the rider sits square in her cart, and the cart square on its rails ---
+//
+// **One heading, composed one way, for the child and the tub she sits in.** The
+// rider is turned by `Player.setRidePose` -> `faceOnGround`, the cart by
+// `rideFrame`; both hand a yaw and a pitch to `world/headingTurn.ts`. #680 once
+// moved the first to `YXZ` and left the second on a default `XYZ` euler, and the
+// two came apart by up to 10.68° round this ring (p50 2.55°) where they had
+// agreed to 1.50° — her arms through the side of the tub on every bend with a
+// hill in it. Nothing in this file could see it, because every clause above
+// seats her at ONE station of the ring, where the heading happened to be kind.
+//
+// So this walks the whole lap, on every lane, through the game's own
+// `placeRaceCart` and `seatRaceRider`, and asks two questions of each station:
+// how far her up is from the tub's up, and how far the tub's nose is from the
+// rails **as drawn** — a finite difference of the leant `pointAt`, not the flat
+// `tangentAt`, which is the unleant route and would report the ring's own lean
+// as a fault.
+{
+  const LAP_STATIONS = 360;
+  /**
+   * Her up against the tub's, in degrees. Not zero, and the reason is real:
+   * `faceOnGround` leans her about the sphere normal at *her* seat, the cart is
+   * leant about the rails' flat column 0.5 m below it, and the two normals
+   * differ by the arc between them — 0.5 m on a 400 m sphere is 0.07°. Half a
+   * degree is seven times that and a sixth of the 3° a child could see.
+   */
+  const RIDER_IN_CART_DEGREES = 0.5;
+  /**
+   * The tub's nose against the drawn rails, in degrees. The heading is read off
+   * the flat tangent and carried onto the sphere by the tilt at one column,
+   * while the drawn rail's direction also feels the tilt *changing* along it —
+   * a turn of arc/R, 0.14° per metre of the 0.5 m finite difference here. A
+   * degree is room for that and nothing like the 7-15° a wrong composition or a
+   * double lean produces.
+   */
+  const CART_ON_RAILS_DEGREES = 1;
+  const lapCart = new Group();
+  const lapHeading: CartHeading = { yaw: 0, pitch: 0 };
+  const lapRider = new Player(new CollisionWorld(), new IsoCamera(), new Vector3());
+  lapRider.beginRide();
+  const riderUp = new Vector3();
+  const cartUp = new Vector3();
+  const riderNose = new Vector3();
+  const cartNose = new Vector3();
+  const ahead = new Vector3();
+  const behind = new Vector3();
+  const degrees = (a: Vector3, b: Vector3): number => (a.angleTo(b) * 180) / Math.PI;
+  const riderInCart: number[] = [];
+  const cartOnRails: number[] = [];
+  let worstRider = { value: 0, lane: 0, at: 0 };
+  let worstCart = { value: 0, lane: 0, at: 0 };
+  for (let lane = 0; lane < LANE_OFFSETS.length; lane += 1) {
+    for (let k = 0; k < LAP_STATIONS; k += 1) {
+      const at = route.wrap(route.startDistance + (route.length * k) / LAP_STATIONS);
+      placeRaceCart(route, lane, at, lapCart, lapHeading);
+      seatRaceRider(lapRider, lapCart, lapHeading, route.scale, 0, 0);
+      // flat-ok: local axes, carried into the world by each body's own quaternion
+      riderUp.set(0, 1, 0).applyQuaternion(lapRider.group.quaternion);
+      // flat-ok: the cart's local up, carried into the world by its quaternion
+      cartUp.set(0, 1, 0).applyQuaternion(lapCart.quaternion);
+      riderNose.set(0, 0, 1).applyQuaternion(lapRider.group.quaternion);
+      cartNose.set(0, 0, 1).applyQuaternion(lapCart.quaternion);
+      const rider = Math.max(degrees(riderUp, cartUp), degrees(riderNose, cartNose));
+      route.pointAt(lane, route.wrap(at + 0.25), ahead);
+      route.pointAt(lane, route.wrap(at - 0.25), behind);
+      const cart = degrees(cartNose, ahead.sub(behind).normalize());
+      riderInCart.push(rider);
+      cartOnRails.push(cart);
+      if (rider > worstRider.value) worstRider = { value: rider, lane, at };
+      if (cart > worstCart.value) worstCart = { value: cart, lane, at };
+    }
+  }
+  const p50 = (values: number[]): number => [...values].sort((a, b) => a - b)[values.length >> 1]!;
+  say('');
+  say(
+    `rider in her cart, round the whole lap (${LAP_STATIONS} stations x ${LANE_OFFSETS.length} lanes): ` +
+      `p50 ${p50(riderInCart).toFixed(2)}°, worst ${worstRider.value.toFixed(2)}° (lane ` +
+      `${worstRider.lane}, s=${worstRider.at.toFixed(1)} m) — allowed ${RIDER_IN_CART_DEGREES}°`,
+  );
+  say(
+    `cart nose against the drawn rails: p50 ${p50(cartOnRails).toFixed(2)}°, worst ` +
+      `${worstCart.value.toFixed(2)}° (lane ${worstCart.lane}, s=${worstCart.at.toFixed(1)} m) — ` +
+      `allowed ${CART_ON_RAILS_DEGREES}°`,
+  );
+  require(
+    riderInCart.length === LAP_STATIONS * LANE_OFFSETS.length && riderInCart.every(Number.isFinite),
+    'the lap sweep measured nothing, or measured NaN — the rider/cart clauses below assert nothing',
+  );
+  require(
+    worstRider.value <= RIDER_IN_CART_DEGREES,
+    `the child is turned ${worstRider.value.toFixed(2)}° away from the cart she sits in (lane ` +
+      `${worstRider.lane}, s=${worstRider.at.toFixed(1)} m), against ${RIDER_IN_CART_DEGREES}° allowed — ` +
+      'she and her tub are composing one heading two different ways. Both must ask ' +
+      '`world/headingTurn.ts`; a second euler anywhere on either path is this bug again',
+  );
+  require(
+    worstCart.value <= CART_ON_RAILS_DEGREES,
+    `the cart's nose points ${worstCart.value.toFixed(2)}° off the rails drawn under it (lane ` +
+      `${worstCart.lane}, s=${worstCart.at.toFixed(1)} m), against ${CART_ON_RAILS_DEGREES}° allowed — ` +
+      'it is crabbing along its own track',
+  );
+}
+
 say('');
 say(`player rides lane ${PLAYER_LANE} (outermost, nearest the camera)`);
 say(`undulation reach ±${UNDULATION_REACH.toFixed(2)} m about a base of ${BASE_HEIGHT} m`);

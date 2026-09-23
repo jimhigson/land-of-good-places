@@ -17,7 +17,6 @@ import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
 import { railRouteSearch, RailRouteUnsolvable, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
 import { TRAIN_MIN_TURN_RADIUS } from './turning';
-import { takePrewarmedTrain } from './prewarm';
 
 /**
  * Where the park train's track goes.
@@ -631,9 +630,14 @@ function loopLeavesEveryDestinationOnTheCrossing(
 }
 
 /** One ladder rung's brief: the shared context aimed at a particular length. */
-function briefForLength(context: TrainContext, desiredLength: number, salt: number): RouteBrief {
+function briefForLength(
+  context: TrainContext,
+  desiredLength: number,
+  salt: number,
+  seedSalt: number,
+): RouteBrief {
   return {
-    seed: PARK_SEED ^ 0x7241 ^ salt,
+    seed: (PARK_SEED ^ 0x7241 ^ salt ^ seedSalt) >>> 0,
     vocabulary: TRAIN_VOCABULARY,
     desiredLength,
     closed: true,
@@ -665,7 +669,10 @@ function briefForLength(context: TrainContext, desiredLength: number, salt: numb
  * cannot close (seeds 2, 5, 11, 18). Only if *every* rung fails does the park
  * fail, loudly, with the last rung's diagnostic — exactly as before.
  */
-export function* trainRouteSearch(): Generator<number, SolvedRailRoute, void> {
+export function* trainRouteSearch(
+  /** The park driver's retry: 0 is the search the park always made. */
+  seedSalt = 0,
+): Generator<number, SolvedRailRoute, void> {
   const context = yield* buildTrainContext();
   let lastFailure: RailRouteUnsolvable | null = null;
   // **A rung that solved but did not satisfy does not end the ladder.**
@@ -692,7 +699,7 @@ export function* trainRouteSearch(): Generator<number, SolvedRailRoute, void> {
     const fraction = TRAIN_LENGTH_FRACTIONS[i] as number;
     // A distinct seed salt per rung, so a shorter fallback explores differently
     // rather than re-walking the longer rung's dead ends at a new length.
-    const brief = briefForLength(context, context.perimeter * fraction, (i + 1) * 0x1000);
+    const brief = briefForLength(context, context.perimeter * fraction, (i + 1) * 0x1000, seedSalt);
     try {
       const route = yield* railRouteSearch(brief);
       if (route.report.satisfied) return route;
@@ -711,13 +718,6 @@ export function* trainRouteSearch(): Generator<number, SolvedRailRoute, void> {
 }
 
 /** Drives {@link trainRouteSearch} straight through — the non-pre-warmed cadence. */
-function solveTrainLoop(): SolvedRailRoute {
-  const search = trainRouteSearch();
-  for (;;) {
-    const step = search.next();
-    if (step.done) return step.value;
-  }
-}
 
 /** The solved loop, and everything the train and the stations ask of it. */
 export class TrainRoute {
@@ -745,12 +745,9 @@ export class TrainRoute {
   private readonly scratch = new Vector3();
   private readonly scratch2: Vec2 = { x: 0, z: 0 };
 
-  constructor() {
-    // The loop `boot/parkGeneration.ts` already searched a slice at a time behind
-    // the cat bus, if there is one; otherwise solve it straight through — the path
-    // `check:park`, `test:procgen` and a continued save all take, none of which
-    // pre-warm. Either way it is the same ladder walk.
-    this.solved = takePrewarmedTrain() ?? solveTrainLoop();
+  /** Built from the loop the park's driver decided (`parkPlan.ts`'s train builder); never solves itself. */
+  constructor(solved: SolvedRailRoute) {
+    this.solved = solved;
     this.solveReport = this.solved.report;
     this.length = this.solved.length;
 

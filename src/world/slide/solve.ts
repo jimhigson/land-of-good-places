@@ -8,7 +8,10 @@ import {
   BUILDING_CENTRE_Z,
   CASTLE_MASONRY_TOP,
   CASTLE_TOWERS,
-  distanceOutsideTower,
+  castleTowerSolids,
+  type TowerSolid,
+  distanceOutsideTowerLocal,
+  worldToCastle,
 } from '../building/layout';
 import {
   BUILDING_HALF_X,
@@ -18,6 +21,7 @@ import {
 } from '../../core/constants';
 import { TAU } from '../../core/mathUtils';
 import { PARK_LAYOUT } from '../parkLayout';
+import { registerPlanCache } from '../../boot/planCaches';
 import { PARK_SEED } from '../parkManifest';
 import { COASTER_PLANS } from '../coaster/plan';
 import { cartEnvelopePoint } from '../coaster/cart';
@@ -29,12 +33,12 @@ import {
   type OpenRouteBrief,
   RailRouteUnsolvable,
   type SolvedRailRoute,
-  solveRailRoute,
+  railRouteSearch,
 } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
 import { Geo, worldYAtAltitude, worldYAtRadius } from '../geo';
 import { altitudeAt } from '../terrain';
-import { CHUTE_ENVELOPE } from '../building/SlideRide';
+import { CHUTE_ENVELOPE, chuteCentreLine } from '../building/SlideRide';
 
 /**
  * **The ginormous slide, as a plan.**
@@ -275,25 +279,51 @@ const BATTLEMENT_AIR = 4.55;
  * to a distance from the planet's centre at the start column, and everything
  * after the start is held in that frame. See {@link heightAt}.
  */
-const START_Y = BUILDING_BASE_Y + CASTLE_MASONRY_TOP + BATTLEMENT_AIR;
+/** Read live: the castle's deck height follows the layout the park's driver decided. */
+function startY(): number {
+  return BUILDING_BASE_Y + CASTLE_MASONRY_TOP + BATTLEMENT_AIR;
+}
 
 /** How far above the ground at the pit the chute's mouth sits, along the local up. */
 const MOUTH_ALTITUDE = 0.9;
 
-/** The mouth's height over the pit, as a world `y` — diagnostic, see {@link END_RADIUS}. */
-const END_Y = worldYAtAltitude(BALL_PIT_X, BALL_PIT_Z, MOUTH_ALTITUDE);
+/** The mouth's height over the pit, as a world `y` — diagnostic, see {@link endRadius()}. */
+/** Read live: the ball pit moves when the layout is re-decided. */
+function endY(): number {
+  return worldYAtAltitude(BALL_PIT_X, BALL_PIT_Z, MOUTH_ALTITUDE);
+}
 
 /**
  * The mouth's distance from the planet's centre: {@link MOUTH_ALTITUDE} above
  * the ground in the middle of the pit. The profile descends to this radius.
  */
-const END_RADIUS = Geo.fromWorld(BALL_PIT_X, END_Y, BALL_PIT_Z).radius();
+function endRadius(): number {
+  // **Memoised on the pit it is a function of.** {@link heightAt} asks this for
+  // every sample of every candidate piece the chute search tries, and each ask
+  // was a `worldYAtAltitude` solve — nine terrain evaluations — for a number
+  // that only moves when the ball pit does. Measured on the canonical seed
+  // (22 Sep 2026, `--cpu-prof` of `check:solve-cost`): **12.1 s of the slide's
+  // 17.6 s of CPU** was this one constant, recomputed three million times.
+  // Keyed on the pit's own coordinates (live bindings the driver rebinds), so a
+  // re-decided layout can never be answered from the old pit; the terrain it
+  // reads is a pure function of the seed. Same inputs, same arithmetic, same
+  // bits — it changes no decision, only how often the question is asked.
+  if (endRadiusPitX !== BALL_PIT_X || endRadiusPitZ !== BALL_PIT_Z) {
+    endRadiusPitX = BALL_PIT_X;
+    endRadiusPitZ = BALL_PIT_Z;
+    endRadiusMemo = Geo.fromWorld(BALL_PIT_X, endY(), BALL_PIT_Z).radius();
+  }
+  return endRadiusMemo;
+}
+let endRadiusPitX = Number.NaN;
+let endRadiusPitZ = Number.NaN;
+let endRadiusMemo = Number.NaN;
 
 /**
  * **The distance from the planet's centre the chute's level lip is held at**,
  * for a start at (x, z) leaving along (headingX, headingZ).
  *
- * `START_Y` is a flat world height (see there), and a line held at a flat world
+ * `startY()` is a flat world height (see there), and a line held at a flat world
  * `y` is not level: its distance from the centre changes along it. So which
  * point of it to take as "the start height" is a real choice, and it is taken
  * as the **higher** of the stub's two ends — the start pose and the farthest
@@ -307,8 +337,8 @@ const END_RADIUS = Geo.fromWorld(BALL_PIT_X, END_Y, BALL_PIT_Z).radius();
 function startRadiusFor(x: number, z: number, headingX: number, headingZ: number): number {
   const back = doorStubLength(headingZ);
   return Math.max(
-    Geo.fromWorld(x, START_Y, z).radius(),
-    Geo.fromWorld(x - headingX * back, START_Y, z - headingZ * back).radius(),
+    Geo.fromWorld(x, startY(), z).radius(),
+    Geo.fromWorld(x - headingX * back, startY(), z - headingZ * back).radius(),
   );
 }
 
@@ -406,7 +436,7 @@ const ROOF_ENTRY_X = 20;
  * stays what he asked for. Taken as approximate — he said "like 1m", and the
  * point is that it reads as being *at* the edge.
  *
- * **This is interior-local and cannot move the garden chute.** `START_Y` is
+ * **This is interior-local and cannot move the garden chute.** `startY()` is
  * measured off the facade's own battlements (`CASTLE_MASONRY_TOP`) and the
  * ride's start pose comes from the facade's south wall via `doorPoses()`;
  * neither reads this. That separation is what lets the
@@ -438,7 +468,10 @@ const ROOF_DOOR_HALF_WIDTH = 2.5;
  */
 const POINT_SPACING = 0.9;
 
-const SOUTH_WALL_Z = BUILDING_CENTRE_Z + BUILDING_HALF_Z;
+/** The castle's south wall, read live: the castle moves when the layout is re-decided. */
+function southWallZ(): number {
+  return BUILDING_CENTRE_Z + BUILDING_HALF_Z;
+}
 
 /**
  * The two plots this ride deliberately joins.
@@ -476,7 +509,7 @@ const JOINED_PLOTS: ReadonlySet<string> = new Set(['building', 'ballPit']);
  * its footprint rectangle. Byte-identity is proved by `measure:slide-fingerprint`
  * on all five CI seeds.
  */
-const AVOIDED_PLOTS = (() => {
+function avoidedplotsNow() {
   const xs: number[] = [];
   const zs: number[] = [];
   const rs: number[] = [];
@@ -492,7 +525,15 @@ const AVOIDED_PLOTS = (() => {
     z: Float64Array.from(zs),
     boundingRadius: Float64Array.from(rs),
   };
-})();
+}
+let AVOIDED_PLOTS_MEMO: ReturnType<typeof avoidedplotsNow> | null = null;
+/** Memoised, and forgotten when the park's driver re-decides what it derives from. */
+function AVOIDED_PLOTS(): ReturnType<typeof avoidedplotsNow> {
+  return (AVOIDED_PLOTS_MEMO ??= avoidedplotsNow());
+}
+registerPlanCache(() => {
+  AVOIDED_PLOTS_MEMO = null;
+});
 
 /**
  * The half-extents of a box that contains every castle tower plus its widest
@@ -505,16 +546,48 @@ const AVOIDED_PLOTS = (() => {
  * returned clear anyway* — a blocked point is always within the box — so it
  * changes no verdict, and it uses no `Math.hypot`, only two `abs`.
  */
-const TOWER_BOUND_X = Math.max(
-  ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.x - BUILDING_CENTRE_X) + Math.max(tower.radiusBottom, tower.radiusTop),
-  ),
-);
-const TOWER_BOUND_Z = Math.max(
-  ...CASTLE_TOWERS.map(
-    (tower) => Math.abs(tower.z - BUILDING_CENTRE_Z) + Math.max(tower.radiusBottom, tower.radiusTop),
-  ),
-);
+/**
+ * Read live: the towers stand where the layout the park's driver decided.
+ *
+ * **In the castle's own axes**, because that is where the solids are — see
+ * `TowerSolid`. The gate below converts its query point the same way, so the
+ * two are comparing like with like and the skip still only ever skips work that
+ * would have returned clear.
+ */
+function towerBoundX(): number {
+  return towerBounds().x;
+}
+/** Read live: the towers stand where the layout the park's driver decided. */
+function towerBoundZ(): number {
+  return towerBounds().z;
+}
+/**
+ * Both bounds, **memoised on the identity of the solids they are derived from**.
+ *
+ * {@link clearsTowers} is on the chute search's hottest loop and asked for these
+ * on every call, each time mapping all eight towers through the layout's lazy
+ * view: 0.65 s of the slide's CPU on the canonical seed. `castleTowerSolids()`
+ * hands back the layout's own memoised array, which is replaced — a new
+ * identity — whenever the castle is re-placed, so a bound can never outlive the
+ * towers it was taken from. Same towers, same arithmetic, same answer.
+ */
+function towerBounds(): { readonly x: number; readonly z: number } {
+  const towers = castleTowerSolids();
+  if (towerBoundsFor !== towers || !towerBoundsMemo) {
+    towerBoundsFor = towers;
+    towerBoundsMemo = {
+      x: Math.max(
+        ...towers.map((tower) => Math.abs(tower.localX) + Math.max(tower.radiusBottom, tower.radiusTop)),
+      ),
+      z: Math.max(
+        ...towers.map((tower) => Math.abs(tower.localZ) + Math.max(tower.radiusBottom, tower.radiusTop)),
+      ),
+    };
+  }
+  return towerBoundsMemo;
+}
+let towerBoundsFor: readonly TowerSolid[] | null = null;
+let towerBoundsMemo: { readonly x: number; readonly z: number } | null = null;
 
 
 /**
@@ -539,28 +612,32 @@ function clearsTowers(x: number, z: number, y: number, radius: number): boolean 
   // every tower is provably further than `radius` away — so skip the loop. This
   // never changes the answer, only avoids eight `distanceOutsideTower` calls for
   // the many samples out over the ball pit and the park's edge. See
-  // {@link TOWER_BOUND_X}.
+  // {@link towerBoundX()}.
+  // **One conversion, not nine.** The transform depends on the point alone, so
+  // the gate below and all eight solids share it; `distanceOutsideTower` would
+  // redo it per tower, on the hottest loop in this search.
+  worldToCastle(towerGate.set(x, y, z), towerGate);
   if (
-    Math.abs(x - BUILDING_CENTRE_X) > TOWER_BOUND_X + radius ||
-    Math.abs(z - BUILDING_CENTRE_Z) > TOWER_BOUND_Z + radius
+    Math.abs(towerGate.x) > towerBoundX() + radius ||
+    Math.abs(towerGate.z) > towerBoundZ() + radius
   ) {
     return true;
   }
-  for (const tower of CASTLE_TOWERS) {
-    // A tower standing on the plinth goes all the way down to the ground, however
-    // far the ground falls away from the plinth's flat height. `TowerSolid` stops
-    // at `bottomY`, so a chute passing *below* that height beside a tower read as
-    // clear of it. Nothing reached there while the chute was held in world `y`;
-    // held against the planet (#645) the run-out drops below the plinth on the
-    // far side of the castle, and seed 131 then ran its last metres through the
-    // foot of `tower-body-1` — 1.22 m inside the built masonry, measured by
-    // `theGinormousSlideMissesTheCastleTowers`. Reading the solid at its own
-    // foot for anything lower is the tower that was built.
-    const atY = tower.bottomY === BUILDING_BASE_Y && y < tower.bottomY ? tower.bottomY : y;
-    if (distanceOutsideTower(tower, x, z, atY) < radius) return false;
+  // The array itself rather than the `CASTLE_TOWERS` view: the same eight
+  // solids, without the view's forwarding on every read of this hot loop.
+  for (const tower of castleTowerSolids()) {
+    // The plinth rule — a tower standing on it reaches down to whatever ground
+    // is under it — moved into `distanceOutsideTower` with `standsOnThePlinth`,
+    // so it is stated once beside the solid it is about rather than copied into
+    // each caller. Found by seed 131 running its last metres through the foot
+    // of `tower-body-1`, 1.22 m inside the built masonry.
+    if (distanceOutsideTowerLocal(tower, towerGate) < radius) return false;
   }
   return true;
 }
+
+/** Scratch for {@link clearsTowers}' one world-to-castle conversion per call. */
+const towerGate = new Vector3();
 
 /**
  * The same question at ground level, for the landing run-in and the exit.
@@ -617,8 +694,7 @@ const CRUISER_SAMPLE_SPACING = 1.5;
  */
 const CRUISER_SAGITTA = 0.05;
 
-const CRUISER_LINE: readonly { readonly x: number; readonly y: number; readonly z: number }[] =
-  (() => {
+function cruiserlineNow() {
     const route = COASTER_PLANS.cruiser.route;
     const samples: { x: number; y: number; z: number }[] = [];
     const probe = new Vector3();
@@ -627,7 +703,15 @@ const CRUISER_LINE: readonly { readonly x: number; readonly y: number; readonly 
       samples.push({ x: probe.x, y: probe.y, z: probe.z });
     }
     return samples;
-  })();
+  }
+let CRUISER_LINE_MEMO: ReturnType<typeof cruiserlineNow> | null = null;
+/** Memoised, and forgotten when the park's driver re-decides what it derives from. */
+function CRUISER_LINE(): ReturnType<typeof cruiserlineNow> {
+  return (CRUISER_LINE_MEMO ??= cruiserlineNow());
+}
+registerPlanCache(() => {
+  CRUISER_LINE_MEMO = null;
+});
 
 /**
  * Would a post standing at (x, z) between `fromY` and `toY` run through the
@@ -646,7 +730,7 @@ export function cruiserCrossesColumn(
 ): boolean {
   const low = Math.min(fromY, toY);
   const high = Math.max(fromY, toY);
-  for (const point of CRUISER_LINE) {
+  for (const point of CRUISER_LINE()) {
     const dx = point.x - x;
     const dz = point.z - z;
     if (dx * dx + dz * dz > CRUISER_OVERLAP * CRUISER_OVERLAP) continue;
@@ -777,16 +861,16 @@ interface CruiserGrid {
   readonly buckets: readonly (readonly number[] | undefined)[];
 }
 
-const CRUISER_GRID: CruiserGrid = (() => {
+function cruisergridNow(): CruiserGrid {
   const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
-  const count = CRUISER_LINE.length;
+  const count = CRUISER_LINE().length;
   let minCx = Infinity;
   let maxCx = -Infinity;
   let minCz = Infinity;
   let maxCz = -Infinity;
   const cellRange = (i: number): [number, number, number, number] => {
-    const a = CRUISER_LINE[i]!;
-    const b = CRUISER_LINE[(i + 1) % count]!;
+    const a = CRUISER_LINE()[i]!;
+    const b = CRUISER_LINE()[(i + 1) % count]!;
     return [
       Math.floor((Math.min(a.x, b.x) - reach) / CRUISER_CELL),
       Math.floor((Math.max(a.x, b.x) + reach) / CRUISER_CELL),
@@ -816,7 +900,15 @@ const CRUISER_GRID: CruiserGrid = (() => {
     }
   }
   return { minCx, minCz, depth, buckets };
-})();
+}
+let CRUISER_GRID_MEMO: ReturnType<typeof cruisergridNow> | null = null;
+/** Memoised, and forgotten when the park's driver re-decides what it derives from. */
+function CRUISER_GRID(): ReturnType<typeof cruisergridNow> {
+  return (CRUISER_GRID_MEMO ??= cruisergridNow());
+}
+registerPlanCache(() => {
+  CRUISER_GRID_MEMO = null;
+});
 
 /**
  * Is a corridor of `radius` about (x, z), `distanceAlong` metres into the ride,
@@ -856,11 +948,11 @@ function chuteMayPass(
   // cannot skip a plot that would have blocked. The `hypot` verdict is reached
   // on exactly the plots that could block, unchanged — so the first blocker, and
   // the boolean, are identical.
-  for (let i = 0; i < AVOIDED_PLOTS.count; i += 1) {
-    const r = (AVOIDED_PLOTS.boundingRadius[i] as number) + radius;
-    const dx = x - (AVOIDED_PLOTS.x[i] as number);
+  for (let i = 0; i < AVOIDED_PLOTS().count; i += 1) {
+    const r = (AVOIDED_PLOTS().boundingRadius[i] as number) + radius;
+    const dx = x - (AVOIDED_PLOTS().x[i] as number);
     if (dx > r || dx < -r) continue;
-    const dz = z - (AVOIDED_PLOTS.z[i] as number);
+    const dz = z - (AVOIDED_PLOTS().z[i] as number);
     if (dz > r || dz < -r) continue;
     if (Math.hypot(dx, dz) < r) return false;
   }
@@ -904,19 +996,19 @@ function cruiserFoulsEveryHeight(x: number, z: number, low: number, high: number
   const reach = CRUISER_OVERLAP + CRUISER_SAGITTA;
   const reach2 = reach * reach;
   const air = CRUISER_AIR + CRUISER_SAGITTA;
-  const cx = Math.floor(x / CRUISER_CELL) - CRUISER_GRID.minCx;
-  const cz = Math.floor(z / CRUISER_CELL) - CRUISER_GRID.minCz;
-  const depth = CRUISER_GRID.depth;
-  if (cx < 0 || cz < 0 || cz >= depth || cx * depth + cz >= CRUISER_GRID.buckets.length) {
+  const cx = Math.floor(x / CRUISER_CELL) - CRUISER_GRID().minCx;
+  const cz = Math.floor(z / CRUISER_CELL) - CRUISER_GRID().minCz;
+  const depth = CRUISER_GRID().depth;
+  if (cx < 0 || cz < 0 || cz >= depth || cx * depth + cz >= CRUISER_GRID().buckets.length) {
     return false;
   }
-  const nearby = CRUISER_GRID.buckets[cx * depth + cz];
+  const nearby = CRUISER_GRID().buckets[cx * depth + cz];
   if (!nearby) return false;
-  const count = CRUISER_LINE.length;
+  const count = CRUISER_LINE().length;
   for (let n = 0; n < nearby.length; n += 1) {
     const i = nearby[n] as number;
-    const a = CRUISER_LINE[i]!;
-    const b = CRUISER_LINE[(i + 1) % count]!;
+    const a = CRUISER_LINE()[i]!;
+    const b = CRUISER_LINE()[(i + 1) % count]!;
     const abx = b.x - a.x;
     const abz = b.z - a.z;
     const len2 = abx * abx + abz * abz;
@@ -981,7 +1073,7 @@ function doorPoses(centreLocal: number): Pose2[] {
   }
   for (const acrossFraction of [0, -0.5, 0.5, -0.85, 0.85]) {
     const x = BUILDING_CENTRE_X + centreLocal + halfGap * acrossFraction;
-    const z = SOUTH_WALL_Z + WALL_STANDOFF;
+    const z = southWallZ() + WALL_STANDOFF;
     for (const yaw of yaws) {
       // Heading is +Z (out of the south face), rotated by `yaw`.
       const pose: Pose2 = { x, z, hx: Math.sin(yaw), hz: Math.cos(yaw) };
@@ -1110,7 +1202,7 @@ function openGround(x: number, z: number): boolean {
  *
  * ### Why a radius (#645)
  *
- * It used to run from `START_Y` to `END_Y` in world `y`. On a planet that is
+ * It used to run from `startY()` to `endY()` in world `y`. On a planet that is
  * the wrong axis: "level" and "downhill" are measured along the local up, which
  * leans away from world `+Y` as the chute runs out from the park's centre. A
  * run-out that was flat in world `y` was *rising* against the local up, and
@@ -1133,7 +1225,7 @@ function heightAt(u: number, x: number, z: number, startRadius: number): number 
   if (clamped <= LIP_FRACTION) return worldYAtRadius(x, z, startRadius);
   const after = (clamped - LIP_FRACTION) / (1 - LIP_FRACTION);
   const eased = after * after * (3 - 2 * after);
-  return worldYAtRadius(x, z, startRadius - (startRadius - END_RADIUS) * eased);
+  return worldYAtRadius(x, z, startRadius - (startRadius - endRadius()) * eased);
 }
 
 /** {@link heightAt}, addressed by metres travelled rather than by fraction. */
@@ -1465,7 +1557,7 @@ export interface PlannedSlide {
  * "solve it both ways in one process and compare the hashes" a legitimate proof
  * rather than a coincidence, and `check:park-boot` is built on it.
  */
-export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
+export function slideRouteBriefAt(attempt: SlideAttempt, seedSalt = 0): OpenRouteBrief {
   const { desiredLength, doorCentre } = attempt;
   // The slide's territory is the park itself. `generate.ts` rejects any piece
   // whose corridor comes within `corridorRadius` of this boundary's edge, so
@@ -1479,7 +1571,7 @@ export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
   // `satisfies` measures the finished chute from its real start.
   const nominalStartRadius = startRadiusFor(
     BUILDING_CENTRE_X + doorCentre,
-    SOUTH_WALL_Z + WALL_STANDOFF,
+    southWallZ() + WALL_STANDOFF,
     0,
     1,
   );
@@ -1492,7 +1584,8 @@ export function slideRouteBriefAt(attempt: SlideAttempt): OpenRouteBrief {
   return {
     // A stream of its own, so the slide's shape cannot shift because some
     // other ride changed how many random draws it takes.
-    seed: PARK_SEED ^ 0x511de,
+    // `seedSalt` is the park driver's retry: 0 is the search the park always made.
+    seed: (PARK_SEED ^ 0x511de ^ seedSalt) >>> 0,
     vocabulary: SLIDE_VOCABULARY,
     desiredLength,
     // The ceiling, as a wall the search cannot cross rather than a verdict
@@ -1593,11 +1686,37 @@ export interface SlideAttempt {
  * search (`boot/parkGeneration.ts`) both walk exactly this, so they cannot build
  * two different slides — `check:park-boot` hashes the two against each other.
  */
-export const SLIDE_ATTEMPTS: readonly SlideAttempt[] = DOOR_OFFER_CENTRES.filter(
-  (doorCentre) => doorPoses(doorCentre).length > 0,
-).flatMap((doorCentre) =>
-  DESIRED_LENGTH_LADDER.map((desiredLength) => ({ doorCentre, desiredLength })),
-);
+function slideAttemptsNow(): readonly SlideAttempt[] {
+  return DOOR_OFFER_CENTRES.filter((doorCentre) => doorPoses(doorCentre).length > 0).flatMap((doorCentre) =>
+    DESIRED_LENGTH_LADDER.map((desiredLength) => ({ doorCentre, desiredLength })),
+  );
+}
+let slideAttemptsMemo: readonly SlideAttempt[] | null = null;
+/** The decisions on offer — door × target length. Memoised per decided castle/cruiser; forgotten on unwind. */
+export function slideAttempts(): readonly SlideAttempt[] {
+  return (slideAttemptsMemo ??= slideAttemptsNow());
+}
+/**
+ * The same offers, one door per piece: each door's stubs are judged against
+ * the towers and the Sky Cruiser (hundreds of short chutes), and all seven
+ * doors in one step was the boot's worst single step (58.8 ms).
+ */
+export function* slideAttemptsSearch(): Generator<number, readonly SlideAttempt[], void> {
+  if (slideAttemptsMemo) return slideAttemptsMemo;
+  const found: SlideAttempt[] = [];
+  let door = 0;
+  for (const doorCentre of DOOR_OFFER_CENTRES) {
+    door += 1;
+    yield door;
+    if (doorPoses(doorCentre).length === 0) continue;
+    for (const desiredLength of DESIRED_LENGTH_LADDER) found.push({ doorCentre, desiredLength });
+  }
+  slideAttemptsMemo = found;
+  return found;
+}
+registerPlanCache(() => {
+  slideAttemptsMemo = null;
+});
 
 /** The blocker when every door was refused before search — one string, both cadences. */
 export const NO_CLEAR_DOOR =
@@ -1610,7 +1729,7 @@ export function describeSlideAttempt(attempt: SlideAttempt): string {
 
 /**
  * The seed cannot carry a ginormous slide: every decision in
- * {@link SLIDE_ATTEMPTS} was tried and none gave a chute a child could ride.
+ * {@link slideAttempts()} was tried and none gave a chute a child could ride.
  * `blocker` is the last thing that stood in the way, in words.
  */
 export interface SlideRefusal {
@@ -1624,26 +1743,29 @@ export function slideRefusalMessage(refusal: SlideRefusal): string {
   return (
     `the ginormous slide never solved to a chute a child could ride: after ` +
     `${refusal.attemptsTried} decisions (doors at ${DOOR_OFFER_CENTRES.join(', ')} m ` +
-    `along the south wall, ${DOOR_OFFER_CENTRES.length - new Set(SLIDE_ATTEMPTS.map((a) => a.doorCentre)).size} ` +
+    `along the south wall, ${DOOR_OFFER_CENTRES.length - new Set(slideAttempts().map((a) => a.doorCentre)).size} ` +
     `refused before search; target lengths ${DESIRED_LENGTH_LADDER.join(', ')} m), ` +
     `the best on offer ${refusal.blocker}.`
   );
 }
 
 /** One attempt at a chute. Null if that attempt admits no route at all. */
-function solveChuteAt(
+function* solveChuteAt(
   attempt: SlideAttempt,
-): { route: SolvedRailRoute; complaint: string | null } | null {
+  seedSalt: number,
+): Generator<number, { route: SolvedRailRoute; complaint: string | null } | null, void> {
   let route: SolvedRailRoute;
   try {
-    route = solveRailRoute(slideRouteBriefAt(attempt));
+    // The same solver the train yields through, a few pieces at a time —
+    // synchronously it was the boot's one 2.9 s lump.
+    route = yield* railRouteSearch(slideRouteBriefAt(attempt, seedSalt));
   } catch (error) {
     // A target that admits no route at all is a rung that did not work, not a
     // park that cannot be built — the next rung gets its turn.
     if (error instanceof RailRouteUnsolvable) return null;
     throw error;
   }
-  return { route, complaint: unrideableComplaint(route) };
+  return { route, complaint: yield* unrideableComplaintSearch(route) };
 }
 
 /**
@@ -1680,7 +1802,20 @@ export function planSlide(): PlannedSlide {
  * throws on a seed that cannot carry the ride; this is the total function those
  * paths can move onto once the readers can live without a slide.
  */
-export function solveSlide(): PlannedSlide | SlideRefusal {
+export function solveSlide(seedSalt = 0): PlannedSlide | SlideRefusal {
+  const steps = slideSearch(seedSalt);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * The same search, offered up one attempt at a time so the park's driver can
+ * stop between frames: `check:park-boot` measured the whole slide solve as one
+ * 2.9 s lump (0 pieces) when it ran synchronously inside a boot slice.
+ */
+export function* slideSearch(seedSalt = 0): Generator<number, PlannedSlide | SlideRefusal, void> {
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
   // trade; for a slide through a roller coaster it is not, so what the search
@@ -1694,17 +1829,18 @@ export function solveSlide(): PlannedSlide | SlideRefusal {
   // it is not describing — and it arrived the identical way, by a second copy
   // of a condition drifting from the first. There is now one owner and nothing
   // to keep in step.
-  let lastComplaint =
-    SLIDE_ATTEMPTS.length === 0 ? NO_CLEAR_DOOR : 'never solved a route at all';
+  const attempts = yield* slideAttemptsSearch();
+  let lastComplaint = attempts.length === 0 ? NO_CLEAR_DOOR : 'never solved a route at all';
   let tried = 0;
-  for (const decision of SLIDE_ATTEMPTS) {
+  for (const decision of attempts) {
     tried += 1;
-    const attempt = solveChuteAt(decision);
+    yield tried;
+    const attempt = yield* solveChuteAt(decision, seedSalt);
     if (!attempt) {
       lastComplaint = `admitted no route ${describeSlideAttempt(decision)}`;
       continue;
     }
-    if (attempt.complaint === null) return finishSlidePlan(attempt.route);
+    if (attempt.complaint === null) return yield* finishSlideSearch(attempt.route);
     lastComplaint = `${attempt.complaint} (${describeSlideAttempt(decision)})`;
   }
   return { refused: true, attemptsTried: tried, blocker: lastComplaint };
@@ -1721,7 +1857,21 @@ export function solveSlide(): PlannedSlide | SlideRefusal {
  * sequence means there is no second one to drift.
  */
 export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
+  const steps = finishSlideSearch(route);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * The finish in pieces: the chute's points, the rideability judge (which
+ * walks every point against the cruiser), the exit and the door, each its own
+ * piece — `check:park-boot` measured the finish as one 80 ms slice.
+ */
+export function* finishSlideSearch(route: SolvedRailRoute): Generator<number, PlannedSlide, void> {
   const points = chutePoints(route);
+  yield 0;
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
   // trade; for a slide through a roller coaster it is not, so what the search
@@ -1735,7 +1885,8 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
   // it is not describing — and it arrived the identical way, by a second copy
   // of a condition drifting from the first. There is now one owner and nothing
   // to keep in step.
-  const complaint = unrideableComplaint(route);
+  const complaint = yield* unrideableComplaintSearch(route, points);
+  yield 0;
   if (complaint) {
     throw new Error(
       `the ginormous slide never solved to a chute a child could ride: ` +
@@ -1745,6 +1896,7 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
   }
 
   const { exitX, exitZ } = planExit();
+  yield 0;
 
   // Where the chute actually goes through the wall, read back off the solved
   // route. Asking the route rather than re-deriving the pose is the whole
@@ -1758,8 +1910,8 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
     points,
     exitX,
     exitZ,
-    startY: START_Y,
-    endY: END_Y,
+    startY: startY(),
+    endY: endY(),
     facadeDoorMinX: crossing.localX - crossing.halfWidth,
     facadeDoorMaxX: crossing.localX + crossing.halfWidth,
     roofDoorMinX: ROOF_ENTRY_X - ROOF_DOOR_HALF_WIDTH,
@@ -1801,12 +1953,24 @@ export function finishSlidePlan(route: SolvedRailRoute): PlannedSlide {
  * than the sampled polyline the search uses for speed.
  */
 export function unrideableComplaint(route: SolvedRailRoute): string | null {
+  const steps = unrideableComplaintSearch(route);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/** The same judge, yielding every {@link JUDGE_PIECE} chute points. `points` may be handed in when the caller already has them. */
+export function* unrideableComplaintSearch(
+  route: SolvedRailRoute,
+  points?: readonly Vector3[],
+): Generator<number, string | null, void> {
   if (route.length > MAX_RIDEABLE_LENGTH) {
     const start = { x: 0, z: 0 };
     route.pointAt(0, start);
     const heading = { x: 0, z: 0 };
     route.tangentAt(0, heading);
-    const drop = startRadiusFor(start.x, start.z, heading.x, heading.z) - END_RADIUS;
+    const drop = startRadiusFor(start.x, start.z, heading.x, heading.z) - endRadius();
     return (
       `is ${route.length.toFixed(2)} m long against a ${MAX_RIDEABLE_LENGTH} m ` +
       `ceiling — at that length the drop of ${drop.toFixed(2)} m is ` +
@@ -1814,7 +1978,9 @@ export function unrideableComplaint(route: SolvedRailRoute): string | null {
     );
   }
 
-  return chuteComplaint(chutePoints(route));
+  const chute = points ?? chutePoints(route);
+  yield 0;
+  return yield* chuteComplaintSearch(chute);
 }
 
 /**
@@ -1824,10 +1990,56 @@ export function unrideableComplaint(route: SolvedRailRoute): string | null {
  * rather than a copy of it.
  */
 function chuteComplaint(points: readonly Vector3[]): string | null {
+  // Synchronous on purpose: `doorStubIsClear` compares this with `null`, and a
+  // generator object never is — for an hour every door on every seed was
+  // refused that way, invisibly to tsc and visibly only in the live trace.
+  const steps = chuteComplaintSearch(points);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+/**
+ * Chute points judged per piece of the rideability walk.
+ *
+ * **8, down from 32.** The number was chosen when this judged the ~90 control
+ * points; it now judges the ~189 samples of the swept curve, and each one costs
+ * a `cruiser.nearestPoint` that walks the Sky Cruiser's whole loop. Measured by
+ * `check:park-boot` at 32: one slice doing **3 work units in 30.1 ms** of
+ * attested busy time against a 20.2 ms allowance — about 10 ms per piece, which
+ * is a frame and a quarter for one of them. At 8 a piece is a quarter of that
+ * and the boot stops hitching.
+ *
+ * It changes no verdict: the generator yields more often and judges exactly the
+ * same points in exactly the same order.
+ */
+const JUDGE_PIECE = 8;
+function* chuteComplaintSearch(
+  controls: readonly Vector3[],
+): Generator<number, string | null, void> {
+  // **Judge the line that gets built, not the controls it is threaded through.**
+  // `SlideRide` sweeps a Catmull-Rom through these points and that curve sags
+  // between them: on seed 11 the built chute came within 5.47 m of the Sky
+  // Cruiser where the control polygon kept 5.50 m, so this passed a ride the
+  // park then drew too close. `chuteCentreLine` is the same curve `SlideRide`
+  // builds, at the same 0.4 m `parkFacts.ts` measures it at.
+  const points = chuteCentreLine(controls);
+  // **Building that curve is itself a unit of work.** `chuteCentreLine` threads
+  // a fresh Catmull-Rom through ~90 controls and measures its arc length, which
+  // is a couple of hundred curve evaluations before a single point has been
+  // judged. Left unyielded it landed in whichever slice the caller was in the
+  // middle of, and `check:park-boot` caught the result: one slice, **one work
+  // unit, 27.5 ms** of attested busy time against a 23.0 ms allowance, "during
+  // shaping the ginormous slide". Yield first so the frame that pays for the
+  // curve pays for nothing else.
+  yield 0;
+  let judged = 0;
   const cruiser = COASTER_PLANS.cruiser.route;
   let worst = Infinity;
   let worstAt: Vector3 | null = null;
   for (const point of points) {
+    judged += 1;
+    if (judged % JUDGE_PIECE === 0) yield judged;
     const near = cruiser.nearestPoint(point.x, point.z);
     const horizontal = Math.hypot(near.x - point.x, near.z - point.z);
     const vertical = Math.abs(near.y - point.y);
@@ -1855,7 +2067,13 @@ function chuteComplaint(points: readonly Vector3[]): string | null {
   // (it stopped exploring routes that could never finish under the length
   // ceiling) then found routes on seeds 11 and 24 that did the same, by up to
   // 1.47 m — so it is asked here, where the search can backtrack over it.
+  // These last two walks used to run to completion without yielding once, so
+  // the whole ground pass and the whole tower pass fell inside whatever slice
+  // the cruiser walk happened to end in — three passes' work, one frame's
+  // budget. They are sliced on the same `JUDGE_PIECE` as the first.
   for (const point of points) {
+    judged += 1;
+    if (judged % JUDGE_PIECE === 0) yield judged;
     const underside = altitudeAt(point.x, point.y, point.z) - CHUTE_ENVELOPE.below;
     if (underside >= 0) continue;
     return (
@@ -1865,6 +2083,8 @@ function chuteComplaint(points: readonly Vector3[]): string | null {
   }
 
   for (const point of points) {
+    judged += 1;
+    if (judged % JUDGE_PIECE === 0) yield judged;
     if (clearsTowers(point.x, point.z, point.y, CORRIDOR_RADIUS)) continue;
     return (
       `runs into a castle tower at (${point.x.toFixed(1)}, ${point.y.toFixed(1)}, ` +
@@ -1881,3 +2101,8 @@ function chuteComplaint(points: readonly Vector3[]): string | null {
  * reparent — it described a frame the slide no longer hangs in, and a constant
  * describing the wrong frame is worse than none.
  */
+
+// Derived from a decision the park's driver may unwind: forgotten with it.
+registerPlanCache(() => {
+  drawnCarPoints = null;
+});

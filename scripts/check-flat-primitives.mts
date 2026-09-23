@@ -614,14 +614,22 @@ function textualControl(files: readonly string[]): { text: number; ast: number; 
   for (const file of files) {
     if (!file.startsWith('src' + sep)) continue;
     const source = readFileSync(join(REPO, file), 'utf8');
-    for (const line of source.split('\n')) {
+    const lines = source.split('\n');
+    for (const [index, line] of lines.entries()) {
       const hits = line.match(DISC);
       if (!hits) continue;
       text += hits.length;
       // A comment line, or `Math.PI / 2 - something`: the two cases a textual
-      // match gets wrong and an AST gets right.
+      // match gets wrong and an AST gets right — and a site carrying the
+      // `flat-ok:` hatch (on the line or the one above), which the AST scan
+      // records as an exemption rather than a finding, so the count of
+      // findings is short by exactly those. Without this line the control
+      // reads a hatched disc as "the AST missed one" and fails on the first
+      // honest exemption of this rule (found landing the procgen rework).
+      const above = lines[index - 1] ?? '';
       if (/^\s*(\*|\/\/|\/\*)/.test(line)) excused += hits.length;
       else if (/Math\.PI ?\/ ?2 ?-/.test(line)) excused += hits.length;
+      else if (/\/\/\s*flat-ok:\s*\S/.test(line) || /^\s*\/\/\s*flat-ok:\s*\S/.test(above)) excused += hits.length;
     }
     ast += scan(file, source).filter((f) => f.rule === 'FLAT_DISC').length;
   }

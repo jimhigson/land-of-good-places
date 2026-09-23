@@ -1,3 +1,5 @@
+import { lazyView } from '../../boot/lazyView';
+import { registerPlanCache } from '../../boot/planCaches';
 import { Rng, clamp } from '../../core/mathUtils';
 import { RAIL_RACE_PLAN } from './plan';
 import { planHazards, type HazardLayout, type HazardSchedule, type RaceLevel } from './hazards';
@@ -252,7 +254,14 @@ const WOBBLE_LOCKOUT = 0.35;
  * `RailRace.ts` never has to know both the geometry and a race's own
  * schedule come from the same `planHazards` call.
  */
-export const HAZARD_LAYOUT: HazardLayout = planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, 1).lap;
+let hazardLayoutMemo: HazardLayout | null = null;
+/** A view: the ring follows the layout the park's driver decided. */
+export const HAZARD_LAYOUT: HazardLayout = lazyView(
+  () => (hazardLayoutMemo ??= planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, 1).lap),
+);
+registerPlanCache(() => {
+  hazardLayoutMemo = null;
+});
 
 /**
  * The hazard schedule for one chosen level — see `hazards.ts`'s header.
@@ -265,7 +274,19 @@ export function scheduleForLevel(level: RaceLevel): HazardSchedule {
 }
 
 /** The finish line, in metres travelled. */
-export const RACE_DISTANCE = RAIL_RACE_PLAN.route.length * RACE_LAPS;
+/**
+ * A live binding: the ring's length follows the layout the park's driver
+ * decided, so this is computed on first read and forgotten with the rest of
+ * the plan-derived memos. `raceDistance()` is the owner; the binding is kept
+ * for the two readers that want a plain number.
+ */
+let raceDistanceMemo: number | null = null;
+export function raceDistance(): number {
+  return (raceDistanceMemo ??= RAIL_RACE_PLAN.route.length * RACE_LAPS);
+}
+registerPlanCache(() => {
+  raceDistanceMemo = null;
+});
 
 export interface Rider {
   readonly lane: number;
@@ -459,7 +480,7 @@ export function stepRider(
   const lap = lapNow !== lapBefore && lapNow < RACE_LAPS ? lapNow + 1 : 0;
 
   let finishedNow = false;
-  if (rider.travelled >= RACE_DISTANCE) {
+  if (rider.travelled >= raceDistance()) {
     rider.finished = true;
     finishedNow = true;
   }
@@ -993,7 +1014,7 @@ export function simulateField(playerStrategy: Strategy, level: RaceLevel, seed: 
       order.push(rider.lane);
       if (isPlayer) {
         playerSeconds = seconds;
-        marginMetres = RACE_DISTANCE - Math.max(...rivals.map((other) => other.travelled));
+        marginMetres = raceDistance() - Math.max(...rivals.map((other) => other.travelled));
       }
     }
     seconds += dt;

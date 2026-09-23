@@ -258,6 +258,22 @@ export class JourneyPlanner implements RoutePlanner {
   }
 
   /** See {@link insideCount} — called once a frame by `NpcSystem`. */
+  /**
+   * The grid the children route on in `space` — handed out so `PoiGraph` can
+   * place and classify its waypoints on **the same lattice the journeys then
+   * walk**, rather than on a second instrument of its own (the Architect's
+   * ruling, 6 Sep 2026: reachability has one owner). `null` for a space with
+   * no boundary, exactly as {@link plan} treats it.
+   */
+  grid(space: SpaceId): NavGrid | null {
+    return this.gridFor(space);
+  }
+
+  /** The ground sampler every grid here was built with — for the same caller. */
+  get groundSampler(): GroundSampler {
+    return this.sample;
+  }
+
   setInsideCount(count: number): void {
     this.insideCount = count;
   }

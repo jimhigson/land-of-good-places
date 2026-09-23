@@ -4,7 +4,7 @@
 
 Same shape of pipeline as ``cart_export.py``: no procedural Stage A, modelled
 directly against ``src/world/railRace/track.ts``'s and ``hazards.ts``'s own
-reference numbers (``DUCK_CLEARANCE``, ``BAR_HALF_SPAN``) in Blender.
+reference numbers (``DUCK_CLEARANCE_AT_PARK_SCALE``, ``BAR_HALF_SPAN_AT_PARK_SCALE``) in Blender.
 ``art/blend/duckbar.blend`` **is** the authoring source; this script's only
 job is exporting it.
 

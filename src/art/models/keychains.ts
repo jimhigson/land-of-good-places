@@ -401,14 +401,27 @@ function rumiKeyring(): Group {
     keyring.add(shoe);
   }
 
-  const head = blob(0.031, skin, [1, 0.95, 0.95], 16);
+  /** Facets round the head and the hair — one number, because the hair's roll below is half of one. */
+  const HEAD_SEGMENTS = 16;
+  const head = blob(0.031, skin, [1, 0.95, 0.95], HEAD_SEGMENTS);
   head.position.y = 0.088;
   keyring.add(head);
   addOutline(head, 0.008);
 
   // The hair: a slightly bigger dome sat back off the face, so the front of
   // the skull shows skin — the same one-blob hair every doll this size gets.
-  const hair = blob(0.034, lilac, [1.02, 0.96, 0.98], 16);
+  const hair = blob(0.034, lilac, [1.02, 0.96, 0.98], HEAD_SEGMENTS);
+  // **Rolled half a facet round its own axis, so no face of it can share a
+  // plane with a face of the head.** Two 16-sided blobs of nearly the same
+  // radius, one just behind the other, put their matching facets (and their
+  // outline hulls' facets) within a few millimetres of one plane all round
+  // the line where the two meet — `check:coplanar` found seven or eight such
+  // seams on this 7 cm doll, the count moving with how the shop leans on each
+  // seed. A stand-off would be a number to maintain; a half-facet roll makes
+  // every hair facet point 11.25 degrees away from its head neighbour, at any
+  // lean. The same fix as the rail race's trestle fork (#696). The outline is
+  // built from this geometry below, so it rolls with it.
+  hair.geometry.rotateY(Math.PI / HEAD_SEGMENTS);
   hair.position.set(0, 0.095, -0.008);
   keyring.add(hair);
   addOutline(hair, 0.008);

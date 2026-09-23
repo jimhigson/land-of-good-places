@@ -1,3 +1,5 @@
+import { lazyArrayView, lazyView } from '../boot/lazyView';
+import { registerPlanCache } from '../boot/planCaches';
 import { CAMERA_FACING_YAW } from '../core/constants';
 import { ANCHORS_BY_ID } from '../world/anchors';
 import { counterFacing, placedEntry } from '../world/parkLayout';
@@ -119,16 +121,96 @@ function facePaintStall(): StallPlacement {
  * already sets `cameraFacing: true`, so `counterFacing(p.signYaw)` gives a
  * camera-legible counter with no bespoke constant to keep in step.
  */
-export const STALL_PLACEMENTS = {
-  railRacer: placedStall('stall.railRacer'),
-  skyCruiser: placedStall('stall.skyCruiser'),
-  spookyHouse: placedStall('stall.spookyHouse'),
-  waterFight: placedStall('stall.waterFight'),
-  spaceFerrisWheel: ferrisKiosk(),
-  dodgems: placedStall('stall.dodgems'),
-  facePaint: facePaintStall(),
-  keychain: placedStall('stall.keychain'),
-} as const satisfies Record<string, StallPlacement>;
+/**
+ * The layout entry each stall's spot is drawn from, for the stalls feature
+ * builder: when it asks whether a shifted booth is clear of the park's plots,
+ * the booth's **own** plot must be the one exception. The ferris kiosk has no
+ * entry of its own — it is placed by relation to the wheel's entrance
+ * ({@link ferrisKiosk}) — so it is deliberately absent.
+ */
+export const STALL_LAYOUT_IDS: Readonly<Record<string, string>> = {
+  railRacer: 'stall.railRacer',
+  skyCruiser: 'stall.skyCruiser',
+  spookyHouse: 'stall.spookyHouse',
+  waterFight: 'stall.waterFight',
+  dodgems: 'stall.dodgems',
+  facePaint: 'stall.facePaint',
+  keychain: 'stall.keychain',
+};
+
+/**
+ * **Where a stall has stepped aside to** — the one owner of a booth's
+ * accommodation, in metres from the spot the layout drew.
+ *
+ * Jim, 16 Sep 2026: *"maybe a stall would move, but this would be on the class
+ * that does the stall placement to decide to move it."* The decision is made
+ * by `world/stallsFeature.ts` (the stall's own `FeatureBuilder`); it is
+ * recorded **here**, because this table is what `world/paths.ts`,
+ * `entities/npc/poiGraph.ts`, `minigames/stalls.ts`, `FacePaintStall` and
+ * `KeychainShop` all read. A booth that moved in one of those and not the
+ * others would be the repo's most-repeated bug wearing a fairground hat.
+ *
+ * Every stand point below is **derived** from the placement, so a shift moves
+ * the stand point, the doormat and the tap target with the booth for free.
+ */
+const shifts = new Map<string, readonly [number, number]>();
+
+/** The shift a stall is carrying, `[0, 0]` for one that never moved. */
+export function stallShift(id: string): readonly [number, number] {
+  return shifts.get(id) ?? [0, 0];
+}
+
+/** Record a stall's accommodation. Only `world/stallsFeature.ts` calls this. */
+export function setStallShift(id: string, dx: number, dz: number): void {
+  if (dx === 0 && dz === 0) shifts.delete(id);
+  else shifts.set(id, [dx, dz]);
+  stallsMemo = null;
+}
+
+/** Forget every accommodation — the driver has unwound past the stalls. */
+export function clearStallShifts(): void {
+  if (shifts.size === 0) return;
+  shifts.clear();
+  stallsMemo = null;
+}
+
+function shifted(id: string, placement: StallPlacement): StallPlacement {
+  const [dx, dz] = stallShift(id);
+  if (dx === 0 && dz === 0) return placement;
+  return { ...placement, position: [placement.position[0] + dx, placement.position[1] + dz] };
+}
+
+function stallPlacementsNow() {
+  return {
+    railRacer: shifted('railRacer', placedStall('stall.railRacer')),
+    skyCruiser: shifted('skyCruiser', placedStall('stall.skyCruiser')),
+    spookyHouse: shifted('spookyHouse', placedStall('stall.spookyHouse')),
+    waterFight: shifted('waterFight', placedStall('stall.waterFight')),
+    spaceFerrisWheel: shifted('spaceFerrisWheel', ferrisKiosk()),
+    dodgems: shifted('dodgems', placedStall('stall.dodgems')),
+    facePaint: shifted('facePaint', facePaintStall()),
+    keychain: shifted('keychain', placedStall('stall.keychain')),
+  } as const satisfies Record<string, StallPlacement>;
+}
+type StallPlacements = ReturnType<typeof stallPlacementsNow>;
+let stallsMemo: { placements: StallPlacements; stands: readonly StallStand[]; byId: ReadonlyMap<string, StallStand> } | null = null;
+function stalls(): NonNullable<typeof stallsMemo> {
+  if (stallsMemo) return stallsMemo;
+  const placements = stallPlacementsNow();
+  const stands = standsFor(placements);
+  stallsMemo = { placements, stands, byId: new Map(stands.map((stand) => [stand.id, stand])) };
+  return stallsMemo;
+}
+registerPlanCache(() => {
+  stallsMemo = null;
+  // A plan reset means the layout is being re-decided, so every spot a booth
+  // stepped aside *from* is about to change. A shift kept across that would be
+  // measured from a plot that no longer exists.
+  shifts.clear();
+});
+/** Views of the decided layout — the park's driver may re-decide it, and these follow. */
+export const STALL_PLACEMENTS: StallPlacements = lazyView(() => stalls().placements);
+
 
 /** Where a child stands to be served at a stall. */
 export interface StallStand {
@@ -146,7 +228,8 @@ export interface StallStand {
  * stale the moment a stall moved — and, after Decision 5, the moment the park
  * regenerated.
  */
-export const STALL_STANDS: readonly StallStand[] = Object.entries(STALL_PLACEMENTS).map(
+function standsFor(placements: StallPlacements): readonly StallStand[] {
+  return Object.entries(placements).map(
   ([id, placement]) => {
     const reach = placement.standDistance ?? STALL_STAND_DISTANCE;
     return {
@@ -156,11 +239,11 @@ export const STALL_STANDS: readonly StallStand[] = Object.entries(STALL_PLACEMEN
     };
   },
 );
+}
+export const STALL_STANDS: readonly StallStand[] = lazyArrayView(() => stalls().stands);
 
 /** The same stands, by id — for the one-off booths that build themselves. */
-export const STALL_STANDS_BY_ID: ReadonlyMap<string, StallStand> = new Map(
-  STALL_STANDS.map((stand) => [stand.id, stand]),
-);
+export const STALL_STANDS_BY_ID: ReadonlyMap<string, StallStand> = lazyView(() => stalls().byId);
 
 /**
  * How close a tap must land to a booth to select it — the pick radius every

@@ -47,7 +47,7 @@ import {
   ENTRANCE_RAMP,
 } from '../src/world/building/layout.ts';
 import { isOutdoors } from '../src/world/up.ts';
-import { NavGrid, NAV_CELL_SIZE as navCellSize } from '../src/world/NavGrid.ts';
+import { NavGrid, NAV_CELL as navCellSize } from '../src/world/NavGrid.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 
 const R = GROUND_SPHERE_RADIUS;

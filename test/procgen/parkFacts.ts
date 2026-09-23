@@ -15,15 +15,17 @@
  * suite owns the invariants about whether the park's scattered furniture is
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
-import { Box3, Mesh, Quaternion, Vector3 } from 'three';
+import { Box3, InstancedMesh, Mesh, Quaternion, Vector3 } from 'three';
 import { measureGateArch } from '../../scripts/gate-arch-measure.mts';
 import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
 import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
+import type { RailRaceRoute } from '../../src/world/railRace/route.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 import type { Claim } from '../../src/boot/groundClaims.ts';
 import type { RoadSegment } from '../../src/world/entrance/roadCorridor.ts';
+import { boothBoxFor, type BoothBox } from '../../src/minigames/boothFootprint.ts';
 
 /**
  * One side of one ring of a bridge's drawn parapet. See
@@ -239,6 +241,31 @@ export interface EntranceFact {
   readonly id: string;
   readonly x: number;
   readonly z: number;
+}
+
+/**
+ * **A stall, as it actually ended up** — where its booth is *drawn*, where the
+ * game sends a child to be served, and what the registry says it owns.
+ *
+ * All three are read off the built park, never asked of the placement table:
+ * the drawn spot comes off the booth group's own world matrix, the stand point
+ * off the built interact zone, and the claims out of the registry. That is the
+ * whole point of the fact — a booth may **step aside** during the world phase
+ * (`world/stallsFeature.ts`), and the failure that matters is the one where
+ * only some of those three moved.
+ */
+export interface StallFact {
+  readonly id: string;
+  /** The booth group's world position, off `matrixWorld`. */
+  readonly drawnX: number;
+  readonly drawnZ: number;
+  /** Its body, from `boothFootprint.ts` — the one owner of every booth's box. */
+  readonly box: BoothBox;
+  /** Where the built interact zone sends a child to be served. */
+  readonly standX: number;
+  readonly standZ: number;
+  /** How far this booth stepped aside during the world phase, in metres. */
+  readonly steppedAside: number;
 }
 
 /**
@@ -594,6 +621,38 @@ export interface DrawnReachFact {
   readonly excludedRoots: readonly string[];
 }
 
+/**
+ * **One Rail Race ring's supports, as the registry holds them and as they were
+ * drawn** — stage 3, step 2: the trestle legs are `footprint` claims.
+ *
+ * `fromDrawn` is rebuilt from the instance buffers of the three trestle meshes
+ * (`railRace:trestle-legs`, `-branches-lower`, `-branches-upper`), pairing each
+ * trunk with its two lower and four upper branches by the index order
+ * `track.ts` draws them in, and run through `track.ts`'s own `trestleClaims` —
+ * the one function the search asked with and the builder committed. Gathered
+ * here, after the world is built, for the reason `RoadCorridorFacts` is:
+ * `track.ts` reaches `parkLayout.ts`, and a static import of it into a test
+ * file would pin every seed to the canonical park.
+ */
+export interface RailRaceSupportFacts {
+  readonly label: 'walk-past' | 'race';
+  /** The feature name the ring committed under — its group name. */
+  readonly feature: string;
+  /** What the built park's registry actually holds for it. */
+  readonly claimed: readonly Claim[];
+  /** The same claims, rebuilt from the drawn struts through the one owner. */
+  readonly fromDrawn: readonly Claim[];
+  /** How many drawn struts (trunks and branches) went into `fromDrawn`. */
+  readonly struts: number;
+  /** One entry per drawn trunk: how far its foot stands from under its top, and how tall it is. */
+  readonly trees: readonly {
+    readonly footX: number;
+    readonly footZ: number;
+    readonly lean: number;
+    readonly trunkHeight: number;
+  }[];
+}
+
 export interface ParkFacts {
   readonly seed: number;
   readonly world: World;
@@ -601,6 +660,24 @@ export interface ParkFacts {
   readonly roadCorridor: RoadCorridorFacts;
   /** The castle's four corner turrets — see {@link CastleTurretFact}. */
   readonly castleTurrets: readonly CastleTurretFact[];
+  /** Each Rail Race ring's supports, claimed and drawn — see {@link RailRaceSupportFacts}. */
+  readonly railRaceSupports: readonly RailRaceSupportFacts[];
+  /**
+   * The run the cat bus actually drives, sampled: from where its body first
+   * appears to where it vanishes along the road's own arc
+   * (`entranceBusArriveAt()` to `entranceBusVanishAt()`, half a bus beyond
+   * each), a point every `PLAYER_RADIUS` at the bus's centre line and both
+   * sides, each with the road's facing there. Read from the arrival's own
+   * owners (`entrance/roadRoute.ts`, `entrance/catBus.ts`), never restated, so
+   * an invariant can ask whether the road's corridor claim covers every metre
+   * of it. Chart coordinates, like the claims.
+   */
+  readonly busRun: {
+    readonly samples: readonly { readonly x: number; readonly z: number }[];
+    /** Metres of arc sampled, for the coverage line. */
+    readonly length: number;
+    readonly halfWidth: number;
+  };
   /**
    * Headroom under the finish rainbow, per ring per lane — see
    * {@link ArchClearanceFact}.
@@ -687,6 +764,25 @@ export interface ParkFacts {
    * default seed.
    */
   readonly cruiserRouteGroundClearance: readonly number[];
+  /**
+   * **The top of every Sky Cruiser pylon as it is drawn, mapped back to the
+   * flat frame the route was planned in.**
+   *
+   * `Coaster.ts` stands each pylon from the foot the planner found to the
+   * track's *drawn* top — `placeOnSphere` of the flat top — so the post leans
+   * with the planet, which is how it reaches the thing it carries. The route
+   * an invariant compares it against (`coaster.route`) is the **flat** plan.
+   * Read the drawn top straight against that plan and the lean itself reads as
+   * error: `height · sin(tilt)`, which on the canonical seed is **2.94 m** of
+   * pure bookkeeping on a pylon whose real gap to its track is **0.034 m**.
+   *
+   * So every top goes through `unplaceFromSphere` here — the exact inverse of
+   * the lean, the same treatment {@link RailRaceSupportFacts} already gives the
+   * Rail Race's drawn struts, and for the same reason. Measured off the built
+   * instance buffer, never re-derived from `pylons.ts`: the whole point of
+   * these two invariants is to catch a post that does not arrive.
+   */
+  readonly cruiserPylonTops: readonly { readonly x: number; readonly y: number; readonly z: number }[];
   readonly walls: readonly WallFact[];
   readonly trees: readonly TreeFact[];
   /** Every bush clump standing in the park. See {@link BushFact}. */
@@ -694,6 +790,21 @@ export interface ParkFacts {
   /** The subset of {@link trees} a child is offered a climb on. */
   readonly climbableTrees: readonly ClimbableTreeFact[];
   readonly lamps: readonly (readonly [number, number])[];
+  /**
+   * The fairy-light rig round the plaza, **counted off the drawn scene** —
+   * the `fairy-pole-*` and `fairy-string-*` meshes `FairyLights.ts` actually
+   * put in the world, not the decision list the builder produced.
+   *
+   * It is counted rather than re-derived because the bug it exists for was
+   * invisible to every other kind of check: the ring's radius had drifted onto
+   * the main loop's paving, every pole was legitimately skipped for standing
+   * on a path, and the park drew **none at all** — a correct generator
+   * producing nothing, which no rule-reading assertion could have seen.
+   *
+   * `strings` matters on its own: a pole with no neighbour carries no cable
+   * and no bulbs, so poles alone do not mean a child sees any lights.
+   */
+  readonly fairyLights: { readonly poles: number; readonly strings: number };
   /**
    * The early, conservative reservation `bridgeKeepout.ts` computes for
    * every railway crossing (`train/bridgeFootprint.ts`'s `planConservative`
@@ -809,6 +920,15 @@ export interface ParkFacts {
   readonly crossingSiteSnapTolerance: number;
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
+  /** Every stall, as built — see {@link StallFact}. */
+  readonly stalls: readonly StallFact[];
+  /**
+   * Stalls that could not be measured at all, with why. A booth with no group
+   * in the scene or no interact zone cannot be held to anything below, so it
+   * is named here rather than leaving a shorter list to imply cover it does
+   * not give.
+   */
+  readonly stallsMissing: readonly string[];
   /**
    * The keychain rack's six keyring stand points, specifically — **not**
    * included in {@link entrances} above.
@@ -1086,6 +1206,35 @@ export interface ParkFacts {
     readonly topY: number;
   } | null;
   /**
+   * {@link slideChute}, put through `worldToCastle` — the chute in the same
+   * axes the castle and everything standing on it is drawn in, so a clearance
+   * against the roof garden compares like with like.
+   */
+  readonly slideChuteInCastleFrame: readonly (readonly [number, number, number])[];
+  /**
+   * **The same box, in the castle's own axes, built from the drawn vertices.**
+   *
+   * A world-axis `Box3` round the roof garden is an axis-aligned box round a
+   * body leaning **12.44 degrees**, so its `max.y` is the highest world `y` any
+   * corner reaches and has nothing to do with the height of the roof where the
+   * chute actually passes. Measured on seed 131 it read the roof at 8.06 m and
+   * reported the ginormous slide 0.22 m *inside* it; asked in the castle's own
+   * frame, with the chute taken there too, the same ride clears the same roof
+   * by **5.02 m**.
+   *
+   * So this is the honest box, and {@link theSlideClearsTheCastleRoofGarden}
+   * asks it. Built by putting every drawn vertex of the roof-garden group
+   * through `worldToCastle`, not by rotating the world box's eight corners —
+   * that would only be a bigger box round a wrong one.
+   */
+  readonly castleRoofGardenInCastleFrame: {
+    readonly minX: number;
+    readonly maxX: number;
+    readonly minZ: number;
+    readonly maxZ: number;
+    readonly topY: number;
+  } | null;
+  /**
    * The castle's four corner towers, as the solids of revolution they were
    * actually built as, in **world space**.
    *
@@ -1105,10 +1254,22 @@ export interface ParkFacts {
    */
   readonly castleTowers: readonly {
     readonly name: string;
-    readonly x: number;
-    readonly z: number;
-    readonly bottomY: number;
-    readonly topY: number;
+    /**
+     * The two ends of the drawn part's **own axis**, in world space, foot
+     * first.
+     *
+     * Not a world-Y window and a plan position: the castle is drawn leaning
+     * **12.44 degrees** onto the planet, so a turret's axis is not world `+Y`
+     * and `centre.y ± height/2` is not its extent. Measured on seed 24 the
+     * four tower bodies' feet span 6 m of world `y` between them while every
+     * one of them stands on the same plinth.
+     */
+    readonly footX: number;
+    readonly footY: number;
+    readonly footZ: number;
+    readonly tipX: number;
+    readonly tipY: number;
+    readonly tipZ: number;
     readonly radiusBottom: number;
     readonly radiusTop: number;
   }[];
@@ -1190,6 +1351,27 @@ export interface ParkFacts {
     /** How near and far the chute gets from this eye across its own beat. */
     readonly nearest: number;
     readonly farthest: number;
+    /**
+     * **The least of her this eye can show anywhere in its own beat**, as the
+     * angular extent of her body: `sin(theta) / distance`, theta being between
+     * the line of sight and the axis she lies along. Her length is left out —
+     * it scales every beat equally and restating how big a child is would be a
+     * second definition of her.
+     *
+     * Distance alone cannot see the failure this exists for. On
+     * `feat/procgen-on-sphere`'s chute, beat 1's rider stayed 6.6–8.9 m from
+     * her eye — inside every allowance the placement code had — while the shot
+     * swung round to look straight down her, and her own head took her body
+     * from 2.58% of the frame to **0.13%** against a 0.40% floor.
+     */
+    readonly worstExtent: number;
+    /**
+     * How nearly end-on that worst moment is: `|cos(theta)|`, 1 being straight
+     * down her body and 0 square across it. Carried beside
+     * {@link worstExtent} because it is the half of it a person can picture,
+     * and a complaint that quotes both says which way a beat went wrong.
+     */
+    readonly worstEndOn: number;
   }[];
   /**
    * The shot plan as spans of the ride, in order — so "every part of the ride is
@@ -1305,10 +1487,18 @@ export interface ParkFacts {
      * `Infinity` if nothing overhangs the gateway at all, which is a gate with
      * no arch on it and which the invariant treats as a failure rather than as
      * generous headroom.
+     *
+     * **Taken whole from `measureGateArch`, never recomputed here.** It used to
+     * be `lowestOverheadY - terrainHeight(centreX, centreZ)` on this line and
+     * the identical expression in `scripts/probe-gate-pool.mts` — one number
+     * with two definitions, and a difference of world `y` is not a height on a
+     * sphere.
      */
     readonly headroom: number;
     /** Where that lowest overhead thing is, so a failure names a place. */
-    readonly lowestOverheadAt: { readonly x: number; readonly z: number } | null;
+    readonly lowestOverheadAt:
+      | { readonly x: number; readonly y: number; readonly z: number }
+      | null;
     /**
      * Which way the arch's lettered face looks, in world XZ. See
      * `scripts/gate-arch-measure.mts`: the gate's *shape* cannot answer this,
@@ -1497,6 +1687,130 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     z: tower.z,
     radiusBottom: tower.radiusBottom,
   }));
+
+  // The Rail Race's supports, as claimed and as drawn — see
+  // {@link RailRaceSupportFacts}. `track.ts` reaches `parkLayout.ts`, so it is
+  // imported here, after this seed's world exists, never at the top of a test.
+  const { trestleClaims } = await import('../../src/world/railRace/track.ts');
+  const railRaceSupports: RailRaceSupportFacts[] = [];
+  {
+    const railRace = world.railRace;
+    // Aliased: a later block in this function destructures `Matrix4` from its
+    // own dynamic import, which would shadow a top-level one into the TDZ here.
+    const { Matrix4: StrutMatrix4 } = await import('three');
+    const matrix = new StrutMatrix4();
+    const centre = new Vector3();
+    const axis = new Vector3();
+    /**
+     * Both ends of drawn strut `i` of an instanced cylinder stood by `track.ts`'s
+     * `strut` — **mapped back to the flat frame the tree was solved in.** The
+     * struts are drawn leant onto the sphere (`leanTrestleTree`); the claims
+     * and the lean bound are made on the flat solve, in chart coordinates. So
+     * each drawn end goes back through the ring's own `chartOf` — the exact
+     * inverse of the one rigid turn it was drawn through — before it is
+     * compared with anything the registry holds. Read straight as flat, a
+     * rail-height point 100 m out is metres off its own plan: the lean itself,
+     * not an error.
+     *
+     * **Not `unplaceFromSphere`, which this used to call.** That answers a
+     * different question — where a plumb line from the point meets the ground —
+     * and it was the exact inverse only while every node was leant at its own
+     * column, which is the shear `route.ts`'s `lean` exists to undo. It now
+     * differs by about 0.13 m out here, three times this clause's own
+     * float32 slack.
+     */
+    const ends = (
+      mesh: InstancedMesh,
+      i: number,
+      ring: RailRaceRoute,
+      at: number,
+    ): { from: Vector3; to: Vector3 } => {
+      mesh.getMatrixAt(i, matrix);
+      centre.setFromMatrixPosition(matrix);
+      axis.setFromMatrixColumn(matrix, 1);
+      return {
+        from: ring.unlean(at, centre.clone().addScaledVector(axis, -0.5), new Vector3()),
+        to: ring.unlean(at, centre.clone().addScaledVector(axis, 0.5), new Vector3()),
+      };
+    };
+    /** Where a drawn trunk's top stands on the ring — the tree's one station. */
+    const stationOfTrunk = (legs: InstancedMesh, i: number, ring: RailRaceRoute): number => {
+      legs.getMatrixAt(i, matrix);
+      centre.setFromMatrixPosition(matrix);
+      axis.setFromMatrixColumn(matrix, 1);
+      return ring.stationOf(centre.clone().addScaledVector(axis, 0.5));
+    };
+    for (const [label, feature, ringRoute] of [
+      ['walk-past', 'railRace:walk-past-ring', railRace.walkPastRoute],
+      ['race', 'railRace:race-ring', railRace.raceRoute],
+    ] as const) {
+      const scale = ringRoute.scale;
+      const group = railRace.group.getObjectByName(feature);
+      const legs = group?.getObjectByName('railRace:trestle-legs');
+      const lower = group?.getObjectByName('railRace:trestle-branches-lower');
+      const upper = group?.getObjectByName('railRace:trestle-branches-upper');
+      if (
+        !(legs instanceof InstancedMesh) ||
+        !(lower instanceof InstancedMesh) ||
+        !(upper instanceof InstancedMesh)
+      ) {
+        railRaceSupports.push({
+          label,
+          feature,
+          claimed: label === 'walk-past' ? railRace.supportClaims.walkPast : railRace.supportClaims.race,
+          fromDrawn: [],
+          struts: 0,
+          trees: [],
+        });
+        continue;
+      }
+      const fromDrawn: Claim[] = [];
+      const trees: RailRaceSupportFacts['trees'][number][] = [];
+      let struts = 0;
+      // `track.ts` draws trestle `i`'s trunk as leg `i`, its two lower branches
+      // as `2i, 2i+1` and its four upper ones as `4i..4i+3` — the tree is
+      // rebuilt from the drawn struts by that order, then run through the one
+      // owner of what a support claims.
+      for (let i = 0; i < legs.count; i += 1) {
+        // One station for the whole tree — see `RailRaceRoute.stationOf`. Per
+        // node, each of the seven would find a station of its own and the
+        // ring's curvature would read back as a bent tree.
+        const at = stationOfTrunk(legs, i, ringRoute);
+        const trunk = ends(legs, i, ringRoute, at);
+        const forkNodes = [ends(lower, 2 * i, ringRoute, at).to, ends(lower, 2 * i + 1, ringRoute, at).to];
+        const laneTops = [0, 1, 2, 3].map((lane) => ends(upper, 4 * i + lane, ringRoute, at).to);
+        struts += 7;
+        fromDrawn.push(
+          ...trestleClaims(
+            {
+              laneTops,
+              forkNodes,
+              trunkTop: trunk.to,
+              trunkFoot: trunk.from,
+              ground: trunk.from.y,
+            },
+            scale / railRace.raceRoute.scale,
+          ),
+        );
+        trees.push({
+          footX: trunk.from.x,
+          footZ: trunk.from.z,
+          lean: Math.hypot(trunk.to.x - trunk.from.x, trunk.to.z - trunk.from.z),
+          // flat-ok: both ends were mapped back to the chart by the ring's own chartOf above; y is chart height
+          trunkHeight: trunk.to.y - trunk.from.y,
+        });
+      }
+      railRaceSupports.push({
+        label,
+        feature,
+        // The ring's own slice of the one `railRace` feature — see `RailRace.supportClaims`.
+        claimed: label === 'walk-past' ? railRace.supportClaims.walkPast : railRace.supportClaims.race,
+        fromDrawn,
+        struts,
+        trees,
+      });
+    }
+  }
 
   const { CROSSING_SITES } = await import('../../src/world/train/crossingPlan.ts');
   const { SITE_SNAP_TOLERANCE } = await import('../../src/world/train/crossings.ts');
@@ -1768,6 +2082,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // than by asking the builder whether it built one — the same discipline the
   // cat bus below is found with, and for the same reason.
   let castleRoofGarden: ParkFacts['castleRoofGarden'] = null;
+  let castleRoofGardenInCastleFrame: ParkFacts['castleRoofGardenInCastleFrame'] = null;
   {
     let roofRoot: import('three').Object3D | null = null;
     scene.traverse((object) => {
@@ -1782,6 +2097,42 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         maxZ: box.max.z,
         topY: box.max.y,
       };
+      // ...and the same thing in the castle's own axes. See the field's
+      // docblock: an axis-aligned box round a leaning building is not the
+      // building.
+      const { worldToCastle } = await import('../../src/world/building/layout.ts');
+      const local = new Box3();
+      const corner = new Vector3();
+      (roofRoot as import('three').Object3D).traverse((object) => {
+        if (!(object instanceof MeshClass)) return;
+        const attribute = object.geometry.getAttribute('position');
+        if (!attribute) return;
+        for (let i = 0; i < attribute.count; i += 1) {
+          corner
+            .set(attribute.getX(i), attribute.getY(i), attribute.getZ(i))
+            .applyMatrix4(object.matrixWorld);
+          worldToCastle(corner, corner);
+          local.expandByPoint(corner);
+        }
+      });
+      if (!local.isEmpty()) {
+        castleRoofGardenInCastleFrame = {
+          minX: local.min.x,
+          maxX: local.max.x,
+          minZ: local.min.z,
+          maxZ: local.max.z,
+          // `local` is a box in the CASTLE's own axes, built by putting every
+          // drawn vertex through `worldToCastle` — so its `+Y` is the castle's
+          // own up, and `max.y` is the top of the roof garden measured along
+          // the direction the castle actually stands in. It is the fix for an
+          // axis-aligned box round a leaning body, not an instance of one: the
+          // world-axis version of this very number read 8.06 m where this reads
+          // 11.80 m, and reported the ginormous slide 0.22 m inside a roof it
+          // in fact clears by 5.02 m.
+          // flat-ok: `local` is in the castle's own axes, so +Y is the castle's up
+          topY: local.max.y,
+        };
+      }
     }
   }
 
@@ -1796,9 +2147,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     // questions of the sixteen pool seeds and must get its answers the same
     // way. It imports nothing but `three`, so it is safe here: nothing in it
     // reads the seed at module load.
-    const measured = measureGateArch(scene);
+    const { terrainHeight: groundAt } = await import('../../src/world/terrain.ts');
+    const measured = measureGateArch(scene, groundAt);
     if (measured) {
-      const { terrainHeight: groundAt } = await import('../../src/world/terrain.ts');
       parkGateArch = {
         minX: measured.minX,
         maxX: measured.maxX,
@@ -1812,8 +2163,9 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
         posts: measured.posts,
         // Against the terrain, never against the arch's own base: an arch
         // sunk into the paving takes its base down with it and a
-        // base-relative number cannot see that.
-        headroom: measured.lowestOverheadY - groundAt(measured.centreX, measured.centreZ),
+        // base-relative number cannot see that. `measureGateArch` owns the
+        // subtraction — see the field's docblock.
+        headroom: measured.headroom,
         lowestOverheadAt: measured.lowestOverheadAt,
         forwardX: measured.forwardX,
         forwardZ: measured.forwardZ,
@@ -2010,8 +2362,10 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
 
   const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
   const castleTowers: {
-    name: string; x: number; z: number;
-    bottomY: number; topY: number; radiusBottom: number; radiusTop: number;
+    name: string;
+    footX: number; footY: number; footZ: number;
+    tipX: number; tipY: number; tipZ: number;
+    radiusBottom: number; radiusTop: number;
   }[] = [];
   scene.traverse((object) => {
     if (!(object instanceof InstancedMeshClass)) return;
@@ -2026,16 +2380,24 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     const local = new Matrix4();
     const composed = new Matrix4();
     const centre = new Vector3();
+    const axis = new Vector3();
     for (let i = 0; i < object.count; i += 1) {
       object.getMatrixAt(i, local);
       composed.multiplyMatrices(object.matrixWorld, local);
       centre.setFromMatrixPosition(composed);
+      // The part's own axis, read off the composed matrix: its local `+Y`
+      // column carries both the direction it stands in and its scale.
+      axis.setFromMatrixColumn(composed, 1);
+      const length = axis.length() * params.height;
+      axis.normalize();
       castleTowers.push({
         name: `${object.name}[${i}]`,
-        x: centre.x,
-        z: centre.z,
-        bottomY: centre.y - params.height / 2,
-        topY: centre.y + params.height / 2,
+        footX: centre.x - (axis.x * length) / 2,
+        footY: centre.y - (axis.y * length) / 2,
+        footZ: centre.z - (axis.z * length) / 2,
+        tipX: centre.x + (axis.x * length) / 2,
+        tipY: centre.y + (axis.y * length) / 2,
+        tipZ: centre.z + (axis.z * length) / 2,
         radiusBottom,
         radiusTop,
       });
@@ -2053,6 +2415,17 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       slide.pointAt(i / steps, probe);
       slide.group.localToWorld(probe);
       slideChute.push([probe.x, probe.y, probe.z]);
+    }
+  }
+
+  // The same chute in the castle's own axes — see `slideChuteInCastleFrame`.
+  const slideChuteInCastleFrame: (readonly [number, number, number])[] = [];
+  {
+    const { worldToCastle } = await import('../../src/world/building/layout.ts');
+    const probe = new Vector3();
+    for (const [x, y, z] of slideChute) {
+      worldToCastle(probe.set(x, y, z), probe);
+      slideChuteInCastleFrame.push([probe.x, probe.y, probe.z]);
     }
   }
 
@@ -2120,6 +2493,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     samples: number;
     nearest: number;
     farthest: number;
+    worstExtent: number;
+    worstEndOn: number;
   }[] = [];
   const slideShotSpans = world.building.slideShots.shots.map((shot) => ({
     kind: shot.kind,
@@ -2132,6 +2507,14 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     // trough floor itself would be a harder test than the game ever asks for.
     const RIDER_ABOVE_FLOOR = 0.24;
     const SAMPLES = 40;
+    // How a reclining rider lies along the chute, from the one owner of it —
+    // `ridePose.ts`, the same angle `Building` poses her at and every pet
+    // follows her down at. Needed because how much of her a camera can show
+    // depends on the angle between its line of sight and the axis she is lying
+    // along, not on distance alone.
+    const { RIDE_RECLINE } = await import('../../src/entities/ridePose.ts');
+    const LEAN = Math.abs(RIDE_RECLINE);
+    const bodyAxis = new Vector3();
     const caster = new RaycasterClass();
     const occluders = [slide.group, world.building.gardenRoot];
     const eye = new Vector3();
@@ -2148,6 +2531,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       let blocked = 0;
       let nearest = Infinity;
       let farthest = 0;
+      let worstExtent = Infinity;
+      let worstEndOn = 0;
       for (let i = 0; i <= SAMPLES; i += 1) {
         const t = shot.from + ((shot.to - shot.from) * i) / SAMPLES;
         slide.pointAt(t, point);
@@ -2170,6 +2555,22 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
         // not counted as something standing in the way.
         caster.far = reach - 0.12;
         if (caster.intersectObjects(occluders, true).length > 0) blocked += 1;
+
+        // **How much of her this eye can show here**, as the angular extent of
+        // her body: `sin(theta) / distance`, where theta is between the line of
+        // sight and the axis she lies along. Her length is deliberately left
+        // out — it would be a second description of how big a child is, and it
+        // scales every beat equally anyway. `toRider` is already normalised by
+        // the raycast above.
+        bodyAxis
+          .copy(up)
+          .multiplyScalar(Math.cos(LEAN))
+          .addScaledVector(tangent.clone().normalize(), -Math.sin(LEAN))
+          .normalize();
+        const endOn = Math.abs(toRider.dot(bodyAxis));
+        const sin = Math.sqrt(Math.max(0, 1 - endOn * endOn));
+        worstExtent = Math.min(worstExtent, sin / reach);
+        worstEndOn = Math.max(worstEndOn, endOn);
       }
       slideCameras.push({
         beat,
@@ -2180,6 +2581,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
         samples: SAMPLES + 1,
         nearest,
         farthest,
+        worstExtent,
+        worstEndOn,
       });
     }
   }
@@ -2269,6 +2672,63 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       .filter((zone) => zone.id.startsWith('stall:'))
       .map((zone) => ({ id: zone.id, x: zone.standX, z: zone.standZ })),
   ];
+
+  /**
+   * **Every stall, measured off the built park.**
+   *
+   * The booth group's own world matrix for where it is *drawn*; the built
+   * interact zone for where a child is sent; `boothFootprint.ts` for its body.
+   * Nothing here is read from the placement table, because a booth that
+   * stepped aside is exactly the case where the table and the scene could
+   * disagree, and that disagreement is what the invariant is for.
+   *
+   * Group names are the booths' own: the six mini-game booths name their prop
+   * `stall:<id>` (`minigames/stallProp.ts`), and the two one-off shops name
+   * theirs after themselves. A stall whose group cannot be found is left out
+   * of the list and the invariant fails on the count, rather than being
+   * quietly unmeasured.
+   */
+  const STALL_GROUP_NAMES: Readonly<Record<string, string>> = {
+    facePaint: 'facePaintStall',
+    keychain: 'keychainShop',
+  };
+  // Seed-dependent (the placements are a view on the layout the driver
+  // decided), so imported here after the world is built — never at this
+  // file's top level. `boothFootprint.ts` is safe to import statically: every
+  // one of its own imports is `import type`, so it pulls nothing in at runtime.
+  const { STALL_PLACEMENTS, stallShift } = await import('../../src/minigames/stallPlacement.ts');
+  const stallZones = new Map(
+    world
+      .interactZones()
+      .filter((zone) => /^stall:[^:]+$/.test(zone.id))
+      .map((zone) => [zone.id.slice('stall:'.length), zone]),
+  );
+  const stalls: StallFact[] = [];
+  const stallsMissing: string[] = [];
+  for (const id of Object.keys(STALL_PLACEMENTS)) {
+    const groupName = STALL_GROUP_NAMES[id] ?? `stall:${id}`;
+    const group = scene.getObjectByName(groupName);
+    const zone = stallZones.get(id);
+    if (!group || !zone) {
+      // Named, never silently dropped: a booth with no group in the scene or
+      // no interact zone is a booth nothing below could measure, and a shorter
+      // list that says nothing is how a check stops covering something.
+      stallsMissing.push(`${id} (${group ? '' : `no scene group '${groupName}'`}${group || zone ? '' : ', '}${zone ? '' : 'no interact zone'})`);
+      continue;
+    }
+    group.updateMatrixWorld(true);
+    const at = new Vector3().setFromMatrixPosition(group.matrixWorld);
+    const [shiftX, shiftZ] = stallShift(id);
+    stalls.push({
+      id,
+      drawnX: at.x,
+      drawnZ: at.z,
+      box: boothBoxFor(id),
+      standX: zone.standX,
+      standZ: zone.standZ,
+      steppedAside: Math.hypot(shiftX, shiftZ),
+    });
+  }
 
   // The six keyring stand points, read with the rack's own zoomed view opened
   // — see {@link ParkFacts.keychainKeyringEntrances}'s own doc comment for why
@@ -2443,67 +2903,34 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
   const raceRoute = world.railRace.raceRoute;
 
   /**
-   * Arc distance from the arch of the ring point nearest `(x, z)`.
+   * A drawn thing's distance from the start/finish arch, in metres of the
+   * shared arc length everything in this ride is addressed by.
    *
-   * **Inverted against the path itself, not against a formula for it.** This
-   * used to invert `angleAt(s) = -s / NOMINAL_RADIUS` in closed form, which was
-   * exact while the ring was a circle and became meaningless the moment #216
-   * made it follow the park boundary — `NOMINAL_RADIUS` is not even exported
-   * any more, so the closed form silently produced `NaN` and every bar deduped
-   * to a single phantom. Walking `route.path`'s own samples works for whatever
-   * shape the ring is next, which is the point.
-   *
-   * The samples sit ~0.25 m apart, which is half the distance a rider covers in
-   * a frame — too coarse to compare against on its own — so the nearest one is
-   * refined by projecting onto the polyline either side of it. That lands well
-   * inside a centimetre.
+   * **Through the ring's own `stationOf`, not by nearest point in plan.** A
+   * duck bar hangs ten metres above the rails and the whole ride is leant onto
+   * the sphere, so the bar's plan position stands metres outside the centre
+   * line — and on a spline whose bend varies, the nearest point of that line
+   * can belong to a quite different part of the loop. Measured on the canonical
+   * seed, that read a bar 12.8 m from where it is: the invariant below
+   * faithfully reported the bonk landing "after the bar", and the bar was
+   * exactly where it should be. `stationOf` refines in the chart, where the
+   * projection is unambiguous.
    */
-  const archRelative = (x: number, z: number): number => {
-    const samples = raceRoute.path.samples;
-    let nearest = 0;
-    let nearestD2 = Infinity;
-    for (let i = 0; i < samples.length; i += 1) {
-      const s = samples[i]!;
-      const d2 = (s.x - x) * (s.x - x) + (s.z - z) * (s.z - z);
-      if (d2 < nearestD2) {
-        nearestD2 = d2;
-        nearest = i;
-      }
-    }
-    let bestAt = samples[nearest]!.at;
-    let bestD2 = nearestD2;
-    for (const step of [-1, 1]) {
-      const a = samples[nearest]!;
-      const b = samples[(nearest + step + samples.length) % samples.length]!;
-      const ex = b.x - a.x;
-      const ez = b.z - a.z;
-      const len2 = ex * ex + ez * ez;
-      if (len2 === 0) continue;
-      const t = Math.max(0, Math.min(1, ((x - a.x) * ex + (z - a.z) * ez) / len2));
-      const px = a.x + ex * t;
-      const pz = a.z + ez * t;
-      const d2 = (px - x) * (px - x) + (pz - z) * (pz - z);
-      if (d2 < bestD2) {
-        bestD2 = d2;
-        // `samples` are evenly spaced in arc length, so `t` interpolates it.
-        bestAt = raceRoute.wrap(a.at + step * t * (raceRoute.length / samples.length));
-      }
-    }
-    return raceRoute.wrap(bestAt - raceRoute.startDistance);
-  };
+  const archRelative = (drawn: { x: number; y: number; z: number }): number =>
+    raceRoute.wrap(raceRoute.stationOf(drawn) - raceRoute.startDistance);
+
   const raceRing = world.railRace.group.getObjectByName('railRace:race-ring');
   const barsMesh = raceRing?.getObjectByName('railRace:duck-bars');
   const builtBarDistances: number[] = [];
   if (barsMesh instanceof Instanced) {
     const matrix = new Mat4();
     const at = new Vec3();
-    const laneProbe = new Vec3();
     for (let i = 0; i < barsMesh.count; i += 1) {
       barsMesh.getMatrixAt(i, matrix);
       at.setFromMatrixPosition(matrix);
       // The bar's real arc position, read off its own matrix rather than off
       // the rule that placed it.
-      const arch = archRelative(at.x, at.z);
+      const arch = archRelative(at);
 
       // **Which lane is it on?** Since 7 August a duck bar crosses one lane
       // rather than all four (`hazards.ts`'s `DuckBar.lane`), so the rider
@@ -2513,15 +2940,31 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       // and is false now, and left in place it made the invariant demand that a
       // rider be bonked by three other people's bars.
       //
-      // Decided by measuring the bar against each lane's own centre point at its
-      // own arc distance — not by its distance from the origin, which stopped
-      // meaning anything when #216 made this ring a spline whose radius varies
-      // by 40 m.
+      // **Asked in the chart, by lane offset.** It compared the bar's plan
+      // position with each lane's plan position, and a bar hangs a rider's
+      // height above the rails on a ride leant onto the sphere — so it stands
+      // further out in plan than the rail it straddles and lands squarely over
+      // the *next lane out*. Measured on the canonical seed: 34 of the ring's
+      // 40 bars were filed one lane too far out, and the rider on lane 3 was
+      // then held to bars belonging to lane 2. That is the whole of the "bonks
+      // 12.5 m after the bar" failure — the bonk was the next real lane-3 bar
+      // along, and the bar it was blamed on was somebody else's.
+      //
+      // Unleaning removes the height entirely: in the chart a bar sits at
+      // exactly its own lane's offset from the centre line, whatever it does
+      // in the air.
+      const across = raceRoute.unlean(
+        raceRoute.wrap(raceRoute.startDistance + arch),
+        at,
+        new Vec3(),
+      );
+      const station = raceRoute.path.sampleAt(raceRoute.wrap(raceRoute.startDistance + arch));
+      const offset =
+        (across.x - station.x) * station.normalX + (across.z - station.z) * station.normalZ;
       let onLane = 0;
       let nearest = Infinity;
       for (let lane = 0; lane < world.railRace.laneCount; lane += 1) {
-        raceRoute.pointAt(lane, raceRoute.wrap(raceRoute.startDistance + arch), laneProbe);
-        const d = Math.hypot(laneProbe.x - at.x, laneProbe.z - at.z);
+        const d = Math.abs(offset - (raceRoute.laneOffsets[lane] ?? 0));
         if (d < nearest) {
           nearest = d;
           onLane = lane;
@@ -3252,9 +3695,93 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     }
   }
 
+  // See `ParkFacts.cruiserPylonTops`: the drawn top of each pylon, unleant back
+  // into the flat frame `coaster.route` is solved in, so an invariant compares
+  // like with like.
+  //
+  // **This block imports `unplaceFromSphere` itself, and must keep doing so.**
+  // It used to lean on the binding the Rail Race's strut block destructured a
+  // few hundred lines up, with a comment saying as much. #684 then stopped the
+  // Rail Race needing it ("Not `unplaceFromSphere`, which this used to call"),
+  // the binding went with it, and a rebase left this reaching for a name that
+  // no longer existed. The tell was not a red test: every seed suite threw in
+  // `buildParkFacts` and vitest reported **203 passed | 490 skipped**, zero
+  // failures — CLAUDE.md's "a skipped test is not a passing test", where the
+  // pass count is the only thing that gives it away. One block, one import, no
+  // shared binding to lose.
+  const cruiserPylonTops: { x: number; y: number; z: number }[] = [];
+  {
+    const pylons = world.coaster.group.getObjectByName('skyCruiser:pylons');
+    if (pylons instanceof InstancedMesh) {
+      const { unplaceFromSphere } = await import('../../src/world/terrain.ts');
+      const { Matrix4: PylonMatrix4 } = await import('three');
+      const matrix = new PylonMatrix4();
+      const drawn = new Vector3();
+      for (let i = 0; i < pylons.count; i += 1) {
+        pylons.getMatrixAt(i, matrix);
+        // The top of a unit-height cylinder, which is where the post ends.
+        drawn.set(0, 0.5, 0).applyMatrix4(matrix);
+        const flat = unplaceFromSphere(drawn, new Vector3());
+        cruiserPylonTops.push({ x: flat.x, y: flat.y, z: flat.z });
+      }
+    }
+  }
+
+  // The fairy-light rig, counted off the scene it drew.
+  //
+  // **Poles and strings only, and both are meshes.** This used to carry a
+  // `slots` field taken from `FAIRY_POLE_COUNT`, which was honest while the
+  // plaza ring was the only chain and became a lie the moment the poles also
+  // followed the paths: the coverage line read "fairy poles 105 (out of 10
+  // slots offered)". A slot is a thing the *builder* planned and never draws,
+  // so it cannot be measured off the built park at all — and a denominator
+  // that cannot be measured has no business in a line that reports
+  // measurements. It is gone rather than corrected.
+  const fairyLightsDrawn = ((): ParkFacts['fairyLights'] => {
+    let poles = 0;
+    let strings = 0;
+    world.fairyLights.group.traverse((object) => {
+      if (object.name.startsWith('fairy-pole-')) poles += 1;
+      else if (object.name.startsWith('fairy-string-')) strings += 1;
+    });
+    return { poles, strings };
+  })();
+
+  // The bus's run, from the same owners `ArrivalSequence.placeBus` and
+  // `check:swept-bus` read: it drives the road's arc from `entranceBusArriveAt()`
+  // to `entranceBusVanishAt()`, its body reaching half its own length beyond
+  // each, as wide as the bus. Beyond the road's own ends a station is clamped,
+  // so the overhang is carried on straight along the facing there.
+  const { entranceBusArriveAt, entranceBusVanishAt, entranceRoadAt, entranceRoadFacing } =
+    await import('../../src/world/entrance/roadRoute.ts');
+  const { CAT_BUS_LENGTH, CAT_BUS_WIDTH } = await import('../../src/world/entrance/catBus.ts');
+  const busRun = ((): ParkFacts['busRun'] => {
+    const from = entranceBusArriveAt() + CAT_BUS_LENGTH / 2;
+    const to = entranceBusVanishAt() - CAT_BUS_LENGTH / 2;
+    const halfWidth = CAT_BUS_WIDTH / 2;
+    const samples: { x: number; z: number }[] = [];
+    for (let at = from; at >= to; at -= PLAYER_RADIUS) {
+      const station = entranceRoadAt(at);
+      const facing = entranceRoadFacing(at);
+      // The bus's nose points down decreasing `at`: forward is (sin, cos) of
+      // the facing, and its right-hand side is (cos, -sin).
+      const forwardX = Math.sin(facing);
+      const forwardZ = Math.cos(facing);
+      const over = at - station.at;
+      const cx = station.x - forwardX * over;
+      const cz = station.z - forwardZ * over;
+      for (const across of [-halfWidth, 0, halfWidth]) {
+        samples.push({ x: cx + Math.cos(facing) * across, z: cz - Math.sin(facing) * across });
+      }
+    }
+    return { samples, length: from - to, halfWidth };
+  })();
+
   return {
     roadCorridor,
     castleTurrets,
+    railRaceSupports,
+    busRun,
     laneCarriageway,
     laneGreenery,
     laneRoadHalfWidth: ROAD_HALF_WIDTH,
@@ -3266,6 +3793,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
     cruiserRouteGroundClearance,
+    cruiserPylonTops,
     seed,
     world,
     walls,
@@ -3273,6 +3801,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     bushes,
     climbableTrees,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
+    fairyLights: fairyLightsDrawn,
     bridgeReservations,
     bridgeParapetRings,
     maxParapetHeight,
@@ -3283,6 +3812,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     plots,
     railRaceArchFeet,
     entrances,
+    stalls,
+    stallsMissing,
     keychainKeyringEntrances,
     catBus,
     hidingTheArrivingBus,
@@ -3293,6 +3824,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     pathEdges,
     pathConnectivityEdges,
     slideChute,
+    slideChuteInCastleFrame,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
     slideChuteBands,
     slideCameras,
@@ -3303,6 +3835,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     castleMasonryTopFacadeY,
     castleMasonryDesignTopY: CASTLE_MASONRY_TOP,
     castleRoofGarden,
+    castleRoofGardenInCastleFrame,
     parkGateArch,
     castleTowers,
     chuteEnvelope: CHUTE_ENVELOPE,

@@ -1,7 +1,8 @@
-import { Euler, Quaternion, Vector3, type Object3D } from 'three';
+import { Quaternion, Vector3, type Object3D } from 'three';
 import { SPACE_GARDEN, spaceAt } from './spaces';
 import { screenBasis3D, type ScreenBasis3D } from '../core/screenBasis';
 import { INDOOR_UP, tiltToSphere, upAt } from './terrain';
+import { headingTurn } from './headingTurn';
 
 /**
  * **Which way is up, for a thing that might be indoors or out.**
@@ -121,7 +122,6 @@ const _basisRight = /* @__PURE__ */ new Vector3();
 const _basisScreenUp = /* @__PURE__ */ new Vector3();
 
 const _tilt = /* @__PURE__ */ new Quaternion();
-const _euler = /* @__PURE__ */ new Euler();
 
 /**
  * Point an object along a yaw (and optionally a pitch) **and** stand it on the
@@ -146,7 +146,9 @@ const _euler = /* @__PURE__ */ new Euler();
  * The build-time helpers may pre-multiply safely, because they run once.
  */
 export function faceOnGround(object: Object3D, yaw: number, pitch = 0): void {
-  object.quaternion.setFromEuler(_euler.set(pitch, yaw, 0));
+  // Yaw, then pitch in the yawed frame — `headingTurn` owns the order, and the
+  // ride carts' `rideFrame` asks the same function. See its header.
+  headingTurn(yaw, pitch, object.quaternion);
   const { x, y, z } = object.position;
   if (spaceAt(x, z) !== SPACE_GARDEN) return;
   object.quaternion.premultiply(tiltToSphere(x, y, z, _tilt));

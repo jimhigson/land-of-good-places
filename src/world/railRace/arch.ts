@@ -1,6 +1,10 @@
 import { Vector3 } from 'three';
 import { RIDER_HEAD_TOP_AT_PARK_SCALE } from './hazards';
-import { RIDE_SCALE, type RailRaceRoute, UNDULATION_REACH } from './route';
+import { type RailRaceRoute, UNDULATION_REACH } from './route';
+// Straight from the leaf rather than through `route.ts`'s re-export — see the
+// same import in `plan.ts` for why a re-export is order-dependent and a leaf
+// is not.
+import { RIDE_SCALE } from './dimensions';
 
 /**
  * **Where the finish rainbow's feet come down — the one owner of that answer.**
