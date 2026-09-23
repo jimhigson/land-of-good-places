@@ -6203,8 +6203,14 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
     const topIndex = top.getIndex();
     if (!topPos || !topIndex) continue;
 
-    /** Height of the parapet's top face at `(x, z)`, or null if not over it. */
-    const wallTopAt = (x: number, z: number): number | null => {
+    /**
+     * The plane of the parapet-top triangle over `(x, z)`, as a function
+     * giving its height anywhere — or null if `(x, z)` is over no triangle.
+     * One triangle, found at one point, then extended: so every vertex of a
+     * block's end can be judged against the cap *that end sits on* without
+     * any of them straddling onto a neighbouring quad.
+     */
+    const wallTopPlaneAt = (x: number, z: number): ((px: number, pz: number) => number) | null => {
       for (let t = 0; t < topIndex.count; t += 3) {
         const ia = topIndex.getX(t);
         const ib = topIndex.getX(t + 1);
@@ -6221,7 +6227,14 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
         const v = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / area;
         const w = 1 - u - v;
         if (u < -1e-6 || v < -1e-6 || w < -1e-6) continue;
-        return u * topPos.getY(ia) + v * topPos.getY(ib) + w * topPos.getY(ic);
+        const ya = topPos.getY(ia);
+        const yb = topPos.getY(ib);
+        const yc = topPos.getY(ic);
+        return (px, pz) => {
+          const pu = ((bz - cz) * (px - cx) + (cx - bx) * (pz - cz)) / area;
+          const pv = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) / area;
+          return pu * ya + pv * yb + (1 - pu - pv) * yc;
+        };
       }
       return null;
     };
@@ -6297,28 +6310,37 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
       let blockAt = '';
       for (const end of baseEnds) {
         let x = 0;
-        let y = 0;
         let z = 0;
         for (const k of end) {
           const i = block * perBlock + k;
           x += copingPos.getX(i);
-          y += copingPos.getY(i);
           z += copingPos.getZ(i);
         }
         x /= end.length;
-        y /= end.length;
         z /= end.length;
-        const surface = wallTopAt(x, z);
-        if (surface === null) {
+        const plane = wallTopPlaneAt(x, z);
+        if (plane === null) {
           blockOff = true;
           continue;
         }
-        // Seated means exactly `COPING_SINK` below the drawn top. Above that
-        // is a floating stone; well below it is a stone buried in its wall.
-        const gap = y - (surface - COPING_SINK);
-        if (Math.abs(gap) > Math.abs(blockWorst)) {
-          blockWorst = gap;
-          blockAt = `(${fmt([x, z])})`;
+        // Seated means exactly `COPING_SINK` below the drawn top — at **every**
+        // base-face vertex of this end, not just its midpoint. The midpoint
+        // alone lies on the stone's centreline, so a block rolled about its
+        // long axis (one side edge lifted, the other sunk — 0.023 m each at
+        // 10°) moved neither end midpoint and passed; a reviewer planted
+        // exactly that. Each vertex is judged against the plane of the cap
+        // triangle under this end's midpoint (see {@link wallTopPlaneAt}), so
+        // the side edges are measured without straddling a neighbouring quad.
+        // Above is a floating stone; below is a stone buried in its wall.
+        for (const k of end) {
+          const i = block * perBlock + k;
+          const vx = copingPos.getX(i);
+          const vz = copingPos.getZ(i);
+          const gap = copingPos.getY(i) - (plane(vx, vz) - COPING_SINK);
+          if (Math.abs(gap) > Math.abs(blockWorst)) {
+            blockWorst = gap;
+            blockAt = `(${fmt([vx, vz])})`;
+          }
         }
       }
       if (blockOff) offWall += 1;
