@@ -150,10 +150,27 @@ written; `vite build` reports gzip for the shipped copy within 0.1 KB of these.
 | 451 | 33.1 KB | 14.8 KB | 12.9 KB | 676 ms | 109 ms |
 | **pool total** | **249.5 KB** | **110.5 KB** | **97.2 KB** | | |
 
+**As served** by the Cloudflare preview (`content-encoding: br`, measured with
+`curl`): 9.0–14.1 KB brotli per park, **106.4 KB brotli / 115.4 KB gzip for
+the whole pool** (249.8 KB identity).
+
 Seeds 0..15 (`check:every-seed-builds`' sweep, `LGP_SEEDS=0,…,15`) total
 **397.3 KB raw, 176.3 KB gzip, 155.6 KB brotli**, 21.4–29.1 KB each. The
 searches there are where the real spread is: **seed 7 takes 217 s** of CPU to
 solve on this Mac, seed 4 40 s, seed 3 26 s — each hydrates in under 0.1 s.
+
+### A finding: parks already differ between machines, by an ulp
+
+CI (Linux x64) and this Mac (arm64) solve the same seed to decisions that
+differ in the last bits — seed 11's train and bridge sites by at most
+**1.1e-13 m** over 102 numbers, seed 208's layout by 7e-15 m, seed 326 not at
+all. Harmless in the park, but it moves the whole-park digest (vertices are
+hashed at 1e-6, and a million vertices put some on a rounding edge): seed 326,
+with byte-identical decisions, digests differently on the two machines. So a
+digest is only ever compared on the machine that produced both sides — which
+is what `build:parks` does — and never carried from one machine to another.
+It also means that today every device builds a very slightly different park;
+with prebuilt parks the *plan* is the CI machine's everywhere.
 
 ## 2. Which parks
 
