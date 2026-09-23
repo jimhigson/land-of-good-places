@@ -6173,24 +6173,60 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
     const copingPos = coping.geometry.getAttribute('position');
     if (!copingPos) continue;
 
-    // **Measure each block's base, not every vertex.** A coping block is
-    // tilted onto the local grade, and near a ramp foot the parapet's own top
-    // line is very steep indeed — the wall is collapsing through its taper
-    // while the road merely descends. Comparing a *tilted block's top face*
-    // against the wall vertically beneath it therefore reads high by up to
-    // 0.12 m on perfectly seated stone: the top face is displaced along the
-    // slope, so it is over wall that is lower than the wall its own base sits
-    // on. That is trigonometry, not daylight. The base is the honest question,
-    // and it is exact: a seated block's lowest vertices sit `COPING_SINK`
-    // below the drawn top, to the millimetre.
-    const perBlock = bridgeStoneGeometry('coping').getAttribute('position')?.count ?? 0;
-    if (perBlock === 0 || copingPos.count % perBlock !== 0) {
+    // **Measure each block's base face, found by what it is, not by where it
+    // happens to be lowest.** A coping block is tilted onto the local grade,
+    // and near a ramp foot the parapet's own top line is very steep indeed —
+    // the wall is collapsing through its taper while the road merely
+    // descends. Comparing a *tilted block's top face* against the wall
+    // vertically beneath it therefore reads high by up to 0.12 m on perfectly
+    // seated stone: that is trigonometry, not daylight. The base is the honest
+    // question, and it is exact: a seated block's base face sits
+    // `COPING_SINK` below the drawn top, to the millimetre.
+    //
+    // **The base is the authored stone's own bottom face (its lowest authored
+    // `y`), picked by vertex index — never "whichever baked vertices are
+    // lowest in the world".** Those were the same thing only while a block
+    // was shallower than about 48°. The stone has a 2 cm chamfer round its
+    // foot, so the bottom of its *end* face sits 0.02 up and 0.016 out from
+    // the base corner; tilt the block past `atan(0.02 / 0.016·scale)` and that
+    // end-face edge drops below the base. The first block of each run, laid
+    // up the steepest part of a ramp-foot taper, is tilted ~50°, so the old
+    // lowest-vertex rule measured the chamfer and reported a perfectly seated
+    // stone as 0.031 m afloat — seeds 11 and 131, three bridges, for weeks.
+    // Measured by recovering each block's placement from its own vertices:
+    // its true base sat within 0.1 mm of `top - COPING_SINK` at both ends.
+    //
+    // Each end of the base is judged, not just its middle: a block that
+    // lifted off at one end and dug in at the other would average to
+    // "seated" at its centre. Each end's midpoint is on the wall line and a
+    // joint's half-width inside its own segment, so it belongs to that
+    // segment's cap and there is nothing to straddle (see seed 5's note in
+    // the history of this invariant: a corner *can* straddle, a mid-edge
+    // point on the wall line cannot).
+    const authored = bridgeStoneGeometry('coping').getAttribute('position');
+    const perBlock = authored?.count ?? 0;
+    if (!authored || perBlock === 0 || copingPos.count % perBlock !== 0) {
       complaints.push(
         `bridge-${crossing.railDistance.toFixed(1)}: its coping mesh has ` +
           `${copingPos.count} vertices, not a whole number of ${perBlock}-vertex ` +
           'authored blocks — the bake has changed shape and this is measuring nothing',
       );
       continue;
+    }
+    let authoredFloor = Infinity;
+    for (let k = 0; k < perBlock; k += 1) authoredFloor = Math.min(authoredFloor, authored.getY(k));
+    /** Authored base-face vertex indices, split by which end of the stone. */
+    const baseEnds: [number[], number[]] = [[], []];
+    for (let k = 0; k < perBlock; k += 1) {
+      if (authored.getY(k) - authoredFloor > 1e-4) continue;
+      baseEnds[authored.getZ(k) < 0 ? 0 : 1].push(k);
+    }
+    if (baseEnds[0].length === 0 || baseEnds[1].length === 0) {
+      complaints.push(
+        'the authored coping stone has no flat base face with two ends — the asset ' +
+          'has changed shape and this invariant is measuring nothing',
+      );
+      return complaints;
     }
 
     const tolerance = 0.02;
@@ -6200,46 +6236,41 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
     let offWall = 0;
     const blocks = copingPos.count / perBlock;
     for (let block = 0; block < blocks; block += 1) {
-      // **The centre of the block's base face**, not a corner of it. A corner
-      // sits on the very edge of the parapet-top quad it belongs to, so on a
-      // curving spine the plan projection can land it on the *neighbouring*
-      // quad instead — which is at a slightly different height, and reads as a
-      // 3 cm error on a stone that is in fact seated perfectly (measured, seed
-      // 5, one block of eighty). The base centre is mid-quad and on the wall
-      // line, so it belongs to exactly one triangle and there is nothing to
-      // straddle. Loosening the tolerance instead would have been this file's
-      // own forbidden move: never weaken an assertion to make a seed pass.
-      let lowest = Infinity;
-      for (let k = 0; k < perBlock; k += 1) {
-        lowest = Math.min(lowest, copingPos.getY(block * perBlock + k));
+      let blockOff = false;
+      let blockWorst = 0;
+      let blockAt = '';
+      for (const end of baseEnds) {
+        let x = 0;
+        let y = 0;
+        let z = 0;
+        for (const k of end) {
+          const i = block * perBlock + k;
+          x += copingPos.getX(i);
+          y += copingPos.getY(i);
+          z += copingPos.getZ(i);
+        }
+        x /= end.length;
+        y /= end.length;
+        z /= end.length;
+        const surface = wallTopAt(x, z);
+        if (surface === null) {
+          blockOff = true;
+          continue;
+        }
+        // Seated means exactly `COPING_SINK` below the drawn top. Above that
+        // is a floating stone; well below it is a stone buried in its wall.
+        const gap = y - (surface - COPING_SINK);
+        if (Math.abs(gap) > Math.abs(blockWorst)) {
+          blockWorst = gap;
+          blockAt = `(${fmt([x, z])})`;
+        }
       }
-      let x = 0;
-      let z = 0;
-      let onBase = 0;
-      for (let k = 0; k < perBlock; k += 1) {
-        const i = block * perBlock + k;
-        if (copingPos.getY(i) - lowest > 1e-3) continue;
-        x += copingPos.getX(i);
-        z += copingPos.getZ(i);
-        onBase += 1;
-      }
-      if (onBase === 0) continue;
-      x /= onBase;
-      z /= onBase;
-
-      const surface = wallTopAt(x, z);
-      if (surface === null) {
-        offWall += 1;
-        continue;
-      }
-      // Seated means exactly `COPING_SINK` below the drawn top. Above that is
-      // a floating stone; well below it is a stone buried in its own wall.
-      const gap = lowest - (surface - COPING_SINK);
-      if (Math.abs(gap) > tolerance) {
+      if (blockOff) offWall += 1;
+      if (Math.abs(blockWorst) > tolerance) {
         floating += 1;
-        if (Math.abs(gap) > Math.abs(worstFloat)) {
-          worstFloat = gap;
-          worstAt = `(${fmt([x, z])})`;
+        if (Math.abs(blockWorst) > Math.abs(worstFloat)) {
+          worstFloat = blockWorst;
+          worstAt = blockAt;
         }
       }
     }
