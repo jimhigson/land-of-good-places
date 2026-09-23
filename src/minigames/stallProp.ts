@@ -1,5 +1,7 @@
 import {
   BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
   ConeGeometry,
   CylinderGeometry,
   Group,
@@ -9,6 +11,7 @@ import {
   TorusGeometry,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../core/palette';
 import { addOutline, decal, solid, toonMaterial } from '../art/style/materials';
 // The stand distance lives with the coordinates rather than with the geometry:
@@ -157,19 +160,20 @@ export function createStallProp(definition: StallDefinition): StallProp {
   const stripes = 9;
   const stripeWidth = STALL_WIDTH / stripes;
   const awningDepth = 1.85;
+  // One scallop shape for every stripe of this booth — see `scallopGeometry`.
+  const scallopShape = scallopGeometry(stripeWidth * SCALLOP_LENGTH_OF_STRIPE);
   for (let i = 0; i < stripes; i += 1) {
     const x = -halfWidth + (i + 0.5) * stripeWidth;
     const material = i % 2 === 0 ? accentMaterial : stripeMaterial;
 
-    const cloth = solid(new Mesh(new BoxGeometry(stripeWidth, 0.11, awningDepth), material));
+    const cloth = solid(new Mesh(new BoxGeometry(stripeWidth, AWNING_CLOTH_THICKNESS, awningDepth), material));
     cloth.position.set(x, 0, 0);
     awning.add(cloth);
 
     // The scalloped valance: a half-cylinder hanging off the front edge of each
     // stripe. This one detail is most of why the booth reads as "fairground".
-    const scallop = solid(new Mesh(new CylinderGeometry(0.22, 0.22, stripeWidth * 0.96, 12, 1, false, 0, Math.PI), material));
-    scallop.rotation.z = Math.PI / 2;
-    scallop.position.set(x, -0.1, awningDepth / 2);
+    const scallop = solid(new Mesh(scallopShape, material));
+    scallop.position.set(x, -SCALLOP_DROP, awningDepth / 2);
     awning.add(scallop);
   }
 
@@ -241,4 +245,141 @@ export function createStallProp(definition: StallDefinition): StallProp {
       });
     },
   };
+}
+
+/** Thickness of one awning stripe's cloth slab. */
+const AWNING_CLOTH_THICKNESS = 0.11;
+/** Radius of the half-cylinder scallop on the front edge of each stripe. */
+const SCALLOP_RADIUS = 0.22;
+/** How far the scallop's axis sits below the middle of its cloth. */
+const SCALLOP_DROP = 0.1;
+/** The scallop's length as a share of its stripe's width — a hair short, so neighbours read as separate. */
+const SCALLOP_LENGTH_OF_STRIPE = 0.96;
+/** Facets round the scallop's half-circle. */
+const SCALLOP_SEGMENTS = 12;
+
+/**
+ * **The scallop on the front edge of an awning stripe, with the part of its
+ * end caps that is buried inside the cloth cut away.**
+ *
+ * The scallop is a half-cylinder lying along the stripe, a hair shorter than
+ * it ({@link SCALLOP_LENGTH_OF_STRIPE}), with its axis on the cloth's front
+ * edge. So a good part of each end cap is *inside* the cloth slab, standing
+ * 9 mm in from the slab's own end face and pointing the same way.
+ * `check:coplanar` reported those as a seam on every stall in the park — 0.19
+ * m² of shared plane on the dodgems — and `ART_DIRECTION.md` §7 says the cure
+ * is to delete the face nobody can see, not to hold the two apart. The tube
+ * itself is untouched and the cap keeps every part of itself that is outside
+ * the cloth: in front of it, under it and above it. Nothing on screen changes.
+ *
+ * Built in the stripe's own frame, axis along X, origin on the axis: the tube
+ * is the upper half (`y >= 0`), and the cloth occupies
+ * `SCALLOP_DROP ± AWNING_CLOTH_THICKNESS / 2` in Y and everything behind the
+ * axis (`z <= 0`) in Z. The caps are cut into convex pieces along the cloth's
+ * top, bottom and front planes, so neighbouring pieces share whole edges and
+ * leave no T-junction inside the cap.
+ */
+function scallopGeometry(length: number): BufferGeometry {
+  // The tube: an open half-cylinder, stood on its side the way the old mesh
+  // was turned with `rotation.z = PI / 2` — baked in here instead.
+  const tube = new CylinderGeometry(
+    SCALLOP_RADIUS,
+    SCALLOP_RADIUS,
+    length,
+    SCALLOP_SEGMENTS,
+    1,
+    true,
+    0,
+    Math.PI,
+  )
+    .rotateZ(Math.PI / 2)
+    .toNonIndexed();
+
+  // After that turn a rim point at angle t is (y, z) = (R sin t, R cos t).
+  const rim: [number, number][] = [];
+  for (let k = 0; k <= SCALLOP_SEGMENTS; k += 1) {
+    const t = (k / SCALLOP_SEGMENTS) * Math.PI;
+    rim.push([SCALLOP_RADIUS * Math.sin(t), SCALLOP_RADIUS * Math.cos(t)]);
+  }
+  /** The whole half-disc three.js would have capped the tube with. */
+  const halfDisc: [number, number][] = [[0, 0], ...rim];
+
+  const clothBottom = SCALLOP_DROP - AWNING_CLOTH_THICKNESS / 2;
+  const clothTop = SCALLOP_DROP + AWNING_CLOTH_THICKNESS / 2;
+  // A half-plane is `a·y + b·z <= c`.
+  type HalfPlane = readonly [a: number, b: number, c: number];
+  const inFront: HalfPlane = [0, -1, 0];
+  const behind: HalfPlane = [0, 1, 0];
+  const belowCloth: HalfPlane = [1, 0, clothBottom];
+  const aboveBottom: HalfPlane = [-1, 0, -clothBottom];
+  const belowTop: HalfPlane = [1, 0, clothTop];
+  const aboveCloth: HalfPlane = [-1, 0, -clothTop];
+  const pieces = [
+    // In front of the cloth: all of it shows, cut at the cloth's two planes
+    // only so its edges meet the pieces behind it vertex for vertex.
+    clip(halfDisc, [inFront, belowCloth]),
+    clip(halfDisc, [inFront, aboveBottom, belowTop]),
+    clip(halfDisc, [inFront, aboveCloth]),
+    // Behind the front edge: only what hangs below the cloth, and what rises
+    // above it. The band between is inside the slab, and is what goes.
+    clip(halfDisc, [behind, belowCloth]),
+    clip(halfDisc, [behind, aboveCloth]),
+  ];
+
+  const capPositions: number[] = [];
+  for (const side of [-1, 1] as const) {
+    const x = (side * length) / 2;
+    for (const piece of pieces) {
+      for (let i = 1; i + 1 < piece.length; i += 1) {
+        type Corner = [number, number];
+        const corners = [piece[0], piece[i], piece[i + 1]] as [Corner, Corner, Corner];
+        // Wind each triangle to face out along this end's own X.
+        const [[y0, z0], [y1, z1], [y2, z2]] = corners;
+        const facingX = (y1 - y0) * (z2 - z0) - (z1 - z0) * (y2 - y0);
+        if (Math.abs(facingX) < 1e-12) continue;
+        const ordered: Corner[] = Math.sign(facingX) === side ? corners : [corners[0], corners[2], corners[1]];
+        for (const [y, z] of ordered) capPositions.push(x, y, z);
+      }
+    }
+  }
+  const caps = new BufferGeometry();
+  const vertexCount = capPositions.length / 3;
+  caps.setAttribute('position', new BufferAttribute(new Float32Array(capPositions), 3));
+  const capNormals = new Float32Array(vertexCount * 3);
+  for (let v = 0; v < vertexCount; v += 1) capNormals[v * 3] = Math.sign(capPositions[v * 3] as number);
+  caps.setAttribute('normal', new BufferAttribute(capNormals, 3));
+  caps.setAttribute('uv', new BufferAttribute(new Float32Array(vertexCount * 2), 2));
+
+  const merged = mergeGeometries([tube, caps]);
+  if (!merged) throw new Error('stallProp: the scallop tube and caps would not merge');
+  tube.dispose();
+  caps.dispose();
+  return merged;
+}
+
+/**
+ * Sutherland–Hodgman: a convex polygon in (y, z), kept to the side of each
+ * half-plane `a·y + b·z <= c`.
+ */
+function clip(
+  polygon: readonly [number, number][],
+  planes: readonly (readonly [number, number, number])[],
+): [number, number][] {
+  let out: [number, number][] = [...polygon];
+  for (const [a, b, c] of planes) {
+    const input = out;
+    out = [];
+    for (let i = 0; i < input.length; i += 1) {
+      const p = input[i] as [number, number];
+      const q = input[(i + 1) % input.length] as [number, number];
+      const dp = a * p[0] + b * p[1] - c;
+      const dq = a * q[0] + b * q[1] - c;
+      if (dp <= 0) out.push(p);
+      if ((dp < 0 && dq > 0) || (dp > 0 && dq < 0)) {
+        const t = dp / (dp - dq);
+        out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+      }
+    }
+  }
+  return out;
 }
