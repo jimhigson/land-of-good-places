@@ -2111,12 +2111,21 @@ function drawnMetresOnABridgeUncarried(
   points: readonly (readonly [number, number])[],
   width: number,
 ): number {
-  if (points.length < 2 || CROSSING_SITES.length === 0) return 0;
+  return drawnBridgeTrespass(points, width).metres;
+}
+
+/** {@link drawnMetresOnABridgeUncarried}, with the drawn samples that count. */
+function drawnBridgeTrespass(
+  points: readonly (readonly [number, number])[],
+  width: number,
+): { metres: number; at: { x: number; z: number }[] } {
+  const at: { x: number; z: number }[] = [];
+  if (points.length < 2 || CROSSING_SITES.length === 0) return { metres: 0, at };
   const curve = routeCurve({ name: 'bridge-screen', width, closed: false, points });
   // A candidate that collapses to a single point once drawn (a leg whose
   // every point is its own start) draws no paving at all — and a one-point
   // Catmull-Rom has no length to sample, it throws.
-  if (curve.points.length < 2) return 0;
+  if (curve.points.length < 2) return { metres: 0, at };
   const drawn = curvePoints(curve, pathDivisions(curve));
   const reach = width / 2 + PATH_KERB_OVERHANG;
   let metres = 0;
@@ -2137,16 +2146,113 @@ function drawnMetresOnABridgeUncarried(
         heading > 1e-9 && Math.abs((headingX * site.dirX + headingZ * site.dirZ) / heading) >= BRIDGE_CARRIED_COSINE;
       if (alongAxis && Math.abs(across) <= BRIDGE_CARRIED_OFFSET) continue;
       metres += stride;
+      at.push({ x: here.x, z: here.z });
       break;
     }
   }
-  return metres;
+  return { metres, at };
 }
 
-/** How squarely along a bridge's axis a drawn route must be heading for the
- * bridge to count as carrying it — cos 25°. A crossing leg is pinned dead
- * straight over the deck (`routeLeg`), so anything carried is well inside
- * this; a street turning off a ramp is well outside it. */
+/**
+ * **The one owner of "a drawn route keeps off every bridge it does not
+ * cross"** — a repair applied to every route as it joins the path graph, so
+ * whichever router produced it (the lattice, a fallback spur, the fence-follow
+ * and double-crossing machinery, a connector, the avenue) the paving that is
+ * drawn has been asked the same question the same way.
+ *
+ * Each stretch whose drawn ribbon stands on a bridge's stone without being
+ * carried by it ({@link drawnBridgeTrespass}) is cut out between the nearest
+ * control points either side that stand clear of every bridge, and re-routed
+ * between them by the axis-aligned router — to which bridges are obstacles
+ * ({@link segmentIsWalkable}). The replacement is kept only if it stays on the
+ * stretch's own side of the railway and the whole route then stands on less
+ * bridge than before; otherwise the route is returned as it was. A crossing's
+ * own deck run is carried, not trespass, and a stretch whose two clear ends lie
+ * on opposite sides of the railway is never touched, so no crossing is lost.
+ *
+ * Why a repair and not a screen per router: the sheets came from nine
+ * different producers (measured on the five test seeds and a 200-seed sweep,
+ * `noDrawnPavingStandsUpAsASheet`), and screening each one separately left the
+ * fence-follow runs — which no screen reached — hanging 4 m sheets on seeds 11
+ * and 24.
+ */
+function keepRouteOffBridges(
+  points: readonly (readonly [number, number])[],
+  width: number,
+): (readonly [number, number])[] {
+  let current: (readonly [number, number])[] = [...points];
+  const reach = width / 2 + PATH_KERB_OVERHANG;
+  for (let pass = 0; pass < 6; pass += 1) {
+    const trespass = drawnBridgeTrespass(current, width);
+    if (trespass.metres === 0) return current;
+    // Which control segments the trespassing drawn samples belong to.
+    const bad = new Set<number>();
+    for (const p of trespass.at) {
+      let best = 0;
+      let bestDistance = Infinity;
+      for (let i = 1; i < current.length; i += 1) {
+        const a = current[i - 1] as readonly [number, number];
+        const b = current[i] as readonly [number, number];
+        const d = distanceToSegmentXZ(p.x, p.z, a[0], a[1], b[0], b[1]);
+        if (d < bestDistance) {
+          bestDistance = d;
+          best = i - 1;
+        }
+      }
+      bad.add(best);
+    }
+    const segments = [...bad].sort((a, b) => a - b);
+    let improved = false;
+    // Latest stretch first, so earlier indices stay valid as later ones change.
+    let s1 = segments.length - 1;
+    while (s1 >= 0) {
+      let s0 = s1;
+      while (s0 > 0 && (segments[s0] as number) - (segments[s0 - 1] as number) <= 1) s0 -= 1;
+      let a = segments[s0] as number;
+      let b = (segments[s1] as number) + 1;
+      s1 = s0 - 1;
+      while (a > 0 && pointNearBridgeStone(current[a] as readonly [number, number], reach)) a -= 1;
+      while (b < current.length - 1 && pointNearBridgeStone(current[b] as readonly [number, number], reach)) b += 1;
+      const from = current[a] as readonly [number, number];
+      const to = current[b] as readonly [number, number];
+      if (pointNearBridgeStone(from, reach) || pointNearBridgeStone(to, reach)) continue;
+      const side = railInfoAt(from[0], from[1]).side;
+      if (railInfoAt(to[0], to[1]).side !== side) continue;
+      const detour = enforceRailSide(manhattanRoute(from, to), side);
+      if (polylineCrossesRail(detour)) continue;
+      const candidate = [...current.slice(0, a), ...detour, ...current.slice(b + 1)];
+      if (drawnMetresOnABridgeUncarried(candidate, width) < trespass.metres) {
+        current = collapseCollinear(candidate);
+        improved = true;
+        break;
+      }
+    }
+    if (!improved) return current;
+  }
+  return current;
+}
+
+/** Distance from a point to a segment in plan. */
+function distanceToSegmentXZ(x: number, z: number, ax: number, az: number, bx: number, bz: number): number {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lengthSq = dx * dx + dz * dz;
+  const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq)) : 0;
+  return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+}
+
+/** True when a ribbon of this `reach` centred here would stand on a bridge's
+ * stone — see {@link stoneZoneHalf}. */
+function pointNearBridgeStone(point: readonly [number, number], reach: number): boolean {
+  for (const site of CROSSING_SITES) {
+    const bounds = siteFootprint(site, RAMP_SCREEN_MARGIN);
+    const { along, across } = siteFrame(site, point[0], point[1]);
+    if (along < bounds.alongMin || along > bounds.alongMax) continue;
+    if (Math.abs(across) <= stoneZoneHalf(site, reach)) return true;
+  }
+  return false;
+}
+
 
 /**
  * **The widest a bridge's drawn stone can stand either side of its axis.** A
@@ -2172,6 +2278,10 @@ function bridgeStoneHalfAcrossMax(): number {
  * of any foreign street, which must clear the stone by its whole ribbon. */
 const BRIDGE_CARRIED_OFFSET = 1;
 
+/** How squarely along a bridge's axis a drawn route must be heading for the
+ * bridge to count as carrying it — cos 25°. A crossing leg is pinned dead
+ * straight over the deck (`routeLeg`), so anything carried is well inside
+ * this; a street turning off a ramp is well outside it. */
 const BRIDGE_CARRIED_COSINE = Math.cos((25 * Math.PI) / 180);
 
 /**
@@ -2434,13 +2544,7 @@ function siteFootprint(
  * stubbed to one node 12 m up the west ramp of the first).
  */
 function pointStandsOnBridgeStone(x: number, z: number): boolean {
-  for (const site of CROSSING_SITES) {
-    const bounds = siteFootprint(site, RAMP_SCREEN_MARGIN);
-    const { along, across } = siteFrame(site, x, z);
-    if (along < bounds.alongMin || along > bounds.alongMax) continue;
-    if (Math.abs(across) <= stoneZoneHalf(site, streetRibbonReachMax())) return true;
-  }
-  return false;
+  return pointNearBridgeStone([x, z], streetRibbonReachMax());
 }
 
 function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
@@ -3848,7 +3952,7 @@ function ensureCompassTaps(edges: PathEdge[]): void {
       from: 'ring',
       to: 'ring',
       paved: true,
-      route: { name: `street-tap-${name}`, width: 3.0, closed: false, points },
+      route: { name: `street-tap-${name}`, width: 3.0, closed: false, points: keepRouteOffBridges(points, 3.0) },
     });
   }
 }
@@ -4358,7 +4462,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: 'gate-approach',
         width: GATE_APPROACH_WIDTH,
         closed: false,
-        points: gateApproach.points,
+        points: keepRouteOffBridges(gateApproach.points, GATE_APPROACH_WIDTH),
       },
     },
     // From the ring to the plaza edge nearest the gate side, so the two
@@ -4557,7 +4661,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: `spur-${id}`,
         width,
         closed: false,
-        points: [...routed, ...past],
+        points: keepRouteOffBridges([...routed, ...past], width),
       },
     });
     if (beforeUnpaved) restoreLatticeState(beforeUnpaved);
@@ -4709,7 +4813,10 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         name: `spur-${id}`,
         width: 2.6,
         closed: false,
-        points: [...(chosen?.points ?? fallbackSpurRoute(network(), stationLead)), ...tail],
+        points: keepRouteOffBridges(
+          [...(chosen?.points ?? fallbackSpurRoute(network(), stationLead)), ...tail],
+          2.6,
+        ),
       },
     });
     yield (progress += 1);
@@ -5227,15 +5334,19 @@ function* addInterconnects(
       }
       if (!primary.some((d) => d.kind === 'sameSide')) yield { kind: 'sameSide' };
     };
-    const pointsFor = (decision: Decision): (readonly [number, number])[] => [
-      ...(leadA.length ? [[a.x, a.z] as [number, number]] : []),
-      ...(decision.kind === 'lattice'
-        ? decision.plan.points
-        : decision.kind === 'routeLeg'
-          ? snapRunsToLattice(routeLeg(fromPoint, toPoint, CONNECTOR_WIDTH))
-          : sameSideLeg(fromPoint, toPoint, railInfoAt(a.x, a.z).side)),
-      ...(leadB.length ? [[b.x, b.z] as [number, number]] : []),
-    ];
+    const pointsFor = (decision: Decision): (readonly [number, number])[] =>
+      keepRouteOffBridges(
+        [
+          ...(leadA.length ? [[a.x, a.z] as [number, number]] : []),
+          ...(decision.kind === 'lattice'
+            ? decision.plan.points
+            : decision.kind === 'routeLeg'
+              ? snapRunsToLattice(routeLeg(fromPoint, toPoint, CONNECTOR_WIDTH))
+              : sameSideLeg(fromPoint, toPoint, railInfoAt(a.x, a.z).side)),
+          ...(leadB.length ? [[b.x, b.z] as [number, number]] : []),
+        ],
+        CONNECTOR_WIDTH,
+      );
 
     // **The disproportion escape** (issue #361). Both screens below drop
     // paving on the principle that a *shortcut* never outranks the park's
