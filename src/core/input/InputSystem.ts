@@ -91,9 +91,30 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
 export class InputSystem {
   // Raw device state ------------------------------------------------------
   private readonly heldKeys = new Set<string>();
+  /**
+   * **Keys that went down since the last {@link update}, whether or not they
+   * are still down** — so a press that starts and ends between two frames is
+   * still a press (#699, #700).
+   *
+   * Held state alone is sampled once a frame, so a key tapped quickly enough
+   * to go down *and* up inside one frame was never seen at all: no `down`, no
+   * `justPressed`, nothing. At 60 fps that takes a 16 ms tap; at the 5-10 fps a
+   * hitching tablet or a software renderer gives, it is an ordinary quick
+   * press. Measured: Escape pressed down-and-up at once (Playwright's
+   * `keyboard.press`) left the keychain view open on every one of three seeds
+   * at ~120 fps; held for 100 ms it closed it on all three. The view kept her
+   * `riding`, which is what made `check:walking`'s tap move her 0 m and what
+   * stopped `check:deep-links`'s autosave ever landing.
+   */
+  private readonly tappedKeys = new Set<string>();
   private gamepadIndex: number | null = null;
   /** `MouseEvent.button` values currently held — see {@link MOUSE_ACTION_BINDINGS}. */
   private readonly heldMouseButtons = new Set<number>();
+  /** The {@link tappedKeys} rule, for mouse buttons. */
+  private readonly clickedMouseButtons = new Set<number>();
+  /** Scratch for {@link update}: held plus tapped. Reused, not reallocated per frame. */
+  private readonly keysThisFrame = new Set<string>();
+  private readonly buttonsThisFrame = new Set<number>();
   /**
    * While true, a right-click's context menu is swallowed rather than shown.
    *
@@ -164,7 +185,10 @@ export class InputSystem {
    */
   setMouseCaptureActive(active: boolean): void {
     this.mouseCaptureActive = active;
-    if (!active) this.heldMouseButtons.clear();
+    if (!active) {
+      this.heldMouseButtons.clear();
+      this.clickedMouseButtons.clear();
+    }
   }
 
   // ----------------------------------------------------------- public API
@@ -348,7 +372,13 @@ export class InputSystem {
     let moveY = 0;
 
     // --- keyboard -------------------------------------------------------
-    for (const code of this.heldKeys) {
+    // Held keys, plus any tapped since the last frame and already released —
+    // see {@link tappedKeys}. A tap counts as down for exactly this one frame.
+    this.keysThisFrame.clear();
+    for (const code of this.heldKeys) this.keysThisFrame.add(code);
+    for (const code of this.tappedKeys) this.keysThisFrame.add(code);
+    this.tappedKeys.clear();
+    for (const code of this.keysThisFrame) {
       const axis = KEYBOARD_MOVE_BINDINGS[code];
       if (axis) {
         moveX += axis[0];
@@ -398,7 +428,11 @@ export class InputSystem {
     // into `this.down` for the frame. Tracked whether or not `mouseCaptureActive`
     // is on — see that flag's own doc comment for why only the context-menu
     // suppression, not the tracking itself, is scoped to the ride.
-    for (const button of this.heldMouseButtons) {
+    this.buttonsThisFrame.clear();
+    for (const button of this.heldMouseButtons) this.buttonsThisFrame.add(button);
+    for (const button of this.clickedMouseButtons) this.buttonsThisFrame.add(button);
+    this.clickedMouseButtons.clear();
+    for (const button of this.buttonsThisFrame) {
       const action = MOUSE_ACTION_BINDINGS[button];
       if (action) this.down.add(action);
     }
@@ -474,6 +508,7 @@ export class InputSystem {
       event.preventDefault();
     }
     this.heldKeys.add(event.code);
+    this.tappedKeys.add(event.code);
     this.lastDeviceUsed = 'keyboard';
   };
 
@@ -490,6 +525,10 @@ export class InputSystem {
   /** Losing focus mid-stride would otherwise leave the player walking forever. */
   private readonly onBlur = (): void => {
     this.heldKeys.clear();
+    // A tap still pending when focus went is dropped with the rest: nothing
+    // pressed before a window switch should fire after it.
+    this.tappedKeys.clear();
+    this.clickedMouseButtons.clear();
     // And an on-screen hold would otherwise leave her climbing forever: a
     // window that loses focus mid-press never delivers the `pointerup`.
     this.virtualHolds.clear();
@@ -500,6 +539,7 @@ export class InputSystem {
 
   private readonly onMouseDown = (event: MouseEvent): void => {
     this.heldMouseButtons.add(event.button);
+    this.clickedMouseButtons.add(event.button);
     this.lastDeviceUsed = 'keyboard';
   };
 
