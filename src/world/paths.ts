@@ -2049,6 +2049,10 @@ function drawnMetresOnABridgeUncarried(
 ): number {
   if (points.length < 2 || CROSSING_SITES.length === 0) return 0;
   const curve = routeCurve({ name: 'bridge-screen', width, closed: false, points });
+  // A candidate that collapses to a single point once drawn (a leg whose
+  // every point is its own start) draws no paving at all — and a one-point
+  // Catmull-Rom has no length to sample, it throws.
+  if (curve.points.length < 2) return 0;
   const drawn = curvePoints(curve, pathDivisions(curve));
   const reach = width / 2 + PATH_KERB_OVERHANG;
   let metres = 0;
