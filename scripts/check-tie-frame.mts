@@ -60,6 +60,9 @@ import { InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { RAIL_GAUGE, TIE_STEP } from '../src/world/coaster/Coaster.ts';
 import { drawnOnSphere, railFrameAt, type RailFrame } from '../src/world/rail/sweptRail.ts';
+import { upFor } from '../src/world/up.ts';
+import { SLEEPER_SPACING } from '../src/world/railRace/trestleGeometry.ts';
+import type { RailRaceRoute } from '../src/world/railRace/route.ts';
 
 // How far a tie's rail-gauge point may sit from the rail centre line it is
 // meant to be bolted to. The rails' own sweep is not perfectly on the
@@ -249,6 +252,122 @@ if (worstDeviation > EPSILON_M) {
         `off its own rails, past ${CART_ON_RAILS_DEGREES}°. If the pitch is being composed about the ` +
         "world's X rather than the yawed one, `world/headingTurn.ts` is being bypassed — it is the one " +
         'owner of how a yaw and a pitch become a turn.',
+    );
+    process.exit(1);
+  }
+}
+
+// --- and every sleeper lies square to the rails as DRAWN, on both rides -------
+//
+// The gauge-point clause above reads each tie's two ends against `railFrameAt`
+// — the same function that placed it — so it can only ever say the tie is where
+// its own frame put it. It cannot see a frame that is wrong. And one was:
+// `drawnOnSphere`'s `tangentAt` turned the flat tangent by the sphere's tilt,
+// and the flat tangent already runs where the drawn rails do, so it leant twice
+// and the Sky Cruiser's sleepers were tipped up to 17° against their rails; the
+// Rail Race laid its sleepers along the route's *chart* tangent, up to ~14° off
+// the rails drawn over them. So this measures each sleeper's own axes, off the
+// real `InstancedMesh`, against the rails' direction taken independently — a
+// finite difference of the drawn points, never a `tangentAt` — and the up
+// square to that and to the local ground.
+{
+  /**
+   * A sleeper against its rails, in degrees. The difference is ±5 cm about each
+   * sleeper, on bends no tighter than the Rail Race's 53.5 m ring or the Sky
+   * Cruiser's solved minimum, so its own error is hundredths of a degree; a
+   * degree is room for that and a small fraction of the misalignments above.
+   */
+  const SLEEPER_ON_RAILS_DEGREES = 1;
+  const STEP = 0.05;
+  const along = new Vector3();
+  const ahead = new Vector3();
+  const behind = new Vector3();
+  const localUp = new Vector3();
+  const side = new Vector3();
+  const squareUp = new Vector3();
+  const tieZ = new Vector3();
+  const tieY = new Vector3();
+  const m = new Matrix4();
+  const q = new Quaternion();
+  const p = new Vector3();
+  const sc = new Vector3();
+  type Worst = { value: number; where: string };
+  const measure = (
+    mesh: InstancedMesh,
+    locate: (i: number) => { at: number; pointAt: (d: number, t: Vector3) => Vector3; where: string },
+  ): { worst: Worst; count: number } => {
+    let worst: Worst = { value: 0, where: '' };
+    for (let i = 0; i < mesh.count; i += 1) {
+      mesh.getMatrixAt(i, m);
+      m.decompose(p, q, sc);
+      tieZ.set(0, 0, 1).applyQuaternion(q);
+      // flat-ok: the sleeper's own local up, carried into the world by its turn
+      tieY.set(0, 1, 0).applyQuaternion(q);
+      const { at, pointAt, where } = locate(i);
+      pointAt(at + STEP, ahead);
+      pointAt(at - STEP, behind);
+      along.subVectors(ahead, behind).normalize();
+      upFor(p.x, p.y, p.z, localUp);
+      side.crossVectors(localUp, along).normalize();
+      squareUp.crossVectors(along, side).normalize();
+      // The sleeper runs across the track, so its own +Z is along it.
+      const off = (Math.max(tieZ.angleTo(along), tieY.angleTo(squareUp)) * 180) / Math.PI;
+      if (off > worst.value) worst = { value: off, where };
+    }
+    return { worst, count: mesh.count };
+  };
+
+  const cruiser = measure(ties, (i) => ({
+    at: i * TIE_STEP,
+    pointAt: (d, t) => drawn.pointAt(coaster.route.wrap(d), t),
+    where: `Sky Cruiser s=${(i * TIE_STEP).toFixed(1)} m`,
+  }));
+
+  const race = (park.world.railRace as unknown as {
+    raceRing: { route: RailRaceRoute; track: { group: import('three').Object3D } };
+    walkPastRing: { route: RailRaceRoute; track: { group: import('three').Object3D } };
+  });
+  const rings = [
+    { name: 'race ring', ring: race.raceRing },
+    { name: 'walk-past ring', ring: race.walkPastRing },
+  ];
+  const results = [{ name: 'Sky Cruiser', ...cruiser }];
+  for (const { name, ring } of rings) {
+    const sleepers = ring.track.group.getObjectByName('railRace:sleepers') as InstancedMesh | undefined;
+    if (!sleepers) {
+      console.error(`check:tie-frame: FAIL — no railRace:sleepers on the ${name}; the sleeper clause is VOID.`);
+      process.exit(1);
+    }
+    const route = ring.route;
+    const perLane = Math.floor(route.length / SLEEPER_SPACING);
+    results.push({
+      name: `Rail Race ${name}`,
+      ...measure(sleepers, (i) => {
+        const lane = Math.floor(i / perLane);
+        const at = (i % perLane) * SLEEPER_SPACING;
+        return {
+          at,
+          pointAt: (d, t) => route.pointAt(lane, route.wrap(d), t),
+          where: `lane ${lane} s=${at.toFixed(1)} m`,
+        };
+      }),
+    });
+  }
+  let failed = false;
+  for (const r of results) {
+    console.log(
+      `check:tie-frame — ${r.name}: ${r.count} sleepers, worst ${r.worst.value.toFixed(2)}° off the ` +
+        `drawn rails (${r.worst.where}), allowed ${SLEEPER_ON_RAILS_DEGREES}°`,
+    );
+    if (!(r.count > 0) || !Number.isFinite(r.worst.value)) failed = true;
+    else if (r.worst.value > SLEEPER_ON_RAILS_DEGREES) failed = true;
+  }
+  if (failed) {
+    console.error(
+      'check:tie-frame: FAIL — a sleeper is turned off the rails drawn over it (or none was measured). ' +
+        "Its frame comes from `railFrameAt`, whose forward is the sampler's `tangentAt`; that has to be " +
+        'the direction the rails are drawn in — `rail/sweptRail.ts`\'s `drawnDirection` — not a flat or ' +
+        'chart tangent turned onto the sphere.',
     );
     process.exit(1);
   }
