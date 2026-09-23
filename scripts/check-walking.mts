@@ -82,6 +82,7 @@
  * (`main.ts` only publishes that handle under `import.meta.env.DEV`).
  */
 import { writeSync } from 'node:fs';
+import { tapEscapeWithinOneFrame } from './lib/keys.mts';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { PLAYER_MAX_SPEED, PLAYER_RADIUS } from '../src/core/constants.ts';
 
@@ -571,11 +572,11 @@ await runCase('after keychain view', async (page) => {
     );
     return;
   }
-  // `press`, deliberately: down and up with nothing between, which lands inside
-  // one frame. Until #699 a key tapped that fast was never seen by
-  // `InputSystem`, the view stayed open and she stayed `riding` — so this is
-  // the regression check for that as well as the way in.
-  await page.keyboard.press('Escape');
+  // Down and up in one task, so certainly inside one frame. Until #699 a key
+  // tapped that fast was never seen by `InputSystem`, the view stayed open and
+  // she stayed `riding` — so this is the regression check for that as well as
+  // the way in.
+  await tapEscapeWithinOneFrame(page);
   await page.waitForTimeout(1500);
   const handedBack = await page.evaluate(() => {
     const g = (window as unknown as { game?: any }).game;

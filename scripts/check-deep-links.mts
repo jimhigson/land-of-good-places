@@ -44,6 +44,7 @@
  * strictly — but a working compositor is still what makes the picker's own
  * `data-open` CSS transition resolve at all).
  */
+import { tapEscapeWithinOneFrame } from './lib/keys.mts';
 import { chromium, type Page } from 'playwright-core';
 import { worldX, worldZ } from '../src/world/building/layout.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
@@ -411,7 +412,7 @@ for (const check of CHECKS) {
       // then close whatever it opened and let the autosave land.
       await page.goto(at(check.primerPath ?? check.path), { waitUntil: 'domcontentloaded' });
       await waitForGame(page, GAME_READY_TIMEOUT_MS);
-      await page.keyboard.press('Escape');
+      await tapEscapeWithinOneFrame(page);
       // **Why this used to time out on `/keychain-stall`, and not for want of
       // time (#700).** The autosave refuses while she is `riding`, and the
       // keychain view keeps her riding until it closes. `press` is down-and-up
