@@ -801,13 +801,10 @@ while (frames < MAX_FRAMES) {
   // The way she is travelling, reconstructed from the rotation the ride itself
   // set (`YXZ`: yaw then slope), so this asks about the pose actually applied
   // rather than re-sampling the curve and hoping the two agree.
-  const yaw = player.group.rotation.y;
-  const pitch = player.group.rotation.x;
-  const travel = new Vector3(
-    Math.sin(yaw) * Math.cos(pitch),
-    -Math.sin(pitch),
-    Math.cos(yaw) * Math.cos(pitch),
-  );
+  // Her own forward, off the quaternion the renderer uses — not rebuilt from
+  // `rotation.y`/`.x`, which is a decomposition and only means yaw and pitch in
+  // one euler order.
+  const travel = new Vector3(0, 0, 1).applyQuaternion(player.group.quaternion);
   const bodyAxis = head.clone().sub(player.position);
   const rise = bodyAxis.y;
   if (rise > worstHeadRise) worstHeadRise = rise;

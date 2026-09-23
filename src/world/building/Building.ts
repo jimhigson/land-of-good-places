@@ -168,11 +168,12 @@ const GROWN_UP_LEAD = 2.6;
 /**
  * The angle a grown-up lies back at, riding in front.
  *
- * A quarter turn about their own left-right axis, applied after the heading, so
- * they end up on their back with their feet pointing the way they are going.
- * `rotation.order` is set to `YXZ` on the model's root for exactly this: yaw
- * first, then pitch in the yawed frame. In the default `XYZ` order the two
- * compose the other way round and a grown-up lying down on a turn corkscrews.
+ * A quarter turn about their own left-right axis, composed onto the chute's own
+ * frame (`SlideRide.frameAt`) as a quaternion, so they end up on their back with
+ * their feet pointing the way they are going. It used to be a `rotation.x` with
+ * the root's `rotation.order` set to `YXZ` — an order that three.js's
+ * `setFromEuler` paths ignored where it mattered; a turn composed onto a frame
+ * has no order to get wrong.
  */
 const GROWN_UP_RECLINE = -Math.PI / 2;
 
@@ -569,7 +570,7 @@ export class Building implements GameSystem {
   private readonly chaseBody = new Vector3();
   private chaseBodyValid = false;
   private readonly chaseSeat: SlideSeat = {
-    x: 0, y: 0, z: 0, facing: 0, pitch: 0, recline: 0,
+    x: 0, y: 0, z: 0, facing: 0, turn: new Quaternion(), recline: 0,
   };
   /**
    * How many companions rode last frame, from `ridePetsDownSlide`'s own return.
@@ -977,13 +978,8 @@ export class Building implements GameSystem {
     // grown-up and the player teleport below, and any of them left behind in
     // the castle's frame would sit a castle's-width off the chute.
     this.eyeMount.rotation.y = Math.PI;
-    // Yaw first, then pitch in the yawed frame. The mount now leans with the
-    // chute as well as turning with it (see `advanceRide`), and in the default
-    // `XYZ` order those two compose the other way round: the pitch would be
-    // taken about the *world* X axis, so it would read as nose-down only while
-    // the ride happened to be heading north, and as a barrel roll a quarter of
-    // the way round the castle. Exactly the trap `GROWN_UP_RECLINE` documents.
-    this.rideMount.rotation.order = 'YXZ';
+    // The mount is turned by the chute's own frame, handed over as a quaternion
+    // in `advanceRide` — no euler, so no composition order to get wrong.
     this.rideMount.add(this.eyeMount);
     this.parkRoot.add(this.rideMount);
 
@@ -1701,16 +1697,13 @@ export class Building implements GameSystem {
       // The chute is in world coordinates now, so there is nothing to add back.
       this.ginormousSlide.pointAt(0, this.point);
       player.teleportTo(this.point.x, this.point.y + RIDER_LIFT, this.point.z);
-      // Lying down in front, so set the composition order before the first
-      // frame places them — see `GROWN_UP_RECLINE`.
-      this.grownUp.root.rotation.order = 'YXZ';
-      // And the same for the child, who is pitched down the slope now that the
-      // chase camera means you can see her. Set here and put back in
-      // `finishRide` rather than left on permanently: with a pitch of zero the
-      // two orders are identical, so no other ride can tell the difference —
-      // but the Rail Race *does* pass a non-zero pitch, and quietly changing
-      // the frame it composes in would alter a ride the family has already
-      // signed off, in a PR that is not about the Rail Race.
+      // **Not for composing her turn** — the ride hands that over whole, as a
+      // quaternion (`Player.setRideFrame`), and no euler order touches it. This
+      // is for the readers that take `group.rotation.y` as the way she faces
+      // (`HeldBalloon`, the parade, the park map): three.js decomposes the
+      // quaternion in this order when they read, and only `YXZ` hands back the
+      // chute's heading as `.y` — `XYZ` folds any heading past 90° back into
+      // ±90° once she is pitched. Put back in `finishRide`.
       player.group.rotation.order = 'YXZ';
       this.startRide(this.ginormousSlide, true, player);
       // **On her back, feet first** (Jim, 6 August 2026) — the way a child
@@ -2130,8 +2123,8 @@ export class Building implements GameSystem {
         spot.z,
         Math.atan2(this.tangent.x, this.tangent.z),
       );
-      // Back to the default composition order now the slope no longer applies
-      // (see `startGiantSlide`), and level: she arrives feet first.
+      // Back to the default order (see `startGiantSlide`), and level: she
+      // arrives feet first.
       player.group.rotation.order = 'XYZ';
       player.group.rotation.x = 0;
       // Handed back still moving, so the last thing the slide does is deliver
@@ -2149,7 +2142,10 @@ export class Building implements GameSystem {
       this.grownUpComing = false;
       // Back up onto the roof, to wait for the next one.
       this.interiorRoot.add(this.grownUp.root);
-      this.grownUp.root.rotation.x = 0;
+      // All three, not `.x` alone: he was turned by a quaternion down the chute,
+      // and zeroing one euler component of it leaves the other two as whatever
+      // three.js decomposed — a lean he would keep standing on the roof.
+      this.grownUp.root.rotation.set(0, 0, 0);
       this.placeGrownUp();
       this.spaces.holdOff();
       this.slideShots.reset();

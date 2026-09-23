@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { Vector3, type Quaternion } from 'three';
 import { RIDE_RECLINE } from '../../entities/ridePose';
 import { SlideFrame, type SlideRide } from '../building/SlideRide';
 
@@ -40,8 +40,15 @@ export interface SlideSeat {
   z: number;
   /** Yaw, radians, the same units `Player.setRidePose` takes. */
   facing: number;
-  /** Nose-down pitch, radians. See {@link slopeOf}. */
-  pitch: number;
+  /**
+   * The chute's own turn at this seat — `SlideRide.frameAt`'s orientation, the
+   * turn the child is given too. Carried whole rather than as a yaw and a
+   * pitch: the pets used to rebuild their pitch from the tangent with a
+   * `slopeOf` of their own, which agreed with the child's frame only because
+   * the frame has no roll. Asking the one owner means it cannot come to
+   * disagree.
+   */
+  readonly turn: Quaternion;
   /**
    * How far back the body lies, radians, **on top of** {@link pitch} and in the
    * same yawed frame — so a companion is turned by `pitch + recline` about its
@@ -228,29 +235,6 @@ export const PET_SIDE_STEP = 0.45;
  * of clearance so it never z-fights the floor it is sliding down.
  */
 export const PET_RIDE_LIFT = 0.06;
-
-/**
- * How steeply the chute is falling here, as a rotation about the rider's own
- * left-right axis.
- *
- * Derived from the unit tangent whatever is being placed is *already* being
- * turned by, so there is no second description of the chute's slope that could
- * drift from the first. Under a `YXZ` composition a model's forward (+Z) maps
- * to `(0, -sin θ, cos θ)` once yaw has been applied, so matching the tangent's
- * rise against its horizontal run is exactly `atan2(-y, |xz|)` — positive is
- * nose-down, which is the way a slide goes.
- *
- * Taking `atan2` of the run rather than `asin` of the rise keeps it honest if a
- * tangent ever arrives un-normalised; `SlideRide.tangentAt` normalises today,
- * and this does not have to care whether it still does tomorrow.
- *
- * Lives here, rather than in `Building.ts` where it was written, because the
- * child, the grown-up and now every companion all need the same answer and two
- * copies of it is the bug this repo files most often.
- */
-export function slopeOf(tangent: Vector3): number {
-  return Math.atan2(-tangent.y, Math.hypot(tangent.x, tangent.z));
-}
 
 const point = new Vector3();
 const tangent = new Vector3();
@@ -468,8 +452,8 @@ export function petSeatOnSlide(
     seatPointFor(slide, distance, link, point);
     ahead.copy(point);
   }
-  // `seatPointFor` left `tangent` at this companion's own place on the chute,
-  // which is what facing and pitch below want.
+  // `seatPointFor` left `tangent` and `frame` at this companion's own place on
+  // the chute, which is what its facing and its turn below want.
 
   // Lifted along the **trough's** up, not world `+Y`: on the steep middle of
   // the chute those differ by most of the lift, and lifting along the wrong one
@@ -478,7 +462,7 @@ export function petSeatOnSlide(
   seat.y = point.y + frame.up.y * PET_RIDE_LIFT;
   seat.z = point.z + frame.up.z * PET_RIDE_LIFT;
   seat.facing = Math.atan2(tangent.x, tangent.z);
-  seat.pitch = slopeOf(tangent);
+  frame.orientation(seat.turn);
   // **On its back, feet first, exactly as she is.** The child's own recline,
   // taken from the one place that defines it, so there is no second answer to
   // "how does a body lie on this chute" for the two kinds of body on it.
