@@ -782,10 +782,11 @@ function gridDetourAttempt(
     segmentClearOfBoundary(ax, az, bx, bz) &&
     !segmentEntersABridge(ax, az, bx, bz) &&
     !segmentPassesTheGate(ax, az, bx, bz) &&
-    // Half the lattice's clamp: enough to keep the search off the rails and
-    // on its side, while still letting it squeeze past a pocket the lattice
-    // would refuse — `pushClearOfRail` restores the full clamp afterwards.
-    (railSide === null || segmentHoldsRailSide(ax, az, bx, bz, railSide, RAIL_CLAMP_DISTANCE / 2));
+    // Only the side, not a clearance: every leg this search draws goes
+    // through `pushClearOfRail`, which restores the full clamp afterwards, so
+    // asking for more here only makes the search fail where it used to
+    // succeed — and a failed search falls back to a raw diagonal.
+    (railSide === null || segmentHoldsRailSide(ax, az, bx, bz, railSide, 0));
   // The connector into the *true* endpoint gets a little more slack on the
   // "arriving at a destination" exemption than an ordinary mid-search edge
   // does: a doormat typically stands `standOff` (1.4 m, `parkLayout.ts`) plus
@@ -5708,6 +5709,16 @@ function* addInterconnects(
       // side of a ramp that way. See {@link drawnMetresOnABridgeUncarried}.
       if (drawnMetresOnABridgeUncarried(points, CONNECTOR_WIDTH) > 0) {
         return 'stands on a bridge it does not cross';
+      }
+      // **Nor as a raw diagonal.** The axis router's last resort, when neither
+      // elbow nor its grid search finds a way, is the straight line it started
+      // from, kept "so the route stays connected" — right for a spur, which
+      // must arrive; a connector is a shortcut the park can do without.
+      // Measured on seed 428: `stall.waterFight`-`exit-railRace`, escaping as
+      // disproportionate, drew a 40 m diagonal through a booth and stranded the
+      // waypoint seeded on it.
+      if (longestOffAxisRun(points) > MAX_OFF_AXIS_RUN) {
+        return 'draws a raw diagonal';
       }
       return null;
     };
