@@ -11,70 +11,16 @@
  */
 import './headless-canvas.mjs';
 import { createHash } from 'node:crypto';
-import { InstancedMesh, Mesh, type BufferAttribute } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
+import { digestScene } from './lib/parkDigest.mts';
 import { LAYOUT_TRACE } from '../src/world/parkLayout.ts';
 import { parkSolveTrace } from '../src/world/parkPlan.ts';
 import { worldSolveTrace } from '../src/world/worldPhase.ts';
 
 const park = buildHeadlessPark();
-
-/** Every mesh in the scene, in traversal order, with its world matrix applied. */
-const perMesh: { name: string; hash: string; verts: number }[] = [];
-const whole = createHash('sha256');
-
-park.scene.updateMatrixWorld(true);
-park.scene.traverse((object) => {
-  if (!(object instanceof Mesh)) return;
-  const position = object.geometry.getAttribute('position') as BufferAttribute | undefined;
-  const hash = createHash('sha256');
-  const name = object.name || '(unnamed)';
-  hash.update(name);
-  hash.update(';');
-  const m = object.matrixWorld.elements;
-  for (const e of m) hash.update(`${e.toFixed(6)},`);
-  if (position) {
-    for (let i = 0; i < position.count; i += 1) {
-      hash.update(
-        `${position.getX(i).toFixed(6)},${position.getY(i).toFixed(6)},${position.getZ(i).toFixed(6)};`,
-      );
-    }
-  }
-  // **An `InstancedMesh` keeps where its instances stand in `instanceMatrix`,
-  // not in `matrixWorld` or its geometry** — so without this the digest of
-  // `railRace:trestle-legs` was the same number whether the legs moved or not.
-  // Found on 6 Sep 2026 by the control this instrument is supposed to be: the
-  // whole-park digest read byte-identical while `check:swept-bus` on the same
-  // park went 28 → 0 posts. Every instance's matrix (and colour) is hashed,
-  // over `count` — the instances actually drawn.
-  if (object instanceof InstancedMesh) {
-    const instances = object.instanceMatrix.array;
-    const drawn = Math.min(object.count, object.instanceMatrix.count) * 16;
-    hash.update(`instances=${object.count};`);
-    for (let i = 0; i < drawn; i += 1) hash.update(`${(instances[i] ?? 0).toFixed(6)},`);
-    const colours = object.instanceColor?.array;
-    if (colours) {
-      const drawnColours = Math.min(object.count, object.instanceColor?.count ?? 0) * 3;
-      for (let i = 0; i < drawnColours; i += 1) hash.update(`${(colours[i] ?? 0).toFixed(6)},`);
-    }
-  }
-  const digest = hash.digest('hex');
-  perMesh.push({ name, hash: digest, verts: position?.count ?? 0 });
-  whole.update(name);
-  whole.update(digest);
-});
-
-// Sorted, named roll-up so a single moved prop is identifiable rather than only
-// changing one opaque number.
-const byName = new Map<string, ReturnType<typeof createHash>>();
-for (const mesh of perMesh) {
-  let h = byName.get(mesh.name);
-  if (!h) {
-    h = createHash('sha256');
-    byName.set(mesh.name, h);
-  }
-  h.update(mesh.hash);
-}
+// Every mesh, hashed — see `scripts/lib/parkDigest.mts`, shared with
+// `scripts/park-file-probe.mts` so both instruments measure one thing.
+const digest = digestScene(park.scene);
 
 // The layout's unwind trace, hashed on its own line: a seed that starts
 // needing a restart it did not need before changes this digest *by name*,
@@ -88,10 +34,8 @@ const planTrace = createHash('sha256').update(parkSolveTrace().join('\n')).diges
 const worldTrace = createHash('sha256').update(worldSolveTrace().join('\n')).digest('hex').slice(0, 16);
 
 const seed = process.env['LGP_SEED'] ?? 'canonical';
-console.log(`seed ${seed}: meshes=${perMesh.length} park=${whole.digest('hex').slice(0, 16)}`);
+console.log(`seed ${seed}: meshes=${digest.meshes} park=${digest.park}`);
 console.log(`  trace ${trace} (${LAYOUT_TRACE.length} line(s))`);
 console.log(`  plan-trace ${planTrace} (${parkSolveTrace().length} line(s))`);
 console.log(`  world-trace ${worldTrace} (${worldSolveTrace().length} line(s))`);
-for (const [name, h] of [...byName.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-  console.log(`  ${name} ${h.digest('hex').slice(0, 16)}`);
-}
+for (const [name, hash] of digest.byName) console.log(`  ${name} ${hash}`);
