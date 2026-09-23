@@ -598,7 +598,15 @@ export interface TowerSolid {
  * so the solid a ride avoids and the mesh a child sees cannot drift apart.
  */
 let castleTowersMemo: readonly TowerSolid[] | null = null;
-export const CASTLE_TOWERS: readonly TowerSolid[] = lazyArrayView(() => (castleTowersMemo ??= castleTowersNow()));
+export const CASTLE_TOWERS: readonly TowerSolid[] = lazyArrayView(castleTowerSolids);
+/**
+ * The array {@link CASTLE_TOWERS} views, itself — for a hot loop that wants to
+ * skip the view's per-read forwarding, or to memoise on its identity (a new
+ * array every time the castle is re-placed).
+ */
+export function castleTowerSolids(): readonly TowerSolid[] {
+  return (castleTowersMemo ??= castleTowersNow());
+}
 function castleTowersNow(): readonly TowerSolid[] {
   const solids: TowerSolid[] = [];
   const corners = CASTLE_TURRET_CORNERS;

@@ -29,6 +29,17 @@
  *    — and still end `solved`. The hook is a `globalThis.process.env` read, which does
  *    not exist in a browser, so this is not a switch a shipped park can reach.
  *
+ *    **The child has to force the decision, and importing is not forcing.**
+ *    Under backtracking `PARK_LAYOUT` is a `lazyView` over
+ *    `planPart('layout')`: importing `parkLayout.ts` decides nothing, so the
+ *    child this clause used to spawn — a bare `import()` — solved no layout,
+ *    injected no refusal, and scored 0/0/0/0 on a ladder that was working
+ *    perfectly. Five clauses had been passing vacuously and then went red
+ *    together for a reason that had nothing to do with the ladder. So the
+ *    child now *reads* the view, and {@link tracedNothing} below turns "the
+ *    trace is empty" into its own named failure rather than letting it be
+ *    counted as four zeroes.
+ *
  * Reads the geometry it proves against off the layout it built, and prints
  * it, so the transcript in a PR carries the input with the verdict.
  */
@@ -161,7 +172,11 @@ const child = spawnSync(
     './scripts/ts-extension-resolver-register.mjs',
     '--input-type=module',
     '-e',
-    'await import("./src/world/parkLayout.ts");',
+    // Reading `.entries` forces the lazy view, which drives the real park
+    // solve — the layout's own rungs run inside `layoutRestartSearch`, and
+    // decision zero is `parkPlan.ts`'s driver drawing the next restart. A bare
+    // `import()` decides nothing (see the note on the machinery half above).
+    'const m = await import("./src/world/parkLayout.ts"); void m.PARK_LAYOUT.entries.size;',
   ],
   {
     env: { ...process.env, LGP_LAYOUT_REFUSE: 'hotel:40' },
@@ -178,12 +193,31 @@ const rungOne = has(/ redraw .*rung=1 entry=hotel/);
 const rungTwo = has(/ redraw .*rung=2 /);
 const decisionZero = has(/ decision-zero /);
 const solved = has(/ solved /);
+// Restarts named anywhere in the trace: decision zero is the driver drawing a
+// different park from the same seed, so more than one restart appearing is the
+// ladder's top rung observed rather than inferred.
+const restarts = new Set(
+  traceLines.flatMap((line) => [...line.matchAll(/restart=(\d+)/g)].map((match) => match[1])),
+);
+// **The absence guard.** Every count above is a count of matching lines, and
+// "no lines at all" scores zero on every one of them — which is exactly how
+// this half sat green while injecting nothing. An empty (or note-only) trace is
+// therefore its own failure, named as such, and never four plausible zeroes.
+const tracedNothing = traceLines.every((line) => / no solve ran in this process/.test(line));
 said.push(
-  `machinery (LGP_LAYOUT_REFUSE=hotel:40, seed ${PARK_LAYOUT.seed}): ${refusals} refusal(s), ` +
-    `${rungOne} rung-1 redraw(s), ${rungTwo} rung-2 redraw(s), ${decisionZero} decision zero(s), solved=${solved}` +
+  `machinery (LGP_LAYOUT_REFUSE=hotel:40, seed ${PARK_LAYOUT.seed}): ${traceLines.length} trace line(s), ` +
+    `${refusals} refusal(s), ${rungOne} rung-1 redraw(s), ${rungTwo} rung-2 redraw(s), ` +
+    `${decisionZero} decision zero(s), ${restarts.size} restart(s) [${[...restarts].join(',')}], solved=${solved}` +
     (child.status === 0 ? '' : `, child exit ${child.status}`),
 );
 if (child.status !== 0) failures.push(`the forced-refusal solve exited ${child.status}: ${child.stderr.slice(-400)}`);
+if (tracedNothing) {
+  failures.push(
+    `the machinery child forced no layout solve — ${traceLines.length} trace line(s), none of them a decision. ` +
+      'Every count below would read 0 from an absence rather than from a refusal that did not happen: ' +
+      'this clause is measuring nothing until that is fixed.',
+  );
+}
 // A floor, not an exact count: how many probes happen before the fortieth
 // depends on the canonical layout (a dead-end draw probes nothing), which the
 // base moves under this check. Thirty is past rung 1 (12) and a full rung 2.
