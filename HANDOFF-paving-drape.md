@@ -23,10 +23,22 @@ Task: paving draped onto a bridge a path only crosses (seed 131, bridge at (-2.2
 6. Lattice nodes refused on bridge stone; snapRunsToLattice never moves a run onto a bridge;
    crossing-tap foot stubs prefer ones that keep off bridges.
 
+7. gridDetour straightens its staircase (fewest walkable elbows) — staircases broke the lattice invariant.
+8. crossingPlanSolve footprintsOverlap uses proven ramp reach + 3 m landing (131 had two sites end to end).
+
+## test:procgen
+- base e982430b: 5 failed | 693 passed (bushes 11, coping 11, coping 131, detour 131, rainbow 326).
+- head @ dc567ccf^ (before 7/8): 12 failed | 687 — new: lattice (11 gate, 131 gate, 24 stall.dodgems),
+  rainbow canonical, cruiser supports 326, sheets (24, 131, canonical), scatterDecoupling crash (fixed).
+
 ## Status (sheet places on test seeds, head)
-- 11, 24, 326: clean. canonical: 1 (station-1 tail turning back past a foot, 0.81 m).
-  131: main-loop x2 (ring passes a ramp end, 0.85/1.01 m) + stall.waterFight 0.94 m (two back-to-back
-  bridges whose feet are 1.5 m apart; lattice stubs go up a ramp).
+- after 8: 326 clean; 131 main-loop x2 (ring passes a ramp end, 1.0 m); canonical station-1 tail 0.81 m;
+  24 spur-stall.dodgems (fence-follow / double crossing of one bridge, up to 4.23 m);
+  11 spur-building + gate-approach near (-21,46) (fence-follow garbage, up to 4.16 m).
+- Remaining causes: fenceFollowRoute / doubleCrossingLeg are not bridge-aware; ring vs ramp end is a
+  site-planner question (ramps reaching the ring).
+- Idea not yet built: one repair pass per route (replace any stretch standing on a bridge with a
+  bridge-avoiding axis detour) instead of screening each router.
 - Invariant `noDrawnPavingStandsUpAsASheet` in test/procgen/invariants.ts.
 
 ## Tools (scratch: /private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/92acae52-e71b-43c9-a76b-92e2c76ea5d3/scratchpad/paving-drape/)
