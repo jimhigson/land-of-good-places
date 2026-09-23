@@ -1254,7 +1254,11 @@ function routeLeg(
       fallbackOnABridge = onABridge;
       fallbackOffAxis = offAxis;
       fallbackLength = length;
-      fallback = points;
+      // The route as built, not as repaired: the repair is applied — and its
+      // verdict on the site taken — once, when the route is committed
+      // (`commitRouteOffBridges`). Judging a site here by its repaired walk
+      // only chooses between sites.
+      fallback = built;
       fallbackState = latticeStateSnapshot();
     }
   }
