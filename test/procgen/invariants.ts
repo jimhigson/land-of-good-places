@@ -11415,6 +11415,218 @@ const everyScatteredFeaturePlacesSomething: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **Every stall is drawn, claimed and solid in the same place, and its counter
+ * is still usable there.**
+ *
+ * This is the invariant a stall's `accommodate` has to answer to. A booth may
+ * now **step aside** during the world phase (`world/stallsFeature.ts`) when a
+ * feature that needs the space more is refused by it — and a move is three
+ * things that must happen together, none of which is derived from the others:
+ * the prop's group moves, its four wall colliders are re-registered, and the
+ * registry's claims for it are re-committed. Nothing in this codebase derives
+ * a collider from a mesh, so a booth a child can see in one place and walk
+ * through in another is one forgotten line away, and it would render
+ * perfectly, screenshot perfectly and be wrong only when she leant on it.
+ *
+ * Four clauses, all measured off the built park:
+ *
+ * 1. **Every stall was measurable.** `facts.stallsMissing` names any booth
+ *    with no group in the scene or no interact zone. A shorter list that says
+ *    nothing is how a check quietly stops covering something.
+ * 2. **Claimed where drawn.** The claims `boothFootprint.ts` produces for the
+ *    booth *at the position its own group is drawn at* must all be in the
+ *    registry under `stalls`. This is the clause that catches a mesh that
+ *    moved without its claim, and a claim that moved without its mesh.
+ * 3. **Solid where drawn.** Each of the four walls' midpoints must refuse a
+ *    half-player body in the real collision world. This is the clause that
+ *    catches a mesh that moved without its collider — the registry cannot see
+ *    that, because the registry is not the collision world.
+ * 4. **The counter is still usable.** The stand point the built interact zone
+ *    sends a child to must be clear ground for a `PLAYER_RADIUS` body, and
+ *    must be covered by this booth's own `walkable` claim — `keepOutsFor`'s
+ *    rule that a new collider must never cost a child somewhere she is
+ *    invited to stand. Thresholds are the game's (`PLAYER_RADIUS`), not the
+ *    shift search's.
+ *
+ * The universal claim-compatibility sweep in
+ * `railRaceSupportsAreClaimedAsDrawn` already holds every `stalls` claim
+ * against every other feature's, so "nothing else stands in a booth" is not
+ * restated here.
+ *
+ * **Coverage is announced on every run**, to stderr, including the number of
+ * booths that actually stepped aside — which is zero on every pool seed today.
+ * A seed where none moved proves the resting case and nothing more, and this
+ * has to say so rather than let a green line imply it exercised the move.
+ */
+const stallsAreDrawnClaimedAndSolidTogether: Invariant = (facts) => {
+  const wrong: string[] = [];
+  for (const missing of facts.stallsMissing) {
+    wrong.push(
+      `seed ${facts.seed}: stall ${missing} — nothing in the built park to measure it by, so no ` +
+        'clause below covers it',
+    );
+  }
+  const collision = facts.world.collision;
+  const claimed = facts.world.groundClaims.claimsOf('stalls');
+  // The registry holds float64 straight from the builder and the scene holds
+  // the same numbers through a float32 world matrix; the same slack
+  // `railRaceSupportsAreClaimedAsDrawn` allows for exactly that reason.
+  const FLOAT32_SLACK = 1e-3;
+  const near = (a: number, b: number): boolean => Math.abs(a - b) <= FLOAT32_SLACK;
+
+  /** Every wall in the built collision world, so a claim can be matched to one. */
+  const walls: { x1: number; z1: number; x2: number; z2: number; halfThickness: number }[] = [];
+  collision.forEachWall((x1, z1, x2, z2, halfThickness) => {
+    walls.push({ x1, z1, x2, z2, halfThickness });
+  });
+
+  let wallsProbed = 0;
+  let moved = 0;
+  let worstShift = 0;
+  let worstCentreGap = 0;
+  for (const stall of facts.stalls) {
+    if (stall.steppedAside > 0) moved += 1;
+    worstShift = Math.max(worstShift, stall.steppedAside);
+    const at = `(${stall.drawnX.toFixed(2)}, ${stall.drawnZ.toFixed(2)})`;
+    const box = stall.box;
+    const halfDiagonal = Math.hypot(box.halfWidth, Math.max(box.front, -box.back));
+
+    // --- 1. this booth's four claimed walls ------------------------------
+    // Found by proximity to where the booth is *drawn*, never by index: the
+    // whole question is whether the registry describes the booth that is on
+    // screen, so the claims have to be looked up by the drawn position.
+    const mine = claimed.filter((claim) => {
+      const shape = claim.shape;
+      if (claim.kind !== 'footprint' || shape.shape !== 'capsule') return false;
+      const midX = (shape.x1 + shape.x2) / 2;
+      const midZ = (shape.z1 + shape.z2) / 2;
+      return Math.hypot(midX - stall.drawnX, midZ - stall.drawnZ) <= halfDiagonal + FLOAT32_SLACK;
+    });
+    if (mine.length !== 4) {
+      wrong.push(
+        `seed ${facts.seed}: the '${stall.id}' booth is drawn at ${at} and the registry holds ` +
+          `${mine.length} "stalls" wall claim(s) within its own body, not 4 — the booth and its ` +
+          'claim are not in the same place',
+      );
+      continue;
+    }
+
+    // Its four walls are that booth's box: two of the counter's width, two of
+    // its depth. Taken from `boothFootprint.ts`'s box, not from a number typed
+    // here, so a booth that is resized stays checked.
+    const sides = mine
+      .map((claim) => {
+        const shape = claim.shape as { x1: number; z1: number; x2: number; z2: number };
+        return Math.hypot(shape.x2 - shape.x1, shape.z2 - shape.z1);
+      })
+      .sort((a, b) => a - b);
+    const wantSides = [box.front - box.back, box.front - box.back, box.halfWidth * 2, box.halfWidth * 2].sort(
+      (a, b) => a - b,
+    );
+    if (sides.some((side, i) => !near(side, wantSides[i] as number))) {
+      wrong.push(
+        `seed ${facts.seed}: the '${stall.id}' booth's claimed walls measure ` +
+          `${sides.map((v) => v.toFixed(2)).join(', ')} m but its body is ` +
+          `${wantSides.map((v) => v.toFixed(2)).join(', ')} m — the registry is describing some ` +
+          'other shape than the booth that was drawn',
+      );
+    }
+
+    // --- 2. drawn where claimed ------------------------------------------
+    // The eight endpoints average to the box's centre (each corner appears in
+    // two walls), and the box's centre sits `(front + back) / 2` ahead of the
+    // booth's own origin — the only offset there is, and it comes off the box
+    // rather than being a tolerance somebody tuned.
+    let sumX = 0;
+    let sumZ = 0;
+    for (const claim of mine) {
+      const shape = claim.shape as { x1: number; z1: number; x2: number; z2: number };
+      sumX += shape.x1 + shape.x2;
+      sumZ += shape.z1 + shape.z2;
+    }
+    const centreGap = Math.hypot(sumX / 8 - stall.drawnX, sumZ / 8 - stall.drawnZ);
+    const allowed = Math.abs((box.front + box.back) / 2) + FLOAT32_SLACK;
+    worstCentreGap = Math.max(worstCentreGap, centreGap);
+    if (centreGap > allowed) {
+      wrong.push(
+        `seed ${facts.seed}: the '${stall.id}' booth is drawn at ${at} but the middle of its ` +
+          `claimed body is ${centreGap.toFixed(3)} m away (at most ${allowed.toFixed(3)} m is its ` +
+          'own box offset) — the booth moved and its claim did not, or the claim moved and the ' +
+          'booth did not',
+      );
+    }
+
+    // --- 3. solid exactly where claimed ----------------------------------
+    for (const claim of mine) {
+      const shape = claim.shape as { x1: number; z1: number; x2: number; z2: number; halfWidth: number };
+      wallsProbed += 1;
+      const collider = walls.find(
+        (wall) =>
+          near(wall.halfThickness, shape.halfWidth) &&
+          ((near(wall.x1, shape.x1) && near(wall.z1, shape.z1) && near(wall.x2, shape.x2) && near(wall.z2, shape.z2)) ||
+            (near(wall.x1, shape.x2) && near(wall.z1, shape.z2) && near(wall.x2, shape.x1) && near(wall.z2, shape.z1))),
+      );
+      const midX = (shape.x1 + shape.x2) / 2;
+      const midZ = (shape.z1 + shape.z2) / 2;
+      if (!collider) {
+        wrong.push(
+          `seed ${facts.seed}: the '${stall.id}' booth claims a wall ` +
+            `(${shape.x1.toFixed(2)}, ${shape.z1.toFixed(2)})-(${shape.x2.toFixed(2)}, ` +
+            `${shape.z2.toFixed(2)}) that no collider in the built world matches — the claim says ` +
+            'solid and nothing stops a child there',
+        );
+      }
+      // And it really is solid, asked of the world rather than of the list:
+      // a collider that exists but has been left with nothing behind it fails
+      // here. This is the clause that has to be able to say no.
+      if (collision.isClearCircle(midX, midZ, shape.halfWidth / 2)) {
+        wrong.push(
+          `seed ${facts.seed}: the '${stall.id}' booth's wall at (${midX.toFixed(2)}, ` +
+            `${midZ.toFixed(2)}) is open air — a child walks straight through the booth she can see`,
+        );
+      }
+    }
+
+    // --- 4. the counter is still usable ----------------------------------
+    const standAt = `(${stall.standX.toFixed(2)}, ${stall.standZ.toFixed(2)})`;
+    if (!collision.isClearCircle(stall.standX, stall.standZ, PLAYER_RADIUS)) {
+      wrong.push(
+        `seed ${facts.seed}: the '${stall.id}' booth sends a child to ${standAt} and there is no ` +
+          `room for a ${PLAYER_RADIUS} m body there — the counter cannot be used`,
+      );
+    }
+    const standClaimed = claimed.some((claim) => {
+      const shape = claim.shape;
+      return (
+        claim.kind === 'walkable' &&
+        shape.shape === 'disc' &&
+        Math.hypot(shape.x - stall.standX, shape.z - stall.standZ) <= FLOAT32_SLACK
+      );
+    });
+    if (!standClaimed) {
+      wrong.push(
+        `seed ${facts.seed}: the '${stall.id}' booth sends a child to ${standAt}, and no "stalls" ` +
+          'walkable claim covers it — nothing stops the next placer putting something solid on ' +
+          'the one square metre she has to stand in',
+      );
+    }
+  }
+
+  process.stderr.write(
+    `  stallsAreDrawnClaimedAndSolidTogether seed ${facts.seed}: ${facts.stalls.length} booths ` +
+      `measured (${facts.stallsMissing.length} unmeasurable), ${wallsProbed} claimed walls matched ` +
+      `to colliders and probed in the real collision world; worst drawn-to-claimed gap ` +
+      `${worstCentreGap.toFixed(4)} m; ${moved} booth(s) stepped aside` +
+      (moved === 0
+        ? ' — NO accommodation ran on this seed, so this run proves the resting case only ' +
+          '(scripts/check-stall-accommodate.mts is what proves the move)'
+        : `, worst ${worstShift.toFixed(2)} m`) +
+      '\n',
+  );
+  return wrong;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'every scattered feature actually puts something in the park',
@@ -11429,6 +11641,10 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theGroundIsTheSphereItClaimsToBe,
   ],
   ["the road's corridor claim is the road it drew", theRoadsCorridorIsTheRoadItDrew],
+  [
+    'every stall is drawn, claimed and solid in the same place, and its counter still works',
+    stallsAreDrawnClaimedAndSolidTogether,
+  ],
   ['every castle corner turret is solid', castleTurretsAreSolid],
   ['the arrival reaches its end and hands over', theArrivalReachesItsEnd],
   ['every Rail Race support is claimed exactly as it is drawn', railRaceSupportsAreClaimedAsDrawn],

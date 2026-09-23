@@ -25,6 +25,7 @@ import type { RailRaceRoute } from '../../src/world/railRace/route.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 import type { Claim } from '../../src/boot/groundClaims.ts';
 import type { RoadSegment } from '../../src/world/entrance/roadCorridor.ts';
+import { boothBoxFor, type BoothBox } from '../../src/minigames/boothFootprint.ts';
 
 /**
  * One side of one ring of a bridge's drawn parapet. See
@@ -240,6 +241,31 @@ export interface EntranceFact {
   readonly id: string;
   readonly x: number;
   readonly z: number;
+}
+
+/**
+ * **A stall, as it actually ended up** — where its booth is *drawn*, where the
+ * game sends a child to be served, and what the registry says it owns.
+ *
+ * All three are read off the built park, never asked of the placement table:
+ * the drawn spot comes off the booth group's own world matrix, the stand point
+ * off the built interact zone, and the claims out of the registry. That is the
+ * whole point of the fact — a booth may **step aside** during the world phase
+ * (`world/stallsFeature.ts`), and the failure that matters is the one where
+ * only some of those three moved.
+ */
+export interface StallFact {
+  readonly id: string;
+  /** The booth group's world position, off `matrixWorld`. */
+  readonly drawnX: number;
+  readonly drawnZ: number;
+  /** Its body, from `boothFootprint.ts` — the one owner of every booth's box. */
+  readonly box: BoothBox;
+  /** Where the built interact zone sends a child to be served. */
+  readonly standX: number;
+  readonly standZ: number;
+  /** How far this booth stepped aside during the world phase, in metres. */
+  readonly steppedAside: number;
 }
 
 /**
@@ -894,6 +920,15 @@ export interface ParkFacts {
   readonly crossingSiteSnapTolerance: number;
   readonly plots: readonly PlotFact[];
   readonly entrances: readonly EntranceFact[];
+  /** Every stall, as built — see {@link StallFact}. */
+  readonly stalls: readonly StallFact[];
+  /**
+   * Stalls that could not be measured at all, with why. A booth with no group
+   * in the scene or no interact zone cannot be held to anything below, so it
+   * is named here rather than leaving a shorter list to imply cover it does
+   * not give.
+   */
+  readonly stallsMissing: readonly string[];
   /**
    * The keychain rack's six keyring stand points, specifically — **not**
    * included in {@link entrances} above.
@@ -2587,6 +2622,63 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       .map((zone) => ({ id: zone.id, x: zone.standX, z: zone.standZ })),
   ];
 
+  /**
+   * **Every stall, measured off the built park.**
+   *
+   * The booth group's own world matrix for where it is *drawn*; the built
+   * interact zone for where a child is sent; `boothFootprint.ts` for its body.
+   * Nothing here is read from the placement table, because a booth that
+   * stepped aside is exactly the case where the table and the scene could
+   * disagree, and that disagreement is what the invariant is for.
+   *
+   * Group names are the booths' own: the six mini-game booths name their prop
+   * `stall:<id>` (`minigames/stallProp.ts`), and the two one-off shops name
+   * theirs after themselves. A stall whose group cannot be found is left out
+   * of the list and the invariant fails on the count, rather than being
+   * quietly unmeasured.
+   */
+  const STALL_GROUP_NAMES: Readonly<Record<string, string>> = {
+    facePaint: 'facePaintStall',
+    keychain: 'keychainShop',
+  };
+  // Seed-dependent (the placements are a view on the layout the driver
+  // decided), so imported here after the world is built — never at this
+  // file's top level. `boothFootprint.ts` is safe to import statically: every
+  // one of its own imports is `import type`, so it pulls nothing in at runtime.
+  const { STALL_PLACEMENTS, stallShift } = await import('../../src/minigames/stallPlacement.ts');
+  const stallZones = new Map(
+    world
+      .interactZones()
+      .filter((zone) => /^stall:[^:]+$/.test(zone.id))
+      .map((zone) => [zone.id.slice('stall:'.length), zone]),
+  );
+  const stalls: StallFact[] = [];
+  const stallsMissing: string[] = [];
+  for (const id of Object.keys(STALL_PLACEMENTS)) {
+    const groupName = STALL_GROUP_NAMES[id] ?? `stall:${id}`;
+    const group = scene.getObjectByName(groupName);
+    const zone = stallZones.get(id);
+    if (!group || !zone) {
+      // Named, never silently dropped: a booth with no group in the scene or
+      // no interact zone is a booth nothing below could measure, and a shorter
+      // list that says nothing is how a check stops covering something.
+      stallsMissing.push(`${id} (${group ? '' : `no scene group '${groupName}'`}${group || zone ? '' : ', '}${zone ? '' : 'no interact zone'})`);
+      continue;
+    }
+    group.updateMatrixWorld(true);
+    const at = new Vector3().setFromMatrixPosition(group.matrixWorld);
+    const [shiftX, shiftZ] = stallShift(id);
+    stalls.push({
+      id,
+      drawnX: at.x,
+      drawnZ: at.z,
+      box: boothBoxFor(id),
+      standX: zone.standX,
+      standZ: zone.standZ,
+      steppedAside: Math.hypot(shiftX, shiftZ),
+    });
+  }
+
   // The six keyring stand points, read with the rack's own zoomed view opened
   // — see {@link ParkFacts.keychainKeyringEntrances}'s own doc comment for why
   // `entrances` above cannot carry these. Closed again immediately after:
@@ -3669,6 +3761,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     plots,
     railRaceArchFeet,
     entrances,
+    stalls,
+    stallsMissing,
     keychainKeyringEntrances,
     catBus,
     hidingTheArrivingBus,

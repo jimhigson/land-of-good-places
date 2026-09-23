@@ -333,11 +333,26 @@ export class World implements GameSystem {
     // Still before the NPCs, for the reason everything above is: the walk-past
     // ring registers its posts with `this.collision`, and the waypoint graph is
     // validated against the finished collision world.
-    // **The world phase** (`worldPhase.ts`): the fountain, walls, trees,
-    // bushes, fairy-light poles, lamp posts and the rail race's trestles each
-    // decide through the one driver against the registry — now that every
-    // fixed structure has registered its colliders — and are then drawn.
-    const phase = solveWorldPhase(this.collision, this.groundClaims, this.coaster.route);
+    // **The world phase** (`worldPhase.ts`): the stalls, the fountain, walls,
+    // trees, bushes, fairy-light poles, lamp posts and the rail race's
+    // trestles each decide through the one driver against the registry — now
+    // that every fixed structure has registered its colliders — and are then
+    // drawn.
+    //
+    // The stalls are the exception to "and are then drawn": their booths were
+    // built above, before the railway had a route to solve against them, so
+    // the phase is handed a way to *move* one instead. Six of the eight are a
+    // single rigid group and four wall colliders, and `MiniGameStalls`
+    // relocates both together. The face-paint and keychain booths answer
+    // `null` — they do not move — and `stallsFeature.ts` turns that into an
+    // ordinary refusal, so the feature that wanted the space is forgone
+    // exactly as it is today rather than anything being left inconsistent.
+    const phase = solveWorldPhase(
+      this.collision,
+      this.groundClaims,
+      this.coaster.route,
+      (id) => this.stalls.boothPlacement(id),
+    );
     this.scenery = new Scenery(this.collision, phase.scenery);
     this.fountain = new Fountain(this.collision, PLAZA.x, PLAZA.z);
     this.fairyLights = new FairyLights(this.collision, phase.fairyPoles);
