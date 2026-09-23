@@ -98,12 +98,6 @@ const KNOWN_ORPHANS: Record<string, string> = {
   'check:arrival-starts': 'needs a dev server on 127.0.0.1:5173 — ERR_CONNECTION_REFUSED. Orphaned since #264, 9 Aug 2026. Wiring: #526',
   'check:deep-links': 'needs a dev server (has CHECK_DEEP_LINKS_URL override). Orphaned since #314, 22 Aug 2026. Wiring: #526',
   'check:walking': 'needs a dev server on 127.0.0.1:5173 — ERR_CONNECTION_REFUSED. Orphaned since #342, 27 Aug 2026. Wiring: #526',
-  'check:wall-tunnelling':
-    'TWO faults, not one. (1) Unreachable: only check:all names it, and no workflow runs check:all — ' +
-    'wiring: #526. (2) It could not fail if it were reached: scripts/measure-wall-tunnelling.mts has ' +
-    'no process.exit(1) and no failure path at all — 32 s, always exit 0, a measurement tool named as ' +
-    'a check — #525, which offers assertions or a rename to measure:wall-tunnelling. Fixing only (1) ' +
-    'would buy a green step that gates nothing',
 };
 
 const scripts: Record<string, string> = JSON.parse(
