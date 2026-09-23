@@ -2359,6 +2359,24 @@ function siteFootprint(
  * ran off the flank into the parapet). Passing over a bridge is what a bridge
  * is for.
  */
+/**
+ * True when a street's ribbon centred here would overlap a bridge's built
+ * stone — its ramps' reach along the axis, {@link stoneZoneHalf} across it.
+ * A lattice node here is a crossroads on a ramp: every street leaving it
+ * sideways leaves through a parapet, and the crossing taps' stubs come back up
+ * the ramp to reach it (seed 131: both feet of two back-to-back bridges were
+ * stubbed to one node 12 m up the west ramp of the first).
+ */
+function pointStandsOnBridgeStone(x: number, z: number): boolean {
+  for (const site of CROSSING_SITES) {
+    const bounds = siteFootprint(site, RAMP_SCREEN_MARGIN);
+    const { along, across } = siteFrame(site, x, z);
+    if (along < bounds.alongMin || along > bounds.alongMax) continue;
+    if (Math.abs(across) <= stoneZoneHalf(site, streetRibbonReachMax())) return true;
+  }
+  return false;
+}
+
 function pointStandsOnBridgeMasonry(x: number, z: number, margin = RAMP_SCREEN_MARGIN): boolean {
   return standsOnSomeBridge(x, z, margin, false);
 }
@@ -2451,7 +2469,7 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
       // The masonry, not the whole footprint: refusing the deck surface too
       // refused the crossing's own approach and cost seed 24 its only bridge.
       // See {@link pointStandsOnBridgeMasonry}.
-      const onRamp = pointStandsOnBridgeMasonry(x, z);
+      const onRamp = pointStandsOnBridgeMasonry(x, z) || pointStandsOnBridgeStone(x, z);
       nodeOk[index] = clear && !inRing && !onRamp && rail.dist >= RAIL_CLAMP_DISTANCE ? 1 : 0;
       side[index] = rail.side;
     }
@@ -2680,7 +2698,7 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
       const nearRing =
         Math.hypot(footless[0] - PLAZA.x, footless[1] - PLAZA.z) <= RING_RADIUS + 4;
       if (otherStubs.length > 0 && nearRing && compassGap <= 8) {
-        const stub = otherStubs[0] as StreetStub;
+        const stub = stubOffTheBridges(otherStubs);
         const plusDeck: readonly [number, number] = [
           site.x + site.dirX * DECK_HALF_LENGTH,
           site.z + site.dirZ * DECK_HALF_LENGTH,
@@ -2726,8 +2744,8 @@ function* streetLatticeSearch(): Generator<number, StreetLattice, void> {
       }
       continue;
     }
-    const stubPlus = stubsPlus[0] as StreetStub;
-    const stubMinus = stubsMinus[0] as StreetStub;
+    const stubPlus = stubOffTheBridges(stubsPlus);
+    const stubMinus = stubOffTheBridges(stubsMinus);
     if (stubPlus.node === stubMinus.node) continue;
     const plusDeck: readonly [number, number] = [
       site.x + site.dirX * DECK_HALF_LENGTH,
@@ -2793,6 +2811,32 @@ interface StreetStub {
   readonly node: number;
   readonly points: readonly (readonly [number, number])[];
   readonly cost: number;
+}
+
+/**
+ * **The cheapest stub off a ramp foot that does not walk back up the ramp.**
+ *
+ * A crossing's feet stand a stride past each ramp, and the stubs that join a
+ * foot to the lattice are ordered by cost alone — so the cheapest could turn
+ * straight round and run back along the ramp it had just come down to a node
+ * beside it, then off the ramp's side. Measured on seed 131:
+ * `spur-stall.waterFight` came off the west foot of the bridge at
+ * (-2.2, 40.3), walked 7 m back up its ramp and turned off through the
+ * parapet — a 0.9 m sheet of paving. So a stub whose legs keep off every
+ * bridge ({@link segmentEntersABridge}) is preferred; when none does, the
+ * cheapest is kept exactly as before, so no crossing ever loses its link.
+ */
+function stubOffTheBridges(stubs: readonly StreetStub[]): StreetStub {
+  for (const stub of stubs) {
+    let clear = true;
+    for (let i = 1; i < stub.points.length && clear; i += 1) {
+      const a = stub.points[i - 1] as readonly [number, number];
+      const b = stub.points[i] as readonly [number, number];
+      if (segmentEntersABridge(a[0], a[1], b[0], b[1])) clear = false;
+    }
+    if (clear) return stub;
+  }
+  return stubs[0] as StreetStub;
 }
 
 /**
@@ -3292,10 +3336,18 @@ function snapRunsToLattice(
         const p = out[k] as [number, number];
         railFloor = Math.min(railFloor, railInfoAt(p[0], p[1]).dist);
       }
+      // And never onto a bridge: a run shifted a few metres sideways onto a
+      // lattice line can land on a ramp it only used to pass beside. Seed
+      // 326's `spur-waterFight` reached the site at (46, -6) from its west
+      // foot, and the snap moved that approach 8.5 m east onto x = 35.1 —
+      // 10.9 m up the ramp — so the spur joined the bridge mid-ramp from the
+      // side and hung a 1.2 m sheet of paving there. See
+      // {@link segmentEntersABridge}.
       const clear = (ax: number, az: number, bx: number, bz: number): boolean =>
         streetSegmentClear(ax, az, bx, bz, destination, 7, PLAYER_RADIUS + 0.5) &&
         segmentClearOfRing(ax, az, bx, bz) &&
-        segmentHoldsRailSide(ax, az, bx, bz, side, Math.max(0, railFloor - 0.1));
+        segmentHoldsRailSide(ax, az, bx, bz, side, Math.max(0, railFloor - 0.1)) &&
+        !segmentEntersABridge(ax, az, bx, bz);
       // A connecting segment re-covers ground the fallback route already
       // walks (plus the few metres of shift), so it is screened at the
       // fallback router's own grade — bounding-circle blockers and a
@@ -3320,7 +3372,8 @@ function snapRunsToLattice(
       // join does too, a couple of metres over — the run itself is still
       // held to its side and floor above.
       const connectorClear = (ax: number, az: number, bx: number, bz: number): boolean =>
-        streetSegmentClear(ax, az, bx, bz, destination, 7, PLAYER_RADIUS + 0.5, 0.6);
+        streetSegmentClear(ax, az, bx, bz, destination, 7, PLAYER_RADIUS + 0.5, 0.6) &&
+        !segmentEntersABridge(ax, az, bx, bz);
       // The nearest lattice line first, then its neighbour on the other
       // side — a run pushed off its nearest line by the very plot that
       // forced it off-lattice can still often reach the next one over.
@@ -4398,7 +4451,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     }
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
-    if (DEBUG_STREETS && id === 'stall.railRacer') { bridgeDebugTMP = true; drawnMetresOnABridgeUncarried([...(streets ?? fallback ?? []), [ex, ez]], width); bridgeDebugTMP = false; console.log(`[pointsTMP] ${(streets ?? fallback ?? []).map((q) => `(${q[0].toFixed(1)},${q[1].toFixed(1)})`).join(' ')}`); }
+    if (DEBUG_STREETS && id === (process.env.LGP_DBG_ID ?? '')) { bridgeDebugTMP = true; drawnMetresOnABridgeUncarried([...(streets ?? fallback ?? []), [ex, ez]], width); bridgeDebugTMP = false; console.log(`[pointsTMP] ${(streets ?? fallback ?? []).map((q) => `(${q[0].toFixed(1)},${q[1].toFixed(1)})`).join(' ')}`); }
     if (DEBUG_STREETS) console.log(`[bridgeTMP] ${id} streets=${streets ? drawnMetresOnABridgeUncarried([...streets, [ex, ez]], width).toFixed(1) : 'none'} fallback=${fallback ? drawnMetresOnABridgeUncarried([...fallback, [ex, ez]], width).toFixed(1) : '-'}`);
     const routed = [
       ...(streets ?? fallback ?? fallbackSpurRoute(network(), routeTarget, spurTail, width)),
