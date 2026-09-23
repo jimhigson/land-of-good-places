@@ -880,13 +880,13 @@ export class Player implements GameSystem {
   /**
    * Called by the ride every frame while it owns the character.
    *
-   * `pitch` defaults to 0 (upright) — most rides that call this are flat, or
-   * put the rider inside a vehicle whose own tilt is enough on its own (a
-   * child of that vehicle's group inherits its pitch for free). A ride whose
-   * player model is positioned independently of any such parent, and that
-   * climbs or drops (the Rail Race's undulating ring), needs to pass its
-   * cart's actual pitch here explicitly, or the rider stays bolt upright
-   * through every hill while the cart under her visibly tilts.
+   * `pitch` defaults to 0 (upright) — most rides that call this are flat, and
+   * leant onto the ground under her, which is what `faceOnGround` does. A ride
+   * that seats her **in a vehicle** — a cart that climbs, a chute that drops —
+   * should not rebuild her turn here from a yaw and a pitch: hand her the
+   * vehicle's own frame through {@link setRideFrame}, as the Rail Race, the Sky
+   * Cruiser and the ginormous slide do. Two turns of one heading, one for her
+   * and one for the tub, is how the Rail Race's rider came apart from her cart.
    */
   setRidePose(x: number, y: number, z: number, facing: number, pitch = 0): void {
     this.position.set(x, y, z);

@@ -125,10 +125,16 @@ const _rideSpin = /* @__PURE__ */ new Quaternion();
  * describes at length, where a per-frame pre-multiply decomposes back into
  * `rotation.x`/`rotation.z` and the tilt compounds until the thing tumbles.
  *
- * Position is deliberately **not** this function's business, because the two
- * kinds of route disagree about it: the coaster and the train solve flat and
- * must map their point through `placeOnSphere`, while the Rail Race's own
- * `pointAt` already returns a leaned point and must not be leaned twice.
+ * Position is deliberately **not** this function's business: the train solves
+ * flat and maps its point through `placeOnSphere`.
+ *
+ * **Only for a heading with no pitch — today, the train's cars.** A pitched
+ * heading read off a flat tangent and then leant is leant twice where the flat
+ * tangent already follows the ground: measured on the Sky Cruiser (canonical
+ * seed), 17.25° between the nose and its drawn rails even once the composition
+ * was right. The Sky Cruiser and the Rail Race carts now take the direction
+ * their rails are actually drawn in, through {@link railTurn}; a new vehicle
+ * that climbs should too.
  */
 export function rideFrame(
   flat: Readonly<Vector3>,
