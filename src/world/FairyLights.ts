@@ -17,7 +17,7 @@ import {
 import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
-import { PLAZA, plazaVerge } from './paths';
+import { PLAZA, plazaVerge, pointStandsOnABridgeRamp } from './paths';
 import { cruiserClearanceForPoints } from './coaster/clearance';
 import type { CoasterRoute } from './coaster/route';
 import { PLAYER_RADIUS } from '../core/constants';
@@ -550,6 +550,14 @@ export function fairyPoleBuilder(
       // Beside the paving, never on it — and never so close that the pole
       // pinches the lane a child walks down.
       if (isOnPath(x, z, POLE_PAVING_CLEARANCE)) continue;
+      // **Nor on a bridge.** A bridge's deck carries its own paving, which the
+      // drawn-path samples above do not see, so `isOnPath` reads a pole on the
+      // deck as standing 1.9 m off the path. Seed 11 put `fairy-pole-88` on the
+      // walkway of the bridge at (1.5, -31.6), making the crossing unwalkable
+      // 11 m along its centreline, and the park had seven more poles inside
+      // bridge footprints — standing through parapet walls. The footprint's one
+      // owner answers, with the pole's own radius as the margin.
+      if (pointStandsOnABridgeRamp(x, z, POLE_RADIUS)) continue;
       // **Ask the ride, before standing anything up.** A pole is 4.4 m tall and
       // the claims registry is a ground-footprint system — it cannot see what
       // sweeps through the air above a square metre. Seed 24 built a park whose

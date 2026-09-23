@@ -6128,6 +6128,17 @@ const fairyPolesStandWalkablyApart: Invariant = (facts) => {
       }
     }
   }
+  // **And none on a bridge** — deck or parapet. The deck's paving is the
+  // bridge's own, not a drawn path sample, so a pole there read as standing
+  // well off the path (seed 11, `fairy-pole-88`, on the walkway at 11 m along
+  // the (1.5, -31.6) crossing; seven more stood through parapet walls).
+  for (const pole of poles) {
+    for (const bridge of facts.world.train.bridges) {
+      if (!bridge.covers(pole.at.x, pole.at.z)) continue;
+      complaints.push(`${pole.name} stands on a bridge at (${fmt([pole.at.x, pole.at.z])})`);
+      break;
+    }
+  }
   if (poles.length < 2) {
     complaints.push(`only ${poles.length} fairy pole(s) drawn — this spacing check measured nothing`);
   }
@@ -11632,7 +11643,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'every modelled coping stone sits on the wall it caps',
     everyCopingStoneSitsOnItsWall,
   ],
-  ['a child can walk between any two fairy poles', fairyPolesStandWalkablyApart],
+  ['a child can walk between any two fairy poles, and none stands on a bridge', fairyPolesStandWalkablyApart],
   [
     'no bridge parapet can be seen through — its outer face reaches the wall top',
     noBridgeParapetCanBeSeenThrough,
