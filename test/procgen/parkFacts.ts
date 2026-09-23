@@ -3614,6 +3614,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
         polesDrawn.push({
           name: object.name,
           at: object.getWorldPosition(new Vector3()),
+          // flat-ok: local axis, leant by the pole's own world quaternion
           up: new Vector3(0, 1, 0).applyQuaternion(quaternion),
         });
       } else if (object.name.startsWith('fairy-string-')) strings += 1;
