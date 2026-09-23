@@ -695,9 +695,13 @@ function elbowLeg(a: readonly [number, number], b: readonly [number, number]): (
  */
 const GRID_DETOUR_REACHES: readonly number[] = [45, 90, 160];
 
-function gridDetour(a: readonly [number, number], b: readonly [number, number]): (readonly [number, number])[] {
+function gridDetour(
+  a: readonly [number, number],
+  b: readonly [number, number],
+  clearance?: GridClearance,
+): (readonly [number, number])[] {
   for (const reach of GRID_DETOUR_REACHES) {
-    const found = gridDetourAttempt(a, b, reach);
+    const found = gridDetourAttempt(a, b, reach, clearance);
     if (found) return found;
   }
   if (DEBUG_STREETS) {
@@ -711,11 +715,22 @@ function gridDetour(a: readonly [number, number], b: readonly [number, number]):
   return [b];
 }
 
+/**
+ * What a {@link gridDetour} search may walk, when a caller wants something
+ * other than the fallback router's own bounding-circle grade: `edge` for the
+ * search's own steps, `entry` for the connectors onto and off its grid.
+ */
+interface GridClearance {
+  readonly edge: (ax: number, az: number, bx: number, bz: number) => boolean;
+  readonly entry: (ax: number, az: number, bx: number, bz: number) => boolean;
+}
+
 /** One `gridDetour` search at a given `reach`, or `null` if it finds nothing. */
 function gridDetourAttempt(
   a: readonly [number, number],
   b: readonly [number, number],
   reach: number,
+  clearance?: GridClearance,
 ): (readonly [number, number])[] | null {
   const step = 2;
   const toWorld = (g: number) => g * step;
@@ -748,6 +763,7 @@ function gridDetourAttempt(
   const aSide = railInfoAt(a[0], a[1]).side;
   const railSide = railInfoAt(b[0], b[1]).side === aSide ? aSide : null;
   const walkable = (ax: number, az: number, bx: number, bz: number, pad: number): boolean =>
+    clearance ? clearance.edge(ax, az, bx, bz) :
     segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) &&
     segmentClearOfBoundary(ax, az, bx, bz) &&
     !segmentEntersABridge(ax, az, bx, bz) &&
@@ -769,6 +785,7 @@ function gridDetourAttempt(
   // only to the one connector actually touching `a`/`b`, never to the
   // ordinary edges the A* search walks between them.
   const walkableToEndpoint = (ax: number, az: number, bx: number, bz: number): boolean =>
+    clearance ? clearance.entry(ax, az, bx, bz) :
     segmentClearOfBlockers(ax, az, bx, bz, ROUTE_WALKER_PAD, localBlockers, DESTINATION_ARRIVAL_MARGIN) &&
     segmentClearOfBoundary(ax, az, bx, bz) &&
     !segmentEntersABridge(ax, az, bx, bz);
@@ -2274,17 +2291,40 @@ function keepRouteOffBridges(
         say('the stretch crosses the railway');
         continue;
       }
-      const detour = enforceRailSide(manhattanRoute(from, to), side);
-      if (polylineCrossesRail(detour)) {
-        say('the detour crosses the railway');
-        continue;
-      }
-      const candidate = [...current.slice(0, wa), ...detour, ...current.slice(wb + 1)];
-      const after = drawnMetresOnABridgeUncarried(candidate, width);
-      say(`detour ${detour.map((q) => `(${q[0].toFixed(1)},${q[1].toFixed(1)})`).join(' ')} leaves ${after.toFixed(1)} m`);
-      if (after < trespass.metres) {
-        current = collapseCollinear(candidate);
-        repaired = true;
+      // Two routers, cheapest first: the ordinary axis-aligned one, then a
+      // grid search held to the street grade — plots' real footprints rather
+      // than their bounding circles, which is what walls a destination beside
+      // a ramp into a pocket the fallback grade cannot see out of (seed 11's
+      // building entrance: its anchor's circle covered every way round but
+      // the ramp) — to its own side of the railway, and off every bridge.
+      const destination = current[current.length - 1] as readonly [number, number];
+      const streetGrade: GridClearance = {
+        edge: (ax, az, bx, bz) =>
+          streetSegmentClear(ax, az, bx, bz, destination, 7, PLAYER_RADIUS + 0.5) &&
+          !segmentEntersABridge(ax, az, bx, bz) &&
+          segmentHoldsRailSide(ax, az, bx, bz, side, RAIL_CLAMP_DISTANCE / 2),
+        entry: (ax, az, bx, bz) =>
+          streetSegmentClear(ax, az, bx, bz, destination, 7, PLAYER_RADIUS + 0.5, 0.6) &&
+          !segmentEntersABridge(ax, az, bx, bz),
+      };
+      const detours = [
+        () => enforceRailSide(manhattanRoute(from, to), side),
+        () => [from, ...gridDetour(from, to, streetGrade)],
+      ];
+      for (const make of detours) {
+        const detour = make();
+        if (polylineCrossesRail(detour)) {
+          say('the detour crosses the railway');
+          continue;
+        }
+        const candidate = [...current.slice(0, wa), ...detour, ...current.slice(wb + 1)];
+        const after = drawnMetresOnABridgeUncarried(candidate, width);
+        say(`detour ${detour.map((q) => `(${q[0].toFixed(1)},${q[1].toFixed(1)})`).join(' ')} leaves ${after.toFixed(1)} m`);
+        if (after < trespass.metres) {
+          current = collapseCollinear(candidate);
+          repaired = true;
+          break;
+        }
       }
       }
       if (repaired) {
