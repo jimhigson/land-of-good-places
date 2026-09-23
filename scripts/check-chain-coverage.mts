@@ -41,10 +41,10 @@
  * The question is **not** "is it in the `check` chain?" — that would be wrong in
  * both directions. `check:coplanar`, `check:live-version`, `check:gateway` and
  * `check:update-adoption` are deliberately *outside* it, each with its own
- * workflow, because `checks.yml` is at **26m55s against a 30-minute cap —
+ * workflow, because `checks.yml` was at **26m55s against a 30-minute cap —
  * 89.7%, needing only 1.11x its own slowest run to breach** (measured by #523,
- * n=15 over `main`, and independently reproduced by its reviewer from a
- * different window; against a 1.58x observed spread in runner speed). A job
+ * n=15 over `main`; the chain has since been split into parallel shards, #693,
+ * which is what the shard section further down proves is still whole). A job
  * killed by `timeout-minutes` reports as `cancelled`, which is how this project
  * lost a deploy on 29 August. Calling those four orphans would be an instrument
  * measuring the wrong thing.
@@ -86,15 +86,16 @@ const REPO = new URL('..', import.meta.url).pathname;
  * Checks that are defined, unreachable, and known to be so — each with the
  * reason it is not merely a missing line, and the ticket that owns wiring it.
  *
- * All four need something the `check` chain cannot give them: a built `dist/`,
- * or a dev server. That is why appending them to `check` would not fix them —
- * they want a workflow that builds and serves first, the way
- * `update-adoption.yml` already does. Measured on `origin/main` 61e95fe5, each
- * run by hand: every one exits 1, and **not one of them fails on the game** —
- * they fail on their own preconditions.
+ * **Empty, and meant to stay that way (#693).** It held five for weeks and was
+ * printed on every run, which turned out to be the same as holding nothing: a
+ * list that is merely stable is a list of checks nobody runs. They were
+ * resolved rather than carried — `check:wall-tunnelling` given a failure path
+ * and put in a shard; `check:walking` and `check:deep-links` put behind
+ * `scripts/with-dev-server.mts` in a shard; the two that need a real GPU
+ * renamed out of `check:` into {@link GPU_ONLY}. An entry here now needs the
+ * same bar: a reason it cannot run yet, and a ticket that owns making it run.
  */
-const KNOWN_ORPHANS: Record<string, string> = {
-};
+const KNOWN_ORPHANS: Record<string, string> = {};
 
 /**
  * **Checks that cannot run on a GitHub-hosted runner at all, and so are not
