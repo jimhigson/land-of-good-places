@@ -21,6 +21,7 @@ import { PLAZA, plazaVerge, pointStandsOnABridgeRamp } from './paths';
 import { cruiserClearanceForPoints } from './coaster/clearance';
 import type { CoasterRoute } from './coaster/route';
 import { PLAYER_RADIUS } from '../core/constants';
+import { nearADoormat, onRideExit } from './Scenery';
 import { isOnPath, pathCentreline } from './pathGraph';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
@@ -559,6 +560,14 @@ export function fairyPoleBuilder(
       // built bridge covers — seven more poles on seed 11 stood inside it but
       // outside the masonry, and those simply slide along their runs).
       if (pointStandsOnABridgeRamp(x, z, POLE_RADIUS)) continue;
+      // **Nor where a child is set down or served.** A pole that slides along
+      // its run can slide onto a ride exit or a doormat — seed 428's
+      // `fairy-pole-60` came to rest 1.30 m from `exit-railRace` and pushed a
+      // child standing there 0.12 m. The owners the lamps and the scenery
+      // already ask: `onRideExit` with the room to walk past the pole, and
+      // `nearADoormat`.
+      if (onRideExit(x, z, POLE_RADIUS + PLAYER_RADIUS * 2)) continue;
+      if (nearADoormat(x, z)) continue;
       // **Ask the ride, before standing anything up.** A pole is 4.4 m tall and
       // the claims registry is a ground-footprint system — it cannot see what
       // sweeps through the air above a square metre. Seed 24 built a park whose
