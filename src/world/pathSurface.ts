@@ -147,10 +147,17 @@ export function pathRibbonV(travelled: number, width: number): number {
   return travelled / Math.max(1, width);
 }
 
-/** A point on the ground; `y` comes from the terrain wherever one is used. */
+/**
+ * A point on the ground; `y` comes from the terrain wherever one is used —
+ * unless the point carries its own. An edge that is **somebody else's
+ * boundary** (the gateway path's road end) hands over that surface's own
+ * height there, so the two meshes meet on one line in space rather than on
+ * one line in plan with a step between them.
+ */
 export interface PathEdgePoint {
   readonly x: number;
   readonly z: number;
+  readonly y?: number;
 }
 
 /**
@@ -197,9 +204,11 @@ export function addPathQuilt(
       // Travelled is measured down this column, so a quilt whose two ends are
       // different lengths still tiles evenly along each of them.
       const travelled = Math.hypot(b.x - a.x, b.z - a.z) * t;
+      // The two edge rows take a height they were handed, if they were.
+      const given = row === 0 ? a.y : row === rows ? b.y : undefined;
       builder.vertex(
         x,
-        terrainHeight(x, z) + lift,
+        given ?? terrainHeight(x, z) + lift,
         z,
         columns === 1 ? 0 : column / (columns - 1),
         pathRibbonV(travelled, width),
