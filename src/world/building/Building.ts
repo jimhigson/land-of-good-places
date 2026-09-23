@@ -931,6 +931,7 @@ export class Building implements GameSystem {
         // The chute as **built**, so the placement search probes the real
         // geometry it has to see past rather than a model of it.
         this.ginormousSlide.group,
+        GIANT_SLIDE_SPEED,
       ),
     );
 

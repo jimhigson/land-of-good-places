@@ -114,7 +114,7 @@ const { CHUTE_ENVELOPE, SlideFrame, troughClearance } = await import(
 );
 const { PLAYER_RADIUS } = await import('../src/core/constants.ts');
 const { IsoCamera } = await import('../src/core/IsoCamera.ts');
-const { Raycaster, Box3 } = await import('three');
+const { Raycaster, Box3, Quaternion } = await import('three');
 type InteriorControls = import('../src/world/building/Building.ts').InteriorControls;
 
 // **Not `park-harness`'s `inertInteriorControls`.** That one throws on every
@@ -517,6 +517,8 @@ const shotEye: Vector3[] = [];
 const shotAim: Vector3[] = [];
 const shotBeat: number[] = [];
 const shotIsTrackside: boolean[] = [];
+/** The live camera's world turn, frame by frame — what the roll clause reads. */
+const shotTurn: import('three').Quaternion[] = [];
 
 // The slide is ~65-75 m at 6.5 m/s, so 20 s is generous headroom for it to end.
 const MAX_FRAMES = 20 * 60;
@@ -575,6 +577,20 @@ const TRACKSIDE_BODY_FLOOR = 0.004;
  * Measured across all 363 trackside frames of the canonical ride: **0.000**.
  */
 const TRACKSIDE_DRIFT = 1e-6;
+
+/**
+ * **How far a trackside picture may roll about its own centre in one frame, in
+ * degrees — half a degree, 30°/s at 60 Hz.**
+ *
+ * Proved red against #680's first placement search (canonical seed, chute
+ * 77.09 m, `180af164`'s `slide/cameras.ts`), which put beat 1's eye 0.37-0.67°
+ * from straight above her and panned it about world up: **86.15° in one frame**
+ * here (118.7-146.8° in the reviewer's browser ride). With the pan axis the
+ * worst is 0.217°/frame. Half a degree is still slower than
+ * the pan itself at closest approach (~1.4°/frame), so a roll this clause lets
+ * through is never the thing a child notices first.
+ */
+const TRACKSIDE_ROLL_PER_FRAME = 0.5;
 
 /**
  * **How hard the shot may change its turn rate, in degrees per frame squared.**
@@ -756,6 +772,10 @@ while (frames < MAX_FRAMES) {
     shotAim.push(
       new Vector3(0, 0, -1).applyQuaternion((liveCamera as { quaternion: never }).quaternion),
     );
+    shotTurn.push(
+      (liveCamera as { getWorldQuaternion(q: import('three').Quaternion): import('three').Quaternion })
+        .getWorldQuaternion(new Quaternion()),
+    );
     shotBeat.push(beat);
     shotIsTrackside.push(liveShot?.kind === 'trackside');
   }
@@ -883,6 +903,10 @@ if (!Number.isFinite(deepestInTrough)) {
   let worstDriftAt = -1;
   let worstTurnAccel = 0;
   let worstTurnAccelAt = -1;
+  let worstTracksideRoll = 0;
+  let worstTracksideRollAt = -1;
+  let worstChaseRoll = 0;
+  const rollDelta = new Quaternion();
   let withinBeat = 0;
   for (let i = 1; i < shotEye.length; i += 1) {
     // Within a beat only. The cut BETWEEN beats is a deliberate hard cut with
@@ -896,6 +920,25 @@ if (!Number.isFinite(deepestInTrough)) {
       if (drift > worstDrift) {
         worstDrift = drift;
         worstDriftAt = i;
+      }
+    }
+    {
+      // **Roll: how far the picture turned about its own centre**, the twist
+      // about the lens axis of the turn from last frame to this one. The aim
+      // clause below cannot see it — a camera can point smoothly at her while
+      // the image spins round her, and that is exactly what #680's first
+      // trackside search did.
+      rollDelta.copy(shotTurn[i - 1]!).invert().multiply(shotTurn[i]!);
+      let roll = Math.abs(2 * Math.atan2(rollDelta.z, rollDelta.w));
+      if (roll > Math.PI) roll = 2 * Math.PI - roll;
+      const rollDegrees = (roll * 180) / Math.PI;
+      if (shotIsTrackside[i] === true) {
+        if (rollDegrees > worstTracksideRoll) {
+          worstTracksideRoll = rollDegrees;
+          worstTracksideRollAt = i;
+        }
+      } else if (rollDegrees > worstChaseRoll) {
+        worstChaseRoll = rollDegrees;
       }
     }
     if (i >= 2 && shotBeat[i - 1] === shotBeat[i - 2]) {
@@ -929,6 +972,19 @@ if (!Number.isFinite(deepestInTrough)) {
         'camera is juddering rather than panning, which no still frame can show',
     );
   }
+  if (worstTracksideRoll > TRACKSIDE_ROLL_PER_FRAME) {
+    complaints.push(
+      `a trackside picture rolled ${worstTracksideRoll.toFixed(2)}° about its own centre in one ` +
+        `frame (frame ${worstTracksideRollAt}), against ${TRACKSIDE_ROLL_PER_FRAME}° allowed — the ` +
+        'image is turning over as she passes, which reads as the camera falling. The pan axis in ' +
+        '`slide/cameras.ts` (`panAxisFor`) is what keeps it steady',
+    );
+  }
+  process.stderr.write(
+    `  the shot's roll: trackside worst ${worstTracksideRoll.toFixed(3)}°/frame (allowed ` +
+      `${TRACKSIDE_ROLL_PER_FRAME}), chase worst ${worstChaseRoll.toFixed(3)}°/frame (banks with the ` +
+      'chute; reported, not gated)\n',
+  );
   process.stderr.write(
     `  the shot, in motion: ${withinBeat} frame pairs inside a beat; worst trackside drift ` +
       `${worstDrift.toFixed(6)} m (allowed ${TRACKSIDE_DRIFT}); worst change in turn rate ` +

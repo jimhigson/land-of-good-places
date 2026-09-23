@@ -1,6 +1,7 @@
 import { Object3D, PerspectiveCamera, Raycaster, Vector3 } from 'three';
 import { fitCameraToViewport } from '../../core/RideCamera';
 import { RIDE_RECLINE } from '../../entities/ridePose';
+import type { SlideFrame } from '../building/SlideRide';
 
 /**
  * **The ginormous slide is cut like a real on-ride video**: trackside cameras
@@ -286,6 +287,12 @@ export interface RideCurve {
   readonly length: number;
   pointAt(t: number, target?: Vector3): Vector3;
   tangentAt(t: number, target?: Vector3): Vector3;
+  /**
+   * The chute's own cross-section at `t` — `SlideRide.frameAt`, the one owner of
+   * "which way is up in the slide". Asked here rather than rebuilt out of the
+   * tangent and world up, which this file used to do twice.
+   */
+  frameAt(t: number, target?: SlideFrame): SlideFrame;
 }
 
 export type ShotKind = 'chase' | 'trackside';
@@ -304,6 +311,11 @@ export interface SlideShot {
   readonly eye: Vector3 | null;
   /** The point on the chute the eye was placed against — its beat's midpoint. */
   readonly covers: Vector3 | null;
+  /**
+   * Which way is up in the trackside picture — the axis the camera pans about.
+   * `null` on a chase shot. See {@link panAxisFor}.
+   */
+  readonly up: Vector3 | null;
 }
 
 /**
@@ -368,10 +380,67 @@ function riderAxisAt(tangent: Vector3, up: Vector3, target: Vector3): Vector3 {
     .normalize();
 }
 
+/**
+ * **Which way is up in a trackside picture: the axis the camera pans about, and
+ * how fast the picture would roll about its own centre with it.**
+ *
+ * `lookAt` turns a camera about the `up` it is given — a pan-and-tilt head
+ * whose pan axis is `up`. As the sight line `F` swings at `ω`, the picture
+ * rolls about its own centre at `ω · |cot θ|`, `θ` the angle between `F` and
+ * the pan axis. With world up as the axis that is harmless for an eye looking
+ * across at her and a singularity for one looking down on her: #680's search
+ * put beat 1's eye within 0.37° of straight down as she passed under it, and
+ * the picture turned over — 118.7-146.8° of roll in one frame.
+ *
+ * A camera operator pans about the axis square to the plane she crosses the
+ * frame in, so she tracks across the picture and it does not turn at all. That
+ * is this: the normal to the fan of sight lines from `eye` to her across the
+ * beat, `Σ Fᵢ × Fᵢ₊₁`, signed skywards. Every sight line is then as far from
+ * the pan axis as it can be — 90° for a fan that is flat — and the roll the
+ * shot will actually have is measured, not assumed, for the search to reject.
+ *
+ * The horizon it gives up was never in these shots: a 30° lens looking at
+ * least 55° down (`TRACKSIDE_ELEVATION_FLOOR`) sees no sky.
+ */
+function panAxisFor(
+  eye: Vector3,
+  riders: readonly { readonly at: Vector3 }[],
+  sampleSeconds: number,
+): { up: Vector3; worstRoll: number } {
+  const sights = riders.map((rider) => rider.at.clone().sub(eye).normalize());
+  const up = new Vector3();
+  const turn = new Vector3();
+  for (let i = 0; i + 1 < sights.length; i += 1) {
+    up.add(turn.crossVectors(sights[i]!, sights[i + 1]!));
+  }
+  if (up.lengthSq() < 1e-12) up.copy(UP);
+  up.normalize();
+  if (up.dot(UP) < 0) up.negate();
+  let worstRoll = 0;
+  for (let i = 0; i + 1 < sights.length; i += 1) {
+    const swing = sights[i]!.angleTo(sights[i + 1]!) / sampleSeconds;
+    const along = Math.min(1, Math.abs(up.dot(sights[i]!)));
+    const roll = (swing * along) / Math.max(1e-6, Math.sqrt(1 - along * along));
+    if (roll > worstRoll) worstRoll = roll;
+  }
+  return { up, worstRoll };
+}
+
+/**
+ * **How fast a trackside picture may roll about its own centre, in radians a
+ * second — 12°/s.** A fifth of a degree a frame at 60 Hz: the picture turns by
+ * less than it pans, and far inside the half-degree a frame `check:slide-rider`
+ * measures on the real ride and allows. The pan axis of {@link panAxisFor}
+ * keeps nearly every candidate far below it; this is what refuses the ones
+ * whose sight lines do not lie in a plane — a chute bending away under the eye.
+ */
+const TRACKSIDE_ROLL_CEILING = (12 * Math.PI) / 180;
+
 /** One candidate eye, and the point on the chute its frame was built at. */
 interface PlacedEye {
   readonly eye: Vector3;
   readonly covers: Vector3;
+  readonly up: Vector3;
 }
 
 /**
@@ -441,6 +510,7 @@ function placeTracksideEye(
   curve: RideCurve,
   awayFrom: { readonly x: number; readonly z: number },
   chute: Object3D,
+  speed: number,
   from: number,
   to: number,
 ): PlacedEye {
@@ -449,14 +519,15 @@ function placeTracksideEye(
   const riders: { at: Vector3; axis: Vector3 }[] = [];
   for (let i = 0; i <= BEAT_SAMPLES; i += 1) {
     const t = from + ((to - from) * i) / BEAT_SAMPLES;
-    const at = curve.pointAt(t, new Vector3()).clone();
-    const tangent = curve.tangentAt(t, new Vector3()).normalize();
-    const right = new Vector3().crossVectors(tangent, UP);
-    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
-    right.normalize();
-    const up = new Vector3().crossVectors(right, tangent).normalize();
-    riders.push({ at, axis: riderAxisAt(tangent, up, new Vector3()) });
+    const frame = curve.frameAt(t);
+    riders.push({
+      at: frame.position.clone(),
+      axis: riderAxisAt(frame.tangent, frame.up, new Vector3()),
+    });
   }
+  // How long she takes between two of those samples, in seconds — what turns
+  // an angle between two sight lines into a rate the eye can feel.
+  const sampleSeconds = ((to - from) * curve.length) / speed / BEAT_SAMPLES;
 
   // **Two questions, in order, and the order is the point.** An eye that hides
   // her behind the chute is not a candidate at all, however much of the frame
@@ -465,20 +536,14 @@ function placeTracksideEye(
   // that is actually clear. Ranking first and probing in rank order is what
   // keeps this cheap: the winner is usually found in the first handful of
   // probes, and a raycast is only ever spent on a candidate worth having.
-  const candidates: { eye: Vector3; covers: Vector3; score: number }[] = [];
+  const candidates: { eye: Vector3; covers: Vector3; up: Vector3; roll: number; score: number }[] = [];
 
   for (let a = 0; a <= ANCHOR_CANDIDATES; a += 1) {
     const anchorT = from + ((to - from) * a) / ANCHOR_CANDIDATES;
-    const covers = curve.pointAt(anchorT, new Vector3()).clone();
-    const tangent = curve.tangentAt(anchorT, new Vector3()).normalize();
-
-    // The chute's own frame, built exactly as `SlideRide.sampleFrames` builds
-    // it — so "beside the chute" and "above the chute" mean here what they mean
-    // to the trough itself, on a bend and on a slope alike.
-    const right = new Vector3().crossVectors(tangent, UP);
-    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
-    right.normalize();
-    const up = new Vector3().crossVectors(right, tangent).normalize();
+    // The chute's own frame, from its one owner — so "beside the chute" and
+    // "above the chute" mean here what they mean to the trough itself, on a
+    // bend and on a slope alike.
+    const { position: covers, tangent, right, up } = curve.frameAt(anchorT);
 
     // Outward from the castle, in plan view. `>= 0` rather than `> 0` so a
     // chute passing exactly over the castle's centre still picks a side rather
@@ -517,31 +582,39 @@ function placeTracksideEye(
           const extent = apparentBodyExtent(eye, rider.at, rider.axis);
           if (extent < score) score = extent;
         }
-        candidates.push({ eye, covers, score });
+        const pan = panAxisFor(eye, riders, sampleSeconds);
+        candidates.push({ eye, covers, up: pan.up, roll: pan.worstRoll, score });
       }
     }
   }
 
   candidates.sort((x, y) => y.score - x.score);
 
+  // **A picture that spins is not a candidate either**, whatever it frames —
+  // so an eye whose shot would roll faster than {@link TRACKSIDE_ROLL_CEILING}
+  // is dropped before a single ray is spent on it. See {@link panAxisFor}.
+  const steady = candidates.filter((candidate) => candidate.roll <= TRACKSIDE_ROLL_CEILING);
+  const ranked = steady.length > 0 ? steady : [...candidates].sort((x, y) => x.roll - y.roll);
+
   const sight = new Raycaster();
   let best: PlacedEye | null = null;
   let fewestBlocked = Infinity;
-  const probes = Math.min(candidates.length, MAX_PROBED_PLACEMENTS);
+  const probes = Math.min(ranked.length, MAX_PROBED_PLACEMENTS);
   for (let i = 0; i < probes; i += 1) {
-    const candidate = candidates[i]!;
+    const candidate = ranked[i]!;
     let blocked = 0;
     for (const rider of riders) {
       if (chuteBlocksView(sight, candidate.eye, rider.at, chute)) blocked += 1;
     }
-    if (blocked === 0) return { eye: candidate.eye, covers: candidate.covers };
+    const placed = { eye: candidate.eye, covers: candidate.covers, up: candidate.up };
+    if (blocked === 0) return placed;
     // Nothing clear yet — remember the least bad, so a beat the chute wraps
     // round itself still gets the best eye there is rather than an arbitrary
     // one. `check:slide-rider` fails on any blocked frame, so this is a floor
     // under the failure, never a way to pass with one.
     if (blocked < fewestBlocked) {
       fewestBlocked = blocked;
-      best = { eye: candidate.eye, covers: candidate.covers };
+      best = placed;
     }
   }
 
@@ -557,6 +630,8 @@ export function planSlideShots(
   curve: RideCurve,
   awayFrom: { readonly x: number; readonly z: number },
   chute: Object3D,
+  /** How fast she goes down it, m/s — `GIANT_SLIDE_SPEED`, handed in by its owner. */
+  speed: number,
 ): SlideShot[] {
   const shots: SlideShot[] = [];
   for (let beat = 0; beat < BEATS; beat += 1) {
@@ -565,11 +640,18 @@ export function planSlideShots(
     // Odd beats are trackside, so the ride opens on the chase and — because
     // `BEATS` is even — closes trackside. See the rhythm note.
     if (beat % 2 === 0) {
-      shots.push({ kind: 'chase', from, to, eye: null, covers: null });
+      shots.push({ kind: 'chase', from, to, eye: null, covers: null, up: null });
       continue;
     }
-    const placed = placeTracksideEye(curve, awayFrom, chute, from, to);
-    shots.push({ kind: 'trackside', from, to, eye: placed.eye, covers: placed.covers });
+    const placed = placeTracksideEye(curve, awayFrom, chute, speed, from, to);
+    shots.push({
+      kind: 'trackside',
+      from,
+      to,
+      eye: placed.eye,
+      covers: placed.covers,
+      up: placed.up,
+    });
   }
   return shots;
 }
@@ -634,12 +716,13 @@ export class SlideShotDirector {
     if (shot.kind !== 'trackside' || !shot.eye) return shot;
 
     this.camera.position.copy(shot.eye);
-    // Aim at her middle, and with world up — so the trackside shot has a **level
-    // horizon** while the chase banks and pitches with the chute. That contrast
-    // is not incidental: it is what makes the cut read as a different camera
-    // rather than as the picture glitching.
+    // Aim at her middle, panning about the shot's own axis — see
+    // `panAxisFor`. World up is what this used to pan about, for a level
+    // horizon; but these eyes look steeply down, where there is no horizon in
+    // a 30° lens, and an eye nearly over her made world up the one axis the
+    // picture could not turn about: 118-147° of roll in a single frame.
     this.aim.lerpVectors(feet, head, AIM_ALONG_BODY);
-    this.camera.up.copy(UP);
+    this.camera.up.copy(shot.up ?? UP);
     this.camera.lookAt(this.aim);
     return shot;
   }
