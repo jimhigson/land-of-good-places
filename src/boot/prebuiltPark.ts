@@ -47,8 +47,15 @@ async function fetchPrebuiltPark(): Promise<void> {
   const timer = setTimeout(() => controller.abort(), PREBUILT_PARK_TIMEOUT_MS);
   try {
     const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) {
-      console.info(`Prebuilt park: none for seed ${PARK_SEED} (${url}: HTTP ${response.status}); solving it here.`);
+    // A host that answers every unknown path with the app's own page (the
+    // service worker's `navigateFallback`, a single-page-app asset config)
+    // says 200 with HTML for a seed that has no file — that is "none", not a
+    // broken file.
+    const type = response.headers.get('content-type') ?? '';
+    if (!response.ok || !type.includes('json')) {
+      console.info(
+        `Prebuilt park: none for seed ${PARK_SEED} (${url}: HTTP ${response.status}, ${type || 'no type'}); solving it here.`,
+      );
       return;
     }
     const file = (await response.json()) as ParkFile;
