@@ -94,3 +94,15 @@ s11 fairy-pole-88 on bridge at (2.8,-20.2)).
   scratchpad `pocket-procgen-last-base.svg.png` / `pocket-procgen-last.svg.png`.
 - Probes moved out of the tree (they tripped check:flat-primitives) to scratchpad
   `probes-procgen-last/`.
+
+## Follow-ups from the Overseer (done)
+- Reverted 7d637b03 (`check:layout-rung`): #687 is its single owner. Noted on the PR.
+- Seed 6's `spur-exit-railRace` through the race-ring legs: `check:park` has a new hard key
+  `rainbow.inPath` (drawn legs vs `distanceToPath` < WALKABLE_GAP), so it runs across
+  check:every-seed-builds' 0..15. Proved red on seed 6 first: 6 legs, worst -0.69 m.
+  Fix: `routeClearsArchFeet` (renamed from connectorClearsArchFeet, one owner) screens
+  `fallbackSpurRoute` candidates (+ the doormat tail); if the nearest four all fail it
+  backtracks down the rest. Seed 6 closest leg now 4.18 m.
+- After: test:procgen `1 failed | 702 passed (703)`, 0 skipped, name diff = four removed.
+  check:park 0..15 all green; waypoints vs base: s3 239 (240), s6 244 (241), s15 263 (268:
+  spur-exit-railRace 36.7 -> 29.3 m, less paving). coplanar keys = base; swept-bus OK.
