@@ -24,10 +24,14 @@ Base: origin/feat/procgen-on-sphere. PR target: feat/procgen-on-sphere.
    layout=768, cruiser=771062, train=302918, slide=3008025, crossings=101 pieces", exit 1.
 3. perturb no-op -> "CONTROL FAILED ... 1279d5dcd2ad01a1 same", exit 1. Unmutated: exit 0, perturbed 3846707368ab1919.
 
-## Next
-- run check:park-boot (ParkGeneration got a rung), tsc, test:procgen, check; vite build + preview in browser.
-- PR against feat/procgen-on-sphere; preview URL with `/`.
+## State (24 Sep)
+- PR #705 (feat/prebuilt-parks -> feat/procgen-on-sphere) open; design PR #704 draft.
+- Local: `check` exit 0, `check:swept-bus` 0. `test:procgen` (5 fails, seeds 11/131/326) and `check:coplanar`
+  (1 NEW garden kerb/surface seam) fail identically on the base ae8257fb — pre-existing, not this PR.
+- CI: everything else green; preview built parks in 178 s on a cache miss, 1m14s total on a cache hit.
+- Preview verified headlessly: `/`, `/spawn?pos=0,40` (seed 11 hydrated), `/arrive?seed=428` (hydrated).
+- Finding: Mac arm64 vs CI x64 decisions differ by <=1.1e-13 m; digests differ across machines, so digests
+  are only compared on one machine (build:parks does both sides).
 
-## Measurements (canonical, M-series)
-- plan search 7.8 s CPU (cruiser 2975, train 1266, slide 3428 ms); world ctor 1.6 s (world-phase ~0.4 s).
-- decisions JSON ~25 KB raw / ~10 KB brotli; geometry 49 MB raw / 5.1 MB brotli.
+## Next (design steps 3-5)
+- ship pathGraph (needs paths.ts side state as data), then world-phase decisions, then optionally drop the solver.
