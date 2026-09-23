@@ -880,8 +880,72 @@ function gridDetourAttempt(
     cur = prev;
   }
   gridPoints.reverse();
-  gridPoints.push([b[0], b[1]]);
-  return collapseCollinear(gridPoints);
+  // **Pull the staircase straight.** A* on a grid prices every shortest path
+  // the same however many corners it turns, so a detour that has to cut a
+  // diagonal across open ground comes back as a 2 m staircase — and a street
+  // drawn as a staircase is a run of private street lines, which is what
+  // `every street sits on the shared 12 m lattice` exists to refuse. Measured
+  // on seed 131's walk in from the gate once bridges became obstacles here: a
+  // 20-corner staircase from the gate to the bridge's east foot, where one
+  // dog-leg past the ramp's flank was clear. So each stretch is replaced by
+  // the farthest single elbow that is still walkable, greedily from the start.
+  const straightened = straightenStaircase(collapseCollinear(gridPoints), (ax, az, bx, bz) =>
+    walkable(ax, az, bx, bz, ROUTE_WALKER_PAD),
+  );
+  straightened.push([b[0], b[1]]);
+  return collapseCollinear(straightened);
+}
+
+/**
+ * Replace runs of an axis-aligned polyline with the fewest elbows that stay
+ * walkable: from each kept point, jump to the farthest later point reachable by
+ * one straight leg or one right-angle elbow whose legs `clear` accepts. The
+ * first and last points are kept; every leg of the result is axis-aligned
+ * because every elbow is. Never longer in corners than the input, since the
+ * input's own next point is always a candidate.
+ */
+function straightenStaircase(
+  points: readonly (readonly [number, number])[],
+  clear: (ax: number, az: number, bx: number, bz: number) => boolean,
+): [number, number][] {
+  if (points.length <= 2) return points.map((p) => [p[0], p[1]] as [number, number]);
+  const out: [number, number][] = [[(points[0] as readonly [number, number])[0], (points[0] as readonly [number, number])[1]]];
+  let i = 0;
+  while (i < points.length - 1) {
+    const from = points[i] as readonly [number, number];
+    let jumped = false;
+    for (let j = points.length - 1; j > i + 1; j -= 1) {
+      const to = points[j] as readonly [number, number];
+      if (from[0] === to[0] || from[1] === to[1]) {
+        if (clear(from[0], from[1], to[0], to[1])) {
+          out.push([to[0], to[1]]);
+          i = j;
+          jumped = true;
+          break;
+        }
+        continue;
+      }
+      const corners: (readonly [number, number])[] = [
+        [to[0], from[1]],
+        [from[0], to[1]],
+      ];
+      const corner = corners.find(
+        (c) => clear(from[0], from[1], c[0], c[1]) && clear(c[0], c[1], to[0], to[1]),
+      );
+      if (corner) {
+        out.push([corner[0], corner[1]], [to[0], to[1]]);
+        i = j;
+        jumped = true;
+        break;
+      }
+    }
+    if (!jumped) {
+      const next = points[i + 1] as readonly [number, number];
+      out.push([next[0], next[1]]);
+      i += 1;
+    }
+  }
+  return out;
 }
 
 /** Minimal binary min-heap of grid-cell indices, ordered by `priority[i]`. Used
