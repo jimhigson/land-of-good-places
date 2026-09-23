@@ -1,4 +1,4 @@
-import { Group, Vector3 } from 'three';
+import { Group, Matrix4, Quaternion, Vector3, type BufferAttribute, type Mesh } from 'three';
 import {
   CAMERA_YAW_DEGREES,
   PLAYER_ACCELERATION,
@@ -287,6 +287,37 @@ const PICK_WALK_AWAY = 0.38;
  * on where they came from.
  */
 export type GroundSampler = (x: number, z: number, y: number) => number;
+
+
+/** One point of her underside, in her own ride frame — see {@link Player.restingUnderside}. */
+export interface RestPoint {
+  readonly across: number;
+  readonly up: number;
+  readonly along: number;
+}
+
+/**
+ * How wide a strip of her one underside point stands for, across her, in
+ * metres. Finer than along her, because the trough's floor is not: it is flat
+ * for 0.66 m either side of the middle and then climbs 0.27 m in the next 0.29,
+ * so a hair crown out at 0.8 m and an elbow at 0.36 m touch the slide in very
+ * different places and one point cannot speak for both. A first cut in three
+ * bands lost exactly that crown, 4 cm through the floor on 215 frames.
+ */
+const REST_BAND = 0.1;
+
+/**
+ * Points of her that sit this far or more above the floor, in metres, on the
+ * straight chute they are solved against, cannot touch it on any bend a child
+ * can ride — the bends move a point by centimetres — so they are dropped
+ * rather than walked every frame. Her feet, for one.
+ */
+const REST_REACH = 0.1;
+
+/** Scratch for {@link Player.restingUnderside}, so boarding allocates nothing per vertex. */
+const _restInverse = /* @__PURE__ */ new Matrix4();
+const _restMatrix = /* @__PURE__ */ new Matrix4();
+const _restVertex = /* @__PURE__ */ new Vector3();
 
 /**
  * The player character: movement, collision, and the walk animation.
@@ -849,13 +880,13 @@ export class Player implements GameSystem {
   /**
    * Called by the ride every frame while it owns the character.
    *
-   * `pitch` defaults to 0 (upright) — most rides that call this are flat, or
-   * put the rider inside a vehicle whose own tilt is enough on its own (a
-   * child of that vehicle's group inherits its pitch for free). A ride whose
-   * player model is positioned independently of any such parent, and that
-   * climbs or drops (the Rail Race's undulating ring), needs to pass its
-   * cart's actual pitch here explicitly, or the rider stays bolt upright
-   * through every hill while the cart under her visibly tilts.
+   * `pitch` defaults to 0 (upright) — most rides that call this are flat, and
+   * leant onto the ground under her, which is what `faceOnGround` does. A ride
+   * that seats her **in a vehicle** — a cart that climbs, a chute that drops —
+   * should not rebuild her turn here from a yaw and a pitch: hand her the
+   * vehicle's own frame through {@link setRideFrame}, as the Rail Race, the Sky
+   * Cruiser and the ginormous slide do. Two turns of one heading, one for her
+   * and one for the tub, is how the Rail Race's rider came apart from her cart.
    */
   setRidePose(x: number, y: number, z: number, facing: number, pitch = 0): void {
     this.position.set(x, y, z);
@@ -864,6 +895,84 @@ export class Player implements GameSystem {
     this.facingAngle = facing;
     this.group.position.copy(this.position);
     faceOnGround(this.group, facing, pitch);
+  }
+
+  /**
+   * **Ride in a vehicle's own frame, rather than on the ground's.**
+   *
+   * {@link setRidePose} ends in `faceOnGround`, which leans her onto the
+   * **sphere normal under her feet**. That is exactly right for anything whose
+   * floor is the ground, and exactly wrong for a rider inside a tube that was
+   * not built on the sphere: she is then leant onto the planet inside a trough
+   * that is not, and the two disagree by more the further out the ride runs.
+   * Measured on the ginormous slide, canonical seed: **her head 0.62 m below
+   * the trough floor**, through geometry a child can see.
+   *
+   * So a ride that owns a frame hands it over whole, as a turn, and nothing
+   * here re-derives it. `facing` is still recorded because the rest of the game
+   * asks which way she is pointing; it does not steer the model.
+   */
+  setRideFrame(position: Vector3, orientation: Quaternion, facing: number): void {
+    this.position.copy(position);
+    this.previousPosition.copy(this.position);
+    this.groundHeight = position.y;
+    this.facingAngle = facing;
+    this.group.position.copy(this.position);
+    this.group.quaternion.copy(orientation);
+  }
+
+  /**
+   * **The underside of her body as she will ride — the points of her that a
+   * floor under her would touch first**, in her own frame: `across` to her
+   * right, `up`, and `along` the way she faces, from her origin at her feet.
+   *
+   * Her current ride posture is applied first, so this is the shape she will
+   * actually ride in. Then every vertex of every visible mesh on her model —
+   * hair, hat, backpack, glasses — is asked how far it sits above a floor of
+   * height `floorAt(across)` under it, and the lowest of them is kept for each
+   * `binSize`-long stretch of her length and each {@link REST_BAND} of her
+   * width, dropping any that sit {@link REST_REACH} clear of the rest. Those few
+   * dozen points stand in for her whole body against a floor, because a floor
+   * can only ever meet the lowest point of each patch.
+   *
+   * **Why vertices, and why here.** The ginormous slide used to lift her by two
+   * constants, `RIDER_LIFT + RECLINED_LIFT` (0.24 m), chosen for a body nobody
+   * had measured. Her head is the biggest thing on her and she lies on the back
+   * of it: measured on the canonical ride, a party hat's tip was **0.72 m**
+   * through the trough and some vertex of her was inside it on every frame. A
+   * constant cannot know what she is wearing; this asks. The ride then lifts
+   * these points clear of the chute where each of them actually is
+   * (`SlideRide.restLift`), which is what a single lift solved at her feet
+   * cannot do on a chute that bends under the length of her.
+   */
+  restingUnderside(floorAt: (across: number) => number, binSize: number): RestPoint[] {
+    if (this.ridingFlag) applyRidePose(this.model, this.climbWave, 0, this.ridePosture);
+    this.group.updateMatrixWorld(true);
+    _restInverse.copy(this.group.matrixWorld).invert();
+    const lowest = new Map<string, RestPoint & { need: number }>();
+    this.model.root.traverseVisible((node) => {
+      const mesh = node as Partial<Mesh>;
+      const position = mesh.isMesh ? mesh.geometry?.attributes['position'] : undefined;
+      if (!mesh.matrixWorld || !position) return;
+      _restMatrix.multiplyMatrices(_restInverse, mesh.matrixWorld);
+      for (let i = 0; i < position.count; i += 1) {
+        _restVertex.fromBufferAttribute(position as BufferAttribute, i).applyMatrix4(_restMatrix);
+        // A model faces +Z with +X on her LEFT (three.js's right-handed frame),
+        // so "across to her right" is −x.
+        const across = -_restVertex.x;
+        const need = floorAt(across) - _restVertex.y;
+        const key = `${Math.round(_restVertex.z / binSize)}:${Math.round(across / REST_BAND)}`;
+        const was = lowest.get(key);
+        if (!was || need > was.need) {
+          lowest.set(key, { across, up: _restVertex.y, along: _restVertex.z, need });
+        }
+      }
+    });
+    let deepest = -Infinity;
+    for (const point of lowest.values()) if (point.need > deepest) deepest = point.need;
+    return [...lowest.values()]
+      .filter((point) => point.need >= deepest - REST_REACH)
+      .map(({ across, up, along }) => ({ across, up, along }));
   }
 
   /**

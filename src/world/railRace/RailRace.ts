@@ -1002,10 +1002,9 @@ export class RailRace implements GameSystem {
    * which is the wrong place: no pose value in this game is an order of
    * magnitude out. **Do not widen the cart.**
    *
-   * `placeRaceCart` (`seat.ts`, which the check asks too) leans it with
-   * `rideFrame`, which takes its lean about `flatPointAt`'s column rather than the
-   * leaned point's, so the cart leans by the same amount as the rails under it
-   * rather than by very nearly that amount. It writes the quaternion from
+   * `placeRaceCart` (`seat.ts`, which the check asks too) stands it square on
+   * the rails as drawn (`railTurn`), and `seatRaceRider` hands her the cart's own
+   * frame, so the two cannot lean differently. It writes the quaternion from
    * scratch, so this is safe to call every frame — an Euler assignment followed
    * by a pre-multiplied tilt is the compounding trap that had the player slowly
    * tumbling, and `world/up.ts` has the numbers.

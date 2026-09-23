@@ -1,6 +1,6 @@
 import {
   CatmullRomCurve3,
-  Euler,
+  Matrix4,
   Quaternion,
   TubeGeometry,
   Vector3,
@@ -8,6 +8,7 @@ import {
 } from 'three';
 import { upFor } from '../up';
 import { placeOnSphere, tiltToSphere } from '../terrain';
+import { headingTurn } from '../headingTurn';
 
 /**
  * **Sweeping a pair of rails along a route.** The park's one way of turning a
@@ -90,7 +91,6 @@ export function drawnOnSphere(sampler: RailSampler): RailSampler {
 
 const _rideTilt = /* @__PURE__ */ new Quaternion();
 const _rideSpin = /* @__PURE__ */ new Quaternion();
-const _rideEuler = /* @__PURE__ */ new Euler();
 
 /**
  * **How a vehicle sits on a route that is drawn on the sphere** — the
@@ -125,10 +125,16 @@ const _rideEuler = /* @__PURE__ */ new Euler();
  * describes at length, where a per-frame pre-multiply decomposes back into
  * `rotation.x`/`rotation.z` and the tilt compounds until the thing tumbles.
  *
- * Position is deliberately **not** this function's business, because the two
- * kinds of route disagree about it: the coaster and the train solve flat and
- * must map their point through `placeOnSphere`, while the Rail Race's own
- * `pointAt` already returns a leaned point and must not be leaned twice.
+ * Position is deliberately **not** this function's business: the train solves
+ * flat and maps its point through `placeOnSphere`.
+ *
+ * **Only for a heading with no pitch — today, the train's cars.** A pitched
+ * heading read off a flat tangent and then leant is leant twice where the flat
+ * tangent already follows the ground: measured on the Sky Cruiser (canonical
+ * seed), 17.25° between the nose and its drawn rails even once the composition
+ * was right. The Sky Cruiser and the Rail Race carts now take the direction
+ * their rails are actually drawn in, through {@link railTurn}; a new vehicle
+ * that climbs should too.
  */
 export function rideFrame(
   flat: Readonly<Vector3>,
@@ -137,7 +143,10 @@ export function rideFrame(
   out: Quaternion,
 ): Quaternion {
   tiltToSphere(flat.x, flat.y, flat.z, _rideTilt);
-  _rideSpin.setFromEuler(_rideEuler.set(pitch, yaw, 0));
+  // Yaw, then pitch in the yawed frame, from the one owner of that order —
+  // the same function `faceOnGround` poses a rider with, so a rider and the
+  // tub she sits in cannot compose one heading two ways again.
+  headingTurn(yaw, pitch, _rideSpin);
   return out.multiplyQuaternions(_rideTilt, _rideSpin);
 }
 
@@ -195,6 +204,28 @@ export function railFrameAt(sampler: RailSampler, distance: number, out: RailFra
   out.up.crossVectors(out.forward, out.side).normalize();
   return out;
 }
+
+/**
+ * **The turn that sits a vehicle square on rails running along `forward` at
+ * `position`** — the orientation half of {@link railFrameAt}, from the same
+ * side/up convention, so a cart and the sleepers under it cannot disagree about
+ * which way is across.
+ *
+ * `forward` is the direction the rails are actually **drawn** in. That is not
+ * always the route's own `tangentAt`: the Rail Race's is the unleant chart
+ * tangent, and a cart turned from it through `rideFrame` ran its nose up to
+ * 3.5° off the rails under it, round the whole lap (`check:rail-race`).
+ */
+export function railTurn(position: Vector3, forward: Vector3, out: Quaternion): Quaternion {
+  railSide(forward, upFor(position.x, position.y, position.z, _railUp), _turnSide);
+  _turnUp.crossVectors(forward, _turnSide).normalize();
+  _turnBasis.makeBasis(_turnSide, _turnUp, forward);
+  return out.setFromRotationMatrix(_turnBasis);
+}
+
+const _turnSide = /* @__PURE__ */ new Vector3();
+const _turnUp = /* @__PURE__ */ new Vector3();
+const _turnBasis = /* @__PURE__ */ new Matrix4();
 
 export interface SweptRailOptions {
   /** Rail centre-to-centre, in metres. */

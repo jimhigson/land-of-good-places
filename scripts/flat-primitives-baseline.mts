@@ -304,7 +304,6 @@ export const FLAT_PRIMITIVE_BASELINE: Readonly<Record<string, BaselineEntry>> = 
   "src/world/railRace/track.ts::Y_DIFFERENCE::top.y - foot.y": { count: 1, rule: 'Y_DIFFERENCE' },
   "src/world/slide/cameras.ts::HARD_UP::new Vector3(0, 1, 0)": { count: 1, rule: 'HARD_UP' },
   "src/world/slide/chaseEye.ts::Y_OVER_GROUND::eye.y - terrainHeight(eye.x, eye.z)": { count: 1, rule: 'Y_OVER_GROUND' },
-  "src/world/slide/petRiders.ts::HARD_UP::new Vector3(0, 1, 0)": { count: 1, rule: 'HARD_UP' },
   "src/world/slide/solve.ts::Y_DIFFERENCE::b.y - a.y": { count: 1, rule: 'Y_DIFFERENCE' },
   "src/world/slide/solve.ts::Y_DIFFERENCE::near.y - point.y": { count: 1, rule: 'Y_DIFFERENCE' },
   "src/world/slide/supports.ts::Y_OVER_GROUND::point.y - ground": { count: 1, rule: 'Y_OVER_GROUND' },

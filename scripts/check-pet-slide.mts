@@ -178,6 +178,15 @@ const BOARD_SECONDS = 2;
  */
 const MAX_STEP = 0.35;
 
+/**
+ * **How much the chase lens's step may change between two frames, in mm/frame²
+ * on a 60 Hz clock.** The rider herself runs at 1.3 mm p50 and 3.5 mm worst down
+ * the canonical ride — the chute's own curvature at 6.5 m/s — and the lens hung
+ * behind her swings through a little more on a bend. Ten millimetres is room for
+ * that and a tenth of the 0.1 m candidate step whose flicker this exists for.
+ */
+const CHASE_JERK_MM = 10;
+
 /** How close a companion must be to her a moment after the ride, in metres. */
 const REGROUP_RADIUS = 14;
 /** How long it is given to get there. */
@@ -811,6 +820,8 @@ async function ride(wired: boolean): Promise<RunResult> {
   const ON_CHUTE =
     Math.hypot(CHUTE_ENVELOPE.halfWidth, CHUTE_ENVELOPE.above) + PARADE_MEMBER_RADIUS;
   const at = new Vector3();
+  /** The chase lens's world position on each chase frame, and the beat it was in. */
+  const chaseEyes: { beat: number; eye: Vector3 }[] = [];
 
   while (frames < MAX_FRAMES) {
     const context = {
@@ -1107,6 +1118,18 @@ async function ride(wired: boolean): Promise<RunResult> {
       nearFanFrames += 1;
     }
 
+    // **The chase lens, frame by frame, for the steadiness clause below.**
+    // Recorded on chase frames only and cut into runs at every change of beat,
+    // because the cut to and from a trackside eye is a deliberate jump.
+    if (liveShot?.kind === 'chase' && liveCamera) {
+      (liveCamera as { updateWorldMatrix(parents: boolean, children: boolean): void })
+        .updateWorldMatrix(true, false);
+      chaseEyes.push({
+        beat: building.slideShots.shots.indexOf(liveShot),
+        eye: new Vector3().setFromMatrixPosition(liveCamera.matrixWorld),
+      });
+    }
+
     if (liveShot?.kind === 'chase' && liveCamera && first) {
       chaseFrames += 1;
 
@@ -1265,6 +1288,51 @@ async function ride(wired: boolean): Promise<RunResult> {
         }
       }
     }
+  }
+
+  // **A chase lens that holds still where she does.** Its second difference —
+  // how much its step changed from one frame to the next — on an even clock,
+  // within one beat. The rider's own is a few millimetres a frame²; the lens's
+  // was **~100 mm/frame², out and back in one frame**, eight times down the
+  // canonical ride on base and on #680 alike: `solveChaseEye` accepting the
+  // first of its 0.1 m candidates that frames the pets, and the first flicking
+  // between two neighbours as a companion crossed the near bound. That is a
+  // judder no still frame shows and a child sees as the picture twitching.
+  //
+  // Proved red on this seed before the fix (chute 77.09 m): **200.8 mm/frame²**
+  // with the pets, and 54.1 without them — the second being the lens swung on
+  // its 4.35 m boom by every curvature jump of the chute's spline, which the
+  // chord-laid mount removed. Now 3.5 and 3.0.
+  let worstChaseJerk = 0;
+  let worstChaseJerkAt = -1;
+  let chaseTriples = 0;
+  const jerk = new Vector3();
+  for (let i = 2; i < chaseEyes.length; i += 1) {
+    const a = chaseEyes[i - 2]!;
+    const b = chaseEyes[i - 1]!;
+    const c = chaseEyes[i]!;
+    if (a.beat !== c.beat || b.beat !== c.beat) continue;
+    chaseTriples += 1;
+    jerk.copy(c.eye).sub(b.eye).sub(b.eye).add(a.eye);
+    const mm = jerk.length() * 1000;
+    if (mm > worstChaseJerk) {
+      worstChaseJerk = mm;
+      worstChaseJerkAt = i;
+    }
+  }
+  process.stderr.write(
+    `  chase lens steadiness: worst second difference ${worstChaseJerk.toFixed(1)} mm/frame² ` +
+      `over ${chaseTriples} frame triples (allowed ${CHASE_JERK_MM})\n`,
+  );
+  if (wired && chaseTriples < 60) {
+    say('chase lens steady', `only ${chaseTriples} chase frame triples were measured — nothing was proved`);
+  } else if (worstChaseJerk > CHASE_JERK_MM) {
+    say(
+      'chase lens steady',
+      `the chase lens jumped ${worstChaseJerk.toFixed(1)} mm/frame² in one frame (chase frame ` +
+        `${worstChaseJerkAt}), against ${CHASE_JERK_MM} allowed — the picture twitches. The solve ` +
+        'in `slide/chaseEye.ts` hands back 0.1 m steps; `Building.advanceRide` must ease between them',
+    );
   }
 
   // **And back to her at the bottom**, with nobody still riding.

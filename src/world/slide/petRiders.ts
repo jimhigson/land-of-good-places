@@ -1,6 +1,6 @@
-import { Vector3 } from 'three';
+import { Vector3, type Quaternion } from 'three';
 import { RIDE_RECLINE } from '../../entities/ridePose';
-import type { SlideRide } from '../building/SlideRide';
+import { SlideFrame, type SlideRide } from '../building/SlideRide';
 
 /**
  * **Where the pets ride while she goes down the ginormous slide** — issue #468.
@@ -40,8 +40,15 @@ export interface SlideSeat {
   z: number;
   /** Yaw, radians, the same units `Player.setRidePose` takes. */
   facing: number;
-  /** Nose-down pitch, radians. See {@link slopeOf}. */
-  pitch: number;
+  /**
+   * The chute's own turn at this seat — `SlideRide.frameAt`'s orientation, the
+   * turn the child is given too. Carried whole rather than as a yaw and a
+   * pitch: the pets used to rebuild their pitch from the tangent with a
+   * `slopeOf` of their own, which agreed with the child's frame only because
+   * the frame has no roll. Asking the one owner means it cannot come to
+   * disagree.
+   */
+  readonly turn: Quaternion;
   /**
    * How far back the body lies, radians, **on top of** {@link pitch} and in the
    * same yawed frame — so a companion is turned by `pitch + recline` about its
@@ -229,33 +236,11 @@ export const PET_SIDE_STEP = 0.45;
  */
 export const PET_RIDE_LIFT = 0.06;
 
-/**
- * How steeply the chute is falling here, as a rotation about the rider's own
- * left-right axis.
- *
- * Derived from the unit tangent whatever is being placed is *already* being
- * turned by, so there is no second description of the chute's slope that could
- * drift from the first. Under a `YXZ` composition a model's forward (+Z) maps
- * to `(0, -sin θ, cos θ)` once yaw has been applied, so matching the tangent's
- * rise against its horizontal run is exactly `atan2(-y, |xz|)` — positive is
- * nose-down, which is the way a slide goes.
- *
- * Taking `atan2` of the run rather than `asin` of the rise keeps it honest if a
- * tangent ever arrives un-normalised; `SlideRide.tangentAt` normalises today,
- * and this does not have to care whether it still does tomorrow.
- *
- * Lives here, rather than in `Building.ts` where it was written, because the
- * child, the grown-up and now every companion all need the same answer and two
- * copies of it is the bug this repo files most often.
- */
-export function slopeOf(tangent: Vector3): number {
-  return Math.atan2(-tangent.y, Math.hypot(tangent.x, tangent.z));
-}
-
 const point = new Vector3();
 const tangent = new Vector3();
 const across = new Vector3();
-const UP = new Vector3(0, 1, 0);
+/** Scratch cross-section, refilled by `chutePointAt` on every read. */
+const frame = new SlideFrame();
 const ahead = new Vector3();
 const trial = new Vector3();
 
@@ -325,8 +310,14 @@ const BEND_STEP = 0.05;
  */
 function chutePointAt(slide: SlideRide, distance: number, out: Vector3): void {
   const t = Math.min(1, Math.max(0, distance) / slide.length);
-  slide.pointAt(t, out);
-  slide.tangentAt(t, tangent);
+  // **The chute's own cross-section, from its one owner.** This used to read
+  // `pointAt`/`tangentAt` and then rebuild `across` out of `tangent x UP` — a
+  // second copy of the sweep's formula, which is how the child's frame and the
+  // trough's came to disagree by 0.62 m of head. Asking `frameAt` means a
+  // companion cannot drift from the trough even if that formula changes.
+  slide.frameAt(t, frame);
+  out.copy(frame.position);
+  tangent.copy(frame.tangent);
   // Behind the lip: carry on along the entry tangent, backwards. `distance` is
   // negative here, so this subtracts.
   if (distance < 0) out.addScaledVector(tangent, distance);
@@ -336,11 +327,10 @@ function chutePointAt(slide: SlideRide, distance: number, out: Vector3): void {
 function seatPointFor(slide: SlideRide, distance: number, slot: number, out: Vector3): void {
   chutePointAt(slide, distance, out);
 
-  // Left, right, left — see PET_SIDE_STEP. Across the chute is the tangent
-  // crossed with world up, which is the same "up is always world up" the chute
-  // itself is swept with (`SlideRide`), so a companion stays in the trough
-  // through a corkscrew instead of being rolled up its wall by a Frenet frame.
-  across.crossVectors(tangent, UP);
+  // Left, right, left — see PET_SIDE_STEP. Across the chute is the frame's own
+  // sideways axis, so a companion stays in the trough through a corkscrew
+  // instead of being rolled up its wall by a Frenet frame.
+  across.copy(frame.right);
   if (across.lengthSq() > 1e-6) {
     across.normalize();
     out.addScaledVector(across, slot % 2 === 0 ? PET_SIDE_STEP : -PET_SIDE_STEP);
@@ -462,14 +452,17 @@ export function petSeatOnSlide(
     seatPointFor(slide, distance, link, point);
     ahead.copy(point);
   }
-  // `seatPointFor` left `tangent` at this companion's own place on the chute,
-  // which is what facing and pitch below want.
+  // `seatPointFor` left `tangent` and `frame` at this companion's own place on
+  // the chute, which is what its facing and its turn below want.
 
-  seat.x = point.x;
-  seat.y = point.y + PET_RIDE_LIFT;
-  seat.z = point.z;
+  // Lifted along the **trough's** up, not world `+Y`: on the steep middle of
+  // the chute those differ by most of the lift, and lifting along the wrong one
+  // is half of what put the child's head through the floor.
+  seat.x = point.x + frame.up.x * PET_RIDE_LIFT;
+  seat.y = point.y + frame.up.y * PET_RIDE_LIFT;
+  seat.z = point.z + frame.up.z * PET_RIDE_LIFT;
   seat.facing = Math.atan2(tangent.x, tangent.z);
-  seat.pitch = slopeOf(tangent);
+  frame.orientation(seat.turn);
   // **On its back, feet first, exactly as she is.** The child's own recline,
   // taken from the one place that defines it, so there is no second answer to
   // "how does a body lie on this chute" for the two kinds of body on it.
