@@ -1,6 +1,14 @@
 /**
  * **The test Jim asked for: on a slow device, does the game actually START?**
  *
+ * **Not a `check:` (retired from that prefix, #693).** It was
+ * `check:arrival-starts`, defined and run by nothing in CI for weeks. It cannot be: it needs a **real GPU** — on the software rasteriser a GitHub-hosted
+ * runner has, the timings it asserts mean nothing (and this script says so and
+ * fails). So it is `gpu:` — a check you run on a machine with a GPU, before
+ * merging anything that draws — and `check:chain-coverage` names it on every run
+ * as not gating, so nobody mistakes it for cover. Putting it in CI needs a GPU
+ * runner, which is a repository/billing decision, not a code change.
+ *
  * Jim, on the deployed game (9 August 2026): *"The cat bus still doesn't work. It
  * gets to the same point and just stops forever. We need a test that the game
  * actually starts. This is a serious failure because the game is not possible to
@@ -183,8 +191,8 @@ await browser.close();
 
 for (const line of said) console.log(line.startsWith('  ') ? line : `  ${line}`);
 if (fouls.length > 0) {
-  console.error('\ncheck:arrival-starts FAILED');
+  console.error('\ngpu:arrival-starts FAILED');
   for (const foul of fouls) console.error(`  - ${foul}`);
   process.exit(1);
 }
-console.log('\ncheck:arrival-starts passed');
+console.log('\ngpu:arrival-starts passed');

@@ -49,7 +49,10 @@
  * required check.
  *
  * Usage (CI, and locally if you want the same view):
- *   pnpm run check:watchdog
+ *   pnpm run check:watchdog check:shard-3      # what each CI shard runs
+ *   pnpm run check:watchdog                    # the whole chain — but timed
+ *                                              # against ONE shard's cap, which
+ *                                              # the whole chain no longer fits
  *   pnpm run test:procgen:watchdog
  *   CHECK_WATCHDOG_MARGIN_SECONDS=120 pnpm run check:watchdog
  *   CHECK_WATCHDOG_BUDGET_SECONDS=30 pnpm run check:watchdog   # to prove it fires
@@ -77,11 +80,31 @@ const DEFAULT_MARGIN_SECONDS = 180;
  * under `procgen-invariants.yml`. Both are **required** status checks, and
  * both fail the same silent way, so both want the same clock.
  */
-const script = process.argv[2] ?? 'check';
-const workflowPath = process.argv[3] ?? '.github/workflows/checks.yml';
+/**
+ * `[script] [workflow] [--job <id>]`, positionals in that order.
+ *
+ * The script comes **first** so that pnpm's own argument forwarding can supply
+ * it: `check:watchdog`'s body names only `--job shards`, and CI runs
+ * `pnpm run check:watchdog check:shard-3`, which pnpm appends — so one
+ * package.json entry serves every shard and a plain `pnpm run check:watchdog`
+ * still runs the whole chain locally.
+ *
+ * `--job` exists because `checks.yml` stopped being one job when the chain
+ * was sharded: it now carries a cap per job, and the watchdog must be timed
+ * against the shard's, not whichever `timeout-minutes:` the file lists first.
+ */
+const positional: string[] = [];
+let jobId: string | undefined;
+for (let i = 2; i < process.argv.length; i++) {
+  const arg = process.argv[i]!;
+  if (arg === '--job') jobId = process.argv[++i];
+  else if (arg !== '--') positional.push(arg);
+}
+const script = positional[0] ?? 'check';
+const workflowPath = positional[1] ?? '.github/workflows/checks.yml';
 const workflow = new URL(`../${workflowPath}`, import.meta.url);
 
-const cap = capSeconds(workflow);
+const cap = capSeconds(workflow, jobId);
 
 /**
  * The margin scales with the cap rather than being a flat three minutes.
