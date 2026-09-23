@@ -86,9 +86,25 @@ import { chromium, type Browser, type Page } from 'playwright-core';
 import { PLAYER_MAX_SPEED, PLAYER_RADIUS } from '../src/core/constants.ts';
 
 import { KEYBOARD_MOVE_BINDINGS } from '../src/core/input/actions.ts';
+import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
 const BASE = (process.env.CHECK_WALKING_URL ?? 'http://127.0.0.1:5173').replace(/\/$/, '');
 const SHOT_DIR = process.env.CHECK_WALKING_SHOTS ?? '/tmp/check-walking';
+
+/**
+ * **Which park, pinned — never the one the pool happens to draw** (#699).
+ *
+ * A fresh browser profile draws its park from `PARK_SEED_POOL`, so until this
+ * was pinned every run of this check walked a different park, and a failure
+ * could not be reproduced from its own transcript: the red run on CI turned out
+ * to be seed 131 only because the stall's coordinates in the log matched a
+ * probe. Every URL below carries `?seed=`, and each case asserts the page
+ * reported that seed back, so the pin cannot silently stop taking effect.
+ *
+ * `CHECK_WALKING_SEED=n` walks another park.
+ */
+const SEED = Number(process.env.CHECK_WALKING_SEED ?? CANONICAL_PARK_SEED);
+const at = (path: string): string => `${BASE}${path}${path.includes('?') ? '&' : '?'}seed=${SEED}`;
 
 /**
  * **How far she must get before a press counts as "she walked".**
@@ -384,9 +400,16 @@ async function tapToMove(page: Page, label: string): Promise<void> {
     );
     return;
   }
-  // Well below the horizon and off to one side, so the ray lands on open
-  // ground a few metres away rather than on the sky or under her own feet.
-  await page.mouse.click(viewport.width * 0.32, viewport.height * 0.72);
+  const spot = await findOpenGround(page);
+  if (!spot) {
+    fouls.push(
+      `${label}: found no open ground to tap — every candidate point below the horizon either picks ` +
+        'a selectable thing or a pet, or lands too near or too far. Either the view is full of things ' +
+        "or Selection's picking has grown to cover everything, which is a finding in itself",
+    );
+    return;
+  }
+  await page.mouse.click(((spot.ndcX + 1) / 2) * viewport.width, ((1 - spot.ndcY) / 2) * viewport.height);
 
   // Polled to the same deadline, and for the same reason, as a key hold: how
   // far she gets is set by frames, not seconds. Unlike a key there is nothing
@@ -420,6 +443,59 @@ async function tapToMove(page: Page, label: string): Promise<void> {
 }
 
 /**
+ * **A point on the screen that is open ground, asked of the game, not assumed.**
+ *
+ * This used to tap a fixed spot (32% across, 72% down). Whatever stood there
+ * got the tap: on seed 428 it was a tree, and GAME_DESIGN.md's SELECTION RULE
+ * is that a tap on a *thing* selects it and does not walk — correct behaviour
+ * that scored as "touch walking is dead". So the candidates are tried against
+ * the game's own pickers — `Selection`'s zone pick and the parade's pets, the
+ * two things `Game`'s tap handler asks before it lets `TapNavigator` walk — and
+ * the first whose whole neighbourhood (±0.06 NDC, a metre or two either side)
+ * is clear, and whose ground is 2.5-12 m away, is the one tapped. The margin is
+ * what keeps a pet trotting into the spot between choosing and clicking from
+ * turning into a flake.
+ *
+ * This chooses where; it asserts nothing. Whether the tap then *walks* her is
+ * still measured the same way, by her position.
+ */
+async function findOpenGround(page: Page): Promise<{ ndcX: number; ndcY: number } | null> {
+  return page.evaluate(() => {
+    const g = (window as unknown as { game?: any }).game;
+    const selection = g?.selection;
+    const camera = g?.camera?.camera;
+    if (!selection || !camera) return null;
+    const { raycaster, ndc } = selection;
+    const clear = (x: number, y: number): boolean => {
+      ndc.set(x, y);
+      raycaster.setFromCamera(ndc, camera);
+      if (selection.pickRay(raycaster.ray)) return false;
+      if (g.parade?.group && raycaster.intersectObject(g.parade.group, true).length > 0) return false;
+      return true;
+    };
+    const groundDistance = (x: number, y: number): number => {
+      ndc.set(x, y);
+      raycaster.setFromCamera(ndc, camera);
+      const { origin, direction } = raycaster.ray;
+      if (direction.y >= -1e-6) return Infinity;
+      const t = (g.player.position.y - origin.y) / direction.y;
+      const hx = origin.x + direction.x * t;
+      const hz = origin.z + direction.z * t;
+      return Math.hypot(hx - g.player.position.x, hz - g.player.position.z);
+    };
+    const offsets = [-0.06, 0, 0.06];
+    for (const y of [-0.4, -0.55, -0.25, -0.7]) {
+      for (const x of [-0.35, 0.35, -0.6, 0.6, -0.15, 0.15]) {
+        const d = groundDistance(x, y);
+        if (d < 2.5 || d > 12) continue;
+        if (offsets.every((dx) => offsets.every((dy) => clear(x + dx, y + dy)))) return { ndcX: x, ndcY: y };
+      }
+    }
+    return null;
+  });
+}
+
+/**
  * A browser process per case, not just a context — same reasoning as
  * `check-deep-links.mts`: two full 3D parks in one Chromium starve each other
  * badly enough under a software renderer to turn a wait into a flake.
@@ -432,7 +508,15 @@ async function inFreshBrowser(run: (page: Page) => Promise<void>): Promise<strin
     const context = await browser.newContext({ viewport: { width: 900, height: 650 } });
     const page = await context.newPage();
     page.on('pageerror', (error) => pageErrors.push(String((error as Error)?.stack ?? error)));
+    const seedsSeen: number[] = [];
+    page.on('console', (message) => {
+      const said = /park seed (\d+)/.exec(message.text());
+      if (said) seedsSeen.push(Number(said[1]));
+    });
     await run(page);
+    const wrong = seedsSeen.filter((seed) => seed !== SEED);
+    if (seedsSeen.length === 0) pageErrors.push(`the page never reported its park seed, so the pin to ${SEED} is unproven`);
+    else if (wrong.length > 0) pageErrors.push(`asked for park seed ${SEED}, the page built ${wrong.join(', ')}`);
   } finally {
     await browser?.close().catch(() => {});
   }
@@ -457,10 +541,11 @@ async function runCase(label: string, run: (page: Page) => Promise<void>): Promi
 }
 
 checkBindingsMatch();
+say(`park seed ${SEED} (pinned on every URL; CHECK_WALKING_SEED=n for another)`);
 
 // --- 1. the plain controllable park -------------------------------------
 await runCase('spawn', async (page) => {
-  await page.goto(`${BASE}/spawn?pos=0,0`, { waitUntil: 'domcontentloaded' });
+  await page.goto(at('/spawn?pos=0,0'), { waitUntil: 'domcontentloaded' });
   await waitForGame(page, 240000);
   // A beat for the first frames to settle before the stopwatch starts.
   await page.waitForTimeout(2000);
@@ -473,7 +558,7 @@ await runCase('spawn', async (page) => {
 // Escape closes it, which must call `endRide()`. If it does not, `riding`
 // stays latched and every key below is dead — see this file's own header.
 await runCase('after keychain view', async (page) => {
-  await page.goto(`${BASE}/keychain-stall`, { waitUntil: 'domcontentloaded' });
+  await page.goto(at('/keychain-stall'), { waitUntil: 'domcontentloaded' });
   await waitForGame(page, 240000);
   await page.waitForTimeout(2000);
   const opened = await page.evaluate(
@@ -486,8 +571,23 @@ await runCase('after keychain view', async (page) => {
     );
     return;
   }
+  // `press`, deliberately: down and up with nothing between, which lands inside
+  // one frame. Until #699 a key tapped that fast was never seen by
+  // `InputSystem`, the view stayed open and she stayed `riding` — so this is
+  // the regression check for that as well as the way in.
   await page.keyboard.press('Escape');
   await page.waitForTimeout(1500);
+  const handedBack = await page.evaluate(() => {
+    const g = (window as unknown as { game?: any }).game;
+    return { viewOpen: g?.world?.keychainShop?.viewOpen ?? null, riding: g?.player?.riding ?? null };
+  });
+  if (handedBack.viewOpen !== false || handedBack.riding !== false) {
+    fouls.push(
+      `after keychain view: a quick Escape did not close the view (viewOpen=${handedBack.viewOpen}, ` +
+        `riding=${handedBack.riding}) — a key pressed and released inside one frame is being dropped (#699)`,
+    );
+    return;
+  }
   // She is left standing at the view's own composed stand point, which sits a
   // full `REACH` from the cart by construction — so every one of the eight
   // directions below has more than {@link MIN_METRES} of room before anything
@@ -501,7 +601,7 @@ await runCase('returning save', async (page) => {
   // then mark it as one that has already seen the arrival — which is what a
   // real returning player's save says, and what makes the reload below take
   // `continueGame`'s branch rather than replaying the bus.
-  await page.goto(`${BASE}/spawn?pos=6,10`, { waitUntil: 'domcontentloaded' });
+  await page.goto(at('/spawn?pos=6,10'), { waitUntil: 'domcontentloaded' });
   await waitForGame(page, 240000);
   await page.waitForFunction(() => !!localStorage.getItem('lgp:save'), undefined, {
     timeout: 60000,
@@ -514,7 +614,7 @@ await runCase('returning save', async (page) => {
     localStorage.setItem('lgp:save', JSON.stringify(save));
   });
 
-  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(at('/'), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('button.welcome-keep', { timeout: 120000 });
   await page.click('button.welcome-keep');
   await waitForGame(page, 300000);
@@ -528,7 +628,7 @@ if (fouls.length > 0) {
   process.exit(1);
 }
 console.log(
-  `\ncheck:walking passed — ${MOVE_KEYS.length} keys plus a tap, x 3 boot paths, ` +
+  `\ncheck:walking passed on park seed ${SEED} — ${MOVE_KEYS.length} keys plus a tap, x 3 boot paths, ` +
     `each covering at least ${MIN_METRES.toFixed(2)} m (PLAYER_RADIUS) inside ` +
     `${MAX_HOLD_MS} ms, which is ${WALKABLE_IN_DEADLINE.toFixed(0)} m of walking at top speed`,
 );

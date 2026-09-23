@@ -47,8 +47,22 @@
 import { chromium, type Page } from 'playwright-core';
 import { worldX, worldZ } from '../src/world/building/layout.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
+import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
 const BASE = (process.env.CHECK_DEEP_LINKS_URL ?? 'http://127.0.0.1:5173').replace(/\/$/, '');
+
+/**
+ * **Which park, pinned — never the one the pool happens to draw** (#700).
+ *
+ * A fresh profile draws its park from `PARK_SEED_POOL`, so every run of this
+ * check used to visit a different park and a red run could not be reproduced
+ * from its own transcript (the one that failed was seed 208, identified only by
+ * matching the stall's coordinates against a probe). Every URL carries
+ * `?seed=`, and every page is held to having reported that seed back.
+ * `CHECK_DEEP_LINKS_SEED=n` visits another park.
+ */
+const SEED = Number(process.env.CHECK_DEEP_LINKS_SEED ?? CANONICAL_PARK_SEED);
+const at = (path: string): string => `${BASE}${path}${path.includes('?') ? '&' : '?'}seed=${SEED}`;
 const SHOT_DIR = process.env.CHECK_DEEP_LINKS_SHOTS ?? '/tmp/check-deep-links';
 
 type CheckResult = { ok: boolean; detail: string };
@@ -317,7 +331,15 @@ async function runInFreshBrowser(run: (page: Page) => Promise<void>): Promise<st
     const context = await browser.newContext({ viewport: { width: 1000, height: 700 } });
     const page = await context.newPage();
     page.on('pageerror', (e) => pageErrors.push(String((e as Error)?.stack ?? e)));
+    const seedsSeen: number[] = [];
+    page.on('console', (message) => {
+      const said = /park seed (\d+)/.exec(message.text());
+      if (said) seedsSeen.push(Number(said[1]));
+    });
     await run(page);
+    const wrong = seedsSeen.filter((seed) => seed !== SEED);
+    if (seedsSeen.length === 0) pageErrors.push(`the page never reported its park seed, so the pin to ${SEED} is unproven`);
+    else if (wrong.length > 0) pageErrors.push(`asked for park seed ${SEED}, the page built ${wrong.join(', ')}`);
   } finally {
     await browser.close().catch(() => {});
   }
@@ -364,7 +386,7 @@ for (const check of CHECKS) {
   // ---- path 1: startFresh (save-less profile) ----
   try {
     const pageErrors = await runInFreshBrowser(async (page) => {
-      await page.goto(`${BASE}${check.path}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(at(check.path), { waitUntil: 'domcontentloaded' });
       await waitForGameReady(check, page, GAME_READY_TIMEOUT_MS);
       // Both `boardRide`/`open` and the panel's own `openWith` run synchronously
       // inside the same tick that produces `window.game` — no further wait needed
@@ -387,21 +409,39 @@ for (const check of CHECKS) {
     const pageErrors = await runInFreshBrowser(async (page) => {
       // Create the save fast, through the deep link itself (skips the bus),
       // then close whatever it opened and let the autosave land.
-      await page.goto(`${BASE}${check.primerPath ?? check.path}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(at(check.primerPath ?? check.path), { waitUntil: 'domcontentloaded' });
       await waitForGame(page, GAME_READY_TIMEOUT_MS);
       await page.keyboard.press('Escape');
-      // Same reasoning as {@link GAME_READY_TIMEOUT_MS}: this wait is for the
-      // autosave to land, and how long that takes is a fact about the machine,
-      // not about the deep link. It was 15 s and timed out on
-      // `/keychain-stall (continueGame)` on a run where every assertion that
-      // did execute was green.
+      // **Why this used to time out on `/keychain-stall`, and not for want of
+      // time (#700).** The autosave refuses while she is `riding`, and the
+      // keychain view keeps her riding until it closes. `press` is down-and-up
+      // at once, inside one frame, and until the fix `InputSystem` never saw a
+      // key that short — so the view stayed open and no save ever landed. The
+      // old 15 s -> 60 s raise could not have helped; nothing was slow.
+      //
+      // Said here, not left to the timeout: if the view is still open after
+      // the Escape, that is the finding.
+      if (check.path === '/keychain-stall') {
+        const closed = await page
+          .waitForFunction(() => (window as unknown as { game?: any }).game?.player?.riding === false, undefined, {
+            timeout: 10000,
+          })
+          .then(() => true)
+          .catch(() => false);
+        if (!closed) {
+          throw new Error(
+            'Escape did not close the keychain view (she is still riding), so no autosave can land — ' +
+              'a key pressed and released inside one frame is being dropped (#700)',
+          );
+        }
+      }
       await page.waitForFunction(() => !!localStorage.getItem('lgp:save'), undefined, {
         timeout: AUTOSAVE_TIMEOUT_MS,
       });
 
       // Now the actual case under test: reload at the same deep link with a
       // save already present — this is `continueGame`, not `startFresh`.
-      await page.goto(`${BASE}${check.path}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(at(check.path), { waitUntil: 'domcontentloaded' });
       await waitForGameReady(check, page, GAME_READY_TIMEOUT_MS);
       const result = await check.assert(page);
       said.push(`  [continueGame] ${result.ok ? 'OK' : 'FAILED'}: ${result.detail}`);
@@ -417,6 +457,7 @@ for (const check of CHECKS) {
 }
 
 for (const line of said) console.log(line);
+console.log(`(park seed ${SEED}, pinned on every URL; CHECK_DEEP_LINKS_SEED=n for another)`);
 if (fouls.length > 0) {
   console.error('\ncheck:deep-links FAILED');
   for (const foul of fouls) console.error(`  - ${foul}`);
