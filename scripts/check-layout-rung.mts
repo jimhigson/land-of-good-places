@@ -161,11 +161,7 @@ const child = spawnSync(
     './scripts/ts-extension-resolver-register.mjs',
     '--input-type=module',
     '-e',
-    // Touch the layout, not just the module: `PARK_LAYOUT` is a lazy view of
-    // the park's plan, so an import alone runs no solve and the child printed
-    // only "cached — no solve ran in this process" — every count below read
-    // zero and this check had been red on `feat/procgen-on-sphere` since.
-    'const m = await import("./src/world/parkLayout.ts"); void m.PARK_LAYOUT.seed;',
+    'await import("./src/world/parkLayout.ts");',
   ],
   {
     env: { ...process.env, LGP_LAYOUT_REFUSE: 'hotel:40' },
