@@ -1220,20 +1220,40 @@ function routeLeg(
   // stone and leaves the rest on the lawn ({@link drawnMetresOnABridgeUncarried}).
   // Judged first, so a site that keeps off every other bridge beats one that
   // does not; among sites that all stand on one, the least is kept.
+  //
+  // A site's legs are judged **after** `keepRouteOffBridges` has repaired
+  // them, because the repair is what will be drawn and it can cost a great
+  // deal: a destination walled in between a ramp and its own plot is only
+  // reached the long way round. Measured on seed 11: the building's entrance
+  // stood 0.8 m from the ramp of the site its spur crossed at, and the repaired
+  // spur walked 150 m round the building. So among the sites whose repaired
+  // legs keep off every bridge, the shortest walk wins, where a site that
+  // needed no repair at all is still taken as it always was.
   const before = latticeStateSnapshot();
   let fallback: (readonly [number, number])[] | null = null;
   let fallbackOnABridge = Infinity;
-  let fallbackWorst = Infinity;
+  let fallbackOffAxis = true;
+  let fallbackLength = Infinity;
   let fallbackState: LatticeStateSnapshot | null = null;
   for (const candidate of candidates.slice(0, 4)) {
     restoreLatticeState(before);
-    const points = build(candidate);
-    const worst = longestOffAxisRun(points, candidate.site);
+    const built = build(candidate);
+    const worst = longestOffAxisRun(built, candidate.site);
+    if (worst <= MAX_OFF_AXIS_RUN && drawnMetresOnABridgeUncarried(built, width) === 0) return built;
+    const points = keepRouteOffBridges(built, width);
     const onABridge = drawnMetresOnABridgeUncarried(points, width);
-    if (onABridge === 0 && worst <= MAX_OFF_AXIS_RUN) return points;
-    if (onABridge < fallbackOnABridge || (onABridge === fallbackOnABridge && worst < fallbackWorst)) {
+    const offAxis = longestOffAxisRun(points, candidate.site) > MAX_OFF_AXIS_RUN;
+    const length = polylineLength(points);
+    const better =
+      onABridge !== fallbackOnABridge
+        ? onABridge < fallbackOnABridge
+        : offAxis !== fallbackOffAxis
+          ? !offAxis
+          : length < fallbackLength;
+    if (better) {
       fallbackOnABridge = onABridge;
-      fallbackWorst = worst;
+      fallbackOffAxis = offAxis;
+      fallbackLength = length;
       fallback = points;
       fallbackState = latticeStateSnapshot();
     }
