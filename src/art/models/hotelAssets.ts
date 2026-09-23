@@ -743,6 +743,7 @@ function slidingDoors(
  */
 function dropOutlineFoot(outline: Mesh, leaf: Mesh): void {
   leaf.geometry.computeBoundingBox();
+  // flat-ok: the leaf's own authored geometry, upright in its object-local frame — the foot of the door, not a world height
   const foot = leaf.geometry.boundingBox?.min.y;
   if (foot === undefined) return;
   const source = outline.geometry.index ? outline.geometry.toNonIndexed() : outline.geometry;
