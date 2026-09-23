@@ -8,7 +8,7 @@ import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN, RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN } from './train/plan';
 import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
-import { DECK_HALF_LENGTH } from './train/bridgeFootprint';
+import { BRIDGE_WALL_THICKNESS, DECK_HALF_LENGTH } from './train/bridgeFootprint';
 import { CROSSING_SITES, type CrossingSite } from './train/crossingPlan';
 import { screenDrawnPathsForOffSiteCrossings } from './train/crossingPredicate';
 import { registerPlanCache } from '../boot/planCaches';
@@ -1959,14 +1959,45 @@ function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number):
   // the ramp. Clipped in each site's own frame instead, where both `along`
   // and `across` are linear in the segment's parameter, so the answer is the
   // band itself rather than a guess at it.
+  //
+  // **And against the stone that is built, not the deck the site could take.**
+  // "Inside `halfWidth` is road" stopped being true when bridges became as wide
+  // as their path (#349): the proven `halfWidth` is 4–5 m and the stone is
+  // 2.3 m at most, so a street entering a ramp's footprint through its *end*
+  // and running diagonally across the ramp never touched the old parapet band
+  // and was passed — the canonical seed's `spur-stall.railRacer` did exactly
+  // that along z = -40.6 and hung 3.6 m of kerb off the ramp. Now a street may
+  // come within its own ribbon's reach of a bridge's stone only by running
+  // along the crossing's own axis, on it; any other entry is a cut.
+  const dx = bx - ax;
+  const dz = bz - az;
+  const length = Math.hypot(dx, dz);
   for (const site of CROSSING_SITES) {
-    const piece = clipToSiteFootprint(site, ax, az, bx, bz, RAMP_SCREEN_MARGIN);
+    const piece = clipToSiteFootprint(site, ax, az, bx, bz, stoneZoneHalf(site, streetRibbonReachMax()));
     if (!piece) continue;
+    const alongAxis =
+      length > 1e-9 && Math.abs((dx * site.dirX + dz * site.dirZ) / length) >= BRIDGE_CARRIED_COSINE;
     // `|across|` is convex along the clipped piece, so its largest value is
-    // at one end — and anywhere past the deck's own half-width is masonry.
-    if (Math.max(Math.abs(piece.acrossAt0), Math.abs(piece.acrossAt1)) > site.halfWidth) return true;
+    // at one end.
+    const offAxis = Math.max(Math.abs(piece.acrossAt0), Math.abs(piece.acrossAt1));
+    if (!alongAxis || offAxis > BRIDGE_CARRIED_OFFSET) return true;
   }
   return false;
+}
+
+/**
+ * How far either side of a site's axis its stone can reach, padded by
+ * {@link RAMP_SCREEN_MARGIN} and by `reach` — the half-width, kerb included,
+ * of whatever ribbon is being asked about, so the answer is where that
+ * ribbon's *centre line* must keep out of.
+ */
+function stoneZoneHalf(site: CrossingSite, reach: number): number {
+  return Math.min(site.halfWidth, bridgeStoneHalfAcrossMax()) + RAMP_SCREEN_MARGIN + reach;
+}
+
+/** The widest reach, kerb included, of any street a router here draws. */
+function streetRibbonReachMax(): number {
+  return Math.max(GATE_APPROACH_WIDTH, SPUR_WIDTH, CONNECTOR_WIDTH) / 2 + PATH_KERB_OVERHANG;
 }
 
 /**
@@ -1979,15 +2010,9 @@ function segmentCutsABridgeRamp(ax: number, az: number, bx: number, bz: number):
  * paving `drapePathsOverBridges` will lift onto the hump while its neighbours
  * stay on the lawn — a wall of paving (seed 131's walk in from the gate).
  */
-function segmentEntersABridge(
-  ax: number,
-  az: number,
-  bx: number,
-  bz: number,
-  margin = RAMP_SCREEN_MARGIN,
-): boolean {
+function segmentEntersABridge(ax: number, az: number, bx: number, bz: number): boolean {
   for (const site of CROSSING_SITES) {
-    if (clipToSiteFootprint(site, ax, az, bx, bz, margin)) return true;
+    if (clipToSiteFootprint(site, ax, az, bx, bz, stoneZoneHalf(site, streetRibbonReachMax()))) return true;
   }
   return false;
 }
@@ -2039,10 +2064,11 @@ function drawnMetresOnABridgeUncarried(
       const bounds = siteFootprint(site, RAMP_SCREEN_MARGIN);
       const { along, across } = siteFrame(site, here.x, here.z);
       if (along < bounds.alongMin || along > bounds.alongMax) continue;
-      if (Math.abs(across) > bounds.acrossHalf + reach) continue;
+      if (Math.abs(across) > stoneZoneHalf(site, reach)) continue;
       const alongAxis =
         heading > 1e-9 && Math.abs((headingX * site.dirX + headingZ * site.dirZ) / heading) >= BRIDGE_CARRIED_COSINE;
-      if (alongAxis && Math.abs(across) + reach <= site.halfWidth) continue;
+      if (alongAxis && Math.abs(across) <= BRIDGE_CARRIED_OFFSET) continue;
+      if (DEBUG_STREETS && bridgeDebugTMP) console.log(`[foulTMP] (${here.x.toFixed(1)},${here.z.toFixed(1)}) site (${site.x.toFixed(1)},${site.z.toFixed(1)}) along ${along.toFixed(1)} [${bounds.alongMin.toFixed(1)},${bounds.alongMax.toFixed(1)}] across ${across.toFixed(1)} hw ${site.halfWidth} alongAxis ${alongAxis}`);
       metres += stride;
       break;
     }
@@ -2054,10 +2080,37 @@ function drawnMetresOnABridgeUncarried(
  * bridge to count as carrying it — cos 25°. A crossing leg is pinned dead
  * straight over the deck (`routeLeg`), so anything carried is well inside
  * this; a street turning off a ramp is well outside it. */
+let bridgeDebugTMP = false;
+
+/**
+ * **The widest a bridge's drawn stone can stand either side of its axis.** A
+ * site's own `halfWidth` is the widest deck the planner *proved* would fit
+ * there, not the one that gets built: Jim's ruling is that a bridge is as wide
+ * as its path, no wider, so `bridgeFootprint.ts` sweeps the masonry to the
+ * carried path's half-width plus its kerb (`bridgeRoadHalfFor`) plus
+ * the wall. The widest path any router draws across the railway is the
+ * avenue's, so that is the widest stone there can be — 2.3 m, against a
+ * proven `halfWidth` of 4–5 m that would push every street a needless 2.5 m
+ * further off every ramp.
+ */
+function bridgeStoneHalfAcrossMax(): number {
+  // A function, not a constant, only because the three widths are declared
+  // further down this module, beside the routers that draw them.
+  return Math.max(GATE_APPROACH_WIDTH, SPUR_WIDTH, CONNECTOR_WIDTH) / 2 + PATH_KERB_OVERHANG + BRIDGE_WALL_THICKNESS;
+}
+
+/** How far a drawn route's centre line may stray from a site's axis and still
+ * be the route the bridge carries. `routeLeg` pins a crossing dead straight
+ * through the deck's edges and centre, so a carried route sits on the axis to
+ * within the curve's own wobble; a metre is generous for that and well short
+ * of any foreign street, which must clear the stone by its whole ribbon. */
+const BRIDGE_CARRIED_OFFSET = 1;
+
 const BRIDGE_CARRIED_COSINE = Math.cos((25 * Math.PI) / 180);
 
 /**
- * The part of segment `a`-`b` inside one site's padded footprint, as the
+ * The part of segment `a`-`b` inside one site's footprint — its ramps' reach
+ * along the axis, `acrossHalf` either side of it — as the
  * parameter range and the signed `across` at each end of it — or `null` if
  * the segment misses it. Clipped in the site's own frame, where `along` and
  * `across` are both linear in the parameter (Liang–Barsky), so it is exact.
@@ -2068,9 +2121,9 @@ function clipToSiteFootprint(
   az: number,
   bx: number,
   bz: number,
-  margin: number,
+  acrossHalf: number,
 ): { t0: number; t1: number; acrossAt0: number; acrossAt1: number } | null {
-  const bounds = siteFootprint(site, margin);
+  const bounds = { ...siteFootprint(site, RAMP_SCREEN_MARGIN), acrossHalf };
   const a = siteFrame(site, ax, az);
   const b = siteFrame(site, bx, bz);
   let t0 = 0;
@@ -4345,6 +4398,8 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     }
     // See {@link SPUR_STRETCH}: no-op in the game, non-zero only for the test
     // that proves a longer spur leaves distant scenery where it was.
+    if (DEBUG_STREETS && id === 'stall.railRacer') { bridgeDebugTMP = true; drawnMetresOnABridgeUncarried([...(streets ?? fallback ?? []), [ex, ez]], width); bridgeDebugTMP = false; console.log(`[pointsTMP] ${(streets ?? fallback ?? []).map((q) => `(${q[0].toFixed(1)},${q[1].toFixed(1)})`).join(' ')}`); }
+    if (DEBUG_STREETS) console.log(`[bridgeTMP] ${id} streets=${streets ? drawnMetresOnABridgeUncarried([...streets, [ex, ez]], width).toFixed(1) : 'none'} fallback=${fallback ? drawnMetresOnABridgeUncarried([...fallback, [ex, ez]], width).toFixed(1) : '-'}`);
     const routed = [
       ...(streets ?? fallback ?? fallbackSpurRoute(network(), routeTarget, spurTail, width)),
       ...(lead.length ? [[ex, ez] as readonly [number, number]] : []),
