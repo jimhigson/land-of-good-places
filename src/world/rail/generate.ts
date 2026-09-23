@@ -170,7 +170,7 @@ interface RouteBriefBase {
    * the search**: when every route from one start pose fails, the next is
    * tried. For a closed loop whose station sits at the start, that makes the
    * station's position part of the search space rather than an assumption —
-   * the same trick `train/plan.ts` plays when `clearStationDistance` slides a
+   * the same trick `train/plan.ts` plays when `rankedStationDistances` slides a
    * station along the track until its platform is on clear ground.
    */
   readonly startPoses: readonly Pose2[];

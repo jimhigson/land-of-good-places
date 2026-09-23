@@ -89,16 +89,16 @@ export function stationStand(
 }
 
 /**
- * Slides along the loop from `target` (0, +1, -1, +2 … metres) until the
- * platform area — three discs across its length — is clear of every plot.
- * Gives up at ±24 m and returns the target; the boot assert and check:park
- * then say so loudly rather than a child finding a platform inside a booth.
+ * Every admissible stand within `STATION_SEARCH_WINDOW` of `target`, best
+ * first. A stand inside an already-placed station's fence window is not
+ * admissible at all; everything else is scored (below) and ranked, so
+ * {@link planStations} can take the best and backtrack to the next.
  */
-function clearStationDistance(
+function rankedStationDistances(
   route: TrainRoute,
   target: number,
   placed: readonly Vec2[],
-): number {
+): number[] {
   const tangent = new Vector3();
   const centre = new Vector3();
 
@@ -128,8 +128,7 @@ function clearStationDistance(
   //  - an inward dip rather than the far rim (short spur, near the paths),
   //  - open ground on the park side where the spur will actually arrive,
   //  - and, mildly, nearness to the seed's bearing.
-  let best = target;
-  let bestScore = Infinity;
+  const ranked: { distance: number; score: number }[] = [];
   for (
     let offset = -STATION_SEARCH_WINDOW;
     offset <= STATION_SEARCH_WINDOW;
@@ -204,10 +203,15 @@ function clearStationDistance(
     // Proportional rather than a step, so a loop that genuinely cannot spread
     // them still returns its least-bad answer instead of a coin toss between
     // two equally-forbidden candidates.
-    let crowding = 0;
-    for (const other of placed) {
-      const gap = Math.hypot(standX - other.x, standZ - other.z);
-      crowding = Math.max(crowding, Math.max(0, STATION_SEPARATION - gap) / STATION_SEPARATION);
+    // **A hard refusal, not a price** (seed 428: Sunny Side and Bluebell Halt
+    // 19.9 m apart against the 20.2 m two platforms need). Crowding used to be
+    // a proportional penalty, `crowding * 3000`; 0.3 m short cost about 44,
+    // less than a blocked approach (120) or the cruiser's low run (400), so a
+    // crowded stand simply won. A stand inside another station's fence window
+    // is not a worse station, it is half of one — so it is not a candidate,
+    // and when a station has none left `planStations` backtracks.
+    if (placed.some((other) => Math.hypot(standX - other.x, standZ - other.z) < STATION_SEPARATION)) {
+      continue;
     }
 
     const score =
@@ -217,19 +221,18 @@ function clearStationDistance(
       // invalid (Jim's ruling on #414) while two stations closer together than
       // we would like is merely bad. Above `blocked`, because a platform inside
       // another platform is worse than a platform near a booth.
-      crowding * 3000 +
       (blocked ? 1000 : 0) +
       (approachBlocked ? 120 : 0) +
       (cruiserLow ? 400 : 0) +
       radialDot * 30 +
       radius * 0.35 +
       Math.abs(offset) * 0.2;
-    if (score < bestScore) {
-      bestScore = score;
-      best = distance;
-    }
+    ranked.push({ distance, score });
   }
-  return best;
+  // Stable, so equal scores keep window order — the first-minimum the old
+  // single-best loop returned is exactly `ranked[0]`.
+  ranked.sort((a, b) => a.score - b.score);
+  return ranked.map((entry) => entry.distance);
 }
 
 let cruiserLowXs: Float64Array | null = null;
@@ -238,7 +241,7 @@ let cruiserLowZs: Float64Array | null = null;
 /**
  * The Sky Cruiser's low-flying sample points, walked once and kept.
  *
- * {@link clearStationDistance} asks {@link nearCruiserLowCorridor} for every
+ * {@link rankedStationDistances} asks {@link nearCruiserLowCorridor} for every
  * candidate offset of every station — 122 calls a solve — and each call used
  * to re-walk the whole cruiser curve through `pointAt` (an arc-length lookup
  * per sample). The walk depends only on the cruiser's solved route, so it is
@@ -288,16 +291,39 @@ const STATION_SEPARATION = PLATFORM_LENGTH + STATION_GAP * 2;
 export function planStations(route: TrainRoute): readonly PlannedStation[] {
   // Sequential, not `map`: each station is scored against the stands already
   // chosen, which is what stops two of them landing in the same place. See the
-  // `crowding` term in `clearStationDistance`.
-  const placed: Vec2[] = [];
+  // hard refusal in `rankedStationDistances`.
+  //
+  // **Backtracking, CLAUDE.md's standing rule.** Each station takes its best
+  // admissible stand; if a later station then has none (every stand in its
+  // window is inside an earlier station's fence window), the earlier one moves
+  // to its next-best stand and the later one is asked again. A park whose
+  // stations fit first time is untouched — its choices are each `ranked[0]`.
+  const targets = STATION_SEEDS.map((seed) =>
+    route.distanceNear(seed.bearingX * STATION_SEED_RADIUS, seed.bearingZ * STATION_SEED_RADIUS),
+  );
+  const chosen: number[] = [];
+  const place = (index: number, placed: readonly Vec2[]): boolean => {
+    if (index === targets.length) return true;
+    for (const distance of rankedStationDistances(route, targets[index] as number, placed)) {
+      const { standX, standZ } = stationStand(route, distance);
+      chosen[index] = distance;
+      if (place(index + 1, [...placed, { x: standX, z: standZ }])) return true;
+    }
+    return false;
+  };
+  if (!place(0, [])) {
+    // No arrangement in any station's window keeps them apart. Say so — the
+    // invariant `stationsDoNotCrowdEachOther` will then fail the park — and
+    // fall back to each station's own target rather than inventing a stand.
+    // eslint-disable-next-line no-console
+    console.warn('planStations: no arrangement keeps the stations a fence window apart');
+    targets.forEach((target, index) => {
+      chosen[index] = target;
+    });
+  }
   return STATION_SEEDS.map((seed, index) => {
-    const target = route.distanceNear(
-      seed.bearingX * STATION_SEED_RADIUS,
-      seed.bearingZ * STATION_SEED_RADIUS,
-    );
-    const distance = clearStationDistance(route, target, placed);
+    const distance = chosen[index] as number;
     const { standX, standZ } = stationStand(route, distance);
-    placed.push({ x: standX, z: standZ });
     const tangent = route.tangentAt(distance, new Vector3());
     // Away from the track, through the stand — the platform's park side.
     const centre = route.pointAt(distance, new Vector3());

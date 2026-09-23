@@ -469,7 +469,7 @@ export interface CoasterRouteOptions {
  * The station is where the loop **starts and ends**, so choosing it is the
  * outermost level of the generator's search: when no loop can be grown from
  * one station, the next is tried. `train/plan.ts` does the same thing when
- * `clearStationDistance` slides a station along the track until its platform
+ * `rankedStationDistances` slides a station along the track until its platform
  * stands on clear ground — a station's position is a thing to search for, not
  * a thing to assume.
  *
