@@ -122,6 +122,23 @@ const WIDEST_DRAWN_RADIUS = Math.max(POLE_DRAWN_BOTTOM_RADIUS, KNOB_RADIUS);
  * has been given its own owner above.
  */
 const POLE_RADIUS = 0.28;
+/** The same figure, for the invariant that measures pole spacing off the drawn park. */
+export const FAIRY_POLE_RADIUS = POLE_RADIUS;
+
+/**
+ * **How far apart two fairy poles must stand** — room for a child to walk
+ * between them, which is two pole radii plus `WALKABLE_GAP` (two player
+ * radii), the width `NavGrid` fattens every collider by.
+ *
+ * The claims registry never refuses a feature for its own claims, so nothing
+ * stopped a pole on one path run landing on a pole of the run that meets it:
+ * seed 208 stood `fairy-pole-39` and `fairy-pole-58` **0.032 m** apart (two
+ * posts drawn through each other, their knobs z-fighting — found by
+ * `check:coplanar`), and every seed had pairs well inside a pole's own
+ * collider (0.087 m, 0.204 m, 0.291 m on the same seed). A pole refused this
+ * way slides along its run like any other refusal.
+ */
+export const FAIRY_POLE_SPACING = POLE_RADIUS * 2 + PLAYER_RADIUS * 2;
 
 // **A pole must not be drawn wider than the ground it claims.** Anything a
 // child can see and lean on has a collider that covers it (CLAUDE.md), and a
@@ -553,6 +570,15 @@ export function fairyPoleBuilder(
           fairyOccupiedPoints(x, z, neighbours),
           WIDEST_DRAWN_RADIUS,
         ) < POLE_RIDE_CLEARANCE
+      ) {
+        continue;
+      }
+      // Not on, or pinching the gap beside, another fairy pole — see
+      // {@link FAIRY_POLE_SPACING}. Every standing pole but this slot's own.
+      if (
+        placed.some(
+          (other, i) => i !== index && other !== null && Math.hypot(other[0] - x, other[1] - z) < FAIRY_POLE_SPACING,
+        )
       ) {
         continue;
       }

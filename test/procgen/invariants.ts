@@ -6094,6 +6094,50 @@ const nothingHangsIntoTheTunnel: Invariant = (facts) => {
 };
 
 /**
+ * **A child can walk between any two fairy poles.**
+ *
+ * The claims registry never refuses a feature for its *own* claims, so a pole
+ * on one path run could stand on a pole of the run that meets it. Seed 208
+ * drew `fairy-pole-39` and `fairy-pole-58` 0.032 m apart — two posts through
+ * each other — and pairs at 0.087, 0.204 and 0.291 m on the same park; it was
+ * found by `check:coplanar` through the two knobs z-fighting, not by anything
+ * that asked about the poles. Measured off the drawn meshes: each pole's
+ * centre, with the separation taken across the pair's own mean axis so a
+ * height difference on sloping ground cannot pass for a gap. The bar is the
+ * game's — two pole radii plus `WALKABLE_GAP` — not the generator's.
+ */
+const fairyPolesStandWalkablyApart: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const poles = facts.fairyLights.polesDrawn;
+  const need = facts.fairyLights.poleRadius * 2 + WALKABLE_GAP;
+  let worst = Infinity;
+  for (let i = 0; i < poles.length; i += 1) {
+    for (let j = i + 1; j < poles.length; j += 1) {
+      const a = poles[i]!;
+      const b = poles[j]!;
+      const up = a.up.clone().add(b.up).normalize();
+      const d = b.at.clone().sub(a.at);
+      d.addScaledVector(up, -d.dot(up));
+      const gap = d.length();
+      worst = Math.min(worst, gap);
+      if (gap < need - 1e-3) {
+        complaints.push(
+          `${a.name} and ${b.name} stand ${gap.toFixed(3)} m apart at (${fmt([a.at.x, a.at.z])}) — ` +
+            `a child needs ${need.toFixed(2)} m (two pole radii plus WALKABLE_GAP) to pass between them`,
+        );
+      }
+    }
+  }
+  if (poles.length < 2) {
+    complaints.push(`only ${poles.length} fairy pole(s) drawn — this spacing check measured nothing`);
+  }
+  process.stderr.write(
+    `[fairy spacing] ${poles.length} poles, closest pair ${worst.toFixed(3)} m against ${need.toFixed(2)} m\n`,
+  );
+  return complaints;
+};
+
+/**
  * **Every modelled coping stone sits on the wall it caps — no stone floating
  * over a gap, none sunk into the parapet, none hanging off the end of it.**
  *
@@ -11588,6 +11632,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'every modelled coping stone sits on the wall it caps',
     everyCopingStoneSitsOnItsWall,
   ],
+  ['a child can walk between any two fairy poles', fairyPolesStandWalkablyApart],
   [
     'no bridge parapet can be seen through — its outer face reaches the wall top',
     noBridgeParapetCanBeSeenThrough,
