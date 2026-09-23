@@ -13,29 +13,100 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+/** One job in a workflow file, as far as the cap and the job's name go. */
+export interface WorkflowJob {
+  /** The key under `jobs:` — `shards`, `build`, `check`. */
+  readonly id: string;
+  /** Its `name:`, verbatim, which may carry a `${{ matrix.x }}` template. */
+  readonly name: string | null;
+  readonly timeoutMinutes: number | null;
+}
+
 /**
- * `checks.yml`'s own `timeout-minutes`, in seconds.
+ * **The jobs in a workflow, read by indentation rather than by a YAML parser.**
  *
- * Deliberately strict: if the workflow is restructured so this cannot be
- * found, throw rather than fall back to a default. A watchdog that silently
- * assumes 30 minutes when the real cap has become 20 is worse than no
- * watchdog, because it reports a margin that does not exist.
+ * Only two keys are wanted from each job, and both sit at a fixed depth in
+ * every workflow this repo has: a job id two spaces in under `jobs:`, and its
+ * `name:` / `timeout-minutes:` four spaces in. Comments are dropped first,
+ * because the workflows mention `timeout-minutes` in prose.
+ *
+ * Why this exists at all: `checks.yml` used to be one job, so "the first
+ * `timeout-minutes:` in the file" *was* the cap. Since the chain was split
+ * into shards (#693's PR) the file has three jobs with three different caps,
+ * and "the first one" would silently become whichever the file happened to
+ * list first — a watchdog timed against the aggregator's 5 minutes, say.
+ */
+export function workflowJobs(yml: string): WorkflowJob[] {
+  const lines = yml.split('\n').filter((line) => !/^\s*#/.test(line));
+  const jobs: { id: string; name: string | null; timeoutMinutes: number | null }[] = [];
+  let inJobs = false;
+  for (const line of lines) {
+    if (/^\S/.test(line)) {
+      inJobs = /^jobs:\s*$/.test(line);
+      continue;
+    }
+    if (!inJobs) continue;
+    const id = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line);
+    if (id) {
+      jobs.push({ id: id[1]!, name: null, timeoutMinutes: null });
+      continue;
+    }
+    const job = jobs.at(-1);
+    if (!job) continue;
+    const name = /^ {4}name:\s*(.+?)\s*$/.exec(line);
+    if (name) job.name = name[1]!.replace(/^["']|["']$/g, '');
+    const timeout = /^ {4}timeout-minutes:\s*(\d+)\s*$/.exec(line);
+    if (timeout) job.timeoutMinutes = Number(timeout[1]);
+  }
+  return jobs;
+}
+
+/**
+ * A workflow job's own `timeout-minutes`, in seconds.
+ *
+ * Deliberately strict: if the cap cannot be found **unambiguously**, throw
+ * rather than fall back to a default. A watchdog that silently assumes 30
+ * minutes when the real cap has become 20 is worse than no watchdog, because
+ * it reports a margin that does not exist.
+ *
+ * - With `jobId`, that job's cap; throws if the job is absent or has none.
+ * - Without, the file's only cap; throws if more than one job declares one.
  */
 export function capSeconds(
-  workflow = new URL('../.github/workflows/checks.yml', import.meta.url),
+  workflow: URL = new URL('../.github/workflows/checks.yml', import.meta.url),
+  jobId?: string,
 ): number {
-  const yml = readFileSync(workflow, 'utf8');
-  // Comments in this file mention `timeout-minutes` in prose, so match only a
-  // real YAML key at the start of a line.
-  const match = /^\s*timeout-minutes:\s*(\d+)\s*$/m.exec(yml);
-  if (!match) {
+  const jobs = workflowJobs(readFileSync(workflow, 'utf8'));
+  const where = fileURLToPath(workflow).replace(/^.*\/\.github\//, '.github/');
+  if (jobId !== undefined) {
+    const job = jobs.find((j) => j.id === jobId);
+    if (!job) {
+      throw new Error(`${where} has no job \`${jobId}\` (jobs: ${jobs.map((j) => j.id).join(', ') || 'none'})`);
+    }
+    if (job.timeoutMinutes === null) {
+      throw new Error(
+        `${where}'s job \`${jobId}\` has no \`timeout-minutes:\` — the watchdog cannot know the cap. ` +
+          'Give the job one rather than hard-coding a number here.',
+      );
+    }
+    return job.timeoutMinutes * 60;
+  }
+  const capped = jobs.filter((j) => j.timeoutMinutes !== null);
+  if (capped.length !== 1) {
     throw new Error(
-      'checks.yml has no `timeout-minutes:` key — the watchdog cannot know the cap. ' +
-        'If the job was restructured, update scripts/checkChain.mts rather than hard-coding a number.',
+      `${where} has ${capped.length} jobs with a \`timeout-minutes:\` ` +
+        `(${capped.map((j) => `${j.id}=${j.timeoutMinutes}`).join(', ') || 'none'}), so "its cap" is ` +
+        'ambiguous. Name the job (check-watchdog.mts --job <id>) rather than taking the first one.',
     );
   }
-  return Number(match[1]) * 60;
+  return capped[0]!.timeoutMinutes! * 60;
 }
+
+/** A job `name:` as a matcher: `Checks shard ${{ matrix.shard }}` matches `Checks shard 3`. */
+const nameMatcher = (name: string): RegExp => {
+  const parts = name.split(/\$\{\{[^}]*\}\}/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(`^${parts.join('.+?')}$`);
+};
 
 /**
  * **The cap for the job a `gh run view --log` dump came from.**
@@ -50,8 +121,8 @@ export function capSeconds(
  * So the log is asked which job it is rather than the caller being trusted to
  * remember. Every line of a `gh` log dump begins with the job's name, and a
  * job's `name:` is what GitHub matches a required status check by — so it is
- * already load-bearing and already unique. Scanning the workflows for the one
- * that declares it needs no hand-maintained map that could drift.
+ * already load-bearing and already unique. A matrix job's templated name
+ * (`Checks shard ${{ matrix.shard }}`) matches every instance of it.
  *
  * Ambiguity and absence both **throw**. Falling back to a default cap is the
  * behaviour that produced the bug.
@@ -61,14 +132,12 @@ export function capSecondsForJob(jobName: string, dir = new URL('../.github/work
   workflow: string;
 } {
   const root = fileURLToPath(dir);
-  const matches: string[] = [];
+  const matches: { file: string; job: WorkflowJob }[] = [];
   for (const file of readdirSync(root)) {
     if (!/\.ya?ml$/.test(file)) continue;
-    const yml = readFileSync(root + file, 'utf8');
-    // A *job's* `name:` is indented; the workflow's own sits at column 0.
-    // Either identifies the file, which is all that is wanted here.
-    const escaped = jobName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (new RegExp(`^\\s*name:\\s*["']?${escaped}["']?\\s*$`, 'm').test(yml)) matches.push(file);
+    for (const job of workflowJobs(readFileSync(root + file, 'utf8'))) {
+      if (job.name !== null && nameMatcher(job.name).test(jobName)) matches.push({ file, job });
+    }
   }
   if (matches.length === 0) {
     throw new Error(
@@ -78,12 +147,12 @@ export function capSecondsForJob(jobName: string, dir = new URL('../.github/work
   }
   if (matches.length > 1) {
     throw new Error(
-      `"${jobName}" is declared by more than one workflow (${matches.join(', ')}), so its ` +
+      `"${jobName}" matches more than one job (${matches.map((m) => `${m.file}:${m.job.id}`).join(', ')}), so its ` +
         'cap is ambiguous. Pass the workflow path explicitly.',
     );
   }
-  const workflow = matches[0] as string;
-  return { seconds: capSeconds(new URL(workflow, dir)), workflow: `.github/workflows/${workflow}` };
+  const { file, job } = matches[0]!;
+  return { seconds: capSeconds(new URL(file, dir), job.id), workflow: `.github/workflows/${file} (job ${job.id})` };
 }
 
 /**

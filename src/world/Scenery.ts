@@ -963,7 +963,7 @@ export function wallBuilder(claims: GroundClaims, out: (WallRun | null)[]): Feat
   });
   return {
     name: 'walls',
-    deps: [],
+    deps: ['stalls'],
     movable: true,
     *advance() {
       const plan = wallPlan().all;

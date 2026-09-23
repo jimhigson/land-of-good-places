@@ -2,7 +2,7 @@ name: Checks
 
 # **The checks. All of them, in the one place that runs them.**
 #
-# `pnpm run check` is the 47-step chain — `tsc`, `typecheck:test`, and every
+# `pnpm run check` is the chain — `tsc`, `typecheck:test`, and every
 # `check:*` from `check:text` to `check:arrival-completes`. It used to live
 # inside `pnpm run build`, which meant every consumer of "build" paid for the
 # whole gate: the deploy re-ran 16 minutes of QA to produce a 191 ms artefact,
@@ -22,9 +22,9 @@ name: Checks
 # the worst way: every PR goes green *faster*, which looks like an
 # improvement.
 #
-# So if you rename this workflow or its job, update the branch protection in
-# the same change — a required check is matched by **name**, and a name that
-# matches nothing gates nothing. Verify by reading it back:
+# So if you rename the **`Checks` aggregator job** (below), update the branch
+# protection in the same change — a required check is matched by **job name**,
+# and a name that matches nothing gates nothing. Verify by reading it back:
 #
 #     gh api repos/jimhigson/land-of-good-places/branches/main/protection
 #
@@ -33,6 +33,29 @@ name: Checks
 # Same reasoning `procgen-invariants.yml` already gives for splitting its
 # invariant suite into its own job: a failure should read as *"a check broke"*
 # on its own line, not be buried in the log of something called "build".
+# ## Why it is split into shards, and what keeps that honest
+#
+# The chain outgrew one runner. On `feat/procgen-on-sphere` it needs ~35-50
+# minutes end to end — most steps there build a park, ~40 s each on CI — and the
+# single job was being killed by its watchdog at 27m00s with 48 of 68 steps
+# done. **Raising the cap was the wrong fix**: a cap stretched to fit a slow job
+# is what caused the 29 August outage. So the chain is split into contiguous
+# `check:shard-N` scripts in `package.json`, and this workflow runs one per
+# runner, in parallel: the wall clock is now the longest shard, not the sum.
+#
+# Three things make that safe rather than merely fast:
+#
+# 1. **`pnpm run check` is still the whole gate**, locally: its body is
+#    `check:shard-1 && ... && check:shard-N`, in the original order. The shards
+#    are not a second definition of the chain, they *are* the chain.
+# 2. **`check:chain-coverage` proves the partition on every run** — each step
+#    in exactly one shard, and every shard named by this file's matrix. Drop a
+#    shard from the matrix below, or a step into two shards, and it goes red.
+# 3. **The required check is still one job called `Checks`** — the aggregator
+#    at the bottom, which `needs:` every shard and the build and fails unless
+#    every one of them *succeeded*. It runs `if: always()`, and that is
+#    load-bearing: without it a failed shard would make GitHub **skip** the
+#    aggregator, and **a skipped required check counts as passing**.
 on:
   pull_request:
   push:
@@ -47,18 +70,28 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    # **This string is the required status check on `main`.** Changing it
-    # silently stops gating merges. See the header.
-    name: Checks
+  shards:
+    # Not the required check — the aggregator below is. These names are what
+    # `measure:check-chain` reads a log's cap by, so keep the template.
+    name: Checks shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    # The chain measured ~15m50s on a slow runner when it lived in `build`, and
-    # it grows as checks are added — which is exactly why it is no longer on the
-    # deploy's critical path. Generous headroom, deliberately: a cap that sits
-    # just above the real duration is what caused the 29 August outage, because
-    # **a job killed by `timeout-minutes` reports as `cancelled`**, which reads
+    # **Each shard's cap, and the watchdog reads it from here** (`--job
+    # shards` in `check:watchdog`), so there is one number, not two.
+    #
+    # Shards are balanced to ~9-10 minutes on a slow runner (see the PR that
+    # split them for the per-step CI durations), so 30 is ~3x headroom, not a
+    # cap sitting just above the real duration. That gap is the point: a job
+    # killed by `timeout-minutes` reports as `cancelled`, which reads
     # identically to a concurrency kill and so fails silently.
     timeout-minutes: 30
+    strategy:
+      # Every shard runs to its own verdict. With fail-fast one red shard
+      # cancels the rest, and a cancelled shard says nothing about its steps.
+      fail-fast: false
+      matrix:
+        # Must name every `check:shard-N` in package.json, each once —
+        # `check:chain-coverage` fails if it does not.
+        shard: [1, 2, 3, 4, 5, 6, 7]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -82,30 +115,38 @@ jobs:
         # live in `.npmrc`, which pnpm reads.
         run: pnpm install --frozen-lockfile
 
-      # The full gate: `tsc --noEmit`, `typecheck:test`, and every `check:*`
-      # that used to sit in front of `vite build`. Identical list, identical
-      # order — the split moved them, it did not edit them.
-      #
-      # **Run under a watchdog, not directly.** `pnpm run check:watchdog` runs
-      # the very same `pnpm run check`, but under a clock set three minutes
-      # *inside* this job's `timeout-minutes` above. Two things that buys, both
-      # of which this job lacked:
+      # One shard of the gate, **under a watchdog, not directly.** The
+      # watchdog runs `pnpm run check:shard-N` under a clock set inside this
+      # job's `timeout-minutes`. Two things that buys:
       #
       # 1. **A timeout becomes red.** If `timeout-minutes` fires, GitHub marks
       #    the job `cancelled` — grey, and identical to a superseded push. The
       #    watchdog gets there first and exits 124, so the job is a `failure`
-      #    with a message naming the step that was running. Silence on a
-      #    timeout is the 29 August outage, described in this file's own header.
-      # 2. **The margin is printed on every run, pass or fail.** This chain sits
-      #    at ~88% of the cap on `main`, and the same chain measures 1.58x
-      #    slower on an ordinary runner than a fast one — so the remaining
-      #    margin is spent by luck rather than by growth, and it needs to be
-      #    visible before it is breached rather than after.
+      #    with a message naming the step that was running.
+      # 2. **The margin is printed on every run, pass or fail**, per shard.
       #
       # `scripts/measure-check-chain.mts` is the tool for the "after" case:
       # `gh run view <run-id> --log > run.log && pnpm run measure:check-chain run.log`.
-      - name: Run the checks
-        run: pnpm run check:watchdog
+      - name: Run this shard of the checks
+        run: pnpm run check:watchdog check:shard-${{ matrix.shard }}
+
+  build:
+    name: Checks build
+    runs-on: ubuntu-latest
+    # Install plus a sub-second `vite build`; 10 minutes is only a backstop.
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       # `vite build` on its own, kept here deliberately.
       #
@@ -116,7 +157,38 @@ jobs:
       # plugin that throws). "A broken build never ships" has been the rule in
       # `DEPLOY_NOTES.md` since 2026-07-26, and this is the step that keeps it
       # true now that the deploy no longer builds-and-checks in one go.
-      #
-      # It costs 191 ms, so it is free insurance rather than a trade.
       - name: Build the artefact
         run: pnpm run build
+
+  check:
+    # **This string is the required status check on `main`.** Changing it
+    # silently stops gating merges. See the header.
+    name: Checks
+    needs: [shards, build]
+    # `always()`, never the default. A job whose `needs` failed is SKIPPED by
+    # default, and GitHub treats a skipped required check as satisfied — so
+    # without this line a red shard would produce a green gate.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard and the build succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+          # The control: if `needs` ever arrives empty (a renamed job, a bad
+          # expression), "no job failed" would be vacuously true. Count them.
+          count=$(echo "$NEEDS" | jq 'length')
+          if [ "$count" != "2" ]; then
+            echo "::error::expected 2 upstream jobs (shards, build), saw $count — the aggregator is measuring nothing"
+            exit 1
+          fi
+          # `success` only. `failure`, `cancelled` (a shard's own timeout) and
+          # `skipped` are all a gate that did not pass.
+          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
+          if [ -n "$bad" ]; then
+            echo "::error::not every part of the gate succeeded: $bad"
+            exit 1
+          fi
+          echo "Checks ok — every shard and the build succeeded."
