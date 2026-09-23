@@ -279,8 +279,10 @@ function footprintAsPlaced(entry: ManifestEntry, x: number, z: number): AnchorFo
  * timing, no map iteration — so two processes print the same lines, which is
  * what lets `scripts/park-digest.mts` hash them.
  *
- * Empty when the layout came out of `cachedSolve`'s store rather than being
- * solved, and says so — an empty trace must never read as "no unwinding".
+ * Empty when nothing in this process forced the layout decision — importing
+ * this module decides nothing, since `PARK_LAYOUT` is a lazy view over the
+ * park's driver. The exit note below says so ("nothing forced the layout
+ * decision"), so an empty trace must never read as "no unwinding".
  */
 const layoutTrace: string[] = [];
 export const LAYOUT_TRACE: readonly string[] = layoutTrace;
