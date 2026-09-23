@@ -1,7 +1,8 @@
-import { Euler, Quaternion, Vector3, type Object3D } from 'three';
+import { Quaternion, Vector3, type Object3D } from 'three';
 import { SPACE_GARDEN, spaceAt } from './spaces';
 import { screenBasis3D, type ScreenBasis3D } from '../core/screenBasis';
 import { INDOOR_UP, tiltToSphere, upAt } from './terrain';
+import { headingTurn } from './headingTurn';
 
 /**
  * **Which way is up, for a thing that might be indoors or out.**
@@ -121,27 +122,6 @@ const _basisRight = /* @__PURE__ */ new Vector3();
 const _basisScreenUp = /* @__PURE__ */ new Vector3();
 
 const _tilt = /* @__PURE__ */ new Quaternion();
-/**
- * **`YXZ`, and that is load-bearing.**
- *
- * `Object3D.quaternion.setFromEuler` reads the order off the euler it is handed
- * and ignores the object's own `rotation.order` entirely — the object's order
- * only governs reading a quaternion back out. So this one euler decides the
- * composition for every caller of {@link faceOnGround}, and it was `XYZ`: pitch
- * about **world** X, outermost, rather than pitch in the yawed frame.
- *
- * With `pitch` left at 0 the two orders are identical — it is a single turn
- * about Y — which is why this survived: of every caller in the game only two
- * pass a pitch at all, `railRace/seat.ts` and the ginormous slide in
- * `building/Building.ts`. Both are riders lying or leaning in a vehicle on a
- * turn, which is precisely the case `XYZ` corkscrews; `Building.ts` sets
- * `player.group.rotation.order = 'YXZ'` at boarding with a docblock explaining
- * why it matters, and that line could never take effect through this path.
- * `GROWN_UP_RECLINE`'s own note says it plainly: *"In the default `XYZ` order
- * the two compose the other way round and a grown-up lying down on a turn
- * corkscrews."*
- */
-const _euler = /* @__PURE__ */ new Euler(0, 0, 0, 'YXZ');
 
 /**
  * Point an object along a yaw (and optionally a pitch) **and** stand it on the
@@ -166,7 +146,9 @@ const _euler = /* @__PURE__ */ new Euler(0, 0, 0, 'YXZ');
  * The build-time helpers may pre-multiply safely, because they run once.
  */
 export function faceOnGround(object: Object3D, yaw: number, pitch = 0): void {
-  object.quaternion.setFromEuler(_euler.set(pitch, yaw, 0));
+  // Yaw, then pitch in the yawed frame — `headingTurn` owns the order, and the
+  // ride carts' `rideFrame` asks the same function. See its header.
+  headingTurn(yaw, pitch, object.quaternion);
   const { x, y, z } = object.position;
   if (spaceAt(x, z) !== SPACE_GARDEN) return;
   object.quaternion.premultiply(tiltToSphere(x, y, z, _tilt));

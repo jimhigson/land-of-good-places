@@ -168,4 +168,90 @@ if (worstDeviation > EPSILON_M) {
   process.exit(1);
 }
 
+// --- and the cart sits square on the same rails ------------------------------
+//
+// **The heading's composition, measured where it shows.** The cart is turned by
+// `rideFrame` — a lean about its flat column, then a yaw and a pitch composed by
+// `world/headingTurn.ts`. For a year that composition was a default `XYZ`
+// euler: the pitch taken about **world** X, which on a heading of 90° is a roll.
+// On this loop's climbs that put the nose off the rails and rolled the tub; #680
+// fixed the rider's half of the same euler and not this one, and the Rail Race
+// came apart. So: every 0.5 m of the loop, the real `Coaster.placeCart`, and the
+// cart's nose and up against the rails as drawn — a finite difference of the
+// leant route, and the up square to it and to the rails' own side.
+//
+// Proved on the canonical seed (loop 288 m): with the cart on `rideFrame` and
+// the heading composed `XYZ`, nose 29.37° / up 40.64° off; composed `YXZ`, up
+// right but nose 17.25° off at s=63 m, because `rideFrame` leans a flat tangent
+// that already runs along the drawn rails (0.26° apart). **`drawnOnSphere`'s
+// own `tangentAt` has the same double lean**, and `railFrameAt` — so the ties —
+// inherit it: a tie is pitched up to 17° about its long axis here. That is not
+// this clause's to fix, and the gauge points above do not see it.
+{
+  /**
+   * The cart against its rails, in degrees. The flat heading is carried onto
+   * the sphere by the tilt at one column, while the drawn rail also feels the
+   * tilt *changing* along it — arc/R, about 0.07° per half-metre on a 400 m
+   * sphere, plus the Catmull-Rom's own sag (the ~20 mm above over a 0.45 m
+   * sample spacing, ~2.5°/m at worst in curvature, not direction). A degree is
+   * room for that and a fraction of what a mis-composed pitch does on a climb.
+   */
+  const CART_ON_RAILS_DEGREES = 1;
+  const rig = coaster as unknown as { distance: number; placeCart(): void; cart: import('three').Object3D };
+  const nose = new Vector3();
+  const up = new Vector3();
+  const ahead = new Vector3();
+  const behind = new Vector3();
+  const railFrame: RailFrame = { position: new Vector3(), forward: new Vector3(), side: new Vector3(), up: new Vector3() };
+  const worldTurn = new Quaternion();
+  const railUp = new Vector3();
+  let worstNose = { value: 0, at: 0 };
+  let worstUp = { value: 0, at: 0 };
+  let stations = 0;
+  const saved = rig.distance;
+  for (let d = 0; d < coaster.route.length; d += 0.5) {
+    rig.distance = d;
+    rig.placeCart();
+    rig.cart.updateWorldMatrix(true, false);
+    rig.cart.getWorldQuaternion(worldTurn);
+    nose.set(0, 0, 1).applyQuaternion(worldTurn);
+    // flat-ok: the cart's own local up, carried into the world by its quaternion
+    up.set(0, 1, 0).applyQuaternion(worldTurn);
+    drawn.pointAt(coaster.route.wrap(d + 0.05), ahead);
+    drawn.pointAt(coaster.route.wrap(d - 0.05), behind);
+    railFrameAt(drawn, d, railFrame);
+    const along = ahead.sub(behind).normalize();
+    const noseOff = (nose.angleTo(along) * 180) / Math.PI;
+    // Square to the rails: perpendicular to the way they run AND to the way
+    // they are spread apart. Not `railFrame.up`, which is built on
+    // `drawnOnSphere`'s `tangentAt` — the flat tangent turned by the tilt — and
+    // that is pitched up to 17° off the drawn rails here (see the note below).
+    const squareUp = railUp.crossVectors(along, railFrame.side).normalize();
+    const upOff = (up.angleTo(squareUp) * 180) / Math.PI;
+    if (noseOff > worstNose.value) worstNose = { value: noseOff, at: d };
+    if (upOff > worstUp.value) worstUp = { value: upOff, at: d };
+    stations += 1;
+  }
+  rig.distance = saved;
+  rig.placeCart();
+  console.log(
+    `check:tie-frame — the cart at ${stations} stations: nose worst ${worstNose.value.toFixed(2)}° ` +
+      `off the drawn rails (s=${worstNose.at.toFixed(1)} m), up worst ${worstUp.value.toFixed(2)}° off ` +
+      `the rails' up (s=${worstUp.at.toFixed(1)} m), allowed ${CART_ON_RAILS_DEGREES}°`,
+  );
+  if (!(stations > 0) || !Number.isFinite(worstNose.value) || !Number.isFinite(worstUp.value)) {
+    console.error('check:tie-frame: FAIL — the cart sweep measured nothing, or measured NaN.');
+    process.exit(1);
+  }
+  if (worstNose.value > CART_ON_RAILS_DEGREES || worstUp.value > CART_ON_RAILS_DEGREES) {
+    console.error(
+      `check:tie-frame: FAIL — the Sky Cruiser's cart sits ${Math.max(worstNose.value, worstUp.value).toFixed(2)}° ` +
+        `off its own rails, past ${CART_ON_RAILS_DEGREES}°. If the pitch is being composed about the ` +
+        "world's X rather than the yawed one, `world/headingTurn.ts` is being bypassed — it is the one " +
+        'owner of how a yaw and a pitch become a turn.',
+    );
+    process.exit(1);
+  }
+}
+
 console.log('tie frame: every tie sits on both rails, within epsilon.');
