@@ -67,27 +67,38 @@
  * would cost N full park solves on a check that now does real work. The CPU
  * clock gets the same property for one run.
  *
- * ### How the budgets were chosen — measured, then multiplied by four
+ * ### How the budgets were chosen — measured where it runs, then multiplied by three
  *
- * Budget = **4 x measured CPU, floored at 250 ms**, where `measuredMs` is the
- * median of three local runs on the canonical seed (see each row), and each
- * row also carries what **CI** read, because CI is where this check gates.
+ * Budget = **3 x measured CPU, floored at 250 ms**, where "measured" is taken
+ * **on the kind of machine the check is running on**: `localMs` is the median
+ * of three runs on an M-series laptop, `ciMs` the median of the canonical-seed
+ * solves in one `Checks` job on GitHub's runner. On CI (`CI=true`, which
+ * GitHub Actions sets) the CI column is the baseline; everywhere else the
+ * local one. Every run prints which.
  *
- * The multiplier was 8 for a long time. The old 8x had to absorb CI hardware
- * **and** parallel load (~2x); contention no longer reaches a CPU reading, so
- * only the hardware term is left, and 8x is wide enough to be useless: 8 x 3305
- * ms would have put the slide's budget at 26440 ms and waved the 16641 ms
- * regression above straight through.
+ * **Why two columns and not one multiplier wide enough for both.** CI reads
+ * 2.0-2.3x the laptop (23 Sep 2026, `Checks` run 35878196330: 33 canonical
+ * solves in the one job — cruiser 6676-7357 ms against 3441 here). One
+ * multiplier on the laptop's number cannot be tight on both:
  *
- * It is 4 rather than 3 because of what CI actually reads. Measured 23 Sep
- * 2026, `Checks` run 35878196330: every park solve in that job prints its
- * per-feature times, and across **33 canonical-seed solves** in the one job
- * the worst readings were cruiser 7357, train 3252, slide 8612, layout 153,
- * pathGraph 149 ms — **2.1-2.3x** the local medians below. At 3x that left CI
- * 1.3-1.4x from its own budget, which one slower runner generation would eat.
- * At 4x it is **1.7x or more on every row**, and a 4x regression is still
- * caught locally as well as on CI (the #681 slide, 4.6x, would read 17.9 s
- * against a 15.6 s budget here and ~35 s against it on CI).
+ * - **3x local** left CI at 1.3-1.4x of its budget on its worst solve — one
+ *   slower runner generation from a red `main` for no commit's sake.
+ * - **4x local** gave CI 1.7x, and then **failed to catch the regression this
+ *   check exists for**: the slide with its `endRadius()` memo removed (the
+ *   #681 cost, below) read **15374 ms against a 15644 ms budget — `ok`** on
+ *   this laptop. Measured, not supposed.
+ *
+ * A baseline per machine class makes both 3x: a 3x regression is caught
+ * wherever it is run, and CI's worst reading sits 2.7x under its own budget.
+ * The multiplier is 3, not the 8 this file used to carry: the old 8x had to
+ * absorb CI hardware **and** parallel load, and a CPU reading sees neither
+ * the load (it is thread CPU time) nor, now, the hardware (it is compared
+ * with a baseline from the same class of machine). 8 x 3305 ms would have put
+ * the slide at 26440 ms and waved the 16641 ms regression straight through.
+ *
+ * A machine that is neither — a slow cloud sandbox without `CI` set — is
+ * judged against the laptop column and may read red for its hardware. That is
+ * a wrong baseline, not a regression; set `CI=true` there or measure it.
  *
  * The 250 ms floor keeps the sub-20 ms features (crossings, pathGraph, road)
  * from tripping on JIT and GC noise that dwarfs their real cost; for them the
@@ -111,29 +122,35 @@ import { performance } from 'node:perf_hooks';
 
 import { busyLabel, busyMsOf, controlOfCpuClock, cpuMs, describeControl } from './lib/cpuClock.mts';
 
-/** One owner for the budget formula: 4x measured CPU, floored at 250 ms. */
-const BUDGET_MULTIPLIER = 4;
+/** One owner for the budget formula: 3x measured CPU, floored at 250 ms. */
+const BUDGET_MULTIPLIER = 3;
+/** Which column is the baseline: GitHub Actions sets `CI=true`. */
+const onCi = process.env['CI'] === 'true';
+const baselineName = onCi ? 'CI' : 'local';
 const budgetMs = (measured: number): number => Math.max(BUDGET_MULTIPLIER * measured, 250);
 
 /**
  * The driver's coarse features, in build order, with the median CPU cost of
  * three runs on the canonical seed. Re-derive with `LGP_SOLVE_COST_REPORT=1`.
  */
-const FEATURES: readonly { readonly feature: string; readonly measuredMs: number }[] = [
+const FEATURES: readonly { readonly feature: string; readonly localMs: number; readonly ciMs: number }[] = [
   // Measured 23 Sep 2026 on 6a407a87 (the slide's end-radius memo in),
-  // canonical seed, M-series laptop, load average ~8-12, three runs, CPU time,
-  // median taken. The three readings are given so the spread is visible. `CI`
-  // is the same row in `Checks` run 35878196330 (ubuntu runner), the worst of
-  // 33 canonical-seed solves in that one job — the number the budget has to
-  // clear with room.
-  //                                            local runs (ms CPU)       CI worst   budget
-  { feature: 'layout', measuredMs: 67 }, //       64.2 /   91.9 /   67.2     153      268
-  { feature: 'cruiser', measuredMs: 3441 }, // 3275.0 / 3933.8 / 3440.5    7357    13764
-  { feature: 'train', measuredMs: 1417 }, //   1403.9 / 1488.0 / 1416.8    3252     5668
-  { feature: 'slide', measuredMs: 3911 }, //   4087.6 / 3910.7 / 3663.5    8612    15644
-  { feature: 'crossings', measuredMs: 12 }, //   17.2 /   12.2 /   10.6      36      250
-  { feature: 'pathGraph', measuredMs: 67 }, //   70.7 /   66.9 /   51.6     149      268
-  { feature: 'road', measuredMs: 1 }, //          0.5 /    0.5 /    0.4       1      250
+  // canonical seed, CPU time.
+  //   local: M-series laptop, load average ~8-12, three runs, median taken; the
+  //          three readings are given so the spread is visible.
+  //   CI:    `Checks` run 35878196330 on that commit, median of the 33
+  //          canonical-seed solves in the one job (min-max beside it). Those are
+  //          the driver's `time/pieces` line, wall clock; on that runner the
+  //          check's own CPU row agreed with wall to within 1% (cruiser 6644.4
+  //          CPU / 6688.5 wall), so they are the same number there.
+  //                                                        local runs (ms CPU)     CI median (min-max)
+  { feature: 'layout', localMs: 67, ciMs: 139 }, //       64.2 /   91.9 /   67.2     139 (132-153)
+  { feature: 'cruiser', localMs: 3441, ciMs: 6739 }, // 3275.0 / 3933.8 / 3440.5    6739 (6676-7357)
+  { feature: 'train', localMs: 1417, ciMs: 2876 }, //   1403.9 / 1488.0 / 1416.8    2876 (2849-3252)
+  { feature: 'slide', localMs: 3911, ciMs: 7755 }, //   4087.6 / 3910.7 / 3663.5    7755 (7644-8612)
+  { feature: 'crossings', localMs: 12, ciMs: 28 }, //     17.2 /   12.2 /   10.6      28 (22-36)
+  { feature: 'pathGraph', localMs: 67, ciMs: 136 }, //    70.7 /   66.9 /   51.6     136 (127-149)
+  { feature: 'road', localMs: 1, ciMs: 1 }, //             0.5 /    0.5 /    0.4       1 (0-1)
 ];
 
 /**
@@ -141,7 +158,7 @@ const FEATURES: readonly { readonly feature: string; readonly measuredMs: number
  * through `cachedSolve` in `src/world/boundary.ts`, so it is still timed as an
  * import — and it is the one row whose old shape was always honest.
  */
-const BOUNDARY_MEASURED_MS = 57; // 51.0 / 73.4 / 56.7 local; CI 100.5; budget 250 (floor)
+const BOUNDARY_MS = { localMs: 57, ciMs: 101 }; // local 51.0 / 73.4 / 56.7; CI 100.5 (one reading: it is timed only here)
 
 const reportOnly = process.env['LGP_SOLVE_COST_REPORT'] === '1';
 
@@ -200,12 +217,12 @@ const judge = (name: string, ms: number, measuredMs: number, how: string): void 
   rows.push(
     `  ${name.padEnd(10)} ${ms.toFixed(1).padStart(9)} ms   budget ${budget
       .toFixed(0)
-      .padStart(6)} ms (${BUDGET_MULTIPLIER} x ${measuredMs} ms measured, floor 250)   ${verdict}   ${how}`,
+      .padStart(6)} ms (${BUDGET_MULTIPLIER} x ${measuredMs} ms ${baselineName}, floor 250)   ${verdict}   ${how}`,
   );
   if (ms > budget && !reportOnly) {
     fouls.push(
       `${name} cost ${ms.toFixed(1)} ms of CPU against a ${budget.toFixed(0)} ms budget ` +
-        `(${BUDGET_MULTIPLIER} x its measured ${measuredMs} ms) — a regression of this size is structural, not noise, and ` +
+        `(${BUDGET_MULTIPLIER} x its ${baselineName} baseline of ${measuredMs} ms) — a regression of this size is structural, not noise, and ` +
         'it is not contention either, because a descheduled solve accrues no CPU time; profile it ' +
         '(node --cpu-prof) and fix the feature, or re-derive the budget from a fresh median with ' +
         'LGP_SOLVE_COST_REPORT=1 if it legitimately grew and say so in scripts/check-solve-cost.mts',
@@ -213,9 +230,13 @@ const judge = (name: string, ms: number, measuredMs: number, how: string): void 
   }
 };
 
-console.log(`solver cost vs budget (canonical seed), gated on ${busyLabel(cpuClock)}:`);
-judge('boundary', boundaryMs, BOUNDARY_MEASURED_MS, `module import, wall ${boundaryWallMs.toFixed(1)} ms`);
-for (const { feature, measuredMs } of FEATURES) {
+console.log(
+  `solver cost vs budget (canonical seed), gated on ${busyLabel(cpuClock)}, against the ` +
+    `${baselineName} baseline (CI=${process.env['CI'] ?? 'unset'}):`,
+)
+judge('boundary', boundaryMs, onCi ? BOUNDARY_MS.ciMs : BOUNDARY_MS.localMs, `module import, wall ${boundaryWallMs.toFixed(1)} ms`);
+for (const { feature, localMs, ciMs } of FEATURES) {
+  const measuredMs = onCi ? ciMs : localMs;
   const ms = stats.cpuMsByFeature[feature] ?? 0;
   const wall = stats.msByFeature[feature] ?? 0;
   const pieces = stats.piecesByFeature[feature] ?? 0;
@@ -254,7 +275,8 @@ process.stderr.write(
 if (reportOnly) {
   process.stderr.write(
     'check:solve-cost NOTE: LGP_SOLVE_COST_REPORT=1 — this run asserted NOTHING about the budgets. ' +
-      'It is the re-derivation mode; take the median of three and write it into FEATURES.\n',
+      'It is the re-derivation mode; take the median of three and write it into FEATURES — localMs from a laptop, ' +
+      'ciMs from a Checks job log (the time/pieces lines).\n',
   );
 }
 
