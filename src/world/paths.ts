@@ -730,10 +730,19 @@ function gridDetourAttempt(
   );
   // Bridges are obstacles to this search for the reason {@link segmentIsWalkable}
   // gives: it only ever draws same-side legs.
+  // **And on its own side of the railway**, when both ends are. Every caller
+  // is a same-side leg, and a search that does not know the rail is there
+  // finds the short way round an obstacle *across* it: measured on seed 24,
+  // detouring a spur round a bridge's ramp, the grid went round the ramp's
+  // far end — over the rail twice — and `pushClearOfRail` then folded the
+  // result into a zig-zag along the fence.
+  const aSide = railInfoAt(a[0], a[1]).side;
+  const railSide = railInfoAt(b[0], b[1]).side === aSide ? aSide : null;
   const walkable = (ax: number, az: number, bx: number, bz: number, pad: number): boolean =>
     segmentClearOfBlockers(ax, az, bx, bz, pad, localBlockers) &&
     segmentClearOfBoundary(ax, az, bx, bz) &&
-    !segmentEntersABridge(ax, az, bx, bz);
+    !segmentEntersABridge(ax, az, bx, bz) &&
+    (railSide === null || segmentHoldsRailSide(ax, az, bx, bz, railSide, RAIL_CLAMP_DISTANCE - 0.1));
   // The connector into the *true* endpoint gets a little more slack on the
   // "arriving at a destination" exemption than an ordinary mid-search edge
   // does: a doormat typically stands `standOff` (1.4 m, `parkLayout.ts`) plus
