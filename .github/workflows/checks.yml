@@ -115,6 +115,14 @@ jobs:
         # live in `.npmrc`, which pnpm reads.
         run: pnpm install --frozen-lockfile
 
+      # `check:served` (`check:walking`, `check:deep-links`) drives a real page.
+      # `playwright-core` ships the driver but not the browser binaries.
+      # Installed on every shard rather than only the one that holds
+      # `check:served` today: tying it to a shard number would be a second
+      # definition of where that step lives, kept in step by hand.
+      - name: Install Chromium
+        run: pnpm exec playwright-core install --with-deps chromium
+
       # One shard of the gate, **under a watchdog, not directly.** The
       # watchdog runs `pnpm run check:shard-N` under a clock set inside this
       # job's `timeout-minutes`. Two things that buys:

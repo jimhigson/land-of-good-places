@@ -94,10 +94,22 @@ const REPO = new URL('..', import.meta.url).pathname;
  * they fail on their own preconditions.
  */
 const KNOWN_ORPHANS: Record<string, string> = {
-  'check:frame-time': 'needs a built dist/ — "No dist/ to measure". Orphaned since #246, 8 Aug 2026. Wiring: #526',
-  'check:arrival-starts': 'needs a dev server on 127.0.0.1:5173 — ERR_CONNECTION_REFUSED. Orphaned since #264, 9 Aug 2026. Wiring: #526',
-  'check:deep-links': 'needs a dev server (has CHECK_DEEP_LINKS_URL override). Orphaned since #314, 22 Aug 2026. Wiring: #526',
-  'check:walking': 'needs a dev server on 127.0.0.1:5173 — ERR_CONNECTION_REFUSED. Orphaned since #342, 27 Aug 2026. Wiring: #526',
+};
+
+/**
+ * **Checks that cannot run on a GitHub-hosted runner at all, and so are not
+ * `check:*`.** Both assert on a real GPU's behaviour, and the hosted runner has
+ * only a software rasteriser, on which their timings mean nothing (each script
+ * detects that and fails). They sat in {@link KNOWN_ORPHANS} as `check:*` for
+ * weeks, which read as "CI will get round to it". It will not — so they were
+ * renamed out of the `check:` prefix (#693), and are named here so the rename
+ * cannot quietly be undone and so the gap is still said out loud on every run.
+ * A GPU runner would let them gate; that is a repository/billing decision.
+ */
+const GPU_ONLY: Record<string, string> = {
+  'gpu:frame-time': 'asserts the frame-time tail on a real GPU (was check:frame-time, orphaned since #246)',
+  'gpu:arrival-starts':
+    'asserts a cold boot hands over control under a 6x CPU throttle on a real GPU (was check:arrival-starts, orphaned since #264)',
 };
 
 const scripts: Record<string, string> = JSON.parse(
@@ -439,6 +451,20 @@ console.log(
 );
 for (const shard of shardNames) console.log(`    ${shard}: ${parts(scripts[shard]!).length} steps`);
 
+for (const [name, why] of Object.entries(GPU_ONLY)) {
+  if (scripts[name] === undefined) {
+    failures.push(`GPU_ONLY lists ${name}, which is not a script any more — delete the entry`);
+  }
+  const asCheck = name.replace(/^gpu:/, 'check:');
+  if (scripts[asCheck] !== undefined) {
+    failures.push(
+      `${asCheck} is defined again — it cannot run on a hosted runner (${why}). Keep it as ${name}, ` +
+        'or give it a GPU runner and delete the GPU_ONLY entry',
+    );
+  }
+  console.log(`  NOT RUN BY CI (needs a GPU): ${name} — ${why}`);
+}
+
 // **Say what is not covered, on every run.** This is the line that stops a green
 // exit code from implying cover this repo does not have.
 for (const [name, why] of Object.entries(KNOWN_ORPHANS)) {
@@ -475,7 +501,9 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `check:chain-coverage ok — every one of the ${leaves.length} check:* leaf scripts is reachable from CI, ` +
-    `except the ${Object.keys(KNOWN_ORPHANS).length} listed above, which are named on every run so the ` +
-    `gap cannot be inherited silently`,
+  `check:chain-coverage ok — every one of the ${leaves.length} check:* leaf scripts is reachable from CI` +
+    (Object.keys(KNOWN_ORPHANS).length === 0
+      ? ', with no known exceptions'
+      : `, except the ${Object.keys(KNOWN_ORPHANS).length} listed above, which are named on every run so the ` +
+        'gap cannot be inherited silently'),
 );
