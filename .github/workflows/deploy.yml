@@ -91,6 +91,25 @@ jobs:
         # counts live in `.npmrc`, which pnpm reads.
         run: pnpm install --frozen-lockfile
 
+      # **Solve the parks a child can be given, so her device does not have
+      # to** (docs/design/PREBUILT-PARKS.md). Its own step, not part of
+      # `build`, which stays a fast artefact step. Cached on the inputs
+      # `scripts/lib/park-source-hash.mjs` hashes, so a tree whose source is
+      # unchanged (a docs or workflow commit) restores the parks instead of
+      # re-solving them. A restored set whose source does not match is refused
+      # by the build's own hash check, which fails the job rather than ship
+      # it: the cache can cost a red run, never a wrong park.
+      - name: Restore prebuilt parks
+        id: parks-cache
+        uses: actions/cache@v4
+        with:
+          path: .parks
+          key: prebuilt-parks-${{ hashFiles('src/**', 'package.json', 'pnpm-lock.yaml') }}
+
+      - name: Solve the prebuilt parks
+        if: steps.parks-cache.outputs.cache-hit != 'true'
+        run: pnpm run build:parks
+
       # **`build` builds. It does not check.**
       #
       # This step used to run a `build` script that was 47 checks followed by a
@@ -107,6 +126,10 @@ jobs:
       # If you ever put the checks back into `build`, this step goes back to
       # taking 16 minutes and the cap below starts mattering again.
       - name: Build
+        # Fails rather than ship a bundle whose parks are missing or were
+        # solved from other code (`prebuiltParksPlugin` in vite.config.ts).
+        env:
+          LGP_REQUIRE_PARKS: '1'
         run: pnpm run build
 
       # `wrangler deploy` is idempotent, so a flaky-network failure is safe to

@@ -16,7 +16,7 @@
     "check:shard-3": "pnpm run check:orientation && pnpm run check:sky-view && pnpm run check:space-night && pnpm run check:waypoints && pnpm run check:seed-pool && pnpm run check:seed-coverage && pnpm run check:park && pnpm run check:fountain-hop && pnpm run check:park-map && pnpm run check:hud-during-rides && pnpm run check:solve-cost && pnpm run check:jitter && pnpm run check:castle && pnpm run check:castle-towers && pnpm run check:benches && pnpm run check:castle-floors",
     "check:shard-4": "pnpm run check:hall-solid && pnpm run check:hotel && pnpm run check:tap-spacing && pnpm run check:look-around && pnpm run check:nav-routes && pnpm run check:path-preference && pnpm run check:rail-race && pnpm run check:cart-shape && pnpm run check:tie-frame && pnpm run check:cruiser-solves && pnpm run check:cruiser-turn-radius",
     "check:shard-5": "pnpm run check:cruiser-clearance && pnpm run check:castle-window && pnpm run check:backpack-peek && pnpm run check:statue-occlusion && pnpm run check:keyring-hang && pnpm run check:keyring-view && pnpm run check:wall-tunnelling",
-    "check:shard-6": "pnpm run check:climb-wave && pnpm run check:cat-bus",
+    "check:shard-6": "pnpm run check:climb-wave && pnpm run check:cat-bus && pnpm run check:prebuilt-park",
     "check:shard-7": "pnpm run check:cat-bus-suspension && pnpm run check:bus-journey && pnpm run check:park-boot && pnpm run check:ground-claims && pnpm run check:arrival-completes && pnpm run check:layout-rung && pnpm run check:stall-accommodate && pnpm run check:arrival-camera",
     "build": "vite build",
     "build:parks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/build-parks.mts",
