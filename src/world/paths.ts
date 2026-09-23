@@ -4324,8 +4324,9 @@ const GATE_APPROACH_WIDTH = 3.2;
 const GATE_CORRIDOR_RAIL_STANDOFF = RAIL_CLAMP_DISTANCE + GATE_APPROACH_WIDTH / 2;
 
 /**
- * **May the authored corridor's ribbon stand at `(0, z)`?** Clear of the track
- * by {@link GATE_CORRIDOR_RAIL_STANDOFF}, and off every planned bridge's ground
+ * **May the authored corridor's ribbon stand at `(0, z)`?** Its edge outside
+ * the railway's fence (`FENCE_OFFSET` from the rail, plus the ribbon's own
+ * half-width), and off every planned bridge's ground
  * by its own half-width — {@link pointStandsOnABridgeRamp}, the router's one
  * owner of that ground, padded by the ribbon so its *edge* keeps off, not just
  * its centre line. The corridor never crosses the railway, so it is never the
@@ -4334,7 +4335,7 @@ const GATE_CORRIDOR_RAIL_STANDOFF = RAIL_CLAMP_DISTANCE + GATE_APPROACH_WIDTH / 
  * in the air as a sheet.
  */
 function gateCorridorClearAt(z: number): boolean {
-  if (railInfoAt(0, z).dist < GATE_CORRIDOR_RAIL_STANDOFF) return false;
+  if (railInfoAt(0, z).dist < FENCE_OFFSET + GATE_APPROACH_WIDTH / 2) return false;
   return !pointStandsOnABridgeRamp(0, z, RAMP_SCREEN_MARGIN + GATE_APPROACH_WIDTH / 2);
 }
 
@@ -4378,9 +4379,11 @@ function gateCorridorDeepestMouth(): readonly [number, number] {
   // bridge at (-2.2, 40.3) and across both of that bridge's parapets. The
   // drape then lifted the stretch inside the stone onto the deck and left the
   // stretch outside it on the lawn, and the paving between hung as a 4.5 m
-  // sheet either side of the deck. A corridor that clears the track by the
-  // standoff and keeps off every bridge's ground is still left exactly as
-  // authored, so a seed whose walk comes nowhere near either is unchanged.
+  // sheet either side of the deck. The line is the fence, not the street
+  // standoff: a corridor whose ribbon stays outside the railway's fence and
+  // off every bridge's ground is left exactly as authored (seed 6's passes the
+  // fence by 6 cm and keeps its full length, as it always had), and one that is
+  // cut is cut back, as before, to where it clears the full standoff.
   let cutAt = -1;
   for (let step = 0; step <= steps; step += 1) {
     const z = GATE_CORRIDOR_START_Z - step * 0.2;
@@ -4397,6 +4400,7 @@ function gateCorridorDeepestMouth(): readonly [number, number] {
   for (let step = 0; step <= steps; step += 1) {
     const z = GATE_CORRIDOR_START_Z - step * 0.2;
     if (z <= cutAt) break;
+    if (railInfoAt(0, z).dist < GATE_CORRIDOR_RAIL_STANDOFF) break;
     deepest = [0, z] as const;
   }
   gateCorridorDeepestCache = deepest;
