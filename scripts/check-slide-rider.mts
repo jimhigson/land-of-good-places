@@ -865,8 +865,8 @@ if (!Number.isFinite(deepestInTrough)) {
       `trough on ridden frame ${deepestFrame} of ${ridingFrames}, and ${framesInside} of ` +
       `${ridingFrames} frames had some vertex of her inside it (median frame's deepest ` +
       `${median(perFrameDeepest).toFixed(3)} m) — that is drawn geometry a child can see her ` +
-      'through. `Building.advanceRide` lifts her by `Player.lowestBelowSeat`, measured off her ' +
-      'own posed vertices against the same profile; if this fires, the lift and her body ' +
+      'through. `Building.advanceRide` lifts her by `SlideRide.restLift` over her ' +
+      '`Player.restingUnderside`, measured off her own posed vertices against the same profile; if this fires, the lift and her body ' +
       'disagree, or `SlideRide.frameAt` has stopped being the one owner of the cross-section',
   );
 }

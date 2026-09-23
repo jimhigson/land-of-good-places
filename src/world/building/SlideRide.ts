@@ -52,28 +52,40 @@ export const CHUTE_ENVELOPE = {
  * point; beyond a side wall and below its lip it is how far through the wall the
  * point has gone; above the lip it is clear, whatever the distance.
  *
- * Exported for the rider's lift (`Player.lowestBelowSeat` and
- * `Building.advanceRide`) and for `check:slide-rider`, which asks it of every
- * vertex of her drawn body — so the lift and the check that proves it cannot
- * hold two different ideas of where the floor is.
+ * Exported for `check:slide-rider`, which asks it of every vertex of her drawn
+ * body; the lift that lays her in the trough (`Player.restingUnderside`, then
+ * {@link SlideRide.restLift}) is handed
+ * {@link troughFloorAt}, the same floor — so the lift and the check that proves
+ * it cannot hold two different ideas of where the floor is.
  */
 export function troughClearance(across: number, up: number): number {
-  const a = Math.abs(across);
-  if (a > CHUTE_ENVELOPE.halfWidth) {
-    return up >= CHUTE_ENVELOPE.above ? Infinity : CHUTE_ENVELOPE.halfWidth - a;
+  if (Math.abs(across) > CHUTE_ENVELOPE.halfWidth) {
+    return up >= CHUTE_ENVELOPE.above ? Infinity : CHUTE_ENVELOPE.halfWidth - Math.abs(across);
   }
+  return up - troughFloorAt(across);
+}
+
+/**
+ * **The height of the drawn trough's floor at `across`**, in the chute's own
+ * cross-section — the surface {@link troughClearance} measures against, from
+ * the same {@link PROFILE}. Beyond a side wall it is the lip, because the only
+ * way over a wall is above it.
+ *
+ * This is what `Player.restingUnderside` and {@link SlideRide.restLift} lay the
+ * child in the slide against.
+ */
+export function troughFloorAt(across: number): number {
+  if (Math.abs(across) > CHUTE_ENVELOPE.halfWidth) return CHUTE_ENVELOPE.above;
   let floor = Infinity;
   for (let k = 0; k < PROFILE.length - 1; k += 1) {
     const [a0, u0] = PROFILE[k]!;
     const [a1, u1] = PROFILE[k + 1]!;
     if (a0 === a1) continue; // a side wall: the floor is the sloped and flat runs
-    const lo = Math.min(a0, a1);
-    const hi = Math.max(a0, a1);
-    if (across < lo || across > hi) continue;
+    if (across < Math.min(a0, a1) || across > Math.max(a0, a1)) continue;
     const at = u0 + ((u1 - u0) * (across - a0)) / (a1 - a0);
     if (at < floor) floor = at;
   }
-  return up - floor;
+  return floor;
 }
 
 const SEGMENTS_PER_METRE = 2.2;
@@ -314,6 +326,84 @@ export class SlideRide {
     buildFrame(target, previousRight);
     return target;
   }
+
+  /**
+   * **The frame a rigid body `span` metres long lies in, with its front end at
+   * `t`** — its axis the chord from the chute's centre line `span` metres back
+   * up the slide to here, rather than the tangent at its front.
+   *
+   * A child lying in the slide is 1.3 m of rigid rig with her feet at `t`. Laid
+   * along the tangent at her feet she overhangs every bend by `κs²/2` at her
+   * head — measured on the canonical ride, her hair crown (1.74 m wide, in a
+   * trough 1.9 m wide) went 2 cm through the side wall on the bends, where no
+   * lift can help. Laid along the chord, like a railway carriage on its two
+   * bogies, both ends sit on the centre line and the middle is off it by a
+   * quarter of that. The frame is otherwise built exactly as {@link frameAt}
+   * builds every frame, so up is the trough's up.
+   *
+   * Behind the lip the chute has no centre line, so the chord runs back along
+   * the entry tangent — the same continuation `slide/petRiders.ts` seats a
+   * companion on.
+   */
+  lyingFrameAt(t: number, span: number, target = new SlideFrame()): SlideFrame {
+    this.pointAt(t, target.position);
+    const back = clamp01(t) * this.length - span;
+    if (back >= 0) {
+      this.pointAt(back / this.length, _chordBack);
+    } else {
+      this.pointAt(0, _chordBack).addScaledVector(this.tangentAt(0, _chordEntry), back);
+    }
+    target.tangent.subVectors(target.position, _chordBack);
+    if (target.tangent.lengthSq() < 1e-8) this.tangentAt(t, target.tangent);
+    else target.tangent.normalize();
+    buildFrame(target);
+    return target;
+  }
+
+  /**
+   * **How far along `here.up` a rigid body lying in `here` — a frame at `t`,
+   * from {@link lyingFrameAt} — has to be raised so that every one of `points`
+   * clears the drawn trough by `margin`, measured where each point actually
+   * is.**
+   *
+   * `points` are in `here`: `across` along its `right`, `up` along its
+   * `up`, `along` its tangent, from the centre line. A child 1.3 m long does not
+   * lie in one cross-section: where the chute runs out flat into the ball pit
+   * the floor under her head rises above the tangent at her feet, so a lift
+   * solved in the cross-section at her feet alone left her hair 4 cm through
+   * the floor there. So each point is carried to its own place on the chute
+   * (one step along the tangent), read in *that* cross-section against
+   * {@link troughFloorAt}, and the largest lift any of them needs is the answer.
+   */
+  restLift(
+    here: SlideFrame,
+    t: number,
+    points: readonly { readonly across: number; readonly up: number; readonly along: number }[],
+    margin: number,
+  ): number {
+    let lift = -Infinity;
+    for (const point of points) {
+      _restPoint
+        .copy(here.position)
+        .addScaledVector(here.right, point.across)
+        .addScaledVector(here.up, point.up)
+        .addScaledVector(here.tangent, point.along);
+      let s = clamp01(t + point.along / this.length);
+      let there = this.frameAt(s, _restThere);
+      _restOffset.subVectors(_restPoint, there.position);
+      s = clamp01(s + _restOffset.dot(there.tangent) / this.length);
+      there = this.frameAt(s, _restThere);
+      _restOffset.subVectors(_restPoint, there.position);
+      const across = _restOffset.dot(there.right);
+      const up = _restOffset.dot(there.up);
+      // Raising her along `here.up` raises this point along `there.up` by the
+      // cosine between the two — near 1 on any chute a child can ride.
+      const gain = Math.max(0.5, here.up.dot(there.up));
+      const need = (troughFloorAt(across) + margin - up) / gain;
+      if (need > lift) lift = need;
+    }
+    return Number.isFinite(lift) ? lift : margin;
+  }
 }
 
 /**
@@ -349,6 +439,11 @@ export class SlideFrame {
 }
 
 const _basis = /* @__PURE__ */ new Matrix4();
+const _restThere = /* @__PURE__ */ new SlideFrame();
+const _chordBack = /* @__PURE__ */ new Vector3();
+const _chordEntry = /* @__PURE__ */ new Vector3();
+const _restPoint = /* @__PURE__ */ new Vector3();
+const _restOffset = /* @__PURE__ */ new Vector3();
 const _basisX = /* @__PURE__ */ new Vector3();
 
 /**

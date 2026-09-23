@@ -29,7 +29,7 @@ import { PALETTE } from '../../core/palette';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import { standFrameInPlot, type AnchorPlots } from '../AnchorPlots';
-import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player } from '../../entities/Player';
+import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint } from '../../entities/Player';
 
 import { BallPit } from './BallPit';
 import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
@@ -42,7 +42,7 @@ import { CASTLE_TURRET_FOOTPRINT_RADIUS } from './castleMasonry';
 import { ROOF_EDGE_Z, ROOF_PARAPET_THICKNESS, roofTurretSpots } from './layout';
 import { ShopUnits } from './ShopUnits';
 import { Shops } from './shops/Shops';
-import { SlideFrame, SlideRide } from './SlideRide';
+import { SlideFrame, SlideRide, troughFloorAt } from './SlideRide';
 import { Toilets } from './Toilets';
 import { Trampoline } from './Trampoline';
 import { WalkSurfaces, type MovingPlatform } from './surfaces';
@@ -117,16 +117,27 @@ import {
 const RIDER_LIFT = 0.06;
 
 /**
- * Extra height for a rider lying on her back, in metres.
+ * How far clear of the trough's drawn floor the **lowest vertex** of a child
+ * lying in the ginormous slide rests, in metres.
  *
- * `RIDER_LIFT` was set for a child *sitting* on the chute, whose contact with
- * it is the soles of her shoes. Lying down she meets the trough along her whole
- * back, and the model's origin is at her feet — so at the seated lift her back,
- * and more to the point her **backpack**, sit inside the floor rather than on
- * it. Worn things are where a reclining pose shows first, and a rucksack half
- * through the slide is the obvious one.
+ * This replaced `RECLINED_LIFT` (0.18 m on top of `RIDER_LIFT`), a constant set
+ * for a backpack and never measured against the rest of her: on the canonical
+ * ride a party hat's tip was 0.72 m through the trough and some vertex of her
+ * was inside it on every one of 743 frames. The lift is now measured off her
+ * own posed body at boarding (`Player.restingUnderside`), whatever she is
+ * wearing, and lifted clear of the chute where each part of her actually is
+ * (`SlideRide.restLift`) — so this is the only number left: two centimetres,
+ * so she lies *on* the slide rather than hovering over it. `check:slide-rider`
+ * measures every vertex of her against the bent chute and holds it at zero.
  */
-const RECLINED_LIFT = 0.18;
+const TROUGH_REST_MARGIN = 0.02;
+
+/**
+ * How long a stretch of her body one underside point stands for, in metres.
+ * A tenth of a metre of a 1.3 m child is thirteen or so points along her,
+ * which is what `SlideRide.restLift` walks every frame.
+ */
+const REST_BIN = 0.1;
 
 /**
  * How far **ahead** of you the grown-up rides, in metres of slide.
@@ -448,6 +459,18 @@ export class Building implements GameSystem {
    */
   private readonly rideFrame = new SlideFrame();
   private readonly rideTurn = new Quaternion();
+  /**
+   * The underside of her body as she rides, measured at boarding by
+   * `Player.restingUnderside` — what `SlideRide.restLift` lifts clear of the
+   * trough every frame. See {@link TROUGH_REST_MARGIN}.
+   */
+  private riderUnderside: readonly RestPoint[] = [];
+  /**
+   * How far back up the slide her underside reaches from her feet, in metres —
+   * the chord `SlideRide.lyingFrameAt` lays her along. Taken from the same
+   * points, so it is her length as drawn and not a number about her.
+   */
+  private riderSpan = 0;
   /**
    * The grown-up's recline, as a turn about his own left-right axis. Built once
    * from {@link GROWN_UP_RECLINE} — the one owner of how far back he lies — and
@@ -1675,6 +1698,13 @@ export class Building implements GameSystem {
       // which is the whole reason that check asserts her *body* rather than
       // that a ride is running.
       player.ridePosture = 'reclined';
+      // **Lying on the slide, measured off her.** Her underside — the lowest
+      // vertex of her posed body, hat, hair, backpack and all, per stretch of
+      // her length — is taken once, here, because nothing about her shape
+      // changes mid-descent; after the posture, because that is the shape
+      // asked about. `advanceRide` lifts those points clear of the chute.
+      this.riderUnderside = player.restingUnderside(troughFloorAt, REST_BIN);
+      this.riderSpan = Math.max(0, ...this.riderUnderside.map((point) => -point.along));
       this.rideView?.board();
       // Back to before the cut, so this ride opens on its plan's first shot
       // rather than inheriting whichever one the last ride ended on.
@@ -1748,10 +1778,17 @@ export class Building implements GameSystem {
       // the descent. `SlideRide.frameAt` is the single owner of that frame and
       // the sweep that drew the trough is written in terms of it, so the shape
       // she lies in and the turn she is given are now the same arithmetic.
-      const frame = ride.slide.frameAt(t, this.rideFrame);
+      // Laid along the chord from her feet back to her head rather than along
+      // the tangent at her feet, so a bend does not swing her head into the
+      // wall — see `SlideRide.lyingFrameAt`.
+      const frame = ride.slide.lyingFrameAt(t, this.riderSpan, this.rideFrame);
       // Lifted along the trough's own up, not world `+Y` — on a 28 degree pitch
-      // those differ by the whole of the lift.
-      this.riderPoint.addScaledVector(frame.up, RIDER_LIFT + RECLINED_LIFT);
+      // those differ by the whole of the lift — and by exactly enough for the
+      // lowest of her to clear the drawn trough where it actually is.
+      this.riderPoint.addScaledVector(
+        frame.up,
+        ride.slide.restLift(frame, t, this.riderUnderside, TROUGH_REST_MARGIN),
+      );
       player.setRideFrame(
         this.riderPoint,
         frame.orientation(this.rideTurn),
