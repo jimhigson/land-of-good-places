@@ -6131,7 +6131,8 @@ const fairyPolesStandWalkablyApart: Invariant = (facts) => {
   // **And none on a bridge** — deck or parapet. The deck's paving is the
   // bridge's own, not a drawn path sample, so a pole there read as standing
   // well off the path (seed 11, `fairy-pole-88`, on the walkway at 11 m along
-  // the (1.5, -31.6) crossing; seven more stood through parapet walls).
+  // the (1.5, -31.6) crossing). Measured against the *built* bridge's own
+  // `covers`, not the planner's footprint.
   for (const pole of poles) {
     for (const bridge of facts.world.train.bridges) {
       if (!bridge.covers(pole.at.x, pole.at.z)) continue;

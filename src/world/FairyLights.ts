@@ -554,9 +554,10 @@ export function fairyPoleBuilder(
       // drawn-path samples above do not see, so `isOnPath` reads a pole on the
       // deck as standing 1.9 m off the path. Seed 11 put `fairy-pole-88` on the
       // walkway of the bridge at (1.5, -31.6), making the crossing unwalkable
-      // 11 m along its centreline, and the park had seven more poles inside
-      // bridge footprints — standing through parapet walls. The footprint's one
-      // owner answers, with the pole's own radius as the margin.
+      // 11 m along its centreline. The footprint's one owner answers, with the
+      // pole's own radius as the margin (it reaches a little past what the
+      // built bridge covers — seven more poles on seed 11 stood inside it but
+      // outside the masonry, and those simply slide along their runs).
       if (pointStandsOnABridgeRamp(x, z, POLE_RADIUS)) continue;
       // **Ask the ride, before standing anything up.** A pole is 4.4 m tall and
       // the claims registry is a ground-footprint system — it cannot see what
