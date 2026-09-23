@@ -279,8 +279,10 @@ function footprintAsPlaced(entry: ManifestEntry, x: number, z: number): AnchorFo
  * timing, no map iteration — so two processes print the same lines, which is
  * what lets `scripts/park-digest.mts` hash them.
  *
- * Empty when the layout came out of `cachedSolve`'s store rather than being
- * solved, and says so — an empty trace must never read as "no unwinding".
+ * Empty when nothing in this process forced the layout decision — importing
+ * this module decides nothing, since `PARK_LAYOUT` is a lazy view over the
+ * park's driver. The exit note below says so ("nothing forced the layout
+ * decision"), so an empty trace must never read as "no unwinding".
  */
 const layoutTrace: string[] = [];
 export const LAYOUT_TRACE: readonly string[] = layoutTrace;
@@ -1086,10 +1088,27 @@ function validate(
  */
 export const PARK_LAYOUT: ParkLayout = lazyView(() => planPart('layout'));
 
-// A layout handed back from the cache ran no solve, so it has no trace. Say
-// so on the trace itself rather than leaving an empty list that reads like
-// "solved first time" — the same disease as a check that asserts nothing.
-if (layoutTrace.length === 0) traceLine('cached — no solve ran in this process');
+// An empty trace must never read as "solved first time" — the same disease as
+// a check that asserts nothing. But WHEN to say so changed under backtracking:
+// `PARK_LAYOUT` is now a lazy view, so at module-evaluation time the trace is
+// *always* empty and a note emitted here was printed on every run, including
+// the runs that went on to solve. (That stale note is what let
+// `check:layout-rung`'s machinery clause read a trace of one line and score
+// zero refusals as a measurement rather than as an absence.) The honest moment
+// is process exit: by then, either something forced the decision and traced it,
+// or nothing ever asked and the trace is empty because no layout was decided.
+try {
+  const nodeProcess = (
+    globalThis as { process?: { on?: (event: string, handler: () => void) => void } }
+  ).process;
+  nodeProcess?.on?.('exit', () => {
+    if (layoutTrace.length === 0) {
+      traceLine('no solve ran in this process — nothing forced the layout decision');
+    }
+  });
+} catch {
+  /* browser: no process to hook, and the trace is readable from LAYOUT_TRACE */
+}
 
 /**
  * The plots as a flat array, built once.

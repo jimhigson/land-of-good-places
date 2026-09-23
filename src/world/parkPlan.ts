@@ -454,10 +454,24 @@ function builders(): readonly FeatureBuilder[] {
       // asked yet: it reads the centreline `buildPaths` publishes when the World
       // is built, which is empty now, and it fouled falsely on every seed. Its
       // throw stays as the guard and must be unreachable from here on.
-      state.pathGraph = graph;
+      //
+      // `state.pathGraph` is NOT assigned here. The screens below yield back to
+      // the frame loop between them, and the graph may yet be refused; bound
+      // now, an unvalidated graph would sit in `state` across those yields for
+      // anything that asked `planPart('pathGraph')` between slices. The driver
+      // binds it through `set()` once `graph` is returned, screened.
       const train = planPart('train');
       const routes = graph.edges.filter((edge) => edge.paved).map((edge) => edge.route);
+      // Each screen below is its own piece. Together they were one unbroken
+      // 15.57 ms `next()` — the fattest single step of the whole plan drive,
+      // measured — and it is the LAST one, so the slice that began it had
+      // already spent most of its 8 ms budget on the steps before it. That is
+      // the 22.4-23.1 ms `parkPlan` slice `check:park-boot` named on run after
+      // run, against a ~20 ms ceiling: not a fat park, a fat piece. Four
+      // independent passes over the same samples split into four pieces.
+      yield 0;
       const drawn = drawnSamplesFor(routes);
+      yield 0;
       // A drawn path must stay inside the park. On seed 4 `spur-waterFight`
       // was routed 1.8 m OUTSIDE the boundary wall, and its waypoint seeds
       // had nowhere to stand (`poi.nospot`). That is a plot standing too near
@@ -468,16 +482,15 @@ function builders(): readonly FeatureBuilder[] {
       // Seed 7 paid a decision zero apiece for 0.24 m and 0.33 m.
       const outside = drawn.find((sample) => PARK_BOUNDARY.distanceToEdge(sample.x, sample.z) < -sample.halfWidth);
       if (outside) {
-        delete state.pathGraph;
         return refusal(
           `paths: a drawn path leaves the park at (${outside.x.toFixed(1)}, ${outside.z.toFixed(1)}), ` +
             `${(-PARK_BOUNDARY.distanceToEdge(outside.x, outside.z)).toFixed(2)} m outside the boundary wall`,
           { consumed: ['layout'] },
         );
       }
+      yield 0;
       const screen = screenDrawnPathsForOffSiteCrossings(train.route, drawn, { esplanadeOver: drawn });
       if (screen.fouls.length > 0) {
-        delete state.pathGraph;
         const foul = screen.fouls[0] as (typeof screen.fouls)[number];
         const sites = planPart('crossings').bridges.map((site) => site.railDistance.toFixed(1)).join(', ');
         return refusal(
@@ -493,9 +506,9 @@ function builders(): readonly FeatureBuilder[] {
       // a site, and the whole park was unreachable from the entrance — the
       // path was squeezed shut between the wall and the fence. The loop is
       // the decision that pinched it.
+      yield 0;
       const pinched = pinchedSample(drawn, planPart('crossings').bridges, train.stations, train.route.length);
       if (pinched) {
-        delete state.pathGraph;
         return refusal(
           `paths: drawn run ${pinched.sample.run} is pinched shut at (${pinched.sample.x.toFixed(1)}, ${pinched.sample.z.toFixed(1)}): ` +
             `nearest lane point is ${pinched.wall.toFixed(2)} m from the boundary edge (needs ${wallKeep().toFixed(2)}) ` +
