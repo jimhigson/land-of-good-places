@@ -3,6 +3,7 @@ import type { CollisionWorld } from '../Collision';
 import type { CoasterRoute } from '../coaster/route';
 import type { BoothRelocator } from '../stallsFeature';
 import type { WorldPhase } from '../worldPhase';
+import type { FerrisExit } from '../../minigames/ferrisWheel/exit';
 import type { LevelCrossing } from '../train/crossings';
 import type { PlannedFootprint, RealWorldQuery } from '../train/bridgeFootprint';
 
@@ -43,6 +44,8 @@ export interface ParkSolver {
   ): WorldPhase;
   /** Every bridge's footprint, searched against the real, mostly-built collision world. */
   bridgeFootprints(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[];
+  /** Where a ferris wheel rider steps off. */
+  ferrisExit(): FerrisExit;
 }
 
 // `var`: read during module cycles, like `parkPlan.ts`'s state.
