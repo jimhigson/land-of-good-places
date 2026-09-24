@@ -4,7 +4,9 @@ import { Rng, clamp } from '../../core/mathUtils';
 import { RAIL_RACE_PLAN } from './plan';
 import {
   BARS_FROM_LEVEL,
+  DuckBarRefusal,
   planHazards,
+  type BarPlanDecision,
   trestleGridIndex,
   type HazardLayout,
   type HazardSchedule,
@@ -269,12 +271,12 @@ export const HAZARD_LAYOUT: HazardLayout = lazyView(
       RAIL_RACE_PLAN.route.length,
       RACE_LAPS,
       1,
-      raceRefusedBarSlots(),
+      raceBarPlanDecision(),
     ).lap),
 );
 registerPlanCache(() => {
   hazardLayoutMemo = null;
-  refusedBarSlotsMemo = null;
+  barPlanDecisionMemo = null;
 });
 
 /**
@@ -311,26 +313,55 @@ registerPlanCache(() => {
  * the whole plan is then raced again, because moving one bar changes the
  * speed every later bar of that lane is met at. Refusals only accumulate, so
  * this ends: either no bar is clipped, or some bar has no legal slot left and
- * `planHazards` throws `DuckBarRefusal`, which fails the build for the park's
- * root loop to start again — never a bad bar kept.
+ * `planHazards` throws `DuckBarRefusal`. That is then answered with the next
+ * decision — the same slots dealt to the lanes in another rotation
+ * (`BarPlanDecision.laneShift`), because a black stretch a lane leaves at the
+ * floor after a bar just before it is often crossed at speed by a lane that
+ * had no bar there. Seed 14 restart 0 needs this: the lap has 42 legal slots
+ * for 40 bars, and lane 0's refused slot 41 left the last bar nowhere to go.
+ * Only when every rotation fails does the build fail, for the park's root
+ * loop to start again — never a bad bar kept.
  */
-let refusedBarSlotsMemo: ReadonlyMap<number, ReadonlySet<number>> | null = null;
-function raceRefusedBarSlots(): ReadonlyMap<number, ReadonlySet<number>> {
-  return (refusedBarSlotsMemo ??= refusedBarSlots(RAIL_RACE_PLAN.raceRing));
+let barPlanDecisionMemo: BarPlanDecision | null = null;
+function raceBarPlanDecision(): BarPlanDecision {
+  return (barPlanDecisionMemo ??= barPlanDecision(RAIL_RACE_PLAN.raceRing));
+}
+
+/**
+ * The bar layout's decision for `route`: the lane rotation the ride was tuned
+ * with if refusals can be met there, else the next rotation that can. Throws
+ * `DuckBarRefusal` — the build fails, and the park's root loop starts again —
+ * only when no rotation leaves every bar a legal slot. See
+ * {@link raceBarPlanDecision}'s doc comment above for the rule.
+ */
+export function barPlanDecision(route: RailRaceRoute): BarPlanDecision {
+  const reasons: string[] = [];
+  for (let laneShift = 0; laneShift < LANE_COUNT; laneShift += 1) {
+    try {
+      return { laneShift, refusedByLane: refusedBarSlots(route, laneShift) };
+    } catch (error) {
+      if (!(error instanceof DuckBarRefusal)) throw error;
+      reasons.push(`lane shift ${laneShift}: ${error.message}`);
+    }
+  }
+  throw new DuckBarRefusal(
+    `railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a ` +
+      `flat-out rider — ${reasons.join('; ')}`,
+  );
 }
 
 /**
  * The trestle slots, by lane, where a flat-out never-ducking rider on `route`
- * would meet a bar with her bonk clipped by the speed floor. See
- * {@link raceRefusedBarSlots} for the rule and why.
+ * would meet a bar with her bonk clipped by the speed floor, for one lane
+ * rotation. See {@link raceBarPlanDecision} for the rule and why.
  */
-export function refusedBarSlots(route: RailRaceRoute): ReadonlyMap<number, ReadonlySet<number>> {
+export function refusedBarSlots(route: RailRaceRoute, laneShift = 0): ReadonlyMap<number, ReadonlySet<number>> {
   const refused = new Map<number, Set<number>>();
   // Bounded by construction (each round refuses at least one new lane-slot
   // pair, and there are LANE_COUNT × slots of those); the guard only turns a
   // future bug into an error rather than a hang.
   for (let round = 0; round <= LANE_COUNT * Math.ceil(route.length); round += 1) {
-    const schedule = planHazards(route.length, RACE_LAPS, BARS_FROM_LEVEL, refused);
+    const schedule = planHazards(route.length, RACE_LAPS, BARS_FROM_LEVEL, { refusedByLane: refused, laneShift });
     let refusedAny = false;
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       const clipped = firstClippedBar(route, schedule, lane);
@@ -382,7 +413,7 @@ function firstClippedBar(route: RailRaceRoute, schedule: HazardSchedule, lane: n
  * idling rivals sit in between races.
  */
 export function scheduleForLevel(level: RaceLevel): HazardSchedule {
-  return planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, level, raceRefusedBarSlots());
+  return planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, level, raceBarPlanDecision());
 }
 
 /** The finish line, in metres travelled. */
