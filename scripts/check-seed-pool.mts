@@ -3,8 +3,8 @@
  *
  * Issue #426 made which park a child gets a *decision* rather than a constant.
  * This check owns the cheap half of that decision being right: that
- * `PARK_SEED_POOL` is a set of distinct positive integers containing the
- * canonical seed, and that `resolveParkSeed()` picks from it in the documented
+ * `PARK_SEED_POOL` is exactly seeds 0 to 15 (Jim, 24 September 2026), distinct,
+ * containing the canonical seed, and that `resolveParkSeed()` picks from it in the documented
  * order — pins first, then the seed this profile already drew, then a draw.
  *
  * **What it deliberately does not prove**, and says so on every run: that each
@@ -63,10 +63,13 @@ check(
   PARK_SEED_POOL.length > 0,
   'an empty pool would draw nothing and every park would be the fallback',
 );
+// Jim, 24 September 2026: "we only support seeds 0..15, no others." Seed 0
+// is a seed (`readSeed` accepts it); the old "positive integer" rule predates
+// the ruling and would refuse it.
 check(
-  'every seed is a positive integer',
-  PARK_SEED_POOL.every((s) => Number.isInteger(s) && s > 0),
-  `got ${PARK_SEED_POOL.filter((s) => !Number.isInteger(s) || s <= 0).join(', ')}`,
+  'the pool is exactly seeds 0 to 15',
+  PARK_SEED_POOL.length === 16 && PARK_SEED_POOL.every((s, i) => s === i),
+  `got [${PARK_SEED_POOL.join(', ')}]`,
 );
 check(
   'no seed appears twice',

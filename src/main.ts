@@ -22,6 +22,8 @@ import {
   ParkGeneration,
 } from './boot/parkGeneration';
 import { loadPrebuiltPark } from './boot/prebuiltPark';
+import { parkUnavailableIn } from './world/prebuilt/parkUnavailable';
+import { showParkUnavailable } from './ui/ParkUnavailableScreen';
 import { OVERRUN_WARMUP_BUDGET_MS, ShaderWarmup, WARMUP_BUDGET_MS } from './boot/shaderWarmup';
 import { JourneySkip } from './ui/JourneySkip';
 import { JourneyTitle } from './ui/JourneyTitle';
@@ -849,15 +851,15 @@ function launchGame(
       // and nothing else to show, so put the card back. `finishLaunch` hides it
       // again on the first rendered frame.
       splash?.classList.remove('hidden');
-      void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
+      finishLaunch(engine, uiRoot, splash, gameOptions, deepLink).catch(showBootFailure);
       return;
     }
     rideInThenPlay(engine, uiRoot, splash, gameOptions, () => {
-      void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
+      finishLaunch(engine, uiRoot, splash, gameOptions, deepLink).catch(showBootFailure);
     });
     return;
   }
-  void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
+  finishLaunch(engine, uiRoot, splash, gameOptions, deepLink).catch(showBootFailure);
 }
 
 /**
@@ -1358,6 +1360,13 @@ askForOrientationOnFirstGesture();
 function showBootFailure(error: unknown): void {
   console.error(error);
   const splash = document.getElementById('boot-splash');
+  // A park with no usable park file (`docs/design/PREBUILT-PARKS.md`): an
+  // error with its own screen, naming the seed and why, and a retry.
+  const unavailable = parkUnavailableIn(error);
+  if (unavailable) {
+    showParkUnavailable(unavailable, splash);
+    return;
+  }
   if (splash) {
     splash.classList.remove('hidden');
     splash.innerHTML =

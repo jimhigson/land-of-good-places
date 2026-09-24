@@ -1,74 +1,82 @@
 import { PARK_SEED } from '../world/parkManifest';
+import { PARK_SEED_POOL } from '../world/parkSeedPool';
 import type { ParkFile } from '../world/prebuilt/parkFile';
 import { parkFileName } from '../world/prebuilt/parkFileName';
-import { offerParkFile } from '../world/prebuilt/parkFileStore';
+import { offerParkFile, reportParkFileMissing } from '../world/prebuilt/parkFileStore';
 
 /**
- * **Fetch this park's prebuilt decisions, so the device does not have to
- * search for them** (`docs/design/PREBUILT-PARKS.md`).
+ * **Fetch this park's decisions — the only way the game has of getting a
+ * park** (`docs/design/PREBUILT-PARKS.md`).
  *
- * The file sits beside the bundle at `/parks/<seed>.json`, emitted by the same
- * `vite build` and precached with it by the service worker, so on an installed
- * game this is a cache hit and costs nothing. It is offered to the plan's
- * driver (`world/prebuilt/parkFileStore.ts`), which hydrates from it instead
- * of spending seconds of a phone's CPU on the searches.
+ * Jim, 24 September 2026: *"there should be no ability to build built into the
+ * game as delivered — seeds not downloadable is an error."* Parks are solved at
+ * build time (`pnpm run build:parks`); each ships as `/parks/<seed>.json` beside
+ * the bundle, emitted by the same `vite build` and precached with it by the
+ * service worker. The game hydrates the park from it and searches for nothing.
  *
- * **It can only ever make the boot faster, never wrong or stuck.** Anything
- * short of a file for exactly this seed, built by exactly this bundle, is
- * ignored and the park is solved here, as it always was:
+ * So anything short of a usable file is an **error**, reported by the plan as
+ * `ParkUnavailable` and shown to the child by `ui/ParkUnavailableScreen.ts`,
+ * naming the seed and the reason this module posts:
  *
- * - no file (a `?seed=` off the pool, a build shipped without parks) → solve;
- * - a file from another build — an old bundle fetching after a deploy, which
- *   the precache normally prevents — is refused on `build` against
- *   `__APP_VERSION__`, so a stale park against a new bundle cannot happen;
- * - a network that does not answer within {@link PREBUILT_PARK_TIMEOUT_MS} is
- *   abandoned, so a bad connection cannot hang the boot.
+ * - a seed outside {@link PARK_SEED_POOL} (Jim: *"we only support seeds
+ *   0..15"*) — refused before anything is fetched;
+ * - no file on the server — the host answers 404, or the app's own page for an
+ *   unknown path (the service worker's `navigateFallback` does that), so
+ *   anything not served as JSON counts as "no file";
+ * - a file from another build — its `build` is not this bundle's
+ *   `__APP_VERSION__`, so a stale park against a new bundle cannot be hydrated;
+ * - a download that failed.
  *
- * Never in dev (Vite serves no parks, and a dev server is where the generator
- * is being changed) and never in Node (checks measure fresh solves; a check
- * that wants a file offers one itself).
+ * **There is no timeout.** A pool park is precached with the bundle that
+ * reads it, so on an installed game the fetch is answered by the service
+ * worker and cannot fail for want of a network; on a first visit the park is
+ * downloaded alongside the bundle itself, and a page that got its script can
+ * get ~10 KB of JSON. Giving up early would only turn a slow load into an
+ * error.
+ *
+ * **Retry means reload.** The screen's button reloads the page, which fetches
+ * the file again — it never solves. That is the right answer to a failed
+ * download and a wrong one (it fails the same way) to an unsupported seed or
+ * a build shipped without parks, which is why the screen also offers the
+ * park she gets without a `?seed=`.
+ *
+ * In Node nothing is fetched: checks and `build:parks` solve fresh or offer a
+ * file themselves.
  */
-
-/** How long a boot waits for the file before solving instead. */
-export const PREBUILT_PARK_TIMEOUT_MS = 3000;
 
 let loading: Promise<void> | null = null;
 
-/** Fetch and offer the prebuilt park, once. Never rejects: the fallback is to solve. */
+/** Fetch and offer this park's file, once. Never rejects: a failure is posted as the reason. */
 export function loadPrebuiltPark(): Promise<void> {
   return (loading ??= fetchPrebuiltPark());
 }
 
 async function fetchPrebuiltPark(): Promise<void> {
-  const env = (import.meta as { env?: { DEV?: boolean; BASE_URL?: string } }).env;
-  if (!env || env.DEV || typeof fetch !== 'function') return;
+  const env = (import.meta as { env?: { BASE_URL?: string } }).env;
+  if (!env || typeof fetch !== 'function') return;
+  if (!PARK_SEED_POOL.includes(PARK_SEED)) {
+    reportParkFileMissing(
+      `seed ${PARK_SEED} is not one of this game's parks (it has seeds ${PARK_SEED_POOL.join(', ')})`,
+    );
+    return;
+  }
   const url = `${env.BASE_URL ?? '/'}${parkFileName(PARK_SEED)}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PREBUILT_PARK_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { signal: controller.signal });
-    // A host that answers every unknown path with the app's own page (the
-    // service worker's `navigateFallback`, a single-page-app asset config)
-    // says 200 with HTML for a seed that has no file — that is "none", not a
-    // broken file.
+    const response = await fetch(url);
     const type = response.headers.get('content-type') ?? '';
     if (!response.ok || !type.includes('json')) {
-      console.info(
-        `Prebuilt park: none for seed ${PARK_SEED} (${url}: HTTP ${response.status}, ${type || 'no type'}); solving it here.`,
-      );
+      reportParkFileMissing(`its park file is not in this build (${url}: HTTP ${response.status}, ${type || 'no type'})`);
       return;
     }
     const file = (await response.json()) as ParkFile;
     if (file.build !== __APP_VERSION__) {
-      console.warn(
-        `Prebuilt park: ${url} belongs to build ${String(file.build)}, this is ${__APP_VERSION__}; solving it here.`,
+      reportParkFileMissing(
+        `its park file belongs to another version of the game (${String(file.build).slice(0, 12)}, this is ${__APP_VERSION__.slice(0, 12)})`,
       );
       return;
     }
     offerParkFile(file);
   } catch (error) {
-    console.warn(`Prebuilt park: could not load ${url} (${String(error)}); solving it here.`);
-  } finally {
-    clearTimeout(timer);
+    reportParkFileMissing(`its park file could not be downloaded (${String(error)})`);
   }
 }
