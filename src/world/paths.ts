@@ -782,10 +782,13 @@ function gridDetourAttempt(
     segmentClearOfBoundary(ax, az, bx, bz) &&
     !segmentEntersABridge(ax, az, bx, bz) &&
     !segmentPassesTheGate(ax, az, bx, bz) &&
-    // Only the side, not a clearance: every leg this search draws goes
-    // through `pushClearOfRail`, which restores the full clamp afterwards, so
-    // asking for more here only makes the search fail where it used to
-    // succeed — and a failed search falls back to a raw diagonal.
+    // Half the lattice's clamp: enough to keep the search off the rails and
+    // on its side, while still letting it squeeze past a pocket the lattice
+    // would refuse — `pushClearOfRail` restores the full clamp afterwards.
+    // Side-only was tried (fix/paving-drape) and walks the search along
+    // private lines hard against the fence: seed 131's gate-approach came out
+    // on z = 46.16, x = 27.30 and z = -34.95 and seed 11's building spur on
+    // x = 42, all red on `every street sits on the shared 12 m lattice`.
     (railSide === null || segmentHoldsRailSide(ax, az, bx, bz, railSide, RAIL_CLAMP_DISTANCE / 2));
   // The connector into the *true* endpoint gets a little more slack on the
   // "arriving at a destination" exemption than an ordinary mid-search edge
@@ -5709,16 +5712,6 @@ function* addInterconnects(
       // side of a ramp that way. See {@link drawnMetresOnABridgeUncarried}.
       if (drawnMetresOnABridgeUncarried(points, CONNECTOR_WIDTH) > 0) {
         return 'stands on a bridge it does not cross';
-      }
-      // **Nor as a raw diagonal.** The axis router's last resort, when neither
-      // elbow nor its grid search finds a way, is the straight line it started
-      // from, kept "so the route stays connected" — right for a spur, which
-      // must arrive; a connector is a shortcut the park can do without.
-      // Measured on seed 428: `stall.waterFight`-`exit-railRace`, escaping as
-      // disproportionate, drew a 40 m diagonal through a booth and stranded the
-      // waypoint seeded on it.
-      if (longestOffAxisRun(points) > MAX_OFF_AXIS_RUN) {
-        return 'draws a raw diagonal';
       }
       return null;
     };
