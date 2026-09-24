@@ -33,3 +33,6 @@ any seed whose bars move.
 - check:rail-race 0, tsc 0, typecheck:test 0 at commit after DP.
 - accept:parks 0-15 --fresh --write running (sbde/accept.out). Then: coplanar seed 4, park:attempt
   4/2/5 at recorded restarts, commit acceptedRestarts.ts.
+- DONE. accept:parks 16/16 (4->3, 5->12, 8->7, 9->4, 11->2, 14->2). park:attempt 4:3, 2:0, 5:12 all
+  accepted. cop4: duck-bars seam gone (43 -> 39 findings). full check:coplanar exit 0 (no new).
+  Red at 4:3 with reach refusal off: 20 complaints. check:rail-race 0, tsc 0, typecheck:test 0.
