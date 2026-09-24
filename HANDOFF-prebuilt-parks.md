@@ -48,3 +48,13 @@ Design: `docs/design/PREBUILT-PARKS.md` (also PR #704, draft). Base: origin/feat
   Every other chain step green locally; swept-bus, every-seed-builds, walk-reach, preview green on CI.
 - CI build:parks cache miss: 647 s for 16 seeds (step cap 18 min). Preview serves 590 KB brotli for all 16.
 - Preview verified: https://pr-705-01dbbbf-land-of-good-places.blockstack.workers.dev/spawn?pos=0,40&seed=5
+
+## 24 Sep, later: placement loops moved (Overseer: they count)
+- pylons, slide legs, rail-race exit+arch, ferris exit, stations, boundary radii -> park file `built`
+  (src/world/prebuilt/built.ts decideBuilt; procgen/world/builtLog.ts recordBuilt). Format 2.
+- src/bootstrap.ts is the page entry: update gate, then fetch park, then import main (module-scope
+  boundary reads need the file first). Boundary solver has its own light loader (ERR_REQUIRE_CYCLE risk).
+- plainData.ts leaf: boundary -> parkFile.ts closed a cycle that left PARK_BOUNDARY undefined in the bundle.
+- 16 parks: 2030 KB raw / 597 KB brotli. Every seed boots from vite preview; 99 -> error screen.
+- CI red is seed content only: fountain-hop seed 10, castle-towers/rail-race/tie-frame seed 5, 39 invariants.
+- Save migration confirmed by Jim (retired -> seed 5). Do NOT rebase onto structural-backtrack until told.
