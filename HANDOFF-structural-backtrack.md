@@ -69,3 +69,11 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - procgen-invariants.yml sharded x5 + pool job + aggregator "Procgen invariants" (protection read back unchanged).
 - check:coplanar NEW: cat-bus chassis seam on generation seed 860110031 -> helper fix/sb-catbus.
 - Random sweep running (sb-random @06223019). After it: full test:procgen + check:every-seed-builds on frozen tree.
+- Random 100: 100/100 accepted, max 8 attempts, mean 2.04, p=0.49 (doc section written).
+- SCOPE: Jim supports 0..15 only. SUPPORTED_PARK_SEEDS in parkSeedPool.ts (#705 moves it to prebuilt/parkFileName.ts
+  and makes PARK_SEED_POOL = it). acceptedRestarts + seed files = 0..15 exactly (151dac7e).
+- #705 CI findings -> helpers: fix/sb-fountain (fountain-hop s10), fix/sb-seed5 (castle-towers, cruiser cart 1.11deg),
+  fix/sb-coplanar16 (coplanar over 0..15). Each told scope 0..15.
+- Running: full test:procgen at 151dac7e in sb-frozen (log procgen-151dac7e.log).
+- TODO after helpers: emulate #705 pool=0..15 locally and run pool-sweeping checks (park-pool, gateway,
+  fountain-hop, swept-bus, entrance-road, path-preference, stall-accommodate, every-seed-builds).
