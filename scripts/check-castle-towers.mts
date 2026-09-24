@@ -198,17 +198,30 @@ said.push(
 );
 
 // ------------------------------- 3. the castle's own doorway is still open
+/**
+ * Walks a player-sized body from (fromX, fromZ) towards (tx, tz), **re-aiming
+ * at the target every stride**, as tap-to-move's seek does; the closest it got.
+ *
+ * It used to aim once and march blind, which measured whether one straight
+ * line was clear rather than whether she could get there: on seed 1 (restart
+ * 6, shipped) the straight line to the door grazes a slide leg 7.3 m out, she
+ * slid 0.63 m sideways round it and walked the rest of the way in parallel,
+ * through the open door, to be scored "0.63 m short". The last stride is cut
+ * to the distance left, so an unobstructed walk ends on the target rather than
+ * up to half a stride either side of it.
+ */
 const marchTo = (tx: number, tz: number, fromX: number, fromZ: number): number => {
   const probe = new Vector3(fromX, 0, fromZ);
   const total = Math.hypot(tx - fromX, tz - fromZ) || 1;
-  const ux = (tx - fromX) / total;
-  const uz = (tz - fromZ) / total;
-  let closest = Infinity;
+  let closest = Math.hypot(probe.x - tx, probe.z - tz);
   for (let travelled = 0; travelled < total + 4; travelled += PLAYER_LONGEST_STEP) {
+    const left = Math.hypot(tx - probe.x, tz - probe.z);
+    if (left < 1e-6) break;
+    const stride = Math.min(PLAYER_LONGEST_STEP, left);
     collision.resolveMovement(
       probe,
-      ux * PLAYER_LONGEST_STEP,
-      uz * PLAYER_LONGEST_STEP,
+      ((tx - probe.x) / left) * stride,
+      ((tz - probe.z) / left) * stride,
       PLAYER_RADIUS,
       0,
       MAX_FRAME_DELTA,
