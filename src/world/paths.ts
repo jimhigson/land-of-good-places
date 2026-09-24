@@ -947,27 +947,39 @@ function gridDetourAttempt(
   // dog-leg past the ramp's flank was clear. So each stretch is replaced by
   // the farthest single elbow that is still walkable, greedily from the start.
   //
-  // A leg the straightening *adds* must not itself be a street on a private
-  // line: the staircase it replaces is a run of 2 m steps that no street
-  // measure reads as a street, and pulling it into one 20 m leg on the
-  // fence's own line trades a wiggle for exactly the defect this exists to
-  // avoid (seed 2's `spur-stall.dodgems`, x = 62 from z = 32.8 to 54, 3.7 m
-  // off the lattice). Such a leg is only taken on a lattice line; otherwise
-  // the next-farthest jump is tried, down to the staircase's own next step.
-  const straightened = straightenStaircase(
-    collapseCollinear(gridPoints),
-    (ax, az, bx, bz) => walkable(ax, az, bx, bz, ROUTE_WALKER_PAD),
-    legKeepsToTheLattice,
+  // **But not into a street on a private line.** Pulling a staircase straight
+  // can lay one long leg along a line no street shares — seed 2's
+  // `spur-stall.dodgems`, pulled into 20 m on x = 62 (the fence's own line,
+  // 3.7 m off the lattice), red on `every street sits on the shared 12 m
+  // lattice`, where the staircase it replaced was a run of short steps no
+  // street measure reads as a street. So a second straightening is made that
+  // takes a street-length leg only on a lattice line
+  // ({@link legKeepsToTheLattice}) and may dog-leg onto one to do it — seed 2
+  // then comes out x = 58.3 / z = 39 / x = 46, all lattice lines — and it is
+  // used whenever the first carries
+  // an off-lattice street run ({@link carriesAnOffLatticeStreetRun}, which
+  // grants the invariant's own exemptions) that it does not. Otherwise the
+  // first stands: the per-leg rule knows nothing of those exemptions, and on
+  // its own it re-routed seed 131's walk in from the gate onto z = 48.
+  const staircase = collapseCollinear(gridPoints);
+  const walkableLeg = (ax: number, az: number, bx: number, bz: number): boolean =>
+    walkable(ax, az, bx, bz, ROUTE_WALKER_PAD);
+  const finish = (points: [number, number][]): (readonly [number, number])[] =>
+    collapseCollinear([...points, [b[0], b[1]]]);
+  const straightest = finish(straightenStaircase(staircase, walkableLeg));
+  if (!carriesAnOffLatticeStreetRun(straightest)) return straightest;
+  const onTheLattice = finish(
+    straightenStaircase(staircase, walkableLeg, legKeepsToTheLattice, latticeLinesAround(staircase)),
   );
-  straightened.push([b[0], b[1]]);
-  return collapseCollinear(straightened);
+  return carriesAnOffLatticeStreetRun(onTheLattice) ? straightest : onTheLattice;
 }
 
 /**
  * Replace runs of an axis-aligned polyline with the fewest elbows that stay
  * walkable: from each kept point, jump to the farthest later point reachable by
- * one straight leg or one right-angle elbow whose legs `clear` and `legible` both
- * accept (the input's own next point is never asked `legible`: it is not new). The
+ * one straight leg, one right-angle elbow, or (given `viaLines`) one dog-leg
+ * whose middle leg runs along one of those lines, whose legs `clear` and
+ * `legible` all accept (the input's own next point is never asked: it is not new). The
  * first and last points are kept; every leg of the result is axis-aligned
  * because every elbow is. Never longer in corners than the input, since the
  * input's own next point is always a candidate.
@@ -976,6 +988,7 @@ function straightenStaircase(
   points: readonly (readonly [number, number])[],
   clear: (ax: number, az: number, bx: number, bz: number) => boolean,
   legible: (ax: number, az: number, bx: number, bz: number) => boolean = () => true,
+  viaLines: { readonly xs: readonly number[]; readonly zs: readonly number[] } | null = null,
 ): [number, number][] {
   if (points.length <= 2) return points.map((p) => [p[0], p[1]] as [number, number]);
   const out: [number, number][] = [[(points[0] as readonly [number, number])[0], (points[0] as readonly [number, number])[1]]];
@@ -994,19 +1007,33 @@ function straightenStaircase(
         }
         continue;
       }
-      const corners: (readonly [number, number])[] = [
-        [to[0], from[1]],
-        [from[0], to[1]],
+      // One right-angle elbow, either way round; and, when asked for
+      // (`viaLines`), a dog-leg whose middle leg runs along one of the given
+      // lines — the lattice's, so a long leg can sit where streets are.
+      const ways: (readonly [number, number])[][] = [
+        [[to[0], from[1]]],
+        [[from[0], to[1]]],
       ];
-      const corner = corners.find(
-        (c) =>
-          legible(from[0], from[1], c[0], c[1]) &&
-          legible(c[0], c[1], to[0], to[1]) &&
-          clear(from[0], from[1], c[0], c[1]) &&
-          clear(c[0], c[1], to[0], to[1]),
-      );
-      if (corner) {
-        out.push([corner[0], corner[1]], [to[0], to[1]]);
+      if (viaLines) {
+        for (const x of viaLines.xs) {
+          if ((x - from[0]) * (x - to[0]) < 0) ways.push([[x, from[1]], [x, to[1]]]);
+        }
+        for (const z of viaLines.zs) {
+          if ((z - from[1]) * (z - to[1]) < 0) ways.push([[from[0], z], [to[0], z]]);
+        }
+      }
+      const way = ways.find((corners) => {
+        const legs = [from, ...corners, to];
+        for (let k = 1; k < legs.length; k += 1) {
+          const p = legs[k - 1] as readonly [number, number];
+          const q = legs[k] as readonly [number, number];
+          if (!legible(p[0], p[1], q[0], q[1]) || !clear(p[0], p[1], q[0], q[1])) return false;
+        }
+        return true;
+      });
+      if (way) {
+        for (const c of way) out.push([c[0], c[1]]);
+        out.push([to[0], to[1]]);
         i = j;
         jumped = true;
         break;
@@ -3986,6 +4013,18 @@ function snapRunsToLattice(
 const STREET_RUN_MIN = 8;
 /** How far off a lattice line a street's line may sit and still be on it, metres. */
 const STREET_LINE_SLACK = 0.9;
+
+/** The plaza lattice's lines crossing the box round `points` (x = const, then z = const). */
+function latticeLinesAround(points: readonly (readonly [number, number])[]): { xs: number[]; zs: number[] } {
+  const lines = (values: number[], anchor: number): number[] => {
+    const out: number[] = [];
+    const lo = Math.ceil((Math.min(...values) - anchor) / STREET_PITCH);
+    const hi = Math.floor((Math.max(...values) - anchor) / STREET_PITCH);
+    for (let k = lo; k <= hi; k += 1) out.push(anchor + k * STREET_PITCH);
+    return out;
+  };
+  return { xs: lines(points.map((p) => p[0]), PLAZA.x), zs: lines(points.map((p) => p[1]), PLAZA.z) };
+}
 
 /**
  * True when the straight leg a→b could not read as a street on a private
