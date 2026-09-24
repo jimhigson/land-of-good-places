@@ -50,7 +50,8 @@ const outDir = join(root, PREBUILT_PARKS_OUT);
 mkdirSync(outDir, { recursive: true });
 // Start clean: a manifest or a file left from another source must not survive
 // into this run's output, whatever this run does.
-for (const name of readdirSync(outDir)) rmSync(join(outDir, name));
+// (Files only: `.parks/dev/` is the dev server's own cache, keyed by source.)
+for (const name of readdirSync(outDir)) if (name.endsWith('.json')) rmSync(join(outDir, name));
 
 console.log(`build:parks: ${seeds.length} seed(s) [${seeds.join(', ')}], ${lanes} at a time, source ${sourceHash.slice(0, 12)}`);
 const { outcomes, controlProblem } = await buildAndVerify(seeds, outDir, lanes, (line) => console.log(line));
