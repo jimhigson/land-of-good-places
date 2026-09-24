@@ -411,6 +411,13 @@ export class RingPath {
     // restart 0, once the 512-gon's own corners were gone). Hermite is C1 across
     // the samples and passes through them exactly, so between two of them it
     // departs from the lerp by the chord's sag, a fraction of a millimetre.
+    //
+    // Always from the faithful table's samples and tangents, whichever table
+    // the frame is read from: the camera's guide shares the ring's positions
+    // (see `guideAt`), and its 10 m tangents are not the direction the ring
+    // runs, so a Hermite built on them would wiggle the same points sideways.
+    const p = this.samples[i] as RingSample;
+    const q = this.samples[j] as RingSample;
     const span = this.length / SAMPLES;
     const t2 = t * t;
     const t3 = t2 * t;
@@ -419,8 +426,8 @@ export class RingPath {
     const h01 = -2 * t3 + 3 * t2;
     const h11 = (t3 - t2) * span;
     return {
-      x: h00 * a.x + h10 * a.tangentX + h01 * b.x + h11 * b.tangentX,
-      z: h00 * a.z + h10 * a.tangentZ + h01 * b.z + h11 * b.tangentZ,
+      x: h00 * p.x + h10 * p.tangentX + h01 * q.x + h11 * q.tangentX,
+      z: h00 * p.z + h10 * p.tangentZ + h01 * q.z + h11 * q.tangentZ,
       tangentX: tx / tl,
       tangentZ: tz / tl,
       normalX: (tz / tl) * this.normalSign,
