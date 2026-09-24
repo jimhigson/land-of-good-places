@@ -1,7 +1,7 @@
 /**
  * **GENERATED — `pnpm run accept:parks -- <seeds> --write`. Do not edit by hand.**
  *
- * For each shipped seed, the restart the root acceptance loop accepted: the
+ * For each supported seed (`SUPPORTED_PARK_SEEDS`, 0..15), the restart the root acceptance loop accepted: the
  * first restart (`parkRestart.ts`) whose finished park passed every
  * acceptance measure — every procgen invariant and every `check:park` key
  * (`scripts/lib/acceptedPark.mts`). So the park a seed *is* — in the browser,
@@ -34,13 +34,4 @@ export const ACCEPTED_RESTARTS: Readonly<Record<number, number>> = {
   13: 0,
   14: 0,
   15: 0,
-  24: 0,
-  128: 7,
-  131: 0,
-  208: 5,
-  274: 1,
-  326: 0,
-  428: 1,
-  451: 2,
-  20260728: 0,
 };

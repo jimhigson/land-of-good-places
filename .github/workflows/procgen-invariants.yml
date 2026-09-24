@@ -3,7 +3,7 @@ name: Procgen invariants
 # Proves the generated park is placed sanely — no wall crossing another wall or
 # the railway, no tree growing through a tree, no lamp standing in anything,
 # every path lit and every doormat usable — on every seed whose accepted restart
-# is recorded in `src/world/acceptedRestarts.ts` (0..15 and the pool), each
+# is recorded in `src/world/acceptedRestarts.ts` (the supported seeds, 0..15), each
 # built at that restart: the second line behind the root acceptance loop
 # (docs/design/STRUCTURAL-BACKTRACKING.md).
 #
@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   # **Sharded, gated by one aggregator named `Procgen invariants`.** The suite
-  # measures every recorded park (25 of them since the root acceptance loop,
+  # measures every recorded park (16 since the root acceptance loop,
   # against 5 before), about 5.5 minutes per five parks on a runner — one job
   # could not hold it under its cap. So the seed files are split over runners
   # with vitest's own `--shard`, the pool sweeps run on their own runner, and

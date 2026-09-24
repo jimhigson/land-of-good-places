@@ -305,3 +305,46 @@ are fixed at cause on `wip/sb-merge` and the sweep is re-taken there.
 | 13 | 30 | 31 | 1444 | every modelled coping stone sits on the wall it caps (12); the Rail Race camera never runs backwards (12); the Sky Cruiser always flies through the castle (12); every Rail Race duck bar slows you down where it stands (11) |
 | 14 | 8 | 9 | 526 | the Sky Cruiser always flies through the castle (5); the Rail Race camera never runs backwards (4); every modelled coping stone sits on the wall it caps (3); every street sits on the shared 12 m lattice (3) |
 | 15 | 6 | 7 | 241 | every street sits on the shared 12 m lattice (4); the Rail Race camera never runs backwards (3); every modelled coping stone sits on the wall it caps (3); every paved path runs on grid axes (2) |
+
+
+## Measured: 100 random seeds (termination)
+
+`pnpm run accept:parks -- <100 seeds> --fresh` at `06223019` (the seeds:
+`random.Random(20260924).sample(range(16, 1000000), 100)`, listed in the run
+log), four lanes on an M-series Mac: **100/100 accepted, 0 broken, 50 needed
+a restart, attempts max 8, mean 2.04, 4827 s wall.**
+Of 204 attempts, 100 passed: the per-attempt acceptance rate is
+p = 0.49, so the attempts a seed needs are geometric with mean
+1/p = 2.04; the chance a seed needs more than 20 is (1-p)^20 = 1.4e-06.
+Wall time per seed (all attempts): median 139 s, max 875 s.
+
+| attempts | seeds |
+|---:|---:|
+| 1 | 50 |
+| 2 | 27 |
+| 3 | 10 |
+| 4 | 4 |
+| 5 | 4 |
+| 6 | 2 |
+| 7 | 2 |
+| 8 | 1 |
+
+What forced the restarts (count of rejected attempts):
+
+| measure | rejections |
+|---|---:|
+| every street sits on the shared 12 m lattice | 36 |
+| no drawn paving stands up on edge as a sheet | 15 |
+| check:park anchor.reach | 14 |
+| the Rail Race finish rainbow stands on the ground | 13 |
+| a child can walk in through the front gate | 10 |
+| every spur starts on the drawn centre line of the path it branches from | 8 |
+| the Sky Cruiser stands on its own supports | 8 |
+| check:park rainbow.inPath | 7 |
+| the Sky Cruiser flies clear of the whole park | 6 |
+| no two close destinations are left with a wildly disproportionate paved detour | 6 |
+| the ginormous slide never climbs, measured against the local up | 6 |
+| every modelled coping stone sits on the wall it caps | 4 |
+| the ginormous slide stands on legs a child can walk between | 4 |
+| built the park it was asked for | 3 |
+| nothing a bridge builds hangs into its own tunnel, measured by ray from the rail | 3 |
