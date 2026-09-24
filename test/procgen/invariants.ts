@@ -9900,7 +9900,14 @@ const railRaceSleepersBridgeBothRails: Invariant = (facts) => {
     }
     // **How far "about a metre" is allowed to stray, and why it is not tight.**
     //
-    // Sleepers are laid every `SLEEPER_SPACING` of *centre-line* distance, but
+    // (Since the structural-backtrack sleeper fix, sleepers are laid evenly
+    // along each lane's own drawn rail — `stationsEvenlyAlongDrawn` — so the
+    // built spread is a lane's lap over the centre line's, a few per cent. The
+    // band below is the older, looser one and is kept, not widened: it was
+    // failing seeds 1, 3, 8, 9 at 0.257–0.267 m because the bends there are
+    // 17.7 m, not 20, while sleepers were still spaced by centre line.)
+    //
+    // Sleepers used to be laid every `SLEEPER_SPACING` of *centre-line* distance, but
     // each one belongs to a lane offset up to `laneSpan / 2` from that centre —
     // and on a bend an outer lane covers more ground per metre of centre-line
     // than an inner one. The spread is therefore `spacing * halfSpan / bendRadius`
