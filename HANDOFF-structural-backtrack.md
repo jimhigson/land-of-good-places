@@ -34,3 +34,9 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - Coplanar: rings declared userData.shownAlone; sweep skips cross-member pairs; ring sleeper baseline entry
   deleted (not loosened). Remaining red: pre-existing seed-24 garden path-kerb|path-surface -> helper fix/sb-kerb.
 - Restart-1 control: seed 11 r1 digest aaed3dd7ff9dbc46 ≠ r0 f949720aa35c7716; two processes agree.
+- Cruiser-castle: merged fix/sb-cruiser-castle (cruiserRouteSearch throws when tiers end unsatisfied; builder
+  refuses a built route with null castleSpan).
+- Kerb helper (fix/sb-kerb): seed-24 + canonical kerb|surface fixed (KERB_PROUD_MAX, KERB_HIDE_MAX); seed 131
+  residual is a hanging paving SHEET -> same helper now merging/finishing fix/paving-drape. Not yet merged.
+- Lattice helper (fix/sb-lattice): moving lattice/grid-axis measures into src + refusals in addInterconnects.
+- Duck-bar helper (fix/sb-duck-bars) still running.
