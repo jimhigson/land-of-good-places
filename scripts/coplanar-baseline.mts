@@ -93,7 +93,6 @@ export const COPLANAR_BASELINE: Readonly<Record<string, BaselineEntry>> = {
   "hotel.breakfast|the-land-hotel-inside/hotel:hotel.breakfast/hotel.breakfastTable/table-leg|the-land-hotel-inside/hotel:hotel.breakfast/hotel.breakfastTable/table-top/<Mesh:BufferGeometry>": { area: 0.2762, seams: 1, fighting: false },
   "hotel.suite|the-land-hotel-inside/hotel:hotel.suite/hotel.napBlanket/<Mesh:BoxGeometry>/<Mesh:BoxGeometry>|the-land-hotel-inside/hotel:hotel.suite/hotel.napBlanket/<Mesh:BoxGeometry>/<Mesh:BoxGeometry>": { area: 0.2700, seams: 2, fighting: true },
   "hotel.corridor|the-land-hotel-inside/hotel:hotel.corridor/hotel.yoursDoor/door-leaf/<Mesh:BufferGeometry>|the-land-hotel-inside/hotel:hotel.corridor/hotel.yoursDoor/door-plaque/<Mesh:BufferGeometry>": { area: 0.2303, seams: 1, fighting: false },
-  "garden|garden/terrain|park-train/railway-bridges/bridge/wallTop": { area: 0.2295, seams: 1, fighting: false },
   "hotel.garden|the-land-hotel-inside/hotel:hotel.garden/hotel.sconce/<Mesh:BoxGeometry>/<Mesh:BoxGeometry>|the-land-hotel-inside/hotel:hotel.garden/hotel.wall": { area: 0.2200, seams: 2, fighting: false },
   "hotel.corridor|the-land-hotel-inside/hotel:hotel.corridor/hotel.sconce/<Mesh:BoxGeometry>/<Mesh:BoxGeometry>|the-land-hotel-inside/hotel:hotel.corridor/hotel.wall": { area: 0.2200, seams: 1, fighting: false },
   "hotel.ocean|the-land-hotel-inside/hotel:hotel.ocean/hotel.sconce/<Mesh:BoxGeometry>/<Mesh:BoxGeometry>|the-land-hotel-inside/hotel:hotel.ocean/hotel.wall": { area: 0.2200, seams: 1, fighting: false },

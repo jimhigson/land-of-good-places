@@ -54,8 +54,8 @@ import { RailRouteUnsolvable, type SolvedRailRoute } from './rail/generate';
 import { TrainRoute, trainRouteSearch } from './train/route';
 import { planStations, type PlannedStation } from './train/plan';
 import { slideSearch, type PlannedSlide } from './slide/solve';
-import { crossingSitesSearch, type SolvedCrossingSites } from './train/crossingPlanSolve';
-import { pathGraphSearch, resetPathsState, type PathGraph } from './paths';
+import { crossingSitesSearch, refuseBridgeSiteForPaths, type SolvedCrossingSites } from './train/crossingPlanSolve';
+import { bridgesThatWallPathsIn, pathGraphSearch, resetPathsState, type PathGraph } from './paths';
 import { screenDrawnPathsForOffSiteCrossings } from './train/crossingPredicate';
 import { drawnSamplesFor } from './pathGraph';
 import { entranceRoadClaims, ROAD_FEATURE } from './entrance/roadCorridor';
@@ -433,10 +433,12 @@ function builders(): readonly FeatureBuilder[] {
   const crossingsBuilder = coarse<SolvedCrossingSites>({
     name: 'crossings',
     deps: ['train'],
-    supply: 1,
-    *solve() {
+    // One draw per bridge site the paths may refuse (`refuseBridgeSiteForPaths`),
+    // beyond the first.
+    supply: 4,
+    *solve(attempt) {
       try {
-        return yield* crossingSitesSearch();
+        return yield* crossingSitesSearch(attempt);
       } catch (error) {
         if (!(error instanceof Error) || !/NO bridge site/.test(error.message)) throw error;
         return refusal('crossing plan: the railway loop proves no bridge site anywhere', { consumed: ['train'] });
@@ -523,6 +525,20 @@ function builders(): readonly FeatureBuilder[] {
             `nearest lane point is ${pinched.wall.toFixed(2)} m from the boundary edge (needs ${wallKeep().toFixed(2)}) ` +
             `and ${pinched.fence.toFixed(2)} m from the rail centreline (needs ${fenceKeep().toFixed(2)}, in a band ${laneSlack().toFixed(2)} m wide)`,
           { consumed: ['train', 'layout'] },
+        );
+      }
+      // A bridge that walls a path in — a route the repair could not take off
+      // it, or could only by walking the long way round — is the crossing
+      // plan's decision, so the plan is re-drawn without that site. See
+      // `paths.ts`'s `commitRouteOffBridges`.
+      const walled = bridgesThatWallPathsIn()[0];
+      if (walled) {
+        refuseBridgeSiteForPaths(walled.railDistance);
+        return refusal(
+          `paths: the bridge at railD ${walled.railDistance.toFixed(1)} walls ${walled.route} in — ` +
+            `${walled.stillOn.toFixed(1)} m still on it after repair, ${walled.added.toFixed(1)} m added to a ` +
+            `${walled.length.toFixed(1)} m route`,
+          { consumed: ['crossings'] },
         );
       }
       return graph;

@@ -91,6 +91,7 @@ import {
   FALL_THRESHOLD,
   MAX_FRAME_DELTA,
   PATH_KERB_LIFT,
+  PATH_KERB_OVERHANG,
   PATH_SURFACE_LIFT,
   PLAYER_LONGEST_STEP,
   SPRINT_LOCAL_GRADE_CEILING,
@@ -1908,6 +1909,15 @@ const streetsShareLatticeLines: Invariant = (facts) => {
       const ARCH_FOOT_REACH = PLAYER_RADIUS * 2 + 0.4 + (3.6 / 2 + 0.85) - 0.02;
       for (const foot of facts.railRaceArchFeet) {
         if (Math.hypot(x - foot.x, z - foot.z) < foot.radius + ARCH_FOOT_REACH) return true;
+      }
+      // A bridge's own stone blocks a street that does not cross on it: its
+      // paving would be lifted onto the ramp where it overlaps the masonry
+      // and hang off it where it does not (`noDrawnPavingStandsUpAsASheet`),
+      // so the generator keeps every such street off it. Measured off the
+      // built masonry, padded by the widest street's half-width and kerb
+      // (the avenue's, 1.6 + 0.425) a hair under.
+      for (const bridge of facts.world.train.bridges) {
+        if (bridge.footprintNear(x, z, 1.6 + PATH_KERB_OVERHANG - 0.02)) return true;
       }
     }
     return false;
@@ -7822,6 +7832,112 @@ const bridgePavingIsCarriedByItsOwnMasonry: Invariant = (facts) => {
 };
 
 /**
+ * **No drawn paving stands up on edge as a sheet.**
+ *
+ * `pathGraph.ts`'s `drapePathsOverBridges` lifts every paving vertex that
+ * stands inside a bridge's drawn stone onto the hump — which is right for the
+ * route the bridge carries, and wrong for any *other* route whose ribbon
+ * merely passes through the same ground in plan. That route's vertices inside
+ * the stone go up to the deck while its vertices a stride outside stay on the
+ * lawn, and the triangle between them is a wall of sandy paving several
+ * metres tall with no masonry round it. Found on seed 131: the authored gate
+ * corridor runs straight down `x = 0` through the ground the bridge at
+ * (-2.2, 40.3) stands on, and 4.85 m sheets of paving hung either side of its
+ * deck.
+ *
+ * Every other bridge-paving check here asks about *vertices* — is each lifted
+ * one on its bridge, at the right height, over stone — and every one of those
+ * vertices was. The fault is between them, so this asks about **edges**: of
+ * every triangle edge in both drawn layers, does any climb more than a child's
+ * own step ({@link BUILDING_STEP_UP}) at a grade steeper than she can walk
+ * ({@link SPRINT_LOCAL_GRADE_CEILING})? A drawn ramp never does — its grade is
+ * held under `MAX_RAMP_GRADIENT` by construction, and one edge of it rises a
+ * few tens of centimetres at most — so either threshold alone would be enough,
+ * and both are the player's numbers, not the generator's.
+ *
+ * Height is {@link altitudeAt} — above the ground, measured from the planet's
+ * centre — not world `y`: 150 m out the lawn itself leans 40 degrees, and a
+ * world-`y` rise would call every ordinary path out there a cliff.
+ */
+const noDrawnPavingStandsUpAsASheet: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const layers: { name: string; mesh: Mesh }[] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    if (object.name === 'path-surface' || object.name === 'path-kerb') layers.push({ name: object.name, mesh: object });
+  });
+  if (layers.length !== 2) {
+    complaints.push(
+      `expected both drawn path layers to measure, found ${layers.length} ` +
+        `(${layers.map((l) => l.name).join(', ') || 'none'}) — this invariant is measuring nothing`,
+    );
+    return complaints;
+  }
+
+  let edgesMeasured = 0;
+  let edgesAboveTheLawn = 0;
+  for (const { name, mesh } of layers) {
+    const position = mesh.geometry.getAttribute('position');
+    const index = mesh.geometry.getIndex();
+    const altitude = new Float64Array(position.count);
+    for (let i = 0; i < position.count; i += 1) {
+      altitude[i] = altitudeAt(position.getX(i), position.getY(i), position.getZ(i));
+    }
+    const corner = (k: number): number => (index ? index.getX(k) : k);
+    const triangles = (index ? index.count : position.count) / 3;
+    const sheets: { at: readonly [number, number]; rise: number; grade: number }[] = [];
+    for (let t = 0; t < triangles; t += 1) {
+      let worst: { at: readonly [number, number]; rise: number; grade: number } | null = null;
+      for (let e = 0; e < 3; e += 1) {
+        const a = corner(3 * t + e);
+        const b = corner(3 * t + ((e + 1) % 3));
+        edgesMeasured += 1;
+        const rise = Math.abs((altitude[a] as number) - (altitude[b] as number));
+        if (rise > BUILDING_STEP_UP / 4) edgesAboveTheLawn += 1;
+        if (rise <= BUILDING_STEP_UP) continue;
+        const run = Math.hypot(position.getX(a) - position.getX(b), position.getZ(a) - position.getZ(b));
+        const grade = rise / Math.max(run, 1e-6);
+        if (grade <= SPRINT_LOCAL_GRADE_CEILING) continue;
+        if (!worst || rise > worst.rise) {
+          worst = { at: [position.getX(a), position.getZ(a)] as const, rise, grade };
+        }
+      }
+      if (worst) sheets.push(worst);
+    }
+    if (sheets.length === 0) continue;
+    // One line per place, not per triangle: a sheet is a dozen triangles.
+    const places: { at: readonly [number, number]; rise: number; grade: number; count: number }[] = [];
+    for (const sheet of sheets) {
+      const near = places.find((p) => Math.hypot(p.at[0] - sheet.at[0], p.at[1] - sheet.at[1]) < 6);
+      if (!near) {
+        places.push({ ...sheet, count: 1 });
+        continue;
+      }
+      near.count += 1;
+      if (sheet.rise > near.rise) Object.assign(near, { at: sheet.at, rise: sheet.rise, grade: sheet.grade });
+    }
+    for (const place of places) {
+      complaints.push(
+        `the drawn ${name} stands up as a sheet at (${fmt(place.at)}): ${place.count} triangle(s), ` +
+          `the worst edge rising ${place.rise.toFixed(2)} m at a grade of ${place.grade.toFixed(2)} ` +
+          `(a child climbs ${BUILDING_STEP_UP} m at ${SPRINT_LOCAL_GRADE_CEILING.toFixed(2)}) — ` +
+          'a wall of paving between a bridge deck and the lawn, with no stone round it',
+      );
+    }
+  }
+  if (edgesMeasured === 0) {
+    complaints.push('the drawn path layers have no triangles — this invariant measured nothing');
+  }
+  // How much of the paving this actually looked at, said on every run — a
+  // green line that never measured a lifted edge would be the vacuous kind.
+  process.stderr.write(
+    `  noDrawnPavingStandsUpAsASheet: ${edgesMeasured} paving edges measured, ` +
+      `${edgesAboveTheLawn} of them rising more than ${(BUILDING_STEP_UP / 4).toFixed(3)} m\n`,
+  );
+  return complaints;
+};
+
+/**
  * **No drawn path ends in mid-air on a bridge** — issue #414.
  *
  * Jim, three times about the same bridge, the third time exactly:
@@ -12077,6 +12193,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     everyProvenBridgeSiteKeepsItsBridge,
   ],
   ['no drawn path ends in mid-air on a bridge', noDrawnPathEndsStrandedOnABridge],
+  ['no drawn paving stands up on edge as a sheet', noDrawnPavingStandsUpAsASheet],
   [
     'no bridge stands where the crossing planner proved none fits',
     noBridgeStandsWhereNoneWasProven,
