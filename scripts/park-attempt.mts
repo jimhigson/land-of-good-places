@@ -37,6 +37,16 @@ export interface AttemptFailure {
   readonly first: readonly string[];
 }
 
+export interface BacktrackStats {
+  readonly refusals: number;
+  readonly retries: number;
+  readonly accommodations: number;
+  readonly unwinds: number;
+  readonly deepestUnwind: number;
+  readonly decisionZero: number;
+  readonly forgone: number;
+}
+
 export interface AttemptVerdict {
   readonly seed: number;
   readonly restart: number;
@@ -48,6 +58,12 @@ export interface AttemptVerdict {
   /** How many measures were asked, so a verdict that asked nothing cannot pass for one that asked everything. */
   readonly measuresAsked: number;
   readonly cpuMs: { readonly build: number; readonly invariants: number; readonly findings: number };
+  /**
+   * How hard the driver worked inside this park — the backtracking below the
+   * root rung, per phase: refusals, retries, accommodations, unwinds, trips to
+   * decision zero, forgone optional increments. Null where the phase never ran.
+   */
+  readonly backtracking: { readonly plan: BacktrackStats | null; readonly world: BacktrackStats | null };
   readonly wallMs: number;
 }
 
@@ -122,6 +138,27 @@ if (facts) {
   findingsCpu = cpuMs() - cpu2;
 }
 
+const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats | null =>
+  stats
+    ? {
+        refusals: stats.refusals,
+        retries: stats.retries,
+        accommodations: stats.accommodations,
+        unwinds: stats.unwinds,
+        deepestUnwind: stats.deepestUnwind,
+        decisionZero: stats.decisionZero,
+        forgone: stats.forgone,
+      }
+    : null;
+let backtracking: AttemptVerdict['backtracking'] = { plan: null, world: null };
+try {
+  const { parkSolveStats } = await import('../src/world/parkPlan.ts');
+  const { worldSolveStats } = await import('../src/world/worldPhase.ts');
+  backtracking = { plan: backtrackOf(parkSolveStats()), world: backtrackOf(worldSolveStats()) };
+} catch {
+  // A build that threw before the plan existed has no stats to give.
+}
+
 const verdict: AttemptVerdict = {
   seed,
   restart,
@@ -132,6 +169,7 @@ const verdict: AttemptVerdict = {
   measuresAsked,
   cpuMs: { build: Math.round(buildCpu), invariants: Math.round(invariantsCpu), findings: Math.round(findingsCpu) },
   wallMs: Math.round(performance.now() - began),
+  backtracking,
 };
 process.stdout.write(`park-attempt: ${JSON.stringify(verdict)}\n`);
 // Handles the build left open (timers in the World) must not keep the process alive.
