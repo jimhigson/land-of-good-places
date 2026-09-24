@@ -7,7 +7,7 @@ import { PLAZA } from '../../src/world/paths';
 import { isOnPath, pathCentreline } from '../../src/world/pathGraph';
 import { type Claim, type GroundClaims } from '../../src/boot/groundClaims';
 import { type CoasterRoute } from '../../src/world/coaster/route';
-import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../../src/boot/featureBuilder';
+import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../boot/featureBuilder';
 import { cruiserClearanceForPoints } from '../../src/world/coaster/clearance';
 import { FAIRY_POLE_COUNT, KNOB_RISE, POLE_HEIGHT, POLE_RADIUS, POST_AXIS_STEP, WIDEST_DRAWN_RADIUS, fairyAnchorAt, fairySpan, type FairyChain, type FairyPole } from '../../src/world/FairyLights';
 /**

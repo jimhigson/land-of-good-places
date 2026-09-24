@@ -11,7 +11,7 @@
  */
 import { GroundClaims } from '../../src/boot/groundClaims';
 import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveStats } from '../boot/parkSolve';
-import { decisionSeed, refusal, type Advance, type FeatureBuilder, type Refusal } from '../../src/boot/featureBuilder';
+import { decisionSeed, refusal, type Advance, type FeatureBuilder, type Refusal } from '../boot/featureBuilder';
 import { PARK_SEED } from '../../src/world/parkManifest';
 import { PARK_RESTARTS, type ParkLayout } from '../../src/world/parkLayout';
 import { layoutRestartSearch } from './parkLayout';

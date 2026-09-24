@@ -5,7 +5,7 @@ import { PLAYER_RADIUS } from '../../src/core/constants';
 import { placedEntry } from '../../src/world/parkLayout';
 import { ANCHORS_BY_ID } from '../../src/world/anchors';
 import { type CollisionWorld } from '../../src/world/Collision';
-import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../../src/boot/featureBuilder';
+import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../boot/featureBuilder';
 import { PARK_BOUNDARY } from '../../src/world/boundary';
 import { clearOfFootprints } from './parkLayout';
 import { STALL_SHIFT_REACH, type BoothRelocator } from '../../src/world/stallsFeature';

@@ -54,7 +54,7 @@
  */
 
 import type { GroundClaims } from '../../src/boot/groundClaims';
-import { isRefusal, type Advance, type FeatureBuilder, type Increment, type Refusal } from '../../src/boot/featureBuilder';
+import { isRefusal, type Advance, type FeatureBuilder, type Increment, type Refusal } from './featureBuilder';
 import { resetPlanCaches } from '../../src/boot/planCaches';
 
 const now = (): number =>

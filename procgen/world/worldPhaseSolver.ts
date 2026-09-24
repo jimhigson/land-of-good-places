@@ -9,7 +9,7 @@
 import type { CollisionWorld } from '../../src/world/Collision';
 import type { GroundClaims, Claim } from '../../src/boot/groundClaims';
 import { ParkSolve, type SolveStats } from '../boot/parkSolve';
-import { refusal, type FeatureBuilder } from '../../src/boot/featureBuilder';
+import { refusal, type FeatureBuilder } from '../boot/featureBuilder';
 import { PARK_SEED } from '../../src/world/parkManifest';
 import type { CoasterRoute } from '../../src/world/coaster/route';
 import { PLAZA } from '../../src/world/paths';

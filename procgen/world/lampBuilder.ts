@@ -2,7 +2,7 @@ import { REAL_PROBE_RADIUS } from '../../src/world/train/bridgeFootprint';
 import { ROUTES, distanceToPath, routeCurve } from '../../src/world/pathGraph';
 import { shapesOverlap, type Claim, type GroundClaims } from '../../src/boot/groundClaims';
 import { type CollisionWorld } from '../../src/world/Collision';
-import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../../src/boot/featureBuilder';
+import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../boot/featureBuilder';
 import { isInEntranceGateOpening } from '../../src/world/entrance/layout';
 import { PLAYER_RADIUS } from '../../src/core/constants';
 import { PARK_LAYOUT } from '../../src/world/parkLayout';

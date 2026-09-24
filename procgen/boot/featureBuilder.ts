@@ -21,8 +21,8 @@
  * sequence of draws, refusals and unwinds on every run and every platform.
  */
 
-import { candidateRng, hashString, Rng } from '../core/mathUtils';
-import type { Claim, Crossing, Demand } from './groundClaims';
+import { candidateRng, hashString, Rng } from '../../src/core/mathUtils';
+import type { Claim, Crossing, Demand } from '../../src/boot/groundClaims';
 
 /**
  * One placed increment. `claims` are committed to the registry under the

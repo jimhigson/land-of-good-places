@@ -2,7 +2,7 @@ import { PLAYER_MAX_SPEED, PLAYER_RADIUS } from '../../src/core/constants';
 import { PARK_SEED } from '../../src/world/parkManifest';
 import { shapesOverlap, type Claim, type GroundClaims } from '../../src/boot/groundClaims';
 import { type CollisionWorld } from '../../src/world/Collision';
-import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../../src/boot/featureBuilder';
+import { refusal, type FeatureBuilder, type Increment, type Refusal } from '../boot/featureBuilder';
 import { Rng, TAU, candidateRng } from '../../src/core/mathUtils';
 import { TREE_REACH, TREE_TOP, pickTreeKind, rollTree, type RolledTree, type TreeKind } from '../../src/world/treeModel';
 import { hidesTheArrivingBus } from '../../src/world/entrance/arrivalSightline';
