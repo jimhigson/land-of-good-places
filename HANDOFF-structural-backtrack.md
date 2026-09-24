@@ -29,3 +29,8 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - Restart-0 identity: seed 11 park digest f949720aa35c7716 identical at ae8257fb and dec4376c (restart stream).
 - Sweep 0..15 (base code): 2@r0, 5@r0, 0@r1, 3@r6, 6@r10, 4@r16, 8@r2 ... (log accept-0-15-r1.log).
 - Helper running: fix/sb-cruiser-castle (castleSpan null though satisfies=crossesTheCastle).
+- Camera: merged fix/sb-race-camera (CEILING_FLOOR 0.6 in measureZoomCeiling; canonical zooms in ≤8.8% on 39 m
+  of lap — VISIBLE, needs Jim's look at /rail-race). Seeds 0,1,3,8,9 camera cleared.
+- Coplanar: rings declared userData.shownAlone; sweep skips cross-member pairs; ring sleeper baseline entry
+  deleted (not loosened). Remaining red: pre-existing seed-24 garden path-kerb|path-surface -> helper fix/sb-kerb.
+- Restart-1 control: seed 11 r1 digest aaed3dd7ff9dbc46 ≠ r0 f949720aa35c7716; two processes agree.
