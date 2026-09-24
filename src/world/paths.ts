@@ -786,7 +786,7 @@ function gridDetourAttempt(
     // through `pushClearOfRail`, which restores the full clamp afterwards, so
     // asking for more here only makes the search fail where it used to
     // succeed — and a failed search falls back to a raw diagonal.
-    (railSide === null || segmentHoldsRailSide(ax, az, bx, bz, railSide, 0));
+    (railSide === null || segmentHoldsRailSide(ax, az, bx, bz, railSide, RAIL_CLAMP_DISTANCE / 2));
   // The connector into the *true* endpoint gets a little more slack on the
   // "arriving at a destination" exemption than an ordinary mid-search edge
   // does: a doormat typically stands `standOff` (1.4 m, `parkLayout.ts`) plus
