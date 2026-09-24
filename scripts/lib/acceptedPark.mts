@@ -44,8 +44,10 @@
  * park.
  */
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { AttemptVerdict } from '../park-attempt.mts';
@@ -161,6 +163,58 @@ export async function acceptPark(
     `accepted park: seed ${seed} passed no attempt in ${cap} restarts — a measure nothing passes is a generator or ` +
       `instrument bug. Restarts:\n${log}`,
   );
+}
+
+/**
+ * **Everything an acceptance verdict depends on**, hashed: the generator
+ * (`src/`), the measures (`test/procgen/`, `scripts/` — the harness, the
+ * attempt, `parkFindings`), and the toolchain (`package.json`,
+ * `pnpm-lock.yaml`). A verdict is a fact about exactly this; change any of it
+ * and the verdict must be taken again. The one owner of that question — the
+ * prebuilt park build keys its files on it too.
+ */
+export function acceptanceSourceHash(): string {
+  const hash = createHash('sha256');
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir).sort()) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else files.push(path);
+    }
+  };
+  for (const dir of ['src', 'test/procgen', 'scripts']) walk(join(REPO, dir));
+  files.push(join(REPO, 'package.json'), join(REPO, 'pnpm-lock.yaml'));
+  for (const file of files) {
+    hash.update(relative(REPO, file));
+    hash.update('\0');
+    hash.update(readFileSync(file));
+    hash.update('\0');
+  }
+  return hash.digest('hex').slice(0, 20);
+}
+
+const CACHE_DIR = join(REPO, '.cache', 'lgp-accepted');
+
+/**
+ * The accepted park for `seed` at this source, from the cache if a previous
+ * run already took the verdict, otherwise by running the loop and caching it.
+ * A cached verdict is only ever reused for byte-identical inputs
+ * ({@link acceptanceSourceHash}), so it is the same answer the loop would give.
+ */
+export async function acceptParkCached(
+  seed: number,
+  options: Parameters<typeof acceptPark>[1] = {},
+): Promise<AcceptedPark & { readonly cached: boolean; readonly sourceHash: string }> {
+  const sourceHash = acceptanceSourceHash();
+  const file = join(CACHE_DIR, sourceHash, `${seed}.json`);
+  if (existsSync(file)) {
+    return { ...(JSON.parse(readFileSync(file, 'utf8')) as AcceptedPark), cached: true, sourceHash };
+  }
+  const accepted = await acceptPark(seed, options);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(accepted)}\n`);
+  return { ...accepted, cached: false, sourceHash };
 }
 
 /** One line per restart, for a log or the park file's metadata. */

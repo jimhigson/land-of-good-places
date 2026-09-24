@@ -63,8 +63,29 @@
  * build, so that fixing something never blocks the person who fixed it.
  */
 import './headless-canvas.mjs';
-import { buildHeadlessPark } from './park-harness.mts';
-import { measureParkFindings } from './lib/parkFindings.mts';
+import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
+import { acceptParkCached, describeRestarts } from './lib/acceptedPark.mts';
+
+/**
+ * **Which restart of the park to measure: the accepted one.** Unless
+ * `LGP_PARK_RESTART` pins one, the root acceptance loop
+ * (`scripts/lib/acceptedPark.mts`) runs first — or its cached verdict at this
+ * source is read — and this measures the park it accepted. The seed and the
+ * restart are read once, at module load, by every generator, so the park's
+ * modules are imported only after both are set.
+ */
+if (process.env['LGP_PARK_RESTART'] === undefined) {
+  const seed = process.env['LGP_SEED'] !== undefined ? Number(process.env['LGP_SEED']) : CANONICAL_PARK_SEED;
+  const accepted = await acceptParkCached(seed);
+  process.env['LGP_PARK_RESTART'] = String(accepted.restart);
+  process.stderr.write(
+    `check:park: seed ${seed} accepted at restart ${accepted.restart} after ${accepted.attempts.length} attempt(s)` +
+      `${accepted.cached ? ' (verdict cached at this source)' : ''}\n` +
+      describeRestarts(accepted).map((line) => `  ${line.slice(0, 300)}\n`).join(''),
+  );
+}
+const { buildHeadlessPark } = await import('./park-harness.mts');
+const { measureParkFindings } = await import('./lib/parkFindings.mts');
 
 const verbose = process.argv.includes('--verbose');
 

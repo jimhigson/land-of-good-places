@@ -12103,6 +12103,19 @@ export const PARK_ACCEPTANCE: readonly (readonly [string, Invariant])[] = [
   ...INVARIANTS,
 ];
 
+/** Where the root acceptance loop lives — see the `beforeAll` below. */
+const ACCEPTED_PARK_MODULE = '../../scripts/lib/acceptedPark.mts';
+
+/** The slice of `scripts/lib/acceptedPark.mts` this suite calls. */
+interface AcceptedParkApi {
+  acceptParkCached(seed: number): Promise<{
+    readonly restart: number;
+    readonly attempts: readonly unknown[];
+    readonly cached: boolean;
+  }>;
+  describeRestarts(accepted: { readonly attempts: readonly unknown[] }): string[];
+}
+
 /**
  * Registers every invariant for one seed.
  *
@@ -12115,7 +12128,24 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
     let facts: ParkFacts;
 
     beforeAll(async () => {
-      facts = await buildParkFacts(seed);
+      // **The accepted park, not restart 0.** The root loop
+      // (`scripts/lib/acceptedPark.mts`) starts the park again from zero
+      // until every entry of `PARK_ACCEPTANCE` passes; this suite then builds
+      // that park and asks the same list again — the second line. Said on
+      // stderr on every run, so a restart is never silent.
+      // Imported through a variable so the test project's typecheck does not
+      // follow it into Node-only code (`test/node-env.d.ts` explains why this
+      // project has no `@types/node`); {@link AcceptedParkApi} is the slice used.
+      const { acceptParkCached, describeRestarts } = (await import(
+        /* @vite-ignore */ ACCEPTED_PARK_MODULE
+      )) as AcceptedParkApi;
+      const accepted = await acceptParkCached(seed);
+      process.stderr.write(
+        `[accepted park] seed ${seed}: restart ${accepted.restart} after ${accepted.attempts.length} attempt(s)` +
+          `${accepted.cached ? ' (verdict cached at this source)' : ''}\n` +
+          describeRestarts(accepted).map((line) => `  ${line.slice(0, 300)}\n`).join(''),
+      );
+      facts = await buildParkFacts(seed, accepted.restart);
       // 300 s, up from 120: a park build is solver work, and the cruiser's
       // search legitimately runs tens of seconds on an awkward seed (58 s
       // worst measured locally, PR #253's report) — a 2-3x slower CI runner
@@ -12124,7 +12154,11 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // at fault either time. The ceiling still exists to catch a genuine
       // hang; it just no longer prosecutes an honest solve. The structural
       // fix is the cruiser's own cost, tracked separately.
-    }, 300_000);
+      //
+      // An hour since the root acceptance loop: before this park is built,
+      // every restart the seed needs is built and measured in its own
+      // process. The ceiling is a hang-catcher, not a budget.
+    }, 3_600_000);
 
     it('built the park it was asked for', () => {
       expect(facts.seed).toBe(seed);

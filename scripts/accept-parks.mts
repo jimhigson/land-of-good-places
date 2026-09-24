@@ -6,13 +6,16 @@
  * pnpm run accept:parks -- 0-15                 # the shipped seeds
  * pnpm run accept:parks -- 1000-1099 --out r.json
  * LGP_LANES=3 pnpm run accept:parks -- 3,6,15
+ * pnpm run accept:parks -- 0-15 --fresh        # ignore the verdict cache
  * ```
  *
  * For each seed, `acceptPark` (`scripts/lib/acceptedPark.mts`) tries restart
  * 0, 1, 2, … — each a fresh process building and measuring one whole park —
  * until one passes every acceptance measure. This prints, per seed, the
  * restart that was accepted, what forced every restart before it, and the
- * time it took; `--out` writes the whole log as JSON.
+ * time it took; `--out` writes the whole log as JSON. Verdicts are cached
+ * under `.cache/lgp-accepted/<source hash>/` (`acceptParkCached`), so a
+ * later `test:procgen` or `check:park` at the same source reuses them.
  *
  * This is the termination proof in practice: the loop is finite for a seed
  * exactly when some restart passes, and this is how that is measured rather
@@ -21,7 +24,7 @@
 import { writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 
-import { acceptPark, describeRestarts, type AcceptedPark } from './lib/acceptedPark.mts';
+import { acceptPark, acceptParkCached, describeRestarts, type AcceptedPark } from './lib/acceptedPark.mts';
 
 function parseSeeds(args: readonly string[]): number[] {
   const seeds: number[] = [];
@@ -68,7 +71,8 @@ await Promise.all(
   Array.from({ length: Math.min(lanes, queue.length) }, async () => {
     for (let seed = queue.pop(); seed !== undefined; seed = queue.pop()) {
       try {
-        const accepted = await acceptPark(seed, {
+        const accept = argv.includes('--fresh') ? acceptPark : acceptParkCached;
+        const accepted = await accept(seed, {
           onAttempt: (record) => {
             if (!record.accepted) {
               process.stdout.write(
