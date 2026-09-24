@@ -1256,10 +1256,8 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
 
     const rampRunPos = rampReach(1);
     const rampRunNeg = rampReach(-1);
-    const roadHalf = bridgeRoadHalfFor(crossing);
-    const walkHalf = walkHalfFor(crossing);
 
-    return {
+    return footprintFromDecision(crossing, {
       cx,
       cz,
       dirX,
@@ -1267,20 +1265,58 @@ function planReal(crossings: readonly LevelCrossing[], real: RealWorldQuery): Pl
       acrossX,
       acrossZ,
       halfAcross,
-      roadHalf,
-      walkHalf,
-      frame,
       shift,
       rampRunPos,
       rampRunNeg,
-      covers: (x: number, z: number, margin = 0): boolean => {
-        const projected = frame.project(x, z, shift);
-        if (Math.abs(projected.across) > walkHalf + margin) return false;
-        const rampRun = projected.along >= 0 ? rampRunPos : rampRunNeg;
-        return Math.abs(projected.along) <= DECK_HALF_LENGTH + rampRun + margin;
-      },
-    };
+    });
   });
+}
+
+/**
+ * Everything the bridge search decides about one bridge — what a prebuilt
+ * park records (`world/prebuilt/parkFile.ts`). The rest of a
+ * {@link BridgeFootprint} is derived from these and the crossing.
+ */
+export interface BridgeDecision {
+  readonly cx: number;
+  readonly cz: number;
+  readonly dirX: number;
+  readonly dirZ: number;
+  readonly acrossX: number;
+  readonly acrossZ: number;
+  readonly halfAcross: number;
+  readonly shift: number;
+  readonly rampRunPos: number;
+  readonly rampRunNeg: number;
+}
+
+/** The decision a footprint came from. */
+export function bridgeDecisionOf(footprint: BridgeFootprint): BridgeDecision {
+  const { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross, shift, rampRunPos, rampRunNeg } = footprint;
+  return { cx, cz, dirX, dirZ, acrossX, acrossZ, halfAcross, shift, rampRunPos, rampRunNeg };
+}
+
+/**
+ * A bridge's footprint from its decision — the one constructor, used by the
+ * search's final pass and by a park hydrated from its file alike.
+ */
+export function footprintFromDecision(crossing: LevelCrossing, decision: BridgeDecision): BridgeFootprint {
+  const frame = frameFor(crossing);
+  const roadHalf = bridgeRoadHalfFor(crossing);
+  const walkHalf = walkHalfFor(crossing);
+  const { shift, rampRunPos, rampRunNeg } = decision;
+  return {
+    ...decision,
+    roadHalf,
+    walkHalf,
+    frame,
+    covers: (x: number, z: number, margin = 0): boolean => {
+      const projected = frame.project(x, z, shift);
+      if (Math.abs(projected.across) > walkHalf + margin) return false;
+      const rampRun = projected.along >= 0 ? rampRunPos : rampRunNeg;
+      return Math.abs(projected.along) <= DECK_HALF_LENGTH + rampRun + margin;
+    },
+  };
 }
 
 /**

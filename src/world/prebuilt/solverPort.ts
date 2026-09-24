@@ -3,6 +3,8 @@ import type { CollisionWorld } from '../Collision';
 import type { CoasterRoute } from '../coaster/route';
 import type { BoothRelocator } from '../stallsFeature';
 import type { WorldPhase } from '../worldPhase';
+import type { LevelCrossing } from '../train/crossings';
+import type { PlannedFootprint, RealWorldQuery } from '../train/bridgeFootprint';
 
 /**
  * **The one port through which build tooling plugs a park solver into the
@@ -39,6 +41,8 @@ export interface ParkSolver {
     cruiserRoute: CoasterRoute | null,
     booths: BoothRelocator,
   ): WorldPhase;
+  /** Every bridge's footprint, searched against the real, mostly-built collision world. */
+  bridgeFootprints(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[];
 }
 
 // `var`: read during module cycles, like `parkPlan.ts`'s state.

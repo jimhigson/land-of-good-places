@@ -10,6 +10,7 @@ import { TrainRoute } from '../train/route';
 import { planStations, type PlannedStation } from '../train/plan';
 import type { LatticeStateSnapshot, PathGraph } from '../paths';
 import type { WorldDecisions } from '../worldPhase';
+import type { BridgeDecision } from '../train/bridgeFootprint';
 import type { Claim, ClaimKind, FeatureContribution } from '../../boot/groundClaims';
 import { Rng } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
@@ -123,13 +124,19 @@ export interface ParkFile {
     readonly pathGraph: PathGraphRecord;
     /** Every world-phase decision (`worldPhase.ts`'s `WorldDecisions`), as plain data. */
     readonly world: Json;
+    /**
+     * Decisions the `World` makes while it builds, by the one search each
+     * still has in build tooling: `bridges` — one `BridgeDecision` or null per
+     * crossing, in crossing order.
+     */
+    readonly built: { readonly bridges: Json };
   };
   /** The plan's features in the order the driver committed them to the claims registry. */
   readonly planOrder: readonly string[];
 }
 
 /** The features a park file carries, in the driver's build order. */
-export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings', 'pathGraph', 'world'] as const;
+export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings', 'pathGraph', 'world', 'built'] as const;
 export type ParkFileFeature = (typeof PARK_FILE_FEATURES)[number];
 
 /** The decided plan, as `parkPlan.ts` holds it — what {@link encodeParkFile} reads. */
@@ -143,6 +150,7 @@ export interface DecidedPlan {
   readonly pathLattice: LatticeStateSnapshot;
   readonly planOrder: readonly string[];
   readonly world: WorldDecisions;
+  readonly bridges: readonly (BridgeDecision | null)[];
 }
 
 // ---------------------------------------------------------------- plain data
@@ -316,7 +324,7 @@ function readRoute(record: RouteRecord, path: string): SolvedRailRoute {
 
 /** The decided plan as a park file. `build` is stamped later, by the bundle that ships it. */
 export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamped'): ParkFile {
-  const { layout, cruiser, train, slide, crossings, pathGraph, pathLattice, planOrder, world } = plan;
+  const { layout, cruiser, train, slide, crossings, pathGraph, pathLattice, planOrder, world, bridges } = plan;
 
   const entries: Json[] = [];
   for (const [id, entry] of layout.entries) {
@@ -360,6 +368,7 @@ export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamp
       crossings: plain(crossings, 'crossings'),
       pathGraph: { graph: plain(pathGraph, 'pathGraph'), lattice: plain(pathLattice, 'pathGraph.lattice') },
       world: writeWorld(world),
+      built: { bridges: plain(bridges, 'built.bridges') },
     },
     planOrder: [...planOrder],
   };
@@ -572,4 +581,9 @@ export function readWorld(record: Json): WorldDecisions {
     trestles: unplain(r['trestles'] as Json, 'world.trestles') as WorldDecisions['trestles'],
     claims,
   };
+}
+
+/** One bridge decision (or null) per crossing, in crossing order. */
+export function readBridges(file: ParkFile): readonly (BridgeDecision | null)[] {
+  return unplain(file.features.built.bridges, 'built.bridges') as readonly (BridgeDecision | null)[];
 }

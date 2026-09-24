@@ -9,5 +9,6 @@
 import { installParkSolver } from '../src/world/prebuilt/solverPort';
 import { createPlanSolver } from './world/planSolver';
 import { solveWorldPhase } from './world/worldPhaseSolver';
+import { searchBridgeFootprints } from './world/builtDecisions';
 
-installParkSolver({ plan: createPlanSolver, worldPhase: solveWorldPhase });
+installParkSolver({ plan: createPlanSolver, worldPhase: solveWorldPhase, bridgeFootprints: searchBridgeFootprints });

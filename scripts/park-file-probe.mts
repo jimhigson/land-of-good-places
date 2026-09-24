@@ -77,7 +77,10 @@ if (mode === 'solve') {
   const { worldPhaseDecisions } = await import('../procgen/world/worldPhaseSolver.ts');
   const world = worldPhaseDecisions();
   if (!world) throw new Error('park-file-probe: the World was built but the world phase recorded no decisions');
-  const text = JSON.stringify(solver.parkPlanFile(world));
+  const { builtBridgeDecisions } = await import('../procgen/world/builtDecisions.ts');
+  const bridges = builtBridgeDecisions();
+  if (!bridges) throw new Error('park-file-probe: the World was built but no bridge search was recorded');
+  const text = JSON.stringify(solver.parkPlanFile(world, bridges));
   writeFileSync(path, text);
   bytes = Buffer.byteLength(text);
 }
