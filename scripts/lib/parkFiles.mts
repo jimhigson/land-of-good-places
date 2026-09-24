@@ -37,6 +37,7 @@ export interface ProbeResult {
   readonly byName: Readonly<Record<string, string>>;
   readonly hydrated: boolean;
   readonly driverRan: boolean;
+  readonly worldSolverRan: boolean;
   readonly piecesByHydratedFeature: Readonly<Record<string, number>>;
   readonly planCpuMs: number;
   readonly worldBuildMs: number;
@@ -84,6 +85,7 @@ function compare(solved: ProbeResult, hydrated: ProbeResult): string[] {
   const problems: string[] = [];
   if (!hydrated.hydrated) problems.push('the hydrate process did not hydrate — it solved, so its digest proves nothing');
   if (hydrated.driverRan) problems.push('the hydrate process constructed the backtracking driver — the client has none, so this is not the path that ships');
+  if (hydrated.worldSolverRan) problems.push('the hydrate process searched the world phase — the client has no search, so this is not the path that ships');
   const searched = Object.entries(hydrated.piecesByHydratedFeature).filter(([, pieces]) => pieces > 0);
   if (searched.length > 0) {
     problems.push(`hydrated features still searched: ${searched.map(([f, p]) => `${f}=${p} pieces`).join(', ')}`);

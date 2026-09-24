@@ -158,6 +158,8 @@ export interface RailRaceTrack {
    * than tolerated. Empty for the ride-scale ring, which keeps every leg.
    */
   readonly barsLostToRoad: readonly { readonly slot: number; readonly lane: number }[];
+  /** Where this ring's trestles stand, as a park file records it. */
+  readonly trestles: DecidedTrestles;
   /**
    * Makes this ring's trestle posts things a child can walk into.
    *
@@ -317,6 +319,13 @@ export interface RailRaceTrackOptions {
    * commits both rings' claims as one contribution once both are placed.
    */
   readonly groundClaims: GroundClaims;
+  /**
+   * **Where this ring's trestles stand** — decided before the ring is built.
+   * In the game, read from the park file ({@link trestleSpotsFromDecisions});
+   * in build tooling, the slot search (`procgen/world/railRace/trestleSearch.ts`).
+   * The game as delivered carries no search (`docs/design/PREBUILT-PARKS.md`).
+   */
+  readonly findSpots: TrestleSpotFinder;
   /**
    * Whether this ring builds the finish-line rainbow arch at all.
    *
@@ -669,16 +678,16 @@ export function buildRailRaceTrack(
   const mandatoryTrestleIndices = new Set(
     layout.bars.map((bar) => trestleGridIndex(bar.at, route.length)),
   );
-  const { spots, overRoadSlots } = trestleSpots(
+  const { spots, overRoadSlots } = options.findSpots({
     route,
     collision,
-    options.groundClaims,
-    RAIL_RACE_FEATURE,
-    options.ringName,
-    options.respectsRoad,
+    groundClaims: options.groundClaims,
+    feature: RAIL_RACE_FEATURE,
+    ringName: options.ringName,
+    respectsRoad: options.respectsRoad,
     ringSizeVsRace,
-    mandatoryTrestleIndices,
-  );
+    mandatoryIndices: mandatoryTrestleIndices,
+  });
   // **A bar whose slot the road rule did not build is not drawn** (its support
   // is gone — see the bar loop's fallback), and that loss is named here, by
   // slot and lane, so the fairness invariant can hold the walk-past ring to
@@ -1103,6 +1112,7 @@ export function buildRailRaceTrack(
   return {
     claims,
     barsLostToRoad,
+    trestles: trestleDecisions({ spots, overRoadSlots }),
     registerCollision,
     group,
 
@@ -1495,7 +1505,63 @@ function treeStandsOn(tree: TrestleTree, ringSizeVsRace: number, claims: readonl
   return false;
 }
 
-interface TrestleSpot {
+/** What a ring asks of whoever decides where its trestles stand. */
+export interface TrestleSpotQuery {
+  readonly route: RailRaceRoute;
+  readonly collision: CollisionWorld;
+  readonly groundClaims: GroundClaims;
+  readonly feature: string;
+  /** The ring's own name, for the trace and the coverage line — never the feature asked as. */
+  readonly ringName: string;
+  /** See `RailRaceTrackOptions.respectsRoad`: only the walk-past ring asks the road rule. */
+  readonly respectsRoad: boolean;
+  readonly ringSizeVsRace: number;
+  readonly mandatoryIndices: ReadonlySet<number>;
+}
+
+export interface TrestleSpotAnswer {
+  readonly spots: TrestleSpot[];
+  /** Slots the road rule left unbuilt — a bar scheduled on one is not drawn. */
+  readonly overRoadSlots: ReadonlySet<number>;
+}
+
+export type TrestleSpotFinder = (query: TrestleSpotQuery) => TrestleSpotAnswer;
+
+/** A ring's decided trestles, as a park file carries them: the slot, and where along and across it stands. */
+export interface DecidedTrestles {
+  readonly spots: readonly (readonly [index: number, at: number, x: number, z: number])[];
+  readonly overRoadSlots: readonly number[];
+}
+
+/** The decisions a found ring's trestles come down to — what a park file stores. */
+export function trestleDecisions(answer: TrestleSpotAnswer): DecidedTrestles {
+  return {
+    spots: answer.spots.map((spot) => [spot.index, spot.at, spot.x, spot.z] as const),
+    overRoadSlots: [...answer.overRoadSlots].sort((a, b) => a - b),
+  };
+}
+
+/**
+ * Trestles from their decisions: each tree rebuilt by the very function the
+ * search built it with ({@link trestleTreeAt}), and its claims by
+ * {@link trestleClaims} — so a hydrated ring and a searched one share every
+ * line after the search.
+ */
+export function trestleSpotsFromDecisions(byRing: Readonly<Record<string, DecidedTrestles>>): TrestleSpotFinder {
+  return ({ route, ringName, ringSizeVsRace }) => {
+    const decided = byRing[ringName];
+    if (!decided) throw new Error(`railRace/track.ts: the park file has no trestles for ${ringName}`);
+    const tree = newTrestleTree();
+    const spots = decided.spots.map(([index, at, x, z]): TrestleSpot => {
+      trestleTreeAt(route, at, x, z, tree);
+      const placed = cloneTrestleTree(tree);
+      return { at, x, z, index, tree: placed, claims: trestleClaims(placed, ringSizeVsRace) };
+    });
+    return { spots, overRoadSlots: new Set(decided.overRoadSlots) };
+  };
+}
+
+export interface TrestleSpot {
   readonly at: number;
   readonly x: number;
   readonly z: number;
@@ -1862,18 +1928,16 @@ function* nearestFirst(reach: number): Generator<number, void, void> {
  * duck-bar loop always has, so a trestle grid index and a hazard-schedule grid
  * index agree on which physical point on the ring they mean.
  */
-function trestleSpots(
-  route: RailRaceRoute,
-  collision: CollisionWorld,
-  groundClaims: GroundClaims,
-  feature: string,
-  /** The ring's own name, for the trace and the coverage line — never the feature asked as. */
-  ringName: string,
-  /** See `RailRaceTrackOptions.respectsRoad`: only the walk-past ring asks the road rule. */
-  respectsRoad: boolean,
-  ringSizeVsRace: number,
-  mandatoryIndices: ReadonlySet<number>,
-): { readonly spots: TrestleSpot[]; readonly overRoadSlots: ReadonlySet<number> } {
+export function trestleSpots({
+  route,
+  collision,
+  groundClaims,
+  feature,
+  ringName,
+  respectsRoad,
+  ringSizeVsRace,
+  mandatoryIndices,
+}: TrestleSpotQuery): TrestleSpotAnswer {
   const spots: TrestleSpot[] = [];
   const count = Math.floor(route.length / TRESTLE_SPACING);
   const footRadius = POST_FOOT_RADIUS * ringSizeVsRace;

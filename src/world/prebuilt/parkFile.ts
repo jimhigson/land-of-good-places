@@ -9,6 +9,12 @@ import type { SolvedCrossingSites } from '../../../procgen/world/train/crossingP
 import { TrainRoute } from '../train/route';
 import { planStations, type PlannedStation } from '../train/plan';
 import type { LatticeStateSnapshot, PathGraph } from '../paths';
+import type { WorldDecisions } from '../worldPhase';
+import type { Claim, ClaimKind, FeatureContribution } from '../../boot/groundClaims';
+import { Rng } from '../../core/mathUtils';
+import { terrainHeight } from '../terrain';
+import { rollTree, type TreeKind } from '../treeModel';
+import { rollBush, type BushDecision, type TreeDecision } from '../Scenery';
 import { PARK_FILE_FORMAT } from './parkFileName';
 
 /**
@@ -115,13 +121,15 @@ export interface ParkFile {
     readonly slide: SlideRecord;
     readonly crossings: Json;
     readonly pathGraph: PathGraphRecord;
+    /** Every world-phase decision (`worldPhase.ts`'s `WorldDecisions`), as plain data. */
+    readonly world: Json;
   };
   /** The plan's features in the order the driver committed them to the claims registry. */
   readonly planOrder: readonly string[];
 }
 
 /** The features a park file carries, in the driver's build order. */
-export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings', 'pathGraph'] as const;
+export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings', 'pathGraph', 'world'] as const;
 export type ParkFileFeature = (typeof PARK_FILE_FEATURES)[number];
 
 /** The decided plan, as `parkPlan.ts` holds it — what {@link encodeParkFile} reads. */
@@ -134,9 +142,19 @@ export interface DecidedPlan {
   readonly pathGraph: PathGraph;
   readonly pathLattice: LatticeStateSnapshot;
   readonly planOrder: readonly string[];
+  readonly world: WorldDecisions;
 }
 
 // ---------------------------------------------------------------- plain data
+
+/** A vector, tagged — tree parts and bush blobs carry `Vector3`s. */
+interface TaggedVector {
+  readonly $v: readonly Json[];
+}
+
+function isVector(value: unknown): value is TaggedVector {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length === 1 && '$v' in value;
+}
 
 /** A number JSON cannot carry, tagged. */
 interface TaggedNumber {
@@ -191,6 +209,7 @@ function plain(value: unknown, path: string): Json {
       throw new Error(`park file: ${path} is ${typeof value}, which a park file cannot carry`);
   }
   if (Array.isArray(value)) return value.map((item, i) => plain(item, `${path}[${i}]`));
+  if (value instanceof Vector3) return { $v: [num(value.x), num(value.y), num(value.z)] };
   const proto = Object.getPrototypeOf(value) as unknown;
   if (proto !== Object.prototype && proto !== null) {
     const name = (proto as { constructor?: { name?: string } }).constructor?.name ?? '?';
@@ -205,6 +224,10 @@ function plain(value: unknown, path: string): Json {
 function unplain(value: Json, path: string): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (isTagged(value)) return unnum(value, path);
+  if (isVector(value)) {
+    const [x, y, z] = value.$v;
+    return new Vector3(unnum(x as Json, `${path}.x`), unnum(y as Json, `${path}.y`), unnum(z as Json, `${path}.z`));
+  }
   if (Array.isArray(value)) return (value as readonly Json[]).map((item, i) => unplain(item, `${path}[${i}]`));
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value as { readonly [key: string]: Json })) {
@@ -293,7 +316,7 @@ function readRoute(record: RouteRecord, path: string): SolvedRailRoute {
 
 /** The decided plan as a park file. `build` is stamped later, by the bundle that ships it. */
 export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamped'): ParkFile {
-  const { layout, cruiser, train, slide, crossings, pathGraph, pathLattice, planOrder } = plan;
+  const { layout, cruiser, train, slide, crossings, pathGraph, pathLattice, planOrder, world } = plan;
 
   const entries: Json[] = [];
   for (const [id, entry] of layout.entries) {
@@ -336,6 +359,7 @@ export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamp
       },
       crossings: plain(crossings, 'crossings'),
       pathGraph: { graph: plain(pathGraph, 'pathGraph'), lattice: plain(pathLattice, 'pathGraph.lattice') },
+      world: writeWorld(world),
     },
     planOrder: [...planOrder],
   };
@@ -416,5 +440,112 @@ export function readPathGraph(record: PathGraphRecord): { graph: PathGraph; latt
   return {
     graph: unplain(record.graph, 'pathGraph') as PathGraph,
     lattice: unplain(record.lattice, 'pathGraph.lattice') as LatticeStateSnapshot,
+  };
+}
+
+// -------------------------------------------------------------- the world
+
+/**
+ * The world phase, compactly. Most of it is plain data; three parts are
+ * written as decisions rather than as what was built from them, because what
+ * was built is nine-tenths of the bytes:
+ *
+ * - a **tree** is `[x, z, kind, climbable, rollState]` and a **bush**
+ *   `[x, z, rollState]` — the stream state it was rolled from ({@link Rng.state}),
+ *   re-rolled on read by the same {@link rollTree}/{@link rollBush} the
+ *   scatter used, from the same ground height;
+ * - a **claim** is `[kind, x, z, radius]` (a disc) or
+ *   `[kind, x1, z1, x2, z2, halfWidth]` (a capsule), `kind` an index into
+ *   {@link CLAIM_KINDS}.
+ */
+const CLAIM_KINDS: readonly ClaimKind[] = ['footprint', 'corridor', 'walkable', 'surface'];
+
+function writeClaim(claim: Claim, path: string): Json {
+  const kind = CLAIM_KINDS.indexOf(claim.kind);
+  if (kind < 0) throw new Error(`park file: ${path} has claim kind '${claim.kind}' the format does not know`);
+  const shape = claim.shape;
+  const keys = Object.keys(claim);
+  if (keys.length !== 2) throw new Error(`park file: ${path} has fields [${keys.join(', ')}] beyond kind and shape`);
+  if (shape.shape === 'disc') return [kind, num(shape.x), num(shape.z), num(shape.radius)];
+  return [kind, num(shape.x1), num(shape.z1), num(shape.x2), num(shape.z2), num(shape.halfWidth)];
+}
+
+function readClaim(record: Json, path: string): Claim {
+  const r = record as readonly Json[];
+  const kind = CLAIM_KINDS[r[0] as number];
+  if (!kind) throw new Error(`park file: ${path} has claim kind ${String(r[0])}`);
+  const n = (i: number): number => unnum(r[i] as Json, `${path}[${i}]`);
+  if (r.length === 4) return { kind, shape: { shape: 'disc', x: n(1), z: n(2), radius: n(3) } };
+  if (r.length === 6) return { kind, shape: { shape: 'capsule', x1: n(1), z1: n(2), x2: n(3), z2: n(4), halfWidth: n(5) } };
+  throw new Error(`park file: ${path} is a claim of ${r.length} fields`);
+}
+
+function writeContribution(c: FeatureContribution, path: string): Json {
+  const out: { [key: string]: Json } = { claims: c.claims.map((claim, i) => writeClaim(claim, `${path}.claims[${i}]`)) };
+  if (c.crossings) out['crossings'] = plain(c.crossings, `${path}.crossings`);
+  if (c.demands) out['demands'] = plain(c.demands, `${path}.demands`);
+  return out;
+}
+
+function readContribution(record: Json, path: string): FeatureContribution {
+  const r = record as { readonly [key: string]: Json };
+  const claims = (r['claims'] as readonly Json[]).map((c, i) => readClaim(c, `${path}.claims[${i}]`));
+  return {
+    claims,
+    ...(r['crossings'] !== undefined ? { crossings: unplain(r['crossings'], `${path}.crossings`) as FeatureContribution['crossings'] } : {}),
+    ...(r['demands'] !== undefined ? { demands: unplain(r['demands'], `${path}.demands`) as FeatureContribution['demands'] } : {}),
+  } as FeatureContribution;
+}
+
+function writeWorld(world: WorldDecisions): Json {
+  return {
+    stallMoves: plain(world.stallMoves, 'world.stallMoves'),
+    walls: plain(world.walls, 'world.walls'),
+    trees: world.trees.map((t) => [num(t.x), num(t.z), t.kind, t.climbable ? 1 : 0, t.tree.rollState]),
+    bushes: world.bushes.map((b) => [num(b.x), num(b.z), b.rollState]),
+    fairyPoles: plain(world.fairyPoles, 'world.fairyPoles'),
+    lamps: plain(world.lamps, 'world.lamps'),
+    trestles: plain(world.trestles, 'world.trestles'),
+    claims: world.claims.map(({ feature, sections }) => [
+      feature,
+      sections.map(([section, c]) => [section, writeContribution(c, `world.claims.${feature}.${section}`)]),
+    ]),
+  };
+}
+
+export function readWorld(record: Json): WorldDecisions {
+  const r = record as { readonly [key: string]: Json };
+  const trees = (r['trees'] as readonly Json[]).map((raw): TreeDecision => {
+    const [xr, zr, kind, climbable, state] = raw as readonly Json[];
+    const x = unnum(xr as Json, 'world.trees.x');
+    const z = unnum(zr as Json, 'world.trees.z');
+    const tree = rollTree(new Rng(state as number), kind as TreeKind, x, terrainHeight(x, z), z);
+    return { x, z, kind: kind as TreeKind, tree, climbable: climbable === 1, resume: { attempts: 0, phase: 'scatter', cell: 0 } };
+  });
+  const bushes = (r['bushes'] as readonly Json[]).map((raw): BushDecision => {
+    const [xr, zr, state] = raw as readonly Json[];
+    const x = unnum(xr as Json, 'world.bushes.x');
+    const z = unnum(zr as Json, 'world.bushes.z');
+    return { x, z, rollState: state as number, blobs: rollBush(new Rng(state as number), x, z), resume: 0 };
+  });
+  const claims = (r['claims'] as readonly Json[]).map((raw) => {
+    const [feature, sections] = raw as readonly [string, readonly Json[]];
+    return {
+      feature,
+      sections: sections.map((entry) => {
+        const [section, c] = entry as readonly [number, Json];
+        return [section, readContribution(c, `world.claims.${feature}.${section}`)] as const;
+      }),
+    };
+  });
+  return {
+    stallMoves: unplain(r['stallMoves'] as Json, 'world.stallMoves') as WorldDecisions['stallMoves'],
+    walls: unplain(r['walls'] as Json, 'world.walls') as WorldDecisions['walls'],
+    trees,
+    bushes,
+    fairyPoles: unplain(r['fairyPoles'] as Json, 'world.fairyPoles') as WorldDecisions['fairyPoles'],
+    lamps: unplain(r['lamps'] as Json, 'world.lamps') as WorldDecisions['lamps'],
+    trestles: unplain(r['trestles'] as Json, 'world.trestles') as WorldDecisions['trestles'],
+    claims,
   };
 }

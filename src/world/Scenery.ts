@@ -601,10 +601,37 @@ export interface TreeDecision {
   readonly resume: { readonly attempts: number; readonly phase: 'scatter' | 'cover'; readonly cell: number };
 }
 
+/**
+ * One clump's blobs, rolled from `rng` — the one owner of a bush's shape, so a
+ * clump re-rolled from its recorded {@link BushDecision.rollState} (a prebuilt
+ * park) is the clump the scatter rolled.
+ */
+export function rollBush(rng: Rng, x: number, z: number): InstanceItem[] {
+  const blobs = rng.int(2, 3);
+  const colour = rng.pick(CANOPY_GREENS);
+  const y = terrainHeight(x, z);
+  const items: InstanceItem[] = [];
+  for (let i = 0; i < blobs; i += 1) {
+    const radius = rng.range(0.7, 1.3);
+    const offset = rng.range(0, TAU);
+    const spread = i === 0 ? 0 : rng.range(0.4, 0.85);
+    items.push({
+      position: new Vector3(x + Math.cos(offset) * spread, y + radius * 0.72, z + Math.sin(offset) * spread),
+      scale: new Vector3(radius, radius * rng.range(0.72, 0.9), radius),
+      rotationY: rng.range(0, TAU),
+      colour,
+      shade: rng.range(0.9, 1.1),
+    });
+  }
+  return items;
+}
+
 /** One bush clump the world phase decided: its blobs, rolled once, drawn later. */
 export interface BushDecision {
   readonly x: number;
   readonly z: number;
+  /** The stream's {@link Rng.state} the clump was rolled from — {@link rollBush} rolls it again. */
+  readonly rollState: number;
   readonly blobs: readonly InstanceItem[];
   readonly resume: number;
 }
@@ -863,25 +890,6 @@ export function bushBuilder(
     return clearOfClaims(claim, keepClearOf);
   };
 
-  const roll = (rng: Rng, x: number, z: number): InstanceItem[] => {
-    const blobs = rng.int(2, 3);
-    const colour = rng.pick(CANOPY_GREENS);
-    const y = terrainHeight(x, z);
-    const items: InstanceItem[] = [];
-    for (let i = 0; i < blobs; i += 1) {
-      const radius = rng.range(0.7, 1.3);
-      const offset = rng.range(0, TAU);
-      const spread = i === 0 ? 0 : rng.range(0.4, 0.85);
-      items.push({
-        position: new Vector3(x + Math.cos(offset) * spread, y + radius * 0.72, z + Math.sin(offset) * spread),
-        scale: new Vector3(radius, radius * rng.range(0.72, 0.9), radius),
-        rotationY: rng.range(0, TAU),
-        colour,
-        shade: rng.range(0.9, 1.1),
-      });
-    }
-    return items;
-  };
 
   const increment = (bush: BushDecision, verb: string): Increment => ({
     claims: [disc(bush.x, bush.z, BUSH_COLLIDER)],
@@ -902,7 +910,7 @@ export function bushBuilder(
         const x = Math.cos(angle) * distance;
         const z = Math.sin(angle) * distance;
         if (!accept(x, z, [])) continue;
-        const decision: BushDecision = { x, z, blobs: roll(rng, x, z), resume };
+        const decision: BushDecision = { x, z, rollState: rng.state, blobs: rollBush(rng, x, z), resume };
         out.push(decision);
         return increment(decision, 'at');
       }
@@ -924,7 +932,7 @@ export function bushBuilder(
         const x = old.x + Math.cos(angle) * r;
         const z = old.z + Math.sin(angle) * r;
         if (!accept(x, z, keepClearOf)) continue;
-        const moved: BushDecision = { ...old, x, z, blobs: roll(rng, x, z) };
+        const moved: BushDecision = { ...old, x, z, rollState: rng.state, blobs: rollBush(rng, x, z) };
         out[section] = moved;
         return increment(moved, `moved from (${old.x.toFixed(1)}, ${old.z.toFixed(1)}) to`);
       }

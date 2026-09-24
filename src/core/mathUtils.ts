@@ -86,10 +86,30 @@ export function createRandom(seed: number): () => number {
 
 /** Convenience wrapper giving a seeded RNG a friendlier surface. */
 export class Rng {
-  private readonly next: () => number;
+  /** mulberry32's whole state — the same arithmetic as {@link createRandom}, held where it can be read. */
+  private a: number;
 
   constructor(seed: number) {
-    this.next = createRandom(seed);
+    this.a = seed >>> 0;
+  }
+
+  /**
+   * **Where this stream is**, as a number that starts an identical stream:
+   * `new Rng(rng.state)` draws exactly what `rng` would draw next. A prebuilt
+   * park records a tree's or a bush's state at the moment it was rolled
+   * (`world/prebuilt/parkFile.ts`), so the client re-rolls the very same shape
+   * from four bytes instead of downloading every blob.
+   */
+  get state(): number {
+    return this.a;
+  }
+
+  private next(): number {
+    this.a = (this.a + 0x6d2b79f5) >>> 0;
+    let t = this.a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
   /** Float in [0, 1). */

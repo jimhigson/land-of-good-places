@@ -50,6 +50,7 @@ import {
 } from '../../src/world/parkPlan';
 import type { PlanSolverRun } from '../../src/world/prebuilt/solverPort';
 import { encodeParkFile, type ParkFile } from '../../src/world/prebuilt/parkFile';
+import type { WorldDecisions } from '../../src/world/worldPhase';
 
 
 /**
@@ -493,10 +494,11 @@ function printTrace(solve: ParkSolve): void {
 }
 
 /**
- * The decided plan as a prebuilt park file — what `scripts/build-parks.mts`
- * writes. Forces the plan if nothing has.
+ * The decided park as a prebuilt park file — what `scripts/build-parks.mts`
+ * writes: the plan (forced if nothing has decided it) and the world phase's
+ * decisions, which only exist once a `World` has been built.
  */
-export function parkPlanFile(build?: string): ParkFile {
+export function parkPlanFile(world: WorldDecisions, build?: string): ParkFile {
   return encodeParkFile(
     PARK_SEED,
     {
@@ -508,6 +510,7 @@ export function parkPlanFile(build?: string): ParkFile {
       pathGraph: planPart('pathGraph'),
       pathLattice: planPart('pathLattice'),
       planOrder: parkPlanOrder(),
+      world,
     },
     build,
   );

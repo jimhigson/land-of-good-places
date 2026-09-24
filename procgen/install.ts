@@ -8,5 +8,6 @@
  */
 import { installParkSolver } from '../src/world/prebuilt/solverPort';
 import { createPlanSolver } from './world/planSolver';
+import { solveWorldPhase } from './world/worldPhaseSolver';
 
-installParkSolver({ plan: createPlanSolver });
+installParkSolver({ plan: createPlanSolver, worldPhase: solveWorldPhase });

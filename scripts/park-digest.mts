@@ -15,7 +15,7 @@ import { buildHeadlessPark } from './park-harness.mts';
 import { digestScene } from './lib/parkDigest.mts';
 import { LAYOUT_TRACE } from '../src/world/parkLayout.ts';
 import { parkSolveTrace } from '../procgen/world/planSolver.ts';
-import { worldSolveTrace } from '../src/world/worldPhase.ts';
+import { worldSolveTrace } from '../procgen/world/worldPhaseSolver.ts';
 
 const park = buildHeadlessPark();
 // Every mesh, hashed — see `scripts/lib/parkDigest.mts`, shared with

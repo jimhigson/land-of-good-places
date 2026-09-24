@@ -52,7 +52,7 @@ import { NavGrid, MAX_ROUTE_WAYPOINTS } from '../src/world/NavGrid.ts';
 import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
-import { worldSolveStallBuilder } from '../src/world/worldPhase.ts';
+import { worldSolveStallBuilder } from '../procgen/world/worldPhaseSolver.ts';
 import { isRefusal } from '../src/boot/featureBuilder.ts';
 import { shapesOverlap, type Claim } from '../src/boot/groundClaims.ts';
 import { boothBoxFor } from '../src/minigames/boothFootprint.ts';

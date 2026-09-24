@@ -1,4 +1,8 @@
 import type { GroundClaims } from '../../boot/groundClaims';
+import type { CollisionWorld } from '../Collision';
+import type { CoasterRoute } from '../coaster/route';
+import type { BoothRelocator } from '../stallsFeature';
+import type { WorldPhase } from '../worldPhase';
 
 /**
  * **The one port through which build tooling plugs a park solver into the
@@ -28,6 +32,13 @@ export interface PlanSolverRun {
 export interface ParkSolver {
   /** A fresh plan search for `PARK_SEED`, decisions written through `parkPlan.ts`'s setters. */
   plan(): PlanSolverRun;
+  /** The world phase searched, for a `World` whose park has no park file. */
+  worldPhase(
+    collision: CollisionWorld,
+    claims: GroundClaims,
+    cruiserRoute: CoasterRoute | null,
+    booths: BoothRelocator,
+  ): WorldPhase;
 }
 
 // `var`: read during module cycles, like `parkPlan.ts`'s state.

@@ -67,15 +67,20 @@ const planWallMs = performance.now() - planWall;
 const stats = solver.parkSolveStats();
 if (mode === 'solve' && !stats) throw new Error('park-file-probe: the plan solved but published no stats');
 
+const park = buildHeadlessPark();
+const digest = digestScene(park.scene);
+
+// Written after the park is built: the world phase's decisions only exist once
+// a `World` has searched them.
 let bytes = 0;
 if (mode === 'solve') {
-  const text = JSON.stringify(solver.parkPlanFile());
+  const { worldPhaseDecisions } = await import('../procgen/world/worldPhaseSolver.ts');
+  const world = worldPhaseDecisions();
+  if (!world) throw new Error('park-file-probe: the World was built but the world phase recorded no decisions');
+  const text = JSON.stringify(solver.parkPlanFile(world));
   writeFileSync(path, text);
   bytes = Buffer.byteLength(text);
 }
-
-const park = buildHeadlessPark();
-const digest = digestScene(park.scene);
 
 const piecesByHydratedFeature: Record<string, number> = {};
 for (const feature of PARK_FILE_FEATURES) piecesByHydratedFeature[feature] = stats?.piecesByFeature[feature] ?? 0;
@@ -89,6 +94,7 @@ console.log(
     byName: Object.fromEntries(digest.byName),
     hydrated: plan.parkPlanHydrated(),
     driverRan: stats !== null,
+    worldSolverRan: (await import('../procgen/world/worldPhaseSolver.ts')).worldSolveTrace().length > 0,
     piecesByHydratedFeature,
     cpuMsByFeature: Object.fromEntries(Object.entries(stats?.cpuMsByFeature ?? {}).map(([k, v]) => [k, Math.round(v)])),
     planCpuMs: Math.round(planCpuMs),

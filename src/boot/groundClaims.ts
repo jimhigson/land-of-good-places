@@ -469,6 +469,22 @@ export class GroundClaims {
     return this.contributions.has(feature);
   }
 
+  /**
+   * Every section a feature has committed, in section order — what a prebuilt
+   * park records so that it can commit exactly the same contributions again
+   * (`world/prebuilt/parkFile.ts`).
+   */
+  contributionsOf(feature: string): readonly (readonly [number, FeatureContribution])[] {
+    const sections = this.contributions.get(feature)?.sections;
+    if (!sections) return [];
+    return [...sections.entries()].sort((a, b) => a[0] - b[0]);
+  }
+
+  /** Committed features in the order they first committed — the order `blockers` ranks by. */
+  featuresInCommitOrder(): string[] {
+    return [...this.contributions.entries()].sort((a, b) => a[1].order - b[1].order).map(([name]) => name);
+  }
+
   committedFeatures(): string[] {
     return [...this.contributions.keys()];
   }
