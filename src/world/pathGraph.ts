@@ -646,6 +646,26 @@ const KERB_BURY_MAX = 2 * (PATH_SURFACE_LIFT - PATH_KERB_LIFT);
  */
 const KERB_PROUD_MAX = PATH_SURFACE_LIFT - PATH_KERB_LIFT;
 
+/**
+ * **How far above the kerb paving may lie and still bury it, where the plan
+ * allows it**, metres: four times the drawn stand-off, 100 mm.
+ *
+ * The same drape error as {@link KERB_PROUD_MAX}, the other way. On the
+ * canonical seed's steep ramp at (-35.6, -43.9), route 23's kerb triangle under
+ * a junction's paving has three routes' triangles over it: one 8.7-11 mm above
+ * (fighting it — `path-kerb|path-surface`, 0.200 m² at 9.9 mm) and two at
+ * 42-63 mm, past {@link KERB_BURY_MAX}. Those two were refused as cover, so the
+ * kerb was kept, and fought the third.
+ *
+ * Paving further overhead hides the kerb only if it also covers the wider strip
+ * its sight-lines cross before they climb that high — {@link sightShadow} at
+ * this height rather than at `KERB_BURY_MAX`. So this is asked only of a kerb
+ * triangle whose wider strip other routes' paving covers in plan, and only after
+ * the ordinary test has said no: it can drop more kerb, never less. Paving a
+ * metre overhead (a deck over another route's kerb) is still well outside it.
+ */
+const KERB_HIDE_MAX = 4 * (PATH_SURFACE_LIFT - PATH_KERB_LIFT);
+
 /** A kerb triangle whose plan another route's paving covers, and by what. */
 interface KerbCandidate {
   /** Its triangle number in the kerb's full index. */
@@ -655,11 +675,22 @@ interface KerbCandidate {
   readonly plan: [number, number][];
   /** The triangle and its {@link sightShadow} — what has to be covered for it to be out of sight. */
   readonly sight: [number, number][];
-  /** Every other-owner paving triangle overlapping `sight` in plan, with the overlap polygon. */
+  /**
+   * The same for paving up to {@link KERB_HIDE_MAX} overhead — or `null` if
+   * other routes' paving does not cover that wider strip in plan, when only
+   * `sight` can ever be asked.
+   */
+  readonly deepSight: [number, number][] | null;
+  /**
+   * Every other-owner paving triangle overlapping `deepSight` in plan (a
+   * superset of `sight`), with both overlap polygons; `overlap` is empty when
+   * it reaches only the wider strip.
+   */
   readonly covers: readonly {
     readonly corners: readonly [number, number, number];
     readonly plan: PlanPolygon;
     readonly overlap: PlanPolygon;
+    readonly deepOverlap: PlanPolygon;
   }[];
 }
 
@@ -742,25 +773,36 @@ class KerbCover {
     for (let t = 0; t < kerb.triangleCount; t += 1) {
       const corners = kerb.triangleAt(t);
       const plan = corners.map((i) => kerb.planAt(i));
-      const sight = sightShadow(plan);
-      const box = boxOf(sight);
+      const sight = sightShadow(plan, KERB_BURY_MAX);
+      // Contains `sight`: both are the triangle swept towards the camera, this one further.
+      const deep = sightShadow(plan, KERB_HIDE_MAX);
+      const box = boxOf(deep);
       const owner = kerbOwners[t] as number;
       const seen = new Set<number>();
       const covers: KerbCandidate['covers'][number][] = [];
       let uncovered: [number, number][][] = [sight];
+      let deepUncovered: [number, number][][] = [deep];
       for (const key of cellsOf(box)) {
         for (const id of grid.get(key) ?? []) {
           if (seen.has(id)) continue;
           seen.add(id);
           const cover = paving[id]!;
           if (cover.owner === owner || !boxesOverlap(cover.box, box)) continue;
-          const overlap = intersectConvex(sight, cover.plan);
-          if (overlap.length < 3 || Math.abs(signedArea(overlap)) < KERB_SLIVER_AREA) continue;
-          covers.push({ corners: cover.corners, plan: cover.plan, overlap });
-          uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
+          const deepOverlap = intersectConvex(deep, cover.plan);
+          if (deepOverlap.length < 3 || Math.abs(signedArea(deepOverlap)) < KERB_SLIVER_AREA) continue;
+          deepUncovered = deepUncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
+          const near = intersectConvex(sight, cover.plan);
+          const overlap = near.length < 3 || Math.abs(signedArea(near)) < KERB_SLIVER_AREA ? [] : near;
+          covers.push({ corners: cover.corners, plan: cover.plan, overlap, deepOverlap });
+          if (overlap.length > 0) {
+            uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
+          }
         }
       }
-      if (uncovered.length === 0) this.candidates.push({ triangle: t, corners, plan, sight, covers });
+      if (uncovered.length === 0) {
+        const deepSight = deepUncovered.length === 0 ? deep : null;
+        this.candidates.push({ triangle: t, corners, plan, sight, deepSight, covers });
+      }
     }
   }
 
@@ -773,21 +815,35 @@ class KerbCover {
     const dropped = new Set<number>();
     for (const candidate of this.candidates) {
       const kerbHeight = kerbAt(candidate.corners, candidate.plan);
-      let uncovered: [number, number][][] = [candidate.sight];
-      for (const cover of candidate.covers) {
-        const coverHeight = planeHeight(
-          cover.plan,
-          cover.corners.map((i) => surfaceY.getY(i)) as [number, number, number],
-        );
-        const onTop = cover.overlap.every(([x, z]) => {
-          const gap = coverHeight(x, z) - kerbHeight(x, z);
-          return gap >= -KERB_PROUD_MAX && gap <= KERB_BURY_MAX;
-        });
-        if (!onTop) continue;
-        uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
-        if (uncovered.length === 0) break;
+      // Hidden if the paving over it covers the strip its sight-lines cross
+      // while they are still under that paving: first asked of paving within
+      // the drawn stand-off's reach, then — where the plan allows — of paving
+      // lying higher over it, which has to cover a wider strip.
+      const hiddenUnder = (shadow: [number, number][], deep: boolean, most: number): boolean => {
+        let uncovered: [number, number][][] = [shadow];
+        for (const cover of candidate.covers) {
+          const overlap = deep ? cover.deepOverlap : cover.overlap;
+          if (overlap.length === 0) continue;
+          const coverHeight = planeHeight(
+            cover.plan,
+            cover.corners.map((i) => surfaceY.getY(i)) as [number, number, number],
+          );
+          const onTop = overlap.every(([x, z]) => {
+            const gap = coverHeight(x, z) - kerbHeight(x, z);
+            return gap >= -KERB_PROUD_MAX && gap <= most;
+          });
+          if (!onTop) continue;
+          uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
+          if (uncovered.length === 0) return true;
+        }
+        return false;
+      };
+      if (
+        hiddenUnder(candidate.sight, false, KERB_BURY_MAX) ||
+        (candidate.deepSight !== null && hiddenUnder(candidate.deepSight, true, KERB_HIDE_MAX))
+      ) {
+        dropped.add(candidate.triangle);
       }
-      if (uncovered.length === 0) dropped.add(candidate.triangle);
     }
     const index: number[] = [];
     for (let t = 0; t < this.all.length / 3; t += 1) {
@@ -806,7 +862,8 @@ const EYE = cameraOffset(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG, 1
 
 /**
  * **A kerb triangle together with the ground its sight-lines to the camera
- * cross while they are still under paving {@link KERB_BURY_MAX} above it.**
+ * cross while they are still under paving `height` above it** — asked at
+ * {@link KERB_BURY_MAX}, and at {@link KERB_HIDE_MAX} for paving lying higher.
  *
  * Paving is a ribbon with no skirt, so kerb under it is hidden only if every
  * line from the kerb to the camera meets the paving before it climbs out from
@@ -818,8 +875,8 @@ const EYE = cameraOffset(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG, 1
  * being dropped while it still shows through the slot under it (one such, on
  * pool seed 451, 22 mm under paving and in view).
  */
-function sightShadow(plan: readonly [number, number][]): [number, number][] {
-  const reach = KERB_BURY_MAX / EYE.y;
+function sightShadow(plan: readonly [number, number][], height: number): [number, number][] {
+  const reach = height / EYE.y;
   const shifted = plan.map(([x, z]) => [x + EYE.x * reach, z + EYE.z * reach] as [number, number]);
   return convexHull([...plan, ...shifted]);
 }
