@@ -59,7 +59,13 @@ import {
   pairKey,
   type ParkFacts,
 } from './parkFacts.ts';
-import { offAxisGround, recutCarriers, type OffAxisGround } from './gridAxes.ts';
+import { offAxisGround, recutCarriers, type OffAxisGround } from '../../src/world/gridAxes.ts';
+import {
+  longDiagonals,
+  offLatticeStreetRuns,
+  railwayGeometryTest,
+  type PavingGround,
+} from '../../src/world/pavingLegibility.ts';
 // A leaf module: `Geo.ts` imports `three` and `core/constants` and nothing
 // else, so a static import here cannot load a seeded module early — the hazard
 // this file's header warns about. It is imported rather than restated because
@@ -91,7 +97,6 @@ import {
   FALL_THRESHOLD,
   MAX_FRAME_DELTA,
   PATH_KERB_LIFT,
-  PATH_KERB_OVERHANG,
   PATH_SURFACE_LIFT,
   PLAYER_LONGEST_STEP,
   SPRINT_LOCAL_GRADE_CEILING,
@@ -1603,39 +1608,6 @@ const buildingsFaceTheCameraAxis: Invariant = (facts) => {
   return problems;
 };
 
-/**
- * Longest continuous stretch of any paved ribbon allowed to run diagonally
- * rather than along a grid axis (issue #269).
- *
- * Not zero, on purpose. Two things legitimately still run at an angle:
- *
- * - **A booth's own doorway approach.** `paths.ts`'s `spur()` deliberately
- *   carries the last few metres of a camera-facing booth's spur along the
- *   counter's own facing diagonal so the ribbon arrives head-on rather than
- *   grazing the counter's side wall (see that function's "Arrive HEAD-ON,
- *   not obliquely" note) — a short, intentional exception to the rule this
- *   invariant otherwise enforces.
- * - **A train platform's fixed final approach**, which predates issue #269
- *   and is out of its scope: the platform turn is authored geometry, not
- *   part of the axis-aligned trunk network `paths.ts` grows.
- *
- * The closed backbone ring is exempt outright, not just tolerated — see
- * {@link ringIsATrueCircleRoundTheStatue} below. It is not a lapse in this
- * invariant's coverage: Jim's own follow-up instruction (issue #269, 18
- * August 2026) is that the ring is deliberately the one route in the network
- * allowed to be a genuine circle, off grid axes for its entire circumference,
- * while everything else — every spur, every interconnect — stays on the
- * grid this invariant polices.
- *
- * Measured, not guessed: the canonical seed's longest such stretch (outside
- * the now-exempt ring) is 11.2 m
- * (the west station's own platform approach). This is set generously above
- * that measured worst case — the same shape of bound
- * {@link TRESTLE_GAP_TOLERANCE} uses — so what actually trips it is a
- * regression: a long run of the *trunk* network (a ring segment, a spur's
- * main body) left diagonal, not a legitimate short approach.
- */
-const MAX_DIAGONAL_APPROACH = 16;
 
 /**
  * **Every paved ribbon's trunk runs on grid axes** — purely north/south or
@@ -1647,7 +1619,7 @@ const MAX_DIAGONAL_APPROACH = 16;
  * `paths.ts` axis-aligns its *control* points, and the curve bows a little
  * rounding each corner, so "runs on grid axes" is stated as a bound on how
  * far any *continuous* stretch of off-axis travel can run
- * ({@link MAX_DIAGONAL_APPROACH}), not as "every single 0.5 m hop is
+ * (`MAX_DIAGONAL_APPROACH`, `pavingLegibility.ts`), not as "every single 0.5 m hop is
  * exactly axis-aligned" — a corner's own rounding would fail that trivially
  * and prove nothing about the shape of the route.
  *
@@ -1657,52 +1629,45 @@ const MAX_DIAGONAL_APPROACH = 16;
  * enough that a genuinely diagonal run cannot hide inside it.
  */
 /**
- * **The railway's own geometry is the grid rule's one measured exception**
- * (Decision 6's "genuine minority"): a crossing runs square to the TRACK
- * — which is diagonal to the world axes wherever the loop is — and a
- * fence-following leg (a pocket pinched between rail and boundary has
- * nowhere else to walk) curves with the loop. Both are the railway
- * dictating the shape, exactly as designed (`crossingPlan.ts`); a stepped
- * zigzag over a bridge deck is the absurdity this exemption avoids.
- * Measured off the built park: a hop is railway geometry when it sits
- * over a real bridge's own footprint, or when both its ends hug the rail
- * corridor (fence-follow legs run at `RAIL_CORRIDOR_CLEARANCE`, 4.2 m;
- * a level crossing's feet stand `DECK_HALF_LENGTH + 4` ≈ 7.2 m out).
- *
- * Shared by {@link pathsRunOnGridAxes} and {@link streetsShareLatticeLines}
- * — one owner for "is this hop the railway's shape, not the street plan's".
+ * The park as built, as the paving measures stand on it
+ * (`src/world/pavingLegibility.ts`'s {@link PavingGround}). The measures
+ * themselves — every threshold and exemption, including the railway's
+ * ({@link railwayGeometryTest}) — live in that module, which is also what the
+ * path graph asks of its own paving at the point of decision: one owner.
  */
-function railwayGeometryTest(
-  facts: ParkFacts,
-): (a: readonly [number, number], b: readonly [number, number]) => boolean {
+function builtPavingGround(facts: ParkFacts, plaza: { x: number; z: number }): PavingGround {
   const railPoint = new Vector3();
-  const nearRail = (x: number, z: number): boolean => {
-    const route = facts.world.train.route;
-    route.pointAt(route.distanceNear(x, z), railPoint);
-    return Math.hypot(railPoint.x - x, railPoint.z - z) <= 8.5;
-  };
-  return (a, b) => {
-    const midX = (a[0] + b[0]) / 2;
-    const midZ = (a[1] + b[1]) / 2;
-    for (const bridge of facts.world.train.bridges) {
-      if (bridge.covers(midX, midZ)) return true;
-    }
-    return nearRail(a[0], a[1]) && nearRail(b[0], b[1]);
+  const route = facts.world.train.route;
+  return {
+    plaza,
+    plots: facts.plots,
+    distanceToEdge: (x, z) => facts.boundary.distanceToEdge(x, z),
+    railDistance: (x, z) => {
+      route.pointAt(route.distanceNear(x, z), railPoint);
+      return Math.hypot(railPoint.x - x, railPoint.z - z);
+    },
+    onBridge: (x, z) => facts.world.train.bridges.some((bridge) => bridge.covers(x, z)),
+    nearBridgeStone: (x, z, pad) => facts.world.train.bridges.some((bridge) => bridge.footprintNear(x, z, pad)),
+    archFeet: facts.railRaceArchFeet,
   };
 }
+
+/** The plaza the lattice anchors through, or the origin when a graph has none
+ * (the lattice invariant reports that case itself). */
+const plazaOf = (facts: ParkFacts): { x: number; z: number } => {
+  const plaza = facts.pathNodes.find((node) => node.kind === 'plaza');
+  return plaza ? { x: plaza.x, z: plaza.z } : { x: 0, z: 0 };
+};
 
 const describeGround = (ground: OffAxisGround): string =>
   `the paving from ${fmt(ground.from)} to ${fmt(ground.to)} runs diagonally for ` +
   `${ground.extent.toFixed(1)} m — longer than a doorway approach or a platform turn should ` +
   `ever need (drawn by ${ground.carriers.join(', ')})`;
 
-const pathsRunOnGridAxes: Invariant = (facts) => {
-  // See {@link railwayGeometryTest} — the grid rule's one measured exception.
-  const ground = offAxisGround(facts.pathEdges, railwayGeometryTest(facts));
-  return ground
-    .filter((piece) => piece.extent > MAX_DIAGONAL_APPROACH)
-    .map((piece) => describeGround(piece));
-};
+const pathsRunOnGridAxes: Invariant = (facts) =>
+  // The measure is `pavingLegibility.ts`'s, shared with the path graph's own
+  // screen — see {@link longDiagonals}.
+  longDiagonals(facts.pathEdges, builtPavingGround(facts, plazaOf(facts))).map((piece) => describeGround(piece));
 
 /**
  * **The grid verdict is a property of the paving, not of the route object
@@ -1726,7 +1691,7 @@ const pathsRunOnGridAxes: Invariant = (facts) => {
  * number of violations can be a swap, and only the set says which.
  */
 const gridAxisVerdictsIgnoreTheCarrier: Invariant = (facts) => {
-  const railwayGeometry = railwayGeometryTest(facts);
+  const railwayGeometry = railwayGeometryTest(builtPavingGround(facts, plazaOf(facts)));
   const asBuilt = offAxisGround(facts.pathEdges, railwayGeometry);
   const recut = offAxisGround(recutCarriers(facts.pathEdges, railwayGeometry), railwayGeometry);
 
@@ -1769,32 +1734,8 @@ const gridAxisVerdictsIgnoreTheCarrier: Invariant = (facts) => {
  */
 const STREET_LATTICE_PITCH = 12;
 
-/**
- * How long an axis-aligned straight run must be before it counts as a
- * *street* (and so must sit on a lattice line): door stubs, arrival leads
- * and fillet transitions are all shorter than this; anything longer is a
- * run a person would read as a street line on the map.
- */
-const MIN_STREET_RUN = 8;
 
-/**
- * How far a street run's own line may sit off the nearest lattice line.
- * The drawn curve on a straight is exact (dense collinear control points),
- * so this headroom only has to absorb the fillet's own approach at the
- * run's two ends — measured worst case across the five seeds: 0.31 m.
- */
-const STREET_LINE_TOLERANCE = 0.9;
 
-/**
- * How much of an edge's either end counts as its door approach (see the
- * exemption list in {@link streetsShareLatticeLines}): the doormat's
- * stand-off (1.4 m), its 3.5 m arrival lead, the into-the-plot `past`
- * extension (2 m), the up-to-7 m off-street stub tail and a fillet's own
- * give. A run must fit entirely inside this reach to be exempt, so no
- * street-length line can hide in it: the longest exemptable run is by
- * construction shorter than this constant.
- */
-const DOOR_APPROACH_REACH = 15;
 
 /**
  * **Every street sits on the shared 12 m lattice through the plaza** —
@@ -1808,8 +1749,8 @@ const DOOR_APPROACH_REACH = 15;
  * of lines* the segments share — the old elbow-folding router put its
  * north-south runs on 19 different x-positions with nothing lining up
  * with anything. So this measures exactly that: every axis-aligned drawn
- * run long enough to read as a street ({@link MIN_STREET_RUN}) must sit
- * within {@link STREET_LINE_TOLERANCE} of a lattice line at
+ * run long enough to read as a street (`MIN_STREET_RUN`) must sit
+ * within `STREET_LINE_TOLERANCE` of a lattice line at
  * {@link STREET_LATTICE_PITCH} through the plaza (the lattice is anchored
  * there so the statue circle's four compass streets are lattice lines by
  * construction, whatever the seed).
@@ -1823,7 +1764,7 @@ const DOOR_APPROACH_REACH = 15;
  *   is on-lattice only by coincidence of seed.
  * - **`fountain-approach`** — the plaza spoke inside the statue circle,
  *   deliberately radial.
- * - **A route's own door approach** ({@link DOOR_APPROACH_REACH}): the
+ * - **A route's own door approach** (`DOOR_APPROACH_REACH`): the
  *   final metres of an edge run where the *door* is — the doormat, its
  *   arrival lead and the into-the-plot-mouth extension all sit on the
  *   destination's own line (Decisions 7/8: one entrance node strictly in
@@ -1846,215 +1787,20 @@ const DOOR_APPROACH_REACH = 15;
  *   like any other.
  */
 const streetsShareLatticeLines: Invariant = (facts) => {
-  const problems: string[] = [];
-  const railwayGeometry = railwayGeometryTest(facts);
   const plaza = facts.pathNodes.find((node) => node.kind === 'plaza');
   if (!plaza) {
     return ['no plaza node in the path graph — cannot anchor the street lattice'];
   }
-  const offLattice = (coordinate: number, anchor: number): number => {
-    const remainder =
-      ((((coordinate - anchor) % STREET_LATTICE_PITCH) + STREET_LATTICE_PITCH) %
-        STREET_LATTICE_PITCH);
-    return Math.min(remainder, STREET_LATTICE_PITCH - remainder);
-  };
-
-  // Is a straight lattice-line segment obstructed anywhere along the span,
-  // in the built park? Sampled every 2 m. The margins mirror what the
-  // generator itself demands of a street (`paths.ts`: plots at
-  // `STREET_PLOT_CLEARANCE` 2.6, the rail corridor at 4.2, the boundary at
-  // a fallback route's own walkable margin) — a hair under each, so float
-  // noise never flips a genuinely usable line to "blocked", while a line
-  // the generator would refuse anyway never counts as available (calling
-  // it available would make the violation unfixable, not stricter).
-  const railPoint = new Vector3();
-  // The statue circle's ground blocks a street exactly as the generator's
-  // own ring guard does — measured off the built backbone ring's drawn
-  // radius, not off a constant.
-  const backbone = facts.pathEdges.find((edge) => edge.backbone);
-  let ringRadius = 0;
-  if (backbone) {
-    let sum = 0;
-    for (const [x, z] of backbone.points) sum += Math.hypot(x - plaza.x, z - plaza.z);
-    ringRadius = sum / backbone.points.length;
-  }
-  const route = facts.world.train.route;
-  const lineBlocked = (
-    axis: 'x' | 'z',
-    line: number,
-    spanStart: number,
-    spanEnd: number,
-  ): boolean => {
-    const from = Math.min(spanStart, spanEnd);
-    const to = Math.max(spanStart, spanEnd);
-    const steps = Math.max(1, Math.ceil((to - from) / 2));
-    for (let s = 0; s <= steps; s += 1) {
-      const along = from + ((to - from) * s) / steps;
-      const x = axis === 'z' ? line : along;
-      const z = axis === 'z' ? along : line;
-      for (const plot of facts.plots) {
-        const dx = Math.max(Math.abs(x - plot.x) - plot.halfX, 0);
-        const dz = Math.max(Math.abs(z - plot.z) - plot.halfZ, 0);
-        if (Math.hypot(dx, dz) < 2.55) return true;
-      }
-      if (facts.boundary.distanceToEdge(x, z) < 2.55) return true;
-      if (Math.hypot(x - plaza.x, z - plaza.z) < ringRadius + 0.4) return true;
-      route.pointAt(route.distanceNear(x, z), railPoint);
-      if (Math.hypot(railPoint.x - x, railPoint.z - z) < 4.0) return true;
-      // A Rail Race arch foot blocks a street the same way it blocks the
-      // generator: `paths.ts`'s `ARCH_FOOT_MARGIN` (a walkable gap plus
-      // the widest ribbon's own half-width and kerb) keeps paving this far
-      // off every foot, drawn or not — matched to the formula, a hair
-      // under, so a borderline-clear spot never flips the wrong way.
-      const ARCH_FOOT_REACH = PLAYER_RADIUS * 2 + 0.4 + (3.6 / 2 + 0.85) - 0.02;
-      for (const foot of facts.railRaceArchFeet) {
-        if (Math.hypot(x - foot.x, z - foot.z) < foot.radius + ARCH_FOOT_REACH) return true;
-      }
-      // A bridge's own stone blocks a street that does not cross on it: its
-      // paving would be lifted onto the ramp where it overlaps the masonry
-      // and hang off it where it does not (`noDrawnPavingStandsUpAsASheet`),
-      // so the generator keeps every such street off it. Measured off the
-      // built masonry, padded by the widest street's half-width and kerb
-      // (the avenue's, 1.6 + 0.425) a hair under.
-      for (const bridge of facts.world.train.bridges) {
-        if (bridge.footprintNear(x, z, 1.6 + PATH_KERB_OVERHANG - 0.02)) return true;
-      }
-    }
-    return false;
-  };
-
-  for (const edge of facts.pathEdges) {
-    if (edge.backbone) continue;
-    if (edge.name === 'fountain-approach') continue;
-    const points = edge.points;
-
-    // Arc length at each sample, for the door-approach exemption below.
-    const along: number[] = [0];
-    for (let i = 1; i < points.length; i += 1) {
-      const a = points[i - 1] as readonly [number, number];
-      const b = points[i] as readonly [number, number];
-      along.push((along[i - 1] as number) + Math.hypot(b[0] - a[0], b[1] - a[1]));
-    }
-    const total = along[along.length - 1] as number;
-
-    // Group consecutive same-axis hops into maximal straight runs.
-    let axis: 'x' | 'z' | null = null; // 'x': east-west (constant z); 'z': north-south (constant x)
-    let runStart = 0;
-    const flush = (endIndex: number): void => {
-      if (axis === null || endIndex <= runStart) return;
-      const a = points[runStart] as readonly [number, number];
-      const b = points[endIndex] as readonly [number, number];
-      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      const runAxis = axis;
-      const startAlong = along[runStart] as number;
-      const endAlong = along[endIndex] as number;
-      axis = null;
-      if (length < MIN_STREET_RUN) return;
-      // The door's own approach — see this invariant's header.
-      if (endAlong <= DOOR_APPROACH_REACH || startAlong >= total - DOOR_APPROACH_REACH) return;
-      // The run's own line: mean of the cross-axis coordinate.
-      let sum = 0;
-      for (let i = runStart; i <= endIndex; i += 1) {
-        sum += (points[i] as readonly [number, number])[runAxis === 'z' ? 0 : 1];
-      }
-      const line = sum / (endIndex - runStart + 1);
-      if (edge.name === 'gate-approach' && runAxis === 'z' && Math.abs(line) < 1) return;
-      const anchor = runAxis === 'z' ? plaza.x : plaza.z;
-      const off = offLattice(line, anchor);
-      if (off > STREET_LINE_TOLERANCE) {
-        // Threading ground the lattice does not serve — see this
-        // invariant's exemption list. Both neighbouring lines must be
-        // obstructed over the run's own span for the run to be excused.
-        const rem =
-          ((((line - anchor) % STREET_LATTICE_PITCH) + STREET_LATTICE_PITCH) %
-            STREET_LATTICE_PITCH);
-        const lower = line - rem;
-        const upper = lower + STREET_LATTICE_PITCH;
-        const spanStart = runAxis === 'z' ? a[1] : a[0];
-        const spanEnd = runAxis === 'z' ? b[1] : b[0];
-        // A neighbouring line is *usable* only when the line itself is
-        // clear over the run's span AND the run could actually have joined
-        // it — a short perpendicular connector from at least one of the
-        // run's own ends must also be clear. A locally-clear line walled
-        // off behind a field of rainbow-arch feet (seed 11's rim stall)
-        // is not a street this run declined; it is ground the router
-        // could never reach.
-        const usable = (candidateLine: number): boolean => {
-          if (lineBlocked(runAxis, candidateLine, spanStart, spanEnd)) return false;
-          const joins: (readonly [number, number, number, number])[] =
-            runAxis === 'z'
-              ? [
-                  [line, spanStart, candidateLine, spanStart],
-                  [line, spanEnd, candidateLine, spanEnd],
-                ]
-              : [
-                  [spanStart, line, spanStart, candidateLine],
-                  [spanEnd, line, spanEnd, candidateLine],
-                ];
-          return joins.some(([jax, jaz, jbx, jbz]) => {
-            const steps = Math.max(1, Math.ceil(Math.hypot(jbx - jax, jbz - jaz) / 1.5));
-            for (let s = 0; s <= steps; s += 1) {
-              const t = s / steps;
-              const x = jax + (jbx - jax) * t;
-              const z = jaz + (jbz - jaz) * t;
-              for (const foot of facts.railRaceArchFeet) {
-                const reach = PLAYER_RADIUS * 2 + 0.4 + (3.6 / 2 + 0.85) - 0.02;
-                if (Math.hypot(x - foot.x, z - foot.z) < foot.radius + reach) return false;
-              }
-              for (const plot of facts.plots) {
-                const dx = Math.max(Math.abs(x - plot.x) - plot.halfX, 0);
-                const dz = Math.max(Math.abs(z - plot.z) - plot.halfZ, 0);
-                if (Math.hypot(dx, dz) < 2.55) return false;
-              }
-              if (facts.boundary.distanceToEdge(x, z) < 2.55) return false;
-              if (Math.hypot(x - plaza.x, z - plaza.z) < ringRadius + 0.4) return false;
-              route.pointAt(route.distanceNear(x, z), railPoint);
-              if (Math.hypot(railPoint.x - x, railPoint.z - z) < 4.0) return false;
-            }
-            return true;
-          });
-        };
-        if (!usable(lower) && !usable(upper)) {
-          return;
-        }
-      }
-      if (off > STREET_LINE_TOLERANCE) {
-        problems.push(
-          `${edge.name} runs ${runAxis === 'z' ? 'north-south' : 'east-west'} for ` +
-            `${length.toFixed(1)} m on ${runAxis === 'z' ? 'x' : 'z'} = ${line.toFixed(2)}, ` +
-            `${off.toFixed(2)} m off the nearest ${STREET_LATTICE_PITCH} m lattice line through ` +
-            `the plaza (${plaza.x.toFixed(2)}, ${plaza.z.toFixed(2)}) — a street on its own ` +
-            `private line is what makes the network read as wandering instead of a grid`,
-        );
-      }
-    };
-
-    for (let i = 1; i < points.length; i += 1) {
-      const a = points[i - 1] as readonly [number, number];
-      const b = points[i] as readonly [number, number];
-      const dx = Math.abs(b[0] - a[0]);
-      const dz = Math.abs(b[1] - a[1]);
-      const hop = Math.hypot(dx, dz);
-      if (hop < 1e-6) continue;
-      const hopAxis: 'x' | 'z' | null =
-        dz / hop <= 0.15 ? 'x' : dx / hop <= 0.15 ? 'z' : null;
-      const exempt = railwayGeometry(a, b);
-      if (hopAxis === null || exempt) {
-        flush(i - 1);
-        continue;
-      }
-      if (axis === null) {
-        axis = hopAxis;
-        runStart = i - 1;
-      } else if (axis !== hopAxis) {
-        flush(i - 1);
-        axis = hopAxis;
-        runStart = i - 1;
-      }
-    }
-    flush(points.length - 1);
-  }
-  return problems;
+  // The measure is `pavingLegibility.ts`'s, shared with the path graph's own
+  // screen — see {@link offLatticeStreetRuns} for the exemptions listed above.
+  return offLatticeStreetRuns(facts.pathEdges, builtPavingGround(facts, plaza), STREET_LATTICE_PITCH).map(
+    (run) =>
+      `${run.edge} runs ${run.axis === 'z' ? 'north-south' : 'east-west'} for ` +
+      `${run.length.toFixed(1)} m on ${run.axis === 'z' ? 'x' : 'z'} = ${run.line.toFixed(2)}, ` +
+      `${run.off.toFixed(2)} m off the nearest ${STREET_LATTICE_PITCH} m lattice line through ` +
+      `the plaza (${plaza.x.toFixed(2)}, ${plaza.z.toFixed(2)}) — a street on its own ` +
+      `private line is what makes the network read as wandering instead of a grid`,
+  );
 };
 
 /**

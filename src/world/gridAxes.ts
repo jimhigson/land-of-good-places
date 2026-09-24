@@ -2,9 +2,11 @@
  * **Where the park's paving runs off the grid, measured as painted ground
  * rather than as route objects.**
  *
- * One owner for the question `pathsRunOnGridAxes` asks. It lives in its own
- * module rather than inside `invariants.ts` so the measurement can be driven
- * directly from fabricated geometry — see `gridAxes.test.ts`, which proves the
+ * One owner for the question `pathsRunOnGridAxes` asks — asked by that
+ * invariant of the built park and by the path graph of its own paving at the
+ * point of decision (`pavingLegibility.ts`). It lives in its own module
+ * rather than inside `invariants.ts` so the measurement can be driven
+ * directly from fabricated geometry — see `test/procgen/gridAxes.test.ts`, which proves the
  * property this module exists to give: **the verdict does not change when the
  * same painted metres are carried by different route objects.**
  *
@@ -58,7 +60,19 @@
  * measure: a child walks the same diagonal whichever route object owns it, and
  * reachability is owned by `poi.stranded` and `check:park`.
  */
-import type { PathEdgeFact } from './parkFacts.ts';
+/**
+ * One drawn ribbon, as the measurement needs it: the centre line sampled off
+ * the real curve every ~0.5 m ({@link drawnCentreLine}), its half-width, and
+ * whether it is the backbone ring. `test/procgen/parkFacts.ts`'s
+ * `DrawnEdge` is one; so is the candidate paving the path graph screens
+ * at the point of decision (`paths.ts`'s `addInterconnects`).
+ */
+export interface DrawnEdge {
+  readonly name: string;
+  readonly backbone: boolean;
+  readonly halfWidth: number;
+  readonly points: readonly (readonly [number, number])[];
+}
 
 export type GroundPoint = readonly [number, number];
 
@@ -338,9 +352,44 @@ const spread = (points: readonly GroundPoint[]): { extent: number; from: GroundP
  * (shared with `streetsShareLatticeLines`).
  */
 export function offAxisGround(
-  edges: readonly PathEdgeFact[],
+  edges: readonly DrawnEdge[],
   isRailwayGeometry: (a: GroundPoint, b: GroundPoint) => boolean,
 ): OffAxisGround[] {
+  return piecesOf(carriedStretches(edges, isRailwayGeometry));
+}
+
+/**
+ * Exactly the pieces of {@link offAxisGround} that `carrier` paints — the
+ * same components, the same extents — without welding the rest of the park.
+ * For a screen asking one candidate ribbon at its point of decision
+ * (`paths.ts`'s `addInterconnects`): only stretches reachable from the
+ * candidate's own through {@link samePaintedGround} can be in its pieces, so
+ * only those are unioned.
+ */
+export function offAxisGroundCarriedBy(
+  edges: readonly DrawnEdge[],
+  carrier: string,
+  isRailwayGeometry: (a: GroundPoint, b: GroundPoint) => boolean,
+): OffAxisGround[] {
+  const stretches = carriedStretches(edges, isRailwayGeometry);
+  const reached = stretches.map((stretch) => stretch.carrier === carrier);
+  const frontier = stretches.filter((stretch) => stretch.carrier === carrier);
+  while (frontier.length > 0) {
+    const from = frontier.pop() as CarriedStretch;
+    stretches.forEach((stretch, i) => {
+      if (reached[i] || !samePaintedGround(from, stretch)) return;
+      reached[i] = true;
+      frontier.push(stretch);
+    });
+  }
+  return piecesOf(stretches.filter((_, i) => reached[i]));
+}
+
+/** Every maximal stretch of off-axis hops, per drawing route object. */
+function carriedStretches(
+  edges: readonly DrawnEdge[],
+  isRailwayGeometry: (a: GroundPoint, b: GroundPoint) => boolean,
+): CarriedStretch[] {
   const stretches: CarriedStretch[] = [];
   for (const edge of edges) {
     // The ring is deliberately a circle, not a grid loop — see
@@ -365,7 +414,11 @@ export function offAxisGround(
       } else open = null;
     }
   }
+  return stretches;
+}
 
+/** Stretches that are the same painted ground unioned into pieces. */
+function piecesOf(stretches: readonly CarriedStretch[]): OffAxisGround[] {
   const owner = stretches.map((_, i) => i);
   const rootOf = (i: number): number => (owner[i] === i ? i : (owner[i] = rootOf(owner[i]!)));
   for (let i = 0; i < stretches.length; i += 1) {
@@ -409,10 +462,10 @@ export function offAxisGround(
  * `gridAxisVerdictsIgnoreTheCarrier` asserts it does on every seed.
  */
 export function recutCarriers(
-  edges: readonly PathEdgeFact[],
+  edges: readonly DrawnEdge[],
   isRailwayGeometry: (a: GroundPoint, b: GroundPoint) => boolean,
-): PathEdgeFact[] {
-  const recut: PathEdgeFact[] = [];
+): DrawnEdge[] {
+  const recut: DrawnEdge[] = [];
   for (const edge of edges) {
     let seam = -1;
     if (!edge.backbone) {
