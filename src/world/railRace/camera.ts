@@ -395,6 +395,24 @@ const CEILING_FLOOR = 0.6;
 const CEILING_ERODE = 8;
 
 /**
+ * **The steepest the zoom ceiling may change, per metre of track.**
+ *
+ * The ceiling is a function of where the rider is, so it moves the picture as
+ * fast as she moves along it. Once it was allowed below 1 (see
+ * {@link CEILING_FLOOR}) a hairpin could take the rig from 1.34 to 0.72 over a
+ * few metres — a snap, not the easing Jim asked for — and it made the camera's
+ * place depend on the frame rate: on seed 1 (restart 6, shipped) the same
+ * wall-clock ramp left the rig 29.19 m out at 30 Hz and 27.20 m at 240 Hz, the
+ * follower's small rate-dependent lag multiplied by that slope.
+ *
+ * So the ceiling is held to the rate the zoom's own easing moves at full racing
+ * speed: `SPEED_PULL_BACK · ln 2 / ZOOM_HALF_LIFE` per second, at
+ * `PULL_BACK_AT` metres a second. A hairpin now draws the rig in over the same
+ * second or so any other zoom takes, starting earlier to be there in time.
+ */
+const CEILING_SLOPE = (SPEED_PULL_BACK * Math.LN2) / (ZOOM_HALF_LIFE * PULL_BACK_AT);
+
+/**
  * The lag a follower with that half-life settles into behind a target moving at
  * constant speed, in seconds — `halfLife / ln 2`.
  *
@@ -1225,7 +1243,7 @@ export class RaceCamera {
       return lowest;
     });
     const blurSpan = Math.max(1, Math.round(erodeSpan / 2));
-    return eroded.map((_, i) => {
+    const blurred = eroded.map((_, i) => {
       let total = 0;
       let count = 0;
       for (let d = -blurSpan; d <= blurSpan; d += 1) {
@@ -1234,6 +1252,32 @@ export class RaceCamera {
       }
       return total / count;
     });
+    // **Then no steeper than the zoom's own easing** — the largest function
+    // under the blurred ceiling whose slope never exceeds `CEILING_SLOPE` per
+    // metre. Under it, so every reversal guarantee above survives; and gentle,
+    // so a hairpin's close-in is eased like every other zoom. See CEILING_SLOPE.
+    const perStation = CEILING_SLOPE * step;
+    const gentle = [...blurred];
+    for (let lap = 0; lap < 2; lap += 1) {
+      for (let i = 0; i < CEILING_STATIONS; i += 1) {
+        const before = gentle[(i - 1 + CEILING_STATIONS) % CEILING_STATIONS] as number;
+        gentle[i] = Math.min(gentle[i] as number, before + perStation);
+      }
+      for (let i = CEILING_STATIONS - 1; i >= 0; i -= 1) {
+        const after = gentle[(i + 1) % CEILING_STATIONS] as number;
+        gentle[i] = Math.min(gentle[i] as number, after + perStation);
+      }
+    }
+    return gentle;
+  }
+
+  /**
+   * The largest zoom the ring lets the rig stand at, at arc distance `s` — the
+   * ceiling {@link place} applies. Public so a check can tell a place where the
+   * pull-back is withheld by the geometry from one where it has stopped working.
+   */
+  ceilingAt(s: number): number {
+    return this.zoomCeilingAt(s);
   }
 
   /** {@link zoomCeiling} at an arbitrary arc distance, linearly interpolated. */

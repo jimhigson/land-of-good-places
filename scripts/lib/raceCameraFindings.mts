@@ -19,6 +19,8 @@ import { PLAYER_LANE, type RailRaceRoute } from '../../src/world/railRace/route.
 import {
   AHEAD,
   CHASE_CEILING,
+  FULL_PULL_BACK_SPEED,
+  zoomAtSpeed,
   SIDE_SCROLLER_FLOOR,
   type RaceCamera,
 } from '../../src/world/railRace/camera.ts';
@@ -284,9 +286,9 @@ export function measureRaceCamera(route: RailRaceRoute, rig: RaceCamera): RaceCa
   rig.resize(1280, 720);
 
   /** Drives the real rig at a constant speed for `seconds`, from a standstill. */
-  function settle(speed: number, dt: number, seconds = 6): number {
-    rig.reset(0);
-    let travelled = 0;
+  function settle(speed: number, dt: number, seconds = 6, from = 0): number {
+    rig.reset(from);
+    let travelled = from;
     for (let t = 0; t < seconds; t += dt) {
       travelled += speed * dt;
       rig.update(travelled, dt);
@@ -305,10 +307,44 @@ export function measureRaceCamera(route: RailRaceRoute, rig: RaceCamera): RaceCa
   }
 
   const TICK = 1 / 60;
-  const crawlRun = settle(2, TICK);
+  // **Where on the lap the pull-back is measured: the first place the ring lets
+  // the rig pull back at all.** The zoom is capped by what each point of the
+  // ring can carry (`RaceCamera.measureZoomCeiling`), and through a hairpin
+  // tighter than the pulled-back stand-off the geometry wins by design. This
+  // used to measure wherever six seconds from the start line happened to land;
+  // on seed 4 (restart 2, shipped) that was 192 m on, in a hairpin, and it
+  // reported the camera standing *closer* at racing speed — the ceiling doing
+  // its job, read as the zoom not doing its. So the ramps start from the first
+  // offset whose racing end, follower lead included, is clear of the ceiling,
+  // and how much of the lap the ceiling withholds is said on every run.
+  const RAMP_SECONDS = 6;
+  const racingEnd = FULL_PULL_BACK_SPEED * RAMP_SECONDS;
+  const fullZoom = zoomAtSpeed(FULL_PULL_BACK_SPEED);
+  const clearOfCeiling = (s: number): boolean => rig.ceilingAt(s) >= fullZoom - 1e-9;
+  let rampFrom = -1;
+  for (let from = 0; from < route.length && rampFrom < 0; from += 1) {
+    let clear = true;
+    for (let d = -5; d <= 10 && clear; d += 1) {
+      clear = clearOfCeiling(route.startDistance + from + racingEnd + d);
+    }
+    if (clear) rampFrom = from;
+  }
+  let withheld = 0;
+  for (let d = 0; d < route.length; d += 1) if (!clearOfCeiling(route.startDistance + d)) withheld += 1;
+  say('');
+  say(
+    `zoom ceiling withholds the full pull-back on ${withheld} of ${Math.floor(route.length)} m of ` +
+      `the lap; the ramp is measured from ${Math.max(0, rampFrom)} m past the start line`,
+  );
+  require(
+    rampFrom >= 0,
+    'the zoom ceiling withholds the pull-back over the whole lap — the ring never lets the rig ' +
+      'stand back at racing speed, so SPEED_PULL_BACK does nothing here',
+  );
+  const crawlRun = settle(2, TICK, RAMP_SECONDS, Math.max(0, rampFrom));
   const crawlStand = standOff(crawlRun);
   const crawlMark = riderMark(crawlRun);
-  const racingRun = settle(32, TICK);
+  const racingRun = settle(32, TICK, RAMP_SECONDS, Math.max(0, rampFrom));
   const racingStand = standOff(racingRun);
   const racingMark = riderMark(racingRun);
 
