@@ -39,3 +39,11 @@
 - Revert proof: base pathGraph.ts -> seed 24 0.2217 m² @6.1 mm, canonical 0.1997 @9.9 mm, 131 1.24e-4 @8.1 mm;
   branch -> 24 and canonical none, 131 unchanged.
 - park:attempt 24 and 20260728: failures [] before and after (exit 0). tsc exit 0.
+
+## Part 2: took over fix/paving-drape (Overseer-ish ruling via structural-backtrack engineer)
+- Merged origin/wip/sb-merge (b5d0b05d) then origin/fix/paving-drape (4d66d808), clean; merged diff == paving-drape's own.
+- Before (base b5d0b05d, worktree .claude/worktrees/sb-kerb-base), park:attempt restart 0: 131/24/20260728/2 failures [];
+  11 fails "built the park it was asked for" (175 bushes, needs >180). Logs scratch pd-before-*.log.
+- After merge: sheet invariant passes on all five. 24, canon clean. NEW lattice fails ("every street sits on the shared
+  12 m lattice"): 131 gate-approach x3 (z=46.16, x=27.30, z=-34.95; count 4), 11 spur-building x=42, 2 spur-stall.dodgems
+  x=62 + connector-waterFight z=-38/x=-42. 11's bush fail gone. Logs pd-merge-*.log. tsc + typecheck:test exit 0.
