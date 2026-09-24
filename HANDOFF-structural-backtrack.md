@@ -92,3 +92,11 @@ coping chamfer (#698 fix/procgen-last has the fix).
   clauses red on 1r6 etc. — likely from the CEILING_FLOOR camera fix). fix/sb-seed5 helper now owns rail-race camera
   clauses too. Chain-sweep driver ($SCRATCH/sb/chain-sweep.mjs) runs 25 park-building chain checks x 16 seeds at
   dda5c8ab in sb-frozen -> chain-sweep.log/json.
+- Merged fix/sb-duck-ends (8b50bd31): barReach.ts one owner; new invariant "every Rail Race duck bar keeps to its own
+  lane"; exact nearestLegalLayout solver. VISIBLE: 18-32 of 40 bars move per seed. Restarts re-recorded:
+  4:3 5:12 8:7 9:4 11:2 14:2. OPEN FOR JIM: bar (2.30 m) wider than lane pitch (1.10 m); rider head 2.84 m vs bar
+  underside 2.55 m and posts over neighbour centreline not measured — design question.
+- Helpers running: fix/sb-seed5 (castle-towers done incl. Collision.resolveMovement change; now rail-race camera),
+  fix/sb-hotel (seed 10 tower hole). Chain sweep at dda5c8ab running.
+- FINAL STEPS: once helpers merged -> accept:parks 0-15 --fresh --write at frozen HEAD, then test:procgen,
+  every-seed-builds, chain sweep, coplanar, check, determinism digests, PR.
