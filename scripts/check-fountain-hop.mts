@@ -215,6 +215,59 @@ check(
     `(ends at ${inbound.endY.toFixed(3)} m, water ${wading.toFixed(3)} m)`,
 );
 
+// ------------------------------- 2b. anywhere on the water, at its own height
+
+// The centre alone is one point at one phase of the 0.5 m lattice, and the
+// wading surface is a **tilted** plane (`Fountain.waterSurfaceY`: about 0.35 m
+// across the basin at 21.6 m from the origin). A route that reports the level
+// of the goal's cell centre rather than of the goal itself is off by the tilt
+// times the goal's offset from that centre — up to ~16 mm, against the 10 mm
+// above — so whether the centre clause saw it was down to where the fountain's
+// centre fell in its cell. Seed 10 at restart 0 on one branch's CI: "ends at
+// 0.307 m, water 0.295 m". Taps at every phase of the cell, on rings across
+// the basin, make that luck irrelevant: the route must end at the height of
+// the water under the tap itself.
+//
+// Proven red against the cause, not a mutation: with `NavGrid` reporting the
+// cell-centre height, 10 of the 16 supported seeds at their recorded restarts
+// failed here (4.6-16.2 mm worst gap; the centre clause above was green on all
+// 16). With the goal sampled at the goal, 0.0 mm on all 16. Inside the water
+// `Fountain.groundLevel` ignores the sampler's reference, so a reached tap now
+// reads the water exactly: what this clause guards is that `lastRouteEndY` is
+// asked *at the goal*, plus reachability across the whole basin.
+let worstGap = 0;
+let worstWhere = '';
+let unreached = 0;
+let goals = 0;
+for (const ring of [0.4, 1.3, 2.2, 3.1]) {
+  const around = ring < 1 ? 7 : 13;
+  for (let k = 0; k < around; k += 1) {
+    const bearing = (k / around) * Math.PI * 2 + ring;
+    const gx = centreX + Math.cos(bearing) * ring;
+    const gz = centreZ + Math.sin(bearing) * ring;
+    goals += 1;
+    const route = plan(outsideX, outsideZ, gx, gz);
+    if (!route.reached) {
+      unreached += 1;
+      continue;
+    }
+    const gap = Math.abs(route.endY - sample(gx, gz, 500));
+    if (gap > worstGap) {
+      worstGap = gap;
+      worstWhere = `(${gx.toFixed(2)}, ${gz.toFixed(2)})`;
+    }
+  }
+}
+check(
+  unreached === 0,
+  `every tap across the basin is reached (${goals - unreached}/${goals})`,
+);
+check(
+  worstGap < 0.01,
+  `and every one ends at the height of the water under the tap itself ` +
+    `(worst gap ${(worstGap * 1000).toFixed(1)} mm at ${worstWhere || '-'}, over ${goals} taps)`,
+);
+
 // --------------------------------------------- 3. and she can get out again
 
 const outbound = plan(centreX, centreZ, outsideX, outsideZ);
