@@ -23,6 +23,7 @@ import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
 import type { HeadlessPark } from '../../scripts/park-harness.mts';
 import type { RailRaceRoute } from '../../src/world/railRace/route.ts';
+import type { BarIntrusion } from '../../src/world/railRace/barReach.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 import type { Claim } from '../../src/boot/groundClaims.ts';
 import type { RoadSegment } from '../../src/world/entrance/roadCorridor.ts';
@@ -417,6 +418,26 @@ export interface DuckBarFact {
 }
 
 /**
+ * **One built duck bar, and every other lane it reaches into** — on either
+ * ring. Read off the bar's own instance matrix and asked of
+ * `railRace/barReach.ts`'s `duckBarIntrusions`, the same function the planner
+ * refuses a slot with, so the planner and this measure cannot disagree about
+ * what "reaches into" means — only about which bars were built.
+ */
+export interface DuckBarReachFact {
+  /** `walk-past` or `race`. */
+  readonly ring: string;
+  /** The bar's instance index in its ring's `railRace:duck-bars`. */
+  readonly index: number;
+  /** The lane it hangs over, found from its drawn centre, not from the plan. */
+  readonly lane: number;
+  /** Metres from the arch, off its own matrix. */
+  readonly builtAt: number;
+  /** Empty when the bar keeps to its own lane. */
+  readonly intrusions: readonly BarIntrusion[];
+}
+
+/**
  * How far past a duck bar {@link DuckBarFact.speedAfter} is sampled, in metres.
  *
  * A shade over one frame's travel at the ride's top speed (33 m/s at 60 Hz is
@@ -716,6 +737,11 @@ export interface ParkFacts {
    * schedules bars, and none in the built scene would itself be a bug.
    */
   readonly duckBars: readonly DuckBarFact[];
+  /**
+   * Every built duck bar on **both** rings, and any other lane it reaches into
+   * — see {@link DuckBarReachFact}. Empty is not healthy: both rings draw bars.
+   */
+  readonly duckBarReach: readonly DuckBarReachFact[];
   /**
    * How smoothly the race camera actually tracks a rider round the built ring —
    * see {@link CameraTrackingFact}.
@@ -3052,6 +3078,48 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     }
   }
 
+  // --- does any duck bar reach into another lane? --------------------------
+  //
+  // Both rings, every drawn bar, off its own instance matrix. The lane is found
+  // from the drawn centre in the chart (nearest lane offset), as the block above
+  // finds it, never from the plan — this measures what was built.
+  const { duckBarIntrusions } = await import('../../src/world/railRace/barReach.ts');
+  const duckBarReach: DuckBarReachFact[] = [];
+  for (const [ringLabel, ringName, ringRoute] of [
+    ['walk-past', 'railRace:walk-past-ring', world.railRace.walkPastRoute],
+    ['race', 'railRace:race-ring', world.railRace.raceRoute],
+  ] as const) {
+    const ringBars = world.railRace.group.getObjectByName(ringName)?.getObjectByName('railRace:duck-bars');
+    if (!(ringBars instanceof Instanced)) continue;
+    const matrix = new Mat4();
+    const centre = new Vec3();
+    const chart = new Vec3();
+    for (let i = 0; i < ringBars.count; i += 1) {
+      ringBars.getMatrixAt(i, matrix);
+      centre.setFromMatrixPosition(matrix);
+      const station = ringRoute.stationOf(centre);
+      ringRoute.unlean(station, centre, chart);
+      const sample = ringRoute.path.sampleAt(station);
+      const offset = (chart.x - sample.x) * sample.normalX + (chart.z - sample.z) * sample.normalZ;
+      let lane = 0;
+      let nearest = Infinity;
+      for (let candidate = 0; candidate < ringRoute.laneOffsets.length; candidate += 1) {
+        const d = Math.abs(offset - (ringRoute.laneOffsets[candidate] ?? 0));
+        if (d < nearest) {
+          nearest = d;
+          lane = candidate;
+        }
+      }
+      duckBarReach.push({
+        ring: ringLabel,
+        index: i,
+        lane,
+        builtAt: ringRoute.wrap(station - ringRoute.startDistance),
+        intrusions: duckBarIntrusions(ringRoute, lane, matrix),
+      });
+    }
+  }
+
   // --- how smoothly the camera tracks a rider round this ring ---------------
   //
   // Drives the real rig. `reset` is the ride's own "snap to this rider" call and
@@ -3820,6 +3888,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     archClearance,
     archLegs,
     duckBars,
+    duckBarReach,
     cameraTracking,
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),

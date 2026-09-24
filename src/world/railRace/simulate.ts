@@ -2,9 +2,11 @@ import { lazyView } from '../../boot/lazyView';
 import { registerPlanCache } from '../../boot/planCaches';
 import { Rng, clamp } from '../../core/mathUtils';
 import { RAIL_RACE_PLAN } from './plan';
+import { duckBarIntrusions, duckBarPose } from './barReach';
 import {
   BARS_FROM_LEVEL,
   DuckBarRefusal,
+  TRESTLE_SPACING,
   planHazards,
   type BarPlanDecision,
   trestleGridIndex,
@@ -308,8 +310,8 @@ registerPlanCache(() => {
  * purpose — just above the floor the bonk bites by a few centimetres a second,
  * and a downhill 0.6 m later can hand it straight back.
  *
- * A refused slot moves the bar the way any other refusal does
- * (`hazards.ts`'s `snapToTrestleGrid`, outward to the nearest legal slot), and
+ * A refused slot moves the bar — `hazards.ts`'s `nearestLegalLayout` finds
+ * the legal layout nearest the tuned one — and
  * the whole plan is then raced again, because moving one bar changes the
  * speed every later bar of that lane is met at. Refusals only accumulate, so
  * this ends: either no bar is clipped, or some bar has no legal slot left and
@@ -321,10 +323,17 @@ registerPlanCache(() => {
  * for 40 bars, and lane 0's refused slot 41 left the last bar nowhere to go.
  * Only when every rotation fails does the build fail, for the park's root
  * loop to start again — never a bad bar kept.
+ *
+ * **The physics is not the only refuser.** Before any of this, every slot where
+ * a bar on either ring would hang inside another lane's track is refused
+ * ({@link reachRefusedSlots}), and the physics starts from those.
  */
 let barPlanDecisionMemo: BarPlanDecision | null = null;
 function raceBarPlanDecision(): BarPlanDecision {
-  return (barPlanDecisionMemo ??= barPlanDecision(RAIL_RACE_PLAN.raceRing));
+  return (barPlanDecisionMemo ??= barPlanDecision(RAIL_RACE_PLAN.raceRing, [
+    RAIL_RACE_PLAN.walkPastRing,
+    RAIL_RACE_PLAN.raceRing,
+  ]));
 }
 
 /**
@@ -334,11 +343,20 @@ function raceBarPlanDecision(): BarPlanDecision {
  * only when no rotation leaves every bar a legal slot. See
  * {@link raceBarPlanDecision}'s doc comment above for the rule.
  */
-export function barPlanDecision(route: RailRaceRoute): BarPlanDecision {
+export function barPlanDecision(
+  route: RailRaceRoute,
+  /**
+   * Every ring the layout is drawn on. A slot where a bar on any of them would
+   * reach into another lane's track is refused before the search starts — see
+   * {@link reachRefusedSlots}.
+   */
+  drawnOn: readonly RailRaceRoute[] = [route],
+): BarPlanDecision {
+  const reach = reachRefusedSlots(route.length, drawnOn);
   const reasons: string[] = [];
   for (let laneShift = 0; laneShift < LANE_COUNT; laneShift += 1) {
     try {
-      return { laneShift, refusedByLane: refusedBarSlots(route, laneShift) };
+      return { laneShift, refusedByLane: refusedBarSlots(route, laneShift, reach) };
     } catch (error) {
       if (!(error instanceof DuckBarRefusal)) throw error;
       reasons.push(`lane shift ${laneShift}: ${error.message}`);
@@ -355,8 +373,13 @@ export function barPlanDecision(route: RailRaceRoute): BarPlanDecision {
  * would meet a bar with her bonk clipped by the speed floor, for one lane
  * rotation. See {@link raceBarPlanDecision} for the rule and why.
  */
-export function refusedBarSlots(route: RailRaceRoute, laneShift = 0): ReadonlyMap<number, ReadonlySet<number>> {
-  const refused = new Map<number, Set<number>>();
+export function refusedBarSlots(
+  route: RailRaceRoute,
+  laneShift = 0,
+  /** Slots already refused for another reason, which the physics starts from. */
+  already: ReadonlyMap<number, ReadonlySet<number>> = new Map(),
+): ReadonlyMap<number, ReadonlySet<number>> {
+  const refused = new Map<number, Set<number>>([...already].map(([lane, slots]) => [lane, new Set(slots)]));
   // Bounded by construction (each round refuses at least one new lane-slot
   // pair, and there are LANE_COUNT × slots of those); the guard only turns a
   // future bug into an error rather than a hang.
@@ -381,6 +404,42 @@ export function refusedBarSlots(route: RailRaceRoute, laneShift = 0): ReadonlyMa
     if (!refusedAny) return refused;
   }
   throw new Error('railRace/simulate.ts: refusedBarSlots did not settle');
+}
+
+/**
+ * **Slots where a bar would reach into another lane's track**, by lane — on
+ * any ring the layout is drawn on.
+ *
+ * A bar is longer than a lane is wide, so its ends always stand over its
+ * neighbours' rails in plan, and only the lanes' different heights keep it
+ * out of them (see `barReach.ts`). Where a neighbour stands at the bar's own
+ * height the bar hangs in that lane's sleepers or in the path of its cart —
+ * measured on seed 4, restart 2: 81 of 196 lane-slots. Each is refused, and
+ * the placement search moves the bar to another legal slot exactly as it does
+ * for a physics refusal. This does not depend on where any other bar went, so
+ * it is asked once, of the very matrix `track.ts` would draw
+ * (`duckBarPose`), by the same function the park's invariant measures the
+ * built bars with (`duckBarIntrusions`).
+ */
+export function reachRefusedSlots(
+  loopLength: number,
+  drawnOn: readonly RailRaceRoute[],
+): ReadonlyMap<number, ReadonlySet<number>> {
+  const refused = new Map<number, Set<number>>();
+  const count = Math.max(1, Math.floor(loopLength / TRESTLE_SPACING));
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    for (let slot = 0; slot < count; slot += 1) {
+      const at = (slot / count) * loopLength;
+      const reaches = drawnOn.some(
+        (ring) => duckBarIntrusions(ring, lane, duckBarPose(ring, lane, at).matrix).length > 0,
+      );
+      if (!reaches) continue;
+      const laneRefused = refused.get(lane) ?? new Set<number>();
+      laneRefused.add(slot);
+      refused.set(lane, laneRefused);
+    }
+  }
+  return refused;
 }
 
 /**

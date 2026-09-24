@@ -3476,6 +3476,39 @@ const finishRainbowStandsOnTheGround: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **Every duck bar keeps to its own lane: no end of it stands inside another
+ * lane's track or the cart running on it.**
+ *
+ * A bar is 2.30 m long at park scale and the lanes are 1.10 m apart, so its
+ * ends always stand over its neighbours' rails in plan; what keeps that
+ * harmless is height, and the lanes undulate on their own phases. Found by
+ * `check:coplanar` on seed 4: the walk-past ring's bar over lane 2 near station
+ * 205 hung at exactly lane 3's rail height, 0.34 m from a sleeper — a cart on
+ * lane 3 would have driven through it.
+ *
+ * Measured on the built bars, both rings, by `railRace/barReach.ts`'s
+ * `duckBarIntrusions` — the function the planner refuses such a slot with. The
+ * envelope is the drawn sleeper bed plus the cart asset's own box; the rider is
+ * not in it (see `barReach.ts` for why).
+ */
+const duckBarsKeepToTheirOwnLane: Invariant = (facts) => {
+  const bars = facts.duckBarReach;
+  if (bars.length === 0) return ['no duck bar was found on either Rail Race ring to measure'];
+  const complaints: string[] = [];
+  for (const bar of bars) {
+    for (const hit of bar.intrusions) {
+      complaints.push(
+        `the ${bar.ring} ring's duck bar ${bar.index} over lane ${bar.lane}, ${bar.builtAt.toFixed(2)} m ` +
+          `from the arch, reaches ${hit.depth.toFixed(3)} m into lane ${hit.lane}'s track envelope at ` +
+          `station ${hit.station.toFixed(1)} (${hit.across.toFixed(2)} m across its centre, ` +
+          `${hit.aboveRail.toFixed(2)} m above its rail) — a cart on lane ${hit.lane} would drive through it`,
+      );
+    }
+  }
+  return complaints;
+};
+
 const duckBarsSlowYouWhereTheyStand: Invariant = (facts) => {
   const complaints: string[] = [];
   const bars = facts.duckBars;
@@ -11837,6 +11870,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the Rail Race flies clear of the railway and stands on clear ground', railRaceFliesClear],
   ['every Rail Race duck bar stands over a real trestle leg', duckBarsStandOnRealSupports],
   ['every Rail Race duck bar slows you down where it stands', duckBarsSlowYouWhereTheyStand],
+  ['every Rail Race duck bar keeps to its own lane', duckBarsKeepToTheirOwnLane],
   ['the Rail Race finish rainbow clears every rider', finishRainbowClearsEveryRider],
   ['the Rail Race finish rainbow stands on the ground', finishRainbowStandsOnTheGround],
   ['every support meets the track it carries', supportsMeetWhatTheyCarry],
