@@ -51,7 +51,7 @@ function check(claim: string, ok: boolean, detail: string): void {
   }
 }
 
-const { CANONICAL_PARK_SEED, CI_SWEEP_SEEDS, PARK_SEED_KEY, PARK_SEED_POOL, forgetParkSeed, parkSeedFor, parkSeedSource, resolveParkSeed } =
+const { CANONICAL_PARK_SEED, CI_SWEEP_SEEDS, PARK_SEED_KEY, PARK_SEED_POOL, forgetParkSeed, parkChangedUnderSave, parkSeedFor, parkSeedSource, resolveParkSeed } =
   await import('../src/world/parkSeedPool.ts');
 
 console.log(`check:seed-pool: ${PARK_SEED_POOL.length} seed(s) in the pool\n`);
@@ -192,11 +192,22 @@ check(
 // nothing anywhere else.
 const { SAVE_KEY } = await import('../src/state/save.ts');
 check(
-  'a save from before the pool keeps the canonical park',
+  'a save from before the pool moves to the default park',
   parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}' })) === CANONICAL_PARK_SEED,
-  `got ${parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}' }))} — ` +
-    'every position in that save would land in the wrong park',
+  `got ${parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}' }))}`,
 );
+// Seeds 0..15 only (Jim, 24 Sep 2026): Eleri's save remembers 20260728, which
+// is retired. She must land in the one default park — the same on every
+// device — not a random draw, and the park must be marked changed so her old
+// position (measured in 20260728) is not restored into seed 5's park.
+check(
+  'a save on a retired seed moves to the default park, not a random one',
+  [1, 2, 3, 4, 5, 6].every(
+    () => parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}', [PARK_SEED_KEY]: '20260728' })) === CANONICAL_PARK_SEED,
+  ),
+  'drew a random seed',
+);
+check('and the park is marked changed under that save', parkChangedUnderSave(), 'parkChangedUnderSave() is false');
 
 // ------------------------------ the end-to-end clause, in real child processes
 //

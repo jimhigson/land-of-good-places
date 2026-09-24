@@ -429,10 +429,6 @@ export function resolveParkSeed(): number {
  */
 export function parkSeedFor(store: Storage | null): number {
   const remembered = readSeed(store?.getItem(PARK_SEED_KEY));
-  // A seed no longer in the pool is one that has been retired — usually
-  // because it was found to build a bad park — so it is not honoured. The
-  // profile is moved to a fresh one and the save degrades exactly as it does
-  // across a `LAYOUT_VERSION` bump.
   if (remembered !== null && PARK_SEED_POOL.includes(remembered)) {
     source = 'remembered';
     return remembered;
@@ -443,12 +439,19 @@ export function parkSeedFor(store: Storage | null): number {
     return CANONICAL_PARK_SEED;
   }
 
-  // A save with no remembered seed is a profile from before the pool existed:
-  // the park she has been playing is the canonical one, and every position in
-  // her save is measured in it.
-  const fromBeforeThePool = remembered === null && hasSave(store);
-  const seed = fromBeforeThePool ? CANONICAL_PARK_SEED : drawFromPool();
-  source = fromBeforeThePool ? 'remembered' : 'drawn';
+  // **A profile whose park has been retired** — a remembered seed that has
+  // left the pool, or a save from before the pool existed (whose park was
+  // 20260728, retired on 24 September 2026 when Jim ruled "we only support
+  // seeds 0..15"). Neither park can be built any more. Both move to the
+  // default park — the same one on every device she plays on, rather than a
+  // fresh random draw each — and keep everything in the save except the spot
+  // she was standing on, which was measured in a park that no longer exists
+  // ({@link parkChangedUnderSave}: she starts on the plaza).
+  // Reaching here with a save means her park is one of those two.
+  const retired = hasSave(store);
+  const seed = retired ? CANONICAL_PARK_SEED : drawFromPool();
+  source = retired ? 'remembered' : 'drawn';
+  if (retired) parkChanged = true;
   try {
     store.setItem(PARK_SEED_KEY, String(seed));
   } catch {
@@ -456,6 +459,19 @@ export function parkSeedFor(store: Storage | null): number {
     // next time. Not worth interrupting a six-year-old about.
   }
   return seed;
+}
+
+let parkChanged = false;
+
+/**
+ * **Did this load move a returning player to a different park?** True when her
+ * remembered park was retired (see {@link parkSeedFor}). Her saved position
+ * then belongs to a park that no longer exists, so a continued game must not
+ * restore it — `main.ts` starts her on the plaza instead, with everything else
+ * in her save intact.
+ */
+export function parkChangedUnderSave(): boolean {
+  return parkChanged;
 }
 
 function drawFromPool(): number {

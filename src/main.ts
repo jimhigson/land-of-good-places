@@ -38,7 +38,7 @@ import { MAX_PARADE_VISIBLE } from './entities/parade/paradeCap';
 import { saveFlags } from './state/flags';
 import { clearSave, loadSave, makeSessionUnsavable, type SaveFile } from './state/save';
 import { PARK_SEED } from './world/parkManifest';
-import { forgetParkSeed, parkSeedSource } from './world/parkSeedPool';
+import { forgetParkSeed, parkChangedUnderSave, parkSeedSource } from './world/parkSeedPool';
 import { canAdoptWithoutAsking, noteAdopting, watchForFirstTouch } from './update-adoption';
 import { startVersionCheck } from './version-check';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
@@ -596,8 +596,10 @@ function continueGame(
   saveFlags.hydrate(save.flags);
   if (deepLink?.kind === 'ride') grantRideCompanion();
   // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
+  // A save whose park was retired keeps everything but the spot she stood on,
+  // which was measured in a park that no longer exists (`parkSeedFor`).
   const options: GameOptions =
-    save.place && deepLink?.kind !== 'spawn' && deepLink?.kind !== 'arrive'
+    save.place && !parkChangedUnderSave() && deepLink?.kind !== 'spawn' && deepLink?.kind !== 'arrive'
       ? { startPlace: save.place }
       : {};
   launchGame(canvas, uiRoot, splash, options, deepLink);
