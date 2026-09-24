@@ -1,4 +1,4 @@
-import type { PlannedCoaster } from '../../../procgen/world/coaster/solve';
+import type { PlannedCoaster } from './planned';
 import { planPart } from '../parkPlan';
 
 /**
@@ -41,7 +41,6 @@ import { planPart } from '../parkPlan';
  * (worst block 1354 ms to 1300 ms, against a 250 ms ceiling). See
  * `coaster/prewarm.ts`.
  */
-export * from '../../../procgen/world/coaster/solve';
 
 /**
  * The plans. Import this; never re-solve — the same rule as `TRAIN_PLAN`.
@@ -67,6 +66,8 @@ export * from '../../../procgen/world/coaster/solve';
  * `check:park-boot`, which runs both in one process and compares a SHA over the
  * built loop.
  */
+export type { PlannedCoaster } from './planned';
+
 export const COASTER_PLANS: {
   readonly cruiser: PlannedCoaster;
 } = {

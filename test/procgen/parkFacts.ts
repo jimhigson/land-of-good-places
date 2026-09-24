@@ -1665,8 +1665,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
   // already built for this exact seed — never at this file's own top level,
   // the seed-pinning trap this file's header already warns about.
-  const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
-  const bridgeReservations = planBridgeFootprints(world.train.crossings);
+  const { planConservativeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
+  const bridgeReservations = planConservativeFootprints(world.train.crossings);
 
   // Same rule, same reason: the road's owner reaches PARK_BOUNDARY, so it is
   // imported here — after the world for this seed is built — and never at the

@@ -16,20 +16,18 @@ import { PARK_SEED } from '../../src/world/parkManifest';
 import { PARK_RESTARTS, type ParkLayout } from '../../src/world/parkLayout';
 import { layoutRestartSearch } from './parkLayout';
 import { layoutRestartBase } from './parkWarp';
-import {
-  cruiserStartSearch,
-  finishCruiserPlanSearch,
-  type CruiserSearchStart,
-  type PlannedCoaster,
-} from './coaster/solve';
+import { cruiserStartSearch, finishCruiserPlanSearch, type CruiserSearchStart } from './coaster/solve';
+import { type PlannedCoaster } from '../../src/world/coaster/planned';
 import { cruiserRouteSearch } from './coaster/route';
 import { type SolvedRailRoute } from '../../src/world/rail/generate';
 import { RailRouteUnsolvable } from './rail/generate';
 import { TrainRoute } from '../../src/world/train/route';
 import { trainRouteSearch } from './train/route';
 import { planStations } from '../../src/world/train/plan';
-import { slideSearch, type PlannedSlide } from './slide/solve';
-import { crossingSitesSearch, type SolvedCrossingSites } from './train/crossingPlanSolve';
+import { slideSearch } from './slide/solve';
+import { type PlannedSlide } from '../../src/world/slide/planned';
+import { crossingSitesSearch } from './train/crossingPlanSolve';
+import { type SolvedCrossingSites } from '../../src/world/train/crossingSite';
 import { resetPathsState, type PathGraph } from '../../src/world/paths';
 import { pathGraphSearch, resetPathSearchCaches } from './paths';
 import { screenDrawnPathsForOffSiteCrossings } from './train/crossingScreen';

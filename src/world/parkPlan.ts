@@ -40,11 +40,11 @@ import { GroundClaims, type FeatureContribution } from '../boot/groundClaims';
 import { PARK_SEED } from './parkManifest';
 import type { ParkLayout } from './parkLayout';
 import { bindCastlePlacement } from './building/layout';
-import type { PlannedCoaster } from '../../procgen/world/coaster/solve';
+import type { PlannedCoaster } from './coaster/planned';
 import type { TrainRoute } from './train/route';
 import type { PlannedStation } from './train/plan';
-import type { PlannedSlide } from '../../procgen/world/slide/solve';
-import type { SolvedCrossingSites } from '../../procgen/world/train/crossingPlanSolve';
+import type { PlannedSlide } from './slide/planned';
+import type { SolvedCrossingSites } from './train/crossingSite';
 import {
   latticeStateSnapshot,
   resetPathsState,
