@@ -371,7 +371,16 @@ function builders(): readonly FeatureBuilder[] {
         if (!(error instanceof RailRouteUnsolvable)) throw error;
         return refusal(`sky cruiser: ${timeless(error.message)}`, { consumed: ['layout'] });
       }
-      return yield* countingSeams(finishCruiserPlanSearch(route, start.rng));
+      const planned = yield* countingSeams(finishCruiserPlanSearch(route, start.rng));
+      // The search asked the plan; this asks the curve riders fly. Both are
+      // `spanInsideCastle` (coaster/route.ts) — `crossesTheCastle` on the plan,
+      // `CoasterRoute.castleSpan` on the built curve, which is the very field
+      // `skyCruiserAlwaysFliesThroughTheCastle` reads — so a loop that missed
+      // is refused here, before anything is built on it, never shipped.
+      if (planned.route.castleSpan === null) {
+        return refusal('sky cruiser: the built loop never enters the castle', { consumed: ['layout'] });
+      }
+      return planned;
     },
     set(cruiser) {
       state.cruiser = cruiser;
