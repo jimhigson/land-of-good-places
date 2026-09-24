@@ -183,9 +183,11 @@ describe('scenery scatter is decoupled from the paths', () => {
     // proves zero bridge sites, which now fails the build loudly rather
     // than falling back to level crossings (it was retired from the sweep
     // for exactly this pathology, #429/seed-24.test.ts's header). Any pool
-    // seed serves; 5 is the one the sweep already builds everywhere else.
-    const other = buildDigest({ LGP_SEED: '5' });
-    expect(other.seed).toBe(5);
+    // seed serves — but not the default one, which is the baseline: since the
+    // default became seed 5 (24 Sep 2026, seeds 0..15 only) this uses 11, one
+    // of the cheapest of 0..15 to solve.
+    const other = buildDigest({ LGP_SEED: '11' });
+    expect(other.seed).toBe(11);
     expect(other.all).not.toBe(baseline.all);
     expect(other.trees.digest).not.toBe(baseline.trees.digest);
     expect(other.bushes.digest).not.toBe(baseline.bushes.digest);

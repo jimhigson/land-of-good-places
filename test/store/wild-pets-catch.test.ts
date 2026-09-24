@@ -2,6 +2,11 @@
 // shim every `scripts/check-*.mts` that builds a model uses. First import, so
 // it is in place before anything reaches for `document`.
 import '../../scripts/headless-canvas.mjs';
+// The park solver lives in build-time code (`procgen/`); this test reads the
+// default park's plan (`SLIDE_PLAN`, `keepOutsFor`), so it plugs the solver in
+// before anything forces the plan. Vitest does not load the scripts' resolver
+// hook that does this lazily elsewhere (`src/world/prebuilt/solverPort.ts`).
+import '../../procgen/install.ts';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { WildPets } from '../../src/world/building/WildPets';
