@@ -3,7 +3,7 @@ name: Checks
 # **The checks. All of them, in the one place that runs them.**
 #
 # `pnpm run check` is the chain — `tsc`, `typecheck:test`, and every
-# `check:*` from `check:text` to `check:arrival-completes`. It used to live
+# `check:*` step in the `check:shard-N` scripts. It used to live
 # inside `pnpm run build`, which meant every consumer of "build" paid for the
 # whole gate: the deploy re-ran 16 minutes of QA to produce a 191 ms artefact,
 # on a commit that had already passed those very checks minutes earlier.

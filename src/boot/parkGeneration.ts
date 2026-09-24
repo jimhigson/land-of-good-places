@@ -22,48 +22,21 @@ import { loadPrebuiltPark } from './prebuiltPark';
  */
 
 /**
- * How long a frame may spend generating, in milliseconds.
- *
- * A sixty-hertz frame is 16.7 ms and the ride still has a bus, twelve children
- * and a thousand instanced trees to draw in it. Eight leaves comfortably more
- * than half the frame for that, and finishes the slide in about **7 s of a 20 s
- * ride** on this machine — early enough that the skip is on offer for most of
- * the journey.
- *
- * The temptation is to raise it, because the whole thing then finishes sooner.
- * Do not: the orbit is the shot, and a camera that stutters once a second is a
- * worse failure than a park that takes longer to be ready — nobody is waiting
- * on it, the bus has nineteen more seconds to fill. If generation genuinely
- * cannot finish inside the ride on some slower device, `JourneyDirector` holds
- * the bus at the kerb rather than handing over, which is the honest outcome.
+ * How long a frame may spend loading the park, in milliseconds, while the bus
+ * is rolling. Since prebuilt parks the whole of it — fetch, hydrate, import —
+ * is a few milliseconds and a handful of frames, so this bounds nothing in
+ * practice; it stays as the pacing `JourneyDirector` hands out, shared with the
+ * shader warm-up's own budget. (It was the solver's frame budget, policed by
+ * `check:park-boot` and `check:arrival-completes`; both retired with the
+ * client-side solve on 24 September 2026.)
  */
 export const GENERATION_BUDGET_MS = 8;
 
 /**
- * How long a frame may spend generating **once the ride has overrun its nominal
- * length and the drive is looping** while it waits for the park — see
- * `JourneyDirector.overrunAwareBudgetMs`.
- *
- * It was **200 ms**, on a premise that no longer holds: that once the ride
- * ended the bus *parked*, so there was no moving shot left to keep smooth. The
- * bus now **loops and keeps moving** throughout the overrun, so a frame that
- * blocks for 200 ms jerks the moving bus, its orbiting camera and the rolling
- * countryside alike — measured on a throttled overrun, the 200 ms budget
- * produced a p99 frame interval of ~209 ms, the "jumpy while it generates" Jim
- * reported. At 12 ms a frame is budget + at most one work unit (the slide's
- * dearest is ~2 ms), inside one 60 Hz refresh with room for the light looping
- * scene to draw.
- *
- * **The trade, stated honestly.** A smaller budget means a longer wait on a
- * slow device: the loop drains at 12 ms a frame rather than 200. Jim reported
- * *jumpiness, not slowness*, and a smooth loop that lasts a few seconds longer
- * reads far better than a juddering one that ends a moment sooner. If the raw
- * wait is itself too long on real hardware the fix is cheaper generation, not
- * a fatter budget that trades the smoothness back away.
- *
- * `check:park-boot` drives generation at this budget and asserts no single
- * frame blocks past one refresh's worth of work; `check:arrival-completes`
- * asserts the loop still *completes* at whatever budget this is.
+ * The same, once the ride has overrun its nominal length and the drive is
+ * looping while it waits for the park — see
+ * `JourneyDirector.overrunAwareBudgetMs`. Kept a little above the rolling
+ * budget so a moving bus never juddered for it.
  */
 export const OVERRUN_GENERATION_BUDGET_MS = 12;
 
