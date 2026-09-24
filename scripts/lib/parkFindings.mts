@@ -116,9 +116,10 @@ export interface ParkFindings {
  * Measure `park` against the six invariants.
  *
  * `ratchetEnforced` false is the old seed-sweep mode (`LGP_RATCHET=off`): only
- * the hard keys fail. The acceptance loop always enforces.
+ * the hard keys fail. The acceptance loop always enforces. `verbose` adds the
+ * per-destination route table to `table`.
  */
-export function measureParkFindings(park: HeadlessPark, ratchetEnforced: boolean): ParkFindings {
+export function measureParkFindings(park: HeadlessPark, ratchetEnforced: boolean, verbose = false): ParkFindings {
   const findings: Finding[] = [];
   /** Lines printed under `--verbose`, or whenever something fails. */
   const table: string[] = [];

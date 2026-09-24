@@ -354,7 +354,7 @@ const SLIDE_LEG_REACH = 10;
  * *requires* a new invariant with every procgen change: this is a mandated
  * path, walked by people who have never opened this file before.
  */
-type Invariant = (facts: ParkFacts) => readonly string[];
+export type Invariant = (facts: ParkFacts) => readonly string[];
 
 
 /**
@@ -11693,6 +11693,110 @@ const stallsAreDrawnClaimedAndSolidTogether: Invariant = (facts) => {
   return wrong;
 };
 
+/**
+ * **The park is furnished** — the anti-vacuity floors. A park with no walls,
+ * no trees or no lamps would pass every clearance invariant below vacuously;
+ * these are the guard against that. They were `expect` calls inside the
+ * registration until the root acceptance loop needed to ask the same question
+ * of a park it had not yet accepted (`scripts/lib/acceptedPark.mts`), so they
+ * are an invariant like every other now — one owner, asked by both.
+ */
+const theParkIsFurnished: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const floor = (count: number, above: number, what: string): void => {
+    if (!(count > above)) complaints.push(`${what}: ${count}, needs more than ${above}`);
+  };
+  // A park with no walls, no trees or no lamps would pass every clearance
+  // invariant below vacuously. This is the guard against that.
+  //
+  // Trees get a real floor rather than `> 0`, because thinning the scatter
+  // is the cheapest possible way to make a clearance invariant go green and
+  // it is not a hypothetical: adding `treesKeepOffWalls` took the canonical
+  // seed from 30 trees to 19 until the scatter's attempt budget was raised
+  // to buy them back.
+  //
+  // **This floor cannot catch every thinning, and the number is chosen
+  // knowing that.** Measured both ways round — healthy park 26/27/26/30/28
+  // across the five seeds, the same park with the budget reverted
+  // 19/23/23/27/23 — the two sets *overlap*: seed 11 thinned (27) plants
+  // more than the canonical seed healthy (26). So no single floor can
+  // separate them everywhere, and any threshold low enough to keep a real
+  // park green necessarily lets seed 11's thinning through.
+  //
+  // 24 is the best a global floor does: it catches 4 of the 5 seeds and
+  // still leaves the healthiest-but-lowest real seed two trees of headroom
+  // for ordinary seed-to-seed drift. Four suites going red at once is a
+  // loud enough signal; running on five seeds is what makes it work, not
+  // the cleverness of the number. Raising it to 25 would catch no more and
+  // leave one tree of headroom, so it is not worth the false alarms.
+  //
+  // An anti-vacuity guard, not a placement threshold — the "thresholds come
+  // from the game" rule above is about the latter.
+  floor(facts.trees.length, 24, 'the park planted almost no trees');
+  // Bushes get a floor for the same reason, and they need one more than
+  // they used to. The clump count was pinned at exactly 108 by a
+  // fill-until-N loop; it is now whatever a fixed budget of candidates
+  // passes, which is the price of the scatter being local (see
+  // `Scenery.ts`'s `BUSH_BUDGET`). That makes thinning something that can
+  // now happen quietly, so it gets a guard.
+  //
+  // **The table that stood here was the same stale one `Scenery.ts` was
+  // carrying** — 149 / 128 / 137 / 142 / 140, a copy kept in step by hand
+  // and, by #500, wrong by two to four times. Two definitions of one
+  // measurement, which is this repo's most-repeated bug; the owner of what
+  // the budget buys is `Scenery.ts`'s `BUSH_BUDGET` comment, and this
+  // quotes no numbers of its own beyond the one it asserts.
+  //
+  // **And 107 had stopped guarding the thing the budget exists for.** It
+  // was chosen when every seed planted 108, so it read as "no seed is
+  // worse off than before". Today the five parks plant 295 / 266 / 201 /
+  // 483 / 456, so a change that halved the scatter — the exact failure
+  // `BUSH_BUDGET` was raised to 4200 to prevent, and the cheapest possible
+  // way to make a clearance invariant go green — would leave the thinnest
+  // park at 100 and this line **still green**. A floor that only fires
+  // after a two-thirds collapse is not a floor.
+  //
+  // So it guards the property the budget was actually chosen for: **no
+  // park is thinner than the day before #500**, whose worst park was 203.
+  // 180 is that, less about a tenth for ordinary seed-to-seed drift as the
+  // geometry moves — the thinnest park today (201) clears it by 21.
+  //
+  // **What a 50% thinning actually does to it, measured rather than
+  // assumed** — the budget halved to 2100 plants 139 / 145 / 98 / 237 /
+  // 220 across canonical / 5 / 11 / 24 / 131, so **three of the five go
+  // red** at 180 where **one** did at 107. Not all five: seeds 24 and 131
+  // sit high enough that halving still leaves them over the bar. A floor
+  // is a per-park guard and the parks are not alike, so no single number
+  // catches every thinning everywhere — the same thing the tree floor's
+  // comment above says about its own 24, and the reason running on five
+  // seeds is what does the work rather than the cleverness of the number.
+  // Three suites going red at once is a loud enough signal.
+  floor(facts.bushes.length, 180, 'the park planted almost no bushes');
+  // Climbable trees get their own floor, separate from the walk-distance
+  // invariant, because the two fail differently: the distance check goes
+  // red when they are badly spread, this one when there are simply too few.
+  // A park could in principle satisfy the walk with four well-placed trees
+  // and still feel bare.
+  //
+  // **This is the primary guard on Jim's complaint**, and it tightened a
+  // long way when #216 landed. Measured across the five CI seeds at
+  // 43 / 40 / 49 / 48 / 48 — up from 8 / 9 / 12 / 12 / 11 before that PR
+  // stopped capping planting at 55 m, and from 1 / 2 / 2 / 3 / 5 under the
+  // rule that had Jim hunting for a tree at all.
+  //
+  // The floor is 25: comfortably below the worst seed (40, so 37% of slack
+  // for a park that regenerates), and comfortably *above* both earlier
+  // populations, so it fails outright if either the old predicate or the
+  // old planting cap comes back. It is deliberately not scaled to the
+  // current park — a floor that tracks what the park happens to manage
+  // catches nothing.
+  floor(facts.climbableTrees.length, 24, 'the park planted almost nothing a child can climb');
+  floor(facts.lamps.length, 0, 'the park has no lamps');
+  floor(facts.plots.length, 0, 'the park placed no plots');
+  floor(facts.exits.length, 0, 'the park has no ride exits');
+  return complaints;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'every scattered feature actually puts something in the park',
@@ -11886,6 +11990,18 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
 ];
 
 /**
+ * **Every measure a park must pass to be accepted** — the furnished floors and
+ * every invariant, in the order the suite runs them. The root acceptance loop
+ * (`scripts/lib/acceptedPark.mts`) asks exactly these of every attempt and
+ * starts the park again from zero while any complains; the suite below asks
+ * them again of the accepted park, as the second line. One list, two askers.
+ */
+export const PARK_ACCEPTANCE: readonly (readonly [string, Invariant])[] = [
+  ['built the park it was asked for', theParkIsFurnished],
+  ...INVARIANTS,
+];
+
+/**
  * Registers every invariant for one seed.
  *
  * The park is built **once** per seed in `beforeAll` and shared: it is a few
@@ -11910,97 +12026,8 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
 
     it('built the park it was asked for', () => {
       expect(facts.seed).toBe(seed);
-      // A park with no walls, no trees or no lamps would pass every clearance
-      // invariant below vacuously. This is the guard against that.
-      //
-      // Trees get a real floor rather than `> 0`, because thinning the scatter
-      // is the cheapest possible way to make a clearance invariant go green and
-      // it is not a hypothetical: adding `treesKeepOffWalls` took the canonical
-      // seed from 30 trees to 19 until the scatter's attempt budget was raised
-      // to buy them back.
-      //
-      // **This floor cannot catch every thinning, and the number is chosen
-      // knowing that.** Measured both ways round — healthy park 26/27/26/30/28
-      // across the five seeds, the same park with the budget reverted
-      // 19/23/23/27/23 — the two sets *overlap*: seed 11 thinned (27) plants
-      // more than the canonical seed healthy (26). So no single floor can
-      // separate them everywhere, and any threshold low enough to keep a real
-      // park green necessarily lets seed 11's thinning through.
-      //
-      // 24 is the best a global floor does: it catches 4 of the 5 seeds and
-      // still leaves the healthiest-but-lowest real seed two trees of headroom
-      // for ordinary seed-to-seed drift. Four suites going red at once is a
-      // loud enough signal; running on five seeds is what makes it work, not
-      // the cleverness of the number. Raising it to 25 would catch no more and
-      // leave one tree of headroom, so it is not worth the false alarms.
-      //
-      // An anti-vacuity guard, not a placement threshold — the "thresholds come
-      // from the game" rule above is about the latter.
-      expect(facts.trees.length, 'the park planted almost no trees').toBeGreaterThan(24);
-      // Bushes get a floor for the same reason, and they need one more than
-      // they used to. The clump count was pinned at exactly 108 by a
-      // fill-until-N loop; it is now whatever a fixed budget of candidates
-      // passes, which is the price of the scatter being local (see
-      // `Scenery.ts`'s `BUSH_BUDGET`). That makes thinning something that can
-      // now happen quietly, so it gets a guard.
-      //
-      // **The table that stood here was the same stale one `Scenery.ts` was
-      // carrying** — 149 / 128 / 137 / 142 / 140, a copy kept in step by hand
-      // and, by #500, wrong by two to four times. Two definitions of one
-      // measurement, which is this repo's most-repeated bug; the owner of what
-      // the budget buys is `Scenery.ts`'s `BUSH_BUDGET` comment, and this
-      // quotes no numbers of its own beyond the one it asserts.
-      //
-      // **And 107 had stopped guarding the thing the budget exists for.** It
-      // was chosen when every seed planted 108, so it read as "no seed is
-      // worse off than before". Today the five parks plant 295 / 266 / 201 /
-      // 483 / 456, so a change that halved the scatter — the exact failure
-      // `BUSH_BUDGET` was raised to 4200 to prevent, and the cheapest possible
-      // way to make a clearance invariant go green — would leave the thinnest
-      // park at 100 and this line **still green**. A floor that only fires
-      // after a two-thirds collapse is not a floor.
-      //
-      // So it guards the property the budget was actually chosen for: **no
-      // park is thinner than the day before #500**, whose worst park was 203.
-      // 180 is that, less about a tenth for ordinary seed-to-seed drift as the
-      // geometry moves — the thinnest park today (201) clears it by 21.
-      //
-      // **What a 50% thinning actually does to it, measured rather than
-      // assumed** — the budget halved to 2100 plants 139 / 145 / 98 / 237 /
-      // 220 across canonical / 5 / 11 / 24 / 131, so **three of the five go
-      // red** at 180 where **one** did at 107. Not all five: seeds 24 and 131
-      // sit high enough that halving still leaves them over the bar. A floor
-      // is a per-park guard and the parks are not alike, so no single number
-      // catches every thinning everywhere — the same thing the tree floor's
-      // comment above says about its own 24, and the reason running on five
-      // seeds is what does the work rather than the cleverness of the number.
-      // Three suites going red at once is a loud enough signal.
-      expect(facts.bushes.length, 'the park planted almost no bushes').toBeGreaterThan(180);
-      // Climbable trees get their own floor, separate from the walk-distance
-      // invariant, because the two fail differently: the distance check goes
-      // red when they are badly spread, this one when there are simply too few.
-      // A park could in principle satisfy the walk with four well-placed trees
-      // and still feel bare.
-      //
-      // **This is the primary guard on Jim's complaint**, and it tightened a
-      // long way when #216 landed. Measured across the five CI seeds at
-      // 43 / 40 / 49 / 48 / 48 — up from 8 / 9 / 12 / 12 / 11 before that PR
-      // stopped capping planting at 55 m, and from 1 / 2 / 2 / 3 / 5 under the
-      // rule that had Jim hunting for a tree at all.
-      //
-      // The floor is 25: comfortably below the worst seed (40, so 37% of slack
-      // for a park that regenerates), and comfortably *above* both earlier
-      // populations, so it fails outright if either the old predicate or the
-      // old planting cap comes back. It is deliberately not scaled to the
-      // current park — a floor that tracks what the park happens to manage
-      // catches nothing.
-      expect(
-        facts.climbableTrees.length,
-        'the park planted almost nothing a child can climb',
-      ).toBeGreaterThan(24);
-      expect(facts.lamps.length, 'the park has no lamps').toBeGreaterThan(0);
-      expect(facts.plots.length, 'the park placed no plots').toBeGreaterThan(0);
-      expect(facts.exits.length, 'the park has no ride exits').toBeGreaterThan(0);
+      const complaints = theParkIsFurnished(facts);
+      expect(complaints, describeComplaints(complaints)).toHaveLength(0);
     });
 
     // The one place in this file that asserts. See {@link Invariant}.

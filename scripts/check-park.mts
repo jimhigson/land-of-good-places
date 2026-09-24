@@ -84,6 +84,7 @@ const park = buildHeadlessPark();
 const { findings, table, regressions, loose, drift, measured, worst, worstDetail, summary } = measureParkFindings(
   park,
   ratchetEnforced,
+  verbose,
 );
 const elapsed = performance.now() - started;
 for (const line of drift) console.log(`drift (not enforced this run): ${line}`);

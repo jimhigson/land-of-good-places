@@ -21,6 +21,7 @@ import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
 import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
+import type { HeadlessPark } from '../../scripts/park-harness.mts';
 import type { RailRaceRoute } from '../../src/world/railRace/route.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 import type { Claim } from '../../src/boot/groundClaims.ts';
@@ -654,8 +655,13 @@ export interface RailRaceSupportFacts {
 }
 
 export interface ParkFacts {
+  /** The seed asked for — the park's identity. */
   readonly seed: number;
+  /** Which start-again of that seed this is (`src/world/parkRestart.ts`); 0 is the seed's own park. */
+  readonly restart: number;
   readonly world: World;
+  /** The harness's own handle on the park — what `check:park`'s measures take. */
+  readonly headless: HeadlessPark;
   /** The entrance road's corridor, claimed and drawn — see {@link RoadCorridorFacts}. */
   readonly roadCorridor: RoadCorridorFacts;
   /** The castle's four corner turrets — see {@link CastleTurretFact}. */
@@ -1640,8 +1646,9 @@ function measureCatBusFit(): {
   return { seatCount, worstProtrusion, worstOverlap, widestChild };
 }
 
-export async function buildParkFacts(seed: number): Promise<ParkFacts> {
+export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFacts> {
   process.env['LGP_SEED'] = String(seed);
+  process.env['LGP_PARK_RESTART'] = String(restart);
 
   const { buildHeadlessPark } = await import('../../scripts/park-harness.mts');
   const { PARK_SEED_ASKED, PARK_MANIFEST } = await import('../../src/world/parkManifest.ts');
@@ -1655,7 +1662,13 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
     );
   }
 
-  const { world, scene, buildMs, sample } = buildHeadlessPark();
+  const { PARK_RESTART } = await import('../../src/world/parkRestart.ts');
+  if (PARK_RESTART !== restart) {
+    throw new Error(`parkFacts: asked for restart ${restart} of seed ${seed} but the park built restart ${PARK_RESTART}.`);
+  }
+
+  const headless = buildHeadlessPark();
+  const { world, scene, buildMs, sample } = headless;
 
   // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
   // already built for this exact seed — never at this file's own top level,
@@ -3795,6 +3808,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     cruiserRouteGroundClearance,
     cruiserPylonTops,
     seed,
+    restart,
+    headless,
     world,
     walls,
     trees,

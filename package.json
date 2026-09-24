@@ -43,6 +43,8 @@
     "check:space-night": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-space-night.mts",
     "check:waypoints": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/check-waypoints.mts",
     "check:park": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-park.mts",
+    "park:attempt": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/park-attempt.mts",
+    "accept:parks": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/accept-parks.mts",
     "check:solve-cost": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-solve-cost.mts",
     "check:castle": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-castle.mts",
     "check:castle-towers": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-castle-towers.mts",
