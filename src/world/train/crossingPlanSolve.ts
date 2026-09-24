@@ -5,10 +5,11 @@ import {
   CROSSING_STATION_CLEARANCE,
   CROSSING_STATION_STRUCTURE_CLEARANCE,
 } from './clearance';
-import { MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
+import { DECK_HALF_LENGTH, MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
 import { STATION_GAP } from './fence';
 import { isInEntranceGateway } from '../entrance/layout';
 import { crossingSiteBanned } from '../parkWarp';
+import { PARK_LAYOUT, RING_PLOT_CLEARANCE, RING_RADIUS } from '../parkLayout';
 import {
   NARROW_HALF_WIDTH,
   SITE_ANGLE_OFFSETS,
@@ -306,10 +307,11 @@ function bridgeCandidateAt(railDistance: number): Candidate | null {
  * clutter rule and cannot answer this: the railway winds, so two crossings a
  * long way apart around the loop can be a few metres apart in the park.
  *
- * Each site is treated as the oriented rectangle its bridge will really fill:
- * {@link MIN_BRIDGE_HALF_LENGTH} along the crossing direction (deck plus the
- * ramp every accepted bridge must achieve, asked of `bridgeFootprint.ts` rather
- * than restated here) by its own proven `halfWidth` across. Overlap is the
+ * Each site is treated as the oriented rectangle its bridge will really fill,
+ * with room to land: {@link siteHalfLengthWithLanding} along the crossing
+ * direction (deck plus its own proven ramp reach, never less than the ramp
+ * every accepted bridge must achieve, plus a landing) by its own proven
+ * `halfWidth` across. Overlap is the
  * separating-axis test on the four face normals — exact for two rectangles, and
  * it costs nothing at this scale.
  *
@@ -334,6 +336,58 @@ function bridgeCandidateAt(railDistance: number): Candidate | null {
  * carries the re-scoped question — why seed 2 proves no bridge sites at all,
  * which is the defect that actually let two bridges collide.
  */
+/**
+ * How far along its axis a site's ground reaches, landing included: the deck,
+ * the longer of the two ramps it *proved* (the reach every path router plants
+ * its feet from), and {@link SITE_LANDING} past it.
+ *
+ * This read {@link MIN_BRIDGE_HALF_LENGTH} — the shortest ramp any bridge may
+ * have — and that let two proven sites stand end to end. Seed 131 kept sites
+ * at (-2.2, 40.3) and (-37.7, 47.7) whose proven ramps met at their feet, 1.6 m
+ * apart: every path leaving the one foot started inside the other bridge's
+ * ramp, the routers had nowhere to put a leg, and paving hung off both ramps.
+ */
+function siteHalfLengthWithLanding(c: Candidate): number {
+  return Math.max(MIN_BRIDGE_HALF_LENGTH, DECK_HALF_LENGTH + Math.max(c.rampReachPos, c.rampReachNeg)) + SITE_LANDING;
+}
+
+/**
+ * Ground each end of a bridge keeps clear past its ramp foot: the metre the
+ * routers set a crossing's foot past the ramp (`paths.ts`'s `crossingFeet`),
+ * plus a street's own half-width and kerb, so a path can land on the foot and
+ * turn away from it without standing on anything.
+ */
+const SITE_LANDING = 3;
+
+/**
+ * **Would this bridge's ramp land on the main loop?** The ring is a fixed
+ * circle of paving round the plaza (`paths.ts`'s `solveRing`), drawn before any
+ * path is routed and never re-routed round anything, so a ramp reaching it puts
+ * the loop's own paving on the ramp — lifted onto the hump where it overlaps
+ * the stone and left on the lawn beside it. Measured on seed 131: the ring
+ * crossed the west end of the ramp at (24.3, -20.5) and hung 1.0 m sheets of
+ * paving either side of it. The loop cannot move, so the site is refused.
+ *
+ * Asked of the site's whole ground with its landing
+ * ({@link siteHalfLengthWithLanding}) against the ring's annulus padded by the
+ * clearance plots already keep from it (`RING_PLOT_CLEARANCE`).
+ */
+function siteReachesTheRing(c: Candidate): boolean {
+  const plaza = PARK_LAYOUT.fountain;
+  const halfLength = siteHalfLengthWithLanding(c);
+  const halfWidth = c.halfWidth;
+  // The plaza's centre in the site's own frame.
+  const dx = plaza.x - c.x;
+  const dz = plaza.z - c.z;
+  const along = dx * c.dirX + dz * c.dirZ;
+  const across = -dx * c.dirZ + dz * c.dirX;
+  const outsideAlong = Math.max(0, Math.abs(along) - halfLength);
+  const outsideAcross = Math.max(0, Math.abs(across) - halfWidth);
+  const nearest = Math.hypot(outsideAlong, outsideAcross);
+  const farthest = Math.hypot(Math.abs(along) + halfLength, Math.abs(across) + halfWidth);
+  return nearest <= RING_RADIUS + RING_PLOT_CLEARANCE && farthest >= RING_RADIUS - RING_PLOT_CLEARANCE;
+}
+
 function footprintsOverlap(a: Candidate, b: Candidate): boolean {
   const axes = [
     [a.dirX, a.dirZ],
@@ -346,7 +400,7 @@ function footprintsOverlap(a: Candidate, b: Candidate): boolean {
   for (const [axX, axZ] of axes) {
     // Each rectangle's own extent on this axis, and the gap between centres.
     const extent = (c: Candidate): number =>
-      Math.abs((c.dirX * axX + c.dirZ * axZ) * MIN_BRIDGE_HALF_LENGTH) +
+      Math.abs((c.dirX * axX + c.dirZ * axZ) * siteHalfLengthWithLanding(c)) +
       Math.abs((-c.dirZ * axX + c.dirX * axZ) * c.halfWidth);
     // A single axis on which they are apart proves they do not overlap.
     if (Math.abs(dx * axX + dz * axZ) >= extent(a) + extent(b)) return false;
@@ -457,17 +511,24 @@ export interface SolvedCrossingSites {
  * between candidates cannot change the result: every candidate is a pure
  * function of its own rail distance and the already-solved layout.
  */
-export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, void> {
+export function* crossingSitesSearch(attempt = 0): Generator<number, SolvedCrossingSites, void> {
   const route = TRAIN_PLAN.route;
+  // A fresh draw forgets every ban: they were measured against a loop that
+  // may no longer be the one being planned.
+  if (attempt === 0) sitesThatWalledPathsIn.length = 0;
+  const bans = sitesThatWalledPathsIn.slice(0, attempt);
   const bridgeCandidates: Candidate[] = [];
   for (let d = 0; d < route.length; d += MARCH_STEP) {
     yield d;
+    if (bans.some((banned) => Math.abs(route.wrap(d - banned + route.length / 2) - route.length / 2) < SITE_SPACING / 2)) {
+      continue;
+    }
     // The warp vector may ban a site the paths could not use well; the
     // march then simply never sees a candidate there and `selectSpaced`
     // picks the next-best spacing. Unwarped, nothing is ever banned.
     if (crossingSiteBanned(d)) continue;
     const bridge = bridgeCandidateAt(d);
-    if (bridge) bridgeCandidates.push(bridge);
+    if (bridge && !siteReachesTheRing(bridge)) bridgeCandidates.push(bridge);
   }
   const bridges = selectSpaced(bridgeCandidates);
   // Zero bridge sites is an invalid park, full stop — there is no level
@@ -486,6 +547,22 @@ export function* crossingSitesSearch(): Generator<number, SolvedCrossingSites, v
   return { bridges };
 }
 
+
+/**
+ * **Bridge sites the path graph found walling a path in**, by rail distance,
+ * in the order it found them — see `paths.ts`'s `commitRouteOffBridges`. The
+ * path-graph step records one here and refuses; the crossing plan's next
+ * attempt then plans without every site recorded so far, and no candidate
+ * within half a site spacing of one (a neighbouring candidate would stand on
+ * the same ground and wall the same path in). The procgen's own backtracking
+ * (CLAUDE.md): a different decision, not a shrunk one.
+ */
+const sitesThatWalledPathsIn: number[] = [];
+
+/** Record a site the path graph was walled in by, for the next crossing plan. */
+export function refuseBridgeSiteForPaths(railDistance: number): void {
+  sitesThatWalledPathsIn.push(railDistance);
+}
 
 /** The same search, driven straight through — Node, the harness and any
  * boot that did not pre-warm. */
