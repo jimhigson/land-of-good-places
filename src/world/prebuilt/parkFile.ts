@@ -7,7 +7,7 @@ import { cruiserPlanFromDecisions, type PlannedCoaster } from '../coaster/planne
 import type { PlannedSlide } from '../slide/planned';
 import type { SolvedCrossingSites } from '../train/crossingSite';
 import { TrainRoute } from '../train/route';
-import { planStations, type PlannedStation } from '../train/plan';
+import type { PlannedStation } from '../train/plan';
 import type { LatticeStateSnapshot, PathGraph } from '../paths';
 import type { WorldDecisions } from '../worldPhase';
 import type { BridgeDecision } from '../train/bridgeFootprint';
@@ -94,6 +94,8 @@ export interface CruiserRecord {
 
 export interface TrainRecord {
   readonly plan: RouteRecord;
+  /** The stations as the search placed them (`procgen/world/train/stations.ts`). */
+  readonly stations: Json;
 }
 
 export interface SlideRecord {
@@ -144,7 +146,7 @@ export interface ParkFile {
 export interface DecidedPlan {
   readonly layout: ParkLayout;
   readonly cruiser: PlannedCoaster;
-  readonly train: { readonly route: TrainRoute };
+  readonly train: { readonly route: TrainRoute; readonly stations: readonly PlannedStation[] };
   readonly slide: PlannedSlide;
   readonly crossings: SolvedCrossingSites;
   readonly pathGraph: PathGraph;
@@ -305,7 +307,7 @@ export function readCruiser(record: CruiserRecord): PlannedCoaster {
 /** The train's route and stations — the stations derived exactly as the solve derives them. */
 export function readTrain(record: TrainRecord): { route: TrainRoute; stations: readonly PlannedStation[] } {
   const route = new TrainRoute(readRoute(record.plan, 'train.plan'));
-  return { route, stations: planStations(route) };
+  return { route, stations: unplain(record.stations, 'train.stations') as readonly PlannedStation[] };
 }
 
 export function readSlide(record: SlideRecord): PlannedSlide {

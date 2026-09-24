@@ -23,7 +23,7 @@ import { type SolvedRailRoute } from '../../src/world/rail/generate';
 import { RailRouteUnsolvable } from './rail/generate';
 import { TrainRoute } from '../../src/world/train/route';
 import { trainRouteSearch } from './train/route';
-import { planStations } from '../../src/world/train/plan';
+import { planStations } from './train/stations';
 import { slideSearch } from './slide/solve';
 import { type PlannedSlide } from '../../src/world/slide/planned';
 import { crossingSitesSearch } from './train/crossingPlanSolve';

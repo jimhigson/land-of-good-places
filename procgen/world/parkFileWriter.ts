@@ -129,7 +129,7 @@ export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamp
         exitX: num(cruiser.exitX),
         exitZ: num(cruiser.exitZ),
       },
-      train: { plan: writeRoute(train.route.solvedRoute, 'train.plan') },
+      train: { plan: writeRoute(train.route.solvedRoute, 'train.plan'), stations: plain(train.stations, 'train.stations') },
       slide: {
         route: writeRoute(slideRoute, 'slide.route'),
         points: flatPoints(slidePoints),
