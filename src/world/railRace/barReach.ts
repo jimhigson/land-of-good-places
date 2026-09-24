@@ -179,25 +179,36 @@ const _chart = new Vector3();
  * Every **other** lane of `route` that the bar drawn by `matrix` reaches into,
  * with the depth of the worst sampled point. Empty is the healthy answer.
  *
- * Samples the bar's whole box — every 5 cm along its length, at its top, middle
- * and bottom and its front, middle and back — takes each sample into the chart
- * at its own station, and asks whether it stands inside another lane's
- * {@link laneEnvelope} there.
+ * Samples the bar's box every {@link BAR_SAMPLE_STEP} along its length, at the
+ * four long edges (top and bottom, front and back — against a box-shaped
+ * envelope the extremes are on the edges), takes each sample into the chart,
+ * and asks whether it stands inside another lane's {@link laneEnvelope} there.
+ *
+ * **One station per bar.** The chart is found at the bar's own centre
+ * (`stationOf`, the expensive search) and every sample is unleant there, its
+ * own station read off its along-track offset in that frame. A bar is a few
+ * tenths of a metre thick along the track, so this is exact to the slope times
+ * that — millimetres — and it is what lets the planner ask it of every slot of
+ * every lane on both rings at boot.
  */
 export function duckBarIntrusions(route: RailRaceRoute, barLane: number, matrix: Matrix4): BarIntrusion[] {
   const box = barBox();
   const envelope = laneEnvelope(route.scale);
   const worst = new Map<number, BarIntrusion>();
+  _world.setFromMatrixPosition(matrix);
+  const centreStation = route.stationOf(_world);
+  const centreSample = route.path.sampleAt(centreStation);
   const steps = Math.max(1, Math.ceil((box.max.x - box.min.x) / BAR_SAMPLE_STEP));
   for (let i = 0; i <= steps; i += 1) {
     const x = box.min.x + ((box.max.x - box.min.x) * i) / steps;
-    for (const y of [box.min.y, (box.min.y + box.max.y) / 2, box.max.y]) {
-      for (const z of [box.min.z, (box.min.z + box.max.z) / 2, box.max.z]) {
+    for (const y of [box.min.y, box.max.y]) {
+      for (const z of [box.min.z, box.max.z]) {
         _world.copy(_local.set(x, y, z)).applyMatrix4(matrix);
-        const station = route.stationOf(_world);
-        route.unlean(station, _world, _chart);
-        const sample = route.path.sampleAt(station);
-        const offset = (_chart.x - sample.x) * sample.normalX + (_chart.z - sample.z) * sample.normalZ;
+        route.unlean(centreStation, _world, _chart);
+        const dx = _chart.x - centreSample.x;
+        const dz = _chart.z - centreSample.z;
+        const offset = dx * centreSample.normalX + dz * centreSample.normalZ;
+        const station = route.wrap(centreStation + dx * centreSample.tangentX + dz * centreSample.tangentZ);
         for (let lane = 0; lane < LANE_COUNT; lane += 1) {
           if (lane === barLane) continue;
           const across = offset - (route.laneOffsets[lane] ?? 0);

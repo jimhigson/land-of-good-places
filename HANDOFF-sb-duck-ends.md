@@ -20,3 +20,9 @@ any seed whose bars move.
   is the reported one: lane 3, station 206.2, 0.02 m above lane 3's rail.
 - 81 of 196 lane:slot pairs blocked on seed 4 (either ring).
 - Rider NOT in envelope (head 2.84 vs bar underside 2.55 at park scale) - would block far more.
+- Invariant `every Rail Race duck bar keeps to its own lane` added (facts: duckBarReach). RED on
+  4 r2 with no refusal: 21 complaints (sbde/red/4-2.out), e.g. walk-past bar 1 over lane 1 at
+  73.28 m reaches 0.536 m into lane 0 at station 340.6 (-0.05 across, 0.90 up).
+- duckBarIntrusions now uses one stationOf per bar (76 ms for all 392 lane-slot checks on seed 4).
+- Refusal: simulate.ts reachRefusedSlots(len, [walkPast, race]) seeds refusedBarSlots; DFS +
+  laneShift unchanged. Comparing layouts over seeds 0..15 (sbde/bars-*.txt) in progress.
