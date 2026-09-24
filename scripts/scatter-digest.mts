@@ -31,7 +31,7 @@
 import './headless-canvas.mjs';
 import { createHash } from 'node:crypto';
 import { buildHeadlessPark } from './park-harness.mts';
-import { PARK_SEED } from '../src/world/parkManifest.ts';
+import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { PATH_GRAPH } from '../src/world/pathGraph.ts';
 
 /**
@@ -139,7 +139,7 @@ const stretchedSpur =
   PATH_GRAPH.edges.find((edge) => edge.route.name === stretchedSpurName)?.route.points ?? [];
 
 const summary = {
-  seed: PARK_SEED,
+  seed: PARK_SEED_ASKED,
   paths: { metres: Number(pathMetres.toFixed(3)), digest: digestOf(pathLabels) },
   spur: { name: stretchedSpurName, points: stretchedSpur },
   spurStretch: Number(process.env['LGP_SPUR_STRETCH'] ?? 0),
