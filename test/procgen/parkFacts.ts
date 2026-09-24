@@ -810,7 +810,14 @@ export interface ParkFacts {
    * `strings` matters on its own: a pole with no neighbour carries no cable
    * and no bulbs, so poles alone do not mean a child sees any lights.
    */
-  readonly fairyLights: { readonly poles: number; readonly strings: number };
+  readonly fairyLights: {
+    readonly poles: number;
+    readonly strings: number;
+    /** Each drawn pole's centre and its own axis (it leans with the planet), off the scene. */
+    readonly polesDrawn: readonly { readonly name: string; readonly at: Vector3; readonly up: Vector3 }[];
+    /** The ground a pole claims — `FairyLights.ts`'s own `FAIRY_POLE_RADIUS`, asked, not copied. */
+    readonly poleRadius: number;
+  };
   /**
    * The early, conservative reservation `bridgeKeepout.ts` computes for
    * every railway crossing (`train/bridgeFootprint.ts`'s `planConservative`
@@ -3750,14 +3757,25 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
   // so it cannot be measured off the built park at all — and a denominator
   // that cannot be measured has no business in a line that reports
   // measurements. It is gone rather than corrected.
+  const { FAIRY_POLE_RADIUS } = await import('../../src/world/FairyLights.ts');
   const fairyLightsDrawn = ((): ParkFacts['fairyLights'] => {
     let poles = 0;
     let strings = 0;
+    const polesDrawn: { name: string; at: Vector3; up: Vector3 }[] = [];
+    world.fairyLights.group.updateMatrixWorld(true);
     world.fairyLights.group.traverse((object) => {
-      if (object.name.startsWith('fairy-pole-')) poles += 1;
-      else if (object.name.startsWith('fairy-string-')) strings += 1;
+      if (object.name.startsWith('fairy-pole-')) {
+        poles += 1;
+        const quaternion = object.getWorldQuaternion(new Quaternion());
+        polesDrawn.push({
+          name: object.name,
+          at: object.getWorldPosition(new Vector3()),
+          // flat-ok: local axis, leant by the pole's own world quaternion
+          up: new Vector3(0, 1, 0).applyQuaternion(quaternion),
+        });
+      } else if (object.name.startsWith('fairy-string-')) strings += 1;
     });
-    return { poles, strings };
+    return { poles, strings, polesDrawn, poleRadius: FAIRY_POLE_RADIUS };
   })();
 
   // The bus's run, from the same owners `ArrivalSequence.placeBus` and

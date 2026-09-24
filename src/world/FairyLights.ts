@@ -17,10 +17,11 @@ import {
 import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
-import { PLAZA, plazaVerge } from './paths';
+import { PLAZA, plazaVerge, pointStandsOnABridgeRamp } from './paths';
 import { cruiserClearanceForPoints } from './coaster/clearance';
 import type { CoasterRoute } from './coaster/route';
-import { PLAYER_RADIUS } from '../core/constants';
+import { PLAYER_RADIUS, WALKABLE_GAP } from '../core/constants';
+import { nearADoormat, onRideExit } from './Scenery';
 import { isOnPath, pathCentreline } from './pathGraph';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
@@ -122,6 +123,23 @@ const WIDEST_DRAWN_RADIUS = Math.max(POLE_DRAWN_BOTTOM_RADIUS, KNOB_RADIUS);
  * has been given its own owner above.
  */
 const POLE_RADIUS = 0.28;
+/** The same figure, for the invariant that measures pole spacing off the drawn park. */
+export const FAIRY_POLE_RADIUS = POLE_RADIUS;
+
+/**
+ * **How far apart two fairy poles must stand** — room for a child to walk
+ * between them, which is two pole radii plus `WALKABLE_GAP` (two player
+ * radii), the width `NavGrid` fattens every collider by.
+ *
+ * The claims registry never refuses a feature for its own claims, so nothing
+ * stopped a pole on one path run landing on a pole of the run that meets it:
+ * seed 208 stood `fairy-pole-39` and `fairy-pole-58` **0.032 m** apart (two
+ * posts drawn through each other, their knobs z-fighting — found by
+ * `check:coplanar`), and every seed had pairs well inside a pole's own
+ * collider (0.087 m, 0.204 m, 0.291 m on the same seed). A pole refused this
+ * way slides along its run like any other refusal.
+ */
+export const FAIRY_POLE_SPACING = POLE_RADIUS * 2 + WALKABLE_GAP;
 
 // **A pole must not be drawn wider than the ground it claims.** Anything a
 // child can see and lean on has a collider that covers it (CLAUDE.md), and a
@@ -533,6 +551,23 @@ export function fairyPoleBuilder(
       // Beside the paving, never on it — and never so close that the pole
       // pinches the lane a child walks down.
       if (isOnPath(x, z, POLE_PAVING_CLEARANCE)) continue;
+      // **Nor on a bridge.** A bridge's deck carries its own paving, which the
+      // drawn-path samples above do not see, so `isOnPath` reads a pole on the
+      // deck as standing 1.9 m off the path. Seed 11 put `fairy-pole-88` on the
+      // walkway of the bridge at (1.5, -31.6), making the crossing unwalkable
+      // 11 m along its centreline. The footprint's one owner answers, with the
+      // pole's own radius as the margin (it reaches a little past what the
+      // built bridge covers — seven more poles on seed 11 stood inside it but
+      // outside the masonry, and those simply slide along their runs).
+      if (pointStandsOnABridgeRamp(x, z, POLE_RADIUS)) continue;
+      // **Nor where a child is set down or served.** A pole that slides along
+      // its run can slide onto a ride exit or a doormat — seed 428's
+      // `fairy-pole-60` came to rest 1.30 m from `exit-railRace` and pushed a
+      // child standing there 0.12 m. The owners the lamps and the scenery
+      // already ask: `onRideExit` with the room to walk past the pole, and
+      // `nearADoormat`.
+      if (onRideExit(x, z, POLE_RADIUS + WALKABLE_GAP)) continue;
+      if (nearADoormat(x, z)) continue;
       // **Ask the ride, before standing anything up.** A pole is 4.4 m tall and
       // the claims registry is a ground-footprint system — it cannot see what
       // sweeps through the air above a square metre. Seed 24 built a park whose
@@ -553,6 +588,15 @@ export function fairyPoleBuilder(
           fairyOccupiedPoints(x, z, neighbours),
           WIDEST_DRAWN_RADIUS,
         ) < POLE_RIDE_CLEARANCE
+      ) {
+        continue;
+      }
+      // Not on, or pinching the gap beside, another fairy pole — see
+      // {@link FAIRY_POLE_SPACING}. Every standing pole but this slot's own.
+      if (
+        placed.some(
+          (other, i) => i !== index && other !== null && Math.hypot(other[0] - x, other[1] - z) < FAIRY_POLE_SPACING,
+        )
       ) {
         continue;
       }

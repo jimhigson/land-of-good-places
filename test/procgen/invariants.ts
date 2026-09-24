@@ -96,6 +96,7 @@ import {
   SPRINT_LOCAL_GRADE_CEILING,
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
+  WALKABLE_GAP,
   RIM_OUTSET_START,
   GROUND_SPHERE_RADIUS,
   BUS_MAX_GRADE,
@@ -184,15 +185,6 @@ import {
 } from '../../src/world/railRace/trestleGeometry.ts';
 import { CLAIM_COMPATIBILITY, distanceOutside, shapesOverlap, type Claim } from '../../src/boot/groundClaims.ts';
 import { RAIL_RACE_FEATURE } from '../../src/world/railRace/feature.ts';
-
-/**
- * The narrowest gap a child can actually use.
- *
- * `PLAYER_RADIUS` is 0.62 and `NavGrid` fattens every collider by it before
- * deciding a cell is walkable, so anything narrower than this is not a gap at
- * all — it is a solid wall with a visible slot in it.
- */
-const WALKABLE_GAP = 1.24;
 
 /**
  * Half the track's width plus a little — `train/route.ts`'s own number.
@@ -6160,6 +6152,62 @@ const nothingHangsIntoTheTunnel: Invariant = (facts) => {
 };
 
 /**
+ * **A child can walk between any two fairy poles.**
+ *
+ * The claims registry never refuses a feature for its *own* claims, so a pole
+ * on one path run could stand on a pole of the run that meets it. Seed 208
+ * drew `fairy-pole-39` and `fairy-pole-58` 0.032 m apart — two posts through
+ * each other — and pairs at 0.087, 0.204 and 0.291 m on the same park; it was
+ * found by `check:coplanar` through the two knobs z-fighting, not by anything
+ * that asked about the poles. Measured off the drawn meshes: each pole's
+ * centre, with the separation taken across the pair's own mean axis so a
+ * height difference on sloping ground cannot pass for a gap. The bar is the
+ * game's — two pole radii plus `WALKABLE_GAP` — not the generator's.
+ */
+const fairyPolesStandWalkablyApart: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const poles = facts.fairyLights.polesDrawn;
+  const need = facts.fairyLights.poleRadius * 2 + WALKABLE_GAP;
+  let worst = Infinity;
+  for (let i = 0; i < poles.length; i += 1) {
+    for (let j = i + 1; j < poles.length; j += 1) {
+      const a = poles[i]!;
+      const b = poles[j]!;
+      const up = a.up.clone().add(b.up).normalize();
+      const d = b.at.clone().sub(a.at);
+      d.addScaledVector(up, -d.dot(up));
+      const gap = d.length();
+      worst = Math.min(worst, gap);
+      if (gap < need - 1e-3) {
+        complaints.push(
+          `${a.name} and ${b.name} stand ${gap.toFixed(3)} m apart at (${fmt([a.at.x, a.at.z])}) — ` +
+            `a child needs ${need.toFixed(2)} m (two pole radii plus WALKABLE_GAP) to pass between them`,
+        );
+      }
+    }
+  }
+  // **And none on a bridge** — deck or parapet. The deck's paving is the
+  // bridge's own, not a drawn path sample, so a pole there read as standing
+  // well off the path (seed 11, `fairy-pole-88`, on the walkway at 11 m along
+  // the (1.5, -31.6) crossing). Measured against the *built* bridge's own
+  // `covers`, not the planner's footprint.
+  for (const pole of poles) {
+    for (const bridge of facts.world.train.bridges) {
+      if (!bridge.covers(pole.at.x, pole.at.z)) continue;
+      complaints.push(`${pole.name} stands on a bridge at (${fmt([pole.at.x, pole.at.z])})`);
+      break;
+    }
+  }
+  if (poles.length < 2) {
+    complaints.push(`only ${poles.length} fairy pole(s) drawn — this spacing check measured nothing`);
+  }
+  process.stderr.write(
+    `[fairy spacing] ${poles.length} poles, closest pair ${worst.toFixed(3)} m against ${need.toFixed(2)} m\n`,
+  );
+  return complaints;
+};
+
+/**
  * **Every modelled coping stone sits on the wall it caps — no stone floating
  * over a gap, none sunk into the parapet, none hanging off the end of it.**
  *
@@ -6213,8 +6261,14 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
     const topIndex = top.getIndex();
     if (!topPos || !topIndex) continue;
 
-    /** Height of the parapet's top face at `(x, z)`, or null if not over it. */
-    const wallTopAt = (x: number, z: number): number | null => {
+    /**
+     * The plane of the parapet-top triangle over `(x, z)`, as a function
+     * giving its height anywhere — or null if `(x, z)` is over no triangle.
+     * One triangle, found at one point, then extended: so every vertex of a
+     * block's end can be judged against the cap *that end sits on* without
+     * any of them straddling onto a neighbouring quad.
+     */
+    const wallTopPlaneAt = (x: number, z: number): ((px: number, pz: number) => number) | null => {
       for (let t = 0; t < topIndex.count; t += 3) {
         const ia = topIndex.getX(t);
         const ib = topIndex.getX(t + 1);
@@ -6231,7 +6285,14 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
         const v = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / area;
         const w = 1 - u - v;
         if (u < -1e-6 || v < -1e-6 || w < -1e-6) continue;
-        return u * topPos.getY(ia) + v * topPos.getY(ib) + w * topPos.getY(ic);
+        const ya = topPos.getY(ia);
+        const yb = topPos.getY(ib);
+        const yc = topPos.getY(ic);
+        return (px, pz) => {
+          const pu = ((bz - cz) * (px - cx) + (cx - bx) * (pz - cz)) / area;
+          const pv = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) / area;
+          return pu * ya + pv * yb + (1 - pu - pv) * yc;
+        };
       }
       return null;
     };
@@ -6239,24 +6300,60 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
     const copingPos = coping.geometry.getAttribute('position');
     if (!copingPos) continue;
 
-    // **Measure each block's base, not every vertex.** A coping block is
-    // tilted onto the local grade, and near a ramp foot the parapet's own top
-    // line is very steep indeed — the wall is collapsing through its taper
-    // while the road merely descends. Comparing a *tilted block's top face*
-    // against the wall vertically beneath it therefore reads high by up to
-    // 0.12 m on perfectly seated stone: the top face is displaced along the
-    // slope, so it is over wall that is lower than the wall its own base sits
-    // on. That is trigonometry, not daylight. The base is the honest question,
-    // and it is exact: a seated block's lowest vertices sit `COPING_SINK`
-    // below the drawn top, to the millimetre.
-    const perBlock = bridgeStoneGeometry('coping').getAttribute('position')?.count ?? 0;
-    if (perBlock === 0 || copingPos.count % perBlock !== 0) {
+    // **Measure each block's base face, found by what it is, not by where it
+    // happens to be lowest.** A coping block is tilted onto the local grade,
+    // and near a ramp foot the parapet's own top line is very steep indeed —
+    // the wall is collapsing through its taper while the road merely
+    // descends. Comparing a *tilted block's top face* against the wall
+    // vertically beneath it therefore reads high by up to 0.12 m on perfectly
+    // seated stone: that is trigonometry, not daylight. The base is the honest
+    // question, and it is exact: a seated block's base face sits
+    // `COPING_SINK` below the drawn top, to the millimetre.
+    //
+    // **The base is the authored stone's own bottom face (its lowest authored
+    // `y`), picked by vertex index — never "whichever baked vertices are
+    // lowest in the world".** Those were the same thing only while a block
+    // was shallower than about 48°. The stone has a 2 cm chamfer round its
+    // foot, so the bottom of its *end* face sits 0.02 up and 0.016 out from
+    // the base corner; tilt the block past `atan(0.02 / 0.016·scale)` and that
+    // end-face edge drops below the base. The first block of each run, laid
+    // up the steepest part of a ramp-foot taper, is tilted ~50°, so the old
+    // lowest-vertex rule measured the chamfer and reported a perfectly seated
+    // stone as 0.031 m afloat — seeds 11 and 131, three bridges, for weeks.
+    // Measured by recovering each block's placement from its own vertices:
+    // its true base sat within 0.1 mm of `top - COPING_SINK` at both ends.
+    //
+    // Each end of the base is judged, not just its middle: a block that
+    // lifted off at one end and dug in at the other would average to
+    // "seated" at its centre. Each end's midpoint is on the wall line and a
+    // joint's half-width inside its own segment, so it belongs to that
+    // segment's cap and there is nothing to straddle (see seed 5's note in
+    // the history of this invariant: a corner *can* straddle, a mid-edge
+    // point on the wall line cannot).
+    const authored = bridgeStoneGeometry('coping').getAttribute('position');
+    const perBlock = authored?.count ?? 0;
+    if (!authored || perBlock === 0 || copingPos.count % perBlock !== 0) {
       complaints.push(
         `bridge-${crossing.railDistance.toFixed(1)}: its coping mesh has ` +
           `${copingPos.count} vertices, not a whole number of ${perBlock}-vertex ` +
           'authored blocks — the bake has changed shape and this is measuring nothing',
       );
       continue;
+    }
+    let authoredFloor = Infinity;
+    for (let k = 0; k < perBlock; k += 1) authoredFloor = Math.min(authoredFloor, authored.getY(k));
+    /** Authored base-face vertex indices, split by which end of the stone. */
+    const baseEnds: [number[], number[]] = [[], []];
+    for (let k = 0; k < perBlock; k += 1) {
+      if (authored.getY(k) - authoredFloor > 1e-4) continue;
+      baseEnds[authored.getZ(k) < 0 ? 0 : 1].push(k);
+    }
+    if (baseEnds[0].length === 0 || baseEnds[1].length === 0) {
+      complaints.push(
+        'the authored coping stone has no flat base face with two ends — the asset ' +
+          'has changed shape and this invariant is measuring nothing',
+      );
+      return complaints;
     }
 
     const tolerance = 0.02;
@@ -6266,46 +6363,50 @@ const everyCopingStoneSitsOnItsWall: Invariant = (facts) => {
     let offWall = 0;
     const blocks = copingPos.count / perBlock;
     for (let block = 0; block < blocks; block += 1) {
-      // **The centre of the block's base face**, not a corner of it. A corner
-      // sits on the very edge of the parapet-top quad it belongs to, so on a
-      // curving spine the plan projection can land it on the *neighbouring*
-      // quad instead — which is at a slightly different height, and reads as a
-      // 3 cm error on a stone that is in fact seated perfectly (measured, seed
-      // 5, one block of eighty). The base centre is mid-quad and on the wall
-      // line, so it belongs to exactly one triangle and there is nothing to
-      // straddle. Loosening the tolerance instead would have been this file's
-      // own forbidden move: never weaken an assertion to make a seed pass.
-      let lowest = Infinity;
-      for (let k = 0; k < perBlock; k += 1) {
-        lowest = Math.min(lowest, copingPos.getY(block * perBlock + k));
+      let blockOff = false;
+      let blockWorst = 0;
+      let blockAt = '';
+      for (const end of baseEnds) {
+        let x = 0;
+        let z = 0;
+        for (const k of end) {
+          const i = block * perBlock + k;
+          x += copingPos.getX(i);
+          z += copingPos.getZ(i);
+        }
+        x /= end.length;
+        z /= end.length;
+        const plane = wallTopPlaneAt(x, z);
+        if (plane === null) {
+          blockOff = true;
+          continue;
+        }
+        // Seated means exactly `COPING_SINK` below the drawn top — at **every**
+        // base-face vertex of this end, not just its midpoint. The midpoint
+        // alone lies on the stone's centreline, so a block rolled about its
+        // long axis (one side edge lifted, the other sunk — 0.023 m each at
+        // 10°) moved neither end midpoint and passed; a reviewer planted
+        // exactly that. Each vertex is judged against the plane of the cap
+        // triangle under this end's midpoint (see {@link wallTopPlaneAt}), so
+        // the side edges are measured without straddling a neighbouring quad.
+        // Above is a floating stone; below is a stone buried in its wall.
+        for (const k of end) {
+          const i = block * perBlock + k;
+          const vx = copingPos.getX(i);
+          const vz = copingPos.getZ(i);
+          const gap = copingPos.getY(i) - (plane(vx, vz) - COPING_SINK);
+          if (Math.abs(gap) > Math.abs(blockWorst)) {
+            blockWorst = gap;
+            blockAt = `(${fmt([vx, vz])})`;
+          }
+        }
       }
-      let x = 0;
-      let z = 0;
-      let onBase = 0;
-      for (let k = 0; k < perBlock; k += 1) {
-        const i = block * perBlock + k;
-        if (copingPos.getY(i) - lowest > 1e-3) continue;
-        x += copingPos.getX(i);
-        z += copingPos.getZ(i);
-        onBase += 1;
-      }
-      if (onBase === 0) continue;
-      x /= onBase;
-      z /= onBase;
-
-      const surface = wallTopAt(x, z);
-      if (surface === null) {
-        offWall += 1;
-        continue;
-      }
-      // Seated means exactly `COPING_SINK` below the drawn top. Above that is
-      // a floating stone; well below it is a stone buried in its own wall.
-      const gap = lowest - (surface - COPING_SINK);
-      if (Math.abs(gap) > tolerance) {
+      if (blockOff) offWall += 1;
+      if (Math.abs(blockWorst) > tolerance) {
         floating += 1;
-        if (Math.abs(gap) > Math.abs(worstFloat)) {
-          worstFloat = gap;
-          worstAt = `(${fmt([x, z])})`;
+        if (Math.abs(blockWorst) > Math.abs(worstFloat)) {
+          worstFloat = blockWorst;
+          worstAt = blockAt;
         }
       }
     }
@@ -11943,6 +12044,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     'every modelled coping stone sits on the wall it caps',
     everyCopingStoneSitsOnItsWall,
   ],
+  ['a child can walk between any two fairy poles, and none stands on a bridge', fairyPolesStandWalkablyApart],
   [
     'no bridge parapet can be seen through — its outer face reaches the wall top',
     noBridgeParapetCanBeSeenThrough,

@@ -21,15 +21,13 @@ import { toonMaterial, outlineGeometry, inkTint } from '../art/style/materials';
 import { clamp01, smoothstep } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight } from './terrain';
 import { distanceToPath, ROUTES, routeCurve } from './pathGraph';
-import { ANCHORS } from './anchors';
 import { PARK_LAYOUT } from './parkLayout';
-import { clearOfCruiser, onRideExit } from './Scenery';
+import { clearOfCruiser, nearADoormat, onRideExit } from './Scenery';
 import { isInEntranceGateOpening } from './entrance/layout';
 import { PLAYER_RADIUS } from '../core/constants';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from './train/plan';
 import { isInBridgeFootprint } from './train/bridgeKeepout';
 import { REAL_PROBE_RADIUS } from './train/bridgeFootprint';
-import { STALL_STANDS } from '../minigames/stallPlacement';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
 import { shapesOverlap, type Claim, type GroundClaims } from '../boot/groundClaims';
@@ -448,15 +446,6 @@ const ANCHOR_MARGIN = 1.2;
 /** Nothing paved within this of a lamp — see {@link EDGE_GAP} for the 0.84. */
 const LAMP_PATH_GAP = 0.95;
 
-/**
- * Doormats and stand points are sacred.
- *
- * A waypoint at a stall counter or an anchor's entrance has to stay reachable,
- * and a lamp standing in front of one pockets it exactly the way the dodgems
- * arch did. Generous on purpose: there is always another lamp 10 m along, and
- * skipping one costs nothing.
- */
-const DOORMAT_CLEARANCE = 2.6;
 
 /** Clear of anything already solid — walls, trunks, bushes, the fountain. */
 const SOLID_CLEARANCE = 0.8;
@@ -712,13 +701,7 @@ function lampFits(
   if (onRideExit(x, z, LAMP_RADIUS + 0.4)) return false;
 
   // Never in front of a door.
-  for (const anchor of ANCHORS) {
-    const [ex, ez] = anchor.entrance;
-    if (Math.hypot(x - ex, z - ez) < DOORMAT_CLEARANCE) return false;
-  }
-  for (const stand of STALL_STANDS) {
-    if (Math.hypot(x - stand.x, z - stand.z) < DOORMAT_CLEARANCE) return false;
-  }
+  if (nearADoormat(x, z)) return false;
 
   // And clear of everything already built. Asking the collision world is the
   // honest version of this: it knows where `Scenery` actually put its walls
