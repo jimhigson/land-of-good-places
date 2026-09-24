@@ -34,7 +34,10 @@ jobs:
   preview:
     name: Deploy PR preview
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 25, from 10: the job now solves the sixteen parks on a cache miss
+    # (`build:parks`, measured at ~4 min locally with seed 7 alone ~3.6 min,
+    # CI ~2x). The step below carries its own, tighter cap.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -73,6 +76,11 @@ jobs:
 
       - name: Solve the prebuilt parks
         if: steps.parks-cache.outputs.cache-hit != 'true'
+        # A coarse bound, well inside the job's own cap: a step that runs out
+        # of time FAILS (red), where a job that does reports as cancelled. Each
+        # seed's solve also has its own timeout inside build:parks
+        # (LGP_PARK_TIMEOUT_MS), so a hung seed is named, not just slow.
+        timeout-minutes: 18
         run: pnpm run build:parks
 
       # Client bundle only — see the on: comment above for why the check

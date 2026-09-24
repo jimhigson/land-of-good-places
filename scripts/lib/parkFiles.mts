@@ -29,6 +29,14 @@ import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 
 const run = promisify(execFile);
 
+/**
+ * How long one probe (one seed's solve, or one hydrate) may run before it is
+ * killed and the seed reported as failed: 12 minutes, against seed 7's ~3.6 min
+ * plan search on an M-series Mac (CI runners read ~2x). `LGP_PARK_TIMEOUT_MS`
+ * overrides it.
+ */
+const PROBE_TIMEOUT_MS = Number(process.env['LGP_PARK_TIMEOUT_MS'] ?? 12 * 60 * 1000);
+
 export interface ProbeResult {
   readonly mode: string;
   readonly seed: number;
@@ -71,11 +79,20 @@ async function probe(mode: 'solve' | 'hydrate' | 'perturb', seed: number, file: 
       env: { ...process.env, LGP_SEED: String(seed) },
       encoding: 'utf8',
       maxBuffer: 256 * 1024 * 1024,
+      // A seed that never finishes must fail by name, not hang the build until
+      // the CI job's own cap cancels it.
+      timeout: PROBE_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     }));
   } catch (error) {
     const failed = error as { stdout?: string; stderr?: string; message?: string };
     const tail = `${failed.stderr ?? ''}\n${failed.stdout ?? ''}`.trim().split('\n').slice(-12).join('\n');
-    throw new Error(`park-file-probe ${mode} seed ${seed} failed:\n${tail || failed.message}`);
+    const killed = (error as { killed?: boolean; signal?: string }).killed || (error as { signal?: string }).signal === 'SIGKILL';
+    throw new Error(
+      killed
+        ? `park-file-probe ${mode} seed ${seed} did not finish in ${PROBE_TIMEOUT_MS / 1000} s and was killed`
+        : `park-file-probe ${mode} seed ${seed} failed:\n${tail || failed.message}`,
+    );
   }
   const last = stdout.trim().split('\n').at(-1) ?? '';
   return JSON.parse(last) as ProbeResult;
