@@ -30,4 +30,8 @@ Task: `check:fountain-hop` failed in another branch's CI on seed 10 r0
   code -> after.txt; then check:nav-routes, park:attempt canonical + seed 2 r0.
   Remove sb-fountain-base worktree at the end.
 
+Baseline (old NavGrid, 57b51869) at recorded restarts: centre clause green 16/16;
+basin clause red 10/16 (s0 13.2, s2 12.9, s7 13.8, s8 14.0, s9 12.4, s10 12.6,
+s11 16.2, s12 14.2, s14 10.4, s15 10.3 mm), green s1 9.1 s3 8.3 s4 4.6 s5 7.4 s6 5.4 s13 7.1.
+
 Sweep script and logs: scratchpad `sb-fountain/sweep.sh`, `sweep.txt`.
