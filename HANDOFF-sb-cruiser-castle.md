@@ -17,5 +17,9 @@ back to tier 1's unsatisfied loop if escalated threw). No plan-vs-built mismatch
   `spanInsideCastle` the search asks of the plan).
 
 ## Status
-- [ ] after-runs: s3 r3/r4/r5, s4 r8, s3 r0, canonical 20260728
-- [ ] red proof, check:cruiser-solves, check:cruiser-clearance, tsc
+- [x] after-runs: castle measure gone on s3 r3/r4/r5, s4 r8; s3 r0 and 20260728 identical failure sets
+      (s3 r0 unchanged 2 Rail Race measures; 20260728 accepted both). Other measures on r3/r4/r5/s4r8
+      move because the cruiser is re-decided (attempt 4 etc.), so the downstream park differs.
+- [x] red proof on s3 r3: ladder throw off -> built-curve refusal fires 4x, same park as fix;
+      both off -> 'always flies through the castle' red again.
+- [x] check:cruiser-solves 0, check:cruiser-clearance 0, tsc 0. DONE.
