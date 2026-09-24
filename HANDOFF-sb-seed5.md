@@ -46,3 +46,17 @@ decision by measurement; fix at cause or make an acceptance measure.
   drifted. FIX (committed): marchTo re-aims each stride. Offline replay 1r6:
   0.000; mutation disc r2.6 in doorway -> 4.58 short (red). Real red run +
   clean 1r6 run in progress (ct-1-6*.log in scratch).
+- tie-frame on 5r0/5r2 at this branch: exit 0 (all 0.00 deg). The 1.11 deg is
+  the RAIL RACE cart (check:rail-race), not the Sky Cruiser. 5r2 (shipped)
+  1.32 deg at s=342.9 lane 0.
+- Rail race cause: RingPath centre line = offset 512-gon resampled; corners up
+  to 2.64 deg (5r2 s=342.8). Rails = 2.2 m Catmull-Rom (rounds corners); cart
+  reads +-5 cm (one side). FIX (committed): smooth centripetal Catmull-Rom
+  through offset vertices + Hermite lookup. Offline measure
+  (scripts/_diag-kink.mts, 4 s, no park build): 1.315 -> 0.176 deg.
+- Merged origin/wip/sb-merge ba6498d0. Baseline worktree
+  .claude/worktrees/sb-seed5-base (detached at ba6498d0) — REMOVE at the end.
+- NEXT: park:attempt base vs mine on canonical r0 + 2r0 + mine 5r2 (pa/ in
+  scratch); then sweeps: castle-towers, rail-race, tie-frame on 0..15; then
+  resolver-affected checks (hop-clearance, deck-fallthrough, hotel, benches,
+  hall-solid, nav-routes, slide-rider, pet-slide) + test:procgen.
