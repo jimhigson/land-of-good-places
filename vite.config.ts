@@ -167,6 +167,8 @@ export default defineConfig({
   // checks.
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
+    // `src/core/clientBundle.ts`: the client carries no park solver.
+    __LGP_CLIENT__: 'true',
   },
   plugins: [
     versionFilePlugin(APP_VERSION),
