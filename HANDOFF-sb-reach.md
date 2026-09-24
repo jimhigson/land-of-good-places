@@ -20,3 +20,12 @@ Task: anchor.reach:waterFight forces restarts (built extent > declared 19 m).
 - Base worktree .claude/worktrees/sb-reach-base (detached 714dca83) running base attempts,
   then digests 0..15 base vs fix (scratch sb-reach/chain.sh). Remove base worktree when done.
 - tsc + typecheck:test exit 0.
+
+## Result (10:55)
+- Base (714dca83) park:attempt shows anchor.reach:waterFight on 1:2 0.1, 9:1 0.7, 11:1 0.5,
+  14:1 0.6, 1:8 0.9, 13:26 1.1. Fixed: none; every other failure identical; 11:1 and 1:8
+  now accepted. 20260728/2/5 r0 verdicts unchanged.
+- Digests seeds 0..15 r0: all 16 change, but only the `(unnamed)` group (the rack meshes);
+  layout/plan/world traces and every named group identical.
+- Rebased onto origin/wip/sb-merge b0888513; tsc both 0; rechecked 1:8 accepted, 9:1 no reach,
+  canonical accepted.
