@@ -80,3 +80,7 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - VERIFIED @151dac7e/ac9f2490 (frozen sb-frozen): full test:procgen 1840 tests, only fail was scatterDecoupling
   identity (fixed ac9f2490, 4/4 pass); check:every-seed-builds 16/16 built, exit 0 (check:park per seed at recorded
   restart, ratchet enforced).
+- Merged fix/sb-coplanar16 (2c3d0df1): check:coplanar sweeps SUPPORTED_PARK_SEEDS at recorded restarts (child per
+  seed; coplanar.yml cap 15->25); stall corner posts open-ended (3 seams). #705's "16 new" were restart-0 parks;
+  at recorded restarts 0..15 had 4. Remaining: seed 4 duck bar end inside lane 3 bed (PLACEMENT) -> helper
+  fix/sb-duck-ends (invariant + slot refusal).
