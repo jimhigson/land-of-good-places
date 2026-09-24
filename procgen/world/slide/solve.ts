@@ -12,33 +12,33 @@ import {
   type TowerSolid,
   distanceOutsideTowerLocal,
   worldToCastle,
-} from '../building/layout';
+} from '../../../src/world/building/layout';
 import {
   BUILDING_HALF_X,
   BUILDING_HALF_Z,
   INTERIOR_HALF_Z,
   PLAYER_RADIUS,
-} from '../../core/constants';
-import { TAU } from '../../core/mathUtils';
-import { PARK_LAYOUT } from '../parkLayout';
-import { registerPlanCache } from '../../boot/planCaches';
-import { PARK_SEED } from '../parkManifest';
-import { COASTER_PLANS } from '../coaster/plan';
-import { cartEnvelopePoint } from '../coaster/cart';
-import { crossSection } from '../coaster/clearance';
-import { drawnOnSphere, railFrameAt, type RailFrame } from '../rail/sweptRail';
-import { PARK_BOUNDARY, solverBoundary } from '../boundary';
-import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from '../train/plan';
+} from '../../../src/core/constants';
+import { TAU } from '../../../src/core/mathUtils';
+import { PARK_LAYOUT } from '../../../src/world/parkLayout';
+import { registerPlanCache } from '../../../src/boot/planCaches';
+import { PARK_SEED } from '../../../src/world/parkManifest';
+import { COASTER_PLANS } from '../../../src/world/coaster/plan';
+import { cartEnvelopePoint } from '../../../src/world/coaster/cart';
+import { crossSection } from '../../../src/world/coaster/clearance';
+import { drawnOnSphere, railFrameAt, type RailFrame } from '../../../src/world/rail/sweptRail';
+import { PARK_BOUNDARY, solverBoundary } from '../../../src/world/boundary';
+import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from '../../../src/world/train/plan';
 import {
   type OpenRouteBrief,
   RailRouteUnsolvable,
   type SolvedRailRoute,
   railRouteSearch,
-} from '../rail/generate';
-import { type Pose2, type SegmentKind, turnVocabulary } from '../rail/segments';
-import { Geo, worldYAtAltitude, worldYAtRadius } from '../geo';
-import { altitudeAt } from '../terrain';
-import { CHUTE_ENVELOPE, chuteCentreLine } from '../building/SlideRide';
+} from '../../../src/world/rail/generate';
+import { type Pose2, type SegmentKind, turnVocabulary } from '../../../src/world/rail/segments';
+import { Geo, worldYAtAltitude, worldYAtRadius } from '../../../src/world/geo';
+import { altitudeAt } from '../../../src/world/terrain';
+import { CHUTE_ENVELOPE, chuteCentreLine } from '../../../src/world/building/SlideRide';
 
 /**
  * **The ginormous slide, as a plan.**

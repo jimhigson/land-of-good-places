@@ -15,7 +15,7 @@ import {
 import { lazyView } from '../boot/lazyView';
 import { planPart } from './parkPlan';
 import { registerPlanCache } from '../boot/planCaches';
-import { layoutRestartBase, layoutStreamBump } from './parkWarp';
+import { layoutRestartBase, layoutStreamBump } from '../../procgen/world/parkWarp';
 import { PARK_BOUNDARY } from './boundary';
 import { ENTRANCE_GATE_X, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
 import { CollisionWorld } from './Collision';

@@ -8,7 +8,7 @@
  */
 import { performance } from 'node:perf_hooks';
 import { railRouteSearch } from '../src/world/rail/generate.ts';
-import { cruiserBriefs, finishCruiserPlan } from '../src/world/coaster/solve.ts';
+import { cruiserBriefs, finishCruiserPlan } from '../procgen/world/coaster/solve.ts';
 
 let briefMs = 0;
 const briefRuns: number[] = [];

@@ -1,4 +1,4 @@
-import type { PlannedSlide } from './solve';
+import type { PlannedSlide } from '../../../procgen/world/slide/solve';
 import { lazyView } from '../../boot/lazyView';
 import { planPart } from '../parkPlan';
 
@@ -35,7 +35,7 @@ import { planPart } from '../parkPlan';
  * nine call sites had to change, which is also what keeps this refactor
  * reviewable: the diff is a rename plus this file.
  */
-export * from './solve';
+export * from '../../../procgen/world/slide/solve';
 
 /**
  * The plan. Import this; never re-solve — the same rule as `TRAIN_PLAN`.

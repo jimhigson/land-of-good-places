@@ -6,23 +6,23 @@ import {
   type CoasterRouteOptions,
   coasterProfileSearch,
   coasterRouteBriefSearch,
-} from './route';
+} from '../../../src/world/coaster/route';
 
 // The retry ladder, re-exported so `boot/parkGeneration.ts` (which imports
 // this module lazily, by design) can drive the SAME policy generator the
 // constructor drives — one owner, two cadences. See its doc in `route.ts`.
-export { cruiserRouteSearch } from './route';
-import type { SolvedRailRoute } from '../rail/generate';
-import { PARK_SEED } from '../parkManifest';
-import { Rng } from '../../core/mathUtils';
-import { placedEntry } from '../parkLayout';
-import { clearOfPlots } from '../parkLayout';
+export { cruiserRouteSearch } from '../../../src/world/coaster/route';
+import type { SolvedRailRoute } from '../../../src/world/rail/generate';
+import { PARK_SEED } from '../../../src/world/parkManifest';
+import { Rng } from '../../../src/core/mathUtils';
+import { placedEntry } from '../../../src/world/parkLayout';
+import { clearOfPlots } from '../../../src/world/parkLayout';
 // The same "far enough inside the edge to stand" margin the Rail Race's exit
 // uses — one owner, and it lives on the boundary because importing it from
 // `railRace/plan` would close the cycle
 // `coaster/plan -> railRace/plan -> train/plan -> coaster/plan`, which `tsc`
 // accepts and Node fails at load.
-import { EXIT_INSIDE_EDGE, PARK_BOUNDARY } from '../boundary';
+import { EXIT_INSIDE_EDGE, PARK_BOUNDARY } from '../../../src/world/boundary';
 
 /**
  * The coaster plan — the Sky Cruiser as *data*, solved at module load

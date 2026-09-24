@@ -28,7 +28,7 @@
  * that inertness is load-bearing: it is what makes the warp machinery safe
  * to land ahead of the search that uses it.
  */
-import { PARK_SEED } from './parkManifest';
+import { PARK_SEED } from '../../src/world/parkManifest';
 
 export interface WarpVector {
   /**

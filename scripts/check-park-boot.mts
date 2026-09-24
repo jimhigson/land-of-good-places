@@ -1059,7 +1059,7 @@ if (unbudgetedMs > UNBUDGETED_CEILING_MS) {
   );
 }
 
-const { planSlide } = await import('../src/world/slide/solve.ts');
+const { planSlide } = await import('../procgen/world/slide/solve.ts');
 const straightThrough = planSlide();
 
 const hashOfRoute = (plan: typeof SLIDE_PLAN): string => {
@@ -1114,7 +1114,7 @@ if (ridden.route === plain.route && ridden.chute === plain.chute) {
 // ---------------------------------------------------------------------------
 
 const { COASTER_PLANS } = await import('../src/world/coaster/plan.ts');
-const { planCruiser } = await import('../src/world/coaster/solve.ts');
+const { planCruiser } = await import('../procgen/world/coaster/solve.ts');
 const cruiserStraightThrough = planCruiser();
 
 const hashOfLoop = (plan: typeof COASTER_PLANS.cruiser): string => {

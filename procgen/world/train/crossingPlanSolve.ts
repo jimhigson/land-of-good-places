@@ -1,13 +1,13 @@
 import { Vector3 } from 'three';
-import { registerPlanCache } from '../../boot/planCaches';
-import { TRAIN_PLAN } from './plan';
+import { registerPlanCache } from '../../../src/boot/planCaches';
+import { TRAIN_PLAN } from '../../../src/world/train/plan';
 import {
   CROSSING_STATION_CLEARANCE,
   CROSSING_STATION_STRUCTURE_CLEARANCE,
-} from './clearance';
-import { MIN_BRIDGE_HALF_LENGTH } from './bridgeFootprint';
-import { STATION_GAP } from './fence';
-import { isInEntranceGateway } from '../entrance/layout';
+} from '../../../src/world/train/clearance';
+import { MIN_BRIDGE_HALF_LENGTH } from '../../../src/world/train/bridgeFootprint';
+import { STATION_GAP } from '../../../src/world/train/fence';
+import { isInEntranceGateway } from '../../../src/world/entrance/layout';
 import { crossingSiteBanned } from '../parkWarp';
 import {
   NARROW_HALF_WIDTH,
@@ -21,7 +21,7 @@ import {
   fitBridgeAcross,
   railCorridorBlocked,
   probeBridgeReach,
-} from './bridgeFit';
+} from '../../../src/world/train/bridgeFit';
 
 // Re-exported so every existing consumer (`paths.ts`, `crossings.ts`,
 // `crossingPlan.ts`) keeps importing these from where it always did.

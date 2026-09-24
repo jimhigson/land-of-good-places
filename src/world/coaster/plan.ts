@@ -1,4 +1,4 @@
-import type { PlannedCoaster } from './solve';
+import type { PlannedCoaster } from '../../../procgen/world/coaster/solve';
 import { planPart } from '../parkPlan';
 
 /**
@@ -41,7 +41,7 @@ import { planPart } from '../parkPlan';
  * (worst block 1354 ms to 1300 ms, against a 250 ms ceiling). See
  * `coaster/prewarm.ts`.
  */
-export * from './solve';
+export * from '../../../procgen/world/coaster/solve';
 
 /**
  * The plans. Import this; never re-solve — the same rule as `TRAIN_PLAN`.

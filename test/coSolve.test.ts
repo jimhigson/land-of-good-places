@@ -5,7 +5,7 @@ import {
   PlacementField,
   type CoSolveFeature,
   type Obstacle,
-} from '../src/boot/coSolve.ts';
+} from '../procgen/boot/coSolve.ts';
 
 /**
  * Unit tests for the cooperative backtracking engine. Pure and fast — no park, no

@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { TRAIN_PLAN } from './plan';
-import type { CrossingSite } from './crossingPlanSolve';
+import type { CrossingSite } from '../../../procgen/world/train/crossingPlanSolve';
 import { lazyArrayView } from '../../boot/lazyView';
 import { planPart } from '../parkPlan';
 
@@ -20,7 +20,7 @@ export {
   SITE_RAMP_IDEAL,
   type CrossingSite,
   type SolvedCrossingSites,
-} from './crossingPlanSolve';
+} from '../../../procgen/world/train/crossingPlanSolve';
 
 
 /**

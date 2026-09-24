@@ -9,7 +9,7 @@ import { terrainHeight } from '../terrain';
 // `./solve`, not `./plan`: these two are plan-view geometry helpers, and
 // importing them has no business triggering the three-and-a-half-second solve
 // that `plan.ts` runs to initialise `SLIDE_PLAN`. See `slide/plan.ts`.
-import { carSweepsColumn, cruiserCrossesColumn, insideCastle } from './solve';
+import { carSweepsColumn, cruiserCrossesColumn, insideCastle } from '../../../procgen/world/slide/solve';
 
 /**
  * **Legs to stand the ginormous slide on.**

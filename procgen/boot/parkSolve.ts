@@ -53,9 +53,9 @@
  * on every headless build and hashed into the park digest.
  */
 
-import type { GroundClaims } from './groundClaims';
-import { isRefusal, type Advance, type FeatureBuilder, type Increment, type Refusal } from './featureBuilder';
-import { resetPlanCaches } from './planCaches';
+import type { GroundClaims } from '../../src/boot/groundClaims';
+import { isRefusal, type Advance, type FeatureBuilder, type Increment, type Refusal } from '../../src/boot/featureBuilder';
+import { resetPlanCaches } from '../../src/boot/planCaches';
 
 const now = (): number =>
   typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();

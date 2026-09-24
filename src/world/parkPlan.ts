@@ -37,24 +37,24 @@
  */
 
 import { GroundClaims } from '../boot/groundClaims';
-import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveStats } from '../boot/parkSolve';
+import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveStats } from '../../procgen/boot/parkSolve';
 import { decisionSeed, refusal, type Advance, type FeatureBuilder, type Refusal } from '../boot/featureBuilder';
 import { PARK_SEED } from './parkManifest';
 import { PARK_RESTARTS, layoutRestartSearch, type ParkLayout } from './parkLayout';
-import { layoutRestartBase } from './parkWarp';
+import { layoutRestartBase } from '../../procgen/world/parkWarp';
 import { bindCastlePlacement } from './building/layout';
 import {
   cruiserStartSearch,
   finishCruiserPlanSearch,
   type CruiserSearchStart,
   type PlannedCoaster,
-} from './coaster/solve';
+} from '../../procgen/world/coaster/solve';
 import { cruiserRouteSearch } from './coaster/route';
 import { RailRouteUnsolvable, type SolvedRailRoute } from './rail/generate';
 import { TrainRoute, trainRouteSearch } from './train/route';
 import { planStations, type PlannedStation } from './train/plan';
-import { slideSearch, type PlannedSlide } from './slide/solve';
-import { crossingSitesSearch, type SolvedCrossingSites } from './train/crossingPlanSolve';
+import { slideSearch, type PlannedSlide } from '../../procgen/world/slide/solve';
+import { crossingSitesSearch, type SolvedCrossingSites } from '../../procgen/world/train/crossingPlanSolve';
 import {
   latticeStateSnapshot,
   pathGraphSearch,

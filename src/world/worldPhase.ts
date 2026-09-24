@@ -25,7 +25,7 @@
 
 import type { CollisionWorld } from './Collision';
 import type { GroundClaims, Claim } from '../boot/groundClaims';
-import { ParkSolve, type SolveStats } from '../boot/parkSolve';
+import { ParkSolve, type SolveStats } from '../../procgen/boot/parkSolve';
 import { refusal, type FeatureBuilder } from '../boot/featureBuilder';
 import { PARK_SEED } from './parkManifest';
 import type { CoasterRoute } from './coaster/route';
