@@ -51,7 +51,8 @@ import {
   type TrainDecision,
 } from '../../src/world/parkPlan';
 import type { PlanSolverRun } from '../../src/world/prebuilt/solverPort';
-import { encodeParkFile, type ParkFile } from '../../src/world/prebuilt/parkFile';
+import { type ParkFile } from '../../src/world/prebuilt/parkFile';
+import { encodeParkFile } from './parkFileWriter';
 import type { WorldDecisions } from '../../src/world/worldPhase';
 import type { BridgeDecision } from '../../src/world/train/bridgeFootprint';
 

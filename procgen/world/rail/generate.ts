@@ -1,5 +1,6 @@
 import { Rng, TAU, clamp } from '../../../src/core/mathUtils';
-import { arcChain, biarcs, cubicPoint, endPose, minCurvatureRadius, type CubicSegment, type Pose2, type SegmentKind, type Vec2 } from '../../../src/world/rail/segments';
+import { cubicPoint, minCurvatureRadius, type CubicSegment, type Pose2, type SegmentKind, type Vec2 } from '../../../src/world/rail/segments';
+import { arcChain, biarcs, endPose } from './segments';
 import { buildRoute, type RouteBrief, type RouteInfluence, type SolveReport, type SolvedRailRoute } from '../../../src/world/rail/generate';
 /**
  * **The rail route search** — grows a track piece by piece with backtracking.

@@ -2,7 +2,8 @@ import { CASTLE_OUTER_X, WINDOW_HALF_WIDTH, WINDOW_TRACK_Y, castleClear, castleD
 import { type RouteBrief, type RouteInfluence, type SolvedRailRoute } from '../../../src/world/rail/generate';
 import { lazyView } from '../../../src/boot/lazyView';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../../../src/world/building/layout';
-import { turnVocabulary, type Pose2, type SegmentKind, type Vec2 } from '../../../src/world/rail/segments';
+import { type Pose2, type SegmentKind, type Vec2 } from '../../../src/world/rail/segments';
+import { turnVocabulary } from '../rail/segments';
 import { PARK_LAYOUT, placedEntry } from '../../../src/world/parkLayout';
 import { clearOfFootprints } from '../parkLayout';
 import { Rng, TAU } from '../../../src/core/mathUtils';

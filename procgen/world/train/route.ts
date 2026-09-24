@@ -1,7 +1,8 @@
 import { ENTRANCE_GATE_HALF_WIDTH, ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from '../../../src/world/entrance/layout';
 import { FENCE_HALF_THICKNESS, FENCE_OFFSET } from '../../../src/world/train/clearance';
 import { PLAYER_RADIUS } from '../../../src/core/constants';
-import { turnVocabulary, type Pose2, type SegmentKind, type Vec2 } from '../../../src/world/rail/segments';
+import { type Pose2, type SegmentKind, type Vec2 } from '../../../src/world/rail/segments';
+import { turnVocabulary } from '../rail/segments';
 import { TRAIN_MIN_TURN_RADIUS } from '../../../src/world/train/turning';
 import { PARK_LAYOUT } from '../../../src/world/parkLayout';
 import { COASTER_PLANS } from '../../../src/world/coaster/plan';
