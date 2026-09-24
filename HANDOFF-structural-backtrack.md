@@ -47,3 +47,8 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - Sweep r2 is MIXED-SOURCE (merges landed mid-sweep into the same tree) — intermediate only. Final sweeps must run
   in a frozen worktree at a fixed commit. r2 so far: 15/16 accepted, mostly r0-r6; remaining causes: lattice (18),
   grid axes (10), rainbow legs near paths (5), anchor.reach:waterFight (4) -> helper fix/sb-reach.
+- Merged fix/sb-lattice (d27593b0): src/world/pavingLegibility.ts is the one owner of longDiagonals /
+  offLatticeStreetRuns (+ gridAxes.ts moved to src); addInterconnects screens connectors; pathGraph builder
+  refuses illegible mandatory paving (consumed train,layout). Conflict resolved: paving-drape's bridge-stone
+  line blocker ported into the shared measure as PavingGround.nearBridgeStone (built: footprintNear; planned:
+  walk footprint -> stricter). NEXT: frozen-worktree sweep of 0..15 at this commit, then 100 random.
