@@ -107,13 +107,26 @@ reworking that driver now. A coarse bound on `build:parks` replaces the
 frame budgets: an 18-minute step timeout in CI and a per-seed kill
 (`LGP_PARK_TIMEOUT_MS`, 12 min) that names the seed.
 
-### Still decided on the client
+### Placement loops moved into the file too (Jim, 24 Sep: they count)
 
-These run while the `World` builds, each a deterministic loop over candidates
-derived from the decided plan: Sky Cruiser pylons (`coaster/pylons.ts`), slide
-legs (`slide/supports.ts`), the rail race's exit and arch (`railRace/plan.ts`),
-the boundary's radii (`boundary.ts`), the ferris wheel's exit. Whether these
-count as "building" is Jim's call (asked); moving them is the same pattern.
+Everything that chose among candidates while the `World` built now reads its
+answer from the file's `built` section (`src/world/prebuilt/built.ts`), and
+its search moved to `procgen/`: the Sky Cruiser's pylons, the slide's legs,
+the rail race's exit and finish arch (`RailRaceRoute` now takes its start
+decided), the ferris wheel's exit, the railway's stations, and the park
+boundary's radii. The boundary is the awkward one: several modules read the
+park's edge at module scope, so the page now fetches the park file **before**
+loading the game (`src/bootstrap.ts`), with the update gate set up first so a
+new build still reaches a park that cannot open. The boundary's search loads
+through its own light loader in Node, because it is first asked for while the
+game's modules are still importing. `check:prebuilt-park` now also fails if a
+hydrated park ran any of these searches.
+
+Left on the client, deliberately: the rail race's hazard schedule
+(`planHazards` — a fixed-seed roll of the race's obstacles per level, no
+search or refusal), the ride cameras' shot planning (runtime camera work), and
+the conservative bridge keep-out the flowers read (a shrink-to-fit reservation
+derived from the decided crossings).
 
 ### Seeds: what the switch to 0..15 cost in coverage
 
