@@ -23,7 +23,13 @@
  */
 import { CatmullRomCurve3 } from 'three';
 import { PLAYER_RADIUS } from '../core/constants';
-import { offAxisGround, type DrawnEdge, type GroundPoint, type OffAxisGround } from './gridAxes';
+import {
+  offAxisGround,
+  offAxisGroundCarriedBy,
+  type DrawnEdge,
+  type GroundPoint,
+  type OffAxisGround,
+} from './gridAxes';
 
 /**
  * The drawn centre line of a curve, every ~0.5 m — the sampling
@@ -122,6 +128,21 @@ export const MAX_DIAGONAL_APPROACH = 16;
  */
 export function longDiagonals(edges: readonly DrawnEdge[], ground: PavingGround): OffAxisGround[] {
   return offAxisGround(edges, railwayGeometryTest(ground)).filter((piece) => piece.extent > MAX_DIAGONAL_APPROACH);
+}
+
+/**
+ * The pieces of {@link longDiagonals} that the edge named `carrier` paints,
+ * and only those — the same verdict, for a screen asking about one
+ * candidate among an already-drawn network.
+ */
+export function longDiagonalsCarriedBy(
+  edges: readonly DrawnEdge[],
+  carrier: string,
+  ground: PavingGround,
+): OffAxisGround[] {
+  return offAxisGroundCarriedBy(edges, carrier, railwayGeometryTest(ground)).filter(
+    (piece) => piece.extent > MAX_DIAGONAL_APPROACH,
+  );
 }
 
 /**

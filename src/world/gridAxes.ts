@@ -355,6 +355,41 @@ export function offAxisGround(
   edges: readonly DrawnEdge[],
   isRailwayGeometry: (a: GroundPoint, b: GroundPoint) => boolean,
 ): OffAxisGround[] {
+  return piecesOf(carriedStretches(edges, isRailwayGeometry));
+}
+
+/**
+ * Exactly the pieces of {@link offAxisGround} that `carrier` paints — the
+ * same components, the same extents — without welding the rest of the park.
+ * For a screen asking one candidate ribbon at its point of decision
+ * (`paths.ts`'s `addInterconnects`): only stretches reachable from the
+ * candidate's own through {@link samePaintedGround} can be in its pieces, so
+ * only those are unioned.
+ */
+export function offAxisGroundCarriedBy(
+  edges: readonly DrawnEdge[],
+  carrier: string,
+  isRailwayGeometry: (a: GroundPoint, b: GroundPoint) => boolean,
+): OffAxisGround[] {
+  const stretches = carriedStretches(edges, isRailwayGeometry);
+  const reached = stretches.map((stretch) => stretch.carrier === carrier);
+  const frontier = stretches.filter((stretch) => stretch.carrier === carrier);
+  while (frontier.length > 0) {
+    const from = frontier.pop() as CarriedStretch;
+    stretches.forEach((stretch, i) => {
+      if (reached[i] || !samePaintedGround(from, stretch)) return;
+      reached[i] = true;
+      frontier.push(stretch);
+    });
+  }
+  return piecesOf(stretches.filter((_, i) => reached[i]));
+}
+
+/** Every maximal stretch of off-axis hops, per drawing route object. */
+function carriedStretches(
+  edges: readonly DrawnEdge[],
+  isRailwayGeometry: (a: GroundPoint, b: GroundPoint) => boolean,
+): CarriedStretch[] {
   const stretches: CarriedStretch[] = [];
   for (const edge of edges) {
     // The ring is deliberately a circle, not a grid loop — see
@@ -379,7 +414,11 @@ export function offAxisGround(
       } else open = null;
     }
   }
+  return stretches;
+}
 
+/** Stretches that are the same painted ground unioned into pieces. */
+function piecesOf(stretches: readonly CarriedStretch[]): OffAxisGround[] {
   const owner = stretches.map((_, i) => i);
   const rootOf = (i: number): number => (owner[i] === i ? i : (owner[i] = rootOf(owner[i]!)));
   for (let i = 0; i < stretches.length; i += 1) {

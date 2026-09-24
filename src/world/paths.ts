@@ -19,7 +19,7 @@ import type { DrawnEdge } from './gridAxes';
 import {
   backboneRadius,
   drawnCentreLine,
-  longDiagonals,
+  longDiagonalsCarriedBy,
   offLatticeStreetRuns,
   type PavingGround,
 } from './pavingLegibility';
@@ -4953,8 +4953,9 @@ function* addInterconnects(
       // (`gridAxes.ts`). Only a piece this candidate paints is its fault.
       if (!DISABLE_LEGIBILITY_SCREEN) {
         const network = edges.filter((edge) => edge.paved).map((edge) => drawnEdgeOf(edge.route));
-        const long = longDiagonals([...network, drawnCandidate], pavingGround);
-        if (long.some((piece) => piece.carriers.includes(candidateName))) return 'long diagonal';
+        if (longDiagonalsCarriedBy([...network, drawnCandidate], candidateName, pavingGround).length > 0) {
+          return 'long diagonal';
+        }
       }
       // A connector running along the ginormous slide's leg corridor starves
       // the chute of standable ground (`slide/supports.ts`) — an optional
