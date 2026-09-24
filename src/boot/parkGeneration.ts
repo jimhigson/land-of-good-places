@@ -1,76 +1,24 @@
-import { SolveScheduler } from './solveScheduler';
 import type { GroundClaims } from './groundClaims';
 import { loadPrebuiltPark } from './prebuiltPark';
 
 /**
- * **Building the park a few milliseconds at a time, while a bus is on screen.**
+ * **Loading the park while a bus is on screen.**
  *
- * Jim, 7 August 2026:
+ * Jim, 7 August 2026: *"this is the time when the procgen should actually run,
+ * amortised over many small tasks over many frames, so it acts as a kind of
+ * loading screen for the park generation."* That was when the device solved
+ * the park, seconds of search sliced across the cat-bus ride.
  *
- * > *"this is the time when the procgen should actually run, amortised over
- * > many small tasks over many frames, so it acts as a kind of loading screen
- * > for the park generation"*
- *
- * And Jim, 3 September 2026, the ruling this file's shape now serves
- * (`docs/DESIGN-round-robin-generation.md`): park features are to generate
- * **all at the same time, round-robin, with backtracking** — so the driver
- * here is **one scheduler** holding every solve as a task, not a hand-ordered
- * chain of phases. Today the task graph reproduces the exact order the
- * hand-ordered chain ran in, so the park is byte-identical (proved by
- * `check:park-boot`'s sliced-vs-straight-through hashes).
- *
- * **Be honest about what serializes the order today: the import ladder, not
- * the `deps`.** Review of #499 measured it — removing the `deps` from
- * `trainSearch`, `slideSearch`, `crossingSites` and `pathGraph` leaves the
- * task order character-for-character unchanged, because each of those tasks
- * is *also* held by a `ready()` gate on a module that the strictly-ordered
- * ladder only loads behind a `gate()` on the very task the dep names. The
- * deps document the data a task genuinely reads (and become load-bearing the
- * moment the module gating loosens), but **relaxing a dep alone changes
- * nothing** — do not conclude from that experiment that the spine is inert.
- * What stage 3 actually has to do is **confront the ladder**: load a
- * migrating placer's modules eagerly (or behind data-readiness rather than
- * task-completion gates), so that its task's `ready()` answers true while
- * other tasks still run — at which point the scheduler genuinely interleaves
- * it and the `deps`/claims become the real constraints. One placer per PR,
- * never a big-bang rewrite of a monolithic driver.
- *
- * ## What was actually costing the boot
- *
- * Measured (7 Aug): the park's boot was **~4.5 s**, of which `World`'s
- * constructor is 442 ms and **the other ~4 s is module-scope generation** —
- * every ride's route is solved by a top-level `const` as its module is first
- * imported, because `paths.ts` needs each ride's exit to build the walk graph
- * and cannot wait for a scene. `SLIDE_PLAN` alone was **~3.46 s, 86% of it**.
- *
- * ## Two different problems, two different answers
- *
- * **The small solves are each about a frame's worth**, so they only need to be
- * on separate frames. Dynamic `import()` gives that for free — the module
- * evaluation that runs the top-level `const` happens when the promise settles,
- * and settling returns to the event loop, so one import is one frame. Those
- * imports are the {@link ImportStep} ladder below, in dependency order — they
- * are Vite chunk loading, not park placement, which is why they stay the
- * driver's own business rather than becoming scheduler tasks: an import
- * completes on the event loop *between* frames, and a task that waited on one
- * would busy-yield its budget away (see `SolveTaskSpec.ready`, which is the
- * clean half of the same answer).
- *
- * **The big solves are sliced from the inside** — each suspends at every joint
- * and the scheduler runs it until a millisecond budget is spent. They are the
- * {@link SolveScheduler} tasks: the cruiser's brief/search/finish, the train's
- * loop, the slide's ladder, the crossing-plan march, and the walk graph.
+ * Since 24 September 2026 it does not: *"there should be no ability to build
+ * built into the game as delivered"* (Jim). Parks are solved at build time
+ * (`pnpm run build:parks`, `procgen/`) and the game downloads each one's
+ * decisions (`docs/design/PREBUILT-PARKS.md`). What is left here is loading:
+ * the park file, the plan hydrated from it, and the modules that read it.
  *
  * ## Why this class has no DOM, no `Game` and no renderer in it
  *
- * So that a check can build a real one and drive it. `Game` cannot be
- * constructed outside a browser — it makes a `WebGLRenderer` — and on this
- * feature *three separate guards* have already turned out to be incapable of
- * failing, one of them for exactly that reason. Everything here is pure module
- * loading and arithmetic, so `scripts/check-park-boot.mts` builds one in Node,
- * advances it with real frame budgets and a real clock, and measures **what
- * each frame actually cost** — rather than asserting that a function was
- * called.
+ * So that a check can build a real one and drive it in Node
+ * (`scripts/check-ground-claims.mts`).
  */
 
 /**
@@ -145,56 +93,34 @@ interface ImportStep {
 }
 
 /**
- * Drives the park's generation in slices. One per boot; `main.ts` owns it.
+ * Drives the park's loading. One per boot; `main.ts` owns it.
  *
- * {@link advance} is synchronous and returns immediately — it either spends the
- * budget in the scheduler or starts a module import and comes back next frame.
- * Nothing here ever blocks for longer than the budget except a single module
- * evaluation, which is one small solve.
+ * Since prebuilt parks (`docs/design/PREBUILT-PARKS.md`) the game searches for
+ * nothing: the park's decisions come from its park file, fetched first, and
+ * the plan is **hydrated** from it a feature per step — a few milliseconds in
+ * all. So what was a solver sliced across the ride is now three small steps:
+ * fetch the file, hydrate the plan, load the modules that read it. A park with
+ * no usable file fails with `ParkUnavailable` and the boot shows it.
  *
- * ### The shape: one import ladder + one scheduler
- *
- * - The {@link ImportStep} ladder loads modules one per frame, each rung gated
- *   on the solve whose letterbox it reads (`train/route` waits for the solved
- *   cruiser; the crossing modules wait for the solved slide; `pathGraph` waits
- *   for the solved walk graph).
- * - The {@link SolveScheduler} holds every solve as a task. Tasks gate on
- *   their modules with `ready()` and name the data they read as `deps`.
- *   **Today the ladder's gates make four of the six deps inert** (see the
- *   module header) — the order is the ladder's, byte-identical to the old
- *   chain, and a placer joins the genuine round-robin at stage 3 by
- *   loosening its module gating, not by touching deps alone.
- *
- * ### Failure semantics, preserved exactly
- *
- * - A cruiser ladder that exhausts even its rescue tier throws
- *   `RailRouteUnsolvable` out of the task; the scheduler records it as
- *   `failed`, nothing is offered to the letterbox, and `COASTER_PLANS`
- *   re-solves and throws in exactly the place and shape it always did.
- * - The slide catches `RailRouteUnsolvable` *per rung* (a target that admits
- *   no route is a rung that did not work, not a park that cannot be built)
- *   and throws only when every one of `SLIDE_ATTEMPTS` is spent.
+ * {@link advance} is synchronous and returns immediately — it either runs
+ * hydration steps until the budget is spent or starts a module import and
+ * comes back next frame.
  */
 export class ParkGeneration {
-  private readonly scheduler: SolveScheduler;
   private importIndex = 0;
   private importInFlight = false;
   private failure: Error | null = null;
   private pathsDone = false;
   private planModule: typeof import('../world/parkPlan') | null = null;
+  private plan: Generator<number, void, void> | null = null;
+  private planDone = false;
   private workingFrames = 0;
-  private slicesSeen = 0;
   /**
-   * The import ladder. `world/parkPlan.ts` imports every solver the park's
-   * driver needs, so the ladder is three rungs: the prebuilt park file, the
-   * plan (solvers), then the graph and world modules that read the decided
+   * The import ladder: the park file (the plan reads it once, when it starts),
+   * the plan module, then the graph and world modules that read the decided
    * plan.
    */
   private readonly importLadder: readonly ImportStep[] = [
-    // **First, this park's prebuilt decisions** (`boot/prebuiltPark.ts`): the
-    // plan's driver reads the offered file once, when it starts, so the fetch
-    // has to have settled — found, refused or given up on — before the plan
-    // task can be ready. On an installed game it is a precache hit.
     {
       name: 'prebuiltPark',
       begin: () => loadPrebuiltPark(),
@@ -208,7 +134,7 @@ export class ParkGeneration {
     },
     {
       name: 'pathGraph',
-      gate: () => this.scheduler.isDone('parkPlan'),
+      gate: () => this.planDone,
       begin: () =>
         import('../world/pathGraph').then(() => {
           this.pathsDone = true;
@@ -216,21 +142,7 @@ export class ParkGeneration {
     },
   ];
 
-  constructor() {
-    const self = this;
-    this.scheduler = new SolveScheduler([
-      {
-        name: 'parkPlan',
-        ready: () => self.planModule !== null,
-        *start() {
-          const module = self.planModule as typeof import('../world/parkPlan');
-          yield* module.parkPlanSearch();
-        },
-      },
-    ]);
-  }
-
-  /** The registry the driver's builders committed into — the same object the `World` adopts. */
+  /** The registry the plan committed into — the same object the `World` adopts. */
   get groundClaims(): GroundClaims {
     if (!this.planModule) throw new Error('park generation: the plan has not been imported yet');
     return this.planModule.parkPlanClaims();
@@ -241,7 +153,7 @@ export class ParkGeneration {
   }
 
   get failed(): Error | null {
-    return this.failure ?? this.scheduler.failed;
+    return this.failure;
   }
 
   /** What the park is doing, for the boot screen — read off the decisions placed so far. */
@@ -260,49 +172,6 @@ export class ParkGeneration {
     return this.workingFrames;
   }
 
-  /** Retries plus unwinds the driver has spent — the boot screen's "still trying" number. */
-  get attempts(): number {
-    const stats = this.planModule?.parkSolveStats();
-    return stats ? stats.retries + stats.unwinds : 0;
-  }
-
-  get cruiserAttempts(): number {
-    return this.planModule?.parkSolveStats()?.turnsByFeature['cruiser'] ?? 0;
-  }
-
-  get stepsPastDeadline(): number {
-    return this.scheduler.slicesPastDeadline;
-  }
-
-  get lateStepsByPhase(): Readonly<Record<string, number>> {
-    return this.scheduler.lateSlicesByTask;
-  }
-
-  /** Work units per phase, by the driver's own count of turns each feature took. */
-  get unitCounts(): Readonly<
-    Record<'brief' | 'cruiserSearch' | 'cruiserFinish' | 'trainSearch' | 'slideSearch', number>
-  > {
-    // Pieces: the yields each feature's advance made, not its turns — the
-    // count a boot that stops between frames can actually use.
-    const pieces = this.planModule?.parkSolveStats()?.piecesByFeature ?? {};
-    const finish = this.planModule?.parkPlanCruiserFinishPieces() ?? 0;
-    return {
-      brief: pieces['layout'] ?? 0,
-      cruiserSearch: Math.max(0, (pieces['cruiser'] ?? 0) - finish),
-      cruiserFinish: finish,
-      trainSearch: pieces['train'] ?? 0,
-      slideSearch: pieces['slide'] ?? 0,
-    };
-  }
-
-  get sliceCountsByTask(): Readonly<Record<string, number>> {
-    return this.scheduler.sliceCounts;
-  }
-
-  get cruiserFinishSeamCount(): number {
-    return this.planModule?.parkPlanCruiserFinishSeams() ?? 0;
-  }
-
   advance(budgetMs: number): void {
     if (this.pathsDone || this.failed || this.importInFlight) return;
     const step = this.importLadder[this.importIndex];
@@ -312,11 +181,19 @@ export class ParkGeneration {
       this.runImport(step);
       return;
     }
-    this.scheduler.advance(budgetMs);
-    const sliced = Object.values(this.scheduler.sliceCounts).reduce((a, b) => a + b, 0);
-    if (sliced > this.slicesSeen) {
-      this.slicesSeen = sliced;
-      this.workingFrames += 1;
+    if (!this.planModule || this.planDone) return;
+    this.workingFrames += 1;
+    const started = performance.now();
+    try {
+      this.plan ??= this.planModule.parkPlanSearch();
+      while (performance.now() - started < budgetMs) {
+        if (this.plan.next().done) {
+          this.planDone = true;
+          return;
+        }
+      }
+    } catch (error) {
+      this.failure = error instanceof Error ? error : new Error(String(error));
     }
   }
 

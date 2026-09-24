@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { buildHeadlessPark } from './park-harness.mts';
 import { digestScene } from './lib/parkDigest.mts';
 import { LAYOUT_TRACE } from '../src/world/parkLayout.ts';
-import { parkSolveTrace } from '../src/world/parkPlan.ts';
+import { parkSolveTrace } from '../procgen/world/planSolver.ts';
 import { worldSolveTrace } from '../src/world/worldPhase.ts';
 
 const park = buildHeadlessPark();

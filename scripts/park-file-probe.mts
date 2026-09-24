@@ -48,10 +48,14 @@ if (mode !== 'solve') {
 
 // Dynamic, so the offer above lands first whatever the import graph does.
 const plan = await import('../src/world/parkPlan.ts');
+const solver = await import('../procgen/world/planSolver.ts');
 const { PARK_SEED } = await import('../src/world/parkManifest.ts');
 const { buildHeadlessPark } = await import('./park-harness.mts');
 const { digestScene } = await import('./lib/parkDigest.mts');
 
+// Drive the plan the way the game does — through the park's own forcing
+// path — so a hydrate run takes the client's route and a solve run the
+// installed solver's (`scripts/ts-extension-resolver-register.mjs`).
 const planWall = performance.now();
 const planCpu = cpuMs();
 plan.solveParkPlanNow();
@@ -60,12 +64,12 @@ const planWallMs = performance.now() - planWall;
 
 // Null when no driver was ever constructed — the hydrated path, which is the
 // only path the client has. Present means the plan was searched.
-const stats = plan.parkSolveStats();
+const stats = solver.parkSolveStats();
 if (mode === 'solve' && !stats) throw new Error('park-file-probe: the plan solved but published no stats');
 
 let bytes = 0;
 if (mode === 'solve') {
-  const text = JSON.stringify(plan.parkPlanFile());
+  const text = JSON.stringify(solver.parkPlanFile());
   writeFileSync(path, text);
   bytes = Buffer.byteLength(text);
 }
