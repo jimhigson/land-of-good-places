@@ -1,37 +1,41 @@
-# HANDOFF — prebuilt parks (feat/prebuilt-parks)
+# HANDOFF — prebuilt parks (feat/prebuilt-parks, PR #705)
 
-Model: Claude Opus 5.5 (1M), chosen by the Overseer (Architect role, then implement).
+Model: Claude Opus 5.5 (1M), chosen by the Overseer (Architect role, then implement). Keep the same model.
+Design: `docs/design/PREBUILT-PARKS.md` (also PR #704, draft). Base: origin/feat/procgen-on-sphere.
 
-Design: `docs/design/PREBUILT-PARKS.md` (PR #704, draft, branch design/prebuilt-parks).
-Base: origin/feat/procgen-on-sphere. PR target: feat/procgen-on-sphere.
+## Jim's rulings driving this (24 Sep)
+- "no ability to build built into the game as delivered — seeds not downloadable is an error."
+- "we only support seeds 0..15, no others."
+- Retire checks that only existed because the client solved; move procgen out of the engine; enforce boundary.
+- If any of 0..15 fails an invariant: do NOT work around (no swaps/skips/baselines) — #705 waits on
+  feat/structural-backtrack (another agent). Base today: only seeds 2 and 5 of 0..15 pass all invariants
+  (vet:seeds, see below). So #705 IS BLOCKED on that branch; rebase onto it when it lands.
 
-## Done
-- Format 1 codec: `src/world/prebuilt/parkFile.ts` (+ `parkFileName.ts`, `parkFileStore.ts`).
-- `parkPlan.ts`: coarse builders take `hydrate(file)` for attempt 0; `parkPlanFile()` encodes; `parkPlanHydrated()`.
-- Shared owners: `buildRoute` exported (rail/generate.ts), `coasterCurve` (coaster/route.ts),
-  `cruiserPlanFromDecisions` (coaster/solve.ts), `TrainRoute.solvedRoute` getter.
+## Architecture now
+- `src/world/prebuilt/`: parkFile.ts (format + READER), parkFileName.ts, parkFileStore.ts (letterbox),
+  parkUnavailable.ts (error), solverPort.ts (the only way src reaches a solver; the client never installs one).
+- `procgen/`: every search + both backtracking drivers + park-file WRITER. install.ts installs the solver.
+  Node scripts get it lazily via `scripts/ts-extension-resolver-register.mjs` (sync registerHooks + require(esm));
+  vitest via `test/procgen/parkFacts.ts` importing procgen/install.ts after pinning the seed.
+- Hydrated in the client: plan (layout, cruiser, train, slide, crossings, pathGraph+lattice, road),
+  world phase (stall moves, walls, trees/bushes as Rng state, fairy poles, lamps, trestles, claims), bridge footprints.
+- Still computed on the client (deterministic candidate loops, asked Overseer whether Jim wants them moved):
+  cruiser pylons, slide legs, rail-race plan (exit/arch), boundary radii, ferris exit.
+- Checks: check:prebuilt-park (shard 6; A/B digest + no driver/world-search in hydrate + perturb control),
+  check:procgen-boundary (shard 1), check:client-no-solver (shard 6). All proved red (see commits).
+- Tools used for the split (scratchpad, not committed): reach.cjs (declaration reachability from src/main.ts),
+  movedecls.cjs (move declarations + wire imports), prune.cjs.
 
-- scripts/lib/parkDigest.mts, scripts/park-file-probe.mts (solve|hydrate|perturb), scripts/lib/parkFiles.mts,
-  scripts/build-parks.mts (.parks/ + manifest with sourceHash), check:prebuilt-park (shard 6).
-- vite plugin prebuiltParksPlugin (emits dist/parks/<seed>.json, stamps build, refuses stale sourceHash,
-  LGP_REQUIRE_PARKS=1 fails); workbox glob parks/*.json.
-- client: src/boot/prebuiltPark.ts (3 s timeout) -> offerParkFile; ParkGeneration first rung; finishLaunch awaits.
-- CI: deploy.yml / pr-preview.yml: actions/cache .parks + build:parks, LGP_REQUIRE_PARKS=1 on build.
+## Measurements
+- Canonical: digest 1279d5dcd2ad01a1 solved == hydrated; hydrated plan ~7 ms; file 119.9 KB raw.
+- Bundle JS before/after: 3,430,754 -> 3,304,071 B raw; 783,721 -> 744,315 B brotli (Garden chunk gone).
 
-## Proved red (canonical seed, file 24596 B, digest 1279d5dcd2ad01a1)
-1. layout decoder drops signYaw -> digest b4bbcbcba7a18981, 155 mesh names differ, exit 1.
-2. driver ignores file (`attempt === 0 && false`) -> digests equal but "hydrated features still searched:
-   layout=768, cruiser=771062, train=302918, slide=3008025, crossings=101 pieces", exit 1.
-3. perturb no-op -> "CONTROL FAILED ... 1279d5dcd2ad01a1 same", exit 1. Unmutated: exit 0, perturbed 3846707368ab1919.
-
-## State (24 Sep)
-- PR #705 (feat/prebuilt-parks -> feat/procgen-on-sphere) open; design PR #704 draft.
-- Local: `check` exit 0, `check:swept-bus` 0. `test:procgen` (5 fails, seeds 11/131/326) and `check:coplanar`
-  (1 NEW garden kerb/surface seam) fail identically on the base ae8257fb — pre-existing, not this PR.
-- CI: everything else green; preview built parks in 178 s on a cache miss, 1m14s total on a cache hit.
-- Preview verified headlessly: `/`, `/spawn?pos=0,40` (seed 11 hydrated), `/arrive?seed=428` (hydrated).
-- Finding: Mac arm64 vs CI x64 decisions differ by <=1.1e-13 m; digests differ across machines, so digests
-  are only compared on one machine (build:parks does both sides).
-
-## Next (design steps 3-5)
-- ship pathGraph (needs paths.ts side state as data), then world-phase decisions, then optionally drop the solver.
+## TODO (in order)
+1. ParkUnavailable screen (large text, seed + reason), remove 3 s timeout fallback, define "retry".
+2. Dev server: Vite dev middleware serves /parks/<seed>.json by running the Node solver (probe `solve`).
+3. Retire client-solve checks: check:solve-cost, check:park-boot (slicing), GENERATION budgets comments,
+   check:arrival-completes?; keep coarse bound on build:parks time in CI (timeout-minutes / watchdog).
+4. Seeds 0..15: PARK_SEED_POOL, new default (not 20260728), CI_SWEEP_SEEDS, per-seed test files,
+   check:seed-pool/seed-coverage, coplanar/swept-bus baselines, build:parks ships 0..15, save migration.
+5. Callers booting arbitrary seeds: list + fix. CLAUDE.md + design doc updates.
+6. Full gates; preview URL with a deep path loaded; screenshot of error screen.
