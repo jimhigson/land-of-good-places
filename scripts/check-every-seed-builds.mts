@@ -93,6 +93,8 @@ interface SeedResult {
   readonly note: string;
   /** Times the layout reached decision zero (whole-park restart); NaN if no trace. */
   readonly decisionZero: number;
+  /** The restart the root acceptance loop accepted (`scripts/lib/acceptedPark.mts`); NaN if not reported. */
+  readonly restart: number;
   /** Refusals the rung unwound on (0 on every seed today; printed either way). */
   readonly rungFired: number;
   /** Refusals the built park contradicts, proved with the rung disarmed. */
@@ -140,13 +142,15 @@ async function buildSeed(seed: number): Promise<SeedResult> {
   // `layout.falseRefusal` for any door the built park reaches). Cheap when
   // nothing fired, which is every seed today; thorough when something did.
   const rungFired = fired ? Number(fired[1]) : 0;
-  const falseRefusals = rungFired > 0 ? await falseRefusalsOf(seed) : 0;
+  const acceptedRestart = /accepted at restart (\d+)/.exec(all)?.[1] ?? '0';
+  const falseRefusals = rungFired > 0 ? await falseRefusalsOf(seed, acceptedRestart) : 0;
   return {
     seed,
     built,
     klass: refusal?.klass ?? '',
     note: built ? summarise(all) : (refusal?.note ?? ''),
     decisionZero: solved ? Number(solved[1]) : NaN,
+    restart: Number(/accepted at restart (\d+)/.exec(all)?.[1] ?? NaN),
     rungFired,
     falseRefusals,
     trace,
@@ -155,14 +159,15 @@ async function buildSeed(seed: number): Promise<SeedResult> {
 }
 
 /** `check:park` with the rung disarmed: how many refusals the built park contradicts. */
-async function falseRefusalsOf(seed: number): Promise<number> {
+/** The same accepted restart, rebuilt with the rung disarmed — never a new acceptance run under a different rule. */
+async function falseRefusalsOf(seed: number, restart: string): Promise<number> {
   const args = [
     '--no-warnings',
     '--import',
     './scripts/ts-extension-resolver-register.mjs',
     'scripts/check-park.mts',
   ];
-  const env = { ...process.env, LGP_SEED: String(seed), LGP_LAYOUT_RUNG: 'off' };
+  const env = { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: restart, LGP_LAYOUT_RUNG: 'off' };
   let all = '';
   try {
     const result = await run(process.execPath, args, { env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -245,6 +250,7 @@ await Promise.all(
           klass: 'crashed',
           note: `the sweep itself threw: ${String(error).slice(0, 140)}`,
           decisionZero: NaN,
+          restart: NaN,
           rungFired: 0,
           falseRefusals: 0,
           trace: [],
@@ -256,7 +262,7 @@ await Promise.all(
         process.stdout.write(
           `  seed ${String(result.seed).padStart(3)}: ${result.built ? 'built    ' : 'NOT BUILT'} ` +
             `${result.built ? '' : `[${result.klass}] `}${String(result.seconds).padStart(5)}s  ${result.note}\n` +
-            `  seed ${String(result.seed).padStart(3)}: built well? decision-zero=${result.decisionZero} ` +
+            `  seed ${String(result.seed).padStart(3)}: built well? restart=${result.restart} decision-zero=${result.decisionZero} ` +
             `rung-fired=${result.rungFired}${result.rungFired > 0 ? ` false-refusals=${result.falseRefusals}` : ''}\n`,
         );
       }

@@ -191,6 +191,13 @@ export function acceptanceSourceHash(): string {
     hash.update(readFileSync(file));
     hash.update('\0');
   }
+  // Every other `LGP_*` switch changes what a park build does
+  // (`LGP_LAYOUT_RUNG=off`, `LGP_WARP`, …), so a verdict taken under one is
+  // not a verdict about the park without it.
+  for (const [key, value] of Object.entries(process.env).sort(([a], [b]) => a.localeCompare(b))) {
+    if (!key.startsWith('LGP_') || key === 'LGP_SEED' || key === 'LGP_PARK_RESTART' || key === 'LGP_LANES') continue;
+    hash.update(`${key}=${value ?? ''}\0`);
+  }
   return hash.digest('hex').slice(0, 20);
 }
 
