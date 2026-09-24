@@ -281,6 +281,37 @@ export function autoHopClears(topHeight: number, apexClearance: number): boolean
 const SHALLOW_OVERLAP = 0.5;
 
 /**
+ * **Whether one collider pushes back on a mover at `position`, right now** —
+ * the one owner of that rule, asked by {@link CollisionWorld.resolve} and by
+ * {@link CollisionWorld.deepestSolidOverlap}, so the step guard in
+ * `resolveMovement` measures exactly the solidity `resolve` enforces.
+ *
+ * - `'absent'`: a banded collider does not exist for a mover below its base —
+ *   the landing rail over the open archway. See the header.
+ * - `'cleared'`: over its footprint but jumped clear above it. Absolute tops
+ *   compare against the mover's real feet height, so a prop she is stood on
+ *   holds still under her — see the header.
+ * - `'solid'`: it pushes.
+ */
+function contactWith(
+  collider: { readonly baseHeight: number; readonly topHeight: number; readonly topIsAbsolute: boolean },
+  position: Vector3,
+  clearance: number,
+): 'absent' | 'cleared' | 'solid' {
+  if (position.y < collider.baseHeight) return 'absent';
+  if (clearsTop(collider.topHeight, collider.topIsAbsolute ? position.y : clearance)) return 'cleared';
+  return 'solid';
+}
+
+/**
+ * How much deeper into something solid a single movement sub-step may leave a
+ * mover than she was before it, in metres, before the step is refused — see
+ * `resolveMovement`'s pinch guard. Float noise only: an ordinary resolve ends
+ * in exact contact.
+ */
+const PINCH_TOLERANCE = 1e-4;
+
+/**
  * The speed, in metres per second, at which a *deep* overlap (see
  * {@link SHALLOW_OVERLAP}) is allowed to resolve.
  *
@@ -790,18 +821,7 @@ export class CollisionWorld {
   ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
     const distance = Math.hypot(deltaX, deltaZ);
     const limit = this.maxSafeStep(radius);
-
-    // The overwhelmingly common case, and deliberately the *identical* code
-    // path to before: one move, one resolve, no arithmetic changed.
-    if (!(distance > limit)) {
-      position.x += deltaX;
-      position.z += deltaZ;
-      const result = this.resolve(position, radius, clearance, dt);
-      onStep?.(position);
-      return result;
-    }
-
-    const steps = Math.min(Math.ceil(distance / limit), MAX_SUBSTEPS);
+    const steps = distance > limit ? Math.min(Math.ceil(distance / limit), MAX_SUBSTEPS) : 1;
     const stepX = deltaX / steps;
     const stepZ = deltaZ / steps;
     const stepDt = dt / steps;
@@ -809,10 +829,34 @@ export class CollisionWorld {
     let clearedWall = false;
     let escorting = false;
     let corrected = false;
+    let depthBefore = this.deepestSolidOverlap(position, radius, clearance);
     for (let step = 0; step < steps; step += 1) {
+      const fromX = position.x;
+      const fromZ = position.z;
       position.x += stepX;
       position.z += stepZ;
-      const result = this.resolve(position, radius, clearance, stepDt);
+      let result = this.resolve(position, radius, clearance, stepDt);
+      // **The pinch guard: a step may not leave her deeper in stone than it
+      // found her.** `resolve` pushes out of each collider in turn, twice.
+      // Between two colliders closer together than she is wide — a lamp post
+      // 1.13 m from a castle turret (seed 4, restart 2) — each push lands her
+      // in the other, and the last one wins: she ended 0.11 m inside the
+      // turret's drawn stone, walking in from 11 of 96 approaches. More passes
+      // only creep towards the answer (sixteen passes still left 4 cm);
+      // the answer is that she does not fit, so the step is not taken. She
+      // stays where she was — in contact at the mouth of the gap, as a child
+      // who cannot squeeze through would — and `resolve` is asked there with
+      // no movement, so an escort already under way still progresses.
+      // `check:castle-towers` marches 48 bearings at every turret.
+      const depthAfter = this.deepestSolidOverlap(position, radius, clearance);
+      if (depthAfter > Math.max(depthBefore, 0) + PINCH_TOLERANCE) {
+        position.x = fromX;
+        position.z = fromZ;
+        result = this.resolve(position, radius, clearance, stepDt);
+        depthBefore = this.deepestSolidOverlap(position, radius, clearance);
+      } else {
+        depthBefore = depthAfter;
+      }
       onStep?.(position);
       clearedWall = clearedWall || result.clearedWall;
       escorting = escorting || result.escorting;
@@ -896,6 +940,38 @@ export class CollisionWorld {
    * not when the correction goes quiet, but when it stops entirely. See
    * `Player.update`, which holds the guard on until then.
    */
+  /**
+   * The deepest a mover of `radius` at `position` overlaps anything solid to
+   * her, in metres (0 when clear). Solid by exactly `resolve`'s rule
+   * ({@link contactWith}); the soft park boundary is not stone and is not
+   * counted. Read-only — the measuring half of `resolveMovement`'s pinch guard.
+   */
+  deepestSolidOverlap(position: Vector3, radius: number, clearance = 0): number {
+    let deepest = 0;
+    for (const circle of this.circles) {
+      const minimum = circle.radius + radius;
+      const depth = minimum - Math.hypot(position.x - circle.x, position.z - circle.z);
+      if (depth <= deepest) continue;
+      if (contactWith(circle, position, clearance) !== 'solid') continue;
+      deepest = depth;
+    }
+    for (const wall of this.walls) {
+      const ax = wall.x2 - wall.x1;
+      const az = wall.z2 - wall.z1;
+      const lengthSquared = ax * ax + az * az;
+      if (lengthSquared < 1e-8) continue;
+      let t = ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const depth =
+        wall.halfThickness + radius -
+        Math.hypot(position.x - (wall.x1 + ax * t), position.z - (wall.z1 + az * t));
+      if (depth <= deepest) continue;
+      if (contactWith(wall, position, clearance) !== 'solid') continue;
+      deepest = depth;
+    }
+    return deepest;
+  }
+
   resolve(
     position: Vector3,
     radius: number,
@@ -939,12 +1015,9 @@ export class CollisionWorld {
         const minimum = circle.radius + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        // A banded collider does not exist for a mover below its base — the
-        // landing rail over the open archway. See the header.
-        if (position.y < circle.baseHeight) continue;
-        // Absolute tops compare against the mover's real feet height, so a
-        // prop she is stood on holds still under her — see the header.
-        if (clearsTop(circle.topHeight, circle.topIsAbsolute ? position.y : clearance)) {
+        const contact = contactWith(circle, position, clearance);
+        if (contact === 'absent') continue;
+        if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -974,10 +1047,9 @@ export class CollisionWorld {
         const minimum = wall.halfThickness + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        // Same banded-base rule as the circles above.
-        if (position.y < wall.baseHeight) continue;
-        // Same absolute-top rule as the circles above.
-        if (clearsTop(wall.topHeight, wall.topIsAbsolute ? position.y : clearance)) {
+        const contact = contactWith(wall, position, clearance);
+        if (contact === 'absent') continue;
+        if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
