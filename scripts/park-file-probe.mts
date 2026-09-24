@@ -13,8 +13,9 @@
  * `paths.ts` keeps module state: a second park in the same process would be
  * measuring the first one's leftovers. The last line on stdout is JSON — the
  * digest (`scripts/lib/parkDigest.mts`, the same function `park-digest.mts`
- * uses), whether the plan was hydrated, how many search pieces each hydrated
- * feature ran (must be zero, or the "hydrated" park was quietly re-solved and
+ * uses), whether the plan was hydrated, whether the backtracking driver was
+ * ever constructed (it must not be: the hydrated path is the client's, which
+ * has no driver — if it ran, the "hydrated" park was quietly re-solved and
  * matching the fresh one proves nothing), and what each stage cost.
  *
  * `perturb` hydrates from the file with the Sky Cruiser's track raised half a
@@ -57,8 +58,10 @@ plan.solveParkPlanNow();
 const planCpuMs = cpuMs() - planCpu;
 const planWallMs = performance.now() - planWall;
 
+// Null when no driver was ever constructed — the hydrated path, which is the
+// only path the client has. Present means the plan was searched.
 const stats = plan.parkSolveStats();
-if (!stats) throw new Error('park-file-probe: the plan solved but published no stats');
+if (mode === 'solve' && !stats) throw new Error('park-file-probe: the plan solved but published no stats');
 
 let bytes = 0;
 if (mode === 'solve') {
@@ -71,7 +74,7 @@ const park = buildHeadlessPark();
 const digest = digestScene(park.scene);
 
 const piecesByHydratedFeature: Record<string, number> = {};
-for (const feature of PARK_FILE_FEATURES) piecesByHydratedFeature[feature] = stats.piecesByFeature[feature] ?? 0;
+for (const feature of PARK_FILE_FEATURES) piecesByHydratedFeature[feature] = stats?.piecesByFeature[feature] ?? 0;
 
 console.log(
   JSON.stringify({
@@ -81,8 +84,9 @@ console.log(
     meshes: digest.meshes,
     byName: Object.fromEntries(digest.byName),
     hydrated: plan.parkPlanHydrated(),
+    driverRan: stats !== null,
     piecesByHydratedFeature,
-    cpuMsByFeature: Object.fromEntries(Object.entries(stats.cpuMsByFeature).map(([k, v]) => [k, Math.round(v)])),
+    cpuMsByFeature: Object.fromEntries(Object.entries(stats?.cpuMsByFeature ?? {}).map(([k, v]) => [k, Math.round(v)])),
     planCpuMs: Math.round(planCpuMs),
     planWallMs: Math.round(planWallMs),
     worldBuildMs: Math.round(park.buildMs),

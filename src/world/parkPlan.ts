@@ -75,7 +75,10 @@ import { distanceToRailCorridor, nearestRailDistanceAlong } from './train/plan';
 import { PLAYER_RADIUS } from '../core/constants';
 import type { PathSample } from './pathGraph';
 import { NAV_CELL } from './NavGrid';
-import { offeredParkFile } from './prebuilt/parkFileStore';
+import { offeredParkFile, parkFileMissingReason } from './prebuilt/parkFileStore';
+import { ParkUnavailable } from './prebuilt/parkUnavailable';
+import { CLIENT_BUNDLE } from '../core/clientBundle';
+import type { FeatureContribution } from '../boot/groundClaims';
 import {
   encodeParkFile,
   parkFileProblem,
@@ -117,10 +120,14 @@ var driver: ParkSolve | null = null;
 var solved = false;
 var forcing = false;
 /**
- * The prebuilt park this driver hydrates from, or null to search — decided
- * once, when the driver starts (`docs/design/PREBUILT-PARKS.md`).
+ * The prebuilt park the plan was hydrated from, or null if it was searched
+ * (`docs/design/PREBUILT-PARKS.md`).
  */
 var hydrateFrom: ParkFile | null = null;
+/** The registry a hydrated plan committed into — the driver's own when it searched. */
+var hydratedClaims: GroundClaims | null = null;
+/** The features a hydrated plan has decided so far, in order. */
+var hydratedPlaced: string[] = [];
 /* eslint-enable no-var */
 
 /**
@@ -163,13 +170,13 @@ export function parkSolveStats(): SolveStats | null {
 
 /** Which features the driver has placed so far, in order — for the boot screen's stage line. */
 export function parkPlanPlaced(): readonly string[] {
-  return driver?.placedFeatures ?? [];
+  return driver?.placedFeatures ?? hydratedPlaced ?? [];
 }
 
 /** The registry every builder committed into — the `World` adopts it. */
 export function parkPlanClaims(): GroundClaims {
-  if (!driver) solveParkPlanNow();
-  return (driver as ParkSolve).claims;
+  if (!driver && !hydratedClaims) solveParkPlanNow();
+  return hydratedClaims ?? (driver as ParkSolve).claims;
 }
 
 // ------------------------------------------------------------- the builders
@@ -177,17 +184,11 @@ export function parkPlanClaims(): GroundClaims {
 /**
  * A feature that is one solve: one increment, placed or refused. `solve` runs
  * at the given attempt; `set`/`clear` hold the decision in {@link state}.
- *
- * `hydrate`, where a feature has one, reads the decision from a prebuilt park
- * file instead of searching for it. It is used for attempt 0 only: if a
- * hydrated decision were ever refused downstream, the unwind asks for attempt
- * 1, which searches — so a wrong file can cost time but cannot wedge the park.
  */
 function coarse<T>(spec: {
   readonly name: string;
   readonly deps: readonly string[];
   readonly supply?: number;
-  hydrate?(file: ParkFile): T;
   solve(attempt: number): Generator<number, T | Refusal, void>;
   set(value: T): void;
   clear(): void;
@@ -199,15 +200,14 @@ function coarse<T>(spec: {
     deps: spec.deps,
     *advance(attempt) {
       if (placed) return 'done';
-      const file = attempt === 0 ? hydrateFrom : null;
-      const outcome = file && spec.hydrate ? spec.hydrate(file) : yield* spec.solve(attempt);
+      const outcome = yield* spec.solve(attempt);
       if (typeof outcome === 'object' && outcome !== null && (outcome as Refusal).refused === true) {
         return outcome as Refusal;
       }
       spec.set(outcome as T);
       placed = true;
       const increment = spec.claims ? spec.claims(outcome as T) : { claims: [] };
-      return { ...increment, label: `attempt=${attempt}${file && spec.hydrate ? ' hydrated' : ''}` };
+      return { ...increment, label: `attempt=${attempt}` };
     },
     back() {
       placed = false;
@@ -372,22 +372,91 @@ export function parkPlanCruiserFinishPieces(): number {
   return cruiserFinishPieces;
 }
 
+function setLayout(layout: ParkLayout): void {
+  state.layout = layout;
+  bindCastlePlacement(layout);
+}
+
+function setPathGraph(graph: PathGraph): void {
+  state.pathGraph = graph;
+  state.pathLattice = latticeStateSnapshot();
+}
+
+/**
+ * One plan feature from a prebuilt park file: its decision set exactly as the
+ * search would have set it, and the claims its increment commits. No search
+ * runs; this is all the game as delivered can do (`docs/design/PREBUILT-PARKS.md`).
+ */
+function hydrateFeature(feature: string, file: ParkFile): FeatureContribution {
+  switch (feature) {
+    case 'layout':
+      setLayout(readLayout(file.features.layout));
+      break;
+    case 'cruiser':
+      state.cruiser = readCruiser(file.features.cruiser);
+      break;
+    case 'train':
+      state.train = readTrain(file.features.train);
+      break;
+    case 'slide':
+      state.slide = readSlide(file.features.slide);
+      break;
+    case 'crossings':
+      state.crossings = readCrossings(file.features.crossings);
+      break;
+    case 'pathGraph': {
+      const { graph, lattice } = readPathGraph(file.features.pathGraph);
+      resetPathsState();
+      restoreLatticeState(lattice);
+      setPathGraph(graph);
+      break;
+    }
+    case ROAD_FEATURE:
+      return { claims: entranceRoadClaims() };
+    default:
+      throw new ParkUnavailable(PARK_SEED, `its park file names a plan feature this game does not know: '${feature}'`);
+  }
+  return { claims: [] };
+}
+
+/** The whole plan from a park file, one feature per step, committed in the order the search committed them. */
+function* hydratePlan(file: ParkFile): Generator<number, void, void> {
+  hydrateFrom = file;
+  hydratedClaims = new GroundClaims();
+  hydratedPlaced = [];
+  for (const feature of file.planOrder) {
+    hydratedClaims.commitSection(feature, 0, hydrateFeature(feature, file));
+    hydratedPlaced.push(feature);
+    yield hydratedPlaced.length;
+  }
+}
+
+/**
+ * The park file to hydrate from, or null to search — and in the client, where
+ * there is no search, never null: a missing or unusable file is
+ * {@link ParkUnavailable}.
+ */
+function parkFileOrNull(): ParkFile | null {
+  const file = offeredParkFile();
+  const problem = file ? parkFileProblem(file, PARK_SEED) : (parkFileMissingReason() ?? 'no park file was loaded');
+  if (!problem) return file;
+  if (CLIENT_BUNDLE) throw new ParkUnavailable(PARK_SEED, problem);
+  if (file) throw new Error(`park plan: the offered park file cannot be used for seed ${PARK_SEED}: ${problem}`);
+  return null;
+}
+
 function builders(): readonly FeatureBuilder[] {
   const layoutBuilder = coarse<ParkLayout>({
     name: 'layout',
     deps: [],
     supply: PARK_RESTARTS,
-    hydrate: (file) => readLayout(file.features.layout),
     *solve(attempt) {
       const restart = layoutRestartBase() + attempt;
       const outcome = yield* layoutRestartSearch(restart);
       if (outcome.kind === 'layout') return outcome.layout;
       return refusal(`layout restart ${restart}: ${outcome.reason}`);
     },
-    set(layout) {
-      state.layout = layout;
-      bindCastlePlacement(layout);
-    },
+    set: setLayout,
     clear() {
       delete state.layout;
     },
@@ -396,7 +465,6 @@ function builders(): readonly FeatureBuilder[] {
   const cruiserBuilder = coarse<PlannedCoaster>({
     name: 'cruiser',
     deps: ['layout'],
-    hydrate: (file) => readCruiser(file.features.cruiser),
     *solve(attempt) {
       const rng = attempt === 0 ? undefined : new Rng(seedFor('cruiser', attempt, 0));
       const start: CruiserSearchStart = yield* cruiserStartSearch(rng);
@@ -420,7 +488,6 @@ function builders(): readonly FeatureBuilder[] {
   const trainBuilder = coarse<TrainDecision>({
     name: 'train',
     deps: ['layout', 'cruiser'],
-    hydrate: (file) => readTrain(file.features.train),
     *solve(attempt) {
       let solvedRoute: SolvedRailRoute;
       try {
@@ -443,7 +510,6 @@ function builders(): readonly FeatureBuilder[] {
   const slideBuilder = coarse<PlannedSlide>({
     name: 'slide',
     deps: ['layout', 'cruiser', 'train'],
-    hydrate: (file) => readSlide(file.features.slide),
     *solve(attempt) {
       const outcome = yield* slideSearch(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'slide', 'solve', attempt));
       if ('refused' in outcome) {
@@ -463,7 +529,6 @@ function builders(): readonly FeatureBuilder[] {
     name: 'crossings',
     deps: ['train'],
     supply: 1,
-    hydrate: (file) => readCrossings(file.features.crossings),
     *solve() {
       try {
         return yield* crossingSitesSearch();
@@ -484,12 +549,6 @@ function builders(): readonly FeatureBuilder[] {
     name: 'pathGraph',
     deps: ['layout', 'cruiser', 'train', 'slide', 'crossings'],
     supply: 1,
-    hydrate: (file) => {
-      const { graph, lattice } = readPathGraph(file.features.pathGraph);
-      resetPathsState();
-      restoreLatticeState(lattice);
-      return graph;
-    },
     *solve() {
       resetPathsState();
       const graph = yield* pathGraphSearch();
@@ -563,10 +622,7 @@ function builders(): readonly FeatureBuilder[] {
       }
       return graph;
     },
-    set(graph) {
-      state.pathGraph = graph;
-      state.pathLattice = latticeStateSnapshot();
-    },
+    set: setPathGraph,
     clear() {
       delete state.pathGraph;
       delete state.pathLattice;
@@ -594,25 +650,23 @@ function builders(): readonly FeatureBuilder[] {
 
 function startDriver(): ParkSolve {
   if (driver) return driver;
-  hydrateFrom = acceptedParkFile();
   driver = new ParkSolve(PARK_SEED, builders(), new GroundClaims());
   return driver;
 }
 
 /**
- * The offered prebuilt park, if it is a park file for this seed in this
- * format; otherwise null, with the reason said once — a discarded file means
- * a slow boot, which somebody should be able to find out about.
+ * The plan, decided: hydrated from the park file when there is one, searched
+ * by the driver otherwise — and the second branch exists only outside the
+ * client bundle, where `CLIENT_BUNDLE` folds to `true` and removes it along
+ * with every search it reaches.
  */
-function acceptedParkFile(): ParkFile | null {
-  const file = offeredParkFile();
-  if (!file) return null;
-  const problem = parkFileProblem(file, PARK_SEED);
-  if (problem) {
-    console.warn(`park plan: ignoring the prebuilt park file (${problem}); solving seed ${PARK_SEED} instead`);
-    return null;
+function* decidePlan(): Generator<number, void, void> {
+  const file = parkFileOrNull();
+  if (file) {
+    yield* hydratePlan(file);
+  } else if (!CLIENT_BUNDLE) {
+    yield* startDriver().run();
   }
-  return file;
 }
 
 /** Whether this park's plan was hydrated from a prebuilt file rather than searched. */
@@ -635,7 +689,7 @@ export function parkPlanFile(build?: string): ParkFile {
       crossings: planPart('crossings'),
       pathGraph: planPart('pathGraph'),
       pathLattice: planPart('pathLattice'),
-      planOrder: (driver as ParkSolve).decisions.map((entry) => entry.feature),
+      planOrder: driver ? driver.decisions.map((entry) => entry.feature) : hydratedPlaced,
     },
     build,
   );
@@ -643,16 +697,15 @@ export function parkPlanFile(build?: string): ParkFile {
 
 function finish(): void {
   solved = true;
-  offerPrewarmedGroundClaims((driver as ParkSolve).claims);
+  offerPrewarmedGroundClaims(parkPlanClaims());
   // One line in the browser console saying which it was: a boot that should
   // have hydrated and searched instead is otherwise invisible, only slow.
-  if (typeof (globalThis as { process?: unknown }).process === 'undefined') {
+  if (CLIENT_BUNDLE) {
     console.info(
-      hydrateFrom
-        ? `Park plan: seed ${PARK_SEED} hydrated from its prebuilt file (${PARK_FILE_FEATURES.join(', ')}).`
-        : `Park plan: seed ${PARK_SEED} solved on this device.`,
+      `Park plan: seed ${PARK_SEED} hydrated from its prebuilt file (${PARK_FILE_FEATURES.join(', ')}).`,
     );
   }
+  if (!driver) return;
   try {
     const nodeProcess = (globalThis as { process?: { stderr?: { write: (s: string) => unknown } } }).process;
     const stats = (driver as ParkSolve).stats;
@@ -682,7 +735,7 @@ export function solveParkPlanNow(): void {
   forcedFrom = new Error('park plan forced here').stack ?? '';
   void forcedFrom;
   try {
-    const run = startDriver().run();
+    const run = decidePlan();
     for (;;) {
       const step = run.next();
       if (step.done) break;
@@ -736,7 +789,7 @@ export function* parkPlanSearch(): Generator<number, void, void> {
   if (solved) return;
   forcing = true;
   try {
-    yield* startDriver().run();
+    yield* decidePlan();
     finish();
   } finally {
     forcing = false;
