@@ -11,7 +11,9 @@
  * version. The cache is keyed on {@link parkSourceHash}, so an edit to `src/`
  * re-solves on the next request rather than serving a park from other code.
  * A seed outside the game's parks gets a 404 — the same error the game shows
- * for it in production.
+ * for it in production. Files `build:parks` wrote for the current source are
+ * served straight from `.parks/`, so a browser session over many seeds can be
+ * made instant by running it first.
  */
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
@@ -33,7 +35,18 @@ export function devParksMiddleware(root, version, seeds) {
 
   /** @param {number} seed */
   async function parkFile(seed) {
-    const dir = join(root, '.parks', 'dev', parkSourceHash(root).slice(0, 16));
+    const source = parkSourceHash(root);
+    // Parks `pnpm run build:parks` already solved from this very source are
+    // used as they are — run it once before a browser session that will visit
+    // many seeds, and nothing is solved on request.
+    try {
+      const manifest = JSON.parse(readFileSync(join(root, '.parks', 'manifest.json'), 'utf8'));
+      const built = join(root, '.parks', `${seed}.json`);
+      if (manifest.sourceHash === source && manifest.seeds.includes(seed) && existsSync(built)) return built;
+    } catch {
+      // No build:parks output (or an unreadable one): solve on request below.
+    }
+    const dir = join(root, '.parks', 'dev', source.slice(0, 16));
     const file = join(dir, `${seed}.json`);
     if (existsSync(file)) return file;
     const key = file;
