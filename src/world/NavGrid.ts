@@ -636,7 +636,16 @@ export class NavGrid {
     // in the choice — a caller who only knows "somewhere on the ground" still
     // gets an honest yes on a hilltop whose one level is the hill.
     this.reachedGoal = endNode === goalNode && goalNode >= 0;
-    this.routeEndY = this.nodeHeight[endNode] ?? startY;
+    // A node's height is its level at the **cell centre**, up to 0.35 m from
+    // the goal itself, and a reached route's last waypoint is the goal, not the
+    // centre. On anything but level ground those are different heights: on the
+    // fountain's tilted wading plane, 12 mm — seed 10 at restart 0 on one CI
+    // run, "ends at 0.307 m, water 0.295 m" — and on a slope, more. So a
+    // reached route reports the goal node's level *at the goal*: the surface a
+    // walker standing on that node meets as she steps across to it, which is
+    // exactly the sampler's question with the node's height as its reference.
+    const nodeY = this.nodeHeight[endNode] ?? startY;
+    this.routeEndY = this.reachedGoal ? sample(goalX, goalZ, nodeY) : nodeY;
 
     const pathLength = this.reconstruct(startNode, endNode);
     return this.smooth(startX, startZ, startY, goalX, goalZ, pathLength, out);
