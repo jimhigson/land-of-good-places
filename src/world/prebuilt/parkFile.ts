@@ -8,6 +8,7 @@ import type { PlannedSlide } from '../slide/solve';
 import type { SolvedCrossingSites } from '../train/crossingPlanSolve';
 import { TrainRoute } from '../train/route';
 import { planStations, type PlannedStation } from '../train/plan';
+import type { LatticeStateSnapshot, PathGraph } from '../paths';
 import { PARK_FILE_FORMAT } from './parkFileName';
 
 /**
@@ -95,6 +96,12 @@ export interface SlideRecord {
   readonly scalars: { readonly [key: string]: Json };
 }
 
+export interface PathGraphRecord {
+  readonly graph: Json;
+  /** The street paving the path search left in `paths.ts`, which the drawn paths read. */
+  readonly lattice: Json;
+}
+
 export interface ParkFile {
   /** {@link PARK_FILE_FORMAT} of the writer. */
   readonly format: number;
@@ -107,11 +114,14 @@ export interface ParkFile {
     readonly train: TrainRecord;
     readonly slide: SlideRecord;
     readonly crossings: Json;
+    readonly pathGraph: PathGraphRecord;
   };
+  /** The plan's features in the order the driver committed them to the claims registry. */
+  readonly planOrder: readonly string[];
 }
 
 /** The features a park file carries, in the driver's build order. */
-export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings'] as const;
+export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings', 'pathGraph'] as const;
 export type ParkFileFeature = (typeof PARK_FILE_FEATURES)[number];
 
 /** The decided plan, as `parkPlan.ts` holds it — what {@link encodeParkFile} reads. */
@@ -121,6 +131,9 @@ export interface DecidedPlan {
   readonly train: { readonly route: TrainRoute };
   readonly slide: PlannedSlide;
   readonly crossings: SolvedCrossingSites;
+  readonly pathGraph: PathGraph;
+  readonly pathLattice: LatticeStateSnapshot;
+  readonly planOrder: readonly string[];
 }
 
 // ---------------------------------------------------------------- plain data
@@ -280,7 +293,7 @@ function readRoute(record: RouteRecord, path: string): SolvedRailRoute {
 
 /** The decided plan as a park file. `build` is stamped later, by the bundle that ships it. */
 export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamped'): ParkFile {
-  const { layout, cruiser, train, slide, crossings } = plan;
+  const { layout, cruiser, train, slide, crossings, pathGraph, pathLattice, planOrder } = plan;
 
   const entries: Json[] = [];
   for (const [id, entry] of layout.entries) {
@@ -322,7 +335,9 @@ export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamp
         scalars,
       },
       crossings: plain(crossings, 'crossings'),
+      pathGraph: { graph: plain(pathGraph, 'pathGraph'), lattice: plain(pathLattice, 'pathGraph.lattice') },
     },
+    planOrder: [...planOrder],
   };
 }
 
@@ -342,6 +357,7 @@ export function parkFileProblem(file: unknown, seed: number): string | null {
   if (!features) return 'no features';
   const missing = PARK_FILE_FEATURES.filter((name) => features[name] === undefined);
   if (missing.length > 0) return `missing ${missing.join(', ')}`;
+  if (!Array.isArray(candidate.planOrder)) return 'no planOrder';
   return null;
 }
 
@@ -394,4 +410,11 @@ export function readSlide(record: SlideRecord): PlannedSlide {
 
 export function readCrossings(record: Json): SolvedCrossingSites {
   return unplain(record, 'crossings') as SolvedCrossingSites;
+}
+
+export function readPathGraph(record: PathGraphRecord): { graph: PathGraph; lattice: LatticeStateSnapshot } {
+  return {
+    graph: unplain(record.graph, 'pathGraph') as PathGraph,
+    lattice: unplain(record.lattice, 'pathGraph.lattice') as LatticeStateSnapshot,
+  };
 }

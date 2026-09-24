@@ -55,7 +55,14 @@ import { TrainRoute, trainRouteSearch } from './train/route';
 import { planStations, type PlannedStation } from './train/plan';
 import { slideSearch, type PlannedSlide } from './slide/solve';
 import { crossingSitesSearch, type SolvedCrossingSites } from './train/crossingPlanSolve';
-import { pathGraphSearch, resetPathsState, type PathGraph } from './paths';
+import {
+  latticeStateSnapshot,
+  pathGraphSearch,
+  resetPathsState,
+  restoreLatticeState,
+  type LatticeStateSnapshot,
+  type PathGraph,
+} from './paths';
 import { screenDrawnPathsForOffSiteCrossings } from './train/crossingPredicate';
 import { drawnSamplesFor } from './pathGraph';
 import { entranceRoadClaims, ROAD_FEATURE } from './entrance/roadCorridor';
@@ -75,6 +82,7 @@ import {
   readCruiser,
   readCrossings,
   readLayout,
+  readPathGraph,
   readSlide,
   readTrain,
   type ParkFile,
@@ -93,6 +101,8 @@ interface PlanState {
   slide?: PlannedSlide;
   crossings?: SolvedCrossingSites;
   pathGraph?: PathGraph;
+  /** The street paving `pathGraphSearch` left in `paths.ts`, captured when the graph was decided. */
+  pathLattice?: LatticeStateSnapshot;
 }
 
 // `var`, deliberately: this module is imported by `parkLayout.ts`, so it is
@@ -474,6 +484,12 @@ function builders(): readonly FeatureBuilder[] {
     name: 'pathGraph',
     deps: ['layout', 'cruiser', 'train', 'slide', 'crossings'],
     supply: 1,
+    hydrate: (file) => {
+      const { graph, lattice } = readPathGraph(file.features.pathGraph);
+      resetPathsState();
+      restoreLatticeState(lattice);
+      return graph;
+    },
     *solve() {
       resetPathsState();
       const graph = yield* pathGraphSearch();
@@ -549,9 +565,11 @@ function builders(): readonly FeatureBuilder[] {
     },
     set(graph) {
       state.pathGraph = graph;
+      state.pathLattice = latticeStateSnapshot();
     },
     clear() {
       delete state.pathGraph;
+      delete state.pathLattice;
       resetPathsState();
     },
   });
@@ -615,6 +633,9 @@ export function parkPlanFile(build?: string): ParkFile {
       train: planPart('train'),
       slide: planPart('slide'),
       crossings: planPart('crossings'),
+      pathGraph: planPart('pathGraph'),
+      pathLattice: planPart('pathLattice'),
+      planOrder: (driver as ParkSolve).decisions.map((entry) => entry.feature),
     },
     build,
   );

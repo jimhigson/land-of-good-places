@@ -1754,15 +1754,19 @@ const usedTaps = new Set<number>();
  * would "branch off nothing" (measured: seed 18's station spur started
  * 11 m from any real paving, on a phantom node a rejected candidate left
  * marked paved).
+ *
+ * Also what a prebuilt park (`world/prebuilt/parkFile.ts`) carries: the paving
+ * the path search left behind is a decision the drawn paths read, and a
+ * hydrated park restores it here rather than searching for it.
  */
-interface LatticeStateSnapshot {
+export interface LatticeStateSnapshot {
   readonly nodes: readonly number[];
   readonly edges: readonly string[];
   readonly taps: readonly number[];
   readonly rims: readonly number[];
 }
 
-function latticeStateSnapshot(): LatticeStateSnapshot {
+export function latticeStateSnapshot(): LatticeStateSnapshot {
   return {
     nodes: [...pavedLatticeNodes],
     edges: [...pavedLatticeEdges],
@@ -1771,7 +1775,7 @@ function latticeStateSnapshot(): LatticeStateSnapshot {
   };
 }
 
-function restoreLatticeState(snapshot: LatticeStateSnapshot): void {
+export function restoreLatticeState(snapshot: LatticeStateSnapshot): void {
   pavedLatticeNodes.clear();
   for (const node of snapshot.nodes) pavedLatticeNodes.add(node);
   pavedLatticeEdges.clear();
