@@ -1,5 +1,5 @@
 import type { TrainRoute } from './route';
-import { pathCentreline } from '../pathGraph';
+import { pathCentreline, type PathSample } from '../pathGraph';
 import { createCrossingScan, esplanadeSamples, siteForFlip } from './crossingPredicate';
 
 // Re-exported so existing importers of this module keep working; the owner is
@@ -281,6 +281,12 @@ function spineThrough(
 export function computeCrossings(
   route: TrainRoute,
   stationDistances: readonly number[] = [],
+  /**
+   * The drawn network to measure. Defaults to the one `buildPaths` published;
+   * the path graph's own plan-time screen (`parkPlan.ts`) passes the samples
+   * of the graph it is about to return, before anything is published.
+   */
+  centrelineSamples: readonly PathSample[] = pathCentreline(),
 ): LevelCrossing[] {
   void stationDistances; // crossings are planned station-clear (crossingPlan.ts); kept for callers
   // **The flip definition lives in `createCrossingScan`, not here.** It used to
@@ -290,7 +296,7 @@ export function computeCrossings(
   const scan = createCrossingScan(route);
   const consider = (x: number, z: number): void => scan.consider(x, z);
 
-  for (const sample of pathCentreline()) consider(sample.x, sample.z);
+  for (const sample of centrelineSamples) consider(sample.x, sample.z);
 
   // **The esplanade: the arch to wherever the drawn network takes over.**
   // Its first sample stands far from the last path sample, so the RUN_BREAK
@@ -319,7 +325,7 @@ export function computeCrossings(
   // metres.** It did not, once: the screen scanned only the drawn curves, so
   // seed 7's loop cutting `x = 0` at `z = 54.5` — in the un-drawn walk in —
   // passed the plan and threw here, three systems later, from tree planting.
-  for (const sample of esplanadeSamples(pathCentreline())) consider(sample.x, sample.z);
+  for (const sample of esplanadeSamples(centrelineSamples)) consider(sample.x, sample.z);
 
   const flips = scan.flips();
   type BareCrossing = Omit<LevelCrossing, 'pathHalfWidth' | 'spine'>;
@@ -391,7 +397,7 @@ export function computeCrossings(
   // through it — see the two fields' own doc comments. Read once, here,
   // rather than per-bridge later, so every consumer (the footprint search,
   // the built geometry, the invariants) shares the identical spine.
-  const centreline = pathCentreline();
+  const centreline = centrelineSamples;
   return crossings.map((crossing): LevelCrossing => {
     const found = spineThrough(centreline, crossing.x, crossing.z, crossing.pathDirX, crossing.pathDirZ);
     return {

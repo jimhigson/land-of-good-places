@@ -15,6 +15,14 @@ import { registerPlanCache } from '../boot/planCaches';
 import { COASTER_PLANS } from './coaster/plan';
 import { RAIL_RACE_PLAN } from './railRace/plan';
 import { archFeet } from './railRace/arch';
+import type { DrawnEdge } from './gridAxes';
+import {
+  backboneRadius,
+  drawnCentreLine,
+  longDiagonals,
+  offLatticeStreetRuns,
+  type PavingGround,
+} from './pavingLegibility';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
 import { STALL_STANDS } from '../minigames/stallPlacement';
@@ -106,6 +114,12 @@ const DISABLE_INTERCONNECTS = stringFromEnv('LGP_DISABLE_INTERCONNECTS') !== nul
 /** Debug hook: log why a spur fell back off the street lattice. Node-only,
  * zero/default in the game, exactly like the hooks above. */
 const DEBUG_STREETS = stringFromEnv('LGP_DEBUG_STREETS') !== null;
+/**
+ * `LGP_DISABLE_LEGIBILITY_SCREEN=1` turns off the path graph's grid screens
+ * (`pavingLegibility.ts`: the connector screen in {@link addInterconnects} and
+ * `parkPlan.ts`'s final one) — for proving them red, never for a real park.
+ */
+export const DISABLE_LEGIBILITY_SCREEN = stringFromEnv('LGP_DISABLE_LEGIBILITY_SCREEN') !== null;
 
 /** Set (debug only) around a re-probe of a fallen-back target so
  * `streetStubs` narrates its per-node rejections for that one point. */
@@ -1547,7 +1561,7 @@ function collapseCollinear(points: readonly (readonly [number, number])[]): (rea
 //   Decision 6 allows, alongside the railway's own crossing geometry.
 
 /** Lattice pitch — Decision 1's "grid pitch 12 m". The one big number. */
-const STREET_PITCH = 12;
+export const STREET_PITCH = 12;
 
 /** Cells each way from the plaza the lattice extends. ±14 cells is ±168 m,
  * comfortably past every boundary spline the generator produces (measured
@@ -4630,6 +4644,56 @@ function arrivalLead(node: PathNode): readonly [number, number][] {
 }
 
 /**
+ * The park as the path graph is planning it, as `pavingLegibility.ts`'s
+ * measures stand on it — the same inputs `test/procgen/invariants.ts` reads
+ * off the built park (`builtPavingGround`): every plot's footprint box, the
+ * boundary, the railway's centre line, the Rail Race arch feet. Only the
+ * bridges are the caller's: which crossings the drawn network makes is not
+ * known until it is drawn, so `parkPlan.ts`'s final screen passes the
+ * footprints of the crossings the graph actually makes, and a mid-build
+ * caller passes none (stricter, never looser).
+ */
+export function plannedPavingGround(onBridge: (x: number, z: number) => boolean = () => false): PavingGround {
+  const route = TRAIN_PLAN.route;
+  const railPoint = new Vector3();
+  return {
+    plaza: { x: PLAZA.x, z: PLAZA.z },
+    plots: [...PARK_LAYOUT.entries.values()].map((entry) => ({
+      x: entry.x,
+      z: entry.z,
+      halfX: entry.footprint.kind === 'circle' ? entry.footprint.radius : entry.footprint.halfX,
+      halfZ: entry.footprint.kind === 'circle' ? entry.footprint.radius : entry.footprint.halfZ,
+    })),
+    distanceToEdge: (x, z) => PARK_BOUNDARY.distanceToEdge(x, z),
+    railDistance: (x, z) => {
+      route.flatPointAt(route.distanceNear(x, z), railPoint);
+      return Math.hypot(railPoint.x - x, railPoint.z - z);
+    },
+    onBridge,
+    archFeet: [RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
+      .flatMap((ring) => archFeet(ring))
+      .map((foot) => ({ x: foot.x, z: foot.z, radius: foot.radius })),
+  };
+}
+
+/** A route as the paving measures read it: its drawn curve, sampled exactly
+ * as the built park's `PathEdgeFact.points` are. Memoised per route object —
+ * a route is never mutated in place (`squareJunctionCorners` replaces it). */
+const drawnEdgeMemo = new WeakMap<RouteDefinition, DrawnEdge>();
+export function drawnEdgeOf(route: RouteDefinition): DrawnEdge {
+  const hit = drawnEdgeMemo.get(route);
+  if (hit) return hit;
+  const edge: DrawnEdge = {
+    name: route.name,
+    backbone: route.closed,
+    halfWidth: route.width / 2,
+    points: drawnCentreLine(routeCurve(route)),
+  };
+  drawnEdgeMemo.set(route, edge);
+  return edge;
+}
+
+/**
  * **The interconnection pass.** Everything earlier in {@link buildGraph}
  * builds a pure hub-and-spoke tree: the ring plus one spur per destination,
  * each branching wherever gives *that one destination* the shortest walk
@@ -4693,6 +4757,14 @@ function* addInterconnects(
   // trigger an edge, so rebuilding on every one of them was pure waste.
   let graph = buildRouteDistanceGraph(edges);
   let stale = false;
+  // What the grid screens below stand on. No bridges: which crossings the
+  // network makes is only known once it is drawn, and a connector never
+  // crosses the railway (the same-side filter above) — so this can only ever
+  // be stricter than the built park's measure near a bridge ramp, never
+  // looser.
+  const pavingGround = plannedPavingGround();
+  const ringEdge = edges.find((edge) => edge.route.closed);
+  const ringRadius = backboneRadius(ringEdge ? [drawnEdgeOf(ringEdge.route)] : [], pavingGround.plaza);
   for (const { a, b, straight } of candidates) {
     // One candidate pair per slice opportunity: each accepted connector plans
     // a street (a lattice search plus clearance screens), which is exactly
@@ -4841,8 +4913,9 @@ function* addInterconnects(
       );
     }
 
+    const candidateName = `connector-${a.id}-${b.id}`;
     /** Why this decision's paving is refused, or null if it may be drawn. */
-    const refusal = (plan: StreetPlan | null, points: readonly (readonly [number, number])[]): string | null => {
+    const refusal = (points: readonly (readonly [number, number])[]): string | null => {
       // A doorstep-to-doorstep link (the ferris wheel and its own kiosk are
       // 2.3 m apart) is exempt from the corridor screen: both ends' spurs
       // already carry lamps there, so the marginal lamp risk is nil, while a
@@ -4859,8 +4932,29 @@ function* addInterconnects(
       // walking reads as a broken park. The one it draws is still held to
       // `streetsShareLatticeLines`' own exemptions in the built park, which
       // is what proves the escape stayed the size of a shortcut.
-      if (!plan && !detourIsDisproportionate && carriesAnOffLatticeStreetRun(points)) {
+      //
+      // **No escape, and measured as the invariant measures it.** This used
+      // to ask `carriesAnOffLatticeStreetRun` of the control points, only of
+      // a non-lattice decision, and waived it when the detour was
+      // disproportionate — an escape `streetsShareLatticeLines` never
+      // granted, so every connector it let through was a park the root loop
+      // built in full and threw away (seed 3 restart 3,
+      // `connector-stall.dodgems-stall.facePaint`, 9.0 m on x = 34.00). It
+      // now asks `pavingLegibility.ts`'s own measure of the drawn curve, of
+      // every decision; a pair every alternative is refused for is left
+      // unlinked — optional paving, not drawn.
+      const drawnCandidate = drawnEdgeOf({ name: candidateName, width: CONNECTOR_WIDTH, closed: false, points });
+      if (!DISABLE_LEGIBILITY_SCREEN && offLatticeStreetRuns([drawnCandidate], pavingGround, STREET_PITCH, ringRadius).length > 0) {
         return 'off-lattice street run';
+      }
+      // `pathsRunOnGridAxes`' measure, likewise — asked of the paving as
+      // painted ground with the network already drawn, because a connector
+      // retracing a spur's diagonal lead is one piece of ground with it
+      // (`gridAxes.ts`). Only a piece this candidate paints is its fault.
+      if (!DISABLE_LEGIBILITY_SCREEN) {
+        const network = edges.filter((edge) => edge.paved).map((edge) => drawnEdgeOf(edge.route));
+        const long = longDiagonals([...network, drawnCandidate], pavingGround);
+        if (long.some((piece) => piece.carriers.includes(candidateName))) return 'long diagonal';
       }
       // A connector running along the ginormous slide's leg corridor starves
       // the chute of standable ground (`slide/supports.ts`) — an optional
@@ -4927,7 +5021,7 @@ function* addInterconnects(
     for (const decision of alternatives()) {
       const points = pointsFor(decision);
       const plan = decision.kind === 'lattice' ? decision.plan : null;
-      const why = refusal(plan, points);
+      const why = refusal(points);
       if (why === null) {
         chosen = { plan, points };
         break;
@@ -4946,7 +5040,7 @@ function* addInterconnects(
       from: a.id,
       to: b.id,
       paved: true,
-      route: { name: `connector-${a.id}-${b.id}`, width: CONNECTOR_WIDTH, closed: false, points },
+      route: { name: candidateName, width: CONNECTOR_WIDTH, closed: false, points },
     });
     stale = true;
   }

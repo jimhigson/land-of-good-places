@@ -55,7 +55,18 @@ import { TrainRoute, trainRouteSearch } from './train/route';
 import { planStations, type PlannedStation } from './train/plan';
 import { slideSearch, type PlannedSlide } from './slide/solve';
 import { crossingSitesSearch, type SolvedCrossingSites } from './train/crossingPlanSolve';
-import { pathGraphSearch, resetPathsState, type PathGraph } from './paths';
+import {
+  DISABLE_LEGIBILITY_SCREEN,
+  STREET_PITCH,
+  drawnEdgeOf,
+  pathGraphSearch,
+  plannedPavingGround,
+  resetPathsState,
+  type PathGraph,
+} from './paths';
+import { longDiagonals, offLatticeStreetRuns } from './pavingLegibility';
+import { computeCrossings } from './train/crossings';
+import { planBridgeFootprints, type PlannedFootprint } from './train/bridgeFootprint';
 import { screenDrawnPathsForOffSiteCrossings } from './train/crossingPredicate';
 import { drawnSamplesFor } from './pathGraph';
 import { entranceRoadClaims, ROAD_FEATURE } from './entrance/roadCorridor';
@@ -525,6 +536,20 @@ function builders(): readonly FeatureBuilder[] {
           { consumed: ['train', 'layout'] },
         );
       }
+      // **The drawn paving must read as a grid** — `pathsRunOnGridAxes` and
+      // `streetsShareLatticeLines`, asked here of the graph about to be
+      // returned through `pavingLegibility.ts`, the one measure those two
+      // invariants ask of the built park. Optional paving already met it at
+      // its own point of decision (`addInterconnects` draws no connector that
+      // fails it); what fails here is mandatory paving — a spur, a station
+      // lead — routed onto its own private line or down a long diagonal by
+      // where the plots, the loop and its crossings stand. Never shipped: the
+      // park unwinds as for a pinched lane.
+      yield 0;
+      const legibility = DISABLE_LEGIBILITY_SCREEN ? null : illegiblePaving(graph, drawn, train.route);
+      if (legibility) {
+        return refusal(`paths: ${legibility}`, { consumed: ['train', 'layout'] });
+      }
       return graph;
     },
     set(graph) {
@@ -550,6 +575,42 @@ function builders(): readonly FeatureBuilder[] {
 
 
   return [layoutBuilder, cruiserBuilder, trainBuilder, slideBuilder, crossingsBuilder, pathGraphBuilder, roadBuilder];
+}
+
+/**
+ * The first way the graph's drawn paving fails to read as a grid, or null —
+ * `pavingLegibility.ts`'s two measures over every paved edge, standing on
+ * the planned park with the bridges of the crossings this very graph makes
+ * (`computeCrossings` over its own samples; the conservative footprint, the
+ * one known before a bridge is built — a superset of the built one's, so
+ * this can only ever be looser than the built park's verdict at a bridge,
+ * never stricter, and a park the invariants accept is never refused here).
+ */
+function illegiblePaving(graph: PathGraph, drawn: readonly PathSample[], route: TrainRoute): string | null {
+  let footprints: readonly PlannedFootprint[] = [];
+  try {
+    footprints = planBridgeFootprints(computeCrossings(route, [], drawn));
+  } catch {
+    // An off-site crossing — refused by the screen above before this runs.
+  }
+  const ground = plannedPavingGround((x, z) => footprints.some((footprint) => footprint?.covers(x, z) === true));
+  const edges = graph.edges.filter((edge) => edge.paved).map((edge) => drawnEdgeOf(edge.route));
+  const diagonal = longDiagonals(edges, ground)[0];
+  if (diagonal) {
+    return (
+      `drawn paving from (${diagonal.from[0].toFixed(1)}, ${diagonal.from[1].toFixed(1)}) to ` +
+      `(${diagonal.to[0].toFixed(1)}, ${diagonal.to[1].toFixed(1)}) runs diagonally for ${diagonal.extent.toFixed(1)} m ` +
+      `(${diagonal.carriers.join(', ')})`
+    );
+  }
+  const run = offLatticeStreetRuns(edges, ground, STREET_PITCH)[0];
+  if (run) {
+    return (
+      `${run.edge} runs ${run.axis === 'z' ? 'north-south' : 'east-west'} for ${run.length.toFixed(1)} m on ` +
+      `${run.axis === 'z' ? 'x' : 'z'} = ${run.line.toFixed(2)}, ${run.off.toFixed(2)} m off the street lattice`
+    );
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------- driving

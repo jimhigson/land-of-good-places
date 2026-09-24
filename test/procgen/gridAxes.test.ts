@@ -10,7 +10,7 @@
  * property rather than infer it from a seed that happens to pass.
  */
 import { describe, it, expect } from 'vitest';
-import { offAxisGround, type GroundPoint } from './gridAxes.ts';
+import { offAxisGround, type GroundPoint } from '../../src/world/gridAxes.ts';
 import type { PathEdgeFact } from './parkFacts.ts';
 
 /** No railway anywhere near these fixtures — the exemption is not what is under test. */
