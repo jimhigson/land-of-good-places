@@ -1124,20 +1124,29 @@ export function coasterRouteBriefs(
  *
  * 1. `first` — unchanged. Every park that solves today takes this (or 2) and
  *    is byte-identical, which is the constraint the whole design serves.
- * 2. `escalated` — unchanged: only if 1 solved without crossing the castle,
- *    and its result is taken whatever it says, exactly as before.
+ * 2. `escalated` — only if 1 solved without crossing the castle.
  * 3. `rescue()` — **only where the park previously failed to build at all**:
  *    tier 1 exhausted every pose without one closed route. The same ladder
  *    runs again over poses constructed against the search's own clearance
  *    truth (Decision 10 part 4; see {@link stationWindowHasLegalTrack}).
  *
- * Two lesser rungs fall out of writing the ladder down, both reachable only
- * on parks that today die: an escalated tier that *throws* (rather than
- * merely missing the castle) hands back the lower tier's solved loop instead
- * of failing the park — the search's own belt-and-braces rule, "a park with
- * no coaster is far worse than one whose coaster missed", applied one level
- * up — and a rescue that throws reports **both** failures, because the seed
- * that hits it will be diagnosed from that message alone.
+ * **Nothing leaves this ladder that misses the castle.** `railRouteSearch`
+ * hands back its first solved loop with `report.satisfied` false when every
+ * pose it tried missed — "a park with no coaster is far worse than one whose
+ * coaster missed" — and this ladder used to pass that loop on: taken from
+ * the escalated tier "whatever it says", and handed back again when the
+ * escalated tier threw. That was the whole of why a sweep of seeds 0..15
+ * failed `skyCruiserAlwaysFliesThroughTheCastle` on 15 of 45 rejected
+ * attempts: on seed 3 restart 3 the escalated tier returned a 267 m loop
+ * with `satisfied=false`, the plan never entered the footprint, and the
+ * built curve had no castle span to cut windows from. The rule it served is
+ * obsolete — a park is now decided by a driver that can try again
+ * (`boot/parkSolve.ts`), so a missed castle is thrown as
+ * `RailRouteUnsolvable` and the cruiser builder refuses, rather than
+ * shipping a castle the family asked to be flown through, whole.
+ *
+ * A rescue that throws reports **both** failures, because the seed that hits
+ * it will be diagnosed from that message alone.
  */
 export function* cruiserRouteSearch(
   briefs: CoasterBriefs,
@@ -1152,12 +1161,15 @@ export function* cruiserRouteSearch(
   }
   if (plan) {
     if (plan.report.satisfied) return plan;
+    let escalated: SolvedRailRoute;
     try {
-      return yield* railRouteSearch(briefs.escalated);
+      escalated = yield* railRouteSearch(briefs.escalated);
     } catch (error) {
       if (!(error instanceof RailRouteUnsolvable)) throw error;
-      return plan;
+      throw missedTheCastle(plan, `the escalated tier then solved nothing: ${error.message}`);
     }
+    if (escalated.report.satisfied) return escalated;
+    throw missedTheCastle(escalated, 'at twice the castle weight too');
   }
 
   const rescue = briefs.rescue();
@@ -1173,12 +1185,30 @@ export function* cruiserRouteSearch(
     );
   }
   if (rescued.report.satisfied) return rescued;
+  let rescuedEscalated: SolvedRailRoute;
   try {
-    return yield* railRouteSearch(rescue.escalated);
+    rescuedEscalated = yield* railRouteSearch(rescue.escalated);
   } catch (error) {
     if (!(error instanceof RailRouteUnsolvable)) throw error;
-    return rescued;
+    throw missedTheCastle(rescued, `the rescue's escalated tier then solved nothing: ${error.message}`);
   }
+  if (rescuedEscalated.report.satisfied) return rescuedEscalated;
+  throw missedTheCastle(rescuedEscalated, "in the rescue tier, at twice the castle weight too");
+}
+
+/**
+ * The ladder's refusal for a loop that closed without entering the castle —
+ * `crossesTheCastle` said no to every pose that solved. The report is the
+ * last tier's, so the message carries how many whole loops were thrown away.
+ */
+function missedTheCastle(route: SolvedRailRoute, detail: string): RailRouteUnsolvable {
+  const { report } = route;
+  return new RailRouteUnsolvable(
+    `every closed loop the search found missed the castle (${report.satisfyRejects} ` +
+      `solved loop(s) rejected by crossesTheCastle over ${report.startPoseCount} start ` +
+      `poses), ${detail}`,
+    report,
+  );
 }
 
 /** {@link cruiserRouteSearch}, driven straight through — the constructor's cadence. */
