@@ -1644,11 +1644,11 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   process.env['LGP_SEED'] = String(seed);
 
   const { buildHeadlessPark } = await import('../../scripts/park-harness.mts');
-  const { PARK_SEED, PARK_MANIFEST } = await import('../../src/world/parkManifest.ts');
+  const { PARK_SEED_ASKED, PARK_MANIFEST } = await import('../../src/world/parkManifest.ts');
 
-  if (PARK_SEED !== seed) {
+  if (PARK_SEED_ASKED !== seed) {
     throw new Error(
-      `parkFacts: asked for seed ${seed} but the park built with ${PARK_SEED}. ` +
+      `parkFacts: asked for seed ${seed} but the park built with ${PARK_SEED_ASKED}. ` +
         'The module registry was reused across seeds — check that vitest is ' +
         'still isolating test files (vitest.config.ts) and that each seed has ' +
         'a file of its own.',

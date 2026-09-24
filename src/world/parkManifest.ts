@@ -1,5 +1,6 @@
 import type { AnchorFootprint } from './anchors';
 import { resolveParkSeed } from './parkSeedPool';
+import { PARK_RESTART, generationSeed } from './parkRestart';
 import { PARK_SURFACE_SCALE } from '../core/constants';
 
 /**
@@ -29,8 +30,8 @@ import { PARK_SURFACE_SCALE } from '../core/constants';
  */
 
 /**
- * **This park's seed** — read once, at module load, by everything that
- * generates anything.
+ * **This park's seed, as asked for** — its identity, read once at module
+ * load. Generators read {@link PARK_SEED}, which differs only on a restart.
  *
  * It is no longer one number for everyone. Since issue #426 a new game draws
  * from `parkSeedPool.ts`'s vetted pool, so a child gets a different park each
@@ -45,7 +46,17 @@ import { PARK_SURFACE_SCALE } from '../core/constants';
  * Saves carry {@link LAYOUT_VERSION}, so positions from an older park degrade
  * to the plaza spawn rather than to a spot inside a relocated ride.
  */
-export const PARK_SEED = resolveParkSeed();
+export const PARK_SEED_ASKED = resolveParkSeed();
+
+/**
+ * **The seed every generator draws from** — {@link PARK_SEED_ASKED} itself on
+ * restart 0, which is every park that passes its acceptance first time, and a
+ * different stream on a restart (`parkRestart.ts`: when the finished park
+ * fails a measure, the root loop starts it again from zero). Identity — what a
+ * profile remembers, what `?seed=` names, what a check asked for — is
+ * {@link PARK_SEED_ASKED}; everything that *generates* reads this.
+ */
+export const PARK_SEED = generationSeed(PARK_SEED_ASKED, PARK_RESTART);
 
 /**
  * Bump alongside PARK_SEED (or any generator change that moves things).
