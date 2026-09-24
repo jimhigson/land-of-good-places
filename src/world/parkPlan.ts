@@ -618,10 +618,15 @@ function* illegiblePaving(
   }
   const ground = plannedPavingGround(
     (x, z) => footprints.some((footprint) => footprint?.covers(x, z) === true),
-    // The walk footprint, not the stone: narrower than the built masonry by the
-    // parapets, so this blocks fewer lattice lines than the invariant's built
-    // measure — the screen can only be stricter, never pass paving the
-    // invariant would reject.
+    // The same conservative footprint, padded: a superset of the built stone,
+    // so like the exemption above it can only excuse MORE here than the
+    // built park will. Deliberately: no bridge exists yet to ask, and a
+    // screen without them would refuse every crossing's own diagonal ramp.
+    // What slips through is caught by the root acceptance loop — measured on
+    // seed 5 restart 0: `gate-approach` (z = 60.00) and `spur-building`
+    // (x = -12.56) pass this screen and fail the built park's lattice
+    // measure, the conservative footprint covering 29 gate-approach samples
+    // the built bridge does not (57 both, 0 built-only).
     (x, z, pad) => footprints.some((footprint) => footprint?.covers(x, z, pad) === true),
   );
   yield 0;
