@@ -41,3 +41,8 @@ decision by measurement; fix at cause or make an acceptance measure.
   tie-frame / rail-race on 5r0 and 5r2. resolveMovement change touches
   playerSim-based checks (nav-routes, hotel, benches, hall-solid) and march
   invariants: run them.
+- ct2 sweep (pinch guard + bounding-circle door start): 16/17 green; 1r6 red
+  0.63 m — blind straight march grazed a slide leg (r0.42 at -35.0,58.1) and
+  drifted. FIX (committed): marchTo re-aims each stride. Offline replay 1r6:
+  0.000; mutation disc r2.6 in doorway -> 4.58 short (red). Real red run +
+  clean 1r6 run in progress (ct-1-6*.log in scratch).
