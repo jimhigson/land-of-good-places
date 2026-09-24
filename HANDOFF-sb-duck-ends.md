@@ -26,3 +26,10 @@ any seed whose bars move.
 - duckBarIntrusions now uses one stationOf per bar (76 ms for all 392 lane-slot checks on seed 4).
 - Refusal: simulate.ts reachRefusedSlots(len, [walkPast, race]) seeds refusedBarSlots; DFS +
   laneShift unchanged. Comparing layouts over seeds 0..15 (sbde/bars-*.txt) in progress.
+- Exact feasibility (reach refusals only, recorded restarts): 14/16 seeds can seat 10 bars/lane;
+  4 and 11 cannot (max 9/lane). With physics refusals too: planner throws on 4,5,8,9,11,14.
+- DFS could not find existing layouts (budget) -> hazards.ts nearestLegalLayout DP (exact,
+  min displacement from tuned layout). Bars moved vs base: 18-32 of 40 on every buildable seed.
+- check:rail-race 0, tsc 0, typecheck:test 0 at commit after DP.
+- accept:parks 0-15 --fresh --write running (sbde/accept.out). Then: coplanar seed 4, park:attempt
+  4/2/5 at recorded restarts, commit acceptedRestarts.ts.
