@@ -62,8 +62,8 @@ import { buildHeadlessPark } from './park-harness.mts';
 import { DEFAULT_TOLERANCES, sweepCoplanar } from './coplanar-sweep.mts';
 import { rankSeams, type RankedSeam } from './coplanar-rank.mts';
 import { COPLANAR_BASELINE, type BaselineEntry } from './coplanar-baseline.mts';
-import { PARK_SEED } from '../src/world/parkManifest.ts';
-import { ACCEPTED_RESTARTS } from '../src/world/acceptedRestarts.ts';
+import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
+import { SUPPORTED_PARK_SEEDS } from '../src/world/parkSeedPool.ts';
 import { SPACE_GARDEN } from '../src/world/spaces.ts';
 import { BRIDGE_GROUP_NAME_RE } from '../src/world/train/bridges.ts';
 
@@ -75,23 +75,18 @@ const isChild = process.env['LGP_COPLANAR_CHILD'] === '1';
 // ------------------------------------------------------------------ the seeds
 
 /**
- * **Every park this game ships** — every seed with a recorded restart in
- * `world/acceptedRestarts.ts`'s `ACCEPTED_RESTARTS`, which is the one owner of
- * "which parks are built, and how".
+ * **Every park this game ships** — `world/parkSeedPool.ts`'s
+ * `SUPPORTED_PARK_SEEDS` (0..15), the one owner of the shipped set, each built
+ * at the restart `acceptedRestarts.ts` recorded for it (`LGP_SEED=s` alone
+ * does that, so a child process builds exactly the park the browser does).
  *
- * This was `PARK_SEED_POOL` alone, the parks drawn on first visit — and seeds
- * 0..15, which are shipped parks too (a child can be sent `?seed=3`, and every
- * other gate builds them), were never swept. Another branch's CI swept them and
- * found sixteen seams nobody had measured. Jim's ruling: every shipped seed must
- * pass every check. So the list is the restart table's keys: a seed recorded
- * there is swept here, the day it is recorded, with nobody coming back to this
- * file. `LGP_SEED=s` alone builds that seed's recorded restart, so each child
- * builds exactly the park the browser does.
+ * This was the old draw pool, and seeds 0..15 were never swept: another
+ * branch's CI swept them and found sixteen seams nobody had measured. Jim's
+ * ruling: every shipped seed must pass every check. Asking the owner rather
+ * than keeping a list here means a seed added to it is swept the day it is.
  */
-function poolSeeds(): number[] {
-  return [
-    ...new Set([PARK_SEED, ...Object.keys(ACCEPTED_RESTARTS).map(Number)]),
-  ].sort((a, b) => a - b);
+function shippedSeeds(): number[] {
+  return [...new Set(SUPPORTED_PARK_SEEDS)].sort((a, b) => a - b);
 }
 
 // ------------------------------------------------------------ one seed's sweep
@@ -167,8 +162,8 @@ function stableName(path: string): string {
 function sweepThisSeed(): Finding[] {
   const park = buildHeadlessPark();
   const result = sweepCoplanar(park.scene, DEFAULT_TOLERANCES);
-  // Interiors are authored and identical on every seed, so only the canonical
-  // run reports them; the rest of the pool is here for the park, which moves.
+  // Interiors are authored and identical on every seed, so only the first
+  // seed's run reports them; the rest are here for the park, which moves.
   //
   // Dropped **before** ranking, not after. Ranking is the expensive half — a
   // sight-line ray against every mesh in the game, then a ring search for
@@ -195,7 +190,9 @@ function sweepThisSeed(): Finding[] {
       reach: seam.reach,
       score: seam.score,
       occluded: seam.occluded,
-      seed: PARK_SEED,
+      // The seed as shipped (what `?seed=` names), not the generation seed a
+      // restart derives from it — a report has to name a park somebody can open.
+      seed: PARK_SEED_ASKED,
       instance: `${seam.a}|${seam.b}`,
       normal: [seam.normal.x, seam.normal.y, seam.normal.z] as const,
     }));
@@ -216,21 +213,23 @@ if (isChild) {
 // ------------------------------------------------------------ across the pool
 
 const started = performance.now();
-const seeds = poolSeeds();
+const seeds = shippedSeeds();
 const findings: Finding[] = [];
 
-/** The canonical seed is swept in-process; the others need a fresh registry. */
-findings.push(...sweepThisSeed());
-
 /**
- * The rest of the pool, several at a time.
+ * Every seed in a child of its own, several at a time — including the first.
  *
- * Sixteen seeds one after another is four minutes on this laptop and each one
- * is a whole park built and swept in a process of its own, so they are
- * independent by construction — nothing is shared but the baseline they are all
- * compared against afterwards.
+ * `parkManifest.ts` reads `LGP_SEED` once, at import, so this process's own
+ * registry is whatever park Node builds with nothing pinned, which is not a
+ * shipped one; sweeping it in-process would measure a park no child is given.
+ * The first shipped seed's child sweeps every space, since interiors are the
+ * same on every seed; the others sweep only the garden.
  *
- * **Never fewer than two**, whatever the machine says. This was
+ * Each child is a whole park built and swept in a process of its own, so they
+ * are independent by construction — nothing is shared but the baseline they
+ * are all compared against afterwards.
+ *
+ * **Never fewer than two lanes**, whatever the machine says. This was
  * `floor(cores / 2)`, which is fine on a laptop and collapses to a single lane
  * on a two-core CI runner — sixteen parks in a row, inside a workflow whose
  * 30-minute cap has taken this project's deploy down once already. Capped at
@@ -239,7 +238,9 @@ findings.push(...sweepThisSeed());
  * doing them in a row.
  */
 const lanes = Math.max(2, Math.min(6, cpus().length));
-const queue = seeds.filter((seed) => seed !== PARK_SEED);
+const everySpaceSeed = seeds[0];
+// Popped from the end, so reversed: the every-space seed, the longest job, starts first.
+const queue = [...seeds].reverse();
 const run = promisify(execFile);
 await Promise.all(
   Array.from({ length: lanes }, async () => {
@@ -257,7 +258,7 @@ await Promise.all(
             ...process.env,
             LGP_SEED: String(seed),
             LGP_COPLANAR_CHILD: '1',
-            LGP_COPLANAR_GARDEN_ONLY: '1',
+            LGP_COPLANAR_GARDEN_ONLY: seed === everySpaceSeed ? '0' : '1',
           },
           encoding: 'utf8',
           maxBuffer: 64 * 1024 * 1024,
