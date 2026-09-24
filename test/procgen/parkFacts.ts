@@ -1669,7 +1669,7 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
     );
   }
 
-  const { PARK_RESTART } = await import('../../src/world/parkRestart.ts');
+  const { PARK_RESTART } = await import('../../src/world/parkManifest.ts');
   if (PARK_RESTART !== restart) {
     throw new Error(`parkFacts: asked for restart ${restart} of seed ${seed} but the park built restart ${PARK_RESTART}.`);
   }

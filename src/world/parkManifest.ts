@@ -1,6 +1,6 @@
 import type { AnchorFootprint } from './anchors';
 import { resolveParkSeed } from './parkSeedPool';
-import { PARK_RESTART, generationSeed } from './parkRestart';
+import { generationSeed, restartFor } from './parkRestart';
 import { PARK_SURFACE_SCALE } from '../core/constants';
 
 /**
@@ -56,6 +56,9 @@ export const PARK_SEED_ASKED = resolveParkSeed();
  * profile remembers, what `?seed=` names, what a check asked for — is
  * {@link PARK_SEED_ASKED}; everything that *generates* reads this.
  */
+/** Which start-again of {@link PARK_SEED_ASKED} this park is — see `parkRestart.ts`. */
+export const PARK_RESTART = restartFor(PARK_SEED_ASKED);
+
 export const PARK_SEED = generationSeed(PARK_SEED_ASKED, PARK_RESTART);
 
 /**

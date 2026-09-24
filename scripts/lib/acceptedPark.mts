@@ -262,6 +262,27 @@ export function acceptanceMetadata(accepted: AcceptedPark, sourceHash: string): 
   };
 }
 
+/**
+ * **Which restart of `seed` is its park** — the recorded answer
+ * (`src/world/acceptedRestarts.ts`) when the seed has one, otherwise the loop's
+ * (cached per source). What `check:park` and `test:procgen` measure.
+ */
+export async function acceptedRestartOf(
+  seed: number,
+): Promise<{ readonly restart: number; readonly how: string; readonly log: readonly string[] }> {
+  const { ACCEPTED_RESTARTS } = await import('../../src/world/acceptedRestarts.ts');
+  const recorded = ACCEPTED_RESTARTS[seed];
+  if (recorded !== undefined) {
+    return { restart: recorded, how: 'recorded in src/world/acceptedRestarts.ts', log: [] };
+  }
+  const accepted = await acceptParkCached(seed);
+  return {
+    restart: accepted.restart,
+    how: `not recorded — the loop ran${accepted.cached ? ' (verdict cached at this source)' : ''}`,
+    log: describeRestarts(accepted),
+  };
+}
+
 /** One line per restart, for a log or the park file's metadata. */
 export function describeRestarts(accepted: AcceptedPark): string[] {
   return accepted.attempts.map((a) =>

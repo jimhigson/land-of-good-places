@@ -11978,12 +11978,7 @@ const ACCEPTED_PARK_MODULE = '../../scripts/lib/acceptedPark.mts';
 
 /** The slice of `scripts/lib/acceptedPark.mts` this suite calls. */
 interface AcceptedParkApi {
-  acceptParkCached(seed: number): Promise<{
-    readonly restart: number;
-    readonly attempts: readonly unknown[];
-    readonly cached: boolean;
-  }>;
-  describeRestarts(accepted: { readonly attempts: readonly unknown[] }): string[];
+  acceptedRestartOf(seed: number): Promise<{ readonly restart: number; readonly how: string; readonly log: readonly string[] }>;
 }
 
 /**
@@ -12006,14 +12001,13 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // Imported through a variable so the test project's typecheck does not
       // follow it into Node-only code (`test/node-env.d.ts` explains why this
       // project has no `@types/node`); {@link AcceptedParkApi} is the slice used.
-      const { acceptParkCached, describeRestarts } = (await import(
+      const { acceptedRestartOf } = (await import(
         /* @vite-ignore */ ACCEPTED_PARK_MODULE
       )) as AcceptedParkApi;
-      const accepted = await acceptParkCached(seed);
+      const accepted = await acceptedRestartOf(seed);
       process.stderr.write(
-        `[accepted park] seed ${seed}: restart ${accepted.restart} after ${accepted.attempts.length} attempt(s)` +
-          `${accepted.cached ? ' (verdict cached at this source)' : ''}\n` +
-          describeRestarts(accepted).map((line) => `  ${line.slice(0, 300)}\n`).join(''),
+        `[accepted park] seed ${seed}: restart ${accepted.restart} (${accepted.how})\n` +
+          accepted.log.map((line) => `  ${line.slice(0, 300)}\n`).join(''),
       );
       facts = await buildParkFacts(seed, accepted.restart);
       // 300 s, up from 120: a park build is solver work, and the cruiser's

@@ -1,4 +1,5 @@
 import { hashString } from '../core/mathUtils';
+import { ACCEPTED_RESTARTS } from './acceptedRestarts';
 
 /**
  * **Backtracking to zero: the whole park, started again.**
@@ -29,17 +30,25 @@ import { hashString } from '../core/mathUtils';
  *
  * Only the root loop (`scripts/lib/acceptedPark.mts`), which tries
  * `r = 0, 1, 2, …`, each in a fresh process, until the whole park passes, and
- * records every restart and what forced it. Everything else reads the answer:
+ * records every restart and what forced it. Its answer for every shipped seed
+ * is recorded in `acceptedRestarts.ts` (generated, and verified by
+ * `test:procgen`, which builds each recorded park and asks the measures
+ * again). Everything else reads that answer — the game and every check alike,
+ * at import, with no search. Two overrides, both explicit:
  *
- * - **Node**: `LGP_PARK_RESTART=r`, set by the root loop for its attempts and
- *   by any check that measures the accepted park.
- * - **Browser**: `globalThis.__LGP_PARK_RESTART__`, which the prebuilt-park
- *   loader sets from the park file before the park's modules evaluate. It must
- *   be known at import, because the boundary is a module constant.
+ * - **Node**: `LGP_PARK_RESTART=r`, set by the loop for each attempt.
+ * - **Browser**: `globalThis.__LGP_PARK_RESTART__`, for a park file that
+ *   carries its own restart; it must be set before the park's modules
+ *   evaluate, because the boundary is a module constant.
  *
- * Read once, at module load, exactly like the seed.
+ * Read once, at module load, exactly like the seed (`parkManifest.ts`'s
+ * `PARK_RESTART`). Without an override, a seed takes the restart the loop
+ * recorded for it in `acceptedRestarts.ts` — so every check, and the game,
+ * builds the accepted park of a shipped seed with no search at all.
  */
-export const PARK_RESTART: number = resolveRestart();
+export function restartFor(seed: number): number {
+  return overriddenRestart() ?? ACCEPTED_RESTARTS[seed] ?? 0;
+}
 
 function readRestart(raw: unknown): number | null {
   if (raw === undefined || raw === null || raw === '') return null;
@@ -47,7 +56,8 @@ function readRestart(raw: unknown): number | null {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function resolveRestart(): number {
+/** An explicit restart: `LGP_PARK_RESTART` in Node, `__LGP_PARK_RESTART__` in a browser. */
+export function overriddenRestart(): number | null {
   try {
     const nodeProcess = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
     const fromEnv = readRestart(nodeProcess?.env?.['LGP_PARK_RESTART']);
@@ -55,7 +65,7 @@ function resolveRestart(): number {
   } catch {
     // no process
   }
-  return readRestart((globalThis as { __LGP_PARK_RESTART__?: unknown }).__LGP_PARK_RESTART__) ?? 0;
+  return readRestart((globalThis as { __LGP_PARK_RESTART__?: unknown }).__LGP_PARK_RESTART__);
 }
 
 /**
