@@ -69,3 +69,22 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - procgen-invariants.yml sharded x5 + pool job + aggregator "Procgen invariants" (protection read back unchanged).
 - check:coplanar NEW: cat-bus chassis seam on generation seed 860110031 -> helper fix/sb-catbus.
 - Random sweep running (sb-random @06223019). After it: full test:procgen + check:every-seed-builds on frozen tree.
+- Random 100: 100/100 accepted, max 8 attempts, mean 2.04, p=0.49 (doc section written).
+- SCOPE: Jim supports 0..15 only. SUPPORTED_PARK_SEEDS in parkSeedPool.ts (#705 moves it to prebuilt/parkFileName.ts
+  and makes PARK_SEED_POOL = it). acceptedRestarts + seed files = 0..15 exactly (151dac7e).
+- #705 CI findings -> helpers: fix/sb-fountain (fountain-hop s10), fix/sb-seed5 (castle-towers, cruiser cart 1.11deg),
+  fix/sb-coplanar16 (coplanar over 0..15). Each told scope 0..15.
+- Running: full test:procgen at 151dac7e in sb-frozen (log procgen-151dac7e.log).
+- TODO after helpers: emulate #705 pool=0..15 locally and run pool-sweeping checks (park-pool, gateway,
+  fountain-hop, swept-bus, entrance-road, path-preference, stall-accommodate, every-seed-builds).
+- VERIFIED @151dac7e/ac9f2490 (frozen sb-frozen): full test:procgen 1840 tests, only fail was scatterDecoupling
+  identity (fixed ac9f2490, 4/4 pass); check:every-seed-builds 16/16 built, exit 0 (check:park per seed at recorded
+  restart, ratchet enforced).
+- Merged fix/sb-coplanar16 (2c3d0df1): check:coplanar sweeps SUPPORTED_PARK_SEEDS at recorded restarts (child per
+  seed; coplanar.yml cap 15->25); stall corner posts open-ended (3 seams). #705's "16 new" were restart-0 parks;
+  at recorded restarts 0..15 had 4. Remaining: seed 4 duck bar end inside lane 3 bed (PLACEMENT) -> helper
+  fix/sb-duck-ends (invariant + slot refusal).
+- Merged fix/sb-fountain (dda5c8ab): NavGrid reached-route end height sampled at the goal, not cell centre
+  (instrument+game bug, 10-16 mm on 10 of 16 seeds); check:fountain-hop clause 2b taps 46 basin points.
+- Still running: fix/sb-seed5 (castle-towers, cruiser cart), fix/sb-duck-ends. Then: emulate #705 pool=0..15 in a
+  scratch worktree and run pool-sweeping checks locally (not pushed; #705 owns the pool change).

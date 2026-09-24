@@ -50,10 +50,14 @@ jobs:
   coplanar:
     name: Coplanar faces
     runs-on: ubuntu-latest
-    # Generous against a measured 3-4 minutes: the sweep builds sixteen parks,
-    # and a runner that is having a slow day should say so by being slow, not by
-    # being cancelled.
-    timeout-minutes: 15
+    # The sweep builds all sixteen supported parks (`SUPPORTED_PARK_SEEDS`),
+    # each at its recorded restart, one child process per park. That was
+    # measured at 3-4 minutes when the parks were cheaper; on 24 Sep 2026 the
+    # same sixteen took ~13 minutes on a runner (feat/prebuilt-parks) and 58 s
+    # per park locally, so 15 was a cancel waiting to happen — and a timeout
+    # reports as `cancelled`, not red. A runner having a slow day should say so
+    # by being slow, not by being cancelled.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v7

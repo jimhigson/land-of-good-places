@@ -14,6 +14,8 @@
  */
 import './headless-dom.mjs';
 
-const { PARK_SEED } = await import('../src/world/parkManifest.ts');
+// The park's identity — what was asked for — not the generation seed a
+// recorded restart derives from it (`parkRestart.ts`).
+const { PARK_SEED_ASKED } = await import('../src/world/parkManifest.ts');
 
-process.stdout.write(String(PARK_SEED));
+process.stdout.write(String(PARK_SEED_ASKED));

@@ -46,7 +46,7 @@
 import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../src/core/constants.ts';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../src/world/building/layout.ts';
 import { SEEDS } from '../src/entities/npc/poiGraph.ts';
-import { PARK_SEED } from '../src/world/parkManifest.ts';
+import { PARK_RESTART, PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { solveParkPlanNow } from '../src/world/parkPlan.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 
@@ -130,7 +130,7 @@ for (const seed of SEEDS) {
 
 const r = (n: number): string => n.toFixed(2);
 console.log(
-  `seed=${PARK_SEED} waypoints=${SEEDS.length} ` +
+  `seed=${PARK_SEED_ASKED} restart=${PARK_RESTART} waypoints=${SEEDS.length} ` +
     `facade=(${r(west)},${r(north)})..(${r(east)},${r(south)}) ` +
     `centre=(${r(BUILDING_CENTRE_X)},${r(BUILDING_CENTRE_Z)})`,
 );

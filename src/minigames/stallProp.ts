@@ -128,8 +128,20 @@ export function createStallProp(definition: StallDefinition): StallProp {
 
   // --- corner posts, candy-striped ------------------------------------------
   const postHeight = 2.75;
+  // **Open-ended: a post has no caps, because neither can ever be seen.** The
+  // foot stands on the ground, so a closed bottom disc lies in the ground's own
+  // plane — and its outline hull's copy, drawn `BackSide`, faces *up* into it
+  // (`check:coplanar`: terrain|post outline, 0.05 m² at a 7.9 mm stand-off on
+  // seeds 4 and 9, wherever a stall is seated on ground that happens to lie
+  // flat under its feet). The top disc is inside the knob: at the post's top
+  // the faceted knob's section is at least 0.138 m in radius (inscribed, 12
+  // sides) against the post's 0.12 — 0.136 with its outline. A hidden face is
+  // deleted, never nudged (ART_DIRECTION §7) —
+  // the same fix the rail race's trestle trunk took for its foot.
   for (const side of [-1, 1] as const) {
-    const post = solid(new Mesh(new CylinderGeometry(0.12, 0.13, postHeight, 10), creamMaterial));
+    const post = solid(
+      new Mesh(new CylinderGeometry(0.12, 0.13, postHeight, 10, 1, true), creamMaterial),
+    );
     post.position.set(side * (halfWidth - 0.12), postHeight / 2, 1.25);
     root.add(post);
     addOutline(post, 0.016);

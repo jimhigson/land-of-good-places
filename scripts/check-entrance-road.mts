@@ -200,7 +200,7 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
    * is deep, so a post cannot pass between two samples of itself.
    */
   const POST_STEP = 0.25;
-  const { PARK_SEED } = await import('../src/world/parkManifest.ts');
+  const { PARK_SEED_ASKED } = await import('../src/world/parkManifest.ts');
   const {
     entranceRoadAt,
     entranceRoadBrow,
@@ -598,7 +598,7 @@ async function measureOneSeed(asControl: boolean): Promise<void> {
   }
 
   const report: SeedReport = {
-    seed: PARK_SEED,
+    seed: PARK_SEED_ASKED,
     downFacingTriangles,
     roadTriangles,
     strayVertices,
