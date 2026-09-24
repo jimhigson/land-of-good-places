@@ -43,4 +43,8 @@ Design: `docs/design/PREBUILT-PARKS.md` (also PR #704, draft). Base: origin/feat
 - #705 blocked: only seeds 2 and 5 of 0..15 pass all invariants at base. Rebase onto feat/structural-backtrack
   when it lands; re-run build:parks, check, test:procgen, coplanar, swept-bus; reload the preview.
 - Asked Overseer: do pylons / slide legs / rail-race plan / boundary radii / ferris exit count as building?
-- Coplanar/swept-bus results on 0..15: see PR / Overseer report.
+- Red on #705, all seed content (fails identically at base): Checks shard 3 castle-towers + shard 4 rail-race,
+  tie-frame on default seed 5; Procgen invariants 37 fails over 14 seeds; Coplanar 16 new seams on new seeds.
+  Every other chain step green locally; swept-bus, every-seed-builds, walk-reach, preview green on CI.
+- CI build:parks cache miss: 647 s for 16 seeds (step cap 18 min). Preview serves 590 KB brotli for all 16.
+- Preview verified: https://pr-705-01dbbbf-land-of-good-places.blockstack.workers.dev/spawn?pos=0,40&seed=5
