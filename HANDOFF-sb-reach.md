@@ -12,3 +12,11 @@ Task: anchor.reach:waterFight forces restarts (built extent > declared 19 m).
 - Plan: stand the rack inside the plot footprint by construction (inward from
   the door along its bearing, clamped into the rect), keep 19 m.
 - Probe: scripts/probe-reach.mts (scratch, do not commit).
+
+## Progress (10:10)
+- Fix committed: rack inset along door bearing + clamped into rect (plot.ts). Declared 19 kept.
+- Before (probe): 1 r2 reach 19.06, 9 r1 19.74 (rack). After park:attempt: no anchor.reach on
+  1:2 9:1 11:1 12:9 14:1 1:8 13:26 20260728:0 2:0; other failures there to compare with base.
+- Base worktree .claude/worktrees/sb-reach-base (detached 714dca83) running base attempts,
+  then digests 0..15 base vs fix (scratch sb-reach/chain.sh). Remove base worktree when done.
+- tsc + typecheck:test exit 0.
