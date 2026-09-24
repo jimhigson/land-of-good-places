@@ -24,7 +24,8 @@ import {
   sweptRails,
   type RailFrame,
 } from '../rail/sweptRail';
-import { planCruiserPylons } from './pylons';
+import { decideBuilt } from '../prebuilt/built';
+import type { CruiserPylon } from './pylons';
 import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/trestleGeometry';
 import type { PlannedCoaster } from './plan';
 import { RideCamera } from '../../core/RideCamera';
@@ -561,12 +562,16 @@ export class Coaster implements GameSystem {
     // stretch of track with no legitimate obstacle at all. `footprintNear`
     // is the bridge's own real, final edge plus this file's own
     // `GROUND_CLEARANCE`-derived margin, nothing more.
-    const pylonSpots = planCruiserPylons(
-      this.route,
-      (x, z, radius) =>
-        collision.isClearCircle(x, z, radius) &&
-        !this.train.bridges.some((bridge) => bridge.footprintNear(x, z, radius)),
-      this.options.clearTreesNear,
+    // Read from the park file; searched only in build tooling
+    // (`procgen/world/coaster/pylons.ts`, `docs/design/PREBUILT-PARKS.md`).
+    const pylonSpots: readonly CruiserPylon[] = decideBuilt('pylons', (solver) =>
+      solver.cruiserPylons(
+        this.route,
+        (x, z, radius) =>
+          collision.isClearCircle(x, z, radius) &&
+          !this.train.bridges.some((bridge) => bridge.footprintNear(x, z, radius)),
+        this.options.clearTreesNear,
+      ),
     );
     const pylons = new InstancedMesh(
       // Straight and vertical, and the **same thickness as the Rail Race's base

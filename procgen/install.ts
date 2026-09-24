@@ -11,10 +11,14 @@ import { createPlanSolver } from './world/planSolver';
 import { solveWorldPhase } from './world/worldPhaseSolver';
 import { recordBuilt, searchBridgeFootprints } from './world/builtDecisions';
 import { planFerrisExit } from './world/ferrisExit';
+import { planSlideLegs } from './world/slide/legs';
+import { planCruiserPylons } from './world/coaster/pylons';
 
 installParkSolver({
   plan: createPlanSolver,
   worldPhase: solveWorldPhase,
   bridgeFootprints: searchBridgeFootprints,
   ferrisExit: () => recordBuilt('ferrisExit', planFerrisExit()),
+  slideLegs: (points, isClear) => recordBuilt('slideLegs', planSlideLegs(points, isClear)),
+  cruiserPylons: (route, isClear, clearTreesNear) => recordBuilt('pylons', planCruiserPylons(route, isClear, clearTreesNear)),
 });

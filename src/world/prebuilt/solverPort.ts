@@ -4,6 +4,10 @@ import type { CoasterRoute } from '../coaster/route';
 import type { BoothRelocator } from '../stallsFeature';
 import type { WorldPhase } from '../worldPhase';
 import type { FerrisExit } from '../../minigames/ferrisWheel/exit';
+import type { Vector3 } from 'three';
+import type { SlideLeg } from '../slide/supports';
+import type { CruiserPylon } from '../coaster/pylons';
+import type { RailSampler } from '../rail/sweptRail';
 import type { LevelCrossing } from '../train/crossings';
 import type { PlannedFootprint, RealWorldQuery } from '../train/bridgeFootprint';
 
@@ -46,6 +50,14 @@ export interface ParkSolver {
   bridgeFootprints(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[];
   /** Where a ferris wheel rider steps off. */
   ferrisExit(): FerrisExit;
+  /** Where the slide's legs stand. */
+  slideLegs(points: readonly Vector3[], isClear: (x: number, z: number, radius: number) => boolean): SlideLeg[];
+  /** Where the Sky Cruiser's pylons stand. */
+  cruiserPylons(
+    route: RailSampler,
+    isClear: (x: number, z: number, radius: number) => boolean,
+    clearTreesNear: (x: number, z: number, radius: number) => number,
+  ): CruiserPylon[];
 }
 
 // `var`: read during module cycles, like `parkPlan.ts`'s state.
