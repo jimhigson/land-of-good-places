@@ -23,3 +23,9 @@ effectively starting again." Plus: every seed must build, not only 0..15; prove 
 check:park passes all; invariants pass only seeds 2, 5. Instrument/geometry bugs to fix at cause (not
 search around): sleepers (#702 fix/sleepers-on-drawn-rails), RR camera (fix/pocket-race diagnosis),
 coping chamfer (#698 fix/procgen-last has the fix).
+- Sleepers: merged fix/sb-sleepers into wip/sb-merge (#702 port + stationsEvenlyAlongDrawn spacing fix; seeds
+  1,3,8,9 sleepers cleared). OPEN: check:coplanar gains race-ring vs walk-past-ring sleeper side faces (canonical
+  ~(-53,-9.6,75.4)); rings are mutually exclusive (RailRace.setActiveRing) — decide: teach the check exclusivity.
+- Restart-0 identity: seed 11 park digest f949720aa35c7716 identical at ae8257fb and dec4376c (restart stream).
+- Sweep 0..15 (base code): 2@r0, 5@r0, 0@r1, 3@r6, 6@r10, 4@r16, 8@r2 ... (log accept-0-15-r1.log).
+- Helper running: fix/sb-cruiser-castle (castleSpan null though satisfies=crossesTheCastle).
