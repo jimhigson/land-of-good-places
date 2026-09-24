@@ -470,6 +470,117 @@ export class DuckBarRefusal extends Error {
  * chosen — level only ever adds or removes whole hazards, never moves one.
  */
 /**
+ * **The legal bar layout nearest the tuned one**, found exactly.
+ *
+ * `lanes[k]` is bar `k`'s lane and `tuned[k]` the slot the unrefused layout
+ * gave it. The answer gives every bar a slot inside `window`, no two bars one
+ * slot, no two bars of one lane in neighbouring slots (the
+ * {@link MIN_LANE_GAP_SLOTS} rule), and no bar a slot its lane has refused —
+ * and among all such layouts, the one whose bars have moved least from where
+ * they were tuned to stand (a lane's bars are interchangeable, so its i-th bar
+ * along the lap is held to its i-th tuned slot). Ties go to the lower lane at
+ * the earlier slot, so it is deterministic.
+ *
+ * A dynamic programme along the window's slots, whose state is the lane in
+ * the previous slot and how many bars each lane has placed so far: exact, and
+ * at 43 slots and ten bars a lane a few million cells. Throws
+ * `DuckBarRefusal` only when no legal layout exists — a proof, not a budget
+ * running out.
+ */
+function nearestLegalLayout(
+  lanes: readonly number[],
+  tuned: readonly number[],
+  window: { readonly min: number; readonly max: number },
+  refusedByLane: ReadonlyMap<number, ReadonlySet<number>>,
+): number[] {
+  if (MIN_LANE_GAP_SLOTS !== 2) {
+    throw new Error('railRace/hazards.ts: nearestLegalLayout remembers one previous slot, so it needs MIN_LANE_GAP_SLOTS === 2');
+  }
+  // Each lane's tuned slots, in order along the lap, and which bar each is.
+  const targets: number[][] = Array.from({ length: LANE_COUNT }, () => []);
+  const barsOf: number[][] = Array.from({ length: LANE_COUNT }, () => []);
+  lanes
+    .map((lane, k) => ({ lane, k, slot: tuned[k]! }))
+    .sort((a, b) => a.slot - b.slot)
+    .forEach(({ lane, k, slot }) => {
+      targets[lane]!.push(slot);
+      barsOf[lane]!.push(k);
+    });
+  const need = targets.map((list) => list.length);
+  const n = window.max - window.min + 1;
+  const NONE = LANE_COUNT;
+  // Counts packed mixed-radix, one digit per lane.
+  const radix = need.map((c) => c + 1);
+  const countStates = radix.reduce((a, r) => a * r, 1);
+  const stride = (LANE_COUNT + 1) * countStates;
+  const cost = new Float32Array((n + 1) * stride).fill(Infinity);
+  const from = new Int32Array((n + 1) * stride).fill(-1);
+  const pick = new Int8Array((n + 1) * stride).fill(-1);
+  const places = radix.map((_r, lane) => radix.slice(0, lane).reduce((a, r) => a * r, 1));
+  const place = (lane: number): number => places[lane]!;
+  const digit = (code: number, lane: number): number => Math.floor(code / places[lane]!) % radix[lane]!;
+  const cell = (i: number, last: number, code: number): number => i * stride + last * countStates + code;
+  cost[cell(0, NONE, 0)] = 0;
+  for (let i = 0; i < n; i += 1) {
+    const slot = window.min + i;
+    for (let last = 0; last <= NONE; last += 1) {
+      for (let code = 0; code < countStates; code += 1) {
+        const here = cost[cell(i, last, code)]!;
+        if (here === Infinity) continue;
+        // Leave this slot empty.
+        const skip = cell(i + 1, NONE, code);
+        if (here < cost[skip]!) {
+          cost[skip] = here;
+          from[skip] = cell(i, last, code);
+          pick[skip] = NONE;
+        }
+        for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+          if (lane === last) continue;
+          const placed = digit(code, lane);
+          if (placed >= need[lane]!) continue;
+          if (refusedByLane.get(lane)?.has(slot)) continue;
+          const next = cell(i + 1, lane, code + place(lane));
+          const total = here + Math.abs(slot - targets[lane]![placed]!);
+          if (total < cost[next]!) {
+            cost[next] = total;
+            from[next] = cell(i, last, code);
+            pick[next] = lane;
+          }
+        }
+      }
+    }
+  }
+  const full = need.reduce((code, c, lane) => code + c * place(lane), 0);
+  let best = -1;
+  for (let last = 0; last <= NONE; last += 1) {
+    const at = cell(n, last, full);
+    if (cost[at]! !== Infinity && (best < 0 || cost[at]! < cost[best]!)) best = at;
+  }
+  if (best < 0) {
+    throw new DuckBarRefusal(
+      `railRace/hazards.ts: no layout gives all ${lanes.length} duck bars a legal trestle slot — ` +
+        `one bar per slot, inside the bar window ${window.min}..${window.max}, never in the slot next to ` +
+        `its own lane's last, and off every refused slot (` +
+        `${[...refusedByLane].map(([lane, slots]) => `lane ${lane}: ${[...slots].sort((a, b) => a - b).join(',')}`).join('; ')})`,
+    );
+  }
+  // Walk back, handing each lane's slots to its bars in order along the lap.
+  const laneSlots: number[][] = Array.from({ length: LANE_COUNT }, () => []);
+  for (let at = best, i = n; i > 0; i -= 1) {
+    const lane = pick[at]!;
+    if (lane !== NONE) laneSlots[lane]!.unshift(window.min + i - 1);
+    at = from[at]!;
+  }
+  const slots: number[] = [];
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    barsOf[lane]!.forEach((k, i) => {
+      slots[k] = laneSlots[lane]![i]!;
+    });
+  }
+  return slots;
+}
+
+/**
  * **The decisions the race's physics makes about where bars may go**, handed
  * to {@link planHazards} by `simulate.ts` (which owns the physics and cannot
  * be imported from here).
@@ -556,16 +667,21 @@ export function planHazards(
   // The lane-to-offset mapping rotates with the event, so it is not lane 0
   // leading every single time — Jim's "not always at the same spots".
   //
-  // **Placed by a backtracking search, not a single greedy pass.** Each bar
-  // takes the nearest legal slot, exactly as before, so a lap that the greedy
-  // pass could place comes out bit-identical. But since the physics can
-  // refuse slots (`BarPlanDecision.refusedByLane`), one bar walking outward
-  // from a refused slot can take the last free slot a later bar needed. That
-  // is a collision like any other, and procgen answers collisions by making
-  // a different decision (CLAUDE.md, "Procgen backtracks on collision"): the
-  // search steps back to the latest bar with another legal slot and tries it.
-  // Only when the whole tree is exhausted (or the budget spent) is it a
-  // `DuckBarRefusal`.
+  // **The layout the ride was tuned with, then the nearest legal one to it.**
+  //
+  // The tuned layout is the nearest-first walk it always was: each bar takes
+  // the nearest legal slot to its event's cursor (backtracking if a bar is
+  // left nowhere, which on an unrefused lap never happens). With nothing
+  // refused, that is the layout, bit-identical to before.
+  //
+  // Refused slots — the physics' (`simulate.ts`'s `refusedBarSlots`) and the
+  // track's (`reachRefusedSlots`: a bar that would hang in another lane's
+  // track) — make it a much tighter problem: on seed 4 two lanes can use only
+  // 17 and 21 of the 42 window slots. The nearest-first walk exhausted a
+  // 200,000-choice budget on seeds 0, 1 and 2 without finding the layouts that
+  // exist, so a refused lap is solved exactly instead, by
+  // {@link nearestLegalLayout}: the legal layout closest to the tuned one, or
+  // a `DuckBarRefusal` when none exists at all.
   const order = barEvents.flatMap((at, barEvent) =>
     BAR_LANE_OFFSETS.map((offset, slot) => ({
       cursor: at + offset * TRESTLE_SPACING,
@@ -574,20 +690,11 @@ export function planHazards(
   );
   const chosen: number[] = [];
   let budget = BAR_SEARCH_BUDGET;
-  let deepest = 0;
   const place = (k: number): boolean => {
     if (k === order.length) return true;
-    deepest = Math.max(deepest, k);
     const { cursor, lane } = order[k]!;
     const laneUsed = usedByLane[lane]!;
-    const candidates = snapToTrestleGrid(
-      cursor,
-      loopLength,
-      usedTrestleIndices,
-      barWindow,
-      laneUsed,
-      refusedByLane.get(lane),
-    );
+    const candidates = snapToTrestleGrid(cursor, loopLength, usedTrestleIndices, barWindow, laneUsed);
     for (const index of candidates) {
       if (budget-- <= 0) return false;
       usedTrestleIndices.add(index);
@@ -600,18 +707,17 @@ export function planHazards(
     return false;
   };
   if (!place(0)) {
-    const stuck = order[deepest]!;
     throw new DuckBarRefusal(
-      `railRace/hazards.ts: no layout gives all ${order.length} duck bars a legal trestle slot ` +
-        `(${budget <= 0 ? `search budget of ${BAR_SEARCH_BUDGET} spent` : 'every choice tried'}; ` +
-        `furthest reached: bar ${deepest} of lane ${stuck.lane}, planned at ${stuck.cursor.toFixed(1)} m). ` +
-        `Rules: one bar per slot, inside the bar window ${barWindow.min}..${barWindow.max}, ` +
-        `${MIN_LANE_GAP_SLOTS} slots from its own lane's other bars, and off the slots the physics ` +
-        `refused (${[...refusedByLane].map(([lane, slots]) => `lane ${lane}: ${[...slots].sort((a, b) => a - b).join(',')}`).join('; ') || 'none'})`,
+      `railRace/hazards.ts: even with nothing refused, no layout gives all ${order.length} duck bars ` +
+        `a trestle slot in the bar window ${barWindow.min}..${barWindow.max}`,
     );
   }
+  const anyRefused = [...refusedByLane.values()].some((slots) => slots.size > 0);
+  const slots = anyRefused
+    ? nearestLegalLayout(order.map(({ lane }) => lane), chosen, barWindow, refusedByLane)
+    : chosen;
   order.forEach(({ lane }, k) => {
-    bars.push({ at: (chosen[k]! / gridCount) * loopLength, lane });
+    bars.push({ at: (slots[k]! / gridCount) * loopLength, lane });
   });
   bars.sort((a, b) => a.at - b.at);
 
