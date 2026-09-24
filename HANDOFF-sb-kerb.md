@@ -18,3 +18,13 @@
 - Before drape, same triangles had gaps 0.021..0.024 and were dropped.
 - Fix (commit on this branch): KERB_PROUD_MAX = PATH_SURFACE_LIFT - PATH_KERB_LIFT (25 mm) replaces KERB_FLOAT.
 - Before: check:coplanar exit 1 (the one NEW finding); park:attempt 24 and 20260728 both failures [] exit 0.
+
+## Second finding, unmasked (canonical 20260728)
+- After fix 1, check:coplanar still exit 1 with the same key on canonical: 0.200 m² at 8.1e-3 m (the report shows only the
+  worst instance per key; this is the 0.1997 recorded by fix/path-ribbon's handoff for base, so it pre-existed).
+- At (-35.56, -7.01, -43.93), steep ramp. Route 23's kerb triangle (verts 4916,4917,4918) is fully covered in plan;
+  covers after drape: surf 2219/2221/2220 at 8.7-11 mm (the fighter), 919/921/920 at 37-63 mm and 2216/2217/2218 at
+  42-58 mm -> refused (> KERB_BURY_MAX 50 mm) -> kerb kept.
+- Fix 2: KERB_HIDE_MAX = 100 mm tier. Candidate also records whether other routes' paving covers its sight shadow
+  at 100 mm; if so and the ordinary test says no, re-ask with gaps up to 100 mm against that wider shadow. Monotone.
+- Probe after fix 2: no kerb|surface pairs on seed 24 or canonical. Full check:coplanar running -> *-after2.log.
