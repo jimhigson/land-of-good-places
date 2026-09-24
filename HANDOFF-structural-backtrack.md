@@ -40,3 +40,6 @@ coping chamfer (#698 fix/procgen-last has the fix).
   residual is a hanging paving SHEET -> same helper now merging/finishing fix/paving-drape. Not yet merged.
 - Lattice helper (fix/sb-lattice): moving lattice/grid-axis measures into src + refusals in addInterconnects.
 - Duck-bar helper (fix/sb-duck-bars) still running.
+- Duck bars: merged fix/sb-duck-bars (refusedBarSlots in simulate.ts; DFS placement in planHazards;
+  DuckBarRefusal -> restart). VISIBLE: canonical lanes 1,2 bars move (492.13->564.15, 564.15->420.11).
+- Sweep r2 (intermediate, wip/sb-merge after sleepers/camera/castle/duck/coping): $SCRATCH/sb/accept-0-15-r2.*
