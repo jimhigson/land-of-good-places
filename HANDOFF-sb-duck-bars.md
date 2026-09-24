@@ -7,7 +7,8 @@ point of decision — bar slots where the flat-out never-ducking rider arrives a
 MIN_SPEED are refused and the bar moved; no slot -> throw so the root loop restarts.
 
 ## Status
-- Fix + backtracking committed. after2 runs in progress (scratchpad sbdb/after2). Remaining: red proof, report.
+- DONE. after2: duck-bar measure gone on 0r0, 3r1,r2,r4,r5, 4, 6, 12, 14; nothing newly failing on any of 12 parks.
+  Red proof (refusal disabled): 6r0 and 3r1 fail the duck-bar measure again (379.34 / 379.27 m). check:rail-race 0, tsc 0.
 - Baseline park:attempt runs going in a detached worktree `.claude/worktrees/sb-duck-bars-base`
   (outputs in the agent scratchpad `base/`).
 
