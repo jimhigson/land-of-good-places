@@ -59,7 +59,7 @@ import './headless-canvas.mjs';
 import { InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { RAIL_GAUGE, TIE_STEP } from '../src/world/coaster/Coaster.ts';
-import { drawnOnSphere, railFrameAt, type RailFrame } from '../src/world/rail/sweptRail.ts';
+import { drawnOnSphere, railFrameAt, stationsEvenlyAlongDrawn, type RailFrame } from '../src/world/rail/sweptRail.ts';
 import { upFor } from '../src/world/up.ts';
 import { SLEEPER_SPACING } from '../src/world/railRace/trestleGeometry.ts';
 import type { RailRaceRoute } from '../src/world/railRace/route.ts';
@@ -339,11 +339,18 @@ if (worstDeviation > EPSILON_M) {
     }
     const route = ring.route;
     const perLane = Math.floor(route.length / SLEEPER_SPACING);
+    // Where `track.ts` laid each lane's sleepers — asked of the same owner it
+    // asks, `stationsEvenlyAlongDrawn`, over the same lane sampler. Only the
+    // *station* is shared; the rail direction there is still this check's own
+    // finite difference of the drawn points.
+    const stationsByLane = Array.from({ length: route.laneOffsets.length }, (_u, lane) =>
+      stationsEvenlyAlongDrawn({ length: route.length, pointAt: (d, t) => route.pointAt(lane, d, t) }, perLane),
+    );
     results.push({
       name: `Rail Race ${name}`,
       ...measure(sleepers, (i) => {
         const lane = Math.floor(i / perLane);
-        const at = (i % perLane) * SLEEPER_SPACING;
+        const at = stationsByLane[lane]![i % perLane]!;
         return {
           at,
           pointAt: (d, t) => route.pointAt(lane, route.wrap(d), t),

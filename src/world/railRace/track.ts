@@ -29,7 +29,14 @@ import { PARK_LAYOUT } from '../parkLayout';
 import { distanceToRailCorridor } from '../train/plan';
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
 import type { CollisionWorld } from '../Collision';
-import { drawnDirection, railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
+import {
+  drawnDirection,
+  railFrameAt,
+  stationsEvenlyAlongDrawn,
+  sweptRails,
+  type RailFrame,
+  type RailSampler,
+} from '../rail/sweptRail';
 import {
   ALERT_RANGE,
   BARS_FROM_LEVEL,
@@ -499,8 +506,15 @@ export function buildRailRaceTrack(
         return drawnDirection(this, distance, target);
       },
     };
+    // **Evenly along this lane's own drawn rail, not every metre of the centre
+    // line.** A lane offset from the centre covers `1 + offset / bend` metres
+    // of rail per metre of centre line, so centre-line spacing put the inner
+    // lane's sleepers 1.254 m apart and the outer lane's 0.830 m apart on a
+    // 17.7 m bend (seed 3). Same count on every lane, so each lane's spacing is
+    // its own lap over that count: about a metre everywhere on it.
+    const stations = stationsEvenlyAlongDrawn(sampler, sleepersPerLane);
     for (let i = 0; i < sleepersPerLane; i += 1) {
-      railFrameAt(sampler, i * SLEEPER_SPACING, sleeperFrame);
+      railFrameAt(sampler, stations[i]!, sleeperFrame);
       sleeperBasis.makeBasis(sleeperFrame.side, sleeperFrame.up, sleeperFrame.forward);
       sleeperRotation.setFromRotationMatrix(sleeperBasis);
       matrix.compose(

@@ -124,6 +124,59 @@ export function drawnDirection(
 const DRAWN_STEP = 0.05;
 const _drawnBehind = /* @__PURE__ */ new Vector3();
 
+/**
+ * **`count` stations round a closed rail, evenly spaced along the rail as
+ * drawn** — the one owner of where a lane's sleepers go.
+ *
+ * Returns the sampler's own `distance` for each, but chosen so the *drawn* arc
+ * between every consecutive pair is the same: `drawnLength / count`.
+ *
+ * Not `i * spacing` of the sampler's distance, which is what the Rail Race laid
+ * its sleepers at, because that distance is the ring's **centre line**, and a
+ * lane offset from it covers `1 + offset / bendRadius` metres of rail per metre
+ * of centre line. On a 17.7 m bend (seed 3, race ring, s=37 m) the innermost
+ * lane — on the outside of that bend — got a sleeper every 1.254 m of drawn
+ * rail, and the outermost one every 0.830 m: "about a metre" on no lane at all,
+ * and worse on whichever seed bent tightest. The lean onto the sphere stretches
+ * the drawn rail a further ~1.6% over its chart there, which a centre-line
+ * spacing cannot see either. Walking the drawn points sees both.
+ *
+ * The table is sampled every `SLEEPER_TABLE_STEP` of distance and inverted
+ * linearly; the chord-for-arc error at that step is far below a millimetre.
+ */
+export function stationsEvenlyAlongDrawn(
+  sampler: Pick<RailSampler, 'pointAt' | 'length'>,
+  count: number,
+): Float64Array {
+  const stations = new Float64Array(Math.max(0, count));
+  if (count <= 0) return stations;
+  const steps = Math.max(1, Math.ceil(sampler.length / STATION_TABLE_STEP));
+  const at = new Float64Array(steps + 1);
+  const run = new Float64Array(steps + 1);
+  const previous = new Vector3();
+  const next = new Vector3();
+  sampler.pointAt(0, previous);
+  for (let k = 1; k <= steps; k += 1) {
+    at[k] = (k / steps) * sampler.length;
+    sampler.pointAt(at[k]!, next);
+    run[k] = run[k - 1]! + next.distanceTo(previous);
+    previous.copy(next);
+  }
+  const spacing = run[steps]! / count;
+  let k = 1;
+  for (let i = 0; i < count; i += 1) {
+    const want = i * spacing;
+    while (k < steps && run[k]! < want) k += 1;
+    const span = run[k]! - run[k - 1]!;
+    const t = span > 0 ? (want - run[k - 1]!) / span : 0;
+    stations[i] = at[k - 1]! + t * (at[k]! - at[k - 1]!);
+  }
+  return stations;
+}
+
+/** How finely {@link stationsEvenlyAlongDrawn} walks the drawn rail, in metres of distance. */
+const STATION_TABLE_STEP = 0.1;
+
 const _rideTilt = /* @__PURE__ */ new Quaternion();
 const _rideSpin = /* @__PURE__ */ new Quaternion();
 
