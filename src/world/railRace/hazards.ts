@@ -193,6 +193,13 @@ export const DUCK_CLEARANCE_AT_PARK_SCALE =
  */
 export const ALERT_RANGE = 34;
 
+/**
+ * How many slot choices the bar placement search may try before it gives up
+ * with a `DuckBarRefusal`. A greedy pass that succeeds tries one per bar (40);
+ * this leaves room for deep backtracking while still bounding a hopeless lap.
+ */
+const BAR_SEARCH_BUDGET = 200_000;
+
 /** A bar across a lane, at one arc distance. */
 export interface DuckBar {
   /** Metres along the loop, measured from the start/finish arch. */
@@ -346,11 +353,14 @@ export function trestleGridIndex(at: number, loopLength: number): number {
 }
 
 /**
- * Snaps a raw cursor position onto `track.ts`'s own trestle grid, and returns
- * exactly the `at` a trestle candidate at that grid index would compute
- * (`(index / count) * loopLength`) — the same formula, not an approximation
- * of it, so a bar and the support meant to carry it agree on position to the
- * metre before any collision-driven search ever nudges the support a little.
+ * Snaps a raw cursor position onto `track.ts`'s own trestle grid: returns
+ * every legal grid slot for the bar, nearest first, and does not take one —
+ * `planHazards`'s search does that, and backtracks to the next entry when a
+ * later bar has nowhere to go. A slot becomes exactly the `at` a trestle
+ * candidate at that grid index would compute (`(index / count) * loopLength`)
+ * — the same formula, not an approximation of it, so a bar and the support
+ * meant to carry it agree on position to the metre before any
+ * collision-driven search ever nudges the support a little.
  *
  * **Why a duck bar needs this at all.** Jim, 1 August 2026: the hazard
  * schedule and the trestle placement were "completely independent systems
@@ -395,7 +405,15 @@ function snapToTrestleGrid(
    * which is exactly the tuned property this change was meant not to touch.
    */
   laneUsed?: Set<number>,
-): number {
+  /**
+   * Slots this bar's lane may **not** use because the race's own physics
+   * refused them: a flat-out rider who never ducks would already be at the
+   * speed floor there, so the bar could not slow her. Decided by
+   * `simulate.ts`'s `refusedBarSlots`, which owns the physics; this file only
+   * obeys. See {@link DuckBarRefusal}.
+   */
+  laneRefused?: ReadonlySet<number>,
+): number[] {
   const count = trestleGridCount(loopLength);
   const raw = trestleGridIndex(cursor, loopLength);
   /** Slots apart, the short way round the loop. */
@@ -406,25 +424,37 @@ function snapToTrestleGrid(
   const allowed = (index: number): boolean =>
     !usedIndices.has(index) &&
     (!window || (index >= window.min && index <= window.max)) &&
-    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS));
+    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS)) &&
+    !laneRefused?.has(index);
+  const legal: number[] = [];
   for (let delta = 0; delta < count; delta += 1) {
     const candidates = delta === 0 ? [raw] : [raw - delta, raw + delta];
     for (const candidate of candidates) {
       const index = ((candidate % count) + count) % count;
-      if (allowed(index)) {
-        usedIndices.add(index);
-        laneUsed?.add(index);
-        return (index / count) * loopLength;
-      }
+      if (allowed(index) && !legal.includes(index)) legal.push(index);
     }
   }
-  // Every grid index already used — not reachable with this file's own
-  // GAP_MIN/TRESTLE_SPACING ratio, but fall back to the raw index rather than
-  // throwing, so a future tuning change that *does* reach this fails as a
-  // slightly crowded schedule, not a crash.
-  const fallback = ((raw % count) + count) % count;
-  usedIndices.add(fallback);
-  return (fallback / count) * loopLength;
+  // Nearest first. The first entry is the slot this function always returned;
+  // the rest are the next decisions `planHazards` backtracks to when a later
+  // bar is left with nowhere to stand. An empty list is a refusal — there is
+  // no longer a fallback to the raw index, which kept a bar on a slot some
+  // rule had just refused, silently.
+  return legal;
+}
+
+/**
+ * **A duck bar that has nowhere legal to stand.** Thrown by the planner when
+ * every trestle slot is refused for a bar — by use, the bar window, the lane
+ * gap, or the physics (a slot where a flat-out rider who never ducks would
+ * already be at the speed floor, so the bar could not slow her). Not a
+ * `TrestleRefusal`: nothing movable is in the way, so there is no blocker to
+ * ask aside, and the build fails for the root loop to start the park again.
+ */
+export class DuckBarRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DuckBarRefusal';
+  }
 }
 
 /**
@@ -439,7 +469,42 @@ function snapToTrestleGrid(
  * *where* a bar or a zone sits, is deliberately the same whichever level is
  * chosen — level only ever adds or removes whole hazards, never moves one.
  */
-export function planHazards(loopLength: number, laps: number, level: RaceLevel): HazardSchedule {
+/**
+ * **The decisions the race's physics makes about where bars may go**, handed
+ * to {@link planHazards} by `simulate.ts` (which owns the physics and cannot
+ * be imported from here).
+ */
+export interface BarPlanDecision {
+  /**
+   * Trestle slots each lane's bars may not use, by lane: a flat-out rider who
+   * never ducks would meet a bar there at the speed floor, so it could not
+   * slow her. See `simulate.ts`'s `refusedBarSlots`.
+   */
+  readonly refusedByLane: ReadonlyMap<number, ReadonlySet<number>>;
+  /**
+   * Added to each event's lane rotation. 0 is the layout the ride was tuned
+   * with; a non-zero shift is the next decision tried when refusals leave
+   * some bar with no legal slot at all — the same slots, dealt to the lanes
+   * in a different order, so a slot one lane cannot use can go to a lane that
+   * reaches it at speed.
+   */
+  readonly laneShift: number;
+}
+
+const NO_BAR_DECISION: BarPlanDecision = { refusedByLane: new Map(), laneShift: 0 };
+
+export function planHazards(
+  loopLength: number,
+  laps: number,
+  level: RaceLevel,
+  /**
+   * The physics' say in where bars go — `simulate.ts`'s `barPlanDecision`.
+   * The default moves nothing, and the layout is then the one this function
+   * has always produced.
+   */
+  decision: BarPlanDecision = NO_BAR_DECISION,
+): HazardSchedule {
+  const { refusedByLane, laneShift } = decision;
   const rng = new Rng(0x9a11ce);
   const bars: DuckBar[] = [];
   const zones: SparkZone[] = [];
@@ -490,20 +555,63 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
   //
   // The lane-to-offset mapping rotates with the event, so it is not lane 0
   // leading every single time — Jim's "not always at the same spots".
-  barEvents.forEach((at, barEvent) => {
-    for (let slot = 0; slot < LANE_COUNT; slot += 1) {
-      const lane = (slot + barEvent) % LANE_COUNT;
-      bars.push({
-        at: snapToTrestleGrid(
-          at + BAR_LANE_OFFSETS[slot]! * TRESTLE_SPACING,
-          loopLength,
-          usedTrestleIndices,
-          barWindow,
-          usedByLane[lane]!,
-        ),
-        lane,
-      });
+  //
+  // **Placed by a backtracking search, not a single greedy pass.** Each bar
+  // takes the nearest legal slot, exactly as before, so a lap that the greedy
+  // pass could place comes out bit-identical. But since the physics can
+  // refuse slots (`BarPlanDecision.refusedByLane`), one bar walking outward
+  // from a refused slot can take the last free slot a later bar needed. That
+  // is a collision like any other, and procgen answers collisions by making
+  // a different decision (CLAUDE.md, "Procgen backtracks on collision"): the
+  // search steps back to the latest bar with another legal slot and tries it.
+  // Only when the whole tree is exhausted (or the budget spent) is it a
+  // `DuckBarRefusal`.
+  const order = barEvents.flatMap((at, barEvent) =>
+    BAR_LANE_OFFSETS.map((offset, slot) => ({
+      cursor: at + offset * TRESTLE_SPACING,
+      lane: (slot + barEvent + laneShift) % LANE_COUNT,
+    })),
+  );
+  const chosen: number[] = [];
+  let budget = BAR_SEARCH_BUDGET;
+  let deepest = 0;
+  const place = (k: number): boolean => {
+    if (k === order.length) return true;
+    deepest = Math.max(deepest, k);
+    const { cursor, lane } = order[k]!;
+    const laneUsed = usedByLane[lane]!;
+    const candidates = snapToTrestleGrid(
+      cursor,
+      loopLength,
+      usedTrestleIndices,
+      barWindow,
+      laneUsed,
+      refusedByLane.get(lane),
+    );
+    for (const index of candidates) {
+      if (budget-- <= 0) return false;
+      usedTrestleIndices.add(index);
+      laneUsed.add(index);
+      chosen[k] = index;
+      if (place(k + 1)) return true;
+      usedTrestleIndices.delete(index);
+      laneUsed.delete(index);
     }
+    return false;
+  };
+  if (!place(0)) {
+    const stuck = order[deepest]!;
+    throw new DuckBarRefusal(
+      `railRace/hazards.ts: no layout gives all ${order.length} duck bars a legal trestle slot ` +
+        `(${budget <= 0 ? `search budget of ${BAR_SEARCH_BUDGET} spent` : 'every choice tried'}; ` +
+        `furthest reached: bar ${deepest} of lane ${stuck.lane}, planned at ${stuck.cursor.toFixed(1)} m). ` +
+        `Rules: one bar per slot, inside the bar window ${barWindow.min}..${barWindow.max}, ` +
+        `${MIN_LANE_GAP_SLOTS} slots from its own lane's other bars, and off the slots the physics ` +
+        `refused (${[...refusedByLane].map(([lane, slots]) => `lane ${lane}: ${[...slots].sort((a, b) => a - b).join(',')}`).join('; ') || 'none'})`,
+    );
+  }
+  order.forEach(({ lane }, k) => {
+    bars.push({ at: (chosen[k]! / gridCount) * loopLength, lane });
   });
   bars.sort((a, b) => a.at - b.at);
 

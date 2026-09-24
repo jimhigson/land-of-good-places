@@ -21,6 +21,7 @@ interface Verdict {
   measuresAsked: number;
   cpuMs: { build: number; invariants: number; findings: number };
   wallMs: number;
+  backtracking: { plan: null; world: null };
 }
 interface Loop {
   acceptPark(
@@ -39,6 +40,7 @@ const verdict = (seed: number, restart: number, failures: string[], extra: Parti
   measuresAsked: 102,
   cpuMs: { build: 0, invariants: 0, findings: 0 },
   wallMs: 0,
+  backtracking: { plan: null, world: null },
   ...extra,
 });
 

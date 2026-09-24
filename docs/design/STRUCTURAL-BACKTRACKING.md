@@ -275,3 +275,33 @@ Baseline (Overseer, `vet:seeds 0..15` at ae8257fb): every seed passes
 - **`fix/paving-drape`, `fix/path-ribbon`**: new invariants about drawn paving
   (sheets, folds). These are geometry, so each must be fixed at cause before
   its invariant is added. Otherwise the loop would search around them.
+
+
+## Measured: the loop on 0..15, before any fix at cause
+
+`pnpm run accept:parks -- 0-15` at `e5d8c8ec` (the loop over the unfixed
+generator, three lanes on an M-series Mac): **16/16 accepted, 0 broken, 14
+needed a restart, attempts max 31, mean 10.81, 2807 s wall.** Every accepted
+park passes every measure — that is the point — but the restart counts are
+inflated by geometry bugs that fail on a fraction of *every* park (sleepers,
+camera, coping), which is exactly what restarts must not be used for; those
+are fixed at cause on `wip/sb-merge` and the sweep is re-taken there.
+
+| seed | accepted restart | attempts | wall s | restarts forced by (count of attempts) |
+|---:|---:|---:|---:|---|
+| 0 | 1 | 2 | 215 | every Rail Race duck bar slows you down where it stands (1); the Sky Cruiser stands on its own supports (1); the Rail Race camera never runs backwards (1) |
+| 1 | 29 | 30 | 1067 | the Rail Race camera never runs backwards (13); every modelled coping stone sits on the wall it caps (10); the Sky Cruiser always flies through the castle (10); every street sits on the shared 12 m lattice (9) |
+| 2 | 0 | 1 | 38 |  |
+| 3 | 6 | 7 | 281 | every Rail Race duck bar slows you down where it stands (4); the Rail Race sleepers bridge both rails, a metre apart (3); the Rail Race camera never runs backwards (3); every paved path runs on grid axes (3) |
+| 4 | 16 | 17 | 608 | every modelled coping stone sits on the wall it caps (9); the Sky Cruiser always flies through the castle (7); every Rail Race duck bar slows you down where it stands (5); every street sits on the shared 12 m lattice (5) |
+| 5 | 0 | 1 | 28 |  |
+| 6 | 10 | 11 | 409 | every Rail Race duck bar slows you down where it stands (4); every paved path runs on grid axes (4); the Sky Cruiser always flies through the castle (4); the Rail Race finish rainbow stands on the ground (3) |
+| 7 | 10 | 11 | 605 | every Rail Race duck bar slows you down where it stands (4); the Sky Cruiser always flies through the castle (4); every modelled coping stone sits on the wall it caps (3); the Rail Race camera never runs backwards (3) |
+| 8 | 2 | 3 | 98 | the Rail Race sleepers bridge both rails, a metre apart (1); the Rail Race camera never runs backwards (1); the ginormous slide's cameras cover the whole ride and can see it (1); every paved path runs on grid axes (1) |
+| 9 | 4 | 5 | 171 | the Rail Race camera never runs backwards (3); every modelled coping stone sits on the wall it caps (2); the Rail Race sleepers bridge both rails, a metre apart (1); the Sky Cruiser always flies through the castle (1) |
+| 10 | 4 | 5 | 185 | the Sky Cruiser always flies through the castle (3); every modelled coping stone sits on the wall it caps (3); every street sits on the shared 12 m lattice (2); the Sky Cruiser flies clear of the whole park (1) |
+| 11 | 11 | 12 | 712 | every modelled coping stone sits on the wall it caps (7); every Rail Race duck bar slows you down where it stands (7); the Rail Race camera never runs backwards (2); check:park anchor.reach (2) |
+| 12 | 20 | 21 | 765 | the Rail Race camera never runs backwards (12); the Sky Cruiser always flies through the castle (9); every street sits on the shared 12 m lattice (7); every Rail Race duck bar slows you down where it stands (7) |
+| 13 | 30 | 31 | 1444 | every modelled coping stone sits on the wall it caps (12); the Rail Race camera never runs backwards (12); the Sky Cruiser always flies through the castle (12); every Rail Race duck bar slows you down where it stands (11) |
+| 14 | 8 | 9 | 526 | the Sky Cruiser always flies through the castle (5); the Rail Race camera never runs backwards (4); every modelled coping stone sits on the wall it caps (3); every street sits on the shared 12 m lattice (3) |
+| 15 | 6 | 7 | 241 | every street sits on the shared 12 m lattice (4); the Rail Race camera never runs backwards (3); every modelled coping stone sits on the wall it caps (3); every paved path runs on grid axes (2) |

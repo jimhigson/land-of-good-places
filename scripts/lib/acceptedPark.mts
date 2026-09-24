@@ -69,6 +69,8 @@ export interface RestartRecord {
   readonly measuresAsked: number;
   readonly wallMs: number;
   readonly cpuMs: number;
+  /** The driver's backtracking inside this attempt, per phase (see `AttemptVerdict.backtracking`). */
+  readonly backtracking: AttemptVerdict['backtracking'];
 }
 
 export interface AcceptedPark {
@@ -149,6 +151,7 @@ export async function acceptPark(
       measuresAsked: verdict.measuresAsked,
       wallMs: verdict.wallMs,
       cpuMs: verdict.cpuMs.build + verdict.cpuMs.invariants + verdict.cpuMs.findings,
+      backtracking: verdict.backtracking,
     };
     attempts.push(record);
     options.onAttempt?.(record);
@@ -222,6 +225,41 @@ export async function acceptParkCached(
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(accepted)}\n`);
   return { ...accepted, cached: false, sourceHash };
+}
+
+/**
+ * **What the prebuilt park file records about how its park was found** — every
+ * restart and what forced it, and the driver's backtracking inside each
+ * attempt. Plain data, stable field names: the park file's `acceptance`
+ * metadata is exactly this object (`build:parks`), so a restart is visible in
+ * the shipped file, never only in a CI log.
+ */
+export interface AcceptanceMetadata {
+  readonly restart: number;
+  readonly attempts: number;
+  readonly sourceHash: string;
+  readonly log: readonly {
+    readonly restart: number;
+    readonly accepted: boolean;
+    readonly forcedBy: readonly { readonly measure: string; readonly count: number; readonly first: string }[];
+    readonly backtracking: RestartRecord['backtracking'];
+    readonly wallMs: number;
+  }[];
+}
+
+export function acceptanceMetadata(accepted: AcceptedPark, sourceHash: string): AcceptanceMetadata {
+  return {
+    restart: accepted.restart,
+    attempts: accepted.attempts.length,
+    sourceHash,
+    log: accepted.attempts.map((a) => ({
+      restart: a.restart,
+      accepted: a.accepted,
+      forcedBy: a.forcedBy,
+      backtracking: a.backtracking,
+      wallMs: a.wallMs,
+    })),
+  };
 }
 
 /** One line per restart, for a log or the park file's metadata. */

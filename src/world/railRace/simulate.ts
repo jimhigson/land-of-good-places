@@ -2,7 +2,16 @@ import { lazyView } from '../../boot/lazyView';
 import { registerPlanCache } from '../../boot/planCaches';
 import { Rng, clamp } from '../../core/mathUtils';
 import { RAIL_RACE_PLAN } from './plan';
-import { planHazards, type HazardLayout, type HazardSchedule, type RaceLevel } from './hazards';
+import {
+  BARS_FROM_LEVEL,
+  DuckBarRefusal,
+  planHazards,
+  type BarPlanDecision,
+  trestleGridIndex,
+  type HazardLayout,
+  type HazardSchedule,
+  type RaceLevel,
+} from './hazards';
 import { LANE_COUNT, PLAYER_LANE, type RailRaceRoute } from './route';
 
 /**
@@ -257,11 +266,145 @@ const WOBBLE_LOCKOUT = 0.35;
 let hazardLayoutMemo: HazardLayout | null = null;
 /** A view: the ring follows the layout the park's driver decided. */
 export const HAZARD_LAYOUT: HazardLayout = lazyView(
-  () => (hazardLayoutMemo ??= planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, 1).lap),
+  () =>
+    (hazardLayoutMemo ??= planHazards(
+      RAIL_RACE_PLAN.route.length,
+      RACE_LAPS,
+      1,
+      raceBarPlanDecision(),
+    ).lap),
 );
 registerPlanCache(() => {
   hazardLayoutMemo = null;
+  barPlanDecisionMemo = null;
 });
+
+/**
+ * **Every duck bar must be able to slow you down where it stands** — refused
+ * where it is decided, by this file's own physics.
+ *
+ * A bonk keeps {@link BONK_SPEED_FACTOR} of your speed, but never takes you
+ * under {@link MIN_SPEED}. So a bar met by a rider who is already crawling at
+ * the floor costs her nothing: `Math.max(MIN_SPEED, speed * 0.35)` is the
+ * speed she came in with. Measured on seed 0, restart 0 (ring 599.93 m): the
+ * player's lane had a bar at 379.55 m, inside the black stretch 361.1-380.7 m.
+ * A rider mashing flat out through the black rail sparks — no thrust, six
+ * extra m/s² of drag — having been bonked to 9.80 m/s by her previous bar at
+ * 355.06 m, and she is at 3.40 m/s by about 370 m. The bar at 379.55 bonked
+ * her from 3.40 to 3.40. That was the single most frequent reason the root
+ * loop restarted a park (`duckBarsSlowYouWhereTheyStand`).
+ *
+ * Bars over the black stretches are allowed — Jim, twice, 7 August 2026 (see
+ * `hazards.ts`'s `BAR_LANE_OFFSETS`) — so this does **not** keep bars off the
+ * black rail. It refuses exactly the slots where the bonk would be clipped by
+ * the floor, for the rider the invariant races: {@link createRider} +
+ * {@link stepRider} + the level-{@link BARS_FROM_LEVEL} schedule, mashing
+ * every frame, never ducking. The rule is asked of **every lane** and the
+ * **whole race**, not just the player's lane and first lap, because a bar a
+ * rival cannot be slowed by is the same defect seen from another cart.
+ *
+ * "Clipped" means `speed * BONK_SPEED_FACTOR <= MIN_SPEED`: the bonk does not
+ * take its full bite. That is stricter than "speed did not fall at all" on
+ * purpose — just above the floor the bonk bites by a few centimetres a second,
+ * and a downhill 0.6 m later can hand it straight back.
+ *
+ * A refused slot moves the bar the way any other refusal does
+ * (`hazards.ts`'s `snapToTrestleGrid`, outward to the nearest legal slot), and
+ * the whole plan is then raced again, because moving one bar changes the
+ * speed every later bar of that lane is met at. Refusals only accumulate, so
+ * this ends: either no bar is clipped, or some bar has no legal slot left and
+ * `planHazards` throws `DuckBarRefusal`. That is then answered with the next
+ * decision — the same slots dealt to the lanes in another rotation
+ * (`BarPlanDecision.laneShift`), because a black stretch a lane leaves at the
+ * floor after a bar just before it is often crossed at speed by a lane that
+ * had no bar there. Seed 14 restart 0 needs this: the lap has 42 legal slots
+ * for 40 bars, and lane 0's refused slot 41 left the last bar nowhere to go.
+ * Only when every rotation fails does the build fail, for the park's root
+ * loop to start again — never a bad bar kept.
+ */
+let barPlanDecisionMemo: BarPlanDecision | null = null;
+function raceBarPlanDecision(): BarPlanDecision {
+  return (barPlanDecisionMemo ??= barPlanDecision(RAIL_RACE_PLAN.raceRing));
+}
+
+/**
+ * The bar layout's decision for `route`: the lane rotation the ride was tuned
+ * with if refusals can be met there, else the next rotation that can. Throws
+ * `DuckBarRefusal` — the build fails, and the park's root loop starts again —
+ * only when no rotation leaves every bar a legal slot. See
+ * {@link raceBarPlanDecision}'s doc comment above for the rule.
+ */
+export function barPlanDecision(route: RailRaceRoute): BarPlanDecision {
+  const reasons: string[] = [];
+  for (let laneShift = 0; laneShift < LANE_COUNT; laneShift += 1) {
+    try {
+      return { laneShift, refusedByLane: refusedBarSlots(route, laneShift) };
+    } catch (error) {
+      if (!(error instanceof DuckBarRefusal)) throw error;
+      reasons.push(`lane shift ${laneShift}: ${error.message}`);
+    }
+  }
+  throw new DuckBarRefusal(
+    `railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a ` +
+      `flat-out rider — ${reasons.join('; ')}`,
+  );
+}
+
+/**
+ * The trestle slots, by lane, where a flat-out never-ducking rider on `route`
+ * would meet a bar with her bonk clipped by the speed floor, for one lane
+ * rotation. See {@link raceBarPlanDecision} for the rule and why.
+ */
+export function refusedBarSlots(route: RailRaceRoute, laneShift = 0): ReadonlyMap<number, ReadonlySet<number>> {
+  const refused = new Map<number, Set<number>>();
+  // Bounded by construction (each round refuses at least one new lane-slot
+  // pair, and there are LANE_COUNT × slots of those); the guard only turns a
+  // future bug into an error rather than a hang.
+  for (let round = 0; round <= LANE_COUNT * Math.ceil(route.length); round += 1) {
+    const schedule = planHazards(route.length, RACE_LAPS, BARS_FROM_LEVEL, { refusedByLane: refused, laneShift });
+    let refusedAny = false;
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      const clipped = firstClippedBar(route, schedule, lane);
+      if (clipped === null) continue;
+      const slot = trestleGridIndex(route.wrap(clipped), route.length);
+      const laneRefused = refused.get(lane) ?? new Set<number>();
+      if (laneRefused.has(slot)) {
+        throw new Error(
+          `railRace/simulate.ts: refusedBarSlots found lane ${lane}'s bar at ${clipped.toFixed(2)} m clipped on ` +
+            `slot ${slot}, which it had already refused — the planner ignored a refusal`,
+        );
+      }
+      laneRefused.add(slot);
+      refused.set(lane, laneRefused);
+      refusedAny = true;
+    }
+    if (!refusedAny) return refused;
+  }
+  throw new Error('railRace/simulate.ts: refusedBarSlots did not settle');
+}
+
+/**
+ * The first bar crossing, in metres travelled, at which a rider in `lane` who
+ * mashes every frame and never ducks has her bonk clipped by {@link MIN_SPEED}
+ * — or null if every bar she meets in the whole race takes its full bite.
+ */
+function firstClippedBar(route: RailRaceRoute, schedule: HazardSchedule, lane: number): number | null {
+  const rider = createRider(lane);
+  const crossings = schedule.barCrossingsByLane[lane] ?? [];
+  const dt = 1 / 60;
+  const total = route.length * RACE_LAPS;
+  let steps = 0;
+  while (!rider.finished && rider.travelled < total && steps < 60 * 60 * 10) {
+    const cursor = rider.barCursor;
+    const speedIn = rider.speed;
+    stepRider(route, rider, schedule, { pressed: true, ducking: false }, dt);
+    if (rider.barCursor > cursor && speedIn * BONK_SPEED_FACTOR <= MIN_SPEED) {
+      return crossings[cursor] ?? null;
+    }
+    steps += 1;
+  }
+  return null;
+}
 
 /**
  * The hazard schedule for one chosen level — see `hazards.ts`'s header.
@@ -270,7 +413,7 @@ registerPlanCache(() => {
  * idling rivals sit in between races.
  */
 export function scheduleForLevel(level: RaceLevel): HazardSchedule {
-  return planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, level);
+  return planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, level, raceBarPlanDecision());
 }
 
 /** The finish line, in metres travelled. */
