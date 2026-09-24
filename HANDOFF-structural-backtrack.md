@@ -88,3 +88,7 @@ coping chamfer (#698 fix/procgen-last has the fix).
   (instrument+game bug, 10-16 mm on 10 of 16 seeds); check:fountain-hop clause 2b taps 46 basin points.
 - Still running: fix/sb-seed5 (castle-towers, cruiser cart), fix/sb-duck-ends. Then: emulate #705 pool=0..15 in a
   scratch worktree and run pool-sweeping checks locally (not pushed; #705 owns the pool change).
+- FINDING: chain checks build only the canonical seed by default, so per-seed failures hid (rail-race camera
+  clauses red on 1r6 etc. — likely from the CEILING_FLOOR camera fix). fix/sb-seed5 helper now owns rail-race camera
+  clauses too. Chain-sweep driver ($SCRATCH/sb/chain-sweep.mjs) runs 25 park-building chain checks x 16 seeds at
+  dda5c8ab in sb-frozen -> chain-sweep.log/json.
