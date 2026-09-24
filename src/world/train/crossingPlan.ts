@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { TRAIN_PLAN } from './plan';
-import type { CrossingSite } from './crossingPlanSolve';
+import type { CrossingSite } from './crossingSite';
 import { lazyArrayView } from '../../boot/lazyView';
 import { planPart } from '../parkPlan';
 
@@ -13,14 +13,8 @@ import { planPart } from '../parkPlan';
  * harness, where nobody pre-warms, it solves straight through here exactly
  * as it always did.
  */
-export {
-  NARROW_HALF_WIDTH,
-  SITE_HALF_WIDTH,
-  SITE_RAMP_FLOOR,
-  SITE_RAMP_IDEAL,
-  type CrossingSite,
-  type SolvedCrossingSites,
-} from './crossingPlanSolve';
+export { NARROW_HALF_WIDTH, SITE_HALF_WIDTH, SITE_RAMP_FLOOR, SITE_RAMP_IDEAL } from './bridgeFit';
+export type { CrossingSite, SolvedCrossingSites } from './crossingSite';
 
 
 /**

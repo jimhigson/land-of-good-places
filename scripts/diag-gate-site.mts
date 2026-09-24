@@ -7,7 +7,7 @@ import './headless-canvas.mjs';
 import { Vector3 } from 'three';
 
 const { TRAIN_PLAN } = await import('../src/world/train/plan.ts');
-const solve = await import('../src/world/train/crossingPlanSolve.ts');
+const solve = await import('../procgen/world/train/crossingPlanSolve.ts');
 const { CROSSING_SITES } = await import('../src/world/train/crossingPlan.ts');
 const { ENTRANCE_GATE_X, ENTRANCE_GATE_Z, isInEntranceGateway } = await import(
   '../src/world/entrance/layout.ts'

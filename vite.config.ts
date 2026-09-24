@@ -1,8 +1,18 @@
 import { execSync } from 'child_process';
-import { writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { VERSION_FILE_NAME } from './src/version-file';
+import {
+  PARK_FILE_FORMAT,
+  PREBUILT_PARKS_MANIFEST,
+  PREBUILT_PARKS_OUT,
+  SUPPORTED_PARK_SEEDS,
+  parkFileName,
+  type PrebuiltParksManifest,
+} from './src/world/prebuilt/parkFileName';
+import { parkSourceHash } from './scripts/lib/park-source-hash.mjs';
+import { devParksMiddleware } from './scripts/lib/dev-parks.mjs';
 
 // No `@types/node` in this project (a browser game has no business seeing
 // `process`, `Buffer`, `require`, etc as ambient globals in `src/`) — the
@@ -10,7 +20,7 @@ import { VERSION_FILE_NAME } from './src/version-file';
 // `vite-config-env.d.ts` instead (a `.d.ts` file, not a module with its own
 // imports, is what lets an ambient `declare module` for an external module
 // actually take).
-declare const process: { readonly env: Readonly<Record<string, string | undefined>> };
+declare const process: { readonly env: Readonly<Record<string, string | undefined>>; cwd(): string };
 
 /**
  * The running build's own identity — the current commit, or a timestamp if
@@ -54,6 +64,72 @@ function versionFilePlugin(version: string): Plugin {
     apply: 'build',
     writeBundle(options) {
       writeFileSync(`${options.dir ?? 'dist'}/${VERSION_FILE_NAME}`, version);
+    },
+  };
+}
+
+/**
+ * **Ships the parks `pnpm run build:parks` solved** — `.parks/<seed>.json`
+ * into `dist/parks/`, each stamped with this bundle's version
+ * (`docs/design/PREBUILT-PARKS.md`, `src/boot/prebuiltPark.ts`).
+ *
+ * Emitted from `generateBundle`, so they are part of the bundle by the time
+ * the PWA plugin globs `dist/` for its precache: the parks and the code that
+ * reads them are one precache, swapped together by `UpdateGate`, and a stale
+ * park against a new bundle cannot be served.
+ *
+ * **Parks solved from any other source are never shipped.** The manifest
+ * records `scripts/lib/park-source-hash.mjs` of the tree `build:parks` ran on;
+ * this recomputes it and ships nothing on a mismatch. Shipping nothing is
+ * correct — every device solves its own park, as it did before prebuilt parks
+ * existed — just slow, so it is a loud warning; and `LGP_REQUIRE_PARKS=1`
+ * (set by the deploy workflows) makes it, and a missing manifest, fail the
+ * build instead.
+ */
+function prebuiltParksPlugin(version: string): Plugin {
+  return {
+    name: 'land-of-good-places-prebuilt-parks',
+    apply: 'build',
+    generateBundle() {
+      const required = process.env.LGP_REQUIRE_PARKS === '1';
+      const none = (why: string): void => {
+        const message = `prebuilt parks: shipping none — ${why}. Every park will be solved on the player's device.`;
+        if (required) this.error(`${message} LGP_REQUIRE_PARKS=1 forbids that.`);
+        this.warn(message);
+      };
+      const manifestPath = `${PREBUILT_PARKS_OUT}/${PREBUILT_PARKS_MANIFEST}`;
+      if (!existsSync(manifestPath)) return none(`no ${manifestPath}; run \`pnpm run build:parks\` first`);
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as PrebuiltParksManifest;
+      if (manifest.format !== PARK_FILE_FORMAT) {
+        return none(`${manifestPath} is format ${manifest.format}, this build reads ${PARK_FILE_FORMAT}`);
+      }
+      const source = parkSourceHash(process.cwd());
+      if (manifest.sourceHash !== source) {
+        return none(
+          `they were solved from source ${manifest.sourceHash.slice(0, 12)} and this is ${source.slice(0, 12)}; ` +
+            'run `pnpm run build:parks` again',
+        );
+      }
+      for (const seed of manifest.seeds) {
+        const file = JSON.parse(readFileSync(`${PREBUILT_PARKS_OUT}/${seed}.json`, 'utf8')) as Record<string, unknown>;
+        this.emitFile({ type: 'asset', fileName: parkFileName(seed), source: JSON.stringify({ ...file, build: version }) });
+      }
+    },
+  };
+}
+
+/**
+ * **Park files on the dev server** — solved on first request by the build-time
+ * solver in a child process and cached, so the dev client fetches and hydrates
+ * exactly as the shipped game does and never solves (`scripts/lib/dev-parks.mjs`).
+ * The seeds are the game's parks, `SUPPORTED_PARK_SEEDS`.
+ */
+function devParksPlugin(version: string): Plugin {
+  return {
+    name: 'land-of-good-places-dev-parks',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use(devParksMiddleware(process.cwd(), version, SUPPORTED_PARK_SEEDS));
     },
   };
 }
@@ -112,6 +188,8 @@ export default defineConfig({
   },
   plugins: [
     versionFilePlugin(APP_VERSION),
+    prebuiltParksPlugin(APP_VERSION),
+    devParksPlugin(APP_VERSION),
     VitePWA({
       registerType: 'prompt',
       injectRegister: false,
@@ -147,7 +225,10 @@ export default defineConfig({
       },
       workbox: {
         // The whole park is code — precaching it is precaching the game.
-        globPatterns: ['**/*.{js,css,html,svg,ico}'],
+        // …and the prebuilt parks (`prebuiltParksPlugin` above): ~10 KB each
+        // compressed, and precaching them is what lets a new game start
+        // offline without solving.
+        globPatterns: ['**/*.{js,css,html,svg,ico}', 'parks/*.json'],
         // Raised from workbox's 2 MiB default so that a future asset cannot
         // silently drop out of the precache and break offline play.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,

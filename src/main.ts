@@ -1,6 +1,5 @@
 import './style.css';
 import { Vector3 } from 'three';
-import { registerSW } from 'virtual:pwa-register';
 // **`import type`, not `import`** — this is the whole reason the ride can cover
 // the load. A static import of `Game` pulls in `World`, `paths.ts` and every
 // ride's plan module, and each of those solves its route in a top-level
@@ -21,11 +20,12 @@ import {
   OVERRUN_GENERATION_BUDGET_MS,
   ParkGeneration,
 } from './boot/parkGeneration';
+import { loadPrebuiltPark } from './boot/prebuiltPark';
+import { showBootFailure } from './ui/bootFailure';
 import { OVERRUN_WARMUP_BUDGET_MS, ShaderWarmup, WARMUP_BUDGET_MS } from './boot/shaderWarmup';
 import { JourneySkip } from './ui/JourneySkip';
 import { JourneyTitle } from './ui/JourneyTitle';
 import { JourneyWait } from './ui/JourneyWait';
-import { UpdateGate } from './ui/UpdateGate';
 import { CharacterCreation, ContinueOrRestart, DevBadge, defaultCharacterChoice } from './ui';
 import { gameStore, walksInParade } from './state';
 import { ALL_CATALOGUE_ITEMS } from './world/building/shops/catalogue';
@@ -35,9 +35,7 @@ import { MAX_PARADE_VISIBLE } from './entities/parade/paradeCap';
 import { saveFlags } from './state/flags';
 import { clearSave, loadSave, makeSessionUnsavable, type SaveFile } from './state/save';
 import { PARK_SEED } from './world/parkManifest';
-import { forgetParkSeed, parkSeedSource } from './world/parkSeedPool';
-import { canAdoptWithoutAsking, noteAdopting, watchForFirstTouch } from './update-adoption';
-import { startVersionCheck } from './version-check';
+import { forgetParkSeed, parkChangedUnderSave, parkSeedSource } from './world/parkSeedPool';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
 
 /**
@@ -593,8 +591,10 @@ function continueGame(
   saveFlags.hydrate(save.flags);
   if (deepLink?.kind === 'ride') grantRideCompanion();
   // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
+  // A save whose park was retired keeps everything but the spot she stood on,
+  // which was measured in a park that no longer exists (`parkSeedFor`).
   const options: GameOptions =
-    save.place && deepLink?.kind !== 'spawn' && deepLink?.kind !== 'arrive'
+    save.place && !parkChangedUnderSave() && deepLink?.kind !== 'spawn' && deepLink?.kind !== 'arrive'
       ? { startPlace: save.place }
       : {};
   launchGame(canvas, uiRoot, splash, options, deepLink);
@@ -848,15 +848,15 @@ function launchGame(
       // and nothing else to show, so put the card back. `finishLaunch` hides it
       // again on the first rendered frame.
       splash?.classList.remove('hidden');
-      void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
+      finishLaunch(engine, uiRoot, splash, gameOptions, deepLink).catch(showBootFailure);
       return;
     }
     rideInThenPlay(engine, uiRoot, splash, gameOptions, () => {
-      void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
+      finishLaunch(engine, uiRoot, splash, gameOptions, deepLink).catch(showBootFailure);
     });
     return;
   }
-  void finishLaunch(engine, uiRoot, splash, gameOptions, deepLink);
+  finishLaunch(engine, uiRoot, splash, gameOptions, deepLink).catch(showBootFailure);
 }
 
 /**
@@ -1120,6 +1120,11 @@ async function finishLaunch(
   // module-scope solving when nothing has — a continued save, a ride deep link,
   // `/view` or `/spawn`, none of which play an arrival. Those are exactly the paths that
   // paid it before this change too, so none of them got slower.
+  // The prebuilt park first (`boot/prebuiltPark.ts`): `new Game` forces the
+  // plan, and the plan's driver reads the offered file once, when it starts.
+  // Already settled when the ride built the park; on a continued save, a deep
+  // link, `/view` or `/spawn` this is where the whole search is saved.
+  await loadPrebuiltPark();
   const GameClass = await loadGame();
   const game = handOverGame ?? new GameClass(engine, uiRoot, gameOptions);
   handOverGame = null;
@@ -1268,98 +1273,12 @@ async function finishLaunch(
   }
 }
 
-/**
- * Registers the service worker ourselves (rather than the PWA plugin's own
- * injected script — see `vite.config.ts`'s `injectRegister: false`) purely to
- * get at `onNeedRefresh`: the one hook that fires when a new deploy has
- * finished downloading in the background and is sat waiting. That is the gate's
- * entire trigger — this function itself polls or schedules nothing.
- *
- * `startVersionCheck` (`version-check.ts`), in production only, is what
- * actually schedules anything: a browser only checks a service worker for
- * updates on navigation, and the family leaves the game open on a phone for
- * hours mid-session, so a deploy could otherwise sit undetected the whole
- * time it is open. It polls a plain `version.txt` every two minutes and, the
- * moment that disagrees with this bundle's own version, calls the service
- * worker's own `update()` — which is what makes `onNeedRefresh` below fire,
- * same as it always has. One trigger path, just two ways to reach it.
- *
- * Kept out of `Game` entirely, and called below independently of `boot()`'s
- * own try/catch: a new version of the *code*, not of the park, so it must
- * keep working even on the day `Game`'s constructor throws and the splash
- * turns into an apology — that is exactly the day the family most needs to be
- * able to refresh their way to a fix. `UpdateGate` touches nothing but the
- * DOM for the same reason.
- */
-function setupUpdateGate(uiRoot: HTMLElement): void {
-  const gate = new UpdateGate(uiRoot);
-  watchForFirstTouch();
-  const takeIt = (): void => {
-    noteAdopting();
-    updateSW(true);
-  };
-  const updateSW = registerSW({
-    // Register now rather than on the window `load` event (workbox's default).
-    // "Am I even the right build?" is not a question to ask after every image
-    // and font has finished arriving: the sooner the answer comes back, the
-    // smaller the window in which this page pulls lazy chunks that the incoming
-    // worker is about to sweep out of the precache — see `update-adoption.ts`.
-    immediate: true,
-    onNeedRefresh: () => {
-      // The whole of issue #341 is this branch. A reload cannot promote a
-      // waiting service worker, so on a page nobody has touched yet we take the
-      // new build without asking; once she is playing, the gate waits for its
-      // button as it always has, because a swap means a reload and a reload
-      // mid-ride loses the ride.
-      if (canAdoptWithoutAsking()) gate.showAndGo(takeIt);
-      else gate.show(takeIt);
-    },
-    onRegisterError: (error: unknown) => {
-      console.error('Land of Good Places: service worker registration failed.', error);
-    },
-  });
-  // Exposed for the same reason `window.game` is: this is how the "new version
-  // ready" gate gets exercised from the console without waiting for a real
-  // deploy. Note that pressing its button really does reload the page.
-  if (import.meta.env.DEV) {
-    (window as unknown as { __triggerUpdateGate: () => void }).__triggerUpdateGate = () =>
-      gate.show(takeIt);
-  }
-  // `version.txt` only exists in a real build (`vite.config.ts`'s
-  // `versionFilePlugin`), so polling for it in dev would just be a 404 every
-  // two minutes for nothing — dev already gets instant feedback from HMR.
-  if (import.meta.env.PROD) startVersionCheck();
-}
-
 // The phone-tilt look, for every first-person ride. Armed at boot and fired on
 // the first thing the child touches — see the function's own note for why "at
 // startup" is not a thing iOS will accept, and why asking per-ride was worse
 // than asking late.
 askForOrientationOnFirstGesture();
 
-/**
- * The apology card, for when the park cannot be opened at all.
- *
- * Its own function because there are now **two** ways to get here and they are
- * not both a `throw` past `boot()`. Generation that fails during the cat-bus
- * ride is caught inside `ParkGeneration` — a rejected promise, several frames
- * deep in a `requestAnimationFrame` loop, a long way from any `try` — and
- * before this existed that case simply hung: the bus would idle at the kerb
- * forever, waiting for a park that was never going to arrive. A loading screen
- * that lies is worse than one that waits, and one that waits for ever is worse
- * than either.
- */
-function showBootFailure(error: unknown): void {
-  console.error(error);
-  const splash = document.getElementById('boot-splash');
-  if (splash) {
-    splash.classList.remove('hidden');
-    splash.innerHTML =
-      '<div class="boot-card"><h1>Oh no!</h1>' +
-      '<p class="boot-sub">The park could not open.</p>' +
-      '<p class="boot-hint">Check the browser console for details.</p></div>';
-  }
-}
 
 try {
   boot();
@@ -1367,8 +1286,5 @@ try {
   showBootFailure(error);
 }
 
-// Outside `boot()`'s own try/catch on purpose — see `setupUpdateGate`'s doc
-// comment. `#ui-root` is the one element both the game and the gate need;
-// if even that is missing the page is broken beyond a panel's help anyway.
-const uiRoot = document.getElementById('ui-root');
-if (uiRoot) setupUpdateGate(uiRoot);
+// The update gate is set up by `bootstrap.ts`, before this module (and the
+// park it loads) is imported — so it keeps working on the day this one fails.

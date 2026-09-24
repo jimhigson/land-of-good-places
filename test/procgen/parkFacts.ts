@@ -1643,6 +1643,11 @@ function measureCatBusFit(): {
 export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   process.env['LGP_SEED'] = String(seed);
 
+  // The park solver lives in build-time code (`procgen/`) and is plugged into
+  // the game's modules here, after the seed is pinned — vitest does not load
+  // `scripts/ts-extension-resolver-register.mjs`, whose lazy loader does this
+  // for every script (`src/world/prebuilt/solverPort.ts`).
+  await import('../../procgen/install.ts');
   const { buildHeadlessPark } = await import('../../scripts/park-harness.mts');
   const { PARK_SEED, PARK_MANIFEST } = await import('../../src/world/parkManifest.ts');
 
@@ -1660,8 +1665,8 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
   // already built for this exact seed — never at this file's own top level,
   // the seed-pinning trap this file's header already warns about.
-  const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
-  const bridgeReservations = planBridgeFootprints(world.train.crossings);
+  const { planConservativeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
+  const bridgeReservations = planConservativeFootprints(world.train.crossings);
 
   // Same rule, same reason: the road's owner reaches PARK_BOUNDARY, so it is
   // imported here — after the world for this seed is built — and never at the

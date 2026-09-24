@@ -4911,3 +4911,38 @@ kbd {
   .journey-wait__dots span { animation: none; opacity: 0.9; }
   .journey-wait--busy .journey-wait__card { animation: none; }
 }
+
+/* ------------------------------------------------ park unavailable (error) */
+/* `ui/ParkUnavailableScreen.ts`: a park with no usable park file. Short and
+   big for the child, the reason underneath for a grown-up — never below
+   --lgp-text-min (GAME_DESIGN.md, TEXT rule). */
+
+.park-unavailable {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: center;
+  max-width: min(34rem, calc(100vw - 2rem));
+}
+
+.park-unavailable-glyph {
+  font-size: 3.5rem;
+  line-height: 1;
+}
+
+.park-unavailable-line {
+  margin: 0;
+  font-size: var(--lgp-text-md);
+  font-weight: 800;
+}
+
+.park-unavailable-why {
+  margin: 0;
+  font-size: var(--lgp-text-min);
+  font-weight: 700;
+  line-height: 1.35;
+  opacity: 0.7;
+}
+
+.park-unavailable-go {
+  margin-top: 0.25rem;
+}

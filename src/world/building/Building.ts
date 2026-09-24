@@ -17,7 +17,8 @@ import {
 } from './floors';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
-import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
+import { buildSlideSupports, type SlideLeg } from '../slide/supports';
+import { decideBuilt } from '../prebuilt/built';
 import { planSlideShots, SlideShotDirector, type SlideShot } from '../slide/cameras';
 import {
   petSeatOnSlide,
@@ -34,7 +35,6 @@ import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint } fro
 
 import { BallPit } from './BallPit';
 import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
-import { FloorFader } from './floorFade';
 import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
 import { InteriorLighting } from './InteriorLighting';
@@ -964,8 +964,10 @@ export class Building implements GameSystem {
     // Something to stand it on. ~95 m of chute with nothing under it reads as
     // floating, and this park's things are meant to look built — see
     // `slide/supports.ts` for why the legs are sparse rather than regular.
-    this.slideLegs = planSlideLegs(SLIDE_PLAN.points, (x, z, radius) =>
-      collision.isClearCircle(x, z, radius),
+    // Read from the park file; searched only in build tooling
+    // (`procgen/world/slide/legs.ts`, `docs/design/PREBUILT-PARKS.md`).
+    this.slideLegs = decideBuilt('slideLegs', (solver) =>
+      solver.slideLegs(SLIDE_PLAN.points, (x, z, radius) => collision.isClearCircle(x, z, radius)),
     );
     // At park level, not under the castle's plot — the ride spans two plots and
     // its legs stand in the park between them. See `buildSlideSupports`.

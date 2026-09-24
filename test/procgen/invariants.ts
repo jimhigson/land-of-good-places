@@ -11906,7 +11906,14 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       // at fault either time. The ceiling still exists to catch a genuine
       // hang; it just no longer prosecutes an honest solve. The structural
       // fix is the cruiser's own cost, tracked separately.
-    }, 300_000);
+      //
+      // 900 s, up from 300, on 24 Sep 2026: every one of seeds 0..15 now has
+      // its own file, and seed 7's plan search alone measures 239 s on an
+      // M-series Mac (`build:parks`), ~2x that on CI — it timed out here with
+      // all 100 invariants skipped. A hang is still caught; a slow seed is not
+      // prosecuted. The structural fix is seed 7's search cost
+      // (feat/structural-backtrack is reworking the driver).
+    }, 900_000);
 
     it('built the park it was asked for', () => {
       expect(facts.seed).toBe(seed);

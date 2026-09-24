@@ -192,6 +192,8 @@ export interface RolledTree {
   readonly lean: number;
   /** Bare trunk height, below the canopy. */
   readonly height: number;
+  /** The stream's {@link Rng.state} this tree was rolled from — `rollTree(new Rng(rollState), …)` rolls it again. */
+  readonly rollState: number;
 }
 
 /**
@@ -206,6 +208,7 @@ export interface RolledTree {
  * the order those `rng` calls happen in.
  */
 export function rollTree(rng: Rng, kind: TreeKind, x: number, y: number, z: number): RolledTree {
+  const rollState = rng.state;
   const height = rng.range(2.3, 3.7);
   const rotationY = rng.range(0, TAU);
   const lean = rng.range(0.92, 1.1);
@@ -315,7 +318,7 @@ export function rollTree(rng: Rng, kind: TreeKind, x: number, y: number, z: numb
     }
   }
 
-  return { parts, wideRadius, wideCentreY, topBallTopY, topBallRadius, lean, height };
+  return { parts, wideRadius, wideCentreY, topBallTopY, topBallRadius, lean, height, rollState };
 }
 
 /**

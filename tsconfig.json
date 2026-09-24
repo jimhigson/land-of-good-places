@@ -29,5 +29,5 @@
     "noEmit": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "vite.config.ts", "vite-config-env.d.ts"]
+  "include": ["src", "procgen", "vite.config.ts", "vite-config-env.d.ts"]
 }

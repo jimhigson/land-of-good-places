@@ -40,7 +40,7 @@ import { bridgeHeightAt, bridgePavingHeightAt } from './train/bridges';
 import { drapePathsOverBridges } from './pathGraph';
 import type { GroundClaims } from '../boot/groundClaims';
 import { parkPlanClaims } from './parkPlan';
-import { solveWorldPhase } from './worldPhase';
+import { decideWorldPhase } from './worldPhase';
 import { ROAD_FEATURE, entranceRoadClaims } from './entrance/roadCorridor';
 
 export interface WorldOptions {
@@ -347,7 +347,7 @@ export class World implements GameSystem {
     // `null` — they do not move — and `stallsFeature.ts` turns that into an
     // ordinary refusal, so the feature that wanted the space is forgone
     // exactly as it is today rather than anything being left inconsistent.
-    const phase = solveWorldPhase(
+    const phase = decideWorldPhase(
       this.collision,
       this.groundClaims,
       this.coaster.route,
