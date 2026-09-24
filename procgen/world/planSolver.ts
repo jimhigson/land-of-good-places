@@ -30,7 +30,8 @@ import { trainRouteSearch } from './train/route';
 import { planStations } from '../../src/world/train/plan';
 import { slideSearch, type PlannedSlide } from './slide/solve';
 import { crossingSitesSearch, type SolvedCrossingSites } from './train/crossingPlanSolve';
-import { pathGraphSearch, resetPathsState, type PathGraph } from '../../src/world/paths';
+import { resetPathsState, type PathGraph } from '../../src/world/paths';
+import { pathGraphSearch, resetPathSearchCaches } from './paths';
 import { screenDrawnPathsForOffSiteCrossings } from '../../src/world/train/crossingPredicate';
 import { drawnSamplesFor } from '../../src/world/pathGraph';
 import { entranceRoadClaims, ROAD_FEATURE } from '../../src/world/entrance/roadCorridor';
@@ -354,6 +355,7 @@ function builders(): readonly FeatureBuilder[] {
     supply: 1,
     *solve() {
       resetPathsState();
+      resetPathSearchCaches();
       const graph = yield* pathGraphSearch();
       // The drawn paths must cross the railway only at proven sites. Asked here,
       // at the point of decision, of the CURVES as they will be drawn

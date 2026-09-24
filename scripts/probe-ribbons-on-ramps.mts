@@ -21,7 +21,7 @@ import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { TRAIN_PLAN } from '../src/world/train/plan.ts';
 import { CROSSING_SITES } from '../src/world/train/crossingPlan.ts';
 import { ROUTES, routeCurve } from '../src/world/pathGraph.ts';
-import { pointStandsOnABridgeRamp } from '../src/world/paths.ts';
+import { pointStandsOnABridgeRamp } from '../procgen/world/paths.ts';
 import { DECK_HALF_LENGTH } from '../src/world/train/clearance.ts';
 
 buildHeadlessPark();

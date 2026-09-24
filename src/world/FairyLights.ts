@@ -17,7 +17,8 @@ import {
 import { PALETTE } from '../core/palette';
 import { clamp01, Rng, TAU } from '../core/mathUtils';
 import { placeOnSphere, terrainHeight, tiltToSphere, upAt } from './terrain';
-import { PLAZA, plazaVerge } from './paths';
+import { PLAZA } from './paths';
+import { plazaVerge } from '../../procgen/world/paths';
 import { cruiserClearanceForPoints } from './coaster/clearance';
 import type { CoasterRoute } from './coaster/route';
 import { PLAYER_RADIUS } from '../core/constants';
