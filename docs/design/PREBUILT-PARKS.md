@@ -45,29 +45,32 @@ all, and seeds 0..15 are the only parks. What shipped:
   perturbed file to digest differently. `check:prebuilt-park` runs the same on
   the default seed in the chain.
 
-### Sizes of the sixteen parks (format 1, as built)
+### Sizes of the sixteen parks (format 2, as built)
 
 Measured by `pnpm run build:parks` on an M-series Mac; every row proven.
 
 | seed | raw | gzip -9 | brotli 11 | plan searched | plan hydrated |
 |---:|---:|---:|---:|---:|---:|
-| 0 | 103.6 KB | 33.8 KB | 28.3 KB | 8.3 s | 11 ms |
-| 1 | 125.9 KB | 44.4 KB | 37.7 KB | 3.1 s | 9 ms |
-| 2 | 125.4 KB | 43.9 KB | 37.0 KB | 8.2 s | 9 ms |
-| 3 | 119.4 KB | 40.4 KB | 33.8 KB | 31.2 s | 10 ms |
-| 4 | 116.5 KB | 40.1 KB | 33.7 KB | 47.7 s | 18 ms |
-| 5 | 105.9 KB | 35.5 KB | 29.9 KB | 3.4 s | 11 ms |
-| 6 | 118.0 KB | 40.5 KB | 33.9 KB | 5.3 s | 10 ms |
-| 7 | 107.5 KB | 35.0 KB | 29.4 KB | 239.0 s | 7 ms |
-| 8 | 117.8 KB | 39.2 KB | 32.9 KB | 7.8 s | 10 ms |
-| 9 | 109.5 KB | 36.2 KB | 30.2 KB | 4.1 s | 10 ms |
-| 10 | 117.2 KB | 40.7 KB | 34.2 KB | 5.5 s | 10 ms |
-| 11 | 102.8 KB | 32.0 KB | 26.7 KB | 0.9 s | 9 ms |
-| 12 | 115.7 KB | 38.3 KB | 31.7 KB | 1.9 s | 9 ms |
-| 13 | 104.3 KB | 33.9 KB | 28.3 KB | 2.1 s | 9 ms |
-| 14 | 110.7 KB | 38.5 KB | 32.5 KB | 5.7 s | 8 ms |
-| 15 | 119.0 KB | 39.8 KB | 33.1 KB | 11.2 s | 8 ms |
-| **total** | **1819.2 KB** | **612.1 KB** | **513.3 KB** | | |
+| 0 | 115.3 KB | 39.5 KB | 33.1 KB | 7.2 s | 5 ms |
+| 1 | 139.5 KB | 50.9 KB | 43.0 KB | 2.7 s | 6 ms |
+| 2 | 139.7 KB | 50.7 KB | 42.6 KB | 7.1 s | 6 ms |
+| 3 | 132.6 KB | 46.8 KB | 39.0 KB | 26.6 s | 5 ms |
+| 4 | 130.0 KB | 46.6 KB | 38.9 KB | 40.3 s | 6 ms |
+| 5 | 119.4 KB | 42.0 KB | 35.2 KB | 2.9 s | 5 ms |
+| 6 | 131.3 KB | 47.0 KB | 39.3 KB | 4.5 s | 5 ms |
+| 7 | 120.6 KB | 41.4 KB | 34.6 KB | 221.7 s | 5 ms |
+| 8 | 130.3 KB | 45.3 KB | 38.1 KB | 6.6 s | 5 ms |
+| 9 | 124.0 KB | 43.1 KB | 35.8 KB | 3.4 s | 6 ms |
+| 10 | 130.2 KB | 46.9 KB | 39.1 KB | 4.6 s | 6 ms |
+| 11 | 116.0 KB | 38.5 KB | 31.9 KB | 0.7 s | 6 ms |
+| 12 | 128.3 KB | 44.4 KB | 36.9 KB | 1.6 s | 6 ms |
+| 13 | 117.2 KB | 40.2 KB | 33.4 KB | 1.8 s | 5 ms |
+| 14 | 123.4 KB | 44.7 KB | 37.6 KB | 5.0 s | 5 ms |
+| 15 | 131.5 KB | 45.9 KB | 38.4 KB | 10.1 s | 6 ms |
+| **total** | **2029.6 KB** | **714.1 KB** | **597.1 KB** | | |
+
+Format 2 added the placement loops' answers (`built`); ~13 KB of each file is
+the boundary's 512 radii at full precision.
 
 The files grew from the plan-only ~25 KB of step 1 to ~110 KB because they now
 carry the world phase. Where the bytes are, on the default seed (raw): the
@@ -84,7 +87,7 @@ JavaScript emitted by `vite build`:
 | | raw | brotli 11 |
 |---|---:|---:|
 | before (client solved) | 3,430,754 B | 783,721 B |
-| after (no solver) | 3,304,071 B | 744,315 B |
+| after (no solver) | 3,297,858 B | 744,451 B |
 
 The `Garden` chunk (208,636 B, where the searches lived) is gone; the `Game`
 chunk grew by ~12 KB for the hydration code and the file reader.
