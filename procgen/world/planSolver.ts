@@ -32,7 +32,7 @@ import { slideSearch, type PlannedSlide } from './slide/solve';
 import { crossingSitesSearch, type SolvedCrossingSites } from './train/crossingPlanSolve';
 import { resetPathsState, type PathGraph } from '../../src/world/paths';
 import { pathGraphSearch, resetPathSearchCaches } from './paths';
-import { screenDrawnPathsForOffSiteCrossings } from '../../src/world/train/crossingPredicate';
+import { screenDrawnPathsForOffSiteCrossings } from './train/crossingScreen';
 import { drawnSamplesFor } from '../../src/world/pathGraph';
 import { entranceRoadClaims, ROAD_FEATURE } from '../../src/world/entrance/roadCorridor';
 import { Rng } from '../../src/core/mathUtils';

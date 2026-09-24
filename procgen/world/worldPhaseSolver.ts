@@ -24,7 +24,7 @@ import { fairyPoleBuilder } from './fairyPoleBuilder';
 import { type BoothRelocator } from '../../src/world/stallsFeature';
 import { stallBuilder } from './stallBuilder';
 import { RailRace } from '../../src/world/railRace/RailRace';
-import { TrestleRefusal, trestleSpots } from '../../src/world/railRace/track';
+import { TrestleRefusal, trestleSpots } from './railRace/trestleSearch';
 import { RAIL_RACE_FEATURE } from '../../src/world/railRace/feature';
 import { ROAD_FEATURE } from '../../src/world/entrance/roadCorridor';
 import { STALL_PLACEMENTS, stallShift } from '../../src/minigames/stallPlacement';

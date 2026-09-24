@@ -3,7 +3,8 @@
  * here** — recorded as they are made so `build:parks` can write them into the
  * park file (`src/world/prebuilt/parkFile.ts`'s `built`).
  */
-import { planBridgeFootprints, bridgeDecisionOf, type BridgeDecision, type PlannedFootprint, type RealWorldQuery } from '../../src/world/train/bridgeFootprint';
+import { type BridgeDecision, type PlannedFootprint, type RealWorldQuery } from '../../src/world/train/bridgeFootprint';
+import { planBridgeFootprints, bridgeDecisionOf } from './train/bridgeSearch';
 import type { LevelCrossing } from '../../src/world/train/crossings';
 
 let bridges: (BridgeDecision | null)[] | null = null;

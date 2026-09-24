@@ -9,19 +9,8 @@ import { MIN_BRIDGE_HALF_LENGTH } from '../../../src/world/train/bridgeFootprint
 import { STATION_GAP } from '../../../src/world/train/fence';
 import { isInEntranceGateway } from '../../../src/world/entrance/layout';
 import { crossingSiteBanned } from '../parkWarp';
-import {
-  NARROW_HALF_WIDTH,
-  SITE_ANGLE_OFFSETS,
-  SITE_BOUNDARY_MARGIN,
-  SITE_HALF_WIDTH,
-  SITE_HALF_WIDTHS,
-  SITE_PLOT_MARGIN,
-  SITE_RAMP_FLOOR,
-  SITE_RAMP_IDEAL,
-  fitBridgeAcross,
-  railCorridorBlocked,
-  probeBridgeReach,
-} from '../../../src/world/train/bridgeFit';
+import { NARROW_HALF_WIDTH, SITE_ANGLE_OFFSETS, SITE_BOUNDARY_MARGIN, SITE_HALF_WIDTH, SITE_HALF_WIDTHS, SITE_PLOT_MARGIN, SITE_RAMP_FLOOR, SITE_RAMP_IDEAL } from '../../../src/world/train/bridgeFit';
+import { fitBridgeAcross, railCorridorBlocked, probeBridgeReach } from './bridgeFit';
 
 // Re-exported so every existing consumer (`paths.ts`, `crossings.ts`,
 // `crossingPlan.ts`) keeps importing these from where it always did.

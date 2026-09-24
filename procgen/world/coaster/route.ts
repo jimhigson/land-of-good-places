@@ -6,7 +6,8 @@ import { turnVocabulary, type Pose2, type SegmentKind, type Vec2 } from '../../.
 import { PARK_LAYOUT, placedEntry } from '../../../src/world/parkLayout';
 import { clearOfFootprints } from '../parkLayout';
 import { Rng, TAU } from '../../../src/core/mathUtils';
-import { PARK_BOUNDARY, circleBoundary, insetBoundarySearch, solverBoundary } from '../../../src/world/boundary';
+import { PARK_BOUNDARY, circleBoundary } from '../../../src/world/boundary';
+import { insetBoundarySearch, solverBoundary } from '../boundarySearch';
 import { PARK_SEED } from '../../../src/world/parkManifest';
 import { RailRouteUnsolvable, railRouteSearch } from '../rail/generate';
 import { CatmullRomCurve3, Vector3 } from 'three';

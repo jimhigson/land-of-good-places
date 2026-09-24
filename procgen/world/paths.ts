@@ -14,7 +14,7 @@ import { ENTRANCE_GATE_Z } from '../../src/world/entrance/layout';
 import { edgeDistanceAlong } from './parkLayout';
 import { ANCHORS } from '../../src/world/anchors';
 import { STALL_STANDS } from '../../src/minigames/stallPlacement';
-import { screenDrawnPathsForOffSiteCrossings } from '../../src/world/train/crossingPredicate';
+import { screenDrawnPathsForOffSiteCrossings } from './train/crossingScreen';
 import { COASTER_PLANS } from '../../src/world/coaster/plan';
 import { FERRIS_WHEEL_EXIT } from '../../src/minigames/ferrisWheel/exit';
 import { FENCE_OFFSET } from '../../src/world/train/clearance';
