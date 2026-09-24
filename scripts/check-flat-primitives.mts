@@ -85,7 +85,7 @@ const REPO = new URL('..', import.meta.url).pathname;
  * asserting against flat geometry is as wrong as the code and worse, because it
  * is green.
  */
-const ROOTS = ['src', 'scripts', 'test'];
+const ROOTS = ['src', 'procgen', 'scripts', 'test'];
 
 /**
  * **The owners of the primitives, which must be allowed to write them.**
