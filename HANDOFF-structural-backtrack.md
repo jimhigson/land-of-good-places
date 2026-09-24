@@ -60,3 +60,7 @@ coping chamfer (#698 fix/procgen-last has the fix).
   check:accepted-restarts (shard 1) proves table == seed files ⊇ 0..15 ∪ pool. Pool acceptance running in
   sb-frozen (--write there; copy values over). 100 random seeds running in sb-random @06223019
   (seeds in $SCRATCH/sb/random-seeds.txt, log accept-random.log).
+- Lattice mismatch ROOT CAUSE (seed 5 r0): the pathGraph legibility screen stands on the CONSERVATIVE planned bridge
+  footprint (superset of the built one: 29 gate-approach samples covered by plan only, 0 built-only), so it
+  exempts/blocks more than the built measure and lets gate-approach (z=60) and spur-building (x=-12.56) through.
+  Kept (a no-bridge screen would refuse every crossing ramp); comment corrected. Root loop catches the rest.
