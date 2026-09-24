@@ -73,3 +73,8 @@ decision by measurement; fix at cause or make an acceptance measure.
   public. Zoom clause ramps from first offset clear of the ceiling.
 - Fast instrument: scripts/_diag-cam.mts (untracked); plan solve per seed takes
   minutes. camsel.sh / cam16.sh in scratch.
+- v2 camera diag: 1r6/2r0/4r2 all camera clauses green, reversal >=0.168.
+  Trade: CEILING_SLOPE widens the zoomed-in stretches: 1r6 ceiling withholds
+  full pull-back on 389 of 618 m (161 m with no slope limit, where easing is
+  red at 1.997 m -> red proof). VISIBLE change: Jim's call.
+- Running final2 sweep (rail-race, castle-towers, tie-frame x 16) in scratch.
