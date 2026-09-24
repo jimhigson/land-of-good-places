@@ -395,6 +395,14 @@ function snapToTrestleGrid(
    * which is exactly the tuned property this change was meant not to touch.
    */
   laneUsed?: Set<number>,
+  /**
+   * Slots this bar's lane may **not** use because the race's own physics
+   * refused them: a flat-out rider who never ducks would already be at the
+   * speed floor there, so the bar could not slow her. Decided by
+   * `simulate.ts`'s `refusedBarSlots`, which owns the physics; this file only
+   * obeys. See {@link DuckBarRefusal}.
+   */
+  laneRefused?: ReadonlySet<number>,
 ): number {
   const count = trestleGridCount(loopLength);
   const raw = trestleGridIndex(cursor, loopLength);
@@ -406,7 +414,8 @@ function snapToTrestleGrid(
   const allowed = (index: number): boolean =>
     !usedIndices.has(index) &&
     (!window || (index >= window.min && index <= window.max)) &&
-    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS));
+    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS)) &&
+    !laneRefused?.has(index);
   for (let delta = 0; delta < count; delta += 1) {
     const candidates = delta === 0 ? [raw] : [raw - delta, raw + delta];
     for (const candidate of candidates) {
@@ -418,13 +427,32 @@ function snapToTrestleGrid(
       }
     }
   }
-  // Every grid index already used — not reachable with this file's own
-  // GAP_MIN/TRESTLE_SPACING ratio, but fall back to the raw index rather than
-  // throwing, so a future tuning change that *does* reach this fails as a
-  // slightly crowded schedule, not a crash.
-  const fallback = ((raw % count) + count) % count;
-  usedIndices.add(fallback);
-  return (fallback / count) * loopLength;
+  // No legal slot anywhere on the lap. This used to fall back to the raw
+  // index — a bar on a slot some rule had just refused, kept silently. Since
+  // the physics can refuse slots too (`laneRefused`) that fallback could hand
+  // back exactly the bar the refusal exists to stop, so it is a refusal now:
+  // the park's root loop starts again rather than ship a bar it knows is bad.
+  throw new DuckBarRefusal(
+    `railRace/hazards.ts: no legal trestle slot for a duck bar planned at ${cursor.toFixed(1)} m ` +
+      `(grid slot ${raw} of ${count}): every slot is used, outside the bar window ` +
+      `${window ? `${window.min}..${window.max}` : '(none)'}, within ${MIN_LANE_GAP_SLOTS} slots of ` +
+      `this lane's own bars, or refused by the physics (${laneRefused ? [...laneRefused].sort((a, b) => a - b).join(',') || 'none' : 'none'})`,
+  );
+}
+
+/**
+ * **A duck bar that has nowhere legal to stand.** Thrown by the planner when
+ * every trestle slot is refused for a bar — by use, the bar window, the lane
+ * gap, or the physics (a slot where a flat-out rider who never ducks would
+ * already be at the speed floor, so the bar could not slow her). Not a
+ * `TrestleRefusal`: nothing movable is in the way, so there is no blocker to
+ * ask aside, and the build fails for the root loop to start the park again.
+ */
+export class DuckBarRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DuckBarRefusal';
+  }
 }
 
 /**
@@ -439,7 +467,17 @@ function snapToTrestleGrid(
  * *where* a bar or a zone sits, is deliberately the same whichever level is
  * chosen — level only ever adds or removes whole hazards, never moves one.
  */
-export function planHazards(loopLength: number, laps: number, level: RaceLevel): HazardSchedule {
+export function planHazards(
+  loopLength: number,
+  laps: number,
+  level: RaceLevel,
+  /**
+   * Trestle slots each lane's bars may not use, by lane — the physics'
+   * refusals (`simulate.ts`'s `refusedBarSlots`). Empty moves nothing, and the
+   * layout is then the one this function has always produced.
+   */
+  refusedByLane: ReadonlyMap<number, ReadonlySet<number>> = new Map(),
+): HazardSchedule {
   const rng = new Rng(0x9a11ce);
   const bars: DuckBar[] = [];
   const zones: SparkZone[] = [];
@@ -500,6 +538,7 @@ export function planHazards(loopLength: number, laps: number, level: RaceLevel):
           usedTrestleIndices,
           barWindow,
           usedByLane[lane]!,
+          refusedByLane.get(lane),
         ),
         lane,
       });
