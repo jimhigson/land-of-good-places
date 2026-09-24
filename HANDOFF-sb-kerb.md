@@ -28,3 +28,14 @@
 - Fix 2: KERB_HIDE_MAX = 100 mm tier. Candidate also records whether other routes' paving covers its sight shadow
   at 100 mm; if so and the ordinary test says no, re-ask with gaps up to 100 mm against that wider shadow. Monotone.
 - Probe after fix 2: no kerb|surface pairs on seed 24 or canonical. Full check:coplanar running -> *-after2.log.
+
+## After fix 2 (full run)
+- check:coplanar exit 1, one finding: NEW garden|path-kerb|path-surface 0.000 m² (1.24e-4) at 8.1e-3 m, seed 131.
+- Seed 131 at (-1.6, -1.71, 42.09), normal (0.004, 0.271, 0.962): a paving SHEET (surface rises -4.13 -> +0.73 m over
+  1.37 m of plan at x=-1.6) and its own route's kerb band beside it (kerb verts 882-885, surf 252-254). Edge contact at
+  x=-1.6; the 25 mm lift offset on a near-vertical plane with a 0.004 x-tilt projects to a ~24 um sliver. Not a buried
+  face; the defect is the sheet itself = fix/paving-drape's root cause (drape lifts other routes' paving inside bridge
+  stone). Pre-existing on base (verified by probing the base pathGraph.ts). Left for the caller to decide.
+- Revert proof: base pathGraph.ts -> seed 24 0.2217 m² @6.1 mm, canonical 0.1997 @9.9 mm, 131 1.24e-4 @8.1 mm;
+  branch -> 24 and canonical none, 131 unchanged.
+- park:attempt 24 and 20260728: failures [] before and after (exit 0). tsc exit 0.
