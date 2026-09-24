@@ -25,3 +25,19 @@ decision by measurement; fix at cause or make an acceptance measure.
   entrance is already check:park `route.unreachable` (frontDoor is a
   destination). Plan: start the march at the edge of the castle's own anchor
   boundingRadius (scatter keeps out of it), along the zone->stand line.
+- Tower clause cause (seed 4 r2): lamp (14.19,-35.19) r0.22 stands 1.13 m
+  from tower-body-2 stone (pinch < 1.24 m child). resolve's 2 sequential
+  passes leave her 0.11 m in the stone. Offline repro: dump colliders
+  (scripts/_diag-dump.mts) + replay (scripts/_diag-replay.mts, <1 s).
+  More passes converge slowly (16 passes: 4 cm). FIX (committed): pinch
+  guard in resolveMovement — refuse a sub-step that ends deeper in solid than
+  it began (deepestSolidOverlap + contactWith one-owner helper). Replay: 0.000.
+  Side finding, NOT fixed: castle drawn reach from building anchor (20.87 m
+  on 4r2, turret + 3.54 m nudge) exceeds declared boundingRadius 19.3;
+  anchor.reach measures lump centres, not extents. Fixing changes all parks.
+- Door clause FIX (committed): march starts at building boundingRadius on
+  the zone->stand line.
+- NEXT: sweep castle-towers (ct2), prove door clause red by mutation, then
+  tie-frame / rail-race on 5r0 and 5r2. resolveMovement change touches
+  playerSim-based checks (nav-routes, hotel, benches, hall-solid) and march
+  invariants: run them.
