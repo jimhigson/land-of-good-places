@@ -64,3 +64,8 @@ coping chamfer (#698 fix/procgen-last has the fix).
   footprint (superset of the built one: 29 gate-approach samples covered by plan only, 0 built-only), so it
   exempts/blocks more than the built measure and lets gate-approach (z=60) and spur-building (x=-12.56) through.
   Kept (a no-bridge screen would refuse every crossing ramp); comment corrected. Root loop catches the rest.
+- Merged fix/sb-reach (waterFight gun rack placed by door bearing, clamped inside plot; VISIBLE rack move).
+- Pool restarts recorded (b033643c): 24:0 128:7 131:0 208:5 274:1 326:0 428:1 451:2 20260728:0.
+- procgen-invariants.yml sharded x5 + pool job + aggregator "Procgen invariants" (protection read back unchanged).
+- check:coplanar NEW: cat-bus chassis seam on generation seed 860110031 -> helper fix/sb-catbus.
+- Random sweep running (sb-random @06223019). After it: full test:procgen + check:every-seed-builds on frozen tree.
