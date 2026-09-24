@@ -227,6 +227,14 @@ check(
 // 0.307 m, water 0.295 m". Taps at every phase of the cell, on rings across
 // the basin, make that luck irrelevant: the route must end at the height of
 // the water under the tap itself.
+//
+// Proven red against the cause, not a mutation: with `NavGrid` reporting the
+// cell-centre height, 10 of the 16 supported seeds at their recorded restarts
+// failed here (4.6-16.2 mm worst gap; the centre clause above was green on all
+// 16). With the goal sampled at the goal, 0.0 mm on all 16. Inside the water
+// `Fountain.groundLevel` ignores the sampler's reference, so a reached tap now
+// reads the water exactly: what this clause guards is that `lastRouteEndY` is
+// asked *at the goal*, plus reachability across the whole basin.
 let worstGap = 0;
 let worstWhere = '';
 let unreached = 0;

@@ -34,4 +34,7 @@ Baseline (old NavGrid, 57b51869) at recorded restarts: centre clause green 16/16
 basin clause red 10/16 (s0 13.2, s2 12.9, s7 13.8, s8 14.0, s9 12.4, s10 12.6,
 s11 16.2, s12 14.2, s14 10.4, s15 10.3 mm), green s1 9.1 s3 8.3 s4 4.6 s5 7.4 s6 5.4 s13 7.1.
 
+After fix (4e838d98): 16/16 exit 0, worst gap 0.0 mm; seed 10 r0 exit 0 (0.544 vs 0.544).
+Remaining: check:nav-routes, park:attempt fixed vs base on 20260728 r0 and 2 r0 (verify.sh).
+
 Sweep script and logs: scratchpad `sb-fountain/sweep.sh`, `sweep.txt`.
