@@ -339,6 +339,27 @@ const FORWARD_MARGIN = 0.15;
 const CEILING_STATIONS = 1024;
 
 /**
+ * **The closest the zoom ceiling may bring the rig in**, as a fraction of the
+ * resting stand-off.
+ *
+ * The ceiling used to be floored at 1 — it could take the speed pull-back away
+ * but never come in past the resting framing. That floor was the bug: on seeds
+ * 0, 1, 3, 8 and 9 the ring has a hairpin tighter than even the *resting*
+ * stand-off can carry, so at a standstill (zoom 1, nothing to take away) the
+ * camera still ran backwards — −0.085 m per metre on seed 1, −0.082 on seed 9,
+ * −0.067 on seed 3 — with the ceiling sitting pinned at exactly 1.000 over the
+ * reversal. Solved without the floor, those hairpins want 0.724–0.800; the
+ * canonical seed's tightest wants 0.912.
+ *
+ * So the ceiling may now come in below 1, which is what a camera operator does
+ * on a corner too tight to swing round. This floor is only a sanity bound on
+ * how far in that goes: 0.6 is well under anything measured, and a ring that
+ * needed closer would fail `raceCameraNeverRunsBackwards` rather than be
+ * quietly framed as a close-up.
+ */
+const CEILING_FLOOR = 0.6;
+
+/**
  * How far either side of a station the ceiling is pulled down to its
  * neighbours', metres.
  *
@@ -1036,7 +1057,7 @@ export class RaceCamera {
    * to satisfy a constraint that only bites over ~30 m of a 600 m lap.
    *
    * So the ceiling is local. The rig pulls back the full 34% for the whole lap
-   * *except* through the two hairpins, where it eases in to its resting framing —
+   * *except* through the two hairpins, where it eases in to its resting framing, or closer if the hairpin needs it —
    * which is what a camera operator does on a tight corner anyway.
    *
    * ### How it is solved rather than tuned
@@ -1055,9 +1076,15 @@ export class RaceCamera {
    * `s` — so the guarantee survives the smoothing that keeps the zoom from
    * kinking.
    *
-   * Floored at 1: the ceiling may take the *pull-back* away, never the resting
-   * stand-off, which is solved from the framing the family signed off and is not
-   * this function's to move.
+   * Floored at {@link CEILING_FLOOR}, **not at 1**. It once was floored at 1, on
+   * the reasoning that the ceiling may take the pull-back away but never move
+   * the resting stand-off the family signed off. That held only while every
+   * hairpin could carry the resting rig, and on most seeds one cannot: the
+   * resting camera ran backwards there with the ceiling pinned at 1. So on those
+   * few metres of lap the rig now comes in *past* its resting framing, by exactly
+   * what the geometry demands. The rider stays on her mark — it is the same
+   * uniform scaling about her as the pull-back — and everywhere else, the
+   * resting framing is untouched.
    */
   private measureZoomCeiling(): readonly number[] {
     const step = this.route.path.length / CEILING_STATIONS;
@@ -1093,7 +1120,7 @@ export class RaceCamera {
       const zoomTerm = vb.sub(va).dot(travel) / step;
       // progress = riderTerm + zoom * zoomTerm, and we want it >= FORWARD_MARGIN.
       //
-      // Clamped into [1, the most the rig would ever ask for] rather than left
+      // Clamped into [CEILING_FLOOR, the most the rig would ever ask for] rather than left
       // open at the top, and that is not tidiness. Three quarters of this ring's
       // stations are bending the camera's way and impose no ceiling at all; as
       // `Infinity` they poison both passes below — an average of infinities is
@@ -1107,7 +1134,7 @@ export class RaceCamera {
       const unlimited = zoomAtSpeed(PULL_BACK_AT);
       raw.push(
         zoomTerm < -1e-9
-          ? clamp((FORWARD_MARGIN - riderTerm) / zoomTerm, 1, unlimited)
+          ? clamp((FORWARD_MARGIN - riderTerm) / zoomTerm, CEILING_FLOOR, unlimited)
           : unlimited,
       );
     }
