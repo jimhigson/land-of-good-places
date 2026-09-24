@@ -15,6 +15,14 @@
  */
 export const PARK_FILE_FORMAT = 1;
 
+/**
+ * **The seeds this game has: 0 to 15.** Jim, 24 September 2026: *"we only
+ * support seeds 0..15, no others."* The one owner of that range —
+ * `parkSeedPool.ts`'s `PARK_SEED_POOL` is this list, and `vite.config.ts`'s
+ * dev park server reads it from here because this module imports nothing.
+ */
+export const SUPPORTED_PARK_SEEDS: readonly number[] = Array.from({ length: 16 }, (_, seed) => seed);
+
 /** The directory park files are served from, relative to the site root. */
 export const PARK_FILE_DIR = 'parks';
 

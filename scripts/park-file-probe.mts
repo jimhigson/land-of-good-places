@@ -5,6 +5,7 @@
  *
  * ```
  * LGP_SEED=11 node … scripts/park-file-probe.mts solve   <out.json>
+ * LGP_SEED=11 node … scripts/park-file-probe.mts write   <out.json>   # solve, no digest (the dev server)
  * LGP_SEED=11 node … scripts/park-file-probe.mts hydrate <in.json>
  * LGP_SEED=11 node … scripts/park-file-probe.mts perturb <in.json>
  * ```
@@ -32,11 +33,13 @@ import { PARK_FILE_FEATURES } from '../src/world/prebuilt/parkFile.ts';
 import { offerParkFile } from '../src/world/prebuilt/parkFileStore.ts';
 
 const [mode, path] = process.argv.slice(2);
-if ((mode !== 'solve' && mode !== 'hydrate' && mode !== 'perturb') || !path) {
-  throw new Error('usage: park-file-probe.mts solve|hydrate|perturb <file.json>');
+if ((mode !== 'solve' && mode !== 'write' && mode !== 'hydrate' && mode !== 'perturb') || !path) {
+  throw new Error('usage: park-file-probe.mts solve|write|hydrate|perturb <file.json>');
 }
+/** `write` is `solve` without the digest: what the dev server runs to make a park file. */
+const solving = mode === 'solve' || mode === 'write';
 
-if (mode !== 'solve') {
+if (!solving) {
   const file = JSON.parse(readFileSync(path, 'utf8')) as ParkFile;
   if (mode === 'perturb') {
     const points = file.features.cruiser.profile.points as Json[];
@@ -65,15 +68,15 @@ const planWallMs = performance.now() - planWall;
 // Null when no driver was ever constructed — the hydrated path, which is the
 // only path the client has. Present means the plan was searched.
 const stats = solver.parkSolveStats();
-if (mode === 'solve' && !stats) throw new Error('park-file-probe: the plan solved but published no stats');
+if (solving && !stats) throw new Error('park-file-probe: the plan solved but published no stats');
 
 const park = buildHeadlessPark();
-const digest = digestScene(park.scene);
+const digest = mode === 'write' ? { park: '', meshes: 0, byName: new Map<string, string>() } : digestScene(park.scene);
 
 // Written after the park is built: the world phase's decisions only exist once
 // a `World` has searched them.
 let bytes = 0;
-if (mode === 'solve') {
+if (solving) {
   const { worldPhaseDecisions } = await import('../procgen/world/worldPhaseSolver.ts');
   const world = worldPhaseDecisions();
   if (!world) throw new Error('park-file-probe: the World was built but the world phase recorded no decisions');

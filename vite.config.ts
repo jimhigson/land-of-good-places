@@ -7,10 +7,12 @@ import {
   PARK_FILE_FORMAT,
   PREBUILT_PARKS_MANIFEST,
   PREBUILT_PARKS_OUT,
+  SUPPORTED_PARK_SEEDS,
   parkFileName,
   type PrebuiltParksManifest,
 } from './src/world/prebuilt/parkFileName';
 import { parkSourceHash } from './scripts/lib/park-source-hash.mjs';
+import { devParksMiddleware } from './scripts/lib/dev-parks.mjs';
 
 // No `@types/node` in this project (a browser game has no business seeing
 // `process`, `Buffer`, `require`, etc as ambient globals in `src/`) — the
@@ -117,6 +119,22 @@ function prebuiltParksPlugin(version: string): Plugin {
 }
 
 /**
+ * **Park files on the dev server** — solved on first request by the build-time
+ * solver in a child process and cached, so the dev client fetches and hydrates
+ * exactly as the shipped game does and never solves (`scripts/lib/dev-parks.mjs`).
+ * The seeds are the game's parks, `SUPPORTED_PARK_SEEDS`.
+ */
+function devParksPlugin(version: string): Plugin {
+  return {
+    name: 'land-of-good-places-dev-parks',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use(devParksMiddleware(process.cwd(), version, SUPPORTED_PARK_SEEDS));
+    },
+  };
+}
+
+/**
  * Vite config.
  *
  * The PWA half exists so the family can play full-screen on a phone: added to
@@ -171,6 +189,7 @@ export default defineConfig({
   plugins: [
     versionFilePlugin(APP_VERSION),
     prebuiltParksPlugin(APP_VERSION),
+    devParksPlugin(APP_VERSION),
     VitePWA({
       registerType: 'prompt',
       injectRegister: false,

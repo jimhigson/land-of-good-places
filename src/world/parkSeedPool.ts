@@ -1,4 +1,5 @@
 import { SAVE_KEY } from '../state/save';
+import { SUPPORTED_PARK_SEEDS } from './prebuilt/parkFileName';
 
 /**
  * **Which park a child gets, and where that number comes from.**
@@ -140,7 +141,7 @@ export const CANONICAL_PARK_SEED = 5;
  * 0.56 m above the rail where the deck they need is 4.06 m up. The seed goes,
  * not the assertion. Written up on #437.
  */
-export const PARK_SEED_POOL: readonly number[] = Array.from({ length: 16 }, (_, seed) => seed);
+export const PARK_SEED_POOL: readonly number[] = SUPPORTED_PARK_SEEDS;
 
 /**
  * **The seeds a multi-seed check script sweeps — THE one owner.**
