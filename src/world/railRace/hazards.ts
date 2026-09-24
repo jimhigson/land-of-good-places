@@ -405,14 +405,6 @@ function snapToTrestleGrid(
    * which is exactly the tuned property this change was meant not to touch.
    */
   laneUsed?: Set<number>,
-  /**
-   * Slots this bar's lane may **not** use because the race's own physics
-   * refused them: a flat-out rider who never ducks would already be at the
-   * speed floor there, so the bar could not slow her. Decided by
-   * `simulate.ts`'s `refusedBarSlots`, which owns the physics; this file only
-   * obeys. See {@link DuckBarRefusal}.
-   */
-  laneRefused?: ReadonlySet<number>,
 ): number[] {
   const count = trestleGridCount(loopLength);
   const raw = trestleGridIndex(cursor, loopLength);
@@ -424,8 +416,7 @@ function snapToTrestleGrid(
   const allowed = (index: number): boolean =>
     !usedIndices.has(index) &&
     (!window || (index >= window.min && index <= window.max)) &&
-    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS)) &&
-    !laneRefused?.has(index);
+    (!laneUsed || [...laneUsed].every((used) => apart(index, used) >= MIN_LANE_GAP_SLOTS));
   const legal: number[] = [];
   for (let delta = 0; delta < count; delta += 1) {
     const candidates = delta === 0 ? [raw] : [raw - delta, raw + delta];

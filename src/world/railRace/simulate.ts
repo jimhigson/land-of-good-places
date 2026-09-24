@@ -310,8 +310,8 @@ registerPlanCache(() => {
  * purpose — just above the floor the bonk bites by a few centimetres a second,
  * and a downhill 0.6 m later can hand it straight back.
  *
- * A refused slot moves the bar the way any other refusal does
- * (`hazards.ts`'s `snapToTrestleGrid`, outward to the nearest legal slot), and
+ * A refused slot moves the bar — `hazards.ts`'s `nearestLegalLayout` finds
+ * the legal layout nearest the tuned one — and
  * the whole plan is then raced again, because moving one bar changes the
  * speed every later bar of that lane is met at. Refusals only accumulate, so
  * this ends: either no bar is clipped, or some bar has no legal slot left and
@@ -323,6 +323,10 @@ registerPlanCache(() => {
  * for 40 bars, and lane 0's refused slot 41 left the last bar nowhere to go.
  * Only when every rotation fails does the build fail, for the park's root
  * loop to start again — never a bad bar kept.
+ *
+ * **The physics is not the only refuser.** Before any of this, every slot where
+ * a bar on either ring would hang inside another lane's track is refused
+ * ({@link reachRefusedSlots}), and the physics starts from those.
  */
 let barPlanDecisionMemo: BarPlanDecision | null = null;
 function raceBarPlanDecision(): BarPlanDecision {
