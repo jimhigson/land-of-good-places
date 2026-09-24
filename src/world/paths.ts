@@ -1385,10 +1385,18 @@ function longestOffAxisRun(
     // Off-axis hop: accumulate only its non-exempt sampled length — a 39 m
     // hop whose midpoint alone was tested read as "near the rail" while
     // most of its length ran over open lawn (seed 5, 2026-08-23).
+    //
+    // One sample per piece, at the piece's middle, each standing for exactly
+    // its own `hop / steps`: the hop's length is counted once. This used to
+    // sample both ends of every piece (`steps + 1` samples of `hop / steps`),
+    // which over-read every hop by one piece — seed 2's
+    // `waterFight`-`stall.waterFight` connector, two diagonal hops of 3.50 m
+    // and 8.46 m (11.96 m drawn), read 15.41 m against the 15 m limit.
     const steps = Math.max(1, Math.ceil(hop / 2));
-    for (let step = 0; step <= steps; step += 1) {
-      const x = a[0] + ((b[0] - a[0]) * step) / steps;
-      const z = a[1] + ((b[1] - a[1]) * step) / steps;
+    for (let step = 0; step < steps; step += 1) {
+      const t = (step + 0.5) / steps;
+      const x = a[0] + (b[0] - a[0]) * t;
+      const z = a[1] + (b[1] - a[1]) * t;
       if (exempt(x, z)) flush();
       else run += hop / steps;
     }
