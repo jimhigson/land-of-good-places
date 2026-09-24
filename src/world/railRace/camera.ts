@@ -1057,8 +1057,9 @@ export class RaceCamera {
    * to satisfy a constraint that only bites over ~30 m of a 600 m lap.
    *
    * So the ceiling is local. The rig pulls back the full 34% for the whole lap
-   * *except* through the two hairpins, where it eases in to its resting framing, or closer if the hairpin needs it —
-   * which is what a camera operator does on a tight corner anyway.
+   * *except* through the two hairpins, where it eases in to its resting framing
+   * — or closer, if the hairpin needs it (see {@link CEILING_FLOOR}) — which is
+   * what a camera operator does on a tight corner anyway.
    *
    * ### How it is solved rather than tuned
    *
