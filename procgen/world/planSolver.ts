@@ -24,7 +24,8 @@ import {
 import { cruiserRouteSearch } from './coaster/route';
 import { type SolvedRailRoute } from '../../src/world/rail/generate';
 import { RailRouteUnsolvable } from './rail/generate';
-import { TrainRoute, trainRouteSearch } from '../../src/world/train/route';
+import { TrainRoute } from '../../src/world/train/route';
+import { trainRouteSearch } from './train/route';
 import { planStations } from '../../src/world/train/plan';
 import { slideSearch, type PlannedSlide } from './slide/solve';
 import { crossingSitesSearch, type SolvedCrossingSites } from './train/crossingPlanSolve';
