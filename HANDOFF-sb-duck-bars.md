@@ -7,7 +7,7 @@ point of decision — bar slots where the flat-out never-ducking rider arrives a
 MIN_SPEED are refused and the bar moved; no slot -> throw so the root loop restarts.
 
 ## Status
-- Fix committed. Remaining: after-runs of park:attempt, red proof.
+- Fix + backtracking committed. after2 runs in progress (scratchpad sbdb/after2). Remaining: red proof, report.
 - Baseline park:attempt runs going in a detached worktree `.claude/worktrees/sb-duck-bars-base`
   (outputs in the agent scratchpad `base/`).
 
@@ -26,3 +26,7 @@ MIN_SPEED are refused and the bar moved; no slot -> throw so the root loop resta
   old silent raw-slot fallback.
 - Canonical 20260728: lane1 492.13 -> 564.15, lane2 564.15 -> 420.11; all other 38 bars unchanged.
 - check:rail-race exit 0 after the fix. tsc exit 0.
+- First cut (greedy outward walk) made seeds 14 r0 and 3 r4 throw DuckBarRefusal: 40 bars in 42-43
+  window slots, a moved bar took the last slot a later bar needed. Fixed: planHazards pass two is a
+  DFS in the same nearest-first order (identical layout when greedy works), budget 200k; plus a
+  laneShift fallback decision in simulate.ts barPlanDecision. Both seeds now settle at shift 0.
