@@ -60,3 +60,16 @@ decision by measurement; fix at cause or make an acceptance measure.
   scratch); then sweeps: castle-towers, rail-race, tie-frame on 0..15; then
   resolver-affected checks (hop-clearance, deck-fallthrough, hotel, benches,
   hall-solid, nav-routes, slide-rider, pet-slide) + test:procgen.
+- Lead expanded scope: own all check:castle-towers clauses on 16 seeds, and
+  the rail-race CAMERA clauses. Pre-merge (7df43aa3^1, before CEILING_FLOOR):
+  1r6 phone look-down 27.6/side 0.886, 2r0 side 0.899, 4r2 zoom -2% already
+  failed; easing 2.0 m on 1r6 is new with CEILING_FLOOR (0.25 before).
+- Camera section extracted verbatim to scripts/lib/raceCameraFindings.mts
+  (measureRaceCamera(route, rig)); check-rail-race calls it. POSES exported.
+- Fix 1 (committed): swing capped by measured guide drift vs
+  SIDE_SCROLLER_FLOOR/CHASE_CEILING (now owned by camera.ts). 1r6 phone
+  0.905/25.2, 2r0 0.904.
+- Fix 2 (committed): CEILING_SLOPE Lipschitz ceiling; RaceCamera.ceilingAt
+  public. Zoom clause ramps from first offset clear of the ceiling.
+- Fast instrument: scripts/_diag-cam.mts (untracked); plan solve per seed takes
+  minutes. camsel.sh / cam16.sh in scratch.
