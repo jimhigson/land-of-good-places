@@ -47,3 +47,9 @@
 - After merge: sheet invariant passes on all five. 24, canon clean. NEW lattice fails ("every street sits on the shared
   12 m lattice"): 131 gate-approach x3 (z=46.16, x=27.30, z=-34.95; count 4), 11 spur-building x=42, 2 spur-stall.dodgems
   x=62 + connector-waterFight z=-38/x=-42. 11's bush fail gone. Logs pd-merge-*.log. tsc + typecheck:test exit 0.
+- Fixes on top of the merge: (1) gridDetour half rail clamp restored (fixes 131 gate-approach, 11 spur-building);
+  (2) paving-drape's raw-diagonal connector refusal dropped (refused seed 2's base lattice connector via
+  longestOffAxisRun's inclusive-sampling overcount 11.9->15.35 m; connector screens are fix/sb-lattice's);
+  (3) gridDetour straightening: lattice-kept second pass with dog-legs via lattice lines, used only when the
+  ordinary one carries an off-lattice street run and it does not (seed 2 spur-stall.dodgems).
+- After (pd-after-*.log): 131, 24, 11, 20260728, 2 all accepted, failures [] (11's base bush fail gone).
