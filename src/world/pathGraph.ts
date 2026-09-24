@@ -622,8 +622,29 @@ const KERB_SLIVER_AREA = 1e-6;
  */
 const KERB_BURY_MAX = 2 * (PATH_SURFACE_LIFT - PATH_KERB_LIFT);
 
-/** Float noise in a height compared between two meshes laid by the same maths, metres. */
-const KERB_FLOAT = 1e-4;
+/**
+ * **How far the kerb may stand proud of other routes' paving and still be the
+ * paving's to hide**, metres: the drawn difference between the two lifts, the
+ * other way up.
+ *
+ * On the ground the kerb lies 25 mm under another route's paving, as drawn.
+ * Over a bridge it cannot be trusted to: `drapePathsOverBridges` lifts each
+ * mesh's *vertices* onto the hump, and the two meshes put their vertices in
+ * different places, so between them each is a different chord of one curved
+ * surface. On pool seed 24, where route 13's kerb band runs under another
+ * route's paving on a ramp at (-7.8, -25.8), the paving's chords come out as
+ * much as 2.8 mm *below* the kerb's — so the kerb pokes through the paving and
+ * the two share a plane: `check:coplanar`'s `path-kerb|path-surface`, 0.222 m²
+ * at 6.1 mm. This used to be a float tolerance of 0.1 mm, which read that kerb
+ * as "above the paving, so visible" and kept it.
+ *
+ * A kerb that close is not a surface of its own: it is the same surface as the
+ * paving it sits in, fighting it. The plan test has already proved the paving
+ * covers all of it, so deleting it shows the paving that was meant to be there.
+ * Kerb metres above paving — carried onto a deck over paving left on the
+ * ground — is still well outside this, and still drawn.
+ */
+const KERB_PROUD_MAX = PATH_SURFACE_LIFT - PATH_KERB_LIFT;
 
 /** A kerb triangle whose plan another route's paving covers, and by what. */
 interface KerbCandidate {
@@ -657,7 +678,7 @@ interface KerbCandidate {
  *
  * A kerb triangle is dropped only when other routes' face-up paving covers
  * **all** of it in plan — and the strip its sight-lines cross on the way to the
- * camera, {@link sightShadow} — **and** lies on top of it — between 0 and {@link KERB_BURY_MAX}
+ * camera, {@link sightShadow} — **and** lies on top of it — from {@link KERB_PROUD_MAX} below it to {@link KERB_BURY_MAX}
  * above it — over every part of the overlap. Both are exact: the plan test is a
  * convex polygon difference (never a capsule, which overstates the ribbon), and
  * the height test compares the two triangles' planes at every corner of their
@@ -760,7 +781,7 @@ class KerbCover {
         );
         const onTop = cover.overlap.every(([x, z]) => {
           const gap = coverHeight(x, z) - kerbHeight(x, z);
-          return gap >= -KERB_FLOAT && gap <= KERB_BURY_MAX;
+          return gap >= -KERB_PROUD_MAX && gap <= KERB_BURY_MAX;
         });
         if (!onTop) continue;
         uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
