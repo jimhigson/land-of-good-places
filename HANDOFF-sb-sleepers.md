@@ -14,3 +14,10 @@
   Cause: sleepers laid at i*1 m of CENTRE-LINE distance; a lane offset d gets 1 + d/R per sleeper. Bends on these seeds are 17.7 m, not the invariant's assumed 20.
 - Fix (commit dff9c23e): `stationsEvenlyAlongDrawn` in rail/sweptRail.ts (one owner); track.ts lays sleepers there; check:tie-frame asks it too. Invariant tolerance untouched (comment updated).
 - Baseline logs: scratchpad before-<seed>.log. Canonical baseline passes all 101 measures.
+
+## Verification (done)
+- park:attempt before/after on 1,3,8,9,20260728: sleepers measure cleared on 1,3,8,9; no new measure on any seed; canonical 0/101 both.
+- check:tie-frame exit 0; tsc exit 0. Red proof: revert only track.ts tangent -> race 14.79 deg / walk-past 14.91 deg, exit 1.
+- check:coplanar exit 1 on branch; base e5d8c8ec also exit 1 (path-kerb/path-surface NEW, seed 24, pre-existing).
+  Branch adds MORE on race-ring sleepers vs walk-past-ring sleepers (1 -> 2 facings, canonical seed): side faces now meet too.
+  Those two rings are never visible together (RailRace.setActiveRing). Baseline NOT edited; left for the caller to decide.
