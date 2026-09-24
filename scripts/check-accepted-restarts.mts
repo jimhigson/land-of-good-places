@@ -13,15 +13,16 @@
  *    (else a recorded restart could go stale unseen);
  *    every seed file's seed is recorded (else the suite measures restart 0 of
  *    a seed whose park is something else — or runs the loop in CI);
- * 2. every pool seed (`PARK_SEED_POOL`, the parks a child can be given) and
- *    every seed 0..15 (the shipped set) is recorded.
+ * 2. the recorded seeds are exactly `SUPPORTED_PARK_SEEDS` (0..15, the parks a
+ *    child can be given) — none missing, none extra (a retired seed's record
+ *    would keep a park measured that nobody can get).
  *
  * Cheap: reads files, builds nothing.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 
 import { ACCEPTED_RESTARTS } from '../src/world/acceptedRestarts.ts';
-import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
+import { SUPPORTED_PARK_SEEDS } from '../src/world/parkSeedPool.ts';
 
 const failures: string[] = [];
 const recorded = new Set(Object.keys(ACCEPTED_RESTARTS).map(Number));
@@ -43,9 +44,12 @@ for (const seed of recorded) {
 for (const [seed, name] of fileSeeds) {
   if (!recorded.has(seed)) failures.push(`${name} measures seed ${seed}, which has no recorded restart — run pnpm run accept:parks -- ${seed} --write`);
 }
-const shipped = [...new Set([...PARK_SEED_POOL, ...Array.from({ length: 16 }, (_, i) => i)])];
+const shipped = [...SUPPORTED_PARK_SEEDS];
 for (const seed of shipped) {
-  if (!recorded.has(seed)) failures.push(`seed ${seed} can be given to a child but has no recorded restart`);
+  if (!recorded.has(seed)) failures.push(`seed ${seed} is supported but has no recorded restart — run pnpm run accept:parks -- ${seed} --write`);
+}
+for (const seed of recorded) {
+  if (!shipped.includes(seed)) failures.push(`seed ${seed} has a recorded restart but is not a supported seed — delete its entry and its seed file`);
 }
 
 process.stdout.write(
@@ -55,4 +59,4 @@ if (failures.length > 0) {
   for (const line of failures) process.stdout.write(`  FAIL  ${line}\n`);
   process.exit(1);
 }
-process.stdout.write('check:accepted-restarts: OK — every recorded park is measured by test:procgen, every shipped seed is recorded\n');
+process.stdout.write('check:accepted-restarts: OK — every recorded park is measured by test:procgen, every supported seed is recorded\n');
