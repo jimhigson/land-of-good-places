@@ -13,6 +13,7 @@ import { recordBuilt, searchBridgeFootprints } from './world/builtDecisions';
 import { planFerrisExit } from './world/ferrisExit';
 import { planSlideLegs } from './world/slide/legs';
 import { planCruiserPylons } from './world/coaster/pylons';
+import { searchRailRacePlan } from './world/railRace/plan';
 
 installParkSolver({
   plan: createPlanSolver,
@@ -21,4 +22,5 @@ installParkSolver({
   ferrisExit: () => recordBuilt('ferrisExit', planFerrisExit()),
   slideLegs: (points, isClear) => recordBuilt('slideLegs', planSlideLegs(points, isClear)),
   cruiserPylons: (route, isClear, clearTreesNear) => recordBuilt('pylons', planCruiserPylons(route, isClear, clearTreesNear)),
+  railRacePlan: () => recordBuilt('railRace', searchRailRacePlan()),
 });

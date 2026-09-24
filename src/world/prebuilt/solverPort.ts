@@ -7,6 +7,7 @@ import type { FerrisExit } from '../../minigames/ferrisWheel/exit';
 import type { Vector3 } from 'three';
 import type { SlideLeg } from '../slide/supports';
 import type { CruiserPylon } from '../coaster/pylons';
+import type { RailRaceDecisions } from '../railRace/plan';
 import type { RailSampler } from '../rail/sweptRail';
 import type { LevelCrossing } from '../train/crossings';
 import type { PlannedFootprint, RealWorldQuery } from '../train/bridgeFootprint';
@@ -58,6 +59,8 @@ export interface ParkSolver {
     isClear: (x: number, z: number, radius: number) => boolean,
     clearTreesNear: (x: number, z: number, radius: number) => number,
   ): CruiserPylon[];
+  /** The rail race's exit and each ring's arch. */
+  railRacePlan(): RailRaceDecisions;
 }
 
 // `var`: read during module cycles, like `parkPlan.ts`'s state.
