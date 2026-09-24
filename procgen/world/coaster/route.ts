@@ -3,7 +3,8 @@ import { type RouteBrief, type RouteInfluence, type SolvedRailRoute } from '../.
 import { lazyView } from '../../../src/boot/lazyView';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../../../src/world/building/layout';
 import { turnVocabulary, type Pose2, type SegmentKind, type Vec2 } from '../../../src/world/rail/segments';
-import { PARK_LAYOUT, clearOfFootprints, placedEntry } from '../../../src/world/parkLayout';
+import { PARK_LAYOUT, placedEntry } from '../../../src/world/parkLayout';
+import { clearOfFootprints } from '../parkLayout';
 import { Rng, TAU } from '../../../src/core/mathUtils';
 import { PARK_BOUNDARY, circleBoundary, insetBoundarySearch, solverBoundary } from '../../../src/world/boundary';
 import { PARK_SEED } from '../../../src/world/parkManifest';

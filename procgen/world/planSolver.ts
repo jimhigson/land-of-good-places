@@ -13,7 +13,8 @@ import { GroundClaims } from '../../src/boot/groundClaims';
 import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveStats } from '../boot/parkSolve';
 import { decisionSeed, refusal, type Advance, type FeatureBuilder, type Refusal } from '../../src/boot/featureBuilder';
 import { PARK_SEED } from '../../src/world/parkManifest';
-import { PARK_RESTARTS, layoutRestartSearch, type ParkLayout } from '../../src/world/parkLayout';
+import { PARK_RESTARTS, type ParkLayout } from '../../src/world/parkLayout';
+import { layoutRestartSearch } from './parkLayout';
 import { layoutRestartBase } from './parkWarp';
 import {
   cruiserStartSearch,

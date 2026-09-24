@@ -86,7 +86,8 @@ import {
   STALL_STAND_DISTANCE,
   type StallPlacement,
 } from '../minigames/stallPlacement';
-import { clearOfFootprints, placedEntry } from './parkLayout';
+import { placedEntry } from './parkLayout';
+import { clearOfFootprints } from '../../procgen/world/parkLayout';
 import { ANCHORS_BY_ID } from './anchors';
 import type { CollisionWorld } from './Collision';
 import { PARK_BOUNDARY } from './boundary';
