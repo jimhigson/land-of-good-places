@@ -27,16 +27,16 @@
  * keeps a list of rooms, because #472 asked for exactly that: *"a hand-written
  * list is how a room quietly stops being checked."*
  *
- * The seeds are derived too, off `world/acceptedRestarts.ts`'s
- * `ACCEPTED_RESTARTS` — every park the game ships (the draw pool and seeds
- * 0..15), not the four `test/procgen` keeps files for. A seam that only shows
- * on one seed is one that some child is looking at.
+ * The seeds are derived too, off `world/parkSeedPool.ts`'s
+ * `SUPPORTED_PARK_SEEDS` — every park the game ships, each at its recorded
+ * restart. A seam that only shows on one seed is one that some child is
+ * looking at.
  *
  * ## What varies by seed and what does not
  *
  * Interiors are authored, not generated: they are identical on every seed. So
- * the canonical seed sweeps everything and the rest of the pool sweeps only the
- * garden, which is the half that moves. Each seed is a child process because
+ * the first shipped seed sweeps everything and the rest sweep only the garden,
+ * which is the half that moves. Each seed is a child process because
  * `parkManifest.ts` reads `LGP_SEED` once, at import — the module registry has
  * to be fresh, which is the same reason `sweep-park-seeds.mts` shells out.
  *

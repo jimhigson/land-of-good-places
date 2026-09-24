@@ -434,8 +434,8 @@ about it are worth knowing before you read its output:
   given.** The castle's floors and the hotel's rooms are hundreds of metres
   away at their own origins; the sweep files each finding under whatever
   `world/spaces.ts` says it is standing in, and sweeps the garden across every
-  seed with a recorded restart in `acceptedRestarts.ts` — every park the game
-  ships. A room added tomorrow is swept the day it exists.
+  seed in `parkSeedPool.ts`'s `SUPPORTED_PARK_SEEDS`, each at the restart
+  `acceptedRestarts.ts` recorded — every park the game ships. A room added tomorrow is swept the day it exists.
 - **It only reports faces that point the same way, and the way the camera
   looks.** Two coplanar faces back to back never fight — culling draws one —
   and the rig has one angle forever, so this is decided rather than guessed.
