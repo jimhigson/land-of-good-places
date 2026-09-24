@@ -766,41 +766,15 @@ export class CoasterRoute {
   private readonly scratch = new Vector3();
 
   /**
-   * Builds the loop.
-   *
-   * `presolved` is the work a driver already did **a slice at a time** —
-   * `boot/parkGeneration.ts`, spreading the ~0.8 s solve across the cat-bus
-   * ride's frames. Handed one, this skips both the brief and the search and
-   * does only the finishing work (the height profile, the carves, the vertical
-   * repair), which is ~10 ms and was never the expensive half.
+   * Builds the loop from what was decided about it: the plan view the search
+   * found and the finished profile. **It never searches** — the game as
+   * delivered carries no search (`docs/design/PREBUILT-PARKS.md`); a loop is
+   * either read from the park file or searched in build tooling
+   * (`procgen/world/coaster/solve.ts`) and handed in here.
    */
-  constructor(options: CoasterRouteOptions, presolved?: PresolvedCoaster) {
-    // The pre-solved path brings its own `Rng` — **the very object its own
-    // `coasterRouteBriefs` call already advanced** — rather than a fresh one.
-    //
-    // That is not a shortcut, it is the only honest way to do it. `stationPoses`
-    // is the sole thing that draws from this stream, `hillPhase` below draws
-    // from it next, and the number of draws `stationPoses` makes depends on how
-    // many candidates survive its filters — a count nothing could restate
-    // without becoming a second definition to keep in step by hand. Re-running
-    // the brief purely to move the stream on was the first attempt and cost
-    // ~20 ms inside a frame that must not hitch. Passing the advanced stream is
-    // identical by construction, and free.
-    const rng = presolved?.rng ?? new Rng(PARK_SEED ^ options.salt);
-    const stall = placedEntry(options.stationStallId);
-    let plan: SolvedRailRoute;
-    if (presolved) {
-      plan = presolved.plan;
-    } else {
-      // Two cadences over one policy — literally one, now: the retry ladder
-      // itself is `cruiserRouteSearch`, and this constructor and
-      // `boot/parkGeneration.ts` are both nothing but drivers over it, the
-      // same relationship `solveRailRoute` has with `railRouteSearch`.
-      const briefs = coasterRouteBriefs(options, rng);
-      plan = solveCruiserRoute(briefs);
-    }
-    this.plan = plan;
-    const profile = presolved?.profile ?? coasterProfile(plan, rng, stall);
+  constructor(decided: DecidedCoaster) {
+    this.plan = decided.plan;
+    const profile = decided.profile;
     this.curve = profile.curve;
     this.length = profile.length;
     this.stationDistance = profile.stationDistance;
@@ -888,30 +862,12 @@ export class CoasterRoute {
  */
 const NEAREST_POINT_STEP = 2;
 
-/**
- * A loop somebody else already searched, ready to be finished.
- *
- * Both halves are needed and neither can be rebuilt cheaply: the plan view is
- * the ~0.8 s the ride spread out, and the `Rng` is the stream `stationPoses`
- * advanced on the way to producing the brief that plan was searched from.
- */
-export interface PresolvedCoaster {
-  /** The plan view a driver already searched, a slice at a time. */
+/** A loop somebody already decided: its plan view and its finished profile. */
+export interface DecidedCoaster {
+  /** The plan view the search found. */
   readonly plan: SolvedRailRoute;
-  /**
-   * The stream that driver's own {@link coasterRouteBriefs} call advanced.
-   * Read only to build a profile, so a caller handing in a finished
-   * {@link profile} (a prebuilt park, `world/prebuilt/parkFile.ts`) omits it.
-   */
-  readonly rng?: Rng;
-  /**
-   * The finished profile, if the driver built that a slice at a time too.
-   *
-   * Omitted — never `undefined`, per `exactOptionalPropertyTypes` — by a caller
-   * that only pre-solved the plan view and is content for the constructor to do
-   * the finishing work in one go.
-   */
-  readonly profile?: CoasterProfile;
+  /** The finished profile: heights, carves, curve. */
+  readonly profile: CoasterProfile;
 }
 
 /** A brief and the harder-pulling retry behind it — one tier of the policy. */
@@ -1598,7 +1554,7 @@ export function* coasterProfileSearch(
 }
 
 /** {@link coasterProfileSearch}, driven straight through. */
-function coasterProfile(
+export function coasterProfile(
   plan: SolvedRailRoute,
   rng: Rng,
   stall: { readonly x: number; readonly z: number },

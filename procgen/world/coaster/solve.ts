@@ -4,8 +4,11 @@ import {
   type CoasterProfile,
   CoasterRoute,
   type CoasterRouteOptions,
+  coasterProfile,
   coasterProfileSearch,
+  coasterRouteBriefs,
   coasterRouteBriefSearch,
+  solveCruiserRoute,
 } from '../../../src/world/coaster/route';
 
 // The retry ladder, re-exported so `boot/parkGeneration.ts` (which imports
@@ -148,7 +151,13 @@ function planCoaster(seed: CoasterSeed, avoid: CoasterRoute | null): PlannedCoas
     ...(seed.outerRadius !== undefined ? { outerRadius: seed.outerRadius } : {}),
     ...(seed.desiredLength !== undefined ? { desiredLength: seed.desiredLength } : {}),
   };
-  const route = new CoasterRoute(options);
+  // The loop the `CoasterRoute` constructor used to search for itself when
+  // handed no plan — searched here now, because the game's `CoasterRoute`
+  // never searches (`docs/design/PREBUILT-PARKS.md`).
+  const rng = new Rng(PARK_SEED ^ options.salt);
+  const plan = solveCruiserRoute(coasterRouteBriefs(options, rng));
+  const profile = coasterProfile(plan, rng, placedEntry(options.stationStallId));
+  const route = new CoasterRoute({ plan, profile });
   const { exitX, exitZ } = planExit(route, seed.stationStallId);
   return { name: seed.name, route, stationStallId: seed.stationStallId, exitX, exitZ };
 }
@@ -252,10 +261,9 @@ export function* finishCruiserPlanSearch(
   solved: SolvedRailRoute,
   rng: Rng,
 ): Generator<number, PlannedCoaster, void> {
-  const options = cruiserOptions();
   const stall = placedEntry(CRUISER_SEED.stationStallId);
   const profile = yield* coasterProfileSearch(solved, rng, stall);
-  const route = new CoasterRoute(options, { plan: solved, rng, profile });
+  const route = new CoasterRoute({ plan: solved, profile });
   const { exitX, exitZ } = planExit(route, CRUISER_SEED.stationStallId);
   return {
     name: CRUISER_SEED.name,
@@ -278,7 +286,7 @@ export function cruiserPlanFromDecisions(
   profile: CoasterProfile,
   exit: { readonly exitX: number; readonly exitZ: number },
 ): PlannedCoaster {
-  const route = new CoasterRoute(cruiserOptions(), { plan, profile });
+  const route = new CoasterRoute({ plan, profile });
   return {
     name: CRUISER_SEED.name,
     route,
