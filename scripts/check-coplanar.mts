@@ -2,7 +2,7 @@
  * **No new pair of faces may come to share a plane.**
  *
  * ```
- * pnpm run check:coplanar              # every space, every seed in the pool
+ * pnpm run check:coplanar              # every space, every shipped seed
  * pnpm run check:coplanar -- --verbose # and print the whole ranked backlog
  * pnpm run check:coplanar -- --print-baseline > scripts/coplanar-baseline.mts
  * LGP_RATCHET=off pnpm run check:coplanar   # report the drift, do not fail
@@ -27,10 +27,10 @@
  * keeps a list of rooms, because #472 asked for exactly that: *"a hand-written
  * list is how a room quietly stops being checked."*
  *
- * The seeds are derived too, off `world/parkSeedPool.ts`'s `PARK_SEED_POOL` —
- * the sixteen parks a child can actually be given (#426), not the four
- * `test/procgen` keeps files for. A seam that only shows on the sixteenth seed
- * is one that one child in sixteen is looking at.
+ * The seeds are derived too, off `world/acceptedRestarts.ts`'s
+ * `ACCEPTED_RESTARTS` — every park the game ships (the draw pool and seeds
+ * 0..15), not the four `test/procgen` keeps files for. A seam that only shows
+ * on one seed is one that some child is looking at.
  *
  * ## What varies by seed and what does not
  *
@@ -63,7 +63,7 @@ import { DEFAULT_TOLERANCES, sweepCoplanar } from './coplanar-sweep.mts';
 import { rankSeams, type RankedSeam } from './coplanar-rank.mts';
 import { COPLANAR_BASELINE, type BaselineEntry } from './coplanar-baseline.mts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
-import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
+import { ACCEPTED_RESTARTS } from '../src/world/acceptedRestarts.ts';
 import { SPACE_GARDEN } from '../src/world/spaces.ts';
 import { BRIDGE_GROUP_NAME_RE } from '../src/world/train/bridges.ts';
 
@@ -75,19 +75,23 @@ const isChild = process.env['LGP_COPLANAR_CHILD'] === '1';
 // ------------------------------------------------------------------ the seeds
 
 /**
- * **Every park a child can actually be given** — `world/parkSeedPool.ts`'s
- * `PARK_SEED_POOL`, which is the one owner of that question since #426/#463.
+ * **Every park this game ships** — every seed with a recorded restart in
+ * `world/acceptedRestarts.ts`'s `ACCEPTED_RESTARTS`, which is the one owner of
+ * "which parks are built, and how".
  *
- * Not the four seeds `test/procgen` happens to have files for, and certainly
- * not a list typed out here: a park is drawn from this pool on first visit, so
- * a seam that only appears on the sixteenth seed is a seam one child in sixteen
- * is looking at. Asking the pool directly also means the day somebody vets a
- * seventeenth, this sweeps it without anybody remembering to come back here.
- * #472 budgeted for exactly this: *"a full park build is seconds, so sweeping
- * every space across sixteen seeds is minutes."*
+ * This was `PARK_SEED_POOL` alone, the parks drawn on first visit — and seeds
+ * 0..15, which are shipped parks too (a child can be sent `?seed=3`, and every
+ * other gate builds them), were never swept. Another branch's CI swept them and
+ * found sixteen seams nobody had measured. Jim's ruling: every shipped seed must
+ * pass every check. So the list is the restart table's keys: a seed recorded
+ * there is swept here, the day it is recorded, with nobody coming back to this
+ * file. `LGP_SEED=s` alone builds that seed's recorded restart, so each child
+ * builds exactly the park the browser does.
  */
 function poolSeeds(): number[] {
-  return [...new Set([PARK_SEED, ...PARK_SEED_POOL])].sort((a, b) => a - b);
+  return [
+    ...new Set([PARK_SEED, ...Object.keys(ACCEPTED_RESTARTS).map(Number)]),
+  ].sort((a, b) => a - b);
 }
 
 // ------------------------------------------------------------ one seed's sweep
