@@ -18,4 +18,16 @@ Task: `check:fountain-hop` failed in another branch's CI on seed 10 r0
 - Fix planned: when reached, report the goal node's level sampled at the exact
   goal point (`sample(goalX, goalZ, nodeHeight[goalNode])`).
 
+## Done (pushed)
+
+- 57b51869: check:fountain-hop clause 2b, taps on 4 rings (46 goals) across the basin,
+  each must end within 10 mm of the water under the tap. Makes the check independent
+  of lattice phase.
+- 4e838d98: NavGrid.findRoute, reached => routeEndY = sample(goalX, goalZ, nodeY).
+- Verdict: instrument/geometry, NOT a decision. No acceptance measure added.
+- Baseline sweep (old NavGrid + new clause) running from detached worktree
+  `.claude/worktrees/sb-fountain-base` -> scratchpad before.txt. Then sweep fixed
+  code -> after.txt; then check:nav-routes, park:attempt canonical + seed 2 r0.
+  Remove sb-fountain-base worktree at the end.
+
 Sweep script and logs: scratchpad `sb-fountain/sweep.sh`, `sweep.txt`.
