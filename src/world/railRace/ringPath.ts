@@ -1,3 +1,4 @@
+import { CatmullRomCurve3, Vector3 } from 'three';
 import { PARK_BOUNDARY } from '../boundary';
 
 /**
@@ -50,6 +51,14 @@ import { PARK_BOUNDARY } from '../boundary';
 const SAMPLES = 2048;
 
 /**
+ * Points per outline side at which the smooth centre line is walked to measure
+ * its arc length (step 2 of the constructor). Sixteen puts them ~7 cm apart on
+ * a ~1.2 m side, so the chord-for-arc error is far under a millimetre a lap and
+ * each resampled point is on the curve to within the same.
+ */
+const DENSE_PER_SIDE = 16;
+
+/**
  * Half-width of the stencil each sample's tangent is estimated over, in metres.
  *
  * ### The jerky camera this exists to fix (6 August 2026)
@@ -76,8 +85,9 @@ const SAMPLES = 2048;
  * longest outline segment, so it always spans several of them.
  *
  * Do not go back to the per-segment tangent to "keep the path faithful to the
- * outline" — the *positions* are untouched and still sit exactly on the offset
- * polygon. This changes only how the frame at those positions is estimated.
+ * outline" — this changes only how the frame at the positions is estimated.
+ * (The positions themselves no longer sit on the offset polygon either, but on
+ * a smooth curve through its vertices — the constructor's step 2 says why.)
  */
 const TANGENT_WINDOW = 2;
 
@@ -248,14 +258,46 @@ export class RingPath {
     // everything that consumes the path.
     offset.reverse();
 
-    // --- 2. cumulative arc length round the offset polygon ------------------
+    // --- 2. a smooth closed curve through the offset vertices ---------------
+    //
+    // **Not the polygon itself.** The ring used to *be* the offset polygon,
+    // resampled: every sample sat exactly on a 512-gon, so the centre line ran
+    // straight for a ~1.2 m side and then turned a corner. Out on a tight bend
+    // a corner is **2.64 deg** (seed 5, restart 2, s=342.8 m; 430 corners over
+    // 0.5 deg on that lap). The rails are swept through the lanes as a
+    // Catmull-Rom every 2.2 m, which rounds those corners off, while the cart
+    // and the sleepers take the direction of the lane at their own spot
+    // (`drawnDirection`, over +-5 cm) — which, near a corner, is one side of it.
+    // So the cart pointed along one side while the rail under it bent through
+    // the corner: 1.32 deg off the rails drawn under it (`check:rail-race`),
+    // with the step at every corner in between. A smooth centre line has no
+    // corner for either to disagree about. The tangents in step 4 were already
+    // smoothed for the camera's sake; this is the same fix one level down, at
+    // the positions they are measured from.
+    //
+    // Centripetal, closed: it passes through every offset vertex, so the ring
+    // still stands `outset` off the outline at each of them, and between them
+    // it departs from the chord by the chord's own sag — millimetres against
+    // clearances measured in metres.
+    const curve = new CatmullRomCurve3(
+      offset.map((point) => new Vector3(point.x, 0, point.z)),
+      true,
+      'centripetal',
+    );
+    const dense = count * DENSE_PER_SIDE;
+    const densePoints: { x: number; z: number }[] = [];
+    const scratch = new Vector3();
+    for (let i = 0; i < dense; i += 1) {
+      curve.getPoint(i / dense, scratch);
+      densePoints.push({ x: scratch.x, z: scratch.z });
+    }
     const cumulative: number[] = [0];
-    for (let i = 0; i < count; i += 1) {
-      const a = offset[i] as { x: number; z: number };
-      const b = offset[(i + 1) % count] as { x: number; z: number };
+    for (let i = 0; i < dense; i += 1) {
+      const a = densePoints[i] as { x: number; z: number };
+      const b = densePoints[(i + 1) % dense] as { x: number; z: number };
       cumulative.push((cumulative[i] as number) + Math.hypot(b.x - a.x, b.z - a.z));
     }
-    const perimeter = cumulative[count] as number;
+    const perimeter = cumulative[dense] as number;
     this.length = perimeter;
 
     // --- 3. resample at even arc length ------------------------------------
@@ -263,9 +305,9 @@ export class RingPath {
     let cursor = 0;
     for (let i = 0; i < SAMPLES; i += 1) {
       const target = (i / SAMPLES) * perimeter;
-      while (cursor < count - 1 && (cumulative[cursor + 1] as number) < target) cursor += 1;
-      const a = offset[cursor] as { x: number; z: number };
-      const b = offset[(cursor + 1) % count] as { x: number; z: number };
+      while (cursor < dense - 1 && (cumulative[cursor + 1] as number) < target) cursor += 1;
+      const a = densePoints[cursor] as { x: number; z: number };
+      const b = densePoints[(cursor + 1) % dense] as { x: number; z: number };
       const segment = (cumulative[cursor + 1] as number) - (cumulative[cursor] as number);
       const t = segment > 1e-9 ? (target - (cumulative[cursor] as number)) / segment : 0;
       samples.push({
@@ -320,10 +362,8 @@ export class RingPath {
   }
 
   /**
-   * The sample at an arc length, interpolated between the two nearest.
-   *
-   * `SAMPLES` around a ~450 m loop is a sample every ~0.22 m, so the lerp is
-   * over a span far shorter than anything the ride draws with.
+   * The sample at an arc length, interpolated between the two nearest — the
+   * position C1 (see `lookup`), the frame lerped.
    */
   sampleAt(distance: number): RingSample {
     return this.lookup(this.samples, distance);
@@ -363,9 +403,24 @@ export class RingPath {
     const tx = lerp(a.tangentX, b.tangentX);
     const tz = lerp(a.tangentZ, b.tangentZ);
     const tl = Math.hypot(tx, tz) || 1;
+    // **Positions by cubic Hermite, not by lerp**, through the two samples with
+    // their own tangents: a lerp is a polygon again — 2048 sides, a corner of
+    // up to 0.87 deg at every sample on the tightest bends — and the cart,
+    // reading its direction over +-5 cm, sat on one side of each corner while
+    // anything reading over a longer span saw it rounded (0.42 deg worst, seed 5
+    // restart 0, once the 512-gon's own corners were gone). Hermite is C1 across
+    // the samples and passes through them exactly, so between two of them it
+    // departs from the lerp by the chord's sag, a fraction of a millimetre.
+    const span = this.length / SAMPLES;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const h00 = 2 * t3 - 3 * t2 + 1;
+    const h10 = (t3 - 2 * t2 + t) * span;
+    const h01 = -2 * t3 + 3 * t2;
+    const h11 = (t3 - t2) * span;
     return {
-      x: lerp(a.x, b.x),
-      z: lerp(a.z, b.z),
+      x: h00 * a.x + h10 * a.tangentX + h01 * b.x + h11 * b.tangentX,
+      z: h00 * a.z + h10 * a.tangentZ + h01 * b.z + h11 * b.tangentZ,
       tangentX: tx / tl,
       tangentZ: tz / tl,
       normalX: (tz / tl) * this.normalSign,
