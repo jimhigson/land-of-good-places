@@ -29,7 +29,9 @@ import { performance } from 'node:perf_hooks';
 
 import { cpuMs } from './lib/cpuClock.mts';
 import type { Json, ParkFile } from '../src/world/prebuilt/parkFile.ts';
-import { PARK_FILE_FEATURES } from '../src/world/prebuilt/parkFile.ts';
+// From the leaf, not `parkFile.ts`: nothing that loads the park may be
+// imported before a hydrate run has offered its file.
+import { PARK_FILE_FEATURES } from '../src/world/prebuilt/parkFileName.ts';
 import { offerParkFile } from '../src/world/prebuilt/parkFileStore.ts';
 
 const [mode, path] = process.argv.slice(2);
@@ -50,6 +52,10 @@ if (!solving) {
 }
 
 // Dynamic, so the offer above lands first whatever the import graph does.
+// `parkFile.ts` first: it is the order this probe has always loaded the park
+// in, and the park's modules still hold module-scope reads inside import
+// cycles (`check:cycle-tdz`) that a different first module can trip over.
+await import('../src/world/prebuilt/parkFile.ts');
 const plan = await import('../src/world/parkPlan.ts');
 const solver = await import('../procgen/world/planSolver.ts');
 const { PARK_SEED } = await import('../src/world/parkManifest.ts');
@@ -112,6 +118,9 @@ console.log(
     hydrated: plan.parkPlanHydrated(),
     driverRan: stats !== null,
     worldSolverRan: (await import('../procgen/world/worldPhaseSolver.ts')).worldSolveTrace().length > 0,
+    // Which of the World's own searches (bridges, pylons, legs, rail race,
+    // ferris exit, boundary) ran — none may, on the hydrated path.
+    builtSearched: Object.keys((await import('../procgen/world/builtLog.ts')).builtDecisions().values),
     piecesByHydratedFeature,
     cpuMsByFeature: Object.fromEntries(Object.entries(stats?.cpuMsByFeature ?? {}).map(([k, v]) => [k, Math.round(v)])),
     planCpuMs: Math.round(planCpuMs),

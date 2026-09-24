@@ -1,4 +1,4 @@
-import { alongBoundary, PARK_BOUNDARY, TERRAIN_EDGE_RADIUS, type EdgeStation } from './boundary';
+import { alongBoundary, PARK_BOUNDARY, terrainEdgeRadius, type EdgeStation } from './boundary';
 import {
   BoxGeometry,
   BufferAttribute,
@@ -103,7 +103,7 @@ function buildTerrain(): Mesh {
 
   for (let ring = 0; ring <= rings; ring += 1) {
     // Squared distribution puts more detail where the player actually walks.
-    const radius = Math.pow(ring / rings, 1.35) * TERRAIN_EDGE_RADIUS;
+    const radius = Math.pow(ring / rings, 1.35) * terrainEdgeRadius();
     for (let segment = 0; segment <= segments; segment += 1) {
       const index = ring * (segments + 1) + segment;
       const angle = (segment / segments) * Math.PI * 2;

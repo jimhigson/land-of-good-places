@@ -3,6 +3,7 @@ import type { CollisionWorld } from '../Collision';
 import type { CoasterRoute } from '../coaster/route';
 import type { BoothRelocator } from '../stallsFeature';
 import type { WorldPhase } from '../worldPhase';
+import type { ParkBoundaryOptions } from '../boundary';
 import type { FerrisExit } from '../../minigames/ferrisWheel/exit';
 import type { Vector3 } from 'three';
 import type { SlideLeg } from '../slide/supports';
@@ -68,6 +69,35 @@ export interface ParkSolver {
 var installed: ParkSolver | null = null;
 var loader: (() => void) | null = null;
 /* eslint-enable no-var */
+
+/* eslint-disable no-var */
+var boundary: ((options: ParkBoundaryOptions) => number[]) | null = null;
+var boundaryLoader: (() => void) | null = null;
+/* eslint-enable no-var */
+
+/**
+ * **The boundary's own solver, installed apart from the rest.** The park's
+ * edge is first asked about while the game's modules are still loading —
+ * sometimes from inside an import cycle — so its search must load without
+ * importing a single park module (`procgen/world/boundaryRadii.ts`). A
+ * `require()` of the full solver at that moment would re-enter the cycle.
+ */
+export function installBoundarySolver(solve: (options: ParkBoundaryOptions) => number[]): void {
+  boundary = solve;
+}
+
+export function setBoundarySolverLoader(load: () => void): void {
+  boundaryLoader = load;
+}
+
+export function boundarySolver(): ((options: ParkBoundaryOptions) => number[]) | null {
+  if (!boundary && boundaryLoader) {
+    const load = boundaryLoader;
+    boundaryLoader = null;
+    load();
+  }
+  return boundary ?? null;
+}
 
 /** Install the solver. Node tooling only. */
 export function installParkSolver(solver: ParkSolver): void {

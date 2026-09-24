@@ -7,6 +7,8 @@
  * (`test/procgen/parkFacts.ts`). The game as delivered never reaches it.
  */
 import { installParkSolver } from '../src/world/prebuilt/solverPort';
+// Installs the boundary's own solver on import (see that module).
+import './world/boundaryRadii';
 import { createPlanSolver } from './world/planSolver';
 import { solveWorldPhase } from './world/worldPhaseSolver';
 import { recordBuilt, searchBridgeFootprints } from './world/builtDecisions';

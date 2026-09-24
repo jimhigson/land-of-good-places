@@ -13,7 +13,7 @@
  * the park is solved instead, so a bump can cost a slow boot but never a
  * wrong park.
  */
-export const PARK_FILE_FORMAT = 1;
+export const PARK_FILE_FORMAT = 2;
 
 /**
  * **The seeds this game has: 0 to 15.** Jim, 24 September 2026: *"we only
@@ -51,3 +51,16 @@ export interface PrebuiltParksManifest {
   /** Each seed's proven whole-park digest (`scripts/lib/parkDigest.mts`). */
   readonly digests: Readonly<Record<string, string>>;
 }
+
+/**
+ * Every decision in a park file's `built` (`parkFile.ts`): bridge footprints, the
+ * Sky Cruiser's pylons, the slide's legs, the rail race's exit and arch, the
+ * ferris wheel's exit, and the park boundary's radii. A file missing any of
+ * them cannot be used — the game would meet the gap mid-play.
+ */
+export const BUILT_DECISIONS = ['bridges', 'pylons', 'slideLegs', 'railRace', 'ferrisExit', 'boundary'] as const;
+export type BuiltDecision = (typeof BUILT_DECISIONS)[number];
+
+/** The features a park file carries, in the driver's build order. */
+export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings', 'pathGraph', 'world', 'built'] as const;
+export type ParkFileFeature = (typeof PARK_FILE_FEATURES)[number];

@@ -16,7 +16,8 @@ import { Rng } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
 import { rollTree, type TreeKind } from '../treeModel';
 import { bushClaim, rollBush, treeClaim, type BushDecision, type TreeDecision } from '../Scenery';
-import { PARK_FILE_FORMAT } from './parkFileName';
+import { BUILT_DECISIONS, PARK_FILE_FEATURES, PARK_FILE_FORMAT, type BuiltDecision, type ParkFileFeature } from './parkFileName';
+export { BUILT_DECISIONS, PARK_FILE_FEATURES, type BuiltDecision, type ParkFileFeature };
 
 /**
  * **A park's solved decisions, as a small JSON file** — the format a prebuilt
@@ -137,18 +138,7 @@ export interface ParkFile {
   readonly planOrder: readonly string[];
 }
 
-/** The features a park file carries, in the driver's build order. */
-export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings', 'pathGraph', 'world', 'built'] as const;
-export type ParkFileFeature = (typeof PARK_FILE_FEATURES)[number];
 
-/**
- * Every decision in {@link ParkFile.features}'s `built`: bridge footprints, the
- * Sky Cruiser's pylons, the slide's legs, the rail race's exit and arch, the
- * ferris wheel's exit, and the park boundary's radii. A file missing any of
- * them cannot be used — the game would meet the gap mid-play.
- */
-export const BUILT_DECISIONS = ['bridges', 'pylons', 'slideLegs', 'railRace', 'ferrisExit', 'boundary'] as const;
-export type BuiltDecision = (typeof BUILT_DECISIONS)[number];
 
 /** The decided plan, as `parkPlan.ts` holds it — what {@link encodeParkFile} reads. */
 export interface DecidedPlan {

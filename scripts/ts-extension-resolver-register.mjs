@@ -36,3 +36,8 @@ const port = await import('../src/world/prebuilt/solverPort.ts');
 port.setParkSolverLoader(() => {
   require('../procgen/install.ts');
 });
+// The boundary's search on its own: it is first needed while the game's
+// modules are still loading, and this one imports none of them.
+port.setBoundarySolverLoader(() => {
+  require('../procgen/world/boundaryRadii.ts');
+});

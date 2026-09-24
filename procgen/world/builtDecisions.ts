@@ -6,23 +6,8 @@
 import { type BridgeDecision, type PlannedFootprint, type RealWorldQuery } from '../../src/world/train/bridgeFootprint';
 import { planBridgeFootprints, bridgeDecisionOf } from './train/bridgeSearch';
 import type { LevelCrossing } from '../../src/world/train/crossings';
-import { BUILT_DECISIONS, type BuiltDecision } from '../../src/world/prebuilt/parkFile';
-
-const recorded = new Map<BuiltDecision, unknown>();
-
-/** Note what a search decided — the latest answer wins, as an unwind re-decides. */
-export function recordBuilt<T>(key: BuiltDecision, value: T): T {
-  recorded.set(key, value);
-  return value;
-}
-
-/** Every built decision this process made, or the keys it never decided. */
-export function builtDecisions(): { readonly values: Readonly<Record<string, unknown>>; readonly missing: readonly BuiltDecision[] } {
-  return {
-    values: Object.fromEntries(recorded),
-    missing: BUILT_DECISIONS.filter((key) => !recorded.has(key)),
-  };
-}
+import { recordBuilt } from './builtLog';
+export { builtDecisions, recordBuilt } from './builtLog';
 
 /** The bridge search, recording what it decided. */
 export function searchBridgeFootprints(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
