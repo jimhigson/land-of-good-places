@@ -77,3 +77,6 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - Running: full test:procgen at 151dac7e in sb-frozen (log procgen-151dac7e.log).
 - TODO after helpers: emulate #705 pool=0..15 locally and run pool-sweeping checks (park-pool, gateway,
   fountain-hop, swept-bus, entrance-road, path-preference, stall-accommodate, every-seed-builds).
+- VERIFIED @151dac7e/ac9f2490 (frozen sb-frozen): full test:procgen 1840 tests, only fail was scatterDecoupling
+  identity (fixed ac9f2490, 4/4 pass); check:every-seed-builds 16/16 built, exit 0 (check:park per seed at recorded
+  restart, ratchet enforced).
