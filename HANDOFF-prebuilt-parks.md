@@ -30,12 +30,17 @@ Design: `docs/design/PREBUILT-PARKS.md` (also PR #704, draft). Base: origin/feat
 - Canonical: digest 1279d5dcd2ad01a1 solved == hydrated; hydrated plan ~7 ms; file 119.9 KB raw.
 - Bundle JS before/after: 3,430,754 -> 3,304,071 B raw; 783,721 -> 744,315 B brotli (Garden chunk gone).
 
-## TODO (in order)
-1. ParkUnavailable screen (large text, seed + reason), remove 3 s timeout fallback, define "retry".
-2. Dev server: Vite dev middleware serves /parks/<seed>.json by running the Node solver (probe `solve`).
-3. Retire client-solve checks: check:solve-cost, check:park-boot (slicing), GENERATION budgets comments,
-   check:arrival-completes?; keep coarse bound on build:parks time in CI (timeout-minutes / watchdog).
-4. Seeds 0..15: PARK_SEED_POOL, new default (not 20260728), CI_SWEEP_SEEDS, per-seed test files,
-   check:seed-pool/seed-coverage, coplanar/swept-bus baselines, build:parks ships 0..15, save migration.
-5. Callers booting arbitrary seeds: list + fix. CLAUDE.md + design doc updates.
-6. Full gates; preview URL with a deep path loaded; screenshot of error screen.
+## Done since (24 Sep)
+- Error screen (ui/ParkUnavailableScreen.ts), no timeout, retry = reload; dev park middleware (scripts/lib/dev-parks.mjs).
+- Retired check:solve-cost, check:park-boot, check:arrival-completes (+ slice scripts, SolveScheduler, CLIENT_BUNDLE).
+- Seeds 0..15 (SUPPORTED_PARK_SEEDS owner), default seed 5, seed-0..15 invariant files, save migration
+  (retired seed -> seed 5, position dropped: parkChangedUnderSave()).
+- CLAUDE.md + design doc "As built" (sizes, bundle, retired checks, seed coverage ledger).
+- build:parks 0..15: 1819 KB raw / 513 KB brotli total; every seed boots in headless Chromium from vite preview.
+- PR #705 is DRAFT, titled "[waiting on structural-backtrack]".
+
+## Open
+- #705 blocked: only seeds 2 and 5 of 0..15 pass all invariants at base. Rebase onto feat/structural-backtrack
+  when it lands; re-run build:parks, check, test:procgen, coplanar, swept-bus; reload the preview.
+- Asked Overseer: do pylons / slide legs / rail-race plan / boundary radii / ferris exit count as building?
+- Coplanar/swept-bus results on 0..15: see PR / Overseer report.
