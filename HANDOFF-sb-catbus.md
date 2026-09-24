@@ -9,3 +9,8 @@ Task: new check:coplanar finding, cat-bus chassis, 0.969 m2, generation seed 860
 - Why only seed 128/r7: the sweep only counts faces whose normal faces the fixed iso camera; on that
   park the arrival bus parks with its door (-X) flank toward the rig (normal 0.50,0.32,-0.81).
 - Fix: doorway spans only the window band (sill..min(head, door top)), where the flank really is open.
+
+## Done (e901d52d)
+- check:coplanar EXIT 0: "186 same-facing coplanar seam(s) across 10 seed(s) and 10 space(s) ... none is new."
+- Revert proof: old catBus.ts -> EXIT 1, "NEW: ...chassis/<Mesh:RoundedBoxGeometry>|...cat-bus-shell-lower 0.969 m2, fighting at 1.1e-7 m, seed 860110031".
+- check:cat-bus EXIT 0, check:bus-journey EXIT 0, tsc and tsc -p tsconfig.test.json EXIT 0.
