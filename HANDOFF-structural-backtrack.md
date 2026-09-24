@@ -84,3 +84,7 @@ coping chamfer (#698 fix/procgen-last has the fix).
   seed; coplanar.yml cap 15->25); stall corner posts open-ended (3 seams). #705's "16 new" were restart-0 parks;
   at recorded restarts 0..15 had 4. Remaining: seed 4 duck bar end inside lane 3 bed (PLACEMENT) -> helper
   fix/sb-duck-ends (invariant + slot refusal).
+- Merged fix/sb-fountain (dda5c8ab): NavGrid reached-route end height sampled at the goal, not cell centre
+  (instrument+game bug, 10-16 mm on 10 of 16 seeds); check:fountain-hop clause 2b taps 46 basin points.
+- Still running: fix/sb-seed5 (castle-towers, cruiser cart), fix/sb-duck-ends. Then: emulate #705 pool=0..15 in a
+  scratch worktree and run pool-sweeping checks locally (not pushed; #705 owns the pool change).
