@@ -1,20 +1,11 @@
 import { Vector3 } from 'three';
-import {
-  type CoasterBriefs,
-  type CoasterProfile,
-  CoasterRoute,
-  type CoasterRouteOptions,
-  coasterProfile,
-  coasterProfileSearch,
-  coasterRouteBriefs,
-  coasterRouteBriefSearch,
-  solveCruiserRoute,
-} from '../../../src/world/coaster/route';
+import { type CoasterBriefs, type CoasterProfile, CoasterRoute, type CoasterRouteOptions } from '../../../src/world/coaster/route';
+import { coasterProfile, coasterProfileSearch, coasterRouteBriefs, coasterRouteBriefSearch, solveCruiserRoute } from './route';
 
 // The retry ladder, re-exported so `boot/parkGeneration.ts` (which imports
 // this module lazily, by design) can drive the SAME policy generator the
 // constructor drives — one owner, two cadences. See its doc in `route.ts`.
-export { cruiserRouteSearch } from '../../../src/world/coaster/route';
+export { cruiserRouteSearch } from './route';
 import type { SolvedRailRoute } from '../../../src/world/rail/generate';
 import { PARK_SEED } from '../../../src/world/parkManifest';
 import { Rng } from '../../../src/core/mathUtils';

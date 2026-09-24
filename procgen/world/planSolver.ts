@@ -21,8 +21,9 @@ import {
   type CruiserSearchStart,
   type PlannedCoaster,
 } from './coaster/solve';
-import { cruiserRouteSearch } from '../../src/world/coaster/route';
-import { RailRouteUnsolvable, type SolvedRailRoute } from '../../src/world/rail/generate';
+import { cruiserRouteSearch } from './coaster/route';
+import { type SolvedRailRoute } from '../../src/world/rail/generate';
+import { RailRouteUnsolvable } from './rail/generate';
 import { TrainRoute, trainRouteSearch } from '../../src/world/train/route';
 import { planStations } from '../../src/world/train/plan';
 import { slideSearch, type PlannedSlide } from './slide/solve';

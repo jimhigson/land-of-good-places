@@ -7,7 +7,7 @@
  * `advance()`, so both are measured against `GENERATION_BUDGET_MS * 3`.
  */
 import { performance } from 'node:perf_hooks';
-import { railRouteSearch } from '../src/world/rail/generate.ts';
+import { railRouteSearch } from '../procgen/world/rail/generate.ts';
 import { cruiserBriefs, finishCruiserPlan } from '../procgen/world/coaster/solve.ts';
 
 let briefMs = 0;

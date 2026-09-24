@@ -15,7 +15,8 @@ import { PLAYER_RADIUS } from '../../core/constants';
 import { STATION_SEEDS, STATION_SEED_RADIUS } from './stationSeeds';
 import { PARK_SEED } from '../parkManifest';
 import { type Pose2, type SegmentKind, type Vec2, turnVocabulary } from '../rail/segments';
-import { railRouteSearch, RailRouteUnsolvable, type RouteBrief, type SolvedRailRoute } from '../rail/generate';
+import { type RouteBrief, type SolvedRailRoute } from '../rail/generate';
+import { railRouteSearch, RailRouteUnsolvable } from '../../../procgen/world/rail/generate';
 import { TRAIN_MIN_TURN_RADIUS } from './turning';
 
 /**

@@ -29,12 +29,8 @@ import { crossSection } from '../../../src/world/coaster/clearance';
 import { drawnOnSphere, railFrameAt, type RailFrame } from '../../../src/world/rail/sweptRail';
 import { PARK_BOUNDARY, solverBoundary } from '../../../src/world/boundary';
 import { distanceToRailCorridor, RAIL_CORRIDOR_CLEARANCE } from '../../../src/world/train/plan';
-import {
-  type OpenRouteBrief,
-  RailRouteUnsolvable,
-  type SolvedRailRoute,
-  railRouteSearch,
-} from '../../../src/world/rail/generate';
+import { type OpenRouteBrief, type SolvedRailRoute } from '../../../src/world/rail/generate';
+import { RailRouteUnsolvable, railRouteSearch } from '../rail/generate';
 import { type Pose2, type SegmentKind, turnVocabulary } from '../../../src/world/rail/segments';
 import { Geo, worldYAtAltitude, worldYAtRadius } from '../../../src/world/geo';
 import { altitudeAt } from '../../../src/world/terrain';
