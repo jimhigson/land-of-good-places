@@ -125,11 +125,13 @@ export interface ParkFile {
     /** Every world-phase decision (`worldPhase.ts`'s `WorldDecisions`), as plain data. */
     readonly world: Json;
     /**
-     * Decisions the `World` makes while it builds, by the one search each
-     * still has in build tooling: `bridges` — one `BridgeDecision` or null per
-     * crossing, in crossing order.
+     * Decisions made while the `World` builds (and the boundary, decided when
+     * the park is first asked about), each by a search that exists only in
+     * build tooling — keyed by {@link BUILT_DECISIONS}. `bridges` is one
+     * `BridgeDecision` or null per crossing; the rest are their own values as
+     * plain data (`built.ts`).
      */
-    readonly built: { readonly bridges: Json };
+    readonly built: { readonly [key: string]: Json };
   };
   /** The plan's features in the order the driver committed them to the claims registry. */
   readonly planOrder: readonly string[];
@@ -138,6 +140,15 @@ export interface ParkFile {
 /** The features a park file carries, in the driver's build order. */
 export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings', 'pathGraph', 'world', 'built'] as const;
 export type ParkFileFeature = (typeof PARK_FILE_FEATURES)[number];
+
+/**
+ * Every decision in {@link ParkFile.features}'s `built`: bridge footprints, the
+ * Sky Cruiser's pylons, the slide's legs, the rail race's exit and arch, the
+ * ferris wheel's exit, and the park boundary's radii. A file missing any of
+ * them cannot be used — the game would meet the gap mid-play.
+ */
+export const BUILT_DECISIONS = ['bridges', 'pylons', 'slideLegs', 'railRace', 'ferrisExit', 'boundary'] as const;
+export type BuiltDecision = (typeof BUILT_DECISIONS)[number];
 
 /** The decided plan, as `parkPlan.ts` holds it — what {@link encodeParkFile} reads. */
 export interface DecidedPlan {
@@ -150,7 +161,8 @@ export interface DecidedPlan {
   readonly pathLattice: LatticeStateSnapshot;
   readonly planOrder: readonly string[];
   readonly world: WorldDecisions;
-  readonly bridges: readonly (BridgeDecision | null)[];
+  /** Every {@link BUILT_DECISIONS} value, as the searches returned it. */
+  readonly built: Readonly<Record<string, unknown>>;
 }
 
 // ---------------------------------------------------------------- plain data
@@ -191,7 +203,7 @@ function unnum(value: Json, path: string): number {
 }
 
 /** Plain data back in: tagged numbers restored, everything else as written. */
-function unplain(value: Json, path: string): unknown {
+export function unplain(value: Json, path: string): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (isTagged(value)) return unnum(value, path);
   if (isVector(value)) {
@@ -262,6 +274,9 @@ export function parkFileProblem(file: unknown, seed: number): string | null {
   const missing = PARK_FILE_FEATURES.filter((name) => features[name] === undefined);
   if (missing.length > 0) return `missing ${missing.join(', ')}`;
   if (!Array.isArray(candidate.planOrder)) return 'no planOrder';
+  const built = (features['built'] ?? {}) as Record<string, unknown>;
+  const absent = BUILT_DECISIONS.filter((key) => built[key] === undefined);
+  if (absent.length > 0) return `its built decisions lack ${absent.join(', ')}`;
   return null;
 }
 
@@ -419,5 +434,5 @@ export function readWorld(record: Json): WorldDecisions {
 
 /** One bridge decision (or null) per crossing, in crossing order. */
 export function readBridges(file: ParkFile): readonly (BridgeDecision | null)[] {
-  return unplain(file.features.built.bridges, 'built.bridges') as readonly (BridgeDecision | null)[];
+  return unplain(file.features.built['bridges'] ?? null, 'built.bridges') as readonly (BridgeDecision | null)[];
 }

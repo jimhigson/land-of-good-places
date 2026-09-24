@@ -94,7 +94,7 @@ function writeRoute(route: SolvedRailRoute, path: string): RouteRecord {
 
 /** The decided plan as a park file. `build` is stamped later, by the bundle that ships it. */
 export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamped'): ParkFile {
-  const { layout, cruiser, train, slide, crossings, pathGraph, pathLattice, planOrder, world, bridges } = plan;
+  const { layout, cruiser, train, slide, crossings, pathGraph, pathLattice, planOrder, world, built } = plan;
 
   const entries: Json[] = [];
   for (const [id, entry] of layout.entries) {
@@ -138,7 +138,7 @@ export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamp
       crossings: plain(crossings, 'crossings'),
       pathGraph: { graph: plain(pathGraph, 'pathGraph'), lattice: plain(pathLattice, 'pathGraph.lattice') },
       world: writeWorld(world),
-      built: { bridges: plain(bridges, 'built.bridges') },
+      built: Object.fromEntries(Object.entries(built).map(([key, value]) => [key, plain(value, `built.${key}`)])),
     },
     planOrder: [...planOrder],
   };

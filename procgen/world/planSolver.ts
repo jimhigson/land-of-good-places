@@ -54,7 +54,6 @@ import type { PlanSolverRun } from '../../src/world/prebuilt/solverPort';
 import { type ParkFile } from '../../src/world/prebuilt/parkFile';
 import { encodeParkFile } from './parkFileWriter';
 import type { WorldDecisions } from '../../src/world/worldPhase';
-import type { BridgeDecision } from '../../src/world/train/bridgeFootprint';
 
 
 /**
@@ -503,7 +502,7 @@ function printTrace(solve: ParkSolve): void {
  * writes: the plan (forced if nothing has decided it) and the world phase's
  * decisions, which only exist once a `World` has been built.
  */
-export function parkPlanFile(world: WorldDecisions, bridges: readonly (BridgeDecision | null)[], build?: string): ParkFile {
+export function parkPlanFile(world: WorldDecisions, built: Readonly<Record<string, unknown>>, build?: string): ParkFile {
   return encodeParkFile(
     PARK_SEED,
     {
@@ -516,7 +515,7 @@ export function parkPlanFile(world: WorldDecisions, bridges: readonly (BridgeDec
       pathLattice: planPart('pathLattice'),
       planOrder: parkPlanOrder(),
       world,
-      bridges,
+      built,
     },
     build,
   );

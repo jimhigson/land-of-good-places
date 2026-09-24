@@ -80,10 +80,21 @@ if (solving) {
   const { worldPhaseDecisions } = await import('../procgen/world/worldPhaseSolver.ts');
   const world = worldPhaseDecisions();
   if (!world) throw new Error('park-file-probe: the World was built but the world phase recorded no decisions');
-  const { builtBridgeDecisions } = await import('../procgen/world/builtDecisions.ts');
-  const bridges = builtBridgeDecisions();
-  if (!bridges) throw new Error('park-file-probe: the World was built but no bridge search was recorded');
-  const text = JSON.stringify(solver.parkPlanFile(world, bridges));
+  // Ask for every built decision the game can ask for, so a lazily decided
+  // one (the ferris wheel's exit is only read when somebody rides it) is in
+  // the file rather than missed mid-play.
+  const { FERRIS_WHEEL_EXIT } = await import('../src/minigames/ferrisWheel/exit.ts');
+  const { RAIL_RACE_PLAN } = await import('../src/world/railRace/plan.ts');
+  const { PARK_BOUNDARY } = await import('../src/world/boundary.ts');
+  void FERRIS_WHEEL_EXIT.x;
+  void RAIL_RACE_PLAN.exitX;
+  void PARK_BOUNDARY.area;
+  const { builtDecisions } = await import('../procgen/world/builtDecisions.ts');
+  const built = builtDecisions();
+  if (built.missing.length > 0) {
+    throw new Error(`park-file-probe: the park was built but these decisions were never made: ${built.missing.join(', ')}`);
+  }
+  const text = JSON.stringify(solver.parkPlanFile(world, built.values));
   writeFileSync(path, text);
   bytes = Buffer.byteLength(text);
 }
