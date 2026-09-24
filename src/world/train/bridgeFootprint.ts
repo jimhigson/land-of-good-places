@@ -576,6 +576,15 @@ export function planBridgeFootprints(
 // The early, conservative reservation — no real collision world to ask yet.
 // --------------------------------------------------------------------------
 
+/**
+ * The early, conservative reservation alone — what the scenery keep-out reads
+ * (`bridgeKeepout.ts`). Its own entry point so that asking for it does not
+ * reach the real search, which only build tooling runs.
+ */
+export function planConservativeFootprints(crossings: readonly LevelCrossing[]): BridgeFootprint[] {
+  return planConservative(crossings);
+}
+
 function planConservative(crossings: readonly LevelCrossing[]): BridgeFootprint[] {
   return crossings.map((crossing) => {
     const cx = crossing.x;
