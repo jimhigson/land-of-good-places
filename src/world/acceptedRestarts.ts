@@ -34,4 +34,13 @@ export const ACCEPTED_RESTARTS: Readonly<Record<number, number>> = {
   13: 0,
   14: 0,
   15: 0,
+  24: 0,
+  128: 7,
+  131: 0,
+  208: 5,
+  274: 1,
+  326: 0,
+  428: 1,
+  451: 2,
+  20260728: 0,
 };
