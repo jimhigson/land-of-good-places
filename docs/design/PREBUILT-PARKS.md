@@ -7,7 +7,141 @@ this that is the park's layout as json, but not every mesh etc, so that the
 client can load a reasonably small park with all decisions made, but not just
 some huge 3d model or models."*
 
-## Recommendation
+## As built, 24 September 2026 (PR #705)
+
+Jim's two rulings of 24 September changed the proposal below in two ways:
+*"there should be no ability to build built into the game as delivered —
+seeds not downloadable is an error"*, and *"we only support seeds 0..15, no
+others."* So there is **no client fallback**: the game carries no solver at
+all, and seeds 0..15 are the only parks. What shipped:
+
+- **`procgen/`** holds every search and both backtracking drivers — build-time
+  Node code. **`src/` never imports it** (`check:procgen-boundary`), and the
+  built bundle contains none of its 163 procgen-only strings
+  (`check:client-no-solver`). Node tooling reaches the solver through one port,
+  `src/world/prebuilt/solverPort.ts`, filled lazily by
+  `scripts/ts-extension-resolver-register.mjs` (a sync `registerHooks` hook, so
+  `require()` shares the module cache) and, for vitest, by
+  `test/procgen/parkFacts.ts`.
+- **The park file carries every decision the searches make**, not only the
+  plan's: layout, cruiser, train, slide, bridge sites, the path graph and the
+  street paving it leaves behind, the plan's commit order, the whole world
+  phase (stall moves, walls, trees and bushes as the RNG state they were rolled
+  from, fairy poles, lamps, rail-race trestles, and every claim committed), and
+  the bridge footprints the `World` searches for while it builds. Format 1,
+  owned by `src/world/prebuilt/parkFile.ts` (reader) and
+  `procgen/world/parkFileWriter.ts` (writer).
+- **No file is an error, never a solve.** A seed outside 0..15, a missing file,
+  a file from another build or a failed download shows
+  `ui/ParkUnavailableScreen.ts` — the seed and the reason. No timeout: a park
+  is precached with the bundle that reads it. **Retry means reload**, which
+  fetches again and never solves; a `?seed=` page also offers "Go to my park".
+- **The dev server serves park files too**, solved by the Node solver on first
+  request and cached per source hash (`scripts/lib/dev-parks.mjs`), so the dev
+  client runs the production path.
+- **Proof, every build:** `build:parks` solves each seed in one process, hydrates
+  it in another, and requires the two whole-park digests to match, the hydrate
+  process to have constructed no driver and run no world search, and a
+  perturbed file to digest differently. `check:prebuilt-park` runs the same on
+  the default seed in the chain.
+
+### Sizes of the sixteen parks (format 1, as built)
+
+Measured by `pnpm run build:parks` on an M-series Mac; every row proven.
+
+| seed | raw | gzip -9 | brotli 11 | plan searched | plan hydrated |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 103.6 KB | 33.8 KB | 28.3 KB | 8.3 s | 11 ms |
+| 1 | 125.9 KB | 44.4 KB | 37.7 KB | 3.1 s | 9 ms |
+| 2 | 125.4 KB | 43.9 KB | 37.0 KB | 8.2 s | 9 ms |
+| 3 | 119.4 KB | 40.4 KB | 33.8 KB | 31.2 s | 10 ms |
+| 4 | 116.5 KB | 40.1 KB | 33.7 KB | 47.7 s | 18 ms |
+| 5 | 105.9 KB | 35.5 KB | 29.9 KB | 3.4 s | 11 ms |
+| 6 | 118.0 KB | 40.5 KB | 33.9 KB | 5.3 s | 10 ms |
+| 7 | 107.5 KB | 35.0 KB | 29.4 KB | 239.0 s | 7 ms |
+| 8 | 117.8 KB | 39.2 KB | 32.9 KB | 7.8 s | 10 ms |
+| 9 | 109.5 KB | 36.2 KB | 30.2 KB | 4.1 s | 10 ms |
+| 10 | 117.2 KB | 40.7 KB | 34.2 KB | 5.5 s | 10 ms |
+| 11 | 102.8 KB | 32.0 KB | 26.7 KB | 0.9 s | 9 ms |
+| 12 | 115.7 KB | 38.3 KB | 31.7 KB | 1.9 s | 9 ms |
+| 13 | 104.3 KB | 33.9 KB | 28.3 KB | 2.1 s | 9 ms |
+| 14 | 110.7 KB | 38.5 KB | 32.5 KB | 5.7 s | 8 ms |
+| 15 | 119.0 KB | 39.8 KB | 33.1 KB | 11.2 s | 8 ms |
+| **total** | **1819.2 KB** | **612.1 KB** | **513.3 KB** | | |
+
+The files grew from the plan-only ~25 KB of step 1 to ~110 KB because they now
+carry the world phase. Where the bytes are, on the default seed (raw): the
+world phase's claims ~30 KB (fairy lights, lamps, stalls and trestles; the
+trees' and bushes' claims are derived on read and cost nothing), bush
+positions ~22 KB, the path graph ~17 KB, the cruiser ~11 KB. The claims could
+be derived from the decisions like the trees' are, which would take roughly a
+quarter off; not done yet.
+
+### The bundle, before and after
+
+JavaScript emitted by `vite build`:
+
+| | raw | brotli 11 |
+|---|---:|---:|
+| before (client solved) | 3,430,754 B | 783,721 B |
+| after (no solver) | 3,304,071 B | 744,315 B |
+
+The `Garden` chunk (208,636 B, where the searches lived) is gone; the `Game`
+chunk grew by ~12 KB for the hydration code and the file reader.
+
+### Checks retired, and why
+
+| check / mechanism | why it no longer applies |
+|---|---|
+| `check:solve-cost` | budgeted the CPU the client spent searching; the client searches for nothing |
+| `check:park-boot` | proved the client's search was sliced across frames without stutter; nothing is sliced |
+| `check:arrival-completes` | proved a slow device's search finished inside the bus ride; loading is a fetch and a few ms of hydration. `check:ground-claims` still drives the real `ParkGeneration` to completion |
+| `SolveScheduler` (`src/boot/solveScheduler.ts`) | sliced the solve across frames |
+| `CLIENT_BUNDLE` flag | briefly used to fold the search out of the bundle; replaced by the import boundary |
+| `measure-generation-slices`, `measure-cruiser-slices`, `profile-park-boot-slice` | measured the slicing of that solve |
+
+Kept deliberately: the searches' own generator `yield`s. They are how the
+driver takes turns between features (Jim's round-robin, Decision 12), not
+only how a browser frame was spared, and `feat/structural-backtrack` is
+reworking that driver now. A coarse bound on `build:parks` replaces the
+frame budgets: an 18-minute step timeout in CI and a per-seed kill
+(`LGP_PARK_TIMEOUT_MS`, 12 min) that names the seed.
+
+### Still decided on the client
+
+These run while the `World` builds, each a deterministic loop over candidates
+derived from the decided plan: Sky Cruiser pylons (`coaster/pylons.ts`), slide
+legs (`slide/supports.ts`), the rail race's exit and arch (`railRace/plan.ts`),
+the boundary's radii (`boundary.ts`), the ferris wheel's exit. Whether these
+count as "building" is Jim's call (asked); moving them is the same pattern.
+
+### Seeds: what the switch to 0..15 cost in coverage
+
+At the base (`ae8257fb`) only seeds 2 and 5 of 0..15 pass `check:park` and
+every invariant; that is why #705 waits on `feat/structural-backtrack`. The
+old per-seed invariant files were on 20260728, 11, 24, 131 and 326; the old
+pool also held 128, 208, 274, 428 and 451. Their failures at the base, and
+whether a seed of 0..15 still shows each one:
+
+| failure on a retired seed | still reproduced on 0..15 |
+|---|---|
+| 11, 451: *built the park it was asked for* | 11 |
+| 11, 128, 131, 274, 451: *every modelled coping stone sits on the wall it caps* | 6, 11 |
+| 131: *no two close destinations are left with a wildly disproportionate paved detour* | 7 |
+| 208, 326: *the Rail Race finish rainbow stands on the ground* | 6 |
+| 128: `check:park` — `route.unreachable` 3, `route.crossesRail` 1, `poi.stranded` 57; *every doormat can be walked to*; *every railway crossing has a bridge you can walk to* | **none** |
+| 208: *the park's own paving rides over every bridge, none left in a tunnel* | **none** |
+| 274: *every spur starts on the drawn centre line of the path it branches from* | **none** |
+| 428: *no two stations stand in each other* | **none** |
+
+The four **none** rows are known generator faults that no longer have a seed
+exhibiting them. The invariants that catch them still run on all sixteen
+seeds. The default seed moved from 20260728 to 5 (see `parkSeedPool.ts`).
+
+---
+
+## Recommendation (the proposal, 23 September)
+
 
 **Ship the park's *decisions* as a small, versioned JSON file per seed — never
 its geometry — solved in CI by a separate `build:parks` step, emitted into the
@@ -300,8 +434,8 @@ Each step ships green on its own.
 
 ## Decisions only Jim can make
 
-1. **Keep the client solver for `?seed=` off the pool** (recommended: yes,
-   it costs nothing and keeps developers' seeds working), or strip it from
-   production and serve only pool parks?
-2. **Grow the pool** now that a park costs the child nothing to generate —
-   e.g. 50 parks is ~0.5 MB precached and ~2 minutes of CI on a cache miss?
+1. ~~Keep the client solver for off-pool `?seed=`?~~ **Decided 24 Sep: no.**
+   An off-pool seed is an error.
+2. ~~Grow the pool?~~ **Decided 24 Sep: seeds 0..15, no others.**
+3. **Open:** do the placement loops listed under "Still decided on the
+   client" count as building, to be moved into the park file?
