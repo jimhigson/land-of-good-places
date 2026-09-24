@@ -546,7 +546,7 @@ function builders(): readonly FeatureBuilder[] {
       // where the plots, the loop and its crossings stand. Never shipped: the
       // park unwinds as for a pinched lane.
       yield 0;
-      const legibility = DISABLE_LEGIBILITY_SCREEN ? null : illegiblePaving(graph, drawn, train.route);
+      const legibility = DISABLE_LEGIBILITY_SCREEN ? null : yield* illegiblePaving(graph, drawn, train.route);
       if (legibility) {
         return refusal(`paths: ${legibility}`, { consumed: ['train', 'layout'] });
       }
@@ -586,7 +586,13 @@ function builders(): readonly FeatureBuilder[] {
  * this can only ever be looser than the built park's verdict at a bridge,
  * never stricter, and a park the invariants accept is never refused here).
  */
-function illegiblePaving(graph: PathGraph, drawn: readonly PathSample[], route: TrainRoute): string | null {
+function* illegiblePaving(
+  graph: PathGraph,
+  drawn: readonly PathSample[],
+  route: TrainRoute,
+): Generator<number, string | null, void> {
+  // Four pieces, not one: together they measured 7-8 ms on the canonical
+  // seed, the whole of a slice's budget (see the screens' own note above).
   let footprints: readonly PlannedFootprint[] = [];
   try {
     footprints = planBridgeFootprints(computeCrossings(route, [], drawn));
@@ -594,7 +600,9 @@ function illegiblePaving(graph: PathGraph, drawn: readonly PathSample[], route: 
     // An off-site crossing — refused by the screen above before this runs.
   }
   const ground = plannedPavingGround((x, z) => footprints.some((footprint) => footprint?.covers(x, z) === true));
+  yield 0;
   const edges = graph.edges.filter((edge) => edge.paved).map((edge) => drawnEdgeOf(edge.route));
+  yield 0;
   const diagonal = longDiagonals(edges, ground)[0];
   if (diagonal) {
     return (
@@ -603,6 +611,7 @@ function illegiblePaving(graph: PathGraph, drawn: readonly PathSample[], route: 
       `(${diagonal.carriers.join(', ')})`
     );
   }
+  yield 0;
   const run = offLatticeStreetRuns(edges, ground, STREET_PITCH)[0];
   if (run) {
     return (
