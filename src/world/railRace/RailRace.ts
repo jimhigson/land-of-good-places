@@ -491,6 +491,12 @@ export class RailRace implements GameSystem {
     this.walkPastRing.track.registerCollision();
     for (const ring of [this.walkPastRing, this.raceRing]) {
       ring.track.setHazardLevel(this.activeLevel);
+      // **Never drawn together** — {@link setActiveRing} shows exactly one.
+      // Declared on the groups so a sweep that ignores `visible` (it must: most
+      // of the game is hidden at build time) can still tell that two faces from
+      // the two rings never meet on screen. See `SHOWN_ALONE` in
+      // `scripts/coplanar-sweep.mts`, the only reader.
+      ring.track.group.userData['shownAlone'] = { set: 'railRace:ring', member: ring.track.group.name };
       this.group.add(ring.track.group);
     }
     this.activeRing = this.walkPastRing;
