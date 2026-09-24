@@ -53,3 +53,6 @@
   (3) gridDetour straightening: lattice-kept second pass with dog-legs via lattice lines, used only when the
   ordinary one carries an off-lattice street run and it does not (seed 2 spur-stall.dodgems).
 - After (pd-after-*.log): 131, 24, 11, 20260728, 2 all accepted, failures [] (11's base bush fail gone).
+- check:coplanar exit 0 (twice; second after dropping the LOOSE bridge wallTop|terrain baseline entry):
+  "186 same-facing coplanar seam(s) across 10 seed(s) ... none is new". tsc + typecheck:test exit 0.
+- Not run: pnpm run check, test:procgen full. Base worktree removed. Branch pushed; no PR.
