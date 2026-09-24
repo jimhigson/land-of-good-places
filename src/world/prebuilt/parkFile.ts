@@ -14,7 +14,7 @@ import type { Claim, ClaimKind, FeatureContribution } from '../../boot/groundCla
 import { Rng } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
 import { rollTree, type TreeKind } from '../treeModel';
-import { rollBush, type BushDecision, type TreeDecision } from '../Scenery';
+import { bushClaim, rollBush, treeClaim, type BushDecision, type TreeDecision } from '../Scenery';
 import { PARK_FILE_FORMAT } from './parkFileName';
 
 /**
@@ -456,8 +456,23 @@ export function readPathGraph(record: PathGraphRecord): { graph: PathGraph; latt
  *   scatter used, from the same ground height;
  * - a **claim** is `[kind, x, z, radius]` (a disc) or
  *   `[kind, x1, z1, x2, z2, halfWidth]` (a capsule), `kind` an index into
- *   {@link CLAIM_KINDS}.
+ *   {@link CLAIM_KINDS};
+ * - and the **trees' and bushes' claims** are not written at all when they are
+ *   exactly one {@link treeClaim}/{@link bushClaim} per decision, section `i`
+ *   for decision `i` — the writer checks that against what was committed and
+ *   writes them out in full if it is ever not so.
  */
+const DERIVED = 'derived';
+
+/** A feature's sections as `treeClaim`/`bushClaim` would make them from its decisions. */
+function derivedSections(
+  feature: string,
+  world: Pick<WorldDecisions, 'trees' | 'bushes'>,
+): readonly (readonly [number, FeatureContribution])[] | null {
+  if (feature === 'trees') return world.trees.map((t, i) => [i, { claims: [treeClaim(t.x, t.z)] }] as const);
+  if (feature === 'bushes') return world.bushes.map((b, i) => [i, { claims: [bushClaim(b.x, b.z)] }] as const);
+  return null;
+}
 const CLAIM_KINDS: readonly ClaimKind[] = ['footprint', 'corridor', 'walkable', 'surface'];
 
 function writeClaim(claim: Claim, path: string): Json {
@@ -506,10 +521,14 @@ function writeWorld(world: WorldDecisions): Json {
     fairyPoles: plain(world.fairyPoles, 'world.fairyPoles'),
     lamps: plain(world.lamps, 'world.lamps'),
     trestles: plain(world.trestles, 'world.trestles'),
-    claims: world.claims.map(({ feature, sections }) => [
-      feature,
-      sections.map(([section, c]) => [section, writeContribution(c, `world.claims.${feature}.${section}`)]),
-    ]),
+    claims: world.claims.map(({ feature, sections }) => {
+      const written = sections.map(([section, c]) => [section, writeContribution(c, `world.claims.${feature}.${section}`)]);
+      const derived = derivedSections(feature, world);
+      const same =
+        derived !== null &&
+        JSON.stringify(derived.map(([section, c]) => [section, writeContribution(c, 'derived')])) === JSON.stringify(written);
+      return [feature, same ? DERIVED : written];
+    }),
   };
 }
 
@@ -529,7 +548,12 @@ export function readWorld(record: Json): WorldDecisions {
     return { x, z, rollState: state as number, blobs: rollBush(new Rng(state as number), x, z), resume: 0 };
   });
   const claims = (r['claims'] as readonly Json[]).map((raw) => {
-    const [feature, sections] = raw as readonly [string, readonly Json[]];
+    const [feature, sections] = raw as readonly [string, readonly Json[] | typeof DERIVED];
+    if (sections === DERIVED) {
+      const derived = derivedSections(feature, { trees, bushes });
+      if (!derived) throw new Error(`park file: world.claims.${feature} is derived, but only trees and bushes can be`);
+      return { feature, sections: derived };
+    }
     return {
       feature,
       sections: sections.map((entry) => {

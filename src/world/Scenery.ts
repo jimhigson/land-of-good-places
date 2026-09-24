@@ -671,6 +671,16 @@ const TARGET_TREES = 72;
 const TREE_BUDGET = 180000;
 const BUSH_BUDGET = 4200;
 
+/** The ground a tree claims — its trunk. One owner for the builder and a prebuilt park. */
+export function treeClaim(x: number, z: number): Claim {
+  return disc(x, z, TREE_TRUNK_CLAIM);
+}
+
+/** The ground a bush clump claims — its collider. One owner for the builder and a prebuilt park. */
+export function bushClaim(x: number, z: number): Claim {
+  return disc(x, z, BUSH_COLLIDER);
+}
+
 function disc(x: number, z: number, radius: number): Claim {
   return { kind: 'footprint', shape: { shape: 'disc', x, z, radius } };
 }
