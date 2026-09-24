@@ -946,8 +946,18 @@ function gridDetourAttempt(
   // 20-corner staircase from the gate to the bridge's east foot, where one
   // dog-leg past the ramp's flank was clear. So each stretch is replaced by
   // the farthest single elbow that is still walkable, greedily from the start.
-  const straightened = straightenStaircase(collapseCollinear(gridPoints), (ax, az, bx, bz) =>
-    walkable(ax, az, bx, bz, ROUTE_WALKER_PAD),
+  //
+  // A leg the straightening *adds* must not itself be a street on a private
+  // line: the staircase it replaces is a run of 2 m steps that no street
+  // measure reads as a street, and pulling it into one 20 m leg on the
+  // fence's own line trades a wiggle for exactly the defect this exists to
+  // avoid (seed 2's `spur-stall.dodgems`, x = 62 from z = 32.8 to 54, 3.7 m
+  // off the lattice). Such a leg is only taken on a lattice line; otherwise
+  // the next-farthest jump is tried, down to the staircase's own next step.
+  const straightened = straightenStaircase(
+    collapseCollinear(gridPoints),
+    (ax, az, bx, bz) => walkable(ax, az, bx, bz, ROUTE_WALKER_PAD),
+    legKeepsToTheLattice,
   );
   straightened.push([b[0], b[1]]);
   return collapseCollinear(straightened);
@@ -956,7 +966,8 @@ function gridDetourAttempt(
 /**
  * Replace runs of an axis-aligned polyline with the fewest elbows that stay
  * walkable: from each kept point, jump to the farthest later point reachable by
- * one straight leg or one right-angle elbow whose legs `clear` accepts. The
+ * one straight leg or one right-angle elbow whose legs `clear` and `legible` both
+ * accept (the input's own next point is never asked `legible`: it is not new). The
  * first and last points are kept; every leg of the result is axis-aligned
  * because every elbow is. Never longer in corners than the input, since the
  * input's own next point is always a candidate.
@@ -964,6 +975,7 @@ function gridDetourAttempt(
 function straightenStaircase(
   points: readonly (readonly [number, number])[],
   clear: (ax: number, az: number, bx: number, bz: number) => boolean,
+  legible: (ax: number, az: number, bx: number, bz: number) => boolean = () => true,
 ): [number, number][] {
   if (points.length <= 2) return points.map((p) => [p[0], p[1]] as [number, number]);
   const out: [number, number][] = [[(points[0] as readonly [number, number])[0], (points[0] as readonly [number, number])[1]]];
@@ -974,7 +986,7 @@ function straightenStaircase(
     for (let j = points.length - 1; j > i + 1; j -= 1) {
       const to = points[j] as readonly [number, number];
       if (from[0] === to[0] || from[1] === to[1]) {
-        if (clear(from[0], from[1], to[0], to[1])) {
+        if (legible(from[0], from[1], to[0], to[1]) && clear(from[0], from[1], to[0], to[1])) {
           out.push([to[0], to[1]]);
           i = j;
           jumped = true;
@@ -987,7 +999,11 @@ function straightenStaircase(
         [from[0], to[1]],
       ];
       const corner = corners.find(
-        (c) => clear(from[0], from[1], c[0], c[1]) && clear(c[0], c[1], to[0], to[1]),
+        (c) =>
+          legible(from[0], from[1], c[0], c[1]) &&
+          legible(c[0], c[1], to[0], to[1]) &&
+          clear(from[0], from[1], c[0], c[1]) &&
+          clear(c[0], c[1], to[0], to[1]),
       );
       if (corner) {
         out.push([corner[0], corner[1]], [to[0], to[1]]);
@@ -3966,6 +3982,27 @@ function snapRunsToLattice(
  * continuous router): a shortcut is not worth drawing a rogue street line
  * for, where a spur — mandatory connectivity — is allowed the fallback.
  */
+/** An axis-aligned run this long reads as a street — the lattice invariant's own `MIN_STREET_RUN`. */
+const STREET_RUN_MIN = 8;
+/** How far off a lattice line a street's line may sit and still be on it, metres. */
+const STREET_LINE_SLACK = 0.9;
+
+/**
+ * True when the straight leg a→b could not read as a street on a private
+ * line: shorter than a street, or axis-aligned on a lattice line through the
+ * plaza. A diagonal leg is not this function's business and passes.
+ */
+function legKeepsToTheLattice(ax: number, az: number, bx: number, bz: number): boolean {
+  if (Math.hypot(bx - ax, bz - az) < STREET_RUN_MIN) return true;
+  const offLine = (line: number, anchor: number): number => {
+    const remainder = ((((line - anchor) % STREET_PITCH) + STREET_PITCH) % STREET_PITCH);
+    return Math.min(remainder, STREET_PITCH - remainder);
+  };
+  if (ax === bx) return offLine(ax, PLAZA.x) <= STREET_LINE_SLACK;
+  if (az === bz) return offLine(az, PLAZA.z) <= STREET_LINE_SLACK;
+  return true;
+}
+
 function carriesAnOffLatticeStreetRun(points: readonly (readonly [number, number])[]): boolean {
   // Arc length per point, for the door-approach allowance (the same one
   // the invariant grants — a run confined to a route's last metres is the
@@ -3989,12 +4026,12 @@ function carriesAnOffLatticeStreetRun(points: readonly (readonly [number, number
     const startAlong = along[runStart] as number;
     const endAlong = along[endIndex] as number;
     axis = null;
-    if (length < 8) return false;
+    if (length < STREET_RUN_MIN) return false;
     if (endAlong <= 15 || startAlong >= total - 15) return false; // door approach
     const line = runAxis === 'z' ? (a[0] + b[0]) / 2 : (a[1] + b[1]) / 2;
     const anchor = runAxis === 'z' ? PLAZA.x : PLAZA.z;
     const remainder = ((((line - anchor) % STREET_PITCH) + STREET_PITCH) % STREET_PITCH);
-    if (Math.min(remainder, STREET_PITCH - remainder) <= 0.9) return false;
+    if (Math.min(remainder, STREET_PITCH - remainder) <= STREET_LINE_SLACK) return false;
     // Threading ground the lattice does not serve: when both neighbouring
     // lattice lines are obstructed over this run's own span, the run is
     // excused — the same allowance the invariant grants, measured with the
