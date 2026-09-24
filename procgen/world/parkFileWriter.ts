@@ -3,7 +3,8 @@ import { type SolvedRailRoute } from '../../src/world/rail/generate';
 import { PARK_FILE_FORMAT } from '../../src/world/prebuilt/parkFileName';
 import { type Claim, type FeatureContribution } from '../../src/boot/groundClaims';
 import { type WorldDecisions } from '../../src/world/worldPhase';
-import { CLAIM_KINDS, DERIVED, SEGMENT_KEYS, derivedSections, type DecidedPlan, type Json, type ParkFile, type RouteRecord, type SegmentRecord } from '../../src/world/prebuilt/parkFile';
+import { CLAIM_KINDS, DERIVED, SEGMENT_KEYS, derivedSections, type DecidedPlan, type ParkFile, type RouteRecord, type SegmentRecord } from '../../src/world/prebuilt/parkFile';
+import { type Json } from '../../src/world/prebuilt/plainData';
 /**
  * **Writing a park file** — the encoder half of the format, which only
  * `build:parks` runs. The format itself, and the reader the game uses, are

@@ -5,7 +5,7 @@ export { GENTLE_CURVATURE_RADIUS, PROFILE_SAMPLES, minCurvatureRadius };
 import { offeredParkFile, parkFileMissingReason } from './prebuilt/parkFileStore';
 import { ParkUnavailable } from './prebuilt/parkUnavailable';
 import { boundarySolver } from './prebuilt/solverPort';
-import { parkFileProblem, unplain } from './prebuilt/parkFile';
+import { parkFileProblem, unplain } from './prebuilt/plainData';
 import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END } from '../core/constants';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from './entrance/layout';
 import { PARK_SEED } from './parkManifest';

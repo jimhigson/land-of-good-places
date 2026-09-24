@@ -57,17 +57,8 @@ import { offerPrewarmedGroundClaims } from '../boot/groundClaimsPrewarm';
 import { offeredParkFile, parkFileMissingReason } from './prebuilt/parkFileStore';
 import { ParkUnavailable } from './prebuilt/parkUnavailable';
 import { parkSolver, type PlanSolverRun } from './prebuilt/solverPort';
-import {
-  parkFileProblem,
-  readCruiser,
-  readCrossings,
-  readLayout,
-  readPathGraph,
-  readSlide,
-  readTrain,
-  type ParkFile,
-  PARK_FILE_FEATURES,
-} from './prebuilt/parkFile';
+import { readCruiser, readCrossings, readLayout, readPathGraph, readSlide, readTrain, type ParkFile, PARK_FILE_FEATURES } from './prebuilt/parkFile';
+import { parkFileProblem } from './prebuilt/plainData';
 
 export interface TrainDecision {
   readonly route: TrainRoute;

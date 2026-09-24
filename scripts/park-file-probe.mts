@@ -28,7 +28,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 
 import { cpuMs } from './lib/cpuClock.mts';
-import type { Json, ParkFile } from '../src/world/prebuilt/parkFile.ts';
+import type { ParkFile } from '../src/world/prebuilt/parkFile.ts';
+import type { Json } from '../src/world/prebuilt/plainData.ts';
 // From the leaf, not `parkFile.ts`: nothing that loads the park may be
 // imported before a hydrate run has offered its file.
 import { PARK_FILE_FEATURES } from '../src/world/prebuilt/parkFileName.ts';
