@@ -72,9 +72,11 @@ export const RATCHET: Readonly<Record<string, Recorded>> = {
   'anchor.reach:waterFight': {
     worst: 0,
     why:
-      'Declared at the worst cross-seed build-out (18.5), which some seeds ' +
-      'hit exactly — the finding then fires at zero, and this entry is what ' +
-      'holds it there rather than re-opening an allowance.',
+      'Held at zero. The overrun that used to fire here (0.1 to 1.1 m past ' +
+      'the declared 19 m, varying per park) was the water-gun rack standing at ' +
+      'a world offset from a per-park door, outside the plot; it now stands ' +
+      'inside the rectangle by construction. Kept rather than deleted so any ' +
+      'overrun fails instead of re-opening an allowance.',
   },
   // `anchor.reach:dodgems` (1.7) and `anchor.reach:waterFight` (2.3) were
   // DELETED 7 Aug 2026: the manifest now declares each ride's MEASURED

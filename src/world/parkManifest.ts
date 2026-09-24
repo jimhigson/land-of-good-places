@@ -183,12 +183,14 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
   {
     id: 'waterFight',
     footprint: { kind: 'rect', halfX: 12, halfZ: 11 },
-    // The pools and hedges are seeded per park. The worst sweep measured 18.4
-    // (seed 5) on the flat park; on the sphere the rim dressing leans outward
-    // and the worst of seeds 0–15 built out to 18.8 (seed 12; 18.6 on seed 6),
-    // so the declaration follows what is built — 16.3 was only ever the
-    // canonical seed's number. `check:park`'s `anchor.reach:waterFight` holds
-    // this at zero allowance.
+    // What varied per park was never the pools or a lean: it was the water-gun
+    // rack, placed at a fixed world offset from the door, which is on whichever
+    // edge faces the park middle — up to 20.6 m out on a corner bearing, past
+    // this number (`anchor.reach:waterFight` forced restarts at 0.1–1.1 m over).
+    // The rack is now held inside the plot rectangle by construction
+    // (`waterFight/plot.ts`), so the furthest thing built is the rectangle's own
+    // corner (~16.9 m); 19 is kept so the layout every seed has does not move.
+    // `check:park`'s `anchor.reach:waterFight` holds this at zero allowance.
     boundingRadius: 19,
     band: { min: 24, max: 80 },
   },
