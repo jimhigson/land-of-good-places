@@ -107,8 +107,10 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  * meant routing children straight through the water for a two-metre saving.
  *
  * So a hoppable collider is stamped into {@link hopBand} instead of into
- * `blocked`, and the cells it covers cost {@link HOP_COST_MULTIPLIER} times the
- * distance walked through them. Which colliders those are is still decided by
+ * `blocked`, and walking through the cells it covers costs a premium of
+ * `HOP_COST_MULTIPLIER - 1` cheapest-metres per metre on top of what the ground
+ * under it costs ({@link bandedStep} — the same premium on the lawn as on the
+ * paving, which the first version of this got wrong). Which colliders those are is still decided by
  * the same `autoHopClears` call `CollisionWorld.wouldAutoHopClear` makes, from
  * the same numbers, so the two can never disagree about which walls she hops.
  *
@@ -170,8 +172,13 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  *   the paving right back across the grass it was avoiding.
  *
  * Where no paving has been published — every interior, and any harness that
- * never builds a garden — the stamp finds nothing and every cell costs 1, which
- * is bit-for-bit the behaviour this router had before.
+ * never builds a garden — the stamp finds nothing and every cell costs the same
+ * {@link OFF_PATH_COST_MULTIPLIER}. (This used to say "every cell costs 1": it
+ * never did, since {@link costOf} charges the unpaved price for every unpaved
+ * cell. A lattice priced flat is the same search whichever flat price it is, so
+ * routes over plain ground are the ones this router gave before #416; what the
+ * flat price does change is how dear a level connector's walk, charged at its
+ * bare length, is against the floor either side of it.)
  *
  * ## Nothing here happens per frame
  *
@@ -282,6 +289,53 @@ const MAX_STEP = BUILDING_STEP_UP;
  * this is re-derived, not adjusted.
  */
 const HOP_COST_MULTIPLIER = 2.65;
+
+/**
+ * **What a metre of one cell costs: its ground, plus the hop if it is in a
+ * band.** The one place the two weightings meet.
+ *
+ * The hop is priced as a **premium added to walking the same metre**, and the
+ * premium is the same wherever the wall stands: `(M - 1)` of the lattice's
+ * cheapest metres (`flat` — a metre of paving where the lattice has any, and
+ * the flat unpaved price where it has none) per metre of band. That is what
+ * {@link HOP_COST_MULTIPLIER}'s own derivation says it is ("prices a crossing
+ * of a band `w` wide at `(M - 1) * w` metres over walking through it"), and it
+ * is what "every hoppable wall in the game is priced the same"
+ * ({@link NavGrid}'s `hopBand`) means.
+ *
+ * **It used to be multiplied into the ground cost instead, and that broke
+ * both of those claims on the lawn.** With `ground * M`, a band on paving cost
+ * `M` a metre but a band on grass cost `OFF_PATH_COST_MULTIPLIER * M` — 4.24
+ * against 2.65 — so a low wall standing on the lawn beside a kerb (exactly
+ * where `Scenery.ts` stands benches and hiding walls, "flush with the path at
+ * various places") charged a child 1.6 times the hop premium to step over it,
+ * and the router walked her along the paving and round its end instead.
+ * Measured on the accepted parks, 25 Sep 2026: seed 0, a lawn bench along the
+ * kerb at z = -5.25, a spot 2.7 m off the kerb behind it — **8.02 m** round the
+ * end against **4.45 m** over it, +80.4%; seed 9, a walk down the band of a
+ * wall between two bushes — **19.68 m** round by the paving against **9.06 m**,
+ * +117.2%. `check:path-preference`'s `stepping off the kerb stays a step` bar
+ * is 73%. A lattice with no paving in it (every interior, and that check's
+ * unweighted comparison) prices every cell alike, so it never saw the
+ * difference: only the weighted router, the one the game runs, paid it.
+ *
+ * Written as `flat * M + (ground - flat)` (per metre) so that the two cases the old rule
+ * already got right come out as **the very same float** it gave, and A*'s
+ * tie-breaks there are bit-for-bit what they were: a band on paving
+ * (`1 * M + 0`), and every band in a lattice with no paving at all
+ * (`1.6 * M + 0`). So the fountain, which stands in the paved plaza, is priced
+ * exactly as it was when `check:fountain-hop` measured the floor of `M`, and
+ * nothing indoors moves. Only a band on unpaved ground in a paved lattice
+ * changes: 4.24 a metre becomes 3.25.
+ *
+ * Still admissible: `ground >= flat >= 1`, so every edge costs at least its
+ * own geometric length and the octile heuristic stays a lower bound.
+ */
+function bandedStep(step: number, ground: number, inBand: boolean, flat: number): number {
+  // `(step * M) * flat + 0` is the old `(step * M) * ground` to the bit
+  // whenever `ground === flat`, in the same order of operations.
+  return inBand ? step * HOP_COST_MULTIPLIER * flat + step * (ground - flat) : step * ground;
+}
 
 /**
  * How far apart two levels of one cell may match a height being looked up —
@@ -431,6 +485,13 @@ export class NavGrid {
    * is paved at the same `x, z` as the ribbon that climbs onto it.
    */
   private paved = new Uint8Array(0);
+  /**
+   * The price of this lattice's cheapest metre: 1 where any cell is paved, and
+   * the flat unpaved price where none is (every interior, whose lattice lies
+   * far from the garden's paving). The unit a hop's premium is counted in —
+   * see {@link bandedStep}.
+   */
+  private flatCost: number = OFF_PATH_COST_MULTIPLIER;
   /** Level count prefix: cell `c`'s nodes are `levelStart[c] .. levelStart[c+1]`. */
   private levelStart = new Int32Array(0);
   /** Height of each node's surface, descending within a cell. */
@@ -846,6 +907,7 @@ export class NavGrid {
     // Blocked cells are stamped too and simply never read — cheaper than a
     // branch, and it keeps this pass independent of the one above it.
     forEachPavedDisc((x, z, radius) => this.stampCircle(x, z, radius, this.paved));
+    this.flatCost = this.paved.includes(1) ? 1 : OFF_PATH_COST_MULTIPLIER;
 
     // Levels, for the free cells only — a blocked cell is never stepped on, so
     // its heights are never asked for, and this is much the most expensive
@@ -1234,22 +1296,15 @@ export class NavGrid {
       // walking step. Both facts come from the same place — see the header —
       // and neither applies anywhere a hoppable collider is not stamped.
       const intoBand = this.hopBand[neighbourCell] === 1;
-      if (intoBand) step *= HOP_COST_MULTIPLIER;
       const rise = onBand || intoBand ? MAX_AUTO_HOP_HEIGHT : MAX_STEP;
 
-      // What the ground is worth (issue #416). Charged on the cell being
-      // stepped *into*, which is the standard weighted-lattice reading and
-      // the one that makes the first step off a kerb cost what the grass
-      // costs. Paving is 1, so the octile heuristic — which is in cell units
-      // at cost 1 — still never overestimates and A* stays optimal.
-      //
-      // **The two multipliers compose safely, structurally rather than by
-      // luck.** Both are written on this same `step`, neither touches
-      // {@link heuristic} (octile, in cell units, at cost 1), and both are
-      // >= 1 on the geometric step — so the heuristic remains a lower bound
-      // with both applied exactly as it is with either alone. Any further
-      // weighting of this shape is admissible for the same reason.
-      step *= this.costOf(neighbourCell);
+      // What the ground is worth (issue #416), plus — in a band — what the
+      // hop is worth on top of it. Charged on the cell being stepped *into*,
+      // which is the standard weighted-lattice reading and the one that makes
+      // the first step off a kerb cost what the grass costs. See
+      // {@link bandedStep} for why the hop's price is *added* to the ground's
+      // rather than multiplied by it.
+      step = bandedStep(step, this.costOf(neighbourCell), intoBand, this.flatCost);
 
       // Every level of the neighbouring cell a walking foot could reach.
       // Levels of one cell are more than a step apart by construction, so
