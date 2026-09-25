@@ -36,3 +36,8 @@ Red proof (base + new instrument), `LGP_SEED=4 LGP_PARK_RESTART=3 check:park`: e
 `anchor.reach:building: 1.33, recorded at 0` (drawn 'tower-bodies' 20.63 m at plan (27.9,-15.8)).
 Seed 4 restart 2 no longer builds on this base (DuckBarRefusal) — the 20.87 was an older base.
 Next: fix sweep, check:park 0/4/11, park:attempt 4/3.
+
+## Fix sweep done (radius 21.31, recorded restarts)
+building 20.13–20.69 on 15 seeds (≤ 21.31, margin 0.62). Others unchanged. Seed 13 restart 0 no longer
+builds (DuckBarRefusal in railRace hazards) — the layout moved; accept:parks re-takes it (coordinator).
+Next: check:park 0/4/11 + park:attempt 4/3 running (scratchpad verify.log).
