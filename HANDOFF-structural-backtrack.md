@@ -100,3 +100,6 @@ coping chamfer (#698 fix/procgen-last has the fix).
   fix/sb-hotel (seed 10 tower hole). Chain sweep at dda5c8ab running.
 - FINAL STEPS: once helpers merged -> accept:parks 0-15 --fresh --write at frozen HEAD, then test:procgen,
   every-seed-builds, chain sweep, coplanar, check, determinism digests, PR.
+- Merged fix/sb-hotel (probe judges by crossing, not landing; all 16 exit 0). ground-claims frame cap 6000->200000
+  (hang-catcher; seed 0 now passes). Helpers: fix/sb-arrival (cat-bus child crosses wall, seeds 0,5), fix/sb-map
+  (park-map blank pan seed 2), fix/sb-seed5 (rail-race camera).
