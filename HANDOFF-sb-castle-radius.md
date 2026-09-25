@@ -19,4 +19,12 @@ Do NOT run `accept:parks` (the coordinator does, once, after merging).
 - Plan frame chosen: radial projection onto the sphere (vertex xz * R/|v - C|, C = (0,-R,0)) — the
   inverse of placeOnSphere: a thing's plan (x,z) is the foot of the up-line through it, which is what a
   tree's foot is compared against.
+- Instrument committed 80f56b86 (vertex walk + unplaceFromSphere, ceil to cm — the old toFixed(1) let a
+  <5 cm overrun read 0.0 and pass a zero allowance). Fix committed 405e05b1: CASTLE_PLOT_REACH in
+  core/constants.ts = nudge 3.54 + max corner hypot 15.315 + CASTLE_TURRET_FOOTPRINT_RADIUS 2.45 = 21.31;
+  manifest reads it. Footprint radius moved to constants, re-exported from layout.ts.
+- Seed 0 r2 (pre-fix) plan-frame: building 20.54 (tower-bodies foot), hotel 6.73 (world-XZ 9.47 — the lean,
+  why plan frame matters), ballPit 6.68, ferris 6.73, dodgems 9.47, waterFight 15.84.
+- In flight: base sweep (detached worktree sb-castle-radius-base with the instrument copied in),
+  red proof check:park seed 4 r3 on base, then fix sweep. Outputs in scratchpad sweep-{base,fix}.*.
 - Probe: scratchpad `probe-reach.mts`; sweep of 16 seeds in `sweep.txt` there.
