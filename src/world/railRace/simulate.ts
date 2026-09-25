@@ -15,6 +15,8 @@ import {
   type RaceLevel,
 } from './hazards';
 import { LANE_COUNT, PLAYER_LANE, type RailRaceRoute } from './route';
+import { LANE_SPACING_AT_PARK_SCALE } from './dimensions';
+import { CHILD_FOOTPRINT } from '../../art/models/kid';
 
 /**
  * **The race, as arithmetic.** No scene, no camera, no DOM.
@@ -492,7 +494,10 @@ registerPlanCache(() => {
 
 export interface Rider {
   readonly lane: number;
-  /** Metres run since the lights went out. Only ever increases. */
+  /**
+   * Metres run since the lights went out. Only ever increases. Starts at
+   * `-`{@link gridSetback} on a set-back grid slot, and at 0 on the front row.
+   */
   travelled: number;
   speed: number;
   /** 0..1: the tap-rate charge that drives thrust. See this file's header. */
@@ -544,6 +549,53 @@ export function createRider(lane: number): Rider {
     finishTime: 0,
     mashPhase: 0,
   };
+}
+
+/**
+ * **How far a set-back grid slot sits behind the line, at park scale** — the
+ * along-track distance that keeps two children in neighbouring lanes from
+ * touching when their carts are lined up at rest.
+ *
+ * Lanes are exactly one cart apart ({@link LANE_SPACING_AT_PARK_SCALE}, 1.10 m)
+ * and a child is {@link CHILD_FOOTPRINT} (1.80 m, hair and hat, measured off
+ * real models and guarded by `childrenFitTheSeatsTheySitIn`) across, nearly all
+ * of it head. So four carts parked abreast put every rider's head 0.70 m inside
+ * her neighbour's: measured on the built park, 22 of one rival's skull vertices
+ * inside the next rival's hair on seed 9, and a torso lying in the plane of the
+ * neighbour's hair shell, which is the `hair.shell.crop | torso` seam
+ * `check:coplanar` found. Two footprint circles one lane apart stop touching
+ * once they are `sqrt(footprint^2 - pitch^2)` apart along the track.
+ *
+ * Derived from both owners, never typed: widen the cart or grow the tallest
+ * hat and the grid opens up with them.
+ */
+export const GRID_SETBACK_AT_PARK_SCALE = Math.sqrt(
+  CHILD_FOOTPRINT * CHILD_FOOTPRINT - LANE_SPACING_AT_PARK_SCALE * LANE_SPACING_AT_PARK_SCALE,
+);
+
+/**
+ * How far behind the line `lane` starts, in metres of `travelled`, on a ring
+ * drawn at `scale` (`RailRaceRoute.scale`: carts, riders and lane pitch all
+ * scale with it, so the gap has to as well).
+ *
+ * A racing grid: the player's lane is on the front row and every other lane
+ * counting in from hers is set back, so no two neighbours are ever level. The
+ * player is never the one set back — the start is a six-year-old's to win.
+ */
+export function gridSetback(lane: number, scale: number): number {
+  return (PLAYER_LANE - lane) % 2 === 0 ? 0 : GRID_SETBACK_AT_PARK_SCALE * scale;
+}
+
+/**
+ * A rider waiting in her grid slot on a ring drawn at `scale` — the one way a
+ * real race, or the idle rivals, line up. {@link createRider} alone is a rider
+ * on the line itself, for the solo runs that measure the physics and have no
+ * neighbours to keep apart.
+ */
+export function riderOnGrid(lane: number, scale: number): Rider {
+  const rider = createRider(lane);
+  rider.travelled = -gridSetback(lane, scale);
+  return rider;
 }
 
 /** What a rider is asking for this exact step. */
@@ -1193,7 +1245,7 @@ export function simulateField(playerStrategy: Strategy, level: RaceLevel, seed: 
   const route = RAIL_RACE_PLAN.route;
   const hazards = scheduleForLevel(level);
   const dt = 1 / 60;
-  const riders = Array.from({ length: LANE_COUNT }, (_unused, lane) => createRider(lane));
+  const riders = Array.from({ length: LANE_COUNT }, (_unused, lane) => riderOnGrid(lane, route.scale));
   const rngs = riders.map((_unused, lane) => new Rng(seed + lane * 0x9e37));
   const player = riders[PLAYER_LANE]!;
   const rivals = riders.filter((rider) => rider.lane !== PLAYER_LANE);
