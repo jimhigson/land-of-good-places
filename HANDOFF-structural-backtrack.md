@@ -107,3 +107,10 @@ coping chamfer (#698 fix/procgen-last has the fix).
   needs browser look zoom 4 seeds 0 NW / 2 NE) and fix/sb-keyring (956f5dd0: tap zones/framing read off leaned
   drawn charms; all 16 exit 0; VISIBLE). Remaining helpers: fix/sb-seed5 (castle-towers+cart done, rail-race camera),
   fix/sb-arrival (cat-bus seeds 0,5). Chain sweep at dda5c8ab ~80%.
+- Chain sweep @dda5c8ab DONE: 400 runs, 39 red: rail-race 9, castle-towers 7, park-map 6, ground-claims 5,
+  keyring-view 5, cat-bus 2, hotel 2, path-preference 2 (seeds 0,14), waypoints 1 (seed 9; passes at 63d79421).
+  Merged since: hotel, map, keyring, arrival, ground-claims cap. Open helpers: fix/sb-seed5 (castle-towers+cart+
+  rail-race camera), fix/sb-pathpref, fix/sb-gate (wall gaps beside slanted gate + arch pole seed 15).
+- FINAL: after those -> accept:parks 0-15 --fresh --write @frozen; then chain-sweep again (all 25 checks x 16),
+  test:procgen, every-seed-builds, coplanar, swept-bus/gateway/entrance-road/park-pool over 0..15, pnpm run check,
+  determinism digests x2, PR against feat/procgen-on-sphere.
