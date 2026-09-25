@@ -324,8 +324,10 @@ const HOP_COST_MULTIPLIER = 2.65;
  * tie-breaks there are bit-for-bit what they were: a band on paving
  * (`1 * M + 0`), and every band in a lattice with no paving at all
  * (`1.6 * M + 0`). So the fountain, which stands in the paved plaza, is priced
- * exactly as it was when `check:fountain-hop` measured the floor of `M`, and
- * nothing indoors moves. Only a band on unpaved ground in a paved lattice
+ * exactly as it was when `check:fountain-hop` measured the floor of `M` (every
+ * band cell inside the plaza is paved: 197 of 197 on seed 24, the binding seed,
+ * and 202 of 202 on the canonical park, measured 25 Sep 2026), and nothing
+ * indoors moves. Only a band on unpaved ground in a paved lattice
  * changes: 4.24 a metre becomes 3.25.
  *
  * Still admissible: `ground >= flat >= 1`, so every edge costs at least its
