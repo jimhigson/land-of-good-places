@@ -175,12 +175,14 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     boundingRadius: CASTLE_PLOT_REACH,
     band: { min: 26, max: 60 },
   },
-  // Bounding radii for these two are the MEASURED build-out (`check:park`'s
-  // anchor-bounds sweep: water fight 16.3 m, dodgems 18.8 m), not the plot
-  // rectangle: both rides dress past their plots, and everything that routes
-  // or scatters around an anchor plans around this number. Declaring the
-  // rectangle's 15 left the overhang unowned, which is where the dodgems
-  // doormat kept ending up (anchor.reach ratchet).
+  // Bounding radii for these two were set from a measured build-out (water
+  // fight 16.3 m, dodgems 18.8 m, in 2026-08) rather than the plot rectangle.
+  // **Both are now over-declared, not under**: `anchor.reach` measuring every
+  // drawn vertex in the plan frame found, across seeds 0..15 (25 Sep 2026),
+  // water fight 15.84–16.24 m and dodgems 9.37–9.48 m (the rink is a disc now).
+  // Over-declaring costs lawn, not correctness; left as they are so the layout
+  // does not move for a non-fix. Deriving them from each ride's own geometry
+  // owner, as the castle's is, is the follow-up.
   {
     id: 'waterFight',
     footprint: { kind: 'rect', halfX: 12, halfZ: 11 },
