@@ -125,3 +125,9 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - ALL helpers done. FINAL RE-ACCEPT running at frozen 6ecdfea2 in sb-frozen (--fresh --write; copy table back).
   Then at the table commit: test:procgen, every-seed-builds, chain-sweep.mjs (25 checks x16), coplanar, swept-bus,
   gateway, park-pool, entrance-road, pnpm run check, determinism digests.
+- Merged fix/sb-castle-radius (anchor.reach per-vertex on ground; CASTLE_PLOT_REACH 21.31 derived) and fix/sb-ribbon
+  (fold repair, easeJogsAndStubs, junctionAprons; invariants noDrawnPavingFacesTheGround, noLawnShowsThroughThePaving).
+- FINAL RE-ACCEPT running at c5023dc0 in sb-frozen (accept-final.log). Helper fix/sb-hair: coplanar kid hair crop vs
+  torso seed 9 (character art only; does not affect acceptance).
+- Coordinator's extra asks: (a) PR + preview deep-link screenshots per visible change + duck bar across lanes shot,
+  (d) Checks shards under 30 min (last CI: max 9.9 min; recheck on PR run). (b),(c) done.
