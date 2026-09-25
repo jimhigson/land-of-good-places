@@ -28,3 +28,11 @@ Do NOT run `accept:parks` (the coordinator does, once, after merging).
 - In flight: base sweep (detached worktree sb-castle-radius-base with the instrument copied in),
   red proof check:park seed 4 r3 on base, then fix sweep. Outputs in scratchpad sweep-{base,fix}.*.
 - Probe: scratchpad `probe-reach.mts`; sweep of 16 seeds in `sweep.txt` there.
+
+## Base sweep done (pre-fix, recorded restarts, plan frame)
+building 19.30 declared: 20.13–20.69 on all 16 seeds (tower-bodies foot every time) — the only overrun.
+hotel 9: 6.73–6.88 · ballPit 9: 6.68 · ferris 13: 6.58–6.73 · dodgems 19: 9.37–9.48 · waterFight 19: 15.84–16.24.
+Red proof (base + new instrument), `LGP_SEED=4 LGP_PARK_RESTART=3 check:park`: exit 1,
+`anchor.reach:building: 1.33, recorded at 0` (drawn 'tower-bodies' 20.63 m at plan (27.9,-15.8)).
+Seed 4 restart 2 no longer builds on this base (DuckBarRefusal) — the 20.87 was an older base.
+Next: fix sweep, check:park 0/4/11, park:attempt 4/3.
