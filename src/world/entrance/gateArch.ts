@@ -4,8 +4,15 @@ import {
   GATE_ARCH_CLEAR_HEIGHT,
   GATE_ARCH_PIER_KEEP_OUT,
 } from '../../art/models/gateArch';
-import { ENTRANCE_GATE_HALF_WIDTH } from './layout';
+import {
+  ENTRANCE_ANGLE,
+  ENTRANCE_GATE_HALF_WIDTH,
+  ENTRANCE_GATE_X,
+  ENTRANCE_GATE_Z,
+  entranceGateFrame,
+} from './layout';
 import { standOnSphere } from '../terrain';
+import { PLAYER_RADIUS } from '../../core/constants';
 
 /**
  * **The park's front gate: the authored arch, seated on its gateway.**
@@ -148,26 +155,103 @@ export interface GateArch {
  */
 export const GATE_POST_COLLIDER_RADIUS = GATE_ARCH_PIER_KEEP_OUT;
 
-export function buildGateArch(options: GateArchOptions): GateArch {
-  const { centreX, centreZ, outward, groundAt } = options;
-  const group = new Group();
-
+/**
+ * **Which way the arch turns, and the line its piers stand on**, from the one
+ * vector a caller gives it.
+ *
+ * A rotation of `yaw` about Y takes local (0,0,1) to (sin yaw, 0, cos yaw), so
+ * this is the yaw that points the arch's lettered face along `outward`; and it
+ * takes local (1,0,0) to (cos yaw, 0, -sin yaw), which is the perpendicular the
+ * piers therefore stand on. Read out of the same rotation rather than derived
+ * from `outward` a second time, so the feet the collider uses are the feet the
+ * mesh actually has — and a function, so {@link parkGateFeet} asks the very
+ * same arithmetic {@link buildGateArch} does rather than restating it.
+ */
+function gateSeating(outward: { readonly x: number; readonly z: number }): {
+  yaw: number;
+  axisX: number;
+  axisZ: number;
+} {
   const length = Math.hypot(outward.x, outward.z);
   if (length < 1e-6) {
     throw new Error('buildGateArch: `outward` has no direction — the arch would face nowhere.');
   }
-  const outX = outward.x / length;
-  const outZ = outward.z / length;
+  const yaw = Math.atan2(outward.x / length, outward.z / length);
+  return { yaw, axisX: Math.cos(yaw), axisZ: -Math.sin(yaw) };
+}
 
-  // A rotation of `yaw` about Y takes local (0,0,1) to (sin yaw, 0, cos yaw),
-  // so this is the yaw that points the arch's lettered face along `outward`.
-  const yaw = Math.atan2(outX, outZ);
-  // ...and it takes local (1,0,0) to (cos yaw, 0, -sin yaw), which is the
-  // perpendicular the piers therefore stand on. Read out of the same rotation
-  // rather than derived from `outward` a second time, so the feet the collider
-  // uses are the feet the mesh actually has.
-  const axisX = Math.cos(yaw);
-  const axisZ = -Math.sin(yaw);
+function footAt(
+  centreX: number,
+  centreZ: number,
+  axisX: number,
+  axisZ: number,
+  side: -1 | 1,
+): { x: number; z: number } {
+  return {
+    x: centreX + side * ENTRANCE_GATE_HALF_WIDTH * axisX,
+    z: centreZ + side * ENTRANCE_GATE_HALF_WIDTH * axisZ,
+  };
+}
+
+/**
+ * **Where the park's own gate piers stand**, before anything is built.
+ *
+ * The boundary wall has to close onto these (`Garden.ts`), and `Garden` is
+ * built long before `Entrance` builds the arch — so it cannot read
+ * {@link GateArch.feet} off a built gate. This is the same seating
+ * {@link buildGateArch} uses for the park's gate (`Entrance.ts` passes the
+ * outward radial at {@link ENTRANCE_ANGLE}), through the same two functions,
+ * so the wall ends where the piers are rather than where a copy says they are.
+ */
+export function parkGateFeet(): readonly [{ x: number; z: number }, { x: number; z: number }] {
+  const { axisX, axisZ } = gateSeating({ x: Math.cos(ENTRANCE_ANGLE), z: Math.sin(ENTRANCE_ANGLE) });
+  return [
+    footAt(ENTRANCE_GATE_X, ENTRANCE_GATE_Z, axisX, axisZ, -1),
+    footAt(ENTRANCE_GATE_X, ENTRANCE_GATE_Z, axisX, axisZ, 1),
+  ];
+}
+
+/**
+ * **How deep the arch's clear span runs, either side of the gate line.**
+ *
+ * The piers' own depth (their collider reach) plus a child's whole body: the
+ * doorway is not only the line between the piers but the ground she crosses
+ * while she is between them, and a child stepping through must be clear of
+ * the arch before she can meet anything else. Seed 15 stood a fairy-light pole
+ * 0.9 m in from the gate line, 3.1 m off the axis — inside the 7 m the arch
+ * promises — and nothing refused it, because the gateway path's claim is only
+ * as wide as the path.
+ */
+export const GATE_ARCH_SPAN_REACH = GATE_ARCH_PIER_KEEP_OUT + 2 * PLAYER_RADIUS;
+
+/**
+ * **Is this point inside the park gate's clear span?** — between the pier
+ * faces, within {@link GATE_ARCH_SPAN_REACH} of the gate line.
+ *
+ * The one owner of that question. A placer asks it with its own footprint's
+ * radius as `margin` and refuses a spot that answers yes; the procgen
+ * invariant asks it of every built collider. `reach` widens the depth for a
+ * caller whose question is about a longer run through the gate (the boundary
+ * wall's opening).
+ */
+export function isInGateArchSpan(
+  x: number,
+  z: number,
+  margin = 0,
+  reach = GATE_ARCH_SPAN_REACH,
+): boolean {
+  const { across, along } = entranceGateFrame(x, z);
+  return (
+    Math.abs(across) < ENTRANCE_GATE_HALF_WIDTH - GATE_ARCH_PIER_KEEP_OUT + margin &&
+    Math.abs(along) < reach + margin
+  );
+}
+
+export function buildGateArch(options: GateArchOptions): GateArch {
+  const { centreX, centreZ, outward, groundAt } = options;
+  const group = new Group();
+
+  const { yaw, axisX, axisZ } = gateSeating(outward);
 
   const ground = groundAt(centreX, centreZ);
 
@@ -183,8 +267,7 @@ export function buildGateArch(options: GateArchOptions): GateArch {
 
   const feet: { x: number; z: number }[] = [];
   for (const side of [-1, 1] as const) {
-    const x = centreX + side * ENTRANCE_GATE_HALF_WIDTH * axisX;
-    const z = centreZ + side * ENTRANCE_GATE_HALF_WIDTH * axisZ;
+    const { x, z } = footAt(centreX, centreZ, axisX, axisZ, side);
     feet.push({ x, z });
 
     // A marker, not a mesh: the piers are one node of the authored `.glb` and

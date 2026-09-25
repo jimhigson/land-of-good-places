@@ -117,15 +117,20 @@ import {
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
   ENTRANCE_WALK_DEPTH,
+  ENTRANCE_GATE_OPENING_REACH,
   entranceGateFrame,
-  isInEntranceGateOpening,
   isInEntranceGateway,
 } from '../../src/world/entrance/layout.ts';
 // A leaf module: pure geometry over a `standable` predicate, no three.js and
 // nothing seed-dependent, so importing it here cannot fix the park's seed early.
 import { GATE_PROBE_INSET, measureGatewayWalk } from '../../src/world/entrance/gatewayWalk.ts';
 import { ROAD_TILE_METRES } from '../../src/world/entrance/road.ts';
-import { GATE_POST_COLLIDER_RADIUS } from '../../src/world/entrance/gateArch.ts';
+import {
+  GATE_ARCH_SPAN_REACH,
+  GATE_POST_COLLIDER_RADIUS,
+  isInGateArchSpan,
+  parkGateFeet,
+} from '../../src/world/entrance/gateArch.ts';
 import { altitudeAt, terrainHeight, unplaceFromSphere } from '../../src/world/terrain.ts';
 // The road corridor's measurement, shared with `check:ground-claims` so the two
 // sites that ask "is the claim the road?" cannot answer it differently. Pure
@@ -8365,38 +8370,59 @@ const noBridgeStandsWhereNoneWasProven: Invariant = (facts) => {
  */
 const theGateIsAHoleInTheWall: Invariant = (facts) => {
   const blocks: { x: number; z: number }[] = [];
+  const corners: { x: number; z: number; name: string }[] = [];
   const local = new Matrix4();
   const composed = new Matrix4();
   const centre = new Vector3();
+  const corner = new Vector3();
   facts.world.garden.group.traverse((object) => {
     if (!(object instanceof InstancedMesh)) return;
     if (!/^boundary-(blocks|pillars)?/.test(object.name) && object.name !== 'boundary-blocks') return;
+    object.geometry.computeBoundingBox();
+    const box = object.geometry.boundingBox!;
     for (let i = 0; i < object.count; i += 1) {
       object.getMatrixAt(i, local);
       composed.multiplyMatrices(object.matrixWorld, local);
       centre.setFromMatrixPosition(composed);
       blocks.push({ x: centre.x, z: centre.z });
+      // The block's real footprint: its geometry's plan corners and the
+      // middles of its sides, through its own instance matrix.
+      for (const fx of [0, 0.5, 1]) {
+        for (const fz of [0, 0.5, 1]) {
+          corner.set(
+            box.min.x + (box.max.x - box.min.x) * fx,
+            box.min.y,
+            box.min.z + (box.max.z - box.min.z) * fz,
+          );
+          corner.applyMatrix4(composed);
+          corners.push({ x: corner.x, z: corner.z, name: object.name });
+        }
+      }
     }
   });
 
   if (blocks.length === 0) return ['found no boundary wall blocks at all to measure'];
 
   const fouls: string[] = [];
-  // **Tested at the block's own extent, not its centre — and the extent is
-  // derived from the geometry, never from the rule being checked.**
+  // **Tested at the block's own footprint, read off the built instance — never
+  // off the rule being checked.**
   //
-  // This filtered on the centre, blind to the very thing `Garden.ts`'s
-  // `DRAWN_BLOCK_GATE_MARGIN` exists to add: a station is where a block's
-  // *middle* goes and the block is `BOUNDARY_BLOCK_WIDTH` long lying along the
-  // edge, so the last kept block reached into the opening by up to its own
-  // half-length and nothing said so.
+  // This filtered on the centre once, blind to a block reaching into the
+  // opening by up to its own half-length. The first fix read the wall's own
+  // gate margin constant, which is worse than useless: zeroing that constant
+  // moved the wall *and this clause together* and the suite stayed at 520/520
+  // with stone back in the doorway. The second derived a worst-case reach from
+  // the block's length, which assumed every block lies along the edge — true
+  // until the wall had to turn and close onto the piers. So it now reads each
+  // block's corners through its own instance matrix and geometry, and holds
+  // whatever policy lays the wall.
   //
-  // The first attempt at this fix read `DRAWN_BLOCK_GATE_MARGIN` itself, which
-  // is worse than useless: zeroing that constant then moved the wall *and this
-  // clause together* and the suite stayed at 520/520 with stone back in the
-  // doorway. So the expectation is rebuilt here from the two facts about the
-  // built wall — how long a block is and how thick the masonry is — and it
-  // holds whatever policy `Garden.ts` adopts.
+  // **The doorway is the arch's clear span**, between the pier faces
+  // (`isInGateArchSpan`), run the depth of the wall's opening either side of the
+  // gate line. It used to be a strip out to the piers' *centres*, which was the
+  // right answer only while the wall stopped short of the piers; closing it
+  // onto them puts stone beside and behind each pier, which is the wall doing
+  // its job, not stone in the doorway.
   //
   // Read off `facts`, never imported: a static import of `Garden.ts` into this
   // file loads `parkManifest.ts` before the seed is set and pins every seed to
@@ -8404,13 +8430,12 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
   // 4 files red, **332 skipped**, 188 passed. `parkFacts.ts` reaches Garden
   // through an `await import` after the park exists, which is the whole reason
   // that pattern is there.
-  const blockReach = facts.boundaryBlockWidth / 2 + facts.masonryHalfWidth;
-  const inGap = blocks.filter((b) => isInEntranceGateOpening(b.x, b.z, blockReach));
+  const inGap = corners.filter((c) => isInGateArchSpan(c.x, c.z, 0, ENTRANCE_GATE_OPENING_REACH));
   if (inGap.length > 0) {
     const worst = inGap[0];
     fouls.push(
-      `${inGap.length} boundary wall blocks stand inside the gate opening, e.g. ` +
-        `${fmt([worst?.x ?? 0, worst?.z ?? 0])} — the gate is solid stone (#195)`,
+      `${inGap.length} boundary wall block corners stand inside the gate's clear span, e.g. ` +
+        `${worst?.name} at ${fmt([worst?.x ?? 0, worst?.z ?? 0])} — the gate is solid stone (#195)`,
     );
   }
 
@@ -8424,6 +8449,229 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
     fouls.push(
       `the closest wall block sits ${nearest.toFixed(2)} m from the middle of the gate — ` +
         `a child of ${PLAYER_RADIUS} m cannot get through`,
+    );
+  }
+  return fouls;
+};
+
+/**
+ * **The wall closes onto the arch: the only way through beside the gate is the
+ * gate.**
+ *
+ * The boundary is a spline pinned *through* the gate at (0, 60) but not square
+ * to it — seed 0 crosses at about 35 degrees — while the wall's opening was cut
+ * as a strip squared to the gate. So the wall stopped at (5.85, 64.13) east and
+ * (-5.78, 56.36) west, metres short of the piers at (+-4.3, 60), and between
+ * each pier and its wall end stood a gap measured clear of colliders at
+ * 3.16 m / 2.68 m on seed 0 (1.53/1.20 on 2, 1.29/0.45 on 15): a hole in the
+ * park wall beside the arch, wider than the 1.24 m a child needs.
+ * {@link theGateIsAHoleInTheWall} could not see it — it asks whether the
+ * opening is *open*, never whether the wall is *shut* either side of it.
+ *
+ * So this marches a child-sized body over the ground round the gate, in the
+ * gate's own frame, against the **built** collision world with the arch's
+ * span plugged, and asks whether the outside can still reach the inside. Only
+ * colliders a child cannot hop are walls here; the soft play boundary is left
+ * out on purpose, because it holds a child in everywhere, gate included, and
+ * would answer "shut" whatever the masonry did.
+ *
+ * "Inside" is the park side of the gate line *and* clear of the park's edge by
+ * more than the wall is thick — the slant puts ground in front of the arch
+ * inside the spline, and that ground is the forecourt, not the park.
+ *
+ * The control is the same flood with the plug pulled: it must get in, through
+ * the arch, or the instrument is measuring nothing.
+ */
+const theWallClosesOntoTheGate: Invariant = (facts) => {
+  const collision = facts.world.collision;
+  const bounds = collision.playBounds;
+  const toGate = Math.hypot(ENTRANCE_GATE_X, ENTRANCE_GATE_Z) || 1;
+  const inX = -ENTRANCE_GATE_X / toGate;
+  const inZ = -ENTRANCE_GATE_Z / toGate;
+  const acrossX = -inZ;
+  const acrossZ = inX;
+  const HALF_ACROSS = 16;
+  const HALF_ALONG = 14;
+  const STEP = 0.05;
+  // **One lattice step thinner than a child.** A lattice of cell centres can
+  // only pass a gap whose band of legal centres is wider than a diagonal step;
+  // probed at `PLAYER_RADIUS` exactly, a 1.29 m gap (seed 15, east) leaves a
+  // 0.05 m band and the flood steps straight over it. Thinned by a step, any
+  // gap of 1.21 m or more is found, which covers every gap a 1.24 m child can
+  // use. The error is on the strict side, by design.
+  const BODY = PLAYER_RADIUS - STEP;
+  const reach = Math.hypot(HALF_ACROSS, HALF_ALONG) + 4;
+  const world = (across: number, along: number): [number, number] => [
+    ENTRANCE_GATE_X + across * acrossX + along * inX,
+    ENTRANCE_GATE_Z + across * acrossZ + along * inZ,
+  ];
+  const segmentDistance = (
+    px: number,
+    pz: number,
+    x1: number,
+    z1: number,
+    x2: number,
+    z2: number,
+  ): number => {
+    const dx = x2 - x1;
+    const dz = z2 - z1;
+    const lengthSq = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (pz - z1) * dz) / lengthSq));
+    return Math.hypot(x1 + t * dx - px, z1 + t * dz - pz);
+  };
+
+  const circles: { x: number; z: number; r: number }[] = [];
+  collision.forEachCircle((x, z, r, _top, hoppable, base) => {
+    if (hoppable || base > 0) return;
+    if (Math.hypot(x - ENTRANCE_GATE_X, z - ENTRANCE_GATE_Z) > reach + r) return;
+    circles.push({ x, z, r });
+  });
+  const walls: { x1: number; z1: number; x2: number; z2: number; h: number }[] = [];
+  collision.forEachWall((x1, z1, x2, z2, h, _top, hoppable, base) => {
+    if (hoppable || base > 0) return;
+    if (segmentDistance(ENTRANCE_GATE_X, ENTRANCE_GATE_Z, x1, z1, x2, z2) > reach + h) return;
+    walls.push({ x1, z1, x2, z2, h });
+  });
+  const [footA, footB] = parkGateFeet();
+
+  const clear = (x: number, z: number, plugged: boolean): boolean => {
+    for (const c of circles) if (Math.hypot(x - c.x, z - c.z) < c.r + BODY) return false;
+    for (const w of walls) {
+      if (segmentDistance(x, z, w.x1, w.z1, w.x2, w.z2) < w.h + BODY) return false;
+    }
+    if (plugged && segmentDistance(x, z, footA.x, footA.z, footB.x, footB.z) < PLAYER_RADIUS) return false;
+    return true;
+  };
+  const deepInside = (x: number, z: number, along: number): boolean =>
+    along > 0 && bounds.distanceToEdge(x, z) > PLAYER_RADIUS + facts.masonryHalfWidth + 0.5;
+
+  const nA = Math.round((2 * HALF_ACROSS) / STEP) + 1;
+  const nL = Math.round((2 * HALF_ALONG) / STEP) + 1;
+  const flood = (plugged: boolean): { reached: number; leak: [number, number] | null; seeded: boolean } => {
+    const solid = new Uint8Array(nA * nL);
+    for (let i = 0; i < nA; i += 1) {
+      for (let j = 0; j < nL; j += 1) {
+        const [x, z] = world(-HALF_ACROSS + i * STEP, -HALF_ALONG + j * STEP);
+        if (!clear(x, z, plugged)) solid[i * nL + j] = 1;
+      }
+    }
+    // Seed outside, on the gate's axis six metres out, at the nearest clear cell.
+    const seedI = Math.round(HALF_ACROSS / STEP);
+    const seedJ = Math.round((HALF_ALONG - 6) / STEP);
+    let start = -1;
+    for (let ring = 0; ring < 30 && start < 0; ring += 1) {
+      for (let di = -ring; di <= ring && start < 0; di += 1) {
+        for (let dj = -ring; dj <= ring && start < 0; dj += 1) {
+          const i = seedI + di;
+          const j = seedJ + dj;
+          if (i < 0 || j < 0 || i >= nA || j >= nL) continue;
+          if (!solid[i * nL + j]) start = i * nL + j;
+        }
+      }
+    }
+    if (start < 0) return { reached: 0, leak: null, seeded: false };
+    const seen = new Uint8Array(nA * nL);
+    const queue = new Int32Array(nA * nL);
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    seen[start] = 1;
+    let leak: [number, number] | null = null;
+    while (head < tail) {
+      const cell = queue[head++]!;
+      const i = Math.floor(cell / nL);
+      const j = cell % nL;
+      const along = -HALF_ALONG + j * STEP;
+      const [x, z] = world(-HALF_ACROSS + i * STEP, along);
+      if (!leak && deepInside(x, z, along)) leak = [x, z];
+      const neighbours = [
+        i > 0 ? cell - nL : -1,
+        i < nA - 1 ? cell + nL : -1,
+        j > 0 ? cell - 1 : -1,
+        j < nL - 1 ? cell + 1 : -1,
+      ];
+      for (const next of neighbours) {
+        if (next < 0 || seen[next] || solid[next]) continue;
+        seen[next] = 1;
+        queue[tail++] = next;
+      }
+    }
+    return { reached: tail, leak, seeded: true };
+  };
+
+  const fouls: string[] = [];
+  const control = flood(false);
+  if (!control.seeded || !control.leak) {
+    fouls.push(
+      `CONTROL: with the arch left open, a ${PLAYER_RADIUS} m body flooding in from six metres ` +
+        `outside the gate never got into the park (${control.reached} cells reached, ` +
+        `${circles.length} circles and ${walls.length} walls near the gate) — this probe cannot ` +
+        'see a way in when there is one, so its answer about the wall proves nothing',
+    );
+    return fouls;
+  }
+  const shut = flood(true);
+  if (shut.leak) {
+    fouls.push(
+      `a ${PLAYER_RADIUS} m child gets from outside the gate to ${fmt(shut.leak)} inside the park ` +
+        'with the arch itself shut — there is a hole in the boundary wall beside the gate ' +
+        `(piers at ${fmt([footA.x, footA.z])} and ${fmt([footB.x, footB.z])})`,
+    );
+  }
+  return fouls;
+};
+
+/**
+ * **Nothing stands in the arch's clear span.**
+ *
+ * The gate promises the 7 m between its pier faces as the way into the park.
+ * On seed 15 a fairy-light pole (r 0.28) stood at (-3.1, 59.1) — 3.1 m off the
+ * axis and 0.9 m in from the gate line, inside that span — because nothing
+ * that placed it knew the span existed: the gateway path's claim is only the
+ * path's own width. {@link theWalkInFromTheGateIsWalkable} stayed green,
+ * rightly, because a child could still get past it; this asks the stricter,
+ * simpler thing a doorway owes her.
+ *
+ * Every ground-level collider in the built world is measured against
+ * `isInGateArchSpan` at its own reach; the arch's two piers are the only
+ * things allowed at its edge, and finding them both is the control that this
+ * is reading the collision world at all.
+ */
+const nothingStandsInTheGateArchSpan: Invariant = (facts) => {
+  const fouls: string[] = [];
+  const feet = parkGateFeet();
+  let piers = 0;
+  facts.world.collision.forEachCircle((x, z, r, _top, _hop, base) => {
+    if (base > 0) return;
+    if (feet.some((f) => Math.hypot(f.x - x, f.z - z) < 1e-3) && Math.abs(r - GATE_POST_COLLIDER_RADIUS) < 1e-6) {
+      piers += 1;
+      return;
+    }
+    if (isInGateArchSpan(x, z, r)) {
+      fouls.push(
+        `a collider (circle r ${r.toFixed(2)}) stands at ${fmt([x, z])}, inside the gate arch's clear ` +
+          `span (within ${GATE_ARCH_SPAN_REACH.toFixed(2)} m of the gate line, between the piers)`,
+      );
+    }
+  });
+  facts.world.collision.forEachWall((x1, z1, x2, z2, h, _top, _hop, base) => {
+    if (base > 0) return;
+    for (let i = 0; i <= 16; i += 1) {
+      const t = i / 16;
+      const x = x1 + (x2 - x1) * t;
+      const z = z1 + (z2 - z1) * t;
+      if (!isInGateArchSpan(x, z, h)) continue;
+      fouls.push(
+        `a wall collider ${fmt([x1, z1])} -> ${fmt([x2, z2])} (half ${h.toFixed(2)}) reaches into the ` +
+          `gate arch's clear span at ${fmt([x, z])}`,
+      );
+      break;
+    }
+  });
+  if (piers !== 2) {
+    fouls.push(
+      `CONTROL: found ${piers} of the gate's 2 pier colliders at ${fmt([feet[0].x, feet[0].z])} and ` +
+        `${fmt([feet[1].x, feet[1].z])} — this is not reading the arch it is meant to measure`,
     );
   }
   return fouls;
@@ -11985,6 +12233,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the cat bus is actually in the park, at the gate, with everyone aboard', theCatBusIsInThePark],
   ['every child fits in the cat bus seat they are sitting in', childrenFitTheSeatsTheySitIn],
   ['the boundary wall has a gate you can actually walk through', theGateIsAHoleInTheWall],
+  ['the boundary wall closes onto the gate, with no way round the arch', theWallClosesOntoTheGate],
+  ['nothing stands in the gate arch\'s clear span', nothingStandsInTheGateArchSpan],
   ['a child can walk in through the front gate', theWalkInFromTheGateIsWalkable],
   ['the road arrives at the park and goes in through the gate', theRoadArrivesAtTheParkAndGoesIn],
   [

@@ -883,6 +883,15 @@ export interface EdgeStation {
   readonly z: number;
   /** Yaw putting a box's local X axis along the edge, for `Object3D.rotation.y`. */
   readonly yaw: number;
+  /**
+   * How far round the edge this station is, in metres from the outline's first
+   * vertex — so a caller can ask "is this station inside a run of the edge?"
+   * (the boundary wall's gate opening) by distance along the curve rather than
+   * by a shape drawn in some other frame.
+   */
+  readonly s: number;
+  /** Length once round the outline these stations were walked on. */
+  readonly perimeter: number;
 }
 
 /**
@@ -934,6 +943,8 @@ export function alongBoundary(
       // long axis along the edge rather than across it — the difference between
       // a wall and a ring of tombstones.
       yaw: Math.atan2(-tangentZ, tangentX),
+      s: target,
+      perimeter,
     });
   }
   return stations;

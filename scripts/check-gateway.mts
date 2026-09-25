@@ -70,9 +70,10 @@ import {
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_WALK_DEPTH,
+  ENTRANCE_GATE_OPENING_REACH,
   entranceGateFrame,
-  isInEntranceGateOpening,
 } from '../src/world/entrance/layout.ts';
+import { isInGateArchSpan } from '../src/world/entrance/gateArch.ts';
 import { GATE_PROBE_INSET, GATE_PROBE_STEP, measureGatewayWalk } from '../src/world/entrance/gatewayWalk.ts';
 import { edgeRadiusAt, PARK_BOUNDARY } from '../src/world/boundary.ts';
 import { BOUNDARY_WALL_COLLISION_HALF } from '../src/world/Garden.ts';
@@ -153,7 +154,12 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
   // the canonical seed — and every one of them walked in fine.
   //
   // So this asks the thing the fix actually changed: does any boundary
-  // collision segment come inside the aperture at all? It is stated over the
+  // collision segment come inside the arch's clear span — between the pier
+  // faces, the depth of the wall's opening either side of the gate line — at
+  // all? (It asked about a strip out to the piers' *centres* while the wall
+  // stopped short of them. Since the wall closes onto the piers, stone beside
+  // and behind each pier is the wall doing its job; the doorway is between
+  // the pier faces.) It is stated over the
   // **whole segment**, not its midpoint, because the midpoint was the bug —
   // a 2 m chord whose middle clears the gap still reaches a metre into it.
   //
@@ -172,12 +178,12 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
       const t = i / steps;
       const x = wall.x1 + (wall.x2 - wall.x1) * t;
       const z = wall.z1 + (wall.z2 - wall.z1) * t;
-      if (!isInEntranceGateOpening(x, z, wall.halfThickness)) continue;
+      if (!isInGateArchSpan(x, z, wall.halfThickness, ENTRANCE_GATE_OPENING_REACH)) continue;
       const { across, along } = entranceGateFrame(x, z);
       foul(
         `boundary masonry reaches into the gateway at (${x.toFixed(2)}, ${z.toFixed(2)}) — ` +
-          `${Math.abs(across).toFixed(2)} m off the axis of an opening that is ` +
-          `${ENTRANCE_GATE_HALF_WIDTH} m wide either side, ${along.toFixed(2)} m along the way in. ` +
+          `${Math.abs(across).toFixed(2)} m off the axis, inside the arch's clear span, ` +
+          `${along.toFixed(2)} m along the way in. ` +
           `Segment (${wall.x1.toFixed(2)}, ${wall.z1.toFixed(2)}) -> ` +
           `(${wall.x2.toFixed(2)}, ${wall.z2.toFixed(2)}), halfThickness ${wall.halfThickness}`,
       );
