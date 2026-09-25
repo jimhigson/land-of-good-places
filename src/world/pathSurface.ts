@@ -144,6 +144,8 @@ export function addPathRibbon(
   width: number,
   divisions: number,
   lift: number,
+  /** Whether a disc of paving of this radius may be laid here — see `REPAIR_DISC_SEGMENTS`. */
+  discAllowed: (x: number, z: number, radius: number) => boolean = () => true,
 ): void {
   const stations = ribbonStations(curve, divisions);
   const repaired = new Set<number>();
@@ -158,6 +160,7 @@ export function addPathRibbon(
   for (const j of [...repaired].sort((a, b) => a - b)) {
     const station = stations[j] as RibbonStation;
     if (laid.some((other) => Math.hypot(other.x - station.x, other.z - station.z) < REPAIR_DISC_SPACING)) continue;
+    if (!discAllowed(station.x, station.z, width / 2)) continue;
     laid.push(station);
     addPavingDisc(builder, station.x, station.z, width / 2, lift);
   }
@@ -177,6 +180,11 @@ export function addPathRibbon(
  * lies under the same material at the same lift, and is inside the kerb's
  * outer line everywhere, so the only thing it can change on screen is lawn
  * that should have been paving.
+ *
+ * Except where it would reach onto a bridge: there `drapePathsOverBridges`
+ * lifts the ribbon's own cross-sections onto the hump, and the paving a bridge
+ * carries is exactly its ribbon and that ribbon's two kerb bands (the bridge
+ * invariants count them). The caller says where that is.
  */
 const REPAIR_DISC_SEGMENTS = 24;
 

@@ -23,6 +23,7 @@ import {
   JUNCTION_SNAP,
   pathDivisions,
   PLAZA,
+  pointStandsOnABridgeRamp,
   routeCurve,
   type PathGraph,
   type RouteDefinition,
@@ -233,7 +234,7 @@ export function buildPaths(): Mesh[] {
   ROUTES.forEach((route, owner) => {
     const curve = routeCurve(route);
     const divisions = pathDivisions(curve);
-    addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT);
+    addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT, clearOfBridges);
     own(surfaceOwners, surface, owner);
     addRibbonKerb(kerb, curve, route.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
     own(kerbOwners, kerb, owner);
@@ -247,20 +248,22 @@ export function buildPaths(): Mesh[] {
 
   // Where route ends meet, the paving they leave between their square-cut
   // ends — see `junctionAprons`.
-  junctionAprons(ROUTES).forEach((apron, k) => {
-    addDisc(surface, apron.x, apron.z, apron.radius, JUNCTION_APRON_SEGMENTS, 1, PATH_SURFACE_LIFT);
-    own(surfaceOwners, surface, JUNCTION_OWNER_BASE - k);
-    addAnnulusKerb(
-      kerb,
-      apron.x,
-      apron.z,
-      apron.radius,
-      apron.radius + PATH_KERB_OVERHANG,
-      JUNCTION_APRON_SEGMENTS,
-      PATH_KERB_LIFT,
-    );
-    own(kerbOwners, kerb, JUNCTION_OWNER_BASE - k);
-  });
+  junctionAprons(ROUTES)
+    .filter((apron) => clearOfBridges(apron.x, apron.z, apron.radius))
+    .forEach((apron, k) => {
+      addDisc(surface, apron.x, apron.z, apron.radius, JUNCTION_APRON_SEGMENTS, 1, PATH_SURFACE_LIFT);
+      own(surfaceOwners, surface, JUNCTION_OWNER_BASE - k);
+      addAnnulusKerb(
+        kerb,
+        apron.x,
+        apron.z,
+        apron.radius,
+        apron.radius + PATH_KERB_OVERHANG,
+        JUNCTION_APRON_SEGMENTS,
+        PATH_KERB_LIFT,
+      );
+      own(kerbOwners, kerb, JUNCTION_OWNER_BASE - k);
+    });
 
   const surfaceMesh = new Mesh(surface.build(), pathSurfaceMaterial());
   surfaceMesh.name = 'path-surface';
@@ -786,6 +789,19 @@ type PlanPolygon = readonly (readonly [number, number])[];
 
 /** The owner id the plaza's disc and annulus are filed under. */
 const PLAZA_OWNER = -1;
+
+/**
+ * **Whether a disc of paving and its kerb, `radius` round `(x, z)`, stays off
+ * every planned bridge.** A junction apron or a repair disc is laid on the
+ * ground only: over a bridge the paving is the route's own ribbon, draped onto
+ * the hump with its two kerb bands, and nothing else (the bridge invariants
+ * count exactly that). Seed 0's `spur-building` starts at (-2.45, 16.50), a
+ * hairpin off the gate approach at the foot of its bridge's ramp; an apron
+ * there reached 1.6 m onto the ramp.
+ */
+function clearOfBridges(x: number, z: number, radius: number): boolean {
+  return !pointStandsOnABridgeRamp(x, z, radius + PATH_KERB_OVERHANG);
+}
 
 /** Junction apron `k`'s disc and annulus are filed under `JUNCTION_OWNER_BASE - k`. */
 const JUNCTION_OWNER_BASE = -2;
