@@ -144,7 +144,7 @@ import { PATH_GRAPH, distanceToPath, isOnPath, pathCentreline } from '../src/wor
 import { JourneyPlanner } from '../src/entities/npc/journey.ts';
 import { gardenAttractions } from '../src/entities/npc/attractions.ts';
 import { SPACE_GARDEN } from '../src/world/spaces.ts';
-import { PLAYER_RADIUS } from '../src/core/constants.ts';
+import { GARDEN_PLAY_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 
@@ -302,8 +302,20 @@ if (excluded.length === 0) {
 function insidePlay(x: number, z: number, inset: number): boolean {
   return GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) >= inset;
 }
-/** A square that holds the whole park, for the lattice samplers to walk. */
-const PLAY_EXTENT = Math.ceil(GARDEN_PLAY_BOUNDARY.maxRadius);
+/**
+ * The coordinates a lattice sampler at `pitch` walks: a square holding the
+ * whole park, **on the same grid the circle-bound samplers used** — anchored
+ * at `-GARDEN_PLAY_RADIUS` and stepped outwards — so the widened sample is a
+ * strict superset of the old one. Every probe the check used to ask it still
+ * asks; the park outside the old circle is added, nothing inside it moves.
+ */
+function sampleAxis(pitch: number): number[] {
+  const extent = GARDEN_PLAY_BOUNDARY.maxRadius;
+  const start = -GARDEN_PLAY_RADIUS - pitch * Math.ceil((extent - GARDEN_PLAY_RADIUS) / pitch);
+  const out: number[] = [];
+  for (let v = start; v <= extent; v += pitch) out.push(v);
+  return out;
+}
 
 const probes: Probe[] = [];
 for (let i = 0; i < junctions.length; i += 1) {
@@ -612,16 +624,23 @@ interface Hop {
 const hops: Hop[] = [];
 {
   const centreline = pathCentreline();
-  // A deterministic spread over the park, thinned so the probe set is a
-  // handful of dozens rather than hundreds — every third lattice point.
-  let seen = 0;
-  for (let x = -PLAY_EXTENT; x <= PLAY_EXTENT; x += 3) {
-    for (let z = -PLAY_EXTENT; z <= PLAY_EXTENT; z += 3) {
+  // A deterministic spread over the whole park: every point of a 3 m lattice
+  // that lands 2-6 m off the paving.
+  //
+  // **Not thinned.** This used to keep every third such point *in the order
+  // the loop met them*, which made the sample depend on where the loop
+  // started: widening the loop from the old 58 m circle to the park's real
+  // edge shifted which third survived, and the very probe that had caught the
+  // seed-0 bench detour (kerb -> (11, -7)) silently dropped out of the set —
+  // measured, the old hop pricing then passed seeds 0 and 9 green. A sample
+  // that loses its own failures when the loop bounds move is not a sample.
+  // Every point is kept instead, on the old grid (`sampleAxis`), so the set is
+  // a strict superset of every set this check has ever asked.
+  for (const x of sampleAxis(3)) {
+    for (const z of sampleAxis(3)) {
       if (!insidePlay(x, z, 4)) continue;
       const off = distanceToPath(x, z);
       if (off < HOP_MIN || off > HOP_MAX) continue;
-      seen += 1;
-      if (seen % 3 !== 0) continue;
       let bestX = 0;
       let bestZ = 0;
       let best = Infinity;
@@ -658,8 +677,8 @@ const weightedHops = hops.map((hop) => trace(weighted, hop.fromX, hop.fromZ, hop
 // forgotten, because they are chosen from the park, not from the router.
 const REACH_PITCH = 6;
 const reachTargets: { x: number; z: number }[] = [];
-for (let x = -PLAY_EXTENT; x <= PLAY_EXTENT; x += REACH_PITCH) {
-  for (let z = -PLAY_EXTENT; z <= PLAY_EXTENT; z += REACH_PITCH) {
+for (const x of sampleAxis(REACH_PITCH)) {
+  for (const z of sampleAxis(REACH_PITCH)) {
     if (!insidePlay(x, z, 2)) continue;
     reachTargets.push({ x, z });
   }
