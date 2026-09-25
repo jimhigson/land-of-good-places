@@ -1241,7 +1241,17 @@ export interface FieldOutcome {
  * skill value re-rolls every rival's whole race and the check reads as noise
  * rather than a measurement of the change that was actually made.
  */
-export function simulateField(playerStrategy: Strategy, level: RaceLevel, seed: number): FieldOutcome {
+export function simulateField(
+  playerStrategy: Strategy,
+  level: RaceLevel,
+  seed: number,
+  /**
+   * Called once per step with every rider, after they have all moved — for a
+   * measurement that wants the whole field's positions through the race, such
+   * as how often two neighbours draw level. Read-only; the race is unchanged.
+   */
+  observe?: (riders: readonly Rider[], seconds: number) => void,
+): FieldOutcome {
   const route = RAIL_RACE_PLAN.route;
   const hazards = scheduleForLevel(level);
   const dt = 1 / 60;
@@ -1272,6 +1282,7 @@ export function simulateField(playerStrategy: Strategy, level: RaceLevel, seed: 
       }
     }
     seconds += dt;
+    observe?.(riders, seconds);
   }
 
   return {
