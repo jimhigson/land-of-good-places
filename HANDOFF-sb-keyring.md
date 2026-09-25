@@ -21,7 +21,14 @@ Branch `fix/sb-keyring` (from origin/wip/sb-merge), worktree `.claude/worktrees/
 - The check (7238af28) now asserts each zone lands on its keyring's screen image, and prints
   the stall's distance, lean and facing. With the fix reverted it goes red from ~45 m.
 
-## Status
-- All-16 run: scratchpad sb-keyring/after.sh -> after-summary.txt.
-- Still to do: prove red on a real seed (pick the one whose stall is farthest out, on the
-  compressing side), tsc both projects, remove the scratch probes (untracked).
+## Status: DONE (no PR, per brief)
+- All 16 seeds, fixed code: check:keyring-view exit 0 on every one. Every seed now reports the
+  same numbers: closest gap 0.341 m, landscape 0.044 m to spare, zones 0.088 m inside their images.
+  Stalls are 13.9-25.3 m out, all facing 45 deg.
+- Red proof (KeychainShop.ts reverted to 728b508e^, new check kept): LGP_SEED=5 (stall (6.8, 22.6),
+  23.6 m out, lean 6.1 deg) exit 1, 7 problems: gap 0.278 m vs 0.279/0.280 m finger in portrait and
+  landscape (landscape wanted zoom 6.362, clamped to 5.5), and ripika touching the portrait margin.
+  LGP_SEED=4 (stall (-24.4, 5.1)) passes even reverted on this head (gap 0.380 m, the spreading
+  side). The sweep's seed-4 red came from an older park.
+- tsc (main) 0, typecheck:test 0; check:tap-spacing seed 5 exit 0.
+- Scratch probes moved to scratchpad/sb-keyring/ (not committed).
