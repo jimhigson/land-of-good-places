@@ -78,3 +78,9 @@ decision by measurement; fix at cause or make an acceptance measure.
   full pull-back on 389 of 618 m (161 m with no slope limit, where easing is
   red at 1.997 m -> red proof). VISIBLE change: Jim's call.
 - Running final2 sweep (rail-race, castle-towers, tie-frame x 16) in scratch.
+- final2: rail-race, castle-towers, tie-frame all exit 0 on 16 seeds at
+  recorded restarts (48/48). Cart nose worst 0.31 (1r6). Phone side-scroller
+  now 0.904-0.912 everywhere (swing capped on every seed: VISIBLE phone framing
+  change). Door reach 0.00 m on 15 seeds, 0.42 on one.
+- Next: affected checks (scratch affected/), then test:procgen, park:attempt
+  canonical + 2r0 again, tsc both; remove sb-seed5-base worktree.
