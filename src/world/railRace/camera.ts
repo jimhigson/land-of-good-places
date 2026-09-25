@@ -225,6 +225,29 @@ const SEC_TILT = Math.hypot(1, TAN_TILT);
 const MAX_SWING = (22 * Math.PI) / 180;
 
 /**
+ * **The side-scroller rule: a rider crosses the picture left to right**, as
+ * `dot(screenRight, travel)` at the rider, never below this. One owner; the
+ * rig caps its swing from it and `scripts/lib/raceCameraFindings.mts` asserts
+ * it on the built ring.
+ */
+export const SIDE_SCROLLER_FLOOR = 0.9;
+
+/**
+ * **The side view's other wall: how far down the track the lens may look**, as
+ * the sine of the angle between its flattened aim and the rider's travel. Past
+ * this it is a chase camera. One owner, as {@link SIDE_SCROLLER_FLOOR}.
+ */
+export const CHASE_CEILING = 0.45;
+
+/**
+ * What the swing keeps in hand under the two walls above once the guide frame's
+ * drift is taken off them — see {@link RaceCamera.measureGuideDrift}. Half a
+ * degree: the drift is measured at four times the stations the check sweeps, so
+ * this is room for the frame lerp between them, not a fudge.
+ */
+const SIDE_VIEW_MARGIN = (0.5 * Math.PI) / 180;
+
+/**
  * Stations round the lap at which the look-ahead is measured, for
  * {@link RaceCamera.solve}'s stand-off. A sample every ~1.2 m of a 600 m lap:
  * far finer than the ~40 m over which the ring's curvature actually changes.
@@ -370,6 +393,24 @@ const CEILING_FLOOR = 0.6;
  * step.
  */
 const CEILING_ERODE = 8;
+
+/**
+ * **The steepest the zoom ceiling may change, per metre of track.**
+ *
+ * The ceiling is a function of where the rider is, so it moves the picture as
+ * fast as she moves along it. Once it was allowed below 1 (see
+ * {@link CEILING_FLOOR}) a hairpin could take the rig from 1.34 to 0.72 over a
+ * few metres — a snap, not the easing Jim asked for — and it made the camera's
+ * place depend on the frame rate: on seed 1 (restart 6, shipped) the same
+ * wall-clock ramp left the rig 29.19 m out at 30 Hz and 27.20 m at 240 Hz, the
+ * follower's small rate-dependent lag multiplied by that slope.
+ *
+ * So the ceiling is held to the rate the zoom's own easing moves at full racing
+ * speed: `SPEED_PULL_BACK · ln 2 / ZOOM_HALF_LIFE` per second, at
+ * `PULL_BACK_AT` metres a second. A hairpin now draws the rig in over the same
+ * second or so any other zoom takes, starting earlier to be there in time.
+ */
+const CEILING_SLOPE = (SPEED_PULL_BACK * Math.LN2) / (ZOOM_HALF_LIFE * PULL_BACK_AT);
 
 /**
  * The lag a follower with that half-life settles into behind a target moving at
@@ -640,11 +681,53 @@ export class RaceCamera {
   private readonly up = new Vector3();
   private readonly aim = new Vector3();
 
+  /**
+   * The most the rig's frame ever turns away from the rider's real travel, in
+   * radians, anywhere on the lap — see {@link measureGuideDrift}.
+   */
+  private readonly guideDrift: number;
+
   constructor(route: RailRaceRoute) {
     this.route = route;
     this.camera.name = 'railRace:camera';
     this.lookahead = this.measureLookahead();
+    this.guideDrift = this.measureGuideDrift();
     this.resize(16, 9);
+  }
+
+  /**
+   * **How far the guide frame turns away from the way the rider is really
+   * going**, at worst, anywhere round this ring.
+   *
+   * The rig stands in the guide frame (see `CAMERA_GUIDE_WINDOW`), smoothed over
+   * 10 m so it cannot run backwards, and in that frame the side-scroller rule
+   * holds exactly: `dot(screenRight, travel) = cos swing`. But the rider travels
+   * along the faithful frame, and where the ring's curvature changes the two
+   * part — so what she actually gets is `cos(swing + drift)`. {@link MAX_SWING}
+   * was set with ~3.8 deg of room for that on the rings of its day. The rings
+   * follow each park's boundary now, and some bend harder: seed 1 (restart 6,
+   * shipped) drifts far enough that a phone looked 27.4 deg down the track and
+   * crossed the screen at 0.887. So the drift is measured on the ring the rig is
+   * built for, and {@link solve} takes it off the swing it allows.
+   *
+   * Measured the way `scripts/lib/raceCameraFindings.mts` measures it: the rig's
+   * own `along` against the rider lane's tangent, both flattened into the local
+   * ground plane.
+   */
+  private measureGuideDrift(): number {
+    const out = new Vector3();
+    const along = new Vector3();
+    const up = new Vector3();
+    const travel = new Vector3();
+    let worst = 0;
+    for (let i = 0; i < CEILING_STATIONS; i += 1) {
+      const s = (i / CEILING_STATIONS) * this.route.path.length;
+      this.rigBasis(s, out, along, up);
+      this.route.tangentAt(PLAYER_LANE, s, travel);
+      travel.addScaledVector(up, -travel.dot(up)).normalize();
+      worst = Math.max(worst, along.angleTo(travel));
+    }
+    return worst;
   }
 
   /** Fills {@link lookahead}. Runs once, before the first {@link resize}. */
@@ -977,7 +1060,18 @@ export class RaceCamera {
     const leftness = -riderNdc;
     // Swing the aim down the track to put them there — as far as that alone can,
     // and no further than the side view allows.
-    const swing = Math.min(Math.atan(leftness * SEC_TILT * tanH), MAX_SWING);
+    //
+    // And no further than keeps both side-view walls once this ring's guide
+    // drift is added on top — see `measureGuideDrift`. Never below zero: a ring
+    // that drifts that far cannot be filmed side-on, and the check says so.
+    const sideView =
+      Math.min(Math.acos(SIDE_SCROLLER_FLOOR), Math.asin(CHASE_CEILING)) -
+      this.guideDrift -
+      SIDE_VIEW_MARGIN;
+    const swing = Math.max(
+      0,
+      Math.min(Math.atan(leftness * SEC_TILT * tanH), MAX_SWING, sideView),
+    );
     const cos = Math.cos(swing);
     const sin = Math.sin(swing);
 
@@ -1149,7 +1243,7 @@ export class RaceCamera {
       return lowest;
     });
     const blurSpan = Math.max(1, Math.round(erodeSpan / 2));
-    return eroded.map((_, i) => {
+    const blurred = eroded.map((_, i) => {
       let total = 0;
       let count = 0;
       for (let d = -blurSpan; d <= blurSpan; d += 1) {
@@ -1158,6 +1252,32 @@ export class RaceCamera {
       }
       return total / count;
     });
+    // **Then no steeper than the zoom's own easing** — the largest function
+    // under the blurred ceiling whose slope never exceeds `CEILING_SLOPE` per
+    // metre. Under it, so every reversal guarantee above survives; and gentle,
+    // so a hairpin's close-in is eased like every other zoom. See CEILING_SLOPE.
+    const perStation = CEILING_SLOPE * step;
+    const gentle = [...blurred];
+    for (let lap = 0; lap < 2; lap += 1) {
+      for (let i = 0; i < CEILING_STATIONS; i += 1) {
+        const before = gentle[(i - 1 + CEILING_STATIONS) % CEILING_STATIONS] as number;
+        gentle[i] = Math.min(gentle[i] as number, before + perStation);
+      }
+      for (let i = CEILING_STATIONS - 1; i >= 0; i -= 1) {
+        const after = gentle[(i + 1) % CEILING_STATIONS] as number;
+        gentle[i] = Math.min(gentle[i] as number, after + perStation);
+      }
+    }
+    return gentle;
+  }
+
+  /**
+   * The largest zoom the ring lets the rig stand at, at arc distance `s` — the
+   * ceiling {@link place} applies. Public so a check can tell a place where the
+   * pull-back is withheld by the geometry from one where it has stopped working.
+   */
+  ceilingAt(s: number): number {
+    return this.zoomCeilingAt(s);
   }
 
   /** {@link zoomCeiling} at an arbitrary arc distance, linearly interpolated. */

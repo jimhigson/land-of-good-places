@@ -49,6 +49,7 @@ import {
   MAX_FRAME_DELTA,
 } from '../src/core/constants.ts';
 import { CASTLE_TOWERS } from '../src/world/building/layout.ts';
+import { PARK_LAYOUT } from '../src/world/parkLayout.ts';
 
 const problems: string[] = [];
 const said: string[] = [];
@@ -197,17 +198,30 @@ said.push(
 );
 
 // ------------------------------- 3. the castle's own doorway is still open
+/**
+ * Walks a player-sized body from (fromX, fromZ) towards (tx, tz), **re-aiming
+ * at the target every stride**, as tap-to-move's seek does; the closest it got.
+ *
+ * It used to aim once and march blind, which measured whether one straight
+ * line was clear rather than whether she could get there: on seed 1 (restart
+ * 6, shipped) the straight line to the door grazes a slide leg 7.3 m out, she
+ * slid 0.63 m sideways round it and walked the rest of the way in parallel,
+ * through the open door, to be scored "0.63 m short". The last stride is cut
+ * to the distance left, so an unobstructed walk ends on the target rather than
+ * up to half a stride either side of it.
+ */
 const marchTo = (tx: number, tz: number, fromX: number, fromZ: number): number => {
   const probe = new Vector3(fromX, 0, fromZ);
   const total = Math.hypot(tx - fromX, tz - fromZ) || 1;
-  const ux = (tx - fromX) / total;
-  const uz = (tz - fromZ) / total;
-  let closest = Infinity;
+  let closest = Math.hypot(probe.x - tx, probe.z - tz);
   for (let travelled = 0; travelled < total + 4; travelled += PLAYER_LONGEST_STEP) {
+    const left = Math.hypot(tx - probe.x, tz - probe.z);
+    if (left < 1e-6) break;
+    const stride = Math.min(PLAYER_LONGEST_STEP, left);
     collision.resolveMovement(
       probe,
-      ux * PLAYER_LONGEST_STEP,
-      uz * PLAYER_LONGEST_STEP,
+      ((tx - probe.x) / left) * stride,
+      ((tz - probe.z) / left) * stride,
       PLAYER_RADIUS,
       0,
       MAX_FRAME_DELTA,
@@ -227,25 +241,53 @@ if (!castleDoor) {
   );
 } else {
   const { standX, standZ } = castleDoor;
-  const outX = standX - centreX;
-  const outZ = standZ - centreZ;
-  const outLen = Math.hypot(outX, outZ) || 1;
-  const doorReach = marchTo(
-    standX,
-    standZ,
-    standX + (outX / outLen) * 20,
-    standZ + (outZ / outLen) * 20,
-  );
+  // **Straight out through the door, from the edge of the castle's own
+  // ground.** The door's outward line is the zone's own: from where she stands
+  // inside the threshold to the chip out on the steps.
+  //
+  // This march used to start 20 m out along the line from the castle's centre,
+  // which put its first metres on open lawn, past the castle's `boundingRadius`
+  // — ground the scatter builders own and are right to use. On seed 2 (restart
+  // 0, the shipped park) it stalled at (-42.64, 48.48) on a knee-high garden
+  // wall and a fairy-light pole about 25 m from the building anchor, and
+  // reported the door "18.67 m short": a child walks round a wall on the lawn;
+  // the door was open. Whether she can get from the park gate to this door at
+  // all is `check:park`'s `route.unreachable` (the front door is one of its
+  // destinations), an acceptance measure. What this clause owns is narrower —
+  // that making the turrets solid did not shut the doorway — so it walks only
+  // the castle's own ground: from where the building anchor's
+  // `boundingRadius` (which every scatter builder keeps out of) crosses the
+  // door's line, straight in.
+  const building = PARK_LAYOUT.entries.get('building');
+  if (!building) throw new Error("check:castle-towers: the park layout has no 'building' entry");
+  const outLen = Math.hypot(castleDoor.x - standX, castleDoor.z - standZ) || 1;
+  const outX = (castleDoor.x - standX) / outLen;
+  const outZ = (castleDoor.z - standZ) / outLen;
+  // |stand + t·out − anchor| = boundingRadius, the far root.
+  const relX = standX - building.x;
+  const relZ = standZ - building.z;
+  const along = relX * outX + relZ * outZ;
+  const disc = along * along - (relX * relX + relZ * relZ - building.boundingRadius ** 2);
+  const approach = disc > 0 ? -along + Math.sqrt(disc) : NaN;
+  if (!(approach > 0)) {
+    throw new Error(
+      `check:castle-towers: the front door's stand spot (${standX.toFixed(2)}, ${standZ.toFixed(2)}) ` +
+        `is not inside the building's ${building.boundingRadius} m bounding circle — the doorway march has no start`,
+    );
+  }
+  const doorReach = marchTo(standX, standZ, standX + outX * approach, standZ + outZ * approach);
   // The control aims at the same depth, 7 m along the facade — solid wall.
   // It must be at the door's own depth: offsetting along the outward normal
   // too puts the target clear of the wall plane, and the probe's correct stop
   // at the stone then reads as a penetration. That mistake was made and caught
   // by this very control.
-  const sideX = standX + (-outZ / outLen) * 7;
-  const wallReach = marchTo(sideX, standZ, sideX + (outX / outLen) * 20, standZ + (outZ / outLen) * 20);
+  const sideX = standX - outZ * 7;
+  const sideZ = standZ + outX * 7;
+  const wallReach = marchTo(sideX, sideZ, sideX + outX * approach, sideZ + outZ * approach);
   said.push(
     `CONTROL doorway: solid facade 7 m along stops ${wallReach.toFixed(2)} m short; the door ` +
-      `itself lets a child to ${doorReach.toFixed(2)} m of her stand spot`,
+      `itself lets a child to ${doorReach.toFixed(2)} m of her stand spot, marched ` +
+      `${approach.toFixed(2)} m in from the building's ${building.boundingRadius} m bounding circle`,
   );
   if (wallReach < 0.5) {
     problems.push(
