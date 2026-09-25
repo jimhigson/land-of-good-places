@@ -17,3 +17,8 @@ Branch fix/sb-gate (from origin/wip/sb-merge), worktree .claude/worktrees/sb-gat
 - Red at 12627b93: seed 0 wall leak (5.7,60.0); seed 2 wall leak; seed 15 wall leak (4.7,57.1) + 2 poles in span (3.1,57.8),(-3.1,59.1).
 - After 22d44267: seeds 0,2,15 accepted, 0 failures, 106 measures.
 - Next: park:attempt remaining 13 seeds; check:cat-bus, gateway, entrance-road (0,15), coplanar, cycle-tdz, tsc.
+
+## Done
+- park:attempt all 16 supported seeds at recorded restarts after fix: all accepted, 0 failures, 106 measures. No accept:parks needed.
+- check:cycle-tdz 0, check:cat-bus 0, check:coplanar 0 (186 seams, all in baseline), tsc 0, typecheck:test 0.
+- check:gateway / check:entrance-road full runs exit 1: pool seed 451 (restart 0) throws DuckBarRefusal in railRace/simulate.ts — reproduced identically on base 63d79421, not this branch. On seeds 0,15 (scratch copies with pool = [0,15]) both exit 0.
