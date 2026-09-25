@@ -287,6 +287,13 @@ const MAX_STEP = BUILDING_STEP_UP;
  * green run, because the value either side of a green one can be four times
  * worse. If the park's walls or the fountain change shape, the cliffs move and
  * this is re-derived, not adjusted.
+ *
+ * **Both cliffs above were measured when a band's price was `ground * M`**,
+ * before {@link bandedStep} (25 Sep 2026). The floor is unaffected — the
+ * fountain's band is all paving, priced identically under both rules. The
+ * kerb ceiling is not: a band on the lawn now costs 3.25 a metre where it cost
+ * 4.24, so the red values of 2.55/2.75 no longer describe this router and the
+ * window has to be re-swept before this number is next moved.
  */
 const HOP_COST_MULTIPLIER = 2.65;
 
