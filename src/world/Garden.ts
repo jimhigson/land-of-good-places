@@ -1,4 +1,10 @@
-import { alongBoundary, PARK_BOUNDARY, TERRAIN_EDGE_RADIUS, type EdgeStation } from './boundary';
+import {
+  alongBoundary,
+  PARK_BOUNDARY,
+  TERRAIN_EDGE_RADIUS,
+  type EdgeStation,
+  type ParkBoundary,
+} from './boundary';
 import {
   BoxGeometry,
   BufferAttribute,
@@ -24,7 +30,8 @@ import { grassTexture, pinkStoneTexture } from '../core/textures';
 import { placeOnSphere, terrainHeight } from './terrain';
 import { buildPaths } from './pathGraph';
 import type { CollisionWorld } from './Collision';
-import { isInEntranceGateOpening } from './entrance/layout';
+import { ENTRANCE_GATE_HALF_WIDTH, entranceGateFrame } from './entrance/layout';
+import { parkGateFeet } from './entrance/gateArch';
 
 /**
  * The ground itself: grassy terrain, the winding paths and the pink stone
@@ -180,12 +187,22 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   // at the bulge.
   const blockWidth = BOUNDARY_BLOCK_WIDTH;
   const courses = 2;
+  // The gate's opening, cut along the edge itself and closed onto the arch's
+  // piers — see {@link gateOpening}. A block is kept only if its whole length
+  // is clear of the opening, never just its middle.
+  const opening = gateOpening(PARK_BOUNDARY);
   const courseStations = [
-    alongBoundary(PARK_BOUNDARY, blockWidth).filter(outsideTheGate),
+    alongBoundary(PARK_BOUNDARY, blockWidth).filter((st) => opening.clears(st, blockWidth / 2)),
     // Half a block along the edge, which is what makes alternate courses bond.
-    alongBoundary(PARK_BOUNDARY, blockWidth, blockWidth / 2).filter(outsideTheGate),
+    alongBoundary(PARK_BOUNDARY, blockWidth, blockWidth / 2).filter((st) =>
+      opening.clears(st, blockWidth / 2),
+    ),
   ];
-  const blockCount = Math.max(courseStations[0]!.length, courseStations[1]!.length);
+  // The pieces that close each course onto the gate: a trimmed block from the
+  // course's last whole one to the wall's end, then the return to the pier.
+  const closing = courseStations.map((stations, course) =>
+    closingPieces(opening, stations, blockWidth, course),
+  );
   const courseHeight = 0.62;
 
   const blockGeometry = new BoxGeometry(blockWidth * 0.96, courseHeight, 0.7);
@@ -195,7 +212,11 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
     roughness: 0.85,
     metalness: 0,
   });
-  const blocks = new InstancedMesh(blockGeometry, blockMaterial, blockCount * courses);
+  const instanceCount = courseStations.reduce(
+    (sum, stations, course) => sum + stations.length + closing[course]!.length,
+    0,
+  );
+  const blocks = new InstancedMesh(blockGeometry, blockMaterial, instanceCount);
   blocks.name = 'boundary-blocks';
   blocks.castShadow = true;
   blocks.receiveShadow = true;
@@ -209,10 +230,14 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   const colour = new Color();
 
   let index = 0;
+  const pieceScale = new Vector3(1, 1, 1);
   for (let course = 0; course < courses; course += 1) {
-    const stations = courseStations[course % courseStations.length] as EdgeStation[];
-    for (let i = 0; i < blockCount; i += 1) {
-      const station = stations[i % stations.length] as EdgeStation;
+    const stations = courseStations[course] as EdgeStation[];
+    // Each course lays its own stations once. It used to lay the longer
+    // course's count on both, wrapping the shorter one round, which stacked a
+    // second block exactly inside the first whenever the two differed.
+    for (let i = 0; i < stations.length; i += 1) {
+      const station = stations[i] as EdgeStation;
       const { x, z } = station;
       const y = terrainHeight(x, z) + courseHeight * (course + 0.5);
       flatVector.set(x, y, z);
@@ -232,6 +257,18 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
       blocks.setColorAt(index, colour);
       index += 1;
     }
+    for (const piece of closing[course]!) {
+      const y = terrainHeight(piece.x, piece.z) + courseHeight * (course + 0.5);
+      flatVector.set(piece.x, y, piece.z);
+      placeOnSphere(flatVector, piece.yaw, positionVector, quaternion);
+      pieceScale.set(piece.length / blockWidth, 1, 1);
+      matrix.compose(positionVector, quaternion, pieceScale);
+      blocks.setMatrixAt(index, matrix);
+      const shade = 0.9 + rng.unit() * 0.2;
+      colour.setRGB(shade, shade * 0.98, shade);
+      blocks.setColorAt(index, colour);
+      index += 1;
+    }
   }
   blocks.instanceMatrix.needsUpdate = true;
   if (blocks.instanceColor) blocks.instanceColor.needsUpdate = true;
@@ -242,9 +279,9 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   const pillarStations = alongBoundary(
     PARK_BOUNDARY,
     PARK_BOUNDARY.perimeter / PILLAR_TARGET_COUNT,
-  ).filter(outsideTheGate);
+  ).filter((st) => opening.clears(st, PILLAR_HALF_WIDTH));
   const pillarCount = pillarStations.length;
-  const pillarGeometry = new BoxGeometry(1.5, 2.1, 1.5);
+  const pillarGeometry = new BoxGeometry(2 * PILLAR_HALF_WIDTH, 2.1, 2 * PILLAR_HALF_WIDTH);
   const pillarMaterial = new MeshStandardMaterial({
     map: pinkStoneTexture(1, 1),
     roughness: 0.85,
@@ -282,43 +319,38 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   caps.instanceMatrix.needsUpdate = true;
   group.add(pillars, caps);
 
-  // The wall is solid **except at the gate**. The collision polygon walks the
-  // same outline the blocks do, at a coarser step — one segment per ~2 m of
-  // edge, so the chord never bows further from the drawn masonry than the
-  // masonry is thick — and skips the same opening, so the hole you can see is
-  // the hole you can walk through.
+  // The wall is solid **except through the arch**. The collision polygon walks
+  // the same outline the blocks do, at a coarser step — one segment per ~2 m
+  // of edge, so the chord never bows further from the drawn masonry than the
+  // masonry is thick — stops at exactly the two points the drawn wall stops
+  // at, and carries on from each of them to its pier, the same way the drawn
+  // returns do. So the hole you can see is the hole you can walk through, and
+  // it is the arch and nothing beside it.
   //
-  // Nothing escapes through it: the player is held by the **soft** boundary at
-  // `GARDEN_PLAY_RADIUS` (58 m), two metres inside this masonry, which is what
-  // has always actually kept her in the park. See `boundary.ts`.
-  const collisionStations = alongBoundary(PARK_BOUNDARY, 2);
-  for (let i = 0; i < collisionStations.length; i += 1) {
-    const a = collisionStations[i] as EdgeStation;
-    const b = collisionStations[(i + 1) % collisionStations.length] as EdgeStation;
-    // **Tested at both ends and the middle, not the midpoint alone.**
-    //
-    // The midpoint test was the bug behind half of #481. A collision station
-    // sits every ~2 m along the outline, so a segment whose *midpoint* is a
-    // hand's breadth outside the opening still reaches a metre into it, and the
-    // last kept segment on each side did exactly that. Measured on `main`, in
-    // the 7.00 m clear width 1.0-2.0 m inside the arch, that stone overlapped a
-    // player-sized body on **nine of the sixteen pool seeds** — worst 0.87 m on
-    // 451 and 0.76 m on 128, and 0.05 m on the canonical seed Jim plays.
-    //
-    // Asking about all three points is what makes "this segment is clear of the
-    // doorway" true of the whole segment rather than of one point on it. The
-    // margin is the collider's own half-thickness, so the *surface* a child
-    // meets clears the arch rather than the centre line.
-    //
-    // The old comment here said a segment with one end in the opening is part
-    // of the opening's edge and must not be walled off. That is still true and
-    // this still honours it — such a segment is skipped, more of them than
-    // before — the aperture simply ends up the arch's own width instead of an
-    // angle that happened to be worth about the same at one radius.
-    const inside = (px: number, pz: number): boolean =>
-      inGateGap(px, pz, BOUNDARY_WALL_COLLISION_HALF);
-    if (inside(a.x, a.z) || inside(b.x, b.z) || inside((a.x + b.x) / 2, (a.z + b.z) / 2)) continue;
+  // It used to skip every segment inside a strip squared to the gate. The
+  // boundary is pinned *through* the gate but not square to it — seed 0
+  // crosses at about 35 degrees — so the strip stopped the wall metres short
+  // of the piers: 3.16 m and 2.68 m of clear ground beside the arch on seed 0,
+  // a hole in the park wall wider than a child on six of the sixteen parks.
+  // `theWallClosesOntoTheGate` (test/procgen/invariants.ts) is what sees it.
+  const collisionStations = alongBoundary(PARK_BOUNDARY, 2)
+    .filter((st) => opening.clears(st, COLLISION_END_MIN))
+    .sort((a, b) => opening.fromToEnd(a.s) - opening.fromToEnd(b.s));
+  const chain: { x: number; z: number }[] = [
+    opening.ends[1],
+    ...collisionStations,
+    opening.ends[0],
+  ];
+  for (let i = 1; i < chain.length; i += 1) {
+    const a = chain[i - 1]!;
+    const b = chain[i]!;
     collision.addWall(a.x, a.z, b.x, b.z, BOUNDARY_WALL_COLLISION_HALF);
+  }
+  for (let side = 0; side < 2; side += 1) {
+    const end = opening.ends[side]!;
+    const pier = opening.piers[side]!;
+    if (Math.hypot(pier.x - end.x, pier.z - end.z) < RETURN_MIN_LENGTH) continue;
+    collision.addWall(end.x, end.z, pier.x, pier.z, BOUNDARY_WALL_COLLISION_HALF);
   }
 
   return group;
@@ -344,65 +376,228 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
 const PILLAR_TARGET_COUNT = 28;
 
 /**
- * **Is this point on the boundary inside the gate's opening?**
+ * **The gate's opening in the boundary wall, and how the wall closes onto the
+ * arch either side of it.**
  *
- * The gate-gap predicate has existed in `entrance/layout.ts` since the entrance
- * was written and, until now, had **zero callers anywhere in the repo** — so
- * the gate was a gate in name only. `Entrance.ts` built an arch, `boundary.ts`
- * pinned the outline's radius at the gate's bearing, and this function laid
- * unbroken masonry straight across the opening between the arch's two posts,
- * with a matching unbroken collision polygon. Its own comment said "the wall is
- * solid", and it was.
+ * Issue #195 cut the first hole here (the gate had been an arch over unbroken
+ * masonry — Jim watched the bus drive through it); #481 made it the arch's own
+ * width in metres. Both cut it as a strip squared to the gate. But the park's
+ * edge is a spline pinned *through* the gate at (0, 60), not square to it —
+ * seed 0 crosses at about 35 degrees — so a strip squared to the gate stops the
+ * wall wherever the slanted edge happens to leave the strip: (5.85, 64.13) east
+ * and (-5.78, 56.36) west on seed 0, metres from piers standing at (+-4.3, 60).
+ * The gap between each pier and its wall end measured 3.16 m and 2.68 m clear on
+ * seed 0, and wider than a child's 1.24 m on six of the sixteen parks.
  *
- * Jim, 7 August 2026, on the first time anyone ever watched the cat bus arrive:
- * *"the bus drives something like 5 m into the park, through a wall."* The bus
- * has been moved back outside where it belongs, but the wall it drove through
- * was the second half of that, and the children walking in would have done
- * exactly the same thing at a smaller scale. Issue #195.
+ * So the opening is cut **along the edge's own line**: from where the edge
+ * crosses the gate, out each way until it has passed the pier's line across the
+ * gateway (`|across| >= ENTRANCE_GATE_HALF_WIDTH`). That is the whole of the
+ * gap in the ring, whatever angle the edge crosses at. From each of those two
+ * wall ends a **return** runs to its pier — the wall turning to meet the gate —
+ * so the ring is closed onto the arch and the arch is the only way through.
+ *
+ * The ends sit on or beyond the pier's line and a return runs straight to the
+ * pier's centre, so no masonry comes inside the pier faces: the 7 m the arch
+ * promises between them is untouched. `theGateIsAHoleInTheWall` holds that,
+ * and `theWallClosesOntoTheGate` holds the closure.
  */
-function inGateGap(x: number, z: number, margin: number): boolean {
-  return isInEntranceGateOpening(x, z, margin);
+interface GateOpening {
+  /**
+   * The two wall ends: `[0]` behind the gate crossing along the edge (decreasing
+   * arc length), `[1]` ahead of it.
+   */
+  readonly ends: readonly [{ x: number; z: number }, { x: number; z: number }];
+  /** The pier each end closes onto, same order. */
+  readonly piers: readonly [{ x: number; z: number }, { x: number; z: number }];
+  /** True if a piece `halfLength` either side of this station is clear of the opening. */
+  clears(station: EdgeStation, halfLength: number): boolean;
+  /** Arc length from `ends[1]` forward round the ring to `s` — for ordering the wall. */
+  fromToEnd(s: number): number;
+  /** Signed arc length from the gate crossing to `s`, in `[-P/2, P/2)`. */
+  rel(s: number): number;
+  /** Signed arc position of the two ends, `[0]` negative and `[1]` positive. */
+  readonly span: readonly [number, number];
+  /** The point on the edge at signed arc position `rel`. */
+  pointAt(rel: number): { x: number; z: number };
 }
 
 /**
- * The same, as a predicate to filter drawn edge stations with.
- *
- * The margin is **half a block plus the masonry's own half-width**, because a
- * station is where a block's *centre* goes and the block is `blockWidth` long
- * lying along the edge. Filtering on the centre alone left the last kept block
- * reaching into the opening by up to its own half-length — which is most of
- * what a child walks into.
+ * How far a wall end may be walked along the edge looking for the pier's line
+ * before the park is declared unbuildable. A return is a short piece of wall
+ * turning to meet the gate; an edge so nearly parallel to the way in that it
+ * has not passed the pier inside this is not a gate in a wall at all.
  */
-function outsideTheGate(station: EdgeStation): boolean {
-  return !inGateGap(station.x, station.z, DRAWN_BLOCK_GATE_MARGIN);
+const GATE_OPENING_MAX_WALK = 30;
+
+/** Step along the edge used to find the opening's ends. */
+const GATE_OPENING_STEP = 0.05;
+
+function gateOpening(boundary: ParkBoundary): GateOpening {
+  const fine = alongBoundary(boundary, GATE_OPENING_STEP);
+  const count = fine.length;
+  const perimeter = fine[0]!.perimeter;
+  const ds = perimeter / count;
+  const at = (k: number): EdgeStation => fine[((k % count) + count) % count]!;
+
+  // Where the edge crosses the gate. The boundary is pinned to pass exactly
+  // through it (`generateParkBoundary`), so this is the nearest station.
+  let gate = 0;
+  let nearest = Infinity;
+  for (let k = 0; k < count; k += 1) {
+    const { across, along } = entranceGateFrame(fine[k]!.x, fine[k]!.z);
+    const d = Math.hypot(across, along);
+    if (d < nearest) {
+      nearest = d;
+      gate = k;
+    }
+  }
+
+  const walk = (direction: 1 | -1): number => {
+    for (let k = 1; k * ds <= GATE_OPENING_MAX_WALK; k += 1) {
+      const st = at(gate + direction * k);
+      if (Math.abs(entranceGateFrame(st.x, st.z).across) >= ENTRANCE_GATE_HALF_WIDTH) return k;
+    }
+    throw new Error(
+      `gateOpening: the park's edge runs ${GATE_OPENING_MAX_WALK} m from the gate without ` +
+        `passing the gate pier's line (${ENTRANCE_GATE_HALF_WIDTH} m off the axis) — it is ` +
+        'running along the way in rather than across it, and no wall can close onto the arch',
+    );
+  };
+  const back = at(gate - walk(-1));
+  const ahead = at(gate + walk(1));
+  const gateS = at(gate).s;
+  const rel = (s: number): number => {
+    const d = (((s - gateS) % perimeter) + perimeter + perimeter / 2) % perimeter;
+    return d - perimeter / 2;
+  };
+  const from = rel(back.s);
+  const to = rel(ahead.s);
+
+  const feet = parkGateFeet();
+  const pierFor = (end: { x: number; z: number }): { x: number; z: number } => {
+    const side = Math.sign(entranceGateFrame(end.x, end.z).across);
+    return feet.find((f) => Math.sign(entranceGateFrame(f.x, f.z).across) === side) ?? feet[0];
+  };
+
+  return {
+    ends: [
+      { x: back.x, z: back.z },
+      { x: ahead.x, z: ahead.z },
+    ],
+    piers: [pierFor(back), pierFor(ahead)],
+    clears: (station, halfLength) => {
+      const r = rel(station.s);
+      return r - halfLength >= to || r + halfLength <= from;
+    },
+    fromToEnd: (s) => (((rel(s) - to) % perimeter) + perimeter) % perimeter,
+    rel,
+    span: [from, to],
+    pointAt: (r) => {
+      const st = at(gate + Math.round(r / ds));
+      return { x: st.x, z: st.z };
+    },
+  };
+}
+
+interface ClosingPiece {
+  readonly x: number;
+  readonly z: number;
+  /** Yaw putting the block's long axis along the piece, as `alongBoundary`'s. */
+  readonly yaw: number;
+  /** Length of stone this piece stands for, before the mortar gap. */
+  readonly length: number;
+}
+
+/** Shorter than this, a trimmed block or a return is left out as a sliver. */
+const RETURN_MIN_LENGTH = 0.1;
+
+/**
+ * A collision station this close to a wall end is dropped, so the chain does
+ * not grow a sliver segment between the station and the end itself.
+ */
+const COLLISION_END_MIN = 0.2;
+
+function piece(a: { x: number; z: number }, b: { x: number; z: number }): ClosingPiece {
+  return {
+    x: (a.x + b.x) / 2,
+    z: (a.z + b.z) / 2,
+    yaw: Math.atan2(-(b.z - a.z), b.x - a.x),
+    length: Math.hypot(b.x - a.x, b.z - a.z),
+  };
+}
+
+/**
+ * The blocks that close one course onto the gate, both sides: a block trimmed
+ * to fill from the course's last whole block to the wall's end (whole blocks
+ * sit on fixed stations, so the last one stops up to a block short), then the
+ * return from the wall's end to the pier, split into block-sized pieces —
+ * half a piece out of step on the upper course, so the return bonds like the
+ * rest of the wall.
+ */
+function closingPieces(
+  opening: GateOpening,
+  kept: readonly EdgeStation[],
+  blockWidth: number,
+  course: number,
+): ClosingPiece[] {
+  const pieces: ClosingPiece[] = [];
+  for (let side = 0; side < 2; side += 1) {
+    const endRel = opening.span[side]!;
+    // The nearest kept block on this side, and where its inner end is.
+    let lastEdge = side === 0 ? -Infinity : Infinity;
+    for (const st of kept) {
+      const r = opening.rel(st.s);
+      if (side === 0 && r < endRel + 1e-6) lastEdge = Math.max(lastEdge, r + blockWidth / 2);
+      if (side === 1 && r > endRel - 1e-6) lastEdge = Math.min(lastEdge, r - blockWidth / 2);
+    }
+    if (Number.isFinite(lastEdge) && Math.abs(endRel - lastEdge) >= RETURN_MIN_LENGTH) {
+      pieces.push(piece(opening.pointAt(lastEdge), opening.pointAt(endRel)));
+    }
+
+    const end = opening.ends[side]!;
+    const pier = opening.piers[side]!;
+    const length = Math.hypot(pier.x - end.x, pier.z - end.z);
+    if (length < RETURN_MIN_LENGTH) continue;
+    const n = Math.max(1, Math.round(length / blockWidth));
+    const cuts: number[] = [0];
+    for (let i = 1; i < n; i += 1) cuts.push(course % 2 === 0 ? i / n : (i - 0.5) / n);
+    if (course % 2 === 1 && n > 1) cuts.push((n - 0.5) / n);
+    cuts.push(1);
+    for (let i = 1; i < cuts.length; i += 1) {
+      const t0 = cuts[i - 1]!;
+      const t1 = cuts[i]!;
+      if (t1 - t0 < 1e-6) continue;
+      pieces.push(
+        piece(
+          { x: end.x + (pier.x - end.x) * t0, z: end.z + (pier.z - end.z) * t0 },
+          { x: end.x + (pier.x - end.x) * t1, z: end.z + (pier.z - end.z) * t1 },
+        ),
+      );
+    }
+  }
+  return pieces;
 }
 
 /**
  * **How long one drawn block of the boundary wall is**, along the edge.
  *
- * Exported because it is a *geometric fact about the built wall*, and the
- * procgen invariant that proves no masonry stands in the gate's opening has to
- * know it to ask the question honestly: a station is where a block's **middle**
- * goes, so "is this block in the doorway?" is about `BOUNDARY_BLOCK_WIDTH / 2`
- * either side of that middle, not about the middle.
+ * Exported because it is a *geometric fact about the built wall*: the park
+ * facts carry it, and anything sizing a probe against the masonry reads it here.
  *
- * The invariant deliberately derives its own expectation from this and
- * {@link BOUNDARY_MASONRY_HALF_WIDTH} rather than reading
- * {@link DRAWN_BLOCK_GATE_MARGIN}. It read that constant for one commit, and
- * that made it blind in exactly the way a check must never be: zeroing the
- * margin moved the code *and the check together*, and the whole suite stayed at
- * 520/520 with stone back in the gateway. A check that reads the policy it is
- * checking cannot fail. It reads the geometry now, and zeroing the margin turns
- * it red.
+ * The invariant that proves no masonry stands in the gate's opening
+ * (`theGateIsAHoleInTheWall`) used to derive a worst-case reach from this and
+ * {@link BOUNDARY_MASONRY_HALF_WIDTH}, having once read the wall's own gate
+ * margin constant and gone blind with it — zeroing the margin moved the code
+ * *and the check together*, and the suite stayed green with stone in the
+ * gateway. It now reads every block's real corners off its instance matrix and
+ * the block's own geometry, which holds whatever policy lays the wall: a
+ * worst-case reach assumed every block lies along the edge, and the returns
+ * that close the wall onto the piers do not.
  */
 export const BOUNDARY_BLOCK_WIDTH = 1.7;
 
-/**
- * How far a drawn block's centre must stand clear of the arch's opening: its
- * own half-length (the pillars are 1.5 m, so the widest half-length is the
- * block's) plus the masonry's half-width.
- */
-export const DRAWN_BLOCK_GATE_MARGIN = BOUNDARY_BLOCK_WIDTH / 2 + BOUNDARY_MASONRY_HALF_WIDTH;
+/** Half the side of a boundary pillar, square in plan. */
+const PILLAR_HALF_WIDTH = 0.75;
 
 const SQUASHED_CAP = new Vector3(1, 0.72, 1);
 

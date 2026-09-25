@@ -22,6 +22,7 @@ import { cruiserClearanceForPoints } from './coaster/clearance';
 import type { CoasterRoute } from './coaster/route';
 import { PLAYER_RADIUS, WALKABLE_GAP } from '../core/constants';
 import { nearADoormat, onRideExit } from './Scenery';
+import { isInGateArchSpan } from './entrance/gateArch';
 import { isOnPath, pathCentreline } from './pathGraph';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { CollisionWorld } from './Collision';
@@ -568,6 +569,16 @@ export function fairyPoleBuilder(
       // `nearADoormat`.
       if (onRideExit(x, z, POLE_RADIUS + WALKABLE_GAP)) continue;
       if (nearADoormat(x, z)) continue;
+      // **Nor in the park gate's doorway.** The arch promises the 7 m between
+      // its pier faces as the way in, and nothing claims that ground: the
+      // gateway path's corridor claim is only as wide as the path itself
+      // (`entrance/roadCorridor.ts`), and `isOnPath` only keeps a pole off the
+      // paving. So seed 15 stood `fairy-pole` at (-3.1, 59.1) — 0.9 m in from
+      // the gate line, 3.1 m off the axis, inside the arch — and another at
+      // (3.1, 57.8), and both were legal. The span's one owner answers, with the
+      // pole's own radius as the margin, and the pole slides along its run or
+      // is left out like any other refusal.
+      if (isInGateArchSpan(x, z, POLE_RADIUS)) continue;
       // **Ask the ride, before standing anything up.** A pole is 4.4 m tall and
       // the claims registry is a ground-footprint system — it cannot see what
       // sweeps through the air above a square metre. Seed 24 built a park whose
