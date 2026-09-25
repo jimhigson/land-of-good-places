@@ -106,6 +106,30 @@
  * here: not
  * "someone once saw this go red", but "it is red right now, in this run".
  *
+ * **Mutations 3 and 4, 25 September 2026**, on `fix/sb-pathpref` over the
+ * accepted parks (`LGP_SEED=s`, restart from `acceptedRestarts.ts`), with every
+ * sampler covering the park's own outline:
+ *
+ * - **3 — a band's price back to `ground * M`** (`NavGrid`'s `bandedStep`).
+ *   Seed 0: `FAIL stepping off the kerb stays a step … worst 80.4% (kerb →
+ *   (11, -7) 2.7 m off)`, 421 hops — a lawn bench along the kerb at
+ *   z ≈ -5.25, x 6.5–13.5, walked round (8.02 m) instead of over (4.45 m).
+ *   Seed 9: `… worst 117.2% (kerb → (-13, 11) 3.2 m off)`, 401 hops. Exit 1
+ *   both. Fixed: 15.0% and 13.7% worst.
+ * - **4 — the paved-only lattice clipped back to `GARDEN_PLAY_RADIUS + 2`.**
+ *   Seed 11: `FAIL the paving is one network: 140 of 204 junction pairs have
+ *   no all-paved walk at all (first: ballPit → dodgems)`, exit 1 — and, before
+ *   that assertion existed, **every other assertion passed** on the 63 probes
+ *   the clipping left, which is why it exists.
+ *
+ * **Not every "no comic detour" ceiling here is arithmetic.** The bound the
+ * header states holds when neither route touches a hoppable wall; once the
+ * unweighted route pays a hop, its length is less than its cost and the
+ * weighted route may legitimately exceed `1.6 × 1.08` of it. The two kerb
+ * failures above were that case with a real bug inside it (the hop priced 1.6×
+ * dearer on the lawn); a failure here after a change to hop pricing wants the
+ * same diagnosis before anyone reaches for a number.
+ *
  * ## Every seed, not just the canonical one
  *
  * The thresholds here were derived on **all five procgen seeds** (canonical
@@ -145,6 +169,7 @@ import { JourneyPlanner } from '../src/entities/npc/journey.ts';
 import { gardenAttractions } from '../src/entities/npc/attractions.ts';
 import { SPACE_GARDEN } from '../src/world/spaces.ts';
 import { GARDEN_PLAY_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
+import { GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 
 const verbose = process.argv.includes('--verbose');
@@ -285,6 +310,37 @@ if (excluded.length === 0) {
   process.stderr.write('  · none — every junction of the network is standable\n');
 }
 
+/**
+ * **Is this point at least `inset` metres inside the park?** Asked of
+ * `GARDEN_PLAY_BOUNDARY` — the outline the park was generated inside and the
+ * one `NavGrid` builds its lattice from — so every sample in this file covers
+ * the park that was built.
+ *
+ * Every sampler here used to ask `Math.hypot(x, z) > GARDEN_PLAY_RADIUS - n`
+ * instead: the circular park, 58 m, which the generated outline replaced at
+ * twice the area and which reaches out to 84 m on some seeds. So the junction
+ * probes, the kerb hops and the reachability lattice all sampled the middle
+ * of the park only, and nothing said so — the same stale radius that clipped
+ * the paved-only lattice below.
+ */
+function insidePlay(x: number, z: number, inset: number): boolean {
+  return GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) >= inset;
+}
+/**
+ * The coordinates a lattice sampler at `pitch` walks: a square holding the
+ * whole park, **on the same grid the circle-bound samplers used** — anchored
+ * at `-GARDEN_PLAY_RADIUS` and stepped outwards — so the widened sample is a
+ * strict superset of the old one. Every probe the check used to ask it still
+ * asks; the park outside the old circle is added, nothing inside it moves.
+ */
+function sampleAxis(pitch: number): number[] {
+  const extent = GARDEN_PLAY_BOUNDARY.maxRadius;
+  const start = -GARDEN_PLAY_RADIUS - pitch * Math.ceil((extent - GARDEN_PLAY_RADIUS) / pitch);
+  const out: number[] = [];
+  for (let v = start; v <= extent; v += pitch) out.push(v);
+  return out;
+}
+
 const probes: Probe[] = [];
 for (let i = 0; i < junctions.length; i += 1) {
   for (let j = i + 1; j < junctions.length; j += 1) {
@@ -293,9 +349,10 @@ for (let i = 0; i < junctions.length; i += 1) {
     const separation = Math.hypot(a.x - b.x, a.z - b.z);
     if (separation < MIN_PROBE_SEPARATION || separation > MAX_PROBE_SEPARATION) continue;
     // Both ends must be inside the garden's own play bounds, or the router
-    // is being asked about somewhere it does not plan.
-    if (Math.hypot(a.x, a.z) > GARDEN_PLAY_RADIUS - 2) continue;
-    if (Math.hypot(b.x, b.z) > GARDEN_PLAY_RADIUS - 2) continue;
+    // is being asked about somewhere it does not plan. Asked of the boundary
+    // the park was built inside — see {@link insidePlay}.
+    if (!insidePlay(a.x, a.z, 2)) continue;
+    if (!insidePlay(b.x, b.z, 2)) continue;
     probes.push({ label: `${a.id} → ${b.id}`, ax: a.x, az: a.z, bx: b.x, bz: b.z });
   }
 }
@@ -331,7 +388,23 @@ if (probes.length < 8) {
 
 /** Cell size of the paved-only lattice. `NavGrid`'s own `CELL`. */
 const PAVED_CELL = 0.5;
-const PAVED_REACH = GARDEN_PLAY_RADIUS + 2;
+/**
+ * How far out the paved-only lattice reaches: the **park's** edge, read off
+ * the boundary the park was built inside, never the circular
+ * `GARDEN_PLAY_RADIUS` the park outgrew when its outline went to twice the
+ * area (`PARK_AREA_MULTIPLIER`).
+ *
+ * It used to be `GARDEN_PLAY_RADIUS + 2` = 60 m, and the paving on a
+ * generated outline runs out to 84 m. So every path that looped outside the
+ * old circle was cut where it crossed it, the paved network fell into pieces,
+ * and a pair of junctions joined by paving the whole way round read as having
+ * **no** all-paved walk at all — "not servable". Measured 25 Sep 2026 on the
+ * accepted parks: seed 11 lost 49 of its 76 probes that way and its population
+ * shrank to the 26 short, straight pairs the unweighted router also walks
+ * paved, so `the bar is a real bar` went red (23 of 26); seeds 4, 8, 9, 10 and
+ * 12 lost 29–56 probes each and stayed green only by luck.
+ */
+const PAVED_REACH = GARDEN_PLAY_BOUNDARY.maxRadius + 2;
 const pavedSide = Math.ceil((PAVED_REACH * 2) / PAVED_CELL);
 const pavedOrigin = -PAVED_REACH + PAVED_CELL / 2;
 const pavedCells = new Uint8Array(pavedSide * pavedSide);
@@ -575,16 +648,23 @@ interface Hop {
 const hops: Hop[] = [];
 {
   const centreline = pathCentreline();
-  // A deterministic spread over the park, thinned so the probe set is a
-  // handful of dozens rather than hundreds — every third lattice point.
-  let seen = 0;
-  for (let x = -GARDEN_PLAY_RADIUS; x <= GARDEN_PLAY_RADIUS; x += 3) {
-    for (let z = -GARDEN_PLAY_RADIUS; z <= GARDEN_PLAY_RADIUS; z += 3) {
-      if (Math.hypot(x, z) > GARDEN_PLAY_RADIUS - 4) continue;
+  // A deterministic spread over the whole park: every point of a 3 m lattice
+  // that lands 2-6 m off the paving.
+  //
+  // **Not thinned.** This used to keep every third such point *in the order
+  // the loop met them*, which made the sample depend on where the loop
+  // started: widening the loop from the old 58 m circle to the park's real
+  // edge shifted which third survived, and the very probe that had caught the
+  // seed-0 bench detour (kerb -> (11, -7)) silently dropped out of the set —
+  // measured, the old hop pricing then passed seeds 0 and 9 green. A sample
+  // that loses its own failures when the loop bounds move is not a sample.
+  // Every point is kept instead, on the old grid (`sampleAxis`), so the set is
+  // a strict superset of every set this check has ever asked.
+  for (const x of sampleAxis(3)) {
+    for (const z of sampleAxis(3)) {
+      if (!insidePlay(x, z, 4)) continue;
       const off = distanceToPath(x, z);
       if (off < HOP_MIN || off > HOP_MAX) continue;
-      seen += 1;
-      if (seen % 3 !== 0) continue;
       let bestX = 0;
       let bestZ = 0;
       let best = Infinity;
@@ -621,9 +701,9 @@ const weightedHops = hops.map((hop) => trace(weighted, hop.fromX, hop.fromZ, hop
 // forgotten, because they are chosen from the park, not from the router.
 const REACH_PITCH = 6;
 const reachTargets: { x: number; z: number }[] = [];
-for (let x = -GARDEN_PLAY_RADIUS; x <= GARDEN_PLAY_RADIUS; x += REACH_PITCH) {
-  for (let z = -GARDEN_PLAY_RADIUS; z <= GARDEN_PLAY_RADIUS; z += REACH_PITCH) {
-    if (Math.hypot(x, z) > GARDEN_PLAY_RADIUS - 2) continue;
+for (const x of sampleAxis(REACH_PITCH)) {
+  for (const z of sampleAxis(REACH_PITCH)) {
+    if (!insidePlay(x, z, 2)) continue;
     reachTargets.push({ x, z });
   }
 }
@@ -734,6 +814,35 @@ const servable = probes.map((probe, i) => {
   return { paved, budget, ok: paved <= budget };
 });
 const servableCount = servable.filter((s) => s.ok).length;
+
+/**
+ * **The paving is one network: every junction pair has *some* all-paved
+ * walk.** Not a budget question — whether one exists at all.
+ *
+ * Every junction here is a node of one solved path graph, so an all-paved walk
+ * between any two of them always exists on the park that was drawn. When this
+ * lattice says otherwise, either the drawn paving really has a gap in it, or
+ * this file's own paved-only lattice does not cover the paving — and in either
+ * case the pairs it drops fall silently out of `servable`, and so out of the
+ * population every paving statement below is made about.
+ *
+ * That is not hypothetical. With the lattice clipped at the old 60 m circle,
+ * seed 11 lost **140 of its 204** probes this way and still passed every other
+ * assertion in this file, on the 63 that were left (measured 25 Sep 2026). A
+ * check that shrinks its own sample without a word is this repo's commonest
+ * defect, so the shrinking is asserted, not just printed.
+ */
+const unconnected = servable
+  .map((s, i) => ({ s, label: probes[i]!.label }))
+  .filter(({ s }) => !Number.isFinite(s.paved));
+check(
+  unconnected.length === 0,
+  unconnected.length === 0
+    ? `the paving is one network: all ${probes.length} junction pairs have an all-paved walk between them`
+    : `the paving is one network: ${unconnected.length} of ${probes.length} junction pairs have no ` +
+        `all-paved walk at all (first: ${unconnected[0]!.label}) — a gap in the drawn paving, or a ` +
+        'paved-only lattice that does not reach it',
+);
 
 for (let i = 0; i < probes.length; i += 1) {
   const s = servable[i]!;
