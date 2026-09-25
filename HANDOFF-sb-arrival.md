@@ -8,12 +8,15 @@ Task: `LGP_SEED=0 pnpm run check:cat-bus` failed "child 0 at x -4.63, z 57.00 cr
 - So she reached the spline only at (-4.63,57.20): across 4.63 > the 4.3 strip the check used, but 0.97 m clear of the nearest wall collider. The check's strip was a proxy for "the gap in the wall".
 - Secondary real bug: the fan aimed the outermost child at +/-3.0 (+/-0.2 wobble) against a 3.50 m pier face; with NPC_RADIUS 0.5 she clipped the west pier by 0.06 m (scripted walks ignore collision).
 
-## Fix
+## Fix (current)
 - ArrivalSequence: GATE_FAN_HALF_WIDTH = GATE_ARCH_CLEAR_WIDTH/2 - NPC_RADIUS - wobble (2.80).
-- check-cat-bus clause 6: (a) at first park-edge entry the child must be clear of every collider (NPC_RADIUS); (b) each child must cross the gate line with |across| <= clear/2 - NPC_RADIUS (3.00).
+- ArrivalSequence.planAround(collision) (called in attachNpcs, finished world): each route to its release point must fit at NPC_RADIUS; else backtrack aim inward (0.05 x20) then finish x toward axis (1 m x12); else release at last clear point. Entrance passes collision.
+- check-cat-bus clause 6: (a) scripted on-foot child never overlaps anything solid (isClearCircle NPC_RADIUS, every frame); (b) gate-line crossing |across| <= clear/2 - NPC_RADIUS; children let go before the gate are announced on stderr (seed 0: child 10 let go 1.36 m short by finish()).
+- Found by the broader clause: seeds 6/11/12 child 0 clipped the west pier by 0.01 m; seed 6 children 0-2 brushed lineside fence (half 0.18) 8 m in.
 
 ## Side finding (not fixed; visible geometry)
-Wall-to-pier gaps beside the arch (clear, after pier keep-out 0.8 and wall half 0.45), seeds 0..15 (east;west):
-0: 3.16;2.68  2: 1.53;1.20  3: -0.25;1.29  7: 1.20;1.39  10: 0.35;1.93  15: 1.29;0.45 ... (probe scripts/tmp-sb/probe-gap.mts, not committed)
+Wall-to-pier gaps beside the arch (clear, after pier keep-out 0.8 and wall half 0.45), east;west:
+0: 3.16;2.68  2: 1.53;1.20  3: -0.25;1.29  7: 1.20;1.39  10: 0.35;1.93  15: 1.29;0.45. Cause: wall aperture is a gate-frame strip while the spline crosses the gate slanted (35 deg on seed 0).
 
 ## Status
+- seed 0, 6 pass on 3rd design. Full 16-seed sweep next, then red proof, then seed5 Collision merge test.
