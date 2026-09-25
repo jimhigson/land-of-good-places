@@ -58,6 +58,7 @@ import {
   INTERIOR_PLAZA_DROP,
   CASTLE_TURRET_BASE_RADIUS,
   CASTLE_TURRET_CORNERS,
+  CASTLE_TURRET_FOOTPRINT_RADIUS,
   PLAYER_RADIUS,
   TOWER_BASE_FLARE,
   TOWER_RADIUS,
@@ -502,26 +503,16 @@ export {
   TOWER_ROOF_OVERHANG,
   CASTLE_TURRET_BASE_RADIUS,
   CASTLE_TURRET_CORNERS,
+  CASTLE_TURRET_FOOTPRINT_RADIUS,
 };
 
 export const TOWER_HEIGHT = 10.6;
 export const TOWER_ROOF_HEIGHT = 4.2;
 
 
-/**
- * **How wide a turret is**, for anything that has to keep out of one — a
- * collider, a keep-out disc, a bench scatter, the offset that pushes the roof
- * garden's turrets clear of its paving.
- *
- * The cone oversails the shaft, and the cone is what a child's hat meets when
- * she walks up to a turret, so the wider of the two is the honest answer.
- * Derived rather than typed for the reason everything round here is: a turret
- * that grows must take its keep-out with it.
- */
-export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
-  CASTLE_TURRET_BASE_RADIUS,
-  TOWER_RADIUS + TOWER_ROOF_OVERHANG,
-);
+// `CASTLE_TURRET_FOOTPRINT_RADIUS` is owned by `core/constants.ts` since the
+// park manifest's castle radius is derived from it, and the manifest cannot
+// import this file. Re-exported above for the readers that take it from here.
 
 /**
  * A tower part as a solid of revolution: a span along its own axis with a

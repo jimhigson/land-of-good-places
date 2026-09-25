@@ -1,7 +1,7 @@
 import type { AnchorFootprint } from './anchors';
 import { resolveParkSeed } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
-import { PARK_SURFACE_SCALE } from '../core/constants';
+import { CASTLE_PLOT_REACH, PARK_SURFACE_SCALE } from '../core/constants';
 
 /**
  * The park manifest — the single editable input to the layout generator.
@@ -168,10 +168,11 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     // discs are written into the *placed* footprint instead — see
     // `parkLayout.ts`'s `footprintAsPlaced`.
     footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
-    // 19.3: the castle's own masonry reaches 19.0 exactly, and on some seeds
-    // the dressing spills another few centimetres (the reach sweep measured
-    // 19.1 on seed 2). Declared at what stands, plus breathing room.
-    boundingRadius: 19.3,
+    // Derived from the castle's own geometry, never typed: the turrets, the
+    // nudge off the plot centre and the widest turret radius, summed on the
+    // worst bearing. See `CASTLE_PLOT_REACH`, and `check:park`'s
+    // `anchor.reach:building`, which holds every drawn vertex inside it.
+    boundingRadius: CASTLE_PLOT_REACH,
     band: { min: 26, max: 60 },
   },
   // Bounding radii for these two are the MEASURED build-out (`check:park`'s
@@ -396,7 +397,7 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
  * manifest was still crowded into the middle 100 m of a 225 m park.
  *
  * **`footprint` and `boundingRadius` are deliberately not scaled.** They are
- * how big the thing physically *is* — a castle is 19.3 m across whatever the
+ * how big the thing physically *is* — a castle reaches 21.3 m whatever the
  * park does — and scaling them would grow the buildings along with the lawn.
  * Only "where does it go" is a proportion; "how big is it" is a fact.
  */

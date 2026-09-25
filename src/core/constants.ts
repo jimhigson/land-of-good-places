@@ -754,6 +754,49 @@ export const CASTLE_TURRET_CORNERS: readonly (readonly [number, number])[] = [
 ];
 
 /**
+ * **How wide a turret is**, for anything that has to keep out of one — a
+ * collider, a keep-out disc, a bench scatter, the offset that pushes the roof
+ * garden's turrets clear of its paving, and the castle's plot reach below.
+ *
+ * The cone oversails the shaft, and the cone is what a child's hat meets when
+ * she walks up to a turret, so the wider of the two is the honest answer.
+ * Derived rather than typed for the reason everything round here is: a turret
+ * that grows must take its keep-out with it.
+ */
+export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
+  CASTLE_TURRET_BASE_RADIUS,
+  TOWER_RADIUS + TOWER_ROOF_OVERHANG,
+);
+
+/**
+ * **How far the castle reaches from its plot's centre, on any placement** —
+ * the 'building' entry's `boundingRadius` in `world/parkManifest.ts`, which
+ * every path, scatter and solver spacing plans around.
+ *
+ * It used to be typed there (19.3, "the castle's own masonry reaches 19.0
+ * exactly"), a second definition of the castle's size kept in step by hand,
+ * and it was wrong by 1.6 m: `check:park`'s `anchor.reach` measured the drawn
+ * turrets at 20.9 m on seed 4 once it measured vertices instead of mesh
+ * centres. The number it missed is the nudge: the castle stands
+ * {@link BUILDING_CENTRE_NUDGE} off its plot centre, towards the park middle,
+ * on a bearing that depends on where the plot lands, while its axes never
+ * turn (`CASTLE_FRAME` is built at bearing 0). So on some placement the nudge
+ * points straight down a turret's diagonal, and the reach is the plain sum:
+ * the nudge, the turret's centre from the castle's ({@link CASTLE_TURRET_CORNERS}),
+ * and the turret's widest radius. 3.54 + 15.32 + 2.45 = 21.31 m.
+ *
+ * This is the bound in the plan frame the radius is read in (a drawn point
+ * unleant onto its own foot — `unplaceFromSphere`): the castle stands plumb
+ * on its own centre and everything above the ground only projects inwards
+ * from there, so no drawn point's foot is further out than this. Measured
+ * across the sixteen shipped seeds the furthest foot is the turret shaft's.
+ */
+export const CASTLE_PLOT_REACH =
+  BUILDING_CENTRE_NUDGE +
+  Math.max(...CASTLE_TURRET_CORNERS.map(([x, z]) => Math.hypot(x, z))) +
+  CASTLE_TURRET_FOOTPRINT_RADIUS;
+
+/**
  * Height of the solid painted wall; a band of glass fills the gap up to the
  * deck above.
  *

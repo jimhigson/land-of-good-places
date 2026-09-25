@@ -64,11 +64,12 @@ export const RATCHET: Readonly<Record<string, Recorded>> = {
   'anchor.reach:building': {
     worst: 0,
     why:
-      'The castle now builds to exactly its 19 m declaration — the overrun ' +
-      'was the plot sign post, and it is gone. Kept at zero rather than ' +
-      'deleted because the finding still fires (19.0 of 19), so an entry is ' +
-      'what holds it at zero; the moment anything builds proud of the wall ' +
-      'again this fails rather than quietly re-opening the old 2 m allowance.',
+      'Held at zero. The castle declared a typed 19.3 m while its turrets ' +
+      'reached 20.9 m (seed 4, restart 2), unseen because this measured mesh ' +
+      'centres; it now measures every drawn vertex in the plan frame, and the ' +
+      'declaration is derived (`CASTLE_PLOT_REACH`, 21.31 m: nudge + turret ' +
+      'corner + turret radius). Kept rather than deleted so any overrun fails ' +
+      'instead of re-opening an allowance.',
   },
   'anchor.reach:waterFight': {
     worst: 0,
