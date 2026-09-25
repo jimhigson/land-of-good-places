@@ -791,6 +791,35 @@ const servable = probes.map((probe, i) => {
 });
 const servableCount = servable.filter((s) => s.ok).length;
 
+/**
+ * **The paving is one network: every junction pair has *some* all-paved
+ * walk.** Not a budget question — whether one exists at all.
+ *
+ * Every junction here is a node of one solved path graph, so an all-paved walk
+ * between any two of them always exists on the park that was drawn. When this
+ * lattice says otherwise, either the drawn paving really has a gap in it, or
+ * this file's own paved-only lattice does not cover the paving — and in either
+ * case the pairs it drops fall silently out of `servable`, and so out of the
+ * population every paving statement below is made about.
+ *
+ * That is not hypothetical. With the lattice clipped at the old 60 m circle,
+ * seed 11 lost **140 of its 204** probes this way and still passed every other
+ * assertion in this file, on the 63 that were left (measured 25 Sep 2026). A
+ * check that shrinks its own sample without a word is this repo's commonest
+ * defect, so the shrinking is asserted, not just printed.
+ */
+const unconnected = servable
+  .map((s, i) => ({ s, label: probes[i]!.label }))
+  .filter(({ s }) => !Number.isFinite(s.paved));
+check(
+  unconnected.length === 0,
+  unconnected.length === 0
+    ? `the paving is one network: all ${probes.length} junction pairs have an all-paved walk between them`
+    : `the paving is one network: ${unconnected.length} of ${probes.length} junction pairs have no ` +
+        `all-paved walk at all (first: ${unconnected[0]!.label}) — a gap in the drawn paving, or a ` +
+        'paved-only lattice that does not reach it',
+);
+
 for (let i = 0; i < probes.length; i += 1) {
   const s = servable[i]!;
   if (s.ok) continue;
