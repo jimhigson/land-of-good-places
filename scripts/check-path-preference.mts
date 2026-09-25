@@ -145,6 +145,7 @@ import { JourneyPlanner } from '../src/entities/npc/journey.ts';
 import { gardenAttractions } from '../src/entities/npc/attractions.ts';
 import { SPACE_GARDEN } from '../src/world/spaces.ts';
 import { GARDEN_PLAY_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
+import { GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 
 const verbose = process.argv.includes('--verbose');
@@ -331,7 +332,23 @@ if (probes.length < 8) {
 
 /** Cell size of the paved-only lattice. `NavGrid`'s own `CELL`. */
 const PAVED_CELL = 0.5;
-const PAVED_REACH = GARDEN_PLAY_RADIUS + 2;
+/**
+ * How far out the paved-only lattice reaches: the **park's** edge, read off
+ * the boundary the park was built inside, never the circular
+ * `GARDEN_PLAY_RADIUS` the park outgrew when its outline went to twice the
+ * area (`PARK_AREA_MULTIPLIER`).
+ *
+ * It used to be `GARDEN_PLAY_RADIUS + 2` = 60 m, and the paving on a
+ * generated outline runs out to 84 m. So every path that looped outside the
+ * old circle was cut where it crossed it, the paved network fell into pieces,
+ * and a pair of junctions joined by paving the whole way round read as having
+ * **no** all-paved walk at all — "not servable". Measured 25 Sep 2026 on the
+ * accepted parks: seed 11 lost 49 of its 76 probes that way and its population
+ * shrank to the 26 short, straight pairs the unweighted router also walks
+ * paved, so `the bar is a real bar` went red (23 of 26); seeds 4, 8, 9, 10 and
+ * 12 lost 29–56 probes each and stayed green only by luck.
+ */
+const PAVED_REACH = GARDEN_PLAY_BOUNDARY.maxRadius + 2;
 const pavedSide = Math.ceil((PAVED_REACH * 2) / PAVED_CELL);
 const pavedOrigin = -PAVED_REACH + PAVED_CELL / 2;
 const pavedCells = new Uint8Array(pavedSide * pavedSide);
