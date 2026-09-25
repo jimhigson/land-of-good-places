@@ -117,8 +117,8 @@ import {
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
   ENTRANCE_WALK_DEPTH,
+  ENTRANCE_GATE_OPENING_REACH,
   entranceGateFrame,
-  isInEntranceGateOpening,
   isInEntranceGateway,
 } from '../../src/world/entrance/layout.ts';
 // A leaf module: pure geometry over a `standable` predicate, no three.js and
@@ -8370,38 +8370,59 @@ const noBridgeStandsWhereNoneWasProven: Invariant = (facts) => {
  */
 const theGateIsAHoleInTheWall: Invariant = (facts) => {
   const blocks: { x: number; z: number }[] = [];
+  const corners: { x: number; z: number; name: string }[] = [];
   const local = new Matrix4();
   const composed = new Matrix4();
   const centre = new Vector3();
+  const corner = new Vector3();
   facts.world.garden.group.traverse((object) => {
     if (!(object instanceof InstancedMesh)) return;
     if (!/^boundary-(blocks|pillars)?/.test(object.name) && object.name !== 'boundary-blocks') return;
+    object.geometry.computeBoundingBox();
+    const box = object.geometry.boundingBox!;
     for (let i = 0; i < object.count; i += 1) {
       object.getMatrixAt(i, local);
       composed.multiplyMatrices(object.matrixWorld, local);
       centre.setFromMatrixPosition(composed);
       blocks.push({ x: centre.x, z: centre.z });
+      // The block's real footprint: its geometry's plan corners and the
+      // middles of its sides, through its own instance matrix.
+      for (const fx of [0, 0.5, 1]) {
+        for (const fz of [0, 0.5, 1]) {
+          corner.set(
+            box.min.x + (box.max.x - box.min.x) * fx,
+            box.min.y,
+            box.min.z + (box.max.z - box.min.z) * fz,
+          );
+          corner.applyMatrix4(composed);
+          corners.push({ x: corner.x, z: corner.z, name: object.name });
+        }
+      }
     }
   });
 
   if (blocks.length === 0) return ['found no boundary wall blocks at all to measure'];
 
   const fouls: string[] = [];
-  // **Tested at the block's own extent, not its centre — and the extent is
-  // derived from the geometry, never from the rule being checked.**
+  // **Tested at the block's own footprint, read off the built instance — never
+  // off the rule being checked.**
   //
-  // This filtered on the centre, blind to the very thing `Garden.ts`'s
-  // `DRAWN_BLOCK_GATE_MARGIN` exists to add: a station is where a block's
-  // *middle* goes and the block is `BOUNDARY_BLOCK_WIDTH` long lying along the
-  // edge, so the last kept block reached into the opening by up to its own
-  // half-length and nothing said so.
+  // This filtered on the centre once, blind to a block reaching into the
+  // opening by up to its own half-length. The first fix read the wall's own
+  // gate margin constant, which is worse than useless: zeroing that constant
+  // moved the wall *and this clause together* and the suite stayed at 520/520
+  // with stone back in the doorway. The second derived a worst-case reach from
+  // the block's length, which assumed every block lies along the edge — true
+  // until the wall had to turn and close onto the piers. So it now reads each
+  // block's corners through its own instance matrix and geometry, and holds
+  // whatever policy lays the wall.
   //
-  // The first attempt at this fix read `DRAWN_BLOCK_GATE_MARGIN` itself, which
-  // is worse than useless: zeroing that constant then moved the wall *and this
-  // clause together* and the suite stayed at 520/520 with stone back in the
-  // doorway. So the expectation is rebuilt here from the two facts about the
-  // built wall — how long a block is and how thick the masonry is — and it
-  // holds whatever policy `Garden.ts` adopts.
+  // **The doorway is the arch's clear span**, between the pier faces
+  // (`isInGateArchSpan`), run the depth of the wall's opening either side of the
+  // gate line. It used to be a strip out to the piers' *centres*, which was the
+  // right answer only while the wall stopped short of the piers; closing it
+  // onto them puts stone beside and behind each pier, which is the wall doing
+  // its job, not stone in the doorway.
   //
   // Read off `facts`, never imported: a static import of `Garden.ts` into this
   // file loads `parkManifest.ts` before the seed is set and pins every seed to
@@ -8409,13 +8430,12 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
   // 4 files red, **332 skipped**, 188 passed. `parkFacts.ts` reaches Garden
   // through an `await import` after the park exists, which is the whole reason
   // that pattern is there.
-  const blockReach = facts.boundaryBlockWidth / 2 + facts.masonryHalfWidth;
-  const inGap = blocks.filter((b) => isInEntranceGateOpening(b.x, b.z, blockReach));
+  const inGap = corners.filter((c) => isInGateArchSpan(c.x, c.z, 0, ENTRANCE_GATE_OPENING_REACH));
   if (inGap.length > 0) {
     const worst = inGap[0];
     fouls.push(
-      `${inGap.length} boundary wall blocks stand inside the gate opening, e.g. ` +
-        `${fmt([worst?.x ?? 0, worst?.z ?? 0])} — the gate is solid stone (#195)`,
+      `${inGap.length} boundary wall block corners stand inside the gate's clear span, e.g. ` +
+        `${worst?.name} at ${fmt([worst?.x ?? 0, worst?.z ?? 0])} — the gate is solid stone (#195)`,
     );
   }
 
@@ -8470,9 +8490,16 @@ const theWallClosesOntoTheGate: Invariant = (facts) => {
   const inZ = -ENTRANCE_GATE_Z / toGate;
   const acrossX = -inZ;
   const acrossZ = inX;
-  const HALF_ACROSS = 18;
-  const HALF_ALONG = 16;
-  const STEP = 0.1;
+  const HALF_ACROSS = 16;
+  const HALF_ALONG = 14;
+  const STEP = 0.05;
+  // **One lattice step thinner than a child.** A lattice of cell centres can
+  // only pass a gap whose band of legal centres is wider than a diagonal step;
+  // probed at `PLAYER_RADIUS` exactly, a 1.29 m gap (seed 15, east) leaves a
+  // 0.05 m band and the flood steps straight over it. Thinned by a step, any
+  // gap of 1.21 m or more is found, which covers every gap a 1.24 m child can
+  // use. The error is on the strict side, by design.
+  const BODY = PLAYER_RADIUS - STEP;
   const reach = Math.hypot(HALF_ACROSS, HALF_ALONG) + 4;
   const world = (across: number, along: number): [number, number] => [
     ENTRANCE_GATE_X + across * acrossX + along * inX,
@@ -8508,9 +8535,9 @@ const theWallClosesOntoTheGate: Invariant = (facts) => {
   const [footA, footB] = parkGateFeet();
 
   const clear = (x: number, z: number, plugged: boolean): boolean => {
-    for (const c of circles) if (Math.hypot(x - c.x, z - c.z) < c.r + PLAYER_RADIUS) return false;
+    for (const c of circles) if (Math.hypot(x - c.x, z - c.z) < c.r + BODY) return false;
     for (const w of walls) {
-      if (segmentDistance(x, z, w.x1, w.z1, w.x2, w.z2) < w.h + PLAYER_RADIUS) return false;
+      if (segmentDistance(x, z, w.x1, w.z1, w.x2, w.z2) < w.h + BODY) return false;
     }
     if (plugged && segmentDistance(x, z, footA.x, footA.z, footB.x, footB.z) < PLAYER_RADIUS) return false;
     return true;
