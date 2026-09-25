@@ -106,6 +106,30 @@
  * here: not
  * "someone once saw this go red", but "it is red right now, in this run".
  *
+ * **Mutations 3 and 4, 25 September 2026**, on `fix/sb-pathpref` over the
+ * accepted parks (`LGP_SEED=s`, restart from `acceptedRestarts.ts`), with every
+ * sampler covering the park's own outline:
+ *
+ * - **3 — a band's price back to `ground * M`** (`NavGrid`'s `bandedStep`).
+ *   Seed 0: `FAIL stepping off the kerb stays a step … worst 80.4% (kerb →
+ *   (11, -7) 2.7 m off)`, 421 hops — a lawn bench along the kerb at
+ *   z ≈ -5.25, x 6.5–13.5, walked round (8.02 m) instead of over (4.45 m).
+ *   Seed 9: `… worst 117.2% (kerb → (-13, 11) 3.2 m off)`, 401 hops. Exit 1
+ *   both. Fixed: 15.0% and 13.7% worst.
+ * - **4 — the paved-only lattice clipped back to `GARDEN_PLAY_RADIUS + 2`.**
+ *   Seed 11: `FAIL the paving is one network: 140 of 204 junction pairs have
+ *   no all-paved walk at all (first: ballPit → dodgems)`, exit 1 — and, before
+ *   that assertion existed, **every other assertion passed** on the 63 probes
+ *   the clipping left, which is why it exists.
+ *
+ * **Not every "no comic detour" ceiling here is arithmetic.** The bound the
+ * header states holds when neither route touches a hoppable wall; once the
+ * unweighted route pays a hop, its length is less than its cost and the
+ * weighted route may legitimately exceed `1.6 × 1.08` of it. The two kerb
+ * failures above were that case with a real bug inside it (the hop priced 1.6×
+ * dearer on the lawn); a failure here after a change to hop pricing wants the
+ * same diagnosis before anyone reaches for a number.
+ *
  * ## Every seed, not just the canonical one
  *
  * The thresholds here were derived on **all five procgen seeds** (canonical
