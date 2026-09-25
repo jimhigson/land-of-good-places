@@ -41,3 +41,9 @@ Next: fix sweep, check:park 0/4/11, park:attempt 4/3.
 building 20.13–20.69 on 15 seeds (≤ 21.31, margin 0.62). Others unchanged. Seed 13 restart 0 no longer
 builds (DuckBarRefusal in railRace hazards) — the layout moved; accept:parks re-takes it (coordinator).
 Next: check:park 0/4/11 + park:attempt 4/3 running (scratchpad verify.log).
+
+## Verified — done
+check:park (recorded restarts) seeds 0/4/11: exit 0; building drawn 20.54 / 20.55 / 20.49 vs 21.31.
+park:attempt 4/3: base = rejected only by `anchor.reach:building: 1.33`; fix = anchor.reach clean, now
+rejected by "the Sky Cruiser stands on its own supports" (103.5 m unsupported) — the layout moved; the
+coordinator re-runs accept:parks. tsc both projects exit 0. Base worktree removed.
