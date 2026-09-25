@@ -84,3 +84,10 @@ decision by measurement; fix at cause or make an acceptance measure.
   change). Door reach 0.00 m on 15 seeds, 0.42 on one.
 - Next: affected checks (scratch affected/), then test:procgen, park:attempt
   canonical + 2r0 again, tsc both; remove sb-seed5-base worktree.
+- Before the second merge: affected checks all exit 0 (hop-clearance,
+  deck-fallthrough, hotel, benches, hall-solid, nav-routes, slide-rider,
+  pet-slide, walk-reach, wall-tunnelling, flat-primitives, cart-shape).
+  test:procgen 35 files / 1840 tests passed, exit 0. park:attempt canonical r0
+  and 2r0 identical to the baseline.
+- Merged wip/sb-merge 3ba8359c: recorded restarts changed for 4,5,8,9,11,14.
+  final3 sweep running at the new restarts; then test:procgen again.
