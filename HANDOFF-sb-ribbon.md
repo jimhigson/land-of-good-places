@@ -23,6 +23,13 @@ Base comparison worktree: .claude/worktrees/sb-ribbon-base (origin/wip/sb-merge 
   Fix: 0/5/11/15 green, largest none. Mutation (aprons off) on fix seed 11: red 0.55 m2 at (-42.57,-11.96).
 - Facing invariant base red: s0 181 surface/336 kerb, s5 159/285, s11 277/476, s15 192/297; fix 0.
 
-## Next
-- park:attempt 0,5,11,15 (final code, running: fix2-*.out); check:coplanar; tsc both; before/after plots; remove sb-ribbon-base worktree.
-- Known: paving-on-paving overlap (aprons/discs vs ribbon, same mesh, different UVs) may speckle — same class as every existing junction overlap; not measured by check:coplanar (same mesh).
+- Gate: aprons/repair discs kept off bridges (seed 0 (-2.45,16.50) broke the bridge 2:1 kerb/surface vertex count) and off the gateway cap
+  (seeds 2 and 13: check:coplanar NEW entrance-gateway-path|path-surface).
+- FINAL (628cabc8 on base 2498aa4b): park:attempt 0:2 5:12 11:2 15:0 all accepted (109 measures). tsc both 0.
+  check:coplanar exit 1 with ONE finding, pre-existing on base (same run on wip/sb-merge): railRace kid hair.shell.crop|torso, seed 9, 8.5 mm.
+- Before/after plan plots: scratch sb-ribbon/ba/seed{0,5,11,15}-before-top-after-bottom.png.
+
+## Done / not done
+- wip/sb-merge moved since (castle radius, 10 commits, disjoint files, merges cleanly) - not re-verified on top of it.
+- Old worktrees path-ribbon, path-ribbon-base, path-ribbon-drapecheck belong to the paused agent: left in place.
+- Known risk: paving discs/aprons overlap ribbon paving in one mesh with different UVs (same class as every junction overlap; check:coplanar ignores same-mesh pairs). Needs eyes in a browser.
