@@ -103,3 +103,7 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - Merged fix/sb-hotel (probe judges by crossing, not landing; all 16 exit 0). ground-claims frame cap 6000->200000
   (hang-catcher; seed 0 now passes). Helpers: fix/sb-arrival (cat-bus child crosses wall, seeds 0,5), fix/sb-map
   (park-map blank pan seed 2), fix/sb-seed5 (rail-race camera).
+- Merged fix/sb-map (7d868a35: pan clamp keeps view centre inside PARK_BOUNDARY outline; all 16 exit 0; VISIBLE,
+  needs browser look zoom 4 seeds 0 NW / 2 NE) and fix/sb-keyring (956f5dd0: tap zones/framing read off leaned
+  drawn charms; all 16 exit 0; VISIBLE). Remaining helpers: fix/sb-seed5 (castle-towers+cart done, rail-race camera),
+  fix/sb-arrival (cat-bus seeds 0,5). Chain sweep at dda5c8ab ~80%.
