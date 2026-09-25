@@ -20,6 +20,7 @@ import { cameraOffset } from '../core/cameraRig';
 import { DEG } from '../core/mathUtils';
 import {
   curvePoints,
+  JUNCTION_SNAP,
   pathDivisions,
   PLAZA,
   routeCurve,
@@ -243,6 +244,23 @@ export function buildPaths(): Mesh[] {
   own(surfaceOwners, surface, PLAZA_OWNER);
   addAnnulusKerb(kerb, PLAZA.x, PLAZA.z, PLAZA.radius, PLAZA.radius + PATH_KERB_OVERHANG * 2, 48, PATH_KERB_LIFT);
   own(kerbOwners, kerb, PLAZA_OWNER);
+
+  // Where route ends meet, the paving they leave between their square-cut
+  // ends — see `junctionAprons`.
+  junctionAprons(ROUTES).forEach((apron, k) => {
+    addDisc(surface, apron.x, apron.z, apron.radius, JUNCTION_APRON_SEGMENTS, 1, PATH_SURFACE_LIFT);
+    own(surfaceOwners, surface, JUNCTION_OWNER_BASE - k);
+    addAnnulusKerb(
+      kerb,
+      apron.x,
+      apron.z,
+      apron.radius,
+      apron.radius + PATH_KERB_OVERHANG,
+      JUNCTION_APRON_SEGMENTS,
+      PATH_KERB_LIFT,
+    );
+    own(kerbOwners, kerb, JUNCTION_OWNER_BASE - k);
+  });
 
   const surfaceMesh = new Mesh(surface.build(), pathSurfaceMaterial());
   surfaceMesh.name = 'path-surface';
@@ -524,6 +542,211 @@ function addAnnulusKerb(
   }
 }
 
+/** Segments round a junction apron: a 1.3-1.8 m disc, so ~25 cm per chord. */
+const JUNCTION_APRON_SEGMENTS = 32;
+
+/** A paved disc where route ends meet. */
+export interface JunctionApron {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+}
+
+/**
+ * **Where the paving leaving a route's end fans out wider than a straight
+ * line, the ground in the fan's elbow is paved too.**
+ *
+ * Each route is drawn as its own ribbon, cut square across its centreline at
+ * each end. Where two routes *end* at one node at an angle — a network corner
+ * that is two routes rather than one route's filleted turn — the square ends
+ * overlap on the inside of the angle and leave a wedge of lawn on the outside,
+ * between the two outer kerbs: a notch in the paving at the corner, up to
+ * half-width² in area. Seed 11 has one at (-43.0, -13.0), where three routes
+ * end together at 135°. The same happens where a route ends on another route's
+ * square junction corner (`squareJunctionCorners`): that corner is drawn as a
+ * turn of the ribbon through it, which cuts its outside corner off along the
+ * chord.
+ *
+ * The test is the one that decides it exactly. Round a node, list the
+ * directions paving leaves it in — every drawn run through or from it. A
+ * square-cut ribbon leaving along `d` covers nothing more than 90° from `d`
+ * near the node, so the lawn between two neighbouring directions is uncovered
+ * there only when they are **more than 180° apart**. A dead end (one
+ * direction, or several within {@link APRON_DEAD_END} of one another) is
+ * left alone: its end is meant to be square. A T on a route's
+ * straight body (the body leaves both ways, 180° apart) and a route passing
+ * straight through a junction need nothing.
+ *
+ * Every other route end gets a paved disc of the widest meeting route's
+ * half-width, with its own annulus of kerb: exactly the ground within half a
+ * path's width of the node, tangent to each ribbon's edges, so the outside of
+ * the corner comes out rounded like every filleted corner in the park, and
+ * nothing is paved that `isOnPath` (discs of half-width round every sample,
+ * the end samples included) did not already call paved. The kerb annulus under
+ * the routes' paving is `KerbCover`'s to bury, like the plaza's. A node inside
+ * the plaza has the plaza. So does the tip of a route that turns back on
+ * itself inside its own width — see {@link hairpinTips}.
+ *
+ * Reads the drawn centreline ({@link samples}, run `k` being `routes[k]`), so
+ * call it after the routes are recorded.
+ */
+export function junctionAprons(routes: readonly RouteDefinition[]): JunctionApron[] {
+  const byRun = new Map<number, PathSample[]>();
+  for (const sample of samples) {
+    const run = byRun.get(sample.run);
+    if (run) run.push(sample);
+    else byRun.set(sample.run, [sample]);
+  }
+  const aprons: JunctionApron[] = [];
+  for (const route of routes) {
+    if (route.closed || route.points.length < 2) continue;
+    const ends = [route.points[0], route.points[route.points.length - 1]] as (readonly [number, number])[];
+    for (const [x, z] of ends) {
+      if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius) continue;
+      if (aprons.some((apron) => Math.hypot(apron.x - x, apron.z - z) <= JUNCTION_SNAP)) continue;
+      const bearings: number[] = [];
+      let radius = route.width / 2;
+      for (const [run, line] of byRun) {
+        const leaving = bearingsLeaving(line, x, z);
+        if (leaving.length === 0) continue;
+        bearings.push(...leaving);
+        radius = Math.max(radius, (routes[run] as RouteDefinition).width / 2);
+      }
+      if (bearings.length < 2) continue;
+      bearings.sort((p, q) => p - q);
+      let widest = 0;
+      for (let k = 0; k < bearings.length; k += 1) {
+        const next = k + 1 < bearings.length ? (bearings[k + 1] as number) : (bearings[0] as number) + 2 * Math.PI;
+        widest = Math.max(widest, next - (bearings[k] as number));
+      }
+      // Wider than a straight line, or it covers itself; and not so wide that
+      // every bearing is one way — that is a dead end, however many routes
+      // arrive at it side by side.
+      if (widest <= Math.PI + APRON_GAP_SLACK || widest >= 2 * Math.PI - APRON_DEAD_END) continue;
+      aprons.push({ x, z, radius });
+    }
+  }
+  // Hairpins: a run that turns back on itself inside its own width.
+  byRun.forEach((line, run) => {
+    const route = routes[run] as RouteDefinition;
+    if (route.closed) return;
+    for (const k of hairpinTips(line)) {
+      const tip = line[k] as PathSample;
+      if (Math.hypot(tip.x - PLAZA.x, tip.z - PLAZA.z) < PLAZA.radius) continue;
+      aprons.push({ x: tip.x, z: tip.z, radius: route.width / 2 });
+    }
+  });
+  return aprons;
+}
+
+/**
+ * The samples of one run at which it turns back on itself — its two bearings
+ * from the sample, read {@link APRON_BEARING_REACH} away, within
+ * {@link APRON_DEAD_END} of each other — one per hairpin, the tightest.
+ *
+ * A route that doubles back inside its own width (seed 11's gate approach
+ * runs north to (35.53, -13.63) and straight back south along itself) cannot
+ * be swept as a ribbon round the turn: `ribbonEdges` draws the inside of it in
+ * to the centreline, and the tip comes out as a point, a V of lawn either side
+ * of it (0.57 m² there). The paving a child sees there is the two legs side by
+ * side ending together — a dead end of both, and a dead end is square, or at
+ * the turn a half-width round.
+ */
+function hairpinTips(line: readonly PathSample[]): number[] {
+  const tips: number[] = [];
+  let best = -1;
+  let bestAngle = Infinity;
+  const reach = (k: number, way: -1 | 1): PathSample | null => {
+    const from = line[k] as PathSample;
+    for (let j = k + way; j >= 0 && j < line.length; j += way) {
+      const p = line[j] as PathSample;
+      if (Math.hypot(p.x - from.x, p.z - from.z) >= APRON_BEARING_REACH) return p;
+    }
+    return null;
+  };
+  for (let k = 1; k + 1 < line.length; k += 1) {
+    const here = line[k] as PathSample;
+    const back = reach(k, -1);
+    const ahead = reach(k, 1);
+    let angle = Infinity;
+    if (back && ahead) {
+      const a = Math.atan2(back.z - here.z, back.x - here.x);
+      const b = Math.atan2(ahead.z - here.z, ahead.x - here.x);
+      angle = Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    }
+    if (angle < APRON_DEAD_END) {
+      if (angle < bestAngle) {
+        bestAngle = angle;
+        best = k;
+      }
+    } else if (best >= 0) {
+      tips.push(best);
+      best = -1;
+      bestAngle = Infinity;
+    }
+  }
+  if (best >= 0) tips.push(best);
+  return tips;
+}
+
+/** Past a straight line by this much (radians, 3°) before a fan's elbow is worth paving. */
+const APRON_GAP_SLACK = (3 * Math.PI) / 180;
+
+/**
+ * Bearings all within this of one another (radians, 45°) leave a node one way:
+ * a dead end, square-cut like any other, not an elbow. Seed 11's waterFight
+ * doormat at (41.19, 28.03) has a connector leaving the spur's last corner back
+ * along the spur itself; paving it as an elbow put a disc out past the doormat.
+ */
+const APRON_DEAD_END = Math.PI / 4;
+
+/** How near a drawn centreline must pass a node to leave it, metres. */
+const APRON_ON_LINE = 0.1;
+
+/** How far along a centreline its bearing from a node is read, metres. */
+const APRON_BEARING_REACH = 1.0;
+
+/**
+ * The bearings (radians, `atan2(dz, dx)`) in which one drawn run leaves the
+ * point `(x, z)` — none if it does not pass within {@link APRON_ON_LINE} of
+ * it, one if it ends there, two if it runs through.
+ */
+function bearingsLeaving(line: readonly PathSample[], x: number, z: number): number[] {
+  let best = Infinity;
+  let at = -1;
+  let t = 0;
+  for (let i = 1; i < line.length; i += 1) {
+    const a = line[i - 1] as PathSample;
+    const b = line[i] as PathSample;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const length2 = dx * dx + dz * dz;
+    const u = length2 > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / length2)) : 0;
+    const d = Math.hypot(a.x + dx * u - x, a.z + dz * u - z);
+    if (d < best) {
+      best = d;
+      at = i - 1;
+      t = u;
+    }
+  }
+  if (at < 0 || best > APRON_ON_LINE) return [];
+  const out: number[] = [];
+  // Walk each way from the foot of the node until the line is REACH away.
+  for (const way of [-1, 1] as const) {
+    let k = way < 0 ? (t > 0 ? at : at - 1) : t < 1 ? at + 1 : at + 2;
+    let far: PathSample | null = null;
+    for (; k >= 0 && k < line.length; k += way) {
+      const p = line[k] as PathSample;
+      far = p;
+      if (Math.hypot(p.x - x, p.z - z) >= APRON_BEARING_REACH) break;
+    }
+    // A run that ends within a hand's width of the node does not leave it that way.
+    if (!far || Math.hypot(far.x - x, far.z - z) < APRON_BEARING_REACH / 2) continue;
+    out.push(Math.atan2(far.z - z, far.x - x));
+  }
+  return out;
+}
+
 /** A paved circle (the fountain plaza), built as concentric rings. */
 function addDisc(
   builder: GeometryBuilder,
@@ -563,6 +786,9 @@ type PlanPolygon = readonly (readonly [number, number])[];
 
 /** The owner id the plaza's disc and annulus are filed under. */
 const PLAZA_OWNER = -1;
+
+/** Junction apron `k`'s disc and annulus are filed under `JUNCTION_OWNER_BASE - k`. */
+const JUNCTION_OWNER_BASE = -2;
 
 /** Pieces smaller than this in plan are dropped, m². A kerb sliver this thin is float noise. */
 const KERB_SLIVER_AREA = 1e-6;

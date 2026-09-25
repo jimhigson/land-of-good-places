@@ -6452,7 +6452,7 @@ const CORNER_FILLET = 1.75;
 /** How close another route's end must be to a corner to be a junction on it.
  * Junctions are the same lattice coordinate reached by two plans, so they
  * agree to rounding, not to a tolerance anyone should tune. */
-const JUNCTION_SNAP = 0.05;
+export const JUNCTION_SNAP = 0.05;
 
 /**
  * **A junction on a corner is drawn square, so the junction exists.**
