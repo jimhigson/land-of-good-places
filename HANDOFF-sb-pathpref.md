@@ -34,6 +34,6 @@ Root-cause, decide router/geometry bug vs placement decision, make all 16 seeds 
 - Proved red: old band pricing -> seed 0 80.4% (11,-7), seed 9 117.2% (-13,11), exit 1; lattice clipped to
   60 m -> seed 11 "140 of 204 junction pairs have no all-paved walk", exit 1.
 - check:fountain-hop green on its 5 seeds; plaza band cells all paved (197/197 seed 24, 202/202 canonical).
-- fix2 sweep 16/16 exit 0. Final sweep at 3d3b71e7 running ($SCRATCH/sb-pathpref/final-*).
-## Next
-- read final sweep, tsc both projects, remove scripts/_diag-*.mts (untracked), remove worktree, hand back.
+- Final sweep at 3d3b71e7: seeds 0..15 all exit 0; kerb worst 8.4-27.7%; "one network" holds on all 16.
+- typecheck 0, typecheck:test 0. Canonical check:path-preference 41 s -> 72 s (more probes/hops).
+## Status: DONE. Open follow-up: HOP_COST_MULTIPLIER's kerb window should be re-swept under the new band price.
