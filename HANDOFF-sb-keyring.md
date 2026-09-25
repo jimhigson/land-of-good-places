@@ -18,7 +18,7 @@ Branch `fix/sb-keyring` (from origin/wip/sb-merge), worktree `.claude/worktrees/
   position, worst landscape margin 0.044 m at zoom 5.32 (< 5.5 cap), portrait slack 0.213 m.
 - Second, smaller fix: framed subjects are now each charm's own box through its world
   matrix, not a world-axis AABB (it was inflated 18%/37% at a 45 deg facing).
-- The check (86ee...) now asserts each zone lands on its keyring's screen image, and prints
+- The check (7238af28) now asserts each zone lands on its keyring's screen image, and prints
   the stall's distance, lean and facing. With the fix reverted it goes red from ~45 m.
 
 ## Status
