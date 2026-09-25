@@ -91,3 +91,8 @@ decision by measurement; fix at cause or make an acceptance measure.
   and 2r0 identical to the baseline.
 - Merged wip/sb-merge 3ba8359c: recorded restarts changed for 4,5,8,9,11,14.
   final3 sweep running at the new restarts; then test:procgen again.
+- After merging 3ba8359c: final3 = 47/48 exit 0 at the new restarts. The one
+  red is check:rail-race 14r2 FACE clause, monitor eye facing 0.336 < 0.35.
+  Already red on wip/sb-merge aca21287 (0.340). OPEN; tried
+  CAMERA_GUIDE_WINDOW 6 (0.345, and it breaks the framing clauses), reverted.
+  test:procgen 35/1856 passed, exit 0. tsc both exit 0.
