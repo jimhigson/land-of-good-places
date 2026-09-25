@@ -14,6 +14,8 @@ import type { FrameContext } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
+import { GATE_ARCH_CLEAR_WIDTH } from '../../art/models/gateArch';
+import type { CollisionWorld } from '../Collision';
 import {
   CHILD_FOOTPRINT,
   KID_EYE_HEIGHT,
@@ -30,6 +32,7 @@ import {
   CAMERA_PITCH_DEGREES,
   CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
+  NPC_RADIUS,
 } from '../../core/constants';
 import { cameraOffset } from '../../core/cameraRig';
 import { createBusDriver, type BusDriver } from './busDriver';
@@ -1165,6 +1168,32 @@ function funnelCorner(from: Vector2Like, to: Vector2Like, gateX: number): Vector
   return { x: (gateX - rest) / weight, z: corner.z };
 }
 
+/**
+ * A child's route from `start` to `finish`, solved to cross the gate line
+ * `aim` metres off the gate's centre (see {@link funnelCorner}).
+ */
+function drawWalkRoute(start: Vector2Like, finish: Vector2Like, aim: number): WalkRoute {
+  return { from: start, corner: funnelCorner(start, finish, ENTRANCE_BUS_DOOR_X + aim), to: finish };
+}
+
+/**
+ * **How far along a route a child first stops fitting**, in metres walked —
+ * `Infinity` if she fits the whole way to `upTo`. Asked of the collision world
+ * as it stands, at her own collision radius, every {@link ROUTE_PROBE_SPACING}.
+ */
+function firstBlockedDistance(
+  route: WalkRoute,
+  arc: ArcTable,
+  upTo: number,
+  collision: CollisionWorld,
+): number {
+  for (let walked = 0; ; walked = Math.min(upTo, walked + ROUTE_PROBE_SPACING)) {
+    const point = bezier(route.from, route.corner, route.to, tAtDistance(arc, walked));
+    if (!collision.isClearCircle(point.x, point.z, NPC_RADIUS + ROUTE_PROBE_SAG)) return walked;
+    if (walked >= upTo) return Infinity;
+  }
+}
+
 /** One walker's route: off the pavement, through the gate, into the park. */
 interface WalkRoute {
   readonly from: Vector2Like;
@@ -1308,14 +1337,72 @@ const NUDGE_DECAY = 1.2;
  */
 const NUDGE_LIMIT = CHILD_FOOTPRINT / 2;
 
+/**
+ * How far either side of its aim a child's line through the gate may wander.
+ * The spacing of the fan ({@link GATE_FAN_HALF_WIDTH} over ten gaps) has to stay
+ * larger than this, or neighbours swap places and their routes cross.
+ */
+const GATE_FAN_WOBBLE = 0.2;
+
+/**
+ * **How far off the gate's centre line the outermost child is aimed**, derived
+ * from the arch rather than chosen: the clear floor between the two pier
+ * colliders ({@link GATE_ARCH_CLEAR_WIDTH}, 7.00 m), less a child's own
+ * collision radius so her *body* clears the pier rather than her centre, less
+ * the wobble on top. 2.80 m.
+ *
+ * It was `3.0`, written when the opening was believed to be the arch's full
+ * `2 * ENTRANCE_GATE_HALF_WIDTH` (8.6 m) — but that is where the piers'
+ * *centres* stand, and each pier is 0.80 m round. So the outermost child was
+ * aimed to pass 3.0 +/- 0.2 m off centre against a 3.50 m face: on the
+ * canonical seed child 0 went under the arch at x -3.06, a 0.5 m child's
+ * shoulder 0.06 m inside the west pier. Scripted walks are collision-exempt,
+ * so nothing but this number stood between her and the stone.
+ */
+const GATE_FAN_HALF_WIDTH = GATE_ARCH_CLEAR_WIDTH / 2 - NPC_RADIUS - GATE_FAN_WOBBLE;
+
+/**
+ * How far apart the points are at which a planned route is asked whether a
+ * child fits. Well under the thinnest band a child could slip through: the
+ * lineside fence is 0.36 m thick, so with her own 0.5 m either side a solid
+ * crossing is 1.36 m long and cannot fall between two samples.
+ */
+const ROUTE_PROBE_SPACING = 0.1;
+
+/**
+ * **What a route is planned to clear by, over a child's own radius**: the most
+ * a path can dip into a round obstacle between two probes
+ * {@link ROUTE_PROBE_SPACING} apart — the sag of that chord, `s^2 / 8r`, taken
+ * at the smallest combined radius there is, her own. 2.5 mm. Without it a
+ * route grazing a lamp post tangentially was clear at every probe and 3-5 mm
+ * inside the post between two of them (seeds 9, 10, 12).
+ */
+const ROUTE_PROBE_SAG = (ROUTE_PROBE_SPACING * ROUTE_PROBE_SPACING) / (8 * NPC_RADIUS);
+
+/** Halvings used to find how much of a nudge still fits — 1/256 of it. */
+const NUDGE_CLEAR_PASSES = 8;
+
+/** How far an aim through the gate is drawn in towards its centre per retry. */
+const AIM_RETRY_STEP = 0.05;
+/** How many times it may be, before the destination is moved instead. */
+const AIM_RETRIES = 20;
+/** How far a destination is drawn in towards the gate's axis per retry. */
+const FINISH_RETRY_STEP = 1;
+/** How many times it may be. */
+const FINISH_RETRIES = 12;
+
 /** One child's scripted walk out of the bus and into the park. */
 interface KidWalk {
-  readonly route: WalkRoute;
-  readonly arc: ArcTable;
+  route: WalkRoute;
+  arc: ArcTable;
   /** Arc distance at which this child is handed to the normal wander driver
    * — see {@link releaseDistanceFor}. Short of {@link ArcTable.total}: the
    * route's tail into the park (issue #269) is never walked by the script. */
-  readonly releaseDistance: number;
+  releaseDistance: number;
+  /** What the route was drawn from, kept so {@link ArrivalSequence.planAround} can draw it again. */
+  readonly start: Vector2Like;
+  readonly finish: Vector2Like;
+  readonly aim: number;
   readonly speed: number;
   /** Where this child sits, and how long their walk to the door takes. */
   seat: Group | null;
@@ -1333,6 +1420,13 @@ export interface ArrivalOptions {
    * the kerb. Omitted, one is built here.
    */
   readonly bus?: CatBusHandle;
+  /**
+   * The park's collision world. The children's walk in is scripted and so is
+   * never *resolved* against it; it is *planned* against it instead, once the
+   * park is finished (see {@link ArrivalSequence.planAround}). Omitted, the
+   * routes are the fan as drawn.
+   */
+  readonly collision?: CollisionWorld;
 }
 
 export class ArrivalSequence {
@@ -1342,6 +1436,8 @@ export class ArrivalSequence {
   private readonly busDriver: BusDriver;
   private readonly playerRoute: WalkRoute;
   private readonly kidWalks: readonly KidWalk[];
+  /** See {@link ArrivalOptions.collision}. */
+  private readonly collision: CollisionWorld | null;
 
   /** The park's own children, borrowed for the ride. Never owned, never freed. */
   private kids: readonly NpcCharacter[] = [];
@@ -1392,6 +1488,7 @@ export class ArrivalSequence {
     // should end up. Working back from the two is what keeps them from
     // drifting apart — and means a longer bus still stops with its door at the
     // gate rather than needing a second constant nudged by hand.
+    this.collision = options.collision ?? null;
     this.stopAt = this.bus.doorDrop.z;
     this.stopFacing = busFacingAtStop(this.stopAt);
     this.playerFacing = this.stopFacing;
@@ -1438,34 +1535,35 @@ export class ArrivalSequence {
         x: end.x + across * 24 + wobble(1.0),
         z: end.z - 2.4 - rng() * 5.5 - Math.abs(across) * 1.4,
       };
-      const route: WalkRoute = {
-        from: start,
-        // The point they funnel through. Two competing constraints, and the
-        // first version got the balance wrong in a way that showed:
-        //
-        // - The opening is only ~8.8 m wide, so a fan wider than the gate walks
-        //   them into the masonry either side of it.
-        // - But **the jitter must stay smaller than the spacing**, or adjacent
-        //   children's aim points swap over and their routes cross. At
-        //   `across * 3.4` the eleven corners were 0.34 m apart with a +/-0.4 m
-        //   wobble on top — so neighbours regularly changed places, and two of
-        //   them met in the middle at 0.54 m, well inside a 1.8 m child.
-        //
-        // 6 m of fan gives 0.6 m of spacing, comfortably more than the wobble,
-        // and still leaves the outermost child half a body inside the gate.
-        // **Solved so the curve is actually at this x on the gate line** — see
-        // {@link funnelCorner}. Before that it was this x used directly as the
-        // control point, which a quadratic Bézier does not pass through, and
-        // once the arc moved the drop off the gate's axis the outermost child
-        // walked through the masonry.
-        corner: funnelCorner(start, finish, ENTRANCE_BUS_DOOR_X + across * 6.0 + wobble(0.2)),
-        to: finish,
-      };
+      const aimed = across * 2 * GATE_FAN_HALF_WIDTH + wobble(GATE_FAN_WOBBLE);
+      // The point they funnel through. Two competing constraints, and the
+      // first version got the balance wrong in a way that showed:
+      //
+      // - The opening is only ~8.8 m wide, so a fan wider than the gate walks
+      //   them into the masonry either side of it.
+      // - But **the jitter must stay smaller than the spacing**, or adjacent
+      //   children's aim points swap over and their routes cross. At
+      //   `across * 3.4` the eleven corners were 0.34 m apart with a +/-0.4 m
+      //   wobble on top — so neighbours regularly changed places, and two of
+      //   them met in the middle at 0.54 m, well inside a 1.8 m child.
+      //
+      // {@link GATE_FAN_HALF_WIDTH} each side gives 0.56 m of spacing, still
+      // more than the wobble, and is derived from the arch's clear floor so
+      // the outermost child's body passes the pier rather than its centre.
+      // **Solved so the curve is actually at this x on the gate line** — see
+      // {@link funnelCorner}. Before that it was this x used directly as the
+      // control point, which a quadratic Bézier does not pass through, and
+      // once the arc moved the drop off the gate's axis the outermost child
+      // walked through the masonry.
+      const route = drawWalkRoute(start, finish, aimed);
       const arc = buildArcTable(route.from, route.corner, route.to);
       walks.push({
         route,
         arc,
         releaseDistance: releaseDistanceFor(arc, route),
+        start,
+        finish,
+        aim: aimed,
         // The park's own pace, varied by a tenth either way. It is **not** an
         // independent number any more: `KID_WALK_SPEED = 1.5` was 46-75% of
         // what every other child in the park walks at, and it showed.
@@ -1542,6 +1640,67 @@ export class ArrivalSequence {
   }
 
   /**
+   * **The walk in is planned round what is built, because it cannot collide
+   * with it.** A scripted child is posed on her curve every frame, never
+   * resolved, so a route drawn through a pier or a fence is a child walked
+   * through one. Measured by `check:cat-bus` before this existed: on seed 6
+   * child 0 passed 0.01 m inside the gate's west pier, just past the gate line
+   * where her route bends away from the aim it was solved to, and children 0-2
+   * brushed the railway's lineside fence 8 m inside the gate by 0.02-0.04 m.
+   *
+   * So each route is asked, at the child's own collision radius and against
+   * the finished collision world, whether it fits the whole way to where she
+   * is handed back — and where it does not, the same decision is made again
+   * differently until it does: the aim through the gate drawn in towards the
+   * centre, and then the destination drawn in towards the gate's axis. The
+   * wobble and the speeds were drawn once, at construction, so nothing any
+   * other child reads from the random stream moves.
+   *
+   * If no variation fits, she is handed back to her own driver at the last
+   * point that did — an ordinary child from there, under ordinary collision —
+   * rather than being walked on into the thing in her way.
+   */
+  private keepNudgeClear(walk: KidWalk, here: Vector2Like, collision: CollisionWorld): void {
+    if (collision.isClearCircle(here.x + walk.nudgeX, here.z + walk.nudgeZ, NPC_RADIUS)) return;
+    let fits = 0;
+    let fails = 1;
+    for (let pass = 0; pass < NUDGE_CLEAR_PASSES; pass += 1) {
+      const mid = (fits + fails) / 2;
+      if (collision.isClearCircle(here.x + walk.nudgeX * mid, here.z + walk.nudgeZ * mid, NPC_RADIUS)) fits = mid;
+      else fails = mid;
+    }
+    walk.nudgeX *= fits;
+    walk.nudgeZ *= fits;
+  }
+
+  private planAround(collision: CollisionWorld): void {
+    for (const walk of this.kidWalks) {
+      const blocked = firstBlockedDistance(walk.route, walk.arc, walk.releaseDistance, collision);
+      if (blocked === Infinity) continue;
+      let replanned = false;
+      const finishOffset = walk.finish.x - ENTRANCE_BUS_DOOR_X;
+      for (let j = 0; j <= FINISH_RETRIES && !replanned; j += 1) {
+        const finish = {
+          x: walk.finish.x - Math.sign(finishOffset) * Math.min(j * FINISH_RETRY_STEP, Math.abs(finishOffset)),
+          z: walk.finish.z,
+        };
+        for (let k = 0; k <= AIM_RETRIES && !replanned; k += 1) {
+          const aim = walk.aim - Math.sign(walk.aim) * Math.min(k * AIM_RETRY_STEP, Math.abs(walk.aim));
+          const route = drawWalkRoute(walk.start, finish, aim);
+          const arc = buildArcTable(route.from, route.corner, route.to);
+          const releaseDistance = releaseDistanceFor(arc, route);
+          if (firstBlockedDistance(route, arc, releaseDistance, collision) !== Infinity) continue;
+          walk.route = route;
+          walk.arc = arc;
+          walk.releaseDistance = releaseDistance;
+          replanned = true;
+        }
+      }
+      if (!replanned) walk.releaseDistance = Math.max(0, blocked - ROUTE_PROBE_SPACING);
+    }
+  }
+
+  /**
    * The park's own children, once `World` has built the crowd.
    *
    * Claimed with `beginScripted()`, which is what exempts them from gravity,
@@ -1554,6 +1713,9 @@ export class ArrivalSequence {
     if (this.doneFlag) return;
     this.kids = children.slice(0, ARRIVAL_KID_COUNT);
     for (const kid of this.kids) kid.beginScripted();
+    // The park is finished by the time its children exist, so this is the
+    // first moment the whole collision world can be asked about the way in.
+    if (this.collision) this.planAround(this.collision);
 
     // **Nearest the door first.** Whoever sits closest gets off first, which is
     // both what happens on a bus and what keeps the queue in order: the walk to
@@ -2118,6 +2280,15 @@ export class ArrivalSequence {
     const dx = ahead.x - here.x;
     const dz = ahead.z - here.z;
 
+    // **A push-apart may not push her into anything solid.** Her curve was
+    // planned clear ({@link planAround}); the nudge is added on top of it and
+    // never was, and the outermost child's neighbours push her outwards —
+    // towards the piers and the fence. So the nudge is cut back to the most of
+    // it that still fits: never more than was asked, and the curve under it
+    // is the fallback that is known to.
+    if (this.collision && (walk.nudgeX !== 0 || walk.nudgeZ !== 0)) {
+      this.keepNudgeClear(walk, here, this.collision);
+    }
     const x = here.x + walk.nudgeX;
     const z = here.z + walk.nudgeZ;
     const facing = dx !== 0 || dz !== 0 ? Math.atan2(dx, dz) : this.stopFacing;

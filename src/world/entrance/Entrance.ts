@@ -422,7 +422,7 @@ export class Entrance implements GameSystem {
     // Built last, and added to this group, so the whole sequence lives under
     // the gate it happens at and goes away with it.
     const arriving = options.arriveByBus ?? arrivalIsDue();
-    this.arrival = arriving ? new ArrivalSequence() : null;
+    this.arrival = arriving ? new ArrivalSequence({ collision }) : null;
     if (this.arrival) this.group.add(this.arrival.group);
   }
 
