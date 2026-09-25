@@ -21,6 +21,7 @@ import { BRIDGE_RISE } from '../../src/world/train/clearance.ts';
 import { bridgeHeightAt } from '../../src/world/train/bridges.ts';
 import type { InteractZone } from '../../src/world/interact.ts';
 import { distanceToPath } from '../../src/world/pathGraph.ts';
+import { unplaceFromSphere } from '../../src/world/terrain.ts';
 import { LAYOUT_REFUSALS_IGNORED } from '../../src/world/parkLayout.ts';
 
 
@@ -834,7 +835,7 @@ export function measureParkFindings(park: HeadlessPark, ratchetEnforced: boolean
       }
     }
 
-    // (b) An anchor's content must stay within the reach it declares.
+    // (b) An anchor's drawn extent must stay within the reach it declares.
     //
     //     `boundingRadius` is documented in `anchors.ts` as the radius "used for
     //     path routing and scenery exclusion" — i.e. the promise every other
@@ -842,38 +843,83 @@ export function measureParkFindings(park: HeadlessPark, ratchetEnforced: boolean
     //     and nobody kept a tree out of. Measured off the built group rather than
     //     off the note beside the number, which is the whole lesson of
     //     `check-asset-contract.mts`.
+    //
+    //     **Every drawn vertex, not every lump's centre.** This used to take
+    //     `lumpsUnder` — one point per mesh, the centre of its bounding sphere —
+    //     and so could not see how far a thing *reaches*, only where its middle
+    //     stands. The castle's four turrets are one instanced mesh each for body
+    //     and roof, whose one bounding-sphere centre is the middle of all four;
+    //     the stone reached 20.9 m past a declared 19.3 (seed 4 restart 2) and
+    //     the finding stayed silent. A radius is a promise about an edge, so the edge is measured.
+    //
+    //     **In the plan frame** — each vertex unleant onto its own foot by
+    //     `unplaceFromSphere`, the inverse of `placeOnSphere`. The radius is
+    //     compared against plan `(x, z)` by everything that reads it (a tree's
+    //     foot, a lamp's, a path's centreline), and a drawn point is above the
+    //     foot its up-line meets, so that foot is the honest place to measure.
+    //     World `x, z` would read the lean itself as reach: a 15 m turret 40 m
+    //     out on a 220 m sphere leans ~2.7 m in world XZ.
+    //
+    //     `measured` is rounded **up** to the centimetre, so any overrun at all
+    //     is non-zero: rounding to the decimetre let an overrun under 5 cm read
+    //     as 0.0 and pass a zero allowance.
+    const vertex = new Vector3();
+    const instance = new Matrix4();
+    const combined = new Matrix4();
+    const foot = new Vector3();
     for (const anchor of ANCHORS) {
       const group = park.scene.getObjectByName(anchorGroupName(anchor.id));
       if (!group) continue;
+      group.updateMatrixWorld(true);
       const [cx, cz] = anchor.position;
       let reach = 0;
       let atX = cx;
       let atZ = cz;
-      for (const lump of lumpsUnder(group)) {
-        const distance = Math.hypot(lump.x - cx, lump.z - cz);
-        if (distance > reach) {
-          reach = distance;
-          atX = lump.x;
-          atZ = lump.z;
+      let atName = '';
+      group.traverse((object) => {
+        const mesh = object as import('three').Mesh & { count?: number; isInstancedMesh?: boolean };
+        if (!mesh.isMesh || !mesh.geometry) return;
+        for (let up: import('three').Object3D | null = mesh; up && up !== group; up = up.parent) {
+          if (!up.visible) return;
         }
-      }
+        const positions = mesh.geometry.getAttribute('position');
+        if (!positions) return;
+        const instances = mesh.isInstancedMesh ? (mesh.count ?? 0) : 1;
+        for (let i = 0; i < instances; i += 1) {
+          if (mesh.isInstancedMesh) {
+            (mesh as unknown as import('three').InstancedMesh).getMatrixAt(i, instance);
+            combined.multiplyMatrices(mesh.matrixWorld, instance);
+          } else {
+            combined.copy(mesh.matrixWorld);
+          }
+          for (let k = 0; k < positions.count; k += 1) {
+            vertex.fromBufferAttribute(positions, k).applyMatrix4(combined);
+            unplaceFromSphere(vertex, foot);
+            const distance = Math.hypot(foot.x - cx, foot.z - cz);
+            if (distance > reach) {
+              reach = distance;
+              atX = foot.x;
+              atZ = foot.z;
+              atName = mesh.name || mesh.parent?.name || '(unnamed)';
+            }
+          }
+        }
+      });
       if (reach > anchor.boundingRadius) {
         report({
           invariant: 6,
           key: `anchor.reach:${anchor.id}`,
-          measured: Number((reach - anchor.boundingRadius).toFixed(1)),
+          measured: Math.ceil((reach - anchor.boundingRadius) * 100) / 100,
           detail:
-            `'${anchor.id}' declares a bounding radius of ${anchor.boundingRadius} m but has built ` +
-            `out to ${reach.toFixed(1)} m, at (${atX.toFixed(1)}, ${atZ.toFixed(1)}) — everything ` +
+            `'${anchor.id}' declares a bounding radius of ${anchor.boundingRadius.toFixed(2)} m but its drawn ` +
+            `'${atName}' reaches ${reach.toFixed(2)} m, at plan (${atX.toFixed(1)}, ${atZ.toFixed(1)}) — everything ` +
             'that routes or scatters around this anchor is planning around the smaller number',
         });
       }
-      if (verbose) {
-        table.push(
-          `  anchor:${anchor.id.padEnd(16)} declares ${String(anchor.boundingRadius).padStart(3)} m, ` +
-            `built out to ${reach.toFixed(1)} m`,
-        );
-      }
+      table.push(
+        `  anchor:${anchor.id.padEnd(16)} declares ${anchor.boundingRadius.toFixed(2).padStart(6)} m, ` +
+          `drawn out to ${reach.toFixed(2)} m ('${atName}')`,
+      );
     }
 
     // (c) Nothing scattered park-wide may stand in a reserved plot.
