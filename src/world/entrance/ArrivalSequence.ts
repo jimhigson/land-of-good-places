@@ -1189,7 +1189,7 @@ function firstBlockedDistance(
 ): number {
   for (let walked = 0; ; walked = Math.min(upTo, walked + ROUTE_PROBE_SPACING)) {
     const point = bezier(route.from, route.corner, route.to, tAtDistance(arc, walked));
-    if (!collision.isClearCircle(point.x, point.z, NPC_RADIUS)) return walked;
+    if (!collision.isClearCircle(point.x, point.z, NPC_RADIUS + ROUTE_PROBE_SAG)) return walked;
     if (walked >= upTo) return Infinity;
   }
 }
@@ -1367,7 +1367,20 @@ const GATE_FAN_HALF_WIDTH = GATE_ARCH_CLEAR_WIDTH / 2 - NPC_RADIUS - GATE_FAN_WO
  * lineside fence is 0.36 m thick, so with her own 0.5 m either side a solid
  * crossing is 1.36 m long and cannot fall between two samples.
  */
-const ROUTE_PROBE_SPACING = 0.25;
+const ROUTE_PROBE_SPACING = 0.1;
+
+/**
+ * **What a route is planned to clear by, over a child's own radius**: the most
+ * a path can dip into a round obstacle between two probes
+ * {@link ROUTE_PROBE_SPACING} apart — the sag of that chord, `s^2 / 8r`, taken
+ * at the smallest combined radius there is, her own. 2.5 mm. Without it a
+ * route grazing a lamp post tangentially was clear at every probe and 3-5 mm
+ * inside the post between two of them (seeds 9, 10, 12).
+ */
+const ROUTE_PROBE_SAG = (ROUTE_PROBE_SPACING * ROUTE_PROBE_SPACING) / (8 * NPC_RADIUS);
+
+/** Halvings used to find how much of a nudge still fits — 1/256 of it. */
+const NUDGE_CLEAR_PASSES = 8;
 
 /** How far an aim through the gate is drawn in towards its centre per retry. */
 const AIM_RETRY_STEP = 0.05;
@@ -1647,6 +1660,19 @@ export class ArrivalSequence {
    * point that did — an ordinary child from there, under ordinary collision —
    * rather than being walked on into the thing in her way.
    */
+  private keepNudgeClear(walk: KidWalk, here: Vector2Like, collision: CollisionWorld): void {
+    if (collision.isClearCircle(here.x + walk.nudgeX, here.z + walk.nudgeZ, NPC_RADIUS)) return;
+    let fits = 0;
+    let fails = 1;
+    for (let pass = 0; pass < NUDGE_CLEAR_PASSES; pass += 1) {
+      const mid = (fits + fails) / 2;
+      if (collision.isClearCircle(here.x + walk.nudgeX * mid, here.z + walk.nudgeZ * mid, NPC_RADIUS)) fits = mid;
+      else fails = mid;
+    }
+    walk.nudgeX *= fits;
+    walk.nudgeZ *= fits;
+  }
+
   private planAround(collision: CollisionWorld): void {
     for (const walk of this.kidWalks) {
       const blocked = firstBlockedDistance(walk.route, walk.arc, walk.releaseDistance, collision);
@@ -2254,6 +2280,15 @@ export class ArrivalSequence {
     const dx = ahead.x - here.x;
     const dz = ahead.z - here.z;
 
+    // **A push-apart may not push her into anything solid.** Her curve was
+    // planned clear ({@link planAround}); the nudge is added on top of it and
+    // never was, and the outermost child's neighbours push her outwards —
+    // towards the piers and the fence. So the nudge is cut back to the most of
+    // it that still fits: never more than was asked, and the curve under it
+    // is the fallback that is known to.
+    if (this.collision && (walk.nudgeX !== 0 || walk.nudgeZ !== 0)) {
+      this.keepNudgeClear(walk, here, this.collision);
+    }
     const x = here.x + walk.nudgeX;
     const z = here.z + walk.nudgeZ;
     const facing = dx !== 0 || dz !== 0 ? Math.atan2(dx, dz) : this.stopFacing;
