@@ -61,7 +61,9 @@ export const SUPPORTED_PARK_SEEDS: readonly number[] = Array.from({ length: 16 }
  * regression seed. It is also, being the most-played park in the game, the
  * most thoroughly vetted member of the pool.
  */
-export const CANONICAL_PARK_SEED = 20260728;
+// 5, not the retired 20260728 (Jim: "we only support seeds 0..15, no
+// others") — the same value feat/prebuilt-parks (#705) sets.
+export const CANONICAL_PARK_SEED = 5;
 
 /**
  * **The vetted pool. Sixteen for now; change the array and nothing else.**
@@ -137,18 +139,7 @@ export const CANONICAL_PARK_SEED = 20260728;
  * 0.56 m above the rail where the deck they need is 4.06 m up. The seed goes,
  * not the assertion. Written up on #437.
  */
-export const PARK_SEED_POOL: readonly number[] = [
-  CANONICAL_PARK_SEED,
-  11,
-  24,
-  128,
-  131,
-  208,
-  274,
-  326,
-  428,
-  451,
-];
+export const PARK_SEED_POOL: readonly number[] = SUPPORTED_PARK_SEEDS;
 
 /**
  * **The seeds a multi-seed check script sweeps — THE one owner.**
@@ -231,20 +222,7 @@ export const PARK_SEED_POOL: readonly number[] = [
  * construction cannot see a stale warp vector on ten of the sixteen seeds a
  * child can actually draw.** See `parkWarp.ts`'s `WARPS_BY_SEED` header.
  */
-export const CI_SWEEP_SEEDS: readonly number[] = [
-  CANONICAL_PARK_SEED,
-  11,
-  24,
-  131,
-  326,
-].map(
-  (seed) => {
-    if (!PARK_SEED_POOL.includes(seed)) {
-      throw new Error(`CI_SWEEP_SEEDS: ${seed} is not in PARK_SEED_POOL — sweep only real parks`);
-    }
-    return seed;
-  },
-);
+export const CI_SWEEP_SEEDS: readonly number[] = [...PARK_SEED_POOL];
 
 /** Where the drawn seed is remembered, so a reload is the same park. */
 export const PARK_SEED_KEY = 'lgp:parkSeed';
