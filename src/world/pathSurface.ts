@@ -146,8 +146,48 @@ export function addPathRibbon(
   lift: number,
 ): void {
   const stations = ribbonStations(curve, divisions);
-  const edges = ribbonEdges(stations, pathCrossSection(width));
+  const repaired = new Set<number>();
+  const edges = ribbonEdges(stations, pathCrossSection(width), repaired);
   addRibbonStrip(builder, stations, edges[1]!, edges[2]!, lift, (travelled) => pathRibbonV(travelled, width));
+  // Where the ribbon could not be swept as drawn, the paving is laid as what
+  // it stands for: every point within half the path's width of the
+  // centreline (`isOnPath`'s own discs). See `REPAIR_DISC_SEGMENTS`.
+  for (const j of repaired) {
+    const station = stations[j] as RibbonStation;
+    addPavingDisc(builder, station.x, station.z, width / 2, lift);
+  }
+}
+
+/**
+ * **Segments round a disc of paving laid where `ribbonEdges` had to repair a
+ * cross-section.**
+ *
+ * Drawing the inside of a turn in towards the centreline keeps every triangle
+ * facing the sky, but the strip it leaves is narrower than the path: a route
+ * that loops round inside its own width (seed 15's building-to-skyCruiser
+ * connector circles 3.7 m across at (23.5, -24.8)) came out with a triangle of
+ * lawn in the middle of its paving, 0.06 m², and a route retracing its own
+ * last leg (seed 11 at (-21.0, 54.2)) with a slot of it. A disc of half-width
+ * round each repaired station is exactly the ground the path claims there,
+ * lies under the same material at the same lift, and is inside the kerb's
+ * outer line everywhere, so the only thing it can change on screen is lawn
+ * that should have been paving.
+ */
+const REPAIR_DISC_SEGMENTS = 24;
+
+/** A flat fan of paving round `(cx, cz)`, draped on the terrain `lift` above it. */
+function addPavingDisc(builder: GeometryBuilder, cx: number, cz: number, radius: number, lift: number): void {
+  const centre = builder.vertexCount;
+  builder.vertex(cx, terrainHeight(cx, cz) + lift, cz, cx / 6, cz / 6);
+  for (let s = 0; s <= REPAIR_DISC_SEGMENTS; s += 1) {
+    const angle = (s / REPAIR_DISC_SEGMENTS) * Math.PI * 2;
+    const x = cx + Math.cos(angle) * radius;
+    const z = cz + Math.sin(angle) * radius;
+    // Textured by world position, as the plaza's disc is (`pathGraph.ts`).
+    builder.vertex(x, terrainHeight(x, z) + lift, z, x / 6, z / 6);
+  }
+  // Anticlockwise seen from above (+Y), which `facesSky` calls face-up.
+  for (let s = 0; s < REPAIR_DISC_SEGMENTS; s += 1) builder.triangle(centre, centre + s + 2, centre + s + 1);
 }
 
 /**
@@ -303,6 +343,7 @@ export function ribbonStations(curve: CatmullRomCurve3, divisions: number): Ribb
 export function ribbonEdges(
   stations: readonly RibbonStation[],
   offsets: readonly number[],
+  repaired?: Set<number>,
 ): [number, number][][] {
   const edges = offsets.map((offset) => cutSwallowtails(stations, offset));
   const last = stations.length - 1;
@@ -360,11 +401,13 @@ export function ribbonEdges(
       else bad = t;
     }
     place(good);
+    if (good < 1 - 1e-3) repaired?.add(j);
     return true;
   };
 
   /** Every edge at station `j` drawn all the way in to the centreline. */
   const pinch = (j: number): void => {
+    repaired?.add(j);
     const station = stations[j] as RibbonStation;
     for (const edge of edges) edge[j] = [station.x, station.z];
   };
@@ -449,6 +492,7 @@ export function ribbonEdges(
           const was = insideEdges.map((e) => (edges[e] as [number, number][])[i] as [number, number]);
           for (const e of insideEdges) (edges[e] as [number, number][])[i] = [near.x, near.z];
           if (drawIn(insideEdges, i + 1, ok)) {
+            repaired?.add(i);
             fixed = true;
           } else {
             insideEdges.forEach((e, k) => {

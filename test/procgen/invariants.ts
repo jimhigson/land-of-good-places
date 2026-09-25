@@ -7675,6 +7675,8 @@ const LAWN_NOTCH_ARC = (150 * Math.PI) / 180;
  * of another route's paving; see the numbers in `HANDOFF-sb-ribbon.md`.
  */
 const LAWN_HOLE_MAX = 0.05;
+/** tan 10°: a path's end cut this far off square still reads as square. */
+const LAWN_END_SKEW = Math.tan((10 * Math.PI) / 180);
 /** A run passing this near another's end (metres) meets it there. */
 const LAWN_JOINED = 0.1;
 /** Runs at an end all leaving it within this (radians, 45°) of one another leave it one way: a dead end. */
@@ -7740,6 +7742,20 @@ const noLawnShowsThroughThePaving: Invariant = (facts) => {
       return (x - e.x) * ux + (z - e.z) * uz > 0 && Math.hypot(x - e.x, z - e.z) < 2 * e.halfWidth;
     });
 
+  const withinEndBand = (run: { first: number; last: number }, x: number, z: number): boolean =>
+    [
+      [run.first, run.first + 1],
+      [run.last, run.last - 1],
+    ].some(([end, inner]) => {
+      const e = samples[end!];
+      const q = samples[inner!];
+      if (!e || !q || q.run !== e.run) return false;
+      const length = Math.hypot(e.x - q.x, e.z - q.z);
+      if (length === 0) return false;
+      const behind = ((e.x - x) * (e.x - q.x) + (e.z - z) * (e.z - q.z)) / length;
+      return behind >= 0 && behind < e.halfWidth * LAWN_END_SKEW && Math.hypot(x - e.x, z - e.z) <= e.halfWidth + 0.1;
+    });
+
   // Along the runs.
   const holes = new Map<string, [number, number]>();
   const asked = new Set<string>();
@@ -7764,6 +7780,11 @@ const noLawnShowsThroughThePaving: Invariant = (facts) => {
           (i - 1 !== run.first && Math.hypot(x - a.x, z - a.z) <= reach) ||
           (i !== run.last && Math.hypot(x - b.x, z - b.z) <= reach);
         if (!squareOn && (!nearInner || pastAnEnd(run, x, z))) continue;
+        // The last sliver before a square-cut end is the end's to cut: across
+        // is read off a chord of the centreline, so an end comes out a few
+        // degrees off the last segment's own square (seed 11's hotel doormat
+        // at (-21.15, 54.35), 3°: a 0.08 m² sliver of "lawn" along the cut).
+        if (withinEndBand(run, x, z)) continue;
         const k = `${gx},${gz}`;
         if (asked.has(k)) continue;
         asked.add(k);
