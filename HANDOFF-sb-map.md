@@ -11,5 +11,7 @@ Fix (src/ui/parkMapProjection.ts): the view centre is projected exactly onto
 Identity on allowed centres (re-clamp drift ~1e-14 m), drag slides along the edge,
 zoom 1 unchanged (box collapses to the framed centre).
 
-Status: fix committed+pushed on fix/sb-map. Remaining: all-16 run, red proof.
-Scratch sweep script `scripts/_sbmap-sweep.mts` is NOT to be committed.
+Status: DONE. check:park-map exit 0 on seeds 0..15 (worst coverage now 25.7-35.4%, all at
+zoom 1 phone landscape, which the fix does not touch). Red proof: pre-fix clamp gives seed 0
+0.0% (NW, square+tablet), seed 2 2.8% (NE, square), both exit 1. Dense sweep (99 canvas sizes x
+7 zooms x 256 pan targets, seeds 0-5): worst 11.8%, re-clamp drift <= 3e-14 m. tsc + typecheck:test 0.
