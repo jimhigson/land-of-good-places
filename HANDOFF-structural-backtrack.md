@@ -114,3 +114,7 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - FINAL: after those -> accept:parks 0-15 --fresh --write @frozen; then chain-sweep again (all 25 checks x 16),
   test:procgen, every-seed-builds, coplanar, swept-bus/gateway/entrance-road/park-pool over 0..15, pnpm run check,
   determinism digests x2, PR against feat/procgen-on-sphere.
+- Merged fix/sb-gate (wall closes onto piers via return walls; arch-span refusal for poles; 2 new invariants). VISIBLE.
+- Pool = SUPPORTED_PARK_SEEDS, CI_SWEEP = pool, CANONICAL = 5 (same as #705) so pool checks stop sweeping retired
+  seed 451 (DuckBarRefusal at r0). Chain checks with no LGP_SEED now build seed 5 at its recorded restart: the
+  full `pnpm run check` must be re-verified (baselines keyed on the canonical park may move).
