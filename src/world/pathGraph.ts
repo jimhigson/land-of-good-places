@@ -42,7 +42,6 @@ import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { registerPlanCache } from '../boot/planCaches';
 import { planPart } from './parkPlan';
 import { publishDrawnPath, publishPaving } from './paving';
-import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from './entrance/layout';
 
 /**
  * **The solved walk network and everything drawn from it.**
@@ -236,7 +235,7 @@ export function buildPaths(): Mesh[] {
   ROUTES.forEach((route, owner) => {
     const curve = routeCurve(route);
     const divisions = pathDivisions(curve);
-    addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT, clearOfBridges);
+    addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT, discMayBeLaid);
     own(surfaceOwners, surface, owner);
     addRibbonKerb(kerb, curve, route.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
     own(kerbOwners, kerb, owner);
@@ -251,7 +250,7 @@ export function buildPaths(): Mesh[] {
   // Where route ends meet, the paving they leave between their square-cut
   // ends — see `junctionAprons`.
   junctionAprons(ROUTES)
-    .filter((apron) => clearOfBridges(apron.x, apron.z, apron.radius))
+    .filter((apron) => discMayBeLaid(apron.x, apron.z, apron.radius))
     .forEach((apron, k) => {
       addDisc(surface, apron.x, apron.z, apron.radius, JUNCTION_APRON_SEGMENTS, 1, PATH_SURFACE_LIFT);
       own(surfaceOwners, surface, JUNCTION_OWNER_BASE - k);
@@ -617,15 +616,6 @@ export function junctionAprons(routes: readonly RouteDefinition[]): JunctionApro
         bearings.push(...leaving);
         radius = Math.max(radius, (routes[run] as RouteDefinition).width / 2);
       }
-      // The gate approach's gate end hands over to the gateway path, laid on
-      // out through the arch by `Entrance.ts` up to what `publishDrawnPath`
-      // says is drawn: paving leaves the park that way too. Seed 2 has a
-      // route meeting the approach at the gate (0.00, 54.00); paved as an
-      // elbow, its apron lay 4 cm under the gateway path's end
-      // (`check:coplanar`, 0.007 m² at 7 mm).
-      if (Math.hypot(x, z - GATE_CORRIDOR_START_Z) <= JUNCTION_SNAP) {
-        bearings.push(Math.atan2(ENTRANCE_GATE_Z, ENTRANCE_GATE_X));
-      }
       if (bearings.length < 2) continue;
       bearings.sort((p, q) => p - q);
       let widest = 0;
@@ -812,6 +802,24 @@ const PLAZA_OWNER = -1;
  */
 function clearOfBridges(x: number, z: number, radius: number): boolean {
   return !pointStandsOnABridgeRamp(x, z, radius + PATH_KERB_OVERHANG);
+}
+
+/**
+ * **And off the gateway.** The gate approach's gate end is not an end: the
+ * gateway path carries the paving on out through the arch (`Entrance.ts`),
+ * laid up to what `publishDrawnPath` says is drawn — the round cap past the
+ * approach's square end included. A disc reaching into that cap lies under the
+ * gateway path's end: seed 2, where a spur leaves the gate sideways, and seed
+ * 13, where the approach leaves it 5° off straight, each paved the gate end as
+ * an elbow (`check:coplanar`, 0.007 and 0.002 m² at 7 mm).
+ */
+function clearOfTheGateway(x: number, z: number, radius: number): boolean {
+  return Math.hypot(x, z - GATE_CORRIDOR_START_Z) >= radius + PATH_KERB_OVERHANG;
+}
+
+/** Where a disc of paving may be laid: on the ground, off every bridge and off the gateway. */
+function discMayBeLaid(x: number, z: number, radius: number): boolean {
+  return clearOfBridges(x, z, radius) && clearOfTheGateway(x, z, radius);
 }
 
 /** Junction apron `k`'s disc and annulus are filed under `JUNCTION_OWNER_BASE - k`. */
