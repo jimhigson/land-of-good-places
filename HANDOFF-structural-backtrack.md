@@ -118,3 +118,10 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - Pool = SUPPORTED_PARK_SEEDS, CI_SWEEP = pool, CANONICAL = 5 (same as #705) so pool checks stop sweeping retired
   seed 451 (DuckBarRefusal at r0). Chain checks with no LGP_SEED now build seed 5 at its recorded restart: the
   full `pnpm run check` must be re-verified (baselines keyed on the canonical park may move).
+- Merged fix/sb-seed5 (resolveMovement deepest-overlap; castle-towers door probe; ringPath smooth centre line;
+  camera SIDE_SCROLLER_FLOOR/CHASE_CEILING/CEILING_SLOPE; raceCameraFindings lib) and fix/sb-pathpref (NavGrid hop
+  premium additive; path-preference lattice to park edge + "paving is one network"). park-attempt now runs
+  check:rail-race itself as an acceptance measure (red proof: 14 r2 rejected, eye 0.336 < 0.35).
+- ALL helpers done. FINAL RE-ACCEPT running at frozen 6ecdfea2 in sb-frozen (--fresh --write; copy table back).
+  Then at the table commit: test:procgen, every-seed-builds, chain-sweep.mjs (25 checks x16), coplanar, swept-bus,
+  gateway, park-pool, entrance-road, pnpm run check, determinism digests.
