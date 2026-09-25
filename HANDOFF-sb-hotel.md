@@ -10,4 +10,9 @@ r=0.28 at (-44.1,-0.3)) slide it across toward the door axis, then the door jamb
 Probe 22 judged the end point. Fix (c0667c43): judge by where the march crossed the facade plane.
 Mutation: dropping ring face 1 -> red on seed 10 (0.15 m from centre, 34 deg).
 
-## Seed 8 "front door walled up" (restart now 7) — pending all-seed run.
+## Seed 8 "front door walled up"
+At its current recorded restart (7, after merging origin/wip/sb-merge 146163b4) seed 8 passes.
+Restart 1 no longer builds at all on this code (DuckBarRefusal in railRace/simulate.ts), so the
+old walled-door failure cannot be reproduced; not investigated further.
+
+## Status: DONE. check:hotel exit 0 on seeds 0..15 at recorded restarts; tsc + typecheck:test exit 0.
