@@ -289,12 +289,16 @@ export function ribbonStations(curve: CatmullRomCurve3, divisions: number): Ribb
  *    station by station.** A cut is not always available — a backtrack that is
  *    collinear, or one that runs off the end of a route — and two edges cut
  *    independently can still disagree about which cross-section is ahead. So
- *    wherever a triangle of any strip would be wound face-down, the edge vertex
- *    that has fallen behind is held where it was at the station before, which
- *    turns that triangle into a line and the strip into a fan about the held
- *    point. Holding is decided across **all** the edges at once, which is why
- *    this takes the whole cross-section: an edge two strips share is held for
- *    both or for neither, so the paving and its kerb still meet on one line.
+ *    wherever a triangle of any strip would be wound face-down, the **inside
+ *    half** of the cross-section at that quad (both of its edges together, so
+ *    the kerb band shrinks with the paving) is drawn in towards the centreline
+ *    only as far as it must be for that triangle to face up — bisected, at the
+ *    far station and then the near one. Failing that the inside kerb alone
+ *    folds onto the paving edge it borders, then the outside half gives, and
+ *    as a last resort the station is pinched to its centreline point. Every
+ *    move is decided across **all** the edges at once, which is why this takes
+ *    the whole cross-section: an edge two strips share moves for both or for
+ *    neither, so the paving and its kerb still meet on one line.
  */
 export function ribbonEdges(
   stations: readonly RibbonStation[],

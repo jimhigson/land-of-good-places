@@ -717,10 +717,12 @@ class KerbCover {
     for (let t = 0; t < surface.triangleCount; t += 1) {
       const corners = surface.triangleAt(t);
       const plan = corners.map((i) => surface.planAt(i));
-      // Only paving the camera sees the top of can hide anything. A ribbon
-      // that folds back on itself (a hairpin tighter than its own half-width)
-      // lays some triangles wound face-down, and `FrontSide` culls them: kerb
-      // under one of those is on screen. Pool seed 451 has one, at (-9.0, -4.4).
+      // Only paving the camera sees the top of can hide anything: `FrontSide`
+      // culls a face-down triangle, so kerb under one is on screen. A ribbon
+      // folding over itself at a hairpin used to lay those (pool seed 451, at
+      // (-9.0, -4.4)); `ribbonEdges` no longer does, and
+      // `noDrawnPavingFacesTheGround` says so — this stays so a fold that
+      // slipped past it could never also delete the kerb beneath it.
       if (facesUp(plan) <= 0) continue;
       const box = boxOf(plan);
       const id = paving.push({ owner: surfaceOwners[t] as number, corners, plan, box }) - 1;
