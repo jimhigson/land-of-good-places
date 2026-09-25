@@ -188,10 +188,10 @@ export function defaultMapView(canvasWidth: number, canvasHeight: number): MapVi
 /**
  * Pulls a view back inside what the map is allowed to show.
  *
- * **The child can never pan off the park into blank paper.** The region she may
- * explore is exactly the region zoom 1 frames — the park plus its lawn margin,
- * letterboxing included — so at any zoom the visible rectangle is clamped to
- * sit inside it. At `zoom === 1` the permitted interval collapses to a single
+ * **The child can never pan off the park into blank paper.** Two rules, both
+ * needed: the visible rectangle stays inside the park's framed extent plus its
+ * lawn margin (no letterbox), and the point at its centre stays inside the
+ * park's drawn outline (no empty bounding-box corner). At `zoom === 1` the permitted interval collapses to a single
  * point, so the default view is pinned to the framed centre and this reduces
  * to precisely the projection #334 shipped. That equivalence is asserted by
  * `check:park-map`, not merely claimed here.
@@ -232,16 +232,172 @@ export function clampMapView(
    * fits exactly (`half === content half`) and the slack axis is larger than
    * the content, so both axes centre and the framing is the default one.
    */
-  const fit = (value: number, lo: number, hi: number, half: number): number => {
-    if (half * 2 >= hi - lo) return (lo + hi) / 2;
-    return Math.min(hi - half, Math.max(lo + half, value));
+  const fitRange = (lo: number, hi: number, half: number): readonly [number, number] =>
+    half * 2 >= hi - lo ? [(lo + hi) / 2, (lo + hi) / 2] : [lo + half, hi - half];
+  const [boxMinX, boxMaxX] = fitRange(contentMinX, contentMaxX, halfX);
+  const [boxMinZ, boxMaxZ] = fitRange(contentMinZ, contentMaxZ, halfZ);
+
+  // **And the centre stays on the park itself, not merely inside its box.**
+  // The rectangle above is the park's *bounding box*, and the park is a lobed
+  // per-seed spline: its box has empty corners. Keeping the visible window
+  // inside the box let the window sit almost wholly in one of those corners —
+  // seed 2 at zoom 4 on a 520 px square, panned NE, showed 2.8% park; seed 0
+  // panned NW showed none at all. So the centre the child may hold is
+  // confined to the part of that box which is **inside the drawn outline**
+  // (`PARK_BOUNDARY.outline()`, the same polygon `ParkMap` fills). A window
+  // centred on park always has park under its middle, whatever the seed.
+  const box: CentreBox = { minX: boxMinX, maxX: boxMaxX, minZ: boxMinZ, maxZ: boxMaxZ };
+  const [centreX, centreZ] = nearestCentreOnPark(
+    view.centreX,
+    view.centreZ,
+    box,
+    PARK_BOUNDARY.outline(),
+  );
+  return { zoom, centreX, centreZ };
+}
+
+/** The rectangle of centres that keep the visible window inside the content. */
+interface CentreBox {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
+type Polygon = readonly (readonly [number, number])[];
+
+/** Standard ray-crossing test. */
+function insidePolygon(x: number, z: number, polygon: Polygon): boolean {
+  let hit = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i] as readonly [number, number];
+    const b = polygon[j] as readonly [number, number];
+    if (a[1] > z !== b[1] > z && x < ((b[0] - a[0]) * (z - a[1])) / (b[1] - a[1]) + a[0]) {
+      hit = !hit;
+    }
+  }
+  return hit;
+}
+
+/**
+ * **The nearest point to (x, z) of `box ∩ park`** — an exact projection, so it
+ * is the identity on any centre already allowed (a clamped view re-clamps to
+ * itself, which `outdoorParkMapProjection` relies on) and a drag off the park
+ * slides the view along its edge rather than stopping dead.
+ *
+ * The nearest point of a closed set to a point outside it lies on its boundary,
+ * and the boundary of `box ∩ park` is made of two kinds of piece: outline edges
+ * clipped to the box, and box edges clipped to the park. Both are measured.
+ *
+ * If the two do not meet — only at or next to zoom 1, where the box shrinks to
+ * the framed centre — the box alone rules, exactly as before this existed.
+ */
+function nearestCentreOnPark(
+  x: number,
+  z: number,
+  box: CentreBox,
+  outline: Polygon,
+): readonly [number, number] {
+  const inBox = x >= box.minX && x <= box.maxX && z >= box.minZ && z <= box.maxZ;
+  if (inBox && insidePolygon(x, z, outline)) return [x, z];
+
+  let bestX = Number.NaN;
+  let bestZ = Number.NaN;
+  let bestD2 = Infinity;
+  const consider = (px: number, pz: number): void => {
+    const d2 = (px - x) ** 2 + (pz - z) ** 2;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      bestX = px;
+      bestZ = pz;
+    }
+  };
+  /** Nearest point on segment a->b to (x, z), for t restricted to [t0, t1]. */
+  const onSegment = (
+    ax: number, az: number, bx: number, bz: number, t0: number, t1: number,
+  ): void => {
+    const dx = bx - ax;
+    const dz = bz - az;
+    const len2 = dx * dx + dz * dz;
+    const t = len2 > 0 ? ((x - ax) * dx + (z - az) * dz) / len2 : t0;
+    const tc = Math.min(t1, Math.max(t0, t));
+    consider(ax + dx * tc, az + dz * tc);
   };
 
-  return {
-    zoom,
-    centreX: fit(view.centreX, contentMinX, contentMaxX, halfX),
-    centreZ: fit(view.centreZ, contentMinZ, contentMaxZ, halfZ),
-  };
+  // 1. Outline edges, clipped to the box (Liang-Barsky).
+  for (let i = 0, j = outline.length - 1; i < outline.length; j = i, i += 1) {
+    const [ax, az] = outline[j] as readonly [number, number];
+    const [bx, bz] = outline[i] as readonly [number, number];
+    const dx = bx - ax;
+    const dz = bz - az;
+    let t0 = 0;
+    let t1 = 1;
+    const clip = (p: number, q: number): boolean => {
+      if (p === 0) return q >= 0;
+      const r = q / p;
+      if (p < 0) {
+        if (r > t1) return false;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return false;
+        if (r < t1) t1 = r;
+      }
+      return true;
+    };
+    if (
+      clip(-dx, ax - box.minX) &&
+      clip(dx, box.maxX - ax) &&
+      clip(-dz, az - box.minZ) &&
+      clip(dz, box.maxZ - az)
+    ) {
+      onSegment(ax, az, bx, bz, t0, t1);
+    }
+  }
+
+  // 2. Box edges, clipped to the park: split each edge where the outline
+  // crosses it and keep the pieces whose middles are inside.
+  const corners: readonly (readonly [number, number])[] = [
+    [box.minX, box.minZ],
+    [box.maxX, box.minZ],
+    [box.maxX, box.maxZ],
+    [box.minX, box.maxZ],
+  ];
+  for (let k = 0; k < 4; k += 1) {
+    const [ax, az] = corners[k] as readonly [number, number];
+    const [bx, bz] = corners[(k + 1) % 4] as readonly [number, number];
+    const ex = bx - ax;
+    const ez = bz - az;
+    const cuts = [0, 1];
+    for (let i = 0, j = outline.length - 1; i < outline.length; j = i, i += 1) {
+      const [px, pz] = outline[j] as readonly [number, number];
+      const [qx, qz] = outline[i] as readonly [number, number];
+      const fx = qx - px;
+      const fz = qz - pz;
+      const denom = ex * fz - ez * fx;
+      if (denom === 0) continue;
+      const t = ((px - ax) * fz - (pz - az) * fx) / denom;
+      const u = ((px - ax) * ez - (pz - az) * ex) / denom;
+      if (t > 0 && t < 1 && u >= 0 && u <= 1) cuts.push(t);
+    }
+    cuts.sort((m, n) => m - n);
+    for (let c = 0; c + 1 < cuts.length; c += 1) {
+      const t0 = cuts[c] as number;
+      const t1 = cuts[c + 1] as number;
+      const mid = (t0 + t1) / 2;
+      if (insidePolygon(ax + ex * mid, az + ez * mid, outline)) {
+        onSegment(ax, az, bx, bz, t0, t1);
+      }
+    }
+    // A box collapsed to a line or a point has zero-length edges, whose one
+    // piece has no interior to test; the point itself is the whole edge.
+    if (ex === 0 && ez === 0 && insidePolygon(ax, az, outline)) consider(ax, az);
+  }
+
+  if (Number.isFinite(bestD2)) return [bestX, bestZ];
+  return [
+    Math.min(box.maxX, Math.max(box.minX, x)),
+    Math.min(box.maxZ, Math.max(box.minZ, z)),
+  ];
 }
 
 /**

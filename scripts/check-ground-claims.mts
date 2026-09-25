@@ -51,7 +51,18 @@ const nextFrame = (): Promise<void> => new Promise((resolve) => setImmediate(res
 // Generate the park exactly as the ride loop does.
 // ---------------------------------------------------------------------------
 const generation = new ParkGeneration();
-const MAX_FRAMES = 6000;
+/**
+ * A hang-catcher, not a budget. Each frame spends `GENERATION_BUDGET_MS` of
+ * WALL clock, so how many frames a park takes depends on how loaded the machine
+ * is as much as on the park — 6000 was enough for the canonical seed and not
+ * for seed 0 at its recorded restart on a busy box (measured: "never finished in
+ * 6000 frames"), which made this check's verdict a function of load. What it
+ * asserts is the registry hand-over, not how fast a park solves; the solver
+ * terminates by its own rules (`parkSolve.ts` throws on exhaustion, and that
+ * lands in `generation.failed` below). So this only has to be far above any
+ * real park — `check:park-boot` owns the generator's cost.
+ */
+const MAX_FRAMES = 200_000;
 let frames = 0;
 while (!generation.ready && generation.failed === null && frames < MAX_FRAMES) {
   generation.advance(GENERATION_BUDGET_MS);

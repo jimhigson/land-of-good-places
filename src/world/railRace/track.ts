@@ -22,7 +22,8 @@ import { hazardTapeTexture } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
-import { terrainHeight, tiltToSphere } from '../terrain';
+import { duckBarPose } from './barReach';
+import { terrainHeight } from '../terrain';
 import { distanceToPath } from '../pathGraph';
 import { archFeet } from './arch';
 import { PARK_LAYOUT } from '../parkLayout';
@@ -406,8 +407,6 @@ export function buildRailRaceTrack(
   const matrix = new Matrix4();
   const rotation = new Quaternion();
   const position = new Vector3();
-  /** The duck-bar asset's own size on this ring — see {@link ringSizeVsRace}. */
-  const assetScale = new Vector3(ringSizeVsRace, ringSizeVsRace, ringSizeVsRace);
   const scale = new Vector3();
   const outward = new Vector3();
   const point = new Vector3();
@@ -861,9 +860,13 @@ export function buildRailRaceTrack(
     // sit a couple of metres along from the bar — well inside the
     // `DUCK_BAR_SUPPORT_TOLERANCE` the invariant already allows for the radial
     // nudge, which always moved the leg out from under the bar anyway.
-    const at = route.wrap(route.startDistance + bar.at);
-    route.outwardAt(at, outward);
-    route.pointAt(bar.lane, at, point);
+    // Posed by `barReach.ts`'s `duckBarPose` — the one owner of where a bar
+    // hangs, so the planner's "does this bar reach into another lane?" is asked
+    // of exactly the matrix drawn here.
+    const pose = duckBarPose(route, bar.lane, bar.at);
+    outward.copy(pose.outward);
+    point.copy(pose.point);
+    barTilt.copy(pose.tilt);
     // **The whole gantry leans with the track it straddles.** Its two posts and
     // the bar between them are placed as offsets from a point on the rail —
     // sideways along `outward`, upward by a clearance — and both of those
@@ -872,7 +875,6 @@ export function buildRailRaceTrack(
     // `+Y` where the radial is 14.5. One tilt, taken at the rail, turns the
     // offsets and the posts' own axis together so the frame stays square to the
     // track.
-    tiltToSphere(point.x, point.y, point.z, barTilt);
     rotation.setFromUnitVectors(ACROSS, outward).premultiply(barTilt);
     postLaneColour.set(LANE_COLOURS[bar.lane % LANE_COLOURS.length]!);
 
@@ -891,10 +893,7 @@ export function buildRailRaceTrack(
       postIndex += 1;
     }
 
-    barOffset.set(0, duckClearance, 0).applyQuaternion(barTilt);
-    position.copy(point).add(barOffset);
-    matrix.compose(position, rotation, assetScale);
-    bars.setMatrixAt(barIndex, matrix);
+    bars.setMatrixAt(barIndex, pose.matrix);
     slots.push(barIndex);
     barIndex += 1;
     barSlots.push(slots);

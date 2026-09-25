@@ -3715,7 +3715,11 @@ for (const room of ROOMS) {
 // longest stride the loop can hand out, because a gap you cannot walk into
 // you may still be able to tunnel into on a stuttering frame.
 //
-// Every bearing but the doorway's own cone must be stopped outside the shell.
+// Every bearing but the doorway's own cone must be stopped outside the shell
+// unless it came in **through the doorway** — judged by where the march crossed
+// the facade plane, not where it ended. On seed 10 two posts and the jamb's end
+// cap steer the 22.5° marches round into the door; the old end-point test read
+// that as a hole 5.97 m from the centre, when the shell was closed all along.
 // The doorway's cone must let her in, and the count of bearings that actually
 // reach the shell is asserted too — otherwise a park that happened to fence
 // the tower off with trees would pass this without ever testing the tower.
@@ -3737,14 +3741,39 @@ for (const room of ROOMS) {
   /** Half the angle the doorway subtends at the tower's centre. */
   const doorCone = Math.atan2(TOWER_DOOR_HALF, facade);
 
-  const marchIn = (bearing: number, step: number): number => {
+  // Along / across the door's axis, relative to the tower's centre.
+  const alongOf = (px: number, pz: number): number =>
+    (px - plot.x) * Math.sin(facadeYaw) + (pz - plot.z) * Math.cos(facadeYaw);
+  const acrossOf = (px: number, pz: number): number =>
+    (px - plot.x) * Math.sin(facadeYaw + Math.PI / 2) +
+    (pz - plot.z) * Math.cos(facadeYaw + Math.PI / 2);
+
+  /**
+   * March in and report the closest approach, and how deep she got **without
+   * having come through the doorway**. Ask what she crossed, not where she
+   * landed: scenery in front of the hotel can turn an off-axis march into the
+   * doorway (seed 10: two posts and the jamb's end cap slide a 22.5° march
+   * round into the door, and she walks in properly between the jambs), and
+   * that is the door working, not a hole in the shell. So a step that carries
+   * her across the facade plane *between the jambs* marks the march as
+   * entered-by-the-door; any depth inside the shell reached before that — or
+   * without it at all — is a hole.
+   */
+  const marchIn = (
+    bearing: number,
+    step: number,
+  ): { closest: number; closestNotByDoor: number; byDoor: boolean } => {
     const probe = new Vector3(
       plot.x + Math.sin(bearing) * 16,
       0,
       plot.z + Math.cos(bearing) * 16,
     );
     let closest = Infinity;
+    let closestNotByDoor = Infinity;
+    let byDoor = false;
     for (let travelled = 0; travelled < 20; travelled += step) {
+      const fromAlong = alongOf(probe.x, probe.z);
+      const fromAcross = acrossOf(probe.x, probe.z);
       collision.resolveMovement(
         probe,
         -Math.sin(bearing) * step,
@@ -3753,14 +3782,25 @@ for (const room of ROOMS) {
         0,
         MAX_FRAME_DELTA,
       );
-      closest = Math.min(closest, Math.hypot(probe.x - plot.x, probe.z - plot.z));
+      const toAlong = alongOf(probe.x, probe.z);
+      const toAcross = acrossOf(probe.x, probe.z);
+      if (!byDoor && fromAlong >= facade && toAlong < facade) {
+        const t = (fromAlong - facade) / (fromAlong - toAlong);
+        const crossedAt = fromAcross + t * (toAcross - fromAcross);
+        if (Math.abs(crossedAt) < TOWER_DOOR_HALF) byDoor = true;
+      }
+      const r = Math.hypot(probe.x - plot.x, probe.z - plot.z);
+      closest = Math.min(closest, r);
+      if (!byDoor) closestNotByDoor = Math.min(closestNotByDoor, r);
     }
-    return closest;
+    return { closest, closestNotByDoor, byDoor };
   };
 
   const BEARINGS = 32;
   let reachedShell = 0;
   let doorwaysIn = 0;
+  /** Off-axis marches scenery steered in through the door — not holes, but said aloud. */
+  let turnedInByDoor = 0;
   for (let i = 0; i < BEARINGS; i += 1) {
     const bearing = facadeYaw + (i / BEARINGS) * Math.PI * 2;
     // Signed angle off the door's axis, wrapped into (−π, π].
@@ -3768,14 +3808,16 @@ for (const room of ROOMS) {
       Math.atan2(Math.sin(bearing - facadeYaw), Math.cos(bearing - facadeYaw)),
     );
     for (const step of [0.05, PLAYER_LONGEST_STEP]) {
-      const closest = marchIn(bearing, step);
+      const { closest, closestNotByDoor, byDoor } = marchIn(bearing, step);
       if (closest < facade + 1.2) reachedShell += 1;
       if (offAxis > doorCone) {
-        if (closest < facade) {
+        if (byDoor && closest < facade) turnedInByDoor += 1;
+        if (closestNotByDoor < facade) {
           problems.push(
             `the hotel tower is not solid ${((offAxis * 180) / Math.PI).toFixed(0)}° off its ` +
               `doorway: a player-sized body marched at it in ${step.toFixed(2)} m steps got to ` +
-              `${closest.toFixed(2)} m from the centre, inside the ${facade.toFixed(2)} m shell ` +
+              `${closestNotByDoor.toFixed(2)} m from the centre, inside the ${facade.toFixed(2)} m shell, ` +
+              `without coming through the doorway ` +
               `(world/hotel/Hotel.ts registerTowerCollision)`,
           );
         }
@@ -3787,6 +3829,12 @@ for (const room of ROOMS) {
   if (doorwaysIn === 0) {
     problems.push(
       'no bearing inside the tower doorwaylets a child in at all — the front door is walled up',
+    );
+  }
+  if (turnedInByDoor > 0) {
+    process.stderr.write(
+      `  note: ${turnedInByDoor} off-doorway march(es) at the hotel tower were steered in through ` +
+        `the doorway by scenery in front of it — counted as the door, not a hole\n`,
     );
   }
   // Green must mean "measured", not "never got near it".

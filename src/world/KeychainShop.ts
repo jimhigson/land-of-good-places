@@ -545,7 +545,18 @@ interface RackKeyring {
    * purpose (sparkles, the tap zone, `rackFocus`).
    */
   readonly root: Group;
-  /** Where the tap has to land — on the counter, inside the cart's own footprint. */
+  /**
+   * The keyring's own bounding box **in {@link root}'s frame** — measured before
+   * any lean, facing or sphere tilt is applied, so its shape is the model's and
+   * nothing else's. The framing carries its eight corners through `root`'s
+   * world matrix; see where {@link KeychainShop.framedSubjects} is filled.
+   */
+  readonly ownBox: Box3;
+  /**
+   * Where the tap has to land — the keyring's **drawn** world position, read
+   * off {@link root} after the cart has been leaned onto the sphere. See
+   * {@link KeychainShop.buildCart}.
+   */
   readonly x: number;
   readonly y: number;
   readonly z: number;
@@ -1351,19 +1362,24 @@ export class KeychainShop implements GameSystem {
       handle.root.rotation.set(0, 0, 0);
       handle.root.scale.setScalar(RACK_KEYRING_SCALE);
       const wrapper = new Group();
-      wrapper.rotation.y = (index % 2 === 0 ? 1 : -1) * RACK_LEAN;
       wrapper.add(handle.root);
+      // The model's own box, in the wrapper's frame, taken while the wrapper is
+      // still the identity — before the lean, the stall's facing or the
+      // sphere's tilt. See `RackKeyring.ownBox`.
+      wrapper.updateMatrixWorld(true);
+      const ownBox = new Box3().setFromObject(wrapper);
+      wrapper.rotation.y = (index % 2 === 0 ? 1 : -1) * RACK_LEAN;
       // At the origin with only its lean applied, so the box comes out in the
       // cart's own local frame — the frame `rackFrontRowLocalZ` insets from.
       wrapper.updateMatrixWorld(true);
       const box = new Box3().setFromObject(wrapper);
-      return { kind, wrapper, halfDepth: Math.max(-box.min.z, box.max.z) };
+      return { kind, wrapper, ownBox, halfDepth: Math.max(-box.min.z, box.max.z) };
     });
     let deepestHalfDepth = 0;
     for (const one of built) deepestHalfDepth = Math.max(deepestHalfDepth, one.halfDepth);
     const frontRowLocalZ = rackFrontRowLocalZ(deepestHalfDepth);
 
-    built.forEach(({ kind, wrapper }, index) => {
+    built.forEach(({ kind, wrapper, ownBox }, index) => {
       const column = index % RACK_COLUMNS;
       const row = Math.floor(index / RACK_COLUMNS);
       const tColumn = RACK_COLUMNS > 1 ? column / (RACK_COLUMNS - 1) : 0.5;
@@ -1374,7 +1390,19 @@ export class KeychainShop implements GameSystem {
       wrapper.position.set(localX, keyringLocalY, localZ);
       this.group.add(wrapper);
 
-      const [x, z] = this.toWorld(localX, localZ);
+      // **Where the keyring is drawn**, read off the wrapper once the cart's
+      // own transform is applied — never `toWorld(localX, localZ)` plus a
+      // height up world Y. The cart is leaned onto the sphere
+      // (`standOnSphere`, in the constructor), and a flat sum ignores that
+      // lean: the tap zone then sits beside the charm it names, and the
+      // screen spacing `viewZoom` frames against is the spacing of points
+      // nobody draws. The lean is distance / sphere radius, so the error grew
+      // with how far out the park put the stall: swept over every facing, a
+      // stall 60 m out measured a closest gap of 0.193 m where the drawn rack
+      // has 0.333 m, and the same stall on the far side 0.436 m — the seed's
+      // placement, not the rack, decided whether a fingertip fit.
+      this.group.updateMatrixWorld(true);
+      const drawn = wrapper.getWorldPosition(new Vector3());
       // Same lateral offset as the keyring itself, but out at the stall's own
       // proven-clear stand depth — never the counter's own `localZ`, which
       // sits inside `buildCollision`'s walls (see `RackKeyring.standX`'s own
@@ -1386,9 +1414,10 @@ export class KeychainShop implements GameSystem {
         kind,
         id: `keychain.${kind}`,
         root: wrapper,
-        x,
-        y: this.groundY + keyringLocalY,
-        z,
+        ownBox,
+        x: drawn.x,
+        y: drawn.y,
+        z: drawn.z,
         standX,
         standZ,
       });
@@ -1399,12 +1428,21 @@ export class KeychainShop implements GameSystem {
     // do this job by eye are gone. Solved once here rather than every frame:
     // neither the keyrings nor her composed stand point ever move afterwards.
     this.group.updateMatrixWorld(true);
-    const measured = new Box3();
+    // Each keyring as **its own box carried through its own world matrix** —
+    // eight corners that turn with the charm — not `Box3.setFromObject`, which
+    // is a box squared to the *world* axes. A charm turned by the stall's
+    // facing and leaned by the sphere fills far more of a world-axis box than
+    // of its own, and by an amount that changes with the seed: 18% too wide
+    // and 37% too tall on a stall facing 45°. That phantom bulk is what pushed
+    // the framing back until a keyring "touched the edge of the screen" that
+    // nothing drawn was touching.
     for (const keyring of this.rack) {
-      measured.setFromObject(keyring.root);
+      const toWorld = keyring.root.matrixWorld;
       this.framedSubjects.push({
         what: keyring.kind,
-        points: boxCorners(measured.min.clone(), measured.max.clone()),
+        points: boxCorners(keyring.ownBox.min, keyring.ownBox.max).map((corner) =>
+          new Vector3(corner.x, corner.y, corner.z).applyMatrix4(toWorld),
+        ),
       });
     }
     // Her, as the box her worst-case height and radius sweep where she stands
@@ -1442,17 +1480,20 @@ export class KeychainShop implements GameSystem {
     // Corrected from the rack's own world centre, which keeps the focus at a
     // sensible depth for anything else reading `IsoCamera.focusPoint`.
     let sumX = 0;
+    let sumY = 0;
     let sumZ = 0;
     for (const keyring of this.rack) {
       sumX += keyring.x;
+      sumY += keyring.y;
       sumZ += keyring.z;
     }
     const rackCentreX = sumX / this.rack.length;
+    const rackCentreY = sumY / this.rack.length;
     const rackCentreZ = sumZ / this.rack.length;
     focusForFrame(
       this.viewBasis,
       this.requiredContent,
-      { x: rackCentreX, y: this.groundY + keyringLocalY, z: rackCentreZ },
+      { x: rackCentreX, y: rackCentreY, z: rackCentreZ },
       this.rackFocus,
     );
 

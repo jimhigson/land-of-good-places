@@ -88,3 +88,22 @@ coping chamfer (#698 fix/procgen-last has the fix).
   (instrument+game bug, 10-16 mm on 10 of 16 seeds); check:fountain-hop clause 2b taps 46 basin points.
 - Still running: fix/sb-seed5 (castle-towers, cruiser cart), fix/sb-duck-ends. Then: emulate #705 pool=0..15 in a
   scratch worktree and run pool-sweeping checks locally (not pushed; #705 owns the pool change).
+- FINDING: chain checks build only the canonical seed by default, so per-seed failures hid (rail-race camera
+  clauses red on 1r6 etc. — likely from the CEILING_FLOOR camera fix). fix/sb-seed5 helper now owns rail-race camera
+  clauses too. Chain-sweep driver ($SCRATCH/sb/chain-sweep.mjs) runs 25 park-building chain checks x 16 seeds at
+  dda5c8ab in sb-frozen -> chain-sweep.log/json.
+- Merged fix/sb-duck-ends (8b50bd31): barReach.ts one owner; new invariant "every Rail Race duck bar keeps to its own
+  lane"; exact nearestLegalLayout solver. VISIBLE: 18-32 of 40 bars move per seed. Restarts re-recorded:
+  4:3 5:12 8:7 9:4 11:2 14:2. OPEN FOR JIM: bar (2.30 m) wider than lane pitch (1.10 m); rider head 2.84 m vs bar
+  underside 2.55 m and posts over neighbour centreline not measured — design question.
+- Helpers running: fix/sb-seed5 (castle-towers done incl. Collision.resolveMovement change; now rail-race camera),
+  fix/sb-hotel (seed 10 tower hole). Chain sweep at dda5c8ab running.
+- FINAL STEPS: once helpers merged -> accept:parks 0-15 --fresh --write at frozen HEAD, then test:procgen,
+  every-seed-builds, chain sweep, coplanar, check, determinism digests, PR.
+- Merged fix/sb-hotel (probe judges by crossing, not landing; all 16 exit 0). ground-claims frame cap 6000->200000
+  (hang-catcher; seed 0 now passes). Helpers: fix/sb-arrival (cat-bus child crosses wall, seeds 0,5), fix/sb-map
+  (park-map blank pan seed 2), fix/sb-seed5 (rail-race camera).
+- Merged fix/sb-map (7d868a35: pan clamp keeps view centre inside PARK_BOUNDARY outline; all 16 exit 0; VISIBLE,
+  needs browser look zoom 4 seeds 0 NW / 2 NE) and fix/sb-keyring (956f5dd0: tap zones/framing read off leaned
+  drawn charms; all 16 exit 0; VISIBLE). Remaining helpers: fix/sb-seed5 (castle-towers+cart done, rail-race camera),
+  fix/sb-arrival (cat-bus seeds 0,5). Chain sweep at dda5c8ab ~80%.
