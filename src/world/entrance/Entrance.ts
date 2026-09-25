@@ -23,7 +23,7 @@ import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld } from '../Collision';
 import type { Player } from '../../entities/Player';
 import { buildPawPrint } from './catBus';
-import { buildGateArch } from './gateArch';
+import { buildGateArch, PARK_GATE_OUTWARD } from './gateArch';
 import { ROAD_HALF_WIDTH, ROAD_TILE_METRES, roadMaterial } from './road';
 import {
   entranceRoadAt,
@@ -51,7 +51,6 @@ import { highlightObject } from '../highlight';
 import { pressAction, type InteractZone } from '../interact';
 import { playOpenChime } from '../../ui/chime';
 import {
-  ENTRANCE_ANGLE,
   ENTRANCE_CLEAR_RADIUS,
   ENTRANCE_CLEAR_X,
   ENTRANCE_CLEAR_Z,
@@ -293,7 +292,7 @@ export class Entrance implements GameSystem {
     const arch = buildGateArch({
       centreX: ENTRANCE_GATE_X,
       centreZ: ENTRANCE_GATE_Z,
-      outward: { x: Math.cos(ENTRANCE_ANGLE), z: Math.sin(ENTRANCE_ANGLE) },
+      outward: PARK_GATE_OUTWARD,
       groundAt: terrainHeight,
       // The arch's root is named `park-gate-arch` so `scripts/check-park-map.mts`
       // can ask the *scene* where the gate stands, rather than re-reading the

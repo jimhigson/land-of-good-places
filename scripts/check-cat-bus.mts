@@ -530,11 +530,13 @@ const walkedDistance = new Array<number>(ARRIVAL_KID_COUNT).fill(0);
 const walkingFrames = new Array<number>(ARRIVAL_KID_COUNT).fill(0);
 const onFootLastFrame = new Array<boolean>(ARRIVAL_KID_COUNT).fill(false);
 const offTheBus = new Array<boolean>(ARRIVAL_KID_COUNT).fill(false);
-const enteredPark = new Array<boolean>(ARRIVAL_KID_COUNT).fill(false);
 let closestPairEver = Infinity;
 let closestPairWhen = 0;
 let closestPairWho = '';
-const crossedGateOutsideGap: string[] = [];
+/** Per child: the first frame the arrival walked them into anything solid, if it ever did. */
+const walkedThroughSolid: (string | undefined)[] = new Array<string | undefined>(ARRIVAL_KID_COUNT).fill(undefined);
+/** How many child-frames that was asked on — so a run that asked nothing says so. */
+let scriptedOnFootFrames = 0;
 /**
  * **Where each child went under the arch** — `across` in the gate's own frame
  * at the moment they crossed the line between its two piers, or `NaN` if they
@@ -661,17 +663,10 @@ for (let index = 0; index < frames; index += 1) {
       seenInsidePark.add(kidIndex);
     }
 
-    // Crossing the **boundary**, which is a spline and is only at z = 60 near
-    // the gate itself. Testing `z` against `ENTRANCE_GATE_Z` flagged a child
-    // strolling around the middle of the park at x = 6.1, thirty seconds after
-    // the arrival ended, as having walked through a wall. Radial, and only
-    // while the arrival still owns them.
-    // Only the **first** time each child enters the park, and only while the
-    // arrival still owns them. Once inside they wander, and a child strolling
-    // about the middle of the park re-crosses this line all afternoon.
-    //
-    // **Where she crossed the edge is asked of what is built there, not of the
-    // gate's strip.** It used to require the crossing point to lie within
+    // **Did the arrival walk her through a wall?** This used to be asked at
+    // the first moment she crossed the boundary spline (radial, and only while
+    // the arrival owned her), and it required that point to be in the gate's
+    // strip. It used to require the crossing point to lie within
     // `ENTRANCE_GATE_HALF_WIDTH` of the gate's centre line, which is only the
     // same question as "did she come through the gap in the wall" when the
     // boundary runs square across the gate. It does not have to: the outline is
@@ -683,23 +678,23 @@ for (let index = 0; index < frames; index += 1) {
     // than the strip allowed and 0.97 m clear of the nearest masonry. The strip
     // called that walking through a wall. What she crossed was the gap.
     //
-    // So: she must be clear of everything solid at the moment she stands on
-    // the edge — the wall's own colliders are what a wall *is* to a child —
-    // and, separately below, she must have gone **under the arch**.
-    if (kid.scripted && !enteredPark[kidIndex]) {
-      const nowInside =
-        Math.hypot(kid.position.x, kid.position.z) <=
-        edgeRadiusAt(PARK_BOUNDARY, Math.atan2(kid.position.z, kid.position.x));
-      if (nowInside) {
-        enteredPark[kidIndex] = true;
-        if (!world.collision.isClearCircle(kid.position.x, kid.position.z, NPC_RADIUS)) {
-          crossedGateOutsideGap.push(
-            `child ${kidIndex} at x ${kid.position.x.toFixed(2)}, z ${kid.position.z.toFixed(2)} ` +
-              `overlapping ${world.collision.describeNear(kid.position.x, kid.position.z, NPC_RADIUS, 0).join(', ')}`,
-          );
-        }
-      }
+    // So the question is now the one the strip stood in for, asked of the
+    // collision world directly and on **every** frame the arrival owns her on
+    // foot, not only at the edge: a scripted walk is exempt from collision, so
+    // this is the only thing that can see her pass through a pier, the wall, a
+    // lamp or anything else built by the way in. Below, separately, she must
+    // have gone **under the arch** rather than round it.
+    if (
+      kid.scripted &&
+      onFoot &&
+      walkedThroughSolid[kidIndex] === undefined &&
+      !world.collision.isClearCircle(kid.position.x, kid.position.z, NPC_RADIUS)
+    ) {
+      walkedThroughSolid[kidIndex] =
+        `child ${kidIndex} at t ${elapsed.toFixed(2)} s, x ${kid.position.x.toFixed(2)}, z ${kid.position.z.toFixed(2)}, ` +
+        `overlapping ${world.collision.describeNear(kid.position.x, kid.position.z, NPC_RADIUS, 0).join(', ')}`;
     }
+    if (kid.scripted && onFoot) scriptedOnFootFrames += 1;
 
     // **Under the arch**, measured on the line between its piers: the first
     // frame a scripted child goes from the road side of it to the park side,
@@ -1000,9 +995,14 @@ check(
 );
 
 // --- 6. everybody walked in through the gate ------------------------------
+const solidWalks = walkedThroughSolid.filter((line): line is string => line !== undefined);
 check(
-  crossedGateOutsideGap.length === 0,
-  `${crossedGateOutsideGap.length} children crossed the boundary through something solid: ${crossedGateOutsideGap
+  scriptedOnFootFrames > 0,
+  'no frame had a child on foot and still walked by the arrival, so the clause below asked nothing',
+);
+check(
+  solidWalks.length === 0,
+  `${solidWalks.length} children were walked through something solid by the arrival: ${solidWalks
     .slice(0, 3)
     .join('; ')}`,
 );
@@ -1047,8 +1047,8 @@ check(
 );
 console.log(
   `  ${archCrossings.length} children went under the arch, widest ${widestUnderArch.toFixed(2)} m off ` +
-    `centre against ${ARCH_BODY_HALF.toFixed(2)} m of body room; ${enteredPark.filter(Boolean).length - crossedGateOutsideGap.length} ` +
-    'stepped over the park edge clear of anything solid',
+    `centre against ${ARCH_BODY_HALF.toFixed(2)} m of body room; ${ARRIVAL_KID_COUNT - solidWalks.length} ` +
+    `of ${ARRIVAL_KID_COUNT} never touched anything solid over ${scriptedOnFootFrames} scripted on-foot child-frames`,
 );
 
 // --- 7. the player -------------------------------------------------------

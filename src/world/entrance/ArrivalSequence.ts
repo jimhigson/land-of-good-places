@@ -14,7 +14,8 @@ import type { FrameContext } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
-import { GATE_ARCH_CLEAR_WIDTH } from '../../art/models/gateArch';
+import { GATE_ARCH_CLEAR_WIDTH, GATE_ARCH_PIER_KEEP_OUT } from '../../art/models/gateArch';
+import { parkGateFeet } from './gateArch';
 import {
   CHILD_FOOTPRINT,
   KID_EYE_HEIGHT,
@@ -1334,6 +1335,37 @@ const GATE_FAN_WOBBLE = 0.2;
  */
 const GATE_FAN_HALF_WIDTH = GATE_ARCH_CLEAR_WIDTH / 2 - NPC_RADIUS - GATE_FAN_WOBBLE;
 
+/**
+ * **How close a scripted route comes to either of the gate's piers**, centre to
+ * centre, sampled finely along the whole curve.
+ *
+ * Asked because a route is only *solved* to be at its aim on the gate line
+ * itself (see {@link funnelCorner}); it is not straight, and one that crosses
+ * the line 2.87 m off centre while bending away towards a destination deep on
+ * that side keeps closing on the pier for a stride after it. Measured on seed 6
+ * by `check:cat-bus`: child 0 passed 1.29 m from the west pier's centre, 0.01 m
+ * inside a child's body plus the pier's 0.80 m, 0.65 m *past* the line where
+ * the aim had been honoured.
+ */
+function closestApproachToPiers(route: WalkRoute): number {
+  const feet = parkGateFeet();
+  let closest = Infinity;
+  const samples = 400;
+  for (let step = 0; step <= samples; step += 1) {
+    const point = bezier(route.from, route.corner, route.to, step / samples);
+    for (const foot of feet) {
+      closest = Math.min(closest, Math.hypot(point.x - foot.x, point.z - foot.z));
+    }
+  }
+  return closest;
+}
+
+/** How far a scripted child's centre must stay from a pier's: its collider plus her own. */
+const PIER_CLEARANCE = GATE_ARCH_PIER_KEEP_OUT + NPC_RADIUS;
+
+/** How far an aim is drawn in towards the gate's centre on each retry. */
+const AIM_RETRY_STEP = 0.05;
+
 /** One child's scripted walk out of the bus and into the park. */
 interface KidWalk {
   readonly route: WalkRoute;
@@ -1464,7 +1496,8 @@ export class ArrivalSequence {
         x: end.x + across * 24 + wobble(1.0),
         z: end.z - 2.4 - rng() * 5.5 - Math.abs(across) * 1.4,
       };
-      const route: WalkRoute = {
+      const aimed = across * 2 * GATE_FAN_HALF_WIDTH + wobble(GATE_FAN_WOBBLE);
+      const routeAimedAt = (aim: number): WalkRoute => ({
         from: start,
         // The point they funnel through. Two competing constraints, and the
         // first version got the balance wrong in a way that showed:
@@ -1485,13 +1518,23 @@ export class ArrivalSequence {
         // control point, which a quadratic Bézier does not pass through, and
         // once the arc moved the drop off the gate's axis the outermost child
         // walked through the masonry.
-        corner: funnelCorner(
-          start,
-          finish,
-          ENTRANCE_BUS_DOOR_X + across * 2 * GATE_FAN_HALF_WIDTH + wobble(GATE_FAN_WOBBLE),
-        ),
+        corner: funnelCorner(start, finish, ENTRANCE_BUS_DOOR_X + aim),
         to: finish,
-      };
+      });
+      // **Backtracked against the piers, not trusted to clear them.** The aim
+      // is honoured on the gate line, but a route bending away to a far
+      // destination can close on a pier after it (see
+      // {@link closestApproachToPiers}). Scripted walks are collision-exempt,
+      // so if this route would put her body into stone the aim is drawn in
+      // towards the centre until it does not — the same decision made again,
+      // differently, until it works. The wobble is drawn once above, so the
+      // random stream every later child reads is unchanged.
+      let aim = aimed;
+      let route = routeAimedAt(aim);
+      while (closestApproachToPiers(route) < PIER_CLEARANCE && Math.abs(aim) > AIM_RETRY_STEP) {
+        aim -= Math.sign(aim) * AIM_RETRY_STEP;
+        route = routeAimedAt(aim);
+      }
       const arc = buildArcTable(route.from, route.corner, route.to);
       walks.push({
         route,
