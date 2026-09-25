@@ -4407,7 +4407,8 @@ const GATE_CORRIDOR_ARCH_INSET = 6;
  * swept seeds. */
 const GATE_CORRIDOR_DEPTH = 30;
 
-const GATE_CORRIDOR_START_Z = ENTRANCE_GATE_Z - GATE_CORRIDOR_ARCH_INSET;
+/** Where the gate approach starts: on the gate's axis, {@link GATE_CORRIDOR_ARCH_INSET} in from the arch. */
+export const GATE_CORRIDOR_START_Z = ENTRANCE_GATE_Z - GATE_CORRIDOR_ARCH_INSET;
 
 const GATE_CORRIDOR_INNER_Z = ENTRANCE_GATE_Z - GATE_CORRIDOR_DEPTH;
 

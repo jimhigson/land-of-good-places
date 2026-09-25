@@ -20,6 +20,7 @@ import { cameraOffset } from '../core/cameraRig';
 import { DEG } from '../core/mathUtils';
 import {
   curvePoints,
+  GATE_CORRIDOR_START_Z,
   JUNCTION_SNAP,
   pathDivisions,
   PLAZA,
@@ -41,6 +42,7 @@ import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { registerPlanCache } from '../boot/planCaches';
 import { planPart } from './parkPlan';
 import { publishDrawnPath, publishPaving } from './paving';
+import { ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from './entrance/layout';
 
 /**
  * **The solved walk network and everything drawn from it.**
@@ -614,6 +616,15 @@ export function junctionAprons(routes: readonly RouteDefinition[]): JunctionApro
         if (leaving.length === 0) continue;
         bearings.push(...leaving);
         radius = Math.max(radius, (routes[run] as RouteDefinition).width / 2);
+      }
+      // The gate approach's gate end hands over to the gateway path, laid on
+      // out through the arch by `Entrance.ts` up to what `publishDrawnPath`
+      // says is drawn: paving leaves the park that way too. Seed 2 has a
+      // route meeting the approach at the gate (0.00, 54.00); paved as an
+      // elbow, its apron lay 4 cm under the gateway path's end
+      // (`check:coplanar`, 0.007 m² at 7 mm).
+      if (Math.hypot(x, z - GATE_CORRIDOR_START_Z) <= JUNCTION_SNAP) {
+        bearings.push(Math.atan2(ENTRANCE_GATE_Z, ENTRANCE_GATE_X));
       }
       if (bearings.length < 2) continue;
       bearings.sort((p, q) => p - q);
