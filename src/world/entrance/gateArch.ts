@@ -4,12 +4,7 @@ import {
   GATE_ARCH_CLEAR_HEIGHT,
   GATE_ARCH_PIER_KEEP_OUT,
 } from '../../art/models/gateArch';
-import {
-  ENTRANCE_ANGLE,
-  ENTRANCE_GATE_HALF_WIDTH,
-  ENTRANCE_GATE_X,
-  ENTRANCE_GATE_Z,
-} from './layout';
+import { ENTRANCE_GATE_HALF_WIDTH } from './layout';
 import { standOnSphere } from '../terrain';
 
 /**
@@ -153,43 +148,6 @@ export interface GateArch {
  */
 export const GATE_POST_COLLIDER_RADIUS = GATE_ARCH_PIER_KEEP_OUT;
 
-/**
- * **Where an arch's two piers stand**, for an arch centred at
- * `(centreX, centreZ)` whose lettered face points along `outward`.
- *
- * The one owner of that arithmetic: {@link buildGateArch} registers its
- * colliders on these points and places its markers on them, and anything that
- * has to steer round the piers — the cat bus's children, walking in on routes
- * the collision world never sees — asks here rather than working the feet out
- * a second time.
- *
- * A rotation of `yaw` about Y takes local (0,0,1) to (sin yaw, 0, cos yaw), so
- * `yaw = atan2(out.x, out.z)` points the face along `outward`; it takes local
- * (1,0,0) to (cos yaw, 0, -sin yaw), which is the line the piers stand on.
- */
-export function gateArchFeet(
-  centreX: number,
-  centreZ: number,
-  outward: { readonly x: number; readonly z: number },
-): [{ x: number; z: number }, { x: number; z: number }] {
-  const yaw = Math.atan2(outward.x, outward.z);
-  const axisX = Math.cos(yaw);
-  const axisZ = -Math.sin(yaw);
-  const foot = (side: number): { x: number; z: number } => ({
-    x: centreX + side * ENTRANCE_GATE_HALF_WIDTH * axisX,
-    z: centreZ + side * ENTRANCE_GATE_HALF_WIDTH * axisZ,
-  });
-  return [foot(-1), foot(1)];
-}
-
-/** Which way the park's own gate faces: out along its bearing, away from the park. */
-export const PARK_GATE_OUTWARD = { x: Math.cos(ENTRANCE_ANGLE), z: Math.sin(ENTRANCE_ANGLE) } as const;
-
-/** The park gate's two piers, where {@link Entrance} builds them. */
-export function parkGateFeet(): [{ x: number; z: number }, { x: number; z: number }] {
-  return gateArchFeet(ENTRANCE_GATE_X, ENTRANCE_GATE_Z, PARK_GATE_OUTWARD);
-}
-
 export function buildGateArch(options: GateArchOptions): GateArch {
   const { centreX, centreZ, outward, groundAt } = options;
   const group = new Group();
@@ -203,9 +161,13 @@ export function buildGateArch(options: GateArchOptions): GateArch {
 
   // A rotation of `yaw` about Y takes local (0,0,1) to (sin yaw, 0, cos yaw),
   // so this is the yaw that points the arch's lettered face along `outward`.
-  // The same yaw {@link gateArchFeet} stands the piers by, so the feet the
-  // collider uses are the feet the mesh actually has.
   const yaw = Math.atan2(outX, outZ);
+  // ...and it takes local (1,0,0) to (cos yaw, 0, -sin yaw), which is the
+  // perpendicular the piers therefore stand on. Read out of the same rotation
+  // rather than derived from `outward` a second time, so the feet the collider
+  // uses are the feet the mesh actually has.
+  const axisX = Math.cos(yaw);
+  const axisZ = -Math.sin(yaw);
 
   const ground = groundAt(centreX, centreZ);
 
@@ -219,8 +181,12 @@ export function buildGateArch(options: GateArchOptions): GateArch {
   if (options.namePrefix !== undefined) arch.root.name = `${options.namePrefix}-arch`;
   group.add(arch.root);
 
-  const feet = gateArchFeet(centreX, centreZ, outward);
-  for (const [index, { x, z }] of feet.entries()) {
+  const feet: { x: number; z: number }[] = [];
+  for (const side of [-1, 1] as const) {
+    const x = centreX + side * ENTRANCE_GATE_HALF_WIDTH * axisX;
+    const z = centreZ + side * ENTRANCE_GATE_HALF_WIDTH * axisZ;
+    feet.push({ x, z });
+
     // A marker, not a mesh: the piers are one node of the authored `.glb` and
     // there is no per-side geometry to hang the name on. It is placed from the
     // same `feet` the collider is registered on, so a scene that says the gate
@@ -228,7 +194,7 @@ export function buildGateArch(options: GateArchOptions): GateArch {
     // code can be in.
     if (options.namePrefix !== undefined) {
       const marker = new Object3D();
-      marker.name = `${options.namePrefix}-post-${index}`;
+      marker.name = `${options.namePrefix}-post-${feet.length - 1}`;
       marker.position.set(x, groundAt(x, z), z);
       group.add(marker);
     }
@@ -236,7 +202,7 @@ export function buildGateArch(options: GateArchOptions): GateArch {
 
   return {
     group,
-    feet,
+    feet: [feet[0]!, feet[1]!],
     footRadius: GATE_ARCH_PIER_KEEP_OUT,
     clearHeightY: ground + GATE_ARCH_CLEAR_HEIGHT,
     // `AssetHandle.dispose` is optional on the interface; `createGateArch`
