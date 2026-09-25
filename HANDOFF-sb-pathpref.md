@@ -28,5 +28,12 @@ Root-cause, decide router/geometry bug vs placement decision, make all 16 seeds 
    (insidePlay) instead of the 58 m circle — seed 11 real-bar margin 0.2 -> 11.6 points.
 - Sweep fix1 (all fixes): 16/16 exit 0. Logs $SCRATCH/sb-pathpref/fix1-seed*.log.
 - Canonical run time 41 s -> 63 s (more probes). Report it.
+- Hop sampler: order-based "every third" thinning dropped the (11,-7) probe when the loop widened, so the old
+  pricing passed seeds 0/9 green. Now every 3 m lattice point on the old grid (superset). 401-607 hops/seed.
+- New assertion "the paving is one network" (no junction pair without an all-paved walk).
+- Proved red: old band pricing -> seed 0 80.4% (11,-7), seed 9 117.2% (-13,11), exit 1; lattice clipped to
+  60 m -> seed 11 "140 of 204 junction pairs have no all-paved walk", exit 1.
+- check:fountain-hop green on its 5 seeds; plaza band cells all paved (197/197 seed 24, 202/202 canonical).
+- fix2 sweep 16/16 exit 0. Final sweep at 3d3b71e7 running ($SCRATCH/sb-pathpref/final-*).
 ## Next
-- fountain-hop, prove red (mutations), tsc both, remove scripts/_diag-*.mts (untracked), remove worktree.
+- read final sweep, tsc both projects, remove scripts/_diag-*.mts (untracked), remove worktree, hand back.
