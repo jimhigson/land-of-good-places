@@ -144,7 +144,7 @@ import { PATH_GRAPH, distanceToPath, isOnPath, pathCentreline } from '../src/wor
 import { JourneyPlanner } from '../src/entities/npc/journey.ts';
 import { gardenAttractions } from '../src/entities/npc/attractions.ts';
 import { SPACE_GARDEN } from '../src/world/spaces.ts';
-import { GARDEN_PLAY_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
+import { PLAYER_RADIUS } from '../src/core/constants.ts';
 import { GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 
@@ -286,6 +286,25 @@ if (excluded.length === 0) {
   process.stderr.write('  · none — every junction of the network is standable\n');
 }
 
+/**
+ * **Is this point at least `inset` metres inside the park?** Asked of
+ * `GARDEN_PLAY_BOUNDARY` — the outline the park was generated inside and the
+ * one `NavGrid` builds its lattice from — so every sample in this file covers
+ * the park that was built.
+ *
+ * Every sampler here used to ask `Math.hypot(x, z) > GARDEN_PLAY_RADIUS - n`
+ * instead: the circular park, 58 m, which the generated outline replaced at
+ * twice the area and which reaches out to 84 m on some seeds. So the junction
+ * probes, the kerb hops and the reachability lattice all sampled the middle
+ * of the park only, and nothing said so — the same stale radius that clipped
+ * the paved-only lattice below.
+ */
+function insidePlay(x: number, z: number, inset: number): boolean {
+  return GARDEN_PLAY_BOUNDARY.distanceToEdge(x, z) >= inset;
+}
+/** A square that holds the whole park, for the lattice samplers to walk. */
+const PLAY_EXTENT = Math.ceil(GARDEN_PLAY_BOUNDARY.maxRadius);
+
 const probes: Probe[] = [];
 for (let i = 0; i < junctions.length; i += 1) {
   for (let j = i + 1; j < junctions.length; j += 1) {
@@ -294,9 +313,10 @@ for (let i = 0; i < junctions.length; i += 1) {
     const separation = Math.hypot(a.x - b.x, a.z - b.z);
     if (separation < MIN_PROBE_SEPARATION || separation > MAX_PROBE_SEPARATION) continue;
     // Both ends must be inside the garden's own play bounds, or the router
-    // is being asked about somewhere it does not plan.
-    if (Math.hypot(a.x, a.z) > GARDEN_PLAY_RADIUS - 2) continue;
-    if (Math.hypot(b.x, b.z) > GARDEN_PLAY_RADIUS - 2) continue;
+    // is being asked about somewhere it does not plan. Asked of the boundary
+    // the park was built inside — see {@link insidePlay}.
+    if (!insidePlay(a.x, a.z, 2)) continue;
+    if (!insidePlay(b.x, b.z, 2)) continue;
     probes.push({ label: `${a.id} → ${b.id}`, ax: a.x, az: a.z, bx: b.x, bz: b.z });
   }
 }
@@ -595,9 +615,9 @@ const hops: Hop[] = [];
   // A deterministic spread over the park, thinned so the probe set is a
   // handful of dozens rather than hundreds — every third lattice point.
   let seen = 0;
-  for (let x = -GARDEN_PLAY_RADIUS; x <= GARDEN_PLAY_RADIUS; x += 3) {
-    for (let z = -GARDEN_PLAY_RADIUS; z <= GARDEN_PLAY_RADIUS; z += 3) {
-      if (Math.hypot(x, z) > GARDEN_PLAY_RADIUS - 4) continue;
+  for (let x = -PLAY_EXTENT; x <= PLAY_EXTENT; x += 3) {
+    for (let z = -PLAY_EXTENT; z <= PLAY_EXTENT; z += 3) {
+      if (!insidePlay(x, z, 4)) continue;
       const off = distanceToPath(x, z);
       if (off < HOP_MIN || off > HOP_MAX) continue;
       seen += 1;
@@ -638,9 +658,9 @@ const weightedHops = hops.map((hop) => trace(weighted, hop.fromX, hop.fromZ, hop
 // forgotten, because they are chosen from the park, not from the router.
 const REACH_PITCH = 6;
 const reachTargets: { x: number; z: number }[] = [];
-for (let x = -GARDEN_PLAY_RADIUS; x <= GARDEN_PLAY_RADIUS; x += REACH_PITCH) {
-  for (let z = -GARDEN_PLAY_RADIUS; z <= GARDEN_PLAY_RADIUS; z += REACH_PITCH) {
-    if (Math.hypot(x, z) > GARDEN_PLAY_RADIUS - 2) continue;
+for (let x = -PLAY_EXTENT; x <= PLAY_EXTENT; x += REACH_PITCH) {
+  for (let z = -PLAY_EXTENT; z <= PLAY_EXTENT; z += REACH_PITCH) {
+    if (!insidePlay(x, z, 2)) continue;
     reachTargets.push({ x, z });
   }
 }
