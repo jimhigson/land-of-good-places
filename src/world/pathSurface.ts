@@ -152,8 +152,13 @@ export function addPathRibbon(
   // Where the ribbon could not be swept as drawn, the paving is laid as what
   // it stands for: every point within half the path's width of the
   // centreline (`isOnPath`'s own discs). See `REPAIR_DISC_SEGMENTS`.
-  for (const j of repaired) {
+  // A repair usually spans a run of stations centimetres apart round one
+  // tight spot; a disc per 10 cm of centreline covers the same ground.
+  const laid: RibbonStation[] = [];
+  for (const j of [...repaired].sort((a, b) => a - b)) {
     const station = stations[j] as RibbonStation;
+    if (laid.some((other) => Math.hypot(other.x - station.x, other.z - station.z) < REPAIR_DISC_SPACING)) continue;
+    laid.push(station);
     addPavingDisc(builder, station.x, station.z, width / 2, lift);
   }
 }
@@ -174,6 +179,9 @@ export function addPathRibbon(
  * that should have been paving.
  */
 const REPAIR_DISC_SEGMENTS = 24;
+
+/** Repaired stations nearer than this to one already given a disc share it, metres. */
+const REPAIR_DISC_SPACING = 0.1;
 
 /** A flat fan of paving round `(cx, cz)`, draped on the terrain `lift` above it. */
 function addPavingDisc(builder: GeometryBuilder, cx: number, cz: number, radius: number, lift: number): void {
