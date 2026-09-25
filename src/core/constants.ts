@@ -775,9 +775,9 @@ export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
  *
  * It used to be typed there (19.3, "the castle's own masonry reaches 19.0
  * exactly"), a second definition of the castle's size kept in step by hand,
- * and it was wrong by 1.6 m: `check:park`'s `anchor.reach` measured the drawn
- * turrets at 20.9 m on seed 4 once it measured vertices instead of mesh
- * centres. The number it missed is the nudge: the castle stands
+ * and it was wrong on every shipped seed: once `check:park`'s `anchor.reach`
+ * measured vertices instead of mesh centres, the drawn turret shafts reached
+ * 20.13–20.69 m across seeds 0..15 (25 Sep 2026). The number it missed is the nudge: the castle stands
  * {@link BUILDING_CENTRE_NUDGE} off its plot centre, towards the park middle,
  * on a bearing that depends on where the plot lands, while its axes never
  * turn (`CASTLE_FRAME` is built at bearing 0). So on some placement the nudge

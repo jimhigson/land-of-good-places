@@ -65,7 +65,7 @@ export const RATCHET: Readonly<Record<string, Recorded>> = {
     worst: 0,
     why:
       'Held at zero. The castle declared a typed 19.3 m while its turrets ' +
-      'reached 20.9 m (seed 4, restart 2), unseen because this measured mesh ' +
+      'reached 20.13-20.69 m on all 16 seeds, unseen because this measured mesh ' +
       'centres; it now measures every drawn vertex in the plan frame, and the ' +
       'declaration is derived (`CASTLE_PLOT_REACH`, 21.31 m: nudge + turret ' +
       'corner + turret radius). Kept rather than deleted so any overrun fails ' +
@@ -850,8 +850,8 @@ export function measureParkFindings(park: HeadlessPark, ratchetEnforced: boolean
     //     and so could not see how far a thing *reaches*, only where its middle
     //     stands. The castle's four turrets are one instanced mesh each for body
     //     and roof, whose one bounding-sphere centre is the middle of all four;
-    //     the stone reached 20.9 m past a declared 19.3 (seed 4 restart 2) and
-    //     the finding stayed silent. A radius is a promise about an edge, so the edge is measured.
+    //     the stone reached 20.13–20.69 m past a declared 19.3 on every one of
+    //     seeds 0..15 (25 Sep 2026) and the finding stayed silent. A radius is a promise about an edge, so the edge is measured.
     //
     //     **In the plan frame** — each vertex unleant onto its own foot by
     //     `unplaceFromSphere`, the inverse of `placeOnSphere`. The radius is
