@@ -7632,6 +7632,272 @@ const noDrawnPavingFacesTheGround: Invariant = (facts) => {
 };
 
 /**
+ * **No lawn shows through the paving: wherever a drawn path runs, the ground
+ * across its full width is paved or kerbed.**
+ *
+ * Jim, playing: holes in the paths. {@link noDrawnPavingFacesTheGround} sees
+ * one cause — a ribbon wound face-down — but not the others, because the cure
+ * for a fold can itself be a hole: a ribbon that cannot turn is drawn in or
+ * pinched shut, and a pinched path is lawn across its whole width (seed 15's
+ * dodgems spur at (58.0, 32.0), 1.2 m², before its jog was eased). Nor does it
+ * see where two ribbons meet: each is cut square at its ends, so two routes
+ * ending together at an angle leave a wedge of lawn outside the corner between
+ * their kerbs (seed 11, (-43.0, -13.0)), and a route turning back on itself
+ * comes to a point with lawn either side (seed 11, (35.5, -13.6), 3.54 m²).
+ *
+ * So this asks the built meshes, in plan, against the centreline the paving
+ * was swept along ({@link ParkFacts.drawnPathSamples}): every point within a
+ * run's half-width (less {@link LAWN_INSET}) must lie under a face-up
+ * triangle of `path-surface` or `path-kerb`. Two kinds of point, because the
+ * ends of a run are not a run:
+ *
+ * - **Along a run** — square-on one of its segments, or within reach of one
+ *   of its inner stations. Uncovered points here are gathered into connected
+ *   holes on a {@link LAWN_STEP} grid.
+ * - **Round a run's end** — the half-disc past a square-cut end is meant to be
+ *   lawn, so a point there counts only if it sits in a **notch**: going round
+ *   the end at its distance, the lawn it is in spans less than
+ *   {@link LAWN_NOTCH_ARC} before paving closes it off on both sides. A dead
+ *   end's lawn spans 180°; the outside of a corner two routes make, or a
+ *   hairpin's V, spans much less.
+ *
+ * A hole or notch larger than {@link LAWN_HOLE_MAX} fails. The coverage
+ * printed on every run says how much was asked.
+ */
+const LAWN_INSET = 0.05;
+/** Grid pitch the paving is asked at, metres. */
+const LAWN_STEP = 0.1;
+/** Lawn round a run's end spanning less than this (radians, 150°) is a notch in the paving, not the ground past a dead end. */
+const LAWN_NOTCH_ARC = (150 * Math.PI) / 180;
+/**
+ * The largest hole allowed, m²: a hand's breadth square. What stands after the
+ * fix is well under it — seams where a kerb band ends a few centimetres short
+ * of another route's paving; see the numbers in `HANDOFF-sb-ribbon.md`.
+ */
+const LAWN_HOLE_MAX = 0.05;
+/** A run passing this near another's end (metres) meets it there. */
+const LAWN_JOINED = 0.1;
+/** Runs at an end all leaving it within this (radians, 45°) of one another leave it one way: a dead end. */
+const LAWN_ONE_WAY = Math.PI / 4;
+
+const noLawnShowsThroughThePaving: Invariant = (facts) => {
+  const triangles: [number, number, number, number, number, number][] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (!(object instanceof Mesh) || (object.name !== 'path-surface' && object.name !== 'path-kerb')) return;
+    const position = object.geometry.getAttribute('position');
+    const index = object.geometry.getIndex();
+    const count = index ? index.count : position.count;
+    for (let slot = 0; slot + 2 < count; slot += 3) {
+      const [a, b, c] = [slot, slot + 1, slot + 2].map((k) => (index ? index.getX(k) : k)) as [number, number, number];
+      const t: [number, number, number, number, number, number] = [
+        position.getX(a), position.getZ(a), position.getX(b), position.getZ(b), position.getX(c), position.getZ(c),
+      ];
+      // Face-up in plan: the same winding the builders emit for the sky.
+      if ((t[3] - t[1]) * (t[4] - t[0]) - (t[2] - t[0]) * (t[5] - t[1]) > 1e-9) triangles.push(t);
+    }
+  });
+  const samples = facts.drawnPathSamples;
+  if (triangles.length === 0 || samples.length === 0) {
+    return [`measured nothing: ${triangles.length} face-up path triangles, ${samples.length} centreline samples`];
+  }
+  const cell = (x: number, z: number): string => `${Math.floor(x)},${Math.floor(z)}`;
+  const byCell = new Map<string, number[]>();
+  triangles.forEach((t, id) => {
+    for (let i = Math.floor(Math.min(t[0], t[2], t[4])); i <= Math.floor(Math.max(t[0], t[2], t[4])); i += 1) {
+      for (let j = Math.floor(Math.min(t[1], t[3], t[5])); j <= Math.floor(Math.max(t[1], t[3], t[5])); j += 1) {
+        const list = byCell.get(`${i},${j}`);
+        if (list) list.push(id);
+        else byCell.set(`${i},${j}`, [id]);
+      }
+    }
+  });
+  const covered = (x: number, z: number): boolean =>
+    (byCell.get(cell(x, z)) ?? []).some((id) => {
+      const t = triangles[id]!;
+      const side = (px: number, pz: number, qx: number, qz: number): number => (qz - pz) * (x - px) - (qx - px) * (z - pz);
+      return side(t[0], t[1], t[2], t[3]) >= -1e-9 && side(t[2], t[3], t[4], t[5]) >= -1e-9 && side(t[4], t[5], t[0], t[1]) >= -1e-9;
+    });
+
+  // Runs: where each starts and ends in `samples`.
+  const runs = new Map<number, { first: number; last: number }>();
+  samples.forEach((s, i) => {
+    const run = runs.get(s.run);
+    if (run) run.last = i;
+    else runs.set(s.run, { first: i, last: i });
+  });
+
+  // Past a run's square-cut end is not along it, however near an inner station.
+  const pastAnEnd = (run: { first: number; last: number }, x: number, z: number): boolean =>
+    [
+      [run.first, run.first + 1],
+      [run.last, run.last - 1],
+    ].some(([end, inner]) => {
+      const e = samples[end!];
+      const q = samples[inner!];
+      if (!e || !q || q.run !== e.run) return false;
+      const ux = e.x - q.x;
+      const uz = e.z - q.z;
+      return (x - e.x) * ux + (z - e.z) * uz > 0 && Math.hypot(x - e.x, z - e.z) < 2 * e.halfWidth;
+    });
+
+  // Along the runs.
+  const holes = new Map<string, [number, number]>();
+  const asked = new Set<string>();
+  const key = (x: number, z: number): string => `${Math.round(x / LAWN_STEP)},${Math.round(z / LAWN_STEP)}`;
+  for (let i = 1; i < samples.length; i += 1) {
+    const a = samples[i - 1]!;
+    const b = samples[i]!;
+    if (a.run !== b.run) continue;
+    const run = runs.get(a.run)!;
+    const reach = a.halfWidth - LAWN_INSET;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const length2 = dx * dx + dz * dz;
+    for (let gx = Math.round((Math.min(a.x, b.x) - reach) / LAWN_STEP); gx * LAWN_STEP <= Math.max(a.x, b.x) + reach; gx += 1) {
+      for (let gz = Math.round((Math.min(a.z, b.z) - reach) / LAWN_STEP); gz * LAWN_STEP <= Math.max(a.z, b.z) + reach; gz += 1) {
+        const x = gx * LAWN_STEP;
+        const z = gz * LAWN_STEP;
+        const t = length2 > 0 ? ((x - a.x) * dx + (z - a.z) * dz) / length2 : 0;
+        // Square-on this segment, or round one of its stations that is not the run's end.
+        const squareOn = t >= 0 && t <= 1 && Math.hypot(x - a.x - t * dx, z - a.z - t * dz) <= reach;
+        const nearInner =
+          (i - 1 !== run.first && Math.hypot(x - a.x, z - a.z) <= reach) ||
+          (i !== run.last && Math.hypot(x - b.x, z - b.z) <= reach);
+        if (!squareOn && (!nearInner || pastAnEnd(run, x, z))) continue;
+        const k = `${gx},${gz}`;
+        if (asked.has(k)) continue;
+        asked.add(k);
+        if (!covered(x, z)) holes.set(k, [x, z]);
+      }
+    }
+  }
+  const found: { area: number; x: number; z: number; what: string }[] = [];
+  const seen = new Set<string>();
+  for (const [start, at] of holes) {
+    if (seen.has(start)) continue;
+    seen.add(start);
+    let n = 0;
+    const stack = [start];
+    while (stack.length > 0) {
+      const [i, j] = stack.pop()!.split(',').map(Number) as [number, number];
+      n += 1;
+      for (let di = -1; di <= 1; di += 1) {
+        for (let dj = -1; dj <= 1; dj += 1) {
+          const next = `${i + di},${j + dj}`;
+          if (holes.has(next) && !seen.has(next)) {
+            seen.add(next);
+            stack.push(next);
+          }
+        }
+      }
+    }
+    found.push({ area: n * LAWN_STEP * LAWN_STEP, x: at[0], z: at[1], what: 'hole in a path' });
+  }
+
+  // Round the runs' ends. Where every run at an end leaves it one way — one
+  // route stopping, or several arriving side by side at one doorway — it is a
+  // dead end, and the lawn past its square-cut end is meant to be there. The
+  // rest are where routes meet at an angle, and are asked in rings.
+  const bearingsFrom = (run: { first: number; last: number }, x: number, z: number): number[] => {
+    let best = Infinity;
+    let at = -1;
+    for (let i = run.first + 1; i <= run.last; i += 1) {
+      const a = samples[i - 1]!;
+      const b = samples[i]!;
+      const d = pointToSegment([x, z], [a.x, a.z], [b.x, b.z]);
+      if (d < best) {
+        best = d;
+        at = i;
+      }
+    }
+    if (at < 0 || best > LAWN_JOINED) return [];
+    const out: number[] = [];
+    for (const [from, way] of [
+      [at, -1],
+      [at - 1, 1],
+    ] as const) {
+      for (let k = from; k >= run.first && k <= run.last; k += way) {
+        const p = samples[k]!;
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (d >= 1) {
+          out.push(Math.atan2(p.z - z, p.x - x));
+          break;
+        }
+      }
+    }
+    return out;
+  };
+  const ends: { x: number; z: number; reach: number }[] = [];
+  const deadEnds: { run: { first: number; last: number }; x: number; z: number }[] = [];
+  for (const run of runs.values()) {
+    for (const i of [run.first, run.last]) {
+      const s = samples[i]!;
+      const bearings = [...runs.values()].flatMap((other) => bearingsFrom(other, s.x, s.z)).sort((p, q) => p - q);
+      let widest = 0;
+      bearings.forEach((bearing, k) => {
+        const next = k + 1 < bearings.length ? bearings[k + 1]! : bearings[0]! + 2 * Math.PI;
+        widest = Math.max(widest, next - bearing);
+      });
+      if (bearings.length < 2 || widest >= 2 * Math.PI - LAWN_ONE_WAY) {
+        deadEnds.push({ run, x: s.x, z: s.z });
+        continue;
+      }
+      if (ends.some((e) => Math.hypot(e.x - s.x, e.z - s.z) < LAWN_STEP / 2)) continue;
+      ends.push({ x: s.x, z: s.z, reach: s.halfWidth - LAWN_INSET });
+    }
+  }
+  const pastADeadEnd = (x: number, z: number): boolean =>
+    deadEnds.some((end) => Math.hypot(x - end.x, z - end.z) < 4 && pastAnEnd(end.run, x, z));
+  const ARC_STEPS = 180;
+  let endsAsked = 0;
+  for (const end of ends) {
+    let notch = 0;
+    for (let rho = LAWN_STEP / 2; rho <= end.reach; rho += LAWN_STEP) {
+      const lawn: boolean[] = [];
+      for (let s = 0; s < ARC_STEPS; s += 1) {
+        const angle = (s / ARC_STEPS) * 2 * Math.PI;
+        const x = end.x + Math.cos(angle) * rho;
+        const z = end.z + Math.sin(angle) * rho;
+        // Along some run is the other clause's to judge.
+        lawn.push(!asked.has(key(x, z)) && !covered(x, z) && !pastADeadEnd(x, z));
+      }
+      const firstPaved = lawn.indexOf(false);
+      if (firstPaved < 0) continue; // all lawn: nothing reaches this end
+      endsAsked += 1;
+      // Contiguous lawn arcs, walked round from a paved step.
+      let span = 0;
+      for (let s = 1; s <= ARC_STEPS; s += 1) {
+        if (lawn[(firstPaved + s) % ARC_STEPS]) {
+          span += 1;
+          continue;
+        }
+        if (span > 0 && (span / ARC_STEPS) * 2 * Math.PI < LAWN_NOTCH_ARC) {
+          notch += (span / ARC_STEPS) * 2 * Math.PI * rho * LAWN_STEP;
+        }
+        span = 0;
+      }
+    }
+    if (notch > 0) found.push({ area: notch, x: end.x, z: end.z, what: 'notch of lawn where paving meets at a path end' });
+  }
+
+  found.sort((p, q) => q.area - p.area);
+  const worst = found[0];
+  process.stderr.write(
+    `  noLawnShowsThroughThePaving: ${asked.size} points along ${runs.size} runs, ${ends.length} run ends ` +
+      `(${deadEnds.length} dead; ${endsAsked} rings round the rest), ${triangles.length} face-up triangles; largest ${
+        worst ? `${worst.area.toFixed(3)} m² at (${worst.x.toFixed(2)}, ${worst.z.toFixed(2)})` : 'none'
+      }\n`,
+  );
+  return found
+    .filter((hole) => hole.area > LAWN_HOLE_MAX)
+    .map(
+      (hole) =>
+        `${hole.what}: ${hole.area.toFixed(2)} m² of lawn at (${hole.x.toFixed(2)}, ${hole.z.toFixed(2)}), ` +
+        `more than the ${LAWN_HOLE_MAX} m² allowed`,
+    );
+};
+
+/**
  * **Paving a bridge holds up in mid-air has stone under it** (issue #349).
  *
  * Jim, playing `main` just after the entrance bridge landed: *"on entering the
@@ -12308,6 +12574,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     theDrawnPathRidesOverEveryBridge,
   ],
   ['every triangle of the drawn paving and its kerb faces the sky', noDrawnPavingFacesTheGround],
+  ['no lawn shows through the paving, along a path or where paths meet', noLawnShowsThroughThePaving],
   [
     "every bridge's carried paving has its own masonry under it",
     bridgePavingIsCarriedByItsOwnMasonry,

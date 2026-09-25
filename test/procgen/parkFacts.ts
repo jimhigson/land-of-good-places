@@ -359,6 +359,15 @@ export interface PathNodeFact {
  * for the paved network itself: a spur branches off wherever the paving already
  * runs, which may be the backbone or an earlier spur.
  */
+/** One station of the drawn centreline — see {@link ParkFacts.drawnPathSamples}. */
+export interface DrawnPathSampleFact {
+  readonly x: number;
+  readonly z: number;
+  readonly halfWidth: number;
+  /** Which drawn route it belongs to; consecutive samples of one run are one ribbon. */
+  readonly run: number;
+}
+
 export interface PathEdgeFact {
   readonly name: string;
   readonly from: string;
@@ -1065,6 +1074,16 @@ export interface ParkFacts {
   readonly pathEdges: readonly PathEdgeFact[];
   /** Every edge in the graph, paved or not — see {@link PathEdgeFact.paved}. */
   readonly pathConnectivityEdges: readonly PathEdgeFact[];
+  /**
+   * **The centreline the paving was actually swept along** — `pathGraph.ts`'s
+   * own recorded samples, one `run` per drawn route, at exactly the stations
+   * the ribbon's cross-sections stand on. Not {@link pathEdges}' 0.5 m
+   * resampling of the same curve: round a fillet the drawn ribbon's outer edge
+   * is a chord between stations, so a measure of "is the paving there" has to
+   * stand on the stations it was drawn at, or it reads the chord's sag as a
+   * hole.
+   */
+  readonly drawnPathSamples: readonly DrawnPathSampleFact[];
   /**
    * The ginormous slide's chute, in **world space**, sampled along what was
    * actually built — not the plan it was built from.
@@ -1868,7 +1887,7 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
   const { PLAZA } = await import('../../src/world/paths.ts');
-  const { PATH_GRAPH, routeCurve } = await import('../../src/world/pathGraph.ts');
+  const { PATH_GRAPH, routeCurve, pathCentreline } = await import('../../src/world/pathGraph.ts');
   const { archFeet } = await import('../../src/world/railRace/arch.ts');
   const { RAIL_RACE_PLAN } = await import('../../src/world/railRace/plan.ts');
   const railRaceArchFeet = [RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
@@ -3925,6 +3944,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     pathNodes,
     pathEdges,
     pathConnectivityEdges,
+    drawnPathSamples: pathCentreline().map(({ x, z, halfWidth, run }) => ({ x, z, halfWidth, run })),
     slideChute,
     slideChuteInCastleFrame,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
