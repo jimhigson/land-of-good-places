@@ -57,8 +57,10 @@ import {
   ENTRANCE_GATE_Z,
   ENTRANCE_PLAYER_X,
   ENTRANCE_PLAYER_Z,
-  isInEntranceGateOpening,
+  entranceGateFrame,
 } from '../src/world/entrance/layout.ts';
+import { GATE_ARCH_CLEAR_WIDTH } from '../src/art/models/gateArch.ts';
+import { NPC_RADIUS } from '../src/core/constants.ts';
 import {
   CAT_BUS_DESTINATION,
   CAT_BUS_DOOR_DROP,
@@ -533,6 +535,18 @@ let closestPairEver = Infinity;
 let closestPairWhen = 0;
 let closestPairWho = '';
 const crossedGateOutsideGap: string[] = [];
+/**
+ * **Where each child went under the arch** — `across` in the gate's own frame
+ * at the moment they crossed the line between its two piers, or `NaN` if they
+ * never did while the arrival owned them.
+ */
+const underArchAcross = new Array<number>(ARRIVAL_KID_COUNT).fill(Number.NaN);
+/**
+ * How far off the gate's centre line a child's **centre** may pass and still
+ * keep her whole body off the piers: the clear floor between the two pier
+ * colliders, less her own collision radius. Both from the game.
+ */
+const ARCH_BODY_HALF = GATE_ARCH_CLEAR_WIDTH / 2 - NPC_RADIUS;
 const seenInsidePark = new Set<number>();
 
 const totalSeconds = ARRIVAL_DURATION + AFTERWARDS_SECONDS;
@@ -645,17 +659,48 @@ for (let index = 0; index < frames; index += 1) {
     // Only the **first** time each child enters the park, and only while the
     // arrival still owns them. Once inside they wander, and a child strolling
     // about the middle of the park re-crosses this line all afternoon.
+    //
+    // **Where she crossed the edge is asked of what is built there, not of the
+    // gate's strip.** It used to require the crossing point to lie within
+    // `ENTRANCE_GATE_HALF_WIDTH` of the gate's centre line, which is only the
+    // same question as "did she come through the gap in the wall" when the
+    // boundary runs square across the gate. It does not have to: the outline is
+    // pinned *through* the gate, not *square to* it, and on the canonical seed
+    // it crosses at about 35 degrees, from (5.85, 64.13) to (-5.78, 56.36)
+    // where the wall stops either side. Child 0 went under the arch at
+    // x -3.06 on the gate line — between the piers — and, walking on, did not
+    // reach the slanted edge until (-4.63, 57.20), 0.33 m further off centre
+    // than the strip allowed and 0.97 m clear of the nearest masonry. The strip
+    // called that walking through a wall. What she crossed was the gap.
+    //
+    // So: she must be clear of everything solid at the moment she stands on
+    // the edge — the wall's own colliders are what a wall *is* to a child —
+    // and, separately below, she must have gone **under the arch**.
     if (kid.scripted && !enteredPark[kidIndex]) {
       const nowInside =
         Math.hypot(kid.position.x, kid.position.z) <=
         edgeRadiusAt(PARK_BOUNDARY, Math.atan2(kid.position.z, kid.position.x));
       if (nowInside) {
         enteredPark[kidIndex] = true;
-        if (!isInEntranceGateOpening(kid.position.x, kid.position.z)) {
+        if (!world.collision.isClearCircle(kid.position.x, kid.position.z, NPC_RADIUS)) {
           crossedGateOutsideGap.push(
-            `child ${kidIndex} at x ${kid.position.x.toFixed(2)}, z ${kid.position.z.toFixed(2)}`,
+            `child ${kidIndex} at x ${kid.position.x.toFixed(2)}, z ${kid.position.z.toFixed(2)} ` +
+              `overlapping ${world.collision.describeNear(kid.position.x, kid.position.z, NPC_RADIUS, 0).join(', ')}`,
           );
         }
+      }
+    }
+
+    // **Under the arch**, measured on the line between its piers: the first
+    // frame a scripted child goes from the road side of it to the park side,
+    // interpolated to the line itself so a 2.6 m/s stride cannot hide an
+    // off-centre crossing.
+    if (kid.scripted && Number.isNaN(underArchAcross[kidIndex])) {
+      const before = entranceGateFrame(previous.x, previous.z);
+      const after = entranceGateFrame(kid.position.x, kid.position.z);
+      if (before.along < 0 && after.along >= 0) {
+        const t = before.along / (before.along - after.along);
+        underArchAcross[kidIndex] = before.across + (after.across - before.across) * t;
       }
     }
 
@@ -947,9 +992,34 @@ check(
 // --- 6. everybody walked in through the gate ------------------------------
 check(
   crossedGateOutsideGap.length === 0,
-  `${crossedGateOutsideGap.length} children crossed the boundary outside the gate opening: ${crossedGateOutsideGap
+  `${crossedGateOutsideGap.length} children crossed the boundary through something solid: ${crossedGateOutsideGap
     .slice(0, 3)
     .join('; ')}`,
+);
+const archCrossings = underArchAcross.filter((across) => !Number.isNaN(across));
+check(
+  archCrossings.length === ARRIVAL_KID_COUNT,
+  `only ${archCrossings.length} of ${ARRIVAL_KID_COUNT} children were seen crossing the gate line while ` +
+    'the arrival owned them, so the arch clause below measured the rest of them not at all',
+);
+const widestUnderArch = Math.max(...archCrossings.map(Math.abs));
+const besideTheArch = underArchAcross
+  .map((across, index) => ({ across, index }))
+  .filter(({ across }) => Math.abs(across) > ARCH_BODY_HALF);
+check(
+  besideTheArch.length === 0,
+  `${besideTheArch.length} children went through the gate line with their body on a pier: ` +
+    besideTheArch
+      .slice(0, 3)
+      .map(({ across, index }) => `child ${index} at ${across.toFixed(2)} m off centre`)
+      .join('; ') +
+    ` — the piers leave ${GATE_ARCH_CLEAR_WIDTH.toFixed(2)} m clear, so a ${NPC_RADIUS} m child's centre ` +
+    `must pass within ${ARCH_BODY_HALF.toFixed(2)} m`,
+);
+console.log(
+  `  ${archCrossings.length} children went under the arch, widest ${widestUnderArch.toFixed(2)} m off ` +
+    `centre against ${ARCH_BODY_HALF.toFixed(2)} m of body room; ${enteredPark.filter(Boolean).length - crossedGateOutsideGap.length} ` +
+    'stepped over the park edge clear of anything solid',
 );
 
 // --- 7. the player -------------------------------------------------------

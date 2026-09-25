@@ -14,6 +14,7 @@ import type { FrameContext } from '../../core/types';
 import type { Player } from '../../entities/Player';
 import type { NpcCharacter } from '../../entities/npc/NpcCharacter';
 import { NPC_WALK_SPEED } from '../../entities/npc/NpcCharacter';
+import { GATE_ARCH_CLEAR_WIDTH } from '../../art/models/gateArch';
 import {
   CHILD_FOOTPRINT,
   KID_EYE_HEIGHT,
@@ -30,6 +31,7 @@ import {
   CAMERA_PITCH_DEGREES,
   CAMERA_VIEW_HEIGHT,
   CAMERA_YAW_DEGREES,
+  NPC_RADIUS,
 } from '../../core/constants';
 import { cameraOffset } from '../../core/cameraRig';
 import { createBusDriver, type BusDriver } from './busDriver';
@@ -1308,6 +1310,30 @@ const NUDGE_DECAY = 1.2;
  */
 const NUDGE_LIMIT = CHILD_FOOTPRINT / 2;
 
+/**
+ * How far either side of its aim a child's line through the gate may wander.
+ * The spacing of the fan ({@link GATE_FAN_HALF_WIDTH} over ten gaps) has to stay
+ * larger than this, or neighbours swap places and their routes cross.
+ */
+const GATE_FAN_WOBBLE = 0.2;
+
+/**
+ * **How far off the gate's centre line the outermost child is aimed**, derived
+ * from the arch rather than chosen: the clear floor between the two pier
+ * colliders ({@link GATE_ARCH_CLEAR_WIDTH}, 7.00 m), less a child's own
+ * collision radius so her *body* clears the pier rather than her centre, less
+ * the wobble on top. 2.80 m.
+ *
+ * It was `3.0`, written when the opening was believed to be the arch's full
+ * `2 * ENTRANCE_GATE_HALF_WIDTH` (8.6 m) — but that is where the piers'
+ * *centres* stand, and each pier is 0.80 m round. So the outermost child was
+ * aimed to pass 3.0 +/- 0.2 m off centre against a 3.50 m face: on the
+ * canonical seed child 0 went under the arch at x -3.06, a 0.5 m child's
+ * shoulder 0.06 m inside the west pier. Scripted walks are collision-exempt,
+ * so nothing but this number stood between her and the stone.
+ */
+const GATE_FAN_HALF_WIDTH = GATE_ARCH_CLEAR_WIDTH / 2 - NPC_RADIUS - GATE_FAN_WOBBLE;
+
 /** One child's scripted walk out of the bus and into the park. */
 interface KidWalk {
   readonly route: WalkRoute;
@@ -1451,14 +1477,19 @@ export class ArrivalSequence {
         //   wobble on top — so neighbours regularly changed places, and two of
         //   them met in the middle at 0.54 m, well inside a 1.8 m child.
         //
-        // 6 m of fan gives 0.6 m of spacing, comfortably more than the wobble,
-        // and still leaves the outermost child half a body inside the gate.
+        // {@link GATE_FAN_HALF_WIDTH} each side gives 0.56 m of spacing, still
+        // more than the wobble, and is derived from the arch's clear floor so
+        // the outermost child's body passes the pier rather than its centre.
         // **Solved so the curve is actually at this x on the gate line** — see
         // {@link funnelCorner}. Before that it was this x used directly as the
         // control point, which a quadratic Bézier does not pass through, and
         // once the arc moved the drop off the gate's axis the outermost child
         // walked through the masonry.
-        corner: funnelCorner(start, finish, ENTRANCE_BUS_DOOR_X + across * 6.0 + wobble(0.2)),
+        corner: funnelCorner(
+          start,
+          finish,
+          ENTRANCE_BUS_DOOR_X + across * 2 * GATE_FAN_HALF_WIDTH + wobble(GATE_FAN_WOBBLE),
+        ),
         to: finish,
       };
       const arc = buildArcTable(route.from, route.corner, route.to);
