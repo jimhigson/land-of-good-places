@@ -131,7 +131,7 @@ import {
   isInGateArchSpan,
   parkGateFeet,
 } from '../../src/world/entrance/gateArch.ts';
-import { altitudeAt, terrainHeight, unplaceFromSphere } from '../../src/world/terrain.ts';
+import { altitudeAt, terrainHeight, unplaceFromSphere, upAt } from '../../src/world/terrain.ts';
 // The road corridor's measurement, shared with `check:ground-claims` so the two
 // sites that ask "is the claim the road?" cannot answer it differently. Pure
 // geometry over what it is handed — nothing seed-dependent is imported here.
@@ -7533,6 +7533,105 @@ const theDrawnPathRidesOverEveryBridge: Invariant = (facts) => {
 };
 
 /**
+ * **Every triangle of the drawn paving faces the sky — none is wound into the
+ * ground.**
+ *
+ * The paving and its kerb are `FrontSide` ribbons swept along each route. Where
+ * a route turns tighter than its own half-width — a filleted corner of radius
+ * ~1 m on a 2.6 m path — the inner edge, offset along the normal, runs
+ * *backwards* between the two cusps of a swallowtail, and the quads between
+ * those stations fold over, wound face-down. The camera culls them, so a child
+ * sees a hole in the path: 189 such triangles (64.5 m²) of `path-surface` and
+ * 451 of `path-kerb` on the canonical seed, before this was measured. A route
+ * whose control points carry a few-centimetre jog does the same thing a second
+ * way: the Catmull-Rom's tangent flips there, both edges swap sides, and the
+ * whole cross-section folds.
+ *
+ * Measured off the built meshes' own index and position buffers, after the
+ * drape over the bridges, against **the planet's up at the triangle**
+ * (`upAt`), not world `+Y` — the park is a cap of a sphere, and at its rim
+ * `+Y` is 40° off the ground's own up. A triangle of zero area (a collapsed
+ * corner's fan) has no facing and is not judged.
+ *
+ * **Nor is a triangle standing steeper than {@link PAVING_WALL_COS}'s 60°.**
+ * A fold lies in the ground it folded on; a triangle standing up on end is
+ * paving hung as a sheet — a route whose vertices a bridge's drape lifted on
+ * one side of it and not the other (seed 24, (9.8, -39.9): 2.2 m² kerb at
+ * 87° from up). Its sign against `up` says which way a wall leans, not which
+ * way it was wound, so it is not this invariant's question; it is the sheet
+ * one's. How many were set aside is printed on every run.
+ */
+/** Cosine of 60°: a paving triangle steeper than this from the planet's up is standing, not lying. */
+const PAVING_WALL_COS = 0.5;
+
+const noDrawnPavingFacesTheGround: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const layers: Mesh[] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (object instanceof Mesh && (object.name === 'path-surface' || object.name === 'path-kerb')) {
+      layers.push(object);
+    }
+  });
+  if (layers.length !== 2) {
+    return [
+      `expected the garden to hold both drawn path layers, found ${layers.length} — the mesh ` +
+        'names in pathGraph.ts have changed and this invariant is measuring nothing',
+    ];
+  }
+  const a = new Vector3();
+  const b = new Vector3();
+  const c = new Vector3();
+  const ab = new Vector3();
+  const ac = new Vector3();
+  const normal = new Vector3();
+  const up = new Vector3();
+  const coverage: string[] = [];
+  for (const mesh of layers) {
+    const position = mesh.geometry.getAttribute('position');
+    const index = mesh.geometry.getIndex();
+    const count = index ? index.count : position.count;
+    const at = (slot: number): number => (index ? index.getX(slot) : slot);
+    let judged = 0;
+    let walls = 0;
+    let down = 0;
+    let downArea = 0;
+    let first: Vector3 | null = null;
+    for (let slot = 0; slot + 2 < count; slot += 3) {
+      a.fromBufferAttribute(position, at(slot));
+      b.fromBufferAttribute(position, at(slot + 1));
+      c.fromBufferAttribute(position, at(slot + 2));
+      normal.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a));
+      const area = normal.length() / 2;
+      // Float noise on a collapsed fan corner, not a face anyone can see.
+      if (area < 1e-8) continue;
+      upAt((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3, up);
+      if (Math.abs(normal.dot(up)) < PAVING_WALL_COS * normal.length()) {
+        walls += 1;
+        continue;
+      }
+      judged += 1;
+      if (normal.dot(up) >= 0) continue;
+      down += 1;
+      downArea += area;
+      first ??= new Vector3().addVectors(a, b).add(c).divideScalar(3);
+    }
+    coverage.push(`${mesh.name} ${judged} triangles (${walls} standing steeper than 60° set aside)`);
+    if (judged === 0) {
+      complaints.push(`the drawn ${mesh.name} has no triangles to judge — this measured nothing`);
+    } else if (down > 0 && first) {
+      complaints.push(
+        `${down} of ${judged} ${mesh.name} triangles (${downArea.toFixed(2)} m²) are wound ` +
+          `face-down, into the ground — culled, so a hole in the path; first at ` +
+          `(${first.x.toFixed(2)}, ${first.y.toFixed(2)}, ${first.z.toFixed(2)}). The ribbon folds ` +
+          'over itself where it turns tighter than its own half-width',
+      );
+    }
+  }
+  process.stderr.write(`  noDrawnPavingFacesTheGround: judged ${coverage.join(', ')}\n`);
+  return complaints;
+};
+
+/**
  * **Paving a bridge holds up in mid-air has stone under it** (issue #349).
  *
  * Jim, playing `main` just after the entrance bridge landed: *"on entering the
@@ -12208,6 +12307,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     "the park's own paving rides over every bridge, and none is left in a tunnel",
     theDrawnPathRidesOverEveryBridge,
   ],
+  ['every triangle of the drawn paving and its kerb faces the sky', noDrawnPavingFacesTheGround],
   [
     "every bridge's carried paving has its own masonry under it",
     bridgePavingIsCarriedByItsOwnMasonry,
