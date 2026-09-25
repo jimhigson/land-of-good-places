@@ -6506,6 +6506,94 @@ const STRAIGHT_SAMPLE = 2.5;
 const ARC_SAMPLE = 0.6;
 
 /**
+ * **A leg shorter than this, metres, cannot be drawn as a turn** — the
+ * narrowest drawn path's half-width is 1.1 m (the ride exits, 2.2 m wide), and
+ * a ribbon swept round two corners closer together than its own half-width
+ * folds over itself between them, however the corners are rounded.
+ */
+const SHORT_LEG = 1.0;
+
+/**
+ * How gently a jog is eased out: metres of run taken either side of it per
+ * metre of sideways step. Ten to one keeps the eased stretch under 6 degrees
+ * off its axis, well inside the 15% `pavingLegibility.ts` still calls on-axis.
+ */
+const JOG_EASE = 5;
+
+/** Legs this parallel (cosine) either side of a short step make it a jog, not a turn. */
+const JOG_PARALLEL_COS = 0.9;
+
+/**
+ * **Two shapes a route's control points take that no ribbon can be drawn
+ * along, taken out before anything is drawn** (mutates `src`).
+ *
+ * Both come from the lattice: a route is snapped to lattice lines, and where
+ * two snaps disagree by a few centimetres, or a doorway sits a hand's width
+ * off the line that reaches it, the control points carry a step far shorter
+ * than the path is wide. Swept as drawn, a 2.6 m ribbon round two corners
+ * 0.37 m apart folds face-down between them (the fold `ribbonEdges` has to
+ * pinch shut — a bow-tie gap across the whole path); swept round a corner
+ * 0.22 m from its end, its last cross-section swings sideways and the end
+ * fans out past the kerb as a fin. Measured before this, on the built parks:
+ *
+ * - **A jog** — a step of under {@link SHORT_LEG} between two legs running
+ *   the same way. Pool seed 15's `spur-stall.dodgems` steps 0.37 m sideways at
+ *   (58.0, 32.0); pinched shut there, 1.2 m² of path is lawn. Eased instead:
+ *   the two corners are replaced by a gentle diagonal from
+ *   {@link JOG_EASE} times the step back along the leg before it to as far
+ *   along the leg after it.
+ * - **A stub** — a first or last leg under {@link SHORT_LEG}. Pool seed 5's
+ *   `spur-exit-ferrisWheel` runs 12 m north and then 0.22 m east to its end
+ *   at (16.75, 38.53). The corner before the stub is dropped, so the last leg
+ *   runs straight to the end point, which does not move: the end is a
+ *   doorway, the corner was only where the lattice line happened to be.
+ *
+ * A corner another route starts on (a square junction corner) is never moved
+ * — that route's paving is drawn from it.
+ */
+function easeJogsAndStubs(
+  src: [number, number][],
+  squareCorners: readonly (readonly [number, number])[],
+): void {
+  const isJunction = (c: readonly [number, number]): boolean =>
+    squareCorners.some((q) => Math.hypot(q[0] - c[0], q[1] - c[1]) <= JUNCTION_SNAP);
+  const gap = (a: readonly [number, number], b: readonly [number, number]): number =>
+    Math.hypot(b[0] - a[0], b[1] - a[1]);
+
+  // Stubs, at either end.
+  if (src.length >= 3) {
+    const last = src.length - 1;
+    const corner = src[last - 1] as [number, number];
+    if (gap(corner, src[last] as [number, number]) < SHORT_LEG && !isJunction(corner)) src.splice(last - 1, 1);
+  }
+  if (src.length >= 3) {
+    const corner = src[1] as [number, number];
+    if (gap(src[0] as [number, number], corner) < SHORT_LEG && !isJunction(corner)) src.splice(1, 1);
+  }
+
+  // Jogs.
+  for (let k = 1; k + 2 < src.length; k += 1) {
+    const a = src[k - 1] as [number, number];
+    const c1 = src[k] as [number, number];
+    const c2 = src[k + 1] as [number, number];
+    const b = src[k + 2] as [number, number];
+    const step = gap(c1, c2);
+    if (step >= SHORT_LEG || isJunction(c1) || isJunction(c2)) continue;
+    const lenIn = gap(a, c1);
+    const lenOut = gap(c2, b);
+    if (lenIn < 1e-6 || lenOut < 1e-6) continue;
+    const inX = (c1[0] - a[0]) / lenIn;
+    const inZ = (c1[1] - a[1]) / lenIn;
+    const outX = (b[0] - c2[0]) / lenOut;
+    const outZ = (b[1] - c2[1]) / lenOut;
+    if (inX * outX + inZ * outZ < JOG_PARALLEL_COS) continue;
+    const ease = Math.min(JOG_EASE * step, lenIn * 0.45, lenOut * 0.45);
+    src.splice(k, 2, [c1[0] - inX * ease, c1[1] - inZ * ease], [c2[0] + outX * ease, c2[1] + outZ * ease]);
+    k += 1;
+  }
+}
+
+/**
  * **The one owner of what an open route's drawn centreline looks like**:
  * dead-straight runs between corners, each corner rounded by a real
  * {@link CORNER_FILLET} arc — not the old behaviour, where the sparse
@@ -6529,6 +6617,7 @@ function drawnPolyline(
     src.push([p[0], p[1]]);
   }
   if (src.length < 2) return src;
+  easeJogsAndStubs(src, squareCorners);
 
   const out: [number, number][] = [src[0] as [number, number]];
   const emitStraightTo = (to: readonly [number, number]): void => {
