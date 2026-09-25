@@ -27,7 +27,25 @@
  * itself broke.
  */
 import './headless-canvas.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { cpuMs } from './lib/cpuClock.mts';
+
+/**
+ * **Whole check scripts that judge a per-park decision, asked as acceptance
+ * measures.** Some checks measure a property the park's own decisions set, but
+ * are written as one top-level script rather than a function over a built park
+ * — `check:rail-race`'s camera and face clauses depend on the ring's shape, and
+ * the ring follows the park's boundary (seed 14 restart 2: the rider's far eye
+ * faces the monitor lens at 0.336 against 0.35, at the face turn's 55° limit —
+ * no rig change fixes that ring without breaking another clause). Rather than a
+ * second copy of the check, the attempt runs the check itself, on the same
+ * seed and restart, in its own process (it builds its own park: the seed and
+ * restart are read once per process). One owner: the check. A park it rejects
+ * is a failed attempt.
+ */
+const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = ['scripts/check-rail-race.mts'];
+const runScript = promisify(execFile);
 
 export interface AttemptFailure {
   /** The measure's name — an invariant's test name, `check:park <key>`, or `build`. */
@@ -136,6 +154,25 @@ if (facts) {
     failures.push({ measure: 'check:park', count: 1, first: [`the measure threw: ${firstLine(error)}`] });
   }
   findingsCpu = cpuMs() - cpu2;
+
+  for (const script of ACCEPTANCE_CHECK_SCRIPTS) {
+    measuresAsked += 1;
+    const name = `check:${script.replace(/^scripts\/check-|\.mts$/g, '')}`;
+    try {
+      await runScript(process.execPath, ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', script], {
+        env: { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: String(restart) },
+        encoding: 'utf8',
+        maxBuffer: 256 * 1024 * 1024,
+      });
+    } catch (error) {
+      const failed = error as { stdout?: string; stderr?: string };
+      const lines = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => /^(FAIL|✗)/.test(l));
+      failures.push({ measure: name, count: Math.max(1, lines.length), first: (lines.length > 0 ? lines : ['exited non-zero with no FAIL line']).slice(0, FIRST) });
+    }
+  }
 }
 
 const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats | null =>
