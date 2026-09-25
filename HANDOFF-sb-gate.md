@@ -12,3 +12,8 @@ Branch fix/sb-gate (from origin/wip/sb-merge), worktree .claude/worktrees/sb-gat
    nothingStandsInTheGateArchSpan.
 
 ## Baselines (before, recorded restarts 0:2 2:0 15:0): all accepted, 0 failures, 104 measures.
+
+## Status (commits 0f8772a9 invariants, 12627b93 instrument, 22d44267 fix)
+- Red at 12627b93: seed 0 wall leak (5.7,60.0); seed 2 wall leak; seed 15 wall leak (4.7,57.1) + 2 poles in span (3.1,57.8),(-3.1,59.1).
+- After 22d44267: seeds 0,2,15 accepted, 0 failures, 106 measures.
+- Next: park:attempt remaining 13 seeds; check:cat-bus, gateway, entrance-road (0,15), coplanar, cycle-tdz, tsc.
