@@ -39,11 +39,11 @@ const run = promisify(execFile);
 
 /**
  * How long one probe (one seed's solve, or one hydrate) may run before it is
- * killed and the seed reported as failed: 12 minutes, against seed 7's ~3.6 min
- * plan search on an M-series Mac (CI runners read ~2x). `LGP_PARK_TIMEOUT_MS`
- * overrides it.
+ * killed and the seed reported as failed: 30 minutes, against seed 6's 650 s
+ * solve at its accepted restart on an uncontended M-series Mac (CI runners
+ * read ~2x, so ~22 min). `LGP_PARK_TIMEOUT_MS` overrides it.
  */
-const PROBE_TIMEOUT_MS = Number(process.env['LGP_PARK_TIMEOUT_MS'] ?? 12 * 60 * 1000);
+const PROBE_TIMEOUT_MS = Number(process.env['LGP_PARK_TIMEOUT_MS'] ?? 30 * 60 * 1000);
 
 export interface ProbeResult {
   readonly mode: string;

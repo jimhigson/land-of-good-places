@@ -34,10 +34,10 @@ jobs:
   preview:
     name: Deploy PR preview
     runs-on: ubuntu-latest
-    # 25, from 10: the job now solves the sixteen parks on a cache miss
-    # (`build:parks`, measured at ~4 min locally with seed 7 alone ~3.6 min,
+    # 60, from 25: the job solves the sixteen parks on a cache miss
+    # (`build:parks`, measured at 1100 s locally at the accepted restarts,
     # CI ~2x). The step below carries its own, tighter cap.
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -80,7 +80,11 @@ jobs:
         # of time FAILS (red), where a job that does reports as cancelled. Each
         # seed's solve also has its own timeout inside build:parks
         # (LGP_PARK_TIMEOUT_MS), so a hung seed is named, not just slow.
-        timeout-minutes: 18
+        # 50, from 18 (1 Oct): at the accepted restarts the sixteen take
+        # 1100 s over four lanes on an M-series Mac, and seed 6 alone 971 s
+        # (478 s of plan search, 507 s of it the train). At CI's ~2x that is
+        # ~37 min. Being made cheaper in the generator (fix/sb-trainsearch).
+        timeout-minutes: 50
         run: pnpm run build:parks
 
       # Client bundle only — see the on: comment above for why the check
