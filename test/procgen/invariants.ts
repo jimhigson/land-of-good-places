@@ -49,7 +49,7 @@
  * pool, went red).
  */
 import { describe, it, beforeAll, expect } from 'vitest';
-import { Box3, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
+import { InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
 import { WIDEST_FLOWER } from '../../src/world/flowerDimensions.ts';
 import {
   buildParkFacts,
@@ -1395,16 +1395,32 @@ function drawnDoorstep(facts: ParkFacts, band: PortalBand, meshName: string): re
   const mesh = root.getObjectByName(meshName);
   if (!mesh) return null;
   mesh.updateWorldMatrix(true, true);
-  const box = new Box3().setFromObject(mesh);
-  if (box.isEmpty()) return null;
   const outX = Math.sin(band.yaw);
   const outZ = Math.cos(band.yaw);
+  // Every drawn vertex, through every instance — not a bounding box, whose
+  // corners overreach the panel's own face once the door is turned off-axis.
   let reach = -Infinity;
-  for (const x of [box.min.x, box.max.x]) {
-    for (const z of [box.min.z, box.max.z]) {
-      reach = Math.max(reach, (x - band.centreX) * outX + (z - band.centreZ) * outZ);
+  const vertex = new Vector3();
+  const instance = new Matrix4();
+  const world = new Matrix4();
+  mesh.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    const position = object.geometry.getAttribute('position');
+    const count = object instanceof InstancedMesh ? object.count : 1;
+    for (let i = 0; i < count; i += 1) {
+      if (object instanceof InstancedMesh) {
+        object.getMatrixAt(i, instance);
+        world.multiplyMatrices(object.matrixWorld, instance);
+      } else {
+        world.copy(object.matrixWorld);
+      }
+      for (let v = 0; v < position.count; v += 1) {
+        vertex.fromBufferAttribute(position, v).applyMatrix4(world);
+        reach = Math.max(reach, (vertex.x - band.centreX) * outX + (vertex.z - band.centreZ) * outZ);
+      }
     }
-  }
+  });
+  if (!Number.isFinite(reach)) return null;
   return [band.centreX + outX * reach, band.centreZ + outZ * reach];
 }
 
