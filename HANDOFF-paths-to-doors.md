@@ -22,3 +22,10 @@ Controls first, sweep 0..15, fix generators, add to PARK_ACCEPTANCE, re-record `
 - Leaf modules: `hotel/towerDimensions.ts`, `building/frontDoor.ts`.
 - Invariant doors now measured off scene meshes `tower-door-glow` / `entrance-steps` (`drawnDoorstep`). noPathEndsNowhere accepts an end at a drawn door front.
 - Frozen tree `.claude/worktrees/paths-to-doors-frozen` @0c545314 running `accept:parks -- 0-15 --fresh --out accept1.json` (scratchpad). Before-tree `paths-to-doors-before` @17cf536e, preview :5439 (pid 91660). Current preview :5437 (pid 47476), dev :5438 (pid 83647).
+
+## State 2 Oct (HEAD 85793abf, rebased on wip/sb-merge 8f34bf45)
+- Hotel: `door: {reach: TOWER_DOOR_BAND_OUTER, pavedTo: TOWER_DRAWN_DOOR_ALONG}`; the recess paving is a *door apron* drawn in `pathGraph.buildPaths` (`doorAprons`), NOT recorded in samples (a spur `past` into the tower made check:park poi.stranded).
+- `paths.ts` spur: `already` = doormat within PLAYER_RADIUS/2 of a route's paved edge (was 4 m of centreline) — fixes 1–2.5 m stall/exit lawn gaps.
+- BEFORE (final instrument, base generator, base accepted restarts): door invariant red on 16/16 (hotel 5.3–6.5 m all 16; castle 13/16 up to 27.7 m; 8 stall/exit 1.06–2.51 m). Bridge-side red on seed 11 only.
+- accept4 running in frozen tree (`--fresh --write --out accept4.json`); base test:procgen JSON running in `paths-to-doors-base`.
+- TODO: copy acceptedRestarts.ts from frozen → branch; test:procgen + check + check:park 0..15 + check:coplanar + determinism; procgen diff vs base; frames; PR vs wip/sb-merge; tell lead.
