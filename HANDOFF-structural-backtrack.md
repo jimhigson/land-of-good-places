@@ -140,3 +140,10 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - PR #706 opened: feat/structural-backtrack (fast-forwarded to wip/sb-merge) -> feat/procgen-on-sphere.
   Keep pushing wip/sb-merge AND `git push origin HEAD:feat/structural-backtrack`.
 - TODO: after duck bars + bush merge -> re-record; verification; preview deep-link screenshots; shard timings.
+- Screenshots on preview d738347 (seed 0 r8), driver scripts/_shots.mjs (scratch, NOT committed; uses channel
+  'chrome' + metal GPU; SwiftShader times out). Good shots in $SCRATCH/sb/shots/pr706/:
+  try3/gate-west.png (view camPos=-14,5,50), keyring (try4/keyring-60s.png, needs 60 s wait), start-grid.png,
+  rail-race-camera.png (click Level 1, +15 s), race-bars-b6.png (Level 3 burst: bar across lanes for Jim),
+  water-fight-rack.png, stall-posts.png, path-corners.png, park-map-zoom-pan.png (KeyM, wheel, drag),
+  cat-bus-burst-b11.png (doorway, ~63 s after load). Coordinates are seed-0/restart-8 specific: retake
+  water-fight/stall/grid/path shots if seed 0's recorded restart changes.
