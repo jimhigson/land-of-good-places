@@ -3,7 +3,7 @@ import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
 import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
-import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
+import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong, entranceFacing, hasOwnDoor } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN, RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN } from './train/plan';
 import { STATION_GAP } from './train/fence';
@@ -4897,8 +4897,10 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     // doormat with, rather than trusting a flat distance to clear every plot
     // shape and standoff combination.
     const placedTarget = PARK_LAYOUT.entries.get(id);
-    let pastReach = 2;
-    if (placedTarget && l > 1e-6) {
+    // A doormat at a real door (`ManifestEntry.door`) has nothing past it but
+    // the door itself: the paving stops on the doormat.
+    let pastReach = placedTarget && hasOwnDoor(placedTarget.id) ? 0 : 2;
+    if (placedTarget && l > 1e-6 && pastReach > 0) {
       const edge = edgeDistanceAlong(placedTarget.footprint, (ex - towardX) / l, (ez - towardZ) / l);
       pastReach = Math.max(0, Math.min(pastReach, l - edge - PAST_CLEARANCE));
     }
@@ -4919,10 +4921,10 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       // which is the counter's facing for a camera-facing booth and the
       // toward-middle line for everything else, because the solver derived
       // the entrance that way. One source of truth for "which way in".
-      const outX = ex - placedTarget.x;
-      const outZ = ez - placedTarget.z;
-      const out = Math.hypot(outX, outZ);
-      if (out > 1e-6) lead.push([ex + (outX / out) * 3.5, ez + (outZ / out) * 3.5]);
+      // A plot whose door faces its own way (the castle's front door faces +Z
+      // on every bearing) declares it; `entranceFacing` is the one owner.
+      const [outX, outZ] = entranceFacing(placedTarget);
+      lead.push([ex + outX * 3.5, ez + outZ * 3.5]);
     }
     // The street lattice serves the spur (network-first, lead-last); the
     // old continuous router is only the fallback for ground the lattice

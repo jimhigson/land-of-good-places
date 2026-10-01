@@ -67,7 +67,8 @@ export interface PlacedEntry {
   readonly footprint: AnchorFootprint;
   readonly boundingRadius: number;
   /**
-   * Where a visitor arrives: on the plot's edge, facing the plaza. Path
+   * Where a visitor arrives: on the plot's edge, facing the plaza — or at
+   * its own door, where the manifest declares one (`ManifestEntry.door`). Path
    * spurs end here, signs stand here, NPC waypoints seed here.
    */
   readonly entranceX: number;
@@ -245,6 +246,38 @@ export function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ
  * spur's target in `paths.ts` — so neither had to learn about turrets, and they
  * cannot disagree.
  */
+/**
+ * Where a plot's building is actually drawn: its centre, except for the castle,
+ * which `building/layout.ts` nudges {@link BUILDING_CENTRE_NUDGE} towards the
+ * park middle — the same nudge {@link footprintAsPlaced} applies.
+ */
+function drawnCentreOf(entry: ManifestEntry, x: number, z: number): readonly [number, number] {
+  if (entry.id !== 'building') return [x, z];
+  const length = Math.hypot(x, z) || 1;
+  return [x - (x / length) * BUILDING_CENTRE_NUDGE, z - (z / length) * BUILDING_CENTRE_NUDGE];
+}
+
+/** Does this plot declare a door of its own (`ManifestEntry.door`)? */
+export function hasOwnDoor(id: string): boolean {
+  return PARK_MANIFEST.some((candidate) => candidate.id === id && candidate.door !== undefined);
+}
+
+/**
+ * **Which way a visitor walks in to this plot's doormat** — a unit vector
+ * pointing out of the plot, away from the door. The manifest's `door.facing`
+ * where it declares one (the castle's front door faces +Z on every bearing);
+ * otherwise the doormat's own bearing from the plot centre, which is how the
+ * doormat was placed. Paths arrive along it (`paths.ts`'s head-on lead).
+ */
+export function entranceFacing(entry: PlacedEntry): readonly [number, number] {
+  const declared = PARK_MANIFEST.find((candidate) => candidate.id === entry.id)?.door;
+  if (declared && 'facing' in declared) return declared.facing;
+  const outX = entry.entranceX - entry.x;
+  const outZ = entry.entranceZ - entry.z;
+  const out = Math.hypot(outX, outZ);
+  return out > 1e-9 ? [outX / out, outZ / out] : [0, 1];
+}
+
 function footprintAsPlaced(entry: ManifestEntry, x: number, z: number): AnchorFootprint {
   if (entry.id !== 'building' || entry.footprint.kind !== 'rect') return entry.footprint;
   // The same nudge `building/layout.ts` applies: towards the park middle.
@@ -951,8 +984,14 @@ function* buildOnce(restart: number, attempts: ReadonlyMap<string, number>): Gen
     const placedFootprint = footprintAsPlaced(entry, x, z);
     const edge = edgeDistanceAlong(placedFootprint, dirX, dirZ);
     const standOff = 1.4; // the sign and the doormat, just clear of the plot
-    const entranceX = x + dirX * (edge + standOff);
-    const entranceZ = z + dirZ * (edge + standOff);
+    // …unless the plot has a door of its own somewhere else: then the doormat
+    // is at that door (`ManifestEntry.door`).
+    const door = entry.door;
+    const [entranceX, entranceZ] = !door
+      ? [x + dirX * (edge + standOff), z + dirZ * (edge + standOff)]
+      : 'reach' in door
+        ? [x + dirX * door.reach, z + dirZ * door.reach]
+        : [drawnCentreOf(entry, x, z)[0] + door.local[0], drawnCentreOf(entry, x, z)[1] + door.local[1]];
 
     const item: PlacedEntry = {
       id: entry.id,
