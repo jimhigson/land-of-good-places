@@ -58,3 +58,20 @@ Design: `docs/design/PREBUILT-PARKS.md` (also PR #704, draft). Base: origin/feat
 - 16 parks: 2030 KB raw / 597 KB brotli. Every seed boots from vite preview; 99 -> error screen.
 - CI red is seed content only: fountain-hop seed 10, castle-towers/rail-race/tie-frame seed 5, 39 invariants.
 - Save migration confirmed by Jim (retired -> seed 5). Do NOT rebase onto structural-backtrack until told.
+
+## 1 Oct: landed on wip/sb-merge (structural-backtrack), accepted restarts
+- Branch rebuilt as ONE squash commit on origin/wip/sb-merge (rebase conflicted on commit 1). Old history:
+  origin/archive/prebuilt-parks-pre-sb. PR #705 base now feat/structural-backtrack (== wip/sb-merge d7383472).
+- Conflict rule: their edits to moved files went with the move; bridge-footprint geometry the client draws
+  with (siteFrame/siteFootprint/standsOnSomeBridge/pointStandsOnABridgeRamp/GATE_CORRIDOR_START_Z) stays in
+  src/world/paths.ts. Base-lines-missing check (scratchpad baselines.py): only re-pathed imports differ.
+- Restarts: file format 3 has `restart` + `acceptance` (acceptanceMetadata). Boot (prebuiltPark.ts) sets
+  __LGP_PARK_RESTART__ from the file before main loads; seed via parkSeedAsked() memo (no parkManifest import —
+  check:prebuilt-park proves bootstrap's static closure excludes parkManifest.ts). Identity = PARK_SEED_ASKED.
+- Acceptance log: accept:parks --write also writes procgen/acceptanceLog.json; build:parks copies a seed's
+  entry into its file (no loop in CI). check:accepted-restarts proves log restart == ACCEPTED_RESTARTS.
+- Source hash (park-source-hash.mjs) = src, procgen, test/procgen, scripts, package.json, lockfile — one owner
+  for park files AND acceptanceSourceHash (+LGP_* env). It previously missed procgen/ entirely.
+- In progress: fresh accept:parks 0-15 --write in worktree prebuilt-parks-accept (snapshot 3ecc4fa9); its
+  restarts must equal the recorded ones (proves the move changed no park); copy acceptanceLog.json back.
+- Then: build:parks (digest proof at accepted restarts), check, test:procgen, coplanar, swept-bus, preview.
