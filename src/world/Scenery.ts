@@ -840,6 +840,23 @@ export function treeBuilder(
  * and every wall, and the real collision world. Correction: a clump asked to
  * step aside is re-placed through the same gate, clear of the asker.
  */
+/**
+ * **What the bush scatter did with each candidate, for measurement only.**
+ * Keyed by candidate index, so a candidate the driver re-asks after a `back()`
+ * overwrites its own verdict rather than counting twice. `probe` is the
+ * builder's own gate ({@link bushBuilder}'s `refusalAt`) as it stands when the
+ * scatter last ran, so a grid sample of "where could a clump legally go" asks
+ * the one owner, not a copy. Read by `scripts/measure-bush-space.mts`, which
+ * is the evidence behind the bush floor in `theParkIsFurnished`; nothing in
+ * the game reads it.
+ */
+export const bushScatterLedger: {
+  readonly verdicts: Map<number, string>;
+  probe: ((x: number, z: number) => string | null) | null;
+  /** Called when the scatter reaches its budget, with the world as the scatter saw it. */
+  onDone: (() => void) | null;
+} = { verdicts: new Map(), probe: null, onDone: null };
+
 export function bushBuilder(
   collision: CollisionWorld,
   claims: GroundClaims,
@@ -850,19 +867,24 @@ export function bushBuilder(
   let attempts = 0;
   const runs = (): readonly WallRun[] => walls().filter((run): run is WallRun => run !== null);
 
-  const accept = (x: number, z: number, keepClearOf: readonly Claim[]): boolean => {
-    if (!isPlantable(x, z, BUSH_REACH)) return false;
-    if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) return false;
-    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP, BUSH_REACH)) return false;
-    if (!collision.isClearCircle(x, z, BUSH_COLLIDER)) return false;
-    if (!clearOfWalls(x, z, BUSH_COLLIDER, 0, runs())) return false;
+  /** Why (x, z) cannot take a clump, or `null` if it can. The one gate. */
+  const refusalAt = (x: number, z: number, keepClearOf: readonly Claim[]): string | null => {
+    const ground = plantableRefusal(x, z, BUSH_REACH);
+    if (ground) return ground;
+    if (!clearOfCruiser(x, z, BUSH_REACH, BUSH_TOP)) return 'cruiser';
+    if (hidesTheArrivingBus(x, z, terrainHeight(x, z) + BUSH_TOP, BUSH_REACH)) return 'hides-bus';
+    if (!collision.isClearCircle(x, z, BUSH_COLLIDER)) return 'collider';
+    if (!clearOfWalls(x, z, BUSH_COLLIDER, 0, runs())) return 'wall';
     for (const tree of trees()) {
-      if (Math.hypot(x - tree.x, z - tree.z) < TREE_REACH[tree.kind] + BUSH_COLLIDER) return false;
+      if (Math.hypot(x - tree.x, z - tree.z) < TREE_REACH[tree.kind] + BUSH_COLLIDER) return 'tree';
     }
     const claim = disc(x, z, BUSH_COLLIDER);
-    if (claims.blockers('bushes', [claim]).length > 0) return false;
-    return clearOfClaims(claim, keepClearOf);
+    if (claims.blockers('bushes', [claim]).length > 0) return 'claim';
+    return clearOfClaims(claim, keepClearOf) ? null : 'asker';
   };
+  const accept = (x: number, z: number, keepClearOf: readonly Claim[]): boolean => refusalAt(x, z, keepClearOf) === null;
+  bushScatterLedger.verdicts.clear();
+  bushScatterLedger.probe = (x, z) => refusalAt(x, z, []);
 
   const roll = (rng: Rng, x: number, z: number): InstanceItem[] => {
     const blobs = rng.int(2, 3);
@@ -902,11 +924,14 @@ export function bushBuilder(
         const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 5);
         const x = Math.cos(angle) * distance;
         const z = Math.sin(angle) * distance;
-        if (!accept(x, z, [])) continue;
+        const why = refusalAt(x, z, []);
+        bushScatterLedger.verdicts.set(attempts, why ?? 'planted');
+        if (why) continue;
         const decision: BushDecision = { x, z, blobs: roll(rng, x, z), resume };
         out.push(decision);
         return increment(decision, 'at');
       }
+      bushScatterLedger.onDone?.();
       return 'done';
     },
     back() {
@@ -1370,17 +1395,32 @@ function isPlantable(
   clearance: number,
   pathClearance: number = clearance,
 ): boolean {
+  return plantableRefusal(x, z, clearance, pathClearance) === null;
+}
+
+/**
+ * {@link isPlantable}'s own answer, with the reason it said no — the one
+ * owner of the question, so a measurement of *why* the scatter refuses
+ * ground (`scripts/measure-bush-space.mts`) asks the same gate rather than a
+ * copy of it. `null` means plantable.
+ */
+function plantableRefusal(
+  x: number,
+  z: number,
+  clearance: number,
+  pathClearance: number = clearance,
+): string | null {
   // Five metres inside the park's own edge — the same margin the old `> 55`
   // kept from the masonry at 60, now measured from an edge that moves.
-  if (PARK_BOUNDARY.distanceToEdge(x, z) < PLANTABLE_MARGIN) return false;
-  if (isOnPath(x, z, pathClearance)) return false;
+  if (PARK_BOUNDARY.distanceToEdge(x, z) < PLANTABLE_MARGIN) return 'edge';
+  if (isOnPath(x, z, pathClearance)) return 'paving';
   // Keep the fountain plaza open — wherever the layout put it (Decision 5).
-  if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + 1.6) return false;
-  if (insideAnyAnchor(x, z, clearance)) return false;
-  if (onRailway(x, z, clearance)) return false;
-  if (onRideExit(x, z, clearance)) return false;
-  if (onEntrancePlaza(x, z, clearance)) return false;
-  return true;
+  if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + 1.6) return 'plaza';
+  if (insideAnyAnchor(x, z, clearance)) return 'plot';
+  if (onRailway(x, z, clearance)) return 'rail';
+  if (onRideExit(x, z, clearance)) return 'ride-exit';
+  if (onEntrancePlaza(x, z, clearance)) return 'entrance';
+  return null;
 }
 
 /**
