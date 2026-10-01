@@ -36,7 +36,7 @@ import {
   RACE_LAPS,
   PLAYER_BOOST_ADVANTAGE,
   RIVAL_SKILL,
-  createRider,
+  riderOnGrid,
   rivalBand,
   rivalInput,
   scheduleForLevel,
@@ -560,14 +560,14 @@ export class RailRace implements GameSystem {
       // No scale here. A cart is sized by the ring it is currently on, and
       // only by `setActiveRing` — see that method for the bug this fixes.
       this.group.add(group);
-      this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid, sad: 0, yaw: 0, pitch: 0 });
+      this.carts.push({ rider: riderOnGrid(index, this.activeRing.route.scale), group, cart, isPlayer: false, kid, sad: 0, yaw: 0, pitch: 0 });
     });
 
     const playerCart = createCart(LANE_COLOURS[PLAYER_LANE] ?? PALETTE.markerMint);
     const group = playerCart.root;
     this.group.add(group);
     this.carts.push({
-      rider: createRider(PLAYER_LANE),
+      rider: riderOnGrid(PLAYER_LANE, this.activeRing.route.scale),
       group,
       cart: playerCart,
       isPlayer: true,
@@ -599,7 +599,8 @@ export class RailRace implements GameSystem {
     // the countdown runs out — a race that has already started when the
     // camera arrives is a race a six-year-old has already lost.
     for (const cart of this.carts) {
-      const fresh = createRider(cart.rider.lane);
+      // Onto the race ring's grid: it is drawn at `RIDE_SCALE`, so its gaps are too.
+      const fresh = riderOnGrid(cart.rider.lane, this.raceRing.route.scale);
       Object.assign(cart.rider, fresh);
     }
     // Headlamps on for the race, and only for the race. They are real
@@ -1257,7 +1258,7 @@ export class RailRace implements GameSystem {
     // Everybody back to the line, so the ring looks ready rather than abandoned.
     for (const cart of this.carts) {
       cart.cart.setHeadlamps(false);
-      Object.assign(cart.rider, createRider(cart.rider.lane));
+      Object.assign(cart.rider, riderOnGrid(cart.rider.lane, this.walkPastRing.route.scale));
     }
     // Back to the calm level-1 default between races — see `activeLevel`'s
     // own doc comment.
