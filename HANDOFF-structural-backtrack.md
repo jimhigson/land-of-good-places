@@ -151,3 +151,6 @@ coping chamfer (#698 fix/procgen-last has the fix).
   macos, 16 seeds). Controls pass. Next: read the CI result; #705 (ade102921125f8c23) owns the file format; plan is
   acceptance measures the hydrated park file (their suggestion), quantise only if CI shows structural divergence.
 - check:coplanar deterministic (2 runs identical). flat-primitives fixed (69d7099a). Walk-reach VOID -> fix/sb-walkreach.
+- NOTE: every push to feat/structural-backtrack cancels the in-flight PR CI (concurrency cancel-in-progress), and
+  handoff-only pushes kept killing Checks before it finished. Push handoff commits to wip/sb-merge only; move
+  feat/structural-backtrack only for code, and let CI finish between. PR CI run at c7dcaf03 is the one to read.
