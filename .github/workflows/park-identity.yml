@@ -1,0 +1,77 @@
+name: Park identity
+
+# **Is a supported park the same park on Linux and on a Mac?** Parks are
+# accepted on one machine and shipped from another; Mac arm64 and Linux x64
+# solve the same seed to decisions that differ in the last bits
+# (docs/design/PREBUILT-PARKS.md). This builds every supported seed at its
+# recorded restart on both, and fails if any decision differs — a solve trace,
+# the mesh set, or any mesh's vertex/instance count — reporting the worst
+# position drift where the decisions agree (scripts/park-identity.mts,
+# scripts/compare-park-identity.mts). Not yet a required check.
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: park-identity-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Park identity ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build every supported park and record its identity
+        run: |
+          mkdir -p identity
+          seq 0 15 | xargs -P 3 -I{} sh -c 'LGP_SEED={} node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/park-identity.mts identity/{}.json 2>&1 | grep "^park-identity" || exit 255'
+          ls identity
+
+      - name: Upload identities
+        uses: actions/upload-artifact@v4
+        with:
+          name: park-identity-${{ matrix.os }}
+          path: identity/
+
+  compare:
+    name: Park identity
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+
+      - name: Download identities
+        uses: actions/download-artifact@v4
+
+      - name: The same park on both platforms
+        run: node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/compare-park-identity.mts park-identity-ubuntu-latest park-identity-macos-latest
