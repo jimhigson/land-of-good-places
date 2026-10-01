@@ -1,4 +1,4 @@
-import { PARK_SEED } from '../parkManifest';
+import { PARK_RESTART, PARK_SEED_ASKED } from '../parkManifest';
 import type { BuiltDecision } from './parkFileName';
 import { unplain, parkFileProblem } from './plainData';
 import { offeredParkFile, parkFileMissingReason } from './parkFileStore';
@@ -18,11 +18,11 @@ import { parkSolver, type ParkSolver } from './solverPort';
 export function decideBuilt<T>(key: BuiltDecision, search: (solver: ParkSolver) => T): T {
   const file = offeredParkFile();
   if (file) {
-    const problem = parkFileProblem(file, PARK_SEED);
-    if (problem) throw new ParkUnavailable(PARK_SEED, problem);
+    const problem = parkFileProblem(file, PARK_SEED_ASKED, PARK_RESTART);
+    if (problem) throw new ParkUnavailable(PARK_SEED_ASKED, problem);
     return unplain(file.features.built[key] as never, `built.${key}`) as T;
   }
   const solver = parkSolver();
-  if (!solver) throw new ParkUnavailable(PARK_SEED, parkFileMissingReason() ?? 'no park file was loaded');
+  if (!solver) throw new ParkUnavailable(PARK_SEED_ASKED, parkFileMissingReason() ?? 'no park file was loaded');
   return search(solver);
 }

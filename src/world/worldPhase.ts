@@ -39,7 +39,7 @@ import type { BoothRelocator } from './stallsFeature';
 import { RailRace } from './railRace/RailRace';
 import { trestleSpotsFromDecisions, type DecidedTrestles } from './railRace/track';
 import { setStallShift } from '../minigames/stallPlacement';
-import { PARK_SEED } from './parkManifest';
+import { PARK_SEED_ASKED } from './parkManifest';
 import { offeredParkFile, parkFileMissingReason } from './prebuilt/parkFileStore';
 import { ParkUnavailable } from './prebuilt/parkUnavailable';
 import { parkSolver } from './prebuilt/solverPort';
@@ -116,7 +116,7 @@ function hydrateWorldPhase(
 ): WorldPhase {
   for (const [id, dx, dz, x, z] of decisions.stallMoves) {
     const booth = booths(id);
-    if (!booth) throw new ParkUnavailable(PARK_SEED, `its park file moves stall ${id}, which cannot move`);
+    if (!booth) throw new ParkUnavailable(PARK_SEED_ASKED, `its park file moves stall ${id}, which cannot move`);
     booth.withdrawCollision();
     setStallShift(id, dx, dz);
     booth.placeAt(x, z);
@@ -145,6 +145,6 @@ export function decideWorldPhase(
   const file = offeredParkFile();
   if (file) return hydrateWorldPhase(readWorld(file.features.world), collision, claims, booths);
   const solver = parkSolver();
-  if (!solver) throw new ParkUnavailable(PARK_SEED, parkFileMissingReason() ?? 'no park file was loaded');
+  if (!solver) throw new ParkUnavailable(PARK_SEED_ASKED, parkFileMissingReason() ?? 'no park file was loaded');
   return solver.worldPhase(collision, claims, cruiserRoute, booths);
 }

@@ -94,7 +94,7 @@ function writeRoute(route: SolvedRailRoute, path: string): RouteRecord {
 // ------------------------------------------------------------------- write
 
 /** The decided plan as a park file. `build` is stamped later, by the bundle that ships it. */
-export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamped'): ParkFile {
+export function encodeParkFile(seed: number, restart: number, plan: DecidedPlan, build = 'unstamped'): ParkFile {
   const { layout, cruiser, train, slide, crossings, pathGraph, pathLattice, planOrder, world, built } = plan;
 
   const entries: Json[] = [];
@@ -116,6 +116,8 @@ export function encodeParkFile(seed: number, plan: DecidedPlan, build = 'unstamp
     format: PARK_FILE_FORMAT,
     build,
     seed,
+    restart,
+    acceptance: null,
     features: {
       layout: { seed: layout.seed, fountain: plain(layout.fountain, 'layout.fountain'), entries },
       cruiser: {

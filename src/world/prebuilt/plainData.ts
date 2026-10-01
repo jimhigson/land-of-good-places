@@ -118,11 +118,16 @@ export function unplain(value: Json, path: string): unknown {
  * the driver, before it trusts any of it: a file that fails here is ignored
  * whole and the park is solved, never half-hydrated.
  */
-export function parkFileProblem(file: unknown, seed: number): string | null {
+export function parkFileProblem(file: unknown, seed: number, restart: number): string | null {
   if (typeof file !== 'object' || file === null) return 'not an object';
   const candidate = file as Partial<ParkFile>;
   if (candidate.format !== PARK_FILE_FORMAT) return `format ${String(candidate.format)}, this build reads ${PARK_FILE_FORMAT}`;
   if (candidate.seed !== seed) return `seed ${String(candidate.seed)}, this park is ${seed}`;
+  // The restart is read at module load (`parkRestart.ts`), so a file of
+  // another restart cannot be built by this page: its decisions are another
+  // park's. The boot applies the file's restart before the park's modules
+  // load (`boot/prebuiltPark.ts`), so this is only ever a boot-order bug.
+  if (candidate.restart !== restart) return `restart ${String(candidate.restart)}, this park was started at restart ${restart}`;
   const features = candidate.features as Record<string, unknown> | undefined;
   if (!features) return 'no features';
   const missing = PARK_FILE_FEATURES.filter((name) => features[name] === undefined);

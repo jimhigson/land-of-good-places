@@ -18,7 +18,7 @@ import { refuseBridgeSiteForPaths } from './train/crossingPlanSolve';
 import { GroundClaims } from '../../src/boot/groundClaims';
 import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveBudget, type SolveStats } from '../boot/parkSolve';
 import { decisionSeed, refusal, type Advance, type FeatureBuilder, type Refusal } from '../boot/featureBuilder';
-import { PARK_SEED } from '../../src/world/parkManifest';
+import { PARK_RESTART, PARK_SEED, PARK_SEED_ASKED } from '../../src/world/parkManifest';
 import { PARK_RESTARTS, type ParkLayout } from '../../src/world/parkLayout';
 import { BUILT_SOLID_MARGIN, distanceToBuiltSolids } from '../../src/world/paths';
 import { PATH_KERB_OVERHANG } from '../../src/core/constants';
@@ -879,7 +879,8 @@ function printTrace(solve: ParkSolve): void {
  */
 export function parkPlanFile(world: WorldDecisions, built: Readonly<Record<string, unknown>>, build?: string): ParkFile {
   return encodeParkFile(
-    PARK_SEED,
+    PARK_SEED_ASKED,
+    PARK_RESTART,
     {
       layout: planPart('layout'),
       cruiser: planPart('cruiser'),

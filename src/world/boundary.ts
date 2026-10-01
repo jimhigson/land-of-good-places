@@ -9,7 +9,7 @@ import { boundarySolver } from './prebuilt/solverPort';
 import { parkFileProblem, unplain } from './prebuilt/plainData';
 import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END, SPUR_PAVED_REACH } from '../core/constants';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from './entrance/layout';
-import { PARK_SEED } from './parkManifest';
+import { PARK_RESTART, PARK_SEED, PARK_SEED_ASKED } from './parkManifest';
 
 /** Axis-aligned extent of a boundary. */
 export interface BoundaryExtent {
@@ -564,12 +564,12 @@ class DecidedBoundary implements ParkBoundary {
 function decideBoundaryRadii(options: ParkBoundaryOptions): readonly number[] {
   const file = offeredParkFile();
   if (file) {
-    const problem = parkFileProblem(file, options.seed);
-    if (problem) throw new ParkUnavailable(options.seed, problem);
+    const problem = parkFileProblem(file, PARK_SEED_ASKED, PARK_RESTART);
+    if (problem) throw new ParkUnavailable(PARK_SEED_ASKED, problem);
     return unplain(file.features.built['boundary'] ?? null, 'built.boundary') as number[];
   }
   const solve = boundarySolver();
-  if (!solve) throw new ParkUnavailable(options.seed, parkFileMissingReason() ?? 'no park file was loaded');
+  if (!solve) throw new ParkUnavailable(PARK_SEED_ASKED, parkFileMissingReason() ?? 'no park file was loaded');
   return solve(options);
 }
 

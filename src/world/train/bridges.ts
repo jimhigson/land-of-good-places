@@ -27,7 +27,7 @@ import {
   type RealWorldQuery,
   HUMP_BLEND,
 } from './bridgeFootprint';
-import { PARK_SEED } from '../parkManifest';
+import { PARK_SEED_ASKED } from '../parkManifest';
 import { offeredParkFile, parkFileMissingReason } from '../prebuilt/parkFileStore';
 import { ParkUnavailable } from '../prebuilt/parkUnavailable';
 import { parkSolver } from '../prebuilt/solverPort';
@@ -44,14 +44,14 @@ function decideBridgeFootprints(crossings: readonly LevelCrossing[], real: RealW
     const decisions = readBridges(file);
     if (decisions.length !== crossings.length) {
       throw new ParkUnavailable(
-        PARK_SEED,
+        PARK_SEED_ASKED,
         `its park file has ${decisions.length} bridge(s) for ${crossings.length} crossing(s)`,
       );
     }
     return decisions.map((decision, i) => (decision ? footprintFromDecision(crossings[i] as LevelCrossing, decision) : null));
   }
   const solver = parkSolver();
-  if (!solver) throw new ParkUnavailable(PARK_SEED, parkFileMissingReason() ?? 'no park file was loaded');
+  if (!solver) throw new ParkUnavailable(PARK_SEED_ASKED, parkFileMissingReason() ?? 'no park file was loaded');
   return solver.bridgeFootprints(crossings, real);
 }
 import { TRACK_CLEARANCE } from './route';

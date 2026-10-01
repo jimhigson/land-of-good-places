@@ -36,7 +36,7 @@ import { ALL_CATALOGUE_ITEMS } from './world/building/shops/catalogue';
 import { MAX_PARADE_VISIBLE } from './entities/parade/paradeCap';
 import { saveFlags } from './state/flags';
 import { clearSave, loadSave, makeSessionUnsavable, type SaveFile } from './state/save';
-import { PARK_SEED } from './world/parkManifest';
+import { PARK_RESTART, PARK_SEED_ASKED } from './world/parkManifest';
 import { forgetParkSeed, parkChangedUnderSave, parkSeedSource } from './world/parkSeedPool';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
 
@@ -94,8 +94,8 @@ function boot(): void {
   // `?seed=` on any URL builds exactly that park again. Issue #426 asks for
   // this in as many words, and it is one line at boot.
   console.info(
-    `Land of Good Places: park seed ${PARK_SEED} (${parkSeedSource()}). ` +
-      `Reproduce this park with ?seed=${PARK_SEED}`,
+    `Land of Good Places: park seed ${PARK_SEED_ASKED}, restart ${PARK_RESTART} (${parkSeedSource()}). ` +
+      `Reproduce this park with ?seed=${PARK_SEED_ASKED}`,
   );
 
   const save = loadSave();

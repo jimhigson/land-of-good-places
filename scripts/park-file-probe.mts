@@ -19,6 +19,12 @@
  * has no driver — if it ran, the "hydrated" park was quietly re-solved and
  * matching the fresh one proves nothing), and what each stage cost.
  *
+ * Restarts: `solve` builds the seed's recorded restart (`acceptedRestarts.ts`,
+ * as every check does); `hydrate` builds the restart the file names, set the
+ * way the browser's boot sets it (`__LGP_PARK_RESTART__`, before the park's
+ * modules load). Both report the restart they built, and `parkFiles.mts`
+ * requires the two to agree with the record.
+ *
  * `perturb` hydrates from the file with the Sky Cruiser's track raised half a
  * metre: the control on the instrument. Its digest must differ from the
  * file's, or the comparison is blind to the file's contents.
@@ -48,6 +54,12 @@ if (!solving) {
     const points = file.features.cruiser.profile.points as Json[];
     for (let i = 1; i < points.length; i += 3) points[i] = (points[i] as number) + 0.5;
   }
+  // The file's restart, exactly as `boot/prebuiltPark.ts` applies it: before
+  // any park module loads, since the restart is read once at module load.
+  if (process.env['LGP_PARK_RESTART'] !== undefined) {
+    throw new Error('park-file-probe: LGP_PARK_RESTART is set, which would override the restart the file names');
+  }
+  (globalThis as { __LGP_PARK_RESTART__?: number }).__LGP_PARK_RESTART__ = file.restart;
   // Before anything imports the plan: the driver reads the letterbox once, when it starts.
   offerParkFile(file);
 }
@@ -59,7 +71,8 @@ if (!solving) {
 await import('../src/world/prebuilt/parkFile.ts');
 const plan = await import('../src/world/parkPlan.ts');
 const solver = await import('../procgen/world/planSolver.ts');
-const { PARK_SEED } = await import('../src/world/parkManifest.ts');
+const { PARK_RESTART, PARK_SEED, PARK_SEED_ASKED } = await import('../src/world/parkManifest.ts');
+const { overriddenRestart } = await import('../src/world/parkRestart.ts');
 const { buildHeadlessPark } = await import('./park-harness.mts');
 const { digestScene } = await import('./lib/parkDigest.mts');
 
@@ -112,7 +125,11 @@ for (const feature of PARK_FILE_FEATURES) piecesByHydratedFeature[feature] = sta
 console.log(
   JSON.stringify({
     mode,
-    seed: PARK_SEED,
+    seed: PARK_SEED_ASKED,
+    restart: PARK_RESTART,
+    /** Where the restart came from: the file (as the browser does) or the record. */
+    restartFrom: overriddenRestart() === null ? 'record' : 'file',
+    generationSeed: PARK_SEED,
     park: digest.park,
     meshes: digest.meshes,
     byName: Object.fromEntries(digest.byName),

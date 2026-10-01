@@ -1,5 +1,4 @@
-import { PARK_SEED } from '../world/parkManifest';
-import { PARK_SEED_POOL } from '../world/parkSeedPool';
+import { PARK_SEED_POOL, parkSeedAsked } from '../world/parkSeedPool';
 import type { ParkFile } from '../world/prebuilt/parkFile';
 import { parkFileName } from '../world/prebuilt/parkFileName';
 import { offerParkFile, reportParkFileMissing } from '../world/prebuilt/parkFileStore';
@@ -40,6 +39,16 @@ import { offerParkFile, reportParkFileMissing } from '../world/prebuilt/parkFile
  * a build shipped without parks, which is why the screen also offers the
  * park she gets without a `?seed=`.
  *
+ * **The file says which restart of the seed to build.** A park is the
+ * restart of its seed the root acceptance loop accepted (`parkRestart.ts`),
+ * and the restart is read once, at module load, by `parkManifest.ts` — so it
+ * has to be known before any park module evaluates. That is why this module
+ * must not import the park (not `parkManifest.ts`, not anything that does —
+ * `check:prebuilt-park` proves it of `bootstrap.ts`'s static imports), asks
+ * for the seed through `parkSeedAsked()`, and sets the file's restart as
+ * `__LGP_PARK_RESTART__` before `bootstrap.ts` imports the game. The plan then
+ * refuses a file whose restart is not the park's (`parkFileProblem`).
+ *
  * In Node nothing is fetched: checks and `build:parks` solve fresh or offer a
  * file themselves.
  */
@@ -54,13 +63,14 @@ export function loadPrebuiltPark(): Promise<void> {
 async function fetchPrebuiltPark(): Promise<void> {
   const env = (import.meta as { env?: { BASE_URL?: string } }).env;
   if (!env || typeof fetch !== 'function') return;
-  if (!PARK_SEED_POOL.includes(PARK_SEED)) {
+  const seed = parkSeedAsked();
+  if (!PARK_SEED_POOL.includes(seed)) {
     reportParkFileMissing(
-      `seed ${PARK_SEED} is not one of this game's parks (it has seeds ${PARK_SEED_POOL.join(', ')})`,
+      `seed ${seed} is not one of this game's parks (it has seeds ${PARK_SEED_POOL.join(', ')})`,
     );
     return;
   }
-  const url = `${env.BASE_URL ?? '/'}${parkFileName(PARK_SEED)}`;
+  const url = `${env.BASE_URL ?? '/'}${parkFileName(seed)}`;
   try {
     const response = await fetch(url);
     const type = response.headers.get('content-type') ?? '';
@@ -75,6 +85,11 @@ async function fetchPrebuiltPark(): Promise<void> {
       );
       return;
     }
+    if (!Number.isInteger(file.restart) || file.restart < 0) {
+      reportParkFileMissing(`its park file names no restart (${String(file.restart)})`);
+      return;
+    }
+    (globalThis as { __LGP_PARK_RESTART__?: number }).__LGP_PARK_RESTART__ = file.restart;
     offerParkFile(file);
   } catch (error) {
     reportParkFileMissing(`its park file could not be downloaded (${String(error)})`);

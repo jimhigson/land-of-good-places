@@ -10,6 +10,11 @@
  * - **hydrate** — the file offered before anything forces the plan, the park
  *   built from it, digested.
  *
+ * Both build the seed's **accepted restart** (`src/world/acceptedRestarts.ts`):
+ * the solve because every Node build reads the record, the hydrate because
+ * its file names it and it applies that the way the browser's boot does. A
+ * seed passes only if solve, file and hydrate all name the recorded restart.
+ *
  * A seed passes when the two digests are equal **and** the hydrate process
  * really hydrated: it says so, it never constructed the backtracking driver,
  * and every feature the file carries ran zero search pieces. The second half is not decoration: a hydrate that
@@ -27,6 +32,9 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 
+import { ACCEPTED_RESTARTS } from '../../src/world/acceptedRestarts.ts';
+import type { ParkFile } from '../../src/world/prebuilt/parkFile.ts';
+
 const run = promisify(execFile);
 
 /**
@@ -40,6 +48,9 @@ const PROBE_TIMEOUT_MS = Number(process.env['LGP_PARK_TIMEOUT_MS'] ?? 12 * 60 * 
 export interface ProbeResult {
   readonly mode: string;
   readonly seed: number;
+  readonly restart: number;
+  readonly restartFrom: 'record' | 'file';
+  readonly generationSeed: number;
   readonly park: string;
   readonly meshes: number;
   readonly byName: Readonly<Record<string, string>>;
@@ -77,7 +88,9 @@ async function probe(mode: 'solve' | 'hydrate' | 'perturb', seed: number, file: 
   let stdout: string;
   try {
     ({ stdout } = await run(process.execPath, args, {
-      env: { ...process.env, LGP_SEED: String(seed) },
+      // Never an inherited LGP_PARK_RESTART: the solve builds the recorded
+      // restart, and the hydrate the one its file names.
+      env: { ...withoutRestart(process.env), LGP_SEED: String(seed) },
       encoding: 'utf8',
       maxBuffer: 256 * 1024 * 1024,
       // A seed that never finishes must fail by name, not hang the build until
@@ -99,8 +112,24 @@ async function probe(mode: 'solve' | 'hydrate' | 'perturb', seed: number, file: 
   return JSON.parse(last) as ProbeResult;
 }
 
-function compare(solved: ProbeResult, hydrated: ProbeResult): string[] {
+function withoutRestart(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { LGP_PARK_RESTART: _dropped, ...rest } = env;
+  return rest;
+}
+
+function compare(seed: number, solved: ProbeResult, hydrated: ProbeResult, file: ParkFile): string[] {
   const problems: string[] = [];
+  const recorded = ACCEPTED_RESTARTS[seed];
+  if (recorded === undefined) problems.push(`seed ${seed} has no accepted restart recorded (src/world/acceptedRestarts.ts)`);
+  if (solved.seed !== seed || hydrated.seed !== seed || file.seed !== seed) {
+    problems.push(`asked for seed ${seed}: solved ${solved.seed}, hydrated ${hydrated.seed}, file says ${file.seed}`);
+  }
+  if (solved.restart !== recorded || file.restart !== recorded || hydrated.restart !== recorded) {
+    problems.push(
+      `seed ${seed}'s accepted restart is ${String(recorded)}: solved ${solved.restart}, file says ${file.restart}, hydrated ${hydrated.restart}`,
+    );
+  }
+  if (hydrated.restartFrom !== 'file') problems.push('the hydrate process did not take its restart from the file, as the browser does');
   if (!hydrated.hydrated) problems.push('the hydrate process did not hydrate — it solved, so its digest proves nothing');
   if (hydrated.driverRan) problems.push('the hydrate process constructed the backtracking driver — the client has none, so this is not the path that ships');
   if (hydrated.worldSolverRan) problems.push('the hydrate process searched the world phase — the client has no search, so this is not the path that ships');
@@ -147,7 +176,7 @@ export async function buildAndVerify(
         raw: bytes.length,
         gzip: gzipSync(bytes, { level: 9 }).length,
         brotli: brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }).length,
-        problems: compare(solved, hydrated),
+        problems: compare(seed, solved, hydrated, JSON.parse(bytes.toString('utf8')) as ParkFile),
       };
       outcomes.push(outcome);
       log(

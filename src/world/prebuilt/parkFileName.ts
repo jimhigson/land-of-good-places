@@ -9,11 +9,15 @@
 
 /**
  * The shape of a park file. **Bump it on any change to what `parkFile.ts`
- * writes or reads**: a file of another format is discarded by the client and
- * the park is solved instead, so a bump can cost a slow boot but never a
- * wrong park.
+ * writes or reads**: a file of another format is refused (`ParkUnavailable`),
+ * never half-read, so a bump can cost an error screen but never a wrong park.
+ * `vite build` ships files and bundle together, so in a real build the two
+ * always agree.
+ *
+ * 3: the file names its seed's accepted restart and carries the acceptance
+ * loop's log (`restart`, `acceptance`).
  */
-export const PARK_FILE_FORMAT = 2;
+export const PARK_FILE_FORMAT = 3;
 
 /**
  * **The seeds this game has: 0 to 15.** Jim, 24 September 2026: *"we only

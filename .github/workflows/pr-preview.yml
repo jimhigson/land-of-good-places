@@ -72,7 +72,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .parks
-          key: prebuilt-parks-${{ hashFiles('src/**', 'package.json', 'pnpm-lock.yaml') }}
+          key: prebuilt-parks-${{ hashFiles('src/**', 'procgen/**', 'test/procgen/**', 'scripts/**', 'package.json', 'pnpm-lock.yaml') }}
 
       - name: Solve the prebuilt parks
         if: steps.parks-cache.outputs.cache-hit != 'true'

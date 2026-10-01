@@ -12,7 +12,10 @@ import { showBootFailure } from './ui/bootFailure';
  *    **before** the game's modules load: several of them ask about the park —
  *    its edge, its ring road — at module scope, and the game has no solver, so
  *    the only answer is the file. It is precached with this bundle, so this is
- *    a cache hit on an installed game.
+ *    a cache hit on an installed game. The file also names the restart of
+ *    the seed to build (`parkRestart.ts`), which the park's modules read at
+ *    load, so it is set here, before they load — and so nothing this module
+ *    imports statically may import the park (`check:prebuilt-park`).
  * 3. The game (`main.ts`). If the park cannot be had, importing it fails with
  *    `ParkUnavailable`, and that is shown rather than lost.
  */

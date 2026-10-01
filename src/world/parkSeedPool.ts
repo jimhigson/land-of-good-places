@@ -65,10 +65,14 @@ export const CANONICAL_PARK_SEED = 5;
  * *"we only support seeds 0..15, no others."* Every one of them ships as a
  * prebuilt park file (`pnpm run build:parks`, `docs/design/PREBUILT-PARKS.md`),
  * and any other seed — a `?seed=` off this list included — is an error in the
- * game, never a park solved on the device. What follows is the pool's history
- * before that ruling; the vetting it describes is now the bar for 0..15 itself
- * (`vet:seeds -- --pool`), and a seed that fails it is fixed in the generator,
- * never swapped out.
+ * game, never a park solved on the device. Each is built at the restart the
+ * root acceptance loop accepted for it (`acceptedRestarts.ts`): the first
+ * start-again of the seed whose finished park passed every acceptance measure
+ * (`parkRestart.ts`). Its park file carries that restart, and the boot applies
+ * it before the park loads. What follows is the pool's history before that
+ * ruling; the bar it describes — every invariant, every `check:park` key — is
+ * now what the acceptance loop asks of each restart, and a seed is never
+ * swapped out.
  *
  * **The vetted pool. Sixteen for now; change the array and nothing else.**
  *
@@ -397,6 +401,21 @@ export function resolveParkSeed(): number {
   }
 
   return parkSeedFor(storage());
+}
+
+let asked: number | null = null;
+
+/**
+ * **This page's park, decided once** — {@link resolveParkSeed}, asked the
+ * first time and remembered for the life of the page. `parkManifest.ts`'s
+ * `PARK_SEED_ASKED` is this, and so is the seed the boot fetches a park file
+ * for (`boot/prebuiltPark.ts`), which has to know it *before* the park's
+ * modules load: the file says which restart to build, and the restart is read
+ * at module load. Asking twice must not draw twice, nor see its own first
+ * draw as "remembered".
+ */
+export function parkSeedAsked(): number {
+  return (asked ??= resolveParkSeed());
 }
 
 /**

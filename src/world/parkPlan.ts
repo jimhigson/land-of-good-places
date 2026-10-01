@@ -37,7 +37,7 @@
  */
 
 import { GroundClaims, type FeatureContribution } from '../boot/groundClaims';
-import { PARK_SEED } from './parkManifest';
+import { PARK_RESTART, PARK_SEED_ASKED } from './parkManifest';
 import type { ParkLayout } from './parkLayout';
 import { bindCastlePlacement } from './building/layout';
 import type { PlannedCoaster } from './coaster/planned';
@@ -225,7 +225,7 @@ function hydrateFeature(feature: string, file: ParkFile): FeatureContribution {
     case ROAD_FEATURE:
       return { claims: entranceRoadClaims() };
     default:
-      throw new ParkUnavailable(PARK_SEED, `its park file names a plan feature this game does not know: '${feature}'`);
+      throw new ParkUnavailable(PARK_SEED_ASKED, `its park file names a plan feature this game does not know: '${feature}'`);
   }
   return { claims: [] };
 }
@@ -253,13 +253,13 @@ function* hydratePlan(file: ParkFile): Generator<number, void, void> {
 function* decidePlan(): Generator<number, void, void> {
   const file = offeredParkFile();
   if (file) {
-    const problem = parkFileProblem(file, PARK_SEED);
-    if (problem) throw new ParkUnavailable(PARK_SEED, problem);
+    const problem = parkFileProblem(file, PARK_SEED_ASKED, PARK_RESTART);
+    if (problem) throw new ParkUnavailable(PARK_SEED_ASKED, problem);
     yield* hydratePlan(file);
     return;
   }
   const solver = parkSolver();
-  if (!solver) throw new ParkUnavailable(PARK_SEED, parkFileMissingReason() ?? 'no park file was loaded');
+  if (!solver) throw new ParkUnavailable(PARK_SEED_ASKED, parkFileMissingReason() ?? 'no park file was loaded');
   driver = solver.plan();
   yield* driver.run();
 }
@@ -279,7 +279,7 @@ function finish(): void {
   solvedClaims = parkPlanClaims().copy();
   offerPrewarmedGroundClaims(parkPlanClaims());
   if (hydrateFrom) {
-    console.info(`Park plan: seed ${PARK_SEED} hydrated from its prebuilt file (${PARK_FILE_FEATURES.join(', ')}).`);
+    console.info(`Park plan: seed ${PARK_SEED_ASKED} (restart ${PARK_RESTART}) hydrated from its prebuilt file (${PARK_FILE_FEATURES.join(', ')}).`);
   }
 }
 

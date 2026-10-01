@@ -78,7 +78,22 @@ export interface ParkFile {
   readonly format: number;
   /** `__APP_VERSION__` of the bundle this file ships in; stamped by `vite.config.ts`. */
   readonly build: string;
+  /** The park's identity — the seed a child is given, `PARK_SEED_ASKED`. */
   readonly seed: number;
+  /**
+   * Which start-again of {@link seed} this park is (`parkRestart.ts`): the
+   * restart the root acceptance loop accepted, `ACCEPTED_RESTARTS[seed]`. The
+   * boot sets it as `__LGP_PARK_RESTART__` before the park's modules load.
+   */
+  readonly restart: number;
+  /**
+   * How {@link restart} was found — every restart tried and what forced it
+   * (`scripts/lib/acceptedPark.mts`'s `acceptanceMetadata`), copied in by
+   * `build:parks` from the loop's log (`procgen/acceptanceLog.json`). Null in a
+   * file no build has shipped (a check's scratch file). Read by people, never
+   * by the game.
+   */
+  readonly acceptance: Json;
   readonly features: {
     readonly layout: LayoutRecord;
     readonly cruiser: CruiserRecord;
