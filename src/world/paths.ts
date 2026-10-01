@@ -4871,7 +4871,14 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     width: number,
   ): void => {
     nodes.push({ id, kind, x: ex, z: ez });
-    const already = distanceToRouteNetwork(network(), ex, ez) < 4;
+    // "Already on the network" means **standing on its paving**, with a foot
+    // on the path: within half a child (`PLAYER_RADIUS / 2`) of a route's own
+    // paved edge. It used to be any doormat within 4 m of a route's centre
+    // line, which left up to 2.7 m of lawn between a route's edge and a stall
+    // or ride exit that never got a spur — 8 doormats across the sixteen pool
+    // seeds' accepted parks (1.06-2.51 m), measured by
+    // `drawnPavingReachesEveryDoor`.
+    const already = pavingGapToRouteNetwork(network(), ex, ez) < PLAYER_RADIUS / 2;
     // An unpaved spur is never drawn, so the street paving its routing commits
     // must not outlive it: a later spur would branch off paving nobody laid.
     // Measured on seed 11 (eng/sphere-six-reds): stall.spaceFerrisWheel stood
@@ -7108,6 +7115,17 @@ function fallbackSpurRoute(
 }
 
 /** Min distance from (x, z) to any segment of the routes built so far. */
+/**
+ * How far (x, z) stands outside the nearest route's paving — its distance to
+ * that route's centre line less half the route's width; negative on paving.
+ * Asked of the control polyline, like {@link distanceToRouteNetwork}.
+ */
+function pavingGapToRouteNetwork(routes: readonly RouteDefinition[], x: number, z: number): number {
+  let best = Infinity;
+  for (const route of routes) best = Math.min(best, distanceToRouteNetwork([route], x, z) - route.width / 2);
+  return best;
+}
+
 function distanceToRouteNetwork(
   routes: readonly RouteDefinition[],
   x: number,
