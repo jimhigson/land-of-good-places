@@ -34,7 +34,10 @@ jobs:
   preview:
     name: Deploy PR preview
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 25, from 10: the job now solves the sixteen parks on a cache miss
+    # (`build:parks`, measured at ~4 min locally with seed 7 alone ~3.6 min,
+    # CI ~2x). The step below carries its own, tighter cap.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -56,6 +59,30 @@ jobs:
         # reasoning as deploy.yml; the counts live in `.npmrc`.
         run: pnpm install --frozen-lockfile
 
+      # **Solve the parks a child can be given, so her device does not have
+      # to** (docs/design/PREBUILT-PARKS.md). Its own step, not part of
+      # `build`, which stays a fast artefact step. Cached on the inputs
+      # `scripts/lib/park-source-hash.mjs` hashes, so a tree whose source is
+      # unchanged (a docs or workflow commit) restores the parks instead of
+      # re-solving them. A restored set whose source does not match is refused
+      # by the build's own hash check, which fails the job rather than ship
+      # it: the cache can cost a red run, never a wrong park.
+      - name: Restore prebuilt parks
+        id: parks-cache
+        uses: actions/cache@v4
+        with:
+          path: .parks
+          key: prebuilt-parks-${{ hashFiles('src/**', 'package.json', 'pnpm-lock.yaml') }}
+
+      - name: Solve the prebuilt parks
+        if: steps.parks-cache.outputs.cache-hit != 'true'
+        # A coarse bound, well inside the job's own cap: a step that runs out
+        # of time FAILS (red), where a job that does reports as cancelled. Each
+        # seed's solve also has its own timeout inside build:parks
+        # (LGP_PARK_TIMEOUT_MS), so a hung seed is named, not just slow.
+        timeout-minutes: 18
+        run: pnpm run build:parks
+
       # Client bundle only — see the on: comment above for why the check
       # suite is deliberately not run here.
       #
@@ -65,6 +92,10 @@ jobs:
       # say it — and it is the same command the deploy runs, which is the point.
       # The checks run in `checks.yml`, which is required before merge.
       - name: Build
+        # Fails rather than ship a bundle whose parks are missing or were
+        # solved from other code (`prebuiltParksPlugin` in vite.config.ts).
+        env:
+          LGP_REQUIRE_PARKS: '1'
         run: pnpm run build
 
       # `wrangler versions upload` publishes a new Worker *version* with its

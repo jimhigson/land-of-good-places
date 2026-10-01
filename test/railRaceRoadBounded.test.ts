@@ -38,8 +38,11 @@ process.env['LGP_PARK_RESTART'] = '3';
 // Through a variable, as the other tests reach Node-only scripts (`test/node-env.d.ts`).
 const HEADLESS_CANVAS = '../scripts/headless-canvas.mjs';
 await import(/* @vite-ignore */ HEADLESS_CANVAS);
-const { setParkPlanSeams, solveParkPlanNow, parkSolveStats, parkSolveTrace } = await import('../src/world/parkPlan');
-const { ParkSolveExhausted } = await import('../src/boot/parkSolve');
+// The park is solved here, in tooling: the solver and its seams live in procgen/ (#705).
+await import('../procgen/install.ts');
+const { solveParkPlanNow } = await import('../src/world/parkPlan');
+const { setParkPlanSeams, parkSolveStats, parkSolveTrace } = await import('../procgen/world/planSolver');
+const { ParkSolveExhausted } = await import('../procgen/boot/parkSolve');
 
 /** Unwinds the road may cause before its next refusal goes to decision zero. */
 const ROAD_UNWINDS = 2;

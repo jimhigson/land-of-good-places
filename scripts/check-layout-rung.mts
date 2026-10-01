@@ -45,7 +45,8 @@
  */
 import { spawnSync } from 'node:child_process';
 
-import { PARK_LAYOUT, probeDoormats, type PlacedEntry } from '../src/world/parkLayout.ts';
+import { PARK_LAYOUT, type PlacedEntry } from '../src/world/parkLayout.ts';
+import { probeDoormats } from '../procgen/world/parkLayout.ts';
 import { PARK_BOUNDARY } from '../src/world/boundary.ts';
 import { ARRIVAL_EXEMPT_NEAR } from '../src/world/streetRules.ts';
 

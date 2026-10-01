@@ -33,7 +33,7 @@ import { createHash } from 'node:crypto';
 import { buildHeadlessPark } from './park-harness.mts';
 import { PARK_RESTART, PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { PATH_GRAPH } from '../src/world/pathGraph.ts';
-import { parkPlanDecisions } from '../src/world/parkPlan.ts';
+import { parkPlanDecisions } from '../procgen/world/planSolver.ts';
 
 /**
  * Rounded to a millimetre before hashing.

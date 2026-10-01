@@ -21,11 +21,39 @@ import {
   BRIDGE_WALL_THICKNESS,
   DECK_HALF_LENGTH,
   parapetReachFor,
-  planBridgeFootprints,
+  footprintFromDecision,
   type BridgeFootprint,
+  type PlannedFootprint,
   type RealWorldQuery,
   HUMP_BLEND,
 } from './bridgeFootprint';
+import { PARK_SEED } from '../parkManifest';
+import { offeredParkFile, parkFileMissingReason } from '../prebuilt/parkFileStore';
+import { ParkUnavailable } from '../prebuilt/parkUnavailable';
+import { parkSolver } from '../prebuilt/solverPort';
+import { readBridges } from '../prebuilt/parkFile';
+
+/**
+ * Every bridge's footprint: read from the park file, or — in build tooling
+ * only — searched by the installed solver (`bridgeFootprint.ts`'s width and
+ * shift search). The game as delivered carries no search.
+ */
+function decideBridgeFootprints(crossings: readonly LevelCrossing[], real: RealWorldQuery): PlannedFootprint[] {
+  const file = offeredParkFile();
+  if (file) {
+    const decisions = readBridges(file);
+    if (decisions.length !== crossings.length) {
+      throw new ParkUnavailable(
+        PARK_SEED,
+        `its park file has ${decisions.length} bridge(s) for ${crossings.length} crossing(s)`,
+      );
+    }
+    return decisions.map((decision, i) => (decision ? footprintFromDecision(crossings[i] as LevelCrossing, decision) : null));
+  }
+  const solver = parkSolver();
+  if (!solver) throw new ParkUnavailable(PARK_SEED, parkFileMissingReason() ?? 'no park file was loaded');
+  return solver.bridgeFootprints(crossings, real);
+}
 import { TRACK_CLEARANCE } from './route';
 import { BUILDING_STEP_UP, PATH_CARRIER_SLACK, PATH_KERB_OVERHANG } from '../../core/constants';
 import { terrainHeight } from '../terrain';
@@ -623,7 +651,7 @@ export function buildBridges(
   // hump before it exists (`bridgeKeepout.ts`, the early conservative
   // pass). A `null` entry is a crossing the real, backtracking search found
   // no walkable, collision-clear bridge for at all.
-  const footprints = planBridgeFootprints(crossings, real);
+  const footprints = decideBridgeFootprints(crossings, real);
 
   for (let crossingIndex = 0; crossingIndex < crossings.length; crossingIndex += 1) {
     const crossing = crossings[crossingIndex] as LevelCrossing;

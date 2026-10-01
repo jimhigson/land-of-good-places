@@ -24,7 +24,14 @@ import {
   type RidePhase,
 } from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
-import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
+import {
+  buildRailRaceTrack,
+  LANE_COLOURS,
+  type RailRaceTrack,
+  type SparkingSegment,
+  type DecidedTrestles,
+  type TrestleSpotFinder,
+} from './track';
 import type { Claim, GroundClaims } from '../../boot/groundClaims';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
@@ -350,6 +357,13 @@ export class RailRace implements GameSystem {
    * compares a ring's drawn supports to its own slice of the one feature.
    */
   readonly supportClaims: { readonly walkPast: readonly Claim[]; readonly race: readonly Claim[] };
+  /** Both rings' trestles by ring name, as a park file records them. */
+  get trestles(): Readonly<Record<string, DecidedTrestles>> {
+    return {
+      [this.walkPastRing.track.group.name]: this.walkPastRing.track.trestles,
+      [this.raceRing.track.group.name]: this.raceRing.track.trestles,
+    };
+  }
   /**
    * The duck bars each ring lost to the road rule (slot and lane) — see
    * `RailRaceTrack.barsLostToRoad`. The fairness invariant reads it: the race
@@ -428,7 +442,7 @@ export class RailRace implements GameSystem {
   /** The running order last sent to the HUD, so it is only sent on a change. */
   private standings: number[] = [];
 
-  constructor(collision: CollisionWorld, groundClaims: GroundClaims) {
+  constructor(collision: CollisionWorld, groundClaims: GroundClaims, findSpots: TrestleSpotFinder) {
     this.collision = collision;
     this.group.name = 'railRace';
 
@@ -465,6 +479,7 @@ export class RailRace implements GameSystem {
         ringName: 'railRace:walk-past-ring',
         respectsRoad: true,
         groundClaims,
+        findSpots,
         // No finish rainbow here — see `RailRaceTrackOptions.showArch` (#299).
         showArch: false,
       }),
@@ -475,6 +490,7 @@ export class RailRace implements GameSystem {
         ringName: 'railRace:race-ring',
         respectsRoad: false,
         groundClaims,
+        findSpots,
         showArch: true,
       }),
     };

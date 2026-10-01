@@ -34,9 +34,6 @@ export const CYCLE_TDZ_BASELINE: readonly string[] = [
 
   // Genuinely at risk, each one import edge from crashing. Not yet moved.
   'src/art/style/artPalette.ts::ART',
-  'src/world/paths.ts::RAIL_CLAMP_DISTANCE',
-  'src/world/paths.ts::RAIL_STATION_GAP_MARGIN',
   'src/world/train/bridgeFit.ts::SITE_RAMP_FLOOR',
   'src/world/train/bridgeFit.ts::SITE_RAMP_IDEAL',
-  'src/world/train/crossingPlanSolve.ts::corridorBlocked',
 ];

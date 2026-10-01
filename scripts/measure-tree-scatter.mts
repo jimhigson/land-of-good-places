@@ -15,7 +15,7 @@
 import './headless-canvas.mjs';
 import { buildHeadlessPark } from './park-harness.mts';
 import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
-import { treeScatterLedger } from '../src/world/Scenery.ts';
+import { treeScatterLedger } from '../procgen/world/sceneryBuilders.ts';
 
 const { world } = buildHeadlessPark();
 process.stdout.write(
