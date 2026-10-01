@@ -154,3 +154,8 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - NOTE: every push to feat/structural-backtrack cancels the in-flight PR CI (concurrency cancel-in-progress), and
   handoff-only pushes kept killing Checks before it finished. Push handoff commits to wip/sb-merge only; move
   feat/structural-backtrack only for code, and let CI finish between. PR CI run at c7dcaf03 is the one to read.
+- sb-grid2 verified (102b3aa4, handoff only, not merged): grid on -> 0 rider overlap at rest on all 16 (closest
+  213 mm seed 1); grid off overlaps every seed. Mid-race head interpenetration 5.4-9.4% of race time (any pair),
+  0.6-1.9% player pair — numbers for Jim's lane-pitch question. Revert proof on seed 9 r4: hair|torso returns.
+- Merged #707 (path-fold invariant no 60deg skip). scatterDecoupling control fixed (6ad909cd); the locality
+  failure on canonical seed 5 -> fix/sb-scatter. 3 coplanar seams -> fix/sb-cop3. Seed 6 train search -> fix/sb-trainsearch.
