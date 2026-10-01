@@ -18,3 +18,9 @@ Do NOT raise BUSH_BUDGET.
   s3 555/2296, s4 504/1960, s5 461/2131). Park ~21140 m2. Refusals are paving, plot,
   rail, tree (all by-design clearances). Looks like space, not a bug.
 - Raw results: scratchpad/sb-bush/recorded.txt
+- DECISION: space, not a bug. Density .196-.257 clumps/legal m2 on all 16; legal 1320-2759 m2.
+  Seed 11 r0 (the only cached bush failure, 175 at an older source) now plants 379.
+- DONE: floor now count > 140 AND density > 0.15 per facts.bushLegalM2 (new fact, from
+  bushScatterLedger.measureGround grid in Scenery.ts). Proved red at BUSH_BUDGET 2100 on
+  11/4, 4/7, 8/4 (reverted).
+- NEXT: park:attempt all 16 at recorded restarts -> scratchpad/sb-bush/attempts.txt; then report.
