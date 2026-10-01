@@ -39,6 +39,7 @@ for (let i = 0; i < 720; i += 1) reach = Math.max(reach, edgeRadiusAt(PARK_BOUND
 reach = Math.ceil(reach) + 1;
 
 interface Grid {
+  gridMs: number;
   parkM2: number;
   legalM2: number;
   gridRefusals: Record<string, number>;
@@ -47,7 +48,8 @@ let grid: Grid | null = null;
 bushScatterLedger.onDone = () => {
   const probe = bushScatterLedger.probe;
   if (!probe) throw new Error('measure-bush-space: the scatter finished with no probe');
-  const g: Grid = { parkM2: 0, legalM2: 0, gridRefusals: {} };
+  const began = performance.now();
+  const g: Grid = { gridMs: 0, parkM2: 0, legalM2: 0, gridRefusals: {} };
   for (let x = -reach + 0.5; x < reach; x += 1) {
     for (let z = -reach + 0.5; z < reach; z += 1) {
       if (PARK_BOUNDARY.distanceToEdge(x, z) < 0) continue;
@@ -57,6 +59,7 @@ bushScatterLedger.onDone = () => {
       else g.gridRefusals[why] = (g.gridRefusals[why] ?? 0) + 1;
     }
   }
+  g.gridMs = Math.round(performance.now() - began);
   grid = g;
 };
 
