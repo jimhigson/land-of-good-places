@@ -170,8 +170,11 @@ export class WalkSurfaces {
         // Cheap plan reject first: the lean moves a footprint by well under
         // GARDEN_RAMP_SLACK, and this runs for every sample in the park.
         if (!regionContains(ramp.footprint, localX, localZ, GARDEN_RAMP_SLACK)) continue;
-        height = castleSurfaceY(x, z, (lx, lz) =>
-          regionContains(ramp.footprint, lx, lz) ? rampHeight(ramp, lx, lz) : null,
+        height = castleSurfaceY(
+          x,
+          z,
+          (lx, lz) => rampHeight(ramp, lx, lz),
+          (lx, lz) => regionContains(ramp.footprint, lx, lz),
         );
         if (height === null) continue;
       }

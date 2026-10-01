@@ -256,14 +256,18 @@ export function castleWorldY(localX: number, localY: number, localZ: number): nu
 
 /**
  * **World `y` of a castle-local surface over a world plan point**, or `null`
- * where the surface does not reach that column.
+ * where the surface does not cover that column.
  *
- * `surfaceAt(localX, localZ)` answers in the castle's own frame — a height over
- * its deck, or `null` off its footprint. This finds the world point straight
- * above or below `(x, z)` that lies on it, by Newton on world `y`: the frame is
- * rigid, so the castle-local height of `(x, y, z)` moves by the castle up's
- * world-`y` component per metre of `y`, and the footprint test is redone at
- * every step in the frame the surface is drawn in.
+ * `heightAt(localX, localZ)` is the surface's height over the castle's deck in
+ * its own frame, defined everywhere (a ramp's clamped profile); `covers` says
+ * where it actually exists. This finds the world point straight above or
+ * below `(x, z)` on the surface, by Newton on world `y` — the frame is rigid,
+ * so the castle-local height of `(x, y, z)` moves by the castle up's world-`y`
+ * component per metre of `y` — and only then asks `covers`, **at the converged
+ * point**. Testing the footprint at the iterates instead dropped the seam
+ * between two abutting ramps: an early guess a metre off the surface lands a
+ * quarter-metre along the lean from where the surface really is, inside one
+ * ramp's footprint and then outside it, and both answered `null`.
  *
  * This is what the garden's entrance steps are sampled through. They were
  * sampled as `BUILDING_BASE_Y + rampHeight(x − BUILDING_CENTRE_X, …)` — the
@@ -276,19 +280,19 @@ export function castleWorldY(localX: number, localY: number, localZ: number): nu
 export function castleSurfaceY(
   x: number,
   z: number,
-  surfaceAt: (localX: number, localZ: number) => number | null,
+  heightAt: (localX: number, localZ: number) => number,
+  covers: (localX: number, localZ: number) => boolean,
 ): number | null {
   const upY = castleWorldY(0, 1, 0) - castleWorldY(0, 0, 0);
   let y = BUILDING_BASE_Y;
-  for (let i = 0; i < 6; i += 1) {
+  for (let i = 0; i < 8; i += 1) {
     worldToCastle(_castleProbe.set(x, y, z), _castleLocal);
-    const height = surfaceAt(_castleLocal.x, _castleLocal.z);
-    if (height === null) return null;
-    const step = (height - _castleLocal.y) / upY;
+    const step = (heightAt(_castleLocal.x, _castleLocal.z) - _castleLocal.y) / upY;
     y += step;
     if (Math.abs(step) < 1e-7) break;
   }
-  return y;
+  worldToCastle(_castleProbe.set(x, y, z), _castleLocal);
+  return covers(_castleLocal.x, _castleLocal.z) ? y : null;
 }
 const _castleProbe = /* @__PURE__ */ new Vector3();
 const _castleLocal = /* @__PURE__ */ new Vector3();
