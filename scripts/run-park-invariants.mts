@@ -1,4 +1,9 @@
-/** Scratch: LGP_SEED=N LGP_ONLY='substr|substr' — run matching PARK_ACCEPTANCE entries on the accepted park. */
+/**
+ * Runs the `PARK_ACCEPTANCE` measures whose names contain any `LGP_ONLY`
+ * substring (`a|b`), on seed `LGP_SEED` at its accepted restart (or
+ * `LGP_PARK_RESTART`). `LGP_CONTROL=<module>` first hands the built facts to a
+ * control (`scripts/controls/*.mts`) that plants a defect, to watch a measure go red.
+ */
 import './headless-canvas.mjs';
 import { ACCEPTED_RESTARTS } from '../src/world/acceptedRestarts.ts';
 const seed = Number(process.env['LGP_SEED'] ?? 0);
