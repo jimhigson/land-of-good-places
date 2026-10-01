@@ -146,6 +146,15 @@ export function parkSolveStats(): SolveStats | null {
   return driver?.stats ?? null;
 }
 
+/**
+ * The plan's settled decisions, `feature#section attempt=n`, in ledger order —
+ * for `scripts/scatter-digest.mts`, so two parks built to differ in one spur
+ * can prove they did not differ in their layout too.
+ */
+export function parkPlanDecisions(): readonly string[] {
+  return (driver?.decisions ?? []).map((entry) => `${entry.feature}#${entry.section} attempt=${entry.attempt}`);
+}
+
 /** Which features the driver has placed so far, in order — for the boot screen's stage line. */
 export function parkPlanPlaced(): readonly string[] {
   return driver?.placedFeatures ?? [];

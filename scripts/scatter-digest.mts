@@ -33,6 +33,7 @@ import { createHash } from 'node:crypto';
 import { buildHeadlessPark } from './park-harness.mts';
 import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { PATH_GRAPH } from '../src/world/pathGraph.ts';
+import { parkPlanDecisions } from '../src/world/parkPlan.ts';
 
 /**
  * Rounded to a millimetre before hashing.
@@ -140,6 +141,13 @@ const stretchedSpur =
 
 const summary = {
   seed: PARK_SEED_ASKED,
+  /**
+   * Which attempt each plan decision settled on. The bow must change one
+   * spur's paving and nothing upstream of it: if the bowed paths are refused
+   * and the plan unwinds to another layout, the comparison is between two
+   * different parks and says nothing about the scatter.
+   */
+  plan: parkPlanDecisions(),
   paths: { metres: Number(pathMetres.toFixed(3)), digest: digestOf(pathLabels) },
   spur: { name: stretchedSpurName, points: stretchedSpur },
   spurStretch: Number(process.env['LGP_SPUR_STRETCH'] ?? 0),
