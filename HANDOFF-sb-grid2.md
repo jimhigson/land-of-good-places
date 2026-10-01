@@ -66,3 +66,5 @@ seed 15 REST grid=off: inside=21702 closest-when-clear=Infinitymm
 seed 15 MID: any 5.6%  player-pair 1.9%
 ```
 - [x] 1, [x] 2 done. Next: check:coplanar (logs scratchpad sb-grid2/coplanar.log)
+- check:coplanar (grid on): exit 1, but hair.shell.crop finding gone (0 mentions). 3 NEW unrelated: facePaintStall cylinder|terrain (seed 2), stone-walls box|terrain (seed 10), fairy-string-59|60 (seed 15).
+- Revert proof running: simulate.ts gridSetback temporarily `return 0` (UNCOMMITTED, restore with git checkout src/world/railRace/simulate.ts).
