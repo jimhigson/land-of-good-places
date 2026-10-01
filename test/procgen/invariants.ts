@@ -8512,14 +8512,21 @@ const pathsMeetBridgesOnlyAtTheirEnds: Invariant = (facts) => {
       }
     }
 
-    // The route(s) this bridge carries: whoever owns the paving over its span.
+    // The route(s) this bridge carries: whoever owns the paving over its span —
+    // asked of each surface triangle's centroid, since a ribbon's vertices
+    // are its two edges and those lie outside the deck's walkable half-width.
     const carried = new Set<number>();
     for (const mesh of layers) {
       if (mesh.name !== 'path-surface') continue;
       const position = mesh.geometry.getAttribute('position');
+      const index = mesh.geometry.getIndex();
       const owners = ownersOf(mesh)!;
-      for (let v = 0; v < position.count; v += 1) {
-        if (bridge.deckCovers(position.getX(v), position.getZ(v))) carried.add(owners[v]!);
+      const count = index ? index.count : position.count;
+      for (let slot = 0; slot + 2 < count; slot += 3) {
+        const ids = [0, 1, 2].map((k) => (index ? index.getX(slot + k) : slot + k));
+        const x = (position.getX(ids[0]!) + position.getX(ids[1]!) + position.getX(ids[2]!)) / 3;
+        const z = (position.getZ(ids[0]!) + position.getZ(ids[1]!) + position.getZ(ids[2]!)) / 3;
+        if (bridge.deckCovers(x, z)) carried.add(owners[ids[0]!]!);
       }
     }
     if (carried.size === 0) {
@@ -8558,7 +8565,7 @@ const pathsMeetBridgesOnlyAtTheirEnds: Invariant = (facts) => {
       const [route, layer] = key.split('|');
       complaints.push(
         isCarriedName(route!, carried, nameOf)
-          ? `${route}, which ${group.name} carries, has ${hit.count} ${layer} triangle(s) running through its ${hit.what} ` +
+          ? `${route}, which runs over ${group.name}'s deck, has ${hit.count} ${layer} triangle(s) running through its ${hit.what} ` +
               `near (${fmt(hit.at)}) — it leaves the bridge through the side, not over an end`
           : `${route}'s ${layer} runs into the side of ${group.name}: ${hit.count} triangle(s) overlap its drawn ` +
               `${hit.what} near (${fmt(hit.at)}) — a path into a wall`,
