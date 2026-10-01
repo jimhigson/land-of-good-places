@@ -8777,6 +8777,7 @@ const theGateIsAHoleInTheWall: Invariant = (facts) => {
         for (const fz of [0, 0.5, 1]) {
           corner.set(
             box.min.x + (box.max.x - box.min.x) * fx,
+            // flat-ok: the block geometry's own object-local box, carried through its instance matrix below
             box.min.y,
             box.min.z + (box.max.z - box.min.z) * fz,
           );

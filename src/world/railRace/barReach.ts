@@ -102,7 +102,9 @@ export function laneEnvelope(scale: number): LaneEnvelope {
   return {
     halfWidth: Math.max(sleeperLength / 2, cartHalfWidth),
     // The drawn sleeper's bottom, or the cart's own underside if that hangs lower.
+    // flat-ok: the cart asset's own object-local box, measured in the cart's frame (y is the cart's up), never a world-axis box
     below: Math.max(railRadius + sleeperThickness, -cart.min.y * scale),
+    // flat-ok: the same object-local cart box, cart frame
     above: cart.max.y * scale,
   };
 }
@@ -201,6 +203,7 @@ export function duckBarIntrusions(route: RailRaceRoute, barLane: number, matrix:
   const steps = Math.max(1, Math.ceil((box.max.x - box.min.x) / BAR_SAMPLE_STEP));
   for (let i = 0; i <= steps; i += 1) {
     const x = box.min.x + ((box.max.x - box.min.x) * i) / steps;
+    // flat-ok: corners of the bar geometry's own object-local box, each carried through the bar's matrix below
     for (const y of [box.min.y, box.max.y]) {
       for (const z of [box.min.z, box.max.z]) {
         _world.copy(_local.set(x, y, z)).applyMatrix4(matrix);
