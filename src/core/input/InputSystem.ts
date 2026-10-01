@@ -88,15 +88,6 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
  *   key or stick is touched ({@link manualMoveActive}) the navigation input is
  *   ignored, so walking manually always wins.
  */
-/**
- * How long after a touch a mouse event is taken to be the browser's
- * compatibility echo of it rather than a real mouse — see
- * `InputSystem.isTouchCompatMouse`. Compat events follow `touchend` within the
- * same task, so this is generous; a person switching from finger to mouse in
- * under a second loses at most one click.
- */
-const TOUCH_COMPAT_WINDOW_MS = 1000;
-
 export class InputSystem {
   // Raw device state ------------------------------------------------------
   private readonly heldKeys = new Set<string>();
@@ -161,8 +152,11 @@ export class InputSystem {
   private lastDeviceUsed: 'keyboard' | 'gamepad' = 'keyboard';
 
   private attached = false;
-  /** `event.timeStamp` of the last touch seen — see {@link isTouchCompatMouse}. */
-  private lastTouchAt = Number.NEGATIVE_INFINITY;
+  /**
+   * The `pointerType` of the last `pointerdown` — see {@link isTouchCompatMouse}.
+   * `null` until one is seen.
+   */
+  private lastPointerType: string | null = null;
 
   // ---------------------------------------------------------------- setup
 
@@ -177,10 +171,9 @@ export class InputSystem {
     target.addEventListener('mousedown', this.onMouseDown);
     target.addEventListener('mouseup', this.onMouseUp);
     target.addEventListener('contextmenu', this.onContextMenu);
-    // Capture, so a handler that stops propagation cannot hide a touch from
-    // the compat-mouse guard; passive, because this only ever reads the time.
-    target.addEventListener('touchstart', this.onTouch, { capture: true, passive: true });
-    target.addEventListener('touchend', this.onTouch, { capture: true, passive: true });
+    // Capture, so a handler that stops propagation cannot hide a pointer from
+    // the compat-mouse guard; passive, because this only reads `pointerType`.
+    target.addEventListener('pointerdown', this.onPointerDown, { capture: true, passive: true });
   }
 
   detach(target: Window = window): void {
@@ -194,8 +187,7 @@ export class InputSystem {
     target.removeEventListener('mousedown', this.onMouseDown);
     target.removeEventListener('mouseup', this.onMouseUp);
     target.removeEventListener('contextmenu', this.onContextMenu);
-    target.removeEventListener('touchstart', this.onTouch, { capture: true });
-    target.removeEventListener('touchend', this.onTouch, { capture: true });
+    target.removeEventListener('pointerdown', this.onPointerDown, { capture: true });
   }
 
   /**
@@ -561,32 +553,42 @@ export class InputSystem {
   };
 
   /**
-   * **A finger is not a mouse.** After a touch, the browser fires
-   * compatibility `mousedown`/`mouseup` for it (unless the `pointerdown` was
-   * `preventDefault`ed), both in one task. Before {@link clickedMouseButtons}
-   * those were invisible here, because they started and ended inside one
-   * frame; now they would count, and every tap-to-move on a tablet would press
+   * **A finger is not a mouse.** After a touch (or pen) tap, the browser fires
+   * compatibility `mousedown`/`mouseup` for it, both in one task, unless the
+   * `pointerdown` was `preventDefault`ed. Before {@link clickedMouseButtons}
+   * those were invisible here, because they started and ended inside one frame;
+   * now they would count, and every tap-to-move on a tablet would press
    * button 0 — today a one-frame `boost` nobody outside the rail race reads,
-   * tomorrow a phantom press of whatever a mouse button is bound to. So a mouse
-   * event is ignored when the browser says it came from touch
-   * (`sourceCapabilities.firesTouchEvents`, Chromium) or when it lands within
-   * {@link TOUCH_COMPAT_WINDOW_MS} of a touch (everywhere else).
+   * tomorrow a phantom press of whatever a mouse button is bound to.
+   *
+   * So a `mousedown` counts only if the `pointerdown` that preceded it said
+   * `pointerType === 'mouse'`. Every browser that fires compat mouse events
+   * fires `pointerdown` first, carrying what really made the press. **No time
+   * window**: an earlier version ignored mouse presses within a second of any
+   * touch, and on a touchscreen laptop that swallowed a real right-button hold
+   * — the whole duck, not one click. Asking the event what it is has no such
+   * edge.
+   *
+   * `null` (no `pointerdown` ever seen — a runtime without Pointer Events) is
+   * taken as a mouse, which is exactly how this behaved before the guard.
    */
-  private isTouchCompatMouse(event: MouseEvent): boolean {
-    const caps = (event as MouseEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } | null })
-      .sourceCapabilities;
-    if (caps?.firesTouchEvents === true) return true;
-    return event.timeStamp - this.lastTouchAt < TOUCH_COMPAT_WINDOW_MS;
+  private isTouchCompatMouse(): boolean {
+    return this.lastPointerType !== null && this.lastPointerType !== 'mouse';
   }
 
-  private readonly onTouch = (event: Event): void => {
-    this.lastTouchAt = event.timeStamp;
+  private readonly onPointerDown = (event: PointerEvent): void => {
+    this.lastPointerType = event.pointerType;
   };
 
   private readonly onMouseDown = (event: MouseEvent): void => {
-    if (this.isTouchCompatMouse(event)) return;
+    // An echo of a touch is not input at all: it presses nothing and, just as
+    // deliberately, leaves `lastDeviceUsed` alone — a finger is not evidence
+    // that she has picked up the keyboard-and-mouse.
+    if (this.isTouchCompatMouse()) return;
     this.heldMouseButtons.add(event.button);
     this.clickedMouseButtons.add(event.button);
+    // A real mouse is reported as `'keyboard'`: the device union has no mouse,
+    // and keyboard-and-mouse is one desk, so the prompts it drives are right.
     this.lastDeviceUsed = 'keyboard';
   };
 

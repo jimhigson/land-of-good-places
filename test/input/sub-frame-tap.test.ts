@@ -41,6 +41,13 @@ function mouse(
   target.dispatchEvent(event);
 }
 
+function pointer(target: Target, pointerType: 'mouse' | 'touch' | 'pen', at: number): void {
+  const event = new Event('pointerdown');
+  Object.defineProperty(event, 'pointerType', { value: pointerType });
+  Object.defineProperty(event, 'timeStamp', { value: at });
+  target.dispatchEvent(event);
+}
+
 function touch(target: Target, type: 'touchstart' | 'touchend', at: number): void {
   const event = new Event(type);
   Object.defineProperty(event, 'timeStamp', { value: at });
@@ -112,37 +119,63 @@ describe('a press shorter than one frame', () => {
 /**
  * **A finger is not a mouse.** A touch tap is followed by the browser's
  * compatibility mousedown/mouseup in one task; once sub-frame clicks started
- * counting, every tablet tap would have pressed button 0. With the guard in
- * `onMouseDown` removed, the first two cases go red; the third is the control
- * that the guard does not swallow a real mouse.
+ * counting, every tablet tap would have pressed button 0. A mouse press counts
+ * only if the `pointerdown` before it was a mouse.
+ *
+ * With the guard in `onMouseDown` removed, the first two cases go red. The last
+ * case went red against the previous, time-window guard (a real right-button
+ * hold within a second of a touch was swallowed on a touchscreen laptop).
  */
 describe("a touch's compatibility mouse events", () => {
   it('a mouse click echoing a touch presses nothing', () => {
     const { input, target } = fresh();
     input.setMouseCaptureActive(true);
-    touch(target, 'touchstart', 5000);
-    touch(target, 'touchend', 5080);
+    pointer(target, 'touch', 5000);
     mouse(target, 'mousedown', 2, 5081);
     mouse(target, 'mouseup', 2, 5081);
     input.update();
     expect(input.isDown('duck')).toBe(false);
   });
 
-  it('Chromium saying the click came from touch is believed, with no touch event seen', () => {
+  it('a pen is not a mouse either', () => {
     const { input, target } = fresh();
     input.setMouseCaptureActive(true);
-    mouse(target, 'mousedown', 2, 9000, true);
-    mouse(target, 'mouseup', 2, 9000, true);
+    pointer(target, 'pen', 9000);
+    mouse(target, 'mousedown', 2, 9000);
+    mouse(target, 'mouseup', 2, 9000);
     input.update();
     expect(input.isDown('duck')).toBe(false);
   });
 
-  it('a real mouse a while after a touch still works', () => {
+  it('a real mouse click counts', () => {
     const { input, target } = fresh();
     input.setMouseCaptureActive(true);
-    touch(target, 'touchend', 1000);
-    mouse(target, 'mousedown', 2, 3000, false);
-    mouse(target, 'mouseup', 2, 3000, false);
+    pointer(target, 'mouse', 3000);
+    mouse(target, 'mousedown', 2, 3000);
+    mouse(target, 'mouseup', 2, 3000);
+    input.update();
+    expect(input.isDown('duck')).toBe(true);
+  });
+
+  it('with no pointer events at all, a mouse is a mouse (the behaviour before the guard)', () => {
+    const { input, target } = fresh();
+    input.setMouseCaptureActive(true);
+    mouse(target, 'mousedown', 2, 100);
+    input.update();
+    expect(input.isDown('duck')).toBe(true);
+  });
+
+  it('a touchscreen laptop: a real mouse held within a second of a touch still ducks', () => {
+    const { input, target } = fresh();
+    input.setMouseCaptureActive(true);
+    pointer(target, 'touch', 1000);
+    touch(target, 'touchstart', 1000);
+    touch(target, 'touchend', 1080);
+    // Then her hand goes to the mouse and holds the right button.
+    pointer(target, 'mouse', 1500);
+    mouse(target, 'mousedown', 2, 1500, false);
+    input.update();
+    expect(input.isDown('duck')).toBe(true);
     input.update();
     expect(input.isDown('duck')).toBe(true);
   });
