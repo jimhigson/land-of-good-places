@@ -131,3 +131,12 @@ coping chamfer (#698 fix/procgen-last has the fix).
   torso seed 9 (character art only; does not affect acceptance).
 - Coordinator's extra asks: (a) PR + preview deep-link screenshots per visible change + duck bar across lanes shot,
   (d) Checks shards under 30 min (last CI: max 9.9 min; recheck on PR run). (b),(c) done.
+
+## 1 Oct (resumed after usage limit)
+- Re-record at c5023dc0 had finished (table written 25 Sep 09:41); committed 135f20c8. Scratch logs were wiped.
+- Merged fix/sb-grid (staggered start grid). Helpers: fix/sb-grid2 (finish its verification), fix/sb-bush (Jim: lower
+  bush floor if it is space — measure). Another agent narrows duck bars (Jim: yes) — merge when it reports.
+- Jim: slide head tip-back — leave. Path folds & #705 restart-from-file now with other agents.
+- PR #706 opened: feat/structural-backtrack (fast-forwarded to wip/sb-merge) -> feat/procgen-on-sphere.
+  Keep pushing wip/sb-merge AND `git push origin HEAD:feat/structural-backtrack`.
+- TODO: after duck bars + bush merge -> re-record; verification; preview deep-link screenshots; shard timings.
