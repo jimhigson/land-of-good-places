@@ -229,8 +229,16 @@ export function buildPaths(): Mesh[] {
   // can later leave out what another route's paving buries — see `KerbCover`.
   const surfaceOwners: number[] = [];
   const kerbOwners: number[] = [];
+  // …and every vertex too, so a measure can ask which route laid a stretch of
+  // the drawn paving off the mesh itself (`test/procgen`'s bridge-side
+  // invariant): a vertex keeps its number through every re-index `KerbCover`
+  // does, where a triangle's position in the index does not.
+  const surfaceVertexOwners: number[] = [];
+  const kerbVertexOwners: number[] = [];
   const own = (list: number[], builder: GeometryBuilder, owner: number): void => {
     while (list.length < builder.triangleCount) list.push(owner);
+    const vertices = builder === surface ? surfaceVertexOwners : kerbVertexOwners;
+    while (vertices.length < builder.vertexCount) vertices.push(owner);
   };
   ROUTES.forEach((route, owner) => {
     const curve = routeCurve(route);
@@ -273,6 +281,14 @@ export function buildPaths(): Mesh[] {
   const kerbMesh = new Mesh(kerb.build(), pathKerbMaterial());
   kerbMesh.name = 'path-kerb';
   kerbMesh.receiveShadow = true;
+
+  // Owners: an index into `ownerNames` (a route), or negative — the plaza
+  // ({@link PLAZA_OWNER}) or a junction apron ({@link JUNCTION_OWNER_BASE}).
+  const ownerNames = ROUTES.map((route) => route.name);
+  surfaceMesh.userData['vertexOwners'] = Int32Array.from(surfaceVertexOwners);
+  surfaceMesh.userData['ownerNames'] = ownerNames;
+  kerbMesh.userData['vertexOwners'] = Int32Array.from(kerbVertexOwners);
+  kerbMesh.userData['ownerNames'] = ownerNames;
 
   drawnLayers = [
     { mesh: kerbMesh, lift: PATH_KERB_LIFT },

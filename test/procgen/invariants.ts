@@ -8357,6 +8357,226 @@ const noDrawnPathEndsStrandedOnABridge: Invariant = (facts) => {
   return complaints;
 };
 
+/** Do two convex plan polygons overlap by more than `depth` metres (separating-axis test)? */
+function convexPlanOverlap(
+  a: readonly (readonly [number, number])[],
+  b: readonly (readonly [number, number])[],
+  depth: number,
+): boolean {
+  for (const poly of [a, b]) {
+    for (let i = 0; i < poly.length; i += 1) {
+      const p = poly[i]!;
+      const q = poly[(i + 1) % poly.length]!;
+      let nx = -(q[1] - p[1]);
+      let nz = q[0] - p[0];
+      const length = Math.hypot(nx, nz);
+      if (length < 1e-9) continue;
+      nx /= length;
+      nz /= length;
+      let aMin = Infinity;
+      let aMax = -Infinity;
+      for (const v of a) {
+        const d = v[0] * nx + v[1] * nz;
+        aMin = Math.min(aMin, d);
+        aMax = Math.max(aMax, d);
+      }
+      let bMin = Infinity;
+      let bMax = -Infinity;
+      for (const v of b) {
+        const d = v[0] * nx + v[1] * nz;
+        bMin = Math.min(bMin, d);
+        bMax = Math.max(bMax, d);
+      }
+      if (Math.min(aMax, bMax) - Math.max(aMin, bMin) <= depth) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * How deep a paving triangle has to reach into a bridge wall, in plan, to
+ * count: a centimetre — float noise on a ribbon edge laid exactly along a
+ * parapet's inner face is not a path running into the wall.
+ */
+const BRIDGE_SIDE_DEPTH = 0.01;
+
+/**
+ * **Paths meet a bridge only at its two ends.**
+ *
+ * Jim, 1 October 2026: *"…and also that don't go through the sides of
+ * bridges?"* — and, three times before that about one bridge (#414): *"there
+ * is also a path that runs into the side of the bridge — basically runs into
+ * a solid wall"*. The bridge-paving invariants above each ask about the paving
+ * a bridge *carries* — lifted to the hump, over its own stone, not stranded,
+ * not a sheet, not in the tunnel. None asks about paving the bridge does not
+ * carry, and none asks where the carried paving gets on and off.
+ *
+ * So, measured off the built meshes, per bridge:
+ *
+ * 1. **No other route's paving touches the bridge** — no triangle of any other
+ *    route's surface or kerb overlaps, in plan, a stretch of the bridge's
+ *    drawn parapet ({@link ParkFacts.bridgeParapetRings}, where a parapet is
+ *    actually standing) or any of its drawn stone that stands more than a
+ *    child's step ({@link BUILDING_STEP_UP}) above the lawn. A path laid into
+ *    the side of the masonry is a path into a wall.
+ * 2. **The route it carries stays between its parapets** — none of that
+ *    route's own *surface* overlaps a parapet, so it gets on and off only
+ *    through the deck's two open ends. (Its kerb is drawn out under the
+ *    parapet by design — `Bridge.pavingHeightAt` — so it is not asked.)
+ *
+ * Which route a bridge carries is read off the mesh as well: the owner
+ * (`pathGraph.ts`'s per-vertex `vertexOwners`) of the paving over the bridge's
+ * central span, `deckCovers`.
+ */
+const pathsMeetBridgesOnlyAtTheirEnds: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const bridges = facts.world.train.bridges;
+  if (bridges.length === 0) return complaints;
+  const layers: Mesh[] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (object instanceof Mesh && (object.name === 'path-surface' || object.name === 'path-kerb')) layers.push(object);
+  });
+  if (layers.length !== 2) {
+    return [`expected both drawn path layers, found ${layers.length} — this invariant is measuring nothing`];
+  }
+  const ownersOf = (mesh: Mesh): Int32Array | null => {
+    const owners = mesh.userData['vertexOwners'];
+    return owners instanceof Int32Array && owners.length === mesh.geometry.getAttribute('position').count ? owners : null;
+  };
+  const names = (layers[0]!.userData['ownerNames'] ?? []) as readonly string[];
+  for (const mesh of layers) {
+    if (!ownersOf(mesh)) {
+      return [`the drawn ${mesh.name} carries no per-vertex route owners — pathGraph.ts has changed and nothing can be attributed`];
+    }
+  }
+  const nameOf = (owner: number): string => (owner >= 0 ? (names[owner] ?? `route ${owner}`) : owner === -1 ? 'the plaza' : 'a junction apron');
+
+  // Each bridge's drawn walls and raised stone, in plan.
+  const groups = facts.world.train.group.getObjectByName('railway-bridges')?.children ?? [];
+  if (groups.length !== bridges.length) {
+    return [`${bridges.length} bridge(s) built but ${groups.length} bridge groups found — measuring the wrong stone`];
+  }
+  const corner = new Vector3();
+  let wallsMeasured = 0;
+  let stoneMeasured = 0;
+  let trianglesJudged = 0;
+  for (let b = 0; b < bridges.length; b += 1) {
+    const bridge = bridges[b]!;
+    const group = groups[b]!;
+    group.updateMatrixWorld(true);
+    type Poly = readonly (readonly [number, number])[];
+    const walls: Poly[] = [];
+    for (const side of [0, 1]) {
+      const rings = facts.bridgeParapetRings.filter((ring) => ring.bridge === group.name).filter((_, i) => i % 2 === side);
+      for (let i = 0; i + 1 < rings.length; i += 1) {
+        const r0 = rings[i]!;
+        const r1 = rings[i + 1]!;
+        if (!r0.expected || !r1.expected) continue;
+        walls.push([r0.outer, r1.outer, r1.inner, r0.inner]);
+      }
+    }
+    const stone: Poly[] = [];
+    group.traverse((object) => {
+      if (!(object instanceof Mesh) || object.name === 'deck') return;
+      const position = object.geometry.getAttribute('position');
+      const index = object.geometry.getIndex();
+      const count = index ? index.count : position.count;
+      for (let slot = 0; slot + 2 < count; slot += 3) {
+        const tri: [number, number][] = [];
+        let tallest = -Infinity;
+        for (let k = 0; k < 3; k += 1) {
+          const v = index ? index.getX(slot + k) : slot + k;
+          corner.set(position.getX(v), position.getY(v), position.getZ(v)).applyMatrix4(object.matrixWorld);
+          tri.push([corner.x, corner.z]);
+          tallest = Math.max(tallest, altitudeAt(corner.x, corner.y, corner.z));
+        }
+        if (tallest > BUILDING_STEP_UP) stone.push(tri);
+      }
+    });
+    wallsMeasured += walls.length;
+    stoneMeasured += stone.length;
+    if (walls.length === 0) {
+      complaints.push(`${group.name} has no standing parapet to measure against — this bridge asserted nothing`);
+      continue;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const poly of [...walls, ...stone]) {
+      for (const [x, z] of poly) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minZ = Math.min(minZ, z);
+        maxZ = Math.max(maxZ, z);
+      }
+    }
+
+    // The route(s) this bridge carries: whoever owns the paving over its span.
+    const carried = new Set<number>();
+    for (const mesh of layers) {
+      if (mesh.name !== 'path-surface') continue;
+      const position = mesh.geometry.getAttribute('position');
+      const owners = ownersOf(mesh)!;
+      for (let v = 0; v < position.count; v += 1) {
+        if (bridge.deckCovers(position.getX(v), position.getZ(v))) carried.add(owners[v]!);
+      }
+    }
+    if (carried.size === 0) {
+      complaints.push(`${group.name} carries no drawn paving over its span — nothing crosses it`);
+    }
+
+    const found = new Map<string, { at: readonly [number, number]; count: number; what: string }>();
+    for (const mesh of layers) {
+      const position = mesh.geometry.getAttribute('position');
+      const index = mesh.geometry.getIndex();
+      const owners = ownersOf(mesh)!;
+      const count = index ? index.count : position.count;
+      for (let slot = 0; slot + 2 < count; slot += 3) {
+        const ids = [0, 1, 2].map((k) => (index ? index.getX(slot + k) : slot + k));
+        const tri = ids.map((v) => [position.getX(v), position.getZ(v)] as const);
+        if (
+          tri.every(([x]) => x < minX) || tri.every(([x]) => x > maxX) ||
+          tri.every(([, z]) => z < minZ) || tri.every(([, z]) => z > maxZ)
+        ) continue;
+        const owner = owners[ids[0]!]!;
+        const isCarried = carried.has(owner);
+        if (isCarried && mesh.name !== 'path-surface') continue;
+        trianglesJudged += 1;
+        let what: string | null = null;
+        if (walls.some((wall) => convexPlanOverlap(tri, wall, BRIDGE_SIDE_DEPTH))) what = 'parapet';
+        else if (!isCarried && stone.some((s) => convexPlanOverlap(tri, s, BRIDGE_SIDE_DEPTH))) what = 'stone';
+        if (!what) continue;
+        const key = `${nameOf(owner)}|${mesh.name}|${what}`;
+        const at = [(tri[0]![0] + tri[1]![0] + tri[2]![0]) / 3, (tri[0]![1] + tri[1]![1] + tri[2]![1]) / 3] as const;
+        const was = found.get(key);
+        if (was) was.count += 1;
+        else found.set(key, { at, count: 1, what });
+      }
+    }
+    for (const [key, hit] of found) {
+      const [route, layer] = key.split('|');
+      complaints.push(
+        isCarriedName(route!, carried, nameOf)
+          ? `${route}, which ${group.name} carries, has ${hit.count} ${layer} triangle(s) running through its ${hit.what} ` +
+              `near (${fmt(hit.at)}) — it leaves the bridge through the side, not over an end`
+          : `${route}'s ${layer} runs into the side of ${group.name}: ${hit.count} triangle(s) overlap its drawn ` +
+              `${hit.what} near (${fmt(hit.at)}) — a path into a wall`,
+      );
+    }
+  }
+  process.stderr.write(
+    `  pathsMeetBridgesOnlyAtTheirEnds: ${bridges.length} bridge(s), ${wallsMeasured} parapet stretches and ` +
+      `${stoneMeasured} raised stone triangles, ${trianglesJudged} paving triangles judged on seed ${facts.seed}\n`,
+  );
+  return complaints;
+};
+
+function isCarriedName(route: string, carried: ReadonlySet<number>, nameOf: (owner: number) => string): boolean {
+  for (const owner of carried) if (nameOf(owner) === route) return true;
+  return false;
+}
+
 /**
  * **The railway is crossed on purpose, and mostly on bridges.**
  *
@@ -12833,6 +13053,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     everyProvenBridgeSiteKeepsItsBridge,
   ],
   ['no drawn path ends in mid-air on a bridge', noDrawnPathEndsStrandedOnABridge],
+  ['paths meet a bridge only at its two ends, never through its side', pathsMeetBridgesOnlyAtTheirEnds],
   ['no drawn paving stands up on edge as a sheet', noDrawnPavingStandsUpAsASheet],
   [
     'no bridge stands where the crossing planner proved none fits',
