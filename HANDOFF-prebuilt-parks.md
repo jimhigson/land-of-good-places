@@ -75,3 +75,10 @@ Design: `docs/design/PREBUILT-PARKS.md` (also PR #704, draft). Base: origin/feat
 - In progress: fresh accept:parks 0-15 --write in worktree prebuilt-parks-accept (snapshot 3ecc4fa9); its
   restarts must equal the recorded ones (proves the move changed no park); copy acceptanceLog.json back.
 - Then: build:parks (digest proof at accepted restarts), check, test:procgen, coplanar, swept-bus, preview.
+- DONE: fresh accept:parks 0-15 reproduced all 16 recorded restarts (acceptedRestarts.ts byte-identical);
+  log committed as procgen/acceptanceLog.json. build:parks at accepted restarts: 16/16 proven, 1100 s / 4 lanes,
+  2061 KB raw / 613 KB brotli. Seed 6 (restart 5) = 971 s (train search 507 s) -> CI caps raised
+  (per-seed 30 min, step 50, preview job 60, deploy 70). fix/sb-trainsearch (other agent) is making it cheaper;
+  if it moves parks they re-record restarts and tell me -> rebuild.
+- Rebased onto wip/sb-merge c7dcaf03 (park-identity.mts imports re-pointed to procgen/).
+- Next: gates (check, swept-bus, coplanar, test:procgen) running; then PR body, CI, preview, report.
