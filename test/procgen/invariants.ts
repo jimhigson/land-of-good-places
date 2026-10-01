@@ -12409,8 +12409,11 @@ const theParkIsFurnished: Invariant = (facts) => {
   // older source) does not reproduce: that park plants 379 today.
   //
   // - **Density > 0.15 per legal m2** — 23% under the thinnest park (.196).
-  //   Halving the candidate budget halves it: proved red with `BUSH_BUDGET`
-  //   at 2100, see the numbers below.
+  //   Halving the candidate budget halves it. Proved red, `BUSH_BUDGET` 2100,
+  //   against the parks in the table above: 11/4 302 clumps on 2759 m2 =
+  //   .109, 4/7 (the densest park) 263 on 1960 = .134, 8/4 132 on 1320 =
+  //   .100 — all three red on density, 8/4 on the count too. The flat 180
+  //   this replaced let 11/4 and 4/7 through.
   // - **Count > 140** — half the thinnest supported park (seed 8, 284). Below
   //   that a park has under ~650 m2 a bush may stand on, outside anything
   //   measured here, and the bush clearance invariants would be asserting
