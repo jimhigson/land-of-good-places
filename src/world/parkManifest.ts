@@ -1,6 +1,6 @@
 import type { AnchorFootprint } from './anchors';
 import { CASTLE_DOORMAT_LOCAL } from './building/frontDoor';
-import { TOWER_FACADE_ALONG } from './hotel/towerDimensions';
+import { TOWER_DOOR_BAND_OUTER, TOWER_DRAWN_DOOR_ALONG } from './hotel/towerDimensions';
 import { resolveParkSeed } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
 import { CASTLE_PLOT_REACH, PARK_SURFACE_SCALE } from '../core/constants';
@@ -149,14 +149,16 @@ export interface ManifestEntry {
    * faces +Z on every bearing, so its path arrived 12 m away round the side
    * (seed 0, 1 Oct 2026 — `drawnPavingReachesEveryDoor`).
    *
-   * - `{ reach }` — the doormat stands `reach` metres from the plot centre on
-   *   the line it would have anyway (the camera's, or the middle's).
+   * - `{ reach, pavedTo? }` — the doormat stands `reach` metres from the plot
+   *   centre on the line it would have anyway (the camera's, or the middle's);
+   *   with `pavedTo`, the paving runs on past it towards the centre to there —
+   *   for a door drawn at the back of a recess the child is let in before.
    * - `{ local, facing }` — the doormat stands at `local` from the *drawn*
    *   centre (`footprintAsPlaced`'s nudge applied), and is approached along
    *   `facing`, whatever bearing the plot stands on.
    */
   readonly door?:
-    | { readonly reach: number }
+    | { readonly reach: number; readonly pavedTo?: number }
     | { readonly local: readonly [number, number]; readonly facing: readonly [number, number] };
 }
 
@@ -270,9 +272,10 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     boundingRadius: 9,
     band: { min: 10, max: 90 },
     near: { id: 'building', min: 28, max: 42 },
-    // The doormat at the tower's own facade, where the sliding doors are —
-    // not past the crystal skirt the plot's radius describes.
-    door: { reach: TOWER_FACADE_ALONG },
+    // The doormat on the door's trigger, where walking on is walking in — not
+    // past the crystal skirt the plot's radius describes — and the paving on
+    // into the recess to the sliding doors themselves.
+    door: { reach: TOWER_DOOR_BAND_OUTER, pavedTo: TOWER_DRAWN_DOOR_ALONG },
     // Jim's ruling, 7 Aug: ALL assets face the camera. The tower's door, its
     // awning and its doormat all derive from this one flag, exactly like a
     // stall's counter — without it the solver faced the door at the park

@@ -1,4 +1,4 @@
-import { TOWER_SHELL_RADIUS, TOWER_BACK_ALONG, TOWER_FACADE_ALONG } from './towerDimensions';
+import { TOWER_SHELL_RADIUS, TOWER_BACK_ALONG, TOWER_FACADE_ALONG, TOWER_DOOR_BAND_OUTER } from './towerDimensions';
 import {
   BoxGeometry,
   type PerspectiveCamera,
@@ -2247,7 +2247,7 @@ export class Hotel implements GameSystem {
     // through the door and the trigger said she was not — the sort of gap
     // between two hand-copied depths this repo has been bitten by six times
     // in a day (CLAUDE.md, "Two definitions of one thing").
-    const outer = TOWER_FACADE_ALONG + 0.4;
+    const outer = TOWER_DOOR_BAND_OUTER;
     const centre = (TOWER_BACK_ALONG + outer) / 2;
     return {
       what: "the hotel tower's front door",

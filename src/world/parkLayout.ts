@@ -257,6 +257,17 @@ function drawnCentreOf(entry: ManifestEntry, x: number, z: number): readonly [nu
   return [x - (x / length) * BUILDING_CENTRE_NUDGE, z - (z / length) * BUILDING_CENTRE_NUDGE];
 }
 
+/**
+ * How far the paving runs on past this plot's doormat, towards the plot centre,
+ * to reach a door drawn at the back of a recess (`ManifestEntry.door.pavedTo`);
+ * zero for every other plot.
+ */
+export function pavedPastTheDoormat(entry: PlacedEntry): number {
+  const door = PARK_MANIFEST.find((candidate) => candidate.id === entry.id)?.door;
+  if (!door || !('reach' in door) || door.pavedTo === undefined) return 0;
+  return Math.max(0, door.reach - door.pavedTo);
+}
+
 /** Does this plot declare a door of its own (`ManifestEntry.door`)? */
 export function hasOwnDoor(id: string): boolean {
   return PARK_MANIFEST.some((candidate) => candidate.id === id && candidate.door !== undefined);

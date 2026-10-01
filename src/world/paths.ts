@@ -3,7 +3,7 @@ import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
 import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
-import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong, entranceFacing, hasOwnDoor } from './parkLayout';
+import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong, entranceFacing, hasOwnDoor, pavedPastTheDoormat } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN, RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN } from './train/plan';
 import { STATION_GAP } from './train/fence';
@@ -4904,10 +4904,15 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       const edge = edgeDistanceAlong(placedTarget.footprint, (ex - towardX) / l, (ez - towardZ) / l);
       pastReach = Math.max(0, Math.min(pastReach, l - edge - PAST_CLEARANCE));
     }
+    // A door at the back of a recess (`door.pavedTo`, the hotel's) is paved
+    // on into it, straight in along the doormat's own facing.
+    const pavedOn = placedTarget ? pavedPastTheDoormat(placedTarget) : 0;
     const past: readonly (readonly [number, number])[] =
-      l > 1e-6 && pastReach > 1e-6
-        ? [[ex + ((towardX - ex) / l) * pastReach, ez + ((towardZ - ez) / l) * pastReach]]
-        : []; // no "past the doormat" when the node is its own destination
+      pavedOn > 1e-6 && placedTarget
+        ? [[ex - entranceFacing(placedTarget)[0] * pavedOn, ez - entranceFacing(placedTarget)[1] * pavedOn]]
+        : l > 1e-6 && pastReach > 1e-6
+          ? [[ex + ((towardX - ex) / l) * pastReach, ez + ((towardZ - ez) / l) * pastReach]]
+          : []; // no "past the doormat" when the node is its own destination
     // Arrive HEAD-ON, not obliquely. The doormat faces the park middle (the
     // solver put it there), and the booth's own counter walls flank it — a
     // branch point far off that axis used to draw a straight leg that grazed

@@ -49,7 +49,7 @@
  * pool, went red).
  */
 import { describe, it, beforeAll, expect } from 'vitest';
-import { InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
+import { Box3, InstancedMesh, Matrix4, Mesh, Raycaster, Vector3, type Object3D } from 'three';
 import { WIDEST_FLOWER } from '../../src/world/flowerDimensions.ts';
 import {
   buildParkFacts,
@@ -85,7 +85,6 @@ import { frameFor } from '../../src/world/train/bridgeSpine.ts';
 // Leaf module: reaches only core/constants, core/uiScale and (type-only)
 // world/interact — nothing seeded, so a static import cannot fix the park.
 import {
-  distanceToBand,
   type PortalBand,
   differentActions,
   sameStorey,
@@ -1382,28 +1381,31 @@ const everyDoormatIsReachableFromTheGate: Invariant = (facts) => {
 };
 
 /**
- * The ground just outside a walk-through door: marched out from the band's
- * centre along its own outward axis (`yaw`, which faces out of the building
- * for every exterior door) to the first point past the band where a child of
- * her own radius stands on the **lawn** — not on the castle's plinth or its
- * steps, and not against the facade. That is where a path has to arrive for
- * the door to be "at the end of the path". `null` if no such point is found
- * within ten metres, which is reported, never skipped.
+ * **Where a door is drawn, on the lawn a path should arrive at**: on the door
+ * trigger's own outward axis, at the furthest reach along it of the mesh that
+ * *is* the door's front — the castle's `entrance-steps` (so, the foot of its
+ * steps) and the hotel tower's `tower-door-glow` (the recess panel its sliding
+ * leaves stand in front of). Read off the built scene, so a door that moves in
+ * the art moves this with it. `null` when the mesh is not in the scene, which
+ * is reported, never skipped.
  */
-function doorstepOf(facts: ParkFacts, band: PortalBand): readonly [number, number] | null {
+function drawnDoorstep(facts: ParkFacts, band: PortalBand, meshName: string): readonly [number, number] | null {
+  let root: Object3D = facts.world.garden.group;
+  while (root.parent) root = root.parent;
+  const mesh = root.getObjectByName(meshName);
+  if (!mesh) return null;
+  mesh.updateWorldMatrix(true, true);
+  const box = new Box3().setFromObject(mesh);
+  if (box.isEmpty()) return null;
   const outX = Math.sin(band.yaw);
   const outZ = Math.cos(band.yaw);
-  for (let along = 0; along <= 10; along += 0.05) {
-    const x = band.centreX + outX * along;
-    const z = band.centreZ + outZ * along;
-    if (distanceToBand(band, x, z) <= 0) continue;
-    if (!facts.isStandable(x, z)) continue;
-    const ground = terrainHeight(x, z);
-    const underfoot = facts.world.building.surfaces.sample(x, z, ground + 1);
-    if (Math.abs(underfoot - ground) > BUILDING_STEP_UP / 4) continue;
-    return [x, z];
+  let reach = -Infinity;
+  for (const x of [box.min.x, box.max.x]) {
+    for (const z of [box.min.z, box.max.z]) {
+      reach = Math.max(reach, (x - band.centreX) * outX + (z - band.centreZ) * outZ);
+    }
   }
-  return null;
+  return [band.centreX + outX * reach, band.centreZ + outZ * reach];
 }
 
 /**
@@ -1429,12 +1431,18 @@ function doorstepOf(facts: ParkFacts, band: PortalBand): readonly [number, numbe
  * stand on the doormat with a foot on the path:
  *
  * - **every exterior door** — the hotel tower's and the castle's front door —
- *   at the lawn just outside its own trigger band ({@link doorstepOf}), read
- *   off the built doors, not off the layout's `entrance` the router aims at;
+ *   where its front is *drawn* ({@link drawnDoorstep}: the hotel's sliding
+ *   doors at the back of their recess, the foot of the castle's steps), read
+ *   off the built scene, not off the layout's `entrance` the router aims at;
  * - **every other anchor's entrance** (the rides whose fence gap is built
  *   facing it), **every stall's stand point**, **every station's** and **every
  *   ride exit**.
  */
+/** The castle's front door — the one of its door bands that opens onto the park. */
+function castleFrontDoorBand(facts: ParkFacts): PortalBand | null {
+  return facts.world.building.doorBands().find((band) => facts.boundary.distanceToEdge(band.centreX, band.centreZ) > 0) ?? null;
+}
+
 const drawnPavingReachesEveryDoor: Invariant = (facts) => {
   const meshes: Mesh[] = [];
   facts.world.garden.group.traverse((object) => {
@@ -1451,12 +1459,14 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
   const joined = floodPaving(raster, cellOf(raster, atGate.at[0], atGate.at[1]), BUILDING_STEP_UP);
 
   const doors: { id: string; at: readonly [number, number] | null }[] = [];
-  const bands = [facts.world.hotel.towerDoorBand(), ...facts.world.building.doorBands()].filter(
-    // The castle interior's exit door stands in its own space hundreds of
-    // metres out; only a door that opens onto the park has a path to arrive at.
-    (band) => facts.boundary.distanceToEdge(band.centreX, band.centreZ) > 0,
-  );
-  for (const band of bands) doors.push({ id: band.what, at: doorstepOf(facts, band) });
+  // The two doors that open onto the park, each with the mesh that is its front.
+  const bands = [
+    { band: facts.world.hotel.towerDoorBand(), front: 'tower-door-glow' },
+    { band: castleFrontDoorBand(facts), front: 'entrance-steps' },
+  ];
+  for (const { band, front } of bands) {
+    doors.push({ id: band ? band.what : `the door '${front}' stands in`, at: band ? drawnDoorstep(facts, band, front) : null });
+  }
   const doored = new Set(['anchor:hotel', 'anchor:building']);
   for (const entrance of facts.entrances) {
     if (!doored.has(entrance.id)) doors.push({ id: entrance.id, at: [entrance.x, entrance.z] });
@@ -1470,7 +1480,7 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
   let worst = 0;
   for (const door of doors) {
     if (!door.at) {
-      complaints.push(`${door.id}: no lawn a child can stand on found within 10 m outside it — nothing to measure`);
+      complaints.push(`${door.id}: its drawn front was not found in the built scene — nothing to measure`);
       continue;
     }
     const [x, z] = door.at;
