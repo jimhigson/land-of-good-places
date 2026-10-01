@@ -47,10 +47,11 @@ import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { AttemptVerdict } from '../park-attempt.mts';
+import { parkSourceHash } from './park-source-hash.mjs';
 
 const run = promisify(execFile);
 
@@ -181,31 +182,19 @@ export async function acceptPark(
 }
 
 /**
- * **Everything an acceptance verdict depends on**, hashed: the generator
- * (`src/`), the measures (`test/procgen/`, `scripts/` — the harness, the
- * attempt, `parkFindings`), and the toolchain (`package.json`,
- * `pnpm-lock.yaml`). A verdict is a fact about exactly this; change any of it
- * and the verdict must be taken again. The one owner of that question — the
- * prebuilt park build keys its files on it too.
+ * **Everything an acceptance verdict depends on**, hashed: the files
+ * `scripts/lib/park-source-hash.mjs` hashes — the game (`src/`), the generator
+ * (`procgen/`), the measures (`test/procgen/`, `scripts/` — the harness, the
+ * attempt, `parkFindings`) and the toolchain — plus every `LGP_*` switch that
+ * changes a build. A verdict is a fact about exactly this; change any of it
+ * and the verdict must be taken again. The files are the prebuilt parks'
+ * `sourceHash` too, one owner for both: a park file and the verdict that
+ * accepted its restart are about the same source.
  */
 export function acceptanceSourceHash(): string {
   const hash = createHash('sha256');
-  const files: string[] = [];
-  const walk = (dir: string): void => {
-    for (const name of readdirSync(dir).sort()) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else files.push(path);
-    }
-  };
-  for (const dir of ['src', 'test/procgen', 'scripts']) walk(join(REPO, dir));
-  files.push(join(REPO, 'package.json'), join(REPO, 'pnpm-lock.yaml'));
-  for (const file of files) {
-    hash.update(relative(REPO, file));
-    hash.update('\0');
-    hash.update(readFileSync(file));
-    hash.update('\0');
-  }
+  hash.update(parkSourceHash(REPO));
+  hash.update('\0');
   // Every other `LGP_*` switch changes what a park build does
   // (`LGP_LAYOUT_RUNG=off`, `LGP_WARP`, …), so a verdict taken under one is
   // not a verdict about the park without it.

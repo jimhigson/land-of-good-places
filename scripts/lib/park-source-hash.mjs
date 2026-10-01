@@ -1,8 +1,14 @@
 // @ts-check
 /**
- * **What a prebuilt park was solved from** — one hash over every input that
- * can change a park: all of `src/`, `package.json` (the Node and three.js the
- * solve ran under are pinned through it) and `pnpm-lock.yaml`.
+ * **What a prebuilt park was solved from, and what its acceptance was measured
+ * against** — one hash over every input that can change a park or the verdict
+ * on it:
+ *
+ * - the game (`src/`) and the generator (`procgen/`), which build it;
+ * - the measures that accept or reject it — `test/procgen/` (the invariants,
+ *   `parkFacts.ts`) and `scripts/` (`park-attempt.mts`, `lib/parkFindings.mts`);
+ * - `package.json` (the Node and three.js the solve ran under are pinned
+ *   through it) and `pnpm-lock.yaml`.
  *
  * `scripts/build-parks.mts` writes it into `.parks/manifest.json`, and
  * `vite.config.ts` recomputes it before shipping those files: a park solved
@@ -18,6 +24,11 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+
+/** The directories hashed whole, relative to the repository root. */
+export const PARK_SOURCE_DIRS = ['src', 'procgen', 'test/procgen', 'scripts'];
+/** The single files hashed beside them. */
+export const PARK_SOURCE_FILES = ['package.json', 'pnpm-lock.yaml'];
 
 /** @param {string} dir @returns {string[]} */
 function filesUnder(dir) {
@@ -36,7 +47,10 @@ function filesUnder(dir) {
  * @returns {string} sha256, hex
  */
 export function parkSourceHash(root) {
-  const files = [...filesUnder(join(root, 'src')), join(root, 'package.json'), join(root, 'pnpm-lock.yaml')]
+  const files = [
+    ...PARK_SOURCE_DIRS.flatMap((dir) => filesUnder(join(root, dir))),
+    ...PARK_SOURCE_FILES.map((file) => join(root, file)),
+  ]
     .map((path) => relative(root, path).split(sep).join('/'))
     .sort();
   const hash = createHash('sha256');
