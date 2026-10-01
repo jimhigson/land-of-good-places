@@ -663,7 +663,7 @@ export function fairyPoleBuilder(
           //
           // It is not a theoretical wrong way round. Lighting two thirds of
           // the paths and letting poles name blockers took seed 131 from 182
-          // bushes to 177 and tripped the park's own floor of 180 — measured
+          // bushes to 177 and tripped the park's bush floor (then a flat 180) — measured
           // against the base with the layout proved unmoved and `unwinds=0` on
           // both sides, so it was displacement through accommodation and
           // nothing else. Yielding costs a handful of poles out of ~100 and

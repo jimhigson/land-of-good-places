@@ -12377,38 +12377,55 @@ const theParkIsFurnished: Invariant = (facts) => {
   // `Scenery.ts`'s `BUSH_BUDGET`). That makes thinning something that can
   // now happen quietly, so it gets a guard.
   //
-  // **The table that stood here was the same stale one `Scenery.ts` was
-  // carrying** — 149 / 128 / 137 / 142 / 140, a copy kept in step by hand
-  // and, by #500, wrong by two to four times. Two definitions of one
-  // measurement, which is this repo's most-repeated bug; the owner of what
-  // the budget buys is `Scenery.ts`'s `BUSH_BUDGET` comment, and this
-  // quotes no numbers of its own beyond the one it asserts.
+  // **Two clauses, because a bush count alone cannot tell "no room" from "a
+  // thinned scatter"** (Jim, Oct 2026: *"if it runs out of space it is ok to
+  // lower the minimum bush count"*). Clumps never refuse each other, so the
+  // scatter plants, near enough, its budget times the share of its candidates
+  // that land on legal ground — the count is a measure of **legal area**, not
+  // of how hard the scatter tried. So the floor is a density against that
+  // area, measured by asking the scatter's own gate over a 1 m grid
+  // (`facts.bushLegalM2`; `bushScatterLedger` in `Scenery.ts`), plus a low
+  // absolute floor so a park with no ground left cannot pass vacuously.
   //
-  // **And 107 had stopped guarding the thing the budget exists for.** It
-  // was chosen when every seed planted 108, so it read as "no seed is
-  // worse off than before". Today the five parks plant 295 / 266 / 201 /
-  // 483 / 456, so a change that halved the scatter — the exact failure
-  // `BUSH_BUDGET` was raised to 4200 to prevent, and the cheapest possible
-  // way to make a clearance invariant go green — would leave the thinnest
-  // park at 100 and this line **still green**. A floor that only fires
-  // after a two-thirds collapse is not a floor.
+  // Measured on the sixteen supported parks at their recorded restarts
+  // (`LGP_SEED=s LGP_PARK_RESTART=r pnpm run -s measure:bush-space`, Oct 2026,
+  // `BUSH_BUDGET` 4200; park ~21140 m2 each), as seed/restart: clumps
+  // standing, legal m2, clumps per legal m2:
   //
-  // So it guards the property the budget was actually chosen for: **no
-  // park is thinner than the day before #500**, whose worst park was 203.
-  // 180 is that, less about a tenth for ordinary seed-to-seed drift as the
-  // geometry moves — the thinnest park today (201) clears it by 21.
+  //   0/8 393 1855 .212    4/7 504 1960 .257    8/4 284 1320 .215   12/0 528 2444 .216
+  //   1/2 311 1423 .219    5/0 461 2131 .216    9/3 569 2505 .227   13/2 534 2453 .218
+  //   2/5 555 2434 .228    6/5 512 2071 .247   10/3 293 1323 .221   14/6 321 1637 .196
+  //   3/2 555 2296 .242    7/3 602 2411 .250   11/4 615 2759 .223   15/5 390 1730 .225
   //
-  // **What a 50% thinning actually does to it, measured rather than
-  // assumed** — the budget halved to 2100 plants 139 / 145 / 98 / 237 /
-  // 220 across canonical / 5 / 11 / 24 / 131, so **three of the five go
-  // red** at 180 where **one** did at 107. Not all five: seeds 24 and 131
-  // sit high enough that halving still leaves them over the bar. A floor
-  // is a per-park guard and the parks are not alike, so no single number
-  // catches every thinning everywhere — the same thing the tree floor's
-  // comment above says about its own 24, and the reason running on five
-  // seeds is what does the work rather than the cleverness of the number.
-  // Three suites going red at once is a loud enough signal.
-  floor(facts.bushes.length, 180, 'the park planted almost no bushes');
+  // and on rejected restarts of seed 11 (r0-r3: 379/1737, 388/1714, 363/1494,
+  // 429/1890 — .218-.243). Density sits in .196-.257 everywhere; what differs
+  // between parks is only the legal ground, 6-13% of the park. Where it goes:
+  // paving (with a bush's 2.15 m reach), plots (bounding radius + 2.5 m +
+  // reach), the railway corridor and the canopies of trees — every one a
+  // clearance some invariant asks for, none a sampler gap. The candidate
+  // refusals tell the same story in the same proportions, so the sampler
+  // reaches every region in proportion to its area. The one bush-floor
+  // failure the acceptance loop ever recorded (seed 11 restart 0, 175, at an
+  // older source) does not reproduce: that park plants 379 today.
+  //
+  // - **Density > 0.15 per legal m2** — 23% under the thinnest park (.196).
+  //   Halving the candidate budget halves it: proved red with `BUSH_BUDGET`
+  //   at 2100, see the numbers below.
+  // - **Count > 140** — half the thinnest supported park (seed 8, 284). Below
+  //   that a park has under ~650 m2 a bush may stand on, outside anything
+  //   measured here, and the bush clearance invariants would be asserting
+  //   over almost nothing.
+  //
+  // Do not raise `BUSH_BUDGET` to pass this, and do not tune it to a park:
+  // re-measure, and if the density moved, find out why.
+  floor(facts.bushes.length, 140, 'the park planted almost no bushes');
+  const bushDensity = facts.bushLegalM2 > 0 ? facts.bushes.length / facts.bushLegalM2 : 0;
+  if (!(bushDensity > 0.15)) {
+    complaints.push(
+      `the bush scatter is thin for its ground: ${facts.bushes.length} clumps on ${facts.bushLegalM2} m2 a clump ` +
+        `could legally stand on is ${bushDensity.toFixed(3)} per m2, needs more than 0.15`,
+    );
+  }
   // Climbable trees get their own floor, separate from the walk-distance
   // invariant, because the two fail differently: the distance check goes
   // red when they are badly spread, this one when there are simply too few.

@@ -11,12 +11,11 @@
  *
  * - `tried` / `planted` and `refusals` by kind — every candidate the scatter
  *   drew, and the reason its own gate gave (`bushScatterLedger.verdicts`);
- * - `legalM2` — a 1 m grid over the park asked the **same gate**
- *   (`bushScatterLedger.probe`) at the moment the scatter finished, so the
- *   world is the one the scatter saw (no lamps, poles or rail-race ring yet,
- *   and no bush colliders: clumps never refuse each other). `parkM2` is the
- *   grid points inside the boundary, and `gridRefusals` the same breakdown
- *   over area rather than over candidates;
+ * - `legalM2` — a 1 m grid over the park asked the **same gate** at the
+ *   moment the scatter finished (`bushScatterLedger.ground`; see its comment
+ *   for which world that is). `parkM2` is the grid points inside the
+ *   boundary, and `gridRefusals` the same breakdown over area rather than
+ *   over candidates;
  * - `decided` — clumps the world phase committed, and `standing` — clumps
  *   left after the build (a ride's pylons fell what they land on).
  *
@@ -32,36 +31,7 @@ if (!Number.isInteger(seed) || seed < 0 || !Number.isInteger(restart) || restart
 }
 
 const { bushScatterLedger } = await import('../src/world/Scenery.ts');
-const { PARK_BOUNDARY, edgeRadiusAt } = await import('../src/world/boundary.ts');
-
-let reach = 0;
-for (let i = 0; i < 720; i += 1) reach = Math.max(reach, edgeRadiusAt(PARK_BOUNDARY, (i / 720) * Math.PI * 2));
-reach = Math.ceil(reach) + 1;
-
-interface Grid {
-  gridMs: number;
-  parkM2: number;
-  legalM2: number;
-  gridRefusals: Record<string, number>;
-}
-let grid: Grid | null = null;
-bushScatterLedger.onDone = () => {
-  const probe = bushScatterLedger.probe;
-  if (!probe) throw new Error('measure-bush-space: the scatter finished with no probe');
-  const began = performance.now();
-  const g: Grid = { gridMs: 0, parkM2: 0, legalM2: 0, gridRefusals: {} };
-  for (let x = -reach + 0.5; x < reach; x += 1) {
-    for (let z = -reach + 0.5; z < reach; z += 1) {
-      if (PARK_BOUNDARY.distanceToEdge(x, z) < 0) continue;
-      g.parkM2 += 1;
-      const why = probe(x, z);
-      if (why === null) g.legalM2 += 1;
-      else g.gridRefusals[why] = (g.gridRefusals[why] ?? 0) + 1;
-    }
-  }
-  g.gridMs = Math.round(performance.now() - began);
-  grid = g;
-};
+bushScatterLedger.measureGround = true;
 
 const { buildHeadlessPark } = await import('./park-harness.mts');
 const { world } = buildHeadlessPark();
@@ -73,6 +43,7 @@ for (const verdict of bushScatterLedger.verdicts.values()) {
   else refusals[verdict] = (refusals[verdict] ?? 0) + 1;
 }
 const standing = world.scenery.bushes.length;
+const ground = bushScatterLedger.ground;
 console.log(
   `bush-space: ${JSON.stringify({
     seed,
@@ -81,7 +52,9 @@ console.log(
     planted,
     standing,
     refusals: Object.fromEntries(Object.entries(refusals).sort((a, b) => b[1] - a[1])),
-    ...(grid ?? { parkM2: null, legalM2: null }),
+    parkM2: ground?.parkM2 ?? null,
+    legalM2: ground?.legalM2 ?? null,
+    gridRefusals: ground?.refusals ?? null,
   })}`,
 );
 process.exit(0);

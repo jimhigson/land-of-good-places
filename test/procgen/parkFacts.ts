@@ -828,6 +828,15 @@ export interface ParkFacts {
   readonly trees: readonly TreeFact[];
   /** Every bush clump standing in the park. See {@link BushFact}. */
   readonly bushes: readonly BushFact[];
+  /**
+   * Square metres of the park a bush clump could legally have stood on when
+   * the bush scatter ran — a 1 m grid asked the scatter's own gate
+   * (`bushScatterLedger` in `Scenery.ts`, one owner), against the world as the
+   * scatter saw it. What the bush floor in `theParkIsFurnished` measures the
+   * planted count against, so a park short of bushes for want of room is told
+   * apart from a scatter that was thinned.
+   */
+  readonly bushLegalM2: number;
   /** The subset of {@link trees} a child is offered a climb on. */
   readonly climbableTrees: readonly ClimbableTreeFact[];
   readonly lamps: readonly (readonly [number, number])[];
@@ -1719,8 +1728,14 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
     throw new Error(`parkFacts: asked for restart ${restart} of seed ${seed} but the park built restart ${PARK_RESTART}.`);
   }
 
+  // Asked before the build: the scatter measures its legal ground the moment
+  // it finishes, against the world as it saw it, which is gone afterwards.
+  const { bushScatterLedger } = await import('../../src/world/Scenery.ts');
+  bushScatterLedger.measureGround = true;
   const headless = buildHeadlessPark();
   const { world, scene, buildMs, sample } = headless;
+  const bushGround = bushScatterLedger.ground;
+  if (!bushGround) throw new Error('parkFacts: the bush scatter never finished, so its legal ground was never measured');
 
   // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
   // already built for this exact seed — never at this file's own top level,
@@ -3920,6 +3935,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     walls,
     trees,
     bushes,
+    bushLegalM2: bushGround.legalM2,
     climbableTrees,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     fairyLights: fairyLightsDrawn,

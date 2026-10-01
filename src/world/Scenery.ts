@@ -841,21 +841,53 @@ export function treeBuilder(
  * step aside is re-placed through the same gate, clear of the asker.
  */
 /**
- * **What the bush scatter did with each candidate, for measurement only.**
- * Keyed by candidate index, so a candidate the driver re-asks after a `back()`
- * overwrites its own verdict rather than counting twice. `probe` is the
- * builder's own gate ({@link bushBuilder}'s `refusalAt`) as it stands when the
- * scatter last ran, so a grid sample of "where could a clump legally go" asks
- * the one owner, not a copy. Read by `scripts/measure-bush-space.mts`, which
- * is the evidence behind the bush floor in `theParkIsFurnished`; nothing in
- * the game reads it.
+ * **What the bush scatter did, and how much ground it had — for measurement
+ * only.** Nothing in the game reads this.
+ *
+ * - `verdicts`: each candidate's answer from the scatter's own gate, keyed by
+ *   candidate index, so a candidate the driver re-asks after a `back()`
+ *   overwrites its verdict rather than counting twice.
+ * - `ground`: set `measureGround` before the park builds and, when the scatter
+ *   reaches its budget, a 1 m grid over the park is asked **the same gate**
+ *   (`refusalAt` in {@link bushBuilder}) against the world exactly as the
+ *   scatter saw it — before any later feature, and with no bush colliders,
+ *   since clumps never refuse each other. `legalM2` is the ground a clump
+ *   could legally stand on; `refusals` says, by the first reason the gate
+ *   gave, where the rest went. About half a second of grid.
+ *
+ * Read by `scripts/measure-bush-space.mts` and by `parkFacts.ts`
+ * (`bushLegalM2`, which the bush floor in `theParkIsFurnished` divides by).
  */
+export interface BushGround {
+  readonly parkM2: number;
+  readonly legalM2: number;
+  readonly refusals: Readonly<Record<string, number>>;
+}
 export const bushScatterLedger: {
   readonly verdicts: Map<number, string>;
-  probe: ((x: number, z: number) => string | null) | null;
-  /** Called when the scatter reaches its budget, with the world as the scatter saw it. */
-  onDone: (() => void) | null;
-} = { verdicts: new Map(), probe: null, onDone: null };
+  measureGround: boolean;
+  ground: BushGround | null;
+} = { verdicts: new Map(), measureGround: false, ground: null };
+
+/** A 1 m grid of the park asked `refusalAt`. See {@link bushScatterLedger}. */
+function measureBushGround(refusalAt: (x: number, z: number) => string | null): BushGround {
+  let reach = 0;
+  for (let i = 0; i < 720; i += 1) reach = Math.max(reach, edgeRadiusAt(PARK_BOUNDARY, (i / 720) * TAU));
+  reach = Math.ceil(reach) + 1;
+  let parkM2 = 0;
+  let legalM2 = 0;
+  const refusals: Record<string, number> = {};
+  for (let x = -reach + 0.5; x < reach; x += 1) {
+    for (let z = -reach + 0.5; z < reach; z += 1) {
+      if (PARK_BOUNDARY.distanceToEdge(x, z) < 0) continue;
+      parkM2 += 1;
+      const why = refusalAt(x, z);
+      if (why === null) legalM2 += 1;
+      else refusals[why] = (refusals[why] ?? 0) + 1;
+    }
+  }
+  return { parkM2, legalM2, refusals };
+}
 
 export function bushBuilder(
   collision: CollisionWorld,
@@ -884,7 +916,7 @@ export function bushBuilder(
   };
   const accept = (x: number, z: number, keepClearOf: readonly Claim[]): boolean => refusalAt(x, z, keepClearOf) === null;
   bushScatterLedger.verdicts.clear();
-  bushScatterLedger.probe = (x, z) => refusalAt(x, z, []);
+  bushScatterLedger.ground = null;
 
   const roll = (rng: Rng, x: number, z: number): InstanceItem[] => {
     const blobs = rng.int(2, 3);
@@ -931,7 +963,7 @@ export function bushBuilder(
         out.push(decision);
         return increment(decision, 'at');
       }
-      bushScatterLedger.onDone?.();
+      if (bushScatterLedger.measureGround) bushScatterLedger.ground = measureBushGround((x, z) => refusalAt(x, z, []));
       return 'done';
     },
     back() {
