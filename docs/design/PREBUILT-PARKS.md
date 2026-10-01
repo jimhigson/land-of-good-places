@@ -45,6 +45,45 @@ all, and seeds 0..15 are the only parks. What shipped:
   perturbed file to digest differently. `check:prebuilt-park` runs the same on
   the default seed in the chain.
 
+### Accepted restarts (1 October, on structural-backtrack)
+
+Since structural-backtrack (#706), a seed's park is not always its first
+attempt. The root acceptance loop (`scripts/lib/acceptedPark.mts`) starts the
+whole park again with a fresh generation seed until a restart passes every
+acceptance measure, and records the accepted restart per seed in
+`src/world/acceptedRestarts.ts`. Every Node build reads that record. The park
+file now carries it too (**format 3**):
+
+- **`restart`** — the accepted restart, `ACCEPTED_RESTARTS[seed]`. The restart
+  is read once at module load (`parkRestart.ts`), so the boot
+  (`boot/prebuiltPark.ts`) sets it as `__LGP_PARK_RESTART__` **before**
+  `bootstrap.ts` imports the game. To learn the seed without loading the park,
+  the boot asks `parkSeedAsked()`, the same once-per-page answer that
+  `parkManifest.ts` reads. `check:prebuilt-park` proves that nothing
+  `bootstrap.ts` loads statically is `parkManifest.ts`. Proved red by adding
+  that import (the closure grows from 15 to 20 modules), with `main.ts` as the
+  control. The plan refuses a file whose `seed` or `restart` is not this
+  park's.
+- **`acceptance`** — how the restart was found: every restart tried, what
+  forced each one, the driver's backtracking inside it, and the source the
+  verdicts were taken against (`acceptanceMetadata`). The loop takes minutes
+  per seed, so it does not run in CI. `accept:parks --write` records the log
+  beside the restarts, in `procgen/acceptanceLog.json`, and `build:parks`
+  copies a seed's entry into its file after the proof. The game never reads
+  it. `check:accepted-restarts` proves that every entry accepted the recorded
+  restart.
+- **The proof is at the accepted restart.** The solve builds the recorded
+  restart. The hydrate takes the restart from the file, as the browser does.
+  A seed passes only if solve, file and hydrate all name the recorded restart,
+  on top of the digest, no-search and control conditions above.
+- **One source hash.** `scripts/lib/park-source-hash.mjs` hashes `src/`,
+  `procgen/`, `test/procgen/` (the invariants, `parkFacts.ts`), `scripts/`
+  (`park-attempt.mts`, `lib/parkFindings.mts`), `package.json` and the
+  lockfile. It is the park files' `sourceHash` and the base of
+  `acceptanceSourceHash`, so a change to a measure re-solves the parks, just
+  as it re-takes the verdicts. (It used to hash `src/` alone, which had
+  silently stopped covering the generator when it moved to `procgen/`.)
+
 ### Sizes of the sixteen parks (format 2, as built)
 
 Measured by `pnpm run build:parks` on an M-series Mac; every row proven.
@@ -364,13 +403,14 @@ fresh draw from `PARK_SEED_POOL` (10 seeds; `CANONICAL_PARK_SEED` =
 
 - **`pnpm run build:parks`** (`scripts/build-parks.mts`) solves each pool
   seed in its own process (the seed is read once at import), writes
-  `.parks/<seed>.json` with a `sourceHash` of the generator inputs (`src/**`,
-  `package.json`, `pnpm-lock.yaml`), and verifies each file by hydrating it in
+  `.parks/<seed>.json` with a `sourceHash` of the generator and measure inputs
+  (`src/`, `procgen/`, `test/procgen/`, `scripts/`, `package.json`,
+  `pnpm-lock.yaml`), and verifies each file by hydrating it in
   a second process (section 5). Lanes in parallel.
 - **`pnpm run build` stays `vite build`**, fast, and never solves. Its plugin
   (`prebuiltParksPlugin` in `vite.config.ts`) emits `.parks/*.json` into
   `dist/parks/`, stamping `build`. If `.parks/` is **missing** it emits none
-  and says so (the client solves — correct, slower). If it is present but its
+  and says so (the game then has no parks, and says so). If it is present but its
   `sourceHash` does not match the source being built, **the build fails**:
   shipping a park solved from other code is the one outcome that must be
   impossible. `LGP_REQUIRE_PARKS=1` (set in `deploy.yml` and
