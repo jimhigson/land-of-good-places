@@ -1,0 +1,1393 @@
+{
+ "0": {
+  "restart": 8,
+  "attempts": 9,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 8,9,10,11,12,26,27,28,29,30,39,40,46,47,48; lane 1: 1,2,3,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 23668
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "nothing a bridge builds hangs into its own tunnel, measured by ray from the rail",
+      "count": 1,
+      "first": "bridge-2.0 leaves only 3.89 m of air over the rail against the 3.90 m the train and its riders sweep to — lowest built stone is archRing at (1.8, -46.4)"
+     },
+     {
+      "measure": "every bridge is as wide as its own path, with the rail corridor open beneath",
+      "count": 1,
+      "first": "the bridge at (4.1, -45.4) has built geometry only 3.89 m over the track bed (at 2.5 m along the rail, -1.3 m off its centre) — the train sweeps to 3.90 m, so it would drive into or through it"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 684926
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no two close destinations are left with a wildly disproportionate paved detour",
+      "count": 1,
+      "first": "'ferrisWheel' and 'stall.spaceFerrisWheel' are 8.1 m apart in a straight line but 160.4 m apart by paving (19.82x, wasting 152.3 m) — closer than 24.1 m (2x the park's own 12.0 m median destination spacing) with no direct connector between them"
+     },
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "hole in a path: 0.08 m² of lawn at (-9.10, -26.10), more than the 0.05 m² allowed"
+     },
+     {
+      "measure": "check:rail-race",
+      "count": 1,
+      "first": "FAIL: a child tapping 3/s and ducking half the bars wins only 4/24 seeds at level 3 — hard mode is meant to be hard, not shut. Raise PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL."
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 422545
+   },
+   {
+    "restart": 3,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "hole in a path: 0.10 m² of lawn at (0.90, 52.70), more than the 0.05 m² allowed"
+     },
+     {
+      "measure": "a child can walk in through the front gate",
+      "count": 1,
+      "first": "the walk in from the arch stops 7.5 m inside it; nothing connects that to the 12 m mark within the arch's own 8.6 m width. The corridor, '.' walked, 'o' open but cut off, '#' no room:\n    1.0 m in  ###.............##\n    1.5 m in  ..................\n    2.0 m in  ..................\n    2.5 m in  ..................\n    3.0 m in  ##................\n    3.5 m in  ####..........###.\n    4.0 m in  ######........###.\n    4.5 m in  #######.......###.\n    5.0 m in  #########.........\n    5.5 m in  ###########.......\n    6.0 m in  ############......\n    6.5 m in  ##############....\n    7.0 m in  ################..\n    7.5 m in  #################.\n    8.0 m in  ##################\n    8.5 m in  ##################\n    9.0 m in  ##################\n    9.5 m in  oo################\n   10.0 m in  oooo##############\n   10.5 m in  ooooo#############\n   11.0 m in  ooooooo###########\n   11.5 m in  ooooooooo#########\n   12.0 m in  ooooooooooo#######"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 206074
+   },
+   {
+    "restart": 4,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "notch of lawn where paving meets at a path end: 0.31 m² of lawn at (0.00, 54.00), more than the 0.05 m² allowed"
+     },
+     {
+      "measure": "check:rail-race",
+      "count": 1,
+      "first": "FAIL: only 19.7 m of track is visible in front of the rider in the tightest window shape, which is less than the 20.25 m the rig is solved to promise. A window shape must never see less than the promise, only more."
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 179338
+   },
+   {
+    "restart": 5,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "the Rail Race finish rainbow stands on the ground",
+      "count": 4,
+      "first": "railRace:finish-rainbow-leg-0-inner on the race ring comes down 0.12 m from the railway corridor (needs 1.3 m) — the train would run through it"
+     },
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "notch of lawn where paving meets at a path end: 0.82 m² of lawn at (0.00, 54.00), more than the 0.05 m² allowed"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 232859
+   },
+   {
+    "restart": 6,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "hole in a path: 0.15 m² of lawn at (66.80, 63.90), more than the 0.05 m² allowed"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 2565561
+   },
+   {
+    "restart": 7,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 5,6,7,8,9,18,19,25,26,27,31,36,37,38,39; lane 1: 0,1,2,3,4"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 76375
+   },
+   {
+    "restart": 8,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 184933
+   }
+  ]
+ },
+ "1": {
+  "restart": 2,
+  "attempts": 3,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "check:rail-race",
+      "count": 1,
+      "first": "FAIL: a child tapping 3/s and ducking half the bars wins only 5/24 seeds at level 3 — hard mode is meant to be hard, not shut. Raise PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL."
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 1583490
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "the Sky Cruiser flies clear of the whole park",
+      "count": 1,
+      "first": "the Sky Cruiser's car passes through 'ginormous-slide / Mesh' at 102.0 m along the loop, world (-35.50, 3.61, 20.74)"
+     },
+     {
+      "measure": "check:rail-race",
+      "count": 1,
+      "first": "FAIL: in a monitor window one of the rider's eyes is only 0.348 turned towards the lens (needs > 0.35); at 0 it is round the back of her head and not drawn at all, and an expression nobody can see is not a feature. See FACE_TURN_MAX in railRace/camera.ts."
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 165578
+   },
+   {
+    "restart": 2,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 1087083
+   }
+  ]
+ },
+ "2": {
+  "restart": 5,
+  "attempts": 6,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "every path is lit end to end",
+      "count": 1,
+      "first": "spur-stall.dodgems has 30.5 m with no lamp within 15 m"
+     },
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "notch of lawn where paving meets at a path end: 1.73 m² of lawn at (0.00, 54.00), more than the 0.05 m² allowed"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 259423
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 2,
+      "first": "hole in a path: 1.06 m² of lawn at (55.60, -6.70), more than the 0.05 m² allowed"
+     },
+     {
+      "measure": "check:rail-race",
+      "count": 1,
+      "first": "FAIL: a child tapping 3/s and ducking half the bars wins only 4/24 seeds at level 3 — hard mode is meant to be hard, not shut. Raise PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL."
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 227410
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 5,6,7,8,9,18,19,25,26,27,31,36,37,38,39; lane 1: 0,1,2,3,4"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 51269
+   },
+   {
+    "restart": 3,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 0,1,2,17,18,19,20,21,30,31,37,38,39,48; lane 1: 1,2,3,5,6,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 192160
+   },
+   {
+    "restart": 4,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 0,1,2,11,12,13,18,19,20,29,30,31,32,33,47,48; lane 1: 4,5,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 24114
+   },
+   {
+    "restart": 5,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 159725
+   }
+  ]
+ },
+ "3": {
+  "restart": 2,
+  "attempts": 3,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "every street sits on the shared 12 m lattice",
+      "count": 1,
+      "first": "spur-waterFight runs north-south for 11.0 m on x = -9.45, 5.93 m off the nearest 12 m lattice line through the plaza (-3.52, -9.44) — a street on its own private line is what makes the network read as wandering instead of a grid"
+     },
+     {
+      "measure": "no two close destinations are left with a wildly disproportionate paved detour",
+      "count": 1,
+      "first": "'stall.railRacer' and 'exit-railRace' are 8.7 m apart in a straight line but 135.1 m apart by paving (15.50x, wasting 126.3 m) — closer than 26.4 m (2x the park's own 13.2 m median destination spacing) with no direct connector between them"
+     },
+     {
+      "measure": "the Sky Cruiser stands on its own supports",
+      "count": 1,
+      "first": "the Sky Cruiser runs 126.6 m without a support, from 246.0 m along its 310.6 m loop — over the 90 m a track may span and still look carried. It has 16 pylons in total."
+     },
+     {
+      "measure": "check:rail-race",
+      "count": 1,
+      "first": "FAIL: a child tapping 3/s and ducking half the bars wins only 5/24 seeds at level 3 — hard mode is meant to be hard, not shut. Raise PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL."
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 2118521
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 3,4,5,10,11,12,21,22,23,24,25,39,40,41,42,43; lane 1: 0,3,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 751452
+   },
+   {
+    "restart": 2,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 561262
+   }
+  ]
+ },
+ "4": {
+  "restart": 7,
+  "attempts": 8,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 8,9,10,11,12,26,27,28,29,30,39,40,41,46,47,48; lane 1: 2,3"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 74198
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no drawn paving stands up on edge as a sheet",
+      "count": 2,
+      "first": "the drawn path-kerb stands up as a sheet at (13.4, 47.9): 2 triangle(s), the worst edge rising 1.22 m at a grade of 1.77 (a child climbs 0.62 m at 0.67) — a wall of paving between a bridge deck and the lawn, with no stone round it"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 238410
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 0,1,2,16,17,18,19,20,29,30,31,36,37,38,47,48; lane 1: 0,1,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 60360
+   },
+   {
+    "restart": 3,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "the Sky Cruiser stands on its own supports",
+      "count": 1,
+      "first": "the Sky Cruiser runs 103.5 m without a support, from 432.0 m along its 445.5 m loop — over the 90 m a track may span and still look carried. It has 31 pylons in total."
+     },
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "notch of lawn where paving meets at a path end: 1.73 m² of lawn at (0.00, 54.00), more than the 0.05 m² allowed"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 167594
+   },
+   {
+    "restart": 4,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..47, never in the slot next to its own lane's last, and off every refused slot (lane 0: 9,10,11,12,13,27,28,29,30,31,40,41,42,48,49; lane 1: 2,3,4"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 756672
+   },
+   {
+    "restart": 5,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..47, never in the slot next to its own lane's last, and off every refused slot (lane 0: 2,3,4,5,6,20,21,22,23,24,31,34,35,41,42,43; lane 1: 4,5,6,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 104433
+   },
+   {
+    "restart": 6,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "the Sky Cruiser flies clear of the whole park",
+      "count": 1,
+      "first": "the Sky Cruiser's car passes through 'shell' at 11.0 m along the loop, world (45.65, -3.78, -10.12)"
+     },
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "hole in a path: 0.09 m² of lawn at (-28.70, -9.60), more than the 0.05 m² allowed"
+     },
+     {
+      "measure": "no drawn paving stands up on edge as a sheet",
+      "count": 4,
+      "first": "the drawn path-kerb stands up as a sheet at (-15.3, 44.8): 4 triangle(s), the worst edge rising 4.29 m at a grade of 7.34 (a child climbs 0.62 m at 0.67) — a wall of paving between a bridge deck and the lawn, with no stone round it"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 233531
+   },
+   {
+    "restart": 7,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 168557
+   }
+  ]
+ },
+ "5": {
+  "restart": 0,
+  "attempts": 1,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 580288
+   }
+  ]
+ },
+ "6": {
+  "restart": 5,
+  "attempts": 6,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "every spur starts on the drawn centre line of the path it branches from",
+      "count": 1,
+      "first": "spur-stall.facePaint's start at -27.8, 13.1 is 0.40 m from the centre line of any other drawn path — it joins at a point that was never built"
+     },
+     {
+      "measure": "the park's own paving rides over every bridge, and none is left in a tunnel",
+      "count": 1,
+      "first": "the bridges carry 133 path-surface vertices but 299 path-kerb ones, against the 2x the kerb's two bands should give — the kerb is torn off the paving it borders somewhere over a bridge"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 208995
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "built the park it was asked for",
+      "count": 1,
+      "first": "the park planted almost no bushes: 138, needs more than 180"
+     },
+     {
+      "measure": "every street sits on the shared 12 m lattice",
+      "count": 1,
+      "first": "spur-waterFight runs north-south for 12.5 m on x = -24.55, 5.04 m off the nearest 12 m lattice line through the plaza (-7.50, 0.89) — a street on its own private line is what makes the network read as wandering instead of a grid"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 553670
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "nothing a bridge builds hangs into its own tunnel, measured by ray from the rail",
+      "count": 1,
+      "first": "no bridge was tested — every crossing on this seed fell back to a level crossing, or the built group names have changed, so this invariant proved nothing"
+     },
+     {
+      "measure": "every modelled coping stone sits on the wall it caps",
+      "count": 1,
+      "first": "no bridge coping was tested — every crossing on this seed fell back to a level crossing, or the built mesh names have changed, so this proved nothing"
+     },
+     {
+      "measure": "no bridge parapet can be seen through — its outer face reaches the wall top",
+      "count": 1,
+      "first": "no bridge parapet was probed — every crossing on this seed fell back to a level crossing, or the built mesh names have changed, so this asserts nothing"
+     },
+     {
+      "measure": "every crossing on a site the planner proved bridgeable still carries its bridge",
+      "count": 1,
+      "first": "the crossing planner proved 2 bridge site(s) on this loop (at railDistance 52.0, 172.0) and not one of the park's 0 built crossing(s) stands on any of them (they sit at nowhere — there are none) — the crossing plan did not reach the park, so every per-bridge check here is iterating over nothing"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 2384647
+   },
+   {
+    "restart": 3,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 6,7,13,14,21,24,25,26,27,41,42,43,44,45; lane 1: 0,1,2,3,6"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 9225
+   },
+   {
+    "restart": 4,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 7,8,9,10,11,25,26,27,28,29,38,39,41,45,46,47; lane 1: 0,1,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 128567
+   },
+   {
+    "restart": 5,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 1503066
+   }
+  ]
+ },
+ "7": {
+  "restart": 3,
+  "attempts": 4,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "every wall run goes alongside a path, and some stand flush against one",
+      "count": 1,
+      "first": "only 3 of 26 wall runs stand flush against paving (face within 0.62 m of it); at least 4 should. Walls all holding the same polite distance off the kerb is the arrangement #417 asked to end"
+     },
+     {
+      "measure": "the Rail Race finish rainbow stands on the ground",
+      "count": 6,
+      "first": "railRace:finish-rainbow-leg-0-inner on the race ring comes down 0.06 m from a path (needs 1.24 m, two player radii) — it lands in the way of somebody walking"
+     },
+     {
+      "measure": "the Sky Cruiser stands on its own supports",
+      "count": 1,
+      "first": "the Sky Cruiser runs 91.0 m without a support, from 49.0 m along its 202.0 m loop — over the 90 m a track may span and still look carried. It has 9 pylons in total."
+     },
+     {
+      "measure": "a child can walk in through the front gate",
+      "count": 1,
+      "first": "the walk in from the arch stops 11.5 m inside it; nothing connects that to the 12 m mark within the arch's own 8.6 m width. The corridor, '.' walked, 'o' open but cut off, '#' no room:\n    1.0 m in  ########........##\n    1.5 m in  ######............\n    2.0 m in  ###...........###.\n    2.5 m in  ##............###.\n    3.0 m in  #.............###.\n    3.5 m in  ..................\n    4.0 m in  ..................\n    4.5 m in  ..................\n    5.0 m in  ..................\n    5.5 m in  .................#\n    6.0 m in  .................#\n    6.5 m in  .................#\n    7.0 m in  ..................\n    7.5 m in  ..................\n    8.0 m in  ..................\n    8.5 m in  ....#.............\n    9.0 m in  ...###............\n    9.5 m in  ..####............\n   10.0 m in  ...##.............\n   10.5 m in  ..................\n   11.0 m in  ..............####\n   11.5 m in  .......###########\n   12.0 m in  ##################"
+     },
+     {
+      "measure": "check:park rainbow.inPath",
+      "count": 1,
+      "first": "rainbow.inPath: 6 (no allowance — this is new)"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 624318
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 8,9,10,11,12,26,27,28,29,30,39,40,46,47,48; lane 1: 1,2,3,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 8972
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "every spur starts on the drawn centre line of the path it branches from",
+      "count": 1,
+      "first": "spur-waterFight's start at -10.6, 24.9 is 0.38 m from the centre line of any other drawn path — it joins at a point that was never built"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 101047
+   },
+   {
+    "restart": 3,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 96243
+   }
+  ]
+ },
+ "8": {
+  "restart": 4,
+  "attempts": 5,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 36 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..45, never in the slot next to its own lane's last, and off every refused slot (lane 0: 0,1,2,16,17,18,19,20,28,29,30,36,37,46,47; lane 1: 1,2,4,5"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 220755
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 0,1,2,11,12,18,19,29,30,31,32,47,48; lane 1: 4,5,6,7,8,11,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 83603
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 2,3,4,5,6,20,21,22,23,24,31,33,34,35,40,41,42; lane 1: 0,5"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 29447
+   },
+   {
+    "restart": 3,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 2,3,12,13,14,15,16,21,31,32,33,34,41,43,44,45; lane 1: 6,7"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 123828
+   },
+   {
+    "restart": 4,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 388726
+   }
+  ]
+ },
+ "9": {
+  "restart": 3,
+  "attempts": 4,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no drawn paving stands up on edge as a sheet",
+      "count": 4,
+      "first": "the drawn path-kerb stands up as a sheet at (48.3, 64.1): 10 triangle(s), the worst edge rising 4.18 m at a grade of 5.80 (a child climbs 0.62 m at 0.67) — a wall of paving between a bridge deck and the lawn, with no stone round it"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 2468819
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no drawn paving stands up on edge as a sheet",
+      "count": 4,
+      "first": "the drawn path-kerb stands up as a sheet at (9.4, 38.7): 6 triangle(s), the worst edge rising 4.44 m at a grade of 3.04 (a child climbs 0.62 m at 0.67) — a wall of paving between a bridge deck and the lawn, with no stone round it"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 254471
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "nothing stands in the gate arch's clear span",
+      "count": 1,
+      "first": "a collider (circle r 0.35) stands at 2.7, 58.8, inside the gate arch's clear span (within 2.04 m of the gate line, between the piers)"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 132231
+   },
+   {
+    "restart": 3,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 324867
+   }
+  ]
+ },
+ "10": {
+  "restart": 3,
+  "attempts": 4,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "every spur starts on the drawn centre line of the path it branches from",
+      "count": 1,
+      "first": "spur-stall.waterFight's start at -7.3, -29.5 is 0.32 m from the centre line of any other drawn path — it joins at a point that was never built"
+     },
+     {
+      "measure": "the Rail Race finish rainbow stands on the ground",
+      "count": 4,
+      "first": "railRace:finish-rainbow-leg-2-inner on the race ring comes down 1.18 m from a path (needs 1.24 m, two player radii) — it lands in the way of somebody walking"
+     },
+     {
+      "measure": "check:park rainbow.inPath",
+      "count": 1,
+      "first": "rainbow.inPath: 4 (no allowance — this is new)"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 425900
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "every wall run goes alongside a path, and some stand flush against one",
+      "count": 1,
+      "first": "only 2 of 14 wall runs stand flush against paving (face within 0.62 m of it); at least 4 should. Walls all holding the same polite distance off the kerb is the arrangement #417 asked to end"
+     },
+     {
+      "measure": "every street sits on the shared 12 m lattice",
+      "count": 2,
+      "first": "gate-approach runs east-west for 13.5 m on z = 48.00, 2.78 m off the nearest 12 m lattice line through the plaza (-0.19, -2.78) — a street on its own private line is what makes the network read as wandering instead of a grid"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 352140
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "hole in a path: 3.40 m² of lawn at (69.70, -19.00), more than the 0.05 m² allowed"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 190778
+   },
+   {
+    "restart": 3,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 311425
+   }
+  ]
+ },
+ "11": {
+  "restart": 4,
+  "attempts": 5,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "every street sits on the shared 12 m lattice",
+      "count": 1,
+      "first": "gate-approach runs north-south for 19.0 m on x = -5.66, 2.90 m off the nearest 12 m lattice line through the plaza (9.24, 6.93) — a street on its own private line is what makes the network read as wandering instead of a grid"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 121533
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "every paved path runs on grid axes",
+      "count": 1,
+      "first": "the paving from 34.4, 51.6 to 22.7, 39.2 runs diagonally for 17.1 m — longer than a doorway approach or a platform turn should ever need (drawn by spur-building, spur-ferrisWheel)"
+     },
+     {
+      "measure": "every street sits on the shared 12 m lattice",
+      "count": 1,
+      "first": "gate-approach runs east-west for 10.5 m on z = 54.00, 1.49 m off the nearest 12 m lattice line through the plaza (-1.13, -4.51) — a street on its own private line is what makes the network read as wandering instead of a grid"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 1469830
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no paved path stops anywhere but a destination",
+      "count": 1,
+      "first": "spur-building's start at -8.7, 49.1 is 2.22 m from the nearest other paving — it branches off nothing"
+     },
+     {
+      "measure": "every spur starts on the drawn centre line of the path it branches from",
+      "count": 1,
+      "first": "spur-building's start at -8.7, 49.1 is 3.82 m from the centre line of any other drawn path — it joins at a point that was never built"
+     },
+     {
+      "measure": "no two close destinations are left with a wildly disproportionate paved detour",
+      "count": 1,
+      "first": "'ballPit' and 'exit-ginormousSlide' are 10.0 m apart in a straight line but 215.2 m apart by paving (21.42x, wasting 205.2 m) — closer than 27.6 m (2x the park's own 13.8 m median destination spacing) with no direct connector between them"
+     },
+     {
+      "measure": "check:rail-race",
+      "count": 1,
+      "first": "FAIL: a child tapping 3/s and ducking half the bars wins only 5/24 seeds at level 3 — hard mode is meant to be hard, not shut. Raise PLAYER_BOOST_ADVANTAGE or lower RIVAL_SKILL."
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 162655
+   },
+   {
+    "restart": 3,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "notch of lawn where paving meets at a path end: 1.77 m² of lawn at (0.00, 54.00), more than the 0.05 m² allowed"
+     },
+     {
+      "measure": "no drawn paving stands up on edge as a sheet",
+      "count": 2,
+      "first": "the drawn path-kerb stands up as a sheet at (20.6, -59.3): 8 triangle(s), the worst edge rising 4.25 m at a grade of 5.50 (a child climbs 0.62 m at 0.67) — a wall of paving between a bridge deck and the lawn, with no stone round it"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 209331
+   },
+   {
+    "restart": 4,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 175620
+   }
+  ]
+ },
+ "12": {
+  "restart": 0,
+  "attempts": 1,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 168142
+   }
+  ]
+ },
+ "13": {
+  "restart": 2,
+  "attempts": 3,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 7,8,9,10,11,20,21,22,27,28,29,38,39,40,41,42; lane 1: 2,3,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 15309
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 1,2,3,4,5,14,15,21,22,23,32,33,34,35,40,41; lane 1: 0,7,8,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 17764
+   },
+   {
+    "restart": 2,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 1108431
+   }
+  ]
+ },
+ "14": {
+  "restart": 6,
+  "attempts": 7,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 4,5,6,7,8,17,18,19,24,25,26,35,36,37,38,39; lane 1: 0,1,2,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 106343
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "built the park it was asked for",
+      "count": 1,
+      "first": "the park planted almost no bushes: 178, needs more than 180"
+     },
+     {
+      "measure": "every street sits on the shared 12 m lattice",
+      "count": 1,
+      "first": "spur-building runs north-south for 20.5 m on x = -10.24, 2.85 m off the nearest 12 m lattice line through the plaza (4.61, 8.47) — a street on its own private line is what makes the network read as wandering instead of a grid"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 141250
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "check:rail-race",
+      "count": 1,
+      "first": "FAIL: in a monitor window one of the rider's eyes is only 0.336 turned towards the lens (needs > 0.35); at 0 it is round the back of her head and not drawn at all, and an expression nobody can see is not a feature. See FACE_TURN_MAX in railRace/camera.ts."
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 129315
+   },
+   {
+    "restart": 3,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 0,1,2,3,17,18,19,20,21,30,31,32,38,39,48; lane 1: 2,3,6,7,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 5634
+   },
+   {
+    "restart": 4,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no lawn shows through the paving, along a path or where paths meet",
+      "count": 1,
+      "first": "hole in a path: 0.08 m² of lawn at (-0.70, 54.10), more than the 0.05 m² allowed"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 182033
+   },
+   {
+    "restart": 5,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 3,4,5,6,15,16,17,23,24,33,34,35,36,37; lane 1: 0,1,2,9,10,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 346908
+   },
+   {
+    "restart": 6,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 565065
+   }
+  ]
+ },
+ "15": {
+  "restart": 5,
+  "attempts": 6,
+  "sourceHash": "c11d9315042690b4215f",
+  "log": [
+   {
+    "restart": 0,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "no two close destinations are left with a wildly disproportionate paved detour",
+      "count": 1,
+      "first": "'stall.railRacer' and 'exit-railRace' are 6.9 m apart in a straight line but 115.1 m apart by paving (16.65x, wasting 108.2 m) — closer than 21.1 m (2x the park's own 10.5 m median destination spacing) with no direct connector between them"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 156763
+   },
+   {
+    "restart": 1,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "the Sky Cruiser stands on its own supports",
+      "count": 1,
+      "first": "the Sky Cruiser runs 101.0 m without a support, from 132.0 m along its 450.2 m loop — over the 90 m a track may span and still look carried. It has 23 pylons in total."
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 688837
+   },
+   {
+    "restart": 2,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 8,9,10,11,12,26,27,28,29,30,39,40,46,47,48; lane 1: 1,2,3,"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 11298
+   },
+   {
+    "restart": 3,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "built the park it was asked for",
+      "count": 1,
+      "first": "the park planted almost no bushes: 167, needs more than 180"
+     },
+     {
+      "measure": "no two close destinations are left with a wildly disproportionate paved detour",
+      "count": 1,
+      "first": "'building' and 'ballPit' are 24.8 m apart in a straight line but 408.8 m apart by paving (16.46x, wasting 384.0 m) — closer than 28.3 m (2x the park's own 14.2 m median destination spacing) with no direct connector between them"
+     },
+     {
+      "measure": "a child can walk in through the front gate",
+      "count": 1,
+      "first": "the walk in from the arch stops 11.5 m inside it; nothing connects that to the 12 m mark within the arch's own 8.6 m width. The corridor, '.' walked, 'o' open but cut off, '#' no room:\n    1.0 m in  #######.........##\n    1.5 m in  #####.............\n    2.0 m in  ##................\n    2.5 m in  #.................\n    3.0 m in  ................##\n    3.5 m in  ...............###\n    4.0 m in  ...............###\n    4.5 m in  ................##\n    5.0 m in  ..................\n    5.5 m in  ..................\n    6.0 m in  ..................\n    6.5 m in  ..................\n    7.0 m in  ..................\n    7.5 m in  ..................\n    8.0 m in  ##................\n    8.5 m in  #####.............\n    9.0 m in  ########..........\n    9.5 m in  ##########........\n   10.0 m in  ############......\n   10.5 m in  ##############....\n   11.0 m in  ###############...\n   11.5 m in  #################.\n   12.0 m in  ##################"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 103027
+   },
+   {
+    "restart": 4,
+    "accepted": false,
+    "forcedBy": [
+     {
+      "measure": "build",
+      "count": 1,
+      "first": "DuckBarRefusal: railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a flat-out rider — lane shift 0: railRace/hazards.ts: no layout gives all 40 duck bars a legal trestle slot — one bar per slot, inside the bar window 5..46, never in the slot next to its own lane's last, and off every refused slot (lane 0: 2,3,4,9,10,11,20,21,22,23,24,38,39,40,41,42; lane 1: 2,3,4"
+     }
+    ],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 169119
+   },
+   {
+    "restart": 5,
+    "accepted": true,
+    "forcedBy": [],
+    "backtracking": {
+     "plan": null,
+     "world": null
+    },
+    "wallMs": 926573
+   }
+  ]
+ }
+}
