@@ -1438,17 +1438,6 @@ function drawnDoorstep(facts: ParkFacts, band: PortalBand, meshName: string): re
  *   facing it), **every stall's stand point**, **every station's** and **every
  *   ride exit**.
  */
-/** Every exterior door's drawn front ({@link drawnDoorstep}), where it was found. */
-function drawnDoorFronts(facts: ParkFacts): (readonly [number, number])[] {
-  const fronts: (readonly [number, number])[] = [];
-  const castle = castleFrontDoorBand(facts);
-  const hotel = drawnDoorstep(facts, facts.world.hotel.towerDoorBand(), 'tower-door-glow');
-  if (hotel) fronts.push(hotel);
-  const steps = castle ? drawnDoorstep(facts, castle, 'entrance-steps') : null;
-  if (steps) fronts.push(steps);
-  return fronts;
-}
-
 /** The castle's front door — the one of its door bands that opens onto the park. */
 function castleFrontDoorBand(facts: ParkFacts): PortalBand | null {
   return facts.world.building.doorBands().find((band) => facts.boundary.distanceToEdge(band.centreX, band.centreZ) > 0) ?? null;
@@ -1609,11 +1598,6 @@ const railRaceExitFitsTheParty: Invariant = (facts) => {
 const noPathEndsNowhere: Invariant = (facts) => {
   const nodes = new Map(facts.pathNodes.map((node) => [node.id, node]));
   const strays: string[] = [];
-  // A drawn door is a destination too: the hotel's paving runs on past its
-  // doormat into the recess its sliding doors stand at the back of, and that
-  // end is *at the door*, not short of anything. Read off the built scene
-  // ({@link drawnDoorstep}), never off the generator's own constant.
-  const doorFronts = drawnDoorFronts(facts);
 
   for (const edge of facts.pathEdges) {
     if (edge.backbone) continue;
@@ -1654,8 +1638,7 @@ const noPathEndsNowhere: Invariant = (facts) => {
         0,
         Math.hypot(point[0] - node.x, point[1] - node.z) - node.reach,
       );
-      const atADoor = doorFronts.some((front) => Math.hypot(point[0] - front[0], point[1] - front[1]) <= ARRIVAL);
-      if (gap > ARRIVAL && !atADoor) {
+      if (gap > ARRIVAL) {
         strays.push(
           `${edge.name}'s ${which} at ${fmt(point)} stops ${gap.toFixed(2)} m short of ` +
             `'${node.id}' (${node.kind}) at ${fmt([node.x, node.z])} — a path to nowhere`,
@@ -8476,7 +8459,7 @@ const pathsMeetBridgesOnlyAtTheirEnds: Invariant = (facts) => {
       return [`the drawn ${mesh.name} carries no per-vertex route owners — pathGraph.ts has changed and nothing can be attributed`];
     }
   }
-  const nameOf = (owner: number): string => (owner >= 0 ? (names[owner] ?? `route ${owner}`) : owner === -1 ? 'the plaza' : 'a junction apron');
+  const nameOf = (owner: number): string => (owner >= 0 ? (names[owner] ?? `route ${owner}`) : owner === -1 ? 'the plaza' : 'an apron (junction or door)');
 
   // Each bridge's drawn walls and raised stone, in plan.
   const groups = facts.world.train.group.getObjectByName('railway-bridges')?.children ?? [];

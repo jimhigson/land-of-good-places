@@ -29,6 +29,7 @@ import {
   type PathGraph,
   type RouteDefinition,
 } from './paths';
+import { PARK_LAYOUT, entranceFacing, pavedPastTheDoormat } from './parkLayout';
 
 /**
  * **The one Catmull-Rom every consumer of a route's drawn shape builds.**
@@ -273,6 +274,17 @@ export function buildPaths(): Mesh[] {
       );
       own(kerbOwners, kerb, JUNCTION_OWNER_BASE - k);
     });
+
+  // Where a door stands at the back of a recess past its doormat, the paving
+  // on to it — see `doorAprons`.
+  doorAprons().forEach((apron, k) => {
+    const curve = routeCurve(apron);
+    const divisions = pathDivisions(curve);
+    addPathRibbon(surface, curve, apron.width, divisions, PATH_SURFACE_LIFT, discMayBeLaid);
+    own(surfaceOwners, surface, DOOR_APRON_OWNER_BASE - k);
+    addRibbonKerb(kerb, curve, apron.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
+    own(kerbOwners, kerb, DOOR_APRON_OWNER_BASE - k);
+  });
 
   const surfaceMesh = new Mesh(surface.build(), pathSurfaceMaterial());
   surfaceMesh.name = 'path-surface';
@@ -836,6 +848,43 @@ function clearOfTheGateway(x: number, z: number, radius: number): boolean {
 /** Where a disc of paving may be laid: on the ground, off every bridge and off the gateway. */
 function discMayBeLaid(x: number, z: number, radius: number): boolean {
   return clearOfBridges(x, z, radius) && clearOfTheGateway(x, z, radius);
+}
+
+/** Door apron `k`'s ribbon and kerb are filed under `DOOR_APRON_OWNER_BASE - k`. */
+export const DOOR_APRON_OWNER_BASE = -100_000;
+
+/**
+ * **The paving from a doormat on to a door drawn at the back of a recess** —
+ * the hotel's (`ManifestEntry.door.pavedTo`): its sliding doors stand ~4.9 m
+ * inside the facade plane, between the crystals, and the child is let in at
+ * the trigger on the doormat before she gets there. So the path is drawn on
+ * to the doors, straight in along the doormat's facing, as the route's own
+ * width, but it is **not walkable paving**: its samples are not recorded, so
+ * nothing routes, seeds a waypoint, or stands anything on ground she is never
+ * on. It is drawn because without it she sees four metres of lawn between the
+ * end of the path and the doors (`drawnPavingReachesEveryDoor`).
+ */
+function doorAprons(): RouteDefinition[] {
+  const aprons: RouteDefinition[] = [];
+  for (const node of PATH_GRAPH.nodes) {
+    if (node.kind !== 'anchor') continue;
+    const entry = PARK_LAYOUT.entries.get(node.id);
+    if (!entry) continue;
+    const on = pavedPastTheDoormat(entry);
+    if (on <= 0) continue;
+    const [outX, outZ] = entranceFacing(entry);
+    const width = ROUTES.find((route) => route.name === `spur-${node.id}`)?.width ?? 2.6;
+    aprons.push({
+      name: `door-${node.id}`,
+      points: [
+        [entry.entranceX, entry.entranceZ],
+        [entry.entranceX - outX * on, entry.entranceZ - outZ * on],
+      ],
+      width,
+      closed: false,
+    });
+  }
+  return aprons;
 }
 
 /** Junction apron `k`'s disc and annulus are filed under `JUNCTION_OWNER_BASE - k`. */
