@@ -184,8 +184,12 @@ describe('scenery scatter is decoupled from the paths', () => {
     // than falling back to level crossings (it was retired from the sweep
     // for exactly this pathology, #429/seed-24.test.ts's header). Any pool
     // seed serves; 5 is the one the sweep already builds everywhere else.
-    const other = buildDigest({ LGP_SEED: '5' });
-    expect(other.seed).toBe(5);
+    // Any supported seed other than the baseline's: the canonical seed became
+    // 5 when the pool became 0..15, and a control that builds the baseline's
+    // own park again cannot tell two parks apart.
+    const otherSeed = baseline.seed === 2 ? 3 : 2;
+    const other = buildDigest({ LGP_SEED: String(otherSeed) });
+    expect(other.seed).toBe(otherSeed);
     expect(other.all).not.toBe(baseline.all);
     expect(other.trees.digest).not.toBe(baseline.trees.digest);
     expect(other.bushes.digest).not.toBe(baseline.bushes.digest);
