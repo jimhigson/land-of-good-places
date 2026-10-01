@@ -249,6 +249,50 @@ export function worldToCastle(world: Readonly<Vector3>, target: Vector3): Vector
   return CASTLE_FRAME.toLocal(world, target);
 }
 
+/** World `y` of a castle-local point — the facade's door, its steps — as the shell is actually standing. */
+export function castleWorldY(localX: number, localY: number, localZ: number): number {
+  return castleToWorld(_castleProbe.set(localX, localY, localZ), _castleLocal).y;
+}
+
+/**
+ * **World `y` of a castle-local surface over a world plan point**, or `null`
+ * where the surface does not reach that column.
+ *
+ * `surfaceAt(localX, localZ)` answers in the castle's own frame — a height over
+ * its deck, or `null` off its footprint. This finds the world point straight
+ * above or below `(x, z)` that lies on it, by Newton on world `y`: the frame is
+ * rigid, so the castle-local height of `(x, y, z)` moves by the castle up's
+ * world-`y` component per metre of `y`, and the footprint test is redone at
+ * every step in the frame the surface is drawn in.
+ *
+ * This is what the garden's entrance steps are sampled through. They were
+ * sampled as `BUILDING_BASE_Y + rampHeight(x − BUILDING_CENTRE_X, …)` — the
+ * castle standing plumb — while `Shell.ts` draws them leaning with
+ * `CASTLE_FRAME`, so the walkable steps and the stone ones parted by the lean
+ * across nine metres of facade: measured on seed 5 the walkable foot hung
+ * **1.5 m** above the ground the drawn steps stand on, and on seed 2 the whole
+ * walkable flight was buried **1.3 m** under the hill the drawn ones climb.
+ */
+export function castleSurfaceY(
+  x: number,
+  z: number,
+  surfaceAt: (localX: number, localZ: number) => number | null,
+): number | null {
+  const upY = castleWorldY(0, 1, 0) - castleWorldY(0, 0, 0);
+  let y = BUILDING_BASE_Y;
+  for (let i = 0; i < 6; i += 1) {
+    worldToCastle(_castleProbe.set(x, y, z), _castleLocal);
+    const height = surfaceAt(_castleLocal.x, _castleLocal.z);
+    if (height === null) return null;
+    const step = (height - _castleLocal.y) / upY;
+    y += step;
+    if (Math.abs(step) < 1e-7) break;
+  }
+  return y;
+}
+const _castleProbe = /* @__PURE__ */ new Vector3();
+const _castleLocal = /* @__PURE__ */ new Vector3();
+
 /**
  * Facade-local -> world **on the plan alone**, ignoring the castle's lean.
  *
@@ -340,13 +384,20 @@ export function circle(x: number, z: number, radius: number): CircleRegion {
   return { kind: 'circle', x, z, radius };
 }
 
-export function regionContains(region: Region, x: number, z: number): boolean {
+/** Is (x, z) inside the region, padded outward by `margin` metres (default none)? */
+export function regionContains(region: Region, x: number, z: number, margin = 0): boolean {
   if (region.kind === 'rect') {
-    return x >= region.minX && x <= region.maxX && z >= region.minZ && z <= region.maxZ;
+    return (
+      x >= region.minX - margin &&
+      x <= region.maxX + margin &&
+      z >= region.minZ - margin &&
+      z <= region.maxZ + margin
+    );
   }
   const dx = x - region.x;
   const dz = z - region.z;
-  return dx * dx + dz * dz <= region.radius * region.radius;
+  const radius = region.radius + margin;
+  return dx * dx + dz * dz <= radius * radius;
 }
 
 /**
