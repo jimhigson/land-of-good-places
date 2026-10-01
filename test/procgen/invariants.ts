@@ -85,6 +85,8 @@ import { frameFor } from '../../src/world/train/bridgeSpine.ts';
 // Leaf module: reaches only core/constants, core/uiScale and (type-only)
 // world/interact — nothing seeded, so a static import cannot fix the park.
 import {
+  distanceToBand,
+  type PortalBand,
   differentActions,
   sameStorey,
   TAP_FINGER_METRES,
@@ -132,6 +134,8 @@ import {
   parkGateFeet,
 } from '../../src/world/entrance/gateArch.ts';
 import { altitudeAt, terrainHeight, unplaceFromSphere, upAt } from '../../src/world/terrain.ts';
+// Leaf module (three types and `terrain.ts` only) — see its own header.
+import { cellOf, distanceToCell, floodPaving, isPaved, rasterisePaving, PAVING_CELL } from './pavingReach.ts';
 // The road corridor's measurement, shared with `check:ground-claims` so the two
 // sites that ask "is the claim the road?" cannot answer it differently. Pure
 // geometry over what it is handed — nothing seed-dependent is imported here.
@@ -1374,6 +1378,120 @@ const everyDoormatIsReachableFromTheGate: Invariant = (facts) => {
     `everyDoormatIsReachableFromTheGate: routed to ${facts.entrances.length} doormat(s) on seed ${facts.seed}\n`,
   );
   if (facts.entrances.length === 0) complaints.push('the built park has no doormats — this asserted nothing');
+  return complaints;
+};
+
+/**
+ * The ground just outside a walk-through door: marched out from the band's
+ * centre along its own outward axis (`yaw`, which faces out of the building
+ * for every exterior door) to the first point past the band where a child of
+ * her own radius stands on the **lawn** — not on the castle's plinth or its
+ * steps, and not against the facade. That is where a path has to arrive for
+ * the door to be "at the end of the path". `null` if no such point is found
+ * within ten metres, which is reported, never skipped.
+ */
+function doorstepOf(facts: ParkFacts, band: PortalBand): readonly [number, number] | null {
+  const outX = Math.sin(band.yaw);
+  const outZ = Math.cos(band.yaw);
+  for (let along = 0; along <= 10; along += 0.05) {
+    const x = band.centreX + outX * along;
+    const z = band.centreZ + outZ * along;
+    if (distanceToBand(band, x, z) <= 0) continue;
+    if (!facts.isStandable(x, z)) continue;
+    const ground = terrainHeight(x, z);
+    const underfoot = facts.world.building.surfaces.sample(x, z, ground + 1);
+    if (Math.abs(underfoot - ground) > BUILDING_STEP_UP / 4) continue;
+    return [x, z];
+  }
+  return null;
+}
+
+/**
+ * **The drawn paving goes all the way to every door — continuous from the
+ * gate, and touching the doormat itself.**
+ *
+ * Jim, 1 October 2026: *"will this work finally give us paths that actually go
+ * to the attractions like up to the doors of the hotel?"*
+ * {@link everyDoormatIsReachableFromTheGate} could not answer that: it asks
+ * whether a child can *walk* to each doormat on the nav lattice, and lawn is
+ * walkable, so a path that stops three metres short of the hotel's door — or
+ * runs down the castle's side wall and never reaches its front door at all —
+ * passes it. Measured on the canonical seed before this existed: the castle's
+ * path ended 12 m from its front door, round the corner, and the hotel's 3.4 m
+ * short across the lawn.
+ *
+ * So this asks the drawn paving itself. Every triangle of `path-surface` and
+ * `path-kerb`, as built and draped, is rasterised in plan
+ * ({@link rasterisePaving}) and flooded from the paving at the gate; two cells
+ * join only where their paving is within a child's step-up of each other, so a
+ * deck does not join the lawn under it. Then every destination must have that
+ * gate-joined paving within her own radius ({@link PLAYER_RADIUS}) — she can
+ * stand on the doormat with a foot on the path:
+ *
+ * - **every exterior door** — the hotel tower's and the castle's front door —
+ *   at the lawn just outside its own trigger band ({@link doorstepOf}), read
+ *   off the built doors, not off the layout's `entrance` the router aims at;
+ * - **every other anchor's entrance** (the rides whose fence gap is built
+ *   facing it), **every stall's stand point**, **every station's** and **every
+ *   ride exit**.
+ */
+const drawnPavingReachesEveryDoor: Invariant = (facts) => {
+  const meshes: Mesh[] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (object instanceof Mesh && (object.name === 'path-surface' || object.name === 'path-kerb')) meshes.push(object);
+  });
+  if (meshes.length !== 2) {
+    return [`expected both drawn path layers, found ${meshes.length} — this invariant is measuring nothing`];
+  }
+  const raster = rasterisePaving(meshes);
+  const gate = facts.pathNodes.find((node) => node.kind === 'gate');
+  if (!gate) return ['the path graph has no gate node to flood the paving from'];
+  const atGate = distanceToCell(raster, gate.x, gate.z, PLAYER_RADIUS, (k) => isPaved(raster, k));
+  if (!atGate.at) return [`no drawn paving within ${PLAYER_RADIUS} m of the gate at ${fmt([gate.x, gate.z])}`];
+  const joined = floodPaving(raster, cellOf(raster, atGate.at[0], atGate.at[1]), BUILDING_STEP_UP);
+
+  const doors: { id: string; at: readonly [number, number] | null }[] = [];
+  const bands = [facts.world.hotel.towerDoorBand(), ...facts.world.building.doorBands()].filter(
+    // The castle interior's exit door stands in its own space hundreds of
+    // metres out; only a door that opens onto the park has a path to arrive at.
+    (band) => facts.boundary.distanceToEdge(band.centreX, band.centreZ) > 0,
+  );
+  for (const band of bands) doors.push({ id: band.what, at: doorstepOf(facts, band) });
+  const doored = new Set(['anchor:hotel', 'anchor:building']);
+  for (const entrance of facts.entrances) {
+    if (!doored.has(entrance.id)) doors.push({ id: entrance.id, at: [entrance.x, entrance.z] });
+  }
+  for (const zone of facts.world.interactZones()) {
+    if (zone.id.startsWith('train-station-')) doors.push({ id: zone.id, at: [zone.standX, zone.standZ] });
+  }
+  for (const exit of facts.exits) doors.push({ id: exit.id, at: [exit.x, exit.z] });
+
+  const complaints: string[] = [];
+  let worst = 0;
+  for (const door of doors) {
+    if (!door.at) {
+      complaints.push(`${door.id}: no lawn a child can stand on found within 10 m outside it — nothing to measure`);
+      continue;
+    }
+    const [x, z] = door.at;
+    const reach = distanceToCell(raster, x, z, 30, (k) => joined[k] === 1);
+    worst = Math.max(worst, reach.distance);
+    if (reach.distance <= PLAYER_RADIUS) continue;
+    const any = distanceToCell(raster, x, z, 30, (k) => isPaved(raster, k));
+    complaints.push(
+      `${door.id}'s doormat at ${fmt(door.at)} is ${Number.isFinite(reach.distance) ? reach.distance.toFixed(2) : 'over 30'} m ` +
+        `from the paving that joins the gate${reach.at ? ` (nearest at ${fmt(reach.at)})` : ''}` +
+        (any.distance + PAVING_CELL < reach.distance
+          ? ` — there is paving ${any.distance.toFixed(2)} m away, but it does not join up with the gate's`
+          : ' — lawn between the path and the door') +
+        ` (a child's radius is ${PLAYER_RADIUS} m)`,
+    );
+  }
+  process.stderr.write(
+    `  drawnPavingReachesEveryDoor: ${doors.length} doormats (${bands.length} built doors) against ` +
+      `${raster.triangles} paving triangles on seed ${facts.seed}; worst ${worst.toFixed(2)} m\n`,
+  );
+  if (doors.length === 0) complaints.push('no doormat was measured — this asserted nothing');
   return complaints;
 };
 
@@ -12634,6 +12752,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ],
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
   ['every doormat in the park can be walked to from the gate', everyDoormatIsReachableFromTheGate],
+  ['the drawn paving runs from the gate all the way to every door', drawnPavingReachesEveryDoor],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
