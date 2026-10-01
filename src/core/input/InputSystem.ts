@@ -88,23 +88,38 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
  *   key or stick is touched ({@link manualMoveActive}) the navigation input is
  *   ignored, so walking manually always wins.
  */
+/**
+ * How long after a touch a mouse event is taken to be the browser's
+ * compatibility echo of it rather than a real mouse — see
+ * `InputSystem.isTouchCompatMouse`. Compat events follow `touchend` within the
+ * same task, so this is generous; a person switching from finger to mouse in
+ * under a second loses at most one click.
+ */
+const TOUCH_COMPAT_WINDOW_MS = 1000;
+
 export class InputSystem {
   // Raw device state ------------------------------------------------------
   private readonly heldKeys = new Set<string>();
   /**
    * **Keys that went down since the last {@link update}, whether or not they
    * are still down** — so a press that starts and ends between two frames is
-   * still a press (#699, #700).
+   * still a press (found while investigating #699/#700; see below).
    *
    * Held state alone is sampled once a frame, so a key tapped quickly enough
    * to go down *and* up inside one frame was never seen at all: no `down`, no
    * `justPressed`, nothing. At 60 fps that takes a 16 ms tap; at the 5-10 fps a
    * hitching tablet or a software renderer gives, it is an ordinary quick
-   * press. Measured: Escape pressed down-and-up at once (Playwright's
-   * `keyboard.press`) left the keychain view open on every one of three seeds
-   * at ~120 fps; held for 100 ms it closed it on all three. The view kept her
-   * `riding`, which is what made `check:walking`'s tap move her 0 m and what
-   * stopped `check:deep-links`'s autosave ever landing.
+   * press. Measured in a browser: keydown and keyup dispatched in one task
+   * left the keychain view open (`viewOpen=true, riding=true`) on seeds 131 and
+   * 208; held for 100 ms, Escape closed it every time.
+   *
+   * **What this did and did not cause.** It is *not* #699: that run's keys all
+   * moved her with `riding=false`, so Escape had been handled — the tap failed
+   * because a fixed screen spot landed on a tree, which a tap rightly selects
+   * (fixed in `check:walking`'s `findOpenGround`). It is the *likely* cause of
+   * #700 (the autosave refuses while she is riding, so a dropped Escape would
+   * time out exactly that wait), but #700 has not been reproduced, so that is
+   * unproven. The bug is real either way: `test/input/sub-frame-tap.test.ts`.
    */
   private readonly tappedKeys = new Set<string>();
   private gamepadIndex: number | null = null;
@@ -146,6 +161,8 @@ export class InputSystem {
   private lastDeviceUsed: 'keyboard' | 'gamepad' = 'keyboard';
 
   private attached = false;
+  /** `event.timeStamp` of the last touch seen — see {@link isTouchCompatMouse}. */
+  private lastTouchAt = Number.NEGATIVE_INFINITY;
 
   // ---------------------------------------------------------------- setup
 
@@ -160,6 +177,10 @@ export class InputSystem {
     target.addEventListener('mousedown', this.onMouseDown);
     target.addEventListener('mouseup', this.onMouseUp);
     target.addEventListener('contextmenu', this.onContextMenu);
+    // Capture, so a handler that stops propagation cannot hide a touch from
+    // the compat-mouse guard; passive, because this only ever reads the time.
+    target.addEventListener('touchstart', this.onTouch, { capture: true, passive: true });
+    target.addEventListener('touchend', this.onTouch, { capture: true, passive: true });
   }
 
   detach(target: Window = window): void {
@@ -173,6 +194,8 @@ export class InputSystem {
     target.removeEventListener('mousedown', this.onMouseDown);
     target.removeEventListener('mouseup', this.onMouseUp);
     target.removeEventListener('contextmenu', this.onContextMenu);
+    target.removeEventListener('touchstart', this.onTouch, { capture: true });
+    target.removeEventListener('touchend', this.onTouch, { capture: true });
   }
 
   /**
@@ -537,7 +560,31 @@ export class InputSystem {
     this.heldMouseButtons.clear();
   };
 
+  /**
+   * **A finger is not a mouse.** After a touch, the browser fires
+   * compatibility `mousedown`/`mouseup` for it (unless the `pointerdown` was
+   * `preventDefault`ed), both in one task. Before {@link clickedMouseButtons}
+   * those were invisible here, because they started and ended inside one
+   * frame; now they would count, and every tap-to-move on a tablet would press
+   * button 0 — today a one-frame `boost` nobody outside the rail race reads,
+   * tomorrow a phantom press of whatever a mouse button is bound to. So a mouse
+   * event is ignored when the browser says it came from touch
+   * (`sourceCapabilities.firesTouchEvents`, Chromium) or when it lands within
+   * {@link TOUCH_COMPAT_WINDOW_MS} of a touch (everywhere else).
+   */
+  private isTouchCompatMouse(event: MouseEvent): boolean {
+    const caps = (event as MouseEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } | null })
+      .sourceCapabilities;
+    if (caps?.firesTouchEvents === true) return true;
+    return event.timeStamp - this.lastTouchAt < TOUCH_COMPAT_WINDOW_MS;
+  }
+
+  private readonly onTouch = (event: Event): void => {
+    this.lastTouchAt = event.timeStamp;
+  };
+
   private readonly onMouseDown = (event: MouseEvent): void => {
+    if (this.isTouchCompatMouse(event)) return;
     this.heldMouseButtons.add(event.button);
     this.clickedMouseButtons.add(event.button);
     this.lastDeviceUsed = 'keyboard';

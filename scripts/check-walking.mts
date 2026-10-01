@@ -447,9 +447,11 @@ async function tapToMove(page: Page, label: string): Promise<void> {
  * **A point on the screen that is open ground, asked of the game, not assumed.**
  *
  * This used to tap a fixed spot (32% across, 72% down). Whatever stood there
- * got the tap: on seed 428 it was a tree, and GAME_DESIGN.md's SELECTION RULE
- * is that a tap on a *thing* selects it and does not walk — correct behaviour
- * that scored as "touch walking is dead". So the candidates are tried against
+ * got the tap: after the keychain view it was `tree-30` on seed 131 and a tree
+ * on seed 428, and GAME_DESIGN.md's SELECTION RULE is that a tap on a *thing*
+ * selects it and does not walk — correct behaviour that scored as "touch
+ * walking is dead". **This was #699's whole cause** (its red run had every key
+ * moving her with `riding=false`, so nothing was stuck). So the candidates are tried against
  * the game's own pickers — `Selection`'s zone pick and the parade's pets, the
  * two things `Game`'s tap handler asks before it lets `TapNavigator` walk — and
  * the first whose whole neighbourhood (±0.06 NDC, a metre or two either side)
@@ -577,10 +579,11 @@ await runCase('after keychain view', async (page) => {
     );
     return;
   }
-  // Down and up in one task, so certainly inside one frame. Until #699 a key
-  // tapped that fast was never seen by `InputSystem`, the view stayed open and
-  // she stayed `riding` — so this is the regression check for that as well as
-  // the way in.
+  // Down and up in one task, so certainly inside one frame. Until the
+  // `InputSystem` fix found while investigating #699, a key tapped that fast
+  // was never seen, the view stayed open and she stayed `riding` — so this is
+  // the regression check for that as well as the way in. (It was not #699's
+  // cause: that was the tap spot, see {@link findOpenGround}.)
   await tapEscapeWithinOneFrame(page);
   await page.waitForTimeout(1500);
   const handedBack = await page.evaluate(() => {
@@ -590,7 +593,7 @@ await runCase('after keychain view', async (page) => {
   if (handedBack.viewOpen !== false || handedBack.riding !== false) {
     fouls.push(
       `after keychain view: a quick Escape did not close the view (viewOpen=${handedBack.viewOpen}, ` +
-        `riding=${handedBack.riding}) — a key pressed and released inside one frame is being dropped (#699)`,
+        `riding=${handedBack.riding}) — a key pressed and released inside one frame is being dropped`,
     );
     return;
   }

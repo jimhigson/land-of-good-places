@@ -90,8 +90,9 @@ const REPO = new URL('..', import.meta.url).pathname;
  * on every run, which turned out to be the same as holding nothing: a list that
  * is merely stable is a list of checks nobody runs. #693 wired in
  * `check:wall-tunnelling` and moved the two GPU-only checks to {@link GPU_ONLY};
- * #699/#700 found why `check:walking` and `check:deep-links` were flaky (a key
- * tapped inside one frame was dropped by `InputSystem`) and wired them in. An
+ * #699/#700 wired in `check:walking` (flaky because its fixed tap spot could
+ * land on a tree) and `check:deep-links` (likely, unreproduced: an Escape
+ * dropped by `InputSystem` when pressed and released inside one frame). An
  * entry here needs a reason it cannot run yet and a ticket that owns making it
  * run.
  */

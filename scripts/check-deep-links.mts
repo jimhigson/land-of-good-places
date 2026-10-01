@@ -57,8 +57,8 @@ const BASE = (process.env.CHECK_DEEP_LINKS_URL ?? 'http://127.0.0.1:5173').repla
  *
  * A fresh profile draws its park from `PARK_SEED_POOL`, so every run of this
  * check used to visit a different park and a red run could not be reproduced
- * from its own transcript (the one that failed was seed 208, identified only by
- * matching the stall's coordinates against a probe). Every URL carries
+ * from its own transcript (the one that failed was most likely seed 208,
+ * judged only by matching the stall's coordinates against a probe). Every URL carries
  * `?seed=`, and every page is held to having reported that seed back.
  * `CHECK_DEEP_LINKS_SEED=n` visits another park.
  */
@@ -413,12 +413,13 @@ for (const check of CHECKS) {
       await page.goto(at(check.primerPath ?? check.path), { waitUntil: 'domcontentloaded' });
       await waitForGame(page, GAME_READY_TIMEOUT_MS);
       await tapEscapeWithinOneFrame(page);
-      // **Why this used to time out on `/keychain-stall`, and not for want of
-      // time (#700).** The autosave refuses while she is `riding`, and the
-      // keychain view keeps her riding until it closes. `press` is down-and-up
-      // at once, inside one frame, and until the fix `InputSystem` never saw a
-      // key that short — so the view stayed open and no save ever landed. The
-      // old 15 s -> 60 s raise could not have helped; nothing was slow.
+      // **The likely reason this once timed out on `/keychain-stall` (#700).**
+      // The autosave refuses while she is `riding`, and the keychain view keeps
+      // her riding until it closes. Until the fix, `InputSystem` never saw a
+      // key pressed and released inside one frame, so an Escape that short left
+      // the view open and no save could land. That is the mechanism, measured
+      // in isolation; the #700 failure itself has not been reproduced, so it
+      // is the likely cause rather than a proven one.
       //
       // Said here, not left to the timeout: if the view is still open after
       // the Escape, that is the finding.
@@ -432,7 +433,7 @@ for (const check of CHECKS) {
         if (!closed) {
           throw new Error(
             'Escape did not close the keychain view (she is still riding), so no autosave can land — ' +
-              'a key pressed and released inside one frame is being dropped (#700)',
+              'a key pressed and released inside one frame is being dropped',
           );
         }
       }

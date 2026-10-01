@@ -163,14 +163,6 @@ function railRaceBuilder(
 }
 
 /**
- * Decide every world-time feature. Synchronous: the World constructor drains it.
- *
- * `booths` is how a stall steps aside: the `World` hands in a way to reach the
- * booths it has already built, and `stallsFeature.ts` drives it. A caller with
- * no booths to move (there is none today) passes one that answers `null`, and
- * every stall then simply refuses to accommodate.
- */
-/**
  * **What the world phase builds, in order — the one owner of that list.**
  *
  * Anything that describes the world phase reads this rather than typing its own
@@ -190,6 +182,14 @@ export const WORLD_PHASE_FEATURES = [
   RAIL_RACE_FEATURE,
 ] as const;
 
+/**
+ * Decide every world-time feature. Synchronous: the World constructor drains it.
+ *
+ * `booths` is how a stall steps aside: the `World` hands in a way to reach the
+ * booths it has already built, and `stallsFeature.ts` drives it. A caller with
+ * no booths to move (there is none today) passes one that answers `null`, and
+ * every stall then simply refuses to accommodate.
+ */
 export function solveWorldPhase(
   collision: CollisionWorld,
   claims: GroundClaims,

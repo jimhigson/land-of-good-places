@@ -7,8 +7,10 @@
  *
  * In the gate as `check:served-walking` (a shard of its own — ~10 min on the
  * hosted runner's software renderer) and `check:served-deep-links`. Both were
- * pulled out once for flakiness; the cause was a dropped sub-frame key press in
- * `InputSystem` (#699, #700), not this harness.
+ * pulled out once for flakiness, and neither cause was this harness:
+ * `check:walking` (#699) tapped a fixed screen spot that, on some seeds, was a
+ * tree; `check:deep-links` (#700) most likely lost its Escape to `InputSystem`
+ * dropping a key pressed and released inside one frame (unreproduced).
  *
  * Some checks drive a real page: `check:walking` presses arrow keys at a
  * running park, `check:deep-links` opens every deep link. They were written to
