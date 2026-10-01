@@ -147,3 +147,7 @@ coping chamfer (#698 fix/procgen-last has the fix).
   water-fight-rack.png, stall-posts.png, path-corners.png, park-map-zoom-pan.png (KeyM, wheel, drag),
   cat-bus-burst-b11.png (doorway, ~63 s after load). Coordinates are seed-0/restart-8 specific: retake
   water-fight/stall/grid/path shots if seed 0's recorded restart changes.
+- Cross-platform identity (coordinator): park-identity.mts + compare-park-identity.mts + park-identity.yml (ubuntu vs
+  macos, 16 seeds). Controls pass. Next: read the CI result; #705 (ade102921125f8c23) owns the file format; plan is
+  acceptance measures the hydrated park file (their suggestion), quantise only if CI shows structural divergence.
+- check:coplanar deterministic (2 runs identical). flat-primitives fixed (69d7099a). Walk-reach VOID -> fix/sb-walkreach.
