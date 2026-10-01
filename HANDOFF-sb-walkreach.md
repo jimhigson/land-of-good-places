@@ -15,3 +15,10 @@ Exit 0: 0 1 4 9 10 12 15. Exit 1, all facade-steps VOID only:
 - buried (no built surface above the ground at all): 2 3 7 11
 Root: ENTRANCE_RAMP is a fixed 0.75 m drop from the door; nothing fits it to the terrain in front of the
 castle. Real park defect on the cliff seeds (door trigger needs |y - BUILDING_BASE_Y| <= 1.6).
+
+ROOT CAUSE (facade): WalkSurfaces.sample summed garden ramps plumb (BUILDING_BASE_Y + rampHeight over x - centre)
+while Shell.ts draws the steps leaning in CASTLE_FRAME. Fixed: layout.ts castleSurfaceY (Newton in the castle frame,
+footprint tested at the converged point), castleWorldY; Building.ts door gate uses worldToCastle(player).y outside,
+entrance band y / doorstepY / leaveInterior / npc portals reference castleWorldY instead of BUILDING_BASE_Y.
+Seed 5 after fix: threshold 0.36 m above ground, steps run into the ground (was 1.5 m cliff).
+Next: seed-5 walk-reach, then full 0..15 sweep; check park-solve trace unchanged (sampler must not move the park).
