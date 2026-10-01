@@ -2362,6 +2362,43 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
   return group;
 }
 
+/**
+ * **A stone wall has no underside, because nobody can ever see it.**
+ *
+ * The wall stands with its foot at the lower of its two ends' ground, so its
+ * closed bottom face lies in — or within millimetres of — the terrain's own
+ * plane, pointing the same way the terrain does once the box is leant onto the
+ * sphere. `check:coplanar` found it on seed 10 at its recorded restart:
+ * `terrain | stone-walls`, 0.115 m² at a 9 mm stand-off, a run at
+ * (66.8, 1.0) on a slope. A face under the ground is a hidden face, and
+ * ART_DIRECTION.md §7 says delete it rather than nudge the wall — the same fix
+ * the rail race's trestle trunk and the stall posts took for their feet.
+ *
+ * `BoxGeometry` builds its six faces in the order +x, -x, +y, -y, +z, -z, each
+ * `widthSegments * heightSegments * 6` (here one segment, six) indices; the
+ * floor is the fourth. Its groups go with it — one material, so they carried
+ * nothing, and a group pointing at the wrong triangles is worse than none.
+ */
+function withoutBoxFloor(geometry: BoxGeometry): BoxGeometry {
+  const index = geometry.getIndex();
+  const perFace = 6;
+  if (
+    !index ||
+    index.count !== 6 * perFace ||
+    geometry.parameters.widthSegments !== 1 ||
+    geometry.parameters.heightSegments !== 1 ||
+    geometry.parameters.depthSegments !== 1
+  ) {
+    throw new Error(
+      `Scenery.ts: withoutBoxFloor wants a one-segment box (36 indices), got ${index?.count ?? 0}`,
+    );
+  }
+  const all = Array.from(index.array);
+  geometry.setIndex([...all.slice(0, 3 * perFace), ...all.slice(4 * perFace)]);
+  geometry.clearGroups();
+  return geometry;
+}
+
 /** Low pink stone walls: garden-bed edging around the plaza and a few benches
  *  of stonework out on the lawn. */
 function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs: readonly WallRun[]): Group {
@@ -2394,7 +2431,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
     const midZ = (z1 + z2) / 2;
     const base = Math.min(terrainHeight(x1, z1), terrainHeight(x2, z2));
 
-    const geometry = new BoxGeometry(length, run.height, 0.55);
+    const geometry = withoutBoxFloor(new BoxGeometry(length, run.height, 0.55));
     scaleUvs(geometry, length / 3, run.height / 1.2);
     // **Wall and coping lean as one piece: both measured up from the same
     // foot, along the same up** — `placeOnSphere`, the way every tree's trunk
