@@ -115,8 +115,14 @@ jobs:
     # the matrix still builds the parks from scratch.
     if: always() && needs.key.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true'
     runs-on: ubuntu-latest
-    # The slowest seed's accept loop at four restarts at a time. Not a budget
-    # to grow into: a seed that needs more is a generator to make cheaper.
+    # The slowest seed's accept loop at four restarts at a time. Sized from
+    # the attempt's measured cost (#706, staged attempts, 2 Oct): a rejected
+    # restart pays its solve plus ~37-54 s of cheap measures; the accepted one
+    # its solve plus ~207 s of every measure. The dearest seed, 15, solves in
+    # 434 s CPU on a Mac (~15 min on a runner at ~2x) and now accepts at
+    # restart 0, so ~22 min; four lanes on four cores keep a seed that needs
+    # several restarts to about one solve per round. Not a budget to grow
+    # into: a seed that needs more is a generator to make cheaper.
     timeout-minutes: 60
     strategy:
       fail-fast: false
