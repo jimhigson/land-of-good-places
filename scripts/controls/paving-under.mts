@@ -5,8 +5,8 @@ import { Mesh, BufferAttribute, Float32BufferAttribute } from 'three';
  * it must not be. CTRL_MODE=booth: moved from the first stall's stand point
  * onto its booth. CTRL_MODE=outside: from the paving nearest the boundary,
  * moved 4 m out past it. CTRL_MODE=castle: from the castle's doormat, 6 m in
- * under its front wall. CTRL_MODE=rail: from the unbridged paving nearest the
- * rail, onto the rail centre line. The copy keeps its owners, so nothing is exempt.
+ * under its front wall. CTRL_MODE=rail: onto the rail centre line where the
+ * loop is furthest from every station and crossing. The copy keeps its owners, so nothing is exempt.
  */
 export default function (facts: any): void {
   const mode = process.env['CTRL_MODE'] ?? 'booth';
@@ -15,19 +15,28 @@ export default function (facts: any): void {
   let from: [number, number];
   let shift: [number, number];
   if (mode === 'rail') {
-    // From the paving nearest the rail that no bridge carries, onto the track.
+    // Onto the rail centre line at the point of the loop furthest (along it)
+    // from every station and every bridge — inside the fences, nothing carrying it.
+    const route = facts.world.train.route;
+    const marks = [
+      ...facts.world.train.stations.map((st: any) => st.distance),
+      ...facts.world.train.crossings.map((c: any) => route.distanceNear(c.x, c.z)),
+    ];
+    let bestAlong = 0;
+    let bestGap = -1;
+    for (let a = 0; a < route.length; a += 1) {
+      const gap = Math.min(...marks.map((m: number) => Math.abs(((a - m + route.length * 1.5) % route.length) - route.length / 2)));
+      if (gap > bestGap) { bestGap = gap; bestAlong = a; }
+    }
+    const at = { x: 0, z: 0 } as any;
+    route.flatPointAt(bestAlong, at);
     let best = Infinity;
     from = [0, 0];
     const p = meshes[0].geometry.getAttribute('position');
-    const route = facts.world.train.route;
     for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), z = p.getZ(i);
-      if (facts.world.train.bridges.some((b: any) => b.pavingHeightAt(x, z) !== null)) continue;
-      const d = facts.distanceToRail(x, z);
-      if (d < best) { best = d; from = [x, z]; }
+      const d = Math.hypot(p.getX(i) - at.x, p.getZ(i) - at.z);
+      if (d < best) { best = d; from = [p.getX(i), p.getZ(i)]; }
     }
-    const at = { x: 0, z: 0 } as any;
-    route.flatPointAt(route.distanceNear(from[0], from[1]), at);
     shift = [at.x - from[0], at.z - from[1]];
   } else if (mode === 'castle') {
     // From the castle's doormat, 6 m in under its front wall.
