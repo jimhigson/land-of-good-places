@@ -302,9 +302,19 @@ export class ReptileHouse implements GameSystem {
     this.ride.attachPlayer(player);
   }
 
-  /** On the tortoise's shell, mid-lap — for the checks. */
+  /** On the tortoise's shell, mid-lap — for the checks and `Game`'s tap handler. */
   get playerOnTortoise(): boolean {
     return this.ride.playerRiding;
+  }
+
+  /** The tortoise back in its bay, solid — for the check. */
+  get tortoiseParked(): boolean {
+    return this.ride.parked;
+  }
+
+  /** A tap anywhere while she is on the tortoise: off it, walking. */
+  dismountTortoise(): void {
+    this.ride.dismount();
   }
 
   /**
@@ -399,7 +409,7 @@ export class ReptileHouse implements GameSystem {
       const local: LocalPoint | null = player ? { x: player.position.x - REPTILE_HOUSE_ORIGIN_X, z: player.position.z - REPTILE_HOUSE_ORIGIN_Z } : null;
       this.exhibits.update(dt, elapsed, local);
       this.stall.update(dt, elapsed);
-      this.ride.update(dt, elapsed);
+      this.ride.update(dt, elapsed, context.input);
       this.hearts.update(dt);
       if (this.bubbleFor > 0) {
         this.bubbleFor -= dt;

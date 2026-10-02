@@ -454,6 +454,12 @@ export class Game {
           this.treeClimbing.requestDescend();
           return;
         }
+        // On the tortoise, likewise: a tap anywhere means "hop off" (Jim,
+        // 2 October 2026 — jumping or trying to walk anywhere gets her off).
+        if (this.world.reptileHouse.playerOnTortoise) {
+          this.world.reptileHouse.dismountTortoise();
+          return;
+        }
         if (this.parade.handleTap(point)) return;
         // GAME_DESIGN.md's SELECTION RULE, step 1: a tap that lands on a thing
         // *selects* it and goes no further. Selection is free — it costs no

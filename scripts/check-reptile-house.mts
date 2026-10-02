@@ -78,6 +78,7 @@ import {
   BEDS,
   EXHIBIT_PLACEMENTS,
   REPTILE_ARCH_HEIGHT,
+  TORTOISE_RIDE_PARK,
   PATHS,
   REPTILE_ARCH_WIDTH,
   REPTILE_ARRIVAL_X,
@@ -593,6 +594,42 @@ console.log('\nDOORS — both ways, on the real building:');
   const saidTall = press();
   say(saidBare === meterReading(2.12), `the chip says "${saidBare}" at 2.12 m`);
   say(saidTall === meterReading(TALLEST_CHILD_HEIGHT) && saidTall !== saidBare, `and "${saidTall}" at ${TALLEST_CHILD_HEIGHT} m (the tallest hat)`);
+}
+
+console.log('\nTORTOISE RIDE — on by the link, off by any input, onto clear floor, and the tortoise comes home:');
+{
+  // A real Player this time: the ride hands her back through `endRide`.
+  const rider = quietly(() => new Player(collision, new IsoCamera(), new Vector3(OX + REPTILE_ARRIVAL_X, 0, OZ + REPTILE_ARRIVAL_Z)));
+  house.attachPlayer(rider);
+  const quiet = { justPressed: () => false, moveAmount: 0 };
+  const frame = (input: { justPressed(a: string): boolean; moveAmount: number }): FrameContext =>
+    ({ dt: 1 / 60, elapsed: 1, playerPosition: rider.position, frame: 1, input } as unknown as FrameContext);
+  const bayX = OX + TORTOISE_RIDE_PARK.x;
+  const bayZ = OZ + TORTOISE_RIDE_PARK.z;
+  const ride = (name: string, off: () => void): void => {
+    say(house.requestTortoiseRide(), `${name}: /tortoise-ride boards`);
+    for (let i = 0; i < 70; i += 1) house.update(frame(quiet));
+    say(rider.riding && house.playerOnTortoise && rider.position.y > 1, `  she is riding, ${rider.position.y.toFixed(2)} m up on the shell`);
+    say(collision.isClearCircle(bayX, bayZ, PLAYER_RADIUS), '  the bay is clear floor while the tortoise is out');
+    // Twelve seconds in: out of the foyer, on the ring.
+    for (let i = 0; i < 12 * 60; i += 1) house.update(frame(quiet));
+    const local = { x: rider.position.x - OX, z: rider.position.z - OZ };
+    say(rider.riding && Math.hypot(local.x, local.z) < 9, `  mid-lap at (${local.x.toFixed(1)}, ${local.z.toFixed(1)}), still riding`);
+    off();
+    say(!rider.riding && !house.playerOnTortoise, '  one frame later she is off the shell and in control (Player.riding false)');
+    say(Math.abs(rider.position.y - REPTILE_HOUSE_FLOOR_Y) < 1e-6, `  on the floor (y ${rider.position.y.toFixed(2)})`);
+    say(collision.isClearCircle(rider.position.x, rider.position.z, PLAYER_RADIUS), `  on clear floor at hall (${(rider.position.x - OX).toFixed(1)}, ${(rider.position.z - OZ).toFixed(1)})`);
+    say(!house.tortoiseParked, '  the tortoise is still out');
+    for (let i = 0; i < 60 * 60 && !house.tortoiseParked; i += 1) house.update(frame(quiet));
+    say(house.tortoiseParked && !collision.isClearCircle(bayX, bayZ, PLAYER_RADIUS), '  and plods home on its own: parked, bay solid again');
+    say(!rider.riding, '  without picking her up again');
+  };
+  ride('jump', () => house.update(frame({ justPressed: (a) => a === 'jump', moveAmount: 0 })));
+  ride('the stick', () => house.update(frame({ justPressed: () => false, moveAmount: 1 })));
+  ride('a tap', () => {
+    house.dismountTortoise();
+    house.update(frame(quiet));
+  });
 }
 
 console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has a collider at its middle:');

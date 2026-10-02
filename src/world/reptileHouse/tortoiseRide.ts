@@ -38,6 +38,17 @@ import {
  * the fixed iso camera follows `player.position` on its own, and the HUD
  * hides itself while `player.riding`.
  *
+ * **Getting off is any input.** Jim, 2 October 2026, having ridden it: *"the
+ * tortoise ride needs a way to get off — jumping or trying to walk anywhere
+ * should jump off its back and return to normal play."* So mid-lap a jump,
+ * any stick or key movement, or a tap anywhere (`Game`'s tap handler, the
+ * tree climb's "tap means come down" branch) is {@link dismount}: a hop off
+ * the shell onto clear floor beside the tortoise (`resolveDismount`, never
+ * into a kerb or a case), `Player.endRide` the same frame, and the tortoise
+ * plods the rest of its lap back to the bay on its own. GAME_DESIGN's
+ * CONTROL rule: pressing left means go left — here it means get off and go
+ * left, which is the same thing one frame later.
+ *
  * **Solid when parked, scenery when walking.** Parked, the tortoise is a
  * drawn thing a child can lean on, so it is one `ReptileProps.wall` — a
  * filled capsule along its body, head included — at the parking spot
@@ -60,6 +71,18 @@ function parkedCapsule(): [LocalPoint, LocalPoint] {
   ];
 }
 
+/** What the ride reads of the frame's input: the two things that mean "off", wherever she is. */
+export interface RideInput {
+  justPressed(action: 'jump'): boolean;
+  readonly moveAmount: number;
+}
+
+/** A nudge off the shell: sideways, up a little, and she is walking. */
+const HOP_OFF_SIDE = 1.2;
+const HOP_OFF_UP = 3;
+/** Where she lands, beside the tortoise's flank, before `resolveDismount` has its say. */
+const DISMOUNT_BESIDE = 1.7;
+
 export class TortoiseRide {
   readonly tortoise: TortoiseHandle;
   private readonly root: Group;
@@ -73,12 +96,15 @@ export class TortoiseRide {
   private readonly ahead = new Vector3();
   private readonly seatWorld = new Vector3();
   private player: Player | null = null;
+  /** The tortoise is out on its lap (with or without her). */
+  private walking = false;
+  /** She is on its shell. */
   private riding = false;
   private along = 0;
   private phase = 0;
   private yaw = (TORTOISE_RIDE_PARK.facing * Math.PI) / 180;
   /** The parked capsule's handle in the collision world, or `null` while it is out walking. */
-  private parked: WallCollider | null = null;
+  private bay: WallCollider | null = null;
   private readonly parkedSolid: ReptileProps['solids'][number];
 
   constructor(root: Group, props: ReptileProps, collision: CollisionWorld, controls: InteriorControls) {
@@ -105,7 +131,7 @@ export class TortoiseRide {
     const [front, back] = parkedCapsule();
     this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, 'wall');
     this.parkedSolid = this.props.solids[this.props.solids.length - 1]!;
-    this.parked = this.parkedSolid.handle as WallCollider;
+    this.bay = this.parkedSolid.handle as WallCollider;
     this.park();
   }
 
@@ -117,16 +143,22 @@ export class TortoiseRide {
     return this.riding;
   }
 
+  /** Back in its bay with its capsule registered — for the check. */
+  get parked(): boolean {
+    return !this.walking && this.bay !== null;
+  }
+
   /** "Hop on!" — from the chip, or from `/tortoise-ride` once she is in the hall. */
   requestBoard(): boolean {
     const player = this.player;
-    if (!player || player.riding || this.riding) return false;
+    if (!player || player.riding || this.walking) return false;
     this.controls.cancelWalk();
+    this.walking = true;
     this.riding = true;
     this.along = 0;
-    if (this.parked !== null) {
-      this.collision.removeWall(this.parked);
-      this.parked = null;
+    if (this.bay !== null) {
+      this.collision.removeWall(this.bay);
+      this.bay = null;
     }
     player.beginRide();
     this.place(0);
@@ -161,8 +193,33 @@ export class TortoiseRide {
     ];
   }
 
-  update(dt: number, elapsed: number): void {
-    if (this.riding) {
+  /**
+   * Off the shell, onto clear floor beside the tortoise, walking — from a
+   * jump, a movement, or a tap. A no-op when she is not on it.
+   */
+  dismount(): void {
+    const player = this.player;
+    if (!player || !this.riding) return;
+    this.riding = false;
+    // Beside its flank, on the side away from the ring's middle — the beds and
+    // Noodle's kerb are inboard of the ring, the open floor outboard — then
+    // `resolveDismount` spirals out from there if that spot is not clear.
+    const sideX = Math.cos(this.yaw);
+    const sideZ = -Math.sin(this.yaw);
+    const outward = sideX * this.at.x + sideZ * this.at.z >= 0 ? 1 : -1;
+    const { x, z } = resolveDismount(
+      this.collision,
+      REPTILE_HOUSE_ORIGIN_X + this.at.x + sideX * outward * DISMOUNT_BESIDE,
+      REPTILE_HOUSE_ORIGIN_Z + this.at.z + sideZ * outward * DISMOUNT_BESIDE,
+      PLAYER_RADIUS,
+    );
+    player.setRidePose(x, REPTILE_HOUSE_FLOOR_Y, z, this.yaw);
+    player.endRide(sideX * outward * HOP_OFF_SIDE, HOP_OFF_UP, sideZ * outward * HOP_OFF_SIDE);
+  }
+
+  update(dt: number, elapsed: number, input?: RideInput): void {
+    if (this.riding && input && (input.justPressed('jump') || input.moveAmount > 0.22)) this.dismount();
+    if (this.walking) {
       this.along += TORTOISE_RIDE_SPEED * dt;
       if (this.along >= this.length) {
         this.arrive();
@@ -187,6 +244,7 @@ export class TortoiseRide {
     if (Math.hypot(dx, dz) > 1e-4) this.yaw = Math.atan2(dx, dz);
     this.tortoise.root.position.set(this.at.x, 0, this.at.z);
     this.tortoise.root.rotation.y = this.yaw;
+    if (!this.riding) return;
     this.root.updateMatrixWorld();
     this.seat.getWorldPosition(this.seatWorld);
     this.player?.setRidePose(this.seatWorld.x, this.seatWorld.y, this.seatWorld.z, this.yaw);
@@ -194,20 +252,22 @@ export class TortoiseRide {
 
   /** Back at the parking spot: the tortoise parks, the disc comes back, she gets off at the stand. */
   private arrive(): void {
+    const rider = this.riding;
     this.riding = false;
+    this.walking = false;
     this.along = 0;
     this.park();
     const [front, back] = parkedCapsule();
-    this.parked = this.collision.addWall(
+    this.bay = this.collision.addWall(
       REPTILE_HOUSE_ORIGIN_X + front.x,
       REPTILE_HOUSE_ORIGIN_Z + front.z,
       REPTILE_HOUSE_ORIGIN_X + back.x,
       REPTILE_HOUSE_ORIGIN_Z + back.z,
       TORTOISE_RIDE_PARK_HALF_WIDTH,
     );
-    this.parkedSolid.handle = this.parked;
+    this.parkedSolid.handle = this.bay;
     const player = this.player;
-    if (!player) return;
+    if (!player || !rider) return;
     const { x, z } = resolveDismount(
       this.collision,
       REPTILE_HOUSE_ORIGIN_X + TORTOISE_RIDE_STAND.x,
