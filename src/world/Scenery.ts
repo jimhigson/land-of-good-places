@@ -2363,23 +2363,29 @@ function buildWoodenWalls(collision: CollisionWorld, built: PlacedWallRun[], run
 }
 
 /**
- * **A stone wall has no underside, because nobody can ever see it.**
+ * **A stone wall has no top face, because its coping always covers it.**
  *
- * The wall stands with its foot at the lower of its two ends' ground, so its
- * closed bottom face lies in — or within millimetres of — the terrain's own
- * plane, pointing the same way the terrain does once the box is leant onto the
- * sphere. `check:coplanar` found it on seed 10 at its recorded restart:
- * `terrain | stone-walls`, 0.115 m² at a 9 mm stand-off, a run at
- * (66.8, 1.0) on a slope. A face under the ground is a hidden face, and
- * ART_DIRECTION.md §7 says delete it rather than nudge the wall — the same fix
- * the rail race's trestle trunk and the stall posts took for their feet.
+ * The coping stone is placed from the same foot along the same up, 0.2 m
+ * longer and 0.17 m wider than the wall, with its underside exactly on the
+ * wall's top — so the wall's own top face is never seen from anywhere. It was
+ * still drawn, and where a wall runs into a hillside the ground climbs to meet
+ * it: the wall's foot is the *lower* of its two ends' ground, so at the
+ * uphill end the terrain reaches the top of the wall and lies in that face's
+ * plane, pointing the same way. `check:coplanar` found it on seed 10 at its
+ * recorded restart: `terrain | stone-walls`, 0.115 m² at a 9 mm stand-off,
+ * the run at (66.8, 1.0). A face nobody can see is a hidden face, and
+ * ART_DIRECTION.md §7 says delete it rather than nudge the wall.
+ *
+ * (Not the underside. That was this fix's first guess, and the sweep proved it
+ * wrong: the sweep only pairs faces pointing the *same* way, and the underside
+ * points away from the ground it stands on, so it never fights it.)
  *
  * `BoxGeometry` builds its six faces in the order +x, -x, +y, -y, +z, -z, each
  * `widthSegments * heightSegments * 6` (here one segment, six) indices; the
- * floor is the fourth. Its groups go with it — one material, so they carried
+ * top is the third. Its groups go with it — one material, so they carried
  * nothing, and a group pointing at the wrong triangles is worse than none.
  */
-function withoutBoxFloor(geometry: BoxGeometry): BoxGeometry {
+function withoutBoxTop(geometry: BoxGeometry): BoxGeometry {
   const index = geometry.getIndex();
   const perFace = 6;
   if (
@@ -2390,11 +2396,11 @@ function withoutBoxFloor(geometry: BoxGeometry): BoxGeometry {
     geometry.parameters.depthSegments !== 1
   ) {
     throw new Error(
-      `Scenery.ts: withoutBoxFloor wants a one-segment box (36 indices), got ${index?.count ?? 0}`,
+      `Scenery.ts: withoutBoxTop wants a one-segment box (36 indices), got ${index?.count ?? 0}`,
     );
   }
   const all = Array.from(index.array);
-  geometry.setIndex([...all.slice(0, 3 * perFace), ...all.slice(4 * perFace)]);
+  geometry.setIndex([...all.slice(0, 2 * perFace), ...all.slice(3 * perFace)]);
   geometry.clearGroups();
   return geometry;
 }
@@ -2431,7 +2437,7 @@ function buildStoneWalls(collision: CollisionWorld, built: PlacedWallRun[], runs
     const midZ = (z1 + z2) / 2;
     const base = Math.min(terrainHeight(x1, z1), terrainHeight(x2, z2));
 
-    const geometry = withoutBoxFloor(new BoxGeometry(length, run.height, 0.55));
+    const geometry = withoutBoxTop(new BoxGeometry(length, run.height, 0.55));
     scaleUvs(geometry, length / 3, run.height / 1.2);
     // **Wall and coping lean as one piece: both measured up from the same
     // foot, along the same up** — `placeOnSphere`, the way every tree's trunk
