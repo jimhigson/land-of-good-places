@@ -18,3 +18,11 @@ report failures, they are information); trees + climbable per seed before/after.
 11/4 72 34 932 | 12/0 72 40 1600 | 13/2 72 34 1428 | 14/6 72 35 3484 | 15/5 72 40 2794
 Sampling area ~18185 m2 on every seed (boundary area ~constant), so "density x area" = a constant budget.
 Next: curve run (cap removed, budget 8000, uncommitted) to get trees(N)/climbable(N) per seed.
+
+## Curve (cap removed, budget 8000): trees/climbable at N candidates, per seed
+Sum |trees-72|: 1200->210, 1400->167, 1600->143, 1800->143, 2000->162, 2500->189. min climbable at 1800: 27 (seed 4).
+Seed 8 accepts only 76 trees in 8000 candidates (lawn-limited); seed 11 accepts 125.
+Decision: fixed candidate density TREE_CANDIDATES_PER_M2 = 0.1 (~1819 candidates). Committed. Reason in the constant's doc.
+Test: scatterDecoupling now loops PARKS = canonical + seed 12. Running default + LGP_SEED=3.
+TODO: control (old cap code + new test -> seed 12 red), after-measure 16 seeds, park:attempt x16 at recorded restarts,
+update the doc numbers in Scenery.ts with the measured after table.
