@@ -30,8 +30,7 @@ import {
   type RouteDefinition,
 } from './paths';
 import { PARK_LAYOUT, doorApronOf } from './parkLayout';
-import { STALL_PLACEMENTS } from '../minigames/stallPlacement';
-import { boothBoxFor, boothCorners } from '../minigames/boothFootprint';
+import { distanceToBoothBodies } from '../minigames/stallPlacement';
 
 /**
  * **The one Catmull-Rom every consumer of a route's drawn shape builds.**
@@ -865,12 +864,7 @@ function clearOfTheGateway(x: number, z: number, radius: number): boolean {
  * stands), or not laid at all if that would leave less than half a path.
  */
 function clearOfBooths(apron: JunctionApron): JunctionApron | null {
-  let room = Infinity;
-  for (const [id, placement] of Object.entries(STALL_PLACEMENTS)) {
-    const box = boothBoxFor(id);
-    const c = boothCorners(placement.position[0], placement.position[1], placement.facing, box);
-    room = Math.min(room, distanceToQuad(apron.x, apron.z, [c.frontLeft, c.frontRight, c.backRight, c.backLeft]) - box.wallHalfThickness);
-  }
+  const room = distanceToBoothBodies(apron.x, apron.z);
   const radius = Math.min(apron.radius, room - PATH_KERB_OVERHANG - BOOTH_APRON_GAP);
   if (radius >= apron.radius) return apron;
   return radius >= apron.radius / 2 ? { ...apron, radius } : null;
@@ -878,22 +872,6 @@ function clearOfBooths(apron: JunctionApron): JunctionApron | null {
 
 /** Daylight left between a shrunk junction apron's kerb and a booth's wall. */
 const BOOTH_APRON_GAP = 0.05;
-
-/** Plan distance from a point to a convex quad (corners in order), negative inside. */
-function distanceToQuad(x: number, z: number, quad: readonly (readonly [number, number])[]): number {
-  let best = Infinity;
-  let positive = 0;
-  let negative = 0;
-  for (let i = 0; i < quad.length; i += 1) {
-    const [ax, az] = quad[i]!;
-    const [bx, bz] = quad[(i + 1) % quad.length]!;
-    best = Math.min(best, distanceToSegment(x, z, ax, az, bx, bz));
-    const cross = (bx - ax) * (z - az) - (bz - az) * (x - ax);
-    if (cross > 0) positive += 1;
-    else if (cross < 0) negative += 1;
-  }
-  return positive === 0 || negative === 0 ? -best : best;
-}
 
 /** Where a disc of paving may be laid: on the ground, off every bridge and off the gateway. */
 function discMayBeLaid(x: number, z: number, radius: number): boolean {

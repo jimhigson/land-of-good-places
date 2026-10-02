@@ -3,6 +3,7 @@ import { registerPlanCache } from '../boot/planCaches';
 import { CAMERA_FACING_YAW } from '../core/constants';
 import { ANCHORS_BY_ID } from '../world/anchors';
 import { counterFacing, placedEntry } from '../world/parkLayout';
+import { boothBoxFor, boothCorners } from './boothFootprint';
 
 /**
  * Where each stall stands, and where a child stands to be served.
@@ -253,3 +254,41 @@ export const STALL_STANDS_BY_ID: ReadonlyMap<string, StallStand> = lazyView(() =
  * tap-spacing rule in `world/tapSpacing.ts`).
  */
 export const STALL_PICK_RADIUS = 3.2;
+
+/**
+ * **How far (x, z) stands from the nearest booth's body**, walls included —
+ * negative inside one — over every booth at its planned placement, the same
+ * box and corners its colliders are built from (`boothFootprint.ts`). `except`
+ * leaves one booth out (by stall id). For the paths: a ribbon must keep its
+ * paving off every booth (`test/procgen`'s `noDrawnPavingUnderASolid`).
+ */
+export function distanceToBoothBodies(x: number, z: number, except?: string): number {
+  let best = Infinity;
+  for (const [id, placement] of Object.entries(STALL_PLACEMENTS)) {
+    if (id === except) continue;
+    const box = boothBoxFor(id);
+    const c = boothCorners(placement.position[0], placement.position[1], placement.facing, box);
+    best = Math.min(best, distanceToQuad(x, z, [c.frontLeft, c.frontRight, c.backRight, c.backLeft]) - box.wallHalfThickness);
+  }
+  return best;
+}
+
+/** Plan distance from a point to a convex quad (corners in order), negative inside. */
+function distanceToQuad(x: number, z: number, quad: readonly (readonly [number, number])[]): number {
+  let best = Infinity;
+  let positive = 0;
+  let negative = 0;
+  for (let i = 0; i < quad.length; i += 1) {
+    const [ax, az] = quad[i]!;
+    const [bx, bz] = quad[(i + 1) % quad.length]!;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const lengthSq = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq));
+    best = Math.min(best, Math.hypot(x - (ax + t * dx), z - (az + t * dz)));
+    const cross = dx * (z - az) - dz * (x - ax);
+    if (cross > 0) positive += 1;
+    else if (cross < 0) negative += 1;
+  }
+  return positive === 0 || negative === 0 ? -best : best;
+}

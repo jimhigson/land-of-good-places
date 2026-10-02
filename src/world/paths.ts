@@ -26,7 +26,7 @@ import {
 } from './pavingLegibility';
 import { SLIDE_PLAN } from './slide/plan';
 import { FERRIS_WHEEL_EXIT } from '../minigames/ferrisWheel/exit';
-import { STALL_STANDS } from '../minigames/stallPlacement';
+import { STALL_PLACEMENTS, STALL_STANDS, distanceToBoothBodies } from '../minigames/stallPlacement';
 import { ENTRANCE_GATE_HALF_WIDTH, ENTRANCE_GATE_X, ENTRANCE_GATE_Z } from './entrance/layout';
 
 /**
@@ -4963,6 +4963,12 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       // on every bearing) declares it; `entranceFacing` is the one owner.
       const [outX, outZ] = entranceFacing(placedTarget);
       lead.push([ex + outX * 3.5, ez + outZ * 3.5]);
+    } else if (kind === 'stall') {
+      // A booth with no plot of its own (the ferris wheel's ticket kiosk) is
+      // still a counter with a front: arrive head-on along the way it faces,
+      // not from behind through the booth (seed 12, 2 Oct 2026).
+      const placement = (STALL_PLACEMENTS as Readonly<Record<string, { readonly facing: number }>>)[id.replace(/^stall\./, '')];
+      if (placement) lead.push([ex + Math.sin(placement.facing) * 3.5, ez + Math.cos(placement.facing) * 3.5]);
     }
     // The street lattice serves the spur (network-first, lead-last); the
     // old continuous router is only the fallback for ground the lattice
@@ -4985,6 +4991,14 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     // so the finished plan is judged whole, on the curve that will be drawn,
     // and the continuous router is asked instead. Whichever stands on less
     // bridge is kept, so a spur the lattice served is never left worse off.
+    // **Nor under a booth.** A street plan whose paving reaches a booth's body
+    // is not the plan: the continuous router, which screens every candidate
+    // for booths, is asked instead.
+    if (streets && !routeClearsBooths([...streets, ...(lead.length ? [[ex, ez] as const] : [])], width)) {
+      restoreLatticeState(beforeStreets);
+      streets = null;
+      fallback = fallbackSpurRoute(network(), routeTarget, spurTail, width);
+    }
     if (streets) {
       const tail = lead.length ? [[ex, ez] as const] : [];
       const streetsOnABridge = drawnMetresOnABridgeUncarried([...streets, ...tail], width);
@@ -5958,6 +5972,10 @@ function* addInterconnects(
       if (!routeClearsArchFeet(points, CONNECTOR_WIDTH)) {
         return "comes down on the finish rainbow's feet";
       }
+      // Nor does it lay its paving under a booth (see {@link routeClearsBooths}).
+      if (!routeClearsBooths(points, CONNECTOR_WIDTH)) {
+        return 'runs under a booth';
+      }
       // **An optional connector never stands on a bridge it does not cross.**
       // Its paving would be lifted onto the ramp where it overlaps the stone
       // and left on the lawn where it does not — the canonical seed's
@@ -6008,6 +6026,31 @@ function* addInterconnects(
  * fallback candidate that fails it is passed over for the next
  * ({@link fallbackSpurRoute}).
  */
+/**
+ * **A route whose drawn paving keeps off every booth.** Asked of the curve that
+ * will be drawn: no sample's ribbon — half its width plus the kerb — may reach
+ * a booth's body (`distanceToBoothBodies`, the booths' own boxes and walls).
+ * Samples within half a width of an end are exempt: that is the route arriving
+ * at a stand point square in front of a counter, whose paving stops there.
+ * Seeds 7, 11 and 12 (2 Oct 2026) laid 0.2–5 m² of paving under booths —
+ * spurs passing a neighbour's booth, and the ferris kiosk's spur arriving
+ * from behind its own (`noDrawnPavingUnderASolid`).
+ */
+function routeClearsBooths(points: readonly (readonly [number, number])[], width: number): boolean {
+  if (points.length < 2) return true;
+  const reach = width / 2 + PATH_KERB_OVERHANG;
+  const first = points[0] as readonly [number, number];
+  const last = points[points.length - 1] as readonly [number, number];
+  const curve = routeCurve({ name: 'booth-screen', width, closed: false, points });
+  if (curve.points.length < 2) return true;
+  for (const p of curvePoints(curve, pathDivisions(curve))) {
+    if (Math.hypot(p.x - first[0], p.z - first[1]) < width / 2) continue;
+    if (Math.hypot(p.x - last[0], p.z - last[1]) < width / 2) continue;
+    if (distanceToBoothBodies(p.x, p.z) < reach) return false;
+  }
+  return true;
+}
+
 function routeClearsArchFeet(
   points: readonly (readonly [number, number])[],
   width: number,
@@ -7083,6 +7126,7 @@ function fallbackSpurRoute(
     restoreLatticeState(before);
     const points = snapRunsToLattice(routeLeg(candidate, target, width));
     if (!routeClearsArchFeet([...points, ...extra], width)) continue;
+    if (!routeClearsBooths([...points, ...extra], width)) continue;
     const onABridge = drawnMetresOnABridgeUncarried([...points, ...extra], width);
     if (onABridge > 0) {
       if (!leastOnABridge || onABridge < leastOnABridge.metres) {
