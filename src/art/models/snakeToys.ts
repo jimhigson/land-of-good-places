@@ -43,10 +43,31 @@ export function createSnakeBalloon(): AssetHandle {
 }
 
 /** A bag of three jelly snakes, best eaten slowly. Origin at the bag's base. */
+/**
+ * `BoxGeometry` builds its six faces in the order +x, −x, +y, −y, +z, −z, six
+ * indices each for a one-segment box; the bottom is the fourth. The groups go
+ * with it — one material, so they carried nothing. `Scenery.ts`'s
+ * `withoutBoxTop` is the same operation the other way up.
+ */
+function withoutBoxBottom(geometry: BoxGeometry): BoxGeometry {
+  const index = geometry.getIndex();
+  const perFace = 6;
+  if (!index || index.count !== 6 * perFace) {
+    throw new Error(`snakeToys: withoutBoxBottom wants a one-segment box (36 indices), got ${index?.count ?? 0}`);
+  }
+  const all = Array.from(index.array);
+  geometry.setIndex([...all.slice(0, 3 * perFace), ...all.slice(4 * perFace)]);
+  geometry.clearGroups();
+  return geometry;
+}
+
 export function createJellySnakes(): AssetHandle {
   const root = new Group();
   root.name = 'candy.jellySnakes';
-  const bag = solid(new Mesh(new BoxGeometry(0.26, 0.3, 0.1), toonMaterial(PALETTE.markerLemon)));
+  // No bottom face: the bag always stands on something (the stall's
+  // counter), and that face lay in the counter top's own plane
+  // (`check:coplanar`, 2 October 2026). ART_DIRECTION §7's deletion.
+  const bag = solid(new Mesh(withoutBoxBottom(new BoxGeometry(0.26, 0.3, 0.1)), toonMaterial(PALETTE.markerLemon)));
   bag.position.y = 0.15;
   root.add(bag);
   addOutline(bag, 0.01);

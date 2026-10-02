@@ -10,7 +10,7 @@ import {
   TubeGeometry,
   Vector3,
 } from 'three';
-import type { CollisionWorld } from '../Collision';
+import type { CollisionWorld, WallCollider } from '../Collision';
 import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
 import { interiorMaterial } from '../building/parts';
 import { Plate } from '../hotel/place';
@@ -131,27 +131,34 @@ export function registerReptileShellCollision(
   collision: CollisionWorld,
   frame: FacadeFrame,
   lowDiscs: readonly { x: number; z: number; radius: number }[],
-): void {
+): WallCollider[] {
   const R = REPTILE_SHELL_RADIUS;
   const sector = (Math.PI * 2) / SHELL_SIDES;
   const facadeAlong = R * Math.cos(sector / 2);
   const vertexAcross = R * Math.sin(sector / 2);
+  // Every wall, in the order it is registered — the fifteen chords first
+  // (`walls[face - 1]` is chord `face`), so `check:reptile-house` can take
+  // one out by name (`REPTILE_CHECK_OPEN_SHELL=8`) and watch the facade
+  // clause go red without anyone editing this file to prove it.
+  const walls: WallCollider[] = [];
 
   const wall = (along1: number, across1: number, along2: number, across2: number, half: number): void => {
     const a = facadeToWorld(frame, along1, across1);
     const b = facadeToWorld(frame, along2, across2);
-    collision.addWall(a.x, a.z, b.x, b.z, half);
+    walls.push(collision.addWall(a.x, a.z, b.x, b.z, half));
   };
 
   for (let face = 1; face < SHELL_SIDES; face += 1) {
     const a1 = frame.yaw + (face - 0.5) * sector;
     const a2 = frame.yaw + (face + 0.5) * sector;
-    collision.addWall(
-      frame.x + Math.sin(a1) * R,
-      frame.z + Math.cos(a1) * R,
-      frame.x + Math.sin(a2) * R,
-      frame.z + Math.cos(a2) * R,
-      SHELL_HALF_THICKNESS,
+    walls.push(
+      collision.addWall(
+        frame.x + Math.sin(a1) * R,
+        frame.z + Math.cos(a1) * R,
+        frame.x + Math.sin(a2) * R,
+        frame.z + Math.cos(a2) * R,
+        SHELL_HALF_THICKNESS,
+      ),
     );
   }
   for (const side of [-1, 1]) {
@@ -166,6 +173,7 @@ export function registerReptileShellCollision(
     const at = facadeToWorld(frame, disc.z, disc.x);
     collision.addCircle(at.x, at.z, disc.radius);
   }
+  return walls;
 }
 
 /**

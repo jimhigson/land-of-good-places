@@ -38,7 +38,7 @@ import {
   type TortoiseHandle,
 } from '../../art/models/reptiles';
 import { reptileCaseMesh, REPTILE_NURSERY_GLASS_RADIUS } from '../../art/models/reptileCasesAssets';
-import { instancedPlant, reptilePlantAnchor, reptilePlantMesh } from '../../art/models/reptilePlantsAssets';
+import { instancedPlant, reptilePlantAnchor, reptilePlantBottom, reptilePlantMesh } from '../../art/models/reptilePlantsAssets';
 import { createNoodleRock, createNoodleTailMound, type NoodleRock } from '../../art/models/reptileNoodleAssets';
 import type { HallContext } from './context';
 import {
@@ -149,6 +149,8 @@ export function grottoPoolSpot(): LocalPoint {
 
 const PICK_RADIUS = 2.4;
 const PEEK_RANGE = 5;
+/** The grove's banyan, scaled to its disc. */
+const BANYAN_SCALE = 0.9;
 /** Where the first-hello bubble floats over an exhibit: above the glass cases' rims. */
 const BLURB_BUBBLE_Y = 3.1;
 
@@ -651,42 +653,81 @@ export class Exhibits {
     return mesh;
   }
 
+  /**
+   * Six tree snakes hanging from the banyan, on the side a child can see.
+   *
+   * They hang from the canopy's underside on the stand spot's own side of the
+   * tree (which is the fixed +X+Z camera's side too), spread either side of
+   * its bearing at two metres from the trunk — outside the root cage, above
+   * the wall, in front of the trunk. The first cut hung them from the kit's
+   * three anchors inside the cage, 1.4 m long and `leafDeep` against a
+   * `leafDeep` canopy: from the stand spot the chip promised six snakes and a
+   * six-year-old saw a tree in a pot (the brief review, 2 October 2026). Now
+   * two metres long, bright, and looking at her; "Hiss hello!" sends one
+   * sliding down the trunk to say it and back up, as the spec has it.
+   */
   private buildSnakeGrove(placement: ExhibitPlacement): Exhibit {
     const group = this.buildWall(placement, 'rc-round-wall');
     const banyan = new Group();
-    banyan.scale.setScalar(0.9);
+    banyan.scale.setScalar(BANYAN_SCALE);
     banyan.add(reptilePlantMesh('rp-banyan'), reptilePlantMesh('rp-banyan-canopy'));
     group.add(banyan);
+    const centre = this.shapeCentre(placement.shape);
+    const toward = Math.atan2(placement.stand.x - centre.x, placement.stand.z - centre.z);
+    // The tail buried a little way up into the leaves, the body emerging.
+    const hangY = reptilePlantBottom('rp-banyan-canopy') * BANYAN_SCALE + 0.25;
+    const hangR = 2.0;
+    const childAt = new Vector3(placement.stand.x - centre.x, 1.0, placement.stand.z - centre.z);
     const snakes: SnakeHandle[] = [];
+    const hangs: Vector3[] = [];
     for (let i = 0; i < 6; i += 1) {
-      const anchor = reptilePlantAnchor(['rp-banyan-anchor-a', 'rp-banyan-anchor-b', 'rp-banyan-anchor-c'][i % 3]!).multiplyScalar(0.9);
-      const side = i < 3 ? 1 : -1;
+      const bearing = toward + ((i - 2.5) * 14 * Math.PI) / 180;
+      const hang = new Vector3(Math.sin(bearing) * hangR, hangY, Math.cos(bearing) * hangR);
+      const side = i % 2 === 0 ? 1 : -1;
       const path = [
-        new Vector3(anchor.x, anchor.y, anchor.z),
-        new Vector3(anchor.x + 0.18 * side, anchor.y - 0.45, anchor.z + 0.1),
-        new Vector3(anchor.x - 0.12 * side, anchor.y - 0.9, anchor.z - 0.1),
-        new Vector3(anchor.x + 0.1 * side, anchor.y - 1.3, anchor.z + 0.15),
+        new Vector3(0, 0, 0),
+        new Vector3(0.22 * side, -0.55, 0.12),
+        new Vector3(-0.18 * side, -1.1, -0.06),
+        new Vector3(0.12 * side, -1.65, 0.18),
       ];
       const snake = createSnake({
-        length: 1.4,
-        radius: 0.08,
+        length: 2,
+        radius: 0.12,
         colourway: 'grove',
         seed: 900 + i,
         path,
-        headLookAt: new Vector3(anchor.x + side, anchor.y - 1.6, anchor.z + 1.5),
+        headLookAt: childAt.clone().sub(hang),
         pool: this.ctx.babies,
       });
+      snake.root.position.copy(hang);
       group.add(snake.root);
       snakes.push(snake);
+      hangs.push(hang);
     }
-    const centre = this.shapeCentre(placement.shape);
+    // The greeter: the one nearest the stand's bearing slides down the trunk
+    // to just above the wall top and back, head still on the child.
+    const greeter = snakes[3]!;
+    const greeterHang = hangs[3]!;
+    const low = new Vector3(Math.sin(toward) * 1.1, REPTILE_ENCLOSURE_WALL_HEIGHT + 1.0, Math.cos(toward) * 1.1);
+    const DESCEND = 1.8;
+    const HOLD = 2.0;
+    const total = DESCEND * 2 + HOLD;
+    let greet = 0;
+    const ease = (t: number): number => t * t * (3 - 2 * t);
     return {
       id: placement.id,
       zone: this.zone(placement.id, centre, placement.stand, banyan, () => {
         for (const snake of snakes) snake.poke();
+        greet = total;
       }),
       update: (dt, elapsed) => {
         for (const snake of snakes) snake.update(dt, elapsed);
+        if (greet > 0) {
+          greet = Math.max(0, greet - dt);
+          const t = total - greet;
+          const f = t < DESCEND ? ease(t / DESCEND) : t < DESCEND + HOLD ? 1 : ease(Math.max(0, greet / DESCEND));
+          greeter.root.position.lerpVectors(greeterHang, low, f);
+        }
       },
       animals: () => [centre],
     };
@@ -899,11 +940,17 @@ export class Exhibits {
       group.add(baby.root);
       this.nurseryBabies.push(baby);
     }
-    const lampPost = solid(new Mesh(new CylinderGeometry(0.03, 0.03, 1.4, 8), toonMaterial(PALETTE.liftFrame)));
-    lampPost.position.set(1.8, 0.8, -1.4);
+    // The post runs from inside the bedding to inside the shade — both ends
+    // hidden, so it is open-ended — and its top is derived from the rail's
+    // with a margin: a typed 0.8 + 1.4 once landed exactly on
+    // `REPTILE_NURSERY_RAIL_TOP` and fought the rail (`check:coplanar`).
+    const postBottom = 0.1;
+    const postTop = REPTILE_NURSERY_RAIL_TOP + 0.1;
+    const lampPost = solid(new Mesh(new CylinderGeometry(0.03, 0.03, postTop - postBottom, 8, 1, true), toonMaterial(PALETTE.liftFrame)));
+    lampPost.position.set(1.8, (postTop + postBottom) / 2, -1.4);
     group.add(lampPost);
     const shade = solid(new Mesh(new CylinderGeometry(0.16, 0.26, 0.22, 12, 1, true), toonMaterial(ART.hothouseClay)));
-    shade.position.set(1.8, 1.55, -1.4);
+    shade.position.set(1.8, postTop - 0.05, -1.4);
     group.add(shade);
     const lampGlow = new Sprite(new SpriteMaterial({ map: glowTexture(PALETTE.fairyPink), transparent: true, depthWrite: false }));
     lampGlow.scale.setScalar(0.8);

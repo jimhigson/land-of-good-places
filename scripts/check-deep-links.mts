@@ -188,6 +188,10 @@ const CHECKS: DeepLinkCheck[] = [
     // same constants the building uses — a conversion that cannot pass by
     // agreeing with itself, exactly as `/castle?at=` below.
     path: `/reptile-house?at=${REPTILE_AT.x},${REPTILE_AT.z}&facing=90`,
+    // The returning-save case primes a save *inside the hall* (the plain
+    // link lands at the arrival), so `continueGame` measures the case that
+    // once refused: restored into the hall, then asked for a spot in it.
+    primerPath: '/reptile-house',
     assert: async (page) => {
       const want = { x: REPTILE_HOUSE_ORIGIN_X + REPTILE_AT.x, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_AT.z };
       await page
@@ -219,6 +223,9 @@ const CHECKS: DeepLinkCheck[] = [
     // Outside the Reptile House's door, on the forecourt: not inside, on the
     // forecourt space, a stride from the door band.
     path: '/reptile-house-door',
+    // Primed inside the hall too: the door link must put a restored-inside
+    // player back out on the doormat.
+    primerPath: '/reptile-house',
     assert: async (page) => {
       await page
         .waitForFunction(

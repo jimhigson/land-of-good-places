@@ -69,7 +69,9 @@ const COLOURWAYS: Readonly<Record<SnakeColourway, ColourwaySpec>> = {
   corn: { bands: [ART.cornOrange, ART.cornOrange, ART.cornSaddle] },
   emerald: { bands: [PALETTE.leafMid, PALETTE.leafLight] },
   milk: { bands: [PALETTE.markerMint, ART.cream, PALETTE.blossomPink], head: PALETTE.markerMint },
-  grove: { bands: [PALETTE.leafDeep, PALETTE.leafDeep, PALETTE.leafDeep, PALETTE.flowerYellow] },
+  // Bright against the banyan's deep-green canopy they hang in — the first
+  // cut's leafDeep bodies vanished into it from the stand spot.
+  grove: { bands: [PALETTE.leafLight, PALETTE.leafLight, PALETTE.flowerYellow], head: PALETTE.leafLight },
 };
 
 /** The kit head is 0.38 m wide at scale 1 — the width an adult body of this radius wants. */

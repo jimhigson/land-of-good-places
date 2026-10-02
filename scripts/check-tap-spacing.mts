@@ -130,7 +130,19 @@ for (const room of ROOMS) {
   spaces.push({ name: SPACE_REPTILE_HOUSE, zones: reptileHouse.interactZones(), bands: exit ? [exit] : [] });
   outsidePlayer.position.set(REPTILE_FORECOURT_ORIGIN_X, 0, REPTILE_FORECOURT_ORIGIN_Z + 15);
   reptileHouse.adoptRestoredPlayer();
-  spaces.push({ name: SPACE_REPTILE_FORECOURT, zones: reptileHouse.interactZones(), bands: entry ? [entry] : [] });
+  const forecourtZones = reptileHouse.interactZones();
+  // The forecourt's list is the forecourt's: the entrance and the tail, and
+  // none of the hall's. The first cut's adopt only ever set flags, so this
+  // second adopt still returned the hall's twenty zones, 280 m from the
+  // entry band — a row that passed without checking anything.
+  const ids = forecourtZones.map((zone) => zone.id);
+  for (const wanted of ['reptile-entrance', 'reptile-tail']) {
+    if (!ids.includes(wanted)) throw new Error(`check:tap-spacing: the Reptile House forecourt offers no '${wanted}' zone (got ${ids.join(', ')})`);
+  }
+  if (ids.some((id) => id.startsWith('reptile:'))) {
+    throw new Error(`check:tap-spacing: the Reptile House forecourt still offers the hall's zones: ${ids.filter((id) => id.startsWith('reptile:')).join(', ')}`);
+  }
+  spaces.push({ name: SPACE_REPTILE_FORECOURT, zones: forecourtZones, bands: entry ? [entry] : [] });
 }
 
 let pairsChecked = 0;

@@ -57,6 +57,17 @@ import {
 export const REPTILE_STALL_SHOP = 'reptileStall';
 export const REPTILE_NURSERY_SHOP = 'reptileNursery';
 
+/** "You are N baby snakes tall!" — how many rungs of the Noodle-o-meter a `height` (metres, hat and all) reaches. */
+export function meterRungs(height: number): number {
+  return Math.max(1, Math.round(height / REPTILE_BABY_SNAKE_UNIT));
+}
+
+/** What the Noodle-o-meter says for a height. */
+export function meterReading(height: number): string {
+  const rungs = meterRungs(height);
+  return `You are ${rungs} baby snake${rungs === 1 ? '' : 's'} tall!`;
+}
+
 export class ReptileStall {
   readonly stands: readonly ShopStand[];
   private readonly ctx: HallContext;
@@ -193,10 +204,7 @@ export class ReptileStall {
           verb: 'How tall',
           highlight: highlightObject(this.meterGroup),
         },
-        () => {
-          const rungs = Math.max(1, Math.round(this.ctx.playerHeight() / REPTILE_BABY_SNAKE_UNIT));
-          this.ctx.say(`You are ${rungs} baby snake${rungs === 1 ? '' : 's'} tall!`, METER_POSITION, 3.3);
-        },
+        () => this.ctx.say(meterReading(this.ctx.playerHeight()), METER_POSITION, 3.3),
         '📏',
         'How tall?',
       ),

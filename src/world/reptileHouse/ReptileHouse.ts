@@ -1,5 +1,5 @@
 import { Group, Sprite, SpriteMaterial, Vector3 } from 'three';
-import { clearsTop, type CollisionWorld } from '../Collision';
+import { clearsTop, type CollisionWorld, type WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
 import type { ShopStand } from '../building/shops/Shops';
@@ -27,6 +27,7 @@ import { SignAtlas } from './signs';
 import { ReptileProps } from './props';
 import { Exhibits } from './exhibits';
 import { Planting } from './planting';
+import { paintPaths } from './floorPaint';
 import { ReptileStall } from './stall';
 import {
   buildForecourt,
@@ -153,6 +154,8 @@ export class ReptileHouse implements GameSystem {
   readonly forecourtRoot = new Group();
   /** The two shop stands — the stall's and the nursery's — for `World.shopStands()`. */
   readonly stands: readonly ShopStand[];
+  /** The exterior shell's wall colliders, chords first, so a check can remove one and go red. */
+  readonly shellSolids: readonly WallCollider[];
 
   private readonly collision: CollisionWorld;
   private readonly controls: InteriorControls;
@@ -173,6 +176,7 @@ export class ReptileHouse implements GameSystem {
   private bubbleFor = 0;
   private tickle = 0;
   private greetedCount = 0;
+  private lastSaid = '';
 
   constructor(collision: CollisionWorld, controls: InteriorControls, surfaces: WalkSurfaces, deps: ReptileHouseDeps) {
     this.collision = collision;
@@ -213,10 +217,14 @@ export class ReptileHouse implements GameSystem {
       greet: (id: string) => this.onGreet(id),
       findBaby: () => this.onBabyFound(),
       openShop: (shopId: string) => this.controls.openShop(shopId),
-      playerHeight: () => this.player?.model.height ?? 0,
+      // Hat and all — `topHeight` is what the name label clears, so the
+      // Noodle-o-meter answers differently in a tall hat (the spec's "she
+      // tries them all"); `model.height` is the bare rig and never moves.
+      playerHeight: () => this.player?.topHeight ?? 0,
     };
     this.exhibits = new Exhibits(context);
     new Planting(context);
+    paintPaths(context);
     this.stall = new ReptileStall(context);
     this.stands = this.stall.stands;
     this.props.assertClear();
@@ -238,7 +246,7 @@ export class ReptileHouse implements GameSystem {
       buildForecourt(this.forecourtRoot, surfaces, REPTILE_FORECOURT_ORIGIN_X, REPTILE_FORECOURT_ORIGIN_Z, this.frame);
       this.forecourtRoot.add(this.exterior.root);
     }
-    registerReptileShellCollision(collision, this.frame, reptileHouseLowDiscs());
+    this.shellSolids = registerReptileShellCollision(collision, this.frame, reptileHouseLowDiscs());
     registerPlinthStep(surfaces, this.frame, reptileHousePlinthTop());
     atlas.applyTo(this.exterior.sign);
   }
@@ -273,6 +281,11 @@ export class ReptileHouse implements GameSystem {
     return this.props.solids;
   }
 
+  /** The last line a bubble was asked to say — for the checks, which cannot read a sprite. */
+  get lastBubble(): string {
+    return this.lastSaid;
+  }
+
   attachPlayer(player: Player): void {
     this.player = player;
   }
@@ -286,13 +299,21 @@ export class ReptileHouse implements GameSystem {
     const player = this.player;
     if (!player) return;
     const space = spaceAt(player.position.x, player.position.z);
+    // Each place clears the other: the flags are what `interactZones` keys
+    // on, and a probe adopted into the hall and then onto the forecourt (as
+    // `check:tap-spacing` does) must get the forecourt's two zones, not the
+    // hall's twenty a second time.
     if (space === SPACE_REPTILE_HOUSE) {
       this.inside = true;
+      this.onForecourt = false;
       this.hallRoot.visible = true;
+      this.forecourtRoot.visible = false;
       this.boundToHall();
       this.spaces.holdOff();
     } else if (space === SPACE_REPTILE_FORECOURT) {
+      this.inside = false;
       this.onForecourt = true;
+      this.hallRoot.visible = false;
       this.forecourtRoot.visible = true;
       this.boundToForecourt();
       this.spaces.holdOff();
@@ -301,10 +322,19 @@ export class ReptileHouse implements GameSystem {
 
   // --------------------------------------------------------------- doors
 
-  /** `/reptile-house`, and `/reptile-house?at=x,z&facing=deg`: straight into the hall. */
+  /**
+   * `/reptile-house`, and `/reptile-house?at=x,z&facing=deg`: straight into
+   * the hall — **from anywhere, the hall included.** A save written inside
+   * the hall restores her there (`adoptRestoredPlayer`) before the link
+   * runs, and a link that then refused because she was "already inside" left
+   * her wherever the save had put her, with a console error, on every
+   * returning profile (the art review's run, 2 October 2026). Already in,
+   * the change of space is a teleport to the asked-for spot, or back to the
+   * arrival for the plain link — the hotel's lobby link's shape.
+   */
   requestEnter(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
     const player = this.player;
-    if (!player || player.riding || this.spaces.isChanging || this.inside) return false;
+    if (!player || player.riding || this.spaces.isChanging) return false;
     this.spaces.changeTo(() => this.enterHall(at));
     return true;
   }
@@ -499,6 +529,7 @@ export class ReptileHouse implements GameSystem {
   }
 
   private say(text: string, at: LocalPoint, y: number): void {
+    this.lastSaid = text;
     this.bubble.anchorAt(at.x, y, at.z);
     this.bubble.setText(text);
     this.bubbleFor = 1.6 + text.length * 0.07;

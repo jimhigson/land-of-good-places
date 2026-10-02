@@ -41,9 +41,11 @@ const SHINE = markShared(new SphereGeometry(1, 6, 5));
 const BLUSH = markShared(new SphereGeometry(1, 8, 6));
 
 /**
- * The house face in three primitives per side: an ink eye taller than wide,
- * a catchlight high and inward, a soft blush below and outward. `size` is the
- * eye's half-height; everything else is a fraction of it (ART_DIRECTION §4).
+ * The house face in four primitives per side: an ink eye taller than wide,
+ * **two** catchlights — a big one high and outboard, a tiny one low and
+ * inboard, ART_DIRECTION §3's "one catchlight looks like a doll's eye; two
+ * look alive" — and a soft blush below and outward. `size` is the eye's
+ * half-height; everything else is a fraction of it (ART_DIRECTION §4).
  */
 export function geometryFace(parent: Group, x: number, y: number, z: number, size: number, blush = true): void {
   for (const side of [-1, 1] as const) {
@@ -52,9 +54,13 @@ export function geometryFace(parent: Group, x: number, y: number, z: number, siz
     eye.scale.set(size * 0.78, size, size * 0.5);
     parent.add(eye);
     const shine = decal(new Mesh(SHINE, toonMaterial(ART.shine)));
-    shine.position.set(side * (x - size * 0.25), y + size * 0.35, z + size * 0.42);
+    shine.position.set(side * (x + size * 0.2), y + size * 0.35, z + size * 0.42);
     shine.scale.setScalar(size * 0.28);
     parent.add(shine);
+    const glint = decal(new Mesh(SHINE, toonMaterial(ART.shine)));
+    glint.position.set(side * (x - size * 0.22), y - size * 0.32, z + size * 0.44);
+    glint.scale.setScalar(size * 0.13);
+    parent.add(glint);
     if (blush) {
       const cheek = decal(new Mesh(BLUSH, toonMaterial(ART.blush)));
       cheek.position.set(side * (x + size * 0.9), y - size * 0.9, z - size * 0.1);
@@ -75,8 +81,14 @@ export function wMouth(parent: Group, y: number, z: number, size: number): void 
   }
 }
 
+/**
+ * A leg stub. Open-ended: its top is inside the body and its bottom stands on
+ * whatever the animal walks on, so both caps were hidden faces — and the
+ * bottom one lay in the tortoise garden's floor plane (`check:coplanar`,
+ * 2 October 2026). ART_DIRECTION §7: delete the hidden face.
+ */
 function stubLeg(radius: number, length: number, colour: number): Mesh {
-  const leg = solid(new Mesh(new CylinderGeometry(radius * 0.8, radius, length, 10), toonMaterial(colour)));
+  const leg = solid(new Mesh(new CylinderGeometry(radius * 0.8, radius, length, 10, 1, true), toonMaterial(colour)));
   addOutline(leg, 0.01);
   return leg;
 }

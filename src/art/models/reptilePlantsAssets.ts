@@ -97,6 +97,11 @@ export function reptilePlantTop(name: string): number {
   return partBox(plantsKit().part(name)).maxY;
 }
 
+/** A part's underside, metres above its origin — the banyan canopy's, to hang snakes from. */
+export function reptilePlantBottom(name: string): number {
+  return partBox(plantsKit().part(name)).minY;
+}
+
 export interface PlantInstance {
   readonly x: number;
   readonly y: number;
