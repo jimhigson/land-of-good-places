@@ -85,6 +85,14 @@ const ACCEPTANCE_SIM_MEASURES: readonly (readonly [
       return { faults: decisions, voids };
     },
   ],
+  [
+    'check:npc-dispersal',
+    async (fresh) => {
+      const { npcDispersal } = await import('./lib/npcDispersal.mts');
+      const { decisions, voids } = await npcDispersal(fresh, { quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
 ];
 
 /**
