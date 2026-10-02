@@ -29,3 +29,8 @@ Controls first, sweep 0..15, fix generators, add to PARK_ACCEPTANCE, re-record `
 - BEFORE (final instrument, base generator, base accepted restarts): door invariant red on 16/16 (hotel 5.3–6.5 m all 16; castle 13/16 up to 27.7 m; 8 stall/exit 1.06–2.51 m). Bridge-side red on seed 11 only.
 - accept4 running in frozen tree (`--fresh --write --out accept4.json`); base test:procgen JSON running in `paths-to-doors-base`.
 - TODO: copy acceptedRestarts.ts from frozen → branch; test:procgen + check + check:park 0..15 + check:coplanar + determinism; procgen diff vs base; frames; PR vs wip/sb-merge; tell lead.
+
+## 2 Oct later (HEAD 31b1c472)
+- accept4 at 85793abf: all 16 accepted, 70 attempts (base table 75); door invariant rejected 0 attempts, bridge-side 8 (always together with the sheet invariant). procgen at 8724ca74: 1950/1952, the 2 fails are base's scatterDecoupling (base also 1918/1920 with the same 2) — reported to lead.
+- BUT seed 5 r11 frames showed the castle spur tunnelling 24 m UNDER the castle (doormat inside castle plot → fallback router). Fixed: `doormatClearOfThePlot` (doormat at plot edge + 1.4 along door facing) + `doorApronOf` (castle apron walkable → samples recorded; hotel apron unwalkable → `decorativeOwners`). New invariant `everyDrawnPathCanBeWalked` (paving within PLAYER_RADIUS+0.5 of a reached nav cell; `facts.reachableGroundCells`). Control: red on the tunnel at 85793abf.
+- Need: sweep (running, sweep-walk/), then accept:parks again at final head, procgen JSON diff vs procgen-base.json, check:park, coplanar, determinism, frames, PR.
