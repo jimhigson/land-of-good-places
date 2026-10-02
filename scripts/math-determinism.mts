@@ -42,6 +42,17 @@ const inputs = Array.from({ length: N }, () => (next() - 0.5) * 400);
 const unit = Array.from({ length: N }, () => next() * 2 - 1);
 const positive = Array.from({ length: N }, () => next() * 300 + 1e-6);
 
+/**
+ * 1e-12 … 1e27 by repeated multiplication. Not `10 ** k`: the operator is V8's
+ * own pow, and a first run that used it measured inputs that already differed
+ * between the platforms.
+ */
+const DECADES = Array.from({ length: 40 }, (_, k) => {
+  let v = 1;
+  for (let j = 0; j < Math.abs(k - 12); j += 1) v = k < 12 ? v / 10 : v * 10;
+  return v;
+});
+
 if (Math.sin === DETERMINISTIC_MATH.sin) {
   throw new Error('math-determinism: the ports are already on the global Math, so the native control would measure them; run without the resolver --import');
 }
@@ -51,8 +62,8 @@ const sweep = (M: MathSet): Record<string, (i: number) => number> => ({
   sin: (i) => M.sin(inputs[i]!),
   cos: (i) => M.cos(inputs[i]!),
   // Angles from 1e-10 to 1e29, so the huge-argument reduction is measured too.
-  sinWide: (i) => M.sin(inputs[i]! * 10 ** ((i % 40) - 12)),
-  cosWide: (i) => M.cos(inputs[i]! * 10 ** ((i % 40) - 12)),
+  sinWide: (i) => M.sin(inputs[i]! * DECADES[i % 40]!),
+  cosWide: (i) => M.cos(inputs[i]! * DECADES[i % 40]!),
   tan: (i) => M.tan(inputs[i]!),
   atan: (i) => M.atan(inputs[i]!),
   atan2: (i) => M.atan2(inputs[i]!, inputs[(i * 7 + 3) % N]!),
@@ -61,7 +72,6 @@ const sweep = (M: MathSet): Record<string, (i: number) => number> => ({
   exp: (i) => M.exp(unit[i]! * 20),
   log: (i) => M.log(positive[i]!),
   pow: (i) => M.pow(positive[i]!, unit[i]! * 3),
-  powOp: (i) => positive[i]! ** (unit[i]! * 3), // the operator: V8's own pow whichever set
   cosh: (i) => M.cosh(unit[i]! * 5),
   cbrt: (i) => Math.cbrt(inputs[i]!),
   hypot2: (i) => Math.hypot(inputs[i]!, inputs[(i * 7 + 3) % N]!),
@@ -87,7 +97,9 @@ const hashAll = (fns: Record<string, (i: number) => number>): Record<string, str
   }
   return result;
 };
-const native = hashAll(sweep(NATIVE_MATH));
+// The `**` operator is V8's own pow whatever is on Math, so it is only ever
+// part of the native control.
+const native = hashAll({ ...sweep(NATIVE_MATH), powOp: (i) => positive[i]! ** (unit[i]! * 3) });
 const deterministic = hashAll(sweep(DETERMINISTIC_MATH as unknown as MathSet));
 writeFileSync(
   out,
