@@ -6002,6 +6002,81 @@ const fairyPolesStandWalkablyApart: Invariant = (facts) => {
 };
 
 /**
+ * **No fairy-light string doubles back through its neighbour.**
+ *
+ * Two strings tied to one post must have parted before they leave the wood.
+ * Seed 15 at its recorded restart hung `fairy-string-59` 14.5 m out to a pole
+ * and `fairy-string-60` straight back again, 15.9° apart, and the two tubes ran
+ * through each other for 18 cm beyond the post — one string drawn twice over
+ * one stretch, found by `check:coplanar` because their facets shared a plane.
+ * The same fold stood on seeds 3 and 4 at 0.8°, 2.6° and 5.9°, unreported
+ * only because those facets happened not to line up.
+ *
+ * Measured off the drawn cables: every pair of `fairy-string-*` tubes with an
+ * end in common is walked out from that end along each tube's own swept path,
+ * and the distance at which their centrelines are first more than two cable
+ * radii apart — the tubes no longer intersecting — must be inside the post,
+ * whose drawn top radius is the bar. Both radii come off the drawn geometry.
+ */
+const fairyStringsNeverDoubleBack: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const { stringsDrawn, cableRadius, postTopRadius } = facts.fairyLights;
+  const step = 0.002;
+  const ends = stringsDrawn.map((string) => {
+    const length = string.path.getLength();
+    // `s` metres along the drawn cable, from its start or from its end.
+    const at = (s: number, fromEnd: boolean): Vector3 => {
+      const u = Math.min(1, s / length);
+      return string.path.getPointAt(fromEnd ? 1 - u : u, new Vector3()).applyMatrix4(string.matrixWorld);
+    };
+    return { name: string.name, length, at };
+  });
+  let ties = 0;
+  let worst = 0;
+  let worstName = '';
+  for (let i = 0; i < ends.length; i += 1) {
+    for (let j = i + 1; j < ends.length; j += 1) {
+      const a = ends[i]!;
+      const b = ends[j]!;
+      for (const aFromEnd of [false, true]) {
+        for (const bFromEnd of [false, true]) {
+          if (a.at(0, aFromEnd).distanceTo(b.at(0, bFromEnd)) > 1e-4) continue;
+          ties += 1;
+          const reach = Math.min(a.length, b.length);
+          let together = reach;
+          for (let s = step; s <= reach; s += step) {
+            if (a.at(s, aFromEnd).distanceTo(b.at(s, bFromEnd)) > cableRadius * 2) {
+              together = s;
+              break;
+            }
+          }
+          if (together > worst) {
+            worst = together;
+            worstName = `${a.name}/${b.name}`;
+          }
+          if (together > postTopRadius) {
+            const tie = a.at(0, aFromEnd);
+            complaints.push(
+              `${a.name} and ${b.name} leave their shared pole at (${fmt([tie.x, tie.z])}) running through ` +
+                `each other for ${together.toFixed(3)} m — past the post's ${postTopRadius.toFixed(3)} m, so one ` +
+                `string is drawn back over the other's stretch`,
+            );
+          }
+        }
+      }
+    }
+  }
+  if (stringsDrawn.length >= 2 && ties === 0) {
+    complaints.push(`${stringsDrawn.length} fairy strings drawn but no two share a pole — this measured nothing`);
+  }
+  process.stderr.write(
+    `[fairy folds] ${ties} shared ties measured across ${stringsDrawn.length} strings; longest run together ` +
+      `${worst.toFixed(3)} m (${worstName || 'none'}) against the post's ${postTopRadius.toFixed(3)} m\n`,
+  );
+  return complaints;
+};
+
+/**
  * **Every modelled coping stone sits on the wall it caps — no stone floating
  * over a gap, none sunk into the parapet, none hanging off the end of it.**
  *
@@ -12594,6 +12669,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     everyCopingStoneSitsOnItsWall,
   ],
   ['a child can walk between any two fairy poles, and none stands on a bridge', fairyPolesStandWalkablyApart],
+  ['no fairy-light string doubles back through its neighbour', fairyStringsNeverDoubleBack],
   [
     'no bridge parapet can be seen through — its outer face reaches the wall top',
     noBridgeParapetCanBeSeenThrough,
