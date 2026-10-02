@@ -128,6 +128,15 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
     },
   ],
   [
+    'check:castle-towers',
+    async (park) => {
+      const { castleTowerFindings } = await import('./lib/castleTowers.mts');
+      // Only the clauses a park decides: turret solidity is code, fixed at cause.
+      const { decisions, voids } = await castleTowerFindings(park);
+      return { faults: decisions, voids };
+    },
+  ],
+  [
     'check:castle-window',
     async (park) => {
       const { castleWindowFindings } = await import('./lib/rideFindings.mts');
