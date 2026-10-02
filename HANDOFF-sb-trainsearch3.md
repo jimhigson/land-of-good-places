@@ -9,3 +9,7 @@ Rules: no acceptedRestarts.ts commit; stay out of railRace/; kill own PIDs only 
   castle misses), 15 (51), 6 (43, cruiser), 8 (40). Seed 9 is 3.9 s at base already.
 - a7 (layout-not-cruiser): 519 -> 406, seed 7 192 -> 41, all final decisions identical (5/8 differ only in message text).
 - Commit "a refusal the train's re-draw did not change names the layout": seed 7 -> 21.8 s, same final park. a8 sweep running.
+- a8 sweep: 519 -> 370 s, final placements identical on all 16 seeds.
+- Commit "rescue tier searched once per layout" (memo, registerPlanCache): seed 3 identical trace; 13/14 also repeat rescue tiers.
+- Running (one job): a9 sweep then accept:parks -- 0-15 --fresh (scratch a9-sweep.txt, accept3.txt).
+- Remaining big costs are single searches (seed 8 cruiser 32 s + train 30 s, 0 unwinds) and castle-unreachable layouts (seed 6).
