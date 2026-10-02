@@ -12,3 +12,9 @@ cheaper exact tests. Measure plan CPU per seed before/after; `accept:parks -- 0-
 
 ## Status
 - [x] (1) implemented in train/route.ts trainRouteSearch (throws TrainRouteUnsolvable)
+- [x] (2) cruiser: generate.ts influences snapshot (lazyView proxy rebuilt per field read) +
+  incremental reach counts; solverBoundary per-cell bracketed edge test. Seed 5: cruiser 79.2 -> 59.5 s,
+  identical pieces (11457386) and decisions. Retries on castle-miss only reshuffle the same 308 poses
+  (brief seed fixed), but the shared rng makes each a different search; history: 10 miss-runs, 4
+  later succeeded (MP x3, MMMMMP x1), 6 MMMMMM -> cutting supply would change decisions; not done.
+- base sweep (48c8a7fd): scratch b4-sweep.txt. Next: after sweep a5, then accept:parks --fresh.
