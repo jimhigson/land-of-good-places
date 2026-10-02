@@ -15,6 +15,7 @@ import {
   REPTILE_HALF_Z,
   REPTILE_STAND_KEEP_OUT,
   STALL_STAND,
+  TORTOISE_RIDE_STAND,
   type LocalPoint,
 } from './layout';
 
@@ -53,6 +54,7 @@ export function reptileKeepOuts(): KeepOut[] {
     { what: 'the doorway', x: REPTILE_DOOR_X, z: REPTILE_HALF_Z - 1, radius: REPTILE_DOORWAY_KEEP_OUT },
     { what: 'the stall stand', x: STALL_STAND.x, z: STALL_STAND.z, radius: REPTILE_STAND_KEEP_OUT },
     { what: 'the meter stand', x: METER_STAND.x, z: METER_STAND.z, radius: REPTILE_STAND_KEEP_OUT },
+    { what: "the tortoise ride's stand", x: TORTOISE_RIDE_STAND.x, z: TORTOISE_RIDE_STAND.z, radius: REPTILE_STAND_KEEP_OUT },
   ];
   for (const exhibit of EXHIBIT_PLACEMENTS) {
     out.push({ what: `${exhibit.id}'s stand`, x: exhibit.stand.x, z: exhibit.stand.z, radius: REPTILE_STAND_KEEP_OUT });

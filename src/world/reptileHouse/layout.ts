@@ -383,6 +383,46 @@ export const METER_FACING = 45;
 export const METER_STAND: StandSpot = { x: 11.9, z: 14.9, facing: 225 };
 
 /**
+ * **The Tortoise Ride** (Jim, 2 October 2026: *"Yeah, put the two rides in,
+ * why not?"*): a big friendly tortoise parked in the foyer's south-east
+ * corner, facing the arrival, that plods one lap of the ring with her on
+ * its shell and comes back. Parked, it is a solid disc; walking, it is
+ * scenery (she is on it). The parking spot is off every path node and the
+ * foyer's 3 m sweep; the stand spot is where she boards and is put down.
+ */
+export const TORTOISE_RIDE_PARK: StandSpot = { x: 9, z: 16.3, facing: 270 };
+export const TORTOISE_RIDE_PARK_RADIUS = 1.3;
+export const TORTOISE_RIDE_STAND: StandSpot = { x: 8, z: 14.3, facing: 23 };
+/** The tortoise at this scale is ≈ 2.9 m long and its shell ≈ 1.9 m up. */
+export const TORTOISE_RIDE_SCALE = 2.4;
+/** Plodding — a lap is about 45 s. */
+export const TORTOISE_RIDE_SPEED = 1.3;
+/**
+ * The lap, closed: out of the foyer, up the south opening, once round the
+ * ring anticlockwise, and back down the opening to the parking spot. The ring
+ * is 4 m wide on r 5.6 and the opening 5 m wide, so a 2.5 m tortoise fits
+ * with a stride to spare; the beds' kerbs stand at `RING_OUTER` 7.6.
+ */
+export const TORTOISE_RIDE_LOOP: readonly LocalPoint[] = [
+  { x: TORTOISE_RIDE_PARK.x, z: TORTOISE_RIDE_PARK.z },
+  { x: 8.8, z: 13.2 },
+  { x: 6.2, z: 11.6 },
+  { x: 3.8, z: 9.5 },
+  { x: 3.7, z: 7.2 },
+  { x: 3.96, z: 3.96 },
+  { x: 5.6, z: 0 },
+  { x: 3.96, z: -3.96 },
+  { x: 0, z: -5.6 },
+  { x: -3.96, z: -3.96 },
+  { x: -5.6, z: 0 },
+  { x: -3.96, z: 3.96 },
+  { x: 0, z: 5.6 },
+  { x: 2.3, z: 8.6 },
+  { x: 5.5, z: 11.2 },
+  { x: 8.3, z: 13.3 },
+];
+
+/**
  * Where she stands to find each of the three hidden babies that have their
  * own zones (two more ride on exhibits: Tock's shell and the Frog Jar). The
  * babies themselves sit a stride away — in the log's knothole, in the

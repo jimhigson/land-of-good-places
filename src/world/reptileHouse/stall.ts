@@ -111,11 +111,16 @@ export class ReptileStall {
     group.add(this.keeper.root);
 
     // The stock, on the counter and the shelf, from the catalogue's own models.
+    // Three on the counter, the rest spread along the shelf — spaced to the
+    // shelf's own width, so a fifth item (the snake egg) sits on wood rather
+    // than floating off its end.
     const items = itemsForShop(REPTILE_STALL_SHOP);
+    const onShelf = Math.max(1, items.length - 3);
     items.forEach((item, index) => {
       const model = item.model();
       const onCounter = index < 3;
-      model.root.position.set(-1.1 + index * 0.75, onCounter ? COUNTER_TOP_Y + 0.02 : 0.77, onCounter ? COUNTER_Z : SHELF_Z);
+      const x = onCounter ? -1.1 + index * 0.75 : -SHELF_HALF_WIDTH + 0.4 + ((index - 3) * (SHELF_HALF_WIDTH * 2 - 0.8)) / Math.max(1, onShelf - 1);
+      model.root.position.set(x, onCounter ? COUNTER_TOP_Y + 0.02 : 0.77, onCounter ? COUNTER_Z : SHELF_Z);
       model.root.scale.setScalar(0.5);
       model.root.rotation.y = 0.2 * index;
       group.add(model.root);

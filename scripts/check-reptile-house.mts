@@ -77,6 +77,7 @@ import { pointInPolygon, distanceToOutline, REPTILE_BED_EDGE_HALF } from '../src
 import {
   BEDS,
   EXHIBIT_PLACEMENTS,
+  REPTILE_ARCH_HEIGHT,
   PATHS,
   REPTILE_ARCH_WIDTH,
   REPTILE_ARRIVAL_X,

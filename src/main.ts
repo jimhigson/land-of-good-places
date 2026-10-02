@@ -207,6 +207,9 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // this drops her on the doormat there — `ReptileHouse.requestEnterDoor`.
   // The hall itself is `/reptile-house`, its own `DeepLink` kind below.
   '/reptile-house-door': 'reptileHouseDoor',
+  // The Reptile House's Tortoise Ride, boarded: into the hall at its stand
+  // spot and straight onto the shell — `ReptileHouse.requestTortoiseRide`.
+  '/tortoise-ride': 'reptileTortoiseRide',
 };
 
 /**

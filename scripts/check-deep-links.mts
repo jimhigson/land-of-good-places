@@ -220,6 +220,38 @@ const CHECKS: DeepLinkCheck[] = [
     },
   },
   {
+    // The Tortoise Ride, boarded: inside the hall, riding, on the shell.
+    path: '/tortoise-ride',
+    primerPath: '/reptile-house',
+    assert: async (page) => {
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            return !!g && g.world?.reptileHouse?.playerOnTortoise === true && g.player?.riding === true;
+          },
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          onTortoise: g?.world?.reptileHouse?.playerOnTortoise ?? null,
+          riding: g?.player?.riding ?? null,
+          y: g?.player?.position?.y ?? null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true || s.onTortoise !== true || s.riding !== true) {
+        return { ok: false, detail: `expected to be riding the tortoise in the hall; inside=${s.inside} onTortoise=${s.onTortoise} riding=${s.riding}` };
+      }
+      return { ok: true, detail: `on the tortoise's shell, ${Number(s.y).toFixed(2)} m up, riding` };
+    },
+  },
+  {
     // Outside the Reptile House's door, on the forecourt: not inside, on the
     // forecourt space, a stride from the door band.
     path: '/reptile-house-door',

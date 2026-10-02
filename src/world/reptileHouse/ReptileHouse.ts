@@ -35,6 +35,7 @@ import { Exhibits } from './exhibits';
 import { Planting } from './planting';
 import { paintPaths } from './floorPaint';
 import { ReptileStall } from './stall';
+import { TortoiseRide } from './tortoiseRide';
 import {
   buildForecourt,
   buildHallShell,
@@ -61,6 +62,7 @@ import {
   REPTILE_HOUSE_ORIGIN_Z,
   REPTILE_HOUSE_PLAY_RADIUS,
   REPTILE_SHELL_RADIUS,
+  TORTOISE_RIDE_STAND,
   type LocalPoint,
 } from './layout';
 
@@ -172,6 +174,7 @@ export class ReptileHouse implements GameSystem {
   private readonly props: ReptileProps;
   private readonly exhibits: Exhibits;
   private readonly stall: ReptileStall;
+  private readonly ride: TortoiseRide;
   private readonly exterior: ReptileHouseExterior;
   private readonly frame: FacadeFrame;
   private readonly bubble = new SpeechBubble(PALETTE.markerMint);
@@ -234,6 +237,7 @@ export class ReptileHouse implements GameSystem {
     paintPaths(context);
     this.stall = new ReptileStall(context);
     this.stands = this.stall.stands;
+    this.ride = new TortoiseRide(this.hallRoot, this.props, collision, controls);
     this.props.assertClear();
 
     // ------------------------------------------------------- the outside
@@ -295,6 +299,12 @@ export class ReptileHouse implements GameSystem {
 
   attachPlayer(player: Player): void {
     this.player = player;
+    this.ride.attachPlayer(player);
+  }
+
+  /** On the tortoise's shell, mid-lap — for the checks. */
+  get playerOnTortoise(): boolean {
+    return this.ride.playerRiding;
   }
 
   /**
@@ -346,6 +356,21 @@ export class ReptileHouse implements GameSystem {
     return true;
   }
 
+  /**
+   * `/tortoise-ride`: into the hall at the ride's stand spot and straight
+   * onto the tortoise — boarded inside the iris, after the teleport, since
+   * `requestEnter` returns before the change of space has happened.
+   */
+  requestTortoiseRide(): boolean {
+    const player = this.player;
+    if (!player || player.riding || this.spaces.isChanging) return false;
+    this.spaces.changeTo(() => {
+      this.enterHall(TORTOISE_RIDE_STAND);
+      this.ride.requestBoard();
+    });
+    return true;
+  }
+
   /** `/reptile-house-door`: outside, on the doormat, facing the door. */
   requestEnterDoor(): boolean {
     const player = this.player;
@@ -360,7 +385,7 @@ export class ReptileHouse implements GameSystem {
   }
 
   interactZones(): InteractZone[] {
-    if (this.inside) return [...this.exhibits.zones(), ...this.stall.zones()];
+    if (this.inside) return [...this.exhibits.zones(), ...this.stall.zones(), ...this.ride.zones()];
     if (this.onForecourt || this.deps.plot) return [this.exteriorEntranceZone(), this.tailZone()];
     return [];
   }
@@ -374,6 +399,7 @@ export class ReptileHouse implements GameSystem {
       const local: LocalPoint | null = player ? { x: player.position.x - REPTILE_HOUSE_ORIGIN_X, z: player.position.z - REPTILE_HOUSE_ORIGIN_Z } : null;
       this.exhibits.update(dt, elapsed, local);
       this.stall.update(dt, elapsed);
+      this.ride.update(dt, elapsed);
       this.hearts.update(dt);
       if (this.bubbleFor > 0) {
         this.bubbleFor -= dt;

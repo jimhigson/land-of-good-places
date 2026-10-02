@@ -991,6 +991,8 @@ export class Game {
       // while the park has no plot for the building.
       if (stallId === 'reptileHouse') return this.world.reptileHouse.requestEnter();
       if (stallId === 'reptileHouseDoor') return this.world.reptileHouse.requestEnterDoor();
+      // The Tortoise Ride (`/tortoise-ride`): into the hall and onto the shell.
+      if (stallId === 'reptileTortoiseRide') return this.world.reptileHouse.requestTortoiseRide();
       return false;
     };
 

@@ -6,6 +6,7 @@ import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon } from '../../../art/models/balloons';
 import { createHat } from '../../../art/models/hats';
 import { createNoodlePlush, createPetSnake } from '../../../art/models/snake';
+import { ART } from '../../../art/style/artPalette';
 import { createJellySnakes, createSnakeBalloon } from '../../../art/models/snakeToys';
 import { createJetpack } from '../../../art/models/jetpack';
 import { createPet, PET_KINDS, PUFF_DISPLAY_NAME, type PetKind } from '../../../art/models/pets';
@@ -175,6 +176,25 @@ export const REPTILE_ITEMS: readonly ShopItem[] = [
     carryable: true,
     model: () => createJellySnakes(),
     heldScale: 0.9,
+    rare: false,
+  },
+  {
+    // The snake egg (Jim, 2 October 2026: "put the two rides in" — the
+    // other being the tortoise — and the spec's surprise-egg ask). Sold at
+    // the stall, it hatches in the shop panel into one of the egg-only
+    // hatchlings in `EGG_PRIZES` below, a baby snake in a colourway the
+    // nursery does not sell.
+    id: 'egg.snake',
+    shopId: 'reptileStall',
+    displayName: 'Snake Egg',
+    blurb: 'Something small and wiggly is inside.',
+    icon: '🥚',
+    price: 20,
+    kind: 'egg',
+    category: 'egg',
+    carryable: true,
+    model: () => createSurpriseEgg(ART.snakeMint, PALETTE.markerLilac),
+    heldScale: 0.7,
     rare: false,
   },
   {
@@ -868,6 +888,53 @@ export const EGG_PRIZES: readonly ShopItem[] = [
     heldScale: 0.4,
     rare: false,
   },
+  // ---------------------------------------------------- the snake egg's
+  // What `egg.snake` (the Reptile House stall) hatches: baby snakes in the
+  // three colourways the nursery does not sell, so an egg is the only way to
+  // own one. `shopId: 'reptileStall'` is what `eggPrize` filters on — the
+  // mall's egg never hatches a snake and the snake egg never a biscuit.
+  {
+    id: 'egg.prize.snakeCorn',
+    shopId: 'reptileStall',
+    displayName: 'Corn Snake Baby',
+    blurb: 'Orange and stripy, and all yours.',
+    icon: '🐍',
+    price: 0,
+    kind: 'pet',
+    category: 'egg',
+    carryable: true,
+    model: () => createPetSnake('corn'),
+    heldScale: 0.45,
+    rare: false,
+  },
+  {
+    id: 'egg.prize.snakeEmerald',
+    shopId: 'reptileStall',
+    displayName: 'Emerald Snake Baby',
+    blurb: 'Bright green, and already looking for a tree.',
+    icon: '🐍',
+    price: 0,
+    kind: 'pet',
+    category: 'egg',
+    carryable: true,
+    model: () => createPetSnake('emerald'),
+    heldScale: 0.45,
+    rare: false,
+  },
+  {
+    id: 'egg.prize.snakeMilk',
+    shopId: 'reptileStall',
+    displayName: 'Milk Snake Baby',
+    blurb: 'Red, black and cream bands, very smart.',
+    icon: '🐍',
+    price: 0,
+    kind: 'pet',
+    category: 'egg',
+    carryable: true,
+    model: () => createPetSnake('milk'),
+    heldScale: 0.45,
+    rare: false,
+  },
 ];
 
 /**
@@ -896,10 +963,17 @@ export function shopItem(id: string): ShopItem | null {
   return BY_ID.get(id) ?? null;
 }
 
-/** Picks a prize. `seed` should be the purchase number, so it is repeatable. */
-export function eggPrize(seed: number): ShopItem {
+/**
+ * Picks a prize for the egg a shop sells. `seed` should be the purchase
+ * number, so it is repeatable; `shopId` is the egg's own shop, so the mall's
+ * surprise egg draws from its prizes and the Reptile House's snake egg from
+ * its hatchlings — one table, filtered, never two lists kept in step.
+ */
+export function eggPrize(seed: number, shopId: ShopItem['shopId']): ShopItem {
+  const prizes = EGG_PRIZES.filter((prize) => prize.shopId === shopId);
+  if (prizes.length === 0) throw new Error(`catalogue: no egg prizes for '${shopId}'`);
   const rng = new Rng(4242 + seed * 977);
-  return rng.pick(EGG_PRIZES);
+  return rng.pick(prizes);
 }
 
 /**

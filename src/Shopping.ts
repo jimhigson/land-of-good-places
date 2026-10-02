@@ -247,9 +247,11 @@ export class Shopping implements GameSystem {
     }
     playPurchaseChime();
 
-    if (item.id !== 'egg.surprise') return;
+    // Any egg hatches — the mall's surprise egg, the Reptile House's snake
+    // egg — into one of its own shop's prizes.
+    if (item.kind !== 'egg') return;
 
-    const prize = eggPrize(gameStore.get().inventory.length);
+    const prize = eggPrize(gameStore.get().inventory.length, item.shopId);
     this.panel.showSurprise(prize.icon, prize.displayName, prize.blurb, () => {
       gameStore.buy(specFor(prize));
       playSurpriseChime();
