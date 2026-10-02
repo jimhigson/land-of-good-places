@@ -53,3 +53,25 @@ Sweep for other seeds runs on snapshot worktree .claude/worktrees/sb-ts-snap (re
 Seed 6 trains: 4 of 8 placed were UNSATISFIED (all refused by pathGraph); satisfied ones were also
 refused (8 off-site crossings, legibility). Next: is the crossing planner dropping the train's own
 proven start site (railD 0)? DIAG offsite line added in main worktree (uncommitted).
+
+## after1 sweep (commits 218a1f17+dd652e6f), plan thread-CPU s, all 16 decision traces identical to base
+seed | before s (train) | after s (train) | unwinds
+0 | 41.3 (12.6) | 25.4 (5.7) | 6 -> 3
+1 | 281.9 (41.8) | 192.2 (23.0) | 32 -> 20
+2 | 3.1 (1.8) | 2.3 (1.1) | 0 -> 0
+3 | 131.9 (50.3) | 58.6 (27.6) | 28 -> 13
+4 | 11.5 (9.6) | 7.3 (5.8) | 1 -> 1
+5 | 92.2 (2.4) | 81.9 (1.5) | 2 -> 2
+6 | 471.5 (361.9) | 267.3 (186.4) | 34 -> 25
+7 | 11.1 (2.7) | 8.9 (1.7) | 0 -> 0
+8 | 80.9 (9.4) | 63.9 (5.5) | 6 -> 6
+9 | 106.1 (78.9) | 59.2 (39.5) | 13 -> 7
+10 | 31.5 (2.1) | 24.4 (1.1) | 3 -> 3
+11 | 10.1 (3.2) | 7.0 (1.8) | 0 -> 0
+12 | 5.8 (3.5) | 3.7 (1.9) | 0 -> 0
+13 | 264.9 (181.2) | 146.2 (87.7) | 28 -> 16
+14 | 184.8 (122.5) | 99.5 (54.4) | 12 -> 9
+15 | 283.0 (149.0) | 134.0 (71.7) | 29 -> 14
+total | 2012 | 1182
+cruiserRejections was never 0 on any seed: the attribution change never fired.
+Unsatisfied trains (ladder fallback) were refused downstream 16/16 on seeds 0,1,3,6.
