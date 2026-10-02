@@ -525,18 +525,34 @@ if (facts) {
       name: 'cheap',
       measures: [...invariants, ...lightChecks.map(parkCheck), ...pathPreference.map(parkCheck), findings],
     },
-    { name: 'middle', measures: ACCEPTANCE_SIM_MEASURES.filter(([name]) => STAGE_TWO_SIMS.has(name)).map(simCheck) },
+    {
+      name: 'middle',
+      measures: [
+        ...ACCEPTANCE_SIM_MEASURES.filter(
+          ([name]) => STAGE_TWO_SIMS.has(name) && !(parkFile && SEARCHES_THE_WORLD_PHASE.has(name)),
+        ).map(simCheck),
+        // On a park hydrated from its file (#705) there is no world-phase
+        // search in this process for these to drive, so each runs in its own
+        // process, which solves this seed and restart — the park the file was
+        // proved equal to (`builtParks.mts`' SEARCH_SCRIPTS).
+        ...(parkFile
+          ? [...SEARCHES_THE_WORLD_PHASE]
+              .filter((name) => STAGE_TWO_SIMS.has(name))
+              .map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`))
+          : []),
+      ],
+    },
     {
       name: 'heavy',
       measures: [
         ...ACCEPTANCE_SIM_MEASURES.filter(
           ([name]) => !STAGE_TWO_SIMS.has(name) && !(parkFile && SEARCHES_THE_WORLD_PHASE.has(name)),
         ).map(simCheck),
-        // On a park hydrated from its file (#705) there is no world-phase
-        // search in this process for these to drive, so each runs in its own
-        // process, which solves this seed and restart — the park the file was
-        // proved equal to (`builtParks.mts`' SEARCH_SCRIPTS).
-        ...(parkFile ? [...SEARCHES_THE_WORLD_PHASE].map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`)) : []),
+        ...(parkFile
+          ? [...SEARCHES_THE_WORLD_PHASE]
+              .filter((name) => !STAGE_TWO_SIMS.has(name))
+              .map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`))
+          : []),
         ...ACCEPTANCE_CHECK_SCRIPTS.map(scriptCheck),
       ],
     },
