@@ -171,8 +171,8 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
       // is how hard the search worked, not a property of the park: decision
       // zero is a rung of the backtracking ladder, used as designed. Judging
       // it rejected seed 11's restarts 0-3 for searching, not for any defect
-      // (#705 review, 2 Oct). Search cost is bounded by SolveBudget and
-      // watched by check:solve-cost; it never restarts a park.
+      // (#705 review, 2 Oct). Search cost is bounded by SolveBudget's caps and
+      // the Parks job's per-seed timeout; it never restarts a park.
       // A missing layout trace is still the instrument failing: a void.
       const unmeasured = builtWellProblems(seed, counts, true).filter((p) => p.startsWith('UNMEASURED'));
       return { faults: [], voids: [...unmeasured, ...(falseRefusal ? [falseRefusal] : [])] };
