@@ -45,13 +45,13 @@
  * contents at all, and every "equal" above means nothing.
  */
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 
 import type { ParkFile } from '../../src/world/prebuilt/parkFile.ts';
-import { PARK_FILE_FORMAT, type PrebuiltParksManifest } from '../../src/world/prebuilt/parkFileName.ts';
+import { PARK_FILE_FORMAT, PREBUILT_PARKS_MANIFEST, SUPPORTED_PARK_SEEDS, type PrebuiltParksManifest } from '../../src/world/prebuilt/parkFileName.ts';
 import type { AttemptVerdict } from '../park-attempt.mts';
 import { acceptanceMetadata, acceptPark, attemptInFreshProcess, type AcceptanceMetadata } from './acceptedPark.mts';
 import { parkSourceHash } from './park-source-hash.mjs';
@@ -370,7 +370,6 @@ export async function verifyParks(
   const sourceHash = parkSourceHash(process.cwd());
   if (manifest.format !== PARK_FILE_FORMAT) problems.push(`format ${manifest.format}, this tree reads ${PARK_FILE_FORMAT}`);
   if (manifest.sourceHash !== sourceHash) problems.push(`source ${manifest.sourceHash.slice(0, 12)}, this tree is ${sourceHash.slice(0, 12)}`);
-  const { SUPPORTED_PARK_SEEDS } = await import('../../src/world/prebuilt/parkFileName.ts');
   for (const seed of SUPPORTED_PARK_SEEDS) if (!manifest.seeds.includes(seed)) problems.push(`seed ${seed} missing`);
   if (problems.length > 0) return problems;
   const queue = [...manifest.seeds].reverse();
