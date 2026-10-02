@@ -649,9 +649,9 @@ const TREE_TRUNK_CLAIM = 0.6;
 /** Radius of the collider a clump registers, and so the ground it occupies. */
 const BUSH_COLLIDER = 0.85;
 /**
- * How many spots a tree or bush tries when asked to step aside. The scatter
- * itself needs ~2500 attempts per accepted tree on a tight lawn (180 000 for
- * 72), so 48 was no budget at all: on seed 11 both trees asked to move
+ * How many spots a tree or bush tries when asked to step aside. On a tight
+ * lawn the scatter's last trees each took hundreds to thousands of candidates
+ * (seed 8 drew 6362 for 72), so 48 was no budget at all: on seed 11 both trees asked to move
  * "found nowhere in 48 tries" and two lamp slots were forgone instead.
  * Every try is a handful of distance checks; 4000 is a few milliseconds.
  */
@@ -668,8 +668,45 @@ const RELOCATE_TRIES = 4000;
 const RELOCATE_REACH = { tree: 24, bush: 20 } as const;
 const TREE_MOVE_SALT = 0x7e3e0e ^ PARK_SEED;
 const BUSH_MOVE_SALT = 0xb0511e ^ PARK_SEED;
-const TARGET_TREES = 72;
-const TREE_BUDGET = 180000;
+/**
+ * **How many tree candidates the scatter draws: a fixed density, never a target count.**
+ *
+ * The scatter used to plant until it had 72 trees. A count for the whole park
+ * is the one thing a rejection sampler cannot have and stay local: lose three
+ * trees to a little extra paving by one spur and the scatter simply keeps
+ * drawing, so candidates #70-72 plant wherever the stream happens to put them.
+ * Seed 12, rail-racer spur bowed 2 m: the three lost trees stood 0-30 m from
+ * the spur and their replacements went in 31 m and 43.6 m away, taking a
+ * dozen bushes with them (`test/procgen/scatterDecoupling`). The same rule
+ * also gave every park exactly 72 trees however much lawn it had, so a park
+ * with little lawn crammed them in (seed 8 drew 6362 candidates to place its
+ * 72nd) and one with plenty spread them out.
+ *
+ * Now the scatter draws a fixed number of candidates — `TREE_CANDIDATES_PER_M2`
+ * times the area they are drawn over (the boundary less {@link TREE_EDGE_MARGIN},
+ * ~18 185 m² on every supported seed) — and plants every one the ground accepts.
+ * Whether candidate *i* stands depends only on the ground under it and the
+ * trees already within a canopy's reach of it, so a change in one corner of
+ * the park changes trees in that corner only. It is the rule the bushes have
+ * always used (`BUSH_BUDGET`).
+ *
+ * **Why this and not a quota per cell**, the other local rule: this one keeps
+ * the stream, the candidate order and the acceptance test exactly as they were,
+ * so every tree that stands is one of the trees the park had before — a park
+ * whose 72nd tree came at candidate 1 819 or later loses its last few, one that
+ * reached 72 sooner gains the next few — and nothing moves. A cell quota would
+ * re-draw every position and even the trees out into a grid of one or two per
+ * cell, losing the clumps and clearings the park has now. The cost is that the
+ * count now follows the lawn: measured on all 16 seeds at their recorded
+ * restarts, 72 everywhere before, 47-86 after (climbable 28-48 before, 27-48
+ * after) — see `HANDOFF-sb-trees.md` / the PR for the table.
+ *
+ * 0.1 per m² (≈1 819 candidates) is where the trees stayed closest to today's
+ * across the 16 seeds (summed |count − 72| of 143 at 1 600-1 800 candidates,
+ * against 162 at 2 000 and 210 at 1 200), and it keeps every seed's climbable
+ * trees above the floor of 24 that `theParkIsFurnished` holds.
+ */
+const TREE_CANDIDATES_PER_M2 = 0.1;
 const BUSH_BUDGET = 4200;
 
 /**
@@ -714,7 +751,8 @@ function clearOfClaims(claim: Claim, keepClearOf: readonly Claim[]): boolean {
 /**
  * **Trees, as a feature builder** (Jim, 16 Sep 2026: every park feature goes
  * through the generic interface). One increment is one tree. The scatter is the
- * one the park always made — same salts, same candidate order, same budget —
+ * one the park always made — same salts, same candidate order — drawn to a
+ * fixed candidate density ({@link TREE_CANDIDATES_PER_M2}) rather than to a count,
  * then the climb-cover pass, cell by cell; each accepted tree is an increment
  * claiming its trunk. The builder never refuses: a spot that fails is simply
  * the next candidate, exactly as before.
@@ -733,6 +771,7 @@ export function treeBuilder(
   out: TreeDecision[],
 ): FeatureBuilder {
   let attempts = 0;
+  const candidates = Math.round(TREE_CANDIDATES_PER_M2 * treeSamplingM2());
   let phase: 'scatter' | 'cover' = 'scatter';
   let cell = 0;
   let cells: { key: number; x: number; z: number }[] | null = null;
@@ -806,7 +845,7 @@ export function treeBuilder(
     movable: true,
     *advance() {
       if (phase === 'scatter') {
-        while (out.length < TARGET_TREES && attempts < TREE_BUDGET) {
+        while (attempts < candidates) {
           const resume = { attempts, phase, cell };
           attempts += 1;
           const rng = candidateRng(TREE_SALT, attempts);
