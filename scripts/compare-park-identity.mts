@@ -9,9 +9,13 @@
  * every seed in both: the decision structure (the three solve traces, the mesh
  * set and every mesh's vertex and instance counts) must be identical — a
  * difference is a decision that flipped between the two machines, a different
- * park, and fails. Where the structure agrees, the worst centroid drift is
- * reported in metres for every seed, so how close "the same" is stays visible.
- * Exit 1 on any structural difference, or a seed missing from either side.
+ * park, and fails. Where the structure agrees, **any centroid drift at all
+ * fails too**: since `src/core/deterministicMath.ts` the two platforms build the
+ * same park to the bit (0.00e+0 m on all sixteen, run 36952601192), so a drift
+ * of one ulp means something has started computing differently again, the
+ * first step towards a decision flipping. Printing it and passing would have
+ * let it accumulate (PR #706 review). Exit 1 on any structural difference, any
+ * drift, or a seed missing from either side.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -83,6 +87,13 @@ for (const seed of seeds) {
   if (problems.length > 0) {
     failures += 1;
     console.log(`seed ${seed} (${x.platform} vs ${y.platform}): DIFFERENT PARK — ${problems.join('; ')}`);
+  } else if (worst > 0) {
+    failures += 1;
+    console.log(
+      `seed ${seed} (${x.platform} vs ${y.platform}): same decisions but NOT the same bits — worst centroid drift ` +
+        `${worst.toExponential(2)} m (${worstName}). The platforms have started computing differently; find what ` +
+        'no longer goes through src/core/deterministicMath.ts.',
+    );
   } else {
     console.log(
       `seed ${seed} (${x.platform} vs ${y.platform}): same decisions, ${x.meshes.length} meshes; ` +

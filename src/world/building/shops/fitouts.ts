@@ -434,7 +434,7 @@ function stickerPetShop(): Fitout {
       // Each pet hops on its own beat, and looks about between hops.
       pets.forEach((pet, index) => {
         const beat = elapsed * 0.9 + index * 1.7;
-        const hop = Math.max(0, Math.sin(beat * 2)) ** 3;
+        const hop = Math.pow(Math.max(0, Math.sin(beat * 2)), 3);
         pet.setWalkPhase((beat * 0.5) % 1, hop);
         pet.head.rotation.y = Math.sin(beat * 0.7) * 0.5;
       });

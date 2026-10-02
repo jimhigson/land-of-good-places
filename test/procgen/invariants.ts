@@ -13153,7 +13153,10 @@ const theParkIsFurnished: Invariant = (facts) => {
   // - **Count > 140** — half the thinnest supported park (seed 8, 284). Below
   //   that a park has under ~650 m2 a bush may stand on, outside anything
   //   measured here, and the bush clearance invariants would be asserting
-  //   over almost nothing.
+  //   over almost nothing. **This is headroom, not a need**: no supported park
+  //   came near the old 180 either, so lowering it rejected nothing that was
+  //   passing and admitted nothing that was failing. The density clause above
+  //   is the one doing the work (PR #706 review).
   //
   // Do not raise `BUSH_BUDGET` to pass this, and do not tune it to a park:
   // re-measure, and if the density moved, find out why.

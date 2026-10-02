@@ -335,7 +335,7 @@ function remPio2Large(x: number, hx: number): number {
   }
   // r = frac/2^128 · π/2 = big / 2^256, split into two doubles.
   const big = frac * PIO2_128;
-  const scale = 2 ** -256;
+  const scale = fromWords((1023 - 256) << 20, 0); // 2^-256, exactly
   const hi = Number(big);
   y0 = hi * scale;
   const rest = big - BigInt(hi);
