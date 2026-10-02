@@ -15,7 +15,7 @@ import {
   ribbonStations,
 } from './pathSurface';
 import { terrainHeight } from './terrain';
-import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../core/constants';
+import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, DOOR_PAVING_OVERLAP } from '../core/constants';
 import { cameraOffset } from '../core/cameraRig';
 import { DEG } from '../core/mathUtils';
 import {
@@ -282,8 +282,18 @@ export function buildPaths(): Mesh[] {
   // on to it — see `doorAprons`.
   // Owners of paving that is drawn but never walked on — see `doorAprons`.
   const decorativeOwners: number[] = [];
+  // The stretches of door apron a measure must let lie under a building, by
+  // name: every door's overlap ({@link DOOR_PAVING_OVERLAP} in under it), and
+  // the hotel's recess behind its trigger. Each a rectangle — from, to, and the
+  // apron's paved reach either side.
+  const doorAllowances: { what: string; from: readonly [number, number]; to: readonly [number, number]; halfReach: number }[] = [];
   doorAprons().forEach((apron, k) => {
     if (!apron.walkable) decorativeOwners.push(DOOR_APRON_OWNER_BASE - k);
+    const halfReach = apron.width / 2 + PATH_KERB_OVERHANG;
+    doorAllowances.push({ what: `${apron.name} overlap under the door`, from: apron.front, to: apron.points[apron.points.length - 1] as readonly [number, number], halfReach });
+    if (!apron.walkable) {
+      doorAllowances.push({ what: `${apron.name} recess behind the trigger`, from: apron.points[0] as readonly [number, number], to: apron.front, halfReach });
+    }
     const curve = routeCurve(apron);
     const divisions = pathDivisions(curve);
     addPathRibbon(surface, curve, apron.width, divisions, PATH_SURFACE_LIFT, discMayBeLaid);
@@ -310,6 +320,7 @@ export function buildPaths(): Mesh[] {
   kerbMesh.userData['ownerNames'] = ownerNames;
   surfaceMesh.userData['decorativeOwners'] = Int32Array.from(decorativeOwners);
   kerbMesh.userData['decorativeOwners'] = Int32Array.from(decorativeOwners);
+  surfaceMesh.userData['doorAllowances'] = doorAllowances;
 
   drawnLayers = [
     { mesh: kerbMesh, lift: PATH_KERB_LIFT },
@@ -881,8 +892,9 @@ function discMayBeLaid(x: number, z: number, radius: number): boolean {
 export const DOOR_APRON_OWNER_BASE = -100_000;
 
 /**
- * **The paving from a doormat on to its drawn door** (`parkLayout.ts`'s
- * `doorApronOf`), straight, at the arriving route's own width: the hotel's
+ * **The paving from a doormat on to its drawn door, and
+ * {@link DOOR_PAVING_OVERLAP} in under it** (`parkLayout.ts`'s `doorApronOf`),
+ * straight, at the arriving route's own width: the hotel's
  * sliding doors stand ~4.9 m inside its facade at the back of a recess, past
  * the trigger the doormat is on, and the castle's steps can stand inside the
  * plot its doormat is pushed clear of. Without it a child sees lawn between
@@ -893,8 +905,8 @@ export const DOOR_APRON_OWNER_BASE = -100_000;
  * The hotel's records none: it lies behind the trigger, on ground she is let
  * in before she reaches, and a waypoint seeded there would be stranded.
  */
-function doorAprons(): (RouteDefinition & { readonly walkable: boolean })[] {
-  const aprons: (RouteDefinition & { readonly walkable: boolean })[] = [];
+function doorAprons(): (RouteDefinition & { readonly walkable: boolean; readonly front: readonly [number, number] })[] {
+  const aprons: (RouteDefinition & { readonly walkable: boolean; readonly front: readonly [number, number] })[] = [];
   for (const node of PATH_GRAPH.nodes) {
     if (node.kind !== 'anchor') continue;
     const entry = PARK_LAYOUT.entries.get(node.id);
@@ -908,6 +920,7 @@ function doorAprons(): (RouteDefinition & { readonly walkable: boolean })[] {
       width,
       closed: false,
       walkable: apron.walkable,
+      front: apron.front,
     });
   }
   return aprons;

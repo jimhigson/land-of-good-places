@@ -20,7 +20,7 @@ import { BOUNDARY_WALL_COLLISION_HALF, PARK_BOUNDARY } from './boundary';
 import { ENTRANCE_GATE_X, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
 import { CollisionWorld } from './Collision';
 import { NAV_CELL, NavGrid, STAND_SEARCH_REACH, type ReachSet } from './NavGrid';
-import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS, SPUR_PAVED_REACH } from '../core/constants';
+import { DOOR_PAVING_OVERLAP, MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS, SPUR_PAVED_REACH } from '../core/constants';
 import { ARRIVAL_EXEMPT_NEAR } from './streetRules';
 import type { AnchorFootprint } from './anchors';
 
@@ -384,29 +384,44 @@ function doormatClearOfThePlot(
 }
 
 /**
- * **The paving from a plot's doormat on to its drawn door**, where the two are
- * not the same place (`ManifestEntry.door`): the hotel's sliding doors stand
- * at the back of a recess past the trigger its doormat is on, and the castle's
- * steps can stand inside the plot its doormat is pushed clear of. `to` is
- * where the door's front is; `walkable` is whether that ground is open lawn a
- * child stands on (the castle's, in front of its steps) or ground she is let
- * in before reaching (the hotel's recess, behind the trigger). `null` where
- * the doormat is the door.
+ * **The paving from a plot's doormat on to its drawn door, and
+ * {@link DOOR_PAVING_OVERLAP} in under it** (`ManifestEntry.door`): the
+ * hotel's sliding doors stand at the back of a recess past the trigger its
+ * doormat is on, and the castle's steps can stand inside the plot its doormat
+ * is pushed clear of. `front` is where the door's front is drawn; `to` is
+ * where the paving stops, the overlap further in, so path and door overlap
+ * with no lawn between them. `facing` points out of the door. `walkable` is
+ * whether the stretch out in front of the door is open lawn a child stands on
+ * (the castle's) or ground she is let in before reaching (the hotel's recess,
+ * behind the trigger).
  */
-export function doorApronOf(entry: PlacedEntry): { readonly to: readonly [number, number]; readonly walkable: boolean } | null {
+export function doorApronOf(entry: PlacedEntry): {
+  readonly front: readonly [number, number];
+  readonly to: readonly [number, number];
+  readonly facing: readonly [number, number];
+  readonly walkable: boolean;
+} | null {
   const manifest = PARK_MANIFEST.find((candidate) => candidate.id === entry.id);
   const door = manifest?.door;
   if (!manifest || !door) return null;
+  const [fx, fz] = entranceFacing(entry);
+  let front: readonly [number, number];
+  let walkable: boolean;
   if ('reach' in door) {
-    if (door.pavedTo === undefined || door.reach <= door.pavedTo) return null;
-    const [fx, fz] = entranceFacing(entry);
-    const back = door.reach - door.pavedTo;
-    return { to: [entry.entranceX - fx * back, entry.entranceZ - fz * back], walkable: false };
+    const back = door.pavedTo === undefined ? 0 : Math.max(0, door.reach - door.pavedTo);
+    front = [entry.entranceX - fx * back, entry.entranceZ - fz * back];
+    walkable = back === 0;
+  } else {
+    const [cx, cz] = drawnCentreOf(manifest, entry.x, entry.z);
+    front = [cx + door.local[0], cz + door.local[1]];
+    walkable = true;
   }
-  const [cx, cz] = drawnCentreOf(manifest, entry.x, entry.z);
-  const to: readonly [number, number] = [cx + door.local[0], cz + door.local[1]];
-  if (Math.hypot(to[0] - entry.entranceX, to[1] - entry.entranceZ) < 1e-6) return null;
-  return { to, walkable: true };
+  return {
+    front,
+    to: [front[0] - fx * DOOR_PAVING_OVERLAP, front[1] - fz * DOOR_PAVING_OVERLAP],
+    facing: [fx, fz],
+    walkable,
+  };
 }
 
 /** Does this plot declare a door of its own (`ManifestEntry.door`)? */
