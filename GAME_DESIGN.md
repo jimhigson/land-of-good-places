@@ -903,11 +903,27 @@ scary face appears. **Tap its eye → the eye pops out** (boing!). **Tap its
 mouth → water squirts out at YOU** (splashes the screen/player). **Tap the
 mouth twice very quickly → CANDY comes pouring out** (collectible sweets).
 
-## The snake room
+## The snake room → the Reptile House
 
 Inside the castle there is a **room full of friendly snakes** — smiley,
 colourful, wiggly. You can adopt a snake as a **pet** and it appears in
 the Cute-o-dex like any cute thing.
+
+**Built as its own building, 2 October 2026.** The castle floor this was
+planned for no longer exists (#377/#380 split the castle into three
+floors), and Jim asked for a whole reptile house instead: *"many animals,
+in a zoo-like format both behind glass and in enclosures without glass
+but with walls … snakes, including baby snakes of various sizes and a
+stall where you can buy snake-themed things inside. The outside of the
+building should be snake-themed too. Inside just one floor but make it
+expansive with forking and meandering paths, and lots of cultivated
+tropical and otherwise snake-appropriate vegetation."* That is
+`src/world/reptileHouse/` (design: `docs/design/REPTILE-HOUSE.md`):
+fifteen exhibits, Noodle the python whose tail comes up in the nursery
+fourteen metres from her head, twelve baby snakes to adopt from, a stall
+called Scales & Tails, and "Sunny", the snake who is the building.
+Reached by `/reptile-house` (and `/reptile-house-door` for the outside)
+until the park gives the building a plot.
 
 ## You cannot wear things from the backpack (27 July 2026 — BUG, queued)
 

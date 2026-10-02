@@ -166,6 +166,12 @@ only question asked is whether the bytes still match.
 | `bridgeStones.glb` | `npm run blend:bridge-stones` | 9.2 KB | the railway bridges' coping, voussoirs and keystone |
 | `castle.glb` | `npm run blend:castle` | 128 KB | the castle interior, batch 1 — 23 nodes, 4 342 triangles |
 | `gateArch.glb` | `pnpm run blend:gate-arch` | 63 KB | the park's entrance arch — 5 nodes, 2 492 triangles |
+| `reptileHouse.glb` | `pnpm run blend:reptile-house` | 250 KB | the Reptile House's exterior, "Sunny" — 13 nodes, 10 680 triangles |
+| `reptileCases.glb` | `pnpm run blend:reptile-cases` | 154 KB | the Reptile House's enclosure masonry — 16 nodes, 5 674 triangles |
+| `reptilePlants.glb` | `pnpm run blend:reptile-plants` | 171 KB | the Reptile House's plant kit — 23 nodes, 5 518 triangles |
+| `reptileCreatures.glb` | `pnpm run blend:reptile-creatures` | 124 KB | the Reptile House's creature parts — 13 nodes, 4 452 triangles |
+| `reptileNoodle.glb` | `pnpm run blend:reptile-noodle` | 112 KB | Noodle the python and her rock — 8 nodes, 4 982 triangles |
+| `reptileStall.glb` | `pnpm run blend:reptile-stall` | 73 KB | Scales & Tails' dressing and the Noodle-o-meter — 17 nodes, 2 449 triangles |
 
 **Two shapes of kit, and the difference matters.** Some are *models* a placer
 puts down whole (the castle's furniture, the hotel's fittings); some are **kits
@@ -315,3 +321,195 @@ assertion.** Worth knowing before painting the next authored surface:
   smeared into radial wedges. The fix is `paint_planar_uvs()`, which computes
   UVs from **where each vertex is**, after emit: a UV that is a function of
   position cannot be given to the wrong face.
+
+### 35 — The Reptile House exterior, "Sunny" (`src/art/models/reptileHouseAssets.ts`)
+
+Nodes: `rh-plinth`, `rh-coil`, `rh-coil-belly`, `rh-coil-spots`, `rh-house-wall`,
+`rh-windows`, `rh-head`, `rh-tongue`, `rh-tail`, `rh-tail-bell`, `rh-arch`,
+`rh-awning`, `rh-sign`. "Sunny, the snake who is the building" — a mint snake
+coiled 2.6 turns round a cream greenhouse, head resting on top at the front
+looking at the camera, tail curling down beside the door as the signpost
+(`docs/design/REPTILE-HOUSE.md` §2). Jim, 2026-10-02: *"The outside of the
+building should be snake-themed too."*
+
+`art/blend/reptile_house_build.py` → `art/blend/reptile_house.blend` →
+`reptile_house_export.py` → `src/art/assets/reptileHouse.glb` →
+`reptileHouseGlb.ts`, by `pnpm run blend:reptile-house`. Renders:
+`art/renders/reptile-house/{iso,door,head,back}.png`, by
+`pnpm run render:reptile-house`. 13 nodes, 10 680 triangles, 255 872 bytes.
+
+Origin on the ground at the building's centre, facing **+Z** (the door, the
+head and the awning all face +Z; the plot is `cameraFacing`). Measured on the
+built mesh, printed by every build run: **12.20 m** to the top of the head,
+furthest vertex **11.30 m** from the centre (≤ `REPTILE_BOUNDING_RADIUS` 11.5),
+plinth 16-gon circumradius **9.400** = `REPTILE_SHELL_RADIUS` (flats at 9.219,
+top at y 0.30), arch bore **3.40 × 3.60** above the plinth top with the mouth
+8.84 m out (≥ `REPTILE_DRAWN_DOOR_ALONG`), tail touching down 0.40 m from the
+`REPTILE_TAIL_REACH` point (5.26, 9.89 in game XZ).
+
+Every shared number is read from `src/world/reptileHouse/layout.ts` through
+`art/blend/reptile_constants.py`; the loader re-asserts the plinth
+circumradius, the arch's outer size and the bounding radius at load, as
+`gateArch.ts` does. The collider is the closed 16-gon ring at
+`REPTILE_SHELL_RADIUS` with one aperture, jambs and a back wall
+(`world/reptileHouse/shell.ts`), plus discs derived from every vertex of the
+tail and sign below `TALLEST_CHILD_HEIGHT` outside the ring
+(`reptileHouseLowDiscs`) — `check:reptile-house` marches at it from 32
+bearings.
+
+Two painted nodes carry UVs: `rh-head` (planar face UVs on the front
+hemisphere only, `u` with +X, `v = (hi − z)/h` to cancel the exporter's 1−v
+— identical to `gate-arch-sign`'s convention; the back hemisphere is parked
+at UV (0.02, 0.02), which the canvas leaves as plain body colour) wearing the
+shared snake face (`snakeFace.ts`), and `rh-sign` (a 1.70 × 0.85 plank,
+planar UVs on all faces) painted from the hall's sign atlas. `rh-tongue` is
+the one node with a transform: a pure translation to the mouth (0.00, 10.08,
+7.85 in game XYZ), so a flick is `scale 0 → 1` on the node.
+
+### 36 — Reptile House: enclosure masonry, the `cases` kit (`src/art/models/reptileCasesAssets.ts`)
+
+Nodes: `rc-case-plinth`, `rc-case-rim`, `rc-case-backboard`,
+`rc-case-backboard-relief`, `rc-pier-post`, `rc-pier-vine`, `rc-jar-base`,
+`rc-jar-rim`, `rc-round-wall`, `rc-lagoon-wall`, `rc-tortoise-wall`,
+`rc-nursery-kerb`, `rc-nursery-rail`, `rc-island-kerb`, `rc-grotto-rock`,
+`rc-grotto-moss`. Asset group §2 of `docs/design/REPTILE-HOUSE.md`.
+
+`art/blend/reptile_cases_build.py` → `art/blend/reptile_cases.blend` →
+`art/blend/reptile_cases_export.py` → `src/art/assets/reptileCases.glb` →
+`reptileCasesGlb.ts`. 16 nodes, 5 674 triangles, 154.2 KB (budget 180).
+Renders: `art/renders/reptile-cases/{case,case-front,enclosures,grotto,
+grotto-front}.png` by `pnpm run render:reptile-cases`.
+
+Every node is authored about its own footprint centre, on the floor, identity
+transform, Blender −Y = game +Z (a case's glass front faces +Z; a west-wall
+case is the same nodes rotated at the root). Every grounded node is sunk
+0.05 m below the floor with **no bottom face**, so nothing shares the floor
+plate's plane. No UVs, no colour: one node per colour, the loader's STYLES
+table owns every colour. Glass panes and nameplates are TypeScript.
+
+**Every footprint is `layout.ts`'s, read with `ts_const` and asserted off the
+emitted vertices on every build, and re-measured by the loader at load** —
+the collider always encloses the stone: `rc-case-plinth`/`rc-case-rim` the
+stadium `REPTILE_CASE_SEGMENT` × half `REPTILE_CASE_HALF_DEPTH`, plinth top
+`REPTILE_CASE_PLINTH_HEIGHT`, rim from `REPTILE_GLASS_TOP`; `rc-pier-post` +
+`rc-pier-vine` within `REPTILE_PIER_POST_RADIUS`; the three walls' tops
+exactly `REPTILE_ENCLOSURE_WALL_HEIGHT` and reaches `REPTILE_ROUND_WALL_RADIUS`
+/ the lagoon and tortoise stadiums; `rc-nursery-kerb` r
+`REPTILE_NURSERY_RADIUS`, `rc-nursery-rail` to `REPTILE_NURSERY_RAIL_TOP`
+(its XY reach is the nursery glass radius, measured as
+`REPTILE_NURSERY_GLASS_RADIUS`); `rc-island-kerb` r `REPTILE_ISLAND_RADIUS`;
+`rc-jar-base` foot `REPTILE_JAR_RADIUS + 0.15`. `rc-grotto-rock` is
+mesh-owned (6.68 wide × 5.09 deep × 3.54 tall, pool basin at local (+0.30,
++1.30), waterfall lip at (+0.30, +0.45, 2.10)) and stands in the grotto bed,
+whose discs are its collider.
+
+### 37 — Reptile House plants (`src/art/models/reptilePlantsAssets.ts`)
+
+Nodes: `rp-palm-trunk`, `rp-palm-frond`, `rp-banana-leaf`, `rp-monstera-stalk`,
+`rp-monstera-leaf`, `rp-fern-frond`, `rp-heliconia-stalk`, `rp-heliconia`,
+`rp-vine-strand`, `rp-vine-leaves`, `rp-lily-pad`, `rp-rock-a/b/c`,
+`rp-log-small`, `rp-log-hollow`, `rp-log-knothole`, `rp-banyan`,
+`rp-banyan-canopy`, `rp-banyan-anchor-a/b/c`, `rp-branch`. A kit of
+instancing units for the Reptile House's beds (spec §5):
+`art/blend/reptile_plants_build.py` → `reptile_plants.blend` →
+`reptile_plants_export.py` → `src/art/assets/reptilePlants.glb` →
+`reptilePlantsGlb.ts`. 23 nodes, 5 518 triangles, 171 KB. Shared numbers
+(`REPTILE_LOG_*`, `REPTILE_PALM_HEIGHT`, `REPTILE_BANYAN_HEIGHT`,
+`TALLEST_CHILD_HEIGHT`) are read from `src/world/reptileHouse/layout.ts` /
+`kid.ts` through `reptile_constants.py`, never typed, and the loader
+re-measures the palm, the banyan and the hollow log's bore. Shape only; no
+UVs; colours from the loader's STYLES table. Renders:
+`art/renders/reptile-plants/*.png`.
+
+Everything stands at origin, base centred on X/Z, bottoms sunk 0.05 m so no
+face is coplanar with the floor plate; leaves point along game +Z; logs lie
+along game X. Four nodes carry a node translation and nothing else, read with
+`reptilePlantAnchor` rather than copied: `rp-log-knothole` (0, 1.25, −1.67)
+on the hollow log's north inner wall, where hidden baby #1 peeks; the three
+banyan hang points below the canopy skirt. The anchor tetrahedra are never
+drawn. `rp-vine-strand`/`rp-vine-leaves` hang from their origin (2.6 m drop).
+The hollow log is a sagged, split log: vertical inner walls at exactly
+y = ±`REPTILE_LOG_INNER_RADIUS` (the Log Walk's two thick-wall colliders), a
+3.30 m clear bore, and the south side cut away so the camera sees her inside.
+Rocks' tops 0.65 / 0.42 / 0.52 m and circumradii 1.054 / 0.690 / 1.519 m are
+measured in TypeScript (`reptilePlantTop`, `reptilePlantRadius`) for the
+hop-on plates and discs; `instancedPlant` makes one `InstancedMesh` plus an
+ink-outline `InstancedMesh` sharing its matrices per part.
+
+### 38 — Reptile House creature kit (`src/art/models/reptileCreaturesAssets.ts`)
+
+Thirteen nodes, `docs/design/REPTILE-HOUSE.md` §ASSET GROUPS 4: `rr-snake-head`
+(PAINTED), `rr-snake-tongue`, `rr-croc-head`, `rr-croc-jaw`, `rr-croc-body`,
+`rr-croc-tail`, `rr-tortoise-shell`, `rr-tortoise-head`, `rr-chameleon-body`,
+`rr-frog-body`, `rr-gecko-body`, `rr-skink-body`, `rr-iguana-body`. The
+organic parts primitives fight; every animal is otherwise TypeScript
+(`snake.ts`, `reptiles.ts`).
+
+`art/blend/reptile_creatures_build.py` → `reptile_creatures.blend` →
+`reptile_creatures_export.py` → `src/art/assets/reptileCreatures.glb` →
+`reptileCreaturesGlb.ts`; `pnpm run blend:reptile-creatures` runs all three.
+Renders: `art/renders/reptile-creatures/*.png`. **4 452 triangles, 124.2 KB**
+(budget 4 500 / 140 KB). No rig, no bones, no materials: shape only. One
+game-owned number, `REPTILE_SNAKE_HEAD_LENGTH` (`layout.ts`, 0.42 m), read
+with `ts_const`, asserted off the vertices and re-measured by the loader.
+
+Conventions: 1 unit = 1 m; every creature faces +Z; origin on the floor under
+its belly, centred — except the snake head (origin at the **neck joint on the
+body axis**, head extending 0.42 m forward) and the four **hinge-origin
+nodes**, whose node carries a pure translation: `rr-snake-tongue` at the mouth
+(scale along its length to flick); `rr-croc-jaw` (rotate about X to yawn);
+`rr-croc-tail` (yaw to sway); `rr-tortoise-head` (translate along +Z to stretch
+the neck). Snappy's four nodes assemble to 3.60 m in one group.
+
+**Snake-face UV contract** (shared with `rn-head` and `rh-head` so one canvas
+fits all three — `snakeFace.ts`): front faces take u across the head's full X
+extent and v down its full height, back faces are parked at (0.02, 0.02). The
+other animals' faces are geometry (ink eye blobs, catchlights, blush, a
+w-mouth — `reptiles.ts`'s `geometryFace`), so the hall spends no canvas on
+them.
+
+### 39 — Noodle, the python, and her rock (`src/art/models/reptileNoodleAssets.ts`)
+
+Parts: `rn-mound`, `rn-coil`, `rn-coil-belly`, `rn-coil-spots`, `rn-head`
+(PAINTED), `rn-tongue`, `rn-burrow`, `rn-tail-mound`.
+`art/blend/reptile_noodle_build.py` → `art/blend/reptile_noodle.blend` →
+`reptile_noodle_export.py` → `src/art/assets/reptileNoodle.glb` →
+`scripts/pack-reptile-noodle-asset.mts` → `reptileNoodleGlb.ts`. 8 nodes,
+4 982 triangles, 112 KB. Every shared number is read through
+`art/blend/reptile_constants.py` from `src/world/reptileHouse/layout.ts`
+(`REPTILE_NOODLE_BODY_RADIUS`, `REPTILE_NOODLE_MOUND_HEIGHT` — the mound peak
+is asserted to it in Python and at load — `REPTILE_NOODLE_HEAD_X/Y/Z`,
+`REPTILE_ISLAND_RADIUS`, `REPTILE_NURSERY_RADIUS`). Island nodes are baked in
+hall-local metres (the island is at the hall origin); `rn-tail-mound` is
+authored at its own base origin for the nursery. Two nodes carry a pure
+translation as their pivot: `rn-head` at the chin's rest point (2.3, 0.5, 2.3)
+— yawed to track a child, lifted to say hello — and `rn-tongue` at the mouth,
+scaled 0 → 1 to flick. The head's face is the shared snake canvas in its own
+UVs. Her snout reaches 3.90 m from the hall origin, 0.30 m past the island's
+collider: the loader measures it (`snoutReach`) and `exhibits.ts` registers
+one small disc under it from that measurement. Renders:
+`art/renders/reptile-noodle/*.png`.
+
+### 40 — Reptile House stall kit (`src/art/models/reptileStallAssets.ts`)
+
+`art/blend/reptile_stall_build.py` → `art/blend/reptile_stall.blend` →
+`reptile_stall_export.py` → `src/art/assets/reptileStall.glb` →
+`reptileStallGlb.ts`. Two frames in one file, told apart by prefix. **Stall
+dressing** (`rs-awning`, `rs-awning-posts`, `rs-awning-snake`, `rs-finial`,
+`rs-sign`, `rs-stall-snake-{face,shine,tongue,spots}`) is authored in
+**`kiosk.ts`'s own frame** — origin at the stall base, counter toward +Z — so
+it is added to the counter group at its origin with no offset: the scalloped
+cloth spans the counter (front eave underside 3.25 m, back 3.85 m, top
+3.92 m), its two posts stand through the counter's top plank, the eave snake
+lies along the front hem with its head lifted at the near corner, and the
+finial coil stands on the awning's back ridge (top 4.87 m). **The
+Noodle-o-meter** (`rs-meter-post`, `rs-meter-bands`, `rs-meter-board`,
+`rs-meter-snake`, `rs-meter-snake-{face,shine,tongue,spots}`) is authored
+about its own base: post 3.20 m (`REPTILE_METER_POST_HEIGHT`, asserted at
+load), 6 bands every `REPTILE_BABY_SNAKE_UNIT`, board top 3.59 m, base disc
+radius **0.340 m**, measured for its collider. Measured headroom in front of
+the counter: **+0.280 m** over `TALLEST_CHILD_HEIGHT` (asserted at load). Only
+`rs-sign` (1.50 × 0.50 m) and `rs-meter-board` (1.00 × 0.45 m) carry UVs,
+planar, already flipped for glTF, painted from the hall's sign atlas. No rig,
+no hinges, no animation, no materials. Renders:
+`art/renders/reptile-stall/*.png` by `pnpm run render:reptile-stall`.
