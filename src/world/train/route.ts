@@ -255,10 +255,15 @@ interface TrainContext {
  * The park driver unwinds into the decisions a refusal names as consumed
  * (`boot/parkSolve.ts`), so naming one that played no part costs a whole
  * re-chosen decision and every failed loop search replayed on top of it.
- * Measured on seed 6 restart 5 (fix/sb-trainsearch): the loop search failed
- * at every cruiser attempt of a layout whose loop the cruiser never touched —
- * thirty-odd exhaustive searches, each a few hundred thousand pieces, spent
- * re-drawing a cruiser that was not in the way.
+ * So the cruiser is named only when one of its obstacles rejected a sample no
+ * layout obstacle had already rejected. Measured on the supported seeds
+ * (fix/sb-trainsearch) it always had — on seed 6's hostile layout 135k-175k
+ * cruiser-only rejections per failed search, and with the cruiser's obstacles
+ * removed the same search closes at attempt 0 — so there the cruiser is the
+ * blocker and is rightly re-drawn; this only stops it being named for nothing.
+ *
+ * Also thrown when the ladder closed loops but **every one failed
+ * {@link loopKeepsItsCrossing}** — see the note in {@link trainRouteSearch}.
  */
 export class TrainRouteUnsolvable extends RailRouteUnsolvable {
   /** {@link TrainContext.cruiserRejections}, summed over every rung of the ladder. */
@@ -789,21 +794,23 @@ export function* trainRouteSearch(
   //
   // `railRouteSearch` never throws once any start pose closed a loop: if every
   // pose failed `satisfies` it hands back the first route regardless, with
-  // `report.satisfied` false, because a park with no railway is far worse than
-  // one whose railway missed. That is right at its level and wrong at this one
+  // `report.satisfied` false, because a ride with no track is far worse than
+  // one whose track missed. That is right at its level and wrong at this one
   // — here there is somewhere else to go, namely the next rung's shorter,
-  // slacker loop, and a rung's unsatisfied route was silently ending the walk
-  // before the ladder ever got there.
+  // slacker loop (seed 2, #427: its longest rung closed one loop out of 96
+  // poses, a loop that had eaten its own ramp room, and the shorter rungs were
+  // never tried).
   //
-  // Measured on seed 2 (#427): its longest rung closed exactly one loop out of
-  // 96 poses, that loop had curved back and eaten its own ramp room, and the
-  // search returned it as a fallback — so the shorter rungs, which are the
-  // whole reason the ladder exists for the pinched seeds, were never tried.
-  //
-  // So an unsatisfied route is kept aside and the ladder goes on. Only when
-  // every rung has been walked is it handed back, which leaves
-  // `railRouteSearch`'s own guarantee exactly as strong as it was: this can
-  // still never fail to produce a railway.
+  // **And when every rung is walked and none satisfied, the train refuses.**
+  // It used to hand the first unsatisfied loop on, so the park was built on a
+  // loop the train itself had already judged unable to keep its crossing — and
+  // the paths, the only thing that could find out, found out three builders
+  // later. Measured over the sixteen supported seeds (fix/sb-trainsearch): 32
+  // such loops were placed and **none** survived into a finished park; 21 of the
+  // 25 off-site-crossing refusals, and seed 6's first pinch refusal, followed
+  // one. The backtracking driver now exists to re-draw the train (and, failing
+  // that, what it stands on), so the refusal is made where the decision is,
+  // with the clause that failed named in the trace.
   let unsatisfied: SolvedRailRoute | null = null;
   for (let i = 0; i < TRAIN_LENGTH_FRACTIONS.length; i += 1) {
     const fraction = TRAIN_LENGTH_FRACTIONS[i] as number;
@@ -813,17 +820,22 @@ export function* trainRouteSearch(
     try {
       const route = yield* railRouteSearch(brief);
       if (route.report.satisfied) return route;
-      // The first, not the best: the ladder has no ordering over whole routes
-      // that could call one unsatisfied loop better than another, and inventing
-      // one here would be a second notion of quality beside `scoreOf`. Same
-      // reasoning `rail/generate.ts` gives for its own fallback.
       unsatisfied ??= route;
     } catch (error) {
       if (!(error instanceof RailRouteUnsolvable)) throw error;
       lastFailure = error;
     }
   }
-  if (unsatisfied) return unsatisfied;
+  if (unsatisfied) {
+    throw new TrainRouteUnsolvable(
+      new RailRouteUnsolvable(
+        `rail route kept no crossing: every loop the length ladder closed failed loopKeepsItsCrossing ` +
+          `(first: ${unsatisfied.length.toFixed(0)} m, ${unsatisfied.report.satisfyRejects} closed loop(s) refused on its rung)`,
+        unsatisfied.report,
+      ),
+      context.cruiserRejections(),
+    );
+  }
   if (!lastFailure) throw new Error('train route: the length ladder was empty');
   throw new TrainRouteUnsolvable(lastFailure, context.cruiserRejections());
 }
