@@ -164,3 +164,17 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - #705 (b20e8057): LGP_PARK_FILE hook in register hook; build:parks fails on a rejected file. Removed swallowing
   catch in park-attempt (c78f30e1).
 - PR body must state step-set change (check:park-boot removed; served-* and shard 8 came from #703 base).
+
+## 2 Oct — cross-platform divergence root-caused and removed at source
+- Model: Opus 5.5 (1M), chosen by the Overseer. Branch wip/sb-merge (PR #706 = feat/structural-backtrack).
+- Merged fix/sb-scatter (47fe3f80; Scenery.ts conflict kept refusalAt+ledger+identity). scatterDecoupling 5/5.
+- CAUSE (park-identity run 36947100024, same Node 26.10.0/V8 on both): sin cos tan atan atan2 asin acos exp log
+  pow ** sinh tanh expm1 differ linux-x64 vs darwin-arm64; sqrt fround hypot cbrt log2 same. V8's C++ libm,
+  FMA-contracted on arm64.
+- FIX f56edfb6: src/core/deterministicMath.ts = fdlibm 5.3 ported to JS (+ exact BigInt reduction for huge
+  trig args), installed on global Math by scripts/ts-extension-resolver-register.mjs, test/setupDeterministicMath.ts
+  (vitest setupFiles), first import of main.ts + art/samples/*. parkManifest asserts it. ** operator cannot be
+  patched: only exact x**2 in world code. Test test/deterministicMath.test.ts (<=1 ulp, sinh 2, tanh 3) proved red.
+- math-determinism.mts hashes native (control) + ports; park-identity.yml fails if ports differ.
+  Dispatched on wip/sb-merge: run 36950557531. Local Mac identities -> $SCRATCH/idmac/ to compare with CI.
+- CONSEQUENCE: every park changes by ulps -> acceptedRestarts must be re-recorded (planned anyway). Tell #705.
