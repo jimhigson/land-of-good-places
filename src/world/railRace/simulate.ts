@@ -334,8 +334,11 @@ registerPlanCache(() => {
  * a bar on either ring would hang inside another lane's track is refused
  * ({@link reachRefusedSlots}), and the physics starts from those.
  */
-export function planRaceBars(): BarPlanDecision {
-  return barPlanDecision(RAIL_RACE_PLAN.raceRing, [RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]);
+export function planRaceBars(rings: {
+  readonly raceRing: RailRaceRoute;
+  readonly walkPastRing: RailRaceRoute;
+}): BarPlanDecision {
+  return barPlanDecision(rings.raceRing, [rings.walkPastRing, rings.raceRing]);
 }
 
 /**
@@ -345,7 +348,7 @@ export function planRaceBars(): BarPlanDecision {
  * bars nowhere was refused, and re-chosen, before anything was built on it.
  */
 function raceBarPlanDecision(): BarPlanDecision {
-  return planPart('railRaceBars');
+  return planPart('railRaceBars').bars;
 }
 
 /**

@@ -3178,7 +3178,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
   const duckBarPlan = {
     decidedInPlan,
     planned: decidedInPlan
-      ? planHazards(raceRoute.length, 1, BARS_FROM_LEVEL, planPart('railRaceBars')).lap.bars.map(({ lane, at }) => ({
+      ? planHazards(raceRoute.length, 1, BARS_FROM_LEVEL, planPart('railRaceBars').bars).lap.bars.map(({ lane, at }) => ({
           lane,
           at,
         }))

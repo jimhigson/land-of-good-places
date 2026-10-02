@@ -88,8 +88,9 @@ import { distanceToRailCorridor, nearestRailDistanceAlong } from './train/plan';
 import { PLAYER_RADIUS } from '../core/constants';
 import type { PathSample } from './pathGraph';
 import { NAV_CELL } from './NavGrid';
-import { RAIL_RACE_PLAN } from './railRace/plan';
-import { DuckBarRefusal, type BarPlanDecision } from './railRace/hazards';
+import { planRailRaceAt, type RailRaceDecision } from './railRace/plan';
+import { ARCH_STATIONS } from './railRace/route';
+import { DuckBarRefusal } from './railRace/hazards';
 import { planRaceBars } from './railRace/simulate';
 
 export interface TrainDecision {
@@ -102,7 +103,7 @@ interface PlanState {
   cruiser?: PlannedCoaster;
   train?: TrainDecision;
   slide?: PlannedSlide;
-  railRaceBars?: BarPlanDecision;
+  railRaceBars?: RailRaceDecision;
   crossings?: SolvedCrossingSites;
   pathGraph?: PathGraph;
 }
@@ -479,47 +480,62 @@ function builders(): readonly FeatureBuilder[] {
   });
 
   /**
-   * **Where the Rail Race's duck bars may stand — refused here, where the ring
-   * is decided, never thrown from the world phase.**
+   * **Where the Rail Race's arch stands, so that its duck bars can — refused
+   * here, where the ring is decided, never thrown from the world phase.**
    *
    * The bar layout is a pure function of the two planned rings
    * (`railRace/simulate.ts`'s `planRaceBars`: the slots where a bar would hang
    * in another lane's track, and the slots where a flat-out rider would meet it
-   * at the speed floor), and the rings are plan data — the layout's boundary
-   * and booth, plus whatever pushed the finish arch along. So a ring that
-   * leaves 40 bars nowhere is known now. It used to be found by
-   * `new RailRace` in the world phase, as a `DuckBarRefusal` thrown out of the
-   * whole build, and the park's root loop paid a full park — plan, world and
-   * acceptance — to start again.
+   * at the speed floor). Which slots those are turns on where the arch puts the
+   * bar window against the lanes' undulation — the walk-past ring refuses
+   * 13-26 of 49 slots a lane, the window holds 42 for 40 bars, and a slide of
+   * the arch by a few metres moves the refusals across it (seed 5 restart 0:
+   * 75 of 121 stations fit, the arch's own station does not, 5.25 m along
+   * does). It used to be found by `new RailRace` in the world phase, as a
+   * `DuckBarRefusal` thrown out of the whole build, and the root loop paid a
+   * full park to start again.
    *
-   * Refused, it names exactly the decisions that placed the ring and its arch
-   * (`RailRaceRoute.archDecidedBy`: always the layout; the cruiser or the
-   * railway only when one of them pushed the arch off the booth's bearing), and
-   * the driver re-chooses the most recent of them. One attempt: the lane
-   * rotations are its own retries already, inside `barPlanDecision`.
+   * So the arch station is this builder's decision: attempt `n` is the `n`-th
+   * clear station (`route.ts`'s `archStation`; attempt 0 is the arch as it
+   * always stood, so a park whose bars fit is unchanged), refused when the bars
+   * do not fit there and retried at the next. When the ring has no clear
+   * station left, it refuses naming the decisions that placed the ring and its
+   * arch's candidates (`archDecidedBy`: the layout always — its boundary and
+   * booth; the cruiser or the railway only when their keep-offs pushed the
+   * arch), and the driver re-chooses the most recent of them.
    */
-  const railRaceBarsBuilder = coarse<BarPlanDecision>({
+  let archStationsOnOffer = ARCH_STATIONS;
+  const railRaceBarsBuilder = coarse<RailRaceDecision>({
     name: 'railRaceBars',
     deps: ['layout', 'cruiser', 'train'],
-    supply: 1,
-    *solve() {
+    supply: () => archStationsOnOffer,
+    *solve(attempt) {
+      const plan = planRailRaceAt(attempt);
+      if ('exhausted' in plan) {
+        archStationsOnOffer = attempt;
+        return refusal(
+          `rail race: no clear arch station leaves every duck bar a legal slot (${attempt} tried)`,
+          { consumed: plan.decidedBy },
+        );
+      }
       try {
-        return planRaceBars();
+        return { archChoice: attempt, plan, bars: planRaceBars(plan) };
       } catch (error) {
         if (!(error instanceof DuckBarRefusal)) throw error;
-        const ring = RAIL_RACE_PLAN.raceRing;
+        const ring = plan.raceRing;
         return refusal(
-          `rail race: no lane rotation leaves all its duck bars a legal slot on a ${ring.length.toFixed(1)} m ` +
-            `ring with the arch at ${ring.startDistance.toFixed(1)} m`,
+          `rail race: no lane rotation leaves every duck bar a legal slot on the ${ring.length.toFixed(1)} m ` +
+            `ring with the arch at ${ring.startDistance.toFixed(2)} m (station ${attempt})`,
           { consumed: ring.archDecidedBy },
         );
       }
     },
-    set(bars) {
-      state.railRaceBars = bars;
+    set(decision) {
+      state.railRaceBars = decision;
     },
     clear() {
       delete state.railRaceBars;
+      archStationsOnOffer = ARCH_STATIONS;
     },
   });
 

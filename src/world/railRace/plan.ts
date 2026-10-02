@@ -1,12 +1,13 @@
 import { lazyView } from '../../boot/lazyView';
-import { registerPlanCache } from '../../boot/planCaches';
 import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
 import { COASTER_PLANS } from '../coaster/plan';
 import { EXIT_INSIDE_EDGE, PARK_BOUNDARY } from '../boundary';
 import { placedEntry } from '../parkLayout';
 import { RAIL_CORRIDOR_CLEARANCE, clearOfPlots, distanceToRailCorridor } from '../train/plan';
-import { type KeepOff, RailRaceRoute } from './route';
+import { type KeepOff, RailRaceRoute, archStation } from './route';
+import type { BarPlanDecision } from './hazards';
+import { planPart } from '../parkPlan';
 // **Straight from the leaf, not through `route.ts`'s re-export.** The read
 // below is inside a function today, so the re-export would serve it — but a
 // re-export does not rescue a module-scope reader, and it is order-*dependent*:
@@ -168,17 +169,32 @@ function planExit(): { exitX: number; exitZ: number; railwayTookPart: boolean } 
   };
 }
 
-/** The plan. Import this; never re-solve — the same rule as `TRAIN_PLAN`. */
-let railRacePlanMemo: PlannedRailRace | null = null;
 /**
- * A view: the rings are derived from the decided layout and cruiser, so when
- * the park's driver re-decides either, this follows on the next read.
+ * **The Rail Race the park's plan decided** — the `railRaceBars` decision in
+ * `parkPlan.ts`, which chose the arch station (and so the rings) where every
+ * duck bar has a legal slot. Import this; never re-solve — the same rule as
+ * `TRAIN_PLAN`. A view: when the driver re-decides the layout, cruiser,
+ * railway or the arch, this follows on the next read.
  */
-export const RAIL_RACE_PLAN: PlannedRailRace = lazyView(() => (railRacePlanMemo ??= planRailRace()));
-registerPlanCache(() => {
-  railRacePlanMemo = null;
-});
-function planRailRace(): PlannedRailRace {
+export const RAIL_RACE_PLAN: PlannedRailRace = lazyView(() => planPart('railRaceBars').plan);
+
+/** The decision `parkPlan.ts`'s `railRaceBars` builder makes and holds. */
+export interface RailRaceDecision {
+  /** Which clear arch station — `route.ts`'s `archStation`; 0 is the arch as it always stood. */
+  readonly archChoice: number;
+  readonly plan: PlannedRailRace;
+  /** Where the duck bars may go on that ring — `simulate.ts`'s `barPlanDecision`. */
+  readonly bars: BarPlanDecision;
+}
+
+/**
+ * The Rail Race with its arch at clear station `archChoice` (`route.ts`'s
+ * `archStation`), or — when the ring has fewer clear stations than that — the
+ * decisions that put the arch's candidates where they are, for a refusal.
+ */
+export function planRailRaceAt(
+  archChoice: number,
+): PlannedRailRace | { readonly exhausted: true; readonly decidedBy: readonly string[] } {
   // **The exit is solved BEFORE the rings, and that ordering is load-bearing.**
   // `slideArchClear` slides the finish arch off anything its feet must not come
   // down on, and the ride's own exit is one of those things — the paving is
@@ -206,8 +222,10 @@ function planRailRace(): PlannedRailRace {
     keepArchOff.push({ x: point.x, z: point.z, radius: 5, owner: 'cruiser' });
   }
 
-  const walkPastRing = new RailRaceRoute(STATION_STALL_ID, 1, keepArchOff);
-  const raceRing = new RailRaceRoute(STATION_STALL_ID, RIDE_SCALE, keepArchOff);
+  const arch = archStation(STATION_STALL_ID, keepArchOff, archChoice);
+  if (arch.at === null) return { exhausted: true, decidedBy: arch.decidedBy };
+  const walkPastRing = new RailRaceRoute(STATION_STALL_ID, 1, keepArchOff, arch);
+  const raceRing = new RailRaceRoute(STATION_STALL_ID, RIDE_SCALE, keepArchOff, arch);
   return {
     name: 'railRace',
     walkPastRing,
