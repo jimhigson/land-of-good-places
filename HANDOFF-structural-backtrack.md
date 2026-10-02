@@ -198,3 +198,11 @@ coping chamfer (#698 fix/procgen-last has the fix).
   * check:deep-links 120 s timeouts: seed 5 cruiser 123 s on CI (11.46M pieces). Helper a6ac on
     fix/sb-trainsearch2 (050c334a): seed 5 plan 94.8 -> 26.9 s local; park unchanged (seed 1 changes).
 - Waiting: fix/sb-trainsearch2 (table + accept --fresh), fix/sb-trees, fix/paths-to-doors. Then re-record once.
+- Merged fix/sb-trees (566d3e1d; trees 47-86/seed, visible -> Jim question) and fix/paths-to-doors (9656825e;
+  drawnPavingReachesEveryDoor, pathsMeetBridgesOnlyAtTheirEnds; LAYOUT_VERSION 5).
+- 26bbb045: PROD BUILD did not boot (bundler evaluated parkManifest chunk before main's install) ->
+  vite strictExecutionOrder. Verified vite preview + headless chromium seed 5: boots, Math is port.
+- New helper ae706c0d (fix/sb-duckbar): DuckBarRefusal thrown in RailRace ctor (world phase) is the commonest
+  rejected attempt -> refuse at decision.
+- In flight: fix/sb-trainsearch2 (a6ac; cruiser seed 5 94.8->27 s), fix/paving-clear (ab03), fix/sb-duckbar.
+  Re-record + verify after all three.
