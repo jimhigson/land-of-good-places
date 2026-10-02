@@ -160,6 +160,9 @@ const EXPECTED_FEATURES = [
   'train',
   'slide',
   'crossings',
+  // `railRaceBars` decides after `train` but commits its ground (the arch's
+  // feet) here: the registry records commit order, and crossings commit first.
+  'railRaceBars',
   'pathGraph',
   ROAD_FEATURE,
   // world/worldPhase.ts's builders, in order.
