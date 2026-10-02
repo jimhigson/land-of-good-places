@@ -54,7 +54,12 @@ import { RailRouteUnsolvable, type SolvedRailRoute } from './rail/generate';
 import { TrainRoute, trainRouteSearch } from './train/route';
 import { planStations, type PlannedStation } from './train/plan';
 import { slideSearch, type PlannedSlide } from './slide/solve';
-import { crossingSitesSearch, refuseBridgeSiteForPaths, type SolvedCrossingSites } from './train/crossingPlanSolve';
+import {
+  crossingSitesSearch,
+  refuseBridgeSiteForPaths,
+  refusedBridgeSiteCount,
+  type SolvedCrossingSites,
+} from './train/crossingPlanSolve';
 import {
   bridgesThatWallPathsIn,
   DISABLE_LEGIBILITY_SCREEN,
@@ -175,7 +180,8 @@ export function parkPlanClaims(): GroundClaims {
 function coarse<T>(spec: {
   readonly name: string;
   readonly deps: readonly string[];
-  readonly supply?: number;
+  /** Attempts on offer; a function when what is on offer depends on what has been refused (the crossings). */
+  readonly supply?: number | (() => number);
   solve(attempt: number): Generator<number, T | Refusal, void>;
   set(value: T): void;
   clear(): void;
@@ -200,7 +206,7 @@ function coarse<T>(spec: {
       placed = false;
       spec.clear();
     },
-    supply: () => spec.supply ?? COARSE_ATTEMPT_CAP,
+    supply: () => (typeof spec.supply === 'function' ? spec.supply() : (spec.supply ?? COARSE_ATTEMPT_CAP)),
     reset() {
       placed = false;
       spec.clear();
@@ -455,8 +461,15 @@ function builders(): readonly FeatureBuilder[] {
     name: 'crossings',
     deps: ['train'],
     // One draw per bridge site the paths may refuse (`refuseBridgeSiteForPaths`),
-    // beyond the first.
-    supply: 4,
+    // beyond the first, up to four — and **only** per site actually refused.
+    // Attempt n plans without the first n refused sites and is otherwise the
+    // same pure function of the loop, so an attempt with no new ban behind it
+    // is attempt n-1 again, byte for byte. It was offered anyway: seed 6
+    // restart 5 re-drew identical sites three times per off-site-crossing
+    // refusal (seed 1 likewise, seed 3 fifteen times), re-routing every path
+    // to be refused the same way, before the unwind reached the decision that
+    // could change something.
+    supply: () => Math.min(4, 1 + refusedBridgeSiteCount()),
     *solve(attempt) {
       try {
         return yield* crossingSitesSearch(attempt);

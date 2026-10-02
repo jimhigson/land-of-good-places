@@ -564,6 +564,16 @@ export function refuseBridgeSiteForPaths(railDistance: number): void {
   sitesThatWalledPathsIn.push(railDistance);
 }
 
+/**
+ * How many sites the paths have refused since the crossing plan's last fresh
+ * draw — so how many distinct re-draws {@link crossingSitesSearch} can offer
+ * beyond its first (attempt n bans the first n; with no ban behind it, an
+ * attempt is the one before it again).
+ */
+export function refusedBridgeSiteCount(): number {
+  return sitesThatWalledPathsIn.length;
+}
+
 /** The same search, driven straight through — Node, the harness and any
  * boot that did not pre-warm. */
 export function solveCrossingSites(): SolvedCrossingSites {
