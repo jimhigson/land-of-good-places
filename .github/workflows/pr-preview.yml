@@ -86,6 +86,13 @@ jobs:
         # ~37 min. Being made cheaper in the generator (fix/sb-trainsearch).
         # Plus accepting each file as shipped (every measure on the hydrated
         # park, ~91 s a seed here, ~6 min over four lanes, ~12 at CI's 2x).
+        # TEMPORARY — the 29 Aug outage was a job pushed past its cap. These
+        # come back down when fix/sb-trainsearch lands (seed 6's train search,
+        # 507 s, is the long pole). Until then they hold only because a cache
+        # hit skips this step: the key below is busted by any change under
+        # src/, procgen/, test/procgen/, scripts/, package.json or the
+        # lockfile, and the cache is branch-scoped, so the first deploy on
+        # main after such a merge re-solves.
         timeout-minutes: 65
         run: pnpm run build:parks
 
