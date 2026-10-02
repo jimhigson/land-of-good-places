@@ -82,3 +82,14 @@ Design: `docs/design/PREBUILT-PARKS.md` (also PR #704, draft). Base: origin/feat
   if it moves parks they re-record restarts and tell me -> rebuild.
 - Rebased onto wip/sb-merge c7dcaf03 (park-identity.mts imports re-pointed to procgen/).
 - Next: gates (check, swept-bus, coplanar, test:procgen) running; then PR body, CI, preview, report.
+
+## 2 Oct: restarts are automatic (Jim), CI restructured
+- build:parks runs acceptPark (lead's one loop) per seed with fileAttempt (solve at r -> hydrated acceptance).
+  acceptPark has `lanes` (speculative, consumed in order, aborts past the answer). LGP_RESTART_LANES.
+- Manifest has `restarts`; builtRestartOf (scripts/lib/builtParks.mts) read first by lead's acceptedRestartSync/Of.
+- park-source-hash.mjs = import closure of solver+measures+hook (422 files; UI/Game/main outside) + toolchain.
+  Proved: Hud.ts edit keeps hash; procgen/paths.ts and invariants.ts edits change it; computed import() throws.
+- CI: .github/workflows/parks.yml (16-seed matrix, per-seed cache, merge-parks.mts, cache prebuilt-parks-<hash>);
+  .github/actions/restore-parks (wait+restore). All park-building workflows have a `Parks ready` job + restore.
+  Preview/deploy caps back to 10/30. Known: branch-scoped cache -> main cold after closure-touching merge.
+- Proof in flight: seeds 2,13 sequential vs RESTART_LANES=3 (.parks/seq vs .parks/spec) must match.
