@@ -47,7 +47,6 @@ import { stallBuilder, type BoothRelocator } from './stallsFeature';
 import { RailRace } from './railRace/RailRace';
 import { TrestleRefusal } from './railRace/track';
 import { RAIL_RACE_FEATURE } from './railRace/feature';
-import { ROAD_FEATURE } from './entrance/roadCorridor';
 
 export interface WorldPhase {
   readonly scenery: SceneryDecisions;
@@ -139,9 +138,14 @@ function railRaceBuilder(
         ride = new RailRace(collision, claims);
       } catch (error) {
         if (!(error instanceof TrestleRefusal)) throw error;
-        const blockers = error.refusedBy.filter((name) => name !== ROAD_FEATURE);
-        if (blockers.length === 0) throw error;
-        return refusal(error.message, { blockers, claims: error.refusedClaims });
+        // A refusal, whoever refused — never a throw. Movable blockers (a
+        // tree, a bush) are asked aside by the driver. One refused by the road
+        // or the lean bound alone names nothing in this phase's ledger, so the
+        // driver unwinds the phase and, if nothing answers it, the build fails
+        // as a solver that gave up — not as a crash. The plan's road builder
+        // (`parkPlan.ts`, `barSlotWithNoSupportRoom`) refuses those slots before
+        // the world phase exists, so this is the backstop, not the mechanism.
+        return refusal(error.message, { blockers: error.refusedBy, claims: error.refusedClaims });
       }
       built = true;
       keep(ride);

@@ -88,10 +88,11 @@ import { distanceToRailCorridor, nearestRailDistanceAlong } from './train/plan';
 import { PLAYER_RADIUS } from '../core/constants';
 import type { PathSample } from './pathGraph';
 import { NAV_CELL } from './NavGrid';
-import { planRailRaceAt, type RailRaceDecision } from './railRace/plan';
+import { RAIL_RACE_PLAN, planRailRaceAt, type RailRaceDecision } from './railRace/plan';
 import { ARCH_STATIONS } from './railRace/route';
 import { DuckBarRefusal } from './railRace/hazards';
-import { planRaceBars } from './railRace/simulate';
+import { HAZARD_LAYOUT, planRaceBars } from './railRace/simulate';
+import { barSlotWithNoSupportRoom } from './railRace/track';
 
 export interface TrainDecision {
   readonly route: TrainRoute;
@@ -566,12 +567,10 @@ function builders(): readonly FeatureBuilder[] {
     supply: () => archStationsOnOffer,
     *solve(attempt) {
       const plan = planRailRaceAt(attempt);
-      if ('exhausted' in plan) {
-        archStationsOnOffer = attempt;
-        return refusal(
-          `rail race: no clear arch station leaves every duck bar a legal slot (${attempt} tried)`,
-          { consumed: plan.decidedBy },
-        );
+      if ('unplaceable' in plan) {
+        // Nothing a later station can answer: unwind now, to what decided it.
+        if (!plan.anotherStationMayHelp) archStationsOnOffer = attempt + 1;
+        return refusal(plan.unplaceable, { consumed: plan.decidedBy });
       }
       try {
         return { archChoice: attempt, plan, bars: planRaceBars(plan) };
@@ -777,9 +776,31 @@ function builders(): readonly FeatureBuilder[] {
 
   const roadBuilder = coarse<true>({
     name: ROAD_FEATURE,
-    deps: ['layout', 'pathGraph'],
+    deps: ['layout', 'railRaceBars', 'pathGraph'],
     supply: 1,
     *solve() {
+      // **The road leaves every Rail Race duck bar its support.** Nothing of a
+      // walk-past trestle may stand over the carriageway (`track.ts`'s road
+      // rule), and no trunk may lean past its bound; a bar's slot with no
+      // candidate left is a support the world phase could only fail to place,
+      // refused by the road or the lean alone — nothing movable to ask aside.
+      // It used to throw there. The bar slots are `railRaceBars`' decision, so
+      // that is the decision re-chosen. Asked here because the road is the
+      // last thing decided that the answer depends on.
+      const road = entranceRoadClaims().filter((claim) => claim.kind === 'corridor');
+      for (const [name, ring, keepOff] of [
+        ['walk-past', RAIL_RACE_PLAN.walkPastRing, road],
+        ['race', RAIL_RACE_PLAN.raceRing, []],
+      ] as const) {
+        const slot = barSlotWithNoSupportRoom(ring, HAZARD_LAYOUT, keepOff);
+        if (slot !== null) {
+          return refusal(
+            `rail race: the ${name} ring's duck bar at slot ${slot} has no support that is a trunk` +
+              (keepOff.length > 0 ? ' and keeps off the entrance road' : ''),
+            { consumed: ['railRaceBars'] },
+          );
+        }
+      }
       return true;
     },
     set() {},

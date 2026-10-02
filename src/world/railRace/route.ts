@@ -396,7 +396,12 @@ export class RailRaceRoute {
     this.clearance = highest + BASE_HEIGHT;
 
     const chosen = arch ?? archStation(stationStallId, keepArchOff, 0);
-    if (chosen.at === null) throw new Error('railRace/route.ts: the first arch station always exists');
+    if (chosen.at === null) {
+      throw new RangeError(
+        'railRace/route.ts: a ring was built with no arch station — `railRaceBars` (parkPlan.ts) refuses ' +
+          'a park with none before any ring is made',
+      );
+    }
     this.startDistance = chosen.at;
     this.archDecidedBy = chosen.decidedBy;
   }
@@ -829,11 +834,13 @@ function slideArchClear(
       if (clears(at)) return { at, pushedBy };
     }
   }
-  // Fewer clear stations than `choice + 1`. For the first choice, nothing on
-  // the whole ring works — keep the booth's own bearing and let the procgen
-  // invariant say so out loud rather than putting the finish line somewhere
-  // arbitrary. For a later one, there is no next station to offer.
-  return { at: choice === 0 ? atBooth : null, pushedBy };
+  // Fewer clear stations than `choice + 1` — for the first choice, nothing on
+  // the whole ring works. This used to keep the booth's own bearing anyway, an
+  // arch standing on something its feet must not, and leave a procgen
+  // invariant to say so after the whole park was built. No station is an
+  // answer the plan can act on: `parkPlan.ts`'s `railRaceBars` refuses, naming
+  // everything that refused a station here.
+  return { at: null, pushedBy };
 }
 
 /** The arch slides in steps this long... */
