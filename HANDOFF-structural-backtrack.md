@@ -209,3 +209,11 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - COORDINATOR Q (answered here, no message route): `sb-duckbar-base` = helper ae706c0d's BASELINE worktree measuring
   how often DuckBarRefusal (thrown in RailRace ctor) ends an attempt, before making it refuse at the decision.
   Brief carries Jim's ruling: bars stay 2.30 m, no width change; no-bar-end-in-another-lane invariant kept.
+- JIM RULING (via coordinator): re-record must be automatic. e6b7708d: acceptedRestarts.ts, check:accepted-restarts,
+  accept:parks --write REMOVED. restartFor: override -> __LGP_RESOLVE_RESTART__ (acceptedRestartSync: cached verdict
+  at acceptanceSourceHash or runs accept-parks for that seed) -> 0. Installed by --import hook + vitest setup.
+  Verified: seed 12 cold 158 s, cached 0.2 s; vitest seed-12 112/112 via loop.
+- Split with #705 (ade10292): build:parks calls acceptPark per seed (fileAttempt), writes .parks/manifest.json
+  restarts; builtRestartOf(root, seed) goes first in my resolvers (their branch); CI `parks` job feeds
+  checks.yml + procgen-invariants.yml. Browser restart comes from the file. => #706 and #705 must land together;
+  #706's own CI cold path re-searches per job (slow, will time out) until #705's parks job exists.
