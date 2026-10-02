@@ -24,3 +24,10 @@ Probe: scripts/slide-cost-probe.mts (LGP_SEED, LGP_PARK_RESTART, LGP_SLIDE_LOG=1
   search 7.7 M (seed 10), next 4.5 M, 4.1 M. 11r4's 350 M is the outlier.
 - Budget: SLIDE_PIECE_BUDGET = 16 M pieces per slide search (solve.ts), refusal budgetSpent, same consumed blockers.
   Measuring 11r4 with it: $SCRATCH/sc/budget-11r4.log. Open question: slide supply after budget refusal (salts).
+- 11r4 with budget, salts kept: 5 salted retries each spent all 16 M at the same decision; cruiser re-draw then placed
+  in 18,978 pieces. => e09ba860: budget refusal sets slide supply to attempt+1 (no re-salt), reset in clear().
+- 11r4 AFTER (e09ba860): slide 36.9 s / 18.0 M pieces (was 655 s / 352 M); plan wall 307 s cpu 273 s (was 815/764).
+  Trace differs only in layout 3's branch (refuse slide -> cruiser 1 -> pathGraph refuses layout 3 at another spot);
+  from layout 4 on identical; final ledger identical. Trace-hash digest will change for 11r4.
+- Running: $SCRATCH/sc/chain.sh (memo sweep 13-15, base 12r0 in sb-slidecost-base @215fa58c, after-sweep 0..15 r0).
+  Worktrees to remove at end: sb-slidecost-frozen, sb-slidecost-base.
