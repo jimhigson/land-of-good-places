@@ -237,3 +237,7 @@ coping chamfer (#698 fix/procgen-last has the fix).
   (paving agent ab031046: paths ~1 m under building doors, Jim's preview feedback).
 - Merged fix/door-overlap (Jim: paving ~1 m under building doors; DOOR_PAVING_OVERLAP). Booth-hollow control
   still red after the merge (seed 12: 0.88 m2). Parks change -> #705 must rebase.
+- Seed 11 r4 plan: 830 s wall, slide 677 s / 352M pieces -> helper on fix/sb-slidecost (deterministic, work-bounded).
+  #705 keeps its 30-min kill as a loud failed seed job (never a rejected restart) until that lands.
+- #705 rule for new acceptance measures needing the search machinery: add the script to builtParks.mts
+  SEARCH_SCRIPTS + park-attempt SEARCHES_THE_WORLD_PHASE, or record what it needs in the park file.
