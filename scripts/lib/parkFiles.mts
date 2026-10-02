@@ -45,18 +45,13 @@
  * contents at all, and every "equal" above means nothing.
  */
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 
 import type { ParkFile } from '../../src/world/prebuilt/parkFile.ts';
-import {
-  PARK_FILE_FORMAT,
-  PREBUILT_PARKS_MANIFEST,
-  PREBUILT_PARKS_OUT,
-  type PrebuiltParksManifest,
-} from '../../src/world/prebuilt/parkFileName.ts';
+import { PARK_FILE_FORMAT, type PrebuiltParksManifest } from '../../src/world/prebuilt/parkFileName.ts';
 import type { AttemptVerdict } from '../park-attempt.mts';
 import { acceptanceMetadata, acceptPark, attemptInFreshProcess, type AcceptanceMetadata } from './acceptedPark.mts';
 import { parkSourceHash } from './park-source-hash.mjs';
@@ -105,7 +100,13 @@ export interface SeedOutcome {
   readonly problems: readonly string[];
 }
 
-async function probe(mode: 'solve' | 'hydrate' | 'perturb', seed: number, file: string, restart?: number): Promise<ProbeResult> {
+async function probe(
+  mode: 'solve' | 'hydrate' | 'perturb',
+  seed: number,
+  file: string,
+  restart?: number,
+  signal?: AbortSignal,
+): Promise<ProbeResult> {
   const args = [
     '--no-warnings',
     '--import',
@@ -130,6 +131,7 @@ async function probe(mode: 'solve' | 'hydrate' | 'perturb', seed: number, file: 
       // the CI job's own cap cancels it.
       timeout: PROBE_TIMEOUT_MS,
       killSignal: 'SIGKILL',
+      ...(signal ? { signal } : {}),
     }));
   } catch (error) {
     const failed = error as { stdout?: string; stderr?: string; message?: string };
@@ -219,12 +221,12 @@ function buildFailed(seed: number, restart: number, message: string, wallMs: num
  * result for the proof.
  */
 function fileAttempt(scratch: string, solves: Map<string, ProbeResult>) {
-  return async (seed: number, restart: number): Promise<AttemptVerdict> => {
+  return async (seed: number, restart: number, signal?: AbortSignal): Promise<AttemptVerdict> => {
     const began = performance.now();
     const file = join(scratch, `${seed}-r${restart}.json`);
     let solved: ProbeResult;
     try {
-      solved = await probe('solve', seed, file, restart);
+      solved = await probe('solve', seed, file, restart, signal);
     } catch (error) {
       if (!(error instanceof ProbeFailed) || error.hung) throw error;
       const last = error.message.split('\n').filter(Boolean).at(-1) ?? error.message;
@@ -234,7 +236,7 @@ function fileAttempt(scratch: string, solves: Map<string, ProbeResult>) {
       throw new Error(`build:parks: asked to solve seed ${seed} restart ${restart}, the probe built seed ${solved.seed} restart ${solved.restart}`);
     }
     solves.set(file, solved);
-    const verdict = await attemptInFreshProcess(seed, restart, file);
+    const verdict = await attemptInFreshProcess(seed, restart, file, signal);
     if (verdict.parkFile === null) {
       throw new Error(`build:parks: the acceptance attempt for seed ${seed} restart ${restart} did not hydrate ${file}`);
     }
@@ -256,6 +258,7 @@ export async function buildAcceptedParks(
   outDir: string,
   lanes: number,
   log: (line: string) => void,
+  restartLanes = 1,
 ): Promise<{ outcomes: SeedOutcome[]; controlProblem: string | null }> {
   const scratch = join(outDir, '.attempts');
   rmSync(scratch, { recursive: true, force: true });
@@ -271,6 +274,7 @@ export async function buildAcceptedParks(
       for (let seed = queue.pop(); seed !== undefined; seed = queue.pop()) {
         const accepted = await acceptPark(seed, {
           attempt,
+          lanes: restartLanes,
           onAttempt: (record) =>
             log(
               `    seed ${String(seed).padStart(2)} restart ${record.restart}: ` +
@@ -344,24 +348,4 @@ export function parksManifest(sourceHash: string, outcomes: readonly SeedOutcome
   };
 }
 
-/**
- * **Seed `seed`'s accepted restart, as `build:parks` found it for this exact
- * source** — or `null` if it has not: no manifest under `.parks/`, a manifest
- * from another source (its `sourceHash` is not this tree's), or one that does
- * not cover the seed. The one way Node tooling should learn a seed's restart
- * from a build rather than search for it; a `null` means run
- * `LGP_SEEDS=<seed> pnpm run build:parks` (or search, as `acceptParkCached` does).
- */
-export function builtRestartOf(root: string, seed: number): number | null {
-  const path = join(root, PREBUILT_PARKS_OUT, PREBUILT_PARKS_MANIFEST);
-  if (!existsSync(path)) return null;
-  let manifest: PrebuiltParksManifest;
-  try {
-    manifest = JSON.parse(readFileSync(path, 'utf8')) as PrebuiltParksManifest;
-  } catch {
-    return null;
-  }
-  if (manifest.format !== PARK_FILE_FORMAT || manifest.sourceHash !== parkSourceHash(root)) return null;
-  const restart = manifest.restarts?.[String(seed)];
-  return typeof restart === 'number' ? restart : null;
-}
+export { builtRestartOf } from './builtParks.mts';

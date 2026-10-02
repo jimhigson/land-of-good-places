@@ -6,7 +6,9 @@
  * ```
  * pnpm run build:parks                 # SUPPORTED_PARK_SEEDS — the parks that ship
  * LGP_SEEDS=0,1,2 pnpm run build:parks # some seeds (still 0..15 only)
- * LGP_LANES=8 …                        # parallelism (default: min(4, cores))
+ * LGP_LANES=8 …                        # seeds at a time (default: min(4, cores))
+ * LGP_RESTART_LANES=4 …                # restarts of one seed at a time, speculatively (default 1;
+ *                                      #   the answer is the same — acceptPark consumes them in order)
  * LGP_PARKS_OUT=dir …                  # write somewhere other than .parks/ (the dev server)
  * ```
  *
@@ -57,7 +59,7 @@ const lanes = Math.max(1, Math.min(Number(process.env['LGP_LANES'] ?? 4), cpus()
 // Any other switch changes what a park build does (`LGP_WARP`, `LGP_LAYOUT_RUNG`,
 // `LGP_PARK_RESTART`, …), and a file built under one is not the park its
 // seed is: refused rather than shipped.
-const HARMLESS = new Set(['LGP_SEEDS', 'LGP_LANES', 'LGP_PARK_TIMEOUT_MS', 'LGP_REQUIRE_PARKS', 'LGP_PARKS_OUT']);
+const HARMLESS = new Set(['LGP_SEEDS', 'LGP_LANES', 'LGP_RESTART_LANES', 'LGP_PARK_TIMEOUT_MS', 'LGP_REQUIRE_PARKS', 'LGP_PARKS_OUT']);
 const switches = Object.keys(process.env).filter((key) => key.startsWith('LGP_') && !HARMLESS.has(key));
 if (switches.length > 0) {
   console.error(`build:parks: refusing to build parks under ${switches.join(', ')} — they would not be the parks the seeds are`);
@@ -72,19 +74,23 @@ mkdirSync(outDir, { recursive: true });
 // (Files only: `.parks/dev/` is the dev server's own cache, keyed by source.)
 for (const name of readdirSync(outDir)) if (name.endsWith('.json')) rmSync(join(outDir, name));
 
-console.log(`build:parks: ${seeds.length} seed(s) [${seeds.join(', ')}], ${lanes} at a time, source ${sourceHash.slice(0, 12)}`);
-const { outcomes, controlProblem } = await buildAcceptedParks(seeds, outDir, lanes, (line) => console.log(line));
+console.log(
+  `build:parks: ${seeds.length} seed(s) [${seeds.join(', ')}], ${lanes} at a time, ` +
+    `${process.env['LGP_RESTART_LANES'] ?? 1} restart(s) of each at a time, source ${sourceHash.slice(0, 12)}`,
+);
+const restartLanes = Math.max(1, Number(process.env['LGP_RESTART_LANES'] ?? 1));
+const { outcomes, controlProblem } = await buildAcceptedParks(seeds, outDir, lanes, (line) => console.log(line), restartLanes);
 
 const kb = (bytes: number): string => `${(bytes / 1024).toFixed(1)} KB`;
-console.log('\n| seed | restart | attempts | raw | gzip -9 | brotli 11 | plan searched | plan hydrated | digest |');
-console.log('|---:|---:|---:|---:|---:|---:|---:|---:|---|');
+console.log('\n| seed | restart | attempts | seconds | raw | gzip -9 | brotli 11 | plan searched | plan hydrated | digest |');
+console.log('|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|');
 for (const o of outcomes) {
   console.log(
-    `| ${o.seed} | ${o.restart} | ${o.acceptance.attempts} | ${kb(o.raw)} | ${kb(o.gzip)} | ${kb(o.brotli)} | ${o.solved.planCpuMs} ms | ${o.hydrated.planCpuMs} ms | ${o.solved.park} |`,
+    `| ${o.seed} | ${o.restart} | ${o.acceptance.attempts} | ${(o.acceptance.log.reduce((t, a) => t + a.wallMs, 0) / 1000).toFixed(0)} | ${kb(o.raw)} | ${kb(o.gzip)} | ${kb(o.brotli)} | ${o.solved.planCpuMs} ms | ${o.hydrated.planCpuMs} ms | ${o.solved.park} |`,
   );
 }
 const sum = (pick: (o: (typeof outcomes)[number]) => number): number => outcomes.reduce((t, o) => t + pick(o), 0);
-console.log(`| **total** | | ${sum((o) => o.acceptance.attempts)} | ${kb(sum((o) => o.raw))} | ${kb(sum((o) => o.gzip))} | ${kb(sum((o) => o.brotli))} | | | |`);
+console.log(`| **total** | | ${sum((o) => o.acceptance.attempts)} | | ${kb(sum((o) => o.raw))} | ${kb(sum((o) => o.gzip))} | ${kb(sum((o) => o.brotli))} | | | |`);
 
 const failed = outcomes.filter((o) => o.problems.length > 0);
 for (const o of failed) for (const problem of o.problems) console.error(`build:parks: seed ${o.seed}: ${problem}`);
