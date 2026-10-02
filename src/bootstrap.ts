@@ -1,3 +1,5 @@
+// First, before anything evaluates a Math function: see core/deterministicMath.ts.
+import './core/installDeterministicMath';
 import { setupUpdateGate } from './updateGateSetup';
 import { loadPrebuiltPark } from './boot/prebuiltPark';
 import { showBootFailure } from './ui/bootFailure';

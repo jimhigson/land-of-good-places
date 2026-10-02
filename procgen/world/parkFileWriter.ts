@@ -1,3 +1,4 @@
+import { bushScatterLedger } from './sceneryBuilders';
 import { Vector3 } from 'three';
 import { type SolvedRailRoute } from '../../src/world/rail/generate';
 import { PARK_FILE_FORMAT } from '../../src/world/prebuilt/parkFileName';
@@ -118,6 +119,7 @@ export function encodeParkFile(seed: number, restart: number, plan: DecidedPlan,
     seed,
     restart,
     acceptance: null,
+    measures: { bushGround: bushScatterLedger.ground === null ? null : plain(bushScatterLedger.ground, 'measures.bushGround') },
     features: {
       layout: { seed: layout.seed, fountain: plain(layout.fountain, 'layout.fountain'), entries },
       cruiser: {

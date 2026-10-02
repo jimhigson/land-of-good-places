@@ -14,10 +14,14 @@
  * `vite build` ships files and bundle together, so in a real build the two
  * always agree.
  *
+ * 4: each tree and bush carries its scatter `identity` (what a relocation is
+ * keyed by), and `measures.bushGround` carries the solve's measurement of the
+ * bush scatter's legal ground, for the acceptance measures of a hydrated park.
+ *
  * 3: the file names its seed's accepted restart and carries the acceptance
  * loop's log (`restart`, `acceptance`).
  */
-export const PARK_FILE_FORMAT = 3;
+export const PARK_FILE_FORMAT = 4;
 
 /**
  * **The seeds this game has: 0 to 15.** Jim, 24 September 2026: *"we only

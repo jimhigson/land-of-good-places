@@ -94,6 +94,15 @@ export interface ParkFile {
    * by the game.
    */
   readonly acceptance: Json;
+  /**
+   * Measurements the solve took of this park that a hydrated park cannot take
+   * again, for the acceptance measures that need them — never read by the
+   * game. `bushGround`: the bush scatter's legal ground, asked of its own gate
+   * against the world as it stood when the scatter finished
+   * (`bushScatterLedger`, procgen/world/sceneryBuilders.ts), which only
+   * exists mid-solve. `parkFacts.ts` reads it from here for a hydrated park.
+   */
+  readonly measures: { readonly bushGround: Json };
   readonly features: {
     readonly layout: LayoutRecord;
     readonly cruiser: CruiserRecord;

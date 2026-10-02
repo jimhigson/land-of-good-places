@@ -64,6 +64,13 @@ if (!solving) {
   offerParkFile(file);
 }
 
+// A solve measures the bush scatter's legal ground as it finishes, so the
+// file can carry it (`measures.bushGround`) to a hydrated park's acceptance.
+if (solving) {
+  const { bushScatterLedger } = await import('../procgen/world/sceneryBuilders.ts');
+  bushScatterLedger.measureGround = true;
+}
+
 // Dynamic, so the offer above lands first whatever the import graph does.
 // `parkFile.ts` first: it is the order this probe has always loaded the park
 // in, and the park's modules still hold module-scope reads inside import
