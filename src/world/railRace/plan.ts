@@ -114,7 +114,14 @@ export interface PlannedRailRace {
  * on the railway. The clearance is the railway's own published figure rather
  * than a number picked to suit.
  */
-function planExit(): { exitX: number; exitZ: number; railwayTookPart: boolean } | { refused: string; railwayTookPart: boolean } {
+export function planExit(
+  /**
+   * Somewhere else the exit may not go, on top of the edge, the railway and
+   * the plots — for a test to hold the no-clear-spot answer to account. The
+   * park passes nothing.
+   */
+  alsoRefuse: (x: number, z: number) => boolean = () => false,
+): { exitX: number; exitZ: number; railwayTookPart: boolean } | { refused: string; railwayTookPart: boolean } {
   const stall = placedEntry(STATION_STALL_ID);
   // Whether the railway refused a spot tried before the one taken — so a
   // refusal of anything placed against this exit knows whether re-choosing the
@@ -152,6 +159,7 @@ function planExit(): { exitX: number; exitZ: number; railwayTookPart: boolean } 
       // one `routeAround` cannot dodge on the way in — the spur leg then
       // grazes the booth's counter and the exit's waypoints strand behind it.
       // And off the railway with its fence, like every exit.
+      if (alsoRefuse(x, z)) continue;
       if (clearOfPlots(x, z, 2.6) && distanceToRailCorridor(x, z) >= RAIL_CORRIDOR_CLEARANCE) {
         return { exitX: x, exitZ: z, railwayTookPart };
       }

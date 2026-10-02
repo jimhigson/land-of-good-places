@@ -122,10 +122,12 @@ function fountainBuilder(claims: GroundClaims): FeatureBuilder {
  * nothing movable (the road, the lean bound) is the build's own failure, as
  * it always was.
  */
-function railRaceBuilder(
+export function railRaceBuilder(
   collision: CollisionWorld,
   claims: GroundClaims,
   keep: (ride: RailRace) => void,
+  /** How the ride is built — the park's own constructor; a test passes one that refuses. */
+  build: (collision: CollisionWorld, claims: GroundClaims) => RailRace = (c, g) => new RailRace(c, g),
 ): FeatureBuilder {
   let built = false;
   return {
@@ -135,7 +137,7 @@ function railRaceBuilder(
       if (built) return 'done';
       let ride: RailRace;
       try {
-        ride = new RailRace(collision, claims);
+        ride = build(collision, claims);
       } catch (error) {
         if (!(error instanceof TrestleRefusal)) throw error;
         // A refusal, whoever refused — never a throw. Movable blockers (a
