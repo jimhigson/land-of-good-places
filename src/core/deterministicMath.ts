@@ -7,8 +7,8 @@
  * `acos`, `exp`, `log`, `pow`, `**`, `sinh`, `tanh` and `expm1` returned
  * different bits for the same input on the two platforms. That is measured,
  * not inferred: `scripts/math-determinism.mts` hashes each function over a
- * fixed sweep, and the park-identity workflow compares the hashes across the
- * two platforms. `sqrt`, `fround`, `hypot`, `cbrt` and `log2` matched.
+ * fixed sweep, and a (since retired) park-identity workflow compared the
+ * hashes across the two platforms, runs 36947100024 and 36952601192. `sqrt`, `fround`, `hypot`, `cbrt` and `log2` matched.
  *
  * The cause: V8 computes these in C++ (fdlibm, plus glibc's `sin`/`cos`). The
  * arm64 compiler is allowed to fuse `a * b + c` into one fused multiply-add,

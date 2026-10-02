@@ -230,3 +230,8 @@ coping chamfer (#698 fix/procgen-last has the fix).
   every solve provably finite; ParkSolveExhausted -> restart), sb-rrtest. All helpers done/stopped.
 - Staged attempt seed 15 r0 (ca46ffde): ACCEPTED at r0; CPU build 434 s, stages 37/17/153 s. Sent to #705.
 - Remaining: #705 Parks CI + rebase onto 3e99dd71; then green CI on #705 head; reviewer approval.
+- 2917738d: "built well" (decision-zero count) is search effort, reported not judged (#705 review: seed 11 r0-3).
+- Jim ruling: no macOS park-identity CI; parks built/accepted on Linux only. Workflow removed here too;
+  deterministic Math + guard + check:pow-operator kept; identity/math scripts are hand tools. Docs reworded.
+- Measuring seed 11 r4 plan solve time (ran past #705's 30-min probe kill). Waiting on fix/door-overlap
+  (paving agent ab031046: paths ~1 m under building doors, Jim's preview feedback).

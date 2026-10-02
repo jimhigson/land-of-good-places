@@ -12,9 +12,10 @@
  * It hashes two sets. `native` is V8's own, which is the control: it must keep
  * showing the platforms differ, or this measurement can no longer see the
  * difference the ports exist to remove. `deterministic` is
- * `src/core/deterministicMath.ts`, which must come out identical. The
- * park-identity workflow compares both and fails if a deterministic hash
- * differs.
+ * `src/core/deterministicMath.ts`, which must come out identical. A hand
+ * tool since the macOS park-identity workflow was retired (Jim, 2 Oct 2026:
+ * parks are built and accepted only on Linux CI): run it on two machines and
+ * compare the two JSON files.
  *
  * Run it **without** the resolver `--import`: that installs the ports on the
  * global `Math`, and the native set would then be hashing the ports twice.

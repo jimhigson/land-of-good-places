@@ -485,8 +485,9 @@ What forced the restarts (count of rejected attempts):
 
 ## The accepted park is the same park on every machine
 
-A restart is accepted on a Mac and the park is shipped from a Linux runner, so
-"accepted" means something only if both build the same park. They did not. On
+When this was written, a restart was accepted on a Mac and the park shipped from
+a Linux runner, so "accepted" meant something only if both built the same park.
+They did not. On
 Node 26.10.0 / V8 14.6.202.34, the same version on both, the park-identity
 workflow (run 36947100024) found seeds 0, 2, 4, 8 and 11 grew **different
 parks** on darwin-arm64 and linux-x64. The first diverging decisions were
@@ -509,4 +510,13 @@ After the fix (run 36950557531), **16/16 seeds are the same park**, with
 worst centroid drift **0.00e+0 m**, on CI-Linux vs CI-Mac and on CI-Linux vs
 this Mac. Control: the same comparator on the pre-fix artifacts still reports
 11/16. Cost: about 5% of a park build (seed 12: 21 s vs 20 s). The `**`
-operator cannot be intercepted; world code uses it only as an exact `x ** 2`.
+operator cannot be intercepted; world code uses it only as an exact `x ** 2`
+(`check:pow-operator`).
+
+**Since 2 October 2026 there is no cross-platform CI leg.** Jim ruled that parks
+are built and accepted only on Linux CI (#705's `build:parks`, with its own
+solve-vs-hydrate digest proof), so the macOS park-identity workflow was removed.
+The deterministic Math and its guard in `parkManifest.ts` stay: they are what
+make a park built on a developer's Mac the park CI ships.
+`scripts/park-identity.mts`, `compare-park-identity.mts` and
+`math-determinism.mts` stay as hand tools for re-taking the measurement above.
