@@ -123,3 +123,6 @@ later). Confirmed by the coordinator (via the #706 agent): it killed 10 of the p
 accept:parks attempts, on seeds 2, 3, 4, 5, 8, 9, 10, 11, 13 and 14; that agent is re-running them.
 Rule from here: kill only PIDs I started, after `lsof -a -p <pid> -d cwd` shows my worktree; never
 pkill -f / pgrep -f / killall.
+
+## park:attempt at recorded restarts (final code, base a2c88976): all 16 accepted, 109 measures each, 0 failures (scratch attempts.txt)
+## DONE. Branch pushed, no PR. Extra worktrees removed (sb-trainsearch-base, sb-ts-snap).
