@@ -97,6 +97,7 @@ import {
   CAMERA_FACING_YAW,
   FALL_THRESHOLD,
   MAX_FRAME_DELTA,
+  DOOR_PAVING_OVERLAP,
   PATH_KERB_LIFT,
   PATH_SURFACE_LIFT,
   PLAYER_LONGEST_STEP,
@@ -1484,13 +1485,32 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
   const joined = floodPaving(raster, cellOf(raster, atGate.at[0], atGate.at[1]), BUILDING_STEP_UP, walkable.allowed);
 
   const doors: { id: string; at: readonly [number, number] | null }[] = [];
+  const complaints: string[] = [];
   // The two doors that open onto the park, each with the mesh that is its front.
   const bands = [
     { band: facts.world.hotel.towerDoorBand(), front: 'tower-door-glow' },
     { band: castleFrontDoorBand(facts), front: 'entrance-steps' },
   ];
+  let overlapsMeasured = 0;
   for (const { band, front } of bands) {
-    doors.push({ id: band ? band.what : `the door '${front}' stands in`, at: band ? drawnDoorstep(facts, band, front) : null });
+    const at = band ? drawnDoorstep(facts, band, front) : null;
+    doors.push({ id: band ? band.what : `the door '${front}' stands in`, at });
+    if (!band || !at) continue;
+    // **And on in under it.** The paving overlaps the door by
+    // {@link DOOR_PAVING_OVERLAP} — Jim, 3 Oct 2026: "like 1 m under, so that
+    // there is overlap and zero gap" — so a gap at a door cannot come back.
+    // Asked of any drawn paving, square in along the door's own axis.
+    overlapsMeasured += 1;
+    const inX = -Math.sin(band.yaw);
+    const inZ = -Math.cos(band.yaw);
+    for (let d = 0; d <= DOOR_PAVING_OVERLAP - PAVING_CELL + 1e-9; d += 0.1) {
+      if (isPaved(raster, cellOf(raster, at[0] + inX * d, at[1] + inZ * d))) continue;
+      complaints.push(
+        `${band.what}: the paving stops ${d.toFixed(2)} m in under the door's drawn front at ${fmt(at)}, short of the ` +
+          `${DOOR_PAVING_OVERLAP} m overlap — a gap can show between the path and the door`,
+      );
+      break;
+    }
   }
   const doored = new Set(['anchor:hotel', 'anchor:building']);
   for (const entrance of facts.entrances) {
@@ -1501,7 +1521,6 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
   }
   for (const exit of facts.exits) doors.push({ id: exit.id, at: [exit.x, exit.z] });
 
-  const complaints: string[] = [];
   let worst = 0;
   for (const door of doors) {
     if (!door.at) {
@@ -1525,7 +1544,8 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
   process.stderr.write(
     `  drawnPavingReachesEveryDoor: ${doors.length} doormats (${bands.length} built doors) against ` +
       `${raster.triangles} paving triangles on seed ${facts.seed}, joined only through ground a child can reach ` +
-      `(${walkable.decorativeTriangles} triangle(s) of declared-unwalked door apron allowed); worst ${worst.toFixed(2)} m\n`,
+      `(${walkable.decorativeTriangles} triangle(s) of declared-unwalked door apron allowed); worst ${worst.toFixed(2)} m; ` +
+      `${overlapsMeasured} door overlap(s) of ${DOOR_PAVING_OVERLAP} m asserted\n`,
   );
   if (doors.length === 0) complaints.push('no doormat was measured — this asserted nothing');
   return complaints;
@@ -1658,10 +1678,13 @@ const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'booth', '
  * too. Paving shut in where nobody can reach, under none of these, is counted
  * on every run but not judged.
  *
- * Two kinds of paving are left out, and counted on every run: what a bridge
- * carries (its kerb runs under its own parapets by design; the bridge
- * invariants own it), and paving declared unwalked (a door apron behind its
- * trigger, `pathGraph.ts`'s `decorativeOwners`).
+ * Two kinds of paving are let through, and counted on every run: what a
+ * bridge carries (its kerb runs under its own parapets by design; the bridge
+ * invariants own it), and the door allowances `pathGraph.ts` builds the door
+ * aprons with — every door's overlap, {@link DOOR_PAVING_OVERLAP} in under the
+ * door so path and door meet with no gap (Jim, 3 Oct 2026), and the hotel's
+ * recess behind its trigger. Each is a rectangle the apron's own width; paving
+ * anywhere else under a building is judged.
  */
 /**
  * **A booth's hollow middle is part of the booth.** Its colliders are four
@@ -1695,18 +1718,43 @@ function boothHollowAt(facts: ParkFacts, x: number, z: number): { id: string; de
   return null;
 }
 
+/** One stretch of door apron paving may lie under a building — see `pathGraph.ts`'s `doorAllowances`. */
+interface DoorAllowance {
+  readonly what: string;
+  readonly from: readonly [number, number];
+  readonly to: readonly [number, number];
+  readonly halfReach: number;
+}
+
+/** The door allowances the drawn paving was built with, or a complaint that there are none to read. */
+function doorAllowancesOf(meshes: readonly Mesh[]): readonly DoorAllowance[] | string {
+  const surface = meshes.find((mesh) => mesh.name === 'path-surface');
+  const allowances = surface?.userData['doorAllowances'];
+  return Array.isArray(allowances)
+    ? (allowances as DoorAllowance[])
+    : 'the drawn path-surface carries no door allowances — pathGraph.ts has changed and the door overlap cannot be told apart';
+}
+
+/** Does (x, z) lie in the allowance's rectangle — from its start to its end, `halfReach` either side? */
+function inAllowance(allowance: DoorAllowance, x: number, z: number): boolean {
+  const [ax, az] = allowance.from;
+  const [bx, bz] = allowance.to;
+  const length = Math.hypot(bx - ax, bz - az);
+  if (length < 1e-9) return false;
+  const ux = (bx - ax) / length;
+  const uz = (bz - az) / length;
+  const along = (x - ax) * ux + (z - az) * uz;
+  const across = Math.abs(-(x - ax) * uz + (z - az) * ux);
+  return along >= 0 && along <= length && across <= allowance.halfReach;
+}
+
 const noDrawnPavingUnderASolid: Invariant = (facts) => {
   const meshes = drawnPathLayers(facts);
   if (typeof meshes === 'string') return [meshes];
-  let decorativeTriangles = 0;
-  const raster = rasterisePaving(meshes, PAVING_CELL, (mesh, vertex) => {
-    const unwalked = mesh.userData['decorativeOwners'];
-    const owners = mesh.userData['vertexOwners'];
-    if (!(unwalked instanceof Int32Array) || !(owners instanceof Int32Array)) return false;
-    const skip = unwalked.includes(owners[vertex]!);
-    if (skip) decorativeTriangles += 1;
-    return skip;
-  });
+  const allowances = doorAllowancesOf(meshes);
+  if (typeof allowances === 'string') return [allowances];
+  const allowed = new Map<string, number>();
+  const raster = rasterisePaving(meshes, PAVING_CELL);
   const walkable = walkablePaving(facts, meshes, raster);
   if (typeof walkable === 'string') return [walkable];
   const bridges = facts.world.train.bridges;
@@ -1724,6 +1772,11 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
       continue;
     }
     paved += 1;
+    const allowance = allowances.find((candidate) => inAllowance(candidate, x, z));
+    if (allowance) {
+      allowed.set(allowance.what, (allowed.get(allowance.what) ?? 0) + 1);
+      continue;
+    }
     const solid = collision.solidDepthAt(x, z, BUILT_SOLIDS);
     const booth = boothHollowAt(facts, x, z);
     if (solid.depth > UNDER_A_SOLID_TOLERANCE) under.push({ k, detail: solid });
@@ -1746,7 +1799,9 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
   const shutPlaces = gatherPlaces(raster, shut, (a, b) => a.depth > b.depth);
   process.stderr.write(
     `  noDrawnPavingUnderASolid: ${paved} paving cells judged on seed ${facts.seed}; ${carried} carried by a bridge ` +
-      `and ${decorativeTriangles} declared-unwalked apron triangle(s) left out; ${under.length} under a building, booth or ` +
+      `left out; ${allowances.length} door allowance(s) let through ` +
+      `[${[...allowed].map(([what, cells]) => `${what} ${(cells * area).toFixed(2)} m²`).join(', ')}]; ` +
+      `${under.length} under a building, booth or ` +
       `the boundary wall. Not judged here: ${otherSolids} under other solids (garden walls, the fountain rim, posts), ` +
       `${shut.length} shut in where nobody can reach${shutPlaces.length ? ` (largest ${(Math.max(...shutPlaces.map((p) => p.cells)) * area).toFixed(2)} m² near ${fmt(shutPlaces.reduce((a, b) => (b.cells > a.cells ? b : a)).at)})` : ''}\n`,
   );

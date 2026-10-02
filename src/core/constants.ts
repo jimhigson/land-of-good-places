@@ -457,6 +457,18 @@ export const WIDEST_SPUR_WIDTH = 2.8;
 export const SPUR_PAVED_REACH = WIDEST_SPUR_WIDTH / 2 + PATH_KERB_OVERHANG;
 
 /**
+ * **How far the paving runs on in under a building's door**, metres — past the
+ * door's drawn front (the hotel's sliding doors, the foot of the castle's
+ * steps), so the path and the door overlap and no lawn shows between them.
+ * Jim, 3 Oct 2026: *"the path really should go a little under the
+ * castle/hotel door (like 1 m under) so that there is overlap and zero gap."*
+ * The one owner: the door aprons are drawn to it (`parkLayout.ts`'s
+ * `doorApronOf`), `noDrawnPavingUnderASolid` allows exactly it, and
+ * `drawnPavingReachesEveryDoor` asserts it.
+ */
+export const DOOR_PAVING_OVERLAP = 1.0;
+
+/**
  * **The main loop's drawn width — the one owner.**
  *
  * The promenade circling the fountain plaza is paved this wide, so its paving
