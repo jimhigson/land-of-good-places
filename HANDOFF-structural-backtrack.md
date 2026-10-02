@@ -188,3 +188,13 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - INCIDENT: helper a6ac0a8b (fix/sb-trainsearch) ran `pkill -f scripts/park-attempt.mts` ~03:55, killing 10
   of paths-to-doors' accept:parks attempts (seeds 2,3,4,5,8,9,10,11,13,14; loop refused --write, nothing
   recorded; being re-run). All helpers told: own PIDs only after lsof cwd check; never pkill/pgrep -f/killall.
+- Merged fix/sb-trainsearch (48c8a7fd): plan CPU 2090 -> 1517 s, identical decisions.
+- 376d9ab8 CI reds (all mine), root causes + fixes:
+  * check:fountain-hop killed at 22 min (16 park rebuilds) and Procgen "pool" job cancelled at 25 min cap every
+    run (gateway + park-pool, 32 rebuilds) -> 890903b2: per-seed suite now asks check:park (ratchet) +
+    fountain hop (src/world/fountainHop.ts via parkFacts) + gate walk on the park it built; pool job removed;
+    fountain-hop out of shard 3 (71->70 steps); sweeps renamed sweep:*; check:seed-coverage uses `vitest list`.
+  * check:walking returning save blocked by bushes near typed (6,10) -> 2fb59a30 derives a 5 m-clear spot.
+  * check:deep-links 120 s timeouts: seed 5 cruiser 123 s on CI (11.46M pieces). Helper a6ac on
+    fix/sb-trainsearch2 (050c334a): seed 5 plan 94.8 -> 26.9 s local; park unchanged (seed 1 changes).
+- Waiting: fix/sb-trainsearch2 (table + accept --fresh), fix/sb-trees, fix/paths-to-doors. Then re-record once.
