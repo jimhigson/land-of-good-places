@@ -47,6 +47,7 @@ interface Group {
 
 interface Digest {
   readonly seed: number;
+  readonly restart: number;
   readonly plan: readonly string[];
   readonly paths: { readonly metres: number; readonly digest: string };
   readonly spur: { readonly name: string; readonly points: readonly (readonly [number, number])[] };
@@ -140,8 +141,17 @@ describe('scenery scatter is decoupled from the paths', () => {
   for (const park of PARKS) {
     describe(park.label, () => {
       const baseline = buildDigest(park.env);
-      const bowed = buildDigest({ ...park.env, LGP_SPUR_STRETCH: String(BOW) });
+      // **The same restart as the baseline, pinned.** LGP_SPUR_STRETCH is a
+      // park-changing switch, so with the restart unset the resolver builds
+      // restart 0 while the baseline is the accepted restart: two different
+      // parks. On #705's CI seed 12 (accepted restart 2) failed exactly so:
+      // layout attempt 5 against 4, trees "moved" 100 m.
+      const bowed = buildDigest({ ...park.env, LGP_PARK_RESTART: String(baseline.restart), LGP_SPUR_STRETCH: String(BOW) });
       baselines.push(baseline);
+
+      it('built the bowed park at the baseline park\'s restart', () => {
+        expect(bowed.restart).toBe(baseline.restart);
+      });
 
       it('perturbed the park for real — otherwise everything below is vacuous', () => {
         // The load-bearing assertion. A knob that silently does nothing would make

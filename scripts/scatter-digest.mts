@@ -31,7 +31,7 @@
 import './headless-canvas.mjs';
 import { createHash } from 'node:crypto';
 import { buildHeadlessPark } from './park-harness.mts';
-import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
+import { PARK_RESTART, PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { PATH_GRAPH } from '../src/world/pathGraph.ts';
 import { parkPlanDecisions } from '../src/world/parkPlan.ts';
 
@@ -141,6 +141,13 @@ const stretchedSpur =
 
 const summary = {
   seed: PARK_SEED_ASKED,
+  /**
+   * Which restart was built. A caller comparing a switched run against a
+   * baseline must pin the switched run to this restart: under a park-changing
+   * switch such as LGP_SPUR_STRETCH the resolver builds restart 0, not the
+   * accepted one, so the two would be different parks.
+   */
+  restart: PARK_RESTART,
   /**
    * Which attempt each plan decision settled on. The bow must change one
    * spur's paving and nothing upstream of it: if the bowed paths are refused
