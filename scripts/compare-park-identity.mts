@@ -21,6 +21,7 @@ interface Identity {
   restart: number;
   platform: string;
   traces: Record<string, string>;
+  traceText?: Record<string, string[]>;
   structure: string;
   meshes: { name: string; vertices: number; instances: number; centroid: [number, number, number] }[];
 }
@@ -53,7 +54,17 @@ for (const seed of seeds) {
   const problems: string[] = [];
   if (x.restart !== y.restart) problems.push(`restart ${x.restart} vs ${y.restart}`);
   for (const key of Object.keys(x.traces)) {
-    if (x.traces[key] !== y.traces[key]) problems.push(`${key} trace differs`);
+    if (x.traces[key] !== y.traces[key]) {
+      // Name the first line that differs: the decision that flipped.
+      const tx = x.traceText?.[key] ?? [];
+      const ty = y.traceText?.[key] ?? [];
+      let at = 0;
+      while (at < tx.length && at < ty.length && tx[at] === ty[at]) at += 1;
+      problems.push(
+        `${key} trace differs from line ${at + 1} of ${tx.length}/${ty.length}` +
+          (tx.length || ty.length ? `:\n      ${x.platform}: ${(tx[at] ?? '(end)').slice(0, 220)}\n      ${y.platform}: ${(ty[at] ?? '(end)').slice(0, 220)}` : ''),
+      );
+    }
   }
   if (x.structure !== y.structure) problems.push('mesh set or counts differ');
   let worst = 0;

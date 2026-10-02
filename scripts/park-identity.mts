@@ -86,6 +86,8 @@ const identity = {
     plan: hash(parkSolveTrace()),
     world: hash(worldSolveTrace()),
   },
+  // The full text, so a comparison can name the first decision that differs.
+  traceText: { layout: [...LAYOUT_TRACE], plan: [...parkSolveTrace()], world: [...worldSolveTrace()] },
   structure: hash(meshes.map((x) => `${x.name}|${x.vertices}|${x.instances}`)),
   meshes,
 };
