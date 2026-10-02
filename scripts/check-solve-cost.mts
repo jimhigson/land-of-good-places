@@ -266,8 +266,22 @@ if (!cpuClock.usable) {
       'do not raise the budgets.\n',
   );
 }
+// A plan feature the driver ran that has no row above is priced by nobody —
+// named every run, never silently skipped (`railRaceBars` landed without a CI
+// reading to budget it from).
+const unbudgeted = Object.keys(stats.cpuMsByFeature).filter(
+  (feature) => !FEATURES.some((row) => row.feature === feature),
+);
+if (unbudgeted.length > 0) {
+  process.stderr.write(
+    `check:solve-cost NOTE: ${unbudgeted.length} plan feature(s) the driver ran have NO budget row and were ` +
+      `not judged: ${unbudgeted
+        .map((feature) => `${feature} (${(stats.cpuMsByFeature[feature] ?? 0).toFixed(0)} ms CPU this run)`)
+        .join(', ')}. Add a row from a fresh median (local) and a Checks job log (CI).\n`,
+  );
+}
 process.stderr.write(
-  'check:solve-cost NOTE: this check covers the seven coarse PLAN features and the boundary only. ' +
+  `check:solve-cost NOTE: this check covers the ${FEATURES.length} budgeted coarse PLAN features and the boundary only. ` +
     `The world phase (src/world/worldPhase.ts — ${WORLD_PHASE_FEATURES.join(', ')}) is a second ` +
     'ParkSolve inside the World constructor and is NOT budgeted here, ' +
     'nor is anything after the plan. A green run says nothing about those.\n',

@@ -3732,6 +3732,58 @@ const duckBarsKeepToTheirOwnLane: Invariant = (facts) => {
   return complaints;
 };
 
+/**
+ * **The race ring's duck bars are the layout the park's plan decided — every
+ * bar, on its lane, where the plan put it.**
+ *
+ * Whether 40 bars have anywhere legal to stand is a question about the two
+ * planned rings alone, so it is answered in the plan, by `parkPlan.ts`'s
+ * `railRaceBars` builder, which refuses — naming the layout, and the cruiser or
+ * railway when they pushed the arch — and lets the driver re-choose. It used to
+ * be answered by `new RailRace` in the world phase, as a `DuckBarRefusal`
+ * thrown out of the build: the commonest reason a whole park was thrown away
+ * (seed 11, five restarts running). The ride reads the plan's decision and
+ * cannot meet that refusal again **only while the bars it draws are the ones
+ * the plan decided**; a ride that re-solved them from anything the plan did not
+ * see could find them unplaceable after the plan said yes. This holds it there.
+ *
+ * Measured on the built bars (their own instance matrices, lane found in the
+ * chart) against `planHazards` over the plan's own decision.
+ */
+const duckBarsAreTheLayoutThePlanDecided: Invariant = (facts) => {
+  const { decidedInPlan, planned, built } = facts.duckBarPlan;
+  if (!decidedInPlan) {
+    return [
+      "the park's plan never placed railRaceBars — the duck bars were not decided in the plan, so the " +
+        'world phase can still meet a layout with nowhere for them to stand',
+    ];
+  }
+  if (planned.length === 0) return ['the plan decided a duck-bar layout with no bars in it'];
+  const complaints: string[] = [];
+  if (built.length !== planned.length) {
+    complaints.push(`the race ring draws ${built.length} duck bars where the plan decided ${planned.length}`);
+  }
+  const unmatched = [...built];
+  for (const bar of planned) {
+    let best = -1;
+    for (let i = 0; i < unmatched.length; i += 1) {
+      const candidate = unmatched[i] as { lane: number; at: number };
+      if (candidate.lane !== bar.lane) continue;
+      if (best < 0 || Math.abs(candidate.at - bar.at) < Math.abs((unmatched[best] as { at: number }).at - bar.at)) best = i;
+    }
+    const match = best >= 0 ? unmatched[best] : undefined;
+    if (!match || Math.abs(match.at - bar.at) > BAR_MEASUREMENT_SLACK) {
+      complaints.push(
+        `the plan put a lane-${bar.lane} duck bar ${bar.at.toFixed(2)} m from the arch, and the race ring ` +
+          (match ? `draws its nearest lane-${bar.lane} bar at ${match.at.toFixed(2)} m` : `draws no lane-${bar.lane} bar left to match it`),
+      );
+      continue;
+    }
+    unmatched.splice(best, 1);
+  }
+  return complaints;
+};
+
 const duckBarsSlowYouWhereTheyStand: Invariant = (facts) => {
   const complaints: string[] = [];
   const bars = facts.duckBars;
@@ -13054,6 +13106,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['every Rail Race duck bar stands over a real trestle leg', duckBarsStandOnRealSupports],
   ['every Rail Race duck bar slows you down where it stands', duckBarsSlowYouWhereTheyStand],
   ['every Rail Race duck bar keeps to its own lane', duckBarsKeepToTheirOwnLane],
+  ['the Rail Race duck bars are the layout the plan decided', duckBarsAreTheLayoutThePlanDecided],
   ['the Rail Race finish rainbow clears every rider', finishRainbowClearsEveryRider],
   ['the Rail Race finish rainbow stands on the ground', finishRainbowStandsOnTheGround],
   ['every support meets the track it carries', supportsMeetWhatTheyCarry],

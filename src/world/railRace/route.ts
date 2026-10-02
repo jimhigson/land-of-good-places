@@ -323,6 +323,19 @@ export class RailRaceRoute {
   readonly startDistance: number;
 
   /**
+   * **Which decisions put the arch where it stands**, for a refusal to name.
+   *
+   * Always `layout` — the ring follows the park's boundary and the arch starts
+   * at the boarding booth's bearing. Plus the {@link KeepOff.owner} of every
+   * keep-off that refused a station {@link slideArchClear} tried before the one
+   * it took: a decision that pushed the arch along is a decision whose re-choice
+   * can move it back. A refusal of the arch's datum (the duck bars,
+   * `parkPlan.ts`'s `duckBars` builder) names exactly these, and nothing it did
+   * not consume.
+   */
+  readonly archDecidedBy: readonly string[];
+
+  /**
    * The level the four lanes undulate about, in world metres.
    *
    * Taken from the **highest** ground anywhere under the widest ring plus
@@ -335,7 +348,17 @@ export class RailRaceRoute {
 
   private readonly scratch = new Vector3();
 
-  constructor(stationStallId: string, scale: number, keepArchOff: readonly KeepOff[] = []) {
+  constructor(
+    stationStallId: string,
+    scale: number,
+    keepArchOff: readonly KeepOff[] = [],
+    /**
+     * Where the arch stands, when the plan has already chosen it
+     * ({@link archStation}); omitted, the first clear station is taken, as the
+     * arch always was.
+     */
+    arch?: ArchStation,
+  ) {
     this.scale = scale;
     this.laneSpacing = LANE_SPACING_AT_PARK_SCALE * scale;
     this.laneOffsets = Array.from(
@@ -372,19 +395,10 @@ export class RailRaceRoute {
     }
     this.clearance = highest + BASE_HEIGHT;
 
-    // The arch goes at the bearing of the booth that boards the ride, so the
-    // rails a child can see from the queue are the rails she is about to start
-    // on. She is carried out to them by the iris wipe, exactly as the other
-    // rides carry her to a station she is not standing on.
-    const stall = placedEntry(stationStallId);
-    const bearing = Math.atan2(stall.z, stall.x);
-    // A search, not a division: `s = -R * bearing` only held while the ring was
-    // a circle. Valid because the boundary is star-shaped, so bearing is
-    // monotone in arc length.
-    const atBooth = this.wrap(RING_PATH.distanceAtBearing(bearing));
-    // ...and then off the doormat it would otherwise land on. See
-    // {@link slideArchClear}: on most seeds this returns `atBooth` untouched.
-    this.startDistance = slideArchClear(this, atBooth, stall, keepArchOff);
+    const chosen = arch ?? archStation(stationStallId, keepArchOff, 0);
+    if (chosen.at === null) throw new Error('railRace/route.ts: the first arch station always exists');
+    this.startDistance = chosen.at;
+    this.archDecidedBy = chosen.decidedBy;
   }
 
   /**
@@ -720,6 +734,12 @@ export interface KeepOff {
   readonly x: number;
   readonly z: number;
   readonly radius: number;
+  /**
+   * The plan decision that put this keep-off here (`cruiser`, `train`, …), so
+   * a refusal of the arch can name it — see {@link RailRaceRoute.archDecidedBy}.
+   * Omitted: the layout's.
+   */
+  readonly owner?: string;
 }
 
 /**
@@ -761,43 +781,113 @@ export interface KeepOff {
  * conflict keeps its finish line exactly where the booth's bearing put it.
  */
 function slideArchClear(
-  route: RailRaceRoute,
   atBooth: number,
   stall: { readonly entranceX: number; readonly entranceZ: number },
   keepOff: readonly KeepOff[],
-): number {
+  /** Which clear station to take, nearest first — see {@link archStation}. */
+  choice: number,
+): { readonly at: number | null; readonly pushedBy: ReadonlySet<string> } {
   const probe = new Vector3();
   const outward = new Vector3();
+  /** The owners of whatever refused a station tried before the one taken. */
+  const pushedBy = new Set<string>();
+  let clearSeen = 0;
+  /** True for the `choice`-th clear station; every refusal on the way is recorded. */
   const clears = (at: number): boolean => {
-    const sample = route.path.sampleAt(at);
-    route.outwardAt(at, outward);
+    const refuser = refusedBy(at);
+    if (refuser !== null) {
+      pushedBy.add(refuser);
+      return false;
+    }
+    clearSeen += 1;
+    return clearSeen > choice;
+  };
+  /** Who refuses the arch at `at`, or null when its feet are clear. */
+  const refusedBy = (at: number): string | null => {
+    const sample = RING_PATH.sampleAt(at);
+    outward.set(sample.normalX, 0, sample.normalZ);
     // The whole span the feet occupy, inner and outer, sampled every half
     // metre: the feet are two lines of six, not a point, and it is the lines
     // that have to miss.
     for (let radius = -ARCH_FOOT_REACH; radius <= ARCH_FOOT_REACH; radius += 0.5) {
       probe.set(sample.x + outward.x * radius, 0, sample.z + outward.z * radius);
       const toDoor = Math.hypot(probe.x - stall.entranceX, probe.z - stall.entranceZ);
-      if (toDoor < ARCH_DOORMAT_CLEARANCE) return false;
+      if (toDoor < ARCH_DOORMAT_CLEARANCE) return 'layout';
       for (const plot of PARK_LAYOUT.entries.values()) {
-        if (Math.hypot(probe.x - plot.x, probe.z - plot.z) < plot.boundingRadius + 1) return false;
+        if (Math.hypot(probe.x - plot.x, probe.z - plot.z) < plot.boundingRadius + 1) return 'layout';
       }
       for (const item of keepOff) {
-        if (Math.hypot(probe.x - item.x, probe.z - item.z) < item.radius) return false;
+        if (Math.hypot(probe.x - item.x, probe.z - item.z) < item.radius) return item.owner ?? 'layout';
       }
     }
-    return true;
+    return null;
   };
-  if (clears(atBooth)) return atBooth;
-  for (let step = 1; step <= 60; step += 1) {
+  if (clears(atBooth)) return { at: atBooth, pushedBy };
+  for (let step = 1; step <= ARCH_SLIDE_STEPS; step += 1) {
     for (const side of [1, -1] as const) {
-      const at = route.wrap(atBooth + side * step * 0.75);
-      if (clears(at)) return at;
+      const at = wrapRing(atBooth + side * step * ARCH_SLIDE_STEP);
+      if (clears(at)) return { at, pushedBy };
     }
   }
-  // Nothing on the whole ring works — keep the booth's own bearing and let the
-  // procgen invariant say so out loud rather than putting the finish line
-  // somewhere arbitrary.
-  return atBooth;
+  // Fewer clear stations than `choice + 1`. For the first choice, nothing on
+  // the whole ring works — keep the booth's own bearing and let the procgen
+  // invariant say so out loud rather than putting the finish line somewhere
+  // arbitrary. For a later one, there is no next station to offer.
+  return { at: choice === 0 ? atBooth : null, pushedBy };
+}
+
+/** The arch slides in steps this long... */
+const ARCH_SLIDE_STEP = 0.75;
+/** ...this many either side of the booth's bearing. */
+const ARCH_SLIDE_STEPS = 60;
+/** How many stations the arch can be offered: the booth's bearing and every step either side. */
+export const ARCH_STATIONS = 1 + 2 * ARCH_SLIDE_STEPS;
+
+/**
+ * **Where the start/finish arch may stand: the `choice`-th clear station.**
+ *
+ * The arch goes at the bearing of the booth that boards the ride, so the rails
+ * a child can see from the queue are the rails she is about to start on. She
+ * is carried out to them by the iris wipe, exactly as the other rides carry her
+ * to a station she is not standing on. Then {@link slideArchClear} slides it
+ * off anything its feet must not come down on; choice 0 is that, the arch as it
+ * always stood. **Choice `n` is the next clear station after choice `n - 1`**,
+ * in the same order (smallest slide first, alternating sides) — the decision a
+ * refusal of the arch's datum re-chooses (`parkPlan.ts`'s `railRaceBars`: a
+ * datum that leaves the duck bars nowhere to stand). `at` is null when there
+ * are fewer clear stations than that.
+ *
+ * Pure in the ring path, so both rings share one answer: their arc length,
+ * startDistance and undulation are the same by construction.
+ */
+export function archStation(
+  stationStallId: string,
+  keepArchOff: readonly KeepOff[],
+  choice: number,
+): ArchStation & { readonly at: number | null } {
+  const stall = placedEntry(stationStallId);
+  const bearing = Math.atan2(stall.z, stall.x);
+  // A search, not a division: `s = -R * bearing` only held while the ring was
+  // a circle. Valid because the boundary is star-shaped, so bearing is
+  // monotone in arc length.
+  const atBooth = wrapRing(RING_PATH.distanceAtBearing(bearing));
+  const found = slideArchClear(atBooth, stall, keepArchOff, choice);
+  return {
+    at: found.at,
+    decidedBy: ['layout', ...[...found.pushedBy].filter((owner) => owner !== 'layout')],
+  };
+}
+
+/** A chosen arch station, and the decisions that put it there. See {@link RailRaceRoute.archDecidedBy}. */
+export interface ArchStation {
+  readonly at: number | null;
+  readonly decidedBy: readonly string[];
+}
+
+/** {@link RailRaceRoute.wrap}, for the one ring path both rings share. */
+function wrapRing(distance: number): number {
+  const wrapped = distance % RING_PATH.length;
+  return wrapped < 0 ? wrapped + RING_PATH.length : wrapped;
 }
 
 /**

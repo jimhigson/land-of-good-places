@@ -2,6 +2,7 @@ import { lazyView } from '../../boot/lazyView';
 import { registerPlanCache } from '../../boot/planCaches';
 import { Rng, clamp } from '../../core/mathUtils';
 import { RAIL_RACE_PLAN } from './plan';
+import { planPart } from '../parkPlan';
 import { duckBarIntrusions, duckBarPose } from './barReach';
 import {
   BARS_FROM_LEVEL,
@@ -280,7 +281,6 @@ export const HAZARD_LAYOUT: HazardLayout = lazyView(
 );
 registerPlanCache(() => {
   hazardLayoutMemo = null;
-  barPlanDecisionMemo = null;
 });
 
 /**
@@ -323,26 +323,39 @@ registerPlanCache(() => {
  * floor after a bar just before it is often crossed at speed by a lane that
  * had no bar there. Seed 14 restart 0 needs this: the lap has 42 legal slots
  * for 40 bars, and lane 0's refused slot 41 left the last bar nowhere to go.
- * Only when every rotation fails does the build fail, for the park's root
- * loop to start again — never a bad bar kept.
+ * Only when every rotation fails is the layout refused — **in the plan
+ * phase**, by `parkPlan.ts`'s `railRaceBars` builder, which names the decisions
+ * that put the ring and its arch where they are
+ * (`RailRaceRoute.archDecidedBy`) so the driver re-chooses one of them. Never a
+ * bad bar kept, and never a throw from the world phase: the race reads the
+ * decision the plan made ({@link raceBarPlanDecision}).
  *
  * **The physics is not the only refuser.** Before any of this, every slot where
  * a bar on either ring would hang inside another lane's track is refused
  * ({@link reachRefusedSlots}), and the physics starts from those.
  */
-let barPlanDecisionMemo: BarPlanDecision | null = null;
+export function planRaceBars(rings: {
+  readonly raceRing: RailRaceRoute;
+  readonly walkPastRing: RailRaceRoute;
+}): BarPlanDecision {
+  return barPlanDecision(rings.raceRing, [rings.walkPastRing, rings.raceRing]);
+}
+
+/**
+ * The bar layout's decision, as the park's plan made it ({@link planRaceBars},
+ * driven by `parkPlan.ts`'s `railRaceBars` builder). Read, never re-solved, so
+ * the world phase cannot meet a `DuckBarRefusal`: a park whose rings leave the
+ * bars nowhere was refused, and re-chosen, before anything was built on it.
+ */
 function raceBarPlanDecision(): BarPlanDecision {
-  return (barPlanDecisionMemo ??= barPlanDecision(RAIL_RACE_PLAN.raceRing, [
-    RAIL_RACE_PLAN.walkPastRing,
-    RAIL_RACE_PLAN.raceRing,
-  ]));
+  return planPart('railRaceBars').bars;
 }
 
 /**
  * The bar layout's decision for `route`: the lane rotation the ride was tuned
  * with if refusals can be met there, else the next rotation that can. Throws
- * `DuckBarRefusal` — the build fails, and the park's root loop starts again —
- * only when no rotation leaves every bar a legal slot. See
+ * `DuckBarRefusal` only when no rotation leaves every bar a legal slot, which
+ * the plan's `railRaceBars` builder turns into a refusal. See
  * {@link raceBarPlanDecision}'s doc comment above for the rule.
  */
 export function barPlanDecision(
@@ -485,7 +498,15 @@ export function scheduleForLevel(level: RaceLevel): HazardSchedule {
  * for the two readers that want a plain number.
  */
 let raceDistanceMemo: number | null = null;
-export function raceDistance(): number {
+export function raceDistance(
+  /**
+   * The ring being raced, when the caller holds one: `stepRider` is asked of a
+   * candidate ring by the plan's `railRaceBars` builder before the park's
+   * Rail Race is decided, so it must not read the decided one.
+   */
+  route?: RailRaceRoute,
+): number {
+  if (route) return route.length * RACE_LAPS;
   return (raceDistanceMemo ??= RAIL_RACE_PLAN.route.length * RACE_LAPS);
 }
 registerPlanCache(() => {
@@ -734,7 +755,7 @@ export function stepRider(
   const lap = lapNow !== lapBefore && lapNow < RACE_LAPS ? lapNow + 1 : 0;
 
   let finishedNow = false;
-  if (rider.travelled >= raceDistance()) {
+  if (rider.travelled >= raceDistance(route)) {
     rider.finished = true;
     finishedNow = true;
   }
