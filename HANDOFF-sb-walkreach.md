@@ -22,3 +22,7 @@ footprint tested at the converged point), castleWorldY; Building.ts door gate us
 entrance band y / doorstepY / leaveInterior / npc portals reference castleWorldY instead of BUILDING_BASE_Y.
 Seed 5 after fix: threshold 0.36 m above ground, steps run into the ground (was 1.5 m cliff).
 Next: seed-5 walk-reach, then full 0..15 sweep; check park-solve trace unchanged (sampler must not move the park).
+
+DONE. After the sampler fix, check:walk-reach exits 0 on all 16 seeds (0..15); every facade site measures
+climbs (worst radial 0.620 on seed 6, at the limit, 0 wrong refusals/admissions). Seed 5 park-solve trace
+identical before/after (sampler does not move the park). Not run: pnpm run check, test:procgen.
