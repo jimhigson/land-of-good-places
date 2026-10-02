@@ -25,3 +25,8 @@ vs 8). Every far change is a different layout, not scatter coupling. Traces: scr
 - c3: salt by `identity` (the planting candidate index; cover trees by cell key + 2^24). Seed 5 pair: near 46, far 0.
   This changes the shipped seed-5 park: 4 relocated bushes land elsewhere -> must re-verify park:attempt.
 - Control already in hand: tent bow + old section salt = 6 far bushes (s5.* in scratch) = red.
+- Seed 5: vitest scatterDecoupling 5/5 pass; park:attempt seed 5 restart 0 accepted; seed 12 restart 0 accepted.
+- Seed 3 pair: nothing changed at all (bow too small to refuse anything). Seed 12 pair: plan same, 14 far changes.
+- Third cause (latent, NOT fixed, reported to caller): TARGET_TREES=72 global cap. Seed 12 bowed park loses 3 trees
+  near the spur (trees#27,#56,#62) so the scatter runs on and plants candidates #70-72 wherever the stream puts them
+  (-12.9,53.6 at 43.6 m; 5.1,-14.5 at 31 m), bushes around them vanish. Any fix reshapes every seed's trees.
