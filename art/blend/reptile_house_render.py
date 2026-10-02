@@ -128,12 +128,13 @@ def main() -> None:
     # The game's own view: iso from the front-right, pitched like the fixed
     # camera (38°), with the whole building, the tail signpost and the child.
     render(camera, kit + [child], "iso", 28.0, 38.0, 1.12, out)
-    # Walking up: low and square on, the door, the awning and the tail.
-    door_parts = [bpy.data.objects[n] for n in ("rh-arch", "rh-awning", "rh-tail", "rh-sign", "rh-tail-bell")]
+    # Walking up: low and square on, the head with the mouth open, the tongue
+    # out on the paving, the tail signpost beside it.
+    door_parts = [bpy.data.objects[n] for n in ("rh-head", "rh-mouth", "rh-tongue", "rh-tail", "rh-sign", "rh-tail-bell")]
     render(camera, door_parts + [child], "door", 8.0, 10.0, 1.35, out)
-    # The face end: head, tongue and the neck coming over the dome.
-    head_parts = [bpy.data.objects[n] for n in ("rh-head", "rh-tongue")]
-    render(camera, head_parts, "head", -22.0, 18.0, 2.2, out)
+    # The face, square on from the doormat: eyes above the mouth, tongue out.
+    head_parts = [bpy.data.objects[n] for n in ("rh-head", "rh-mouth", "rh-tongue")]
+    render(camera, head_parts + [child], "head", -10.0, 12.0, 1.3, out)
     # From behind, so the neck's route over the dome can be judged.
     render(camera, kit, "back", 180.0 + 30.0, 30.0, 1.1, out)
 

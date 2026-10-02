@@ -21,7 +21,13 @@ import { SpeechBubble } from '../../ui/SpeechBubble';
 import { discoverSecret } from '../../state/secrets';
 import { JUMP_APEX_HEIGHT } from '../../entities/Player';
 import { SnakeSegmentPool } from '../../art/models/snake';
-import { createReptileHouseExterior, reptileHouseLowDiscs, reptileHousePlinthTop, type ReptileHouseExterior } from '../../art/models/reptileHouseAssets';
+import {
+  createReptileHouseExterior,
+  reptileHouseLipsReach,
+  reptileHouseLowDiscs,
+  reptileHousePlinthTop,
+  type ReptileHouseExterior,
+} from '../../art/models/reptileHouseAssets';
 import { ReptileLighting } from './lighting';
 import { SignAtlas } from './signs';
 import { ReptileProps } from './props';
@@ -38,6 +44,7 @@ import {
   reptileEntryBand,
   reptileExitBand,
   reptileTailBase,
+  REPTILE_JAMB_STRIP,
   type FacadeFrame,
 } from './shell';
 import {
@@ -246,7 +253,7 @@ export class ReptileHouse implements GameSystem {
       buildForecourt(this.forecourtRoot, surfaces, REPTILE_FORECOURT_ORIGIN_X, REPTILE_FORECOURT_ORIGIN_Z, this.frame);
       this.forecourtRoot.add(this.exterior.root);
     }
-    this.shellSolids = registerReptileShellCollision(collision, this.frame, reptileHouseLowDiscs());
+    this.shellSolids = registerReptileShellCollision(collision, this.frame, reptileHouseLowDiscs(REPTILE_JAMB_STRIP), reptileHouseLipsReach());
     registerPlinthStep(surfaces, this.frame, reptileHousePlinthTop());
     atlas.applyTo(this.exterior.sign);
   }
@@ -377,18 +384,18 @@ export class ReptileHouse implements GameSystem {
 
     if (this.onForecourt || this.deps.plot) {
       this.exterior.setNight(this.deps.nightFactor());
+      // The head is the door now, so it only ever tilts a few hundredths of
+      // a radian — the lips stay on the jambs' colliders — and the tongue,
+      // which is the doormat, wags at its root rather than vanishing.
       if (this.tickle > 0) {
         this.tickle = Math.max(0, this.tickle - dt);
         const t = this.tickle / 2;
-        this.exterior.head.rotation.z = Math.sin(t * Math.PI * 3) * 0.1;
-        this.exterior.tongue.visible = t > 0.6;
+        this.exterior.head.rotation.z = Math.sin(t * Math.PI * 3) * 0.03;
+        this.exterior.tongue.rotation.y = Math.sin(t * Math.PI * 6) * 0.1;
         this.exterior.setFace(t > 0.3 ? 'happy' : 'neutral');
       } else {
-        this.exterior.head.rotation.z = Math.sin(elapsed * 0.4) * 0.02;
-        // Hidden by visibility, not by a 0.001 scale along its length: that
-        // left the tongue's 0.69 × 0.31 m silhouette on the snout as a magenta
-        // frown under the eyes (the art review's crop, 2 October 2026).
-        this.exterior.tongue.visible = Math.sin(elapsed * 0.7) > 0.98;
+        this.exterior.head.rotation.z = Math.sin(elapsed * 0.4) * 0.008;
+        this.exterior.tongue.rotation.y = 0;
       }
     }
 

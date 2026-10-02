@@ -65,6 +65,52 @@ const LAYOUT: FacePaintOptions = {
  */
 export const SNAKE_FACE_ROWS = { eye: LAYOUT.eyeY!, mouth: LAYOUT.eyeY! + LAYOUT.mouthDrop! } as const;
 
+/**
+ * **Sunny's face — the building's.** Her mouth is not painted: it is the
+ * doorway, a bore through `rh-head` lined by `rh-mouth` (Jim, 2 October
+ * 2026: *"the door as its mouth"*). So her canvas carries eyes and blush
+ * only, and the eyes sit high — the head's UVs span its whole height,
+ * two metres of which is sunk into the ground under the chin, and the lips'
+ * top is 4.3 m up a 6 m head. `art/blend/reptile_house_build.py` reads
+ * {@link SUNNY_FACE_EYE_ROW} (a plain literal, for `ts_const`) and asserts
+ * the row lands above the lips on the built mesh; `check:reptile-house`
+ * reads it against the shipped UVs.
+ */
+export const SUNNY_FACE_EYE_ROW = 0.13;
+
+const SUNNY_LAYOUT: FacePaintOptions = {
+  size: 512,
+  eyeY: SUNNY_FACE_EYE_ROW,
+  eyeGap: 0.46,
+  eyeW: 0.11,
+  eyeH: 0.14,
+  mouth: 'none',
+  blush: ART.blush,
+  blushStyle: 'soft',
+  blushR: 0.09,
+};
+
+const SUNNY_PAINTS: Readonly<Record<SnakeExpression, FacePaintOptions>> = {
+  neutral: { ...SUNNY_LAYOUT, eyeStyle: 'open' },
+  blink: { ...SUNNY_LAYOUT, eyeStyle: 'closedHappy' },
+  happy: { ...SUNNY_LAYOUT, eyeStyle: 'archHappy' },
+  surprised: { ...SUNNY_LAYOUT, eyeStyle: 'wide', brows: true },
+  asleep: { ...SUNNY_LAYOUT, eyeStyle: 'closedHappy' },
+};
+
+let sunnyCache: Record<SnakeExpression, CanvasTexture> | null = null;
+
+/** Sunny's expression set — eyes and blush over an open-mouth doorway. */
+export function sunnyFaceTextures(): Record<SnakeExpression, CanvasTexture> {
+  if (sunnyCache) return sunnyCache;
+  const painted = {} as Record<SnakeExpression, CanvasTexture>;
+  for (const name of Object.keys(SUNNY_PAINTS) as SnakeExpression[]) {
+    painted[name] = markShared(paintOnFill(SUNNY_PAINTS[name], 512, 512));
+  }
+  sunnyCache = painted;
+  return painted;
+}
+
 const PAINTS: Readonly<Record<SnakeExpression, FacePaintOptions>> = {
   neutral: { ...LAYOUT, eyeStyle: 'open' },
   blink: { ...LAYOUT, eyeStyle: 'closedHappy' },
@@ -92,17 +138,17 @@ export function snakeFaceTextures(): Record<SnakeExpression, CanvasTexture> {
  * stretching it onto the slightly-wider canvas is a 12 % squash nobody can see
  * on a snout.
  */
-function paintOnFill(options: FacePaintOptions): CanvasTexture {
+function paintOnFill(options: FacePaintOptions, width = WIDTH, height = HEIGHT): CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = WIDTH;
-  canvas.height = HEIGHT;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('snakeFace: 2D canvas context unavailable');
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.fillRect(0, 0, width, height);
   const patch = paintFace(options);
   const image = patch.image as CanvasImageSource;
-  ctx.drawImage(image, 0, 0, WIDTH, HEIGHT);
+  ctx.drawImage(image, 0, 0, width, height);
   patch.dispose();
   return planarUvCanvasTexture(canvas);
 }

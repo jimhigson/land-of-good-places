@@ -119,6 +119,9 @@ BACK_PANEL_HEIGHT = ts_const(STALL_SHAPE, "BACK_PANEL_HEIGHT")
 
 # --- game-wide figures with their own owners -------------------------------
 TALLEST_CHILD_HEIGHT = ts_const(KID, "TALLEST_CHILD_HEIGHT")
+#: Where `snakeFace.ts` paints Sunny's eyes, as a fraction of her head's
+#: canvas from its top — the house build asserts that row lands above the mouth.
+SUNNY_FACE_EYE_ROW = ts_const("src/art/models/snakeFace.ts", "SUNNY_FACE_EYE_ROW")
 KID_EYE_HEIGHT = ts_const(KID, "KID_EYE_HEIGHT")
 DOOR_HALF = ts_const("src/world/hotel/layout.ts", "DOOR_HALF")
 

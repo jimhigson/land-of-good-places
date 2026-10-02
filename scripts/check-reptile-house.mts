@@ -65,7 +65,8 @@ import { IsoCamera } from '../src/core/IsoCamera.ts';
 import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 import { createHat } from '../src/art/models/hats.ts';
-import { SNAKE_FACE_ROWS } from '../src/art/models/snakeFace.ts';
+import { SNAKE_FACE_ROWS, SUNNY_FACE_EYE_ROW } from '../src/art/models/snakeFace.ts';
+import { reptileHouseLipThickness, reptileHousePlinthTop } from '../src/art/models/reptileHouseAssets.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { PRIMARY_ACTION } from '../src/world/interact.ts';
 import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt } from '../src/world/spaces.ts';
@@ -741,9 +742,22 @@ console.log('\nPAINTED FACES — eyes above the smile on every painted head, the
       ys.push(position.getY(i));
       rows.push(map.flipY ? 1 - v : v);
     }
+    const fall = slope(ys, rows);
+    if (name === 'rh-head') {
+      // Sunny's mouth is the doorway, not a painted smile: her eye row has to
+      // land above the lips round the bore, which the plinth top, the bore's
+      // height and the lining's thickness put at a known height.
+      const eye = rows.reduce((best, row, i) => (Math.abs(row - SUNNY_FACE_EYE_ROW) < Math.abs(rows[best]! - SUNNY_FACE_EYE_ROW) ? i : best), 0);
+      const lipsTop = reptileHousePlinthTop() + REPTILE_ARCH_HEIGHT + reptileHouseLipThickness();
+      say(
+        fall < 0 && ys[eye]! > lipsTop + 0.3,
+        `${name}: ${ys.length} front vertices, canvas row ${fall < 0 ? 'falls' : 'RISES'} ${Math.abs(fall).toFixed(2)}/m with height (flipY ${map.flipY}); ` +
+          `the eye row lands at y ${ys[eye]!.toFixed(2)}, over the lips' top at ${lipsTop.toFixed(2)} (the mouth is the door)`,
+      );
+      continue;
+    }
     const eye = rows.reduce((best, row, i) => (Math.abs(row - SNAKE_FACE_ROWS.eye) < Math.abs(rows[best]! - SNAKE_FACE_ROWS.eye) ? i : best), 0);
     const mouth = rows.reduce((best, row, i) => (Math.abs(row - SNAKE_FACE_ROWS.mouth) < Math.abs(rows[best]! - SNAKE_FACE_ROWS.mouth) ? i : best), 0);
-    const fall = slope(ys, rows);
     say(
       fall < 0 && ys[eye]! > ys[mouth]!,
       `${name}: ${ys.length} front vertices, canvas row ${fall < 0 ? 'falls' : 'RISES'} ${Math.abs(fall).toFixed(2)}/m with height (flipY ${map.flipY}); ` +

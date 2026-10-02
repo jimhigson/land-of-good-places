@@ -125,16 +125,25 @@ export const REPTILE_BACK_WALL_ALONG = REPTILE_SHELL_RADIUS * Math.cos(Math.PI /
 /** The tail signpost's base, radially from the building centre. */
 export const REPTILE_TAIL_REACH = 11.2;
 
-/** The tail base's bearing, in degrees past the facade bearing. */
-export const REPTILE_TAIL_BEARING_OFFSET = 28;
+/**
+ * The tail base's bearing, in degrees past the facade bearing. 40, not the
+ * spec's 28: the coil starts at this bearing too, and at 28° its first tube
+ * ran 0.6 m into the flank of the head now lying in front of the door
+ * (`reptile_house_build.py`'s `check_head_clearance`, 2 October 2026).
+ */
+export const REPTILE_TAIL_BEARING_OFFSET = 40;
 
 /** The round "snake hole" entrance arch's clear width and height. */
 export const REPTILE_ARCH_WIDTH = 3.4;
 export const REPTILE_ARCH_HEIGHT = 3.6;
 
-/** Manifest numbers for the placement agents (not this effort). */
+/**
+ * Manifest numbers for the placement agents (not this effort). The bounding
+ * radius is 12, not the spec's 11.5: the tongue — the doormat — lolls out of
+ * the mouth to its fork at 11.9 m (`reptile_house_build.py` measures it).
+ */
 export const REPTILE_FOOTPRINT_RADIUS = 10.5;
-export const REPTILE_BOUNDING_RADIUS = 11.5;
+export const REPTILE_BOUNDING_RADIUS = 12;
 
 // ---------------------------------------------------------------------------
 // Exhibits — masonry the `cases` kit builds and the colliders register

@@ -1,15 +1,4 @@
-import {
-  BoxGeometry,
-  CircleGeometry,
-  Curve,
-  EllipseCurve,
-  Group,
-  Mesh,
-  Shape,
-  ShapeGeometry,
-  TubeGeometry,
-  Vector3,
-} from 'three';
+import { BoxGeometry, CircleGeometry, Curve, EllipseCurve, Group, Mesh, TubeGeometry, Vector3 } from 'three';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import type { MovingPlatform, WalkSurfaces } from '../building/surfaces';
 import { interiorMaterial } from '../building/parts';
@@ -115,22 +104,37 @@ export function reptileTailBase(frame: FacadeFrame): { x: number; z: number } {
 
 const SHELL_SIDES = 16;
 const SHELL_HALF_THICKNESS = 0.3;
-/** The jambs' half-spacing: the arch's clear width, plus their own thickness. */
-const JAMB_ACROSS = REPTILE_ARCH_WIDTH / 2 + 0.05;
 const JAMB_HALF = 0.3;
+/**
+ * The jambs' centrelines: their inner faces lie **on** the bore's drawn walls
+ * — `REPTILE_ARCH_WIDTH / 2` out, plus their own half-thickness. The first cut
+ * put the centreline 0.05 past the bore, so the collider stood 0.25 m inside
+ * the drawn opening on each side: a child walking the edge of the mouth
+ * bumped air (the solidity review, 2 October 2026).
+ */
+const JAMB_ACROSS = REPTILE_ARCH_WIDTH / 2 + JAMB_HALF;
+/**
+ * The doorway strip the jambs own, `|across|` under this: the bore and the
+ * lips either side of it. `reptileHouseLowDiscs` leaves the strip alone so no
+ * mesh-derived disc lands in the doorway.
+ */
+export const REPTILE_JAMB_STRIP = JAMB_ACROSS + JAMB_HALF;
 
 /**
  * **The exterior's collision: a closed ring with one hole in it.** Fifteen
  * chords of the 16-gon, two stubs of the sixteenth either side of the
- * doorway, two jambs running out past the plinth, and a back wall two metres
- * in so a sprinting child stops on something while the iris closes. Plus
- * whatever of the dressing stands low enough to meet her: the discs the
- * caller derived from the mesh (`lowDiscs`), the tail base and the sign.
+ * doorway, two jambs running out from the back wall to where the mouth's lips
+ * reach (`jambReach`, measured off the mesh — not a metre further onto the
+ * paving), and the back wall two metres in so a sprinting child stops on
+ * something while the iris closes. Plus whatever of the dressing stands low
+ * enough to meet her: the discs the caller derived from the mesh
+ * (`lowDiscs` — the head's cheeks, the tail, the sign) and the tail base.
  */
 export function registerReptileShellCollision(
   collision: CollisionWorld,
   frame: FacadeFrame,
   lowDiscs: readonly { x: number; z: number; radius: number }[],
+  jambReach: number,
 ): WallCollider[] {
   const R = REPTILE_SHELL_RADIUS;
   const sector = (Math.PI * 2) / SHELL_SIDES;
@@ -163,7 +167,7 @@ export function registerReptileShellCollision(
   }
   for (const side of [-1, 1]) {
     wall(facadeAlong, side * JAMB_ACROSS, facadeAlong, side * (vertexAcross + 0.3), SHELL_HALF_THICKNESS);
-    wall(REPTILE_BACK_WALL_ALONG, side * JAMB_ACROSS, R + 1.6, side * JAMB_ACROSS, JAMB_HALF);
+    wall(REPTILE_BACK_WALL_ALONG, side * JAMB_ACROSS, jambReach, side * JAMB_ACROSS, JAMB_HALF);
   }
   wall(REPTILE_BACK_WALL_ALONG, JAMB_ACROSS, REPTILE_BACK_WALL_ALONG, -JAMB_ACROSS, 0.35);
 
@@ -233,7 +237,7 @@ export function buildForecourt(root: Group, surfaces: WalkSurfaces, originX: num
     ),
   );
 
-  // The spur: from the doormat out to the lawn's edge, in the facade's frame.
+  // The spur: from under the mouth out to the lawn's edge, in the facade's frame.
   const spurFrom = REPTILE_DOOR_BAND_OUTER - 1;
   const spurTo = REPTILE_FORECOURT_RADIUS - 1;
   const spur = new Mesh(new BoxGeometry(3.4, 0.04, spurTo - spurFrom), toonMaterial(PALETTE.pathSand));
@@ -243,32 +247,8 @@ export function buildForecourt(root: Group, surfaces: WalkSurfaces, originX: num
   spur.rotation.y = frame.yaw;
   spur.name = 'reptile-forecourt-spur';
   root.add(spur);
-
-  root.add(tongueDoormat(frame, originX, originZ));
-}
-
-/** The forked-tongue doormat on the paving outside the door: 1.6 × 1.0 m, pink. */
-function tongueDoormat(frame: FacadeFrame, originX: number, originZ: number): Mesh {
-  const shape = new Shape();
-  // A rounded strip with a V fork at the far end, drawn in the facade's own
-  // (across, along) plane and stood on the paving.
-  shape.moveTo(-0.3, -0.5);
-  shape.lineTo(0.3, -0.5);
-  shape.lineTo(0.3, 0.1);
-  shape.lineTo(0.8, 0.5);
-  shape.lineTo(0.55, 0.5);
-  shape.lineTo(0, 0.2);
-  shape.lineTo(-0.55, 0.5);
-  shape.lineTo(-0.8, 0.5);
-  shape.lineTo(-0.3, 0.1);
-  shape.closePath();
-  const mat = decal(new Mesh(new ShapeGeometry(shape), toonMaterial(PALETTE.markerPink)));
-  mat.rotation.x = -Math.PI / 2;
-  mat.rotation.z = -frame.yaw;
-  const at = facadeToWorld(frame, REPTILE_DOOR_BAND_OUTER + 0.8, 0);
-  mat.position.set(at.x - originX, 0.05, at.z - originZ);
-  mat.name = 'reptile-doormat';
-  return mat;
+  // The doormat is Sunny's tongue, part of the exterior kit (`rh-tongue`):
+  // it lolls out of the mouth over the plinth's edge onto this paving.
 }
 
 /** The hall's floor plate, walls and rib arches, in `root` (at the hall origin). */

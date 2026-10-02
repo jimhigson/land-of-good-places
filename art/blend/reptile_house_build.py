@@ -31,19 +31,27 @@ the game** are not typed here at all — they come through
   the paving the plot lays reaches it.
 * ``REPTILE_BOUNDING_RADIUS`` — nothing in the kit reaches past it.
 
-## How the snake avoids her own front door
+## The door is her mouth
 
-A snake coiled round a building blocks its door, and this took some working
-out, so here it is once. The helix starts just past the door (the tail's
-bearing, ``REPTILE_TAIL_BEARING_OFFSET`` degrees round from it) and winds
-**away**, so the bottom turn never crosses the doorway at all; it is the
-*second* turn that passes over the door, 0.92 turns later. One pitch is not
-tall enough to clear a 3.6 m arch, so every turn carries a smooth **hump** at
-the door bearing — full height on the first pass, half on the second, so the
-coils stay snug — and the whole body reads as lifting to let you in. The head
-then sits at the front with her chin on that second hump, looking at the
-camera, and the neck comes over the dome from behind. The clearance under the
-hump is measured off the emitted vertices below, not trusted.
+Jim, 2 October 2026, on seeing the first cut's snake hole beside a head on
+the roof: *"Why beside the door and not the door as its mouth? That sounds
+cooler so do that."* So the head lies on the ground in front of the plinth,
+chin down, mouth open — the bore through it is the game's
+``REPTILE_ARCH_WIDTH × REPTILE_ARCH_HEIGHT`` doorway, lined pink
+(``rh-mouth``, a boolean of the old arch tunnel with the head), the tongue
+(``rh-tongue``) lolling out of it over the plinth's edge onto the paving as
+the doormat, and the eyes above the mouth. Cute, smiley, no teeth.
+
+The body still has to get past its own door. The helix starts just past it
+(the tail's bearing, ``REPTILE_TAIL_BEARING_OFFSET`` degrees round) and winds
+**away**, so the bottom turn never crosses the doorway; the pass over the
+door comes 0.92 turns later and carries a smooth **hump** at the door
+bearing, tall enough to clear the crown of the head below it. The helix ends
+a little short of the door on its second lap, and the neck lifts up over that
+humped pass and dives down into the back of the crown — Sunny has reached
+round her own body to lay her head at your feet. Every clearance (coil over
+head, neck over coil, tail beside head) is measured off the emitted vertices
+below, not trusted.
 
 ## Conventions (ART_DIRECTION §7)
 
@@ -53,8 +61,9 @@ hump is measured off the emitted vertices below, not trusted.
   camera's diagonal.
 * Every node is baked into vertex positions and leaves at an identity
   transform, with one exception the export script allows: ``rh-tongue`` is
-  emitted with its node origin at the mouth, so the game can scale it 0→1 for
-  a flick with no pivot arithmetic (the castle chest-lid precedent).
+  emitted with its node origin at its root on the mouth's floor, so the game
+  can wag it a few degrees with no pivot arithmetic (the castle chest-lid
+  precedent).
 * No two faces share a plane (``check:coplanar``). Parts interpenetrate
   rather than touch; the start caps of the coil, belly and tail are each
   buried inside another tube at a different angle.
@@ -88,6 +97,7 @@ from blendkit import (  # noqa: E402
 )
 from gate_arch_build import paint_planar_uvs  # noqa: E402
 from reptile_constants import (  # noqa: E402
+    SUNNY_FACE_EYE_ROW,
     REPTILE_ARCH_HEIGHT,
     REPTILE_ARCH_WIDTH,
     REPTILE_BOUNDING_RADIUS,
@@ -122,7 +132,9 @@ FLOOR = PLINTH_H
 # ring radius, the height and the tube radius are all linear in the turn
 # count, plus the door hump described in the docstring.
 
-COIL_TURNS = 2.6
+#: Short of two laps: the body ends on the second lap a little before the
+#: door bearing, where the neck takes over (`body_path`).
+COIL_TURNS = 1.86
 COIL_RING_R0 = 8.1
 #: How much the ring tightens per turn.
 COIL_RING_STEP = 0.9
@@ -138,13 +150,15 @@ COIL_SIDES = 16
 COIL_STEPS_PER_TURN = 36
 
 #: The hump over the door: a raised-cosine window this wide either side of the
-#: door bearing, lifting the body by `HUMP_H` on the first pass and half that on
-#: the second (the pass the head's chin rests on).
-HUMP_HALF_WINDOW = math.radians(50.0)
-HUMP_H = 2.15
-HUMP_SECOND_PASS = 0.5
+#: door bearing, lifting the body by `HUMP_H` on the first pass — clear over
+#: the crown of the head lying below it (`check_head_clearance`) — and
+#: `HUMP_SECOND_PASS` of that on the second, so the two passes stay snug
+#: where the helix ends.
+HUMP_HALF_WINDOW = math.radians(60.0)
+HUMP_H = 3.5
+HUMP_SECOND_PASS = 0.7
 
-#: The neck: from the helix end, over the dome, into the back of the head.
+#: The neck: from the helix end, up over the first pass, down into the crown.
 NECK_R1 = 0.85
 
 #: The belly stripe: a thinner tube on the same path, pushed down and outward
@@ -188,14 +202,42 @@ PORTHOLE_SEGMENTS = 10
 
 # -------------------------------------------------------------------- head
 
-HEAD_RX, HEAD_RY, HEAD_RZ = 1.7, 2.1, 1.5
-#: Head centre: on top of everything at the front, resting on the second door
-#: hump with her chin out over the entrance, so the first thing a child sees
-#: walking up is Sunny looking down at her. Measured and printed below.
-HEAD_CENTRE = Vector((0.0, -6.0, 10.7))
-#: The mouth, where the tongue's node origin goes.
-MOUTH = HEAD_CENTRE + Vector((0.0, -HEAD_RY + 0.25, -0.62))
-TONGUE_R = 0.08
+#: A wide, flattish snake head big enough to hold the doorway in its open
+#: mouth with the eyes above it: 8.4 wide, 4.6 deep, and sunk two metres into
+#: the ground so its chin spreads wide at ground level where the mouth is
+#: (a round head sitting *on* the ground is only 1.8 m wide at its base).
+HEAD_RX, HEAD_RY, HEAD_RZ = 4.2, 2.3, 4.4
+#: Head centre: in front of the plinth with the back of the head buried in
+#: the greenhouse wall, the mouth's lips just inside `REPTILE_BOUNDING_RADIUS`.
+HEAD_CENTRE = Vector((0.0, -8.5, 2.0))
+
+#: The bore through the head is the old snake hole's outline (`arch_outline`):
+#: legs straight down to the plinth's top so the full `REPTILE_ARCH_WIDTH` is
+#: clear at ankle height, a semicircle on top. It is lined pink `ARCH_LIP`
+#: thick (`rh-mouth`) — the lining shows on the face as lips — and the head's
+#: own hole is cut `LIP_BURY` smaller than the lining's outer skin, so the
+#: skin sits inside the flesh and no two faces share a plane.
+ARCH_LIP = 0.4
+LIP_BURY = 0.04
+ARCH_SEGMENTS = 24
+#: Where the bore ends at the back: just inside the greenhouse wall (r 7.0 at
+#: the door, 6.68 at the bore's corners), so the mouth is an alcove closed by
+#: the house, as the snake hole was; the back-wall collider stops her first.
+ARCH_BACK_Y = -(HOUSE_PROFILE[1][0] - 0.4)
+#: Both cutters start out here, well in front of the head's front-most point.
+ARCH_FRONT_Y = -(REPTILE_BOUNDING_RADIUS + 1.0)
+#: The stone-less join: behind the head's back surface the lining runs on to
+#: the house wall as a plain collar, within this box.
+COLLAR_BACK_Y = HEAD_CENTRE.y
+
+#: The tongue: a flat pink ribbon from the mouth's floor on the plinth, out
+#: over the plinth's edge and down onto the paving, forking at its tip — the
+#: doormat. Its node origin is its root on the plinth; the game wags it there.
+TONGUE_ROOT = Vector((0.0, -8.0, 0.0))
+TONGUE_THICK = 0.08
+#: Standing off the plinth top and the paving by more than a centimetre, so
+#: `check:coplanar` has no stand-off to report.
+TONGUE_LIFT = 0.06
 
 # -------------------------------------------------------------------- tail
 #
@@ -211,26 +253,6 @@ BELL_R = 0.36
 SIGN_W, SIGN_H, SIGN_D = 1.7, 0.85, 0.08
 #: Where the plank hangs, measured along the rising tail.
 SIGN_Z = 2.35
-
-# -------------------------------------------------------------------- arch
-#
-# The snake hole: a short round tunnel from the coil's face back to the
-# greenhouse wall, with a rounded lip. Its *clear* opening is the game's
-# `REPTILE_ARCH_WIDTH × REPTILE_ARCH_HEIGHT`, above the plinth.
-
-ARCH_LIP = 0.4
-ARCH_SEGMENTS = 24
-#: The tunnel's mouth is this far out; it runs back into the house wall.
-ARCH_MOUTH_Y = -(REPTILE_DRAWN_DOOR_ALONG + 0.45)
-ARCH_BACK_Y = -(HOUSE_PROFILE[1][0] - 0.5)
-
-# ------------------------------------------------------------------ awning
-#
-# One giant leaf over the doormat, sprouting from the arch's top and leaning
-# out and up, so it sits in front of the humped coil rather than inside it.
-
-AWNING_W, AWNING_L, AWNING_T = 4.0, 2.5, 0.12
-AWNING_TILT = math.radians(18.0)
 
 
 # =============================================================================
@@ -338,17 +360,16 @@ def body_path():
         points.append(p)
         radii.append(r)
     end, end_r, _ = helix_at(COIL_TURNS)
-    # The neck: from the helix end at the back-left, arcing over the dome
-    # and the top coil's front, into the back of the head.
-    back = HEAD_CENTRE + Vector((0.0, HEAD_RY, 0.0))
-    ahead, _, _ = helix_at(COIL_TURNS + 0.02)
-    tangent = (ahead - end).normalized()
+    # The neck: from the helix end on the second lap, just short of the door,
+    # forward and up over the humped first pass, then down into the back of
+    # the crown — the last knot is buried in the head so the end cap is hidden.
+    crown = HEAD_CENTRE + Vector((0.0, -0.5, HEAD_RZ * 0.8))
     neck_knots = [
         end,
-        end + tangent * 1.6 + Vector((0.0, 0.0, 0.5)),
-        Vector((end.x * 0.25, back.y + 1.7, HEAD_CENTRE.z - 0.1)),
-        back + Vector((0.0, 0.1, 0.0)),
-        HEAD_CENTRE + Vector((0.0, HEAD_RY - 1.0, 0.0)),
+        Vector((end.x * 0.7, HEAD_CENTRE.y + 0.9, end.z + 1.8)),
+        Vector((end.x * 0.25, HEAD_CENTRE.y - 1.0, end.z + 0.8)),
+        Vector((0.0, HEAD_CENTRE.y - 1.0, crown.z + 1.6)),
+        crown,
     ]
     neck = catmull_rom(neck_knots, 4)[1:]
     for i, p in enumerate(neck):
@@ -488,20 +509,148 @@ def paint_face_uvs(obj, centre: Vector, rx: float, rz: float):
             layer.data[loop_index].uv = ((co.x - lo_x) / width, (hi_z - co.z) / height)
 
 
+def apply_boolean(obj, other, operation: str) -> None:
+    """``obj = obj <operation> other``, applied in place with the exact solver."""
+    modifier = obj.modifiers.new("bool", "BOOLEAN")
+    modifier.operation = operation
+    modifier.object = other
+    modifier.solver = "EXACT"
+    with bpy.context.temp_override(object=obj, active_object=obj, selected_objects=[obj]):
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+
+def tunnel(outer: float, y0: float, y1: float):
+    """A closed solid round the mouth's outline: the bore widened by ``outer``
+    on every side, extruded along Y from ``y0`` to ``y1``. ``outer`` 0 is the
+    bore itself (the cutter); `ARCH_LIP` is the lining's skin."""
+    outline, _ = arch_outline()
+    count = len(outline)
+    verts = []
+    for i, (x, z) in enumerate(outline):
+        xa, za = outline[max(i - 1, 0)]
+        xb, zb = outline[min(i + 1, count - 1)]
+        tx, tz = xb - xa, zb - za
+        length = math.hypot(tx, tz) or 1.0
+        nx, nz = tz / length, -tx / length
+        if nx * x + nz * (z - (FLOOR + REPTILE_ARCH_HEIGHT * 0.5)) < 0:
+            nx, nz = -nx, -nz
+        verts.append((x + nx * outer, y0, z + nz * outer))
+        verts.append((x + nx * outer, y1, z + nz * outer))
+    faces = []
+    for i in range(count - 1):
+        a, b = 2 * i, 2 * i + 1
+        c, d = 2 * (i + 1) + 1, 2 * (i + 1)
+        faces.append((a, b, c, d))
+    # The legs' bottoms, below the floor, and the two side faces of the
+    # open-bottomed outline: close the solid with a floor strip.
+    floor = [(count - 1) * 2, (count - 1) * 2 + 1, 1, 0]
+    faces.append(tuple(floor))
+    front = [2 * i for i in range(count)]
+    back = [2 * i + 1 for i in range(count - 1, -1, -1)]
+    faces.append(tuple(front))
+    faces.append(tuple(back))
+    return verts, faces
+
+
 def build_head(coll):
+    """The head on the ground with the doorway through it, the pink lining
+    and the tongue. Three booleans, all against an uncut copy of the head:
+
+    * ``rh-head`` = head − tunnel(`ARCH_LIP` − `LIP_BURY`)
+    * ``rh-mouth`` = tunnel(`ARCH_LIP`) ∩ (head ∪ collar) − tunnel(0)
+    """
     hv, hf = ellipsoid(HEAD_RX, HEAD_RY, HEAD_RZ, subdivisions=4)
     head = Part("rh-head").add(hv, hf, Matrix.Translation(HEAD_CENTRE)).emit(coll)
-    paint_face_uvs(head, HEAD_CENTRE, HEAD_RX, HEAD_RZ)
+    clip = Part("tmp-clip").add(hv, hf, Matrix.Translation(HEAD_CENTRE)).emit(coll)
+    # The collar: the bit of lining between the head's back surface and the
+    # greenhouse wall, a box the lining is clipped to behind the head.
+    half_w = REPTILE_ARCH_WIDTH * 0.5 + ARCH_LIP + 0.3
+    cv, cf = box(half_w * 2, COLLAR_BACK_Y - ARCH_BACK_Y, FLOOR + REPTILE_ARCH_HEIGHT + ARCH_LIP + 1.0)
+    collar = Part("tmp-collar").add(
+        cv, cf, Matrix.Translation(Vector((0.0, (COLLAR_BACK_Y + ARCH_BACK_Y) * 0.5, (FLOOR + REPTILE_ARCH_HEIGHT + ARCH_LIP + 1.0) * 0.5 - 0.6)))
+    ).emit(coll, smooth=False)
+    apply_boolean(clip, collar, "UNION")
 
-    # The tongue, authored about the mouth: a stem forward, then the fork.
-    tongue = Part("rh-tongue")
-    stem = [(0.0, 0.1, 0.0), (0.0, -0.5, -0.03), (0.0, -0.95, -0.08)]
-    tongue.add(*sweep_varying(stem, [TONGUE_R, TONGUE_R, TONGUE_R * 0.9], 6))
+    hole = Part("tmp-hole").add(*tunnel(ARCH_LIP - LIP_BURY, ARCH_FRONT_Y, ARCH_BACK_Y)).emit(coll, smooth=False)
+    apply_boolean(head, hole, "DIFFERENCE")
+
+    mouth = Part("rh-mouth").add(*tunnel(ARCH_LIP, ARCH_FRONT_Y, ARCH_BACK_Y)).emit(coll)
+    apply_boolean(mouth, clip, "INTERSECT")
+    bore = Part("tmp-bore").add(*tunnel(0.0, ARCH_FRONT_Y - 1.0, ARCH_BACK_Y + 0.1)).emit(coll, smooth=False)
+    apply_boolean(mouth, bore, "DIFFERENCE")
+    # The bore cutter was pushed `0.1` past the back so the lining has a
+    # 0.1 m back annulus and the back face of the bore itself: the mouth is
+    # an alcove closed by the lining, like the snake hole was by the wall.
+
+    for tmp in (clip, collar, hole, bore):
+        mesh = tmp.data
+        bpy.data.objects.remove(tmp, do_unlink=True)
+        bpy.data.meshes.remove(mesh)
+
+    paint_face_uvs(head, HEAD_CENTRE, HEAD_RX, HEAD_RZ)
+    tongue = build_tongue(coll)
+    return head, mouth, tongue
+
+
+def sweep_flat(points, half_widths, half_thick: float, sides: int = 8):
+    """A flat ribbon: `sweep_varying`'s frame with an elliptical section,
+    ``half_widths`` across and ``half_thick`` through."""
+    pts = [Vector(p) for p in points]
+    count = len(pts)
+    tangents = []
+    for i in range(count):
+        nxt = pts[min(i + 1, count - 1)]
+        prv = pts[max(i - 1, 0)]
+        tangents.append((nxt - prv).normalized())
+    up = Vector((0.0, 0.0, 1.0))
+    verts = []
+    for i in range(count):
+        side = tangents[i].cross(up).normalized()
+        normal = side.cross(tangents[i]).normalized()
+        for k in range(sides):
+            a = k * TAU / sides
+            verts.append(tuple(pts[i] + side * (math.cos(a) * half_widths[i]) + normal * (math.sin(a) * half_thick)))
+    faces = []
+    for i in range(count - 1):
+        for k in range(sides):
+            kn = (k + 1) % sides
+            faces.append((i * sides + k, i * sides + kn, (i + 1) * sides + kn, (i + 1) * sides + k))
+    faces.append(tuple(range(sides - 1, -1, -1)))
+    faces.append(tuple(range((count - 1) * sides, count * sides)))
+    return verts, faces
+
+
+def build_tongue(coll):
+    """The tongue, authored about its root on the mouth's floor: along the
+    plinth, over its edge, down to the paving, and forking at the tip."""
+    plinth_edge = -REPTILE_SHELL_RADIUS * math.cos(math.pi / PLINTH_SIDES)
+    on_plinth = FLOOR + TONGUE_LIFT + TONGUE_THICK * 0.5
+    on_ground = TONGUE_LIFT + TONGUE_THICK * 0.5
+    fork_y = plinth_edge - 1.6
+    stem = catmull_rom(
+        [
+            (0.0, 0.0, on_plinth),
+            (0.0, plinth_edge + 0.25 - TONGUE_ROOT.y, on_plinth),
+            (0.0, plinth_edge - 0.45 - TONGUE_ROOT.y, on_ground + 0.02),
+            (0.0, fork_y - TONGUE_ROOT.y, on_ground),
+        ],
+        6,
+    )
+    widths = [0.45 + 0.2 * (i / (len(stem) - 1)) for i in range(len(stem))]
+    tongue = Part("rh-tongue").add(*sweep_flat(stem, widths, TONGUE_THICK * 0.5))
+    tip_y = fork_y - 0.95
     for sx in (-1.0, 1.0):
-        prong = [(0.0, -0.9, -0.08), (sx * 0.18, -1.25, -0.12), (sx * 0.32, -1.5, -0.2)]
-        tongue.add(*sweep_varying(prong, [TONGUE_R * 0.9, TONGUE_R * 0.7, 0.03], 6))
-    tongue_obj = tongue.emit(coll, location=tuple(MOUTH))
-    return head, tongue_obj
+        prong = catmull_rom(
+            [
+                (0.0, fork_y - TONGUE_ROOT.y + 0.3, on_ground),
+                (sx * 0.28, fork_y - TONGUE_ROOT.y - 0.35, on_ground),
+                (sx * 0.62, tip_y - TONGUE_ROOT.y, on_ground),
+            ],
+            5,
+        )
+        pw = [0.34 * (1.0 - 0.75 * (i / (len(prong) - 1))) for i in range(len(prong))]
+        tongue.add(*sweep_flat(prong, pw, TONGUE_THICK * 0.5))
+    return tongue.emit(coll, location=tuple(TONGUE_ROOT))
 
 
 def tail_path():
@@ -600,88 +749,6 @@ def arch_outline():
     return pts, spring
 
 
-def build_arch(coll):
-    """The snake hole: an arched tunnel from the coil's face back to the
-    greenhouse wall, with a half-round lip at the mouth. Clear opening =
-    `REPTILE_ARCH_WIDTH × REPTILE_ARCH_HEIGHT` above the plinth; the legs run
-    on down into the plinth so the ends are buried."""
-    outline, _ = arch_outline()
-    depth = ARCH_BACK_Y - ARCH_MOUTH_Y
-    # The lip profile, as (outward offset, depth): bore edge at the mouth,
-    # half-round out to the outer face, straight back to the wall, and in.
-    lip = ARCH_LIP * 0.5
-    profile = [(0.0, 0.0)]
-    lip_segments = 5
-    for s in range(1, lip_segments):
-        a = (s / lip_segments) * math.pi
-        profile.append((lip * (1 - math.cos(a)), -lip * math.sin(a)))
-    profile += [(ARCH_LIP, 0.0), (ARCH_LIP, depth), (0.0, depth)]
-    count = len(outline)
-    pcount = len(profile)
-    verts = []
-    for i, (x, z) in enumerate(outline):
-        # The outward normal, from the neighbouring outline points; the legs'
-        # ends get a plain sideways normal.
-        xa, za = outline[max(i - 1, 0)]
-        xb, zb = outline[min(i + 1, count - 1)]
-        tx, tz = xb - xa, zb - za
-        length = math.hypot(tx, tz) or 1.0
-        nx, nz = tz / length, -tx / length
-        if nx * x + nz * (z - (FLOOR + REPTILE_ARCH_HEIGHT * 0.5)) < 0:
-            nx, nz = -nx, -nz
-        for off, d in profile:
-            verts.append((x + nx * off, ARCH_MOUTH_Y + d, z + nz * off))
-    faces = []
-    for i in range(count - 1):
-        for p in range(pcount):
-            pn = (p + 1) % pcount
-            a = i * pcount + p
-            b = i * pcount + pn
-            c = (i + 1) * pcount + pn
-            d = (i + 1) * pcount + p
-            faces.append((a, b, c, d))
-    # Caps on the buried leg ends, so the tunnel is a closed solid.
-    faces.append(tuple(range(pcount - 1, -1, -1)))
-    faces.append(tuple(range((count - 1) * pcount, count * pcount)))
-    return Part("rh-arch").add(verts, faces).emit(coll)
-
-
-def build_awning(coll):
-    """A giant leaf, pointing out over the doormat from the arch's top."""
-    n = 24
-    outline = []
-    for i in range(n):
-        a = i * TAU / n
-        # A pointed leaf: a lens in XZ (Z = along the leaf) with a sharp tip.
-        x = (AWNING_W * 0.5) * math.sin(a) * (1.0 - 0.3 * math.cos(a))
-        y = (AWNING_L * 0.5) * math.cos(a)
-        outline.append((x, y))
-    verts = [(x, -AWNING_T * 0.5, z) for x, z in outline] + [(x, AWNING_T * 0.5, z) for x, z in outline]
-    verts.append((0.0, -AWNING_T * 0.5, 0.0))
-    verts.append((0.0, AWNING_T * 0.5, 0.0))
-    fc, bc = 2 * n, 2 * n + 1
-    faces = []
-    for i in range(n):
-        j = (i + 1) % n
-        faces.append((i, j, n + j, n + i))
-        faces.append((j, i, fc))
-        faces.append((n + i, n + j, bc))
-    # A midrib: a slim tube down the leaf's length, standing proud of it.
-    rib_v, rib_f = sweep_varying(
-        [(0.0, -AWNING_T * 0.35, -AWNING_L * 0.5 + 0.1), (0.0, -AWNING_T * 0.35, AWNING_L * 0.5 - 0.15)],
-        [0.09, 0.05],
-        6,
-    )
-    # Lay the leaf flat (its length along −Y, out of the door), tilt it up by
-    # `AWNING_TILT`, and hang its stem end over the arch's top.
-    lie = Matrix.Rotation(-math.pi / 2, 4, "X")
-    tilt = Matrix.Rotation(-AWNING_TILT, 4, "X")
-    stem = Vector((0.0, ARCH_MOUTH_Y - 0.1, FLOOR + REPTILE_ARCH_HEIGHT + ARCH_LIP - 0.1))
-    place = Matrix.Translation(stem + Vector((0.0, -AWNING_L * 0.5 * math.cos(AWNING_TILT), AWNING_L * 0.5 * math.sin(AWNING_TILT))))
-    awning = Part("rh-awning").add(verts, faces, place @ tilt @ lie).add(rib_v, rib_f, place @ tilt @ lie)
-    return awning.emit(coll, sharp_deg=60.0)
-
-
 # =============================================================================
 # Checks — every one of them against the emitted vertices
 # =============================================================================
@@ -720,34 +787,47 @@ def check_plinth(bounds) -> str:
     )
 
 
-def check_door_clearance(bounds) -> str:
-    """Nothing of the snake hangs onto the arch, and the leaf is clear of her."""
-    arch_lo, arch_hi = bounds["rh-arch"]
-    lowest = 1e9
-    for name in ("rh-coil", "rh-coil-belly", "rh-coil-spots"):
-        for v in world_verts(name):
-            if abs(v.x) <= arch_hi.x + 0.1 and arch_lo.y - 0.5 <= v.y <= arch_hi.y + 0.5:
-                lowest = min(lowest, v.z)
-    assert lowest > arch_hi.z, (
-        f"the coil hangs to z {lowest:.2f} over the door, below the arch's top {arch_hi.z:.2f} — raise HUMP_H"
-    )
-    # The awning must sit in front of the humped body, never inside it: every
-    # leaf vertex is further from the coil's centre line than the tube there.
-    steps = 400
-    centreline = [helix_at(COIL_TURNS * i / steps) for i in range(steps + 1)]
+def head_scaled(v: Vector) -> float:
+    """< 1 inside the head's ellipsoid, 1 on its skin, > 1 outside."""
+    d = v - HEAD_CENTRE
+    return math.sqrt((d.x / HEAD_RX) ** 2 + (d.y / HEAD_RY) ** 2 + (d.z / HEAD_RZ) ** 2)
+
+
+def check_head_clearance() -> str:
+    """The body clears the head it lies in front of, the neck clears the pass
+    it climbs over, and the neck's end is buried in the crown."""
+    points, radii = body_path()
+    steps = int(round(COIL_TURNS * COIL_STEPS_PER_TURN))
+    head_verts = world_verts("rh-head")
+    # Every helix sample's tube against every head vertex: the real mesh, not
+    # the ellipsoid formula (the boolean leaves the formula's skin only where
+    # it was not cut).
     worst = 1e9
-    for v in world_verts("rh-awning"):
-        for p, r, _ in centreline:
-            worst = min(worst, (v - p).length - r)
-    assert worst > 0.05, f"the awning pokes {-worst:.2f} m into the coil"
+    worst_t = 0.0
+    for i in range(steps + 1):
+        p, r = points[i], radii[i]
+        if p.y > HEAD_CENTRE.y + HEAD_RY + 1.5:
+            continue
+        gap = min((v - p).length for v in head_verts) - r
+        if gap < worst:
+            worst, worst_t = gap, COIL_TURNS * i / steps
+    assert worst > 0.1, f"the coil comes within {worst:.2f} m of the head at turn {worst_t:.2f} — raise HUMP_H"
+    # The neck over the first pass.
+    first = [(points[i], radii[i]) for i in range(steps + 1) if COIL_TURNS * i / steps < 1.3]
+    neck = [(points[i], radii[i]) for i in range(steps + 1, len(points))]
+    neck_gap = min((p - q).length - r - s for p, r in neck for q, s in first)
+    assert neck_gap > 0.05, f"the neck passes {-neck_gap:.2f} m into the first coil pass"
+    end, end_r = neck[-1]
+    buried = head_scaled(end)
+    assert buried < 0.9, f"the neck's end sits at {buried:.2f} of the head's radius — not buried"
     return (
-        f"  door: the humped coil's lowest point over the arch is z {lowest:.2f} against the arch's top "
-        f"{arch_hi.z:.2f}; the awning clears the body by {worst:.2f} m"
+        f"  head clearance: the coil's nearest pass is {worst:.2f} m off the head's skin (turn {worst_t:.2f}); "
+        f"the neck clears the first pass by {neck_gap:.2f} m and ends {buried:.2f} of a radius into the crown"
     )
 
 
-def check_arch(bounds) -> str:
-    lo, hi = bounds["rh-arch"]
+def check_mouth(bounds) -> str:
+    lo, hi = bounds["rh-mouth"]
     half_w = REPTILE_ARCH_WIDTH * 0.5
     _, spring = arch_outline()
 
@@ -756,22 +836,42 @@ def check_arch(bounds) -> str:
             return abs(v.x) - half_w
         return math.hypot(v.x, v.z - spring) - half_w
 
-    mid_y = (ARCH_MOUTH_Y + ARCH_BACK_Y) * 0.5
-    bore = [v for v in world_verts("rh-arch") if abs(bore_distance(v)) < 0.01 and abs(v.y - mid_y) <= (ARCH_BACK_Y - ARCH_MOUTH_Y) * 0.5 + 1e-4]
+    bore = [v for v in world_verts("rh-mouth") if abs(bore_distance(v)) < 0.01]
     assert len(bore) >= 2 * (ARCH_SEGMENTS + 3), f"only {len(bore)} bore vertices found"
     width = max(v.x for v in bore) - min(v.x for v in bore)
     height = max(v.z for v in bore) - FLOOR
-    assert abs(width - REPTILE_ARCH_WIDTH) < 0.01, f"arch bore {width:.3f} wide ≠ REPTILE_ARCH_WIDTH"
-    assert abs(height - REPTILE_ARCH_HEIGHT) < 0.01, f"arch bore {height:.3f} tall ≠ REPTILE_ARCH_HEIGHT"
-    assert -lo.y >= REPTILE_DRAWN_DOOR_ALONG, (
-        f"arch mouth at {-lo.y:.2f} is inside REPTILE_DRAWN_DOOR_ALONG {REPTILE_DRAWN_DOOR_ALONG}"
-    )
+    assert abs(width - REPTILE_ARCH_WIDTH) < 0.01, f"mouth bore {width:.3f} wide ≠ REPTILE_ARCH_WIDTH"
+    assert abs(height - REPTILE_ARCH_HEIGHT) < 0.01, f"mouth bore {height:.3f} tall ≠ REPTILE_ARCH_HEIGHT"
+    # The bore runs the whole way: from in front of the plinth to the back wall.
+    front = -min(v.y for v in bore)
+    back = -max(v.y for v in bore)
+    assert front >= REPTILE_DRAWN_DOOR_ALONG, f"the lips are at {front:.2f}, inside REPTILE_DRAWN_DOOR_ALONG"
+    assert back <= -ARCH_BACK_Y + 0.11, f"the bore stops {back:.2f} out, short of the house wall"
+    # The lips at ground level, where she walks in: the lining's lowest front
+    # vertices on either side of the bore.
+    lip = [v for v in world_verts("rh-mouth") if v.z < 0.6 and abs(v.x) > half_w + 0.02]
+    lips_at = -min(v.y for v in lip)
     assert height >= TALLEST_CHILD_HEIGHT + 0.4
     return (
-        f"  arch: bore {width:.2f} × {height:.2f} above the plinth (legs straight to the floor, "
-        f"semicircle from z {spring:.2f}), mouth at {-lo.y:.2f} out (≥ REPTILE_DRAWN_DOOR_ALONG "
-        f"{REPTILE_DRAWN_DOOR_ALONG}), lip top {hi.z:.2f}, headroom {height - TALLEST_CHILD_HEIGHT:.2f} "
-        f"over TALLEST_CHILD_HEIGHT"
+        f"  mouth: bore {width:.2f} × {height:.2f} above the plinth (legs straight to the floor, "
+        f"semicircle from z {spring:.2f}), lips {front:.2f} out at the top and {lips_at:.2f} at the floor "
+        f"(≥ REPTILE_DRAWN_DOOR_ALONG {REPTILE_DRAWN_DOOR_ALONG}), bore back at {back:.2f}, lining top "
+        f"{hi.z:.2f}, headroom {height - TALLEST_CHILD_HEIGHT:.2f} over TALLEST_CHILD_HEIGHT"
+    )
+
+
+def check_tongue(bounds) -> str:
+    lo, hi = bounds["rh-tongue"]
+    plinth_top = bounds["rh-plinth"][1].z
+    verts = world_verts("rh-tongue")
+    on_plinth = [v for v in verts if v.y > -REPTILE_SHELL_RADIUS * math.cos(math.pi / PLINTH_SIDES) + 0.3]
+    assert min(v.z for v in on_plinth) > plinth_top + 0.01, "the tongue lies in the plinth's top"
+    assert lo.z > 0.01, f"the tongue's underside is at z {lo.z:.3f}, in the paving"
+    assert hi.z < plinth_top + TONGUE_THICK + TONGUE_LIFT + 0.05
+    reach = max(math.hypot(v.x, v.y) for v in verts)
+    return (
+        f"  tongue: from the mouth's floor (z {max(v.z for v in on_plinth):.2f} over the plinth's {plinth_top:.2f}) "
+        f"out to {reach:.2f} ≤ REPTILE_BOUNDING_RADIUS {REPTILE_BOUNDING_RADIUS}, underside {lo.z:.3f} over the paving"
     )
 
 
@@ -785,9 +885,13 @@ def check_tail() -> str:
     assert off < 0.7, f"the tail touches down {off:.2f} m from the REPTILE_TAIL_REACH point"
     reach = max(math.hypot(v.x, v.y) for name in ("rh-tail", "rh-tail-bell", "rh-sign") for v in world_verts(name))
     assert reach <= REPTILE_BOUNDING_RADIUS, f"tail reaches {reach:.2f} > REPTILE_BOUNDING_RADIUS"
+    # Beside the head, never in it: the tail and the plank keep clear of the skin.
+    nearest = min(head_scaled(v) for name in ("rh-tail", "rh-sign", "rh-tail-bell") for v in world_verts(name))
+    assert nearest > 1.08, f"the tail or its plank reaches {nearest:.2f} of the head's radius — into the head"
     return (
         f"  tail: touches down (z {lowest.z:.2f}) {off:.2f} m from the REPTILE_TAIL_REACH point "
-        f"({base.x:.2f}, {base.y:.2f}); furthest vertex {reach:.2f} ≤ REPTILE_BOUNDING_RADIUS {REPTILE_BOUNDING_RADIUS}"
+        f"({base.x:.2f}, {base.y:.2f}); furthest vertex {reach:.2f} ≤ REPTILE_BOUNDING_RADIUS {REPTILE_BOUNDING_RADIUS}; "
+        f"nearest to the head {nearest:.2f} radii"
     )
 
 
@@ -807,12 +911,17 @@ def check_head(bounds) -> str:
     mesh = bpy.data.objects["rh-head"].data
     painted = sum(1 for p in mesh.polygons if p.normal.y < -0.02)
     assert mesh.uv_layers, "rh-head has no UV layer"
-    assert 0.35 < painted / len(mesh.polygons) < 0.65, "the painted hemisphere is not a hemisphere"
+    assert 0.2 < painted / len(mesh.polygons) < 0.65, "the painted hemisphere is not a hemisphere"
+    # The eyes sit above the mouth: the row `snakeFace.ts` paints Sunny's eyes
+    # on, read from the canvas's own owner, lands on the head above the lips.
+    eye_z = hi.z - SUNNY_FACE_EYE_ROW * (hi.z - lo.z)
+    lips_top = FLOOR + REPTILE_ARCH_HEIGHT + ARCH_LIP
+    assert eye_z > lips_top + 0.3, f"the eyes paint at z {eye_z:.2f}, on or below the lips' top {lips_top:.2f}"
     return (
         f"  head: centre ({HEAD_CENTRE.x:.1f}, {HEAD_CENTRE.y:.1f}, {HEAD_CENTRE.z:.1f}), "
         f"{HEAD_RX * 2:.1f} × {HEAD_RY * 2:.1f} × {HEAD_RZ * 2:.1f} m, z {lo.z:.2f} … {hi.z:.2f}; "
-        f"face UVs on {painted} of {len(mesh.polygons)} faces (front, −Y), canvas aspect "
-        f"{HEAD_RX * 2:.1f}:{HEAD_RZ * 2:.1f}; mouth / tongue origin ({MOUTH.x:.2f}, {MOUTH.y:.2f}, {MOUTH.z:.2f})"
+        f"face UVs on {painted} of {len(mesh.polygons)} faces (front, −Y); the eye row paints at z {eye_z:.2f}, "
+        f"{eye_z - lips_top:.2f} above the lips' top {lips_top:.2f}"
     )
 
 
@@ -837,8 +946,6 @@ def main() -> None:
     _, _, porthole_frames = build_house(collection("house"))
     build_head(collection("head"))
     _, _, _, sign_centre = build_tail(collection("tail"))
-    build_arch(collection("arch"))
-    build_awning(collection("awning"))
     bpy.context.view_layer.update()
 
     bounds = measured()
@@ -846,8 +953,9 @@ def main() -> None:
     print(summarise())
     print("\n  measured off the emitted vertices:")
     print(check_plinth(bounds))
-    print(check_arch(bounds))
-    print(check_door_clearance(bounds))
+    print(check_mouth(bounds))
+    print(check_head_clearance())
+    print(check_tongue(bounds))
     print(check_tail())
     print(check_head(bounds))
     print(check_portholes(porthole_frames))

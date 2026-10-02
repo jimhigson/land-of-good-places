@@ -36,11 +36,10 @@ EXPECTED = {
     "rh-house-wall",
     "rh-windows",
     "rh-head",
+    "rh-mouth",
     "rh-tongue",
     "rh-tail",
     "rh-tail-bell",
-    "rh-arch",
-    "rh-awning",
     "rh-sign",
 }
 
@@ -49,8 +48,8 @@ EXPECTED = {
 PAINTED = {"rh-head", "rh-sign"}
 
 #: The one node allowed a (pure translation) transform: its origin is the
-#: mouth, so a flick is `scale 0 → 1` on the node with no pivot arithmetic.
-#: The castle chest-lid precedent.
+#: tongue's root on the mouth's floor, so a wag is a yaw on the node with no
+#: pivot arithmetic. The castle chest-lid precedent.
 HINGED = {"rh-tongue"}
 
 
