@@ -321,7 +321,7 @@ if (facts) {
       const lines = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`
         .split('\n')
         .map((l) => l.trim())
-        .filter((l) => /^(FAIL|✗)/.test(l));
+        .filter((l) => /^(FAIL|✗|- |· )|FAILED/.test(l));
       failures.push({ measure: name, count: Math.max(1, lines.length), first: (lines.length > 0 ? lines : ['exited non-zero with no FAIL line']).slice(0, FIRST) });
     }
   }
