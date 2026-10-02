@@ -273,7 +273,41 @@ function verdictFile(seed: number, sourceHash: string): string {
  * Jim, 2 October 2026, on the hand-run re-record this replaces: "that should
  * be done by a script, no?"
  */
+/**
+ * The switches the generator reads (`src/`) that change **what park it builds**.
+ * Under any of these the park is a deliberately altered one — a mutation, a
+ * forced refusal, a disabled screen — and "the accepted restart" means
+ * nothing: there is no acceptance verdict about an altered generator, and
+ * running the loop under one searches restarts of a park nobody ships.
+ * Diagnostics (`LGP_DEBUG_*`, `LGP_TRACE_LIVE`) only print, so they are not here.
+ *
+ * Found by `check:layout-rung`: its machinery child sets
+ * `LGP_LAYOUT_REFUSE=hotel:40` and no restart, so the resolver ran the whole
+ * acceptance loop under the forced refusal and the child printed 11 solved
+ * layouts across 12 restarts where the check expects one.
+ */
+export const PARK_CHANGING_SWITCHES: readonly string[] = [
+  'LGP_LAYOUT_RUNG',
+  'LGP_LAYOUT_REFUSE',
+  'LGP_WARP',
+  'LGP_SPUR_STRETCH',
+  'LGP_SPUR_STRETCH_ID',
+  'LGP_PLAN_NO_FORCE',
+  'LGP_DISABLE_LEGIBILITY_SCREEN',
+  'LGP_CONNECTOR_CAP',
+  'LGP_ALLOW_UNPROVEN_BRIDGES',
+  'LGP_DISABLE_INTERCONNECTS',
+];
+
 export function acceptedRestartSync(seed: number): number {
+  const altered = PARK_CHANGING_SWITCHES.filter((key) => process.env[key] !== undefined && process.env[key] !== '');
+  if (altered.length > 0) {
+    process.stderr.write(
+      `[accepted park] seed ${seed}: ${altered.join(', ')} alters the generator, so there is no accepted restart to ` +
+        'look up — building restart 0 (set LGP_PARK_RESTART to pick another)\n',
+    );
+    return 0;
+  }
   const sourceHash = acceptanceSourceHash();
   const file = verdictFile(seed, sourceHash);
   if (!existsSync(file)) {

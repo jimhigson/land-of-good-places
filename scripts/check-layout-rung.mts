@@ -225,7 +225,17 @@ if (refusals < 30) failures.push(`expected at least 30 forced refusals of the ho
 if (rungTwo < 1) failures.push('expected the pretend blocker to be redrawn on rung 2 once the hotel ran out');
 if (rungOne < 11) failures.push(`expected the hotel to exhaust its candidates on rung 1 (11 redraws), saw ${rungOne}`);
 if (decisionZero < 1) failures.push('expected decision zero to be reached after the hotel exhausted its supply');
-if (solved !== 1) failures.push(`expected exactly one solved line, saw ${solved}`);
+// **The solve ends on a solved layout.** Not "exactly one solved line": in the
+// round-robin plan a layout is solved, then a later feature may refuse it and
+// name `layout`, which draws the next one, printing another `solved`. Measured
+// under this switch on seed 5 (2 Oct 2026): 11 solved layouts, each re-drawn
+// because the train, the cruiser, the duck bars or the path screen refused the
+// one before by name. That is the ladder working, so the clause asks that the
+// last layout decision was a solve and that the child finished — the property
+// the old count stood in for when one layout was all a plan ever drew.
+const lastDecision = [...traceLines].reverse().find((line) => / (solved|decision-zero) /.test(line)) ?? '';
+if (solved < 1) failures.push('expected the forced-refusal solve to end on a solved layout, saw no solved line');
+else if (!/ solved /.test(lastDecision)) failures.push(`expected the last layout decision to be a solve, it was: ${lastDecision}`);
 
 // ------------------------------------------------------------------ verdict
 
