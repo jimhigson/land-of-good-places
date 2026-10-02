@@ -3,59 +3,46 @@ name: Deploy
 # Builds the game and publishes dist/ to Cloudflare Workers (static assets)
 # on every push to main. Can also be run by hand from the Actions tab.
 on:
-  push:
-    branches: [main]
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
+  # By hand, from the Actions tab, on a branch whose parks CI has cached.
   workflow_dispatch:
 
-# **Queue deploys; never cancel one.** `cancel-in-progress: true` here meant a
-# second merge landing while the first deploy was still running *killed* it —
-# and because this workflow is the only thing that publishes the site, the newer
-# run could finish while the older one's cancellation left nothing behind but an
-# ordinary-looking grey "cancelled" tick.
-#
-# This is the **secondary** cause of the 29 August 2026 outage, not the headline.
-# The headline is the job timeout below: GitHub reports a timeout as `cancelled`
-# too, so the two are indistinguishable in the run list and we spent hours
-# reading one as the other. The tell is duration — a concurrency cancellation
-# dies in ~1-2 minutes, when the next merge lands; a timeout dies at exactly the
-# cap. Both were happening; only the timeout was killing runs with no successor.
-#
-# A deploy is a **publish step, not a CI check**: unlike a test run, the last one
-# must always actually run. So the group queues instead.
-#
-# GitHub still only keeps **one** run pending per group — a third merge arriving
-# replaces the *pending* second one — which is fine and in fact what we want:
-# the pending run that survives is the newest commit, and it contains the one it
-# displaced. What must never be cancelled is the run that is already *deploying*,
-# and that is exactly what `cancel-in-progress: false` protects.
-concurrency:
-  group: deploy-main
-  cancel-in-progress: false
+# The deploy queue is on the job below, not here: a called workflow's
+# `github.workflow` is the caller's, so a workflow-level group would collide.
 
 permissions:
   contents: read
-  # restore-parks reads the Parks workflow's cache list and run status.
-  actions: read
 
 jobs:
-  # Waits for this tree's accepted parks (`parks.yml`) — see
-  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
-  # never comes out of the deploy job's cap.
-  parks:
-    name: Parks ready
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-      - uses: ./.github/actions/restore-parks
-
   deploy:
     name: Build and deploy to Cloudflare Workers
-    needs: [parks]
     runs-on: ubuntu-latest
+    # **Queue deploys; never cancel one.** `cancel-in-progress: true` here meant a
+    # second merge landing while the first deploy was still running *killed* it —
+    # and because this workflow is the only thing that publishes the site, the newer
+    # run could finish while the older one's cancellation left nothing behind but an
+    # ordinary-looking grey "cancelled" tick.
+    #
+    # This is the **secondary** cause of the 29 August 2026 outage, not the headline.
+    # The headline is the job timeout below: GitHub reports a timeout as `cancelled`
+    # too, so the two are indistinguishable in the run list and we spent hours
+    # reading one as the other. The tell is duration — a concurrency cancellation
+    # dies in ~1-2 minutes, when the next merge lands; a timeout dies at exactly the
+    # cap. Both were happening; only the timeout was killing runs with no successor.
+    #
+    # A deploy is a **publish step, not a CI check**: unlike a test run, the last one
+    # must always actually run. So the group queues instead.
+    #
+    # GitHub still only keeps **one** run pending per group — a third merge arriving
+    # replaces the *pending* second one — which is fine and in fact what we want:
+    # the pending run that survives is the newest commit, and it contains the one it
+    # displaced. What must never be cancelled is the run that is already *deploying*,
+    # and that is exactly what `cancel-in-progress: false` protects.
+    concurrency:
+      group: deploy-main
+      cancel-in-progress: false
     # **15 minutes was below what this job actually takes, and GitHub reports a
     # job timeout as `cancelled`** — indistinguishable, in the run list, from the
     # concurrency cancellation above. That is the real reason the site stopped
@@ -116,8 +103,6 @@ jobs:
       # without them (LGP_REQUIRE_PARKS). Nothing is solved in this job.
       - name: Restore the accepted parks
         uses: ./.github/actions/restore-parks
-        with:
-          wait-minutes: '1'
 
       # **`build` builds. It does not check.**
       #

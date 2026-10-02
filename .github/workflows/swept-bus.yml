@@ -39,38 +39,18 @@ name: Swept bus
 # **Do not rename this job.** A required status check is matched by name, so a
 # rename stops it gating merges with nothing going red.
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: swept-bus-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
-  # restore-parks reads the Parks workflow's cache list and run status.
-  actions: read
 
 jobs:
-  # Waits for this tree's accepted parks (`parks.yml`) — see
-  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
-  # never comes out of the work job's cap.
-  parks:
-    name: Parks ready
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-      - uses: ./.github/actions/restore-parks
-
   swept-bus:
     name: Swept bus
-    needs: [parks]
     runs-on: ubuntu-latest
     # Generous against a measured 56 s locally and a measured 3m26s here: a
     # runner having a slow day should say so by being slow, not by being
@@ -97,8 +77,6 @@ jobs:
 
       - name: Restore the accepted parks
         uses: ./.github/actions/restore-parks
-        with:
-          wait-minutes: '1'
 
       - name: Sweep the bus against the drawn ride
         run: pnpm run check:swept-bus

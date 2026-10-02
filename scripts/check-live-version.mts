@@ -218,7 +218,7 @@ if (last.version === expected.sha) {
   console.error('  the site quietly stops moving while main goes on ahead. Check the Deploy');
   console.error('  workflow for a cancelled or failed run, then republish by hand with:');
   console.error('');
-  console.error('      gh workflow run deploy.yml');
+  console.error('      gh workflow run ci.yml --ref main');
   console.error('');
   process.exitCode = 1;
 }

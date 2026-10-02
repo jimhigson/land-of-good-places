@@ -13,17 +13,14 @@ name: PR preview
 # failure (syntax error, missing import) — it is not re-proving correctness
 # the other job already owns.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: pr-preview-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
-  # restore-parks reads the Parks workflow's cache list and run status.
-  actions: read
   # PR conversation comments are the Issues API, not the Pull Requests API —
   # `pull-requests: write` alone gets `Resource not accessible by
   # integration` from `listComments`/`createComment`/`updateComment`.
@@ -33,23 +30,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Waits for this tree's accepted parks (`parks.yml`) — see
-  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
-  # never comes out of the preview job's cap.
-  parks:
-    name: Parks ready
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-      - uses: ./.github/actions/restore-parks
-
   preview:
     name: Deploy PR preview
-    needs: [parks]
     runs-on: ubuntu-latest
     # Back to 10: the parks are found by the Parks workflow and restored here
     # (the `parks` job above does the waiting), so this job only builds and
@@ -82,8 +64,6 @@ jobs:
       # without them (LGP_REQUIRE_PARKS). Nothing is solved in this job.
       - name: Restore the accepted parks
         uses: ./.github/actions/restore-parks
-        with:
-          wait-minutes: '1'
 
       # Client bundle only — see the on: comment above for why the check
       # suite is deliberately not run here.

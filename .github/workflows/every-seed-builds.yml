@@ -40,38 +40,18 @@ name: Every seed builds
 # **Do not rename this job.** A required status check is matched by name, so a
 # rename stops it gating merges with nothing going red.
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: every-seed-builds-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
-  # restore-parks reads the Parks workflow's cache list and run status.
-  actions: read
 
 jobs:
-  # Waits for this tree's accepted parks (`parks.yml`) — see
-  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
-  # never comes out of the work job's cap.
-  parks:
-    name: Parks ready
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-      - uses: ./.github/actions/restore-parks
-
   every-seed-builds:
     name: Every seed builds
-    needs: [parks]
     runs-on: ubuntu-latest
     # Generous: a runner having a slow day should say so by being slow, not by
     # being cancelled. Re-decide from the measured number once there is one.
@@ -94,8 +74,6 @@ jobs:
 
       - name: Restore the accepted parks
         uses: ./.github/actions/restore-parks
-        with:
-          wait-minutes: '1'
 
       - name: Build every seed
         run: pnpm run check:every-seed-builds

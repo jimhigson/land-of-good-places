@@ -34,38 +34,18 @@ name: Coplanar faces
 # CLAUDE.md describes under "A check that never runs is worse than a check that
 # fails".
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: coplanar-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
-  # restore-parks reads the Parks workflow's cache list and run status.
-  actions: read
 
 jobs:
-  # Waits for this tree's accepted parks (`parks.yml`) — see
-  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
-  # never comes out of the work job's cap.
-  parks:
-    name: Parks ready
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-      - uses: ./.github/actions/restore-parks
-
   coplanar:
     name: Coplanar faces
-    needs: [parks]
     runs-on: ubuntu-latest
     # The sweep builds all sixteen supported parks (`SUPPORTED_PARK_SEEDS`),
     # each at its recorded restart, one child process per park. That was
@@ -98,8 +78,6 @@ jobs:
 
       - name: Restore the accepted parks
         uses: ./.github/actions/restore-parks
-        with:
-          wait-minutes: '1'
 
       - name: Coplanar sweep
         run: pnpm run check:coplanar

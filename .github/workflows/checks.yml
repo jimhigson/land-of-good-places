@@ -22,7 +22,7 @@ name: Checks
 # the worst way: every PR goes green *faster*, which looks like an
 # improvement.
 #
-# So if you rename the **`Checks` aggregator job** (below), update the branch
+# So if you rename the **`Checks` aggregator job** (in `ci.yml`), update the branch
 # protection in the same change — a required check is matched by **job name**,
 # and a name that matches nothing gates nothing. Verify by reading it back:
 #
@@ -52,45 +52,25 @@ name: Checks
 #    in exactly one shard, and every shard named by this file's matrix. Drop a
 #    shard from the matrix below, or a step into two shards, and it goes red.
 # 3. **The required check is still one job called `Checks`** — the aggregator
-#    at the bottom, which `needs:` every shard and the build and fails unless
+#    in `ci.yml`, which `needs:` every shard and the build and fails unless
 #    every one of them *succeeded*. It runs `if: always()`, and that is
 #    load-bearing: without it a failed shard would make GitHub **skip** the
 #    aggregator, and **a skipped required check counts as passing**.
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: checks-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
-  # restore-parks reads the Parks workflow's cache list and run status.
-  actions: read
 
 jobs:
-  # Waits for this tree's accepted parks (`parks.yml`) — see
-  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
-  # never comes out of the work job's cap.
-  parks:
-    name: Parks ready
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-      - uses: ./.github/actions/restore-parks
-
   shards:
-    # Not the required check — the aggregator below is. These names are what
+    # Not the required check — the aggregator in `ci.yml` is. These names are what
     # `measure:check-chain` reads a log's cap by, so keep the template.
     name: Checks shard ${{ matrix.shard }}
-    needs: [parks]
     runs-on: ubuntu-latest
     # **Each shard's cap, and the watchdog reads it from here** (`--job
     # shards` in `check:watchdog`), so there is one number, not two.
@@ -134,8 +114,6 @@ jobs:
 
       - name: Restore the accepted parks
         uses: ./.github/actions/restore-parks
-        with:
-          wait-minutes: '1'
 
       # `check:served-walking` and `check:served-deep-links` drive a real page
       # in Chromium; `playwright-core` ships the driver but not the browser.
@@ -190,35 +168,6 @@ jobs:
       - name: Build the artefact
         run: pnpm run build
 
-  check:
-    # **This string is the required status check on `main`.** Changing it
-    # silently stops gating merges. See the header.
-    name: Checks
-    needs: [shards, build]
-    # `always()`, never the default. A job whose `needs` failed is SKIPPED by
-    # default, and GitHub treats a skipped required check as satisfied — so
-    # without this line a red shard would produce a green gate.
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Every shard and the build succeeded
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-        run: |
-          echo "$NEEDS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
-          # The control: if `needs` ever arrives empty (a renamed job, a bad
-          # expression), "no job failed" would be vacuously true. Count them.
-          count=$(echo "$NEEDS" | jq 'length')
-          if [ "$count" != "2" ]; then
-            echo "::error::expected 2 upstream jobs (shards, build), saw $count — the aggregator is measuring nothing"
-            exit 1
-          fi
-          # `success` only. `failure`, `cancelled` (a shard's own timeout) and
-          # `skipped` are all a gate that did not pass.
-          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
-          if [ -n "$bad" ]; then
-            echo "::error::not every part of the gate succeeded: $bad"
-            exit 1
-          fi
-          echo "Checks ok — every shard and the build succeeded."
+# The `Checks` aggregator — the required status check — is in `ci.yml`, the
+# caller, at the top level: a job inside a called workflow is reported as
+# "<caller job> / <job>", which would match no required check.
