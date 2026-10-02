@@ -1620,6 +1620,13 @@ export interface ParkFacts {
    * level; pass a bridge's own `heightAt(x, z)` to ask about its deck.
    */
   readonly reachableFromEntrance: (x: number, z: number, goalY?: number) => boolean;
+  /**
+   * **Every nav-lattice cell a child can walk to from the entrance**, as the
+   * centres `NavGrid.floodFrom(...).forEachCell` visits — one flood of the real
+   * lattice ({@link reachableFromEntrance}'s own grid), computed on first ask.
+   * Flat `[x0, z0, x1, z1, …]`.
+   */
+  readonly reachableGroundCells: () => Float64Array;
   readonly buildMs: number;
 }
 
@@ -2981,6 +2988,16 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     return Math.hypot(endX - x, endZ - z) < 1.5;
   };
 
+  let reachableGroundMemo: Float64Array | null = null;
+  const reachableGroundCells = (): Float64Array => {
+    if (reachableGroundMemo) return reachableGroundMemo;
+    const flood = navGrid.floodFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, sample(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0), sample);
+    const cells: number[] = [];
+    flood?.forEachCell((x, z) => cells.push(x, z));
+    reachableGroundMemo = Float64Array.from(cells);
+    return reachableGroundMemo;
+  };
+
   const castlePass = {
     windows: CASTLE_WINDOWS,
     complaints: [
@@ -4022,6 +4039,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     slideLegs: world.building.slideLegs,
     castleFootprint,
     reachableFromEntrance,
+    reachableGroundCells,
     routes,
     nearPairs,
     boundary: world.collision.playBounds,

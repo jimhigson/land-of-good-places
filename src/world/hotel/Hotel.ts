@@ -1,3 +1,4 @@
+import { TOWER_SHELL_RADIUS, TOWER_BACK_ALONG, TOWER_FACADE_ALONG, TOWER_DOOR_BAND_OUTER } from './towerDimensions';
 import {
   BoxGeometry,
   type PerspectiveCamera,
@@ -2246,7 +2247,7 @@ export class Hotel implements GameSystem {
     // through the door and the trigger said she was not — the sort of gap
     // between two hand-copied depths this repo has been bitten by six times
     // in a day (CLAUDE.md, "Two definitions of one thing").
-    const outer = TOWER_FACADE_ALONG + 0.4;
+    const outer = TOWER_DOOR_BAND_OUTER;
     const centre = (TOWER_BACK_ALONG + outer) / 2;
     return {
       what: "the hotel tower's front door",
@@ -6739,12 +6740,9 @@ function paintYours(plaque: Mesh): void {
   plaque.material = new MeshToonMaterial({ map: glbCanvasTexture(canvas) });
 }
 
-/**
- * The tower's collision shell — an octagon of this circumradius, in metres.
- * Sized to the crystal cluster's own standing-height mass (measured 6.0–8.4 m
- * out from the plot centre), so what looks solid is solid.
- */
-export const TOWER_SHELL_RADIUS = 7.2;
+// The tower's shell radius, back wall and facade plane live in a leaf module so
+// the park layout can place the doormat at the real door — see its header.
+export { TOWER_SHELL_RADIUS, TOWER_BACK_ALONG, TOWER_FACADE_ALONG } from './towerDimensions';
 
 /** The shell walls' own half-thickness. */
 const TOWER_SHELL_HALF_THICKNESS = 0.4;
@@ -6757,15 +6755,6 @@ const TOWER_SHELL_HALF_THICKNESS = 0.4;
  */
 export const TOWER_DOOR_HALF = DOOR_HALF + 0.5;
 
-/** How far in the lobby back wall stands, along the door's axis. */
-export const TOWER_BACK_ALONG = TOWER_SHELL_RADIUS - 2.2;
-
-/**
- * The facade plane: the flat of the octagon face the doorway is cut into,
- * along the door's axis. The doorway sits in the *middle* of a face rather
- * than across a corner, so this is a single distance rather than a range.
- */
-export const TOWER_FACADE_ALONG = TOWER_SHELL_RADIUS * Math.cos(Math.PI / 8);
 
 /**
  * The tower's collision: a **closed** octagon around the crystal cluster with

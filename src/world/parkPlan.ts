@@ -40,7 +40,7 @@ import { GroundClaims } from '../boot/groundClaims';
 import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveStats } from '../boot/parkSolve';
 import { decisionSeed, refusal, type Advance, type FeatureBuilder, type Refusal } from '../boot/featureBuilder';
 import { PARK_SEED } from './parkManifest';
-import { PARK_RESTARTS, layoutRestartSearch, type ParkLayout } from './parkLayout';
+import { PARK_RESTARTS, hasOwnDoor, layoutRestartSearch, type ParkLayout } from './parkLayout';
 import { layoutRestartBase } from './parkWarp';
 import { bindCastlePlacement } from './building/layout';
 import {
@@ -544,6 +544,22 @@ function builders(): readonly FeatureBuilder[] {
           { consumed: ['layout'] },
         );
       }
+      // **No drawn path runs through a plot.** A ribbon whose whole width
+      // stands inside a plot's footprint is paving laid under a building or
+      // through a ride: seed 8 (2 Oct 2026) drew the sky cruiser stall's spur
+      // straight through the castle — plinth, walls and towers — and seed 5
+      // drew the castle's own spur 24 m under it to its front steps. Both are
+      // continuous ribbons in plan; a child walking them meets a wall
+      // (`drawnPavingReachesEveryDoor` measures it on the built park). The
+      // layout is the decision that left no way round, so it is re-drawn.
+      const throughAPlot = drawnSampleThroughAPlot(drawn);
+      if (throughAPlot) {
+        return refusal(
+          `paths: drawn run ${throughAPlot.sample.run} runs through plot '${throughAPlot.plot}' at ` +
+            `(${throughAPlot.sample.x.toFixed(1)}, ${throughAPlot.sample.z.toFixed(1)}), ${throughAPlot.depth.toFixed(2)} m inside it`,
+          { consumed: ['layout'] },
+        );
+      }
       yield 0;
       const screen = screenDrawnPathsForOffSiteCrossings(train.route, drawn, { esplanadeOver: drawn });
       if (screen.fouls.length > 0) {
@@ -784,3 +800,41 @@ export function* parkPlanSearch(): Generator<number, void, void> {
     forcing = false;
   }
 }
+
+/**
+ * The first drawn sample whose whole ribbon stands inside a building's placed
+ * footprint — deeper than its own half-width plus a hand's breadth — or `null`.
+ * Measured against the footprint as placed (`PARK_LAYOUT`, the castle's corner
+ * turrets included), the same shape every plot is spaced and routed by.
+ */
+function drawnSampleThroughAPlot(
+  drawn: readonly PathSample[],
+): { readonly sample: PathSample; readonly plot: string; readonly depth: number } | null {
+  // Buildings only — the plots that declare a door of their own (the castle,
+  // the hotel): those are entered by their door, never through their walls.
+  // Asked of every plot it refused layout after layout on paving that merely
+  // laps a ride's or a stall's padded footprint (seed 5: water fight 1.67 m,
+  // ball pit 1.92 m, face-paint stall 1.93 m deep), so the solve spent minutes
+  // at decision zero on ground those plots' own measures already own.
+  const plots = [...planPart('layout').entries.values()].filter((entry) => hasOwnDoor(entry.id));
+  for (const sample of drawn) {
+    for (const plot of plots) {
+      const footprint = plot.footprint;
+      let inside: number;
+      if (footprint.kind === 'circle') {
+        inside = footprint.radius - Math.hypot(sample.x - plot.x, sample.z - plot.z);
+      } else {
+        inside = Math.min(footprint.halfX - Math.abs(sample.x - plot.x), footprint.halfZ - Math.abs(sample.z - plot.z));
+        // The castle's turrets stand outside its rectangle (#549).
+        for (const [cx, cz] of footprint.corners?.at ?? []) {
+          inside = Math.max(inside, (footprint.corners?.radius ?? 0) - Math.hypot(sample.x - plot.x - cx, sample.z - plot.z - cz));
+        }
+      }
+      if (inside > sample.halfWidth + THROUGH_A_PLOT_SLACK) return { sample, plot: plot.id, depth: inside };
+    }
+  }
+  return null;
+}
+
+/** How far past a ribbon's own half-width it must be inside a plot to be running through it. */
+const THROUGH_A_PLOT_SLACK = 0.3;

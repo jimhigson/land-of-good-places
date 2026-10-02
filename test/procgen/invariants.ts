@@ -85,6 +85,7 @@ import { frameFor } from '../../src/world/train/bridgeSpine.ts';
 // Leaf module: reaches only core/constants, core/uiScale and (type-only)
 // world/interact — nothing seeded, so a static import cannot fix the park.
 import {
+  type PortalBand,
   differentActions,
   sameStorey,
   TAP_FINGER_METRES,
@@ -132,6 +133,8 @@ import {
   parkGateFeet,
 } from '../../src/world/entrance/gateArch.ts';
 import { altitudeAt, terrainHeight, unplaceFromSphere, upAt } from '../../src/world/terrain.ts';
+// Leaf module (three types and `terrain.ts` only) — see its own header.
+import { cellCentre, cellOf, distanceToCell, floodPaving, isPaved, rasterisePaving, PAVING_CELL, type PavingRaster } from './pavingReach.ts';
 // The road corridor's measurement, shared with `check:ground-claims` so the two
 // sites that ask "is the claim the road?" cannot answer it differently. Pure
 // geometry over what it is handed — nothing seed-dependent is imported here.
@@ -1376,6 +1379,221 @@ const everyDoormatIsReachableFromTheGate: Invariant = (facts) => {
   if (facts.entrances.length === 0) complaints.push('the built park has no doormats — this asserted nothing');
   return complaints;
 };
+
+/**
+ * **Where a door is drawn, on the lawn a path should arrive at**: on the door
+ * trigger's own outward axis, at the furthest reach along it of the mesh that
+ * *is* the door's front — the castle's `entrance-steps` (so, the foot of its
+ * steps) and the hotel tower's `tower-door-glow` (the recess panel its sliding
+ * leaves stand in front of). Read off the built scene, so a door that moves in
+ * the art moves this with it. `null` when the mesh is not in the scene, which
+ * is reported, never skipped.
+ */
+function drawnDoorstep(facts: ParkFacts, band: PortalBand, meshName: string): readonly [number, number] | null {
+  let root: Object3D = facts.world.garden.group;
+  while (root.parent) root = root.parent;
+  const mesh = root.getObjectByName(meshName);
+  if (!mesh) return null;
+  mesh.updateWorldMatrix(true, true);
+  const outX = Math.sin(band.yaw);
+  const outZ = Math.cos(band.yaw);
+  // Every drawn vertex, through every instance — not a bounding box, whose
+  // corners overreach the panel's own face once the door is turned off-axis.
+  let reach = -Infinity;
+  const vertex = new Vector3();
+  const instance = new Matrix4();
+  const world = new Matrix4();
+  mesh.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    const position = object.geometry.getAttribute('position');
+    const count = object instanceof InstancedMesh ? object.count : 1;
+    for (let i = 0; i < count; i += 1) {
+      if (object instanceof InstancedMesh) {
+        object.getMatrixAt(i, instance);
+        world.multiplyMatrices(object.matrixWorld, instance);
+      } else {
+        world.copy(object.matrixWorld);
+      }
+      for (let v = 0; v < position.count; v += 1) {
+        vertex.fromBufferAttribute(position, v).applyMatrix4(world);
+        reach = Math.max(reach, (vertex.x - band.centreX) * outX + (vertex.z - band.centreZ) * outZ);
+      }
+    }
+  });
+  if (!Number.isFinite(reach)) return null;
+  return [band.centreX + outX * reach, band.centreZ + outZ * reach];
+}
+
+/**
+ * **The drawn paving goes all the way to every door — continuous from the
+ * gate, and touching the doormat itself.**
+ *
+ * Jim, 1 October 2026: *"will this work finally give us paths that actually go
+ * to the attractions like up to the doors of the hotel?"*
+ * {@link everyDoormatIsReachableFromTheGate} could not answer that: it asks
+ * whether a child can *walk* to each doormat on the nav lattice, and lawn is
+ * walkable, so a path that stops three metres short of the hotel's door — or
+ * runs down the castle's side wall and never reaches its front door at all —
+ * passes it. Measured on the canonical seed before this existed: the castle's
+ * path ended 12 m from its front door, round the corner, and the hotel's 3.4 m
+ * short across the lawn.
+ *
+ * So this asks the drawn paving itself. Every triangle of `path-surface` and
+ * `path-kerb`, as built and draped, is rasterised in plan
+ * ({@link rasterisePaving}) and flooded from the paving at the gate; two cells
+ * join only where their paving is within a child's step-up of each other, so a
+ * deck does not join the lawn under it, and only through paving a child can
+ * stand on ({@link walkablePaving}) — a ribbon that reaches the castle's steps
+ * by running under the castle is continuous in plan and no path on the ground
+ * (seed 5, 2 Oct 2026: 24 m of it, passed by the plan-only flood). Then every destination must have that
+ * gate-joined paving within her own radius ({@link PLAYER_RADIUS}) — she can
+ * stand on the doormat with a foot on the path:
+ *
+ * - **every exterior door** — the hotel tower's and the castle's front door —
+ *   where its front is *drawn* ({@link drawnDoorstep}: the hotel's sliding
+ *   doors at the back of their recess, the foot of the castle's steps), read
+ *   off the built scene, not off the layout's `entrance` the router aims at;
+ * - **every other anchor's entrance** (the rides whose fence gap is built
+ *   facing it), **every stall's stand point**, **every station's** and **every
+ *   ride exit**.
+ */
+/** The castle's front door — the one of its door bands that opens onto the park. */
+function castleFrontDoorBand(facts: ParkFacts): PortalBand | null {
+  return facts.world.building.doorBands().find((band) => facts.boundary.distanceToEdge(band.centreX, band.centreZ) > 0) ?? null;
+}
+
+const drawnPavingReachesEveryDoor: Invariant = (facts) => {
+  const meshes: Mesh[] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (object instanceof Mesh && (object.name === 'path-surface' || object.name === 'path-kerb')) meshes.push(object);
+  });
+  if (meshes.length !== 2) {
+    return [`expected both drawn path layers, found ${meshes.length} — this invariant is measuring nothing`];
+  }
+  const raster = rasterisePaving(meshes);
+  const gate = facts.pathNodes.find((node) => node.kind === 'gate');
+  if (!gate) return ['the path graph has no gate node to flood the paving from'];
+  const atGate = distanceToCell(raster, gate.x, gate.z, PLAYER_RADIUS, (k) => isPaved(raster, k));
+  if (!atGate.at) return [`no drawn paving within ${PLAYER_RADIUS} m of the gate at ${fmt([gate.x, gate.z])}`];
+  // Joined only through paving a child can stand on: a path that reaches a
+  // door by running under the castle (seed 5, 2 Oct 2026, 24 m of it) is a
+  // continuous ribbon in plan and no path at all on the ground.
+  const walkable = walkablePaving(facts, meshes, raster);
+  if (typeof walkable === 'string') return [walkable];
+  const joined = floodPaving(raster, cellOf(raster, atGate.at[0], atGate.at[1]), BUILDING_STEP_UP, walkable.allowed);
+
+  const doors: { id: string; at: readonly [number, number] | null }[] = [];
+  // The two doors that open onto the park, each with the mesh that is its front.
+  const bands = [
+    { band: facts.world.hotel.towerDoorBand(), front: 'tower-door-glow' },
+    { band: castleFrontDoorBand(facts), front: 'entrance-steps' },
+  ];
+  for (const { band, front } of bands) {
+    doors.push({ id: band ? band.what : `the door '${front}' stands in`, at: band ? drawnDoorstep(facts, band, front) : null });
+  }
+  const doored = new Set(['anchor:hotel', 'anchor:building']);
+  for (const entrance of facts.entrances) {
+    if (!doored.has(entrance.id)) doors.push({ id: entrance.id, at: [entrance.x, entrance.z] });
+  }
+  for (const zone of facts.world.interactZones()) {
+    if (zone.id.startsWith('train-station-')) doors.push({ id: zone.id, at: [zone.standX, zone.standZ] });
+  }
+  for (const exit of facts.exits) doors.push({ id: exit.id, at: [exit.x, exit.z] });
+
+  const complaints: string[] = [];
+  let worst = 0;
+  for (const door of doors) {
+    if (!door.at) {
+      complaints.push(`${door.id}: its drawn front was not found in the built scene — nothing to measure`);
+      continue;
+    }
+    const [x, z] = door.at;
+    const reach = distanceToCell(raster, x, z, 30, (k) => joined[k] === 1);
+    worst = Math.max(worst, reach.distance);
+    if (reach.distance <= PLAYER_RADIUS) continue;
+    const any = distanceToCell(raster, x, z, 30, (k) => isPaved(raster, k));
+    complaints.push(
+      `${door.id}'s doormat at ${fmt(door.at)} is ${Number.isFinite(reach.distance) ? reach.distance.toFixed(2) : 'over 30'} m ` +
+        `from the paving that joins the gate${reach.at ? ` (nearest at ${fmt(reach.at)})` : ''}` +
+        (any.distance + PAVING_CELL < reach.distance
+          ? ` — there is paving ${any.distance.toFixed(2)} m away, but it does not join up with the gate's`
+          : ' — lawn between the path and the door') +
+        ` (a child's radius is ${PLAYER_RADIUS} m)`,
+    );
+  }
+  process.stderr.write(
+    `  drawnPavingReachesEveryDoor: ${doors.length} doormats (${bands.length} built doors) against ` +
+      `${raster.triangles} paving triangles on seed ${facts.seed}, joined only through ground a child can reach ` +
+      `(${walkable.decorativeTriangles} triangle(s) of declared-unwalked door apron allowed); worst ${worst.toFixed(2)} m\n`,
+  );
+  if (doors.length === 0) complaints.push('no doormat was measured — this asserted nothing');
+  return complaints;
+};
+
+/**
+ * How far a stretch of drawn paving may stand from the nearest nav-lattice cell
+ * a child can reach and still be "walkable": her own radius plus one lattice
+ * cell — the lattice is {@link NAV_CELL}-coarse and keeps her centre a radius
+ * off every collider, so paving lapping up to a wall or a door's steps is
+ * within this of a cell she reaches; paving under a building is not.
+ */
+const WALKABLE_PAVING_REACH = PLAYER_RADIUS + 0.5;
+
+/**
+ * **Which paved cells a child can actually stand on**: within
+ * {@link WALKABLE_PAVING_REACH} of a nav-lattice cell the entrance's flood
+ * reaches ({@link ParkFacts.reachableGroundCells}) — or paving the generator
+ * draws but declares unwalked (a door apron behind its trigger, the hotel's
+ * recess: `pathGraph.ts`'s `decorativeOwners`). Paving under a building, inside
+ * a solid or in a sealed pocket is neither.
+ */
+function walkablePaving(facts: ParkFacts, meshes: readonly Mesh[], raster: PavingRaster): { readonly allowed: (k: number) => boolean; readonly decorativeTriangles: number } | string {
+  const decorative = new Map<Mesh, Set<number>>();
+  for (const mesh of meshes) {
+    const owners = mesh.userData['vertexOwners'];
+    const unwalked = mesh.userData['decorativeOwners'];
+    if (!(owners instanceof Int32Array) || !(unwalked instanceof Int32Array)) {
+      return `the drawn ${mesh.name} carries no route owners — pathGraph.ts has changed and nothing can be attributed`;
+    }
+    decorative.set(mesh, new Set(unwalked));
+  }
+  let decorativeTriangles = 0;
+  const declared = rasterisePaving(meshes, raster.cell, (mesh, vertex) => {
+    const keep = decorative.get(mesh)!.has((mesh.userData['vertexOwners'] as Int32Array)[vertex]!);
+    if (keep) decorativeTriangles += 1;
+    return !keep;
+  });
+  const cells = facts.reachableGroundCells();
+  if (cells.length === 0) return 'the entrance reaches no nav-lattice cell at all — this measured nothing';
+  const bucket = WALKABLE_PAVING_REACH;
+  const buckets = new Map<string, number[]>();
+  for (let i = 0; i < cells.length; i += 2) {
+    const key = `${Math.floor(cells[i]! / bucket)},${Math.floor(cells[i + 1]! / bucket)}`;
+    const list = buckets.get(key);
+    if (list) list.push(cells[i]!, cells[i + 1]!);
+    else buckets.set(key, [cells[i]!, cells[i + 1]!]);
+  }
+  const nearReached = (x: number, z: number): boolean => {
+    const bx = Math.floor(x / bucket);
+    const bz = Math.floor(z / bucket);
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        const list = buckets.get(`${bx + dx},${bz + dz}`);
+        if (!list) continue;
+        for (let i = 0; i < list.length; i += 2) {
+          if (Math.hypot(list[i]! - x, list[i + 1]! - z) <= WALKABLE_PAVING_REACH) return true;
+        }
+      }
+    }
+    return false;
+  };
+  const allowed = (k: number): boolean => {
+    const [x, z] = cellCentre(raster, k);
+    if (isPaved(declared, cellOf(declared, x, z))) return true;
+    return nearReached(x, z);
+  };
+  return { allowed, decorativeTriangles };
+}
 
 /**
  * The Rail Race's exit has room for the whole **party** that arrives on it, not
@@ -8239,6 +8457,233 @@ const noDrawnPathEndsStrandedOnABridge: Invariant = (facts) => {
   return complaints;
 };
 
+/** Do two convex plan polygons overlap by more than `depth` metres (separating-axis test)? */
+function convexPlanOverlap(
+  a: readonly (readonly [number, number])[],
+  b: readonly (readonly [number, number])[],
+  depth: number,
+): boolean {
+  for (const poly of [a, b]) {
+    for (let i = 0; i < poly.length; i += 1) {
+      const p = poly[i]!;
+      const q = poly[(i + 1) % poly.length]!;
+      let nx = -(q[1] - p[1]);
+      let nz = q[0] - p[0];
+      const length = Math.hypot(nx, nz);
+      if (length < 1e-9) continue;
+      nx /= length;
+      nz /= length;
+      let aMin = Infinity;
+      let aMax = -Infinity;
+      for (const v of a) {
+        const d = v[0] * nx + v[1] * nz;
+        aMin = Math.min(aMin, d);
+        aMax = Math.max(aMax, d);
+      }
+      let bMin = Infinity;
+      let bMax = -Infinity;
+      for (const v of b) {
+        const d = v[0] * nx + v[1] * nz;
+        bMin = Math.min(bMin, d);
+        bMax = Math.max(bMax, d);
+      }
+      if (Math.min(aMax, bMax) - Math.max(aMin, bMin) <= depth) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * How deep a paving triangle has to reach into a bridge wall, in plan, to
+ * count: a centimetre — float noise on a ribbon edge laid exactly along a
+ * parapet's inner face is not a path running into the wall.
+ */
+const BRIDGE_SIDE_DEPTH = 0.01;
+
+/**
+ * **Paths meet a bridge only at its two ends.**
+ *
+ * Jim, 1 October 2026: *"…and also that don't go through the sides of
+ * bridges?"* — and, three times before that about one bridge (#414): *"there
+ * is also a path that runs into the side of the bridge — basically runs into
+ * a solid wall"*. The bridge-paving invariants above each ask about the paving
+ * a bridge *carries* — lifted to the hump, over its own stone, not stranded,
+ * not a sheet, not in the tunnel. None asks about paving the bridge does not
+ * carry, and none asks where the carried paving gets on and off.
+ *
+ * So, measured off the built meshes, per bridge:
+ *
+ * 1. **No other route's paving touches the bridge** — no triangle of any other
+ *    route's surface or kerb overlaps, in plan, a stretch of the bridge's
+ *    drawn parapet ({@link ParkFacts.bridgeParapetRings}, where a parapet is
+ *    actually standing) or any of its drawn stone that stands more than a
+ *    child's step ({@link BUILDING_STEP_UP}) above the lawn. A path laid into
+ *    the side of the masonry is a path into a wall.
+ * 2. **The route it carries stays between its parapets** — none of that
+ *    route's own *surface* overlaps a parapet, so it gets on and off only
+ *    through the deck's two open ends. (Its kerb is drawn out under the
+ *    parapet by design — `Bridge.pavingHeightAt` — so it is not asked.)
+ *
+ * Which route a bridge carries is read off the mesh as well: the owner
+ * (`pathGraph.ts`'s per-vertex `vertexOwners`) of the paving over the bridge's
+ * central span, `deckCovers`.
+ */
+const pathsMeetBridgesOnlyAtTheirEnds: Invariant = (facts) => {
+  const complaints: string[] = [];
+  const bridges = facts.world.train.bridges;
+  if (bridges.length === 0) return complaints;
+  const layers: Mesh[] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (object instanceof Mesh && (object.name === 'path-surface' || object.name === 'path-kerb')) layers.push(object);
+  });
+  if (layers.length !== 2) {
+    return [`expected both drawn path layers, found ${layers.length} — this invariant is measuring nothing`];
+  }
+  const ownersOf = (mesh: Mesh): Int32Array | null => {
+    const owners = mesh.userData['vertexOwners'];
+    return owners instanceof Int32Array && owners.length === mesh.geometry.getAttribute('position').count ? owners : null;
+  };
+  const names = (layers[0]!.userData['ownerNames'] ?? []) as readonly string[];
+  for (const mesh of layers) {
+    if (!ownersOf(mesh)) {
+      return [`the drawn ${mesh.name} carries no per-vertex route owners — pathGraph.ts has changed and nothing can be attributed`];
+    }
+  }
+  const nameOf = (owner: number): string => (owner >= 0 ? (names[owner] ?? `route ${owner}`) : owner === -1 ? 'the plaza' : 'an apron (junction or door)');
+
+  // Each bridge's drawn walls and raised stone, in plan.
+  const groups = facts.world.train.group.getObjectByName('railway-bridges')?.children ?? [];
+  if (groups.length !== bridges.length) {
+    return [`${bridges.length} bridge(s) built but ${groups.length} bridge groups found — measuring the wrong stone`];
+  }
+  const corner = new Vector3();
+  let wallsMeasured = 0;
+  let stoneMeasured = 0;
+  let trianglesJudged = 0;
+  for (let b = 0; b < bridges.length; b += 1) {
+    const bridge = bridges[b]!;
+    const group = groups[b]!;
+    group.updateMatrixWorld(true);
+    type Poly = readonly (readonly [number, number])[];
+    const walls: Poly[] = [];
+    for (const side of [0, 1]) {
+      const rings = facts.bridgeParapetRings.filter((ring) => ring.bridge === group.name).filter((_, i) => i % 2 === side);
+      for (let i = 0; i + 1 < rings.length; i += 1) {
+        const r0 = rings[i]!;
+        const r1 = rings[i + 1]!;
+        if (!r0.expected || !r1.expected) continue;
+        walls.push([r0.outer, r1.outer, r1.inner, r0.inner]);
+      }
+    }
+    const stone: Poly[] = [];
+    group.traverse((object) => {
+      if (!(object instanceof Mesh) || object.name === 'deck') return;
+      const position = object.geometry.getAttribute('position');
+      const index = object.geometry.getIndex();
+      const count = index ? index.count : position.count;
+      for (let slot = 0; slot + 2 < count; slot += 3) {
+        const tri: [number, number][] = [];
+        let tallest = -Infinity;
+        for (let k = 0; k < 3; k += 1) {
+          const v = index ? index.getX(slot + k) : slot + k;
+          corner.set(position.getX(v), position.getY(v), position.getZ(v)).applyMatrix4(object.matrixWorld);
+          tri.push([corner.x, corner.z]);
+          tallest = Math.max(tallest, altitudeAt(corner.x, corner.y, corner.z));
+        }
+        if (tallest > BUILDING_STEP_UP) stone.push(tri);
+      }
+    });
+    wallsMeasured += walls.length;
+    stoneMeasured += stone.length;
+    if (walls.length === 0) {
+      complaints.push(`${group.name} has no standing parapet to measure against — this bridge asserted nothing`);
+      continue;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const poly of [...walls, ...stone]) {
+      for (const [x, z] of poly) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minZ = Math.min(minZ, z);
+        maxZ = Math.max(maxZ, z);
+      }
+    }
+
+    // The route(s) this bridge carries: whoever owns the paving over its span —
+    // asked of each surface triangle's centroid, since a ribbon's vertices
+    // are its two edges and those lie outside the deck's walkable half-width.
+    const carried = new Set<number>();
+    for (const mesh of layers) {
+      if (mesh.name !== 'path-surface') continue;
+      const position = mesh.geometry.getAttribute('position');
+      const index = mesh.geometry.getIndex();
+      const owners = ownersOf(mesh)!;
+      const count = index ? index.count : position.count;
+      for (let slot = 0; slot + 2 < count; slot += 3) {
+        const ids = [0, 1, 2].map((k) => (index ? index.getX(slot + k) : slot + k));
+        const x = (position.getX(ids[0]!) + position.getX(ids[1]!) + position.getX(ids[2]!)) / 3;
+        const z = (position.getZ(ids[0]!) + position.getZ(ids[1]!) + position.getZ(ids[2]!)) / 3;
+        if (bridge.deckCovers(x, z)) carried.add(owners[ids[0]!]!);
+      }
+    }
+    if (carried.size === 0) {
+      complaints.push(`${group.name} carries no drawn paving over its span — nothing crosses it`);
+    }
+
+    const found = new Map<string, { at: readonly [number, number]; count: number; what: string }>();
+    for (const mesh of layers) {
+      const position = mesh.geometry.getAttribute('position');
+      const index = mesh.geometry.getIndex();
+      const owners = ownersOf(mesh)!;
+      const count = index ? index.count : position.count;
+      for (let slot = 0; slot + 2 < count; slot += 3) {
+        const ids = [0, 1, 2].map((k) => (index ? index.getX(slot + k) : slot + k));
+        const tri = ids.map((v) => [position.getX(v), position.getZ(v)] as const);
+        if (
+          tri.every(([x]) => x < minX) || tri.every(([x]) => x > maxX) ||
+          tri.every(([, z]) => z < minZ) || tri.every(([, z]) => z > maxZ)
+        ) continue;
+        const owner = owners[ids[0]!]!;
+        const isCarried = carried.has(owner);
+        if (isCarried && mesh.name !== 'path-surface') continue;
+        trianglesJudged += 1;
+        let what: string | null = null;
+        if (walls.some((wall) => convexPlanOverlap(tri, wall, BRIDGE_SIDE_DEPTH))) what = 'parapet';
+        else if (!isCarried && stone.some((s) => convexPlanOverlap(tri, s, BRIDGE_SIDE_DEPTH))) what = 'stone';
+        if (!what) continue;
+        const key = `${nameOf(owner)}|${mesh.name}|${what}`;
+        const at = [(tri[0]![0] + tri[1]![0] + tri[2]![0]) / 3, (tri[0]![1] + tri[1]![1] + tri[2]![1]) / 3] as const;
+        const was = found.get(key);
+        if (was) was.count += 1;
+        else found.set(key, { at, count: 1, what });
+      }
+    }
+    for (const [key, hit] of found) {
+      const [route, layer] = key.split('|');
+      complaints.push(
+        isCarriedName(route!, carried, nameOf)
+          ? `${route}, which runs over ${group.name}'s deck, has ${hit.count} ${layer} triangle(s) running through its ${hit.what} ` +
+              `near (${fmt(hit.at)}) — it leaves the bridge through the side, not over an end`
+          : `${route}'s ${layer} runs into the side of ${group.name}: ${hit.count} triangle(s) overlap its drawn ` +
+              `${hit.what} near (${fmt(hit.at)}) — a path into a wall`,
+      );
+    }
+  }
+  process.stderr.write(
+    `  pathsMeetBridgesOnlyAtTheirEnds: ${bridges.length} bridge(s), ${wallsMeasured} parapet stretches and ` +
+      `${stoneMeasured} raised stone triangles, ${trianglesJudged} paving triangles judged on seed ${facts.seed}\n`,
+  );
+  return complaints;
+};
+
+function isCarriedName(route: string, carried: ReadonlySet<number>, nameOf: (owner: number) => string): boolean {
+  for (const owner of carried) if (nameOf(owner) === route) return true;
+  return false;
+}
+
 /**
  * **The railway is crossed on purpose, and mostly on bridges.**
  *
@@ -12634,6 +13079,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ],
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
   ['every doormat in the park can be walked to from the gate', everyDoormatIsReachableFromTheGate],
+  ['the drawn paving runs from the gate all the way to every door', drawnPavingReachesEveryDoor],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
@@ -12714,6 +13160,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
     everyProvenBridgeSiteKeepsItsBridge,
   ],
   ['no drawn path ends in mid-air on a bridge', noDrawnPathEndsStrandedOnABridge],
+  ['paths meet a bridge only at its two ends, never through its side', pathsMeetBridgesOnlyAtTheirEnds],
   ['no drawn paving stands up on edge as a sheet', noDrawnPavingStandsUpAsASheet],
   [
     'no bridge stands where the crossing planner proved none fits',

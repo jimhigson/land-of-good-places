@@ -1,9 +1,10 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
+import type { AnchorFootprint } from './anchors';
 import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
 import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
-import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong } from './parkLayout';
+import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong, entranceFacing, hasOwnDoor } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN, RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN } from './train/plan';
 import { STATION_GAP } from './train/fence';
@@ -1846,7 +1847,7 @@ const STREET_PLOT_CLEARANCE = 2.6;
  * inside). Plots are axis-aligned by construction (`edgeDistanceAlong`'s
  * own comment). */
 function distanceToPlotEdge(
-  entry: { x: number; z: number; footprint: { kind: 'circle'; radius: number } | { kind: 'rect'; halfX: number; halfZ: number } },
+  entry: { x: number; z: number; footprint: AnchorFootprint },
   x: number,
   z: number,
 ): number {
@@ -1858,18 +1859,28 @@ function distanceToPlotEdge(
   const ox = Math.max(dx, 0);
   const oz = Math.max(dz, 0);
   const outside = Math.hypot(ox, oz);
-  return outside > 0 ? outside : Math.max(dx, dz);
+  let distance = outside > 0 ? outside : Math.max(dx, dz);
+  // **And the solids at its corners** — the castle's turrets (#549), which
+  // stand outside its rectangle. A street kept clear of the rectangle alone ran
+  // through the turrets and the plinth between them (seed 8, 2 Oct 2026: a
+  // street along the castle's south face, unwalkable for a metre of its width,
+  // cut the eastern half of the park's paving off from the gate).
+  const corners = entry.footprint.corners;
+  if (corners) {
+    for (const [cx, cz] of corners.at) {
+      distance = Math.min(distance, Math.hypot(x - entry.x - cx, z - entry.z - cz) - corners.radius);
+    }
+  }
+  return distance;
 }
 
 /** The placed plots a street must clear — every layout entry except the
  * fountain (the plaza is paving, not an obstacle). */
-let streetPlotsCache:
-  | readonly { x: number; z: number; footprint: { kind: 'circle'; radius: number } | { kind: 'rect'; halfX: number; halfZ: number } }[]
-  | null = null;
+let streetPlotsCache: readonly { x: number; z: number; footprint: AnchorFootprint }[] | null = null;
 function streetPlots(): readonly {
   x: number;
   z: number;
-  footprint: { kind: 'circle'; radius: number } | { kind: 'rect'; halfX: number; halfZ: number };
+  footprint: AnchorFootprint;
 }[] {
   if (!streetPlotsCache) {
     streetPlotsCache = [...PARK_LAYOUT.entries.values()]
@@ -4871,7 +4882,14 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     width: number,
   ): void => {
     nodes.push({ id, kind, x: ex, z: ez });
-    const already = distanceToRouteNetwork(network(), ex, ez) < 4;
+    // "Already on the network" means **standing on its paving**, with a foot
+    // on the path: within half a child (`PLAYER_RADIUS / 2`) of a route's own
+    // paved edge. It used to be any doormat within 4 m of a route's centre
+    // line, which left up to 2.7 m of lawn between a route's edge and a stall
+    // or ride exit that never got a spur — 8 doormats across the sixteen pool
+    // seeds' accepted parks (1.06-2.51 m), measured by
+    // `drawnPavingReachesEveryDoor`.
+    const already = pavingGapToRouteNetwork(network(), ex, ez) < PLAYER_RADIUS / 2;
     // An unpaved spur is never drawn, so the street paving its routing commits
     // must not outlive it: a later spur would branch off paving nobody laid.
     // Measured on seed 11 (eng/sphere-six-reds): stall.spaceFerrisWheel stood
@@ -4897,8 +4915,10 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     // doormat with, rather than trusting a flat distance to clear every plot
     // shape and standoff combination.
     const placedTarget = PARK_LAYOUT.entries.get(id);
-    let pastReach = 2;
-    if (placedTarget && l > 1e-6) {
+    // A doormat at a real door (`ManifestEntry.door`) has nothing past it but
+    // the door itself: the paving stops on the doormat.
+    let pastReach = placedTarget && hasOwnDoor(placedTarget.id) ? 0 : 2;
+    if (placedTarget && l > 1e-6 && pastReach > 0) {
       const edge = edgeDistanceAlong(placedTarget.footprint, (ex - towardX) / l, (ez - towardZ) / l);
       pastReach = Math.max(0, Math.min(pastReach, l - edge - PAST_CLEARANCE));
     }
@@ -4919,10 +4939,10 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       // which is the counter's facing for a camera-facing booth and the
       // toward-middle line for everything else, because the solver derived
       // the entrance that way. One source of truth for "which way in".
-      const outX = ex - placedTarget.x;
-      const outZ = ez - placedTarget.z;
-      const out = Math.hypot(outX, outZ);
-      if (out > 1e-6) lead.push([ex + (outX / out) * 3.5, ez + (outZ / out) * 3.5]);
+      // A plot whose door faces its own way (the castle's front door faces +Z
+      // on every bearing) declares it; `entranceFacing` is the one owner.
+      const [outX, outZ] = entranceFacing(placedTarget);
+      lead.push([ex + outX * 3.5, ez + outZ * 3.5]);
     }
     // The street lattice serves the spur (network-first, lead-last); the
     // old continuous router is only the fallback for ground the lattice
@@ -7106,6 +7126,17 @@ function fallbackSpurRoute(
 }
 
 /** Min distance from (x, z) to any segment of the routes built so far. */
+/**
+ * How far (x, z) stands outside the nearest route's paving — its distance to
+ * that route's centre line less half the route's width; negative on paving.
+ * Asked of the control polyline, like {@link distanceToRouteNetwork}.
+ */
+function pavingGapToRouteNetwork(routes: readonly RouteDefinition[], x: number, z: number): number {
+  let best = Infinity;
+  for (const route of routes) best = Math.min(best, distanceToRouteNetwork([route], x, z) - route.width / 2);
+  return best;
+}
+
 function distanceToRouteNetwork(
   routes: readonly RouteDefinition[],
   x: number,

@@ -67,7 +67,8 @@ export interface PlacedEntry {
   readonly footprint: AnchorFootprint;
   readonly boundingRadius: number;
   /**
-   * Where a visitor arrives: on the plot's edge, facing the plaza. Path
+   * Where a visitor arrives: on the plot's edge, facing the plaza — or at
+   * its own door, where the manifest declares one (`ManifestEntry.door`). Path
    * spurs end here, signs stand here, NPC waypoints seed here.
    */
   readonly entranceX: number;
@@ -245,6 +246,92 @@ export function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ
  * spur's target in `paths.ts` — so neither had to learn about turrets, and they
  * cannot disagree.
  */
+/**
+ * Where a plot's building is actually drawn: its centre, except for the castle,
+ * which `building/layout.ts` nudges {@link BUILDING_CENTRE_NUDGE} towards the
+ * park middle — the same nudge {@link footprintAsPlaced} applies.
+ */
+function drawnCentreOf(entry: ManifestEntry, x: number, z: number): readonly [number, number] {
+  if (entry.id !== 'building') return [x, z];
+  const length = Math.hypot(x, z) || 1;
+  return [x - (x / length) * BUILDING_CENTRE_NUDGE, z - (z / length) * BUILDING_CENTRE_NUDGE];
+}
+
+/** Cosine of 60 degrees: how far off the park's middle a fixed-facing door may face. */
+const DOOR_FACES_IN_COS = 0.5;
+
+/**
+ * A `{ local, facing }` door's doormat: at the door's own front if that stands
+ * clear of the plot, otherwise pushed straight out along `facing` until it is
+ * the usual stand-off past the plot's edge — the same place every other
+ * plot's doormat stands, so the arriving street can reach it without crossing
+ * the plot. The paving between it and the door is the door's apron
+ * ({@link doorApronOf}).
+ */
+function doormatClearOfThePlot(
+  entry: ManifestEntry,
+  footprint: AnchorFootprint,
+  x: number,
+  z: number,
+  door: { readonly local: readonly [number, number]; readonly facing: readonly [number, number] },
+  standOff: number,
+): readonly [number, number] {
+  const [cx, cz] = drawnCentreOf(entry, x, z);
+  const frontX = cx + door.local[0];
+  const frontZ = cz + door.local[1];
+  const [fx, fz] = door.facing;
+  const along = (frontX - x) * fx + (frontZ - z) * fz;
+  const push = Math.max(0, edgeDistanceAlong(footprint, fx, fz) + standOff - along);
+  return [frontX + fx * push, frontZ + fz * push];
+}
+
+/**
+ * **The paving from a plot's doormat on to its drawn door**, where the two are
+ * not the same place (`ManifestEntry.door`): the hotel's sliding doors stand
+ * at the back of a recess past the trigger its doormat is on, and the castle's
+ * steps can stand inside the plot its doormat is pushed clear of. `to` is
+ * where the door's front is; `walkable` is whether that ground is open lawn a
+ * child stands on (the castle's, in front of its steps) or ground she is let
+ * in before reaching (the hotel's recess, behind the trigger). `null` where
+ * the doormat is the door.
+ */
+export function doorApronOf(entry: PlacedEntry): { readonly to: readonly [number, number]; readonly walkable: boolean } | null {
+  const manifest = PARK_MANIFEST.find((candidate) => candidate.id === entry.id);
+  const door = manifest?.door;
+  if (!manifest || !door) return null;
+  if ('reach' in door) {
+    if (door.pavedTo === undefined || door.reach <= door.pavedTo) return null;
+    const [fx, fz] = entranceFacing(entry);
+    const back = door.reach - door.pavedTo;
+    return { to: [entry.entranceX - fx * back, entry.entranceZ - fz * back], walkable: false };
+  }
+  const [cx, cz] = drawnCentreOf(manifest, entry.x, entry.z);
+  const to: readonly [number, number] = [cx + door.local[0], cz + door.local[1]];
+  if (Math.hypot(to[0] - entry.entranceX, to[1] - entry.entranceZ) < 1e-6) return null;
+  return { to, walkable: true };
+}
+
+/** Does this plot declare a door of its own (`ManifestEntry.door`)? */
+export function hasOwnDoor(id: string): boolean {
+  return PARK_MANIFEST.some((candidate) => candidate.id === id && candidate.door !== undefined);
+}
+
+/**
+ * **Which way a visitor walks in to this plot's doormat** — a unit vector
+ * pointing out of the plot, away from the door. The manifest's `door.facing`
+ * where it declares one (the castle's front door faces +Z on every bearing);
+ * otherwise the doormat's own bearing from the plot centre, which is how the
+ * doormat was placed. Paths arrive along it (`paths.ts`'s head-on lead).
+ */
+export function entranceFacing(entry: PlacedEntry): readonly [number, number] {
+  const declared = PARK_MANIFEST.find((candidate) => candidate.id === entry.id)?.door;
+  if (declared && 'facing' in declared) return declared.facing;
+  const outX = entry.entranceX - entry.x;
+  const outZ = entry.entranceZ - entry.z;
+  const out = Math.hypot(outX, outZ);
+  return out > 1e-9 ? [outX / out, outZ / out] : [0, 1];
+}
+
 function footprintAsPlaced(entry: ManifestEntry, x: number, z: number): AnchorFootprint {
   if (entry.id !== 'building' || entry.footprint.kind !== 'rect') return entry.footprint;
   // The same nudge `building/layout.ts` applies: towards the park middle.
@@ -951,8 +1038,14 @@ function* buildOnce(restart: number, attempts: ReadonlyMap<string, number>): Gen
     const placedFootprint = footprintAsPlaced(entry, x, z);
     const edge = edgeDistanceAlong(placedFootprint, dirX, dirZ);
     const standOff = 1.4; // the sign and the doormat, just clear of the plot
-    const entranceX = x + dirX * (edge + standOff);
-    const entranceZ = z + dirZ * (edge + standOff);
+    // …unless the plot has a door of its own somewhere else: then the doormat
+    // is at that door (`ManifestEntry.door`).
+    const door = entry.door;
+    const [entranceX, entranceZ] = !door
+      ? [x + dirX * (edge + standOff), z + dirZ * (edge + standOff)]
+      : 'reach' in door
+        ? [x + dirX * door.reach, z + dirZ * door.reach]
+        : doormatClearOfThePlot(entry, placedFootprint, x, z, door, standOff);
 
     const item: PlacedEntry = {
       id: entry.id,
@@ -1061,6 +1154,23 @@ function validate(
       if (ringGap < entry.boundingRadius + RING_PLOT_CLEARANCE) {
         return fail('stands in the statue ring');
       }
+    }
+  }
+
+  // **A plot whose door faces a fixed way stands where that door faces into
+  // the park** — the castle's front door faces +Z on every bearing
+  // (`ManifestEntry.door.facing`), so a castle north of the middle turns its
+  // door to the wall, and the only path to it runs round, or under, the
+  // building (seed 5, 2 Oct 2026: the spur ran 24 m under the castle to reach
+  // its steps). The door must face within 60 degrees of the park's middle.
+  if (entry.door && 'facing' in entry.door) {
+    const fountainEntry = placed.find((other) => other.id === 'fountain');
+    const midX = (fountainEntry?.x ?? 0) - x;
+    const midZ = (fountainEntry?.z ?? 0) - z;
+    const toMiddle = Math.hypot(midX, midZ);
+    const [fx, fz] = entry.door.facing;
+    if (toMiddle > 1e-6 && (midX * fx + midZ * fz) / toMiddle < DOOR_FACES_IN_COS) {
+      return fail('turns its door away from the park');
     }
   }
 

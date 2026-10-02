@@ -1,4 +1,6 @@
 import type { AnchorFootprint } from './anchors';
+import { CASTLE_DOORMAT_LOCAL } from './building/frontDoor';
+import { TOWER_DOOR_BAND_OUTER, TOWER_DRAWN_DOOR_ALONG } from './hotel/towerDimensions';
 import { resolveParkSeed } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
 import { CASTLE_PLOT_REACH, PARK_SURFACE_SCALE } from '../core/constants';
@@ -78,8 +80,11 @@ export const PARK_SEED = generationSeed(PARK_SEED_ASKED, PARK_RESTART);
  * *other* entry's candidates, but this still forces a fresh solve rather than
  * risk `cachedSolve` handing back a `localStorage` layout from before the
  * stall existed on some browser that visited an earlier build of this seed.
+ *
+ * 5: the castle's and the hotel's doormats moved to their real doors
+ * (`ManifestEntry.door`), which moves their entrances on every seed.
  */
-export const LAYOUT_VERSION = 4;
+export const LAYOUT_VERSION = 5;
 
 export interface ManifestEntry {
   readonly id: string;
@@ -133,6 +138,28 @@ export interface ManifestEntry {
    * ended up behind their own counters and their waypoints stranded.
    */
   readonly cameraFacing?: boolean;
+  /**
+   * **Where this plot's door actually is**, when that is not on the plot's
+   * edge — so the doormat, and the path that arrives at it, are at the door.
+   *
+   * Without it the doormat goes `1.4 m` past the plot's edge, which is right
+   * for a ride whose fence gap is built facing the doormat, and wrong for a
+   * building with its own door: the hotel's plot edge is its crystal skirt, so
+   * its path stopped 3.4 m short across the lawn, and the castle's front door
+   * faces +Z on every bearing, so its path arrived 12 m away round the side
+   * (seed 0, 1 Oct 2026 — `drawnPavingReachesEveryDoor`).
+   *
+   * - `{ reach, pavedTo? }` — the doormat stands `reach` metres from the plot
+   *   centre on the line it would have anyway (the camera's, or the middle's);
+   *   with `pavedTo`, the paving runs on past it towards the centre to there —
+   *   for a door drawn at the back of a recess the child is let in before.
+   * - `{ local, facing }` — the doormat stands at `local` from the *drawn*
+   *   centre (`footprintAsPlaced`'s nudge applied), and is approached along
+   *   `facing`, whatever bearing the plot stands on.
+   */
+  readonly door?:
+    | { readonly reach: number; readonly pavedTo?: number }
+    | { readonly local: readonly [number, number]; readonly facing: readonly [number, number] };
 }
 
 /** Half-width of the corridor kept clear from the gate to the plaza. */
@@ -180,6 +207,9 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     // `anchor.reach:building`, which holds every drawn vertex inside it.
     boundingRadius: CASTLE_PLOT_REACH,
     band: { min: 26, max: 60 },
+    // The front door faces +Z on every bearing (`building/frontDoor.ts`): the
+    // doormat is at the foot of its steps, not on the plot edge facing the middle.
+    door: { local: CASTLE_DOORMAT_LOCAL, facing: [0, 1] },
   },
   // Bounding radii for these two were set from a measured build-out (water
   // fight 16.3 m, dodgems 18.8 m, in 2026-08) rather than the plot rectangle.
@@ -242,6 +272,10 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     boundingRadius: 9,
     band: { min: 10, max: 90 },
     near: { id: 'building', min: 28, max: 42 },
+    // The doormat on the door's trigger, where walking on is walking in — not
+    // past the crystal skirt the plot's radius describes — and the paving on
+    // into the recess to the sliding doors themselves.
+    door: { reach: TOWER_DOOR_BAND_OUTER, pavedTo: TOWER_DRAWN_DOOR_ALONG },
     // Jim's ruling, 7 Aug: ALL assets face the camera. The tower's door, its
     // awning and its doormat all derive from this one flag, exactly like a
     // stall's counter — without it the solver faced the door at the park

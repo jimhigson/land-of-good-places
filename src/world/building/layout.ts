@@ -3,6 +3,7 @@ import { PALETTE } from '../../core/palette';
 import type { ParkLayout } from '../parkLayout';
 import { lazyArrayView, lazyView } from '../../boot/lazyView';
 import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
+import { ENTRANCE_MIN_X, ENTRANCE_MAX_X, ENTRANCE_STEPS_REACH } from './frontDoor';
 
 /**
  * The facade's centre: the placed 'building' plot, nudged towards the park
@@ -447,9 +448,9 @@ export function insideInterior(localX: number, localZ: number, margin = 0): bool
 export const INTERIOR_DOOR_MIN_X = -3.2;
 export const INTERIOR_DOOR_MAX_X = 3.2;
 
-/** The matching door in the facade out in the garden, at the top of the steps. */
-export const ENTRANCE_MIN_X = -1;
-export const ENTRANCE_MAX_X = 4;
+// The matching door in the facade out in the garden, at the top of the steps —
+// in a leaf module so the park layout can place the castle's doormat there.
+export { ENTRANCE_MIN_X, ENTRANCE_MAX_X, ENTRANCE_STEPS_REACH } from './frontDoor';
 
 /** Way through the +X (east) wall into the glass lift, on every deck. */
 export const LIFT_DOOR_MIN_Z = 3.5;
@@ -894,7 +895,7 @@ export const ENTRANCE_RAMP: RampDefinition = {
   space: 'garden',
   footprint: rect(ENTRANCE_MIN_X, ENTRANCE_MAX_X, BUILDING_HALF_Z, BUILDING_HALF_Z + 3),
   axis: 'z',
-  from: BUILDING_HALF_Z + 2.8,
+  from: BUILDING_HALF_Z + ENTRANCE_STEPS_REACH,
   to: BUILDING_HALF_Z,
   yFrom: -0.75,
   yTo: 0,

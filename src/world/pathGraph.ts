@@ -29,6 +29,7 @@ import {
   type PathGraph,
   type RouteDefinition,
 } from './paths';
+import { PARK_LAYOUT, doorApronOf } from './parkLayout';
 
 /**
  * **The one Catmull-Rom every consumer of a route's drawn shape builds.**
@@ -229,8 +230,16 @@ export function buildPaths(): Mesh[] {
   // can later leave out what another route's paving buries — see `KerbCover`.
   const surfaceOwners: number[] = [];
   const kerbOwners: number[] = [];
+  // …and every vertex too, so a measure can ask which route laid a stretch of
+  // the drawn paving off the mesh itself (`test/procgen`'s bridge-side
+  // invariant): a vertex keeps its number through every re-index `KerbCover`
+  // does, where a triangle's position in the index does not.
+  const surfaceVertexOwners: number[] = [];
+  const kerbVertexOwners: number[] = [];
   const own = (list: number[], builder: GeometryBuilder, owner: number): void => {
     while (list.length < builder.triangleCount) list.push(owner);
+    const vertices = builder === surface ? surfaceVertexOwners : kerbVertexOwners;
+    while (vertices.length < builder.vertexCount) vertices.push(owner);
   };
   ROUTES.forEach((route, owner) => {
     const curve = routeCurve(route);
@@ -266,6 +275,21 @@ export function buildPaths(): Mesh[] {
       own(kerbOwners, kerb, JUNCTION_OWNER_BASE - k);
     });
 
+  // Where a door stands at the back of a recess past its doormat, the paving
+  // on to it — see `doorAprons`.
+  // Owners of paving that is drawn but never walked on — see `doorAprons`.
+  const decorativeOwners: number[] = [];
+  doorAprons().forEach((apron, k) => {
+    if (!apron.walkable) decorativeOwners.push(DOOR_APRON_OWNER_BASE - k);
+    const curve = routeCurve(apron);
+    const divisions = pathDivisions(curve);
+    addPathRibbon(surface, curve, apron.width, divisions, PATH_SURFACE_LIFT, discMayBeLaid);
+    own(surfaceOwners, surface, DOOR_APRON_OWNER_BASE - k);
+    addRibbonKerb(kerb, curve, apron.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
+    own(kerbOwners, kerb, DOOR_APRON_OWNER_BASE - k);
+    if (apron.walkable) recordSamples(curve, divisions, apron.width / 2);
+  });
+
   const surfaceMesh = new Mesh(surface.build(), pathSurfaceMaterial());
   surfaceMesh.name = 'path-surface';
   surfaceMesh.receiveShadow = true;
@@ -273,6 +297,16 @@ export function buildPaths(): Mesh[] {
   const kerbMesh = new Mesh(kerb.build(), pathKerbMaterial());
   kerbMesh.name = 'path-kerb';
   kerbMesh.receiveShadow = true;
+
+  // Owners: an index into `ownerNames` (a route), or negative — the plaza
+  // ({@link PLAZA_OWNER}) or a junction apron ({@link JUNCTION_OWNER_BASE}).
+  const ownerNames = ROUTES.map((route) => route.name);
+  surfaceMesh.userData['vertexOwners'] = Int32Array.from(surfaceVertexOwners);
+  surfaceMesh.userData['ownerNames'] = ownerNames;
+  kerbMesh.userData['vertexOwners'] = Int32Array.from(kerbVertexOwners);
+  kerbMesh.userData['ownerNames'] = ownerNames;
+  surfaceMesh.userData['decorativeOwners'] = Int32Array.from(decorativeOwners);
+  kerbMesh.userData['decorativeOwners'] = Int32Array.from(decorativeOwners);
 
   drawnLayers = [
     { mesh: kerbMesh, lift: PATH_KERB_LIFT },
@@ -820,6 +854,42 @@ function clearOfTheGateway(x: number, z: number, radius: number): boolean {
 /** Where a disc of paving may be laid: on the ground, off every bridge and off the gateway. */
 function discMayBeLaid(x: number, z: number, radius: number): boolean {
   return clearOfBridges(x, z, radius) && clearOfTheGateway(x, z, radius);
+}
+
+/** Door apron `k`'s ribbon and kerb are filed under `DOOR_APRON_OWNER_BASE - k`. */
+export const DOOR_APRON_OWNER_BASE = -100_000;
+
+/**
+ * **The paving from a doormat on to its drawn door** (`parkLayout.ts`'s
+ * `doorApronOf`), straight, at the arriving route's own width: the hotel's
+ * sliding doors stand ~4.9 m inside its facade at the back of a recess, past
+ * the trigger the doormat is on, and the castle's steps can stand inside the
+ * plot its doormat is pushed clear of. Without it a child sees lawn between
+ * the end of the path and the door (`drawnPavingReachesEveryDoor`).
+ *
+ * A walkable apron (the castle's, open lawn) records its samples like any
+ * route, so the router, the scatter and the waypoints all know it is paving.
+ * The hotel's records none: it lies behind the trigger, on ground she is let
+ * in before she reaches, and a waypoint seeded there would be stranded.
+ */
+function doorAprons(): (RouteDefinition & { readonly walkable: boolean })[] {
+  const aprons: (RouteDefinition & { readonly walkable: boolean })[] = [];
+  for (const node of PATH_GRAPH.nodes) {
+    if (node.kind !== 'anchor') continue;
+    const entry = PARK_LAYOUT.entries.get(node.id);
+    if (!entry) continue;
+    const apron = doorApronOf(entry);
+    if (!apron) continue;
+    const width = ROUTES.find((route) => route.name === `spur-${node.id}`)?.width ?? 2.6;
+    aprons.push({
+      name: `door-${node.id}`,
+      points: [[entry.entranceX, entry.entranceZ], apron.to],
+      width,
+      closed: false,
+      walkable: apron.walkable,
+    });
+  }
+  return aprons;
 }
 
 /** Junction apron `k`'s disc and annulus are filed under `JUNCTION_OWNER_BASE - k`. */
