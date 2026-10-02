@@ -257,6 +257,9 @@ function drawnCentreOf(entry: ManifestEntry, x: number, z: number): readonly [nu
   return [x - (x / length) * BUILDING_CENTRE_NUDGE, z - (z / length) * BUILDING_CENTRE_NUDGE];
 }
 
+/** Cosine of 60 degrees: how far off the park's middle a fixed-facing door may face. */
+const DOOR_FACES_IN_COS = 0.5;
+
 /**
  * A `{ local, facing }` door's doormat: at the door's own front if that stands
  * clear of the plot, otherwise pushed straight out along `facing` until it is
@@ -1151,6 +1154,23 @@ function validate(
       if (ringGap < entry.boundingRadius + RING_PLOT_CLEARANCE) {
         return fail('stands in the statue ring');
       }
+    }
+  }
+
+  // **A plot whose door faces a fixed way stands where that door faces into
+  // the park** — the castle's front door faces +Z on every bearing
+  // (`ManifestEntry.door.facing`), so a castle north of the middle turns its
+  // door to the wall, and the only path to it runs round, or under, the
+  // building (seed 5, 2 Oct 2026: the spur ran 24 m under the castle to reach
+  // its steps). The door must face within 60 degrees of the park's middle.
+  if (entry.door && 'facing' in entry.door) {
+    const fountainEntry = placed.find((other) => other.id === 'fountain');
+    const midX = (fountainEntry?.x ?? 0) - x;
+    const midZ = (fountainEntry?.z ?? 0) - z;
+    const toMiddle = Math.hypot(midX, midZ);
+    const [fx, fz] = entry.door.facing;
+    if (toMiddle > 1e-6 && (midX * fx + midZ * fz) / toMiddle < DOOR_FACES_IN_COS) {
+      return fail('turns its door away from the park');
     }
   }
 
