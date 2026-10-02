@@ -38,7 +38,9 @@ merges this branch when the building is complete.
 
 Picked up after the fix agent died with its tree uncommitted; that tree is
 commit `2a68c9e0` (tsc 0, `check:reptile-house` pinned exit 0, "All clauses
-passed"). Doing, in this order, committing each step:
+passed"). Done, each step committed and pushed (`0ed2f795` the mouth door,
+`5b40c9c8` the ride and the egg, then the manifest/spec); the state of play
+is at the bottom of this section. The plan was:
 
 1. **Jim's ruling — the door is Sunny's open mouth** (*"Why beside the door
    and not the door as its mouth? That sounds cooler so do that."*). The head
@@ -62,6 +64,24 @@ passed"). Doing, in this order, committing each step:
    `eggPrize` filtered by shop, `Shopping.buy` keyed on `kind === 'egg'`.
 4. Remaining low findings: rock b into the open, dead `boardRide` branch,
    `void id`, derived constants exported as literals.
+
+**State of play.** The facade is built and measured (build log numbers in
+ASSET_MANIFEST §35); `tsc`, `typecheck:test` exit 0; `check:reptile-house`
+pinned was green at `5b40c9c8` with the ride parked as a disc. Then the
+drawn ⇒ solid clause found the parked tortoise's head bare, so the parked
+collider became a capsule, which collided with the hop-on log and the
+meter's stand keep-out and the exit band's tap-spacing rule in turn — the
+parking bay is now (9.4, 16.7) facing west along the south wall, the log
+moved to (7..11, 9.7), rock b to (0.5, 17), the ride's zone pick 1.7. If you
+are picking this up: run `LGP_SEED=5 LGP_PARK_RESTART=1 pnpm run
+check:reptile-house` and `check:tap-spacing`, then `check:brevity`,
+`check:assets`; then re-arm the check (`REPTILE_CHECK_REMOVE="the tortoise
+ride, parked"`, `REPTILE_CHECK_OPEN_SHELL=8`,
+`REPTILE_CHECK_MUTATE=faces-upside-down` must each go red); then build,
+`vite preview --port 5991 --strictPort`, and
+`scripts/local/reptile-shots-3.local.mts` (uncommitted scratch) for the
+final screenshots into the Overseer's `…/scratchpad/reptile-house/final/`.
+The branch's base question (wip/sb-merge vs main) is the Overseer's.
 
 ## What the review changed (all at cause; findings in the Overseer's thread)
 
@@ -137,7 +157,9 @@ as facing *up*, which is what most of the "croc" findings were.
   `?at=20.4,6.5&facing=270` the nursery · `?at=15,1.8&facing=180` the lagoon ·
   `?at=-13,0&facing=90` inside the log · `?at=3.04,15.24&facing=225` the stall
   · `?at=-17.8,-12.4&facing=315` the grove.
-- `/reptile-house-door` — outside on the forecourt doormat, facing the door.
+- `/reptile-house-door` — outside on the forecourt, on the tongue, facing the
+  mouth.
+- `/tortoise-ride` — in the hall, on the tortoise's shell, mid-lap.
 
 Screenshots are taken headless against `vite preview` with
 `__LGP_PARK_RESTART__ = 1` injected (`scripts/local/reptile-shots-2.local.mts`,
