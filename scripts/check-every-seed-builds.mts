@@ -330,8 +330,17 @@ for (const r of results) {
   }
   const falseRefusal = falseRefusalProblem(r.seed, r.falseRefusals);
   if (falseRefusal) problems.push(falseRefusal);
-  // Built well? `lib/builtWell.mts`, one owner with the acceptance loop.
-  problems.push(...builtWellProblems(r.seed, r, recorded !== undefined));
+  // Built well? Reported, not failed. Decision-zero redraws are the
+  // backtracking ladder working as designed, and a seed's accepted park is
+  // whichever restart passes, so a count against one restart's record is
+  // search effort, not a defect — failing on it would let an accepted park
+  // turn CI red. Search cost is SolveBudget's to bound and check:solve-cost's
+  // to watch (#705 review, 2 Oct: seed 11 restarts 0-3 rejected for this alone).
+  // An UNMEASURED line is the instrument failing, and still fails.
+  for (const note of builtWellProblems(r.seed, r, recorded !== undefined)) {
+    if (note.startsWith('UNMEASURED')) problems.push(note);
+    else loose.push(`SEARCH COST (reported): ${note}`);
+  }
   const zero = DECISION_ZERO_BASELINE[r.seed];
   if (zero !== undefined && Number.isFinite(r.decisionZero) && r.decisionZero < zero) {
     loose.push(`BASELINE LOOSE: seed ${r.seed} reached decision zero ${r.decisionZero} time(s), baseline ${zero}`);

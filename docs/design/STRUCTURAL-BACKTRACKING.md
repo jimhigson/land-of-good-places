@@ -92,8 +92,12 @@ measure, through one owner shared by the check and the loop:
   (`lib/entranceRoad.mts`), `check:swept-bus` (`lib/sweptBus.mts`),
   `check:castle-window` and `check:cruiser-turn-radius` (`lib/rideFindings.mts`),
   `check:coplanar`'s ratchet on the garden (`lib/coplanarRatchet.mts`),
-  `check:every-seed-builds`' "built well" and false-refusal clauses
-  (`lib/builtWell.mts`), `check:castle-towers` (`lib/castleTowers.mts`),
+  `check:every-seed-builds`' false-refusal clause and missing-trace void
+  (`lib/builtWell.mts`; its "built well" count of decision-zero redraws is
+  search effort, not a park property, so it is reported and judges nothing:
+  decision zero is a rung of this ladder, used as designed, and an accepted
+  park is whichever restart passes, so a count against one restart's record
+  would let an accepted park turn CI red), `check:castle-towers` (`lib/castleTowers.mts`),
   `check:path-preference` (`lib/pathPreference.mts`) and `check:waypoints`
   (`lib/waypointFindings.mts`: waypoints are sampled off a park's own paths).
 - **On a fresh World of its own, in the same process**

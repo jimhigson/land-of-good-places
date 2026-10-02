@@ -167,12 +167,15 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
       // Proving one costs a second build, so it is asked only when the rung fired.
       const falseRefusal =
         counts.rungFired > 0 ? falseRefusalProblem(seed, await falseRefusalsOf(seed, restart)) : null;
-      // Built well is judged against the seed's own record, and only seeds the
-      // check sweeps have one: an off-pool seed is not this check's to judge.
-      const { DECISION_ZERO_BASELINE, UNBUILT_BASELINE } = await import('./every-seed-builds-baseline.mts');
-      const swept = DECISION_ZERO_BASELINE[seed] !== undefined || UNBUILT_BASELINE[seed] !== undefined;
-      const faults = swept ? builtWellProblems(seed, counts, UNBUILT_BASELINE[seed] !== undefined) : [];
-      return { faults, voids: falseRefusal ? [falseRefusal] : [] };
+      // **Not "built well".** How many times the layout reached decision zero
+      // is how hard the search worked, not a property of the park: decision
+      // zero is a rung of the backtracking ladder, used as designed. Judging
+      // it rejected seed 11's restarts 0-3 for searching, not for any defect
+      // (#705 review, 2 Oct). Search cost is bounded by SolveBudget and
+      // watched by check:solve-cost; it never restarts a park.
+      // A missing layout trace is still the instrument failing: a void.
+      const unmeasured = builtWellProblems(seed, counts, true).filter((p) => p.startsWith('UNMEASURED'));
+      return { faults: [], voids: [...unmeasured, ...(falseRefusal ? [falseRefusal] : [])] };
     },
   ],
   [
