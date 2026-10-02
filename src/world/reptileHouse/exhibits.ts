@@ -847,7 +847,7 @@ export class Exhibits {
     // Inside the rail's posts and ring by a clear margin, so no pane face
     // lies in a plane with the rail's.
     const glass = new Mesh(
-      new CylinderGeometry(glassRadius - 0.1, glassRadius - 0.1, REPTILE_NURSERY_RAIL_TOP - REPTILE_NURSERY_KERB_HEIGHT - 0.05, 32, 1, true),
+      new CylinderGeometry(glassRadius - 0.2, glassRadius - 0.2, REPTILE_NURSERY_RAIL_TOP - REPTILE_NURSERY_KERB_HEIGHT - 0.05, 32, 1, true),
       GLASS,
     );
     glass.position.y = (REPTILE_NURSERY_RAIL_TOP + REPTILE_NURSERY_KERB_HEIGHT) / 2;

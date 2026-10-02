@@ -2084,7 +2084,17 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
   const reachThree = await import('three');
   const drawnReach = ((): DrawnReachFact => {
     const ReachInstancedMesh = reachThree.InstancedMesh;
-    const excluded = [world.building.interiorRoot, world.hotel.hotelRoot];
+    // The spaces that are not the park, each hundreds of metres out at its
+    // own origin: the castle's interior, the hotel's rooms, and the Reptile
+    // House's hall and forecourt (600 m east, 600–900 m north — counted, they
+    // put the park "past the equator" on every seed, which is how the
+    // acceptance loop failed every restart of seed 5 on 2 Oct 2026).
+    const excluded = [
+      world.building.interiorRoot,
+      world.hotel.hotelRoot,
+      world.reptileHouse.hallRoot,
+      world.reptileHouse.forecourtRoot,
+    ];
     const instance = new reachThree.Matrix4();
     const toWorld = new reachThree.Matrix4();
     const vertex = new reachThree.Vector3();

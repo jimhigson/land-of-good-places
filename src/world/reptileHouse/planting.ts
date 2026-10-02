@@ -4,7 +4,6 @@ import {
   InstancedMesh,
   Matrix4,
   Mesh,
-  Path,
   Quaternion,
   Shape,
   SphereGeometry,
@@ -44,8 +43,10 @@ import { segmentDistance } from './props';
  * the hop-on logs and rocks their own wall or disc with a standing plate.
  */
 
-const SOIL_HEIGHT = 0.1;
 const KERB_HEIGHT = 0.12;
+/** The soil's top, standing on the kerb slab. Plants root just under it. */
+const SOIL_HEIGHT = 0.16;
+const PLANT_Y = SOIL_HEIGHT - 0.04;
 const KERB_WIDTH = 0.18;
 /** Disc centres this far apart — well under two radii, so no slot between them. */
 const DISC_PITCH = 1.0;
@@ -110,22 +111,19 @@ export class Planting {
 
   private buildBed(bed: BedSpec): void {
     const outline = bed.outline;
-    // The kerb: the outline extruded, with the soil's inset as a hole, sunk
-    // 0.03 m so its bottom shares no plane with the floor (0) or with the
-    // kits' own 0.05 m sinks; the soil inside it, a hair lower, starting
-    // 0.02 m up for the same reason. The soil is cut to exactly the kerb's
-    // hole, so where the two meet their faces point opposite ways — which the
-    // coplanar sweep rightly ignores — rather than running a few millimetres
-    // apart, which it rightly reports.
-    const inner = insetPolygon(outline, KERB_WIDTH);
-    const kerbShape = polygonShape(outline);
-    kerbShape.holes.push(polygonPath(inner));
-    const kerb = solid(new Mesh(new ExtrudeGeometry(kerbShape, { depth: KERB_HEIGHT + 0.03, bevelEnabled: false }), toonMaterial(PALETTE.stonePink)));
+    // The kerb is a stone slab the shape of the whole bed, sunk 0.03 m so its
+    // bottom shares no plane with the floor (0) or the kits' own 0.05 m
+    // sinks; the soil is a smaller slab stood on top of it, its top four
+    // centimetres higher. No hole, no shared edge: every face of one is in a
+    // different plane from every face of the other (a kerb cut as a ring
+    // round the soil put the two in one plane along their seam, which the
+    // coplanar sweep reported).
+    const kerb = solid(new Mesh(new ExtrudeGeometry(polygonShape(outline), { depth: KERB_HEIGHT + 0.03, bevelEnabled: false }), toonMaterial(PALETTE.stonePink)));
     kerb.rotation.x = Math.PI / 2;
     kerb.position.y = KERB_HEIGHT;
     kerb.name = `bed:${bed.id}:kerb`;
     this.ctx.root.add(kerb);
-    const soil = solid(new Mesh(new ExtrudeGeometry(polygonShape(inner), { depth: SOIL_HEIGHT - 0.02, bevelEnabled: false }), toonMaterial(PALETTE.barkDark)));
+    const soil = solid(new Mesh(new ExtrudeGeometry(polygonShape(insetPolygon(outline, KERB_WIDTH)), { depth: SOIL_HEIGHT - KERB_HEIGHT + 0.06, bevelEnabled: false }), toonMaterial(PALETTE.barkDark)));
     soil.rotation.x = Math.PI / 2;
     soil.position.y = SOIL_HEIGHT;
     soil.name = `bed:${bed.id}:soil`;
@@ -191,7 +189,7 @@ export class Planting {
       const at = sample(0.45);
       if (!at) continue;
       // A fern is six fronds in a whorl.
-      for (let k = 0; k < 6; k += 1) ferns.push({ x: at.x, y: 0.05, z: at.z, yaw: (k / 6) * Math.PI * 2 + rng.range(0, 0.5), scale: rng.range(0.8, 1.15), tilt: 0.25 });
+      for (let k = 0; k < 6; k += 1) ferns.push({ x: at.x, y: PLANT_Y, z: at.z, yaw: (k / 6) * Math.PI * 2 + rng.range(0, 0.5), scale: rng.range(0.8, 1.15), tilt: 0.25 });
     }
     const tuftCount = Math.round(area / 3) + 4;
     for (let i = 0; i < tuftCount; i += 1) {
@@ -205,17 +203,17 @@ export class Planting {
       if (!at || !tall(at)) continue;
       const kind = rng.int(0, 2);
       if (kind === 0) {
-        for (let k = 0; k < 3; k += 1) bananas.push({ x: at.x, y: 0.05, z: at.z, yaw: (k / 3) * Math.PI * 2 + rng.range(0, 1), scale: rng.range(0.9, 1.2) });
+        for (let k = 0; k < 3; k += 1) bananas.push({ x: at.x, y: PLANT_Y, z: at.z, yaw: (k / 3) * Math.PI * 2 + rng.range(0, 1), scale: rng.range(0.9, 1.2) });
       } else if (kind === 1) {
-        for (let k = 0; k < 4; k += 1) monsteras.push({ x: at.x, y: 0.05, z: at.z, yaw: (k / 4) * Math.PI * 2 + rng.range(0, 1), scale: rng.range(0.9, 1.1) });
+        for (let k = 0; k < 4; k += 1) monsteras.push({ x: at.x, y: PLANT_Y, z: at.z, yaw: (k / 4) * Math.PI * 2 + rng.range(0, 1), scale: rng.range(0.9, 1.1) });
       } else {
-        heliconias.push({ x: at.x, y: 0.05, z: at.z, yaw: rng.range(0, 6.28), scale: rng.range(0.9, 1.1) });
+        heliconias.push({ x: at.x, y: PLANT_Y, z: at.z, yaw: rng.range(0, 6.28), scale: rng.range(0.9, 1.1) });
       }
     }
     // Decorative rocks inside the mass — no collider of their own, the bed is solid.
     if (bounds.maxX - bounds.minX > 6) {
       const at = sample(1.6);
-      if (at) this.ctx.root.add(...instancedPlant(rng.chance(0.5) ? 'rp-rock-b' : 'rp-rock-c', [{ x: at.x, y: 0, z: at.z, yaw: rng.range(0, 6.28), scale: 0.8 }]));
+      if (at) this.ctx.root.add(...instancedPlant(rng.chance(0.5) ? 'rp-rock-b' : 'rp-rock-c', [{ x: at.x, y: PLANT_Y, z: at.z, yaw: rng.range(0, 6.28), scale: 0.8 }]));
     }
   }
 
@@ -231,7 +229,7 @@ export class Planting {
     const scale = new Vector3();
     const colour = new Color();
     tufts.forEach((tuft, index) => {
-      position.set(tuft.x, 0.1, tuft.z);
+      position.set(tuft.x, SOIL_HEIGHT, tuft.z);
       scale.set(tuft.scale, tuft.scale * 0.6, tuft.scale);
       matrix.compose(position, quaternion, scale);
       mesh.setMatrixAt(index, matrix);
@@ -286,16 +284,6 @@ function polygonShape(points: readonly LocalPoint[]): Shape {
   });
   shape.closePath();
   return shape;
-}
-
-function polygonPath(points: readonly LocalPoint[]): Path {
-  const path = new Path();
-  points.forEach((point, index) => {
-    if (index === 0) path.moveTo(point.x, point.z);
-    else path.lineTo(point.x, point.z);
-  });
-  path.closePath();
-  return path;
 }
 
 function polygonBounds(points: readonly LocalPoint[]): { minX: number; maxX: number; minZ: number; maxZ: number } {
