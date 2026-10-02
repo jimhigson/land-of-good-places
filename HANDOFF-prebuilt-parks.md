@@ -93,3 +93,20 @@ Design: `docs/design/PREBUILT-PARKS.md` (also PR #704, draft). Base: origin/feat
   .github/actions/restore-parks (wait+restore). All park-building workflows have a `Parks ready` job + restore.
   Preview/deploy caps back to 10/30. Known: branch-scoped cache -> main cold after closure-touching merge.
 - Proof in flight: seeds 2,13 sequential vs RESTART_LANES=3 (.parks/seq vs .parks/spec) must match.
+
+## 2 Oct evening: replacement engineer (Claude Opus 5.5 1M, chosen by Overseer) — CI rate-limit fix
+- Cause: 8 `Parks ready` jobs (one per park-consuming workflow) polled `gh cache list`/`gh run list`
+  every 30 s for ~20 min -> installation rate limit (403) at 17:51 UTC on 819958fe; every Park N passed.
+- Fix (0bb9ac79): `.github/workflows/ci.yml` ("CI") calls parks.yml (now `workflow_call`, output `ready`)
+  then every consumer as a called workflow behind `needs: [parks]` + `if: !cancelled() && ready`.
+  restore-parks = hash + cache restore only (no API). Required `Checks` / `Procgen invariants`
+  aggregators moved to ci.yml top level (same names; called jobs show as "<caller> / <job>").
+  Callees lost workflow-level concurrency (github.workflow is the caller's). Deploy: job-level
+  `deploy-main` queue; ci.yml group = sha on push (main never cancelled). Deploy also runs on
+  `gh workflow run ci.yml --ref main`. live-version follows workflow_run [CI] on main, waits on
+  in-flight ci.yml runs (retrying API errors, 60 min). Parks reuse lookup retries 403 and falls back to building.
+- check:seed-coverage BLOCKING_JOBS now {workflow: ci.yml, job, runs: callee, via: caller job}; control
+  (break procgen call) -> red. checkChain.capSecondsForJob strips "<caller> / ". actionlint clean.
+- No rebase needed: branch already contains origin/feat/structural-backtrack b0f7e2dd. Step set vs it:
+  -solve-cost -arrival-completes +procgen-boundary +prebuilt-park +client-no-solver (all intended).
+- Stale 1afdf689 old-style runs still polling; cancel was denied to me -> asked Overseer.

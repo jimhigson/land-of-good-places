@@ -278,10 +278,16 @@ timeout as `cancelled`, so the site sat stale for hours with nothing red.
 
 **Where they run:**
 
+Every workflow that builds a park is **called from `ci.yml`**, behind a
+`needs:` edge on the Parks build (`parks.yml`) in the same run, and the two
+required aggregators, `Checks` and `Procgen invariants`, are jobs in `ci.yml`
+itself. Never wait for parks by polling the API from another workflow: eight
+pollers exhausted the installation's rate limit on 2 Oct 2026 (#705).
+
 | script | workflow | required to merge? |
 |---|---|---|
-| `check` | `checks.yml` ("Checks") | **yes** |
-| `test:procgen` | `procgen-invariants.yml` ("Procgen invariants") | **yes** |
+| `check` | `checks.yml`, called by `ci.yml` ("Checks") | **yes** |
+| `test:procgen` | `procgen-invariants.yml`, called by `ci.yml` ("Procgen invariants") | **yes** |
 | `check:coplanar` | `coplanar.yml` ("Coplanar faces") | not yet — needs adding |
 | `check:swept-bus` | `swept-bus.yml` ("Swept bus") | not yet — needs adding |
 | `build` | `deploy.yml`, `pr-preview.yml`, and `checks.yml` | — |
