@@ -168,6 +168,7 @@ import {
   LOCO_BODY_TOP_Y,
 } from '../../src/world/train/trainDimensions.ts';
 import {
+  FENCE_OFFSET,
   PLATFORM_LENGTH,
   RIDER_HEADROOM,
   STATION_GAP,
@@ -1747,6 +1748,55 @@ const noDrawnPavingOutsideThePark: Invariant = (facts) => {
   );
   process.stderr.write(`  noDrawnPavingOutsideThePark: ${paved} paving cells judged on seed ${facts.seed}; ${outside.length} outside\n`);
   if (paved === 0) complaints.push('no paving was judged — this measured nothing');
+  return complaints;
+};
+
+/**
+ * **No drawn paving lies inside the railway's corridor**, except where a bridge
+ * carries it over.
+ *
+ * The corridor is the train's own: the ground between its two fences,
+ * {@link FENCE_OFFSET} either side of the rail centre line (`train/clearance.ts`,
+ * the number the fences are built from). Paving in there is paving nobody can
+ * walk — fenced off, under the train. Found on seed 10 (2 Oct 2026): the
+ * connector `connector-stall.facePaint-station-0` ran along the track beside a
+ * station, ~14 m² of it inside the fences.
+ *
+ * Every crossing is a bridge (since 2 Sep 2026; level crossings no longer
+ * exist), so the one exemption is paving a bridge carries
+ * (`Bridge.pavingHeightAt`), counted on every run.
+ */
+const noDrawnPavingInTheRailCorridor: Invariant = (facts) => {
+  const meshes = drawnPathLayers(facts);
+  if (typeof meshes === 'string') return [meshes];
+  const raster = rasterisePaving(meshes);
+  const bridges = facts.world.train.bridges;
+  const inside: { k: number; detail: number }[] = [];
+  let paved = 0;
+  let carried = 0;
+  for (let k = 0; k < raster.cols * raster.rows; k += 1) {
+    if (!isPaved(raster, k)) continue;
+    const [x, z] = cellCentre(raster, k);
+    const rail = facts.distanceToRail(x, z);
+    if (rail >= FENCE_OFFSET) continue;
+    paved += 1;
+    if (bridges.some((bridge) => bridge.pavingHeightAt(x, z) !== null)) {
+      carried += 1;
+      continue;
+    }
+    inside.push({ k, detail: rail });
+  }
+  const area = PAVING_CELL * PAVING_CELL;
+  const complaints = gatherPlaces(raster, inside, (a, b) => a < b).map(
+    (place) =>
+      `${(place.cells * area).toFixed(2)} m² of drawn paving near ${fmt(place.at)} lies inside the railway's ` +
+      `fences, as close as ${place.worst.toFixed(2)} m to the rail centre line (the fences stand ${FENCE_OFFSET} m out) ` +
+      'with no bridge carrying it',
+  );
+  process.stderr.write(
+    `  noDrawnPavingInTheRailCorridor: ${paved} paving cells inside the fences on seed ${facts.seed}, ` +
+      `${carried} of them carried by a bridge, ${inside.length} not\n`,
+  );
   return complaints;
 };
 
@@ -13293,6 +13343,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the drawn paving runs from the gate all the way to every door', drawnPavingReachesEveryDoor],
   ['no drawn paving lies under a building, a booth or the boundary wall', noDrawnPavingUnderASolid],
   ['no drawn paving lies outside the park', noDrawnPavingOutsideThePark],
+  ["no drawn paving lies inside the railway's fences unless a bridge carries it", noDrawnPavingInTheRailCorridor],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],

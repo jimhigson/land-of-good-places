@@ -5,7 +5,8 @@ import { Mesh, BufferAttribute, Float32BufferAttribute } from 'three';
  * it must not be. CTRL_MODE=booth: moved from the first stall's stand point
  * onto its booth. CTRL_MODE=outside: from the paving nearest the boundary,
  * moved 4 m out past it. CTRL_MODE=castle: from the castle's doormat, 6 m in
- * under its front wall. The copy keeps its owners, so nothing is exempt.
+ * under its front wall. CTRL_MODE=rail: from the unbridged paving nearest the
+ * rail, onto the rail centre line. The copy keeps its owners, so nothing is exempt.
  */
 export default function (facts: any): void {
   const mode = process.env['CTRL_MODE'] ?? 'booth';
@@ -13,7 +14,22 @@ export default function (facts: any): void {
   facts.world.garden.group.traverse((o: any) => { if (o instanceof Mesh && (o.name === 'path-surface' || o.name === 'path-kerb')) meshes.push(o); });
   let from: [number, number];
   let shift: [number, number];
-  if (mode === 'castle') {
+  if (mode === 'rail') {
+    // From the paving nearest the rail that no bridge carries, onto the track.
+    let best = Infinity;
+    from = [0, 0];
+    const p = meshes[0].geometry.getAttribute('position');
+    const route = facts.world.train.route;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), z = p.getZ(i);
+      if (facts.world.train.bridges.some((b: any) => b.pavingHeightAt(x, z) !== null)) continue;
+      const d = facts.distanceToRail(x, z);
+      if (d < best) { best = d; from = [x, z]; }
+    }
+    const at = { x: 0, z: 0 } as any;
+    route.flatPointAt(route.distanceNear(from[0], from[1]), at);
+    shift = [at.x - from[0], at.z - from[1]];
+  } else if (mode === 'castle') {
     // From the castle's doormat, 6 m in under its front wall.
     const door = facts.entrances.find((e: any) => e.id === 'anchor:building');
     from = [door.x, door.z];
