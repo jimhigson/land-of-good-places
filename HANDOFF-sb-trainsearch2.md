@@ -18,3 +18,8 @@ cheaper exact tests. Measure plan CPU per seed before/after; `accept:parks -- 0-
   (brief seed fixed), but the shared rng makes each a different search; history: 10 miss-runs, 4
   later succeeded (MP x3, MMMMMP x1), 6 MMMMMM -> cutting supply would change decisions; not done.
 - base sweep (48c8a7fd): scratch b4-sweep.txt. Next: after sweep a5, then accept:parks --fresh.
+- [x] 050c334a cruiser castle-miss supply 2 (CruiserMissedTheCastle). Seed 5: cruiser 79.2 s/11.46M ->
+  15.3 s/4.02M, plan 94.8 -> 26.9 s, final decisions identical. Changes seed 1 (MMMMMP history).
+  Root cause seed 5: layout draw 2 castle 24.9 m from boundary, window axis at it.
+- a5 sweep (part1 + identity speedups): total 1330 -> 1287 s; part 1 makes 9 (56->148 s), 3, 1, 15 trains costlier.
+- Running: a6 sweep (all), then accept:parks -- 0-15 --fresh (no --write).
