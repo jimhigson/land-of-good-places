@@ -152,7 +152,7 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
       const { pathPreference } = await import('./lib/pathPreference.mts');
       // Only the clauses the park decides (the network it drew, how routes sit
       // on it); the router's own are code, fixed at cause.
-      const { decisions, voids } = await pathPreference(park, { quiet: true });
+      const { decisions, voids } = await pathPreference(park, { quiet: true, clauses: 'decisions' });
       return { faults: decisions, voids };
     },
   ],
