@@ -1816,6 +1816,25 @@ export function solveSlide(seedSalt = 0): PlannedSlide | SlideRefusal {
  * 2.9 s lump (0 pieces) when it ran synchronously inside a boot slice.
  */
 export function* slideSearch(seedSalt = 0): Generator<number, PlannedSlide | SlideRefusal, void> {
+  const found = yield* slideRouteSearch(seedSalt);
+  if ('refused' in found) return found;
+  return yield* finishSlideSearch(found.route);
+}
+
+/**
+ * **The search half of {@link slideSearch}: the chute's route, or a refusal —
+ * never the finished plan.**
+ *
+ * Split out because the two halves read different decisions. The search reads
+ * the layout (the castle, the pit, the plots), the Sky Cruiser and the seed —
+ * nothing else; the finish reads the railway too ({@link planExit} keeps the
+ * exit off the rail corridor). So a railway re-draw leaves this half's answer
+ * unchanged, byte for byte, and the park's slide builder keeps it rather than
+ * searching again (see `parkPlan.ts`).
+ */
+export function* slideRouteSearch(
+  seedSalt = 0,
+): Generator<number, { readonly route: SolvedRailRoute } | SlideRefusal, void> {
   // `satisfies` cannot fail a park on its own — the generator hands back the
   // first route that solved if none satisfied. For a coaster that is the right
   // trade; for a slide through a roller coaster it is not, so what the search
@@ -1840,7 +1859,7 @@ export function* slideSearch(seedSalt = 0): Generator<number, PlannedSlide | Sli
       lastComplaint = `admitted no route ${describeSlideAttempt(decision)}`;
       continue;
     }
-    if (attempt.complaint === null) return yield* finishSlideSearch(attempt.route);
+    if (attempt.complaint === null) return { route: attempt.route };
     lastComplaint = `${attempt.complaint} (${describeSlideAttempt(decision)})`;
   }
   return { refused: true, attemptsTried: tried, blocker: lastComplaint };

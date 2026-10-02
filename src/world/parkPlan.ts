@@ -56,7 +56,7 @@ const CASTLE_MISS_DRAWS = 2;
 import { RailRouteUnsolvable, type SolvedRailRoute } from './rail/generate';
 import { TrainRoute, TrainRouteUnsolvable, trainRouteSearch } from './train/route';
 import { planStations, type PlannedStation } from './train/plan';
-import { slideSearch, type PlannedSlide } from './slide/solve';
+import { finishSlideSearch, slideRouteSearch, type PlannedSlide, type SlideRefusal } from './slide/solve';
 import {
   crossingSitesSearch,
   refuseBridgeSiteForPaths,
@@ -642,11 +642,46 @@ function builders(): readonly FeatureBuilder[] {
     },
   });
 
+  /**
+   * **The slide's searches, kept for as long as what they read stands.**
+   *
+   * The chute's search reads the layout and the Sky Cruiser alone
+   * (`slideRouteSearch`); only its finish reads the railway, to keep the exit
+   * off the rail corridor. Yet the slide comes after the train in the build
+   * order, so every railway re-draw — and every unwind that reaches it from the
+   * crossings or the paths — backs the slide out and asks it again, and it ran
+   * the identical search to the identical answer. Measured on seed 11 restart
+   * 4 (fix/sb-slidecost): of 11 slide searches, 2 were repeats under an
+   * unchanged layout and cruiser (89,182 and 145,830 pieces, the same counts
+   * as the searches they repeated). Cheap there; on a layout whose slide is
+   * the expensive one, each train re-draw would have paid it again.
+   *
+   * So the answer per attempt is kept, keyed on the very layout and cruiser
+   * objects it was searched under — a re-drawn cruiser or layout is a new
+   * object and empties the memo, so nothing is ever answered from a decision
+   * that is gone — and only the finish (a few milliseconds, the exit read
+   * against the railway as it now stands) runs again. Every decision is the
+   * one the search would have made: the search draws only its own seeded
+   * stream, so the same inputs and attempt give the same route or refusal.
+   */
+  let slideSearchedUnder: { readonly layout: ParkLayout; readonly cruiser: PlannedCoaster } | null = null;
+  const slideSearched = new Map<number, { readonly route: SolvedRailRoute } | SlideRefusal>();
   const slideBuilder = coarse<PlannedSlide>({
     name: 'slide',
     deps: ['layout', 'cruiser', 'train'],
     *solve(attempt) {
-      const outcome = yield* slideSearch(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'slide', 'solve', attempt));
+      const layout = planPart('layout');
+      const cruiser = planPart('cruiser');
+      if (slideSearchedUnder?.layout !== layout || slideSearchedUnder.cruiser !== cruiser) {
+        slideSearched.clear();
+        slideSearchedUnder = { layout, cruiser };
+      }
+      let found = slideSearched.get(attempt);
+      if (found === undefined) {
+        found = yield* slideRouteSearch(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'slide', 'solve', attempt));
+        slideSearched.set(attempt, found);
+      }
+      const outcome = 'refused' in found ? found : yield* finishSlideSearch(found.route);
       if ('refused' in outcome) {
         return refusal(`ginormous slide: ${outcome.blocker}`, { consumed: ['cruiser', 'layout'] });
       }
