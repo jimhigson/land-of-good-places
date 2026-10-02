@@ -248,6 +248,26 @@ export const ART = {
    */
   castleTapestry: 0xc4577f,
 
+  // --- the Reptile House (spec §12) -----------------------------------------
+  /**
+   * The house snakes — Noodle, Sunny the building, the nursery babies and
+   * the pet you adopt. A soft mint rather than `PALETTE.leafMid`'s grass
+   * green: a snake must read as a *toy* snake next to the real foliage it
+   * lives in, and the same green as a leaf would vanish into the beds.
+   */
+  snakeMint: 0x9fe0b0,
+  /** The second colourway — the coral baby, the finial on the stall. */
+  snakeCoral: 0xff9f80,
+  /** Every snake's belly: a shade warmer than `cream` so it reads under the toon ramp. */
+  snakeBelly: 0xfff1d0,
+  /** The corn snakes, and the Noodle-o-meter's own climber. */
+  cornOrange: 0xffa75c,
+  cornSaddle: 0xd96b4a,
+  /** Grandpa Tock's shell, and the small tortoises'. */
+  shellOlive: 0xb5b86a,
+  /** The hothouse's terracotta — pot rims, the nursery's heat-lamp shade. */
+  hothouseClay: 0xe9a883,
+
   // --- effects ---------------------------------------------------------------
   /**
    * The park's rainbow, inner band first. Used by the hop ring.

@@ -2001,7 +2001,15 @@ function resolveSpawn(place: SavedPlace | undefined): Vector3 {
   // own origins, so "being there" is a position plus one adoption call
   // (`Hotel.adoptRestoredPlayer`), unlike the castle's stacked decks, whose
   // restore stays deliberately deferred to Decision 3 (see below).
-  if (place.space !== SPACE_GARDEN && !place.space.startsWith('hotel.')) return DEFAULT_SPAWN;
+  // …and so does the Reptile House (`ReptileHouse.adoptRestoredPlayer`), hall
+  // and forecourt alike — `spaces.ts` names both with the `reptileHouse` stem.
+  if (
+    place.space !== SPACE_GARDEN &&
+    !place.space.startsWith('hotel.') &&
+    !place.space.startsWith('reptileHouse')
+  ) {
+    return DEFAULT_SPAWN;
+  }
   const world = localToWorld(place.space, place.x, place.y, place.z);
   if (!world) return DEFAULT_SPAWN;
   return new Vector3(world.x, world.y, world.z);

@@ -47,6 +47,13 @@ import {
   HOTEL_SUITE_Z,
 } from '../core/constants';
 import { castleFloorAt } from './building/floors';
+import {
+  REPTILE_FORECOURT_ORIGIN_X,
+  REPTILE_FORECOURT_ORIGIN_Z,
+  REPTILE_HOUSE_ORIGIN_X,
+  REPTILE_HOUSE_ORIGIN_Z,
+  REPTILE_HOUSE_SPACE_RADIUS,
+} from './reptileHouse/layout';
 
 /**
  * A place, as a save file names it.
@@ -103,6 +110,25 @@ export const SPACE_HOTEL_GARDEN: SpaceId = 'hotel.garden';
 export const SPACE_HOTEL_OCEAN: SpaceId = 'hotel.ocean';
 
 /**
+ * **The Reptile House** — one hall, one disjoint space, and the forecourt it
+ * is entered from while the park has no plot for it (`reptileHouse/layout.ts`
+ * owns both origins). Same shape as a hotel room: a flat plate at a far-off
+ * origin, entered through a door that is really a teleport.
+ */
+export const SPACE_REPTILE_HOUSE: SpaceId = 'reptileHouse';
+export const SPACE_REPTILE_FORECOURT: SpaceId = 'reptileHouse.forecourt';
+
+/**
+ * Every reptile-house space's origin, written once — read by {@link spaceAt}
+ * here and by `spaceOrigins.ts` for saves, for the same reason
+ * {@link HOTEL_ROOM_Z} exists.
+ */
+export const REPTILE_SPACE_ORIGINS: readonly (readonly [SpaceId, number, number])[] = [
+  [SPACE_REPTILE_HOUSE, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z],
+  [SPACE_REPTILE_FORECOURT, REPTILE_FORECOURT_ORIGIN_X, REPTILE_FORECOURT_ORIGIN_Z],
+];
+
+/**
  * **Every hotel room's Z, written once.**
  *
  * This list used to exist twice — once in the save origins' table and once,
@@ -145,6 +171,11 @@ export function spaceAt(x: number, z: number): SpaceId {
     const hx = x - HOTEL_ORIGIN_X;
     const hz = z - roomZ;
     if (hx * hx + hz * hz <= HOTEL_ROOM_RADIUS * HOTEL_ROOM_RADIUS) return space;
+  }
+  for (const [space, originX, originZ] of REPTILE_SPACE_ORIGINS) {
+    const rx = x - originX;
+    const rz = z - originZ;
+    if (rx * rx + rz * rz <= REPTILE_HOUSE_SPACE_RADIUS * REPTILE_HOUSE_SPACE_RADIUS) return space;
   }
   return SPACE_GARDEN;
 }

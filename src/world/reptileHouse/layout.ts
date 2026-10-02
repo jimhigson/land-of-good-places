@@ -46,6 +46,21 @@ export const REPTILE_HOUSE_FLOOR_Y = 0;
 export const REPTILE_HOUSE_SPACE_RADIUS = 70;
 
 /**
+ * **The forecourt — where the building stands until the park gives it a
+ * plot.** Its own disjoint space, 300 m south of the hall (the castle floors'
+ * spacing), holding a flat lawn with "Sunny" standing on it, door facing +Z:
+ * `/reptile-house-door` lands here while `placedEntry('reptileHouse')` does
+ * not exist, and leaving the hall with no plot comes back out here, so the
+ * door works both ways on a park that has not placed the building yet. The
+ * day the placement agents add the manifest entry the exterior stands in the
+ * park instead and this lawn is simply never visited.
+ */
+export const REPTILE_FORECOURT_ORIGIN_X = 600;
+export const REPTILE_FORECOURT_ORIGIN_Z = -900;
+/** The forecourt lawn's radius, and the play boundary bound while on it. */
+export const REPTILE_FORECOURT_RADIUS = 26;
+
+/**
  * The play boundary bound while inside. The plate corner is
  * √(24² + 18²) = 30.0 m out, so this clears it with room for the walls.
  */
