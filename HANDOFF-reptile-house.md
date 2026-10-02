@@ -65,7 +65,21 @@ is at the bottom of this section. The plan was:
 4. Remaining low findings: rock b into the open, dead `boardRide` branch,
    `void id`, derived constants exported as literals.
 
-**State of play.** The facade is built and measured (build log numbers in
+**Done (head `ff5e9fdb` + this handoff).** Pinned `check:reptile-house`
+green ("All clauses passed": 286 solids, 0 pockets in 10242 cells, 75/75
+keep-outs reachable, facade 64/64 marches reached the shell and 2 entered
+by the mouth, 68 tall drawn solids 0 bare, rh-head eye row y 5.23 over the
+lips at 4.30) with both controls firing; re-armed red three ways
+(`REPTILE_CHECK_REMOVE="the tortoise ride, parked"` 3 clauses,
+`REPTILE_CHECK_OPEN_SHELL=8` 3, `REPTILE_CHECK_MUTATE=faces-upside-down`
+7). `check:tap-spacing`, `check:brevity`, `check:assets`, `tsc`,
+`typecheck:test`, `build` all exit 0. Final screenshots in the Overseer's
+`…/scratchpad/reptile-house/final/` (taken on a dev server: `window.game`
+is DEV-only, so the preview build cannot drive the script). Not run here
+(push and let CI): the full `check`, `test:procgen`, `check:coplanar`,
+`check:swept-bus`, `check:deep-links`.
+
+**Earlier state of play, kept for the record.** The facade is built and measured (build log numbers in
 ASSET_MANIFEST §35); `tsc`, `typecheck:test` exit 0; `check:reptile-house`
 pinned was green at `5b40c9c8` with the ride parked as a disc. Then the
 drawn ⇒ solid clause found the parked tortoise's head bare, so the parked
