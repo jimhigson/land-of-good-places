@@ -1,4 +1,4 @@
-import { TOWER_SHELL_RADIUS, TOWER_BACK_ALONG, TOWER_FACADE_ALONG, TOWER_DOOR_BAND_OUTER } from './towerDimensions';
+import { TOWER_SHELL_RADIUS, TOWER_BACK_ALONG, TOWER_FACADE_ALONG, TOWER_DOOR_BAND_OUTER, TOWER_JAMB_REACH, TOWER_JAMB_HALF_THICKNESS } from './towerDimensions';
 import {
   BoxGeometry,
   type PerspectiveCamera,
@@ -6854,7 +6854,7 @@ function registerTowerCollision(
   // The jambs, running from the back wall out past the facade plane, and the
   // lobby back wall across the far end between them.
   for (const side of [-1, 1]) {
-    wall(TOWER_BACK_ALONG, side * TOWER_DOOR_HALF, R + 0.4, side * TOWER_DOOR_HALF, 0.35);
+    wall(TOWER_BACK_ALONG, side * TOWER_DOOR_HALF, TOWER_JAMB_REACH, side * TOWER_DOOR_HALF, TOWER_JAMB_HALF_THICKNESS);
   }
   wall(TOWER_BACK_ALONG, TOWER_DOOR_HALF, TOWER_BACK_ALONG, -TOWER_DOOR_HALF, 0.35);
 }

@@ -1926,6 +1926,9 @@ function boundaryDistanceCached(x: number, z: number): number {
  * own endpoint exemption encodes), the same clearance from the boundary,
  * and clear of every arch foot.
  */
+/** How far a street's drawn paving reaches from its centre line: the widest spur's half-width plus its kerb. */
+const NEIGHBOUR_PLOT_PAVED_REACH = 2.8 / 2 + PATH_KERB_OVERHANG;
+
 function streetSegmentClear(
   ax: number,
   az: number,
@@ -1943,6 +1946,23 @@ function streetSegmentClear(
   const relaxed = exemptAt
     ? plots.filter((plot) => distanceToPlotEdge(plot, exemptAt[0], exemptAt[1]) <= exemptNear)
     : [];
+  // The destination's own plot is the one its doormat stands nearest; every
+  // other relaxed plot is a neighbour the stub may pass, and passing it means
+  // passing with the drawn paving — half a street plus its kerb — clear of
+  // its face, not merely the centre line. Seed 11 (2 Oct 2026): the water
+  // fight's spur ran along its own stall's plot 0.3 m off the edge and laid
+  // 5 m² of paving under the booth (`noDrawnPavingUnderASolid`).
+  let own: (typeof relaxed)[number] | null = null;
+  if (exemptAt) {
+    let nearest = Infinity;
+    for (const plot of relaxed) {
+      const gap = distanceToPlotEdge(plot, exemptAt[0], exemptAt[1]);
+      if (gap < nearest) {
+        nearest = gap;
+        own = plot;
+      }
+    }
+  }
   const length = Math.hypot(bx - ax, bz - az);
   const steps = Math.max(1, Math.ceil(length / 1.5));
   for (let s = 0; s <= steps; s += 1) {
@@ -1954,7 +1974,7 @@ function streetSegmentClear(
     }
     // A destination's own frontage may be walked along, never through.
     for (const plot of relaxed) {
-      if (distanceToPlotEdge(plot, x, z) < 0.3) return false;
+      if (distanceToPlotEdge(plot, x, z) < (plot === own ? 0.3 : NEIGHBOUR_PLOT_PAVED_REACH)) return false;
     }
     if (boundaryDistanceCached(x, z) < boundaryMargin) return false;
     for (const foot of archFootBlockers()) {

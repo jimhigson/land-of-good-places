@@ -30,6 +30,8 @@ import {
   type RouteDefinition,
 } from './paths';
 import { PARK_LAYOUT, doorApronOf } from './parkLayout';
+import { STALL_PLACEMENTS } from '../minigames/stallPlacement';
+import { boothBoxFor, boothCorners } from '../minigames/boothFootprint';
 
 /**
  * **The one Catmull-Rom every consumer of a route's drawn shape builds.**
@@ -259,7 +261,8 @@ export function buildPaths(): Mesh[] {
   // Where route ends meet, the paving they leave between their square-cut
   // ends — see `junctionAprons`.
   junctionAprons(ROUTES)
-    .filter((apron) => discMayBeLaid(apron.x, apron.z, apron.radius))
+    .map((apron) => clearOfBooths(apron))
+    .filter((apron): apron is JunctionApron => apron !== null && discMayBeLaid(apron.x, apron.z, apron.radius))
     .forEach((apron, k) => {
       addDisc(surface, apron.x, apron.z, apron.radius, JUNCTION_APRON_SEGMENTS, 1, PATH_SURFACE_LIFT);
       own(surfaceOwners, surface, JUNCTION_OWNER_BASE - k);
@@ -849,6 +852,47 @@ function clearOfBridges(x: number, z: number, radius: number): boolean {
  */
 function clearOfTheGateway(x: number, z: number, radius: number): boolean {
   return Math.hypot(x, z - GATE_CORRIDOR_START_Z) >= radius + PATH_KERB_OVERHANG;
+}
+
+/**
+ * **A junction apron that keeps out from under the booths.** A spur and a
+ * connector that both end on a stall's stand point meet there, and the disc
+ * that paves their meeting reached 1.73 m (half a path plus the kerb) from a
+ * stand point that stands 1.45 m from the booth's front wall — 0.2–0.3 m² of
+ * kerb under every such booth (`noDrawnPavingUnderASolid`, 2 Oct 2026). So
+ * the disc is shrunk to stop short of the booth's body (its walls included,
+ * `boothCorners` and the booth's own box: the one owner of where a booth
+ * stands), or not laid at all if that would leave less than half a path.
+ */
+function clearOfBooths(apron: JunctionApron): JunctionApron | null {
+  let room = Infinity;
+  for (const [id, placement] of Object.entries(STALL_PLACEMENTS)) {
+    const box = boothBoxFor(id);
+    const c = boothCorners(placement.position[0], placement.position[1], placement.facing, box);
+    room = Math.min(room, distanceToQuad(apron.x, apron.z, [c.frontLeft, c.frontRight, c.backRight, c.backLeft]) - box.wallHalfThickness);
+  }
+  const radius = Math.min(apron.radius, room - PATH_KERB_OVERHANG - BOOTH_APRON_GAP);
+  if (radius >= apron.radius) return apron;
+  return radius >= apron.radius / 2 ? { ...apron, radius } : null;
+}
+
+/** Daylight left between a shrunk junction apron's kerb and a booth's wall. */
+const BOOTH_APRON_GAP = 0.05;
+
+/** Plan distance from a point to a convex quad (corners in order), negative inside. */
+function distanceToQuad(x: number, z: number, quad: readonly (readonly [number, number])[]): number {
+  let best = Infinity;
+  let positive = 0;
+  let negative = 0;
+  for (let i = 0; i < quad.length; i += 1) {
+    const [ax, az] = quad[i]!;
+    const [bx, bz] = quad[(i + 1) % quad.length]!;
+    best = Math.min(best, distanceToSegment(x, z, ax, az, bx, bz));
+    const cross = (bx - ax) * (z - az) - (bz - az) * (x - ax);
+    if (cross > 0) positive += 1;
+    else if (cross < 0) negative += 1;
+  }
+  return positive === 0 || negative === 0 ? -best : best;
 }
 
 /** Where a disc of paving may be laid: on the ground, off every bridge and off the gateway. */

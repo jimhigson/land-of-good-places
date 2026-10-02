@@ -45,3 +45,21 @@ export const TOWER_DOOR_BAND_OUTER = TOWER_FACADE_ALONG + 0.4;
  * door off the built tower and fails if the paving does not reach it.
  */
 export const TOWER_DRAWN_DOOR_ALONG = 1.77;
+
+/**
+ * How far out along the door's axis the doorway's jambs run (from the lobby
+ * back wall out past the facade plane), and their half-thickness — the
+ * collision `registerTowerCollision` stands either side of the doorway.
+ */
+export const TOWER_JAMB_REACH = TOWER_SHELL_RADIUS + 0.4;
+export const TOWER_JAMB_HALF_THICKNESS = 0.35;
+
+/**
+ * **Where the hotel's doormat stands** along the door's axis: just clear of
+ * the jambs' rounded ends, so the arriving path's kerb — which reaches past
+ * the doorway's own width — stops on open lawn rather than running in under
+ * the jambs (seeds 1, 7, 11, 12: 0.2–0.3 m² of kerb under them,
+ * `noDrawnPavingUnderASolid`). The paving goes on into the doorway as the
+ * door apron, between the jambs.
+ */
+export const TOWER_DOORMAT_REACH = TOWER_JAMB_REACH + TOWER_JAMB_HALF_THICKNESS + 0.1;
