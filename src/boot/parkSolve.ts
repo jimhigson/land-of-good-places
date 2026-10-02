@@ -59,15 +59,24 @@
  *   most {@link SolveBudget.unwindsPerFeature} times in a solve. Past that it
  *   has shown that re-choosing what it names does not answer it, and its next
  *   refusal goes **straight to decision zero** (rung 4);
- * - **decision zero per solve** — {@link SolveBudget.decisionZero} redraws of
- *   the first decision, however reached. Past that the **attempt fails**: a
- *   {@link ParkSolveExhausted} (a plain `Error`, so `attemptError.ts` reads it
- *   as a park that could not be made, never a bug) and the root acceptance
- *   loop starts the park again at its next restart — which is decision zero
- *   with a fresh stream, the same rung one level up;
- * - **unwinds per solve** ({@link SolveBudget.unwinds}) and **turns per
- *   solve** ({@link SolveBudget.turns}) — the global caps, which fail the
- *   attempt the same way.
+ * - **escalations per feature** — a feature past its unwinds may send the
+ *   solve to decision zero at most {@link SolveBudget.decisionZeroPerFeature}
+ *   times. Refusing on that many fresh layouts as well, it is refusing
+ *   whatever is drawn, and the **attempt fails**: a {@link ParkSolveExhausted}
+ *   (a plain `Error`, so `attemptError.ts` reads it as a park that could not
+ *   be made, never a bug) naming the feature, and the root acceptance loop
+ *   starts the park again at its next restart — decision zero with a fresh
+ *   stream, the same rung one level up;
+ * - **decision zero, unwinds and turns per solve**
+ *   ({@link SolveBudget.decisionZero}, {@link SolveBudget.unwinds},
+ *   {@link SolveBudget.turns}) — global caps, which fail the attempt the same
+ *   way.
+ *
+ * **Decision zero itself is not rationed tightly, on purpose.** Redrawing the
+ * layout is how a seed normally finds its park: unmutated, seed 15 restart 0
+ * redraws it 34 times before its road is first asked, seed 5 restart 2 12
+ * times (fix/sb-bounded, measured). A cap on decision zero alone would refuse
+ * those parks; the per-feature caps refuse only a feature that keeps refusing.
  *
  * Whichever budget ends a solve is named in {@link SolveStats.exhausted} and
  * in the trace, so the attempt's backtracking stats say why it failed.
@@ -75,19 +84,21 @@
  * **The worst case.** Every turn calls one `advance`, and `run` refuses to
  * start turn {@link SolveBudget.turns}` + 1`, so a solve is at most that many
  * advances whatever its builders do — even a builder that places forever and
- * never says `done`. Within that, the caps above bind first on any refusal
- * that keeps coming back: retries per increment <= attemptsPerDecision;
- * accommodations per increment <= {@link MAX_ACCOMMODATIONS}; targeted
- * unwinds <= unwindsPerFeature x builders; decision-zero redraws <=
- * decisionZero; so the refusals that reach rung 3 number at most
- * `unwindsPerFeature x builders + decisionZero + 1` before the solve ends.
+ * never says `done`. Within that, the caps bind first on any refusal that
+ * keeps coming back. With `B` builders, `U` unwinds and `E` escalations per
+ * feature: retries per increment <= attemptsPerDecision; accommodations per
+ * increment <= {@link MAX_ACCOMMODATIONS}; forgoes <= the increments there
+ * are; and every refusal that reaches rung 3 is charged to its feature as an
+ * unwind or an escalation, so at most `B x (U + E)` of them happen before one
+ * feature's `E + 1`-th escalation ends the solve. Between two such refusals
+ * the ledger only grows, so the solve is a bounded number of bounded replays.
  * Each `advance` is itself one bounded search (each solver's own attempt
  * ladder), which is the builder's contract, not the driver's.
  *
- * The defaults sit far above any park built: over every attempt recorded in
- * the acceptance caches of this line of work (16 seeds, many restarts), the
- * plan phase's worst was 33 unwinds in all, 9 decision-zero redraws and 91
- * refusals; the world phase has never unwound.
+ * The per-feature defaults sit far above any park built: over every attempt
+ * recorded in the acceptance caches of this line of work (16 seeds, many
+ * restarts), the plan phase's worst was 33 unwinds in all features together
+ * and 91 refusals; the world phase has never unwound.
  *
  * ## Determinism
  *
@@ -155,7 +166,9 @@ export interface SolveBudget {
   readonly attemptsPerDecision: number;
   /** Unwinds one feature's refusals may cause before its next refusal goes to decision zero. */
   readonly unwindsPerFeature: number;
-  /** Redraws of the ledger's first decision before the attempt fails. */
+  /** Decision-zero redraws one feature past its unwinds may cause before the attempt fails. */
+  readonly decisionZeroPerFeature: number;
+  /** Redraws of the ledger's first decision, however reached, before the attempt fails. */
   readonly decisionZero: number;
   /** Ledger unwinds in all (each decision passed over counts) before the attempt fails. */
   readonly unwinds: number;
@@ -167,9 +180,10 @@ export const DEFAULT_SOLVE_BUDGET: SolveBudget = {
   // The layout offers PARK_RESTARTS (240) draws; nothing else offers more than 121.
   attemptsPerDecision: 256,
   // Worst recorded: 33 unwinds in a whole plan solve, all features together.
-  unwindsPerFeature: 48,
-  // Worst recorded: 9.
-  decisionZero: 32,
+  unwindsPerFeature: 64,
+  decisionZeroPerFeature: 16,
+  // No tighter than the layout's own supply: redrawing it is normal (34 on seed 15 restart 0).
+  decisionZero: 256,
   unwinds: MAX_UNWINDS,
   // Far above a full park's advances in either phase (a few hundred).
   turns: 200_000,
@@ -220,6 +234,8 @@ export interface SolveStats {
   exhausted: string | null;
   /** Unwinds each feature's refusals caused — what {@link SolveBudget.unwindsPerFeature} counts. */
   unwindsByFeature: Record<string, number>;
+  /** Decision-zero redraws each feature caused once past its unwinds — {@link SolveBudget.decisionZeroPerFeature}. */
+  escalationsByFeature: Record<string, number>;
   /** Highest attempt any decision was made at, by feature. */
   worstAttempt: Record<string, number>;
   /** Turns each feature has taken. */
@@ -257,6 +273,7 @@ export class ParkSolve {
     forgone: 0,
     exhausted: null,
     unwindsByFeature: {},
+    escalationsByFeature: {},
     worstAttempt: {},
     turnsByFeature: {},
     piecesByFeature: {},
@@ -523,6 +540,15 @@ export class ParkSolve {
     // shown that re-choosing what it names does not answer it — go to rung 4.
     const spent = this.stats.unwindsByFeature[refused.name] ?? 0;
     if (spent >= this.budget.unwindsPerFeature) {
+      const escalated = this.stats.escalationsByFeature[refused.name] ?? 0;
+      if (escalated >= this.budget.decisionZeroPerFeature) {
+        this.exhaust(
+          'decision-zero-per-feature',
+          `${refused.name} still refuses after its ${this.budget.unwindsPerFeature} unwinds and ` +
+            `${escalated} decision-zero redraws — ${refusal.reason}`,
+        );
+      }
+      this.stats.escalationsByFeature[refused.name] = escalated + 1;
       this.toDecisionZero(refused, refusal, `${refused.name} spent its ${this.budget.unwindsPerFeature} unwinds`);
       return;
     }

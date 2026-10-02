@@ -82,7 +82,7 @@ function drain(solve: ParkSolve): unknown {
  * replays at most every builder once, plus its own retries.
  */
 function turnBound(budget: SolveBudget, builders: number, retriesPerRefusal: number): number {
-  const rung3 = budget.unwindsPerFeature * builders + budget.decisionZero + 1;
+  const rung3 = (budget.unwindsPerFeature + budget.decisionZeroPerFeature) * builders + 1;
   return rung3 * (builders + retriesPerRefusal + 1) + builders;
 }
 
@@ -97,15 +97,16 @@ describe('a refusal no redraw can answer', () => {
     const error = drain(solve);
 
     expect(error).toBeInstanceOf(ParkSolveExhausted);
-    expect((error as ParkSolveExhausted).budget).toBe('decision-zero');
+    expect((error as ParkSolveExhausted).budget).toBe('decision-zero-per-feature');
     expect((error as Error).message).toContain('B still refuses');
-    expect(solve.stats.exhausted).toMatch(/^decision-zero: .*B still refuses/);
-    // B spent exactly its unwinds, then every further refusal went to decision zero.
+    expect(solve.stats.exhausted).toMatch(/^decision-zero-per-feature: B still refuses/);
+    // B spent exactly its unwinds, then sent the solve to decision zero its quota of times.
     expect(solve.stats.unwindsByFeature['B']).toBe(DEFAULT_SOLVE_BUDGET.unwindsPerFeature);
-    expect(solve.stats.decisionZero).toBe(DEFAULT_SOLVE_BUDGET.decisionZero);
+    expect(solve.stats.escalationsByFeature['B']).toBe(DEFAULT_SOLVE_BUDGET.decisionZeroPerFeature);
+    expect(solve.stats.decisionZero).toBe(DEFAULT_SOLVE_BUDGET.decisionZeroPerFeature);
     expect(solve.trace.some((line) => line.includes('DECISION-ZERO (budget: B spent its'))).toBe(true);
     // The bound — the red proof (4001 advances of B before the budgets).
-    expect(b.advances).toBeLessThanOrEqual(DEFAULT_SOLVE_BUDGET.unwindsPerFeature + DEFAULT_SOLVE_BUDGET.decisionZero + 1);
+    expect(b.advances).toBe(DEFAULT_SOLVE_BUDGET.unwindsPerFeature + DEFAULT_SOLVE_BUDGET.decisionZeroPerFeature + 1);
     expect(solve.stats.turns).toBeLessThanOrEqual(turnBound(DEFAULT_SOLVE_BUDGET, 3, 0));
   });
 
@@ -134,14 +135,16 @@ describe('a refusal no redraw can answer', () => {
       },
     };
     const y = refuser('Y', ['X'], ['X'], 3);
-    const budget: Partial<SolveBudget> = { unwindsPerFeature: 5, decisionZero: 4 };
+    const budget: Partial<SolveBudget> = { unwindsPerFeature: 5, decisionZeroPerFeature: 4 };
     const solve = new ParkSolve(2, [root, x, y], new GroundClaims(), budget);
     const error = drain(solve);
 
     expect(error).toBeInstanceOf(ParkSolveExhausted);
-    expect((error as ParkSolveExhausted).budget).toBe('decision-zero');
-    expect(solve.stats.exhausted).toMatch(/still refuses/);
-    expect(solve.stats.decisionZero).toBe(4);
+    expect((error as ParkSolveExhausted).budget).toBe('decision-zero-per-feature');
+    const named = /^decision-zero-per-feature: (\w+) still refuses/.exec(solve.stats.exhausted ?? '')?.[1];
+    expect(['X', 'Y']).toContain(named);
+    expect(solve.stats.unwindsByFeature[named as string]).toBe(5);
+    expect(solve.stats.escalationsByFeature[named as string]).toBe(4);
     expect(solve.stats.turns).toBeLessThanOrEqual(turnBound({ ...DEFAULT_SOLVE_BUDGET, ...budget }, 3, 3));
   });
 

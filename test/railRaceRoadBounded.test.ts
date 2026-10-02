@@ -14,8 +14,8 @@ import { describe, expect, it } from 'vitest';
  * `railRaceRefusals.test.ts` lacked: the same mutation, and the solve must
  * finish as a `ParkSolveExhausted` — a failed attempt the root loop restarts.
  *
- * The budget is tightened through the same seam (two road unwinds, a handful
- * of decision-zero redraws) so the test costs a few layouts rather than the
+ * The budget is tightened through the same seam (two road unwinds, then one
+ * decision-zero redraw) so the test costs a few layouts rather than the
  * default's worst case; `parkSolveBounded.test.ts` proves the defaults bound
  * the same shape of failure without a park. Seed 12 restart 0, given
  * explicitly, so no acceptance loop runs.
@@ -30,18 +30,14 @@ const { ParkSolveExhausted } = await import('../src/boot/parkSolve');
 
 /** Unwinds the road may cause before its next refusal goes to decision zero. */
 const ROAD_UNWINDS = 2;
-/**
- * Decision-zero redraws before the attempt fails. Seed 12 restart 0 redraws
- * its layout 4 times on its own before the road is first asked (measured,
- * fix/sb-bounded); this leaves the road's escalation room to happen.
- */
-const DECISION_ZERO = 6;
+/** Decision-zero redraws the road may then cause before the attempt fails. */
+const ROAD_ESCALATIONS = 1;
 
 describe('the plan solve, with no duck bar ever finding trestle room', () => {
   it('ends as a failed attempt within its budget, the road having spent its unwinds', () => {
     setParkPlanSeams({
       barSlotWithNoSupportRoom: () => 7,
-      budget: { unwindsPerFeature: ROAD_UNWINDS, decisionZero: DECISION_ZERO },
+      budget: { unwindsPerFeature: ROAD_UNWINDS, decisionZeroPerFeature: ROAD_ESCALATIONS },
     });
     let thrown: unknown = null;
     try {
@@ -62,11 +58,11 @@ describe('the plan solve, with no duck bar ever finding trestle room', () => {
     // Red, not hung and not a crash: the driver's own exhaustion, in the cause chain.
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).cause).toBeInstanceOf(ParkSolveExhausted);
-    expect(stats?.exhausted).toMatch(/^decision-zero: /);
+    expect(stats?.exhausted).toMatch(/^decision-zero-per-feature: road still refuses/);
     // The road refused, unwound exactly its budget, and was escalated by it.
     expect(trace.some((line) => line.startsWith('refused road#0') && line.includes('consumed=railRaceBars'))).toBe(true);
     expect(stats?.unwindsByFeature['road']).toBe(ROAD_UNWINDS);
     expect(trace.some((line) => line.includes(`DECISION-ZERO (budget: road spent its ${ROAD_UNWINDS} unwinds)`))).toBe(true);
-    expect(stats?.decisionZero).toBe(DECISION_ZERO);
+    expect(stats?.escalationsByFeature['road']).toBe(ROAD_ESCALATIONS);
   });
 });
