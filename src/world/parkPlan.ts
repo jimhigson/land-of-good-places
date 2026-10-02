@@ -368,6 +368,53 @@ export function parkPlanCruiserFinishPieces(): number {
   return cruiserFinishPieces;
 }
 
+/**
+ * **A path refusal the train's re-draw did not change is not the train's.**
+ *
+ * The pinch, off-site-crossing and legibility screens name the train because
+ * the loop *can* cause them. Whether it did is measurable after the fact: the
+ * driver re-draws the train, the paths are routed again, and if the screen
+ * refuses with the **same reason, character for character** — the same run,
+ * at the same coordinates to 0.1 m, by the same margins — under a loop that is
+ * a different loop, then that refusal does not depend on the loop, and every
+ * further re-draw buys a full loop search and a full path graph to be told it
+ * again. Measured (fix/sb-trainsearch3): seed 7's first layout drew six trains
+ * against `spur-dodgems runs east-west for 32.5 m on z = 33.22, 5.59 m off
+ * the street lattice` and `drawn run 1 is pinched shut at (0.0, 54.0)` —
+ * three loops each, identical text — before the layout was re-drawn and solved
+ * first time; seed 15's third layout the same with one diagonal, three times.
+ * In every sweep run on this line since the crossing replays were removed, no
+ * layout on which a train-naming refusal repeated under a different loop went
+ * on to a finished park.
+ *
+ * So the second time a reason is seen under a different loop, the refusal
+ * names the layout alone. Reset whenever the layout changes; keyed on the
+ * loop's own shape (length and two points), not its attempt number.
+ */
+// `var` and lazily made, for the reason `state` is: a solve can be forced
+// while this module is still mid-evaluation.
+/* eslint-disable-next-line no-var */
+var pathRefusalsMap: Map<string, string> | undefined;
+function pathRefusals(): Map<string, string> {
+  return (pathRefusalsMap ??= new Map());
+}
+function trainKey(train: TrainDecision): string {
+  const a = train.route.pointAt(0).clone();
+  const b = train.route.pointAt(train.route.length / 3);
+  return `${train.route.length}:${a.x},${a.z}:${b.x},${b.z}`;
+}
+function unlessTrainInnocent(
+  reason: string,
+  train: TrainDecision,
+  consumed: readonly string[],
+): readonly string[] {
+  const key = trainKey(train);
+  const seenUnder = pathRefusals().get(reason);
+  if (seenUnder !== undefined && seenUnder !== key) return ['layout'];
+  if (seenUnder === undefined) pathRefusals().set(reason, key);
+  return consumed;
+}
+
 function builders(): readonly FeatureBuilder[] {
   const layoutBuilder = coarse<ParkLayout>({
     name: 'layout',
@@ -380,11 +427,13 @@ function builders(): readonly FeatureBuilder[] {
       return refusal(`layout restart ${restart}: ${outcome.reason}`);
     },
     set(layout) {
+      pathRefusals().clear();
       state.layout = layout;
       bindCastlePlacement(layout);
     },
     clear() {
       delete state.layout;
+      pathRefusals().clear();
     },
   });
 
@@ -450,18 +499,24 @@ function builders(): readonly FeatureBuilder[] {
         solvedRoute = yield* trainRouteSearch(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'train', 'solve', attempt));
       } catch (error) {
         if (!(error instanceof RailRouteUnsolvable)) throw error;
-        // Conflict-directed: the cruiser is named only if one of its
-        // obstacles rejected a sample no layout obstacle had already rejected
-        // (`TrainRouteUnsolvable.cruiserRejections`). A search the cruiser took
-        // no part in is not rescued by re-drawing it, and each re-draw buys six
-        // more exhaustive loop searches. Measured, it does take part on seed 6
-        // restart 5 (4-8 thousand such samples per failed search), so there
-        // the cruiser is still named; this only stops it being named for
-        // nothing.
-        const cruiserTookPart = !(error instanceof TrainRouteUnsolvable) || error.cruiserRejections > 0;
-        return refusal(`railway loop: ${timeless(error.message)}`, {
-          consumed: cruiserTookPart ? ['cruiser', 'layout'] : ['layout'],
-        });
+        // **The layout, not the cruiser.** The train reads the cruiser only
+        // through its low corridor beside the station and its dismount point
+        // (`trainObstacles`), and both stand where the layout put the
+        // cruiser's booth: a cruiser re-draw re-orders the same start poses
+        // around the same booth (`stationPoseSearch`), so it moves the
+        // corridor little. Measured over every sweep of the sixteen supported
+        // seeds this branch's line has run (six sweeps, fix/sb-trainsearch3):
+        // seven distinct layouts had a cruiser draw whose six train searches
+        // all failed, and none of the further train searches bought on its
+        // re-drawn cruisers led to a finished park on that layout;
+        // and no accepted park in any sweep used a cruiser re-draw for its
+        // train. Named as well, the cruiser was re-drawn five times per such
+        // layout — 30 more exhaustive loop searches, most of seed 9's train
+        // cost. The cruiser does take part (its obstacles reject samples
+        // nothing else rejects — counted in the reason below), but re-drawing
+        // it is not a different enough decision to be worth naming.
+        const cruiserOnly = error instanceof TrainRouteUnsolvable ? `; ${error.cruiserRejections} cruiser-only rejections` : '';
+        return refusal(`railway loop: ${timeless(error.message)}${cruiserOnly}`, { consumed: ['layout'] });
       }
       const route = new TrainRoute(solvedRoute);
       return { route, stations: planStations(route) };
@@ -589,11 +644,13 @@ function builders(): readonly FeatureBuilder[] {
       if (screen.fouls.length > 0) {
         const foul = screen.fouls[0] as (typeof screen.fouls)[number];
         const sites = planPart('crossings').bridges.map((site) => site.railDistance.toFixed(1)).join(', ');
-        return refusal(
+        const reasonOffSite =
           `paths: ${screen.fouls.length} drawn crossing(s) off every proven site — first at railD ${foul.railDistance.toFixed(1)} ` +
-            `(${foul.x.toFixed(1)}, ${foul.z.toFixed(1)}) by drawn run ${foul.run}; sites at railD ${sites}`,
+            `(${foul.x.toFixed(1)}, ${foul.z.toFixed(1)}) by drawn run ${foul.run}; sites at railD ${sites}`;
+        return refusal(
+          reasonOffSite,
           // Not the slide: a spur crossing the rail off-site is the loop's and the sites'.
-          { consumed: ['crossings', 'train', 'cruiser', 'layout'] },
+          { consumed: unlessTrainInnocent(reasonOffSite, train, ['crossings', 'train', 'cruiser', 'layout']) },
         );
       }
       // A drawn ribbon must leave a child a lane. Seed 7's gate approach ran
@@ -605,12 +662,11 @@ function builders(): readonly FeatureBuilder[] {
       yield 0;
       const pinched = pinchedSample(drawn, planPart('crossings').bridges, train.stations, train.route.length);
       if (pinched) {
-        return refusal(
+        const reasonPinched =
           `paths: drawn run ${pinched.sample.run} is pinched shut at (${pinched.sample.x.toFixed(1)}, ${pinched.sample.z.toFixed(1)}): ` +
             `nearest lane point is ${pinched.wall.toFixed(2)} m from the boundary edge (needs ${wallKeep().toFixed(2)}) ` +
-            `and ${pinched.fence.toFixed(2)} m from the rail centreline (needs ${fenceKeep().toFixed(2)}, in a band ${laneSlack().toFixed(2)} m wide)`,
-          { consumed: ['train', 'layout'] },
-        );
+            `and ${pinched.fence.toFixed(2)} m from the rail centreline (needs ${fenceKeep().toFixed(2)}, in a band ${laneSlack().toFixed(2)} m wide)`;
+        return refusal(reasonPinched, { consumed: unlessTrainInnocent(reasonPinched, train, ['train', 'layout']) });
       }
       // A bridge that walls a path in — a route the repair could not take off
       // it, or could only by walking the long way round — is the crossing
@@ -638,7 +694,8 @@ function builders(): readonly FeatureBuilder[] {
       yield 0;
       const legibility = DISABLE_LEGIBILITY_SCREEN ? null : yield* illegiblePaving(graph, drawn, train.route);
       if (legibility) {
-        return refusal(`paths: ${legibility}`, { consumed: ['train', 'layout'] });
+        const reasonIllegible = `paths: ${legibility}`;
+        return refusal(reasonIllegible, { consumed: unlessTrainInnocent(reasonIllegible, train, ['train', 'layout']) });
       }
       return graph;
     },
