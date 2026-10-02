@@ -171,14 +171,23 @@ import { SPACE_GARDEN } from '../src/world/spaces.ts';
 import { GARDEN_PLAY_RADIUS, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { GARDEN_PLAY_BOUNDARY } from '../src/world/boundary.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
+import { counts, exitVoid, type ClauseKind } from './lib/checkScope.mts';
 
 const verbose = process.argv.includes('--verbose');
 const failures: string[] = [];
 const table: string[] = [];
 
-function check(ok: boolean, what: string): void {
-  const line = `${ok ? '  ok ' : 'FAIL '} ${what}`;
+/**
+ * One clause. `kind` says whether a park's own decisions set it (`decision`:
+ * the paving network a park drew, and how its routes sit on it) or the router
+ * does, the same on every park (`code`) — see `lib/checkScope.mts`. Under the
+ * acceptance scope only decisions fail the run; in CI every clause does.
+ */
+function check(ok: boolean, what: string, kind: ClauseKind): void {
+  const outside = !ok && !counts(kind);
+  const line = `${ok ? '  ok ' : outside ? 'CODE ' : 'FAIL '} ${what}`;
   if (ok) table.push(line);
+  else if (outside) table.push(`${line} (a code clause, outside acceptance: fixed at cause, never restarted around)`);
   else failures.push(what);
   if (!ok || verbose) console.log(line);
 }
@@ -195,7 +204,7 @@ if (!pavingIsKnown()) {
       '(world/paving.ts). Either `buildPaths()` stopped publishing, or this ' +
       'harness stopped building a garden. Refusing to measure nothing.',
   );
-  process.exit(1);
+  exitVoid();
 }
 
 const bridgeCovers = (x: number, z: number): boolean =>
@@ -371,7 +380,7 @@ if (probes.length < 8) {
       `${excluded.length} excluded — listed above). The network has changed ` +
       'shape; re-derive the probes rather than lowering the bar.',
   );
-  process.exit(1);
+  exitVoid();
 }
 
 // ------------------------------- can the paving actually serve a pair at all?
@@ -423,7 +432,7 @@ if (pavedCellCount < 100) {
       'paved cells. `isOnPath` has stopped agreeing with the drawn network; ' +
       'refusing to measure servability against nothing.',
   );
-  process.exit(1);
+  exitVoid();
 }
 
 /** The paved cell nearest a world point, or -1 if none is within 3 m. */
@@ -692,7 +701,7 @@ if (hops.length < 8) {
     `check:path-preference — only ${hops.length} points in the park sit ${HOP_MIN}–${HOP_MAX} m ` +
       'off the paving. That is not a park with grass in it; re-derive these probes.',
   );
-  process.exit(1);
+  exitVoid();
 }
 
 const weightedHops = hops.map((hop) => trace(weighted, hop.fromX, hop.fromZ, hop.toX, hop.toZ));
@@ -787,6 +796,7 @@ check(
   unreached.length === 0,
   `every probe arrives: all ${probes.length} junction-to-junction routes reached ` +
     `their goal${unreached.length > 0 ? `, but ${unreached.length} did not` : ''}`,
+  'decision',
 );
 
 /**
@@ -842,6 +852,7 @@ check(
     : `the paving is one network: ${unconnected.length} of ${probes.length} junction pairs have no ` +
         `all-paved walk at all (first: ${unconnected[0]!.label}) — a gap in the drawn paving, or a ` +
         'paved-only lattice that does not reach it',
+  'decision',
 );
 
 for (let i = 0; i < probes.length; i += 1) {
@@ -894,7 +905,7 @@ if (population.length < 8) {
       'too few to assert a distribution over. Either the paving or the multiplier ' +
       'has moved a long way; re-derive the probes rather than lowering the bar.',
   );
-  process.exit(1);
+  exitVoid();
 }
 
 const populationWeighted = population.map((r) => r.w);
@@ -947,6 +958,7 @@ check(
     `the paving can serve within ${OFF_PATH_COST_MULTIPLIER}x ` +
     `(floor ${(MEAN_PAVED_FLOOR * 100).toFixed(0)}%; ` +
     `unweighted, the same routes manage ${(mean(populationUnweighted) * 100).toFixed(1)}%)`,
+  'decision',
 );
 
 /**
@@ -1013,6 +1025,7 @@ check(
     `(${(share * 100).toFixed(1)}%) are at least ${(PAVED_FLOOR * 100).toFixed(0)}% paved, ` +
     `bar ${(PAVED_SHARE * 100).toFixed(0)}% (over the probes that arrive and the paving can ` +
     `serve within ${OFF_PATH_COST_MULTIPLIER}x, of ${probes.length} probes in all)`,
+  'decision',
 );
 
 /**
@@ -1043,6 +1056,7 @@ check(
     `(${(unweightedShare * 100).toFixed(1)}%) over the ${(PAVED_FLOOR * 100).toFixed(0)}% ` +
     `floor, failing the ${(PAVED_SHARE * 100).toFixed(0)}% bar by ` +
     `${((PAVED_SHARE - unweightedShare) * 100).toFixed(1)} points`,
+  'decision',
 );
 
 /**
@@ -1066,6 +1080,7 @@ check(
   longest <= DETOUR_CEILING,
   `no comic detour: the worst route is ${((longest - 1) * 100).toFixed(1)}% longer than ` +
     `the direct one (${longestLabel}), ceiling ${((DETOUR_CEILING - 1) * 100).toFixed(0)}%`,
+  'code',
 );
 
 // The short hop onto the grass — the case Jim named. Same ceiling, because it
@@ -1090,6 +1105,7 @@ check(
     `out on the grass the walk grew by ${(hopExtra / hops.length).toFixed(2)} m on average, ` +
     `worst ${((worstHop - 1) * 100).toFixed(1)}% (${worstHopLabel}), ceiling ` +
     `${((DETOUR_CEILING - 1) * 100).toFixed(0)}%`,
+  'code',
 );
 
 // Reachability: a preference, not a wall.
@@ -1110,6 +1126,7 @@ check(
     `${unweightedReach.filter((r) => r.reachedGoal).length} were reachable unweighted and ` +
     `${weightedReach.filter((r) => r.reachedGoal).length} are reachable weighted` +
     `${lost > 0 ? ` — lost ${lost}, first at ${lostExample}` : ''}`,
+  'code',
 );
 
 // Both movers, one penalty.
@@ -1126,6 +1143,7 @@ check(
   widestDisagreement < 0.001,
   `the children route exactly as the player does: worst disagreement in paved fraction ` +
     `${(widestDisagreement * 100).toFixed(3)}% (${disagreementLabel || 'none'})`,
+  'code',
 );
 
 // ------------------------------------------------------------------- report

@@ -38,6 +38,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cpuMs } from './lib/cpuClock.mts';
 import type { HeadlessPark } from './park-harness.mts';
+import { VOID_EXIT } from './lib/checkScope.mts';
 
 /**
  * **Whole check scripts that judge a per-park decision, asked as acceptance
@@ -52,7 +53,14 @@ import type { HeadlessPark } from './park-harness.mts';
  * restart are read once per process). One owner: the check. A park it rejects
  * is a failed attempt.
  */
-const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = ['scripts/check-rail-race.mts'];
+const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
+  'scripts/check-rail-race.mts',
+  // Builds its own park and forgets the paving to build a second lattice, so
+  // it cannot share this process's park. Asked under the acceptance scope:
+  // only its decision clauses (the network a park drew, how routes sit on it)
+  // fail the attempt; the router's own clauses are code.
+  'scripts/check-path-preference.mts',
+];
 
 /**
  * What one in-process check measure says about a park: `faults` fail the
@@ -285,12 +293,18 @@ if (facts) {
     const name = `check:${script.replace(/^scripts\/check-|\.mts$/g, '')}`;
     try {
       await runScript(process.execPath, ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', script], {
-        env: { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: String(restart) },
+        // The scope: a script that knows it (`lib/checkScope.mts`) fails only on
+        // its decision clauses and exits VOID_EXIT when it could not measure.
+        env: { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: String(restart), LGP_CHECK_SCOPE: 'acceptance' },
         encoding: 'utf8',
         maxBuffer: 256 * 1024 * 1024,
       });
     } catch (error) {
-      const failed = error as { stdout?: string; stderr?: string };
+      const failed = error as { stdout?: string; stderr?: string; code?: number };
+      if (failed.code === VOID_EXIT) {
+        const tail = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`.trim().split('\n').slice(-3).join(' / ');
+        broken ??= `${name}: the instrument could not measure — ${tail.slice(0, 400)}`;
+      }
       const lines = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`
         .split('\n')
         .map((l) => l.trim())
