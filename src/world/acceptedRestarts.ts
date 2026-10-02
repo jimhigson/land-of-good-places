@@ -18,20 +18,20 @@
  * browser builds restart 0.
  */
 export const ACCEPTED_RESTARTS: Readonly<Record<number, number>> = {
-  0: 8,
+  0: 6,
   1: 2,
   2: 5,
   3: 2,
   4: 7,
-  5: 0,
+  5: 11,
   6: 5,
   7: 3,
-  8: 4,
+  8: 1,
   9: 3,
   10: 3,
-  11: 4,
+  11: 0,
   12: 0,
-  13: 2,
-  14: 6,
-  15: 5,
+  13: 4,
+  14: 1,
+  15: 1,
 };
