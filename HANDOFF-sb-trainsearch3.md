@@ -5,3 +5,7 @@ Rules: no acceptedRestarts.ts commit; stay out of railRace/; kill own PIDs only 
 1. Done (commit "a failed loop search names the layout"): evidence in layouts.txt — first cruiser draw with 6/6 train
    failures never led to an accepted park on that layout (7 layouts); no accepted park ever used a cruiser re-draw for its train.
 2. Next: baseline b7 sweep (908e2f5a) running, then after sweep, look at 6/9/15/1 for identical-search waste.
+- Base 908e2f5a re-measured (b7): parks changed with paths-to-doors; total 519 s; slowest now 7 (192, train), 3 (63, cruiser
+  castle misses), 15 (51), 6 (43, cruiser), 8 (40). Seed 9 is 3.9 s at base already.
+- a7 (layout-not-cruiser): 519 -> 406, seed 7 192 -> 41, all final decisions identical (5/8 differ only in message text).
+- Commit "a refusal the train's re-draw did not change names the layout": seed 7 -> 21.8 s, same final park. a8 sweep running.
