@@ -217,3 +217,11 @@ coping chamfer (#698 fix/procgen-last has the fix).
   restarts; builtRestartOf(root, seed) goes first in my resolvers (their branch); CI `parks` job feeds
   checks.yml + procgen-invariants.yml. Browser restart comes from the file. => #706 and #705 must land together;
   #706's own CI cold path re-searches per job (slow, will time out) until #705's parks job exists.
+- Merged paving-clear (6657a0e6), duckbar (6de631e0), trainsearch3. Review fixes 7a9f71fe (identity fails on any
+  drift; check:pow-operator; bush 140 = headroom). PR body updated (scratch pr706-body-new.md has bush edit, re-apply).
+- CI @6de631e0: test:procgen shards 1/3/5 and check shards 3/5 RAN OUT OF CLOCK — every job now resolves restarts
+  cold (no table) = predicted. Unblock = #705's Parks CI (parks.yml + restore-parks + Parks ready; needs
+  build:parks/builtRestartOf) landing with #706. No real red seen yet behind the timeouts.
+- Helpers: a3f17beeb (fix/sb-coverage: reviewer pt1 acceptance coverage + pavingLegibility test; resumed after
+  limit), ae706c0d (fix/sb-throws, coordinator resuming). QA coords sent to af62470c (skyCruiser booth seed 5 r2
+  may have paving under it: 10 tri centres, unverified — paving-clear should fix; recheck on next preview).
