@@ -1662,6 +1662,38 @@ const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'booth', '
  * invariants own it), and paving declared unwalked (a door apron behind its
  * trigger, `pathGraph.ts`'s `decorativeOwners`).
  */
+/**
+ * **A booth's hollow middle is part of the booth.** Its colliders are four
+ * walls round a hollow (`boothFootprint.ts`), so a paving patch that stops
+ * inside the hollow, touching no wall, is under no collider at all. QA found
+ * exactly that on #705's preview, seed 5 restart 2: ten paving triangles inside
+ * the Sky Cruiser booth, up to 0.8 m behind its centre, with this measure
+ * unable to see them. So the booth's whole body is asked as well, off
+ * `StallFact.footprint` (the drawn spot and yaw, through the colliders' own
+ * `boothCorners`). Returns how far inside the body the point is, or null.
+ */
+function boothHollowAt(facts: ParkFacts, x: number, z: number): { id: string; depth: number } | null {
+  for (const stall of facts.stalls) {
+    const quad = stall.footprint;
+    let inside = true;
+    let depth = Infinity;
+    for (let i = 0; i < quad.length && inside; i += 1) {
+      const [ax, az] = quad[i]!;
+      const [bx, bz] = quad[(i + 1) % quad.length]!;
+      const length = Math.hypot(bx - ax, bz - az) || 1;
+      // Signed distance to this edge, positive towards the quad's centre.
+      const cross = ((bx - ax) * (z - az) - (bz - az) * (x - ax)) / length;
+      const [cx, cz] = [stall.drawnX, stall.drawnZ];
+      const centreSide = Math.sign((bx - ax) * (cz - az) - (bz - az) * (cx - ax)) || 1;
+      const d = cross * centreSide;
+      if (d <= UNDER_A_SOLID_TOLERANCE) inside = false;
+      depth = Math.min(depth, d);
+    }
+    if (inside) return { id: stall.id, depth };
+  }
+  return null;
+}
+
 const noDrawnPavingUnderASolid: Invariant = (facts) => {
   const meshes = drawnPathLayers(facts);
   if (typeof meshes === 'string') return [meshes];
@@ -1692,7 +1724,9 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
     }
     paved += 1;
     const solid = collision.solidDepthAt(x, z, BUILT_SOLIDS);
+    const booth = boothHollowAt(facts, x, z);
     if (solid.depth > UNDER_A_SOLID_TOLERANCE) under.push({ k, detail: solid });
+    else if (booth) under.push({ k, detail: { depth: booth.depth, what: `${booth.id}'s body (its hollow middle)`, owner: 'booth' } });
     else if (!walkable.allowed(k)) shut.push({ k, detail: collision.solidDepthAt(x, z) });
     else if (collision.solidDepthAt(x, z).depth > UNDER_A_SOLID_TOLERANCE) otherSolids += 1;
   }

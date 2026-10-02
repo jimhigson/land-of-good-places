@@ -28,7 +28,7 @@ import type { BarIntrusion } from '../../src/world/railRace/barReach.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 import type { Claim } from '../../src/boot/groundClaims.ts';
 import type { RoadSegment } from '../../src/world/entrance/roadCorridor.ts';
-import { boothBoxFor, type BoothBox } from '../../src/minigames/boothFootprint.ts';
+import { boothBoxFor, boothCorners, type BoothBox } from '../../src/minigames/boothFootprint.ts';
 
 /**
  * One side of one ring of a bridge's drawn parapet. See
@@ -264,6 +264,14 @@ export interface StallFact {
   readonly drawnZ: number;
   /** Its body, from `boothFootprint.ts` — the one owner of every booth's box. */
   readonly box: BoothBox;
+  /**
+   * The booth's whole body in plan, walls **and** hollow middle: `box` placed
+   * at the drawn spot with the drawn group's yaw, through `boothCorners` (the
+   * same function the colliders are built from). Corners in order round the
+   * quad. Its colliders are four walls round a hollow, so paving that stops
+   * inside the hollow touches no collider; this is what can see it.
+   */
+  readonly footprint: readonly (readonly [number, number])[];
   /** Where the built interact zone sends a child to be served. */
   readonly standX: number;
   readonly standZ: number;
@@ -2845,11 +2853,17 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     group.updateMatrixWorld(true);
     const at = new Vector3().setFromMatrixPosition(group.matrixWorld);
     const [shiftX, shiftZ] = stallShift(id);
+    // The drawn yaw: where the group's own +Z points, in plan (boothCorners
+    // maps local +Z to (sin yaw, cos yaw)).
+    const forward = new Vector3().setFromMatrixColumn(group.matrixWorld, 2);
+    const yaw = Math.atan2(forward.x, forward.z);
+    const corners = boothCorners(at.x, at.z, yaw, boothBoxFor(id));
     stalls.push({
       id,
       drawnX: at.x,
       drawnZ: at.z,
       box: boothBoxFor(id),
+      footprint: [corners.frontLeft, corners.frontRight, corners.backRight, corners.backLeft],
       standX: zone.standX,
       standZ: zone.standZ,
       steppedAside: Math.hypot(shiftX, shiftZ),

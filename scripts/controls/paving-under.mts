@@ -6,9 +6,12 @@ import { Mesh, BufferAttribute, Float32BufferAttribute } from 'three';
  * onto its booth. CTRL_MODE=outside: from the paving nearest the boundary,
  * moved 4 m out past it. CTRL_MODE=castle: from the castle's doormat, 6 m in
  * under its front wall. The copy keeps its owners, so nothing is exempt.
+ * CTRL_RADIUS (default 3 m) sets the patch: 0.6 at a booth puts it wholly in
+ * the booth's hollow middle, touching none of its four wall colliders.
  */
 export default function (facts: any): void {
   const mode = process.env['CTRL_MODE'] ?? 'booth';
+  const radius = Number(process.env['CTRL_RADIUS'] ?? 3);
   const meshes: any[] = [];
   facts.world.garden.group.traverse((o: any) => { if (o instanceof Mesh && (o.name === 'path-surface' || o.name === 'path-kerb')) meshes.push(o); });
   let from: [number, number];
@@ -46,7 +49,7 @@ export default function (facts: any): void {
       const t = [0, 1, 2].map((k) => index.getX(s + k));
       const cx = t.reduce((a, i) => a + pos.getX(i), 0) / 3;
       const cz = t.reduce((a, i) => a + pos.getZ(i), 0) / 3;
-      if (Math.hypot(cx - from[0], cz - from[1]) > 3) continue;
+      if (Math.hypot(cx - from[0], cz - from[1]) > radius) continue;
       for (const i of t) { xyz.push(pos.getX(i) + shift[0], pos.getY(i), pos.getZ(i) + shift[1]); newOwners.push(owners[i]!); idx.push(v++); }
       planted += 1;
     }
