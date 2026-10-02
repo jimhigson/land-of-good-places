@@ -183,7 +183,8 @@ describe('profileBoundary.distanceToEdge', () => {
  * Proved able to fail (fix/sb-trainsearch, these five profiles): with the
  * shortcut's sign inverted in `boundary.ts`, 195056 of 615760 queries
  * disagree; with the bound taken as the cell centre's own distance (no
- * half-diagonal, no rounding shave), 17810 do.
+ * half-diagonal, no rounding shave), 17810 do; with the certainly-inside
+ * radius taken as the largest sample instead of the smallest, 34404 do.
  */
 describe('edgeCloserThan', () => {
   it('gives the same boolean as distanceToEdge < margin', () => {

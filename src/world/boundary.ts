@@ -494,6 +494,7 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
    * metres from any edge.
    */
   const lowerBounds = new Float64Array(gridWide * gridDeep).fill(Number.NaN);
+  const innerRadius = radii.reduce((a, b) => Math.min(a, b), Infinity) * (1 - 1e-9);
   const halfDiagonal = cellSize * Math.SQRT1_2;
   const cellLowerBound = (gx: number, gz: number, index: number): number => {
     const cx = minX + (gx + 0.5) * cellSize;
@@ -522,7 +523,14 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
       const index = gx * gridDeep + gz;
       const cached = lowerBounds[index] as number;
       const bound = cached === cached ? cached : cellLowerBound(gx, gz, index);
-      if (bound > Math.abs(margin)) return !(Math.hypot(x, z) <= radiusAt(Math.atan2(z, x)));
+      if (bound > Math.abs(margin)) {
+        const r = Math.hypot(x, z);
+        // Inside for certain without the bearing: `radiusAt` interpolates
+        // between two samples, so it is never under the smallest sample by
+        // more than an ulp, and `innerRadius` is shaved well past that.
+        if (r <= innerRadius) return false;
+        return !(r <= radiusAt(Math.atan2(z, x)));
+      }
     }
     return distanceToEdge(x, z) < margin;
   };

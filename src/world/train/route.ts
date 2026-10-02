@@ -296,65 +296,85 @@ function* buildTrainContext(): Generator<number, TrainContext, void> {
    * (seed 6 restart 5, CPU profile), most of it proving far-off discs far off.
    *
    * **The answer is identical, and so is which obstacle gives it.** A cell lists
-   * every obstacle whose reach-plus-radius square overlaps it, padded a cell
-   * each way against rounding at the edges, so no obstacle that could reject a
-   * point in the cell is missing from its list; the list is in ascending index
-   * order, so the first hit is the same first hit the full scan finds (which
-   * `cruiserRejections` depends on). A point off the grid takes the full scan.
+   * every obstacle whose reach-plus-radius square overlaps it, widened by a
+   * micrometre against rounding at the edges (the coordinates are ~100 m, an
+   * ulp is ~1e-14 m), so no obstacle that could reject a point in the cell is
+   * missing from its list; the list is in ascending index order, so the first
+   * hit is the same first hit the full scan finds (which `cruiserRejections`
+   * depends on); and each obstacle's reach-plus-radius is the same sum on the
+   * same doubles, computed once per grid instead of once per ask. A point off
+   * the grid takes the full scan.
    */
-  const CELL = 4;
-  const grids = new Map<number, { minX: number; minZ: number; wide: number; deep: number; cells: (Int32Array | null)[] }>();
-  const gridFor = (radius: number): NonNullable<ReturnType<typeof grids.get>> => {
-    const cached = grids.get(radius);
-    if (cached) return cached;
+  const CELL = 2;
+  const PAD = 1e-6;
+  interface ObstacleGrid {
+    readonly radius: number;
+    readonly minX: number;
+    readonly minZ: number;
+    readonly wide: number;
+    readonly deep: number;
+    readonly cells: (Int32Array | null)[];
+    /** `oreach[i] + radius`, per obstacle. */
+    readonly reach: Float64Array;
+  }
+  const grids: ObstacleGrid[] = [];
+  let lastGrid: ObstacleGrid | null = null;
+  const gridFor = (radius: number): ObstacleGrid => {
+    if (lastGrid && lastGrid.radius === radius) return lastGrid;
+    const cached = grids.find((grid) => grid.radius === radius);
+    if (cached) return (lastGrid = cached);
     const { minX, maxX, minZ, maxZ } = PARK_BOUNDARY.extent;
     const wide = Math.ceil((maxX - minX) / CELL) + 1;
     const deep = Math.ceil((maxZ - minZ) / CELL) + 1;
     const lists: number[][] = Array.from({ length: wide * deep }, () => []);
+    const reachOf = new Float64Array(count);
     for (let i = 0; i < count; i += 1) {
       const reach = (oreach[i] as number) + radius;
-      const x0 = Math.max(0, Math.floor(((ox[i] as number) - reach - minX) / CELL) - 1);
-      const x1 = Math.min(wide - 1, Math.floor(((ox[i] as number) + reach - minX) / CELL) + 1);
-      const z0 = Math.max(0, Math.floor(((oz[i] as number) - reach - minZ) / CELL) - 1);
-      const z1 = Math.min(deep - 1, Math.floor(((oz[i] as number) + reach - minZ) / CELL) + 1);
+      reachOf[i] = reach;
+      const x0 = Math.max(0, Math.floor(((ox[i] as number) - reach - PAD - minX) / CELL));
+      const x1 = Math.min(wide - 1, Math.floor(((ox[i] as number) + reach + PAD - minX) / CELL));
+      const z0 = Math.max(0, Math.floor(((oz[i] as number) - reach - PAD - minZ) / CELL));
+      const z1 = Math.min(deep - 1, Math.floor(((oz[i] as number) + reach + PAD - minZ) / CELL));
       for (let gx = x0; gx <= x1; gx += 1) {
         for (let gz = z0; gz <= z1; gz += 1) (lists[gx * deep + gz] as number[]).push(i);
       }
     }
-    const grid = { minX, minZ, wide, deep, cells: lists.map((list) => (list.length > 0 ? Int32Array.from(list) : null)) };
-    grids.set(radius, grid);
-    return grid;
+    const grid: ObstacleGrid = {
+      radius,
+      minX,
+      minZ,
+      wide,
+      deep,
+      cells: lists.map((list) => (list.length > 0 ? Int32Array.from(list) : null)),
+      reach: reachOf,
+    };
+    grids.push(grid);
+    return (lastGrid = grid);
   };
 
-  /** One obstacle's verdict on (x, z) — the same `hypot(a, b) >= |a|` axis prefilter the layout scans use. */
-  const hits = (i: number, x: number, z: number, radius: number): boolean => {
-    const reach = (oreach[i] as number) + radius;
-    const dx = x - (ox[i] as number);
-    if (dx >= reach || -dx >= reach) return false;
-    const dz = z - (oz[i] as number);
-    if (dz >= reach || -dz >= reach) return false;
-    return Math.hypot(dx, dz) < reach;
-  };
-
-  /** Is a corridor of `radius` about (x, z) clear of every obstacle? */
+  /**
+   * Is a corridor of `radius` about (x, z) clear of every obstacle? The same
+   * `hypot(a, b) >= |a|` axis prefilter the layout scans use, on the same
+   * obstacles in the same order as a scan of all of them would meet the ones
+   * that matter.
+   */
   const clear = (x: number, z: number, radius: number): boolean => {
     const grid = gridFor(radius);
+    const reachOf = grid.reach;
     const gx = Math.floor((x - grid.minX) / CELL);
     const gz = Math.floor((z - grid.minZ) / CELL);
-    if (gx >= 0 && gz >= 0 && gx < grid.wide && gz < grid.deep) {
-      const list = grid.cells[gx * grid.deep + gz];
-      if (!list) return true;
-      for (let k = 0; k < list.length; k += 1) {
-        const i = list[k] as number;
-        if (hits(i, x, z, radius)) {
-          if (i >= fromLayout) cruiserRejections += 1;
-          return false;
-        }
-      }
-      return true;
-    }
-    for (let i = 0; i < count; i += 1) {
-      if (hits(i, x, z, radius)) {
+    const inside = gx >= 0 && gz >= 0 && gx < grid.wide && gz < grid.deep;
+    const list = inside ? grid.cells[gx * grid.deep + gz] : null;
+    if (inside && !list) return true;
+    const n = list ? list.length : count;
+    for (let k = 0; k < n; k += 1) {
+      const i = list ? (list[k] as number) : k;
+      const reach = reachOf[i] as number;
+      const dx = x - (ox[i] as number);
+      if (dx >= reach || -dx >= reach) continue;
+      const dz = z - (oz[i] as number);
+      if (dz >= reach || -dz >= reach) continue;
+      if (Math.hypot(dx, dz) < reach) {
         if (i >= fromLayout) cruiserRejections += 1;
         return false;
       }
