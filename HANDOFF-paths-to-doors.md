@@ -39,3 +39,10 @@ Controls first, sweep 0..15, fix generators, add to PARK_ACCEPTANCE, re-record `
 - Castle tunnel root cause: castle front door faces +Z always; when the castle was north of the middle, the router (blocker circles drop when they contain the end) drove the spur under the castle. Fix: layout `validate` refuses castle placements whose door faces >60° from the fountain (DOOR_FACES_IN_COS). (A longer lead out of the blocker circle was tried and reverted: it produced 300 m wandering spurs.)
 - `drawnPavingReachesEveryDoor` now floods only walkable paving (`walkablePaving`: within PLAYER_RADIUS+0.5 of a reached nav cell, or declared-unwalked door apron). Standalone everyDrawnPathCanBeWalked dropped: it flagged unrelated pre-existing paving defects on every seed (paving under stall booths e.g. seed 11 (-41,29.6); paving outside/along the boundary wall seed 3 z≈60-66; under the castle's corner seed 13 (27,-29)). Report those as a follow-up finding.
 - accept5 running in frozen tree (accept5.log/json); base procgen at 80269a04 running in paths-to-doors-base (procgen-base2.json).
+
+## 3 Oct (HEAD cc1bbcf7, base 040ebeb8)
+- Lead (a52ae94): NO PR needed, NO committed acceptedRestarts.ts (he re-records after merges); report branch + measurements to him. Table reverted on branch.
+- Added: parkPlan pathGraph refusal `drawnSampleThroughAPlot` (buildings only — plots with own door; turrets included) consumed layout; paths.ts `distanceToPlotEdge` counts footprint.corners (castle turrets) — seed 8 r2 street through turrets cut east paving off.
+- Base procgen at 040ebeb8: 1962/1962 (procgen-base3.json).
+- accept8 was hit by another agent's pkill (10 seeds no verdict); accept8b found seed 5 stuck at decision zero due to the all-plots refusal → restricted to buildings. accept9 (full, fresh, local --write) running in frozen @cc1bbcf7.
+- NEVER pgrep -f / pkill -f: kill by PID after lsof cwd check.
