@@ -4,7 +4,8 @@ import { Mesh, BufferAttribute, Float32BufferAttribute } from 'three';
  * copies the drawn paving within 3 m of a point and plants the copy somewhere
  * it must not be. CTRL_MODE=booth: moved from the first stall's stand point
  * onto its booth. CTRL_MODE=outside: from the paving nearest the boundary,
- * moved 4 m out past it. The copy keeps its owners, so nothing is exempt.
+ * moved 4 m out past it. CTRL_MODE=castle: from the castle's doormat, 6 m in
+ * under its front wall. The copy keeps its owners, so nothing is exempt.
  */
 export default function (facts: any): void {
   const mode = process.env['CTRL_MODE'] ?? 'booth';
@@ -12,7 +13,12 @@ export default function (facts: any): void {
   facts.world.garden.group.traverse((o: any) => { if (o instanceof Mesh && (o.name === 'path-surface' || o.name === 'path-kerb')) meshes.push(o); });
   let from: [number, number];
   let shift: [number, number];
-  if (mode === 'booth') {
+  if (mode === 'castle') {
+    // From the castle's doormat, 6 m in under its front wall.
+    const door = facts.entrances.find((e: any) => e.id === 'anchor:building');
+    from = [door.x, door.z];
+    shift = [0, -6];
+  } else if (mode === 'booth') {
     const stall = facts.stalls[0];
     from = [stall.standX, stall.standZ];
     shift = [stall.drawnX - stall.standX, stall.drawnZ - stall.standZ];
