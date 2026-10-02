@@ -760,6 +760,20 @@ export interface ParkFacts {
    */
   readonly duckBarReach: readonly DuckBarReachFact[];
   /**
+   * **The duck-bar layout the plan decided, against the one the race ring drew.**
+   *
+   * `planned` is `planHazards` over the plan's own `railRaceBars` decision
+   * (`parkPlan.ts`) — read straight off the plan, not through the ride; `built`
+   * is every bar on the race ring, all four lanes, off its own instance matrix
+   * with its lane found in the chart. `decidedInPlan` is whether the plan's
+   * driver placed `railRaceBars` at all. See `duckBarsAreTheLayoutThePlanDecided`.
+   */
+  readonly duckBarPlan: {
+    readonly decidedInPlan: boolean;
+    readonly planned: readonly { readonly lane: number; readonly at: number }[];
+    readonly built: readonly { readonly lane: number; readonly at: number }[];
+  };
+  /**
    * How smoothly the race camera actually tracks a rider round the built ring —
    * see {@link CameraTrackingFact}.
    */
@@ -3044,6 +3058,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
   const raceRing = world.railRace.group.getObjectByName('railRace:race-ring');
   const barsMesh = raceRing?.getObjectByName('railRace:duck-bars');
   const builtBarDistances: number[] = [];
+  /** Every race-ring bar, every lane — for `duckBarPlan`. */
+  const builtBarsEveryLane: { lane: number; at: number }[] = [];
   if (barsMesh instanceof Instanced) {
     const matrix = new Mat4();
     const at = new Vec3();
@@ -3092,6 +3108,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
           onLane = lane;
         }
       }
+      builtBarsEveryLane.push({ lane: onLane, at: arch });
       if (onLane !== PLAYER) continue;
       builtBarDistances.push(arch);
     }
@@ -3153,6 +3170,21 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
       });
     }
   }
+
+  // --- the bar layout the plan decided, against the one drawn --------------
+  const { planPart, parkPlanPlaced } = await import('../../src/world/parkPlan.ts');
+  const { planHazards } = await import('../../src/world/railRace/hazards.ts');
+  const decidedInPlan = parkPlanPlaced().includes('railRaceBars');
+  const duckBarPlan = {
+    decidedInPlan,
+    planned: decidedInPlan
+      ? planHazards(raceRoute.length, 1, BARS_FROM_LEVEL, planPart('railRaceBars')).lap.bars.map(({ lane, at }) => ({
+          lane,
+          at,
+        }))
+      : [],
+    built: builtBarsEveryLane.sort((a, b) => a.at - b.at),
+  };
 
   // --- does any duck bar reach into another lane? --------------------------
   //
@@ -3981,6 +4013,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     archLegs,
     duckBars,
     duckBarReach,
+    duckBarPlan,
     cameraTracking,
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
