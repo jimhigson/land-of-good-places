@@ -16,3 +16,11 @@ Probe: scripts/slide-cost-probe.mts (LGP_SEED, LGP_PARK_RESTART, LGP_SLIDE_LOG=1
   (identical pieces) but cost ~1 s total. So the cause is inside one slideRouteSearch: rungs (door x length) run in
   full. Memo (layout/cruiser object identity -> per-attempt route/refusal; finish re-run) written, uncommitted.
 - Next: RUNGLOG per rung (door, length, pieces, report) in $SCRATCH/sc/memo-11r4.log.
+- Rung analysis (layout 3, door 9.5 len 60): 859 pairings, 722 hit the 1200-step limit, 121 dead-end, 16 solve and fail
+  3D cruiser air by 0.19 m. Door 9.5 offers all head east (pit is 36 m west). Cruiser rings the pit rim (5-7 m from
+  centre, y~-2) and rises south of the doors. NO exact cheap rung-refusal exists: rungs do solve routes, only the 3D
+  check refuses them; and any in-search prune changes the shared rng stream (identity lost).
+- Sweep 0..15 r0 (frozen worktree sb-slidecost-frozen @c64c2d4b + log): no slide refusal anywhere; largest placed
+  search 7.7 M (seed 10), next 4.5 M, 4.1 M. 11r4's 350 M is the outlier.
+- Budget: SLIDE_PIECE_BUDGET = 16 M pieces per slide search (solve.ts), refusal budgetSpent, same consumed blockers.
+  Measuring 11r4 with it: $SCRATCH/sc/budget-11r4.log. Open question: slide supply after budget refusal (salts).

@@ -1736,7 +1736,36 @@ export interface SlideRefusal {
   readonly refused: true;
   readonly attemptsTried: number;
   readonly blocker: string;
+  /** True when the refusal is {@link SLIDE_PIECE_BUDGET} running out, not every decision tried. */
+  readonly budgetSpent?: true;
 }
+
+/**
+ * **The most search pieces one slide search may spend before it refuses** —
+ * work, not time, so the same seed refuses at the same piece on any machine.
+ *
+ * A piece is one yield of the chute's route search: one joint of one pairing
+ * of a door offer with a pit mouth. Without a ceiling the search's cost is the
+ * whole door x length ladder ({@link slideAttempts}: up to 42 decisions), each
+ * walking every pairing to its step limit when no route keeps its air from the
+ * Sky Cruiser. Measured on seed 11 restart 4 (fix/sb-slidecost), its fourth
+ * layout draw: 27 decisions each refused on the cruiser's air after all of
+ * their 860-3440 pairings (84% of them ending at the step limit, 2% solving and
+ * then failing the 3D check by 0.2-2 m), before the 28th placed — 350 M pieces
+ * and 651 s of the plan's 815 s, on a layout the paths then refused anyway.
+ *
+ * Every other slide search in that solve, and in the restart-0 solves of all
+ * sixteen supported seeds, placed within 7.7 M pieces (seed 10, its sixth
+ * layout draw); the next largest were 4.5 M and 4.1 M, and most under 0.6 M.
+ * The ceiling stands at twice the largest of those, so a slide that is
+ * placing in the ordinary way never meets it.
+ *
+ * Running out is a refusal like any other — the search could not find a chute
+ * within what it is given — and names the same decisions a full refusal does
+ * (the cruiser and the layout, in `parkPlan.ts`), so the driver answers it the
+ * same way: its next rung.
+ */
+export const SLIDE_PIECE_BUDGET = 16_000_000;
 
 /** The message a refusal is thrown as, by the callers that cannot yet live without a slide. */
 export function slideRefusalMessage(refusal: SlideRefusal): string {
@@ -1851,10 +1880,28 @@ export function* slideRouteSearch(
   const attempts = yield* slideAttemptsSearch();
   let lastComplaint = attempts.length === 0 ? NO_CLEAR_DOOR : 'never solved a route at all';
   let tried = 0;
+  let spent = 0;
   for (const decision of attempts) {
     tried += 1;
     yield tried;
-    const attempt = yield* solveChuteAt(decision, seedSalt);
+    const chute = solveChuteAt(decision, seedSalt);
+    let step = chute.next();
+    while (!step.done) {
+      spent += 1;
+      if (spent > SLIDE_PIECE_BUDGET) {
+        return {
+          refused: true,
+          attemptsTried: tried,
+          budgetSpent: true,
+          blocker:
+            `spent its ${SLIDE_PIECE_BUDGET} search pieces ${describeSlideAttempt(decision)}, ` +
+            `${tried - 1} of ${attempts.length} decisions refused before it (the last: ${lastComplaint})`,
+        };
+      }
+      yield step.value;
+      step = chute.next();
+    }
+    const attempt = step.value;
     if (!attempt) {
       lastComplaint = `admitted no route ${describeSlideAttempt(decision)}`;
       continue;
