@@ -309,7 +309,7 @@ def body_path():
         lead.append(Vector((r * math.cos(b), r * math.sin(b), z)))
 
     # --- the spiral: TURNS full turns, clockwise, ending on the head bearing
-    steps_per_turn = 16  # 22.5° a step: still smooth on the 0.95 m inner turn under the toon ramp
+    steps_per_turn = 15  # 24° a step: still smooth on the 0.95 m inner turn under the toon ramp
     spiral = []
     total = TURNS * steps_per_turn
     for i in range(total + 1):
@@ -324,16 +324,18 @@ def body_path():
     # the sink, so she rests on her own coils rather than hovering.
     cb, sb = math.cos(HEAD_BEARING), math.sin(HEAD_BEARING)
 
-    def over(r: float, lift: float) -> Vector:
-        return Vector((r * cb, r * sb, spiral_z_at_r(r) + BODY_R + lift))
+    # `sway` is a sideways offset (metres, +ve to her left as she looks out),
+    # so the neck comes down in a gentle S rather than a straight pipe.
+    def over(r: float, lift: float, sway: float = 0.0) -> Vector:
+        return Vector((r * cb - sway * sb, r * sb + sway * cb, spiral_z_at_r(r) + BODY_R + lift))
 
     chin_r = math.hypot(REPTILE_NOODLE_HEAD_X, REPTILE_NOODLE_HEAD_Z)
     head_centre_z = REPTILE_NOODLE_HEAD_Y + HEAD_HEIGHT * 0.5
     neck = [
-        over(1.5, 0.30),
-        over(2.0, 0.30),
-        over(2.5, 0.28),
-        Vector((2.85 * cb, 2.85 * sb, head_centre_z + 0.12)),
+        over(1.5, 0.30, 0.30),
+        over(2.0, 0.30, 0.10),
+        over(2.5, 0.28, -0.22),
+        Vector((2.85 * cb + 0.12 * sb, 2.85 * sb - 0.12 * cb, head_centre_z + 0.12)),
         # the last stretch runs *into* the head so a 0.4 m "Say hi!" lift
         # still leaves the neck inside it
         Vector(((chin_r - 0.45) * cb, (chin_r - 0.45) * sb, head_centre_z)),
@@ -362,9 +364,13 @@ def build_body(coll, path, frames):
     belly = Part("rn-coil-belly")
 
     def belly_offset(i, side, normal):
-        return outward_up(path[i], side, normal, 0.45, -0.9) * 0.15
+        # Round the lower-outer flank — far enough round that a band of it
+        # shows from the game's 38° camera, which looks down on the pile.
+        return outward_up(path[i], side, normal, 0.75, -0.6) * 0.16
 
-    belly.add(*sweep_varying(path, frames, lambda i: radius_at(i) * 0.84, 6, belly_offset))
+    # 8 sides, not fewer: a 6-sided tube's 60° edges are over `emit`'s 46°
+    # crease threshold, and the belly then rendered as hard-edged flat panels.
+    belly.add(*sweep_varying(path, frames, lambda i: radius_at(i) * 0.84, 8, belly_offset))
     belly.emit(coll)
 
     spots = Part("rn-coil-spots")
@@ -386,15 +392,15 @@ def build_body(coll, path, frames):
         rx, ry = 0.27 * r_here / BODY_R, 0.20 * r_here / BODY_R
         base = len(spots.verts)
         rim = []
-        for k in range(8):
-            a = k * TAU / 8
+        for k in range(6):
+            a = k * TAU / 6
             rim.append(tuple(centre + along * (math.cos(a) * rx) + across * (math.sin(a) * ry)))
         spots.verts.extend(rim)
         spots.verts.append(tuple(centre + d * 0.05))
         spots.verts.append(tuple(centre - d * 0.03))
-        apex, bottom = base + 8, base + 9
-        for k in range(8):
-            k2 = (k + 1) % 8
+        apex, bottom = base + 6, base + 7
+        for k in range(6):
+            k2 = (k + 1) % 6
             spots.faces.append((base + k, base + k2, apex))
             spots.faces.append((base + k2, base + k, bottom))
     spots.emit(coll, weld=False)
