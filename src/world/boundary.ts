@@ -1,3 +1,4 @@
+import { registerFastEdgeTest } from './boundaryEdgeTest';
 import { Rng, TAU } from '../core/mathUtils';
 import { cachedSolve } from '../core/solveCache';
 import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END } from '../core/constants';
@@ -468,7 +469,73 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
     return Math.hypot(x, z) <= radiusAt(Math.atan2(z, x)) ? best : -best;
   };
 
-  return {
+  /**
+   * **`distanceToEdge(x, z) < margin`, answered without the distance wherever
+   * the answer is already certain** — see `edgeCloserThan` (`boundaryEdgeTest.ts`), which is how
+   * a caller reaches it.
+   *
+   * Each cell of the candidate grid above gets, the first time a query lands in
+   * it, a lower bound on how far any point inside it is from the polygon: the
+   * centre's exact distance to every segment, less the cell's half-diagonal
+   * (the triangle inequality), shaved by a part in 10^9 and a nanometre for
+   * rounding. `distanceToEdge`'s magnitude is a minimum over a *subset* of the
+   * polygon's segments, so it is never smaller than the true distance, so never
+   * smaller than this bound. When the bound already clears `|margin|`, the
+   * comparison is decided by the sign alone, and the sign is computed by the
+   * same expression `distanceToEdge` uses. So the boolean is the one
+   * `distanceToEdge(x, z) < margin` gives, for every input; only the work
+   * differs. Near the edge (inside a cell's width of the margin) it is simply
+   * `distanceToEdge`.
+   *
+   * Why it exists: the rail generator's `validate` asks this of every sample
+   * of every candidate piece, and on a seed whose railway keeps dead-ending
+   * (seed 6 restart 5: 48.7 M pieces) `distanceToEdge` and its nearest-vertex
+   * pass were ~20% of the whole plan's CPU, nearly all of it for samples
+   * metres from any edge.
+   */
+  const lowerBounds = new Float64Array(gridWide * gridDeep).fill(Number.NaN);
+  const innerRadius = radii.reduce((a, b) => Math.min(a, b), Infinity) * (1 - 1e-9);
+  const halfDiagonal = cellSize * Math.SQRT1_2;
+  const cellLowerBound = (gx: number, gz: number, index: number): number => {
+    const cx = minX + (gx + 0.5) * cellSize;
+    const cz = minZ + (gz + 0.5) * cellSize;
+    let nearest = Infinity;
+    for (let i = 0; i < count; i += 1) {
+      const j = (i + 1) % count;
+      const ax = vertexX[i] as number;
+      const az = vertexZ[i] as number;
+      const dx = (vertexX[j] as number) - ax;
+      const dz = (vertexZ[j] as number) - az;
+      const lengthSq = dx * dx + dz * dz;
+      let t = lengthSq > 0 ? ((cx - ax) * dx + (cz - az) * dz) / lengthSq : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const d = Math.hypot(cx - (ax + dx * t), cz - (az + dz * t));
+      if (d < nearest) nearest = d;
+    }
+    const bound = (nearest - halfDiagonal) * (1 - 1e-9) - 1e-9;
+    lowerBounds[index] = bound;
+    return bound;
+  };
+  const closerThan = (x: number, z: number, margin: number): boolean => {
+    const gx = Math.floor((x - minX) / cellSize);
+    const gz = Math.floor((z - minZ) / cellSize);
+    if (gx >= 0 && gz >= 0 && gx < gridWide && gz < gridDeep) {
+      const index = gx * gridDeep + gz;
+      const cached = lowerBounds[index] as number;
+      const bound = cached === cached ? cached : cellLowerBound(gx, gz, index);
+      if (bound > Math.abs(margin)) {
+        const r = Math.hypot(x, z);
+        // Inside for certain without the bearing: `radiusAt` interpolates
+        // between two samples, so it is never under the smallest sample by
+        // more than an ulp, and `innerRadius` is shaved well past that.
+        if (r <= innerRadius) return false;
+        return !(r <= radiusAt(Math.atan2(z, x)));
+      }
+    }
+    return distanceToEdge(x, z) < margin;
+  };
+
+  const boundary: ParkBoundary = {
     contains: (x, z) => Math.hypot(x, z) <= radiusAt(Math.atan2(z, x)),
     distanceToEdge,
     area,
@@ -477,6 +544,8 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
     extent,
     outline: () => points,
   };
+  registerFastEdgeTest(boundary, closerThan);
+  return boundary;
 }
 
 /**
