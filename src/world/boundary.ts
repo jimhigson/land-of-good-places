@@ -1,7 +1,7 @@
 import { registerFastEdgeTest } from './boundaryEdgeTest';
 import { Rng, TAU } from '../core/mathUtils';
 import { cachedSolve } from '../core/solveCache';
-import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END } from '../core/constants';
+import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END, SPUR_PAVED_REACH } from '../core/constants';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from './entrance/layout';
 import { PARK_SEED } from './parkManifest';
 
@@ -888,6 +888,14 @@ export const GARDEN_PLAY_BOUNDARY: ParkBoundary = PARK_BOUNDARY;
  */
 /** Ground beyond the crest, so the cut edge sits below the horizon not level with it. */
 /**
+ * Half-thickness of the boundary wall as **collision** sees it — what a child
+ * is actually stopped by, as opposed to the stone she can see. Owned here so
+ * the layout can keep doormats and exits off the wall; `Garden.ts` builds the
+ * wall with it.
+ */
+export const BOUNDARY_WALL_COLLISION_HALF = 0.45;
+
+/**
  * How far inside the park's edge a ride's exit must sit, in metres.
  *
  * A statement about the boundary, so it lives with the boundary: a point can
@@ -901,8 +909,13 @@ export const GARDEN_PLAY_BOUNDARY: ParkBoundary = PARK_BOUNDARY;
  * either of them because those two modules cannot import from each other:
  * `coaster/plan -> railRace/plan -> train/plan -> coaster/plan` is a cycle that
  * `tsc` accepts and Node fails at load.
+ *
+ * Far enough in that the path arriving at the exit — half the widest spur plus
+ * its kerb, from any side — keeps its paving off the boundary wall (2 m left
+ * the exit paths' kerbs 0.1–0.4 m under the wall on seeds 2, 6 and 8, and
+ * over it on seed 8: `noDrawnPavingUnderASolid`, 2 Oct 2026).
  */
-export const EXIT_INSIDE_EDGE = 2;
+export const EXIT_INSIDE_EDGE = SPUR_PAVED_REACH + BOUNDARY_WALL_COLLISION_HALF + 0.1;
 
 export const TERRAIN_APRON = RIM_OUTSET_END + 1.5;
 
@@ -1151,9 +1164,3 @@ function solverCloserThan(
   };
 }
 
-/**
- * Half-thickness of the boundary wall as **collision** sees it — what a child
- * is actually stopped by, as opposed to the stone she can see. Owned here so
- * the layout can keep doormats off the wall; `Garden.ts` builds the wall with it.
- */
-export const BOUNDARY_WALL_COLLISION_HALF = 0.45;

@@ -66,6 +66,7 @@ import {
 import {
   bridgesThatWallPathsIn,
   DISABLE_LEGIBILITY_SCREEN,
+  BUILT_SOLID_MARGIN,
   distanceToBuiltSolids,
   STREET_PITCH,
   drawnEdgeOf,
@@ -964,7 +965,7 @@ function drawnSampleUnderASolid(drawn: readonly PathSample[]): PathSample | null
     if (t < 1e-9) continue;
     const reach = here.halfWidth + PATH_KERB_OVERHANG;
     for (const k of [0, -1, -0.5, 0.5, 1]) {
-      if (distanceToBuiltSolids(here.x - (tz / t) * reach * k, here.z + (tx / t) * reach * k) < 0) return here;
+      if (distanceToBuiltSolids(here.x - (tz / t) * reach * k, here.z + (tx / t) * reach * k) < BUILT_SOLID_MARGIN) return here;
     }
   }
   return null;

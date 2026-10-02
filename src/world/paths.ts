@@ -18,7 +18,7 @@ import {
 import { TOWER_JAMB_HALF_THICKNESS, TOWER_JAMB_REACH } from './hotel/towerDimensions';
 import { ANCHORS } from './anchors';
 import { DOORMAT_LEAD, PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong, entranceFacing, hasOwnDoor } from './parkLayout';
-import { PARK_BOUNDARY } from './boundary';
+import { BOUNDARY_WALL_COLLISION_HALF, PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN, RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN } from './train/plan';
 import { STATION_GAP } from './train/fence';
 import { FENCE_OFFSET } from './train/clearance';
@@ -6039,13 +6039,18 @@ function* addInterconnects(
 /**
  * **How far (x, z) stands from the nearest built solid** a path may not run
  * under — every booth's body (`distanceToBoothBodies`), the hotel tower's
- * shell out to the ends of its doorway jambs, and the castle's walls and corner
- * turrets — negative inside one. Plan-time owners of the shapes the colliders
+ * shell out to the ends of its doorway jambs, the castle's walls and corner
+ * turrets, and the boundary wall — negative inside one. Plan-time owners of the shapes the colliders
  * are built from; `test/procgen`'s `noDrawnPavingUnderASolid` measures the
  * built park against the colliders themselves.
  */
 export function distanceToBuiltSolids(x: number, z: number): number {
   let best = distanceToBoothBodies(x, z);
+  // The boundary wall — except across the gateway, where the wall stops and
+  // the gate approach carries the paving out through the arch.
+  if (Math.hypot(x - ENTRANCE_GATE_X, z - ENTRANCE_GATE_Z) > ENTRANCE_GATE_HALF_WIDTH + SPUR_PAVED_REACH + 2) {
+    best = Math.min(best, PARK_BOUNDARY.distanceToEdge(x, z) - BOUNDARY_WALL_COLLISION_HALF);
+  }
   const hotel = PARK_LAYOUT.entries.get('hotel');
   if (hotel) best = Math.min(best, Math.hypot(x - hotel.x, z - hotel.z) - (TOWER_JAMB_REACH + TOWER_JAMB_HALF_THICKNESS));
   const castle = PARK_LAYOUT.entries.get('building');
@@ -6063,6 +6068,14 @@ export function distanceToBuiltSolids(x: number, z: number): number {
   }
   return best;
 }
+
+/**
+ * How far a drawn cross-section's sampled points must keep from a built solid:
+ * a hand's breadth for what five points across a 0.8 m station cannot see —
+ * the kerb's mitre at a corner and the ribbon between stations (seeds 4 and 6,
+ * 2 Oct 2026: 0.16–0.20 m of kerb under a booth past a clean screen).
+ */
+export const BUILT_SOLID_MARGIN = 0.25;
 
 /**
  * **A route whose drawn paving keeps off every built solid**
@@ -6091,7 +6104,7 @@ function routeClearsSolids(points: readonly (readonly [number, number])[], width
     const nx = t > 1e-9 ? -tz / t : 0;
     const nz = t > 1e-9 ? tx / t : 0;
     for (const k of [0, -1, -0.5, 0.5, 1]) {
-      if (distanceToBuiltSolids(here.x + nx * reach * k, here.z + nz * reach * k) < 0) return false;
+      if (distanceToBuiltSolids(here.x + nx * reach * k, here.z + nz * reach * k) < BUILT_SOLID_MARGIN) return false;
     }
   }
   return true;

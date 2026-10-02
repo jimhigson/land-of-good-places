@@ -20,6 +20,7 @@ import { cameraOffset } from '../core/cameraRig';
 import { DEG } from '../core/mathUtils';
 import {
   curvePoints,
+  BUILT_SOLID_MARGIN,
   distanceToBuiltSolids,
   GATE_CORRIDOR_START_Z,
   JUNCTION_SNAP,
@@ -866,13 +867,10 @@ function clearOfTheGateway(x: number, z: number, radius: number): boolean {
  */
 function clearOfBooths(apron: JunctionApron): JunctionApron | null {
   const room = distanceToBuiltSolids(apron.x, apron.z);
-  const radius = Math.min(apron.radius, room - PATH_KERB_OVERHANG - BOOTH_APRON_GAP);
+  const radius = Math.min(apron.radius, room - PATH_KERB_OVERHANG - BUILT_SOLID_MARGIN);
   if (radius >= apron.radius) return apron;
   return radius >= apron.radius / 2 ? { ...apron, radius } : null;
 }
-
-/** Daylight left between a shrunk junction apron's kerb and a booth's wall. */
-const BOOTH_APRON_GAP = 0.05;
 
 /** Where a disc of paving may be laid: on the ground, off every bridge and off the gateway. */
 function discMayBeLaid(x: number, z: number, radius: number): boolean {
