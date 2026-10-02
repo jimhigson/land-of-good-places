@@ -666,7 +666,12 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
     const countReach = (s: Sample, delta: 1 | -1): void => {
       for (let k = 0; k < influences.length; k += 1) {
         const influence = influences[k] as RouteInfluence;
-        if (Math.hypot(s.x - influence.x, s.z - influence.z) <= influence.radius) {
+        // `hypot(a, b) >= |a|`, so an axis alone past the radius settles it.
+        const dx = s.x - influence.x;
+        if (dx > influence.radius || -dx > influence.radius) continue;
+        const dz = s.z - influence.z;
+        if (dz > influence.radius || -dz > influence.radius) continue;
+        if (Math.hypot(dx, dz) <= influence.radius) {
           reachedBy[k] = (reachedBy[k] as number) + delta;
         }
       }
