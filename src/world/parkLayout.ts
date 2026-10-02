@@ -16,11 +16,11 @@ import { lazyView } from '../boot/lazyView';
 import { planPart } from './parkPlan';
 import { registerPlanCache } from '../boot/planCaches';
 import { layoutRestartBase, layoutStreamBump } from './parkWarp';
-import { PARK_BOUNDARY } from './boundary';
+import { BOUNDARY_WALL_COLLISION_HALF, PARK_BOUNDARY } from './boundary';
 import { ENTRANCE_GATE_X, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
 import { CollisionWorld } from './Collision';
 import { NAV_CELL, NavGrid, STAND_SEARCH_REACH, type ReachSet } from './NavGrid';
-import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
+import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS, SPUR_PAVED_REACH } from '../core/constants';
 import { ARRIVAL_EXEMPT_NEAR } from './streetRules';
 import type { AnchorFootprint } from './anchors';
 
@@ -255,6 +255,104 @@ function drawnCentreOf(entry: ManifestEntry, x: number, z: number): readonly [nu
   if (entry.id !== 'building') return [x, z];
   const length = Math.hypot(x, z) || 1;
   return [x - (x / length) * BUILDING_CENTRE_NUDGE, z - (z / length) * BUILDING_CENTRE_NUDGE];
+}
+
+/**
+ * **Where an entry placed at (x, z) puts its doormat** — the one owner, asked
+ * by the placement and by {@link validate} alike. On the plot's edge, facing
+ * the camera (a counter, GAME_DESIGN #16) or the park middle, plus the
+ * stand-off; or at the plot's own door, where the manifest declares one.
+ */
+function doormatFor(entry: ManifestEntry, x: number, z: number): readonly [number, number] {
+  let dirX: number;
+  let dirZ: number;
+  if (entry.cameraFacing) {
+    const facing = counterFacing(CAMERA_FACING_YAW);
+    dirX = Math.sin(facing);
+    dirZ = Math.cos(facing);
+  } else {
+    const length = Math.hypot(x, z);
+    dirX = length > 1e-6 ? -x / length : 0;
+    dirZ = length > 1e-6 ? -z / length : 1;
+  }
+  // The placed footprint, not the authored one: for the castle it carries the
+  // corner turrets, nudged to where they are actually drawn. Asking the
+  // authored rectangle here is what put three seeds' doormats inside a tower.
+  const placedFootprint = footprintAsPlaced(entry, x, z);
+  const edge = edgeDistanceAlong(placedFootprint, dirX, dirZ);
+  const standOff = 1.4; // the sign and the doormat, just clear of the plot
+  // …unless the plot has a door of its own somewhere else: then the doormat
+  // is at that door (`ManifestEntry.door`).
+  const door = entry.door;
+  return !door
+    ? [x + dirX * (edge + standOff), z + dirZ * (edge + standOff)]
+    : 'reach' in door
+      ? [x + dirX * door.reach, z + dirZ * door.reach]
+      : doormatClearOfThePlot(entry, placedFootprint, x, z, door, standOff);
+}
+
+/**
+ * How far out along its facing a path arrives at a doormat from — the head-on
+ * lead `paths.ts` routes every spur through. One owner, asked here so a plot
+ * is never placed with that lead in the boundary wall.
+ */
+export const DOORMAT_LEAD = 3.5;
+
+/**
+ * How far inside the boundary a doormat, and its lead, must stand: the widest
+ * spur's half-width, its kerb, and the boundary wall's own collision half —
+ * so the arriving path's paving stays inside the park and off the wall.
+ * Seed 12 (2 Oct 2026): the rail-race stall's counter faced the wall 1.5 m
+ * from it, and its spur wandered along the wall to get round, laying paving
+ * under and over it (`noDrawnPavingUnderASolid`, `noDrawnPavingOutsideThePark`).
+ */
+const DOORMAT_WALL_ROOM = SPUR_PAVED_REACH + BOUNDARY_WALL_COLLISION_HALF + 0.1;
+
+/** An entry's arrival lane: from its doormat out along its facing to the lead. */
+type Lane = readonly [readonly [number, number], readonly [number, number]];
+
+function arrivalLane(entry: ManifestEntry, x: number, z: number): Lane {
+  const [ex, ez] = doormatFor(entry, x, z);
+  const out = Math.hypot(ex - x, ez - z);
+  const [fx, fz] =
+    entry.door && 'facing' in entry.door ? entry.door.facing : out > 1e-9 ? [(ex - x) / out, (ez - z) / out] : [0, 1];
+  return [
+    [ex, ez],
+    [ex + fx * DOORMAT_LEAD, ez + fz * DOORMAT_LEAD],
+  ];
+}
+
+function laneOf(entry: PlacedEntry): Lane {
+  const [fx, fz] = entranceFacing(entry);
+  return [
+    [entry.entranceX, entry.entranceZ],
+    [entry.entranceX + fx * DOORMAT_LEAD, entry.entranceZ + fz * DOORMAT_LEAD],
+  ];
+}
+
+
+/** Does a lane's paving ({@link SPUR_PAVED_REACH} either side) reach onto a footprint placed at (px, pz)? */
+function laneMeetsFootprint(lane: Lane, footprint: AnchorFootprint, px: number, pz: number): boolean {
+  const [[ax, az], [bx, bz]] = lane;
+  const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.5));
+  for (let s = 0; s <= steps; s += 1) {
+    const t = s / steps;
+    const x = ax + (bx - ax) * t - px;
+    const z = az + (bz - az) * t - pz;
+    let distance: number;
+    if (footprint.kind === 'circle') distance = Math.hypot(x, z) - footprint.radius;
+    else {
+      const dx = Math.abs(x) - footprint.halfX;
+      const dz = Math.abs(z) - footprint.halfZ;
+      const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
+      distance = outside > 0 ? outside : Math.max(dx, dz);
+      for (const [cx, cz] of footprint.corners?.at ?? []) {
+        distance = Math.min(distance, Math.hypot(x - cx, z - cz) - (footprint.corners?.radius ?? 0));
+      }
+    }
+    if (distance < SPUR_PAVED_REACH) return true;
+  }
+  return false;
 }
 
 /** Cosine of 60 degrees: how far off the park's middle a fixed-facing door may face. */
@@ -1020,32 +1118,8 @@ function* buildOnce(restart: number, attempts: ReadonlyMap<string, number>): Gen
     // diagonal, not drawn from `rng`, so there is no per-seed rotation left
     // to call "arbitrary."
     const signYaw = CAMERA_FACING_YAW;
-    let dirX: number;
-    let dirZ: number;
-    if (entry.cameraFacing) {
-      const facing = counterFacing(signYaw);
-      dirX = Math.sin(facing);
-      dirZ = Math.cos(facing);
-    } else {
-      const towardMiddle = Math.hypot(x, z) > 1e-6 ? [-x, -z] : [0, 1];
-      const length = Math.hypot(towardMiddle[0] as number, towardMiddle[1] as number);
-      dirX = (towardMiddle[0] as number) / length;
-      dirZ = (towardMiddle[1] as number) / length;
-    }
-    // The placed footprint, not the authored one: for the castle it carries the
-    // corner turrets, nudged to where they are actually drawn. Asking the
-    // authored rectangle here is what put three seeds' doormats inside a tower.
     const placedFootprint = footprintAsPlaced(entry, x, z);
-    const edge = edgeDistanceAlong(placedFootprint, dirX, dirZ);
-    const standOff = 1.4; // the sign and the doormat, just clear of the plot
-    // …unless the plot has a door of its own somewhere else: then the doormat
-    // is at that door (`ManifestEntry.door`).
-    const door = entry.door;
-    const [entranceX, entranceZ] = !door
-      ? [x + dirX * (edge + standOff), z + dirZ * (edge + standOff)]
-      : 'reach' in door
-        ? [x + dirX * door.reach, z + dirZ * door.reach]
-        : doormatClearOfThePlot(entry, placedFootprint, x, z, door, standOff);
+    const [entranceX, entranceZ] = doormatFor(entry, x, z);
 
     const item: PlacedEntry = {
       id: entry.id,
@@ -1140,6 +1214,20 @@ function validate(
 
   if (inGateCorridor(x, z, entry.boundingRadius)) return fail('blocks the gate corridor');
 
+  // The doormat, and the lead a path arrives along, stand clear of the wall.
+  if (entry.id !== 'fountain') {
+    const [ex, ez] = doormatFor(entry, x, z);
+    const out = Math.hypot(ex - x, ez - z);
+    const [fx, fz] =
+      entry.door && 'facing' in entry.door ? entry.door.facing : out > 1e-9 ? [(ex - x) / out, (ez - z) / out] : [0, 1];
+    if (
+      PARK_BOUNDARY.distanceToEdge(ex, ez) < DOORMAT_WALL_ROOM ||
+      PARK_BOUNDARY.distanceToEdge(ex + fx * DOORMAT_LEAD, ez + fz * DOORMAT_LEAD) < DOORMAT_WALL_ROOM
+    ) {
+      return fail('arrives at its doormat along the boundary wall');
+    }
+  }
+
   // Keep every plot's bounding circle clear of the statue ring's annulus —
   // the fountain is solveOrder 0, so it is always already placed when any
   // other entry validates. (The fountain itself is the ring's centre; the
@@ -1171,6 +1259,23 @@ function validate(
     const [fx, fz] = entry.door.facing;
     if (toMiddle > 1e-6 && (midX * fx + midZ * fz) / toMiddle < DOOR_FACES_IN_COS) {
       return fail('turns its door away from the park');
+    }
+  }
+
+  // **Every arrival lane stays clear of every other plot.** A path arrives at
+  // a doormat head-on along its lead (`DOORMAT_LEAD`); that last stretch of
+  // paving may not lie on another plot. Seed 11 (2 Oct 2026): the water-fight
+  // stall stood in the water fight's own arrival lane, 5 m from its doormat,
+  // and the spur laid 5 m² of paving under the booth. Asked both ways: this
+  // entry's lane against the plots already placed, and theirs against this.
+  if (entry.id !== 'fountain') {
+    const mine = arrivalLane(entry, x, z);
+    const myFootprint = footprintAsPlaced(entry, x, z);
+    for (const other of placed) {
+      if (other.id === 'fountain') continue;
+      if (laneMeetsFootprint(mine, other.footprint, other.x, other.z)) return fail(`arrives across '${other.id}'`);
+      const theirs = laneOf(other);
+      if (laneMeetsFootprint(theirs, myFootprint, x, z)) return fail(`stands in '${other.id}''s arrival lane`);
     }
   }
 

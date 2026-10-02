@@ -20,6 +20,8 @@ import { cameraOffset } from '../core/cameraRig';
 import { DEG } from '../core/mathUtils';
 import {
   curvePoints,
+  BUILT_SOLID_MARGIN,
+  distanceToBuiltSolids,
   GATE_CORRIDOR_START_Z,
   JUNCTION_SNAP,
   pathDivisions,
@@ -259,7 +261,8 @@ export function buildPaths(): Mesh[] {
   // Where route ends meet, the paving they leave between their square-cut
   // ends — see `junctionAprons`.
   junctionAprons(ROUTES)
-    .filter((apron) => discMayBeLaid(apron.x, apron.z, apron.radius))
+    .map((apron) => clearOfBooths(apron))
+    .filter((apron): apron is JunctionApron => apron !== null && discMayBeLaid(apron.x, apron.z, apron.radius))
     .forEach((apron, k) => {
       addDisc(surface, apron.x, apron.z, apron.radius, JUNCTION_APRON_SEGMENTS, 1, PATH_SURFACE_LIFT);
       own(surfaceOwners, surface, JUNCTION_OWNER_BASE - k);
@@ -849,6 +852,24 @@ function clearOfBridges(x: number, z: number, radius: number): boolean {
  */
 function clearOfTheGateway(x: number, z: number, radius: number): boolean {
   return Math.hypot(x, z - GATE_CORRIDOR_START_Z) >= radius + PATH_KERB_OVERHANG;
+}
+
+/**
+ * **A junction apron that keeps out from under the booths** (and the
+ * buildings: `paths.ts`'s `distanceToBuiltSolids`). A spur and a
+ * connector that both end on a stall's stand point meet there, and the disc
+ * that paves their meeting reached 1.73 m (half a path plus the kerb) from a
+ * stand point that stands 1.45 m from the booth's front wall — 0.2–0.3 m² of
+ * kerb under every such booth (`noDrawnPavingUnderASolid`, 2 Oct 2026). So
+ * the disc is shrunk to stop short of the booth's body (its walls included,
+ * `boothCorners` and the booth's own box: the one owner of where a booth
+ * stands), or not laid at all if that would leave less than half a path.
+ */
+function clearOfBooths(apron: JunctionApron): JunctionApron | null {
+  const room = distanceToBuiltSolids(apron.x, apron.z);
+  const radius = Math.min(apron.radius, room - PATH_KERB_OVERHANG - BUILT_SOLID_MARGIN);
+  if (radius >= apron.radius) return apron;
+  return radius >= apron.radius / 2 ? { ...apron, radius } : null;
 }
 
 /** Where a disc of paving may be laid: on the ground, off every bridge and off the gateway. */

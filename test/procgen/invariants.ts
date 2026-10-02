@@ -1595,6 +1595,161 @@ function walkablePaving(facts: ParkFacts, meshes: readonly Mesh[], raster: Pavin
   return { allowed, decorativeTriangles };
 }
 
+/** The drawn path layers, or a complaint that they are missing. */
+function drawnPathLayers(facts: ParkFacts): Mesh[] | string {
+  const meshes: Mesh[] = [];
+  facts.world.garden.group.traverse((object) => {
+    if (object instanceof Mesh && (object.name === 'path-surface' || object.name === 'path-kerb')) meshes.push(object);
+  });
+  return meshes.length === 2 ? meshes : `expected both drawn path layers, found ${meshes.length} — this measured nothing`;
+}
+
+/** Gathers flagged raster cells into places a few metres across, for one complaint each. */
+function gatherPlaces<T>(
+  raster: PavingRaster,
+  flagged: readonly { k: number; detail: T }[],
+  /** True when `a` is worse than `b`. */
+  worse: (a: T, b: T) => boolean,
+): { at: readonly [number, number]; cells: number; worst: T }[] {
+  const places: { at: readonly [number, number]; cells: number; worst: T }[] = [];
+  for (const { k, detail } of flagged) {
+    const at = cellCentre(raster, k);
+    const near = places.find((place) => Math.hypot(place.at[0] - at[0], place.at[1] - at[1]) < 6);
+    if (near) {
+      near.cells += 1;
+      if (worse(detail, near.worst)) near.worst = detail;
+    } else places.push({ at, cells: 1, worst: detail });
+  }
+  return places;
+}
+
+/**
+ * How far a paving cell's centre may stand inside a solid before it counts:
+ * half a raster cell, so the rasterising cannot itself be the finding — a kerb
+ * laid flush against a garden wall, its edge on the wall's face, is not paving
+ * under the wall.
+ */
+const UNDER_A_SOLID_TOLERANCE = PAVING_CELL / 2;
+
+/**
+ * The solids paving may not lie under: buildings, booths and the boundary wall
+ * — every collider their builders file under these owners
+ * (`CollisionWorld.ownedBy`). Garden walls stand flush along paths by design
+ * (`wallsRunAlongsideAPath`), the fountain's rim stands on the plaza, and a
+ * lamp may stand at a path's edge; those are counted on every run, not judged.
+ */
+const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'booth', 'boundary wall']);
+
+/**
+ * **No drawn paving lies under a building, a booth or the boundary wall.**
+ *
+ * Found on 2 October 2026 by a walkability probe over the accepted parks:
+ * paving drawn under the back of stall booths (seed 11 near (-41, 29.6)),
+ * along and under the boundary wall (seed 3), under the castle's corners
+ * (seed 13). Every one of those is a ribbon a child can see and cannot walk.
+ *
+ * Measured off the drawn `path-surface` and `path-kerb`, rasterised in plan,
+ * against the **colliders** — the one owner of every footprint
+ * (`CollisionWorld.solidDepthAt`): a paved cell whose centre stands more than
+ * {@link UNDER_A_SOLID_TOLERANCE} inside any ground-standing collider filed
+ * under a building, a booth or the boundary wall ({@link BUILT_SOLIDS}). A
+ * ribbon into a booth's hollow middle crosses its walls, so it is caught here
+ * too. Paving shut in where nobody can reach, under none of these, is counted
+ * on every run but not judged.
+ *
+ * Two kinds of paving are left out, and counted on every run: what a bridge
+ * carries (its kerb runs under its own parapets by design; the bridge
+ * invariants own it), and paving declared unwalked (a door apron behind its
+ * trigger, `pathGraph.ts`'s `decorativeOwners`).
+ */
+const noDrawnPavingUnderASolid: Invariant = (facts) => {
+  const meshes = drawnPathLayers(facts);
+  if (typeof meshes === 'string') return [meshes];
+  let decorativeTriangles = 0;
+  const raster = rasterisePaving(meshes, PAVING_CELL, (mesh, vertex) => {
+    const unwalked = mesh.userData['decorativeOwners'];
+    const owners = mesh.userData['vertexOwners'];
+    if (!(unwalked instanceof Int32Array) || !(owners instanceof Int32Array)) return false;
+    const skip = unwalked.includes(owners[vertex]!);
+    if (skip) decorativeTriangles += 1;
+    return skip;
+  });
+  const walkable = walkablePaving(facts, meshes, raster);
+  if (typeof walkable === 'string') return [walkable];
+  const bridges = facts.world.train.bridges;
+  const collision = facts.world.collision;
+  const under: { k: number; detail: { depth: number; what: string; owner: string } }[] = [];
+  const shut: { k: number; detail: { depth: number; what: string; owner: string } }[] = [];
+  let paved = 0;
+  let carried = 0;
+  let otherSolids = 0;
+  for (let k = 0; k < raster.cols * raster.rows; k += 1) {
+    if (!isPaved(raster, k)) continue;
+    const [x, z] = cellCentre(raster, k);
+    if (bridges.some((bridge) => bridge.pavingHeightAt(x, z) !== null)) {
+      carried += 1;
+      continue;
+    }
+    paved += 1;
+    const solid = collision.solidDepthAt(x, z, BUILT_SOLIDS);
+    if (solid.depth > UNDER_A_SOLID_TOLERANCE) under.push({ k, detail: solid });
+    else if (!walkable.allowed(k)) shut.push({ k, detail: collision.solidDepthAt(x, z) });
+    else if (collision.solidDepthAt(x, z).depth > UNDER_A_SOLID_TOLERANCE) otherSolids += 1;
+  }
+  const area = PAVING_CELL * PAVING_CELL;
+  const complaints = [
+    ...gatherPlaces(raster, under, (a, b) => a.depth > b.depth).map(
+      (place) =>
+        `${(place.cells * area).toFixed(2)} m² of drawn paving near ${fmt(place.at)} lies under a ${place.worst.owner} — ` +
+        `${place.worst.depth.toFixed(2)} m inside ${place.worst.what}`,
+    ),
+  ];
+  // Paving shut in where nobody can reach it, but under none of the above, is
+  // said rather than judged: it is the railway's and the rides' to own (on
+  // 2 October 2026 every case away from a booth was a connector laid along a
+  // station's track, which is a different defect from this one).
+  const shutPlaces = gatherPlaces(raster, shut, (a, b) => a.depth > b.depth);
+  process.stderr.write(
+    `  noDrawnPavingUnderASolid: ${paved} paving cells judged on seed ${facts.seed}; ${carried} carried by a bridge ` +
+      `and ${decorativeTriangles} declared-unwalked apron triangle(s) left out; ${under.length} under a building, booth or ` +
+      `the boundary wall. Not judged here: ${otherSolids} under other solids (garden walls, the fountain rim, posts), ` +
+      `${shut.length} shut in where nobody can reach${shutPlaces.length ? ` (largest ${(Math.max(...shutPlaces.map((p) => p.cells)) * area).toFixed(2)} m² near ${fmt(shutPlaces.reduce((a, b) => (b.cells > a.cells ? b : a)).at)})` : ''}\n`,
+  );
+  if (paved === 0) complaints.push('no paving was judged — this measured nothing');
+  return complaints;
+};
+
+/**
+ * **No drawn paving lies outside the park.** Every paved cell of the drawn
+ * `path-surface` and `path-kerb` stands inside the boundary
+ * (`facts.boundary.distanceToEdge`, the play bounds the wall is built on), so
+ * no path runs out past the wall or hangs its kerb over it. Paving merely
+ * *under* the wall is the solid clause's ({@link noDrawnPavingUnderASolid}).
+ */
+const noDrawnPavingOutsideThePark: Invariant = (facts) => {
+  const meshes = drawnPathLayers(facts);
+  if (typeof meshes === 'string') return [meshes];
+  const raster = rasterisePaving(meshes);
+  const outside: { k: number; detail: number }[] = [];
+  let paved = 0;
+  for (let k = 0; k < raster.cols * raster.rows; k += 1) {
+    if (!isPaved(raster, k)) continue;
+    paved += 1;
+    const [x, z] = cellCentre(raster, k);
+    const inside = facts.boundary.distanceToEdge(x, z);
+    if (inside < 0) outside.push({ k, detail: -inside });
+  }
+  const area = PAVING_CELL * PAVING_CELL;
+  const complaints = gatherPlaces(raster, outside, (a, b) => a > b).map(
+    (place) =>
+      `${(place.cells * area).toFixed(2)} m² of drawn paving near ${fmt(place.at)} lies outside the park, ` +
+      `up to ${place.worst.toFixed(2)} m past the boundary`,
+  );
+  process.stderr.write(`  noDrawnPavingOutsideThePark: ${paved} paving cells judged on seed ${facts.seed}; ${outside.length} outside\n`);
+  if (paved === 0) complaints.push('no paving was judged — this measured nothing');
+  return complaints;
+};
+
 /**
  * The Rail Race's exit has room for the whole **party** that arrives on it, not
  * just for one child.
@@ -13133,6 +13288,8 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
   ['every doormat in the park can be walked to from the gate', everyDoormatIsReachableFromTheGate],
   ['the drawn paving runs from the gate all the way to every door', drawnPavingReachesEveryDoor],
+  ['no drawn paving lies under a building, a booth or the boundary wall', noDrawnPavingUnderASolid],
+  ['no drawn paving lies outside the park', noDrawnPavingOutsideThePark],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],
