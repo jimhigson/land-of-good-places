@@ -325,10 +325,13 @@ assertion.** Worth knowing before painting the next authored surface:
 ### 35 — The Reptile House exterior, "Sunny" (`src/art/models/reptileHouseAssets.ts`)
 
 Nodes: `rh-plinth`, `rh-coil`, `rh-coil-belly`, `rh-coil-spots`, `rh-house-wall`,
-`rh-windows`, `rh-head`, `rh-tongue`, `rh-tail`, `rh-tail-bell`, `rh-arch`,
-`rh-awning`, `rh-sign`. "Sunny, the snake who is the building" — a mint snake
-coiled 2.6 turns round a cream greenhouse, head resting on top at the front
-looking at the camera, tail curling down beside the door as the signpost
+`rh-windows`, `rh-head`, `rh-mouth`, `rh-tongue`, `rh-tail`, `rh-tail-bell`,
+`rh-sign`. "Sunny, the snake who is the building" — a mint snake coiled 1.86
+turns round a cream greenhouse, **her head on the ground in front of the door
+with her mouth open: the mouth is the door** (Jim, 2 October 2026: *"Why
+beside the door and not the door as its mouth? That sounds cooler so do
+that."*), the neck lifting up over the humped first coil and diving into the
+back of the crown, the tail curling down beside the head as the signpost
 (`docs/design/REPTILE-HOUSE.md` §2). Jim, 2026-10-02: *"The outside of the
 building should be snake-themed too."*
 
@@ -336,40 +339,55 @@ building should be snake-themed too."*
 `reptile_house_export.py` → `src/art/assets/reptileHouse.glb` →
 `reptileHouseGlb.ts`, by `pnpm run blend:reptile-house`. Renders:
 `art/renders/reptile-house/{iso,door,head,back}.png`, by
-`pnpm run render:reptile-house`. 13 nodes, 10 680 triangles, 255 872 bytes.
+`pnpm run render:reptile-house`. 12 nodes, 10 102 triangles, 255 408 bytes.
 
-Origin on the ground at the building's centre, facing **+Z** (the door, the
-head and the awning all face +Z; the plot is `cameraFacing`). Measured on the
-built mesh, printed by every build run: **12.20 m** to the top of the head,
-furthest vertex **11.30 m** from the centre (≤ `REPTILE_BOUNDING_RADIUS` 11.5),
-plinth 16-gon circumradius **9.400** = `REPTILE_SHELL_RADIUS` (flats at 9.219,
-top at y 0.30), arch bore **3.40 × 3.60** above the plinth top with the mouth
-8.84 m out (≥ `REPTILE_DRAWN_DOOR_ALONG`), tail touching down 0.40 m from the
-`REPTILE_TAIL_REACH` point (5.26, 9.89 in game XZ).
+Origin on the ground at the building's centre, facing **+Z** (the door and
+the head face +Z; the plot is `cameraFacing`). Measured on the built mesh,
+printed by every build run: **12.25 m** to the top of the humped coil,
+furthest vertex **11.82 m** from the centre — the tongue's fork — (≤
+`REPTILE_BOUNDING_RADIUS` 12), plinth 16-gon circumradius **9.400** =
+`REPTILE_SHELL_RADIUS` (flats at 9.219, top at y 0.30), the mouth's bore
+**3.40 × 3.60** above the plinth top with the lips 10.60 m out at the top and
+10.34 at the floor (≥ `REPTILE_DRAWN_DOOR_ALONG`), the coil's nearest pass
+0.27 m off the head's skin, the neck 0.22 m over the first pass, the tail
+touching down 0.40 m from the `REPTILE_TAIL_REACH` point (7.20, 8.58 in game
+XZ; bearing offset 40°).
+
+The head is an 8.4 × 4.6 × 8.8 m ellipsoid sunk 2.4 m into the ground (so its
+chin is wide where the mouth is) with the doorway bored through it by a
+boolean; `rh-mouth` is the old snake-hole tunnel intersected with the head
+and the bore cut back out — a 0.4 m pink lining that shows on the face as
+lips, the head's own hole cut 0.04 m smaller so the lining's skin sits inside
+the flesh and no two faces share a plane. `rh-tongue` is the doormat: a flat
+ribbon from the mouth's floor on the plinth, over its edge and down onto the
+paving, forking at the tip, standing 0.05 m off the plinth top and the paving.
 
 Every shared number is read from `src/world/reptileHouse/layout.ts` through
-`art/blend/reptile_constants.py`; the loader re-asserts the plinth
-circumradius, the arch's outer size and the bounding radius at load, as
-`gateArch.ts` does. The collider is the closed 16-gon ring at
-`REPTILE_SHELL_RADIUS` with one aperture, jambs and a back wall
-(`world/reptileHouse/shell.ts`), plus discs derived from every vertex of the
-tail and sign below `TALLEST_CHILD_HEIGHT` outside the ring
-(`reptileHouseLowDiscs`) — `check:reptile-house` marches at it from 32
+`art/blend/reptile_constants.py` (plus `snakeFace.ts`'s `SUNNY_FACE_EYE_ROW`,
+which the build asserts lands above the lips); the loader re-asserts the
+plinth circumradius, the mouth's outer size and the bounding radius at load,
+as `gateArch.ts` does. The collider is the closed 16-gon ring at
+`REPTILE_SHELL_RADIUS` with one aperture, jambs flush with the bore running
+from the back wall to where the lips reach (`reptileHouseLipsReach`, off the
+mesh) and the back wall (`world/reptileHouse/shell.ts`), plus discs derived
+from every vertex of the head, the mouth, the tail and the sign between the
+ground and `TALLEST_CHILD_HEIGHT` outside the ring and outside the doorway
+strip (`reptileHouseLowDiscs`) — `check:reptile-house` marches at it from 32
 bearings.
 
 Two painted nodes carry UVs: `rh-head` (planar face UVs on the front
 hemisphere only, `u` with +X, `v = (hi − z)/h` to cancel the exporter's 1−v
 — identical to `gate-arch-sign`'s convention; the back hemisphere is parked
-at UV (0.02, 0.02), which the canvas leaves as plain body colour) wearing the
-shared snake face (`snakeFace.ts`), and `rh-sign` (a 1.70 × 0.85 plank,
-planar UVs on all faces) dressed from the hall's sign atlas. **That
-convention wants `flipY` on** — `art/style/glb.ts`'s `planarUvCanvasTexture`,
-never `glbCanvasTexture` (which is for kits authored the glTF way, like the
-hotel's signboard); painted through the wrong one, the face is upside-down
-and the plank reads rotated, which is how the first cut shipped (2 October
-2026). `rh-tongue` is the one node with a transform: a pure translation to
-the mouth (0.00, 10.08, 7.85 in game XYZ), so a flick is the node made
-`visible` for a moment.
+at UV (0.02, 0.02), which the canvas leaves as plain body colour) wearing
+Sunny's own face (`snakeFace.ts`'s `sunnyFaceTextures`: eyes and blush, no
+painted mouth), and `rh-sign` (a 1.70 × 0.85 plank, planar UVs on all faces)
+dressed from the hall's sign atlas. **That convention wants `flipY` on** —
+`art/style/glb.ts`'s `planarUvCanvasTexture`, never `glbCanvasTexture`
+(which is for kits authored the glTF way, like the hotel's signboard);
+painted through the wrong one, the face is upside-down and the plank reads
+rotated, which is how the first cut shipped (2 October 2026). `rh-tongue` is
+the one node with a transform: a pure translation to its root on the mouth's
+floor (0.00, 0.00, 8.00 in game XYZ), so a wag is a yaw on the node.
 
 ### 36 — Reptile House: enclosure masonry, the `cases` kit (`src/art/models/reptileCasesAssets.ts`)
 
