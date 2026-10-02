@@ -544,6 +544,22 @@ function builders(): readonly FeatureBuilder[] {
           { consumed: ['layout'] },
         );
       }
+      // **No drawn path runs through a plot.** A ribbon whose whole width
+      // stands inside a plot's footprint is paving laid under a building or
+      // through a ride: seed 8 (2 Oct 2026) drew the sky cruiser stall's spur
+      // straight through the castle — plinth, walls and towers — and seed 5
+      // drew the castle's own spur 24 m under it to its front steps. Both are
+      // continuous ribbons in plan; a child walking them meets a wall
+      // (`drawnPavingReachesEveryDoor` measures it on the built park). The
+      // layout is the decision that left no way round, so it is re-drawn.
+      const throughAPlot = drawnSampleThroughAPlot(drawn);
+      if (throughAPlot) {
+        return refusal(
+          `paths: drawn run ${throughAPlot.sample.run} runs through plot '${throughAPlot.plot}' at ` +
+            `(${throughAPlot.sample.x.toFixed(1)}, ${throughAPlot.sample.z.toFixed(1)}), ${throughAPlot.depth.toFixed(2)} m inside it`,
+          { consumed: ['layout'] },
+        );
+      }
       yield 0;
       const screen = screenDrawnPathsForOffSiteCrossings(train.route, drawn, { esplanadeOver: drawn });
       if (screen.fouls.length > 0) {
@@ -784,3 +800,32 @@ export function* parkPlanSearch(): Generator<number, void, void> {
     forcing = false;
   }
 }
+
+/**
+ * The first drawn sample whose whole ribbon stands inside a placed plot's
+ * footprint — deeper than its own half-width plus a hand's breadth — or `null`.
+ * The fountain is exempt (it is the plaza, paving itself). Measured against the
+ * footprint as placed (`PARK_LAYOUT`), the same shape every plot is spaced and
+ * routed by.
+ */
+function drawnSampleThroughAPlot(
+  drawn: readonly PathSample[],
+): { readonly sample: PathSample; readonly plot: string; readonly depth: number } | null {
+  const plots = [...planPart('layout').entries.values()].filter((entry) => entry.id !== 'fountain');
+  for (const sample of drawn) {
+    for (const plot of plots) {
+      const footprint = plot.footprint;
+      let inside: number;
+      if (footprint.kind === 'circle') {
+        inside = footprint.radius - Math.hypot(sample.x - plot.x, sample.z - plot.z);
+      } else {
+        inside = Math.min(footprint.halfX - Math.abs(sample.x - plot.x), footprint.halfZ - Math.abs(sample.z - plot.z));
+      }
+      if (inside > sample.halfWidth + THROUGH_A_PLOT_SLACK) return { sample, plot: plot.id, depth: inside };
+    }
+  }
+  return null;
+}
+
+/** How far past a ribbon's own half-width it must be inside a plot to be running through it. */
+const THROUGH_A_PLOT_SLACK = 0.3;
