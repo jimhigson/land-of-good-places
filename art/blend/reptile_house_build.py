@@ -122,7 +122,7 @@ FLOOR = PLINTH_H
 # ring radius, the height and the tube radius are all linear in the turn
 # count, plus the door hump described in the docstring.
 
-COIL_TURNS = 2.3
+COIL_TURNS = 2.6
 COIL_RING_R0 = 8.1
 #: How much the ring tightens per turn.
 COIL_RING_STEP = 0.9
@@ -135,7 +135,7 @@ COIL_PITCH = 3.2
 COIL_TUBE_R0 = 1.3
 COIL_TUBE_R1 = 1.0
 COIL_SIDES = 16
-COIL_STEPS_PER_TURN = 40
+COIL_STEPS_PER_TURN = 36
 
 #: The hump over the door: a raised-cosine window this wide either side of the
 #: door bearing, lifting the body by `HUMP_H` on the first pass and half that on
@@ -150,9 +150,9 @@ NECK_R1 = 0.85
 #: The belly stripe: a thinner tube on the same path, pushed down and outward
 #: so a cream band shows along the lower outer flank of every coil from the
 #: game's 38° camera (a belly on the true underside would be invisible).
-BELLY_SCALE = 0.72
-BELLY_OFFSET = 0.42
-BELLY_SIDES = 8
+BELLY_SCALE = 0.86
+BELLY_OFFSET = 0.3
+BELLY_SIDES = 6
 
 SPOT_COUNT = 14
 SPOT_SIZE = (0.62, 0.44, 0.15)
@@ -189,9 +189,10 @@ PORTHOLE_SEGMENTS = 10
 # -------------------------------------------------------------------- head
 
 HEAD_RX, HEAD_RY, HEAD_RZ = 1.7, 2.1, 1.5
-#: Head centre: at the front, chin on the second door hump, sunk a little into
-#: the dome. Measured and printed below.
-HEAD_CENTRE = Vector((0.0, -4.5, 9.0))
+#: Head centre: on top of everything at the front, resting on the second door
+#: hump with her chin out over the entrance, so the first thing a child sees
+#: walking up is Sunny looking down at her. Measured and printed below.
+HEAD_CENTRE = Vector((0.0, -6.0, 10.7))
 #: The mouth, where the tongue's node origin goes.
 MOUTH = HEAD_CENTRE + Vector((0.0, -HEAD_RY + 0.25, -0.62))
 TONGUE_R = 0.08
@@ -337,12 +338,16 @@ def body_path():
         points.append(p)
         radii.append(r)
     end, end_r, _ = helix_at(COIL_TURNS)
-    # The neck: over the dome from behind, into the back of the head.
+    # The neck: from the helix end at the back-left, arcing over the dome
+    # and the top coil's front, into the back of the head.
+    back = HEAD_CENTRE + Vector((0.0, HEAD_RY, 0.0))
+    ahead, _, _ = helix_at(COIL_TURNS + 0.02)
+    tangent = (ahead - end).normalized()
     neck_knots = [
         end,
-        Vector((end.x * 0.72, end.y * 0.42, end.z + 0.75)),
-        Vector((end.x * 0.3, -0.7, end.z + 0.9)),
-        HEAD_CENTRE + Vector((0.0, HEAD_RY - 0.05, 0.15)),
+        end + tangent * 1.6 + Vector((0.0, 0.0, 0.5)),
+        Vector((end.x * 0.25, back.y + 1.7, HEAD_CENTRE.z - 0.1)),
+        back + Vector((0.0, 0.1, 0.0)),
         HEAD_CENTRE + Vector((0.0, HEAD_RY - 1.0, 0.0)),
     ]
     neck = catmull_rom(neck_knots, 4)[1:]
@@ -379,7 +384,7 @@ def build_coil(coll):
         # dome's axis", which is still the visible flank.
         radial = Vector((p.x, p.y, 0.0))
         radial = radial.normalized() if radial.length > 0.3 else Vector((0.0, -1.0, 0.0))
-        shift = (radial * 0.55 + Vector((0.0, 0.0, -1.0)) * 0.85).normalized() * (radii[i] * BELLY_OFFSET)
+        shift = (radial * 0.7 + Vector((0.0, 0.0, -1.0)) * 0.7).normalized() * (radii[i] * BELLY_OFFSET)
         belly_pts.append(p + shift)
         belly_r.append(radii[i] * BELLY_SCALE)
     bverts, bfaces = sweep_varying(belly_pts, belly_r, BELLY_SIDES)
@@ -501,7 +506,12 @@ def build_head(coll):
 
 def tail_path():
     """Centre line and radii: coil → ground at the tail reach → S-curve up."""
-    start, start_r, _ = helix_at(0.03)
+    # The tail begins *inside* the coil, a little way along the helix, and
+    # runs back through its start point: the two tubes overlap there and the
+    # coil's start cap is swallowed, so the body reads as one continuous
+    # snake rather than a coil with a stub and a tail hung beside it.
+    inside, start_r, _ = helix_at(0.08)
+    start, _, _ = helix_at(0.0)
     base = Vector((REPTILE_TAIL_REACH * math.cos(TAIL_BEARING), REPTILE_TAIL_REACH * math.sin(TAIL_BEARING), 0.0))
     out = (base - Vector((start.x, start.y, 0.0))).normalized()
     side = Vector((-out.y, out.x, 0.0))
@@ -509,8 +519,9 @@ def tail_path():
     # leans back toward the building so the tip stays inside the bounding
     # radius, with the bell on top.
     knots = [
+        inside,
         start,
-        start + out * 1.2 + Vector((0.0, 0.0, -0.3)),
+        start + out * 1.3 + Vector((0.0, 0.0, -0.45)),
         base - out * 1.9 + Vector((0.0, 0.0, 1.3)),
         base - out * 0.4 + Vector((0.0, 0.0, 0.5)),
         base + side * 0.5 - out * 0.45 + Vector((0.0, 0.0, 1.4)),
@@ -523,25 +534,39 @@ def tail_path():
     radii = []
     for i in range(count):
         u = i / (count - 1)
-        # Fat where it leaves the coil, slim by the time it touches down —
-        # the reach point is only 0.3 m inside the bounding radius.
+        # A shade fatter than the coil where the two overlap (so the coil's
+        # cap is inside the tail, not flush with its skin), then slim by the
+        # time it touches down — the reach point is only 0.3 m inside the
+        # bounding radius.
         w = (1.0 - u) ** 3.2
-        radii.append(start_r * w + TAIL_TIP_R * (1.0 - w))
+        radii.append((start_r + 0.03) * w + TAIL_TIP_R * (1.0 - w))
     return points, radii, base, out, side
 
 
 def build_tail(coll):
     points, radii, base, out, side = tail_path()
     tv, tf = sweep_varying(points, radii, TAIL_SIDES)
-    tail = Part("rh-tail").add(tv, tf).emit(coll)
 
     tip = points[-1]
-    bv, bf = ellipsoid(BELL_R, BELL_R, BELL_R * 0.9, subdivisions=3)
+    bv, bf = ellipsoid(BELL_R, BELL_R, BELL_R * 0.9, subdivisions=2)
     bell = Part("rh-tail-bell").add(bv, bf, Matrix.Translation(tip + Vector((0.0, 0.0, BELL_R * 0.55)))).emit(coll)
 
-    # The sign plank hangs beside the tail's lower bend, facing −Y like the
-    # door. It overlaps the tail tube so it reads as hung from it.
-    sign_centre = base + Vector((0.0, 0.0, SIGN_Z)) - out * 0.55
+    # The sign plank hangs beside the tail on the door's side, facing −Y like
+    # the door, held up by a tendril of tail that curls over its top edge.
+    sign_centre = base - side * 1.3 - out * 0.35 + Vector((0.0, 0.0, SIGN_Z))
+    hold_from = min(points, key=lambda q: (q - (sign_centre + Vector((0.0, 0.0, 1.0)))).length)
+    tendril = catmull_rom(
+        [
+            hold_from,
+            hold_from - side * 0.5 + Vector((0.0, 0.0, 0.25)),
+            sign_centre + Vector((0.0, 0.0, SIGN_H * 0.5 + 0.35)),
+            sign_centre + Vector((0.0, 0.0, SIGN_H * 0.5 - 0.3)),
+        ],
+        5,
+    )
+    tail_part = Part("rh-tail").add(tv, tf)
+    tail_part.add(*sweep_varying(tendril, [0.16] * len(tendril), 6))
+    tail = tail_part.emit(coll)
     sv, sf = box(SIGN_W, SIGN_D, SIGN_H)
     sign = Part("rh-sign").add(sv, sf, Matrix.Translation(sign_centre)).emit(coll, smooth=False)
     paint_planar_uvs(
