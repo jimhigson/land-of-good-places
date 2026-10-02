@@ -46,3 +46,9 @@ Controls first, sweep 0..15, fix generators, add to PARK_ACCEPTANCE, re-record `
 - Base procgen at 040ebeb8: 1962/1962 (procgen-base3.json).
 - accept8 was hit by another agent's pkill (10 seeds no verdict); accept8b found seed 5 stuck at decision zero due to the all-plots refusal → restricted to buildings. accept9 (full, fresh, local --write) running in frozen @cc1bbcf7.
 - NEVER pgrep -f / pkill -f: kill by PID after lsof cwd check.
+
+## DONE — measurements (3 Oct)
+- Branch head 87e2f6a9 (rebased on wip/sb-merge 26bbb045, clean, tsc + typecheck:test clean). Measured at cc1bbcf7 on base 040ebeb8 with a LOCAL (uncommitted) table: accept:parks 0-15 --fresh: 16/16, 54 attempts (mean 3.38, max 9); of 38 rejected attempts the door invariant rejected 0 and the bridge-side 2, never as the sole reason. Table: 0:1 1:0 2:0 3:8 4:3 5:5 6:1 7:0 8:7 9:3 10:0 11:0 12:0 13:8 14:1 15:1.
+- test:procgen 1993/1994 (+32 new tests all pass vs base 1962/1962); the 1 is scatterDecoupling timing out under load (255 s vs 240 s) — passes 5/5 alone (209 s). Diff tool + planted control in scratchpad procgen-diff.py.
+- check:park 0..15: 16/16 exit 0. Determinism: park-identity twice on seeds 0,5,11 byte-identical. check:coplanar: 1 NEW seam on seed 15 (restart 1): terrain|bridge wallTop 0.181 m² at 8 mm — bridge geometry of a park base never selected; base 186 seams all baselined.
+- Lead merges into wip/sb-merge himself; no PR; he re-records the table after all merges.
