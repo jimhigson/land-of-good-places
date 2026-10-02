@@ -158,6 +158,17 @@ measured, not assumed (`pnpm run accept:parks -- <seeds>`). `MAX_RESTARTS`
 (200) is a bug-catcher like the driver's `MAX_UNWINDS`: hitting it throws the
 whole log.
 
+**Each attempt is bounded too, not merely finite.** The driver holds every
+solve to a `SolveBudget` (`src/boot/parkSolve.ts`, "Termination"): attempts
+per decision, unwinds per feature (past which that feature's refusals go
+straight to decision zero), decision-zero redraws per feature past that, and
+global unwind and turn caps. Running one out ends the attempt as a
+`ParkSolveExhausted` — a failed build, recorded in the attempt's
+`backtracking.{plan,world}.exhausted` — and the loop above starts the next
+restart. Before the budgets, a refusal no redraw could answer walked the
+product of every decision's supply: with the bar-support mutation seed 15
+restart 0 ran 480 s without nearing an end (`test/railRaceRoadBounded.test.ts`).
+
 **What restarts must never be used for**: a measure that fails because of a
 geometry or instrument bug fails on some fraction of every park. A search
 would route around it by rejecting the parks where it shows, and ship the bug
