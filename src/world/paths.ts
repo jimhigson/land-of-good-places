@@ -6070,6 +6070,33 @@ export function distanceToBuiltSolids(x: number, z: number): number {
 }
 
 /**
+ * **Is (x, z) inside the railway's fences where nothing carries a path?** The
+ * corridor is the train's own — {@link FENCE_OFFSET} either side of the rail
+ * centre line, the number the fences are built from — less the ground a
+ * planned bridge stands on (its deck and ramps carry the crossing) and a
+ * station platform's open side, where the fence has its gap (`STATION_GAP`
+ * either way along the loop) and the paths arrive. Seed 10 (2 Oct 2026):
+ * `connector-stall.facePaint-station-0` ran up the track inside the fences,
+ * ~14 m² nobody can walk (`noDrawnPavingInTheRailCorridor`).
+ */
+export function inRailCorridor(x: number, z: number): boolean {
+  const info = railInfoAt(x, z);
+  if (info.dist >= FENCE_OFFSET) return false;
+  for (const site of CROSSING_SITES) {
+    const bounds = siteFootprint(site, RAMP_SCREEN_MARGIN);
+    const { along, across } = siteFrame(site, x, z);
+    if (along >= bounds.alongMin && along <= bounds.alongMax && Math.abs(across) <= bounds.acrossHalf) return false;
+  }
+  const route = TRAIN_PLAN.route;
+  const here = route.distanceNear(x, z);
+  for (const station of TRAIN_PLAN.stations) {
+    const gap = Math.abs(((here - station.distance + route.length * 1.5) % route.length) - route.length / 2);
+    if (gap <= STATION_GAP && railInfoAt(station.standX, station.standZ).side === info.side) return false;
+  }
+  return true;
+}
+
+/**
  * How far a drawn cross-section's sampled points must keep from a built solid:
  * a hand's breadth for what five points across a 0.8 m station cannot see —
  * the kerb's mitre at a corner and the ribbon between stations (seeds 4 and 6,
@@ -6079,7 +6106,8 @@ export const BUILT_SOLID_MARGIN = 0.25;
 
 /**
  * **A route whose drawn paving keeps off every built solid**
- * ({@link distanceToBuiltSolids}). Asked of the curve that will be drawn, one
+ * ({@link distanceToBuiltSolids}) and out of the railway's fences
+ * ({@link inRailCorridor}). Asked of the curve that will be drawn, one
  * cross-section per sample: the centre and four points out to half the width
  * plus the kerb either side, square to the curve. A route arriving square at a
  * stall's counter, ending 1.45 m from it, lays nothing under it; one arriving
@@ -6104,7 +6132,9 @@ function routeClearsSolids(points: readonly (readonly [number, number])[], width
     const nx = t > 1e-9 ? -tz / t : 0;
     const nz = t > 1e-9 ? tx / t : 0;
     for (const k of [0, -1, -0.5, 0.5, 1]) {
-      if (distanceToBuiltSolids(here.x + nx * reach * k, here.z + nz * reach * k) < BUILT_SOLID_MARGIN) return false;
+      const px = here.x + nx * reach * k;
+      const pz = here.z + nz * reach * k;
+      if (distanceToBuiltSolids(px, pz) < BUILT_SOLID_MARGIN || inRailCorridor(px, pz)) return false;
     }
   }
   return true;

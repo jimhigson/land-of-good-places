@@ -5,9 +5,11 @@ import { Mesh, BufferAttribute, Float32BufferAttribute } from 'three';
  * it must not be. CTRL_MODE=booth: moved from the first stall's stand point
  * onto its booth. CTRL_MODE=outside: from the paving nearest the boundary,
  * moved 4 m out past it. CTRL_MODE=castle: from the castle's doormat, 6 m in
- * under its front wall. The copy keeps its owners, so nothing is exempt.
- * CTRL_RADIUS (default 3 m) sets the patch: 0.6 at a booth puts it wholly in
- * the booth's hollow middle, touching none of its four wall colliders.
+ * under its front wall. CTRL_MODE=rail: onto the rail centre line where the
+ * loop is furthest from every station and crossing. The copy keeps its owners,
+ * so nothing is exempt. CTRL_RADIUS (default 3 m) sets the patch: 0.6 at a
+ * booth puts it wholly in the booth's hollow middle, touching none of its four
+ * wall colliders.
  */
 export default function (facts: any): void {
   const mode = process.env['CTRL_MODE'] ?? 'booth';
@@ -16,7 +18,31 @@ export default function (facts: any): void {
   facts.world.garden.group.traverse((o: any) => { if (o instanceof Mesh && (o.name === 'path-surface' || o.name === 'path-kerb')) meshes.push(o); });
   let from: [number, number];
   let shift: [number, number];
-  if (mode === 'castle') {
+  if (mode === 'rail') {
+    // Onto the rail centre line at the point of the loop furthest (along it)
+    // from every station and every bridge — inside the fences, nothing carrying it.
+    const route = facts.world.train.route;
+    const marks = [
+      ...facts.world.train.stations.map((st: any) => st.distance),
+      ...facts.world.train.crossings.map((c: any) => route.distanceNear(c.x, c.z)),
+    ];
+    let bestAlong = 0;
+    let bestGap = -1;
+    for (let a = 0; a < route.length; a += 1) {
+      const gap = Math.min(...marks.map((m: number) => Math.abs(((a - m + route.length * 1.5) % route.length) - route.length / 2)));
+      if (gap > bestGap) { bestGap = gap; bestAlong = a; }
+    }
+    const at = { x: 0, z: 0 } as any;
+    route.flatPointAt(bestAlong, at);
+    let best = Infinity;
+    from = [0, 0];
+    const p = meshes[0].geometry.getAttribute('position');
+    for (let i = 0; i < p.count; i++) {
+      const d = Math.hypot(p.getX(i) - at.x, p.getZ(i) - at.z);
+      if (d < best) { best = d; from = [p.getX(i), p.getZ(i)]; }
+    }
+    shift = [at.x - from[0], at.z - from[1]];
+  } else if (mode === 'castle') {
     // From the castle's doormat, 6 m in under its front wall.
     const door = facts.entrances.find((e: any) => e.id === 'anchor:building');
     from = [door.x, door.z];

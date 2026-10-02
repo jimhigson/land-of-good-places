@@ -68,6 +68,7 @@ import {
   DISABLE_LEGIBILITY_SCREEN,
   BUILT_SOLID_MARGIN,
   distanceToBuiltSolids,
+  inRailCorridor,
   STREET_PITCH,
   drawnEdgeOf,
   pathGraphSearch,
@@ -701,7 +702,7 @@ function builders(): readonly FeatureBuilder[] {
       const under = drawnSampleUnderASolid(drawn);
       if (under) {
         return refusal(
-          `paths: drawn run ${under.run} lays paving under a booth or a building at ` +
+          `paths: drawn run ${under.run} lays paving under a booth, a building or inside the railway's fences at ` +
             `(${under.x.toFixed(1)}, ${under.z.toFixed(1)})`,
           { consumed: ['layout'] },
         );
@@ -965,7 +966,9 @@ function drawnSampleUnderASolid(drawn: readonly PathSample[]): PathSample | null
     if (t < 1e-9) continue;
     const reach = here.halfWidth + PATH_KERB_OVERHANG;
     for (const k of [0, -1, -0.5, 0.5, 1]) {
-      if (distanceToBuiltSolids(here.x - (tz / t) * reach * k, here.z + (tx / t) * reach * k) < BUILT_SOLID_MARGIN) return here;
+      const px = here.x - (tz / t) * reach * k;
+      const pz = here.z + (tx / t) * reach * k;
+      if (distanceToBuiltSolids(px, pz) < BUILT_SOLID_MARGIN || inRailCorridor(px, pz)) return here;
     }
   }
   return null;
