@@ -354,11 +354,13 @@ export const PIER_POSTS: readonly LocalPoint[] = [
   { x: REPTILE_WEST_CASE_X, z: 1.2 },
 ];
 
-/** The stall at (2, 13) facing +X+Z, and where she stands to buy. */
-export const STALL_POSITION: LocalPoint = { x: 2, z: 13 };
+/**
+ * The stall in the foyer facing +X+Z (the camera), and where she stands to
+ * buy: 2.6 m out along its facing, a stride clear of the counter's front.
+ */
+export const STALL_POSITION: LocalPoint = { x: 1.2, z: 13.4 };
 export const STALL_FACING = 45;
-export const STALL_STAND: StandSpot = { x: 3.6, z: 14.6, facing: 225 };
-export const STALL_KEEPER: LocalPoint = { x: 1.3, z: 12.3 };
+export const STALL_STAND: StandSpot = { x: 3.04, z: 15.24, facing: 225 };
 
 /** The Noodle-o-meter in the foyer, facing the camera, and where she stands to be measured. */
 export const METER_POSITION: LocalPoint = { x: 10.5, z: 13.5 };
@@ -375,11 +377,11 @@ export const METER_STAND: StandSpot = { x: 11.9, z: 14.9, facing: 225 };
 export const HIDDEN_BABY_SPOTS: readonly StandSpot[] = [
   { x: -13, z: 0, facing: 180 }, // the Hollow Log's knothole, on its north wall
   { x: -19.3, z: 11, facing: 0 }, // the Grotto pool
-  { x: -1, z: 14.5, facing: 160 }, // the foyer's tall-banana pot
+  { x: -1.6, z: 15.1, facing: 336 }, // the foyer's tall-banana pot
 ];
 
-/** The foyer's tall-banana pot — hidden baby #3's hiding place. */
-export const FOYER_POT: LocalPoint = { x: -2, z: 16.3 };
+/** The foyer's tall-banana pot, in the south-west corner of the foyer — hidden baby #3's hiding place. */
+export const FOYER_POT: LocalPoint = { x: -2.4, z: 16.9 };
 export const FOYER_POT_RADIUS = 0.6;
 
 /**
@@ -571,8 +573,8 @@ export const PATHS: readonly PathSpec[] = [
     points: [
       { x: REPTILE_ARRIVAL_X, z: REPTILE_ARRIVAL_Z },
       { x: 6, z: 12.5 },
-      { x: -3, z: 12.5 },
-      { x: 16, z: 12.5 },
+      { x: -1.5, z: 12.5 },
+      { x: 14, z: 12.5 },
     ],
   },
   {
@@ -600,13 +602,13 @@ export const PATHS: readonly PathSpec[] = [
   { id: 'lagoonWalk', width: 3.6, points: [{ x: 5.6, z: 0 }, { x: 7.6, z: 1.8 }, { x: 20, z: 1.8 }, { x: 21.9, z: 1.8 }] },
   { id: 'westStrip', width: 3.65, points: [{ x: -19.3, z: -11 }, { x: -19.3, z: 0 }, { x: -19.3, z: 10.7 }] },
   { id: 'nwLink', width: 3, points: [{ x: -19.3, z: -11 }, { x: -16, z: -13 }] },
-  { id: 'northStrip', width: 4.05, points: [{ x: -16, z: -13 }, { x: 0, z: -13 }, { x: 15, z: -13 }] },
-  { id: 'neClearing', width: 5.7, points: [{ x: 15, z: -13 }, { x: 15, z: -8.85 }, { x: 21.9, z: -8.85 }] },
+  { id: 'northStrip', width: 4.05, points: [{ x: -16, z: -13 }, { x: 0, z: -13 }, { x: 13.5, z: -13 }] },
+  { id: 'neClearing', width: 5.7, points: [{ x: 13.5, z: -13 }, { x: 15, z: -8.85 }, { x: 21.9, z: -8.85 }] },
   { id: 'eastStrip', width: 3.75, points: [{ x: 21.9, z: -8.85 }, { x: 21.9, z: 1.8 }, { x: 21.9, z: 6.35 }] },
   {
     id: 'seChannel',
     width: 3.4,
-    points: [{ x: 21.9, z: 6.35 }, { x: 21.9, z: 10.8 }, { x: 16, z: 10.8 }, { x: 16, z: 12.5 }],
+    points: [{ x: 21.9, z: 6.35 }, { x: 21.9, z: 10.8 }, { x: 14, z: 10.8 }, { x: 14, z: 12.5 }],
   },
-  { id: 'swWalk', width: 3.25, points: [{ x: -19.3, z: 10.7 }, { x: -3, z: 10.7 }, { x: -3, z: 12.5 }] },
+  { id: 'swWalk', width: 3.25, points: [{ x: -19.3, z: 10.7 }, { x: -3, z: 10.7 }, { x: -1.5, z: 12.5 }] },
 ];

@@ -152,7 +152,10 @@ export class Shopping implements GameSystem {
    */
   openShopById(unitId: string): void {
     if (this.uiOpen || this.player.riding) return;
-    const stand = this.world.building.shops.stands.find((candidate) => candidate.id === unitId);
+    // Every stand in the game — the castle's and the Reptile House's — so a
+    // chip wired through `InteriorControls.openShop` in either building opens
+    // its panel rather than silently finding nothing.
+    const stand = this.world.shopStands().find((candidate) => candidate.id === unitId);
     if (stand) this.openShop(stand);
   }
 

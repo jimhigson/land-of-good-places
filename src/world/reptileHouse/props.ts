@@ -1,4 +1,4 @@
-import type { CollisionWorld } from '../Collision';
+import type { CollisionWorld, WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import { Plate } from '../hotel/place';
 import { JUMP_APEX_HEIGHT } from '../../entities/Player';
@@ -78,8 +78,19 @@ export interface PropOptions {
 
 export class ReptileProps {
   readonly violations: string[] = [];
-  /** Every registered solid, local, for the checks to walk. */
-  readonly solids: { what: string; shape: 'disc' | 'wall'; top: PropTop; points: LocalPoint[]; radius: number }[] = [];
+  /**
+   * Every registered solid, local, for the checks to walk — with the
+   * collision world's own handle, so a check can take one out deliberately
+   * and watch itself go red.
+   */
+  readonly solids: {
+    what: string;
+    shape: 'disc' | 'wall';
+    top: PropTop;
+    points: LocalPoint[];
+    radius: number;
+    handle: number | WallCollider;
+  }[] = [];
 
   private readonly collision: CollisionWorld;
   private readonly surfaces: WalkSurfaces;
@@ -100,13 +111,14 @@ export class ReptileProps {
     this.checkKeepOuts(what, [{ x, z }], radius);
     const worldX = this.originX + x;
     const worldZ = this.originZ + z;
+    let handle: number;
     if (top === 'wall') {
-      this.collision.addCircle(worldX, worldZ, radius);
+      handle = this.collision.addCircle(worldX, worldZ, radius);
     } else {
-      this.collision.addCircle(worldX, worldZ, radius, top, false, true);
+      handle = this.collision.addCircle(worldX, worldZ, radius, top, false, true);
       this.standable(top, worldX - radius * 0.75, worldX + radius * 0.75, worldZ - radius * 0.75, worldZ + radius * 0.75, options);
     }
-    this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius });
+    this.solids.push({ what, shape: 'disc', top, points: [{ x, z }], radius, handle });
   }
 
   /** A filled capsule between two hall-local points. `half` is the half-thickness. */
@@ -116,10 +128,11 @@ export class ReptileProps {
     const az = this.originZ + a.z;
     const bx = this.originX + b.x;
     const bz = this.originZ + b.z;
+    let handle: WallCollider;
     if (top === 'wall') {
-      this.collision.addWall(ax, az, bx, bz, half);
+      handle = this.collision.addWall(ax, az, bx, bz, half);
     } else {
-      this.collision.addWall(ax, az, bx, bz, half, top, false, true);
+      handle = this.collision.addWall(ax, az, bx, bz, half, top, false, true);
       // The plate is the capsule's axis-aligned box — right for the axis-aligned
       // logs this building has, conservative otherwise.
       this.standable(
@@ -131,7 +144,7 @@ export class ReptileProps {
         options,
       );
     }
-    this.solids.push({ what, shape: 'wall', top, points: [a, b], radius: half });
+    this.solids.push({ what, shape: 'wall', top, points: [a, b], radius: half, handle });
   }
 
   /** Throws with every solid found inside a keep-out — call once, after everything is placed. */

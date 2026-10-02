@@ -259,6 +259,8 @@ export class Game {
     // A save written inside the hotel restores into its room, not the plaza:
     // rooms are true spaces, so being there is a position plus this adoption.
     this.world.hotel.adoptRestoredPlayer();
+    // …and the Reptile House's hall and forecourt, for the same reason.
+    this.world.reptileHouse.adoptRestoredPlayer();
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -984,6 +986,11 @@ export class Game {
       // Not a ride either: the guest suite, for its own deep link — see
       // `Hotel.requestEnterSuite`.
       if (stallId === 'hotelSuite') return this.world.hotel.requestEnterSuite();
+      // Not a ride either: the Reptile House's hall (`/reptile-house`), and
+      // its front door from outside (`/reptile-house-door`) — on the forecourt
+      // while the park has no plot for the building.
+      if (stallId === 'reptileHouse') return this.world.reptileHouse.requestEnter();
+      if (stallId === 'reptileHouseDoor') return this.world.reptileHouse.requestEnterDoor();
       return false;
     };
 
@@ -1526,6 +1533,16 @@ export class Game {
    */
   enterCastleSpawn(deck: number, at?: { readonly x: number; readonly z: number }): boolean {
     return this.world.building.enterCastleSpawn(deck, at);
+  }
+
+  /**
+   * `/reptile-house?at=x,z&facing=deg` — inside the Reptile House's hall, on
+   * that hall-local spot, on the first frame. Same shape as
+   * {@link enterCastleSpawn}: being inside is a space, so only the building
+   * can put her in one.
+   */
+  enterReptileSpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
+    return this.world.reptileHouse.requestEnter(at);
   }
 
   start(): void {

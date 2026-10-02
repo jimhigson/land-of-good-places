@@ -170,6 +170,10 @@ export interface SnakeOptions {
   readonly headLookAt?: Vector3;
   /** Share this pool; omitted, the snake makes a private one under its own body. */
   readonly pool?: SnakeSegmentPool;
+  /** No head — a tail coming up out of the ground (Noodle's, in the nursery). */
+  readonly headless?: true;
+  /** The tail end's radius as a fraction of `radius`; 1 (the default) is a uniform body. */
+  readonly taper?: number;
 }
 
 export interface SnakeHandle extends CreatureHandle {
@@ -221,11 +225,14 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
   const headMaterial = headMesh.material as MeshToonMaterial;
   headMaterial.map = faces.neutral;
   headMaterial.needsUpdate = true;
-  head.add(headMesh);
   const tongue = reptileCreatureMesh('rr-snake-tongue');
   tongue.scale.set(1, 1, 0.001);
-  headMesh.add(tongue);
+  if (!options.headless) {
+    head.add(headMesh);
+    headMesh.add(tongue);
+  }
   body.add(head);
+  const taper = options.taper ?? 1;
 
   const path = new CatmullRomCurve3(
     (options.path ?? restingS(options.length, radius)).map((p) => p.clone()),
@@ -290,7 +297,8 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
       SCRATCH_NORMAL.normalize();
       const offset = amplitude * Math.sin(k * s - wave) * (i === 0 ? 0.35 : 1);
       SCRATCH_POSITION.addScaledVector(SCRATCH_NORMAL, offset);
-      SCRATCH_POSITION.y += radius;
+      const r = radius * (1 - (1 - taper) * (i / Math.max(1, count - 1)));
+      SCRATCH_POSITION.y += r;
       if (i === 0) {
         head.position.copy(SCRATCH_POSITION);
         if (options.headLookAt) SCRATCH_LOOK.copy(options.headLookAt);
@@ -298,7 +306,7 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
         head.lookAt(SCRATCH_LOOK.applyMatrix4(body.matrixWorld));
       }
       SCRATCH_QUATERNION.setFromUnitVectors(FORWARD, SCRATCH_TANGENT);
-      SCRATCH_SCALE.set(radius, radius * 0.86, radius * 1.3);
+      SCRATCH_SCALE.set(r, r * 0.86, r * 1.3);
       SCRATCH_MATRIX.compose(SCRATCH_POSITION, SCRATCH_QUATERNION, SCRATCH_SCALE);
       if (!privatePool) SCRATCH_MATRIX.premultiply(SCRATCH_TO_POOL);
       pool.setMatrix(first + i, SCRATCH_MATRIX);

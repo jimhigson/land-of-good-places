@@ -48,6 +48,13 @@ import {
 } from '../src/world/tapSpacing.ts';
 import { zoneVerb, type InteractZone } from '../src/world/interact.ts';
 import { hotelDoorBands, ROOMS } from '../src/world/hotel/layout.ts';
+import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE } from '../src/world/spaces.ts';
+import {
+  REPTILE_FORECOURT_ORIGIN_X,
+  REPTILE_FORECOURT_ORIGIN_Z,
+  REPTILE_HOUSE_ORIGIN_X,
+  REPTILE_HOUSE_ORIGIN_Z,
+} from '../src/world/reptileHouse/layout.ts';
 
 const problems: string[] = [];
 const warnings: string[] = [];
@@ -110,6 +117,20 @@ for (const room of ROOMS) {
     zones: hotel.interactZones(),
     bands: hotelDoorBands(room),
   });
+}
+
+// The Reptile House's hall and its forecourt, the same way: its zones are
+// gated on where the player is, and each space has one door band.
+{
+  const { reptileHouse } = world;
+  reptileHouse.attachPlayer(outsidePlayer as never);
+  const [entry, exit] = reptileHouse.doorBands();
+  outsidePlayer.position.set(REPTILE_HOUSE_ORIGIN_X, 0, REPTILE_HOUSE_ORIGIN_Z);
+  reptileHouse.adoptRestoredPlayer();
+  spaces.push({ name: SPACE_REPTILE_HOUSE, zones: reptileHouse.interactZones(), bands: exit ? [exit] : [] });
+  outsidePlayer.position.set(REPTILE_FORECOURT_ORIGIN_X, 0, REPTILE_FORECOURT_ORIGIN_Z + 15);
+  reptileHouse.adoptRestoredPlayer();
+  spaces.push({ name: SPACE_REPTILE_FORECOURT, zones: reptileHouse.interactZones(), bands: entry ? [entry] : [] });
 }
 
 let pairsChecked = 0;

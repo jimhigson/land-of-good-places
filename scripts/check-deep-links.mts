@@ -47,6 +47,15 @@
 import { tapEscapeWithinOneFrame } from './lib/keys.mts';
 import { chromium, type Page } from 'playwright-core';
 import { worldX, worldZ } from '../src/world/building/layout.ts';
+import {
+  REPTILE_DOOR_BAND_OUTER,
+  REPTILE_FORECOURT_ORIGIN_X,
+  REPTILE_FORECOURT_ORIGIN_Z,
+  REPTILE_HOUSE_ORIGIN_X,
+  REPTILE_HOUSE_ORIGIN_Z,
+  REPTILE_LOG_CENTRE_X,
+} from '../src/world/reptileHouse/layout.ts';
+import { SPACE_REPTILE_FORECOURT, spaceAt } from '../src/world/spaces.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
@@ -169,7 +178,77 @@ const GAME_READY_TIMEOUT_MS = 120000;
  */
 const AUTOSAVE_TIMEOUT_MS = 60000;
 
+/** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
+const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
+
 const CHECKS: DeepLinkCheck[] = [
+  {
+    // The Reptile House's hall, at a spot: `inside` must flip and the player
+    // must be at the asked-for hall-local point, converted back here from the
+    // same constants the building uses — a conversion that cannot pass by
+    // agreeing with itself, exactly as `/castle?at=` below.
+    path: `/reptile-house?at=${REPTILE_AT.x},${REPTILE_AT.z}&facing=90`,
+    assert: async (page) => {
+      const want = { x: REPTILE_HOUSE_ORIGIN_X + REPTILE_AT.x, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_AT.z };
+      await page
+        .waitForFunction(
+          () => ((window as unknown as { game?: any }).game)?.world?.reptileHouse?.playerIsInside === true,
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true) return { ok: false, detail: `the Reptile House was not entered (inside=${s.inside})` };
+      if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
+      const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
+      if (off > CASTLE_TOLERANCE) {
+        return { ok: false, detail: `asked to stand at hall (${REPTILE_AT.x}, ${REPTILE_AT.z}) = world (${want.x}, ${want.z}), but the player is at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)}) — ${off.toFixed(1)} m off` };
+      }
+      return { ok: true, detail: `inside the Reptile House, ${off.toFixed(2)} m from the asked-for spot` };
+    },
+  },
+  {
+    // Outside the Reptile House's door, on the forecourt: not inside, on the
+    // forecourt space, a stride from the door band.
+    path: '/reptile-house-door',
+    assert: async (page) => {
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            return !!g && g.world?.reptileHouse?.playerIsInside === false && !!g.player?.position && g.player.position.z < -800;
+          },
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
+      const space = spaceAt(s.playerPos.x, s.playerPos.z);
+      if (space !== SPACE_REPTILE_FORECOURT || s.inside !== false) {
+        return { ok: false, detail: `expected to stand on the forecourt outside the door; she is in '${space}' (inside=${s.inside}) at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)})` };
+      }
+      const off = Math.hypot(s.playerPos.x - REPTILE_FORECOURT_ORIGIN_X, s.playerPos.z - (REPTILE_FORECOURT_ORIGIN_Z + REPTILE_DOOR_BAND_OUTER + 1.2));
+      if (off > CASTLE_TOLERANCE) return { ok: false, detail: `on the forecourt but ${off.toFixed(1)} m from the doormat` };
+      return { ok: true, detail: `on the forecourt doormat, ${off.toFixed(2)} m from the door band's outer edge` };
+    },
+  },
   {
     // **This target exists because of a bug it would have caught.** `at` is in
     // the interior's own metres and `teleportTo` takes world coordinates, so

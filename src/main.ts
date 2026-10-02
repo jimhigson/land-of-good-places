@@ -202,6 +202,11 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // world ride, so this falls to `MiniGameHost.open` the same way `/ferris`
   // does.
   '/spooky-house': 'spookyHouse',
+  // The Reptile House's front door from outside (issue: Jim, 2 Oct 2026). While
+  // the park has no plot for the building it stands on its own forecourt, and
+  // this drops her on the doormat there — `ReptileHouse.requestEnterDoor`.
+  // The hall itself is `/reptile-house`, its own `DeepLink` kind below.
+  '/reptile-house-door': 'reptileHouseDoor',
 };
 
 /**
@@ -305,6 +310,19 @@ type DeepLink =
        * for the reason above: the space has to be entered first.
        */
       readonly at?: { readonly x: number; readonly z: number };
+    }
+  /**
+   * `/reptile-house`, `/reptile-house?at=x,z&facing=deg` — inside the Reptile
+   * House's hall, at that hall-local spot (#reptile-house). Its own kind for
+   * the reason `/castle` is: the hall is a *space* 600 m from the park, and
+   * `/spawn?pos=` would drop her at the coordinate with the hall switched off.
+   * `at` is in the hall's own metres (`world/reptileHouse/layout.ts`), so
+   * `?at=4.4,2.4&facing=267` is Noodle's stand spot and `?at=-13,0` is inside
+   * the Hollow Log.
+   */
+  | {
+      readonly kind: 'reptileHouse';
+      readonly at?: { readonly x: number; readonly z: number; readonly facing?: number };
     };
 
 /**
@@ -321,7 +339,29 @@ function parseDeepLink(pathname: string, search: string): DeepLink | null {
   if (pathname === '/bridge') return { kind: 'bridge' };
   if (pathname === '/arrive') return parseArriveLink(search);
   if (pathname === '/castle') return parseCastleLink(search);
+  if (pathname === '/reptile-house') return parseReptileLink(search);
   return null;
+}
+
+/** `/reptile-house?at=x,z&facing=deg` — see the `DeepLink` kind. Built the way `parseCastleLink` is. */
+function parseReptileLink(search: string): DeepLink {
+  const params = new URLSearchParams(search);
+  const raw = params.get('at');
+  const at = parseSpawnPoint(raw);
+  const facingRaw = params.get('facing');
+  const link: { kind: 'reptileHouse'; at?: { x: number; z: number; facing?: number } } = { kind: 'reptileHouse' };
+  if (at) {
+    const spot: { x: number; z: number; facing?: number } = { x: at.x, z: at.z };
+    const facing = facingRaw === null ? Number.NaN : Number(facingRaw);
+    if (Number.isFinite(facing)) spot.facing = facing;
+    link.at = spot;
+  } else if (raw !== null) {
+    console.warn(
+      `Land of Good Places: /reptile-house could not read at=${raw} — expected "x,z" in the ` +
+        "hall's own metres. Standing at the arrival instead.",
+    );
+  }
+  return link;
 }
 
 /**
@@ -1220,6 +1260,16 @@ async function finishLaunch(
               'plan built none, so there is nothing to stand on. This is the failure issue #339 ' +
               'was about; check world.train.bridges and test/procgen/invariants.ts\'s ' +
               '"every crossing on a site the planner proved bridgeable still carries its bridge".',
+          );
+        }
+        break;
+      case 'reptileHouse':
+        // Fails loud, like `/castle`: a hall that will not open is the thing
+        // this link exists to check.
+        if (!game.enterReptileSpawn(deepLink.at)) {
+          console.error(
+            'Land of Good Places: /reptile-house did not enter the Reptile House — see ' +
+              'ReptileHouse.requestEnter (she may be riding, or a change of space is already running).',
           );
         }
         break;

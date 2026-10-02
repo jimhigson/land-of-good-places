@@ -5,6 +5,8 @@ import { createRipika, WILD_RIPIKA_PALETTE } from '../../../art/models/ripika';
 import { createBiscuit } from '../../../art/models/biscuit';
 import { createBalloon } from '../../../art/models/balloons';
 import { createHat } from '../../../art/models/hats';
+import { createNoodlePlush, createPetSnake } from '../../../art/models/snake';
+import { createJellySnakes, createSnakeBalloon } from '../../../art/models/snakeToys';
 import { createJetpack } from '../../../art/models/jetpack';
 import { createPet, PET_KINDS, PUFF_DISPLAY_NAME, type PetKind } from '../../../art/models/pets';
 import {
@@ -83,7 +85,7 @@ export interface ShopItem {
    * `Record<ShopId, …>` tables in `fitouts.ts`/`Shops.ts` never have to know
    * about a shop that doesn't physically exist.
    */
-  readonly shopId: ShopId | 'spookyHouse' | 'keychainStall' | 'roofGarden';
+  readonly shopId: ShopId | 'spookyHouse' | 'keychainStall' | 'roofGarden' | 'reptileStall' | 'reptileNursery';
   readonly displayName: string;
   /** One cheerful line under the name in the purchase panel. */
   readonly blurb: string;
@@ -108,6 +110,116 @@ const ICE_SCOOPS = {
   minty: [PALETTE.markerMint],
   rainbow: [PALETTE.markerPink, PALETTE.flowerYellow, PALETTE.markerSky],
 } as const;
+
+/**
+ * **Scales & Tails and the Nursery** — the Reptile House's stall and its
+ * adoption stand (`world/reptileHouse/stall.ts`). Neither is a `ShopId`:
+ * they are not castle units, so the exhaustive castle tables never hear of
+ * them, exactly as `'keychainStall'` and `'roofGarden'` are not. The three
+ * pets are the same `createPetSnake` the nursery's hatchlings are made of —
+ * **the pet she adopts is the pet she saw** — and `kind: 'pet'` is what walks
+ * them in the parade and seats them in the Cute-o-dex.
+ */
+export const REPTILE_ITEMS: readonly ShopItem[] = [
+  {
+    id: 'toy.noodlePlush',
+    shopId: 'reptileStall',
+    displayName: 'Noodle Plush',
+    blurb: 'Soft, stripy and very huggable.',
+    icon: '🧸',
+    price: 30,
+    kind: 'toy',
+    category: 'toy',
+    carryable: true,
+    model: () => createNoodlePlush(),
+    heldScale: 0.4,
+    rare: false,
+  },
+  {
+    id: 'hat.snake',
+    shopId: 'reptileStall',
+    displayName: 'Snake Hat',
+    blurb: 'A snake that sits on your head and smiles.',
+    icon: '🐍',
+    price: 35,
+    kind: 'hat',
+    category: 'hat',
+    carryable: true,
+    model: () => createHat('snake'),
+    heldScale: 0.7,
+    rare: false,
+  },
+  {
+    id: 'balloon.snake',
+    shopId: 'reptileStall',
+    displayName: 'Snake Balloon',
+    blurb: 'A long wobbly snake on a string.',
+    icon: '🎈',
+    price: 10,
+    kind: 'balloon',
+    category: 'balloon',
+    carryable: true,
+    model: () => createSnakeBalloon(),
+    heldScale: 0.5,
+    rare: false,
+  },
+  {
+    id: 'candy.jellySnakes',
+    shopId: 'reptileStall',
+    displayName: 'Jelly Snakes',
+    blurb: 'A bag of three, best eaten slowly.',
+    icon: '🍬',
+    price: 10,
+    kind: 'treat',
+    category: 'candyfloss',
+    carryable: true,
+    model: () => createJellySnakes(),
+    heldScale: 0.9,
+    rare: false,
+  },
+  {
+    id: 'pet.snakeMint',
+    shopId: 'reptileNursery',
+    displayName: 'Minty Snake',
+    blurb: 'A wiggly friend who follows you everywhere.',
+    icon: '🐍',
+    price: 30,
+    kind: 'pet',
+    category: 'pet',
+    carryable: true,
+    model: () => createPetSnake('mint'),
+    heldScale: 0.45,
+    rare: false,
+  },
+  {
+    id: 'pet.snakeCoral',
+    shopId: 'reptileNursery',
+    displayName: 'Coral Snake',
+    blurb: 'A wiggly friend who follows you everywhere.',
+    icon: '🐍',
+    price: 30,
+    kind: 'pet',
+    category: 'pet',
+    carryable: true,
+    model: () => createPetSnake('coral'),
+    heldScale: 0.45,
+    rare: false,
+  },
+  {
+    id: 'pet.snakeRainbow',
+    shopId: 'reptileNursery',
+    displayName: 'Rainbow Snake',
+    blurb: 'Very rare, and every colour at once.',
+    icon: '🌈',
+    price: 30,
+    kind: 'pet',
+    category: 'pet',
+    carryable: true,
+    model: () => createPetSnake('rainbow'),
+    heldScale: 0.45,
+    rare: true,
+  },
+];
 
 export const SHOP_ITEMS: readonly ShopItem[] = [
   // ------------------------------------------------------------------- toys
@@ -646,9 +758,11 @@ export const SHOP_ITEMS: readonly ShopItem[] = [
     heldScale: 1,
     rare: false,
   })),
+  // The Reptile House's stall and nursery — see `REPTILE_ITEMS` above.
+  ...REPTILE_ITEMS,
 ];
 
-export function itemsForShop(shopId: ShopId): ShopItem[] {
+export function itemsForShop(shopId: ShopItem['shopId']): ShopItem[] {
   return SHOP_ITEMS.filter((item) => item.shopId === shopId);
 }
 

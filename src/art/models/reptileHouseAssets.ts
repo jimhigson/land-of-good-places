@@ -137,6 +137,11 @@ export function reptileHouseHeadCentre(): { x: number; y: number; z: number } {
   return { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2, z: (box.minZ + box.maxZ) / 2 };
 }
 
+/** The plinth's top — the step she walks up onto through the arch. */
+export function reptileHousePlinthTop(): number {
+  return partBox(houseKit().part('rh-plinth')).maxY;
+}
+
 /** The sign plank's centre, in building-local metres. */
 export function reptileHouseSignCentre(): { x: number; y: number; z: number } {
   const box = partBox(houseKit().part('rh-sign'));
