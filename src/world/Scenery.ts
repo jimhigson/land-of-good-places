@@ -685,6 +685,8 @@ export const treeScatterLedger = {
   scatterPlanted: 0,
   coverPlanted: 0,
   samplingM2: 0,
+  /** Each scatter tree as planted: the candidate index that planted it, and whether its canopy can be climbed. */
+  scatterTrees: [] as (readonly [candidate: number, climbable: boolean])[],
 };
 
 /** The tree scatter's candidate margin inside the boundary, in metres. */
@@ -825,6 +827,7 @@ export function treeBuilder(
         treeScatterLedger.candidates = attempts;
         treeScatterLedger.scatterPlanted = out.length;
         treeScatterLedger.samplingM2 = treeSamplingM2();
+        treeScatterLedger.scatterTrees = out.map((tree) => [tree.identity, tree.tree.topBallRadius >= CLIMBABLE_MIN_CANOPY_RADIUS] as const);
       }
       cells ??= coverCells();
       while (cell < cells.length) {
