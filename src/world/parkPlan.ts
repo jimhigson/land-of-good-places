@@ -820,6 +820,10 @@ function drawnSampleThroughAPlot(
         inside = footprint.radius - Math.hypot(sample.x - plot.x, sample.z - plot.z);
       } else {
         inside = Math.min(footprint.halfX - Math.abs(sample.x - plot.x), footprint.halfZ - Math.abs(sample.z - plot.z));
+        // The castle's turrets stand outside its rectangle (#549).
+        for (const [cx, cz] of footprint.corners?.at ?? []) {
+          inside = Math.max(inside, (footprint.corners?.radius ?? 0) - Math.hypot(sample.x - plot.x - cx, sample.z - plot.z - cz));
+        }
       }
       if (inside > sample.halfWidth + THROUGH_A_PLOT_SLACK) return { sample, plot: plot.id, depth: inside };
     }

@@ -1,4 +1,5 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
+import type { AnchorFootprint } from './anchors';
 import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
 import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
@@ -1846,7 +1847,7 @@ const STREET_PLOT_CLEARANCE = 2.6;
  * inside). Plots are axis-aligned by construction (`edgeDistanceAlong`'s
  * own comment). */
 function distanceToPlotEdge(
-  entry: { x: number; z: number; footprint: { kind: 'circle'; radius: number } | { kind: 'rect'; halfX: number; halfZ: number } },
+  entry: { x: number; z: number; footprint: AnchorFootprint },
   x: number,
   z: number,
 ): number {
@@ -1858,18 +1859,28 @@ function distanceToPlotEdge(
   const ox = Math.max(dx, 0);
   const oz = Math.max(dz, 0);
   const outside = Math.hypot(ox, oz);
-  return outside > 0 ? outside : Math.max(dx, dz);
+  let distance = outside > 0 ? outside : Math.max(dx, dz);
+  // **And the solids at its corners** — the castle's turrets (#549), which
+  // stand outside its rectangle. A street kept clear of the rectangle alone ran
+  // through the turrets and the plinth between them (seed 8, 2 Oct 2026: a
+  // street along the castle's south face, unwalkable for a metre of its width,
+  // cut the eastern half of the park's paving off from the gate).
+  const corners = entry.footprint.corners;
+  if (corners) {
+    for (const [cx, cz] of corners.at) {
+      distance = Math.min(distance, Math.hypot(x - entry.x - cx, z - entry.z - cz) - corners.radius);
+    }
+  }
+  return distance;
 }
 
 /** The placed plots a street must clear — every layout entry except the
  * fountain (the plaza is paving, not an obstacle). */
-let streetPlotsCache:
-  | readonly { x: number; z: number; footprint: { kind: 'circle'; radius: number } | { kind: 'rect'; halfX: number; halfZ: number } }[]
-  | null = null;
+let streetPlotsCache: readonly { x: number; z: number; footprint: AnchorFootprint }[] | null = null;
 function streetPlots(): readonly {
   x: number;
   z: number;
-  footprint: { kind: 'circle'; radius: number } | { kind: 'rect'; halfX: number; halfZ: number };
+  footprint: AnchorFootprint;
 }[] {
   if (!streetPlotsCache) {
     streetPlotsCache = [...PARK_LAYOUT.entries.values()]
