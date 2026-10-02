@@ -301,7 +301,14 @@ export function buildHallShell(root: Group, collision: CollisionWorld, surfaces:
     const to = along === 'x' ? x2 : z2;
     const gaps: (readonly [number, number])[] = side === 'south' ? [reptileDoorGap()] : [];
     const spans = segmentsMinusGaps(from, to, gaps);
-    const drawn = along === 'x' ? cornerClosedSpans(spans, from, to, WALL_HALF_DEPTH) : spans;
+    // North and south take the corners; east and west stop short of them by
+    // the same depth, so no two wall boxes share a corner column — the
+    // hotel's butting walls run the full extent and their tops meet the
+    // corner-closed walls' tops in one plane, which the coplanar sweep reports.
+    const drawn =
+      along === 'x'
+        ? cornerClosedSpans(spans, from, to, WALL_HALF_DEPTH)
+        : spans.map(([a, b]): [number, number] => [a <= from + 1e-6 ? a + WALL_HALF_DEPTH : a, b >= to - 1e-6 ? b - WALL_HALF_DEPTH : b]);
     for (const [index, [a, b]] of spans.entries()) {
       if (b - a < 0.05) continue;
       const [drawnA, drawnB] = drawn[index] ?? [a, b];

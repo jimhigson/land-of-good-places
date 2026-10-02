@@ -111,16 +111,21 @@ export class Planting {
   private buildBed(bed: BedSpec): void {
     const outline = bed.outline;
     // The kerb: the outline extruded, with the soil's inset as a hole, sunk
-    // 0.05 m so its bottom is in no plane with the floor; the soil inside it,
-    // a hair lower, starting 0.02 m up for the same reason.
+    // 0.03 m so its bottom shares no plane with the floor (0) or with the
+    // kits' own 0.05 m sinks; the soil inside it, a hair lower, starting
+    // 0.02 m up for the same reason. The soil is cut to exactly the kerb's
+    // hole, so where the two meet their faces point opposite ways — which the
+    // coplanar sweep rightly ignores — rather than running a few millimetres
+    // apart, which it rightly reports.
+    const inner = insetPolygon(outline, KERB_WIDTH);
     const kerbShape = polygonShape(outline);
-    kerbShape.holes.push(polygonPath(insetPolygon(outline, KERB_WIDTH)));
-    const kerb = solid(new Mesh(new ExtrudeGeometry(kerbShape, { depth: KERB_HEIGHT + 0.05, bevelEnabled: false }), toonMaterial(PALETTE.stonePink)));
+    kerbShape.holes.push(polygonPath(inner));
+    const kerb = solid(new Mesh(new ExtrudeGeometry(kerbShape, { depth: KERB_HEIGHT + 0.03, bevelEnabled: false }), toonMaterial(PALETTE.stonePink)));
     kerb.rotation.x = Math.PI / 2;
     kerb.position.y = KERB_HEIGHT;
     kerb.name = `bed:${bed.id}:kerb`;
     this.ctx.root.add(kerb);
-    const soil = solid(new Mesh(new ExtrudeGeometry(polygonShape(insetPolygon(outline, KERB_WIDTH - 0.02)), { depth: SOIL_HEIGHT - 0.02, bevelEnabled: false }), toonMaterial(PALETTE.barkDark)));
+    const soil = solid(new Mesh(new ExtrudeGeometry(polygonShape(inner), { depth: SOIL_HEIGHT - 0.02, bevelEnabled: false }), toonMaterial(PALETTE.barkDark)));
     soil.rotation.x = Math.PI / 2;
     soil.position.y = SOIL_HEIGHT;
     soil.name = `bed:${bed.id}:soil`;
@@ -265,12 +270,19 @@ export class Planting {
 
 // ---------------------------------------------------------------- geometry
 
+/**
+ * The extrude is rotated +90° about X to lie flat, which maps the shape's
+ * own y straight onto +z and the extrusion depth onto −y (the slab hangs
+ * below the mesh's position). The first cut negated z here and drew every
+ * bed mirrored north↔south — found by `check:coplanar`'s sweep reporting the
+ * south-east corner's soil coplanar with the tortoise garden's, forty metres
+ * away, and measured with `Box3` before it was believed.
+ */
 function polygonShape(points: readonly LocalPoint[]): Shape {
   const shape = new Shape();
   points.forEach((point, index) => {
-    // The extrude is rotated +90° about X to lie flat, which maps shape −y to +z.
-    if (index === 0) shape.moveTo(point.x, -point.z);
-    else shape.lineTo(point.x, -point.z);
+    if (index === 0) shape.moveTo(point.x, point.z);
+    else shape.lineTo(point.x, point.z);
   });
   shape.closePath();
   return shape;
@@ -279,8 +291,8 @@ function polygonShape(points: readonly LocalPoint[]): Shape {
 function polygonPath(points: readonly LocalPoint[]): Path {
   const path = new Path();
   points.forEach((point, index) => {
-    if (index === 0) path.moveTo(point.x, -point.z);
-    else path.lineTo(point.x, -point.z);
+    if (index === 0) path.moveTo(point.x, point.z);
+    else path.lineTo(point.x, point.z);
   });
   path.closePath();
   return path;

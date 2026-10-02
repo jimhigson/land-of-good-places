@@ -758,6 +758,9 @@ export class Exhibits {
       const bubble = decal(new Mesh(SMALL_SPHERE, toonMaterial(PALETTE.waterFoam)));
       bubble.scale.setScalar(0.06);
       bubble.visible = false;
+      // Parked apart under the water, not twelve spheres in one spot, so the
+      // coplanar sweep (which sees hidden meshes too) has nothing to report.
+      bubble.position.set(-1.5 + i * 0.25, -0.5, 0);
       group.add(bubble);
       bubbles.push(bubble);
     }
@@ -841,8 +844,10 @@ export class Exhibits {
     this.ctx.root.add(group);
     group.add(reptileCaseMesh('rc-nursery-kerb'), reptileCaseMesh('rc-nursery-rail'));
     const glassRadius = REPTILE_NURSERY_GLASS_RADIUS;
+    // Inside the rail's posts and ring by a clear margin, so no pane face
+    // lies in a plane with the rail's.
     const glass = new Mesh(
-      new CylinderGeometry(glassRadius - 0.03, glassRadius - 0.03, REPTILE_NURSERY_RAIL_TOP - REPTILE_NURSERY_KERB_HEIGHT - 0.05, 32, 1, true),
+      new CylinderGeometry(glassRadius - 0.1, glassRadius - 0.1, REPTILE_NURSERY_RAIL_TOP - REPTILE_NURSERY_KERB_HEIGHT - 0.05, 32, 1, true),
       GLASS,
     );
     glass.position.y = (REPTILE_NURSERY_RAIL_TOP + REPTILE_NURSERY_KERB_HEIGHT) / 2;
