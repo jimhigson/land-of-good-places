@@ -45,44 +45,68 @@ all, and seeds 0..15 are the only parks. What shipped:
   perturbed file to digest differently. `check:prebuilt-park` runs the same on
   the default seed in the chain.
 
-### Accepted restarts (1 October, on structural-backtrack)
+### Accepted restarts, found by the build (2 October)
 
-Since structural-backtrack (#706), a seed's park is not always its first
-attempt. The root acceptance loop (`scripts/lib/acceptedPark.mts`) starts the
-whole park again with a fresh generation seed until a restart passes every
-acceptance measure, and records the accepted restart per seed in
-`src/world/acceptedRestarts.ts`. Every Node build reads that record. The park
-file now carries it too (**format 3**):
+Since structural-backtrack (#706), a seed's park is the first **restart** (a
+fresh generation stream, `parkRestart.ts`) whose finished park passes every
+acceptance measure. Jim ruled that finding it must be automatic, with no
+hand-kept table. So `build:parks` owns it.
 
-- **`restart`** — the accepted restart, `ACCEPTED_RESTARTS[seed]`. The restart
-  is read once at module load (`parkRestart.ts`), so the boot
-  (`boot/prebuiltPark.ts`) sets it as `__LGP_PARK_RESTART__` **before**
-  `bootstrap.ts` imports the game. To learn the seed without loading the park,
-  the boot asks `parkSeedAsked()`, the same once-per-page answer that
-  `parkManifest.ts` reads. `check:prebuilt-park` proves that nothing
-  `bootstrap.ts` loads statically is `parkManifest.ts`. Proved red by adding
-  that import (the closure grows from 15 to 20 modules), with `main.ts` as the
-  control. The plan refuses a file whose `seed` or `restart` is not this
-  park's.
-- **`acceptance`** — how the restart was found: every restart tried, what
-  forced each one, the driver's backtracking inside it, and the source the
-  verdicts were taken against (`acceptanceMetadata`). The loop takes minutes
-  per seed, so it does not run in CI. `accept:parks --write` records the log
-  beside the restarts, in `procgen/acceptanceLog.json`, and `build:parks`
-  copies a seed's entry into its file after the proof. The game never reads
-  it. `check:accepted-restarts` proves that every entry accepted the recorded
-  restart.
-- **The proof is at the accepted restart.** The solve builds the recorded
-  restart. The hydrate takes the restart from the file, as the browser does.
-  A seed passes only if solve, file and hydrate all name the recorded restart,
-  on top of the digest, no-search and control conditions above.
-- **One source hash.** `scripts/lib/park-source-hash.mjs` hashes `src/`,
-  `procgen/`, `test/procgen/` (the invariants, `parkFacts.ts`), `scripts/`
-  (`park-attempt.mts`, `lib/parkFindings.mts`), `package.json` and the
-  lockfile. It is the park files' `sourceHash` and the base of
-  `acceptanceSourceHash`, so a change to a measure re-solves the parks, just
-  as it re-takes the verdicts. (It used to hash `src/` alone, which had
-  silently stopped covering the generator when it moved to `procgen/`.)
+- **The accept loop is the lead's `acceptPark`**, with a file attempt plugged
+  in. Each attempt solves restart `r` to a file. Then a fresh process
+  (`park-attempt.mts` under `LGP_PARK_FILE`) asks every acceptance measure of
+  the park *hydrated from that file*, plus `hydrate`, which fails if anything
+  was searched. The first restart in order that passes is the seed's park.
+- **Speculative lanes** (`LGP_RESTART_LANES`) run several restarts at once.
+  The verdicts are consumed strictly in order and attempts past the answer
+  are aborted unseen. So the answer is the sequential one. Measured on seeds
+  2 and 13, sequential against 3 lanes: the same restarts (0 and 3), digests,
+  files and attempt logs. Seed 13 went from 378 s to 224 s.
+- **The file is then proven**: its hydrate digest must equal the solve's,
+  with nothing searched. A perturbed-file control runs once per build.
+- **What the file and the manifest carry.** The file carries `restart` and
+  `acceptance` (every attempt and what forced it). The boot sets
+  `__LGP_PARK_RESTART__` from the file before any park module loads, and
+  `check:prebuilt-park` proves nothing loads earlier. `.parks/manifest.json`
+  carries `restarts`. `builtRestartOf` reads them back for Node tooling, but
+  only when fresh, and #706's resolver asks it first.
+- **The source hash is the import closure** of the solver, the build and
+  attempt scripts, the measures and the `--import` hook, plus the toolchain
+  (`scripts/lib/park-source-hash.mjs`).
+  - The closure is 422 files. The UI, `Game.ts`, `main.ts` and the HUD are
+    outside it.
+  - Proved: an edit to `src/ui/Hud.ts` keeps the hash; edits to
+    `procgen/world/paths.ts` or `test/procgen/invariants.ts` change it.
+  - A computed `import()` inside the closure throws, so the closure cannot
+    silently miss a dependency.
+
+**CI: one `Parks` workflow per tree** (`.github/workflows/parks.yml`).
+
+- It runs one runner per seed, with four restart lanes each. Each seed's
+  output is cached, and `merge-parks.mts` combines the sixteen into one
+  `.parks/`, refusing anything partial or stale. The result is cached under
+  `prebuilt-parks-<hash>` and uploaded as artifact `parks-<hash>`.
+- Every other workflow that builds a park (Checks, Procgen, Coplanar, Swept
+  bus, Entrance road, Every seed builds, Walk reach, Park identity, preview,
+  deploy) has a `Parks ready` job. That job waits for the cache
+  (`.github/actions/restore-parks`) and fails fast if Parks failed. The work
+  jobs restore it and run no accept loop of their own. Preview and deploy are
+  back to 10 and 30 minutes.
+- **Across branches.** Parks are a pure function of the hash, but GitHub's
+  cache is branch-scoped. So on a miss, Parks first looks for `parks-<hash>`
+  from any run (the artifacts API, with the run's own token).
+  `verify-parks.mts` re-hydrates every file and requires the digest and
+  restart its manifest records. Only then is the set saved to this branch's
+  cache, so main reuses the parks its PR built.
+
+The first cold run (36983213098) took the following per seed (find and prove,
+one runner each):
+
+| seed | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| seconds | 312 | 156 | 503 | 264 | 275 | 530 | 187 | 261 | 834 | 484 | 482 | 176 | 221 | 391 | 477 | 1665 |
+
+Seed 15 is the critical path at 28 minutes.
 
 ### Sizes of the sixteen parks (format 2, as built)
 
