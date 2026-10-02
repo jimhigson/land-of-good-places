@@ -450,18 +450,24 @@ function builders(): readonly FeatureBuilder[] {
         solvedRoute = yield* trainRouteSearch(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'train', 'solve', attempt));
       } catch (error) {
         if (!(error instanceof RailRouteUnsolvable)) throw error;
-        // Conflict-directed: the cruiser is named only if one of its
-        // obstacles rejected a sample no layout obstacle had already rejected
-        // (`TrainRouteUnsolvable.cruiserRejections`). A search the cruiser took
-        // no part in is not rescued by re-drawing it, and each re-draw buys six
-        // more exhaustive loop searches. Measured, it does take part on seed 6
-        // restart 5 (4-8 thousand such samples per failed search), so there
-        // the cruiser is still named; this only stops it being named for
-        // nothing.
-        const cruiserTookPart = !(error instanceof TrainRouteUnsolvable) || error.cruiserRejections > 0;
-        return refusal(`railway loop: ${timeless(error.message)}`, {
-          consumed: cruiserTookPart ? ['cruiser', 'layout'] : ['layout'],
-        });
+        // **The layout, not the cruiser.** The train reads the cruiser only
+        // through its low corridor beside the station and its dismount point
+        // (`trainObstacles`), and both stand where the layout put the
+        // cruiser's booth: a cruiser re-draw re-orders the same start poses
+        // around the same booth (`stationPoseSearch`), so it moves the
+        // corridor little. Measured over every sweep of the sixteen supported
+        // seeds this branch's line has run (six sweeps, fix/sb-trainsearch3):
+        // seven distinct layouts had a cruiser draw whose six train searches
+        // all failed, and none of the further train searches bought on its
+        // re-drawn cruisers led to a finished park on that layout;
+        // and no accepted park in any sweep used a cruiser re-draw for its
+        // train. Named as well, the cruiser was re-drawn five times per such
+        // layout — 30 more exhaustive loop searches, most of seed 9's train
+        // cost. The cruiser does take part (its obstacles reject samples
+        // nothing else rejects — counted in the reason below), but re-drawing
+        // it is not a different enough decision to be worth naming.
+        const cruiserOnly = error instanceof TrainRouteUnsolvable ? `; ${error.cruiserRejections} cruiser-only rejections` : '';
+        return refusal(`railway loop: ${timeless(error.message)}${cruiserOnly}`, { consumed: ['layout'] });
       }
       const route = new TrainRoute(solvedRoute);
       return { route, stations: planStations(route) };
