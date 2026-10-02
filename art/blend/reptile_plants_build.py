@@ -115,13 +115,13 @@ PALM_TOP_RADIUS = 0.22
 PALM_LEAN = 0.2            # the trunk's S-curve, returning to centre at the crown
 PALM_FROND_LENGTH = 3.0
 PALM_FROND_HALF_WIDTH = 0.46
-BANANA_LENGTH = 2.4
-BANANA_HALF_WIDTH = 0.42
-MONSTERA_STALK = 0.95
-MONSTERA_RADIUS = 0.5
+BANANA_LENGTH = 3.0
+BANANA_HALF_WIDTH = 0.55
+MONSTERA_STALK = 1.25
+MONSTERA_RADIUS = 0.72
 FERN_LENGTH = 1.4
 FERN_HALF_WIDTH = 0.22
-HELICONIA_HEIGHT = 1.8
+HELICONIA_HEIGHT = 2.2
 HELICONIA_BRACTS = 6
 VINE_DROP = 2.6
 VINE_LEAVES = 7
@@ -130,8 +130,9 @@ ROCK_TOP_MAX = 0.7         # spec §5: a rock she can hop onto is a plate ≤ 0.
 LOG_SMALL_LENGTH = 4.0
 LOG_SMALL_TOP = 0.6        # the spec's "top 0.6 absolute" — the collider's top
 LOG_SMALL_RADIUS = 0.32    # so the body's belly sits SINK under the floor
-LOG_HOLLOW_SOUTH_WALL = 1.0
-LOG_HOLLOW_CUT_DEG = 112.0  # the arch stops here, a little past the crown
+LOG_HOLLOW_SOUTH_WALL = 1.3
+LOG_HOLLOW_CUT_DEG = 138.0  # the roof curls on past the crown and overhangs the stub
+LOG_HOLLOW_BULGE = 0.22     # the outer walls belly out, so the log is round, not boxed
 KNOTHOLE_HEIGHT = 1.25
 KNOTHOLE_RADIUS = 0.32
 BANYAN_TRUNK_RADIUS = 0.55
@@ -348,7 +349,7 @@ def build_banana(coll):
     splits in the blade so three of them in a clump do not read as one
     green block."""
     count = 18
-    spine = arc_spine(BANANA_LENGTH, 72.0, -28.0, count)
+    spine = arc_spine(BANANA_LENGTH, 80.0, -16.0, count)
     widths = []
     folds = []
     for i in range(count):
@@ -379,7 +380,7 @@ def build_monstera(coll):
     stalk.add(*taper_sweep(stalk_pts, [0.045] * 7, sides=6))
     stalk.emit(coll)
 
-    outline = heart_outline(points=40, lobes=5, lobe_depth=0.38, radius=MONSTERA_RADIUS)
+    outline = heart_outline(points=40, lobes=5, lobe_depth=0.5, radius=MONSTERA_RADIUS)
     verts, faces = extrude_outline(outline, 0.03)
     # The outline's stem notch is at −z; lift it so the notch sits on the stalk
     # tip, then tilt the blade back 38° and face it down the −Y axis.
@@ -420,23 +421,23 @@ def build_heliconia(coll):
         t = i / (rings - 1)
         pts.append((0.08 * math.sin(math.pi * t * 0.5), -0.22 * t * t, -SINK + (HELICONIA_HEIGHT - 0.25 + SINK) * t))
     stalk = Part("rp-heliconia-stalk")
-    stalk.add(*taper_sweep(pts, [0.05 - 0.02 * (i / (rings - 1)) for i in range(rings)], sides=6))
+    stalk.add(*taper_sweep(pts, [0.07 - 0.025 * (i / (rings - 1)) for i in range(rings)], sides=6))
     stalk.emit(coll)
 
     rng = random.Random(SEED + 3)
     bracts = Part("rp-heliconia")
-    base_z = HELICONIA_HEIGHT - 1.05
+    base_z = HELICONIA_HEIGHT - 1.3
     for i in range(HELICONIA_BRACTS):
         t = i / (HELICONIA_BRACTS - 1)
-        z = base_z + t * 0.95
+        z = base_z + t * 1.15
         side = 1.0 if i % 2 == 0 else -1.0
         x = 0.08 * math.sin(math.pi * (z / HELICONIA_HEIGHT) * 0.5)
         y = -0.22 * (z / HELICONIA_HEIGHT) ** 2
-        verts, faces = blob(rng, 0.2, 0.075, 0.075, 0.04, subdivisions=1)
-        pose = Matrix.Translation((x + side * 0.16, y, z)) @ rot_y(side * 28.0) @ Matrix.Translation((0.0, 0.0, 0.0))
+        verts, faces = blob(rng, 0.32, 0.11, 0.1, 0.04, subdivisions=1)
+        pose = Matrix.Translation((x + side * 0.25, y, z)) @ rot_y(side * 28.0)
         bracts.add(verts, faces, pose)
     # The top bract points up like a flame.
-    verts, faces = blob(rng, 0.07, 0.07, 0.17, 0.04, subdivisions=1)
+    verts, faces = blob(rng, 0.1, 0.1, 0.24, 0.04, subdivisions=1)
     bracts.add(verts, faces, Matrix.Translation((0.08 * 0.99, -0.22, HELICONIA_HEIGHT - 0.14)))
     bracts.emit(coll)
 
@@ -501,13 +502,15 @@ def build_rocks(coll):
         ("rp-rock-b", 0.62, 0.55, 0.3),
         ("rp-rock-c", 1.35, 1.05, 0.38),
     ):
-        verts, faces = blob(rng, rx, ry, rz, 0.09)
+        verts, faces = blob(rng, rx, ry, rz, 0.16)
         # Sit it on the floor: the lump's belly is under the plate.
         verts = [(x, y, z + rz * 0.45) for x, y, z in verts]
         verts = flatten_bottom(verts, -SINK)
         rock = Part(name)
         rock.add(verts, faces)
-        rock.emit(coll, sharp_deg=60.0)
+        # Flat-shaded on purpose: a low-poly boulder reads as rock where a
+        # smooth one reads as a pudding.
+        rock.emit(coll, sharp_deg=12.0)
 
 
 def build_log_small(coll):
@@ -546,14 +549,19 @@ def hollow_profiles(outer_scale):
     ro = REPTILE_LOG_OUTER_RADIUS * outer_scale
     steps = 9
     cut = math.radians(LOG_HOLLOW_CUT_DEG)
-    outer = [(ro, -SINK), (ro, ri)]
-    inner = [(ri, -SINK), (ri, ri)]
+    bulge = LOG_HOLLOW_BULGE * outer_scale
+    outer = [(ro, -SINK), (ro + bulge * 0.8, ri * 0.35), (ro + bulge, ri * 0.7), (ro, ri)]
+    inner = [(ri, -SINK), (ri, ri * 0.35), (ri, ri * 0.7), (ri, ri)]
     for k in range(1, steps + 1):
         a = cut * k / steps
         outer.append((ro * math.cos(a), ri + ro * math.sin(a)))
         inner.append((ri * math.cos(a), ri + ri * math.sin(a)))
     north = outer + inner[::-1]
-    south = [(-ro, -SINK), (-ro, LOG_HOLLOW_SOUTH_WALL), (-ri, LOG_HOLLOW_SOUTH_WALL), (-ri, -SINK)]
+    sw = LOG_HOLLOW_SOUTH_WALL
+    south = [
+        (-ro, -SINK), (-ro - bulge * 0.8, sw * 0.45), (-ro - bulge * 0.9, sw * 0.9), (-ro - bulge * 0.5, sw),
+        (-ri, sw), (-ri, sw * 0.9), (-ri, sw * 0.45), (-ri, -SINK),
+    ]
     return north, south
 
 
@@ -596,7 +604,7 @@ def build_log_hollow(coll):
     for i in range(stations):
         t = i / (stations - 1)
         x = -REPTILE_LOG_LENGTH / 2 + REPTILE_LOG_LENGTH * t
-        wobble = 1.0 - 0.035 * (0.5 - 0.5 * math.cos(TAU * t * 6.0))
+        wobble = 1.0 - 0.05 * (0.5 - 0.5 * math.cos(TAU * t * 6.0))
         north, south = hollow_profiles(wobble)
         xs.append(x)
         norths.append(north)
@@ -606,9 +614,7 @@ def build_log_hollow(coll):
     cap_c(faces, count, n)
     log.add(verts, faces)
     verts, faces, count, n = loft(souths, xs)
-    for s, flip in ((0, True), (n - 1, False)):
-        quad = tuple(s * count + k for k in range(count))
-        faces.append(quad[::-1] if flip else quad)
+    cap_c(faces, count, n)
     log.add(verts, faces)
     log.emit(coll, sharp_deg=50.0)
 
@@ -649,10 +655,10 @@ def build_banyan(coll):
     # Buttress roots: wedge fins, tall at the trunk, running out along the
     # floor. Each is an outline in XZ extruded through Y, then yawed round.
     fin = [
-        (0.0, -SINK), (1.45, -SINK), (1.5, 0.12), (1.2, 0.3), (0.75, 0.55),
-        (0.45, 0.95), (0.3, 1.45), (0.0, 1.7),
+        (0.0, -SINK), (1.85, -SINK), (1.95, 0.14), (1.6, 0.38), (1.05, 0.7),
+        (0.6, 1.25), (0.38, 1.9), (0.0, 2.3),
     ]
-    fin_verts, fin_faces = extrude_outline(fin, 0.2, centre=(0.4, 0.3))
+    fin_verts, fin_faces = extrude_outline(fin, 0.32, centre=(0.5, 0.4))
     for k in range(BANYAN_ROOTS):
         yaw = k * 360.0 / BANYAN_ROOTS + rng.uniform(-14.0, 14.0)
         tree.add(fin_verts, fin_faces, rot_z(yaw) @ Matrix.Translation((BANYAN_TRUNK_RADIUS * 0.3, 0.0, 0.0)))
@@ -782,7 +788,7 @@ def check_contract(bounds, anchors):
     clear = 2 * REPTILE_LOG_INNER_RADIUS
     assert clear >= TALLEST_CHILD_HEIGHT + 0.3, f"bore {clear} under TALLEST_CHILD_HEIGHT + 0.3"
     assert abs((hi.x - lo.x) - REPTILE_LOG_LENGTH) < 1e-3, f"hollow log length {hi.x - lo.x:.3f} ≠ REPTILE_LOG_LENGTH"
-    assert hi.y <= REPTILE_LOG_OUTER_RADIUS + 1e-3 and -lo.y <= REPTILE_LOG_OUTER_RADIUS + 1e-3, "hollow log outside its outer radius"
+    assert hi.y <= REPTILE_LOG_OUTER_RADIUS + LOG_HOLLOW_BULGE + 1e-3 and -lo.y <= REPTILE_LOG_OUTER_RADIUS + LOG_HOLLOW_BULGE + 1e-3, "hollow log outside its outer radius"
     lines.append(
         f"    hollow log: {hi.x - lo.x:.2f} m along X, inner faces y = ±{REPTILE_LOG_INNER_RADIUS}, "
         f"clear bore {clear:.2f} m (TALLEST_CHILD_HEIGHT {TALLEST_CHILD_HEIGHT} + 0.3), crown top {crown_z:.2f} m, "
