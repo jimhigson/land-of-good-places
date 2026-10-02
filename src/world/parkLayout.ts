@@ -308,6 +308,55 @@ export const DOORMAT_LEAD = 3.5;
  */
 const DOORMAT_WALL_ROOM = 2.8 / 2 + PATH_KERB_OVERHANG + BOUNDARY_WALL_COLLISION_HALF + 0.1;
 
+/** An entry's arrival lane: from its doormat out along its facing to the lead. */
+type Lane = readonly [readonly [number, number], readonly [number, number]];
+
+function arrivalLane(entry: ManifestEntry, x: number, z: number): Lane {
+  const [ex, ez] = doormatFor(entry, x, z);
+  const out = Math.hypot(ex - x, ez - z);
+  const [fx, fz] =
+    entry.door && 'facing' in entry.door ? entry.door.facing : out > 1e-9 ? [(ex - x) / out, (ez - z) / out] : [0, 1];
+  return [
+    [ex, ez],
+    [ex + fx * DOORMAT_LEAD, ez + fz * DOORMAT_LEAD],
+  ];
+}
+
+function laneOf(entry: PlacedEntry): Lane {
+  const [fx, fz] = entranceFacing(entry);
+  return [
+    [entry.entranceX, entry.entranceZ],
+    [entry.entranceX + fx * DOORMAT_LEAD, entry.entranceZ + fz * DOORMAT_LEAD],
+  ];
+}
+
+/** The widest spur's paved reach from its centre line: half its width plus the kerb. */
+const LANE_PAVED_REACH = 2.8 / 2 + PATH_KERB_OVERHANG;
+
+/** Does a lane's paving ({@link LANE_PAVED_REACH} either side) reach onto a footprint placed at (px, pz)? */
+function laneMeetsFootprint(lane: Lane, footprint: AnchorFootprint, px: number, pz: number): boolean {
+  const [[ax, az], [bx, bz]] = lane;
+  const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.5));
+  for (let s = 0; s <= steps; s += 1) {
+    const t = s / steps;
+    const x = ax + (bx - ax) * t - px;
+    const z = az + (bz - az) * t - pz;
+    let distance: number;
+    if (footprint.kind === 'circle') distance = Math.hypot(x, z) - footprint.radius;
+    else {
+      const dx = Math.abs(x) - footprint.halfX;
+      const dz = Math.abs(z) - footprint.halfZ;
+      const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
+      distance = outside > 0 ? outside : Math.max(dx, dz);
+      for (const [cx, cz] of footprint.corners?.at ?? []) {
+        distance = Math.min(distance, Math.hypot(x - cx, z - cz) - (footprint.corners?.radius ?? 0));
+      }
+    }
+    if (distance < LANE_PAVED_REACH) return true;
+  }
+  return false;
+}
+
 /** Cosine of 60 degrees: how far off the park's middle a fixed-facing door may face. */
 const DOOR_FACES_IN_COS = 0.5;
 
@@ -1212,6 +1261,23 @@ function validate(
     const [fx, fz] = entry.door.facing;
     if (toMiddle > 1e-6 && (midX * fx + midZ * fz) / toMiddle < DOOR_FACES_IN_COS) {
       return fail('turns its door away from the park');
+    }
+  }
+
+  // **Every arrival lane stays clear of every other plot.** A path arrives at
+  // a doormat head-on along its lead (`DOORMAT_LEAD`); that last stretch of
+  // paving may not lie on another plot. Seed 11 (2 Oct 2026): the water-fight
+  // stall stood in the water fight's own arrival lane, 5 m from its doormat,
+  // and the spur laid 5 m² of paving under the booth. Asked both ways: this
+  // entry's lane against the plots already placed, and theirs against this.
+  if (entry.id !== 'fountain') {
+    const mine = arrivalLane(entry, x, z);
+    const myFootprint = footprintAsPlaced(entry, x, z);
+    for (const other of placed) {
+      if (other.id === 'fountain') continue;
+      if (laneMeetsFootprint(mine, other.footprint, other.x, other.z)) return fail(`arrives across '${other.id}'`);
+      const theirs = laneOf(other);
+      if (laneMeetsFootprint(theirs, myFootprint, x, z)) return fail(`stands in '${other.id}''s arrival lane`);
     }
   }
 
