@@ -127,7 +127,7 @@ CROC_LENGTH = 3.6                  # snout tip to tail tip, the spec's "3.6 m"
 CROC_BODY_HALF_LENGTH = 0.62
 CROC_BODY_HALF_WIDTH = 0.46
 CROC_BODY_HALF_HEIGHT = 0.30
-CROC_BELLY_LIFT = 0.14             # floor to the belly's underside
+CROC_BELLY_LIFT = 0.10             # floor to the belly's underside — squat, she lies low
 CROC_LEG_RADIUS = 0.13
 CROC_HEAD_LENGTH = 1.18
 CROC_HEAD_HALF_WIDTH = 0.33
@@ -341,7 +341,10 @@ def build_snake() -> None:
     mouth = (0.0, -SNAKE_HEAD_LENGTH + 0.02, -SNAKE_MOUTH_DROP)
     anchor("rr-snake-head", "neck-joint (origin)", 0.0, 0.0, 0.0)
     anchor("rr-snake-head", "mouth / tongue origin", *mouth)
-    anchor("rr-snake-head", "painted eye centres (u,v)", 0.30, 0.42, 0.0, 0.70, 0.42)
+    # Where to paint, in the canvas's own (u, v): eyes low and wide under the brows.
+    anchor("rr-snake-head", "painted eye L (u, v, -)", 0.30, 0.42, 0.0)
+    anchor("rr-snake-head", "painted eye R (u, v, -)", 0.70, 0.42, 0.0)
+    anchor("rr-snake-head", "painted smile (u, v, -)", 0.50, 0.72, 0.0)
 
     # The tongue: a forked ribbon emerging from the mouth, authored fully out.
     # Its node origin is the mouth, so `scale` along its length is the flick.
@@ -394,14 +397,17 @@ def build_croc() -> None:
         for sy in (-1.0, 1.0):
             x = sx * CROC_BODY_HALF_WIDTH * 0.95
             y = sy * CROC_BODY_HALF_LENGTH * 0.62
-            leg(body, x, y, centre_z - 0.05, CROC_LEG_RADIUS, 6, splay=(sx * 0.12, 0.0), z_bottom=0.06)
-            # A big round foot: ART_DIRECTION §4, "feet oversized".
-            body.add(*ellipsoid(0.19, 0.21, 0.07, 1), at(x + sx * 0.04, y - 0.03, 0.07))
+            leg(body, x, y, centre_z - 0.05, CROC_LEG_RADIUS, 6, splay=(sx * 0.12, 0.0), z_bottom=0.05)
+            # A big round foot pad: ART_DIRECTION §4, "feet oversized". An
+            # 8-sided puck, because a 20-face icosahedron squashed flat
+            # rendered as a lump of crystal rather than a foot.
+            body.add(*tube(0.20, 0.07, 8), at(x + sx * 0.04, y - 0.03, 0.0))
     # One row of soft ridges down the spine, the biggest in the middle.
     for i in range(5):
         y = (i - 2) * CROC_BODY_HALF_LENGTH * 0.42
         size = 0.11 - abs(i - 2) * 0.018
-        body.add(*cone(size, size * 1.3, 6), at(0.0, y, croc_body_top(y) - size * 0.35))
+        # Squat bumps, not spikes: a six-year-old's crocodile is knobbly, not armoured.
+        body.add(*cone(size, size * 0.8, 6), at(0.0, y, croc_body_top(y) - size * 0.3))
     body.emit(coll)
 
     # The head sits forward of the body, its back inside the body's front so
@@ -459,7 +465,7 @@ def build_croc() -> None:
     tail.add(*tapered_sweep(pts, radii, 8))
     for s, r in zip(stations[:4], radii[:4]):
         p = pts[stations.index(s)]
-        tail.add(*cone(r * 0.35, r * 0.5, 6), at(p[0], p[1], p[2] + r * 0.85))
+        tail.add(*cone(r * 0.38, r * 0.35, 6), at(p[0], p[1], p[2] + r * 0.85))
     tail.emit(coll, location=tail_hinge)
     anchor("rr-croc-tail", "hinge (node origin)", *tail_hinge)
     anchor("rr-croc-body", "origin (floor under the body centre)", 0.0, 0.0, 0.0)
@@ -566,10 +572,16 @@ def build_chameleon() -> None:
     head_c = (0.0, -bry * 1.15, body_z + 0.06)
     part.add(*ellipsoid_y(hrx, hry, hrz, 2), at(*head_c))
     # The casque: a fin leaning back off the crown.
-    part.add(*cone(0.065, 0.15, 6), at(head_c[0], head_c[1] + 0.03, head_c[2] + hrz * 0.75, rot_x(-28.0)))
+    # The casque: a low fin swept back off the crown, not a horn — the first
+    # one was a unicorn's.
+    part.add(*cone(0.07, 0.09, 6), at(head_c[0], head_c[1] + 0.05, head_c[2] + hrz * 0.7, rot_x(-50.0)))
+    # Eye turrets: short cones either side of the head for the Engineer's
+    # two eye spheres to sit in, so the eyes read as a chameleon's and not
+    # as two balls stuck on a pig.
     for sx in (-1.0, 1.0):
-        anchor("rr-chameleon-body", f"eye sphere {'L' if sx < 0 else 'R'} (centre, r)",
-               sx * hrx * 0.95, head_c[1] - hry * 0.1, head_c[2] + hrz * 0.3, 0.05)
+        eye = (sx * hrx * 0.95, head_c[1] - hry * 0.1, head_c[2] + hrz * 0.3)
+        part.add(*cone(0.055, 0.04, 8), at(eye[0] - sx * 0.02, eye[1], eye[2] - 0.02, rot_y(sx * 90.0)))
+        anchor("rr-chameleon-body", f"eye sphere {'L' if sx < 0 else 'R'} (centre, r)", *eye, 0.05)
     for sx in (-1.0, 1.0):
         for sy in (-1.0, 1.0):
             leg(part, sx * brx * 1.1, sy * bry * 0.55, body_z - 0.02, 0.035, 6, splay=(sx * 0.03, 0.0))
