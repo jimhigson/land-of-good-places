@@ -70,6 +70,12 @@ import {
  * restart are read once per process). One owner: the check. A park it rejects
  * is a failed attempt.
  */
+/**
+ * In-process measures that drive the world phase's own builders (the stalls'
+ * `accommodate`), which a park hydrated from its file never constructs.
+ */
+const SEARCHES_THE_WORLD_PHASE: ReadonlySet<string> = new Set(['check:stall-accommodate']);
+
 const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
   'scripts/check-rail-race.mts',
 ];
@@ -523,7 +529,14 @@ if (facts) {
     {
       name: 'heavy',
       measures: [
-        ...ACCEPTANCE_SIM_MEASURES.filter(([name]) => !STAGE_TWO_SIMS.has(name)).map(simCheck),
+        ...ACCEPTANCE_SIM_MEASURES.filter(
+          ([name]) => !STAGE_TWO_SIMS.has(name) && !(parkFile && SEARCHES_THE_WORLD_PHASE.has(name)),
+        ).map(simCheck),
+        // On a park hydrated from its file (#705) there is no world-phase
+        // search in this process for these to drive, so each runs in its own
+        // process, which solves this seed and restart — the park the file was
+        // proved equal to (`builtParks.mts`' SEARCH_SCRIPTS).
+        ...(parkFile ? [...SEARCHES_THE_WORLD_PHASE].map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`)) : []),
         ...ACCEPTANCE_CHECK_SCRIPTS.map(scriptCheck),
       ],
     },

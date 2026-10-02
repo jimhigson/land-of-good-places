@@ -80,6 +80,8 @@ const SEARCH_SCRIPTS = new Set([
   'park-identity.mts',
   'scatter-digest.mts',
   'check-every-seed-builds.mts',
+  // Drives the world phase's stalls builder (`accommodate`), which only a search has.
+  'check-stall-accommodate.mts',
   'measure-tree-scatter.mts',
   'measure-bush-space.mts',
   'measure-duck-bars.mts',
