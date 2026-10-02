@@ -49,7 +49,10 @@ import {
   type CruiserSearchStart,
   type PlannedCoaster,
 } from './coaster/solve';
-import { cruiserRouteSearch } from './coaster/route';
+import { CruiserMissedTheCastle, cruiserRouteSearch } from './coaster/route';
+
+/** Draws of the cruiser a castle miss is offered — see the cruiser builder's `supply`. */
+const CASTLE_MISS_DRAWS = 2;
 import { RailRouteUnsolvable, type SolvedRailRoute } from './rail/generate';
 import { TrainRoute, TrainRouteUnsolvable, trainRouteSearch } from './train/route';
 import { planStations, type PlannedStation } from './train/plan';
@@ -385,10 +388,30 @@ function builders(): readonly FeatureBuilder[] {
     },
   });
 
+  // Whether the cruiser's most recent search closed loops that all missed the
+  // castle — read by its `supply` (below) at the moment the driver decides
+  // whether to retry.
+  let cruiserMissedTheCastle = false;
   const cruiserBuilder = coarse<PlannedCoaster>({
     name: 'cruiser',
     deps: ['layout'],
+    // **A castle miss gets one re-draw, not five.** A re-draw of the cruiser
+    // changes only the ORDER of its start poses (`stationPoseSearch` shuffles
+    // with the retry stream; the set of poses, both briefs and their seeds
+    // are functions of the layout alone), and each draw searches every pose
+    // twice over — 2 x 308 on seed 5 — before it can say it missed. Where the
+    // miss is the layout's (seed 5's second layout draw stands the
+    // castle 24.9 m from the boundary with its window axis pointing at it:
+    // measured, only near-straight passages along that axis clear the walls,
+    // and the far side leaves 21.5 m to turn in), all six draws missed and
+    // were 2/3 of the canonical park's whole cruiser cost. Over the sixteen
+    // supported seeds ten castle-miss runs were recorded: six missed all six
+    // draws, three passed at the first re-draw, one at the fifth. One re-draw
+    // keeps the three; the castle rule itself is untouched — a missed castle
+    // is still refused, it just names the layout sooner.
+    supply: () => (cruiserMissedTheCastle ? CASTLE_MISS_DRAWS : COARSE_ATTEMPT_CAP),
     *solve(attempt) {
+      cruiserMissedTheCastle = false;
       const rng = attempt === 0 ? undefined : new Rng(seedFor('cruiser', attempt, 0));
       const start: CruiserSearchStart = yield* cruiserStartSearch(rng);
       let route: SolvedRailRoute;
@@ -396,6 +419,7 @@ function builders(): readonly FeatureBuilder[] {
         route = yield* cruiserRouteSearch(start.briefs);
       } catch (error) {
         if (!(error instanceof RailRouteUnsolvable)) throw error;
+        cruiserMissedTheCastle = error instanceof CruiserMissedTheCastle;
         return refusal(`sky cruiser: ${timeless(error.message)}`, { consumed: ['layout'] });
       }
       const planned = yield* countingSeams(finishCruiserPlanSearch(route, start.rng));

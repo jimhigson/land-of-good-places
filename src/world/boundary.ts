@@ -600,7 +600,7 @@ export function solverBoundary(boundary: ParkBoundary): ParkBoundary {
     const b = table[(i + 1) % count] as number;
     return a + (b - a) * frac;
   };
-  return {
+  const view: ParkBoundary = {
     contains: (x, z) => Math.hypot(x, z) <= at(radii, Math.atan2(z, x)),
     distanceToEdge: (x, z) => {
       // Both tables looked up from ONE bearing reduction. This is `at` twice
@@ -629,6 +629,8 @@ export function solverBoundary(boundary: ParkBoundary): ParkBoundary {
     extent: boundary.extent,
     outline: () => points,
   };
+  registerFastEdgeTest(view, solverCloserThan(radii, obliquity, view));
+  return view;
 }
 
 // ------------------------------------------------------------- the generator
@@ -1044,4 +1046,107 @@ export function minCurvatureRadius(radii: readonly number[]): number {
     if (radius < smallest) smallest = radius;
   }
   return smallest;
+}
+
+/**
+ * **`solverBoundary`'s `distanceToEdge(x, z) < margin`, the same boolean for
+ * every input, mostly without the `atan2`.**
+ *
+ * The solver view's distance is `(r(θ) − |p|) · c(θ)`, both factors linear
+ * interpolations between two adjacent samples of a table. Over one small grid
+ * cell, `|p|` lies between the cell's nearest and farthest distance from the
+ * origin, and `θ` within the arc its corners subtend — so `r(θ)` and `c(θ)`
+ * lie between the smallest and largest table entries that arc can touch
+ * (widened by two samples each side, so a corner's own rounding cannot move
+ * the index out of the range). That brackets the distance for every point in
+ * the cell, lazily, once per cell. When the bracket clears `margin` by a
+ * micrometre — eight orders of magnitude above the rounding of `|p|`, the
+ * lerps and the product on ~100 m values — the comparison is decided without
+ * evaluating the distance; otherwise it is evaluated exactly as
+ * `distanceToEdge` does. A cell containing the origin has no bearing range and
+ * always evaluates.
+ *
+ * Why: the Sky Cruiser's route search asks this on every sample of every
+ * candidate piece, and on seed 5 (whose cruiser re-searches a castle-missing
+ * layout six times) the `atan2` and its fdlibm reductions were ~10% of the
+ * whole plan. `test/geo/boundaryDistance.test.ts` pins it against the
+ * evaluated answer.
+ */
+function solverCloserThan(
+  radii: Float64Array,
+  obliquity: Float64Array,
+  view: ParkBoundary,
+): (x: number, z: number, margin: number) => boolean {
+  const count = radii.length;
+  const CELL = 2;
+  const SLACK = 1e-6;
+  const { minX, maxX, minZ, maxZ } = view.extent;
+  const wide = Math.ceil((maxX - minX) / CELL) + 1;
+  const deep = Math.ceil((maxZ - minZ) / CELL) + 1;
+  // Per cell: lower and upper bound of the distance; NaN = not yet computed,
+  // and a cell that cannot be bounded stores lower = -Infinity, upper = Infinity.
+  const lower = new Float64Array(wide * deep).fill(Number.NaN);
+  const upper = new Float64Array(wide * deep);
+  const indexOf = (bearing: number): number => {
+    const t = ((bearing % TAU) + TAU) % TAU;
+    return Math.floor((t / TAU) * count) % count;
+  };
+  const bound = (gx: number, gz: number, cell: number): void => {
+    const x0 = minX + gx * CELL;
+    const z0 = minZ + gz * CELL;
+    const x1 = x0 + CELL;
+    const z1 = z0 + CELL;
+    if (x0 <= 0 && 0 <= x1 && z0 <= 0 && 0 <= z1) {
+      lower[cell] = -Infinity;
+      upper[cell] = Infinity;
+      return;
+    }
+    const nearX = x0 > 0 ? x0 : x1 < 0 ? x1 : 0;
+    const nearZ = z0 > 0 ? z0 : z1 < 0 ? z1 : 0;
+    const hMin = Math.hypot(nearX, nearZ);
+    const hMax = Math.max(Math.hypot(x0, z0), Math.hypot(x1, z0), Math.hypot(x0, z1), Math.hypot(x1, z1));
+    // The arc the corners subtend: the cell does not contain the origin, so it
+    // is under half a turn; measured as offsets from one corner's bearing.
+    const base = Math.atan2(z0, x0);
+    let lo = 0;
+    let hi = 0;
+    for (const [cx, cz] of [[x1, z0], [x0, z1], [x1, z1]] as const) {
+      let d = Math.atan2(cz, cx) - base;
+      if (d > Math.PI) d -= TAU;
+      if (d < -Math.PI) d += TAU;
+      if (d < lo) lo = d;
+      if (d > hi) hi = d;
+    }
+    const first = indexOf(base + lo) - 2;
+    const span = indexOf(base + hi) - indexOf(base + lo);
+    const steps = (span < 0 ? span + count : span) + 5;
+    let rMin = Infinity;
+    let rMax = -Infinity;
+    let cMin = Infinity;
+    let cMax = -Infinity;
+    for (let k = 0; k <= steps; k += 1) {
+      const i = (((first + k) % count) + count) % count;
+      const r = radii[i] as number;
+      const c = obliquity[i] as number;
+      if (r < rMin) rMin = r;
+      if (r > rMax) rMax = r;
+      if (c < cMin) cMin = c;
+      if (c > cMax) cMax = c;
+    }
+    const lowRadial = rMin - hMax;
+    const highRadial = rMax - hMin;
+    lower[cell] = lowRadial >= 0 ? lowRadial * cMin : lowRadial * cMax;
+    upper[cell] = highRadial >= 0 ? highRadial * cMax : highRadial * cMin;
+  };
+  return (x, z, margin) => {
+    const gx = Math.floor((x - minX) / CELL);
+    const gz = Math.floor((z - minZ) / CELL);
+    if (gx >= 0 && gz >= 0 && gx < wide && gz < deep) {
+      const cell = gx * deep + gz;
+      if ((lower[cell] as number) !== (lower[cell] as number)) bound(gx, gz, cell);
+      if ((lower[cell] as number) - SLACK >= margin) return false;
+      if ((upper[cell] as number) + SLACK < margin) return true;
+    }
+    return view.distanceToEdge(x, z) < margin;
+  };
 }

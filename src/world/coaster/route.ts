@@ -1203,13 +1203,20 @@ export function* cruiserRouteSearch(
  */
 function missedTheCastle(route: SolvedRailRoute, detail: string): RailRouteUnsolvable {
   const { report } = route;
-  return new RailRouteUnsolvable(
+  return new CruiserMissedTheCastle(
     `every closed loop the search found missed the castle (${report.satisfyRejects} ` +
       `solved loop(s) rejected by crossesTheCastle over ${report.startPoseCount} start ` +
       `poses), ${detail}`,
     report,
   );
 }
+
+/**
+ * **Loops closed, and every one missed the castle** — as opposed to no loop
+ * closing at all. The park driver treats the two differently: see the
+ * cruiser builder's `supply` in `parkPlan.ts`.
+ */
+export class CruiserMissedTheCastle extends RailRouteUnsolvable {}
 
 /** {@link cruiserRouteSearch}, driven straight through — the constructor's cadence. */
 export function solveCruiserRoute(briefs: CoasterBriefs): SolvedRailRoute {
