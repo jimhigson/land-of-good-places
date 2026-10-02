@@ -61,7 +61,30 @@ const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
   // acceptance scope: only their decision clauses fail the attempt. Measured
   // on seed 5 restart 0, CPU including the build: 18 s and 25 s.
   'scripts/check-stall-accommodate.mts',
-  'scripts/check-cat-bus.mts',
+];
+
+/**
+ * **Checks that play the park forward, asked in-process on a fresh World of
+ * their own** — they move the world under them (an arrival, a crowd, a ride),
+ * so they cannot share the attempt's park, but a second World over the plan
+ * this process already solved costs ~6.5 s on seed 5 where a fresh process
+ * re-solving the plan costs ~14 s plus module load. Each is handed `fresh`,
+ * which builds that World as a fresh process would see it (the arrival due),
+ * and asks only its decision clauses. Run after everything that reads the
+ * attempt's own park.
+ */
+const ACCEPTANCE_SIM_MEASURES: readonly (readonly [
+  string,
+  (fresh: () => HeadlessPark) => Promise<CheckVerdict>,
+])[] = [
+  [
+    'check:cat-bus',
+    async (fresh) => {
+      const { catBus } = await import('./lib/catBus.mts');
+      const { decisions, voids } = await catBus(fresh, { quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
 ];
 
 /**
@@ -274,6 +297,32 @@ try {
 }
 buildCpu = cpuMs() - cpu0;
 
+const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats | null =>
+  stats
+    ? {
+        refusals: stats.refusals,
+        retries: stats.retries,
+        accommodations: stats.accommodations,
+        unwinds: stats.unwinds,
+        deepestUnwind: stats.deepestUnwind,
+        decisionZero: stats.decisionZero,
+        forgone: stats.forgone,
+      }
+    : null;
+// Taken now, straight after the build: the simulated checks below build
+// fresh Worlds of their own, and the world phase's stats would then be theirs.
+// Not wrapped in a catch: a build that threw before the plan existed already
+// reads as null stats (the accessors return null), and an import that fails is
+// a broken instrument that must be loud — a swallowing catch here once hid a
+// moved module and filed `backtracking: null` for every attempt (found on #705).
+const { parkSolveStats } = await import('../src/world/parkPlan.ts');
+const { worldSolveStats } = await import('../src/world/worldPhase.ts');
+const backtracking: AttemptVerdict['backtracking'] = {
+  plan: backtrackOf(parkSolveStats()),
+  world: backtrackOf(worldSolveStats()),
+};
+
+
 if (facts) {
   const cpu1 = cpuMs();
   const { PARK_ACCEPTANCE } = await import('../test/procgen/invariants.ts');
@@ -323,6 +372,30 @@ if (facts) {
   }
   findingsCpu = cpuMs() - cpu2;
 
+  const cpu3 = cpuMs();
+  const { buildHeadlessPark, quietly } = await import('./park-harness.mts');
+  const { saveFlags } = await import('../src/state/flags.ts');
+  const fresh = (): HeadlessPark => {
+    saveFlags.hydrate({ arrivedByBus: false });
+    return quietly(() => buildHeadlessPark());
+  };
+  for (const [name, measure] of ACCEPTANCE_SIM_MEASURES) {
+    measuresAsked += 1;
+    try {
+      const { faults, voids } = await measure(fresh);
+      if (voids.length > 0) {
+        broken ??= `${name}: ${voids[0]}`;
+        failures.push({ measure: name, count: voids.length, first: voids.slice(0, FIRST) });
+      } else if (faults.length > 0) {
+        failures.push({ measure: name, count: faults.length, first: faults.slice(0, FIRST) });
+      }
+    } catch (error) {
+      broken ??= `${name}: ${firstLine(error)}`;
+      failures.push({ measure: name, count: 1, first: [`the measure threw: ${firstLine(error)}`] });
+    }
+  }
+  checksCpu += cpuMs() - cpu3;
+
   for (const script of ACCEPTANCE_CHECK_SCRIPTS) {
     measuresAsked += 1;
     const name = `check:${script.replace(/^scripts\/check-|\.mts$/g, '')}`;
@@ -348,29 +421,6 @@ if (facts) {
     }
   }
 }
-
-const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats | null =>
-  stats
-    ? {
-        refusals: stats.refusals,
-        retries: stats.retries,
-        accommodations: stats.accommodations,
-        unwinds: stats.unwinds,
-        deepestUnwind: stats.deepestUnwind,
-        decisionZero: stats.decisionZero,
-        forgone: stats.forgone,
-      }
-    : null;
-// Not wrapped in a catch: a build that threw before the plan existed already
-// reads as null stats (the accessors return null), and an import that fails is
-// a broken instrument that must be loud — a swallowing catch here once hid a
-// moved module and filed `backtracking: null` for every attempt (found on #705).
-const { parkSolveStats } = await import('../src/world/parkPlan.ts');
-const { worldSolveStats } = await import('../src/world/worldPhase.ts');
-const backtracking: AttemptVerdict['backtracking'] = {
-  plan: backtrackOf(parkSolveStats()),
-  world: backtrackOf(worldSolveStats()),
-};
 
 const verdict: AttemptVerdict = {
   seed,
