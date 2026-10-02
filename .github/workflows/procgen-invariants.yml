@@ -28,10 +28,16 @@ jobs:
   # measures every recorded park (16 since the root acceptance loop,
   # against 5 before), about 5.5 minutes per five parks on a runner — one job
   # could not hold it under its cap. So the seed files are split over runners
-  # with vitest's own `--shard`, the pool sweeps run on their own runner, and
-  # the job GitHub gates on (`Procgen invariants`, a required check matched BY
+  # with vitest's own `--shard`, and the job GitHub gates on (`Procgen invariants`, a required check matched BY
   # NAME) is the aggregator at the bottom, which fails unless every part
   # succeeded — the same shape as `checks.yml`.
+  #
+  # There used to be a `pool` job here running `check:gateway` and
+  # `check:park-pool` over all sixteen seeds, each building every park again.
+  # It was cancelled at its 25-minute cap on every run once the pool was the
+  # sixteen supported seeds. Both questions are now asked by each seed's own
+  # file, on the park it has already built (`registerParkInvariants`), and
+  # `check:seed-coverage` asserts that every pool seed's file asks them.
   suite:
     name: Procgen invariants shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
@@ -63,32 +69,6 @@ jobs:
           LGP_PROCGEN_SHARD: ${{ matrix.shard }}/5
         run: pnpm run test:procgen:watchdog
 
-  pool:
-    name: Procgen invariants pool
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: The front gate opens, on every seed in the pool
-        run: pnpm run check:gateway
-
-      - name: check:park, on every seed in the pool
-        run: pnpm run check:park-pool
-
   # **Do not rename this job.** `Procgen invariants` is a required status check
   # on `main`; a required check is matched by name, so renaming it stops it
   # gating merges without anything going red.
@@ -97,19 +77,19 @@ jobs:
   # now the work is split and this job only reads its upstream results.
   invariants:
     name: Procgen invariants
-    needs: [suite, pool]
+    needs: [suite]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Every shard of the suite and the pool sweeps succeeded
+      - name: Every shard of the suite succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
           count=$(echo "$NEEDS" | jq 'length')
-          if [ "$count" != "2" ]; then
-            echo "::error::expected 2 upstream jobs (suite, pool), saw $count — the aggregator is measuring nothing"
+          if [ "$count" != "1" ]; then
+            echo "::error::expected 1 upstream job (suite), saw $count — the aggregator is measuring nothing"
             exit 1
           fi
           bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
@@ -117,4 +97,4 @@ jobs:
             echo "::error::not every part of the procgen gate succeeded: $bad"
             exit 1
           fi
-          echo "Procgen invariants ok — every shard and the pool sweeps succeeded."
+          echo "Procgen invariants ok — every shard succeeded."

@@ -175,21 +175,16 @@ export const PARK_SEED_POOL: readonly number[] = SUPPORTED_PARK_SEEDS;
  *
  * ## What being in this list does NOT mean
  *
- * **It does not mean `check:park` builds that seed's park. `check:park` is
- * canonical-only.** The only `check:*` step in the `check` chain that sweeps
- * *this* list is `check:fountain-hop` — so the `--- seed N: passed` lines in a
- * `pnpm run check` log are *its* sweep, and nothing else's. The other
- * consumers are `measure-*`/`sweep-*` scripts nobody runs in CI. Grep before
- * believing otherwise; the list of importers is short and this comment can rot.
- *
- * **Since #510 the whole pool IS built by blocking checks — but by
- * {@link PARK_SEED_POOL}, not by this subset, and not from the `check` chain.**
- * `check:park-pool` and `check:gateway` each sweep all sixteen from the
- * required `Procgen invariants` job. So "is seed N built by something that
- * blocks a merge?" is now a question about the pool, not about this list; this
- * list answers only "does seed N have a per-seed invariant file?". Do not read
- * membership here as coverage in either direction — `check:seed-coverage`
- * prints the real map on every run.
+ * **Since 2 October 2026 every seed in this list is measured whole, once, by
+ * its own `test/procgen/seed-N.test.ts`**: the invariants, `check:park` with
+ * its ratchet, the walk in through the front gate and the fountain hop, all
+ * asked of the one park that file builds, in the required `Procgen invariants`
+ * job. They used to be three sweeps of their own (`sweep:park-pool`,
+ * `sweep:gateway`, and `sweep:fountain-hop` in the `check` chain), each
+ * building every park again; at sixteen seeds they outgrew their jobs. They
+ * remain as hand-run scripts. `check:seed-coverage` asks vitest which tests
+ * each seed file registers and fails if a pool seed's file is missing one, so
+ * this paragraph is not the only thing that knows.
  *
  * **The trap that makes this easy to misread**: `check-park.mts` *does*
  * import something called `SEEDS` (line 72) and prints `N/M seeds placed`
@@ -207,15 +202,6 @@ export const PARK_SEED_POOL: readonly number[] = SUPPORTED_PARK_SEEDS;
  * `check:park` the entire time. Seed 115 failed the other way round —
  * `check:park` green, three invariants red. Neither gate implies the other
  * (#437).
- *
- * **The last clause of this paragraph used to read "and neither sees most of
- * the pool". That is no longer true, and it is the point of #510:**
- * `check:park-pool` puts every one of the sixteen through `check:park`, and
- * `check:gateway` walks a child in through every one's front arch, both in the
- * required `Procgen invariants` job. What remains uncovered is the *invariant*
- * side — only the seven seeds with per-seed files get that — and
- * `check:seed-coverage` prints exactly that gap on every run rather than
- * leaving it to a comment here to remember.
  *
  * **So when the generator's geometry changes, the tell is `pnpm run
  * vet:seeds` over the whole pool — not a green `check`, which by

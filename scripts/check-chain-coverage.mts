@@ -39,7 +39,7 @@
  * ## What "reachable" means here, and why it is asked this way
  *
  * The question is **not** "is it in the `check` chain?" — that would be wrong in
- * both directions. `check:coplanar`, `check:live-version`, `check:gateway` and
+ * both directions. `check:coplanar`, `check:live-version` and
  * `check:update-adoption` are deliberately *outside* it, each with its own
  * workflow, because `checks.yml` was at **26m55s against a 30-minute cap —
  * 89.7%, needing only 1.11x its own slowest run to breach** (measured by #523,

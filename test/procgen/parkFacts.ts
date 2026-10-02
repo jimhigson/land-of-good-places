@@ -22,6 +22,7 @@ import { HAIR_STYLES } from '../../src/state/types.ts';
 import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
 import type { HeadlessPark } from '../../scripts/park-harness.mts';
+import type { FountainHopClause } from '../../src/world/fountainHop.ts';
 import type { RailRaceRoute } from '../../src/world/railRace/route.ts';
 import type { BarIntrusion } from '../../src/world/railRace/barReach.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
@@ -692,6 +693,13 @@ export interface ParkFacts {
   readonly world: World;
   /** The harness's own handle on the park — what `check:park`'s measures take. */
   readonly headless: HeadlessPark;
+  /**
+   * Every clause of `src/world/fountainHop.ts`'s measurement, asked of this
+   * park. Measured here rather than by the invariant because that module
+   * imports `Collision.ts`, which loads `parkManifest.ts`: a static import of
+   * it from `invariants.ts` pins every seed file to the default seed.
+   */
+  readonly fountainHop: readonly FountainHopClause[];
   /** The entrance road's corridor, claimed and drawn — see {@link RoadCorridorFacts}. */
   readonly roadCorridor: RoadCorridorFacts;
   /** The castle's four corner turrets — see {@link CastleTurretFact}. */
@@ -1757,6 +1765,8 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
   // the seed-pinning trap this file's header already warns about.
   const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
   const bridgeReservations = planBridgeFootprints(world.train.crossings);
+  const { measureFountainHop } = await import('../../src/world/fountainHop.ts');
+  const fountainHop = measureFountainHop(world.fountain, world.collision, sample);
 
   // Same rule, same reason: the road's owner reaches PARK_BOUNDARY, so it is
   // imported here — after the world for this seed is built — and never at the
@@ -3962,6 +3972,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     seed,
     restart,
     headless,
+    fountainHop,
     world,
     walls,
     trees,

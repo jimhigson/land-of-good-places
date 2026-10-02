@@ -2,8 +2,8 @@
  * **A child can walk in through the front gate. On every park she can be given.**
  *
  * ```
- * pnpm run check:gateway            # every seed in PARK_SEED_POOL
- * pnpm run check:gateway -- --map   # and print the standability map per seed
+ * pnpm run sweep:gateway            # every seed in PARK_SEED_POOL
+ * pnpm run sweep:gateway -- --map   # and print the standability map per seed
  * ```
  *
  * Issue #481. The gate is the one fixed thing in the park — `ENTRANCE_GATE_X/Z`
@@ -303,7 +303,7 @@ await Promise.all(
 results.sort((a, b) => a.seed - b.seed);
 
 console.log(
-  `check:gateway: the walk in from the arch, ${GATE_PROBE_INSET} to ${ENTRANCE_WALK_DEPTH} m inside, ` +
+  `sweep:gateway: the walk in from the arch, ${GATE_PROBE_INSET} to ${ENTRANCE_WALK_DEPTH} m inside, ` +
     `${(2 * ENTRANCE_GATE_HALF_WIDTH).toFixed(2)} m across, ` +
     `probed at PLAYER_RADIUS (${PLAYER_RADIUS}) every ${GATE_PROBE_STEP} m — ${results.length} seed(s)\n`,
 );
@@ -343,7 +343,7 @@ for (const result of results) {
  * invariants do keeps one habit rather than two.
  */
 process.stderr.write(
-  `check:gateway covers the ground from the arch to ${ENTRANCE_WALK_DEPTH} m inside it, and nothing else:\n` +
+  `sweep:gateway covers the ground from the arch to ${ENTRANCE_WALK_DEPTH} m inside it, and nothing else:\n` +
     `  - it does not prove she can reach the plaza. Past ${ENTRANCE_WALK_DEPTH} m the railway may\n` +
     '    legitimately ring the park, and the walk crosses it at a level crossing or a bridge;\n' +
     "    whether that walk connects is `check:park`'s routing invariant, not this.\n" +
@@ -363,7 +363,7 @@ process.stderr.write(
 // different parks, is a corridor being measured somewhere the park is not.
 if (everBlocked === 0) {
   console.error(
-    '\ncheck:gateway: not one cell of the corridor was blocked on any seed. The gate posts ' +
+    '\nsweep:gateway: not one cell of the corridor was blocked on any seed. The gate posts ' +
       'stand in it on every park, so this probe is not measuring the park.',
   );
   process.exit(1);
@@ -383,22 +383,22 @@ if (failed) {
     r.fouls.some((f) => f.what.startsWith('boundary masonry')),
   ).length;
   const controls = results.filter((r) => r.fouls.some((f) => f.what.startsWith('CONTROL'))).length;
-  if (shut) console.error(`\ncheck:gateway: ${shut} of ${results.length} seed(s) cannot be walked into.`);
+  if (shut) console.error(`\nsweep:gateway: ${shut} of ${results.length} seed(s) cannot be walked into.`);
   if (encroached) {
     console.error(
-      `check:gateway: ${encroached} of ${results.length} seed(s) have masonry standing inside the ` +
+      `sweep:gateway: ${encroached} of ${results.length} seed(s) have masonry standing inside the ` +
         'arch\'s opening — walkable, and still stone in the doorway.',
     );
   }
   if (controls) {
     console.error(
-      `check:gateway: ${controls} of ${results.length} seed(s) failed a CONTROL — the probe is ` +
+      `sweep:gateway: ${controls} of ${results.length} seed(s) failed a CONTROL — the probe is ` +
         'not measuring the park, so nothing above it means anything.',
     );
   }
   process.exit(1);
 }
 console.log(
-  `\ncheck:gateway: all ${results.length} seed(s) open at the front door ` +
+  `\nsweep:gateway: all ${results.length} seed(s) open at the front door ` +
     `(${everBlocked} corridor cells blocked across the pool, so the probe can see solid ground).`,
 );

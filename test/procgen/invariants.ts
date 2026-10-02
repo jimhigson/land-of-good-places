@@ -9160,6 +9160,23 @@ const nothingStandsInTheGateArchSpan: Invariant = (facts) => {
  * seed. The walk starts a metre in, and the gate posts are the control that says
  * the probe can see solid ground at all.
  */
+/**
+ * **A tap on the fountain's water wades her in, she can get out, and walking
+ * past keeps her dry.** `src/world/fountainHop.ts` owns the measurement, and
+ * `parkFacts.ts` asks it (see `ParkFacts.fountainHop` for why there);
+ * `scripts/check-fountain-hop.mts` explains the four mechanisms it guards and
+ * how each was proved red. It is here, on the park this file has already built,
+ * because as its own sweep it built all sixteen parks a second time and
+ * outgrew its CI shard. Every seed matters: the ground round the rim decides
+ * whether mechanism 4 is exercised at all (seed 11 at restart 0 only gets in
+ * through it).
+ */
+const aTapOnTheFountainWadesIn: Invariant = (facts) => {
+  const clauses = facts.fountainHop;
+  process.stderr.write(`[fountain hop] ${clauses.filter((c) => c.ok).length}/${clauses.length} clauses hold\n`);
+  return clauses.filter((c) => !c.ok).map((c) => c.what);
+};
+
 const theWalkInFromTheGateIsWalkable: Invariant = (facts) => {
   const walk = measureGatewayWalk((x, z) => facts.isStandable(x, z, PLAYER_RADIUS));
   const fouls: string[] = [];
@@ -12712,6 +12729,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ['the boundary wall closes onto the gate, with no way round the arch', theWallClosesOntoTheGate],
   ['nothing stands in the gate arch\'s clear span', nothingStandsInTheGateArchSpan],
   ['a child can walk in through the front gate', theWalkInFromTheGateIsWalkable],
+  ['a tap on the fountain wades her in, and she can get out', aTapOnTheFountainWadesIn],
   ['the road arrives at the park and goes in through the gate', theRoadArrivesAtTheParkAndGoesIn],
   [
     'the bus stop and the walk in from it are clear of trees and bushes',
@@ -12735,6 +12753,20 @@ export const PARK_ACCEPTANCE: readonly (readonly [string, Invariant])[] = [
 
 /** Where the root acceptance loop lives — see the `beforeAll` below. */
 const ACCEPTED_PARK_MODULE = '../../scripts/lib/acceptedPark.mts';
+
+/**
+ * Where `check:park`'s measures live (`scripts/lib/parkFindings.mts`), imported
+ * the same way and for the same reason as {@link ACCEPTED_PARK_MODULE}.
+ */
+const PARK_FINDINGS_MODULE = '../../scripts/lib/parkFindings.mts';
+
+/** The slice of `scripts/lib/parkFindings.mts` this suite calls. */
+interface ParkFindingsApi {
+  measureParkFindings(
+    park: ParkFacts['headless'],
+    ratchetEnforced: boolean,
+  ): { readonly regressions: readonly string[]; readonly summary: string; readonly elapsedMs: number };
+}
 
 /** The slice of `scripts/lib/acceptedPark.mts` this suite calls. */
 interface AcceptedParkApi {
@@ -12789,6 +12821,19 @@ export function registerParkInvariants(seed: number, label = `seed ${seed}`): vo
       const complaints = theParkIsFurnished(facts);
       expect(complaints, describeComplaints(complaints)).toHaveLength(0);
     });
+
+    // **`check:park`, on this park, with the ratchet on** — the same measure
+    // the acceptance loop asks (`scripts/park-attempt.mts`), so this is its
+    // second line exactly as the invariants below are theirs. It is here
+    // rather than in a sweep of its own (`check:park-pool`, which built every
+    // park again and ran out of its 25-minute job on all sixteen) because this
+    // file has already built the park.
+    it('check:park finds nothing new on it', async () => {
+      const { measureParkFindings } = (await import(/* @vite-ignore */ PARK_FINDINGS_MODULE)) as ParkFindingsApi;
+      const park = measureParkFindings(facts.headless, true);
+      process.stderr.write(`[check:park] seed ${seed}: ${park.summary} (${Math.round(park.elapsedMs)} ms)\n`);
+      expect(park.regressions, park.regressions.join('\n')).toHaveLength(0);
+    }, 1_800_000);
 
     // The one place in this file that asserts. See {@link Invariant}.
     for (const [name, check] of INVARIANTS) {
