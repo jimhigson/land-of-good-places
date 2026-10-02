@@ -11,7 +11,10 @@ import { beforeAll, describe, expect, it } from 'vitest';
  */
 process.env['LGP_SEED'] = '15';
 process.env['LGP_PARK_RESTART'] = '0';
-await import('../scripts/headless-canvas.mjs');
+// Through a variable, as the other tests reach Node-only scripts, so the test
+// project's typecheck does not follow it (`test/node-env.d.ts`).
+const HEADLESS_CANVAS = '../scripts/headless-canvas.mjs';
+await import(/* @vite-ignore */ HEADLESS_CANVAS);
 const { solveParkPlanNow } = await import('../src/world/parkPlan');
 const { archStation } = await import('../src/world/railRace/route');
 const { planExit, RAIL_RACE_PLAN } = await import('../src/world/railRace/plan');
