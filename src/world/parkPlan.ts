@@ -97,6 +97,22 @@ import { DuckBarRefusal } from './railRace/hazards';
 import { HAZARD_LAYOUT, planRaceBars } from './railRace/simulate';
 import { barSlotWithNoSupportRoom } from './railRace/track';
 
+/**
+ * **Test seams** — a test replaces one of these to inject a fault into a
+ * builder without editing its source (`test/parkSolveBounded.test.ts`). Unset
+ * in every real build. `var` for the reason `state` is: a solve can be forced
+ * while this module is still mid-evaluation.
+ */
+export interface ParkPlanSeams {
+  barSlotWithNoSupportRoom?: typeof barSlotWithNoSupportRoom;
+}
+/* eslint-disable-next-line no-var */
+export var parkPlanSeams: ParkPlanSeams | undefined;
+/** Install (or, with `undefined`, remove) the test seams. */
+export function setParkPlanSeams(seams: ParkPlanSeams | undefined): void {
+  parkPlanSeams = seams;
+}
+
 export interface TrainDecision {
   readonly route: TrainRoute;
   readonly stations: readonly PlannedStation[];
@@ -793,7 +809,7 @@ function builders(): readonly FeatureBuilder[] {
         ['walk-past', RAIL_RACE_PLAN.walkPastRing, road],
         ['race', RAIL_RACE_PLAN.raceRing, []],
       ] as const) {
-        const slot = barSlotWithNoSupportRoom(ring, HAZARD_LAYOUT, keepOff);
+        const slot = (parkPlanSeams?.barSlotWithNoSupportRoom ?? barSlotWithNoSupportRoom)(ring, HAZARD_LAYOUT, keepOff);
         if (slot !== null) {
           return refusal(
             `rail race: the ${name} ring's duck bar at slot ${slot} has no support that is a trunk` +
