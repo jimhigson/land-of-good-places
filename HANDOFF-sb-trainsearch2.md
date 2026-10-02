@@ -44,3 +44,23 @@ seed | before s (train) | after s (train) | unwinds
 15 | 172.6 (92.5) | 160.1 (118.5) | 14 -> 7
 total | 1330 | 1004
 cruiser total 537 -> 232 s. accept:parks --fresh running -> scratch accept.txt/accept.json
+
+## accept:parks -- 0-15 --fresh (head 050c334a, no --write): 16/16 accepted, 0 broken, 4683 s
+seed     0: accepted restart 8 after 9 attempt(s), 1487 s wall
+seed     1: accepted restart 2 after 3 attempt(s), 731 s wall
+seed     2: accepted restart 5 after 6 attempt(s), 426 s wall
+seed     3: accepted restart 2 after 3 attempt(s), 884 s wall
+seed     4: accepted restart 7 after 8 attempt(s), 894 s wall
+seed     5: accepted restart 0 after 1 attempt(s), 107 s wall
+seed     6: accepted restart 5 after 6 attempt(s), 1772 s wall
+seed     7: accepted restart 0 after 1 attempt(s), 458 s wall
+seed     8: accepted restart 4 after 5 attempt(s), 671 s wall
+seed     9: accepted restart 3 after 4 attempt(s), 1363 s wall
+seed    10: accepted restart 3 after 4 attempt(s), 604 s wall
+seed    11: accepted restart 4 after 5 attempt(s), 803 s wall
+seed    12: accepted restart 0 after 1 attempt(s), 61 s wall
+seed    13: accepted restart 2 after 3 attempt(s), 399 s wall
+seed    14: accepted restart 6 after 7 attempt(s), 622 s wall
+seed    15: accepted restart 5 after 6 attempt(s), 1033 s wall
+vs recorded: only seed 7 differs (now restart 0, was 3).
+DONE. Base worktree sb-ts2-base removed.
