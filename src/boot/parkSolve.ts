@@ -174,6 +174,8 @@ export interface SolveBudget {
   readonly unwinds: number;
   /** Turns (advances) in all before the attempt fails. */
   readonly turns: number;
+  /** The per-feature budgets for named features, where they differ — a test tightens one feature's alone. */
+  readonly byFeature?: Readonly<Record<string, Partial<Pick<SolveBudget, 'unwindsPerFeature' | 'decisionZeroPerFeature'>>>>;
 }
 
 export const DEFAULT_SOLVE_BUDGET: SolveBudget = {
@@ -538,18 +540,20 @@ export class ParkSolve {
     }
     // Rung 3's budget: a feature that has unwound the ledger this often has
     // shown that re-choosing what it names does not answer it — go to rung 4.
+    const own = this.budget.byFeature?.[refused.name];
+    const unwindsAllowed = own?.unwindsPerFeature ?? this.budget.unwindsPerFeature;
     const spent = this.stats.unwindsByFeature[refused.name] ?? 0;
-    if (spent >= this.budget.unwindsPerFeature) {
+    if (spent >= unwindsAllowed) {
       const escalated = this.stats.escalationsByFeature[refused.name] ?? 0;
-      if (escalated >= this.budget.decisionZeroPerFeature) {
+      if (escalated >= (own?.decisionZeroPerFeature ?? this.budget.decisionZeroPerFeature)) {
         this.exhaust(
           'decision-zero-per-feature',
-          `${refused.name} still refuses after its ${this.budget.unwindsPerFeature} unwinds and ` +
+          `${refused.name} still refuses after its ${unwindsAllowed} unwinds and ` +
             `${escalated} decision-zero redraws — ${refusal.reason}`,
         );
       }
       this.stats.escalationsByFeature[refused.name] = escalated + 1;
-      this.toDecisionZero(refused, refusal, `${refused.name} spent its ${this.budget.unwindsPerFeature} unwinds`);
+      this.toDecisionZero(refused, refusal, `${refused.name} spent its ${unwindsAllowed} unwinds`);
       return;
     }
     this.stats.unwindsByFeature[refused.name] = spent + 1;
