@@ -30,6 +30,7 @@ import './headless-canvas.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cpuMs } from './lib/cpuClock.mts';
+import { buildBug } from './lib/attemptError.mts';
 
 /**
  * **Whole check scripts that judge a per-park decision, asked as acceptance
@@ -120,7 +121,12 @@ try {
 } catch (error) {
   // The build itself gave up — a solver exhausted, a search that threw. That
   // is a park that could not be made from this stream: a reason to start again.
-  failures.push({ measure: 'build', count: 1, first: [firstLine(error)] });
+  // **Unless it is a bug** (`lib/attemptError.mts`: a TypeError, RangeError,
+  // ReferenceError or SyntaxError anywhere in its cause chain): a restart
+  // cannot fix that and must never be what hides it, so it is `broken`.
+  const bug = buildBug(error);
+  if (bug) broken ??= `build: ${firstLine(bug)}${bug.stack ? ` @ ${(bug.stack.split('\n')[1] ?? '').trim()}` : ''}`;
+  failures.push({ measure: 'build', count: 1, first: [firstLine(bug ?? error)] });
 }
 buildCpu = cpuMs() - cpu0;
 
