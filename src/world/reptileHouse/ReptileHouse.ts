@@ -240,7 +240,7 @@ export class ReptileHouse implements GameSystem {
     }
     registerReptileShellCollision(collision, this.frame, reptileHouseLowDiscs());
     registerPlinthStep(surfaces, this.frame, reptileHousePlinthTop());
-    atlas.applyTo(this.exterior.sign, atlas.paint('Reptile House', 'Say hi to the snakes!', '🐍'));
+    atlas.applyTo(this.exterior.sign);
   }
 
   // --------------------------------------------------------------- state
@@ -351,11 +351,14 @@ export class ReptileHouse implements GameSystem {
         this.tickle = Math.max(0, this.tickle - dt);
         const t = this.tickle / 2;
         this.exterior.head.rotation.z = Math.sin(t * Math.PI * 3) * 0.1;
-        this.exterior.tongue.scale.z = t > 0.6 ? 1 : 0.001;
+        this.exterior.tongue.visible = t > 0.6;
         this.exterior.setFace(t > 0.3 ? 'happy' : 'neutral');
       } else {
         this.exterior.head.rotation.z = Math.sin(elapsed * 0.4) * 0.02;
-        this.exterior.tongue.scale.z = Math.sin(elapsed * 0.7) > 0.98 ? 1 : 0.001;
+        // Hidden by visibility, not by a 0.001 scale along its length: that
+        // left the tongue's 0.69 × 0.31 m silhouette on the snout as a magenta
+        // frown under the eyes (the art review's crop, 2 October 2026).
+        this.exterior.tongue.visible = Math.sin(elapsed * 0.7) > 0.98;
       }
     }
 

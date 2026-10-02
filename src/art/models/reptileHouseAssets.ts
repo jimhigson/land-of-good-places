@@ -29,8 +29,9 @@ import { snakeFaceTextures, type SnakeExpression } from './snakeFace';
  * Origin on the ground at the building's centre, **door, head and awning all
  * facing +Z**. Two nodes carry UVs: `rh-head` wears the shared snake face
  * (`snakeFace.ts`) and `rh-sign` the anchor sign. `rh-tongue` is the one node
- * with a transform — a pure translation to the mouth — so a flick is
- * `scale.z 0 → 1` on the node about its own origin.
+ * with a transform — a pure translation to the mouth — so a flick is the node
+ * made `visible` for a moment (never a 0.001 scale along one axis, which
+ * leaves the tongue's flat silhouette on the snout).
  */
 const STYLES: Readonly<Record<string, PartStyle>> = {
   'rh-plinth': { colour: PALETTE.stonePink, outline: 0.02 },
@@ -88,11 +89,11 @@ function houseKit(): ReturnType<typeof loadReptileKit> {
 export interface ReptileHouseExterior extends AssetHandle {
   /** The head, pivoted about its own centre — yaw and tilt it for the tickle. */
   readonly head: Group;
-  /** The tongue, scaled 0 → 1 along its length to flick. */
+  /** The tongue, `visible` only for a flick. */
   readonly tongue: Mesh;
   /** The tail and its bell — the signpost by the door. */
   readonly tail: Group;
-  /** The plank the anchor sign is painted on (UVs authored; paint via `glbCanvasTexture`). */
+  /** The plank the anchor sign is painted on (planar UVs authored the gate arch's way; dress it from the hall's `SignAtlas`, which flips the canvas via `planarUvCanvasTexture`). */
   readonly sign: Mesh;
   /** The twelve porthole panes, lit after dark. */
   readonly windows: Mesh;
@@ -177,7 +178,7 @@ export function createReptileHouseExterior(): ReptileHouseExterior {
   const tongue = parts.mesh('rh-tongue');
   // The node's own translation is the mouth; re-expressed about the pivot.
   tongue.position.add(headMesh.position);
-  tongue.scale.z = 0.001;
+  tongue.visible = false;
   head.add(tongue);
   root.add(head);
 

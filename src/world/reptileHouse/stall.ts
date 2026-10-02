@@ -93,8 +93,7 @@ export class ReptileStall {
 
     const dressing = createReptileStallDressing();
     group.add(dressing.root);
-    const signCell = ctx.atlas.paint('Scales & Tails', 'Snake toys, hats and jelly snakes.', '🐍');
-    ctx.atlas.applyTo(dressing.sign, signCell);
+    ctx.atlas.applyTo(dressing.sign);
 
     this.keeper = createKeeper({ colour: PALETTE.leafMid });
     this.keeper.root.position.set(-0.9, 0.1, 0.45);
@@ -129,7 +128,7 @@ export class ReptileStall {
     meterGroup.add(meter.root);
     ctx.root.add(meterGroup);
     this.meterGroup = meterGroup;
-    ctx.atlas.applyTo(meter.board, ctx.atlas.paint('Noodle-o-meter', 'How many baby snakes tall are you?', '📏'));
+    ctx.atlas.applyTo(meter.board);
     ctx.props.disc('the Noodle-o-meter', METER_POSITION.x, METER_POSITION.z, meter.baseRadius, 'wall');
 
     const nursery = EXHIBIT_PLACEMENTS.find((exhibit) => exhibit.id === 'nursery');

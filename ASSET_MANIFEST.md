@@ -362,9 +362,14 @@ hemisphere only, `u` with +X, `v = (hi − z)/h` to cancel the exporter's 1−v
 — identical to `gate-arch-sign`'s convention; the back hemisphere is parked
 at UV (0.02, 0.02), which the canvas leaves as plain body colour) wearing the
 shared snake face (`snakeFace.ts`), and `rh-sign` (a 1.70 × 0.85 plank,
-planar UVs on all faces) painted from the hall's sign atlas. `rh-tongue` is
-the one node with a transform: a pure translation to the mouth (0.00, 10.08,
-7.85 in game XYZ), so a flick is `scale 0 → 1` on the node.
+planar UVs on all faces) dressed from the hall's sign atlas. **That
+convention wants `flipY` on** — `art/style/glb.ts`'s `planarUvCanvasTexture`,
+never `glbCanvasTexture` (which is for kits authored the glTF way, like the
+hotel's signboard); painted through the wrong one, the face is upside-down
+and the plank reads rotated, which is how the first cut shipped (2 October
+2026). `rh-tongue` is the one node with a transform: a pure translation to
+the mouth (0.00, 10.08, 7.85 in game XYZ), so a flick is the node made
+`visible` for a moment.
 
 ### 36 — Reptile House: enclosure masonry, the `cases` kit (`src/art/models/reptileCasesAssets.ts`)
 
@@ -510,6 +515,8 @@ load), 6 bands every `REPTILE_BABY_SNAKE_UNIT`, board top 3.59 m, base disc
 radius **0.340 m**, measured for its collider. Measured headroom in front of
 the counter: **+0.280 m** over `TALLEST_CHILD_HEIGHT` (asserted at load). Only
 `rs-sign` (1.50 × 0.50 m) and `rs-meter-board` (1.00 × 0.45 m) carry UVs,
-planar, already flipped for glTF, painted from the hall's sign atlas. No rig,
+planar, `v = (hi − z)/h` the gate arch's way — so they are dressed with a
+`flipY = true` canvas (`planarUvCanvasTexture`) from the hall's sign atlas,
+each in a cell painted at the plank's own measured aspect. No rig,
 no hinges, no animation, no materials. Renders:
 `art/renders/reptile-stall/*.png` by `pnpm run render:reptile-stall`.

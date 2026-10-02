@@ -1,4 +1,5 @@
-import { CanvasTexture, Group, Mesh, SRGBColorSpace, Vector3 } from 'three';
+import { CanvasTexture, Group, Mesh, Vector3 } from 'three';
+import { planarUvCanvasTexture } from '../style/glb';
 import { GATE_ARCH_GLB_BASE64 } from '../assets/gateArchGlb';
 import { base64ToArrayBuffer, readGlbParts, type GlbPart } from '../style/glb';
 import { addOutline, disposeTree, markShared, solid, toonMaterial } from '../style/materials';
@@ -234,10 +235,11 @@ function canvasOf(width: number, height: number): {
 }
 
 function finish(canvas: HTMLCanvasElement): CanvasTexture {
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
+  // `flipY` on: the arch's UVs come from `paint_planar_uvs`, which pre-inverts
+  // `v` for the exporter — see `planarUvCanvasTexture`, the owner of which
+  // kits want the flip and which do not.
+  const texture = planarUvCanvasTexture(canvas);
   texture.anisotropy = 8;
-  texture.needsUpdate = true;
   // Shared and owned here, so `disposeTree` must never free it.
   return markShared(texture);
 }

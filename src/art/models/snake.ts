@@ -226,7 +226,9 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
   headMaterial.map = faces.neutral;
   headMaterial.needsUpdate = true;
   const tongue = reptileCreatureMesh('rr-snake-tongue');
-  tongue.scale.set(1, 1, 0.001);
+  // Hidden by visibility for the flick, not by a 0.001 scale along its
+  // length — that leaves the tongue's flat silhouette on the snout.
+  tongue.visible = false;
   if (!options.headless) {
     head.add(headMesh);
     headMesh.add(tongue);
@@ -281,7 +283,7 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
       nextTongue = rng.range(4, 9);
       tongueFor = 0.12;
     }
-    tongue.scale.z = tongueFor > 0 ? 1 : 0.001;
+    tongue.visible = tongueFor > 0;
     faceLife.update(dt, reaction > 0 ? 'happy' : resting === 'neutral' ? 'neutral' : 'happy');
 
     // Segments are written in the pool parent's space.

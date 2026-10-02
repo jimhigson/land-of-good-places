@@ -1,6 +1,6 @@
 import type { CanvasTexture } from 'three';
 import { ART } from '../style/artPalette';
-import { glbCanvasTexture } from '../style/glb';
+import { planarUvCanvasTexture } from '../style/glb';
 import { markShared } from '../style/materials';
 import { paintFace, type FacePaintOptions } from '../style/faces';
 
@@ -14,6 +14,14 @@ import { paintFace, type FacePaintOptions } from '../style/faces';
  * and every snake from a 0.3 m hatchling to the ten-metre building wears the
  * same smile — which is the point: the babies are *Noodle's* babies, and the
  * house is a snake because the snakes are.
+ *
+ * **Right way up by the kits' own convention.** All three heads are authored
+ * with `v = (hi_z − z) / h` (the gate arch's `paint_planar_uvs` recipe), so
+ * `v` climbs with height once the `.glb` is read and the canvas has to be
+ * flipped on upload — `planarUvCanvasTexture`, never `glbCanvasTexture`.
+ * Painted through the latter (as it was until 2 October 2026) the mouth sat
+ * above the eyes on every snake in the park; `check:reptile-house`'s
+ * painted-faces clause now reads the UVs and the flip together.
  *
  * The features are **ink on an opaque white fill**, so `MeshToonMaterial`'s
  * own `color` tints the whole head: a mint snake gets mint skin and dark-mint
@@ -89,5 +97,5 @@ function paintOnFill(options: FacePaintOptions): CanvasTexture {
   const image = patch.image as CanvasImageSource;
   ctx.drawImage(image, 0, 0, WIDTH, HEIGHT);
   patch.dispose();
-  return glbCanvasTexture(canvas);
+  return planarUvCanvasTexture(canvas);
 }

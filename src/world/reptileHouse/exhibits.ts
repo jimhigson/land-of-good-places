@@ -78,9 +78,17 @@ import {
  * The copy is a table (`check:brevity` walks it: title ≤ 24 characters, blurb
  * one sentence of ≤ 50, chip a short call to action) and the building is what
  * the table describes: a glass wall case or an open walled enclosure from the
- * `cases` kit, the animals inside it, a nameplate off the sign atlas, and one
- * `InteractZone` whose chip pokes the animals. Every animal is cute, smiley and
- * never scary; every reaction is a two-second state on the creature itself.
+ * `cases` kit, the animals inside it, and one `InteractZone` whose chip pokes
+ * the animals. Every animal is cute, smiley and never scary; every reaction is
+ * a two-second state on the creature itself.
+ *
+ * **No nameplates.** The first cut painted each exhibit's title and blurb on a
+ * 1.6 × 0.2 m plate — 6–8 cm letters nobody could read from the stand spot,
+ * against GAME_DESIGN.md's TEXT RULE and the 28 July ruling that in-world
+ * signs carry no painted words (`signs.ts` has the account). The title is the
+ * zone's label (DOM text, sized by the rule), and the blurb is said in a
+ * speech bubble over the exhibit the first time it is greeted — the same
+ * line, where a child can read it.
  *
  * Coordinates are hall-local. The glass cases' colliders are the one
  * `addWall` capsule their plinth is drawn to, the round enclosures one filled
@@ -90,6 +98,7 @@ import {
 export interface ExhibitCopy {
   readonly id: string;
   readonly title: string;
+  /** One sentence, said in a bubble over the exhibit on its first hello. */
   readonly blurb: string;
   /** The chip — a short call to action. */
   readonly chip: string;
@@ -121,10 +130,27 @@ export const FOUND_YOU_CHIP = 'Found you!';
 /** The nursery's second chip — the adoption stand. */
 export const ADOPT_CHIP = 'Adopt a snake!';
 
+/** The grotto pool's basin, in the grotto rock's own frame — where the `cases` kit cut it. */
+const GROTTO_BASIN: LocalPoint = { x: 0.3, z: 1.3 };
+
+/** A point in the grotto rock's frame, hall-local. */
+function grottoLocal(x: number, z: number): LocalPoint {
+  const yaw = (GROTTO_ROCK_YAW * Math.PI) / 180;
+  return {
+    x: GROTTO_ROCK.x + Math.cos(yaw) * x + Math.sin(yaw) * z,
+    z: GROTTO_ROCK.z - Math.sin(yaw) * x + Math.cos(yaw) * z,
+  };
+}
+
+/** The grotto pool's middle, hall-local — the planting keeps the sightline from hidden baby #2's stand to it clear. */
+export function grottoPoolSpot(): LocalPoint {
+  return grottoLocal(GROTTO_BASIN.x, GROTTO_BASIN.z);
+}
+
 const PICK_RADIUS = 2.4;
 const PEEK_RANGE = 5;
-const NAMEPLATE_WIDTH = 1.6;
-const NAMEPLATE_HEIGHT = 0.2;
+/** Where the first-hello bubble floats over an exhibit: above the glass cases' rims. */
+const BLURB_BUBBLE_Y = 3.1;
 
 const GLASS = glassMaterial(0.24);
 GLASS.side = DoubleSide;
@@ -266,9 +292,13 @@ export class Exhibits {
   ): InteractZone {
     const copy = this.copy(id);
     const greetAndRun = (): void => {
+      const first = !this.greeted.has(id);
       this.greeted.add(id);
       this.ctx.greet(id);
       run();
+      // The first hello gets the exhibit's one line as a bubble over it —
+      // after `run`, so it wins over the reaction's own 'peep!' this once.
+      if (first) this.ctx.say(copy.blurb, focus, BLURB_BUBBLE_Y);
     };
     return {
       id: `reptile:${id}`,
@@ -283,15 +313,6 @@ export class Exhibits {
       highlight: highlightObject(highlight),
       actions: () => [{ id: PRIMARY_ACTION, label: copy.chip, glyph: copy.glyph, run: greetAndRun }, ...(extra ? extra() : [])],
     };
-  }
-
-  private nameplate(id: string, x: number, z: number, yaw: number, y: number, parent: Object3D = this.ctx.root): void {
-    const copy = this.copy(id);
-    const cell = this.ctx.atlas.paint(copy.title, copy.blurb, copy.glyph);
-    const plate = this.ctx.atlas.plate(cell, NAMEPLATE_WIDTH, NAMEPLATE_HEIGHT);
-    plate.position.set(x, y, z);
-    plate.rotation.y = yaw;
-    parent.add(plate);
   }
 
   private shapeCentre(shape: ExhibitShape): LocalPoint {
@@ -348,7 +369,6 @@ export class Exhibits {
     lamp.scale.setScalar(0.9);
     lamp.position.set(0, REPTILE_GLASS_TOP + 0.25, half - 0.3);
     group.add(lamp);
-    this.nameplate(placement.id, 0, half + 0.03, 0, 0.72, group);
     this.registerShape(placement.id, shape, REPTILE_GLASS_TOP);
     return group;
   }
@@ -660,7 +680,6 @@ export class Exhibits {
       snakes.push(snake);
     }
     const centre = this.shapeCentre(placement.shape);
-    this.nameplate(placement.id, centre.x + Math.sin((135 * Math.PI) / 180) * 2.43, centre.z + Math.cos((135 * Math.PI) / 180) * 2.43, (135 * Math.PI) / 180, 0.95);
     return {
       id: placement.id,
       zone: this.zone(placement.id, centre, placement.stand, banyan, () => {
@@ -705,8 +724,6 @@ export class Exhibits {
     const speed = 0.15;
     const at = new Vector3();
     const ahead = new Vector3();
-    const half = placement.shape.kind === 'stadium' ? placement.shape.half : 0;
-    this.nameplate(placement.id, centre.x, centre.z + half + 0.03, 0, 0.95);
     return {
       id: placement.id,
       zone: this.zone(
@@ -771,8 +788,6 @@ export class Exhibits {
     const at = new Vector3();
     const ahead = new Vector3();
     const centre = this.shapeCentre(placement.shape);
-    const half = placement.shape.kind === 'stadium' ? placement.shape.half : 0;
-    this.nameplate(placement.id, centre.x, centre.z + half + 0.03, 0, 0.95);
     return {
       id: placement.id,
       zone: this.zone(placement.id, centre, placement.stand, snappy.root, () => {
@@ -821,7 +836,6 @@ export class Exhibits {
       iguanas.push(iguana);
     }
     const centre = this.shapeCentre(placement.shape);
-    this.nameplate(placement.id, centre.x, centre.z - 2.43, Math.PI, 0.95);
     return {
       id: placement.id,
       zone: this.zone(placement.id, centre, placement.stand, group, () => {
@@ -895,7 +909,6 @@ export class Exhibits {
     lampGlow.scale.setScalar(0.8);
     lampGlow.position.set(1.8, 1.45, -1.4);
     group.add(lampGlow);
-    this.nameplate(placement.id, centre.x + shape.radius + 0.03, centre.z, Math.PI / 2, 0.45);
     return {
       id: placement.id,
       zone: this.zone(
@@ -967,7 +980,6 @@ export class Exhibits {
     const hidden: HiddenBaby = { index: 4, snake: baby, at: { x: centre.x + hatSpot.x, z: centre.z + hatSpot.z }, restY: floor + 0.08, found: false };
     this.babies.push(hidden);
     this.registerShape(placement.id, shape, REPTILE_GLASS_TOP);
-    this.nameplate(placement.id, centre.x, centre.z + shape.radius + 0.03, 0, 0.42);
     let chorus = 0;
     return {
       id: placement.id,
@@ -1025,7 +1037,6 @@ export class Exhibits {
       this.ctx.props.disc("Noodle's snout", Math.SQRT1_2 * at, Math.SQRT1_2 * at, over / 2 + 0.15, 1.3, { stand: false });
     }
     const headAt: LocalPoint = { x: rock.head.position.x, z: rock.head.position.z };
-    this.nameplate(placement.id, 3.43, 0.2, Math.PI / 2, 0.35);
     return {
       id: placement.id,
       zone: this.zone(placement.id, headAt, placement.stand, rock.head, () => {
@@ -1124,8 +1135,8 @@ export class Exhibits {
     group.add(reptileCaseMesh('rc-grotto-rock'), reptileCaseMesh('rc-grotto-moss'));
     this.ctx.root.add(group);
     // The pool basin and the waterfall lip, where the kit puts them (local).
-    const basinX = 0.3;
-    const basinZ = 1.3;
+    const basinX = GROTTO_BASIN.x;
+    const basinZ = GROTTO_BASIN.z;
     const pool = decal(new Mesh(new CylinderGeometry(1.15, 1.15, 0.04, 24), toonMaterial(PALETTE.waterTop, { emissive: PALETTE.waterTop, emissiveIntensity: 0.15 })));
     pool.position.set(basinX, 0.3, basinZ);
     group.add(pool);
@@ -1136,12 +1147,7 @@ export class Exhibits {
     const baby = createSnake({ length: 0.3, radius: 0.05, colourway: 'mint', seed: 1600, pool: this.ctx.babies });
     baby.root.position.set(basinX + 0.3, 0.2, basinZ + 0.2);
     group.add(baby.root);
-    const yaw = (GROTTO_ROCK_YAW * Math.PI) / 180;
-    const at: LocalPoint = {
-      x: GROTTO_ROCK.x + Math.cos(yaw) * (basinX + 0.3) + Math.sin(yaw) * (basinZ + 0.2),
-      z: GROTTO_ROCK.z - Math.sin(yaw) * (basinX + 0.3) + Math.cos(yaw) * (basinZ + 0.2),
-    };
-    this.hiddenBaby(1, baby, at, 0.2, HIDDEN_BABY_SPOTS[1]!, 'the grotto pool');
+    this.hiddenBaby(1, baby, grottoLocal(basinX + 0.3, basinZ + 0.2), 0.2, HIDDEN_BABY_SPOTS[1]!, 'the grotto pool');
   }
 
   /** The foyer's tall-banana pot, with hidden baby #3 peeking over its rim. */
