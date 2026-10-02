@@ -117,6 +117,16 @@ work that feeds nothing else: path-preference's router sweeps, slide-rider's
 chase rasters and trough sweep, and pet-slide's control descent. CI's run of
 each script asks every clause.
 
+The measures are asked **in three cost stages**, and the attempt stops at the
+first stage that rejects (`lib/attemptStages.mts`). Stage 1 is the
+invariants, the checks on the attempt's own park, and `check:park`. Stage 2 is
+cat-bus and stall-accommodate. Stage 3 is npc-dispersal, slide-rider,
+pet-slide and `check:rail-race`. A rejected attempt pays only up to its stage,
+and its verdict names what was never asked ("not asked: rejected at stage N").
+An accepted attempt has been asked everything, so the guarantee is unchanged;
+`test/attemptStages.test.ts` holds a park that fails only stage 3 to a
+rejection. A void stops the attempt in any stage.
+
 A check's clauses are sorted three ways. **Decision** clauses fail the attempt
 and the park starts again. **Voids** (a control that misbehaved, nothing found
 to measure) mark the attempt `broken`, and the loop stops. **Code** clauses
