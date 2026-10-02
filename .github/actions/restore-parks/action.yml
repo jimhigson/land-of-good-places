@@ -1,13 +1,15 @@
 name: Restore the accepted parks
 description: >-
-  Waits for the Parks workflow to have built this tree's accepted parks
-  (`.github/workflows/parks.yml`), then restores them into `.parks/`, so this
-  job builds every park at the restart build:parks accepted and searches for
-  none (`builtRestartOf`). Fails loudly if Parks failed or never finishes.
-inputs:
-  wait-minutes:
-    description: How long to wait for the Parks workflow before failing.
-    default: '70'
+  Restores this tree's accepted parks into `.parks/` from the cache the Parks
+  workflow (`.github/workflows/parks.yml`) saved earlier in the same run, so
+  this job builds every park at the restart build:parks accepted and searches
+  for none (`builtRestartOf`). Fails loudly on a miss.
+# **No waiting in here, and no API call.** The job using this sits behind a
+# `needs:` edge on the Parks call in `ci.yml` (gated on its `ready` output), so
+# by the time it runs the cache is either there or Parks failed and this job
+# was never started. This action used to poll the caches and runs API until the
+# key appeared, from every consuming workflow at once, and that exhausted the
+# installation's rate limit (HTTP 403) on PR #705.
 runs:
   using: composite
   steps:
@@ -17,49 +19,6 @@ runs:
       # The one owner of what a park depends on (scripts/lib/park-source-hash.mjs):
       # the import closure of the solver and the measures, not whole directories.
       run: echo "hash=$(node scripts/lib/park-source-hash.mjs)" >> "$GITHUB_OUTPUT"
-
-    - name: Wait for the Parks workflow's cache
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-        KEY: prebuilt-parks-${{ steps.hash.outputs.hash }}
-        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        WAIT_MINUTES: ${{ inputs.wait-minutes }}
-        # Only caches this run can actually restore count: its own ref, the PR's
-        # base branch, and the default branch. A key saved under some other
-        # ref (the PR, seen from main's push) is visible to `gh cache list` but
-        # not restorable here, and waiting on it would fail the restore below.
-        THIS_REF: ${{ github.ref }}
-        BASE_REF: ${{ github.base_ref && format('refs/heads/{0}', github.base_ref) || '' }}
-        DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
-      run: |
-        deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
-        while :; do
-          ready=""
-          for ref in "$THIS_REF" "$BASE_REF" "$DEFAULT_REF"; do
-            [ -n "$ref" ] || continue
-            if gh cache list --repo "$GITHUB_REPOSITORY" --key "$KEY" --ref "$ref" --json key -q '.[].key' | grep -qx "$KEY"; then
-              ready="$ref"
-              break
-            fi
-          done
-          if [ -n "$ready" ]; then
-            echo "parks ready: $KEY (saved under $ready)"
-            break
-          fi
-          failed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow parks.yml --commit "$HEAD_SHA" \
-            --json status,conclusion -q '[.[] | select(.status == "completed" and .conclusion != "success")] | length')
-          if [ "${failed:-0}" != "0" ]; then
-            echo "::error::the Parks workflow for $HEAD_SHA did not succeed, so there are no accepted parks for this tree ($KEY)"
-            exit 1
-          fi
-          if [ "$(date +%s)" -ge "$deadline" ]; then
-            echo "::error::no accepted parks ($KEY) after ${WAIT_MINUTES} min — is the Parks workflow running for $HEAD_SHA?"
-            exit 1
-          fi
-          echo "waiting for $KEY …"
-          sleep 30
-        done
 
     - name: Restore the parks
       uses: actions/cache/restore@v4
