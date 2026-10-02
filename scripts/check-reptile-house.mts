@@ -37,11 +37,23 @@
  *
  * **Proven red before trusted green**, on 2 October 2026 with
  * `REPTILE_CHECK_REMOVE=lagoon` (the lagoon's one stadium collider removed
- * after the build): clause 2 reported the lagoon's middle reachable and the
- * drawn lagoon wall with no collider, clause 4 marched inside it from 16
- * bearings, clause 9 put Snappy outside any enclosure. The geometry that was
- * proved against is `layout.ts`'s `EXHIBIT_PLACEMENTS` lagoon stadium
- * (13, −3)→(17, −3) half 3 at origin (600, −600).
+ * after the build), seed 5 restart 1, 8 clauses red:
+ *
+ * ```
+ *   ✗ lagoon's middle is NOT reachable
+ *   ✗ lagoon — 22 of 32 marches got inside it
+ *   ✗ 11 of 60 jump-height marches got over a 1.45 m wall (apex 1.28 m)
+ *   ✗ enclosure:lagoon/rc-lagoon-wall/rc-lagoon-wall (1.50 m tall) has no collider at (15.00, -3.00)
+ *   ✗ enclosure:lagoon/rp-rock-a/rp-rock-a (0.74 m tall) has no collider at (15.52, -3.83)
+ *   ✗ enclosure:lagoon/reptile.croc//rr-croc-body/rr-croc-body (0.78 m tall) has no collider at (13.27, -2.26)
+ *   ✗ enclosure:lagoon/reptile.croc//rr-croc-tail/rr-croc-tail (0.66 m tall) has no collider at (13.99, -3.21)
+ *   ✗ 55 tall drawn solids checked, 4 with no collider
+ * ```
+ *
+ * The geometry that was proved against is `layout.ts`'s `EXHIBIT_PLACEMENTS`
+ * lagoon stadium (13, −3)→(17, −3) half 3 at origin (600, −600), walls at
+ * `REPTILE_ENCLOSURE_WALL_HEIGHT` 1.45. (Clause 9 stays green under that
+ * mutation: animals are measured by position, not by collider.)
  */
 import './headless-canvas.mjs';
 import { Group, Mesh, Box3, Vector3 } from 'three';

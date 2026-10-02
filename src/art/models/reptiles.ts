@@ -111,7 +111,9 @@ export function createCroc(seed: number): CrocHandle {
     [0.6, -0.4],
   ] as const) {
     const leg = stubLeg(0.13, 0.3, PALETTE.leafDeep);
-    leg.position.set(x, 0.15, z);
+    // Splayed 0.5 rad, so the pad's far rim comes down 0.062 m; stood at
+    // 0.2 the lowest point is 6 mm above the floor and the origin stays the base.
+    leg.position.set(x, 0.2, z);
     leg.rotation.z = x < 0 ? 0.5 : -0.5;
     body.add(leg);
   }

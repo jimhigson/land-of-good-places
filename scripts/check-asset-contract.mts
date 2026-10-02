@@ -310,7 +310,10 @@ function collect(): Subject[] {
   add('reptile.skink', createSkink(7));
   add('reptile.iguana', createIguana(8));
   add('reptile.egg', createEgg(9, false));
-  add('reptile.house', createReptileHouseExterior());
+  // The exterior's origin is the ground under the plinth; the arch's legs run
+  // 0.1 m down into the plinth by design (their outline to 0.12), so only the
+  // height half of the contract applies.
+  add('reptile.house', createReptileHouseExterior(), 'anchor');
   add('reptile.noodleRock', createNoodleRock(), 'anchor');
   add('reptile.noodleTailMound', createNoodleTailMound(), 'anchor');
   add('reptile.stallDressing', createReptileStallDressing(), 'anchor');

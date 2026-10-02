@@ -263,10 +263,15 @@ export function createSnake(options: SnakeOptions): SnakeHandle {
   const wavelength = 0.8;
   const k = (Math.PI * 2) / wavelength;
 
-  const update = (dt: number, _elapsed: number): void => {
+  const update = (dt: number, elapsed: number): void => {
     if (crawl > 0) headAt = (headAt + crawl * dt) % pathLength;
+    // A house snake's wave runs on its own clock. A parade snake's is the
+    // walk phase, **scaled by speed** — so standing still it carries only the
+    // idle wiggle on `elapsed`, and `check:assets`' rest-pose rule (a walk
+    // cycle at zero speed moves nothing) holds: the swing is added to the
+    // rest, never assigned over it.
     if (walkPhase === null) wave += waveSpeed * dt;
-    else wave = walkPhase * Math.PI * 2;
+    else wave = elapsed * 0.6 + walkPhase * Math.PI * 2 * waveSpeed;
     if (reaction > 0) reaction = Math.max(0, reaction - dt);
     const amplitude = radius * 0.5 * wriggle * (reaction > 0 ? 2.2 : 1);
 
@@ -424,6 +429,11 @@ export function createNoodlePlush(): AssetHandle {
   }
   const snake = createSnake({ length: 3.6, radius: 0.12, colourway: 'mint', seed: 0x9100d, path, headLookAt: new Vector3(0, 0.5, 1.2) });
   snake.root.name = 'toy.noodlePlush';
+  // Origin at the base, as the shop contract promises: the coil's lowest
+  // sphere sits a few centimetres up its own path, so the body comes down by
+  // the measured amount rather than a guessed one.
+  const { bottom } = visibleBounds(snake.root);
+  snake.body.position.y -= bottom;
   return { root: snake.root, height: visibleBounds(snake.root).top, update: snake.update };
 }
 
