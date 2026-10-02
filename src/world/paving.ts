@@ -209,3 +209,12 @@ export function pointIsOnDrawnPath(x: number, z: number, layer: DrawnPathLayer):
 export function forgetPavingForTesting(): void {
   source = null;
 }
+
+/**
+ * The published reader, so a check that forgets the paving to measure a
+ * paving-blind router can put it back afterwards ({@link publishPaving}) — the
+ * acceptance loop asks that check in the same process as the rest of the park.
+ */
+export function pavingSourceForTesting(): PavedDiscSource | null {
+  return source;
+}

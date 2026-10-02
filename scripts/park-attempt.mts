@@ -55,11 +55,6 @@ import { VOID_EXIT } from './lib/checkScope.mts';
  */
 const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
   'scripts/check-rail-race.mts',
-  // Builds its own park and forgets the paving to build a second lattice, so
-  // it cannot share this process's park. Asked under the acceptance scope:
-  // only its decision clauses (the network a park drew, how routes sit on it)
-  // fail the attempt; the router's own clauses are code.
-  'scripts/check-path-preference.mts',
 ];
 
 /**
@@ -141,6 +136,16 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
       const { castleTowerFindings } = await import('./lib/castleTowers.mts');
       // Only the clauses a park decides: turret solidity is code, fixed at cause.
       const { decisions, voids } = await castleTowerFindings(park);
+      return { faults: decisions, voids };
+    },
+  ],
+  [
+    'check:path-preference',
+    async (park) => {
+      const { pathPreference } = await import('./lib/pathPreference.mts');
+      // Only the clauses the park decides (the network it drew, how routes sit
+      // on it); the router's own are code, fixed at cause.
+      const { decisions, voids } = await pathPreference(park, { quiet: true });
       return { faults: decisions, voids };
     },
   ],
