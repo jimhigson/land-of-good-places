@@ -30,7 +30,11 @@
  * the native function keeps that value. It is installed by
  * `scripts/ts-extension-resolver-register.mjs` for Node scripts, by
  * `test/setupDeterministicMath.ts` for vitest, and by the first import of
- * `main.ts` in the browser. {@link assertDeterministicMath}, called when
+ * `main.ts` (and of each art-sample page) in the browser. That last one holds
+ * in a production build only because `vite.config.ts` sets
+ * `strictExecutionOrder`: by default the bundler evaluates the chunks an entry
+ * imports before the entry itself, and `parkManifest.ts` sits in one of them,
+ * so the first production build after this change refused to boot. {@link assertDeterministicMath}, called when
  * `parkManifest.ts` loads, refuses to generate a park without them.
  *
  * Not covered: the `**` operator. V8 compiles it to its native pow, and

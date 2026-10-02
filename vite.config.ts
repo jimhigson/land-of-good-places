@@ -102,6 +102,19 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        // **Modules run in the order the source imports them, whatever chunk
+        // they land in.** `main.ts`'s first import installs the deterministic
+        // Math (src/core/deterministicMath.ts) that every park is generated
+        // with. Without this, the bundler evaluates the chunks an entry imports
+        // before the entry's own modules, and `parkManifest.ts` sits in one of
+        // them: the first production build after that change refused to boot
+        // ("Math.sin ... are still the platform's own"). The dev server and Node
+        // already follow source order, so this makes the build agree with them.
+        strictExecutionOrder: true,
+      },
+    },
   },
   // The bundle's own baked-in copy of `APP_VERSION`, read by
   // `src/version-check.ts` — see that file for why polling a flat text file
