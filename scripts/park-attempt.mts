@@ -55,6 +55,12 @@ import { VOID_EXIT } from './lib/checkScope.mts';
  */
 const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
   'scripts/check-rail-race.mts',
+  // These move the world under them (booths stepping aside; the arrival and
+  // thirty seconds of crowd), so each gets a park of its own. Asked under the
+  // acceptance scope: only their decision clauses fail the attempt. Measured
+  // on seed 5 restart 0, CPU including the build: 18 s and 25 s.
+  'scripts/check-stall-accommodate.mts',
+  'scripts/check-cat-bus.mts',
 ];
 
 /**
