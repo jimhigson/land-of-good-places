@@ -81,6 +81,74 @@ is marked `broken` and the loop stops, because a restart cannot fix it and
 searching around it would hide it. A **build** that throws (a solver
 exhausted) is a failed park and gets a restart.
 
+### Every CI check that judges a park is asked
+
+The ruling: **an accepted park must not be able to turn any CI check red.** So
+every check script that judges a decision a park made is an acceptance
+measure, through one owner shared by the check and the loop:
+
+- **In-process** (`ACCEPTANCE_CHECK_MEASURES` in `scripts/park-attempt.mts`),
+  through the function the script is now a printer over: `check:entrance-road`
+  (`lib/entranceRoad.mts`), `check:swept-bus` (`lib/sweptBus.mts`),
+  `check:castle-window` and `check:cruiser-turn-radius` (`lib/rideFindings.mts`),
+  `check:coplanar`'s ratchet on the garden (`lib/coplanarRatchet.mts`),
+  `check:every-seed-builds`' "built well" and false-refusal clauses
+  (`lib/builtWell.mts`), `check:castle-towers` (`lib/castleTowers.mts`),
+  `check:path-preference` (`lib/pathPreference.mts`) and `check:waypoints`
+  (`lib/waypointFindings.mts`: waypoints are sampled off a park's own paths).
+- **In a process of its own** (`ACCEPTANCE_CHECK_SCRIPTS`), for checks that run
+  a simulation which moves the world under it: `check:rail-race`, plus the
+  scripts under `LGP_CHECK_SCOPE=acceptance` (`lib/checkScope.mts`).
+
+A check's clauses are sorted three ways. **Decision** clauses fail the attempt
+and the park starts again. **Voids** (a control that misbehaved, nothing found
+to measure) mark the attempt `broken`, and the loop stops. **Code** clauses
+judge behaviour that is the same on every park, so they are reported but never
+restarted around; one failing on every park would otherwise run the loop to
+`MAX_RESTARTS`. Under the scope a script fails only on its decision clauses.
+CI runs it unscoped and fails on all three, as before.
+
+### Outside acceptance, and why
+
+Each of these is red on every park or on none, so no restart can change it.
+They are fixed at cause:
+
+- **No park at all**: `check:node`, `check:text`, `check:flat-primitives` (a
+  source scan), `check:cycle-tdz`, `check:chain-coverage`, `check:brevity`,
+  `check:assets`, `check:hat-fit`, `check:glasses-fit`, `check:hood-face`,
+  `check:baked-face`, `check:hair`, `check:character-parity`,
+  `check:shop-spacing`, `check:stall-shape`, `check:gondola-sightline`,
+  `check:orientation`, `check:sky-view`, `check:space-night`,
+  `check:seed-pool`, `check:seed-coverage`, `check:backpack-peek`,
+  `check:keyring-hang`.
+- **Authored, the same on every seed**: `check:castle`, `check:castle-floors`,
+  `check:hall-solid`, `check:benches`, `check:nav-routes` (the hotel lobby),
+  `check:keyring-view`, the interiors
+  half of `check:coplanar`, and the hotel's interior probes in `check:hotel`.
+- **Code: a mechanism, a router, a rig or a physics rule**, judged on one park
+  but the same on any: `check:tie-frame`, `check:cart-shape`, `check:park-map`
+  (the projection), `check:ground-claims`, `check:layout-rung`,
+  `check:tap-spacing` (its park half is the invariant
+  `tapTargetsKeepTheirDistance`, already asked), `check:look-around`,
+  `check:deck-fallthrough`, `check:wall-tunnelling`, `check:hop-clearance`,
+  `check:walk-reach`, `check:climb-wave` (the wave pose), `check:jitter`,
+  `check:crowd`'s driver trace with npc-perch, npc-separation and npc-presence,
+  `check:speech-bubbles`, `check:ride-camera`, `check:statue-occlusion`,
+  `check:bus-journey`, `check:cat-bus-suspension`, `check:arrival-completes`,
+  `check:arrival-camera`, `check:deep-links` and `check:walking`. Also the code
+  clauses of the scoped checks: path-preference's detour ceilings,
+  reachability and child/player agreement, cat-bus's arrival and model,
+  slide-rider's rig and pose, and pet-slide's parade.
+- **Already covered by an invariant asked by the loop**:
+  `check:cruiser-clearance` (`skyCruiserFliesClearOfThePark`, the same
+  `cruiserStrikes`), `check:cruiser-solves` (an unsolvable route throws in the
+  build, and a build throw fails the attempt), and the "built" half of
+  `check:every-seed-builds` (`check:park`).
+- **Budget and baseline upkeep**: `check:solve-cost` (CPU time, which is not
+  deterministic and is not a property of the park), `BASELINE LOOSE` in
+  `check:coplanar` and `check:every-seed-builds` (a seam or a decision zero
+  that has gone away, which asks for the baseline to be re-taken).
+
 ### Termination
 
 Each restart is an independent draw from the parks the generator makes. If a

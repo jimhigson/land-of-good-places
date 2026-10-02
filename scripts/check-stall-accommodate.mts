@@ -57,9 +57,21 @@ import { isRefusal } from '../src/boot/featureBuilder.ts';
 import { shapesOverlap, type Claim } from '../src/boot/groundClaims.ts';
 import { boothBoxFor } from '../src/minigames/boothFootprint.ts';
 import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../src/minigames/stallPlacement.ts';
+import { ACCEPTANCE_SCOPE, VOID_EXIT, counts, type ClauseKind } from './lib/checkScope.mts';
 
 const failures: string[] = [];
-const fail = (message: string): void => {
+/**
+ * One failed clause. `decision` where the park's own layout decides it —
+ * whether any booth has room to step aside, and whether a moved counter can
+ * still be stood at and walked to; `code` (the default) where it is the
+ * mechanism itself — claims, colliders and the refusal path, the same on every
+ * park. Under the acceptance scope (`lib/checkScope.mts`) only decisions fail.
+ */
+const fail = (message: string, kind: ClauseKind = 'code'): void => {
+  if (!counts(kind)) {
+    console.log(`CODE  ${message} (outside acceptance: fixed at cause, never restarted around)`);
+    return;
+  }
   failures.push(message);
   console.log(`FAIL  ${message}`);
 };
@@ -68,7 +80,7 @@ const pass = (message: string): void => {
 };
 const die = (message: string): never => {
   console.log(`VOID  ${message}`);
-  process.exit(2);
+  process.exit(ACCEPTANCE_SCOPE ? VOID_EXIT : 2);
 };
 
 const seed = process.env['LGP_SEED'] ?? 'canonical';
@@ -301,11 +313,12 @@ for (const id of movableIds) {
   // at the end, over the world every booth has finished moving in.
   const stand = STALL_STANDS_BY_ID.get(id);
   if (!stand) {
-    fail(`'${id}' moved and has no stand point at all`);
+    fail(`'${id}' moved and has no stand point at all`, 'decision');
   } else if (!collision.isClearCircle(stand.x, stand.z, PLAYER_RADIUS)) {
     fail(
       `'${id}' moved and its stand point (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) has no room ` +
         `for a ${PLAYER_RADIUS} m body`,
+      'decision',
     );
   } else {
     pass(`'${id}': its counter at (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) has room to stand`);
@@ -318,6 +331,7 @@ if (!proved) {
   fail(
     'no booth in the park would step aside for a claim laid across its own counter — the ' +
       'mechanism is unexercised, so nothing above proves it works',
+    'decision',
   );
 }
 
@@ -347,6 +361,7 @@ if (!proved) {
     fail(
       `'${id}': its counter at (${stand.x.toFixed(2)}, ${stand.z.toFixed(2)}) can no longer be ` +
         'walked to from the park entrance after the booths moved',
+      'decision',
     );
   }
   if (walkable === ids.length) {

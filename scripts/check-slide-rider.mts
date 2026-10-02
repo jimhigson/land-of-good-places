@@ -103,6 +103,7 @@
 
 import './headless-dom.mjs';
 import { Vector3 } from 'three';
+import { ACCEPTANCE_SCOPE, exitVoid } from './lib/checkScope.mts';
 
 await import('./headless-canvas.mjs');
 const { Scene } = await import('three');
@@ -435,7 +436,7 @@ function bodyParts(model: {
 const boarded = building.requestBoardSlide(false);
 if (!boarded) {
   console.error('check:slide-rider FAILED — could not board the ginormous slide at all');
-  process.exit(1);
+  exitVoid();
 }
 
 // The ride starts behind an iris; `liveControls.iris` runs the midpoint straight
@@ -845,6 +846,15 @@ const trackside = shots.filter((s) => s.kind === 'trackside');
 const chase = shots.filter((s) => s.kind === 'chase');
 
 const complaints: string[] = [];
+/**
+ * The clauses a park's own decisions set — where the slide runs and so where
+ * its trackside eyes stand — kept apart from the rest (the rig, the pose, the
+ * rider's frame), which are code and the same on every park. Under the
+ * acceptance scope (`lib/checkScope.mts`) only these fail the run.
+ */
+const decisions: string[] = [];
+/** The instrument measured nothing it could judge by — a void, never a restart. */
+const voids: string[] = [];
 
 // Coverage first: a sweep that did nothing must not pass.
 if (ridingFrames < 60) {
@@ -1032,12 +1042,12 @@ if (neverSampled.length > 0) {
 // **Her body must read on a trackside camera.** This is the clause Jim's ruling
 // buys: the chase is allowed to be all head *because* these carry her body.
 if (trackside.length === 0) {
-  complaints.push('no trackside shot was measured at all, so her body was never checked');
+  voids.push('no trackside shot was measured at all, so her body was never checked');
 } else {
   const tooSmall = trackside.filter((s) => s.bodyPixels / s.framePixels < TRACKSIDE_BODY_FLOOR);
   if (tooSmall.length > 0) {
     const worst = tooSmall.reduce((a, b) => (b.bodyPixels < a.bodyPixels ? b : a));
-    complaints.push(
+    decisions.push(
       `the child's body is ${((worst.bodyPixels / worst.framePixels) * 100).toFixed(2)}% of the ` +
         `frame on beat ${worst.beat}'s trackside camera (ridden frame ${worst.frame}), against ` +
         `${(TRACKSIDE_BODY_FLOOR * 100).toFixed(2)}% required — ${tooSmall.length} of ` +
@@ -1051,9 +1061,9 @@ if (trackside.length === 0) {
 // that actually catches a badly-placed camera: the pixel samples above are too
 // sparse to, as 40° of elevation proved by staying green.
 if (tracksideFrames === 0) {
-  complaints.push('no frame was ever on a trackside camera, so its sight line was never tested');
+  voids.push('no frame was ever on a trackside camera, so its sight line was never tested');
 } else if (tracksideBlockedFrames > 0) {
-  complaints.push(
+  decisions.push(
     `the chute or the castle stands between a trackside camera and the child on ` +
       `${tracksideBlockedFrames} of ${tracksideFrames} trackside frames (first at ridden ` +
       `frame ${firstBlockedFrame}) — she disappears behind scenery mid-shot. If this is the ` +
@@ -1068,7 +1078,7 @@ if (tracksideFrames === 0) {
 // is *empty*: that is the state she was in for the whole ride at 26.65 m off
 // the chute, and it is what this file was written for.
 if (chase.length === 0) {
-  complaints.push('no chase shot was measured at all, so the chase camera was never checked');
+  voids.push('no chase shot was measured at all, so the chase camera was never checked');
 } else {
   const empty = chase.filter((s) => s.headPixels + s.bodyPixels === 0);
   if (empty.length > 0) {
@@ -1107,9 +1117,20 @@ if (worstSeatGap > ON_CHUTE) {
   );
 }
 
-if (complaints.length > 0) {
+if (voids.length > 0) {
+  console.error('check:slide-rider VOID — measured nothing it could judge by');
+  for (const line of voids) console.error(`  - ${line}`);
+  exitVoid();
+}
+const failing = [...decisions, ...(ACCEPTANCE_SCOPE ? [] : complaints)];
+if (ACCEPTANCE_SCOPE) {
+  for (const complaint of complaints) {
+    console.log(`  CODE (outside acceptance: fixed at cause, never restarted around) ${complaint}`);
+  }
+}
+if (failing.length > 0) {
   console.error('check:slide-rider FAILED');
-  for (const complaint of complaints) console.error(`  - ${complaint}`);
+  for (const complaint of failing) console.error(`  - ${complaint}`);
   process.exit(1);
 }
 

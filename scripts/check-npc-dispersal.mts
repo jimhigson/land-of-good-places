@@ -155,6 +155,7 @@ import { MAX_INSIDE } from '../src/entities/npc/journey.ts';
 import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import type { FrameContext } from '../src/core/types.ts';
+import { counts, type ClauseKind } from './lib/checkScope.mts';
 
 const mutate = process.argv.includes('--mutate');
 
@@ -412,8 +413,18 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
 
 const failures: string[] = [];
 const notes: string[] = [];
-const check = (ok: boolean, message: string): void => {
-  if (!ok) failures.push(message);
+/** Failed code clauses, reported but outside acceptance (`lib/checkScope.mts`). */
+const outside: string[] = [];
+/**
+ * One clause, and what kind it is: `decision` where the park's own layout —
+ * where its attractions, castle door, stations and trees stand — decides how
+ * the crowd spreads; `code` where it is the caps' own arithmetic, the same on
+ * every park. Under the acceptance scope only decisions fail the run.
+ */
+const check = (ok: boolean, message: string, kind: ClauseKind): void => {
+  if (ok) return;
+  if (counts(kind)) failures.push(message);
+  else outside.push(message);
 };
 
 const worstSpread = samples.reduce((a, b) => (b.rms < a.rms ? b : a));
@@ -478,6 +489,7 @@ check(
     'shipped the shops, the castle lattice and the deck connectors as unreachable code because ' +
     'nothing could carry a child over the threshold. If this is red, the portals in ' +
     'entities/npc/portals.ts have stopped working and a whole requirement has gone quietly missing',
+  'decision',
 );
 
 const minimumFree = kids.length - HELD_AT_MOST;
@@ -486,6 +498,7 @@ check(
   `the whole-park caps now sum to ${HELD_AT_MOST}, which is not fewer than the ${kids.length} ` +
     'children in the park, so every child could legitimately be held or indoors at once and this ' +
     'check can no longer prove anything about dispersal. Lower a cap, or raise NPC_DENSITY',
+  'code',
 );
 check(
   minimumFree <= 0 || worstFree.free >= minimumFree,
@@ -495,6 +508,7 @@ check(
     `${MAX_CONCURRENT_RIDERS} on the railway, ${MAX_CONCURRENT_PAINTED} being painted, ` +
     `${MAX_CONCURRENT_CHATTERS} chatting, ${MAX_INSIDE} in the castle). Something is holding children ` +
     'past its own cap, or the dispersal numbers below are about a handful of children and mean nothing',
+  'decision',
 );
 
 const minimumRms = UNIFORM_RMS * MIN_SPREAD_FRACTION;
@@ -507,6 +521,7 @@ check(
     `${UNIFORM_RMS.toFixed(2)} m a uniform scatter over this park's own area ` +
     `(${PARK_BOUNDARY.area.toFixed(0)} m², equivalent radius ${PARK_EQUIVALENT_RADIUS.toFixed(1)} m) ` +
     'would have. The children are pooling instead of going places — issue #350',
+  'decision',
 );
 
 const maximumClump = Math.floor(kids.length * MAX_CLUMP_FRACTION);
@@ -515,6 +530,7 @@ check(
   `${worstClump.largestClump} of ${worstClump.free} free children were within ${CLUMP_RADIUS.toFixed(1)} m of ` +
     `one another at t=${worstClump.t.toFixed(0)}s (a tenth of the park's width), more than the ` +
     `${maximumClump} a third of the crowd allows — that is the clump issue #350 was raised for`,
+  'decision',
 );
 
 const minimumDestinations = Math.max(3, Math.floor(destinationPool * MIN_DESTINATION_POOL_FRACTION));
@@ -525,6 +541,7 @@ check(
     `${minimumDestinations} expected of a ${destinationPool}-destination park — they may be spread ` +
     'out, but not because each is going somewhere of their own, so the mechanism this check exists ' +
     'for is not what did it',
+  'decision',
 );
 
 // ------------------------------------------------------------------ report
@@ -561,6 +578,7 @@ notes.push(
     `${HELD_AT_MOST} held or indoors)`,
 );
 for (const note of notes) console.log(`  ${note}`);
+for (const line of outside) console.log(`  CODE (outside acceptance: fixed at cause, never restarted around) ${line}`);
 
 if (failures.length > 0) {
   console.error(`\nFAIL: the park's children are not spread across the park${mutate ? ' (--mutate: expected)' : ''}.`);

@@ -39,6 +39,7 @@ import { promisify } from 'node:util';
 import { cpuMs } from './lib/cpuClock.mts';
 import type { HeadlessPark } from './park-harness.mts';
 import { buildBug } from './lib/attemptError.mts';
+import { VOID_EXIT } from './lib/checkScope.mts';
 
 /**
  * **Whole check scripts that judge a per-park decision, asked as acceptance
@@ -53,7 +54,15 @@ import { buildBug } from './lib/attemptError.mts';
  * restart are read once per process). One owner: the check. A park it rejects
  * is a failed attempt.
  */
-const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = ['scripts/check-rail-race.mts'];
+const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
+  'scripts/check-rail-race.mts',
+  // These move the world under them (booths stepping aside; the arrival and
+  // thirty seconds of crowd), so each gets a park of its own. Asked under the
+  // acceptance scope: only their decision clauses fail the attempt. Measured
+  // on seed 5 restart 0, CPU including the build: 18 s and 25 s.
+  'scripts/check-stall-accommodate.mts',
+  'scripts/check-cat-bus.mts',
+];
 
 /**
  * What one in-process check measure says about a park: `faults` fail the
@@ -126,6 +135,43 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
     async (park) => {
       const { gardenCoplanarRegressions } = await import('./lib/coplanarRatchet.mts');
       return { faults: await gardenCoplanarRegressions(park), voids: [] };
+    },
+  ],
+  [
+    'check:castle-towers',
+    async (park) => {
+      const { castleTowerFindings } = await import('./lib/castleTowers.mts');
+      // Only the clauses a park decides: turret solidity is code, fixed at cause.
+      const { decisions, voids } = await castleTowerFindings(park);
+      return { faults: decisions, voids };
+    },
+  ],
+  [
+    'check:path-preference',
+    async (park) => {
+      const { pathPreference } = await import('./lib/pathPreference.mts');
+      // Only the clauses the park decides (the network it drew, how routes sit
+      // on it); the router's own are code, fixed at cause.
+      const { decisions, voids } = await pathPreference(park, { quiet: true });
+      return { faults: decisions, voids };
+    },
+  ],
+  [
+    'check:waypoints',
+    async () => {
+      const { waypointFindings } = await import('./lib/waypointFindings.mts');
+      const { voids, failures } = await waypointFindings();
+      return { faults: failures.map((f) => `(${f.x}, ${f.z}) ${f.why}`), voids };
+    },
+  ],
+  [
+    'check:hotel',
+    async (park) => {
+      // Probe 22's park half — what stands in front of the tower. The rest of
+      // check:hotel is the authored hotel (and four park builds), the same on
+      // every park, so it stays the script's.
+      const { hotelTowerFindings } = await import('./lib/hotelTower.mts');
+      return { faults: (await hotelTowerFindings(park)).decisions, voids: [] };
     },
   ],
   [
@@ -282,16 +328,22 @@ if (facts) {
     const name = `check:${script.replace(/^scripts\/check-|\.mts$/g, '')}`;
     try {
       await runScript(process.execPath, ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', script], {
-        env: { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: String(restart) },
+        // The scope: a script that knows it (`lib/checkScope.mts`) fails only on
+        // its decision clauses and exits VOID_EXIT when it could not measure.
+        env: { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: String(restart), LGP_CHECK_SCOPE: 'acceptance' },
         encoding: 'utf8',
         maxBuffer: 256 * 1024 * 1024,
       });
     } catch (error) {
-      const failed = error as { stdout?: string; stderr?: string };
+      const failed = error as { stdout?: string; stderr?: string; code?: number };
+      if (failed.code === VOID_EXIT) {
+        const tail = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`.trim().split('\n').slice(-3).join(' / ');
+        broken ??= `${name}: the instrument could not measure — ${tail.slice(0, 400)}`;
+      }
       const lines = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`
         .split('\n')
         .map((l) => l.trim())
-        .filter((l) => /^(FAIL|✗)/.test(l));
+        .filter((l) => /^(FAIL|✗|- |· )|FAILED/.test(l));
       failures.push({ measure: name, count: Math.max(1, lines.length), first: (lines.length > 0 ? lines : ['exited non-zero with no FAIL line']).slice(0, FIRST) });
     }
   }
