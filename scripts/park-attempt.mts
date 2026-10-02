@@ -207,6 +207,8 @@ export interface BacktrackStats {
   readonly deepestUnwind: number;
   readonly decisionZero: number;
   readonly forgone: number;
+  /** The driver budget that ended the solve, or null (`SolveStats.exhausted`). */
+  readonly exhausted: string | null;
 }
 
 export interface AttemptVerdict {
@@ -359,6 +361,7 @@ const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats |
         deepestUnwind: stats.deepestUnwind,
         decisionZero: stats.decisionZero,
         forgone: stats.forgone,
+        exhausted: stats.exhausted ?? null,
       }
     : null;
 // Not wrapped in a catch: a build that threw before the plan existed already

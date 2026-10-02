@@ -37,7 +37,7 @@
  */
 
 import { GroundClaims } from '../boot/groundClaims';
-import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveStats } from '../boot/parkSolve';
+import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveBudget, type SolveStats } from '../boot/parkSolve';
 import { decisionSeed, refusal, type Advance, type FeatureBuilder, type Refusal } from '../boot/featureBuilder';
 import { PARK_SEED } from './parkManifest';
 import { PARK_RESTARTS, layoutRestartSearch, type ParkLayout } from './parkLayout';
@@ -105,6 +105,8 @@ import { barSlotWithNoSupportRoom } from './railRace/track';
  */
 export interface ParkPlanSeams {
   barSlotWithNoSupportRoom?: typeof barSlotWithNoSupportRoom;
+  /** Tighter driver bounds, so a test reaches the end of a budget in seconds. */
+  budget?: Partial<SolveBudget>;
 }
 /* eslint-disable-next-line no-var */
 export var parkPlanSeams: ParkPlanSeams | undefined;
@@ -890,7 +892,7 @@ function* illegiblePaving(
 
 function startDriver(): ParkSolve {
   if (driver) return driver;
-  driver = new ParkSolve(PARK_SEED, builders(), new GroundClaims());
+  driver = new ParkSolve(PARK_SEED, builders(), new GroundClaims(), parkPlanSeams?.budget ?? {});
   return driver;
 }
 
