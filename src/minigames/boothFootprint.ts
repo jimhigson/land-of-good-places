@@ -134,12 +134,12 @@ export function addBoothCollision(
 ): WallCollider[] {
   const { frontLeft, frontRight, backLeft, backRight } = boothCorners(x, z, yaw, box);
   const t = box.wallHalfThickness;
-  return [
+  return collision.ownedBy('booth', () => [
     collision.addWall(frontLeft[0], frontLeft[1], frontRight[0], frontRight[1], t),
     collision.addWall(backLeft[0], backLeft[1], backRight[0], backRight[1], t),
     collision.addWall(frontLeft[0], frontLeft[1], backLeft[0], backLeft[1], t),
     collision.addWall(frontRight[0], frontRight[1], backRight[0], backRight[1], t),
-  ];
+  ]);
 }
 
 /**

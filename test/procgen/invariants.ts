@@ -1632,6 +1632,15 @@ function gatherPlaces<T>(
 const UNDER_A_SOLID_TOLERANCE = PAVING_CELL / 2;
 
 /**
+ * The solids paving may not lie under: buildings, booths and the boundary wall
+ * — every collider their builders file under these owners
+ * (`CollisionWorld.ownedBy`). Garden walls stand flush along paths by design
+ * (`wallsRunAlongsideAPath`), the fountain's rim stands on the plaza, and a
+ * lamp may stand at a path's edge; those are counted on every run, not judged.
+ */
+const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'booth', 'boundary wall']);
+
+/**
  * **No drawn paving lies under anything solid** — not under a building, a
  * booth, a wall or a post, and not in a pocket a child cannot get into.
  *
@@ -1645,7 +1654,8 @@ const UNDER_A_SOLID_TOLERANCE = PAVING_CELL / 2;
  * (`CollisionWorld.solidDepthAt`) — in two clauses:
  *
  * 1. **Under a solid**: a paved cell whose centre stands more than
- *    {@link UNDER_A_SOLID_TOLERANCE} inside any ground-standing collider.
+ *    {@link UNDER_A_SOLID_TOLERANCE} inside any ground-standing collider of a
+ *    building, a booth or the boundary wall ({@link BUILT_SOLIDS}).
  * 2. **Shut in**: a paved cell more than {@link WALKABLE_PAVING_REACH} from
  *    every nav-lattice cell the entrance reaches — the inside of a booth's or a
  *    building's walls, which a collider ring encloses without filling.
@@ -1675,6 +1685,7 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
   const shut: { k: number; detail: { depth: number; what: string } }[] = [];
   let paved = 0;
   let carried = 0;
+  let otherSolids = 0;
   for (let k = 0; k < raster.cols * raster.rows; k += 1) {
     if (!isPaved(raster, k)) continue;
     const [x, z] = cellCentre(raster, k);
@@ -1683,15 +1694,16 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
       continue;
     }
     paved += 1;
-    const solid = collision.solidDepthAt(x, z);
+    const solid = collision.solidDepthAt(x, z, BUILT_SOLIDS);
     if (solid.depth > UNDER_A_SOLID_TOLERANCE) under.push({ k, detail: solid });
-    else if (!walkable.allowed(k)) shut.push({ k, detail: solid });
+    else if (!walkable.allowed(k)) shut.push({ k, detail: collision.solidDepthAt(x, z) });
+    else if (collision.solidDepthAt(x, z).depth > UNDER_A_SOLID_TOLERANCE) otherSolids += 1;
   }
   const area = PAVING_CELL * PAVING_CELL;
   const complaints = [
     ...gatherPlaces(raster, under, (a, b) => a.depth > b.depth).map(
       (place) =>
-        `${(place.cells * area).toFixed(2)} m² of drawn paving near ${fmt(place.at)} lies under a solid — ` +
+        `${(place.cells * area).toFixed(2)} m² of drawn paving near ${fmt(place.at)} lies under a ${place.worst.owner} — ` +
         `${place.worst.depth.toFixed(2)} m inside ${place.worst.what}`,
     ),
     ...gatherPlaces(raster, shut, (a, b) => a.depth > b.depth).map(
@@ -1703,7 +1715,9 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
   ];
   process.stderr.write(
     `  noDrawnPavingUnderASolid: ${paved} paving cells judged on seed ${facts.seed}; ${carried} carried by a bridge ` +
-      `and ${decorativeTriangles} declared-unwalked apron triangle(s) left out; ${under.length} under a solid, ${shut.length} shut in\n`,
+      `and ${decorativeTriangles} declared-unwalked apron triangle(s) left out; ${under.length} under a building, booth or ` +
+      `the boundary wall, ${shut.length} shut in; ${otherSolids} under other solids (garden walls, the fountain rim, ` +
+      `posts — not judged by this measure)\n`,
   );
   if (paved === 0) complaints.push('no paving was judged — this measured nothing');
   return complaints;

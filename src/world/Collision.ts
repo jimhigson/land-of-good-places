@@ -111,6 +111,8 @@ interface CircleCollider {
   baseHeight: number;
   /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
   navStamped: boolean;
+  /** What registered it, where the registration was scoped ({@link CollisionWorld.ownedBy}); `''` otherwise. */
+  owner: string;
 }
 
 export interface WallCollider {
@@ -126,6 +128,8 @@ export interface WallCollider {
   baseHeight: number;
   /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
   navStamped: boolean;
+  /** What registered it, where the registration was scoped ({@link CollisionWorld.ownedBy}); `''` otherwise. */
+  owner: string;
 }
 
 /**
@@ -454,6 +458,26 @@ export class CollisionWorld {
     return out;
   }
 
+  /** The owner every collider registered now is filed under — see {@link ownedBy}. */
+  private currentOwner = '';
+
+  /**
+   * **Files every collider `build` registers under `owner`** — `'castle'`,
+   * `'hotel'`, `'booth'`, `'boundary wall'` — so a measure can ask what a solid
+   * *is* (`test/procgen`'s `noDrawnPavingUnderASolid` holds paving off
+   * buildings and booths). Nests: the innermost owner wins. Changes nothing
+   * about how anything collides.
+   */
+  ownedBy<T>(owner: string, build: () => T): T {
+    const outer = this.currentOwner;
+    this.currentOwner = owner;
+    try {
+      return build();
+    } finally {
+      this.currentOwner = outer;
+    }
+  }
+
   /**
    * **How deep (x, z) stands inside the deepest ground-standing solid** —
    * metres inside a circle's rim or a wall's band, the larger of the two;
@@ -463,22 +487,26 @@ export class CollisionWorld {
    * the drawn paving is laid over is asked of the colliders, the one owner of
    * every footprint (`test/procgen`'s `noDrawnPavingUnderASolid`).
    */
-  solidDepthAt(x: number, z: number): { depth: number; what: string } {
+  solidDepthAt(x: number, z: number, owners?: ReadonlySet<string>): { depth: number; what: string; owner: string } {
     let depth = -Infinity;
     let what = '';
+    let owner = '';
     const grid = this.solidGrid();
     const bucket = grid.cells.get(`${Math.floor(x / SOLID_GRID)},${Math.floor(z / SOLID_GRID)}`);
-    if (!bucket) return { depth, what };
+    if (!bucket) return { depth, what, owner };
     for (const circle of bucket.circles) {
       if (circle.baseHeight > 0) continue;
+      if (owners && !owners.has(circle.owner)) continue;
       const here = circle.radius - Math.hypot(x - circle.x, z - circle.z);
       if (here > depth) {
         depth = here;
+        owner = circle.owner;
         what = `circle#${circle.id} at (${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}) r=${circle.radius.toFixed(2)} top=${circle.topHeight.toFixed(2)}`;
       }
     }
     for (const wall of bucket.walls) {
       if (wall.baseHeight > 0) continue;
+      if (owners && !owners.has(wall.owner)) continue;
       const abx = wall.x2 - wall.x1;
       const abz = wall.z2 - wall.z1;
       const lengthSq = abx * abx + abz * abz || 1;
@@ -486,12 +514,13 @@ export class CollisionWorld {
       const here = wall.halfThickness - Math.hypot(x - (wall.x1 + abx * t), z - (wall.z1 + abz * t));
       if (here > depth) {
         depth = here;
+        owner = wall.owner;
         what =
           `wall (${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)})-(${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}) ` +
           `half=${wall.halfThickness.toFixed(2)} top=${wall.topHeight.toFixed(2)}${wall.topIsAbsolute ? ' abs' : ''}${wall.autoHoppable ? ' hoppable' : ''}`;
       }
     }
-    return { depth, what };
+    return { depth, what: owner ? `${owner} ${what}` : what, owner };
   }
 
   /** {@link solidDepthAt}'s bucket grid, rebuilt whenever the world's revision moves. */
@@ -625,6 +654,7 @@ export class CollisionWorld {
       topIsAbsolute,
       baseHeight,
       navStamped,
+      owner: this.currentOwner,
     });
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
     this.revisionCounter += 1;
@@ -682,6 +712,7 @@ export class CollisionWorld {
       topIsAbsolute,
       baseHeight,
       navStamped,
+      owner: this.currentOwner,
     };
     this.walls.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);

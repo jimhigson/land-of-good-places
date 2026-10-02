@@ -344,13 +344,13 @@ function buildBoundaryWall(collision: CollisionWorld): Group {
   for (let i = 1; i < chain.length; i += 1) {
     const a = chain[i - 1]!;
     const b = chain[i]!;
-    collision.addWall(a.x, a.z, b.x, b.z, BOUNDARY_WALL_COLLISION_HALF);
+    collision.ownedBy('boundary wall', () => collision.addWall(a.x, a.z, b.x, b.z, BOUNDARY_WALL_COLLISION_HALF));
   }
   for (let side = 0; side < 2; side += 1) {
     const end = opening.ends[side]!;
     const pier = opening.piers[side]!;
     if (Math.hypot(pier.x - end.x, pier.z - end.z) < RETURN_MIN_LENGTH) continue;
-    collision.addWall(end.x, end.z, pier.x, pier.z, BOUNDARY_WALL_COLLISION_HALF);
+    collision.ownedBy('boundary wall', () => collision.addWall(end.x, end.z, pier.x, pier.z, BOUNDARY_WALL_COLLISION_HALF));
   }
 
   return group;
