@@ -588,7 +588,9 @@ function builders(): readonly FeatureBuilder[] {
 
   const pathGraphBuilder = coarse<PathGraph>({
     name: 'pathGraph',
-    deps: ['layout', 'cruiser', 'train', 'slide', 'crossings'],
+    // `railRaceBars`: the paving keeps off the Rail Race arch's feet (`paths.ts`
+    // BLOCKERS), and that builder decides where the arch stands.
+    deps: ['layout', 'cruiser', 'train', 'railRaceBars', 'slide', 'crossings'],
     supply: 1,
     *solve() {
       resetPathsState();
