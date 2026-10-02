@@ -159,3 +159,8 @@ coping chamfer (#698 fix/procgen-last has the fix).
   0.6-1.9% player pair — numbers for Jim's lane-pitch question. Revert proof on seed 9 r4: hair|torso returns.
 - Merged #707 (path-fold invariant no 60deg skip). scatterDecoupling control fixed (6ad909cd); the locality
   failure on canonical seed 5 -> fix/sb-scatter. 3 coplanar seams -> fix/sb-cop3. Seed 6 train search -> fix/sb-trainsearch.
+- Retired check:park-boot (coordinator: client-solve speed checks go; 73 -> 72 steps). Keep cruiser castle-miss retry
+  cost (84 s seed 5) on the list: fold into the re-record that follows fix/sb-trainsearch.
+- #705 (b20e8057): LGP_PARK_FILE hook in register hook; build:parks fails on a rejected file. Removed swallowing
+  catch in park-attempt (c78f30e1).
+- PR body must state step-set change (check:park-boot removed; served-* and shard 8 came from #703 base).
