@@ -498,7 +498,15 @@ export function scheduleForLevel(level: RaceLevel): HazardSchedule {
  * for the two readers that want a plain number.
  */
 let raceDistanceMemo: number | null = null;
-export function raceDistance(): number {
+export function raceDistance(
+  /**
+   * The ring being raced, when the caller holds one: `stepRider` is asked of a
+   * candidate ring by the plan's `railRaceBars` builder before the park's
+   * Rail Race is decided, so it must not read the decided one.
+   */
+  route?: RailRaceRoute,
+): number {
+  if (route) return route.length * RACE_LAPS;
   return (raceDistanceMemo ??= RAIL_RACE_PLAN.route.length * RACE_LAPS);
 }
 registerPlanCache(() => {
@@ -747,7 +755,7 @@ export function stepRider(
   const lap = lapNow !== lapBefore && lapNow < RACE_LAPS ? lapNow + 1 : 0;
 
   let finishedNow = false;
-  if (rider.travelled >= raceDistance()) {
+  if (rider.travelled >= raceDistance(route)) {
     rider.finished = true;
     finishedNow = true;
   }
