@@ -225,3 +225,8 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - Helpers: a3f17beeb (fix/sb-coverage: reviewer pt1 acceptance coverage + pavingLegibility test; resumed after
   limit), ae706c0d (fix/sb-throws, coordinator resuming). QA coords sent to af62470c (skyCruiser booth seed 5 r2
   may have paving under it: 10 tri centres, unverified — paving-clear should fix; recheck on next preview).
+- 3e99dd71: merged sb-throws, coverage batches 1-4 (every per-park CI check is an acceptance decision measure;
+  staged attempts; registry copy per World), paving-rail, booth-hollow measure fix, sb-bounded (SolveBudget:
+  every solve provably finite; ParkSolveExhausted -> restart), sb-rrtest. All helpers done/stopped.
+- Staged attempt seed 15 r0 (ca46ffde): ACCEPTED at r0; CPU build 434 s, stages 37/17/153 s. Sent to #705.
+- Remaining: #705 Parks CI + rebase onto 3e99dd71; then green CI on #705 head; reviewer approval.
