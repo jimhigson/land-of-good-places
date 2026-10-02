@@ -262,6 +262,56 @@ export function fairySpan(from: Vector3, to: Vector3): { cable: Vector3[]; bulbs
 }
 
 /**
+ * **How far out from the pole two cables tied to it run inside each other**,
+ * in metres along the cable — the drawn cables, each a `CatmullRomCurve3`
+ * through {@link fairySpan}'s points exactly as the constructor hangs it.
+ *
+ * Two strings tied to one post part at whatever angle their far poles make.
+ * Wide, and their tubes separate inside the wood; narrow, and they leave the
+ * post as one doubled cable. Seed 15 at its recorded restart strung
+ * `fairy-string-59` 14.5 m from (-33.2, -18.4) to (-47.7, -19.0) and
+ * `fairy-string-60` straight back to (-41.7, -20.5), 15.9° apart: the second
+ * string retraced the first, the two tubes ran through each other for 18 cm
+ * outside the post, and `check:coplanar` found their facets sharing a plane.
+ * The same fold stood unreported on other seeds (0.8°, 2.6° and 5.9° on seeds
+ * 3 and 4) only because their facets happened not to line up.
+ *
+ * Walked rather than solved from the angle at the tie, so it measures the
+ * curve that is drawn and not a straight-line idealisation of it.
+ */
+export function fairyCablesRunTogether(shared: Vector3, farA: Vector3, farB: Vector3, upTo: number): number {
+  const a = new CatmullRomCurve3(fairySpan(shared, farA).cable);
+  const b = new CatmullRomCurve3(fairySpan(shared, farB).cable);
+  const lengthA = a.getLength();
+  const lengthB = b.getLength();
+  const reach = Math.min(upTo, lengthA, lengthB);
+  const pa = new Vector3();
+  const pb = new Vector3();
+  for (let s = CABLE_WALK_STEP; s <= reach; s += CABLE_WALK_STEP) {
+    a.getPointAt(s / lengthA, pa);
+    b.getPointAt(s / lengthB, pb);
+    if (pa.distanceTo(pb) > CABLE_RADIUS * 2) return s;
+  }
+  return reach;
+}
+
+/** Arc-length step for {@link fairyCablesRunTogether}: a fifth of the cable's own radius. */
+const CABLE_WALK_STEP = 0.005;
+
+/**
+ * **Two cables tied to one post must have parted before they leave it.**
+ *
+ * The tie is on the post's axis, so anything within the post's drawn radius of
+ * it is inside the wood and nobody sees two tubes meeting there — that is
+ * simply the knot. Beyond it, two cables running through each other are one
+ * string drawn twice over the same stretch: a fold, never a design. Both
+ * numbers are the drawn geometry's own ({@link POLE_DRAWN_TOP_RADIUS}, the
+ * post at the height the cable is tied; `CABLE_RADIUS`), so thickening either
+ * moves the line with it.
+ */
+export const FAIRY_CABLES_PART_WITHIN = POLE_DRAWN_TOP_RADIUS;
+
+/**
  * **Every world point the rig occupies for one pole and its spans — what the
  * clearance test asks about.**
  *
@@ -539,6 +589,52 @@ export function fairyPoleBuilder(
     return out2;
   };
 
+  /**
+   * The standing pole `offset` places along this slot's chain, or `null` —
+   * wrapping round a closed chain, stopping at the ends of an open one.
+   */
+  const standingAlong = (index: number, offset: number): readonly [number, number] | null => {
+    const { chains, slots } = ensurePlan();
+    const slot = slots[index];
+    if (!slot) return null;
+    const mine: number[] = [];
+    slots.forEach((s, i) => {
+      if (s.chain === slot.chain) mine.push(i);
+    });
+    let at = mine.indexOf(index) + offset;
+    if (chains[slot.chain]?.closed) at = ((at % mine.length) + mine.length) % mine.length;
+    const other = mine[at];
+    if (other === undefined || other === index) return null;
+    return placed[other] ?? null;
+  };
+
+  /**
+   * Would standing this slot's pole at (x, z) hang any two cables through
+   * each other beyond the post they share? See {@link FAIRY_CABLES_PART_WITHIN}.
+   *
+   * A pole decides three ties: its own (between its two cables), and one at
+   * each standing neighbour (between the cable it adds there and the one the
+   * neighbour already carries to *its* far side). All three are asked, because
+   * a fold is just as visible at the neighbour as at the pole that caused it.
+   * Cables only ever join neighbours, and a missing pole leaves a gap with no
+   * cable across it, so a tie with either side empty has nothing to fold.
+   */
+  const foldsACable = (index: number, x: number, z: number): boolean => {
+    const anchor = (p: readonly [number, number]): Vector3 => fairyAnchorAt(p[0], p[1], new Vector3());
+    const here = fairyAnchorAt(x, z, new Vector3());
+    const prev = standingAlong(index, -1);
+    const next = standingAlong(index, 1);
+    const prevPrev = prev ? standingAlong(index, -2) : null;
+    const nextNext = next ? standingAlong(index, 2) : null;
+    const upTo = FAIRY_CABLES_PART_WITHIN + CABLE_WALK_STEP;
+    const folds = (shared: Vector3, a: Vector3, b: Vector3): boolean =>
+      fairyCablesRunTogether(shared, a, b, upTo) > FAIRY_CABLES_PART_WITHIN;
+    if (prev && next && folds(here, anchor(prev), anchor(next))) return true;
+    if (prev && prevPrev && folds(anchor(prev), anchor(prevPrev), here)) return true;
+    if (next && nextNext && folds(anchor(next), here, anchor(nextNext))) return true;
+    return false;
+  };
+
   const chooseSpot = (
     slot: PoleSlot,
     index: number,
@@ -611,6 +707,13 @@ export function fairyPoleBuilder(
       ) {
         continue;
       }
+      // **Nor where its cables would fold back over a neighbour's.** A pole
+      // slid along its run can overtake the next one (slides reach 4.7 m
+      // either way on a 7.1 m spacing), and the chain then doubles back on
+      // itself — two strings drawn over one stretch, through each other. It
+      // tries its next candidate like any other refusal. See
+      // {@link FAIRY_CABLES_PART_WITHIN}.
+      if (foldsACable(index, x, z)) continue;
       const claim = claimOf(x, z);
       if (keepClearOf.some((other) => claimsOverlap(claim, other))) continue;
       const refused = claims.blockers('fairyLights', [claim]).map((b) => b.feature);
