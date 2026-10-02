@@ -34,6 +34,9 @@
  *  8. Every drawn solid taller than 0.6 m under the hall root has a collider
  *     at its middle, bar a named walk-through list.
  *  9. Every animal is inside its own enclosure.
+ * 10. The Tortoise Ride, on a real `Player`: boards by the link, and mid-lap
+ *     a jump, the stick or a tap each put her off the shell on clear floor
+ *     with `Player.riding` false, and the tortoise parks itself.
  *
  * **Proven red before trusted green**, on 2 October 2026 with
  * `REPTILE_CHECK_REMOVE=lagoon` (the lagoon's one stadium collider removed
@@ -54,6 +57,20 @@
  * lagoon stadium (13, −3)→(17, −3) half 3 at origin (600, −600), walls at
  * `REPTILE_ENCLOSURE_WALL_HEIGHT` 1.45. (Clause 9 stays green under that
  * mutation: animals are measured by position, not by collider.)
+ *
+ * Clause 10 proved red the same day with the one line in
+ * `TortoiseRide.update` that reads the input commented out (the mouth-door
+ * geometry, `TORTOISE_RIDE_LOOP` as in `layout.ts`, seed 5 restart 1), 4
+ * clauses red — the tap route calls `dismount()` itself and rightly stayed
+ * green:
+ *
+ * ```
+ *   ✗   one frame later she is off the shell and in control (Player.riding false)
+ *   ✗   on the floor (y 1.64)
+ *   ✗   one frame later she is off the shell and in control (Player.riding false)
+ *   ✗   on the floor (y 1.64)
+ *   4 clause(s) FAILED.
+ * ```
  */
 import './headless-canvas.mjs';
 import { BackSide, Group, InstancedMesh, Matrix4, Mesh, Box3, Vector3, type BufferAttribute, type MeshToonMaterial, type Texture } from 'three';
@@ -78,6 +95,7 @@ import {
   BEDS,
   EXHIBIT_PLACEMENTS,
   REPTILE_ARCH_HEIGHT,
+  REPTILE_HOUSE_FLOOR_Y,
   TORTOISE_RIDE_PARK,
   PATHS,
   REPTILE_ARCH_WIDTH,
