@@ -56,11 +56,6 @@ import { VOID_EXIT } from './lib/checkScope.mts';
  */
 const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
   'scripts/check-rail-race.mts',
-  // These move the world under them (booths stepping aside; the arrival and
-  // thirty seconds of crowd), so each gets a park of its own. Asked under the
-  // acceptance scope: only their decision clauses fail the attempt. Measured
-  // on seed 5 restart 0, CPU including the build: 18 s and 25 s.
-  'scripts/check-stall-accommodate.mts',
 ];
 
 /**
@@ -90,6 +85,15 @@ const ACCEPTANCE_SIM_MEASURES: readonly (readonly [
     async (fresh) => {
       const { npcDispersal } = await import('./lib/npcDispersal.mts');
       const { decisions, voids } = await npcDispersal(fresh, { quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
+  // Last: it moves booths, and the stand table it moves them in is the module's.
+  [
+    'check:stall-accommodate',
+    async (fresh) => {
+      const { stallAccommodate } = await import('./lib/stallAccommodate.mts');
+      const { decisions, voids } = await stallAccommodate(fresh, { quiet: true, clauses: 'decisions' });
       return { faults: decisions, voids };
     },
   ],
