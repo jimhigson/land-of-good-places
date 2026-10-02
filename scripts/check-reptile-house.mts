@@ -56,18 +56,23 @@
  * mutation: animals are measured by position, not by collider.)
  */
 import './headless-canvas.mjs';
-import { Group, Mesh, Box3, Vector3 } from 'three';
+import { BackSide, Group, InstancedMesh, Matrix4, Mesh, Box3, Vector3, type BufferAttribute, type MeshToonMaterial, type Texture } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
 import { clearsTop, CollisionWorld } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
-import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
+import { IsoCamera } from '../src/core/IsoCamera.ts';
+import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
 import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
+import { createHat } from '../src/art/models/hats.ts';
+import { SNAKE_FACE_ROWS } from '../src/art/models/snakeFace.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
+import { PRIMARY_ACTION } from '../src/world/interact.ts';
 import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt } from '../src/world/spaces.ts';
 import { reptileKeepOuts, segmentDistance } from '../src/world/reptileHouse/props.ts';
+import { meterReading, meterRungs } from '../src/world/reptileHouse/stall.ts';
 import { buildHallShell, facadeToWorld, reptileEntryBand, reptileExitBand, REPTILE_INNER_X, REPTILE_INNER_Z } from '../src/world/reptileHouse/shell.ts';
-import { pointInPolygon, distanceToOutline } from '../src/world/reptileHouse/planting.ts';
+import { pointInPolygon, distanceToOutline, REPTILE_BED_EDGE_HALF } from '../src/world/reptileHouse/planting.ts';
 import {
   BEDS,
   EXHIBIT_PLACEMENTS,
@@ -227,6 +232,22 @@ if (remove) {
   else collision.removeWall(victim.handle);
   note(`REMOVED ${victim.what} on purpose — this run must go red`);
 }
+// `REPTILE_CHECK_OPEN_SHELL=8` takes chord 8 of the exterior's sixteen out
+// (chord 8 is dead opposite the doorway), so the facade clause can be re-armed
+// without anyone editing shell.ts to prove it.
+const openShell = process.env['REPTILE_CHECK_OPEN_SHELL'];
+if (openShell) {
+  const chord = Number(openShell);
+  const wall = house.shellSolids[chord - 1];
+  if (!Number.isInteger(chord) || chord < 1 || chord > 15 || !wall) throw new Error(`REPTILE_CHECK_OPEN_SHELL=${openShell}: chords are 1..15`);
+  collision.removeWall(wall);
+  note(`OPENED shell chord ${chord} on purpose — this run must go red`);
+}
+// `REPTILE_CHECK_MUTATE=faces-upside-down` flips every painted head's and
+// plank's texture the other way up before the painted-faces clause measures,
+// which is what painting them through `glbCanvasTexture` did.
+const mutate = process.env['REPTILE_CHECK_MUTATE'];
+if (mutate && mutate !== 'faces-upside-down') throw new Error(`REPTILE_CHECK_MUTATE=${mutate}: only faces-upside-down is known`);
 collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
 
 console.log(`\nREACHABILITY — ${house.solids.length} solids registered by the hall:`);
@@ -315,24 +336,76 @@ console.log('\nMARCHED at every solid from 16 bearings, at 5 cm and at the sprin
     got += inside;
     say(inside === 0, `${exhibit.id} — ${inside} of 32 marches got inside it`);
   }
+  // Every bed, at every corner of its outline and at the middle of every
+  // edge, from the nearest path node outside it — where a child actually
+  // comes at that kerb from. The first cut marched at the bed's centroid from
+  // 14 m out on bearings uncorrelated with the corner it named, so it never
+  // reached the open corners and reported 0.00 m on beds a body could walk
+  // 0.59 m into. Corners alone are not enough either: with one whole edge's
+  // capsule removed, the two neighbouring capsules still stop a body at each
+  // corner, and only a march at the edge's middle finds the hole.
+  const nodes = PATHS.flatMap((path) => path.points);
+  let touched = 0;
+  let bedMarches = 0;
+  // A convex corner rounds off by the capsule's own radius: its two capsules
+  // are pulled back to stay inside the kerb, and a body's edge can reach
+  // h·(1/sin(θ/2) − 1) past the point of a corner of interior angle θ — 0.12 m
+  // at a right angle. The allowance is that figure for the sharpest convex
+  // corner any bed has, plus three centimetres of resolver slack; anything
+  // over it is a hole.
+  const sharpest = Math.max(
+    ...BEDS.flatMap((bed) =>
+      bed.outline.map((c, i) => {
+        const p = bed.outline[(i - 1 + bed.outline.length) % bed.outline.length]!;
+        const q = bed.outline[(i + 1) % bed.outline.length]!;
+        const a = Math.atan2(p.z - c.z, p.x - c.x);
+        const b = Math.atan2(q.z - c.z, q.x - c.x);
+        const interior = Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+        return REPTILE_BED_EDGE_HALF * (1 / Math.sin(interior / 2) - 1);
+      }),
+    ),
+  );
+  const allowance = sharpest + 0.03;
   for (const bed of BEDS) {
     let deepest = 0;
-    const targets = bed.outline;
-    for (let b = 0; b < 12; b += 1) {
-      const target = targets[b % targets.length]!;
-      const centre = targets.reduce((acc, p) => ({ x: acc.x + p.x / targets.length, z: acc.z + p.z / targets.length }), { x: 0, z: 0 });
-      const angle = (b / 12) * Math.PI * 2;
+    const outside = nodes.filter((node) => !pointInPolygon(node, bed.outline));
+    const targets: LocalPoint[] = bed.outline.flatMap((vertex, i) => {
+      const next = bed.outline[(i + 1) % bed.outline.length]!;
+      return [vertex, { x: (vertex.x + next.x) / 2, z: (vertex.z + next.z) / 2 }];
+    });
+    for (const vertex of targets) {
+      const from = outside.reduce((best, node) =>
+        Math.hypot(node.x - vertex.x, node.z - vertex.z) < Math.hypot(best.x - vertex.x, best.z - vertex.z) ? node : best,
+      );
+      const distance = Math.hypot(from.x - vertex.x, from.z - vertex.z);
       for (const step of [0.05, PLAYER_LONGEST_STEP]) {
         marches += 1;
-        const from = new Vector3(OX + centre.x + Math.cos(angle) * 14, 0, OZ + centre.z + Math.sin(angle) * 14);
-        const end = march(collision, from, new Vector3(OX + target.x, 0, OZ + target.z), step, 16);
+        bedMarches += 1;
+        const end = march(collision, new Vector3(OX + from.x, 0, OZ + from.z), new Vector3(OX + vertex.x, 0, OZ + vertex.z), step, distance + 1.5);
         const local = { x: end.x - OX, z: end.z - OZ };
-        if (pointInPolygon(local, bed.outline)) deepest = Math.max(deepest, distanceToOutline(local, bed.outline));
+        const inside = pointInPolygon(local, bed.outline);
+        // How far the body's **edge** crossed the kerb: its radius less its
+        // centre's distance to the outline, or plus it once the centre is in.
+        // Measured at the edge, not the centre, because the interior discs
+        // alone stop a body 0.3 m short of a long edge — its edge over the
+        // kerb by 0.3 m, its centre still outside — and a centre-only
+        // reading called that solid.
+        const over = inside ? PLAYER_RADIUS + distanceToOutline(local, bed.outline) : PLAYER_RADIUS - distanceToOutline(local, bed.outline);
+        deepest = Math.max(deepest, over);
+        // Reached the kerb: the body's edge within 0.15 m of the outline (or over it).
+        if (over >= -0.15) touched += 1;
       }
     }
-    // The disc tiling covers to within a disc's fringe of the drawn edge.
-    say(deepest < 0.45, `bed '${bed.id}' — deepest a body got into it: ${deepest.toFixed(2)} m (limit 0.45)`);
+    // The edge capsules put the solid boundary on the kerb; a right-angled
+    // corner rounds off 0.12 m short of its point and nothing else gives.
+    say(
+      deepest < allowance,
+      `bed '${bed.id}' — furthest a body's edge got over the kerb, at ${bed.outline.length} corners and ${bed.outline.length} edge middles from the nearest path node: ${deepest.toFixed(2)} m (allowance ${allowance.toFixed(2)}, the sharpest corner's rounding ${sharpest.toFixed(2)} + 0.03)`,
+    );
   }
+  // The marches have to be measuring the beds, not stopping on something in
+  // the way: most of them must actually arrive at the kerb.
+  say(touched >= bedMarches * 0.7, `${touched} of ${bedMarches} bed marches reached a kerb (rule: 70 %)`);
   // The walls: from inside, at 12 stations a side, nobody leaves the plate but through the door.
   let escaped = 0;
   for (let i = 0; i < 12; i += 1) {
@@ -443,6 +516,9 @@ console.log('\nDOORS — both ways, on the real building:');
     previousPosition: new Vector3(0, 0, 0),
     riding: false,
     model: { height: 2.12 },
+    // What the real Player answers hat and all; the bare rig's height is
+    // `model.height` above and never moves. The meter clause moves this one.
+    topHeight: 2.12,
     teleportTo(x: number, y: number, z: number) {
       probe.position.set(x, y, z);
       probe.previousPosition.set(x, y, z);
@@ -482,6 +558,39 @@ console.log('\nDOORS — both ways, on the real building:');
   say(house.requestEnter({ x: REPTILE_LOG_CENTRE_X, z: 0, facing: 90 }), '/reptile-house?at= enters at a spot');
   for (let i = 0; i < 70; i += 1) house.update(context);
   say(Math.abs(probe.position.x - OX - REPTILE_LOG_CENTRE_X) < 0.01 && Math.abs(probe.position.z - OZ) < 0.01, 'and she stands exactly there, inside the log');
+  // And again from inside: a save written in the hall restores her there
+  // before the link runs, and the link once refused "already inside".
+  say(house.requestEnter(), '/reptile-house from inside the hall still enters');
+  for (let i = 0; i < 70; i += 1) house.update(context);
+  const back = Math.hypot(probe.position.x - OX - REPTILE_ARRIVAL_X, probe.position.z - OZ - REPTILE_ARRIVAL_Z);
+  say(back < 0.01 && house.playerIsInside, `and puts her back on the arrival (${back.toFixed(2)} m off)`);
+
+  console.log('\nNOODLE-O-METER — a hat changes the answer:');
+  // The real rule, on a real Player: `topHeight` is the hat's own measured
+  // height over the model's own anchor, which is what the name label clears.
+  const player = quietly(() => new Player(collision, new IsoCamera(), new Vector3(OX + REPTILE_ARRIVAL_X, 0, OZ + REPTILE_ARRIVAL_Z)));
+  const hat = createHat('snake');
+  const bare = player.topHeight;
+  say(Math.abs(bare - player.model.height) < 1e-6, `bare-headed, Player.topHeight is the rig's own ${bare.toFixed(2)} m`);
+  // The worn-hat system's one read property, with the real hat's measured height.
+  player.wornHat = { hatHeight: hat.height } as never;
+  const hatted = player.topHeight;
+  say(hatted > bare + 0.2, `in the snake hat (${hat.height.toFixed(2)} m from its anchor), Player.topHeight is ${hatted.toFixed(2)} m`);
+  say(meterRungs(hatted) > meterRungs(bare), `the meter reads ${meterRungs(bare)} rungs bare-headed and ${meterRungs(hatted)} in the hat`);
+  // And the chip itself, on the probe the hall has: it must read `topHeight`.
+  const meter = house.interactZones().find((zone) => zone.id === 'reptile:meter');
+  const press = (): string => {
+    const action = meter?.actions?.().find((a) => a.id === PRIMARY_ACTION);
+    if (!action) throw new Error('no Noodle-o-meter chip');
+    action.run();
+    return house.lastBubble;
+  };
+  probe.topHeight = 2.12;
+  const saidBare = press();
+  probe.topHeight = TALLEST_CHILD_HEIGHT;
+  const saidTall = press();
+  say(saidBare === meterReading(2.12), `the chip says "${saidBare}" at 2.12 m`);
+  say(saidTall === meterReading(TALLEST_CHILD_HEIGHT) && saidTall !== saidBare, `and "${saidTall}" at ${TALLEST_CHILD_HEIGHT} m (the tallest hat)`);
 }
 
 console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has a collider at its middle:');
@@ -495,17 +604,35 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
     ['rp-log-hollow', "a walk-through: its middle is the Log Walk, its walls are the two capsules marched above"],
     ['rs-awning-posts', "both posts stand inside the counter's capsule; the pair's middle is the sealed pocket"],
   ];
+  // The plants kit is all `InstancedMesh` (`instancedPlant`), shadowless by
+  // the interior rule — so castShadow cannot say which of those is solid.
+  // Every instance is a drawn thing unless its species is foliage: a child
+  // brushes through a fern, a tuft, a lily pad, a hanging vine and the
+  // leaves and flowers that lean out over a path from the bed or pot they
+  // root in (the bed probe above is what proves those solid at the kerb).
+  // Trunks, rocks, logs and the banyan stay in. The first cut skipped
+  // instanced meshes wholesale, and stayed green with the collider gone from
+  // under both hop-on rocks and the foyer log.
+  const softSpecies = [
+    'rp-fern-frond',
+    'reptile-tufts',
+    'rp-vine-strand',
+    'rp-vine-leaves',
+    'rp-lily-pad',
+    'rp-banana-leaf',
+    'rp-monstera-leaf',
+    'rp-monstera-stalk',
+    'rp-heliconia',
+    'rp-heliconia-stalk',
+    'rp-palm-frond',
+  ];
   let checked = 0;
   let naked = 0;
+  let instances = 0;
   const box = new Box3();
-  house.hallRoot.updateWorldMatrix(true, true);
-  house.hallRoot.traverse((object) => {
-    if (!(object instanceof Mesh) || !object.castShadow || !object.visible) return;
-    if ((object as Mesh & { isInstancedMesh?: boolean }).isInstancedMesh) return;
-    box.setFromObject(object);
-    const height = box.max.y - box.min.y;
-    if (height < 0.6 || !Number.isFinite(height)) return;
-    if (box.min.y > TALLEST_CHILD_HEIGHT) return;
+  const instance = new Matrix4();
+  const world = new Matrix4();
+  const pathOf = (object: Mesh): string => {
     let ancestor: typeof object.parent = object;
     let name = object.name;
     while (ancestor) {
@@ -513,6 +640,12 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
       ancestor = ancestor.parent;
       if (ancestor === house.hallRoot) break;
     }
+    return name;
+  };
+  const probeBox = (name: string): void => {
+    const height = box.max.y - box.min.y;
+    if (height < 0.6 || !Number.isFinite(height)) return;
+    if (box.min.y > TALLEST_CHILD_HEIGHT) return;
     if (walkThrough.some(([prefix]) => name.includes(prefix))) return;
     checked += 1;
     const cx = (box.min.x + box.max.x) / 2;
@@ -521,9 +654,132 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
       naked += 1;
       if (naked <= 8) say(false, `${name} (${height.toFixed(2)} m tall) has no collider at (${(cx - OX).toFixed(2)}, ${(cz - OZ).toFixed(2)})`);
     }
+  };
+  house.hallRoot.updateWorldMatrix(true, true);
+  house.hallRoot.traverse((object) => {
+    if (!(object instanceof Mesh) || !object.visible) return;
+    if (object instanceof InstancedMesh) {
+      // Outline hulls are drawn inside-out round their plant and are not a thing of their own.
+      if ((object.material as { side?: number }).side === BackSide) return;
+      if (softSpecies.includes(object.name)) return;
+      object.geometry.computeBoundingBox();
+      const local = object.geometry.boundingBox;
+      if (!local) return;
+      for (let i = 0; i < object.count; i += 1) {
+        object.getMatrixAt(i, instance);
+        world.multiplyMatrices(object.matrixWorld, instance);
+        box.copy(local).applyMatrix4(world);
+        instances += 1;
+        probeBox(`${pathOf(object)}[${i}]`);
+      }
+      return;
+    }
+    if (!object.castShadow) return;
+    box.setFromObject(object);
+    probeBox(pathOf(object));
   });
-  say(naked === 0, `${checked} tall drawn solids checked, ${naked} with no collider`);
-  note(`walk-through list: ${walkThrough.map(([prefix, why]) => `${prefix} (${why})`).join('; ')}`);
+  say(naked === 0, `${checked} tall drawn solids checked (${instances} plant instances among them), ${naked} with no collider`);
+  note(`walk-through list: ${walkThrough.map(([prefix, why]) => `${prefix} (${why})`).join('; ')}; soft species: ${softSpecies.join(', ')}`);
+}
+
+console.log('\nPAINTED FACES — eyes above the smile on every painted head, the motif upright on every plank:');
+{
+  // The three heads share one canvas and one UV contract; the three planks
+  // are authored the same way (`planarUvCanvasTexture`'s doc comment owns
+  // it). Read each mesh's UVs against the texture's own `flipY` and ask which
+  // canvas row a vertex samples: higher vertices must sample rows nearer the
+  // top. Painted through the wrong helper, every head wore its mouth above
+  // its eyes and no frame would have said so.
+  const heads = new Map<string, Mesh>();
+  const planks = new Map<string, Mesh>();
+  for (const root of [house.hallRoot, house.forecourtRoot]) {
+    root.traverse((object) => {
+      if (!(object instanceof Mesh)) return;
+      if (['rh-head', 'rn-head', 'rr-snake-head'].includes(object.name) && !heads.has(object.name)) heads.set(object.name, object);
+      if (['rh-sign', 'rs-sign', 'rs-meter-board'].includes(object.name) && !planks.has(object.name)) planks.set(object.name, object);
+    });
+  }
+  say(heads.size === 3, `painted heads found: ${[...heads.keys()].join(', ') || 'none'}`);
+  say(planks.size === 3, `dressed planks found: ${[...planks.keys()].join(', ') || 'none'}`);
+  if (mutate === 'faces-upside-down') {
+    const flipped = new Set<Texture>();
+    for (const mesh of [...heads.values(), ...planks.values()]) {
+      const map = (mesh.material as MeshToonMaterial).map;
+      if (map && !flipped.has(map)) {
+        map.flipY = !map.flipY;
+        flipped.add(map);
+      }
+    }
+    note(`FLIPPED ${flipped.size} texture(s) the other way up on purpose — this run must go red`);
+  }
+  // Least-squares slope of one series against another.
+  const slope = (xs: number[], ys: number[]): number => {
+    const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+    let num = 0;
+    let den = 0;
+    for (let i = 0; i < xs.length; i += 1) {
+      num += (xs[i]! - mx) * (ys[i]! - my);
+      den += (xs[i]! - mx) ** 2;
+    }
+    return den > 0 ? num / den : Number.NaN;
+  };
+  for (const [name, mesh] of heads) {
+    const map = (mesh.material as MeshToonMaterial).map;
+    const position = mesh.geometry.getAttribute('position') as BufferAttribute;
+    const uv = mesh.geometry.getAttribute('uv') as BufferAttribute | undefined;
+    if (!map || !uv) {
+      say(false, `${name} wears no painted face (map ${!!map}, uv ${!!uv})`);
+      continue;
+    }
+    const ys: number[] = [];
+    const rows: number[] = [];
+    for (let i = 0; i < uv.count; i += 1) {
+      const u = uv.getX(i);
+      const v = uv.getY(i);
+      if (u < 0.05 && v < 0.05) continue; // the parked back faces
+      ys.push(position.getY(i));
+      rows.push(map.flipY ? 1 - v : v);
+    }
+    const eye = rows.reduce((best, row, i) => (Math.abs(row - SNAKE_FACE_ROWS.eye) < Math.abs(rows[best]! - SNAKE_FACE_ROWS.eye) ? i : best), 0);
+    const mouth = rows.reduce((best, row, i) => (Math.abs(row - SNAKE_FACE_ROWS.mouth) < Math.abs(rows[best]! - SNAKE_FACE_ROWS.mouth) ? i : best), 0);
+    const fall = slope(ys, rows);
+    say(
+      fall < 0 && ys[eye]! > ys[mouth]!,
+      `${name}: ${ys.length} front vertices, canvas row ${fall < 0 ? 'falls' : 'RISES'} ${Math.abs(fall).toFixed(2)}/m with height (flipY ${map.flipY}); ` +
+        `the eye row lands at y ${ys[eye]!.toFixed(2)} and the smile row at y ${ys[mouth]!.toFixed(2)}`,
+    );
+  }
+  for (const [name, mesh] of planks) {
+    const map = (mesh.material as MeshToonMaterial).map;
+    const position = mesh.geometry.getAttribute('position') as BufferAttribute;
+    const uv = mesh.geometry.getAttribute('uv') as BufferAttribute | undefined;
+    const normal = mesh.geometry.getAttribute('normal') as BufferAttribute | undefined;
+    if (!map || !uv || !normal) {
+      say(false, `${name} is not dressed (map ${!!map}, uv ${!!uv}, normal ${!!normal})`);
+      continue;
+    }
+    for (const facing of [1, -1]) {
+      const xs: number[] = [];
+      const us: number[] = [];
+      const ys: number[] = [];
+      const rows: number[] = [];
+      for (let i = 0; i < uv.count; i += 1) {
+        if (normal.getZ(i) * facing < 0.9) continue;
+        xs.push(position.getX(i));
+        us.push(uv.getX(i));
+        ys.push(position.getY(i));
+        rows.push(map.flipY ? 1 - uv.getY(i) : uv.getY(i));
+      }
+      const fall = slope(ys, rows);
+      const run = slope(xs, us) * facing;
+      say(
+        xs.length >= 4 && fall < 0 && run > 0,
+        `${name}'s ${facing > 0 ? 'front' : 'back'} face (${xs.length} vertices): canvas row ${fall < 0 ? 'falls' : 'RISES'} with height, ` +
+          `the motif runs ${run > 0 ? 'left to right' : 'MIRRORED'} as read from that side (flipY ${map.flipY})`,
+      );
+    }
+  }
 }
 
 console.log('\nANIMALS — every one inside its own enclosure:');

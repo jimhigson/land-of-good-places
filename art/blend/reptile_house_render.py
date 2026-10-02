@@ -20,19 +20,17 @@ script's numbers and drifted, so:
 
 * **The geometry comes from ``reptile_house.blend``**, opened here — the
   picture is of the mesh that ships.
-* **The colours come from ``src/art/models/reptileHouseAssets.ts``**, parsed,
-  once the Engineer's loader lands. Until then :data:`PROPOSED` below is used
-  — the Artist's suggestion, stated once and printed loudly on every run so a
-  render made from proposals is never mistaken for one made from the game.
+* **The colours come from ``src/art/models/reptileHouseAssets.ts``**, parsed.
+  There is no fallback table: a render of colours the game does not draw is a
+  render of a different building (the first committed set was, made before
+  the loader chose ``ART.snakeMint`` over the proposal's ``markerMint``).
 * The composition's numbers (where the camera points, where the scale figure
   stands) come from ``reptile_house_build`` itself, imported, so the review
   shot moves with the geometry.
 
-Hex values are never written here: :data:`PROPOSED` names ``PALETTE.``/``ART.``
+Hex values are never written here: the loader names ``PALETTE.``/``ART.``
 keys and :func:`castle_render.palette_values` reads the numbers out of the
-palette modules. The snake's own colours (``ART.snakeMint`` and friends) are
-spec §12's additions and do not exist on this branch yet, so each has a
-stand-in from the existing palette, named beside it.
+palette modules.
 """
 
 import math
@@ -56,26 +54,6 @@ BLEND = os.path.join(REPO, "art", "blend", "reptile_house.blend")
 DEFAULT_OUT = os.path.join(REPO, "art", "renders", "reptile-house")
 
 ENGINEER_MODULE = "src/art/models/reptileHouseAssets.ts"
-
-# The Artist's proposal for the Engineer's `STYLES` table, by node name. Every
-# value is a palette key, never a hex literal. Where spec §12 names a colour
-# that does not exist yet (`ART.snakeMint`, `ART.snakeBelly`), the nearest
-# existing key stands in and the intended one is named beside it.
-PROPOSED = {
-    "rh-plinth": "PALETTE.stonePink",
-    "rh-coil": "PALETTE.markerMint",  # → ART.snakeMint (0x9fe0b0) when §12 lands
-    "rh-coil-belly": "ART.cream",  # → ART.snakeBelly (0xfff1d0)
-    "rh-coil-spots": "PALETTE.markerLilac",
-    "rh-house-wall": "PALETTE.buildingWall",
-    "rh-windows": "PALETTE.buildingWindowWarm",
-    "rh-head": "PALETTE.markerMint",  # → ART.snakeMint, face painted in code
-    "rh-tongue": "PALETTE.markerPink",
-    "rh-tail": "PALETTE.markerMint",  # → ART.snakeMint
-    "rh-tail-bell": "PALETTE.flowerYellow",
-    "rh-arch": "PALETTE.stonePink",
-    "rh-awning": "PALETTE.leafLight",
-    "rh-sign": "PALETTE.signBoard",
-}
 
 STANDIN_GROUND = 0xF4EEF9
 STANDIN_CHILD = 0xE86F9B
@@ -101,14 +79,8 @@ def engineer_styles():
 def resolve_colours():
     values = palette_values()
     styles = engineer_styles()
-    if styles:
-        source = f"{ENGINEER_MODULE} — the Engineer's own table"
-    else:
-        styles = PROPOSED
-        source = (
-            "PROPOSED in reptile_house_render.py — the Engineer's module is not on "
-            "this branch yet, so these renders show the Artist's SUGGESTED colours"
-        )
+    assert styles, f"{ENGINEER_MODULE} has no STYLES rows for rh- parts — nothing to render the game's colours from"
+    source = f"{ENGINEER_MODULE} — the Engineer's own table"
     missing = [key for key in styles.values() if key not in values]
     assert not missing, f"these colours are named but do not exist in the palette modules: {missing}"
     return {node: values[key] for node, key in styles.items()}, source, styles

@@ -15,12 +15,9 @@ closest a background render gets to that in a second.
 * **The geometry comes from ``reptile_creatures.blend``**, opened here. There
   is no second builder, so the picture is of the mesh that ships.
 * **The colours come from the game's palette modules**, parsed by
-  ``castle_render.palette_values`` — imported, not copied. Until the
-  Engineer's ``reptileCreaturesAssets.ts`` lands, :data:`PROPOSED` names the
-  palette keys the Artist suggests, and the banner says so loudly. The spec's
-  new snake colours (``ART.snakeMint`` and friends) do not exist on this
-  branch yet, so the proposals below use the nearest colours that do; the
-  Engineer's table supersedes them the day it exists.
+  ``castle_render.palette_values`` — imported, not copied — through the
+  Engineer's ``reptileCreaturesAssets.ts`` ``STYLES`` table, and from nowhere
+  else: the run fails without it rather than render a proposal.
 * **Framing, colour conversion and the scale stand-in** are
   ``castle_render``'s functions, imported. The child-height post is sized
   from ``kid.ts``'s ``KID_HEIGHT`` through ``ts_const`` — the same owner the
@@ -53,25 +50,6 @@ OUT = os.path.join(REPO, "art", "renders", "reptile-creatures")
 ENGINEER_MODULE = "src/art/models/reptileCreaturesAssets.ts"
 CHILD_HEIGHT = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
 
-# Palette keys, never hex (ART_DIRECTION §5). Nearest existing colours to the
-# spec's proposed additions: `markerMint` for `snakeMint`, `leafDeep` for the
-# crocodile and iguana, `cream` for the belly-coloured jaw, `biscuitFur` for
-# the skink, `leafLight` for the gecko and the frogs.
-PROPOSED = {
-    "rr-snake-head": "PALETTE.markerMint",
-    "rr-snake-tongue": "PALETTE.markerPink",
-    "rr-croc-head": "PALETTE.leafDeep",
-    "rr-croc-jaw": "ART.cream",
-    "rr-croc-body": "PALETTE.leafDeep",
-    "rr-croc-tail": "PALETTE.leafDeep",
-    "rr-tortoise-shell": "PALETTE.leafMid",
-    "rr-tortoise-head": "ART.biscuitMuzzle",
-    "rr-chameleon-body": "PALETTE.leafMid",
-    "rr-frog-body": "PALETTE.leafLight",
-    "rr-gecko-body": "PALETTE.leafLight",
-    "rr-skink-body": "ART.biscuitFur",
-    "rr-iguana-body": "PALETTE.leafDeep",
-}
 
 
 def resolve_colours():
@@ -87,14 +65,8 @@ def resolve_colours():
             re.DOTALL,
         )
         styles = {name: key for name, key in found} or None
-    if styles:
-        source = f"{ENGINEER_MODULE} — the Engineer's own table"
-    else:
-        styles = PROPOSED
-        source = (
-            "PROPOSED in reptile_creatures_render.py — the Engineer's module is not on "
-            "this branch yet, so these renders show the Artist's SUGGESTED colours"
-        )
+    assert styles, f"{ENGINEER_MODULE} has no STYLES rows — nothing to render the game's colours from"
+    source = f"{ENGINEER_MODULE} — the Engineer's own table"
     missing = [key for key in styles.values() if key not in values]
     assert not missing, f"these colours are named but do not exist in the palette modules: {missing}"
     return {node: values[key] for node, key in styles.items()}, source, styles

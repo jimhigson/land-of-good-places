@@ -1,142 +1,119 @@
 # HANDOFF — the Reptile House
 
 **Branch:** `feat/reptile-house` · **worktree:** `.claude/worktrees/reptile-house`
-· **based on:** `origin/wip/sb-merge` (not `main`; rebase onto `main` only
-when the Overseer says `wip/sb-merge` has landed).
+· **based on:** `origin/wip/sb-merge` at its current tip (rebased 2 October
+2026 from the 97-commits-stale fork; not `main` — rebase onto `main` only when
+the Overseer says `wip/sb-merge` has landed). **The PR goes to `wip/sb-merge`
+(or the stack branch the Overseer names), never to `main`**: against `main`
+the three-dot diff carries the whole unmerged sphere/prebuilt-parks stack.
 **Model:** Fable 5.1 (`claude-fable-5-1`), chosen by the Overseer's ultracode
 workflow — a replacement runs the same model (CLAUDE.md). Every agent on this
-effort (Artists A–F, Engineers, placement) branches **from this branch** and
-PRs **back into it**; the Overseer merges this branch when the building is
-complete.
+effort branches **from this branch** and PRs **back into it**; the Overseer
+merges this branch when the building is complete.
 
-## State (2 October 2026)
+## State (2 October 2026, after the four-lens review)
 
-- [x] Spec: `docs/design/REPTILE-HOUSE.md`. One owner of every shared number:
+- [x] Spec: `docs/design/REPTILE-HOUSE.md` (corrected in place where the code
+      wins: no nameplates, no painted words, geometry faces with two
+      catchlights). One owner of every shared number:
       `src/world/reptileHouse/layout.ts` (+ `art/blend/reptile_constants.py`).
-- [x] Artists A–F merged: `house`, `cases`, `plants`, `creatures`, `noodle`,
-      `stall` kits, each with build/export/render scripts, renders under
-      `art/renders/reptile-*/`, recorded in `ASSET_MANIFEST.md` §35–40.
-- [x] Loaders: `src/art/models/reptile{Kit,HouseAssets,CasesAssets,PlantsAssets,
-      CreaturesAssets,NoodleAssets,StallAssets}.ts` — STYLES tables, every
-      shared number re-asserted against `layout.ts` at load, `markShared`.
-- [x] Snake rig `src/art/models/snake.ts` (instanced segment pool, pet, plush),
-      reptiles `reptiles.ts`, shared face `snakeFace.ts`, stall stock
-      `snakeToys.ts`, the `'snake'` hat in `hats.ts`.
-- [x] The building `src/world/reptileHouse/`: `ReptileHouse.ts` (doors, spaces,
-      forecourt, zones), `shell.ts`, `props.ts` (one placement call, keep-outs),
-      `exhibits.ts` (15 exhibits, Noodle thread, hidden babies), `planting.ts`
-      (beds as disc tilings, instanced plants), `stall.ts` (Scales & Tails,
-      Noodle-o-meter, two `ShopStand`s), `lighting.ts`, `signs.ts` (one atlas).
-- [x] Wiring: `World.ts` (construct, zones, roots, update, `shopStands()`,
-      `playerInAnyInterior`), `Game.ts` (`boardRide` ids, `enterReptileSpawn`,
-      `adoptRestoredPlayer`), `main.ts` (`/reptile-house`, `/reptile-house?at=`,
-      `/reptile-house-door`), `Shopping.openShopById` reads `World.shopStands()`,
-      catalogue rows (`REPTILE_ITEMS`), `secrets.ts` (two deeds).
-- [x] `scripts/check-reptile-house.mts`, in `check:shard-4` (parsed, verified).
-      Hooks into `check:tap-spacing`, `check:brevity`, `check:assets`,
-      `check:deep-links`, `art/samples/main.ts`.
-- [ ] **Run the checks to green** — see "Where this is" below.
+- [x] Six kits (`house`, `cases`, `plants`, `creatures`, `noodle`, `stall`)
+      with build/export/render scripts; renders under `art/renders/reptile-*/`
+      are **re-rendered from the loaders' own STYLES tables** — every
+      `PROPOSED` colour fallback is gone, the stall render parses its loader
+      like the others.
+- [x] Loaders, snake rig, reptiles, shared snake face, stall stock, the
+      `'snake'` hat, the building (`ReptileHouse.ts`, `shell.ts`, `props.ts`,
+      `exhibits.ts`, `planting.ts`, `floorPaint.ts`, `stall.ts`, `lighting.ts`,
+      `signs.ts`), wiring (`World.ts`, `Game.ts`, `main.ts`, catalogue,
+      secrets), hooks into `check:tap-spacing`, `check:copy-brevity`,
+      `check:assets`, `check:deep-links`, `art/samples/main.ts`.
+- [x] `scripts/check-reptile-house.mts` in `check:shard-4`, with the review's
+      clauses added (below), every one proved red first.
 - [ ] Placement agents (separate, later): manifest, anchor, park enlargement,
       procgen invariants. `ReptileHouse` takes `plot: PlacedEntry | null`;
-      `World.ts` passes `null`. With a plot the exterior stands in the park
-      and leaving lands on `plot.entranceX/Z`.
+      `World.ts` passes `null`.
 
-## Where this is
+## What the review changed (all at cause; findings in the Overseer's thread)
 
-`tsc --noEmit`, `typecheck:test`, `pnpm run build`, `check:chain-coverage`
-exit 0. Pinned to **seed 5, restart 1** (`LGP_SEED=5 LGP_PARK_RESTART=1`):
+- **Faces and planks upside-down.** The three heads and three planks are
+  authored the gate arch's way (`v = (hi_z − z)/h`) and need `flipY` on:
+  `art/style/glb.ts`'s **`planarUvCanvasTexture`** owns the convention beside
+  `glbCanvasTexture` (glTF way, the hotel's). `snakeFace.ts`, `signs.ts` and
+  the gate arch read it. Measured `dv/dy`: +1.18 `rh-sign`, +2.0 `rs-sign`,
+  +0.33 `rh-head` vs −0.82 on the hotel's signboard. Sunny's and the kit
+  snakes' tongues hide by `visible`, not a 0.001 scale along one axis.
+- **No painted words.** TEXT RULE + the 28 July ruling: the 15 nameplates are
+  gone (an exhibit's blurb is said in a bubble on its first hello), and the
+  three planks wear the house motif from a 768 × 768 atlas painted **at each
+  plank's measured aspect** (`SignAtlas.applyTo(plank)`). Names are the zone
+  labels. If Jim wants words on the planks they need to be ~3× taller — an
+  Artist job, not a font size.
+- **Beds solid to the kerb.** `planting.ts` adds one capsule per outline edge
+  (`REPTILE_BED_EDGE_HALF` 0.3, pulled back at convex corners), on top of the
+  disc tiling. Beds notched round the hollow log (`layout.ts`) so no kerb face
+  lies in the bore wall's plane.
+- **Jungle to budget.** Tall clumps ≈ area/8 per bed, retried not dropped,
+  sampled south of the islands' north 3 m and ≥ 1.2 m off every stand spot's
+  line of sight (`sightlinesToKeep`, incl. hidden baby #2 → the grotto pool,
+  which `exhibits.ts` now exports as `grottoPoolSpot()`).
+- **Follow-the-snake floor** (`floorPaint.ts`): scales along every `PATHS`
+  polyline (one InstancedMesh), a 2 m smiling head at the arrival, the tail
+  tip by the grotto; decals at `DECAL_STEP` 0.02 layers, nothing coplanar.
+- **Snake Grove**: six 2 m `grove` snakes (now `leafLight`/`flowerYellow`)
+  hung from the canopy on the stand spot's side, looking at her; "Hiss hello!"
+  slides one down the trunk and back (`buildSnakeGrove`).
+- **Code findings**: `Player.topHeight` (hat and all) → the Noodle-o-meter
+  (`meterReading`/`meterRungs` in `stall.ts`); `requestEnter` works from
+  inside the hall (returning saves); `adoptRestoredPlayer` clears the other
+  place's flag and `check:tap-spacing` asserts the forecourt's list; the hotel
+  feast seats her own companion's `model()` (an adopted snake, not a bunny;
+  `hasWalk` moved to `art/style/asset.ts`); `check:deep-links` primes both
+  reptile rows inside the hall.
+- **Art findings**: two catchlights per eye on every geometry face
+  (`reptiles.ts`, the stall kit's snakes); `check:coplanar` clean for the hall
+  — belly tube without caps, spot domes without bottoms and steeper than the
+  tube's facets, the mound's foot one real ledge, the croc's jaw a real lower
+  jaw seated 0.04 into the head with the beads at the mouth line, foot pads
+  without bottoms, stub legs open-ended, the nursery lamp post derived from
+  the rail top, the jelly bag bottomless.
 
-| check | result |
+## The check (`pnpm run check:reptile-house`), and how to re-arm it
+
+Pinned to **seed 5, restart 1** (`LGP_SEED=5 LGP_PARK_RESTART=1`) for
+iterating — ~35 s a run. Mutation switches, each proved red (transcripts in
+the script header):
+
+| switch | what it does |
 |---|---|
-| `check:reptile-house` | exit 0 — "All clauses passed": 0 pockets in 11 418 clear cells, 768 marches, 0 inside; proved red with `REPTILE_CHECK_REMOVE=lagoon` (8 clauses, transcript in the script header) |
-| `check:tap-spacing` | exit 0 — 10 spaces (the hall and the forecourt added), 147 zones, 25 bands |
-| `check:hall-solid`, `check:hotel`, `check:castle`, `check:castle-floors`, `check:castle-towers`, `check:castle-window` | exit 0 |
-| `check:brevity`, `check:assets`, `check:hat-fit`, `check:character-parity` | exit 0 |
-| coplanar sweep of the hall (`LGP_COPLANAR_CHILD=1`, seed 5) | first run: 70 seams, which found the beds **drawn mirrored north–south** (the collider discs were right; the extrude's rotation negated z); fixed, rerun pending below |
+| `REPTILE_CHECK_REMOVE=<solid name substring>` | removes one registered hall collider (`lagoon`, `floor rock rp-rock-a`, `the foyer log`, `bed 'swBed' edge 10`, …) |
+| `REPTILE_CHECK_OPEN_SHELL=8` | removes exterior chord 8 (opposite the door) — the facade clause |
+| `REPTILE_CHECK_MUTATE=faces-upside-down` | flips every painted head's and plank's texture — the painted-faces clause |
 
-**The acceptance loop is the slow part, and it is why every run above is
-pinned.** Any edit to `src/`, `scripts/`, `test/procgen/` or `package.json`
-changes `acceptanceSourceHash()` (`scripts/lib/acceptedPark.mts`), and the
-first headless build of a seed then re-runs `accept-parks` for it (minutes,
-many restarts: seed 5's restarts 0 and 4 are refused by the rail race's
-`DuckBarRefusal` at build, 1/2/3/5 by invariants of the park's own —
-nothing to do with the hall). Restart 1 *builds*, so it is the one to pin
-for iterating on the hall. The unpinned runs are CI's.
+Clauses added by the review: bed probe at every corner **and edge middle**
+from the nearest path node, measured at the body's edge (a centre-only read
+could not see a removed edge); instanced plants probed per instance
+(foliage species soft, trunks/rocks/logs/banyan solid); painted faces read
+UV-vs-`flipY`; the Noodle-o-meter on a real `Player` with the real hat's
+height; `/reptile-house` from inside.
 
-**Two things cannot pass locally on this base, for the same reason, and
-neither is this branch's doing:**
-
-- `check:served-deep-links` — the browser has no prebuilt park file (#705),
-  so it always builds restart 0, which seed 5's rail race refuses; no deep
-  link, old or new, boots. The two new `CHECKS` rows are written and
-  typechecked; the links themselves were verified in headless Chromium by
-  injecting `__LGP_PARK_RESTART__ = 1` before the page's modules ran
-  (`scripts/local/reptile-shots.local.mts`, uncommitted), which is what a park
-  file does.
-- `check:coplanar` whole, `test:procgen`, `check:swept-bus` — each sweeps
-  every pool seed through the acceptance loop; not run here. The hall's own
-  spaces were swept directly (above).
-
-The check itself has a `REPTILE_CHECK_REMOVE=<solid name substring>` switch
-that removes one registered collider after the build, for proving it red.
-
-## The design decisions worth knowing
-
-- **The forecourt.** While `placedEntry('reptileHouse')` does not exist, the
-  exterior stands on its own flat lawn — a disjoint space at (600, −900),
-  `SPACE_REPTILE_FORECOURT` — so `/reptile-house-door` lands her on the
-  doormat there and leaving the hall comes back out to it. Nothing in
-  procgen was touched.
-- **No rectangles.** Every solid is a filled disc or a filled capsule
-  (`addWall`); beds are tilings of r 1.2 discs inside their drawn outline
-  (`planting.ts`), thin beds take the largest disc they can hold.
-- **Keep-outs** (`props.ts reptileKeepOuts`) are asserted against every
-  placement; `assertClear()` throws once with all violations.
-- **Pets are catalogue entries, not `PetKind`s**: `pet.snakeMint/Coral/Rainbow`
-  use `createPetSnake` (sized to `PET_RENDER_HEIGHT`) and walk in the parade
-  as walkers. Extending `PetKind` would have put wild snakes on the castle
-  roof and three more statues in the hotel; the spec's "if the store keys on
-  PetKind alone" condition is false — it keys on the catalogue id.
-- **Noodle's stand spot** moved off her bearing to (4.4, 2.4) facing 267
-  (the Artist's sightline note); her snout's 0.3 m overhang gets one disc
-  derived from the measured reach.
-- **One sign canvas** (`signs.ts` atlas, 2048 × 1152, 18 cells); one snake
-  face set (5 textures) shared by every snake, Noodle and Sunny.
-- Reptile faces are **geometry** (ink blobs, catchlights, blush, w-mouth), no
-  canvas.
-- The camera-ray sightline probe in the spec (§10.8) is **not** implemented;
-  the sightline rule is applied by hand in `planting.ts` (no tall planting in
-  the north 2 m of the island beds, near-side beds low).
-
-## How to read a shared number
-
-**TypeScript:** `import { REPTILE_SHELL_RADIUS } from '../reptileHouse/layout';`
-(the module is a leaf — it imports nothing — so anything may import it).
-
-**Blender build script** (`art/blend/reptile_<id>_build.py`):
-
-```python
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from blendkit import Part, collection, reset_scene  # noqa: E402
-from reptile_constants import REPTILE_SHELL_RADIUS, TALLEST_CHILD_HEIGHT  # noqa: E402
-```
-
-Never type a figure into Python. If the number you need is not in
-`reptile_constants.py`, first add the `export const NAME = <literal>;` line
-to `layout.ts`, then the one-line `_layout("NAME")` read. `ts_const` is a
-regex: it reads **plain literals on their own line only**, so derived values
-(`REPTILE_DOOR_BAND_OUTER`, `REPTILE_BACK_WALL_ALONG`) are re-derived in
-Python from the same literal with the same arithmetic, not read.
+`scripts/local/coplanar-hall.local.mts` (uncommitted scratch) sweeps only the
+reptile spaces with outline hulls named — the sweep sees a hull's underside
+as facing *up*, which is what most of the "croc" findings were.
 
 ## Deep links
 
 - `/reptile-house` — inside, at the arrival (6, 15.8) facing north.
-- `/reptile-house?at=x,z&facing=deg` — inside, at a hall-local spot:
-  `?at=4.4,2.4&facing=267` Noodle · `?at=20.4,6.5&facing=270` the nursery ·
-  `?at=15,1.8&facing=180` the lagoon · `?at=-13,0&facing=90` inside the log ·
-  `?at=3.04,15.24&facing=225` the stall.
+- `/reptile-house?at=x,z&facing=deg` — `?at=4.4,2.4&facing=267` Noodle ·
+  `?at=20.4,6.5&facing=270` the nursery · `?at=15,1.8&facing=180` the lagoon ·
+  `?at=-13,0&facing=90` inside the log · `?at=3.04,15.24&facing=225` the stall
+  · `?at=-17.8,-12.4&facing=315` the grove.
 - `/reptile-house-door` — outside on the forecourt doormat, facing the door.
+
+Screenshots are taken headless against `vite preview` with
+`__LGP_PARK_RESTART__ = 1` injected (`scripts/local/reptile-shots-2.local.mts`,
+uncommitted), because the browser has no prebuilt park file (#705) and seed
+5's restart 0 is refused by the rail race.
 
 ## Rules that bite here
 
@@ -144,8 +121,10 @@ Python from the same literal with the same arithmetic, not read.
   `feat/reptile-house`, commit and push after every meaningful edit.
 - `pnpm` only. Kill only your own processes by PID. Never touch port 5412.
 - Blender headless only (`--background --python`). Never the live MCP session.
-- Do not touch park generation / placement code; the building is reached
-  through `/reptile-house` until the placement agents give it a plot.
-- Anything drawn is solid, in the same commit; prove reachability with an
-  instrument and a control first (`check:reptile-house` does both).
+  `blend:reptile-<kit>` builds, exports and packs; `render:reptile-<kit>`
+  re-renders from the loader's colours. The stall kit has a 2500-triangle
+  budget (2401 used).
+- Do not touch park generation / placement code.
+- Anything drawn is solid, in the same commit; prove it with the check's
+  mutation switches, red first.
 - Scratch: `/private/tmp/claude-501/-Users-jim-dev-landOfGoodPlaces/92acae52-e71b-43c9-a76b-92e2c76ea5d3/scratchpad/reptile-house/<agent>/`.

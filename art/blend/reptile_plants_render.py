@@ -12,15 +12,12 @@ hand-copied its build script's numbers and drifted. So:
 
 * **The geometry comes from ``reptile_plants.blend``**, opened here. There is
   no second builder, so the picture is of the mesh that ships.
-* **The colours come from ``src/art/models/reptilePlantsAssets.ts``**, parsed,
-  the day the Engineer's module lands; until then from :data:`PROPOSED` below,
-  which names palette keys and never a hex value, and is announced loudly on
-  every run so a render made from proposals is never mistaken for one made
-  from the game.
+* **The colours come from ``src/art/models/reptilePlantsAssets.ts``**, parsed —
+  and from nowhere else: the run asserts they did.
 * **The scene plumbing comes from ``castle_render.py``** — the palette reader,
   the Workbench setup, the stand-in boxes and the framing — imported, not
-  re-typed. Its module-level ``ENGINEER_MODULE`` and ``PROPOSED`` are pointed
-  at this kit's before ``resolve_colours`` is called; that is the one place
+  re-typed. Its module-level ``ENGINEER_MODULE`` is pointed at this kit's
+  before ``resolve_colours`` is called; that is the one place
   this file reaches into another, and it is so the two renderers cannot
   disagree about what a review render looks like.
 * **The composition's numbers come from ``reptile_plants_build``** — the
@@ -50,35 +47,6 @@ DEFAULT_OUT = os.path.join(REPO, "art", "renders", "reptile-plants")
 
 ENGINEER_MODULE = "src/art/models/reptilePlantsAssets.ts"
 
-# The Artist's proposal for the Engineer's `STYLES` table, by node name. Every
-# value is a **palette key**, never a hex literal (ART_DIRECTION §5).
-PROPOSED = {
-    "rp-palm-trunk": "PALETTE.bark",
-    "rp-palm-frond": "PALETTE.leafMid",
-    "rp-banana-leaf": "PALETTE.leafLight",
-    "rp-monstera-stalk": "PALETTE.leafDeep",
-    "rp-monstera-leaf": "PALETTE.leafDeep",
-    "rp-fern-frond": "PALETTE.leafLight",
-    "rp-heliconia-stalk": "PALETTE.leafMid",
-    "rp-heliconia": "PALETTE.flowerRed",
-    "rp-vine-strand": "PALETTE.barkDark",
-    "rp-vine-leaves": "PALETTE.leafLight",
-    "rp-lily-pad": "PALETTE.leafLight",
-    "rp-rock-a": "PALETTE.grassDark",
-    "rp-rock-b": "PALETTE.grassDark",
-    "rp-rock-c": "PALETTE.grassDark",
-    "rp-log-small": "PALETTE.bark",
-    "rp-log-hollow": "PALETTE.bark",
-    "rp-log-knothole": "PALETTE.barkDark",
-    "rp-banyan": "PALETTE.barkDark",
-    "rp-banyan-canopy": "PALETTE.leafDeep",
-    # The anchors are never drawn in the game; pink here so a reviewer can
-    # see where a snake will hang.
-    "rp-banyan-anchor-a": "PALETTE.markerPink",
-    "rp-banyan-anchor-b": "PALETTE.markerPink",
-    "rp-banyan-anchor-c": "PALETTE.markerPink",
-    "rp-branch": "PALETTE.woodDark",
-}
 
 GAME_ELEVATION = cr.GAME_ELEVATION
 
@@ -169,8 +137,10 @@ def main() -> None:
 
     # Point castle_render's resolver at this kit (see the module docstring).
     cr.ENGINEER_MODULE = ENGINEER_MODULE
-    cr.PROPOSED = PROPOSED
     colours, source, styles = cr.resolve_colours()
+    # The game's own table, never a proposal: a render of colours the game
+    # does not draw is a render of a different kit.
+    assert source.startswith(ENGINEER_MODULE), f"colours did not come from {ENGINEER_MODULE}: {source}"
 
     bpy.ops.wm.open_mainfile(filepath=BLEND)
     cr.configure(colours)

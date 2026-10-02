@@ -133,7 +133,8 @@ export function createCroc(seed: number): CrocHandle {
   const eyes = new Group();
   body.add(eyes);
   geometryFace(eyes, 0.205, 0.72, 0.72, 0.1);
-  wMouth(eyes, 0.46, 1.5, 0.06);
+  // No drawn w-mouth: the cream lower jaw hangs below the snout with its
+  // beads at the mouth line, and that is the smile.
 
   let yawn = 0;
   let nextYawn = rng.range(18, 30);

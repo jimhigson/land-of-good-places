@@ -225,8 +225,16 @@ def transport_frames(points):
     return frames
 
 
-def sweep_varying(points, frames, radius_at, sides: int, offset_at=None):
-    """A capped tube along ``points`` with a per-sample radius (and centre offset)."""
+def sweep_varying(points, frames, radius_at, sides: int, offset_at=None, caps: bool = True):
+    """A tube along ``points`` with a per-sample radius (and centre offset).
+
+    ``caps`` closes both ends with a flat n-gon. A tube that starts and ends
+    inside something else (the belly stripe, buried in the coil's own ends)
+    takes ``caps=False``: its caps would lie in the very planes of the coil's
+    caps, and `check:coplanar` found the belly's chin-end cap fighting the
+    coil's across 0.22 m² (2 October 2026). ART_DIRECTION §7: delete the
+    hidden face.
+    """
     count = len(points)
     verts = []
     faces = []
@@ -241,8 +249,9 @@ def sweep_varying(points, frames, radius_at, sides: int, offset_at=None):
         for k in range(sides):
             k2 = (k + 1) % sides
             faces.append((i * sides + k, i * sides + k2, (i + 1) * sides + k2, (i + 1) * sides + k))
-    faces.append(tuple(range(sides - 1, -1, -1)))
-    faces.append(tuple(range((count - 1) * sides, count * sides)))
+    if caps:
+        faces.append(tuple(range(sides - 1, -1, -1)))
+        faces.append(tuple(range((count - 1) * sides, count * sides)))
     return verts, faces
 
 
@@ -370,7 +379,8 @@ def build_body(coll, path, frames):
 
     # 8 sides, not fewer: a 6-sided tube's 60° edges are over `emit`'s 46°
     # crease threshold, and the belly then rendered as hard-edged flat panels.
-    belly.add(*sweep_varying(path, frames, lambda i: radius_at(i) * 0.84, 8, belly_offset))
+    # No caps: both ends are inside the coil's own (see `sweep_varying`).
+    belly.add(*sweep_varying(path, frames, lambda i: radius_at(i) * 0.84, 8, belly_offset, caps=False))
     belly.emit(coll)
 
     spots = Part("rn-coil-spots")
@@ -396,13 +406,18 @@ def build_body(coll, path, frames):
             a = k * TAU / 6
             rim.append(tuple(centre + along * (math.cos(a) * rx) + across * (math.sin(a) * ry)))
         spots.verts.extend(rim)
-        spots.verts.append(tuple(centre + d * 0.05))
-        spots.verts.append(tuple(centre - d * 0.03))
-        apex, bottom = base + 6, base + 7
+        # A six-fan dome and nothing under it: the old bottom fan was buried
+        # in the coil (a hidden face), and the dome stands 0.07 proud of the
+        # rim rather than 0.05 so every fan facet tilts at least 17° off the
+        # rim's plane — more than the 12.9° a 14-sided tube's facet normals
+        # can stray from the dome's own axis, so no facet of a spot can lie in
+        # a facet of the coil, whichever way the spot's wander put it
+        # (`check:coplanar` had found two that did, 9 mm apart).
+        spots.verts.append(tuple(centre + d * 0.07))
+        apex = base + 6
         for k in range(6):
             k2 = (k + 1) % 6
             spots.faces.append((base + k, base + k2, apex))
-            spots.faces.append((base + k2, base + k, bottom))
     spots.emit(coll, weld=False)
     return neck_start
 
@@ -412,8 +427,14 @@ def build_mound(coll):
     and crown get moss ledges — flat steps a child reads as "a rock you could
     climb", even though the kerb says she cannot."""
     profile = [(MOUND_BASE_R, -MOUND_SINK), (MOUND_BASE_R, 0.0)]
-    # the foot: two ledges before the coil covers it
-    profile += [(2.92, 0.05), (2.80, 0.06), (2.78, 0.11), (2.62, 0.12)]
+    # the foot: one honest ledge before the coil covers it. The first cut cut
+    # two treads rising a centimetre each — steps thinner than the 0.022 m
+    # outline hull drawn round the rock, so the hull of one tread lay 7 mm
+    # off the next (`check:coplanar`, 2 October 2026). A step that exists is
+    # at least three times the outline.
+    # The slope leaves the base ring straight away: a tread on z = 0 would lie
+    # in the hall floor's own plane (2.4 m² of it, found the first time).
+    profile += [(2.85, 0.07), (2.62, 0.07)]
     for r in (2.5, 2.0, 1.5, 1.2, SPIRAL_R_INNER):
         profile.append((r, mound_z_at_r(r)))
     # the crown: a stepped plateau inside the top turn

@@ -367,6 +367,18 @@ def build_snake() -> None:
 # =============================================================================
 
 
+def without_bottom_cap(faces):
+    """A :func:`blendkit.tube` with its bottom cap deleted.
+
+    ``tube`` appends the bottom cap (the reversed ring) and then the top cap;
+    a foot pad stands on whatever the animal stands on, so its bottom is a
+    hidden face — and the baby crocodile's, drawn round with an outline hull,
+    lay 6 mm off the rock it sits on (`check:coplanar`, 2 October 2026).
+    """
+    assert len(faces) >= 2 and faces[-2][0] > faces[-2][-1], "expected tube's reversed bottom cap"
+    return faces[:-2] + faces[-1:]
+
+
 def croc_body_top(y: float) -> float:
     """Height of the body ellipsoid's back at station ``y`` (a ridge sits here)."""
     t = max(0.0, 1.0 - (y / CROC_BODY_HALF_LENGTH) ** 2)
@@ -400,8 +412,9 @@ def build_croc() -> None:
             leg(body, x, y, centre_z - 0.05, CROC_LEG_RADIUS, 6, splay=(sx * 0.12, 0.0), z_bottom=0.05)
             # A big round foot pad: ART_DIRECTION §4, "feet oversized". An
             # 8-sided puck, because a 20-face icosahedron squashed flat
-            # rendered as a lump of crystal rather than a foot.
-            body.add(*tube(0.20, 0.07, 8), at(x + sx * 0.04, y - 0.03, 0.0))
+            # rendered as a lump of crystal rather than a foot. No bottom.
+            pad_verts, pad_faces = tube(0.20, 0.07, 8)
+            body.add(pad_verts, without_bottom_cap(pad_faces), at(x + sx * 0.04, y - 0.03, 0.0))
     # One row of soft ridges down the spine, the biggest in the middle.
     for i in range(5):
         y = (i - 2) * CROC_BODY_HALF_LENGTH * 0.42
@@ -437,19 +450,27 @@ def build_croc() -> None:
     anchor("rr-croc-head", "smile patch (front of snout, centre)", 0.0, snout_tip + 0.12, head_z - 0.02)
 
     # The jaw: hinge at the back of the lower jaw, under the head. Authored
-    # closed, lying flush under the snout; `rotation.x` drops it open.
-    jaw_hinge = (0.0, head_back + 0.04, head_z - CROC_HEAD_HALF_HEIGHT * 0.55)
+    # closed, its top seated 0.04 up inside the head's underside, so the cream
+    # jaw hangs below the green snout and the mouth line is the clean seam
+    # where the two surfaces cross; `rotation.x` drops it open. The first cut
+    # hung the hinge inside the head, which put the jaw's bottom in the
+    # head's bottom plane — the two outline hulls fought there on fourteen
+    # facets (`check:coplanar`); a jaw merely touching the underside at the
+    # pole left its top facets inside the head's own outline hull.
+    JAW_SEAT = 0.04
+    jaw_hinge = (0.0, head_back + 0.04, head_z - CROC_HEAD_HALF_HEIGHT - CROC_JAW_HALF_HEIGHT + JAW_SEAT)
     jaw = Part("rr-croc-jaw")
     jaw_len = CROC_HEAD_LENGTH * 0.92
     jaw.add(
         *ellipsoid_y(CROC_HEAD_HALF_WIDTH * 0.92, jaw_len * 0.5, CROC_JAW_HALF_HEIGHT, 2),
         at(0.0, -jaw_len * 0.5, 0.0),
     )
-    # Four beads along the jaw's rim — round, in the belly colour. No points.
+    # Four beads along the jaw's rim at the mouth line — round, in the belly
+    # colour. No points. Half in, half out of the head's underside.
     for sx in (-1.0, 1.0):
         for (fx, fy) in ((0.78, 0.45), (0.55, 0.80)):
             jaw.add(*icosphere(CROC_BEAD_RADIUS, 1),
-                    at(sx * CROC_HEAD_HALF_WIDTH * fx, -jaw_len * fy, CROC_JAW_HALF_HEIGHT * 0.9))
+                    at(sx * CROC_HEAD_HALF_WIDTH * fx, -jaw_len * fy, CROC_JAW_HALF_HEIGHT - JAW_SEAT))
     jaw.emit(coll, location=jaw_hinge)
     anchor("rr-croc-jaw", "hinge (node origin)", *jaw_hinge)
 

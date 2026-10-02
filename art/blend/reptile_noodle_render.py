@@ -16,13 +16,8 @@ at whoever just walked in — from the angle the game actually uses.
 
 Each node's colour is a *name* in ``STYLES``; the hex behind it is read out of
 ``src/core/palette.ts`` and ``src/art/style/artPalette.ts`` by regex, the same
-way ``blendkit.ts_const`` reads a dimension. The Reptile House's own palette
-rows (spec §12: ``snakeMint`` and friends) do not exist in ``artPalette.ts``
-yet — they land with the loader — so for those names, and only those, this
-file carries the spec's proposed values in ``PROPOSED`` and **says so on every
-run**. The moment the palette gains the name, the palette wins and the line
-stops printing. That is the one place a number lives here that the game does
-not own, and it is a preview colour, not a dimension.
+way ``blendkit.ts_const`` reads a dimension. A name the palette lacks is a
+failed run, never a stand-in: there is no number here the game does not own.
 
 ## The stand-in child
 
@@ -64,28 +59,20 @@ STYLES = {
     "stand-in-child": "markerSky",
 }
 
-# Spec §12's proposed additions, used ONLY when the palette lacks the name.
-PROPOSED = {
-    "snakeMint": 0x9FE0B0,
-    "snakeCoral": 0xFF9F80,
-    "snakeBelly": 0xFFF1D0,
-    "cornOrange": 0xFFA75C,
-    "cornSaddle": 0xD96B4A,
-    "shellOlive": 0xB5B86A,
-    "hothouseClay": 0xE9A883,
-}
-
-
 def palette_hex(name: str) -> int:
+    """A colour by name out of the palette modules — and from nowhere else.
+
+    The first cut carried spec §12's proposed values as a fallback for names
+    the palette lacked; the palette has had them since the loader landed, and
+    a fallback that stays would turn a palette rename into a quietly wrong
+    render rather than a failed one.
+    """
     for rel in PALETTE_FILES:
         with open(os.path.join(REPO, rel), encoding="utf-8") as handle:
             source = handle.read()
         found = re.findall(rf"^\s+{name}: 0x([0-9a-fA-F]{{6}}),", source, flags=re.MULTILINE)
         if found:
             return int(found[0], 16)
-    if name in PROPOSED:
-        print(f"  colour {name}: not in the palette yet — using the spec's proposed 0x{PROPOSED[name]:06x}")
-        return PROPOSED[name]
     raise SystemExit(f"reptile_noodle_render: no colour named {name} in {PALETTE_FILES}")
 
 

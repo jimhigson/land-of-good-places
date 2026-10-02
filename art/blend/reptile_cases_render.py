@@ -15,11 +15,12 @@ house.
 * **The geometry comes from ``reptile_cases.blend``**, opened here. There is
   no second builder, so the shapes cannot drift — the picture is of the mesh
   that ships.
-* **The colours come from ``src/art/models/reptileCasesAssets.ts``**, parsed,
-  once the Engineer's loader lands; until then :data:`PROPOSED` is used and
-  the banner says so loudly. Hex values are never written here: every entry
-  names a ``PALETTE.``/``ART.`` key and ``castle_render.palette_values`` reads
-  the numbers out of the palette modules.
+* **The colours come from ``src/art/models/reptileCasesAssets.ts``**, parsed —
+  and from nowhere else: a render of colours the game does not draw is a
+  render of a different kit, so the run fails instead. Hex values are never
+  written here: every entry names a ``PALETTE.``/``ART.`` key and
+  ``castle_render.palette_values`` reads the numbers out of the palette
+  modules.
 * **The compositions are built from the build script's own constants and the
   game's** (``reptile_cases_build``, ``reptile_constants``, ``ts_const``) —
   the one thing ``bridge_stones_render.py`` got wrong. Preview placements
@@ -69,27 +70,6 @@ OUT = os.path.join(REPO, "art", "renders", "reptile-cases")
 
 ENGINEER_MODULE = "src/art/models/reptileCasesAssets.ts"
 
-#: The Artist's proposal for the Engineer's `STYLES` table, by node name.
-#: Palette keys only (ART_DIRECTION §5) — a render in an off-palette colour
-#: is a render that lies about how the asset will look.
-PROPOSED = {
-    "rc-case-plinth": "PALETTE.stonePinkLight",
-    "rc-case-rim": "PALETTE.liftFrame",
-    "rc-case-backboard": "PALETTE.buildingWindowWarm",
-    "rc-case-backboard-relief": "PALETTE.leafDeep",
-    "rc-pier-post": "PALETTE.stonePink",
-    "rc-pier-vine": "PALETTE.leafMid",
-    "rc-jar-base": "PALETTE.stonePinkLight",
-    "rc-jar-rim": "PALETTE.liftFrame",
-    "rc-round-wall": "PALETTE.stonePink",
-    "rc-lagoon-wall": "PALETTE.stonePink",
-    "rc-tortoise-wall": "PALETTE.stonePink",
-    "rc-nursery-kerb": "PALETTE.stonePink",
-    "rc-nursery-rail": "PALETTE.liftFrame",
-    "rc-island-kerb": "PALETTE.stonePinkDark",
-    "rc-grotto-rock": "PALETTE.stonePinkDark",
-    "rc-grotto-moss": "PALETTE.leafLight",
-}
 
 #: Where she stands to greet a north-wall case, relative to its centreline —
 #: both numbers the layout's, read, so the stand-in child is at the real spot.
@@ -118,14 +98,8 @@ def engineer_styles():
 def resolve_colours():
     values = palette_values()
     styles = engineer_styles()
-    if styles:
-        source = f"{ENGINEER_MODULE} — the Engineer's own table"
-    else:
-        styles = PROPOSED
-        source = (
-            "PROPOSED in reptile_cases_render.py — the Engineer's module is not on "
-            "this branch yet, so these renders show the Artist's SUGGESTED colours"
-        )
+    assert styles, f"{ENGINEER_MODULE} has no STYLES rows for rc- parts — nothing to render the game's colours from"
+    source = f"{ENGINEER_MODULE} — the Engineer's own table"
     missing = [key for key in styles.values() if key not in values]
     assert not missing, f"these colours are named but do not exist in the palette modules: {missing}"
     return {node: values[key] for node, key in styles.items()}, source, values

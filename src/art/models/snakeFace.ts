@@ -58,6 +58,13 @@ const LAYOUT: FacePaintOptions = {
   blushR: 0.08,
 };
 
+/**
+ * Where the eyes and the smile sit, as fractions of the canvas from its top
+ * row — `check:reptile-house` reads a painted head's UVs against these to
+ * assert the eyes come out above the smile on the mesh.
+ */
+export const SNAKE_FACE_ROWS = { eye: LAYOUT.eyeY!, mouth: LAYOUT.eyeY! + LAYOUT.mouthDrop! } as const;
+
 const PAINTS: Readonly<Record<SnakeExpression, FacePaintOptions>> = {
   neutral: { ...LAYOUT, eyeStyle: 'open' },
   blink: { ...LAYOUT, eyeStyle: 'closedHappy' },

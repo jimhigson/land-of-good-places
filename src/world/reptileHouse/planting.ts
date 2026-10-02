@@ -65,8 +65,9 @@ const PLANT_Y = SOIL_HEIGHT - 0.04;
 const KERB_WIDTH = 0.18;
 /** Disc centres this far apart — well under two radii, so no slot between them. */
 const DISC_PITCH = 1.0;
-/** The edge capsules' half-thickness; their outer face is the drawn kerb. */
-const EDGE_HALF = 0.3;
+/** The edge capsules' half-thickness; their outer face is the drawn kerb. Exported for the check's corner allowance. */
+export const REPTILE_BED_EDGE_HALF = 0.3;
+const EDGE_HALF = REPTILE_BED_EDGE_HALF;
 /** Tall plants stay this far off a stand spot's line of sight. */
 const SIGHTLINE_CLEAR = 1.2;
 

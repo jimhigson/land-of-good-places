@@ -11,10 +11,11 @@ Workbench, like ``hotel_render.py`` and for its reason: flat object colour with
 an ink outline is the nearest thing a background render gets to the game's
 own look, so a shape reading badly here reads badly in the park.
 
-**The colours below are a proposal, not the owner.** The loader
-(``src/art/models/reptileStallAssets.ts``) does not exist yet; when it does,
-its STYLES table is right and this one is stale — ``castle_render.py`` shows
-how to parse the loader instead, and this file should go that way then.
+**The colours are the loader's** (``src/art/models/reptileStallAssets.ts``'s
+``STYLES``), parsed the way ``reptile_house_render.py`` parses its own, with
+the hex behind each palette key read by ``castle_render.palette_values``. No
+table of numbers lives here: the first cut's hand-typed one agreed with the
+loader by luck and would have gone on agreeing by nobody checking.
 
 The composition stands the kit in the arrangement the game puts it in: the
 kiosk's own counter and back panel as plain stand-in boxes (they are
@@ -39,6 +40,7 @@ sys.dont_write_bytecode = True
 
 import reptile_stall_build as rb  # noqa: E402  (import-safe: everything is behind main())
 from blendkit import REPO, ts_const  # noqa: E402
+from castle_render import palette_values  # noqa: E402
 from reptile_constants import (  # noqa: E402
     BACK_PANEL_HEIGHT,
     BACK_PANEL_THICKNESS,
@@ -53,27 +55,27 @@ OUT = os.path.join(REPO, "art", "renders", "reptile-stall")
 
 KID_HEIGHT = ts_const("src/art/models/kid.ts", "KID_HEIGHT")
 
-# Proposed colours, PALETTE / ART names beside each so the loader can be
-# written from this table and compared by eye.
-COLOURS = {
-    "rs-awning": 0xFFA9D4,  # PALETTE.blossomPink
-    "rs-awning-posts": 0xE6BD8C,  # PALETTE.woodLight
-    "rs-awning-snake": 0x9FE0B0,  # ART.snakeMint (spec §12)
-    "rs-finial": 0xFF9F80,  # ART.snakeCoral (spec §12)
-    "rs-sign": 0xFFF2DC,  # PALETTE.signBoard (painted from the atlas in game)
-    "rs-stall-snake-face": 0x4A3A52,  # PALETTE.ink
-    "rs-stall-snake-shine": 0xFFFDF8,  # ART.shine
-    "rs-stall-snake-tongue": 0xFF8FC0,  # PALETTE.markerPink
-    "rs-stall-snake-spots": 0xC9A9FF,  # PALETTE.markerLilac
-    "rs-meter-post": 0xE6BD8C,  # PALETTE.woodLight
-    "rs-meter-bands": 0xFFD76E,  # PALETTE.liftFrame
-    "rs-meter-board": 0xFFF2DC,  # PALETTE.signBoard
-    "rs-meter-snake": 0xFFA75C,  # ART.cornOrange (spec §12)
-    "rs-meter-snake-face": 0x4A3A52,  # PALETTE.ink
-    "rs-meter-snake-shine": 0xFFFDF8,  # ART.shine
-    "rs-meter-snake-tongue": 0xFF8FC0,  # PALETTE.markerPink
-    "rs-meter-snake-spots": 0xC9A9FF,  # PALETTE.markerLilac
-}
+ENGINEER_MODULE = "src/art/models/reptileStallAssets.ts"
+
+
+def engineer_colours():
+    """``{node name: hex}`` from the loader's ``STYLES`` table — the same regex
+    ``reptile_house_render.engineer_styles`` uses, over this kit's module."""
+    import re
+
+    source = open(os.path.join(REPO, ENGINEER_MODULE), encoding="utf-8").read()
+    found = re.findall(
+        r"['\"]?(rs-[\w-]*)['\"]?:\s*\{[^}]*?colour:\s*((?:PALETTE|ART)\.\w+)",
+        source,
+        re.DOTALL,
+    )
+    assert found, f"{ENGINEER_MODULE} has no STYLES rows for rs- parts — nothing to render the game's colours from"
+    values = palette_values()
+    missing = [key for _, key in found if key not in values]
+    assert not missing, f"these colours are named but do not exist in the palette modules: {missing}"
+    return {name: values[key] for name, key in found}
+
+
 STANDIN_KIOSK = 0xFFF3E2  # ART.cream — kiosk.ts's own counter colour
 STANDIN_FLOOR = 0xF4EEF9
 STANDIN_CHILD = 0xE86F9B
@@ -125,10 +127,12 @@ def configure() -> None:
     shading.background_type = "VIEWPORT"
     shading.background_color = (0.86, 0.91, 0.96)
     scene.display.render_aa = "16"
+    colours = engineer_colours()
+    print(f"  colours from: {ENGINEER_MODULE}")
     for obj in bpy.data.objects:
         if obj.type == "MESH":
-            assert obj.name in COLOURS, f"no proposed colour for {obj.name}"
-            obj.color = linear_rgba(COLOURS[obj.name])
+            assert obj.name in colours, f"{ENGINEER_MODULE} has no colour for {obj.name}"
+            obj.color = linear_rgba(colours[obj.name])
 
 
 def standin_box(name: str, size, centre, colour: int):

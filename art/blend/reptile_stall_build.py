@@ -245,6 +245,15 @@ def disc(rx, ry, thickness, sides):
     return [(v[0] * rx, v[1] * ry, v[2]) for v in verts], faces
 
 
+def fan(rx, ry, sides):
+    """A one-sided elliptical disc on z = 0 facing +Z — a catchlight, whose back
+    lies against the eye it sits on and would be a hidden face as a coin."""
+    verts = [(math.cos(k * TAU / sides) * rx, math.sin(k * TAU / sides) * ry, 0.0) for k in range(sides)]
+    verts.append((0.0, 0.0, 0.0))
+    centre = sides
+    return verts, [(k, (k + 1) % sides, centre) for k in range(sides)]
+
+
 def frame_to(forward, up=(0.0, 0.0, 1.0)):
     """A rotation whose local +Y is ``forward`` and local +Z is as near ``up`` as it can be."""
     return Vector(forward).normalized().to_track_quat("Y", "Z").to_matrix().to_4x4()
@@ -318,8 +327,9 @@ class Snake:
             n = Vector((p.x / a**2, p.y / b**2, p.z / c**2)).normalized()
             return p, n
 
-        # Eyes: tall ink ovals low on the face, wide apart, with a catchlight
-        # high and forward on each — the house face (ART_DIRECTION §3).
+        # Eyes: tall ink ovals low on the face, wide apart, each with the
+        # house face's two catchlights (ART_DIRECTION §3): a big one high and
+        # outboard, a tiny one low and inboard. One alone is a doll's eye.
         for s in (-1.0, 1.0):
             p, n = surface((s * 0.48, 0.82, 0.34))
             eye = Matrix.Translation(centre) @ frame_to(fwd) @ Matrix.Translation(p - n * 0.004) @ axis_to(n)
@@ -327,10 +337,17 @@ class Snake:
             glint = (
                 Matrix.Translation(centre)
                 @ frame_to(fwd)
-                @ Matrix.Translation(p + n * 0.006 + Vector((s * -0.03, 0.0, 0.07)) * width)
+                @ Matrix.Translation(p + n * 0.006 + Vector((s * 0.03, 0.0, 0.07)) * width)
                 @ axis_to(n)
             )
-            self.shine.add(*disc(width * 0.055, width * 0.07, 0.01, 6), glint)
+            self.shine.add(*fan(width * 0.055, width * 0.07, 6), glint)
+            glint_small = (
+                Matrix.Translation(centre)
+                @ frame_to(fwd)
+                @ Matrix.Translation(p + n * 0.006 + Vector((s * -0.035, 0.0, -0.06)) * width)
+                @ axis_to(n)
+            )
+            self.shine.add(*fan(width * 0.026, width * 0.032, 6), glint_small)
         # The w-mouth: a thin ink line across the front of the snout, dipping
         # twice — five points, no teeth, nothing scary.
         mouth = []

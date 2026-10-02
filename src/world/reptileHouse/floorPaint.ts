@@ -18,8 +18,9 @@ import { PATHS, REPTILE_ARRIVAL_X, REPTILE_ARRIVAL_Z, type LocalPoint } from './
  * as nothing at all on a plate of one colour).
  *
  * Every decal lies {@link DECAL_STEP} above whatever it is painted on: the
- * scales and the head's dark shape at one step over the floor, the eyes, the
- * blush and the tongue at two, the catchlights at three. Two centimetres is
+ * scales and the head's dark shape at one step over the floor, the eyes and
+ * the blush at two, the catchlights and the tongue (which crosses the smile)
+ * at three. Two centimetres is
  * past `check:coplanar`'s one-centimetre "stand-off" threshold, and the
  * scales skip the head's and the tail's own footprints so no two decals of
  * one colour tile the same plane. Nothing here is solid.
@@ -143,7 +144,7 @@ export function paintPaths(ctx: HallContext): void {
   tongue.lineTo(head.x - 0.16, -(mouthZ + 0.43));
   tongue.lineTo(head.x - 0.04, -(mouthZ + 0.23));
   tongue.closePath();
-  headGroup.add(flat(tongue, PALETTE.markerPink, DECAL_STEP * 2, 4));
+  headGroup.add(flat(tongue, PALETTE.markerPink, DECAL_STEP * 3, 4));
 
   // ---- the tail: a tapering wedge from the SW Walk's end into the corner, with a rattle on the tip
   const along = { x: TAIL_TIP.x - TAIL_BASE.x, z: TAIL_TIP.z - TAIL_BASE.z };
