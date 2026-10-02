@@ -225,7 +225,7 @@ def main() -> None:
             if "stall" in frames:
                 extras += child_standin(0.0, -STAND_DISTANCE)
             else:
-                extras += child_standin(0.9, -0.9)
+                extras += child_standin(-1.4, -0.5)
         floor_lo = Vector((1e9, 1e9, 0.0))
         floor_hi = Vector((-1e9, -1e9, 0.0))
         for obj in shown + extras:

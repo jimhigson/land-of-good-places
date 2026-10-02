@@ -10,8 +10,8 @@ origin** (ART_DIRECTION §7) and told apart by name prefix:
   counter-and-back-panel into **Scales & Tails**: a scalloped cloth awning on
   two posts, a long mint snake lying along its front eave and coiling up at
   the near corner to lift a smiling head at the shopper, a second snake coiled
-  into a finial on top of the back panel, and the name board standing on the
-  front eave. Authored in the kiosk's own frame, so the awning's eaves land
+  into a finial crest on the awning's back ridge, and the name board standing
+  on the front eave. Authored in the kiosk's own frame, so the awning's eaves land
   over the counter `kiosk.ts` builds and the finial sits on the panel it
   builds, with nothing to line up afterwards.
 * ``rs-meter-*`` — the **Noodle-o-meter**: a post taller than the tallest hat,
@@ -25,9 +25,9 @@ radii, where a head looks — and asserts the ones that matter against the
 emitted vertices at the end of every run. The numbers that are **shared with
 the game** are read, never typed (CLAUDE.md, "two definitions of one thing"):
 
-* ``COUNTER_HALF_WIDTH``, ``COUNTER_Z``, ``COUNTER_DEPTH``, ``SHELF_Z``,
-  ``BACK_PANEL_HEIGHT`` (``shops/stallShape.ts``) — the counter and the back
-  panel this awning has to sit over and the finial has to sit on.
+* ``COUNTER_HALF_WIDTH``, ``COUNTER_Z``, ``COUNTER_DEPTH``, ``SHELF_Z``
+  (``shops/stallShape.ts``) — the counter and the back panel this awning has
+  to reach over.
 * ``REPTILE_METER_POST_HEIGHT`` and ``REPTILE_BABY_SNAKE_UNIT``
   (``reptileHouse/layout.ts``) — the post, and the band spacing the game's
   "You are N baby snakes tall!" arithmetic divides by.
@@ -75,13 +75,12 @@ from blendkit import (  # noqa: E402
     collection,
     ellipsoid,
     reset_scene,
-    ring,
+    revolve,
     summarise,
     total_triangles,
     tube,
 )
 from reptile_constants import (  # noqa: E402
-    BACK_PANEL_HEIGHT,
     BACK_PANEL_Z,
     COUNTER_DEPTH,
     COUNTER_HALF_WIDTH,
@@ -122,7 +121,7 @@ AWN_SAG = 0.12
 AWN_CLOTH_T = 0.07
 #: The hem: half-round scallops, this many along the front and each side.
 SCALLOPS_FRONT = 8
-SCALLOPS_SIDE = 5
+SCALLOPS_SIDE = 4
 SCALLOP_SEGMENTS = 4
 #: Ridge-side headroom the hem must keep over the tallest hat, in front of
 #: the counter. The awning drops nothing lower than its front eave.
@@ -150,7 +149,7 @@ SIGN_Y = AWN_Y_FRONT + 0.38
 # tongue. Big head, small body, eyes low and wide: ART_DIRECTION §4.
 BODY_SIDES = 5
 #: Head size as a multiple of the body radius: length, width, height.
-HEAD_SCALE = (3.2, 2.3, 2.0)
+HEAD_SCALE = (4.0, 3.1, 2.7)
 SPOTS_PER_SNAKE = 4
 
 #: The eave snake: tail at the far (−X) front corner, body along the front
@@ -159,12 +158,18 @@ EAVE_SNAKE_R = 0.13
 EAVE_COIL_CENTRE = (AWN_HALF_X - 0.55, AWN_Y_FRONT + 0.52)
 EAVE_COIL_R = 0.42
 
-#: The finial: a cone-coil on the back panel's top, head at the shopper.
-FINIAL_R = 0.10
-FINIAL_PLINTH_R = 0.34
+#: The finial: a cone-coil standing on the awning's back ridge — the stall's
+#: crest, where every mall stall carries its emblem. The spec put it on the
+#: back panel; measured from the park camera's 38° pitch, the awning's 3.9 m
+#: back edge shadows 1.8 m of everything behind and below it, so a coil on a
+#: 1.5 m panel under the cloth would never be seen. Up here it is the first
+#: thing read across the foyer.
+FINIAL_R = 0.11
+FINIAL_PLINTH_R = 0.36
 FINIAL_PLINTH_H = 0.06
-FINIAL_COIL_R = 0.30
+FINIAL_COIL_R = 0.34
 FINIAL_TURNS = 2.25
+FINIAL_Y = AWN_Y_BACK - 0.42
 
 #: The meter: post, bands, a helix up it, the board on top.
 METER_POST_R = 0.12
@@ -220,6 +225,18 @@ def sweep_var(points, radii, sides=BODY_SIDES):
     faces.append(tuple(range(sides - 1, -1, -1)))
     faces.append(tuple(range((count - 1) * sides, count * sides)))
     return verts, faces
+
+
+def ellipsoid_rev(rx, ry, rz, segments=12, rings=6):
+    """A squashed sphere as a surface of revolution — a 12-gon silhouette
+    from every side, which a subdivision-1 icosphere (hexagonal in outline)
+    cannot give a head, at under half the cost of subdivision 2."""
+    profile = []
+    for i in range(rings + 1):
+        phi = math.pi * i / rings
+        profile.append((math.sin(phi), math.cos(phi)))
+    verts, faces = revolve(profile, segments)
+    return [(v[0] * rx, v[1] * ry, v[2] * rz) for v in verts], faces
 
 
 def disc(rx, ry, thickness, sides):
@@ -291,7 +308,7 @@ class Snake:
         centre = Vector(neck) + fwd * (length * 0.32)
         m = Matrix.Translation(centre) @ frame_to(fwd)
         a, b, c = width / 2, length / 2, height / 2
-        self.body.add(*ellipsoid(a, b, c, 1), m)
+        self.body.add(*ellipsoid_rev(a, b, c), m)
 
         def surface(d):
             """Point on and outward normal of the head ellipsoid in local direction d."""
@@ -304,16 +321,16 @@ class Snake:
         # Eyes: tall ink ovals low on the face, wide apart, with a catchlight
         # high and forward on each — the house face (ART_DIRECTION §3).
         for s in (-1.0, 1.0):
-            p, n = surface((s * 0.62, 0.72, 0.30))
+            p, n = surface((s * 0.48, 0.82, 0.34))
             eye = Matrix.Translation(centre) @ frame_to(fwd) @ Matrix.Translation(p - n * 0.004) @ axis_to(n)
-            self.face.add(*disc(width * 0.15, height * 0.21, 0.012, 8), eye)
+            self.face.add(*disc(width * 0.17, height * 0.26, 0.012, 8), eye)
             glint = (
                 Matrix.Translation(centre)
                 @ frame_to(fwd)
-                @ Matrix.Translation(p + n * 0.006 + Vector((s * -0.02, 0.0, 0.05)) * width)
+                @ Matrix.Translation(p + n * 0.006 + Vector((s * -0.03, 0.0, 0.07)) * width)
                 @ axis_to(n)
             )
-            self.shine.add(*disc(width * 0.05, width * 0.06, 0.01, 6), glint)
+            self.shine.add(*disc(width * 0.055, width * 0.07, 0.01, 6), glint)
         # The w-mouth: a thin ink line across the front of the snout, dipping
         # twice — five points, no teeth, nothing scary.
         mouth = []
@@ -444,16 +461,13 @@ def build_awning(coll):
 
 def build_posts(coll):
     """Two round posts under the front eave, and the finial's little plinth
-    on the back panel — all one wood colour, so one node."""
+    on the awning's back ridge — all one wood colour, so one node."""
     part = Part("rs-awning-posts")
     for sx in (-1.0, 1.0):
         x = sx * POST_X
         height = cloth_z(POST_Y) + AWN_CLOTH_T * 0.6 - POST_BASE_Z
         part.at(*tube(POST_R, height, 8), x, POST_Y, POST_BASE_Z)
-        # A ball on each post top poking through the cloth: a finial at the
-        # eave corners, and the one place the posts show above the hem.
-        part.at(*ellipsoid(POST_R * 1.9, POST_R * 1.9, POST_R * 1.6, 1), x, POST_Y, cloth_z(POST_Y) + AWN_CLOTH_T + POST_R * 1.2)
-    part.at(*tube(FINIAL_PLINTH_R, FINIAL_PLINTH_H, 10), 0.0, BACK_PANEL_Y, BACK_PANEL_HEIGHT - 0.02)
+    part.at(*tube(FINIAL_PLINTH_R, FINIAL_PLINTH_H, 10), 0.0, FINIAL_Y, cloth_z(FINIAL_Y) + AWN_CLOTH_T - 0.02)
     return part.emit(coll)
 
 
@@ -479,7 +493,7 @@ def eave_snake_path():
         t = i / (along - 1)
         x = x0 + (x1 - x0) * t
         wave = math.sin(t * math.pi * 3.0)
-        pts.append((x, AWN_Y_FRONT + 0.1 + wave * 0.07, top + EAVE_SNAKE_R + abs(wave) * 0.03))
+        pts.append((x, AWN_Y_FRONT + 0.1 + wave * 0.07, top + abs(wave) * 0.03))
     # The coil: a spiral in from the eave, a turn and a quarter, climbing.
     coil = 13
     for i in range(1, coil + 1):
@@ -494,24 +508,28 @@ def eave_snake_path():
         t = i / neck
         pts.append((last.x + 0.08 * t, last.y - 0.42 * t * t, last.z + 0.62 * math.sin(t * math.pi / 2)))
     radii = taper(len(pts), EAVE_SNAKE_R, neck_fraction=0.12, r_neck=EAVE_SNAKE_R * 0.9)
+    # Seat the straight run on the cloth by its own local radius, so the thin
+    # tail lies on the roof rather than floating at the fat body's height.
+    pts = [(x, y, z + radii[i]) if i < along else (x, y, z) for i, (x, y, z) in enumerate(pts)]
     return pts, radii
 
 
 def finial_path():
-    cx, cy = 0.0, BACK_PANEL_Y
-    z0 = BACK_PANEL_HEIGHT + FINIAL_PLINTH_H - 0.02 + FINIAL_R
+    cx, cy = 0.0, FINIAL_Y
+    z0 = cloth_z(FINIAL_Y) + AWN_CLOTH_T + FINIAL_PLINTH_H - 0.02
     pts = []
-    turns = 18
+    turns = 14
     for i in range(turns + 1):
         t = i / turns
         ang = -math.pi / 2 + t * TAU * FINIAL_TURNS
         r = FINIAL_COIL_R * (1.0 - 0.6 * t)
-        pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang), z0 + 0.62 * t))
+        pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang), z0 + 0.68 * t))
     last = Vector(pts[-1])
     for i in range(1, 5):
         t = i / 4
         pts.append((last.x, last.y - 0.16 * t, last.z + 0.2 * t))
     radii = taper(len(pts), FINIAL_R, neck_fraction=0.15, r_neck=FINIAL_R * 0.85)
+    pts = [(x, y, z + radii[i]) for i, (x, y, z) in enumerate(pts)]
     return pts, radii
 
 
@@ -525,7 +543,7 @@ def build_stall_snakes(coll):
     pts, radii = eave_snake_path()
     Snake(body, face, shine, tongue, spots).lay(pts, radii, head_forward=(0.35, -1.0, -0.25), spot_every=7)
     pts, radii = finial_path()
-    Snake(finial, face, shine, tongue, spots).lay(pts, radii, head_forward=(0.0, -1.0, -0.3), spot_every=5)
+    Snake(finial, face, shine, tongue, spots).lay(pts, radii, head_forward=(0.0, -1.0, -0.2), spot_every=6)
     # Bodies keep a crease at their tail caps; the face discs, catchlights,
     # tongues and spots are emitted fully smooth: a 1 cm coin's rim-to-cap
     # edge is invisible, and splitting it triples every vertex in the kit's
@@ -570,10 +588,10 @@ def build_meter_board(coll):
 
 def meter_snake_path():
     helix_r = METER_POST_R + METER_SNAKE_R * 0.9
-    z0 = METER_BASE_H + METER_SNAKE_R
+    z0 = METER_BASE_H
     z1 = REPTILE_METER_POST_HEIGHT - 0.55
     pts = []
-    steps = 24
+    steps = 20
     for i in range(steps + 1):
         t = i / steps
         # Finish on the front (−Y) of the post so the neck lifts straight at her.
@@ -584,6 +602,7 @@ def meter_snake_path():
         t = i / 4
         pts.append((last.x, last.y - 0.1 * t, last.z + 0.22 * t))
     radii = taper(len(pts), METER_SNAKE_R, neck_fraction=0.12, r_neck=METER_SNAKE_R * 0.85)
+    pts = [(x, y, z + radii[i]) for i, (x, y, z) in enumerate(pts)]
     return pts, radii
 
 
@@ -594,7 +613,7 @@ def build_meter_snake(coll):
     tongue = Part("rs-meter-snake-tongue")
     spots = Part("rs-meter-snake-spots")
     pts, radii = meter_snake_path()
-    Snake(body, face, shine, tongue, spots).lay(pts, radii, head_forward=(0.0, -1.0, 0.15), spot_every=6)
+    Snake(body, face, shine, tongue, spots).lay(pts, radii, head_forward=(0.0, -1.0, 0.15), spot_every=7)
     return [body.emit(coll, sharp_deg=80.0)] + [p.emit(coll, sharp_deg=100.0) for p in (face, shine, tongue, spots)]
 
 
@@ -651,11 +670,13 @@ def check_awning_covers_counter(bounds):
     )
 
 
-def check_finial_sits_on_panel(bounds):
+def check_finial_sits_on_ridge(bounds):
     lo, hi = bounds["rs-finial"]
-    assert lo.z >= BACK_PANEL_HEIGHT - 0.03, f"the finial starts at {lo.z:.3f}, below the back panel top {BACK_PANEL_HEIGHT}"
-    assert abs((lo.y + hi.y) / 2 - BACK_PANEL_Y) < 0.25, "the finial is not centred on the back panel"
-    return f"    finial on the back panel: z {lo.z:.3f}..{hi.z:.3f}, centred y {(lo.y + hi.y) / 2:+.2f}"
+    ridge = cloth_z(FINIAL_Y) + AWN_CLOTH_T
+    assert ridge - 0.03 <= lo.z <= ridge + FINIAL_PLINTH_H + 0.03, f"the finial starts at {lo.z:.3f}, not on the ridge at {ridge:.3f}"
+    assert abs((lo.x + hi.x) / 2) < 0.1, "the finial is not centred on the stall"
+    assert hi.y <= AWN_Y_BACK, "the finial overhangs the awning's back edge"
+    return f"    finial on the awning's back ridge: z {lo.z:.3f}..{hi.z:.3f}, centred y {(lo.y + hi.y) / 2:+.2f}"
 
 
 def check_meter(bounds, bands):
@@ -710,7 +731,7 @@ def main() -> None:
     print("\n  measured off the emitted vertices:")
     print(check_awning_covers_counter(bounds))
     print(check_headroom())
-    print(check_finial_sits_on_panel(bounds))
+    print(check_finial_sits_on_ridge(bounds))
     print(check_meter(bounds, bands))
     print("\n  painted surfaces:")
     print(check_uvs())
@@ -722,7 +743,7 @@ def main() -> None:
     print(f"\n  stall dressing top {stall_top:.3f} m; meter top {meter_top:.3f} m")
     print(
         f"  read from the game: COUNTER_HALF_WIDTH {COUNTER_HALF_WIDTH}, COUNTER_Z {COUNTER_Z}, "
-        f"BACK_PANEL_HEIGHT {BACK_PANEL_HEIGHT}, REPTILE_METER_POST_HEIGHT {REPTILE_METER_POST_HEIGHT}, "
+        f"BACK_PANEL_Z {BACK_PANEL_Z}, REPTILE_METER_POST_HEIGHT {REPTILE_METER_POST_HEIGHT}, "
         f"REPTILE_BABY_SNAKE_UNIT {REPTILE_BABY_SNAKE_UNIT}, TALLEST_CHILD_HEIGHT {TALLEST_CHILD_HEIGHT}"
     )
     total = total_triangles()
