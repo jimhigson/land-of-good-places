@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { profileBoundary, REFINE } from '../../src/world/boundary.ts';
+import { profileBoundary, REFINE, solverBoundary } from '../../src/world/boundary.ts';
 import { TAU } from '../../src/core/mathUtils.ts';
 import { edgeCloserThan } from '../../src/world/boundaryEdgeTest.ts';
 
@@ -210,6 +210,48 @@ describe('edgeCloserThan', () => {
       }
     }
     process.stderr.write(`edgeCloserThan: ${checked} queries, ${disagreements} disagree with distanceToEdge < margin\n`);
+    expect(disagreements).toBe(0);
+    expect(checked).toBeGreaterThan(500000);
+  });
+});
+
+/**
+ * **The same promise for `solverBoundary`'s fast test**, whose distance is a
+ * formula over two interpolated tables rather than a geometric distance, so
+ * its bracket is a different argument (`solverCloserThan` in `boundary.ts`).
+ * Asked the same way: a grid through the origin cell, inside, across and
+ * beyond the edge, and rings hugging the edge at the margin itself.
+ *
+ * Proved able to fail (fix/sb-trainsearch2, these five profiles): the lower
+ * bound taken from the cell's nearest point instead of its farthest, 26561 of
+ * 615760 disagree; the upper bound from the farthest instead of the nearest,
+ * 23184; the sample range not widened past the corners' own indices, 3337.
+ */
+describe('edgeCloserThan on solverBoundary', () => {
+  it('gives the same boolean as distanceToEdge < margin', () => {
+    let checked = 0;
+    let disagreements = 0;
+    for (let kind = 0; kind < 5; kind += 1) {
+      const exact = profileBoundary(profile(kind));
+      const boundary = solverBoundary(exact);
+      const fast = edgeCloserThan(boundary);
+      const outline = exact.outline();
+      for (const margin of [-3, -0.5, 0, 0.5, 1.8, 2.4, 6, 15]) {
+        const ask = (x: number, z: number): void => {
+          checked += 1;
+          if (fast(x, z, margin) !== boundary.distanceToEdge(x, z) < margin) disagreements += 1;
+        };
+        for (const [x, z] of queries()) ask(x, z);
+        for (let i = 0; i < outline.length; i += 1) {
+          const [vx, vz] = outline[i] as readonly [number, number];
+          const r = Math.hypot(vx, vz);
+          for (const k of [-margin - 0.01, -margin, -margin + 0.01, margin - 0.01, margin, margin + 0.01]) {
+            ask((vx / r) * (r - k), (vz / r) * (r - k));
+          }
+        }
+      }
+    }
+    process.stderr.write(`edgeCloserThan (solver view): ${checked} queries, ${disagreements} disagree\n`);
     expect(disagreements).toBe(0);
     expect(checked).toBeGreaterThan(500000);
   });

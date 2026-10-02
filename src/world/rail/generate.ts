@@ -520,6 +520,22 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
   // `brief.boundary.distanceToEdge(x, z) < margin`, the identical boolean,
   // without measuring the distance where the answer is already certain.
   const edgeCloser = edgeCloserThan(brief.boundary);
+  /**
+   * The brief's influences, **read once**. A ride hands them in as
+   * `lazyView`s (the cruiser's castle pull is one), and every field read of a
+   * view goes through a Proxy that rebuilds the whole object: `stillWanted`
+   * and `pullOf` read `x`/`z`/`radius`/`weight` per laid sample and per
+   * candidate, and on seed 5 that rebuilding was ~3% of the plan's CPU by
+   * itself. Nothing an influence views changes during one search (it is a
+   * function of decisions made before it), so these are the same doubles.
+   */
+  const influences: readonly RouteInfluence[] = (brief.influences ?? []).map((influence) => ({
+    name: influence.name,
+    x: influence.x,
+    z: influence.z,
+    radius: influence.radius,
+    weight: influence.weight,
+  }));
   const maxLength = brief.maxLength;
 
   /**
@@ -639,6 +655,22 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
     }
     usedCells.length = 0;
     const laid: Sample[] = [];
+    /**
+     * Per influence, how many laid samples stand within its radius — kept as
+     * samples are laid and taken back, so {@link stillWanted} is a lookup
+     * instead of a scan of every sample laid so far per joint (it was ~11% of
+     * seed 5's plan). The same `hypot(...) <= radius` on the same doubles, so
+     * an influence counts as reached exactly when the scan said it was.
+     */
+    const reachedBy = new Int32Array(influences.length);
+    const countReach = (s: Sample, delta: 1 | -1): void => {
+      for (let k = 0; k < influences.length; k += 1) {
+        const influence = influences[k] as RouteInfluence;
+        if (Math.hypot(s.x - influence.x, s.z - influence.z) <= influence.radius) {
+          reachedBy[k] = (reachedBy[k] as number) + delta;
+        }
+      }
+    };
 
     const headPose = (): Pose2 => {
       const last = chosen[chosen.length - 1];
@@ -650,6 +682,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       sampleCounts.push(produced.length);
       for (const s of produced) {
         laid.push(s);
+        if (influences.length > 0) countReach(s, 1);
         const index = cellIndexOf(s.x, s.z);
         const bucket = grid[index];
         if (bucket) {
@@ -673,6 +706,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
       for (let i = 0; i < count; i += 1) {
         const s = laid.pop();
         if (!s) break;
+        if (influences.length > 0) countReach(s, -1);
         grid[cellIndexOf(s.x, s.z)]?.pop();
       }
       accumulated -= seg.length;
@@ -1001,14 +1035,8 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
      * same answer, and the answer only changes when a piece is accepted.
      */
     const stillWanted = (): readonly RouteInfluence[] => {
-      const wanted = brief.influences;
-      if (!wanted || wanted.length === 0) return EMPTY_INFLUENCES;
-      return wanted.filter((influence) => {
-        for (const s of laid) {
-          if (Math.hypot(s.x - influence.x, s.z - influence.z) <= influence.radius) return false;
-        }
-        return true;
-      });
+      if (influences.length === 0) return EMPTY_INFLUENCES;
+      return influences.filter((_influence, k) => reachedBy[k] === 0);
     };
 
     /**
