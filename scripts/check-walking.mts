@@ -141,6 +141,14 @@ const MIN_METRES = PLAYER_RADIUS;
  */
 const MAX_HOLD_MS = 5000;
 
+/**
+ * Clear ground round the returning save's stand point, in metres. The eight
+ * walks chain end to start and wandered about 3.5 m from where they began
+ * (measured on seed 5), so a disc this size leaves every one room to cover
+ * {@link MIN_METRES} whichever way it points.
+ */
+const SAVE_SPOT_CLEARANCE = 5;
+
 /** What {@link MAX_HOLD_MS} is worth at top speed, for the message it prints. */
 const WALKABLE_IN_DEADLINE = PLAYER_MAX_SPEED * (MAX_HOLD_MS / 1000);
 
@@ -610,11 +618,56 @@ await runCase('returning save', async (page) => {
   // then mark it as one that has already seen the arrival — which is what a
   // real returning player's save says, and what makes the reload below take
   // `continueGame`'s branch rather than replaying the bus.
+  //
+  // **Where she stands is found on the built park, not typed in.** This case
+  // used to spawn at a hand-picked (6, 10). When the generator moved, something
+  // solid came to stand beside it on the canonical seed: ArrowLeft got 0.571 m
+  // on #706's CI, from (6.89, 9.84), stopping at (6.55, 10.30), and 1.117 m
+  // locally, stopping at the same spot. That was the check's own premise ("room
+  // every way") failing, not walking. So the park is asked: the nearest point
+  // to (6, 10) with nothing solid within {@link SAVE_SPOT_CLEARANCE}, enough
+  // for the eight walks below, which chain end to start and wander about 3.5 m.
   await page.goto(at('/spawn?pos=6,10'), { waitUntil: 'domcontentloaded' });
   await waitForGame(page, 240000);
-  await page.waitForFunction(() => !!localStorage.getItem('lgp:save'), undefined, {
-    timeout: 60000,
-  });
+  const spot = await page.evaluate((clearance) => {
+    const game = (window as unknown as {
+      game?: { world: { collision: { isClearCircle(x: number, z: number, r: number): boolean } } };
+    }).game;
+    if (!game) return null;
+    for (let ring = 0; ring <= 40; ring += 0.5) {
+      const around = Math.max(1, Math.round(ring * 4));
+      for (let k = 0; k < around; k += 1) {
+        const bearing = (k / around) * Math.PI * 2;
+        const x = 6 + Math.cos(bearing) * ring;
+        const z = 10 + Math.sin(bearing) * ring;
+        if (game.world.collision.isClearCircle(x, z, clearance)) return { x, z };
+      }
+    }
+    return null;
+  }, SAVE_SPOT_CLEARANCE);
+  if (!spot) {
+    fouls.push(`returning save: no point within 40 m of (6, 10) is clear for ${SAVE_SPOT_CLEARANCE} m, so there was nowhere to stand her`);
+    return;
+  }
+  say(`  [returning save] standing her at (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}), clear for ${SAVE_SPOT_CLEARANCE} m`);
+  // The first boot has already written a save. Left in place, the wait below
+  // would pass on *it*, the flags would be patched into it, and the second
+  // boot's own first write would then land on top and take them away: the
+  // reload went back onto the arrival bus. So clear it, and wait for the save
+  // that records her standing on the chosen spot.
+  await page.evaluate(() => localStorage.removeItem('lgp:save'));
+  await page.goto(at(`/spawn?pos=${spot.x.toFixed(2)},${spot.z.toFixed(2)}`), { waitUntil: 'domcontentloaded' });
+  await waitForGame(page, 240000);
+  await page.waitForFunction(
+    (where) => {
+      const raw = localStorage.getItem('lgp:save');
+      if (!raw) return false;
+      const place = (JSON.parse(raw) as { place?: { x: number; z: number } }).place;
+      return !!place && Math.hypot(place.x - where.x, place.z - where.z) < 1;
+    },
+    spot,
+    { timeout: 60000 },
+  );
   await page.evaluate(() => {
     const raw = localStorage.getItem('lgp:save');
     if (!raw) return;
