@@ -178,3 +178,10 @@ coping chamfer (#698 fix/procgen-last has the fix).
 - math-determinism.mts hashes native (control) + ports; park-identity.yml fails if ports differ.
   Dispatched on wip/sb-merge: run 36950557531. Local Mac identities -> $SCRATCH/idmac/ to compare with CI.
 - CONSEQUENCE: every park changes by ulps -> acceptedRestarts must be re-recorded (planned anyway). Tell #705.
+- PROVEN: park-identity run 36952601192 green on wip/sb-merge: native control 17 differ, ports 0 differ,
+  16/16 same park, drift 0.00e+0 m (also CI-linux vs this Mac). Pre-fix artifacts via same comparator: 11/16.
+  Cost ~5% (seed 12 21 s vs 20 s).
+- Merged fix/sb-cop3 (4e2acbd1): post foot caps, wall top under coping, fairy strings never double back
+  (+ invariant fairyStringsNeverDoubleBack). Helper verified check:coplanar exit 0 on det-Math base.
+- Waiting: fix/sb-trainsearch (a6ac0a8b), fix/sb-trees (a046a48f), fix/paths-to-doors (ab031046; new
+  acceptance measures drawnPavingReachesEveryDoor, pathsMeetBridgesOnlyAtTheirEnds). Then ONE re-record + verification.
