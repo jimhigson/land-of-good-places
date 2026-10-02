@@ -26,3 +26,10 @@ Decision: fixed candidate density TREE_CANDIDATES_PER_M2 = 0.1 (~1819 candidates
 Test: scatterDecoupling now loops PARKS = canonical + seed 12. Running default + LGP_SEED=3.
 TODO: control (old cap code + new test -> seed 12 red), after-measure 16 seeds, park:attempt x16 at recorded restarts,
 update the doc numbers in Scenery.ts with the measured after table.
+
+## Results so far
+- Control (old 72-cap Scenery.ts + new test): seed 12 red, 14 strays 30.1-45.8 m (2 trees, 12 bushes). Fixed: 9/9 green
+  default (5 + 12) and LGP_SEED=3 (3 + 12).
+- AFTER trees/climbable: 72/37 50/33 77/48 75/37 68/27 73/31 79/42 77/39 47/29 79/44 55/35 86/40 73/40 76/36 59/29 56/33
+  (seeds 0..15). Min climbable 27 (seed 4) > 24. Cover pass planted 1 on seed 6 only.
+- park:attempt x16 at recorded restarts: running -> scratchpad sb-trees/attempts.txt
