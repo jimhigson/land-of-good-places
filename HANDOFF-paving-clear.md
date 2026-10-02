@@ -24,3 +24,8 @@ New PARK_ACCEPTANCE measures: (1) no drawn paving under any building/booth solid
 - Sweep r0 at head: both new measures PASS on all 10 parks that build (5,7,9,11,14,15 DuckBarRefusal — not mine, reported to lead).
 - Controls red: booth (2.02 m² under booth), castle (1.62 m²), outside (11.27 m²) — seed 12 r0.
 - accept:parks 0-15 --fresh running in worktree paving-clear-base (frozen ddcf2bb7) → pc-accept.json/log.
+
+## Handed to lead (3 Oct) — head rebased on 6de631e0
+- Partial accept (frozen f1f8d067 on 4964e204, stopped per Jim's 'CI verifies' rule): new measures rejected 0 of 41 rejected attempts. Seeds measured on both: head 0:4 1:5 4:4 5:3 6:2 8:1 10:1 attempts vs base 0:1 1:1 4:4 5:3 6:2 8:4 10:1.
+- Rebased head: clean run + booth/outside controls on seed 12 r0 as expected (pass / red / red).
+- Skipped locally: full accept, test:procgen, check:park, coplanar, determinism, frames — CI and the lead's merge run them.
