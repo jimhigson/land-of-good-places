@@ -97,6 +97,16 @@ const ACCEPTANCE_SIM_MEASURES: readonly (readonly [
       return { faults: decisions, voids };
     },
   ],
+  [
+    'check:pet-slide',
+    async () => {
+      // Builds its own World; catches three companions into the game store
+      // (as the script does), so it runs after everything that reads the park.
+      const { petSlide } = await import('./lib/petSlide.mts');
+      const { decisions, voids } = await petSlide({ quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
   // Last: it moves booths, and the stand table it moves them in is the module's.
   [
     'check:stall-accommodate',
