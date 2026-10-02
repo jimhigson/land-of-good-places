@@ -88,6 +88,9 @@ import { distanceToRailCorridor, nearestRailDistanceAlong } from './train/plan';
 import { PLAYER_RADIUS } from '../core/constants';
 import type { PathSample } from './pathGraph';
 import { NAV_CELL } from './NavGrid';
+import { RAIL_RACE_PLAN } from './railRace/plan';
+import { DuckBarRefusal, type BarPlanDecision } from './railRace/hazards';
+import { planRaceBars } from './railRace/simulate';
 
 export interface TrainDecision {
   readonly route: TrainRoute;
@@ -99,6 +102,7 @@ interface PlanState {
   cruiser?: PlannedCoaster;
   train?: TrainDecision;
   slide?: PlannedSlide;
+  railRaceBars?: BarPlanDecision;
   crossings?: SolvedCrossingSites;
   pathGraph?: PathGraph;
 }
@@ -474,6 +478,51 @@ function builders(): readonly FeatureBuilder[] {
     },
   });
 
+  /**
+   * **Where the Rail Race's duck bars may stand — refused here, where the ring
+   * is decided, never thrown from the world phase.**
+   *
+   * The bar layout is a pure function of the two planned rings
+   * (`railRace/simulate.ts`'s `planRaceBars`: the slots where a bar would hang
+   * in another lane's track, and the slots where a flat-out rider would meet it
+   * at the speed floor), and the rings are plan data — the layout's boundary
+   * and booth, plus whatever pushed the finish arch along. So a ring that
+   * leaves 40 bars nowhere is known now. It used to be found by
+   * `new RailRace` in the world phase, as a `DuckBarRefusal` thrown out of the
+   * whole build, and the park's root loop paid a full park — plan, world and
+   * acceptance — to start again.
+   *
+   * Refused, it names exactly the decisions that placed the ring and its arch
+   * (`RailRaceRoute.archDecidedBy`: always the layout; the cruiser or the
+   * railway only when one of them pushed the arch off the booth's bearing), and
+   * the driver re-chooses the most recent of them. One attempt: the lane
+   * rotations are its own retries already, inside `barPlanDecision`.
+   */
+  const railRaceBarsBuilder = coarse<BarPlanDecision>({
+    name: 'railRaceBars',
+    deps: ['layout', 'cruiser', 'train'],
+    supply: 1,
+    *solve() {
+      try {
+        return planRaceBars();
+      } catch (error) {
+        if (!(error instanceof DuckBarRefusal)) throw error;
+        const ring = RAIL_RACE_PLAN.raceRing;
+        return refusal(
+          `rail race: no lane rotation leaves all its duck bars a legal slot on a ${ring.length.toFixed(1)} m ` +
+            `ring with the arch at ${ring.startDistance.toFixed(1)} m`,
+          { consumed: ring.archDecidedBy },
+        );
+      }
+    },
+    set(bars) {
+      state.railRaceBars = bars;
+    },
+    clear() {
+      delete state.railRaceBars;
+    },
+  });
+
   const slideBuilder = coarse<PlannedSlide>({
     name: 'slide',
     deps: ['layout', 'cruiser', 'train'],
@@ -664,7 +713,7 @@ function builders(): readonly FeatureBuilder[] {
   });
 
 
-  return [layoutBuilder, cruiserBuilder, trainBuilder, slideBuilder, crossingsBuilder, pathGraphBuilder, roadBuilder];
+  return [layoutBuilder, cruiserBuilder, trainBuilder, railRaceBarsBuilder, slideBuilder, crossingsBuilder, pathGraphBuilder, roadBuilder];
 }
 
 /**

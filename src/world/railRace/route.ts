@@ -323,6 +323,19 @@ export class RailRaceRoute {
   readonly startDistance: number;
 
   /**
+   * **Which decisions put the arch where it stands**, for a refusal to name.
+   *
+   * Always `layout` — the ring follows the park's boundary and the arch starts
+   * at the boarding booth's bearing. Plus the {@link KeepOff.owner} of every
+   * keep-off that refused a station {@link slideArchClear} tried before the one
+   * it took: a decision that pushed the arch along is a decision whose re-choice
+   * can move it back. A refusal of the arch's datum (the duck bars,
+   * `parkPlan.ts`'s `duckBars` builder) names exactly these, and nothing it did
+   * not consume.
+   */
+  readonly archDecidedBy: readonly string[];
+
+  /**
    * The level the four lanes undulate about, in world metres.
    *
    * Taken from the **highest** ground anywhere under the widest ring plus
@@ -384,7 +397,9 @@ export class RailRaceRoute {
     const atBooth = this.wrap(RING_PATH.distanceAtBearing(bearing));
     // ...and then off the doormat it would otherwise land on. See
     // {@link slideArchClear}: on most seeds this returns `atBooth` untouched.
-    this.startDistance = slideArchClear(this, atBooth, stall, keepArchOff);
+    const arch = slideArchClear(this, atBooth, stall, keepArchOff);
+    this.startDistance = arch.at;
+    this.archDecidedBy = ['layout', ...[...arch.pushedBy].filter((owner) => owner !== 'layout')];
   }
 
   /**
@@ -720,6 +735,12 @@ export interface KeepOff {
   readonly x: number;
   readonly z: number;
   readonly radius: number;
+  /**
+   * The plan decision that put this keep-off here (`cruiser`, `train`, …), so
+   * a refusal of the arch can name it — see {@link RailRaceRoute.archDecidedBy}.
+   * Omitted: the layout's.
+   */
+  readonly owner?: string;
 }
 
 /**
@@ -765,10 +786,19 @@ function slideArchClear(
   atBooth: number,
   stall: { readonly entranceX: number; readonly entranceZ: number },
   keepOff: readonly KeepOff[],
-): number {
+): { readonly at: number; readonly pushedBy: ReadonlySet<string> } {
   const probe = new Vector3();
   const outward = new Vector3();
+  /** The owners of whatever refused a station tried before the one taken. */
+  const pushedBy = new Set<string>();
   const clears = (at: number): boolean => {
+    const refuser = refusedBy(at);
+    if (refuser === null) return true;
+    pushedBy.add(refuser);
+    return false;
+  };
+  /** Who refuses the arch at `at`, or null when its feet are clear. */
+  const refusedBy = (at: number): string | null => {
     const sample = route.path.sampleAt(at);
     route.outwardAt(at, outward);
     // The whole span the feet occupy, inner and outer, sampled every half
@@ -777,27 +807,27 @@ function slideArchClear(
     for (let radius = -ARCH_FOOT_REACH; radius <= ARCH_FOOT_REACH; radius += 0.5) {
       probe.set(sample.x + outward.x * radius, 0, sample.z + outward.z * radius);
       const toDoor = Math.hypot(probe.x - stall.entranceX, probe.z - stall.entranceZ);
-      if (toDoor < ARCH_DOORMAT_CLEARANCE) return false;
+      if (toDoor < ARCH_DOORMAT_CLEARANCE) return 'layout';
       for (const plot of PARK_LAYOUT.entries.values()) {
-        if (Math.hypot(probe.x - plot.x, probe.z - plot.z) < plot.boundingRadius + 1) return false;
+        if (Math.hypot(probe.x - plot.x, probe.z - plot.z) < plot.boundingRadius + 1) return 'layout';
       }
       for (const item of keepOff) {
-        if (Math.hypot(probe.x - item.x, probe.z - item.z) < item.radius) return false;
+        if (Math.hypot(probe.x - item.x, probe.z - item.z) < item.radius) return item.owner ?? 'layout';
       }
     }
-    return true;
+    return null;
   };
-  if (clears(atBooth)) return atBooth;
+  if (clears(atBooth)) return { at: atBooth, pushedBy };
   for (let step = 1; step <= 60; step += 1) {
     for (const side of [1, -1] as const) {
       const at = route.wrap(atBooth + side * step * 0.75);
-      if (clears(at)) return at;
+      if (clears(at)) return { at, pushedBy };
     }
   }
   // Nothing on the whole ring works — keep the booth's own bearing and let the
   // procgen invariant say so out loud rather than putting the finish line
   // somewhere arbitrary.
-  return atBooth;
+  return { at: atBooth, pushedBy };
 }
 
 /**
