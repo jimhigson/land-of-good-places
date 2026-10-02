@@ -697,9 +697,21 @@ const BUSH_MOVE_SALT = 0xb0511e ^ PARK_SEED;
  * reached 72 sooner gains the next few — and nothing moves. A cell quota would
  * re-draw every position and even the trees out into a grid of one or two per
  * cell, losing the clumps and clearings the park has now. The cost is that the
- * count now follows the lawn: measured on all 16 seeds at their recorded
- * restarts, 72 everywhere before, 47-86 after (climbable 28-48 before, 27-48
- * after) — see `HANDOFF-sb-trees.md` / the PR for the table.
+ * count now follows the lawn. Measured on all 16 seeds at their recorded
+ * restarts (`scripts/measure-tree-scatter.mts`), trees / climbable:
+ *
+ * ```
+ *   seed   0      1      2      3      4      5      6      7
+ *   was  72/37  72/36  72/48  72/36  72/28  72/31  73/41  73/36
+ *   now  72/37  50/33  77/48  75/37  68/27  73/31  79/42  77/39
+ *   seed   8      9     10     11     12     13     14     15
+ *   was  72/32  72/41  72/42  72/34  72/40  72/34  72/35  72/40
+ *   now  47/29  79/44  55/35  86/40  73/40  76/36  59/29  56/33
+ * ```
+ *
+ * The parks that lose trees are the ones with the least lawn: seed 8's whole
+ * lawn takes 76 trees however many candidates are drawn (8000 measured), so
+ * its old 72 was the lawn nearly full.
  *
  * 0.1 per m² (≈1 819 candidates) is where the trees stayed closest to today's
  * across the 16 seeds (summed |count − 72| of 143 at 1 600-1 800 candidates,
