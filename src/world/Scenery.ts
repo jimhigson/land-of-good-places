@@ -649,9 +649,9 @@ const TREE_TRUNK_CLAIM = 0.6;
 /** Radius of the collider a clump registers, and so the ground it occupies. */
 const BUSH_COLLIDER = 0.85;
 /**
- * How many spots a tree or bush tries when asked to step aside. The scatter
- * itself needs ~2500 attempts per accepted tree on a tight lawn (180 000 for
- * 72), so 48 was no budget at all: on seed 11 both trees asked to move
+ * How many spots a tree or bush tries when asked to step aside. On a tight
+ * lawn the scatter's last trees each took hundreds to thousands of candidates
+ * (seed 8 drew 6362 for 72), so 48 was no budget at all: on seed 11 both trees asked to move
  * "found nowhere in 48 tries" and two lamp slots were forgone instead.
  * Every try is a handful of distance checks; 4000 is a few milliseconds.
  */
@@ -668,9 +668,89 @@ const RELOCATE_TRIES = 4000;
 const RELOCATE_REACH = { tree: 24, bush: 20 } as const;
 const TREE_MOVE_SALT = 0x7e3e0e ^ PARK_SEED;
 const BUSH_MOVE_SALT = 0xb0511e ^ PARK_SEED;
-const TARGET_TREES = 72;
-const TREE_BUDGET = 180000;
+/**
+ * **How many tree candidates the scatter draws: a fixed density, never a target count.**
+ *
+ * The scatter used to plant until it had 72 trees. A count for the whole park
+ * is the one thing a rejection sampler cannot have and stay local: lose three
+ * trees to a little extra paving by one spur and the scatter simply keeps
+ * drawing, so candidates #70-72 plant wherever the stream happens to put them.
+ * Seed 12, rail-racer spur bowed 2 m: the three lost trees stood 0-30 m from
+ * the spur and their replacements went in 31 m and 43.6 m away, taking a
+ * dozen bushes with them (`test/procgen/scatterDecoupling`). The same rule
+ * also gave every park exactly 72 trees however much lawn it had, so a park
+ * with little lawn crammed them in (seed 8 drew 6362 candidates to place its
+ * 72nd) and one with plenty spread them out.
+ *
+ * Now the scatter draws a fixed number of candidates — `TREE_CANDIDATES_PER_M2`
+ * times the area they are drawn over (the boundary less {@link TREE_EDGE_MARGIN},
+ * ~18 185 m² on every supported seed) — and plants every one the ground accepts.
+ * Whether candidate *i* stands depends only on the ground under it and the
+ * trees already within a canopy's reach of it, so a change in one corner of
+ * the park changes trees in that corner only. It is the rule the bushes have
+ * always used (`BUSH_BUDGET`).
+ *
+ * **Why this and not a quota per cell**, the other local rule: this one keeps
+ * the stream, the candidate order and the acceptance test exactly as they were,
+ * so every tree that stands is one of the trees the park had before — a park
+ * whose 72nd tree came at candidate 1 819 or later loses its last few, one that
+ * reached 72 sooner gains the next few — and nothing moves. A cell quota would
+ * re-draw every position and even the trees out into a grid of one or two per
+ * cell, losing the clumps and clearings the park has now. The cost is that the
+ * count now follows the lawn. Measured on all 16 seeds at their recorded
+ * restarts (`scripts/measure-tree-scatter.mts`), trees / climbable:
+ *
+ * ```
+ *   seed   0      1      2      3      4      5      6      7
+ *   was  72/37  72/36  72/48  72/36  72/28  72/31  73/41  73/36
+ *   now  72/37  50/33  77/48  75/37  68/27  73/31  79/42  77/39
+ *   seed   8      9     10     11     12     13     14     15
+ *   was  72/32  72/41  72/42  72/34  72/40  72/34  72/35  72/40
+ *   now  47/29  79/44  55/35  86/40  73/40  76/36  59/29  56/33
+ * ```
+ *
+ * The parks that lose trees are the ones with the least lawn: seed 8's whole
+ * lawn takes 76 trees however many candidates are drawn (8000 measured), so
+ * its old 72 was the lawn nearly full.
+ *
+ * 0.1 per m² (≈1 819 candidates) is where the trees stayed closest to today's
+ * across the 16 seeds (summed |count − 72| of 143 at 1 600-1 800 candidates,
+ * against 162 at 2 000 and 210 at 1 200), and it keeps every seed's climbable
+ * trees above the floor of 24 that `theParkIsFurnished` holds.
+ */
+const TREE_CANDIDATES_PER_M2 = 0.1;
 const BUSH_BUDGET = 4200;
+
+/**
+ * **What the tree scatter did — for measurement only.** Nothing in the game
+ * reads this. `candidates` is how many scatter candidates were drawn before the
+ * scatter phase ended, `scatterPlanted` how many of them stand, `coverPlanted`
+ * how many trees the climb-cover pass added after; `samplingM2` is the area the
+ * scatter's candidates are drawn over (the boundary pulled in by its margin).
+ * Read by `scripts/measure-tree-scatter.mts`.
+ */
+export const treeScatterLedger = {
+  candidates: 0,
+  scatterPlanted: 0,
+  coverPlanted: 0,
+  samplingM2: 0,
+  /** Each scatter tree as planted: the candidate index that planted it, and whether its canopy can be climbed. */
+  scatterTrees: [] as (readonly [candidate: number, climbable: boolean])[],
+};
+
+/** The tree scatter's candidate margin inside the boundary, in metres. */
+const TREE_EDGE_MARGIN = 6;
+
+/** The area tree candidates are drawn over: the boundary pulled in by {@link TREE_EDGE_MARGIN}. */
+function treeSamplingM2(): number {
+  const steps = 720;
+  let area = 0;
+  for (let i = 0; i < steps; i += 1) {
+    const r = Math.max(0, edgeRadiusAt(PARK_BOUNDARY, (i / steps) * TAU) - TREE_EDGE_MARGIN);
+    area += 0.5 * r * r * (TAU / steps);
+  }
+  return area;
+}
 
 function disc(x: number, z: number, radius: number): Claim {
   return { kind: 'footprint', shape: { shape: 'disc', x, z, radius } };
@@ -683,7 +763,8 @@ function clearOfClaims(claim: Claim, keepClearOf: readonly Claim[]): boolean {
 /**
  * **Trees, as a feature builder** (Jim, 16 Sep 2026: every park feature goes
  * through the generic interface). One increment is one tree. The scatter is the
- * one the park always made — same salts, same candidate order, same budget —
+ * one the park always made — same salts, same candidate order — drawn to a
+ * fixed candidate density ({@link TREE_CANDIDATES_PER_M2}) rather than to a count,
  * then the climb-cover pass, cell by cell; each accepted tree is an increment
  * claiming its trunk. The builder never refuses: a spot that fails is simply
  * the next candidate, exactly as before.
@@ -702,6 +783,7 @@ export function treeBuilder(
   out: TreeDecision[],
 ): FeatureBuilder {
   let attempts = 0;
+  const candidates = Math.round(TREE_CANDIDATES_PER_M2 * treeSamplingM2());
   let phase: 'scatter' | 'cover' = 'scatter';
   let cell = 0;
   let cells: { key: number; x: number; z: number }[] | null = null;
@@ -775,12 +857,12 @@ export function treeBuilder(
     movable: true,
     *advance() {
       if (phase === 'scatter') {
-        while (out.length < TARGET_TREES && attempts < TREE_BUDGET) {
+        while (attempts < candidates) {
           const resume = { attempts, phase, cell };
           attempts += 1;
           const rng = candidateRng(TREE_SALT, attempts);
           const angle = rng.range(0, TAU);
-          const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
+          const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - TREE_EDGE_MARGIN);
           const x = Math.cos(angle) * distance;
           const z = Math.sin(angle) * distance;
           if (!isPlantable(x, z, 2.6)) continue;
@@ -793,6 +875,10 @@ export function treeBuilder(
         }
         phase = 'cover';
         cell = 0;
+        treeScatterLedger.candidates = attempts;
+        treeScatterLedger.scatterPlanted = out.length;
+        treeScatterLedger.samplingM2 = treeSamplingM2();
+        treeScatterLedger.scatterTrees = out.map((tree) => [tree.identity, tree.tree.topBallRadius >= CLIMBABLE_MIN_CANOPY_RADIUS] as const);
       }
       cells ??= coverCells();
       while (cell < cells.length) {
@@ -827,6 +913,7 @@ export function treeBuilder(
           return increment(decision, 'for climb cover at');
         }
       }
+      treeScatterLedger.coverPlanted = out.length - treeScatterLedger.scatterPlanted;
       return 'done';
     },
     back() {
