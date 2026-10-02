@@ -187,14 +187,16 @@ const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats |
         forgone: stats.forgone,
       }
     : null;
-let backtracking: AttemptVerdict['backtracking'] = { plan: null, world: null };
-try {
-  const { parkSolveStats } = await import('../src/world/parkPlan.ts');
-  const { worldSolveStats } = await import('../src/world/worldPhase.ts');
-  backtracking = { plan: backtrackOf(parkSolveStats()), world: backtrackOf(worldSolveStats()) };
-} catch {
-  // A build that threw before the plan existed has no stats to give.
-}
+// Not wrapped in a catch: a build that threw before the plan existed already
+// reads as null stats (the accessors return null), and an import that fails is
+// a broken instrument that must be loud — a swallowing catch here once hid a
+// moved module and filed `backtracking: null` for every attempt (found on #705).
+const { parkSolveStats } = await import('../src/world/parkPlan.ts');
+const { worldSolveStats } = await import('../src/world/worldPhase.ts');
+const backtracking: AttemptVerdict['backtracking'] = {
+  plan: backtrackOf(parkSolveStats()),
+  world: backtrackOf(worldSolveStats()),
+};
 
 const verdict: AttemptVerdict = {
   seed,
