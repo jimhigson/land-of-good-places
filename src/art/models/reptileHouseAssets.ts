@@ -11,6 +11,8 @@ import {
   REPTILE_SHELL_RADIUS,
 } from '../../world/reptileHouse/layout';
 import { assertMeasured, loadReptileKit, partBox, partRadiusXZ, partReachXZ, type PartStyle } from './reptileKit';
+import { TALLEST_CHILD_HEIGHT } from './kid';
+import type { BufferAttribute } from 'three';
 import { snakeFaceTextures, type SnakeExpression } from './snakeFace';
 
 /**
@@ -97,6 +99,36 @@ export interface ReptileHouseExterior extends AssetHandle {
   setFace(expression: SnakeExpression): void;
   /** 0 by day, 1 at full night: the portholes glow and Sunny falls asleep. */
   setNight(night: number): void;
+}
+
+/**
+ * **Everything of the dressing that stands low enough to meet a child,
+ * outside the collision ring, as discs** — derived from the mesh, never
+ * typed. The tail curls down beside the door and the sign hangs from it at
+ * head height; both are outside the 16-gon, so the ring does not cover them.
+ * Every vertex below `TALLEST_CHILD_HEIGHT` and outside the shell is bucketed
+ * into half-metre cells, and each occupied cell becomes a disc a little wider
+ * than its own diagonal. The facade march in `check:reptile-house` is what
+ * says whether that cover is complete.
+ */
+export function reptileHouseLowDiscs(): { x: number; z: number; radius: number }[] {
+  const parts = houseKit();
+  const cell = 0.5;
+  const cells = new Map<string, { x: number; z: number }>();
+  for (const name of ['rh-tail', 'rh-sign', 'rh-tail-bell']) {
+    const part = parts.part(name);
+    const position = part.geometry.getAttribute('position') as BufferAttribute;
+    for (let i = 0; i < position.count; i += 1) {
+      const x = position.getX(i) + part.position.x;
+      const y = position.getY(i) + part.position.y;
+      const z = position.getZ(i) + part.position.z;
+      if (y > TALLEST_CHILD_HEIGHT) continue;
+      if (Math.hypot(x, z) < REPTILE_SHELL_RADIUS - 0.3) continue;
+      const key = `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+      if (!cells.has(key)) cells.set(key, { x: (Math.floor(x / cell) + 0.5) * cell, z: (Math.floor(z / cell) + 0.5) * cell });
+    }
+  }
+  return [...cells.values()].map((centre) => ({ x: centre.x, z: centre.z, radius: cell * 0.8 }));
 }
 
 /** Where the head's centre sits, in building-local metres — measured off the mesh. */

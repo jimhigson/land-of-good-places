@@ -115,6 +115,13 @@ export const REPTILE_DOOR_BAND_OUTER = REPTILE_SHELL_RADIUS + 0.2;
 /** Where the drawn arch stands along the facade bearing; paving runs to it. */
 export const REPTILE_DRAWN_DOOR_ALONG = REPTILE_SHELL_RADIUS - 1.2;
 
+/**
+ * The lobby back wall, along the facade bearing: two metres inside the flat
+ * of the 16-gon face the door is cut into, so a sprinting child stops on it
+ * while the iris closes. Derived; a Blender script wanting it re-derives it.
+ */
+export const REPTILE_BACK_WALL_ALONG = REPTILE_SHELL_RADIUS * Math.cos(Math.PI / 16) - 2;
+
 /** The tail signpost's base, radially from the building centre. */
 export const REPTILE_TAIL_REACH = 11.2;
 
@@ -281,7 +288,11 @@ export const EXHIBIT_PLACEMENTS: readonly ExhibitPlacement[] = [
   {
     id: 'noodle',
     shape: { kind: 'disc', centre: { x: 0, z: 0 }, radius: REPTILE_ISLAND_COLLIDER_RADIUS },
-    stand: { x: 3.5, z: 3.5, facing: 225 },
+    // Beside her bearing rather than on it: a child stood on the head's own
+    // 45° line hid the head from the 38° camera almost entirely (the noodle
+    // kit's `game-view-with-child.png`), so she stands a stride to the east
+    // and looks west along the kerb at the chin.
+    stand: { x: 4.4, z: 2.4, facing: 267 },
   },
   northCase('rainbowBoa', -12.5),
   northCase('hatchery', -6.25),
@@ -349,14 +360,192 @@ export const STALL_FACING = 45;
 export const STALL_STAND: StandSpot = { x: 3.6, z: 14.6, facing: 225 };
 export const STALL_KEEPER: LocalPoint = { x: 1.3, z: 12.3 };
 
-/** The Noodle-o-meter in the foyer. */
+/** The Noodle-o-meter in the foyer, facing the camera, and where she stands to be measured. */
 export const METER_POSITION: LocalPoint = { x: 10.5, z: 13.5 };
+export const METER_FACING = 45;
+export const METER_STAND: StandSpot = { x: 11.9, z: 14.9, facing: 225 };
 
-/** The three hidden-baby spots with their own zones (two more ride on exhibits). */
-export const HIDDEN_BABY_SPOTS: readonly LocalPoint[] = [
-  { x: -13, z: 0 }, // the Hollow Log's knothole
-  { x: -19.3, z: 11 }, // the Grotto pool
-  { x: -1, z: 14.5 }, // the foyer's tall-banana pot
+/**
+ * Where she stands to find each of the three hidden babies that have their
+ * own zones (two more ride on exhibits: Tock's shell and the Frog Jar). The
+ * babies themselves sit a stride away — in the log's knothole, in the
+ * grotto's pool, in the foyer's banana pot — at spots `exhibits.ts` derives
+ * from the kit's own anchors.
+ */
+export const HIDDEN_BABY_SPOTS: readonly StandSpot[] = [
+  { x: -13, z: 0, facing: 180 }, // the Hollow Log's knothole, on its north wall
+  { x: -19.3, z: 11, facing: 0 }, // the Grotto pool
+  { x: -1, z: 14.5, facing: 160 }, // the foyer's tall-banana pot
+];
+
+/** The foyer's tall-banana pot — hidden baby #3's hiding place. */
+export const FOYER_POT: LocalPoint = { x: -2, z: 16.3 };
+export const FOYER_POT_RADIUS = 0.6;
+
+/**
+ * The grotto rock, in the south-west corner, yawed so its pool side faces +X
+ * — the one side the fixed +X+Z camera can see into a corner.
+ */
+export const GROTTO_ROCK: LocalPoint = { x: -21.6, z: 15.5 };
+export const GROTTO_ROCK_YAW = 90;
+
+/**
+ * How much clear floor a child must have around a stand spot, the arrival
+ * point and the doorway — the radii `reptileKeepOuts()` publishes and every
+ * collider is asserted clear of.
+ */
+export const REPTILE_STAND_KEEP_OUT = 1;
+export const REPTILE_ARRIVAL_KEEP_OUT = 1.5;
+export const REPTILE_DOORWAY_KEEP_OUT = 1.6;
+
+// ---------------------------------------------------------------------------
+// The planted beds — the solid mass between the paths
+// ---------------------------------------------------------------------------
+
+/**
+ * A bed's radius-1.2 discs and their absolute top. The top is above
+ * `JUMP_APEX_HEIGHT` (≈ 1.28) so a jump never clears a bed; the discs are
+ * what `planting.ts` registers, chained along the inset outline and tiled
+ * across the inside so there is no hollow for a child to land in.
+ */
+export const REPTILE_BED_DISC_RADIUS = 1.2;
+export const REPTILE_BED_TOP = 2.4;
+
+export interface BedSpec {
+  readonly id: string;
+  /** The visual outline, hall-local, counter-clockwise or clockwise alike. */
+  readonly outline: readonly LocalPoint[];
+}
+
+/** Points along an arc of radius `r` about the origin, from `fromDeg` to `toDeg` (compass-style, 0 = +Z). */
+function arc(r: number, fromDeg: number, toDeg: number, steps: number): LocalPoint[] {
+  const out: LocalPoint[] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const deg = fromDeg + ((toDeg - fromDeg) * i) / steps;
+    const rad = (deg * Math.PI) / 180;
+    out.push({ x: Math.sin(rad) * r, z: Math.cos(rad) * r });
+  }
+  return out;
+}
+
+/** The ring path's outer edge: beds stop here. */
+const RING_OUTER = 7.6;
+
+/**
+ * Every bed's outline, each edge lying exactly on the path edge it faces, so
+ * the paths keep the widths the `PATHS` table promises — the width probe in
+ * `scripts/check-reptile-house.mts` is what holds them to it.
+ */
+export const BEDS: readonly BedSpec[] = [
+  {
+    // NW island: between the West Strip, the North Strip, the north channel,
+    // the Log Walk and the ring.
+    id: 'nwIsland',
+    outline: [
+      { x: -17.5, z: -11 },
+      { x: -1.8, z: -11 },
+      ...arc(RING_OUTER, 193.7, 257.5, 6),
+      { x: -17.5, z: -1.65 },
+    ],
+  },
+  {
+    // NE island: between the north channel, the North Strip, the NE Clearing,
+    // the lagoon, the Lagoon Walk and the ring.
+    id: 'neIsland',
+    outline: [
+      { x: 1.8, z: -11 },
+      { x: 10, z: -11 },
+      { x: 10, z: 0 },
+      { x: RING_OUTER, z: 0 },
+      ...arc(RING_OUTER, 90, 166.3, 6),
+    ],
+  },
+  {
+    // SW bed: between the Log Walk, the West Strip, the SW Walk and the
+    // ring; the Frog Jar stands at its south-east corner.
+    id: 'swBed',
+    outline: [
+      { x: -17.5, z: 1.65 },
+      ...arc(RING_OUTER, 282.5, 307.8, 4),
+      { x: -6, z: 8.95 },
+      { x: -17.5, z: 8.95 },
+    ],
+  },
+  {
+    // SE island: between the south opening, the Lagoon Walk, the Nursery and
+    // the foyer.
+    id: 'seIsland',
+    outline: [
+      { x: 6, z: 9.1 },
+      ...arc(RING_OUTER, 52.2, 61.7, 3),
+      { x: 13.5, z: 3.6 },
+      { x: 13.5, z: 9.1 },
+    ],
+  },
+  {
+    // Grotto: the south-west corner behind the SW Walk, taking the Iguana
+    // Rocks' west flank.
+    id: 'grotto',
+    outline: [
+      { x: -23.75, z: 12.5 },
+      { x: -13.5, z: 12.5 },
+      { x: -13.5, z: 17.75 },
+      { x: -23.75, z: 17.75 },
+    ],
+  },
+  {
+    // SW-E bed: between the Iguana Rocks and the foyer, under the south wall.
+    id: 'swEast',
+    outline: [
+      { x: -10.5, z: 12.5 },
+      { x: -3, z: 12.5 },
+      { x: -3, z: 17.75 },
+      { x: -10.5, z: 17.75 },
+    ],
+  },
+  {
+    // SE corner: south of the SE Channel, east of the foyer.
+    id: 'seCorner',
+    outline: [
+      { x: 16, z: 12.5 },
+      { x: 23.75, z: 12.5 },
+      { x: 23.75, z: 17.75 },
+      { x: 16, z: 17.75 },
+    ],
+  },
+  {
+    // W-S bed: the west wall between the skink's case and the SW Walk.
+    id: 'westSouth',
+    outline: [
+      { x: -23.75, z: 6.8 },
+      { x: -21.15, z: 6.8 },
+      { x: -21.15, z: 12.5 },
+      { x: -23.75, z: 12.5 },
+    ],
+  },
+  {
+    // Grove-side bed: the west wall between the tree snake's case and the
+    // Snake Grove, run into the grove's own disc.
+    id: 'groveSide',
+    outline: [
+      { x: -23.75, z: -10.2 },
+      { x: -21.15, z: -10.2 },
+      { x: -21.15, z: -12.6 },
+      { x: -22.3, z: -14 },
+      { x: -23.75, z: -15 },
+    ],
+  },
+  {
+    // The nook between the first north case and the grove, with the corner palm.
+    id: 'nwNook',
+    outline: [
+      { x: -18.4, z: -17.75 },
+      { x: -15.2, z: -17.75 },
+      { x: -15.2, z: -15.15 },
+      { x: -16, z: -15.15 },
+      { x: -18.4, z: -16 },
+    ],
+  },
 ];
 
 /**
