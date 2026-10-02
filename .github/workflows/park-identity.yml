@@ -44,6 +44,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Hash every Math function over a fixed sweep
+        run: |
+          mkdir -p identity-math
+          node --no-warnings scripts/math-determinism.mts identity-math/math.json
+
       - name: Build every supported park and record its identity
         run: |
           mkdir -p identity
@@ -54,7 +59,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: park-identity-${{ matrix.os }}
-          path: identity/
+          path: |
+            identity/
+            identity-math/
 
   compare:
     name: Park identity
@@ -73,5 +80,12 @@ jobs:
       - name: Download identities
         uses: actions/download-artifact@v4
 
+      - name: Which Math functions differ between the platforms
+        run: |
+          node -e "
+          const a=require('./park-identity-ubuntu-latest/identity-math/math.json'), b=require('./park-identity-macos-latest/identity-math/math.json');
+          console.log(a.platform, a.node, a.v8, 'vs', b.platform, b.node, b.v8);
+          for (const k of Object.keys(a.result)) console.log((a.result[k]===b.result[k]?'same     ':'DIFFERENT'), k);"
+
       - name: The same park on both platforms
-        run: node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/compare-park-identity.mts park-identity-ubuntu-latest park-identity-macos-latest
+        run: node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/compare-park-identity.mts park-identity-ubuntu-latest/identity park-identity-macos-latest/identity
