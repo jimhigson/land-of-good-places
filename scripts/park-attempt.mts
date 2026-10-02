@@ -40,6 +40,14 @@ import { cpuMs } from './lib/cpuClock.mts';
 import type { HeadlessPark } from './park-harness.mts';
 import { buildBug } from './lib/attemptError.mts';
 import { VOID_EXIT } from './lib/checkScope.mts';
+import {
+  describeNotAsked,
+  runStages,
+  type MeasureOutcome,
+  type NotAsked,
+  type Stage,
+  type StageMeasure,
+} from './lib/attemptStages.mts';
 
 /**
  * **Whole check scripts that judge a per-park decision, asked as acceptance
@@ -56,12 +64,66 @@ import { VOID_EXIT } from './lib/checkScope.mts';
  */
 const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
   'scripts/check-rail-race.mts',
-  // These move the world under them (booths stepping aside; the arrival and
-  // thirty seconds of crowd), so each gets a park of its own. Asked under the
-  // acceptance scope: only their decision clauses fail the attempt. Measured
-  // on seed 5 restart 0, CPU including the build: 18 s and 25 s.
-  'scripts/check-stall-accommodate.mts',
-  'scripts/check-cat-bus.mts',
+];
+
+/**
+ * **Checks that play the park forward, asked in-process on a fresh World of
+ * their own** — they move the world under them (an arrival, a crowd, a ride),
+ * so they cannot share the attempt's park, but a second World over the plan
+ * this process already solved costs ~6.5 s on seed 5 where a fresh process
+ * re-solving the plan costs ~14 s plus module load. Each is handed `fresh`,
+ * which builds that World as a fresh process would see it (the arrival due),
+ * and asks only its decision clauses. Run after everything that reads the
+ * attempt's own park.
+ */
+const ACCEPTANCE_SIM_MEASURES: readonly (readonly [
+  string,
+  (fresh: () => HeadlessPark) => Promise<CheckVerdict>,
+])[] = [
+  [
+    'check:cat-bus',
+    async (fresh) => {
+      const { catBus } = await import('./lib/catBus.mts');
+      const { decisions, voids } = await catBus(fresh, { quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
+  [
+    'check:npc-dispersal',
+    async (fresh) => {
+      const { npcDispersal } = await import('./lib/npcDispersal.mts');
+      const { decisions, voids } = await npcDispersal(fresh, { quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
+  [
+    'check:slide-rider',
+    async () => {
+      // Builds its own World (it rides, so it needs live interior controls).
+      const { slideRider } = await import('./lib/slideRider.mts');
+      const { decisions, voids } = await slideRider({ quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
+  [
+    'check:pet-slide',
+    async () => {
+      // Builds its own World; catches three companions into the game store
+      // (as the script does), so it runs after everything that reads the park.
+      const { petSlide } = await import('./lib/petSlide.mts');
+      const { decisions, voids } = await petSlide({ quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
+  // Moves booths, and puts the module's stand table back as it found it.
+  [
+    'check:stall-accommodate',
+    async (fresh) => {
+      const { stallAccommodate } = await import('./lib/stallAccommodate.mts');
+      const { decisions, voids } = await stallAccommodate(fresh, { quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
 ];
 
 /**
@@ -152,7 +214,7 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
       const { pathPreference } = await import('./lib/pathPreference.mts');
       // Only the clauses the park decides (the network it drew, how routes sit
       // on it); the router's own are code, fixed at cause.
-      const { decisions, voids } = await pathPreference(park, { quiet: true });
+      const { decisions, voids } = await pathPreference(park, { quiet: true, clauses: 'decisions' });
       return { faults: decisions, voids };
     },
   ],
@@ -227,6 +289,14 @@ export interface AttemptVerdict {
    */
   readonly backtracking: { readonly plan: BacktrackStats | null; readonly world: BacktrackStats | null };
   readonly wallMs: number;
+  /**
+   * The measures this attempt never asked, because an earlier, cheaper stage
+   * had already rejected the park (or found a void). Null when every measure
+   * was asked, which an accepted verdict always is.
+   */
+  readonly notAsked: NotAsked | null;
+  /** CPU per stage asked, in order. */
+  readonly stageCpuMs: readonly number[];
 }
 
 const seed = Number(process.env['LGP_SEED'] ?? NaN);
@@ -274,81 +344,6 @@ try {
 }
 buildCpu = cpuMs() - cpu0;
 
-if (facts) {
-  const cpu1 = cpuMs();
-  const { PARK_ACCEPTANCE } = await import('../test/procgen/invariants.ts');
-  for (const [name, measure] of PARK_ACCEPTANCE) {
-    measuresAsked += 1;
-    let complaints: readonly string[];
-    try {
-      complaints = measure(facts);
-    } catch (error) {
-      broken ??= `${name}: ${firstLine(error)}`;
-      complaints = [`the measure threw: ${firstLine(error)}`];
-    }
-    if (complaints.length > 0) failures.push({ measure: name, count: complaints.length, first: complaints.slice(0, FIRST) });
-  }
-  invariantsCpu = cpuMs() - cpu1;
-
-  const cpuChecks = cpuMs();
-  for (const [name, measure] of ACCEPTANCE_CHECK_MEASURES) {
-    measuresAsked += 1;
-    try {
-      const { faults, voids } = await measure(facts.headless, { seed, restart });
-      if (voids.length > 0) {
-        broken ??= `${name}: ${voids[0]}`;
-        failures.push({ measure: name, count: voids.length, first: voids.slice(0, FIRST) });
-      } else if (faults.length > 0) {
-        failures.push({ measure: name, count: faults.length, first: faults.slice(0, FIRST) });
-      }
-    } catch (error) {
-      broken ??= `${name}: ${firstLine(error)}`;
-      failures.push({ measure: name, count: 1, first: [`the measure threw: ${firstLine(error)}`] });
-    }
-  }
-  checksCpu = cpuMs() - cpuChecks;
-
-  const cpu2 = cpuMs();
-  try {
-    const { measureParkFindings } = await import('./lib/parkFindings.mts');
-    const park = measureParkFindings(facts.headless, true);
-    measuresAsked += 1;
-    for (const line of park.regressions) {
-      const key = line.split(':')[0] ?? line;
-      failures.push({ measure: `check:park ${key}`, count: 1, first: [line] });
-    }
-  } catch (error) {
-    broken ??= `check:park: ${firstLine(error)}`;
-    failures.push({ measure: 'check:park', count: 1, first: [`the measure threw: ${firstLine(error)}`] });
-  }
-  findingsCpu = cpuMs() - cpu2;
-
-  for (const script of ACCEPTANCE_CHECK_SCRIPTS) {
-    measuresAsked += 1;
-    const name = `check:${script.replace(/^scripts\/check-|\.mts$/g, '')}`;
-    try {
-      await runScript(process.execPath, ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', script], {
-        // The scope: a script that knows it (`lib/checkScope.mts`) fails only on
-        // its decision clauses and exits VOID_EXIT when it could not measure.
-        env: { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: String(restart), LGP_CHECK_SCOPE: 'acceptance' },
-        encoding: 'utf8',
-        maxBuffer: 256 * 1024 * 1024,
-      });
-    } catch (error) {
-      const failed = error as { stdout?: string; stderr?: string; code?: number };
-      if (failed.code === VOID_EXIT) {
-        const tail = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`.trim().split('\n').slice(-3).join(' / ');
-        broken ??= `${name}: the instrument could not measure — ${tail.slice(0, 400)}`;
-      }
-      const lines = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => /^(FAIL|✗|- |· )|FAILED/.test(l));
-      failures.push({ measure: name, count: Math.max(1, lines.length), first: (lines.length > 0 ? lines : ['exited non-zero with no FAIL line']).slice(0, FIRST) });
-    }
-  }
-}
-
 const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats | null =>
   stats
     ? {
@@ -361,6 +356,8 @@ const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats |
         forgone: stats.forgone,
       }
     : null;
+// Taken now, straight after the build: the simulated checks below build
+// fresh Worlds of their own, and the world phase's stats would then be theirs.
 // Not wrapped in a catch: a build that threw before the plan existed already
 // reads as null stats (the accessors return null), and an import that fails is
 // a broken instrument that must be loud — a swallowing catch here once hid a
@@ -371,6 +368,134 @@ const backtracking: AttemptVerdict['backtracking'] = {
   plan: backtrackOf(parkSolveStats()),
   world: backtrackOf(worldSolveStats()),
 };
+
+
+/**
+ * **The measures in cost order, cheapest stage first** (`lib/attemptStages.mts`):
+ * a rejected attempt pays only up to the stage that rejected it, and an
+ * accepted one has been asked every measure. The order is a cost order and
+ * nothing else.
+ *
+ * 1. **Cheap** — every invariant, then the checks that read the attempt's own
+ *    park, then `check:park`'s findings. Path-preference is in here rather
+ *    than with the stage-2 checks because it routes over the attempt's park,
+ *    and the findings then demote its hoppable colliders as the game's boot
+ *    does; every check that reads the park must run before that, as the
+ *    scripts measure an undemoted park.
+ * 2. **Middle** — cat-bus and stall-accommodate, each on a fresh World.
+ * 3. **Heavy** — npc-dispersal, slide-rider and pet-slide, each on a fresh
+ *    World (pet-slide last: it puts companions into the game store), then the
+ *    whole scripts in their own processes.
+ */
+const STAGE_TWO_SIMS = new Set(['check:cat-bus', 'check:stall-accommodate']);
+let notAsked: NotAsked | null = null;
+let stageCpuMs: readonly number[] = [];
+if (facts) {
+  const parkFacts = facts;
+  const outcome = (name: string, faults: readonly string[], voids: readonly string[]): MeasureOutcome =>
+    voids.length > 0
+      ? { failures: [{ measure: name, count: voids.length, first: voids.slice(0, FIRST) }], broken: `${name}: ${voids[0]}` }
+      : { failures: faults.length > 0 ? [{ measure: name, count: faults.length, first: faults.slice(0, FIRST) }] : [], broken: null };
+
+  const { PARK_ACCEPTANCE } = await import('../test/procgen/invariants.ts');
+  const invariants: StageMeasure[] = PARK_ACCEPTANCE.map(([name, measure]) => ({
+    name,
+    cpu: 'invariants' as const,
+    run: () => outcome(name, measure(parkFacts), []),
+  }));
+  const parkCheck = ([name, measure]: (typeof ACCEPTANCE_CHECK_MEASURES)[number]): StageMeasure => ({
+    name,
+    cpu: 'checks',
+    run: async () => {
+      const { faults, voids } = await measure(parkFacts.headless, { seed, restart });
+      return outcome(name, faults, voids);
+    },
+  });
+  const findings: StageMeasure = {
+    name: 'check:park',
+    cpu: 'findings',
+    run: async () => {
+      const { measureParkFindings } = await import('./lib/parkFindings.mts');
+      const park = measureParkFindings(parkFacts.headless, true);
+      return {
+        failures: park.regressions.map((line) => ({ measure: `check:park ${line.split(':')[0] ?? line}`, count: 1, first: [line] })),
+        broken: null,
+      };
+    },
+  };
+
+  const { buildHeadlessPark, quietly } = await import('./park-harness.mts');
+  const { saveFlags } = await import('../src/state/flags.ts');
+  const fresh = (): HeadlessPark => quietly(() => buildHeadlessPark());
+  const simCheck = ([name, measure]: (typeof ACCEPTANCE_SIM_MEASURES)[number]): StageMeasure => ({
+    name,
+    cpu: 'checks',
+    run: async () => {
+      // As a fresh process finds it: the arrival due (cat-bus records that it
+      // played, and every World built after it would otherwise have none).
+      saveFlags.hydrate({ arrivedByBus: false });
+      const { faults, voids } = await measure(fresh);
+      return outcome(name, faults, voids);
+    },
+  });
+  const scriptCheck = (script: string): StageMeasure => {
+    const name = `check:${script.replace(/^scripts\/check-|\.mts$/g, '')}`;
+    return {
+      name,
+      cpu: 'checks',
+      run: async () => {
+        try {
+          await runScript(process.execPath, ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', script], {
+            // The scope: a script that knows it (`lib/checkScope.mts`) fails only on
+            // its decision clauses and exits VOID_EXIT when it could not measure.
+            env: { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: String(restart), LGP_CHECK_SCOPE: 'acceptance' },
+            encoding: 'utf8',
+            maxBuffer: 256 * 1024 * 1024,
+          });
+          return { failures: [], broken: null };
+        } catch (error) {
+          const failed = error as { stdout?: string; stderr?: string; code?: number };
+          const lines = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`
+            .split('\n')
+            .map((l) => l.trim())
+            .filter((l) => /^(FAIL|✗|- |· )|FAILED/.test(l));
+          const tail = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`.trim().split('\n').slice(-3).join(' / ');
+          return {
+            failures: [{ measure: name, count: Math.max(1, lines.length), first: (lines.length > 0 ? lines : ['exited non-zero with no FAIL line']).slice(0, FIRST) }],
+            broken: failed.code === VOID_EXIT ? `${name}: the instrument could not measure — ${tail.slice(0, 400)}` : null,
+          };
+        }
+      },
+    };
+  };
+
+  const pathPreference = ACCEPTANCE_CHECK_MEASURES.filter(([name]) => name === 'check:path-preference');
+  const lightChecks = ACCEPTANCE_CHECK_MEASURES.filter(([name]) => name !== 'check:path-preference');
+  const stages: Stage[] = [
+    {
+      name: 'cheap',
+      measures: [...invariants, ...lightChecks.map(parkCheck), ...pathPreference.map(parkCheck), findings],
+    },
+    { name: 'middle', measures: ACCEPTANCE_SIM_MEASURES.filter(([name]) => STAGE_TWO_SIMS.has(name)).map(simCheck) },
+    {
+      name: 'heavy',
+      measures: [
+        ...ACCEPTANCE_SIM_MEASURES.filter(([name]) => !STAGE_TWO_SIMS.has(name)).map(simCheck),
+        ...ACCEPTANCE_CHECK_SCRIPTS.map(scriptCheck),
+      ],
+    },
+  ];
+  const result = await runStages(stages);
+  failures.push(...result.failures);
+  broken ??= result.broken;
+  measuresAsked += result.measuresAsked;
+  notAsked = result.notAsked;
+  stageCpuMs = result.stageCpuMs.map((ms) => Math.round(ms));
+  invariantsCpu = result.cpuMs.invariants;
+  checksCpu = result.cpuMs.checks;
+  findingsCpu = result.cpuMs.findings;
+  if (notAsked) process.stderr.write(`park-attempt: ${describeNotAsked(notAsked)}\n`);
+}
 
 const verdict: AttemptVerdict = {
   seed,
@@ -387,6 +512,8 @@ const verdict: AttemptVerdict = {
     findings: Math.round(findingsCpu),
   },
   wallMs: Math.round(performance.now() - began),
+  notAsked,
+  stageCpuMs,
   backtracking,
 };
 process.stdout.write(`park-attempt: ${JSON.stringify(verdict)}\n`);

@@ -42,8 +42,19 @@ export interface PathPreferenceResult {
 
 export async function pathPreference(
   park: HeadlessPark,
-  options: { readonly quiet?: boolean; readonly verbose?: boolean } = {},
+  options: {
+    readonly quiet?: boolean;
+    readonly verbose?: boolean;
+    /**
+     * `'decisions'` asks only the clauses a park decides, and skips the work
+     * that feeds nothing else — the children's planner, the short hops and the
+     * reachability sweep, which are the router's own (code) clauses and most
+     * of the routing. The acceptance loop's question; the script asks `'all'`.
+     */
+    readonly clauses?: 'all' | 'decisions';
+  } = {},
 ): Promise<PathPreferenceResult> {
+  const all = (options.clauses ?? 'all') === 'all';
   const quiet = options.quiet ?? false;
   const verbose = options.verbose ?? false;
   let lastError = '';
@@ -492,7 +503,7 @@ export async function pathPreference(
       bridgeCovers,
       gardenAttractions(park.sample),
     );
-    const npcRuns = probes.map((probe) => {
+    const npcRuns = (all ? probes : []).map((probe) => {
       planner.beginFrame();
       const ay = park.sample(probe.ax, probe.az, 0);
       const by = park.sample(probe.bx, probe.bz, 0);
@@ -538,7 +549,7 @@ export async function pathPreference(
     }
 
     const hops: Hop[] = [];
-    {
+    if (all) {
       const centreline = pathCentreline();
       // A deterministic spread over the whole park: every point of a 3 m lattice
       // that lands 2-6 m off the paving.
@@ -579,7 +590,7 @@ export async function pathPreference(
       }
     }
 
-    if (hops.length < 8) {
+    if (all && hops.length < 8) {
       err(
         `check:path-preference — only ${hops.length} points in the park sit ${HOP_MIN}–${HOP_MAX} m ` +
           'off the paving. That is not a park with grass in it; re-derive these probes.',
@@ -593,7 +604,7 @@ export async function pathPreference(
     // forgotten, because they are chosen from the park, not from the router.
     const REACH_PITCH = 6;
     const reachTargets: { x: number; z: number }[] = [];
-    for (const x of sampleAxis(REACH_PITCH)) {
+    for (const x of all ? sampleAxis(REACH_PITCH) : []) {
       for (const z of sampleAxis(REACH_PITCH)) {
         if (!insidePlay(x, z, 2)) continue;
         reachTargets.push({ x, z });
@@ -967,68 +978,72 @@ export async function pathPreference(
       'code',
     );
 
-    // The short hop onto the grass — the case Jim named. Same ceiling, because it
-    // is the same arithmetic; reported separately because it is the one an adult
-    // watching over her shoulder would notice first.
-    let worstHop = 0;
-    let worstHopLabel = '';
-    let hopExtra = 0;
-    for (let i = 0; i < hops.length; i += 1) {
-      const w = weightedHops[i]!;
-      const u = unweightedHops[i]!;
-      hopExtra += w.length - u.length;
-      const ratio = w.length / Math.max(u.length, 0.01);
-      if (ratio > worstHop) {
-        worstHop = ratio;
-        worstHopLabel = hops[i]!.label;
-      }
-    }
-    check(
-      worstHop <= DETOUR_CEILING,
-      `stepping off the kerb stays a step: across ${hops.length} destinations ${HOP_MIN}–${HOP_MAX} m ` +
-        `out on the grass the walk grew by ${(hopExtra / hops.length).toFixed(2)} m on average, ` +
-        `worst ${((worstHop - 1) * 100).toFixed(1)}% (${worstHopLabel}), ceiling ` +
-        `${((DETOUR_CEILING - 1) * 100).toFixed(0)}%`,
-      'code',
-    );
-
-    // Reachability: a preference, not a wall.
-    let lost = 0;
-    let lostExample = '';
-    for (let i = 0; i < reachTargets.length; i += 1) {
-      if (unweightedReach[i]!.reachedGoal && !weightedReach[i]!.reachedGoal) {
-        lost += 1;
-        if (!lostExample) {
-          const t = reachTargets[i]!;
-          lostExample = `(${t.x.toFixed(0)}, ${t.z.toFixed(0)})`;
+    // The router's own clauses — code, the same on every park. Asked only when
+    // all clauses are (the script); the acceptance loop skips their routing.
+    if (all) {
+      // The short hop onto the grass — the case Jim named. Same ceiling, because it
+      // is the same arithmetic; reported separately because it is the one an adult
+      // watching over her shoulder would notice first.
+      let worstHop = 0;
+      let worstHopLabel = '';
+      let hopExtra = 0;
+      for (let i = 0; i < hops.length; i += 1) {
+        const w = weightedHops[i]!;
+        const u = unweightedHops[i]!;
+        hopExtra += w.length - u.length;
+        const ratio = w.length / Math.max(u.length, 0.01);
+        if (ratio > worstHop) {
+          worstHop = ratio;
+          worstHopLabel = hops[i]!.label;
         }
       }
-    }
-    check(
-      lost === 0,
-      `reachability did not shrink: of ${reachTargets.length} destinations across the park, ` +
-        `${unweightedReach.filter((r) => r.reachedGoal).length} were reachable unweighted and ` +
-        `${weightedReach.filter((r) => r.reachedGoal).length} are reachable weighted` +
-        `${lost > 0 ? ` — lost ${lost}, first at ${lostExample}` : ''}`,
-      'code',
-    );
+      check(
+        worstHop <= DETOUR_CEILING,
+        `stepping off the kerb stays a step: across ${hops.length} destinations ${HOP_MIN}–${HOP_MAX} m ` +
+          `out on the grass the walk grew by ${(hopExtra / hops.length).toFixed(2)} m on average, ` +
+          `worst ${((worstHop - 1) * 100).toFixed(1)}% (${worstHopLabel}), ceiling ` +
+          `${((DETOUR_CEILING - 1) * 100).toFixed(0)}%`,
+        'code',
+      );
 
-    // Both movers, one penalty.
-    let widestDisagreement = 0;
-    let disagreementLabel = '';
-    for (let i = 0; i < probes.length; i += 1) {
-      const gap = Math.abs(fraction(npcRuns[i]!) - weightedPaved[i]!);
-      if (gap > widestDisagreement) {
-        widestDisagreement = gap;
-        disagreementLabel = probes[i]!.label;
+      // Reachability: a preference, not a wall.
+      let lost = 0;
+      let lostExample = '';
+      for (let i = 0; i < reachTargets.length; i += 1) {
+        if (unweightedReach[i]!.reachedGoal && !weightedReach[i]!.reachedGoal) {
+          lost += 1;
+          if (!lostExample) {
+            const t = reachTargets[i]!;
+            lostExample = `(${t.x.toFixed(0)}, ${t.z.toFixed(0)})`;
+          }
+        }
       }
+      check(
+        lost === 0,
+        `reachability did not shrink: of ${reachTargets.length} destinations across the park, ` +
+          `${unweightedReach.filter((r) => r.reachedGoal).length} were reachable unweighted and ` +
+          `${weightedReach.filter((r) => r.reachedGoal).length} are reachable weighted` +
+          `${lost > 0 ? ` — lost ${lost}, first at ${lostExample}` : ''}`,
+        'code',
+      );
+
+      // Both movers, one penalty.
+      let widestDisagreement = 0;
+      let disagreementLabel = '';
+      for (let i = 0; i < probes.length; i += 1) {
+        const gap = Math.abs(fraction(npcRuns[i]!) - weightedPaved[i]!);
+        if (gap > widestDisagreement) {
+          widestDisagreement = gap;
+          disagreementLabel = probes[i]!.label;
+        }
+      }
+      check(
+        widestDisagreement < 0.001,
+        `the children route exactly as the player does: worst disagreement in paved fraction ` +
+          `${(widestDisagreement * 100).toFixed(3)}% (${disagreementLabel || 'none'})`,
+        'code',
+      );
     }
-    check(
-      widestDisagreement < 0.001,
-      `the children route exactly as the player does: worst disagreement in paved fraction ` +
-        `${(widestDisagreement * 100).toFixed(3)}% (${disagreementLabel || 'none'})`,
-      'code',
-    );
 
     // ------------------------------------------------------------------- report
 

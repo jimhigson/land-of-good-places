@@ -14,10 +14,11 @@ Lead: agent a52ae9484877226d6. Ruling: EVERY decision-judging check is an accept
   cat-bus, hotel, pet-slide.
 - Doc: STRUCTURAL-BACKTRACKING.md "Every CI check that judges a park is asked" + "Outside acceptance".
 
-## Costs (seed 5 r0, CPU)
-- build ~31-48 s; invariants ~8 s; in-process checks 65 s (path-preference ~60 s, coplanar ~5 s).
-- stall-accommodate subprocess 18 s; others being measured (scratchpad costs.sh).
-
-## Next
-- Wire the six tagged scripts into ACCEPTANCE_CHECK_SCRIPTS once costs known; tell lead.
+## State
+- Registry leak fixed in src (worldPlanClaims + GroundClaims.copy); digests 7d0c5f08 x3, control differs.
+  hotel and pet-slide transcripts unchanged on seed 5 after the fix.
+- Cost stages (lib/attemptStages.mts + test/attemptStages.test.ts); park-attempt stages 1/2/3.
+- stall-accommodate restores the stall-shift table; fresh() rehydrates arrivedByBus before each sim.
+- Fixed stale acceptedPark.test expectation (sb-throws message).
+- Measuring: seed 15 r0/r1 and seed 5 r0 staged attempts (scratchpad stage-*.txt), then report to lead.
 - Never run a script without LGP_PARK_RESTART: resolver triggers a whole acceptance loop.

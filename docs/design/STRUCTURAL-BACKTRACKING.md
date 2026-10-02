@@ -96,17 +96,44 @@ measure, through one owner shared by the check and the loop:
   (`lib/builtWell.mts`), `check:castle-towers` (`lib/castleTowers.mts`),
   `check:path-preference` (`lib/pathPreference.mts`) and `check:waypoints`
   (`lib/waypointFindings.mts`: waypoints are sampled off a park's own paths).
-- **In a process of its own** (`ACCEPTANCE_CHECK_SCRIPTS`), for checks that run
-  a simulation which moves the world under it: `check:rail-race`, plus the
-  scripts under `LGP_CHECK_SCOPE=acceptance` (`lib/checkScope.mts`).
+- **On a fresh World of its own, in the same process**
+  (`ACCEPTANCE_SIM_MEASURES`), for checks that play the park forward and so
+  move the world under them: `check:cat-bus` (`lib/catBus.mts`),
+  `check:npc-dispersal` (`lib/npcDispersal.mts`), `check:slide-rider`
+  (`lib/slideRider.mts`), `check:pet-slide` (`lib/petSlide.mts`) and
+  `check:stall-accommodate` (`lib/stallAccommodate.mts`). A second World over
+  the plan the process has already solved costs ~6.5 s on seed 5, where a
+  fresh process costs ~14 s plus the module load. The plan's ground-claims
+  registry each later World adopts is its own copy of the registry as the
+  plan left it (`worldPlanClaims`, `parkPlan.ts`). Before that fix a second
+  World adopted the first one's claims and was a different park (seed 5: 534
+  bushes, not 536). Now three Worlds digest identically, and the transcripts
+  match the scripts' own to the digit.
+- **In a process of its own** (`ACCEPTANCE_CHECK_SCRIPTS`): only
+  `check:rail-race`, which is still one top-level script.
+
+The loop asks for decision clauses only (`clauses: 'decisions'`), and skips
+work that feeds nothing else: path-preference's router sweeps, slide-rider's
+chase rasters and trough sweep, and pet-slide's control descent. CI's run of
+each script asks every clause.
+
+The measures are asked **in three cost stages**, and the attempt stops at the
+first stage that rejects (`lib/attemptStages.mts`). Stage 1 is the
+invariants, the checks on the attempt's own park, and `check:park`. Stage 2 is
+cat-bus and stall-accommodate. Stage 3 is npc-dispersal, slide-rider,
+pet-slide and `check:rail-race`. A rejected attempt pays only up to its stage,
+and its verdict names what was never asked ("not asked: rejected at stage N").
+An accepted attempt has been asked everything, so the guarantee is unchanged;
+`test/attemptStages.test.ts` holds a park that fails only stage 3 to a
+rejection. A void stops the attempt in any stage.
 
 A check's clauses are sorted three ways. **Decision** clauses fail the attempt
 and the park starts again. **Voids** (a control that misbehaved, nothing found
 to measure) mark the attempt `broken`, and the loop stops. **Code** clauses
 judge behaviour that is the same on every park, so they are reported but never
 restarted around; one failing on every park would otherwise run the loop to
-`MAX_RESTARTS`. Under the scope a script fails only on its decision clauses.
-CI runs it unscoped and fails on all three, as before.
+`MAX_RESTARTS`. Under `LGP_CHECK_SCOPE=acceptance` a script fails only on its decision
+clauses. CI runs it unscoped and fails on all three, as before.
 
 ### Outside acceptance, and why
 

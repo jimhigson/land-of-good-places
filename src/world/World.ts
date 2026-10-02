@@ -39,7 +39,7 @@ import { terrainHeight } from './terrain';
 import { bridgeHeightAt, bridgePavingHeightAt } from './train/bridges';
 import { drapePathsOverBridges } from './pathGraph';
 import type { GroundClaims } from '../boot/groundClaims';
-import { parkPlanClaims } from './parkPlan';
+import { worldPlanClaims } from './parkPlan';
 import { solveWorldPhase } from './worldPhase';
 import { ROAD_FEATURE, entranceRoadClaims } from './entrance/roadCorridor';
 
@@ -81,9 +81,11 @@ export class World implements GameSystem {
    * Nothing pre-warms in Node, so a headless park (the harness, `check:park`,
    * `test:procgen`) gets a fresh registry and fills it from its own builders.
    * That is the honest result either way: the registry describes the park in
-   * this `World`, never a previous one.
+   * this `World`, never a previous one — and a second `World` in the same
+   * process gets its own copy of the plan's registry, never the first one's
+   * (`worldPlanClaims`).
    */
-  readonly groundClaims: GroundClaims = parkPlanClaims();
+  readonly groundClaims: GroundClaims = worldPlanClaims();
 
   readonly garden: Garden;
   readonly scenery: Scenery;
