@@ -105,6 +105,17 @@ REPTILE_NOODLE_HEAD_Y = _layout("REPTILE_NOODLE_HEAD_Y")
 REPTILE_BABY_SNAKE_UNIT = _layout("REPTILE_BABY_SNAKE_UNIT")
 REPTILE_METER_POST_HEIGHT = _layout("REPTILE_METER_POST_HEIGHT")
 COUNTER_HALF_WIDTH = ts_const(STALL_SHAPE, "COUNTER_HALF_WIDTH")
+# The rest of the kiosk envelope the awning has to sit over — `kiosk.ts` builds
+# the counter and the back panel to these, so the stall kit reads the same
+# lines rather than guessing where the cloth's eaves and the finial's perch are.
+# `BACK_PANEL_Z` is derived in `stallShape.ts` (`SHELF_Z - 0.25`), so it is
+# re-derived here with the same arithmetic from the same literal.
+COUNTER_Z = ts_const(STALL_SHAPE, "COUNTER_Z")
+COUNTER_DEPTH = ts_const(STALL_SHAPE, "COUNTER_DEPTH")
+SHELF_Z = ts_const(STALL_SHAPE, "SHELF_Z")
+BACK_PANEL_Z = SHELF_Z - 0.25  # as stallShape.ts derives it
+BACK_PANEL_THICKNESS = ts_const(STALL_SHAPE, "BACK_PANEL_THICKNESS")
+BACK_PANEL_HEIGHT = ts_const(STALL_SHAPE, "BACK_PANEL_HEIGHT")
 
 # --- game-wide figures with their own owners -------------------------------
 TALLEST_CHILD_HEIGHT = ts_const(KID, "TALLEST_CHILD_HEIGHT")
