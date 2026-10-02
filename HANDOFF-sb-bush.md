@@ -23,4 +23,5 @@ Do NOT raise BUSH_BUDGET.
 - DONE: floor now count > 140 AND density > 0.15 per facts.bushLegalM2 (new fact, from
   bushScatterLedger.measureGround grid in Scenery.ts). Proved red at BUSH_BUDGET 2100 on
   11/4, 4/7, 8/4 (reverted).
-- NEXT: park:attempt all 16 at recorded restarts -> scratchpad/sb-bush/attempts.txt; then report.
+- VERIFIED: park:attempt all 16 at recorded restarts: accepted, 109 measures, 0 failures, none broken.
+  tsc (both projects) exit 0. Task complete; no PR (per brief).
