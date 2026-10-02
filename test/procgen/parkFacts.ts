@@ -15,7 +15,7 @@
  * suite owns the invariants about whether the park's scattered furniture is
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
-import { Box3, InstancedMesh, Mesh, Quaternion, Vector3 } from 'three';
+import { Box3, CylinderGeometry, InstancedMesh, Matrix4, Mesh, Quaternion, TubeGeometry, Vector3, type Curve } from 'three';
 import { measureGateArch } from '../../scripts/gate-arch-measure.mts';
 import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
@@ -861,6 +861,21 @@ export interface ParkFacts {
     readonly polesDrawn: readonly { readonly name: string; readonly at: Vector3; readonly up: Vector3 }[];
     /** The ground a pole claims — `FairyLights.ts`'s own `FAIRY_POLE_RADIUS`, asked, not copied. */
     readonly poleRadius: number;
+    /**
+     * Each drawn cable: the curve its tube was swept along (the
+     * `TubeGeometry`'s own `path`) and the mesh's world matrix, so a point on
+     * it is `path.getPointAt(u).applyMatrix4(matrixWorld)` — the cable that is
+     * drawn, not the anchors the builder meant it to hang from.
+     */
+    readonly stringsDrawn: readonly {
+      readonly name: string;
+      readonly path: Curve<Vector3>;
+      readonly matrixWorld: Matrix4;
+    }[];
+    /** The cables' drawn tube radius, off their own geometry (`NaN` if none is drawn). */
+    readonly cableRadius: number;
+    /** The posts' drawn radius at the top, where cables are tied, off their own geometry (`NaN` if none). */
+    readonly postTopRadius: number;
   };
   /**
    * The early, conservative reservation `bridgeKeepout.ts` computes for
@@ -3864,10 +3879,15 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     let poles = 0;
     let strings = 0;
     const polesDrawn: { name: string; at: Vector3; up: Vector3 }[] = [];
+    const stringsDrawn: { name: string; path: Curve<Vector3>; matrixWorld: Matrix4 }[] = [];
+    let cableRadius = Number.NaN;
+    let postTopRadius = Number.NaN;
     world.fairyLights.group.updateMatrixWorld(true);
     world.fairyLights.group.traverse((object) => {
       if (object.name.startsWith('fairy-pole-')) {
         poles += 1;
+        const geometry = (object as Mesh).geometry;
+        if (geometry instanceof CylinderGeometry) postTopRadius = geometry.parameters.radiusTop;
         const quaternion = object.getWorldQuaternion(new Quaternion());
         polesDrawn.push({
           name: object.name,
@@ -3875,9 +3895,20 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
           // flat-ok: local axis, leant by the pole's own world quaternion
           up: new Vector3(0, 1, 0).applyQuaternion(quaternion),
         });
-      } else if (object.name.startsWith('fairy-string-')) strings += 1;
+      } else if (object.name.startsWith('fairy-string-')) {
+        strings += 1;
+        const geometry = (object as Mesh).geometry;
+        if (geometry instanceof TubeGeometry) {
+          cableRadius = geometry.parameters.radius;
+          stringsDrawn.push({
+            name: object.name,
+            path: geometry.parameters.path,
+            matrixWorld: object.matrixWorld.clone(),
+          });
+        }
+      }
     });
-    return { poles, strings, polesDrawn, poleRadius: FAIRY_POLE_RADIUS };
+    return { poles, strings, polesDrawn, poleRadius: FAIRY_POLE_RADIUS, stringsDrawn, cableRadius, postTopRadius };
   })();
 
   // The bus's run, from the same owners `ArrivalSequence.placeBus` and
