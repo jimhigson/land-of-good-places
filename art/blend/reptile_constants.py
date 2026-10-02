@@ -63,6 +63,8 @@ REPTILE_TAIL_REACH = _layout("REPTILE_TAIL_REACH")
 REPTILE_TAIL_BEARING_OFFSET = _layout("REPTILE_TAIL_BEARING_OFFSET")
 REPTILE_ARCH_WIDTH = _layout("REPTILE_ARCH_WIDTH")
 REPTILE_ARCH_HEIGHT = _layout("REPTILE_ARCH_HEIGHT")
+REPTILE_FOOTPRINT_RADIUS = _layout("REPTILE_FOOTPRINT_RADIUS")
+REPTILE_BOUNDING_RADIUS = _layout("REPTILE_BOUNDING_RADIUS")
 
 # --- enclosure masonry ("cases" kit) ---------------------------------------
 REPTILE_CASE_SEGMENT = _layout("REPTILE_CASE_SEGMENT")
@@ -118,3 +120,4 @@ assert REPTILE_ENCLOSURE_WALL_HEIGHT < KID_EYE_HEIGHT, "she could not see over a
 assert REPTILE_NURSERY_RAIL_TOP > REPTILE_NURSERY_KERB_HEIGHT, "the nursery glass is below its kerb"
 assert REPTILE_METER_POST_HEIGHT >= TALLEST_CHILD_HEIGHT, "the Noodle-o-meter is shorter than the tallest hat"
 assert REPTILE_TAIL_REACH > REPTILE_SHELL_RADIUS, "the tail signpost stands inside the collision shell"
+assert REPTILE_BOUNDING_RADIUS > REPTILE_FOOTPRINT_RADIUS > REPTILE_SHELL_RADIUS, "the plot radii do not enclose the shell"
