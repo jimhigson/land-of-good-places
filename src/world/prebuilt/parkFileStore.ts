@@ -1,4 +1,5 @@
 import type { ParkFile } from './parkFile';
+import { parkSeedAsked } from '../parkSeedPool';
 
 /**
  * **The one letterbox a prebuilt park is posted through.** Whoever has a park
@@ -18,6 +19,8 @@ import type { ParkFile } from './parkFile';
 /* eslint-disable no-var */
 var offered: ParkFile | null = null;
 var missing: string | null = null;
+/** Whether Node's shipped-file resolver has been asked yet (once per process). */
+var resolverAsked: boolean | undefined;
 /* eslint-enable no-var */
 
 /** Offer a park file. Must happen before the plan is driven. */
@@ -28,6 +31,15 @@ export function offerParkFile(file: ParkFile): void {
 
 /** The offered file, or null. */
 export function offeredParkFile(): ParkFile | null {
+  if (!offered && !resolverAsked) {
+    resolverAsked = true;
+    // Node tooling only (the `--import` hook installs it): the shipped file
+    // for this seed when there is a fresh one, so a check builds the park the
+    // game ships rather than solving it. Never set in the browser.
+    const resolve = (globalThis as { __LGP_RESOLVE_PARK_FILE__?: (seed: number) => ParkFile | null })
+      .__LGP_RESOLVE_PARK_FILE__;
+    if (resolve) offered = resolve(parkSeedAsked()) ?? null;
+  }
   return offered ?? null;
 }
 

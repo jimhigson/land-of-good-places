@@ -33,9 +33,15 @@ import { installDeterministicMath } from '../src/core/deterministicMath.ts';
 // a process that builds a park ever calls it). Node builtins only, so it loads
 // before the resolver below is registered.
 import { acceptedRestartSync } from './lib/acceptedPark.mts';
+import { builtParkFileOf } from './lib/builtParks.mts';
 
 installDeterministicMath();
 globalThis.__LGP_RESOLVE_RESTART__ = acceptedRestartSync;
+// And the shipped park file itself, when there is one for this source: a
+// process that builds a supported seed's park with no explicit restart and no
+// park-changing switch hydrates it from `.parks/` (`builtParkFileOf`) instead of
+// solving it — the park the game ships, proven equal to the solve.
+globalThis.__LGP_RESOLVE_PARK_FILE__ = (seed) => builtParkFileOf(process.cwd(), seed, process.env);
 
 import { resolveTsExtension } from './ts-extension-resolver.mjs';
 
