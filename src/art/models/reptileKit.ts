@@ -89,6 +89,20 @@ export function partRadiusXZ(part: GlbPart): number {
   return radius;
 }
 
+/**
+ * The furthest any vertex of a part sits from the *kit's* origin in plan, with
+ * the node's own translation applied — what a hinge-origin part like a tongue
+ * actually reaches once it is parented where its node says.
+ */
+export function partReachXZ(part: GlbPart): number {
+  const position = part.geometry.getAttribute('position') as BufferAttribute;
+  let reach = 0;
+  for (let i = 0; i < position.count; i += 1) {
+    reach = Math.max(reach, Math.hypot(position.getX(i) + part.position.x, position.getZ(i) + part.position.z));
+  }
+  return reach;
+}
+
 /** The axis-aligned extent of a part's own vertices, before its node transform. */
 export function partBox(part: GlbPart): {
   minX: number;
