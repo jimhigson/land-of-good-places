@@ -43,7 +43,12 @@ export interface PavingRaster {
  * the planet's own ground (`altitudeAt`), so paving on a bridge deck and the
  * lawn under it are told apart.
  */
-export function rasterisePaving(meshes: readonly Mesh[], cell = PAVING_CELL): PavingRaster {
+export function rasterisePaving(
+  meshes: readonly Mesh[],
+  cell = PAVING_CELL,
+  /** Leave out a triangle whose first corner is this vertex of this mesh. */
+  skip: (mesh: Mesh, vertex: number) => boolean = () => false,
+): PavingRaster {
   let minX = Infinity;
   let minZ = Infinity;
   let maxX = -Infinity;
@@ -76,6 +81,7 @@ export function rasterisePaving(meshes: readonly Mesh[], cell = PAVING_CELL): Pa
       const ia = at(slot);
       const ib = at(slot + 1);
       const ic = at(slot + 2);
+      if (skip(mesh, ia)) continue;
       const ax = position.getX(ia);
       const az = position.getZ(ia);
       const bx = position.getX(ib);

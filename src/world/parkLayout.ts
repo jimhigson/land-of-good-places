@@ -258,14 +258,54 @@ function drawnCentreOf(entry: ManifestEntry, x: number, z: number): readonly [nu
 }
 
 /**
- * How far the paving runs on past this plot's doormat, towards the plot centre,
- * to reach a door drawn at the back of a recess (`ManifestEntry.door.pavedTo`);
- * zero for every other plot.
+ * A `{ local, facing }` door's doormat: at the door's own front if that stands
+ * clear of the plot, otherwise pushed straight out along `facing` until it is
+ * the usual stand-off past the plot's edge — the same place every other
+ * plot's doormat stands, so the arriving street can reach it without crossing
+ * the plot. The paving between it and the door is the door's apron
+ * ({@link doorApronOf}).
  */
-export function pavedPastTheDoormat(entry: PlacedEntry): number {
-  const door = PARK_MANIFEST.find((candidate) => candidate.id === entry.id)?.door;
-  if (!door || !('reach' in door) || door.pavedTo === undefined) return 0;
-  return Math.max(0, door.reach - door.pavedTo);
+function doormatClearOfThePlot(
+  entry: ManifestEntry,
+  footprint: AnchorFootprint,
+  x: number,
+  z: number,
+  door: { readonly local: readonly [number, number]; readonly facing: readonly [number, number] },
+  standOff: number,
+): readonly [number, number] {
+  const [cx, cz] = drawnCentreOf(entry, x, z);
+  const frontX = cx + door.local[0];
+  const frontZ = cz + door.local[1];
+  const [fx, fz] = door.facing;
+  const along = (frontX - x) * fx + (frontZ - z) * fz;
+  const push = Math.max(0, edgeDistanceAlong(footprint, fx, fz) + standOff - along);
+  return [frontX + fx * push, frontZ + fz * push];
+}
+
+/**
+ * **The paving from a plot's doormat on to its drawn door**, where the two are
+ * not the same place (`ManifestEntry.door`): the hotel's sliding doors stand
+ * at the back of a recess past the trigger its doormat is on, and the castle's
+ * steps can stand inside the plot its doormat is pushed clear of. `to` is
+ * where the door's front is; `walkable` is whether that ground is open lawn a
+ * child stands on (the castle's, in front of its steps) or ground she is let
+ * in before reaching (the hotel's recess, behind the trigger). `null` where
+ * the doormat is the door.
+ */
+export function doorApronOf(entry: PlacedEntry): { readonly to: readonly [number, number]; readonly walkable: boolean } | null {
+  const manifest = PARK_MANIFEST.find((candidate) => candidate.id === entry.id);
+  const door = manifest?.door;
+  if (!manifest || !door) return null;
+  if ('reach' in door) {
+    if (door.pavedTo === undefined || door.reach <= door.pavedTo) return null;
+    const [fx, fz] = entranceFacing(entry);
+    const back = door.reach - door.pavedTo;
+    return { to: [entry.entranceX - fx * back, entry.entranceZ - fz * back], walkable: false };
+  }
+  const [cx, cz] = drawnCentreOf(manifest, entry.x, entry.z);
+  const to: readonly [number, number] = [cx + door.local[0], cz + door.local[1]];
+  if (Math.hypot(to[0] - entry.entranceX, to[1] - entry.entranceZ) < 1e-6) return null;
+  return { to, walkable: true };
 }
 
 /** Does this plot declare a door of its own (`ManifestEntry.door`)? */
@@ -1002,7 +1042,7 @@ function* buildOnce(restart: number, attempts: ReadonlyMap<string, number>): Gen
       ? [x + dirX * (edge + standOff), z + dirZ * (edge + standOff)]
       : 'reach' in door
         ? [x + dirX * door.reach, z + dirZ * door.reach]
-        : [drawnCentreOf(entry, x, z)[0] + door.local[0], drawnCentreOf(entry, x, z)[1] + door.local[1]];
+        : doormatClearOfThePlot(entry, placedFootprint, x, z, door, standOff);
 
     const item: PlacedEntry = {
       id: entry.id,

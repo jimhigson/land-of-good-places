@@ -29,7 +29,7 @@ import {
   type PathGraph,
   type RouteDefinition,
 } from './paths';
-import { PARK_LAYOUT, entranceFacing, pavedPastTheDoormat } from './parkLayout';
+import { PARK_LAYOUT, doorApronOf } from './parkLayout';
 
 /**
  * **The one Catmull-Rom every consumer of a route's drawn shape builds.**
@@ -277,13 +277,17 @@ export function buildPaths(): Mesh[] {
 
   // Where a door stands at the back of a recess past its doormat, the paving
   // on to it — see `doorAprons`.
+  // Owners of paving that is drawn but never walked on — see `doorAprons`.
+  const decorativeOwners: number[] = [];
   doorAprons().forEach((apron, k) => {
+    if (!apron.walkable) decorativeOwners.push(DOOR_APRON_OWNER_BASE - k);
     const curve = routeCurve(apron);
     const divisions = pathDivisions(curve);
     addPathRibbon(surface, curve, apron.width, divisions, PATH_SURFACE_LIFT, discMayBeLaid);
     own(surfaceOwners, surface, DOOR_APRON_OWNER_BASE - k);
     addRibbonKerb(kerb, curve, apron.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
     own(kerbOwners, kerb, DOOR_APRON_OWNER_BASE - k);
+    if (apron.walkable) recordSamples(curve, divisions, apron.width / 2);
   });
 
   const surfaceMesh = new Mesh(surface.build(), pathSurfaceMaterial());
@@ -301,6 +305,8 @@ export function buildPaths(): Mesh[] {
   surfaceMesh.userData['ownerNames'] = ownerNames;
   kerbMesh.userData['vertexOwners'] = Int32Array.from(kerbVertexOwners);
   kerbMesh.userData['ownerNames'] = ownerNames;
+  surfaceMesh.userData['decorativeOwners'] = Int32Array.from(decorativeOwners);
+  kerbMesh.userData['decorativeOwners'] = Int32Array.from(decorativeOwners);
 
   drawnLayers = [
     { mesh: kerbMesh, lift: PATH_KERB_LIFT },
@@ -854,34 +860,33 @@ function discMayBeLaid(x: number, z: number, radius: number): boolean {
 export const DOOR_APRON_OWNER_BASE = -100_000;
 
 /**
- * **The paving from a doormat on to a door drawn at the back of a recess** —
- * the hotel's (`ManifestEntry.door.pavedTo`): its sliding doors stand ~4.9 m
- * inside the facade plane, between the crystals, and the child is let in at
- * the trigger on the doormat before she gets there. So the path is drawn on
- * to the doors, straight in along the doormat's facing, as the route's own
- * width, but it is **not walkable paving**: its samples are not recorded, so
- * nothing routes, seeds a waypoint, or stands anything on ground she is never
- * on. It is drawn because without it she sees four metres of lawn between the
- * end of the path and the doors (`drawnPavingReachesEveryDoor`).
+ * **The paving from a doormat on to its drawn door** (`parkLayout.ts`'s
+ * `doorApronOf`), straight, at the arriving route's own width: the hotel's
+ * sliding doors stand ~4.9 m inside its facade at the back of a recess, past
+ * the trigger the doormat is on, and the castle's steps can stand inside the
+ * plot its doormat is pushed clear of. Without it a child sees lawn between
+ * the end of the path and the door (`drawnPavingReachesEveryDoor`).
+ *
+ * A walkable apron (the castle's, open lawn) records its samples like any
+ * route, so the router, the scatter and the waypoints all know it is paving.
+ * The hotel's records none: it lies behind the trigger, on ground she is let
+ * in before she reaches, and a waypoint seeded there would be stranded.
  */
-function doorAprons(): RouteDefinition[] {
-  const aprons: RouteDefinition[] = [];
+function doorAprons(): (RouteDefinition & { readonly walkable: boolean })[] {
+  const aprons: (RouteDefinition & { readonly walkable: boolean })[] = [];
   for (const node of PATH_GRAPH.nodes) {
     if (node.kind !== 'anchor') continue;
     const entry = PARK_LAYOUT.entries.get(node.id);
     if (!entry) continue;
-    const on = pavedPastTheDoormat(entry);
-    if (on <= 0) continue;
-    const [outX, outZ] = entranceFacing(entry);
+    const apron = doorApronOf(entry);
+    if (!apron) continue;
     const width = ROUTES.find((route) => route.name === `spur-${node.id}`)?.width ?? 2.6;
     aprons.push({
       name: `door-${node.id}`,
-      points: [
-        [entry.entranceX, entry.entranceZ],
-        [entry.entranceX - outX * on, entry.entranceZ - outZ * on],
-      ],
+      points: [[entry.entranceX, entry.entranceZ], apron.to],
       width,
       closed: false,
+      walkable: apron.walkable,
     });
   }
   return aprons;
