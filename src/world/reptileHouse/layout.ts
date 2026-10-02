@@ -107,13 +107,24 @@ export const REPTILE_EXIT_BAND_Z = 18;
 export const REPTILE_SHELL_RADIUS = 9.4;
 
 /**
+ * How far past the shell the front door's walk-through band reaches, and how
+ * far inside the shell the drawn doorway stands: the two stand-offs the
+ * derived figures below are made of, as plain literals so
+ * `reptile_constants.py` reads them rather than re-typing them.
+ */
+export const REPTILE_DOOR_BAND_STANDOFF = 0.2;
+export const REPTILE_DRAWN_DOOR_INSET = 1.2;
+/** How far past the band's outer edge she stands on the doormat (the tongue). */
+export const REPTILE_DOORMAT_STANDOFF = 1.2;
+
+/**
  * The outer edge of the front door's walk-through band along the facade
  * bearing — the park layout stands the tongue doormat on it.
  */
-export const REPTILE_DOOR_BAND_OUTER = REPTILE_SHELL_RADIUS + 0.2;
+export const REPTILE_DOOR_BAND_OUTER = REPTILE_SHELL_RADIUS + REPTILE_DOOR_BAND_STANDOFF;
 
-/** Where the drawn arch stands along the facade bearing; paving runs to it. */
-export const REPTILE_DRAWN_DOOR_ALONG = REPTILE_SHELL_RADIUS - 1.2;
+/** Where the drawn doorway stands along the facade bearing; paving runs to it. */
+export const REPTILE_DRAWN_DOOR_ALONG = REPTILE_SHELL_RADIUS - REPTILE_DRAWN_DOOR_INSET;
 
 /**
  * The lobby back wall, along the facade bearing: two metres inside the flat
@@ -384,17 +395,38 @@ export const METER_STAND: StandSpot = { x: 11.9, z: 14.9, facing: 225 };
 
 /**
  * **The Tortoise Ride** (Jim, 2 October 2026: *"Yeah, put the two rides in,
- * why not?"*): a big friendly tortoise parked in the foyer's south-east
- * corner, facing the arrival, that plods one lap of the ring with her on
- * its shell and comes back. Parked, it is a solid disc; walking, it is
- * scenery (she is on it). The parking spot is off every path node and the
- * foyer's 3 m sweep; the stand spot is where she boards and is put down.
+ * why not?"*): a big friendly tortoise parked along the south wall east of
+ * the arrival, facing west towards her, that plods one lap of the ring with
+ * her on its shell and comes back. Parked, it is a solid capsule; walking,
+ * it is scenery (she is on it). The parking bay is the one patch of foyer
+ * floor clear of every keep-out — the arrival, the doorway, the foyer's
+ * nodes, the meter's stand — and of the wall; the stand spot, at its head,
+ * is where she boards and is put down.
  */
-export const TORTOISE_RIDE_PARK: StandSpot = { x: 9, z: 16.3, facing: 270 };
-export const TORTOISE_RIDE_PARK_RADIUS = 1.3;
-export const TORTOISE_RIDE_STAND: StandSpot = { x: 8, z: 14.3, facing: 23 };
-/** The tortoise at this scale is ≈ 2.9 m long and its shell ≈ 1.9 m up. */
-export const TORTOISE_RIDE_SCALE = 2.4;
+export const TORTOISE_RIDE_PARK: StandSpot = { x: 9.4, z: 16.7, facing: 270 };
+/**
+ * Parked, the tortoise is one filled capsule along its body: this half-length
+ * either way along its facing, this half-width across — a disc could not
+ * cover a 2.9 m body whose head reaches 1.8 m ahead of its centre
+ * (`check:reptile-house`'s drawn ⇒ solid clause found the head bare).
+ */
+export const TORTOISE_RIDE_PARK_HALF_LENGTH = 0.7;
+export const TORTOISE_RIDE_PARK_HALF_WIDTH = 1;
+export const TORTOISE_RIDE_STAND: StandSpot = { x: 6.9, z: 15.6, facing: 66 };
+/**
+ * The zone's tap area: the tortoise's shell and a little round it. Any
+ * bigger and it covers the exit band two strides away, or runs into the
+ * Noodle-o-meter's zone (`check:tap-spacing`'s 1.13 m rule, both measured).
+ */
+export const TORTOISE_RIDE_PICK_RADIUS = 1.6;
+/**
+ * The zone's centre sits this far back from the parking spot along the
+ * tortoise's body (its shell, not its head): the head end is two strides
+ * from the exit band, and a zone centred there covered it.
+ */
+export const TORTOISE_RIDE_ZONE_SETBACK = 1.1;
+/** The tortoise at this scale is ≈ 2.4 m long, 2 m wide, its shell ≈ 1.6 m up. */
+export const TORTOISE_RIDE_SCALE = 2;
 /** Plodding — a lap is about 45 s. */
 export const TORTOISE_RIDE_SPEED = 1.3;
 /**
@@ -405,8 +437,8 @@ export const TORTOISE_RIDE_SPEED = 1.3;
  */
 export const TORTOISE_RIDE_LOOP: readonly LocalPoint[] = [
   { x: TORTOISE_RIDE_PARK.x, z: TORTOISE_RIDE_PARK.z },
-  { x: 8.8, z: 13.2 },
-  { x: 6.2, z: 11.6 },
+  { x: 7.6, z: 14.6 },
+  { x: 6, z: 11.8 },
   { x: 3.8, z: 9.5 },
   { x: 3.7, z: 7.2 },
   { x: 3.96, z: 3.96 },
@@ -418,8 +450,8 @@ export const TORTOISE_RIDE_LOOP: readonly LocalPoint[] = [
   { x: -3.96, z: 3.96 },
   { x: 0, z: 5.6 },
   { x: 2.3, z: 8.6 },
-  { x: 5.5, z: 11.2 },
-  { x: 8.3, z: 13.3 },
+  { x: 5, z: 11.4 },
+  { x: 8.6, z: 14.2 },
 ];
 
 /**

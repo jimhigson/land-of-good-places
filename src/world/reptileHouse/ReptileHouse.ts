@@ -53,6 +53,7 @@ import {
   REPTILE_ARRIVAL_X,
   REPTILE_ARRIVAL_Z,
   REPTILE_DOOR_BAND_OUTER,
+  REPTILE_DOORMAT_STANDOFF,
   REPTILE_ENCLOSURE_WALL_HEIGHT,
   REPTILE_FORECOURT_ORIGIN_X,
   REPTILE_FORECOURT_ORIGIN_Z,
@@ -185,7 +186,6 @@ export class ReptileHouse implements GameSystem {
   private onForecourt = false;
   private bubbleFor = 0;
   private tickle = 0;
-  private greetedCount = 0;
   private lastSaid = '';
 
   constructor(collision: CollisionWorld, controls: InteriorControls, surfaces: WalkSurfaces, deps: ReptileHouseDeps) {
@@ -224,7 +224,7 @@ export class ReptileHouse implements GameSystem {
       rng: this.rng,
       say: (text: string, at: LocalPoint, y: number) => this.say(text, at, y),
       hearts: (at: LocalPoint, y: number) => this.hearts.puff(at.x, y, at.z, this.rng),
-      greet: (id: string) => this.onGreet(id),
+      greet: () => this.onGreet(),
       findBaby: () => this.onBabyFound(),
       openShop: (shopId: string) => this.controls.openShop(shopId),
       // Hat and all — `topHeight` is what the name label clears, so the
@@ -442,11 +442,17 @@ export class ReptileHouse implements GameSystem {
   // ------------------------------------------------------------ private
 
   private checkDoorways(player: Player): void {
-    if (this.spaces.settling) return;
     const { x, z } = player.position;
     const fromX = player.previousPosition.x;
     const fromZ = player.previousPosition.z;
     if (!this.inside) {
+      // The cooldown guards the band that just fired: she is put down on the
+      // doormat a stride outside the entry band, and must not be pulled
+      // straight back in. Inside, the arrival is 1.6 m from the exit band, so
+      // the exit is checked from the first frame — a child who arrives and
+      // immediately pushes down used to walk off the plate and be popped back
+      // to the arrival (the solidity review, 2 October 2026).
+      if (this.spaces.settling) return;
       if (bandCrossed(reptileEntryBand(this.frame), fromX, fromZ, x, z)) {
         this.spaces.changeTo(() => this.enterHall());
       }
@@ -496,7 +502,7 @@ export class ReptileHouse implements GameSystem {
     this.onForecourt = true;
     this.forecourtRoot.visible = true;
     this.boundToForecourt();
-    const mat = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + 1.2, 0);
+    const mat = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF, 0);
     player.teleportTo(mat.x, REPTILE_HOUSE_FLOOR_Y, mat.z, facing);
   }
 
@@ -536,10 +542,10 @@ export class ReptileHouse implements GameSystem {
     };
   }
 
-  /** "Tickle tail!" at the signpost: Sunny's head on the roof sways, winks and flicks her tongue. */
+  /** "Tickle tail!" at the signpost: Sunny's head tilts, her eyes go happy and her tongue wags. */
   private tailZone(): InteractZone {
     const base = reptileTailBase(this.frame);
-    const stand = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + 1.2, 2.6);
+    const stand = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF, 2.6);
     return pressZone(
       {
         id: 'reptile-tail',
@@ -568,10 +574,8 @@ export class ReptileHouse implements GameSystem {
     this.bubbleFor = 1.6 + text.length * 0.07;
   }
 
-  private onGreet(id: string): void {
-    void id;
-    this.greetedCount = this.exhibits.exhibitsGreeted;
-    if (this.greetedCount >= 15) discoverSecret('secret.metTheReptiles');
+  private onGreet(): void {
+    if (this.exhibits.exhibitsGreeted >= 15) discoverSecret('secret.metTheReptiles');
   }
 
   private onBabyFound(): void {

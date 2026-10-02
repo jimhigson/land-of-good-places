@@ -57,8 +57,10 @@ REPTILE_DOOR_X = _layout("REPTILE_DOOR_X")
 
 # --- exterior ("house" kit) ------------------------------------------------
 REPTILE_SHELL_RADIUS = _layout("REPTILE_SHELL_RADIUS")
-REPTILE_DOOR_BAND_OUTER = REPTILE_SHELL_RADIUS + 0.2  # as layout.ts derives it
-REPTILE_DRAWN_DOOR_ALONG = REPTILE_SHELL_RADIUS - 1.2  # as layout.ts derives it
+# Derived in layout.ts from two literals it also owns; the same arithmetic
+# on the same reads, no number of our own.
+REPTILE_DOOR_BAND_OUTER = REPTILE_SHELL_RADIUS + _layout("REPTILE_DOOR_BAND_STANDOFF")
+REPTILE_DRAWN_DOOR_ALONG = REPTILE_SHELL_RADIUS - _layout("REPTILE_DRAWN_DOOR_INSET")
 REPTILE_TAIL_REACH = _layout("REPTILE_TAIL_REACH")
 REPTILE_TAIL_BEARING_OFFSET = _layout("REPTILE_TAIL_BEARING_OFFSET")
 REPTILE_ARCH_WIDTH = _layout("REPTILE_ARCH_WIDTH")

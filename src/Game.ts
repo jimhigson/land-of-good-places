@@ -986,10 +986,10 @@ export class Game {
       // Not a ride either: the guest suite, for its own deep link — see
       // `Hotel.requestEnterSuite`.
       if (stallId === 'hotelSuite') return this.world.hotel.requestEnterSuite();
-      // Not a ride either: the Reptile House's hall (`/reptile-house`), and
-      // its front door from outside (`/reptile-house-door`) — on the forecourt
-      // while the park has no plot for the building.
-      if (stallId === 'reptileHouse') return this.world.reptileHouse.requestEnter();
+      // Not a ride either: the Reptile House's front door from outside
+      // (`/reptile-house-door`) — on the forecourt while the park has no plot
+      // for the building. The hall itself (`/reptile-house`) is its own
+      // `DeepLink` kind, `enterReptileSpawn`, never a stall id.
       if (stallId === 'reptileHouseDoor') return this.world.reptileHouse.requestEnterDoor();
       // The Tortoise Ride (`/tortoise-ride`): into the hall and onto the shell.
       if (stallId === 'reptileTortoiseRide') return this.world.reptileHouse.requestTortoiseRide();

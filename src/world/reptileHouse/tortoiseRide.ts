@@ -1,5 +1,5 @@
 import { Box3, CatmullRomCurve3, Group, Vector3 } from 'three';
-import type { CollisionWorld } from '../Collision';
+import type { CollisionWorld, WallCollider } from '../Collision';
 import type { InteriorControls } from '../building/Building';
 import type { Player } from '../../entities/Player';
 import { PLAYER_RADIUS } from '../../core/constants';
@@ -14,10 +14,14 @@ import {
   REPTILE_HOUSE_ORIGIN_Z,
   TORTOISE_RIDE_LOOP,
   TORTOISE_RIDE_PARK,
-  TORTOISE_RIDE_PARK_RADIUS,
+  TORTOISE_RIDE_PARK_HALF_LENGTH,
+  TORTOISE_RIDE_PARK_HALF_WIDTH,
+  TORTOISE_RIDE_PICK_RADIUS,
   TORTOISE_RIDE_SCALE,
   TORTOISE_RIDE_SPEED,
   TORTOISE_RIDE_STAND,
+  TORTOISE_RIDE_ZONE_SETBACK,
+  type LocalPoint,
 } from './layout';
 
 /**
@@ -35,16 +39,27 @@ import {
  * hides itself while `player.riding`.
  *
  * **Solid when parked, scenery when walking.** Parked, the tortoise is a
- * drawn thing a child can lean on, so it is one `ReptileProps.disc` at the
- * parking spot (keep-outs asserted like every other solid in the hall).
- * Walking, she is on it and nothing else is near it; the disc comes out at
- * boarding and goes back at arrival — two collision edits per lap, not one
- * per frame, and the parking spot is never an invisible disc with no
- * tortoise on it. The lap itself (`TORTOISE_RIDE_LOOP`) runs the ring and
+ * drawn thing a child can lean on, so it is one `ReptileProps.wall` — a
+ * filled capsule along its body, head included — at the parking spot
+ * (keep-outs asserted like every other solid in the hall). Walking, she is
+ * on it and nothing else is near it; the capsule comes out at boarding and
+ * goes back at arrival — two collision edits per lap, not one per frame,
+ * and the parking spot is never an invisible solid with no tortoise on it. The lap itself (`TORTOISE_RIDE_LOOP`) runs the ring and
  * the south opening, both wider than the tortoise by a stride; riding
  * bypasses collision, so a bed's kerb could not stop it anyway, which is why
  * the loop is proved against the layout's own path widths rather than trusted.
  */
+/** The parked capsule's two ends, hall-local: along the parking spot's facing, head end first. */
+function parkedCapsule(): [LocalPoint, LocalPoint] {
+  const yaw = (TORTOISE_RIDE_PARK.facing * Math.PI) / 180;
+  const dx = Math.sin(yaw) * TORTOISE_RIDE_PARK_HALF_LENGTH;
+  const dz = Math.cos(yaw) * TORTOISE_RIDE_PARK_HALF_LENGTH;
+  return [
+    { x: TORTOISE_RIDE_PARK.x + dx, z: TORTOISE_RIDE_PARK.z + dz },
+    { x: TORTOISE_RIDE_PARK.x - dx, z: TORTOISE_RIDE_PARK.z - dz },
+  ];
+}
+
 export class TortoiseRide {
   readonly tortoise: TortoiseHandle;
   private readonly root: Group;
@@ -62,8 +77,8 @@ export class TortoiseRide {
   private along = 0;
   private phase = 0;
   private yaw = (TORTOISE_RIDE_PARK.facing * Math.PI) / 180;
-  /** The parked disc's handle in the collision world, or `null` while it is out walking. */
-  private parked: number | null = null;
+  /** The parked capsule's handle in the collision world, or `null` while it is out walking. */
+  private parked: WallCollider | null = null;
   private readonly parkedSolid: ReptileProps['solids'][number];
 
   constructor(root: Group, props: ReptileProps, collision: CollisionWorld, controls: InteriorControls) {
@@ -87,9 +102,10 @@ export class TortoiseRide {
     );
     this.length = this.loop.getLength();
 
-    this.props.disc('the tortoise ride, parked', TORTOISE_RIDE_PARK.x, TORTOISE_RIDE_PARK.z, TORTOISE_RIDE_PARK_RADIUS, 'wall');
+    const [front, back] = parkedCapsule();
+    this.props.wall('the tortoise ride, parked', front, back, TORTOISE_RIDE_PARK_HALF_WIDTH, 'wall');
     this.parkedSolid = this.props.solids[this.props.solids.length - 1]!;
-    this.parked = this.parkedSolid.handle as number;
+    this.parked = this.parkedSolid.handle as WallCollider;
     this.park();
   }
 
@@ -109,7 +125,7 @@ export class TortoiseRide {
     this.riding = true;
     this.along = 0;
     if (this.parked !== null) {
-      this.collision.removeCircle(this.parked);
+      this.collision.removeWall(this.parked);
       this.parked = null;
     }
     player.beginRide();
@@ -119,15 +135,18 @@ export class TortoiseRide {
 
   zones(): InteractZone[] {
     if (this.riding) return [];
+    const yaw = (TORTOISE_RIDE_PARK.facing * Math.PI) / 180;
+    const zoneX = TORTOISE_RIDE_PARK.x - Math.sin(yaw) * TORTOISE_RIDE_ZONE_SETBACK;
+    const zoneZ = TORTOISE_RIDE_PARK.z - Math.cos(yaw) * TORTOISE_RIDE_ZONE_SETBACK;
     return [
       pressZone(
         {
           id: 'reptile:tortoiseRide',
           label: 'Tortoise ride',
-          x: REPTILE_HOUSE_ORIGIN_X + TORTOISE_RIDE_PARK.x,
+          x: REPTILE_HOUSE_ORIGIN_X + zoneX,
           y: 1,
-          z: REPTILE_HOUSE_ORIGIN_Z + TORTOISE_RIDE_PARK.z,
-          pickRadius: TORTOISE_RIDE_PARK_RADIUS + 1.4,
+          z: REPTILE_HOUSE_ORIGIN_Z + zoneZ,
+          pickRadius: TORTOISE_RIDE_PICK_RADIUS,
           standX: REPTILE_HOUSE_ORIGIN_X + TORTOISE_RIDE_STAND.x,
           standZ: REPTILE_HOUSE_ORIGIN_Z + TORTOISE_RIDE_STAND.z,
           verb: 'Ride',
@@ -178,10 +197,13 @@ export class TortoiseRide {
     this.riding = false;
     this.along = 0;
     this.park();
-    this.parked = this.collision.addCircle(
-      REPTILE_HOUSE_ORIGIN_X + TORTOISE_RIDE_PARK.x,
-      REPTILE_HOUSE_ORIGIN_Z + TORTOISE_RIDE_PARK.z,
-      TORTOISE_RIDE_PARK_RADIUS,
+    const [front, back] = parkedCapsule();
+    this.parked = this.collision.addWall(
+      REPTILE_HOUSE_ORIGIN_X + front.x,
+      REPTILE_HOUSE_ORIGIN_Z + front.z,
+      REPTILE_HOUSE_ORIGIN_X + back.x,
+      REPTILE_HOUSE_ORIGIN_Z + back.z,
+      TORTOISE_RIDE_PARK_HALF_WIDTH,
     );
     this.parkedSolid.handle = this.parked;
     const player = this.player;

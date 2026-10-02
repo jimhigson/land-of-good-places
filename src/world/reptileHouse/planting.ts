@@ -84,11 +84,21 @@ const PALMS: readonly (readonly [x: number, z: number])[] = [
 /** Hop-on rocks and logs out on the floor, with plates — never within 2.5 m of an enclosure wall. */
 const FLOOR_ROCKS: readonly (readonly [name: string, x: number, z: number, yaw: number])[] = [
   ['rp-rock-a', 14.8, 16.3, 0.4],
-  ['rp-rock-b', -5.6, 16.6, 2.1],
+  // In the foyer's south-west corner, between the stall and the banana pot —
+  // the first cut put it at (-5.6, 16.6), inside the SW-E bed, buried under
+  // the bed's own discs with 1.95 m of air to the nearest reachable floor
+  // (the solidity review, 2 October 2026).
+  ['rp-rock-b', 0.5, 17, 2.1],
 ];
+/**
+ * The hop-on log, in the strip between the foyer's sweep and the SE island's
+ * kerb. It used to lie along the south wall at z 16.6, which is the Tortoise
+ * Ride's parking bay now; a jump from its 0.6 m top cannot reach the bed's
+ * 2.4 m collider top beside it.
+ */
 const FLOOR_LOG: readonly [LocalPoint, LocalPoint] = [
-  { x: 9.5, z: 16.6 },
-  { x: 13.5, z: 16.6 },
+  { x: 7, z: 9.7 },
+  { x: 11, z: 9.7 },
 ];
 
 const TUFT = markShared(new SphereGeometry(1, 8, 6));

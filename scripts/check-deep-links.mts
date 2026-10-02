@@ -49,6 +49,7 @@ import { chromium, type Page } from 'playwright-core';
 import { worldX, worldZ } from '../src/world/building/layout.ts';
 import {
   REPTILE_DOOR_BAND_OUTER,
+  REPTILE_DOORMAT_STANDOFF,
   REPTILE_FORECOURT_ORIGIN_X,
   REPTILE_FORECOURT_ORIGIN_Z,
   REPTILE_HOUSE_ORIGIN_X,
@@ -283,7 +284,7 @@ const CHECKS: DeepLinkCheck[] = [
       if (space !== SPACE_REPTILE_FORECOURT || s.inside !== false) {
         return { ok: false, detail: `expected to stand on the forecourt outside the door; she is in '${space}' (inside=${s.inside}) at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)})` };
       }
-      const off = Math.hypot(s.playerPos.x - REPTILE_FORECOURT_ORIGIN_X, s.playerPos.z - (REPTILE_FORECOURT_ORIGIN_Z + REPTILE_DOOR_BAND_OUTER + 1.2));
+      const off = Math.hypot(s.playerPos.x - REPTILE_FORECOURT_ORIGIN_X, s.playerPos.z - (REPTILE_FORECOURT_ORIGIN_Z + REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF));
       if (off > CASTLE_TOLERANCE) return { ok: false, detail: `on the forecourt but ${off.toFixed(1)} m from the doormat` };
       return { ok: true, detail: `on the forecourt doormat, ${off.toFixed(2)} m from the door band's outer edge` };
     },
