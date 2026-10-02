@@ -13,12 +13,16 @@ import { PALETTE } from '../../core/palette';
 import { markShared, solid, toonMaterial } from '../../art/style/materials';
 import { instancedPlant, reptilePlantRadius, reptilePlantTop, type PlantInstance } from '../../art/models/reptilePlantsAssets';
 import type { HallContext } from './context';
+import { grottoPoolSpot } from './exhibits';
 import {
   BEDS,
+  EXHIBIT_PLACEMENTS,
+  HIDDEN_BABY_SPOTS,
   REPTILE_BED_DISC_RADIUS,
   REPTILE_BED_TOP,
   REPTILE_HALF_Z,
   type BedSpec,
+  type ExhibitShape,
   type LocalPoint,
 } from './layout';
 import { segmentDistance } from './props';
@@ -33,14 +37,25 @@ import { segmentDistance } from './props';
  * view, ferns everywhere. Every species is one `InstancedMesh` plus one
  * outline (`instancedPlant`), so seventy ferns cost two draw calls.
  *
- * **A bed's collider is a tiling of discs, not a rectangle.** Discs of
- * `REPTILE_BED_DISC_RADIUS` are laid wherever the bed is at least that far
- * from its own edge, close enough that no gap between them is wider than a
- * child, so the whole polygon is solid with no hollow a jump could land her
- * in (CLAUDE.md: a rectangle is four walls round a hollow middle). Their top
- * is `REPTILE_BED_TOP`, above the jump apex, so a bed is a wall to feet on
- * the floor whatever is planted in it. Palm trunks get a disc of their own,
- * the hop-on logs and rocks their own wall or disc with a standing plate.
+ * **A bed's collider is a tiling of discs inside a ring of capsules, not a
+ * rectangle.** Discs of `REPTILE_BED_DISC_RADIUS` are laid wherever the bed
+ * is at least that far from its own edge, close enough that no gap between
+ * them is wider than a child, so the whole polygon is solid with no hollow a
+ * jump could land her in (CLAUDE.md: a rectangle is four walls round a hollow
+ * middle). Then one filled capsule per outline edge, inset half its own
+ * thickness, puts the solid boundary **on the drawn kerb**: the discs alone
+ * stop a radius short of every edge and leave every convex corner open — the
+ * solidity review (2 October 2026) walked a body 0.59 m into the NW island
+ * and 0.57 m into the SW bed, feet under the soil slab. Every top is
+ * `REPTILE_BED_TOP`, above the jump apex, so a bed is a wall to feet on the
+ * floor whatever is planted in it. Palm trunks get a disc of their own, the
+ * hop-on logs and rocks their own wall or disc with a standing plate.
+ *
+ * **Tall planting keeps the sightlines.** The spec's raked-theatre rule is
+ * applied by construction, not by discarding: the tall budget is sampled
+ * only south of the island beds' north three metres, never in the near-side
+ * beds, and never within {@link SIGHTLINE_CLEAR} of the line from a stand
+ * spot to what it looks at — an exhibit's middle, or hidden baby #2's pool.
  */
 
 const KERB_HEIGHT = 0.12;
@@ -50,6 +65,10 @@ const PLANT_Y = SOIL_HEIGHT - 0.04;
 const KERB_WIDTH = 0.18;
 /** Disc centres this far apart — well under two radii, so no slot between them. */
 const DISC_PITCH = 1.0;
+/** The edge capsules' half-thickness; their outer face is the drawn kerb. */
+const EDGE_HALF = 0.3;
+/** Tall plants stay this far off a stand spot's line of sight. */
+const SIGHTLINE_CLEAR = 1.2;
 
 /** Palms, by bed, at the spots the sightline rule allows. */
 const PALMS: readonly (readonly [x: number, z: number])[] = [
@@ -83,10 +102,11 @@ export class Planting {
     const monsteraLeaves: PlantInstance[] = [];
     const heliconias: PlantInstance[] = [];
     const tufts: { x: number; z: number; scale: number; colour: number }[] = [];
+    const sightlines = sightlinesToKeep();
 
     for (const bed of BEDS) {
       this.buildBed(bed);
-      this.plantBed(bed, ferns, bananas, monsteraLeaves, heliconias, tufts);
+      this.plantBed(bed, sightlines, ferns, bananas, monsteraLeaves, heliconias, tufts);
     }
 
     for (const [x, z] of PALMS) {
@@ -157,10 +177,41 @@ export class Planting {
     for (const [index, point] of kept.entries()) {
       this.ctx.props.disc(`bed '${bed.id}' disc ${index}`, point.x, point.z, radius, REPTILE_BED_TOP, { stand: false });
     }
+
+    // The edge: one capsule per outline edge, its axis `EDGE_HALF` inside the
+    // kerb so its outer face is the kerb. At a **convex** corner the capsule
+    // is also pulled back `EDGE_HALF` along its edge, or its round end would
+    // stand that far out into the path past the corner (the first cut did,
+    // and four path nodes lost 0.3–0.6 m of clearance to it); the corner then
+    // rounds off 0.12 m short of a right angle's point, which a 0.62 m body
+    // cannot reach into. At a reflex corner the overshoot lands inside the
+    // bed, so the capsule runs to the vertex and the two overlap.
+    const inward = windingInward(outline);
+    const count = outline.length;
+    for (let i = 0; i < count; i += 1) {
+      const a = outline[i]!;
+      const b = outline[(i + 1) % count]!;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      if (length < 0.05) continue;
+      const t = { x: (b.x - a.x) / length, z: (b.z - a.z) / length };
+      const n = edgeNormal(a, b, inward);
+      const backA = convexVertex(outline, i, inward) ? EDGE_HALF : 0;
+      const backB = convexVertex(outline, (i + 1) % count, inward) ? EDGE_HALF : 0;
+      if (length - backA - backB < 0.05) continue;
+      this.ctx.props.wall(
+        `bed '${bed.id}' edge ${i}`,
+        { x: a.x + n.x * EDGE_HALF + t.x * backA, z: a.z + n.z * EDGE_HALF + t.z * backA },
+        { x: b.x + n.x * EDGE_HALF - t.x * backB, z: b.z + n.z * EDGE_HALF - t.z * backB },
+        EDGE_HALF,
+        REPTILE_BED_TOP,
+        { stand: false },
+      );
+    }
   }
 
   private plantBed(
     bed: BedSpec,
+    sightlines: readonly (readonly [LocalPoint, LocalPoint])[],
     ferns: PlantInstance[],
     bananas: PlantInstance[],
     monsteras: PlantInstance[],
@@ -172,17 +223,20 @@ export class Planting {
     const bounds = polygonBounds(outline);
     const area = Math.max(1, (bounds.maxX - bounds.minX) * (bounds.maxZ - bounds.minZ)) * 0.6;
     const nearSide = bed.id === 'seCorner' || bed.id === 'swEast';
-    const islandNorth = bed.id === 'nwIsland' || bed.id === 'neIsland' ? bounds.minZ + 2 : -Infinity;
-    const sample = (margin: number): LocalPoint | null => {
+    // The island beds' north three metres stay low so the lit cases behind
+    // them stay in view (the spec's sightline rule); sampled, not discarded.
+    const tallMinZ = bed.id === 'nwIsland' || bed.id === 'neIsland' ? bounds.minZ + 3 : bounds.minZ;
+    const sample = (margin: number, minZ = bounds.minZ): LocalPoint | null => {
       for (let attempt = 0; attempt < 40; attempt += 1) {
-        const point = { x: rng.range(bounds.minX, bounds.maxX), z: rng.range(bounds.minZ, bounds.maxZ) };
+        const point = { x: rng.range(bounds.minX, bounds.maxX), z: rng.range(Math.max(minZ, bounds.minZ), bounds.maxZ) };
         if (!pointInPolygon(point, outline)) continue;
         if (distanceToOutline(point, outline) < margin) continue;
         return point;
       }
       return null;
     };
-    const tall = (point: LocalPoint): boolean => !nearSide && point.z > islandNorth + 1;
+    const offSightlines = (point: LocalPoint): boolean =>
+      sightlines.every(([from, to]) => segmentDistance(from, to, point) >= SIGHTLINE_CLEAR);
 
     const fernCount = Math.round(area / 9) + 2;
     for (let i = 0; i < fernCount; i += 1) {
@@ -197,10 +251,17 @@ export class Planting {
       if (!at) continue;
       tufts.push({ x: at.x, z: at.z, scale: rng.range(0.14, 0.3), colour: rng.chance(0.5) ? PALETTE.leafLight : PALETTE.leafMid });
     }
-    const tallCount = nearSide ? 0 : Math.round(area / 22) + 1;
-    for (let i = 0; i < tallCount; i += 1) {
-      const at = sample(0.8);
-      if (!at || !tall(at)) continue;
+    // About one tall clump per eight square metres of bed — the spec's 36
+    // bananas, monsteras and heliconias across the hall — and a rejected
+    // sample is retried, not dropped: the first cut dropped every rejection
+    // and planted a third of the spec, so the beds read as flat brown
+    // rectangles (the brief review, 2 October 2026).
+    const tallCount = nearSide ? 0 : Math.round(area / 8) + 1;
+    let planted = 0;
+    for (let attempt = 0; attempt < tallCount * 8 && planted < tallCount; attempt += 1) {
+      const at = sample(0.8, tallMinZ);
+      if (!at || !offSightlines(at)) continue;
+      planted += 1;
       const kind = rng.int(0, 2);
       if (kind === 0) {
         for (let k = 0; k < 3; k += 1) bananas.push({ x: at.x, y: PLANT_Y, z: at.z, yaw: (k / 3) * Math.PI * 2 + rng.range(0, 1), scale: rng.range(0.9, 1.2) });
@@ -325,11 +386,7 @@ export function distanceToOutline(point: LocalPoint, polygon: readonly LocalPoin
  */
 function insetPolygon(points: readonly LocalPoint[], by: number): LocalPoint[] {
   const n = points.length;
-  const signedArea = points.reduce((sum, p, i) => {
-    const q = points[(i + 1) % n]!;
-    return sum + (p.x * q.z - q.x * p.z);
-  }, 0);
-  const inward = signedArea > 0 ? -1 : 1;
+  const inward = windingInward(points);
   return points.map((p, i) => {
     const prev = points[(i - 1 + n) % n]!;
     const next = points[(i + 1) % n]!;
@@ -339,6 +396,43 @@ function insetPolygon(points: readonly LocalPoint[], by: number): LocalPoint[] {
     const scale = by / Math.max(0.3, 1 + dot);
     return { x: p.x + (n1.x + n2.x) * scale, z: p.z + (n1.z + n2.z) * scale };
   });
+}
+
+function signedArea(points: readonly LocalPoint[]): number {
+  const n = points.length;
+  return points.reduce((sum, p, i) => {
+    const q = points[(i + 1) % n]!;
+    return sum + (p.x * q.z - q.x * p.z);
+  }, 0);
+}
+
+/** +1 or −1: which side of each edge the polygon's inside is on, from its signed area. */
+function windingInward(points: readonly LocalPoint[]): number {
+  return signedArea(points) > 0 ? -1 : 1;
+}
+
+/** Whether vertex `i` turns the polygon's own way (interior angle under 180°). */
+function convexVertex(points: readonly LocalPoint[], i: number, inward: number): boolean {
+  const n = points.length;
+  const p = points[(i - 1 + n) % n]!;
+  const c = points[i]!;
+  const q = points[(i + 1) % n]!;
+  const cross = (c.x - p.x) * (q.z - c.z) - (c.z - p.z) * (q.x - c.x);
+  // `inward` is −1 for a positive signed area, so a positive cross is convex there.
+  return cross * -inward > 0;
+}
+
+/**
+ * Every line of sight tall planting must stay off: each exhibit's stand spot
+ * to the middle of what it looks at, and hidden baby #2's stand to the grotto
+ * pool. The other hidden babies' lines cross no bed.
+ */
+function sightlinesToKeep(): (readonly [LocalPoint, LocalPoint])[] {
+  const centre = (shape: ExhibitShape): LocalPoint =>
+    shape.kind === 'disc' ? shape.centre : { x: (shape.a.x + shape.b.x) / 2, z: (shape.a.z + shape.b.z) / 2 };
+  const lines: (readonly [LocalPoint, LocalPoint])[] = EXHIBIT_PLACEMENTS.map((exhibit) => [exhibit.stand, centre(exhibit.shape)] as const);
+  lines.push([HIDDEN_BABY_SPOTS[1]!, grottoPoolSpot()]);
+  return lines;
 }
 
 function edgeNormal(a: LocalPoint, b: LocalPoint, inward: number): LocalPoint {

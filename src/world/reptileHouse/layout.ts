@@ -440,6 +440,20 @@ function arc(r: number, fromDeg: number, toDeg: number, steps: number): LocalPoi
 const RING_OUTER = 7.6;
 
 /**
+ * The Hollow Log lies across the Log Walk with its bore walls on the walk's
+ * edges (|z| = `REPTILE_LOG_INNER_RADIUS`) and its bark out to
+ * `REPTILE_LOG_OUTER_RADIUS`, so the two beds either side are notched round
+ * it: along the log's length their kerb stops here, **inside the log's wall**
+ * — buried in bark rather than lying in the bore wall's own plane, which is
+ * where the first cut put it and where `check:coplanar` found 0.9 m² of kerb
+ * face fighting the bore (2 October 2026). The notch runs 0.3 m past each end
+ * of the log so the kerb's step faces stand clear of the log's end caps.
+ */
+const LOG_NOTCH_Z = REPTILE_LOG_OUTER_RADIUS - 0.1;
+const LOG_NOTCH_WEST = REPTILE_LOG_CENTRE_X - REPTILE_LOG_LENGTH / 2 - 0.3;
+const LOG_NOTCH_EAST = REPTILE_LOG_CENTRE_X + REPTILE_LOG_LENGTH / 2 + 0.3;
+
+/**
  * Every bed's outline, each edge lying exactly on the path edge it faces, so
  * the paths keep the widths the `PATHS` table promises — the width probe in
  * `scripts/check-reptile-house.mts` is what holds them to it.
@@ -453,7 +467,11 @@ export const BEDS: readonly BedSpec[] = [
       { x: -17.5, z: -11 },
       { x: -1.8, z: -11 },
       ...arc(RING_OUTER, 193.7, 257.5, 6),
-      { x: -17.5, z: -1.65 },
+      { x: LOG_NOTCH_EAST, z: -REPTILE_LOG_INNER_RADIUS },
+      { x: LOG_NOTCH_EAST, z: -LOG_NOTCH_Z },
+      { x: LOG_NOTCH_WEST, z: -LOG_NOTCH_Z },
+      { x: LOG_NOTCH_WEST, z: -REPTILE_LOG_INNER_RADIUS },
+      { x: -17.5, z: -REPTILE_LOG_INNER_RADIUS },
     ],
   },
   {
@@ -473,7 +491,11 @@ export const BEDS: readonly BedSpec[] = [
     // ring; the Frog Jar stands at its south-east corner.
     id: 'swBed',
     outline: [
-      { x: -17.5, z: 1.65 },
+      { x: -17.5, z: REPTILE_LOG_INNER_RADIUS },
+      { x: LOG_NOTCH_WEST, z: REPTILE_LOG_INNER_RADIUS },
+      { x: LOG_NOTCH_WEST, z: LOG_NOTCH_Z },
+      { x: LOG_NOTCH_EAST, z: LOG_NOTCH_Z },
+      { x: LOG_NOTCH_EAST, z: REPTILE_LOG_INNER_RADIUS },
       ...arc(RING_OUTER, 282.5, 307.8, 4),
       { x: -6, z: 8.95 },
       { x: -17.5, z: 8.95 },
