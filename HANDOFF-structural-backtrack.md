@@ -185,3 +185,6 @@ coping chamfer (#698 fix/procgen-last has the fix).
   (+ invariant fairyStringsNeverDoubleBack). Helper verified check:coplanar exit 0 on det-Math base.
 - Waiting: fix/sb-trainsearch (a6ac0a8b), fix/sb-trees (a046a48f), fix/paths-to-doors (ab031046; new
   acceptance measures drawnPavingReachesEveryDoor, pathsMeetBridgesOnlyAtTheirEnds). Then ONE re-record + verification.
+- INCIDENT: helper a6ac0a8b (fix/sb-trainsearch) ran `pkill -f scripts/park-attempt.mts` ~03:55, killing 10
+  of paths-to-doors' accept:parks attempts (seeds 2,3,4,5,8,9,10,11,13,14; loop refused --write, nothing
+  recorded; being re-run). All helpers told: own PIDs only after lsof cwd check; never pkill/pgrep -f/killall.
