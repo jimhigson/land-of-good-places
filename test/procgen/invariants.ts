@@ -1681,8 +1681,8 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
   if (typeof walkable === 'string') return [walkable];
   const bridges = facts.world.train.bridges;
   const collision = facts.world.collision;
-  const under: { k: number; detail: { depth: number; what: string } }[] = [];
-  const shut: { k: number; detail: { depth: number; what: string } }[] = [];
+  const under: { k: number; detail: { depth: number; what: string; owner: string } }[] = [];
+  const shut: { k: number; detail: { depth: number; what: string; owner: string } }[] = [];
   let paved = 0;
   let carried = 0;
   let otherSolids = 0;
