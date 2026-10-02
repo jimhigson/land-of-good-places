@@ -73,7 +73,36 @@ interface CheckVerdict {
  * turns — so a different restart can pass it. Measured on seed 5 restart 0:
  * well under a second together, against a ~25 s park build.
  */
-const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [string, (park: HeadlessPark) => Promise<CheckVerdict>])[] = [
+/** Which park an in-process measure is looking at, for the ones keyed on the seed. */
+interface AttemptPark {
+  readonly seed: number;
+  readonly restart: number;
+}
+
+const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
+  string,
+  (park: HeadlessPark, which: AttemptPark) => Promise<CheckVerdict>,
+])[] = [
+  [
+    'check:every-seed-builds',
+    async (_park, { seed, restart }) => {
+      const { LAYOUT_TRACE } = await import('../src/world/parkLayout.ts');
+      const { builtWellProblems, falseRefusalProblem, falseRefusalsOf, layoutTraceCounts } = await import(
+        './lib/builtWell.mts'
+      );
+      const counts = layoutTraceCounts(LAYOUT_TRACE);
+      // A false refusal is the rung's instrument being wrong: a void, never a restart.
+      // Proving one costs a second build, so it is asked only when the rung fired.
+      const falseRefusal =
+        counts.rungFired > 0 ? falseRefusalProblem(seed, await falseRefusalsOf(seed, restart)) : null;
+      // Built well is judged against the seed's own record, and only seeds the
+      // check sweeps have one: an off-pool seed is not this check's to judge.
+      const { DECISION_ZERO_BASELINE, UNBUILT_BASELINE } = await import('./every-seed-builds-baseline.mts');
+      const swept = DECISION_ZERO_BASELINE[seed] !== undefined || UNBUILT_BASELINE[seed] !== undefined;
+      const faults = swept ? builtWellProblems(seed, counts, UNBUILT_BASELINE[seed] !== undefined) : [];
+      return { faults, voids: falseRefusal ? [falseRefusal] : [] };
+    },
+  ],
   [
     'check:entrance-road',
     async (park) => {
@@ -213,7 +242,7 @@ if (facts) {
   for (const [name, measure] of ACCEPTANCE_CHECK_MEASURES) {
     measuresAsked += 1;
     try {
-      const { faults, voids } = await measure(facts.headless);
+      const { faults, voids } = await measure(facts.headless, { seed, restart });
       if (voids.length > 0) {
         broken ??= `${name}: ${voids[0]}`;
         failures.push({ measure: name, count: voids.length, first: voids.slice(0, FIRST) });

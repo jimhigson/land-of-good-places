@@ -71,6 +71,12 @@ import { cpus } from 'node:os';
 import { promisify } from 'node:util';
 
 import { DECISION_ZERO_BASELINE, UNBUILT_BASELINE } from './every-seed-builds-baseline.mts';
+import {
+  builtWellProblems,
+  falseRefusalProblem,
+  falseRefusalsOf,
+  layoutTraceCounts,
+} from './lib/builtWell.mts';
 
 const run = promisify(execFile);
 
@@ -134,14 +140,13 @@ async function buildSeed(seed: number): Promise<SeedResult> {
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.startsWith('layout-trace:'));
-  const solved = trace.map((l) => /decision-zero-reached=(\d+)/.exec(l)).find((m) => m);
-  const fired = trace.map((l) => /rung-1-fired=(\d+)/.exec(l)).find((m) => m);
+  const counts = layoutTraceCounts(trace);
   const refusal = built ? null : classify(all);
   // The guard: where the rung fired, prove each refusal against the built
   // park (a second solve with the rung disarmed; `check:park` reports
   // `layout.falseRefusal` for any door the built park reaches). Cheap when
   // nothing fired, which is every seed today; thorough when something did.
-  const rungFired = fired ? Number(fired[1]) : 0;
+  const rungFired = counts.rungFired;
   const acceptedRestart = /accepted at restart (\d+)/.exec(all)?.[1] ?? '0';
   const falseRefusals = rungFired > 0 ? await falseRefusalsOf(seed, acceptedRestart) : 0;
   return {
@@ -149,35 +154,13 @@ async function buildSeed(seed: number): Promise<SeedResult> {
     built,
     klass: refusal?.klass ?? '',
     note: built ? summarise(all) : (refusal?.note ?? ''),
-    decisionZero: solved ? Number(solved[1]) : NaN,
+    decisionZero: counts.decisionZero,
     restart: Number(/accepted at restart (\d+)/.exec(all)?.[1] ?? NaN),
     rungFired,
     falseRefusals,
     trace,
     seconds: Math.round((performance.now() - begun) / 100) / 10,
   };
-}
-
-/** `check:park` with the rung disarmed: how many refusals the built park contradicts. */
-/** The same accepted restart, rebuilt with the rung disarmed — never a new acceptance run under a different rule. */
-async function falseRefusalsOf(seed: number, restart: string): Promise<number> {
-  const args = [
-    '--no-warnings',
-    '--import',
-    './scripts/ts-extension-resolver-register.mjs',
-    'scripts/check-park.mts',
-  ];
-  const env = { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: restart, LGP_LAYOUT_RUNG: 'off' };
-  let all = '';
-  try {
-    const result = await run(process.execPath, args, { env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-    all = `${result.stdout}\n${result.stderr}`;
-  } catch (error) {
-    const failed = error as { stdout?: string; stderr?: string };
-    all = `${failed.stdout ?? ''}\n${failed.stderr ?? ''}`;
-  }
-  const line = all.split('\n').map((l) => l.trim()).find((l) => /^layout\.falseRefusal:\s*\d+/.test(l));
-  return line ? Number(/(\d+)/.exec(line)?.[1] ?? 0) : 0;
 }
 
 function summarise(output: string): string {
@@ -345,20 +328,12 @@ for (const r of results) {
   if (recorded !== undefined) {
     loose.push(`BASELINE LOOSE: seed ${r.seed} now BUILDS (was [${recorded}]) — re-take the baseline`);
   }
-  if (r.falseRefusals > 0) {
-    problems.push(
-      `FALSE REFUSAL: seed ${r.seed} — the layout rung refused ${r.falseRefusals} door(s) the built park reaches; ` +
-        'it moved a plot to satisfy a measurement error (see check:park with LGP_LAYOUT_RUNG=off)',
-    );
-  }
+  const falseRefusal = falseRefusalProblem(r.seed, r.falseRefusals);
+  if (falseRefusal) problems.push(falseRefusal);
+  // Built well? `lib/builtWell.mts`, one owner with the acceptance loop.
+  problems.push(...builtWellProblems(r.seed, r, recorded !== undefined));
   const zero = DECISION_ZERO_BASELINE[r.seed];
-  if (!Number.isFinite(r.decisionZero)) {
-    problems.push(`UNMEASURED: seed ${r.seed} built but printed no layout-trace line`);
-  } else if (zero === undefined) {
-    if (recorded === undefined) problems.push(`UNMEASURED: seed ${r.seed} has no decision-zero baseline — re-take`);
-  } else if (r.decisionZero > zero) {
-    problems.push(`WORSE: seed ${r.seed} reached decision zero ${r.decisionZero} time(s), baseline ${zero}`);
-  } else if (r.decisionZero < zero) {
+  if (zero !== undefined && Number.isFinite(r.decisionZero) && r.decisionZero < zero) {
     loose.push(`BASELINE LOOSE: seed ${r.seed} reached decision zero ${r.decisionZero} time(s), baseline ${zero}`);
   }
 }
