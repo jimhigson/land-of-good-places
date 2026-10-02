@@ -20,7 +20,7 @@ import { BOUNDARY_WALL_COLLISION_HALF, PARK_BOUNDARY } from './boundary';
 import { ENTRANCE_GATE_X, ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from './entrance/layout';
 import { CollisionWorld } from './Collision';
 import { NAV_CELL, NavGrid, STAND_SEARCH_REACH, type ReachSet } from './NavGrid';
-import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
+import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS, SPUR_PAVED_REACH } from '../core/constants';
 import { ARRIVAL_EXEMPT_NEAR } from './streetRules';
 import type { AnchorFootprint } from './anchors';
 
@@ -306,7 +306,7 @@ export const DOORMAT_LEAD = 3.5;
  * from it, and its spur wandered along the wall to get round, laying paving
  * under and over it (`noDrawnPavingUnderASolid`, `noDrawnPavingOutsideThePark`).
  */
-const DOORMAT_WALL_ROOM = 2.8 / 2 + PATH_KERB_OVERHANG + BOUNDARY_WALL_COLLISION_HALF + 0.1;
+const DOORMAT_WALL_ROOM = SPUR_PAVED_REACH + BOUNDARY_WALL_COLLISION_HALF + 0.1;
 
 /** An entry's arrival lane: from its doormat out along its facing to the lead. */
 type Lane = readonly [readonly [number, number], readonly [number, number]];
@@ -330,10 +330,8 @@ function laneOf(entry: PlacedEntry): Lane {
   ];
 }
 
-/** The widest spur's paved reach from its centre line: half its width plus the kerb. */
-const LANE_PAVED_REACH = 2.8 / 2 + PATH_KERB_OVERHANG;
 
-/** Does a lane's paving ({@link LANE_PAVED_REACH} either side) reach onto a footprint placed at (px, pz)? */
+/** Does a lane's paving ({@link SPUR_PAVED_REACH} either side) reach onto a footprint placed at (px, pz)? */
 function laneMeetsFootprint(lane: Lane, footprint: AnchorFootprint, px: number, pz: number): boolean {
   const [[ax, az], [bx, bz]] = lane;
   const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.5));
@@ -352,7 +350,7 @@ function laneMeetsFootprint(lane: Lane, footprint: AnchorFootprint, px: number, 
         distance = Math.min(distance, Math.hypot(x - cx, z - cz) - (footprint.corners?.radius ?? 0));
       }
     }
-    if (distance < LANE_PAVED_REACH) return true;
+    if (distance < SPUR_PAVED_REACH) return true;
   }
   return false;
 }

@@ -20,6 +20,7 @@ import { cameraOffset } from '../core/cameraRig';
 import { DEG } from '../core/mathUtils';
 import {
   curvePoints,
+  distanceToBuiltSolids,
   GATE_CORRIDOR_START_Z,
   JUNCTION_SNAP,
   pathDivisions,
@@ -30,7 +31,6 @@ import {
   type RouteDefinition,
 } from './paths';
 import { PARK_LAYOUT, doorApronOf } from './parkLayout';
-import { distanceToBoothBodies } from '../minigames/stallPlacement';
 
 /**
  * **The one Catmull-Rom every consumer of a route's drawn shape builds.**
@@ -854,7 +854,8 @@ function clearOfTheGateway(x: number, z: number, radius: number): boolean {
 }
 
 /**
- * **A junction apron that keeps out from under the booths.** A spur and a
+ * **A junction apron that keeps out from under the booths** (and the
+ * buildings: `paths.ts`'s `distanceToBuiltSolids`). A spur and a
  * connector that both end on a stall's stand point meet there, and the disc
  * that paves their meeting reached 1.73 m (half a path plus the kerb) from a
  * stand point that stands 1.45 m from the booth's front wall — 0.2–0.3 m² of
@@ -864,7 +865,7 @@ function clearOfTheGateway(x: number, z: number, radius: number): boolean {
  * stands), or not laid at all if that would leave less than half a path.
  */
 function clearOfBooths(apron: JunctionApron): JunctionApron | null {
-  const room = distanceToBoothBodies(apron.x, apron.z);
+  const room = distanceToBuiltSolids(apron.x, apron.z);
   const radius = Math.min(apron.radius, room - PATH_KERB_OVERHANG - BOOTH_APRON_GAP);
   if (radius >= apron.radius) return apron;
   return radius >= apron.radius / 2 ? { ...apron, radius } : null;

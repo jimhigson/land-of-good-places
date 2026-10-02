@@ -2,7 +2,20 @@ import { CatmullRomCurve3, Vector3 } from 'three';
 import type { AnchorFootprint } from './anchors';
 import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
-import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
+import {
+  BUILDING_CENTRE_NUDGE,
+  BUILDING_HALF_X,
+  BUILDING_HALF_Z,
+  BUILDING_WALL_THICKNESS,
+  CASTLE_TURRET_BASE_RADIUS,
+  CASTLE_TURRET_CORNERS,
+  MAIN_LOOP_WIDTH,
+  PATH_KERB_OVERHANG,
+  PLAYER_RADIUS,
+  SPUR_PAVED_REACH,
+  WIDEST_SPUR_WIDTH,
+} from '../core/constants';
+import { TOWER_JAMB_HALF_THICKNESS, TOWER_JAMB_REACH } from './hotel/towerDimensions';
 import { ANCHORS } from './anchors';
 import { DOORMAT_LEAD, PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong, entranceFacing, hasOwnDoor } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
@@ -1926,9 +1939,6 @@ function boundaryDistanceCached(x: number, z: number): number {
  * own endpoint exemption encodes), the same clearance from the boundary,
  * and clear of every arch foot.
  */
-/** How far a street's drawn paving reaches from its centre line: the widest spur's half-width plus its kerb. */
-const NEIGHBOUR_PLOT_PAVED_REACH = 2.8 / 2 + PATH_KERB_OVERHANG;
-
 function streetSegmentClear(
   ax: number,
   az: number,
@@ -1974,7 +1984,7 @@ function streetSegmentClear(
     }
     // A destination's own frontage may be walked along, never through.
     for (const plot of relaxed) {
-      if (distanceToPlotEdge(plot, x, z) < (plot === own ? 0.3 : NEIGHBOUR_PLOT_PAVED_REACH)) return false;
+      if (distanceToPlotEdge(plot, x, z) < (plot === own ? 0.3 : SPUR_PAVED_REACH)) return false;
     }
     if (boundaryDistanceCached(x, z) < boundaryMargin) return false;
     for (const foot of archFootBlockers()) {
@@ -4991,10 +5001,10 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
     // so the finished plan is judged whole, on the curve that will be drawn,
     // and the continuous router is asked instead. Whichever stands on less
     // bridge is kept, so a spur the lattice served is never left worse off.
-    // **Nor under a booth.** A street plan whose paving reaches a booth's body
-    // is not the plan: the continuous router, which screens every candidate
-    // for booths, is asked instead.
-    if (streets && !routeClearsBooths([...streets, ...(lead.length ? [[ex, ez] as const] : [])], width)) {
+    // **Nor under a booth or a building.** A street plan whose paving reaches
+    // one is not the plan: the continuous router, which screens every
+    // candidate the same way, is asked instead.
+    if (streets && !routeClearsSolids([...streets, ...(lead.length ? [[ex, ez] as const] : [])], width)) {
       restoreLatticeState(beforeStreets);
       streets = null;
       fallback = fallbackSpurRoute(network(), routeTarget, spurTail, width);
@@ -5103,7 +5113,7 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       ez,
       anchor.position[0],
       anchor.position[1],
-      anchor.id === 'building' ? 2.8 : 2.6,
+      anchor.id === 'building' ? WIDEST_SPUR_WIDTH : 2.6,
     );
     yield (progress += 1);
   }
@@ -5973,7 +5983,7 @@ function* addInterconnects(
         return "comes down on the finish rainbow's feet";
       }
       // Nor does it lay its paving under a booth (see {@link routeClearsBooths}).
-      if (!routeClearsBooths(points, CONNECTOR_WIDTH)) {
+      if (!routeClearsSolids(points, CONNECTOR_WIDTH)) {
         return 'runs under a booth';
       }
       // **An optional connector never stands on a bridge it does not cross.**
@@ -6027,26 +6037,62 @@ function* addInterconnects(
  * ({@link fallbackSpurRoute}).
  */
 /**
- * **A route whose drawn paving keeps off every booth.** Asked of the curve that
- * will be drawn: no sample's ribbon — half its width plus the kerb — may reach
- * a booth's body (`distanceToBoothBodies`, the booths' own boxes and walls).
- * Samples within half a width of an end are exempt: that is the route arriving
- * at a stand point square in front of a counter, whose paving stops there.
- * Seeds 7, 11 and 12 (2 Oct 2026) laid 0.2–5 m² of paving under booths —
- * spurs passing a neighbour's booth, and the ferris kiosk's spur arriving
- * from behind its own (`noDrawnPavingUnderASolid`).
+ * **How far (x, z) stands from the nearest built solid** a path may not run
+ * under — every booth's body (`distanceToBoothBodies`), the hotel tower's
+ * shell out to the ends of its doorway jambs, and the castle's walls and corner
+ * turrets — negative inside one. Plan-time owners of the shapes the colliders
+ * are built from; `test/procgen`'s `noDrawnPavingUnderASolid` measures the
+ * built park against the colliders themselves.
  */
-function routeClearsBooths(points: readonly (readonly [number, number])[], width: number): boolean {
+export function distanceToBuiltSolids(x: number, z: number): number {
+  let best = distanceToBoothBodies(x, z);
+  const hotel = PARK_LAYOUT.entries.get('hotel');
+  if (hotel) best = Math.min(best, Math.hypot(x - hotel.x, z - hotel.z) - (TOWER_JAMB_REACH + TOWER_JAMB_HALF_THICKNESS));
+  const castle = PARK_LAYOUT.entries.get('building');
+  if (castle) {
+    const length = Math.hypot(castle.x, castle.z) || 1;
+    const cx = castle.x - (castle.x / length) * BUILDING_CENTRE_NUDGE;
+    const cz = castle.z - (castle.z / length) * BUILDING_CENTRE_NUDGE;
+    const dx = Math.abs(x - cx) - (BUILDING_HALF_X + BUILDING_WALL_THICKNESS);
+    const dz = Math.abs(z - cz) - (BUILDING_HALF_Z + BUILDING_WALL_THICKNESS);
+    const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
+    best = Math.min(best, outside > 0 ? outside : Math.max(dx, dz));
+    for (const [tx, tz] of CASTLE_TURRET_CORNERS) {
+      best = Math.min(best, Math.hypot(x - cx - tx, z - cz - tz) - CASTLE_TURRET_BASE_RADIUS);
+    }
+  }
+  return best;
+}
+
+/**
+ * **A route whose drawn paving keeps off every built solid**
+ * ({@link distanceToBuiltSolids}). Asked of the curve that will be drawn, one
+ * cross-section per sample: the centre and four points out to half the width
+ * plus the kerb either side, square to the curve. A route arriving square at a
+ * stall's counter, ending 1.45 m from it, lays nothing under it; one arriving
+ * along the counter's face lays its kerb 0.3 m under it — the cross-section
+ * tells the two apart where a disc round each sample cannot. Seeds 3, 7, 11
+ * and 12 (2 Oct 2026) laid 0.2–5 m² of paving under booths and the hotel's
+ * jambs (`noDrawnPavingUnderASolid`).
+ */
+function routeClearsSolids(points: readonly (readonly [number, number])[], width: number): boolean {
   if (points.length < 2) return true;
   const reach = width / 2 + PATH_KERB_OVERHANG;
-  const first = points[0] as readonly [number, number];
-  const last = points[points.length - 1] as readonly [number, number];
-  const curve = routeCurve({ name: 'booth-screen', width, closed: false, points });
+  const curve = routeCurve({ name: 'solid-screen', width, closed: false, points });
   if (curve.points.length < 2) return true;
-  for (const p of curvePoints(curve, pathDivisions(curve))) {
-    if (Math.hypot(p.x - first[0], p.z - first[1]) < width / 2) continue;
-    if (Math.hypot(p.x - last[0], p.z - last[1]) < width / 2) continue;
-    if (distanceToBoothBodies(p.x, p.z) < reach) return false;
+  const drawn = curvePoints(curve, pathDivisions(curve));
+  for (let i = 0; i < drawn.length; i += 1) {
+    const here = drawn[i] as { x: number; z: number };
+    const before = drawn[Math.max(0, i - 1)] as { x: number; z: number };
+    const after = drawn[Math.min(drawn.length - 1, i + 1)] as { x: number; z: number };
+    const tx = after.x - before.x;
+    const tz = after.z - before.z;
+    const t = Math.hypot(tx, tz);
+    const nx = t > 1e-9 ? -tz / t : 0;
+    const nz = t > 1e-9 ? tx / t : 0;
+    for (const k of [0, -1, -0.5, 0.5, 1]) {
+      if (distanceToBuiltSolids(here.x + nx * reach * k, here.z + nz * reach * k) < 0) return false;
+    }
   }
   return true;
 }
@@ -7126,7 +7172,7 @@ function fallbackSpurRoute(
     restoreLatticeState(before);
     const points = snapRunsToLattice(routeLeg(candidate, target, width));
     if (!routeClearsArchFeet([...points, ...extra], width)) continue;
-    if (!routeClearsBooths([...points, ...extra], width)) continue;
+    if (!routeClearsSolids([...points, ...extra], width)) continue;
     const onABridge = drawnMetresOnABridgeUncarried([...points, ...extra], width);
     if (onABridge > 0) {
       if (!leastOnABridge || onABridge < leastOnABridge.metres) {

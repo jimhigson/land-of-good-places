@@ -445,6 +445,17 @@ export const PATH_KERB_LIFT = 0.03;
  * edge of the thing carrying it. */
 export const PATH_KERB_OVERHANG = 0.425;
 
+/** The widest spur a destination is given (the castle's), metres. */
+export const WIDEST_SPUR_WIDTH = 2.8;
+
+/**
+ * **How far a spur's drawn paving reaches from its centre line**: half the
+ * widest spur plus its kerb. What a path's centre has to keep from a booth, a
+ * building, a neighbour's plot or the boundary wall for its paving to stay
+ * off them (`test/procgen`'s `noDrawnPavingUnderASolid`).
+ */
+export const SPUR_PAVED_REACH = WIDEST_SPUR_WIDTH / 2 + PATH_KERB_OVERHANG;
+
 /**
  * **The main loop's drawn width — the one owner.**
  *
