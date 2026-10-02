@@ -134,7 +134,7 @@ import {
 } from '../../src/world/entrance/gateArch.ts';
 import { altitudeAt, terrainHeight, unplaceFromSphere, upAt } from '../../src/world/terrain.ts';
 // Leaf module (three types and `terrain.ts` only) — see its own header.
-import { cellCentre, cellOf, distanceToCell, floodPaving, isPaved, rasterisePaving, PAVING_CELL } from './pavingReach.ts';
+import { cellCentre, cellOf, distanceToCell, floodPaving, isPaved, rasterisePaving, PAVING_CELL, type PavingRaster } from './pavingReach.ts';
 // The road corridor's measurement, shared with `check:ground-claims` so the two
 // sites that ask "is the claim the road?" cannot answer it differently. Pure
 // geometry over what it is handed — nothing seed-dependent is imported here.
@@ -1442,7 +1442,10 @@ function drawnDoorstep(facts: ParkFacts, band: PortalBand, meshName: string): re
  * `path-kerb`, as built and draped, is rasterised in plan
  * ({@link rasterisePaving}) and flooded from the paving at the gate; two cells
  * join only where their paving is within a child's step-up of each other, so a
- * deck does not join the lawn under it. Then every destination must have that
+ * deck does not join the lawn under it, and only through paving a child can
+ * stand on ({@link walkablePaving}) — a ribbon that reaches the castle's steps
+ * by running under the castle is continuous in plan and no path on the ground
+ * (seed 5, 2 Oct 2026: 24 m of it, passed by the plan-only flood). Then every destination must have that
  * gate-joined paving within her own radius ({@link PLAYER_RADIUS}) — she can
  * stand on the doormat with a foot on the path:
  *
@@ -1472,7 +1475,12 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
   if (!gate) return ['the path graph has no gate node to flood the paving from'];
   const atGate = distanceToCell(raster, gate.x, gate.z, PLAYER_RADIUS, (k) => isPaved(raster, k));
   if (!atGate.at) return [`no drawn paving within ${PLAYER_RADIUS} m of the gate at ${fmt([gate.x, gate.z])}`];
-  const joined = floodPaving(raster, cellOf(raster, atGate.at[0], atGate.at[1]), BUILDING_STEP_UP);
+  // Joined only through paving a child can stand on: a path that reaches a
+  // door by running under the castle (seed 5, 2 Oct 2026, 24 m of it) is a
+  // continuous ribbon in plan and no path at all on the ground.
+  const walkable = walkablePaving(facts, meshes, raster);
+  if (typeof walkable === 'string') return [walkable];
+  const joined = floodPaving(raster, cellOf(raster, atGate.at[0], atGate.at[1]), BUILDING_STEP_UP, walkable.allowed);
 
   const doors: { id: string; at: readonly [number, number] | null }[] = [];
   // The two doors that open onto the park, each with the mesh that is its front.
@@ -1515,7 +1523,8 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
   }
   process.stderr.write(
     `  drawnPavingReachesEveryDoor: ${doors.length} doormats (${bands.length} built doors) against ` +
-      `${raster.triangles} paving triangles on seed ${facts.seed}; worst ${worst.toFixed(2)} m\n`,
+      `${raster.triangles} paving triangles on seed ${facts.seed}, joined only through ground a child can reach ` +
+      `(${walkable.decorativeTriangles} triangle(s) of declared-unwalked door apron allowed); worst ${worst.toFixed(2)} m\n`,
   );
   if (doors.length === 0) complaints.push('no doormat was measured — this asserted nothing');
   return complaints;
@@ -1531,51 +1540,31 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
 const WALKABLE_PAVING_REACH = PLAYER_RADIUS + 0.5;
 
 /**
- * **Every metre of the drawn walking paths is ground a child can actually walk
- * on** — none of it laid under a building, inside a solid, or in a sealed
- * pocket.
- *
- * {@link drawnPavingReachesEveryDoor} floods the paving in plan, so it cannot
- * tell a path that goes *round* the castle to its front door from one that
- * goes *through* it: both are continuous ribbons. On 2 October 2026 the first
- * fix for the castle's door did exactly that on seed 5 — the spur ran 24 m
- * straight under the castle (its doormat sat inside the castle's own plot, so
- * the street router gave up and the fallback router went through) and came out
- * at the front steps, and the flood passed it. This asks the other half: every
- * cell of walkable paving must lie within {@link WALKABLE_PAVING_REACH} of a
- * cell of the real nav lattice that the entrance's flood reaches
- * ({@link ParkFacts.reachableGroundCells}).
- *
- * Paving the generator draws but declares unwalked — a door apron behind its
- * trigger (`pathGraph.ts`'s `doorAprons`, the hotel's recess) — is left out,
- * and how much was left out is said on every run.
+ * **Which paved cells a child can actually stand on**: within
+ * {@link WALKABLE_PAVING_REACH} of a nav-lattice cell the entrance's flood
+ * reaches ({@link ParkFacts.reachableGroundCells}) — or paving the generator
+ * draws but declares unwalked (a door apron behind its trigger, the hotel's
+ * recess: `pathGraph.ts`'s `decorativeOwners`). Paving under a building, inside
+ * a solid or in a sealed pocket is neither.
  */
-const everyDrawnPathCanBeWalked: Invariant = (facts) => {
-  const meshes: Mesh[] = [];
-  facts.world.garden.group.traverse((object) => {
-    if (object instanceof Mesh && (object.name === 'path-surface' || object.name === 'path-kerb')) meshes.push(object);
-  });
-  if (meshes.length !== 2) return [`expected both drawn path layers, found ${meshes.length} — this measured nothing`];
+function walkablePaving(facts: ParkFacts, meshes: readonly Mesh[], raster: PavingRaster): { readonly allowed: (k: number) => boolean; readonly decorativeTriangles: number } | string {
   const decorative = new Map<Mesh, Set<number>>();
   for (const mesh of meshes) {
     const owners = mesh.userData['vertexOwners'];
     const unwalked = mesh.userData['decorativeOwners'];
     if (!(owners instanceof Int32Array) || !(unwalked instanceof Int32Array)) {
-      return [`the drawn ${mesh.name} carries no route owners — pathGraph.ts has changed and nothing can be attributed`];
+      return `the drawn ${mesh.name} carries no route owners — pathGraph.ts has changed and nothing can be attributed`;
     }
     decorative.set(mesh, new Set(unwalked));
   }
-  let skipped = 0;
-  const raster = rasterisePaving(meshes, PAVING_CELL, (mesh, vertex) => {
-    const owners = mesh.userData['vertexOwners'] as Int32Array;
-    const out = decorative.get(mesh)!.has(owners[vertex]!);
-    if (out) skipped += 1;
-    return out;
+  let decorativeTriangles = 0;
+  const declared = rasterisePaving(meshes, raster.cell, (mesh, vertex) => {
+    const keep = decorative.get(mesh)!.has((mesh.userData['vertexOwners'] as Int32Array)[vertex]!);
+    if (keep) decorativeTriangles += 1;
+    return !keep;
   });
-
-  // The reached lattice cells, bucketed for a neighbourhood lookup.
   const cells = facts.reachableGroundCells();
-  if (cells.length === 0) return ['the entrance reaches no nav-lattice cell at all — this measured nothing'];
+  if (cells.length === 0) return 'the entrance reaches no nav-lattice cell at all — this measured nothing';
   const bucket = WALKABLE_PAVING_REACH;
   const buckets = new Map<string, number[]>();
   for (let i = 0; i < cells.length; i += 2) {
@@ -1598,37 +1587,13 @@ const everyDrawnPathCanBeWalked: Invariant = (facts) => {
     }
     return false;
   };
-
-  // Unwalkable paving, gathered into places a few metres across.
-  let paved = 0;
-  const places: { at: [number, number]; cells: number }[] = [];
-  for (let k = 0; k < raster.cols * raster.rows; k += 1) {
-    if (!isPaved(raster, k)) continue;
-    paved += 1;
+  const allowed = (k: number): boolean => {
     const [x, z] = cellCentre(raster, k);
-    if (nearReached(x, z)) continue;
-    const near = places.find((place) => Math.hypot(place.at[0] - x, place.at[1] - z) < 6);
-    if (near) near.cells += 1;
-    else places.push({ at: [x, z], cells: 1 });
-  }
-  const area = PAVING_CELL * PAVING_CELL;
-  // Less than a tenth of a square metre is a corner of kerb clipped by the
-  // lattice's own coarseness, not a stretch of path anyone could walk along.
-  const complaints = places
-    .filter((place) => place.cells * area >= 0.1)
-    .map(
-      (place) =>
-        `${(place.cells * area).toFixed(2)} m² of drawn path near ${fmt(place.at)} is more than ` +
-        `${WALKABLE_PAVING_REACH.toFixed(2)} m from any ground a child can reach from the entrance — ` +
-        'paving laid under a building, inside something solid, or in a pocket nobody can get into',
-    );
-  process.stderr.write(
-    `  everyDrawnPathCanBeWalked: ${paved} paving cells against ${cells.length / 2} reached lattice cells on seed ` +
-      `${facts.seed}; ${skipped} triangle(s) of declared-unwalked door apron left out\n`,
-  );
-  if (paved === 0) complaints.push('no paving was rasterised — this measured nothing');
-  return complaints;
-};
+    if (isPaved(declared, cellOf(declared, x, z))) return true;
+    return nearReached(x, z);
+  };
+  return { allowed, decorativeTriangles };
+}
 
 /**
  * The Rail Race's exit has room for the whole **party** that arrives on it, not
@@ -13115,7 +13080,6 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
   ['every doormat in the park can be walked to from the gate', everyDoormatIsReachableFromTheGate],
   ['the drawn paving runs from the gate all the way to every door', drawnPavingReachesEveryDoor],
-  ['every metre of the drawn paths is ground a child can walk on', everyDrawnPathCanBeWalked],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
   ['the Sky Cruiser goes round the big wheel', skyCruiserGoesRoundTheBigWheel],

@@ -141,9 +141,15 @@ export const isPaved = (raster: PavingRaster, k: number): boolean => k >= 0 && !
  * a bridge deck does not join the lawn-level paving under it in plan, and a
  * ribbon standing up as a sheet is a cliff rather than a join.
  */
-export function floodPaving(raster: PavingRaster, start: number, stepUp: number): Uint8Array {
+export function floodPaving(
+  raster: PavingRaster,
+  start: number,
+  stepUp: number,
+  /** Cells the flood may enter at all, beyond being paved. */
+  allowed: (k: number) => boolean = () => true,
+): Uint8Array {
   const seen = new Uint8Array(raster.cols * raster.rows);
-  if (!isPaved(raster, start)) return seen;
+  if (!isPaved(raster, start) || !allowed(start)) return seen;
   const queue = new Int32Array(raster.cols * raster.rows);
   let head = 0;
   let tail = 0;
@@ -163,6 +169,7 @@ export function floodPaving(raster: PavingRaster, start: number, stepUp: number)
       const nhi = hi[n] as number;
       // Intervals within a step of each other.
       if (nlo > khi + stepUp || klo > nhi + stepUp) return;
+      if (!allowed(n)) return;
       seen[n] = 1;
       queue[tail++] = n;
     };
