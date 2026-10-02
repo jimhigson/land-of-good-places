@@ -68,12 +68,29 @@ concurrency:
 
 permissions:
   contents: read
+  # restore-parks reads the Parks workflow's cache list and run status.
+  actions: read
 
 jobs:
+  # Waits for this tree's accepted parks (`parks.yml`) — see
+  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
+  # never comes out of the work job's cap.
+  parks:
+    name: Parks ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/restore-parks
+
   shards:
     # Not the required check — the aggregator below is. These names are what
     # `measure:check-chain` reads a log's cap by, so keep the template.
     name: Checks shard ${{ matrix.shard }}
+    needs: [parks]
     runs-on: ubuntu-latest
     # **Each shard's cap, and the watchdog reads it from here** (`--job
     # shards` in `check:watchdog`), so there is one number, not two.
@@ -114,6 +131,11 @@ jobs:
         # Registry hiccups are common enough to be worth retrying; the counts
         # live in `.npmrc`, which pnpm reads.
         run: pnpm install --frozen-lockfile
+
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
+        with:
+          wait-minutes: '1'
 
       # `check:served-walking` and `check:served-deep-links` drive a real page
       # in Chromium; `playwright-core` ships the driver but not the browser.

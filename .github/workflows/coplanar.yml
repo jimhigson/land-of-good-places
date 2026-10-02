@@ -45,10 +45,27 @@ concurrency:
 
 permissions:
   contents: read
+  # restore-parks reads the Parks workflow's cache list and run status.
+  actions: read
 
 jobs:
+  # Waits for this tree's accepted parks (`parks.yml`) — see
+  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
+  # never comes out of the work job's cap.
+  parks:
+    name: Parks ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/restore-parks
+
   coplanar:
     name: Coplanar faces
+    needs: [parks]
     runs-on: ubuntu-latest
     # The sweep builds all sixteen supported parks (`SUPPORTED_PARK_SEEDS`),
     # each at its recorded restart, one child process per park. That was
@@ -78,6 +95,11 @@ jobs:
         # Registry hiccups are common enough to be worth retrying — same
         # reasoning as deploy.yml; the counts live in `.npmrc`.
         run: pnpm install --frozen-lockfile
+
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
+        with:
+          wait-minutes: '1'
 
       - name: Coplanar sweep
         run: pnpm run check:coplanar

@@ -22,6 +22,8 @@ concurrency:
 
 permissions:
   contents: read
+  # restore-parks reads the Parks workflow's cache list and run status.
+  actions: read
   # PR conversation comments are the Issues API, not the Pull Requests API —
   # `pull-requests: write` alone gets `Resource not accessible by
   # integration` from `listComments`/`createComment`/`updateComment`.
@@ -31,13 +33,28 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Waits for this tree's accepted parks (`parks.yml`) — see
+  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
+  # never comes out of the preview job's cap.
+  parks:
+    name: Parks ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/restore-parks
+
   preview:
     name: Deploy PR preview
+    needs: [parks]
     runs-on: ubuntu-latest
-    # 80, from 25: the job solves the sixteen parks on a cache miss
-    # (`build:parks`, measured at 1100 s locally at the accepted restarts,
-    # CI ~2x). The step below carries its own, tighter cap.
-    timeout-minutes: 80
+    # Back to 10: the parks are found by the Parks workflow and restored here
+    # (the `parks` job above does the waiting), so this job only builds and
+    # uploads.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -59,42 +76,14 @@ jobs:
         # reasoning as deploy.yml; the counts live in `.npmrc`.
         run: pnpm install --frozen-lockfile
 
-      # **Solve the parks a child can be given, so her device does not have
-      # to** (docs/design/PREBUILT-PARKS.md). Its own step, not part of
-      # `build`, which stays a fast artefact step. Cached on the inputs
-      # `scripts/lib/park-source-hash.mjs` hashes, so a tree whose source is
-      # unchanged (a docs or workflow commit) restores the parks instead of
-      # re-solving them. A restored set whose source does not match is refused
-      # by the build's own hash check, which fails the job rather than ship
-      # it: the cache can cost a red run, never a wrong park.
-      - name: Restore prebuilt parks
-        id: parks-cache
-        uses: actions/cache@v4
+      # The accepted parks, found once per tree by the Parks workflow
+      # (`parks.yml`: build:parks's accept loop and proof, one runner per
+      # seed) and restored here; `vite build` below ships them and fails
+      # without them (LGP_REQUIRE_PARKS). Nothing is solved in this job.
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
         with:
-          path: .parks
-          key: prebuilt-parks-${{ hashFiles('src/**', 'procgen/**', 'test/procgen/**', 'scripts/**', 'package.json', 'pnpm-lock.yaml') }}
-
-      - name: Solve the prebuilt parks
-        if: steps.parks-cache.outputs.cache-hit != 'true'
-        # A coarse bound, well inside the job's own cap: a step that runs out
-        # of time FAILS (red), where a job that does reports as cancelled. Each
-        # seed's solve also has its own timeout inside build:parks
-        # (LGP_PARK_TIMEOUT_MS), so a hung seed is named, not just slow.
-        # 50, from 18 (1 Oct): at the accepted restarts the sixteen take
-        # 1100 s over four lanes on an M-series Mac, and seed 6 alone 971 s
-        # (478 s of plan search, 507 s of it the train). At CI's ~2x that is
-        # ~37 min. Being made cheaper in the generator (fix/sb-trainsearch).
-        # Plus accepting each file as shipped (every measure on the hydrated
-        # park, ~91 s a seed here, ~6 min over four lanes, ~12 at CI's 2x).
-        # TEMPORARY — the 29 Aug outage was a job pushed past its cap. These
-        # come back down when fix/sb-trainsearch lands (seed 6's train search,
-        # 507 s, is the long pole). Until then they hold only because a cache
-        # hit skips this step: the key below is busted by any change under
-        # src/, procgen/, test/procgen/, scripts/, package.json or the
-        # lockfile, and the cache is branch-scoped, so the first deploy on
-        # main after such a merge re-solves.
-        timeout-minutes: 65
-        run: pnpm run build:parks
+          wait-minutes: '1'
 
       # Client bundle only — see the on: comment above for why the check
       # suite is deliberately not run here.

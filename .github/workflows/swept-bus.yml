@@ -50,10 +50,27 @@ concurrency:
 
 permissions:
   contents: read
+  # restore-parks reads the Parks workflow's cache list and run status.
+  actions: read
 
 jobs:
+  # Waits for this tree's accepted parks (`parks.yml`) — see
+  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
+  # never comes out of the work job's cap.
+  parks:
+    name: Parks ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/restore-parks
+
   swept-bus:
     name: Swept bus
+    needs: [parks]
     runs-on: ubuntu-latest
     # Generous against a measured 56 s locally and a measured 3m26s here: a
     # runner having a slow day should say so by being slow, not by being
@@ -77,6 +94,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
+        with:
+          wait-minutes: '1'
 
       - name: Sweep the bus against the drawn ride
         run: pnpm run check:swept-bus

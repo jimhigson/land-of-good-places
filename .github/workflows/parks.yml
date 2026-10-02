@@ -1,0 +1,126 @@
+name: Parks
+
+# **Every supported park, found once per tree, for every other job to use.**
+#
+# `build:parks` runs the accept loop per seed (restart 0, 1, 2, … until the
+# park hydrated from that restart's file passes every acceptance measure),
+# proves the file, and writes `.parks/`. It is cached under the park source
+# hash (`scripts/lib/park-source-hash.mjs`: the import closure of the solver
+# and the measures, plus the toolchain), so a tree whose parks cannot have
+# changed (a UI, docs or workflow change) builds nothing here.
+#
+# Every other workflow that builds a park waits for this cache and restores it
+# (`.github/actions/restore-parks`), so it builds each park at the restart
+# found here and searches for none. That is what keeps a cold build to one
+# accept loop per tree rather than one per job.
+#
+# One runner per seed, each running that seed's restarts four at a time
+# (`LGP_RESTART_LANES`, speculative, same answer as in order: `acceptPark`),
+# so the critical path is the slowest seed, not the sum.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: parks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  key:
+    name: Parks key
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      hash: ${{ steps.hash.outputs.hash }}
+      hit: ${{ steps.lookup.outputs.cache-hit }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Park source hash
+        id: hash
+        run: echo "hash=$(node scripts/lib/park-source-hash.mjs)" >> "$GITHUB_OUTPUT"
+      - name: Already built?
+        id: lookup
+        uses: actions/cache/restore@v4
+        with:
+          path: .parks
+          key: prebuilt-parks-${{ steps.hash.outputs.hash }}
+          lookup-only: true
+
+  seed:
+    name: Park ${{ matrix.seed }}
+    needs: [key]
+    if: needs.key.outputs.hit != 'true'
+    runs-on: ubuntu-latest
+    # The slowest seed's accept loop at four restarts at a time. Not a budget
+    # to grow into: a seed that needs more is a generator to make cheaper.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Per seed, so re-running a failed matrix rebuilds only the seeds that failed.
+      - name: This seed, if already found at this source
+        id: seed-cache
+        uses: actions/cache@v4
+        with:
+          path: .parks-seed
+          key: prebuilt-park-${{ needs.key.outputs.hash }}-${{ matrix.seed }}
+      - name: Find and prove seed ${{ matrix.seed }}'s accepted park
+        if: steps.seed-cache.outputs.cache-hit != 'true'
+        env:
+          LGP_SEEDS: ${{ matrix.seed }}
+          LGP_LANES: '1'
+          LGP_RESTART_LANES: '4'
+          LGP_PARKS_OUT: .parks-seed
+        run: pnpm run build:parks
+      - uses: actions/upload-artifact@v4
+        with:
+          name: park-${{ matrix.seed }}
+          path: |
+            .parks-seed/*.json
+          if-no-files-found: error
+          retention-days: 3
+
+  merge:
+    name: Parks
+    needs: [key, seed]
+    if: needs.key.outputs.hit != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: park-*
+          path: parts
+      - name: One .parks/ from sixteen seeds
+        run: node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/merge-parks.mts parts/*
+      - name: Save for every other job
+        uses: actions/cache/save@v4
+        with:
+          path: .parks
+          key: prebuilt-parks-${{ needs.key.outputs.hash }}

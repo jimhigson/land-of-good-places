@@ -22,8 +22,24 @@ concurrency:
 
 permissions:
   contents: read
+  # restore-parks reads the Parks workflow's cache list and run status.
+  actions: read
 
 jobs:
+  # Waits for this tree's accepted parks (`parks.yml`) — see
+  # `.github/actions/restore-parks`. Its own job, so the wait for a cold build
+  # never comes out of the work job's cap.
+  parks:
+    name: Parks ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/restore-parks
+
   # **Sharded, gated by one aggregator named `Procgen invariants`.** The suite
   # measures every recorded park (16 since the root acceptance loop,
   # against 5 before), about 5.5 minutes per five parks on a runner — one job
@@ -40,6 +56,7 @@ jobs:
   # `check:seed-coverage` asserts that every pool seed's file asks them.
   suite:
     name: Procgen invariants shard ${{ matrix.shard }}
+    needs: [parks]
     runs-on: ubuntu-latest
     # A shard holds five or six parks; see the history of this number in the
     # aggregator's comment. The watchdog reads it (`--job suite`).
@@ -63,6 +80,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
+        with:
+          wait-minutes: '1'
 
       - name: Procgen invariant suite, this shard
         env:
