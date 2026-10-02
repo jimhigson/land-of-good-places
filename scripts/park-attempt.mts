@@ -170,7 +170,12 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
       const { builtWellProblems, falseRefusalProblem, falseRefusalsOf, layoutTraceCounts } = await import(
         './lib/builtWell.mts'
       );
-      const counts = layoutTraceCounts(LAYOUT_TRACE);
+      // A park hydrated from its file (`LGP_PARK_FILE`) ran no layout search;
+      // the solve that made it recorded the trace's summary in the file.
+      const { offeredParkFile } = await import('../src/world/prebuilt/parkFileStore.ts');
+      const counts = layoutTraceCounts(
+        LAYOUT_TRACE.length > 0 ? LAYOUT_TRACE : (offeredParkFile()?.measures.layoutTrace ?? []),
+      );
       // A false refusal is the rung's instrument being wrong: a void, never a restart.
       // Proving one costs a second build, so it is asked only when the rung fired.
       const falseRefusal =

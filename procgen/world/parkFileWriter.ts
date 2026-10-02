@@ -1,3 +1,4 @@
+import { LAYOUT_TRACE } from '../../src/world/parkLayout';
 import { bushScatterLedger } from './sceneryBuilders';
 import { Vector3 } from 'three';
 import { type SolvedRailRoute } from '../../src/world/rail/generate';
@@ -119,7 +120,13 @@ export function encodeParkFile(seed: number, restart: number, plan: DecidedPlan,
     seed,
     restart,
     acceptance: null,
-    measures: { bushGround: bushScatterLedger.ground === null ? null : plain(bushScatterLedger.ground, 'measures.bushGround') },
+    measures: {
+      bushGround: bushScatterLedger.ground === null ? null : plain(bushScatterLedger.ground, 'measures.bushGround'),
+      // The layout search's summary lines (decision zeros, the doormat rung):
+      // `check:every-seed-builds`' acceptance clause reads them, and only the
+      // solve that made this park printed them.
+      layoutTrace: LAYOUT_TRACE.filter((line) => /decision-zero-reached=|rung-1-fired=/.test(line)),
+    },
     features: {
       layout: { seed: layout.seed, fountain: plain(layout.fountain, 'layout.fountain'), entries },
       cruiser: {

@@ -86,6 +86,12 @@ const SEARCH_SCRIPTS = new Set([
   'measure-deck-fallthrough.mts',
 ]);
 
+/** Whether this process's script is one whose point is the search ({@link SEARCH_SCRIPTS}). */
+export function isSearchScript(): boolean {
+  const script = (process.argv[1] ?? '').split(/[\\/]/).at(-1) ?? '';
+  return SEARCH_SCRIPTS.has(script);
+}
+
 /**
  * **The shipped park file for `seed`, when a Node process may build from it
  * instead of solving** — or null. Node tooling (every check, through the
@@ -102,8 +108,7 @@ const SEARCH_SCRIPTS = new Set([
  */
 export function builtParkFileOf(root: string, seed: number, env: Readonly<Record<string, string | undefined>>): unknown {
   if (env['LGP_SOLVE'] === '1' || env['LGP_PARK_FILE']) return null;
-  const script = (process.argv[1] ?? '').split(/[\\/]/).at(-1) ?? '';
-  if (SEARCH_SCRIPTS.has(script)) return null;
+  if (isSearchScript()) return null;
   if (env['LGP_PARK_RESTART'] !== undefined && env['LGP_PARK_RESTART'] !== '') return null;
   if ((globalThis as { __LGP_PARK_RESTART__?: unknown }).__LGP_PARK_RESTART__ !== undefined) return null;
   const switches = parkSwitches(root);

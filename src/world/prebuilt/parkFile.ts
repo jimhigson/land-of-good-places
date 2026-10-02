@@ -108,7 +108,12 @@ export interface ParkFile {
    * (`bushScatterLedger`, procgen/world/sceneryBuilders.ts), which only
    * exists mid-solve. `parkFacts.ts` reads it from here for a hydrated park.
    */
-  readonly measures: { readonly bushGround: Json };
+  /**
+   * …and `layoutTrace`: the layout search's summary lines (decision zeros, the
+   * doormat rung), which only the solve printed, for `check:every-seed-builds`'
+   * acceptance clause on a hydrated park.
+   */
+  readonly measures: { readonly bushGround: Json; readonly layoutTrace?: readonly string[] };
   readonly features: {
     readonly layout: LayoutRecord;
     readonly cruiser: CruiserRecord;

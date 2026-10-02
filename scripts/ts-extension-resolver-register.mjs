@@ -33,7 +33,7 @@ import { installDeterministicMath } from '../src/core/deterministicMath.ts';
 // a process that builds a park ever calls it). Node builtins only, so it loads
 // before the resolver below is registered.
 import { acceptedRestartSync } from './lib/acceptedPark.mts';
-import { builtParkFileOf, parkSwitches } from './lib/builtParks.mts';
+import { builtParkFileOf, isSearchScript, parkSwitches } from './lib/builtParks.mts';
 
 installDeterministicMath();
 globalThis.__LGP_RESOLVE_RESTART__ = acceptedRestartSync;
@@ -72,8 +72,12 @@ port.setBoundarySolverLoader(() => {
 // A child that sets a switch the park's code reads (builtWell's
 // `LGP_LAYOUT_RUNG=off` solve, run under an acceptance attempt that set
 // LGP_PARK_FILE) is asking for a park other than the file's, so it solves.
+// And a script whose point is the search itself (`check:every-seed-builds`,
+// asked as an acceptance measure, reads the solve's layout trace) solves the
+// same seed and restart rather than hydrating.
 const parkFilePath =
   process.env['LGP_PARK_FILE'] &&
+  !isSearchScript() &&
   !Object.keys(process.env).some((key) => process.env[key] && parkSwitches(process.cwd()).has(key))
     ? process.env['LGP_PARK_FILE']
     : undefined;
