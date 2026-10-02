@@ -89,9 +89,20 @@ export interface AcceptedPark {
   readonly wallMs: number;
 }
 
-/** Run one attempt in a fresh process. The default attempt runner. */
-export async function attemptInFreshProcess(seed: number, restart: number): Promise<AttemptVerdict> {
-  const env = { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: String(restart) };
+/**
+ * Run one attempt in a fresh process. The default attempt runner. With
+ * `parkFile`, the attempt is the park hydrated from that file
+ * (`LGP_PARK_FILE`, `park-attempt.mts`) — what `build:parks` asks of every
+ * file it ships; the file must be `seed` at `restart`.
+ */
+export async function attemptInFreshProcess(seed: number, restart: number, parkFile?: string): Promise<AttemptVerdict> {
+  const { LGP_PARK_FILE: _inherited, ...rest } = process.env;
+  const env = {
+    ...rest,
+    LGP_SEED: String(seed),
+    LGP_PARK_RESTART: String(restart),
+    ...(parkFile ? { LGP_PARK_FILE: parkFile } : {}),
+  };
   let out = '';
   let err = '';
   let code = 0;

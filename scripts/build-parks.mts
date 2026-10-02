@@ -16,7 +16,19 @@
  *
  * Every file is **proven before it is kept**: hydrated in a second process and
  * digested against the fresh solve it came from (`scripts/lib/parkFiles.mts`),
- * with a perturbed-file control once per run. Any failure exits 1 and writes
+ * with a perturbed-file control once per run.
+ *
+ * And then **accepted as shipped**: every acceptance measure is asked of the
+ * park hydrated from the file itself (`park-attempt.mts` under
+ * `LGP_PARK_FILE`), in a fresh process per seed — the park a child will be
+ * given, built the way her device builds it. The restart was accepted on
+ * whichever machine ran `accept:parks`; a park solver's decisions can differ
+ * between machines (Linux x64 against Mac arm64: seeds 0, 2, 4, 8, 11 on
+ * 1 Oct), so the file this machine wrote is only shipped if it passes here
+ * too. A rejection fails the build, naming the seed, the restart and the
+ * first failing measure. It is never re-searched: a recorded restart means one
+ * park, and a machine that builds another one is a divergence to remove at
+ * source. Any failure exits 1 and writes
  * no manifest, and without a manifest `vite build` ships no parks — so the
  * game has none, and says so (`ParkUnavailable`). `LGP_REQUIRE_PARKS=1` on the
  * build (set by the deploy workflows) turns "no parks" into a failed build.
@@ -38,6 +50,7 @@ import {
 } from '../src/world/prebuilt/parkFileName.ts';
 import { parkSourceHash } from './lib/park-source-hash.mjs';
 import { buildAndVerify } from './lib/parkFiles.mts';
+import { attemptInFreshProcess } from './lib/acceptedPark.mts';
 import { acceptanceLogProblem, readAcceptanceLog, ACCEPTANCE_LOG_FILE } from './lib/acceptanceLog.mts';
 import { ACCEPTED_RESTARTS } from '../src/world/acceptedRestarts.ts';
 
@@ -103,6 +116,50 @@ if (parkSourceHash(root) !== sourceHash) {
 }
 if (failed.length > 0 || controlProblem) {
   console.error(`build:parks: FAILED — no manifest written, so vite build will ship no parks`);
+  process.exit(1);
+}
+
+// Proven; now asked every acceptance measure, as the park it will ship as.
+console.log(`\nbuild:parks: accepting the ${outcomes.length} file(s) as shipped — every measure, on the park hydrated from each`);
+const acceptBegan = performance.now();
+const rejected: string[] = [];
+const acceptQueue = [...outcomes].reverse();
+await Promise.all(
+  Array.from({ length: Math.min(lanes, acceptQueue.length) }, async () => {
+    for (let o = acceptQueue.pop(); o !== undefined; o = acceptQueue.pop()) {
+      const restart = ACCEPTED_RESTARTS[o.seed] as number;
+      const began = performance.now();
+      let line: string;
+      try {
+        const verdict = await attemptInFreshProcess(o.seed, restart, o.file);
+        if (verdict.parkFile === null || verdict.restart !== restart || verdict.seed !== o.seed) {
+          line = `seed ${o.seed} restart ${restart}: the acceptance attempt did not build the file (it built seed ${verdict.seed} restart ${verdict.restart}, file ${verdict.parkFile})`;
+          rejected.push(line);
+        } else if (!verdict.accepted) {
+          const first = verdict.failures[0];
+          line =
+            `seed ${o.seed} restart ${restart}: the shipped file is REJECTED by ${verdict.failures.length} measure(s); first: ` +
+            `${first?.measure ?? '(none)'} — ${first?.first[0] ?? verdict.broken ?? '(no complaint)'}` +
+            (verdict.failures.length > 1 ? `; also ${verdict.failures.slice(1).map((f) => f.measure).join(', ')}` : '');
+          rejected.push(line);
+        } else {
+          line = `seed ${o.seed} restart ${restart}: accepted as shipped, ${verdict.measuresAsked} measures`;
+        }
+      } catch (error) {
+        line = `seed ${o.seed} restart ${restart}: the acceptance attempt broke — ${String(error).split('\n').slice(0, 6).join(' | ')}`;
+        rejected.push(line);
+      }
+      console.log(`  ${line} (${((performance.now() - began) / 1000).toFixed(0)} s)`);
+    }
+  }),
+);
+console.log(`build:parks: acceptance of the shipped files took ${((performance.now() - acceptBegan) / 1000).toFixed(0)} s`);
+if (rejected.length > 0) {
+  for (const line of rejected) console.error(`build:parks: ${line}`);
+  console.error(
+    'build:parks: FAILED — a shipped park must be the park that was accepted. Not re-searched: remove the divergence at ' +
+      'source (scripts/park-identity.mts names the first decision that differs), or re-run accept:parks. No manifest written.',
+  );
   process.exit(1);
 }
 

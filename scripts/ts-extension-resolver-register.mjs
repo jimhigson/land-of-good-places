@@ -55,3 +55,30 @@ port.setParkSolverLoader(() => {
 port.setBoundarySolverLoader(() => {
   require('../procgen/world/boundaryRadii.ts');
 });
+
+// **`LGP_PARK_FILE=<park file>`: build that file's park, as the browser does.**
+// The file's restart is set, and the file offered, before the script imports
+// anything of the park — exactly `boot/prebuiltPark.ts`'s order — so every
+// script run under it (an acceptance attempt, and each check script the
+// attempt runs in its own process) builds the park hydrated from that file
+// and searches nothing. This is how `build:parks` asks every acceptance
+// measure of the file it is about to ship, rather than of a fresh solve.
+const parkFilePath = process.env['LGP_PARK_FILE'];
+if (parkFilePath) {
+  const { readFileSync } = await import('node:fs');
+  const file = JSON.parse(readFileSync(parkFilePath, 'utf8'));
+  const askedRestart = process.env['LGP_PARK_RESTART'];
+  if (askedRestart !== undefined && askedRestart !== '' && Number(askedRestart) !== file.restart) {
+    throw new Error(
+      `LGP_PARK_FILE ${parkFilePath} is restart ${file.restart}, but LGP_PARK_RESTART=${askedRestart} asks for another park`,
+    );
+  }
+  const askedSeed = process.env['LGP_SEED'];
+  if (askedSeed !== undefined && askedSeed !== '' && Number(askedSeed) !== file.seed) {
+    throw new Error(`LGP_PARK_FILE ${parkFilePath} is seed ${file.seed}, but LGP_SEED=${askedSeed} asks for another park`);
+  }
+  process.env['LGP_SEED'] = String(file.seed);
+  globalThis.__LGP_PARK_RESTART__ = file.restart;
+  const { offerParkFile } = await import('../src/world/prebuilt/parkFileStore.ts');
+  offerParkFile(file);
+}
