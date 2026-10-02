@@ -33,3 +33,4 @@ update the doc numbers in Scenery.ts with the measured after table.
 - AFTER trees/climbable: 72/37 50/33 77/48 75/37 68/27 73/31 79/42 77/39 47/29 79/44 55/35 86/40 73/40 76/36 59/29 56/33
   (seeds 0..15). Min climbable 27 (seed 4) > 24. Cover pass planted 1 on seed 6 only.
 - park:attempt x16 at recorded restarts: running -> scratchpad sb-trees/attempts.txt
+- park:attempt at each recorded restart: all 16 seeds built and accepted (109 measures each). DONE.
