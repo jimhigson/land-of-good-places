@@ -23,3 +23,24 @@ cheaper exact tests. Measure plan CPU per seed before/after; `accept:parks -- 0-
   Root cause seed 5: layout draw 2 castle 24.9 m from boundary, window axis at it.
 - a5 sweep (part1 + identity speedups): total 1330 -> 1287 s; part 1 makes 9 (56->148 s), 3, 1, 15 trains costlier.
 - Running: a6 sweep (all), then accept:parks -- 0-15 --fresh (no --write).
+
+## a6 sweep (head 050c334a) vs base 48c8a7fd, plan thread-CPU s at recorded restarts:
+seed | before s (train) | after s (train) | unwinds
+0 | 34.2 (7.5) | 15.4 (8.1) | 3 -> 3
+1 | 188.3 (21.3) | 100.2 (31.2) | 20 -> 15
+2 | 2.0 (0.9) | 1.7 (1.0) | 0 -> 0
+3 | 54.0 (25.3) | 53.6 (38.3) | 13 -> 7
+4 | 6.5 (5.1) | 6.6 (5.4) | 1 -> 1
+5 | 94.8 (1.5) | 27.2 (1.3) | 2 -> 2
+6 | 315.8 (217.5) | 219.6 (179.8) | 25 -> 19
+7 | 9.1 (1.7) | 9.4 (2.3) | 0 -> 0
+8 | 62.7 (5.1) | 52.4 (23.0) | 6 -> 0
+9 | 56.7 (37.6) | 176.4 (155.3) | 7 -> 8
+10 | 24.2 (1.1) | 22.1 (1.3) | 3 -> 3
+11 | 7.2 (1.8) | 5.9 (2.0) | 0 -> 0
+12 | 3.5 (1.8) | 3.8 (2.0) | 0 -> 0
+13 | 165.4 (101.3) | 114.9 (95.7) | 16 -> 8
+14 | 132.9 (70.2) | 34.3 (16.8) | 9 -> 3
+15 | 172.6 (92.5) | 160.1 (118.5) | 14 -> 7
+total | 1330 | 1004
+cruiser total 537 -> 232 s. accept:parks --fresh running -> scratch accept.txt/accept.json
