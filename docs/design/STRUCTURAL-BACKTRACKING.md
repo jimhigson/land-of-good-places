@@ -103,8 +103,12 @@ measure, through one owner shared by the check and the loop:
   (`lib/slideRider.mts`), `check:pet-slide` (`lib/petSlide.mts`) and
   `check:stall-accommodate` (`lib/stallAccommodate.mts`). A second World over
   the plan the process has already solved costs ~6.5 s on seed 5, where a
-  fresh process costs ~14 s plus the module load. The transcripts read the
-  same as the scripts' own, to the digit.
+  fresh process costs ~14 s plus the module load. The plan's ground-claims
+  registry is put back as the plan left it before each one
+  (`lib/freshWorld.mts`). Without that, a second World adopts the first
+  one's claims and is a different park (seed 5: 534 bushes, not 536). With
+  it the scene digests are identical, and the transcripts match the scripts'
+  own to the digit.
 - **In a process of its own** (`ACCEPTANCE_CHECK_SCRIPTS`): only
   `check:rail-race`, which is still one top-level script.
 

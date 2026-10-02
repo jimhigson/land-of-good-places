@@ -19,7 +19,8 @@ Lead: agent a52ae9484877226d6. Ruling: EVERY decision-judging check is an accept
 - path-preference decisions-only 6.9 s (was ~60). Sims in-process on fresh World (6.5 s build):
   cat-bus 13.7, npc-dispersal 37.0, stall-accommodate 8.2, slide-rider (trackside only) 43.6,
   pet-slide (wired only) 47.4. Only check:rail-race still a subprocess.
-- Temp harnesses scripts/zz-sim.mts, scripts/zz-slide.mts are untracked: delete before finishing.
+- Fidelity fix: lib/freshWorld.mts restores plan claims before every fresh World (digest-proved).
+- Batch 4 reported to lead. Verification attempt with restore: see scratchpad attempt5e.
 
 ## Next
 - Full attempt seed 5 for before/after; report to lead; consider profiling pet-slide/slide-rider further.
