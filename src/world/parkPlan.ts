@@ -122,6 +122,10 @@ interface PlanState {
 var state: PlanState = {};
 var driver: ParkSolve | null = null;
 var solved = false;
+/** The registry as the plan left it when it solved — what every `World` after the first starts from. */
+var solvedClaims: GroundClaims | null = null;
+/** Whether a `World` has adopted the plan's own registry yet. */
+var claimsAdopted = false;
 var forcing = false;
 /* eslint-enable no-var */
 
@@ -181,6 +185,30 @@ export function parkPlanPlaced(): readonly string[] {
 export function parkPlanClaims(): GroundClaims {
   if (!driver) solveParkPlanNow();
   return (driver as ParkSolve).claims;
+}
+
+/**
+ * **The registry a new `World` adopts.** The first `World` adopts the plan's
+ * own — the very object the generator negotiated over, so
+ * `World.groundClaims === ParkGeneration.groundClaims` holds for the one park
+ * the game builds. Every later `World` in the same process gets its own copy of
+ * the registry *as the plan left it*, never one another `World` has committed
+ * its world phase into.
+ *
+ * Before this, a second `World` adopted the first one's claims too, and its
+ * world phase refused differently: seed 5's second World placed 534 bushes
+ * where the first placed 536, so every script that builds more than one park
+ * in a process (`check:hotel`, `check:pet-slide`'s control descent, the
+ * acceptance loop's simulated checks) was measuring a park nobody ships.
+ */
+export function worldPlanClaims(): GroundClaims {
+  const claims = parkPlanClaims();
+  if (!claimsAdopted) {
+    claimsAdopted = true;
+    return claims;
+  }
+  if (!solvedClaims) throw new Error('park plan: a second World asked for the plan registry before the plan solved');
+  return solvedClaims.copy();
 }
 
 // ------------------------------------------------------------- the builders
@@ -880,6 +908,7 @@ function startDriver(): ParkSolve {
 
 function finish(): void {
   solved = true;
+  solvedClaims = (driver as ParkSolve).claims.copy();
   offerPrewarmedGroundClaims((driver as ParkSolve).claims);
   try {
     const nodeProcess = (globalThis as { process?: { stderr?: { write: (s: string) => unknown } } }).process;

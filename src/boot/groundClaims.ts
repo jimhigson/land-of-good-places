@@ -370,6 +370,18 @@ export class GroundClaims {
   private readonly contributions = new Map<string, Contribution>();
   private commitClock = 0;
 
+  /**
+   * A registry holding exactly what this one holds now, which later commits to
+   * either never reach. Each contribution is replaced on every commit, never
+   * mutated, so the copy may share them; the map and the clock are its own.
+   */
+  copy(): GroundClaims {
+    const twin = new GroundClaims();
+    for (const [feature, contribution] of this.contributions) twin.contributions.set(feature, contribution);
+    twin.commitClock = this.commitClock;
+    return twin;
+  }
+
   commit(feature: string, contribution: FeatureContribution): void {
     this.setSections(feature, new Map([[0, contribution]]));
   }

@@ -312,13 +312,7 @@ let broken: string | null = null;
 
 const cpu0 = cpuMs();
 let facts: import('../test/procgen/parkFacts.ts').ParkFacts | null = null;
-let restorePlanClaims: (() => void) | null = null;
 try {
-  // The plan's registry as the plan left it, before any World commits into it:
-  // put back before each fresh World the simulated checks build, so theirs is
-  // the park a fresh process builds (`lib/freshWorld.mts`).
-  const { snapshotPlanClaims } = await import('./lib/freshWorld.mts');
-  restorePlanClaims = await snapshotPlanClaims();
   const { buildParkFacts } = await import('../test/procgen/parkFacts.ts');
   facts = await buildParkFacts(seed, restart);
   built = true;
@@ -413,15 +407,11 @@ if (facts) {
   const { buildHeadlessPark, quietly } = await import('./park-harness.mts');
   const { saveFlags } = await import('../src/state/flags.ts');
   const fresh = (): HeadlessPark => {
-    restorePlanClaims?.();
     saveFlags.hydrate({ arrivedByBus: false });
     return quietly(() => buildHeadlessPark());
   };
   for (const [name, measure] of ACCEPTANCE_SIM_MEASURES) {
     measuresAsked += 1;
-    // Slide-rider and pet-slide build their own World: put the plan's registry
-    // back for them too.
-    restorePlanClaims?.();
     try {
       const { faults, voids } = await measure(fresh);
       if (voids.length > 0) {
