@@ -5,7 +5,7 @@
  * before its own resolver is registered (`acceptedPark.mts`'s
  * `acceptedRestartSync` asks it first).
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -15,6 +15,7 @@ import {
   type PrebuiltParksManifest,
 } from '../../src/world/prebuilt/parkFileName.ts';
 import { parkSourceHash } from './park-source-hash.mjs';
+import { PARK_CHANGING_SWITCHES } from './acceptedPark.mts';
 
 /**
  * **Seed `seed`'s accepted restart, as `build:parks` found it for this exact
@@ -39,34 +40,17 @@ export function builtRestartOf(root: string, seed: number): number | null {
 }
 
 /**
- * **The `LGP_*` switches the game and the generator actually read** — measured
- * off the source (`src/`, `procgen/`), not listed by hand, so a switch added
- * tomorrow is counted the day it exists. One that is set asks for a park that
- * may not be the shipped one, so {@link builtParkFileOf} offers nothing. A
- * switch nothing in the park's code reads (a check's own `LGP_*_CHILD` marker,
- * `LGP_PROCGEN_SHARD`, `LGP_LANES`) cannot change a park and is ignored.
- * Excluded: `LGP_SEED` (which park — the file is per seed), the restart (its
- * own rule below), and the `LGP_DEBUG_*`/`LGP_TRACE_*` switches, which print
- * and decide nothing.
+ * **The `LGP_*` switches that change what a park build makes** — one owner,
+ * `acceptedPark.mts`'s `PARK_CHANGING_SWITCHES` (held to every switch the code
+ * reads by `test/parkChangingSwitches.test.ts`). One that is set asks for a
+ * park that may not be the shipped one, so {@link builtParkFileOf} offers
+ * nothing; a switch outside it (a check's own `LGP_*_CHILD` marker,
+ * `LGP_PROCGEN_SHARD`) cannot change a park and is ignored. Read at call time:
+ * `acceptedPark.mts` imports this module, so the list is read once both have
+ * loaded.
  */
-let parkSwitchesMemo: ReadonlySet<string> | null = null;
-export function parkSwitches(root: string): ReadonlySet<string> {
-  if (parkSwitchesMemo) return parkSwitchesMemo;
-  const found = new Set<string>();
-  const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) walk(path);
-      else if (/\.[mc]?[jt]s$/.test(entry.name)) {
-        for (const match of readFileSync(path, 'utf8').matchAll(/\bLGP_[A-Z0-9_]*[A-Z0-9]\b/g)) found.add(match[0]);
-      }
-    }
-  };
-  for (const dir of ['src', 'procgen']) if (existsSync(join(root, dir))) walk(join(root, dir));
-  for (const key of [...found]) {
-    if (key === 'LGP_SEED' || key === 'LGP_PARK_RESTART' || /^LGP_(DEBUG|TRACE)_/.test(key)) found.delete(key);
-  }
-  return (parkSwitchesMemo = found);
+export function parkSwitches(_root?: string): ReadonlySet<string> {
+  return new Set(PARK_CHANGING_SWITCHES);
 }
 
 /**
