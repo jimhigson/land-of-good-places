@@ -87,7 +87,7 @@ hand-kept table. So `build:parks` owns it.
   `.parks/`, refusing anything partial or stale. The result is cached under
   `prebuilt-parks-<hash>` and uploaded as artifact `parks-<hash>`.
 - Every other workflow that builds a park (Checks, Procgen, Coplanar, Swept
-  bus, Entrance road, Every seed builds, Walk reach, Park identity, preview,
+  bus, Entrance road, Every seed builds, Walk reach, preview,
   deploy) has a `Parks ready` job. That job waits for the cache
   (`.github/actions/restore-parks`) and fails fast if Parks failed. The work
   jobs restore it and run no accept loop of their own. Preview and deploy are
