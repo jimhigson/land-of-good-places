@@ -10,11 +10,21 @@ import {
   BALL_PIT_X,
   BALL_PIT_Z,
   BUILDING_BASE_Y,
+  castleSurfaceY,
   insideInterior,
   INTERIOR_GROUND_Y,
   regionContains,
   type RampDefinition,
 } from './layout';
+
+/**
+ * How far a garden ramp's footprint can sit from its plumb plan position once
+ * the castle's lean is applied — a pre-filter for {@link castleSurfaceY}, never
+ * the answer. The frame is rigid, so a point `d` metres out on the deck moves
+ * in plan by `d (1 − cos lean)` plus its height times `sin lean`: under 0.6 m
+ * for the facade's 12 m at the park's steepest castle lean (~17 degrees).
+ */
+const GARDEN_RAMP_SLACK = 1.5;
 
 /**
  * A platform that moves — the lift car, the trampoline pad.
@@ -142,12 +152,32 @@ export class WalkSurfaces {
     // steps. Every castle floor carries the same set, because each one has its
     // own porch and its own lift alcove at the same floor-local spot; a lift
     // that wandered from floor to floor would read as broken.
+    //
+    // Indoors up is +Y and a floor is plumb, so a ramp's height is the deck's
+    // plus its own. **Out in the garden the steps belong to the castle, which
+    // leans** — they are drawn in `CASTLE_FRAME`, so they are walked in it too
+    // (`castleSurfaceY`); a plumb sum here once left seed 5's walkable steps
+    // hanging 1.5 m over the stone ones.
     const space = floor ? 'interior' : 'garden';
     for (const ramp of this.ramps) {
       if (ramp.space !== space) continue;
       if (ramp.onlyFloor !== undefined && ramp.onlyFloor !== floor?.index) continue;
-      if (!regionContains(ramp.footprint, localX, localZ)) continue;
-      const height = BUILDING_BASE_Y + rampHeight(ramp, localX, localZ);
+      let height: number | null;
+      if (floor) {
+        if (!regionContains(ramp.footprint, localX, localZ)) continue;
+        height = BUILDING_BASE_Y + rampHeight(ramp, localX, localZ);
+      } else {
+        // Cheap plan reject first: the lean moves a footprint by well under
+        // GARDEN_RAMP_SLACK, and this runs for every sample in the park.
+        if (!regionContains(ramp.footprint, localX, localZ, GARDEN_RAMP_SLACK)) continue;
+        height = castleSurfaceY(
+          x,
+          z,
+          (lx, lz) => rampHeight(ramp, lx, lz),
+          (lx, lz) => regionContains(ramp.footprint, lx, lz),
+        );
+        if (height === null) continue;
+      }
       if (height <= ceiling && height > best) best = height;
     }
 
