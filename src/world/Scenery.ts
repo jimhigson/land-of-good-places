@@ -672,6 +672,35 @@ const TARGET_TREES = 72;
 const TREE_BUDGET = 180000;
 const BUSH_BUDGET = 4200;
 
+/**
+ * **What the tree scatter did — for measurement only.** Nothing in the game
+ * reads this. `candidates` is how many scatter candidates were drawn before the
+ * scatter phase ended, `scatterPlanted` how many of them stand, `coverPlanted`
+ * how many trees the climb-cover pass added after; `samplingM2` is the area the
+ * scatter's candidates are drawn over (the boundary pulled in by its margin).
+ * Read by `scripts/measure-tree-scatter.mts`.
+ */
+export const treeScatterLedger = {
+  candidates: 0,
+  scatterPlanted: 0,
+  coverPlanted: 0,
+  samplingM2: 0,
+};
+
+/** The tree scatter's candidate margin inside the boundary, in metres. */
+const TREE_EDGE_MARGIN = 6;
+
+/** The area tree candidates are drawn over: the boundary pulled in by {@link TREE_EDGE_MARGIN}. */
+function treeSamplingM2(): number {
+  const steps = 720;
+  let area = 0;
+  for (let i = 0; i < steps; i += 1) {
+    const r = Math.max(0, edgeRadiusAt(PARK_BOUNDARY, (i / steps) * TAU) - TREE_EDGE_MARGIN);
+    area += 0.5 * r * r * (TAU / steps);
+  }
+  return area;
+}
+
 function disc(x: number, z: number, radius: number): Claim {
   return { kind: 'footprint', shape: { shape: 'disc', x, z, radius } };
 }
@@ -780,7 +809,7 @@ export function treeBuilder(
           attempts += 1;
           const rng = candidateRng(TREE_SALT, attempts);
           const angle = rng.range(0, TAU);
-          const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - 6);
+          const distance = Math.sqrt(rng.unit()) * (edgeRadiusAt(PARK_BOUNDARY, angle) - TREE_EDGE_MARGIN);
           const x = Math.cos(angle) * distance;
           const z = Math.sin(angle) * distance;
           if (!isPlantable(x, z, 2.6)) continue;
@@ -793,6 +822,9 @@ export function treeBuilder(
         }
         phase = 'cover';
         cell = 0;
+        treeScatterLedger.candidates = attempts;
+        treeScatterLedger.scatterPlanted = out.length;
+        treeScatterLedger.samplingM2 = treeSamplingM2();
       }
       cells ??= coverCells();
       while (cell < cells.length) {
@@ -827,6 +859,7 @@ export function treeBuilder(
           return increment(decision, 'for climb cover at');
         }
       }
+      treeScatterLedger.coverPlanted = out.length - treeScatterLedger.scatterPlanted;
       return 'done';
     },
     back() {
