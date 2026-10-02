@@ -34,6 +34,35 @@ merges this branch when the building is complete.
       procgen invariants. `ReptileHouse` takes `plot: PlacedEntry | null`;
       `World.ts` passes `null`.
 
+## Engineer 3 (2 October 2026, Fable 5.1 — chosen by the Overseer's workflow; a replacement runs the same model)
+
+Picked up after the fix agent died with its tree uncommitted; that tree is
+commit `2a68c9e0` (tsc 0, `check:reptile-house` pinned exit 0, "All clauses
+passed"). Doing, in this order, committing each step:
+
+1. **Jim's ruling — the door is Sunny's open mouth** (*"Why beside the door
+   and not the door as its mouth? That sounds cooler so do that."*). The head
+   comes down off the roof to lie in front of the plinth, chin on the ground,
+   mouth open as the arch (the bore stays `REPTILE_ARCH_WIDTH × HEIGHT`),
+   the neck lifting up over the first coil's hump and diving into the crown.
+   The old `rh-arch` stone tunnel becomes `rh-mouth` (pink lining + lips,
+   a boolean of the tunnel with the head); `rh-awning` is gone; `rh-tongue`
+   is the doormat itself, lolling out of the mouth over the plinth edge onto
+   the paving (replaces `shell.ts`'s `tongueDoormat`). Colliders: jambs flush
+   with the bore (`REPTILE_ARCH_WIDTH/2 + JAMB_HALF`, the review's finding),
+   the head's low vertices outside the bore strip as mesh-derived discs
+   (`reptileHouseLowDiscs` gains `rh-head`/`rh-mouth`), proved by the facade
+   march (32 bearings, two strides) and the flood with its control.
+2. **Tortoise ride** (*"Yeah, put the two rides in, why not?"*): board a big
+   tortoise that plods the ring; `/tortoise-ride`; `boardRide` id
+   `reptileTortoiseRide`; Coaster's board/arrive shape + TreeClimbing's
+   iso-camera `setRidePose` loop; parks on a static disc off every path node.
+3. **Snake egg** at the stall: `egg.snake` row + `EGG_PRIZES` snake
+   hatchlings (price 0, `createPetSnake('corn'|'emerald'|'milk')`),
+   `eggPrize` filtered by shop, `Shopping.buy` keyed on `kind === 'egg'`.
+4. Remaining low findings: rock b into the open, dead `boardRide` branch,
+   `void id`, derived constants exported as literals.
+
 ## What the review changed (all at cause; findings in the Overseer's thread)
 
 - **Faces and planks upside-down.** The three heads and three planks are
