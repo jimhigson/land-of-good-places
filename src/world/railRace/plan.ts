@@ -114,7 +114,14 @@ export interface PlannedRailRace {
  * on the railway. The clearance is the railway's own published figure rather
  * than a number picked to suit.
  */
-function planExit(): { exitX: number; exitZ: number; railwayTookPart: boolean } {
+export function planExit(
+  /**
+   * Somewhere else the exit may not go, on top of the edge, the railway and
+   * the plots — for a test to hold the no-clear-spot answer to account. The
+   * park passes nothing.
+   */
+  alsoRefuse: (x: number, z: number) => boolean = () => false,
+): { exitX: number; exitZ: number; railwayTookPart: boolean } | { refused: string; railwayTookPart: boolean } {
   const stall = placedEntry(STATION_STALL_ID);
   // Whether the railway refused a spot tried before the one taken — so a
   // refusal of anything placed against this exit knows whether re-choosing the
@@ -152,19 +159,23 @@ function planExit(): { exitX: number; exitZ: number; railwayTookPart: boolean } 
       // one `routeAround` cannot dodge on the way in — the spur leg then
       // grazes the booth's counter and the exit's waypoints strand behind it.
       // And off the railway with its fence, like every exit.
+      if (alsoRefuse(x, z)) continue;
       if (clearOfPlots(x, z, 2.6) && distanceToRailCorridor(x, z) >= RAIL_CORRIDOR_CLEARANCE) {
         return { exitX: x, exitZ: z, railwayTookPart };
       }
     }
   }
 
-  // Nothing clear anywhere around the booth. Hand back the nearest try rather
-  // than nothing: `world/dismount.ts`'s runtime safety net is the last resort
-  // for exactly this, and the procgen invariant is the loud way to hear about
-  // it long before a child does.
+  // Nothing clear anywhere around the booth. This used to hand back the
+  // nearest try anyway — a spot it had just found unclear — and leave
+  // `world/dismount.ts`'s runtime safety net to cope. It refuses instead, and
+  // the plan re-chooses what put the booth there (`parkPlan.ts`'s
+  // `railRaceBars`, which names the layout, and the railway when it refused a
+  // spot).
   return {
-    exitX: stall.x + Math.cos(outward) * start,
-    exitZ: stall.z + Math.sin(outward) * start,
+    refused:
+      `rail race: no clear exit within ${(start + 14).toFixed(1)} m of the booth at ` +
+      `(${stall.x.toFixed(1)}, ${stall.z.toFixed(1)}) — every spot is off the park's edge, on the railway or in a plot`,
     railwayTookPart,
   };
 }
@@ -177,6 +188,15 @@ function planExit(): { exitX: number; exitZ: number; railwayTookPart: boolean } 
  * railway or the arch, this follows on the next read.
  */
 export const RAIL_RACE_PLAN: PlannedRailRace = lazyView(() => planPart('railRaceBars').plan);
+
+/** Why no Rail Race can be planned at an arch station, and which decisions to re-choose. */
+export interface RailRaceUnplaceable {
+  readonly unplaceable: string;
+  /** The plan decisions that put what refused it there — a refusal's `consumed`. */
+  readonly decidedBy: readonly string[];
+  /** False when no later arch station can answer it (the exit, or the stations ran out). */
+  readonly anotherStationMayHelp: boolean;
+}
 
 /** The decision `parkPlan.ts`'s `railRaceBars` builder makes and holds. */
 export interface RailRaceDecision {
@@ -192,16 +212,23 @@ export interface RailRaceDecision {
  * `archStation`), or — when the ring has fewer clear stations than that — the
  * decisions that put the arch's candidates where they are, for a refusal.
  */
-export function planRailRaceAt(
-  archChoice: number,
-): PlannedRailRace | { readonly exhausted: true; readonly decidedBy: readonly string[] } {
+export function planRailRaceAt(archChoice: number): PlannedRailRace | RailRaceUnplaceable {
   // **The exit is solved BEFORE the rings, and that ordering is load-bearing.**
   // `slideArchClear` slides the finish arch off anything its feet must not come
   // down on, and the ride's own exit is one of those things — the paving is
   // obliged to reach it, so a foot on the exit is a foot on the exit's spur.
   // `planExit` never needed a ring: it asks the booth, the boundary and the
   // railway corridor, all of which exist already. It simply used to run second.
-  const { exitX, exitZ, railwayTookPart } = planExit();
+  const exit = planExit();
+  if ('refused' in exit) {
+    return {
+      unplaceable: exit.refused,
+      decidedBy: ['layout', ...(exit.railwayTookPart ? ['train'] : [])],
+      // The exit does not depend on the arch, so no other station can help.
+      anotherStationMayHelp: false,
+    };
+  }
+  const { exitX, exitZ, railwayTookPart } = exit;
 
   // Everything the arch's feet must miss that only this module can see. The
   // doormat and the plots are checked inside the route (it has them); these two
@@ -223,7 +250,16 @@ export function planRailRaceAt(
   }
 
   const arch = archStation(STATION_STALL_ID, keepArchOff, archChoice);
-  if (arch.at === null) return { exhausted: true, decidedBy: arch.decidedBy };
+  if (arch.at === null) {
+    return {
+      unplaceable:
+        archChoice === 0
+          ? 'rail race: no station on the whole ring leaves the finish arch\'s feet clear'
+          : `rail race: no clear arch station leaves every duck bar a legal slot (${archChoice} tried)`,
+      decidedBy: arch.decidedBy,
+      anotherStationMayHelp: false,
+    };
+  }
   const walkPastRing = new RailRaceRoute(STATION_STALL_ID, 1, keepArchOff, arch);
   const raceRing = new RailRaceRoute(STATION_STALL_ID, RIDE_SCALE, keepArchOff, arch);
   return {

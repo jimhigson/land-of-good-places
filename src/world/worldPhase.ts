@@ -47,7 +47,6 @@ import { stallBuilder, type BoothRelocator } from './stallsFeature';
 import { RailRace } from './railRace/RailRace';
 import { TrestleRefusal } from './railRace/track';
 import { RAIL_RACE_FEATURE } from './railRace/feature';
-import { ROAD_FEATURE } from './entrance/roadCorridor';
 
 export interface WorldPhase {
   readonly scenery: SceneryDecisions;
@@ -123,10 +122,12 @@ function fountainBuilder(claims: GroundClaims): FeatureBuilder {
  * nothing movable (the road, the lean bound) is the build's own failure, as
  * it always was.
  */
-function railRaceBuilder(
+export function railRaceBuilder(
   collision: CollisionWorld,
   claims: GroundClaims,
   keep: (ride: RailRace) => void,
+  /** How the ride is built — the park's own constructor; a test passes one that refuses. */
+  build: (collision: CollisionWorld, claims: GroundClaims) => RailRace = (c, g) => new RailRace(c, g),
 ): FeatureBuilder {
   let built = false;
   return {
@@ -136,12 +137,17 @@ function railRaceBuilder(
       if (built) return 'done';
       let ride: RailRace;
       try {
-        ride = new RailRace(collision, claims);
+        ride = build(collision, claims);
       } catch (error) {
         if (!(error instanceof TrestleRefusal)) throw error;
-        const blockers = error.refusedBy.filter((name) => name !== ROAD_FEATURE);
-        if (blockers.length === 0) throw error;
-        return refusal(error.message, { blockers, claims: error.refusedClaims });
+        // A refusal, whoever refused — never a throw. Movable blockers (a
+        // tree, a bush) are asked aside by the driver. One refused by the road
+        // or the lean bound alone names nothing in this phase's ledger, so the
+        // driver unwinds the phase and, if nothing answers it, the build fails
+        // as a solver that gave up — not as a crash. The plan's road builder
+        // (`parkPlan.ts`, `barSlotWithNoSupportRoom`) refuses those slots before
+        // the world phase exists, so this is the backstop, not the mechanism.
+        return refusal(error.message, { blockers: error.refusedBy, claims: error.refusedClaims });
       }
       built = true;
       keep(ride);

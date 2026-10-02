@@ -139,8 +139,9 @@ export async function acceptPark(
     }
     if (verdict.broken !== null) {
       throw new Error(
-        `accepted park: seed ${seed} restart ${restart}: a measure threw (${verdict.broken}) — an instrument bug, ` +
-          'which no restart can fix, so the loop stops here rather than search around it',
+        `accepted park: seed ${seed} restart ${restart}: broken (${verdict.broken}) — a measure that threw, or a ` +
+          'build that threw a programming error (scripts/lib/attemptError.mts): a bug in an instrument or a ' +
+          'generator, which no restart can fix, so the loop stops here rather than search around it',
       );
     }
     const record: RestartRecord = {

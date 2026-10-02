@@ -1882,6 +1882,94 @@ function* nearestFirst(reach: number): Generator<number, void, void> {
  * duck-bar loop always has, so a trestle grid index and a hazard-schedule grid
  * index agree on which physical point on the ring they mean.
  */
+/**
+ * **The one march a trestle's foot makes round its slot**: every lean from
+ * zero outward, and at each lean every arc offset from zero outward, yielding
+ * each candidate that is still a trunk (`maxTrunkLean`) with `tree` solved
+ * there — and `'leanExhausted'` when a whole lean ring has no trunk left, which
+ * ends it. {@link trestleSpots} asks each candidate the road, the registry and
+ * the legacy refusers; {@link barSlotWithNoSupportRoom} asks the plan-time
+ * half (the lean and the road) of the same candidates, so the two cannot disagree on which
+ * candidates exist.
+ */
+function* marchTrestle(
+  route: RailRaceRoute,
+  atArch0: number,
+  leanGuard: number,
+  arcReach: number,
+  tree: TrestleTree,
+): Generator<{ readonly at: number; readonly x: number; readonly z: number } | 'leanExhausted', void, void> {
+  for (const lean of nearestFirst(leanGuard)) {
+    let admissible = false;
+    for (const along of nearestFirst(arcReach)) {
+      const at = route.wrap(route.startDistance + atArch0 + along);
+      // Nudged along the centre line's own outward normal, not out from the
+      // origin: on a ring that follows the park's edge the two differ.
+      const sample = route.path.sampleAt(at);
+      const x = sample.x + sample.normalX * lean;
+      const z = sample.z + sample.normalZ * lean;
+      trestleTreeAt(route, at, x, z, tree);
+      // 1. Still a trunk? The lean is the run from foot to top, in the chart
+      //    the tree is solved in — see `TrestleTree` for why not world `xz`.
+      const rise = trunkRise(tree);
+      if (rise.lean > maxTrunkLean(rise.height)) continue;
+      admissible = true;
+      yield { at, x, z };
+    }
+    // No arc offset at this lean can still be a trunk: the march is over.
+    if (!admissible && lean !== 0) {
+      yield 'leanExhausted';
+      return;
+    }
+  }
+}
+
+/**
+ * **The first duck bar's slot on `route` with no room for its support** — no
+ * candidate that is a trunk and keeps off `road` — or null. Asked in the plan
+ * (`parkPlan.ts`'s road builder, of both rings; only the walk-past ring is
+ * given the road), where the bars and the road are both decided, so the world
+ * phase never meets it.
+ *
+ * Exactly {@link trestleSpots}' road rule over exactly its candidates
+ * ({@link marchTrestle}): a slot whose nominal tree stands on the road is not
+ * built by design (its bar is dropped and named — Jim's road rule), so it is
+ * not counted here; a slot that is built must have at least one candidate that
+ * is a trunk and keeps every strut off the road. When none has, the world
+ * phase could only fail with a `TrestleRefusal` refused by the road or the lean
+ * bound alone — nothing movable to ask aside — and that is a decision the plan
+ * made.
+ */
+export function barSlotWithNoSupportRoom(
+  route: RailRaceRoute,
+  layout: HazardLayout,
+  road: readonly Claim[],
+): number | null {
+  const count = Math.floor(route.length / TRESTLE_SPACING);
+  const ringSizeVsRace = route.scale / RIDE_SCALE;
+  const arcReach = TRESTLE_SPACING / 2 - POST_FOOT_RADIUS * ringSizeVsRace;
+  const leanGuard = maxTrunkLean(route.clearance);
+  const tree = newTrestleTree();
+  const slots = [...new Set(layout.bars.map((bar) => trestleGridIndex(bar.at, route.length)))].sort((a, b) => a - b);
+  for (const i of slots) {
+    const atArch0 = (i / count) * route.length;
+    const nominalAt = route.wrap(route.startDistance + atArch0);
+    const nominal = route.path.sampleAt(nominalAt);
+    trestleTreeAt(route, nominalAt, nominal.x, nominal.z, tree);
+    if (treeStandsOn(tree, ringSizeVsRace, road)) continue;
+    let room = false;
+    for (const candidate of marchTrestle(route, atArch0, leanGuard, arcReach, tree)) {
+      if (candidate === 'leanExhausted') break;
+      if (!treeStandsOn(tree, ringSizeVsRace, road)) {
+        room = true;
+        break;
+      }
+    }
+    if (!room) return i;
+  }
+  return null;
+}
+
 function trestleSpots(
   route: RailRaceRoute,
   collision: CollisionWorld,
@@ -1950,53 +2038,39 @@ function trestleSpots(
     /** The claims of every candidate the registry refused — what a blocker is asked to clear. */
     const refusedClaims: Claim[] = [];
 
-    search: for (const lean of nearestFirst(leanGuard)) {
-      let admissible = false;
-      for (const along of nearestFirst(arcReach)) {
-        const at = route.wrap(route.startDistance + atArch0 + along);
-        // Nudged along the centre line's own outward normal, not out from the
-        // origin: on a ring that follows the park's edge the two differ.
-        const sample = route.path.sampleAt(at);
-        const x = sample.x + sample.normalX * lean;
-        const z = sample.z + sample.normalZ * lean;
-        trestleTreeAt(route, at, x, z, tree);
-        // 1. Still a trunk? The lean is the run from foot to top, in the chart
-        //    the tree is solved in — see `TrestleTree` for why not world `xz`.
-        const rise = trunkRise(tree);
-        if (rise.lean > maxTrunkLean(rise.height)) continue;
-        admissible = true;
-        // 2. Nothing of a trestle stands over the road — asked of every
-        //    candidate with the whole drawn tree, unclipped, because a claim
-        //    stops at a walker's height and a branch over the carriageway
-        //    does not (measured: the guard found kept branches 4–6.7 m up in
-        //    the driven bus when only the nominal slot was asked).
-        if (treeStandsOn(tree, ringSizeVsRace, road)) {
-          refusedBy.add(ROAD_FEATURE);
-          roadRefused += 1;
-          continue;
-        }
-        // 3. May it stand? The registry first, with the drawn geometry.
-        const claims = trestleClaims(tree, ringSizeVsRace);
-        const blockers = groundClaims.blockers(feature, claims);
-        if (blockers.length > 0) {
-          for (const blocker of blockers) refusedBy.add(blocker.feature);
-          if (refusedClaims.length < 64) refusedClaims.push(...claims);
-          continue;
-        }
-        const legacy = legacyRefuser(x, z, collision);
-        if (legacy !== null) {
-          refusedBy.add(legacy);
-          legacyTally.set(legacy, (legacyTally.get(legacy) ?? 0) + 1);
-          continue;
-        }
-        placed = { at, x, z, index: i, tree: cloneTrestleTree(tree), claims };
-        break search;
-      }
-      // No arc offset at this lean can still be a trunk: the march is over.
-      if (!admissible && lean !== 0) {
+    const march = marchTrestle(route, atArch0, leanGuard, arcReach, tree);
+    for (let step = march.next(); !step.done; step = march.next()) {
+      if (step.value === 'leanExhausted') {
         leanExhausted = true;
         break;
       }
+      const { at, x, z } = step.value;
+      // 2. Nothing of a trestle stands over the road — asked of every
+      //    candidate with the whole drawn tree, unclipped, because a claim
+      //    stops at a walker's height and a branch over the carriageway
+      //    does not (measured: the guard found kept branches 4–6.7 m up in
+      //    the driven bus when only the nominal slot was asked).
+      if (treeStandsOn(tree, ringSizeVsRace, road)) {
+        refusedBy.add(ROAD_FEATURE);
+        roadRefused += 1;
+        continue;
+      }
+      // 3. May it stand? The registry first, with the drawn geometry.
+      const claims = trestleClaims(tree, ringSizeVsRace);
+      const blockers = groundClaims.blockers(feature, claims);
+      if (blockers.length > 0) {
+        for (const blocker of blockers) refusedBy.add(blocker.feature);
+        if (refusedClaims.length < 64) refusedClaims.push(...claims);
+        continue;
+      }
+      const legacy = legacyRefuser(x, z, collision);
+      if (legacy !== null) {
+        refusedBy.add(legacy);
+        legacyTally.set(legacy, (legacyTally.get(legacy) ?? 0) + 1);
+        continue;
+      }
+      placed = { at, x, z, index: i, tree: cloneTrestleTree(tree), claims };
+      break;
     }
 
     if (placed) {
