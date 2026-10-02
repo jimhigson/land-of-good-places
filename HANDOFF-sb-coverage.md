@@ -14,15 +14,11 @@ Lead: agent a52ae9484877226d6. Ruling: EVERY decision-judging check is an accept
   cat-bus, hotel, pet-slide.
 - Doc: STRUCTURAL-BACKTRACKING.md "Every CI check that judges a park is asked" + "Outside acceptance".
 
-## Costs (seed 5 r0, CPU)
-- Lead wants cost down (seed 15 needs 8-9 attempts in build:parks).
-- path-preference decisions-only 6.9 s (was ~60). Sims in-process on fresh World (6.5 s build):
-  cat-bus 13.7, npc-dispersal 37.0, stall-accommodate 8.2, slide-rider (trackside only) 43.6,
-  pet-slide (wired only) 47.4. Only check:rail-race still a subprocess.
-- Fidelity fix: lib/freshWorld.mts restores plan claims before every fresh World (digest-proved).
-- Batch 4 reported to lead. Verification attempt with restore: see scratchpad attempt5e.
-
-## Next
-- Full attempt seed 5 for before/after; report to lead; consider profiling pet-slide/slide-rider further.
-- Verify scripts unscoped still pass (cat-bus, npc-dispersal, slide-rider, pet-slide, path-preference, hotel).
+## State
+- Registry leak fixed in src (worldPlanClaims + GroundClaims.copy); digests 7d0c5f08 x3, control differs.
+  hotel and pet-slide transcripts unchanged on seed 5 after the fix.
+- Cost stages (lib/attemptStages.mts + test/attemptStages.test.ts); park-attempt stages 1/2/3.
+- stall-accommodate restores the stall-shift table; fresh() rehydrates arrivedByBus before each sim.
+- Fixed stale acceptedPark.test expectation (sb-throws message).
+- Measuring: seed 15 r0/r1 and seed 5 r0 staged attempts (scratchpad stage-*.txt), then report to lead.
 - Never run a script without LGP_PARK_RESTART: resolver triggers a whole acceptance loop.
