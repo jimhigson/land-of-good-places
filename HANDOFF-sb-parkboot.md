@@ -17,3 +17,9 @@ Task: check:park-boot fails on seed 5 with "cruiser was read before it was decid
 
 ## Open
 - The real foul: seed 5 generation cost. Measuring CPU per feature (scratch drive2.mts).
+
+## Measurements (load ~86 on 14 cores; CPU = threadCpuUsage)
+- Seed 5 sliced, uncapped: 12577 frames, ready, 155 s wall, 99.5 s CPU. CPU by feature:
+  cruiser 83.9 s, pathGraph 11.2 s (271 pieces, ~41 ms/piece), train 2.7 s, slide 1.2 s.
+- Same decision-zero x2 trace at b128937f (pre procgen-on-sphere merge): not a merge regression.
+- With harness fix, default seed fails honestly: "never finished: 6000 frames ... flying the sky cruiser".
