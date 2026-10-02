@@ -71,6 +71,12 @@ export interface RestartRecord {
   readonly cpuMs: number;
   /** The driver's backtracking inside this attempt, per phase (see `AttemptVerdict.backtracking`). */
   readonly backtracking: AttemptVerdict['backtracking'];
+  /**
+   * What this attempt never asked because a cheaper stage had already rejected
+   * it (`lib/attemptStages.mts`) — said, so the log never reads as though a
+   * measure passed that did not run. Null when every measure was asked.
+   */
+  readonly notAsked: AttemptVerdict['notAsked'];
 }
 
 export interface AcceptedPark {
@@ -153,6 +159,7 @@ export async function acceptPark(
       wallMs: verdict.wallMs,
       cpuMs: verdict.cpuMs.build + verdict.cpuMs.invariants + verdict.cpuMs.checks + verdict.cpuMs.findings,
       backtracking: verdict.backtracking,
+      notAsked: verdict.notAsked ?? null,
     };
     attempts.push(record);
     options.onAttempt?.(record);
@@ -161,7 +168,11 @@ export async function acceptPark(
     }
   }
   const log = attempts
-    .map((a) => `  restart ${a.restart}: ${a.forcedBy.map((f) => `${f.measure} (${f.count})`).join('; ')}`)
+    .map(
+      (a) =>
+        `  restart ${a.restart}: ${a.forcedBy.map((f) => `${f.measure} (${f.count})`).join('; ')}` +
+        (a.notAsked ? ` — not asked: rejected at stage ${a.notAsked.rejectedAtStage}` : ''),
+    )
     .join('\n');
   throw new Error(
     `accepted park: seed ${seed} passed no attempt in ${cap} restarts — a measure nothing passes is a generator or ` +
@@ -301,6 +312,7 @@ export interface AcceptanceMetadata {
     readonly forcedBy: readonly { readonly measure: string; readonly count: number; readonly first: string }[];
     readonly backtracking: RestartRecord['backtracking'];
     readonly wallMs: number;
+    readonly notAsked: RestartRecord['notAsked'];
   }[];
 }
 
@@ -315,6 +327,7 @@ export function acceptanceMetadata(accepted: AcceptedPark, sourceHash: string): 
       forcedBy: a.forcedBy,
       backtracking: a.backtracking,
       wallMs: a.wallMs,
+      notAsked: a.notAsked,
     })),
   };
 }
@@ -344,6 +357,7 @@ export function describeRestarts(accepted: AcceptedPark): string[] {
   return accepted.attempts.map((a) =>
     a.accepted
       ? `restart ${a.restart}: accepted (${a.measuresAsked} measures, ${(a.wallMs / 1000).toFixed(1)} s)`
-      : `restart ${a.restart}: rejected by ${a.forcedBy.map((f) => `${f.measure} x${f.count} — ${f.first}`).join(' | ')}`,
+      : `restart ${a.restart}: rejected by ${a.forcedBy.map((f) => `${f.measure} x${f.count} — ${f.first}`).join(' | ')}` +
+        (a.notAsked ? ` (not asked: rejected at stage ${a.notAsked.rejectedAtStage}, ${a.notAsked.measures.length} measure(s))` : ''),
   );
 }

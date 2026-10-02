@@ -72,7 +72,7 @@ describe('the root acceptance loop', () => {
           return verdict(seed, r, ['x'], { accepted: false, broken: 'x: TypeError' });
         },
       }),
-    ).rejects.toThrow(/restart 0: a measure threw \(x: TypeError\)/);
+    ).rejects.toThrow(/restart 0: broken \(x: TypeError\)/);
     expect(calls, 'the loop searched on past an instrument that throws').toBe(1);
   });
 

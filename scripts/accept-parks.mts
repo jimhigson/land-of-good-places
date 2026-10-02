@@ -77,7 +77,8 @@ await Promise.all(
             if (!record.accepted) {
               process.stdout.write(
                 `  seed ${seed} restart ${record.restart} rejected (${(record.wallMs / 1000).toFixed(0)} s): ` +
-                  `${record.forcedBy.map((f) => f.measure).join(' | ').slice(0, 300)}\n`,
+                  `${record.forcedBy.map((f) => f.measure).join(' | ').slice(0, 300)}` +
+                  `${record.notAsked ? ` — not asked: rejected at stage ${record.notAsked.rejectedAtStage} (${record.notAsked.measures.length} measures)` : ''}\n`,
               );
             }
           },

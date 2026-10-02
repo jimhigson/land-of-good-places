@@ -16,7 +16,12 @@ import { worldSolveStallBuilder } from '../../src/world/worldPhase.ts';
 import { isRefusal } from '../../src/boot/featureBuilder.ts';
 import { shapesOverlap, type Claim } from '../../src/boot/groundClaims.ts';
 import { boothBoxFor } from '../../src/minigames/boothFootprint.ts';
-import { STALL_PLACEMENTS, STALL_STANDS_BY_ID } from '../../src/minigames/stallPlacement.ts';
+import {
+  STALL_PLACEMENTS,
+  STALL_STANDS_BY_ID,
+  setStallShift,
+  stallShift,
+} from '../../src/minigames/stallPlacement.ts';
 import type { ClauseKind } from './checkScope.mts';
 
 
@@ -48,6 +53,13 @@ export async function stallAccommodate(
   };
   const write = (text: string): void => {
     if (!quiet) process.stderr.write(text);
+  };
+  // The booths this moves are recorded in a module-level table every later
+  // World reads (`stallPlacement.ts`): put it back as it was before returning,
+  // so a World built after this one is the park a fresh process builds.
+  const shiftsBefore = Object.keys(STALL_PLACEMENTS).map((id) => [id, stallShift(id)] as const);
+  const restoreShifts = (): void => {
+    for (const [id, [dx, dz]] of shiftsBefore) setStallShift(id, dx, dz);
   };
   try {
     const decisions: string[] = [];
@@ -407,5 +419,7 @@ export async function stallAccommodate(
       return { voids: [error.message], decisions: [], code: [], notes: [] };
     }
     throw error;
+  } finally {
+    restoreShifts();
   }
 }
