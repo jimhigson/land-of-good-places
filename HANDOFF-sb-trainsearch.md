@@ -35,3 +35,14 @@ confirm park:attempt accepts at recorded restarts.
 ## Changes so far (uncommitted DIAG lines must be stripped before commit)
 - crossings supply = min(4, 1 + refusedBridgeSiteCount()) — no identical re-draws.
 - TrainRouteUnsolvable carries cruiserRejections; train refusal names cruiser only if >0.
+
+## Baseline sweep (base worktree .claude/worktrees/sb-trainsearch-base = origin/wip/sb-merge b128937f,
+## scratch base-sweep.txt + base/seedN.log; plan thread-CPU s per seed)
+0:41 1:282 2:3 3:132 4:11 5:92 6:472 7:11 8:81 9:106 10:31 11:10 12:6 13:265 14:185 15:283
+Train-failure cascades (train re-seeds failing ~85%, x6 per cruiser) dominate 6, 9, 13, 14, 15;
+crossings identical replays inflate pathGraph on 1, 3, 15; cruiser search itself big on 1, 5, 8.
+
+## Commits
+- 218a1f17 crossings supply = min(4, 1 + refused sites) (no identical re-draws)
+- dd652e6f rail search speedups (train clear grid, boundary edgeCloserThan) + cruiser-attribution
+Next: after1 sweep (scratch after1-sweep.txt) with DIAG train satisfied/cruiserRejections prints.
