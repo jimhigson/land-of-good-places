@@ -1150,3 +1150,10 @@ function solverCloserThan(
     return view.distanceToEdge(x, z) < margin;
   };
 }
+
+/**
+ * Half-thickness of the boundary wall as **collision** sees it — what a child
+ * is actually stopped by, as opposed to the stone she can see. Owned here so
+ * the layout can keep doormats off the wall; `Garden.ts` builds the wall with it.
+ */
+export const BOUNDARY_WALL_COLLISION_HALF = 0.45;

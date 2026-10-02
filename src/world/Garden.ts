@@ -30,6 +30,7 @@ import { grassTexture, pinkStoneTexture } from '../core/textures';
 import { placeOnSphere, terrainHeight } from './terrain';
 import { buildPaths } from './pathGraph';
 import type { CollisionWorld } from './Collision';
+import { BOUNDARY_WALL_COLLISION_HALF } from './boundary';
 import { ENTRANCE_GATE_HALF_WIDTH, entranceGateFrame } from './entrance/layout';
 import { parkGateFeet } from './entrance/gateArch';
 
@@ -58,16 +59,10 @@ import { parkGateFeet } from './entrance/gateArch';
  */
 export const BOUNDARY_MASONRY_HALF_WIDTH = 0.86;
 
-/**
- * Half-thickness of the boundary wall as **collision** sees it — what a child
- * is actually stopped by, as opposed to the stone she can see.
- *
- * Narrower than {@link BOUNDARY_MASONRY_HALF_WIDTH} because the pillar caps
- * bulge past the run of blocks and nothing needs to collide with a decorative
- * bulge. Both numbers are real and they answer different questions: "could a
- * child be standing here?" is this one, "is there stone here?" is that one.
- */
-export const BOUNDARY_WALL_COLLISION_HALF = 0.45;
+// Half-thickness of the boundary wall as collision sees it — owned by
+// `boundary.ts` (narrower than BOUNDARY_MASONRY_HALF_WIDTH: the pillar caps
+// bulge past the run of blocks and nothing needs to collide with them).
+export { BOUNDARY_WALL_COLLISION_HALF };
 
 export class Garden {
   readonly group = new Group();

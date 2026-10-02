@@ -4,7 +4,7 @@ import { lazyArrayView, lazyView } from '../boot/lazyView';
 import { ARRIVAL_EXEMPT_NEAR, DEPARTURE_EXEMPT_NEAR } from './streetRules';
 import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG, PLAYER_RADIUS } from '../core/constants';
 import { ANCHORS } from './anchors';
-import { PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong, entranceFacing, hasOwnDoor } from './parkLayout';
+import { DOORMAT_LEAD, PARK_LAYOUT, RING_RADIUS, edgeDistanceAlong, entranceFacing, hasOwnDoor } from './parkLayout';
 import { PARK_BOUNDARY } from './boundary';
 import { TRAIN_PLAN, RAIL_CORRIDOR_CLEARANCE as RAIL_CORRIDOR_CLEARANCE_PLAN } from './train/plan';
 import { STATION_GAP } from './train/fence';
@@ -4962,13 +4962,13 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
       // A plot whose door faces its own way (the castle's front door faces +Z
       // on every bearing) declares it; `entranceFacing` is the one owner.
       const [outX, outZ] = entranceFacing(placedTarget);
-      lead.push([ex + outX * 3.5, ez + outZ * 3.5]);
+      lead.push([ex + outX * DOORMAT_LEAD, ez + outZ * DOORMAT_LEAD]);
     } else if (kind === 'stall') {
       // A booth with no plot of its own (the ferris wheel's ticket kiosk) is
       // still a counter with a front: arrive head-on along the way it faces,
       // not from behind through the booth (seed 12, 2 Oct 2026).
       const placement = (STALL_PLACEMENTS as Readonly<Record<string, { readonly facing: number }>>)[id.replace(/^stall\./, '')];
-      if (placement) lead.push([ex + Math.sin(placement.facing) * 3.5, ez + Math.cos(placement.facing) * 3.5]);
+      if (placement) lead.push([ex + Math.sin(placement.facing) * DOORMAT_LEAD, ez + Math.cos(placement.facing) * DOORMAT_LEAD]);
     }
     // The street lattice serves the spur (network-first, lead-last); the
     // old continuous router is only the fallback for ground the lattice
