@@ -46,10 +46,11 @@
 import './headless-canvas.mjs';
 import { Group, Mesh, Box3, Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
-import { CollisionWorld } from '../src/world/Collision.ts';
+import { clearsTop, CollisionWorld } from '../src/world/Collision.ts';
 import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
+import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt } from '../src/world/spaces.ts';
 import { reptileKeepOuts, segmentDistance } from '../src/world/reptileHouse/props.ts';
@@ -351,6 +352,7 @@ console.log('\nHOP — the 1.4 m walls hold a body at jump height:');
   probe.set(5, JUMP_APEX_HEIGHT, 0);
   const lowEnd = march(low, probe, new Vector3(0, 0, 0), 0.1, 6);
   say(Math.hypot(lowEnd.x, lowEnd.z) < 2.4, `CONTROL: a wall ${(JUMP_APEX_HEIGHT - 0.08).toFixed(2)} m tall lets a body at the apex in (ended ${Math.hypot(lowEnd.x, lowEnd.z).toFixed(2)} m from the centre)`);
+  say(!clearsTop(REPTILE_ENCLOSURE_WALL_HEIGHT, JUMP_APEX_HEIGHT), `the engine's own rule holds a body at the apex under a ${REPTILE_ENCLOSURE_WALL_HEIGHT} m wall (clearsTop)`);
   let breached = 0;
   for (const exhibit of EXHIBIT_PLACEMENTS) {
     if (!['snakeGrove', 'tortoiseGarden', 'lagoon', 'iguanaRocks', 'nursery'].includes(exhibit.id)) continue;
@@ -472,11 +474,14 @@ console.log('\nDOORS — both ways, on the real building:');
 
 console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has a collider at its middle:');
 {
-  // Things drawn with no collider on purpose, by name prefix, with the reason.
+  // Things drawn with no collider at their middle on purpose, by name, with
+  // the reason. Anything whose lowest point is above the tallest hat is
+  // overhead and never met at all, so it is skipped before this list.
   const walkThrough: readonly [string, string][] = [
-    ['shopkeeper', "behind the counter, in the pocket the fill proved unreachable"],
-    ['reptile.rib', 'overhead, 4.2 m up at the walls'],
+    ['shopkeeper', 'behind the counter, in the pocket the fill proved unreachable'],
     ['reptile.wall', 'the walls are colliders themselves and the probe above marches at them'],
+    ['rp-log-hollow', "a walk-through: its middle is the Log Walk, its walls are the two capsules marched above"],
+    ['rs-awning-posts', "both posts stand inside the counter's capsule; the pair's middle is the sealed pocket"],
   ];
   let checked = 0;
   let naked = 0;
@@ -488,6 +493,7 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
     box.setFromObject(object);
     const height = box.max.y - box.min.y;
     if (height < 0.6 || !Number.isFinite(height)) return;
+    if (box.min.y > TALLEST_CHILD_HEIGHT) return;
     let ancestor: typeof object.parent = object;
     let name = object.name;
     while (ancestor) {

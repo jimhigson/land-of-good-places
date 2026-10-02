@@ -1017,7 +1017,7 @@ export class Exhibits {
     const over = rock.snoutReach - REPTILE_ISLAND_COLLIDER_RADIUS;
     if (over > 0) {
       const at = (REPTILE_ISLAND_COLLIDER_RADIUS + rock.snoutReach) / 2;
-      this.ctx.props.disc("Noodle's snout", Math.SQRT1_2 * at, Math.SQRT1_2 * at, over / 2 + 0.25, 1.3, { stand: false });
+      this.ctx.props.disc("Noodle's snout", Math.SQRT1_2 * at, Math.SQRT1_2 * at, over / 2 + 0.15, 1.3, { stand: false });
     }
     const headAt: LocalPoint = { x: rock.head.position.x, z: rock.head.position.z };
     this.nameplate(placement.id, 3.43, 0.2, Math.PI / 2, 0.35);

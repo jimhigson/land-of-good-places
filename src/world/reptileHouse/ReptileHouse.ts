@@ -1,5 +1,5 @@
 import { Group, Sprite, SpriteMaterial, Vector3 } from 'three';
-import type { CollisionWorld } from '../Collision';
+import { clearsTop, type CollisionWorld } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
 import type { ShopStand } from '../building/shops/Shops';
@@ -181,10 +181,13 @@ export class ReptileHouse implements GameSystem {
     this.deps = deps;
     this.spaces = new SpaceManager(controls);
 
-    if (REPTILE_ENCLOSURE_WALL_HEIGHT <= JUMP_APEX_HEIGHT) {
+    // The engine's own rule, not a copy of it: `clearsTop` is what the
+    // resolver asks, grace included, so a wall it would let a body at the
+    // apex over is a wall a child jumps into and never gets out of.
+    if (clearsTop(REPTILE_ENCLOSURE_WALL_HEIGHT, JUMP_APEX_HEIGHT)) {
       throw new Error(
-        `Reptile House: the open enclosures' ${REPTILE_ENCLOSURE_WALL_HEIGHT} m walls are not above the ` +
-          `jump apex (${JUMP_APEX_HEIGHT.toFixed(2)} m) — a child could jump in and never get out.`,
+        `Reptile House: the open enclosures' ${REPTILE_ENCLOSURE_WALL_HEIGHT} m walls are cleared by a jump ` +
+          `(apex ${JUMP_APEX_HEIGHT.toFixed(2)} m plus the resolver's grace) — a child could jump in and never get out.`,
       );
     }
 
@@ -447,15 +450,21 @@ export class ReptileHouse implements GameSystem {
    */
   private exteriorEntranceZone(): InteractZone {
     const band = reptileEntryBand(this.frame);
-    const mat = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + 1.2, 0);
-    const reach = Math.hypot(mat.x - this.frame.x, mat.z - this.frame.z);
+    const plot = this.deps.plot;
+    // With a plot, the pick area reaches the map pin at the plot's entrance
+    // point, as the hotel's does; on the forecourt there is no pin, and the
+    // tail's own "Tickle tail!" zone stands at `REPTILE_TAIL_REACH`, so the
+    // pick area stops a finger short of it (the tap-spacing rule).
+    const pickRadius = plot
+      ? Math.max(REPTILE_SHELL_RADIUS, Math.hypot(plot.entranceX - plot.x, plot.entranceZ - plot.z)) + 1
+      : REPTILE_SHELL_RADIUS + 0.6;
     return {
       id: ENTRANCE_ZONE,
       label: 'Reptile House',
       x: this.frame.x,
       y: this.surfaces.sample(this.frame.x, this.frame.z, 3),
       z: this.frame.z,
-      pickRadius: Math.max(REPTILE_SHELL_RADIUS, reach) + 1,
+      pickRadius,
       standX: band.centreX,
       standZ: band.centreZ,
     };

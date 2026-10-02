@@ -159,13 +159,19 @@ export const REPTILE_WEST_STAND_X = -19.5;
 export const REPTILE_PIER_POST_RADIUS = 0.45;
 
 /**
- * Open (glass-less) enclosure walls: above `JUMP_APEX_HEIGHT` (≈ 1.28 m,
- * derived in `Player.ts`) and below `KID_EYE_HEIGHT` (1.5164). She looks
- * over, cannot get in, nothing inside has to be leavable. `shell.ts` asserts
- * this against the imported `JUMP_APEX_HEIGHT` at construction, because a
- * derived value cannot be read from here.
+ * Open (glass-less) enclosure walls: above what a jump clears and below
+ * `KID_EYE_HEIGHT` (1.5164). She looks over, cannot get in, nothing inside
+ * has to be leavable.
+ *
+ * **1.45, not the spec's 1.4.** `Collision.ts`'s `clearsTop` grants a mover
+ * `JUMP_CLEARANCE_GRACE` (0.15 m) over her feet, so a body at the 1.28 m
+ * apex clears anything up to 1.43 m — measured by `check:reptile-house`'s
+ * hop probe, which marched a body over a 1.4 m wall from 25 of 60 bearings.
+ * `ReptileHouse`'s constructor asserts this constant against the engine's
+ * own `clearsTop(…, JUMP_APEX_HEIGHT)`, because neither the apex nor the
+ * grace can be read from here.
  */
-export const REPTILE_ENCLOSURE_WALL_HEIGHT = 1.4;
+export const REPTILE_ENCLOSURE_WALL_HEIGHT = 1.45;
 
 /** Snake Grove and Iguana Rocks: solid discs. */
 export const REPTILE_ROUND_WALL_RADIUS = 2.4;
@@ -568,15 +574,18 @@ export const REPTILE_PATH_MIN_CLEAR = 3;
 
 export const PATHS: readonly PathSpec[] = [
   {
+    // The foyer is open floor; these two polylines are how it is swept — the
+    // east leg to the SE Channel, the west one round the stall to the SW Walk.
     id: 'foyer',
     width: 9,
     points: [
       { x: REPTILE_ARRIVAL_X, z: REPTILE_ARRIVAL_Z },
       { x: 6, z: 12.5 },
-      { x: -1.5, z: 12.5 },
-      { x: 14, z: 12.5 },
+      { x: 6, z: 11.8 },
+      { x: 14, z: 11.8 },
     ],
   },
+  { id: 'foyerWest', width: 4, points: [{ x: 6, z: 12.5 }, { x: 3.3, z: 10.3 }, { x: -1.5, z: 12.5 }] },
   {
     id: 'ring',
     width: 4,
@@ -608,7 +617,7 @@ export const PATHS: readonly PathSpec[] = [
   {
     id: 'seChannel',
     width: 3.4,
-    points: [{ x: 21.9, z: 6.35 }, { x: 21.9, z: 10.8 }, { x: 14, z: 10.8 }, { x: 14, z: 12.5 }],
+    points: [{ x: 21.9, z: 6.35 }, { x: 21.9, z: 10.8 }, { x: 14, z: 11.8 }],
   },
   { id: 'swWalk', width: 3.25, points: [{ x: -19.3, z: 10.7 }, { x: -3, z: 10.7 }, { x: -1.5, z: 12.5 }] },
 ];
