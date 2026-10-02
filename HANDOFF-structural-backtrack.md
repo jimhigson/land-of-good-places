@@ -206,3 +206,6 @@ coping chamfer (#698 fix/procgen-last has the fix).
   rejected attempt -> refuse at decision.
 - In flight: fix/sb-trainsearch2 (a6ac; cruiser seed 5 94.8->27 s), fix/paving-clear (ab03), fix/sb-duckbar.
   Re-record + verify after all three.
+- COORDINATOR Q (answered here, no message route): `sb-duckbar-base` = helper ae706c0d's BASELINE worktree measuring
+  how often DuckBarRefusal (thrown in RailRace ctor) ends an attempt, before making it refuse at the decision.
+  Brief carries Jim's ruling: bars stay 2.30 m, no width change; no-bar-end-in-another-lane invariant kept.
