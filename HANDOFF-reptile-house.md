@@ -43,20 +43,39 @@ complete.
 
 ## Where this is
 
-`tsc --noEmit`, `typecheck:test` and `pnpm run build` exit 0. The hall
-builds in the real harness with zero keep-out violations (the first two
-builds found ten, all fixed by moving nodes/props — `props.ts` reports them
-by name).
+`tsc --noEmit`, `typecheck:test`, `pnpm run build`, `check:chain-coverage`
+exit 0. Pinned to **seed 5, restart 1** (`LGP_SEED=5 LGP_PARK_RESTART=1`):
 
-**The acceptance loop is the slow part.** Any edit to `src/`, `scripts/`,
-`test/procgen/` or `package.json` changes `acceptanceSourceHash()`
-(`scripts/lib/acceptedPark.mts`), and the first headless build of a seed then
-re-runs `accept-parks` for it (minutes, several restarts). To iterate on the
-hall without that, pin the restart: `LGP_SEED=5 LGP_PARK_RESTART=<r>` — but
-seed 5's restart 0 is refused by the rail race (`DuckBarRefusal`) and restart
-1 by two invariants, so **the accepted restart has to be learnt from
-`pnpm run accept:parks 5`** (log in the scratchpad `build/accept5.log`), then
-pinned for iteration. The final unpinned runs are what CI does.
+| check | result |
+|---|---|
+| `check:reptile-house` | exit 0 — "All clauses passed": 0 pockets in 11 418 clear cells, 768 marches, 0 inside; proved red with `REPTILE_CHECK_REMOVE=lagoon` (8 clauses, transcript in the script header) |
+| `check:tap-spacing` | exit 0 — 10 spaces (the hall and the forecourt added), 147 zones, 25 bands |
+| `check:hall-solid`, `check:hotel`, `check:castle`, `check:castle-floors`, `check:castle-towers`, `check:castle-window` | exit 0 |
+| `check:brevity`, `check:assets`, `check:hat-fit`, `check:character-parity` | exit 0 |
+| coplanar sweep of the hall (`LGP_COPLANAR_CHILD=1`, seed 5) | first run: 70 seams, which found the beds **drawn mirrored north–south** (the collider discs were right; the extrude's rotation negated z); fixed, rerun pending below |
+
+**The acceptance loop is the slow part, and it is why every run above is
+pinned.** Any edit to `src/`, `scripts/`, `test/procgen/` or `package.json`
+changes `acceptanceSourceHash()` (`scripts/lib/acceptedPark.mts`), and the
+first headless build of a seed then re-runs `accept-parks` for it (minutes,
+many restarts: seed 5's restarts 0 and 4 are refused by the rail race's
+`DuckBarRefusal` at build, 1/2/3/5 by invariants of the park's own —
+nothing to do with the hall). Restart 1 *builds*, so it is the one to pin
+for iterating on the hall. The unpinned runs are CI's.
+
+**Two things cannot pass locally on this base, for the same reason, and
+neither is this branch's doing:**
+
+- `check:served-deep-links` — the browser has no prebuilt park file (#705),
+  so it always builds restart 0, which seed 5's rail race refuses; no deep
+  link, old or new, boots. The two new `CHECKS` rows are written and
+  typechecked; the links themselves were verified in headless Chromium by
+  injecting `__LGP_PARK_RESTART__ = 1` before the page's modules ran
+  (`scripts/local/reptile-shots.local.mts`, uncommitted), which is what a park
+  file does.
+- `check:coplanar` whole, `test:procgen`, `check:swept-bus` — each sweeps
+  every pool seed through the acceptance loop; not run here. The hall's own
+  spaces were swept directly (above).
 
 The check itself has a `REPTILE_CHECK_REMOVE=<solid name substring>` switch
 that removes one registered collider after the build, for proving it red.
