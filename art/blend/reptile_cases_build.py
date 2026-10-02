@@ -69,7 +69,6 @@ from blendkit import (  # noqa: E402
     TAU,
     Part,
     collection,
-    ellipsoid,
     extrude_outline,
     flat_top_box,
     reset_scene,
@@ -119,7 +118,8 @@ JAR_FOOT_RADIUS = REPTILE_JAR_RADIUS + 0.15
 WALL_THICKNESS = 0.4
 COPING_BULGE = 0.06
 SCALLOP_LOBES = 8
-SCALLOP_DEPTH = 0.1
+SCALLOP_DEPTH = 0.12
+SCALLOP_SEGMENTS = 48
 
 #: The pier post: a stone core with a vine spiralling up it. Core, vine tube
 #: and leaf tips all stay inside `REPTILE_PIER_POST_RADIUS` (asserted).
@@ -162,7 +162,7 @@ GROTTO_LIP_Z = 2.1
 # =============================================================================
 
 
-def stadium_outline(segment: float, half: float, arc_steps: int = 12):
+def stadium_outline(segment: float, half: float, arc_steps: int = 10):
     """The closed outline of a stadium along X, as ``(x, y, nx, ny, back)``.
 
     ``back`` marks an outline *edge* (from this point to the next) that lies on
@@ -275,14 +275,20 @@ def enclosure_profile(height: float, thickness: float = WALL_THICKNESS):
     ]
 
 
-def leaf_outline(length: float, width: float, points: int = 6):
-    """A pointed leaf in the XZ plane, base at the origin, tip at ``+X``."""
+def leaf_outline(length: float, width: float, points: int = 10):
+    """A pointed leaf in the XZ plane, base at the origin, tip at ``+X``.
+
+    Widest a third of the way along, drawn to a point at both ends — a banana
+    leaf's silhouette rather than a hexagon's.
+    """
     outline = []
     for i in range(points):
         t = i / points
         angle = t * TAU
-        x = length * 0.5 * (1.0 + math.cos(angle))
-        z = width * 0.5 * math.sin(angle) * (0.6 + 0.4 * math.sin(math.pi * x / length))
+        along = 0.5 * (1.0 - math.cos(angle))  # 0 at the base, 1 at the tip
+        x = length * along
+        belly = math.sin(math.pi * along ** 0.7)
+        z = width * 0.5 * (1.0 if math.sin(angle) >= 0 else -1.0) * belly
         outline.append((x, z))
     return outline
 
@@ -326,9 +332,10 @@ def build_case(coll):
         (-CASE_RIM_INSET, g + CASE_RIM_HEIGHT),
         (-CASE_RIM_INSET, g),
     ]
-    Part("rc-case-rim").add(
-        *swept_wall(outline, rim, closed_profile=True, skip_back=True)
-    ).emit(coll)
+    # Closed all the way round: it is 0.2 m off the wall and the 38° camera
+    # looks over the backboard at its back run, so a missing run reads as a
+    # broken frame rather than as economy.
+    Part("rc-case-rim").add(*swept_wall(outline, rim, closed_profile=True)).emit(coll)
 
     # The backboard: a flat slab across the back, run into the plinth below
     # and the rim above. Its corners stay inside the stadium's arcs.
@@ -380,9 +387,11 @@ def build_case(coll):
 def build_pier(coll):
     core = Part("rc-pier-post")
     core.add(*tube(PIER_CORE_RADIUS, PIER_HEIGHT - 0.15 + FLOOR_SINK, sides=14, z0=-FLOOR_SINK))
-    # A squashed cap, its equator sunk into the core's top.
-    core.at(*ellipsoid(PIER_CORE_RADIUS + 0.02, PIER_CORE_RADIUS + 0.02, 0.17, 1),
-            z=PIER_HEIGHT - 0.17)
+    # A domed cap, its skirt sunk into the core's top.
+    c = PIER_CORE_RADIUS
+    core.add(*lathe_open([(c + 0.02, PIER_HEIGHT - 0.2), (c + 0.02, PIER_HEIGHT - 0.14),
+                          (c * 0.78, PIER_HEIGHT - 0.05), (c * 0.4, PIER_HEIGHT - 0.005),
+                          (0.0, PIER_HEIGHT)], 14))
     core.emit(coll)
 
     vine = Part("rc-pier-vine")
@@ -401,7 +410,7 @@ def build_pier(coll):
         t = (k + 0.5) / VINE_LEAVES
         angle = t * VINE_TURNS * TAU
         x, y, z = helix_r * math.cos(angle), helix_r * math.sin(angle), z_lo + t * (z_hi - z_lo)
-        verts, faces = extrude_outline(leaf_outline(VINE_LEAF_LENGTH, 0.1), 0.02, centre=(VINE_LEAF_LENGTH * 0.5, 0.0))
+        verts, faces = extrude_outline(leaf_outline(VINE_LEAF_LENGTH, 0.1, 6), 0.02, centre=(VINE_LEAF_LENGTH * 0.5, 0.0))
         # Leaf in XZ pointing +X → rotate to lie tangentially (around Z by the
         # helix angle + 90°), tilted 40° upward, then moved to the stem.
         m = (Matrix.Translation((x, y, z))
@@ -436,7 +445,7 @@ def build_jar(coll):
 
 
 def build_round_wall(coll):
-    outline = circle_outline(REPTILE_ROUND_WALL_RADIUS, 32, SCALLOP_LOBES, SCALLOP_DEPTH)
+    outline = circle_outline(REPTILE_ROUND_WALL_RADIUS, SCALLOP_SEGMENTS, SCALLOP_LOBES, SCALLOP_DEPTH)
     Part("rc-round-wall").add(
         *swept_wall(outline, enclosure_profile(REPTILE_ENCLOSURE_WALL_HEIGHT))
     ).emit(coll)
@@ -470,7 +479,7 @@ def build_nursery(coll):
     top = REPTILE_NURSERY_RAIL_TOP
     ring = [(gr - NURSERY_RAIL_RING, top - NURSERY_RAIL_RING), (gr, top - NURSERY_RAIL_RING),
             (gr, top), (gr - NURSERY_RAIL_RING, top)]
-    rail.add(*revolve(ring, 32))
+    rail.add(*revolve(ring, 24))
     post_r = NURSERY_RAIL_POST_RADIUS
     for k in range(NURSERY_RAIL_POSTS):
         angle = k * TAU / NURSERY_RAIL_POSTS
@@ -496,35 +505,55 @@ def build_island_kerb(coll):
         (-t, h - 0.25),
         (-t, -FLOOR_SINK),
     ]
-    Part("rc-island-kerb").add(*swept_wall(circle_outline(r, 40), kerb)).emit(coll)
+    Part("rc-island-kerb").add(*swept_wall(circle_outline(r, 32), kerb)).emit(coll)
 
 
 # =============================================================================
 # The Grotto
 # =============================================================================
 
-#: (centre x, y, z, radii x, y, z) — a back arc of boulders, two low ones at
-#: the front corners, two stacked up to the waterfall's top.
+#: (centre x, y, z, radii x, y, z, spin° about Z, tilt° about X) — a back arc
+#: of boulders, two low ones at the front corners, two stacked up to the
+#: waterfall's top. Each is a smooth lathe ellipsoid turned a little so the
+#: pile does not read as a row of eggs.
 GROTTO_BOULDERS = [
-    (-1.9, 0.9, 1.0, 1.3, 1.1, 1.0),
-    (0.0, 1.1, 1.3, 1.6, 1.2, 1.3),
-    (1.9, 0.9, 0.9, 1.2, 1.0, 0.95),
-    (-0.9, 1.3, 2.4, 1.1, 0.9, 0.9),
-    (0.8, 1.4, 2.7, 1.0, 0.85, 0.8),
-    (-2.8, 0.3, 0.45, 0.7, 0.6, 0.5),
-    (2.7, 0.2, 0.4, 0.6, 0.55, 0.45),
+    (-1.9, 0.9, 1.0, 1.3, 1.1, 1.0, 20, 8),
+    (0.0, 1.1, 1.3, 1.6, 1.2, 1.3, -10, -6),
+    (1.9, 0.9, 0.9, 1.2, 1.0, 0.95, 35, 10),
+    (-0.9, 1.3, 2.4, 1.1, 0.9, 0.9, -25, 12),
+    (0.8, 1.4, 2.7, 1.0, 0.85, 0.8, 15, -8),
+    (-2.8, 0.3, 0.45, 0.7, 0.6, 0.5, 40, 0),
+    (2.7, 0.2, 0.4, 0.6, 0.55, 0.45, -30, 0),
 ]
+
+
+def boulder(rx: float, ry: float, rz: float, segments: int = 10, rows: int = 5):
+    """A smooth lathe ellipsoid — rounder than an icosphere at the same cost,
+    because its quads shade smoothly where the icosphere's low-subdivision
+    triangles crease at `Part.emit`'s 46° threshold."""
+    profile = []
+    for i in range(rows + 1):
+        a = math.pi * i / rows
+        profile.append((math.sin(a), -math.cos(a)))
+    verts, faces = lathe_open(profile, segments)
+    return [(x * rx, y * ry, z * rz) for x, y, z in verts], faces
+
+
+def boulder_matrix(cx, cy, cz, spin_deg, tilt_deg):
+    return (Matrix.Translation((cx, cy, cz))
+            @ Matrix.Rotation(math.radians(spin_deg), 4, "Z")
+            @ Matrix.Rotation(math.radians(tilt_deg), 4, "X"))
 
 
 def build_grotto(coll):
     rock = Part("rc-grotto-rock")
-    for cx, cy, cz, rx, ry, rz in GROTTO_BOULDERS:
-        rock.at(*ellipsoid(rx, ry, rz, 1), x=cx, y=cy, z=cz)
+    for cx, cy, cz, rx, ry, rz, spin, tilt in GROTTO_BOULDERS:
+        rock.add(*boulder(rx, ry, rz), boulder_matrix(cx, cy, cz, spin, tilt))
     # The waterfall lip: a flat shelf poking out of the middle boulder. Water
     # (TS) falls off its front edge into the pool.
     lip_depth = 0.9
     lip_y = GROTTO_BOULDERS[1][1] - GROTTO_BOULDERS[1][4] + 0.55 - lip_depth * 0.5
-    rock.at(*flat_top_box(0.8, lip_depth, 0.2, 0.06), x=0.3, y=lip_y, z=GROTTO_LIP_Z - 0.1)
+    rock.at(*flat_top_box(1.2, lip_depth, 0.16, 0.05), x=0.3, y=lip_y, z=GROTTO_LIP_Z - 0.08)
     # The pool basin: a low lipped ring, open to the floor inside.
     pr = GROTTO_POOL_RADIUS
     basin = [
@@ -536,12 +565,16 @@ def build_grotto(coll):
         (pr - 0.28, -FLOOR_SINK),
     ]
     rock.at(*lathe_open(basin, 24), x=GROTTO_POOL_CENTRE[0], y=GROTTO_POOL_CENTRE[1])
-    rock.emit(coll)
+    # Everything smooth: a boulder has no crease to keep.
+    rock.emit(coll, sharp_deg=90)
 
     moss = Part("rc-grotto-moss")
-    for cx, cy, cz, rx, ry, rz in GROTTO_BOULDERS[:5]:
-        moss.at(*ellipsoid(rx * 0.55, ry * 0.5, rz * 0.22, 1), x=cx, y=cy - ry * 0.15, z=cz + rz * 0.86)
-    moss.emit(coll)
+    for cx, cy, cz, rx, ry, rz, spin, tilt in GROTTO_BOULDERS[:5]:
+        # A flat cushion sat on the boulder's crown, in the boulder's own frame
+        # so it sits where the crown actually is after the tilt.
+        m = boulder_matrix(cx, cy, cz, spin, tilt) @ Matrix.Translation((0.0, -ry * 0.12, rz * 0.84))
+        moss.add(*boulder(rx * 0.55, ry * 0.5, rz * 0.24, 8, 3), m)
+    moss.emit(coll, sharp_deg=90)
     return {
         "lip_front_y": lip_y - lip_depth * 0.5,
         "lip_z": GROTTO_LIP_Z,
