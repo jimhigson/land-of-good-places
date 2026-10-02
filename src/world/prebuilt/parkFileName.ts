@@ -14,6 +14,10 @@
  * `vite build` ships files and bundle together, so in a real build the two
  * always agree.
  *
+ * 5: the Rail Race is a plan feature, `railRaceBars` (its arch station, exit
+ * and duck-bar plan, decided where the bars fit — #706), no longer a `built`
+ * decision.
+ *
  * 4: each tree and bush carries its scatter `identity` (what a relocation is
  * keyed by), and `measures.bushGround` carries the solve's measurement of the
  * bush scatter's legal ground, for the acceptance measures of a hydrated park.
@@ -21,7 +25,7 @@
  * 3: the file names its seed's accepted restart and carries the acceptance
  * loop's log (`restart`, `acceptance`).
  */
-export const PARK_FILE_FORMAT = 4;
+export const PARK_FILE_FORMAT = 5;
 
 /**
  * **The seeds this game has: 0 to 15.** Jim, 24 September 2026: *"we only
@@ -68,9 +72,9 @@ export interface PrebuiltParksManifest {
  * ferris wheel's exit, and the park boundary's radii. A file missing any of
  * them cannot be used — the game would meet the gap mid-play.
  */
-export const BUILT_DECISIONS = ['bridges', 'pylons', 'slideLegs', 'railRace', 'ferrisExit', 'boundary'] as const;
+export const BUILT_DECISIONS = ['bridges', 'pylons', 'slideLegs', 'ferrisExit', 'boundary'] as const;
 export type BuiltDecision = (typeof BUILT_DECISIONS)[number];
 
 /** The features a park file carries, in the driver's build order. */
-export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'slide', 'crossings', 'pathGraph', 'world', 'built'] as const;
+export const PARK_FILE_FEATURES = ['layout', 'cruiser', 'train', 'railRaceBars', 'slide', 'crossings', 'pathGraph', 'world', 'built'] as const;
 export type ParkFileFeature = (typeof PARK_FILE_FEATURES)[number];

@@ -335,9 +335,13 @@ function builders(): readonly FeatureBuilder[] {
       if (outcome.kind === 'layout') return outcome.layout;
       return refusal(`layout restart ${restart}: ${outcome.reason}`);
     },
-    set: setLayout,
+    set(layout) {
+      pathRefusals().clear();
+      setLayout(layout);
+    },
     clear() {
       clearPlanDecision('layout');
+      pathRefusals().clear();
     },
   });
 
@@ -886,6 +890,7 @@ export function parkPlanFile(world: WorldDecisions, built: Readonly<Record<strin
       cruiser: planPart('cruiser'),
       train: planPart('train'),
       slide: planPart('slide'),
+      railRaceBars: planPart('railRaceBars'),
       crossings: planPart('crossings'),
       pathGraph: planPart('pathGraph'),
       pathLattice: planPart('pathLattice'),

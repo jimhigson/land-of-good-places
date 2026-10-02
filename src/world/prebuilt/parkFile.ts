@@ -8,6 +8,7 @@ import type { CubicSegment } from '../rail/segments';
 import { coasterCurve } from '../coaster/route';
 import { cruiserPlanFromDecisions, type PlannedCoaster } from '../coaster/planned';
 import type { PlannedSlide } from '../slide/planned';
+import { railRacePlanFrom, type RailRaceDecision } from '../railRace/plan';
 import type { SolvedCrossingSites } from '../train/crossingSite';
 import { TrainRoute } from '../train/route';
 import type { PlannedStation } from '../train/plan';
@@ -107,6 +108,8 @@ export interface ParkFile {
     readonly cruiser: CruiserRecord;
     readonly train: TrainRecord;
     readonly slide: SlideRecord;
+    /** The Rail Race's arch station, exit and duck-bar plan — the plan's `railRaceBars` decision. */
+    readonly railRaceBars: RailRaceBarsRecord;
     readonly crossings: Json;
     readonly pathGraph: PathGraphRecord;
     /** Every world-phase decision (`worldPhase.ts`'s `WorldDecisions`), as plain data. */
@@ -132,6 +135,7 @@ export interface DecidedPlan {
   readonly cruiser: PlannedCoaster;
   readonly train: { readonly route: TrainRoute; readonly stations: readonly PlannedStation[] };
   readonly slide: PlannedSlide;
+  readonly railRaceBars: RailRaceDecision;
   readonly crossings: SolvedCrossingSites;
   readonly pathGraph: PathGraph;
   readonly pathLattice: LatticeStateSnapshot;
@@ -216,6 +220,38 @@ export function readCruiser(record: CruiserRecord): PlannedCoaster {
 export function readTrain(record: TrainRecord): { route: TrainRoute; stations: readonly PlannedStation[] } {
   const route = new TrainRoute(readRoute(record.plan, 'train.plan'));
   return { route, stations: unplain(record.stations, 'train.stations') as readonly PlannedStation[] };
+}
+
+/**
+ * The Rail Race as its plan decided it: which clear arch station and where on
+ * the ring that is, the exit, and the duck bars' refused slots per lane and lane
+ * shift. Both rings are rebuilt from the station and the exit with no search
+ * (`railRacePlanFrom`).
+ */
+export interface RailRaceBarsRecord {
+  readonly archChoice: number;
+  readonly archAt: Json;
+  readonly exitX: Json;
+  readonly exitZ: Json;
+  /** `[lane, slots[]]` per lane with refused slots. */
+  readonly refusedByLane: readonly (readonly [number, readonly number[]])[];
+  readonly laneShift: number;
+}
+
+export function readRailRaceBars(record: RailRaceBarsRecord): RailRaceDecision {
+  const plan = railRacePlanFrom(unnum(record.exitX, 'railRaceBars.exitX'), unnum(record.exitZ, 'railRaceBars.exitZ'), {
+    at: unnum(record.archAt, 'railRaceBars.archAt'),
+    // A park read from its file refuses nothing, so nothing is named.
+    decidedBy: [],
+  });
+  return {
+    archChoice: record.archChoice,
+    plan,
+    bars: {
+      refusedByLane: new Map(record.refusedByLane.map(([lane, slots]) => [lane, new Set(slots)] as const)),
+      laneShift: record.laneShift,
+    },
+  };
 }
 
 export function readSlide(record: SlideRecord): PlannedSlide {

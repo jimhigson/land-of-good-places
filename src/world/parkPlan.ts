@@ -58,7 +58,7 @@ import { offerPrewarmedGroundClaims } from '../boot/groundClaimsPrewarm';
 import { offeredParkFile, parkFileMissingReason } from './prebuilt/parkFileStore';
 import { ParkUnavailable } from './prebuilt/parkUnavailable';
 import { parkSolver, type PlanSolverRun } from './prebuilt/solverPort';
-import { readCruiser, readCrossings, readLayout, readPathGraph, readSlide, readTrain, type ParkFile, PARK_FILE_FEATURES } from './prebuilt/parkFile';
+import { readCruiser, readCrossings, readLayout, readPathGraph, readRailRaceBars, readSlide, readTrain, type ParkFile, PARK_FILE_FEATURES } from './prebuilt/parkFile';
 import { parkFileProblem } from './prebuilt/plainData';
 
 export interface TrainDecision {
@@ -211,6 +211,9 @@ function hydrateFeature(feature: string, file: ParkFile): FeatureContribution {
       break;
     case 'slide':
       state.slide = readSlide(file.features.slide);
+      break;
+    case 'railRaceBars':
+      state.railRaceBars = readRailRaceBars(file.features.railRaceBars);
       break;
     case 'crossings':
       state.crossings = readCrossings(file.features.crossings);

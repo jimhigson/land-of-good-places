@@ -96,7 +96,7 @@ function writeRoute(route: SolvedRailRoute, path: string): RouteRecord {
 
 /** The decided plan as a park file. `build` is stamped later, by the bundle that ships it. */
 export function encodeParkFile(seed: number, restart: number, plan: DecidedPlan, build = 'unstamped'): ParkFile {
-  const { layout, cruiser, train, slide, crossings, pathGraph, pathLattice, planOrder, world, built } = plan;
+  const { layout, cruiser, train, slide, railRaceBars, crossings, pathGraph, pathLattice, planOrder, world, built } = plan;
 
   const entries: Json[] = [];
   for (const [id, entry] of layout.entries) {
@@ -139,6 +139,14 @@ export function encodeParkFile(seed: number, restart: number, plan: DecidedPlan,
         route: writeRoute(slideRoute, 'slide.route'),
         points: flatPoints(slidePoints),
         scalars,
+      },
+      railRaceBars: {
+        archChoice: railRaceBars.archChoice,
+        archAt: num(railRaceBars.plan.raceRing.startDistance),
+        exitX: num(railRaceBars.plan.exitX),
+        exitZ: num(railRaceBars.plan.exitZ),
+        refusedByLane: [...railRaceBars.bars.refusedByLane].map(([lane, slots]) => [lane, [...slots].sort((a, b) => a - b)] as const),
+        laneShift: railRaceBars.bars.laneShift,
       },
       crossings: plain(crossings, 'crossings'),
       pathGraph: { graph: plain(pathGraph, 'pathGraph'), lattice: plain(pathLattice, 'pathGraph.lattice') },
