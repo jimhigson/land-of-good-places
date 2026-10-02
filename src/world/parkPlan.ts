@@ -40,7 +40,7 @@ import { GroundClaims } from '../boot/groundClaims';
 import { ParkSolve, COARSE_ATTEMPT_CAP, type SolveStats } from '../boot/parkSolve';
 import { decisionSeed, refusal, type Advance, type FeatureBuilder, type Refusal } from '../boot/featureBuilder';
 import { PARK_SEED } from './parkManifest';
-import { PARK_RESTARTS, layoutRestartSearch, type ParkLayout } from './parkLayout';
+import { PARK_RESTARTS, hasOwnDoor, layoutRestartSearch, type ParkLayout } from './parkLayout';
 import { layoutRestartBase } from './parkWarp';
 import { bindCastlePlacement } from './building/layout';
 import {
@@ -802,16 +802,21 @@ export function* parkPlanSearch(): Generator<number, void, void> {
 }
 
 /**
- * The first drawn sample whose whole ribbon stands inside a placed plot's
+ * The first drawn sample whose whole ribbon stands inside a building's placed
  * footprint — deeper than its own half-width plus a hand's breadth — or `null`.
- * The fountain is exempt (it is the plaza, paving itself). Measured against the
- * footprint as placed (`PARK_LAYOUT`), the same shape every plot is spaced and
- * routed by.
+ * Measured against the footprint as placed (`PARK_LAYOUT`, the castle's corner
+ * turrets included), the same shape every plot is spaced and routed by.
  */
 function drawnSampleThroughAPlot(
   drawn: readonly PathSample[],
 ): { readonly sample: PathSample; readonly plot: string; readonly depth: number } | null {
-  const plots = [...planPart('layout').entries.values()].filter((entry) => entry.id !== 'fountain');
+  // Buildings only — the plots that declare a door of their own (the castle,
+  // the hotel): those are entered by their door, never through their walls.
+  // Asked of every plot it refused layout after layout on paving that merely
+  // laps a ride's or a stall's padded footprint (seed 5: water fight 1.67 m,
+  // ball pit 1.92 m, face-paint stall 1.93 m deep), so the solve spent minutes
+  // at decision zero on ground those plots' own measures already own.
+  const plots = [...planPart('layout').entries.values()].filter((entry) => hasOwnDoor(entry.id));
   for (const sample of drawn) {
     for (const plot of plots) {
       const footprint = plot.footprint;
