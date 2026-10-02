@@ -348,3 +348,31 @@ What forced the restarts (count of rejected attempts):
 | the ginormous slide stands on legs a child can walk between | 4 |
 | built the park it was asked for | 3 |
 | nothing a bridge builds hangs into its own tunnel, measured by ray from the rail | 3 |
+
+## The accepted park is the same park on every machine
+
+A restart is accepted on a Mac and the park is shipped from a Linux runner, so
+"accepted" means something only if both build the same park. They did not. On
+Node 26.10.0 / V8 14.6.202.34, the same version on both, the park-identity
+workflow (run 36947100024) found seeds 0, 2, 4, 8 and 11 grew **different
+parks** on darwin-arm64 and linux-x64. The first diverging decisions were
+fairy-pole positions and one stone-wall piece. The other eleven drifted by up
+to 3.9e-5 m.
+
+The cause, measured by hashing every `Math` function over a fixed sweep on both
+runners: `sin cos tan atan atan2 asin acos exp log pow ** sinh tanh expm1`
+return different bits, while `sqrt fround hypot cbrt log2` do not. V8
+implements the first group in C++, and the arm64 build fuses multiply-adds.
+
+The fix is at source, not in the file. `src/core/deterministicMath.ts` is
+fdlibm written in JavaScript, whose `+ - * /` are correctly rounded and never
+fused on any platform. It is installed on the global `Math` before anything
+else evaluates: by the resolver `--import` for every Node script, by a vitest
+setup file, and by the first import of `main.ts`. `parkManifest.ts` refuses to
+load without it.
+
+After the fix (run 36950557531), **16/16 seeds are the same park**, with
+worst centroid drift **0.00e+0 m**, on CI-Linux vs CI-Mac and on CI-Linux vs
+this Mac. Control: the same comparator on the pre-fix artifacts still reports
+11/16. Cost: about 5% of a park build (seed 12: 21 s vs 20 s). The `**`
+operator cannot be intercepted; world code uses it only as an exact `x ** 2`.

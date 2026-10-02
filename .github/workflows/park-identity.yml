@@ -1,9 +1,11 @@
 name: Park identity
 
 # **Is a supported park the same park on Linux and on a Mac?** Parks are
-# accepted on one machine and shipped from another; Mac arm64 and Linux x64
-# solve the same seed to decisions that differ in the last bits
-# (docs/design/PREBUILT-PARKS.md). This builds every supported seed at its
+# accepted on one machine and shipped from another. With V8's own Math they
+# were not: seeds 0, 2, 4, 8 and 11 grew different parks on arm64 (run
+# 36947100024), because V8's transcendental functions differ by an ulp between
+# x64 and arm64. src/core/deterministicMath.ts removes that, and since then all
+# sixteen are identical to the bit (run 36950557531). This builds every supported seed at its
 # recorded restart on both, and fails if any decision differs — a solve trace,
 # the mesh set, or any mesh's vertex/instance count — reporting the worst
 # position drift where the decisions agree (scripts/park-identity.mts,

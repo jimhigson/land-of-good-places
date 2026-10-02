@@ -15,9 +15,11 @@
  * structure drifted. Written as JSON to the path given as the first argument.
  *
  * Why it exists: parks are accepted on one machine (`scripts/lib/acceptedPark.mts`)
- * and their decisions shipped from another (`build:parks` in CI); Mac arm64 and
- * Linux x64 were measured to disagree by up to 1.1e-13 m (PREBUILT-PARKS.md).
- * Whether that ever changes a *decision* is a fact to measure, not assume.
+ * and their decisions shipped from another (`build:parks` in CI). With V8's
+ * own Math the two platforms disagreed, and on five seeds the disagreement
+ * flipped decisions. `src/core/deterministicMath.ts` is the fix. This is the
+ * measurement that says it still holds: the expected answer is 0 m drift on
+ * every seed, not a small one.
  */
 import './headless-canvas.mjs';
 import { createHash } from 'node:crypto';
