@@ -6,11 +6,18 @@ import { beforeAll, describe, expect, it } from 'vitest';
  * quietly keeping a result it had just found wrong — the arch on the booth's
  * bearing with nowhere clear, the exit at its nearest unclear try — or a
  * refusal by the road turned into a crash. These hold each answer to the
- * refusal, on a real planned park (seed 15, restart 0: given explicitly, so no
+ * refusal, on a real planned park (seed 12, restart 3: given explicitly, so no
  * acceptance loop runs).
+ *
+ * Seed 12 restart 3, not seed 15 restart 0: only the plan is solved here, and
+ * seed 15 restart 0's plan redraws its layout 34 times on the way (~540 s,
+ * over the 240 s hook timeout), while seed 12 restart 3's redraws it once
+ * (~20 s). Every clause below asks only a solved plan — its booth, its rings,
+ * its road — so any seed whose plan solves exercises the same code; this is
+ * just the cheapest one measured (fix/sb-rrtest).
  */
-process.env['LGP_SEED'] = '15';
-process.env['LGP_PARK_RESTART'] = '0';
+process.env['LGP_SEED'] = '12';
+process.env['LGP_PARK_RESTART'] = '3';
 // Through a variable, as the other tests reach Node-only scripts, so the test
 // project's typecheck does not follow it (`test/node-env.d.ts`).
 const HEADLESS_CANVAS = '../scripts/headless-canvas.mjs';
