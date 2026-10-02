@@ -1,7 +1,7 @@
 # HANDOFF — sb-trainsearch3
 Model: Claude Opus 5.5 (structural-backtrack engineer's choice). Branch fix/sb-trainsearch3 off wip/sb-merge 908e2f5a.
 Scratch: .../scratchpad/sb-trainsearch/ (sweep.sh, table.js, tracecmp.sh, layouts.txt). Base worktree sb-ts3-base (remove at end).
-Rules: no acceptedRestarts.ts commit; stay out of railRace/; kill own PIDs only after lsof cwd check; never pkill -f.
+Rules: stay out of railRace/; kill own PIDs only after lsof cwd check; never pkill -f.
 1. Done (commit "a failed loop search names the layout"): evidence in layouts.txt — first cruiser draw with 6/6 train
    failures never led to an accepted park on that layout (7 layouts); no accepted park ever used a cruiser re-draw for its train.
 2. Next: baseline b7 sweep (908e2f5a) running, then after sweep, look at 6/9/15/1 for identical-search waste.
@@ -13,3 +13,6 @@ Rules: no acceptedRestarts.ts commit; stay out of railRace/; kill own PIDs only 
 - Commit "rescue tier searched once per layout" (memo, registerPlanCache): seed 3 identical trace; 13/14 also repeat rescue tiers.
 - Running (one job): a9 sweep then accept:parks -- 0-15 --fresh (scratch a9-sweep.txt, accept3.txt).
 - Remaining big costs are single searches (seed 8 cruiser 32 s + train 30 s, 0 unwinds) and castle-unreachable layouts (seed 6).
+- a9 final (on 908e2f5a, recorded restarts): 519 -> 285 s, final placements identical on all 16 seeds.
+- accept:parks -- 0-15 --fresh on this branch (pre-rebase): 16/16, mean 2.50 attempts, max 9, 0 broken (scratch accept3.txt).
+- Rebased onto e6b7708d (no restart table). DONE; base worktree sb-ts3-base removed.
