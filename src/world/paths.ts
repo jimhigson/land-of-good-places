@@ -6616,15 +6616,31 @@ function easeJogsAndStubs(
   const gap = (a: readonly [number, number], b: readonly [number, number]): number =>
     Math.hypot(b[0] - a[0], b[1] - a[1]);
 
-  // Stubs, at either end.
+  // Stubs, at either end. **Never when dropping the corner leaves no leg**: an
+  // out-and-back `A → B → A` (seed 15 restart 7: a bridge-repair detour 0.86 m
+  // out and straight back) has a "stub" last leg, and dropping `B` left `A → A`
+  // — one point once collapsed, a Catmull-Rom that throws `reading 'x'` when
+  // asked its length, and a whole park build thrown away by a TypeError.
   if (src.length >= 3) {
     const last = src.length - 1;
     const corner = src[last - 1] as [number, number];
-    if (gap(corner, src[last] as [number, number]) < SHORT_LEG && !isJunction(corner)) src.splice(last - 1, 1);
+    if (
+      gap(corner, src[last] as [number, number]) < SHORT_LEG &&
+      !isJunction(corner) &&
+      gap(src[last - 2] as [number, number], src[last] as [number, number]) >= COINCIDENT
+    ) {
+      src.splice(last - 1, 1);
+    }
   }
   if (src.length >= 3) {
     const corner = src[1] as [number, number];
-    if (gap(src[0] as [number, number], corner) < SHORT_LEG && !isJunction(corner)) src.splice(1, 1);
+    if (
+      gap(src[0] as [number, number], corner) < SHORT_LEG &&
+      !isJunction(corner) &&
+      gap(src[0] as [number, number], src[2] as [number, number]) >= COINCIDENT
+    ) {
+      src.splice(1, 1);
+    }
   }
 
   // Jogs.
@@ -6674,19 +6690,29 @@ function easeJogsAndStubs(
  * round each fillet), so the Catmull-Rom built from them cannot depart
  * from the shape they describe.
  */
+/** Two drawn points nearer than this are one point: {@link drawnPolyline} collapses them. */
+const COINCIDENT = 0.05;
+
 function drawnPolyline(
   points: readonly (readonly [number, number])[],
   squareCorners: readonly (readonly [number, number])[],
 ): (readonly [number, number])[] {
   // Collapse near-duplicates first — a zero-length leg is a NaN tangent.
-  const src: [number, number][] = [];
-  for (const p of points) {
-    const last = src[src.length - 1];
-    if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.05) continue;
-    src.push([p[0], p[1]]);
-  }
+  const collapse = (from: readonly (readonly [number, number])[]): [number, number][] => {
+    const out: [number, number][] = [];
+    for (const p of from) {
+      const last = out[out.length - 1];
+      if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < COINCIDENT) continue;
+      out.push([p[0], p[1]]);
+    }
+    return out;
+  };
+  let src = collapse(points);
   if (src.length < 2) return src;
   easeJogsAndStubs(src, squareCorners);
+  // ...and again after easing, which moves corners and can land one on its neighbour.
+  src = collapse(src);
+  if (src.length < 2) return src;
 
   const out: [number, number][] = [src[0] as [number, number]];
   const emitStraightTo = (to: readonly [number, number]): void => {
@@ -6793,6 +6819,17 @@ export function curvePoints(
 
 export function routeCurve(route: RouteDefinition): CatmullRomCurve3 {
   const points = route.closed ? route.points : drawnPolyline(route.points, route.squareCorners ?? []);
+  // A curve through one point has no length, and three's Catmull-Rom answers
+  // that with `Cannot read properties of undefined (reading 'x')` from deep in
+  // `getLength` — which reads as a park that failed rather than the bug it is.
+  // A RangeError says what happened and where, and `park-attempt` reports it
+  // as broken, never as a reason to start the park again.
+  if (points.length < 2) {
+    throw new RangeError(
+      `paths.ts routeCurve: route '${route.name}' draws ${points.length} point(s) from ${route.points.length} ` +
+        `control point(s) — a path needs two`,
+    );
+  }
   const vectors = points.map(([x, z]) => new Vector3(x, 0, z));
   return new CatmullRomCurve3(vectors, route.closed, 'catmullrom', 0.4);
 }
