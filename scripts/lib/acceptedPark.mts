@@ -150,7 +150,7 @@ export async function acceptPark(
       forcedBy: verdict.failures.map((f) => ({ measure: f.measure, count: f.count, first: f.first[0] ?? '' })),
       measuresAsked: verdict.measuresAsked,
       wallMs: verdict.wallMs,
-      cpuMs: verdict.cpuMs.build + verdict.cpuMs.invariants + verdict.cpuMs.findings,
+      cpuMs: verdict.cpuMs.build + verdict.cpuMs.invariants + verdict.cpuMs.checks + verdict.cpuMs.findings,
       backtracking: verdict.backtracking,
     };
     attempts.push(record);

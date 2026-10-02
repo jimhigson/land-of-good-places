@@ -61,11 +61,16 @@ import { promisify } from 'node:util';
 import { buildHeadlessPark } from './park-harness.mts';
 import { DEFAULT_TOLERANCES, sweepCoplanar } from './coplanar-sweep.mts';
 import { rankSeams, type RankedSeam } from './coplanar-rank.mts';
-import { COPLANAR_BASELINE, type BaselineEntry } from './coplanar-baseline.mts';
+import { COPLANAR_BASELINE } from './coplanar-baseline.mts';
+import {
+  coplanarRegressions,
+  keyOf,
+  worstPerKey,
+  type RatchetWorst,
+} from './lib/coplanarRatchet.mts';
 import { PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 import { SUPPORTED_PARK_SEEDS } from '../src/world/parkSeedPool.ts';
 import { SPACE_GARDEN } from '../src/world/spaces.ts';
-import { BRIDGE_GROUP_NAME_RE } from '../src/world/train/bridges.ts';
 
 const verbose = process.argv.includes('--verbose');
 const printBaseline = process.argv.includes('--print-baseline');
@@ -117,47 +122,6 @@ interface Finding {
   readonly normal: readonly [number, number, number];
 }
 
-/**
- * The ratchet key: which space, and which two things met in it.
- *
- * Deliberately not a coordinate and not a triangle index — both move when the
- * park is regenerated, and a baseline that has to be rewritten on every seed is
- * a baseline nobody keeps. Two objects that share a plane share it on every
- * seed, so this is stable in exactly the way the geometry is.
- */
-function keyOf(seam: RankedSeam): string {
-  return `${seam.space}|${stableName(seam.a)}|${stableName(seam.b)}`;
-}
-
-/**
- * **A key may not carry a position, and one did.**
- *
- * A railway bridge is named for the distance along the loop it stands at —
- * `park-train/railway-bridges/bridge-44.0/deck` — so the ratchet keyed the same
- * modelled seam under a different name on every seed, and under a *new* name
- * the moment a loop moved. The baseline duly recorded the identical
- * `deck`-against-`shell` seam **ten times over**, at `0.0173 m²` and `fighting`
- * every time, under bridge-0.0, 2.0, 12.0, 20.0, 62.0, 142.0, 200.0, 224.0,
- * 244.0, 284.0, 312.0.
- *
- * Found by #481, which legitimately moves pool seed 288's railway off the
- * park's front gate: three seams appeared as NEW that are the same seam on
- * bridges that had moved to 44 m and 96 m, and the honest fix is not to record
- * two more copies. This file's own header says an entry means "this was already
- * wrong when the gate was written" — a key that changes when nothing has gone
- * wrong turns that into noise, and the noise is what an agent silences with a
- * baseline edit.
- *
- * So the index comes out of the key while the *printed* path keeps it, which is
- * the right granularity anyway: a bridge is one model, and a seam in it is one
- * finding however many the park builds.
- *
- * The pattern is `bridges.ts`'s own — restating the naming convention here as a
- * second regex would be the same disease one layer out.
- */
-function stableName(path: string): string {
-  return path.replace(BRIDGE_GROUP_NAME_RE, '/bridge/');
-}
 
 function sweepThisSeed(): Finding[] {
   const park = buildHeadlessPark();
@@ -345,146 +309,18 @@ findings.sort((a, b) => a.seed - b.seed || (a.key < b.key ? -1 : a.key > b.key ?
 
 // ------------------------------------------------------------------ the gate
 
-/**
- * **Two findings are the same facing if their normals are within this of each
- * other, chained.** 15°.
- *
- * Not a tolerance on the geometry — the sweep has already decided these faces
- * share a plane. It is the answer to "how many *ways* do these two objects meet
- * here", and it has to be a chain rather than a bucket because a bucket's own
- * edge would split a surface at an arbitrary angle.
- *
- * The number sits in a wide gap. Below it: a surface that bends. The sweep
- * separates findings on the normal rounded to `Math.round(n * 100)` — steps of
- * about **0.57°** — so a kerb following a path that rises to a bridge is
- * reported as several findings whose normals differ by a few degrees, and
- * chaining walks along them however far the run curves in total. Above it: two
- * objects genuinely meeting more than one way, which is a corner — 90°, or 45°
- * at the shallowest thing in this game.
- *
- * @see facingsPerSeed for what went wrong without it.
- */
-const SAME_FACING_DEGREES = 15;
-const SAME_FACING_COS = Math.cos((SAME_FACING_DEGREES * Math.PI) / 180);
 
-/**
- * **How many ways these two objects meet, on each seed — not how many findings
- * the sweep split that into.**
- *
- * This is the `seams` the baseline records, and it went wrong in both of the
- * ways this file's own `stableName` header warns about, on the branch that
- * makes every rail crossing a bridge (#474). It counted findings, and a finding
- * is split from its neighbour by a normal rounded at half a degree, so:
- *
- * 1. **A surface that bends counted as several facings.** Pool seed 225's
- *    `garden/path-kerb|garden/path-surface` went from 1 to 3 — measured, the
- *    three normals were 1.9°, 2.5° and 6.8° off vertical: one kerb, following
- *    one path, over ground that is not flat.
- * 2. **A model built more than once counted once per copy.** Seed 225 builds
- *    bridges at railD 102 and 194, each with the same modelled
- *    `terrain|wallTop` contact, and the count came out 2 where the baseline
- *    said 1 — undoing exactly what taking the rail distance out of the key was
- *    for. `stableName`: *"a bridge is one model, and a seam in it is one
- *    finding however many the park builds."*
- *
- * Neither is a new coplanar seam and neither is anything a builder did. So the
- * count is taken **per real object pair, clustered by facing** (see
- * {@link SAME_FACING_DEGREES}), and the key's figure is the **worst single
- * instance** rather than the sum over instances.
- *
- * What it still catches is what the clause was written for: a third object
- * hiding under a name another already uses — `hotel.wall|hotel.wall` is a real
- * key — shows up as a second facing on that one pair and is red. Proved by
- * mutation: giving one bridge's `wallTop` a second, 90°-apart contact with the
- * terrain takes its key from 1 to 2 and fails.
- */
-function facingsPerSeed(all: readonly Finding[]): Map<string, number> {
-  /** Every finding, grouped by seed, ratchet key, and real object pair. */
-  const groups = new Map<string, Finding[]>();
-  for (const finding of all) {
-    const id = `${finding.seed} ${finding.key} ${finding.instance}`;
-    const group = groups.get(id);
-    if (group) group.push(finding);
-    else groups.set(id, [finding]);
-  }
-
-  const perSeed = new Map<string, number>();
-  for (const [id, group] of groups) {
-    const [seed, key] = id.split(' ') as [string, string];
-    // Union-find over the group's normals: two findings join if they are
-    // within SAME_FACING_COS of each other, and joining is transitive, so a
-    // surface bending through any total angle in small steps stays one facing.
-    const parent = group.map((_, index) => index);
-    const find = (index: number): number => {
-      let root = index;
-      while (parent[root] !== root) root = parent[root] as number;
-      return root;
-    };
-    for (let i = 0; i < group.length; i += 1) {
-      for (let j = i + 1; j < group.length; j += 1) {
-        const [ax, ay, az] = (group[i] as Finding).normal;
-        const [bx, by, bz] = (group[j] as Finding).normal;
-        if (ax * bx + ay * by + az * bz < SAME_FACING_COS) continue;
-        const rootI = find(i);
-        const rootJ = find(j);
-        if (rootI !== rootJ) parent[rootJ] = rootI;
-      }
-    }
-    const facings = new Set(group.map((_, index) => find(index))).size;
-    const seedKey = `${seed} ${key}`;
-    // The worst single instance, never the total: see this function's header.
-    perSeed.set(seedKey, Math.max(perSeed.get(seedKey) ?? 0, facings));
-  }
-  return perSeed;
-}
-
-/**
- * Worst seen per key across the whole pool — the numbers the baseline records.
- *
- * **`seams` is per seed, not a total**, and it is what closes the hole the key
- * would otherwise leave: two *different* objects can share one path —
- * `hotel.wall|hotel.wall` is a real key today, because both meshes are called
- * `hotel.wall` — so without it a third wall joining them would land on an
- * existing key and pass in silence. It counts distinct facings — see
- * {@link facingsPerSeed}, which is where "distinct" is decided, and which is
- * the difference between a facing and a surface that bends. Two objects
- * meeting in two parallel planes fold into one seam whose `area` is their sum,
- * and that case is caught by `area` instead.
- *
- * **`best` is the seed that shows this seam off worst**, not the seed with the
- * largest overlap, and the two are not the same question. The entrance road's
- * kerb is 45 m² of shared plane on one seed and buried under a bridge ramp on
- * another; ranking off the biggest one dropped the single most prominent seam
- * in the game — 45 m² at the front gate — to the bottom of the list, because
- * that particular seed happened to hide it. What a person wants to know is
- * whether *any* park a child can be given puts it in front of her.
- */
-const worst = new Map<
-  string,
-  { area: number; separation: number; seams: number; best: Finding }
->();
+/** Worst seen per key across the pool (`worstPerKey`), with the seed that shows each off worst. */
+const worst = new Map<string, RatchetWorst & { best: Finding }>();
 {
-  /** How many facings each key had **on one seed**, so the max is comparable. */
-  const perSeed = facingsPerSeed(findings);
+  const bestOf = new Map<string, Finding>();
   for (const finding of findings) {
-    const seams = perSeed.get(`${finding.seed} ${finding.key}`) ?? 1;
-    const previous = worst.get(finding.key);
-    if (!previous) {
-      worst.set(finding.key, {
-        area: finding.area,
-        separation: finding.separation,
-        seams,
-        best: finding,
-      });
-      continue;
-    }
-    if (seams > previous.seams) previous.seams = seams;
-    if (finding.area > previous.area) previous.area = finding.area;
-    if (finding.separation < previous.separation) previous.separation = finding.separation;
+    const previous = bestOf.get(finding.key);
     // `findings` is in seed order, so `>` rather than `>=` keeps the lowest
     // seed of any tie and the report cannot wobble.
-    if (finding.score > previous.best.score) previous.best = finding;
+    if (!previous || finding.score > previous.score) bestOf.set(finding.key, finding);
   }
+  for (const [key, entry] of worstPerKey(findings)) worst.set(key, { ...entry, best: bestOf.get(key) as Finding });
 }
 
 if (printBaseline) {
@@ -522,40 +358,7 @@ if (printBaseline) {
  */
 const ratchetEnforced = process.env['LGP_RATCHET'] !== 'off';
 
-const regressions: string[] = [];
-for (const [key, entry] of worst) {
-  const recorded: BaselineEntry | undefined = COPLANAR_BASELINE[key];
-  const fighting = entry.separation <= DEFAULT_TOLERANCES.fighting;
-  if (!recorded) {
-    regressions.push(
-      `NEW: ${key}\n      ${entry.area.toFixed(3)} m² of shared plane, ` +
-        `${entry.separation <= DEFAULT_TOLERANCES.fighting ? 'fighting now' : 'a maintained stand-off'} ` +
-        `at ${entry.separation.toExponential(1)} m, seen on seed ${entry.best.seed}`,
-    );
-    continue;
-  }
-  // A tenth of a square metre of slack, because the park is regenerated and a
-  // seam's *extent* moves with the geometry under it even when the seam itself
-  // is the same modelling mistake. Its existence is what is ratcheted; its
-  // exact size is not something a builder controls.
-  if (entry.area > recorded.area + 0.1) {
-    regressions.push(
-      `WORSE: ${key}\n      ${entry.area.toFixed(3)} m², recorded at ${recorded.area.toFixed(3)} m²`,
-    );
-  }
-  if (entry.seams > recorded.seams) {
-    regressions.push(
-      `MORE: ${key}\n      ${entry.seams} separate seam(s) between these two on one seed, ` +
-        `recorded at ${recorded.seams}`,
-    );
-  }
-  if (fighting && !recorded.fighting) {
-    regressions.push(
-      `TIGHTER: ${key}\n      now fighting at ${entry.separation.toExponential(1)} m; ` +
-        `it was a stand-off when the baseline was taken`,
-    );
-  }
-}
+const regressions: string[] = coplanarRegressions(worst, (key) => worst.get(key)?.best.seed ?? -1);
 
 const loose: string[] = [];
 for (const key of Object.keys(COPLANAR_BASELINE)) {

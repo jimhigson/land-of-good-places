@@ -14,10 +14,17 @@
  * 1. every entry of `PARK_ACCEPTANCE` (`test/procgen/invariants.ts`) — the
  *    furnished floors and every procgen invariant, the same functions the
  *    suite asserts;
- * 2. `check:park`'s measures (`scripts/lib/parkFindings.mts`), ratchet
+ * 2. the per-park clauses of four check scripts, through the functions those
+ *    scripts are printers over (`ACCEPTANCE_CHECK_MEASURES` below) — each
+ *    judges a decision a different restart could change;
+ * 3. `check:park`'s measures (`scripts/lib/parkFindings.mts`), ratchet
  *    enforced — last, because `checkHoppableColliders` demotes colliders as
  *    the game's boot does, and the invariants are measured on the park as
- *    built, exactly as the suite measures them.
+ *    built, exactly as the suite measures them;
+ * 4. the whole scripts in `ACCEPTANCE_CHECK_SCRIPTS`, each in its own process.
+ *
+ * Which checks are deliberately *not* asked, and why, is listed in
+ * `docs/design/STRUCTURAL-BACKTRACKING.md` ("Outside acceptance").
  *
  * A build that throws is an attempt that failed, not a crash of the loop: a
  * solver giving up is one more reason to start again.
@@ -30,6 +37,7 @@ import './headless-canvas.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cpuMs } from './lib/cpuClock.mts';
+import type { HeadlessPark } from './park-harness.mts';
 
 /**
  * **Whole check scripts that judge a per-park decision, asked as acceptance
@@ -45,6 +53,95 @@ import { cpuMs } from './lib/cpuClock.mts';
  * is a failed attempt.
  */
 const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = ['scripts/check-rail-race.mts'];
+
+/**
+ * What one in-process check measure says about a park: `faults` fail the
+ * attempt (a reason to start again); `voids` mean the instrument could not
+ * measure at all — a broken measure, which stops the loop like a throw does.
+ */
+interface CheckVerdict {
+  readonly faults: readonly string[];
+  readonly voids: readonly string[];
+}
+
+/**
+ * **Check scripts whose per-park clauses are acceptance measures, asked
+ * in-process** through the one function each script is a printer over, so the
+ * attempt pays no second park build for them. Each judges something the park's
+ * own decisions set — where the Rail Race stands its trestles against the
+ * road, where the Sky Cruiser's loop crosses the castle, how tight that loop
+ * turns — so a different restart can pass it. Measured on seed 5 restart 0:
+ * well under a second together, against a ~25 s park build.
+ */
+/** Which park an in-process measure is looking at, for the ones keyed on the seed. */
+interface AttemptPark {
+  readonly seed: number;
+  readonly restart: number;
+}
+
+const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
+  string,
+  (park: HeadlessPark, which: AttemptPark) => Promise<CheckVerdict>,
+])[] = [
+  [
+    'check:every-seed-builds',
+    async (_park, { seed, restart }) => {
+      const { LAYOUT_TRACE } = await import('../src/world/parkLayout.ts');
+      const { builtWellProblems, falseRefusalProblem, falseRefusalsOf, layoutTraceCounts } = await import(
+        './lib/builtWell.mts'
+      );
+      const counts = layoutTraceCounts(LAYOUT_TRACE);
+      // A false refusal is the rung's instrument being wrong: a void, never a restart.
+      // Proving one costs a second build, so it is asked only when the rung fired.
+      const falseRefusal =
+        counts.rungFired > 0 ? falseRefusalProblem(seed, await falseRefusalsOf(seed, restart)) : null;
+      // Built well is judged against the seed's own record, and only seeds the
+      // check sweeps have one: an off-pool seed is not this check's to judge.
+      const { DECISION_ZERO_BASELINE, UNBUILT_BASELINE } = await import('./every-seed-builds-baseline.mts');
+      const swept = DECISION_ZERO_BASELINE[seed] !== undefined || UNBUILT_BASELINE[seed] !== undefined;
+      const faults = swept ? builtWellProblems(seed, counts, UNBUILT_BASELINE[seed] !== undefined) : [];
+      return { faults, voids: falseRefusal ? [falseRefusal] : [] };
+    },
+  ],
+  [
+    'check:entrance-road',
+    async (park) => {
+      const { measureEntranceRoad, entranceRoadFaults, entranceRoadVoids } = await import('./lib/entranceRoad.mts');
+      const report = await measureEntranceRoad(park);
+      return { faults: entranceRoadFaults(report), voids: entranceRoadVoids(report) };
+    },
+  ],
+  [
+    'check:swept-bus',
+    async (park) => {
+      const { measureSweptBus, sweptBusIntrusion, sweptBusVoids } = await import('./lib/sweptBus.mts');
+      const report = await measureSweptBus(park);
+      const intrusion = sweptBusIntrusion(report);
+      return { faults: intrusion === null ? [] : [intrusion], voids: sweptBusVoids(report) };
+    },
+  ],
+  [
+    'check:coplanar',
+    async (park) => {
+      const { gardenCoplanarRegressions } = await import('./lib/coplanarRatchet.mts');
+      return { faults: await gardenCoplanarRegressions(park), voids: [] };
+    },
+  ],
+  [
+    'check:castle-window',
+    async (park) => {
+      const { castleWindowFindings } = await import('./lib/rideFindings.mts');
+      return { faults: (await castleWindowFindings(park)).complaints, voids: [] };
+    },
+  ],
+  [
+    'check:cruiser-turn-radius',
+    async () => {
+      const { cruiserTurnRadius } = await import('./lib/rideFindings.mts');
+      return { faults: (await cruiserTurnRadius()).complaints, voids: [] };
+    },
+  ],
+];
 const runScript = promisify(execFile);
 
 export interface AttemptFailure {
@@ -75,7 +172,7 @@ export interface AttemptVerdict {
   readonly failures: readonly AttemptFailure[];
   /** How many measures were asked, so a verdict that asked nothing cannot pass for one that asked everything. */
   readonly measuresAsked: number;
-  readonly cpuMs: { readonly build: number; readonly invariants: number; readonly findings: number };
+  readonly cpuMs: { readonly build: number; readonly invariants: number; readonly checks: number; readonly findings: number };
   /**
    * How hard the driver worked inside this park — the backtracking below the
    * root rung, per phase: refusals, retries, accommodations, unwinds, trips to
@@ -99,6 +196,7 @@ let measuresAsked = 0;
 let built = false;
 let buildCpu = 0;
 let invariantsCpu = 0;
+let checksCpu = 0;
 let findingsCpu = 0;
 
 const firstLine = (error: unknown): string =>
@@ -139,6 +237,24 @@ if (facts) {
     if (complaints.length > 0) failures.push({ measure: name, count: complaints.length, first: complaints.slice(0, FIRST) });
   }
   invariantsCpu = cpuMs() - cpu1;
+
+  const cpuChecks = cpuMs();
+  for (const [name, measure] of ACCEPTANCE_CHECK_MEASURES) {
+    measuresAsked += 1;
+    try {
+      const { faults, voids } = await measure(facts.headless, { seed, restart });
+      if (voids.length > 0) {
+        broken ??= `${name}: ${voids[0]}`;
+        failures.push({ measure: name, count: voids.length, first: voids.slice(0, FIRST) });
+      } else if (faults.length > 0) {
+        failures.push({ measure: name, count: faults.length, first: faults.slice(0, FIRST) });
+      }
+    } catch (error) {
+      broken ??= `${name}: ${firstLine(error)}`;
+      failures.push({ measure: name, count: 1, first: [`the measure threw: ${firstLine(error)}`] });
+    }
+  }
+  checksCpu = cpuMs() - cpuChecks;
 
   const cpu2 = cpuMs();
   try {
@@ -206,7 +322,12 @@ const verdict: AttemptVerdict = {
   broken,
   failures,
   measuresAsked,
-  cpuMs: { build: Math.round(buildCpu), invariants: Math.round(invariantsCpu), findings: Math.round(findingsCpu) },
+  cpuMs: {
+    build: Math.round(buildCpu),
+    invariants: Math.round(invariantsCpu),
+    checks: Math.round(checksCpu),
+    findings: Math.round(findingsCpu),
+  },
   wallMs: Math.round(performance.now() - began),
   backtracking,
 };

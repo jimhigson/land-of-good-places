@@ -19,7 +19,7 @@ interface Verdict {
   broken: string | null;
   failures: { measure: string; count: number; first: string[] }[];
   measuresAsked: number;
-  cpuMs: { build: number; invariants: number; findings: number };
+  cpuMs: { build: number; invariants: number; checks: number; findings: number };
   wallMs: number;
   backtracking: { plan: null; world: null };
 }
@@ -38,7 +38,7 @@ const verdict = (seed: number, restart: number, failures: string[], extra: Parti
   broken: null,
   failures: failures.map((measure) => ({ measure, count: 1, first: [`${measure} complained`] })),
   measuresAsked: 102,
-  cpuMs: { build: 0, invariants: 0, findings: 0 },
+  cpuMs: { build: 0, invariants: 0, checks: 0, findings: 0 },
   wallMs: 0,
   backtracking: { plan: null, world: null },
   ...extra,
