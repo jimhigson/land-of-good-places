@@ -45,3 +45,11 @@
 - Seed 5 r0 now: refused stations 0..11, placed at 12, park builds (other measures fail as normal).
 - check:solve-cost prints unbudgeted plan features (railRaceBars has no budget row: no CI reading).
 - before run (base) shows DuckBarRefusal on seeds 3,4,5,8,9 (...) as build failures.
+
+## Result (accept:parks 0-15 --fresh, no --write)
+- before (wip/sb-merge ff44be3e): 61 attempts, 19 ended by DuckBarRefusal (seeds 3:4, 4:1, 5:3, 8:2, 9:2, 13:4, 15:3).
+- after (54a07346, same base): 44 attempts, 0 DuckBarRefusal. Seeds 3 9->2, 5 6->3, 13 9->2.
+- Mutation A (ride ignores plan refusals) seed 15 r0: new invariant 28 complaints. Mutation B (no plan
+  builder, old world-phase solve): 'plan never placed railRaceBars'. Clean seed 15 r0: passes.
+- Other throw seen: seed 15 r7 "Cannot read properties of undefined (reading 'x')" (before and after).
+- DONE; rebased onto wip/sb-merge 90c0237a.
