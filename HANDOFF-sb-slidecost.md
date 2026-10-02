@@ -31,3 +31,6 @@ Probe: scripts/slide-cost-probe.mts (LGP_SEED, LGP_PARK_RESTART, LGP_SLIDE_LOG=1
   from layout 4 on identical; final ledger identical. Trace-hash digest will change for 11r4.
 - Running: $SCRATCH/sc/chain.sh (memo sweep 13-15, base 12r0 in sb-slidecost-base @215fa58c, after-sweep 0..15 r0).
   Worktrees to remove at end: sb-slidecost-frozen, sb-slidecost-base.
+- VERIFIED: decision traces at r0 identical for all 16 seeds 0..15 (memo-sweep vs after-sweep, frozen @c64c2d4b vs
+  e09ba860); base 215fa58c == memo == after on 12r0. 11r4 changes only in layout 3's branch; final ledger same.
+  tsc (both projects) exit 0. DONE; worktrees removed.
