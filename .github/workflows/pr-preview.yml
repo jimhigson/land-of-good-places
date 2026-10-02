@@ -34,10 +34,10 @@ jobs:
   preview:
     name: Deploy PR preview
     runs-on: ubuntu-latest
-    # 60, from 25: the job solves the sixteen parks on a cache miss
+    # 80, from 25: the job solves the sixteen parks on a cache miss
     # (`build:parks`, measured at 1100 s locally at the accepted restarts,
     # CI ~2x). The step below carries its own, tighter cap.
-    timeout-minutes: 60
+    timeout-minutes: 80
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -84,7 +84,9 @@ jobs:
         # 1100 s over four lanes on an M-series Mac, and seed 6 alone 971 s
         # (478 s of plan search, 507 s of it the train). At CI's ~2x that is
         # ~37 min. Being made cheaper in the generator (fix/sb-trainsearch).
-        timeout-minutes: 50
+        # Plus accepting each file as shipped (every measure on the hydrated
+        # park, ~91 s a seed here, ~6 min over four lanes, ~12 at CI's 2x).
+        timeout-minutes: 65
         run: pnpm run build:parks
 
       # Client bundle only — see the on: comment above for why the check
