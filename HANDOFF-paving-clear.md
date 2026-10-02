@@ -17,3 +17,10 @@ New PARK_ACCEPTANCE measures: (1) no drawn paving under any building/booth solid
 
 ## Fixes so far (HEAD after 'cross-section screen' commit)
 - hotel doormat TOWER_DOORMAT_REACH = jamb end + SPUR_PAVED_REACH; streets pass neighbour plots by SPUR_PAVED_REACH; junction aprons shrink off built solids; layout: doormat+lead clear of boundary wall (DOORMAT_WALL_ROOM), arrival lanes off other plots; paths.ts distanceToBuiltSolids + routeClearsSolids (cross-section) in spur/fallback/connectors; kiosk head-on lead; parkPlan refuses drawn sample under a solid (consumed layout).
+
+## 2 Oct late (HEAD ddcf2bb7, base e6b7708d — no table; restarts resolve via acceptedPark cache / LGP_PARK_RESTART)
+- Added: EXIT_INSIDE_EDGE = SPUR_PAVED_REACH + wall half + 0.1; distanceToBuiltSolids includes boundary wall (gate exempt); BUILT_SOLID_MARGIN 0.25.
+- Measure scoped: under building/booth/boundary wall only (shut-in counted on stderr, not judged; rail-corridor connector at seed 10 r0 is a separate defect to report).
+- Sweep r0 at head: both new measures PASS on all 10 parks that build (5,7,9,11,14,15 DuckBarRefusal — not mine, reported to lead).
+- Controls red: booth (2.02 m² under booth), castle (1.62 m²), outside (11.27 m²) — seed 12 r0.
+- accept:parks 0-15 --fresh running in worktree paving-clear-base (frozen ddcf2bb7) → pc-accept.json/log.
