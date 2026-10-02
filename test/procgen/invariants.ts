@@ -1763,8 +1763,10 @@ const noDrawnPavingOutsideThePark: Invariant = (facts) => {
  * station, ~14 m² of it inside the fences.
  *
  * Every crossing is a bridge (since 2 Sep 2026; level crossings no longer
- * exist), so the one exemption is paving a bridge carries
- * (`Bridge.pavingHeightAt`), counted on every run.
+ * exist), so the exemptions are paving a bridge carries
+ * (`Bridge.pavingHeightAt`) and paving arriving on a station platform's open
+ * side — the one place inside the fence line a child is meant to stand — both
+ * counted on every run.
  */
 const noDrawnPavingInTheRailCorridor: Invariant = (facts) => {
   const meshes = drawnPathLayers(facts);
@@ -1774,6 +1776,26 @@ const noDrawnPavingInTheRailCorridor: Invariant = (facts) => {
   const inside: { k: number; detail: number }[] = [];
   let paved = 0;
   let carried = 0;
+  let platform = 0;
+  // A station's platform is the one stretch inside the fence line a child
+  // stands on: the fence leaves {@link STATION_GAP} open either side of the
+  // platform's centre, on the platform's own side (`fence.ts`'s `stationRun`),
+  // and the paths arrive there. Its far side stays sealed, and is judged.
+  const route = facts.world.train.route;
+  const railPoint = new Vector3();
+  const stationPoint = new Vector3();
+  const onAPlatform = (x: number, z: number): boolean => {
+    const along = route.distanceNear(x, z);
+    route.flatPointAt(along, railPoint);
+    for (const station of facts.world.train.stations) {
+      const gap = Math.abs(((along - station.distance + route.length * 1.5) % route.length) - route.length / 2);
+      if (gap > STATION_GAP) continue;
+      route.flatPointAt(station.distance, stationPoint);
+      const side = (x - railPoint.x) * (station.standX - stationPoint.x) + (z - railPoint.z) * (station.standZ - stationPoint.z);
+      if (side > 0) return true;
+    }
+    return false;
+  };
   for (let k = 0; k < raster.cols * raster.rows; k += 1) {
     if (!isPaved(raster, k)) continue;
     const [x, z] = cellCentre(raster, k);
@@ -1782,6 +1804,10 @@ const noDrawnPavingInTheRailCorridor: Invariant = (facts) => {
     paved += 1;
     if (bridges.some((bridge) => bridge.pavingHeightAt(x, z) !== null)) {
       carried += 1;
+      continue;
+    }
+    if (onAPlatform(x, z)) {
+      platform += 1;
       continue;
     }
     inside.push({ k, detail: rail });
@@ -1795,7 +1821,7 @@ const noDrawnPavingInTheRailCorridor: Invariant = (facts) => {
   );
   process.stderr.write(
     `  noDrawnPavingInTheRailCorridor: ${paved} paving cells inside the fences on seed ${facts.seed}, ` +
-      `${carried} of them carried by a bridge, ${inside.length} not\n`,
+      `${carried} of them carried by a bridge, ${platform} on a station platform's open side, ${inside.length} neither\n`,
   );
   return complaints;
 };
