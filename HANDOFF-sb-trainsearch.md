@@ -75,3 +75,20 @@ seed | before s (train) | after s (train) | unwinds
 total | 2012 | 1182
 cruiserRejections was never 0 on any seed: the attribution change never fired.
 Unsatisfied trains (ladder fallback) were refused downstream 16/16 on seeds 0,1,3,6.
+
+## Later findings (measured)
+- Cruiser counterfactual (seed 6, layout restart+1, cruiser 0): with cruiser obstacles the six train
+  re-seeds all fail with 135k-175k cruiser-only rejections each; without them attempt 0 closes. The
+  cruiser IS the blocker there, so naming it is right; no counterfactual policy needed.
+- Unsatisfied loops (train ladder's fallback) across all 16 seeds: 32 placed, 0 accepted; 21 of the
+  25 off-site-crossing refusals followed one. Refusing them at the train would change parks on
+  seeds 0,1,3,8,9,15 (their "leaves the park" refusals name layout only) for ~100 s total CPU:
+  NOT done, reported as a recommendation.
+- Crossing plan drops the loop's own proven site (railD 0) sometimes (seed 0: lost to railD 228
+  inside the 24 m spacing). Experiment (patch in scratch loopsite-experiment.patch): offering a
+  re-draw keeping it did NOT clear seed 0's off-site foul (same railD 192.2) -> reverted.
+- Satisfied loops refused by pathGraph: 25 (legibility 15, offsite 4, pinch 2, leaves 3...): the
+  path graph has no alternatives (supply 1), so the train re-draw is its only lever. Real fix =
+  router alternatives; out of scope.
+- c050cafe: clear() 2 m cells/reach summed once; boundary interior skip. Rebased onto
+  origin/wip/sb-merge 47fe3f80. Final sweeps base2/after2 running (scratch), then park:attempt x16.
