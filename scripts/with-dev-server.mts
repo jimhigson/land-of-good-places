@@ -5,10 +5,12 @@
  * pnpm run with-dev-server pnpm run check:walking -- pnpm run check:deep-links
  * ```
  *
- * **Not yet in the gate.** Both checks were run through this on CI for #693 and
- * both proved flaky (#699, #700), so they sit in `check:chain-coverage`'s
- * `KNOWN_ORPHANS` rather than a shard. When they are fixed, wiring one in is a
- * `check:served-<name>` script calling this and one line in a `check:shard-N`.
+ * In the gate as `check:served-walking` (a shard of its own — ~10 min on the
+ * hosted runner's software renderer) and `check:served-deep-links`. Both were
+ * pulled out once for flakiness, and neither cause was this harness:
+ * `check:walking` (#699) tapped a fixed screen spot that, on some seeds, was a
+ * tree; `check:deep-links` (#700) most likely lost its Escape to `InputSystem`
+ * dropping a key pressed and released inside one frame (unreproduced).
  *
  * Some checks drive a real page: `check:walking` presses arrow keys at a
  * running park, `check:deep-links` opens every deep link. They were written to
