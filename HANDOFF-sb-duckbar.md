@@ -34,3 +34,14 @@
 ## Runs
 - before: worktree sb-duckbar-base (origin/wip/sb-merge ff44be3e), scratchpad before.json/log
 - after: worktree sb-duckbar-after (f6cf6b2b), scratchpad after.json/log
+
+## v2 (f6680752..54a07346): the arch station is the decision
+- Arch scan (base, seed 5 r0): 75/121 arch stations fit the bars; booth station does not, +5.25 m does.
+  Seed 15 r0: 43/121. So railRaceBars' attempt n = n-th clear arch station (route.ts archStation);
+  attempt 0 = arch as always. Exhausted -> refusal consumed archDecidedBy (layout [+cruiser/train]).
+- RAIL_RACE_PLAN is now a view of planPart('railRaceBars').plan (no memo).
+- stepRider finish uses raceDistance(route) (was the decided plan: read-before-decided in the builder).
+- pathGraph deps += railRaceBars (round-robin ran pathGraph while railRaceBars retried).
+- Seed 5 r0 now: refused stations 0..11, placed at 12, park builds (other measures fail as normal).
+- check:solve-cost prints unbudgeted plan features (railRaceBars has no budget row: no CI reading).
+- before run (base) shows DuckBarRefusal on seeds 3,4,5,8,9 (...) as build failures.
