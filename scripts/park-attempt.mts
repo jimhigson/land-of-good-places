@@ -150,6 +150,14 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
     },
   ],
   [
+    'check:waypoints',
+    async () => {
+      const { waypointFindings } = await import('./lib/waypointFindings.mts');
+      const { voids, failures } = await waypointFindings();
+      return { faults: failures.map((f) => `(${f.x}, ${f.z}) ${f.why}`), voids };
+    },
+  ],
+  [
     'check:castle-window',
     async (park) => {
       const { castleWindowFindings } = await import('./lib/rideFindings.mts');
