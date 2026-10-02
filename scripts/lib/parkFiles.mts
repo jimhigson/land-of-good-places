@@ -349,3 +349,54 @@ export function parksManifest(sourceHash: string, outcomes: readonly SeedOutcome
 }
 
 export { builtRestartOf } from './builtParks.mts';
+
+/**
+ * **Is `dir` this tree's parks, as they were proven?** For parks built by
+ * another workflow run (CI reuses them across branches by source hash): the
+ * manifest must be this tree's source and format and cover every supported
+ * seed, and each file, hydrated in a fresh process exactly as the proof
+ * hydrates it, must build the digest and restart the manifest records with
+ * nothing searched. Returns the problems; empty means trust it.
+ */
+export async function verifyParks(
+  dir: string,
+  lanes: number,
+  log: (line: string) => void,
+): Promise<string[]> {
+  const problems: string[] = [];
+  const path = join(dir, PREBUILT_PARKS_MANIFEST);
+  if (!existsSync(path)) return [`${dir}: no manifest`];
+  const manifest = JSON.parse(readFileSync(path, 'utf8')) as PrebuiltParksManifest;
+  const sourceHash = parkSourceHash(process.cwd());
+  if (manifest.format !== PARK_FILE_FORMAT) problems.push(`format ${manifest.format}, this tree reads ${PARK_FILE_FORMAT}`);
+  if (manifest.sourceHash !== sourceHash) problems.push(`source ${manifest.sourceHash.slice(0, 12)}, this tree is ${sourceHash.slice(0, 12)}`);
+  const { SUPPORTED_PARK_SEEDS } = await import('../../src/world/prebuilt/parkFileName.ts');
+  for (const seed of SUPPORTED_PARK_SEEDS) if (!manifest.seeds.includes(seed)) problems.push(`seed ${seed} missing`);
+  if (problems.length > 0) return problems;
+  const queue = [...manifest.seeds].reverse();
+  await Promise.all(
+    Array.from({ length: Math.max(1, lanes) }, async () => {
+      for (let seed = queue.pop(); seed !== undefined; seed = queue.pop()) {
+        const file = join(dir, `${seed}.json`);
+        if (!existsSync(file)) {
+          problems.push(`seed ${seed}: no file`);
+          continue;
+        }
+        const parsed = JSON.parse(readFileSync(file, 'utf8')) as ParkFile;
+        const hydrated = await probe('hydrate', seed, file);
+        const want = { digest: manifest.digests[String(seed)], restart: manifest.restarts[String(seed)] };
+        const wrong: string[] = [];
+        if (hydrated.park !== want.digest) wrong.push(`digest ${hydrated.park}, manifest says ${want.digest}`);
+        if (hydrated.restart !== want.restart || parsed.restart !== want.restart) {
+          wrong.push(`restart ${hydrated.restart} (file ${parsed.restart}), manifest says ${want.restart}`);
+        }
+        if (!hydrated.hydrated || hydrated.driverRan || hydrated.worldSolverRan || hydrated.builtSearched.length > 0) {
+          wrong.push('it was searched, not hydrated');
+        }
+        for (const w of wrong) problems.push(`seed ${seed}: ${w}`);
+        log(`  seed ${String(seed).padStart(2)}: ${wrong.length === 0 ? 'verified' : 'WRONG'} — digest ${hydrated.park}, restart ${hydrated.restart}`);
+      }
+    }),
+  );
+  return problems;
+}

@@ -29,6 +29,8 @@ concurrency:
 
 permissions:
   contents: read
+  # Reading another run's `parks-<hash>` artifact (the reuse job).
+  actions: read
 
 jobs:
   key:
@@ -54,10 +56,64 @@ jobs:
           key: prebuilt-parks-${{ steps.hash.outputs.hash }}
           lookup-only: true
 
-  seed:
-    name: Park ${{ matrix.seed }}
+  # **Parks are a pure function of the source hash, so any branch's will do.**
+  # GitHub's cache is branch-scoped (main cannot read a PR's), but artifacts
+  # are not: the merge job below uploads `.parks` as `parks-<hash>`, and this
+  # job finds that artifact from any earlier run — typically the PR that is
+  # being merged — downloads it, and **verifies** it before trusting it:
+  # every file re-hydrated must build the digest and restart its manifest
+  # records, with nothing searched (`scripts/verify-parks.mts`). Then it saves
+  # it to this branch's cache and the matrix below never runs.
+  reuse:
+    name: Parks from another run
     needs: [key]
     if: needs.key.outputs.hit != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      reused: ${{ steps.verify.outputs.reused }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Find parks-${{ needs.key.outputs.hash }} from any run
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: parks-${{ needs.key.outputs.hash }}
+        run: |
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$NAME&per_page=20" \
+            -q '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].workflow_run.id // empty')
+          if [ -z "$run_id" ]; then echo "no unexpired $NAME anywhere — the matrix will build it"; exit 0; fi
+          echo "found $NAME in run $run_id"
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" -n "$NAME" -D reused
+          echo "found=true" >> "$GITHUB_OUTPUT"
+      - name: Verify every park before trusting it
+        id: verify
+        if: steps.find.outputs.found == 'true'
+        run: |
+          node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/verify-parks.mts reused
+          mkdir -p .parks && cp reused/*.json .parks/
+          echo "reused=true" >> "$GITHUB_OUTPUT"
+      - name: Save for every other job
+        if: steps.verify.outputs.reused == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .parks
+          key: prebuilt-parks-${{ needs.key.outputs.hash }}
+
+  seed:
+    name: Park ${{ matrix.seed }}
+    needs: [key, reuse]
+    # always(): a reused set that fails verification fails the reuse job (red —
+    # the same source built two different parks, which is a bug to chase) and
+    # the matrix still builds the parks from scratch.
+    if: always() && needs.key.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true'
     runs-on: ubuntu-latest
     # The slowest seed's accept loop at four restarts at a time. Not a budget
     # to grow into: a seed that needs more is a generator to make cheaper.
@@ -96,12 +152,14 @@ jobs:
           path: |
             .parks-seed/*.json
           if-no-files-found: error
+          # `.parks-seed` is a dot-directory, which upload-artifact skips unless told.
+          include-hidden-files: true
           retention-days: 3
 
   merge:
     name: Parks
-    needs: [key, seed]
-    if: needs.key.outputs.hit != 'true'
+    needs: [key, reuse, seed]
+    if: always() && needs.seed.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -124,3 +182,11 @@ jobs:
         with:
           path: .parks
           key: prebuilt-parks-${{ needs.key.outputs.hash }}
+      # For other branches (main, after this PR merges): see the reuse job.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parks-${{ needs.key.outputs.hash }}
+          path: .parks/*.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
