@@ -7,7 +7,10 @@
  *
  * Solves the plan only (no `World`), then asks `simulate.ts`'s own owners —
  * `reachRefusedSlots` and `refusedBarSlots` — per lane and per lane rotation,
- * and prints one `duck-bars: {json}` line.
+ * and prints one `duck-bars: {json}` line. It measures the rings the plan
+ * decided, so since the `railRaceBars` builder chooses the arch station it
+ * reports a ring that fits (`decided`) — the refused stations are in the
+ * plan's `park-solve` trace on stderr.
  */
 import './headless-canvas.mjs';
 import { solveParkPlanNow } from '../src/world/parkPlan.ts';
