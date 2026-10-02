@@ -97,6 +97,7 @@ import { PARK_BOUNDARY, edgeRadiusAt } from '../src/world/boundary.ts';
 import { saveFlags } from '../src/state/flags.ts';
 import type { FrameContext } from '../src/core/types.ts';
 import type { Player } from '../src/entities/Player.ts';
+import { counts, exitVoid, type ClauseKind } from './lib/checkScope.mts';
 
 /**
  * Every word the art code paints, and which canvas it painted it onto.
@@ -164,8 +165,19 @@ const AFTERWARDS_SECONDS = 30;
 const failures: string[] = [];
 const notes: string[] = [];
 
-function check(ok: boolean, message: string): void {
-  if (!ok) failures.push(message);
+/** Failed code clauses, reported but outside acceptance (`lib/checkScope.mts`). */
+const outside: string[] = [];
+/**
+ * One clause. `decision` where the park's own layout at the gate decides it —
+ * where the road runs and the boundary lies, what stands on the children's way
+ * in, whether they can walk off once inside; `code` (the default) where it is
+ * the arrival, the bus model or the hand-over, the same on every park. Under
+ * the acceptance scope only decisions fail the run.
+ */
+function check(ok: boolean, message: string, kind: ClauseKind = 'code'): void {
+  if (ok) return;
+  if (counts(kind)) failures.push(message);
+  else outside.push(message);
 }
 
 class RecordingPlayer {
@@ -459,8 +471,8 @@ const world = park.world;
 const arrival = world.entrance.arrival;
 
 if (!arrival) {
-  console.error('FAIL: the headless park built no cat bus arrival at all.');
-  process.exit(1);
+  console.error('VOID: the headless park built no cat bus arrival at all.');
+  exitVoid();
 }
 
 const player = new RecordingPlayer();
@@ -754,6 +766,7 @@ check(doorAtEnd < 0.01, `the bus drove away with its door ${doorAtEnd.toFixed(2)
 check(
   deepestIntoPark < 0,
   `the bus reached ${deepestIntoPark.toFixed(2)} m INSIDE the park boundary — it is a bus, it belongs on the road outside the gate`,
+  'decision',
 );
 
 // --- 2. THE ONE THAT MATTERS: are they still here, and are they NPCs? -----
@@ -861,6 +874,7 @@ check(
 check(
   seenInsidePark.size === ARRIVAL_KID_COUNT,
   `only ${seenInsidePark.size} of ${ARRIVAL_KID_COUNT} bus children were ever inside the park boundary`,
+  'decision',
 );
 
 // Behaving *as NPCs*: an ordinary park child moves. Eleven statues standing
@@ -891,6 +905,7 @@ check(
   `only ${movedAfterwards} of ${ARRIVAL_KID_COUNT} bus children moved in the 10 s after that, and ` +
     `only ${busyAfterwards} more were busy with an activity — the rest are present but not alive; ` +
     'the hand-back to the wander driver did not take',
+  'decision',
 );
 
 // --- 3. they came through the doorway one at a time -----------------------
@@ -1005,6 +1020,7 @@ check(
   `${solidWalks.length} children were walked through something solid by the arrival: ${solidWalks
     .slice(0, 3)
     .join('; ')}`,
+  'decision',
 );
 const archCrossings = underArchAcross.filter((across) => !Number.isNaN(across));
 // **Not every child is still the arrival's when they reach the gate, and this
@@ -1044,6 +1060,7 @@ check(
       .join('; ') +
     ` — the piers leave ${GATE_ARCH_CLEAR_WIDTH.toFixed(2)} m clear, so a ${NPC_RADIUS} m child's centre ` +
     `must pass within ${ARCH_BODY_HALF.toFixed(2)} m`,
+  'decision',
 );
 console.log(
   `  ${archCrossings.length} children went under the arch, widest ${widestUnderArch.toFixed(2)} m off ` +
@@ -1186,6 +1203,7 @@ check(
     check(
       toTheGate < ROAD_TILE_METRES / 2,
       `the nearest paved surface gets to the gate is ${toTheGate.toFixed(1)} m — it does not reach the park`,
+      'decision',
     );
 
     // **And through it.** A surface that stops at the wall arrives at a park you
@@ -1213,6 +1231,7 @@ check(
       worstOffRoad < ROAD_TILE_METRES / 2,
       `somewhere along its run the bus stands ${worstOffRoad.toFixed(1)} m from the nearest road surface ` +
         '— it is parked on the grass',
+      'decision',
     );
 
     const deepest = Math.min(...arrivalPoints.map((point) => point.z));
@@ -1450,6 +1469,7 @@ notes.push(`${stillInTheWorld} children in the park ${AFTERWARDS_SECONDS} s late
 notes.push(`bus is ${TALLEST_CHILD_HEIGHT.toFixed(2)} m child-friendly; seat plan from CHILD_FOOTPRINT ${CHILD_FOOTPRINT} m`);
 
 for (const note of notes) console.log(`  ${note}`);
+for (const line of outside) console.log(`  CODE (outside acceptance: fixed at cause, never restarted around) ${line}`);
 
 if (failures.length > 0) {
   console.error('\nFAIL: the cat bus arrival did not play as it should.');

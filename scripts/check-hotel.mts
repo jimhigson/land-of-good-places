@@ -135,6 +135,7 @@ import { Parade } from '../src/entities/parade/Parade.ts';
 // The game's own definition of "that was not a walk", so probe 3d's teleport
 // clause jumps by an amount the game agrees is a jump. See its use below.
 import { TELEPORT_GAP } from '../src/entities/parade/trail.ts';
+import { ACCEPTANCE_SCOPE } from './lib/checkScope.mts';
 
 /**
  * **How far BELOW the surface that supports her counts as falling.**
@@ -252,6 +253,14 @@ const ABOVE_EVERY_SURFACE = 1e6;
 const SETTLE_SECONDS = 8;
 
 const problems: string[] = [];
+/**
+ * The failures a park's own decisions made rather than the hotel's code: what
+ * the park stood in front of the tower — scenery that stops every march short
+ * of the shell, or walls up the doorway. The hotel itself is authored and the
+ * same on every park. Under the acceptance scope (`lib/checkScope.mts`) only
+ * these fail the run; in CI everything does.
+ */
+const decisions: string[] = [];
 const { world, scene } = quietly(() => buildHeadlessPark());
 const { collision, npcs, hotel } = world;
 
@@ -3827,7 +3836,7 @@ for (const room of ROOMS) {
     }
   }
   if (doorwaysIn === 0) {
-    problems.push(
+    decisions.push(
       'no bearing inside the tower doorwaylets a child in at all — the front door is walled up',
     );
   }
@@ -3839,7 +3848,7 @@ for (const room of ROOMS) {
   }
   // Green must mean "measured", not "never got near it".
   if (reachedShell < BEARINGS) {
-    problems.push(
+    decisions.push(
       `only ${reachedShell} of ${BEARINGS * 2} marches at the hotel tower reached its shell at ` +
         `all — the rest were stopped by other scenery, so this probe is not measuring the tower`,
     );
@@ -5097,9 +5106,15 @@ console.log(
     `${roomsFlooded} room(s) flood-filled for whole-room reachability.`,
 );
 
-if (problems.length > 0) {
-  for (const problem of problems) console.error(`  ✗ ${problem}`);
-  console.error(`check:hotel FAILED — ${problems.length} problem(s)`);
+if (ACCEPTANCE_SCOPE) {
+  for (const problem of problems) {
+    console.log(`  CODE (outside acceptance: fixed at cause, never restarted around) ${problem}`);
+  }
+}
+const failing = [...decisions, ...(ACCEPTANCE_SCOPE ? [] : problems)];
+if (failing.length > 0) {
+  for (const problem of failing) console.error(`  ✗ ${problem}`);
+  console.error(`check:hotel FAILED — ${failing.length} problem(s)`);
   process.exit(1);
 }
 console.log('check:hotel OK');

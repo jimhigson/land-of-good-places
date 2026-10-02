@@ -85,6 +85,7 @@
 
 import './headless-dom.mjs';
 import { Box3, Matrix4, Object3D, Quaternion, Vector3 } from 'three';
+import { ACCEPTANCE_SCOPE, counts, exitVoid } from './lib/checkScope.mts';
 
 await import('./headless-canvas.mjs');
 const { Scene } = await import('three');
@@ -1578,14 +1579,34 @@ const wired = await ride(true);
 console.log('  and again with the ride never told about the parade — the control:');
 const control = await ride(false);
 
+/**
+ * The clauses the park's own slide decides — how its route lets the chase lens
+ * frame her and her companions. The rest (the parade, the pose, the lens rig)
+ * are code, the same on every park; `coverage` and the control are the
+ * instrument's own. Under the acceptance scope (`lib/checkScope.mts`) only
+ * framing fails the run, and an instrument that measured nothing is a void.
+ */
+const DECISION_CLAUSES = new Set(['in shot', 'the child is in her own shot', 'nothing in the lens']);
 const failures: string[] = [];
-for (const complaint of wired.complaints) failures.push(`${complaint.clause}: ${complaint.detail}`);
+for (const complaint of wired.complaints) {
+  const line = `${complaint.clause}: ${complaint.detail}`;
+  if (ACCEPTANCE_SCOPE && complaint.clause === 'coverage') {
+    console.error(`check:pet-slide VOID — ${line}`);
+    exitVoid();
+  }
+  if (counts(DECISION_CLAUSES.has(complaint.clause) ? 'decision' : 'code')) failures.push(line);
+  else console.log(`  CODE (outside acceptance: fixed at cause, never restarted around) ${line}`);
+}
 
 // **The control must fail.** If riding with the parade unwired passes every
 // clause above, then every clause above is satisfied by a pet standing in the
 // long grass and this file proves nothing. Which clauses go red is not pinned —
 // that would be a second description of the old behaviour — only that some do.
 if (control.complaints.length === 0) {
+  if (ACCEPTANCE_SCOPE) {
+    console.error('check:pet-slide VOID — the control passed, so no clause here can be believed');
+    exitVoid();
+  }
   failures.push(
     'the control passed: a descent where the ride was never told about the parade at all ' +
       'satisfied every clause above, so the clauses are not measuring whether the pets ride ' +
