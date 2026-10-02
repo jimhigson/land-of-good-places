@@ -349,6 +349,18 @@ if (!generation.ready) {
       `still at "${generation.stage}" — the bus would idle at the gate forever`,
   );
 }
+// **Stop here if the park was never finished.** Everything below compares the
+// pre-warmed park with a straight-through solve, and a straight-through
+// `planSlide()` against a plan the driver left half-built reads the decisions
+// it never made — it throws "cruiser was read before it was decided", which
+// names an ordering bug that does not exist and hides the foul above, the one
+// that is true. Seed 5's first canonical run on wip/sb-merge did exactly that.
+if (!generation.ready || generation.failed) {
+  for (const line of said) console.log(`  ${line}`);
+  console.error('\ncheck:park-boot FAILED');
+  for (const foul of fouls) console.error(`  - ${foul}`);
+  process.exit(1);
+}
 
 said.push(
   `generation finished in ${frames} frames / ${(wallClockMs / 1000).toFixed(2)} s wall clock, ` +
