@@ -1,5 +1,6 @@
 import { Rng, TAU, clamp } from '../../core/mathUtils';
 import type { ParkBoundary } from '../boundary';
+import { edgeCloserThan } from '../boundaryEdgeTest';
 import {
   type CubicSegment,
   type Pose2,
@@ -516,6 +517,9 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
   let closerAttempts = 0;
   let restarts = 0;
   const rejected = { collision: 0, boundary: 0, selfClearance: 0, curvature: 0, tooLong: 0 };
+  // `brief.boundary.distanceToEdge(x, z) < margin`, the identical boolean,
+  // without measuring the distance where the answer is already certain.
+  const edgeCloser = edgeCloserThan(brief.boundary);
   const maxLength = brief.maxLength;
 
   /**
@@ -781,10 +785,7 @@ export function* railRouteSearch(brief: RouteBrief): Generator<number, SolvedRai
           rejected.collision += 1;
           return null;
         }
-        if (
-          brief.boundary.distanceToEdge(point.x, point.z) <
-          (brief.boundaryMargin ?? brief.corridorRadius)
-        ) {
+        if (edgeCloser(point.x, point.z, brief.boundaryMargin ?? brief.corridorRadius)) {
           rejected.boundary += 1;
           return null;
         }

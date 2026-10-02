@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { profileBoundary, REFINE } from '../../src/world/boundary.ts';
 import { TAU } from '../../src/core/mathUtils.ts';
+import { edgeCloserThan } from '../../src/world/boundaryEdgeTest.ts';
 
 /**
  * **`profileBoundary`'s distance query, held to brute force.**
@@ -165,5 +166,50 @@ describe('profileBoundary.distanceToEdge', () => {
     // been measured before; 1 cm is a ceiling far above what it does (under a
     // micrometre on these profiles) and far below anything the park asks.
     expect(worst).toBeLessThan(0.01);
+  });
+});
+
+/**
+ * **`edgeCloserThan` is `distanceToEdge(x, z) < margin`, for every input.**
+ *
+ * The rail generator asks only that boolean, and the fast test decides most
+ * queries from a per-cell lower bound without measuring a distance. It must
+ * never differ: a single flipped sample rejects or admits a different piece
+ * and every park after it is a different park. So it is asked on a fine grid
+ * (the origin, inside, across and beyond the edge) and on rings hugging the
+ * edge at the margin itself, at margins from negative through zero to well
+ * past a cell's width, and compared to the measured answer every time.
+ *
+ * Proved able to fail (fix/sb-trainsearch, these five profiles): with the
+ * shortcut's sign inverted in `boundary.ts`, 195056 of 615760 queries
+ * disagree; with the bound taken as the cell centre's own distance (no
+ * half-diagonal, no rounding shave), 17810 do.
+ */
+describe('edgeCloserThan', () => {
+  it('gives the same boolean as distanceToEdge < margin', () => {
+    let checked = 0;
+    let disagreements = 0;
+    for (let kind = 0; kind < 5; kind += 1) {
+      const boundary = profileBoundary(profile(kind));
+      const fast = edgeCloserThan(boundary);
+      const outline = boundary.outline();
+      for (const margin of [-3, -0.5, 0, 0.5, 1.8, 2.4, 6, 15]) {
+        const ask = (x: number, z: number): void => {
+          checked += 1;
+          if (fast(x, z, margin) !== boundary.distanceToEdge(x, z) < margin) disagreements += 1;
+        };
+        for (const [x, z] of queries()) ask(x, z);
+        for (let i = 0; i < outline.length; i += 1) {
+          const [vx, vz] = outline[i] as readonly [number, number];
+          const r = Math.hypot(vx, vz);
+          for (const k of [-margin - 0.01, -margin, -margin + 0.01, margin - 0.01, margin, margin + 0.01]) {
+            ask((vx / r) * (r - k), (vz / r) * (r - k));
+          }
+        }
+      }
+    }
+    process.stderr.write(`edgeCloserThan: ${checked} queries, ${disagreements} disagree with distanceToEdge < margin\n`);
+    expect(disagreements).toBe(0);
+    expect(checked).toBeGreaterThan(500000);
   });
 });

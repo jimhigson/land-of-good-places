@@ -204,7 +204,7 @@ interface Obstacle {
  * where its rail is too low for the train to pass under with Decision 4's
  * {@link RAIL_OVER_RAIL_AIR} does it become a no-go disc.
  */
-function trainObstacles(): Obstacle[] {
+function trainObstacles(): { obstacles: Obstacle[]; fromLayout: number } {
   const out: Obstacle[] = [];
   for (const entry of PARK_LAYOUT.entries.values()) {
     // The fountain keeps the loop out of the plaza's heart by PLAZA_INNER_FLOOR,
@@ -215,6 +215,8 @@ function trainObstacles(): Obstacle[] {
         : entry.boundingRadius + TRACK_PLOT_CLEARANCE;
     out.push({ x: entry.x, z: entry.z, reach });
   }
+  // Everything from here on is the cruiser's — see `TrainContext.cruiserRejections`.
+  const fromLayout = out.length;
   // The cruiser's dismount point: a fence across the spot a ride sets a child
   // down is the seed-18 failure shape, so the avoidance lives here.
   out.push({ x: COASTER_PLANS.cruiser.exitX, z: COASTER_PLANS.cruiser.exitZ, reach: 1.6 + 4.0 });
@@ -229,7 +231,7 @@ function trainObstacles(): Obstacle[] {
     // cruiser car's 1.45 m half-width — see the old profile's own note.
     out.push({ x: probe.x, z: probe.z, reach: 1.6 + 4.0 });
   }
-  return out;
+  return { obstacles: out, fromLayout };
 }
 
 /** Everything the ladder's briefs share — the obstacle field, boundary and poses. */
@@ -237,6 +239,36 @@ interface TrainContext {
   readonly clear: (x: number, z: number, radius: number) => boolean;
   readonly startPoses: readonly Pose2[];
   readonly perimeter: number;
+  /**
+   * How many validation samples a **cruiser** obstacle rejected that no layout
+   * obstacle had already rejected — the obstacles are asked layout-first, so a
+   * hit on a cruiser index is a rejection the cruiser alone made. Read when the
+   * whole ladder fails: zero means the cruiser took no part in the failure,
+   * and the refusal does not name it (see {@link TrainRouteUnsolvable}).
+   */
+  readonly cruiserRejections: () => number;
+}
+
+/**
+ * **The railway loop failed, and here is which decisions took part.**
+ *
+ * The park driver unwinds into the decisions a refusal names as consumed
+ * (`boot/parkSolve.ts`), so naming one that played no part costs a whole
+ * re-chosen decision and every failed loop search replayed on top of it.
+ * Measured on seed 6 restart 5 (fix/sb-trainsearch): the loop search failed
+ * at every cruiser attempt of a layout whose loop the cruiser never touched —
+ * thirty-odd exhaustive searches, each a few hundred thousand pieces, spent
+ * re-drawing a cruiser that was not in the way.
+ */
+export class TrainRouteUnsolvable extends RailRouteUnsolvable {
+  /** {@link TrainContext.cruiserRejections}, summed over every rung of the ladder. */
+  readonly cruiserRejections: number;
+
+  constructor(cause: RailRouteUnsolvable, cruiserRejections: number) {
+    super(cause.message, cause.report);
+    this.name = 'TrainRouteUnsolvable';
+    this.cruiserRejections = cruiserRejections;
+  }
 }
 
 /**
@@ -248,26 +280,84 @@ interface TrainContext {
  * and `check:park-boot` red. See `bridgeableCrossingPosesSearch`'s own note.
  */
 function* buildTrainContext(): Generator<number, TrainContext, void> {
-  const obstacles = trainObstacles();
+  const { obstacles, fromLayout } = trainObstacles();
+  let cruiserRejections = 0;
   const ox = Float64Array.from(obstacles, (o) => o.x);
   const oz = Float64Array.from(obstacles, (o) => o.z);
   const oreach = Float64Array.from(obstacles, (o) => o.reach);
   const count = obstacles.length;
 
   /**
-   * Is a corridor of `radius` about (x, z) clear of every obstacle? The same
-   * `hypot(a, b) >= |a|` axis prefilter the layout scans use, because this is
-   * asked on every metre of every candidate piece and most obstacles are a whole
-   * axis out of reach of the sample being asked about.
+   * **The obstacles worth asking about at a point, by grid cell** — built once
+   * per corridor radius (the briefs all share one), so a sample asks the few
+   * obstacles whose reach can touch its cell instead of all of them. The cruiser's
+   * low stretches alone are a disc every 2 m, and `clear` is asked on every
+   * metre of every candidate piece: it was 13% of a failing train search
+   * (seed 6 restart 5, CPU profile), most of it proving far-off discs far off.
+   *
+   * **The answer is identical, and so is which obstacle gives it.** A cell lists
+   * every obstacle whose reach-plus-radius square overlaps it, padded a cell
+   * each way against rounding at the edges, so no obstacle that could reject a
+   * point in the cell is missing from its list; the list is in ascending index
+   * order, so the first hit is the same first hit the full scan finds (which
+   * `cruiserRejections` depends on). A point off the grid takes the full scan.
    */
-  const clear = (x: number, z: number, radius: number): boolean => {
+  const CELL = 4;
+  const grids = new Map<number, { minX: number; minZ: number; wide: number; deep: number; cells: (Int32Array | null)[] }>();
+  const gridFor = (radius: number): NonNullable<ReturnType<typeof grids.get>> => {
+    const cached = grids.get(radius);
+    if (cached) return cached;
+    const { minX, maxX, minZ, maxZ } = PARK_BOUNDARY.extent;
+    const wide = Math.ceil((maxX - minX) / CELL) + 1;
+    const deep = Math.ceil((maxZ - minZ) / CELL) + 1;
+    const lists: number[][] = Array.from({ length: wide * deep }, () => []);
     for (let i = 0; i < count; i += 1) {
       const reach = (oreach[i] as number) + radius;
-      const dx = x - (ox[i] as number);
-      if (dx >= reach || -dx >= reach) continue;
-      const dz = z - (oz[i] as number);
-      if (dz >= reach || -dz >= reach) continue;
-      if (Math.hypot(dx, dz) < reach) return false;
+      const x0 = Math.max(0, Math.floor(((ox[i] as number) - reach - minX) / CELL) - 1);
+      const x1 = Math.min(wide - 1, Math.floor(((ox[i] as number) + reach - minX) / CELL) + 1);
+      const z0 = Math.max(0, Math.floor(((oz[i] as number) - reach - minZ) / CELL) - 1);
+      const z1 = Math.min(deep - 1, Math.floor(((oz[i] as number) + reach - minZ) / CELL) + 1);
+      for (let gx = x0; gx <= x1; gx += 1) {
+        for (let gz = z0; gz <= z1; gz += 1) (lists[gx * deep + gz] as number[]).push(i);
+      }
+    }
+    const grid = { minX, minZ, wide, deep, cells: lists.map((list) => (list.length > 0 ? Int32Array.from(list) : null)) };
+    grids.set(radius, grid);
+    return grid;
+  };
+
+  /** One obstacle's verdict on (x, z) — the same `hypot(a, b) >= |a|` axis prefilter the layout scans use. */
+  const hits = (i: number, x: number, z: number, radius: number): boolean => {
+    const reach = (oreach[i] as number) + radius;
+    const dx = x - (ox[i] as number);
+    if (dx >= reach || -dx >= reach) return false;
+    const dz = z - (oz[i] as number);
+    if (dz >= reach || -dz >= reach) return false;
+    return Math.hypot(dx, dz) < reach;
+  };
+
+  /** Is a corridor of `radius` about (x, z) clear of every obstacle? */
+  const clear = (x: number, z: number, radius: number): boolean => {
+    const grid = gridFor(radius);
+    const gx = Math.floor((x - grid.minX) / CELL);
+    const gz = Math.floor((z - grid.minZ) / CELL);
+    if (gx >= 0 && gz >= 0 && gx < grid.wide && gz < grid.deep) {
+      const list = grid.cells[gx * grid.deep + gz];
+      if (!list) return true;
+      for (let k = 0; k < list.length; k += 1) {
+        const i = list[k] as number;
+        if (hits(i, x, z, radius)) {
+          if (i >= fromLayout) cruiserRejections += 1;
+          return false;
+        }
+      }
+      return true;
+    }
+    for (let i = 0; i < count; i += 1) {
+      if (hits(i, x, z, radius)) {
+        if (i >= fromLayout) cruiserRejections += 1;
+        return false;
+      }
     }
     return true;
   };
@@ -302,7 +392,7 @@ function* buildTrainContext(): Generator<number, TrainContext, void> {
   // crossing the literal design called for.
   const startPoses: Pose2[] = yield* bridgeableCrossingPosesSearch(PARK_SEED);
 
-  return { clear, startPoses, perimeter };
+  return { clear, startPoses, perimeter, cruiserRejections: () => cruiserRejections };
 }
 
 /**
@@ -714,7 +804,8 @@ export function* trainRouteSearch(
     }
   }
   if (unsatisfied) return unsatisfied;
-  throw lastFailure ?? new Error('train route: the length ladder was empty');
+  if (!lastFailure) throw new Error('train route: the length ladder was empty');
+  throw new TrainRouteUnsolvable(lastFailure, context.cruiserRejections());
 }
 
 /** Drives {@link trainRouteSearch} straight through — the non-pre-warmed cadence. */

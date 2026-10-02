@@ -51,7 +51,7 @@ import {
 } from './coaster/solve';
 import { cruiserRouteSearch } from './coaster/route';
 import { RailRouteUnsolvable, type SolvedRailRoute } from './rail/generate';
-import { TrainRoute, trainRouteSearch } from './train/route';
+import { TrainRoute, TrainRouteUnsolvable, trainRouteSearch } from './train/route';
 import { planStations, type PlannedStation } from './train/plan';
 import { slideSearch, type PlannedSlide } from './slide/solve';
 import {
@@ -426,7 +426,18 @@ function builders(): readonly FeatureBuilder[] {
         solvedRoute = yield* trainRouteSearch(attempt === 0 ? 0 : decisionSeed(PARK_SEED, 'train', 'solve', attempt));
       } catch (error) {
         if (!(error instanceof RailRouteUnsolvable)) throw error;
-        return refusal(`railway loop: ${timeless(error.message)}`, { consumed: ['cruiser', 'layout'] });
+        // Conflict-directed: the cruiser is named only if one of its
+        // obstacles rejected a sample no layout obstacle had already rejected
+        // (`TrainRouteUnsolvable.cruiserRejections`). A search the cruiser took
+        // no part in is not rescued by re-drawing it, and each re-draw buys six
+        // more exhaustive loop searches. Measured, it does take part on seed 6
+        // restart 5 (4-8 thousand such samples per failed search), so there
+        // the cruiser is still named; this only stops it being named for
+        // nothing.
+        const cruiserTookPart = !(error instanceof TrainRouteUnsolvable) || error.cruiserRejections > 0;
+        return refusal(`railway loop: ${timeless(error.message)}`, {
+          consumed: cruiserTookPart ? ['cruiser', 'layout'] : ['layout'],
+        });
       }
       const route = new TrainRoute(solvedRoute);
       return { route, stations: planStations(route) };
