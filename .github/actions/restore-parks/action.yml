@@ -25,11 +25,26 @@ runs:
         KEY: prebuilt-parks-${{ steps.hash.outputs.hash }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         WAIT_MINUTES: ${{ inputs.wait-minutes }}
+        # Only caches this run can actually restore count: its own ref, the PR's
+        # base branch, and the default branch. A key saved under some other
+        # ref (the PR, seen from main's push) is visible to `gh cache list` but
+        # not restorable here, and waiting on it would fail the restore below.
+        THIS_REF: ${{ github.ref }}
+        BASE_REF: ${{ github.base_ref && format('refs/heads/{0}', github.base_ref) || '' }}
+        DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
       run: |
         deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
         while :; do
-          if gh cache list --repo "$GITHUB_REPOSITORY" --key "$KEY" --json key -q '.[].key' | grep -qx "$KEY"; then
-            echo "parks ready: $KEY"
+          ready=""
+          for ref in "$THIS_REF" "$BASE_REF" "$DEFAULT_REF"; do
+            [ -n "$ref" ] || continue
+            if gh cache list --repo "$GITHUB_REPOSITORY" --key "$KEY" --ref "$ref" --json key -q '.[].key' | grep -qx "$KEY"; then
+              ready="$ref"
+              break
+            fi
+          done
+          if [ -n "$ready" ]; then
+            echo "parks ready: $KEY (saved under $ready)"
             break
           fi
           failed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow parks.yml --commit "$HEAD_SHA" \

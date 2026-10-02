@@ -38,6 +38,7 @@ import { saveFlags } from './state/flags';
 import { clearSave, loadSave, makeSessionUnsavable, type SaveFile } from './state/save';
 import { PARK_RESTART, PARK_SEED_ASKED } from './world/parkManifest';
 import { forgetParkSeed, parkChangedUnderSave, parkSeedSource } from './world/parkSeedPool';
+import { parkStamp } from './world/prebuilt/parkFileStore';
 import { askForOrientationOnFirstGesture } from './core/deviceOrientationLook';
 
 /**
@@ -593,10 +594,13 @@ function continueGame(
   saveFlags.hydrate(save.flags);
   if (deepLink?.kind === 'ride') grantRideCompanion();
   // Omitted rather than passed as undefined — `exactOptionalPropertyTypes`.
-  // A save whose park was retired keeps everything but the spot she stood on,
-  // which was measured in a park that no longer exists (`parkSeedFor`).
+  // A save keeps everything but the spot she stood on when that spot was
+  // measured in another park: a retired seed (`parkSeedFor`), or the same seed
+  // whose park has since changed — its restart re-found, its generator changed
+  // (`parkStamp`: the park file's digest, stamped on the saved place).
+  const samePark = save.place !== undefined && save.place.park !== undefined && save.place.park === parkStamp();
   const options: GameOptions =
-    save.place && !parkChangedUnderSave() && deepLink?.kind !== 'spawn' && deepLink?.kind !== 'arrive'
+    save.place && samePark && !parkChangedUnderSave() && deepLink?.kind !== 'spawn' && deepLink?.kind !== 'arrive'
       ? { startPlace: save.place }
       : {};
   launchGame(canvas, uiRoot, splash, options, deepLink);

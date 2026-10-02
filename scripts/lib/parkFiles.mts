@@ -293,7 +293,7 @@ export async function buildAcceptedParks(
         const problems = compare(seed, accepted.restart, solved, hydrated, parsed);
         // `acceptance` is read by people, never by the game: added after the
         // proof, it changes nothing the proof covered.
-        const shipped = JSON.stringify({ ...parsed, acceptance });
+        const shipped = JSON.stringify({ ...parsed, acceptance, digest: solved.park });
         writeFileSync(file, shipped);
         const bytes = Buffer.from(shipped);
         outcomes.push({

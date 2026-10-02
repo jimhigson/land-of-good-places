@@ -31,6 +31,18 @@ export function offeredParkFile(): ParkFile | null {
   return offered ?? null;
 }
 
+/**
+ * **Which park this is, exactly** — the offered file's whole-park digest
+ * (`build:parks` writes it after proving the file), or null with no file. A
+ * saved position is stamped with it and only restored into the same park
+ * (`main.ts`): a seed's park changes when its restart is re-found or its
+ * generator changes, and a spot measured in the old one can stand inside a
+ * collider of the new.
+ */
+export function parkStamp(): string | null {
+  return typeof offered?.digest === 'string' ? offered.digest : null;
+}
+
 /** Say why there is no park file to offer. */
 export function reportParkFileMissing(reason: string): void {
   missing = reason;

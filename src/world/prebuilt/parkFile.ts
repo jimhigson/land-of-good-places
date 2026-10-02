@@ -95,6 +95,12 @@ export interface ParkFile {
    */
   readonly acceptance: Json;
   /**
+   * The park's whole-park digest (`scripts/lib/parkDigest.mts`), written by
+   * `build:parks` once the file is proven to build it. Saved positions are
+   * stamped with it (`parkStamp`). Absent in a file the build has not finished.
+   */
+  readonly digest?: string;
+  /**
    * Measurements the solve took of this park that a hydrated park cannot take
    * again, for the acceptance measures that need them — never read by the
    * game. `bushGround`: the bush scatter's legal ground, asked of its own gate

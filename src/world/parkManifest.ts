@@ -52,8 +52,10 @@ assertDeterministicMath('parkManifest');
  * **In Node with nothing pinned this is still `CANONICAL_PARK_SEED`**,
  * so every check script measures the park it always did.
  *
- * Saves carry {@link LAYOUT_VERSION}, so positions from an older park degrade
- * to the plaza spawn rather than to a spot inside a relocated ride.
+ * A saved position carries the park it was measured in (`SavedPlace.park`, the
+ * park file's digest), so a position from any other park — another seed, a
+ * re-found restart, a generator change — degrades to the plaza spawn rather
+ * than to a spot inside a relocated ride ({@link parkStamp}).
  */
 export const PARK_SEED_ASKED = parkSeedAsked();
 

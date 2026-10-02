@@ -80,11 +80,11 @@ function versionFilePlugin(version: string): Plugin {
  *
  * **Parks solved from any other source are never shipped.** The manifest
  * records `scripts/lib/park-source-hash.mjs` of the tree `build:parks` ran on;
- * this recomputes it and ships nothing on a mismatch. Shipping nothing is
- * correct — every device solves its own park, as it did before prebuilt parks
- * existed — just slow, so it is a loud warning; and `LGP_REQUIRE_PARKS=1`
- * (set by the deploy workflows) makes it, and a missing manifest, fail the
- * build instead.
+ * this recomputes it and ships nothing on a mismatch. A bundle with no parks
+ * cannot open any park — the game has no solver, and shows `ParkUnavailable`
+ * — so outside the deploy workflows it is a loud warning, and
+ * `LGP_REQUIRE_PARKS=1` (set by them) makes it, and a missing manifest, fail
+ * the build instead.
  */
 function prebuiltParksPlugin(version: string): Plugin {
   return {
