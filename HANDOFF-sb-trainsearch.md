@@ -115,3 +115,8 @@ seed | before s (train) | after s (train) | unwinds
 total | 2090 | 1517
 per feature totals: cruiser 604->622 (unchanged work: the noise control, load avg ~140), train 1103->665, pathGraph 314->163, slide 64->62
 park:attempt x16 running: scratch attempts.txt
+
+## INCIDENT (own it): at ~03:55 I ran `pkill -f "scripts/park-attempt.mts"` to stop my own
+park:attempt loop. The pattern was not scoped to my worktree; it may have killed another agent's
+park-attempt process (a new one from worktree paths-to-doors-frozen was seen starting seconds
+later). That agent's acceptance loop may have recorded one killed attempt as a failure/broken.
