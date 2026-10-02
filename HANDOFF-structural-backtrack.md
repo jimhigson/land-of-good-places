@@ -235,3 +235,5 @@ coping chamfer (#698 fix/procgen-last has the fix).
   deterministic Math + guard + check:pow-operator kept; identity/math scripts are hand tools. Docs reworded.
 - Measuring seed 11 r4 plan solve time (ran past #705's 30-min probe kill). Waiting on fix/door-overlap
   (paving agent ab031046: paths ~1 m under building doors, Jim's preview feedback).
+- Merged fix/door-overlap (Jim: paving ~1 m under building doors; DOOR_PAVING_OVERLAP). Booth-hollow control
+  still red after the merge (seed 12: 0.88 m2). Parks change -> #705 must rebase.
