@@ -600,6 +600,8 @@ export interface TreeDecision {
   readonly climbable: boolean;
   /** The scatter's state before this tree's search — `back()` restores it exactly. */
   readonly resume: { readonly attempts: number; readonly phase: 'scatter' | 'cover'; readonly cell: number };
+  /** Which tree this is, independent of how many were planted before it — see {@link scatterIdentity}. */
+  readonly identity: number;
 }
 
 /** One bush clump the world phase decided: its blobs, rolled once, drawn later. */
@@ -608,6 +610,31 @@ export interface BushDecision {
   readonly z: number;
   readonly blobs: readonly InstanceItem[];
   readonly resume: number;
+  /** Which clump this is, independent of how many were planted before it — see {@link scatterIdentity}. */
+  readonly identity: number;
+}
+
+/**
+ * **What a relocation's candidate stream is keyed by: the object, not its place in the list.**
+ *
+ * A tree or bush asked to step aside draws its new spots from
+ * `candidateRng(MOVE_SALT ^ identity, ...)`. It used to be `^ section` — the
+ * object's index among those planted — and that index is exactly the thing a
+ * change elsewhere moves: pave a little more lawn by one spur and a clump
+ * beside it is refused, every later clump's section drops by one, and a clump
+ * on the far side of the park asked to make room for a lamp re-rolls its whole
+ * relocation stream and lands somewhere else. Measured on seed 5 with the
+ * rail-racer spur bowed 2 m: bushes 47-72 m from the spur changed, every one
+ * of them a relocated clump (bushes#432 in one park, the same clump as
+ * bushes#429 in the other).
+ *
+ * The identity is the candidate that planted the object — the scatter's own
+ * index-locked draw counter, or (for a climb-cover tree) its cover cell's
+ * key, offset clear of every scatter index — so it names the same object in
+ * both parks whatever was refused before it.
+ */
+function scatterIdentity(phase: 'scatter' | 'cover', candidate: number): number {
+  return phase === 'scatter' ? candidate : (1 << 24) + candidate;
 }
 
 export interface SceneryDecisions {
@@ -760,7 +787,7 @@ export function treeBuilder(
           const kind = pickTreeKind(rng);
           const tree = accept(rng, kind, x, z, false, -1, []);
           if (!tree) continue;
-          const decision: TreeDecision = { x, z, kind, tree, climbable: false, resume };
+          const decision: TreeDecision = { x, z, kind, tree, climbable: false, resume, identity: scatterIdentity('scatter', attempts) };
           out.push(decision);
           return increment(decision, 'at');
         }
@@ -787,7 +814,15 @@ export function treeBuilder(
           if (!isPlantable(x, z, 2.6)) continue;
           const tree = accept(rng, 'lollipop', x, z, true, -1, []);
           if (!tree) continue;
-          const decision: TreeDecision = { x, z, kind: 'lollipop', tree, climbable: true, resume };
+          const decision: TreeDecision = {
+            x,
+            z,
+            kind: 'lollipop',
+            tree,
+            climbable: true,
+            resume,
+            identity: scatterIdentity('cover', at.key),
+          };
           out.push(decision);
           return increment(decision, 'for climb cover at');
         }
@@ -807,7 +842,7 @@ export function treeBuilder(
       const old = out[section];
       if (!old) return refusal(`trees: no tree owns claim ${claimIndex}`);
       for (let k = 0; k < RELOCATE_TRIES; k += 1) {
-        const rng = candidateRng(TREE_MOVE_SALT ^ section, attempt * RELOCATE_TRIES + k);
+        const rng = candidateRng(TREE_MOVE_SALT ^ old.identity, attempt * RELOCATE_TRIES + k);
         const angle = rng.range(0, TAU);
         const r = 4 + Math.sqrt(rng.unit()) * (RELOCATE_REACH.tree - 4);
         const x = old.x + Math.cos(angle) * r;
@@ -959,7 +994,7 @@ export function bushBuilder(
         const why = refusalAt(x, z, []);
         bushScatterLedger.verdicts.set(attempts, why ?? 'planted');
         if (why) continue;
-        const decision: BushDecision = { x, z, blobs: roll(rng, x, z), resume };
+        const decision: BushDecision = { x, z, blobs: roll(rng, x, z), resume, identity: scatterIdentity('scatter', attempts) };
         out.push(decision);
         return increment(decision, 'at');
       }
@@ -976,7 +1011,7 @@ export function bushBuilder(
       const old = out[section];
       if (!old) return refusal(`bushes: no clump owns claim ${claimIndex}`);
       for (let k = 0; k < RELOCATE_TRIES; k += 1) {
-        const rng = candidateRng(BUSH_MOVE_SALT ^ section, attempt * RELOCATE_TRIES + k);
+        const rng = candidateRng(BUSH_MOVE_SALT ^ old.identity, attempt * RELOCATE_TRIES + k);
         const angle = rng.range(0, TAU);
         const r = 3 + Math.sqrt(rng.unit()) * (RELOCATE_REACH.bush - 3);
         const x = old.x + Math.cos(angle) * r;

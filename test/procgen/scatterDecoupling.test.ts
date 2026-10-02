@@ -47,6 +47,7 @@ interface Group {
 
 interface Digest {
   readonly seed: number;
+  readonly plan: readonly string[];
   readonly paths: { readonly metres: number; readonly digest: string };
   readonly spur: { readonly name: string; readonly points: readonly (readonly [number, number])[] };
   readonly trees: Group;
@@ -137,6 +138,19 @@ describe('scenery scatter is decoupled from the paths', () => {
     expect(Number.isFinite(baseline.paths.metres)).toBe(true);
     expect(Number.isFinite(bowed.paths.metres)).toBe(true);
     expect(bowed.paths.metres).not.toBeCloseTo(baseline.paths.metres, 3);
+  });
+
+  it('bowed one spur of the same park — the plan settled on the same decisions', () => {
+    // Without this, the test below compares two different parks. On seed 5 a
+    // whole-segment bow read as a street off the lattice, the plan refused the
+    // paths and unwound to another layout, and "the scatter moved 52 m away"
+    // was the castle, the walls and the fairy chains all being somewhere else.
+    expect(baseline.plan.length).toBeGreaterThan(0);
+    expect(
+      bowed.plan,
+      `bowing ${baseline.spur.name} by ${BOW} m changed the plan's decisions, so the two parks differ ` +
+        `upstream of the scatter and the locality check below would measure that, not the scatter`,
+    ).toEqual(baseline.plan);
   });
 
   it('measured a real park on both sides', () => {

@@ -102,6 +102,16 @@ export interface RouteDefinition {
  * bug — at 1, 2, 3, 4, 6, 8, 10, 14, 18 and 24 m, the scatter digest never
  * budged once. A perturbation that cannot break the broken version cannot
  * validate the fixed one.
+ *
+ * ### And the bow has to be a park the plan accepts
+ *
+ * The two parks must differ in that spur's paving *and nothing upstream of it*.
+ * A bow the plan refuses — a long street pushed off the lattice, a spur into a
+ * plot — sends the plan back to an earlier decision and the "bowed" park is a
+ * different layout altogether, so every far change is real and none of it is
+ * the scatter's. That is what a whole-segment V did on seed 5; the bow is now a
+ * short tent (see the splice below), and the decoupling test asserts both parks
+ * settled on the same plan decisions before it compares any scenery.
  */
 const SPUR_STRETCH = numberFromEnv('LGP_SPUR_STRETCH');
 const SPUR_STRETCH_ID = stringFromEnv('LGP_SPUR_STRETCH_ID') ?? 'stall.railRacer';
@@ -4987,10 +4997,29 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
         const q = routed[i] as readonly [number, number];
         const segment = Math.hypot(q[0] - p[0], q[1] - p[1]);
         if (walked + segment >= total / 2 && segment > 1e-6) {
-          routed.splice(i, 0, [
-            (p[0] + q[0]) / 2 + (-(q[1] - p[1]) / segment) * SPUR_STRETCH,
-            (p[1] + q[1]) / 2 + (((q[0] - p[0])) / segment) * SPUR_STRETCH,
-          ]);
+          // A short tent at the segment's middle, not a V across its whole
+          // length: the apex stands SPUR_STRETCH off the line and its feet
+          // SPUR_STRETCH either side of the middle, so its flanks run at
+          // 45 degrees. A whole-segment V is a 6-degree lean on a long
+          // street — under `offLatticeStreetRuns`' hop tolerance, so it reads
+          // as a street on its own private line (seed 5: a 36 m spur on
+          // x = 23.28 bowed to "35.7 m on x = 22.28, 1.00 m off the street
+          // lattice"), the plan refuses the paths and re-solves the whole
+          // park from decision zero, and the two parks being compared differ
+          // in their layout, not in one spur. The tent leaves both halves of
+          // the street on their line and paves only the lawn the apex covers.
+          const ux = (q[0] - p[0]) / segment;
+          const uz = (q[1] - p[1]) / segment;
+          const mx = (p[0] + q[0]) / 2;
+          const mz = (p[1] + q[1]) / 2;
+          const foot = Math.min(SPUR_STRETCH, segment / 4);
+          routed.splice(
+            i,
+            0,
+            [mx - ux * foot, mz - uz * foot],
+            [mx - uz * SPUR_STRETCH, mz + ux * SPUR_STRETCH],
+            [mx + ux * foot, mz + uz * foot],
+          );
           break;
         }
         walked += segment;
