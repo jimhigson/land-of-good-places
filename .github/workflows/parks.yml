@@ -110,10 +110,10 @@ jobs:
   seed:
     name: Park ${{ matrix.seed }}
     needs: [key, reuse]
-    # always(): a reused set that fails verification fails the reuse job (red —
+    # !cancelled(), not always() — always() jobs ignore a superseding push's cancel: a reused set that fails verification fails the reuse job (red —
     # the same source built two different parks, which is a bug to chase) and
     # the matrix still builds the parks from scratch.
-    if: always() && needs.key.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true'
+    if: ${{ !cancelled() && needs.key.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true' }}
     runs-on: ubuntu-latest
     # The slowest seed's accept loop at four restarts at a time. Sized from
     # the attempt's measured cost (#706, staged attempts, 2 Oct): a rejected
@@ -165,7 +165,7 @@ jobs:
   merge:
     name: Parks
     needs: [key, reuse, seed]
-    if: always() && needs.seed.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true'
+    if: ${{ !cancelled() && needs.seed.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
