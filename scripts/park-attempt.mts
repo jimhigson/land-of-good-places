@@ -88,6 +88,15 @@ const ACCEPTANCE_SIM_MEASURES: readonly (readonly [
       return { faults: decisions, voids };
     },
   ],
+  [
+    'check:slide-rider',
+    async () => {
+      // Builds its own World (it rides, so it needs live interior controls).
+      const { slideRider } = await import('./lib/slideRider.mts');
+      const { decisions, voids } = await slideRider({ quiet: true, clauses: 'decisions' });
+      return { faults: decisions, voids };
+    },
+  ],
   // Last: it moves booths, and the stand table it moves them in is the module's.
   [
     'check:stall-accommodate',
