@@ -46,3 +46,10 @@ crossings identical replays inflate pathGraph on 1, 3, 15; cruiser search itself
 - 218a1f17 crossings supply = min(4, 1 + refused sites) (no identical re-draws)
 - dd652e6f rail search speedups (train clear grid, boundary edgeCloserThan) + cruiser-attribution
 Next: after1 sweep (scratch after1-sweep.txt) with DIAG train satisfied/cruiserRejections prints.
+
+## After commits 218a1f17+dd652e6f: seed 6 plan CPU 472 -> 267 s (train 362 -> 186 s, identical
+48654299 pieces; decision trace identical to base minus crossings replays - scratch tracecmp.sh).
+Sweep for other seeds runs on snapshot worktree .claude/worktrees/sb-ts-snap (remove at end).
+Seed 6 trains: 4 of 8 placed were UNSATISFIED (all refused by pathGraph); satisfied ones were also
+refused (8 off-site crossings, legibility). Next: is the crossing planner dropping the train's own
+proven start site (railD 0)? DIAG offsite line added in main worktree (uncommitted).
