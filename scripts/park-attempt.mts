@@ -158,6 +158,16 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
     },
   ],
   [
+    'check:hotel',
+    async (park) => {
+      // Probe 22's park half — what stands in front of the tower. The rest of
+      // check:hotel is the authored hotel (and four park builds), the same on
+      // every park, so it stays the script's.
+      const { hotelTowerFindings } = await import('./lib/hotelTower.mts');
+      return { faults: (await hotelTowerFindings(park)).decisions, voids: [] };
+    },
+  ],
+  [
     'check:castle-window',
     async (park) => {
       const { castleWindowFindings } = await import('./lib/rideFindings.mts');
