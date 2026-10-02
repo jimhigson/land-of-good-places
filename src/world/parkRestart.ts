@@ -1,5 +1,5 @@
 import { hashString } from '../core/mathUtils';
-import { ACCEPTED_RESTARTS } from './acceptedRestarts';
+import { SUPPORTED_PARK_SEEDS } from './parkSeedPool';
 
 /**
  * **Backtracking to zero: the whole park, started again.**
@@ -30,24 +30,43 @@ import { ACCEPTED_RESTARTS } from './acceptedRestarts';
  *
  * Only the root loop (`scripts/lib/acceptedPark.mts`), which tries
  * `r = 0, 1, 2, …`, each in a fresh process, until the whole park passes, and
- * records every restart and what forced it. Its answer for every shipped seed
- * is recorded in `acceptedRestarts.ts` (generated, and verified by
- * `test:procgen`, which builds each recorded park and asks the measures
- * again). Everything else reads that answer — the game and every check alike,
- * at import, with no search. Two overrides, both explicit:
+ * records every restart and what forced it. **Nothing is committed**: the
+ * answer is the loop's verdict at the exact source being run, cached on its
+ * hash (`acceptanceSourceHash`), and taken afresh whenever the generator or a
+ * measure changes. (A committed table, `acceptedRestarts.ts`, used to hold it.
+ * Every generator change made it stale until someone re-ran the loop by hand,
+ * and merges waited on that. Jim, 2 Oct 2026: "that should be done by a
+ * script, no?")
  *
- * - **Node**: `LGP_PARK_RESTART=r`, set by the loop for each attempt.
- * - **Browser**: `globalThis.__LGP_PARK_RESTART__`, for a park file that
- *   carries its own restart; it must be set before the park's modules
- *   evaluate, because the boundary is a module constant.
+ * So a supported seed's restart comes from, in order:
+ *
+ * - **an explicit override**: `LGP_PARK_RESTART=r` in Node, set by the loop
+ *   for each attempt; `globalThis.__LGP_PARK_RESTART__` in the browser, for a
+ *   park file that carries its own restart (it must be set before the park's
+ *   modules evaluate, because the boundary is a module constant);
+ * - **the resolver** a Node process installs (`__LGP_RESOLVE_RESTART__`:
+ *   `scripts/ts-extension-resolver-register.mjs`, and vitest's setup file),
+ *   which reads the cached verdict or runs the loop for that seed;
+ * - otherwise **0**, the seed's own park. A browser with no park file has no
+ *   way to run the loop, so it builds restart 0; the prebuilt park files
+ *   (#705) are what carry the accepted restart to it.
+ *
+ * Seeds outside `SUPPORTED_PARK_SEEDS` are never resolved: a sweep over
+ * arbitrary seeds measures each seed's own park unless it asks otherwise.
  *
  * Read once, at module load, exactly like the seed (`parkManifest.ts`'s
- * `PARK_RESTART`). Without an override, a seed takes the restart the loop
- * recorded for it in `acceptedRestarts.ts` — so every check, and the game,
- * builds the accepted park of a shipped seed with no search at all.
+ * `PARK_RESTART`).
  */
 export function restartFor(seed: number): number {
-  return overriddenRestart() ?? ACCEPTED_RESTARTS[seed] ?? 0;
+  return overriddenRestart() ?? resolvedRestart(seed) ?? 0;
+}
+
+/** The installed resolver's answer for a supported seed; null with no resolver. */
+function resolvedRestart(seed: number): number | null {
+  if (!SUPPORTED_PARK_SEEDS.includes(seed)) return null;
+  const resolve = (globalThis as { __LGP_RESOLVE_RESTART__?: unknown }).__LGP_RESOLVE_RESTART__;
+  if (typeof resolve !== 'function') return null;
+  return readRestart((resolve as (seed: number) => unknown)(seed));
 }
 
 function readRestart(raw: unknown): number | null {

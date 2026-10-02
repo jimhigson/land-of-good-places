@@ -5,9 +5,11 @@
  * control (`scripts/controls/*.mts`) that plants a defect, to watch a measure go red.
  */
 import './headless-canvas.mjs';
-import { ACCEPTED_RESTARTS } from '../src/world/acceptedRestarts.ts';
+import { acceptedRestartOf } from './lib/acceptedPark.mts';
 const seed = Number(process.env['LGP_SEED'] ?? 0);
-const restart = Number(process.env['LGP_PARK_RESTART'] ?? ACCEPTED_RESTARTS[seed] ?? 0);
+const restart = process.env['LGP_PARK_RESTART'] !== undefined
+  ? Number(process.env['LGP_PARK_RESTART'])
+  : (await acceptedRestartOf(seed)).restart;
 const only = (process.env['LGP_ONLY'] ?? '').split('|').filter(Boolean);
 const { buildParkFacts } = await import('../test/procgen/parkFacts.ts');
 const facts = await buildParkFacts(seed, restart);

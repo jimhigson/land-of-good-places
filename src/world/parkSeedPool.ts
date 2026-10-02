@@ -43,8 +43,8 @@ import { SAVE_KEY } from '../state/save';
 /**
  * **The seeds the game supports: 0..15** (Jim, 24 Sep 2026). The one owner of
  * the shipped set — every park a child can be given is one of these, each at
- * the restart the root acceptance loop recorded for it
- * (`acceptedRestarts.ts`). The prebuilt-parks work (#705) makes the pool this
+ * the restart the root acceptance loop accepts for it at this source
+ * (`scripts/lib/acceptedPark.mts`). The prebuilt-parks work (#705) makes the pool this
  * list and ships a park file per entry.
  */
 export const SUPPORTED_PARK_SEEDS: readonly number[] = Array.from({ length: 16 }, (_, seed) => seed);

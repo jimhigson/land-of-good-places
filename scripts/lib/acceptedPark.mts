@@ -43,9 +43,9 @@
  * accepts the same restart, every run, on every machine that builds the same
  * park.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -198,7 +198,18 @@ export function acceptanceSourceHash(): string {
   // (`LGP_LAYOUT_RUNG=off`, `LGP_WARP`, …), so a verdict taken under one is
   // not a verdict about the park without it.
   for (const [key, value] of Object.entries(process.env).sort(([a], [b]) => a.localeCompare(b))) {
-    if (!key.startsWith('LGP_') || key === 'LGP_SEED' || key === 'LGP_PARK_RESTART' || key === 'LGP_LANES') continue;
+    // Not these: which park (seed, restart), how many lanes, and which CI
+    // shard is asking are not inputs to what a park build does, and counting
+    // the shard would give every CI job a different hash for the same park.
+    if (
+      !key.startsWith('LGP_') ||
+      key === 'LGP_SEED' ||
+      key === 'LGP_PARK_RESTART' ||
+      key === 'LGP_LANES' ||
+      key === 'LGP_PROCGEN_SHARD'
+    ) {
+      continue;
+    }
     hash.update(`${key}=${value ?? ''}\0`);
   }
   return hash.digest('hex').slice(0, 20);
@@ -217,14 +228,59 @@ export async function acceptParkCached(
   options: Parameters<typeof acceptPark>[1] = {},
 ): Promise<AcceptedPark & { readonly cached: boolean; readonly sourceHash: string }> {
   const sourceHash = acceptanceSourceHash();
-  const file = join(CACHE_DIR, sourceHash, `${seed}.json`);
+  const file = verdictFile(seed, sourceHash);
   if (existsSync(file)) {
     return { ...(JSON.parse(readFileSync(file, 'utf8')) as AcceptedPark), cached: true, sourceHash };
   }
   const accepted = await acceptPark(seed, options);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify(accepted)}\n`);
+  // Written whole and renamed into place: several processes may be asking for
+  // the same seed at once, and none may ever read half a verdict.
+  const partial = `${file}.${process.pid}.partial`;
+  writeFileSync(partial, `${JSON.stringify(accepted)}\n`);
+  renameSync(partial, file);
   return { ...accepted, cached: false, sourceHash };
+}
+
+/** Where the verdict for `seed` at `sourceHash` is kept. */
+function verdictFile(seed: number, sourceHash: string): string {
+  return join(CACHE_DIR, sourceHash, `${seed}.json`);
+}
+
+/**
+ * **Which restart is `seed`'s park, answered synchronously** — for
+ * `parkManifest.ts`, which needs it at import, in Node.
+ * `scripts/ts-extension-resolver-register.mjs` installs this as the resolver
+ * `src/world/parkRestart.ts` asks (and `test/setupDeterministicMath.ts` does
+ * the same for vitest).
+ *
+ * There is no committed table to go stale: the answer is the acceptance loop's
+ * verdict at this exact source ({@link acceptanceSourceHash}), read from the
+ * cache, or taken now by running the loop for this seed (`accept-parks.mts`,
+ * in a child, its log on stderr so a script's own stdout stays its own).
+ * Jim, 2 October 2026, on the hand-run re-record this replaces: "that should
+ * be done by a script, no?"
+ */
+export function acceptedRestartSync(seed: number): number {
+  const sourceHash = acceptanceSourceHash();
+  const file = verdictFile(seed, sourceHash);
+  if (!existsSync(file)) {
+    process.stderr.write(
+      `[accepted park] seed ${seed}: no verdict yet at source ${sourceHash}, so the acceptance loop runs now ` +
+        `(scripts/accept-parks.mts ${seed})\n`,
+    );
+    const run = spawnSync(
+      process.execPath,
+      ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', 'scripts/accept-parks.mts', String(seed)],
+      { cwd: REPO, stdio: ['ignore', 2, 2] },
+    );
+    if (!existsSync(file)) {
+      throw new Error(
+        `accepted park: the acceptance loop for seed ${seed} left no verdict (exit ${run.status ?? run.signal}); its log is above`,
+      );
+    }
+  }
+  return (JSON.parse(readFileSync(file, 'utf8')) as AcceptedPark).restart;
 }
 
 /**
@@ -263,22 +319,21 @@ export function acceptanceMetadata(accepted: AcceptedPark, sourceHash: string): 
 }
 
 /**
- * **Which restart of `seed` is its park** — the recorded answer
- * (`src/world/acceptedRestarts.ts`) when the seed has one, otherwise the loop's
- * (cached per source). What `check:park` and `test:procgen` measure.
+ * **Which restart of `seed` is its park**: the acceptance loop's verdict at
+ * this source, cached, or taken now. What `check:park` and `test:procgen`
+ * measure. (There used to be a committed table, `acceptedRestarts.ts`, filled
+ * by hand with `accept:parks --write`; every generator change made it stale
+ * until somebody re-ran it, and merges waited on that.)
  */
 export async function acceptedRestartOf(
   seed: number,
 ): Promise<{ readonly restart: number; readonly how: string; readonly log: readonly string[] }> {
-  const { ACCEPTED_RESTARTS } = await import('../../src/world/acceptedRestarts.ts');
-  const recorded = ACCEPTED_RESTARTS[seed];
-  if (recorded !== undefined) {
-    return { restart: recorded, how: 'recorded in src/world/acceptedRestarts.ts', log: [] };
-  }
   const accepted = await acceptParkCached(seed);
   return {
     restart: accepted.restart,
-    how: `not recorded — the loop ran${accepted.cached ? ' (verdict cached at this source)' : ''}`,
+    how: accepted.cached
+      ? `the acceptance loop's verdict at source ${accepted.sourceHash}, cached`
+      : `the acceptance loop, run now at source ${accepted.sourceHash}`,
     log: describeRestarts(accepted),
   };
 }

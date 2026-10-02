@@ -7,7 +7,6 @@
  * pnpm run accept:parks -- 1000-1099 --out r.json
  * LGP_LANES=3 pnpm run accept:parks -- 3,6,15
  * pnpm run accept:parks -- 0-15 --fresh        # ignore the verdict cache
- * pnpm run accept:parks -- 0-15 --write        # record the answers in src/world/acceptedRestarts.ts
  * ```
  *
  * For each seed, `acceptPark` (`scripts/lib/acceptedPark.mts`) tries restart
@@ -22,7 +21,7 @@
  * exactly when some restart passes, and this is how that is measured rather
  * than assumed. Exit 1 if any seed hit `MAX_RESTARTS` (or its loop broke).
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 
 import { acceptPark, acceptParkCached, describeRestarts, type AcceptedPark } from './lib/acceptedPark.mts';
@@ -106,25 +105,4 @@ process.stdout.write(
     `${broken.length} broken, ${((performance.now() - began) / 1000).toFixed(0)} s\n`,
 );
 save();
-/**
- * `--write`: record each accepted seed's restart in `src/world/acceptedRestarts.ts`
- * — the file every check and the game read. Seeds not run keep their entry.
- * Refused if anything broke: a partial answer is not recorded.
- */
-if (argv.includes('--write')) {
-  if (broken.length > 0) {
-    process.stdout.write('accept:parks: --write refused — a seed did not finish; nothing recorded\n');
-  } else {
-    const file = new URL('../src/world/acceptedRestarts.ts', import.meta.url);
-    const text = readFileSync(file, 'utf8');
-    const open = text.indexOf('= {\n');
-    const close = text.indexOf('\n};', open);
-    const entries = new Map<number, number>();
-    for (const m of text.slice(open, close).matchAll(/^\s*(\d+): (\d+),$/gm)) entries.set(Number(m[1]), Number(m[2]));
-    for (const r of results) entries.set(r.seed, r.restart);
-    const body = [...entries].sort((a, b) => a[0] - b[0]).map(([seed, restart]) => `  ${seed}: ${restart},`).join('\n');
-    writeFileSync(file, `${text.slice(0, open)}= {\n${body}${text.slice(close)}`);
-    process.stdout.write(`accept:parks: recorded ${results.length} restart(s) in src/world/acceptedRestarts.ts\n`);
-  }
-}
-process.exit(broken.length > 0 ? 1 : 0);
+if (broken.length > 0) process.exitCode = 1;

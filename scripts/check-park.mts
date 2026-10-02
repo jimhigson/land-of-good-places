@@ -67,10 +67,9 @@ import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 import { acceptedRestartOf } from './lib/acceptedPark.mts';
 
 /**
- * **Which restart of the park to measure: the accepted one** — recorded for a
- * shipped seed (`src/world/acceptedRestarts.ts`), found by the root loop for
- * any other (`scripts/lib/acceptedPark.mts`), unless `LGP_PARK_RESTART` pins
- * one. The seed and the restart are read once, at module load, by every
+ * **Which restart of the park to measure: the accepted one** — the root
+ * loop's verdict at this source, cached or taken now
+ * (`scripts/lib/acceptedPark.mts`), unless `LGP_PARK_RESTART` pins one. The seed and the restart are read once, at module load, by every
  * generator, so the park's modules are imported only after both are set.
  */
 if (process.env['LGP_PARK_RESTART'] === undefined) {

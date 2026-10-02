@@ -33,6 +33,30 @@ must not rely on which seeds are shipped.
 the first attempt that did. What forced every restart is logged per attempt
 (`describeRestarts`), for the prebuilt park file's metadata.
 
+### Nothing committed, nothing to go stale
+
+The accepted restart is never written into the repository. It is the loop's
+verdict at the exact source being run, cached on `acceptanceSourceHash`
+(`.cache/lgp-accepted/<hash>/<seed>.json`), and taken afresh by whoever first
+needs it after the generator or a measure changes:
+
+- **Node** gets it through the resolver that the `--import` hook installs
+  (`acceptedRestartSync`), and vitest's setup file installs the same resolver.
+  `src/world/parkRestart.ts` asks the resolver for a supported seed with no
+  explicit `LGP_PARK_RESTART`.
+- **`check:park` and `test:procgen`** ask `acceptedRestartOf`, the same loop
+  run asynchronously.
+- **The browser** cannot run the loop. It builds restart 0 unless a park file
+  hands it the restart (`globalThis.__LGP_PARK_RESTART__`), which is the
+  prebuilt park files' job (#705). There `build:parks` runs this same
+  `acceptPark` once per seed in CI, on the hydrated file, and records the
+  answer in the file and its manifest.
+
+There used to be a committed table, `acceptedRestarts.ts`, filled by hand with
+`accept:parks --write` and guarded by `check:accepted-restarts`. Every
+generator change made it stale until someone re-ran the loop, and merges
+waited on that. Jim, 2 October 2026: *"that should be done by a script, no?"*
+
 ### One owner per measure
 
 The acceptance measures are the invariants themselves and `check:park`'s keys,

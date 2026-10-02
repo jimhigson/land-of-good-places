@@ -2,10 +2,10 @@ name: Procgen invariants
 
 # Proves the generated park is placed sanely — no wall crossing another wall or
 # the railway, no tree growing through a tree, no lamp standing in anything,
-# every path lit and every doormat usable — on every seed whose accepted restart
-# is recorded in `src/world/acceptedRestarts.ts` (the supported seeds, 0..15), each
-# built at that restart: the second line behind the root acceptance loop
-# (docs/design/STRUCTURAL-BACKTRACKING.md).
+# every path lit and every doormat usable — on every supported seed (0..15),
+# each built at the restart the root acceptance loop accepts for it at this
+# source (scripts/lib/acceptedPark.mts; nothing committed, so nothing to go
+# stale): the second line behind that loop (docs/design/STRUCTURAL-BACKTRACKING.md).
 #
 # This is a required check on main. Any change to the procedural generation is
 # expected to extend `test/procgen/invariants.ts` in the same PR — see

@@ -107,7 +107,7 @@
  * "someone once saw this go red", but "it is red right now, in this run".
  *
  * **Mutations 3 and 4, 25 September 2026**, on `fix/sb-pathpref` over the
- * accepted parks (`LGP_SEED=s`, restart from `acceptedRestarts.ts`), with every
+ * accepted parks (`LGP_SEED=s`, restart from the committed table of that day), with every
  * sampler covering the park's own outline:
  *
  * - **3 — a band's price back to `ground * M`** (`NavGrid`'s `bandedStep`).
