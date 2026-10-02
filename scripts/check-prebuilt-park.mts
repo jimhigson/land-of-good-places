@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
-import { buildAndVerify } from './lib/parkFiles.mts';
+import { buildAcceptedParks } from './lib/parkFiles.mts';
 import { PARK_MODULES_AFTER_FILE, staticImportClosure } from './lib/bootStaticImports.mts';
 
 {
@@ -47,7 +47,7 @@ import { PARK_MODULES_AFTER_FILE, staticImportClosure } from './lib/bootStaticIm
 
 const outDir = mkdtempSync(join(tmpdir(), 'lgp-prebuilt-park-'));
 try {
-  const { outcomes, controlProblem } = await buildAndVerify([CANONICAL_PARK_SEED], outDir, 1, (line) => console.log(line));
+  const { outcomes, controlProblem } = await buildAcceptedParks([CANONICAL_PARK_SEED], outDir, 1, (line) => console.log(line));
   const problems = [...outcomes.flatMap((o) => o.problems.map((p) => `seed ${o.seed}: ${p}`)), ...(controlProblem ? [controlProblem] : [])];
   process.stderr.write(
     'check:prebuilt-park NOTE: covers the canonical seed only. Every shipped seed is proven by build:parks in the deploy that ships it.\n',

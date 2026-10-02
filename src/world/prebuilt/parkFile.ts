@@ -82,16 +82,15 @@ export interface ParkFile {
   readonly seed: number;
   /**
    * Which start-again of {@link seed} this park is (`parkRestart.ts`): the
-   * restart the root acceptance loop accepted, `ACCEPTED_RESTARTS[seed]`. The
+   * restart `build:parks`'s accept loop accepted for this source. The
    * boot sets it as `__LGP_PARK_RESTART__` before the park's modules load.
    */
   readonly restart: number;
   /**
    * How {@link restart} was found — every restart tried and what forced it
-   * (`scripts/lib/acceptedPark.mts`'s `acceptanceMetadata`), copied in by
-   * `build:parks` from the loop's log (`procgen/acceptanceLog.json`). Null in a
-   * file no build has shipped (a check's scratch file). Read by people, never
-   * by the game.
+   * (`scripts/lib/acceptedPark.mts`'s `acceptanceMetadata`), written by
+   * `build:parks`'s accept loop. Null in a file the loop has not finished with
+   * (a solve's scratch file). Read by people, never by the game.
    */
   readonly acceptance: Json;
   /**

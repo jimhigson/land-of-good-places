@@ -19,11 +19,11 @@
  * has no driver — if it ran, the "hydrated" park was quietly re-solved and
  * matching the fresh one proves nothing), and what each stage cost.
  *
- * Restarts: `solve` builds the seed's recorded restart (`acceptedRestarts.ts`,
- * as every check does); `hydrate` builds the restart the file names, set the
- * way the browser's boot sets it (`__LGP_PARK_RESTART__`, before the park's
- * modules load). Both report the restart they built, and `parkFiles.mts`
- * requires the two to agree with the record.
+ * Restarts: `solve` builds `LGP_PARK_RESTART` (the accept loop sets it per
+ * attempt); `hydrate` builds the restart the file names, set the way the
+ * browser's boot sets it (`__LGP_PARK_RESTART__`, before the park's modules
+ * load). Both report the restart they built, and `parkFiles.mts` requires both
+ * to be the restart the loop accepted.
  *
  * `perturb` hydrates from the file with the Sky Cruiser's track raised half a
  * metre: the control on the instrument. Its digest must differ from the

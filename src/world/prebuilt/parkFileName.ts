@@ -56,6 +56,8 @@ export interface PrebuiltParksManifest {
   /** `scripts/lib/park-source-hash.mjs` of the tree the parks were solved from. */
   readonly sourceHash: string;
   readonly seeds: readonly number[];
+  /** Each seed's accepted restart, found by `build:parks`'s accept loop for this source. */
+  readonly restarts: Readonly<Record<string, number>>;
   /** Each seed's proven whole-park digest (`scripts/lib/parkDigest.mts`). */
   readonly digests: Readonly<Record<string, string>>;
 }

@@ -5,10 +5,12 @@
  * solver of its own (`docs/design/PREBUILT-PARKS.md`).
  *
  * Solving still happens, but here, in build tooling: the first request for a
- * seed runs `scripts/park-file-probe.mts write` in a child Node process (the
- * same solve `build:parks` runs), caches the file under
- * `.parks/dev/<source hash>/`, and serves it stamped with this build's
- * version. The cache is keyed on {@link parkSourceHash}, so an edit to `src/`
+ * seed runs `build:parks` for that seed in a child Node process — the same
+ * accept loop and proof the shipped parks get, so the dev park is the
+ * accepted park, never an unmeasured restart — caches the file under
+ * `.parks/dev/<source hash>/<seed>/`, and serves it stamped with this build's
+ * version. That can take minutes a seed (every attempt is a solve plus every
+ * acceptance measure). The cache is keyed on {@link parkSourceHash}, so an edit to `src/`
  * re-solves on the next request rather than serving a park from other code.
  * A seed outside the game's parks gets a 404 — the same error the game shows
  * for it in production. Files `build:parks` wrote for the current source are
@@ -16,8 +18,8 @@
  * made instant by running it first.
  */
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 
 import { parkSourceHash } from './park-source-hash.mjs';
@@ -46,24 +48,28 @@ export function devParksMiddleware(root, version, seeds) {
     } catch {
       // No build:parks output (or an unreadable one): solve on request below.
     }
-    const dir = join(root, '.parks', 'dev', source.slice(0, 16));
+    const dir = join(root, '.parks', 'dev', source.slice(0, 16), String(seed));
     const file = join(dir, `${seed}.json`);
-    if (existsSync(file)) return file;
+    if (existsSync(join(dir, 'manifest.json')) && existsSync(file)) return file;
     const key = file;
     let pending = inFlight.get(key);
     if (!pending) {
       pending = (async () => {
-        mkdirSync(dir, { recursive: true });
-        const partial = `${file}.${process.pid}.partial`;
         const started = Date.now();
-        console.log(`[dev parks] solving seed ${seed} (first request since the source changed)…`);
+        console.log(`[dev parks] building seed ${seed}'s accepted park (first request since the source changed)…`);
+        // build:parks writes its manifest last, only once the file is proven,
+        // so a run that dies leaves no manifest and the next request starts it again.
         await run(
           process.execPath,
-          ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', 'scripts/park-file-probe.mts', 'write', partial],
-          { cwd: root, env: { ...process.env, LGP_SEED: String(seed) }, maxBuffer: 256 * 1024 * 1024 },
+          ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', 'scripts/build-parks.mts'],
+          {
+            cwd: root,
+            env: { ...process.env, LGP_SEEDS: String(seed), LGP_LANES: '1', LGP_PARKS_OUT: relative(root, dir) },
+            maxBuffer: 256 * 1024 * 1024,
+          },
         );
-        renameSync(partial, file);
-        console.log(`[dev parks] seed ${seed} solved in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+        if (!existsSync(join(dir, 'manifest.json'))) throw new Error(`build:parks wrote no manifest for seed ${seed}`);
+        console.log(`[dev parks] seed ${seed} built in ${((Date.now() - started) / 1000).toFixed(1)} s`);
         return file;
       })().finally(() => inFlight.delete(key));
       inFlight.set(key, pending);
