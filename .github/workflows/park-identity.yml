@@ -80,12 +80,21 @@ jobs:
       - name: Download identities
         uses: actions/download-artifact@v4
 
-      - name: Which Math functions differ between the platforms
+      # `native` is the control: V8's own functions, which differ between
+      # x64 and arm64. If it ever stops differing, this step can no longer see
+      # what the ports exist to remove, and it says so. `deterministic` is
+      # src/core/deterministicMath.ts, and any difference there fails the job.
+      - name: Math is the same on both platforms
         run: |
           node -e "
           const a=require('./park-identity-ubuntu-latest/identity-math/math.json'), b=require('./park-identity-macos-latest/identity-math/math.json');
           console.log(a.platform, a.node, a.v8, 'vs', b.platform, b.node, b.v8);
-          for (const k of Object.keys(a.result)) console.log((a.result[k]===b.result[k]?'same     ':'DIFFERENT'), k);"
+          let nativeDiffer=0, detDiffer=0;
+          for (const k of Object.keys(a.native)) { const same=a.native[k]===b.native[k]; if(!same) nativeDiffer++; console.log('native        ', same?'same     ':'DIFFERENT', k); }
+          for (const k of Object.keys(a.deterministic)) { const same=a.deterministic[k]===b.deterministic[k]; if(!same) detDiffer++; console.log('deterministic ', same?'same     ':'DIFFERENT', k); }
+          console.log('native functions differing (control):', nativeDiffer, '| deterministic functions differing:', detDiffer);
+          if (nativeDiffer===0) console.error('NOTE: the native control shows no difference on this pair of runners, so this run does not demonstrate the ports are needed.');
+          if (detDiffer>0) { console.error('FAIL: src/core/deterministicMath.ts gave different bits on the two platforms'); process.exit(1); }"
 
       - name: The same park on both platforms
         run: node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/compare-park-identity.mts park-identity-ubuntu-latest/identity park-identity-macos-latest/identity

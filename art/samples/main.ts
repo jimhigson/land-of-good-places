@@ -1,3 +1,4 @@
+import '../../src/core/installDeterministicMath';
 import {
   CanvasTexture,
   CylinderGeometry,

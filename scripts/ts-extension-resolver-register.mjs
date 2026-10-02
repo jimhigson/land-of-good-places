@@ -5,5 +5,11 @@
  * registered before the target's imports are resolved.
  */
 import { register } from 'node:module';
+// Also the Node end of `src/core/deterministicMath.ts`: every script that
+// imports `src/` comes through here, before its own modules evaluate, so every
+// park built by a script uses the same `Math` on a Mac as on the CI runner.
+// Imported by full path because the resolver below is not registered yet.
+import { installDeterministicMath } from '../src/core/deterministicMath.ts';
 
+installDeterministicMath();
 register('./ts-extension-resolver.mjs', import.meta.url);

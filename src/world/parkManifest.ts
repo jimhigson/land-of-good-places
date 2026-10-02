@@ -2,6 +2,12 @@ import type { AnchorFootprint } from './anchors';
 import { resolveParkSeed } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
 import { CASTLE_PLOT_REACH, PARK_SURFACE_SCALE } from '../core/constants';
+import { assertDeterministicMath } from '../core/deterministicMath';
+
+// Every park is built from here, so refuse here: a park generated with the
+// platform's own Math is a different park on an arm64 Mac than on the x64
+// runner that ships it (core/deterministicMath.ts).
+assertDeterministicMath('parkManifest');
 
 /**
  * The park manifest — the single editable input to the layout generator.

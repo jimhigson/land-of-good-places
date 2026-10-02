@@ -1,3 +1,5 @@
+// First, before anything evaluates a Math function: see core/deterministicMath.ts.
+import './core/installDeterministicMath';
 import './style.css';
 import { Vector3 } from 'three';
 import { registerSW } from 'virtual:pwa-register';
