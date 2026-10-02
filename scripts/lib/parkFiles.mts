@@ -205,9 +205,11 @@ function buildFailed(seed: number, restart: number, message: string, wallMs: num
     broken: null,
     failures: [{ measure: 'build', count: 1, first: [message.slice(0, 400)] }],
     measuresAsked: 0,
-    cpuMs: { build: 0, invariants: 0, findings: 0 },
+    cpuMs: { build: 0, invariants: 0, checks: 0, findings: 0 },
     backtracking: { plan: null, world: null },
     wallMs,
+    notAsked: null,
+    stageCpuMs: [],
     parkFile: null,
   };
 }
@@ -230,7 +232,12 @@ function fileAttempt(scratch: string, solves: Map<string, ProbeResult>) {
     } catch (error) {
       if (!(error instanceof ProbeFailed) || error.hung) throw error;
       const last = error.message.split('\n').filter(Boolean).at(-1) ?? error.message;
-      return buildFailed(seed, restart, last, Math.round(performance.now() - began));
+      const failed = buildFailed(seed, restart, last, Math.round(performance.now() - began));
+      // A programming error is a bug, not a park that could not be made — the
+      // same rule park-attempt applies to a build (`lib/attemptError.mts`):
+      // broken, so the loop stops on it instead of restarting round it.
+      const bug = /\b(TypeError|RangeError|ReferenceError|SyntaxError)\b.*$/m.exec(error.message);
+      return bug ? { ...failed, broken: `solve: ${bug[0].slice(0, 300)}` } : failed;
     }
     if (solved.seed !== seed || solved.restart !== restart) {
       throw new Error(`build:parks: asked to solve seed ${seed} restart ${restart}, the probe built seed ${solved.seed} restart ${solved.restart}`);
