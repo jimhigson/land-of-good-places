@@ -17,3 +17,11 @@ vs 8). Every far change is a different layout, not scatter coupling. Traces: scr
    line and the plan accepts the bowed park unchanged.
 2. Digest emits plan decisions; test asserts both parks' plan settled identically (else the comparison is vacuous/unfair).
 3. Control: break tree candidateRng index-locking -> test must go red under the new perturbation.
+
+## Progress
+- c2: tent bow + plan-decisions assertion. Seed 5 pair: plan identical, but 6 bushes 47-72 m away still changed.
+- Second cause: tree/bush `accommodate` salted its relocation stream by `section` (index in the list). A refusal near
+  the spur shifts every later section, so a far clump moved for a lamp re-rolled (bushes#432 base == bushes#429 bowed).
+- c3: salt by `identity` (the planting candidate index; cover trees by cell key + 2^24). Seed 5 pair: near 46, far 0.
+  This changes the shipped seed-5 park: 4 relocated bushes land elsewhere -> must re-verify park:attempt.
+- Control already in hand: tent bow + old section salt = 6 far bushes (s5.* in scratch) = red.
