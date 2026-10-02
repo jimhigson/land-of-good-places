@@ -92,3 +92,26 @@ Unsatisfied trains (ladder fallback) were refused downstream 16/16 on seeds 0,1,
   router alternatives; out of scope.
 - c050cafe: clear() 2 m cells/reach summed once; boundary interior skip. Rebased onto
   origin/wip/sb-merge 47fe3f80. Final sweeps base2/after2 running (scratch), then park:attempt x16.
+
+## FINAL on origin/wip/sb-merge a2c88976 (deterministic Math), plan thread-CPU s (base3 vs after3),
+## all 16 decision traces identical (train refusal lines carry exact piece/rejection counts):
+seed | before s (train) | after s (train) | unwinds
+0 | 44.3 (13.8) | 37.3 (8.2) | 6 -> 3
+1 | 290.5 (44.6) | 213.1 (25.1) | 32 -> 20
+2 | 2.9 (1.8) | 2.8 (1.3) | 0 -> 0
+3 | 118.7 (46.2) | 72.0 (33.8) | 28 -> 13
+4 | 10.4 (8.8) | 9.1 (7.0) | 1 -> 1
+5 | 78.9 (2.2) | 98.0 (1.6) | 2 -> 2
+6 | 513.2 (393.8) | 341.1 (231.7) | 34 -> 25
+7 | 9.3 (2.4) | 10.4 (2.0) | 0 -> 0
+8 | 69.1 (7.9) | 84.1 (7.0) | 6 -> 6
+9 | 113.6 (84.4) | 80.1 (53.2) | 13 -> 7
+10 | 34.7 (2.2) | 34.0 (1.5) | 3 -> 3
+11 | 10.9 (3.4) | 10.1 (2.5) | 0 -> 0
+12 | 6.4 (3.9) | 5.0 (2.5) | 0 -> 0
+13 | 288.4 (195.7) | 207.3 (120.5) | 28 -> 16
+14 | 198.2 (129.9) | 136.3 (72.6) | 12 -> 9
+15 | 300.8 (162.5) | 176.2 (95.0) | 29 -> 14
+total | 2090 | 1517
+per feature totals: cruiser 604->622 (unchanged work: the noise control, load avg ~140), train 1103->665, pathGraph 314->163, slide 64->62
+park:attempt x16 running: scratch attempts.txt
