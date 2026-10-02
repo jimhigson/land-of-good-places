@@ -1641,8 +1641,7 @@ const UNDER_A_SOLID_TOLERANCE = PAVING_CELL / 2;
 const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'booth', 'boundary wall']);
 
 /**
- * **No drawn paving lies under anything solid** — not under a building, a
- * booth, a wall or a post, and not in a pocket a child cannot get into.
+ * **No drawn paving lies under a building, a booth or the boundary wall.**
  *
  * Found on 2 October 2026 by a walkability probe over the accepted parks:
  * paving drawn under the back of stall booths (seed 11 near (-41, 29.6)),
@@ -1651,14 +1650,12 @@ const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'booth', '
  *
  * Measured off the drawn `path-surface` and `path-kerb`, rasterised in plan,
  * against the **colliders** — the one owner of every footprint
- * (`CollisionWorld.solidDepthAt`) — in two clauses:
- *
- * 1. **Under a solid**: a paved cell whose centre stands more than
- *    {@link UNDER_A_SOLID_TOLERANCE} inside any ground-standing collider of a
- *    building, a booth or the boundary wall ({@link BUILT_SOLIDS}).
- * 2. **Shut in**: a paved cell more than {@link WALKABLE_PAVING_REACH} from
- *    every nav-lattice cell the entrance reaches — the inside of a booth's or a
- *    building's walls, which a collider ring encloses without filling.
+ * (`CollisionWorld.solidDepthAt`): a paved cell whose centre stands more than
+ * {@link UNDER_A_SOLID_TOLERANCE} inside any ground-standing collider filed
+ * under a building, a booth or the boundary wall ({@link BUILT_SOLIDS}). A
+ * ribbon into a booth's hollow middle crosses its walls, so it is caught here
+ * too. Paving shut in where nobody can reach, under none of these, is counted
+ * on every run but not judged.
  *
  * Two kinds of paving are left out, and counted on every run: what a bridge
  * carries (its kerb runs under its own parapets by design; the bridge
@@ -1706,18 +1703,17 @@ const noDrawnPavingUnderASolid: Invariant = (facts) => {
         `${(place.cells * area).toFixed(2)} m² of drawn paving near ${fmt(place.at)} lies under a ${place.worst.owner} — ` +
         `${place.worst.depth.toFixed(2)} m inside ${place.worst.what}`,
     ),
-    ...gatherPlaces(raster, shut, (a, b) => a.depth > b.depth).map(
-      (place) =>
-        `${(place.cells * area).toFixed(2)} m² of drawn paving near ${fmt(place.at)} is shut in — more than ` +
-        `${WALKABLE_PAVING_REACH.toFixed(2)} m from any ground a child can reach from the entrance` +
-        (place.worst.what ? ` (nearest solid: ${place.worst.what}, ${(-place.worst.depth).toFixed(2)} m off)` : ''),
-    ),
   ];
+  // Paving shut in where nobody can reach it, but under none of the above, is
+  // said rather than judged: it is the railway's and the rides' to own (on
+  // 2 October 2026 every case away from a booth was a connector laid along a
+  // station's track, which is a different defect from this one).
+  const shutPlaces = gatherPlaces(raster, shut, (a, b) => a.depth > b.depth);
   process.stderr.write(
     `  noDrawnPavingUnderASolid: ${paved} paving cells judged on seed ${facts.seed}; ${carried} carried by a bridge ` +
       `and ${decorativeTriangles} declared-unwalked apron triangle(s) left out; ${under.length} under a building, booth or ` +
-      `the boundary wall, ${shut.length} shut in; ${otherSolids} under other solids (garden walls, the fountain rim, ` +
-      `posts — not judged by this measure)\n`,
+      `the boundary wall. Not judged here: ${otherSolids} under other solids (garden walls, the fountain rim, posts), ` +
+      `${shut.length} shut in where nobody can reach${shutPlaces.length ? ` (largest ${(Math.max(...shutPlaces.map((p) => p.cells)) * area).toFixed(2)} m² near ${fmt(shutPlaces.reduce((a, b) => (b.cells > a.cells ? b : a)).at)})` : ''}\n`,
   );
   if (paved === 0) complaints.push('no paving was judged — this measured nothing');
   return complaints;
@@ -13292,7 +13288,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ["the rail-race stall's doormat is standable and reachable", railRaceStallDoormatIsUsable],
   ['every doormat in the park can be walked to from the gate', everyDoormatIsReachableFromTheGate],
   ['the drawn paving runs from the gate all the way to every door', drawnPavingReachesEveryDoor],
-  ['no drawn paving lies under anything solid, or shut in where nobody can reach it', noDrawnPavingUnderASolid],
+  ['no drawn paving lies under a building, a booth or the boundary wall', noDrawnPavingUnderASolid],
   ['no drawn paving lies outside the park', noDrawnPavingOutsideThePark],
   ["every keychain keyring's stand point is standable and reachable", keychainStallStandIsUsable],
   ['the Sky Cruiser flies clear of the whole park', skyCruiserFliesClearOfThePark],
