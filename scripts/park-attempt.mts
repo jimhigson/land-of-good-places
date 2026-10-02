@@ -92,6 +92,13 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [string, (park: HeadlessPark
     },
   ],
   [
+    'check:coplanar',
+    async (park) => {
+      const { gardenCoplanarRegressions } = await import('./lib/coplanarRatchet.mts');
+      return { faults: await gardenCoplanarRegressions(park), voids: [] };
+    },
+  ],
+  [
     'check:castle-window',
     async (park) => {
       const { castleWindowFindings } = await import('./lib/rideFindings.mts');
