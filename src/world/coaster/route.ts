@@ -1,5 +1,6 @@
 import { CatmullRomCurve3, Vector3 } from 'three';
 import { lazyView } from '../../boot/lazyView';
+import { registerPlanCache } from '../../boot/planCaches';
 import { Rng, TAU } from '../../core/mathUtils';
 import { PARK_SEED } from '../parkManifest';
 import { CART_ENVELOPE } from './cart';
@@ -1172,10 +1173,9 @@ export function* cruiserRouteSearch(
     throw missedTheCastle(escalated, 'at twice the castle weight too');
   }
 
-  const rescue = briefs.rescue();
   let rescued: SolvedRailRoute;
   try {
-    rescued = yield* railRouteSearch(rescue.first);
+    rescued = yield* rescueTier('first', briefs);
   } catch (error) {
     if (!(error instanceof RailRouteUnsolvable) || !primaryFailure) throw error;
     throw new RailRouteUnsolvable(
@@ -1187,13 +1187,66 @@ export function* cruiserRouteSearch(
   if (rescued.report.satisfied) return rescued;
   let rescuedEscalated: SolvedRailRoute;
   try {
-    rescuedEscalated = yield* railRouteSearch(rescue.escalated);
+    rescuedEscalated = yield* rescueTier('escalated', briefs);
   } catch (error) {
     if (!(error instanceof RailRouteUnsolvable)) throw error;
     throw missedTheCastle(rescued, `the rescue's escalated tier then solved nothing: ${error.message}`);
   }
   if (rescuedEscalated.report.satisfied) return rescuedEscalated;
   throw missedTheCastle(rescuedEscalated, "in the rescue tier, at twice the castle weight too");
+}
+
+/**
+ * **The rescue tier is the same search on every cruiser draw of one layout,
+ * so it is searched once.**
+ *
+ * A cruiser re-draw (`parkPlan.ts`, the retry stream handed to
+ * `cruiserStartSearch`) re-orders the primary tiers' start poses and nothing
+ * else. The rescue pair it never touches: its poses come from
+ * `rescueStationPoses` under a fixed stream (`PARK_SEED ^ salt ^ 0x9e5c`), its
+ * briefs' seeds are fixed, and its `clear`, boundary and influences are the
+ * layout's. So when a second draw's primary tier again closes nothing, the
+ * rescue tier it falls to is the first draw's rescue tier exactly — measured
+ * on seed 3's third layout draw (fix/sb-trainsearch3): both draws reported
+ * "2 solved loop(s) rejected by crossesTheCastle over 162 start poses, in the
+ * rescue tier", byte for byte, two exhaustive searches apiece.
+ *
+ * The outcome (the route, or the error) is kept and handed back. A draw is a
+ * **retry** to the driver, never an unwind, so the memo lives exactly as long
+ * as the layout: `registerPlanCache` forgets it on every unwind, and nothing
+ * but an unwind can change the layout. The yields of a search answered from
+ * the memo are not repeated, so piece counts fall; no decision can.
+ */
+type TierOutcome = { readonly route: SolvedRailRoute } | { readonly error: unknown };
+// `var`: read by a driver that can be forced mid-import (see `parkPlan.ts`'s `state`).
+/* eslint-disable-next-line no-var */
+var rescueOutcomes: Map<string, TierOutcome> | undefined;
+registerPlanCache(() => rescueOutcomes?.clear());
+function* rescueTier(
+  which: 'first' | 'escalated',
+  briefs: CoasterBriefs,
+): Generator<number, SolvedRailRoute, void> {
+  const memo = (rescueOutcomes ??= new Map());
+  const brief = briefs.rescue()[which];
+  // Keyed on what makes the brief this ride's and not another's — its seed
+  // (which folds in the ride's salt), length, and its start poses — so a
+  // second coaster built in the same process (a `CoasterRoute` constructed
+  // without a presolved plan) cannot be handed this one's answer. The layout
+  // it stands on is covered by the unwind reset above.
+  const key =
+    `${which}|${brief.seed}|${brief.desiredLength}|${brief.startPoses.length}|` +
+    brief.startPoses.map((pose) => `${pose.x},${pose.z},${pose.hx},${pose.hz}`).join(';');
+  let outcome = memo.get(key);
+  if (!outcome) {
+    try {
+      outcome = { route: yield* railRouteSearch(brief) };
+    } catch (error) {
+      outcome = { error };
+    }
+    memo.set(key, outcome);
+  }
+  if ('error' in outcome) throw outcome.error;
+  return outcome.route;
 }
 
 /**
