@@ -11,3 +11,10 @@ report failures, they are information); trees + climbable per seed before/after.
 1. Instrument: `treeScatterLedger` in Scenery.ts + scripts/measure-tree-scatter.mts. Measure BEFORE on 16 seeds.
 2. Choose: fixed candidate budget by density (N = density x sampling area) vs per-cell quota. Leaning density:
    it is what bushes already do (BUSH_BUDGET), and the planted set is a prefix-or-extension of today's stream.
+
+## BEFORE (base a2c88976 + ledger, each seed at recorded restart): seed restart trees climbable candidates-to-72
+0/8 72 37 1763 | 1/2 72 36 4165 | 2/5 72 48 1560 | 3/2 72 36 1468 | 4/7 72 28 2019 | 5/0 72 31 1761
+6/5 73 41 1265 (1 cover) | 7/3 73 36 1311 (1 cover) | 8/4 72 32 6362 | 9/3 72 41 1495 | 10/3 72 42 4201
+11/4 72 34 932 | 12/0 72 40 1600 | 13/2 72 34 1428 | 14/6 72 35 3484 | 15/5 72 40 2794
+Sampling area ~18185 m2 on every seed (boundary area ~constant), so "density x area" = a constant budget.
+Next: curve run (cap removed, budget 8000, uncommitted) to get trees(N)/climbable(N) per seed.
