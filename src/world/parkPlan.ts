@@ -666,9 +666,22 @@ function builders(): readonly FeatureBuilder[] {
    */
   let slideSearchedUnder: { readonly layout: ParkLayout; readonly cruiser: PlannedCoaster } | null = null;
   const slideSearched = new Map<number, { readonly route: SolvedRailRoute } | SlideRefusal>();
+  // Attempts on offer while the slide's search has not run out of pieces.
+  let slideAttemptsOnOffer = COARSE_ATTEMPT_CAP;
   const slideBuilder = coarse<PlannedSlide>({
     name: 'slide',
     deps: ['layout', 'cruiser', 'train'],
+    // **A slide that ran out of pieces is not re-salted.** A retry changes only
+    // the search's random stream; the doors, the pit mouths, the cruiser's air
+    // and the ladder are the same, so a search that spent `SLIDE_PIECE_BUDGET`
+    // on them is told the same thing again. Measured on seed 11 restart 4's
+    // fourth layout (fix/sb-slidecost): all five re-salted searches spent the
+    // whole budget too, each at the same decision (the 62 m target from the
+    // door at 9.5 m) — 80 M pieces, ~190 s — and the cruiser re-draw the
+    // driver then reached placed the slide in 18,978 pieces. So a budget
+    // refusal names the cruiser at once (`consumed` below), which is the
+    // driver's next rung once no retry is on offer.
+    supply: () => slideAttemptsOnOffer,
     *solve(attempt) {
       const layout = planPart('layout');
       const cruiser = planPart('cruiser');
@@ -683,6 +696,7 @@ function builders(): readonly FeatureBuilder[] {
       }
       const outcome = 'refused' in found ? found : yield* finishSlideSearch(found.route);
       if ('refused' in outcome) {
+        if (outcome.budgetSpent) slideAttemptsOnOffer = attempt + 1;
         return refusal(`ginormous slide: ${outcome.blocker}`, { consumed: ['cruiser', 'layout'] });
       }
       return outcome;
@@ -692,6 +706,7 @@ function builders(): readonly FeatureBuilder[] {
     },
     clear() {
       delete state.slide;
+      slideAttemptsOnOffer = COARSE_ATTEMPT_CAP;
     },
   });
 
