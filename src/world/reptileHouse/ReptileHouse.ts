@@ -55,6 +55,9 @@ import {
   REPTILE_ARRIVAL_Z,
   REPTILE_DOOR_BAND_OUTER,
   REPTILE_LIPS_REACH,
+  REPTILE_FOOTPRINT_RADIUS,
+  REPTILE_TAIL_BASE_RADIUS,
+  REPTILE_TAIL_REACH,
   REPTILE_DOORMAT_STANDOFF,
   REPTILE_ENCLOSURE_WALL_HEIGHT,
   REPTILE_FORECOURT_ORIGIN_X,
@@ -284,6 +287,9 @@ export class ReptileHouse implements GameSystem {
       lipsReach,
       ...lowDiscs.filter((disc) => disc.z > 0 && Math.abs(disc.x) < REPTILE_JAMB_STRIP + 2).map((disc) => disc.z + disc.radius),
     );
+    if (REPTILE_FOOTPRINT_RADIUS < REPTILE_TAIL_REACH + REPTILE_TAIL_BASE_RADIUS) {
+      throw new Error('ReptileHouse: REPTILE_FOOTPRINT_RADIUS does not cover the tail base — paths would pave under it');
+    }
     if (mouthReach > REPTILE_LIPS_REACH) {
       throw new Error(`ReptileHouse: the mouth reaches ${mouthReach.toFixed(2)} m, past REPTILE_LIPS_REACH ${REPTILE_LIPS_REACH} — raise it in layout.ts`);
     }

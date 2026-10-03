@@ -162,7 +162,15 @@ export const REPTILE_ARCH_HEIGHT = 3.6;
  * radius is 12, not the spec's 11.5: the tongue — the doormat — lolls out of
  * the mouth to its fork at 11.9 m (`reptile_house_build.py` measures it).
  */
-export const REPTILE_FOOTPRINT_RADIUS = 10.5;
+/**
+ * The footprint is what the park's paths keep their paving out of, so it
+ * covers every solid at the plot: the tail base's collider is the furthest,
+ * `REPTILE_TAIL_REACH` + `REPTILE_TAIL_BASE_RADIUS` = 11.8 (it was 10.5, and
+ * seed 5 restart 4 laid 4.2 m² of paving under the tail base). A literal for
+ * `reptile_constants.py`; `ReptileHouse` asserts the sum at load.
+ */
+export const REPTILE_TAIL_BASE_RADIUS = 0.6;
+export const REPTILE_FOOTPRINT_RADIUS = 11.8;
 export const REPTILE_BOUNDING_RADIUS = 12;
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import {
   REPTILE_HOUSE_ORIGIN_X,
   REPTILE_HOUSE_ORIGIN_Z,
   REPTILE_SHELL_RADIUS,
+  REPTILE_TAIL_BASE_RADIUS,
   REPTILE_TAIL_BEARING_OFFSET,
   REPTILE_TAIL_REACH,
   REPTILE_WALL_HEIGHT,
@@ -172,7 +173,7 @@ export function registerReptileShellCollision(
   wall(REPTILE_BACK_WALL_ALONG, JAMB_ACROSS, REPTILE_BACK_WALL_ALONG, -JAMB_ACROSS, 0.35);
 
   const tail = reptileTailBase(frame);
-  collision.addCircle(tail.x, tail.z, 0.6);
+  collision.addCircle(tail.x, tail.z, REPTILE_TAIL_BASE_RADIUS);
   for (const disc of lowDiscs) {
     const at = facadeToWorld(frame, disc.z, disc.x);
     collision.addCircle(at.x, at.z, disc.radius);
