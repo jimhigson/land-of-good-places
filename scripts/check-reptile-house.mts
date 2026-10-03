@@ -86,7 +86,8 @@ import { SNAKE_FACE_ROWS, SUNNY_FACE_EYE_ROW } from '../src/art/models/snakeFace
 import { reptileHouseLipThickness, reptileHousePlinthTop } from '../src/art/models/reptileHouseAssets.ts';
 import { bandCrossed } from '../src/world/tapSpacing.ts';
 import { PRIMARY_ACTION } from '../src/world/interact.ts';
-import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE, spaceAt } from '../src/world/spaces.ts';
+import { SPACE_GARDEN, SPACE_REPTILE_HOUSE, spaceAt } from '../src/world/spaces.ts';
+import { placedEntry } from '../src/world/parkLayout.ts';
 import { reptileKeepOuts, segmentDistance } from '../src/world/reptileHouse/props.ts';
 import { meterReading, meterRungs } from '../src/world/reptileHouse/stall.ts';
 import { buildHallShell, facadeToWorld, reptileEntryBand, reptileExitBand, REPTILE_INNER_X, REPTILE_INNER_Z } from '../src/world/reptileHouse/shell.ts';
@@ -549,7 +550,12 @@ console.log('\nDOORS — both ways, on the real building:');
   const context = { dt: 1 / 60, elapsed: 1, playerPosition: probe.position, frame: 1 } as unknown as FrameContext;
   say(house.requestEnterDoor(), '/reptile-house-door puts her outside the door');
   for (let i = 0; i < 70; i += 1) house.update(context);
-  say(spaceAt(probe.position.x, probe.position.z) === SPACE_REPTILE_FORECOURT, `she stands on the forecourt (${spaceAt(probe.position.x, probe.position.z)})`);
+  say(spaceAt(probe.position.x, probe.position.z) === SPACE_GARDEN, `she stands in the park (${spaceAt(probe.position.x, probe.position.z)})`);
+  {
+    const plot = placedEntry('reptileHouse');
+    const off = Math.hypot(probe.position.x - plot.entranceX, probe.position.z - plot.entranceZ);
+    say(off < 0.01, `on the plot's own doormat, ${off.toFixed(3)} m from (${plot.entranceX.toFixed(2)}, ${plot.entranceZ.toFixed(2)})`);
+  }
   say(house.interactZones().some((zone) => zone.id === 'reptile-entrance'), 'the entrance zone is offered from outside');
   // Walk in through the band, at a sprint stride.
   const band = reptileEntryBand(house.facade);
@@ -573,7 +579,7 @@ console.log('\nDOORS — both ways, on the real building:');
   say(bandCrossed(exit, probe.previousPosition.x, probe.previousPosition.z, probe.position.x, probe.position.z), 'a sprint stride across the exit band fires it');
   house.update(context);
   for (let i = 0; i < 70; i += 1) house.update(context);
-  say(!house.playerIsInside && spaceAt(probe.position.x, probe.position.z) === SPACE_REPTILE_FORECOURT, 'walking out through the exit leaves to the forecourt');
+  say(!house.playerIsInside && spaceAt(probe.position.x, probe.position.z) === SPACE_GARDEN, 'walking out through the exit leaves into the park');
   say(collision.isClearCircle(probe.position.x, probe.position.z, PLAYER_RADIUS), 'she lands on clear ground outside the door');
   // Back in by the deep link, at a chosen spot.
   say(house.requestEnter({ x: REPTILE_LOG_CENTRE_X, z: 0, facing: 90 }), '/reptile-house?at= enters at a spot');
@@ -749,7 +755,7 @@ console.log('\nPAINTED FACES — eyes above the smile on every painted head, the
   // its eyes and no frame would have said so.
   const heads = new Map<string, Mesh>();
   const planks = new Map<string, Mesh>();
-  for (const root of [house.hallRoot, house.forecourtRoot]) {
+  for (const root of [house.hallRoot, house.parkRoot]) {
     root.traverse((object) => {
       if (!(object instanceof Mesh)) return;
       if (['rh-head', 'rn-head', 'rr-snake-head'].includes(object.name) && !heads.has(object.name)) heads.set(object.name, object);
@@ -874,8 +880,13 @@ console.log('\nHOUSEKEEPING:');
   });
   say(lights >= 8, `${lights} lights under the hall root`);
   say(spaceAt(OX, OZ) === SPACE_REPTILE_HOUSE, `spaceAt the hall origin is '${spaceAt(OX, OZ)}'`);
-  say(scene.children.includes(house.hallRoot) && scene.children.includes(house.forecourtRoot), 'both roots are in the scene');
-  note(`${EXHIBIT_PLACEMENTS.length} exhibits probed, ${BEDS.length} beds marched, ${PATHS.length} paths swept, facade marched on the forecourt (no plot yet)`);
+  say(scene.children.includes(house.hallRoot), 'the hall root is in the scene');
+  {
+    let parent = house.parkRoot.parent;
+    while (parent && parent.parent && parent.parent !== scene) parent = parent.parent;
+    say(house.parkRoot.parent?.name === 'anchor:reptileHouse' && Boolean(parent), `the exterior stands in its park plot (${house.parkRoot.parent?.name ?? 'nowhere'})`);
+  }
+  note(`${EXHIBIT_PLACEMENTS.length} exhibits probed, ${BEDS.length} beds marched, ${PATHS.length} paths swept, facade marched on its park plot`);
 }
 
 console.log(bad === 0 ? '\nAll clauses passed.' : `\n${bad} clause(s) FAILED.`);

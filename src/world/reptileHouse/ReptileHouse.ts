@@ -86,7 +86,7 @@ import {
  * `SpaceManager.changeTo` on a swept `PortalBand`. `Hotel.ts` is the precedent
  * for every one of those moves and they are copied here with new numbers.
  *
- * **Until the park has a plot for it, the exterior stands on the forecourt**:
+ * **The park places the exterior** (`World` passes `placedEntry('reptileHouse')`); without a plot it stands on the forecourt:
  * its own flat lawn, another disjoint space 300 m south of the hall, where
  * `/reptile-house-door` puts her on the doormat and where leaving the hall
  * comes back out to. So the door works both ways on a park that has not
@@ -521,12 +521,19 @@ export class ReptileHouse implements GameSystem {
     this.standAtDoor(this.frame.yaw);
   }
 
-  /** On the doormat outside the door, on the forecourt, facing the door. */
+  /** On the doormat outside the door — the park plot's, or the forecourt's — facing the door. */
   private standAtDoor(facing = this.frame.yaw + Math.PI): void {
     const player = this.player;
     if (!player) return;
     this.inside = false;
     this.hallRoot.visible = false;
+    const plot = this.deps.plot;
+    if (plot) {
+      // The plot's own doormat, the one the park's paths are routed to.
+      this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
+      player.teleportTo(plot.entranceX, this.surfaces.sample(plot.entranceX, plot.entranceZ, 3), plot.entranceZ, facing);
+      return;
+    }
     this.onForecourt = true;
     this.forecourtRoot.visible = true;
     this.boundToForecourt();
