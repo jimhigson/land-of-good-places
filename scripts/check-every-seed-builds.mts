@@ -176,8 +176,10 @@ async function buildSeed(seed: number): Promise<SeedResult> {
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.startsWith('layout-trace:'));
-  // A hydrated park ran no layout search; its solve's trace is in the file.
-  const trace = (solvedTrace.length > 0 || parkFile === null ? solvedTrace : recordedTrace(parkFile))
+  // A hydrated park ran no layout search — its process prints only "no solve
+  // ran in this process" — so the trace is the one its solve recorded in the
+  // file (what `park-attempt.mts` reads for the same measure).
+  const trace = (parkFile === null ? solvedTrace : recordedTrace(parkFile))
     .map((l) => l.trim())
     .filter((l) => l.startsWith('layout-trace:'));
   const counts = layoutTraceCounts(trace);
