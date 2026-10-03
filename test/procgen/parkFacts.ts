@@ -1763,6 +1763,11 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
   process.env['LGP_SEED'] = String(seed);
   process.env['LGP_PARK_RESTART'] = String(restart);
 
+  // The park solver lives in build-time code (`procgen/`) and is plugged into
+  // the game's modules here, after the seed is pinned — vitest does not load
+  // `scripts/ts-extension-resolver-register.mjs`, whose lazy loader does this
+  // for every script (`src/world/prebuilt/solverPort.ts`).
+  await import('../../procgen/install.ts');
   const { buildHeadlessPark } = await import('../../scripts/park-harness.mts');
   const { PARK_SEED_ASKED, PARK_MANIFEST } = await import('../../src/world/parkManifest.ts');
 
@@ -1782,18 +1787,30 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
 
   // Asked before the build: the scatter measures its legal ground the moment
   // it finishes, against the world as it saw it, which is gone afterwards.
-  const { bushScatterLedger } = await import('../../src/world/Scenery.ts');
+  const { bushScatterLedger } = await import('../../procgen/world/sceneryBuilders.ts');
   bushScatterLedger.measureGround = true;
   const headless = buildHeadlessPark();
   const { world, scene, buildMs, sample } = headless;
-  const bushGround = bushScatterLedger.ground;
-  if (!bushGround) throw new Error('parkFacts: the bush scatter never finished, so its legal ground was never measured');
+  // A park hydrated from its file ran no scatter: the solve measured the
+  // ground and the file carries it (`measures.bushGround`).
+  const { offeredParkFile } = await import('../../src/world/prebuilt/parkFileStore.ts');
+  const offered = offeredParkFile();
+  const bushGround = offered
+    ? (offered.measures?.bushGround as { readonly legalM2: number } | null | undefined)
+    : bushScatterLedger.ground;
+  if (!bushGround) {
+    throw new Error(
+      offered
+        ? 'parkFacts: the park file carries no measures.bushGround, so its bush scatter\'s legal ground is unknown'
+        : 'parkFacts: the bush scatter never finished, so its legal ground was never measured',
+    );
+  }
 
   // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
   // already built for this exact seed — never at this file's own top level,
   // the seed-pinning trap this file's header already warns about.
-  const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
-  const bridgeReservations = planBridgeFootprints(world.train.crossings);
+  const { planConservativeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
+  const bridgeReservations = planConservativeFootprints(world.train.crossings);
   const { measureFountainHop } = await import('../../src/world/fountainHop.ts');
   const fountainHop = measureFountainHop(world.fountain, world.collision, sample);
 

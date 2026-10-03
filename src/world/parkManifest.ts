@@ -1,7 +1,7 @@
 import type { AnchorFootprint } from './anchors';
 import { CASTLE_DOORMAT_LOCAL } from './building/frontDoor';
 import { TOWER_DOORMAT_REACH, TOWER_DRAWN_DOOR_ALONG } from './hotel/towerDimensions';
-import { resolveParkSeed } from './parkSeedPool';
+import { parkSeedAsked } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
 import { CASTLE_PLOT_REACH, PARK_SURFACE_SCALE } from '../core/constants';
 import { assertDeterministicMath } from '../core/deterministicMath';
@@ -46,15 +46,18 @@ assertDeterministicMath('parkManifest');
  * time she starts one, while the park she gets is still one that has been
  * proved sound. `resolveParkSeed()` is the single owner of the choice and its
  * doc comment is the whole story: pins first (`LGP_SEED`, then `?seed=`), then
- * the seed this profile already drew, then a fresh draw.
+ * the seed this profile already drew, then a fresh draw. Decided once per page
+ * (`parkSeedAsked`), so the boot's park-file fetch and this agree.
  *
  * **In Node with nothing pinned this is still `CANONICAL_PARK_SEED`**,
  * so every check script measures the park it always did.
  *
- * Saves carry {@link LAYOUT_VERSION}, so positions from an older park degrade
- * to the plaza spawn rather than to a spot inside a relocated ride.
+ * A saved position carries the park it was measured in (`SavedPlace.park`, the
+ * park file's digest), so a position from any other park — another seed, a
+ * re-found restart, a generator change — degrades to the plaza spawn rather
+ * than to a spot inside a relocated ride ({@link parkStamp}).
  */
-export const PARK_SEED_ASKED = resolveParkSeed();
+export const PARK_SEED_ASKED = parkSeedAsked();
 
 /**
  * **The seed every generator draws from** — {@link PARK_SEED_ASKED} itself on

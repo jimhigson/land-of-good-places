@@ -5,6 +5,8 @@ import { buildBug } from '../scripts/lib/attemptError.mts';
 // runs the whole acceptance loop to find one, which a pure geometry test must
 // not wait on. `routeCurve` reads no park at all.
 process.env['LGP_PARK_RESTART'] ??= '0';
+// The park is built here, in tooling: the solver lives in procgen/ (#705).
+await import('../procgen/install.ts');
 const { routeCurve } = await import('../src/world/paths');
 
 /**

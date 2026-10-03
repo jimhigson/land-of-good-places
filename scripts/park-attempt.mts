@@ -26,6 +26,14 @@
  * Which checks are deliberately *not* asked, and why, is listed in
  * `docs/design/STRUCTURAL-BACKTRACKING.md` ("Outside acceptance").
  *
+ * **`LGP_PARK_FILE=<file>`: the attempt is the park hydrated from that file**
+ * — the park a child is shipped, not a fresh solve. The file is offered and its
+ * restart set before anything loads (`ts-extension-resolver-register.mjs`), so
+ * this process and every check script it runs build from the file. The
+ * attempt then also asks that nothing was searched (`hydrate`, a measure like
+ * any other): a "hydrated" park quietly re-solved would be a fresh solve
+ * passing for the file. `build:parks` runs this on every file it ships.
+ *
  * A build that throws is an attempt that failed, not a crash of the loop: a
  * solver giving up is one more reason to start again.
  *
@@ -62,6 +70,12 @@ import {
  * restart are read once per process). One owner: the check. A park it rejects
  * is a failed attempt.
  */
+/**
+ * In-process measures that drive the world phase's own builders (the stalls'
+ * `accommodate`), which a park hydrated from its file never constructs.
+ */
+const SEARCHES_THE_WORLD_PHASE: ReadonlySet<string> = new Set(['check:stall-accommodate']);
+
 const ACCEPTANCE_CHECK_SCRIPTS: readonly string[] = [
   'scripts/check-rail-race.mts',
 ];
@@ -162,7 +176,12 @@ const ACCEPTANCE_CHECK_MEASURES: readonly (readonly [
       const { builtWellProblems, falseRefusalProblem, falseRefusalsOf, layoutTraceCounts } = await import(
         './lib/builtWell.mts'
       );
-      const counts = layoutTraceCounts(LAYOUT_TRACE);
+      // A park hydrated from its file (`LGP_PARK_FILE`) ran no layout search;
+      // the solve that made it recorded the trace's summary in the file.
+      const { offeredParkFile } = await import('../src/world/prebuilt/parkFileStore.ts');
+      const counts = layoutTraceCounts(
+        LAYOUT_TRACE.length > 0 ? LAYOUT_TRACE : (offeredParkFile()?.measures.layoutTrace ?? []),
+      );
       // A false refusal is the rung's instrument being wrong: a void, never a restart.
       // Proving one costs a second build, so it is asked only when the rung fired.
       const falseRefusal =
@@ -302,10 +321,16 @@ export interface AttemptVerdict {
   readonly notAsked: NotAsked | null;
   /** CPU per stage asked, in order. */
   readonly stageCpuMs: readonly number[];
+  /** The park file this attempt hydrated (`LGP_PARK_FILE`), or null for a fresh solve. */
+  readonly parkFile: string | null;
 }
 
+const parkFile = process.env['LGP_PARK_FILE'] || null;
 const seed = Number(process.env['LGP_SEED'] ?? NaN);
-const restart = Number(process.env['LGP_PARK_RESTART'] ?? 0);
+// A file names its own restart (and the register hook refused a contradicting LGP_PARK_RESTART).
+const restart = parkFile
+  ? Number((globalThis as { __LGP_PARK_RESTART__?: number }).__LGP_PARK_RESTART__)
+  : Number(process.env['LGP_PARK_RESTART'] ?? 0);
 if (!Number.isInteger(seed) || seed < 0 || !Number.isInteger(restart) || restart < 0) {
   console.error(`park-attempt: LGP_SEED (${process.env['LGP_SEED']}) and LGP_PARK_RESTART must be non-negative integers`);
   process.exit(2);
@@ -349,6 +374,23 @@ try {
 }
 buildCpu = cpuMs() - cpu0;
 
+if (facts && parkFile) {
+  // The file's park, or nothing: every search the game does not have must
+  // have stayed idle while it was built.
+  measuresAsked += 1;
+  const complaints: string[] = [];
+  const { parkPlanHydrated } = await import('../src/world/parkPlan.ts');
+  const { parkSolveStats } = await import('../procgen/world/planSolver.ts');
+  const { worldSolveTrace } = await import('../procgen/world/worldPhaseSolver.ts');
+  const { builtDecisions } = await import('../procgen/world/builtLog.ts');
+  if (!parkPlanHydrated()) complaints.push(`the plan was not hydrated from ${parkFile}`);
+  if (parkSolveStats() !== null) complaints.push('the plan driver ran — the park was searched, not hydrated');
+  if (worldSolveTrace().length > 0) complaints.push('the world phase was searched, not hydrated');
+  const searched = Object.keys(builtDecisions().values);
+  if (searched.length > 0) complaints.push(`the World searched ${searched.join(', ')} instead of reading the file`);
+  if (complaints.length > 0) failures.push({ measure: 'hydrate', count: complaints.length, first: complaints.slice(0, FIRST) });
+}
+
 const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats | null =>
   stats
     ? {
@@ -368,8 +410,9 @@ const backtrackOf = (stats: BacktrackStats | null | undefined): BacktrackStats |
 // reads as null stats (the accessors return null), and an import that fails is
 // a broken instrument that must be loud — a swallowing catch here once hid a
 // moved module and filed `backtracking: null` for every attempt (found on #705).
-const { parkSolveStats } = await import('../src/world/parkPlan.ts');
-const { worldSolveStats } = await import('../src/world/worldPhase.ts');
+// From procgen/: the solvers moved out of the game (#705).
+const { parkSolveStats } = await import('../procgen/world/planSolver.ts');
+const { worldSolveStats } = await import('../procgen/world/worldPhaseSolver.ts');
 const backtracking: AttemptVerdict['backtracking'] = {
   plan: backtrackOf(parkSolveStats()),
   world: backtrackOf(worldSolveStats()),
@@ -482,11 +525,34 @@ if (facts) {
       name: 'cheap',
       measures: [...invariants, ...lightChecks.map(parkCheck), ...pathPreference.map(parkCheck), findings],
     },
-    { name: 'middle', measures: ACCEPTANCE_SIM_MEASURES.filter(([name]) => STAGE_TWO_SIMS.has(name)).map(simCheck) },
+    {
+      name: 'middle',
+      measures: [
+        ...ACCEPTANCE_SIM_MEASURES.filter(
+          ([name]) => STAGE_TWO_SIMS.has(name) && !(parkFile && SEARCHES_THE_WORLD_PHASE.has(name)),
+        ).map(simCheck),
+        // On a park hydrated from its file (#705) there is no world-phase
+        // search in this process for these to drive, so each runs in its own
+        // process, which solves this seed and restart — the park the file was
+        // proved equal to (`builtParks.mts`' SEARCH_SCRIPTS).
+        ...(parkFile
+          ? [...SEARCHES_THE_WORLD_PHASE]
+              .filter((name) => STAGE_TWO_SIMS.has(name))
+              .map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`))
+          : []),
+      ],
+    },
     {
       name: 'heavy',
       measures: [
-        ...ACCEPTANCE_SIM_MEASURES.filter(([name]) => !STAGE_TWO_SIMS.has(name)).map(simCheck),
+        ...ACCEPTANCE_SIM_MEASURES.filter(
+          ([name]) => !STAGE_TWO_SIMS.has(name) && !(parkFile && SEARCHES_THE_WORLD_PHASE.has(name)),
+        ).map(simCheck),
+        ...(parkFile
+          ? [...SEARCHES_THE_WORLD_PHASE]
+              .filter((name) => !STAGE_TWO_SIMS.has(name))
+              .map((name) => scriptCheck(`scripts/${name.replace('check:', 'check-')}.mts`))
+          : []),
         ...ACCEPTANCE_CHECK_SCRIPTS.map(scriptCheck),
       ],
     },
@@ -521,6 +587,7 @@ const verdict: AttemptVerdict = {
   notAsked,
   stageCpuMs,
   backtracking,
+  parkFile,
 };
 process.stdout.write(`park-attempt: ${JSON.stringify(verdict)}\n`);
 // Handles the build left open (timers in the World) must not keep the process alive.

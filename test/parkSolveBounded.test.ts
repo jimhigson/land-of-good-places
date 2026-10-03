@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { refusal, type Advance, type FeatureBuilder } from '../src/boot/featureBuilder';
+import { refusal, type Advance, type FeatureBuilder } from '../procgen/boot/featureBuilder';
 import { GroundClaims } from '../src/boot/groundClaims';
-import { DEFAULT_SOLVE_BUDGET, ParkSolve, ParkSolveExhausted, type SolveBudget } from '../src/boot/parkSolve';
+import { DEFAULT_SOLVE_BUDGET, ParkSolve, ParkSolveExhausted, type SolveBudget } from '../procgen/boot/parkSolve';
 
 /**
  * **The driver's search is bounded, whatever its builders do** — pure and

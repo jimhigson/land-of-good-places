@@ -22,13 +22,15 @@ process.env['LGP_PARK_RESTART'] = '3';
 // project's typecheck does not follow it (`test/node-env.d.ts`).
 const HEADLESS_CANVAS = '../scripts/headless-canvas.mjs';
 await import(/* @vite-ignore */ HEADLESS_CANVAS);
+// The park is solved here, in tooling: the solver lives in procgen/ (#705).
+await import('../procgen/install.ts');
 const { solveParkPlanNow } = await import('../src/world/parkPlan');
-const { archStation } = await import('../src/world/railRace/route');
-const { planExit, RAIL_RACE_PLAN } = await import('../src/world/railRace/plan');
-const { barSlotWithNoSupportRoom, TrestleRefusal } = await import('../src/world/railRace/track');
+const { archStation, planExit } = await import('../procgen/world/railRace/plan');
+const { RAIL_RACE_PLAN } = await import('../src/world/railRace/plan');
+const { barSlotWithNoSupportRoom, TrestleRefusal } = await import('../procgen/world/railRace/trestleSearch');
 const { HAZARD_LAYOUT } = await import('../src/world/railRace/simulate');
 const { entranceRoadClaims } = await import('../src/world/entrance/roadCorridor');
-const { railRaceBuilder } = await import('../src/world/worldPhase');
+const { railRaceBuilder } = await import('../procgen/world/worldPhaseSolver');
 const { GroundClaims } = await import('../src/boot/groundClaims');
 
 beforeAll(() => {

@@ -11,14 +11,11 @@ name: Procgen invariants
 # expected to extend `test/procgen/invariants.ts` in the same PR — see
 # CLAUDE.md, "Expanding the procedural generation".
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: procgen-invariants-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
@@ -29,7 +26,7 @@ jobs:
   # against 5 before), about 5.5 minutes per five parks on a runner — one job
   # could not hold it under its cap. So the seed files are split over runners
   # with vitest's own `--shard`, and the job GitHub gates on (`Procgen invariants`, a required check matched BY
-  # NAME) is the aggregator at the bottom, which fails unless every part
+  # NAME) is the aggregator in `ci.yml`, which fails unless every part
   # succeeded — the same shape as `checks.yml`.
   #
   # There used to be a `pool` job here running `check:gateway` and
@@ -64,37 +61,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
+
       - name: Procgen invariant suite, this shard
         env:
           LGP_PROCGEN_SHARD: ${{ matrix.shard }}/5
         run: pnpm run test:procgen:watchdog
 
-  # **Do not rename this job.** `Procgen invariants` is a required status check
-  # on `main`; a required check is matched by name, so renaming it stops it
-  # gating merges without anything going red.
-  #
-  # History of the cap: 15 → 25 by #510 when the single job took ~14 minutes;
-  # now the work is split and this job only reads its upstream results.
-  invariants:
-    name: Procgen invariants
-    needs: [suite]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Every shard of the suite succeeded
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-        run: |
-          echo "$NEEDS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
-          count=$(echo "$NEEDS" | jq 'length')
-          if [ "$count" != "1" ]; then
-            echo "::error::expected 1 upstream job (suite), saw $count — the aggregator is measuring nothing"
-            exit 1
-          fi
-          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
-          if [ -n "$bad" ]; then
-            echo "::error::not every part of the procgen gate succeeded: $bad"
-            exit 1
-          fi
-          echo "Procgen invariants ok — every shard succeeded."
+# The `Procgen invariants` aggregator — the required status check — is in
+# `ci.yml`, the caller, at the top level: a job inside a called workflow is
+# reported as "<caller job> / <job>", which would match no required check.

@@ -26,6 +26,8 @@ describe('park-changing switches', () => {
       }
     };
     walk('src');
+    // And the generator, which moved out of the game into procgen/ (#705).
+    walk('procgen');
     const identityOrDiagnostic = (k: string): boolean =>
       k === 'LGP_SEED' || k === 'LGP_PARK_RESTART' || k.startsWith('LGP_DEBUG_') || k === 'LGP_TRACE_LIVE' || k.startsWith('LGP_PARK_RESTART_') || k.startsWith('LGP_RESOLVE_RESTART');
     const missing = [...found].filter((k) => !identityOrDiagnostic(k) && !PARK_CHANGING_SWITCHES.includes(k));

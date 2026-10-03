@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { profileBoundary, REFINE, solverBoundary } from '../../src/world/boundary.ts';
+import { profileBoundary, REFINE } from '../../src/world/boundary.ts';
+import { solverBoundary } from '../../procgen/world/boundarySearch.ts';
 import { TAU } from '../../src/core/mathUtils.ts';
 import { edgeCloserThan } from '../../src/world/boundaryEdgeTest.ts';
 

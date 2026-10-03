@@ -30,7 +30,7 @@ if (!Number.isInteger(seed) || seed < 0 || !Number.isInteger(restart) || restart
   process.exit(2);
 }
 
-const { bushScatterLedger } = await import('../src/world/Scenery.ts');
+const { bushScatterLedger } = await import('../procgen/world/sceneryBuilders.ts');
 bushScatterLedger.measureGround = true;
 
 const { buildHeadlessPark } = await import('./park-harness.mts');

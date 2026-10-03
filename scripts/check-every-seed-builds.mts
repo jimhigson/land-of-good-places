@@ -67,8 +67,13 @@
  * and goes red without blocking a merge.
  */
 import { execFile } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
+
+import { PREBUILT_PARKS_OUT } from '../src/world/prebuilt/parkFileName.ts';
+import { builtRestartOf } from './lib/builtParks.mts';
 
 import { DECISION_ZERO_BASELINE, UNBUILT_BASELINE } from './every-seed-builds-baseline.mts';
 import {
@@ -107,17 +112,48 @@ interface SeedResult {
   readonly falseRefusals: number;
   readonly trace: readonly string[];
   readonly seconds: number;
+  /** Whether `check:park` measured the shipped file's park or a fresh solve ({@link shippedParkFile}). */
+  readonly source: 'hydrated' | 'solved';
+}
+
+/**
+ * **The seed's shipped park file, when `build:parks` has proved it for this
+ * exact source** — else null, and the seed is solved from scratch.
+ *
+ * `build:parks` (the Parks job, earlier in the same CI run) already solved
+ * every seed at its accepted restart in a fresh process and proved the file
+ * hydrates to the identical park (`scripts/lib/parkFiles.mts`, "hydrate"). So
+ * the solve is paid once per tree, there; solving all sixteen again here took
+ * this job past its 25-minute cap (run 37068721140: seeds 11, 13 and 0 at
+ * 813 s, 674 s and 638 s on four lanes, seed 15 never reached). Here the child
+ * `check:park` measures the park hydrated from that file — the park a child's
+ * device builds — and the layout trace is the one the solve recorded in it.
+ * With no fresh `.parks/` (a local run on an edited tree) it solves, as before.
+ */
+function shippedParkFile(seed: number): string | null {
+  if (process.env['LGP_SOLVE'] === '1') return null;
+  if (builtRestartOf(process.cwd(), seed) === null) return null;
+  const file = join(process.cwd(), PREBUILT_PARKS_OUT, `${seed}.json`);
+  return existsSync(file) ? file : null;
+}
+
+/** The layout trace the solve recorded in a park file (`measures.layoutTrace`). */
+function recordedTrace(file: string): string[] {
+  const parsed = JSON.parse(readFileSync(file, 'utf8')) as { measures?: { layoutTrace?: readonly string[] } };
+  return [...(parsed.measures?.layoutTrace ?? [])];
 }
 
 async function buildSeed(seed: number): Promise<SeedResult> {
   const begun = performance.now();
+  const parkFile = shippedParkFile(seed);
   const args = [
     '--no-warnings',
     '--import',
     './scripts/ts-extension-resolver-register.mjs',
     'scripts/check-park.mts',
   ];
-  const env = { ...process.env, LGP_SEED: String(seed) };
+  const env: NodeJS.ProcessEnv = { ...process.env, LGP_SEED: String(seed) };
+  if (parkFile !== null) env['LGP_PARK_FILE'] = parkFile;
   let stdout = '';
   let stderr = '';
   let built = false;
@@ -136,8 +172,14 @@ async function buildSeed(seed: number): Promise<SeedResult> {
     stderr = failed.stderr ?? failed.message ?? '';
   }
   const all = `${stdout}\n${stderr}`;
-  const trace = all
+  const solvedTrace = all
     .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('layout-trace:'));
+  // A hydrated park ran no layout search — its process prints only "no solve
+  // ran in this process" — so the trace is the one its solve recorded in the
+  // file (what `park-attempt.mts` reads for the same measure).
+  const trace = (parkFile === null ? solvedTrace : recordedTrace(parkFile))
     .map((l) => l.trim())
     .filter((l) => l.startsWith('layout-trace:'));
   const counts = layoutTraceCounts(trace);
@@ -160,6 +202,7 @@ async function buildSeed(seed: number): Promise<SeedResult> {
     falseRefusals,
     trace,
     seconds: Math.round((performance.now() - begun) / 100) / 10,
+    source: parkFile === null ? 'solved' : 'hydrated',
   };
 }
 
@@ -238,13 +281,14 @@ await Promise.all(
           falseRefusals: 0,
           trace: [],
           seconds: 0,
+          source: 'solved',
         }),
       );
       results.push(result);
       if (!printBaseline) {
         process.stdout.write(
           `  seed ${String(result.seed).padStart(3)}: ${result.built ? 'built    ' : 'NOT BUILT'} ` +
-            `${result.built ? '' : `[${result.klass}] `}${String(result.seconds).padStart(5)}s  ${result.note}\n` +
+            `${result.built ? '' : `[${result.klass}] `}${String(result.seconds).padStart(5)}s ${result.source}  ${result.note}\n` +
             `  seed ${String(result.seed).padStart(3)}: built well? restart=${result.restart} decision-zero=${result.decisionZero} ` +
             `rung-fired=${result.rungFired}${result.rungFired > 0 ? ` false-refusals=${result.falseRefusals}` : ''}\n`,
         );
@@ -357,7 +401,9 @@ process.stdout.write(
         .map((k) => `${k} (${notBuilt.filter((r) => r.klass === k).map((r) => r.seed).join(',')})`)
         .join('; ') || 'none unbuilt'
     }\n` +
-    `  - COVERS: seeds ${SEEDS.join(',')} through the real check:park, ratchet on, one process each.\n` +
+    `  - COVERS: seeds ${SEEDS.join(',')} through the real check:park, ratchet on, one process each;\n` +
+    `    ${results.filter((r) => r.source === 'hydrated').length} measured on the shipped park file (.parks/, whose solve\n` +
+    `    build:parks proved), ${results.filter((r) => r.source === 'solved').length} solved from scratch here.\n` +
     `  - DOES NOT COVER: test/procgen's invariants (the two gates do not imply each other, #437),\n` +
     `    nor any seed outside this list — under totality every integer is a seed, and a rolling\n` +
     `    random draw is still owed (design doc, stage 5).\n`,

@@ -40,14 +40,11 @@ name: Every seed builds
 # **Do not rename this job.** A required status check is matched by name, so a
 # rename stops it gating merges with nothing going red.
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: every-seed-builds-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
@@ -74,6 +71,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
 
       - name: Build every seed
         run: pnpm run check:every-seed-builds

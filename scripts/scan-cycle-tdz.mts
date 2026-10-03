@@ -87,6 +87,10 @@ const walk = (dir: string): void => {
   }
 };
 walk(srcRoot);
+// The build-time solver (`procgen/`) runs in every Node check and imports the
+// game's modules, so a cycle through it can crash a check exactly as one inside
+// `src/` crashes the game. Scanned with `src/`.
+walk(join(repoRoot, 'procgen'));
 
 /** Resolve a specifier the way this repo writes them: relative, with `.ts`. */
 const resolveSpecifier = (from: string, spec: string): string | undefined => {

@@ -27,8 +27,8 @@ import { writeFileSync } from 'node:fs';
 import { InstancedMesh, Matrix4, Mesh, Vector3, type BufferAttribute } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { LAYOUT_TRACE } from '../src/world/parkLayout.ts';
-import { parkSolveTrace } from '../src/world/parkPlan.ts';
-import { worldSolveTrace } from '../src/world/worldPhase.ts';
+import { parkSolveTrace } from '../procgen/world/planSolver.ts';
+import { worldSolveTrace } from '../procgen/world/worldPhaseSolver.ts';
 import { PARK_RESTART, PARK_SEED_ASKED } from '../src/world/parkManifest.ts';
 
 const park = buildHeadlessPark();

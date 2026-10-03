@@ -75,9 +75,22 @@ import { CI_SWEEP_SEEDS, PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
  * `Procgen invariants`, which is already required, so they gate on the day
  * they land rather than waiting on a branch-protection change only Jim can make.
  */
-const BLOCKING_JOBS: readonly { readonly workflow: string; readonly job: string }[] = [
-  { workflow: '.github/workflows/checks.yml', job: 'Checks' },
-  { workflow: '.github/workflows/procgen-invariants.yml', job: 'Procgen invariants' },
+const BLOCKING_JOBS: readonly {
+  /** Where the job GitHub matches by name is declared: `ci.yml`, top level. */
+  readonly workflow: string;
+  readonly job: string;
+  /** The called workflow whose jobs do the work the aggregator gates on. */
+  readonly runs: string;
+  /** The `ci.yml` job that calls it, which the aggregator `needs:`. */
+  readonly via: string;
+}[] = [
+  { workflow: '.github/workflows/ci.yml', job: 'Checks', runs: '.github/workflows/checks.yml', via: 'Checks parts' },
+  {
+    workflow: '.github/workflows/ci.yml',
+    job: 'Procgen invariants',
+    runs: '.github/workflows/procgen-invariants.yml',
+    via: 'Procgen invariants parts',
+  },
 ];
 
 /**
@@ -109,7 +122,7 @@ const PROTECTION_READ_BACK = '5 September 2026: ["Procgen invariants","Checks"]'
  * the answer is yes; for `Coplanar faces` it is emphatically no, which is why
  * that one is named every run.
  */
-const NOT_A_GATE: readonly string[] = ['Deploy PR preview'];
+const NOT_A_GATE: readonly string[] = ['Deploy PR preview', 'PR preview', 'Deploy'];
 
 let failures = 0;
 function fail(what: string): void {
@@ -194,10 +207,12 @@ if (strangers.length > 0) {
 const invocation = /pnpm run test:procgen(?::watchdog)?(?![\w:-])/;
 const wiredInto = BLOCKING_JOBS.filter((where) => {
   let text: string;
+  let runs: string;
   try {
     text = readFileSync(where.workflow, 'utf8');
+    runs = readFileSync(where.runs, 'utf8');
   } catch {
-    fail(`${where.workflow} does not exist — a job named in BLOCKING_JOBS has been moved or renamed`);
+    fail(`${where.workflow} or ${where.runs} does not exist — a job named in BLOCKING_JOBS has been moved or renamed`);
     return false;
   }
   if (!new RegExp(`^[ \\t]{2,}name:\\s*${where.job}\\s*$`, 'm').test(text)) {
@@ -207,7 +222,13 @@ const wiredInto = BLOCKING_JOBS.filter((where) => {
         `protection in the same change and read it back.`,
     );
   }
-  return invocation.test(text);
+  // The aggregator gates on the called workflow only if the caller calls it.
+  const called = new RegExp(`^\\s+uses:\\s*\\./${where.runs.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'm');
+  if (!called.test(text)) {
+    fail(`${where.workflow} does not call ${where.runs}, so "${where.job}" gates nothing it runs`);
+    return false;
+  }
+  return invocation.test(runs);
 });
 
 if (wiredInto.length === 0) {
@@ -239,7 +260,7 @@ if (wiredInto.length === 0) {
  * report-don't-act on settings. Printing it every run is the report.
  */
 function nonBlockingGates(): string[] {
-  const blocking = new Set(BLOCKING_JOBS.map((b) => b.job));
+  const blocking = new Set(BLOCKING_JOBS.flatMap((b) => [b.job, b.via]));
   const out: string[] = [];
   for (const file of readdirSync('.github/workflows').sort()) {
     if (!file.endsWith('.yml') && !file.endsWith('.yaml')) continue;

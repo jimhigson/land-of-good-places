@@ -1,0 +1,28 @@
+name: Restore the accepted parks
+description: >-
+  Restores this tree's accepted parks into `.parks/` from the cache the Parks
+  workflow (`.github/workflows/parks.yml`) saved earlier in the same run, so
+  this job builds every park at the restart build:parks accepted and searches
+  for none (`builtRestartOf`). Fails loudly on a miss.
+# **No waiting in here, and no API call.** The job using this sits behind a
+# `needs:` edge on the Parks call in `ci.yml` (gated on its `ready` output), so
+# by the time it runs the cache is either there or Parks failed and this job
+# was never started. This action used to poll the caches and runs API until the
+# key appeared, from every consuming workflow at once, and that exhausted the
+# installation's rate limit (HTTP 403) on PR #705.
+runs:
+  using: composite
+  steps:
+    - name: Park source hash
+      id: hash
+      shell: bash
+      # The one owner of what a park depends on (scripts/lib/park-source-hash.mjs):
+      # the import closure of the solver and the measures, not whole directories.
+      run: echo "hash=$(node scripts/lib/park-source-hash.mjs)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the parks
+      uses: actions/cache/restore@v4
+      with:
+        path: .parks
+        key: prebuilt-parks-${{ steps.hash.outputs.hash }}
+        fail-on-cache-miss: true

@@ -45,12 +45,14 @@
  */
 import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { AttemptVerdict } from '../park-attempt.mts';
+import { parkSourceHash } from './park-source-hash.mjs';
+import { builtRestartOf } from './builtParks.mts';
 
 const run = promisify(execFile);
 
@@ -88,9 +90,25 @@ export interface AcceptedPark {
   readonly wallMs: number;
 }
 
-/** Run one attempt in a fresh process. The default attempt runner. */
-export async function attemptInFreshProcess(seed: number, restart: number): Promise<AttemptVerdict> {
-  const env = { ...process.env, LGP_SEED: String(seed), LGP_PARK_RESTART: String(restart) };
+/**
+ * Run one attempt in a fresh process. The default attempt runner. With
+ * `parkFile`, the attempt is the park hydrated from that file
+ * (`LGP_PARK_FILE`, `park-attempt.mts`) — what `build:parks` asks of every
+ * file it ships; the file must be `seed` at `restart`.
+ */
+export async function attemptInFreshProcess(
+  seed: number,
+  restart: number,
+  parkFile?: string,
+  signal?: AbortSignal,
+): Promise<AttemptVerdict> {
+  const { LGP_PARK_FILE: _inherited, ...rest } = process.env;
+  const env = {
+    ...rest,
+    LGP_SEED: String(seed),
+    LGP_PARK_RESTART: String(restart),
+    ...(parkFile ? { LGP_PARK_FILE: parkFile } : {}),
+  };
   let out = '';
   let err = '';
   let code = 0;
@@ -98,7 +116,7 @@ export async function attemptInFreshProcess(seed: number, restart: number): Prom
     const result = await run(
       process.execPath,
       ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', 'scripts/park-attempt.mts'],
-      { cwd: REPO, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
+      { cwd: REPO, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...(signal ? { signal } : {}) },
     );
     out = result.stdout;
     err = result.stderr;
@@ -121,51 +139,92 @@ export async function attemptInFreshProcess(seed: number, restart: number): Prom
 
 /**
  * Start seed `seed`'s park again from zero until an attempt passes every
- * acceptance measure. `onAttempt` hears each attempt as it lands (for a live
- * log); `from` starts the count later, for measuring the loop itself.
+ * acceptance measure. `onAttempt` hears each attempt as it lands, in restart
+ * order (for a live log).
+ *
+ * **`lanes` runs restarts speculatively in parallel, with the same answer.**
+ * Restarts `r, r + 1, …, r + lanes - 1` are attempted at once, but their
+ * verdicts are consumed strictly in restart order, exactly as the sequential
+ * loop would see them: the first accepted restart in order is the answer, the
+ * first broken one in order throws, and the log holds restarts `0..answer` and
+ * nothing past it. Attempts already running past the answer are aborted
+ * (`signal`) and their results discarded unseen, so they can neither change
+ * the answer nor fail the loop. `lanes: 1` is the plain sequential loop.
  */
 export async function acceptPark(
   seed: number,
   options: {
     readonly onAttempt?: (record: RestartRecord) => void;
-    readonly attempt?: (seed: number, restart: number) => Promise<AttemptVerdict>;
+    readonly attempt?: (seed: number, restart: number, signal?: AbortSignal) => Promise<AttemptVerdict>;
     readonly maxRestarts?: number;
+    readonly lanes?: number;
   } = {},
 ): Promise<AcceptedPark> {
   const began = performance.now();
-  const attempt = options.attempt ?? attemptInFreshProcess;
+  const attempt =
+    options.attempt ?? ((s: number, r: number, signal?: AbortSignal) => attemptInFreshProcess(s, r, undefined, signal));
   const cap = options.maxRestarts ?? MAX_RESTARTS;
+  const lanes = Math.max(1, options.lanes ?? 1);
   const attempts: RestartRecord[] = [];
-  for (let restart = 0; restart < cap; restart += 1) {
-    const verdict = await attempt(seed, restart);
-    if (verdict.seed !== seed || verdict.restart !== restart) {
-      throw new Error(
-        `accepted park: asked for seed ${seed} restart ${restart}, the attempt built seed ${verdict.seed} restart ${verdict.restart}`,
+  const abort = new AbortController();
+  type Settled = { readonly ok: true; readonly verdict: AttemptVerdict } | { readonly ok: false; readonly error: unknown };
+  const pending = new Map<number, Promise<Settled>>();
+  let launched = 0;
+  const launch = (): void => {
+    while (launched < cap && launched < attempts.length + lanes) {
+      const restart = launched;
+      launched += 1;
+      pending.set(
+        restart,
+        attempt(seed, restart, abort.signal).then(
+          (verdict): Settled => ({ ok: true, verdict }),
+          (error: unknown): Settled => ({ ok: false, error }),
+        ),
       );
     }
-    if (verdict.broken !== null) {
-      throw new Error(
-        `accepted park: seed ${seed} restart ${restart}: broken (${verdict.broken}) — a measure that threw, or a ` +
-          'build that threw a programming error (scripts/lib/attemptError.mts): a bug in an instrument or a ' +
-          'generator, which no restart can fix, so the loop stops here rather than search around it',
-      );
+  };
+  const stop = async (): Promise<void> => {
+    abort.abort();
+    await Promise.all(pending.values());
+  };
+  try {
+    for (let restart = 0; restart < cap; restart += 1) {
+      launch();
+      const settled = await (pending.get(restart) as Promise<Settled>);
+      pending.delete(restart);
+      if (!settled.ok) throw settled.error;
+      const verdict = settled.verdict;
+      if (verdict.seed !== seed || verdict.restart !== restart) {
+        throw new Error(
+          `accepted park: asked for seed ${seed} restart ${restart}, the attempt built seed ${verdict.seed} restart ${verdict.restart}`,
+        );
+      }
+      if (verdict.broken !== null) {
+        throw new Error(
+          `accepted park: seed ${seed} restart ${restart}: broken (${verdict.broken}) — a measure that threw, or a ` +
+            'build that threw a programming error (scripts/lib/attemptError.mts): a bug in an instrument or a ' +
+            'generator, which no restart can fix, so the loop stops here rather than search around it',
+        );
+      }
+      const record: RestartRecord = {
+        restart,
+        accepted: verdict.accepted,
+        built: verdict.built,
+        forcedBy: verdict.failures.map((f) => ({ measure: f.measure, count: f.count, first: f.first[0] ?? '' })),
+        measuresAsked: verdict.measuresAsked,
+        wallMs: verdict.wallMs,
+        cpuMs: verdict.cpuMs.build + verdict.cpuMs.invariants + verdict.cpuMs.checks + verdict.cpuMs.findings,
+        backtracking: verdict.backtracking,
+        notAsked: verdict.notAsked ?? null,
+      };
+      attempts.push(record);
+      options.onAttempt?.(record);
+      if (verdict.accepted) {
+        return { seed, restart, attempts, wallMs: Math.round(performance.now() - began) };
+      }
     }
-    const record: RestartRecord = {
-      restart,
-      accepted: verdict.accepted,
-      built: verdict.built,
-      forcedBy: verdict.failures.map((f) => ({ measure: f.measure, count: f.count, first: f.first[0] ?? '' })),
-      measuresAsked: verdict.measuresAsked,
-      wallMs: verdict.wallMs,
-      cpuMs: verdict.cpuMs.build + verdict.cpuMs.invariants + verdict.cpuMs.checks + verdict.cpuMs.findings,
-      backtracking: verdict.backtracking,
-      notAsked: verdict.notAsked ?? null,
-    };
-    attempts.push(record);
-    options.onAttempt?.(record);
-    if (verdict.accepted) {
-      return { seed, restart, attempts, wallMs: Math.round(performance.now() - began) };
-    }
+  } finally {
+    await stop();
   }
   const log = attempts
     .map(
@@ -181,31 +240,19 @@ export async function acceptPark(
 }
 
 /**
- * **Everything an acceptance verdict depends on**, hashed: the generator
- * (`src/`), the measures (`test/procgen/`, `scripts/` — the harness, the
- * attempt, `parkFindings`), and the toolchain (`package.json`,
- * `pnpm-lock.yaml`). A verdict is a fact about exactly this; change any of it
- * and the verdict must be taken again. The one owner of that question — the
- * prebuilt park build keys its files on it too.
+ * **Everything an acceptance verdict depends on**, hashed: the files
+ * `scripts/lib/park-source-hash.mjs` hashes — the game (`src/`), the generator
+ * (`procgen/`), the measures (`test/procgen/`, `scripts/` — the harness, the
+ * attempt, `parkFindings`) and the toolchain — plus every `LGP_*` switch that
+ * changes a build. A verdict is a fact about exactly this; change any of it
+ * and the verdict must be taken again. The files are the prebuilt parks'
+ * `sourceHash` too, one owner for both: a park file and the verdict that
+ * accepted its restart are about the same source.
  */
 export function acceptanceSourceHash(): string {
   const hash = createHash('sha256');
-  const files: string[] = [];
-  const walk = (dir: string): void => {
-    for (const name of readdirSync(dir).sort()) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else files.push(path);
-    }
-  };
-  for (const dir of ['src', 'test/procgen', 'scripts']) walk(join(REPO, dir));
-  files.push(join(REPO, 'package.json'), join(REPO, 'pnpm-lock.yaml'));
-  for (const file of files) {
-    hash.update(relative(REPO, file));
-    hash.update('\0');
-    hash.update(readFileSync(file));
-    hash.update('\0');
-  }
+  hash.update(parkSourceHash(REPO));
+  hash.update('\0');
   // Every other `LGP_*` switch changes what a park build does
   // (`LGP_LAYOUT_RUNG=off`, `LGP_WARP`, …), so a verdict taken under one is
   // not a verdict about the park without it.
@@ -308,6 +355,10 @@ export function acceptedRestartSync(seed: number): number {
     );
     return 0;
   }
+  // What build:parks found for this exact source, first: the restart the
+  // shipped file carries (`builtParks.mts`).
+  const built = builtRestartOf(REPO, seed);
+  if (built !== null) return built;
   const sourceHash = acceptanceSourceHash();
   const file = verdictFile(seed, sourceHash);
   if (!existsSync(file)) {
@@ -376,6 +427,10 @@ export function acceptanceMetadata(accepted: AcceptedPark, sourceHash: string): 
 export async function acceptedRestartOf(
   seed: number,
 ): Promise<{ readonly restart: number; readonly how: string; readonly log: readonly string[] }> {
+  const built = builtRestartOf(REPO, seed);
+  if (built !== null) {
+    return { restart: built, how: 'build:parks found it at this source (.parks/manifest.json)', log: [] };
+  }
   const accepted = await acceptParkCached(seed);
   return {
     restart: accepted.restart,

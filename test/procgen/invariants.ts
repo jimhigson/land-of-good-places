@@ -12833,12 +12833,16 @@ const railRaceSupportsAreClaimedAsDrawn: Invariant = (facts) => {
   // `RailRace.ts` commits walk-past then race under RAIL_RACE_FEATURE; each
   // ring above was compared to its own slice, so the registry must hold
   // exactly those slices concatenated or a ring's "claimed" was not what the
-  // park claimed.
+  // park claimed. Compared exactly by value — kind, shape and every number,
+  // printed at full precision by `key` — not by object identity: a park
+  // hydrated from its prebuilt file commits the claims the file recorded,
+  // which are equal to the ring's but are not the same objects. Equal objects
+  // are equal values, so a solved park is held to exactly what it was.
   const registry = facts.world.groundClaims;
   {
     const union = registry.claimsOf(RAIL_RACE_FEATURE);
     const slices = facts.railRaceSupports.flatMap((ring) => ring.claimed);
-    if (union.length !== slices.length || union.some((claim, i) => claim !== slices[i])) {
+    if (union.length !== slices.length || union.some((claim, i) => slices[i] === undefined || key(claim) !== key(slices[i]!))) {
       wrong.push(
         `seed ${facts.seed}: the registry holds ${union.length} "${RAIL_RACE_FEATURE}" claims but the ` +
           `two rings' slices total ${slices.length} (walk-past then race) — the slices a ring was ` +
