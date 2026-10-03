@@ -219,6 +219,13 @@ HEAD_CENTRE = Vector((0.0, -8.5, 2.0))
 #: skin sits inside the flesh and no two faces share a plane.
 ARCH_LIP = 0.4
 LIP_BURY = 0.04
+#: How far the lips stand proud of the head's skin. The lining is clipped to
+#: the head grown by this much, not to the head itself: clipped flush, its
+#: front face lay *in* the head's skin across the `LIP_BURY` band where the
+#: head's hole is smaller than the lining, and `check:coplanar` reported
+#: `rh-head` vs `rh-mouth`. Proud by more than its 1 cm `near` tolerance, the
+#: band is the lips' own rim and nothing shares a plane.
+LIP_PROUD = 0.05
 ARCH_SEGMENTS = 24
 #: Where the bore ends at the back: just inside the greenhouse wall (r 7.0 at
 #: the door, 6.68 at the bore's corners), so the mouth is an alcove closed by
@@ -557,11 +564,12 @@ def build_head(coll):
     and the tongue. Three booleans, all against an uncut copy of the head:
 
     * ``rh-head`` = head − tunnel(`ARCH_LIP` − `LIP_BURY`)
-    * ``rh-mouth`` = tunnel(`ARCH_LIP`) ∩ (head ∪ collar) − tunnel(0)
+    * ``rh-mouth`` = tunnel(`ARCH_LIP`) ∩ (head grown `LIP_PROUD` ∪ collar) − tunnel(0)
     """
     hv, hf = ellipsoid(HEAD_RX, HEAD_RY, HEAD_RZ, subdivisions=4)
     head = Part("rh-head").add(hv, hf, Matrix.Translation(HEAD_CENTRE)).emit(coll)
-    clip = Part("tmp-clip").add(hv, hf, Matrix.Translation(HEAD_CENTRE)).emit(coll)
+    pv, pf = ellipsoid(HEAD_RX + LIP_PROUD, HEAD_RY + LIP_PROUD, HEAD_RZ + LIP_PROUD, subdivisions=4)
+    clip = Part("tmp-clip").add(pv, pf, Matrix.Translation(HEAD_CENTRE)).emit(coll)
     # The collar: the bit of lining between the head's back surface and the
     # greenhouse wall, a box the lining is clipped to behind the head.
     half_w = REPTILE_ARCH_WIDTH * 0.5 + ARCH_LIP + 0.3
