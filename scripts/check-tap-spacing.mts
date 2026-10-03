@@ -48,10 +48,8 @@ import {
 } from '../src/world/tapSpacing.ts';
 import { zoneVerb, type InteractZone } from '../src/world/interact.ts';
 import { hotelDoorBands, ROOMS } from '../src/world/hotel/layout.ts';
-import { SPACE_REPTILE_FORECOURT, SPACE_REPTILE_HOUSE } from '../src/world/spaces.ts';
+import { SPACE_REPTILE_HOUSE } from '../src/world/spaces.ts';
 import {
-  REPTILE_FORECOURT_ORIGIN_X,
-  REPTILE_FORECOURT_ORIGIN_Z,
   REPTILE_HOUSE_ORIGIN_X,
   REPTILE_HOUSE_ORIGIN_Z,
 } from '../src/world/reptileHouse/layout.ts';
@@ -84,10 +82,23 @@ const outsidePlayer = {
 };
 hotel.attachPlayer(outsidePlayer as never);
 hotel.adoptRestoredPlayer();
+// The Reptile House's exterior is a park building now: its entrance and tail
+// zones are in the park's list, and its front door band shares the park floor.
+const [reptileEntryBand] = world.reptileHouse.doorBands();
+const parkZones = world.interactZones();
+{
+  const ids = parkZones.map((zone) => zone.id);
+  for (const wanted of ['reptile-entrance', 'reptile-tail']) {
+    if (!ids.includes(wanted)) throw new Error(`check:tap-spacing: the park offers no Reptile House '${wanted}' zone`);
+  }
+  if (ids.some((id) => id.startsWith('reptile:'))) {
+    throw new Error(`check:tap-spacing: the park offers the Reptile House hall's zones: ${ids.filter((id) => id.startsWith('reptile:')).join(', ')}`);
+  }
+}
 spaces.push({
   name: 'the park and castle',
-  zones: world.interactZones(),
-  bands: [hotel.towerDoorBand(), ...world.building.doorBands()],
+  zones: parkZones,
+  bands: [hotel.towerDoorBand(), ...world.building.doorBands(), ...(reptileEntryBand ? [reptileEntryBand] : [])],
 });
 
 // The keychain rack's own zoomed picker (#331): six keyrings crowd one small
@@ -119,30 +130,15 @@ for (const room of ROOMS) {
   });
 }
 
-// The Reptile House's hall and its forecourt, the same way: its zones are
-// gated on where the player is, and each space has one door band.
+// The Reptile House's hall, the same way: its zones are gated on where the
+// player is, and it has one door band, the exit.
 {
   const { reptileHouse } = world;
   reptileHouse.attachPlayer(outsidePlayer as never);
-  const [entry, exit] = reptileHouse.doorBands();
+  const [, exit] = reptileHouse.doorBands();
   outsidePlayer.position.set(REPTILE_HOUSE_ORIGIN_X, 0, REPTILE_HOUSE_ORIGIN_Z);
   reptileHouse.adoptRestoredPlayer();
   spaces.push({ name: SPACE_REPTILE_HOUSE, zones: reptileHouse.interactZones(), bands: exit ? [exit] : [] });
-  outsidePlayer.position.set(REPTILE_FORECOURT_ORIGIN_X, 0, REPTILE_FORECOURT_ORIGIN_Z + 15);
-  reptileHouse.adoptRestoredPlayer();
-  const forecourtZones = reptileHouse.interactZones();
-  // The forecourt's list is the forecourt's: the entrance and the tail, and
-  // none of the hall's. The first cut's adopt only ever set flags, so this
-  // second adopt still returned the hall's twenty zones, 280 m from the
-  // entry band — a row that passed without checking anything.
-  const ids = forecourtZones.map((zone) => zone.id);
-  for (const wanted of ['reptile-entrance', 'reptile-tail']) {
-    if (!ids.includes(wanted)) throw new Error(`check:tap-spacing: the Reptile House forecourt offers no '${wanted}' zone (got ${ids.join(', ')})`);
-  }
-  if (ids.some((id) => id.startsWith('reptile:'))) {
-    throw new Error(`check:tap-spacing: the Reptile House forecourt still offers the hall's zones: ${ids.filter((id) => id.startsWith('reptile:')).join(', ')}`);
-  }
-  spaces.push({ name: SPACE_REPTILE_FORECOURT, zones: forecourtZones, bands: entry ? [entry] : [] });
 }
 
 let pairsChecked = 0;

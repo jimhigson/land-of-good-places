@@ -48,15 +48,11 @@ import { tapEscapeWithinOneFrame } from './lib/keys.mts';
 import { chromium, type Page } from 'playwright-core';
 import { worldX, worldZ } from '../src/world/building/layout.ts';
 import {
-  REPTILE_DOOR_BAND_OUTER,
-  REPTILE_DOORMAT_STANDOFF,
-  REPTILE_FORECOURT_ORIGIN_X,
-  REPTILE_FORECOURT_ORIGIN_Z,
   REPTILE_HOUSE_ORIGIN_X,
   REPTILE_HOUSE_ORIGIN_Z,
   REPTILE_LOG_CENTRE_X,
 } from '../src/world/reptileHouse/layout.ts';
-import { SPACE_REPTILE_FORECOURT, spaceAt } from '../src/world/spaces.ts';
+import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
@@ -253,8 +249,8 @@ const CHECKS: DeepLinkCheck[] = [
     },
   },
   {
-    // Outside the Reptile House's door, on the forecourt: not inside, on the
-    // forecourt space, a stride from the door band.
+    // Outside the Reptile House's door, in the park: not inside, standing on
+    // the plot's own doormat (`ReptileHouse.doormat`, the spot the paths reach).
     path: '/reptile-house-door',
     // Primed inside the hall too: the door link must put a restored-inside
     // player back out on the doormat.
@@ -264,7 +260,9 @@ const CHECKS: DeepLinkCheck[] = [
         .waitForFunction(
           () => {
             const g = (window as unknown as { game?: any }).game;
-            return !!g && g.world?.reptileHouse?.playerIsInside === false && !!g.player?.position && g.player.position.z < -800;
+            const mat = g?.world?.reptileHouse?.doormat;
+            return !!g && !!mat && g.world.reptileHouse.playerIsInside === false && !!g.player?.position &&
+              Math.hypot(g.player.position.x - mat.x, g.player.position.z - mat.z) < 1;
           },
           undefined,
           { timeout: 10000 },
@@ -272,21 +270,23 @@ const CHECKS: DeepLinkCheck[] = [
         .catch(() => {});
       const s = await page.evaluate(() => {
         const g = (window as unknown as { game?: any }).game;
+        const mat = g?.world?.reptileHouse?.doormat;
         return {
           hasGame: !!g,
           inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          mat: mat ? { x: mat.x, z: mat.z } : null,
           playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
         };
       });
       if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
-      if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
+      if (!s.playerPos || !s.mat) return { ok: false, detail: 'the player or the doormat had no position' };
       const space = spaceAt(s.playerPos.x, s.playerPos.z);
-      if (space !== SPACE_REPTILE_FORECOURT || s.inside !== false) {
-        return { ok: false, detail: `expected to stand on the forecourt outside the door; she is in '${space}' (inside=${s.inside}) at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)})` };
+      if (space !== SPACE_GARDEN || s.inside !== false) {
+        return { ok: false, detail: `expected to stand in the park outside the door; she is in '${space}' (inside=${s.inside}) at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)})` };
       }
-      const off = Math.hypot(s.playerPos.x - REPTILE_FORECOURT_ORIGIN_X, s.playerPos.z - (REPTILE_FORECOURT_ORIGIN_Z + REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF));
-      if (off > CASTLE_TOLERANCE) return { ok: false, detail: `on the forecourt but ${off.toFixed(1)} m from the doormat` };
-      return { ok: true, detail: `on the forecourt doormat, ${off.toFixed(2)} m from the door band's outer edge` };
+      const off = Math.hypot(s.playerPos.x - s.mat.x, s.playerPos.z - s.mat.z);
+      if (off > CASTLE_TOLERANCE) return { ok: false, detail: `in the park but ${off.toFixed(1)} m from the doormat at (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
+      return { ok: true, detail: `on the Reptile House's park doormat, ${off.toFixed(2)} m from (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
     },
   },
   {

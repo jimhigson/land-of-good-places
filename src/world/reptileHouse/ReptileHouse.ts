@@ -287,6 +287,17 @@ export class ReptileHouse implements GameSystem {
     return this.inside;
   }
 
+  /**
+   * Where she stands outside the door: the park plot's doormat (the one the
+   * paths are routed to), or the forecourt's without a plot. The one owner —
+   * `/reptile-house-door`, the hall's exit and `check:deep-links` all ask it.
+   */
+  get doormat(): { readonly x: number; readonly z: number } {
+    const plot = this.deps.plot;
+    if (plot) return { x: plot.entranceX, z: plot.entranceZ };
+    return facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF, 0);
+  }
+
   /** Where the exterior stands and faces — for the checks and the door band. */
   get facade(): FacadeFrame {
     return this.frame;
@@ -527,17 +538,15 @@ export class ReptileHouse implements GameSystem {
     if (!player) return;
     this.inside = false;
     this.hallRoot.visible = false;
-    const plot = this.deps.plot;
-    if (plot) {
-      // The plot's own doormat, the one the park's paths are routed to.
+    const mat = this.doormat;
+    if (this.deps.plot) {
       this.collision.setPlayBounds(GARDEN_PLAY_BOUNDARY);
-      player.teleportTo(plot.entranceX, this.surfaces.sample(plot.entranceX, plot.entranceZ, 3), plot.entranceZ, facing);
+      player.teleportTo(mat.x, this.surfaces.sample(mat.x, mat.z, 3), mat.z, facing);
       return;
     }
     this.onForecourt = true;
     this.forecourtRoot.visible = true;
     this.boundToForecourt();
-    const mat = facadeToWorld(this.frame, REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF, 0);
     player.teleportTo(mat.x, REPTILE_HOUSE_FLOOR_Y, mat.z, facing);
   }
 

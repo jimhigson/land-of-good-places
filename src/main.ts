@@ -202,9 +202,9 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // world ride, so this falls to `MiniGameHost.open` the same way `/ferris`
   // does.
   '/spooky-house': 'spookyHouse',
-  // The Reptile House's front door from outside (issue: Jim, 2 Oct 2026). While
-  // the park has no plot for the building it stands on its own forecourt, and
-  // this drops her on the doormat there — `ReptileHouse.requestEnterDoor`.
+  // The Reptile House's front door from outside (issue: Jim, 2 Oct 2026): she
+  // stands on its park plot's doormat, the tongue, facing the mouth —
+  // `ReptileHouse.requestEnterDoor` / `ReptileHouse.doormat`.
   // The hall itself is `/reptile-house`, its own `DeepLink` kind below.
   '/reptile-house-door': 'reptileHouseDoor',
   // The Reptile House's Tortoise Ride, boarded: into the hall at its stand
