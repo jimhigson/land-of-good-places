@@ -117,8 +117,8 @@ export function partBox(part: GlbPart): {
   return {
     minX: box.min.x,
     maxX: box.max.x,
-    minY: box.min.y,
-    maxY: box.max.y,
+    minY: box.min.y, // flat-ok: the part's own object-local geometry box
+    maxY: box.max.y, // flat-ok: the part's own object-local geometry box
     minZ: box.min.z,
     maxZ: box.max.z,
   };

@@ -223,7 +223,7 @@ export function registerPlinthStep(surfaces: WalkSurfaces, frame: FacadeFrame, p
  */
 export function buildForecourt(root: Group, surfaces: WalkSurfaces, originX: number, originZ: number, frame: FacadeFrame): void {
   const lawn = new Mesh(new CircleGeometry(REPTILE_FORECOURT_RADIUS, 48), softMaterial(PALETTE.grass));
-  lawn.rotation.x = -Math.PI / 2;
+  lawn.rotation.x = -Math.PI / 2; // flat-ok: the forecourt lawn on its flat plate; the reptile house is its own flat space at x 600, floor y 0, off the sphere
   lawn.receiveShadow = true;
   lawn.name = 'reptile-forecourt-lawn';
   root.add(lawn);

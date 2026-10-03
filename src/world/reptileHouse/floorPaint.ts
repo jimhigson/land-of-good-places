@@ -50,14 +50,14 @@ function crescent(): ShapeGeometry {
   shape.closePath();
   const geometry = new ShapeGeometry(shape, 12);
   // (x, y) → (x, 0, −y): the shape's +y is the hall's −z, and the face points up.
-  geometry.rotateX(-Math.PI / 2);
+  geometry.rotateX(-Math.PI / 2); // flat-ok: the decal laid on the hall floor; the reptile house is its own flat space at x 600, floor y 0, off the sphere
   return geometry;
 }
 
 /** A flat shape in the hall's XZ plane, lying at `y`, from a drawing in (x, −z). */
 function flat(shape: Shape, colour: number, y: number, curveSegments = 24): Mesh {
   const geometry = new ShapeGeometry(shape, curveSegments);
-  geometry.rotateX(-Math.PI / 2);
+  geometry.rotateX(-Math.PI / 2); // flat-ok: a decal laid on the reptile hall floor, a flat space at x 600, floor y 0, off the sphere
   const mesh = decal(new Mesh(geometry, toonMaterial(colour)));
   mesh.position.y = y;
   return mesh;
@@ -102,7 +102,7 @@ export function paintPaths(ctx: HallContext): void {
   const quaternion = new Quaternion();
   const position = new Vector3();
   const scale = new Vector3();
-  const up = new Vector3(0, 1, 0);
+  const up = new Vector3(0, 1, 0); // flat-ok: the hall floor's up; the reptile house is its own flat space at x 600, floor y 0, off the sphere
   stations.forEach((station, index) => {
     position.set(station.x, DECAL_STEP, station.z);
     quaternion.setFromAxisAngle(up, station.yaw);

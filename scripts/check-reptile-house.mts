@@ -627,7 +627,7 @@ console.log('\nTORTOISE RIDE — on by the link, off by any input, onto clear fl
   const ride = (name: string, off: () => void): void => {
     say(house.requestTortoiseRide(), `${name}: /tortoise-ride boards`);
     for (let i = 0; i < 70; i += 1) house.update(frame(quiet));
-    say(rider.riding && house.playerOnTortoise && rider.position.y > 1, `  she is riding, ${rider.position.y.toFixed(2)} m up on the shell`);
+    say(rider.riding && house.playerOnTortoise && rider.position.y > 1, `  she is riding, ${rider.position.y.toFixed(2)} m up on the shell`); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere: 1 m over that floor is up on the shell
     say(collision.isClearCircle(bayX, bayZ, PLAYER_RADIUS), '  the bay is clear floor while the tortoise is out');
     // Twelve seconds in: out of the foyer, on the ring.
     for (let i = 0; i < 12 * 60; i += 1) house.update(frame(quiet));
@@ -700,9 +700,9 @@ console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has
     return name;
   };
   const probeBox = (name: string): void => {
-    const height = box.max.y - box.min.y;
+    const height = box.max.y - box.min.y; // flat-ok: a prop mesh's box in the reptile hall, a flat space (floor y 0, off the sphere)
     if (height < 0.6 || !Number.isFinite(height)) return;
-    if (box.min.y > TALLEST_CHILD_HEIGHT) return;
+    if (box.min.y > TALLEST_CHILD_HEIGHT) return; // flat-ok: the same prop box in the flat reptile hall (floor y 0, off the sphere); TALLEST_CHILD_HEIGHT over that floor
     if (walkThrough.some(([prefix]) => name.includes(prefix))) return;
     checked += 1;
     const cx = (box.min.x + box.max.x) / 2;

@@ -138,7 +138,7 @@ export function instancedPlant(name: string, items: readonly PlantInstance[]): I
   const tilt = new Quaternion();
   const position = new Vector3();
   const scale = new Vector3();
-  const up = new Vector3(0, 1, 0);
+  const up = new Vector3(0, 1, 0); // flat-ok: the plant asset's own local up, before it is placed
   const right = new Vector3(1, 0, 0);
   items.forEach((item, index) => {
     quaternion.setFromAxisAngle(up, item.yaw);

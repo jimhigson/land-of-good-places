@@ -118,7 +118,7 @@ export class TortoiseRide {
     // The seat: on top of the shell, a little back of its middle, so she sits
     // on the dome of it rather than on the neck.
     const shell = new Box3().setFromObject(this.tortoise.shell);
-    this.seat.position.set(0, shell.max.y - 0.08, -0.15);
+    this.seat.position.set(0, shell.max.y - 0.08, -0.15); // flat-ok: the tortoise's box taken under its root before any lean; the hall is flat (floor y 0, off the sphere)
     this.tortoise.root.add(this.seat);
 
     this.loop = new CatmullRomCurve3(

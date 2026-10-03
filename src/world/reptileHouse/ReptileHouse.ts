@@ -439,7 +439,7 @@ export class ReptileHouse implements GameSystem {
     if (!this.spaces.isChanging && !player.riding) this.checkDoorways(player);
 
     // Nobody falls out of the world: a slipped trigger lands her back at the arrival.
-    if (this.inside && !this.spaces.isChanging && player.position.y < -2) {
+    if (this.inside && !this.spaces.isChanging && player.position.y < -2) { // flat-ok: two metres under the hall floor; the reptile house is its own flat space at x 600, floor y 0, off the sphere
       player.teleportTo(REPTILE_HOUSE_ORIGIN_X + REPTILE_ARRIVAL_X, REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_Z + REPTILE_ARRIVAL_Z, Math.PI);
       this.controls.snapCamera();
     }

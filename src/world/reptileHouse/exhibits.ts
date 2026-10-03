@@ -648,7 +648,7 @@ export class Exhibits {
     outline.absarc(-halfLength, 0, r, Math.PI / 2, (Math.PI * 3) / 2, false);
     outline.absarc(halfLength, 0, r, (Math.PI * 3) / 2, Math.PI / 2 + Math.PI * 2, false);
     const mesh = decal(new Mesh(new ShapeGeometry(outline, 24), toonMaterial(colour, emissive ? { emissive: colour, emissiveIntensity: emissive } : {})));
-    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.x = -Math.PI / 2; // flat-ok: a floor decal laid flat in the hall; the reptile house is its own flat space at x 600, floor y 0, off the sphere
     mesh.position.y = y;
     return mesh;
   }

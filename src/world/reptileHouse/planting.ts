@@ -150,12 +150,12 @@ export class Planting {
     // round the soil put the two in one plane along their seam, which the
     // coplanar sweep reported).
     const kerb = solid(new Mesh(new ExtrudeGeometry(polygonShape(outline), { depth: KERB_HEIGHT + 0.03, bevelEnabled: false }), toonMaterial(PALETTE.stonePink)));
-    kerb.rotation.x = Math.PI / 2;
+    kerb.rotation.x = Math.PI / 2; // flat-ok: the kerb stood on the hall floor; the reptile house is its own flat space at x 600, floor y 0, off the sphere
     kerb.position.y = KERB_HEIGHT;
     kerb.name = `bed:${bed.id}:kerb`;
     this.ctx.root.add(kerb);
     const soil = solid(new Mesh(new ExtrudeGeometry(polygonShape(insetPolygon(outline, KERB_WIDTH)), { depth: SOIL_HEIGHT - KERB_HEIGHT + 0.06, bevelEnabled: false }), toonMaterial(PALETTE.barkDark)));
-    soil.rotation.x = Math.PI / 2;
+    soil.rotation.x = Math.PI / 2; // flat-ok: the soil stood on the hall floor; the reptile house is its own flat space at x 600, floor y 0, off the sphere
     soil.position.y = SOIL_HEIGHT;
     soil.name = `bed:${bed.id}:soil`;
     this.ctx.root.add(soil);

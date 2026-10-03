@@ -99,7 +99,7 @@ function plankAspect(plank: Mesh): number {
   const box = plank.geometry.boundingBox;
   if (!box) throw new Error(`SignAtlas: '${plank.name}' has no geometry to measure`);
   const width = box.max.x - box.min.x;
-  const height = box.max.y - box.min.y;
+  const height = box.max.y - box.min.y; // flat-ok: the plank geometry's own object-local box (y is the plank's height)
   if (!(width > 0) || !(height > 0)) throw new Error(`SignAtlas: '${plank.name}' is ${width} × ${height} m — not a plank`);
   return width / height;
 }

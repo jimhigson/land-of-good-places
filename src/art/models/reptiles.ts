@@ -272,7 +272,7 @@ export function createChameleon(seed: number): ReptileHandle {
   }
   wMouth(root, 0.2, 0.4, 0.02);
   const tongue = solid(new Mesh(new CylinderGeometry(0.012, 0.012, 1, 6), toonMaterial(PALETTE.markerPink)));
-  tongue.rotation.x = Math.PI / 2;
+  tongue.rotation.x = Math.PI / 2; // flat-ok: the tongue's object-local turn inside the creature's own frame
   tongue.position.set(0, 0.2, 0.4);
   tongue.scale.set(1, 0.001, 1);
   root.add(tongue);
