@@ -39,14 +39,11 @@ name: Swept bus
 # **Do not rename this job.** A required status check is matched by name, so a
 # rename stops it gating merges with nothing going red.
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: swept-bus-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
@@ -77,6 +74,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
 
       - name: Sweep the bus against the drawn ride
         run: pnpm run check:swept-bus

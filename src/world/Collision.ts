@@ -111,6 +111,8 @@ interface CircleCollider {
   baseHeight: number;
   /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
   navStamped: boolean;
+  /** What registered it, where the registration was scoped ({@link CollisionWorld.ownedBy}); `''` otherwise. */
+  owner: string;
 }
 
 export interface WallCollider {
@@ -126,6 +128,8 @@ export interface WallCollider {
   baseHeight: number;
   /** Banded, yet stamped into route maps — a ramp's flank. See the header. */
   navStamped: boolean;
+  /** What registered it, where the registration was scoped ({@link CollisionWorld.ownedBy}); `''` otherwise. */
+  owner: string;
 }
 
 /**
@@ -281,6 +285,37 @@ export function autoHopClears(topHeight: number, apexClearance: number): boolean
 const SHALLOW_OVERLAP = 0.5;
 
 /**
+ * **Whether one collider pushes back on a mover at `position`, right now** —
+ * the one owner of that rule, asked by {@link CollisionWorld.resolve} and by
+ * {@link CollisionWorld.deepestSolidOverlap}, so the step guard in
+ * `resolveMovement` measures exactly the solidity `resolve` enforces.
+ *
+ * - `'absent'`: a banded collider does not exist for a mover below its base —
+ *   the landing rail over the open archway. See the header.
+ * - `'cleared'`: over its footprint but jumped clear above it. Absolute tops
+ *   compare against the mover's real feet height, so a prop she is stood on
+ *   holds still under her — see the header.
+ * - `'solid'`: it pushes.
+ */
+function contactWith(
+  collider: { readonly baseHeight: number; readonly topHeight: number; readonly topIsAbsolute: boolean },
+  position: Vector3,
+  clearance: number,
+): 'absent' | 'cleared' | 'solid' {
+  if (position.y < collider.baseHeight) return 'absent';
+  if (clearsTop(collider.topHeight, collider.topIsAbsolute ? position.y : clearance)) return 'cleared';
+  return 'solid';
+}
+
+/**
+ * How much deeper into something solid a single movement sub-step may leave a
+ * mover than she was before it, in metres, before the step is refused — see
+ * `resolveMovement`'s pinch guard. Float noise only: an ordinary resolve ends
+ * in exact contact.
+ */
+const PINCH_TOLERANCE = 1e-4;
+
+/**
  * The speed, in metres per second, at which a *deep* overlap (see
  * {@link SHALLOW_OVERLAP}) is allowed to resolve.
  *
@@ -374,6 +409,9 @@ const SUBSTEP_FOOTPRINT_FRACTION = 0.5;
  */
 export const MAX_SUBSTEPS = 16;
 
+/** Bucket size of {@link CollisionWorld.solidDepthAt}'s grid, metres. */
+const SOLID_GRID = 4;
+
 export class CollisionWorld {
   private readonly circles: CircleCollider[] = [];
   private readonly walls: WallCollider[] = [];
@@ -386,6 +424,129 @@ export class CollisionWorld {
    * building somewhere — so it reads whatever has been registered at the
    * time it is called, exactly like the boot asserts do.
    */
+  /**
+   * **Name what is near a point** — every collider within `reach` of a probe
+   * of `radius` at `(x, z)`, as text. A diagnostic, for a placer that was
+   * refused and wants to say by what (the bridge search's `LGP_DEBUG_BRIDGE`
+   * line said "collider" and nothing else). Colliders carry no names, so
+   * this describes their shape: a circle's radius says tree trunk (0.3–0.5)
+   * from lamp post (0.2) from stall (metres); a wall its length and height.
+   */
+  describeNear(x: number, z: number, radius: number, reach = 1): string[] {
+    const out: string[] = [];
+    for (const circle of this.circles) {
+      const gap = Math.hypot(circle.x - x, circle.z - z) - circle.radius - radius;
+      if (gap <= reach) {
+        out.push(
+          `circle#${circle.id} at (${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}) r=${circle.radius.toFixed(2)} gap=${gap.toFixed(2)}`,
+        );
+      }
+    }
+    for (const wall of this.walls) {
+      const dx = wall.x2 - wall.x1;
+      const dz = wall.z2 - wall.z1;
+      const lengthSq = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((x - wall.x1) * dx + (z - wall.z1) * dz) / lengthSq));
+      const gap = Math.hypot(wall.x1 + t * dx - x, wall.z1 + t * dz - z) - wall.halfThickness - radius;
+      if (gap <= reach) {
+        out.push(
+          `wall (${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)})-(${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}) ` +
+            `half=${wall.halfThickness.toFixed(2)} top=${wall.topHeight.toFixed(1)} gap=${gap.toFixed(2)}`,
+        );
+      }
+    }
+    return out;
+  }
+
+  /** The owner every collider registered now is filed under — see {@link ownedBy}. */
+  private currentOwner = '';
+
+  /**
+   * **Files every collider `build` registers under `owner`** — `'castle'`,
+   * `'hotel'`, `'booth'`, `'boundary wall'` — so a measure can ask what a solid
+   * *is* (`test/procgen`'s `noDrawnPavingUnderASolid` holds paving off
+   * buildings and booths). Nests: the innermost owner wins. Changes nothing
+   * about how anything collides.
+   */
+  ownedBy<T>(owner: string, build: () => T): T {
+    const outer = this.currentOwner;
+    this.currentOwner = owner;
+    try {
+      return build();
+    } finally {
+      this.currentOwner = outer;
+    }
+  }
+
+  /**
+   * **How deep (x, z) stands inside the deepest ground-standing solid** —
+   * metres inside a circle's rim or a wall's band, the larger of the two;
+   * negative where the point is clear of everything, by how much. Banded
+   * colliders (a `baseHeight` above the ground) are not solid here, the same
+   * reading {@link isClearCircle} gives. A planning and measuring query: what
+   * the drawn paving is laid over is asked of the colliders, the one owner of
+   * every footprint (`test/procgen`'s `noDrawnPavingUnderASolid`).
+   */
+  solidDepthAt(x: number, z: number, owners?: ReadonlySet<string>): { depth: number; what: string; owner: string } {
+    let depth = -Infinity;
+    let what = '';
+    let owner = '';
+    const grid = this.solidGrid();
+    const bucket = grid.cells.get(`${Math.floor(x / SOLID_GRID)},${Math.floor(z / SOLID_GRID)}`);
+    if (!bucket) return { depth, what, owner };
+    for (const circle of bucket.circles) {
+      if (circle.baseHeight > 0) continue;
+      if (owners && !owners.has(circle.owner)) continue;
+      const here = circle.radius - Math.hypot(x - circle.x, z - circle.z);
+      if (here > depth) {
+        depth = here;
+        owner = circle.owner;
+        what = `circle#${circle.id} at (${circle.x.toFixed(1)}, ${circle.z.toFixed(1)}) r=${circle.radius.toFixed(2)} top=${circle.topHeight.toFixed(2)}`;
+      }
+    }
+    for (const wall of bucket.walls) {
+      if (wall.baseHeight > 0) continue;
+      if (owners && !owners.has(wall.owner)) continue;
+      const abx = wall.x2 - wall.x1;
+      const abz = wall.z2 - wall.z1;
+      const lengthSq = abx * abx + abz * abz || 1;
+      const t = Math.max(0, Math.min(1, ((x - wall.x1) * abx + (z - wall.z1) * abz) / lengthSq));
+      const here = wall.halfThickness - Math.hypot(x - (wall.x1 + abx * t), z - (wall.z1 + abz * t));
+      if (here > depth) {
+        depth = here;
+        owner = wall.owner;
+        what =
+          `wall (${wall.x1.toFixed(1)}, ${wall.z1.toFixed(1)})-(${wall.x2.toFixed(1)}, ${wall.z2.toFixed(1)}) ` +
+          `half=${wall.halfThickness.toFixed(2)} top=${wall.topHeight.toFixed(2)}${wall.topIsAbsolute ? ' abs' : ''}${wall.autoHoppable ? ' hoppable' : ''}`;
+      }
+    }
+    return { depth, what: owner ? `${owner} ${what}` : what, owner };
+  }
+
+  /** {@link solidDepthAt}'s bucket grid, rebuilt whenever the world's revision moves. */
+  private solidGridMemo: { revision: number; cells: Map<string, { circles: CircleCollider[]; walls: WallCollider[] }> } | null = null;
+  private solidGrid(): { revision: number; cells: Map<string, { circles: CircleCollider[]; walls: WallCollider[] }> } {
+    if (this.solidGridMemo && this.solidGridMemo.revision === this.revisionCounter) return this.solidGridMemo;
+    const cells = new Map<string, { circles: CircleCollider[]; walls: WallCollider[] }>();
+    const stamp = (minX: number, minZ: number, maxX: number, maxZ: number, add: (cell: { circles: CircleCollider[]; walls: WallCollider[] }) => void): void => {
+      for (let i = Math.floor(minX / SOLID_GRID); i <= Math.floor(maxX / SOLID_GRID); i += 1) {
+        for (let j = Math.floor(minZ / SOLID_GRID); j <= Math.floor(maxZ / SOLID_GRID); j += 1) {
+          const key = `${i},${j}`;
+          let cell = cells.get(key);
+          if (!cell) cells.set(key, (cell = { circles: [], walls: [] }));
+          add(cell);
+        }
+      }
+    };
+    for (const c of this.circles) stamp(c.x - c.radius, c.z - c.radius, c.x + c.radius, c.z + c.radius, (cell) => cell.circles.push(c));
+    for (const w of this.walls) {
+      const h = w.halfThickness;
+      stamp(Math.min(w.x1, w.x2) - h, Math.min(w.z1, w.z2) - h, Math.max(w.x1, w.x2) + h, Math.max(w.z1, w.z2) + h, (cell) => cell.walls.push(w));
+    }
+    this.solidGridMemo = { revision: this.revisionCounter, cells };
+    return this.solidGridMemo;
+  }
+
   isClearCircle(x: number, z: number, radius: number): boolean {
     for (const circle of this.circles) {
       // A ground-plane planning query: a banded collider (baseHeight above the
@@ -493,6 +654,7 @@ export class CollisionWorld {
       topIsAbsolute,
       baseHeight,
       navStamped,
+      owner: this.currentOwner,
     });
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, radius);
     this.revisionCounter += 1;
@@ -550,6 +712,7 @@ export class CollisionWorld {
       topIsAbsolute,
       baseHeight,
       navStamped,
+      owner: this.currentOwner,
     };
     this.walls.push(wall);
     this.thinnestHalfWidth = Math.min(this.thinnestHalfWidth, halfThickness);
@@ -756,18 +919,7 @@ export class CollisionWorld {
   ): { clearedWall: boolean; escorting: boolean; corrected: boolean } {
     const distance = Math.hypot(deltaX, deltaZ);
     const limit = this.maxSafeStep(radius);
-
-    // The overwhelmingly common case, and deliberately the *identical* code
-    // path to before: one move, one resolve, no arithmetic changed.
-    if (!(distance > limit)) {
-      position.x += deltaX;
-      position.z += deltaZ;
-      const result = this.resolve(position, radius, clearance, dt);
-      onStep?.(position);
-      return result;
-    }
-
-    const steps = Math.min(Math.ceil(distance / limit), MAX_SUBSTEPS);
+    const steps = distance > limit ? Math.min(Math.ceil(distance / limit), MAX_SUBSTEPS) : 1;
     const stepX = deltaX / steps;
     const stepZ = deltaZ / steps;
     const stepDt = dt / steps;
@@ -775,10 +927,34 @@ export class CollisionWorld {
     let clearedWall = false;
     let escorting = false;
     let corrected = false;
+    let depthBefore = this.deepestSolidOverlap(position, radius, clearance);
     for (let step = 0; step < steps; step += 1) {
+      const fromX = position.x;
+      const fromZ = position.z;
       position.x += stepX;
       position.z += stepZ;
-      const result = this.resolve(position, radius, clearance, stepDt);
+      let result = this.resolve(position, radius, clearance, stepDt);
+      // **The pinch guard: a step may not leave her deeper in stone than it
+      // found her.** `resolve` pushes out of each collider in turn, twice.
+      // Between two colliders closer together than she is wide — a lamp post
+      // 1.13 m from a castle turret (seed 4, restart 2) — each push lands her
+      // in the other, and the last one wins: she ended 0.11 m inside the
+      // turret's drawn stone, walking in from 11 of 96 approaches. More passes
+      // only creep towards the answer (sixteen passes still left 4 cm);
+      // the answer is that she does not fit, so the step is not taken. She
+      // stays where she was — in contact at the mouth of the gap, as a child
+      // who cannot squeeze through would — and `resolve` is asked there with
+      // no movement, so an escort already under way still progresses.
+      // `check:castle-towers` marches 48 bearings at every turret.
+      const depthAfter = this.deepestSolidOverlap(position, radius, clearance);
+      if (depthAfter > Math.max(depthBefore, 0) + PINCH_TOLERANCE) {
+        position.x = fromX;
+        position.z = fromZ;
+        result = this.resolve(position, radius, clearance, stepDt);
+        depthBefore = this.deepestSolidOverlap(position, radius, clearance);
+      } else {
+        depthBefore = depthAfter;
+      }
       onStep?.(position);
       clearedWall = clearedWall || result.clearedWall;
       escorting = escorting || result.escorting;
@@ -862,6 +1038,38 @@ export class CollisionWorld {
    * not when the correction goes quiet, but when it stops entirely. See
    * `Player.update`, which holds the guard on until then.
    */
+  /**
+   * The deepest a mover of `radius` at `position` overlaps anything solid to
+   * her, in metres (0 when clear). Solid by exactly `resolve`'s rule
+   * ({@link contactWith}); the soft park boundary is not stone and is not
+   * counted. Read-only — the measuring half of `resolveMovement`'s pinch guard.
+   */
+  deepestSolidOverlap(position: Vector3, radius: number, clearance = 0): number {
+    let deepest = 0;
+    for (const circle of this.circles) {
+      const minimum = circle.radius + radius;
+      const depth = minimum - Math.hypot(position.x - circle.x, position.z - circle.z);
+      if (depth <= deepest) continue;
+      if (contactWith(circle, position, clearance) !== 'solid') continue;
+      deepest = depth;
+    }
+    for (const wall of this.walls) {
+      const ax = wall.x2 - wall.x1;
+      const az = wall.z2 - wall.z1;
+      const lengthSquared = ax * ax + az * az;
+      if (lengthSquared < 1e-8) continue;
+      let t = ((position.x - wall.x1) * ax + (position.z - wall.z1) * az) / lengthSquared;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const depth =
+        wall.halfThickness + radius -
+        Math.hypot(position.x - (wall.x1 + ax * t), position.z - (wall.z1 + az * t));
+      if (depth <= deepest) continue;
+      if (contactWith(wall, position, clearance) !== 'solid') continue;
+      deepest = depth;
+    }
+    return deepest;
+  }
+
   resolve(
     position: Vector3,
     radius: number,
@@ -905,12 +1113,9 @@ export class CollisionWorld {
         const minimum = circle.radius + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        // A banded collider does not exist for a mover below its base — the
-        // landing rail over the open archway. See the header.
-        if (position.y < circle.baseHeight) continue;
-        // Absolute tops compare against the mover's real feet height, so a
-        // prop she is stood on holds still under her — see the header.
-        if (clearsTop(circle.topHeight, circle.topIsAbsolute ? position.y : clearance)) {
+        const contact = contactWith(circle, position, clearance);
+        if (contact === 'absent') continue;
+        if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }
@@ -940,10 +1145,9 @@ export class CollisionWorld {
         const minimum = wall.halfThickness + radius;
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared >= minimum * minimum) continue; // not overlapping at all
-        // Same banded-base rule as the circles above.
-        if (position.y < wall.baseHeight) continue;
-        // Same absolute-top rule as the circles above.
-        if (clearsTop(wall.topHeight, wall.topIsAbsolute ? position.y : clearance)) {
+        const contact = contactWith(wall, position, clearance);
+        if (contact === 'absent') continue;
+        if (contact === 'cleared') {
           clearedAny = true; // over its footprint, but jumped clear above it
           continue;
         }

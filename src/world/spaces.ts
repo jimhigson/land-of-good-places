@@ -20,24 +20,33 @@
  * floors — `world/building/floors.ts` owns the table — and this file simply
  * folds them in beside the hotel's rooms. The old single `castle` id is gone,
  * exactly as the paragraph that used to stand here predicted: a save written
- * before the split names a space that no longer exists, {@link localToWorld}
- * returns `null` for it, and that player spawns on the plaza **with her name,
+ * before the split names a space that no longer exists, `localToWorld`
+ * (`spaceOrigins.ts`) returns `null` for it, and that player spawns on the plaza **with her name,
  * her hat, her Cute-o-dex and her whole parade intact**. That is the intended
  * failure, and it is the reason this file was written a week early.
+ *
+ * **This module is a leaf on purpose** — `core/constants` and `building/floors`
+ * and nothing else — because `spaceAt` is what the step-reach rule
+ * (`building/stepReach.ts`) asks to tell indoors from outdoors, and that rule is
+ * what `NavGrid` walks, and `parkLayout.ts` floods a `NavGrid` while it is still
+ * solving the park. The origins a save is written against need the castle's
+ * placed height, which needs the solved layout, so they live in
+ * `spaceOrigins.ts`; had they stayed here the layout would have imported the
+ * castle which imports the layout, and `PARK_LAYOUT` was read before it
+ * existed (a `ReferenceError` on every seed, found landing the procgen rework
+ * on the sphere).
  */
 
 import {
   HOTEL_BREAKFAST_Z,
   HOTEL_CORRIDOR_Z,
-  HOTEL_FLOOR_Y,
   HOTEL_GARDEN_Z,
   HOTEL_LOBBY_Z,
   HOTEL_OCEAN_Z,
   HOTEL_ORIGIN_X,
   HOTEL_SUITE_Z,
 } from '../core/constants';
-import { CASTLE_FLOORS, castleFloorAt } from './building/floors';
-import { BUILDING_BASE_Y } from './building/layout';
+import { castleFloorAt } from './building/floors';
 
 /**
  * A place, as a save file names it.
@@ -93,24 +102,18 @@ export const SPACE_HOTEL_SUITE: SpaceId = 'hotel.suite';
 export const SPACE_HOTEL_GARDEN: SpaceId = 'hotel.garden';
 export const SPACE_HOTEL_OCEAN: SpaceId = 'hotel.ocean';
 
-interface SpaceOrigin {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-}
-
 /**
  * **Every hotel room's Z, written once.**
  *
- * This list used to exist twice — once in `ORIGINS` and once, spelled out
- * again as a tuple array, inside {@link spaceAt}. Adding a floor therefore
+ * This list used to exist twice — once in the save origins' table and once,
+ * spelled out again as a tuple array, inside {@link spaceAt}. Adding a floor therefore
  * meant editing both, and forgetting the second gives a room that is fully
  * built, fully lit and fully furnished but which `spaceAt` reports as
  * `garden`: the lift lands you in it, `Hotel.currentRoom` returns null, and
  * the floor pill goes blank. That is CLAUDE.md's opening bug — two
  * definitions of one thing kept in step by hand — so there is now one.
  */
-const HOTEL_ROOM_Z: readonly (readonly [SpaceId, number])[] = [
+export const HOTEL_ROOM_Z: readonly (readonly [SpaceId, number])[] = [
   [SPACE_HOTEL_LOBBY, HOTEL_LOBBY_Z],
   [SPACE_HOTEL_BREAKFAST, HOTEL_BREAKFAST_Z],
   [SPACE_HOTEL_CORRIDOR, HOTEL_CORRIDOR_Z],
@@ -118,21 +121,6 @@ const HOTEL_ROOM_Z: readonly (readonly [SpaceId, number])[] = [
   [SPACE_HOTEL_GARDEN, HOTEL_GARDEN_Z],
   [SPACE_HOTEL_OCEAN, HOTEL_OCEAN_Z],
 ];
-
-const ORIGINS: Readonly<Record<SpaceId, SpaceOrigin>> = {
-  [SPACE_GARDEN]: { x: 0, y: 0, z: 0 },
-  // Every castle floor stands at the same height — they are not stacked any
-  // more, so `BUILDING_BASE_Y` is simply the floor you walk on, on all three.
-  ...Object.fromEntries(
-    CASTLE_FLOORS.map((floor) => [
-      floor.space,
-      { x: floor.originX, y: BUILDING_BASE_Y, z: floor.originZ },
-    ]),
-  ),
-  ...Object.fromEntries(
-    HOTEL_ROOM_Z.map(([space, z]) => [space, { x: HOTEL_ORIGIN_X, y: HOTEL_FLOOR_Y, z }]),
-  ),
-};
 
 /** Rooms are ~30 m across; anywhere within this of a room's origin is in it. */
 const HOTEL_ROOM_RADIUS = 70;
@@ -159,35 +147,4 @@ export function spaceAt(x: number, z: number): SpaceId {
     if (hx * hx + hz * hz <= HOTEL_ROOM_RADIUS * HOTEL_ROOM_RADIUS) return space;
   }
   return SPACE_GARDEN;
-}
-
-/** World position -> the offset a save records, relative to its space. */
-export function worldToLocal(
-  space: SpaceId,
-  x: number,
-  y: number,
-  z: number,
-): { x: number; y: number; z: number } {
-  const origin = ORIGINS[space] ?? ORIGINS[SPACE_GARDEN];
-  // `SPACE_GARDEN` is a literal key of ORIGINS, so this cannot actually be
-  // undefined; the fallback is for a caller that invented an id.
-  if (!origin) return { x, y, z };
-  return { x: x - origin.x, y: y - origin.y, z: z - origin.z };
-}
-
-/**
- * A saved offset -> world position, or `null` if that space no longer exists.
- *
- * `null` is the whole point of the space id (see the file comment): the caller
- * spawns at the default place and loads everything else.
- */
-export function localToWorld(
-  space: SpaceId,
-  x: number,
-  y: number,
-  z: number,
-): { x: number; y: number; z: number } | null {
-  const origin = ORIGINS[space];
-  if (!origin) return null;
-  return { x: x + origin.x, y: y + origin.y, z: z + origin.z };
 }

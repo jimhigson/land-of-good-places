@@ -1,6 +1,6 @@
 import {
   CatmullRomCurve3,
-  Euler,
+  Matrix4,
   Quaternion,
   TubeGeometry,
   Vector3,
@@ -8,6 +8,7 @@ import {
 } from 'three';
 import { upFor } from '../up';
 import { placeOnSphere, tiltToSphere } from '../terrain';
+import { headingTurn } from '../headingTurn';
 
 /**
  * **Sweeping a pair of rails along a route.** The park's one way of turning a
@@ -49,7 +50,6 @@ export interface RailSampler {
 }
 
 const _railUp = /* @__PURE__ */ new Vector3();
-const _leanAt = /* @__PURE__ */ new Vector3();
 const _leanSpin = /* @__PURE__ */ new Quaternion();
 
 /**
@@ -79,18 +79,106 @@ export function drawnOnSphere(sampler: RailSampler): RailSampler {
       placeOnSphere(target, 0, target, _leanSpin);
       return target;
     },
+    // The direction the drawn rails actually run — see `drawnDirection`. This
+    // used to be the flat tangent turned by the sphere's tilt at the point,
+    // which leans it twice wherever the flat route already follows the ground:
+    // the Sky Cruiser's sleepers were tipped 17.25° against their rails at
+    // s=63 m on the canonical seed.
     tangentAt(distance: number, target: Vector3): Vector3 {
-      sampler.pointAt(distance, _leanAt);
-      sampler.tangentAt(distance, target);
-      tiltToSphere(_leanAt.x, _leanAt.y, _leanAt.z, _leanSpin);
-      return target.applyQuaternion(_leanSpin).normalize();
+      return drawnDirection(this, distance, target);
     },
   };
 }
 
+/**
+ * **Which way the rails are actually drawn at `distance`: the one owner of that
+ * question.** A central difference of the sampler's own drawn points, ±5 cm.
+ *
+ * Not any route's `tangentAt`, because two routes in this park have a
+ * `tangentAt` that is a different thing from the direction of their drawn
+ * rails, and both were built on as if it were:
+ *
+ * - the Sky Cruiser's flat route, turned onto the sphere by the tilt at the
+ *   point (`drawnOnSphere`), which leans a tangent that already follows the
+ *   ground a second time — sleepers tipped 17.25° off their rails;
+ * - the Rail Race's route, whose `tangentAt` is the unleant *chart* tangent the
+ *   physics wants — sleepers laid up to 14.9° across the rails over them.
+ *
+ * A difference of the drawn points cannot disagree with the rails, because it
+ * is read off the same points the rails are swept through. Five centimetres is
+ * far inside the tightest bend on either ride and far above float noise.
+ * `check:tie-frame` measures every sleeper and both carts against this, taken
+ * independently.
+ */
+export function drawnDirection(
+  sampler: Pick<RailSampler, 'pointAt'>,
+  distance: number,
+  target: Vector3,
+): Vector3 {
+  sampler.pointAt(distance - DRAWN_STEP, _drawnBehind);
+  sampler.pointAt(distance + DRAWN_STEP, target);
+  return target.sub(_drawnBehind).normalize();
+}
+
+/** Half the span of {@link drawnDirection}'s difference, in metres. */
+const DRAWN_STEP = 0.05;
+const _drawnBehind = /* @__PURE__ */ new Vector3();
+
+/**
+ * **`count` stations round a closed rail, evenly spaced along the rail as
+ * drawn** — the one owner of where a lane's sleepers go.
+ *
+ * Returns the sampler's own `distance` for each, but chosen so the *drawn* arc
+ * between every consecutive pair is the same: `drawnLength / count`.
+ *
+ * Not `i * spacing` of the sampler's distance, which is what the Rail Race laid
+ * its sleepers at, because that distance is the ring's **centre line**, and a
+ * lane offset from it covers `1 + offset / bendRadius` metres of rail per metre
+ * of centre line. On a 17.7 m bend (seed 3, race ring, s=37 m) the innermost
+ * lane — on the outside of that bend — got a sleeper every 1.254 m of drawn
+ * rail, and the outermost one every 0.830 m: "about a metre" on no lane at all,
+ * and worse on whichever seed bent tightest. The lean onto the sphere stretches
+ * the drawn rail a further ~1.6% over its chart there, which a centre-line
+ * spacing cannot see either. Walking the drawn points sees both.
+ *
+ * The table is sampled every `SLEEPER_TABLE_STEP` of distance and inverted
+ * linearly; the chord-for-arc error at that step is far below a millimetre.
+ */
+export function stationsEvenlyAlongDrawn(
+  sampler: Pick<RailSampler, 'pointAt' | 'length'>,
+  count: number,
+): Float64Array {
+  const stations = new Float64Array(Math.max(0, count));
+  if (count <= 0) return stations;
+  const steps = Math.max(1, Math.ceil(sampler.length / STATION_TABLE_STEP));
+  const at = new Float64Array(steps + 1);
+  const run = new Float64Array(steps + 1);
+  const previous = new Vector3();
+  const next = new Vector3();
+  sampler.pointAt(0, previous);
+  for (let k = 1; k <= steps; k += 1) {
+    at[k] = (k / steps) * sampler.length;
+    sampler.pointAt(at[k]!, next);
+    run[k] = run[k - 1]! + next.distanceTo(previous);
+    previous.copy(next);
+  }
+  const spacing = run[steps]! / count;
+  let k = 1;
+  for (let i = 0; i < count; i += 1) {
+    const want = i * spacing;
+    while (k < steps && run[k]! < want) k += 1;
+    const span = run[k]! - run[k - 1]!;
+    const t = span > 0 ? (want - run[k - 1]!) / span : 0;
+    stations[i] = at[k - 1]! + t * (at[k]! - at[k - 1]!);
+  }
+  return stations;
+}
+
+/** How finely {@link stationsEvenlyAlongDrawn} walks the drawn rail, in metres of distance. */
+const STATION_TABLE_STEP = 0.1;
+
 const _rideTilt = /* @__PURE__ */ new Quaternion();
 const _rideSpin = /* @__PURE__ */ new Quaternion();
-const _rideEuler = /* @__PURE__ */ new Euler();
 
 /**
  * **How a vehicle sits on a route that is drawn on the sphere** — the
@@ -125,10 +213,16 @@ const _rideEuler = /* @__PURE__ */ new Euler();
  * describes at length, where a per-frame pre-multiply decomposes back into
  * `rotation.x`/`rotation.z` and the tilt compounds until the thing tumbles.
  *
- * Position is deliberately **not** this function's business, because the two
- * kinds of route disagree about it: the coaster and the train solve flat and
- * must map their point through `placeOnSphere`, while the Rail Race's own
- * `pointAt` already returns a leaned point and must not be leaned twice.
+ * Position is deliberately **not** this function's business: the train solves
+ * flat and maps its point through `placeOnSphere`.
+ *
+ * **Only for a heading with no pitch — today, the train's cars.** A pitched
+ * heading read off a flat tangent and then leant is leant twice where the flat
+ * tangent already follows the ground: measured on the Sky Cruiser (canonical
+ * seed), 17.25° between the nose and its drawn rails even once the composition
+ * was right. The Sky Cruiser and the Rail Race carts now take the direction
+ * their rails are actually drawn in, through {@link railTurn}; a new vehicle
+ * that climbs should too.
  */
 export function rideFrame(
   flat: Readonly<Vector3>,
@@ -137,7 +231,10 @@ export function rideFrame(
   out: Quaternion,
 ): Quaternion {
   tiltToSphere(flat.x, flat.y, flat.z, _rideTilt);
-  _rideSpin.setFromEuler(_rideEuler.set(pitch, yaw, 0));
+  // Yaw, then pitch in the yawed frame, from the one owner of that order —
+  // the same function `faceOnGround` poses a rider with, so a rider and the
+  // tub she sits in cannot compose one heading two ways again.
+  headingTurn(yaw, pitch, _rideSpin);
   return out.multiplyQuaternions(_rideTilt, _rideSpin);
 }
 
@@ -195,6 +292,28 @@ export function railFrameAt(sampler: RailSampler, distance: number, out: RailFra
   out.up.crossVectors(out.forward, out.side).normalize();
   return out;
 }
+
+/**
+ * **The turn that sits a vehicle square on rails running along `forward` at
+ * `position`** — the orientation half of {@link railFrameAt}, from the same
+ * side/up convention, so a cart and the sleepers under it cannot disagree about
+ * which way is across.
+ *
+ * `forward` is the direction the rails are actually **drawn** in. That is not
+ * always the route's own `tangentAt`: the Rail Race's is the unleant chart
+ * tangent, and a cart turned from it through `rideFrame` ran its nose up to
+ * 3.5° off the rails under it, round the whole lap (`check:rail-race`).
+ */
+export function railTurn(position: Vector3, forward: Vector3, out: Quaternion): Quaternion {
+  railSide(forward, upFor(position.x, position.y, position.z, _railUp), _turnSide);
+  _turnUp.crossVectors(forward, _turnSide).normalize();
+  _turnBasis.makeBasis(_turnSide, _turnUp, forward);
+  return out.setFromRotationMatrix(_turnBasis);
+}
+
+const _turnSide = /* @__PURE__ */ new Vector3();
+const _turnUp = /* @__PURE__ */ new Vector3();
+const _turnBasis = /* @__PURE__ */ new Matrix4();
 
 export interface SweptRailOptions {
   /** Rail centre-to-centre, in metres. */

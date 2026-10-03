@@ -51,7 +51,8 @@ import { SaveSystem } from './SaveSystem';
 import { gameStore, type CharacterCreationChoice } from './state';
 import { shopItem } from './world/building/shops/catalogue';
 import type { SavedPlace } from './state/save';
-import { localToWorld, SPACE_GARDEN } from './world/spaces';
+import { SPACE_GARDEN } from './world/spaces';
+import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
 import { attractionOwnsTheScreen } from './core/attraction';
 

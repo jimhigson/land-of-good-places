@@ -1,4 +1,3 @@
-import { SUPPORT_MAX_RADIAL_NUDGE } from './supportGround';
 import {
   TorusGeometry,
   BoxGeometry,
@@ -6,11 +5,14 @@ import {
   BufferGeometry,
   Color,
   CylinderGeometry,
+  DynamicDrawUsage,
   Group,
+  InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  type MeshToonMaterial,
   Quaternion,
   Vector3,
 } from 'three';
@@ -20,51 +22,49 @@ import { hazardTapeTexture } from '../../core/textures';
 import { addOutline, decal, solid, toonMaterial } from '../../art/style/materials';
 import { ART } from '../../art/style/artPalette';
 import { duckBarAssetGeometry } from '../../art/models/duckBarAsset';
-import { placeOnSphere, terrainHeight, tiltToSphere } from '../terrain';
-import { distanceToPath } from '../pathGraph';
+import { duckBarPose } from './barReach';
+import { terrainHeight } from '../terrain';
 import { archFeet } from './arch';
-import { PARK_LAYOUT } from '../parkLayout';
-import { distanceToRailCorridor } from '../train/plan';
 import { TALLEST_CHILD_HEIGHT } from '../../art/models/kid';
-import { CAT_BUS_BODY_TOP_Y } from '../entrance/catBus';
-import { isInEntranceRoad } from '../entrance/roadRoute';
 import type { CollisionWorld } from '../Collision';
-import { railFrameAt, sweptRails, type RailFrame, type RailSampler } from '../rail/sweptRail';
 import {
-  ALERT_RANGE,
-  BARS_FROM_LEVEL,
-  DUCK_CLEARANCE_AT_PARK_SCALE,
-  RIDER_HEAD_TOP_AT_PARK_SCALE,
-  TRESTLE_SPACING,
-  trestleGridIndex,
-  ZONES_FROM_LEVEL,
-  type HazardLayout,
-  type RaceLevel,
-} from './hazards';
-import {
-  BAR_HALF_SPAN_AT_PARK_SCALE,
-  BEAM_DROP,
-  BRANCH_TAPER,
-  forkPlan,
-  POST_FOOT_RADIUS,
-  POST_TOP_RADIUS,
-  RAIL_GAUGE_AT_PARK_SCALE,
-  RAIL_RADIUS_AT_PARK_SCALE,
-  SLEEPER_ALONG_TRACK,
-  SLEEPER_OVERHANG,
-  SLEEPER_SPACING,
-  SLEEPER_THICKNESS,
-} from './trestleGeometry';
+  drawnDirection,
+  railFrameAt,
+  stationsEvenlyAlongDrawn,
+  sweptRails,
+  type RailFrame,
+  type RailSampler,
+} from '../rail/sweptRail';
+import { ALERT_RANGE, BARS_FROM_LEVEL, DUCK_CLEARANCE_AT_PARK_SCALE, RIDER_HEAD_TOP_AT_PARK_SCALE, trestleGridIndex, ZONES_FROM_LEVEL, type HazardLayout, type RaceLevel } from './hazards';
+import { BAR_HALF_SPAN_AT_PARK_SCALE, BEAM_DROP, forkPlan, POST_FOOT_RADIUS, POST_TOP_RADIUS, STRUT_RADII, RAIL_GAUGE_AT_PARK_SCALE, RAIL_RADIUS_AT_PARK_SCALE, SLEEPER_ALONG_TRACK, SLEEPER_OVERHANG, SLEEPER_SPACING, SLEEPER_THICKNESS } from './trestleGeometry';
+import { type Claim, type GroundClaims } from '../../boot/groundClaims';
+import { RAIL_RACE_FEATURE } from './feature';
 // Re-exported: these used to be defined here, and `cart.ts` and
 // `scripts/check-rail-race.mts` import them from this module.
 export { BAR_HALF_SPAN_AT_PARK_SCALE, RAIL_GAUGE_AT_PARK_SCALE } from './trestleGeometry';
-import {
-  LANE_COUNT,
-  PLAYER_LANE,
-  RIDE_SCALE,
-  UNDULATION_REACH,
-  type RailRaceRoute,
-} from './route';
+import { UNDULATION_REACH, type RailRaceRoute } from './route';
+// The dimensions come from the leaf, not through `./route`'s re-export, because
+// `RAIL_GAUGE` below is computed at **module scope**. `track.ts` is not in the
+// `route -> parkLayout -> ... -> hazards` cycle today — measured, `route.ts`
+// cannot reach `track.ts`, so it is strictly downstream and its imports are
+// fully evaluated before its body runs. This import is therefore hardening, not
+// a repair: the moment anything inside that cycle imports `track.ts`, a
+// module-scope read through `./route` would land in `RIDE_SCALE`'s temporal
+// dead zone, and the leaf cannot. See `dimensions.ts` for why a re-export does
+// not escape a cycle and a direct leaf import does.
+import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE } from './dimensions';
+
+/**
+ * How many sides a trestle branch is drawn with.
+ *
+ * One owner because two things must agree about it: both branch geometries are
+ * built with it, and the half-facet roll that keeps a fork from putting two
+ * faces in one plane is `PI / this` — half of the `2 * PI / this` a facet
+ * spans. It was written as a bare `8` twice, and a roll derived from a third
+ * copy of the number is exactly the "two definitions kept in step by hand"
+ * CLAUDE.md warns about.
+ */
+const BRANCH_RADIAL_SEGMENTS = 8;
 
 /**
  * **Everything the Rail Race runs through**: four rails, the trestles holding
@@ -127,6 +127,35 @@ export type DuckBarPart = (typeof DUCKBAR_PARTS)[number];
 export interface RailRaceTrack {
   readonly group: Group;
   /**
+   * The ground this ring's supports claim — the very claims its search was
+   * answered with, one per strut below the headroom, from the tree as drawn.
+   * `RailRace.ts` commits both rings' together under {@link RAIL_RACE_FEATURE}.
+   */
+  readonly claims: readonly Claim[];
+  /**
+   * The duck bars this ring did not draw because the road rule did not build
+   * their slot — slot and lane — so the loss is accounted for by name rather
+   * than tolerated. Empty for the ride-scale ring, which keeps every leg.
+   */
+  readonly barsLostToRoad: readonly { readonly slot: number; readonly lane: number }[];
+  /** Where this ring's trestles stand, as a park file records it. */
+  readonly trestles: DecidedTrestles;
+  /**
+   * Makes this ring's trestle posts things a child can walk into.
+   *
+   * **Only the walk-past ring is ever asked, and only after both rings have
+   * found their ground.** `CollisionWorld` has no per-collider removal — only
+   * `clear()` — so a ring that registered colliders and was then hidden would
+   * leave invisible solid posts in the park forever; the race ring only exists
+   * while a child is strapped into a cart, and nobody is walking then. And a
+   * collider registered before the race ring searched would be an obstacle to
+   * it through the unmigrated `legacy:collision` predicate — a second
+   * definition of the walk-past ring's ground, which the registry (one feature
+   * for both rings) says is no obstacle at all. Measured before this order was
+   * fixed: 100 of the canonical race ring's candidates refused by exactly that.
+   */
+  registerCollision(): void;
+  /**
    * Drives the warning lamps.
    *
    * `lapOffset` is how far round the current lap the player is; `safe` is
@@ -171,6 +200,49 @@ export interface SparkingSegment {
 }
 
 /** The colours a warning runs through: calm cream, amber warning, mint safe. */
+/** The alert's size at rest and right on top of a bar — the old sleeve's own scale range. */
+const ALERT_SIZE_CALM = 0.9;
+const ALERT_SIZE_FULL = 1.3;
+/** How strongly the stripe paints over the tape — the old sleeve's opacity. */
+const ALERT_STRENGTH = 0.92;
+
+/**
+ * **Paint the duck-bar alert stripe into the bar's own material.**
+ *
+ * Reads a per-instance `alert` attribute — `rgb` the stripe's colour (linear),
+ * `a` how much of the bar's length it covers, 0 to 1 — and mixes that colour
+ * over the lit, tone-mapped result, so it glows flat whatever the light is
+ * doing, exactly as the unlit sleeve it replaces did. The stripe is measured
+ * along the bar's own length (`position.x`, the asset's long axis, against its
+ * half-length), spreading out from the middle.
+ */
+function paintAlertStripe(material: MeshToonMaterial, halfLength: number): void {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['barHalfLength'] = { value: halfLength };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nattribute vec4 alert;\nvarying vec4 vAlert;\nvarying float vAlong;',
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvAlert = alert;\nvAlong = position.x;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nvarying vec4 vAlert;\nvarying float vAlong;\nuniform float barHalfLength;',
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        [
+          'float alertEdge = vAlert.a * barHalfLength;',
+          'float alertBand = vAlert.a <= 0.0 ? 0.0 : 1.0 - smoothstep(alertEdge - 0.02, alertEdge, abs(vAlong));',
+          `gl_FragColor.rgb = mix(gl_FragColor.rgb, linearToOutputTexel(vec4(vAlert.rgb, 1.0)).rgb, alertBand * ${ALERT_STRENGTH.toFixed(2)});`,
+          '#include <dithering_fragment>',
+        ].join('\n'),
+      );
+  };
+  material.customProgramCacheKey = () => 'duck-bar-alert-stripe';
+}
+
 const CALM = new Color(PALETTE.signBoard);
 const WARN = new Color(PALETTE.fairyWarm);
 const SAFE = new Color(PALETTE.markerMint);
@@ -199,22 +271,41 @@ export interface RailRaceTrackOptions {
   /**
    * A name for the built group, so the two rings can be told apart in the
    * scene graph (and by `test/procgen/invariants.ts`, which measures them
-   * separately).
+   * separately). Not a feature name: both rings claim ground as
+   * {@link RAIL_RACE_FEATURE}.
    */
   readonly ringName: string;
   /**
-   * Whether this ring's trestle legs become things a child can walk into.
+   * Whether this ring keeps its supports off the bus's road.
    *
-   * **Only the walk-past ring says yes**, and there is no way to say it twice.
-   * `CollisionWorld` has no per-collider removal — only `clear()` — so a ring
-   * that registered colliders and was then hidden would leave invisible solid
-   * posts standing in the park forever. The race ring never needs them: it only
-   * exists while a child is strapped into a cart, and nobody is walking then.
-   * So the one ring that is ever there while you are on foot is the one ring
-   * that is ever solid, and the classic bug (walking into a rail that is not
-   * drawn) has nowhere to live.
+   * Jim, 7 Sep 2026: *"make the big version have all its legs, but the normal
+   * version can have them selectively."* The walk-past ring is the one
+   * standing there while a child is on foot and the bus is driving, so it
+   * skips every slot over the road (`trestleSpots`); the ride-scale ring
+   * exists only mid-race, when the bus is long gone, so nothing it stands on
+   * can ever be met from the road, and it keeps every leg. Sound rather than
+   * an exemption for exactly one reason: the two rings are never in the world
+   * together — the same fact `RAIL_RACE_FEATURE` rests on. If that were ever
+   * false, both are wrong together.
    */
-  readonly registerCollision: boolean;
+  readonly respectsRoad: boolean;
+  /**
+   * **The park's one claims registry**, which this ring's supports ask before
+   * they stand (stage 3, step 2 of `docs/DESIGN-round-robin-generation.md`).
+   * They ask as {@link RAIL_RACE_FEATURE} — one feature for both rings, so
+   * the other ring's supports are never an obstacle (there is one rail race,
+   * shown at one scale at a time) — and they do **not** commit here: the
+   * built track returns its {@link RailRaceTrack.claims} and `RailRace.ts`
+   * commits both rings' claims as one contribution once both are placed.
+   */
+  readonly groundClaims: GroundClaims;
+  /**
+   * **Where this ring's trestles stand** — decided before the ring is built.
+   * In the game, read from the park file ({@link trestleSpotsFromDecisions});
+   * in build tooling, the slot search (`procgen/world/railRace/trestleSearch.ts`).
+   * The game as delivered carries no search (`docs/design/PREBUILT-PARKS.md`).
+   */
+  readonly findSpots: TrestleSpotFinder;
   /**
    * Whether this ring builds the finish-line rainbow arch at all.
    *
@@ -280,9 +371,6 @@ export function buildRailRaceTrack(
   const matrix = new Matrix4();
   const rotation = new Quaternion();
   const position = new Vector3();
-  const one = new Vector3(1, 1, 1);
-  /** The duck-bar asset's own size on this ring — see {@link ringSizeVsRace}. */
-  const assetScale = new Vector3(ringSizeVsRace, ringSizeVsRace, ringSizeVsRace);
   const scale = new Vector3();
   const outward = new Vector3();
   const point = new Vector3();
@@ -372,14 +460,34 @@ export function buildRailRaceTrack(
     const sampler: RailSampler = {
       length: route.length,
       pointAt: (distance, target) => route.pointAt(lane, distance, target),
-      tangentAt: (distance, target) => route.tangentAt(lane, distance, target),
+      // **The direction the rails are drawn in, not the route's `tangentAt`**,
+      // which is the unleant chart tangent the physics runs on: laid along it,
+      // the sleepers ran up to 14.9° across the rails over them, and the rails'
+      // own side offset leant the same way. `drawnDirection` reads it off the
+      // drawn points this very sampler returns.
+      tangentAt(distance, target) {
+        return drawnDirection(this, distance, target);
+      },
     };
+    // **Evenly along this lane's own drawn rail, not every metre of the centre
+    // line.** A lane offset from the centre covers `1 + offset / bend` metres
+    // of rail per metre of centre line, so centre-line spacing put the inner
+    // lane's sleepers 1.254 m apart and the outer lane's 0.830 m apart on a
+    // 17.7 m bend (seed 3). Same count on every lane, so each lane's spacing is
+    // its own lap over that count: about a metre everywhere on it.
+    const stations = stationsEvenlyAlongDrawn(sampler, sleepersPerLane);
     for (let i = 0; i < sleepersPerLane; i += 1) {
-      railFrameAt(sampler, i * SLEEPER_SPACING, sleeperFrame);
+      railFrameAt(sampler, stations[i]!, sleeperFrame);
       sleeperBasis.makeBasis(sleeperFrame.side, sleeperFrame.up, sleeperFrame.forward);
       sleeperRotation.setFromRotationMatrix(sleeperBasis);
       matrix.compose(
-        point.copy(sleeperMid).setY(sleeperMid.y - sleeperDrop),
+        // **Sunk along the track's own up, not along world `+Y`.** The sleeper
+        // is turned onto `sleeperFrame` and then lowered so the rails rest on
+        // it; lowering it in world `y` on ground that leans 27 deg slides it
+        // `sleeperDrop * sin(tilt)` sideways out from under the rails it is
+        // bolted to — measured at 0.086 m of the 0.116 m a gauge point was
+        // missing by. The frame already carries the direction; use it.
+        point.copy(sleeperMid).addScaledVector(sleeperFrame.up, -sleeperDrop),
         sleeperRotation,
         sleeperScale,
       );
@@ -545,13 +653,30 @@ export function buildRailRaceTrack(
   const mandatoryTrestleIndices = new Set(
     layout.bars.map((bar) => trestleGridIndex(bar.at, route.length)),
   );
-  const spots = trestleSpots(
+  const { spots, overRoadSlots } = options.findSpots({
     route,
     collision,
-    mandatoryTrestleIndices,
-    POST_FOOT_RADIUS * ringSizeVsRace,
-  );
+    groundClaims: options.groundClaims,
+    feature: RAIL_RACE_FEATURE,
+    ringName: options.ringName,
+    respectsRoad: options.respectsRoad,
+    ringSizeVsRace,
+    mandatoryIndices: mandatoryTrestleIndices,
+  });
+  // **A bar whose slot the road rule did not build is not drawn** (its support
+  // is gone — see the bar loop's fallback), and that loss is named here, by
+  // slot and lane, so the fairness invariant can hold the walk-past ring to
+  // "the race ring's count minus exactly these" and say each one out loud.
+  const barsLostToRoad: readonly { readonly slot: number; readonly lane: number }[] = layout.bars
+    .map((bar) => ({ slot: trestleGridIndex(bar.at, route.length), lane: bar.lane }))
+    .filter((bar) => overRoadSlots.has(bar.slot));
   const spotByIndex = new Map(spots.map((spot) => [spot.index, spot]));
+  // **The supports' claims** — the very claims the search was answered with,
+  // returned on the track for `RailRace.ts` to commit with the other ring's as
+  // one feature. A ring's legs never collide with each other through the
+  // registry (a feature is its own business), and the arc bound in
+  // `trestleSpots` is what keeps two neighbouring slots off the same ground.
+  const claims: readonly Claim[] = spots.flatMap((spot) => spot.claims);
 
   // --- the duck bars ---------------------------------------------------------
   //
@@ -577,7 +702,11 @@ export function buildRailRaceTrack(
   // — unlike `sleeveGeometry` below — these must never be pushed to
   // `disposables`: see `dispose()`'s own note.
   const postGeometry = duckBarAssetGeometry('post');
-  const barGeometry = duckBarAssetGeometry('bar');
+  // The bar is **cloned** per ring, unlike the post: it carries this ring's own
+  // per-instance alert attribute (see `alertAttribute` below), and two rings
+  // writing their alerts into one shared buffer would light each other's bars.
+  const barGeometry = duckBarAssetGeometry('bar').clone();
+  keep(barGeometry);
   /**
    * **How much the posts have to be stretched to reach the bar they hold up.**
    *
@@ -605,36 +734,41 @@ export function buildRailRaceTrack(
     ringSizeVsRace * postStretch,
     ringSizeVsRace,
   );
-  // The bar itself is the warning light. Lamps on the posts were legible at a
-  // standstill and invisible at fourteen metres a second; a stripe of amber
-  // right where the thing you must duck under is cannot be missed. A sleeve
-  // around the bar rather than the bar's own material, so the toon shading
-  // underneath still shapes it. Kept procedural (not part of the asset): its
-  // whole job is to be resized and recoloured every frame by `setAlerts`,
-  // which is exactly the "appearance from code" half of the split — a fixed
-  // authored shape has nothing to offer a part that never looks the same way
-  // twice.
-  const sleeveGeometry = new BoxGeometry(
-    barHalfSpan * 2 - 0.04 * ringScale,
-    0.28 * ringScale,
-    0.32 * ringScale,
-  );
-  keep(sleeveGeometry);
+  // **The bar itself is the warning light**, painted onto its own surface.
+  // Lamps on the posts were legible at a standstill and invisible at fourteen
+  // metres a second; a stripe of amber right where the thing you must duck
+  // under is cannot be missed.
+  //
+  // It used to be a sleeve — a second, slightly bigger box around the bar,
+  // swollen and recoloured every frame. A second mesh positioned to track the
+  // first one's surface is the disease `src/art/models/CLAUDE.md` names, and it
+  // showed: at rest the sleeve's faces sat a centimetre off the bar's, in one
+  // plane with them (`check:coplanar`, `walk-past-ring` Box|`duck-bars`). Jim,
+  // on the choice: *"make it into a texture."* So the stripe now lives on the
+  // bar itself — one surface, and nothing to keep in step.
+  //
+  // The tape is a shared canvas texture and every bar in the ring is one
+  // `InstancedMesh`, so a per-bar stripe cannot be a per-bar canvas. It is the
+  // bar material's own paint instead: {@link paintAlertStripe} adds a
+  // per-instance `alert` attribute (colour, and how much of the bar's length
+  // is lit) and mixes that colour over the tape in the fragment shader, unlit,
+  // the way the sleeve's `MeshBasicMaterial` was. `setAlerts` writes that
+  // attribute exactly where it used to write the sleeve's colour and scale:
+  // the colour is the same tint, and the sleeve's swelling is the stripe
+  // spreading out from the middle of the bar towards its ends, pulse and all.
+  barGeometry.computeBoundingBox();
+  const barHalfLength = barGeometry.boundingBox?.max.x ?? 1;
+  const alertAttribute = new InstancedBufferAttribute(new Float32Array(Math.max(1, barCount) * 4), 4);
+  alertAttribute.setUsage(DynamicDrawUsage);
+  barGeometry.setAttribute('alert', alertAttribute);
+  paintAlertStripe(barMaterial, barHalfLength);
 
   const posts = new InstancedMesh(postGeometry, frameMaterial, Math.max(1, barCount * 2));
   const bars = new InstancedMesh(barGeometry, barMaterial, Math.max(1, barCount));
-  const sleeveMaterial = new MeshBasicMaterial({
-    color: PALETTE.signBoard,
-    toneMapped: false,
-    transparent: true,
-    opacity: 0.92,
-  });
-  keep(sleeveMaterial);
-  const sleeves = new InstancedMesh(sleeveGeometry, sleeveMaterial, Math.max(1, barCount));
 
   let postIndex = 0;
   let barIndex = 0;
-  // Where each bar's sleeve instance lives, so `setAlerts` can find them again:
+  // Where each bar's instance lives, so `setAlerts` can find them again:
   // `barSlots[b]` holds the instance id of bar `b`. A list per bar rather than a
   // bare number because a bar whose trestle was never placed contributes no
   // instance at all, and `setAlerts` must skip it rather than shift every id
@@ -653,9 +787,8 @@ export function buildRailRaceTrack(
    * around the lap instead of stacked four abreast, its colour is the only thing
    * that answers "is that one mine?" at fourteen metres a second.
    *
-   * Per-instance colour on one shared `InstancedMesh`, the same trick `sleeves`
-   * uses for its alert state — one draw call for every post in the ring, four
-   * lane colours and all.
+   * Per-instance colour on one shared `InstancedMesh` — one draw call for every
+   * post in the ring, four lane colours and all.
    */
   const postLaneColour = new Color();
 
@@ -676,9 +809,9 @@ export function buildRailRaceTrack(
     //
     // This used to be `spot.at` — its supporting trestle's position, including
     // that trestle's own collision-avoidance nudge along the loop — so that bar
-    // and leg stayed exactly coincident. `MANDATORY_RADIAL_NUDGES`' doc comment
-    // below argues that an arc nudge therefore "costs nothing". It costs the
-    // hazard its correctness: `simulate.ts` bonks at `bar.at`, knows nothing of
+    // and leg stayed exactly coincident, on the argument that an arc nudge
+    // therefore "costs nothing". It costs the hazard its correctness:
+    // `simulate.ts` bonks at `bar.at`, knows nothing of
     // any nudge, and on the canonical seed every one of the seven bars was
     // being drawn 2.00 m before the point that actually bonked you. A rider
     // flew clean through the bar and lost her speed a cart's length later —
@@ -691,9 +824,13 @@ export function buildRailRaceTrack(
     // sit a couple of metres along from the bar — well inside the
     // `DUCK_BAR_SUPPORT_TOLERANCE` the invariant already allows for the radial
     // nudge, which always moved the leg out from under the bar anyway.
-    const at = route.wrap(route.startDistance + bar.at);
-    route.outwardAt(at, outward);
-    route.pointAt(bar.lane, at, point);
+    // Posed by `barReach.ts`'s `duckBarPose` — the one owner of where a bar
+    // hangs, so the planner's "does this bar reach into another lane?" is asked
+    // of exactly the matrix drawn here.
+    const pose = duckBarPose(route, bar.lane, bar.at);
+    outward.copy(pose.outward);
+    point.copy(pose.point);
+    barTilt.copy(pose.tilt);
     // **The whole gantry leans with the track it straddles.** Its two posts and
     // the bar between them are placed as offsets from a point on the rail —
     // sideways along `outward`, upward by a clearance — and both of those
@@ -702,7 +839,6 @@ export function buildRailRaceTrack(
     // `+Y` where the radial is 14.5. One tilt, taken at the rail, turns the
     // offsets and the posts' own axis together so the frame stays square to the
     // track.
-    tiltToSphere(point.x, point.y, point.z, barTilt);
     rotation.setFromUnitVectors(ACROSS, outward).premultiply(barTilt);
     postLaneColour.set(LANE_COLOURS[bar.lane % LANE_COLOURS.length]!);
 
@@ -721,16 +857,7 @@ export function buildRailRaceTrack(
       postIndex += 1;
     }
 
-    barOffset.set(0, duckClearance, 0).applyQuaternion(barTilt);
-    position.copy(point).add(barOffset);
-    matrix.compose(position, rotation, assetScale);
-    bars.setMatrixAt(barIndex, matrix);
-    // The sleeve's own geometry is already built at this ring's size (see
-    // `sleeveGeometry`), so it must not take the asset scale on top — and
-    // `setAlerts` below decomposes this matrix and re-composes it with
-    // `(1, size, size)`, which assumes exactly that.
-    matrix.compose(position, rotation, one);
-    sleeves.setMatrixAt(barIndex, matrix);
+    bars.setMatrixAt(barIndex, pose.matrix);
     slots.push(barIndex);
     barIndex += 1;
     barSlots.push(slots);
@@ -738,13 +865,12 @@ export function buildRailRaceTrack(
 
   posts.count = postIndex;
   bars.count = barIndex;
-  sleeves.count = barIndex;
   // Named so `test/procgen/invariants.ts` can find the bars in the built
   // scene and measure them against the trestle legs directly, the same
   // reason the trestle meshes below are named.
   posts.name = 'railRace:duck-bar-posts';
   bars.name = 'railRace:duck-bars';
-  for (const mesh of [posts, bars, sleeves]) {
+  for (const mesh of [posts, bars]) {
     mesh.instanceMatrix.needsUpdate = true;
     // The bars stand nine metres up on a ring that is mostly out of shot; per
     // instance culling is not worth the bounds maths.
@@ -755,14 +881,8 @@ export function buildRailRaceTrack(
   // live once, the same way the matrix update above is one flip after every
   // instance is written rather than one per instance.
   posts.instanceColor!.needsUpdate = true;
-  // Per-instance colour is what lets one draw call hold four lanes' worth of
-  // warning lamps at four different states of alarm.
-  sleeves.setColorAt(0, CALM);
-  sleeves.instanceColor!.needsUpdate = true;
 
   // --- the trestles ----------------------------------------------------------
-  // The beam height each trestle is solved against lives in `trestleTreeAt`,
-  // which is the one owner of a trestle's shape — see `TrestleTree`.
 
   // One colour for the whole support tree — trunk and both generations of
   // branch — which is Jim's "the supports can all be one colour that
@@ -787,19 +907,76 @@ export function buildRailRaceTrack(
   // trunk it grew from, and a taper baked into the geometry costs nothing,
   // where faking it with a non-uniform instance scale would squash the
   // cross-section into an ellipse.
-  const legGeometry = new CylinderGeometry(POST_TOP_RADIUS, POST_FOOT_RADIUS, 1, 8);
+  //
+  // Radii from `STRUT_RADII`, the same table `trestleClaims` reads: a
+  // `CylinderGeometry` takes its top radius first, and `strut` stands the
+  // cylinder from `from` (its bottom) to `to` (its top).
+  //
+  // **The trunk has no foot cap.** Its foot stands exactly on the terrain, so a
+  // closed bottom disc lies in the ground's own plane and fights it
+  // (`check:coplanar`: 0.026 m² at an 8.5 mm stand-off on seed 24, a race-ring
+  // leg at its nominal slot). A face under the ground is a hidden face, and
+  // ART_DIRECTION §7 says delete it, never nudge the foot. The top cap stays:
+  // the two lower branches leave it thinner than it is (`BRANCH_TAPER`), so an
+  // open trunk top would show from above. It is still a `CylinderGeometry` —
+  // `check:entrance-road` and `check:swept-bus` read the post's radii off
+  // `geometry.parameters` — with the bottom cap's triangles dropped from the
+  // index: three.js builds the torso, then the top cap, then the bottom cap,
+  // one triangle per radial segment.
+  const LEG_RADIAL_SEGMENTS = 8;
+  const legGeometry = new CylinderGeometry(STRUT_RADII.legs.to, STRUT_RADII.legs.from, 1, LEG_RADIAL_SEGMENTS);
+  {
+    const index = legGeometry.getIndex();
+    const capIndices = LEG_RADIAL_SEGMENTS * 3;
+    const torsoIndices = LEG_RADIAL_SEGMENTS * 6;
+    if (!index || index.count !== torsoIndices + 2 * capIndices) {
+      throw new Error(
+        `railRace/track.ts: the trunk cylinder has ${index?.count ?? 0} indices, not the ` +
+          `${torsoIndices + 2 * capIndices} (torso + two caps) its foot cap is cut from`,
+      );
+    }
+    legGeometry.setIndex(Array.from(index.array.subarray(0, index.count - capIndices)));
+  }
   const lowerBranchGeometry = new CylinderGeometry(
-    POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER,
-    POST_TOP_RADIUS * BRANCH_TAPER,
+    STRUT_RADII['branches-lower'].to,
+    STRUT_RADII['branches-lower'].from,
     1,
-    8,
+    BRANCH_RADIAL_SEGMENTS,
   );
   const upperBranchGeometry = new CylinderGeometry(
-    POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER * BRANCH_TAPER,
-    POST_TOP_RADIUS * BRANCH_TAPER * BRANCH_TAPER,
+    STRUT_RADII['branches-upper'].to,
+    STRUT_RADII['branches-upper'].from,
     1,
-    8,
+    BRANCH_RADIAL_SEGMENTS,
   );
+  // **The upper generation is rolled half a facet, so a fork cannot make two
+  // faces share a plane.** A branch and the branch continuing from it are very
+  // nearly in line — measured on the canonical seed, 0.14° to 1.15° apart at
+  // the fork — and `strut` below turns every cylinder with
+  // `setFromUnitVectors(UP, direction)`, which adds no roll of its own. So the
+  // facet phase of a strut is a pure function of its direction, and two struts
+  // pointing the same way come out phased alike.
+  //
+  // That alone would only make their faces parallel. What puts them in *one*
+  // plane is that `STRUT_RADII` tapers the tree continuously, so
+  // `branches-lower.to` and `branches-upper.from` are the same expression and
+  // the two cylinders are exactly as fat as each other where they meet. Equal
+  // radius plus equal phase plus a shared axis is a shared plane, and
+  // `check:coplanar` found one at 7.6e-5 m — inside the depth buffer's
+  // resolution, so it strobed.
+  //
+  // Half a facet is the whole fix and it is exact rather than lucky: the
+  // upper's faces sit at the midpoints of the lower's, so no face of one is
+  // ever coincident with a face of the other, at any joint angle, on any seed.
+  // A per-strut random phase was the other candidate and is weaker — it leaves
+  // every near-collinear pair a ~2% chance of landing within the sweep's 0.5°
+  // tolerance anyway, which is a seam waiting for a seed nobody has drawn yet.
+  //
+  // It cannot change the silhouette: an N-gon rolled about its own axis is the
+  // same N-gon, and the instance scale is equal in x and z, so the roll
+  // commutes with it. Nothing reads the phase — the claims, the collider and
+  // `check:swept-bus` all measure the strut's endpoints and radii.
+  upperBranchGeometry.rotateY(Math.PI / BRANCH_RADIAL_SEGMENTS);
   keep(legGeometry);
   keep(lowerBranchGeometry);
   keep(upperBranchGeometry);
@@ -838,59 +1015,29 @@ export function buildRailRaceTrack(
     mesh.setMatrixAt(index, matrix);
   };
 
-  // Scratch for one trestle's tree, reused across spots. **The tree is solved by
-  // `trestleTreeAt` and not here** — `postClearsEntranceRoad` decides where a
-  // trestle may stand from the same solve, and the last time these were two
-  // copies of one derivation the copies disagreed and posts stood in the bus.
-  // See `TrestleTree`.
-  const tree = newTrestleTree();
-  const trunkFoot = new Vector3();
-
+  /** Scratch for the leant form of each spot's tree, reused across spots. */
+  const drawnTree = newTrestleTree();
   spots.forEach((spot, index) => {
-    route.outwardAt(spot.at, outward);
-    rotation.setFromUnitVectors(ACROSS, outward);
-
-    // **A branch top is the middle of the lane it carries** — the whole point of
-    // Jim's 7 August ruling, and `route.pointAt` in full, height included, not
-    // flattened onto a plane, which is what `trestleTreeAt` asks of the route.
-    const { laneTops, forkNodes, trunkTop, ground } = trestleTreeAt(
-      route,
-      spot.at,
-      spot.x,
-      spot.z,
-      tree,
-    );
-    // The foot, though, stands exactly where the clear ground was found — so a
-    // nudged trestle leans very slightly rather than planting itself in whatever
-    // the nudge was avoiding.
-    trunkFoot.set(spot.x, ground, spot.z);
-
-    strut(legs, index, trunkFoot, trunkTop);
-    for (let half = 0; half < 2; half += 1) {
-      strut(lowerBranches, lowerIndex, trunkTop, forkNodes[half]!);
-      lowerIndex += 1;
-    }
-    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      strut(upperBranches, upperIndex, forkNodes[Math.floor(lane / 2)]!, laneTops[lane]!);
-      upperIndex += 1;
+    // **Drawn from the tree the search solved, allowed and claimed** — not
+    // re-solved here. `trestleTreeAt` is the one owner of the shape (a branch
+    // top is the middle of the lane it carries; a fork node sits under the
+    // midpoint of its pair; heights measured down from the lowest lane, never
+    // the mean — see its doc comment), and `trestleStruts` the one owner of
+    // which points make which strut. The foot stands exactly where the search
+    // found clear ground, so a moved foot is a lean, not a moved support.
+    const meshes = {
+      legs,
+      'branches-lower': lowerBranches,
+      'branches-upper': upperBranches,
+    } as const;
+    // Leant onto the sphere here, at draw time, and nowhere earlier: the tree
+    // the search, the claims and the road rule read is the flat one.
+    for (const piece of trestleStruts(leanTrestleTree(route, spot.at, spot.tree, drawnTree))) {
+      const mesh = meshes[piece.part];
+      const slot = piece.part === 'legs' ? index : piece.part === 'branches-lower' ? lowerIndex++ : upperIndex++;
+      strut(mesh, slot, piece.from, piece.to);
     }
 
-    // A post is a thing a child can walk into — on the ring that is actually
-    // there while she is on foot. See `RailRaceTrackOptions.registerCollision`.
-    //
-    // Taken from the post's own foot radius rather than the 0.36 this was
-    // written as when the leg was half as thick: the collider and the thing you
-    // can see are now the same claim about the same post.
-    //
-    // **A single circle at the foot is only right for a post that stands up
-    // straight**, and since the entrance-road corridor joined `groundIsClear`
-    // these do not: `trunkFoot` is the nudged spot and `trunkTop` is derived
-    // from the lane tops, which are never nudged, so a nudged leg leans by
-    // construction (see the comment above `trunkFoot`). `addPostCollider` walks
-    // the lean instead.
-    if (options.registerCollision) {
-      addPostCollider(collision, trunkFoot, trunkTop, ringSizeVsRace);
-    }
   });
 
   legs.count = spots.length;
@@ -920,12 +1067,31 @@ export function buildRailRaceTrack(
   const INK = new Color(PALETTE.ink);
   const FLASH = new Color(PALETTE.fairyWarm);
 
+  // A post is a thing a child can walk into — on the ring that is actually
+  // there while she is on foot, and only once both rings have found their
+  // ground. See `RailRaceTrack.registerCollision`. Taken from the post's own
+  // foot radius: the collider and the thing you can see are the same claim
+  // about the same post.
+  //
+  // The collider is stamped along the post as DRAWN — `addPostCollider` walks
+  // the leant trunk in world `xz` up to a walker's height, which is where the
+  // child's plan-view body meets it — so it is handed the leant tree, the same
+  // form the draw loop stood up.
+  const registerCollision = (): void => {
+    for (const spot of spots) {
+      const drawn = leanTrestleTree(route, spot.at, spot.tree, drawnTree);
+      addPostCollider(collision, drawn.trunkFoot, drawn.trunkTop, ringSizeVsRace);
+    }
+  };
+
   return {
+    claims,
+    barsLostToRoad,
+    trestles: trestleDecisions({ spots, overRoadSlots }),
+    registerCollision,
     group,
 
     setAlerts(lapOffset: number, safe: boolean, elapsed: number): void {
-      const colour = sleeves.instanceColor;
-      if (!colour) return;
       layout.bars.forEach((bar, index) => {
         // How close the player is to this bar, going forwards. Bars behind are
         // calm; the one coming up swells and colours.
@@ -943,20 +1109,17 @@ export function buildRailRaceTrack(
         const closeness = ahead < 0 || !mine ? 0 : clamp01(1 - ahead / ALERT_RANGE);
         tint.copy(CALM).lerp(safe ? SAFE : WARN, closeness);
         const pulse = 1 + Math.sin(elapsed * (safe ? 7 : 13)) * 0.16 * closeness;
-        const size = lerp(0.9, 1.3, closeness) * pulse;
+        const size = lerp(ALERT_SIZE_CALM, ALERT_SIZE_FULL, closeness) * pulse;
+        // Size is the second channel: how far along the bar the stripe has
+        // spread, from nothing at rest to end to end up close. Painted, not
+        // scaled, so the thing you actually collide with never changes size —
+        // the alert only changes how loudly it shouts.
+        const spread = clamp01((size - ALERT_SIZE_CALM) / (ALERT_SIZE_FULL - ALERT_SIZE_CALM));
         for (const slot of barSlots[index] ?? []) {
-          colour.setXYZ(slot, tint.r, tint.g, tint.b);
-          // Size is the second channel. Scaling the sleeve rather than the bar
-          // keeps the thing you actually collide with a fixed size — the alert
-          // must never change the hitbox, only how loudly it shouts.
-          sleeves.getMatrixAt(slot, matrix);
-          matrix.decompose(position, rotation, scale);
-          matrix.compose(position, rotation, scale.set(1, size, size));
-          sleeves.setMatrixAt(slot, matrix);
+          alertAttribute.setXYZW(slot, tint.r, tint.g, tint.b, spread);
         }
       });
-      colour.needsUpdate = true;
-      sleeves.instanceMatrix.needsUpdate = true;
+      alertAttribute.needsUpdate = true;
     },
 
     setSparking(active: readonly SparkingSegment[], elapsed: number): void {
@@ -1053,16 +1216,14 @@ export function buildRailRaceTrack(
       const barsLive = level >= BARS_FROM_LEVEL;
       posts.visible = barsLive;
       bars.visible = barsLive;
-      sleeves.visible = barsLive;
     },
 
     dispose(): void {
-      // `postGeometry`/`barGeometry` are deliberately never in `disposables`
-      // — they come from `duckBarAsset.ts`'s shared, `markShared` cache, the
-      // same one every other trestle span's posts and bars point at, so
-      // freeing them here would corrupt the rest of the ring. Everything
-      // else this track built for itself (rails, spark ribbons, the sleeve
-      // geometry, every material) is.
+      // `postGeometry` is deliberately never in `disposables` — it comes from
+      // `duckBarAsset.ts`'s shared, `markShared` cache, the same one every
+      // other trestle span's posts point at, so freeing it here would corrupt
+      // the rest of the ring. Everything else this track built for itself
+      // (rails, spark ribbons, the bar's own clone, every material) is.
       for (const item of disposables) item.dispose();
     },
   };
@@ -1222,64 +1383,213 @@ function buildRailZoneVertexRanges(
   });
 }
 
-interface TrestleSpot {
+/** One drawn strut of a tree: its two ends and the radii of the cylinder it is drawn as, at race-ring size. */
+export interface TrestleStrut {
+  readonly from: Vector3;
+  readonly to: Vector3;
+  readonly radiusFrom: number;
+  readonly radiusTo: number;
+  readonly part: 'legs' | 'branches-lower' | 'branches-upper';
+}
+
+/**
+ * The seven struts of a tree, in the order they are drawn. The radii are the
+ * ones `buildRailRaceTrack` bakes into its three cylinder geometries — stated
+ * here once, and the geometries below read the same expressions.
+ */
+export function trestleStruts(tree: TrestleTree): readonly TrestleStrut[] {
+  const one = (part: TrestleStrut['part'], from: Vector3, to: Vector3): TrestleStrut => ({
+    from,
+    to,
+    radiusFrom: STRUT_RADII[part].from,
+    radiusTo: STRUT_RADII[part].to,
+    part,
+  });
+  const struts: TrestleStrut[] = [one('legs', tree.trunkFoot, tree.trunkTop)];
+  for (let half = 0; half < 2; half += 1) {
+    struts.push(one('branches-lower', tree.trunkTop, tree.forkNodes[half]!));
+  }
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    struts.push(one('branches-upper', tree.forkNodes[Math.floor(lane / 2)]!, tree.laneTops[lane]!));
+  }
+  return struts;
+}
+
+/**
+ * **What a trestle claims: the plan projection of everything it draws below
+ * a walker's height above its own ground** — the leaning trunk, and whichever
+ * branches dip under {@link TALLEST_CHILD_HEIGHT} — as `footprint` capsules,
+ * one per strut, each as wide as the thickest end of the strut it covers.
+ *
+ * Not a foot disc. `check:swept-bus` measured 364 drawn posts inside the bus
+ * across the pool while every foot was clear of the road, because a nudged
+ * trunk leans and a fork opens below bus-roof height. The claim is the drawn
+ * geometry (design: the #504 variant), so what a walker meets near the ground
+ * is exactly what is claimed. The bus is not the claim's business any more:
+ * Jim's rule (7 Sep 2026) skips every slot over the road outright — see
+ * `trestleSpots` — and `check:swept-bus` guards the rest.
+ *
+ * Exported so the invariant can rebuild the very same claims from the drawn
+ * struts and compare them with what the registry holds.
+ */
+export function trestleClaims(tree: TrestleTree, ringSizeVsRace: number): readonly Claim[] {
+  const ceiling = tree.ground + TALLEST_CHILD_HEIGHT;
+  const claims: Claim[] = [];
+  for (const strut of trestleStruts(tree)) {
+    const { from, to } = strut;
+    const low = from.y <= to.y ? from : to;
+    const high = from.y <= to.y ? to : from;
+    if (low.y >= ceiling) continue;
+    // Clip the strut where it crosses the ceiling, so a branch that only dips
+    // its root under a walker's height claims only that root.
+    // flat-ok: the tree is the flat solve (TrestleTree); its y is chart height, not world y
+    const t = high.y <= ceiling ? 1 : (ceiling - low.y) / (high.y - low.y);
+    claims.push({
+      kind: 'footprint',
+      shape: {
+        shape: 'capsule',
+        x1: low.x,
+        z1: low.z,
+        x2: low.x + (high.x - low.x) * t,
+        z2: low.z + (high.z - low.z) * t,
+        halfWidth: Math.max(strut.radiusFrom, strut.radiusTo) * ringSizeVsRace,
+      },
+    });
+  }
+  return claims;
+}
+
+/** What a ring asks of whoever decides where its trestles stand. */
+export interface TrestleSpotQuery {
+  readonly route: RailRaceRoute;
+  readonly collision: CollisionWorld;
+  readonly groundClaims: GroundClaims;
+  readonly feature: string;
+  /** The ring's own name, for the trace and the coverage line — never the feature asked as. */
+  readonly ringName: string;
+  /** See `RailRaceTrackOptions.respectsRoad`: only the walk-past ring asks the road rule. */
+  readonly respectsRoad: boolean;
+  readonly ringSizeVsRace: number;
+  readonly mandatoryIndices: ReadonlySet<number>;
+}
+
+export interface TrestleSpotAnswer {
+  readonly spots: TrestleSpot[];
+  /** Slots the road rule left unbuilt — a bar scheduled on one is not drawn. */
+  readonly overRoadSlots: ReadonlySet<number>;
+}
+
+export type TrestleSpotFinder = (query: TrestleSpotQuery) => TrestleSpotAnswer;
+
+/** A ring's decided trestles, as a park file carries them: the slot, and where along and across it stands. */
+export interface DecidedTrestles {
+  readonly spots: readonly (readonly [index: number, at: number, x: number, z: number])[];
+  readonly overRoadSlots: readonly number[];
+}
+
+/** The decisions a found ring's trestles come down to — what a park file stores. */
+export function trestleDecisions(answer: TrestleSpotAnswer): DecidedTrestles {
+  return {
+    spots: answer.spots.map((spot) => [spot.index, spot.at, spot.x, spot.z] as const),
+    overRoadSlots: [...answer.overRoadSlots].sort((a, b) => a - b),
+  };
+}
+
+/**
+ * Trestles from their decisions: each tree rebuilt by the very function the
+ * search built it with ({@link trestleTreeAt}), and its claims by
+ * {@link trestleClaims} — so a hydrated ring and a searched one share every
+ * line after the search.
+ */
+export function trestleSpotsFromDecisions(byRing: Readonly<Record<string, DecidedTrestles>>): TrestleSpotFinder {
+  return ({ route, ringName, ringSizeVsRace }) => {
+    const decided = byRing[ringName];
+    if (!decided) throw new Error(`railRace/track.ts: the park file has no trestles for ${ringName}`);
+    const tree = newTrestleTree();
+    const spots = decided.spots.map(([index, at, x, z]): TrestleSpot => {
+      trestleTreeAt(route, at, x, z, tree);
+      const placed = cloneTrestleTree(tree);
+      return { at, x, z, index, tree: placed, claims: trestleClaims(placed, ringSizeVsRace) };
+    });
+    return { spots, overRoadSlots: new Set(decided.overRoadSlots) };
+  };
+}
+
+export interface TrestleSpot {
   readonly at: number;
   readonly x: number;
   readonly z: number;
   /** Which of `trestleSpots`'s `TRESTLE_SPACING` grid slots this is — see `planHazards`'s `snapToTrestleGrid`. */
   readonly index: number;
+  /** The tree that was searched, allowed and claimed — and is now drawn. One computation, three uses. */
+  readonly tree: TrestleTree;
+  /** Exactly what was asked of the registry for this tree, and what is committed for it. */
+  readonly claims: readonly Claim[];
 }
+
+/**
 
 /**
  * **Where a trestle's support tree stands — the one owner of that question.**
  *
  * A trestle is a trunk rising from the ground to `trunkTop`, forking twice to
- * reach the four lane tops. Three separate things need to know where those
- * points are: the loop that *draws* it, the collider that makes it solid, and
- * `postClearsEntranceRoad`, which has to decide before any of that whether a
- * candidate spot puts the post in the road the cat bus drives.
+ * reach the four lane tops. Everything that needs to know where those points
+ * are — the search that finds ground for it, the claims it makes on that
+ * ground, the road rule, the loop that draws it and the collider that makes it
+ * solid — reads this one solve. It has been two definitions twice, and both
+ * times the second was wrong (a trunk top taken as the mean of the lane
+ * heights, a collider that only knew the foot); see CLAUDE.md, *"two
+ * definitions of one thing, kept in step by hand"*.
  *
- * **They used to be two definitions, and the second one was wrong.** The draw
- * loop computed the tree inline; `postClearsEntranceRoad` restated it — and
- * restated it *differently*, taking the trunk's top as the **mean of the four
- * lane heights** where the drawn trunk stops a whole `forkPlan(...).fork` lower,
- * under the branches. A post is only tested for the road as far up as there is
- * bus to hit, expressed as a fraction of its rise, so believing the post rises
- * further than it does made that fraction too small: the generator checked the
- * bottom two thirds of a lean and passed a post whose top third stood squarely
- * in the bus. Measured on seed 11 — feet 3.17 m clear of the corridor, posts
- * leaning 6.00 m, and 1.78 m of post inside the bodywork at 3.38 m up.
+ * **The tree is solved FLAT, in the chart, and leant only when drawn.** Every
+ * node is derived from its neighbours — a fork node is the midpoint of the pair
+ * it carries, the trunk top the midpoint of the two fork nodes — so the tree
+ * only holds its shape if all of them are in one frame while it is solved; the
+ * sphere branch found trunks at 28 degrees from world `+Y` against a radial of
+ * 14 when the tops came from already-leant rails. The flat frame is also the
+ * one the registry measures in (`groundClaims.ts` since #620: a claim's `x, z`
+ * are chart coordinates of ground), so {@link trestleClaims} and the road rule
+ * read this tree as it is, and a trunk's *lean* is a chart quantity — the run
+ * from foot to top *in this frame* — which is what `maxTrunkLean` bounds. A
+ * straight radial trunk 100 m out has a 2–4 m world-`xz` offset between foot
+ * and top; that is the planet, not a lean, and reading it as one would refuse
+ * every slot on the ring. {@link leanTrestleTree} is the drawn form, and the
+ * invariant maps drawn struts back with the ring's own `unlean` before
+ * comparing — the exact inverse of the one turn the tree was drawn through.
  *
- * That is this repo's most common bug (CLAUDE.md, *"two definitions of one
- * thing, kept in step by hand"*) and it is the **second** instance of it in this
- * one mechanism: the clause and its check both asked about the leg's *foot* and
- * agreed with each other for weeks. So this function exists to make a third
- * copy impossible to write by accident. **If you need to know where any part of
- * a trestle is, call this — do not re-derive it**, however small the derivation
- * looks. Both of the bugs above looked small.
- *
- * The tree is solved for a *foot position*, because the fork geometry is scaled
- * by how much post there is under the beam ({@link forkPlan}), and that depends
- * on the terrain the foot stands on. `at` fixes the tops: a branch top is the
- * middle of the lane it carries, and nothing nudges a lane.
+ * `y` in this tree is height in the chart: `terrainHeight`'s value, the same
+ * number `placeOnSphere` takes as its `flat.y`.
  */
-interface TrestleTree {
+export interface TrestleTree {
   /** Where each lane's rails pass overhead — the four tips of the tree. */
   readonly laneTops: readonly Vector3[];
   /** The two nodes where the trunk's fork splits again to reach a pair of lanes. */
   readonly forkNodes: readonly Vector3[];
   /** Where the trunk stops and the first fork begins. **Not** the lane tops. */
   readonly trunkTop: Vector3;
+  /** Where the trunk stands: the found foot, on the ground under it. */
+  readonly trunkFoot: Vector3;
   /** The terrain height under the foot this tree was solved for. */
   ground: number;
 }
 
-function newTrestleTree(): TrestleTree {
+export function newTrestleTree(): TrestleTree {
   return {
     laneTops: Array.from({ length: LANE_COUNT }, () => new Vector3()),
     forkNodes: [new Vector3(), new Vector3()],
     trunkTop: new Vector3(),
+    trunkFoot: new Vector3(),
     ground: 0,
+  };
+}
+
+export function cloneTrestleTree(tree: TrestleTree): TrestleTree {
+  return {
+    laneTops: tree.laneTops.map((p) => p.clone()),
+    forkNodes: tree.forkNodes.map((p) => p.clone()),
+    trunkTop: tree.trunkTop.clone(),
+    trunkFoot: tree.trunkFoot.clone(),
+    ground: tree.ground,
   };
 }
 
@@ -1287,10 +1597,23 @@ function newTrestleTree(): TrestleTree {
 const barTilt = new Quaternion();
 const barOffset = new Vector3();
 const treeScratch = new Vector3();
-const treeSpin = new Quaternion();
 
-/** See {@link TrestleTree}. Writes into `into` and returns it. */
-function trestleTreeAt(
+/**
+ * Solves the tree for a foot at `(footX, footZ)` under the ring at `at` (a raw
+ * route distance), flat in the chart — see {@link TrestleTree}. Writes into
+ * `into` and returns it.
+ *
+ * **A branch top is the middle of the lane it carries** — Jim's 7 August ruling,
+ * and `route.flatPointAt` in full, height included: the rails are that point
+ * leant, so the leant tree's tips land exactly on them. A fork node sits under
+ * the midpoint of the pair it carries and the trunk under the midpoint of the
+ * two fork nodes — horizontally derived from the *tops*, never from the foot,
+ * which is what makes a moved foot a lean rather than a moved support. The
+ * height of each is measured down from the *lowest* of what it carries, never
+ * the mean, so the solved angle is the widest a fork ever opens (see
+ * `trestleGeometry.ts` for the measured lane spread that makes that necessary).
+ */
+export function trestleTreeAt(
   route: RailRaceRoute,
   at: number,
   footX: number,
@@ -1298,24 +1621,14 @@ function trestleTreeAt(
   into: TrestleTree,
 ): TrestleTree {
   const ground = terrainHeight(footX, footZ);
+  // The notional deck the fork is solved against — `BEAM_DROP` under the lowest
+  // the rails ever get. Nothing is built on it; it fixes the post height the
+  // angle is solved from, and so the angle (`trestleGeometry.ts`, `BEAM_DROP`).
   const beamY = route.baseAt(at) - UNDULATION_REACH - BEAM_DROP;
   const plan = forkPlan(beamY - ground, route.laneSpacing);
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     into.laneTops[lane]!.copy(route.flatPointAt(lane, at, treeScratch));
   }
-  // A fork node sits under the midpoint of the pair it carries, and the trunk
-  // under the midpoint of the two fork nodes — horizontally derived from the
-  // tops rather than from the foot, which may have been nudged sideways to find
-  // clear ground.
-  //
-  // The *height* is measured down from the *lowest* of what each node carries,
-  // never the mean. That is what stops "different branches reach different
-  // heights" turning into a branch lying nearly flat: the lower of a pair then
-  // gets exactly `plan.upper` of rise and so exactly the solved angle, and its
-  // partner — whose lane is higher — is steeper. The solved angle is the widest
-  // the fork can ever open, in one direction only. See `trestleGeometry.ts` for
-  // the measured lane spread (up to 4.38 m across the four, 3.02 m within one
-  // pair) that makes this necessary.
   for (let half = 0; half < 2; half += 1) {
     const a = into.laneTops[half * 2]!;
     const b = into.laneTops[half * 2 + 1]!;
@@ -1325,24 +1638,50 @@ function trestleTreeAt(
     .copy(into.forkNodes[0]!)
     .lerp(into.forkNodes[1]!, 0.5)
     .setY(Math.min(into.forkNodes[0]!.y, into.forkNodes[1]!.y) - plan.lower);
-
-  // **The whole tree is solved flat, then leant as one piece.**
-  //
-  // Every node above is derived from its neighbours — a fork node is the
-  // midpoint of the pair it carries, the trunk top the midpoint of the two fork
-  // nodes — so the tree only holds its shape if all of them are in the same
-  // frame while it is being solved. Built from already-leant rails instead, the
-  // top inherited the rails' outward displacement while the foot stayed on its
-  // own patch of ground, and the trunks came out at **28 degrees** from world
-  // `+Y` against a radial of 14: leaning twice as far as the ground they stand
-  // in. Leaning each node here, at its own (x, z), puts the trunk on the local
-  // up and lands the branch tops exactly on the rails, because the rails are
-  // `flatPointAt` followed by this same call.
-  for (const node of into.laneTops) placeOnSphere(node, 0, node, treeSpin);
-  for (const node of into.forkNodes) placeOnSphere(node, 0, node, treeSpin);
-  placeOnSphere(into.trunkTop, 0, into.trunkTop, treeSpin);
-
+  into.trunkFoot.set(footX, ground, footZ);
   into.ground = ground;
+  return into;
+}
+
+/**
+ * **The tree as it is drawn: the flat solve, leant as one piece onto the
+ * sphere.** Each node goes through `placeOnSphere` at its own `(x, z)`, so the
+ * trunk stands on the local up and the branch tips land exactly on the rails
+ * (which are `flatPointAt` followed by this same call). The foot is a height-0
+ * point and does not move. Writes into `into` and returns it.
+ *
+ * Only the draw loop and the collider read this form; the search, the claims
+ * and the road rule read the flat tree — see {@link TrestleTree} for why.
+ */
+function leanTrestleTree(
+  route: RailRaceRoute,
+  at: number,
+  flat: TrestleTree,
+  into: TrestleTree,
+): TrestleTree {
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    route.lean(at, flat.laneTops[lane]!, into.laneTops[lane]!);
+  }
+  for (let half = 0; half < 2; half += 1) {
+    route.lean(at, flat.forkNodes[half]!, into.forkNodes[half]!);
+  }
+  route.lean(at, flat.trunkTop, into.trunkTop);
+  // **The foot goes through the same one turn as everything else**, and it
+  // still lands on the ground. It is worth knowing why, because the obvious
+  // worry is that a station's frame is a *plane* and the ground is a sphere, so
+  // a foot several metres out along that plane should hover by `u^2 / 2R`. It
+  // does not: the foot's chart height is `terrainHeight`, which already carries
+  // the cap's own drop over that same `u`, so the two cancel and the drawn foot
+  // sits on the terrain. Measured on the canonical seed rather than argued —
+  // see `scripts/_probe-feet.mts` in the branch's handoff.
+  //
+  // Leaning it any other way is what it cost to find that out: a foot placed by
+  // `placeOnSphere` while its trunk top was turned rigidly made the drawn tree
+  // stop being the inverse of the chart tree, and `railRaceSupportsAreClaimedAsDrawn`
+  // caught it immediately — a degenerate capsule in the registry against a
+  // 0.02 m leaning one read back off the mesh.
+  route.lean(at, flat.trunkFoot, into.trunkFoot);
+  into.ground = flat.ground;
   return into;
 }
 
@@ -1398,362 +1737,6 @@ function addPostCollider(collision: CollisionWorld, foot: Vector3, top: Vector3,
       footRadius + (topRadius - footRadius) * t,
     );
   }
-}
-
-
-/**
- * **Does the whole post — not just its foot — stay out of the road the bus
- * drives?**
- *
- * A trestle's foot is where `searchForClearGround` put it; its top is fixed by
- * `at`, because a branch top is the middle of the lane it carries and no nudge
- * moves it. So nudging the foot out of the corridor tilts the post back over
- * it, and asking only about the foot answers a question nobody was asking.
- *
- * The corridor is plan-view and height-agnostic, so this walks the post's own
- * plan-view span over the heights the **bus body** occupies — below the chassis
- * and above the roof there is nothing to hit — and asks the corridor about each,
- * at the post's own tapering radius.
- *
- * **The post it walks is {@link trestleTreeAt}'s, not a restatement of it.** This
- * function used to derive the trunk's top itself and got it wrong — see that
- * function's doc comment for what the wrong answer cost. There is one owner of
- * where a trestle stands, and this asks it.
- */
-const clearanceTree = newTrestleTree();
-
-function postClearsEntranceRoad(
-  route: RailRaceRoute,
-  at: number,
-  footX: number,
-  footZ: number,
-  footRadius: number,
-): boolean {
-  const { trunkTop, ground } = trestleTreeAt(route, at, footX, footZ, clearanceTree);
-  const rise = trunkTop.y - ground;
-  if (rise <= 0) return !isInEntranceRoad(footX, footZ, footRadius);
-  // Only as far up the post as there is bus to meet. A fraction of the post's
-  // own rise, so it is the *drawn* post's height this is a fraction of.
-  const reach = Math.min(1, CAT_BUS_BODY_TOP_Y / rise);
-  const lean = Math.hypot(trunkTop.x - footX, trunkTop.z - footZ);
-  const steps = Math.max(1, Math.ceil((lean * reach) / 0.25));
-  for (let i = 0; i <= steps; i += 1) {
-    const t = (i / steps) * reach;
-    if (
-      isInEntranceRoad(
-        footX + (trunkTop.x - footX) * t,
-        footZ + (trunkTop.z - footZ) * t,
-        footRadius,
-      )
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Every one of `trestleSpots`'s ground-clearance predicates, together.
- *
- * **The entrance road is one of them (#488).** It was not, and the omission was
- * exactly the shape CLAUDE.md names: *"a generator that only checks itself
- * against a hand-picked obstacle list will silently miss whatever a sibling
- * system placed there"*. This list already refuses ground near a path, near the
- * railway's corridor and near a `PARK_LAYOUT` entry — the road the cat bus
- * arrives on was simply not in it, so on **all sixteen pool seeds** two to eight
- * legs stood inside the bus's own swept body and it drove straight through them.
- *
- * It cannot be answered on the road's side: measured, the trestle line stands at
- * `NOMINAL_OUTSET` (6.5 m beyond the park's edge) and a 7.78 m road parallel to
- * it needs a centre at outset ≤ 2.1 or ≥ 10.9, while staying out of the park and
- * off the hillside allows only [3.89, 8.11]. Those bands do not intersect — see
- * `entrance/roadRoute.ts`, which owns the corridor and carries the full
- * argument.
- *
- * So the ride declines to put a foot in the road and re-rolls, which is the
- * standing procgen rule rather than a special case: `searchForClearGround`'s
- * existing nudges do the moving, and a leg at outset 6.5 needs about +2.6 m
- * radially to clear a road hugging the wall — inside `RADIAL_NUDGES` and inside
- * `MANDATORY_RADIAL_NUDGES`. Nothing here deletes a support or places one by
- * hand.
- *
- * Ordering works because `World.ts` builds `RailRace` before `Entrance`, and the
- * corridor is derived from the boundary alone — it does not need the road to
- * have been built, only to have been *decided*.
- */
-function groundIsClear(
-  x: number,
-  z: number,
-  collision: CollisionWorld,
-  footRadius: number,
-  route?: RailRaceRoute,
-  at = 0,
-): boolean {
-  if (!collision.isClearCircle(x, z, 1.1)) return false;
-  if (distanceToPath(x, z) < 2.8) return false;
-  if (distanceToRailCorridor(x, z) < 2.4) return false;
-  // **The whole post, not just its foot.**
-  //
-  // This asked `isInEntranceRoad(x, z, footRadius)` — the foot alone — and was
-  // very nearly inert because of it. Measured with `check:entrance-road`
-  // sweeping posts rather than feet: turning this clause *entirely off* changed
-  // the count from 8–9 posts in the bus to 8–10. It was removing about one post
-  // in nine, and the check agreed with it only because the check had the
-  // identical blind spot.
-  //
-  // A nudged post keeps its top under the rails while its foot moves, so moving
-  // the foot out of the road leans the post straight back into it. The corridor
-  // is a plan-view swept body, so what has to clear it is the post's whole
-  // plan-view span over the heights the bus body occupies — which is what
-  // `postClearsEntranceRoad` asks. A candidate that fails is a **different
-  // decision to try**, not a floor to settle at: `searchForClearGround` walks on
-  // to the next radial nudge, exactly as it does for every other refusal here.
-  if (route && !postClearsEntranceRoad(route, at, x, z, footRadius)) return false;
-  const pinchesCorridor = [...PARK_LAYOUT.entries.values()].some(
-    (entry) => Math.hypot(x - entry.x, z - entry.z) < entry.boundingRadius + 2.4,
-  );
-  return !pinchesCorridor;
-}
-
-/**
- * How far `trestleSpots` will nudge a candidate before giving up on it — along
- * the route (metres of arc) and across it (metres off the centre line).
- * Kept well inside half of `TRESTLE_SPACING` (12 m) so two neighbouring
- * slots' searches can never land on the same ground.
- *
- * Ordering within each array no longer matters (`searchForClearGround` picks
- * its own priority, radial-first — see that function's doc comment); kept
- * closest-to-zero-first anyway because it reads as "the nudge, ranked."
- */
-const ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3];
-const RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
-
-/**
- * The wider arc search a grid slot gets when a duck bar is actually scheduled
- * on it — see `planHazards`'s `snapToTrestleGrid`. An ambient, decorative
- * slot with nothing scheduled on it is allowed to go missing (the track
- * "shrugs it off"); a slot a bar is relying on for its own visible support is
- * not, so it is worth searching harder — still well inside half of
- * `TRESTLE_SPACING` so it can never reach into a neighbouring slot's ground.
- */
-const WIDE_ARC_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5];
-
-/**
- * The radial budget a *mandatory* slot's wide search is normally allowed —
- * deliberately **not** the same `±8` a decorative slot's search would use if
- * it had one (it doesn't; only mandatory slots get a second attempt at all).
- *
- * **Why radial is special and arc is not.** A duck bar renders at its lane's
- * fixed radius (`route.pointAt`'s `LANE_RADII[lane]`, `route.ts`) — nothing
- * ever nudges *that*. An arc nudge shifts `at` for the leg and the bar
- * identically (both derive from the same `spot.at`, `track.ts`'s duck-bar
- * loop above), so it costs nothing: bar and leg stay exactly as coincident as
- * they always were, just moved together along the loop. A radial nudge only
- * moves the leg — the bar has no radial nudge to match it with — so every
- * metre of radial nudge is a metre the bar and its own support drift apart.
- *
- * Found the hard way (2 August 2026): PR #162 moved the rail-race stall to
- * the rim, which (via the shared-RNG butterfly effect documented in that
- * PR — an earlier consumer's draw count shifting every later one) changed
- * which ground was clear near two mandatory slots enough that their old,
- * uncapped `±8` wide search reached all the way to `dr = 8`. With `LANE_RADII`
- * offsets up to `±3.9` off nominal (`LANE_SPAN / 2`, `route.ts`), that put
- * the duck bar on the innermost lane a measured `|8 - (-3.9)| = 11.9 m` from
- * its own support — over `DUCK_BAR_SUPPORT_TOLERANCE` (8 m,
- * `test/procgen/invariants.ts`) and, worse, a real visual bug: the trestle's
- * beam and leg (both drawn at the leg's nudged `x,z`) would stand visibly
- * beside the branch tops standing under the actual rails (drawn, correctly,
- * at the unnudged `x,z` `route.pointAt` gives — see the duck-bar loop and
- * the trestle loop above), not under them.
- *
- * `4` keeps the worst case (`4 + 3.9 = 7.9 m`, the innermost lane against a
- * full `+4` nudge) under the 8 m tolerance with a little room to spare, while
- * still giving the search four full extra metres either way beyond the
- * ordinary, non-mandatory `RADIAL_NUDGES` reach. Paired with
- * `searchForClearGround`'s radial-outer ordering (below), a mandatory slot
- * now always tries every `WIDE_ARC_NUDGES` offset at each radial step before
- * growing the radial nudge further, so the search spends its "free" arc room
- * before its costly radial room — the fix that actually matters; this cap is
- * the backstop that makes the guarantee structural rather than merely
- * "usually true of whatever the search happens to find."
- */
-const MANDATORY_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4];
-
-/**
- * The old, uncapped `±8` radial range — kept only as the last-resort
- * fallback `trestleSpots` reaches for if even `MANDATORY_RADIAL_NUDGES`
- * finds no clear ground at all. Accepting a support that may exceed the duck
- * bar's own tolerance is still better than the alternative: `trestleSpots`
- * drops the bar's geometry entirely when its slot has no support at all (see
- * the duck-bar loop's `if (!spot) { ... continue; }`), and a duck bar with no
- * support of any kind is a worse bug than one whose support is visibly a
- * little off to the side. `trestleSpots` warns loudly whenever this fallback
- * is the one that actually placed a mandatory slot, so it stays visible
- * rather than becoming a silent, permanent crutch.
- */
-const WIDE_RADIAL_NUDGES = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8];
-
-// **The published band and this ladder are one fact, so they are checked
-// against each other rather than trusted to agree.** `supportGround.ts` tells
-// the entrance road how far out the ride may put a foot; if this ladder ever
-// reaches further than the band admits, the road would be laid through ground
-// the ride is still using and nothing would say so. A comment promising two
-// numbers match is not a mechanism (CLAUDE.md); this is.
-const widestNudge = Math.max(
-  ...RADIAL_NUDGES,
-  ...MANDATORY_RADIAL_NUDGES,
-  ...WIDE_RADIAL_NUDGES,
-);
-if (widestNudge > SUPPORT_MAX_RADIAL_NUDGE) {
-  throw new Error(
-    `railRace: a radial nudge ladder reaches ${widestNudge} m but supportGround.ts ` +
-      `publishes ${SUPPORT_MAX_RADIAL_NUDGE} m as the band the entrance road clears. ` +
-      'Widen SUPPORT_MAX_RADIAL_NUDGE (and re-measure the road) or narrow the ladder.',
-  );
-}
-
-/**
- * Tries each (radial, arc) nudge in order and returns the first clear ground
- * it finds.
- *
- * **Radial-outer, arc-inner — not the other way round.** A slot's search
- * used to be arc-outer: try every radial nudge at `da = 0` before ever
- * trying `da = ±1`. That is backwards for a mandatory slot, where a radial
- * nudge costs real alignment (see `MANDATORY_RADIAL_NUDGES`'s doc comment)
- * and an arc nudge costs nothing — the old order reached for the biggest,
- * costliest radial nudges long before it had exhausted the free arc ones.
- * Radial-outer instead tries every arc offset at the smallest radial
- * deviation first, and only grows the radial nudge once the whole arc
- * range has failed to turn up clear ground that close in. Harmless for the
- * ordinary (non-mandatory) search too — a decorative trestle looking a
- * little closer to its nominal radius is no worse than one that doesn't.
- *
- * `atArch` is arch-relative — the same convention `hazards.ts`'s `DuckBar.at`
- * uses ("metres along the loop, measured from the start/finish arch") —
- * **not** the raw route coordinate `route.angleAt`/`pointAt` actually want.
- * Converting it here, the same way the duck-bar loop below always has
- * (`route.wrap(route.startDistance + at)`), is what makes a trestle grid
- * index and a hazard-schedule grid index agree on which physical point on
- * the ring they mean. Before this, `trestleSpots` computed its candidates in
- * the *raw* route coordinate directly — harmless when nothing else needed to
- * agree with it, which stopped being true the moment a duck bar needed to
- * find "its own" trestle by index.
- */
-function searchForClearGround(
-  route: RailRaceRoute,
-  collision: CollisionWorld,
-  atArch0: number,
-  arcNudges: readonly number[],
-  radialNudges: readonly number[],
-  footRadius: number,
-): { at: number; x: number; z: number } | null {
-  for (const dr of radialNudges) {
-    for (const da of arcNudges) {
-      const at = route.wrap(route.startDistance + atArch0 + da);
-      // Nudged along the centre line's own outward normal, not out from the
-      // origin. On a ring that follows the park's edge the two differ wherever
-      // the boundary's radius is changing, and a radial nudge would drift the
-      // candidate sideways along the track as well as outward — searching a
-      // different place from the one it reports.
-      const sample = route.path.sampleAt(at);
-      const x = sample.x + sample.normalX * dr;
-      const z = sample.z + sample.normalZ * dr;
-      if (groundIsClear(x, z, collision, footRadius, route, at)) return { at, x, z };
-    }
-  }
-  return null;
-}
-
-/**
- * Where the ring can actually be stood up.
- *
- * The same predicate set the coaster's pylons use, plus one this ride needs and
- * the coaster does not: the ring runs *inside the railway's own band*, so a leg
- * has to clear the train's corridor as well as the walking network.
- *
- * **A rigid, one-shot candidate grid found almost nowhere to stand.** The first
- * version of this function tried exactly one point per slot — the centre line
- * at the slot's own arc position — and gave up outright if that one point was
- * blocked. Measured against the real, built park (1 August 2026): **1 of 28**
- * candidates survived. The ride's own docs already say it "runs through a band
- * of the park that is already full" — garden planting, the walking network, the
- * railway corridor — and that density is exactly what a single fixed point
- * cannot route around. The result was not "a few trestles skipped here and
- * there", which the docs' "shrugs off a missing support" language anticipates;
- * it was a 336 m elevated loop standing on one leg.
- *
- * So each slot now searches a small, bounded neighbourhood — a handful of
- * along-the-route and across-the-ring nudges, closest first — before it is
- * actually given up on. Against the same real park this finds a clear spot for
- * **25 of 28**. The remaining few are still allowed to go missing, on purpose:
- * over the railway, over a path, in the gap between two plots, no amount of
- * local nudging *should* find a leg — the walk network cannot shrug off a
- * misplaced one, and a rare true gap is what "the track shrugs off a missing
- * support" was always meant to cover.
- *
- * **`mandatoryIndices` may not go missing.** These are the grid slots
- * `planHazards`'s `snapToTrestleGrid` actually scheduled a duck bar onto — a
- * bar with no visible support underneath it is the exact bug this whole
- * mechanism exists to fix, so those slots get a second, wider attempt rather
- * than being allowed to shrug: `WIDE_ARC_NUDGES` paired with
- * `MANDATORY_RADIAL_NUDGES` (bigger arc room, which costs a mandatory slot
- * nothing, and a deliberately *capped* radial room, which does — see
- * `MANDATORY_RADIAL_NUDGES`'s own doc comment for the bug this cap fixes).
- * Only if even that fails does a third attempt reach for the old, uncapped
- * `WIDE_RADIAL_NUDGES` — a support that may sit further from its bar than
- * the invariant likes is still better than a bar rendered with no support at
- * all. Every index is returned on the result so the duck-bar geometry can
- * look its own support up directly rather than re-deriving it.
- */
-function trestleSpots(
-  route: RailRaceRoute,
-  collision: CollisionWorld,
-  mandatoryIndices: ReadonlySet<number>,
-  footRadius: number,
-): TrestleSpot[] {
-  const spots: TrestleSpot[] = [];
-  // Arch-relative, matching `planHazards`'s `snapToTrestleGrid` exactly — the
-  // same formula, not an approximation of it — so grid index `i` names the
-  // same physical point on the ring in both files. `searchForClearGround`
-  // converts it to the raw route coordinate `route.angleAt`/`pointAt` want.
-  const count = Math.floor(route.length / TRESTLE_SPACING);
-  for (let i = 0; i < count; i += 1) {
-    const atArch0 = (i / count) * route.length;
-    const mandatory = mandatoryIndices.has(i);
-    let placed = searchForClearGround(route, collision, atArch0, ARC_NUDGES, RADIAL_NUDGES, footRadius);
-    if (!placed && mandatory) {
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, MANDATORY_RADIAL_NUDGES, footRadius);
-    }
-    if (!placed && mandatory) {
-      // Last resort — see `WIDE_RADIAL_NUDGES`'s own doc comment. Loud
-      // because this is the one path where a duck bar's support can land
-      // further from it than `DUCK_BAR_SUPPORT_TOLERANCE`
-      // (`test/procgen/invariants.ts`) actually wants; if this fires on a
-      // real seed, that slot's ground is worth a closer look, not just a
-      // wider search.
-      placed = searchForClearGround(route, collision, atArch0, WIDE_ARC_NUDGES, WIDE_RADIAL_NUDGES, footRadius);
-      if (placed) {
-        console.warn(
-          `railRace/track.ts: the mandatory trestle at slot ${i} (arch-relative at=` +
-            `${atArch0.toFixed(1)}) only found clear ground beyond MANDATORY_RADIAL_NUDGES' ` +
-            `safe radial range — its duck bar may sit further from it than the ` +
-            `DUCK_BAR_SUPPORT_TOLERANCE invariant expects.`,
-        );
-      }
-    }
-    if (!placed && mandatory) {
-      // Exceedingly rare given the search above — genuinely no clear ground
-      // within 8 m of a bar's own scheduled position — but a bar must never
-      // silently render with no support, so this is loud rather than quiet.
-      console.warn(
-        `railRace/track.ts: no clear ground found for the mandatory trestle at slot ${i} ` +
-          `(arch-relative at=${atArch0.toFixed(1)}) even after the wide search — a duck bar is ` +
-          `scheduled here with no visible support. Widen WIDE_ARC_NUDGES/WIDE_RADIAL_NUDGES or move this bar.`,
-      );
-    }
-    if (placed) spots.push({ ...placed, index: i });
-  }
-  return spots;
 }
 
 /**
@@ -1908,6 +1891,27 @@ function buildArch(
       keep(legGeometry);
       const leg = solid(new Mesh(legGeometry, material));
       leg.position.set(footX, bottom + height / 2, footZ);
+      // **Neighbouring legs get opposite facet phases, so no two of their
+      // faces lie in one plane.**
+      //
+      // The bands are `band` apart and each leg's tube is `band / 2`, so
+      // consecutive legs stand exactly tangent — six touching posts making one
+      // rainbow's leg, which is the look. Eight-sided prisms standing tangent
+      // present each other a long flat facet the height of the whole leg, and
+      // `check:coplanar` found eight such pairs on the canonical seed, the
+      // worst 0.562 m² of shared plane fighting at 6 mm. Nothing there is
+      // visible — the faces are buried between two posts that touch — so this
+      // is ART_DIRECTION §7's "delete the hidden face" rather than a stand-off:
+      // half a facet of spin on every other leg leaves a facet of one post
+      // facing a *vertex* of the next, 22.5° apart, and two faces 22.5° apart
+      // cannot share a plane however close they stand. Nothing moves, so the
+      // rainbow is drawn exactly where it was.
+      //
+      // The better fix is one merged leg stack per side with the band colours
+      // as vertex colours, which would delete the buried faces outright and
+      // give the six posts a single silhouette; it changes what a child sees,
+      // so it is Jim's call rather than this ticket's.
+      leg.rotation.y = (i % 2) * (Math.PI / 8);
       leg.name = `railRace:finish-rainbow-leg-${i}-${side < 0 ? 'inner' : 'outer'}`;
       leg.frustumCulled = false;
       group.add(leg);

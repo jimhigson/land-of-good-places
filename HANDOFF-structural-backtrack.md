@@ -1,0 +1,243 @@
+# HANDOFF — structural backtracking (feat/structural-backtrack)
+
+Model: Claude Opus 5.5 (1M). Engineer/Architect, Overseer-dispatched. A replacement runs the same model.
+Base: origin/feat/procgen-on-sphere (Jim: this branch is the dependency; feat/prebuilt-parks (#705) waits on it).
+Worktree: .claude/worktrees/structural-backtrack. Scratch: $SCRATCH/sb/ (session scratchpad).
+
+## Requirement (Jim, verbatim)
+"there should be no 'fail some placement checks' GUARANTEED STRUCTURALLY because ALL FEATURES SHOULD BE
+BACKTRACKABLE — this means that even in the case of total failure, backtracking to zero will work,
+effectively starting again." Plus: every seed must build, not only 0..15; prove on 0..15 + ~100 random.
+
+## Design so far
+- `src/world/parkRestart.ts`: PARK_RESTART (LGP_PARK_RESTART env / globalThis.__LGP_PARK_RESTART__),
+  `generationSeed(seed, r)` (r=0 -> seed unchanged). parkManifest: PARK_SEED_ASKED = identity,
+  PARK_SEED = generationSeed(asked, restart) — every generator already reads PARK_SEED, so restart r is a
+  whole new park (boundary included) under the same identity.
+- `scripts/lib/parkFindings.mts`: check:park's measures as `measureParkFindings(park, ratchetEnforced)`;
+  check-park.mts is now a printer.
+- Next: `scripts/park-attempt.mts` (one process: build at (seed, r), run every invariant + check:park,
+  print JSON verdict) and `scripts/lib/acceptedPark.mts` (root loop r=0.. until accepted, log restarts).
+
+## Overseer baseline (vet:seeds 0..15 at ae8257fb)
+check:park passes all; invariants pass only seeds 2, 5. Instrument/geometry bugs to fix at cause (not
+search around): sleepers (#702 fix/sleepers-on-drawn-rails), RR camera (fix/pocket-race diagnosis),
+coping chamfer (#698 fix/procgen-last has the fix).
+- Sleepers: merged fix/sb-sleepers into wip/sb-merge (#702 port + stationsEvenlyAlongDrawn spacing fix; seeds
+  1,3,8,9 sleepers cleared). OPEN: check:coplanar gains race-ring vs walk-past-ring sleeper side faces (canonical
+  ~(-53,-9.6,75.4)); rings are mutually exclusive (RailRace.setActiveRing) — decide: teach the check exclusivity.
+- Restart-0 identity: seed 11 park digest f949720aa35c7716 identical at ae8257fb and dec4376c (restart stream).
+- Sweep 0..15 (base code): 2@r0, 5@r0, 0@r1, 3@r6, 6@r10, 4@r16, 8@r2 ... (log accept-0-15-r1.log).
+- Helper running: fix/sb-cruiser-castle (castleSpan null though satisfies=crossesTheCastle).
+- Camera: merged fix/sb-race-camera (CEILING_FLOOR 0.6 in measureZoomCeiling; canonical zooms in ≤8.8% on 39 m
+  of lap — VISIBLE, needs Jim's look at /rail-race). Seeds 0,1,3,8,9 camera cleared.
+- Coplanar: rings declared userData.shownAlone; sweep skips cross-member pairs; ring sleeper baseline entry
+  deleted (not loosened). Remaining red: pre-existing seed-24 garden path-kerb|path-surface -> helper fix/sb-kerb.
+- Restart-1 control: seed 11 r1 digest aaed3dd7ff9dbc46 ≠ r0 f949720aa35c7716; two processes agree.
+- Cruiser-castle: merged fix/sb-cruiser-castle (cruiserRouteSearch throws when tiers end unsatisfied; builder
+  refuses a built route with null castleSpan).
+- Kerb helper (fix/sb-kerb): seed-24 + canonical kerb|surface fixed (KERB_PROUD_MAX, KERB_HIDE_MAX); seed 131
+  residual is a hanging paving SHEET -> same helper now merging/finishing fix/paving-drape. Not yet merged.
+- Lattice helper (fix/sb-lattice): moving lattice/grid-axis measures into src + refusals in addInterconnects.
+- Duck-bar helper (fix/sb-duck-bars) still running.
+- Duck bars: merged fix/sb-duck-bars (refusedBarSlots in simulate.ts; DFS placement in planHazards;
+  DuckBarRefusal -> restart). VISIBLE: canonical lanes 1,2 bars move (492.13->564.15, 564.15->420.11).
+- Sweep r2 (intermediate, wip/sb-merge after sleepers/camera/castle/duck/coping): $SCRATCH/sb/accept-0-15-r2.*
+- Merged fix/sb-kerb (+ fix/paving-drape): check:coplanar exit 0 per helper; seed 11 bushes pass at r0.
+- Sweep r2 is MIXED-SOURCE (merges landed mid-sweep into the same tree) — intermediate only. Final sweeps must run
+  in a frozen worktree at a fixed commit. r2 so far: 15/16 accepted, mostly r0-r6; remaining causes: lattice (18),
+  grid axes (10), rainbow legs near paths (5), anchor.reach:waterFight (4) -> helper fix/sb-reach.
+- Merged fix/sb-lattice (d27593b0): src/world/pavingLegibility.ts is the one owner of longDiagonals /
+  offLatticeStreetRuns (+ gridAxes.ts moved to src); addInterconnects screens connectors; pathGraph builder
+  refuses illegible mandatory paving (consumed train,layout). Conflict resolved: paving-drape's bridge-stone
+  line blocker ported into the shared measure as PavingGround.nearBridgeStone (built: footprintNear; planned:
+  walk footprint -> stricter). NEXT: frozen-worktree sweep of 0..15 at this commit, then 100 random.
+- Frozen sweep r3 @025efdb4 (0..15, --fresh): 16/16 accepted, 7 restarted, max 7 attempts, mean 2.00, 718 s.
+  Remaining restart causes: lattice (gate-approach/spurs still slip past the plan-time screen — built vs planned
+  ground mismatch, INVESTIGATE), sheets (0,1,10), spur centreline, rainbow legs, slide legs/cameras, detour.
+- 06223019: src/world/acceptedRestarts.ts (generated by accept:parks --write) = the loop's answer per shipped seed,
+  read at import (restartFor); check:park/test:procgen use it (acceptedRestartOf). Seed files for 0..15 + pool;
+  check:accepted-restarts (shard 1) proves table == seed files ⊇ 0..15 ∪ pool. Pool acceptance running in
+  sb-frozen (--write there; copy values over). 100 random seeds running in sb-random @06223019
+  (seeds in $SCRATCH/sb/random-seeds.txt, log accept-random.log).
+- Lattice mismatch ROOT CAUSE (seed 5 r0): the pathGraph legibility screen stands on the CONSERVATIVE planned bridge
+  footprint (superset of the built one: 29 gate-approach samples covered by plan only, 0 built-only), so it
+  exempts/blocks more than the built measure and lets gate-approach (z=60) and spur-building (x=-12.56) through.
+  Kept (a no-bridge screen would refuse every crossing ramp); comment corrected. Root loop catches the rest.
+- Merged fix/sb-reach (waterFight gun rack placed by door bearing, clamped inside plot; VISIBLE rack move).
+- Pool restarts recorded (b033643c): 24:0 128:7 131:0 208:5 274:1 326:0 428:1 451:2 20260728:0.
+- procgen-invariants.yml sharded x5 + pool job + aggregator "Procgen invariants" (protection read back unchanged).
+- check:coplanar NEW: cat-bus chassis seam on generation seed 860110031 -> helper fix/sb-catbus.
+- Random sweep running (sb-random @06223019). After it: full test:procgen + check:every-seed-builds on frozen tree.
+- Random 100: 100/100 accepted, max 8 attempts, mean 2.04, p=0.49 (doc section written).
+- SCOPE: Jim supports 0..15 only. SUPPORTED_PARK_SEEDS in parkSeedPool.ts (#705 moves it to prebuilt/parkFileName.ts
+  and makes PARK_SEED_POOL = it). acceptedRestarts + seed files = 0..15 exactly (151dac7e).
+- #705 CI findings -> helpers: fix/sb-fountain (fountain-hop s10), fix/sb-seed5 (castle-towers, cruiser cart 1.11deg),
+  fix/sb-coplanar16 (coplanar over 0..15). Each told scope 0..15.
+- Running: full test:procgen at 151dac7e in sb-frozen (log procgen-151dac7e.log).
+- TODO after helpers: emulate #705 pool=0..15 locally and run pool-sweeping checks (park-pool, gateway,
+  fountain-hop, swept-bus, entrance-road, path-preference, stall-accommodate, every-seed-builds).
+- VERIFIED @151dac7e/ac9f2490 (frozen sb-frozen): full test:procgen 1840 tests, only fail was scatterDecoupling
+  identity (fixed ac9f2490, 4/4 pass); check:every-seed-builds 16/16 built, exit 0 (check:park per seed at recorded
+  restart, ratchet enforced).
+- Merged fix/sb-coplanar16 (2c3d0df1): check:coplanar sweeps SUPPORTED_PARK_SEEDS at recorded restarts (child per
+  seed; coplanar.yml cap 15->25); stall corner posts open-ended (3 seams). #705's "16 new" were restart-0 parks;
+  at recorded restarts 0..15 had 4. Remaining: seed 4 duck bar end inside lane 3 bed (PLACEMENT) -> helper
+  fix/sb-duck-ends (invariant + slot refusal).
+- Merged fix/sb-fountain (dda5c8ab): NavGrid reached-route end height sampled at the goal, not cell centre
+  (instrument+game bug, 10-16 mm on 10 of 16 seeds); check:fountain-hop clause 2b taps 46 basin points.
+- Still running: fix/sb-seed5 (castle-towers, cruiser cart), fix/sb-duck-ends. Then: emulate #705 pool=0..15 in a
+  scratch worktree and run pool-sweeping checks locally (not pushed; #705 owns the pool change).
+- FINDING: chain checks build only the canonical seed by default, so per-seed failures hid (rail-race camera
+  clauses red on 1r6 etc. — likely from the CEILING_FLOOR camera fix). fix/sb-seed5 helper now owns rail-race camera
+  clauses too. Chain-sweep driver ($SCRATCH/sb/chain-sweep.mjs) runs 25 park-building chain checks x 16 seeds at
+  dda5c8ab in sb-frozen -> chain-sweep.log/json.
+- Merged fix/sb-duck-ends (8b50bd31): barReach.ts one owner; new invariant "every Rail Race duck bar keeps to its own
+  lane"; exact nearestLegalLayout solver. VISIBLE: 18-32 of 40 bars move per seed. Restarts re-recorded:
+  4:3 5:12 8:7 9:4 11:2 14:2. OPEN FOR JIM: bar (2.30 m) wider than lane pitch (1.10 m); rider head 2.84 m vs bar
+  underside 2.55 m and posts over neighbour centreline not measured — design question.
+- Helpers running: fix/sb-seed5 (castle-towers done incl. Collision.resolveMovement change; now rail-race camera),
+  fix/sb-hotel (seed 10 tower hole). Chain sweep at dda5c8ab running.
+- FINAL STEPS: once helpers merged -> accept:parks 0-15 --fresh --write at frozen HEAD, then test:procgen,
+  every-seed-builds, chain sweep, coplanar, check, determinism digests, PR.
+- Merged fix/sb-hotel (probe judges by crossing, not landing; all 16 exit 0). ground-claims frame cap 6000->200000
+  (hang-catcher; seed 0 now passes). Helpers: fix/sb-arrival (cat-bus child crosses wall, seeds 0,5), fix/sb-map
+  (park-map blank pan seed 2), fix/sb-seed5 (rail-race camera).
+- Merged fix/sb-map (7d868a35: pan clamp keeps view centre inside PARK_BOUNDARY outline; all 16 exit 0; VISIBLE,
+  needs browser look zoom 4 seeds 0 NW / 2 NE) and fix/sb-keyring (956f5dd0: tap zones/framing read off leaned
+  drawn charms; all 16 exit 0; VISIBLE). Remaining helpers: fix/sb-seed5 (castle-towers+cart done, rail-race camera),
+  fix/sb-arrival (cat-bus seeds 0,5). Chain sweep at dda5c8ab ~80%.
+- Chain sweep @dda5c8ab DONE: 400 runs, 39 red: rail-race 9, castle-towers 7, park-map 6, ground-claims 5,
+  keyring-view 5, cat-bus 2, hotel 2, path-preference 2 (seeds 0,14), waypoints 1 (seed 9; passes at 63d79421).
+  Merged since: hotel, map, keyring, arrival, ground-claims cap. Open helpers: fix/sb-seed5 (castle-towers+cart+
+  rail-race camera), fix/sb-pathpref, fix/sb-gate (wall gaps beside slanted gate + arch pole seed 15).
+- FINAL: after those -> accept:parks 0-15 --fresh --write @frozen; then chain-sweep again (all 25 checks x 16),
+  test:procgen, every-seed-builds, coplanar, swept-bus/gateway/entrance-road/park-pool over 0..15, pnpm run check,
+  determinism digests x2, PR against feat/procgen-on-sphere.
+- Merged fix/sb-gate (wall closes onto piers via return walls; arch-span refusal for poles; 2 new invariants). VISIBLE.
+- Pool = SUPPORTED_PARK_SEEDS, CI_SWEEP = pool, CANONICAL = 5 (same as #705) so pool checks stop sweeping retired
+  seed 451 (DuckBarRefusal at r0). Chain checks with no LGP_SEED now build seed 5 at its recorded restart: the
+  full `pnpm run check` must be re-verified (baselines keyed on the canonical park may move).
+- Merged fix/sb-seed5 (resolveMovement deepest-overlap; castle-towers door probe; ringPath smooth centre line;
+  camera SIDE_SCROLLER_FLOOR/CHASE_CEILING/CEILING_SLOPE; raceCameraFindings lib) and fix/sb-pathpref (NavGrid hop
+  premium additive; path-preference lattice to park edge + "paving is one network"). park-attempt now runs
+  check:rail-race itself as an acceptance measure (red proof: 14 r2 rejected, eye 0.336 < 0.35).
+- ALL helpers done. FINAL RE-ACCEPT running at frozen 6ecdfea2 in sb-frozen (--fresh --write; copy table back).
+  Then at the table commit: test:procgen, every-seed-builds, chain-sweep.mjs (25 checks x16), coplanar, swept-bus,
+  gateway, park-pool, entrance-road, pnpm run check, determinism digests.
+- Merged fix/sb-castle-radius (anchor.reach per-vertex on ground; CASTLE_PLOT_REACH 21.31 derived) and fix/sb-ribbon
+  (fold repair, easeJogsAndStubs, junctionAprons; invariants noDrawnPavingFacesTheGround, noLawnShowsThroughThePaving).
+- FINAL RE-ACCEPT running at c5023dc0 in sb-frozen (accept-final.log). Helper fix/sb-hair: coplanar kid hair crop vs
+  torso seed 9 (character art only; does not affect acceptance).
+- Coordinator's extra asks: (a) PR + preview deep-link screenshots per visible change + duck bar across lanes shot,
+  (d) Checks shards under 30 min (last CI: max 9.9 min; recheck on PR run). (b),(c) done.
+
+## 1 Oct (resumed after usage limit)
+- Re-record at c5023dc0 had finished (table written 25 Sep 09:41); committed 135f20c8. Scratch logs were wiped.
+- Merged fix/sb-grid (staggered start grid). Helpers: fix/sb-grid2 (finish its verification), fix/sb-bush (Jim: lower
+  bush floor if it is space — measure). Another agent narrows duck bars (Jim: yes) — merge when it reports.
+- Jim: slide head tip-back — leave. Path folds & #705 restart-from-file now with other agents.
+- PR #706 opened: feat/structural-backtrack (fast-forwarded to wip/sb-merge) -> feat/procgen-on-sphere.
+  Keep pushing wip/sb-merge AND `git push origin HEAD:feat/structural-backtrack`.
+- TODO: after duck bars + bush merge -> re-record; verification; preview deep-link screenshots; shard timings.
+- Screenshots on preview d738347 (seed 0 r8), driver scripts/_shots.mjs (scratch, NOT committed; uses channel
+  'chrome' + metal GPU; SwiftShader times out). Good shots in $SCRATCH/sb/shots/pr706/:
+  try3/gate-west.png (view camPos=-14,5,50), keyring (try4/keyring-60s.png, needs 60 s wait), start-grid.png,
+  rail-race-camera.png (click Level 1, +15 s), race-bars-b6.png (Level 3 burst: bar across lanes for Jim),
+  water-fight-rack.png, stall-posts.png, path-corners.png, park-map-zoom-pan.png (KeyM, wheel, drag),
+  cat-bus-burst-b11.png (doorway, ~63 s after load). Coordinates are seed-0/restart-8 specific: retake
+  water-fight/stall/grid/path shots if seed 0's recorded restart changes.
+- Cross-platform identity (coordinator): park-identity.mts + compare-park-identity.mts + park-identity.yml (ubuntu vs
+  macos, 16 seeds). Controls pass. Next: read the CI result; #705 (ade102921125f8c23) owns the file format; plan is
+  acceptance measures the hydrated park file (their suggestion), quantise only if CI shows structural divergence.
+- check:coplanar deterministic (2 runs identical). flat-primitives fixed (69d7099a). Walk-reach VOID -> fix/sb-walkreach.
+- NOTE: every push to feat/structural-backtrack cancels the in-flight PR CI (concurrency cancel-in-progress), and
+  handoff-only pushes kept killing Checks before it finished. Push handoff commits to wip/sb-merge only; move
+  feat/structural-backtrack only for code, and let CI finish between. PR CI run at c7dcaf03 is the one to read.
+- sb-grid2 verified (102b3aa4, handoff only, not merged): grid on -> 0 rider overlap at rest on all 16 (closest
+  213 mm seed 1); grid off overlaps every seed. Mid-race head interpenetration 5.4-9.4% of race time (any pair),
+  0.6-1.9% player pair — numbers for Jim's lane-pitch question. Revert proof on seed 9 r4: hair|torso returns.
+- Merged #707 (path-fold invariant no 60deg skip). scatterDecoupling control fixed (6ad909cd); the locality
+  failure on canonical seed 5 -> fix/sb-scatter. 3 coplanar seams -> fix/sb-cop3. Seed 6 train search -> fix/sb-trainsearch.
+- Retired check:park-boot (coordinator: client-solve speed checks go; 73 -> 72 steps). Keep cruiser castle-miss retry
+  cost (84 s seed 5) on the list: fold into the re-record that follows fix/sb-trainsearch.
+- #705 (b20e8057): LGP_PARK_FILE hook in register hook; build:parks fails on a rejected file. Removed swallowing
+  catch in park-attempt (c78f30e1).
+- PR body must state step-set change (check:park-boot removed; served-* and shard 8 came from #703 base).
+
+## 2 Oct — cross-platform divergence root-caused and removed at source
+- Model: Opus 5.5 (1M), chosen by the Overseer. Branch wip/sb-merge (PR #706 = feat/structural-backtrack).
+- Merged fix/sb-scatter (47fe3f80; Scenery.ts conflict kept refusalAt+ledger+identity). scatterDecoupling 5/5.
+- CAUSE (park-identity run 36947100024, same Node 26.10.0/V8 on both): sin cos tan atan atan2 asin acos exp log
+  pow ** sinh tanh expm1 differ linux-x64 vs darwin-arm64; sqrt fround hypot cbrt log2 same. V8's C++ libm,
+  FMA-contracted on arm64.
+- FIX f56edfb6: src/core/deterministicMath.ts = fdlibm 5.3 ported to JS (+ exact BigInt reduction for huge
+  trig args), installed on global Math by scripts/ts-extension-resolver-register.mjs, test/setupDeterministicMath.ts
+  (vitest setupFiles), first import of main.ts + art/samples/*. parkManifest asserts it. ** operator cannot be
+  patched: only exact x**2 in world code. Test test/deterministicMath.test.ts (<=1 ulp, sinh 2, tanh 3) proved red.
+- math-determinism.mts hashes native (control) + ports; park-identity.yml fails if ports differ.
+  Dispatched on wip/sb-merge: run 36950557531. Local Mac identities -> $SCRATCH/idmac/ to compare with CI.
+- CONSEQUENCE: every park changes by ulps -> acceptedRestarts must be re-recorded (planned anyway). Tell #705.
+- PROVEN: park-identity run 36952601192 green on wip/sb-merge: native control 17 differ, ports 0 differ,
+  16/16 same park, drift 0.00e+0 m (also CI-linux vs this Mac). Pre-fix artifacts via same comparator: 11/16.
+  Cost ~5% (seed 12 21 s vs 20 s).
+- Merged fix/sb-cop3 (4e2acbd1): post foot caps, wall top under coping, fairy strings never double back
+  (+ invariant fairyStringsNeverDoubleBack). Helper verified check:coplanar exit 0 on det-Math base.
+- Waiting: fix/sb-trainsearch (a6ac0a8b), fix/sb-trees (a046a48f), fix/paths-to-doors (ab031046; new
+  acceptance measures drawnPavingReachesEveryDoor, pathsMeetBridgesOnlyAtTheirEnds). Then ONE re-record + verification.
+- INCIDENT: helper a6ac0a8b (fix/sb-trainsearch) ran `pkill -f scripts/park-attempt.mts` ~03:55, killing 10
+  of paths-to-doors' accept:parks attempts (seeds 2,3,4,5,8,9,10,11,13,14; loop refused --write, nothing
+  recorded; being re-run). All helpers told: own PIDs only after lsof cwd check; never pkill/pgrep -f/killall.
+- Merged fix/sb-trainsearch (48c8a7fd): plan CPU 2090 -> 1517 s, identical decisions.
+- 376d9ab8 CI reds (all mine), root causes + fixes:
+  * check:fountain-hop killed at 22 min (16 park rebuilds) and Procgen "pool" job cancelled at 25 min cap every
+    run (gateway + park-pool, 32 rebuilds) -> 890903b2: per-seed suite now asks check:park (ratchet) +
+    fountain hop (src/world/fountainHop.ts via parkFacts) + gate walk on the park it built; pool job removed;
+    fountain-hop out of shard 3 (71->70 steps); sweeps renamed sweep:*; check:seed-coverage uses `vitest list`.
+  * check:walking returning save blocked by bushes near typed (6,10) -> 2fb59a30 derives a 5 m-clear spot.
+  * check:deep-links 120 s timeouts: seed 5 cruiser 123 s on CI (11.46M pieces). Helper a6ac on
+    fix/sb-trainsearch2 (050c334a): seed 5 plan 94.8 -> 26.9 s local; park unchanged (seed 1 changes).
+- Waiting: fix/sb-trainsearch2 (table + accept --fresh), fix/sb-trees, fix/paths-to-doors. Then re-record once.
+- Merged fix/sb-trees (566d3e1d; trees 47-86/seed, visible -> Jim question) and fix/paths-to-doors (9656825e;
+  drawnPavingReachesEveryDoor, pathsMeetBridgesOnlyAtTheirEnds; LAYOUT_VERSION 5).
+- 26bbb045: PROD BUILD did not boot (bundler evaluated parkManifest chunk before main's install) ->
+  vite strictExecutionOrder. Verified vite preview + headless chromium seed 5: boots, Math is port.
+- New helper ae706c0d (fix/sb-duckbar): DuckBarRefusal thrown in RailRace ctor (world phase) is the commonest
+  rejected attempt -> refuse at decision.
+- In flight: fix/sb-trainsearch2 (a6ac; cruiser seed 5 94.8->27 s), fix/paving-clear (ab03), fix/sb-duckbar.
+  Re-record + verify after all three.
+- COORDINATOR Q (answered here, no message route): `sb-duckbar-base` = helper ae706c0d's BASELINE worktree measuring
+  how often DuckBarRefusal (thrown in RailRace ctor) ends an attempt, before making it refuse at the decision.
+  Brief carries Jim's ruling: bars stay 2.30 m, no width change; no-bar-end-in-another-lane invariant kept.
+- JIM RULING (via coordinator): re-record must be automatic. e6b7708d: acceptedRestarts.ts, check:accepted-restarts,
+  accept:parks --write REMOVED. restartFor: override -> __LGP_RESOLVE_RESTART__ (acceptedRestartSync: cached verdict
+  at acceptanceSourceHash or runs accept-parks for that seed) -> 0. Installed by --import hook + vitest setup.
+  Verified: seed 12 cold 158 s, cached 0.2 s; vitest seed-12 112/112 via loop.
+- Split with #705 (ade10292): build:parks calls acceptPark per seed (fileAttempt), writes .parks/manifest.json
+  restarts; builtRestartOf(root, seed) goes first in my resolvers (their branch); CI `parks` job feeds
+  checks.yml + procgen-invariants.yml. Browser restart comes from the file. => #706 and #705 must land together;
+  #706's own CI cold path re-searches per job (slow, will time out) until #705's parks job exists.
+- Merged paving-clear (6657a0e6), duckbar (6de631e0), trainsearch3. Review fixes 7a9f71fe (identity fails on any
+  drift; check:pow-operator; bush 140 = headroom). PR body updated (scratch pr706-body-new.md has bush edit, re-apply).
+- CI @6de631e0: test:procgen shards 1/3/5 and check shards 3/5 RAN OUT OF CLOCK — every job now resolves restarts
+  cold (no table) = predicted. Unblock = #705's Parks CI (parks.yml + restore-parks + Parks ready; needs
+  build:parks/builtRestartOf) landing with #706. No real red seen yet behind the timeouts.
+- Helpers: a3f17beeb (fix/sb-coverage: reviewer pt1 acceptance coverage + pavingLegibility test; resumed after
+  limit), ae706c0d (fix/sb-throws, coordinator resuming). QA coords sent to af62470c (skyCruiser booth seed 5 r2
+  may have paving under it: 10 tri centres, unverified — paving-clear should fix; recheck on next preview).
+- 3e99dd71: merged sb-throws, coverage batches 1-4 (every per-park CI check is an acceptance decision measure;
+  staged attempts; registry copy per World), paving-rail, booth-hollow measure fix, sb-bounded (SolveBudget:
+  every solve provably finite; ParkSolveExhausted -> restart), sb-rrtest. All helpers done/stopped.
+- Staged attempt seed 15 r0 (ca46ffde): ACCEPTED at r0; CPU build 434 s, stages 37/17/153 s. Sent to #705.
+- Remaining: #705 Parks CI + rebase onto 3e99dd71; then green CI on #705 head; reviewer approval.
+- 2917738d: "built well" (decision-zero count) is search effort, reported not judged (#705 review: seed 11 r0-3).
+- Jim ruling: no macOS park-identity CI; parks built/accepted on Linux only. Workflow removed here too;
+  deterministic Math + guard + check:pow-operator kept; identity/math scripts are hand tools. Docs reworded.
+- Measuring seed 11 r4 plan solve time (ran past #705's 30-min probe kill). Waiting on fix/door-overlap
+  (paving agent ab031046: paths ~1 m under building doors, Jim's preview feedback).
+- Merged fix/door-overlap (Jim: paving ~1 m under building doors; DOOR_PAVING_OVERLAP). Booth-hollow control
+  still red after the merge (seed 12: 0.88 m2). Parks change -> #705 must rebase.
+- Seed 11 r4 plan: 830 s wall, slide 677 s / 352M pieces -> helper on fix/sb-slidecost (deterministic, work-bounded).
+  #705 keeps its 30-min kill as a loud failed seed job (never a rejected restart) until that lands.
+- #705 rule for new acceptance measures needing the search machinery: add the script to builtParks.mts
+  SEARCH_SCRIPTS + park-attempt SEARCHES_THE_WORLD_PHASE, or record what it needs in the park file.

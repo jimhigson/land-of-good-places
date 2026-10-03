@@ -355,8 +355,24 @@ function applyReclinedRidePose(model: RidePoseTarget): void {
   model.rightArm.rotation.x = -1.9;
   model.leftArm.rotation.z = 0.55;
   model.rightArm.rotation.z = -0.48;
-  // A little curl, so she is not a plank: chest lifted off the trough.
-  model.body.rotation.x = -0.12;
+  // **Propped up off the back of her head, so she lies ON the slide.** `body`
+  // pivots at her feet (her hips hang off it — see above), so this is not a
+  // curl but a share of the recline, and its sign is forwards: it sits her up
+  // by 0.21 rad from `RIDE_RECLINE`. It was `-0.12`, commented as "chest lifted
+  // off the trough", which in fact laid her *further* back — and her head is
+  // the biggest thing on her. Measured on the rig, lift solved so her lowest
+  // vertex clears the drawn trough by 2 cm (`Player.restingUnderside`):
+  //
+  //   body   lift   head gap  back gap  feet gap
+  //   -0.12  0.72   0.02      0.39      0.60    her head in the floor, or
+  //                                             lifted clear and floating
+  //    0.14  0.26   0.02      0.06      0.17
+  //    0.21  0.18   0.02      0.02      0.10    back and head both resting
+  //    0.30  0.12   0.07      0.02      0.06    sitting up, head off the floor
+  //
+  // 0.21 is where the back of her head and her back rest on the floor
+  // together, which is what lying in a slide looks like.
+  model.body.rotation.x = 0.21;
   // Zeroed for the same reason the seated pose zeroes it — `Player.animate`
   // runs immediately before this and writes the gait's roll into it, so a rider
   // who boarded mid-stride would otherwise keep a frozen sliver of that lean for

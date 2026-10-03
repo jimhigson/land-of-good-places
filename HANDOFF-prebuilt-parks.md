@@ -1,0 +1,112 @@
+# HANDOFF — prebuilt parks (feat/prebuilt-parks, PR #705)
+
+Model: Claude Opus 5.5 (1M), chosen by the Overseer (Architect role, then implement). Keep the same model.
+Design: `docs/design/PREBUILT-PARKS.md` (also PR #704, draft). Base: origin/feat/procgen-on-sphere.
+
+## Jim's rulings driving this (24 Sep)
+- "no ability to build built into the game as delivered — seeds not downloadable is an error."
+- "we only support seeds 0..15, no others."
+- Retire checks that only existed because the client solved; move procgen out of the engine; enforce boundary.
+- If any of 0..15 fails an invariant: do NOT work around (no swaps/skips/baselines) — #705 waits on
+  feat/structural-backtrack (another agent). Base today: only seeds 2 and 5 of 0..15 pass all invariants
+  (vet:seeds, see below). So #705 IS BLOCKED on that branch; rebase onto it when it lands.
+
+## Architecture now
+- `src/world/prebuilt/`: parkFile.ts (format + READER), parkFileName.ts, parkFileStore.ts (letterbox),
+  parkUnavailable.ts (error), solverPort.ts (the only way src reaches a solver; the client never installs one).
+- `procgen/`: every search + both backtracking drivers + park-file WRITER. install.ts installs the solver.
+  Node scripts get it lazily via `scripts/ts-extension-resolver-register.mjs` (sync registerHooks + require(esm));
+  vitest via `test/procgen/parkFacts.ts` importing procgen/install.ts after pinning the seed.
+- Hydrated in the client: plan (layout, cruiser, train, slide, crossings, pathGraph+lattice, road),
+  world phase (stall moves, walls, trees/bushes as Rng state, fairy poles, lamps, trestles, claims), bridge footprints.
+- Still computed on the client (deterministic candidate loops, asked Overseer whether Jim wants them moved):
+  cruiser pylons, slide legs, rail-race plan (exit/arch), boundary radii, ferris exit.
+- Checks: check:prebuilt-park (shard 6; A/B digest + no driver/world-search in hydrate + perturb control),
+  check:procgen-boundary (shard 1), check:client-no-solver (shard 6). All proved red (see commits).
+- Tools used for the split (scratchpad, not committed): reach.cjs (declaration reachability from src/main.ts),
+  movedecls.cjs (move declarations + wire imports), prune.cjs.
+
+## Measurements
+- Canonical: digest 1279d5dcd2ad01a1 solved == hydrated; hydrated plan ~7 ms; file 119.9 KB raw.
+- Bundle JS before/after: 3,430,754 -> 3,304,071 B raw; 783,721 -> 744,315 B brotli (Garden chunk gone).
+
+## Done since (24 Sep)
+- Error screen (ui/ParkUnavailableScreen.ts), no timeout, retry = reload; dev park middleware (scripts/lib/dev-parks.mjs).
+- Retired check:solve-cost, check:park-boot, check:arrival-completes (+ slice scripts, SolveScheduler, CLIENT_BUNDLE).
+- Seeds 0..15 (SUPPORTED_PARK_SEEDS owner), default seed 5, seed-0..15 invariant files, save migration
+  (retired seed -> seed 5, position dropped: parkChangedUnderSave()).
+- CLAUDE.md + design doc "As built" (sizes, bundle, retired checks, seed coverage ledger).
+- build:parks 0..15: 1819 KB raw / 513 KB brotli total; every seed boots in headless Chromium from vite preview.
+- PR #705 is DRAFT, titled "[waiting on structural-backtrack]".
+
+## Open
+- #705 blocked: only seeds 2 and 5 of 0..15 pass all invariants at base. Rebase onto feat/structural-backtrack
+  when it lands; re-run build:parks, check, test:procgen, coplanar, swept-bus; reload the preview.
+- Asked Overseer: do pylons / slide legs / rail-race plan / boundary radii / ferris exit count as building?
+- Red on #705, all seed content (fails identically at base): Checks shard 3 castle-towers + shard 4 rail-race,
+  tie-frame on default seed 5; Procgen invariants 37 fails over 14 seeds; Coplanar 16 new seams on new seeds.
+  Every other chain step green locally; swept-bus, every-seed-builds, walk-reach, preview green on CI.
+- CI build:parks cache miss: 647 s for 16 seeds (step cap 18 min). Preview serves 590 KB brotli for all 16.
+- Preview verified: https://pr-705-01dbbbf-land-of-good-places.blockstack.workers.dev/spawn?pos=0,40&seed=5
+
+## 24 Sep, later: placement loops moved (Overseer: they count)
+- pylons, slide legs, rail-race exit+arch, ferris exit, stations, boundary radii -> park file `built`
+  (src/world/prebuilt/built.ts decideBuilt; procgen/world/builtLog.ts recordBuilt). Format 2.
+- src/bootstrap.ts is the page entry: update gate, then fetch park, then import main (module-scope
+  boundary reads need the file first). Boundary solver has its own light loader (ERR_REQUIRE_CYCLE risk).
+- plainData.ts leaf: boundary -> parkFile.ts closed a cycle that left PARK_BOUNDARY undefined in the bundle.
+- 16 parks: 2030 KB raw / 597 KB brotli. Every seed boots from vite preview; 99 -> error screen.
+- CI red is seed content only: fountain-hop seed 10, castle-towers/rail-race/tie-frame seed 5, 39 invariants.
+- Save migration confirmed by Jim (retired -> seed 5). Do NOT rebase onto structural-backtrack until told.
+
+## 1 Oct: landed on wip/sb-merge (structural-backtrack), accepted restarts
+- Branch rebuilt as ONE squash commit on origin/wip/sb-merge (rebase conflicted on commit 1). Old history:
+  origin/archive/prebuilt-parks-pre-sb. PR #705 base now feat/structural-backtrack (== wip/sb-merge d7383472).
+- Conflict rule: their edits to moved files went with the move; bridge-footprint geometry the client draws
+  with (siteFrame/siteFootprint/standsOnSomeBridge/pointStandsOnABridgeRamp/GATE_CORRIDOR_START_Z) stays in
+  src/world/paths.ts. Base-lines-missing check (scratchpad baselines.py): only re-pathed imports differ.
+- Restarts: file format 3 has `restart` + `acceptance` (acceptanceMetadata). Boot (prebuiltPark.ts) sets
+  __LGP_PARK_RESTART__ from the file before main loads; seed via parkSeedAsked() memo (no parkManifest import —
+  check:prebuilt-park proves bootstrap's static closure excludes parkManifest.ts). Identity = PARK_SEED_ASKED.
+- Acceptance log: accept:parks --write also writes procgen/acceptanceLog.json; build:parks copies a seed's
+  entry into its file (no loop in CI). check:accepted-restarts proves log restart == ACCEPTED_RESTARTS.
+- Source hash (park-source-hash.mjs) = src, procgen, test/procgen, scripts, package.json, lockfile — one owner
+  for park files AND acceptanceSourceHash (+LGP_* env). It previously missed procgen/ entirely.
+- In progress: fresh accept:parks 0-15 --write in worktree prebuilt-parks-accept (snapshot 3ecc4fa9); its
+  restarts must equal the recorded ones (proves the move changed no park); copy acceptanceLog.json back.
+- Then: build:parks (digest proof at accepted restarts), check, test:procgen, coplanar, swept-bus, preview.
+- DONE: fresh accept:parks 0-15 reproduced all 16 recorded restarts (acceptedRestarts.ts byte-identical);
+  log committed as procgen/acceptanceLog.json. build:parks at accepted restarts: 16/16 proven, 1100 s / 4 lanes,
+  2061 KB raw / 613 KB brotli. Seed 6 (restart 5) = 971 s (train search 507 s) -> CI caps raised
+  (per-seed 30 min, step 50, preview job 60, deploy 70). fix/sb-trainsearch (other agent) is making it cheaper;
+  if it moves parks they re-record restarts and tell me -> rebuild.
+- Rebased onto wip/sb-merge c7dcaf03 (park-identity.mts imports re-pointed to procgen/).
+- Next: gates (check, swept-bus, coplanar, test:procgen) running; then PR body, CI, preview, report.
+
+## 2 Oct: restarts are automatic (Jim), CI restructured
+- build:parks runs acceptPark (lead's one loop) per seed with fileAttempt (solve at r -> hydrated acceptance).
+  acceptPark has `lanes` (speculative, consumed in order, aborts past the answer). LGP_RESTART_LANES.
+- Manifest has `restarts`; builtRestartOf (scripts/lib/builtParks.mts) read first by lead's acceptedRestartSync/Of.
+- park-source-hash.mjs = import closure of solver+measures+hook (422 files; UI/Game/main outside) + toolchain.
+  Proved: Hud.ts edit keeps hash; procgen/paths.ts and invariants.ts edits change it; computed import() throws.
+- CI: .github/workflows/parks.yml (16-seed matrix, per-seed cache, merge-parks.mts, cache prebuilt-parks-<hash>);
+  .github/actions/restore-parks (wait+restore). All park-building workflows have a `Parks ready` job + restore.
+  Preview/deploy caps back to 10/30. Known: branch-scoped cache -> main cold after closure-touching merge.
+- Proof in flight: seeds 2,13 sequential vs RESTART_LANES=3 (.parks/seq vs .parks/spec) must match.
+
+## 2 Oct evening: replacement engineer (Claude Opus 5.5 1M, chosen by Overseer) — CI rate-limit fix
+- Cause: 8 `Parks ready` jobs (one per park-consuming workflow) polled `gh cache list`/`gh run list`
+  every 30 s for ~20 min -> installation rate limit (403) at 17:51 UTC on 819958fe; every Park N passed.
+- Fix (0bb9ac79): `.github/workflows/ci.yml` ("CI") calls parks.yml (now `workflow_call`, output `ready`)
+  then every consumer as a called workflow behind `needs: [parks]` + `if: !cancelled() && ready`.
+  restore-parks = hash + cache restore only (no API). Required `Checks` / `Procgen invariants`
+  aggregators moved to ci.yml top level (same names; called jobs show as "<caller> / <job>").
+  Callees lost workflow-level concurrency (github.workflow is the caller's). Deploy: job-level
+  `deploy-main` queue; ci.yml group = sha on push (main never cancelled). Deploy also runs on
+  `gh workflow run ci.yml --ref main`. live-version follows workflow_run [CI] on main, waits on
+  in-flight ci.yml runs (retrying API errors, 60 min). Parks reuse lookup retries 403 and falls back to building.
+- check:seed-coverage BLOCKING_JOBS now {workflow: ci.yml, job, runs: callee, via: caller job}; control
+  (break procgen call) -> red. checkChain.capSecondsForJob strips "<caller> / ". actionlint clean.
+- No rebase needed: branch already contains origin/feat/structural-backtrack b0f7e2dd. Step set vs it:
+  -solve-cost -arrival-completes +procgen-boundary +prebuilt-park +client-no-solver (all intended).
+- Stale 1afdf689 old-style runs still polling; cancel was denied to me -> asked Overseer.

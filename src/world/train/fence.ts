@@ -113,6 +113,13 @@ export function buildRailFence(
         [0, margin],
         [0, -margin],
       ] as const) {
+        // Only a probe the bridge actually covers may vote. An offset that
+        // falls just OFF the deck's end reads the ground there, and the
+        // minimum then set the seam's top at ground level beside the deck —
+        // a half-metre of bare rail a child could stand on, `check:park`'s
+        // `rail.walkable: 1` on seeds 4, 6 and 9 (one sample each, always the
+        // sample just before a deck begins).
+        if ((ox !== 0 || oz !== 0) && !bridge.covers(x + ox, z + oz)) continue;
         const height = bridge.heightAt(x + ox, z + oz);
         if (best === null || height < best) best = height;
       }

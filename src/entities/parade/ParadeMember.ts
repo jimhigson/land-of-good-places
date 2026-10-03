@@ -1,4 +1,4 @@
-import { Euler, Group, Vector3 } from 'three';
+import { Group, Quaternion, Vector3 } from 'three';
 import { clamp, clamp01, TAU, turnTowards } from '../../core/mathUtils';
 import { disposeTree } from '../../art/style/materials';
 import type { AssetHandle, CreatureHandle } from '../../art/style/asset';
@@ -133,6 +133,10 @@ const TABLE_ARRIVE_RADIUS = 0.55;
 const TABLE_HEAD_DIP = 0.45;
 const TABLE_CHEW = 0.09;
 
+
+/** A body's own left-right axis, which a recline turns about. */
+const X_AXIS = /* @__PURE__ */ new Vector3(1, 0, 0);
+
 /**
  * The smallest a follower's jet pack may be shrunk, as a fraction of the one on
  * the player's back.
@@ -243,7 +247,7 @@ export class ParadeMember {
     y: 0,
     z: 0,
     facing: 0,
-    pitch: 0,
+    turn: new Quaternion(),
     recline: 0,
   };
   private phase_: BedPhase = 'walking';
@@ -288,7 +292,8 @@ export class ParadeMember {
 
   /** Scratch for turning {@link slideOffset} into the world frame each frame. */
   private readonly slideLift = new Vector3();
-  private readonly seatFrame = new Euler(0, 0, 0, 'YXZ');
+  /** Scratch: the recline as a turn, composed onto the seat's. */
+  private readonly recline = new Quaternion();
 
   constructor(uid: string, item: ShopItem) {
     this.uid = uid;
@@ -446,17 +451,12 @@ export class ParadeMember {
       // it down the chute, and it must not be waiting to be spent when the
       // ride hands the body back at the bottom.
       this.velocity.set(0, 0, 0);
-      // Yaw first, then the chute's slope in the yawed frame — the same `YXZ`
-      // composition the child and the grown-up ride in. In the default `XYZ`
-      // the two compose the other way round and a pet lying down on a turn
-      // corkscrews. Put back in {@link leaveSlide}.
-      this.root.rotation.order = 'YXZ';
     }
     this.seat.x = seat.x;
     this.seat.y = seat.y;
     this.seat.z = seat.z;
     this.seat.facing = seat.facing;
-    this.seat.pitch = seat.pitch;
+    this.seat.turn.copy(seat.turn);
     // **Every field, or the body wears a stale one.** The seat is a scratch
     // object the ride refills for each companion in turn, so a field copied out
     // here is the only way its value reaches this member — and one left out
@@ -483,7 +483,6 @@ export class ParadeMember {
   leaveSlide(): void {
     if (!this.sliding) return;
     this.sliding = false;
-    this.root.rotation.order = 'XYZ';
     this.root.rotation.set(0, this.facing, 0);
     this.velocity.set(0, 0, 0);
     this.rejoice();
@@ -707,27 +706,31 @@ export class ParadeMember {
    *
    * **And it is lying down, because she is.** Jim, 1 September 2026: *"they
    * should ride behind them, lying down like the player"*. The angle is the
-   * child's own `RIDE_RECLINE`, handed over in {@link SlideSeat.recline}, added
-   * to the chute's pitch in the yawed `YXZ` frame — so `pitch` keeps the body
-   * parallel with the falling floor and `recline` lays it back on that floor,
-   * which is precisely how `Building.advanceRide` and `Player.setRidePose`
-   * compose the same two turns for her (her ride group takes the pitch, her
-   * model root takes the recline). One angle, one composition, two kinds of
-   * body.
+   * child's own `RIDE_RECLINE`, handed over in {@link SlideSeat.recline}, and
+   * composed onto the chute's own turn at the seat ({@link SlideSeat.turn}, from
+   * `SlideRide.frameAt`) about the body's own left-right axis — so the turn keeps
+   * the body parallel with the falling floor and `recline` lays it back on that
+   * floor. That is how `Building.advanceRide` turns her too: her ride group is
+   * handed the chute's frame through `Player.setRideFrame`, and her model root
+   * takes the recline. One frame, one angle, two kinds of body.
    */
   private updateOnSlide(dt: number, elapsed: number): void {
     this.updatePop(dt);
 
     this.facing = this.seat.facing;
-    this.root.rotation.set(this.seat.pitch + this.seat.recline, this.seat.facing, 0);
+    // The chute's own turn, then the recline about the body's own left-right
+    // axis within it — the child's composition exactly (her ride group takes
+    // the turn, her model root the recline).
+    this.root.quaternion
+      .copy(this.seat.turn)
+      .multiply(this.recline.setFromAxisAngle(X_AXIS, this.seat.recline));
 
     // Lifted so its lowest point rests on the seat instead of sinking through
     // the trough — see {@link slideOffset}. The lift is measured in the
     // reclined body's own frame, so it is turned into the world by the seat's
     // yaw and pitch (and *not* by the recline, which the measurement already
     // carries) before it is added.
-    this.seatFrame.set(this.seat.pitch, this.seat.facing, 0);
-    this.slideLift.copy(this.slideOffset).applyEuler(this.seatFrame);
+    this.slideLift.copy(this.slideOffset).applyQuaternion(this.seat.turn);
     this.position.set(
       this.seat.x + this.slideLift.x,
       this.seat.y + this.slideLift.y,

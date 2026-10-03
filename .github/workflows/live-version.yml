@@ -23,9 +23,12 @@ name: Live version
 # Note that `workflow_run` always runs the copy of this file on the default
 # branch, so this trigger only starts working once merged.
 on:
+  # The deploy is a job in the CI workflow's run on main (`ci.yml` calls
+  # `deploy.yml`), so this follows CI on main, however it ended.
   workflow_run:
-    workflows: [Deploy]
+    workflows: [CI]
     types: [completed]
+    branches: [main]
   schedule:
     # Every half hour. The site is expected to be current within ~40 s of a
     # merge, so half an hour is already a very generous grace period.
@@ -52,8 +55,9 @@ jobs:
   live-version:
     name: Live site is serving the newest commit
     runs-on: ubuntu-latest
-    # Generous: most of this is waiting out a deploy that is legitimately mid-build.
-    timeout-minutes: 40
+    # Generous: most of this is waiting out a deploy that is legitimately
+    # mid-build, behind a Parks build that may be cold (see the step below).
+    timeout-minutes: 75
     steps:
       # A deploy runs the whole `npm run build` gate before it publishes, so
       # "main is ahead of live" is the *normal, correct* state for tens of
@@ -63,32 +67,49 @@ jobs:
       - name: Wait for any deploy already in flight
         uses: actions/github-script@v8
         with:
+          # The deploy is a job inside `ci.yml`'s run on main, behind its Parks
+          # build, so a CI run on main still in flight is a deploy that may yet
+          # land. A rate-limited or failed API call is retried, never read as
+          # "no deploy in flight".
           script: |
             const started = Date.now();
-            const LIMIT_MS = 30 * 60 * 1000;
+            const LIMIT_MS = 60 * 60 * 1000;
+            const runsWithStatus = async (status) => {
+              for (let attempt = 1; ; attempt++) {
+                try {
+                  const { data } = await github.rest.actions.listWorkflowRuns({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    workflow_id: 'ci.yml',
+                    branch: 'main',
+                    event: 'push',
+                    status,
+                  });
+                  return data.workflow_runs;
+                } catch (error) {
+                  if (attempt >= 6) throw error;
+                  core.info(`listing CI runs failed (${error.status ?? error.message}), retrying`);
+                  await new Promise((resolve) => setTimeout(resolve, attempt * 30_000));
+                }
+              }
+            };
             for (;;) {
               const busy = [];
               for (const status of ['queued', 'in_progress', 'waiting', 'pending']) {
-                const { data } = await github.rest.actions.listWorkflowRuns({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  workflow_id: 'deploy.yml',
-                  status,
-                });
-                busy.push(...data.workflow_runs.map((run) => `${run.id} (${status})`));
+                busy.push(...(await runsWithStatus(status)).map((run) => `${run.id} (${status})`));
               }
               if (busy.length === 0) {
-                core.info(`No deploy in flight after ${Math.round((Date.now() - started) / 1000)}s.`);
+                core.info(`No CI run on main in flight after ${Math.round((Date.now() - started) / 1000)}s.`);
                 return;
               }
               if (Date.now() - started > LIMIT_MS) {
-                // Deliberately not a failure of *this* check: a deploy stuck for
-                // half an hour is its own problem, with its own red run.
-                core.warning(`Deploy still in flight after 30 min: ${busy.join(', ')}. Checking anyway.`);
+                // Deliberately not a failure of *this* check: a run stuck for an
+                // hour is its own problem, with its own red run.
+                core.warning(`CI on main still in flight after 60 min: ${busy.join(', ')}. Checking anyway.`);
                 return;
               }
-              core.info(`Deploy in flight: ${busy.join(', ')} — waiting.`);
-              await new Promise((resolve) => setTimeout(resolve, 30_000));
+              core.info(`CI on main in flight (its deploy may yet land): ${busy.join(', ')} — waiting.`);
+              await new Promise((resolve) => setTimeout(resolve, 60_000));
             }
 
       - name: Checkout
@@ -130,7 +151,7 @@ jobs:
               `moving while \`main\` goes on ahead, and every preview and deploy after it is ` +
               `describing a build nobody can see.\n\n` +
               `The exact commits it saw are in the [failing run](${runUrl}).\n\n` +
-              `To republish by hand: \`gh workflow run deploy.yml\`. This issue closes itself ` +
+              `To republish by hand: \`gh workflow run ci.yml --ref main\`. This issue closes itself ` +
               `on the next run that finds the site current again.`;
             const { data: open } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,

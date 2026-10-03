@@ -1,7 +1,23 @@
+import { lazyView } from '../../boot/lazyView';
+import { registerPlanCache } from '../../boot/planCaches';
 import { Rng, clamp } from '../../core/mathUtils';
 import { RAIL_RACE_PLAN } from './plan';
-import { planHazards, type HazardLayout, type HazardSchedule, type RaceLevel } from './hazards';
+import { planPart } from '../parkPlan';
+import { duckBarIntrusions, duckBarPose } from './barReach';
+import {
+  BARS_FROM_LEVEL,
+  DuckBarRefusal,
+  TRESTLE_SPACING,
+  planHazards,
+  type BarPlanDecision,
+  trestleGridIndex,
+  type HazardLayout,
+  type HazardSchedule,
+  type RaceLevel,
+} from './hazards';
 import { LANE_COUNT, PLAYER_LANE, type RailRaceRoute } from './route';
+import { LANE_SPACING_AT_PARK_SCALE } from './dimensions';
+import { CHILD_FOOTPRINT } from '../../art/models/kid';
 
 /**
  * **The race, as arithmetic.** No scene, no camera, no DOM.
@@ -252,7 +268,217 @@ const WOBBLE_LOCKOUT = 0.35;
  * `RailRace.ts` never has to know both the geometry and a race's own
  * schedule come from the same `planHazards` call.
  */
-export const HAZARD_LAYOUT: HazardLayout = planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, 1).lap;
+let hazardLayoutMemo: HazardLayout | null = null;
+/** A view: the ring follows the layout the park's driver decided. */
+export const HAZARD_LAYOUT: HazardLayout = lazyView(
+  () =>
+    (hazardLayoutMemo ??= planHazards(
+      RAIL_RACE_PLAN.route.length,
+      RACE_LAPS,
+      1,
+      raceBarPlanDecision(),
+    ).lap),
+);
+registerPlanCache(() => {
+  hazardLayoutMemo = null;
+});
+
+/**
+ * **Every duck bar must be able to slow you down where it stands** — refused
+ * where it is decided, by this file's own physics.
+ *
+ * A bonk keeps {@link BONK_SPEED_FACTOR} of your speed, but never takes you
+ * under {@link MIN_SPEED}. So a bar met by a rider who is already crawling at
+ * the floor costs her nothing: `Math.max(MIN_SPEED, speed * 0.35)` is the
+ * speed she came in with. Measured on seed 0, restart 0 (ring 599.93 m): the
+ * player's lane had a bar at 379.55 m, inside the black stretch 361.1-380.7 m.
+ * A rider mashing flat out through the black rail sparks — no thrust, six
+ * extra m/s² of drag — having been bonked to 9.80 m/s by her previous bar at
+ * 355.06 m, and she is at 3.40 m/s by about 370 m. The bar at 379.55 bonked
+ * her from 3.40 to 3.40. That was the single most frequent reason the root
+ * loop restarted a park (`duckBarsSlowYouWhereTheyStand`).
+ *
+ * Bars over the black stretches are allowed — Jim, twice, 7 August 2026 (see
+ * `hazards.ts`'s `BAR_LANE_OFFSETS`) — so this does **not** keep bars off the
+ * black rail. It refuses exactly the slots where the bonk would be clipped by
+ * the floor, for the rider the invariant races: {@link createRider} +
+ * {@link stepRider} + the level-{@link BARS_FROM_LEVEL} schedule, mashing
+ * every frame, never ducking. The rule is asked of **every lane** and the
+ * **whole race**, not just the player's lane and first lap, because a bar a
+ * rival cannot be slowed by is the same defect seen from another cart.
+ *
+ * "Clipped" means `speed * BONK_SPEED_FACTOR <= MIN_SPEED`: the bonk does not
+ * take its full bite. That is stricter than "speed did not fall at all" on
+ * purpose — just above the floor the bonk bites by a few centimetres a second,
+ * and a downhill 0.6 m later can hand it straight back.
+ *
+ * A refused slot moves the bar — `hazards.ts`'s `nearestLegalLayout` finds
+ * the legal layout nearest the tuned one — and
+ * the whole plan is then raced again, because moving one bar changes the
+ * speed every later bar of that lane is met at. Refusals only accumulate, so
+ * this ends: either no bar is clipped, or some bar has no legal slot left and
+ * `planHazards` throws `DuckBarRefusal`. That is then answered with the next
+ * decision — the same slots dealt to the lanes in another rotation
+ * (`BarPlanDecision.laneShift`), because a black stretch a lane leaves at the
+ * floor after a bar just before it is often crossed at speed by a lane that
+ * had no bar there. Seed 14 restart 0 needs this: the lap has 42 legal slots
+ * for 40 bars, and lane 0's refused slot 41 left the last bar nowhere to go.
+ * Only when every rotation fails is the layout refused — **in the plan
+ * phase**, by `parkPlan.ts`'s `railRaceBars` builder, which names the decisions
+ * that put the ring and its arch where they are
+ * (`RailRaceRoute.archDecidedBy`) so the driver re-chooses one of them. Never a
+ * bad bar kept, and never a throw from the world phase: the race reads the
+ * decision the plan made ({@link raceBarPlanDecision}).
+ *
+ * **The physics is not the only refuser.** Before any of this, every slot where
+ * a bar on either ring would hang inside another lane's track is refused
+ * ({@link reachRefusedSlots}), and the physics starts from those.
+ */
+export function planRaceBars(rings: {
+  readonly raceRing: RailRaceRoute;
+  readonly walkPastRing: RailRaceRoute;
+}): BarPlanDecision {
+  return barPlanDecision(rings.raceRing, [rings.walkPastRing, rings.raceRing]);
+}
+
+/**
+ * The bar layout's decision, as the park's plan made it ({@link planRaceBars},
+ * driven by `parkPlan.ts`'s `railRaceBars` builder). Read, never re-solved, so
+ * the world phase cannot meet a `DuckBarRefusal`: a park whose rings leave the
+ * bars nowhere was refused, and re-chosen, before anything was built on it.
+ */
+function raceBarPlanDecision(): BarPlanDecision {
+  return planPart('railRaceBars').bars;
+}
+
+/**
+ * The bar layout's decision for `route`: the lane rotation the ride was tuned
+ * with if refusals can be met there, else the next rotation that can. Throws
+ * `DuckBarRefusal` only when no rotation leaves every bar a legal slot, which
+ * the plan's `railRaceBars` builder turns into a refusal. See
+ * {@link raceBarPlanDecision}'s doc comment above for the rule.
+ */
+export function barPlanDecision(
+  route: RailRaceRoute,
+  /**
+   * Every ring the layout is drawn on. A slot where a bar on any of them would
+   * reach into another lane's track is refused before the search starts — see
+   * {@link reachRefusedSlots}.
+   */
+  drawnOn: readonly RailRaceRoute[] = [route],
+): BarPlanDecision {
+  const reach = reachRefusedSlots(route.length, drawnOn);
+  const reasons: string[] = [];
+  for (let laneShift = 0; laneShift < LANE_COUNT; laneShift += 1) {
+    try {
+      return { laneShift, refusedByLane: refusedBarSlots(route, laneShift, reach) };
+    } catch (error) {
+      if (!(error instanceof DuckBarRefusal)) throw error;
+      reasons.push(`lane shift ${laneShift}: ${error.message}`);
+    }
+  }
+  throw new DuckBarRefusal(
+    `railRace/simulate.ts: no lane rotation leaves every duck bar a slot where it can slow a ` +
+      `flat-out rider — ${reasons.join('; ')}`,
+  );
+}
+
+/**
+ * The trestle slots, by lane, where a flat-out never-ducking rider on `route`
+ * would meet a bar with her bonk clipped by the speed floor, for one lane
+ * rotation. See {@link raceBarPlanDecision} for the rule and why.
+ */
+export function refusedBarSlots(
+  route: RailRaceRoute,
+  laneShift = 0,
+  /** Slots already refused for another reason, which the physics starts from. */
+  already: ReadonlyMap<number, ReadonlySet<number>> = new Map(),
+): ReadonlyMap<number, ReadonlySet<number>> {
+  const refused = new Map<number, Set<number>>([...already].map(([lane, slots]) => [lane, new Set(slots)]));
+  // Bounded by construction (each round refuses at least one new lane-slot
+  // pair, and there are LANE_COUNT × slots of those); the guard only turns a
+  // future bug into an error rather than a hang.
+  for (let round = 0; round <= LANE_COUNT * Math.ceil(route.length); round += 1) {
+    const schedule = planHazards(route.length, RACE_LAPS, BARS_FROM_LEVEL, { refusedByLane: refused, laneShift });
+    let refusedAny = false;
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      const clipped = firstClippedBar(route, schedule, lane);
+      if (clipped === null) continue;
+      const slot = trestleGridIndex(route.wrap(clipped), route.length);
+      const laneRefused = refused.get(lane) ?? new Set<number>();
+      if (laneRefused.has(slot)) {
+        throw new Error(
+          `railRace/simulate.ts: refusedBarSlots found lane ${lane}'s bar at ${clipped.toFixed(2)} m clipped on ` +
+            `slot ${slot}, which it had already refused — the planner ignored a refusal`,
+        );
+      }
+      laneRefused.add(slot);
+      refused.set(lane, laneRefused);
+      refusedAny = true;
+    }
+    if (!refusedAny) return refused;
+  }
+  throw new Error('railRace/simulate.ts: refusedBarSlots did not settle');
+}
+
+/**
+ * **Slots where a bar would reach into another lane's track**, by lane — on
+ * any ring the layout is drawn on.
+ *
+ * A bar is longer than a lane is wide, so its ends always stand over its
+ * neighbours' rails in plan, and only the lanes' different heights keep it
+ * out of them (see `barReach.ts`). Where a neighbour stands at the bar's own
+ * height the bar hangs in that lane's sleepers or in the path of its cart —
+ * measured on seed 4, restart 2: 81 of 196 lane-slots. Each is refused, and
+ * the placement search moves the bar to another legal slot exactly as it does
+ * for a physics refusal. This does not depend on where any other bar went, so
+ * it is asked once, of the very matrix `track.ts` would draw
+ * (`duckBarPose`), by the same function the park's invariant measures the
+ * built bars with (`duckBarIntrusions`).
+ */
+export function reachRefusedSlots(
+  loopLength: number,
+  drawnOn: readonly RailRaceRoute[],
+): ReadonlyMap<number, ReadonlySet<number>> {
+  const refused = new Map<number, Set<number>>();
+  const count = Math.max(1, Math.floor(loopLength / TRESTLE_SPACING));
+  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    for (let slot = 0; slot < count; slot += 1) {
+      const at = (slot / count) * loopLength;
+      const reaches = drawnOn.some(
+        (ring) => duckBarIntrusions(ring, lane, duckBarPose(ring, lane, at).matrix).length > 0,
+      );
+      if (!reaches) continue;
+      const laneRefused = refused.get(lane) ?? new Set<number>();
+      laneRefused.add(slot);
+      refused.set(lane, laneRefused);
+    }
+  }
+  return refused;
+}
+
+/**
+ * The first bar crossing, in metres travelled, at which a rider in `lane` who
+ * mashes every frame and never ducks has her bonk clipped by {@link MIN_SPEED}
+ * — or null if every bar she meets in the whole race takes its full bite.
+ */
+function firstClippedBar(route: RailRaceRoute, schedule: HazardSchedule, lane: number): number | null {
+  const rider = createRider(lane);
+  const crossings = schedule.barCrossingsByLane[lane] ?? [];
+  const dt = 1 / 60;
+  const total = route.length * RACE_LAPS;
+  let steps = 0;
+  while (!rider.finished && rider.travelled < total && steps < 60 * 60 * 10) {
+    const cursor = rider.barCursor;
+    const speedIn = rider.speed;
+    stepRider(route, rider, schedule, { pressed: true, ducking: false }, dt);
+    if (rider.barCursor > cursor && speedIn * BONK_SPEED_FACTOR <= MIN_SPEED) {
+      return crossings[cursor] ?? null;
+    }
+    steps += 1;
+  }
+  return null;
+}
 
 /**
  * The hazard schedule for one chosen level — see `hazards.ts`'s header.
@@ -261,15 +487,38 @@ export const HAZARD_LAYOUT: HazardLayout = planHazards(RAIL_RACE_PLAN.route.leng
  * idling rivals sit in between races.
  */
 export function scheduleForLevel(level: RaceLevel): HazardSchedule {
-  return planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, level);
+  return planHazards(RAIL_RACE_PLAN.route.length, RACE_LAPS, level, raceBarPlanDecision());
 }
 
 /** The finish line, in metres travelled. */
-export const RACE_DISTANCE = RAIL_RACE_PLAN.route.length * RACE_LAPS;
+/**
+ * A live binding: the ring's length follows the layout the park's driver
+ * decided, so this is computed on first read and forgotten with the rest of
+ * the plan-derived memos. `raceDistance()` is the owner; the binding is kept
+ * for the two readers that want a plain number.
+ */
+let raceDistanceMemo: number | null = null;
+export function raceDistance(
+  /**
+   * The ring being raced, when the caller holds one: `stepRider` is asked of a
+   * candidate ring by the plan's `railRaceBars` builder before the park's
+   * Rail Race is decided, so it must not read the decided one.
+   */
+  route?: RailRaceRoute,
+): number {
+  if (route) return route.length * RACE_LAPS;
+  return (raceDistanceMemo ??= RAIL_RACE_PLAN.route.length * RACE_LAPS);
+}
+registerPlanCache(() => {
+  raceDistanceMemo = null;
+});
 
 export interface Rider {
   readonly lane: number;
-  /** Metres run since the lights went out. Only ever increases. */
+  /**
+   * Metres run since the lights went out. Only ever increases. Starts at
+   * `-`{@link gridSetback} on a set-back grid slot, and at 0 on the front row.
+   */
   travelled: number;
   speed: number;
   /** 0..1: the tap-rate charge that drives thrust. See this file's header. */
@@ -321,6 +570,53 @@ export function createRider(lane: number): Rider {
     finishTime: 0,
     mashPhase: 0,
   };
+}
+
+/**
+ * **How far a set-back grid slot sits behind the line, at park scale** — the
+ * along-track distance that keeps two children in neighbouring lanes from
+ * touching when their carts are lined up at rest.
+ *
+ * Lanes are exactly one cart apart ({@link LANE_SPACING_AT_PARK_SCALE}, 1.10 m)
+ * and a child is {@link CHILD_FOOTPRINT} (1.80 m, hair and hat, measured off
+ * real models and guarded by `childrenFitTheSeatsTheySitIn`) across, nearly all
+ * of it head. So four carts parked abreast put every rider's head 0.70 m inside
+ * her neighbour's: measured on the built park, 22 of one rival's skull vertices
+ * inside the next rival's hair on seed 9, and a torso lying in the plane of the
+ * neighbour's hair shell, which is the `hair.shell.crop | torso` seam
+ * `check:coplanar` found. Two footprint circles one lane apart stop touching
+ * once they are `sqrt(footprint^2 - pitch^2)` apart along the track.
+ *
+ * Derived from both owners, never typed: widen the cart or grow the tallest
+ * hat and the grid opens up with them.
+ */
+export const GRID_SETBACK_AT_PARK_SCALE = Math.sqrt(
+  CHILD_FOOTPRINT * CHILD_FOOTPRINT - LANE_SPACING_AT_PARK_SCALE * LANE_SPACING_AT_PARK_SCALE,
+);
+
+/**
+ * How far behind the line `lane` starts, in metres of `travelled`, on a ring
+ * drawn at `scale` (`RailRaceRoute.scale`: carts, riders and lane pitch all
+ * scale with it, so the gap has to as well).
+ *
+ * A racing grid: the player's lane is on the front row and every other lane
+ * counting in from hers is set back, so no two neighbours are ever level. The
+ * player is never the one set back — the start is a six-year-old's to win.
+ */
+export function gridSetback(lane: number, scale: number): number {
+  return (PLAYER_LANE - lane) % 2 === 0 ? 0 : GRID_SETBACK_AT_PARK_SCALE * scale;
+}
+
+/**
+ * A rider waiting in her grid slot on a ring drawn at `scale` — the one way a
+ * real race, or the idle rivals, line up. {@link createRider} alone is a rider
+ * on the line itself, for the solo runs that measure the physics and have no
+ * neighbours to keep apart.
+ */
+export function riderOnGrid(lane: number, scale: number): Rider {
+  const rider = createRider(lane);
+  rider.travelled = -gridSetback(lane, scale);
+  return rider;
 }
 
 /** What a rider is asking for this exact step. */
@@ -459,7 +755,7 @@ export function stepRider(
   const lap = lapNow !== lapBefore && lapNow < RACE_LAPS ? lapNow + 1 : 0;
 
   let finishedNow = false;
-  if (rider.travelled >= RACE_DISTANCE) {
+  if (rider.travelled >= raceDistance(route)) {
     rider.finished = true;
     finishedNow = true;
   }
@@ -966,11 +1262,21 @@ export interface FieldOutcome {
  * skill value re-rolls every rival's whole race and the check reads as noise
  * rather than a measurement of the change that was actually made.
  */
-export function simulateField(playerStrategy: Strategy, level: RaceLevel, seed: number): FieldOutcome {
+export function simulateField(
+  playerStrategy: Strategy,
+  level: RaceLevel,
+  seed: number,
+  /**
+   * Called once per step with every rider, after they have all moved — for a
+   * measurement that wants the whole field's positions through the race, such
+   * as how often two neighbours draw level. Read-only; the race is unchanged.
+   */
+  observe?: (riders: readonly Rider[], seconds: number) => void,
+): FieldOutcome {
   const route = RAIL_RACE_PLAN.route;
   const hazards = scheduleForLevel(level);
   const dt = 1 / 60;
-  const riders = Array.from({ length: LANE_COUNT }, (_unused, lane) => createRider(lane));
+  const riders = Array.from({ length: LANE_COUNT }, (_unused, lane) => riderOnGrid(lane, route.scale));
   const rngs = riders.map((_unused, lane) => new Rng(seed + lane * 0x9e37));
   const player = riders[PLAYER_LANE]!;
   const rivals = riders.filter((rider) => rider.lane !== PLAYER_LANE);
@@ -993,10 +1299,11 @@ export function simulateField(playerStrategy: Strategy, level: RaceLevel, seed: 
       order.push(rider.lane);
       if (isPlayer) {
         playerSeconds = seconds;
-        marginMetres = RACE_DISTANCE - Math.max(...rivals.map((other) => other.travelled));
+        marginMetres = raceDistance() - Math.max(...rivals.map((other) => other.travelled));
       }
     }
     seconds += dt;
+    observe?.(riders, seconds);
   }
 
   return {

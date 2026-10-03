@@ -397,6 +397,24 @@ const suites: readonly { readonly label: string; readonly cases: Case[] }[] = [
   },
 ];
 
+/**
+ * **What makes this a check rather than a printout (#525).**
+ *
+ * It used to have no failure path at all — every sweep printed and the process
+ * exited 0 whatever it found, so `check:wall-tunnelling` could not have gone red
+ * had anything ever run it. The assertions are the claims this file already
+ * made in prose, now enforced:
+ *
+ * - **with sub-stepping (what ships), nothing tunnels** — in either suite;
+ * - **without it, something does.** That is the control. The old integration
+ *   is known to tunnel at the frame clamp; a sweep that cannot find it with
+ *   sub-stepping off cannot find it with sub-stepping on either, and a zero
+ *   from it would be a zero about nothing;
+ * - **ordinary movement is identical**, to the last bit, at every frame rate
+ *   that needs only one sub-step.
+ */
+const failures: string[] = [];
+
 for (const suite of suites) {
   console.log(
     `\n=== ${suite.label}\n    ${suite.cases.length} shapes × ${DELTAS.length} frame rates × ` +
@@ -420,6 +438,19 @@ for (const suite of suites) {
         `    took                  ${((Date.now() - started) / 1000).toFixed(1)} s`,
     );
     for (const example of summary.examples) console.log(`      e.g. ${example}`);
+    if (substepping && summary.counts.tunnelled > 0) {
+      failures.push(
+        `${suite.label}: ${summary.counts.tunnelled} of ${summary.runs} runs TUNNELLED through a wall with ` +
+          `sub-stepping on — e.g. ${summary.examples.join('; ')}`,
+      );
+    }
+    if (!substepping && summary.counts.tunnelled === 0) {
+      failures.push(
+        `instrument: ${suite.label}: the old integration (sub-stepping off) tunnelled 0 of ${summary.runs} ` +
+          'times — it is known to tunnel at the frame clamp, so this sweep can no longer see a tunnel, and ' +
+          "the with-sub-stepping zero above means nothing",
+      );
+    }
   }
 }
 
@@ -452,5 +483,18 @@ for (const dt of DELTAS) {
         `${String(Math.ceil(step / limit)).padStart(9)}  ${worst.toFixed(6)} m` +
         (worst === 0 ? '   (identical)' : ''),
     );
+    if (Math.ceil(step / limit) <= 1 && worst !== 0) {
+      failures.push(
+        `ordinary movement changed: at ${Math.round(1 / dt)} fps ${sprint ? 'sprint' : 'walk'} (one sub-step) ` +
+          `the walk with and without sub-stepping diverges by ${worst} m — it must be exactly 0`,
+      );
+    }
   }
 }
+
+if (failures.length > 0) {
+  console.error(`\ncheck:wall-tunnelling FAILED — ${failures.length} problem(s)`);
+  for (const failure of failures) console.error(`  - ${failure}`);
+  process.exit(1);
+}
+console.log('\ncheck:wall-tunnelling ok — no tunnel with sub-stepping, the old code still tunnels (control), ordinary walking identical');

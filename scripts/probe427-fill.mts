@@ -17,6 +17,9 @@
 import './headless-canvas.mjs';
 import { Vector3 } from 'three';
 import { buildHeadlessPark, quietly } from './park-harness.mts';
+import { NavGrid } from '../src/world/NavGrid.ts';
+import { PLAYER_RADIUS } from '../src/core/constants.ts';
+import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 import { PoiGraph } from '../src/entities/npc/poiGraph.ts';
 import { bridgeHeightAt } from '../src/world/train/bridges.ts';
 import { isOnPath } from '../src/world/pathGraph.ts';
@@ -29,7 +32,15 @@ const PAVED_CLEARANCE = NPC_RADIUS - 0.02;
 const park = buildHeadlessPark();
 const collision = park.world.collision;
 const height = (x: number, z: number) => bridgeHeightAt(park.world.train.bridges, x, z);
-const graph = quietly(() => new PoiGraph(collision, height));
+const graph = quietly(
+  () =>
+    new PoiGraph({
+      grid: new NavGrid(collision, PLAYER_RADIUS, JUMP_APEX_HEIGHT, undefined, (x, z) =>
+        park.world.train.bridges.some((bridge) => bridge.covers(x, z)),
+      ),
+      sample: park.sample,
+    }),
+);
 const route = TRAIN_PLAN.route;
 
 const probe = new Vector3();

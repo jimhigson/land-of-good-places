@@ -411,7 +411,7 @@ export class BallPitSimulation {
     // See BALL_SOLVER_ITERATIONS: the whole sweep runs several times against
     // the same broad-phase grid so a multi-contact pile actually converges
     // within this sub-step.
-    const perIterationDamping = CONTACT_DAMPING ** (1 / BALL_SOLVER_ITERATIONS);
+    const perIterationDamping = Math.pow(CONTACT_DAMPING, 1 / BALL_SOLVER_ITERATIONS);
     for (let iteration = 0; iteration < BALL_SOLVER_ITERATIONS; iteration += 1) {
       for (let i = 0; i < this.count; i += 1) {
         if (this.asleep[i]) continue;

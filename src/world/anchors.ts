@@ -1,4 +1,6 @@
 import { PALETTE } from '../core/palette';
+import { lazyArrayView, lazyView } from '../boot/lazyView';
+import { registerPlanCache } from '../boot/planCaches';
 import { placedEntry } from './parkLayout';
 
 /**
@@ -103,8 +105,9 @@ function placed(id: AnchorId, copy: AnchorCopy): AnchorDefinition {
   };
 }
 
-export const ANCHORS: readonly AnchorDefinition[] = [
-  placed('building', {
+function anchorsNow(): readonly AnchorDefinition[] {
+  return [
+    placed('building', {
     signTitle: 'The Castle',
     signSubtitle: 'come in and look around!',
     glyph: '\u{1F3F0}',
@@ -114,7 +117,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
       'and the top of the ginormous slide. The slide exits towards the ballPit ' +
       'anchor, which the layout solver keeps within reach (see parkManifest).',
   }),
-  placed('hotel', {
+    placed('hotel', {
     signTitle: 'The Land Hotel',
     signSubtitle: 'fifty floors of crystal!',
     glyph: '\u{1F3E8}',
@@ -125,7 +128,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
       'with beds to sleep on or jump between. Rooms are disjoint spaces - see ' +
       'world/hotel/.',
   }),
-  placed('ballPit', {
+    placed('ballPit', {
     signTitle: 'Ball Pit',
     signSubtitle: 'the ginormous slide lands here!',
     glyph: '\u{1F389}',
@@ -134,7 +137,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
       'Landing pit of squishy balls at the bottom of the ginormous slide. The ' +
       'manifest holds it within slide reach of the building whatever the seed.',
   }),
-  placed('ferrisWheel', {
+    placed('ferrisWheel', {
     signTitle: 'Space Ferris Wheel',
     signSubtitle: 'all the way up to space!',
     glyph: '\u{1F3A1}',
@@ -143,7 +146,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
       'The wheel climbs into space: park shrinks, Earth appears, stars, moon, ' +
       'planets, a waving alien and Space RiPika. It lights up at night.',
   }),
-  placed('dodgems', {
+    placed('dodgems', {
     signTitle: 'Dodgems',
     signSubtitle: 'bonk the wobbly tree!',
     glyph: '\u{1F697}',
@@ -152,7 +155,7 @@ export const ANCHORS: readonly AnchorDefinition[] = [
       'Arena floor plus the fake wooden tree in the middle. Bonking the tree ' +
       'wobbles it, drops apples, rains leaves and pops a surprised bird out.',
   }),
-  placed('waterFight', {
+    placed('waterFight', {
     signTitle: 'Water Fight',
     signSubtitle: 'very big water guns!',
     glyph: '\u{1F4A6}',
@@ -161,11 +164,18 @@ export const ANCHORS: readonly AnchorDefinition[] = [
       'Splash points, giggling kids who splash back, drippy soaked hair and a ' +
       'little rainbow when lots of water is in the air.',
   }),
-];
+  ];
+}
+let anchorsMemo: readonly AnchorDefinition[] | null = null;
+/** A view: the anchors stand where the layout the park's driver decided put them, and follow a re-decision. */
+export const ANCHORS: readonly AnchorDefinition[] = lazyArrayView(() => (anchorsMemo ??= anchorsNow()));
+registerPlanCache(() => {
+  anchorsMemo = null;
+});
 
-export const ANCHORS_BY_ID: Readonly<Record<AnchorId, AnchorDefinition>> = Object.fromEntries(
-  ANCHORS.map((anchor) => [anchor.id, anchor]),
-) as Record<AnchorId, AnchorDefinition>;
+export const ANCHORS_BY_ID: Readonly<Record<AnchorId, AnchorDefinition>> = lazyView(
+  () => Object.fromEntries(ANCHORS.map((anchor) => [anchor.id, anchor])) as Record<AnchorId, AnchorDefinition>,
+);
 
 /** Scene-graph name given to each anchor's group. */
 export function anchorGroupName(id: AnchorId): string {

@@ -6,7 +6,7 @@ import type { Rng } from '../../core/mathUtils';
  * stays open, and whether a tap landed inside it. It knows nothing about
  * three.js, the DOM or sound — `SpookyHouse.ts` drives it with `dt` every
  * frame and reacts to the events it hands back. Kept pure and dependency-free
- * the same way `boot/solveScheduler.ts` is, so it can be driven by a fake
+ * the same way the park's old slice scheduler was, so it can be driven by a fake
  * clock in `test/spookyJumpscare.test.ts` without a canvas or a scene in
  * sight.
  *

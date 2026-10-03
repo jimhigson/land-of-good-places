@@ -1,0 +1,1585 @@
+/**
+ * **`check:pet-slide`, as a function** — one owner, asked by the script (which
+ * prints it and fails on every clause) and by the root acceptance loop
+ * (`scripts/park-attempt.mts`), which asks only what the park's slide decides:
+ * how the chase lens frames her and her companions on this route. What every
+ * clause asks, and why, is the script's header.
+ *
+ * It builds **its own Worlds**, in the same process, over the plan that process
+ * already solved. Asked for decisions only it rides once, wired: the second,
+ * unwired descent is the instrument's control, which CI's own run keeps asking.
+ */
+import '../headless-dom.mjs';
+import { Box3, Matrix4, Object3D, Quaternion, Vector3 } from 'three';
+
+export interface PetSlideFindings {
+  readonly voids: readonly string[];
+  readonly decisions: readonly string[];
+  readonly code: readonly string[];
+  readonly notes: readonly string[];
+  readonly seed: number;
+  readonly source: string;
+}
+
+export async function petSlide(
+  options: { readonly quiet?: boolean; readonly clauses?: 'all' | 'decisions' } = {},
+): Promise<PetSlideFindings> {
+  const quiet = options.quiet ?? false;
+  const all = (options.clauses ?? 'all') === 'all';
+  const log = (...parts: unknown[]): void => {
+    if (!quiet) console.log(...parts);
+  };
+  const err = (...parts: unknown[]): void => {
+    if (!quiet) console.error(...parts);
+  };
+  const write = (text: string): void => {
+    if (!quiet) process.stderr.write(text);
+  };
+  void err;
+  await import('../headless-canvas.mjs');
+  const { Scene } = await import('three');
+  const { World } = await import('../../src/world/World.ts');
+  const { Sky } = await import('../../src/world/Sky.ts');
+  const { Player } = await import('../../src/entities/Player.ts');
+  const { Parade } = await import('../../src/entities/parade/Parade.ts');
+  const { CHUTE_ENVELOPE } = await import('../../src/world/building/SlideRide.ts');
+  const { bendAllowanceExhaustions, resetBendAllowanceExhaustions, MAX_BEND_ALLOWANCE } = await import(
+    '../../src/world/slide/petRiders.ts'
+  );
+  const { Raycaster } = await import('three');
+  const { PARADE_MEMBER_RADIUS } = await import('../../src/core/constants.ts');
+  const { IsoCamera } = await import('../../src/core/IsoCamera.ts');
+  const { gameStore } = await import('../../src/state/index.ts');
+  const { shopItem } = await import('../../src/world/building/shops/catalogue.ts');
+  const { PARK_SEED } = await import('../../src/world/parkManifest.ts');
+  const { parkSeedSource } = await import('../../src/world/parkSeedPool.ts');
+  const { terrainHeight } = await import('../../src/world/terrain.ts');
+  // **The framing band has one owner**, `src/world/slide/petFraming.ts`, because
+  // the camera solve has to respect the same two numbers while PLACING the lens.
+  // A copy here would be the two-definitions fault inside the fix for a
+  // two-definitions fault. This file measures the band; it does not define it.
+  const { PET_FRAME_FLOOR, PET_FRAME_CEILING } = await import(
+    '../../src/world/slide/petFraming.ts'
+  );
+  // **#518's instrument.** The near bound's own counters, so "it fires" and "it
+  // cannot fire" are distinguishable from a run rather than from reading the
+  // source. `CEILING_REJECT_ABOVE` comes from the solver too — printing the
+  // worst estimate beside a threshold restated here would be the copy this
+  // module family keeps being bitten by.
+  const {
+    chaseCeilingRejections,
+    chaseCeilingCalls,
+    chaseCeilingWorstShare,
+    CEILING_REJECT_ABOVE,
+    chaseSolveCost,
+  } = await import('../../src/world/slide/chaseEye.ts');
+  type InteriorControls = import('../../src/world/building/Building.ts').InteriorControls;
+
+  // **Say which park was measured, on every run, pass or fail.** Every clause in
+  // this file is a statement about one generated park, and until #508 a Node
+  // check silently drew a different one each run — so the same command gave a
+  // different answer with no edit between, and nothing in the output said why.
+  // Two separate agents then spent hours re-deriving "it is not the harness" from
+  // frame counts, because a red log named a pet and a frame number but never the
+  // park those belonged to. `drawn` here means the run is not repeatable and the
+  // result is about whichever park came up; it must never appear under Node.
+  //
+  // **What that tripwire is and is not.** Seeing `drawn` under Node means #508's
+  // `inNode()` early return in `resolveParkSeed` has been removed or broken —
+  // that one branch, and nothing wider. It is not general assurance that the park
+  // is the one you meant: this file measures **exactly one** park, the canonical
+  // seed, 1 of the 16 in the pool, so a green run here is a statement about seed
+  // 20260728 and no other while a child can draw any of the 16. That gap is #510;
+  // this line makes it legible rather than closing it.
+  log(`  park seed ${PARK_SEED} (${parkSeedSource()})`);
+
+  // Live controls, as `check:slide-rider` uses: boarding the slide is a change of
+  // space, and the ride does not start until the iris midpoint fires.
+  const liveControls: InteriorControls = {
+    cancelWalk: () => {},
+    iris: (midpoint) => midpoint(),
+    flash: () => {},
+    snapCamera: () => {},
+  };
+
+  /**
+   * The companions she takes down with her.
+   *
+   * Three, and three different species: one would not prove they do not pile up,
+   * and two of a kind would not prove the spacing works for models of different
+   * heights. Granted the way the park grants them — `catchWildPet`, the roof
+   * garden's own route into the parade — rather than by building `ParadeMember`s
+   * here, so what rides the slide is what a child who caught three animals has.
+   */
+  const PET_IDS = ['pet.kitten', 'pet.bunny', 'pet.mouse'] as const;
+
+  /** How long after boarding every companion must be on the chute, in seconds. */
+  const BOARD_SECONDS = 2;
+
+  /**
+   * The furthest a companion may move in one frame, in metres, after the boarding
+   * teleport.
+   *
+   * The chute is travelled at `GIANT_SLIDE_SPEED` (6.5 m/s), so a frame at 60 fps
+   * covers 0.108 m and nothing on this ride has any business going faster. 0.35 m
+   * is three times that: comfortably clear of the honest motion, and two orders
+   * of magnitude under the sort of hand-off failure it is here to catch — a pet
+   * left at the top and snapped down, or dropped to the ground under the chute.
+   */
+  const MAX_STEP = 0.35;
+
+  /**
+   * **How much the chase lens's step may change between two frames, in mm/frame²
+   * on a 60 Hz clock.** The rider herself runs at 1.3 mm p50 and 3.5 mm worst down
+   * the canonical ride — the chute's own curvature at 6.5 m/s — and the lens hung
+   * behind her swings through a little more on a bend. Ten millimetres is room for
+   * that and a tenth of the 0.1 m candidate step whose flicker this exists for.
+   */
+  const CHASE_JERK_MM = 10;
+
+  /** How close a companion must be to her a moment after the ride, in metres. */
+  const REGROUP_RADIUS = 14;
+  /** How long it is given to get there. */
+  const REGROUP_SECONDS = 3;
+
+  /**
+   * **How far the point the chase solve used may sit from the companion's drawn
+   * centre**, in metres (#518).
+   *
+   * **Read off the failures it has to separate, not reasoned from first
+   * principles** — the same method `PET_FRAME_CEILING`'s own doc records as
+   * *"read off the failure, not chosen in the abstract"*, and the method this
+   * whole ticket argues for:
+   *
+   * | | distance |
+   * |---|---|
+   * | one frame of travel, which this comparison is stale by *by construction* | **measured** — see below |
+   * | **0.40 m — this threshold** | a few frames' headroom |
+   * | the derived stand-in tried first, and rejected | 0.70 m |
+   * | the **seat**, i.e. a straight reversion to #518 | ~0.95 m |
+   *
+   * The staleness is real and not a defect: the solve reads the body point at the
+   * top of `advanceRide` and the animals are seated at the bottom, exactly as
+   * `Building.chaseCompanions` is deliberately one frame behind. So the floor
+   * cannot be zero. The ceiling is set by what the clause must reject, and a
+   * threshold above 0.70 m would fail to reject the very error this fix was
+   * rewritten to remove.
+   *
+   * **The floor is never written down here.** One frame of travel is a quantity
+   * this file already *measures* — `worstStep`, printed as "biggest single-frame
+   * step" — so quoting it as a literal would be two owners of one number, which
+   * is the fault this very PR is about. The failure message interpolates the
+   * measured value, and {@link bodyDriftHeadroom} asserts the relationship still
+   * holds rather than trusting a comment about it.
+   */
+  const MAX_BODY_DRIFT = 0.4;
+
+  /**
+   * How many frames of travel {@link MAX_BODY_DRIFT} must stay clear of.
+   *
+   * 2 rather than today's ~3.4 because this guards the *relationship*, not the
+   * current value: it should fire when the window has genuinely closed up, not
+   * every time a frame gets slightly longer. Below 2x, a clause measured across
+   * one unavoidable frame of staleness is being asked to resolve less than two
+   * frames, and honest runs start failing.
+   */
+  const MIN_DRIFT_HEADROOM = 2;
+
+  /** The fraction of chase rasters the nearest companion must be in the shot on. */
+  const IN_SHOT_FLOOR = 0.95;
+
+  /**
+   * How often the chase shot is rastered, in chase frames.
+   *
+   * Every 25th rather than every 45th, since the raster is the *only* instrument
+   * left on the framing question and eight samples across a whole descent is a
+   * thin basis for a percentage. It is the expensive line in this file — 8160
+   * rays through four object trees — so it is sampled rather than run every
+   * frame, but the sampling has to be dense enough that a beat which loses the
+   * pet for a second cannot fall between two of them.
+   */
+  const RASTER_EVERY = 25;
+
+  /**
+   * The raster the chase shot is measured on. Landscape, and the same shape
+   * `check:slide-rider` measures the same camera with, so the two files' pixel
+   * numbers are comparable.
+   */
+  const RASTER_W = 120;
+  const RASTER_H = 68;
+
+  /**
+   * How far back a companion has to be lying for this to call it lying down,
+   * expressed as the dot product of its own **up** axis with the chute's tangent.
+   *
+   * Zero is a body standing on the chute — its up axis square to the direction of
+   * travel — which is what shipped, and which Jim saw as a pet inside her head.
+   * Lying back on its shoulders at `RIDE_RECLINE` (−1.35 rad, 77°) puts its up
+   * axis 0.976 *against* the tangent: head up-slope, feet first, exactly as she
+   * goes down.
+   *
+   * −0.707 is a quarter turn — 45° back — which no upright pet can reach by
+   * accident on any pitch of chute (the pitch turns the body *and* the tangent
+   * together, so it cancels out of this product entirely), and which the honest
+   * pose clears by a wide margin. It is a floor on "is it lying down at all",
+   * deliberately not a re-statement of `RIDE_RECLINE`: a check that asserted the
+   * exact angle would be a second copy of the pose rather than a question about
+   * it, and would have to be edited every time the pose was tuned.
+   */
+  const LYING_DOWN_DOT = -0.707;
+
+  /**
+   * One drawn part, as the **oriented** box it really is: a centre, three axes
+   * and three half-extents, all in world metres.
+   *
+   * Why oriented, and not the world-axis-aligned box `Box3.setFromObject` hands
+   * out: everything on this ride is turned. A child on her back at −1.35 rad on a
+   * chute pitched 30° down and yawed off the compass has no part of her square to
+   * the world, and the axis-aligned box round her hair is very much bigger than
+   * her hair. Measured that way she reached **3.05 m** up-slope of her own feet
+   * against the 2.28 m the built model actually spans — three quarters of a metre
+   * of nothing, which the spacing would then have had to be padded to clear.
+   * Padding a real gap to satisfy a loose instrument is how a check ends up
+   * driving the game rather than describing it.
+   *
+   * The kid is fourteen flat rigid parts and a pet is a dozen more — there is no
+   * skinning anywhere in this pipeline, and `export_skins=False` on all three
+   * Blender exporters — so every one of them really is a box, and an oriented box
+   * round it is not an approximation of the silhouette. It is the silhouette.
+   */
+  interface OrientedBox {
+    readonly name: string;
+    readonly centre: Vector3;
+    readonly axes: readonly [Vector3, Vector3, Vector3];
+    readonly half: readonly [number, number, number];
+  }
+
+  /** Every drawn mesh under `root`, found once. */
+  function drawnParts(root: Object3D): Object3D[] {
+    const parts: Object3D[] = [];
+    root.traverse((node: Object3D) => {
+      if ((node as { isMesh?: boolean }).isMesh) parts.push(node);
+    });
+    return parts;
+  }
+
+  const SCRATCH_CENTRE = new Vector3();
+  const SCRATCH_SIZE = new Vector3();
+
+  /**
+   * The oriented world box of one part this frame.
+   *
+   * `updateWorldMatrix` first, and not because it is tidy: the check drives the
+   * game loop by hand and nothing renders, so nothing else in the process ever
+   * flushes a world matrix. Reading one without this measures where the part was
+   * last frame — 0.11 m at `GIANT_SLIDE_SPEED`, which is a quarter of the
+   * clearance being asserted.
+   */
+  function orientedBoxOf(part: Object3D): OrientedBox | null {
+    const geometry = (part as { geometry?: { boundingBox: Box3 | null; computeBoundingBox(): void } })
+      .geometry;
+    if (!geometry) return null;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const local = geometry.boundingBox;
+    if (!local || local.isEmpty()) return null;
+    part.updateWorldMatrix(true, false);
+    const m = part.matrixWorld.elements;
+    local.getCenter(SCRATCH_CENTRE);
+    local.getSize(SCRATCH_SIZE);
+    const centre = SCRATCH_CENTRE.clone().applyMatrix4(part.matrixWorld);
+    const x = new Vector3(m[0]!, m[1]!, m[2]!);
+    const y = new Vector3(m[4]!, m[5]!, m[6]!);
+    const z = new Vector3(m[8]!, m[9]!, m[10]!);
+    const sx = x.length();
+    const sy = y.length();
+    const sz = z.length();
+    if (sx < 1e-9 || sy < 1e-9 || sz < 1e-9) return null;
+    return {
+      name: part.name || part.type,
+      centre,
+      axes: [x.divideScalar(sx), y.divideScalar(sy), z.divideScalar(sz)],
+      half: [(SCRATCH_SIZE.x * sx) / 2, (SCRATCH_SIZE.y * sy) / 2, (SCRATCH_SIZE.z * sz) / 2],
+    };
+  }
+
+  /**
+   * How far two oriented boxes are into each other, in metres — negative when
+   * they are apart, and then it is how far apart along their worst separating
+   * axis, which is a lower bound on the distance between them.
+   *
+   * The standard fifteen-axis separating-axis test: three faces each, and the
+   * nine cross products that catch an edge-on-edge touch two boxes can make
+   * without either one's face seeing it. Returning the depth rather than a
+   * boolean is what lets a failure say *how far* a pet is inside her — "0.31 m
+   * into her head" is a number somebody can act on, and `true` is not.
+   */
+  function penetration(a: OrientedBox, b: OrientedBox): number {
+    const between = b.centre.clone().sub(a.centre);
+    let worst = Infinity;
+    const test = (axis: Vector3): void => {
+      const length = axis.length();
+      // A degenerate cross product means those two edges are parallel, and the
+      // face axes already cover that case. Skipping it is correct, not a gap.
+      if (length < 1e-6) return;
+      axis.divideScalar(length);
+      let reach = 0;
+      for (let i = 0; i < 3; i += 1) reach += a.half[i]! * Math.abs(a.axes[i]!.dot(axis));
+      for (let i = 0; i < 3; i += 1) reach += b.half[i]! * Math.abs(b.axes[i]!.dot(axis));
+      const overlap = reach - Math.abs(between.dot(axis));
+      if (overlap < worst) worst = overlap;
+    };
+    // **All fifteen, every time, and not stopping at the first axis that
+    // separates them.** Stopping there answers the question this file asserts —
+    // are they touching — and gets the question it *reports* wrong: it hands back
+    // whichever separation it happened to find first, which for two bodies half a
+    // metre apart was routinely a millimetre. The check then printed "closest to
+    // her 0.00 m" on a run where nothing came near her, which is a number that
+    // teaches the next reader something false about a green build.
+    for (let i = 0; i < 3; i += 1) test(a.axes[i]!.clone());
+    for (let i = 0; i < 3; i += 1) test(b.axes[i]!.clone());
+    for (let i = 0; i < 3; i += 1) {
+      for (let j = 0; j < 3; j += 1) test(a.axes[i]!.clone().cross(b.axes[j]!));
+    }
+    return worst;
+  }
+
+  /**
+   * The worst thing that happens between two bodies this frame: how deep inside
+   * each other they are, and — when they are not — how close they came.
+   *
+   * One pass rather than two, because both answers fall out of the same fifteen
+   * axes and walking a hundred and fifty part pairs twice for 675 frames is the
+   * difference between a check that runs in a minute and one nobody waits for.
+   */
+  function closest(
+    a: readonly OrientedBox[],
+    b: readonly OrientedBox[],
+  ): { overlap: number; clearance: number; pair: string } {
+    let overlap = 0;
+    let clearance = Infinity;
+    let pair = '';
+    for (const boxA of a) {
+      for (const boxB of b) {
+        const depth = penetration(boxA, boxB);
+        if (depth > 0) {
+          if (depth > overlap) {
+            overlap = depth;
+            pair = `${boxA.name} and ${boxB.name}`;
+          }
+        } else if (-depth < clearance) {
+          clearance = -depth;
+          if (overlap === 0) pair = `${boxA.name} and ${boxB.name}`;
+        }
+      }
+    }
+    return { overlap, clearance: overlap > 0 ? 0 : clearance, pair };
+  }
+
+  interface Complaint {
+    readonly clause: string;
+    readonly detail: string;
+  }
+
+  interface RunResult {
+    readonly ridingFrames: number;
+    readonly complaints: readonly Complaint[];
+    readonly framedFraction: number;
+    readonly worstOffChute: number;
+    readonly worstStep: number;
+    readonly closestPair: number;
+    /** The closest any companion's drawn geometry came to hers, in metres. */
+    readonly worstClearance: number;
+    /** How far inside her the worst one got — 0 on a run where nobody clipped. */
+    readonly deepestOverlap: number;
+    /** The closest any companion came to the body in front of it, in metres. */
+    readonly worstNeighbour: number;
+    /** The most upright any companion rode. See {@link LYING_DOWN_DOT}. */
+    readonly worstLie: number;
+    readonly worstRegroup: number;
+  }
+
+  /**
+   * One whole descent, measured.
+   *
+   * `wired` is the control switch: with it false the ride is never introduced to
+   * the parade, which is the game exactly as it was before #468.
+   */
+  async function ride(wired: boolean): Promise<RunResult> {
+    // The seat solve counts every frame it could not find a seat far enough back
+    // (see `petRiders.bendAllowanceExhaustions`). Zeroed per descent so the
+    // number below belongs to this ride and not to the one before it.
+    resetBendAllowanceExhaustions();
+    const scene = new Scene();
+    const world = new World(scene, new Sky(), liveControls, new IsoCamera());
+    const building = world.building;
+    const slide = building.ginormousSlide;
+    slide.group.updateMatrixWorld(true);
+
+    const camera = new IsoCamera();
+    const player = new Player(world.collision, camera, new Vector3(0, 0, 0));
+    scene.add(player.group);
+    building.attachPlayer(player);
+
+    const parade = new Parade(player, world.collision, camera);
+    scene.add(parade.group);
+    if (wired) building.petParade = parade;
+
+    let ridingNow = false;
+    building.onRideChange = (riding) => {
+      ridingNow = riding;
+      player.group.visible = !riding || building.playerStaysVisible;
+    };
+
+    // The chute as **drawn**, sampled once, so "where is this on the slide" is a
+    // question about the built curve rather than about the plan it came from.
+    const chute: Vector3[] = [];
+    {
+      const probe = new Vector3();
+      const steps = Math.max(400, Math.round(slide.length / 0.2));
+      for (let i = 0; i <= steps; i += 1) {
+        slide.pointAt(i / steps, probe);
+        chute.push(slide.group.localToWorld(probe.clone()));
+      }
+    }
+    /** Nearest chute sample to a world point: how far off, and how far along. */
+    function onChute(point: Vector3): { off: number; along: number } {
+      let off = Infinity;
+      let along = 0;
+      for (let i = 0; i < chute.length; i += 1) {
+        const d = point.distanceTo(chute[i]!);
+        if (d < off) {
+          off = d;
+          along = i / (chute.length - 1);
+        }
+      }
+      return { off, along };
+    }
+
+    /** Is `node` `part`, or somewhere underneath it? */
+    function isDescendantOf(node: unknown, part: unknown): boolean {
+      let walk = node as { parent: unknown } | null;
+      while (walk) {
+        if (walk === part) return true;
+        walk = walk.parent as typeof walk;
+      }
+      return false;
+    }
+
+    function drawn(object: { visible: boolean; parent: unknown } | null): boolean {
+      let node = object;
+      while (node) {
+        if (!node.visible) return false;
+        node = node.parent as typeof node;
+      }
+      return true;
+    }
+
+    const SHOT_W = 240;
+    const SHOT_H = 135;
+    building.resizeRideCameras(SHOT_W, SHOT_H);
+
+    if (!building.requestBoardSlide(false)) {
+      throw new Error('check:pet-slide — could not board the ginormous slide at all');
+    }
+
+    // **The lens is not written down anywhere any more, so there is nothing here
+    // to compare it against.** There used to be: the seats were laid out around a
+    // copy of `Building.ts`'s `CHASE_EYE.z`, kept honest by reading the live
+    // mounted camera's offset back and failing if the two had drifted. The copy
+    // went when the pets lay down and the blind band that needed it was deleted,
+    // and the assertion went with it — an assertion whose subject no longer
+    // exists is the "check that cannot fail" this repo keeps meeting, dressed as
+    // diligence. What guards the framing now is downstream and empirical: the
+    // rasters below shoot the live camera and complain about what the shot
+    // actually contains, so moving the lens is answered by the picture.
+
+    const dt = 1 / 60;
+    let elapsed = 0;
+    let frames = 0;
+    let ridingFrames = 0;
+    let afterFrames = 0;
+    let rideEnded = false;
+
+    const complaints: Complaint[] = [];
+    const say = (clause: string, detail: string): void => {
+      if (complaints.some((c) => c.clause === clause)) return;
+      complaints.push({ clause, detail });
+    };
+
+    /**
+     * **What the chase camera actually shows**, by shooting a grid of rays
+     * through the live camera and counting what each one lands on — the same
+     * instrument `check:slide-rider` and `check:climb-wave` measure legibility
+     * with, and for the same reason: *in frustum* and *in shot* are different
+     * questions, and only an area measurement can tell them apart.
+     */
+    function raster(
+      camera: unknown,
+      childRoot: unknown,
+      pets: readonly { readonly displayName: string; readonly root: unknown }[],
+    ): { child: number; pets: [string, number][]; total: number } {
+      const caster = new Raycaster();
+      const targets = [slide.group, building.gardenRoot, childRoot, parade.group];
+      let child = 0;
+      const counts = pets.map((pet): [string, number] => [pet.displayName, 0]);
+      for (let iy = 0; iy < RASTER_H; iy += 1) {
+        const ndcY = 1 - (2 * (iy + 0.5)) / RASTER_H;
+        for (let ix = 0; ix < RASTER_W; ix += 1) {
+          const ndcX = (2 * (ix + 0.5)) / RASTER_W - 1;
+          caster.setFromCamera({ x: ndcX, y: ndcY } as never, camera as never);
+          const hit = caster.intersectObjects(targets as never[], true)[0];
+          if (!hit) continue;
+          if (isDescendantOf(hit.object, childRoot)) {
+            child += 1;
+            continue;
+          }
+          for (let i = 0; i < pets.length; i += 1) {
+            if (isDescendantOf(hit.object, pets[i]!.root)) {
+              counts[i]![1] += 1;
+              break;
+            }
+          }
+        }
+      }
+      return { child, pets: counts, total: RASTER_W * RASTER_H };
+    }
+
+    /**
+     * **Why a companion is not in the shot** — diagnosis only, never an
+     * assertion, and printed only under `LGP_SHOT_DEBUG=1`.
+     *
+     * {@link raster} counts rays that *land on* a pet. A pet hidden behind the
+     * trough wall and a pet outside the frustum both land zero, so `in shot`
+     * reports the same 0% for two unrelated faults: a framing bug, which is about
+     * where the lens points, and an occlusion bug, which is about the chute being
+     * between the child and her own pet. Telling them apart needs a second
+     * question — where is it, and what does the camera meet on the way — which is
+     * what this asks.
+     */
+    type PerspectiveCameraLike = {
+      readonly fov: number;
+      worldToLocal(v: Vector3): Vector3;
+    };
+
+    function shotDiagnosis(
+      camera: unknown,
+      pet: { readonly displayName: string; readonly root: unknown },
+      childRoot: unknown,
+    ): string {
+      const centre = new Vector3();
+      new Box3().setFromObject(pet.root as never).getCenter(centre);
+      const ndc = centre.clone().project(camera as never);
+      const across = Math.abs(ndc.x) <= 1;
+      const down = Math.abs(ndc.y) <= 1;
+      const infront = ndc.z >= -1 && ndc.z <= 1;
+
+      // **Only ask what the camera meets if the camera can see there at all.**
+      // `setFromCamera` happily builds a ray for |ndc| > 1 by extrapolating past
+      // the frustum, and that ray hits the pet perfectly well — so an unguarded
+      // version of this prints "camera meets the pet itself" about a pet that is
+      // nowhere in the picture. That is the same fault this helper exists to
+      // expose, committed by the helper: one string for two different worlds.
+      let meets = 'n/a — outside the frustum, so there is no ray to follow';
+      if (across && down && infront) {
+        const caster = new Raycaster();
+        caster.setFromCamera({ x: ndc.x, y: ndc.y } as never, camera as never);
+        const hit = caster.intersectObjects(
+          [slide.group, building.gardenRoot, childRoot, parade.group] as never[],
+          true,
+        )[0];
+        meets = 'nothing';
+        if (hit) {
+          if (isDescendantOf(hit.object, pet.root)) meets = 'the pet itself';
+          else if (isDescendantOf(hit.object, childRoot)) meets = 'the child';
+          else if (isDescendantOf(hit.object, slide.group)) meets = 'the SLIDE — OCCLUDED';
+          else if (isDescendantOf(hit.object, building.gardenRoot)) meets = 'the garden — OCCLUDED';
+          else meets = 'another companion';
+        }
+      }
+      // **Where the pet actually is, in the lens's own frame** — the numbers that
+      // say *why* the ndc is what it is. `worldToLocal` on the camera gives
+      // camera space: -z is straight ahead, +y is up the frame. So `ahead` is how
+      // far in front of the lens the animal is and `below` is how far under its
+      // axis, and `angle` is the two combined — which is the number to compare
+      // against the camera's own half-fov, because a pet further below the axis
+      // than that is off the bottom of the picture by construction.
+      const cam = camera as PerspectiveCameraLike;
+      const inCamera = cam.worldToLocal(centre.clone());
+      const ahead = -inCamera.z;
+      const below = -inCamera.y;
+      const angleBelow = (Math.atan2(below, Math.max(ahead, 1e-6)) * 180) / Math.PI;
+      const halfFov = cam.fov / 2;
+      return (
+        `${pet.displayName} ndc(${ndc.x.toFixed(2)},${ndc.y.toFixed(2)},${ndc.z.toFixed(2)}) ` +
+        `${across ? '' : 'OFF-SIDE '}${down ? '' : 'OFF-TOP/BOTTOM '}${infront ? '' : 'BEHIND-LENS '}` +
+        `| ahead ${ahead.toFixed(2)}m below-axis ${below.toFixed(2)}m ` +
+        `= ${angleBelow.toFixed(1)}° vs half-fov ${halfFov.toFixed(1)}° ` +
+        `→ camera meets ${meets}`
+      );
+    }
+
+    // **#516 instrumentation** — the rim mesh, found once by shape rather than by
+    // name, and its two radii read off the geometry that was actually built.
+    const cameraWorld = new Vector3();
+    const rimLocal = new Vector3();
+    const rimInverse = new Matrix4();
+    let rimMesh: { readonly matrixWorld: Matrix4 } | null = null;
+    let rimMajor = 0;
+    let rimTube = 0;
+    let rimNearest = Infinity;
+    let rimInsideFrames = 0;
+    let rimNearestShot = 'none';
+    const rimInsideShots = new Set<string>();
+
+    // **What is nearest the lens, of anything in the scene?** See the fan's use
+    // below. Every third frame, because 14 rays against the whole scene on every
+    // one of ~700 frames is real time for an answer that cannot move far in
+    // 50 ms — and the thing being hunted fills two-thirds of a frame, not a
+    // pixel.
+    const nearCaster = new Raycaster();
+    const NEAR_FAN_REACH = 2.0;
+    const NEAR_FAN_EVERY = 3;
+    const NEAR_FAN: readonly Vector3[] = [
+      new Vector3(1, 0, 0), new Vector3(-1, 0, 0),
+      new Vector3(0, 1, 0), new Vector3(0, -1, 0),
+      new Vector3(0, 0, 1), new Vector3(0, 0, -1),
+      new Vector3(1, 1, 1).normalize(), new Vector3(-1, 1, 1).normalize(),
+      new Vector3(1, 1, -1).normalize(), new Vector3(-1, 1, -1).normalize(),
+      new Vector3(1, -1, 1).normalize(), new Vector3(-1, -1, 1).normalize(),
+      new Vector3(1, -1, -1).normalize(), new Vector3(-1, -1, -1).normalize(),
+    ];
+    // Only where the lens is ACTUALLY underground. Gating at 1.0 m fired the fan
+    // across most of the descent — the chute runs close to the ground — and made
+    // a whole-pool sweep impractical. Underground is the case that needs a name.
+    const NEAR_FAN_GATE = 0.0;
+    let lowestAboveGround = Infinity;
+    let lowestAboveGroundFrame = 0;
+    let lowestAboveGroundShot = 'none';
+    let undergroundFrames = 0;
+    /**
+     * **The worst angle the nearest companion's drawn centre sat off the chase
+     * lens's own axis**, in degrees, across the descent's rasters — and the
+     * camera's own vertical half-fov to compare it against.
+     *
+     * This pair is the #514 guard; see the clause that fills them. `-1` and `0`
+     * mean nothing was ever measured, which the report says out loud rather than
+     * printing a reassuring zero.
+     */
+    /**
+     * **How far the solve's derived body centre sat from the drawn body's own
+     * centre** (#518), in metres, and where. `-1` means never measured.
+     */
+    let worstBodyDrift = -1;
+    let worstBodyDriftFrame = 0;
+    let worstPetOffAxis = -1;
+    let worstPetOffAxisFrame = 0;
+    let petHalfFov = 0;
+    let nearFanFrames = 0;
+    /**
+     * **How many frames the fan actually fired on** — printed on every run,
+     * because it is usually **zero** and a "nearest ANYTHING" line that does not
+     * say so implies cover this instrument does not give.
+     *
+     * The fan is gated on {@link NEAR_FAN_GATE}, i.e. on the lens being genuinely
+     * underground. Once the stale-matrix bug above was fixed that stopped
+     * happening on the canonical park at all — so the honest reading of this
+     * instrument today is "it has never run against a real lens position", and
+     * the report has to be able to say that out loud rather than printing a
+     * confident `>2 m — nothing`.
+     */
+    let nearFanRuns = 0;
+    let nearestAnything = Infinity;
+    let nearestAnythingName = 'nothing';
+    let nearestAnythingFrame = 0;
+    /** `a/b/c` up the scene graph, so a finding names something findable. */
+    const namePath = (object: { name?: string; parent?: unknown } | null): string => {
+      const parts: string[] = [];
+      let at = object as { name?: string; parent?: unknown } | null;
+      while (at && parts.length < 6) {
+        if (at.name) parts.unshift(at.name);
+        at = at.parent as { name?: string; parent?: unknown } | null;
+      }
+      return parts.join('/') || '<unnamed>';
+    };
+    building.ballPit.group.updateMatrixWorld(true);
+    building.ballPit.group.traverse((object: unknown) => {
+      const mesh = object as {
+        isMesh?: boolean;
+        geometry?: { type?: string; parameters?: { radius?: number; tube?: number } };
+        matrixWorld?: Matrix4;
+      };
+      if (!mesh.isMesh || mesh.geometry?.type !== 'TorusGeometry') return;
+      rimMesh = mesh as { readonly matrixWorld: Matrix4 };
+      rimMajor = mesh.geometry.parameters?.radius ?? 0;
+      rimTube = mesh.geometry.parameters?.tube ?? 0;
+      rimInverse.copy(mesh.matrixWorld as Matrix4).invert();
+    });
+
+    const previous = new Map<string, Vector3>();
+    let rasters = 0;
+    let childHiddenSamples = 0;
+    let worstChild = Infinity;
+    let biggestPet = 0;
+    let biggestPetName = '—';
+    let worstOffChute = 0;
+    let worstStep = 0;
+    let closestPair = Infinity;
+    let worstRegroup = 0;
+    let chaseFrames = 0;
+    let framedFrames = 0;
+    let missingFrames = 0;
+    let offChuteFrames = 0;
+    let aheadFrames = 0;
+    let deepestOverlap = 0;
+    let worstClearance = Infinity;
+    let deepestNeighbour = 0;
+    let worstNeighbour = Infinity;
+    let smallestNearest = Infinity;
+    let touchingFrames = 0;
+    let uprightFrames = 0;
+    /** The most upright any companion was seen, as {@link LYING_DOWN_DOT}'s dot. */
+    let worstLie = -1;
+
+    /**
+     * The chute's direction of travel at a position along it, in world metres —
+     * read off the sampled curve, so the tangent a pose is judged against is the
+     * one the chute was actually built with.
+     */
+    function chuteTangent(along: number, out: Vector3): void {
+      const last = chute.length - 2;
+      const i = Math.min(last, Math.max(0, Math.round(along * last)));
+      out.copy(chute[i + 1]!).sub(chute[i]!).normalize();
+    }
+
+    /**
+     * The parts of each body, found once. A model's *parts* do not change during
+     * a descent — only where they are — and re-walking four models every frame
+     * for 675 frames is the difference between a check that runs in seconds and
+     * one nobody waits for.
+     */
+    const petParts = new Map<string, Object3D[]>();
+    let childParts: Object3D[] = [];
+    const up = new Vector3();
+    const forward = new Vector3();
+    const spin = new Quaternion();
+
+    const MAX_FRAMES = 25 * 60;
+    // Her own width is what can stick out of the trough sideways; a companion's
+    // is `PARADE_MEMBER_RADIUS`. From the game, never from the generator's own
+    // wider `CORRIDOR_RADIUS` — see `check:slide-rider`.
+    const ON_CHUTE =
+      Math.hypot(CHUTE_ENVELOPE.halfWidth, CHUTE_ENVELOPE.above) + PARADE_MEMBER_RADIUS;
+    const at = new Vector3();
+    /** The chase lens's world position on each chase frame, and the beat it was in. */
+    const chaseEyes: { beat: number; eye: Vector3 }[] = [];
+
+    while (frames < MAX_FRAMES) {
+      const context = {
+        dt,
+        elapsed,
+        input: { justPressed: () => false, isDown: () => false } as never,
+        playerPosition: player.position,
+        cameraForward: new Vector3(0, 0, 1),
+        frame: frames,
+      } as never;
+      building.update(context);
+      player.update(context);
+      parade.update(context);
+      elapsed += dt;
+      frames += 1;
+
+      if (!ridingNow) {
+        if (ridingFrames === 0) continue;
+        rideEnded = true;
+        afterFrames += 1;
+        if (afterFrames < REGROUP_SECONDS * 60) continue;
+        break;
+      }
+      ridingFrames += 1;
+      // Her own drawn parts, found on the first ridden frame — her model is built
+      // by then and does not change shape for the rest of the descent.
+      if (childParts.length === 0) childParts = drawnParts(player.model.root as never);
+
+      // The bodies the game would draw, in line order, asked of the system that
+      // owns them.
+      const bodies = PET_IDS.map((_, slot) => parade.companionAt(slot)).filter(
+        (member): member is NonNullable<typeof member> => member !== null,
+      );
+      if (bodies.length !== PET_IDS.length) {
+        say(
+          'line',
+          `only ${bodies.length} of ${PET_IDS.length} companions were in the line on ridden ` +
+            `frame ${ridingFrames} — one of them left it during the descent`,
+        );
+      }
+
+      const rider = onChute(player.position);
+      let lastAlong = rider.along;
+      /** Past the boarding stretch — see {@link BOARD_SECONDS}. */
+      const settledRide = ridingFrames > BOARD_SECONDS * 60;
+
+      // Every body's real shape this frame, taken once. Hers first, then the line
+      // in order, so the clauses below can ask about any pair of them without
+      // re-deriving a hundred and fifty boxes per question.
+      const herBoxes = childParts
+        .map(orientedBoxOf)
+        .filter((box): box is OrientedBox => box !== null);
+      let boxesInFront = herBoxes;
+      let nameInFront = 'the child';
+
+      for (let slot = 0; slot < bodies.length; slot += 1) {
+        const member = bodies[slot]!;
+        member.root.getWorldPosition(at);
+
+        if (!drawn(member.root as never)) {
+          missingFrames += 1;
+          say(
+            'drawn',
+            `${member.displayName} was not drawn on ridden frame ${ridingFrames} of the ` +
+              'descent — a pet that vanishes mid-ride is worse than one that never left',
+          );
+        }
+
+        const where = onChute(at);
+        // Behind the lip for the first stride or two — deliberately, so eight
+        // animals do not stand in one another at the entry. After that it must be
+        // in the trough and stay there.
+        if (settledRide) {
+          if (where.off > worstOffChute) worstOffChute = where.off;
+          if (where.off > ON_CHUTE) {
+            offChuteFrames += 1;
+            say(
+              'on the chute',
+              `${member.displayName} was ${where.off.toFixed(2)} m off the chute on ridden frame ` +
+                `${ridingFrames} (trough allows ${ON_CHUTE.toFixed(2)} m) — it is beside the ` +
+                'slide, or on the ground under it, not on it',
+            );
+          }
+        }
+
+        // **Behind her, and behind the one in front.** Measured as a position on
+        // the built curve, so it holds through every bend rather than only where
+        // the chute happens to run straight.
+        if (where.along > lastAlong + 1e-6) {
+          aheadFrames += 1;
+          say(
+            'behind her',
+            `${member.displayName} was ${(where.along * slide.length).toFixed(1)} m down the ` +
+              `chute against ${(lastAlong * slide.length).toFixed(1)} m for the one in front of ` +
+              `it, on ridden frame ${ridingFrames} — it has overtaken`,
+          );
+        }
+        lastAlong = where.along;
+
+        // **No two on the same spot.**
+        if (slot > 0) {
+          const ahead = bodies[slot - 1]!.root.getWorldPosition(new Vector3());
+          const gap = ahead.distanceTo(at);
+          if (gap < closestPair) closestPair = gap;
+        }
+
+        // **Not inside her.** The whole of Jim's complaint, measured on the drawn
+        // meshes of the real child against the drawn meshes of the real pet — not
+        // on the gap between two points on a curve, which is what every clause
+        // above measures and which is exactly why none of them saw it.
+        let mine = petParts.get(member.uid);
+        if (!mine) {
+          mine = drawnParts(member.root as never);
+          petParts.set(member.uid, mine);
+        }
+        const its = mine.map(orientedBoxOf).filter((box): box is OrientedBox => box !== null);
+        const hers = closest(herBoxes, its);
+        if (hers.overlap > deepestOverlap) deepestOverlap = hers.overlap;
+        if (hers.clearance < worstClearance) worstClearance = hers.clearance;
+        if (hers.overlap > 0) {
+          touchingFrames += 1;
+          say(
+            'not inside her',
+            `${member.displayName} was ${(hers.overlap * 100).toFixed(0)} cm inside the child on ` +
+              `ridden frame ${ridingFrames} — ${hers.pair} occupy the same space, which is a pet ` +
+              'clipping through her, not a pet following her down the slide',
+          );
+        }
+
+        // **And not inside the one in front of it**, which is the same question
+        // one place further down the line and the reason Jim asked for *several*
+        // pets rather than one: whatever keeps a companion out of her has to keep
+        // it out of its neighbour too, or three of them fixes one clip and
+        // introduces two. Measured against the body actually in front — hers for
+        // the first, the previous animal for the rest — rather than against a
+        // rule about spacing.
+        if (slot > 0) {
+          const neighbour = closest(boxesInFront, its);
+          if (neighbour.overlap > deepestNeighbour) deepestNeighbour = neighbour.overlap;
+          if (neighbour.clearance < worstNeighbour) worstNeighbour = neighbour.clearance;
+          if (neighbour.overlap > 0) {
+            say(
+              'not inside each other',
+              `${member.displayName} was ${(neighbour.overlap * 100).toFixed(0)} cm inside ` +
+                `${nameInFront} on ridden frame ${ridingFrames} — ${neighbour.pair} occupy the ` +
+                'same space, so the line has piled up on itself',
+            );
+          }
+        }
+        boxesInFront = its;
+        nameInFront = member.displayName;
+
+        // **Lying down, as she is.** Asked of the world quaternion the renderer
+        // would use, so it covers the composition order as well as the angle.
+        member.root.getWorldQuaternion(spin as never);
+        up.set(0, 1, 0).applyQuaternion(spin as never);
+        chuteTangent(where.along, forward);
+        const lie = up.dot(forward);
+        if (lie > worstLie) worstLie = lie;
+        if (lie > LYING_DOWN_DOT) {
+          uprightFrames += 1;
+          say(
+            'lying down',
+            `${member.displayName} rode ridden frame ${ridingFrames} with its up axis at ` +
+              `${lie.toFixed(3)} against the chute's own direction, where lying back on its ` +
+              `shoulders is ${LYING_DOWN_DOT} or less (and the child's own recline is −0.976) — ` +
+              'it is standing on the chute, not lying on it',
+          );
+        }
+
+        const was = previous.get(member.uid);
+        // The first ridden frame is the boarding teleport — the whole park
+        // changes space behind a closed iris there, exactly as it does for the
+        // child, so a step is expected and is not a stutter anybody sees.
+        if (was && ridingFrames > 1) {
+          const step = was.distanceTo(at);
+          if (step > worstStep) worstStep = step;
+          if (step > MAX_STEP) {
+            say(
+              'no jump',
+              `${member.displayName} moved ${step.toFixed(2)} m in one frame on ridden frame ` +
+                `${ridingFrames}, against ${MAX_STEP} m allowed — that is a jump, not a slide`,
+            );
+          }
+        }
+        previous.set(member.uid, at.clone());
+      }
+
+      // **Is the nearest companion actually in the picture?** Through the live
+      // ride camera — the real object the game renders with, from
+      // `Building.rideCameraNow` — not a reconstruction of it.
+      const liveShot = building.slideShots.liveShot;
+      const liveCamera = building.rideCameraNow;
+      const first = bodies[0];
+      // **#516: is the lens itself inside the ball pit's rim?** Measured on every
+      // ridden frame **whatever shot is live**, and that "whatever" is the whole
+      // point — the first version of this sampler sat inside the `kind === 'chase'`
+      // branch below and reported the camera never came within 6.13 m of the rim
+      // on seed 346, flatly contradicting the frame QA photographed. It was not
+      // measuring the camera that clips. The slide has **two** shot kinds
+      // (`slide/cameras.ts`: `chase` and `trackside`), and a trackside eye is a
+      // fixed world point placed by formula — standoff and elevation, stepped
+      // closer only until the *framing* fits — that never asks what is at that
+      // point. A sampler blind to it is a check that cannot see the bug it is for.
+      //
+      // Sampled per frame rather than per raster because #516 reports the clip as
+      // lasting "a frame or two", and the rasters are one frame in twenty-five.
+      //
+      // The rim is a torus, so the test is exact: put the camera into the rim's
+      // own local space, and a point is inside the tube when its distance to the
+      // ring circle is under the tube radius. Both radii are read off the built
+      // geometry rather than restated here — `BALL_PIT_RADIUS + 0.4` and `0.3`
+      // live in `BallPit.ts` and a copy here would be the usual defect.
+      if (liveCamera && rimMesh) {
+        // **Flush the lens's own world matrix before reading it, and flush it
+        // from the top of the chain.** Nothing renders in this process, so no
+        // world matrix is ever brought up to date except where a line like this
+        // one does it — and the chase camera hangs off `eyeBoom` → `eyeMount` →
+        // `rideMount`, every link of which is moved during the same frame.
+        //
+        // Read without this, `setFromMatrixPosition` returned **the world
+        // origin** on ridden frame 1 and a one-frame-stale position thereafter.
+        // That fed `terrainHeight(0, 0)` = 0.09 into the clearance below, which
+        // then reported "−0.09 m, 1 frame UNDERGROUND" and fired the ray fan from
+        // (0,0,0), naming whatever happened to be near the middle of the park.
+        // Neither number was about the lens; the tell was that the control run —
+        // whose camera is somewhere else entirely — printed identical figures.
+        //
+        // `updateWorldMatrix(true, false)` is the right call rather than
+        // `updateMatrixWorld(true)`: it walks **up** to the ancestors first, which
+        // is where the staleness is, and does not descend into children this has
+        // no use for. `orientedBoxOf` above uses it for exactly the same reason.
+        (liveCamera as { updateWorldMatrix(parents: boolean, children: boolean): void })
+          .updateWorldMatrix(true, false);
+        cameraWorld.setFromMatrixPosition(liveCamera.matrixWorld);
+        rimLocal.copy(cameraWorld).applyMatrix4(rimInverse);
+        // Torus lies in local XY with its axis on Z (three.js `TorusGeometry`).
+        const ring = Math.hypot(rimLocal.x, rimLocal.y) - rimMajor;
+        const toSurface = Math.hypot(ring, rimLocal.z) - rimTube;
+        if (toSurface < rimNearest) {
+          rimNearest = toSurface;
+          rimNearestShot = liveShot?.kind ?? 'none';
+        }
+        if (toSurface < 0) {
+          rimInsideFrames += 1;
+          rimInsideShots.add(liveShot?.kind ?? 'none');
+        }
+
+        // **And what is nearest the lens, of anything at all?** #516 names the
+        // ball pit's rim as the culprit; the frame QA photographed is two-thirds
+        // filled by a flat TAN surface while the rim's pink and the bowl's cream
+        // sit far away at the top right, and both instruments here put the rim
+        // metres off. So the issue's stated culprit is a hypothesis, and this
+        // asks the scene instead of assuming it: a short ray fan from the lens,
+        // recording the nearest thing hit and its name. Naming the mesh is the
+        // difference between fixing the camera and fixing the wrong prop.
+        // **The cheap, decisive test first.** The hypothesis is that the lens
+        // goes UNDER THE GROUND near the bottom of the chute, so ask the ground
+        // directly: `terrainHeight` is the same sampler every prop in the park
+        // is placed against. Negative clearance means the camera is underground,
+        // which is exactly the "buried in a flat tan surface" frame QA caught.
+        //
+        // This runs every frame because it is two lookups; the ray fan below,
+        // which names the mesh, is gated behind it because 14 rays against the
+        // whole scene is seconds per seed and is only interesting where the
+        // camera is actually close to something.
+        const groundY = terrainHeight(cameraWorld.x, cameraWorld.z);
+        const aboveGround = cameraWorld.y - groundY;
+        if (aboveGround < lowestAboveGround) {
+          lowestAboveGround = aboveGround;
+          lowestAboveGroundFrame = ridingFrames;
+          lowestAboveGroundShot = liveShot?.kind ?? 'none';
+        }
+        if (aboveGround < 0) undergroundFrames += 1;
+
+        if (aboveGround < NEAR_FAN_GATE && nearFanFrames % NEAR_FAN_EVERY === 0) {
+          // Sprites raycast through the camera's own matrix, so a caster with no
+          // camera throws the moment the fan meets one (the park has several).
+          // Handing it the live camera is both the fix and the honest thing: a
+          // sprite is only "in the way" as the lens sees it.
+          (nearCaster as unknown as { camera: unknown }).camera = liveCamera;
+          nearFanRuns += 1;
+          for (const dir of NEAR_FAN) {
+            nearCaster.set(cameraWorld, dir);
+            nearCaster.far = NEAR_FAN_REACH;
+            const hit = nearCaster.intersectObject(scene, true)[0];
+            if (hit && hit.distance < nearestAnything) {
+              nearestAnything = hit.distance;
+              nearestAnythingName = namePath(hit.object);
+              nearestAnythingFrame = ridingFrames;
+            }
+          }
+        }
+        nearFanFrames += 1;
+      }
+
+      // **The chase lens, frame by frame, for the steadiness clause below.**
+      // Recorded on chase frames only and cut into runs at every change of beat,
+      // because the cut to and from a trackside eye is a deliberate jump.
+      if (liveShot?.kind === 'chase' && liveCamera) {
+        (liveCamera as { updateWorldMatrix(parents: boolean, children: boolean): void })
+          .updateWorldMatrix(true, false);
+        chaseEyes.push({
+          beat: building.slideShots.shots.indexOf(liveShot),
+          eye: new Vector3().setFromMatrixPosition(liveCamera.matrixWorld),
+        });
+      }
+
+      if (liveShot?.kind === 'chase' && liveCamera && first) {
+        chaseFrames += 1;
+
+        // **What does the shot actually contain?** Rays through the live camera,
+        // counting what each one lands on — the only honest form of this
+        // question, and this file has now got it wrong in both directions with
+        // cheaper ones. See {@link PET_FRAME_FLOOR}.
+        // Not while they are still boarding. The line runs on backwards behind
+        // the lip so eight animals do not stand inside one another at the entry
+        // (see `slide/petRiders.ts`), which means for the first stride or two the
+        // nearest one is genuinely still up inside the castle and genuinely not
+        // in the shot. That is the same grace the on-chute clause takes, taken
+        // for the same reason — and taking it here is what lets the floor below
+        // be 95% of what is left rather than a number chosen to accommodate the
+        // one raster that could never have passed.
+        if (settledRide && chaseFrames % RASTER_EVERY === 1) {
+          scene.updateMatrixWorld(true);
+          (liveCamera as { updateMatrixWorld(force: boolean): void }).updateMatrixWorld(true);
+          const shot = raster(liveCamera, player.model.root, bodies);
+          rasters += 1;
+
+          // **Is the nearest companion's MIDDLE inside the picture, or only its
+          // top edge?** This is the clause that guards #514, and it exists
+          // because the pixel clauses above cannot: reverting the aim
+          // (`eyeBoom.rotation.x = 0`, the pre-#514 camera) leaves the raster
+          // scoring **4.0%** of frame on 100% of rasters, comfortably over
+          // `PET_FRAME_FLOOR`'s 1%, so the broken camera passes every other
+          // assertion in this file on the only seed CI runs. A fix whose
+          // regression is invisible to the gate is not guarded at all.
+          //
+          // The number this asks for is the one #514 was actually diagnosed on:
+          // the angle of the animal from the lens's own axis, against the lens's
+          // own half-fov. Broken it was **34.3°–45.4° against 30°** — outside the
+          // frustum on every raster of every park, with the few percent of pixels
+          // coming from the body clipping in from underneath.
+          //
+          // Three things make it an honest question rather than a restatement:
+          //
+          // - **The threshold is the camera's own half-fov**, read off the live
+          //   camera, not a constant chosen here. A body centre beyond it is
+          //   outside the picture by construction, whatever any percentage says.
+          // - **It measures the DRAWN BODY**, via `Box3.setFromObject`, not the
+          //   seat. The seat is the reference point that made the solve's own
+          //   ceiling guard unable to fire (#518); taking it here would repeat
+          //   that fault in the instrument meant to catch it.
+          // - **It is about the aim, which is the whole of the fix.** The lens
+          //   position never moves (measured: first candidate accepted on every
+          //   frame of all 16 parks), so the axis is the only thing #514 changed
+          //   and the only thing a regression can change back.
+          if (first) {
+            const cam = liveCamera as unknown as PerspectiveCameraLike;
+            const bodyCentre = new Vector3();
+            new Box3().setFromObject(first.root as never).getCenter(bodyCentre);
+
+            // **Does the point the camera solve reasons about actually sit on the
+            // animal?** (#518.)
+            //
+            // The solve is handed a point measured off the drawn mesh by
+            // `Parade.nearestRiderBodyCentre`. This asks whether the point it
+            // actually used is on the animal — measured here independently, with
+            // `Box3.setFromObject` on the real body, on real frames of a real
+            // descent.
+            //
+            // **What it is really guarding.** Both sides run `Box3.setFromObject`
+            // on the *same* `Object3D`, so this cannot catch a drifting formula —
+            // there is no formula left. What it catches is the solve being handed
+            // the **wrong point**: most obviously a reversion to the **seat**
+            // (~0.95 m away, and the whole of #518), or a derived stand-in like
+            // the one tried first here, which measured **0.70 m out**.
+            //
+            // **Why the threshold is what it is.** The two reads differ in *when*,
+            // not in what: the body point is taken at the top of `advanceRide`
+            // and the animals are seated at the bottom, so this is one frame
+            // stale by construction. The honest window is therefore: comfortably
+            // above one frame of motion, comfortably below the 0.70 m error it
+            // exists to reject.
+            //
+            // One frame of travel is **not written down** — this file measures it
+            // as `worstStep` and the clause interpolates that measurement, so
+            // there is one owner of it rather than a literal to keep in step.
+            // {@link MAX_BODY_DRIFT} is 0.40 m, well under both 0.70 m and the
+            // seat's 0.95 m. A threshold at ~0.95 m — proposed at one point —
+            // would sit *above* the error it was offered as catching, which is
+            // the same fault one layer out.
+            const solved = building.chaseNearestBodyCentre();
+            if (solved) {
+              const drift = solved.distanceTo(bodyCentre);
+              if (drift > worstBodyDrift) {
+                worstBodyDrift = drift;
+                worstBodyDriftFrame = ridingFrames;
+              }
+            }
+            const inCamera = cam.worldToLocal(bodyCentre.clone());
+            const ahead = -inCamera.z;
+            // Vertical off-axis only, compared against the VERTICAL half-fov:
+            // `fov` is the vertical field, and the frame is wider than it is
+            // tall, so folding the horizontal offset in here would compare a
+            // number against a bound that does not apply to it. #514 was a
+            // purely vertical miss — the lens flying over the top of the line.
+            const offAxis = (Math.atan2(Math.abs(inCamera.y), Math.max(ahead, 1e-6)) * 180) / Math.PI;
+            petHalfFov = cam.fov / 2;
+            if (ahead <= 0) {
+              // Behind the lens entirely: no angle describes that, and reporting
+              // one would be arithmetic about a body that is not in front of the
+              // camera at all.
+              say(
+                'the lens is aimed at the line',
+                `on ridden frame ${ridingFrames} the nearest companion was BEHIND the lens ` +
+                  `(${(-ahead).toFixed(2)} m back), so the chase camera is not filming the line ` +
+                  'it is chasing',
+              );
+            } else if (offAxis > worstPetOffAxis) {
+              worstPetOffAxis = offAxis;
+              worstPetOffAxisFrame = ridingFrames;
+            }
+          }
+          const nearestShare = (shot.pets[0]?.[1] ?? 0) / shot.total;
+          // **Why is it not in the shot?** `LGP_SHOT_DEBUG=1` only. The raster
+          // counts a pet hidden behind the trough wall and a pet outside the
+          // frustum identically, at 0 px, and those are different bugs with
+          // different fixes — see `shotDiagnosis`.
+          if (process.env['LGP_SHOT_DEBUG'] === '1') {
+            const nearest = bodies[0];
+            write(
+              `    raster ${rasters} ridden frame ${ridingFrames}: nearest ` +
+                `${(nearestShare * 100).toFixed(1)}% — ` +
+                (nearest ? shotDiagnosis(liveCamera, nearest, player.model.root) : 'no companion') +
+                '\n',
+            );
+          }
+          if (nearestShare >= PET_FRAME_FLOOR) framedFrames += 1;
+          if (nearestShare < smallestNearest) smallestNearest = nearestShare;
+          if (shot.child === 0) {
+            childHiddenSamples += 1;
+            say(
+              'the child is in her own shot',
+              `on ridden frame ${ridingFrames} the chase camera shows 0 px of the child — her ` +
+                'companions are between her and the lens and have covered her up entirely',
+            );
+          }
+          if (shot.child < worstChild) worstChild = shot.child;
+          for (const [name, pixels] of shot.pets) {
+            const share = pixels / shot.total;
+            if (share > biggestPet) {
+              biggestPet = share;
+              biggestPetName = name;
+            }
+            if (share > PET_FRAME_CEILING) {
+              say(
+                'nothing in the lens',
+                `${name} fills ${(share * 100).toFixed(0)}% of the chase frame on ridden frame ` +
+                  `${ridingFrames}, against ${(PET_FRAME_CEILING * 100).toFixed(0)}% allowed — it ` +
+                  'is not following her down the slide, it is pressed against the camera',
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // **A chase lens that holds still where she does.** Its second difference —
+    // how much its step changed from one frame to the next — on an even clock,
+    // within one beat. The rider's own is a few millimetres a frame²; the lens's
+    // was **~100 mm/frame², out and back in one frame**, eight times down the
+    // canonical ride on base and on #680 alike: `solveChaseEye` accepting the
+    // first of its 0.1 m candidates that frames the pets, and the first flicking
+    // between two neighbours as a companion crossed the near bound. That is a
+    // judder no still frame shows and a child sees as the picture twitching.
+    //
+    // Proved red on this seed before the fix (chute 77.09 m): **200.8 mm/frame²**
+    // with the pets, and 54.1 without them — the second being the lens swung on
+    // its 4.35 m boom by every curvature jump of the chute's spline, which the
+    // chord-laid mount removed. Now 3.5 and 3.0.
+    let worstChaseJerk = 0;
+    let worstChaseJerkAt = -1;
+    let chaseTriples = 0;
+    const jerk = new Vector3();
+    for (let i = 2; i < chaseEyes.length; i += 1) {
+      const a = chaseEyes[i - 2]!;
+      const b = chaseEyes[i - 1]!;
+      const c = chaseEyes[i]!;
+      if (a.beat !== c.beat || b.beat !== c.beat) continue;
+      chaseTriples += 1;
+      jerk.copy(c.eye).sub(b.eye).sub(b.eye).add(a.eye);
+      const mm = jerk.length() * 1000;
+      if (mm > worstChaseJerk) {
+        worstChaseJerk = mm;
+        worstChaseJerkAt = i;
+      }
+    }
+    write(
+      `  chase lens steadiness: worst second difference ${worstChaseJerk.toFixed(1)} mm/frame² ` +
+        `over ${chaseTriples} frame triples (allowed ${CHASE_JERK_MM})\n`,
+    );
+    if (wired && chaseTriples < 60) {
+      say('chase lens steady', `only ${chaseTriples} chase frame triples were measured — nothing was proved`);
+    } else if (worstChaseJerk > CHASE_JERK_MM) {
+      say(
+        'chase lens steady',
+        `the chase lens jumped ${worstChaseJerk.toFixed(1)} mm/frame² in one frame (chase frame ` +
+          `${worstChaseJerkAt}), against ${CHASE_JERK_MM} allowed — the picture twitches. The solve ` +
+          'in `slide/chaseEye.ts` hands back 0.1 m steps; `Building.advanceRide` must ease between them',
+      );
+    }
+
+    // **And back to her at the bottom**, with nobody still riding.
+    const settled = PET_IDS.map((_, slot) => parade.companionAt(slot)).filter(
+      (member): member is NonNullable<typeof member> => member !== null,
+    );
+    for (const member of settled) {
+      if (member.onSlide) {
+        say('off at the bottom', `${member.displayName} was still on the chute after the ride`);
+      }
+      member.root.getWorldPosition(at);
+      const gap = at.distanceTo(player.position);
+      if (gap > worstRegroup) worstRegroup = gap;
+      if (gap > REGROUP_RADIUS) {
+        say(
+          'regroup',
+          `${member.displayName} was ${gap.toFixed(1)} m from her ${REGROUP_SECONDS} s after the ` +
+            `ride, against ${REGROUP_RADIUS} m — it did not come back to her`,
+        );
+      }
+    }
+
+    if (!rideEnded) say('coverage', 'the ride never finished, so nothing after it was measured');
+    if (ridingFrames < 60) {
+      say('coverage', `the ride only ran for ${ridingFrames} frames — nothing was exercised`);
+    }
+    const framedFraction = rasters > 0 ? framedFrames / rasters : 0;
+    if (rasters === 0) {
+      say('in shot', 'the chase camera was never rastered, so framing was never tested');
+    } else if (framedFraction < IN_SHOT_FLOOR) {
+      say(
+        'in shot',
+        `the nearest companion filled at least ${(PET_FRAME_FLOOR * 100).toFixed(0)}% of the chase ` +
+          `frame on only ${(framedFraction * 100).toFixed(0)}% of ${rasters} rasters, against ` +
+          `${(IN_SHOT_FLOOR * 100).toFixed(0)}% required (its smallest was ` +
+          `${(smallestNearest * 100).toFixed(1)}%) — it is behind her, but not in the shot`,
+      );
+    }
+
+    // **The window has not closed up underneath us (#518).**
+    //
+    // `MAX_BODY_DRIFT` only means anything relative to one frame of travel, which
+    // this comparison is stale by. That quantity is **measured** here as
+    // `worstStep`, not written down — so instead of a comment asserting "0.40 m
+    // is about 3.4x a frame", which would rot silently the moment the ride's
+    // speed or frame step changed, the relationship is asserted.
+    //
+    // At `GIANT_SLIDE_SPEED` a frame is ~0.12 m today, giving ~3.4x. If a frame
+    // ever grew past `MAX_BODY_DRIFT / MIN_DRIFT_HEADROOM` the threshold would
+    // start catching honest staleness as if it were a wrong point, and nothing
+    // would announce it. This does.
+    if (worstStep > 0 && MAX_BODY_DRIFT / worstStep < MIN_DRIFT_HEADROOM) {
+      say(
+        'the drift window still has room',
+        `one frame of travel is now ${worstStep.toFixed(3)} m, so ${MAX_BODY_DRIFT.toFixed(2)} m ` +
+          `of allowed drift is only ${(MAX_BODY_DRIFT / worstStep).toFixed(1)}x a frame, against ` +
+          `${MIN_DRIFT_HEADROOM}x required. The drift clause is measured across a one-frame ` +
+          'staleness it cannot remove, so a threshold this close to a frame will start failing ' +
+          'honest runs. Raise MAX_BODY_DRIFT (it has room below the 0.70 m it must still reject) ' +
+          'or slow what moved',
+      );
+    }
+
+    // **The body point the solve used was actually on the animal (#518).**
+    //
+    // This clause exists because the first version of this instrument **only
+    // printed** `worstBodyDrift` and asserted on nothing — so an injected 8.66 m
+    // offset in `Parade.nearestRiderBodyCentre` produced
+    // `worst 8.73 m out` and still `check:pet-slide ok`, exit 0. A printed number
+    // nobody asserts on is not protection, which is the entire thesis of the
+    // change this file is checking; the clause meant to embody it was itself only
+    // printed. Caught in review by a person reading the number, which is
+    // creditable and is not a mechanism.
+    if (worstBodyDrift < 0) {
+      say(
+        'the solve measured the drawn body',
+        'the point the chase solve used for the nearest companion was never compared against ' +
+          'the drawn animal, so #518 — the near bound reasoning about a point the animal is ' +
+          'not at — was not tested on this run',
+      );
+    } else if (worstBodyDrift > MAX_BODY_DRIFT) {
+      say(
+        'the solve measured the drawn body',
+        `the point the chase solve used for the nearest companion sat ` +
+          `${worstBodyDrift.toFixed(2)} m from that animal's drawn centre on ridden frame ` +
+          `${worstBodyDriftFrame}, against ${MAX_BODY_DRIFT.toFixed(2)} m allowed (this run's ` +
+          `biggest single-frame step, which the comparison is stale by, was ` +
+          `${worstStep.toFixed(3)} m). The near bound is reasoning about a point the animal is not at, ` +
+          `which is #518: measuring to the seat reads ~0.95 m out and estimates 6% of frame ` +
+          `where the raster measures 21%. Ask the parade for the drawn body; do not derive it`,
+      );
+    }
+
+    // **The aim guard (#514).** See the measurement's own comment in the raster
+    // block for why this is the clause that actually holds the fix down.
+    //
+    // Proved red by reverting the fix itself rather than by mutating a constant:
+    // with `Building.ts`'s `this.eyeBoom.rotation.x` forced to 0 — the pre-#514
+    // camera, aimed along the mount's forward — this clause fails while every
+    // other clause in the file stays green. That is the whole point of it.
+    if (worstPetOffAxis < 0) {
+      say(
+        'the lens is aimed at the line',
+        'the nearest companion was never measured against the chase lens axis, so the aim ' +
+          'that #514 is about was not tested on this run',
+      );
+    } else if (worstPetOffAxis > petHalfFov) {
+      say(
+        'the lens is aimed at the line',
+        `the nearest companion's drawn centre sat ${worstPetOffAxis.toFixed(1)}° off the chase ` +
+          `camera's own axis on ridden frame ${worstPetOffAxisFrame}, against a ` +
+          `${petHalfFov.toFixed(1)}° half-fov — its middle is outside the picture and any pixels ` +
+          'the raster counts are its edge clipping in from the border. This is #514: the lens ' +
+          'is flying over the top of the line it is meant to be filming. Aim it at the line, ' +
+          'do not lower the pixel floor',
+      );
+    }
+
+    // **The seat solve never gave up.** `arcForChord` walks back until a
+    // companion really is clear of the body in front; if it exhausts
+    // `MAX_BEND_ALLOWANCE` it seats the animal too close anyway and counts it,
+    // because a shipped game must not throw at a child mid-ride. That clamp is
+    // silent everywhere except here — without this clause a chute that bends hard
+    // enough would go on producing the exact clipping #507 is about while every
+    // check stayed green, which is the failure mode this file exists to prevent.
+    const gaveUp = bendAllowanceExhaustions();
+    if (gaveUp > 0) {
+      say(
+        'the spacing solve found a seat',
+        `the bend allowance ran out on ${gaveUp} seat solves — this chute bends hard enough ` +
+          `that ${MAX_BEND_ALLOWANCE} m of extra chute still did not put a companion clear of ` +
+          'the body in front, so it was seated too close and may be drawn inside her. (A solve ' +
+          'is one link of the chain, and the chain is re-walked from her for every companion, ' +
+          'so a frame with n of them costs n(n+1)/2 solves — not one per companion.) Raising ' +
+          'the allowance is the wrong fix; the seat is wanted, not the clamp',
+      );
+    }
+
+    // **The chase solve found a lens placement on every frame.** `solveChaseEye`
+    // walks back and up until the child and her nearest companion are both inside
+    // the frustum and the lens is clear of the ground; if nothing in range does
+    // both it reports `gaveUp` rather than clamping, because a shipped game must
+    // not throw at a child mid-ride.
+    //
+    // Without this clause that counter had no reader at all — while `Building.ts`
+    // carried a comment stating this check asserted it was zero. A guard nobody
+    // reads is not a guard, and a comment claiming an assertion that does not
+    // exist is worse than silence.
+    const chaseGaveUp = building.chaseSolveGaveUpFrames();
+    if (chaseGaveUp > 0) {
+      say(
+        'the chase solve found a lens',
+        `the chase camera solve gave up on ${chaseGaveUp} frames of the descent — no placement ` +
+          'within its range put the child and her nearest companion both in shot while keeping ' +
+          'the lens out of the ground, so the shot those frames drew is one the solver knows is ' +
+          'wrong. Widening the range is not the fix; the placement is wanted, not the clamp',
+      );
+    }
+
+    parade.dispose();
+
+    log(
+      `  ${wired ? 'wired  ' : 'control'}: ${ridingFrames} ridden frames, ` +
+        `worst ${worstOffChute.toFixed(2)} m off the chute, ` +
+        `closest pair ${closestPair === Infinity ? 'n/a' : `${closestPair.toFixed(2)} m`}, ` +
+        `closest to her ${worstClearance === Infinity ? 'n/a' : `${worstClearance.toFixed(2)} m`} ` +
+        `(deepest inside her ${deepestOverlap.toFixed(2)} m), ` +
+        `closest to its neighbour ` +
+        `${worstNeighbour === Infinity ? 'n/a' : `${worstNeighbour.toFixed(2)} m`} ` +
+        `(deepest inside it ${deepestNeighbour.toFixed(2)} m), ` +
+        `most upright lie ${worstLie.toFixed(3)} against ${LYING_DOWN_DOT}, ` +
+        `biggest single-frame step ${worstStep.toFixed(3)} m, ` +
+        `nearest pet in shot on ${(framedFraction * 100).toFixed(0)}% of rasters ` +
+        `(smallest ${smallestNearest === Infinity ? 'n/a' : `${(smallestNearest * 100).toFixed(1)}%`}), ` +
+        `${chaseFrames} chase frames, ` +
+        `${rasters} chase rasters (child at worst ${worstChild === Infinity ? 'n/a' : `${worstChild} px`}, ` +
+        // **Both edges of the band, always.** `PET_FRAME_CEILING` is 25% and the
+        // ceiling guard in the solve cannot currently fire (#518), so the biggest
+        // raster is the number that says how much headroom is left — reporting
+        // only the smallest describes one edge of a band as if it were the whole
+        // of it.
+        `biggest pet ${(biggestPet * 100).toFixed(0)}% of frame — ${biggestPetName}, ` +
+        `against a ${(PET_FRAME_CEILING * 100).toFixed(0)}% ceiling), ` +
+        // **#518: did the near bound do anything?** Printed every run, because
+        // the whole defect was a guard that looked calibrated and rejected
+        // nothing, and only a count can tell that from a guard with nothing to
+        // reject.
+        `solve search ${chaseSolveCost().candidates} candidates in ${chaseSolveCost().calls} calls (worst ${chaseSolveCost().worstCandidates} of 600 possible), ` +
+        `solved body centre vs drawn ` +
+        `${worstBodyDrift < 0 ? 'NEVER MEASURED' : `worst ${worstBodyDrift.toFixed(2)} m out (frame ${worstBodyDriftFrame})`}, ` +
+        `near bound ${chaseCeilingRejections()} rejections in ${chaseCeilingCalls()} calls ` +
+        `(worst estimate ${(chaseCeilingWorstShare() * 100).toFixed(1)}% against ` +
+        `${(CEILING_REJECT_ABOVE * 100).toFixed(1)}% to reject)` +
+        `${chaseCeilingRejections() === 0 ? ' — NEVER FIRED' : ''}, ` +
+        // The #514 aim guard's own number, printed green or red.
+        `nearest pet worst ` +
+        `${worstPetOffAxis < 0 ? 'NEVER MEASURED' : `${worstPetOffAxis.toFixed(1)}° off the lens axis (frame ${worstPetOffAxisFrame}, half-fov ${petHalfFov.toFixed(1)}°)`}, ` +
+        `furthest from her afterwards ${worstRegroup.toFixed(1)} m ` +
+        `(${missingFrames} undrawn, ${offChuteFrames} off-chute, ${aheadFrames} overtaking, ` +
+        `${touchingFrames} clipping, ${uprightFrames} upright pet-frames), ` +
+        // #516: the lens against the ball pit's rim, every chase frame. Negative
+        // "nearest" means the camera was inside the tube.
+        `camera nearest the pit rim ${rimNearest === Infinity ? 'n/a' : `${rimNearest.toFixed(2)} m`} ` +
+        `on a ${rimNearestShot} shot (${rimInsideFrames} frames INSIDE it` +
+        `${rimInsideShots.size > 0 ? `, on ${[...rimInsideShots].join('/')} shots` : ''}), ` +
+        `lens lowest above ground ${lowestAboveGround === Infinity ? 'n/a' : `${lowestAboveGround.toFixed(2)} m`} ` +
+        `on a ${lowestAboveGroundShot} shot (ridden frame ${lowestAboveGroundFrame}, ` +
+        `${undergroundFrames} frames UNDERGROUND), ` +
+        // The ray fan names the mesh nearest the lens — but only on frames where
+        // the lens is underground, which is normally none of them. Its own
+        // coverage is printed first, so a reader can never take the reach figure
+        // for a measurement it did not make.
+        `ray fan fired on ${nearFanRuns} frames ` +
+        `${nearFanRuns === 0 ? '(ASSERTS NOTHING — the lens was never underground, so nothing was named)' : `— nearest ANYTHING to the lens ${nearestAnything === Infinity ? `>${NEAR_FAN_REACH} m` : `${nearestAnything.toFixed(2)} m`} — ${nearestAnythingName} (ridden frame ${nearestAnythingFrame})`}`,
+    );
+
+    return {
+      ridingFrames,
+      complaints,
+      framedFraction,
+      worstOffChute,
+      worstStep,
+      closestPair,
+      worstClearance,
+      deepestOverlap,
+      worstNeighbour,
+      worstLie,
+      worstRegroup,
+    };
+  }
+
+  // Granted once, before either run: the store is the game's, there is one of it,
+  // and both descents must be taken by the same three animals or the control is
+  // not a control.
+  for (const id of PET_IDS) {
+    const spec = shopItem(id);
+    if (!spec) throw new Error(`check:pet-slide — no catalogue entry for ${id}`);
+    gameStore.catchWildPet(spec);
+  }
+
+  log('  riding the ginormous slide with three companions:');
+  const wired = await ride(true);
+  // The control is the instrument's own proof, not a question about this park:
+  // ridden only when every clause is asked.
+  if (all) log('  and again with the ride never told about the parade — the control:');
+  const control = all ? await ride(false) : null;
+
+  /**
+   * The clauses the park's own slide decides — how its route lets the chase lens
+   * frame her and her companions. The rest (the parade, the pose, the lens rig)
+   * are code, the same on every park; `coverage` and the control are the
+   * instrument's own, voids.
+   */
+  const DECISION_CLAUSES = new Set(['in shot', 'the child is in her own shot', 'nothing in the lens']);
+  const voids: string[] = [];
+  const decisions: string[] = [];
+  const code: string[] = [];
+  const notes: string[] = [];
+  for (const complaint of wired.complaints) {
+    const line = `${complaint.clause}: ${complaint.detail}`;
+    if (complaint.clause === 'coverage') voids.push(line);
+    else (DECISION_CLAUSES.has(complaint.clause) ? decisions : code).push(line);
+  }
+  // **The control must fail.** If riding with the parade unwired passes every
+  // clause above, then every clause above is satisfied by a pet standing in the
+  // long grass and this file proves nothing. Which clauses go red is not pinned —
+  // that would be a second description of the old behaviour — only that some do.
+  if (control && control.complaints.length === 0) {
+    voids.push(
+      'the control passed: a descent where the ride was never told about the parade at all ' +
+        'satisfied every clause above, so the clauses are not measuring whether the pets ride ' +
+        'the slide. Nothing green in this file can be believed until this goes red again',
+    );
+  }
+  if (all) {
+    notes.push(
+      // The seed is on the green summary as well as on line 1 and on the failure,
+      // because **the misleading pass was the expensive half**: a red log at least
+      // gets read, while five green runs quoting different frame counts were read
+      // as one park behaving inconsistently for a whole evening.
+      `check:pet-slide ok on park seed ${PARK_SEED} (${parkSeedSource()}) — three companions rode ` +
+        `all ${wired.ridingFrames} frames of the descent ` +
+        `behind her and in order, never more than ${wired.worstOffChute.toFixed(2)} m off the chute, ` +
+        `lying down throughout (most upright ${wired.worstLie.toFixed(3)}, against ` +
+        `${LYING_DOWN_DOT} required), never closer to her own body than ` +
+        `${wired.worstClearance.toFixed(2)} m, ` +
+        `never closer to the one in front of it than ${wired.worstNeighbour.toFixed(2)} m, never ` +
+        `moving more than ` +
+        `${wired.worstStep.toFixed(3)} m in a frame, in the chase camera's shot on ` +
+        `${(wired.framedFraction * 100).toFixed(0)}% of its rasters, and back within ` +
+        `${wired.worstRegroup.toFixed(1)} m of her ${REGROUP_SECONDS} s later.\n` +
+        `  The control (ride not wired to the parade) failed ` +
+        `${control?.complaints.length ?? 0} of the same clauses — ` +
+        `${(control?.complaints ?? []).map((c) => c.clause).join(', ')} — so they measure the ride and not ` +
+        'the park.',
+    );
+  }
+  return { voids, decisions, code, notes, seed: PARK_SEED, source: parkSeedSource() };
+
+}

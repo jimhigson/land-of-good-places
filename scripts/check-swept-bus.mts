@@ -4,8 +4,6 @@
  * ```
  * pnpm run check:swept-bus                      # every seed in the pool
  * pnpm run check:swept-bus -- --verbose         # and every offending post
- * pnpm run check:swept-bus -- --print-baseline > scripts/swept-bus-baseline.mts
- * LGP_RATCHET=off pnpm run check:swept-bus      # report the drift, do not fail
  * ```
  *
  * This is stage 3's independent instrument — the thing every later stage-3 step
@@ -18,12 +16,15 @@
  *
  * 1. **It was written before the fix**, deliberately, so that it could be
  *    watched failing. A check nobody has seen go red is not known to be able to.
- * 2. **It lands as a ratchet** (`scripts/swept-bus-baseline.mts`) because the
- *    park is genuinely red on it — 364 drawn posts inside the bus across the
- *    sixteen pool seeds when this was written. Green here means *no worse*,
- *    never *clear*, and the run says so every time.
- * 3. **Step 2 owns driving that to zero** and deleting the baseline file. Read
- *    the note this prints when a seed first reaches zero before you do.
+ * 2. **It landed as a ratchet** (a per-seed baseline, 364 drawn posts inside
+ *    the bus across the sixteen pool seeds) because the park was genuinely red
+ *    on it, and green meant *no worse*.
+ * 3. **Step 2 made the supports claims** — the plan projection of the drawn
+ *    trunk and branches below the bus's own height, asked of the registry the
+ *    road claimed its corridor in — and with that the ratchet is gone: **any
+ *    drawn post inside the bus, on any pool seed, fails this check**, and so
+ *    does a seed whose park cannot be built at all. There is no baseline file
+ *    to add an entry to.
  *
  * ## The bug it is written against is a bug in the previous instrument
  *
@@ -55,19 +56,15 @@
  * ## The rename hazard, and why this check cannot fall into it
  *
  * Issue **#520**: `check:coplanar`'s ratchet is keyed on **mesh names**, so a
- * rename orphans the entry and nobody hears. This check meets that hazard
- * twice, and answers it twice.
- *
- * 1. **The baseline is keyed on the seed number**, which nothing can rename. A
- *    baseline entry for a seed that is not in `PARK_SEED_POOL` is an
- *    **orphan**, and an orphan is a **failure** here rather than a printed
- *    note — the brief's own instruction, and the thing #520 asks for.
- * 2. **The meshes it measures are asserted to exist**, on every seed. This
- *    check finds posts *by name*; rename `railRace:trestle-legs` and the sweep
- *    would find nothing, report a triumphant zero, and beat the ratchet. So a
- *    named mesh that is absent, or present with no instances, fails the run and
- *    says the mesh is gone. A green line that could only be produced by
- *    measuring nothing is the disease this whole file is about.
+ * rename orphans the entry and nobody hears. This check has no baseline any
+ * more (it had one, keyed on the seed number, until step 2 drove it to zero),
+ * but it meets the same hazard one layer out and answers it: **the meshes it
+ * measures are asserted to exist**, on every seed. This check finds posts *by
+ * name*; rename `railRace:trestle-legs` and the sweep would find nothing and
+ * report a triumphant zero. So a named mesh that is absent, or present with no
+ * instances, fails the run and says the mesh is gone. A green line that could
+ * only be produced by measuring nothing is the disease this whole file is
+ * about.
  *
  * ## The controls, run on every seed on every run
  *
@@ -92,7 +89,7 @@
  *   each resolved to the single point at its **foot**. No branches, nowhere
  *   along the lean. Its count is printed beside the real one on every seed, and
  *   the two differing is the evidence that the foot was the wrong origin. The
- *   **post** count is the one the ratchet binds.
+ *   **post** count is the one that fails the run.
  *
  * ## What this covers, stated plainly
  *
@@ -122,113 +119,26 @@ import { execFile } from 'node:child_process';
 import { cpus } from 'node:os';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { InstancedMesh, Matrix4, Vector3, type Object3D } from 'three';
 import { PARK_SEED } from '../src/world/parkManifest.ts';
 import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
-import { SWEPT_BUS_BASELINE } from './swept-bus-baseline.mts';
+import {
+  CONTROL_LIFT,
+  FINER_STEP_WARNING,
+  SWEEP_STEP,
+  TRESTLE_MESHES,
+  type SeedReport,
+  OWNER_SLACK,
+  sweptBusIntrusion,
+  sweptBusVoids,
+} from './lib/sweptBus.mts';
+
 
 const run = promisify(execFile);
 const HERE = fileURLToPath(import.meta.url);
 const verbose = process.argv.includes('--verbose');
-const printBaseline = process.argv.includes('--print-baseline');
 const isChild = process.env['LGP_SWEPT_BUS_CHILD'] === '1';
 const started = performance.now();
 
-/**
- * How finely a post is sampled along its own length. Comfortably finer than the
- * bus is deep, so a post cannot slip between two samples of itself.
- *
- * **This can only ever *under*-count, never over-count**, and that is the
- * direction that matters. A post grazing the bus between two of its own samples
- * is missed; a post that is not touching can never be invented. So every number
- * here is a **lower bound** on the intrusion — which is the safe direction while
- * the count is large and the *unsafe* one at the moment it reaches zero.
- *
- * Hence {@link FINER_STEP_WARNING}: a zero measured at this step is not proof of
- * a zero, and the check says so on the run where somebody would act on it.
- */
-const POST_STEP = 0.2;
-
-/**
- * What to print when a seed reaches zero — read at the moment it is needed,
- * rather than in a handoff nobody opens.
- */
-const FINER_STEP_WARNING =
-  `  A zero at POST_STEP=${POST_STEP} m is a LOWER BOUND, not a proof. The sampling can only\n` +
-  '  under-count (a post grazing the bus between two of its own samples is missed),\n' +
-  '  so before deleting scripts/swept-bus-baseline.mts, re-run with POST_STEP and\n' +
-  '  SWEEP_STEP cut to 0.02 m and confirm the zero holds. Deleting the baseline on a\n' +
-  '  coarse zero is how this check would come to certify a bus still clipping a post.\n';
-
-/** How finely the bus is stepped along its run. Finer than the thinnest post. */
-const SWEEP_STEP = 0.2;
-
-/** How far the control bus is lifted — well above anything the ride draws. */
-const CONTROL_LIFT = 200;
-
-/** The three meshes every part of a trestle is drawn into, by `track.ts`'s `strut`. */
-const TRESTLE_MESHES = [
-  'railRace:trestle-legs',
-  'railRace:trestle-branches-lower',
-  'railRace:trestle-branches-upper',
-] as const;
-
-/** One post the bus reaches, as a person would need it described to go and look. */
-export interface Intrusion {
-  /** `<ring>:<part>:<instance>` — which drawn strut this is. */
-  readonly post: string;
-  /** How far inside the bus's body the post reaches, in metres. */
-  readonly penetration: number;
-  /** Where on the post that happens, in world metres. */
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  /** The height of that point above the ground under it. */
-  readonly up: number;
-  /** Where the bus was standing when it reached that deep. */
-  readonly busX: number;
-}
-
-/** What one child hands back about one seed. */
-export interface SeedReport {
-  readonly seed: number;
-  /** Distinct drawn posts the bus's body reaches. The ratcheted number. */
-  readonly posts: number;
-  /** The same sweep asked only at each post's foot — the old, wrong question. */
-  readonly feet: number;
-  /** The same sweep with the bus lifted clear. Must be zero or the run is void. */
-  readonly lifted: number;
-  /** Every intrusion, worst first. */
-  readonly worst: readonly Intrusion[];
-  /** How many post samples the sweep had to look at — zero means it measured nothing. */
-  readonly samples: number;
-  /** Instances found per trestle mesh, so a rename cannot pass as a clean park. */
-  readonly instances: Readonly<Record<string, number>>;
-  /** The bus box as measured off the drawn bus, for the transcript. */
-  readonly bus: {
-    readonly length: number;
-    readonly width: number;
-    readonly bottom: number;
-    readonly top: number;
-  };
-  /**
-   * The stretch of the road's arc the bus was swept along, and the road's own
-   * full length beside it.
-   *
-   * **`roadLength` is here because a span without a whole is not coverage.** This
-   * check printed `swept along the road's arc from 1.00 to -1.00 m` and headlined
-   * "0 intruding posts on 14 seeds", and both sentences were true while the thing
-   * a reader took from them — that the bus had been proved clear of the ride —
-   * covered **2 m of a 145.7 m road, 1.4%**. That number was quoted as acceptance
-   * evidence for the road merge. Nothing in the output contradicted it because
-   * nothing in the output gave the reader the denominator.
-   */
-  readonly route: {
-    readonly fromAt: number;
-    readonly toAt: number;
-    readonly roadLength: number;
-  };
-}
 
 // ------------------------------------------------------------------ the child
 
@@ -242,329 +152,15 @@ export interface SeedReport {
  */
 async function measureOneSeed(): Promise<void> {
   const { buildHeadlessPark } = await import('./park-harness.mts');
-  const { terrainHeight } = await import('../src/world/terrain.ts');
-  // The road is a curve now, so its own accessors replace layout.ts's three
-  // straight-road constants (which this branch deleted). Dynamic, like every
-  // import here: `roadRoute.ts` builds a RingPath off the seeded boundary at
-  // module scope, so a static import would pin the seed.
-  const {
-    entranceRoadAt,
-    entranceRoadFacing,
-    entranceBusArriveAt,
-    entranceBusVanishAt,
-    entranceRoadExtent,
-  } = await import('../src/world/entrance/roadRoute.ts');
-  const { PARK_SEED: seed } = await import('../src/world/parkManifest.ts');
   const { saveFlags } = await import('../src/state/flags.ts');
-  const { Box3 } = await import('three');
+  const { measureSweptBus } = await import('./lib/sweptBus.mts');
 
   // The arrival only exists for a child who has not already arrived — the same
   // hydrate `check:cat-bus` does, and for the same reason: without it the park
   // builds no bus and this check would sweep an empty road and call it clear.
   saveFlags.hydrate({ arrivedByBus: false });
 
-  const park = buildHeadlessPark();
-
-  // --- the bus, as it is drawn and as it is really placed -------------------
-  //
-  // **The park's own bus, not one this script builds.** `ArrivalSequence`
-  // constructs it and calls `placeBus`, which sets the position *and* the
-  // bearing. Taking both off that object means this check cannot hold a second
-  // opinion about either — no `BUS_FACING` restated here, no bus assembled with
-  // different options. Both are things `check:entrance-road` would have had to
-  // copy, and a copy is the bug this branch keeps finding.
-  const arrival = park.world.entrance.arrival;
-  if (!arrival) throw new Error('check:swept-bus: the headless park built no cat bus arrival');
-  let busRoot: Object3D | null = null;
-  arrival.group.traverse((object: Object3D) => {
-    if (!busRoot && object.name === 'cat-bus') busRoot = object;
-  });
-  if (!busRoot) {
-    throw new Error(
-      'check:swept-bus: no node named `cat-bus` under the arrival group. This check finds ' +
-        'the bus by that name, so a rename would make it sweep nothing and report clear.',
-    );
-  }
-  const bus = busRoot as Object3D;
-
-  /**
-   * **Everything above the bus must be identity, and this says so out loud.**
-   *
-   * `placeBus` writes the bus's pose into its **own** transform, and everything
-   * below reads that transform and then works in world coordinates. The two are
-   * the same thing only while every ancestor — the arrival group, the entrance
-   * group, the scene — is untransformed, which is true today and is nowhere
-   * written down. Give the arrival group an offset tomorrow and every number
-   * this check prints would be quietly measured in the wrong place: the "two
-   * definitions of one thing kept in step by hand" fault, sitting in the
-   * instrument instead of in the park.
-   *
-   * So it is asserted rather than assumed. Cheaper than folding the world
-   * matrix in, and it fails loudly instead of drifting.
-   */
-  for (let node = bus.parent; node; node = node.parent) {
-    const moved =
-      node.position.lengthSq() > 1e-12 ||
-      Math.abs(node.quaternion.w - 1) > 1e-9 ||
-      Math.abs(node.scale.x - 1) > 1e-9 ||
-      Math.abs(node.scale.y - 1) > 1e-9 ||
-      Math.abs(node.scale.z - 1) > 1e-9;
-    if (moved) {
-      throw new Error(
-        `check:swept-bus: \`${node.name || node.type}\`, an ancestor of the cat bus, has a ` +
-          "transform of its own. This check reads the bus's pose off the bus and then " +
-          'measures in world coordinates, which is only the same thing while everything ' +
-          'above it is identity. Fold the ancestor transform in before trusting any ' +
-          'number here.',
-      );
-    }
-  }
-
-  /** The bearing `placeBus` gave it. Read, never restated. */
-  const facing = bus.rotation.y;
-  const forwardX = Math.sin(facing);
-  const forwardZ = Math.cos(facing);
-  const rightX = Math.cos(facing);
-  const rightZ = -Math.sin(facing);
-
-  // The drawn extent **in the bus's own frame**: +Z along its length, +X across
-  // it, y from the underside of the tyres to the tips of its ears. Taken by
-  // standing the real bus at the origin unrotated for the measurement and
-  // putting it straight back — nothing else has looked at it yet, and the
-  // alternative is re-deriving a dozen private constants in `catBus.ts`.
-  const keptPosition = bus.position.clone();
-  const keptRotationY = bus.rotation.y;
-  bus.position.set(0, 0, 0);
-  bus.rotation.y = 0;
-  bus.updateMatrixWorld(true);
-  const busBox = new Box3().setFromObject(bus);
-  bus.position.copy(keptPosition);
-  bus.rotation.y = keptRotationY;
-  bus.updateMatrixWorld(true);
-  if (!Number.isFinite(busBox.min.x) || busBox.max.y <= busBox.min.y) {
-    throw new Error('check:swept-bus: the drawn cat bus has no measurable body');
-  }
-
-  // --- the posts, as they are drawn ----------------------------------------
-  interface Sample {
-    readonly x: number;
-    readonly y: number;
-    readonly z: number;
-    readonly radius: number;
-    readonly post: string;
-    /** Which of the three trestle meshes this came from: `legs`, `branches-*`. */
-    readonly part: string;
-    /** True for the sample at the strut's own start — its foot, for a trunk. */
-    readonly isFoot: boolean;
-  }
-  const samples: Sample[] = [];
-  const instances: Record<string, number> = Object.fromEntries(
-    TRESTLE_MESHES.map((name) => [name, 0]),
-  );
-  const matrix = new Matrix4();
-  const centre = new Vector3();
-  const axis = new Vector3();
-  const across = new Vector3();
-
-  park.scene.traverse((object: Object3D) => {
-    const mesh = object as InstancedMesh;
-    if (!mesh.isInstancedMesh) return;
-    const name = mesh.name as (typeof TRESTLE_MESHES)[number];
-    if (!TRESTLE_MESHES.includes(name)) return;
-    instances[name] = (instances[name] ?? 0) + mesh.count;
-
-    // Which ring, so a reader knows whether this is the one a child stands
-    // beside on foot or the one she meets mid-ride.
-    let ring = 'unknown';
-    for (let node: Object3D | null = mesh; node; node = node.parent) {
-      if (node.name.includes('walk-past')) {
-        ring = 'walk-past';
-        break;
-      }
-      if (node.name.includes('race-ring')) {
-        ring = 'race';
-        break;
-      }
-    }
-
-    // `strut` stands a unit-height cylinder from `from` to `to`, so the
-    // geometry's own bottom radius belongs to the `from` end and its top radius
-    // to the `to` end. Asked of the geometry — three trestle radii written out
-    // in a check would be three more copies of numbers `trestleGeometry.ts`
-    // owns, which is the bug this branch exists to stop repeating.
-    const parameters = (
-      mesh.geometry as unknown as {
-        parameters?: { radiusTop: number; radiusBottom: number };
-      }
-    ).parameters;
-    if (!parameters) {
-      throw new Error(`check:swept-bus: ${mesh.name} is not a cylinder — its radii cannot be read`);
-    }
-    const { radiusTop, radiusBottom } = parameters;
-    const part = mesh.name.replace('railRace:trestle-', '');
-
-    for (let i = 0; i < mesh.count; i += 1) {
-      mesh.getMatrixAt(i, matrix);
-      centre.setFromMatrixPosition(matrix);
-      axis.setFromMatrixColumn(matrix, 1);
-      const length = axis.length();
-      if (length < 1e-6) continue;
-      axis.divideScalar(length);
-      // x and z are scaled by the ring's own size — exactly the factor
-      // `track.ts` multiplies `POST_FOOT_RADIUS` by for the collider.
-      const widthScale = across.setFromMatrixColumn(matrix, 0).length();
-      const footX = centre.x - axis.x * (length / 2);
-      const footY = centre.y - axis.y * (length / 2);
-      const footZ = centre.z - axis.z * (length / 2);
-      const post = `${ring}:${part}:${i}`;
-      // Stepped by a whole number of intervals rather than by adding
-      // {@link POST_STEP} until it overshoots, so **both ends are always
-      // sampled** and the spacing is never coarser than asked for. Walking a
-      // float up to `<= length` drops the top of a strut whenever the length is
-      // not a multiple of the step — and the top of a trunk is exactly where
-      // the fork the bus meets is.
-      const steps = Math.max(1, Math.ceil(length / POST_STEP));
-      for (let step = 0; step <= steps; step += 1) {
-        const t = step / steps;
-        const along = t * length;
-        samples.push({
-          x: footX + axis.x * along,
-          y: footY + axis.y * along,
-          z: footZ + axis.z * along,
-          radius: (radiusBottom + (radiusTop - radiusBottom) * t) * widthScale,
-          post,
-          part,
-          isFoot: step === 0,
-        });
-      }
-    }
-  });
-
-  // --- the sweep -----------------------------------------------------------
-  //
-  // **The road is an arc, so the sweep is an arc.** The bus rolls in from
-  // `entranceBusArriveAt()`, stops, and drives off past `entranceBusVanishAt()`,
-  // and `ArrivalSequence.placeBus` is the three lines that turn a position along
-  // that arc into a pose:
-  //
-  //     const station = entranceRoadAt(at);
-  //     root.position.set(station.x, terrainHeight(station.x, station.z), station.z);
-  //     root.rotation.y = entranceRoadFacing(at);
-  //
-  // So this asks the same three functions and holds no separate opinion about
-  // where the road goes — the same rule the straight version followed.
-  //
-  // **This check has never measured a curved road before.** It was written
-  // against a straight kerb: an x-range at a fixed z, with the bus's bearing
-  // read once off the built vehicle because it never changed. On the arc the
-  // bearing changes at every station, so it is read per position instead — and
-  // that is the ONLY thing that changed. The post sampling, the height test,
-  // `reachInto`'s box arithmetic and both controls are untouched, so a number
-  // that moves here moves because the road is genuinely somewhere else.
-  // A green result on geometry an instrument has just been taught is the moment
-  // to be most suspicious of it, which is why both controls are re-proved below.
-  const fromAt = entranceBusArriveAt();
-  const toAt = entranceBusVanishAt();
-
-  /**
-   * How far a post sample reaches inside the bus's body, standing at `busX`.
-   * Zero or less is clear. The bus is an axis-aligned box once the bearing
-   * above is folded in, so this is the ordinary point-to-box distance.
-   */
-  const reachInto = (
-    sample: Sample,
-    pose: { readonly x: number; readonly z: number; readonly facing: number },
-    busGroundY: number,
-    lift: number,
-  ): number => {
-    // Into the bus's own frame. The bearing comes from the pose because the arc
-    // turns the bus as it drives; on the straight road it was a constant read
-    // once off the built vehicle, and this is the same quantity per position.
-    const fx = Math.sin(pose.facing);
-    const fz = Math.cos(pose.facing);
-    const rx = Math.cos(pose.facing);
-    const rz = -Math.sin(pose.facing);
-    const dx = sample.x - pose.x;
-    const dz = sample.z - pose.z;
-    const localZ = dx * fx + dz * fz;
-    const localX = dx * rx + dz * rz;
-    const localY = sample.y - busGroundY - lift;
-    const outX = Math.max(busBox.min.x - localX, localX - busBox.max.x);
-    const outY = Math.max(busBox.min.y - localY, localY - busBox.max.y);
-    const outZ = Math.max(busBox.min.z - localZ, localZ - busBox.max.z);
-    if (outX <= 0 && outY <= 0 && outZ <= 0) {
-      // Inside the box: the deepest it is from any face, plus its own radius.
-      return sample.radius - Math.max(outX, outY, outZ);
-    }
-    const outside = Math.hypot(Math.max(0, outX), Math.max(0, outY), Math.max(0, outZ));
-    return sample.radius - outside;
-  };
-
-  /**
-   * Sweeps the run and returns the distinct posts reached.
-   *
-   * `feetOnly` reproduces **exactly** the question `check:entrance-road` was
-   * asking when it headlined "0 legs hit on all sixteen seeds": the trunks
-   * (`railRace:trestle-legs`) alone, each resolved to the single point at its
-   * **foot**. Not the branches, which that check could not see at all, and not
-   * anywhere along the lean. `lift` is the control that raises the bus clear of
-   * everything.
-   */
-  const sweep = (
-    feetOnly: boolean,
-    lift: number,
-  ): { posts: Map<string, Intrusion> } => {
-    const hit = new Map<string, Intrusion>();
-    const looking = feetOnly
-      ? samples.filter((sample) => sample.isFoot && sample.part === 'legs')
-      : samples;
-    for (let at = fromAt; at >= toAt; at -= SWEEP_STEP) {
-      const station = entranceRoadAt(at);
-      const pose = { x: station.x, z: station.z, facing: entranceRoadFacing(at) };
-      const busGroundY = terrainHeight(station.x, station.z);
-      for (const sample of looking) {
-        const reach = reachInto(sample, pose, busGroundY, lift);
-        if (reach <= 0) continue;
-        const already = hit.get(sample.post);
-        if (already && already.penetration >= reach) continue;
-        hit.set(sample.post, {
-          post: sample.post,
-          penetration: reach,
-          x: sample.x,
-          y: sample.y,
-          z: sample.z,
-          up: sample.y - terrainHeight(sample.x, sample.z),
-          busX: station.x,
-        });
-      }
-    }
-    return { posts: hit };
-  };
-
-  const real = sweep(false, 0);
-  const feet = sweep(true, 0);
-  const lifted = sweep(false, CONTROL_LIFT);
-
-  const report: SeedReport = {
-    seed,
-    posts: real.posts.size,
-    feet: feet.posts.size,
-    lifted: lifted.posts.size,
-    worst: [...real.posts.values()].sort((a, b) => b.penetration - a.penetration),
-    samples: samples.length,
-    instances,
-    bus: {
-      length: busBox.max.z - busBox.min.z,
-      width: busBox.max.x - busBox.min.x,
-      bottom: busBox.min.y,
-      top: busBox.max.y,
-    },
-    route: {
-      fromAt,
-      toAt,
-      roadLength: entranceRoadExtent().to - entranceRoadExtent().from,
-    },
-  };
+  const report = await measureSweptBus(buildHeadlessPark());
   process.stdout.write(`\n__SWEPT_BUS__${JSON.stringify(report)}\n`);
 }
 
@@ -584,6 +180,8 @@ const seeds = [...new Set([PARK_SEED, ...PARK_SEED_POOL])].sort((a, b) => a - b)
 
 const limit = Math.max(1, Math.min(seeds.length, cpus().length - 1));
 const reports: SeedReport[] = [];
+/** Seeds whose park threw before the bus could be swept, with the thrown reason. */
+const unbuilt: { seed: number; reason: string }[] = [];
 let cursor = 0;
 await Promise.all(
   Array.from({ length: limit }, async () => {
@@ -592,16 +190,34 @@ await Promise.all(
       cursor += 1;
       const seed = seeds[index];
       if (seed === undefined) return;
-      const { stdout } = await run(
-        process.execPath,
-        ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', HERE],
-        {
-          env: { ...process.env, LGP_SEED: String(seed), LGP_SWEPT_BUS_CHILD: '1' },
-          maxBuffer: 64 * 1024 * 1024,
-        },
-      );
+      let stdout = '';
+      try {
+        ({ stdout } = await run(
+          process.execPath,
+          ['--no-warnings', '--import', './scripts/ts-extension-resolver-register.mjs', HERE],
+          {
+            env: { ...process.env, LGP_SEED: String(seed), LGP_SWEPT_BUS_CHILD: '1' },
+            maxBuffer: 64 * 1024 * 1024,
+          },
+        ));
+      } catch (error) {
+        // **A park that cannot be built is a failed seed, said in one line.**
+        // The Rail Race refuses a duck bar's slot with a thrown Error when no
+        // support can stand (track.ts, `trestleSpots`); the child dies with it,
+        // and the reason belongs in this report beside the seeds that did build,
+        // not as a stack trace that hides the other fifteen.
+        const stderr = (error as { stderr?: string }).stderr ?? String(error);
+        const reason =
+          stderr.split('\n').find((each) => each.startsWith('Error: '))?.slice('Error: '.length) ??
+          stderr.trim().split('\n').slice(-1)[0] ?? 'unknown';
+        unbuilt.push({ seed, reason });
+        continue;
+      }
       const line = stdout.split('\n').find((each) => each.startsWith('__SWEPT_BUS__'));
-      if (!line) throw new Error(`check:swept-bus: seed ${seed} produced no report`);
+      if (!line) {
+        unbuilt.push({ seed, reason: 'the child produced no report' });
+        continue;
+      }
       reports.push(JSON.parse(line.slice('__SWEPT_BUS__'.length)) as SeedReport);
     }
   }),
@@ -611,124 +227,10 @@ reports.sort((a, b) => a.seed - b.seed);
 // ----------------------------------------------------- can this measure at all
 
 /**
- * **The guards that stop a green line meaning "I looked at nothing".**
- *
- * This check finds the ride's supports by mesh name, so a rename is all it
- * takes to turn it into a ratchet that passes because it swept an empty park.
- * That is #520's fault, one layer out, and it is caught here rather than
- * inferred later.
+ * **The guards that stop a green line meaning "I looked at nothing"** —
+ * `sweptBusVoids`, one owner with the acceptance loop (see `lib/sweptBus.mts`).
  */
-const voids: string[] = [];
-for (const report of reports) {
-  for (const name of TRESTLE_MESHES) {
-    if ((report.instances[name] ?? 0) === 0) {
-      voids.push(
-        `seed ${report.seed}: no instances of \`${name}\` in the built park. ` +
-          'This check finds the ride\'s supports by that name, so a rename makes it ' +
-          'measure nothing and report zero. Fix the name here, do not accept the zero.',
-      );
-    }
-  }
-  if (report.samples === 0) {
-    voids.push(`seed ${report.seed}: the sweep had no post samples to look at`);
-  }
-  if (report.lifted !== 0) {
-    voids.push(
-      `seed ${report.seed}: the CONTROL sweep, with the bus lifted ${CONTROL_LIFT} m clear of ` +
-        `the whole ride, still reached ${report.lifted} post(s). The sweep is not ` +
-        'height-aware, so every number it reports about the real bus is void.',
-    );
-  }
-}
-
-// ------------------------------------------------------------- the baseline
-
-if (printBaseline) {
-  const lines = reports
-    .filter((report) => report.posts > 0)
-    .map((report) => `  ${report.seed}: ${report.posts},`);
-  process.stdout.write(
-    `/**\n` +
-      ` * **What the cat bus was already driving through when \`check:swept-bus\` was written.**\n` +
-      ` *\n` +
-      ` * Generated by \`pnpm run check:swept-bus -- --print-baseline\`. Each entry is a\n` +
-      ` * **seed number** and the count of distinct drawn trestle posts the bus's body\n` +
-      ` * reaches on that seed. Keyed on the seed and nothing else, deliberately:\n` +
-      ` * issue #520 is that \`check:coplanar\`'s baseline is keyed on mesh names, so a\n` +
-      ` * rename silently loses the finding. A seed number cannot be renamed, and an\n` +
-      ` * entry here for a seed that is not in \`PARK_SEED_POOL\` **fails the check**\n` +
-      ` * rather than sitting quietly.\n` +
-      ` *\n` +
-      ` * A seed with no entry allows **zero**. Do not add an entry to make the check\n` +
-      ` * pass — an entry means "this was already wrong when the gate was written", and\n` +
-      ` * a new one means the road or the ride has just been made worse.\n` +
-      ` *\n` +
-      ` * Stage 3, step 2 drives this to empty and deletes the file. See\n` +
-      ` * \`docs/DESIGN-round-robin-generation.md\`.\n` +
-      ` */\n` +
-      `export const SWEPT_BUS_BASELINE: Readonly<Record<number, number>> = {\n` +
-      `${lines.join('\n')}\n};\n`,
-  );
-  process.exit(voids.length > 0 ? 1 : 0);
-}
-
-const ratchetEnforced = process.env['LGP_RATCHET'] !== 'off';
-const inPool = new Set(seeds);
-
-const regressions: string[] = [];
-for (const report of reports) {
-  const allowed = SWEPT_BUS_BASELINE[report.seed] ?? 0;
-  if (report.posts > allowed) {
-    const worst = report.worst[0];
-    regressions.push(
-      `WORSE: seed ${report.seed} — ${report.posts} drawn post(s) inside the bus, ` +
-        `baseline allows ${allowed}` +
-        (worst
-          ? `\n      worst ${worst.penetration.toFixed(3)} m into the body at ` +
-            `(${worst.x.toFixed(2)}, ${worst.z.toFixed(2)}), ` +
-            `${worst.up.toFixed(2)} m up, post ${worst.post}, bus at x=${worst.busX.toFixed(2)}`
-          : ''),
-    );
-  }
-}
-
-/**
- * **An orphaned entry is a failure, not a note.**
- *
- * The brief's instruction, straight out of #520: a ratchet entry that matches
- * nothing has stopped being a measurement of anything, and the one thing that
- * must never happen is for it to stop mattering quietly.
- */
-const orphans = Object.keys(SWEPT_BUS_BASELINE)
-  .map(Number)
-  .filter((seed) => !inPool.has(seed));
-
-/**
- * Entries the park has grown out of — slack in the ratchet.
- *
- * **This is enforced, not merely printed**, and that is a deliberate decision
- * rather than the default. A ratchet with slack nobody takes up stops being a
- * bound on anything: the recorded number drifts away from the measured one, and
- * the next reader takes the baseline for a description of the park when it has
- * quietly become a description of the past. That is the same family as #520 —
- * a recorded finding that has stopped matching what is there, saying nothing
- * about it.
- *
- * `check:coplanar` prints its `BASELINE LOOSE` without failing, and it is right
- * to: its entries are *areas*, which move a little on every regenerated park
- * whether or not the modelling mistake changed. These are **integer counts of
- * distinct posts**, which move only when the road or the ride actually moves —
- * so a drop here is a real event somebody should record, and the fix is ten
- * seconds of `--print-baseline`.
- *
- * It also serves the design directly: the sphere (#511) is expected to change
- * these counts, and this makes it impossible to land that change without
- * re-taking the measurement the prediction is to be judged on.
- */
-const loose = reports.filter(
-  (report) => SWEPT_BUS_BASELINE[report.seed] !== undefined &&
-    report.posts < (SWEPT_BUS_BASELINE[report.seed] ?? 0),
-);
+const voids: string[] = reports.flatMap((report) => sweptBusVoids(report));
 
 // ------------------------------------------------------------------- report
 //
@@ -782,10 +284,18 @@ function coverageNote(at: NonNullable<typeof route>, seed: number): string {
 
 process.stderr.write(
   `\ncheck:swept-bus — the drawn cat bus against the drawn rail-race posts, ` +
-    `${reports.length} seed(s) of PARK_SEED_POOL.\n` +
+    `${reports.length} of ${seeds.length} seed(s) of PARK_SEED_POOL built.\n` +
     (bus && route
-      ? `  bus body as drawn: ${bus.length.toFixed(2)} m long, ${bus.width.toFixed(2)} m wide, ` +
+      ? `  swept the walk-past ring only (railRace:walk-past-ring), by name: the ride-scale ring exists only ` +
+        `mid-race, when the bus is gone, and keeps every leg by Jim's ruling; race-ring instances seen and not swept: ` +
+        `${Object.entries(reports[0]?.excludedByDesign ?? {}).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}\n` +
+        `  bus body as drawn: ${bus.length.toFixed(2)} m long, ${bus.width.toFixed(2)} m wide, ` +
         `${bus.bottom.toFixed(2)} to ${bus.top.toFixed(2)} m above the ground it stands on\n` +
+        `  owner check: CAT_BUS_TOP ${bus.ownerTop.toFixed(4)} m vs the drawn top ${bus.top.toFixed(4)} m ` +
+        `(off by ${(bus.top - bus.ownerTop).toFixed(4)} m, slack ${OWNER_SLACK})\n` +
+        `  driven check: CAT_BUS_DRIVEN_TOP ${bus.ownerDrivenTop.toFixed(4)} m vs the drawn bus posed at its highest ` +
+        `${bus.drivenTop.toFixed(4)} m (${bus.drivenPose}; off by ${(bus.drivenTop - bus.ownerDrivenTop).toFixed(4)} m, slack ${OWNER_SLACK})\n` +
+        `  swept as driven: top ${bus.drivenTop.toFixed(4)} m, +${(bus.drivenTop - bus.top).toFixed(4)} m over rest\n` +
         coverageNote(route, reports[0]?.seed ?? 0)
       : '') +
     `  seed   posts  feet(control)  lifted(control)  worst penetration\n`,
@@ -810,50 +320,34 @@ for (const report of reports) {
     }
   }
 }
+for (const { seed, reason } of unbuilt) {
+  process.stderr.write(`  ${String(seed).padStart(5)}  NOT BUILT — ${reason}\n`);
+}
 
 /**
  * **The control's own number, said out loud on every run.**
  *
- * The feet-only column is the question `check:entrance-road` was asking. If it
- * ever stops differing from the post column, either the posts have stopped
- * leaning — which is step 2's whole job and worth knowing — or this instrument
- * has quietly become the old one again.
+ * The feet-only column is the question `check:entrance-road` was asking. Step 2
+ * of stage 3 is the reason the two columns should now agree at zero: a support
+ * is claimed as the plan projection of the drawn trunk and branches, so a foot
+ * that is clear means a post that is clear. The moment they disagree again, a
+ * post is leaning through the bus with its foot outside the road — the exact
+ * bug this instrument was written to see, and the claim has stopped
+ * describing the drawn geometry.
  */
 const differs = reports.filter((report) => report.feet !== report.posts).length;
 process.stderr.write(
   `\n  CONTROL, feet-only vs the drawn post: the two counts differ on ${differs} of ` +
-    `${reports.length} seed(s).\n` +
-    (differs === 0
-      ? '  They agree everywhere. Either no post leans through the bus any more, or this\n' +
-        '  check has become the foot-only one it was written to replace — say which.\n'
-      : '  Where they differ, the foot is the wrong origin and the post count binds.\n') +
+    `${reports.length} built seed(s).\n` +
     `  CONTROL, bus lifted ${CONTROL_LIFT} m: ` +
     `${reports.every((report) => report.lifted === 0) ? 'zero on every seed, as it must be' : 'NOT ZERO — see above'}.\n`,
 );
 
-process.stderr.write(
-  `\n  ${intruding.length} seed(s) still intruding — step 2 owes these. ` +
-    `${reports.reduce((sum, report) => sum + report.posts, 0)} drawn post(s) in total.\n`,
-);
-
-// **Said on the run where somebody would act on it, not in a handoff.** The
-// moment a seed reads zero is the moment the under-counting in POST_STEP stops
-// being the safe direction, so that is when the instruction has to appear.
+// **Said on the run where somebody would act on it, not in a handoff.** A zero
+// here is where the under-counting in POST_STEP stops being the safe direction.
 if (intruding.length < reports.length) {
   process.stderr.write(
-    `\n  ${reports.length - intruding.length} seed(s) now read ZERO.\n` + FINER_STEP_WARNING,
-  );
-}
-
-for (const seed of orphans) {
-  process.stderr.write(
-    `  BASELINE ORPHAN: seed ${seed} has a baseline entry but is not in PARK_SEED_POOL.\n`,
-  );
-}
-for (const report of loose) {
-  process.stderr.write(
-    `  BASELINE LOOSE: seed ${report.seed} is down to ${report.posts} from ` +
-      `${SWEPT_BUS_BASELINE[report.seed]} — tighten it (this fails the run; see below).\n`,
+    `\n  ${reports.length - intruding.length} seed(s) read ZERO.\n` + FINER_STEP_WARNING,
   );
 }
 
@@ -867,66 +361,36 @@ if (voids.length > 0) {
   process.exit(1);
 }
 
-if (orphans.length > 0) {
+if (unbuilt.length > 0) {
   console.error(
-    `\ncheck:swept-bus — ${orphans.length} orphaned baseline ` +
-      `${orphans.length === 1 ? 'entry' : 'entries'}, for ` +
-      `${orphans.length === 1 ? 'a seed' : 'seeds'} not in PARK_SEED_POOL: ` +
-      `${orphans.join(', ')}.\n` +
-      'A ratchet entry that matches no seed has stopped measuring anything, and #520 is\n' +
-      'exactly what happens when that is allowed to be quiet. Delete the entry, or put\n' +
-      'the seed back in PARK_SEED_POOL — do not leave it standing.',
+    `\ncheck:swept-bus — ${unbuilt.length} seed(s) could not be built, so the bus was not ` +
+      'swept on them:\n',
+  );
+  for (const { seed, reason } of unbuilt) console.error(`  seed ${seed}: ${reason}`);
+  console.error(
+    '\nA park that does not build is not a clear park. If the Rail Race refused a support,\n' +
+      'the placer needs a different decision (a second support shape) or the blocker must\n' +
+      'move — see docs/DESIGN-round-robin-generation.md, "Stage 3, ruled".',
   );
   process.exit(1);
 }
 
-if (loose.length > 0 && ratchetEnforced) {
+if (intruding.length > 0) {
   console.error(
-    `\ncheck:swept-bus — ${loose.length} baseline ${loose.length === 1 ? 'entry is' : 'entries are'} ` +
-      'now looser than the park:\n',
+    `\ncheck:swept-bus — the bus drives through the drawn ride on ${intruding.length} seed(s):\n`,
   );
-  for (const report of loose) {
-    console.error(
-      `  seed ${report.seed}: ${report.posts} drawn post(s), baseline records ` +
-        `${SWEPT_BUS_BASELINE[report.seed]}`,
-    );
-  }
+  for (const report of intruding) console.error(`  ${sweptBusIntrusion(report) ?? ''}`);
   console.error(
-    '\nThe park got better and the ratchet did not follow, which is good news that has\n' +
-      'to be recorded: slack nobody takes up stops the baseline describing anything, and\n' +
-      'the next reader takes it for the park when it has become a description of the\n' +
-      'past. Take it up in the same change:\n' +
-      '  pnpm run check:swept-bus -- --print-baseline > scripts/swept-bus-baseline.mts\n' +
-      'and put the new numbers in your diff, where a reviewer can see what moved.',
+    '\nThe fix is a support placement that clears, never a tolerance — the trestle placer\n' +
+      'claims the plan projection of everything it draws below the bus (track.ts,\n' +
+      '`trestleClaims`), so a post in the bus means a claim that stopped describing the\n' +
+      'drawn geometry, or a road whose corridor claim is narrower than the bus it carries.',
   );
   process.exit(1);
-}
-
-if (regressions.length > 0) {
-  const say = ratchetEnforced ? console.error : console.log;
-  say(
-    `\ncheck:swept-bus — ${regressions.length} seed(s) where the bus now reaches more of ` +
-      `the ride than the baseline records` +
-      `${ratchetEnforced ? '' : ' (LGP_RATCHET=off, so reported and not enforced)'}:\n`,
-  );
-  for (const line of regressions) say(`  ${line}`);
-  if (ratchetEnforced) {
-    console.error(
-      '\nThe fix is a road or a support placement that clears, not a bigger baseline —\n' +
-        'see docs/DESIGN-round-robin-generation.md, "Stage 3". A trestle whose foot is\n' +
-        'clear can still lean through the bus at height; measure the drawn post.',
-    );
-    process.exit(1);
-  }
 }
 
 console.log(
-  `check:swept-bus OK — swept ${reports.length} seed(s) over ` +
-    `${route ? `${Math.abs(route.fromAt - route.toAt).toFixed(1)} m of a ${route.roadLength.toFixed(1)} m road (${((100 * Math.abs(route.fromAt - route.toAt)) / route.roadLength).toFixed(1)}%), the driven run only` : 'an unknown span'}; ` +
-    `${intruding.length} still have the bus driving through the drawn ride ` +
-    `(${reports.reduce((sum, report) => sum + report.posts, 0)} post(s)), all within the ` +
-    `baseline in scripts/swept-bus-baseline.mts. ` +
-    `${regressions.length === 0 ? 'None is new.' : `${regressions.length} new, listed above and NOT enforced because LGP_RATCHET=off.`} ` +
-    `THIS IS NOT CLEAR — green here means "no worse", and step 2 owes the zero. ` +
+  `check:swept-bus OK — swept ${reports.length} seed(s); the drawn bus reaches no drawn ` +
+    `trestle post on any of them (both controls held). ` +
     `${((performance.now() - started) / 1000).toFixed(1)} s.`,
 );
