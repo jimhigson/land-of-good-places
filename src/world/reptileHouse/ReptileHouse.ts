@@ -54,6 +54,7 @@ import {
   REPTILE_ARRIVAL_X,
   REPTILE_ARRIVAL_Z,
   REPTILE_DOOR_BAND_OUTER,
+  REPTILE_LIPS_REACH,
   REPTILE_DOORMAT_STANDOFF,
   REPTILE_ENCLOSURE_WALL_HEIGHT,
   REPTILE_FORECOURT_ORIGIN_X,
@@ -275,7 +276,18 @@ export class ReptileHouse implements GameSystem {
       buildForecourt(this.forecourtRoot, surfaces, REPTILE_FORECOURT_ORIGIN_X, REPTILE_FORECOURT_ORIGIN_Z, this.frame);
       this.forecourtRoot.add(this.exterior.root);
     }
-    this.shellSolids = registerReptileShellCollision(collision, this.frame, reptileHouseLowDiscs(REPTILE_JAMB_STRIP), reptileHouseLipsReach());
+    // `REPTILE_LIPS_REACH` is what the park's doormat is placed from, so hold
+    // it to the mesh: nothing solid round the mouth may reach past it.
+    const lowDiscs = reptileHouseLowDiscs(REPTILE_JAMB_STRIP);
+    const lipsReach = reptileHouseLipsReach();
+    const mouthReach = Math.max(
+      lipsReach,
+      ...lowDiscs.filter((disc) => disc.z > 0 && Math.abs(disc.x) < REPTILE_JAMB_STRIP + 2).map((disc) => disc.z + disc.radius),
+    );
+    if (mouthReach > REPTILE_LIPS_REACH) {
+      throw new Error(`ReptileHouse: the mouth reaches ${mouthReach.toFixed(2)} m, past REPTILE_LIPS_REACH ${REPTILE_LIPS_REACH} — raise it in layout.ts`);
+    }
+    this.shellSolids = registerReptileShellCollision(collision, this.frame, lowDiscs, lipsReach);
     registerPlinthStep(surfaces, this.frame, reptileHousePlinthTop());
     atlas.applyTo(this.exterior.sign);
   }

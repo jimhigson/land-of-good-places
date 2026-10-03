@@ -133,6 +133,15 @@ export const REPTILE_DRAWN_DOOR_ALONG = REPTILE_SHELL_RADIUS - REPTILE_DRAWN_DOO
  */
 export const REPTILE_BACK_WALL_ALONG = REPTILE_SHELL_RADIUS * Math.cos(Math.PI / 16) - 2;
 
+/**
+ * How far out along the facade bearing anything solid round the mouth stands
+ * at child height: the lips (`reptileHouseLipsReach`, 10.65 m) and the cheek
+ * discs beside them (10.25 + 0.4). A literal so the park manifest can read it
+ * without loading the mesh; `ReptileHouse` measures both off the mesh at load
+ * and throws if either reaches past it.
+ */
+export const REPTILE_LIPS_REACH = 10.7;
+
 /** The tail signpost's base, radially from the building centre. */
 export const REPTILE_TAIL_REACH = 11.2;
 
