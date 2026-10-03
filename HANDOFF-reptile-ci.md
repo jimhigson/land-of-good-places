@@ -24,3 +24,11 @@ Place the reptile house as a normal anchor building on every seed 0..15, enlarge
 - Park growth: PARK_GROWTH = 1.0416 in core/constants.ts (linear; garden half-size, play radius, manifest bands via PARK_EXTENT_SCALE). PARK_AREA_MULTIPLIER 2.17 was tried first: pinned gate -> solveBoundaryRadii threw on seed 5 restart 4.
 - Checks updated: check-reptile-house (park doormat, exterior in plot), check-tap-spacing (exterior zones + entry band in the park), check-deep-links (/reptile-house-door on ReptileHouse.doormat), invariants (rh-mouth as a door front; reptile band in tap clearance).
 - Next: seed 5 acceptance locally (running), CI Parks for all 16, /spawn?pos= on the seed-5 doormat from the park file, preview screenshot.
+
+## Fixes found by seed 5's acceptance loop (3282c2dc..9637e3ca)
+- gate node was a typed z 54 (copy of ENTRANCE_GATE_Z-6) -> GATE_CORRIDOR_START_Z (park growth exposed it; every restart failed noPathEndsNowhere).
+- entrance tap zone overlapped the tail zone in the park -> SHELL+0.6 as on the forecourt.
+- doormat reach = REPTILE_LIPS_REACH (10.7, asserted vs mesh at load) + SPUR_PAVED_REACH (hotel's rule).
+- footprint 10.5 -> 11.8 to cover the tail base collider (REPTILE_TAIL_BASE_RADIUS 0.6), asserted at load.
+- Seed 5 restart 4 accepted locally after these (att54c).
+- Debug a restart: `LGP_SEED=5 LGP_PARK_RESTART=n node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/park-attempt.mts` prints failures' first lines.
