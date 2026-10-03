@@ -1,0 +1,229 @@
+name: Parks
+
+# **Every supported park, found once per tree, for every other job to use.**
+#
+# `build:parks` runs the accept loop per seed (restart 0, 1, 2, … until the
+# park hydrated from that restart's file passes every acceptance measure),
+# proves the file, and writes `.parks/`. It is cached under the park source
+# hash (`scripts/lib/park-source-hash.mjs`: the import closure of the solver
+# and the measures, plus the toolchain), so a tree whose parks cannot have
+# changed (a UI, docs or workflow change) builds nothing here.
+#
+# **Called, never triggered on its own** (`ci.yml`). Every job that builds a
+# park sits in the same run, behind a `needs:` edge on this, and restores the
+# cache it saved (`.github/actions/restore-parks`) — so it builds each park at
+# the restart found here and searches for none, and **waiting for parks costs
+# no API call at all.** It used to be its own workflow, and each of eight
+# consuming workflows polled the caches and runs API from a `Parks ready` job
+# for the ~20 minutes a cold build takes; together they exhausted the
+# installation's rate limit (HTTP 403, PR #705, 2 Oct) and every one went red
+# while every park had built. A `needs:` edge is free; a poll never is.
+#
+# One runner per seed, each running that seed's restarts four at a time
+# (`LGP_RESTART_LANES`, speculative, same answer as in order: `acceptPark`),
+# so the critical path is the slowest seed, not the sum.
+on:
+  workflow_call:
+    outputs:
+      # 'true' when `.parks/` for this tree is in this run's cache: already
+      # there, reused and verified, or built and merged just now. Consumers
+      # gate on it rather than on this workflow's result, because a reuse that
+      # fails verification is red here (a bug to chase) while the matrix still
+      # builds good parks.
+      ready:
+        value: ${{ jobs.key.outputs.hit == 'true' || jobs.reuse.outputs.reused == 'true' || jobs.merge.outputs.saved == 'true' }}
+  # By hand, from the Actions tab: builds and caches this branch's parks.
+  workflow_dispatch:
+
+# No `concurrency:` here. A called workflow's `github.workflow` is the
+# caller's, so a group keyed on it would collide with `ci.yml`'s own; the
+# caller owns cancellation.
+
+permissions:
+  contents: read
+  # Reading another run's `parks-<hash>` artifact (the reuse job).
+  actions: read
+
+jobs:
+  key:
+    name: Parks key
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      hash: ${{ steps.hash.outputs.hash }}
+      hit: ${{ steps.lookup.outputs.cache-hit }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Park source hash
+        id: hash
+        run: echo "hash=$(node scripts/lib/park-source-hash.mjs)" >> "$GITHUB_OUTPUT"
+      - name: Already built?
+        id: lookup
+        uses: actions/cache/restore@v4
+        with:
+          path: .parks
+          key: prebuilt-parks-${{ steps.hash.outputs.hash }}
+          lookup-only: true
+
+  # **Parks are a pure function of the source hash, so any branch's will do.**
+  # GitHub's cache is branch-scoped (main cannot read a PR's), but artifacts
+  # are not: the merge job below uploads `.parks` as `parks-<hash>`, and this
+  # job finds that artifact from any earlier run — typically the PR that is
+  # being merged — downloads it, and **verifies** it before trusting it:
+  # every file re-hydrated must build the digest and restart its manifest
+  # records, with nothing searched (`scripts/verify-parks.mts`). Then it saves
+  # it to this branch's cache and the matrix below never runs.
+  reuse:
+    name: Parks from another run
+    needs: [key]
+    if: needs.key.outputs.hit != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      reused: ${{ steps.verify.outputs.reused }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Find parks-${{ needs.key.outputs.hash }} from any run
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: parks-${{ needs.key.outputs.hash }}
+        # The one API call left in waiting for parks, made once per run. It
+        # retries a rate limit (403/429) rather than failing, and an answer it
+        # cannot get is "nothing to reuse", never "parks failed": the matrix
+        # below then builds them, which is slower and always correct.
+        run: |
+          run_id=""
+          for attempt in 1 2 3 4 5; do
+            if out=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$NAME&per_page=20" \
+                -q '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].workflow_run.id // empty' 2>err.txt); then
+              run_id="$out"; looked=true; break
+            fi
+            echo "artifact lookup failed (attempt $attempt): $(cat err.txt)"
+            sleep $(( attempt * 30 ))
+          done
+          if [ "${looked:-}" != "true" ]; then echo "::warning::could not ask for $NAME — building instead"; exit 0; fi
+          if [ -z "$run_id" ]; then echo "no unexpired $NAME anywhere — the matrix will build it"; exit 0; fi
+          echo "found $NAME in run $run_id"
+          if ! gh run download "$run_id" --repo "$GITHUB_REPOSITORY" -n "$NAME" -D reused; then
+            echo "::warning::could not download $NAME from run $run_id — building instead"
+            exit 0
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+      - name: Verify every park before trusting it
+        id: verify
+        if: steps.find.outputs.found == 'true'
+        run: |
+          node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/verify-parks.mts reused
+          mkdir -p .parks && cp reused/*.json .parks/
+          echo "reused=true" >> "$GITHUB_OUTPUT"
+      - name: Save for every other job
+        if: steps.verify.outputs.reused == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .parks
+          key: prebuilt-parks-${{ needs.key.outputs.hash }}
+
+  seed:
+    name: Park ${{ matrix.seed }}
+    needs: [key, reuse]
+    # !cancelled(), not always() — always() jobs ignore a superseding push's cancel: a reused set that fails verification fails the reuse job (red —
+    # the same source built two different parks, which is a bug to chase) and
+    # the matrix still builds the parks from scratch.
+    if: ${{ !cancelled() && needs.key.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true' }}
+    runs-on: ubuntu-latest
+    # The slowest seed's accept loop at four restarts at a time. Sized from
+    # the attempt's measured cost (#706, staged attempts, 2 Oct): a rejected
+    # restart pays its solve plus ~37-54 s of cheap measures; the accepted one
+    # its solve plus ~207 s of every measure. The dearest seed, 15, solves in
+    # 434 s CPU on a Mac (~15 min on a runner at ~2x) and now accepts at
+    # restart 0, so ~22 min; four lanes on four cores keep a seed that needs
+    # several restarts to about one solve per round. Not a budget to grow
+    # into: a seed that needs more is a generator to make cheaper.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Per seed, so re-running a failed matrix rebuilds only the seeds that failed.
+      - name: This seed, if already found at this source
+        id: seed-cache
+        uses: actions/cache@v4
+        with:
+          path: .parks-seed
+          key: prebuilt-park-${{ needs.key.outputs.hash }}-${{ matrix.seed }}
+      - name: Find and prove seed ${{ matrix.seed }}'s accepted park
+        if: steps.seed-cache.outputs.cache-hit != 'true'
+        env:
+          LGP_SEEDS: ${{ matrix.seed }}
+          LGP_LANES: '1'
+          LGP_RESTART_LANES: '4'
+          LGP_PARKS_OUT: .parks-seed
+        run: pnpm run build:parks
+      - uses: actions/upload-artifact@v4
+        with:
+          name: park-${{ matrix.seed }}
+          path: |
+            .parks-seed/*.json
+          if-no-files-found: error
+          # `.parks-seed` is a dot-directory, which upload-artifact skips unless told.
+          include-hidden-files: true
+          retention-days: 3
+
+  merge:
+    name: Parks
+    needs: [key, reuse, seed]
+    if: ${{ !cancelled() && needs.seed.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      saved: ${{ steps.saved.outputs.saved }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: park-*
+          path: parts
+      - name: One .parks/ from sixteen seeds
+        run: node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/merge-parks.mts parts/*
+      - name: Save for every other job
+        uses: actions/cache/save@v4
+        with:
+          path: .parks
+          key: prebuilt-parks-${{ needs.key.outputs.hash }}
+      - id: saved
+        run: echo "saved=true" >> "$GITHUB_OUTPUT"
+      # For other branches (main, after this PR merges): see the reuse job.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parks-${{ needs.key.outputs.hash }}
+          path: .parks/*.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30

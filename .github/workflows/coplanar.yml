@@ -34,14 +34,11 @@ name: Coplanar faces
 # CLAUDE.md describes under "A check that never runs is worse than a check that
 # fails".
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: coplanar-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
@@ -50,10 +47,14 @@ jobs:
   coplanar:
     name: Coplanar faces
     runs-on: ubuntu-latest
-    # Generous against a measured 3-4 minutes: the sweep builds sixteen parks,
-    # and a runner that is having a slow day should say so by being slow, not by
-    # being cancelled.
-    timeout-minutes: 15
+    # The sweep builds all sixteen supported parks (`SUPPORTED_PARK_SEEDS`),
+    # each at its recorded restart, one child process per park. That was
+    # measured at 3-4 minutes when the parks were cheaper; on 24 Sep 2026 the
+    # same sixteen took ~13 minutes on a runner (feat/prebuilt-parks) and 58 s
+    # per park locally, so 15 was a cancel waiting to happen — and a timeout
+    # reports as `cancelled`, not red. A runner having a slow day should say so
+    # by being slow, not by being cancelled.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -74,6 +75,9 @@ jobs:
         # Registry hiccups are common enough to be worth retrying — same
         # reasoning as deploy.yml; the counts live in `.npmrc`.
         run: pnpm install --frozen-lockfile
+
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
 
       - name: Coplanar sweep
         run: pnpm run check:coplanar

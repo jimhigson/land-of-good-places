@@ -1,4 +1,7 @@
 import { SAVE_KEY } from '../state/save';
+import { SUPPORTED_PARK_SEEDS } from './prebuilt/parkFileName';
+// Re-exported: its owner is the dependency-free `parkFileName.ts`.
+export { SUPPORTED_PARK_SEEDS };
 
 /**
  * **Which park a child gets, and where that number comes from.**
@@ -41,20 +44,36 @@ import { SAVE_KEY } from '../state/save';
  */
 
 /**
- * The park everyone had before the pool existed, and the one every check and
- * every test that does not ask for another still gets.
+ * **The default park: seed 5.** The seed Node resolves to when nothing pins
+ * one — so it is the park `check:park` and every other single-seed check
+ * measures — and `test/procgen`'s default regression seed. A child never gets
+ * it by default; she draws from {@link PARK_SEED_POOL}.
  *
- * It stays the canonical seed for three separate jobs, and they are worth
- * keeping apart: it is the park a **returning child** carries on playing (her
- * save's positions mean nothing in a different park); it is the seed **Node
- * resolves to** when nothing pins one, so `check:park` and every other check
- * measures the same park it always did; and it is `test/procgen`'s canonical
- * regression seed. It is also, being the most-played park in the game, the
- * most thoroughly vetted member of the pool.
+ * **It was 20260728 until 24 September 2026**, when Jim ruled *"we only
+ * support seeds 0..15, no others"* (#705, prebuilt parks). 20260728 is
+ * retired with the rest of the old pool. Seed 5 was chosen because, at the base
+ * the ruling landed on, it is one of the two seeds of 0..15 that pass both
+ * `check:park` and every procgen invariant (2 and 5; `vet:seeds` over 0..15),
+ * and of those two the cheaper to solve (2.8 s of plan search on an M-series
+ * Mac against seed 2's 6.8 s) — which every check that builds the default park
+ * pays on every run.
  */
-export const CANONICAL_PARK_SEED = 20260728;
+export const CANONICAL_PARK_SEED = 5;
 
 /**
+ * **The parks this game has: seeds 0 to 15, exactly.** Jim, 24 September 2026:
+ * *"we only support seeds 0..15, no others."* Every one of them ships as a
+ * prebuilt park file (`pnpm run build:parks`, `docs/design/PREBUILT-PARKS.md`),
+ * and any other seed — a `?seed=` off this list included — is an error in the
+ * game, never a park solved on the device. Each is built at the restart the
+ * root acceptance loop accepted for it (`acceptedRestarts.ts`): the first
+ * start-again of the seed whose finished park passed every acceptance measure
+ * (`parkRestart.ts`). Its park file carries that restart, and the boot applies
+ * it before the park loads. What follows is the pool's history before that
+ * ruling; the bar it describes — every invariant, every `check:park` key — is
+ * now what the acceptance loop asks of each restart, and a seed is never
+ * swapped out.
+ *
  * **The vetted pool. Sixteen for now; change the array and nothing else.**
  *
  * Jim expects this number to move ("that's enough for now but we might change
@@ -128,18 +147,7 @@ export const CANONICAL_PARK_SEED = 20260728;
  * 0.56 m above the rail where the deck they need is 4.06 m up. The seed goes,
  * not the assertion. Written up on #437.
  */
-export const PARK_SEED_POOL: readonly number[] = [
-  CANONICAL_PARK_SEED,
-  11,
-  24,
-  128,
-  131,
-  208,
-  274,
-  326,
-  428,
-  451,
-];
+export const PARK_SEED_POOL: readonly number[] = SUPPORTED_PARK_SEEDS;
 
 /**
  * **The seeds a multi-seed check script sweeps — THE one owner.**
@@ -175,21 +183,16 @@ export const PARK_SEED_POOL: readonly number[] = [
  *
  * ## What being in this list does NOT mean
  *
- * **It does not mean `check:park` builds that seed's park. `check:park` is
- * canonical-only.** The only `check:*` step in the `check` chain that sweeps
- * *this* list is `check:fountain-hop` — so the `--- seed N: passed` lines in a
- * `pnpm run check` log are *its* sweep, and nothing else's. The other
- * consumers are `measure-*`/`sweep-*` scripts nobody runs in CI. Grep before
- * believing otherwise; the list of importers is short and this comment can rot.
- *
- * **Since #510 the whole pool IS built by blocking checks — but by
- * {@link PARK_SEED_POOL}, not by this subset, and not from the `check` chain.**
- * `check:park-pool` and `check:gateway` each sweep all sixteen from the
- * required `Procgen invariants` job. So "is seed N built by something that
- * blocks a merge?" is now a question about the pool, not about this list; this
- * list answers only "does seed N have a per-seed invariant file?". Do not read
- * membership here as coverage in either direction — `check:seed-coverage`
- * prints the real map on every run.
+ * **Since 2 October 2026 every seed in this list is measured whole, once, by
+ * its own `test/procgen/seed-N.test.ts`**: the invariants, `check:park` with
+ * its ratchet, the walk in through the front gate and the fountain hop, all
+ * asked of the one park that file builds, in the required `Procgen invariants`
+ * job. They used to be three sweeps of their own (`sweep:park-pool`,
+ * `sweep:gateway`, and `sweep:fountain-hop` in the `check` chain), each
+ * building every park again; at sixteen seeds they outgrew their jobs. They
+ * remain as hand-run scripts. `check:seed-coverage` asks vitest which tests
+ * each seed file registers and fails if a pool seed's file is missing one, so
+ * this paragraph is not the only thing that knows.
  *
  * **The trap that makes this easy to misread**: `check-park.mts` *does*
  * import something called `SEEDS` (line 72) and prints `N/M seeds placed`
@@ -208,34 +211,18 @@ export const PARK_SEED_POOL: readonly number[] = [
  * `check:park` green, three invariants red. Neither gate implies the other
  * (#437).
  *
- * **The last clause of this paragraph used to read "and neither sees most of
- * the pool". That is no longer true, and it is the point of #510:**
- * `check:park-pool` puts every one of the sixteen through `check:park`, and
- * `check:gateway` walks a child in through every one's front arch, both in the
- * required `Procgen invariants` job. What remains uncovered is the *invariant*
- * side — only the seven seeds with per-seed files get that — and
- * `check:seed-coverage` prints exactly that gap on every run rather than
- * leaving it to a comment here to remember.
- *
  * **So when the generator's geometry changes, the tell is `pnpm run
  * vet:seeds` over the whole pool — not a green `check`, which by
  * construction cannot see a stale warp vector on ten of the sixteen seeds a
  * child can actually draw.** See `parkWarp.ts`'s `WARPS_BY_SEED` header.
+ *
+ * **Since 24 September 2026 this is the whole pool** — every one of seeds
+ * 0..15 has its own invariant file (`test/procgen/seed-N.test.ts`), because
+ * every one ships as a park a child can be given, and the bar Jim set is that
+ * each builds and passes every invariant. The history above is kept because it
+ * explains why the list and the files are held equal by `check:seed-pool`.
  */
-export const CI_SWEEP_SEEDS: readonly number[] = [
-  CANONICAL_PARK_SEED,
-  11,
-  24,
-  131,
-  326,
-].map(
-  (seed) => {
-    if (!PARK_SEED_POOL.includes(seed)) {
-      throw new Error(`CI_SWEEP_SEEDS: ${seed} is not in PARK_SEED_POOL — sweep only real parks`);
-    }
-    return seed;
-  },
-);
+export const CI_SWEEP_SEEDS: readonly number[] = [...PARK_SEED_POOL];
 
 /** Where the drawn seed is remembered, so a reload is the same park. */
 export const PARK_SEED_KEY = 'lgp:parkSeed';
@@ -416,6 +403,21 @@ export function resolveParkSeed(): number {
   return parkSeedFor(storage());
 }
 
+let asked: number | null = null;
+
+/**
+ * **This page's park, decided once** — {@link resolveParkSeed}, asked the
+ * first time and remembered for the life of the page. `parkManifest.ts`'s
+ * `PARK_SEED_ASKED` is this, and so is the seed the boot fetches a park file
+ * for (`boot/prebuiltPark.ts`), which has to know it *before* the park's
+ * modules load: the file says which restart to build, and the restart is read
+ * at module load. Asking twice must not draw twice, nor see its own first
+ * draw as "remembered".
+ */
+export function parkSeedAsked(): number {
+  return (asked ??= resolveParkSeed());
+}
+
 /**
  * **What a browser profile holding `store` gets** — everything after the pins
  * and after {@link inNode}.
@@ -435,10 +437,6 @@ export function resolveParkSeed(): number {
  */
 export function parkSeedFor(store: Storage | null): number {
   const remembered = readSeed(store?.getItem(PARK_SEED_KEY));
-  // A seed no longer in the pool is one that has been retired — usually
-  // because it was found to build a bad park — so it is not honoured. The
-  // profile is moved to a fresh one and the save degrades exactly as it does
-  // across a `LAYOUT_VERSION` bump.
   if (remembered !== null && PARK_SEED_POOL.includes(remembered)) {
     source = 'remembered';
     return remembered;
@@ -449,12 +447,19 @@ export function parkSeedFor(store: Storage | null): number {
     return CANONICAL_PARK_SEED;
   }
 
-  // A save with no remembered seed is a profile from before the pool existed:
-  // the park she has been playing is the canonical one, and every position in
-  // her save is measured in it.
-  const fromBeforeThePool = remembered === null && hasSave(store);
-  const seed = fromBeforeThePool ? CANONICAL_PARK_SEED : drawFromPool();
-  source = fromBeforeThePool ? 'remembered' : 'drawn';
+  // **A profile whose park has been retired** — a remembered seed that has
+  // left the pool, or a save from before the pool existed (whose park was
+  // 20260728, retired on 24 September 2026 when Jim ruled "we only support
+  // seeds 0..15"). Neither park can be built any more. Both move to the
+  // default park — the same one on every device she plays on, rather than a
+  // fresh random draw each — and keep everything in the save except the spot
+  // she was standing on, which was measured in a park that no longer exists
+  // ({@link parkChangedUnderSave}: she starts on the plaza).
+  // Reaching here with a save means her park is one of those two.
+  const retired = hasSave(store);
+  const seed = retired ? CANONICAL_PARK_SEED : drawFromPool();
+  source = retired ? 'remembered' : 'drawn';
+  if (retired) parkChanged = true;
   try {
     store.setItem(PARK_SEED_KEY, String(seed));
   } catch {
@@ -462,6 +467,19 @@ export function parkSeedFor(store: Storage | null): number {
     // next time. Not worth interrupting a six-year-old about.
   }
   return seed;
+}
+
+let parkChanged = false;
+
+/**
+ * **Did this load move a returning player to a different park?** True when her
+ * remembered park was retired (see {@link parkSeedFor}). Her saved position
+ * then belongs to a park that no longer exists, so a continued game must not
+ * restore it — `main.ts` starts her on the plaza instead, with everything else
+ * in her save intact.
+ */
+export function parkChangedUnderSave(): boolean {
+  return parkChanged;
 }
 
 function drawFromPool(): number {

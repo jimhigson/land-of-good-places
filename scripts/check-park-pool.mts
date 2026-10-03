@@ -2,8 +2,8 @@
  * **`check:park`, on every park a child can actually be given.** Issue #510.
  *
  * ```
- * pnpm run check:park-pool            # every seed in PARK_SEED_POOL
- * pnpm run check:park-pool -- --list  # print the seeds it would sweep, as JSON
+ * pnpm run sweep:park-pool            # every seed in PARK_SEED_POOL
+ * pnpm run sweep:park-pool -- --list  # print the seeds it would sweep, as JSON
  * ```
  *
  * ## The gap this closes, measured rather than asserted
@@ -15,7 +15,7 @@
  *
  * Classified on `main` at `61e95fe5`, the 63 expanded steps of `pnpm run check`
  * are: **40 seed-dependent and canonical-only**, **1 sweeping**
- * (`check:fountain-hop`, over `CI_SWEEP_SEEDS`'s seven), and 22 that build no
+ * (`sweep:fountain-hop`, over `CI_SWEEP_SEEDS`'s seven), and 22 that build no
  * park at all. So **nine of the sixteen pool seeds — 115, 128, 208, 225, 267,
  * 274, 346, 428, 451 — were built by no required check whatever**, and none of
  * the sixteen was ever put through `check:park`. The pool is the product and
@@ -26,7 +26,7 @@
  * One child process per seed, running `scripts/check-park.mts` itself with
  * `LGP_SEED` set — because `parkManifest.ts` reads the seed **once, at import**,
  * so a single process cannot build two different parks. That is the same
- * mechanism `check:gateway` and `check:coplanar` use.
+ * mechanism `sweep:gateway` and `check:coplanar` use.
  *
  * The important half is what it does *not* do: it contains no assertion of its
  * own about what makes a park sound. `check-park.mts` owns that, and this asks
@@ -55,7 +55,7 @@
  *
  * `check:park` measures 4.9 s on the canonical seed and 16.6 s on seed 428;
  * across the pool on six lanes this is ~60 s wall, the same shape as
- * `check:gateway`'s measured 56 s.
+ * `sweep:gateway`'s measured 56 s.
  *
  * That is cheap, but it is not free, and `checks.yml` is the one place it must
  * not go: its recent **successful** runs on `main` are 26.7, 26.8 and 25.9
@@ -65,7 +65,7 @@
  * in the `Procgen invariants` job, which is **already a required status check**,
  * so the gate takes effect on the day it lands rather than waiting on a
  * branch-protection change only Jim can make. That is the same reasoning
- * `check:gateway` is there under, and it is deliberate.
+ * `sweep:gateway` is there under, and it is deliberate.
  */
 import { execFile } from 'node:child_process';
 import { cpus } from 'node:os';
@@ -196,7 +196,7 @@ const queue = [...seeds];
 const results: SeedResult[] = [];
 
 process.stdout.write(
-  `check:park-pool: ${seeds.length} seed(s) from PARK_SEED_POOL, ${lanes} at a time, ratchet enforced\n`,
+  `sweep:park-pool: ${seeds.length} seed(s) from PARK_SEED_POOL, ${lanes} at a time, ratchet enforced\n`,
 );
 
 await Promise.all(
@@ -231,7 +231,7 @@ const failed = results.filter((r) => !r.ok);
  * On **stdout**, not stderr. This is a plain Node script rather than a Vitest
  * suite, so both streams are unconditionally visible, and stdout is where a
  * reader of a CI log looks. (Measured on this branch: neither `check:park` nor
- * `check:gateway` emits any `THREE.*` noise at all — 0 lines of it in either —
+ * `sweep:gateway` emits any `THREE.*` noise at all — 0 lines of it in either —
  * so the "stderr gets buried" caution does not apply to these two. Verified by
  * running them and counting, not by reading the code.)
  */
@@ -241,7 +241,7 @@ const failed = results.filter((r) => !r.ok);
 // must not overstate what was measured.
 const onlyBuiltHere = seeds.filter((seed) => !CI_SWEEP_SEEDS.includes(seed));
 process.stdout.write(
-  `\ncheck:park-pool: ${results.length - failed.length}/${results.length} pool seed(s) ` +
+  `\nsweep:park-pool: ${results.length - failed.length}/${results.length} pool seed(s) ` +
     `pass check:park with the ratchet enforced.\n` +
     `  - COVERS: every seed in PARK_SEED_POOL, which is every park a child can be drawn.\n` +
     `    ${onlyBuiltHere.length} of the ${results.length} (${onlyBuiltHere.join(', ')}) are built by NO other\n` +
@@ -258,7 +258,7 @@ process.stdout.write(
 
 if (failed.length > 0) {
   process.stdout.write(
-    `\ncheck:park-pool: ${failed.length} pool seed(s) FAILED — these are parks a child can be given:\n` +
+    `\nsweep:park-pool: ${failed.length} pool seed(s) FAILED — these are parks a child can be given:\n` +
       failed.map((f) => `  seed ${f.seed}: ${f.note}`).join('\n') +
       `\n`,
   );

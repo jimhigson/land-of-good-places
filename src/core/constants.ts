@@ -353,6 +353,13 @@ export const PLAYER_TURN_SPEED = 13;
 export const PLAYER_RADIUS = 0.62;
 
 /**
+ * The narrowest gap a child can actually use: two player radii. `NavGrid`
+ * fattens every collider by `PLAYER_RADIUS` before calling a cell walkable, so
+ * anything narrower is a solid wall with a visible slot in it.
+ */
+export const WALKABLE_GAP = PLAYER_RADIUS * 2;
+
+/**
  * Half-thickness of the collider under a **hoppable** wall — one entry per
  * wall the park registers with `autoHoppable: true`, and there are exactly
  * three of them.
@@ -437,6 +444,29 @@ export const PATH_KERB_LIFT = 0.03;
  * this much more than the paving's own width, or the kerb tears off at the
  * edge of the thing carrying it. */
 export const PATH_KERB_OVERHANG = 0.425;
+
+/** The widest spur a destination is given (the castle's), metres. */
+export const WIDEST_SPUR_WIDTH = 2.8;
+
+/**
+ * **How far a spur's drawn paving reaches from its centre line**: half the
+ * widest spur plus its kerb. What a path's centre has to keep from a booth, a
+ * building, a neighbour's plot or the boundary wall for its paving to stay
+ * off them (`test/procgen`'s `noDrawnPavingUnderASolid`).
+ */
+export const SPUR_PAVED_REACH = WIDEST_SPUR_WIDTH / 2 + PATH_KERB_OVERHANG;
+
+/**
+ * **How far the paving runs on in under a building's door**, metres — past the
+ * door's drawn front (the hotel's sliding doors, the foot of the castle's
+ * steps), so the path and the door overlap and no lawn shows between them.
+ * Jim, 3 Oct 2026: *"the path really should go a little under the
+ * castle/hotel door (like 1 m under) so that there is overlap and zero gap."*
+ * The one owner: the door aprons are drawn to it (`parkLayout.ts`'s
+ * `doorApronOf`), `noDrawnPavingUnderASolid` allows exactly it, and
+ * `drawnPavingReachesEveryDoor` asserts it.
+ */
+export const DOOR_PAVING_OVERLAP = 1.0;
 
 /**
  * **The main loop's drawn width — the one owner.**
@@ -745,6 +775,49 @@ export const CASTLE_TURRET_CORNERS: readonly (readonly [number, number])[] = [
   [-(BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2), BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2],
   [BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2, BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2],
 ];
+
+/**
+ * **How wide a turret is**, for anything that has to keep out of one — a
+ * collider, a keep-out disc, a bench scatter, the offset that pushes the roof
+ * garden's turrets clear of its paving, and the castle's plot reach below.
+ *
+ * The cone oversails the shaft, and the cone is what a child's hat meets when
+ * she walks up to a turret, so the wider of the two is the honest answer.
+ * Derived rather than typed for the reason everything round here is: a turret
+ * that grows must take its keep-out with it.
+ */
+export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
+  CASTLE_TURRET_BASE_RADIUS,
+  TOWER_RADIUS + TOWER_ROOF_OVERHANG,
+);
+
+/**
+ * **How far the castle reaches from its plot's centre, on any placement** —
+ * the 'building' entry's `boundingRadius` in `world/parkManifest.ts`, which
+ * every path, scatter and solver spacing plans around.
+ *
+ * It used to be typed there (19.3, "the castle's own masonry reaches 19.0
+ * exactly"), a second definition of the castle's size kept in step by hand,
+ * and it was wrong on every shipped seed: once `check:park`'s `anchor.reach`
+ * measured vertices instead of mesh centres, the drawn turret shafts reached
+ * 20.13–20.69 m across seeds 0..15 (25 Sep 2026). The number it missed is the nudge: the castle stands
+ * {@link BUILDING_CENTRE_NUDGE} off its plot centre, towards the park middle,
+ * on a bearing that depends on where the plot lands, while its axes never
+ * turn (`CASTLE_FRAME` is built at bearing 0). So on some placement the nudge
+ * points straight down a turret's diagonal, and the reach is the plain sum:
+ * the nudge, the turret's centre from the castle's ({@link CASTLE_TURRET_CORNERS}),
+ * and the turret's widest radius. 3.54 + 15.32 + 2.45 = 21.31 m.
+ *
+ * This is the bound in the plan frame the radius is read in (a drawn point
+ * unleant onto its own foot — `unplaceFromSphere`): the castle stands plumb
+ * on its own centre and everything above the ground only projects inwards
+ * from there, so no drawn point's foot is further out than this. Measured
+ * across the sixteen shipped seeds the furthest foot is the turret shaft's.
+ */
+export const CASTLE_PLOT_REACH =
+  BUILDING_CENTRE_NUDGE +
+  Math.max(...CASTLE_TURRET_CORNERS.map(([x, z]) => Math.hypot(x, z))) +
+  CASTLE_TURRET_FOOTPRINT_RADIUS;
 
 /**
  * Height of the solid painted wall; a band of glass fills the gap up to the

@@ -14,14 +14,11 @@ name: Walk reach
 # **Not yet a required status check** — that is a repository setting only Jim
 # can add. **Do not rename this job**: required checks are matched by name.
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  # Called from ci.yml, behind a `needs:` edge on the Parks build in the same
+  # run, so the parks it restores are already in this run's cache.
+  workflow_call:
 
-concurrency:
-  group: walk-reach-${{ github.ref }}
-  cancel-in-progress: true
+# No `concurrency:` here: ci.yml, the caller, owns it.
 
 permissions:
   contents: read
@@ -46,6 +43,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Restore the accepted parks
+        uses: ./.github/actions/restore-parks
 
       - name: Measure the step-up reach against the planet
         run: pnpm run check:walk-reach

@@ -46,7 +46,7 @@ const { buildHeadlessPark } = await import('./park-harness.mts');
 const { world } = buildHeadlessPark();
 const { PARK_SEED } = await import('../src/world/parkManifest.ts');
 const { CROSSING_SITES } = await import('../src/world/train/crossingPlan.ts');
-const { explainBridgeRefusal } = await import('../src/world/train/crossingPlanSolve.ts');
+const { explainBridgeRefusal } = await import('../procgen/world/train/crossingPlanSolve.ts');
 
 console.log(`\n=== seed ${PARK_SEED} ===`);
 let disagreements = 0;

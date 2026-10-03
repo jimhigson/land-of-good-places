@@ -39,8 +39,8 @@ import { terrainHeight } from './terrain';
 import { bridgeHeightAt, bridgePavingHeightAt } from './train/bridges';
 import { drapePathsOverBridges } from './pathGraph';
 import type { GroundClaims } from '../boot/groundClaims';
-import { parkPlanClaims } from './parkPlan';
-import { solveWorldPhase } from './worldPhase';
+import { worldPlanClaims } from './parkPlan';
+import { decideWorldPhase } from './worldPhase';
 import { ROAD_FEATURE, entranceRoadClaims } from './entrance/roadCorridor';
 
 export interface WorldOptions {
@@ -81,9 +81,11 @@ export class World implements GameSystem {
    * Nothing pre-warms in Node, so a headless park (the harness, `check:park`,
    * `test:procgen`) gets a fresh registry and fills it from its own builders.
    * That is the honest result either way: the registry describes the park in
-   * this `World`, never a previous one.
+   * this `World`, never a previous one — and a second `World` in the same
+   * process gets its own copy of the plan's registry, never the first one's
+   * (`worldPlanClaims`).
    */
-  readonly groundClaims: GroundClaims = parkPlanClaims();
+  readonly groundClaims: GroundClaims = worldPlanClaims();
 
   readonly garden: Garden;
   readonly scenery: Scenery;
@@ -132,7 +134,8 @@ export class World implements GameSystem {
     this.fireflies = new Fireflies();
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
-    this.building = new Building(this.collision, this.anchorPlots, interiorControls, camera);
+    // Owned, so a measure can ask what a solid is (`CollisionWorld.ownedBy`).
+    this.building = this.collision.ownedBy('castle', () => new Building(this.collision, this.anchorPlots, interiorControls, camera));
     // The Land Hotel (issue #236): a crystal tower near the castle whose door
     // leads to rooms that are each their own space. Shares the building's
     // WalkSurfaces sampler — its floor plates and mattress tops are ordinary
@@ -140,13 +143,13 @@ export class World implements GameSystem {
     // The camera sizes the receptionist's speech bubble on screen; the clock is
     // read as a closure because `dayNight` is built further down this
     // constructor and a time read eagerly here would be dawn for ever.
-    this.hotel = new Hotel(
+    this.hotel = this.collision.ownedBy('hotel', () => new Hotel(
       this.collision,
       this.anchorPlots,
       interiorControls,
       this.building.surfaces,
       { camera, clock: () => this.dayNight.timeOfDay },
-    );
+    ));
     // The hotel's exterior tap target (`hotel-entrance`) reaches out from the
     // tower's true centre as far as the map pin at `entranceX`/`entranceZ` —
     // deliberately wide, per `Hotel.exteriorEntranceZone`'s own doc comment,
@@ -347,7 +350,7 @@ export class World implements GameSystem {
     // `null` — they do not move — and `stallsFeature.ts` turns that into an
     // ordinary refusal, so the feature that wanted the space is forgone
     // exactly as it is today rather than anything being left inconsistent.
-    const phase = solveWorldPhase(
+    const phase = decideWorldPhase(
       this.collision,
       this.groundClaims,
       this.coaster.route,

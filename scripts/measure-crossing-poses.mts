@@ -56,8 +56,8 @@ const {
   SITE_PLOT_MARGIN,
   SITE_RAMP_FLOOR,
   SITE_RAMP_IDEAL,
-  probeBridgeReach,
 } = await import('../src/world/train/bridgeFit.ts');
+const { probeBridgeReach } = await import('../procgen/world/train/bridgeFit.ts');
 
 /** Grid pitch for candidate crossing points, metres. Fine enough that a
  * usable strip of ground is not stepped over, coarse enough to sweep a whole

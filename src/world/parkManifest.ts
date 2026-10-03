@@ -1,6 +1,15 @@
 import type { AnchorFootprint } from './anchors';
-import { resolveParkSeed } from './parkSeedPool';
-import { PARK_SURFACE_SCALE } from '../core/constants';
+import { CASTLE_DOORMAT_LOCAL } from './building/frontDoor';
+import { TOWER_DOORMAT_REACH, TOWER_DRAWN_DOOR_ALONG } from './hotel/towerDimensions';
+import { parkSeedAsked } from './parkSeedPool';
+import { generationSeed, restartFor } from './parkRestart';
+import { CASTLE_PLOT_REACH, PARK_SURFACE_SCALE } from '../core/constants';
+import { assertDeterministicMath } from '../core/deterministicMath';
+
+// Every park is built from here, so refuse here: a park generated with the
+// platform's own Math is a different park on an arm64 Mac than on the x64
+// runner that ships it (core/deterministicMath.ts).
+assertDeterministicMath('parkManifest');
 
 /**
  * The park manifest — the single editable input to the layout generator.
@@ -29,23 +38,39 @@ import { PARK_SURFACE_SCALE } from '../core/constants';
  */
 
 /**
- * **This park's seed** — read once, at module load, by everything that
- * generates anything.
+ * **This park's seed, as asked for** — its identity, read once at module
+ * load. Generators read {@link PARK_SEED}, which differs only on a restart.
  *
  * It is no longer one number for everyone. Since issue #426 a new game draws
  * from `parkSeedPool.ts`'s vetted pool, so a child gets a different park each
  * time she starts one, while the park she gets is still one that has been
  * proved sound. `resolveParkSeed()` is the single owner of the choice and its
  * doc comment is the whole story: pins first (`LGP_SEED`, then `?seed=`), then
- * the seed this profile already drew, then a fresh draw.
+ * the seed this profile already drew, then a fresh draw. Decided once per page
+ * (`parkSeedAsked`), so the boot's park-file fetch and this agree.
  *
  * **In Node with nothing pinned this is still `CANONICAL_PARK_SEED`**,
  * so every check script measures the park it always did.
  *
- * Saves carry {@link LAYOUT_VERSION}, so positions from an older park degrade
- * to the plaza spawn rather than to a spot inside a relocated ride.
+ * A saved position carries the park it was measured in (`SavedPlace.park`, the
+ * park file's digest), so a position from any other park — another seed, a
+ * re-found restart, a generator change — degrades to the plaza spawn rather
+ * than to a spot inside a relocated ride ({@link parkStamp}).
  */
-export const PARK_SEED = resolveParkSeed();
+export const PARK_SEED_ASKED = parkSeedAsked();
+
+/**
+ * **The seed every generator draws from** — {@link PARK_SEED_ASKED} itself on
+ * restart 0, which is every park that passes its acceptance first time, and a
+ * different stream on a restart (`parkRestart.ts`: when the finished park
+ * fails a measure, the root loop starts it again from zero). Identity — what a
+ * profile remembers, what `?seed=` names, what a check asked for — is
+ * {@link PARK_SEED_ASKED}; everything that *generates* reads this.
+ */
+/** Which start-again of {@link PARK_SEED_ASKED} this park is — see `parkRestart.ts`. */
+export const PARK_RESTART = restartFor(PARK_SEED_ASKED);
+
+export const PARK_SEED = generationSeed(PARK_SEED_ASKED, PARK_RESTART);
 
 /**
  * Bump alongside PARK_SEED (or any generator change that moves things).
@@ -58,8 +83,11 @@ export const PARK_SEED = resolveParkSeed();
  * *other* entry's candidates, but this still forces a fresh solve rather than
  * risk `cachedSolve` handing back a `localStorage` layout from before the
  * stall existed on some browser that visited an earlier build of this seed.
+ *
+ * 5: the castle's and the hotel's doormats moved to their real doors
+ * (`ManifestEntry.door`), which moves their entrances on every seed.
  */
-export const LAYOUT_VERSION = 4;
+export const LAYOUT_VERSION = 5;
 
 export interface ManifestEntry {
   readonly id: string;
@@ -113,6 +141,28 @@ export interface ManifestEntry {
    * ended up behind their own counters and their waypoints stranded.
    */
   readonly cameraFacing?: boolean;
+  /**
+   * **Where this plot's door actually is**, when that is not on the plot's
+   * edge — so the doormat, and the path that arrives at it, are at the door.
+   *
+   * Without it the doormat goes `1.4 m` past the plot's edge, which is right
+   * for a ride whose fence gap is built facing the doormat, and wrong for a
+   * building with its own door: the hotel's plot edge is its crystal skirt, so
+   * its path stopped 3.4 m short across the lawn, and the castle's front door
+   * faces +Z on every bearing, so its path arrived 12 m away round the side
+   * (seed 0, 1 Oct 2026 — `drawnPavingReachesEveryDoor`).
+   *
+   * - `{ reach, pavedTo? }` — the doormat stands `reach` metres from the plot
+   *   centre on the line it would have anyway (the camera's, or the middle's);
+   *   with `pavedTo`, the paving runs on past it towards the centre to there —
+   *   for a door drawn at the back of a recess the child is let in before.
+   * - `{ local, facing }` — the doormat stands at `local` from the *drawn*
+   *   centre (`footprintAsPlaced`'s nudge applied), and is approached along
+   *   `facing`, whatever bearing the plot stands on.
+   */
+  readonly door?:
+    | { readonly reach: number; readonly pavedTo?: number }
+    | { readonly local: readonly [number, number]; readonly facing: readonly [number, number] };
 }
 
 /** Half-width of the corridor kept clear from the gate to the plaza. */
@@ -154,27 +204,35 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     // discs are written into the *placed* footprint instead — see
     // `parkLayout.ts`'s `footprintAsPlaced`.
     footprint: { kind: 'rect', halfX: 15, halfZ: 11 },
-    // 19.3: the castle's own masonry reaches 19.0 exactly, and on some seeds
-    // the dressing spills another few centimetres (the reach sweep measured
-    // 19.1 on seed 2). Declared at what stands, plus breathing room.
-    boundingRadius: 19.3,
+    // Derived from the castle's own geometry, never typed: the turrets, the
+    // nudge off the plot centre and the widest turret radius, summed on the
+    // worst bearing. See `CASTLE_PLOT_REACH`, and `check:park`'s
+    // `anchor.reach:building`, which holds every drawn vertex inside it.
+    boundingRadius: CASTLE_PLOT_REACH,
     band: { min: 26, max: 60 },
+    // The front door faces +Z on every bearing (`building/frontDoor.ts`): the
+    // doormat is at the foot of its steps, not on the plot edge facing the middle.
+    door: { local: CASTLE_DOORMAT_LOCAL, facing: [0, 1] },
   },
-  // Bounding radii for these two are the MEASURED build-out (`check:park`'s
-  // anchor-bounds sweep: water fight 16.3 m, dodgems 18.8 m), not the plot
-  // rectangle: both rides dress past their plots, and everything that routes
-  // or scatters around an anchor plans around this number. Declaring the
-  // rectangle's 15 left the overhang unowned, which is where the dodgems
-  // doormat kept ending up (anchor.reach ratchet).
+  // Bounding radii for these two were set from a measured build-out (water
+  // fight 16.3 m, dodgems 18.8 m, in 2026-08) rather than the plot rectangle.
+  // **Both are now over-declared, not under**: `anchor.reach` measuring every
+  // drawn vertex in the plan frame found, across seeds 0..15 (25 Sep 2026),
+  // water fight 15.84–16.24 m and dodgems 9.37–9.48 m (the rink is a disc now).
+  // Over-declaring costs lawn, not correctness; left as they are so the layout
+  // does not move for a non-fix. Deriving them from each ride's own geometry
+  // owner, as the castle's is, is the follow-up.
   {
     id: 'waterFight',
     footprint: { kind: 'rect', halfX: 12, halfZ: 11 },
-    // The pools and hedges are seeded per park. The worst sweep measured 18.4
-    // (seed 5) on the flat park; on the sphere the rim dressing leans outward
-    // and the worst of seeds 0–15 built out to 18.8 (seed 12; 18.6 on seed 6),
-    // so the declaration follows what is built — 16.3 was only ever the
-    // canonical seed's number. `check:park`'s `anchor.reach:waterFight` holds
-    // this at zero allowance.
+    // What varied per park was never the pools or a lean: it was the water-gun
+    // rack, placed at a fixed world offset from the door, which is on whichever
+    // edge faces the park middle — up to 20.6 m out on a corner bearing, past
+    // this number (`anchor.reach:waterFight` forced restarts at 0.1–1.1 m over).
+    // The rack is now held inside the plot rectangle by construction
+    // (`waterFight/plot.ts`), so the furthest thing built is the rectangle's own
+    // corner (~16.9 m); 19 is kept so the layout every seed has does not move.
+    // `check:park`'s `anchor.reach:waterFight` holds this at zero allowance.
     boundingRadius: 19,
     band: { min: 24, max: 80 },
   },
@@ -217,6 +275,10 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     boundingRadius: 9,
     band: { min: 10, max: 90 },
     near: { id: 'building', min: 28, max: 42 },
+    // The doormat just outside the doorway's jambs — not past the crystal
+    // skirt the plot's radius describes — and the paving on into the recess
+    // to the sliding doors themselves.
+    door: { reach: TOWER_DOORMAT_REACH, pavedTo: TOWER_DRAWN_DOOR_ALONG },
     // Jim's ruling, 7 Aug: ALL assets face the camera. The tower's door, its
     // awning and its doormat all derive from this one flag, exactly like a
     // stall's counter — without it the solver faced the door at the park
@@ -380,7 +442,7 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
  * manifest was still crowded into the middle 100 m of a 225 m park.
  *
  * **`footprint` and `boundingRadius` are deliberately not scaled.** They are
- * how big the thing physically *is* — a castle is 19.3 m across whatever the
+ * how big the thing physically *is* — a castle reaches 21.3 m whatever the
  * park does — and scaling them would grow the buildings along with the lawn.
  * Only "where does it go" is a proportion; "how big is it" is a fact.
  */

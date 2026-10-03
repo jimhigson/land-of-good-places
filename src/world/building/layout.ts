@@ -3,6 +3,7 @@ import { PALETTE } from '../../core/palette';
 import type { ParkLayout } from '../parkLayout';
 import { lazyArrayView, lazyView } from '../../boot/lazyView';
 import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
+import { ENTRANCE_MIN_X, ENTRANCE_MAX_X, ENTRANCE_STEPS_REACH } from './frontDoor';
 
 /**
  * The facade's centre: the placed 'building' plot, nudged towards the park
@@ -58,6 +59,7 @@ import {
   INTERIOR_PLAZA_DROP,
   CASTLE_TURRET_BASE_RADIUS,
   CASTLE_TURRET_CORNERS,
+  CASTLE_TURRET_FOOTPRINT_RADIUS,
   PLAYER_RADIUS,
   TOWER_BASE_FLARE,
   TOWER_RADIUS,
@@ -248,6 +250,54 @@ export function worldToCastle(world: Readonly<Vector3>, target: Vector3): Vector
   return CASTLE_FRAME.toLocal(world, target);
 }
 
+/** World `y` of a castle-local point — the facade's door, its steps — as the shell is actually standing. */
+export function castleWorldY(localX: number, localY: number, localZ: number): number {
+  return castleToWorld(_castleProbe.set(localX, localY, localZ), _castleLocal).y;
+}
+
+/**
+ * **World `y` of a castle-local surface over a world plan point**, or `null`
+ * where the surface does not cover that column.
+ *
+ * `heightAt(localX, localZ)` is the surface's height over the castle's deck in
+ * its own frame, defined everywhere (a ramp's clamped profile); `covers` says
+ * where it actually exists. This finds the world point straight above or
+ * below `(x, z)` on the surface, by Newton on world `y` — the frame is rigid,
+ * so the castle-local height of `(x, y, z)` moves by the castle up's world-`y`
+ * component per metre of `y` — and only then asks `covers`, **at the converged
+ * point**. Testing the footprint at the iterates instead dropped the seam
+ * between two abutting ramps: an early guess a metre off the surface lands a
+ * quarter-metre along the lean from where the surface really is, inside one
+ * ramp's footprint and then outside it, and both answered `null`.
+ *
+ * This is what the garden's entrance steps are sampled through. They were
+ * sampled as `BUILDING_BASE_Y + rampHeight(x − BUILDING_CENTRE_X, …)` — the
+ * castle standing plumb — while `Shell.ts` draws them leaning with
+ * `CASTLE_FRAME`, so the walkable steps and the stone ones parted by the lean
+ * across nine metres of facade: measured on seed 5 the walkable foot hung
+ * **1.5 m** above the ground the drawn steps stand on, and on seed 2 the whole
+ * walkable flight was buried **1.3 m** under the hill the drawn ones climb.
+ */
+export function castleSurfaceY(
+  x: number,
+  z: number,
+  heightAt: (localX: number, localZ: number) => number,
+  covers: (localX: number, localZ: number) => boolean,
+): number | null {
+  const upY = castleWorldY(0, 1, 0) - castleWorldY(0, 0, 0);
+  let y = BUILDING_BASE_Y;
+  for (let i = 0; i < 8; i += 1) {
+    worldToCastle(_castleProbe.set(x, y, z), _castleLocal);
+    const step = (heightAt(_castleLocal.x, _castleLocal.z) - _castleLocal.y) / upY;
+    y += step;
+    if (Math.abs(step) < 1e-7) break;
+  }
+  worldToCastle(_castleProbe.set(x, y, z), _castleLocal);
+  return covers(_castleLocal.x, _castleLocal.z) ? y : null;
+}
+const _castleProbe = /* @__PURE__ */ new Vector3();
+const _castleLocal = /* @__PURE__ */ new Vector3();
+
 /**
  * Facade-local -> world **on the plan alone**, ignoring the castle's lean.
  *
@@ -339,13 +389,20 @@ export function circle(x: number, z: number, radius: number): CircleRegion {
   return { kind: 'circle', x, z, radius };
 }
 
-export function regionContains(region: Region, x: number, z: number): boolean {
+/** Is (x, z) inside the region, padded outward by `margin` metres (default none)? */
+export function regionContains(region: Region, x: number, z: number, margin = 0): boolean {
   if (region.kind === 'rect') {
-    return x >= region.minX && x <= region.maxX && z >= region.minZ && z <= region.maxZ;
+    return (
+      x >= region.minX - margin &&
+      x <= region.maxX + margin &&
+      z >= region.minZ - margin &&
+      z <= region.maxZ + margin
+    );
   }
   const dx = x - region.x;
   const dz = z - region.z;
-  return dx * dx + dz * dz <= region.radius * region.radius;
+  const radius = region.radius + margin;
+  return dx * dx + dz * dz <= radius * radius;
 }
 
 /**
@@ -391,9 +448,9 @@ export function insideInterior(localX: number, localZ: number, margin = 0): bool
 export const INTERIOR_DOOR_MIN_X = -3.2;
 export const INTERIOR_DOOR_MAX_X = 3.2;
 
-/** The matching door in the facade out in the garden, at the top of the steps. */
-export const ENTRANCE_MIN_X = -1;
-export const ENTRANCE_MAX_X = 4;
+// The matching door in the facade out in the garden, at the top of the steps —
+// in a leaf module so the park layout can place the castle's doormat there.
+export { ENTRANCE_MIN_X, ENTRANCE_MAX_X, ENTRANCE_STEPS_REACH } from './frontDoor';
 
 /** Way through the +X (east) wall into the glass lift, on every deck. */
 export const LIFT_DOOR_MIN_Z = 3.5;
@@ -502,26 +559,16 @@ export {
   TOWER_ROOF_OVERHANG,
   CASTLE_TURRET_BASE_RADIUS,
   CASTLE_TURRET_CORNERS,
+  CASTLE_TURRET_FOOTPRINT_RADIUS,
 };
 
 export const TOWER_HEIGHT = 10.6;
 export const TOWER_ROOF_HEIGHT = 4.2;
 
 
-/**
- * **How wide a turret is**, for anything that has to keep out of one — a
- * collider, a keep-out disc, a bench scatter, the offset that pushes the roof
- * garden's turrets clear of its paving.
- *
- * The cone oversails the shaft, and the cone is what a child's hat meets when
- * she walks up to a turret, so the wider of the two is the honest answer.
- * Derived rather than typed for the reason everything round here is: a turret
- * that grows must take its keep-out with it.
- */
-export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
-  CASTLE_TURRET_BASE_RADIUS,
-  TOWER_RADIUS + TOWER_ROOF_OVERHANG,
-);
+// `CASTLE_TURRET_FOOTPRINT_RADIUS` is owned by `core/constants.ts` since the
+// park manifest's castle radius is derived from it, and the manifest cannot
+// import this file. Re-exported above for the readers that take it from here.
 
 /**
  * A tower part as a solid of revolution: a span along its own axis with a
@@ -848,7 +895,7 @@ export const ENTRANCE_RAMP: RampDefinition = {
   space: 'garden',
   footprint: rect(ENTRANCE_MIN_X, ENTRANCE_MAX_X, BUILDING_HALF_Z, BUILDING_HALF_Z + 3),
   axis: 'z',
-  from: BUILDING_HALF_Z + 2.8,
+  from: BUILDING_HALF_Z + ENTRANCE_STEPS_REACH,
   to: BUILDING_HALF_Z,
   yFrom: -0.75,
   yTo: 0,

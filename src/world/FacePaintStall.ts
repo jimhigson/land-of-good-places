@@ -531,8 +531,31 @@ export class FacePaintStall implements GameSystem {
 
     // --- corner posts, candy-striped ------------------------------------------
     const postHeight = 2.35;
+    // **A post has no foot cap, because it can never be seen.** The foot stands
+    // on the ground, so a closed bottom disc lies in the ground's own plane —
+    // and its outline hull's copy, pushed 12 mm down and drawn `BackSide`,
+    // faces *up* into it (`check:coplanar`: `facePaintStall | terrain`,
+    // 0.028 m² at a 7.8 mm stand-off on seed 2 at its recorded restart, where
+    // the booth is seated on ground that lies flat under a post). A hidden face
+    // is deleted, never nudged (ART_DIRECTION §7) — the same fix
+    // `minigames/stallProp.ts`'s posts and the rail race's trestle trunk took.
+    // The top cap stays: it is buried in the knob, so it fights nothing.
+    // three.js builds the torso, then the top cap, then the bottom cap, one
+    // triangle per radial segment; the cut is made before `addOutline`, which
+    // copies this geometry, so the hull loses its foot too.
+    const postSegments = 10;
+    const postGeometry = new CylinderGeometry(0.09, 0.1, postHeight, postSegments);
+    {
+      const index = postGeometry.getIndex();
+      const capIndices = postSegments * 3;
+      if (!index || index.count !== postSegments * 6 + 2 * capIndices) {
+        throw new Error(`FacePaintStall.ts: the post cylinder has ${index?.count ?? 0} indices, not torso + two caps`);
+      }
+      postGeometry.setIndex(Array.from(index.array.subarray(0, index.count - capIndices)));
+      postGeometry.clearGroups();
+    }
     for (const side of [-1, 1] as const) {
-      const post = solid(new Mesh(new CylinderGeometry(0.09, 0.1, postHeight, 10), creamMaterial));
+      const post = solid(new Mesh(postGeometry, creamMaterial));
       post.position.set(side * (halfWidth - 0.1), postHeight / 2, 0.9);
       this.group.add(post);
       addOutline(post, 0.012);

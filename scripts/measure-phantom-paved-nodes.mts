@@ -39,7 +39,7 @@ if (!process.env['LGP_ONE_SEED']) {
 
 const { PARK_SEED } = await import('../src/world/parkManifest.ts');
 const { PATH_GRAPH, routeCurve } = await import('../src/world/pathGraph.ts');
-const { debugStreetLattice } = await import('../src/world/paths.ts');
+const { debugStreetLattice } = await import('../procgen/world/paths.ts');
 
 /** Every drawn ribbon's centreline, densely sampled. */
 const drawn: [number, number][] = [];

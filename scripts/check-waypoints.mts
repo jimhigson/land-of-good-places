@@ -43,97 +43,15 @@
  * child standing in a doorway in the dark.
  */
 
-import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../src/core/constants.ts';
-import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../src/world/building/layout.ts';
-import { SEEDS } from '../src/entities/npc/poiGraph.ts';
-import { PARK_SEED } from '../src/world/parkManifest.ts';
-import { solveParkPlanNow } from '../src/world/parkPlan.ts';
-import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
+import { waypointFindings } from './lib/waypointFindings.mts';
 
-interface Failure {
-  readonly x: number;
-  readonly z: number;
-  readonly why: string;
+// The measurement is `lib/waypointFindings.mts`'s, one owner with the acceptance loop.
+const { voids, failures, summary } = await waypointFindings();
+if (voids.length > 0) {
+  console.error(`\ncheck:waypoints cannot run: ${voids.join('; ')}\n`);
+  process.exit(1);
 }
-
-const failures: Failure[] = [];
-
-/**
- * **The facade is not where it used to be.** `BUILDING_CENTRE_X/Z` were plain
- * constants when this script was written; they are now `let`s that
- * `bindCastlePlacement` rebinds when the backtracking driver decides a layout,
- * and they read `NaN` until it does. Importing them is not enough — nothing in
- * this script's import graph solves the park, so both were `NaN` on every run,
- * the rectangle printed `x NaN..NaN`, and because every comparison against
- * `NaN` is false the `continue` that means "this waypoint is outside the
- * facade" never fired: all 245 waypoints were reported as inside it. A check
- * that cannot pass is the same disease as one that cannot fail.
- *
- * So: solve first, read after, and refuse to compare against anything that is
- * not a real number.
- */
-solveParkPlanNow();
-
-// --- inside the facade -------------------------------------------------------
-
-const west = BUILDING_CENTRE_X - BUILDING_HALF_X;
-const east = BUILDING_CENTRE_X + BUILDING_HALF_X;
-const north = BUILDING_CENTRE_Z - BUILDING_HALF_Z;
-const south = BUILDING_CENTRE_Z + BUILDING_HALF_Z;
-
-for (const [name, bound] of [
-  ['west', west],
-  ['east', east],
-  ['north', north],
-  ['south', south],
-] as const) {
-  if (!Number.isFinite(bound)) {
-    console.error(
-      `\ncheck:waypoints cannot run: the facade's ${name} edge is ${bound}, not a number.\n` +
-        "BUILDING_CENTRE_X/Z are rebound by bindCastlePlacement() when the driver decides a\n" +
-        'layout; reading them before the park is solved bakes a NaN, and every comparison\n' +
-        'against a NaN is false, so this check would report on nothing at all.\n',
-    );
-    process.exit(1);
-  }
-}
-
-for (const seed of SEEDS) {
-  const inside = seed.x >= west && seed.x <= east && seed.z >= north && seed.z <= south;
-  if (!inside) continue;
-  failures.push({
-    x: seed.x,
-    z: seed.z,
-    why:
-      `inside the facade (x ${west}..${east}, z ${north}..${south}), which is ` +
-      'solid scenery. The building\'s inside is not here — it is 600 m away.',
-  });
-}
-
-// --- in a space children cannot reach ---------------------------------------
-
-for (const seed of SEEDS) {
-  const space = spaceAt(seed.x, seed.z);
-  if (space === SPACE_GARDEN) continue;
-  failures.push({
-    x: seed.x,
-    z: seed.z,
-    why:
-      `in the '${space}' space. Children cannot get there: crossing the ` +
-      'threshold is a teleport, not a walk. Indoor waypoints wait for the ' +
-      'castle floor split (ARCHITECTURE-DECISIONS Decision 3, S2), which gives ' +
-      'each floor its own space and its own portals.',
-  });
-}
-
-// --- say so ------------------------------------------------------------------
-
-const r = (n: number): string => n.toFixed(2);
-console.log(
-  `seed=${PARK_SEED} waypoints=${SEEDS.length} ` +
-    `facade=(${r(west)},${r(north)})..(${r(east)},${r(south)}) ` +
-    `centre=(${r(BUILDING_CENTRE_X)},${r(BUILDING_CENTRE_Z)})`,
-);
+console.log(summary);
 
 if (failures.length > 0) {
   console.error(`\n${failures.length} waypoint(s) are somewhere no child could stand:\n`);

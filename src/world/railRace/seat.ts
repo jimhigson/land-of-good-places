@@ -1,6 +1,6 @@
 import { Quaternion, Vector3, type Object3D } from 'three';
 import type { Player } from '../../entities/Player';
-import { railTurn } from '../rail/sweptRail';
+import { drawnDirection, railTurn } from '../rail/sweptRail';
 import { SEAT_HEIGHT } from './cart';
 import type { RailRaceRoute } from './route';
 
@@ -35,14 +35,7 @@ export interface CartHeading {
 }
 
 const _tangent = /* @__PURE__ */ new Vector3();
-const _ahead = /* @__PURE__ */ new Vector3();
-const _behind = /* @__PURE__ */ new Vector3();
-/**
- * Half the span, in metres, of the difference the rails' drawn direction is
- * read from. A tenth of the ring's tightest bend radius (53.5 m) would do; this
- * is far inside it, and far above float noise on a 600 m ring.
- */
-const DRAWN_STEP = 0.05;
+const _along = /* @__PURE__ */ new Vector3();
 const _turnBody = /* @__PURE__ */ new Quaternion();
 const _seat = /* @__PURE__ */ new Vector3();
 // flat-ok: the tub's own local up, the axis her face turn is taken about
@@ -79,9 +72,12 @@ export function placeRaceCart(
   // rails under it round the lap. So the tub takes the direction the rails are
   // actually drawn in, and `railTurn` — the sleepers' own side/up convention —
   // stands it on them.
-  route.pointAt(lane, route.wrap(at + DRAWN_STEP), _ahead);
-  route.pointAt(lane, route.wrap(at - DRAWN_STEP), _behind);
-  railTurn(cart.position, _ahead.sub(_behind).normalize(), cart.quaternion);
+  drawnDirection(
+    { pointAt: (distance, target) => route.pointAt(lane, route.wrap(distance), target) },
+    at,
+    _along,
+  );
+  railTurn(cart.position, _along, cart.quaternion);
 }
 
 /**

@@ -132,6 +132,9 @@ export function capSecondsForJob(jobName: string, dir = new URL('../.github/work
   workflow: string;
 } {
   const root = fileURLToPath(dir);
+  // A job inside a workflow `ci.yml` calls is logged as "<caller job> / <job>"
+  // (`Checks parts / Checks shard 3`); its cap is the called job's own.
+  jobName = jobName.split(' / ').at(-1)!;
   const matches: { file: string; job: WorkflowJob }[] = [];
   for (const file of readdirSync(root)) {
     if (!/\.ya?ml$/.test(file)) continue;

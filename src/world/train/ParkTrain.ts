@@ -773,7 +773,7 @@ export class ParkTrain implements GameSystem, TrainService {
       this.locomotive.root.position.x - playerPosition.x,
       this.locomotive.root.position.z - playerPosition.z,
     );
-    setTrainAudioCarry(clamp01(1 - toPlayer / AUDIBLE_RANGE) ** 1.5);
+    setTrainAudioCarry(Math.pow(clamp01(1 - toPlayer / AUDIBLE_RANGE), 1.5));
 
     // --- lights --------------------------------------------------------------
     const lit = clamp01(this.nightFactor);

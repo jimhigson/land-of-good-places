@@ -1615,15 +1615,30 @@ export function createCatBus(): CatBusHandle {
   // windows have solid bodywork immediately behind the glass"*. Filling the
   // aperture in the wall is all this ever needed to do, so the wall's own
   // thickness is what it is.
+  //
+  // **And it fills only the band where the flank really is open: sill to
+  // head.** It used to run the door's full height from `BODY_BOTTOM_Y`, and
+  // the flank below `WINDOW_SILL_Y` is not an opening — it is the solid
+  // `cat-bus-shell-lower`, whose outer face stands on `x = -BODY_WIDTH / 2`
+  // exactly as this slab's does. So the slab's lower 1.46 m was buried in the
+  // shell with its outer face in the shell's own plane: ~0.97 m² of two faces
+  // sharing a plane (ART_DIRECTION.md §7), which `check:coplanar` found on
+  // pool seed 128 at restart 7 — the one park whose arrival bus parks with
+  // this flank turned to the fixed camera. The top, likewise, reaches into
+  // `cat-bus-shell-upper` above `WINDOW_HEAD_Y`. Neither buried part could
+  // ever be seen, so they are deleted rather than nudged: the aperture is the
+  // window band, the same span every pillar and pane on this flank fills.
+  const doorwayBottomY = WINDOW_SILL_Y;
+  const doorwayTopY = Math.min(WINDOW_HEAD_Y, BODY_BOTTOM_Y + DOOR_HEIGHT);
   const doorway = decal(
     new Mesh(
-      new RoundedBoxGeometry(WALL_THICKNESS, DOOR_HEIGHT, DOOR_WIDTH, 2, 0.05 * DETAIL),
+      new RoundedBoxGeometry(WALL_THICKNESS, doorwayTopY - doorwayBottomY, DOOR_WIDTH, 2, 0.05 * DETAIL),
       toonMaterial(new Color(PALETTE.ink).multiplyScalar(0.7).getHex()),
     ),
   );
   doorway.position.set(
     doorGroup.position.x + WALL_THICKNESS / 2,
-    BODY_BOTTOM_Y + DOOR_HEIGHT / 2,
+    (doorwayBottomY + doorwayTopY) / 2,
     doorGroup.position.z + DOOR_WIDTH / 2,
   );
   chassis.add(doorway);

@@ -17,7 +17,8 @@ import {
 } from './floors';
 import { GIANT_SLIDE_SPEED, SLIDE_PLAN } from '../slide/plan';
 import { LANDING_DROP, slideLandingSpot } from '../slide/landing';
-import { buildSlideSupports, planSlideLegs, type SlideLeg } from '../slide/supports';
+import { buildSlideSupports, type SlideLeg } from '../slide/supports';
+import { decideBuilt } from '../prebuilt/built';
 import { planSlideShots, SlideShotDirector, type SlideShot } from '../slide/cameras';
 import {
   petSeatOnSlide,
@@ -34,7 +35,6 @@ import { INDOOR_FLY_CEILING, PARK_FLY_CEILING, type Player, type RestPoint } fro
 
 import { BallPit } from './BallPit';
 import { solveChaseEye, resetChaseCeilingCounters } from '../slide/chaseEye';
-import { FloorFader } from './floorFade';
 import { LiftRide, type LiftPanelSource } from './liftRide';
 import { GrownUp } from './GrownUp';
 import { InteriorLighting } from './InteriorLighting';
@@ -92,6 +92,8 @@ import {
   BALL_PIT_Z,
   BUILDING_BASE_Y,
   CASTLE_FRAME,
+  castleWorldY,
+  worldToCastle,
   ENTRANCE_MAX_X,
   ENTRANCE_MIN_X,
   GROWN_UP_X,
@@ -324,6 +326,9 @@ export interface InteriorControls {
  *   which is what gives the Theme Park cutaway look indoors.
  */
 
+/** Scratch for `checkDoorways`' frame-local height. */
+const _doorLocal = new Vector3();
+
 /**
  * The castle's front-door trigger, out in the garden — the rectangle
  * `Building.checkDoorways` walks through, published (like the hotel's
@@ -338,7 +343,9 @@ export function castleEntranceBand(): PortalBand {
     halfAlong: 1.35,
     halfAcross: (ENTRANCE_MAX_X - ENTRANCE_MIN_X) / 2 + 0.4,
     yaw: 0,
-    y: BUILDING_BASE_Y,
+    // The threshold's own height, as the leaning shell stands — not the deck's
+    // plumb `BUILDING_BASE_Y`, which is up to ~1.7 m off it at the facade.
+    y: castleWorldY((ENTRANCE_MIN_X + ENTRANCE_MAX_X) / 2, 0, BUILDING_HALF_Z - 0.85),
     // The 'frontDoor' zone *is* this door — its "Enter!" chip walks you in —
     // so it alone may cover the band.
     ownZoneId: 'frontDoor',
@@ -964,8 +971,10 @@ export class Building implements GameSystem {
     // Something to stand it on. ~95 m of chute with nothing under it reads as
     // floating, and this park's things are meant to look built — see
     // `slide/supports.ts` for why the legs are sparse rather than regular.
-    this.slideLegs = planSlideLegs(SLIDE_PLAN.points, (x, z, radius) =>
-      collision.isClearCircle(x, z, radius),
+    // Read from the park file; searched only in build tooling
+    // (`procgen/world/slide/legs.ts`, `docs/design/PREBUILT-PARKS.md`).
+    this.slideLegs = decideBuilt('slideLegs', (solver) =>
+      solver.slideLegs(SLIDE_PLAN.points, (x, z, radius) => collision.isClearCircle(x, z, radius)),
     );
     // At park level, not under the castle's plot — the ride spans two plots and
     // its legs stand in the park between them. See `buildSlideSupports`.
@@ -1073,10 +1082,12 @@ export class Building implements GameSystem {
   private buildingZones(): InteractZone[] {
     return buildingInteractZones({
       trampolineSurfaceY: this.trampoline.surfaceY,
+      // Asked from a metre over the leaning steps themselves, not over the
+      // plumb deck height, which can be further from them than a step.
       doorstepY: this.surfaces.sample(
         facadeX(1.5),
         facadeZ(BUILDING_HALF_Z + 1.4),
-        BUILDING_BASE_Y + 1,
+        castleWorldY(1.5, 1, BUILDING_HALF_Z + 1.4),
       ),
       // The lift's "Call" chip and the panel's big round button are the same
       // summon — see `liftRide.ts`'s `LiftPanelSource`.
@@ -1378,7 +1389,14 @@ export class Building implements GameSystem {
    */
   private checkDoorways(player: Player): void {
     if (this.spaces.settling) return;
-    if (Math.abs(player.position.y - BUILDING_BASE_Y) > 1.6) return;
+    // How far she is off the floor of the door she might be crossing: the
+    // interior is plumb at `BUILDING_BASE_Y`; the facade leans with the castle,
+    // so its threshold is asked in the castle's own frame (a plumb compare was
+    // off by the lean across nine metres of facade — up to ~1.7 m).
+    const offFloor = this.inside
+      ? player.position.y - BUILDING_BASE_Y
+      : worldToCastle(player.position, _doorLocal).y;
+    if (Math.abs(offFloor) > 1.6) return;
     const { x, z } = player.position;
 
     if (!this.inside) {
@@ -1596,7 +1614,7 @@ export class Building implements GameSystem {
     const x = facadeX(1.5);
     const z = facadeZ(BUILDING_HALF_Z + 2.4);
     // Facing +Z, out into the park — which is also the way the camera looks.
-    player.teleportTo(x, this.surfaces.sample(x, z, BUILDING_BASE_Y + 1), z, 0);
+    player.teleportTo(x, this.surfaces.sample(x, z, castleWorldY(1.5, 1, BUILDING_HALF_Z + 2.4)), z, 0);
   }
 
   /**

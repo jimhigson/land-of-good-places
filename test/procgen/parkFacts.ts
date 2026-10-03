@@ -15,17 +15,20 @@
  * suite owns the invariants about whether the park's scattered furniture is
  * *placed sanely*, and holds them across many seeds with no allowances at all.
  */
-import { Box3, InstancedMesh, Mesh, Quaternion, Vector3 } from 'three';
+import { Box3, CylinderGeometry, InstancedMesh, Matrix4, Mesh, Quaternion, TubeGeometry, Vector3, type Curve } from 'three';
 import { measureGateArch } from '../../scripts/gate-arch-measure.mts';
 import { createKid } from '../../src/art/models/kid.ts';
 import { HAIR_STYLES } from '../../src/state/types.ts';
 import { createCatBus } from '../../src/world/entrance/catBus.ts';
 import type { World } from '../../src/world/World.ts';
+import type { HeadlessPark } from '../../scripts/park-harness.mts';
+import type { FountainHopClause } from '../../src/world/fountainHop.ts';
 import type { RailRaceRoute } from '../../src/world/railRace/route.ts';
+import type { BarIntrusion } from '../../src/world/railRace/barReach.ts';
 import type { ParkBoundary } from '../../src/world/boundary.ts';
 import type { Claim } from '../../src/boot/groundClaims.ts';
 import type { RoadSegment } from '../../src/world/entrance/roadCorridor.ts';
-import { boothBoxFor, type BoothBox } from '../../src/minigames/boothFootprint.ts';
+import { boothBoxFor, boothCorners, type BoothBox } from '../../src/minigames/boothFootprint.ts';
 
 /**
  * One side of one ring of a bridge's drawn parapet. See
@@ -261,6 +264,14 @@ export interface StallFact {
   readonly drawnZ: number;
   /** Its body, from `boothFootprint.ts` — the one owner of every booth's box. */
   readonly box: BoothBox;
+  /**
+   * The booth's whole body in plan, walls **and** hollow middle: `box` placed
+   * at the drawn spot with the drawn group's yaw, through `boothCorners` (the
+   * same function the colliders are built from). Corners in order round the
+   * quad. Its colliders are four walls round a hollow, so paving that stops
+   * inside the hollow touches no collider; this is what can see it.
+   */
+  readonly footprint: readonly (readonly [number, number])[];
   /** Where the built interact zone sends a child to be served. */
   readonly standX: number;
   readonly standZ: number;
@@ -357,6 +368,15 @@ export interface PathNodeFact {
  * for the paved network itself: a spur branches off wherever the paving already
  * runs, which may be the backbone or an earlier spur.
  */
+/** One station of the drawn centreline — see {@link ParkFacts.drawnPathSamples}. */
+export interface DrawnPathSampleFact {
+  readonly x: number;
+  readonly z: number;
+  readonly halfWidth: number;
+  /** Which drawn route it belongs to; consecutive samples of one run are one ribbon. */
+  readonly run: number;
+}
+
 export interface PathEdgeFact {
   readonly name: string;
   readonly from: string;
@@ -413,6 +433,26 @@ export interface DuckBarFact {
   readonly speedAfter: number;
   /** How far she travels during that frame — the finest resolution available. */
   readonly frameTravel: number;
+}
+
+/**
+ * **One built duck bar, and every other lane it reaches into** — on either
+ * ring. Read off the bar's own instance matrix and asked of
+ * `railRace/barReach.ts`'s `duckBarIntrusions`, the same function the planner
+ * refuses a slot with, so the planner and this measure cannot disagree about
+ * what "reaches into" means — only about which bars were built.
+ */
+export interface DuckBarReachFact {
+  /** `walk-past` or `race`. */
+  readonly ring: string;
+  /** The bar's instance index in its ring's `railRace:duck-bars`. */
+  readonly index: number;
+  /** The lane it hangs over, found from its drawn centre, not from the plan. */
+  readonly lane: number;
+  /** Metres from the arch, off its own matrix. */
+  readonly builtAt: number;
+  /** Empty when the bar keeps to its own lane. */
+  readonly intrusions: readonly BarIntrusion[];
 }
 
 /**
@@ -654,8 +694,20 @@ export interface RailRaceSupportFacts {
 }
 
 export interface ParkFacts {
+  /** The seed asked for — the park's identity. */
   readonly seed: number;
+  /** Which start-again of that seed this is (`src/world/parkRestart.ts`); 0 is the seed's own park. */
+  readonly restart: number;
   readonly world: World;
+  /** The harness's own handle on the park — what `check:park`'s measures take. */
+  readonly headless: HeadlessPark;
+  /**
+   * Every clause of `src/world/fountainHop.ts`'s measurement, asked of this
+   * park. Measured here rather than by the invariant because that module
+   * imports `Collision.ts`, which loads `parkManifest.ts`: a static import of
+   * it from `invariants.ts` pins every seed file to the default seed.
+   */
+  readonly fountainHop: readonly FountainHopClause[];
   /** The entrance road's corridor, claimed and drawn — see {@link RoadCorridorFacts}. */
   readonly roadCorridor: RoadCorridorFacts;
   /** The castle's four corner turrets — see {@link CastleTurretFact}. */
@@ -710,6 +762,25 @@ export interface ParkFacts {
    * schedules bars, and none in the built scene would itself be a bug.
    */
   readonly duckBars: readonly DuckBarFact[];
+  /**
+   * Every built duck bar on **both** rings, and any other lane it reaches into
+   * — see {@link DuckBarReachFact}. Empty is not healthy: both rings draw bars.
+   */
+  readonly duckBarReach: readonly DuckBarReachFact[];
+  /**
+   * **The duck-bar layout the plan decided, against the one the race ring drew.**
+   *
+   * `planned` is `planHazards` over the plan's own `railRaceBars` decision
+   * (`parkPlan.ts`) — read straight off the plan, not through the ride; `built`
+   * is every bar on the race ring, all four lanes, off its own instance matrix
+   * with its lane found in the chart. `decidedInPlan` is whether the plan's
+   * driver placed `railRaceBars` at all. See `duckBarsAreTheLayoutThePlanDecided`.
+   */
+  readonly duckBarPlan: {
+    readonly decidedInPlan: boolean;
+    readonly planned: readonly { readonly lane: number; readonly at: number }[];
+    readonly built: readonly { readonly lane: number; readonly at: number }[];
+  };
   /**
    * How smoothly the race camera actually tracks a rider round the built ring —
    * see {@link CameraTrackingFact}.
@@ -787,6 +858,15 @@ export interface ParkFacts {
   readonly trees: readonly TreeFact[];
   /** Every bush clump standing in the park. See {@link BushFact}. */
   readonly bushes: readonly BushFact[];
+  /**
+   * Square metres of the park a bush clump could legally have stood on when
+   * the bush scatter ran — a 1 m grid asked the scatter's own gate
+   * (`bushScatterLedger` in `Scenery.ts`, one owner), against the world as the
+   * scatter saw it. What the bush floor in `theParkIsFurnished` measures the
+   * planted count against, so a park short of bushes for want of room is told
+   * apart from a scatter that was thinned.
+   */
+  readonly bushLegalM2: number;
   /** The subset of {@link trees} a child is offered a climb on. */
   readonly climbableTrees: readonly ClimbableTreeFact[];
   readonly lamps: readonly (readonly [number, number])[];
@@ -804,7 +884,29 @@ export interface ParkFacts {
    * `strings` matters on its own: a pole with no neighbour carries no cable
    * and no bulbs, so poles alone do not mean a child sees any lights.
    */
-  readonly fairyLights: { readonly poles: number; readonly strings: number };
+  readonly fairyLights: {
+    readonly poles: number;
+    readonly strings: number;
+    /** Each drawn pole's centre and its own axis (it leans with the planet), off the scene. */
+    readonly polesDrawn: readonly { readonly name: string; readonly at: Vector3; readonly up: Vector3 }[];
+    /** The ground a pole claims — `FairyLights.ts`'s own `FAIRY_POLE_RADIUS`, asked, not copied. */
+    readonly poleRadius: number;
+    /**
+     * Each drawn cable: the curve its tube was swept along (the
+     * `TubeGeometry`'s own `path`) and the mesh's world matrix, so a point on
+     * it is `path.getPointAt(u).applyMatrix4(matrixWorld)` — the cable that is
+     * drawn, not the anchors the builder meant it to hang from.
+     */
+    readonly stringsDrawn: readonly {
+      readonly name: string;
+      readonly path: Curve<Vector3>;
+      readonly matrixWorld: Matrix4;
+    }[];
+    /** The cables' drawn tube radius, off their own geometry (`NaN` if none is drawn). */
+    readonly cableRadius: number;
+    /** The posts' drawn radius at the top, where cables are tied, off their own geometry (`NaN` if none). */
+    readonly postTopRadius: number;
+  };
   /**
    * The early, conservative reservation `bridgeKeepout.ts` computes for
    * every railway crossing (`train/bridgeFootprint.ts`'s `planConservative`
@@ -1026,6 +1128,16 @@ export interface ParkFacts {
   readonly pathEdges: readonly PathEdgeFact[];
   /** Every edge in the graph, paved or not — see {@link PathEdgeFact.paved}. */
   readonly pathConnectivityEdges: readonly PathEdgeFact[];
+  /**
+   * **The centreline the paving was actually swept along** — `pathGraph.ts`'s
+   * own recorded samples, one `run` per drawn route, at exactly the stations
+   * the ribbon's cross-sections stand on. Not {@link pathEdges}' 0.5 m
+   * resampling of the same curve: round a fillet the drawn ribbon's outer edge
+   * is a chord between stations, so a measure of "is the paving there" has to
+   * stand on the stations it was drawn at, or it reads the chord's sag as a
+   * hole.
+   */
+  readonly drawnPathSamples: readonly DrawnPathSampleFact[];
   /**
    * The ginormous slide's chute, in **world space**, sampled along what was
    * actually built — not the plan it was built from.
@@ -1530,6 +1642,13 @@ export interface ParkFacts {
    * level; pass a bridge's own `heightAt(x, z)` to ask about its deck.
    */
   readonly reachableFromEntrance: (x: number, z: number, goalY?: number) => boolean;
+  /**
+   * **Every nav-lattice cell a child can walk to from the entrance**, as the
+   * centres `NavGrid.floodFrom(...).forEachCell` visits — one flood of the real
+   * lattice ({@link reachableFromEntrance}'s own grid), computed on first ask.
+   * Flat `[x0, z0, x1, z1, …]`.
+   */
+  readonly reachableGroundCells: () => Float64Array;
   readonly buildMs: number;
 }
 
@@ -1640,28 +1759,60 @@ function measureCatBusFit(): {
   return { seatCount, worstProtrusion, worstOverlap, widestChild };
 }
 
-export async function buildParkFacts(seed: number): Promise<ParkFacts> {
+export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFacts> {
   process.env['LGP_SEED'] = String(seed);
+  process.env['LGP_PARK_RESTART'] = String(restart);
 
+  // The park solver lives in build-time code (`procgen/`) and is plugged into
+  // the game's modules here, after the seed is pinned — vitest does not load
+  // `scripts/ts-extension-resolver-register.mjs`, whose lazy loader does this
+  // for every script (`src/world/prebuilt/solverPort.ts`).
+  await import('../../procgen/install.ts');
   const { buildHeadlessPark } = await import('../../scripts/park-harness.mts');
-  const { PARK_SEED, PARK_MANIFEST } = await import('../../src/world/parkManifest.ts');
+  const { PARK_SEED_ASKED, PARK_MANIFEST } = await import('../../src/world/parkManifest.ts');
 
-  if (PARK_SEED !== seed) {
+  if (PARK_SEED_ASKED !== seed) {
     throw new Error(
-      `parkFacts: asked for seed ${seed} but the park built with ${PARK_SEED}. ` +
+      `parkFacts: asked for seed ${seed} but the park built with ${PARK_SEED_ASKED}. ` +
         'The module registry was reused across seeds — check that vitest is ' +
         'still isolating test files (vitest.config.ts) and that each seed has ' +
         'a file of its own.',
     );
   }
 
-  const { world, scene, buildMs, sample } = buildHeadlessPark();
+  const { PARK_RESTART } = await import('../../src/world/parkManifest.ts');
+  if (PARK_RESTART !== restart) {
+    throw new Error(`parkFacts: asked for restart ${restart} of seed ${seed} but the park built restart ${PARK_RESTART}.`);
+  }
+
+  // Asked before the build: the scatter measures its legal ground the moment
+  // it finishes, against the world as it saw it, which is gone afterwards.
+  const { bushScatterLedger } = await import('../../procgen/world/sceneryBuilders.ts');
+  bushScatterLedger.measureGround = true;
+  const headless = buildHeadlessPark();
+  const { world, scene, buildMs, sample } = headless;
+  // A park hydrated from its file ran no scatter: the solve measured the
+  // ground and the file carries it (`measures.bushGround`).
+  const { offeredParkFile } = await import('../../src/world/prebuilt/parkFileStore.ts');
+  const offered = offeredParkFile();
+  const bushGround = offered
+    ? (offered.measures?.bushGround as { readonly legalM2: number } | null | undefined)
+    : bushScatterLedger.ground;
+  if (!bushGround) {
+    throw new Error(
+      offered
+        ? 'parkFacts: the park file carries no measures.bushGround, so its bush scatter\'s legal ground is unknown'
+        : 'parkFacts: the bush scatter never finished, so its legal ground was never measured',
+    );
+  }
 
   // Dynamically imported here, after `world` (and so `TRAIN_PLAN`) is
   // already built for this exact seed — never at this file's own top level,
   // the seed-pinning trap this file's header already warns about.
-  const { planBridgeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
-  const bridgeReservations = planBridgeFootprints(world.train.crossings);
+  const { planConservativeFootprints } = await import('../../src/world/train/bridgeFootprint.ts');
+  const bridgeReservations = planConservativeFootprints(world.train.crossings);
+  const { measureFountainHop } = await import('../../src/world/fountainHop.ts');
+  const fountainHop = measureFountainHop(world.fountain, world.collision, sample);
 
   // Same rule, same reason: the road's owner reaches PARK_BOUNDARY, so it is
   // imported here — after the world for this seed is built — and never at the
@@ -1822,7 +1973,7 @@ export async function buildParkFacts(seed: number): Promise<ParkFacts> {
   const { PARK_LAYOUT } = await import('../../src/world/parkLayout.ts');
   const { ANCHORS } = await import('../../src/world/anchors.ts');
   const { PLAZA } = await import('../../src/world/paths.ts');
-  const { PATH_GRAPH, routeCurve } = await import('../../src/world/pathGraph.ts');
+  const { PATH_GRAPH, routeCurve, pathCentreline } = await import('../../src/world/pathGraph.ts');
   const { archFeet } = await import('../../src/world/railRace/arch.ts');
   const { RAIL_RACE_PLAN } = await import('../../src/world/railRace/plan.ts');
   const railRaceArchFeet = [RAIL_RACE_PLAN.walkPastRing, RAIL_RACE_PLAN.raceRing]
@@ -2719,11 +2870,17 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     group.updateMatrixWorld(true);
     const at = new Vector3().setFromMatrixPosition(group.matrixWorld);
     const [shiftX, shiftZ] = stallShift(id);
+    // The drawn yaw: where the group's own +Z points, in plan (boothCorners
+    // maps local +Z to (sin yaw, cos yaw)).
+    const forward = new Vector3().setFromMatrixColumn(group.matrixWorld, 2);
+    const yaw = Math.atan2(forward.x, forward.z);
+    const corners = boothCorners(at.x, at.z, yaw, boothBoxFor(id));
     stalls.push({
       id,
       drawnX: at.x,
       drawnZ: at.z,
       box: boothBoxFor(id),
+      footprint: [corners.frontLeft, corners.frontRight, corners.backRight, corners.backLeft],
       standX: zone.standX,
       standZ: zone.standZ,
       steppedAside: Math.hypot(shiftX, shiftZ),
@@ -2876,6 +3033,16 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     return Math.hypot(endX - x, endZ - z) < 1.5;
   };
 
+  let reachableGroundMemo: Float64Array | null = null;
+  const reachableGroundCells = (): Float64Array => {
+    if (reachableGroundMemo) return reachableGroundMemo;
+    const flood = navGrid.floodFrom(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, sample(ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z, 0), sample);
+    const cells: number[] = [];
+    flood?.forEachCell((x, z) => cells.push(x, z));
+    reachableGroundMemo = Float64Array.from(cells);
+    return reachableGroundMemo;
+  };
+
   const castlePass = {
     windows: CASTLE_WINDOWS,
     complaints: [
@@ -2922,6 +3089,8 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
   const raceRing = world.railRace.group.getObjectByName('railRace:race-ring');
   const barsMesh = raceRing?.getObjectByName('railRace:duck-bars');
   const builtBarDistances: number[] = [];
+  /** Every race-ring bar, every lane — for `duckBarPlan`. */
+  const builtBarsEveryLane: { lane: number; at: number }[] = [];
   if (barsMesh instanceof Instanced) {
     const matrix = new Mat4();
     const at = new Vec3();
@@ -2970,6 +3139,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
           onLane = lane;
         }
       }
+      builtBarsEveryLane.push({ lane: onLane, at: arch });
       if (onLane !== PLAYER) continue;
       builtBarDistances.push(arch);
     }
@@ -3028,6 +3198,63 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
         speedAt: row?.speedAt ?? 0,
         speedAfter: row?.speedAfter ?? 0,
         frameTravel: row?.frameTravel ?? 0,
+      });
+    }
+  }
+
+  // --- the bar layout the plan decided, against the one drawn --------------
+  const { planPart, parkPlanPlaced } = await import('../../src/world/parkPlan.ts');
+  const { planHazards } = await import('../../src/world/railRace/hazards.ts');
+  const decidedInPlan = parkPlanPlaced().includes('railRaceBars');
+  const duckBarPlan = {
+    decidedInPlan,
+    planned: decidedInPlan
+      ? planHazards(raceRoute.length, 1, BARS_FROM_LEVEL, planPart('railRaceBars').bars).lap.bars.map(({ lane, at }) => ({
+          lane,
+          at,
+        }))
+      : [],
+    built: builtBarsEveryLane.sort((a, b) => a.at - b.at),
+  };
+
+  // --- does any duck bar reach into another lane? --------------------------
+  //
+  // Both rings, every drawn bar, off its own instance matrix. The lane is found
+  // from the drawn centre in the chart (nearest lane offset), as the block above
+  // finds it, never from the plan — this measures what was built.
+  const { duckBarIntrusions } = await import('../../src/world/railRace/barReach.ts');
+  const duckBarReach: DuckBarReachFact[] = [];
+  for (const [ringLabel, ringName, ringRoute] of [
+    ['walk-past', 'railRace:walk-past-ring', world.railRace.walkPastRoute],
+    ['race', 'railRace:race-ring', world.railRace.raceRoute],
+  ] as const) {
+    const ringBars = world.railRace.group.getObjectByName(ringName)?.getObjectByName('railRace:duck-bars');
+    if (!(ringBars instanceof Instanced)) continue;
+    const matrix = new Mat4();
+    const centre = new Vec3();
+    const chart = new Vec3();
+    for (let i = 0; i < ringBars.count; i += 1) {
+      ringBars.getMatrixAt(i, matrix);
+      centre.setFromMatrixPosition(matrix);
+      const station = ringRoute.stationOf(centre);
+      ringRoute.unlean(station, centre, chart);
+      const sample = ringRoute.path.sampleAt(station);
+      const offset = (chart.x - sample.x) * sample.normalX + (chart.z - sample.z) * sample.normalZ;
+      let lane = 0;
+      let nearest = Infinity;
+      for (let candidate = 0; candidate < ringRoute.laneOffsets.length; candidate += 1) {
+        const d = Math.abs(offset - (ringRoute.laneOffsets[candidate] ?? 0));
+        if (d < nearest) {
+          nearest = d;
+          lane = candidate;
+        }
+      }
+      duckBarReach.push({
+        ring: ringLabel,
+        index: i,
+        lane,
+        builtAt: ringRoute.wrap(station - ringRoute.startDistance),
+        intrusions: duckBarIntrusions(ringRoute, lane, matrix),
       });
     }
   }
@@ -3737,14 +3964,41 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
   // so it cannot be measured off the built park at all — and a denominator
   // that cannot be measured has no business in a line that reports
   // measurements. It is gone rather than corrected.
+  const { FAIRY_POLE_RADIUS } = await import('../../src/world/FairyLights.ts');
   const fairyLightsDrawn = ((): ParkFacts['fairyLights'] => {
     let poles = 0;
     let strings = 0;
+    const polesDrawn: { name: string; at: Vector3; up: Vector3 }[] = [];
+    const stringsDrawn: { name: string; path: Curve<Vector3>; matrixWorld: Matrix4 }[] = [];
+    let cableRadius = Number.NaN;
+    let postTopRadius = Number.NaN;
+    world.fairyLights.group.updateMatrixWorld(true);
     world.fairyLights.group.traverse((object) => {
-      if (object.name.startsWith('fairy-pole-')) poles += 1;
-      else if (object.name.startsWith('fairy-string-')) strings += 1;
+      if (object.name.startsWith('fairy-pole-')) {
+        poles += 1;
+        const geometry = (object as Mesh).geometry;
+        if (geometry instanceof CylinderGeometry) postTopRadius = geometry.parameters.radiusTop;
+        const quaternion = object.getWorldQuaternion(new Quaternion());
+        polesDrawn.push({
+          name: object.name,
+          at: object.getWorldPosition(new Vector3()),
+          // flat-ok: local axis, leant by the pole's own world quaternion
+          up: new Vector3(0, 1, 0).applyQuaternion(quaternion),
+        });
+      } else if (object.name.startsWith('fairy-string-')) {
+        strings += 1;
+        const geometry = (object as Mesh).geometry;
+        if (geometry instanceof TubeGeometry) {
+          cableRadius = geometry.parameters.radius;
+          stringsDrawn.push({
+            name: object.name,
+            path: geometry.parameters.path,
+            matrixWorld: object.matrixWorld.clone(),
+          });
+        }
+      }
     });
-    return { poles, strings };
+    return { poles, strings, polesDrawn, poleRadius: FAIRY_POLE_RADIUS, stringsDrawn, cableRadius, postTopRadius };
   })();
 
   // The bus's run, from the same owners `ArrivalSequence.placeBus` and
@@ -3789,16 +4043,22 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     archClearance,
     archLegs,
     duckBars,
+    duckBarReach,
+    duckBarPlan,
     cameraTracking,
     castlePass,
     cruiserStrikes: cruiserStrikes(world.coaster.route, world.coaster.group, [world.coaster.group]),
     cruiserRouteGroundClearance,
     cruiserPylonTops,
     seed,
+    restart,
+    headless,
+    fountainHop,
     world,
     walls,
     trees,
     bushes,
+    bushLegalM2: bushGround.legalM2,
     climbableTrees,
     lamps: world.lampPosts.positions.map((p) => [p.x, p.z] as const),
     fairyLights: fairyLightsDrawn,
@@ -3823,6 +4083,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     pathNodes,
     pathEdges,
     pathConnectivityEdges,
+    drawnPathSamples: pathCentreline().map(({ x, z, halfWidth, run }) => ({ x, z, halfWidth, run })),
     slideChute,
     slideChuteInCastleFrame,
     slideRiderFrame: { local: slideRiderLocal, world: slideRiderWorld },
@@ -3842,6 +4103,7 @@ function heightAlongOwnUp(root: import('three').Object3D): number {
     slideLegs: world.building.slideLegs,
     castleFootprint,
     reachableFromEntrance,
+    reachableGroundCells,
     routes,
     nearPairs,
     boundary: world.collision.playBounds,
