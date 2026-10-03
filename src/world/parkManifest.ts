@@ -10,7 +10,7 @@ import {
 } from './reptileHouse/layout';
 import { parkSeedAsked } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
-import { CASTLE_PLOT_REACH, PARK_SURFACE_SCALE } from '../core/constants';
+import { CASTLE_PLOT_REACH, PARK_EXTENT_SCALE } from '../core/constants';
 import { assertDeterministicMath } from '../core/deterministicMath';
 
 // Every park is built from here, so refuse here: a park generated with the
@@ -472,8 +472,8 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
 export const PARK_MANIFEST: readonly ManifestEntry[] = AUTHORED_MANIFEST.map((entry) => ({
   ...entry,
   band: {
-    min: entry.band.min * PARK_SURFACE_SCALE,
-    max: entry.band.max * PARK_SURFACE_SCALE,
+    min: entry.band.min * PARK_EXTENT_SCALE,
+    max: entry.band.max * PARK_EXTENT_SCALE,
   },
 }));
 
