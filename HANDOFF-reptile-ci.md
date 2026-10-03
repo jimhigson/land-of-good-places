@@ -16,3 +16,11 @@ Push: `git push origin reptile-ci:feat/reptile-house`. Base: feat/procgen-on-sph
 
 ## Now (Overseer, new scope)
 Place the reptile house as a normal anchor building on every seed 0..15, enlarge park boundary slightly (one constant), /spawn link to its doormat on seed 5, CI green, preview screenshot.
+
+## Placement work (commits 09af53fb..0d27c269)
+- anchors.ts 'reptileHouse'; parkManifest entry (footprint 10.5, bounding 12, band 24..90, door reach = DOOR_BAND_OUTER+DOORMAT_STANDOFF, pavedTo = DRAWN_DOOR_ALONG, cameraFacing).
+- ReptileHouse: with a plot the exterior stands in anchor:reptileHouse via standInPlot (parkRoot); `doormat` getter is the one owner; standAtDoor uses it in the park.
+- World passes placedEntry('reptileHouse') + anchorPlots, ownedBy('reptile house'); BUILT_SOLIDS includes it.
+- Park growth: PARK_GROWTH = 1.0416 in core/constants.ts (linear; garden half-size, play radius, manifest bands via PARK_EXTENT_SCALE). PARK_AREA_MULTIPLIER 2.17 was tried first: pinned gate -> solveBoundaryRadii threw on seed 5 restart 4.
+- Checks updated: check-reptile-house (park doormat, exterior in plot), check-tap-spacing (exterior zones + entry band in the park), check-deep-links (/reptile-house-door on ReptileHouse.doormat), invariants (rh-mouth as a door front; reptile band in tap clearance).
+- Next: seed 5 acceptance locally (running), CI Parks for all 16, /spawn?pos= on the seed-5 doormat from the park file, preview screenshot.
