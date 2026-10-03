@@ -9,6 +9,7 @@ import { LampPosts } from './LampPosts';
 import { TreeLights } from './TreeLights';
 import { Fireflies } from './Fireflies';
 import { AnchorPlots } from './AnchorPlots';
+import { placedEntry } from './parkLayout';
 import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
@@ -166,16 +167,18 @@ export class World implements GameSystem {
     // and let it replant anything caught underneath, rather than shrinking
     // the zone back down and losing the pin's reachability fix.
     tapZones.push(...this.hotel.interactZones());
-    // The Reptile House: a hall that is its own space, and — until the park
-    // has a plot for it — an exterior standing on its own forecourt space.
-    // `plot: null` is the whole of what the placement agents change. The
-    // night is a closure for the reason the hotel's clock is: `dayNight` is
-    // built further down this constructor.
-    this.reptileHouse = new ReptileHouse(this.collision, interiorControls, this.building.surfaces, {
-      plot: null,
+    // The Reptile House: a hall that is its own space, and an exterior that is
+    // just another building in the park — Sunny on her plinth on the
+    // `reptileHouse` plot, her mouth the door. Its solids are owned like the
+    // hotel's, so a measure can ask what a collider is. The night is a closure
+    // for the reason the hotel's clock is: `dayNight` is built further down
+    // this constructor.
+    this.reptileHouse = this.collision.ownedBy('reptile house', () => new ReptileHouse(this.collision, interiorControls, this.building.surfaces, {
+      plot: placedEntry('reptileHouse'),
+      anchorPlots: this.anchorPlots,
       camera,
       nightFactor: () => this.dayNight.nightFactor,
-    });
+    }));
     tapZones.push(...this.reptileHouse.interactZones());
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,

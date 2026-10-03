@@ -1,6 +1,13 @@
 import type { AnchorFootprint } from './anchors';
 import { CASTLE_DOORMAT_LOCAL } from './building/frontDoor';
 import { TOWER_DOORMAT_REACH, TOWER_DRAWN_DOOR_ALONG } from './hotel/towerDimensions';
+import {
+  REPTILE_BOUNDING_RADIUS,
+  REPTILE_DOOR_BAND_OUTER,
+  REPTILE_DOORMAT_STANDOFF,
+  REPTILE_DRAWN_DOOR_ALONG,
+  REPTILE_FOOTPRINT_RADIUS,
+} from './reptileHouse/layout';
 import { parkSeedAsked } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
 import { CASTLE_PLOT_REACH, PARK_SURFACE_SCALE } from '../core/constants';
@@ -284,6 +291,22 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     // stall's counter — without it the solver faced the door at the park
     // middle, which from most placements is straight away from the camera:
     // a hotel you could walk all round without ever seeing a way in.
+    cameraFacing: true,
+  },
+  // The Reptile House (Jim, 2 Oct 2026): "just another building". Sunny the
+  // snake is coiled round a greenhouse on a 16-gon plinth; her open mouth is
+  // the door and her tongue the doormat. Every number is the building's own
+  // (`reptileHouse/layout.ts`): the doormat stands on the tongue just past the
+  // door band, and the paving runs on up the tongue into the mouth to the
+  // drawn doorway (plus `DOOR_PAVING_OVERLAP`, as for every door).
+  {
+    id: 'reptileHouse',
+    footprint: { kind: 'circle', radius: REPTILE_FOOTPRINT_RADIUS },
+    boundingRadius: REPTILE_BOUNDING_RADIUS,
+    band: { min: 24, max: 90 },
+    door: { reach: REPTILE_DOOR_BAND_OUTER + REPTILE_DOORMAT_STANDOFF, pavedTo: REPTILE_DRAWN_DOOR_ALONG },
+    // ALL assets face the camera (Jim, 7 Aug): the mouth, the tongue and the
+    // sign all derive from this, exactly as the hotel's door does.
     cameraFacing: true,
   },
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.

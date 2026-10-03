@@ -11,6 +11,7 @@ import type { InteractZone } from '../interact';
 import { pressZone } from '../interact';
 import { highlightObject } from '../highlight';
 import type { PlacedEntry } from '../parkLayout';
+import { standInPlot, type AnchorPlots } from '../AnchorPlots';
 import type { Player } from '../../entities/Player';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
@@ -105,6 +106,12 @@ import {
 export interface ReptileHouseDeps {
   /** The park's plot for the exterior, or `null` while there is none. */
   readonly plot: PlacedEntry | null;
+  /**
+   * The park's reserved plots: with a `plot`, the exterior stands in
+   * `anchor:reptileHouse` on the sphere (`standInPlot`), exactly as the
+   * hotel's tower does, and the plot's "coming soon" placeholder goes.
+   */
+  readonly anchorPlots: AnchorPlots | null;
   /** For sizing speech bubbles on screen. */
   readonly camera: IsoCamera;
   /** The park's night, 0..1 — the portholes glow and Sunny sleeps. */
@@ -162,6 +169,8 @@ export class ReptileHouse implements GameSystem {
   readonly hallRoot = new Group();
   /** The forecourt lawn and the exterior on it, hidden unless she is there. */
   readonly forecourtRoot = new Group();
+  /** The exterior's root in the park, when the park has a plot for it. */
+  readonly parkRoot = new Group();
   /** The two shop stands — the stall's and the nursery's — for `World.shopStands()`. */
   readonly stands: readonly ShopStand[];
   /** The exterior shell's wall colliders, chords first, so a check can remove one and go red. */
@@ -249,9 +258,18 @@ export class ReptileHouse implements GameSystem {
     if (plot) {
       // The park's plot: the facade faces its doormat, as the hotel's does.
       this.frame = { x: plot.x, z: plot.z, yaw: Math.atan2(plot.entranceX - plot.x, plot.entranceZ - plot.z) };
-      this.exterior.root.position.set(plot.x, surfaces.sample(plot.x, plot.z, 3), plot.z);
+      if (!deps.anchorPlots) throw new Error('ReptileHouse: a park plot needs the park\'s AnchorPlots to stand in');
+      // The plot's own origin is the ground under the building, leant to the
+      // local up; `standInPlot` carries the world transform back through it,
+      // so the plinth stands on the sphere rather than at world y 0 (the
+      // hotel's 13 Sep "floating in space" fix, Hotel.ts).
+      const group = deps.anchorPlots.getGroup('reptileHouse');
+      this.parkRoot.name = 'the-reptile-house-outside';
+      standInPlot(group, this.parkRoot, plot.x, plot.z, 0, 0);
       this.exterior.root.rotation.y = this.frame.yaw;
-      this.forecourtRoot.add(this.exterior.root);
+      this.parkRoot.add(this.exterior.root);
+      group.add(this.parkRoot);
+      deps.anchorPlots.setPlaceholderVisible('reptileHouse', false);
     } else {
       this.frame = { x: REPTILE_FORECOURT_ORIGIN_X, z: REPTILE_FORECOURT_ORIGIN_Z, yaw: 0 };
       buildForecourt(this.forecourtRoot, surfaces, REPTILE_FORECOURT_ORIGIN_X, REPTILE_FORECOURT_ORIGIN_Z, this.frame);

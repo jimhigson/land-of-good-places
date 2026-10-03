@@ -1659,7 +1659,7 @@ const UNDER_A_SOLID_TOLERANCE = PAVING_CELL / 2;
  * (`wallsRunAlongsideAPath`), the fountain's rim stands on the plaza, and a
  * lamp may stand at a path's edge; those are counted on every run, not judged.
  */
-const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'booth', 'boundary wall']);
+const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'reptile house', 'booth', 'boundary wall']);
 
 /**
  * **No drawn paving lies under a building, a booth or the boundary wall.**
