@@ -566,14 +566,12 @@ export class ReptileHouse implements GameSystem {
    */
   private exteriorEntranceZone(): InteractZone {
     const band = reptileEntryBand(this.frame);
-    const plot = this.deps.plot;
-    // With a plot, the pick area reaches the map pin at the plot's entrance
-    // point, as the hotel's does; on the forecourt there is no pin, and the
-    // tail's own "Tickle tail!" zone stands at `REPTILE_TAIL_REACH`, so the
-    // pick area stops a finger short of it (the tap-spacing rule).
-    const pickRadius = plot
-      ? Math.max(REPTILE_SHELL_RADIUS, Math.hypot(plot.entranceX - plot.x, plot.entranceZ - plot.z)) + 1
-      : REPTILE_SHELL_RADIUS + 0.6;
+    // The tail's own "Tickle tail!" zone stands at `REPTILE_TAIL_REACH`, so the
+    // pick area stops a finger short of it (the tap-spacing rule) — in the
+    // park as on the forecourt. Reaching out to the doormat as the hotel's
+    // does put the tail inside it (seed 5 restart 4: 'reptile-entrance' and
+    // 'reptile-tail' 0.00 m apart); the doormat is walked onto, not tapped.
+    const pickRadius = REPTILE_SHELL_RADIUS + 0.6;
     return {
       id: ENTRANCE_ZONE,
       label: 'Reptile House',
