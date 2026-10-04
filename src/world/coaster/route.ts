@@ -173,7 +173,19 @@ export function tallObstacles(): TallObstacle[] {
     // branch with no cruiser sweep to run, made visible when the loop
     // re-rolled (seed 5 flew the car straight through the tower's spires).
     hotelTallObstacle(),
+    // The Reptile House (#708): Sunny's coil stands ~11 m against the same
+    // 6.2 m cruise floor — the fourth member, missed exactly as the hotel's
+    // comment says the next one would be. The four-arm acceptance run caught
+    // it: 7 of 64 attempts with the house in the park flew the car through
+    // `rh-coil` or `rh-house-wall`, none with it unplaced. Its bounding
+    // radius already holds every drawn vertex (`REPTILE_BOUNDING_RADIUS`).
+    reptileTallObstacle(),
   ];
+}
+
+function reptileTallObstacle(): TallObstacle {
+  const house = placedEntry('reptileHouse');
+  return { x: house.x, z: house.z, radius: house.boundingRadius };
 }
 
 function hotelTallObstacle(): TallObstacle {
