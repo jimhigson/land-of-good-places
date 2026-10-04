@@ -70,3 +70,7 @@ base 30%, head@f24a550e 16%, growth reverted 27%, house unplaced 16%, bands not 
 - Sky Cruiser flew through the house: added to tallObstacles (2c802e63); no rh-* hits in the re-run.
 - Authored distances checked: STATION_SEED_RADIUS 60 (used only via route.distanceNear on a bearing - insensitive, left); train lengths are rim-perimeter fractions (derived); RING_RADIUS from fountain (physical); STREET_PITCH 12, turn radii, model sizes physical (fixed); GATE_CORRIDOR_DEPTH relative to the gate (derived).
 - Arm worktrees: .claude/worktrees/arm-{head,nogrow,unplaced,base,nobands} on local scratch/arm-* branches (not pushed); remove when done. Results: /private/tmp/claude-501/lgp-reptile/arms/.
+
+## CI 52aa270d (run 37211805391)
+Per seed (CI minutes, accepted restart): 0:14 r0, 1:34 r1, 2:45 r7, 3:60 CANCELLED (r0-7 rejected, 7 different measures, attempts up to 1961 s), 4:13 r0, 5:37 r3, 6:25 r5, 7:20 r1, 8:19 r1, 9:21 r0, 10:12 r0, 11:9 r0, 12:24 r2, 13:20 r0, 14:14 r0, 15:18 r0.
+At ~27-30% acceptance per built park, P(a seed needs >8 attempts) ~6-8%; over 16 seeds a full re-solve exceeds the 60-min cap more often than not, base included (base's CI reused cached parks). Open: Sky Cruiser tall-obstacle list -> issue #709.
