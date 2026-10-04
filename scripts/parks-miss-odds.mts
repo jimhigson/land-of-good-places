@@ -24,13 +24,13 @@
  */
 
 /**
- * Share of attempts accepted (build failures count as rejections), both at
- * 52aa270d: 15 of 64 on #708's head arm (seeds 0-15 x restarts 0-3, real
- * park-attempt, every measure) and 15 of 43 attempts CI logged (run
- * 37211805391). Base #706 measured 19 of 64 the first way.
+ * Share of attempts accepted (build failures count as rejections): 30 of
+ * 123 attempts CI logged at 9de53b82, the first cold run of the
+ * seed x block matrix, with the step cap (run 37216428224). Earlier, without
+ * the cap: 30 of 107 at 52aa270d; base #706 19 of 64.
  */
-const ACCEPTED = 15 + 15;
-const ATTEMPTS = 64 + 43;
+const ACCEPTED = 30;
+const ATTEMPTS = 123;
 
 /** Wilson score lower bound at ~95% (z = 1.96): the pessimistic `p`. */
 function wilsonLower(successes: number, trials: number, z = 1.96): number {
@@ -43,13 +43,19 @@ function wilsonLower(successes: number, trials: number, z = 1.96): number {
 
 /**
  * Attempt wall times on a CI runner with four lanes sharing its cores, seconds
- * (CI run 37211805391, 43 attempts logged): rejected and accepted.
+ * (the same run, 123 attempts): rejected and accepted.
  */
 const REJECTED_S = [
-  185, 225, 249, 276, 284, 312, 330, 363, 412, 421, 434, 435, 449, 461, 472, 579, 787, 817, 880, 967, 1031, 1113, 1126,
-  1138, 1246, 1326, 1417, 1961,
+  131, 172, 194, 220, 226, 234, 244, 247, 248, 250, 250, 261, 264, 288, 312, 312, 332, 334, 339, 340, 347, 368, 375,
+  384, 387, 392, 394, 396, 399, 401, 407, 411, 412, 419, 421, 427, 435, 445, 446, 450, 453, 472, 480, 497, 502, 503,
+  523, 523, 524, 527, 546, 562, 571, 571, 585, 587, 593, 607, 608, 615, 625, 636, 638, 643, 670, 707, 743, 775, 801,
+  812, 846, 856, 862, 866, 870, 877, 961, 966, 999, 1022, 1030, 1045, 1045, 1070, 1080, 1090, 1149, 1164, 1228, 1239,
+  1386, 1423, 2051,
 ];
-const ACCEPTED_S = [510, 681, 707, 786, 830, 902, 921, 1020, 1030, 1138, 1185, 1196, 1397, 2029, 2162];
+const ACCEPTED_S = [
+  472, 486, 535, 586, 662, 666, 681, 822, 881, 892, 893, 923, 943, 970, 1054, 1061, 1075, 1099, 1116, 1189, 1200,
+  1230, 1319, 1333, 1357, 1368, 1383, 1535, 1770, 1994,
+];
 
 /** The job's `timeout-minutes` (60), less ~4 minutes of checkout, install and the proof. */
 const CLOCK_S = 56 * 60;
