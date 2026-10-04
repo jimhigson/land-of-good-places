@@ -1767,6 +1767,23 @@ export async function buildParkFacts(seed: number, restart = 0): Promise<ParkFac
   // the game's modules here, after the seed is pinned — vitest does not load
   // `scripts/ts-extension-resolver-register.mjs`, whose lazy loader does this
   // for every script (`src/world/prebuilt/solverPort.ts`).
+  // **The shipped park, hydrated, when `.parks/` has a fresh one** — what
+  // `scripts/ts-extension-resolver-register.mjs` installs for every script, and
+  // vitest never loads. Without it the suite re-solved each seed's accepted
+  // restart (up to 850 s on CI, three seeds a shard) though `build:parks` had
+  // already proved the file builds exactly that park; the shards ran out of
+  // their watchdogs (#708, run 37221975719). With no fresh `.parks/` (or a
+  // restart other than the shipped one) this answers null and the park solves.
+  // Installed before anything of the park loads: the store asks it once.
+  // Through a variable, so the test project's typecheck does not follow it
+  // into Node-only code (`test/node-env.d.ts`).
+  const BUILT_PARKS = '../../scripts/lib/builtParks.mts';
+  const { builtParkFileOf } = (await import(/* @vite-ignore */ BUILT_PARKS)) as {
+    builtParkFileOf: (root: string, seed: number, env: Readonly<Record<string, string | undefined>>) => unknown;
+  };
+  (globalThis as { __LGP_RESOLVE_PARK_FILE__?: (seed: number) => unknown }).__LGP_RESOLVE_PARK_FILE__ = (asked) =>
+    // No trailing slash: the source hash is taken over paths relative to it.
+    builtParkFileOf(new URL('../..', import.meta.url).pathname.replace(/\/$/, ''), asked, process.env);
   await import('../../procgen/install.ts');
   const { buildHeadlessPark } = await import('../../scripts/park-harness.mts');
   const { PARK_SEED_ASKED, PARK_MANIFEST } = await import('../../src/world/parkManifest.ts');

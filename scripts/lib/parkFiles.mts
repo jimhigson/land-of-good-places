@@ -362,6 +362,40 @@ export async function buildAcceptedParks(
 }
 
 /**
+ * **The codec's proof on one park, without the accept loop**: solve `seed` at
+ * `restart` into a file, hydrate a second process from it, compare the two
+ * built parks (whole-park digest, nothing searched on the hydrated side, the
+ * file's restart), and run the perturbed-file control. What `build:parks` does
+ * to every file it ships, minus finding which restart to ship — so a check that
+ * only asks "does a file build the park it was solved from" (`check:prebuilt-park`)
+ * pays one solve, not a seed's whole run of attempts and their measures.
+ */
+export async function proveParkFile(
+  seed: number,
+  restart: number,
+  outDir: string,
+  log: (line: string) => void,
+): Promise<{ readonly solved: ProbeResult; readonly hydrated: ProbeResult; readonly raw: number; readonly problems: string[] }> {
+  const file = join(outDir, `${seed}.json`);
+  const solved = await probe('solve', seed, file, restart);
+  const hydrated = await probe('hydrate', seed, file);
+  const parsed = JSON.parse(readFileSync(file, 'utf8')) as ParkFile;
+  const problems = compare(seed, restart, solved, hydrated, parsed);
+  const perturbed = await probe('perturb', seed, file);
+  if (perturbed.park === hydrated.park) {
+    problems.push(
+      `CONTROL FAILED: seed ${seed}'s file with the Sky Cruiser raised 0.5 m built digest ${perturbed.park}, ` +
+        'the same as the unperturbed file — the comparison cannot see what is in the file',
+    );
+  }
+  log(
+    `  seed ${seed} restart ${restart}: solved ${solved.park}, hydrated ${hydrated.park}; control (cruiser +0.5 m) ` +
+      `${perturbed.park} — ${perturbed.park === hydrated.park ? 'BLIND' : 'differs, as it must'}`,
+  );
+  return { solved, hydrated, raw: Buffer.byteLength(readFileSync(file)), problems };
+}
+
+/**
  * One block's verdict on one seed (`build-parks.mts`, `LGP_RESTART_BLOCK`):
  * the restarts it covered, `[from, to)`, and the lowest of them that was
  * accepted, or null when none was. `merge-parks.mts` reads these.

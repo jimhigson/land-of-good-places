@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
-import { buildAcceptedParks } from './lib/parkFiles.mts';
+import { buildAcceptedParks, builtRestartOf, proveParkFile } from './lib/parkFiles.mts';
 import { PARK_MODULES_AFTER_FILE, staticImportClosure } from './lib/bootStaticImports.mts';
 
 {
@@ -47,20 +47,39 @@ import { PARK_MODULES_AFTER_FILE, staticImportClosure } from './lib/bootStaticIm
 
 const outDir = mkdtempSync(join(tmpdir(), 'lgp-prebuilt-park-'));
 try {
-  const { outcomes, controlProblem } = await buildAcceptedParks([CANONICAL_PARK_SEED], outDir, 1, (line) => console.log(line));
-  const problems = [...outcomes.flatMap((o) => o.problems.map((p) => `seed ${o.seed}: ${p}`)), ...(controlProblem ? [controlProblem] : [])];
+  // **At the shipped restart, when there is one** — the proof is about the
+  // codec, not about which restart is accepted, so it needs one solve, not the
+  // accept loop's whole run of attempts and measures: on #708 the canonical
+  // seed accepts at restart 3, and asking all four with every measure took
+  // this check past its shard's watchdog (run 37221975719). With no fresh
+  // `.parks/` it falls back to the accept loop, which finds a restart that
+  // solves.
+  const shipped = builtRestartOf(process.cwd(), CANONICAL_PARK_SEED);
+  let problems: string[];
+  let summary: string;
+  if (shipped !== null) {
+    const proof = await proveParkFile(CANONICAL_PARK_SEED, shipped, outDir, (line) => console.log(line));
+    problems = proof.problems.map((p) => `seed ${CANONICAL_PARK_SEED}: ${p}`);
+    summary =
+      `seed ${CANONICAL_PARK_SEED} restart ${shipped} digest ${proof.solved.park} both ways; ` +
+      `plan ${proof.solved.planCpuMs} ms searched, ${proof.hydrated.planCpuMs} ms hydrated; file ${proof.raw} bytes`;
+  } else {
+    const { outcomes, controlProblem } = await buildAcceptedParks([CANONICAL_PARK_SEED], outDir, 1, (line) => console.log(line));
+    problems = [...outcomes.flatMap((o) => o.problems.map((p) => `seed ${o.seed}: ${p}`)), ...(controlProblem ? [controlProblem] : [])];
+    const o = outcomes[0];
+    summary =
+      `seed ${o?.seed} digest ${o?.solved.park} both ways; ` +
+      `plan ${o?.solved.planCpuMs} ms searched, ${o?.hydrated.planCpuMs} ms hydrated; file ${o?.raw} bytes`;
+  }
   process.stderr.write(
     'check:prebuilt-park NOTE: covers the canonical seed only. Every shipped seed is proven by build:parks in the deploy that ships it.\n',
   );
   if (problems.length > 0) {
-    for (const problem of problems) console.error(`check:prebuilt-park: ${problem}`);
-    process.exit(1);
+    for (const problem of problems) console.error(`check:prebuilt-park FAILED: ${problem}`);
+    process.exitCode = 1;
+  } else {
+    console.log(`check:prebuilt-park passed: ${summary}`);
   }
-  const o = outcomes[0];
-  console.log(
-    `check:prebuilt-park passed: seed ${o?.seed} digest ${o?.solved.park} both ways; ` +
-      `plan ${o?.solved.planCpuMs} ms searched, ${o?.hydrated.planCpuMs} ms hydrated; file ${o?.raw} bytes`,
-  );
 } finally {
   rmSync(outDir, { recursive: true, force: true });
 }
