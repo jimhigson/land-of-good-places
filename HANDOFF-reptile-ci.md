@@ -62,3 +62,11 @@ Scratch worktree .claude/worktrees/reptile-exp (detached, NOT for pushing): env 
 - CI 33eb4b0f (run 37198917576): 13 seeds 12-51 min; 2, 14, 15 cancelled at the 60-min cap (reached restarts 8, 8, 11).
 - Local CPU to accept at 33eb4b0f: 0: 1059 s (r5), 1: 2252 (r11), 2: 2819 (r10), 15: 2464 (r12); 14 still running.
 - Scratch: .claude/worktrees/reptile-exp (detached; LGP_X_DZ/LGP_X_DZF toggles in earlier revisions). Remove when done.
+
+## Four-arm acceptance (2c802e63, 52aa270d)
+Real park-attempt, seeds 0-15 x restarts 0-3, 64 per arm; share of built parks accepted:
+base 30%, head@f24a550e 16%, growth reverted 27%, house unplaced 16%, bands not grown 33%, head@52aa270d 27%.
+- Cause: PARK_GROWTH scaled the manifest bands while near-relations (metres) and the fountain ring stayed put. Bands now use PARK_SURFACE_SCALE; growth only grows rim + gate (52aa270d).
+- Sky Cruiser flew through the house: added to tallObstacles (2c802e63); no rh-* hits in the re-run.
+- Authored distances checked: STATION_SEED_RADIUS 60 (used only via route.distanceNear on a bearing - insensitive, left); train lengths are rim-perimeter fractions (derived); RING_RADIUS from fountain (physical); STREET_PITCH 12, turn radii, model sizes physical (fixed); GATE_CORRIDOR_DEPTH relative to the gate (derived).
+- Arm worktrees: .claude/worktrees/arm-{head,nogrow,unplaced,base,nobands} on local scratch/arm-* branches (not pushed); remove when done. Results: /private/tmp/claude-501/lgp-reptile/arms/.
