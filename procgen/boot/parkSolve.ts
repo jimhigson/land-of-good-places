@@ -184,8 +184,17 @@ export const DEFAULT_SOLVE_BUDGET: SolveBudget = {
   // Worst recorded: 33 unwinds in a whole plan solve, all features together.
   unwindsPerFeature: 64,
   decisionZeroPerFeature: 16,
-  // No tighter than the layout's own supply: redrawing it is normal (34 on seed 15 restart 0).
-  decisionZero: 256,
+  // **Held to the time a solve is given, not to the layout's supply.** Each
+  // redraw of decision zero re-solves the layout and everything after it:
+  // measured 22 s apiece locally with four solves running (seed 10 restart 1,
+  // 48 redraws in 1061 s; seed 1 restart 1 on #706's base, 51 in 727 s), about
+  // twice that on a CI runner. `PROBE_TIMEOUT_MS` (1800 s, `parkFiles.mts`)
+  // fits ~40 at CI speed, so 256 let a solve run past it and the Parks job died
+  // "did not finish in 1800 s" instead of refusing the restart (seed 1 on
+  // #708, then seeds 10 and 11). At 24 a solve that would take that long is
+  // refused, and the accept loop backtracks to its next restart; the restarts
+  // that solve need 4-6.
+  decisionZero: 24,
   unwinds: MAX_UNWINDS,
   // Far above a full park's advances in either phase (a few hundred).
   turns: 200_000,
