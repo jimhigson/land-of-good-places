@@ -45,3 +45,11 @@ Place the reptile house as a normal anchor building on every seed 0..15, enlarge
 - Previous round (77b920c3, run 37168588131): all 16 parks, every Checks shard, coplanar, swept bus, entrance road, walk reach, every-seed-builds GREEN; only the 3 invariant shards red (now fixed).
 - OPEN: Park 14 hit parks.yml timeout-minutes 60 (shown as cancelled). Seed 14 restarts 0-19 all rejected, 11 of them inside the solve ("build": decision-zero budget 8 spent; redraws driven by pathGraph 'paving under a building/railway fence' at scattered spots, cruiser 'loops miss the castle'/'no start poses', train). Last round it accepted at restart 26 inside 60 min; this runner was ~2x slower. Needs a call: generator work on seed 14's acceptance rate, or the Parks time budget.
 - No preview yet: PR preview/deploy are gated on Parks.
+
+## Generator work on restart counts (61e94c9d, b6ff26a2)
+Scratch worktree .claude/worktrees/reptile-exp (detached, NOT for pushing): env toggles LGP_X_DZ, LGP_X_DZF, LGP_X_GROWTH, LGP_X_NORH, LGP_X_BANDMAX, LGP_X_FAR + XRUN/XHIT instrumentation on path refusals. Runner: /private/tmp/claude-501/lgp-reptile/exp/one.sh <variant> <seed> <restart>. NB the toggles do NOT reach park-attempt.mts's measures (base-like run gave the current park) — only trust park-file-probe solve results from it.
+- Layout draws per solve are as heavy-tailed on #706's base (2-35) as here; the difference was budget 256 vs 8.
+- Fixed: paving-in-rail-fence refusals now unwind to the train (was the #1 decision-zero cause, base too). Seed 0/14/15 r0-5 at budget 8: 15/18 solves succeed (was ~half); median draws 12 -> 6.
+- Fixed: router's distanceToBuiltSolids now includes the Reptile House; its doormat leaves BUILT_SOLID_MARGIN (moved to core/constants).
+- Restart counts (CI): before (37168588131) 5,3,10,4,6,1,9,14,18,6,5,4,2,2,26*,3; after 61e94c9d 5,3,10,4,6,1,5,1,3,6,5,4,2,2,>20,7; after b6ff26a2 5,15,10,4,6,1,5,1,3,6,0,4,2,2,running,13. Base (#706): 1,4,2,0,3,0,1,4,0,11,0,1,2,0,0,0.
+- Remaining seed-14 causes: Sky Cruiser misses the castle (layout's, ~30% of redraws, same share on base); spurs grazing their own booth/hotel (pre-existing doormat-at-zero-margin pattern, hotel TOWER_DOORMAT_REACH and booth stand points); measures: rail-racer stall vs its own exit 80+ m apart by paving (detour), lawn notch at the gate approach start (0, 56.58).
