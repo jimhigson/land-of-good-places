@@ -53,7 +53,7 @@ import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 import type { ParkFile } from '../../src/world/prebuilt/parkFile.ts';
 import { PARK_FILE_FORMAT, PREBUILT_PARKS_MANIFEST, SUPPORTED_PARK_SEEDS, type PrebuiltParksManifest } from '../../src/world/prebuilt/parkFileName.ts';
 import type { AttemptVerdict } from '../park-attempt.mts';
-import { acceptanceMetadata, acceptPark, attemptInFreshProcess, type AcceptanceMetadata } from './acceptedPark.mts';
+import { acceptanceMetadata, acceptPark, acceptParkInRange, attemptInFreshProcess, type AcceptanceMetadata, type RestartRecord } from './acceptedPark.mts';
 import { parkSourceHash } from './park-source-hash.mjs';
 
 const run = promisify(execFile);
@@ -266,7 +266,13 @@ export async function buildAcceptedParks(
   lanes: number,
   log: (line: string) => void,
   restartLanes = 1,
-): Promise<{ outcomes: SeedOutcome[]; controlProblem: string | null }> {
+  /**
+   * One block of each seed's restarts, `[from, to)`, instead of all of them
+   * (`LGP_RESTART_BLOCK`). A seed with no accepted restart in the block is
+   * returned in `none`, not thrown: another block finds it (`merge-parks.mts`).
+   */
+  block: { readonly from: number; readonly to: number } | null = null,
+): Promise<{ outcomes: SeedOutcome[]; none: number[]; controlProblem: string | null }> {
   const scratch = join(outDir, '.attempts');
   rmSync(scratch, { recursive: true, force: true });
   mkdirSync(scratch, { recursive: true });
@@ -275,21 +281,29 @@ export async function buildAcceptedParks(
   const attempt = fileAttempt(scratch, solves);
 
   const outcomes: SeedOutcome[] = [];
+  const none: number[] = [];
   const queue = [...seeds].reverse();
   await Promise.all(
     Array.from({ length: Math.min(Math.max(1, lanes), seeds.length) }, async () => {
       for (let seed = queue.pop(); seed !== undefined; seed = queue.pop()) {
-        const accepted = await acceptPark(seed, {
+        const options = {
           attempt,
           lanes: restartLanes,
-          onAttempt: (record) =>
+          onAttempt: (record: RestartRecord) =>
             log(
               `    seed ${String(seed).padStart(2)} restart ${record.restart}: ` +
                 (record.accepted
                   ? `accepted as shipped (${record.measuresAsked} measures, ${(record.wallMs / 1000).toFixed(0)} s)`
                   : `rejected by ${record.forcedBy.map((f) => f.measure).join(' | ').slice(0, 240)} (${(record.wallMs / 1000).toFixed(0)} s)`),
             ),
-        });
+        };
+        const found = block ? (await acceptParkInRange(seed, block.from, block.to, options)).accepted : await acceptPark(seed, options);
+        if (!found) {
+          none.push(seed);
+          log(`  seed ${String(seed).padStart(2)}: no restart in ${block?.from}..${(block?.to ?? 1) - 1} accepted — a later block's`);
+          continue;
+        }
+        const accepted = found;
         const acceptance = acceptanceMetadata(accepted, sourceHash);
         const winner = join(scratch, `${seed}-r${accepted.restart}.json`);
         const solved = solves.get(winner) as ProbeResult;
@@ -327,7 +341,10 @@ export async function buildAcceptedParks(
   rmSync(scratch, { recursive: true, force: true });
 
   // The control, on the first seed that was proven.
-  let controlProblem: string | null = 'no seed was proven, so the control had nothing to perturb';
+  // A block that accepted nothing has nothing to perturb, and that is not a
+  // fault: the control runs in whichever block's job proves that seed.
+  let controlProblem: string | null =
+    block && outcomes.length === 0 ? null : 'no seed was proven, so the control had nothing to perturb';
   const first = outcomes.find((o) => o.problems.length === 0);
   if (first) {
     const perturbed = await probe('perturb', first.seed, first.file);
@@ -341,7 +358,20 @@ export async function buildAcceptedParks(
         (controlProblem ? 'BLIND' : 'differs, as it must'),
     );
   }
-  return { outcomes, controlProblem };
+  return { outcomes, none, controlProblem };
+}
+
+/**
+ * One block's verdict on one seed (`build-parks.mts`, `LGP_RESTART_BLOCK`):
+ * the restarts it covered, `[from, to)`, and the lowest of them that was
+ * accepted, or null when none was. `merge-parks.mts` reads these.
+ */
+export interface ParkBlockRecord {
+  readonly sourceHash: string;
+  readonly seed: number;
+  readonly from: number;
+  readonly to: number;
+  readonly restart: number | null;
 }
 
 /** The manifest for `outcomes`, built from `sourceHash`. */

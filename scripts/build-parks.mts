@@ -41,7 +41,7 @@ import { PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
 import { PREBUILT_PARKS_MANIFEST, PREBUILT_PARKS_OUT } from '../src/world/prebuilt/parkFileName.ts';
 import { SUPPORTED_PARK_SEEDS } from '../src/world/prebuilt/parkFileName.ts';
 import { parkSourceHash } from './lib/park-source-hash.mjs';
-import { buildAcceptedParks, parksManifest } from './lib/parkFiles.mts';
+import { buildAcceptedParks, parksManifest, type ParkBlockRecord } from './lib/parkFiles.mts';
 
 const root = process.cwd();
 const started = performance.now();
@@ -59,7 +59,16 @@ const lanes = Math.max(1, Math.min(Number(process.env['LGP_LANES'] ?? 4), cpus()
 // Any other switch changes what a park build does (`LGP_WARP`, `LGP_LAYOUT_RUNG`,
 // `LGP_PARK_RESTART`, …), and a file built under one is not the park its
 // seed is: refused rather than shipped.
-const HARMLESS = new Set(['LGP_SEEDS', 'LGP_LANES', 'LGP_RESTART_LANES', 'LGP_PARK_TIMEOUT_MS', 'LGP_REQUIRE_PARKS', 'LGP_PARKS_OUT']);
+const HARMLESS = new Set([
+  'LGP_SEEDS',
+  'LGP_LANES',
+  'LGP_RESTART_LANES',
+  'LGP_RESTART_BLOCK',
+  'LGP_RESTART_BLOCK_SIZE',
+  'LGP_PARK_TIMEOUT_MS',
+  'LGP_REQUIRE_PARKS',
+  'LGP_PARKS_OUT',
+]);
 const switches = Object.keys(process.env).filter((key) => key.startsWith('LGP_') && !HARMLESS.has(key));
 if (switches.length > 0) {
   console.error(`build:parks: refusing to build parks under ${switches.join(', ')} — they would not be the parks the seeds are`);
@@ -79,7 +88,26 @@ console.log(
     `${process.env['LGP_RESTART_LANES'] ?? 1} restart(s) of each at a time, source ${sourceHash.slice(0, 12)}`,
 );
 const restartLanes = Math.max(1, Number(process.env['LGP_RESTART_LANES'] ?? 1));
-const { outcomes, controlProblem } = await buildAcceptedParks(seeds, outDir, lanes, (line) => console.log(line), restartLanes);
+// **One block of each seed's restarts** (`parks.yml`'s seed x block matrix):
+// restarts [block x size, (block + 1) x size). Each seed gets a
+// `block-<seed>.json` record — its range and the restart it accepted, or null
+// — and `merge-parks.mts` takes the lowest accepted restart over a run of
+// blocks from 0, which is the restart the sequential loop finds.
+const blockIndex = process.env['LGP_RESTART_BLOCK'];
+const blockSize = Number(process.env['LGP_RESTART_BLOCK_SIZE'] ?? 4);
+if (blockIndex !== undefined && (!/^\d+$/.test(blockIndex) || !Number.isInteger(blockSize) || blockSize < 1)) {
+  throw new Error(`build:parks: bad LGP_RESTART_BLOCK ${blockIndex} / LGP_RESTART_BLOCK_SIZE ${blockSize}`);
+}
+const block = blockIndex === undefined ? null : { from: Number(blockIndex) * blockSize, to: (Number(blockIndex) + 1) * blockSize };
+const { outcomes, none, controlProblem } = await buildAcceptedParks(seeds, outDir, lanes, (line) => console.log(line), restartLanes, block);
+if (block) {
+  for (const seed of seeds) {
+    const outcome = outcomes.find((o) => o.seed === seed);
+    const record: ParkBlockRecord = { sourceHash, seed, from: block.from, to: block.to, restart: outcome ? outcome.restart : null };
+    writeFileSync(join(outDir, `block-${seed}.json`), `${JSON.stringify(record)}\n`);
+  }
+  if (none.length > 0) console.log(`build:parks: no accepted restart in ${block.from}..${block.to - 1} for seed(s) ${none.join(', ')}`);
+}
 
 const kb = (bytes: number): string => `${(bytes / 1024).toFixed(1)} KB`;
 console.log('\n| seed | restart | attempts | seconds | raw | gzip -9 | brotli 11 | plan searched | plan hydrated | digest |');
