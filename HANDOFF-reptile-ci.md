@@ -39,3 +39,9 @@ Place the reptile house as a normal anchor building on every seed 0..15, enlarge
 - check:ground-claims shard 7: railRaceBars/slide/crossings are dep-siblings; list now tiers them (proved green + red).
 - railRaceRoadBounded fixture: seed 12 restart 3 -> 2.
 - Avoid pushing while CI's Parks runs: a push cancels it (~45 min per Parks round).
+
+## Round a119e0ee (run 37172614020) — where it stands
+- Fixed and verified locally: lamps alternate per route (scatterDecoupling seed 12 coupling, 44.2 m wall); test pins moved to seed 1 restart 3 (railRaceRoadBounded 4.6 s; railRaceRefusals + scatter control). Local: 18/18 in those files.
+- Previous round (77b920c3, run 37168588131): all 16 parks, every Checks shard, coplanar, swept bus, entrance road, walk reach, every-seed-builds GREEN; only the 3 invariant shards red (now fixed).
+- OPEN: Park 14 hit parks.yml timeout-minutes 60 (shown as cancelled). Seed 14 restarts 0-19 all rejected, 11 of them inside the solve ("build": decision-zero budget 8 spent; redraws driven by pathGraph 'paving under a building/railway fence' at scattered spots, cruiser 'loops miss the castle'/'no start poses', train). Last round it accepted at restart 26 inside 60 min; this runner was ~2x slower. Needs a call: generator work on seed 14's acceptance rate, or the Parks time budget.
+- No preview yet: PR preview/deploy are gated on Parks.
