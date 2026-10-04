@@ -244,10 +244,11 @@ export const gradientAtParkRadius = (
  * Jim, 3 Oct 2026: the Reptile House goes in the park, *"with the park
  * enlarged slightly to fit it"*, so the parks are no more crowded than before.
  *
- * A linear factor on everything {@link PARK_SURFACE_SCALE} sizes in the park —
- * the garden's half-size (and so the gate), the play radius (and so the
- * outline's target area) and every manifest band — and on nothing else: the
- * planet keeps its radius and every building keeps its size. Measured, not
+ * A linear factor on the garden's half-size (and so the gate) and the play
+ * radius (and so the outline's target area) — and on nothing else: the planet
+ * keeps its radius, every building keeps its size, and the manifest's bands
+ * stay where they were (`parkManifest.ts` says why: growing them halved the
+ * acceptance rate). Measured, not
  * guessed: at 1 the manifest's bounding discs claimed 25.3% of the park; the
  * Reptile House's (radius 12, 452 m²) is 8.5% more claim, so the area grows
  * 8.5% and the radius √1.085 = 1.0416 — the claimed share stays 25.3%.

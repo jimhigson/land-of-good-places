@@ -9,7 +9,7 @@ import {
 } from './reptileHouse/layout';
 import { parkSeedAsked } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
-import { BUILT_SOLID_MARGIN, CASTLE_PLOT_REACH, PARK_EXTENT_SCALE, SPUR_PAVED_REACH } from '../core/constants';
+import { BUILT_SOLID_MARGIN, CASTLE_PLOT_REACH, PARK_SURFACE_SCALE, SPUR_PAVED_REACH } from '../core/constants';
 import { assertDeterministicMath } from '../core/deterministicMath';
 
 // Every park is built from here, so refuse here: a park generated with the
@@ -473,11 +473,21 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
  * park does — and scaling them would grow the buildings along with the lawn.
  * Only "where does it go" is a proportion; "how big is it" is a fact.
  */
+//
+// **By `PARK_SURFACE_SCALE`, not `PARK_EXTENT_SCALE`: the bands do not grow
+// with `PARK_GROWTH`.** The growth makes room at the rim; it does not push the
+// attractions outward. Scaled with it, every band moved 4% out while the
+// metre-valued relations that tie plots to each other (`near`: castle-hotel
+// 28-42 m, ball pit-castle 24-26.5 m) and the ring round the fountain stayed
+// put, so the two sets of constraints pulled against each other. Measured on
+// #708 (seeds 0-15 x restarts 0-3, real park-attempt, every measure): built
+// parks accepted 16% with grown bands, 33% with bands at this scale — base
+// (#706) 30%.
 export const PARK_MANIFEST: readonly ManifestEntry[] = AUTHORED_MANIFEST.map((entry) => ({
   ...entry,
   band: {
-    min: entry.band.min * PARK_EXTENT_SCALE,
-    max: entry.band.max * PARK_EXTENT_SCALE,
+    min: entry.band.min * PARK_SURFACE_SCALE,
+    max: entry.band.max * PARK_SURFACE_SCALE,
   },
 }));
 
