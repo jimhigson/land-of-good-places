@@ -149,6 +149,17 @@ const TROUGH_REST_MARGIN = 0.02;
 const CHASE_EASE_HALF_LIFE = 0.08;
 
 /**
+ * **The most the chase lens's boom may accelerate, m/s²** — the easing's
+ * guarantee, not its hope. Two easing stages smooth one 0.1 m flick of the
+ * solve, but a bigger jump (several steps at once, when a companion crosses
+ * its near bound) still kinked the lens: 11.0 mm/frame² on seed 5 restart 3
+ * (#708), against `check:pet-slide`'s 10. Capped here, the boom's own second
+ * difference is at most 21.6 m/s² x (1/60 s)² = 6 mm/frame² at 60 Hz on any
+ * park, leaving the rest of the 10 for the rider's own path (3.5 mm worst).
+ */
+const CHASE_MAX_ACCELERATION = 21.6;
+
+/**
  * How long a stretch of her body one underside point stands for, in metres.
  * A tenth of a metre of a 1.3 m child is thirteen or so points along her,
  * which is what `SlideRide.restLift` walks every frame.
@@ -571,6 +582,9 @@ export class Building implements GameSystem {
   /** The first of the two easing stages — see {@link CHASE_EASE_HALF_LIFE}. */
   private chaseBackEasing = Number.NaN;
   private chaseHighEasing = Number.NaN;
+  /** The boom's last velocity, m/s, for {@link CHASE_MAX_ACCELERATION}. */
+  private chaseBackVelocity = 0;
+  private chaseHighVelocity = 0;
   private readonly chaseAim = new Vector3();
   private readonly chasePet = new Vector3();
   /** The body centre the near bound used this frame (#518), and whether it is set. */
@@ -1772,6 +1786,8 @@ export class Building implements GameSystem {
     this.chaseHigh = Number.NaN;
     this.chaseBackEasing = Number.NaN;
     this.chaseHighEasing = Number.NaN;
+    this.chaseBackVelocity = 0;
+    this.chaseHighVelocity = 0;
     // The near bound's counters describe this descent too (#518), and they live
     // on the solver's module rather than here because the solver is where the
     // rejection happens. Same reasoning as the two above: a counter whose doc
@@ -1924,8 +1940,24 @@ export class Building implements GameSystem {
       } else {
         this.chaseBackEasing = damp(this.chaseBackEasing, solved.back, CHASE_EASE_HALF_LIFE, dt);
         this.chaseHighEasing = damp(this.chaseHighEasing, solved.up, CHASE_EASE_HALF_LIFE, dt);
-        this.chaseBack = damp(this.chaseBack, this.chaseBackEasing, CHASE_EASE_HALF_LIFE, dt);
-        this.chaseHigh = damp(this.chaseHigh, this.chaseHighEasing, CHASE_EASE_HALF_LIFE, dt);
+        const back = damp(this.chaseBack, this.chaseBackEasing, CHASE_EASE_HALF_LIFE, dt);
+        const high = damp(this.chaseHigh, this.chaseHighEasing, CHASE_EASE_HALF_LIFE, dt);
+        if (dt > 0) {
+          // The velocity the easing asks for, and how far it may move from the
+          // last one this frame: both axes together, so a diagonal change is
+          // bounded as one vector, not two.
+          const wantBack = (back - this.chaseBack) / dt;
+          const wantHigh = (high - this.chaseHigh) / dt;
+          const dvBack = wantBack - this.chaseBackVelocity;
+          const dvHigh = wantHigh - this.chaseHighVelocity;
+          const dv = Math.hypot(dvBack, dvHigh);
+          const limit = CHASE_MAX_ACCELERATION * dt;
+          const scale = dv > limit ? limit / dv : 1;
+          this.chaseBackVelocity += dvBack * scale;
+          this.chaseHighVelocity += dvHigh * scale;
+          this.chaseBack += this.chaseBackVelocity * dt;
+          this.chaseHigh += this.chaseHighVelocity * dt;
+        }
       }
       this.eyeBoom.position.set(0, this.chaseHigh, this.chaseBack);
 
