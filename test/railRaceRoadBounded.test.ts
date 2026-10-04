@@ -29,15 +29,17 @@ import { describe, expect, it } from 'vitest';
  * old driver's semantics (no per-feature or decision-zero cap) was still
  * solving at 436 s, past vitest's 240 s timeout — which cannot interrupt a
  * synchronous solve, so it had to be killed by hand. With the budget: 21 s,
- * 43 turns, 3 road refusals. Seed 12 restart 2, given explicitly, so no
- * acceptance loop runs: a restart that reaches the road after few organic
- * redraws. (It was restart 3 until the Reptile House joined the park and the
- * park grew, #708: restart 3 then spent `DEFAULT_SOLVE_BUDGET.decisionZero`
- * on the cruiser before the road was ever asked. Restart 2 is the one the
- * accept loop shipped for seed 12, its plan solved in 44 s.)
+ * 43 turns, 3 road refusals. Seed 1 restart 3, given explicitly, so no
+ * acceptance loop runs: a restart that reaches the road with few organic
+ * redraws — the park the accept loop shipped for seed 1, its whole plan
+ * solved in 10 s. (It was seed 12 restart 3 until the Reptile House joined
+ * the park and the park grew, #708: that restart then spent the whole
+ * `DEFAULT_SOLVE_BUDGET.decisionZero` on the cruiser before the road was
+ * asked, and seed 12 restart 2 reached it only after 8 redraws, 377 s on CI
+ * against vitest's 240 s.)
  */
-process.env['LGP_SEED'] = '12';
-process.env['LGP_PARK_RESTART'] = '2';
+process.env['LGP_SEED'] = '1';
+process.env['LGP_PARK_RESTART'] = '3';
 // Through a variable, as the other tests reach Node-only scripts (`test/node-env.d.ts`).
 const HEADLESS_CANVAS = '../scripts/headless-canvas.mjs';
 await import(/* @vite-ignore */ HEADLESS_CANVAS);
