@@ -239,8 +239,31 @@ export const gradientAtParkRadius = (
   radius: number = GROUND_SPHERE_RADIUS,
 ): number => (d >= radius ? Infinity : d / Math.sqrt(radius * radius - d * d));
 
+/**
+ * **How much the park grew to fit the Reptile House — the one owner of it.**
+ * Jim, 3 Oct 2026: the Reptile House goes in the park, *"with the park
+ * enlarged slightly to fit it"*, so the parks are no more crowded than before.
+ *
+ * A linear factor on everything {@link PARK_SURFACE_SCALE} sizes in the park —
+ * the garden's half-size (and so the gate), the play radius (and so the
+ * outline's target area) and every manifest band — and on nothing else: the
+ * planet keeps its radius and every building keeps its size. Measured, not
+ * guessed: at 1 the manifest's bounding discs claimed 25.3% of the park; the
+ * Reptile House's (radius 12, 452 m²) is 8.5% more claim, so the area grows
+ * 8.5% and the radius √1.085 = 1.0416 — the claimed share stays 25.3%.
+ *
+ * Not the area multiplier: growing the area against a gate that stays put is
+ * what `boundary.ts` warns swells the outline, and at 2.17 seed 5 restart 4
+ * found no gentle outline at all (`solveBoundaryRadii` threw). Scaling the gate
+ * with the park is what this constant does instead.
+ */
+export const PARK_GROWTH = 1.0416;
+
+/** Everything in the park that spreads out with it: {@link PARK_SURFACE_SCALE} × {@link PARK_GROWTH}. */
+export const PARK_EXTENT_SCALE = PARK_SURFACE_SCALE * PARK_GROWTH;
+
 /** Half-width of the playable garden, in metres. The garden is square. */
-export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
+export const GARDEN_HALF_SIZE = 62 * PARK_EXTENT_SCALE;
 
 /**
  * Player is pushed back inside this radius from the centre (soft boundary).
@@ -254,7 +277,7 @@ export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
  * the shell has to swell to cover. Scaling both together keeps the gate on the
  * wall rather than stranding it inside a park that grew around it.
  */
-export const GARDEN_PLAY_RADIUS = 58 * PARK_SURFACE_SCALE;
+export const GARDEN_PLAY_RADIUS = 58 * PARK_EXTENT_SCALE;
 
 /**
  * The gradient the cat bus is comfortable on, as rise over run.

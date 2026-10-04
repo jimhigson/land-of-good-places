@@ -183,9 +183,23 @@ export const DEFAULT_SOLVE_BUDGET: SolveBudget = {
   attemptsPerDecision: 256,
   // Worst recorded: 33 unwinds in a whole plan solve, all features together.
   unwindsPerFeature: 64,
-  decisionZeroPerFeature: 16,
-  // No tighter than the layout's own supply: redrawing it is normal (34 on seed 15 restart 0).
-  decisionZero: 256,
+  // Under `decisionZero`, so one feature's quota runs out before the whole solve's does.
+  decisionZeroPerFeature: 6,
+  // **Held to the time a solve is given, not to the layout's supply.** Each
+  // redraw of decision zero re-solves the layout and everything after it:
+  // 14-40 s apiece (seed 10 restart 1: 48 redraws in 1061 s locally; seed 1
+  // restart 1 on #706's base: 51 in 727 s), about twice that on CI. Two clocks
+  // bound a solve, and both broke at 256:
+  //  - `PROBE_TIMEOUT_MS` (1800 s, `parkFiles.mts`): the Parks job died "did
+  //    not finish" instead of refusing the restart (#708: seeds 1, 10, 11);
+  //  - the invariant shards, which re-solve every seed's *accepted* restart in
+  //    process (~3 seeds a shard against a 22m30s watchdog): at 24 the accepted
+  //    restarts' plans ran 720-900 s on six seeds and shards 1-3 ran out of
+  //    clock (#708, run 37163750316).
+  // At 8 a restart that needs more is refused and the accept loop backtracks
+  // to its next one, so what ships is a park that solves in minutes; the
+  // restarts that solve need 4-6.
+  decisionZero: 8,
   unwinds: MAX_UNWINDS,
   // Far above a full park's advances in either phase (a few hundred).
   turns: 200_000,

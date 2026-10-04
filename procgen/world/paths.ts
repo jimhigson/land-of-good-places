@@ -4074,7 +4074,11 @@ export function* pathGraphSearch(): Generator<number, PathGraph, void> {
   const ring: RouteDefinition = { name: 'main-loop', width: MAIN_LOOP_WIDTH, closed: true, points: ringPoints };
 
   const nodes: PathNode[] = [
-    { id: 'gate', kind: 'gate', x: 0, z: 54 },
+    // Where the approach starts — asked of its owner, never typed. This was a
+    // literal 54, a copy of `ENTRANCE_GATE_Z - 6` taken at the authored park
+    // size; when the park grew (PARK_GROWTH) the approach moved to 56.6 and
+    // left the node 2.58 m behind it ("a path to nowhere", seed 5).
+    { id: 'gate', kind: 'gate', x: 0, z: GATE_CORRIDOR_START_Z },
     { id: 'plaza', kind: 'plaza', x: PLAZA.x, z: PLAZA.z },
   ];
   // Solved before the edge table is assembled, because it is the one edge whose

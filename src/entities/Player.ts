@@ -1464,6 +1464,16 @@ export class Player implements GameSystem {
   }
 
   /**
+   * How tall she is right now, hat and all, in metres — the Noodle-o-meter's
+   * reading (`world/reptileHouse/stall.ts`). The same figure the name label
+   * clears, so a hat that reaches above the hair changes the answer and a
+   * low one does not; `model.height` alone is the bare rig and never moves.
+   */
+  get topHeight(): number {
+    return this.labelTopHeight();
+  }
+
+  /**
    * The flower flourish, laid over this frame's finished pose.
    *
    * Four beats, all read off one clock: she bends and reaches down, tugs the

@@ -28,6 +28,8 @@ import { createKid } from '../../src/art/models/kid';
 import { createMini } from '../../src/art/models/mini';
 import { createBalloon } from '../../src/art/models/balloons';
 import { createLollipopTree, createPinkWall, createWoodWall } from '../../src/art/models/props';
+import { createNoodlePlush, createPetSnake } from '../../src/art/models/snake';
+import { createChameleon, createCroc, createFrog, createIguana, createTortoise } from '../../src/art/models/reptiles';
 
 /**
  * The art sample gallery — a soft-lit showroom for the client (Eleri, age 6).
@@ -169,6 +171,15 @@ add('dalmatian', 'Fire Pup', createBalloon('dalmatian'), -3.95, -5.2, 0.6);
 add('corgi', 'Sky Corgi', createBalloon('corgi'), -0.6, -5.2, 0.6);
 add('chicken', 'Chicken-looter', createBalloon('chicken'), 2.75, -5.2, 0.6);
 add('wall', 'Pink wall', createPinkWall({ length: 1, seed: 2 }), 6.9, -5.2, 0, 0.15);
+
+// Third row: the Reptile House's animals, at the size the hall shows them.
+add('petSnake', 'Minty Snake', createPetSnake('mint'), -8.4, -12.5, 0.6);
+add('noodlePlush', 'Noodle Plush', createNoodlePlush(), -5.6, -12.5, 0.6);
+add('croc', 'Snappy', createCroc(1), -2.4, -12.5, 0.6);
+add('tortoise', 'Grandpa Tock', createTortoise(2), 0.9, -12.5, 0.6);
+add('chameleon', 'Cammy', createChameleon(4), 3.6, -12.5, 0.6);
+add('frog', 'Leaf frog', createFrog(5), 5.8, -12.5, 0.6);
+add('iguana', 'Iguana', createIguana(8), 8.2, -12.5, 0.6);
 
 // Kept out of the lineup so the wide shot stays legible, but still viewable on
 // its own with ?only=woodwall.

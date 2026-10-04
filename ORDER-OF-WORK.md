@@ -170,7 +170,7 @@ All of this is **thrown away** if done before 2.2.
 - 5.5 **Interior perimeter wall** in castle style, sliced to the current
   floor and below
 - 5.6 **Interior re-theme** — stone, vaults, arches, chandeliers, banners
-- 5.7 **Snake room** — needs a floor to live in
+- 5.7 **Snake room** — became the Reptile House, its own building (`src/world/reptileHouse/`, 2 Oct 2026); what remains is giving it a plot in the park
 - 5.8 **Novelty shopfronts** — giant ice cream, giant balloon, attendant
   openings. Gated here because a tall shopfront needs more ceiling height
   than the decks currently have.

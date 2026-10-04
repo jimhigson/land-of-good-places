@@ -9,6 +9,7 @@ import { LampPosts } from './LampPosts';
 import { TreeLights } from './TreeLights';
 import { Fireflies } from './Fireflies';
 import { AnchorPlots } from './AnchorPlots';
+import { placedEntry } from './parkLayout';
 import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
@@ -17,6 +18,8 @@ import { FerrisWheelRide } from './ferrisWheel/FerrisWheelRide';
 import { COASTER_PLANS } from './coaster/plan';
 import { RailRace } from './railRace/RailRace';
 import { Hotel } from './hotel/Hotel';
+import { ReptileHouse } from './reptileHouse/ReptileHouse';
+import type { ShopStand } from './building/shops/Shops';
 import { MiniGameStalls } from '../minigames';
 import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
@@ -98,6 +101,8 @@ export class World implements GameSystem {
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly hotel: Hotel;
+  /** The Reptile House (Jim, 2 Oct 2026): snakes behind glass and over walls, one expansive floor. */
+  readonly reptileHouse: ReptileHouse;
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;
@@ -162,6 +167,19 @@ export class World implements GameSystem {
     // and let it replant anything caught underneath, rather than shrinking
     // the zone back down and losing the pin's reachability fix.
     tapZones.push(...this.hotel.interactZones());
+    // The Reptile House: a hall that is its own space, and an exterior that is
+    // just another building in the park — Sunny on her plinth on the
+    // `reptileHouse` plot, her mouth the door. Its solids are owned like the
+    // hotel's, so a measure can ask what a collider is. The night is a closure
+    // for the reason the hotel's clock is: `dayNight` is built further down
+    // this constructor.
+    this.reptileHouse = this.collision.ownedBy('reptile house', () => new ReptileHouse(this.collision, interiorControls, this.building.surfaces, {
+      plot: placedEntry('reptileHouse'),
+      anchorPlots: this.anchorPlots,
+      camera,
+      nightFactor: () => this.dayNight.nightFactor,
+    }));
+    tapZones.push(...this.reptileHouse.interactZones());
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
     // a sprinkler and a rack of very big water guns. The fight itself is a
@@ -453,7 +471,14 @@ export class World implements GameSystem {
     // hundred metres from the park rather than inside the plot the facade
     // stands on. Deliberately **not** one of the park groups above — it is not
     // the park, and {@link setElsewhereVisible} is what hides it.
-    scene.add(...this.parkGroups, this.building.interiorRoot, this.hotel.hotelRoot, this.ferrisWheel.group);
+    scene.add(
+      ...this.parkGroups,
+      this.building.interiorRoot,
+      this.hotel.hotelRoot,
+      this.reptileHouse.hallRoot,
+      this.reptileHouse.forecourtRoot,
+      this.ferrisWheel.group,
+    );
   }
 
   /**
@@ -518,7 +543,16 @@ export class World implements GameSystem {
    * `hotel/lighting.ts` for the hotel.
    */
   private get playerInAnyInterior(): boolean {
-    return this.building.playerInRoofedInterior || this.hotel.playerIsInside;
+    return this.building.playerInRoofedInterior || this.hotel.playerIsInside || this.reptileHouse.playerIsInside;
+  }
+
+  /**
+   * Every shop counter in the game, for `Shopping.openShopById` — the castle's
+   * seven and the Reptile House's stall and nursery. One list, so a chip in
+   * either building finds its panel.
+   */
+  shopStands(): readonly ShopStand[] {
+    return [...this.building.shops.stands, ...this.reptileHouse.stands];
   }
 
   update(context: FrameContext): void {
@@ -555,6 +589,7 @@ export class World implements GameSystem {
     this.anchorPlots.update(context);
     this.building.update(context);
     this.hotel.update(context);
+    this.reptileHouse.update(context);
 
     // The train runs before the children, and it has to: it carries the ones
     // who are aboard by writing their position, and their own movement code —
@@ -615,6 +650,7 @@ export class World implements GameSystem {
     return [
       ...this.building.interactZones(),
       ...this.hotel.interactZones(),
+      ...this.reptileHouse.interactZones(),
       ...this.stalls.interactZones(),
       ...this.facePaintStall.interactZones(),
       ...this.keychainShop.interactZones(),
@@ -651,6 +687,7 @@ export class World implements GameSystem {
   attachPlayer(player: Player): void {
     this.building.attachPlayer(player);
     this.hotel.attachPlayer(player);
+    this.reptileHouse.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
     this.keychainShop.attachPlayer(player);
     this.train.attachPlayer(player);
@@ -676,6 +713,7 @@ export class World implements GameSystem {
   }
 
   dispose(): void {
+    this.reptileHouse.dispose();
     this.fountain.dispose();
     this.fairyLights.dispose();
     this.lampPosts.dispose();

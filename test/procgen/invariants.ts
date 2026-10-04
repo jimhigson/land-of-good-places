@@ -1486,10 +1486,13 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
 
   const doors: { id: string; at: readonly [number, number] | null }[] = [];
   const complaints: string[] = [];
-  // The two doors that open onto the park, each with the mesh that is its front.
+  // The three doors that open onto the park, each with the mesh that is its
+  // front. The Reptile House's door is Sunny's mouth, so its front is the
+  // mouth's pink lining (`rh-mouth`), the lips.
   const bands = [
     { band: facts.world.hotel.towerDoorBand(), front: 'tower-door-glow' },
     { band: castleFrontDoorBand(facts), front: 'entrance-steps' },
+    { band: facts.world.reptileHouse.doorBands()[0] ?? null, front: 'rh-mouth' },
   ];
   let overlapsMeasured = 0;
   for (const { band, front } of bands) {
@@ -1659,7 +1662,7 @@ const UNDER_A_SOLID_TOLERANCE = PAVING_CELL / 2;
  * (`wallsRunAlongsideAPath`), the fountain's rim stands on the plaza, and a
  * lamp may stand at a path's edge; those are counted on every run, not judged.
  */
-const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'booth', 'boundary wall']);
+const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'reptile house', 'booth', 'boundary wall']);
 
 /**
  * **No drawn paving lies under a building, a booth or the boundary wall.**
@@ -11955,7 +11958,8 @@ const tapTargetsKeepTheirDistance: Invariant = (facts) => {
     }
   }
   // …and the walk-through doorways: nothing may eat a tap aimed at a door.
-  const bands = [facts.world.hotel.towerDoorBand(), ...facts.world.building.doorBands()];
+  const reptileFront = facts.world.reptileHouse.doorBands()[0];
+  const bands = [facts.world.hotel.towerDoorBand(), ...facts.world.building.doorBands(), ...(reptileFront ? [reptileFront] : [])];
   for (const zone of zones) {
     for (const band of bands) {
       if (band.ownZoneId === zone.id) continue;

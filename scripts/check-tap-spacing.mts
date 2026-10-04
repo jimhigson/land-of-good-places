@@ -48,6 +48,11 @@ import {
 } from '../src/world/tapSpacing.ts';
 import { zoneVerb, type InteractZone } from '../src/world/interact.ts';
 import { hotelDoorBands, ROOMS } from '../src/world/hotel/layout.ts';
+import { SPACE_REPTILE_HOUSE } from '../src/world/spaces.ts';
+import {
+  REPTILE_HOUSE_ORIGIN_X,
+  REPTILE_HOUSE_ORIGIN_Z,
+} from '../src/world/reptileHouse/layout.ts';
 
 const problems: string[] = [];
 const warnings: string[] = [];
@@ -77,10 +82,23 @@ const outsidePlayer = {
 };
 hotel.attachPlayer(outsidePlayer as never);
 hotel.adoptRestoredPlayer();
+// The Reptile House's exterior is a park building now: its entrance and tail
+// zones are in the park's list, and its front door band shares the park floor.
+const [reptileEntryBand] = world.reptileHouse.doorBands();
+const parkZones = world.interactZones();
+{
+  const ids = parkZones.map((zone) => zone.id);
+  for (const wanted of ['reptile-entrance', 'reptile-tail']) {
+    if (!ids.includes(wanted)) throw new Error(`check:tap-spacing: the park offers no Reptile House '${wanted}' zone`);
+  }
+  if (ids.some((id) => id.startsWith('reptile:'))) {
+    throw new Error(`check:tap-spacing: the park offers the Reptile House hall's zones: ${ids.filter((id) => id.startsWith('reptile:')).join(', ')}`);
+  }
+}
 spaces.push({
   name: 'the park and castle',
-  zones: world.interactZones(),
-  bands: [hotel.towerDoorBand(), ...world.building.doorBands()],
+  zones: parkZones,
+  bands: [hotel.towerDoorBand(), ...world.building.doorBands(), ...(reptileEntryBand ? [reptileEntryBand] : [])],
 });
 
 // The keychain rack's own zoomed picker (#331): six keyrings crowd one small
@@ -110,6 +128,17 @@ for (const room of ROOMS) {
     zones: hotel.interactZones(),
     bands: hotelDoorBands(room),
   });
+}
+
+// The Reptile House's hall, the same way: its zones are gated on where the
+// player is, and it has one door band, the exit.
+{
+  const { reptileHouse } = world;
+  reptileHouse.attachPlayer(outsidePlayer as never);
+  const [, exit] = reptileHouse.doorBands();
+  outsidePlayer.position.set(REPTILE_HOUSE_ORIGIN_X, 0, REPTILE_HOUSE_ORIGIN_Z);
+  reptileHouse.adoptRestoredPlayer();
+  spaces.push({ name: SPACE_REPTILE_HOUSE, zones: reptileHouse.interactZones(), bands: exit ? [exit] : [] });
 }
 
 let pairsChecked = 0;

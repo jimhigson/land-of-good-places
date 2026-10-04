@@ -158,11 +158,17 @@ const EXPECTED_FEATURES = [
   'layout',
   'cruiser',
   'train',
+  // **Siblings: one tier, any order among themselves.** All three depend only
+  // on layout/cruiser/train and on none of each other, and the solver is
+  // round-robin: a sibling refused on its first draws lets the others commit
+  // first. This list once fixed them as slide, crossings, railRaceBars — what
+  // the canonical seed happened to do because railRaceBars was refused for its
+  // first seven draws there — and the next park on which railRaceBars placed
+  // first time (#708, seed 5 restart 1) "committed out of order" with nothing
+  // wrong. Committing ahead of an earlier *tier* is still a foul.
+  'railRaceBars',
   'slide',
   'crossings',
-  // `railRaceBars` decides after `train` but commits its ground (the arch's
-  // feet) here: the registry records commit order, and crossings commit first.
-  'railRaceBars',
   'pathGraph',
   ROAD_FEATURE,
   // world/worldPhase.ts's builders, in order.
@@ -193,13 +199,19 @@ if (strangers.length > 0) {
       'If a later step has added a placer, widen this probe deliberately rather than deleting it',
   );
 }
+/** Features with no ordering among themselves (see the list above): each takes its tier's first index. */
+const SIBLINGS: readonly (readonly string[])[] = [['railRaceBars', 'slide', 'crossings']];
+const tierOf = (feature: string): number => {
+  const group = SIBLINGS.find((siblings) => siblings.includes(feature));
+  return Math.min(...(group ?? [feature]).map((name) => EXPECTED_FEATURES.indexOf(name)));
+};
 let previous = -1;
 const outOfOrder: string[] = [];
 for (const feature of features) {
-  const at = EXPECTED_FEATURES.indexOf(feature);
-  if (at === -1) continue;
+  if (!EXPECTED_FEATURES.includes(feature)) continue;
+  const at = tierOf(feature);
   if (at < previous) outOfOrder.push(feature);
-  previous = at;
+  previous = Math.max(previous, at);
 }
 if (outOfOrder.length > 0) {
   fouls.push(

@@ -48,6 +48,20 @@ export const SECRETS: readonly Secret[] = [
     icon: '🔑',
     done: 'You collected your first keychain!',
   },
+  // The Reptile House's two deeds (`world/reptileHouse/`): every one of its
+  // fifteen exhibits greeted, and all five hiding baby snakes found.
+  {
+    id: 'secret.metTheReptiles',
+    name: 'Reptile friend',
+    icon: '🦎',
+    done: 'You said hi to every animal in the house!',
+  },
+  {
+    id: 'secret.snakeSpotter',
+    name: 'Snake spotter',
+    icon: '🐍',
+    done: 'You found all five hiding baby snakes!',
+  },
 ];
 
 const BY_ID = new Map<string, Secret>(SECRETS.map((secret) => [secret.id, secret]));

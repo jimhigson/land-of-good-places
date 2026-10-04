@@ -1,7 +1,7 @@
 import { Group, Quaternion, Vector3 } from 'three';
 import { clamp, clamp01, TAU, turnTowards } from '../../core/mathUtils';
 import { disposeTree } from '../../art/style/materials';
-import type { AssetHandle, CreatureHandle } from '../../art/style/asset';
+import { hasWalk, type AssetHandle, type CreatureHandle } from '../../art/style/asset';
 import type { Expression } from '../../art/style/faces';
 import { createJetpack, type JetpackHandle } from '../../art/models/jetpack';
 import { KID_HEIGHT } from '../../art/models/kid';
@@ -961,10 +961,6 @@ export class ParadeMember {
 }
 
 // ------------------------------------------------------------------ helpers
-
-function hasWalk(handle: AssetHandle): handle is CreatureHandle {
-  return typeof (handle as Partial<CreatureHandle>).setWalkPhase === 'function';
-}
 
 function hasExpression(handle: AssetHandle): handle is AssetHandle & Expressive {
   return typeof (handle as Partial<Expressive>).setExpression === 'function';

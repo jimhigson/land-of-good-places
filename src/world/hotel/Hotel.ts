@@ -23,7 +23,7 @@ import { mosaicTexture } from '../../core/textures';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
-import type { CreatureHandle } from '../../art/style/asset';
+import { hasWalk, type CreatureHandle } from '../../art/style/asset';
 import type { Player } from '../../entities/Player';
 import type { InteriorControls } from '../building';
 import type { WalkSurfaces, MovingPlatform } from '../building/surfaces';
@@ -80,6 +80,7 @@ import {
 import { petBedFit } from './petBedFit';
 import { createRipikaStatue, type RipikaStatueHandle } from '../../art/models/ripikaStatue';
 import { createPet, PET_KINDS, type PetKind } from '../../art/models/pets';
+import { shopItem } from '../building/shops/catalogue';
 import { createKeeper, type KeeperHandle } from '../../art/models/keeper';
 import { KID_SKIN_TONES } from '../../art/models/kid';
 import { CharacterModel } from '../../entities/CharacterModel';
@@ -2780,7 +2781,7 @@ export class Hotel implements GameSystem {
     const side = chair.facing + Math.PI / 2;
     const petX = chair.x + Math.sin(side) * 1.15;
     const petZ = chair.z + Math.cos(side) * 1.15;
-    const pet = this.feast?.pet ?? createPet(this.paradePetKind());
+    const pet = this.feast?.pet ?? this.feastPet();
     const petBowl = this.feast?.petBowl ?? new Group();
     if (!this.feast) {
       petBowl.add(createPetBowl().root);
@@ -5366,6 +5367,25 @@ export class Hotel implements GameSystem {
    * companion in the catalogue, and hers was always the largest footprint in
    * the table (1.12 m × 1.49 m). So nothing here had to grow to let her in.
    */
+  /**
+   * The pet that eats beside her: **her own companion's model**, built the
+   * way `ParadeMember` builds it (the catalogue item's `model()`), with
+   * {@link paradePetKind} only as the fallback for a child who owns none.
+   * Going through the kind alone seated a bunny for a child whose only pet
+   * was an adopted Reptile House snake — `pet.snakeMint` is a catalogue id
+   * and deliberately not a `PetKind`, exactly as the comment below records
+   * for RiPika — so the feast now asks the item, and the item answers with
+   * whatever walks.
+   */
+  private feastPet(): CreatureHandle {
+    for (const item of gameStore.get().inventory) {
+      if (item.kind !== 'pet' || !item.paradeable || item.stowed) continue;
+      const handle = shopItem(item.id)?.model();
+      if (handle && hasWalk(handle)) return handle;
+    }
+    return createPet(this.paradePetKind());
+  }
+
   private paradePetKind(): PetKind {
     for (const item of gameStore.get().inventory) {
       if (item.kind !== 'pet' || !item.paradeable || item.stowed) continue;
