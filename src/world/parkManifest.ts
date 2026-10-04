@@ -9,7 +9,7 @@ import {
 } from './reptileHouse/layout';
 import { parkSeedAsked } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
-import { CASTLE_PLOT_REACH, PARK_EXTENT_SCALE, SPUR_PAVED_REACH } from '../core/constants';
+import { BUILT_SOLID_MARGIN, CASTLE_PLOT_REACH, PARK_EXTENT_SCALE, SPUR_PAVED_REACH } from '../core/constants';
 import { assertDeterministicMath } from '../core/deterministicMath';
 
 // Every park is built from here, so refuse here: a park generated with the
@@ -298,8 +298,9 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
   // (`reptileHouse/layout.ts`): the doormat stands on the tongue just past the
   // door band, and the paving runs on up the tongue into the mouth to the
   // drawn doorway (plus `DOOR_PAVING_OVERLAP`, as for every door). The doormat
-  // stands a spur's paved half-width past the lips and cheeks — the hotel's
-  // `TOWER_DOORMAT_REACH` rule — so a spur arriving at it from any bearing
+  // stands a spur's paved half-width (plus the router's `BUILT_SOLID_MARGIN`)
+  // past the lips and cheeks — the hotel's `TOWER_DOORMAT_REACH` rule — so a
+  // spur arriving at it from any bearing
   // lays no paving under them (seed 5 restarts 4, 8, 9: 0.14-5.8 m² under a
   // cheek disc, the tail base or a shell chord).
   {
@@ -307,7 +308,7 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     footprint: { kind: 'circle', radius: REPTILE_FOOTPRINT_RADIUS },
     boundingRadius: REPTILE_BOUNDING_RADIUS,
     band: { min: 24, max: 90 },
-    door: { reach: REPTILE_LIPS_REACH + SPUR_PAVED_REACH, pavedTo: REPTILE_DRAWN_DOOR_ALONG },
+    door: { reach: REPTILE_LIPS_REACH + SPUR_PAVED_REACH + BUILT_SOLID_MARGIN, pavedTo: REPTILE_DRAWN_DOOR_ALONG },
     // ALL assets face the camera (Jim, 7 Aug): the mouth, the tongue and the
     // sign all derive from this, exactly as the hotel's door does.
     cameraFacing: true,

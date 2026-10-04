@@ -871,10 +871,5 @@ export function distanceToBuiltSolids(x: number, z: number): number {
 }
 
 
-/**
- * How far a drawn cross-section's sampled points must keep from a built solid:
- * a hand's breadth for what five points across a 0.8 m station cannot see —
- * the kerb's mitre at a corner and the ribbon between stations (seeds 4 and 6,
- * 2 Oct 2026: 0.16–0.20 m of kerb under a booth past a clean screen).
- */
-export const BUILT_SOLID_MARGIN = 0.25;
+/** Owned by `core/constants.ts` (the park manifest places a doormat from it too). */
+export { BUILT_SOLID_MARGIN } from '../core/constants';

@@ -492,6 +492,18 @@ export const SPUR_PAVED_REACH = WIDEST_SPUR_WIDTH / 2 + PATH_KERB_OVERHANG;
 export const DOOR_PAVING_OVERLAP = 1.0;
 
 /**
+ * How far a drawn cross-section's sampled points must keep from a built solid:
+ * a hand's breadth for what five points across a 0.8 m station cannot see —
+ * the kerb's mitre at a corner and the ribbon between stations (seeds 4 and 6,
+ * 2 Oct 2026: 0.16–0.20 m of kerb under a booth past a clean screen). The path
+ * router screens every candidate with it (`paths.ts`), and a doormat placed
+ * from a building's solids leaves it too, or every spur arriving at that
+ * doormat at an angle is refused (#708: the Reptile House's own spur, 0.23 m
+ * clear and refused).
+ */
+export const BUILT_SOLID_MARGIN = 0.25;
+
+/**
  * **The main loop's drawn width — the one owner.**
  *
  * The promenade circling the fountain plaza is paved this wide, so its paving
