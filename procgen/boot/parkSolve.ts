@@ -174,6 +174,13 @@ export interface SolveBudget {
   readonly unwinds: number;
   /** Turns (advances) in all before the attempt fails. */
   readonly turns: number;
+  /**
+   * **Steps in all — every piece any feature's search yields — before the
+   * attempt fails.** The cap on one attempt's work, counted in steps rather
+   * than seconds so it decides the same on every machine (a park is a pure
+   * function of seed and restart; a clock is not).
+   */
+  readonly pieces: number;
   /** The per-feature budgets for named features, where they differ — a test tightens one feature's alone. */
   readonly byFeature?: Readonly<Record<string, Partial<Pick<SolveBudget, 'unwindsPerFeature' | 'decisionZeroPerFeature'>>>>;
 }
@@ -214,6 +221,14 @@ export const DEFAULT_SOLVE_BUDGET: SolveBudget = {
   unwinds: MAX_UNWINDS,
   // Far above a full park's advances in either phase (a few hundred).
   turns: 200_000,
+  // **The ceiling on one attempt's solve, so the Parks job's time is bounded
+  // by construction** (`parks.yml` sizes its blocks on it). Measured over 44
+  // plan solves on #708: 0.4-35 Mpieces for 39 of them, then a tail of 50, 55,
+  // 91, 161 and 186 Mpieces taking 465-1639 s — the 1300-2000 s CI attempts.
+  // At 4-12 us a piece (heavier pieces to 50 us), 40 M is a few hundred
+  // seconds of solve; a restart that needs more is refused and the accept
+  // loop takes the next one, as for any other spent budget.
+  pieces: 40_000_000,
 };
 
 /**
@@ -273,6 +288,8 @@ export interface SolveStats {
    * (`check:park-boot` asserts floors on these, per phase).
    */
   piecesByFeature: Record<string, number>;
+  /** Every piece of every feature, the {@link SolveBudget.pieces} count. */
+  pieces: number;
   /** Wall-clock milliseconds spent inside each feature's `advance`, summed over turns. Headless diagnostics only. */
   msByFeature: Record<string, number>;
   /**
@@ -304,6 +321,7 @@ export class ParkSolve {
     worstAttempt: {},
     turnsByFeature: {},
     piecesByFeature: {},
+    pieces: 0,
     msByFeature: {},
     cpuMsByFeature: {},
   };
@@ -420,6 +438,10 @@ export class ParkSolve {
         break;
       }
       this.stats.piecesByFeature[builder.name] = (this.stats.piecesByFeature[builder.name] ?? 0) + 1;
+      this.stats.pieces += 1;
+      if (this.stats.pieces > this.budget.pieces) {
+        this.exhaust('pieces', `${this.budget.pieces} steps without finishing (${builder.name} searching)`);
+      }
       yield step.value;
     }
     this.stats.msByFeature[builder.name] = (this.stats.msByFeature[builder.name] ?? 0) + (now() - began);
