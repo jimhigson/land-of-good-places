@@ -4861,12 +4861,25 @@ function buildRouteDistanceGraph(edges: readonly PathEdge[]): {
  * itself gives no lead to. */
 function arrivalLead(node: PathNode): readonly [number, number][] {
   const placed = PARK_LAYOUT.entries.get(node.id);
-  if (!placed) return [];
+  if (!placed) {
+    // **A booth with no plot of its own is still a counter with a front** —
+    // the ferris wheel's ticket kiosk. `spur` already arrives head-on along
+    // the way it faces (seed 12, 2 Oct 2026); this did not, so a connector
+    // between the wheel and its own kiosk, 2-8 m apart, reached the kiosk's
+    // stand point obliquely, swung its edge under the kiosk on every drawing
+    // and was dropped — leaving the pair 50-180 m apart by paving, the
+    // commonest single reason a built park was rejected (#708: 60 of 172
+    // rejections were that measure, the wheel/kiosk pair most often).
+    if (node.kind !== 'stall') return [];
+    const placement = (STALL_PLACEMENTS as Readonly<Record<string, { readonly facing: number }>>)[node.id.replace(/^stall\./, '')];
+    if (!placement) return [];
+    return [[node.x + Math.sin(placement.facing) * DOORMAT_LEAD, node.z + Math.cos(placement.facing) * DOORMAT_LEAD]];
+  }
   const outX = node.x - placed.x;
   const outZ = node.z - placed.z;
   const out = Math.hypot(outX, outZ);
   if (out <= 1e-6) return [];
-  return [[node.x + (outX / out) * 3.5, node.z + (outZ / out) * 3.5]];
+  return [[node.x + (outX / out) * DOORMAT_LEAD, node.z + (outZ / out) * DOORMAT_LEAD]];
 }
 
 
