@@ -4,7 +4,7 @@
  * importing `Hotel.ts` and everything it builds. `Hotel.ts` re-exports these;
  * they are defined here and nowhere else.
  */
-import { SPUR_PAVED_REACH } from '../../core/constants';
+import { BUILT_SOLID_MARGIN, SPUR_PAVED_REACH } from '../../core/constants';
 
 /**
  * The tower's collision shell — an octagon of this circumradius, in metres.
@@ -62,4 +62,9 @@ export const TOWER_JAMB_HALF_THICKNESS = 0.35;
  * of kerb under them, `noDrawnPavingUnderASolid`). The paving goes on into
  * the doorway as the door apron, between the jambs.
  */
-export const TOWER_DOORMAT_REACH = TOWER_JAMB_REACH + TOWER_JAMB_HALF_THICKNESS + SPUR_PAVED_REACH;
+//
+// Plus the router's own `BUILT_SOLID_MARGIN`: at exactly a paved reach, every
+// spur arriving at the doormat off-axis came within the margin the router
+// screens with, and the whole layout was redrawn for paving 0.05 m clear of
+// the jambs (#708, seed 14).
+export const TOWER_DOORMAT_REACH = TOWER_JAMB_REACH + TOWER_JAMB_HALF_THICKNESS + SPUR_PAVED_REACH + BUILT_SOLID_MARGIN;
