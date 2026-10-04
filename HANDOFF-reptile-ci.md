@@ -53,3 +53,12 @@ Scratch worktree .claude/worktrees/reptile-exp (detached, NOT for pushing): env 
 - Fixed: router's distanceToBuiltSolids now includes the Reptile House; its doormat leaves BUILT_SOLID_MARGIN (moved to core/constants).
 - Restart counts (CI): before (37168588131) 5,3,10,4,6,1,9,14,18,6,5,4,2,2,26*,3; after 61e94c9d 5,3,10,4,6,1,5,1,3,6,5,4,2,2,>20,7; after b6ff26a2 5,15,10,4,6,1,5,1,3,6,0,4,2,2,running,13. Base (#706): 1,4,2,0,3,0,1,4,0,11,0,1,2,0,0,0.
 - Remaining seed-14 causes: Sky Cruiser misses the castle (layout's, ~30% of redraws, same share on base); spurs grazing their own booth/hotel (pre-existing doormat-at-zero-margin pattern, hotel TOWER_DOORMAT_REACH and booth stand points); measures: rail-racer stall vs its own exit 80+ m apart by paving (detour), lawn notch at the gate approach start (0, 56.58).
+
+## CPU-to-accept round (a23f5b8e..33eb4b0f)
+- Budget trade-off measured (seeds 0,1,2,14,15 x 8/16/32, whole accept loop, main-thread CPU): worst 5429 / 4102 / 4817 s -> decisionZero 16, per-feature 12; table beside the constant in procgen/boot/parkSolve.ts.
+- Cruiser castle misses: ~1/3 of layouts on base and branch alike; no layout predictor (edge distance, neighbours); Reptile House never near the castle. Left alone.
+- Hotel doormat now leaves BUILT_SOLID_MARGIN. Booth stand points left (gameplay distance; hits are corner-cutting, not margin).
+- Top measure rejection (60/172): "disproportionate paved detour" between a ride and its own booth/exit. arrivalLead now gives plotless booths (ferris kiosk) a head-on lead: connector drawn in 2 of 3 measured cases.
+- CI 33eb4b0f (run 37198917576): 13 seeds 12-51 min; 2, 14, 15 cancelled at the 60-min cap (reached restarts 8, 8, 11).
+- Local CPU to accept at 33eb4b0f: 0: 1059 s (r5), 1: 2252 (r11), 2: 2819 (r10), 15: 2464 (r12); 14 still running.
+- Scratch: .claude/worktrees/reptile-exp (detached; LGP_X_DZ/LGP_X_DZF toggles in earlier revisions). Remove when done.
