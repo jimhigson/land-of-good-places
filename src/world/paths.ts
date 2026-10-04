@@ -1,5 +1,11 @@
 import { BUILDING_CENTRE_NUDGE, BUILDING_HALF_X, BUILDING_HALF_Z, BUILDING_WALL_THICKNESS, CASTLE_TURRET_BASE_RADIUS, CASTLE_TURRET_CORNERS, SPUR_PAVED_REACH } from '../core/constants';
 import { TOWER_JAMB_HALF_THICKNESS, TOWER_JAMB_REACH } from './hotel/towerDimensions';
+import {
+  REPTILE_LIPS_REACH,
+  REPTILE_TAIL_BASE_RADIUS,
+  REPTILE_TAIL_BEARING_OFFSET,
+  REPTILE_TAIL_REACH,
+} from './reptileHouse/layout';
 import { BOUNDARY_WALL_COLLISION_HALF, PARK_BOUNDARY } from './boundary';
 import { distanceToBoothBodies } from '../minigames/stallPlacement';
 import { ENTRANCE_GATE_HALF_WIDTH, ENTRANCE_GATE_X } from './entrance/layout';
@@ -834,6 +840,20 @@ export function distanceToBuiltSolids(x: number, z: number): number {
   }
   const hotel = PARK_LAYOUT.entries.get('hotel');
   if (hotel) best = Math.min(best, Math.hypot(x - hotel.x, z - hotel.z) - (TOWER_JAMB_REACH + TOWER_JAMB_HALF_THICKNESS));
+  // The Reptile House: everything solid round the shell and the mouth stands
+  // inside `REPTILE_LIPS_REACH` (held to the mesh at load), and the tail base
+  // stands outside it on its own bearing. Missing from this list, the router
+  // chose routes under the building it could not see and the plan or the
+  // acceptance loop threw the whole layout away for them (#708, seed 14).
+  const reptile = PARK_LAYOUT.entries.get('reptileHouse');
+  if (reptile) {
+    best = Math.min(best, Math.hypot(x - reptile.x, z - reptile.z) - REPTILE_LIPS_REACH);
+    const yaw = Math.atan2(reptile.entranceX - reptile.x, reptile.entranceZ - reptile.z);
+    const bearing = yaw + (REPTILE_TAIL_BEARING_OFFSET * Math.PI) / 180;
+    const tailX = reptile.x + Math.sin(bearing) * REPTILE_TAIL_REACH;
+    const tailZ = reptile.z + Math.cos(bearing) * REPTILE_TAIL_REACH;
+    best = Math.min(best, Math.hypot(x - tailX, z - tailZ) - REPTILE_TAIL_BASE_RADIUS);
+  }
   const castle = PARK_LAYOUT.entries.get('building');
   if (castle) {
     const length = Math.hypot(castle.x, castle.z) || 1;
