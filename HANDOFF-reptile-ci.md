@@ -32,3 +32,10 @@ Place the reptile house as a normal anchor building on every seed 0..15, enlarge
 - footprint 10.5 -> 11.8 to cover the tail base collider (REPTILE_TAIL_BASE_RADIUS 0.6), asserted at load.
 - Seed 5 restart 4 accepted locally after these (att54c).
 - Debug a restart: `LGP_SEED=5 LGP_PARK_RESTART=n node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/park-attempt.mts` prints failures' first lines.
+
+## CI rounds (b3b48120, 5d777c52)
+- Parks: PROBE_TIMEOUT 1800 s killed slow solves (seeds 1/10/11) -> DEFAULT_SOLVE_BUDGET.decisionZero 256 -> 24 -> 8 (per-feature 16 -> 6). All 16 parks passed at 24.
+- Procgen invariant shards 1-3 ran out of their 22m30s watchdog re-solving accepted restarts with 720-900 s plans -> the 8 budget.
+- check:ground-claims shard 7: railRaceBars/slide/crossings are dep-siblings; list now tiers them (proved green + red).
+- railRaceRoadBounded fixture: seed 12 restart 3 -> 2.
+- Avoid pushing while CI's Parks runs: a push cancels it (~45 min per Parks round).
