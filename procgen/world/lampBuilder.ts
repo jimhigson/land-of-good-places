@@ -90,7 +90,6 @@ interface LampSlot {
 
 function lampSlots(): LampSlot[] {
   const slots: LampSlot[] = [];
-  let side = 0;
   for (const route of ROUTES) {
     const curve = routeCurve(route);
     const length = curve.getLength();
@@ -99,8 +98,14 @@ function lampSlots(): LampSlot[] {
     const offset = route.width / 2 + EDGE_GAP;
     for (let i = 0; i < count; i += 1) {
       const t = route.closed ? i / count : (i + 0.5) / count;
-      side += 1;
-      const preferred: 1 | -1 = side % 2 === 0 ? 1 : -1;
+      // **Alternate within the route, not across the park.** This was one
+      // counter over every route, so a lamp's side was its slot's parity in
+      // the whole park: one spur growing a slot flipped every lamp on every
+      // later route, which then met different blockers and moved walls and
+      // fairy poles far from anything that changed (#708: a 2 m bow of
+      // spur-stall.railRacer on seed 12 removed a wall 44.2 m away —
+      // `scatterDecoupling.test.ts`). The same index-locking the trees got.
+      const preferred: 1 | -1 = i % 2 === 0 ? -1 : 1;
       const nudge = (1 / count) * 0.25;
       slots.push({ curve, closed: route.closed, t, preferred, nudge, offset });
     }

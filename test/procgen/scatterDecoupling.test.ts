@@ -232,12 +232,15 @@ describe('scenery scatter is decoupled from the paths', () => {
     // Any supported seed other than the baseline's: the canonical seed became
     // 5 when the pool became 0..15, and a control that builds the baseline's
     // own park again cannot tell two parks apart.
-    const otherSeed = baseline.seed === 2 ? 3 : 2;
-    // Restart 0, explicitly: the control needs *a* different park, not that
+    // Seed 1 restart 3 since #708: the park the accept loop shipped for seed 1,
+    // its plan solved in 10 s. Seed 2 restart 0 (or 3) now spends the whole
+    // decision-zero budget first — 518 s on CI, over the 240 s timeout.
+    const otherSeed = baseline.seed === 1 ? 2 : 1;
+    // An explicit restart: the control needs *a* different park, not that
     // seed's accepted one, and leaving the restart unset made the resolver run
     // the whole acceptance loop for it (442 s on #705's CI, over the 240 s
     // timeout), measuring nothing this test asks about.
-    const other = buildDigest({ LGP_SEED: String(otherSeed), LGP_PARK_RESTART: '0' });
+    const other = buildDigest({ LGP_SEED: String(otherSeed), LGP_PARK_RESTART: otherSeed === 1 ? '3' : '0' });
     expect(other.seed).toBe(otherSeed);
     expect(other.all).not.toBe(baseline.all);
     expect(other.trees.digest).not.toBe(baseline.trees.digest);
