@@ -184,22 +184,33 @@ export const DEFAULT_SOLVE_BUDGET: SolveBudget = {
   // Worst recorded: 33 unwinds in a whole plan solve, all features together.
   unwindsPerFeature: 64,
   // Under `decisionZero`, so one feature's quota runs out before the whole solve's does.
-  decisionZeroPerFeature: 6,
-  // **Held to the time a solve is given, not to the layout's supply.** Each
-  // redraw of decision zero re-solves the layout and everything after it:
-  // 14-40 s apiece (seed 10 restart 1: 48 redraws in 1061 s locally; seed 1
-  // restart 1 on #706's base: 51 in 727 s), about twice that on CI. Two clocks
-  // bound a solve, and both broke at 256:
-  //  - `PROBE_TIMEOUT_MS` (1800 s, `parkFiles.mts`): the Parks job died "did
-  //    not finish" instead of refusing the restart (#708: seeds 1, 10, 11);
-  //  - the invariant shards, which re-solve every seed's *accepted* restart in
-  //    process (~3 seeds a shard against a 22m30s watchdog): at 24 the accepted
-  //    restarts' plans ran 720-900 s on six seeds and shards 1-3 ran out of
-  //    clock (#708, run 37163750316).
-  // At 8 a restart that needs more is refused and the accept loop backtracks
-  // to its next one, so what ships is a park that solves in minutes; the
-  // restarts that solve need 4-6.
-  decisionZero: 8,
+  decisionZeroPerFeature: 12,
+  // **Chosen by CPU time to an accepted park, measured — not by restart
+  // count.** Each redraw of decision zero re-solves the layout and everything
+  // after it (cruiser 30%, railRaceBars 30%, train 24%, paths 12% of plan CPU
+  // over 29 solves), so the budget trades long solves against thrown-away
+  // ones: too low and a solve a few redraws from an acceptable park is
+  // discarded (seed 14 restart 9 needs more than 8 and is the one accepted),
+  // too high and solves that the measures will reject anyway run on.
+  //
+  // Measured on #708 at a23f5b8e: the whole accept loop per seed, main-thread
+  // CPU seconds to acceptance (per-feature quota 3/4 of the total; measures
+  // run in child processes are not in these figures, so built attempts are
+  // given too — they are what the measures cost):
+  //
+  //   seed  dz8: restart  cpu-s  built  dz16: restart  cpu-s  built  dz32: restart  cpu-s  built
+  //   0              5    1385     6            5    1386     6            5    1383     6
+  //   1             15    3062    10           15    4102    13           15    4680    16
+  //   2             10    2453     6           10    3474     8           10    4360     9
+  //   14            25    5429    11            9    3971     7            9    4817     8
+  //   15            13    2317     9           12    3132    10            0     831     1
+  //   worst              5429 (14)                  4102 (1)                    4817 (14)
+  //
+  // 16 has the lowest worst seed. Earlier history: 256 let one solve outrun
+  // `PROBE_TIMEOUT_MS` (1800 s) and the Parks job died "did not finish"
+  // (seeds 1, 10, 11); 24 had the invariant shards, which re-solve each
+  // accepted restart, run out of their watchdog; 8 cost seed 14 26 restarts.
+  decisionZero: 16,
   unwinds: MAX_UNWINDS,
   // Far above a full park's advances in either phase (a few hundred).
   turns: 200_000,
