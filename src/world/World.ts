@@ -9,6 +9,7 @@ import { LampPosts } from './LampPosts';
 import { TreeLights } from './TreeLights';
 import { Fireflies } from './Fireflies';
 import { AnchorPlots } from './AnchorPlots';
+import { placedEntry } from './parkLayout';
 import { DayNight } from './DayNight';
 import { Building, type InteriorControls } from './building';
 import { ParkTrain } from './train';
@@ -17,6 +18,8 @@ import { FerrisWheelRide } from './ferrisWheel/FerrisWheelRide';
 import { COASTER_PLANS } from './coaster/plan';
 import { RailRace } from './railRace/RailRace';
 import { Hotel } from './hotel/Hotel';
+import { ReptileHouse } from './reptileHouse/ReptileHouse';
+import type { ShopStand } from './building/shops/Shops';
 import { MiniGameStalls } from '../minigames';
 import { dressWaterFightPlot } from '../minigames/waterFight/plot';
 import { buildDodgemsPlot, type DodgemsPlot } from '../minigames/dodgems/plot';
@@ -38,8 +41,9 @@ import { ARRIVAL_KID_COUNT } from './entrance/ArrivalSequence';
 import { terrainHeight } from './terrain';
 import { bridgeHeightAt, bridgePavingHeightAt } from './train/bridges';
 import { drapePathsOverBridges } from './pathGraph';
-import { GroundClaims } from '../boot/groundClaims';
-import { takePrewarmedGroundClaims } from '../boot/groundClaimsPrewarm';
+import type { GroundClaims } from '../boot/groundClaims';
+import { worldPlanClaims } from './parkPlan';
+import { decideWorldPhase } from './worldPhase';
 import { ROAD_FEATURE, entranceRoadClaims } from './entrance/roadCorridor';
 
 export interface WorldOptions {
@@ -80,9 +84,11 @@ export class World implements GameSystem {
    * Nothing pre-warms in Node, so a headless park (the harness, `check:park`,
    * `test:procgen`) gets a fresh registry and fills it from its own builders.
    * That is the honest result either way: the registry describes the park in
-   * this `World`, never a previous one.
+   * this `World`, never a previous one — and a second `World` in the same
+   * process gets its own copy of the plan's registry, never the first one's
+   * (`worldPlanClaims`).
    */
-  readonly groundClaims: GroundClaims = takePrewarmedGroundClaims() ?? new GroundClaims();
+  readonly groundClaims: GroundClaims = worldPlanClaims();
 
   readonly garden: Garden;
   readonly scenery: Scenery;
@@ -95,6 +101,8 @@ export class World implements GameSystem {
   readonly anchorPlots: AnchorPlots;
   readonly building: Building;
   readonly hotel: Hotel;
+  /** The Reptile House (Jim, 2 Oct 2026): snakes behind glass and over walls, one expansive floor. */
+  readonly reptileHouse: ReptileHouse;
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;
@@ -121,24 +129,18 @@ export class World implements GameSystem {
     options: WorldOptions = {},
   ) {
     this.garden = new Garden(this.collision);
-    this.scenery = new Scenery(this.collision);
-    // Living, pickable flowers — no collision (you walk straight through
-    // them, same as the old decorative scatter), so it needs nothing from
-    // the world to be built.
-    this.flowers = new Flowers(this.collision);
-    this.fountain = new Fountain(this.collision, PLAZA.x, PLAZA.z);
-    this.fairyLights = new FairyLights(this.collision);
-    // Lamp posts along the paths — the family's "night is too dark" feedback.
-    // Built after FairyLights (which rings the fountain plaza) and before
-    // AnchorPlots so it only needs the static ANCHORS list, not the built
-    // plots themselves, to keep its lamps out of the reserved ride footprints.
-    this.lampPosts = new LampPosts(this.collision);
+    // The scenery, fountain, fairy lights and lamp posts are decided by the
+    // world phase below, after every fixed structure has registered its
+    // colliders, and drawn from those decisions; the flowers come after them.
+    // Tap zones the flowers must keep clear of are collected meanwhile.
+    const tapZones: { x: number; z: number; pickRadius: number }[] = [];
     // Drifting sparks over the lawn after dark. Depends on nothing but the
     // terrain and the reserved plots it keeps out of.
     this.fireflies = new Fireflies();
     this.anchorPlots = new AnchorPlots(this.collision);
     // Built into the reserved plots, so it must come after AnchorPlots.
-    this.building = new Building(this.collision, this.anchorPlots, interiorControls, camera);
+    // Owned, so a measure can ask what a solid is (`CollisionWorld.ownedBy`).
+    this.building = this.collision.ownedBy('castle', () => new Building(this.collision, this.anchorPlots, interiorControls, camera));
     // The Land Hotel (issue #236): a crystal tower near the castle whose door
     // leads to rooms that are each their own space. Shares the building's
     // WalkSurfaces sampler — its floor plates and mattress tops are ordinary
@@ -146,13 +148,13 @@ export class World implements GameSystem {
     // The camera sizes the receptionist's speech bubble on screen; the clock is
     // read as a closure because `dayNight` is built further down this
     // constructor and a time read eagerly here would be dawn for ever.
-    this.hotel = new Hotel(
+    this.hotel = this.collision.ownedBy('hotel', () => new Hotel(
       this.collision,
       this.anchorPlots,
       interiorControls,
       this.building.surfaces,
       { camera, clock: () => this.dayNight.timeOfDay },
-    );
+    ));
     // The hotel's exterior tap target (`hotel-entrance`) reaches out from the
     // tower's true centre as far as the map pin at `entranceX`/`entranceZ` —
     // deliberately wide, per `Hotel.exteriorEntranceZone`'s own doc comment,
@@ -164,7 +166,20 @@ export class World implements GameSystem {
     // stations and the welcome sign (#303): tell the meadow after the fact
     // and let it replant anything caught underneath, rather than shrinking
     // the zone back down and losing the pin's reachability fix.
-    this.flowers.keepClearOfTapZones(this.hotel.interactZones());
+    tapZones.push(...this.hotel.interactZones());
+    // The Reptile House: a hall that is its own space, and an exterior that is
+    // just another building in the park — Sunny on her plinth on the
+    // `reptileHouse` plot, her mouth the door. Its solids are owned like the
+    // hotel's, so a measure can ask what a collider is. The night is a closure
+    // for the reason the hotel's clock is: `dayNight` is built further down
+    // this constructor.
+    this.reptileHouse = this.collision.ownedBy('reptile house', () => new ReptileHouse(this.collision, interiorControls, this.building.surfaces, {
+      plot: placedEntry('reptileHouse'),
+      anchorPlots: this.anchorPlots,
+      camera,
+      nightFactor: () => this.dayNight.nightFactor,
+    }));
+    tapZones.push(...this.reptileHouse.interactZones());
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
     // a sprinkler and a rack of very big water guns. The fight itself is a
@@ -181,10 +196,13 @@ export class World implements GameSystem {
     // world, so a tree planted across the park edge bends the track rather than
     // growing through it (see `train/route.ts`). Built before the NPCs, so the
     // waypoint graph is validated against its station posts too.
+    // No tree exists yet when the railway builds — the world phase plants
+    // them afterwards, against the bridges' footprints — so there is nothing
+    // to fell and nothing fellable.
     this.train = new ParkTrain(
       this.collision,
-      (x, z, radius) => this.scenery.clearTreesNear(x, z, radius),
-      (x, z, radius) => this.scenery.hasFellableTreeNear(x, z, radius),
+      () => 0,
+      () => false,
     );
     // The path goes up and over each bridge, rather than a bridge growing its
     // own separate floor (Jim, 2026-08-24) — and rather than the ground ribbon
@@ -199,7 +217,7 @@ export class World implements GameSystem {
     // …and they are tap targets, which the meadow — planted before the loop
     // was solved — must keep its pickable blooms out of (the tap-spacing
     // rule, `world/tapSpacing.ts`). Any flower already inside is replanted.
-    this.flowers.keepClearOfTapZones(this.train.stationTapAreas());
+    tapZones.push(...this.train.stationTapAreas());
 
     // Two rollercoasters (family ruling, 28 July): the Sky Cruiser, a
     // serene first-person ride, and the Rail Race, third person with
@@ -219,7 +237,7 @@ export class World implements GameSystem {
     this.coaster = new Coaster(this.collision, this.train, {
       plan: COASTER_PLANS.cruiser,
       camera: 'firstPerson',
-      clearTreesNear: (x, z, radius) => this.scenery.clearTreesNear(x, z, radius),
+      clearTreesNear: () => 0,
     });
 
     // Garlands of lights strung tree to tree. Nothing about them is authored:
@@ -229,13 +247,10 @@ export class World implements GameSystem {
     // puts it here — it needs the train's route, and the train does not have
     // one until it has solved for it against the finished collision world.
     // It registers no collision itself; the wires hang overhead.
-    this.treeLights = new TreeLights(this.scenery.foliageOccluders, this.train.route);
+    // (Constructed after the world phase below, which plants the trees.)
 
-    // The Rail Race is no longer a coaster at all (reform of 31 July 2026): it
-    // is four parallel rails round the park's rim, raced side-on with the park
-    // itself as the backdrop. Its own module owns the route, the physics, the
-    // geometry and the camera — see `railRace/RailRace.ts`.
-    this.railRace = new RailRace(this.collision);
+    // The Rail Race used to be built here. It is built below, after the
+    // entrance — see the note there.
 
     // The dodgems, standing in their own anchor plot: bumper wall, fairy lights
     // and the fake wooden tree, visible from right across the garden. Built
@@ -306,13 +321,69 @@ export class World implements GameSystem {
     // What it buys is that the registry a built park carries describes the
     // road that was actually drawn, rather than a snapshot taken before the
     // paths existed.
+    // The road as the Entrance actually drew it replaces the plan's `road`
+    // decision in the registry (`parkPlan.ts` committed the same corridor at
+    // plan time for the plan's own askers); `test/procgen`'s
+    // theRoadClaimIsTheRoadItDrew holds the registry to the drawn road.
     this.groundClaims.commit(ROAD_FEATURE, { claims: entranceRoadClaims() });
     // The welcome sign's spot is chosen dynamically against the *solved*
     // train route (see above), which the meadow — planted long before this
     // line — could not have known about either. Same pattern as the train's
     // own stations just above: tell the meadow after the fact and let it
     // replant anything that landed underneath.
-    this.flowers.keepClearOfTapZones(this.entrance.interactZones());
+    tapZones.push(...this.entrance.interactZones());
+
+    // The Rail Race is no longer a coaster at all (reform of 31 July 2026): it
+    // is four parallel rails round the park's rim, raced side-on with the park
+    // itself as the backdrop. Its own module owns the route, the physics, the
+    // geometry and the camera — see `railRace/RailRace.ts`.
+    //
+    // **Built after the road's realised claim, on purpose** (stage 3, step 2).
+    // Its trestle legs are claims asked of `groundClaims`, and the road's
+    // corridor is the thing they most need to see. It was built above, before
+    // the entrance, until step 2 — but a headless park (the harness behind
+    // every check and invariant) takes no registry from the generator, so at
+    // that point its registry held nothing and the legs would have stood in a
+    // road the played park's legs avoid: two different parks, one of them the
+    // one every instrument measures. Here, in both the played and the headless
+    // park, the registry holds the road exactly as drawn — the spur trimmed to
+    // the plaza's paving — so the legs answer to the same road in both. The
+    // brief's alternative was to prove the spur's 3.9 m end move reaches no
+    // foot; this makes the question moot instead.
+    //
+    // Still before the NPCs, for the reason everything above is: the walk-past
+    // ring registers its posts with `this.collision`, and the waypoint graph is
+    // validated against the finished collision world.
+    // **The world phase** (`worldPhase.ts`): the stalls, the fountain, walls,
+    // trees, bushes, fairy-light poles, lamp posts and the rail race's
+    // trestles each decide through the one driver against the registry — now
+    // that every fixed structure has registered its colliders — and are then
+    // drawn.
+    //
+    // The stalls are the exception to "and are then drawn": their booths were
+    // built above, before the railway had a route to solve against them, so
+    // the phase is handed a way to *move* one instead. Six of the eight are a
+    // single rigid group and four wall colliders, and `MiniGameStalls`
+    // relocates both together. The face-paint and keychain booths answer
+    // `null` — they do not move — and `stallsFeature.ts` turns that into an
+    // ordinary refusal, so the feature that wanted the space is forgone
+    // exactly as it is today rather than anything being left inconsistent.
+    const phase = decideWorldPhase(
+      this.collision,
+      this.groundClaims,
+      this.coaster.route,
+      (id) => this.stalls.boothPlacement(id),
+    );
+    this.scenery = new Scenery(this.collision, phase.scenery);
+    this.fountain = new Fountain(this.collision, PLAZA.x, PLAZA.z);
+    this.fairyLights = new FairyLights(this.collision, phase.fairyPoles);
+    this.lampPosts = new LampPosts(this.collision, phase.lamps);
+    this.railRace = phase.railRace;
+    // Living, pickable flowers — no collision, and they re-seat themselves
+    // against the finished park below, so they come after everything solid.
+    this.flowers = new Flowers(this.collision);
+    this.flowers.keepClearOfTapZones(tapZones);
+    this.treeLights = new TreeLights(this.scenery.foliageOccluders, this.train.route);
 
     // The other children in the park. Built last, because the waypoint graph
     // they wander is validated against the finished collision world — every
@@ -400,7 +471,14 @@ export class World implements GameSystem {
     // hundred metres from the park rather than inside the plot the facade
     // stands on. Deliberately **not** one of the park groups above — it is not
     // the park, and {@link setElsewhereVisible} is what hides it.
-    scene.add(...this.parkGroups, this.building.interiorRoot, this.hotel.hotelRoot, this.ferrisWheel.group);
+    scene.add(
+      ...this.parkGroups,
+      this.building.interiorRoot,
+      this.hotel.hotelRoot,
+      this.reptileHouse.hallRoot,
+      this.reptileHouse.forecourtRoot,
+      this.ferrisWheel.group,
+    );
   }
 
   /**
@@ -465,7 +543,16 @@ export class World implements GameSystem {
    * `hotel/lighting.ts` for the hotel.
    */
   private get playerInAnyInterior(): boolean {
-    return this.building.playerInRoofedInterior || this.hotel.playerIsInside;
+    return this.building.playerInRoofedInterior || this.hotel.playerIsInside || this.reptileHouse.playerIsInside;
+  }
+
+  /**
+   * Every shop counter in the game, for `Shopping.openShopById` — the castle's
+   * seven and the Reptile House's stall and nursery. One list, so a chip in
+   * either building finds its panel.
+   */
+  shopStands(): readonly ShopStand[] {
+    return [...this.building.shops.stands, ...this.reptileHouse.stands];
   }
 
   update(context: FrameContext): void {
@@ -502,6 +589,7 @@ export class World implements GameSystem {
     this.anchorPlots.update(context);
     this.building.update(context);
     this.hotel.update(context);
+    this.reptileHouse.update(context);
 
     // The train runs before the children, and it has to: it carries the ones
     // who are aboard by writing their position, and their own movement code —
@@ -562,6 +650,7 @@ export class World implements GameSystem {
     return [
       ...this.building.interactZones(),
       ...this.hotel.interactZones(),
+      ...this.reptileHouse.interactZones(),
       ...this.stalls.interactZones(),
       ...this.facePaintStall.interactZones(),
       ...this.keychainShop.interactZones(),
@@ -598,6 +687,7 @@ export class World implements GameSystem {
   attachPlayer(player: Player): void {
     this.building.attachPlayer(player);
     this.hotel.attachPlayer(player);
+    this.reptileHouse.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
     this.keychainShop.attachPlayer(player);
     this.train.attachPlayer(player);
@@ -623,6 +713,7 @@ export class World implements GameSystem {
   }
 
   dispose(): void {
+    this.reptileHouse.dispose();
     this.fountain.dispose();
     this.fairyLights.dispose();
     this.lampPosts.dispose();

@@ -18,7 +18,7 @@ import {
 import type { ShopUnits } from '../ShopUnits';
 import { buildKiosk } from './kiosk';
 import { buildFitout, type Fitout } from './fitouts';
-import { rainbowFlossAvailable, type ShopId } from './catalogue';
+import { rainbowFlossAvailable, type ShopId, type ShopItem } from './catalogue';
 
 /**
  * The seven fitted-out shops.
@@ -66,7 +66,12 @@ export const SHOP_REACH = 2.2 * SHOP_SCALE_XZ;
 const KEEPER_LIFT = 0.1;
 
 export interface ShopStand {
-  readonly id: ShopId;
+  /**
+   * Any shop the catalogue sells for — the castle's seven `ShopId`s here, and
+   * the Reptile House's two stands (`reptileHouse/stall.ts`), which
+   * `World.shopStands()` pools with these for `Shopping.openShopById`.
+   */
+  readonly id: ShopItem['shopId'];
   readonly title: string;
   /** The shop's emoji, from `SHOP_UNITS` — the same one on its name board. */
   readonly glyph: string;

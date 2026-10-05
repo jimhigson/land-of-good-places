@@ -341,6 +341,16 @@ interface Contribution {
   readonly demands: readonly Demand[];
   /** Commit order, so refusals are reported deterministically. */
   readonly order: number;
+  /**
+   * The feature's contribution is the concatenation of its **sections**, in
+   * section order — one per increment the feature builder placed — so a
+   * backtrack can withdraw exactly the increment it is undoing (a claim must
+   * be unwindable to the decision that caused it). A whole-feature `commit`
+   * is section 0 alone.
+   */
+  readonly sections: ReadonlyMap<number, FeatureContribution>;
+  /** Which section each entry of `claims` came from, so a blocker can be named by increment. */
+  readonly claimSections: readonly number[];
 }
 
 /** What a feature publishes when it commits: its claims, and optionally the
@@ -360,14 +370,105 @@ export class GroundClaims {
   private readonly contributions = new Map<string, Contribution>();
   private commitClock = 0;
 
+  /**
+   * A registry holding exactly what this one holds now, which later commits to
+   * either never reach. Each contribution is replaced on every commit, never
+   * mutated, so the copy may share them; the map and the clock are its own.
+   */
+  copy(): GroundClaims {
+    const twin = new GroundClaims();
+    for (const [feature, contribution] of this.contributions) twin.contributions.set(feature, contribution);
+    twin.commitClock = this.commitClock;
+    return twin;
+  }
+
   commit(feature: string, contribution: FeatureContribution): void {
+    this.setSections(feature, new Map([[0, contribution]]));
+  }
+
+  /** Commit (or replace) one section of a feature's contribution — one increment's claims. */
+  commitSection(feature: string, section: number, contribution: FeatureContribution): void {
+    const sections = new Map(this.contributions.get(feature)?.sections ?? []);
+    sections.set(section, contribution);
+    this.setSections(feature, sections);
+  }
+
+  /** Withdraw one section; the feature's other increments stay committed. */
+  withdrawSection(feature: string, section: number): void {
+    const existing = this.contributions.get(feature);
+    if (!existing) return;
+    const sections = new Map(existing.sections);
+    sections.delete(section);
+    if (sections.size === 0) {
+      this.contributions.delete(feature);
+      return;
+    }
+    this.setSections(feature, sections);
+  }
+
+  /** The section (increment) that committed claim `index` of `feature`, or -1. */
+  sectionOfClaim(feature: string, index: number): number {
+    return this.contributions.get(feature)?.claimSections[index] ?? -1;
+  }
+
+  /** The sections `feature` has committed, ascending. */
+  sectionsOf(feature: string): number[] {
+    return [...(this.contributions.get(feature)?.sections.keys() ?? [])].sort((a, b) => a - b);
+  }
+
+  /**
+   * Which of `feature`'s claims (by index) refuse `claim` — what a builder
+   * asked to accommodate needs to know: which of its own increments is in the
+   * way.
+   */
+  refusingClaimIndices(asker: string, feature: string, claim: Claim): number[] {
+    const contribution = this.contributions.get(feature);
+    if (!contribution) return [];
+    const out: number[] = [];
+    const [minX, minZ, maxX, maxZ] = bounds(claim.shape);
+    for (let i = 0; i < contribution.claims.length; i += 1) {
+      const other = contribution.claims[i] as Claim;
+      const rule = CLAIM_COMPATIBILITY[claim.kind][other.kind];
+      if (rule === true) continue;
+      const [oMinX, oMinZ, oMaxX, oMaxZ] = contribution.claimBounds[i] as readonly [
+        number,
+        number,
+        number,
+        number,
+      ];
+      if (oMinX > maxX || oMaxX < minX || oMinZ > maxZ || oMaxZ < minZ) continue;
+      if (!shapesOverlap(claim.shape, other.shape)) continue;
+      if (rule === 'crossing' && this.overlapInsideDeclaredCrossing(asker, feature, claim.shape, other.shape)) {
+        continue;
+      }
+      out.push(i);
+    }
+    return out;
+  }
+
+  private setSections(feature: string, sections: Map<number, FeatureContribution>): void {
     const order = this.contributions.get(feature)?.order ?? this.commitClock++;
+    const claims: Claim[] = [];
+    const claimSections: number[] = [];
+    const crossings: Crossing[] = [];
+    const demands: Demand[] = [];
+    for (const section of [...sections.keys()].sort((a, b) => a - b)) {
+      const contribution = sections.get(section) as FeatureContribution;
+      for (const claim of contribution.claims) {
+        claims.push(claim);
+        claimSections.push(section);
+      }
+      crossings.push(...(contribution.crossings ?? []));
+      demands.push(...(contribution.demands ?? []));
+    }
     this.contributions.set(feature, {
-      claims: contribution.claims,
-      claimBounds: contribution.claims.map((c) => bounds(c.shape)),
-      crossings: contribution.crossings ?? [],
-      demands: contribution.demands ?? [],
+      claims,
+      claimBounds: claims.map((c) => bounds(c.shape)),
+      crossings,
+      demands,
       order,
+      sections,
+      claimSections,
     });
   }
 
@@ -378,6 +479,22 @@ export class GroundClaims {
 
   has(feature: string): boolean {
     return this.contributions.has(feature);
+  }
+
+  /**
+   * Every section a feature has committed, in section order — what a prebuilt
+   * park records so that it can commit exactly the same contributions again
+   * (`world/prebuilt/parkFile.ts`).
+   */
+  contributionsOf(feature: string): readonly (readonly [number, FeatureContribution])[] {
+    const sections = this.contributions.get(feature)?.sections;
+    if (!sections) return [];
+    return [...sections.entries()].sort((a, b) => a[0] - b[0]);
+  }
+
+  /** Committed features in the order they first committed — the order `blockers` ranks by. */
+  featuresInCommitOrder(): string[] {
+    return [...this.contributions.entries()].sort((a, b) => a[1].order - b[1].order).map(([name]) => name);
   }
 
   committedFeatures(): string[] {

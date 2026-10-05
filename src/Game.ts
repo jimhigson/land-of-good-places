@@ -51,7 +51,8 @@ import { SaveSystem } from './SaveSystem';
 import { gameStore, type CharacterCreationChoice } from './state';
 import { shopItem } from './world/building/shops/catalogue';
 import type { SavedPlace } from './state/save';
-import { localToWorld, SPACE_GARDEN } from './world/spaces';
+import { SPACE_GARDEN } from './world/spaces';
+import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
 import { attractionOwnsTheScreen } from './core/attraction';
 
@@ -258,6 +259,8 @@ export class Game {
     // A save written inside the hotel restores into its room, not the plaza:
     // rooms are true spaces, so being there is a position plus this adoption.
     this.world.hotel.adoptRestoredPlayer();
+    // …and the Reptile House's hall and forecourt, for the same reason.
+    this.world.reptileHouse.adoptRestoredPlayer();
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -449,6 +452,12 @@ export class Game {
         // anyway (see `Player.riding`).
         if (this.treeClimbing.playerClimbing) {
           this.treeClimbing.requestDescend();
+          return;
+        }
+        // On the tortoise, likewise: a tap anywhere means "hop off" (Jim,
+        // 2 October 2026 — jumping or trying to walk anywhere gets her off).
+        if (this.world.reptileHouse.playerOnTortoise) {
+          this.world.reptileHouse.dismountTortoise();
           return;
         }
         if (this.parade.handleTap(point)) return;
@@ -983,6 +992,13 @@ export class Game {
       // Not a ride either: the guest suite, for its own deep link — see
       // `Hotel.requestEnterSuite`.
       if (stallId === 'hotelSuite') return this.world.hotel.requestEnterSuite();
+      // Not a ride either: the Reptile House's front door from outside
+      // (`/reptile-house-door`) — on the forecourt while the park has no plot
+      // for the building. The hall itself (`/reptile-house`) is its own
+      // `DeepLink` kind, `enterReptileSpawn`, never a stall id.
+      if (stallId === 'reptileHouseDoor') return this.world.reptileHouse.requestEnterDoor();
+      // The Tortoise Ride (`/tortoise-ride`): into the hall and onto the shell.
+      if (stallId === 'reptileTortoiseRide') return this.world.reptileHouse.requestTortoiseRide();
       return false;
     };
 
@@ -1527,6 +1543,16 @@ export class Game {
     return this.world.building.enterCastleSpawn(deck, at);
   }
 
+  /**
+   * `/reptile-house?at=x,z&facing=deg` — inside the Reptile House's hall, on
+   * that hall-local spot, on the first frame. Same shape as
+   * {@link enterCastleSpawn}: being inside is a space, so only the building
+   * can put her in one.
+   */
+  enterReptileSpawn(at?: { readonly x: number; readonly z: number; readonly facing?: number }): boolean {
+    return this.world.reptileHouse.requestEnter(at);
+  }
+
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -2000,7 +2026,15 @@ function resolveSpawn(place: SavedPlace | undefined): Vector3 {
   // own origins, so "being there" is a position plus one adoption call
   // (`Hotel.adoptRestoredPlayer`), unlike the castle's stacked decks, whose
   // restore stays deliberately deferred to Decision 3 (see below).
-  if (place.space !== SPACE_GARDEN && !place.space.startsWith('hotel.')) return DEFAULT_SPAWN;
+  // …and so does the Reptile House (`ReptileHouse.adoptRestoredPlayer`), hall
+  // and forecourt alike — `spaces.ts` names both with the `reptileHouse` stem.
+  if (
+    place.space !== SPACE_GARDEN &&
+    !place.space.startsWith('hotel.') &&
+    !place.space.startsWith('reptileHouse')
+  ) {
+    return DEFAULT_SPAWN;
+  }
   const world = localToWorld(place.space, place.x, place.y, place.z);
   if (!world) return DEFAULT_SPAWN;
   return new Vector3(world.x, world.y, world.z);

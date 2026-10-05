@@ -29,7 +29,7 @@ import {
   createSurpriseEgg,
 } from '../../../art/models/shopItems';
 import { COUNTER_TOP_Y, SHELF_Z } from './kiosk';
-import { petKindsForShop, type ShopId } from './catalogue';
+import { itemsForShop, petKindsForShop, type ShopId } from './catalogue';
 
 /**
  * What each of the seven shops actually *sells*, standing on its shelves.
@@ -303,8 +303,15 @@ function iceCreamShop(): Fitout {
 function hatShop(): Fitout {
   const detail = new Group();
 
-  // Six stands: posts and bases instanced, hats parented on top of each.
-  const positions = HAT_KINDS.map((_, index) => {
+  // **What this counter sells, not what `hats.ts` can build** — the pet
+  // shop's rule below. The Snake Hat is a `HatKind` sold only at the Reptile
+  // House's Scales & Tails; iterating `HAT_KINDS` put it on a stand here,
+  // advertising stock this counter does not carry. In `HAT_KINDS` order.
+  const sold = new Set(itemsForShop('hat').map((item) => item.id));
+  const stocked = HAT_KINDS.filter((kind) => sold.has(`hat.${kind}`));
+
+  // One stand per hat: posts and bases instanced, hats parented on top of each.
+  const positions = stocked.map((_, index) => {
     const onCounter = index < 3;
     return {
       x: onCounter
@@ -339,7 +346,7 @@ function hatShop(): Fitout {
   );
   detail.add(bases);
 
-  const hats = HAT_KINDS.map((kind, index) => {
+  const hats = stocked.map((kind, index) => {
     const slot = positions[index];
     const hat = createHat(kind);
     // Shown well under life size — the stands are `HAT_STAND_SPACING` apart and
@@ -434,7 +441,7 @@ function stickerPetShop(): Fitout {
       // Each pet hops on its own beat, and looks about between hops.
       pets.forEach((pet, index) => {
         const beat = elapsed * 0.9 + index * 1.7;
-        const hop = Math.max(0, Math.sin(beat * 2)) ** 3;
+        const hop = Math.pow(Math.max(0, Math.sin(beat * 2)), 3);
         pet.setWalkPhase((beat * 0.5) % 1, hop);
         pet.head.rotation.y = Math.sin(beat * 0.7) * 0.5;
       });

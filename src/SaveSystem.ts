@@ -1,3 +1,4 @@
+import { parkStamp } from './world/prebuilt/parkFileStore';
 import { saveFlags } from './state/flags';
 import { gameStore } from './state';
 import {
@@ -7,7 +8,8 @@ import {
   type SaveFile,
   type SavedPlace,
 } from './state/save';
-import { spaceAt, worldToLocal, type SpaceId } from './world/spaces';
+import { spaceAt, type SpaceId } from './world/spaces';
+import { worldToLocal } from './world/spaceOrigins';
 
 /**
  * The autosave.
@@ -212,12 +214,14 @@ export class SaveSystem {
       flags: saveFlags.snapshot(),
     };
     if (this.haveGoodPlace) {
+      const park = parkStamp();
       file.place = {
         space: this.goodSpace,
         x: this.goodX,
         y: this.goodY,
         z: this.goodZ,
         facing: this.goodFacing,
+        ...(park === null ? {} : { park }),
       };
     }
 

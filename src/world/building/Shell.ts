@@ -14,6 +14,7 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three';
+import { lazyArrayView } from '../../boot/lazyView';
 import {
   BUILDING_FLOOR_COUNT,
   BUILDING_FLOOR_HEIGHT,
@@ -514,9 +515,9 @@ function buildCornerPillars(plan: ShellPlan): InstancedMesh {
  * doorway now moves all four, which is what CLAUDE.md's "one owner; everyone
  * else asks" is for.
  */
-const ROOF_SLIDE_GAPS: readonly (readonly [number, number])[] = [
+const ROOF_SLIDE_GAPS: readonly (readonly [number, number])[] = lazyArrayView(() => [
   [SLIDE_PLAN.roofDoorMinX, SLIDE_PLAN.roofDoorMaxX],
-];
+]);
 
 /**
  * **The roof deck's plate, stopping where the curtain wall starts** (#467).

@@ -91,9 +91,36 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
 export class InputSystem {
   // Raw device state ------------------------------------------------------
   private readonly heldKeys = new Set<string>();
+  /**
+   * **Keys that went down since the last {@link update}, whether or not they
+   * are still down** — so a press that starts and ends between two frames is
+   * still a press (found while investigating #699/#700; see below).
+   *
+   * Held state alone is sampled once a frame, so a key tapped quickly enough
+   * to go down *and* up inside one frame was never seen at all: no `down`, no
+   * `justPressed`, nothing. At 60 fps that takes a 16 ms tap; at the 5-10 fps a
+   * hitching tablet or a software renderer gives, it is an ordinary quick
+   * press. Measured in a browser: keydown and keyup dispatched in one task
+   * left the keychain view open (`viewOpen=true, riding=true`) on seeds 131 and
+   * 208; held for 100 ms, Escape closed it every time.
+   *
+   * **What this did and did not cause.** It is *not* #699: that run's keys all
+   * moved her with `riding=false`, so Escape had been handled — the tap failed
+   * because a fixed screen spot landed on a tree, which a tap rightly selects
+   * (fixed in `check:walking`'s `findOpenGround`). It is the *likely* cause of
+   * #700 (the autosave refuses while she is riding, so a dropped Escape would
+   * time out exactly that wait), but #700 has not been reproduced, so that is
+   * unproven. The bug is real either way: `test/input/sub-frame-tap.test.ts`.
+   */
+  private readonly tappedKeys = new Set<string>();
   private gamepadIndex: number | null = null;
   /** `MouseEvent.button` values currently held — see {@link MOUSE_ACTION_BINDINGS}. */
   private readonly heldMouseButtons = new Set<number>();
+  /** The {@link tappedKeys} rule, for mouse buttons. */
+  private readonly clickedMouseButtons = new Set<number>();
+  /** Scratch for {@link update}: held plus tapped. Reused, not reallocated per frame. */
+  private readonly keysThisFrame = new Set<string>();
+  private readonly buttonsThisFrame = new Set<number>();
   /**
    * While true, a right-click's context menu is swallowed rather than shown.
    *
@@ -125,6 +152,11 @@ export class InputSystem {
   private lastDeviceUsed: 'keyboard' | 'gamepad' = 'keyboard';
 
   private attached = false;
+  /**
+   * The `pointerType` of the last `pointerdown` — see {@link isTouchCompatMouse}.
+   * `null` until one is seen.
+   */
+  private lastPointerType: string | null = null;
 
   // ---------------------------------------------------------------- setup
 
@@ -139,6 +171,9 @@ export class InputSystem {
     target.addEventListener('mousedown', this.onMouseDown);
     target.addEventListener('mouseup', this.onMouseUp);
     target.addEventListener('contextmenu', this.onContextMenu);
+    // Capture, so a handler that stops propagation cannot hide a pointer from
+    // the compat-mouse guard; passive, because this only reads `pointerType`.
+    target.addEventListener('pointerdown', this.onPointerDown, { capture: true, passive: true });
   }
 
   detach(target: Window = window): void {
@@ -152,6 +187,7 @@ export class InputSystem {
     target.removeEventListener('mousedown', this.onMouseDown);
     target.removeEventListener('mouseup', this.onMouseUp);
     target.removeEventListener('contextmenu', this.onContextMenu);
+    target.removeEventListener('pointerdown', this.onPointerDown, { capture: true });
   }
 
   /**
@@ -164,7 +200,10 @@ export class InputSystem {
    */
   setMouseCaptureActive(active: boolean): void {
     this.mouseCaptureActive = active;
-    if (!active) this.heldMouseButtons.clear();
+    if (!active) {
+      this.heldMouseButtons.clear();
+      this.clickedMouseButtons.clear();
+    }
   }
 
   // ----------------------------------------------------------- public API
@@ -348,7 +387,13 @@ export class InputSystem {
     let moveY = 0;
 
     // --- keyboard -------------------------------------------------------
-    for (const code of this.heldKeys) {
+    // Held keys, plus any tapped since the last frame and already released —
+    // see {@link tappedKeys}. A tap counts as down for exactly this one frame.
+    this.keysThisFrame.clear();
+    for (const code of this.heldKeys) this.keysThisFrame.add(code);
+    for (const code of this.tappedKeys) this.keysThisFrame.add(code);
+    this.tappedKeys.clear();
+    for (const code of this.keysThisFrame) {
       const axis = KEYBOARD_MOVE_BINDINGS[code];
       if (axis) {
         moveX += axis[0];
@@ -398,7 +443,11 @@ export class InputSystem {
     // into `this.down` for the frame. Tracked whether or not `mouseCaptureActive`
     // is on — see that flag's own doc comment for why only the context-menu
     // suppression, not the tracking itself, is scoped to the ride.
-    for (const button of this.heldMouseButtons) {
+    this.buttonsThisFrame.clear();
+    for (const button of this.heldMouseButtons) this.buttonsThisFrame.add(button);
+    for (const button of this.clickedMouseButtons) this.buttonsThisFrame.add(button);
+    this.clickedMouseButtons.clear();
+    for (const button of this.buttonsThisFrame) {
       const action = MOUSE_ACTION_BINDINGS[button];
       if (action) this.down.add(action);
     }
@@ -474,6 +523,7 @@ export class InputSystem {
       event.preventDefault();
     }
     this.heldKeys.add(event.code);
+    this.tappedKeys.add(event.code);
     this.lastDeviceUsed = 'keyboard';
   };
 
@@ -490,6 +540,10 @@ export class InputSystem {
   /** Losing focus mid-stride would otherwise leave the player walking forever. */
   private readonly onBlur = (): void => {
     this.heldKeys.clear();
+    // A tap still pending when focus went is dropped with the rest: nothing
+    // pressed before a window switch should fire after it.
+    this.tappedKeys.clear();
+    this.clickedMouseButtons.clear();
     // And an on-screen hold would otherwise leave her climbing forever: a
     // window that loses focus mid-press never delivers the `pointerup`.
     this.virtualHolds.clear();
@@ -498,8 +552,43 @@ export class InputSystem {
     this.heldMouseButtons.clear();
   };
 
+  /**
+   * **A finger is not a mouse.** After a touch (or pen) tap, the browser fires
+   * compatibility `mousedown`/`mouseup` for it, both in one task, unless the
+   * `pointerdown` was `preventDefault`ed. Before {@link clickedMouseButtons}
+   * those were invisible here, because they started and ended inside one frame;
+   * now they would count, and every tap-to-move on a tablet would press
+   * button 0 — today a one-frame `boost` nobody outside the rail race reads,
+   * tomorrow a phantom press of whatever a mouse button is bound to.
+   *
+   * So a `mousedown` counts only if the `pointerdown` that preceded it said
+   * `pointerType === 'mouse'`. Every browser that fires compat mouse events
+   * fires `pointerdown` first, carrying what really made the press. **No time
+   * window**: an earlier version ignored mouse presses within a second of any
+   * touch, and on a touchscreen laptop that swallowed a real right-button hold
+   * — the whole duck, not one click. Asking the event what it is has no such
+   * edge.
+   *
+   * `null` (no `pointerdown` ever seen — a runtime without Pointer Events) is
+   * taken as a mouse, which is exactly how this behaved before the guard.
+   */
+  private isTouchCompatMouse(): boolean {
+    return this.lastPointerType !== null && this.lastPointerType !== 'mouse';
+  }
+
+  private readonly onPointerDown = (event: PointerEvent): void => {
+    this.lastPointerType = event.pointerType;
+  };
+
   private readonly onMouseDown = (event: MouseEvent): void => {
+    // An echo of a touch is not input at all: it presses nothing and, just as
+    // deliberately, leaves `lastDeviceUsed` alone — a finger is not evidence
+    // that she has picked up the keyboard-and-mouse.
+    if (this.isTouchCompatMouse()) return;
     this.heldMouseButtons.add(event.button);
+    this.clickedMouseButtons.add(event.button);
+    // A real mouse is reported as `'keyboard'`: the device union has no mouse,
+    // and keyboard-and-mouse is one desk, so the prompts it drives are right.
     this.lastDeviceUsed = 'keyboard';
   };
 

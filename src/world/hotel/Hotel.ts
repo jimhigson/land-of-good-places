@@ -1,3 +1,4 @@
+import { TOWER_SHELL_RADIUS, TOWER_BACK_ALONG, TOWER_FACADE_ALONG, TOWER_DOOR_BAND_OUTER, TOWER_JAMB_REACH, TOWER_JAMB_HALF_THICKNESS } from './towerDimensions';
 import {
   BoxGeometry,
   type PerspectiveCamera,
@@ -22,7 +23,7 @@ import { mosaicTexture } from '../../core/textures';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { CollisionWorld, WallCollider } from '../Collision';
 import { standInPlot, type AnchorPlots } from '../AnchorPlots';
-import type { CreatureHandle } from '../../art/style/asset';
+import { hasWalk, type CreatureHandle } from '../../art/style/asset';
 import type { Player } from '../../entities/Player';
 import type { InteriorControls } from '../building';
 import type { WalkSurfaces, MovingPlatform } from '../building/surfaces';
@@ -79,6 +80,7 @@ import {
 import { petBedFit } from './petBedFit';
 import { createRipikaStatue, type RipikaStatueHandle } from '../../art/models/ripikaStatue';
 import { createPet, PET_KINDS, type PetKind } from '../../art/models/pets';
+import { shopItem } from '../building/shops/catalogue';
 import { createKeeper, type KeeperHandle } from '../../art/models/keeper';
 import { KID_SKIN_TONES } from '../../art/models/kid';
 import { CharacterModel } from '../../entities/CharacterModel';
@@ -2246,7 +2248,7 @@ export class Hotel implements GameSystem {
     // through the door and the trigger said she was not — the sort of gap
     // between two hand-copied depths this repo has been bitten by six times
     // in a day (CLAUDE.md, "Two definitions of one thing").
-    const outer = TOWER_FACADE_ALONG + 0.4;
+    const outer = TOWER_DOOR_BAND_OUTER;
     const centre = (TOWER_BACK_ALONG + outer) / 2;
     return {
       what: "the hotel tower's front door",
@@ -2779,7 +2781,7 @@ export class Hotel implements GameSystem {
     const side = chair.facing + Math.PI / 2;
     const petX = chair.x + Math.sin(side) * 1.15;
     const petZ = chair.z + Math.cos(side) * 1.15;
-    const pet = this.feast?.pet ?? createPet(this.paradePetKind());
+    const pet = this.feast?.pet ?? this.feastPet();
     const petBowl = this.feast?.petBowl ?? new Group();
     if (!this.feast) {
       petBowl.add(createPetBowl().root);
@@ -5365,6 +5367,25 @@ export class Hotel implements GameSystem {
    * companion in the catalogue, and hers was always the largest footprint in
    * the table (1.12 m × 1.49 m). So nothing here had to grow to let her in.
    */
+  /**
+   * The pet that eats beside her: **her own companion's model**, built the
+   * way `ParadeMember` builds it (the catalogue item's `model()`), with
+   * {@link paradePetKind} only as the fallback for a child who owns none.
+   * Going through the kind alone seated a bunny for a child whose only pet
+   * was an adopted Reptile House snake — `pet.snakeMint` is a catalogue id
+   * and deliberately not a `PetKind`, exactly as the comment below records
+   * for RiPika — so the feast now asks the item, and the item answers with
+   * whatever walks.
+   */
+  private feastPet(): CreatureHandle {
+    for (const item of gameStore.get().inventory) {
+      if (item.kind !== 'pet' || !item.paradeable || item.stowed) continue;
+      const handle = shopItem(item.id)?.model();
+      if (handle && hasWalk(handle)) return handle;
+    }
+    return createPet(this.paradePetKind());
+  }
+
   private paradePetKind(): PetKind {
     for (const item of gameStore.get().inventory) {
       if (item.kind !== 'pet' || !item.paradeable || item.stowed) continue;
@@ -6739,12 +6760,9 @@ function paintYours(plaque: Mesh): void {
   plaque.material = new MeshToonMaterial({ map: glbCanvasTexture(canvas) });
 }
 
-/**
- * The tower's collision shell — an octagon of this circumradius, in metres.
- * Sized to the crystal cluster's own standing-height mass (measured 6.0–8.4 m
- * out from the plot centre), so what looks solid is solid.
- */
-export const TOWER_SHELL_RADIUS = 7.2;
+// The tower's shell radius, back wall and facade plane live in a leaf module so
+// the park layout can place the doormat at the real door — see its header.
+export { TOWER_SHELL_RADIUS, TOWER_BACK_ALONG, TOWER_FACADE_ALONG } from './towerDimensions';
 
 /** The shell walls' own half-thickness. */
 const TOWER_SHELL_HALF_THICKNESS = 0.4;
@@ -6757,15 +6775,6 @@ const TOWER_SHELL_HALF_THICKNESS = 0.4;
  */
 export const TOWER_DOOR_HALF = DOOR_HALF + 0.5;
 
-/** How far in the lobby back wall stands, along the door's axis. */
-export const TOWER_BACK_ALONG = TOWER_SHELL_RADIUS - 2.2;
-
-/**
- * The facade plane: the flat of the octagon face the doorway is cut into,
- * along the door's axis. The doorway sits in the *middle* of a face rather
- * than across a corner, so this is a single distance rather than a range.
- */
-export const TOWER_FACADE_ALONG = TOWER_SHELL_RADIUS * Math.cos(Math.PI / 8);
 
 /**
  * The tower's collision: a **closed** octagon around the crystal cluster with
@@ -6865,7 +6874,7 @@ function registerTowerCollision(
   // The jambs, running from the back wall out past the facade plane, and the
   // lobby back wall across the far end between them.
   for (const side of [-1, 1]) {
-    wall(TOWER_BACK_ALONG, side * TOWER_DOOR_HALF, R + 0.4, side * TOWER_DOOR_HALF, 0.35);
+    wall(TOWER_BACK_ALONG, side * TOWER_DOOR_HALF, TOWER_JAMB_REACH, side * TOWER_DOOR_HALF, TOWER_JAMB_HALF_THICKNESS);
   }
   wall(TOWER_BACK_ALONG, TOWER_DOOR_HALF, TOWER_BACK_ALONG, -TOWER_DOOR_HALF, 0.35);
 }

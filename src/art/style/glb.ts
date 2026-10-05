@@ -303,3 +303,36 @@ export function glbCanvasTexture(canvas: HTMLCanvasElement): CanvasTexture {
   texture.needsUpdate = true;
   return texture;
 }
+
+/**
+ * A canvas texture for a mesh whose UVs were authored by
+ * `art/blend/gate_arch_build.py`'s `paint_planar_uvs` — or by its copies in
+ * the reptile kits (`reptile_house_build.py`'s `paint_face_uvs`,
+ * `reptile_noodle_build.py`'s head, `reptile_creatures_build.py`'s
+ * `snake_face_uvs`, `reptile_stall_build.py`'s planks).
+ *
+ * Those scripts write `v = (hi_z − z) / height` — pre-inverted to cancel the
+ * exporter's own `1 − v` — so by the time the `.glb` is read here `v` climbs
+ * **with** height, the opposite of what {@link glbCanvasTexture} expects and
+ * exactly what three.js's default `flipY = true` expects. Measured on the
+ * shipped files (2 October 2026): `dv/dy` is **+1.18** on `rh-sign`, **+2.0**
+ * on `rs-sign`, **+0.33** on `rh-head`, against **−0.82** on the hotel's
+ * `tower-signboard`, which is authored the glTF way and painted through
+ * {@link glbCanvasTexture}. Painting the reptile kits through that helper
+ * put every snake's mouth above its eyes and turned all three sign planks
+ * upside-down — the two conventions are each right for their own kits and
+ * wrong for the other's, and this pair of functions is the one place that
+ * says which is which.
+ *
+ * **Pick by how the kit was authored, never by what looks right in a
+ * screenshot**: `check:reptile-house`'s painted-faces clause reads the head
+ * UVs and the texture's `flipY` together and fails if the eyes land below
+ * the smile.
+ */
+export function planarUvCanvasTexture(canvas: HTMLCanvasElement): CanvasTexture {
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.flipY = true;
+  texture.needsUpdate = true;
+  return texture;
+}

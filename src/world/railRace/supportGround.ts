@@ -1,4 +1,4 @@
-import { NOMINAL_OUTSET } from './route';
+import { NOMINAL_OUTSET } from './dimensions';
 import { POST_FOOT_RADIUS } from './trestleGeometry';
 
 /**

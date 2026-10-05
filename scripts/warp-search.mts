@@ -91,6 +91,10 @@ async function score(seed: number, warp: WarpVector | null): Promise<Score> {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     LGP_SEED: String(seed),
+    // Pinned, so the unwarped and warped runs are restarts of the same park:
+    // LGP_WARP is a park-changing switch, and with no restart the resolver
+    // would build the accepted restart unwarped but restart 0 warped.
+    LGP_PARK_RESTART: process.env['LGP_PARK_RESTART'] ?? '0',
   };
   if (warp) env['LGP_WARP'] = JSON.stringify(warp);
   let out: string;
@@ -153,6 +157,10 @@ async function proveWithOracle(seed: number, warp: WarpVector | null): Promise<'
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     LGP_SEED: String(seed),
+    // Pinned, so the unwarped and warped runs are restarts of the same park:
+    // LGP_WARP is a park-changing switch, and with no restart the resolver
+    // would build the accepted restart unwarped but restart 0 warped.
+    LGP_PARK_RESTART: process.env['LGP_PARK_RESTART'] ?? '0',
   };
   if (warp) env['LGP_WARP'] = JSON.stringify(warp);
   try {
@@ -169,6 +177,10 @@ async function passesExtraGate(seed: number, warp: WarpVector | null, script: st
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     LGP_SEED: String(seed),
+    // Pinned, so the unwarped and warped runs are restarts of the same park:
+    // LGP_WARP is a park-changing switch, and with no restart the resolver
+    // would build the accepted restart unwarped but restart 0 warped.
+    LGP_PARK_RESTART: process.env['LGP_PARK_RESTART'] ?? '0',
   };
   if (warp) env['LGP_WARP'] = JSON.stringify(warp);
   try {

@@ -1,5 +1,4 @@
-import { BUILDING_STEP_UP, GROUND_SPHERE_RADIUS } from '../../core/constants';
-import { SPACE_GARDEN, spaceAt } from '../spaces';
+import { stepCeilingAt } from './stepReach';
 import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from './layout';
 import { clamp01 } from '../../core/mathUtils';
 import { terrainHeight } from '../terrain';
@@ -11,11 +10,21 @@ import {
   BALL_PIT_X,
   BALL_PIT_Z,
   BUILDING_BASE_Y,
+  castleSurfaceY,
   insideInterior,
   INTERIOR_GROUND_Y,
   regionContains,
   type RampDefinition,
 } from './layout';
+
+/**
+ * How far a garden ramp's footprint can sit from its plumb plan position once
+ * the castle's lean is applied — a pre-filter for {@link castleSurfaceY}, never
+ * the answer. The frame is rigid, so a point `d` metres out on the deck moves
+ * in plan by `d (1 − cos lean)` plus its height times `sin lean`: under 0.6 m
+ * for the facade's 12 m at the park's steepest castle lean (~17 degrees).
+ */
+const GARDEN_RAMP_SLACK = 1.5;
 
 /**
  * A platform that moves — the lift car, the trampoline pad.
@@ -143,12 +152,32 @@ export class WalkSurfaces {
     // steps. Every castle floor carries the same set, because each one has its
     // own porch and its own lift alcove at the same floor-local spot; a lift
     // that wandered from floor to floor would read as broken.
+    //
+    // Indoors up is +Y and a floor is plumb, so a ramp's height is the deck's
+    // plus its own. **Out in the garden the steps belong to the castle, which
+    // leans** — they are drawn in `CASTLE_FRAME`, so they are walked in it too
+    // (`castleSurfaceY`); a plumb sum here once left seed 5's walkable steps
+    // hanging 1.5 m over the stone ones.
     const space = floor ? 'interior' : 'garden';
     for (const ramp of this.ramps) {
       if (ramp.space !== space) continue;
       if (ramp.onlyFloor !== undefined && ramp.onlyFloor !== floor?.index) continue;
-      if (!regionContains(ramp.footprint, localX, localZ)) continue;
-      const height = BUILDING_BASE_Y + rampHeight(ramp, localX, localZ);
+      let height: number | null;
+      if (floor) {
+        if (!regionContains(ramp.footprint, localX, localZ)) continue;
+        height = BUILDING_BASE_Y + rampHeight(ramp, localX, localZ);
+      } else {
+        // Cheap plan reject first: the lean moves a footprint by well under
+        // GARDEN_RAMP_SLACK, and this runs for every sample in the park.
+        if (!regionContains(ramp.footprint, localX, localZ, GARDEN_RAMP_SLACK)) continue;
+        height = castleSurfaceY(
+          x,
+          z,
+          (lx, lz) => rampHeight(ramp, lx, lz),
+          (lx, lz) => regionContains(ramp.footprint, lx, lz),
+        );
+        if (height === null) continue;
+      }
       if (height <= ceiling && height > best) best = height;
     }
 
@@ -186,126 +215,14 @@ export class WalkSurfaces {
 }
 
 // ------------------------------------------------------------------ the reach
-
-/**
- * **The highest world `y` in column `(x, z)` a walker standing at `(x, y, z)`
- * can step up to** — the one owner of what "one step up" means (#643).
- *
- * Outdoors the world is a sphere, and up is away from its centre, so the step
- * is measured **radially**: a surface is within reach when its distance from
- * the planet's centre is no more than `BUILDING_STEP_UP` past hers. It used to
- * be `y + BUILDING_STEP_UP`, a world-`y` reach, which at lean `θ` counts the
- * planet's lean as climb: a riser `h` tall reads `h / cos θ` plus the
- * sub-step's own plan travel times `tan θ`, so whether a child could step up a
- * knee-high edge depended on which way she walked and her frame rate — 584
- * honest step-ups refused and 55 over-tall ones admitted on the canonical park
- * (`scripts/measure-walk-reach.mts`). The deeper fall-through far out (a 0.5
- * ramp at r = 140 m dropping her 13.7 m) is cured mostly by
- * {@link carryReference}, not by this; the two are one change because a reach
- * and its reference must be measured in the same frame. Indoors up is `+Y`, the castle floors and
- * hotel rooms are hundreds of metres out where a radial reach would lean by
- * tens of degrees, so there the reach stays the plain world-`y` step — the same
- * split `up.ts`'s `upFor` makes, asked of the same `spaceAt`.
- *
- * A reference at or below the planet's centre (the `-1e6` "bare ground,
- * please" some checks ask with) is not a place anyone stands; it keeps the
- * plain world-`y` arithmetic so it still refuses everything built.
- */
-export function stepCeilingAt(x: number, z: number, y: number): number {
-  const cy = y + GROUND_SPHERE_RADIUS;
-  if (cy <= 0 || spaceAt(x, z) !== SPACE_GARDEN) return y + BUILDING_STEP_UP;
-  const reach = Math.hypot(x, cy, z) + BUILDING_STEP_UP;
-  const above = reach * reach - x * x - z * z;
-  // Past the horizon no column reaches that radius. Unreachable while `reach`
-  // exceeds her own radius, which is never less than the column's plan
-  // distance — guarded anyway, for symmetry with the inverse.
-  if (above <= 0) return y + BUILDING_STEP_UP;
-  return Math.sqrt(above) - GROUND_SPHERE_RADIUS;
-}
-
-/**
- * **How far `b` stands above `a` along the local up** — the one owner of "is
- * this rise within a step", for everything that decides steps without asking
- * {@link WalkSurfaces.sample} itself (`NavGrid`'s edges, its line walk and its
- * level separation).
- *
- * Outdoors, the difference of the two points' distances from the planet's
- * centre — exactly what {@link stepCeilingAt} spends, once a walker's reference
- * has been carried to the next column by {@link carryReference}, so a nav edge
- * and a real foot can never disagree about the same pair of heights (#643).
- * Indoors, or when either end is not in the garden, the plain `y` difference.
- */
-export function riseBetween(
-  ax: number,
-  ay: number,
-  az: number,
-  bx: number,
-  by: number,
-  bz: number,
-): number {
-  const acy = ay + GROUND_SPHERE_RADIUS;
-  const bcy = by + GROUND_SPHERE_RADIUS;
-  if (acy <= 0 || bcy <= 0) return by - ay;
-  if (spaceAt(ax, az) !== SPACE_GARDEN || spaceAt(bx, bz) !== SPACE_GARDEN) return by - ay;
-  return Math.hypot(bx, bcy, bz) - Math.hypot(ax, acy, az);
-}
-
-/** True when `b` is no more than `limit` above or below `a` along the local up. */
-export function withinStep(
-  ax: number,
-  ay: number,
-  az: number,
-  bx: number,
-  by: number,
-  bz: number,
-  limit: number = BUILDING_STEP_UP,
-): boolean {
-  return Math.abs(riseBetween(ax, ay, az, bx, by, bz)) <= limit;
-}
-
-/**
- * **The inverse of {@link stepCeilingAt}**: the reference `y` in column
- * `(x, z)` whose step ceiling is exactly `ceilingY`. For a caller that wants
- * "everything at or below this height" out of {@link WalkSurfaces.sample} —
- * `NavGrid`'s level peel — and used to get it by subtracting
- * `BUILDING_STEP_UP`, which is only the inverse while the reach is world-`y`.
- */
-export function stepReferenceFor(x: number, z: number, ceilingY: number): number {
-  const cy = ceilingY + GROUND_SPHERE_RADIUS;
-  if (cy <= 0 || spaceAt(x, z) !== SPACE_GARDEN) return ceilingY - BUILDING_STEP_UP;
-  const radius = Math.hypot(x, cy, z) - BUILDING_STEP_UP;
-  const below = radius * radius - x * x - z * z;
-  if (radius <= 0 || below <= 0) return ceilingY - BUILDING_STEP_UP;
-  return Math.sqrt(below) - GROUND_SPHERE_RADIUS;
-}
-
-/**
- * **A reference height taken in one column, re-expressed in another at the
- * same distance from the planet's centre.**
- *
- * A walker's sampler reference is the surface she was standing on, and she
- * moves in plan: asked unchanged in the next column, that `y` is a point lower
- * (towards the park) or higher (away from it) than her foot by the sub-step
- * times the sine of the lean, and the reach would spend that on the planet
- * rather than on the ramp. `Player` and `playerSim.mts` carry the reference
- * through this between sub-steps, so a level deck asks for no climb at all.
- * Indoors, or for a reference that is not a place, it is the identity.
- */
-export function carryReference(
-  fromX: number,
-  fromZ: number,
-  y: number,
-  toX: number,
-  toZ: number,
-): number {
-  const cy = y + GROUND_SPHERE_RADIUS;
-  if (!Number.isFinite(y) || cy <= 0) return y;
-  if (spaceAt(fromX, fromZ) !== SPACE_GARDEN || spaceAt(toX, toZ) !== SPACE_GARDEN) return y;
-  const radius = Math.hypot(fromX, cy, fromZ);
-  const above = radius * radius - toX * toX - toZ * toZ;
-  if (above <= 0) return y;
-  return Math.sqrt(above) - GROUND_SPHERE_RADIUS;
-}
+//
+// `stepCeilingAt`, `riseBetween`, `withinStep`, `stepReferenceFor` and
+// `carryReference` live in `stepReach.ts` and are re-exported here, so every
+// caller that learned them from this file keeps working. They moved because
+// `NavGrid` needs them and `parkLayout.ts` floods a `NavGrid` while the park is
+// still being solved: this file reaches `layout.ts`, which reaches the solved
+// layout, so importing it from `NavGrid` made the layout depend on itself.
+export { carryReference, riseBetween, stepCeilingAt, stepReferenceFor, withinStep } from './stepReach';
 
 // ------------------------------------------------------------------ helpers
 

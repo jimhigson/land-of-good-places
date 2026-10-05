@@ -1,7 +1,7 @@
 import { PARK_SEED } from '../src/world/parkManifest';
 import { circleBoundary } from '../src/world/boundary';
-import { RailRouteUnsolvable, solveRailRoute, ringStartPoses } from '../src/world/rail/generate';
-import { turnVocabulary } from '../src/world/rail/segments';
+import { RailRouteUnsolvable, solveRailRoute, ringStartPoses } from '../procgen/world/rail/generate';
+import { turnVocabulary } from '../procgen/world/rail/segments';
 
 /**
  * **What giving up costs**, so the bail threshold can be chosen rather than

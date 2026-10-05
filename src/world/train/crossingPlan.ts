@@ -1,7 +1,8 @@
 import { Vector3 } from 'three';
 import { TRAIN_PLAN } from './plan';
-import { solveCrossingSites, type CrossingSite } from './crossingPlanSolve';
-import { takePrewarmedCrossingSites } from './crossingPrewarm';
+import type { CrossingSite } from './crossingSite';
+import { lazyArrayView } from '../../boot/lazyView';
+import { planPart } from '../parkPlan';
 
 /**
  * **Where the park may cross its own railway — planned first, not
@@ -12,23 +13,17 @@ import { takePrewarmedCrossingSites } from './crossingPrewarm';
  * harness, where nobody pre-warms, it solves straight through here exactly
  * as it always did.
  */
-export {
-  NARROW_HALF_WIDTH,
-  SITE_HALF_WIDTH,
-  SITE_RAMP_FLOOR,
-  SITE_RAMP_IDEAL,
-  type CrossingSite,
-  type SolvedCrossingSites,
-} from './crossingPlanSolve';
+export { NARROW_HALF_WIDTH, SITE_HALF_WIDTH, SITE_RAMP_FLOOR, SITE_RAMP_IDEAL } from './bridgeFit';
+export type { CrossingSite, SolvedCrossingSites } from './crossingSite';
 
-const SOLVED = takePrewarmedCrossingSites() ?? solveCrossingSites();
 
 /**
  * Every point on the loop where a bridge provably fits — the places
  * `paths.ts` prefers for any leg that must cross the railway. Solved once,
  * at module load, from the same fixed inputs the rail and plot solvers used.
  */
-export const CROSSING_SITES: readonly CrossingSite[] = SOLVED.bridges;
+/** A view: the park's driver decides the sites from the loop it decided, and may re-decide both. */
+export const CROSSING_SITES: readonly CrossingSite[] = lazyArrayView(() => planPart('crossings').bridges);
 
 /**
  * Which side of the railway a point stands on, in `crossings.ts`'s own

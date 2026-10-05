@@ -37,6 +37,19 @@ import type { CollisionWorld } from '../../world/Collision';
 /** How far the props keep from the path spur and the stall's counter, in metres. */
 const STALL_CLEARANCE = 4.2;
 
+/**
+ * Where the water-gun rack stands relative to the door: {@link RACK_INSET}
+ * metres in from the door along its bearing (the door itself stands 1.4 m
+ * outside the plot's edge) and {@link RACK_ASIDE} to one side of the arrival
+ * line. {@link RACK_HALF_X}/{@link RACK_HALF_Z} are the rack's own half-extents
+ * in plot-local x/z — the legs at ±0.85 with a 2 m bar, and the guns propped
+ * forward — by which it is held inside the lawn.
+ */
+const RACK_INSET = 2.8;
+const RACK_ASIDE = 1.6;
+const RACK_HALF_X = 1.1;
+const RACK_HALF_Z = 0.8;
+
 /** How thick the mown-lawn slab is, and how far its middle sits off the plot's
  * own origin — so its top surface is at {@link LAWN_TOP}. One definition, read
  * by the slab that is built and by the ground query every prop stands on. */
@@ -210,10 +223,37 @@ export function dressWaterFightPlot(plots: AnchorPlots, collision: CollisionWorl
   // card, and the rack of enormous water guns two metres away says the rest.
 
   // --- the rack of very big water guns ----------------------------------------------
-  // Right where the path spur arrives, so a child walking up meets three
-  // enormous water guns before they meet anything else.
-  const rackX = doorX - 2.6;
-  const rackZ = doorZ - 1.4;
+  // Just inside the plot beside where the path spur arrives, so a child walking
+  // up meets three enormous water guns before they meet anything else.
+  //
+  // **Inside the plot, by construction.** The rack used to stand at a fixed
+  // world-axis offset from the door, `door + (-2.6, -1.4)`. But the door is not
+  // fixed: `parkLayout` puts it on the plot's edge facing the park middle, so
+  // with the bearing it lies anywhere from 12.4 m to 17.7 m out (the rectangle's
+  // side to its corner, plus the stand-off), and on a corner bearing the rack
+  // landed up to 20.6 m from the centre — outside the plot, past the 19 m the
+  // manifest declares, where no path or tree had been told about it or its
+  // collider. That was `anchor.reach:waterFight` forcing park restarts (0.1 to
+  // 1.1 m over, varying with the door's bearing).
+  //
+  // So it is placed relative to the door's *bearing* — inward along it, and to
+  // one side, so it is beside the arrival rather than across it — and then held
+  // inside the lawn by the rack's own half-extents. Nothing now depends on where
+  // the door happened to land: the rack's reach is bounded by the rectangle,
+  // whatever the seed. Measured over every bearing at 0.5°: the rack centre
+  // stays within 14.2 m of the plot centre and within 3.8 m of the door, and at
+  // least 0.33 m clear of every pool, hedge and the sprinkler this plot keeps.
+  const doorReach = Math.hypot(doorX, doorZ);
+  const inX = -doorX / doorReach;
+  const inZ = -doorZ / doorReach;
+  const rackX = Math.min(
+    halfX - RACK_HALF_X,
+    Math.max(-halfX + RACK_HALF_X, doorX + inX * RACK_INSET + inZ * RACK_ASIDE),
+  );
+  const rackZ = Math.min(
+    halfZ - RACK_HALF_Z,
+    Math.max(-halfZ + RACK_HALF_Z, doorZ + inZ * RACK_INSET - inX * RACK_ASIDE),
+  );
   const rackY = localGround(rackX, rackZ);
 
   for (const offset of [-0.85, 0.85]) {

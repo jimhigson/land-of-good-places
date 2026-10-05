@@ -1,7 +1,8 @@
 import type { ParkBoundary } from './boundary';
 import { BUILDING_STEP_UP } from '../core/constants';
 import type { GroundSampler } from '../entities/Player';
-import { stepReferenceFor, withinStep, type LevelConnector } from './building/surfaces';
+import type { LevelConnector } from './building/surfaces';
+import { stepReferenceFor, withinStep } from './building/stepReach';
 import { MAX_AUTO_HOP_HEIGHT, autoHopClears, type CollisionWorld } from './Collision';
 import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
 
@@ -106,8 +107,10 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  * meant routing children straight through the water for a two-metre saving.
  *
  * So a hoppable collider is stamped into {@link hopBand} instead of into
- * `blocked`, and the cells it covers cost {@link HOP_COST_MULTIPLIER} times the
- * distance walked through them. Which colliders those are is still decided by
+ * `blocked`, and walking through the cells it covers costs a premium of
+ * `HOP_COST_MULTIPLIER - 1` cheapest-metres per metre on top of what the ground
+ * under it costs ({@link bandedStep} — the same premium on the lawn as on the
+ * paving, which the first version of this got wrong). Which colliders those are is still decided by
  * the same `autoHopClears` call `CollisionWorld.wouldAutoHopClear` makes, from
  * the same numbers, so the two can never disagree about which walls she hops.
  *
@@ -169,8 +172,13 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  *   the paving right back across the grass it was avoiding.
  *
  * Where no paving has been published — every interior, and any harness that
- * never builds a garden — the stamp finds nothing and every cell costs 1, which
- * is bit-for-bit the behaviour this router had before.
+ * never builds a garden — the stamp finds nothing and every cell costs the same
+ * {@link OFF_PATH_COST_MULTIPLIER}. (This used to say "every cell costs 1": it
+ * never did, since {@link costOf} charges the unpaved price for every unpaved
+ * cell. A lattice priced flat is the same search whichever flat price it is, so
+ * routes over plain ground are the ones this router gave before #416; what the
+ * flat price does change is how dear a level connector's walk, charged at its
+ * bare length, is against the floor either side of it.)
  *
  * ## Nothing here happens per frame
  *
@@ -206,9 +214,15 @@ import { forEachPavedDisc, OFF_PATH_COST_MULTIPLIER } from './paving';
  * her round it; a pessimistic one seals a gap she can plainly see and walks her
  * the long way about.
  */
-const CELL = 0.5;
-/** The lattice pitch, for instruments that walk the grid (`measure-walk-reach.mts`). */
-export const NAV_CELL_SIZE = CELL;
+/**
+ * The lattice's cell pitch — the one owner. Exported for a caller sampling one
+ * cell outside a stamp (`parkLayout.ts`) and for instruments that walk the grid
+ * (`measure-walk-reach.mts`).
+ */
+export const NAV_CELL = 0.5;
+/** Nodes popped per piece of a sliced flood ({@link NavGrid.floodFromSearch}). */
+const FLOOD_PIECE = 4096;
+const CELL = NAV_CELL;
 const INVERSE_CELL = 1 / CELL;
 
 /** Metres of lattice built beyond the soft play boundary, for elbow room. */
@@ -273,8 +287,64 @@ const MAX_STEP = BUILDING_STEP_UP;
  * green run, because the value either side of a green one can be four times
  * worse. If the park's walls or the fountain change shape, the cliffs move and
  * this is re-derived, not adjusted.
+ *
+ * **Both cliffs above were measured when a band's price was `ground * M`**,
+ * before {@link bandedStep} (25 Sep 2026). The floor is unaffected — the
+ * fountain's band is all paving, priced identically under both rules. The
+ * kerb ceiling is not: a band on the lawn now costs 3.25 a metre where it cost
+ * 4.24, so the red values of 2.55/2.75 no longer describe this router and the
+ * window has to be re-swept before this number is next moved.
  */
 const HOP_COST_MULTIPLIER = 2.65;
+
+/**
+ * **What a metre of one cell costs: its ground, plus the hop if it is in a
+ * band.** The one place the two weightings meet.
+ *
+ * The hop is priced as a **premium added to walking the same metre**, and the
+ * premium is the same wherever the wall stands: `(M - 1)` of the lattice's
+ * cheapest metres (`flat` — a metre of paving where the lattice has any, and
+ * the flat unpaved price where it has none) per metre of band. That is what
+ * {@link HOP_COST_MULTIPLIER}'s own derivation says it is ("prices a crossing
+ * of a band `w` wide at `(M - 1) * w` metres over walking through it"), and it
+ * is what "every hoppable wall in the game is priced the same"
+ * ({@link NavGrid}'s `hopBand`) means.
+ *
+ * **It used to be multiplied into the ground cost instead, and that broke
+ * both of those claims on the lawn.** With `ground * M`, a band on paving cost
+ * `M` a metre but a band on grass cost `OFF_PATH_COST_MULTIPLIER * M` — 4.24
+ * against 2.65 — so a low wall standing on the lawn beside a kerb (exactly
+ * where `Scenery.ts` stands benches and hiding walls, "flush with the path at
+ * various places") charged a child 1.6 times the hop premium to step over it,
+ * and the router walked her along the paving and round its end instead.
+ * Measured on the accepted parks, 25 Sep 2026: seed 0, a lawn bench along the
+ * kerb at z = -5.25, a spot 2.7 m off the kerb behind it — **8.02 m** round the
+ * end against **4.45 m** over it, +80.4%; seed 9, a walk down the band of a
+ * wall between two bushes — **19.68 m** round by the paving against **9.06 m**,
+ * +117.2%. `check:path-preference`'s `stepping off the kerb stays a step` bar
+ * is 73%. A lattice with no paving in it (every interior, and that check's
+ * unweighted comparison) prices every cell alike, so it never saw the
+ * difference: only the weighted router, the one the game runs, paid it.
+ *
+ * Written as `flat * M + (ground - flat)` (per metre) so that the two cases the old rule
+ * already got right come out as **the very same float** it gave, and A*'s
+ * tie-breaks there are bit-for-bit what they were: a band on paving
+ * (`1 * M + 0`), and every band in a lattice with no paving at all
+ * (`1.6 * M + 0`). So the fountain, which stands in the paved plaza, is priced
+ * exactly as it was when `check:fountain-hop` measured the floor of `M` (every
+ * band cell inside the plaza is paved: 197 of 197 on seed 24, the binding seed,
+ * and 202 of 202 on the canonical park, measured 25 Sep 2026), and nothing
+ * indoors moves. Only a band on unpaved ground in a paved lattice
+ * changes: 4.24 a metre becomes 3.25.
+ *
+ * Still admissible: `ground >= flat >= 1`, so every edge costs at least its
+ * own geometric length and the octile heuristic stays a lower bound.
+ */
+function bandedStep(step: number, ground: number, inBand: boolean, flat: number): number {
+  // `(step * M) * flat + 0` is the old `(step * M) * ground` to the bit
+  // whenever `ground === flat`, in the same order of operations.
+  return inBand ? step * HOP_COST_MULTIPLIER * flat + step * (ground - flat) : step * ground;
+}
 
 /**
  * How far apart two levels of one cell may match a height being looked up —
@@ -335,7 +405,25 @@ const BEST_HEIGHT_WEIGHT = 0.25 / CELL;
  * place in here that can put a leg through scenery, and the cost of never
  * reaching it is a 1 KB array.
  */
+/** What {@link NavGrid.floodFrom} reached. See there. */
+export interface ReachSet {
+  /** Can a walker at the flood's start get to `(x, z, y)`? */
+  readonly has: (x: number, z: number, y: number) => boolean;
+  /** Every lattice cell the flood reached, as its centre, once each. */
+  readonly forEachCell: (visit: (x: number, z: number) => void) => void;
+}
+
 export const MAX_ROUTE_WAYPOINTS = 128;
+
+/**
+ * How far from where it was asked for a waypoint may be moved to find
+ * somewhere to stand — the reach {@link NavGrid.nearestStandable} is asked
+ * with by `PoiGraph` at boot and by `parkLayout.ts`'s doormat probe at layout
+ * time, so both ask the same question. A metre or two turns "that one is
+ * inside a bush" into "that one is beside a bush", which is where a child
+ * would have stood anyway. Owned here, by the grid that answers it.
+ */
+export const STAND_SEARCH_REACH = 2.2;
 
 /**
  * How much dearer than the lattice legs it replaces a smoothed chord may be
@@ -406,6 +494,13 @@ export class NavGrid {
    * is paved at the same `x, z` as the ribbon that climbs onto it.
    */
   private paved = new Uint8Array(0);
+  /**
+   * The price of this lattice's cheapest metre: 1 where any cell is paved, and
+   * the flat unpaved price where none is (every interior, whose lattice lies
+   * far from the garden's paving). The unit a hop's premium is counted in —
+   * see {@link bandedStep}.
+   */
+  private flatCost: number = OFF_PATH_COST_MULTIPLIER;
   /** Level count prefix: cell `c`'s nodes are `levelStart[c] .. levelStart[c+1]`. */
   private levelStart = new Int32Array(0);
   /** Height of each node's surface, descending within a cell. */
@@ -611,7 +706,16 @@ export class NavGrid {
     // in the choice — a caller who only knows "somewhere on the ground" still
     // gets an honest yes on a hilltop whose one level is the hill.
     this.reachedGoal = endNode === goalNode && goalNode >= 0;
-    this.routeEndY = this.nodeHeight[endNode] ?? startY;
+    // A node's height is its level at the **cell centre**, up to 0.35 m from
+    // the goal itself, and a reached route's last waypoint is the goal, not the
+    // centre. On anything but level ground those are different heights: on the
+    // fountain's tilted wading plane, 12 mm — seed 10 at restart 0 on one CI
+    // run, "ends at 0.307 m, water 0.295 m" — and on a slope, more. So a
+    // reached route reports the goal node's level *at the goal*: the surface a
+    // walker standing on that node meets as she steps across to it, which is
+    // exactly the sampler's question with the node's height as its reference.
+    const nodeY = this.nodeHeight[endNode] ?? startY;
+    this.routeEndY = this.reachedGoal ? sample(goalX, goalZ, nodeY) : nodeY;
 
     const pathLength = this.reconstruct(startNode, endNode);
     return this.smooth(startX, startZ, startY, goalX, goalZ, pathLength, out);
@@ -714,13 +818,38 @@ export class NavGrid {
     // Asked of the boundary itself, so the lattice and `CollisionWorld`'s
     // clamp cannot disagree about where the park ends. If they ever do,
     // tap-to-move routes to somewhere walking refuses to go.
+    // The boundary band — every cell outside the park or within a walker of
+    // its edge — the set `distanceToEdge(x, z) < walkerRadius` describes,
+    // built the way every wall's band is: block what `contains` says is
+    // outside, then `stampSegment` each segment of `outline()` at the
+    // walker's radius. Asking `distanceToEdge` per cell instead scans the
+    // spline's 512 vertices 134k times: measured 189 ms of a 195 ms lattice
+    // build, paid by the player's grid, every journey grid and the layout's
+    // doormat probe alike.
+    //
+    // **Equivalent, not identical by construction.** For the park's spline,
+    // `outline()` and `distanceToEdge` read the same 512-sample table, so they
+    // are one curve. For a circle boundary they are not: the outline is an
+    // inscribed 512-gon, so a cell can sit up to r(1 - cos(pi/512)) inside the
+    // true circle's band and outside the polygon's — 0.57 mm at r = 30, 2.3 mm
+    // at r = 120, against a 500 mm cell. Small, and empirical, which is why
+    // `check:nav-routes`'s band clause compares every cell centre of a
+    // colliders-free lattice against the per-cell rule on every run (exact on
+    // the spline, within that chord error on a circle) and fails naming the
+    // cell. That clause is the guard; this comment is not.
     for (let cz = 0; cz < side; cz += 1) {
       const z = this.originZ + cz * CELL;
       const row = cz * side;
       for (let cx = 0; cx < side; cx += 1) {
         const x = this.originX + cx * CELL;
-        if (boundary.distanceToEdge(x, z) < this.walkerRadius) this.blocked[row + cx] = 1;
+        if (!boundary.contains(x, z)) this.blocked[row + cx] = 1;
       }
+    }
+    const edge = boundary.outline();
+    for (let i = 0; i < edge.length; i += 1) {
+      const a = edge[i] as readonly [number, number];
+      const b = edge[(i + 1) % edge.length] as readonly [number, number];
+      this.stampSegment(a[0], a[1], b[0], b[1], this.walkerRadius, this.blocked);
     }
 
     // Then everything solid, fattened by the walker's own width — the walls
@@ -787,6 +916,7 @@ export class NavGrid {
     // Blocked cells are stamped too and simply never read — cheaper than a
     // branch, and it keeps this pass independent of the one above it.
     forEachPavedDisc((x, z, radius) => this.stampCircle(x, z, radius, this.paved));
+    this.flatCost = this.paved.includes(1) ? 1 : OFF_PATH_COST_MULTIPLIER;
 
     // Levels, for the free cells only — a blocked cell is never stepped on, so
     // its heights are never asked for, and this is much the most expensive
@@ -1010,6 +1140,201 @@ export class NavGrid {
   // --------------------------------------------------------------- the search
 
   /**
+   * **Every place a walker standing at `(x, z, y)` can get to**, as a predicate
+   * — one flood over exactly the lattice, steps, hops and connector edges
+   * {@link findRoute} searches, so it can never answer differently from a
+   * route. The one owner of "can a child reach this?" for a whole *set* of
+   * destinations: `findRoute` per destination costs ~6 ms each on the park
+   * (224 waypoints: 1.4 s, measured on seed 13), this is one pass.
+   *
+   * `null` when there is no lattice or nowhere to stand at the start — the
+   * same cases in which `findRoute` returns 0.
+   *
+   * The predicate describes the lattice **as built at the moment of the
+   * flood**. Asking it after the collision world's revision has moved on is
+   * a programming error and throws, rather than quietly answering about a
+   * park that no longer exists — an answer nobody can hear being wrong is
+   * the disease CLAUDE.md names.
+   */
+  reachableFrom(
+    startX: number,
+    startZ: number,
+    startY: number,
+    sample: GroundSampler,
+  ): ((x: number, z: number, y: number) => boolean) | null {
+    const flood = this.floodFrom(startX, startZ, startY, sample);
+    return flood ? flood.has : null;
+  }
+
+  /**
+   * The flood {@link reachableFrom} is the predicate of, with its cells
+   * exposed: `has` answers for a point, `forEachCell` visits every lattice
+   * cell the walker reached (once per cell, whatever its levels). The
+   * layout's doormat probe walks the cells of an *unreachable* pocket to name
+   * what bounds it — the plots and the boundary a door is boxed in by —
+   * derived from the pocket's own geometry rather than from any radius.
+   */
+  floodFrom(startX: number, startZ: number, startY: number, sample: GroundSampler): ReachSet | null {
+    const steps = this.floodFromSearch(startX, startZ, startY, sample);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+    }
+  }
+
+  /** {@link reachableFrom} in pieces, for a boot that stops between frames. */
+  *reachableFromSearch(
+    startX: number,
+    startZ: number,
+    startY: number,
+    sample: GroundSampler,
+  ): Generator<number, ((x: number, z: number, y: number) => boolean) | null, void> {
+    const flood = yield* this.floodFromSearch(startX, startZ, startY, sample);
+    return flood ? flood.has : null;
+  }
+
+  /**
+   * {@link floodFrom} in pieces: one after the lattice is built, then one
+   * every {@link FLOOD_PIECE} nodes popped. The layout's doormat probe floods
+   * a whole-park lattice and was the boot's one 48 ms step.
+   */
+  *floodFromSearch(
+    startX: number,
+    startZ: number,
+    startY: number,
+    sample: GroundSampler,
+  ): Generator<number, ReachSet | null, void> {
+    if (!this.ensureLattice(sample)) return null;
+    yield 0;
+    let startCell = this.cellAt(startX, startZ);
+    if (startCell < 0) return null;
+    if (this.blocked[startCell] === 1) {
+      startCell = this.nearestFreeCell(startCell);
+      if (startCell < 0) return null;
+    }
+    const startNode = this.nodeNearest(startCell, startY);
+    if (startNode < 0) return null;
+
+    const reached = new Uint8Array(this.nodeCount);
+    const stack = new Int32Array(this.nodeCount);
+    let top = 0;
+    reached[startNode] = 1;
+    stack[top++] = startNode;
+    const visit = (neighbour: number): void => {
+      if (reached[neighbour] === 1) return;
+      reached[neighbour] = 1;
+      stack[top++] = neighbour;
+    };
+    let popped = 0;
+    while (top > 0) {
+      const node = stack[--top] ?? 0;
+      this.forEachStep(node, visit);
+      popped += 1;
+      if (popped % FLOOD_PIECE === 0) yield popped;
+    }
+
+    const revision = this.builtRevision;
+    const boundary = this.builtBoundary;
+    const fresh = (): void => {
+      if (this.builtRevision !== revision || this.builtBoundary !== boundary) {
+        throw new Error('NavGrid.floodFrom: the lattice was rebuilt after this flood — flood again');
+      }
+    };
+    return {
+      has: (x, z, y) => {
+        fresh();
+        const cell = this.cellAt(x, z);
+        if (cell < 0 || this.blocked[cell] === 1) return false;
+        const node = this.nodeNearest(cell, y);
+        return node >= 0 && reached[node] === 1;
+      },
+      forEachCell: (visitCell) => {
+        fresh();
+        let lastCell = -1;
+        for (let node = 0; node < this.nodeCount; node += 1) {
+          if (reached[node] !== 1) continue;
+          const cell = this.nodeCell[node] ?? 0;
+          if (cell === lastCell) continue; // levels of one cell are contiguous
+          lastCell = cell;
+          const cx = cell % this.cells;
+          const cz = (cell - cx) / this.cells;
+          visitCell(this.originX + cx * CELL, this.originZ + cz * CELL);
+        }
+      },
+    };
+  }
+
+  /**
+   * Every node one step from `node` — the eight lattice neighbours at each
+   * level a foot can reach, plus the connector edges — with the cost of the
+   * step and the connector it rode (`0` for a lattice step). **The one owner
+   * of what a step is**: {@link search} and {@link reachableFrom} both walk
+   * this, so a rule about corners, hops or ground cost written here is a
+   * rule about routes and about reachability at once.
+   */
+  private forEachStep(
+    node: number,
+    visit: (neighbour: number, cost: number, via: number) => void,
+  ): void {
+    const cell = this.nodeCell[node] ?? 0;
+    const cx = cell % this.cells;
+    const cz = (cell - cx) / this.cells;
+    const onBand = this.hopBand[cell] === 1;
+
+    for (let i = 0; i < 8; i += 1) {
+      const nx = cx + (NEIGHBOUR_X[i] ?? 0);
+      const nz = cz + (NEIGHBOUR_Z[i] ?? 0);
+      if (nx < 0 || nz < 0 || nx >= this.cells || nz >= this.cells) continue;
+
+      const neighbourCell = nz * this.cells + nx;
+      if (this.blocked[neighbourCell] === 1) continue;
+
+      let step = 1;
+      if (i >= 4) {
+        // No cutting corners: a diagonal is only a step if both of the
+        // straight cells it passes between are walkable too. Without this a
+        // route slips through the gap where two walls meet, which the
+        // resolver then refuses to let her through.
+        if (this.blocked[cz * this.cells + nx] === 1) continue;
+        if (this.blocked[nz * this.cells + cx] === 1) continue;
+        step = Math.SQRT2;
+      }
+
+      // An edge touching a hoppable wall's band is a *hop*, so it is priced
+      // at the multiplier and held to the hop's own reach rather than to a
+      // walking step. Both facts come from the same place — see the header —
+      // and neither applies anywhere a hoppable collider is not stamped.
+      const intoBand = this.hopBand[neighbourCell] === 1;
+      const rise = onBand || intoBand ? MAX_AUTO_HOP_HEIGHT : MAX_STEP;
+
+      // What the ground is worth (issue #416), plus — in a band — what the
+      // hop is worth on top of it. Charged on the cell being stepped *into*,
+      // which is the standard weighted-lattice reading and the one that makes
+      // the first step off a kerb cost what the grass costs. See
+      // {@link bandedStep} for why the hop's price is *added* to the ground's
+      // rather than multiplied by it.
+      step = bandedStep(step, this.costOf(neighbourCell), intoBand, this.flatCost);
+
+      // Every level of the neighbouring cell a walking foot could reach.
+      // Levels of one cell are more than a step apart by construction, so
+      // at most one matches; the loop is over the cell's own short range.
+      const from = this.levelStart[neighbourCell] ?? 0;
+      const to = this.levelStart[neighbourCell + 1] ?? 0;
+      for (let neighbour = from; neighbour < to; neighbour += 1) {
+        // Whether the rise is within a step is {@link stepAdmits}' — the one
+        // owner physics and nav share (#660) — never a `y` difference here.
+        if (!this.stepAdmits(node, neighbour, rise)) continue;
+        visit(neighbour, step, 0);
+      }
+    }
+
+    const edges = this.connectorEdges.get(node);
+    if (edges) {
+      for (const edge of edges) visit(edge.to, edge.cost, edge.via);
+    }
+  }
+
+  /**
    * A* from one node to another, over the eight-connected lattice plus the
    * connector edges.
    *
@@ -1048,70 +1373,14 @@ export class NavGrid {
       expansions += 1;
       if (expansions > MAX_EXPANSIONS) break;
 
-      const cell = this.nodeCell[node] ?? 0;
-      const cx = cell % this.cells;
-      const cz = (cell - cx) / this.cells;
-      const nodeCost = this.gScore[node] ?? 0;
-      const onBand = this.hopBand[cell] === 1;
-
-      for (let i = 0; i < 8; i += 1) {
-        const nx = cx + (NEIGHBOUR_X[i] ?? 0);
-        const nz = cz + (NEIGHBOUR_Z[i] ?? 0);
-        if (nx < 0 || nz < 0 || nx >= this.cells || nz >= this.cells) continue;
-
-        const neighbourCell = nz * this.cells + nx;
-        if (this.blocked[neighbourCell] === 1) continue;
-
-        let step = 1;
-        if (i >= 4) {
-          // No cutting corners: a diagonal is only a step if both of the
-          // straight cells it passes between are walkable too. Without this a
-          // route slips through the gap where two walls meet, which the
-          // resolver then refuses to let her through.
-          if (this.blocked[cz * this.cells + nx] === 1) continue;
-          if (this.blocked[nz * this.cells + cx] === 1) continue;
-          step = Math.SQRT2;
-        }
-
-        // An edge touching a hoppable wall's band is a *hop*, so it is priced
-        // at the multiplier and held to the hop's own reach rather than to a
-        // walking step. Both facts come from the same place — see the header —
-        // and neither applies anywhere a hoppable collider is not stamped.
-        const intoBand = this.hopBand[neighbourCell] === 1;
-        if (intoBand) step *= HOP_COST_MULTIPLIER;
-        const rise = onBand || intoBand ? MAX_AUTO_HOP_HEIGHT : MAX_STEP;
-
-        // What the ground is worth (issue #416). Charged on the cell being
-        // stepped *into*, which is the standard weighted-lattice reading and
-        // the one that makes the first step off a kerb cost what the grass
-        // costs. Paving is 1, so the octile heuristic — which is in cell units
-        // at cost 1 — still never overestimates and A* stays optimal.
-        //
-        // **The two multipliers compose safely, structurally rather than by
-        // luck.** Both are written on this same `step`, neither touches
-        // {@link heuristic} (octile, in cell units, at cost 1), and both are
-        // >= 1 on the geometric step — so the heuristic remains a lower bound
-        // with both applied exactly as it is with either alone. Any further
-        // weighting of this shape is admissible for the same reason.
-        step *= this.costOf(neighbourCell);
-
-        // Every level of the neighbouring cell a walking foot could reach.
-        // Levels of one cell are more than a step apart by construction, so
-        // at most one matches; the loop is over the cell's own short range.
-        const from = this.levelStart[neighbourCell] ?? 0;
-        const to = this.levelStart[neighbourCell + 1] ?? 0;
-        for (let neighbour = from; neighbour < to; neighbour += 1) {
-          if (!this.stepAdmits(node, neighbour, rise)) continue;
-          this.relax(node, neighbour, nodeCost + step, 0, goalX, goalZ, goalY);
-        }
-      }
-
-      const edges = this.connectorEdges.get(node);
-      if (edges) {
-        for (const edge of edges) {
-          this.relax(node, edge.to, nodeCost + edge.cost, edge.via, goalX, goalZ, goalY);
-        }
-      }
+      // The steps themselves — corners, hops, ground cost, levels, connectors
+      // — are {@link forEachStep}'s, shared with {@link reachableFrom}.
+      this.expandFrom = node;
+      this.expandCost = this.gScore[node] ?? 0;
+      this.expandGoalX = goalX;
+      this.expandGoalZ = goalZ;
+      this.expandGoalY = goalY;
+      this.forEachStep(node, this.relaxStep);
     }
 
     return this.searchBestNode;
@@ -1139,6 +1408,26 @@ export class NavGrid {
       rise,
     );
   }
+
+  // The node being expanded and its goal, held on the instance so the visitor
+  // {@link forEachStep} is handed can be one arrow allocated once rather than
+  // one per expansion — `search` expands up to MAX_EXPANSIONS nodes a route.
+  private expandFrom = -1;
+  private expandCost = 0;
+  private expandGoalX = 0;
+  private expandGoalZ = 0;
+  private expandGoalY = 0;
+  private readonly relaxStep = (neighbour: number, cost: number, via: number): void => {
+    this.relax(
+      this.expandFrom,
+      neighbour,
+      this.expandCost + cost,
+      via,
+      this.expandGoalX,
+      this.expandGoalZ,
+      this.expandGoalY,
+    );
+  };
 
   /** One A* relaxation, tracking the best fallback ending as it goes. */
   private relax(
@@ -1451,6 +1740,87 @@ export class NavGrid {
     const cz = this.rowOf(z);
     if (cx < 0 || cz < 0 || cx >= this.cells || cz >= this.cells) return -1;
     return cz * this.cells + cx;
+  }
+
+  /**
+   * Every cell centre of the lattice with whether it is blocked — the
+   * lattice's own geometry, for a check that must compare it cell-for-cell
+   * against a rule (`check:nav-routes`'s band clause). Re-deriving the cell
+   * layout in the check is how a first control compared different points and
+   * reported 104 phantom disagreements; the one owner of where a cell is, is
+   * here.
+   */
+  forEachCellCentre(
+    sample: GroundSampler,
+    visit: (x: number, z: number, blocked: boolean) => void,
+  ): void {
+    if (!this.ensureLattice(sample)) return;
+    for (let cz = 0; cz < this.cells; cz += 1) {
+      const z = this.originZ + cz * CELL;
+      const row = cz * this.cells;
+      for (let cx = 0; cx < this.cells; cx += 1) {
+        visit(this.originX + cx * CELL, z, this.blocked[row + cx] === 1);
+      }
+    }
+  }
+
+  /**
+   * **The nearest spot to `(x, z)` a walker can stand on** — within `within`
+   * metres, preferring one `accept` says yes to (a reachable one, say), and
+   * answering `null` when nothing within reach is standable at all. The one
+   * owner of "where may a waypoint stand?", asked by `PoiGraph` so that a
+   * node is placed by exactly the lattice the children then walk: a spot the
+   * resolver calls clear but no route can stand on is a node nobody can
+   * visit, which is what stranded three waypoints inside the castle facade
+   * for weeks.
+   *
+   * Nearest by real distance over the whole square of cells, not first-ring
+   * order, so two callers with the same inputs get the same cell whatever the
+   * lattice's origin — determinism the graph's spawn order rests on.
+   */
+  nearestStandable(
+    x: number,
+    z: number,
+    y: number,
+    sample: GroundSampler,
+    within: number,
+    accept: (x: number, z: number, y: number) => boolean = () => true,
+  ): { x: number; z: number; y: number } | null {
+    if (!this.ensureLattice(sample)) return null;
+    const reach = Math.ceil(within / CELL);
+    const cx = this.columnOf(x);
+    const cz = this.rowOf(z);
+    let best: { x: number; z: number; y: number } | null = null;
+    let bestDistance = Infinity;
+    let fallback: { x: number; z: number; y: number } | null = null;
+    let fallbackDistance = Infinity;
+    for (let dz = -reach; dz <= reach; dz += 1) {
+      const row = cz + dz;
+      if (row < 0 || row >= this.cells) continue;
+      for (let dx = -reach; dx <= reach; dx += 1) {
+        const column = cx + dx;
+        if (column < 0 || column >= this.cells) continue;
+        const cell = row * this.cells + column;
+        if (this.blocked[cell] === 1) continue;
+        const node = this.nodeNearest(cell, y);
+        if (node < 0) continue;
+        const px = this.originX + column * CELL;
+        const pz = this.originZ + row * CELL;
+        const distance = Math.hypot(px - x, pz - z);
+        if (distance > within) continue;
+        const py = this.nodeHeight[node] ?? y;
+        if (accept(px, pz, py)) {
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = { x: px, z: pz, y: py };
+          }
+        } else if (distance < fallbackDistance) {
+          fallbackDistance = distance;
+          fallback = { x: px, z: pz, y: py };
+        }
+      }
+    }
+    return best ?? fallback;
   }
 
   /** The closest cell to `cell` a walker could stand in, or -1 if none is near. */

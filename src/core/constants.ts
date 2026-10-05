@@ -239,8 +239,32 @@ export const gradientAtParkRadius = (
   radius: number = GROUND_SPHERE_RADIUS,
 ): number => (d >= radius ? Infinity : d / Math.sqrt(radius * radius - d * d));
 
+/**
+ * **How much the park grew to fit the Reptile House — the one owner of it.**
+ * Jim, 3 Oct 2026: the Reptile House goes in the park, *"with the park
+ * enlarged slightly to fit it"*, so the parks are no more crowded than before.
+ *
+ * A linear factor on the garden's half-size (and so the gate) and the play
+ * radius (and so the outline's target area) — and on nothing else: the planet
+ * keeps its radius, every building keeps its size, and the manifest's bands
+ * stay where they were (`parkManifest.ts` says why: growing them halved the
+ * acceptance rate). Measured, not
+ * guessed: at 1 the manifest's bounding discs claimed 25.3% of the park; the
+ * Reptile House's (radius 12, 452 m²) is 8.5% more claim, so the area grows
+ * 8.5% and the radius √1.085 = 1.0416 — the claimed share stays 25.3%.
+ *
+ * Not the area multiplier: growing the area against a gate that stays put is
+ * what `boundary.ts` warns swells the outline, and at 2.17 seed 5 restart 4
+ * found no gentle outline at all (`solveBoundaryRadii` threw). Scaling the gate
+ * with the park is what this constant does instead.
+ */
+export const PARK_GROWTH = 1.0416;
+
+/** Everything in the park that spreads out with it: {@link PARK_SURFACE_SCALE} × {@link PARK_GROWTH}. */
+export const PARK_EXTENT_SCALE = PARK_SURFACE_SCALE * PARK_GROWTH;
+
 /** Half-width of the playable garden, in metres. The garden is square. */
-export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
+export const GARDEN_HALF_SIZE = 62 * PARK_EXTENT_SCALE;
 
 /**
  * Player is pushed back inside this radius from the centre (soft boundary).
@@ -254,7 +278,7 @@ export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
  * the shell has to swell to cover. Scaling both together keeps the gate on the
  * wall rather than stranding it inside a park that grew around it.
  */
-export const GARDEN_PLAY_RADIUS = 58 * PARK_SURFACE_SCALE;
+export const GARDEN_PLAY_RADIUS = 58 * PARK_EXTENT_SCALE;
 
 /**
  * The gradient the cat bus is comfortable on, as rise over run.
@@ -353,6 +377,13 @@ export const PLAYER_TURN_SPEED = 13;
 export const PLAYER_RADIUS = 0.62;
 
 /**
+ * The narrowest gap a child can actually use: two player radii. `NavGrid`
+ * fattens every collider by `PLAYER_RADIUS` before calling a cell walkable, so
+ * anything narrower is a solid wall with a visible slot in it.
+ */
+export const WALKABLE_GAP = PLAYER_RADIUS * 2;
+
+/**
  * Half-thickness of the collider under a **hoppable** wall — one entry per
  * wall the park registers with `autoHoppable: true`, and there are exactly
  * three of them.
@@ -437,6 +468,58 @@ export const PATH_KERB_LIFT = 0.03;
  * this much more than the paving's own width, or the kerb tears off at the
  * edge of the thing carrying it. */
 export const PATH_KERB_OVERHANG = 0.425;
+
+/** The widest spur a destination is given (the castle's), metres. */
+export const WIDEST_SPUR_WIDTH = 2.8;
+
+/**
+ * **How far a spur's drawn paving reaches from its centre line**: half the
+ * widest spur plus its kerb. What a path's centre has to keep from a booth, a
+ * building, a neighbour's plot or the boundary wall for its paving to stay
+ * off them (`test/procgen`'s `noDrawnPavingUnderASolid`).
+ */
+export const SPUR_PAVED_REACH = WIDEST_SPUR_WIDTH / 2 + PATH_KERB_OVERHANG;
+
+/**
+ * **How far the paving runs on in under a building's door**, metres — past the
+ * door's drawn front (the hotel's sliding doors, the foot of the castle's
+ * steps), so the path and the door overlap and no lawn shows between them.
+ * Jim, 3 Oct 2026: *"the path really should go a little under the
+ * castle/hotel door (like 1 m under) so that there is overlap and zero gap."*
+ * The one owner: the door aprons are drawn to it (`parkLayout.ts`'s
+ * `doorApronOf`), `noDrawnPavingUnderASolid` allows exactly it, and
+ * `drawnPavingReachesEveryDoor` asserts it.
+ */
+export const DOOR_PAVING_OVERLAP = 1.0;
+
+/**
+ * How far a drawn cross-section's sampled points must keep from a built solid:
+ * a hand's breadth for what five points across a 0.8 m station cannot see —
+ * the kerb's mitre at a corner and the ribbon between stations (seeds 4 and 6,
+ * 2 Oct 2026: 0.16–0.20 m of kerb under a booth past a clean screen). The path
+ * router screens every candidate with it (`paths.ts`), and a doormat placed
+ * from a building's solids leaves it too, or every spur arriving at that
+ * doormat at an angle is refused (#708: the Reptile House's own spur, 0.23 m
+ * clear and refused).
+ */
+export const BUILT_SOLID_MARGIN = 0.25;
+
+/**
+ * **The main loop's drawn width — the one owner.**
+ *
+ * The promenade circling the fountain plaza is paved this wide, so its paving
+ * reaches `MAIN_LOOP_WIDTH / 2` either side of `RING_RADIUS`.
+ *
+ * It lives here, in a leaf module, because **four** places need it and two of
+ * them cannot import each other: `paths.ts` draws the ring and imports
+ * `parkLayout.ts`, so `parkLayout.ts` cannot import back. It was previously
+ * the literal `3.6` in the ring's own route, a restatement of `3.6 / 2` in
+ * `paths.ts`'s `RIBBON_HALF_WIDTH_CEILING`, a third restatement inside
+ * `parkLayout.ts`'s `RING_PLOT_CLEARANCE`, and — once the fairy ring had to
+ * know where the loop's paving stopped — nearly a fourth. A comment promising
+ * that several numbers agree is not a mechanism; this is.
+ */
+export const MAIN_LOOP_WIDTH = 3.6;
 
 /**
  * Slack a carrier of the path adds on top of {@link PATH_KERB_OVERHANG}
@@ -728,6 +811,49 @@ export const CASTLE_TURRET_CORNERS: readonly (readonly [number, number])[] = [
   [-(BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2), BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2],
   [BUILDING_HALF_X + BUILDING_WALL_THICKNESS / 2, BUILDING_HALF_Z + BUILDING_WALL_THICKNESS / 2],
 ];
+
+/**
+ * **How wide a turret is**, for anything that has to keep out of one — a
+ * collider, a keep-out disc, a bench scatter, the offset that pushes the roof
+ * garden's turrets clear of its paving, and the castle's plot reach below.
+ *
+ * The cone oversails the shaft, and the cone is what a child's hat meets when
+ * she walks up to a turret, so the wider of the two is the honest answer.
+ * Derived rather than typed for the reason everything round here is: a turret
+ * that grows must take its keep-out with it.
+ */
+export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
+  CASTLE_TURRET_BASE_RADIUS,
+  TOWER_RADIUS + TOWER_ROOF_OVERHANG,
+);
+
+/**
+ * **How far the castle reaches from its plot's centre, on any placement** —
+ * the 'building' entry's `boundingRadius` in `world/parkManifest.ts`, which
+ * every path, scatter and solver spacing plans around.
+ *
+ * It used to be typed there (19.3, "the castle's own masonry reaches 19.0
+ * exactly"), a second definition of the castle's size kept in step by hand,
+ * and it was wrong on every shipped seed: once `check:park`'s `anchor.reach`
+ * measured vertices instead of mesh centres, the drawn turret shafts reached
+ * 20.13–20.69 m across seeds 0..15 (25 Sep 2026). The number it missed is the nudge: the castle stands
+ * {@link BUILDING_CENTRE_NUDGE} off its plot centre, towards the park middle,
+ * on a bearing that depends on where the plot lands, while its axes never
+ * turn (`CASTLE_FRAME` is built at bearing 0). So on some placement the nudge
+ * points straight down a turret's diagonal, and the reach is the plain sum:
+ * the nudge, the turret's centre from the castle's ({@link CASTLE_TURRET_CORNERS}),
+ * and the turret's widest radius. 3.54 + 15.32 + 2.45 = 21.31 m.
+ *
+ * This is the bound in the plan frame the radius is read in (a drawn point
+ * unleant onto its own foot — `unplaceFromSphere`): the castle stands plumb
+ * on its own centre and everything above the ground only projects inwards
+ * from there, so no drawn point's foot is further out than this. Measured
+ * across the sixteen shipped seeds the furthest foot is the turret shaft's.
+ */
+export const CASTLE_PLOT_REACH =
+  BUILDING_CENTRE_NUDGE +
+  Math.max(...CASTLE_TURRET_CORNERS.map(([x, z]) => Math.hypot(x, z))) +
+  CASTLE_TURRET_FOOTPRINT_RADIUS;
 
 /**
  * Height of the solid painted wall; a band of glass fills the gap up to the

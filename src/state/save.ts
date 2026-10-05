@@ -112,6 +112,12 @@ export interface SavedPlace {
   readonly z: number;
   /** Yaw, in radians — which way she was looking. */
   readonly facing: number;
+  /**
+   * The park this position was measured in — the park file's digest
+   * (`parkStamp`). A position is only restored into the same park; one with no
+   * stamp predates the stamp and is not restored.
+   */
+  readonly park?: string;
 }
 
 /** The one-time things that have already happened on this device. */
@@ -612,7 +618,8 @@ function readPlace(value: unknown): SavedPlace | undefined {
   if (space === undefined || x === undefined || y === undefined || z === undefined) {
     return undefined;
   }
-  return { space, x, y, z, facing: facing ?? 0 };
+  const park = readString(value['park']);
+  return { space, x, y, z, facing: facing ?? 0, ...(park === undefined ? {} : { park }) };
 }
 
 function readFlags(value: unknown): SavedFlags {

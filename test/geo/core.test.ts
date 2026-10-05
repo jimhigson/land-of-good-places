@@ -21,7 +21,7 @@ import {
   tangentTowards,
   unboundedConstant,
 } from '../../src/world/geo';
-import { placeOnSphere, terrainHeight, upAt } from '../../src/world/terrain';
+import { placeOnSphere, terrainHeight, unplaceFromSphere, upAt } from '../../src/world/terrain';
 
 /**
  * **The core sphere vocabulary, and a control on every instrument that measures
@@ -278,6 +278,34 @@ describe('Chart: flatness is declared, bounded, and priced', () => {
     // escape hatch: it answers anywhere, including 60 m away, which is exactly
     // the bug when it is used for a height.
     expect(unboundedConstant(0.45).at(g)).toBe(0.45);
+  });
+});
+
+describe('unplaceFromSphere: a drawn point back to the flat frame it was authored in', () => {
+  it('inverts placeOnSphere to a tenth of a millimetre, out to the ride heights', () => {
+    const drawn = new Vector3();
+    const q = new Quaternion();
+    const back = new Vector3();
+    let worst = 0;
+    for (const [x, z] of SAMPLE_COLUMNS) {
+      for (const height of [0, 1.4, 9, 25]) {
+        const flat = { x, y: terrainHeight(x, z) + height, z };
+        placeOnSphere(flat, 0, drawn, q);
+        unplaceFromSphere(drawn, back);
+        // flat-ok: a round-trip residual between two points in the same chart frame, not a height
+        worst = Math.max(worst, Math.hypot(back.x - flat.x, back.y - flat.y, back.z - flat.z));
+      }
+    }
+    process.stderr.write(`unplaceFromSphere round trip: worst ${worst.toExponential(2)} m\n`);
+    expect(worst).toBeLessThan(1e-4);
+  });
+
+  it('control: reading a drawn point straight as flat is metres out, which is the error it removes', () => {
+    const drawn = new Vector3();
+    const q = new Quaternion();
+    const [x, z] = [90, 40];
+    placeOnSphere({ x, y: terrainHeight(x, z) + 9, z }, 0, drawn, q);
+    expect(Math.hypot(drawn.x - x, drawn.z - z)).toBeGreaterThan(3);
   });
 });
 

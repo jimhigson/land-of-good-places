@@ -290,6 +290,64 @@ walker from an import list; the rule that follows is in "Traps" below —
 
 **Baseline corrected**: 4 of 16 build (0, 5, 11, 14), not 2.
 
+**A false refusal, measured (6 Sep), and the rule it sharpens.** Rung 1
+refused the castle's doormat on seed 1 and redrew the castle. The door at
+(−28.5, 24.7) sits 5.49 m from the ball pit's centre, inside its 7.5 m
+footprint circle **by design** (the near pair: the slide exits into the
+pit). In the layout-time world every footprint is solid and fattened by
+the walker, so nothing within 2.2 m is standable; in the **built** park
+the nearest standable reachable spot is 0.07 m from the door and the only
+collider within 2.5 m is a turret 1.30 m clear. The ball pit's footprint
+is walkable ground. So "a door covered by another plot's footprint is
+certainly bad" is false, and there is no safe over-approximation while
+the layout-time world cannot tell a solid from a surface.
+
+**Rule, binding on every rung that reasons about a partial world:** *a
+probe exploring an over-approximate world may refuse only what is
+certainly bad on that world's own terms — and if the world cannot express
+"walkable", nothing is certainly bad and the probe must not refuse at
+all.* A refusal on an over-approximation redraws real geometry to satisfy
+a measurement error, which is the failure the totality contract exists to
+prevent. The engineer's guard — refusals ignored under a scratch flag are
+asserted genuinely unreachable in the built park, else
+`layout.falseRefusal` — is the net; it stays, on every run.
+
+**Where the distinction lives — ruled.** It is the claim kinds, and the
+registry is its home; that is what `footprint` versus `walkable` /
+`surface` were defined for, and `CLAIM_COMPATIBILITY` already says a
+corridor and a stand spot are welcome on walkable ground. What is missing
+is not a new field but the **plots' migration** — stage 5's first row,
+"plots first (everyone re-derives their circles by hand)" — brought
+forward, because this is the third consumer in a week to invent the
+solid/surface answer privately (#503, #504, now the layout probe):
+
+- **One owner per plot: the thing that draws it.** A plot's builder
+  publishes its claims — `footprint` for what is solid (the ball pit's
+  rim and walls, a booth's body), `walkable` for ground a child stands on
+  (the pit's floor, a plaza), `surface` for a deck — describing the
+  *drawn* geometry (#504's variant). Not a manifest flag: a flag beside a
+  radius is a second definition of the shape, and the manifest already
+  lies about one radius (#504's bush).
+- **`PARK_LAYOUT`'s circles become the plots' *provisional* claims** at
+  layout time (a footprint disc is the conservative shape while nothing
+  is drawn), realised by the builder into their kinds when the plot is
+  built — the provisional-then-realised mechanism the road already uses.
+  Until a plot is realised its provisional claim is `footprint`, and by
+  the rule above **a layout-time probe may not refuse on a provisional
+  footprint** — it may only note "unresolved" and defer the verdict to
+  the commit (the built NavGrid).
+- **Interim, accepted**: the layout probe's obstacle set is *what the
+  router itself treats as obstacles*, read from its one owner
+  (`streetPlots` or its sibling) — the same function the paths' commit
+  uses, so an explore-yes/commit-no disagreement has one legal cause.
+  **If nothing owns that set today, the answer is not a manifest field;
+  it is the plots row above, and the probe refuses nothing until it
+  lands** (the built verdict still arms the rung).
+
+`headroom` on a corridor claim and `standable` on a footprint are the same
+idea — a claim saying what may share its ground — and both belong on the
+claim, not on the consumer.
+
 **Determinism — the rule that keeps a seed meaning something.** A park
 that reached decision zero is *a different park than seed n nominally
 asked for*, and that is fine; what is not fine is a park that is not a
@@ -939,6 +997,211 @@ there so nobody re-files it.
    measurement (if the sphere alone clears the posts, it shrinks to
    counters + the engine move).
 
+#### Steps 3 and 4, re-cut (6 Sep) — what the code turned out to be
+
+Read against the code before the briefs were re-cut (`parkGeneration.ts`,
+`solveScheduler.ts`, `groundClaims.ts`, `coSolve.ts`, and step 2's branch),
+three facts the step list above did not state, and the rulings they force:
+
+- **The trestles are not a scheduler task after step 2.** Step 2 makes
+  each leg a claim, but `trestleSpots` still runs at `RailRace`
+  construction inside `World`, against the letterboxed registry. So "the
+  two migrated placers interleave" has nothing on the trestle side to
+  interleave until **step 3 makes a `railRaceSupports` task** — both
+  rings, sliced per slot, output letterboxed to `World`, `RailRace`
+  consuming it and re-solving only when the letterbox is empty. Its
+  `collision.isClearCircle` legacy predicate has no generation-time owner;
+  step 3 measures what it was refusing on every seed and either drops it
+  with the number or names the collider's own owner as a legacy predicate.
+- **The road task is last by declaration, not by data**: `roadCorridor` is
+  registered `deps: ['pathGraph']`, and its second turn is `World`
+  re-committing after `Entrance` because `publishPaving()` is called from
+  `buildPaths()` (a draw). Step 3 splits it into `roadCorridor`
+  (provisional, `deps: []`) and `roadCorridorRealised` (`deps:
+  ['pathGraph', 'roadCorridor']`), and **brings forward one stage-4 item
+  only: `publishPaving()` moves into the `pathGraph` task** (the graph is
+  solved there already; publishing is data readiness). The paths do not
+  migrate.
+- **Neither placer in the pair draws randomness** (both are nearest-first
+  marches), so step 3's park is expected byte-identical unless the two
+  measurements above move a leg. The decision-stream owner
+  (`hash(seed, feature, decision, attempt)`) still lands in step 3, as the
+  decision log's owner; the PR says in words that no draw goes through it
+  yet.
+- **Step 4 is the scheduler learning the ladder, not "a loud failure".**
+  `SolveScheduler` absorbs `CoSolveEngine`'s mechanics (attempt, withdraw,
+  negotiate, unwind, restart, counters) and both `coSolve.ts` and
+  `PlacementField` are deleted; a task returns a `Refused` value instead
+  of throwing; the trestle throw becomes that refusal; the road's next
+  attempt is the nearest outset past the refusing claim's extent (derived,
+  finite). The scheduler's own decision zero is wired and proved reachable
+  under a scratch flag; the **layout's** decision zero is not reachable
+  from a scheduler refusal until the layout is a task (stage 4), and the
+  trace says so on every run. The support shape is built only if a seed's
+  refusal survives the road's negotiation on the sphere — measured first.
+  A refusal surviving every rung with the flag off is a bug that stops the
+  PR, per Jim's ruling; it is never a designed terminal state.
+
+The briefs (`BRIEF-stage3-step3-confront-ladder.md`,
+`BRIEF-stage3-step4-negotiation.md`) carry the detail; this section is the
+authority they cite.
+
+#### One rail race (Jim, 6 Sep) — the two rings are never in the world together
+
+Jim: *"either the small one or the big one is shown — it is purely a
+visual trick, they never occupy the world at the same time."* Confirmed in
+code: `RailRace.setActiveRing` shows exactly one ring's group; invariant
+"only the walk-past ring is solid" already forbids the race ring a
+collider because it is hidden except mid-race. **There is one rail race,
+drawn at one of two scales.** Anything that makes the two rings clear
+each other describes a world that never occurs — on the canonical seed
+that was ~100 race-ring candidates refused by `legacy:collision` at
+exactly 1.0 m from walk-past posts (1.1 m clear circle), pure waste.
+
+Ruled, as deletions rather than better-shaped claims:
+
+- **One feature name, `railRace`**, for both rings' claims. The registry
+  never refuses a feature with its own claims (`refusalsOf` skips the
+  asker), so the rings stop constraining each other with no
+  exemption-by-identity; the road and everything later still see the
+  union, because either ring can be shown while they are there.
+- **The walk-past ring's colliders are registered after both rings are
+  placed.** They stay — a child on foot, `NavGrid` (so every NPC route),
+  `LampPosts` and `check:park` all read them, and none of that is
+  cross-ring — but they are for feet on the floor, not for placing the
+  ride ring, so the race ring's search never sees them.
+- The walk-past × race pairs vanish from the registry sweep; the
+  three-feature probe becomes `[road, railRace]`; per-ring facts compare
+  each ring's drawn claims to its slice of the one feature's.
+
+Open with Jim: the race ring exists only mid-race, when the bus is not on
+the road, so its headroom clip and its feet's refusal by the road corridor
+are also for a co-presence that cannot happen. Until he rules, both rings
+keep respecting the road; `check:swept-bus` sweeps the walk-past ring's
+posts (the first `railRace:trestle-legs` in the scene) and should say so.
+
+#### The road rule (Jim, 6 Sep) — legs over the road are skipped; nothing else changes
+
+Jim, asked whether the ride-scale ring may stand on or over the bus road:
+*"just skip all the legs over the road, otherwise keep them — one simple
+rule is all we need here."* The rule, as an engineer implements it:
+
+> A trestle slot whose foot disc (`POST_FOOT_RADIUS` at the ring's scale)
+> at its nominal position on the ring overlaps the road's corridor claim —
+> `entranceRoadClaims()`, whose `halfWidth` **is** `ROAD_HALF_WIDTH`, the
+> drawn carriageway, no outset — is not built: no search, no lean, no
+> shape, on either ring. Every other slot is placed exactly as today; a
+> march candidate that lands on the road is refused like any other claim.
+
+"Over the road" has one owner because the corridor claim and the drawn
+carriageway are one number. Cost, measured on the branch: on the sphere
+the road sits at outset 19.07 against a ring ground band ending at 11.58
+plus a foot, so the rule fires on **zero** slots on every pool seed and the
+40 m-run and duck-bar invariants are untouched. A road that ever crossed
+the band would cost at most one slot per radial crossing (12 m spacing
+against 7.78 m of carriageway — a 24 m gap); a *mandatory* duck-bar slot
+over the road loses its post and `duckBarsStandOnRealSupports` says so —
+the alarm, and the day for a second clause, not now.
+
+**Final form (Jim, 7 Sep), after the duck-bar alarm fired on two seeds:**
+*"ok fine, make the big version have all its legs, but the normal version
+can have them selectively."* So: **the ride-scale ring ignores the road
+entirely and keeps every leg; the walk-past ring applies the rule and
+skips its own.** The alarm was the ruling's design doing its job — put to
+Jim as "two of fourteen pool seeds lose one bar for one racer", answered
+with the number in front of him. Seed 131's slot was the race ring's and
+clears; seed 326's is the walk-past ring's and may not — if it does not,
+that is the rule costing exactly one bar on one seed, **accepted**, and it
+goes in the PR body as an accepted cost, not back to Jim.
+
+**The one fact this rests on, stated once because it is now load-bearing
+in two places:** *the two rings are never in the world at the same time.*
+The one-feature change (the rings do not constrain each other) and the
+rule's asymmetry (the ride ring may stand over a road the bus is never on
+while it exists) are both consequences of exactly that fact, and nothing
+else. If it were ever false — a design that showed both rings at once, or
+the bus on the road mid-race — **both are wrong together**, and the first
+thing to re-examine is `RailRace.setActiveRing`, the one place the fact
+lives in code.
+
+**Fairness is the race ring's property (Architect, 7 Sep).** With the
+final form in, seed 131's walk-past ring reads 10/10/9/10 duck bars per
+lane. `RailRace.ts` on that ring: *"nobody is racing, but the rivals do
+not know that — they carry on"*; no standings, no winner, no player.
+Equal-per-racer — Jim's 7 Aug ask, "what makes the race fair" — is a
+property of the race, and the race happens on the ride-scale ring only,
+so asserting it on the walk-past ring measures the wrong object. Re-cut:
+equal-per-racer on the race ring; on the walk-past ring, no-two-touch
+stays and each lane's count equals the race ring's for that lane minus
+the bars whose slot the road rule skipped there, the skipped count
+printed per seed — a bar missing for any other reason is still caught,
+and the rule's cost is stated on every run, never tolerated silently.
+
+**What the rule makes unnecessary** — each a rule the generator would
+otherwise imply and no longer applies, so deleted, not left:
+
+- `Claim.headroom` and `GroundClaims.tallestHeadroom`; the corridor claim
+  carrying a bus height; `trestleClaims`' headroom parameter — the clip
+  stays, at `TALLEST_CHILD_HEIGHT` from `kid.ts`, because a claim describes
+  what a walker meets near the ground.
+- The road's outset marching the registry against trestle claims, and the
+  deletion of `supportGround.ts` (step 2 phase 2, item 3): the road no
+  longer avoids trestles — they skip it — so it stays where its band owner
+  puts it.
+- **Step 4's negotiation has no customer.** A trestle refused by the road
+  is skipped, never negotiated, and the road is never refused by a
+  trestle; "the first negotiated pair" has nothing to negotiate. The
+  scheduler's ladder lands with the first placer that genuinely returns a
+  refusal (stage 4's paths), not as a mechanism exercised by a check that
+  cannot fail.
+
+**What stays**: `CAT_BUS_TOP` (label, asset contract); `CAT_BUS_DRIVEN_TOP`
+and the posed-crown derivation, as the owner `check:swept-bus` reads — the
+check is now the instrument that proves the rule against the drawn park
+and the alarm if a kept branch ever hangs where the bus drives;
+`suspensionTravelAt` for the chin, wheel and step.
+
+#### Two roads met (6 Sep) — ruled: one road, `roadCorridor` shape, `roadRoute` geometry
+
+The sphere branch carries `roadRoute.ts` (#498's arc, now at outset
+19.07 m from `supportGround.ts`'s published band, with the arc-aware
+`check:swept-bus` at 0 drawn posts on fourteen seeds); `main` carries
+step 1's `roadCorridor.ts` (the one owner of the road's segments and
+claims; `check:ground-claims`). Step 1 *knew*: its brief was re-cut off
+`roadRoute.ts` when #498 stalled, with "if it lands later the claim
+follows its owner" — the shape was built to receive the arc. Not a
+duplication; a sequencing seam, closed as follows:
+
+- **`roadCorridor.ts` stays the owner of what the road *is* to everyone
+  else** — `entranceRoadSegments()` / `entranceRoadClaims()`, the
+  provisional-then-realised commit, the letterbox, the invariant.
+- **`roadRoute.ts` becomes the geometry it returns.** `entranceRoadSegments()`
+  samples the arc (from `roadRoute`'s own owner of the outset, which reads
+  `supportGround.ts`'s band — no copy of 19.07 anywhere) into straight
+  runs; `RoadSegment` is generalised from axis-aligned `across/along` to an
+  arbitrary `from → to` (a capsule claim already is one); claims become
+  **one capsule per run**, and the "exactly two" probe becomes "claim
+  count == segment count, and each claim is its segment".
+- **`Entrance.ts` draws from the segments** using the sphere branch's arc
+  ribbon builder; nothing in the builder or the claim re-derives an
+  endpoint. The spur (gate approach) keeps its provisional/realised end.
+- `check:ground-claims` and the road invariant measure oriented bounds
+  per run instead of axis-aligned; probe 2b, probe 3 (`===`) and probe 4
+  (byte-equality with the owner) unchanged.
+- `check:swept-bus`, `supportGround.ts` and the ring band are **untouched
+  in substance**: they read the road through its owner. If any reads
+  `roadRoute.ts` directly, redirect the read to `roadCorridor.ts`'s
+  exports or make `roadRoute` a private import of it — one owner chain,
+  whichever is fewer lines.
+
+**Proof the merge changed nothing it should not**: the sphere branch's
+park digest on all fourteen building seeds before and after (the road's
+geometry must not move by a millimetre — `check:swept-bus`'s bidirectional
+ratchet says so independently at 0 posts), and `check:ground-claims`
+green with the arc. **Honest size: one engineer, half a day to a day** —
+the #511 engineer, who holds both sides' measurements; the risk is in the
+oriented-bounds rewrite of the invariant, not in the geometry.
+
 ### Stage 4 mechanism — incremental route growth: explore free, commit in sections
 
 Jim's section-by-section ruling (the slide-leg section above) reshapes how
@@ -1094,7 +1357,7 @@ section above (march becomes exploration) is unchanged by them.
 
 ### Stage 4 — paths, railway, crossings migrate together (large; parks change)
 
-*Filed here from stage 3 (5 Sep): `publishPaving()` runs inside `new World(...)`, after generation — a post-generation commit by the paths that the road's second turn today has to wait for.*
+*Filed here from stage 3 (5 Sep): `publishPaving()` runs inside `new World(...)`, after generation — a post-generation commit by the paths that the road's second turn today has to wait for. **Re-filed 6 Sep: the publishing alone moves into the `pathGraph` task in stage 3 step 3** ("Steps 3 and 4, re-cut"); the paths' migration itself stays here.*
 
 *Also filed (5 Sep, from the #511 branch's `test:procgen` run): **seed 288
 throws during park construction on a bridge-siting failure** —

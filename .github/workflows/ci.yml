@@ -1,0 +1,174 @@
+name: CI
+
+# **Everything that builds a park, in one run, behind one Parks build.**
+#
+# A park is found once per tree by `parks.yml` (the accept loop, one runner per
+# seed, cached under the park source hash) and every job that builds a park
+# restores that cache instead of searching. Those jobs used to be eight
+# separate workflows, and a workflow cannot `needs:` a job in another one — so
+# each of them had a `Parks ready` job polling the caches and runs API every
+# 30 s for the ~20 minutes a cold build takes. Eight pollers on one PR, two PRs
+# stacked: the installation's API rate limit was gone by 17:51 UTC on 2 Oct
+# (HTTP 403, PR #705), every poller went red, and every park had built.
+#
+# Here they are called workflows behind a `needs:` edge on the Parks call, so
+# **waiting for parks costs no API call at all**, and a cold build is still
+# paid once per tree, not once per consumer. Each consumer keeps its own file
+# (its jobs, caps and the long comments explaining them); this file only wires
+# them together.
+#
+# **The two required status checks live here, at the top level**, because a
+# job inside a called workflow is reported as "<caller job> / <job>" and a
+# required check is matched by exact name. `Checks` and `Procgen invariants`
+# below are those names; renaming either stops it gating merges with nothing
+# going red. Read them back with
+#
+#     gh api repos/jimhigson/land-of-good-places/branches/main/protection
+#
+# `update-adoption.yml` and `live-version.yml` build no park and stay separate.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A PR's superseded run is cancelled. A push to main is never cancelled: each
+# commit is its own group, because this run deploys, and a cancelled deploy is
+# the 29 August outage (the deploy job also queues on `deploy-main` itself).
+concurrency:
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # The Parks reuse job reads another run's `parks-<hash>` artifact.
+  actions: read
+
+jobs:
+  parks:
+    name: Parks
+    uses: ./.github/workflows/parks.yml
+
+  # Every consumer runs only when this run's cache holds the parks. If Parks
+  # failed they are skipped, and the two required aggregators below turn a
+  # skipped upstream into red, never into a pass.
+  checks:
+    name: Checks parts
+    needs: [parks]
+    if: ${{ !cancelled() && needs.parks.outputs.ready == 'true' }}
+    uses: ./.github/workflows/checks.yml
+
+  procgen:
+    name: Procgen invariants parts
+    needs: [parks]
+    if: ${{ !cancelled() && needs.parks.outputs.ready == 'true' }}
+    uses: ./.github/workflows/procgen-invariants.yml
+
+  coplanar:
+    name: Coplanar faces
+    needs: [parks]
+    if: ${{ !cancelled() && needs.parks.outputs.ready == 'true' }}
+    uses: ./.github/workflows/coplanar.yml
+
+  entrance-road:
+    name: Entrance road
+    needs: [parks]
+    if: ${{ !cancelled() && needs.parks.outputs.ready == 'true' }}
+    uses: ./.github/workflows/entrance-road.yml
+
+  every-seed-builds:
+    name: Every seed builds
+    needs: [parks]
+    if: ${{ !cancelled() && needs.parks.outputs.ready == 'true' }}
+    uses: ./.github/workflows/every-seed-builds.yml
+
+  swept-bus:
+    name: Swept bus
+    needs: [parks]
+    if: ${{ !cancelled() && needs.parks.outputs.ready == 'true' }}
+    uses: ./.github/workflows/swept-bus.yml
+
+  walk-reach:
+    name: Walk reach
+    needs: [parks]
+    if: ${{ !cancelled() && needs.parks.outputs.ready == 'true' }}
+    uses: ./.github/workflows/walk-reach.yml
+
+  preview:
+    name: PR preview
+    needs: [parks]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.parks.outputs.ready == 'true' }}
+    uses: ./.github/workflows/pr-preview.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      # The preview link is a PR conversation comment: the Issues API.
+      issues: write
+      pull-requests: write
+
+  deploy:
+    name: Deploy
+    needs: [parks]
+    # A push to main, or by hand on main (`gh workflow run ci.yml --ref main`,
+    # which builds the parks first if main's cache lacks them).
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.parks.outputs.ready == 'true' }}
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+
+  # **This string is a required status check on `main`.** See the header.
+  check:
+    name: Checks
+    needs: [checks]
+    # `always()`, never the default. A job whose `needs` failed is SKIPPED by
+    # default, and GitHub treats a skipped required check as satisfied — so
+    # without this line a red shard would produce a green gate.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard and the build succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+          # The control: if `needs` ever arrives empty (a renamed job, a bad
+          # expression), "no job failed" would be vacuously true. Count them.
+          count=$(echo "$NEEDS" | jq 'length')
+          if [ "$count" != "1" ]; then
+            echo "::error::expected 1 upstream job (checks), saw $count — the aggregator is measuring nothing"
+            exit 1
+          fi
+          # `success` only. `failure`, `cancelled` (a shard's own timeout) and
+          # `skipped` (Parks failed, so nothing was checked) are all a gate
+          # that did not pass.
+          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
+          if [ -n "$bad" ]; then
+            echo "::error::not every part of the gate succeeded: $bad"
+            exit 1
+          fi
+          echo "Checks ok — every shard and the build succeeded."
+
+  # **This string is a required status check on `main`.** See the header.
+  invariants:
+    name: Procgen invariants
+    needs: [procgen]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard of the suite succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+          count=$(echo "$NEEDS" | jq 'length')
+          if [ "$count" != "1" ]; then
+            echo "::error::expected 1 upstream job (procgen), saw $count — the aggregator is measuring nothing"
+            exit 1
+          fi
+          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
+          if [ -n "$bad" ]; then
+            echo "::error::not every part of the procgen gate succeeded: $bad"
+            exit 1
+          fi
+          echo "Procgen invariants ok — every shard succeeded."

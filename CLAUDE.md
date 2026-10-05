@@ -278,10 +278,16 @@ timeout as `cancelled`, so the site sat stale for hours with nothing red.
 
 **Where they run:**
 
+Every workflow that builds a park is **called from `ci.yml`**, behind a
+`needs:` edge on the Parks build (`parks.yml`) in the same run, and the two
+required aggregators, `Checks` and `Procgen invariants`, are jobs in `ci.yml`
+itself. Never wait for parks by polling the API from another workflow: eight
+pollers exhausted the installation's rate limit on 2 Oct 2026 (#705).
+
 | script | workflow | required to merge? |
 |---|---|---|
-| `check` | `checks.yml` ("Checks") | **yes** |
-| `test:procgen` | `procgen-invariants.yml` ("Procgen invariants") | **yes** |
+| `check` | `checks.yml`, called by `ci.yml` ("Checks") | **yes** |
+| `test:procgen` | `procgen-invariants.yml`, called by `ci.yml` ("Procgen invariants") | **yes** |
 | `check:coplanar` | `coplanar.yml` ("Coplanar faces") | not yet — needs adding |
 | `check:swept-bus` | `swept-bus.yml` ("Swept bus") | not yet — needs adding |
 | `build` | `deploy.yml`, `pr-preview.yml`, and `checks.yml` | — |
@@ -424,8 +430,8 @@ either fails to run or only runs on a Node nobody should still be on:
 
 `test/procgen/invariants.ts` proves the generated park is placed sanely — no
 wall crossing another wall or the railway, no tree through a tree, no lamp in
-anything, every path lit, every doormat usable — across the canonical seed and
-four sweep seeds. **If you add to or change procgen, add or extend an invariant
+anything, every path lit, every doormat usable — across every one of seeds
+0..15, each with its own `test/procgen/seed-N.test.ts`. **If you add to or change procgen, add or extend an invariant
 in that file in the same PR.** It is one small function plus one line in the
 list, and it then runs on every seed for free.
 
@@ -433,15 +439,14 @@ Two rules when you do: measure the park that was built, never the rules that
 built it; and take thresholds from the game (`PLAYER_RADIUS`,
 `TRACK_CLEARANCE`) rather than from the generator's own target.
 
-**The bar is sixteen good seeds, not every seed** (Jim's ruling, 2 Sep 2026,
-revising the older "swap the seed and write down why"): the pool
-(`parkSeedPool.ts`) holds sixteen seeds that pass **all** invariants —
-including quality, like not bunching the park up — and beyond those sixteen,
-a seed the generator cannot make a good park from simply is not in the pool.
-**The invariants themselves are never weakened**, for any seed; what changed
-is only that universal seed coverage was never the goal. When a pool seed
-stops passing, fix the generator or replace the seed in the pool — and
-write down why, either way.
+**The game has exactly seeds 0 to 15, and every one must pass** (Jim,
+24 Sep 2026: *"we only support seeds 0..15, no others"*; this replaces the
+2 Sep ruling that let a failing seed be swapped out of a pool). The seeds are
+fixed — `SUPPORTED_PARK_SEEDS` in `src/world/prebuilt/parkFileName.ts` owns
+them, `check:seed-pool` holds them to 0..15 — so when one stops passing,
+**fix the generator; never swap, skip or baseline the seed.** The default seed
+every single-seed check measures is 5 (`CANONICAL_PARK_SEED`). **The
+invariants themselves are never weakened**, for any seed.
 
 `pnpm run test:procgen`. CI runs it on every PR and **blocks the merge**, so this
 is not optional. It complements `check:park`, which owns whether the park
@@ -474,8 +479,8 @@ back to a simpler alternative — never shrink to a floor and accept a result
 that still doesn't clear. (One former example of "simpler alternative" is
 dead: a level crossing instead of a bridge. Since 2 Sep 2026 every rail
 crossing is a bridge and the ability to plan a level crossing does not
-exist; a generator that cannot bridge backtracks further — a warp vector,
-`parkWarp.ts` — or the seed leaves the pool.)
+exist; a generator that cannot bridge backtracks further. Since 24 Sep 2026 a
+seed can no longer "leave the pool": seeds 0..15 are the game.)
 
 **Because every feature generates step by step at the same time, not one
 system finishing before the next starts, "backtrack" means checking the real
@@ -486,6 +491,38 @@ silently miss whatever a sibling system placed there — the exact shape of
 issues #317 and #319. If a generator in this codebase does not yet backtrack
 this way, that is a bug in the generator: refactor it until it does, rather
 than documenting the gap as a known limitation.
+
+## Parks are built at build time; the game carries no solver
+
+Jim, 24 September 2026: *"procgen should be build-time and downloaded by the
+game instead of done on the client that is playing"*, and *"there should be no
+ability to build built into the game as delivered — seeds not downloadable is
+an error."* Design and measurements: `docs/design/PREBUILT-PARKS.md`.
+
+- **Every search and both backtracking drivers live in `procgen/`**, which is
+  build-time Node code. **Nothing under `src/` may import `procgen/`** — not a
+  value, not a type. `check:procgen-boundary` fails on the line;
+  `check:client-no-solver` builds the bundle and fails if any string that
+  exists only in `procgen/` is in it. Shared types and constants have one owner,
+  in `src/`, and both sides import that.
+- **The game reads each park's decisions from `/parks/<seed>.json`** (layout,
+  routes, path graph, world-phase placements, bridge footprints — never
+  meshes), written by `pnpm run build:parks`, shipped by `vite build`,
+  precached by the service worker, and hydrated by `src/world/parkPlan.ts`,
+  `src/world/worldPhase.ts` and `src/world/prebuilt/`. A seed with no usable
+  file is `ParkUnavailable` and an on-screen error — **never** a solve.
+- **Node tooling still solves**: every check and test builds a fresh park
+  through the solver that `scripts/ts-extension-resolver-register.mjs`
+  installs lazily into `src/world/prebuilt/solverPort.ts` (vitest: through
+  `test/procgen/parkFacts.ts`). `check:prebuilt-park` proves a park hydrated
+  from its file is byte-identical, by whole-park digest, to a fresh solve.
+- **The dev server serves park files too** (`scripts/lib/dev-parks.mjs`):
+  solved on first request per source change (seconds to minutes per seed) and
+  cached, or taken straight from `build:parks` output solved from the same
+  source. **Run `pnpm run build:parks` before a browser session over many
+  seeds.** `vite preview` serves only what `build:parks` wrote.
+- **A `?seed=` outside 0..15 is an error screen**, by design. There is no
+  URL that makes the game solve.
 
 ## A check can pass without checking anything
 
@@ -1002,20 +1039,20 @@ this file's own "measurement taken on a convenient origin rather than on the
 thing that gets drawn", and it is why every number in that check comes off the
 built scene.
 
-It **ratchets** against `scripts/swept-bus-baseline.mts`, so green means *no
-worse*, never *clear* — the check says so on every run. Two things about it are
-deliberate and worth knowing before you touch it:
+It landed as a ratchet against a per-seed baseline (364 posts) and, since
+stage 3 step 2 made the trestles claims, **it fails on any intrusion on any
+pool seed, and on any seed whose park cannot be built** — there is no baseline
+file to add an entry to. Two things about it are deliberate and worth knowing
+before you touch it:
 
-- **The baseline is keyed on the seed number, and an entry matching no pool
-  seed is a failure.** That is the fix for **#520** (`check:coplanar`'s baseline
-  is keyed on mesh names, so a rename orphans the entry silently). The same
-  hazard one layer out — the check finds posts *by mesh name* — is caught by
-  asserting each named trestle mesh is present with instances, so a rename in
-  `track.ts` makes the run **VOID** rather than a triumphant zero.
+- **The check finds posts *by mesh name***, and that hazard (**#520**:
+  `check:coplanar`'s baseline is keyed on mesh names, so a rename orphans the
+  entry silently) is caught by asserting each named trestle mesh is present
+  with instances, so a rename in `track.ts` makes the run **VOID** rather than
+  a triumphant zero.
 - **Its 0.2 m post sampling can only ever *under*-count**, at grazing contact.
-  So when the count eventually reaches zero, **confirm that zero at a finer
-  step before deleting the baseline** — the check prints this instruction at
-  the moment it matters.
+  So when the supports or the road move, **confirm the zero at a finer step**
+  — the check prints this instruction on every run that reads zero.
 
 ## Handoff files
 

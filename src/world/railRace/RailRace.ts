@@ -24,7 +24,15 @@ import {
   type RidePhase,
 } from './duckPose';
 import { RAIL_RACE_PLAN } from './plan';
-import { buildRailRaceTrack, LANE_COLOURS, type RailRaceTrack, type SparkingSegment } from './track';
+import {
+  buildRailRaceTrack,
+  LANE_COLOURS,
+  type RailRaceTrack,
+  type SparkingSegment,
+  type DecidedTrestles,
+  type TrestleSpotFinder,
+} from './track';
+import type { Claim, GroundClaims } from '../../boot/groundClaims';
 import { LANE_COUNT, PLAYER_LANE, RIDE_SCALE, type RailRaceRoute } from './route';
 import { createCart, SEAT_HEIGHT, type CartHandle } from './cart';
 import { placeRaceCart, seatRaceRider } from './seat';
@@ -35,7 +43,7 @@ import {
   RACE_LAPS,
   PLAYER_BOOST_ADVANTAGE,
   RIVAL_SKILL,
-  createRider,
+  riderOnGrid,
   rivalBand,
   rivalInput,
   scheduleForLevel,
@@ -343,6 +351,29 @@ export class RailRace implements GameSystem {
    */
   readonly walkPastRoute = RAIL_RACE_PLAN.walkPastRing;
   readonly raceRoute = RAIL_RACE_PLAN.raceRing;
+  /**
+   * Each ring's support claims, in the order they were committed under
+   * {@link RAIL_RACE_FEATURE} (walk-past first): `test/procgen/parkFacts.ts`
+   * compares a ring's drawn supports to its own slice of the one feature.
+   */
+  readonly supportClaims: { readonly walkPast: readonly Claim[]; readonly race: readonly Claim[] };
+  /** Both rings' trestles by ring name, as a park file records them. */
+  get trestles(): Readonly<Record<string, DecidedTrestles>> {
+    return {
+      [this.walkPastRing.track.group.name]: this.walkPastRing.track.trestles,
+      [this.raceRing.track.group.name]: this.raceRing.track.trestles,
+    };
+  }
+  /**
+   * The duck bars each ring lost to the road rule (slot and lane) — see
+   * `RailRaceTrack.barsLostToRoad`. The fairness invariant reads it: the race
+   * happens on the ride-scale ring, which loses none; the walk-past ring's
+   * count per lane is the race ring's minus exactly these, each said aloud.
+   */
+  readonly barsLostToRoad: {
+    readonly walkPast: readonly { readonly slot: number; readonly lane: number }[];
+    readonly race: readonly { readonly slot: number; readonly lane: number }[];
+  };
   readonly laneCount = LANE_COUNT;
   /** The side-on view leaves her model on screen: watching her duck is the game. */
   readonly playerStaysVisible = true;
@@ -411,7 +442,7 @@ export class RailRace implements GameSystem {
   /** The running order last sent to the HUD, so it is only sent on a change. */
   private standings: number[] = [];
 
-  constructor(collision: CollisionWorld) {
+  constructor(collision: CollisionWorld, groundClaims: GroundClaims, findSpots: TrestleSpotFinder) {
     this.collision = collision;
     this.group.name = 'railRace';
 
@@ -420,16 +451,35 @@ export class RailRace implements GameSystem {
     // hazard geometry is built once, in full, whichever level ends up chosen;
     // `setHazardLevel` only ever toggles its visibility.
     //
-    // The walk-past ring goes up **first**, and it is the one that registers
-    // collision. The race ring's own trestle search then sees those posts as
-    // occupied ground and stands its legs clear of them for free, so the two
-    // rings' supports never land on the same square metre even though the
-    // rings are concentric.
+    // **One rail race, two scales, one feature.** Jim, 7 Sep 2026: *"either
+    // the small one or the big one is shown — it is purely a visual trick,
+    // they never occupy the world at the same time."* So each ring's supports
+    // ask the park's one registry where they may stand as `RAIL_RACE_FEATURE`
+    // (stage 3, step 2 of `docs/DESIGN-round-robin-generation.md`), which
+    // means neither ring is ever an obstacle to the other, and both rings'
+    // claims are committed together, once, below — the road and anything
+    // placed later see the union. Order matters for one thing only: the
+    // walk-past ring's *colliders* (what a child on foot walks into) are
+    // registered after BOTH rings have found their ground, so the race ring's
+    // search never meets them through the unmigrated collision predicate.
+    //
+    // **The two rings differ in whether they respect the road**, and that is
+    // sound rather than an exemption for the same reason the one feature is:
+    // they are never in the world together. Jim, 7 Sep 2026: "make the big
+    // version have all its legs, but the normal version can have them
+    // selectively." The walk-past ring is there while the bus drives, so it
+    // skips its legs over the road; the ride ring exists only mid-race, when
+    // the bus is gone, so it keeps every leg (`RailRaceTrackOptions.
+    // respectsRoad`). If the rings were ever co-present, both changes would be
+    // wrong together — and `check:swept-bus` sweeps the walk-past ring alone,
+    // by name, for the same reason.
     this.walkPastRing = {
       route: RAIL_RACE_PLAN.walkPastRing,
       track: buildRailRaceTrack(RAIL_RACE_PLAN.walkPastRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:walk-past-ring',
-        registerCollision: true,
+        respectsRoad: true,
+        groundClaims,
+        findSpots,
         // No finish rainbow here — see `RailRaceTrackOptions.showArch` (#299).
         showArch: false,
       }),
@@ -438,12 +488,31 @@ export class RailRace implements GameSystem {
       route: RAIL_RACE_PLAN.raceRing,
       track: buildRailRaceTrack(RAIL_RACE_PLAN.raceRing, HAZARD_LAYOUT, collision, {
         ringName: 'railRace:race-ring',
-        registerCollision: false,
+        respectsRoad: false,
+        groundClaims,
+        findSpots,
         showArch: true,
       }),
     };
+    this.supportClaims = {
+      walkPast: this.walkPastRing.track.claims,
+      race: this.raceRing.track.claims,
+    };
+    this.barsLostToRoad = {
+      walkPast: this.walkPastRing.track.barsLostToRoad,
+      race: this.raceRing.track.barsLostToRoad,
+    };
+    // The claims are committed by the world phase's builder (`worldPhase.ts`),
+    // as the increment this ride is — not here, so `back()` can withdraw them.
+    this.walkPastRing.track.registerCollision();
     for (const ring of [this.walkPastRing, this.raceRing]) {
       ring.track.setHazardLevel(this.activeLevel);
+      // **Never drawn together** — {@link setActiveRing} shows exactly one.
+      // Declared on the groups so a sweep that ignores `visible` (it must: most
+      // of the game is hidden at build time) can still tell that two faces from
+      // the two rings never meet on screen. See `SHOWN_ALONE` in
+      // `scripts/coplanar-sweep.mts`, the only reader.
+      ring.track.group.userData['shownAlone'] = { set: 'railRace:ring', member: ring.track.group.name };
       this.group.add(ring.track.group);
     }
     this.activeRing = this.walkPastRing;
@@ -507,14 +576,14 @@ export class RailRace implements GameSystem {
       // No scale here. A cart is sized by the ring it is currently on, and
       // only by `setActiveRing` — see that method for the bug this fixes.
       this.group.add(group);
-      this.carts.push({ rider: createRider(index), group, cart, isPlayer: false, kid, sad: 0, yaw: 0, pitch: 0 });
+      this.carts.push({ rider: riderOnGrid(index, this.activeRing.route.scale), group, cart, isPlayer: false, kid, sad: 0, yaw: 0, pitch: 0 });
     });
 
     const playerCart = createCart(LANE_COLOURS[PLAYER_LANE] ?? PALETTE.markerMint);
     const group = playerCart.root;
     this.group.add(group);
     this.carts.push({
-      rider: createRider(PLAYER_LANE),
+      rider: riderOnGrid(PLAYER_LANE, this.activeRing.route.scale),
       group,
       cart: playerCart,
       isPlayer: true,
@@ -546,7 +615,8 @@ export class RailRace implements GameSystem {
     // the countdown runs out — a race that has already started when the
     // camera arrives is a race a six-year-old has already lost.
     for (const cart of this.carts) {
-      const fresh = createRider(cart.rider.lane);
+      // Onto the race ring's grid: it is drawn at `RIDE_SCALE`, so its gaps are too.
+      const fresh = riderOnGrid(cart.rider.lane, this.raceRing.route.scale);
       Object.assign(cart.rider, fresh);
     }
     // Headlamps on for the race, and only for the race. They are real
@@ -955,10 +1025,9 @@ export class RailRace implements GameSystem {
    * which is the wrong place: no pose value in this game is an order of
    * magnitude out. **Do not widen the cart.**
    *
-   * `placeRaceCart` (`seat.ts`, which the check asks too) leans it with
-   * `rideFrame`, which takes its lean about `flatPointAt`'s column rather than the
-   * leaned point's, so the cart leans by the same amount as the rails under it
-   * rather than by very nearly that amount. It writes the quaternion from
+   * `placeRaceCart` (`seat.ts`, which the check asks too) stands it square on
+   * the rails as drawn (`railTurn`), and `seatRaceRider` hands her the cart's own
+   * frame, so the two cannot lean differently. It writes the quaternion from
    * scratch, so this is safe to call every frame — an Euler assignment followed
    * by a pre-multiplied tilt is the compounding trap that had the player slowly
    * tumbling, and `world/up.ts` has the numbers.
@@ -1104,7 +1173,7 @@ export class RailRace implements GameSystem {
     // Scaled by RIDE_SCALE — her own model is too (`requestBoard()`), so an
     // unscaled drop stayed the same fixed 0.5m while her seated head height
     // grew with everything else, and duck bars ended up sitting well below
-    // her head in *both* held and ducked states (see DUCK_CLEARANCE in
+    // her head in *both* held and ducked states (see DUCK_CLEARANCE_AT_PARK_SCALE in
     // hazards.ts). This and that value were picked together against her real
     // measured head height in both states, live, on 1 August 2026.
     //
@@ -1205,7 +1274,7 @@ export class RailRace implements GameSystem {
     // Everybody back to the line, so the ring looks ready rather than abandoned.
     for (const cart of this.carts) {
       cart.cart.setHeadlamps(false);
-      Object.assign(cart.rider, createRider(cart.rider.lane));
+      Object.assign(cart.rider, riderOnGrid(cart.rider.lane, this.walkPastRing.route.scale));
     }
     // Back to the calm level-1 default between races — see `activeLevel`'s
     // own doc comment.

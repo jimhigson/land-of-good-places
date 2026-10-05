@@ -1,8 +1,15 @@
-import { Rng, TAU } from '../core/mathUtils';
-import { cachedSolve } from '../core/solveCache';
-import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END } from '../core/constants';
+import { registerFastEdgeTest } from './boundaryEdgeTest';
+import { TAU } from '../core/mathUtils';
+import { GENTLE_CURVATURE_RADIUS, PROFILE_SAMPLES, minCurvatureRadius } from './boundaryProfile';
+// Re-exported: every caller still asks the boundary for its profile rules.
+export { GENTLE_CURVATURE_RADIUS, PROFILE_SAMPLES, minCurvatureRadius };
+import { offeredParkFile, parkFileMissingReason } from './prebuilt/parkFileStore';
+import { ParkUnavailable } from './prebuilt/parkUnavailable';
+import { boundarySolver } from './prebuilt/solverPort';
+import { parkFileProblem, unplain } from './prebuilt/plainData';
+import { GARDEN_PLAY_RADIUS, RIM_OUTSET_END, SPUR_PAVED_REACH } from '../core/constants';
 import { ENTRANCE_ANGLE, ENTRANCE_WALL_RADIUS } from './entrance/layout';
-import { PARK_SEED } from './parkManifest';
+import { PARK_RESTART, PARK_SEED, PARK_SEED_ASKED } from './parkManifest';
 
 /** Axis-aligned extent of a boundary. */
 export interface BoundaryExtent {
@@ -76,96 +83,21 @@ export function circleBoundary(radius: number, centreX = 0, centreZ = 0): ParkBo
   };
 }
 
-/**
- * The same park, `inset` metres smaller all the way round.
- *
- * For the rides that solve *inside* the park — the ginormous slide and the
- * Sky Cruiser hand their route search a territory, and until issue #241 that
- * territory was a hand-sized circle (`GARDEN_PLAY_RADIUS`, `OUTER_RADIUS`)
- * which quietly stopped meaning "the park" when the park became a spline:
- * plots now spread to the real edge, and a ride whose start pose sits beyond
- * its own territory circle rejects every candidate piece as out of bounds
- * and cannot solve at all.
- *
- * Built by walking each bearing in from the true edge until the signed
- * distance field reads `inset`, then wrapping those radii in
- * {@link profileBoundary} — so the result is a full, honest `ParkBoundary`
- * (area, perimeter, outline and all), not a wrapper that lies about
- * everything but distance. The inset curve of a gentle star-shaped curve is
- * still star-shaped while `inset` stays far below
- * {@link GENTLE_CURVATURE_RADIUS}, which every caller's few metres does.
- */
-export function insetBoundary(boundary: ParkBoundary, inset: number): ParkBoundary {
-  const search = insetBoundarySearch(boundary, inset);
-  for (;;) {
-    const step = search.next();
-    if (step.done) return step.value;
-  }
-}
-
-/**
- * Bearings resolved between yields in {@link insetBoundarySearch}.
- *
- * 8 of the 512 — 1/64th of the job, ~0.4 ms on an M4 Pro. Deliberately a
- * fraction of the whole rather than a millisecond count: how long 8 bearings
- * take is a property of the machine, but "the driver can stop 64 times on the
- * way through" is a property of this code and true on every device.
- */
-const INSET_BEARINGS_PER_SLICE = 8;
-
-/**
- * {@link insetBoundary}, a handful of bearings at a time.
- *
- * **Why this one is sliced and the rest of the file is not.** It is 512
- * bearings times a 24-step binary search, and every probe calls
- * `distanceToEdge`, which itself scans 512 vertices — about 12,000 of them, for
- * **~25 ms measured, cold and warm alike**. That made it the single largest
- * uninterruptible block in the Sky Cruiser's brief, which `boot/parkGeneration.ts`
- * builds inside one frame of the cat-bus ride. It passed on a fast laptop and
- * failed in CI, which is the signature of a unit of work that is too big rather
- * than a budget that is too small.
- *
- * The straight-through {@link insetBoundary} above is a thin driver over this,
- * so there is one algorithm and two cadences — the same relationship
- * `solveRailRoute` has with `railRouteSearch`. Suspending cannot move the
- * result: every piece of state is a local, and there is no randomness here at
- * all.
- */
-export function* insetBoundarySearch(
-  boundary: ParkBoundary,
-  inset: number,
-): Generator<number, ParkBoundary, void> {
-  const radii: number[] = [];
-  for (let i = 0; i < PROFILE_SAMPLES; i += 1) {
-    if (i > 0 && i % INSET_BEARINGS_PER_SLICE === 0) yield i;
-    const angle = (i / PROFILE_SAMPLES) * TAU;
-    const dirX = Math.cos(angle);
-    const dirZ = Math.sin(angle);
-    let low = 0;
-    let high = edgeRadiusAt(boundary, angle);
-    // The signed distance shrinks towards the edge along the ray, so binary
-    // search finds where it crosses `inset` to well under geometry noise.
-    for (let step = 0; step < 24; step += 1) {
-      const mid = (low + high) / 2;
-      if (boundary.distanceToEdge(dirX * mid, dirZ * mid) >= inset) low = mid;
-      else high = mid;
-    }
-    radii.push(low);
-  }
-  return profileBoundary(radii);
-}
-
 // --------------------------------------------------------------- the profile
 
+
 /**
- * How many bearings the boundary is sampled at.
+ * Segments either side of the nearest vertex that get real point-to-segment
+ * work in {@link profileBoundary}'s `distanceToEdge`.
  *
- * The curve is smooth and low-frequency by construction (see
- * {@link generateParkBoundary}), so this is about the accuracy of the *distance
- * query*, not about resolving detail: 512 segments round an ~80 m park is a
- * chord every ~1 m, well under the metre-scale clearances anything asks about.
+ * **Exported because the test needs the same number, and a second copy of it
+ * would be this repo's most-reported bug** (CLAUDE.md, "Two definitions of one
+ * thing, kept in step by hand"): `test/geo/boundaryDistance.test.ts` builds two
+ * oracles that must refine over exactly this window, and a hand-copied `2` in
+ * them would silently stop describing this function the day it changed — while
+ * still passing, because both oracles would have moved together.
  */
-const PROFILE_SAMPLES = 512;
+export const REFINE = 2;
 
 /**
  * A boundary given as a radius per bearing.
@@ -274,35 +206,173 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
    * close, 108 vertices apart, and the strided pass simply picked the wrong
    * one, after which refining around it can never reach the other.
    *
-   * So every vertex is scanned, but cheaply: squared distances, no `hypot` and
-   * no projection. Only the handful of segments beside the winner get the real
-   * point-to-segment treatment. That is 512 multiply-adds plus 5 projections
-   * rather than 512 projections — this is called from `terrainHeight`, which
-   * runs hundreds of thousands of times a build, so the constant matters. The
-   * invariant suite checks it against a brute-force search over every segment,
-   * including the degenerate query at the origin, so it stays measured.
+   * So a vertex is only ever compared cheaply: squared distances, no `hypot`
+   * and no projection. Only the handful of segments beside the winner get the
+   * real point-to-segment treatment — 5 projections rather than 512.
+   *
+   * **Which vertices get compared at all is the candidate list below**, and
+   * that is the change of 18 September 2026: every vertex used to be scanned,
+   * and scanning them was 80.7% of the park solve.
+   *
+   * *This paragraph used to claim the invariant suite held it to a brute-force
+   * search over every segment, and no such test existed* — a rule with no
+   * command beside it, decaying quietly. It does now:
+   * `test/geo/boundaryDistance.test.ts`, which pins this bit-for-bit against
+   * the old full scan and to a micrometre against brute force, over five
+   * profiles including a circle and including the degenerate query at the
+   * origin.
    */
-  const REFINE = 2;
+  // The vertices again as two flat arrays. The coarse pass below reads them a
+  // few hundred thousand times a build and `points[i]` is a pointer chase to a
+  // two-element JS array per vertex; these are the same doubles in the same
+  // order, so every arithmetic result is bit-identical.
+  const vertexX = new Float64Array(count);
+  const vertexZ = new Float64Array(count);
+  for (let i = 0; i < count; i += 1) {
+    const [x, z] = points[i] as [number, number];
+    vertexX[i] = x;
+    vertexZ[i] = z;
+  }
 
-  const distanceToEdge = (x: number, z: number): number => {
+  /**
+   * **The coarse pass's 512-vertex scan, made exact and cheap.**
+   *
+   * The scan below finds the nearest *vertex* so the refinement can do real
+   * point-to-segment work on the five segments beside it. It was **80.7% of
+   * the whole park solve's CPU** (profiled on seed 7, 2026-09-18): the rail
+   * generator's `validate` asks `distanceToEdge` once per sample of every
+   * candidate piece — hundreds of thousands of pieces on a seed whose railway
+   * dead-ends — and each ask walked all 512.
+   *
+   * So the plane is diced into cells, and each cell remembers **every vertex
+   * that could be the nearest one for any point inside it**. For a cell, let
+   * `U` be the smallest "furthest corner" distance any vertex has to that
+   * cell; a vertex whose *nearest* approach to the cell exceeds `U` can never
+   * win anywhere in it, and everything else is kept. So the candidate list
+   * provably contains the true nearest vertex for every point in the cell.
+   *
+   * **It is exact, not an approximation, and that is the whole point** —
+   * `solverBoundary` below is the approximate answer, and adopting it for the
+   * train would have re-drawn every park on every seed. The list is held in
+   * ascending vertex order and scanned with the same strictly-less-than test
+   * as the full scan, so a tie is broken towards the same index the full scan
+   * would have picked; the distances themselves are the same `dx*dx + dz*dz`
+   * on the same doubles. A park built before this change is built identically
+   * after it (proved: the canonical park digest is unchanged).
+   *
+   * **A cell's list is computed the first time a query lands in it**, not up
+   * front. Filling the whole grid is a ~17 M-operation lump, and the browser
+   * boot runs this inside a sliced frame whose worst slice `check:park-boot`
+   * holds to 21 ms — a one-off cost in the wrong place is how a speed fix
+   * becomes a stutter. Per cell it is two passes over the vertices, about two
+   * microseconds, paid by whichever query got there first and by no other.
+   *
+   * A cell that would keep more than half the vertices keeps none instead and
+   * its queries fall back to the full scan — near a near-circular park's
+   * centre every vertex genuinely can be the nearest one, and a list of 512 is
+   * the scan with an allocation on top.
+   */
+  const GRID_CELLS_ACROSS = 128;
+  const gridWidth = Math.max(maxX - minX, 1e-6);
+  const gridDepth = Math.max(maxZ - minZ, 1e-6);
+  const cellSize = Math.max(gridWidth, gridDepth) / GRID_CELLS_ACROSS;
+  const gridWide = Math.floor(gridWidth / cellSize) + 1;
+  const gridDeep = Math.floor(gridDepth / cellSize) + 1;
+  const cellCandidates: (Int32Array | null)[] = new Array(gridWide * gridDeep).fill(null);
+  const cellComputed = new Uint8Array(gridWide * gridDeep);
+  const candidateCap = count >> 1;
+
+  const candidatesFor = (gx: number, gz: number, index: number): Int32Array | null => {
+    cellComputed[index] = 1;
+    const x0 = minX + gx * cellSize;
+    const x1 = x0 + cellSize;
+    const z0 = minZ + gz * cellSize;
+    const z1 = z0 + cellSize;
+    // The tightest "some vertex is certainly this close, everywhere in the
+    // cell" bound: the smallest furthest-corner distance over all vertices.
+    let bound = Infinity;
+    for (let i = 0; i < count; i += 1) {
+      const px = vertexX[i] as number;
+      const pz = vertexZ[i] as number;
+      const fx = Math.max(px - x0, x1 - px);
+      const fz = Math.max(pz - z0, z1 - pz);
+      const far = fx * fx + fz * fz;
+      if (far < bound) bound = far;
+    }
+    // **The margin is for rounding, not for slack.** In real arithmetic the
+    // superset property is exact: `bound` is a distance some vertex certainly
+    // achieves everywhere in the cell, the test is non-strict so every exact
+    // minimiser survives, and the rect is closed so a vertex on a cell edge is
+    // kept. In floating point both `near²` and the `x0 <= px <= x1`
+    // containment are rounded, which makes that "exact" ulp-approximate rather
+    // than proven. Widening the bound by one part in 10^12 restores the proof
+    // and can only ever admit a vertex, never drop one — and admitting a
+    // vertex that cannot win costs a squared distance and changes no answer.
+    //
+    // It is free because the real slack is enormous: a mutation sweep keeps
+    // every one of 244,205 queries bit-identical at `bound * 0.99` and at
+    // `bound * 0.999999`, so the margin being taken here is ten orders of
+    // magnitude inside what the geometry actually needs.
+    const keepBound = bound * (1 + 1e-12);
+    const keep: number[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const px = vertexX[i] as number;
+      const pz = vertexZ[i] as number;
+      const nx = px < x0 ? x0 - px : px > x1 ? px - x1 : 0;
+      const nz = pz < z0 ? z0 - pz : pz > z1 ? pz - z1 : 0;
+      if (nx * nx + nz * nz <= keepBound) keep.push(i);
+    }
+    if (keep.length > candidateCap) return null;
+    const list = Int32Array.from(keep);
+    cellCandidates[index] = list;
+    return list;
+  };
+
+  const nearestVertex = (x: number, z: number): number => {
+    const gx = Math.floor((x - minX) / cellSize);
+    const gz = Math.floor((z - minZ) / cellSize);
     let coarse = 0;
     let coarseBest = Infinity;
+    if (gx >= 0 && gz >= 0 && gx < gridWide && gz < gridDeep) {
+      const index = gx * gridDeep + gz;
+      const list = cellComputed[index] === 1 ? cellCandidates[index] : candidatesFor(gx, gz, index);
+      if (list) {
+        for (let k = 0; k < list.length; k += 1) {
+          const i = list[k] as number;
+          const dx = x - (vertexX[i] as number);
+          const dz = z - (vertexZ[i] as number);
+          const d = dx * dx + dz * dz;
+          if (d < coarseBest) {
+            coarseBest = d;
+            coarse = i;
+          }
+        }
+        return coarse;
+      }
+    }
     for (let i = 0; i < count; i += 1) {
-      const [px, pz] = points[i] as [number, number];
-      const dx = x - px;
-      const dz = z - pz;
+      const dx = x - (vertexX[i] as number);
+      const dz = z - (vertexZ[i] as number);
       const d = dx * dx + dz * dz;
       if (d < coarseBest) {
         coarseBest = d;
         coarse = i;
       }
     }
+    return coarse;
+  };
+
+  const distanceToEdge = (x: number, z: number): number => {
+    const coarse = nearestVertex(x, z);
 
     let best = Infinity;
     for (let step = -REFINE; step <= REFINE; step += 1) {
       const i = (((coarse + step) % count) + count) % count;
-      const [ax, az] = points[i] as [number, number];
-      const [bx, bz] = points[(i + 1) % count] as [number, number];
+      const j = (i + 1) % count;
+      const ax = vertexX[i] as number;
+      const az = vertexZ[i] as number;
+      const bx = vertexX[j] as number;
+      const bz = vertexZ[j] as number;
       const dx = bx - ax;
       const dz = bz - az;
       const lengthSq = dx * dx + dz * dz;
@@ -317,7 +387,73 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
     return Math.hypot(x, z) <= radiusAt(Math.atan2(z, x)) ? best : -best;
   };
 
-  return {
+  /**
+   * **`distanceToEdge(x, z) < margin`, answered without the distance wherever
+   * the answer is already certain** — see `edgeCloserThan` (`boundaryEdgeTest.ts`), which is how
+   * a caller reaches it.
+   *
+   * Each cell of the candidate grid above gets, the first time a query lands in
+   * it, a lower bound on how far any point inside it is from the polygon: the
+   * centre's exact distance to every segment, less the cell's half-diagonal
+   * (the triangle inequality), shaved by a part in 10^9 and a nanometre for
+   * rounding. `distanceToEdge`'s magnitude is a minimum over a *subset* of the
+   * polygon's segments, so it is never smaller than the true distance, so never
+   * smaller than this bound. When the bound already clears `|margin|`, the
+   * comparison is decided by the sign alone, and the sign is computed by the
+   * same expression `distanceToEdge` uses. So the boolean is the one
+   * `distanceToEdge(x, z) < margin` gives, for every input; only the work
+   * differs. Near the edge (inside a cell's width of the margin) it is simply
+   * `distanceToEdge`.
+   *
+   * Why it exists: the rail generator's `validate` asks this of every sample
+   * of every candidate piece, and on a seed whose railway keeps dead-ending
+   * (seed 6 restart 5: 48.7 M pieces) `distanceToEdge` and its nearest-vertex
+   * pass were ~20% of the whole plan's CPU, nearly all of it for samples
+   * metres from any edge.
+   */
+  const lowerBounds = new Float64Array(gridWide * gridDeep).fill(Number.NaN);
+  const innerRadius = radii.reduce((a, b) => Math.min(a, b), Infinity) * (1 - 1e-9);
+  const halfDiagonal = cellSize * Math.SQRT1_2;
+  const cellLowerBound = (gx: number, gz: number, index: number): number => {
+    const cx = minX + (gx + 0.5) * cellSize;
+    const cz = minZ + (gz + 0.5) * cellSize;
+    let nearest = Infinity;
+    for (let i = 0; i < count; i += 1) {
+      const j = (i + 1) % count;
+      const ax = vertexX[i] as number;
+      const az = vertexZ[i] as number;
+      const dx = (vertexX[j] as number) - ax;
+      const dz = (vertexZ[j] as number) - az;
+      const lengthSq = dx * dx + dz * dz;
+      let t = lengthSq > 0 ? ((cx - ax) * dx + (cz - az) * dz) / lengthSq : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const d = Math.hypot(cx - (ax + dx * t), cz - (az + dz * t));
+      if (d < nearest) nearest = d;
+    }
+    const bound = (nearest - halfDiagonal) * (1 - 1e-9) - 1e-9;
+    lowerBounds[index] = bound;
+    return bound;
+  };
+  const closerThan = (x: number, z: number, margin: number): boolean => {
+    const gx = Math.floor((x - minX) / cellSize);
+    const gz = Math.floor((z - minZ) / cellSize);
+    if (gx >= 0 && gz >= 0 && gx < gridWide && gz < gridDeep) {
+      const index = gx * gridDeep + gz;
+      const cached = lowerBounds[index] as number;
+      const bound = cached === cached ? cached : cellLowerBound(gx, gz, index);
+      if (bound > Math.abs(margin)) {
+        const r = Math.hypot(x, z);
+        // Inside for certain without the bearing: `radiusAt` interpolates
+        // between two samples, so it is never under the smallest sample by
+        // more than an ulp, and `innerRadius` is shaved well past that.
+        if (r <= innerRadius) return false;
+        return !(r <= radiusAt(Math.atan2(z, x)));
+      }
+    }
+    return distanceToEdge(x, z) < margin;
+  };
+
+  const boundary: ParkBoundary = {
     contains: (x, z) => Math.hypot(x, z) <= radiusAt(Math.atan2(z, x)),
     distanceToEdge,
     area,
@@ -326,144 +462,9 @@ export function profileBoundary(radii: readonly number[]): ParkBoundary {
     extent,
     outline: () => points,
   };
+  registerFastEdgeTest(boundary, closerThan);
+  return boundary;
 }
-
-/**
- * A fast read-only view of a star-shaped boundary, for the ride solvers.
- *
- * `profileBoundary`'s `distanceToEdge` scans all 512 vertices per query so a
- * one-off ask (a lamp, a plot candidate) is exact even at the eccentric
- * near-tie its comment documents. A route search is a different customer: it
- * asks per CANDIDATE PIECE — measured at 776k pieces on one seed, the scan
- * was most of a 31-second solve. This view answers in O(1) from two lookup
- * tables: the radius per bearing, and the cosine of the angle between the
- * radial and the edge NORMAL per bearing (the obliquity), so
- * `distance ≈ (radiusAt(θ) − |p|) · cosAt(θ)` — exact on a circle, and on
- * these deliberately gentle curves (curvature radius ≥ 20 m by construction)
- * within a few percent, erring by UNDER-stating distance wherever the edge
- * runs oblique, which for a solver holding a corridor INSIDE the park is the
- * safe direction: it can only reject a piece the exact test would allow,
- * never accept one it would forbid.
- *
- * Only `contains`/`distanceToEdge` are re-derived; everything else delegates.
- */
-export function solverBoundary(boundary: ParkBoundary): ParkBoundary {
-  const points = boundary.outline();
-  const count = points.length;
-  const radii = new Float64Array(count);
-  const obliquity = new Float64Array(count);
-  for (let i = 0; i < count; i += 1) {
-    const [x, z] = points[i] as readonly [number, number];
-    const [nx, nz] = points[(i + 1) % count] as readonly [number, number];
-    const [px, pz] = points[(i - 1 + count) % count] as readonly [number, number];
-    const radius = Math.hypot(x, z) || 1;
-    radii[i] = radius;
-    // Edge direction by central difference; its normal versus the radial.
-    const ex = nx - px;
-    const ez = nz - pz;
-    const edge = Math.hypot(ex, ez) || 1;
-    // normal = (-ez, ex)/edge; radial = (x, z)/radius; |dot| is the cosine.
-    obliquity[i] = Math.abs((-ez * x + ex * z) / (edge * radius));
-  }
-  const at = (table: Float64Array, bearing: number): number => {
-    const t = ((bearing % TAU) + TAU) % TAU;
-    const scaled = (t / TAU) * count;
-    const i = Math.floor(scaled) % count;
-    const frac = scaled - Math.floor(scaled);
-    const a = table[i] as number;
-    const b = table[(i + 1) % count] as number;
-    return a + (b - a) * frac;
-  };
-  return {
-    contains: (x, z) => Math.hypot(x, z) <= at(radii, Math.atan2(z, x)),
-    distanceToEdge: (x, z) => {
-      // Both tables looked up from ONE bearing reduction. This is `at` twice
-      // with the index arithmetic hoisted — the same operations on the same
-      // values in the same order, so the same doubles — because the route
-      // search asks this on every sample of every candidate piece and the
-      // mod/floor/lerp was being derived twice for one bearing.
-      const bearing = Math.atan2(z, x);
-      const t = ((bearing % TAU) + TAU) % TAU;
-      const scaled = (t / TAU) * count;
-      const i = Math.floor(scaled) % count;
-      const frac = scaled - Math.floor(scaled);
-      const j = (i + 1) % count;
-      const radiusA = radii[i] as number;
-      const radiusB = radii[j] as number;
-      const cosA = obliquity[i] as number;
-      const cosB = obliquity[j] as number;
-      return (
-        (radiusA + (radiusB - radiusA) * frac - Math.hypot(x, z)) *
-        (cosA + (cosB - cosA) * frac)
-      );
-    },
-    area: boundary.area,
-    perimeter: boundary.perimeter,
-    maxRadius: boundary.maxRadius,
-    extent: boundary.extent,
-    outline: () => points,
-  };
-}
-
-// ------------------------------------------------------------- the generator
-
-/**
- * Harmonics the park's outline is built from.
- *
- * Only 2 through 5. One (`k = 1`) is not a shape at all — it just slides the
- * whole park off the origin — and anything above 5 puts more than five lobes
- * round the edge, which stops reading as a park and starts reading as a flower.
- * Low harmonics are also what *makes* the curve gentle: the tightest possible
- * curvature scales with `k` squared, so keeping `k` small is the same act as
- * keeping the spline smooth.
- */
-const HARMONICS = [2, 3, 4, 5] as const;
-
-/**
- * How much of the mean radius the wiggle may claim, before the area and gate
- * constraints are solved.
- *
- * These are the numbers that decide how *different* two seeds' parks look, and
- * the family's ruling (5 Aug 2026) is that every park should be unique — so
- * this is deliberately pushed until the curvature floor is what stops it, not
- * timidity. Amplitudes are re-rolled and shrunk if the result would be too
- * sharp; see {@link generateParkBoundary}.
- */
-const WIGGLE_MIN = 0.1;
-const WIGGLE_MAX = 0.32;
-
-/**
- * How many candidate outlines to try before taking the best one.
- *
- * This number is load-bearing and was measured, not guessed. Taking the *first*
- * candidate that cleared a gentleness floor produced no park at all: every seed
- * exhausted its attempts and silently fell back to a circle, which is the
- * "every park is the same park" failure the family's uniqueness ruling exists
- * to prevent. Searching properly and keeping the best fixes it, and the budget
- * is what decides whether it works:
- *
- * | tries | best curvature radius found, across the five test seeds |
- * |---|---|
- * | 200 | 18.2 - 37.4 m (three seeds too sharp) |
- * | 2000 | 30.1 - 37.4 m (every seed comfortable) |
- *
- * Which is the family's ruling on ride generation applied here (5 Aug 2026):
- * keep trying, and only bail after a very large number of tries.
- */
-const ATTEMPTS = 2000;
-
-/**
- * The sharpest the boundary may ever turn, in metres of curvature radius.
- *
- * Taken from the camera rather than from the generator: the fixed iso view
- * shows roughly 36 m of ground depth (ARCHITECTURE.md, "the park is a diorama
- * on a hilltop"), so an edge whose curvature radius is under half that turns
- * visibly inside a single screen and reads as a corner rather than as a gentle
- * park boundary. The generator does far better than this in practice — 30 m and
- * up on every test seed — and that headroom is the point: this is the floor
- * below which the shape is *wrong*, not the target it aims for.
- */
-export const GENTLE_CURVATURE_RADIUS = 20;
 
 export interface ParkBoundaryOptions {
   readonly seed: number;
@@ -507,88 +508,69 @@ export interface ParkBoundaryOptions {
  * circle after {@link ATTEMPTS} failures.
  */
 export function generateParkBoundary(options: ParkBoundaryOptions): ParkBoundary {
-  const radii = cachedSolve(
-    'boundary',
-    `${options.seed}:${options.targetArea.toFixed(0)}:${options.gateBearing.toFixed(4)}:${options.gateRadius}`,
-    () => solveBoundaryRadii(options),
-    (value) => value,
-    (raw) => {
-      const list = raw as number[];
-      if (!Array.isArray(list) || list.length !== PROFILE_SAMPLES) throw new Error('stale profile');
-      return list;
-    },
-  );
-  return profileBoundary(radii);
+  return new DecidedBoundary(options);
 }
 
-function solveBoundaryRadii(options: ParkBoundaryOptions): number[] {
-  const { seed, targetArea, gateBearing, gateRadius } = options;
-  const rng = new Rng(seed);
-  const areaOverPi = targetArea / Math.PI;
+/**
+ * **The park's boundary, decided on first use.** Its radii are the one thing
+ * about it that is searched for (`procgen/world/boundaryRadii.ts`); the game
+ * reads them from the park file (`built.boundary`), and build tooling searches
+ * through the boundary solver the Node loader installs
+ * (`prebuilt/solverPort.ts`). Lazy because the park file arrives after the
+ * game's modules have loaded, and nothing may ask about the edge before it —
+ * a module-scope read of it before then is a `ParkUnavailable` at load.
+ */
+class DecidedBoundary implements ParkBoundary {
+  private readonly options: ParkBoundaryOptions;
+  private decided: ParkBoundary | null = null;
 
-  let best: { radii: number[]; curvature: number } | null = null;
-
-  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
-    const amplitudes = HARMONICS.map(() => rng.range(WIGGLE_MIN, WIGGLE_MAX));
-    const phases = HARMONICS.map(() => rng.range(0, TAU));
-
-    const u = (angle: number): number => {
-      let total = 0;
-      for (let h = 0; h < HARMONICS.length; h += 1) {
-        total += (amplitudes[h] as number) * Math.cos((HARMONICS[h] as number) * angle + (phases[h] as number));
-      }
-      return total;
-    };
-
-    const q = amplitudes.reduce((sum, a) => sum + a * a, 0);
-    const gateU = u(gateBearing);
-
-    // (gateU^2 + q/2) B^2 - 2 gateRadius gateU B + (gateRadius^2 - areaOverPi) = 0
-    const qa = gateU * gateU + q / 2;
-    const qb = -2 * gateRadius * gateU;
-    const qc = gateRadius * gateRadius - areaOverPi;
-    if (Math.abs(qa) < 1e-9) continue;
-    const discriminant = qb * qb - 4 * qa * qc;
-    if (discriminant < 0) continue;
-    const root = Math.sqrt(discriminant);
-    // The `+` root is the one that grows the park outward from the gate.
-    const b = (-qb + root) / (2 * qa);
-    const a = gateRadius - b * gateU;
-    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0) continue;
-
-    const radii: number[] = [];
-    let smallest = Infinity;
-    for (let i = 0; i < PROFILE_SAMPLES; i += 1) {
-      const angle = (i / PROFILE_SAMPLES) * TAU;
-      const r = a + b * u(angle);
-      if (r < smallest) smallest = r;
-      radii.push(r);
-    }
-    // A profile that dips to nothing is not a park.
-    if (smallest < gateRadius * 0.5) continue;
-
-    // Keep the gentlest candidate rather than the first acceptable one. See
-    // ATTEMPTS: first-acceptable found nothing at all and fell back to a
-    // circle on every seed.
-    const curvature = minCurvatureRadius(radii);
-    if (!best || curvature > best.curvature) best = { radii, curvature };
+  constructor(options: ParkBoundaryOptions) {
+    this.options = options;
   }
 
-  // No silent fallback to a circle. A boundary that cannot be generated is a
-  // broken park, and quietly handing back a circle would turn that into "every
-  // seed produced the same park" — which is exactly how this went wrong the
-  // first time, and it took a spread-of-radii probe to notice. The seed is
-  // committed and CI builds five of them, so this failing is a build-time
-  // failure, which is where it belongs.
-  if (!best || best.curvature < GENTLE_CURVATURE_RADIUS) {
-    throw new Error(
-      `generateParkBoundary: no gentle outline for seed ${seed} after ${ATTEMPTS} tries ` +
-        `(best curvature radius ${best ? best.curvature.toFixed(1) : 'none'} m, ` +
-        `floor ${GENTLE_CURVATURE_RADIUS} m). Target area ${targetArea.toFixed(0)} m2 ` +
-        `with the gate pinned at ${gateRadius} m may be geometrically impossible.`,
-    );
+  private get boundary(): ParkBoundary {
+    return (this.decided ??= profileBoundary(decideBoundaryRadii(this.options)));
   }
-  return best.radii;
+
+  contains(x: number, z: number): boolean {
+    return this.boundary.contains(x, z);
+  }
+
+  distanceToEdge(x: number, z: number): number {
+    return this.boundary.distanceToEdge(x, z);
+  }
+
+  get area(): number {
+    return this.boundary.area;
+  }
+
+  get perimeter(): number {
+    return this.boundary.perimeter;
+  }
+
+  get maxRadius(): number {
+    return this.boundary.maxRadius;
+  }
+
+  get extent(): BoundaryExtent {
+    return this.boundary.extent;
+  }
+
+  outline(): readonly (readonly [number, number])[] {
+    return this.boundary.outline();
+  }
+}
+
+function decideBoundaryRadii(options: ParkBoundaryOptions): readonly number[] {
+  const file = offeredParkFile();
+  if (file) {
+    const problem = parkFileProblem(file, PARK_SEED_ASKED, PARK_RESTART);
+    if (problem) throw new ParkUnavailable(PARK_SEED_ASKED, problem);
+    return unplain(file.features.built['boundary'] ?? null, 'built.boundary') as number[];
+  }
+  const solve = boundarySolver();
+  if (!solve) throw new ParkUnavailable(PARK_SEED_ASKED, parkFileMissingReason() ?? 'no park file was loaded');
+  return solve(options);
 }
 
 /**
@@ -660,6 +642,14 @@ export const GARDEN_PLAY_BOUNDARY: ParkBoundary = PARK_BOUNDARY;
  */
 /** Ground beyond the crest, so the cut edge sits below the horizon not level with it. */
 /**
+ * Half-thickness of the boundary wall as **collision** sees it — what a child
+ * is actually stopped by, as opposed to the stone she can see. Owned here so
+ * the layout can keep doormats and exits off the wall; `Garden.ts` builds the
+ * wall with it.
+ */
+export const BOUNDARY_WALL_COLLISION_HALF = 0.45;
+
+/**
  * How far inside the park's edge a ride's exit must sit, in metres.
  *
  * A statement about the boundary, so it lives with the boundary: a point can
@@ -673,12 +663,24 @@ export const GARDEN_PLAY_BOUNDARY: ParkBoundary = PARK_BOUNDARY;
  * either of them because those two modules cannot import from each other:
  * `coaster/plan -> railRace/plan -> train/plan -> coaster/plan` is a cycle that
  * `tsc` accepts and Node fails at load.
+ *
+ * Far enough in that the path arriving at the exit — half the widest spur plus
+ * its kerb, from any side — keeps its paving off the boundary wall (2 m left
+ * the exit paths' kerbs 0.1–0.4 m under the wall on seeds 2, 6 and 8, and
+ * over it on seed 8: `noDrawnPavingUnderASolid`, 2 Oct 2026).
  */
-export const EXIT_INSIDE_EDGE = 2;
+export const EXIT_INSIDE_EDGE = SPUR_PAVED_REACH + BOUNDARY_WALL_COLLISION_HALF + 0.1;
 
 export const TERRAIN_APRON = RIM_OUTSET_END + 1.5;
 
-export const TERRAIN_EDGE_RADIUS = PARK_BOUNDARY.maxRadius + TERRAIN_APRON;
+/**
+ * How far out the terrain disc is built. A function, not a constant: the
+ * boundary is decided lazily (see {@link generateParkBoundary}), and a
+ * module-scope read would ask about it before the park file has arrived.
+ */
+export function terrainEdgeRadius(): number {
+  return PARK_BOUNDARY.maxRadius + TERRAIN_APRON;
+}
 
 /**
  * Distance from the origin to the park's edge on a given bearing.
@@ -704,28 +706,21 @@ export function edgeRadiusAt(boundary: ParkBoundary, bearing: number): number {
   return a + (b - a) * frac;
 }
 
-/**
- * Where the ground stops, on a given bearing.
- *
- * The terrain disc follows the park's outline rather than being a circle around
- * it, and that is not cosmetic. The apron between the edge and the cut has to be
- * the *same width all the way round*: on a circular disc around a boundary
- * running 57-110 m it would be 22 m at the widest bearing and 67 m at the
- * narrowest, so the treeline that hides the cut would either stand miles out on
- * a bare hillside or fail to reach the cut at all. Following the outline keeps
- * the hill, the treeline and the cut edge in the same relationship on every
- * bearing.
- */
-export function terrainEdgeRadiusAt(bearing: number): number {
-  return edgeRadiusAt(PARK_BOUNDARY, bearing) + TERRAIN_APRON;
-}
-
 /** A point along the park's edge, with the way the edge runs there. */
 export interface EdgeStation {
   readonly x: number;
   readonly z: number;
   /** Yaw putting a box's local X axis along the edge, for `Object3D.rotation.y`. */
   readonly yaw: number;
+  /**
+   * How far round the edge this station is, in metres from the outline's first
+   * vertex — so a caller can ask "is this station inside a run of the edge?"
+   * (the boundary wall's gate opening) by distance along the curve rather than
+   * by a shape drawn in some other frame.
+   */
+  readonly s: number;
+  /** Length once round the outline these stations were walked on. */
+  readonly perimeter: number;
 }
 
 /**
@@ -777,34 +772,9 @@ export function alongBoundary(
       // long axis along the edge rather than across it — the difference between
       // a wall and a ring of tombstones.
       yaw: Math.atan2(-tangentZ, tangentX),
+      s: target,
+      perimeter,
     });
   }
   return stations;
-}
-
-/**
- * Smallest radius of curvature anywhere on a sampled polar profile.
- *
- * `kappa = (r^2 + 2 r'^2 - r r'') / (r^2 + r'^2)^1.5`, with the derivatives
- * taken by central difference on the samples — measured off the profile that
- * will actually be used, not from the harmonics it was built from, so it stays
- * true if the profile is ever produced some other way.
- */
-export function minCurvatureRadius(radii: readonly number[]): number {
-  const count = radii.length;
-  const step = TAU / count;
-  let smallest = Infinity;
-  for (let i = 0; i < count; i += 1) {
-    const previous = radii[(i - 1 + count) % count] as number;
-    const r = radii[i] as number;
-    const next = radii[(i + 1) % count] as number;
-    const first = (next - previous) / (2 * step);
-    const second = (next - 2 * r + previous) / (step * step);
-    const numerator = r * r + 2 * first * first - r * second;
-    if (Math.abs(numerator) < 1e-9) continue;
-    const curvature = numerator / Math.pow(r * r + first * first, 1.5);
-    const radius = Math.abs(1 / curvature);
-    if (radius < smallest) smallest = radius;
-  }
-  return smallest;
 }

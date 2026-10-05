@@ -1,7 +1,9 @@
 import { Vector3 } from 'three';
 import { PALETTE } from '../../core/palette';
-import { placedEntry } from '../parkLayout';
+import type { ParkLayout } from '../parkLayout';
+import { lazyArrayView, lazyView } from '../../boot/lazyView';
 import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
+import { ENTRANCE_MIN_X, ENTRANCE_MAX_X, ENTRANCE_STEPS_REACH } from './frontDoor';
 
 /**
  * The facade's centre: the placed 'building' plot, nudged towards the park
@@ -11,12 +13,37 @@ import { BUILDING_CENTRE_NUDGE } from '../../core/constants';
  * old authored coordinates while its plot, its rail avoidance and its
  * keep-outs had all moved: 85 m of 'building' at seed 7.
  */
-const FACADE_ANCHOR = placedEntry('building');
-const FACADE_LENGTH = Math.hypot(FACADE_ANCHOR.x, FACADE_ANCHOR.z) || 1;
-export const BUILDING_CENTRE_X =
-  FACADE_ANCHOR.x - (FACADE_ANCHOR.x / FACADE_LENGTH) * BUILDING_CENTRE_NUDGE;
-export const BUILDING_CENTRE_Z =
-  FACADE_ANCHOR.z - (FACADE_ANCHOR.z / FACADE_LENGTH) * BUILDING_CENTRE_NUDGE;
+/**
+ * **Live bindings, rebound by the park's backtracking driver** every time the
+ * layout is decided (`parkPlan.ts` → {@link bindCastlePlacement}). They used
+ * to be constants computed here at import from `placedEntry('building')`;
+ * under backtracking the layout can be re-drawn (decision zero) after this
+ * module has loaded, and a hundred consumers read these as plain numbers, so
+ * the numbers themselves move. ESM live bindings make every consumer's read
+ * the current value with no change to the consumer. Before the first layout
+ * decision they are NaN — loud in any arithmetic, never silently stale.
+ */
+export let BUILDING_CENTRE_X = Number.NaN;
+export let BUILDING_CENTRE_Z = Number.NaN;
+export let BALL_PIT_X = Number.NaN;
+export let BALL_PIT_Z = Number.NaN;
+
+/** Bind the castle's and ball pit's placement from a decided layout. The driver's, not a consumer's. */
+export function bindCastlePlacement(layout: ParkLayout): void {
+  const anchor = layout.entries.get('building');
+  const pit = layout.entries.get('ballPit');
+  if (!anchor || !pit) throw new Error("park layout: no 'building' or 'ballPit' entry in the decided layout");
+  const length = Math.hypot(anchor.x, anchor.z) || 1;
+  BUILDING_CENTRE_X = anchor.x - (anchor.x / length) * BUILDING_CENTRE_NUDGE;
+  BUILDING_CENTRE_Z = anchor.z - (anchor.z / length) * BUILDING_CENTRE_NUDGE;
+  BALL_PIT_X = pit.x;
+  BALL_PIT_Z = pit.z;
+  BALL_PIT_FLOOR_Y = terrainHeight(pit.x, pit.z) - BALL_PIT_DEPTH;
+  BUILDING_BASE_Y = deckClearanceOverFootprint() + BUILDING_PLINTH;
+  INTERIOR_GROUND_Y = BUILDING_BASE_Y - INTERIOR_PLAZA_DROP;
+  castleTowersMemo = null;
+  castleFrameMemo = null;
+}
 import {
   BUILDING_FLOOR_HEIGHT,
   BUILDING_HALF_X,
@@ -32,6 +59,7 @@ import {
   INTERIOR_PLAZA_DROP,
   CASTLE_TURRET_BASE_RADIUS,
   CASTLE_TURRET_CORNERS,
+  CASTLE_TURRET_FOOTPRINT_RADIUS,
   PLAYER_RADIUS,
   TOWER_BASE_FLARE,
   TOWER_RADIUS,
@@ -82,7 +110,8 @@ import { Frame, Geo } from '../geo';
 // --------------------------------------------------------------- geometry
 
 /** Ground-floor deck height in world units. Deck 0 is level; the site is not. */
-export const BUILDING_BASE_Y = deckClearanceOverFootprint() + BUILDING_PLINTH;
+/** Live, like the castle's centre it is measured under: rebound by {@link bindCastlePlacement}. */
+export let BUILDING_BASE_Y = Number.NaN;
 
 /**
  * The interior's own ground, a little below its ground-floor deck.
@@ -92,7 +121,8 @@ export const BUILDING_BASE_Y = deckClearanceOverFootprint() + BUILDING_PLINTH;
  * at, gives the roof terrace a "we are very high up" drop, and gives anybody who
  * walks off the edge of deck zero somewhere to land.
  */
-export const INTERIOR_GROUND_Y = BUILDING_BASE_Y - INTERIOR_PLAZA_DROP;
+/** Live, with {@link BUILDING_BASE_Y}. */
+export let INTERIOR_GROUND_Y = Number.NaN;
 
 /**
  * The three floors by name, so nothing has to type a bare `0`, `1` or `2`.
@@ -193,7 +223,9 @@ export function onPlate(authored: number): number {
  * in fact spans **6.44 m of world `y`** across its footprint at scale 1, and the
  * Sky Cruiser's loop was solved through a level slice of a leaning building.
  */
-export const CASTLE_FRAME = /* @__PURE__ */ Frame.fromBearing(
+let castleFrameMemo: Frame | null = null;
+function castleFrameNow(): Frame {
+  return Frame.fromBearing(
   Geo.fromWorld(
     BUILDING_CENTRE_X,
     terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z),
@@ -201,6 +233,12 @@ export const CASTLE_FRAME = /* @__PURE__ */ Frame.fromBearing(
   ).lift(BUILDING_BASE_Y - terrainHeight(BUILDING_CENTRE_X, BUILDING_CENTRE_Z)),
   0,
 );
+}
+/**
+ * A view of the castle's rigid transform, which follows the layout the park's
+ * driver decided (see {@link bindCastlePlacement}, which forgets the memo).
+ */
+export const CASTLE_FRAME: Frame = lazyView(() => (castleFrameMemo ??= castleFrameNow()));
 
 /** A castle-local point, in world space. The inverse of {@link worldToCastle}. */
 export function castleToWorld(local: Readonly<Vector3>, target: Vector3): Vector3 {
@@ -211,6 +249,54 @@ export function castleToWorld(local: Readonly<Vector3>, target: Vector3): Vector
 export function worldToCastle(world: Readonly<Vector3>, target: Vector3): Vector3 {
   return CASTLE_FRAME.toLocal(world, target);
 }
+
+/** World `y` of a castle-local point — the facade's door, its steps — as the shell is actually standing. */
+export function castleWorldY(localX: number, localY: number, localZ: number): number {
+  return castleToWorld(_castleProbe.set(localX, localY, localZ), _castleLocal).y;
+}
+
+/**
+ * **World `y` of a castle-local surface over a world plan point**, or `null`
+ * where the surface does not cover that column.
+ *
+ * `heightAt(localX, localZ)` is the surface's height over the castle's deck in
+ * its own frame, defined everywhere (a ramp's clamped profile); `covers` says
+ * where it actually exists. This finds the world point straight above or
+ * below `(x, z)` on the surface, by Newton on world `y` — the frame is rigid,
+ * so the castle-local height of `(x, y, z)` moves by the castle up's world-`y`
+ * component per metre of `y` — and only then asks `covers`, **at the converged
+ * point**. Testing the footprint at the iterates instead dropped the seam
+ * between two abutting ramps: an early guess a metre off the surface lands a
+ * quarter-metre along the lean from where the surface really is, inside one
+ * ramp's footprint and then outside it, and both answered `null`.
+ *
+ * This is what the garden's entrance steps are sampled through. They were
+ * sampled as `BUILDING_BASE_Y + rampHeight(x − BUILDING_CENTRE_X, …)` — the
+ * castle standing plumb — while `Shell.ts` draws them leaning with
+ * `CASTLE_FRAME`, so the walkable steps and the stone ones parted by the lean
+ * across nine metres of facade: measured on seed 5 the walkable foot hung
+ * **1.5 m** above the ground the drawn steps stand on, and on seed 2 the whole
+ * walkable flight was buried **1.3 m** under the hill the drawn ones climb.
+ */
+export function castleSurfaceY(
+  x: number,
+  z: number,
+  heightAt: (localX: number, localZ: number) => number,
+  covers: (localX: number, localZ: number) => boolean,
+): number | null {
+  const upY = castleWorldY(0, 1, 0) - castleWorldY(0, 0, 0);
+  let y = BUILDING_BASE_Y;
+  for (let i = 0; i < 8; i += 1) {
+    worldToCastle(_castleProbe.set(x, y, z), _castleLocal);
+    const step = (heightAt(_castleLocal.x, _castleLocal.z) - _castleLocal.y) / upY;
+    y += step;
+    if (Math.abs(step) < 1e-7) break;
+  }
+  worldToCastle(_castleProbe.set(x, y, z), _castleLocal);
+  return covers(_castleLocal.x, _castleLocal.z) ? y : null;
+}
+const _castleProbe = /* @__PURE__ */ new Vector3();
+const _castleLocal = /* @__PURE__ */ new Vector3();
 
 /**
  * Facade-local -> world **on the plan alone**, ignoring the castle's lean.
@@ -303,13 +389,20 @@ export function circle(x: number, z: number, radius: number): CircleRegion {
   return { kind: 'circle', x, z, radius };
 }
 
-export function regionContains(region: Region, x: number, z: number): boolean {
+/** Is (x, z) inside the region, padded outward by `margin` metres (default none)? */
+export function regionContains(region: Region, x: number, z: number, margin = 0): boolean {
   if (region.kind === 'rect') {
-    return x >= region.minX && x <= region.maxX && z >= region.minZ && z <= region.maxZ;
+    return (
+      x >= region.minX - margin &&
+      x <= region.maxX + margin &&
+      z >= region.minZ - margin &&
+      z <= region.maxZ + margin
+    );
   }
   const dx = x - region.x;
   const dz = z - region.z;
-  return dx * dx + dz * dz <= region.radius * region.radius;
+  const radius = region.radius + margin;
+  return dx * dx + dz * dz <= radius * radius;
 }
 
 /**
@@ -355,9 +448,9 @@ export function insideInterior(localX: number, localZ: number, margin = 0): bool
 export const INTERIOR_DOOR_MIN_X = -3.2;
 export const INTERIOR_DOOR_MAX_X = 3.2;
 
-/** The matching door in the facade out in the garden, at the top of the steps. */
-export const ENTRANCE_MIN_X = -1;
-export const ENTRANCE_MAX_X = 4;
+// The matching door in the facade out in the garden, at the top of the steps —
+// in a leaf module so the park layout can place the castle's doormat there.
+export { ENTRANCE_MIN_X, ENTRANCE_MAX_X, ENTRANCE_STEPS_REACH } from './frontDoor';
 
 /** Way through the +X (east) wall into the glass lift, on every deck. */
 export const LIFT_DOOR_MIN_Z = 3.5;
@@ -466,40 +559,82 @@ export {
   TOWER_ROOF_OVERHANG,
   CASTLE_TURRET_BASE_RADIUS,
   CASTLE_TURRET_CORNERS,
+  CASTLE_TURRET_FOOTPRINT_RADIUS,
 };
 
 export const TOWER_HEIGHT = 10.6;
 export const TOWER_ROOF_HEIGHT = 4.2;
 
 
-/**
- * **How wide a turret is**, for anything that has to keep out of one — a
- * collider, a keep-out disc, a bench scatter, the offset that pushes the roof
- * garden's turrets clear of its paving.
- *
- * The cone oversails the shaft, and the cone is what a child's hat meets when
- * she walks up to a turret, so the wider of the two is the honest answer.
- * Derived rather than typed for the reason everything round here is: a turret
- * that grows must take its keep-out with it.
- */
-export const CASTLE_TURRET_FOOTPRINT_RADIUS = Math.max(
-  CASTLE_TURRET_BASE_RADIUS,
-  TOWER_RADIUS + TOWER_ROOF_OVERHANG,
-);
+// `CASTLE_TURRET_FOOTPRINT_RADIUS` is owned by `core/constants.ts` since the
+// park manifest's castle radius is derived from it, and the manifest cannot
+// import this file. Re-exported above for the readers that take it from here.
 
 /**
- * A tower part as a solid of revolution: a vertical span with a radius that
- * varies linearly from bottom to top. A cylinder and a cone are both this.
+ * A tower part as a solid of revolution: a span along its own axis with a
+ * radius that varies linearly from bottom to top. A cylinder and a cone are
+ * both this.
+ *
+ * **The solid is described in the castle's own axes, because that is the frame
+ * it is drawn in.** `Shell.ts`'s `buildCornerTowers` stands the four turrets at
+ * `(±outerX, ±outerZ)`, `baseY: 0`, inside the castle's group, and that group
+ * hangs on {@link CASTLE_FRAME} — which leans **12.44 degrees** onto the
+ * planet. This used to be `BUILDING_CENTRE_X + localX` and `BUILDING_BASE_Y +
+ * localY`, which is a castle standing plumb, and is the last instance of the
+ * two flat formulas {@link worldToCastle}'s own docblock exists to replace.
+ *
+ * What that cost, measured on seed 24: `slide/solve.ts` cleared every solid
+ * here by **2.599 m** against the 1.45 m it demands, 0 samples inside — and the
+ * built chute then ran **1.703 m inside the drawn `tower-roof-3`**, 10 of 198
+ * samples, a child riding through solid masonry. The slide is drawn at its plan
+ * coordinates exactly (`Building.ts`: "the chute hangs at park level, whose
+ * group is the identity"); the castle is not. Two maps out of one flat frame,
+ * disagreeing by metres at the corners the ride passes closest to.
+ *
+ * So: {@link localX}/{@link localZ}/{@link localBottomY}/{@link localTopY} are
+ * the solid, and {@link distanceOutsideTower} takes a **world** point through
+ * {@link worldToCastle} before it measures. {@link x}/{@link z} are the drawn
+ * foot in world plan, which is what a collider and a keep-out want and all they
+ * want.
  */
 export interface TowerSolid {
   readonly name: string;
-  /** Axis position, in world space. */
+  /**
+   * World `x`/`z` on the **plan**, `BUILDING_CENTRE + local` — unchanged, and
+   * deliberately not the drawn foot.
+   *
+   * Every consumer of this is a ground-plane question: the collider
+   * `Building.registerCastleTowerCollision` puts under the tower,
+   * `check:castle-towers`' march, `parkFacts`' turret list. Moving it to the
+   * drawn foot was tried and reverted: the two differ by the lean, and
+   * `check:castle-towers` then measured "tower-body-0 stops a child at 2.66 m
+   * from its axis but its collider should hold her at 2.83 m". Both numbers
+   * come from this field, so the mismatch was the memo moving under one of its
+   * two readers — `CASTLE_FRAME` depends on `BUILDING_BASE_Y` and the terrain,
+   * which this used not to. The plan position has no such dependency, and at
+   * these radii it is what the `castleFlatToWorld` docblock already calls
+   * accurate enough for a ground-plane answer.
+   */
   readonly x: number;
   readonly z: number;
-  readonly bottomY: number;
-  readonly topY: number;
+  /** The axis, in the castle's own axes. */
+  readonly localX: number;
+  readonly localZ: number;
+  readonly localBottomY: number;
+  readonly localTopY: number;
   readonly radiusBottom: number;
   readonly radiusTop: number;
+  /**
+   * Does this part stand on the plinth — is its foot the castle's own base?
+   *
+   * A tower standing on the plinth goes all the way down to the ground, however
+   * far the ground falls away from the plinth. The solid stops at its foot, so
+   * a chute passing *below* that height beside a tower read as clear of it;
+   * seed 131 ran its last metres through the foot of `tower-body-1`, 1.22 m
+   * inside the built masonry. {@link distanceOutsideTower} reads the solid at
+   * its own foot for anything lower, which is the tower that was built.
+   */
+  readonly standsOnThePlinth: boolean;
 }
 
 
@@ -509,33 +644,50 @@ export interface TowerSolid {
  * Derived from the same numbers `Shell.ts` composes its instance matrices from,
  * so the solid a ride avoids and the mesh a child sees cannot drift apart.
  */
-export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
+let castleTowersMemo: readonly TowerSolid[] | null = null;
+export const CASTLE_TOWERS: readonly TowerSolid[] = lazyArrayView(castleTowerSolids);
+/**
+ * The array {@link CASTLE_TOWERS} views, itself — for a hot loop that wants to
+ * skip the view's per-read forwarding, or to memoise on its identity (a new
+ * array every time the castle is re-placed).
+ */
+export function castleTowerSolids(): readonly TowerSolid[] {
+  return (castleTowersMemo ??= castleTowersNow());
+}
+function castleTowersNow(): readonly TowerSolid[] {
   const solids: TowerSolid[] = [];
   const corners = CASTLE_TURRET_CORNERS;
   corners.forEach(([localX, localZ], index) => {
+    // Plan position, not the drawn foot — see {@link TowerSolid.x}.
     const x = BUILDING_CENTRE_X + localX;
     const z = BUILDING_CENTRE_Z + localZ;
     solids.push({
       name: `tower-body-${index}`,
       x,
       z,
-      bottomY: BUILDING_BASE_Y,
-      topY: BUILDING_BASE_Y + TOWER_HEIGHT,
+      localX,
+      localZ,
+      localBottomY: 0,
+      localTopY: TOWER_HEIGHT,
       radiusBottom: CASTLE_TURRET_BASE_RADIUS,
       radiusTop: TOWER_RADIUS,
+      standsOnThePlinth: true,
     });
     solids.push({
       name: `tower-roof-${index}`,
       x,
       z,
-      bottomY: BUILDING_BASE_Y + TOWER_HEIGHT,
-      topY: BUILDING_BASE_Y + TOWER_HEIGHT + TOWER_ROOF_HEIGHT,
+      localX,
+      localZ,
+      localBottomY: TOWER_HEIGHT,
+      localTopY: TOWER_HEIGHT + TOWER_ROOF_HEIGHT,
       radiusBottom: TOWER_RADIUS + TOWER_ROOF_OVERHANG,
       radiusTop: 0,
+      standsOnThePlinth: false,
     });
   });
   return solids;
-})();
+}
 
 /**
  * Horizontal distance from a tower's surface at height `y`, or `Infinity` where
@@ -550,12 +702,39 @@ export const CASTLE_TOWERS: readonly TowerSolid[] = (() => {
  * between the rays that a thin obstacle can slip through. Do not "unify" the
  * two: for a cylinder, rays would be strictly less accurate than this.
  */
+const towerProbe = new Vector3();
+
 export function distanceOutsideTower(tower: TowerSolid, x: number, z: number, y: number): number {
-  if (y < tower.bottomY || y > tower.topY) return Infinity;
-  const span = tower.topY - tower.bottomY;
-  const t = span <= 1e-9 ? 0 : (y - tower.bottomY) / span;
+  // **Into the castle's own axes first.** The solid leans with the building;
+  // asking this in world `x`/`z`/`y` measures a castle standing plumb, which is
+  // not the one that is drawn. See {@link TowerSolid}.
+  worldToCastle(towerProbe.set(x, y, z), towerProbe);
+  return distanceOutsideTowerLocal(tower, towerProbe);
+}
+
+/**
+ * {@link distanceOutsideTower} with the conversion already done — for a caller
+ * asking about **one point against several towers**.
+ *
+ * The transform depends only on the point, not on the tower, so a caller that
+ * walks all eight solids should pay for it once rather than eight times over:
+ * `clearsTowers` was doing nine per sample, on the hottest loop in the slide's
+ * search. Same arithmetic either way; this is only about where the conversion
+ * sits.
+ */
+export function distanceOutsideTowerLocal(
+  tower: TowerSolid,
+  local: Readonly<Vector3>,
+): number {
+  // A part standing on the plinth reaches down to whatever ground is under it,
+  // so anything below its foot is measured at the foot.
+  const atY =
+    tower.standsOnThePlinth && local.y < tower.localBottomY ? tower.localBottomY : local.y;
+  if (atY < tower.localBottomY || atY > tower.localTopY) return Infinity;
+  const span = tower.localTopY - tower.localBottomY;
+  const t = span <= 1e-9 ? 0 : (atY - tower.localBottomY) / span;
   const radius = tower.radiusBottom + (tower.radiusTop - tower.radiusBottom) * t;
-  return Math.hypot(x - tower.x, z - tower.z) - radius;
+  return Math.hypot(local.x - tower.localX, local.z - tower.localZ) - radius;
 }
 
 /**
@@ -716,7 +895,7 @@ export const ENTRANCE_RAMP: RampDefinition = {
   space: 'garden',
   footprint: rect(ENTRANCE_MIN_X, ENTRANCE_MAX_X, BUILDING_HALF_Z, BUILDING_HALF_Z + 3),
   axis: 'z',
-  from: BUILDING_HALF_Z + 2.8,
+  from: BUILDING_HALF_Z + ENTRANCE_STEPS_REACH,
   to: BUILDING_HALF_Z,
   yFrom: -0.75,
   yTo: 0,
@@ -1534,9 +1713,8 @@ export function shopForecourtRegion(unit: ShopUnitDefinition): RectRegion {
 // --------------------------------------------------------------- ball pit
 
 /** Centre of the ball pit, in world coordinates (the `ballPit` anchor). */
-export const BALL_PIT_X = placedEntry('ballPit').x;
-export const BALL_PIT_Z = placedEntry('ballPit').z;
 export const BALL_PIT_RADIUS = 6;
 /** How far the pit floor sits below the surrounding grass. */
 export const BALL_PIT_DEPTH = 0.5;
-export const BALL_PIT_FLOOR_Y = terrainHeight(BALL_PIT_X, BALL_PIT_Z) - BALL_PIT_DEPTH;
+/** Live, like the pit's position: rebound by {@link bindCastlePlacement}. */
+export let BALL_PIT_FLOOR_Y = Number.NaN;

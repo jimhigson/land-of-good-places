@@ -227,6 +227,8 @@ interface Collected {
   /** `n` object ids, indexing {@link Collected.names}. */
   readonly owner: Int32Array;
   readonly names: string[];
+  /** Per object id: its {@link SHOWN_ALONE} declaration, or null. */
+  readonly shownAlone: readonly ({ readonly set: string; readonly member: string } | null)[];
   readonly count: number;
   readonly total: number;
   readonly objects: number;
@@ -241,6 +243,37 @@ interface Collected {
  * check turns on. In `Float32Array` the tight tolerance would silently become
  * meaningless exactly in the spaces the last two bugs were found in.
  */
+/**
+ * **`SHOWN_ALONE`: faces that can never be on screen together.** A group whose
+ * `userData.shownAlone` is `{ set, member }` is one of a set the game only ever
+ * shows one member of at a time — today the Rail Race's two rings, which
+ * `RailRace.setActiveRing` swaps (the only writer of the declaration, beside
+ * the swap). This sweep has to ignore `visible` (see above), so without the
+ * declaration it would report the two rings' sleepers as fighting, though no
+ * frame ever draws both. Two faces from different members of one set are not
+ * a finding; two faces from the same member, or from outside any set, still
+ * are.
+ */
+function shownAloneOf(node: Object3D): { set: string; member: string } | null {
+  for (let at: Object3D | null = node; at; at = at.parent) {
+    const declared = at.userData['shownAlone'] as { set?: unknown; member?: unknown } | undefined;
+    if (declared && typeof declared.set === 'string' && typeof declared.member === 'string') {
+      return { set: declared.set, member: declared.member };
+    }
+  }
+  return null;
+}
+
+function neverShownTogether(
+  shownAlone: Collected['shownAlone'],
+  a: number,
+  b: number,
+): boolean {
+  const first = shownAlone[a];
+  const second = shownAlone[b];
+  return !!first && !!second && first.set === second.set && first.member !== second.member;
+}
+
 function collect(root: Object3D): Collected {
   root.updateMatrixWorld(true);
 
@@ -248,6 +281,7 @@ function collect(root: Object3D): Collected {
   const normals: number[] = [];
   const owner: number[] = [];
   const names: string[] = [];
+  const shownAlone: ({ set: string; member: string } | null)[] = [];
   let total = 0;
   let objects = 0;
 
@@ -307,6 +341,7 @@ function collect(root: Object3D): Collected {
     // question; this file's question is what the modeller drew.
     const id = names.length;
     names.push(objectPath(node));
+    shownAlone.push(shownAloneOf(node));
     objects += 1;
     for (let copy = 0; copy < copies; copy += 1) {
       if (node instanceof InstancedMesh) {
@@ -355,6 +390,7 @@ function collect(root: Object3D): Collected {
     normals: Float64Array.from(normals),
     owner: Int32Array.from(owner),
     names,
+    shownAlone,
     count: owner.length,
     total,
     objects,
@@ -585,6 +621,7 @@ export function sweepCoplanar(
                   if (j >= i || seen.has(j)) continue;
                   seen.add(j);
                   if (owner[j] === owner[i]) continue;
+                  if (neverShownTogether(collected.shownAlone, owner[i] as number, owner[j] as number)) continue;
 
                   const mx = normals[j * 3] as number;
                   const my = normals[j * 3 + 1] as number;

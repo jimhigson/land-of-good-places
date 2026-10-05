@@ -17,6 +17,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
+    // Before any test file's imports: see src/core/deterministicMath.ts.
+    setupFiles: ['test/setupDeterministicMath.ts'],
     pool: 'forks',
     isolate: true,
     // 240 s: seed 11's park is the slow one — its slide legitimately burns a

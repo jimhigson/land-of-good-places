@@ -1,4 +1,4 @@
-import { type BufferAttribute, CatmullRomCurve3, Mesh, Vector3 } from 'three';
+import { type BufferAttribute, CatmullRomCurve3, Mesh } from 'three';
 import {
   PATH_KERB_LIFT,
   PATH_KERB_OVERHANG,
@@ -6,12 +6,32 @@ import {
 } from '../core/constants';
 import {
   addPathRibbon,
+  addRibbonStrip,
   GeometryBuilder,
   pathKerbMaterial,
+  pathCrossSection,
   pathSurfaceMaterial,
+  ribbonEdges,
+  ribbonStations,
 } from './pathSurface';
 import { terrainHeight } from './terrain';
-import { buildGraph, PLAZA, routeCurve, type PathGraph, type RouteDefinition } from './paths';
+import { CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, DOOR_PAVING_OVERLAP } from '../core/constants';
+import { cameraOffset } from '../core/cameraRig';
+import { DEG } from '../core/mathUtils';
+import {
+  curvePoints,
+  BUILT_SOLID_MARGIN,
+  distanceToBuiltSolids,
+  GATE_CORRIDOR_START_Z,
+  JUNCTION_SNAP,
+  pathDivisions,
+  PLAZA,
+  pointStandsOnABridgeRamp,
+  routeCurve,
+  type PathGraph,
+  type RouteDefinition,
+} from './paths';
+import { PARK_LAYOUT, doorApronOf } from './parkLayout';
 
 /**
  * **The one Catmull-Rom every consumer of a route's drawn shape builds.**
@@ -21,7 +41,9 @@ import { buildGraph, PLAZA, routeCurve, type PathGraph, type RouteDefinition } f
  * answered every geometric question against the control polyline instead).
  */
 export { routeCurve };
-import { takePrewarmedPathGraph } from './pathsPrewarm';
+import { lazyArrayView, lazyView } from '../boot/lazyView';
+import { registerPlanCache } from '../boot/planCaches';
+import { planPart } from './parkPlan';
 import { publishDrawnPath, publishPaving } from './paving';
 
 /**
@@ -38,16 +60,24 @@ import { publishDrawnPath, publishPaving } from './paving';
  */
 
 /** The solved graph — nodes, edges, backbone. One per build, like the park. */
-export const PATH_GRAPH: PathGraph = takePrewarmedPathGraph() ?? buildGraph();
+/** A view: the park's driver decides the graph, and may re-decide it. */
+export const PATH_GRAPH: PathGraph = lazyView(() => planPart('pathGraph'));
 
 /**
  * The ribbons actually drawn — the graph's paved edges. Exported so anything
  * that wants to *draw* the network — the park map — can rebuild the same
  * centreline from the same generated control points.
  */
-export const ROUTES: readonly RouteDefinition[] = PATH_GRAPH.edges
-  .filter((edge) => edge.paved)
-  .map((edge) => edge.route);
+let routesMemo: readonly RouteDefinition[] | null = null;
+export const ROUTES: readonly RouteDefinition[] = lazyArrayView(
+  () =>
+    (routesMemo ??= planPart('pathGraph')
+      .edges.filter((edge) => edge.paved)
+      .map((edge) => edge.route)),
+);
+registerPlanCache(() => {
+  routesMemo = null;
+});
 
 /**
  * One straight, grid-axis-aligned stretch of a paved route, long enough to
@@ -184,6 +214,8 @@ interface DrawnLayer {
   readonly lift: number;
 }
 let drawnLayers: DrawnLayer[] = [];
+/** Decides which kerb triangles are buried — rebuilt with the paths, re-asked after a drape. */
+let kerbCover: KerbCover | null = null;
 
 /**
  * Builds the whole path network as two meshes: a cream kerb and the sandy
@@ -196,16 +228,80 @@ export function buildPaths(): Mesh[] {
   const surface = new GeometryBuilder();
   const kerb = new GeometryBuilder();
 
-  for (const route of ROUTES) {
+  // Every triangle of paving is filed by the route that laid it, so the kerb
+  // can later leave out what another route's paving buries — see `KerbCover`.
+  const surfaceOwners: number[] = [];
+  const kerbOwners: number[] = [];
+  // …and every vertex too, so a measure can ask which route laid a stretch of
+  // the drawn paving off the mesh itself (`test/procgen`'s bridge-side
+  // invariant): a vertex keeps its number through every re-index `KerbCover`
+  // does, where a triangle's position in the index does not.
+  const surfaceVertexOwners: number[] = [];
+  const kerbVertexOwners: number[] = [];
+  const own = (list: number[], builder: GeometryBuilder, owner: number): void => {
+    while (list.length < builder.triangleCount) list.push(owner);
+    const vertices = builder === surface ? surfaceVertexOwners : kerbVertexOwners;
+    while (vertices.length < builder.vertexCount) vertices.push(owner);
+  };
+  ROUTES.forEach((route, owner) => {
     const curve = routeCurve(route);
-    const divisions = Math.max(24, Math.round(curve.getLength() / 0.8));
-    addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT);
+    const divisions = pathDivisions(curve);
+    addPathRibbon(surface, curve, route.width, divisions, PATH_SURFACE_LIFT, discMayBeLaid);
+    own(surfaceOwners, surface, owner);
     addRibbonKerb(kerb, curve, route.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
+    own(kerbOwners, kerb, owner);
     recordSamples(curve, divisions, route.width / 2);
-  }
+  });
 
   addDisc(surface, PLAZA.x, PLAZA.z, PLAZA.radius, 48, 5, PATH_SURFACE_LIFT);
+  own(surfaceOwners, surface, PLAZA_OWNER);
   addAnnulusKerb(kerb, PLAZA.x, PLAZA.z, PLAZA.radius, PLAZA.radius + PATH_KERB_OVERHANG * 2, 48, PATH_KERB_LIFT);
+  own(kerbOwners, kerb, PLAZA_OWNER);
+
+  // Where route ends meet, the paving they leave between their square-cut
+  // ends — see `junctionAprons`.
+  junctionAprons(ROUTES)
+    .map((apron) => clearOfBooths(apron))
+    .filter((apron): apron is JunctionApron => apron !== null && discMayBeLaid(apron.x, apron.z, apron.radius))
+    .forEach((apron, k) => {
+      addDisc(surface, apron.x, apron.z, apron.radius, JUNCTION_APRON_SEGMENTS, 1, PATH_SURFACE_LIFT);
+      own(surfaceOwners, surface, JUNCTION_OWNER_BASE - k);
+      addAnnulusKerb(
+        kerb,
+        apron.x,
+        apron.z,
+        apron.radius,
+        apron.radius + PATH_KERB_OVERHANG,
+        JUNCTION_APRON_SEGMENTS,
+        PATH_KERB_LIFT,
+      );
+      own(kerbOwners, kerb, JUNCTION_OWNER_BASE - k);
+    });
+
+  // Where a door stands at the back of a recess past its doormat, the paving
+  // on to it — see `doorAprons`.
+  // Owners of paving that is drawn but never walked on — see `doorAprons`.
+  const decorativeOwners: number[] = [];
+  // The stretches of door apron a measure must let lie under a building, by
+  // name: every door's overlap ({@link DOOR_PAVING_OVERLAP} in under it), and
+  // the hotel's recess behind its trigger. Each a rectangle — from, to, and the
+  // apron's paved reach either side.
+  const doorAllowances: { what: string; from: readonly [number, number]; to: readonly [number, number]; halfReach: number }[] = [];
+  doorAprons().forEach((apron, k) => {
+    if (!apron.walkable) decorativeOwners.push(DOOR_APRON_OWNER_BASE - k);
+    const halfReach = apron.width / 2 + PATH_KERB_OVERHANG;
+    doorAllowances.push({ what: `${apron.name} overlap under the door`, from: apron.front, to: apron.points[apron.points.length - 1] as readonly [number, number], halfReach });
+    if (!apron.walkable) {
+      doorAllowances.push({ what: `${apron.name} recess behind the trigger`, from: apron.points[0] as readonly [number, number], to: apron.front, halfReach });
+    }
+    const curve = routeCurve(apron);
+    const divisions = pathDivisions(curve);
+    addPathRibbon(surface, curve, apron.width, divisions, PATH_SURFACE_LIFT, discMayBeLaid);
+    own(surfaceOwners, surface, DOOR_APRON_OWNER_BASE - k);
+    addRibbonKerb(kerb, curve, apron.width, PATH_KERB_OVERHANG, divisions, PATH_KERB_LIFT);
+    own(kerbOwners, kerb, DOOR_APRON_OWNER_BASE - k);
+    if (apron.walkable) recordSamples(curve, divisions, apron.width / 2);
+  });
 
   const surfaceMesh = new Mesh(surface.build(), pathSurfaceMaterial());
   surfaceMesh.name = 'path-surface';
@@ -215,10 +311,23 @@ export function buildPaths(): Mesh[] {
   kerbMesh.name = 'path-kerb';
   kerbMesh.receiveShadow = true;
 
+  // Owners: an index into `ownerNames` (a route), or negative — the plaza
+  // ({@link PLAZA_OWNER}) or a junction apron ({@link JUNCTION_OWNER_BASE}).
+  const ownerNames = ROUTES.map((route) => route.name);
+  surfaceMesh.userData['vertexOwners'] = Int32Array.from(surfaceVertexOwners);
+  surfaceMesh.userData['ownerNames'] = ownerNames;
+  kerbMesh.userData['vertexOwners'] = Int32Array.from(kerbVertexOwners);
+  kerbMesh.userData['ownerNames'] = ownerNames;
+  surfaceMesh.userData['decorativeOwners'] = Int32Array.from(decorativeOwners);
+  kerbMesh.userData['decorativeOwners'] = Int32Array.from(decorativeOwners);
+  surfaceMesh.userData['doorAllowances'] = doorAllowances;
+
   drawnLayers = [
     { mesh: kerbMesh, lift: PATH_KERB_LIFT },
     { mesh: surfaceMesh, lift: PATH_SURFACE_LIFT },
   ];
+  kerbCover = new KerbCover(surface, surfaceOwners, kerb, kerbOwners, kerbMesh, surfaceMesh);
+  kerbCover.apply();
 
   // Tell the router where the paving went (issue #416, `world/paving.ts`).
   // The same `samples` and the same `PLAZA` disc `distanceToPath` answers
@@ -346,22 +455,77 @@ export function drapePathsOverBridges(
     normal.needsUpdate = true;
     mesh.geometry.computeBoundingSphere();
   }
+  // The drape moves paving and kerb apart in height, so what is buried has to
+  // be asked again of the heights as they now stand.
+  kerbCover?.apply();
 }
 
 // ---------------------------------------------------------------- internals
 
 
 function recordSamples(curve: CatmullRomCurve3, divisions: number, halfWidth: number): void {
-  const point = new Vector3();
   const run = nextRun;
   nextRun += 1;
-  for (let i = 0; i <= divisions; i += 1) {
-    curve.getPoint(i / divisions, point);
-    samples.push({ x: point.x, z: point.z, halfWidth, run });
-  }
+  for (const sample of sampleCurve(curve, divisions, halfWidth, run)) samples.push(sample);
 }
 
-/** Sweeps a flat ribbon of `width` along the curve, draped onto the terrain. */
+/**
+ * **How finely a route's curve is drawn — the one owner.**
+ *
+ * `buildPaths` uses it to divide the ribbon, the kerb and the samples, and the
+ * generator's commit-time crossing screen uses it to reproduce exactly the
+ * samples the drawing will lay down. A second `max(24, len / 0.8)` written
+ * beside either would be two definitions of "how smooth is a path", and it
+ * would drift the first time anybody tuned smoothness — with the screen then
+ * measuring a slightly different curve from the one drawn, which is the whole
+ * disease this work exists to remove, one level down.
+ */
+// `pathDivisions` and `curvePoints` live in `paths.ts`, beside `routeCurve`.
+// They moved there so the ROUTER can reproduce the drawn geometry before it
+// commits a decision — `crossings.ts` imports this file, so anything the router
+// needs cannot live here without a cycle. That import direction is exactly why
+// the crossing check could only ever run after the graph was published.
+
+/**
+ * The samples a curve lays down when it is drawn — **post fillet and
+ * Catmull-Rom**, which is the geometry a child actually walks and the only
+ * geometry worth asking the railway about. The control polyline is not this.
+ */
+function sampleCurve(
+  curve: CatmullRomCurve3,
+  divisions: number,
+  halfWidth: number,
+  run: number,
+): PathSample[] {
+  return curvePoints(curve, divisions).map((p) => ({ x: p.x, z: p.z, halfWidth, run }));
+}
+
+/**
+ * **The drawn samples a candidate set of routes would produce, without drawing
+ * anything.**
+ *
+ * The generator's `pathGraph` task needs the drawn geometry *before* it commits
+ * a graph, and a reviewer's first question is reasonably "how can you have
+ * drawn samples before anything is drawn". The answer is that **the drawing is
+ * a pure function of the graph**: `buildPaths` derives `ROUTES` from
+ * `PATH_GRAPH.edges`, turns each into a curve with {@link routeCurve}, and
+ * samples it at {@link pathDivisions}. Given the candidate edges, the same
+ * three steps give the same samples — so this shares those steps rather than
+ * restating them.
+ */
+export function drawnSamplesFor(routes: readonly RouteDefinition[]): PathSample[] {
+  const out: PathSample[] = [];
+  let run = 0;
+  for (const route of routes) {
+    const curve = routeCurve(route);
+    for (const sample of sampleCurve(curve, pathDivisions(curve), route.width / 2, run)) {
+      out.push(sample);
+    }
+    run += 1;
+  }
+  return out;
+}
+
 /**
  * **The kerb, as the two bands you can actually see.**
  *
@@ -392,56 +556,15 @@ function addRibbonKerb(
   divisions: number,
   lift: number,
 ): void {
-  // Inner edge exactly where the surface's own edge falls: both ribbons walk
-  // the same curve at the same `divisions`, so the two edges share their
-  // stations and there is no hairline between them to fill.
-  addRibbonBand(builder, curve, width / 2, width / 2 + overhang, divisions, lift);
-  addRibbonBand(builder, curve, -width / 2 - overhang, -width / 2, divisions, lift);
-}
-
-/** One band of a ribbon, between two signed offsets from its centre line. */
-function addRibbonBand(
-  builder: GeometryBuilder,
-  curve: CatmullRomCurve3,
-  fromOffset: number,
-  toOffset: number,
-  divisions: number,
-  lift: number,
-): void {
-  const point = new Vector3();
-  const tangent = new Vector3();
-  let travelled = 0;
-  let previousX = 0;
-  let previousZ = 0;
-
-  for (let i = 0; i <= divisions; i += 1) {
-    const t = i / divisions;
-    curve.getPoint(t, point);
-    curve.getTangent(t, tangent);
-    const nx = -tangent.z;
-    const nz = tangent.x;
-    const length = Math.hypot(nx, nz) || 1;
-
-    if (i > 0) travelled += Math.hypot(point.x - previousX, point.z - previousZ);
-    previousX = point.x;
-    previousZ = point.z;
-
-    const ax = point.x + (nx / length) * fromOffset;
-    const az = point.z + (nz / length) * fromOffset;
-    const bx = point.x + (nx / length) * toOffset;
-    const bz = point.z + (nz / length) * toOffset;
-
-    // Same winding rule as `addRibbon`: the lower offset first, so the quads
-    // wind anticlockwise seen from above and the band faces the sky.
-    const v = travelled / Math.max(1, toOffset - fromOffset);
-    builder.vertex(ax, terrainHeight(ax, az) + lift, az, 0, v);
-    builder.vertex(bx, terrainHeight(bx, bz) + lift, bz, 1, v);
-
-    if (i > 0) {
-      const base = builder.vertexCount - 4;
-      builder.quad(base, base + 1, base + 2, base + 3);
-    }
-  }
+  // Inner edge exactly where the surface's own edge falls: both are swept from
+  // one cross-section (`pathCrossSection`) by one call, so the two edges are
+  // one line — trimmed at a tight corner identically — with no hairline
+  // between them to fill.
+  const stations = ribbonStations(curve, divisions);
+  const [outerRight, right, left, outerLeft] = ribbonEdges(stations, pathCrossSection(width));
+  const vAt = (travelled: number): number => travelled / Math.max(1, overhang);
+  addRibbonStrip(builder, stations, left!, outerLeft!, lift, vAt);
+  addRibbonStrip(builder, stations, outerRight!, right!, lift, vAt);
 }
 
 /** The plaza's kerb: the same idea round a disc, so its middle is not buried. */
@@ -469,6 +592,211 @@ function addAnnulusKerb(
     const a = first + s;
     builder.quad(a, a + 1, a + stride, a + stride + 1);
   }
+}
+
+/** Segments round a junction apron: a 1.3-1.8 m disc, so ~25 cm per chord. */
+const JUNCTION_APRON_SEGMENTS = 32;
+
+/** A paved disc where route ends meet. */
+export interface JunctionApron {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+}
+
+/**
+ * **Where the paving leaving a route's end fans out wider than a straight
+ * line, the ground in the fan's elbow is paved too.**
+ *
+ * Each route is drawn as its own ribbon, cut square across its centreline at
+ * each end. Where two routes *end* at one node at an angle — a network corner
+ * that is two routes rather than one route's filleted turn — the square ends
+ * overlap on the inside of the angle and leave a wedge of lawn on the outside,
+ * between the two outer kerbs: a notch in the paving at the corner, up to
+ * half-width² in area. Seed 11 has one at (-43.0, -13.0), where three routes
+ * end together at 135°. The same happens where a route ends on another route's
+ * square junction corner (`squareJunctionCorners`): that corner is drawn as a
+ * turn of the ribbon through it, which cuts its outside corner off along the
+ * chord.
+ *
+ * The test is the one that decides it exactly. Round a node, list the
+ * directions paving leaves it in — every drawn run through or from it. A
+ * square-cut ribbon leaving along `d` covers nothing more than 90° from `d`
+ * near the node, so the lawn between two neighbouring directions is uncovered
+ * there only when they are **more than 180° apart**. A dead end (one
+ * direction, or several within {@link APRON_DEAD_END} of one another) is
+ * left alone: its end is meant to be square. A T on a route's
+ * straight body (the body leaves both ways, 180° apart) and a route passing
+ * straight through a junction need nothing.
+ *
+ * Every other route end gets a paved disc of the widest meeting route's
+ * half-width, with its own annulus of kerb: exactly the ground within half a
+ * path's width of the node, tangent to each ribbon's edges, so the outside of
+ * the corner comes out rounded like every filleted corner in the park, and
+ * nothing is paved that `isOnPath` (discs of half-width round every sample,
+ * the end samples included) did not already call paved. The kerb annulus under
+ * the routes' paving is `KerbCover`'s to bury, like the plaza's. A node inside
+ * the plaza has the plaza. So does the tip of a route that turns back on
+ * itself inside its own width — see {@link hairpinTips}.
+ *
+ * Reads the drawn centreline ({@link samples}, run `k` being `routes[k]`), so
+ * call it after the routes are recorded.
+ */
+export function junctionAprons(routes: readonly RouteDefinition[]): JunctionApron[] {
+  const byRun = new Map<number, PathSample[]>();
+  for (const sample of samples) {
+    const run = byRun.get(sample.run);
+    if (run) run.push(sample);
+    else byRun.set(sample.run, [sample]);
+  }
+  const aprons: JunctionApron[] = [];
+  for (const route of routes) {
+    if (route.closed || route.points.length < 2) continue;
+    const ends = [route.points[0], route.points[route.points.length - 1]] as (readonly [number, number])[];
+    for (const [x, z] of ends) {
+      if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius) continue;
+      if (aprons.some((apron) => Math.hypot(apron.x - x, apron.z - z) <= JUNCTION_SNAP)) continue;
+      const bearings: number[] = [];
+      let radius = route.width / 2;
+      for (const [run, line] of byRun) {
+        const leaving = bearingsLeaving(line, x, z);
+        if (leaving.length === 0) continue;
+        bearings.push(...leaving);
+        radius = Math.max(radius, (routes[run] as RouteDefinition).width / 2);
+      }
+      if (bearings.length < 2) continue;
+      bearings.sort((p, q) => p - q);
+      let widest = 0;
+      for (let k = 0; k < bearings.length; k += 1) {
+        const next = k + 1 < bearings.length ? (bearings[k + 1] as number) : (bearings[0] as number) + 2 * Math.PI;
+        widest = Math.max(widest, next - (bearings[k] as number));
+      }
+      // Wider than a straight line, or it covers itself; and not so wide that
+      // every bearing is one way — that is a dead end, however many routes
+      // arrive at it side by side.
+      if (widest <= Math.PI + APRON_GAP_SLACK || widest >= 2 * Math.PI - APRON_DEAD_END) continue;
+      aprons.push({ x, z, radius });
+    }
+  }
+  // Hairpins: a run that turns back on itself inside its own width.
+  byRun.forEach((line, run) => {
+    const route = routes[run] as RouteDefinition;
+    if (route.closed) return;
+    for (const k of hairpinTips(line)) {
+      const tip = line[k] as PathSample;
+      if (Math.hypot(tip.x - PLAZA.x, tip.z - PLAZA.z) < PLAZA.radius) continue;
+      aprons.push({ x: tip.x, z: tip.z, radius: route.width / 2 });
+    }
+  });
+  return aprons;
+}
+
+/**
+ * The samples of one run at which it turns back on itself — its two bearings
+ * from the sample, read {@link APRON_BEARING_REACH} away, within
+ * {@link APRON_DEAD_END} of each other — one per hairpin, the tightest.
+ *
+ * A route that doubles back inside its own width (seed 11's gate approach
+ * runs north to (35.53, -13.63) and straight back south along itself) cannot
+ * be swept as a ribbon round the turn: `ribbonEdges` draws the inside of it in
+ * to the centreline, and the tip comes out as a point, a V of lawn either side
+ * of it (0.57 m² there). The paving a child sees there is the two legs side by
+ * side ending together — a dead end of both, and a dead end is square, or at
+ * the turn a half-width round.
+ */
+function hairpinTips(line: readonly PathSample[]): number[] {
+  const tips: number[] = [];
+  let best = -1;
+  let bestAngle = Infinity;
+  const reach = (k: number, way: -1 | 1): PathSample | null => {
+    const from = line[k] as PathSample;
+    for (let j = k + way; j >= 0 && j < line.length; j += way) {
+      const p = line[j] as PathSample;
+      if (Math.hypot(p.x - from.x, p.z - from.z) >= APRON_BEARING_REACH) return p;
+    }
+    return null;
+  };
+  for (let k = 1; k + 1 < line.length; k += 1) {
+    const here = line[k] as PathSample;
+    const back = reach(k, -1);
+    const ahead = reach(k, 1);
+    let angle = Infinity;
+    if (back && ahead) {
+      const a = Math.atan2(back.z - here.z, back.x - here.x);
+      const b = Math.atan2(ahead.z - here.z, ahead.x - here.x);
+      angle = Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    }
+    if (angle < APRON_DEAD_END) {
+      if (angle < bestAngle) {
+        bestAngle = angle;
+        best = k;
+      }
+    } else if (best >= 0) {
+      tips.push(best);
+      best = -1;
+      bestAngle = Infinity;
+    }
+  }
+  if (best >= 0) tips.push(best);
+  return tips;
+}
+
+/** Past a straight line by this much (radians, 3°) before a fan's elbow is worth paving. */
+const APRON_GAP_SLACK = (3 * Math.PI) / 180;
+
+/**
+ * Bearings all within this of one another (radians, 45°) leave a node one way:
+ * a dead end, square-cut like any other, not an elbow. Seed 11's waterFight
+ * doormat at (41.19, 28.03) has a connector leaving the spur's last corner back
+ * along the spur itself; paving it as an elbow put a disc out past the doormat.
+ */
+const APRON_DEAD_END = Math.PI / 4;
+
+/** How near a drawn centreline must pass a node to leave it, metres. */
+const APRON_ON_LINE = 0.1;
+
+/** How far along a centreline its bearing from a node is read, metres. */
+const APRON_BEARING_REACH = 1.0;
+
+/**
+ * The bearings (radians, `atan2(dz, dx)`) in which one drawn run leaves the
+ * point `(x, z)` — none if it does not pass within {@link APRON_ON_LINE} of
+ * it, one if it ends there, two if it runs through.
+ */
+function bearingsLeaving(line: readonly PathSample[], x: number, z: number): number[] {
+  let best = Infinity;
+  let at = -1;
+  let t = 0;
+  for (let i = 1; i < line.length; i += 1) {
+    const a = line[i - 1] as PathSample;
+    const b = line[i] as PathSample;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const length2 = dx * dx + dz * dz;
+    const u = length2 > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / length2)) : 0;
+    const d = Math.hypot(a.x + dx * u - x, a.z + dz * u - z);
+    if (d < best) {
+      best = d;
+      at = i - 1;
+      t = u;
+    }
+  }
+  if (at < 0 || best > APRON_ON_LINE) return [];
+  const out: number[] = [];
+  // Walk each way from the foot of the node until the line is REACH away.
+  for (const way of [-1, 1] as const) {
+    let k = way < 0 ? (t > 0 ? at : at - 1) : t < 1 ? at + 1 : at + 2;
+    let far: PathSample | null = null;
+    for (; k >= 0 && k < line.length; k += way) {
+      const p = line[k] as PathSample;
+      far = p;
+      if (Math.hypot(p.x - x, p.z - z) >= APRON_BEARING_REACH) break;
+    }
+    // A run that ends within a hand's width of the node does not leave it that way.
+    if (!far || Math.hypot(far.x - x, far.z - z) < APRON_BEARING_REACH / 2) continue;
+    out.push(Math.atan2(far.z - z, far.x - x));
+  }
+  return out;
 }
 
 /** A paved circle (the fountain plaza), built as concentric rings. */
@@ -503,3 +831,534 @@ function addDisc(
   }
 }
 
+// ------------------------------------------------------ the kerb's cover
+
+/** A convex polygon in plan, `(x, z)` corners in order. */
+type PlanPolygon = readonly (readonly [number, number])[];
+
+/** The owner id the plaza's disc and annulus are filed under. */
+const PLAZA_OWNER = -1;
+
+/**
+ * **Whether a disc of paving and its kerb, `radius` round `(x, z)`, stays off
+ * every planned bridge.** A junction apron or a repair disc is laid on the
+ * ground only: over a bridge the paving is the route's own ribbon, draped onto
+ * the hump with its two kerb bands, and nothing else (the bridge invariants
+ * count exactly that). Seed 0's `spur-building` starts at (-2.45, 16.50), a
+ * hairpin off the gate approach at the foot of its bridge's ramp; an apron
+ * there reached 1.6 m onto the ramp.
+ */
+function clearOfBridges(x: number, z: number, radius: number): boolean {
+  return !pointStandsOnABridgeRamp(x, z, radius + PATH_KERB_OVERHANG);
+}
+
+/**
+ * **And off the gateway.** The gate approach's gate end is not an end: the
+ * gateway path carries the paving on out through the arch (`Entrance.ts`),
+ * laid up to what `publishDrawnPath` says is drawn — the round cap past the
+ * approach's square end included. A disc reaching into that cap lies under the
+ * gateway path's end: seed 2, where a spur leaves the gate sideways, and seed
+ * 13, where the approach leaves it 5° off straight, each paved the gate end as
+ * an elbow (`check:coplanar`, 0.007 and 0.002 m² at 7 mm).
+ */
+function clearOfTheGateway(x: number, z: number, radius: number): boolean {
+  return Math.hypot(x, z - GATE_CORRIDOR_START_Z) >= radius + PATH_KERB_OVERHANG;
+}
+
+/**
+ * **A junction apron that keeps out from under the booths** (and the
+ * buildings: `paths.ts`'s `distanceToBuiltSolids`). A spur and a
+ * connector that both end on a stall's stand point meet there, and the disc
+ * that paves their meeting reached 1.73 m (half a path plus the kerb) from a
+ * stand point that stands 1.45 m from the booth's front wall — 0.2–0.3 m² of
+ * kerb under every such booth (`noDrawnPavingUnderASolid`, 2 Oct 2026). So
+ * the disc is shrunk to stop short of the booth's body (its walls included,
+ * `boothCorners` and the booth's own box: the one owner of where a booth
+ * stands), or not laid at all if that would leave less than half a path.
+ */
+function clearOfBooths(apron: JunctionApron): JunctionApron | null {
+  const room = distanceToBuiltSolids(apron.x, apron.z);
+  const radius = Math.min(apron.radius, room - PATH_KERB_OVERHANG - BUILT_SOLID_MARGIN);
+  if (radius >= apron.radius) return apron;
+  return radius >= apron.radius / 2 ? { ...apron, radius } : null;
+}
+
+/** Where a disc of paving may be laid: on the ground, off every bridge and off the gateway. */
+function discMayBeLaid(x: number, z: number, radius: number): boolean {
+  return clearOfBridges(x, z, radius) && clearOfTheGateway(x, z, radius);
+}
+
+/** Door apron `k`'s ribbon and kerb are filed under `DOOR_APRON_OWNER_BASE - k`. */
+export const DOOR_APRON_OWNER_BASE = -100_000;
+
+/**
+ * **The paving from a doormat on to its drawn door, and
+ * {@link DOOR_PAVING_OVERLAP} in under it** (`parkLayout.ts`'s `doorApronOf`),
+ * straight, at the arriving route's own width: the hotel's
+ * sliding doors stand ~4.9 m inside its facade at the back of a recess, past
+ * the trigger the doormat is on, and the castle's steps can stand inside the
+ * plot its doormat is pushed clear of. Without it a child sees lawn between
+ * the end of the path and the door (`drawnPavingReachesEveryDoor`).
+ *
+ * A walkable apron (the castle's, open lawn) records its samples like any
+ * route, so the router, the scatter and the waypoints all know it is paving.
+ * The hotel's records none: it lies behind the trigger, on ground she is let
+ * in before she reaches, and a waypoint seeded there would be stranded.
+ */
+function doorAprons(): (RouteDefinition & { readonly walkable: boolean; readonly front: readonly [number, number] })[] {
+  const aprons: (RouteDefinition & { readonly walkable: boolean; readonly front: readonly [number, number] })[] = [];
+  for (const node of PATH_GRAPH.nodes) {
+    if (node.kind !== 'anchor') continue;
+    const entry = PARK_LAYOUT.entries.get(node.id);
+    if (!entry) continue;
+    const apron = doorApronOf(entry);
+    if (!apron) continue;
+    const width = ROUTES.find((route) => route.name === `spur-${node.id}`)?.width ?? 2.6;
+    aprons.push({
+      name: `door-${node.id}`,
+      points: [[entry.entranceX, entry.entranceZ], apron.to],
+      width,
+      closed: false,
+      walkable: apron.walkable,
+      front: apron.front,
+    });
+  }
+  return aprons;
+}
+
+/** Junction apron `k`'s disc and annulus are filed under `JUNCTION_OWNER_BASE - k`. */
+const JUNCTION_OWNER_BASE = -2;
+
+/** Pieces smaller than this in plan are dropped, m². A kerb sliver this thin is float noise. */
+const KERB_SLIVER_AREA = 1e-6;
+
+/**
+ * **How far above the kerb paving may lie and still bury it**, metres: twice
+ * the drawn difference between the two lifts (`PATH_SURFACE_LIFT -
+ * PATH_KERB_LIFT`, 25 mm).
+ *
+ * Buried means *laid on top of it*, not *somewhere above it*. The paving is a
+ * ribbon with no thickness and no skirt, so kerb under it is hidden only where
+ * the gap is too thin to see into from the one camera: at its ~38° elevation a
+ * gap of `h` shows kerb up to `h / tan 38°` in from the paving's edge — 3 cm
+ * at the drawn 25 mm. Paving a metre overhead (a route carried over a bridge
+ * across another route's kerb) hides nothing, and kerb *above* paving (a kerb
+ * carried onto a deck over paving left on the ground) is the visible surface.
+ * Both happen: #701's first version tested plan alone and dropped kerb up to
+ * 2.03 m *above* its "cover" on the canonical seed, visible on 9 of 10 seeds.
+ */
+const KERB_BURY_MAX = 2 * (PATH_SURFACE_LIFT - PATH_KERB_LIFT);
+
+/**
+ * **How far the kerb may stand proud of other routes' paving and still be the
+ * paving's to hide**, metres: the drawn difference between the two lifts, the
+ * other way up.
+ *
+ * On the ground the kerb lies 25 mm under another route's paving, as drawn.
+ * Over a bridge it cannot be trusted to: `drapePathsOverBridges` lifts each
+ * mesh's *vertices* onto the hump, and the two meshes put their vertices in
+ * different places, so between them each is a different chord of one curved
+ * surface. On pool seed 24, where route 13's kerb band runs under another
+ * route's paving on a ramp at (-7.8, -25.8), the paving's chords come out as
+ * much as 2.8 mm *below* the kerb's — so the kerb pokes through the paving and
+ * the two share a plane: `check:coplanar`'s `path-kerb|path-surface`, 0.222 m²
+ * at 6.1 mm. This used to be a float tolerance of 0.1 mm, which read that kerb
+ * as "above the paving, so visible" and kept it.
+ *
+ * A kerb that close is not a surface of its own: it is the same surface as the
+ * paving it sits in, fighting it. The plan test has already proved the paving
+ * covers all of it, so deleting it shows the paving that was meant to be there.
+ * Kerb metres above paving — carried onto a deck over paving left on the
+ * ground — is still well outside this, and still drawn.
+ */
+const KERB_PROUD_MAX = PATH_SURFACE_LIFT - PATH_KERB_LIFT;
+
+/**
+ * **How far above the kerb paving may lie and still bury it, where the plan
+ * allows it**, metres: four times the drawn stand-off, 100 mm.
+ *
+ * The same drape error as {@link KERB_PROUD_MAX}, the other way. On the
+ * canonical seed's steep ramp at (-35.6, -43.9), route 23's kerb triangle under
+ * a junction's paving has three routes' triangles over it: one 8.7-11 mm above
+ * (fighting it — `path-kerb|path-surface`, 0.200 m² at 9.9 mm) and two at
+ * 42-63 mm, past {@link KERB_BURY_MAX}. Those two were refused as cover, so the
+ * kerb was kept, and fought the third.
+ *
+ * Paving further overhead hides the kerb only if it also covers the wider strip
+ * its sight-lines cross before they climb that high — {@link sightShadow} at
+ * this height rather than at `KERB_BURY_MAX`. So this is asked only of a kerb
+ * triangle whose wider strip other routes' paving covers in plan, and only after
+ * the ordinary test has said no: it can drop more kerb, never less. Paving a
+ * metre overhead (a deck over another route's kerb) is still well outside it.
+ */
+const KERB_HIDE_MAX = 4 * (PATH_SURFACE_LIFT - PATH_KERB_LIFT);
+
+/** A kerb triangle whose plan another route's paving covers, and by what. */
+interface KerbCandidate {
+  /** Its triangle number in the kerb's full index. */
+  readonly triangle: number;
+  /** Its three kerb vertex indices. */
+  readonly corners: readonly [number, number, number];
+  readonly plan: [number, number][];
+  /** The triangle and its {@link sightShadow} — what has to be covered for it to be out of sight. */
+  readonly sight: [number, number][];
+  /**
+   * The same for paving up to {@link KERB_HIDE_MAX} overhead — or `null` if
+   * other routes' paving does not cover that wider strip in plan, when only
+   * `sight` can ever be asked.
+   */
+  readonly deepSight: [number, number][] | null;
+  /**
+   * Every other-owner paving triangle overlapping `deepSight` in plan (a
+   * superset of `sight`), with both overlap polygons; `overlap` is empty when
+   * it reaches only the wider strip.
+   */
+  readonly covers: readonly {
+    readonly corners: readonly [number, number, number];
+    readonly plan: PlanPolygon;
+    readonly overlap: PlanPolygon;
+    readonly deepOverlap: PlanPolygon;
+  }[];
+}
+
+/**
+ * **Where the paving lies on top of the kerb, so the kerb is not drawn there.**
+ *
+ * Each route's kerb is two bands along its own edges, and at a junction those
+ * bands run on under the *other* route's surface, 25 mm down. That is a buried
+ * face, invisible only while 25 mm stays 25 mm: over a bridge the drape lifts
+ * vertices one by one, and the triangles straddling the deck's edge become
+ * steep ramps — two routes' ramps meeting at a junction there come out within
+ * a centimetre of one plane, same way up. `check:coplanar`:
+ * `path-kerb|path-surface`, 0.651 m² at 7.7 mm on seed 24 and 0.200 m² at
+ * 9.9 mm on the canonical seed. `ART_DIRECTION.md` §7's cure is to delete the
+ * face nobody can see.
+ *
+ * A kerb triangle is dropped only when other routes' face-up paving covers
+ * **all** of it in plan — and the strip its sight-lines cross on the way to the
+ * camera, {@link sightShadow} — **and** lies on top of it — from {@link KERB_PROUD_MAX} below it to {@link KERB_BURY_MAX}
+ * above it — over every part of the overlap. Both are exact: the plan test is a
+ * convex polygon difference (never a capsule, which overstates the ribbon), and
+ * the height test compares the two triangles' planes at every corner of their
+ * overlap polygon, which bounds it everywhere between (both are linear there).
+ * Only paving that passes the height test counts towards the cover.
+ *
+ * The plan half is decided once, when the paths are drawn — plan never moves.
+ * The height half is decided by {@link apply}, which reads the meshes' current
+ * vertices, so it is asked again after `drapePathsOverBridges` has moved them:
+ * before a drape every route lies on the ground and 25 mm is 25 mm everywhere.
+ * `apply` rewrites the kerb's index only; every vertex stays where it was laid,
+ * so per-vertex measures of the kerb (the bridge-carrying invariant counts
+ * them) are unchanged. A route's own surface is never subtracted from its own
+ * kerb: the two share an edge by construction.
+ *
+ * **Whole triangles only.** Cutting partly covered triangles down to their
+ * uncovered part was tried and is worse: `check:coplanar` measures a pair of
+ * triangles by their furthest vertices, so small pieces of kerb that were
+ * always within a few millimetres of the coarse terrain mesh became findings
+ * the whole triangle had hidden (0.755 m² of `path-kerb|terrain` on seed 11).
+ */
+class KerbCover {
+  private readonly all: number[];
+  private readonly candidates: KerbCandidate[] = [];
+  private readonly kerbMesh: Mesh;
+  private readonly surfaceMesh: Mesh;
+
+  constructor(
+    surface: GeometryBuilder,
+    surfaceOwners: readonly number[],
+    kerb: GeometryBuilder,
+    kerbOwners: readonly number[],
+    kerbMesh: Mesh,
+    surfaceMesh: Mesh,
+  ) {
+    this.kerbMesh = kerbMesh;
+    this.surfaceMesh = surfaceMesh;
+    this.all = Array.from(kerbMesh.geometry.index?.array ?? []);
+
+    // The paving, in a plan grid.
+    const paving: { owner: number; corners: [number, number, number]; plan: PlanPolygon; box: Box }[] = [];
+    const grid = new Map<string, number[]>();
+    for (let t = 0; t < surface.triangleCount; t += 1) {
+      const corners = surface.triangleAt(t);
+      const plan = corners.map((i) => surface.planAt(i));
+      // Only paving the camera sees the top of can hide anything: `FrontSide`
+      // culls a face-down triangle, so kerb under one is on screen. A ribbon
+      // folding over itself at a hairpin used to lay those (pool seed 451, at
+      // (-9.0, -4.4)); `ribbonEdges` no longer does, and
+      // `noDrawnPavingFacesTheGround` says so — this stays so a fold that
+      // slipped past it could never also delete the kerb beneath it.
+      if (facesUp(plan) <= 0) continue;
+      const box = boxOf(plan);
+      const id = paving.push({ owner: surfaceOwners[t] as number, corners, plan, box }) - 1;
+      for (const key of cellsOf(box)) {
+        const list = grid.get(key);
+        if (list) list.push(id);
+        else grid.set(key, [id]);
+      }
+    }
+
+    // Every kerb triangle that the union of other routes' paving covers in plan.
+    for (let t = 0; t < kerb.triangleCount; t += 1) {
+      const corners = kerb.triangleAt(t);
+      const plan = corners.map((i) => kerb.planAt(i));
+      const sight = sightShadow(plan, KERB_BURY_MAX);
+      // Contains `sight`: both are the triangle swept towards the camera, this one further.
+      const deep = sightShadow(plan, KERB_HIDE_MAX);
+      const box = boxOf(deep);
+      const owner = kerbOwners[t] as number;
+      const seen = new Set<number>();
+      const covers: KerbCandidate['covers'][number][] = [];
+      let uncovered: [number, number][][] = [sight];
+      let deepUncovered: [number, number][][] = [deep];
+      for (const key of cellsOf(box)) {
+        for (const id of grid.get(key) ?? []) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const cover = paving[id]!;
+          if (cover.owner === owner || !boxesOverlap(cover.box, box)) continue;
+          const deepOverlap = intersectConvex(deep, cover.plan);
+          if (deepOverlap.length < 3 || Math.abs(signedArea(deepOverlap)) < KERB_SLIVER_AREA) continue;
+          deepUncovered = deepUncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
+          const near = intersectConvex(sight, cover.plan);
+          const overlap = near.length < 3 || Math.abs(signedArea(near)) < KERB_SLIVER_AREA ? [] : near;
+          covers.push({ corners: cover.corners, plan: cover.plan, overlap, deepOverlap });
+          if (overlap.length > 0) {
+            uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
+          }
+        }
+      }
+      if (uncovered.length === 0) {
+        const deepSight = deepUncovered.length === 0 ? deep : null;
+        this.candidates.push({ triangle: t, corners, plan, sight, deepSight, covers });
+      }
+    }
+  }
+
+  /** Re-decide which candidates are buried, from the meshes' current heights, and rewrite the kerb's index. */
+  apply(): void {
+    const kerbY = this.kerbMesh.geometry.getAttribute('position');
+    const surfaceY = this.surfaceMesh.geometry.getAttribute('position');
+    const kerbAt = (corners: readonly [number, number, number], plan: PlanPolygon) =>
+      planeHeight(plan, corners.map((i) => kerbY.getY(i)) as [number, number, number]);
+    const dropped = new Set<number>();
+    for (const candidate of this.candidates) {
+      const kerbHeight = kerbAt(candidate.corners, candidate.plan);
+      // Hidden if the paving over it covers the strip its sight-lines cross
+      // while they are still under that paving: first asked of paving within
+      // the drawn stand-off's reach, then — where the plan allows — of paving
+      // lying higher over it, which has to cover a wider strip.
+      const hiddenUnder = (shadow: [number, number][], deep: boolean, most: number): boolean => {
+        let uncovered: [number, number][][] = [shadow];
+        for (const cover of candidate.covers) {
+          const overlap = deep ? cover.deepOverlap : cover.overlap;
+          if (overlap.length === 0) continue;
+          const coverHeight = planeHeight(
+            cover.plan,
+            cover.corners.map((i) => surfaceY.getY(i)) as [number, number, number],
+          );
+          const onTop = overlap.every(([x, z]) => {
+            const gap = coverHeight(x, z) - kerbHeight(x, z);
+            return gap >= -KERB_PROUD_MAX && gap <= most;
+          });
+          if (!onTop) continue;
+          uncovered = uncovered.flatMap((piece) => subtractConvex(piece, cover.plan) ?? [piece]);
+          if (uncovered.length === 0) return true;
+        }
+        return false;
+      };
+      if (
+        hiddenUnder(candidate.sight, false, KERB_BURY_MAX) ||
+        (candidate.deepSight !== null && hiddenUnder(candidate.deepSight, true, KERB_HIDE_MAX))
+      ) {
+        dropped.add(candidate.triangle);
+      }
+    }
+    const index: number[] = [];
+    for (let t = 0; t < this.all.length / 3; t += 1) {
+      if (dropped.has(t)) continue;
+      index.push(this.all[t * 3] as number, this.all[t * 3 + 1] as number, this.all[t * 3 + 2] as number);
+    }
+    this.kerbMesh.geometry.setIndex(index);
+  }
+}
+
+/**
+ * The camera's direction, unit length — the same derivation `IsoCamera` and
+ * `check:coplanar` use, from the one yaw and pitch this game has.
+ */
+const EYE = cameraOffset(CAMERA_YAW_DEGREES * DEG, CAMERA_PITCH_DEGREES * DEG, 1);
+
+/**
+ * **A kerb triangle together with the ground its sight-lines to the camera
+ * cross while they are still under paving `height` above it** — asked at
+ * {@link KERB_BURY_MAX}, and at {@link KERB_HIDE_MAX} for paving lying higher.
+ *
+ * Paving is a ribbon with no skirt, so kerb under it is hidden only if every
+ * line from the kerb to the camera meets the paving before it climbs out from
+ * under its edge. A sight-line rises `EYE.y` per unit and runs `EYE.xz` across
+ * the ground, so by the time it is `KERB_BURY_MAX` up it has moved
+ * `KERB_BURY_MAX · EYE.xz / EYE.y` in plan — about 3 cm at 38°. Requiring the
+ * paving to cover the triangle swept that far towards the camera, not just the
+ * triangle, is what keeps a kerb triangle hard against a paving edge from
+ * being dropped while it still shows through the slot under it (one such, on
+ * pool seed 451, 22 mm under paving and in view).
+ */
+function sightShadow(plan: readonly [number, number][], height: number): [number, number][] {
+  const reach = height / EYE.y;
+  const shifted = plan.map(([x, z]) => [x + EYE.x * reach, z + EYE.z * reach] as [number, number]);
+  return convexHull([...plan, ...shifted]);
+}
+
+/** Andrew's monotone chain; anticlockwise in (x, z). */
+function convexHull(points: readonly [number, number][]): [number, number][] {
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (list: [number, number][]): [number, number][] => {
+    const out: [number, number][] = [];
+    for (const p of list) {
+      while (out.length >= 2 && cross(out[out.length - 2]!, out[out.length - 1]!, p) <= 0) out.pop();
+      out.push(p);
+    }
+    out.pop();
+    return out;
+  };
+  return [...half(sorted), ...half([...sorted].reverse())];
+}
+
+interface Box {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
+function boxOf(plan: readonly (readonly [number, number])[]): Box {
+  const xs = plan.map((p) => p[0]);
+  const zs = plan.map((p) => p[1]);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+}
+
+function boxesOverlap(a: Box, b: Box): boolean {
+  return a.maxX > b.minX && a.minX < b.maxX && a.maxZ > b.minZ && a.minZ < b.maxZ;
+}
+
+/** The height of the plane through a triangle's three corners, as a function of plan position. */
+function planeHeight(
+  plan: PlanPolygon,
+  heights: readonly [number, number, number],
+): (x: number, z: number) => number {
+  const [[x0, z0], [x1, z1], [x2, z2]] = plan as [[number, number], [number, number], [number, number]];
+  const det = (x1 - x0) * (z2 - z0) - (x2 - x0) * (z1 - z0);
+  const [h0, h1, h2] = heights;
+  if (Math.abs(det) < 1e-12) return () => Math.max(h0, h1, h2);
+  return (x, z) => {
+    const w1 = ((x - x0) * (z2 - z0) - (x2 - x0) * (z - z0)) / det;
+    const w2 = ((x1 - x0) * (z - z0) - (x - x0) * (z1 - z0)) / det;
+    return (1 - w1 - w2) * h0 + w1 * h1 + w2 * h2;
+  };
+}
+
+/**
+ * Positive when a triangle given in plan, in its index order, is wound to face
+ * the sky — the `y` of `(b - a) × (c - a)`.
+ */
+function facesUp(plan: readonly (readonly [number, number])[]): number {
+  const [[ax, az], [bx, bz], [cx, cz]] = plan as [[number, number], [number, number], [number, number]];
+  return (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+}
+
+/** The intersection of two convex polygons in plan. */
+function intersectConvex(piece: readonly [number, number][], cover: PlanPolygon): [number, number][] {
+  const orientation = Math.sign(signedArea(cover));
+  if (orientation === 0) return [];
+  let rest: [number, number][] = [...piece];
+  for (let k = 0; k < cover.length && rest.length >= 3; k += 1) {
+    const [ax, az] = cover[k]!;
+    const [bx, bz] = cover[(k + 1) % cover.length]!;
+    rest = clipToSide(rest, ([x, z]) => orientation * ((bx - ax) * (z - az) - (bz - az) * (x - ax)));
+  }
+  return rest;
+}
+
+/** Grid cell side for {@link KerbCover}'s lookup, metres. */
+const KERB_COVER_CELL = 4;
+
+function cellsOf(box: Box): string[] {
+  const keys: string[] = [];
+  for (let i = Math.floor(box.minX / KERB_COVER_CELL); i <= Math.floor(box.maxX / KERB_COVER_CELL); i += 1) {
+    for (let j = Math.floor(box.minZ / KERB_COVER_CELL); j <= Math.floor(box.maxZ / KERB_COVER_CELL); j += 1) {
+      keys.push(`${i},${j}`);
+    }
+  }
+  return keys;
+}
+
+function signedArea(polygon: readonly (readonly [number, number])[]): number {
+  let area = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const [ax, az] = polygon[i]!;
+    const [bx, bz] = polygon[(i + 1) % polygon.length]!;
+    area += ax * bz - bx * az;
+  }
+  return area / 2;
+}
+
+/**
+ * `piece` minus the convex `cover`, as convex pieces in `piece`'s own winding
+ * — or `null` if the cover takes nothing measurable from it.
+ *
+ * The standard split: walking the cover's edges, whatever of the piece lies
+ * outside edge *k* but inside edges *0..k-1* is one piece of the answer, and
+ * whatever is inside every edge is the part covered.
+ */
+function subtractConvex(
+  piece: readonly [number, number][],
+  cover: PlanPolygon,
+): [number, number][][] | null {
+  const orientation = Math.sign(signedArea(cover));
+  if (orientation === 0) return null;
+  const out: [number, number][][] = [];
+  let rest: [number, number][] = [...piece];
+  for (let k = 0; k < cover.length && rest.length >= 3; k += 1) {
+    const [ax, az] = cover[k]!;
+    const [bx, bz] = cover[(k + 1) % cover.length]!;
+    // > 0 inside this edge's half-plane, for either winding of the cover.
+    const side = ([x, z]: [number, number]): number =>
+      orientation * ((bx - ax) * (z - az) - (bz - az) * (x - ax));
+    const outside = clipToSide(rest, (p) => -side(p));
+    if (outside.length >= 3 && Math.abs(signedArea(outside)) >= KERB_SLIVER_AREA) out.push(outside);
+    rest = clipToSide(rest, side);
+  }
+  if (rest.length < 3 || Math.abs(signedArea(rest)) < KERB_SLIVER_AREA) return null;
+  return out;
+}
+
+/** Sutherland–Hodgman against one half-plane: keeps where `side(p) >= 0`. */
+function clipToSide(
+  polygon: readonly [number, number][],
+  side: (p: [number, number]) => number,
+): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < polygon.length; i += 1) {
+    const p = polygon[i]!;
+    const q = polygon[(i + 1) % polygon.length]!;
+    const sp = side(p);
+    const sq = side(q);
+    if (sp >= 0) out.push(p);
+    if ((sp > 0 && sq < 0) || (sp < 0 && sq > 0)) {
+      const t = sp / (sp - sq);
+      out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+    }
+  }
+  return out;
+}
+
+// Derived from a decision the park's driver may unwind: forgotten with it.
+registerPlanCache(() => {
+  cachedBorderSegments = null;
+  drawnLayers = [];
+  kerbCover = null;
+  nextRun = 0;
+});

@@ -44,11 +44,32 @@
  * strictly — but a working compositor is still what makes the picker's own
  * `data-open` CSS transition resolve at all).
  */
+import { tapEscapeWithinOneFrame } from './lib/keys.mts';
 import { chromium, type Page } from 'playwright-core';
 import { worldX, worldZ } from '../src/world/building/layout.ts';
+import {
+  REPTILE_HOUSE_ORIGIN_X,
+  REPTILE_HOUSE_ORIGIN_Z,
+  REPTILE_LOG_CENTRE_X,
+} from '../src/world/reptileHouse/layout.ts';
+import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
+import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
 const BASE = (process.env.CHECK_DEEP_LINKS_URL ?? 'http://127.0.0.1:5173').replace(/\/$/, '');
+
+/**
+ * **Which park, pinned — never the one the pool happens to draw** (#700).
+ *
+ * A fresh profile draws its park from `PARK_SEED_POOL`, so every run of this
+ * check used to visit a different park and a red run could not be reproduced
+ * from its own transcript (the one that failed was most likely seed 208,
+ * judged only by matching the stall's coordinates against a probe). Every URL carries
+ * `?seed=`, and every page is held to having reported that seed back.
+ * `CHECK_DEEP_LINKS_SEED=n` visits another park.
+ */
+const SEED = Number(process.env.CHECK_DEEP_LINKS_SEED ?? CANONICAL_PARK_SEED);
+const at = (path: string): string => `${BASE}${path}${path.includes('?') ? '&' : '?'}seed=${SEED}`;
 const SHOT_DIR = process.env.CHECK_DEEP_LINKS_SHOTS ?? '/tmp/check-deep-links';
 
 type CheckResult = { ok: boolean; detail: string };
@@ -154,7 +175,120 @@ const GAME_READY_TIMEOUT_MS = 120000;
  */
 const AUTOSAVE_TIMEOUT_MS = 60000;
 
+/** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
+const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
+
 const CHECKS: DeepLinkCheck[] = [
+  {
+    // The Reptile House's hall, at a spot: `inside` must flip and the player
+    // must be at the asked-for hall-local point, converted back here from the
+    // same constants the building uses — a conversion that cannot pass by
+    // agreeing with itself, exactly as `/castle?at=` below.
+    path: `/reptile-house?at=${REPTILE_AT.x},${REPTILE_AT.z}&facing=90`,
+    // The returning-save case primes a save *inside the hall* (the plain
+    // link lands at the arrival), so `continueGame` measures the case that
+    // once refused: restored into the hall, then asked for a spot in it.
+    primerPath: '/reptile-house',
+    assert: async (page) => {
+      const want = { x: REPTILE_HOUSE_ORIGIN_X + REPTILE_AT.x, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_AT.z };
+      await page
+        .waitForFunction(
+          () => ((window as unknown as { game?: any }).game)?.world?.reptileHouse?.playerIsInside === true,
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true) return { ok: false, detail: `the Reptile House was not entered (inside=${s.inside})` };
+      if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
+      const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
+      if (off > CASTLE_TOLERANCE) {
+        return { ok: false, detail: `asked to stand at hall (${REPTILE_AT.x}, ${REPTILE_AT.z}) = world (${want.x}, ${want.z}), but the player is at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)}) — ${off.toFixed(1)} m off` };
+      }
+      return { ok: true, detail: `inside the Reptile House, ${off.toFixed(2)} m from the asked-for spot` };
+    },
+  },
+  {
+    // The Tortoise Ride, boarded: inside the hall, riding, on the shell.
+    path: '/tortoise-ride',
+    primerPath: '/reptile-house',
+    assert: async (page) => {
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            return !!g && g.world?.reptileHouse?.playerOnTortoise === true && g.player?.riding === true;
+          },
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          onTortoise: g?.world?.reptileHouse?.playerOnTortoise ?? null,
+          riding: g?.player?.riding ?? null,
+          y: g?.player?.position?.y ?? null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true || s.onTortoise !== true || s.riding !== true) {
+        return { ok: false, detail: `expected to be riding the tortoise in the hall; inside=${s.inside} onTortoise=${s.onTortoise} riding=${s.riding}` };
+      }
+      return { ok: true, detail: `on the tortoise's shell, ${Number(s.y).toFixed(2)} m up, riding` };
+    },
+  },
+  {
+    // Outside the Reptile House's door, in the park: not inside, standing on
+    // the plot's own doormat (`ReptileHouse.doormat`, the spot the paths reach).
+    path: '/reptile-house-door',
+    // Primed inside the hall too: the door link must put a restored-inside
+    // player back out on the doormat.
+    primerPath: '/reptile-house',
+    assert: async (page) => {
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            const mat = g?.world?.reptileHouse?.doormat;
+            return !!g && !!mat && g.world.reptileHouse.playerIsInside === false && !!g.player?.position &&
+              Math.hypot(g.player.position.x - mat.x, g.player.position.z - mat.z) < 1;
+          },
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        const mat = g?.world?.reptileHouse?.doormat;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          mat: mat ? { x: mat.x, z: mat.z } : null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (!s.playerPos || !s.mat) return { ok: false, detail: 'the player or the doormat had no position' };
+      const space = spaceAt(s.playerPos.x, s.playerPos.z);
+      if (space !== SPACE_GARDEN || s.inside !== false) {
+        return { ok: false, detail: `expected to stand in the park outside the door; she is in '${space}' (inside=${s.inside}) at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)})` };
+      }
+      const off = Math.hypot(s.playerPos.x - s.mat.x, s.playerPos.z - s.mat.z);
+      if (off > CASTLE_TOLERANCE) return { ok: false, detail: `in the park but ${off.toFixed(1)} m from the doormat at (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
+      return { ok: true, detail: `on the Reptile House's park doormat, ${off.toFixed(2)} m from (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
+    },
+  },
   {
     // **This target exists because of a bug it would have caught.** `at` is in
     // the interior's own metres and `teleportTo` takes world coordinates, so
@@ -317,7 +451,15 @@ async function runInFreshBrowser(run: (page: Page) => Promise<void>): Promise<st
     const context = await browser.newContext({ viewport: { width: 1000, height: 700 } });
     const page = await context.newPage();
     page.on('pageerror', (e) => pageErrors.push(String((e as Error)?.stack ?? e)));
+    const seedsSeen: number[] = [];
+    page.on('console', (message) => {
+      const said = /park seed (\d+)/.exec(message.text());
+      if (said) seedsSeen.push(Number(said[1]));
+    });
     await run(page);
+    const wrong = seedsSeen.filter((seed) => seed !== SEED);
+    if (seedsSeen.length === 0) pageErrors.push(`the page never reported its park seed, so the pin to ${SEED} is unproven`);
+    else if (wrong.length > 0) pageErrors.push(`asked for park seed ${SEED}, the page built ${wrong.join(', ')}`);
   } finally {
     await browser.close().catch(() => {});
   }
@@ -364,7 +506,7 @@ for (const check of CHECKS) {
   // ---- path 1: startFresh (save-less profile) ----
   try {
     const pageErrors = await runInFreshBrowser(async (page) => {
-      await page.goto(`${BASE}${check.path}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(at(check.path), { waitUntil: 'domcontentloaded' });
       await waitForGameReady(check, page, GAME_READY_TIMEOUT_MS);
       // Both `boardRide`/`open` and the panel's own `openWith` run synchronously
       // inside the same tick that produces `window.game` — no further wait needed
@@ -387,21 +529,40 @@ for (const check of CHECKS) {
     const pageErrors = await runInFreshBrowser(async (page) => {
       // Create the save fast, through the deep link itself (skips the bus),
       // then close whatever it opened and let the autosave land.
-      await page.goto(`${BASE}${check.primerPath ?? check.path}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(at(check.primerPath ?? check.path), { waitUntil: 'domcontentloaded' });
       await waitForGame(page, GAME_READY_TIMEOUT_MS);
-      await page.keyboard.press('Escape');
-      // Same reasoning as {@link GAME_READY_TIMEOUT_MS}: this wait is for the
-      // autosave to land, and how long that takes is a fact about the machine,
-      // not about the deep link. It was 15 s and timed out on
-      // `/keychain-stall (continueGame)` on a run where every assertion that
-      // did execute was green.
+      await tapEscapeWithinOneFrame(page);
+      // **The likely reason this once timed out on `/keychain-stall` (#700).**
+      // The autosave refuses while she is `riding`, and the keychain view keeps
+      // her riding until it closes. Until the fix, `InputSystem` never saw a
+      // key pressed and released inside one frame, so an Escape that short left
+      // the view open and no save could land. That is the mechanism, measured
+      // in isolation; the #700 failure itself has not been reproduced, so it
+      // is the likely cause rather than a proven one.
+      //
+      // Said here, not left to the timeout: if the view is still open after
+      // the Escape, that is the finding.
+      if (check.path === '/keychain-stall') {
+        const closed = await page
+          .waitForFunction(() => (window as unknown as { game?: any }).game?.player?.riding === false, undefined, {
+            timeout: 10000,
+          })
+          .then(() => true)
+          .catch(() => false);
+        if (!closed) {
+          throw new Error(
+            'Escape did not close the keychain view (she is still riding), so no autosave can land — ' +
+              'a key pressed and released inside one frame is being dropped',
+          );
+        }
+      }
       await page.waitForFunction(() => !!localStorage.getItem('lgp:save'), undefined, {
         timeout: AUTOSAVE_TIMEOUT_MS,
       });
 
       // Now the actual case under test: reload at the same deep link with a
       // save already present — this is `continueGame`, not `startFresh`.
-      await page.goto(`${BASE}${check.path}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(at(check.path), { waitUntil: 'domcontentloaded' });
       await waitForGameReady(check, page, GAME_READY_TIMEOUT_MS);
       const result = await check.assert(page);
       said.push(`  [continueGame] ${result.ok ? 'OK' : 'FAILED'}: ${result.detail}`);
@@ -417,6 +578,7 @@ for (const check of CHECKS) {
 }
 
 for (const line of said) console.log(line);
+console.log(`(park seed ${SEED}, pinned on every URL; CHECK_DEEP_LINKS_SEED=n for another)`);
 if (fouls.length > 0) {
   console.error('\ncheck:deep-links FAILED');
   for (const foul of fouls) console.error(`  - ${foul}`);

@@ -135,6 +135,8 @@ import { Parade } from '../src/entities/parade/Parade.ts';
 // The game's own definition of "that was not a walk", so probe 3d's teleport
 // clause jumps by an amount the game agrees is a jump. See its use below.
 import { TELEPORT_GAP } from '../src/entities/parade/trail.ts';
+import { ACCEPTANCE_SCOPE } from './lib/checkScope.mts';
+import { hotelTowerFindings } from './lib/hotelTower.mts';
 
 /**
  * **How far BELOW the surface that supports her counts as falling.**
@@ -252,6 +254,14 @@ const ABOVE_EVERY_SURFACE = 1e6;
 const SETTLE_SECONDS = 8;
 
 const problems: string[] = [];
+/**
+ * The failures a park's own decisions made rather than the hotel's code: what
+ * the park stood in front of the tower — scenery that stops every march short
+ * of the shell, or walls up the doorway. The hotel itself is authored and the
+ * same on every park. Under the acceptance scope (`lib/checkScope.mts`) only
+ * these fail the run; in CI everything does.
+ */
+const decisions: string[] = [];
 const { world, scene } = quietly(() => buildHeadlessPark());
 const { collision, npcs, hotel } = world;
 
@@ -3715,7 +3725,11 @@ for (const room of ROOMS) {
 // longest stride the loop can hand out, because a gap you cannot walk into
 // you may still be able to tunnel into on a stuttering frame.
 //
-// Every bearing but the doorway's own cone must be stopped outside the shell.
+// Every bearing but the doorway's own cone must be stopped outside the shell
+// unless it came in **through the doorway** — judged by where the march crossed
+// the facade plane, not where it ended. On seed 10 two posts and the jamb's end
+// cap steer the 22.5° marches round into the door; the old end-point test read
+// that as a hole 5.97 m from the centre, when the shell was closed all along.
 // The doorway's cone must let her in, and the count of bearings that actually
 // reach the shell is asserted too — otherwise a park that happened to fence
 // the tower off with trees would pass this without ever testing the tower.
@@ -3726,76 +3740,14 @@ for (const room of ROOMS) {
 // the tower. It also trips the reach guard ("only 25 of 64 marches reached the
 // shell"), because a body that walks straight through a wall never stops
 // against it.
+// The probe is `lib/hotelTower.mts`'s, one owner with the acceptance loop.
 {
-  // The bounds are still the 1e6 sentinel section 2 fitted; the tower is out
-  // in the park and its own leash is nothing to do with this.
+  const tower = await hotelTowerFindings({ world });
+  problems.push(...tower.code);
+  decisions.push(...tower.decisions);
+  for (const note of tower.notes) process.stderr.write(note);
+  // Section 2's sentinel bounds, which the probe put back as it found them.
   collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
-  const plot = placedEntry('hotel');
-  const facadeYaw = Math.atan2(plot.entranceX - plot.x, plot.entranceZ - plot.z);
-  /** Where a bearing has to stop to count as "outside": the shell's own flat. */
-  const facade = TOWER_FACADE_ALONG;
-  /** Half the angle the doorway subtends at the tower's centre. */
-  const doorCone = Math.atan2(TOWER_DOOR_HALF, facade);
-
-  const marchIn = (bearing: number, step: number): number => {
-    const probe = new Vector3(
-      plot.x + Math.sin(bearing) * 16,
-      0,
-      plot.z + Math.cos(bearing) * 16,
-    );
-    let closest = Infinity;
-    for (let travelled = 0; travelled < 20; travelled += step) {
-      collision.resolveMovement(
-        probe,
-        -Math.sin(bearing) * step,
-        -Math.cos(bearing) * step,
-        PLAYER_RADIUS,
-        0,
-        MAX_FRAME_DELTA,
-      );
-      closest = Math.min(closest, Math.hypot(probe.x - plot.x, probe.z - plot.z));
-    }
-    return closest;
-  };
-
-  const BEARINGS = 32;
-  let reachedShell = 0;
-  let doorwaysIn = 0;
-  for (let i = 0; i < BEARINGS; i += 1) {
-    const bearing = facadeYaw + (i / BEARINGS) * Math.PI * 2;
-    // Signed angle off the door's axis, wrapped into (−π, π].
-    const offAxis = Math.abs(
-      Math.atan2(Math.sin(bearing - facadeYaw), Math.cos(bearing - facadeYaw)),
-    );
-    for (const step of [0.05, PLAYER_LONGEST_STEP]) {
-      const closest = marchIn(bearing, step);
-      if (closest < facade + 1.2) reachedShell += 1;
-      if (offAxis > doorCone) {
-        if (closest < facade) {
-          problems.push(
-            `the hotel tower is not solid ${((offAxis * 180) / Math.PI).toFixed(0)}° off its ` +
-              `doorway: a player-sized body marched at it in ${step.toFixed(2)} m steps got to ` +
-              `${closest.toFixed(2)} m from the centre, inside the ${facade.toFixed(2)} m shell ` +
-              `(world/hotel/Hotel.ts registerTowerCollision)`,
-          );
-        }
-      } else if (closest < facade) {
-        doorwaysIn += 1;
-      }
-    }
-  }
-  if (doorwaysIn === 0) {
-    problems.push(
-      'no bearing inside the tower doorwaylets a child in at all — the front door is walled up',
-    );
-  }
-  // Green must mean "measured", not "never got near it".
-  if (reachedShell < BEARINGS) {
-    problems.push(
-      `only ${reachedShell} of ${BEARINGS * 2} marches at the hotel tower reached its shell at ` +
-        `all — the rest were stopped by other scenery, so this probe is not measuring the tower`,
-    );
-  }
 }
 
 // -------- 23. every doorway fires on the line she walked, at any stride
@@ -5049,9 +5001,15 @@ console.log(
     `${roomsFlooded} room(s) flood-filled for whole-room reachability.`,
 );
 
-if (problems.length > 0) {
-  for (const problem of problems) console.error(`  ✗ ${problem}`);
-  console.error(`check:hotel FAILED — ${problems.length} problem(s)`);
+if (ACCEPTANCE_SCOPE) {
+  for (const problem of problems) {
+    console.log(`  CODE (outside acceptance: fixed at cause, never restarted around) ${problem}`);
+  }
+}
+const failing = [...decisions, ...(ACCEPTANCE_SCOPE ? [] : problems)];
+if (failing.length > 0) {
+  for (const problem of failing) console.error(`  ✗ ${problem}`);
+  console.error(`check:hotel FAILED — ${failing.length} problem(s)`);
   process.exit(1);
 }
 console.log('check:hotel OK');

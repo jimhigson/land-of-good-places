@@ -123,7 +123,7 @@ export function entranceGateFrame(x: number, z: number): { across: number; along
  * line. Only enough to cut the aperture: the wall is a ring and the rest of it
  * is nowhere near here.
  */
-const ENTRANCE_GATE_OPENING_REACH = 8;
+export const ENTRANCE_GATE_OPENING_REACH = 8;
 
 /**
  * **Is this point in the hole the boundary wall must leave for the arch?**
