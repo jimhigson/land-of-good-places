@@ -1,5 +1,8 @@
 import {
   BUILDING_BASE_Y,
+  castleWorldY,
+  ENTRANCE_MAX_X,
+  ENTRANCE_MIN_X,
   facadeX,
   facadeZ,
   worldX,
@@ -101,7 +104,8 @@ export function castlePortals(
       to: SPACE_CASTLE_MALL,
       nearX: gardenDoorX,
       nearZ: gardenDoorZ,
-      nearY: sample(gardenDoorX, gardenDoorZ, BUILDING_BASE_Y + 1),
+      // Asked from a metre over the leaning threshold, not the plumb deck.
+      nearY: sample(gardenDoorX, gardenDoorZ, castleWorldY((ENTRANCE_MIN_X + ENTRANCE_MAX_X) / 2, 1, BUILDING_HALF_Z - 0.85)),
       farX: worldX(0),
       farY: BUILDING_BASE_Y,
       farZ: worldZ(INTERIOR_HALF_Z - INTERIOR_LANDING_INSET),
@@ -116,7 +120,7 @@ export function castlePortals(
       nearZ: outBand.centreZ,
       nearY: outBand.y,
       farX: gardenLandingX,
-      farY: sample(gardenLandingX, gardenLandingZ, BUILDING_BASE_Y + 1),
+      farY: sample(gardenLandingX, gardenLandingZ, castleWorldY(1.5, 1, BUILDING_HALF_Z + GARDEN_LANDING_OUTSET)),
       farZ: gardenLandingZ,
       farFacing: 0,
     },

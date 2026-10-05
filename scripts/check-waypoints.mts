@@ -43,56 +43,15 @@
  * child standing in a doorway in the dark.
  */
 
-import { BUILDING_HALF_X, BUILDING_HALF_Z } from '../src/core/constants.ts';
-import { BUILDING_CENTRE_X, BUILDING_CENTRE_Z } from '../src/world/building/layout.ts';
-import { SEEDS } from '../src/entities/npc/poiGraph.ts';
-import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
+import { waypointFindings } from './lib/waypointFindings.mts';
 
-interface Failure {
-  readonly x: number;
-  readonly z: number;
-  readonly why: string;
+// The measurement is `lib/waypointFindings.mts`'s, one owner with the acceptance loop.
+const { voids, failures, summary } = await waypointFindings();
+if (voids.length > 0) {
+  console.error(`\ncheck:waypoints cannot run: ${voids.join('; ')}\n`);
+  process.exit(1);
 }
-
-const failures: Failure[] = [];
-
-// --- inside the facade -------------------------------------------------------
-
-const west = BUILDING_CENTRE_X - BUILDING_HALF_X;
-const east = BUILDING_CENTRE_X + BUILDING_HALF_X;
-const north = BUILDING_CENTRE_Z - BUILDING_HALF_Z;
-const south = BUILDING_CENTRE_Z + BUILDING_HALF_Z;
-
-for (const seed of SEEDS) {
-  if (seed.x < west || seed.x > east || seed.z < north || seed.z > south) continue;
-  failures.push({
-    x: seed.x,
-    z: seed.z,
-    why:
-      `inside the facade (x ${west}..${east}, z ${north}..${south}), which is ` +
-      'solid scenery. The building\'s inside is not here — it is 600 m away.',
-  });
-}
-
-// --- in a space children cannot reach ---------------------------------------
-
-for (const seed of SEEDS) {
-  const space = spaceAt(seed.x, seed.z);
-  if (space === SPACE_GARDEN) continue;
-  failures.push({
-    x: seed.x,
-    z: seed.z,
-    why:
-      `in the '${space}' space. Children cannot get there: crossing the ` +
-      'threshold is a teleport, not a walk. Indoor waypoints wait for the ' +
-      'castle floor split (ARCHITECTURE-DECISIONS Decision 3, S2), which gives ' +
-      'each floor its own space and its own portals.',
-  });
-}
-
-// --- say so ------------------------------------------------------------------
-
-console.log(`waypoints=${SEEDS.length} facade=(${west},${north})..(${east},${south})`);
+console.log(summary);
 
 if (failures.length > 0) {
   console.error(`\n${failures.length} waypoint(s) are somewhere no child could stand:\n`);

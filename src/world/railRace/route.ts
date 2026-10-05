@@ -1,8 +1,39 @@
-import { Quaternion, Vector3 } from 'three';
+import { Vector3 } from 'three';
 import { TAU } from '../../core/mathUtils';
-import { capHeight, placeOnSphere, terrainHeight } from '../terrain';
-import { PARK_LAYOUT, placedEntry } from '../parkLayout';
-import { RingPath } from './ringPath';
+import { capHeight, terrainHeight, upAt } from '../terrain';
+import { RingPath, type RingSample } from './ringPath';
+import {
+  BASE_HEIGHT,
+  CART_WIDTH_AT_PARK_SCALE,
+  LANE_COUNT,
+  LANE_SPACING_AT_PARK_SCALE,
+  NOMINAL_OUTSET,
+  PLAYER_LANE,
+  RIDE_SCALE,
+} from './dimensions';
+
+/**
+ * The ride's dimensions live in `./dimensions.ts`, which imports nothing, and
+ * are re-exported here so that the many callers reading them **inside
+ * functions** did not have to change — a function body does not run at import
+ * time, so those are safe through this module.
+ *
+ * **A caller that reads one at module scope must import `./dimensions`
+ * directly.** This module is inside the `hazards` -> `route` -> `parkLayout`
+ * -> ... -> `hazards` import cycle, and an indirect binding resolved through a
+ * module in a cycle is still subject to that cycle's evaluation order; the leaf
+ * is not. `scripts/scan-cycle-tdz.mts` finds anyone who gets this wrong, and
+ * `dimensions.ts`'s own header has the full account.
+ */
+export {
+  BASE_HEIGHT,
+  CART_WIDTH_AT_PARK_SCALE,
+  LANE_COUNT,
+  LANE_SPACING_AT_PARK_SCALE,
+  NOMINAL_OUTSET,
+  PLAYER_LANE,
+  RIDE_SCALE,
+};
 
 /**
  * **The Rail Race's four tracks** — a ring around the park's rim, flown high.
@@ -96,32 +127,6 @@ import { RingPath } from './ringPath';
  * lane's dip, and the difficulty would depend on the lane again.
  */
 
-/** Four lanes, one per racer. */
-export const LANE_COUNT = 4;
-
-/**
- * The lane the player rides: the **outermost**, and so the one nearest a camera
- * that sits outside the ring looking in.
- *
- * Straight from the retired 2D game's note on the same choice: the player wants
- * the row of the picture where nothing can ever be drawn in front of them.
- */
-export const PLAYER_LANE = LANE_COUNT - 1;
-
-/**
- * The circle the shared arc length `s` is measured on — the same for both
- * rings, so `travelled` means the same distance whichever one a rider is on.
- *
- * **Chosen by the wide ring's outer edge, not by taste.** The race ring is four
- * lanes at `LANE_SPACING_AT_PARK_SCALE * RIDE_SCALE` = 2.75 m plus a 1.55 m
- * gauge: 9.80 m of radial width, 4.90 m of it either side of this circle. At
- * 65.5 m its innermost rail sits at 60.6 m — clear of the boundary masonry at
- * `ENTRANCE_WALL_RADIUS` (60 m), which is what "outside the park" has to mean if
- * it is to mean anything. Any smaller and the inner rail is back over the wall;
- * any larger and the outer rail walks out onto the hillside for no gain.
- */
-export const NOMINAL_OUTSET = 6.5;
-
 /**
  * The ring's centre line, built once and shared by both rings.
  *
@@ -156,98 +161,7 @@ export const NOMINAL_OUTSET = 6.5;
  * of this; the old invariant did not catch it because it compared against the
  * wall's centre line plus a player radius and forgot the stone had thickness.
  */
-const RING_PATH = new RingPath(NOMINAL_OUTSET);
-
-/**
- * **How wide a cart is at park scale — the one number the ring is built around.**
- *
- * The tub is authored in `art/blend/cart.blend`, not here, so this is a
- * *statement about the asset* rather than a second definition of it:
- * `check:cart-shape` measures the built hopper's own widest vertices and fails
- * the build if they disagree with this number. That is what stops the two
- * drifting apart, which is this repo's most common bug by a distance.
- *
- * ### 7 August 2026: 1.04 -> 1.10, because her arm came through the side
- *
- * Jim, having ridden it: *"the characters arm clips through the mine cart -
- * make the box of the cart wider until this no longer happens"*. Measured by
- * ray-casting the built hopper against every vertex her arms draw, her hand
- * reached **0.285 m outside the tub** at ride scale.
- *
- * The cause was the *taper*, not the width: the tub was 0.62 m across at its
- * floor and 1.04 m at its rim, and her hands hang only **24% of the way up that
- * wall**. So most of the fix is shape — the wall is now vertical from the bevel
- * to the rim instead of sloping — and only 0.06 m of it is extra footprint. A
- * uniform widening big enough to fix the floor would have needed 1.36 here, and
- * the corridor below has nothing like that much room.
- *
- * **1.10 is a ceiling, not a preference.** Every extra centimetre here walks the
- * outermost lane — the one the player rides — further out, and the race camera
- * stands off *that* lane round a ~22 m hairpin where it is already turning
- * tighter than she is. Swept against the park's own
- * `raceCameraNeverRunsBackwards` invariant: 1.04, 1.06, 1.08 and 1.10 pass;
- * **1.12 fails on seed 5** at 0.049 m of camera per metre of rider against its
- * 0.05 floor. So this is the widest the ring can carry, and it is enough.
- *
- * Worst remaining clearance across the four poses that move her arms: **0.058 m**
- * (seated and boost; the duck has more, and the victory jump lifts her arms clear
- * of the tub altogether). Guarded in `check:rail-race`.
- */
-export const CART_WIDTH_AT_PARK_SCALE = 1.10;
-
-/**
- * Metres between neighbouring rails **at park scale**. A ring's own spacing is
- * this times its {@link RailRaceRoute.scale}, so the race ring keeps the 2.8 m
- * of lane pitch its carts need and the walk-past ring is a genuinely narrower
- * structure rather than the same one drawn small.
- *
- * **Exactly one cart wide, and derived rather than copied.** It was an
- * independent 1.04 that happened to equal the cart's own 1.04, with nothing
- * anywhere saying they had to agree — so the four carts sat side by side with
- * zero gap by coincidence, and any widening of the cart would silently have made
- * neighbours interpenetrate. Lanes are one cart apart because a cart has to fit
- * in one; that is the rule, and this is now the only place it is written.
- */
-const LANE_SPACING_AT_PARK_SCALE = CART_WIDTH_AT_PARK_SCALE;
-
-/**
- * The size-up of the carts, riders, rail gauge and lane spacing on the **race
- * ring** — `RailRaceRoute.scale` for that ring, and the multiplier the cart and
- * rider models take while they are on it.
- *
- * Deliberately not physics: the arc length, the undulation and every hazard's
- * position are shared with the walk-past ring, so nothing about *when* anything
- * happens in a race moves. Only how big the ring and the things riding it are.
- *
- * A scratch fix (1 August 2026) tried making the camera stand closer with a
- * wider lens instead, and hit a real ceiling: past ~120° horizontal FOV the
- * rider — pinned near the screen's edge by `RaceCamera`'s own
- * `RIDER_SCREEN_X_PORTRAIT` — grew too big for her own anchor point and
- * clipped off it, the opposite of "the character should be the focus of the
- * screen." Worse, the solve at 130° broke down numerically (a bisection that
- * had assumed a moderate lens produced a nonsense 140 m "visible ahead").
- * Scaling what is actually drawn sidesteps both problems: no camera geometry
- * to re-derive, and nothing to clip, since the anchor point itself does not
- * move.
- *
- * The value is the family's own pick from a screenshot sweep at 1.5×, 2×,
- * 2.5× and 3× — 1.5× already read clearly bigger without losing the park
- * behind her; 3× was mostly a hat filling the screen. 2.5× is the answer.
- */
-export const RIDE_SCALE = 2.5;
-
-/**
- * How high the rails fly above the ground under the nominal circle.
- *
- * Nothing in the park has to be cleared out here any more — the rings stand on
- * the empty hilltop apron outside the wall — so this is now a *sightline*
- * number rather than a clearance one: high enough that the side-on camera,
- * standing outside the ring, looks in over the boundary wall and the treeline
- * at the park rather than at masonry. Kept at the value the family already
- * approved the race's framing at rather than re-picked, and still asserted
- * against the ground it crosses by `scripts/check-rail-race.mts`.
- */
-export const BASE_HEIGHT = 9.5;
+export const RING_PATH = new RingPath(NOMINAL_OUTSET);
 
 /**
  * The three harmonics every lane runs.
@@ -342,7 +256,14 @@ function undulation(lane: number, phase: number): number {
  * `pointAt`/`tangentAt`/`length`/`wrap` shape the other two routes expose, which
  * is what "our standard track path following" actually means here.
  */
-const spin = /* @__PURE__ */ new Quaternion();
+/** Scratch for {@link RailRaceRoute.lean} and its inverse — both are on hot paths. */
+const _up = /* @__PURE__ */ new Vector3();
+const _out = /* @__PURE__ */ new Vector3();
+const _along = /* @__PURE__ */ new Vector3();
+const _chart = /* @__PURE__ */ new Vector3();
+const _station = /* @__PURE__ */ new Vector3();
+/** Terrain height at the station `frameAt` last built, its fourth output. */
+let _ground = 0;
 
 export class RailRaceRoute {
   /**
@@ -382,11 +303,37 @@ export class RailRaceRoute {
   /** Distance from the innermost lane's centre to the outermost lane's. */
   readonly laneSpan: number;
 
+  /**
+   * How far the undulation can carry a lane from its base, either way.
+   *
+   * The same {@link UNDULATION_REACH} `track.ts` solves the trestles' fork
+   * plane against, published on the ring so a measurement can ask the *built*
+   * object rather than importing the module (which pins the seed) or keeping a
+   * second copy of the number. It is a bound, not a maximum that is attained —
+   * the three harmonics do not peak together — so it cannot be recovered by
+   * sampling the built ring, which is exactly why it has to be published.
+   */
+  readonly undulationReach = UNDULATION_REACH;
+
   /** One lap, in metres of shared arc length. Identical on both rings. */
   readonly length = RING_PATH.length;
 
   /** Where the start/finish arch stands, in metres along the loop. */
   readonly startDistance: number;
+
+  /**
+   * **Which decisions put the arch where it stands**, for a refusal to name.
+   *
+   * Always `layout` — the ring follows the park's boundary and the arch starts
+   * at the boarding booth's bearing. Plus the {@link KeepOff.owner} of every
+   * keep-off that refused a station the arch search tried before the one it
+   * took (`procgen/world/railRace/plan.ts`'s `archStation`): a decision that
+   * pushed the arch along is a decision whose re-choice can move it back. A
+   * refusal of the arch's datum (the duck bars, the plan's `railRaceBars`
+   * builder) names exactly these. Empty for a park read from its file, which
+   * refuses nothing.
+   */
+  readonly archDecidedBy: readonly string[];
 
   /**
    * The level the four lanes undulate about, in world metres.
@@ -401,7 +348,15 @@ export class RailRaceRoute {
 
   private readonly scratch = new Vector3();
 
-  constructor(stationStallId: string, scale: number, keepArchOff: readonly KeepOff[] = []) {
+  /**
+   * `arch` is where the finish arch — and so the whole ride's datum — stands,
+   * and the decisions that put it there ({@link ArchStation}). In the game it
+   * is the park file's recorded answer; in build tooling it is the arch search
+   * (`procgen/world/railRace/plan.ts`'s `archStation`). Both rings of a park
+   * take the same one: the station is a distance along the one ring path they
+   * share.
+   */
+  constructor(scale: number, arch: ArchStation) {
     this.scale = scale;
     this.laneSpacing = LANE_SPACING_AT_PARK_SCALE * scale;
     this.laneOffsets = Array.from(
@@ -438,19 +393,60 @@ export class RailRaceRoute {
     }
     this.clearance = highest + BASE_HEIGHT;
 
-    // The arch goes at the bearing of the booth that boards the ride, so the
-    // rails a child can see from the queue are the rails she is about to start
-    // on. She is carried out to them by the iris wipe, exactly as the other
-    // rides carry her to a station she is not standing on.
-    const stall = placedEntry(stationStallId);
-    const bearing = Math.atan2(stall.z, stall.x);
-    // A search, not a division: `s = -R * bearing` only held while the ring was
-    // a circle. Valid because the boundary is star-shaped, so bearing is
-    // monotone in arc length.
-    const atBooth = this.wrap(RING_PATH.distanceAtBearing(bearing));
-    // ...and then off the doormat it would otherwise land on. See
-    // {@link slideArchClear}: on most seeds this returns `atBooth` untouched.
-    this.startDistance = slideArchClear(this, atBooth, stall, keepArchOff);
+    this.startDistance = arch.at;
+    this.archDecidedBy = arch.decidedBy;
+  }
+
+
+  /**
+   * **Where a drawn point of this ride was authored** — {@link unlean} without
+   * having to know the station first.
+   *
+   * A measurement holds a vertex or an instance matrix, not an arc length, so
+   * this has to find the station the point belongs to before it can invert the
+   * turn there.
+   *
+   * **It searches in the chart, not in the drawn world, and that is the whole
+   * of the difficulty.** A drawn point stands up to twelve metres outside the
+   * centre line once the lean has pushed it out, and the ring follows a spline
+   * whose curvature varies — so the nearest point of the *curve* to it can
+   * belong to a different part of the loop altogether. Measured on the
+   * canonical seed: asking `distanceNear` of a drawn lane top answered 2.4 m of
+   * arc away from the trestle it belongs to, which unleant its four tops to
+   * heights up to 0.57 m wrong and made a perfectly well-built fork read as
+   * 2.3 deg off its plan. Unleaning at *any* station gives a chart point within
+   * a lane offset of the line, though, and at that range the projection is
+   * unambiguous — no lane sits further from the centre line than a fraction of
+   * the tightest bend. So: one guess, then three refinements in the chart,
+   * which is a fixed point rather than a limit and settles on the first.
+   */
+  chartOf(drawn: { x: number; y: number; z: number }, target: Vector3): Vector3 {
+    return this.unlean(this.stationOf(drawn, target), drawn, target);
+  }
+
+  /**
+   * The arc length a drawn point belongs to — {@link chartOf}'s first half,
+   * exposed because a shape made of several nodes has **one** station and must
+   * be unleant at that one.
+   *
+   * Nearest-point-on-the-curve is the normal-plane condition, and on a curve
+   * whose bend tightens there can be more than one station whose normal plane
+   * holds a given point: an outer lane top is genuinely in two of them, and the
+   * nearest is not always the one it was authored at. So a trestle asks this of
+   * its **trunk top** — the one node that sits on the centre line itself, where
+   * the projection is unambiguous — and unleans the whole tree there, rather
+   * than letting each of its seven nodes find a station of its own and reading
+   * the ring's own curvature as a bent tree. Measured before that was done: up
+   * to 0.08 m of spurious height per node, which is eighty times the float32
+   * slack `railRaceSupportsAreClaimedAsDrawn` compares claims to.
+   */
+  stationOf(drawn: { x: number; y: number; z: number }, scratch = _station): number {
+    let at = RING_PATH.distanceNear(drawn.x, drawn.z);
+    for (let step = 0; step < 3; step += 1) {
+      this.unlean(at, drawn, scratch);
+      at = RING_PATH.distanceNear(scratch.x, scratch.z);
+    }
+    return at;
   }
 
   /** Brings any arc length into `[0, length)`. */
@@ -496,20 +492,136 @@ export class RailRaceRoute {
    * above the *sphere*, so its world `y` falls away round the loop exactly as
    * the world does. Anything that used to read `route.base` as "the height of
    * the ride" wants this instead, asked at its own arc length.
+   *
+   * **Asked at the centre line, for every lane.** It used to sample the cap
+   * under each lane's own column, which reads as "a constant height above the
+   * sphere" and is right for a point but wrong for a *cross-section*: the cap
+   * falls 2.1 m across the race ring's 8.25 m of lanes out at the bulge, so
+   * four lanes each measured from their own column are a chart shape that is
+   * already tilted before the ring is leant at all — the planet counted twice.
+   * The ring is one rigid section turned as a piece about this one column (see
+   * {@link lean}), so the datum is this one column's too.
    */
-  baseAt(distance: number, lane = 0): number {
+  baseAt(distance: number): number {
     const sample = RING_PATH.sampleAt(distance);
-    const offset = this.laneOffsets[lane] ?? 0;
-    return (
-      capHeight(sample.x + sample.normalX * offset, sample.z + sample.normalZ * offset) +
-      this.clearance
+    return capHeight(sample.x, sample.z) + this.clearance;
+  }
+
+  /** Height of a lane's rail head, in **chart** metres — see {@link lean}. */
+  heightAt(lane: number, distance: number): number {
+    return this.baseAt(distance) + undulation(lane, this.phaseAt(distance));
+  }
+
+  /**
+   * **The chart-to-world map for the whole ring: one rigid turn per station.**
+   *
+   * ## The bug this replaces, measured
+   *
+   * Every point of this ride used to be leant by `placeOnSphere` *at its own
+   * column*, which displaces it outward by `height x up.x` — and `up.x` is
+   * `r / GROUND_SPHERE_RADIUS`, 0.32 to 0.46 out here. The four lanes undulate
+   * on their own phases and stand up to **4.38 m apart in height at one
+   * station**, so they were displaced outward by up to `4.38 x 0.46 = 2.0 m`
+   * *relative to each other* — against a walk-past lane spacing of 1.1 m. The
+   * cross-section was **sheared**, not leant, and the lanes crossed over one
+   * another: measured on the canonical seed, a minimum drawn lateral gap of
+   * **-0.284 m** where 1.1 m is nominal, with the order of lanes 2 and 3
+   * swapped at 46 of 690 sampled stations. Four "parallel tracks" that pass
+   * through each other.
+   *
+   * It is worth writing down what does *not* fix it, because it is the obvious
+   * thing and it is wrong: applying the undulation along the local up *after*
+   * the lean shears by exactly the same amount, because the undulation **is**
+   * the height difference. Any map that moves a point outward in proportion to
+   * its height shears a section that has height variation across it.
+   *
+   * ## What this does instead
+   *
+   * At each arc length the ring has one frame — the centre line's own ground
+   * column, the local up there, and the two horizontals perpendicular to that
+   * up. A chart point is decomposed against the *chart's* axes (the outward
+   * normal, world `+Y`, the tangent) and rebuilt against that frame. It is an
+   * isometry, so a cross-section keeps its shape exactly: lanes stay
+   * `laneSpacing` apart, measured square to the up they are leant along.
+   *
+   * At the centre line with no lateral offset it is bit-for-bit
+   * `placeOnSphere`, which is what the ride has always done there.
+   */
+  lean(distance: number, chart: { x: number; y: number; z: number }, target: Vector3): Vector3 {
+    const sample = this.frameAt(distance);
+    const ground = _ground;
+    return target
+      .set(sample.x, ground, sample.z)
+      .addScaledVector(_out, (chart.x - sample.x) * sample.normalX + (chart.z - sample.z) * sample.normalZ)
+      .addScaledVector(_along, (chart.x - sample.x) * sample.tangentX + (chart.z - sample.z) * sample.tangentZ)
+      // flat-ok: chart height over chart ground, the number placeOnSphere takes as flat.y
+      .addScaledVector(_up, chart.y - ground);
+  }
+
+  /**
+   * The station's frame, into `_up` / `_out` / `_along`, and its origin.
+   *
+   * **Orthonormal, and built by a cross product rather than by projecting both
+   * horizontals.** The first draft took `out` and `along` as the outward normal
+   * and the tangent each with their `up` component removed, which looks
+   * symmetric and is not a frame: `out . along` comes out at `-(N.up)(T.up)`,
+   * and out here `N.up` is about 0.45 while `T.up` is whatever the ring's
+   * normal misses the radial by. The map was therefore a shear rather than a
+   * turn, and it cost exactly what a shear costs — measured, every drawn lane
+   * top came back **9.1% of its own lane offset** away from where it was
+   * authored, 0.38 m on the race ring's outer lane, which is what was left of
+   * the fork angles being 2.3 deg out and the trestle claims disagreeing with
+   * the registry at 13 mm.
+   *
+   * The tangent is the axis worth keeping true — the ring has to run along its
+   * own path — so `along` is the projected tangent and `out` is the cross
+   * product, which is perpendicular to both by construction rather than by
+   * hope.
+   */
+  private frameAt(distance: number): RingSample {
+    const sample = RING_PATH.sampleAt(distance);
+    const ground = terrainHeight(sample.x, sample.z);
+    upAt(sample.x, ground, sample.z, _up);
+    _along
+      .set(sample.tangentX, 0, sample.tangentZ)
+      .addScaledVector(_up, -(sample.tangentX * _up.x + sample.tangentZ * _up.z))
+      .normalize();
+    _out.crossVectors(_along, _up).normalize();
+    // The cross product's sign follows the winding, which is decided in
+    // `ringPath.ts` and not worth re-deriving here: ask the outward normal
+    // which way it meant, once, and flip if they disagree.
+    if (_out.x * sample.normalX + _out.z * sample.normalZ < 0) _out.negate();
+    _ground = ground;
+    return sample;
+  }
+
+  /**
+   * The inverse of {@link lean}: where a drawn point was authored.
+   *
+   * `terrain.ts`'s `unplaceFromSphere` is the general form of this and answers
+   * to within a few centimetres out here, but it assumes a point lies on the
+   * ray through its own foot — which is true of everything leant per column and
+   * only nearly true of a ring leant as a rigid section. This is exact, and it
+   * is what a check measuring a drawn rail against the park's own *chart*
+   * boundary needs.
+   */
+  unlean(distance: number, drawn: { x: number; y: number; z: number }, target: Vector3): Vector3 {
+    const sample = this.frameAt(distance);
+    const ground = _ground;
+    const dx = drawn.x - sample.x;
+    // flat-ok: not a height — a displacement's y, decomposed against the frame below
+    const dy = drawn.y - ground;
+    const dz = drawn.z - sample.z;
+    const across = dx * _out.x + dy * _out.y + dz * _out.z;
+    const along = dx * _along.x + dy * _along.y + dz * _along.z;
+    const rise = dx * _up.x + dy * _up.y + dz * _up.z;
+    return target.set(
+      sample.x + sample.normalX * across + sample.tangentX * along,
+      ground + rise,
+      sample.z + sample.normalZ * across + sample.tangentZ * along,
     );
   }
 
-  /** Height of a lane's rail head, in world metres. */
-  heightAt(lane: number, distance: number): number {
-    return this.baseAt(distance, lane) + undulation(lane, this.phaseAt(distance));
-  }
 
   /**
    * A point on a lane's rail.
@@ -522,11 +634,13 @@ export class RailRaceRoute {
    * for, and it is what makes a trestle drawn from its foot up to the rail lean
    * away from the park's centre instead of standing at an angle to its own
    * ground.
+   *
+   * **Leant by {@link lean}, not by `placeOnSphere` at the lane's own column.**
+   * The two agree exactly on the centre line and differ by up to two metres
+   * sideways on an outer lane — see {@link lean} for the lanes that crossed.
    */
   pointAt(lane: number, distance: number, target: Vector3 = this.scratch): Vector3 {
-    this.flatPointAt(lane, distance, target);
-    placeOnSphere(target, 0, target, spin);
-    return target;
+    return this.lean(distance, this.flatPointAt(lane, distance, _chart), target);
   }
 
   /**
@@ -612,108 +726,13 @@ export class RailRaceRoute {
   }
 }
 
-/** Something the arch's feet must not come down on. */
-export interface KeepOff {
-  readonly x: number;
-  readonly z: number;
-  readonly radius: number;
+/**
+ * **Where the start/finish arch stands on the ring, and which plan decisions
+ * put it there** (`RailRaceRoute.archDecidedBy`). Chosen by the arch search in
+ * build tooling (`procgen/world/railRace/plan.ts`'s `archStation`), read from
+ * the park file in the game.
+ */
+export interface ArchStation {
+  readonly at: number;
+  readonly decidedBy: readonly string[];
 }
-
-/**
- * Slides the finish line along the ring until the arch's feet are off
- * everything a foot must not stand on.
- *
- * **The arch and the booth's doormat are placed by the same bearing, so on some
- * seeds they are placed on top of each other.** The arch is centred on the ring
- * at the boarding booth's bearing (just above), and its feet march inward along
- * that same radial — which is exactly where the doormat sits and where the spur
- * that serves it has to arrive. Measured on seed 11: six inner feet from
- * (67.4, -21.4) to (65.1, -19.9), straddling a doormat at (65.9, -20.7), with
- * the paving 1.14 m *inside* a leg. `paths.ts` routes around published
- * obstacles but cannot route around that one — a spur has to reach the door it
- * serves — so the arch is what gives.
- *
- * Moving `startDistance` moves the finish line **and everything measured from
- * it together**: the duck bars, the spark zones, `RACE_DISTANCE`, the cart
- * placement and the invariants that check them all read `startDistance`, so
- * this is the one lever that cannot desynchronise them. Nudging `buildArch`'s
- * own local copy instead would decouple the drawn finish from the scored one.
- *
- * ### Why it must clear more than the doormat
- *
- * A first cut checked the doormat and the plots only. It turned seed 11 green
- * and **turned seed 5 red on two tests** — because `startDistance` is the whole
- * ride's datum, so moving the arch moved the ride, onto the Sky Cruiser's loop.
- * One failure traded for two. Everything the datum can collide with has to be
- * in the list or this is a game of whack-a-mole: the doormat and the plots
- * here, and the ride's own exit and the cruiser's loop passed in as
- * {@link KeepOff} by `plan.ts`, which is the module that can see them.
- *
- * Everything asked about is **plan-time** data — no path exists yet when a
- * route is constructed. The doormat and the exit are what the paving is
- * obliged to reach, so keeping clear of them keeps clear of their spurs by
- * construction.
- *
- * Offsets are tried smallest first, alternating sides, so a park with no
- * conflict keeps its finish line exactly where the booth's bearing put it.
- */
-function slideArchClear(
-  route: RailRaceRoute,
-  atBooth: number,
-  stall: { readonly entranceX: number; readonly entranceZ: number },
-  keepOff: readonly KeepOff[],
-): number {
-  const probe = new Vector3();
-  const outward = new Vector3();
-  const clears = (at: number): boolean => {
-    const sample = route.path.sampleAt(at);
-    route.outwardAt(at, outward);
-    // The whole span the feet occupy, inner and outer, sampled every half
-    // metre: the feet are two lines of six, not a point, and it is the lines
-    // that have to miss.
-    for (let radius = -ARCH_FOOT_REACH; radius <= ARCH_FOOT_REACH; radius += 0.5) {
-      probe.set(sample.x + outward.x * radius, 0, sample.z + outward.z * radius);
-      const toDoor = Math.hypot(probe.x - stall.entranceX, probe.z - stall.entranceZ);
-      if (toDoor < ARCH_DOORMAT_CLEARANCE) return false;
-      for (const plot of PARK_LAYOUT.entries.values()) {
-        if (Math.hypot(probe.x - plot.x, probe.z - plot.z) < plot.boundingRadius + 1) return false;
-      }
-      for (const item of keepOff) {
-        if (Math.hypot(probe.x - item.x, probe.z - item.z) < item.radius) return false;
-      }
-    }
-    return true;
-  };
-  if (clears(atBooth)) return atBooth;
-  for (let step = 1; step <= 60; step += 1) {
-    for (const side of [1, -1] as const) {
-      const at = route.wrap(atBooth + side * step * 0.75);
-      if (clears(at)) return at;
-    }
-  }
-  // Nothing on the whole ring works — keep the booth's own bearing and let the
-  // procgen invariant say so out loud rather than putting the finish line
-  // somewhere arbitrary.
-  return atBooth;
-}
-
-/**
- * How far the arch's feet reach from the ring's centre line.
- *
- * `archFeet` owns the exact radii; this is the generous bound the search needs,
- * kept here because importing `arch.ts` would close a cycle (it needs
- * `RailRaceRoute`). Over-stating the reach only makes the search more cautious.
- */
-const ARCH_FOOT_REACH = 22;
-
-/**
- * How much room the arch's feet keep from the booth's doormat.
- *
- * 6 m, measured rather than chosen: a spur is ~2.4 m of paving, a leg needs
- * `WALKABLE_GAP`'s 1.24 m beside it, and the doormat has its own approach to
- * stand in. On seed 11 this leaves the nearest inner foot 4.2 m from the
- * nearest path where it used to be 1.14 m *inside* it; at 3.2 m it was still
- * 0.46 m inside, because the strip inward of the booth carries the exit's spur
- * as well as the booth's own.
- */
-const ARCH_DOORMAT_CLEARANCE = 6;

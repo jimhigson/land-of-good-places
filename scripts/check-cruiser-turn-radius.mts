@@ -18,51 +18,14 @@
  * three points at a fixed arc spacing, horizontal only — turning radius is a
  * plan-view notion and the hills do not change it.
  */
-import { Vector3 } from 'three';
+import { cruiserTurnRadius } from './lib/rideFindings.mts';
 
-const SPACING = 2.5;
-
-function mengerRadius(a: Vector3, b: Vector3, c: Vector3): number {
-  const ab = Math.hypot(b.x - a.x, b.z - a.z);
-  const bc = Math.hypot(c.x - b.x, c.z - b.z);
-  const ca = Math.hypot(a.x - c.x, a.z - c.z);
-  const area = Math.abs((b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z)) / 2;
-  if (area < 1e-9) return Infinity;
-  return (ab * bc * ca) / (4 * area);
-}
-
-const { COASTER_PLANS } = await import('../src/world/coaster/plan.ts');
-const { MIN_TURN_RADIUS } = await import('../src/world/coaster/route.ts');
-const route = COASTER_PLANS.cruiser.route;
-
-const a = new Vector3();
-const b = new Vector3();
-const c = new Vector3();
-let built = Infinity;
-let at = 0;
-for (let d = 0; d < route.length; d += 0.5) {
-  route.pointAt(d - SPACING, a);
-  route.pointAt(d, b);
-  route.pointAt(d + SPACING, c);
-  const radius = mengerRadius(a, b, c);
-  if (radius < built) {
-    built = radius;
-    at = d;
-  }
-}
-
-const planned = route.plan.minCurvature;
-const ok = built >= MIN_TURN_RADIUS;
+// The measurement is `lib/rideFindings.mts`'s, one owner with the acceptance loop.
+const { built, at, planned, limit, complaints } = await cruiserTurnRadius();
 console.log(
   `check:cruiser-turn-radius: plan ${planned.toFixed(2)} m, built ${built.toFixed(2)} m ` +
-    `at ${at.toFixed(0)} m along, limit ${MIN_TURN_RADIUS} m — ${ok ? 'holds' : 'FAILS'} ` +
+    `at ${at.toFixed(0)} m along, limit ${limit} m — ${complaints.length === 0 ? 'holds' : 'FAILS'} ` +
     `(rebuild cost ${(planned - built).toFixed(2)} m)`,
 );
-if (!ok) {
-  console.error(
-    `check:cruiser-turn-radius: the built curve turns tighter than the ${MIN_TURN_RADIUS} m ` +
-      `this ride promises. Validating the plan is not enough — the resampling into ` +
-      `control points has to keep the promise too.`,
-  );
-  process.exitCode = 1;
-}
+for (const complaint of complaints) console.error(`check:cruiser-turn-radius: ${complaint}`);
+if (complaints.length > 0) process.exitCode = 1;

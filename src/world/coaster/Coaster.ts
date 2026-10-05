@@ -20,11 +20,13 @@ import {
 import {
   drawnOnSphere,
   railFrameAt,
-  rideFrame,
+  railTurn,
   sweptRails,
   type RailFrame,
+  type RailSampler,
 } from '../rail/sweptRail';
-import { planCruiserPylons } from './pylons';
+import { decideBuilt } from '../prebuilt/built';
+import type { CruiserPylon } from './pylons';
 import { POST_FOOT_RADIUS, POST_TOP_RADIUS } from '../railRace/trestleGeometry';
 import type { PlannedCoaster } from './plan';
 import { RideCamera } from '../../core/RideCamera';
@@ -90,6 +92,7 @@ const EYE = { x: 0, y: CART_EYE_HEIGHT - CART_SEAT_HEIGHT, z: 0 };
 
 /** Somewhere for `placeOnSphere`'s rotation to go when only its point is wanted. */
 const DISCARDED_SPIN = /* @__PURE__ */ new Quaternion();
+const DRAWN_ALONG = /* @__PURE__ */ new Vector3();
 
 /** Scratch for the cart's own up, used to seat the rider down into the tub. */
 const SEAT_DROP = /* @__PURE__ */ new Vector3();
@@ -124,6 +127,8 @@ export class Coaster implements GameSystem {
   readonly playerStaysVisible: boolean;
   readonly group = new Group();
   readonly route: CoasterRoute;
+  /** The route as drawn — what the rails are swept through and the cart sits on. */
+  private readonly drawn: RailSampler;
 
   rideView: RideCamera | null = null;
   onRideChange: ((riding: boolean) => void) | null = null;
@@ -168,6 +173,7 @@ export class Coaster implements GameSystem {
     // Solved already, at module load (`coaster/plan.ts`) — built here, not
     // re-solved. Mirrors `ParkTrain` taking `TRAIN_PLAN.route` as given.
     this.route = options.plan.route;
+    this.drawn = drawnOnSphere(this.route);
     this.distance = this.route.stationDistance;
 
     // Boot assert, in the claim-versus-fact tradition: report loudly and
@@ -358,10 +364,13 @@ export class Coaster implements GameSystem {
       // wrong in a way that grows as the ride goes round.
       // flat-ok: local axis, leant by the cart's own quaternion
       const down = SEAT_DROP.set(0, 1, 0).applyQuaternion(this.cart.quaternion);
-      this.player.setRidePose(
-        seat.x - down.x * 0.55,
-        seat.y - down.y * 0.55,
-        seat.z - down.z * 0.55,
+      // **Turned by the cart's own frame, handed over whole** — not by
+      // `setRidePose`, which rebuilt her turn from `cartYaw` alone: no pitch,
+      // leant about the sphere at her own seat, so on every climb she sat bolt
+      // upright in a tub pitched up to 28° under her.
+      this.player.setRideFrame(
+        seat.addScaledVector(down, -0.55),
+        this.cart.quaternion,
         this.cartYaw,
       );
     }
@@ -400,26 +409,36 @@ export class Coaster implements GameSystem {
    * own rails** at the worst point of the 213.5 m circuit, 3.42 m on average.
    *
    * So: the position through `placeOnSphere`, exactly as `drawnOnSphere` maps
-   * each drawn rail point, and the orientation through `rideFrame`, which takes
-   * its lean about the same **flat** column. Everything hung off the cart —
-   * `cartMount`, `eyeMount`, and so both ride cameras — inherits this for free,
-   * which is why there is nothing to change in `RideCamera`.
+   * each drawn rail point, and the orientation from **the direction the rails
+   * are drawn in there** (`drawnOnSphere`'s `tangentAt`, which is
+   * `drawnDirection`) — stood up by
+   * `railTurn`, the side/up convention the rails and ties are swept with.
+   * Everything hung off the cart — `cartMount`, `eyeMount`, and so both ride
+   * cameras — inherits this for free, which is why there is nothing to change
+   * in `RideCamera`.
+   *
+   * **Not `rideFrame`, which it used to be.** That leans a flat heading about
+   * the flat column: yaw and pitch off the flat tangent, then the sphere's tilt
+   * on top. Measured every 0.5 m round the canonical loop against the rails as
+   * drawn, with the heading composed `XYZ` (pitch about the world's X) the nose
+   * was **29.4°** off and the up **40.6°**; composed `YXZ` the up came right
+   * (0.88°) and the nose was still **17.3°** off, because the flat tangent here
+   * already runs where the drawn rails do (0.26° apart) and the tilt turns it a
+   * second time. Taking the drawn direction itself has no heading to compose
+   * and nothing to lean twice. `check:tie-frame` holds it to a degree.
    */
   private placeCart(): void {
     this.route.pointAt(this.distance, this.point);
     this.route.tangentAt(this.distance, this.tangent);
     const yaw = Math.atan2(this.tangent.x, this.tangent.z);
-    // Pitch with the track, gently — the mount (and so the rider's eye and
-    // the cart's nose) follows the hill it is on. Still read off the flat
-    // tangent: `placeOnSphere` is locally a rotation, so a gradient in the flat
-    // frame already *is* the gradient against local gravity.
-    const pitch = -Math.asin(Math.max(-0.6, Math.min(0.6, this.tangent.y)));
-    // `placeOnSphere` is asked only for the position; `rideFrame` owns the
-    // orientation, because it carries the pitch as well as the yaw. The spare
-    // quaternion is thrown away rather than written straight to the cart, so
-    // that nothing reads as though the rotation were set twice.
+    // `placeOnSphere` is asked only for the position; the spare quaternion is
+    // thrown away rather than written to the cart, so nothing reads as though
+    // the rotation were set twice.
     placeOnSphere(this.point, yaw, this.cart.position, DISCARDED_SPIN);
-    rideFrame(this.point, yaw, pitch, this.cart.quaternion);
+    // The rails as drawn, from the one owner of their direction — the same
+    // `drawnOnSphere` sampler `buildTrack` sweeps them and lays the ties from.
+    this.drawn.tangentAt(this.distance, DRAWN_ALONG);
+    railTurn(this.cart.position, DRAWN_ALONG, this.cart.quaternion);
     this.cartYaw = yaw;
   }
 
@@ -447,7 +466,7 @@ export class Coaster implements GameSystem {
     // which is where its clearance solve, its physics and its invariants all
     // want to be. See that function for why the two frames give the same
     // answers to every question except "where does this get drawn".
-    const drawn = drawnOnSphere(this.route);
+    const drawn = this.drawn;
     const railGeometries = sweptRails(drawn, {
       gauge: RAIL_GAUGE,
       radius: 0.075,
@@ -544,12 +563,16 @@ export class Coaster implements GameSystem {
     // stretch of track with no legitimate obstacle at all. `footprintNear`
     // is the bridge's own real, final edge plus this file's own
     // `GROUND_CLEARANCE`-derived margin, nothing more.
-    const pylonSpots = planCruiserPylons(
-      this.route,
-      (x, z, radius) =>
-        collision.isClearCircle(x, z, radius) &&
-        !this.train.bridges.some((bridge) => bridge.footprintNear(x, z, radius)),
-      this.options.clearTreesNear,
+    // Read from the park file; searched only in build tooling
+    // (`procgen/world/coaster/pylons.ts`, `docs/design/PREBUILT-PARKS.md`).
+    const pylonSpots: readonly CruiserPylon[] = decideBuilt('pylons', (solver) =>
+      solver.cruiserPylons(
+        this.route,
+        (x, z, radius) =>
+          collision.isClearCircle(x, z, radius) &&
+          !this.train.bridges.some((bridge) => bridge.footprintNear(x, z, radius)),
+        this.options.clearTreesNear,
+      ),
     );
     const pylons = new InstancedMesh(
       // Straight and vertical, and the **same thickness as the Rail Race's base

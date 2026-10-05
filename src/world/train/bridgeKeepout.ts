@@ -1,6 +1,7 @@
 import { TRAIN_PLAN } from './plan';
+import { registerPlanCache } from '../../boot/planCaches';
 import { computeCrossings } from './crossings';
-import { planBridgeFootprints, type PlannedFootprint } from './bridgeFootprint';
+import { planConservativeFootprints, type PlannedFootprint } from './bridgeFootprint';
 
 /**
  * Where a bridge's deck and ramps will stand — computed lazily, on first
@@ -50,7 +51,7 @@ function footprints(): readonly PlannedFootprint[] {
   // No `real` collision world handed in — this is the early, conservative
   // reservation pass (see `bridgeFootprint.ts`'s own header on the two
   // calling conventions); it never returns `null` entries.
-  footprintsCache = planBridgeFootprints(crossings);
+  footprintsCache = planConservativeFootprints(crossings);
   return footprintsCache;
 }
 
@@ -82,3 +83,8 @@ export function isInBridgeFootprint(x: number, z: number, margin = KEEPOUT_MARGI
   }
   return false;
 }
+
+// Derived from a decision the park's driver may unwind: forgotten with it.
+registerPlanCache(() => {
+  footprintsCache = null;
+});

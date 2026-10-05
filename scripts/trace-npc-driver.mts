@@ -141,20 +141,11 @@ function buildGraph(): PoiGraph {
         index: index(ix, iz),
         x: (ix - 2) * 6,
         z: (iz - 2) * 6,
+        y: 0,
         interesting: (ix + iz) % 3 === 0,
-        indoors: false,
-        neighbours: [],
+        space: 'garden',
+        reachable: true,
       } as unknown as PoiNode);
-    }
-  }
-  const link = (a: number, b: number) => {
-    (nodes[a]!.neighbours as number[]).push(b);
-    (nodes[b]!.neighbours as number[]).push(a);
-  };
-  for (let iz = 0; iz < 5; iz += 1) {
-    for (let ix = 0; ix < 5; ix += 1) {
-      if (ix < 4 && !(iz === 4 && ix === 3)) link(index(ix, iz), index(ix + 1, iz));
-      if (iz < 4) link(index(ix, iz), index(ix, iz + 1));
     }
   }
 
@@ -164,7 +155,7 @@ function buildGraph(): PoiGraph {
       let best: PoiNode | null = null;
       let bestDistance = Infinity;
       for (const node of nodes) {
-        if (node.neighbours.length === 0) continue;
+        if (!node.reachable) continue;
         const d = (node.x - x) ** 2 + (node.z - z) ** 2;
         if (d < bestDistance) {
           bestDistance = d;

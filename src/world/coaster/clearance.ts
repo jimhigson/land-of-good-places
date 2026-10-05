@@ -389,3 +389,122 @@ export function cruiserStrikes(
   }
   return complaints;
 }
+
+/**
+ * **How much room the Sky Cruiser leaves for a post standing at (x, z).**
+ *
+ * Returns the smallest gap, in metres, between the car's swept envelope and an
+ * upright post of `radius` rising `height` from `baseY`. Zero or less means the
+ * ride passes through it.
+ *
+ * ### Why this exists
+ *
+ * Fairy-light poles are 4.4 m tall and are placed by a builder that knew only
+ * about paving and about *ground* claims. The claims registry answers "who else
+ * wants this square metre"; it says nothing about what sweeps through the air
+ * above it. Ten poles in the plaza verge never met the loop. Ninety-odd strung
+ * along two thirds of the path network did, and seed 24 built a park where
+ * **the car passed through `fairy-pole-84`** at 17.0 m along the loop.
+ *
+ * That is the standing rule in this codebase — a generator that checks itself
+ * against the obstacle classes it happens to know by name will silently miss
+ * whatever a sibling system put there — so a pole now asks the ride directly,
+ * before it is placed, instead of the ride discovering the pole afterwards.
+ *
+ * ### It asks the ride for its own envelope
+ *
+ * Not a bounding box round the route. The gap is measured in **the frame the
+ * ride is drawn in** (`drawnOnSphere` + `railFrameAt`) against
+ * {@link CART_ENVELOPE}, exactly as {@link thingsTheCruiserPasses} does — a box
+ * round a leaning ride is neither the real gap nor a consistent over-estimate
+ * of it, and this park leans everywhere.
+ *
+ * The post is sampled along its axis rather than treated as a point, because a
+ * pole is tall and the loop dives: the tip can foul where the foot is clear.
+ */
+/**
+ * The loop's frames, resolved once per route.
+ *
+ * **This memo is load-bearing, not a micro-optimisation.** The caller asks per
+ * *candidate* position — a hundred-odd poles with up to ten candidates each —
+ * and `drawnOnSphere` plus a full walk of the loop per call turned a question
+ * that should cost microseconds into millions of frame resolutions. The world
+ * phase is sliced a frame at a time in the browser and `check:park-boot`
+ * polices the slice ceiling, so the expensive thing has to happen once.
+ *
+ * Keyed by the route object: a new solve produces a new route, so a stale entry
+ * cannot be read for a park it does not describe.
+ */
+const postFrameMemo = new WeakMap<CoasterRoute, { frames: RailFrame[]; centre: Vector3; reach: number }>();
+
+function framesForPostQueries(route: CoasterRoute): { frames: RailFrame[]; centre: Vector3; reach: number } {
+  const cached = postFrameMemo.get(route);
+  if (cached) return cached;
+  const drawn = drawnOnSphere(route);
+  const frames: RailFrame[] = [];
+  const centre = new Vector3();
+  for (let d = 0; d < route.length; d += SAMPLE_STEP) {
+    const frame = railFrameAt(drawn, d, {
+      position: new Vector3(),
+      forward: new Vector3(),
+      side: new Vector3(),
+      up: new Vector3(),
+    });
+    frames.push(frame);
+    centre.add(frame.position);
+  }
+  if (frames.length > 0) centre.multiplyScalar(1 / frames.length);
+  // A sphere round the whole loop, so a pole on the far side of the park is
+  // rejected in one distance test instead of several hundred.
+  let reach = 0;
+  for (const frame of frames) reach = Math.max(reach, frame.position.distanceTo(centre));
+  const resolved = { frames, centre, reach };
+  postFrameMemo.set(route, resolved);
+  return resolved;
+}
+
+/**
+ * The smallest gap between the car's swept envelope and any of `points`.
+ *
+ * Takes the **drawn world points of the thing itself** rather than a shape
+ * description, so whatever the caller draws is what gets tested — see
+ * `FairyLights.fairyOccupiedPoints`, which exists because a version of this
+ * guarded a post and missed the bulbs hanging beside it.
+ */
+export function cruiserClearanceForPoints(
+  route: CoasterRoute,
+  points: readonly Vector3[],
+  radius: number,
+): number {
+  const { halfWidth, above, below } = CART_ENVELOPE;
+  const halfLength = CART_BODY_LENGTH / 2;
+  const { frames, centre, reach } = framesForPostQueries(route);
+  const envelope = halfLength + halfWidth + Math.max(above, below);
+  if (points.length === 0) return Infinity;
+
+  // Whole-loop reject: a cluster far outside the loop's bounding sphere cannot
+  // reach it, and most of the park's poles are exactly that.
+  let nearest = Infinity;
+  for (const p of points) nearest = Math.min(nearest, p.distanceTo(centre));
+  const far = nearest - reach - envelope - radius;
+  if (far > 0) return far;
+
+  const offset = new Vector3();
+  let best = Infinity;
+  for (const frame of frames) {
+    for (const point of points) {
+      offset.subVectors(point, frame.position);
+      if (offset.length() - envelope > best) continue;
+      const alongCar = offset.dot(frame.forward);
+      const acrossCar = offset.dot(frame.side);
+      const upCar = offset.dot(frame.up);
+      const dx = Math.max(0, Math.abs(alongCar) - halfLength);
+      const dz = Math.max(0, Math.abs(acrossCar) - halfWidth);
+      const dy = upCar > 0 ? Math.max(0, upCar - above) : Math.max(0, -upCar - below);
+      const gap = Math.hypot(dx, dy, dz) - radius;
+      if (gap < best) best = gap;
+    }
+  }
+  return best;
+}
+

@@ -58,6 +58,7 @@ import { readFileSync } from 'node:fs';
 import '../scripts/headless-canvas.mjs';
 import { SHOP_ITEMS, EGG_PRIZES } from '../src/world/building/shops/catalogue.ts';
 import { ANCHORS } from '../src/world/anchors.ts';
+import { EXHIBITS } from '../src/world/reptileHouse/exhibits.ts';
 
 /**
  * The longest a title may be, in characters.
@@ -173,6 +174,28 @@ function collect(): Copy[] {
       where: 'src/world/building/shops/catalogue.ts',
       shape: 'line',
       text: item.blurb,
+    });
+  }
+
+  // The Reptile House's nameplates and chips — fifteen exhibits, one table.
+  for (const exhibit of EXHIBITS) {
+    copy.push({
+      key: `exhibitTitle:${exhibit.id}`,
+      where: 'src/world/reptileHouse/exhibits.ts',
+      shape: 'title',
+      text: exhibit.title,
+    });
+    copy.push({
+      key: `exhibitBlurb:${exhibit.id}`,
+      where: 'src/world/reptileHouse/exhibits.ts',
+      shape: 'line',
+      text: exhibit.blurb,
+    });
+    copy.push({
+      key: `exhibitChip:${exhibit.id}`,
+      where: 'src/world/reptileHouse/exhibits.ts',
+      shape: 'title',
+      text: exhibit.chip,
     });
   }
 

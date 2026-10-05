@@ -8,7 +8,7 @@
  * The Rail Race duck bar's counterpart to `pack-cart-asset.mts` — the
  * **third** asset through the `.glb` pipeline (`ART-AGENT-NOTES.md` §6a).
  * Modelled directly in Blender against the reference numbers already in
- * `track.ts`/`hazards.ts` (`DUCK_CLEARANCE`, `BAR_HALF_SPAN`), so
+ * `track.ts`/`hazards.ts` (`DUCK_CLEARANCE_AT_PARK_SCALE`, `BAR_HALF_SPAN_AT_PARK_SCALE`), so
  * `npm run blend:duckbar` (`art/blend/duckbar_export.py`) is the only
  * producer of `duckbar.glb`, and this is always the next step after it.
  *

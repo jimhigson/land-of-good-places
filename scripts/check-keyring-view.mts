@@ -62,6 +62,7 @@ import { screenBasis3D, screenRightOf, screenUpOf, type ScreenBasis3D } from '..
 import { screenBasis3DAt } from '../src/world/up.ts';
 import { screenDistance } from '../src/core/contentFrame.ts';
 import { PHONE_VIEWPORT, TAP_FINGER_METRES, TAP_FINGER_PIXELS } from '../src/world/tapSpacing.ts';
+import { STALL_PLACEMENTS } from '../src/minigames/stallPlacement.ts';
 
 const problems: string[] = [];
 const notes: string[] = [];
@@ -176,6 +177,61 @@ console.log(
   `check:keyring-view — ${keyrings.length} keyrings, ${VIEWPORTS.length} viewports, ` +
     `finger = ${TAP_FINGER_PIXELS} CSS px.`,
 );
+
+// ---------------------------------------------------------------------------
+// Each tap zone must be ON the keyring it names, as drawn.
+//
+// The cart leans onto the sphere by distance / GROUND_SPHERE_RADIUS, so where it
+// stands varies with the seed. The zones were once placed by a flat sum
+// (toWorld(x, z) plus a height up world Y) that ignored the lean. On a stall
+// 60 m out they sat beside the charms, and every spacing below was measured
+// between points nobody draws: a closest gap of 0.193 m against 0.333 m drawn.
+// So this asks, in the screen space the finger works in, whether each zone's
+// centre lands inside the image of its own keyring's box. That box turns with
+// the charm (`viewRequiredSubjects`).
+// ---------------------------------------------------------------------------
+{
+  const placement = STALL_PLACEMENTS.keychain;
+  const [sx, sz] = placement.position;
+  const out = Math.hypot(sx, sz);
+  console.log(
+    `  stall at (${sx.toFixed(1)}, ${sz.toFixed(1)}), ${out.toFixed(1)} m from the centre ` +
+      `(lean ${((out / GROUND_SPHERE_RADIUS) / DEG).toFixed(1)}°), facing ${(placement.facing / DEG).toFixed(1)}°`,
+  );
+  let worstInset = Infinity;
+  for (const zone of zones) {
+    const subject = keyrings.find((one) => zone.id === `stall:keychain:${one.what}`);
+    if (!subject) {
+      problems.push(`tap zone '${zone.id}' names no keyring the view frames — the check cannot tell whether it is on one.`);
+      continue;
+    }
+    let rMin = Infinity;
+    let rMax = -Infinity;
+    let uMin = Infinity;
+    let uMax = -Infinity;
+    for (const point of subject.points) {
+      const right = screenRightOf(basis, point.x, point.y, point.z);
+      const up = screenUpOf(basis, point.x, point.y, point.z);
+      rMin = Math.min(rMin, right);
+      rMax = Math.max(rMax, right);
+      uMin = Math.min(uMin, up);
+      uMax = Math.max(uMax, up);
+    }
+    const zr = screenRightOf(basis, zone.x, zone.y, zone.z);
+    const zu = screenUpOf(basis, zone.x, zone.y, zone.z);
+    // Positive means inside the keyring's image, by that many metres of screen.
+    const inset = Math.min(zr - rMin, rMax - zr, zu - uMin, uMax - zu);
+    worstInset = Math.min(worstInset, inset);
+    if (inset < 0) {
+      problems.push(
+        `tap zone '${zone.id}' is ${(-inset).toFixed(3)} m off the image of the keyring it names, on ` +
+          `screen. The zone is not where the charm is drawn, and a tap on the charm is measured ` +
+          `against the wrong point. Read the zone off the keyring's own world matrix.`,
+      );
+    }
+  }
+  console.log(`  every tap zone on its own keyring's image; the least inside is ${worstInset.toFixed(3)} m`);
+}
 
 for (const viewport of VIEWPORTS) {
   const camera = new IsoCamera();

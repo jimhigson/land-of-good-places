@@ -1,3 +1,4 @@
+import '../../src/core/installDeterministicMath';
 import { ART } from '../../src/art/style/artPalette';
 import { PALETTE } from '../../src/core/palette';
 import { CharacterPreview } from '../../src/ui/characterCreationPreview';

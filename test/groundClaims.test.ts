@@ -339,3 +339,23 @@ describe('out where the chart is wrong', () => {
     );
   });
 });
+
+describe('GroundClaims.copy', () => {
+  // The registry a second World adopts (`worldPlanClaims`): what the plan
+  // committed, and nothing either side commits afterwards.
+  it('holds what the original holds, and neither sees the other’s later commits', () => {
+    const plan = new GroundClaims();
+    plan.commit('road', { claims: [claim('corridor', disc(0, 0, 2))] });
+    const twin = plan.copy();
+    expect(twin.committedFeatures()).toEqual(['road']);
+    expect(twin.claimsOf('road')).toEqual(plan.claimsOf('road'));
+
+    plan.commit('trees', { claims: [claim('footprint', disc(10, 0, 1))] });
+    twin.commitSection('bushes', 0, { claims: [claim('footprint', disc(-10, 0, 1))] });
+    expect(plan.committedFeatures()).toEqual(['road', 'trees']);
+    expect(twin.committedFeatures()).toEqual(['road', 'bushes']);
+    // A footprint the original holds does not refuse anyone in the copy.
+    expect(twin.allows('lamps', claim('footprint', disc(10, 0, 1)))).toBe(true);
+    expect(plan.allows('lamps', claim('footprint', disc(10, 0, 1)))).toBe(false);
+  });
+});

@@ -47,7 +47,7 @@ import {
   ENTRANCE_RAMP,
 } from '../src/world/building/layout.ts';
 import { isOutdoors } from '../src/world/up.ts';
-import { NavGrid, NAV_CELL_SIZE as navCellSize } from '../src/world/NavGrid.ts';
+import { NavGrid, NAV_CELL as navCellSize } from '../src/world/NavGrid.ts';
 import { JUMP_APEX_HEIGHT } from '../src/entities/Player.ts';
 
 const R = GROUND_SPHERE_RADIUS;
@@ -137,22 +137,63 @@ interface Site {
   readonly label: string;
   readonly x: number;
   readonly z: number;
+  /**
+   * The bearings the site is marched on: the 16 fixed compass bearings plus
+   * the site's **own approach axis, read off the built geometry** — a bridge's
+   * path direction, the facade steps' climbing axis. A narrow, long climb is
+   * only climbable along its axis; marched 9 degrees off it, every run meets
+   * the hump side-on as a 2-4 m cliff and nothing is measured. That is what
+   * seed 5's bridge did (path at 144 deg, between the compass's 135 and
+   * 157.5) — the instrument had assumed the old park's bridges happened to
+   * line up with a compass bearing.
+   */
+  readonly bearings: readonly number[];
+  /** How far out each march starts: past the end of the site's own climb. */
+  readonly halfRun: number;
+}
+
+/** A bearing (`dx = sin b`, `dz = cos b`) and its reverse, from a plan direction. */
+const axisBearings = (dirX: number, dirZ: number): number[] => {
+  const b = Math.atan2(dirX, dirZ);
+  return [b, b + Math.PI];
+};
+
+/** How far `covers` holds out from (x, z) along a plan direction, both ways — the climb's own length. */
+function coveredReach(covers: (x: number, z: number) => boolean, x: number, z: number, dirX: number, dirZ: number): number {
+  let reach = 0;
+  for (const sign of [1, -1]) {
+    let t = 0;
+    while (t < 200 && covers(x + sign * dirX * t, z + sign * dirZ * t)) t += 0.05;
+    reach = Math.max(reach, t);
+  }
+  return reach;
 }
 
 const sites: Site[] = [];
 for (const c of world.train.crossings) {
-  if (world.train.bridges.some((b) => b.deckCovers(c.x, c.z))) {
-    sites.push({ label: `bridge @(${c.x.toFixed(1)}, ${c.z.toFixed(1)})`, x: c.x, z: c.z });
+  const bridge = world.train.bridges.find((b) => b.deckCovers(c.x, c.z));
+  if (bridge) {
+    const reach = coveredReach((x, z) => bridge.covers(x, z), c.x, c.z, c.pathDirX, c.pathDirZ);
+    sites.push({
+      label: `bridge @(${c.x.toFixed(1)}, ${c.z.toFixed(1)})`,
+      x: c.x,
+      z: c.z,
+      bearings: [...BEARINGS, ...axisBearings(c.pathDirX, c.pathDirZ)],
+      halfRun: Math.max(HALF_RUN, reach + 2),
+    });
   }
 }
 for (const s of world.train.stationTapAreas()) {
-  sites.push({ label: `station @(${s.x.toFixed(1)}, ${s.z.toFixed(1)})`, x: s.x, z: s.z });
+  sites.push({ label: `station @(${s.x.toFixed(1)}, ${s.z.toFixed(1)})`, x: s.x, z: s.z, bearings: BEARINGS, halfRun: HALF_RUN });
 }
 {
   const fp = ENTRANCE_RAMP.footprint;
   const x = BUILDING_CENTRE_X + (fp.minX + fp.maxX) / 2;
   const z = BUILDING_CENTRE_Z + (fp.minZ + fp.maxZ) / 2;
-  sites.push({ label: `facade steps @(${x.toFixed(1)}, ${z.toFixed(1)})`, x, z });
+  // Facade-local to world on the plan is a pure translation (`facadeX`/`facadeZ`;
+  // the castle frame's bearing is 0), so the ramp's local axis is the world one.
+  const axis = ENTRANCE_RAMP.axis === 'z' ? axisBearings(0, 1) : axisBearings(1, 0);
+  sites.push({ label: `facade steps @(${x.toFixed(1)}, ${z.toFixed(1)})`, x, z, bearings: [...BEARINGS, ...axis], halfRun: HALF_RUN });
 }
 
 function collisionWorld(): CollisionWorld {
@@ -177,6 +218,9 @@ interface Tally {
   /** Radially too-tall steps the sampler admitted. */
   wrongAdmissions: number;
   firstWrong: string | null;
+  /** The smallest radial rise of a climb too tall to take — what a VOID site was met with instead. */
+  smallestCliff: number;
+  smallestCliffAt: string | null;
 }
 
 const report: { site: Site; lean: number; tally: Tally }[] = [];
@@ -193,8 +237,10 @@ for (const site of sites) {
     wrongRefusals: 0,
     wrongAdmissions: 0,
     firstWrong: null,
+    smallestCliff: Infinity,
+    smallestCliffAt: null,
   };
-  for (const bearing of BEARINGS) {
+  for (const bearing of site.bearings) {
     const dx = Math.sin(bearing);
     const dz = Math.cos(bearing);
     for (const delta of DELTAS) {
@@ -238,6 +284,10 @@ for (const site of sites) {
               tally.worstRampWorld = Math.max(tally.worstRampWorld, worldDemand);
               tally.worstRampRadial = Math.max(tally.worstRampRadial, radialDemand);
             }
+            if (!honest && radialDemand < tally.smallestCliff) {
+              tally.smallestCliff = radialDemand;
+              tally.smallestCliffAt = `(${x.toFixed(2)}, ${z.toFixed(2)}) onto y=${top.toFixed(3)} from y=${last.y.toFixed(3)}`;
+            }
             if (honest) {
               tally.continuous += 1;
               tally.worstWorld = Math.max(tally.worstWorld, worldDemand);
@@ -257,9 +307,9 @@ for (const site of sites) {
         };
         const player = new SimPlayer(collisionWorld(), { ground });
         const offset = phase * 0.925;
-        player.placeOnGround(site.x - dx * (HALF_RUN + offset), site.z - dz * (HALF_RUN + offset));
+        player.placeOnGround(site.x - dx * (site.halfRun + offset), site.z - dz * (site.halfRun + offset));
         last = null;
-        const frames = Math.ceil((2 * HALF_RUN) / (5.5 * delta));
+        const frames = Math.ceil((2 * site.halfRun) / (5.5 * delta));
         for (let f = 0; f < frames; f += 1) {
           player.step(delta, dx, dz, true);
           last = { x: player.position.x, z: player.position.z, y: player.groundHeight };
@@ -405,7 +455,15 @@ const failures: string[] = [];
 for (const { site, tally } of report) {
   // A site the marches never climbed onto measured nothing; say so loudly
   // rather than counting its zeros as agreement.
-  if (tally.continuous === 0) failures.push(`VOID: no climb onto ${site.label} was measured at all`);
+  if (tally.continuous === 0) {
+    failures.push(
+      `VOID: no climb onto ${site.label} was measured at all` +
+        (tally.smallestCliffAt
+          ? ` — every march met it as a cliff; the lowest was a radial rise of ${tally.smallestCliff.toFixed(3)} m ` +
+            `(BUILDING_STEP_UP ${BUILDING_STEP_UP}) at ${tally.smallestCliffAt}`
+          : ' — no march met a built surface above her at all'),
+    );
+  }
 }
 if (navPairs === 0) failures.push('VOID: the nav lattice had no neighbour pairs to compare');
 if (worldDisagree === 0) failures.push('VOID: control — a world-y step rule agrees with the radial one on every pair, so this park cannot tell them apart');

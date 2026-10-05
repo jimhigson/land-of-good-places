@@ -2,8 +2,8 @@
  * **A child can walk in through the front gate. On every park she can be given.**
  *
  * ```
- * pnpm run check:gateway            # every seed in PARK_SEED_POOL
- * pnpm run check:gateway -- --map   # and print the standability map per seed
+ * pnpm run sweep:gateway            # every seed in PARK_SEED_POOL
+ * pnpm run sweep:gateway -- --map   # and print the standability map per seed
  * ```
  *
  * Issue #481. The gate is the one fixed thing in the park — `ENTRANCE_GATE_X/Z`
@@ -70,9 +70,10 @@ import {
   ENTRANCE_GATE_X,
   ENTRANCE_GATE_Z,
   ENTRANCE_WALK_DEPTH,
+  ENTRANCE_GATE_OPENING_REACH,
   entranceGateFrame,
-  isInEntranceGateOpening,
 } from '../src/world/entrance/layout.ts';
+import { isInGateArchSpan } from '../src/world/entrance/gateArch.ts';
 import { GATE_PROBE_INSET, GATE_PROBE_STEP, measureGatewayWalk } from '../src/world/entrance/gatewayWalk.ts';
 import { edgeRadiusAt, PARK_BOUNDARY } from '../src/world/boundary.ts';
 import { BOUNDARY_WALL_COLLISION_HALF } from '../src/world/Garden.ts';
@@ -153,7 +154,12 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
   // the canonical seed — and every one of them walked in fine.
   //
   // So this asks the thing the fix actually changed: does any boundary
-  // collision segment come inside the aperture at all? It is stated over the
+  // collision segment come inside the arch's clear span — between the pier
+  // faces, the depth of the wall's opening either side of the gate line — at
+  // all? (It asked about a strip out to the piers' *centres* while the wall
+  // stopped short of them. Since the wall closes onto the piers, stone beside
+  // and behind each pier is the wall doing its job; the doorway is between
+  // the pier faces.) It is stated over the
   // **whole segment**, not its midpoint, because the midpoint was the bug —
   // a 2 m chord whose middle clears the gap still reaches a metre into it.
   //
@@ -172,12 +178,12 @@ function measureThisSeed(): { fouls: Foul[]; open: number; total: number; map: s
       const t = i / steps;
       const x = wall.x1 + (wall.x2 - wall.x1) * t;
       const z = wall.z1 + (wall.z2 - wall.z1) * t;
-      if (!isInEntranceGateOpening(x, z, wall.halfThickness)) continue;
+      if (!isInGateArchSpan(x, z, wall.halfThickness, ENTRANCE_GATE_OPENING_REACH)) continue;
       const { across, along } = entranceGateFrame(x, z);
       foul(
         `boundary masonry reaches into the gateway at (${x.toFixed(2)}, ${z.toFixed(2)}) — ` +
-          `${Math.abs(across).toFixed(2)} m off the axis of an opening that is ` +
-          `${ENTRANCE_GATE_HALF_WIDTH} m wide either side, ${along.toFixed(2)} m along the way in. ` +
+          `${Math.abs(across).toFixed(2)} m off the axis, inside the arch's clear span, ` +
+          `${along.toFixed(2)} m along the way in. ` +
           `Segment (${wall.x1.toFixed(2)}, ${wall.z1.toFixed(2)}) -> ` +
           `(${wall.x2.toFixed(2)}, ${wall.z2.toFixed(2)}), halfThickness ${wall.halfThickness}`,
       );
@@ -297,7 +303,7 @@ await Promise.all(
 results.sort((a, b) => a.seed - b.seed);
 
 console.log(
-  `check:gateway: the walk in from the arch, ${GATE_PROBE_INSET} to ${ENTRANCE_WALK_DEPTH} m inside, ` +
+  `sweep:gateway: the walk in from the arch, ${GATE_PROBE_INSET} to ${ENTRANCE_WALK_DEPTH} m inside, ` +
     `${(2 * ENTRANCE_GATE_HALF_WIDTH).toFixed(2)} m across, ` +
     `probed at PLAYER_RADIUS (${PLAYER_RADIUS}) every ${GATE_PROBE_STEP} m — ${results.length} seed(s)\n`,
 );
@@ -337,7 +343,7 @@ for (const result of results) {
  * invariants do keeps one habit rather than two.
  */
 process.stderr.write(
-  `check:gateway covers the ground from the arch to ${ENTRANCE_WALK_DEPTH} m inside it, and nothing else:\n` +
+  `sweep:gateway covers the ground from the arch to ${ENTRANCE_WALK_DEPTH} m inside it, and nothing else:\n` +
     `  - it does not prove she can reach the plaza. Past ${ENTRANCE_WALK_DEPTH} m the railway may\n` +
     '    legitimately ring the park, and the walk crosses it at a level crossing or a bridge;\n' +
     "    whether that walk connects is `check:park`'s routing invariant, not this.\n" +
@@ -357,7 +363,7 @@ process.stderr.write(
 // different parks, is a corridor being measured somewhere the park is not.
 if (everBlocked === 0) {
   console.error(
-    '\ncheck:gateway: not one cell of the corridor was blocked on any seed. The gate posts ' +
+    '\nsweep:gateway: not one cell of the corridor was blocked on any seed. The gate posts ' +
       'stand in it on every park, so this probe is not measuring the park.',
   );
   process.exit(1);
@@ -377,22 +383,22 @@ if (failed) {
     r.fouls.some((f) => f.what.startsWith('boundary masonry')),
   ).length;
   const controls = results.filter((r) => r.fouls.some((f) => f.what.startsWith('CONTROL'))).length;
-  if (shut) console.error(`\ncheck:gateway: ${shut} of ${results.length} seed(s) cannot be walked into.`);
+  if (shut) console.error(`\nsweep:gateway: ${shut} of ${results.length} seed(s) cannot be walked into.`);
   if (encroached) {
     console.error(
-      `check:gateway: ${encroached} of ${results.length} seed(s) have masonry standing inside the ` +
+      `sweep:gateway: ${encroached} of ${results.length} seed(s) have masonry standing inside the ` +
         'arch\'s opening — walkable, and still stone in the doorway.',
     );
   }
   if (controls) {
     console.error(
-      `check:gateway: ${controls} of ${results.length} seed(s) failed a CONTROL — the probe is ` +
+      `sweep:gateway: ${controls} of ${results.length} seed(s) failed a CONTROL — the probe is ` +
         'not measuring the park, so nothing above it means anything.',
     );
   }
   process.exit(1);
 }
 console.log(
-  `\ncheck:gateway: all ${results.length} seed(s) open at the front door ` +
+  `\nsweep:gateway: all ${results.length} seed(s) open at the front door ` +
     `(${everBlocked} corridor cells blocked across the pool, so the probe can see solid ground).`,
 );

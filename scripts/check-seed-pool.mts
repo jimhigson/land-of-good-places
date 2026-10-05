@@ -3,8 +3,8 @@
  *
  * Issue #426 made which park a child gets a *decision* rather than a constant.
  * This check owns the cheap half of that decision being right: that
- * `PARK_SEED_POOL` is a set of distinct positive integers containing the
- * canonical seed, and that `resolveParkSeed()` picks from it in the documented
+ * `PARK_SEED_POOL` is exactly seeds 0 to 15 (Jim, 24 September 2026), distinct,
+ * containing the canonical seed, and that `resolveParkSeed()` picks from it in the documented
  * order — pins first, then the seed this profile already drew, then a draw.
  *
  * **What it deliberately does not prove**, and says so on every run: that each
@@ -51,7 +51,7 @@ function check(claim: string, ok: boolean, detail: string): void {
   }
 }
 
-const { CANONICAL_PARK_SEED, CI_SWEEP_SEEDS, PARK_SEED_KEY, PARK_SEED_POOL, forgetParkSeed, parkSeedFor, parkSeedSource, resolveParkSeed } =
+const { CANONICAL_PARK_SEED, CI_SWEEP_SEEDS, PARK_SEED_KEY, PARK_SEED_POOL, forgetParkSeed, parkChangedUnderSave, parkSeedFor, parkSeedSource, resolveParkSeed } =
   await import('../src/world/parkSeedPool.ts');
 
 console.log(`check:seed-pool: ${PARK_SEED_POOL.length} seed(s) in the pool\n`);
@@ -63,10 +63,13 @@ check(
   PARK_SEED_POOL.length > 0,
   'an empty pool would draw nothing and every park would be the fallback',
 );
+// Jim, 24 September 2026: "we only support seeds 0..15, no others." Seed 0
+// is a seed (`readSeed` accepts it); the old "positive integer" rule predates
+// the ruling and would refuse it.
 check(
-  'every seed is a positive integer',
-  PARK_SEED_POOL.every((s) => Number.isInteger(s) && s > 0),
-  `got ${PARK_SEED_POOL.filter((s) => !Number.isInteger(s) || s <= 0).join(', ')}`,
+  'the pool is exactly seeds 0 to 15',
+  PARK_SEED_POOL.length === 16 && PARK_SEED_POOL.every((s, i) => s === i),
+  `got [${PARK_SEED_POOL.join(', ')}]`,
 );
 check(
   'no seed appears twice',
@@ -189,11 +192,22 @@ check(
 // nothing anywhere else.
 const { SAVE_KEY } = await import('../src/state/save.ts');
 check(
-  'a save from before the pool keeps the canonical park',
+  'a save from before the pool moves to the default park',
   parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}' })) === CANONICAL_PARK_SEED,
-  `got ${parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}' }))} — ` +
-    'every position in that save would land in the wrong park',
+  `got ${parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}' }))}`,
 );
+// Seeds 0..15 only (Jim, 24 Sep 2026): Eleri's save remembers 20260728, which
+// is retired. She must land in the one default park — the same on every
+// device — not a random draw, and the park must be marked changed so her old
+// position (measured in 20260728) is not restored into seed 5's park.
+check(
+  'a save on a retired seed moves to the default park, not a random one',
+  [1, 2, 3, 4, 5, 6].every(
+    () => parkSeedFor(fakeStorage({ [SAVE_KEY]: '{"v":2}', [PARK_SEED_KEY]: '20260728' })) === CANONICAL_PARK_SEED,
+  ),
+  'drew a random seed',
+);
+check('and the park is marked changed under that save', parkChangedUnderSave(), 'parkChangedUnderSave() is false');
 
 // ------------------------------ the end-to-end clause, in real child processes
 //

@@ -59,7 +59,10 @@ import './headless-canvas.mjs';
 import { InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
 import { buildHeadlessPark } from './park-harness.mts';
 import { RAIL_GAUGE, TIE_STEP } from '../src/world/coaster/Coaster.ts';
-import { drawnOnSphere, railFrameAt, type RailFrame } from '../src/world/rail/sweptRail.ts';
+import { drawnOnSphere, railFrameAt, stationsEvenlyAlongDrawn, type RailFrame } from '../src/world/rail/sweptRail.ts';
+import { upFor } from '../src/world/up.ts';
+import { SLEEPER_SPACING } from '../src/world/railRace/trestleGeometry.ts';
+import type { RailRaceRoute } from '../src/world/railRace/route.ts';
 
 // How far a tie's rail-gauge point may sit from the rail centre line it is
 // meant to be bolted to. The rails' own sweep is not perfectly on the
@@ -166,6 +169,214 @@ if (worstDeviation > EPSILON_M) {
       'world/rail/sweptRail.ts\'s railFrameAt.',
   );
   process.exit(1);
+}
+
+// --- and the cart sits square on the same rails ------------------------------
+//
+// **The heading's composition, measured where it shows.** The cart is turned by
+// `rideFrame` — a lean about its flat column, then a yaw and a pitch composed by
+// `world/headingTurn.ts`. For a year that composition was a default `XYZ`
+// euler: the pitch taken about **world** X, which on a heading of 90° is a roll.
+// On this loop's climbs that put the nose off the rails and rolled the tub; #680
+// fixed the rider's half of the same euler and not this one, and the Rail Race
+// came apart. So: every 0.5 m of the loop, the real `Coaster.placeCart`, and the
+// cart's nose and up against the rails as drawn — a finite difference of the
+// leant route, and the up square to it and to the rails' own side.
+//
+// Proved on the canonical seed (loop 288 m): with the cart on `rideFrame` and
+// the heading composed `XYZ`, nose 29.37° / up 40.64° off; composed `YXZ`, up
+// right but nose 17.25° off at s=63 m, because `rideFrame` leans a flat tangent
+// that already runs along the drawn rails (0.26° apart). `drawnOnSphere`'s own
+// `tangentAt` had the same double lean, and the ties inherited it — the sleeper
+// clause below, and `rail/sweptRail.ts`'s `drawnDirection`, are the fix.
+{
+  /**
+   * The cart against its rails, in degrees. The flat heading is carried onto
+   * the sphere by the tilt at one column, while the drawn rail also feels the
+   * tilt *changing* along it — arc/R, about 0.07° per half-metre on a 400 m
+   * sphere, plus the Catmull-Rom's own sag (the ~20 mm above over a 0.45 m
+   * sample spacing, ~2.5°/m at worst in curvature, not direction). A degree is
+   * room for that and a fraction of what a mis-composed pitch does on a climb.
+   */
+  const CART_ON_RAILS_DEGREES = 1;
+  const rig = coaster as unknown as { distance: number; placeCart(): void; cart: import('three').Object3D };
+  const nose = new Vector3();
+  const up = new Vector3();
+  const ahead = new Vector3();
+  const behind = new Vector3();
+  const railFrame: RailFrame = { position: new Vector3(), forward: new Vector3(), side: new Vector3(), up: new Vector3() };
+  const worldTurn = new Quaternion();
+  const railUp = new Vector3();
+  let worstNose = { value: 0, at: 0 };
+  let worstUp = { value: 0, at: 0 };
+  let stations = 0;
+  const saved = rig.distance;
+  for (let d = 0; d < coaster.route.length; d += 0.5) {
+    rig.distance = d;
+    rig.placeCart();
+    rig.cart.updateWorldMatrix(true, false);
+    rig.cart.getWorldQuaternion(worldTurn);
+    nose.set(0, 0, 1).applyQuaternion(worldTurn);
+    // flat-ok: the cart's own local up, carried into the world by its quaternion
+    up.set(0, 1, 0).applyQuaternion(worldTurn);
+    drawn.pointAt(coaster.route.wrap(d + 0.05), ahead);
+    drawn.pointAt(coaster.route.wrap(d - 0.05), behind);
+    railFrameAt(drawn, d, railFrame);
+    const along = ahead.sub(behind).normalize();
+    const noseOff = (nose.angleTo(along) * 180) / Math.PI;
+    // Square to the rails: perpendicular to the way they run AND to the way
+    // they are spread apart — built here from the difference above rather than
+    // read off `railFrame.up`, so the clause does not take the frame's word for
+    // the thing it is checking.
+    const squareUp = railUp.crossVectors(along, railFrame.side).normalize();
+    const upOff = (up.angleTo(squareUp) * 180) / Math.PI;
+    if (noseOff > worstNose.value) worstNose = { value: noseOff, at: d };
+    if (upOff > worstUp.value) worstUp = { value: upOff, at: d };
+    stations += 1;
+  }
+  rig.distance = saved;
+  rig.placeCart();
+  console.log(
+    `check:tie-frame — the cart at ${stations} stations: nose worst ${worstNose.value.toFixed(2)}° ` +
+      `off the drawn rails (s=${worstNose.at.toFixed(1)} m), up worst ${worstUp.value.toFixed(2)}° off ` +
+      `the rails' up (s=${worstUp.at.toFixed(1)} m), allowed ${CART_ON_RAILS_DEGREES}°`,
+  );
+  if (!(stations > 0) || !Number.isFinite(worstNose.value) || !Number.isFinite(worstUp.value)) {
+    console.error('check:tie-frame: FAIL — the cart sweep measured nothing, or measured NaN.');
+    process.exit(1);
+  }
+  if (worstNose.value > CART_ON_RAILS_DEGREES || worstUp.value > CART_ON_RAILS_DEGREES) {
+    console.error(
+      `check:tie-frame: FAIL — the Sky Cruiser's cart sits ${Math.max(worstNose.value, worstUp.value).toFixed(2)}° ` +
+        `off its own rails, past ${CART_ON_RAILS_DEGREES}°. If the pitch is being composed about the ` +
+        "world's X rather than the yawed one, `world/headingTurn.ts` is being bypassed — it is the one " +
+        'owner of how a yaw and a pitch become a turn.',
+    );
+    process.exit(1);
+  }
+}
+
+// --- and every sleeper lies square to the rails as DRAWN, on both rides -------
+//
+// The gauge-point clause above reads each tie's two ends against `railFrameAt`
+// — the same function that placed it — so it can only ever say the tie is where
+// its own frame put it. It cannot see a frame that is wrong. And one was:
+// `drawnOnSphere`'s `tangentAt` turned the flat tangent by the sphere's tilt,
+// and the flat tangent already runs where the drawn rails do, so it leant twice
+// and the Sky Cruiser's sleepers were tipped up to 17° against their rails; the
+// Rail Race laid its sleepers along the route's *chart* tangent, up to ~14° off
+// the rails drawn over them. So this measures each sleeper's own axes, off the
+// real `InstancedMesh`, against the rails' direction taken independently — a
+// finite difference of the drawn points, never a `tangentAt` — and the up
+// square to that and to the local ground.
+{
+  /**
+   * A sleeper against its rails, in degrees. The difference is ±5 cm about each
+   * sleeper, on bends no tighter than the Rail Race's 53.5 m ring or the Sky
+   * Cruiser's solved minimum, so its own error is hundredths of a degree; a
+   * degree is room for that and a small fraction of the misalignments above.
+   */
+  const SLEEPER_ON_RAILS_DEGREES = 1;
+  const STEP = 0.05;
+  const along = new Vector3();
+  const ahead = new Vector3();
+  const behind = new Vector3();
+  const localUp = new Vector3();
+  const side = new Vector3();
+  const squareUp = new Vector3();
+  const tieZ = new Vector3();
+  const tieY = new Vector3();
+  const m = new Matrix4();
+  const q = new Quaternion();
+  const p = new Vector3();
+  const sc = new Vector3();
+  type Worst = { value: number; where: string };
+  const measure = (
+    mesh: InstancedMesh,
+    locate: (i: number) => { at: number; pointAt: (d: number, t: Vector3) => Vector3; where: string },
+  ): { worst: Worst; count: number } => {
+    let worst: Worst = { value: 0, where: '' };
+    for (let i = 0; i < mesh.count; i += 1) {
+      mesh.getMatrixAt(i, m);
+      m.decompose(p, q, sc);
+      tieZ.set(0, 0, 1).applyQuaternion(q);
+      // flat-ok: the sleeper's own local up, carried into the world by its turn
+      tieY.set(0, 1, 0).applyQuaternion(q);
+      const { at, pointAt, where } = locate(i);
+      pointAt(at + STEP, ahead);
+      pointAt(at - STEP, behind);
+      along.subVectors(ahead, behind).normalize();
+      upFor(p.x, p.y, p.z, localUp);
+      side.crossVectors(localUp, along).normalize();
+      squareUp.crossVectors(along, side).normalize();
+      // The sleeper runs across the track, so its own +Z is along it.
+      const off = (Math.max(tieZ.angleTo(along), tieY.angleTo(squareUp)) * 180) / Math.PI;
+      if (off > worst.value) worst = { value: off, where };
+    }
+    return { worst, count: mesh.count };
+  };
+
+  const cruiser = measure(ties, (i) => ({
+    at: i * TIE_STEP,
+    pointAt: (d, t) => drawn.pointAt(coaster.route.wrap(d), t),
+    where: `Sky Cruiser s=${(i * TIE_STEP).toFixed(1)} m`,
+  }));
+
+  const race = (park.world.railRace as unknown as {
+    raceRing: { route: RailRaceRoute; track: { group: import('three').Object3D } };
+    walkPastRing: { route: RailRaceRoute; track: { group: import('three').Object3D } };
+  });
+  const rings = [
+    { name: 'race ring', ring: race.raceRing },
+    { name: 'walk-past ring', ring: race.walkPastRing },
+  ];
+  const results = [{ name: 'Sky Cruiser', ...cruiser }];
+  for (const { name, ring } of rings) {
+    const sleepers = ring.track.group.getObjectByName('railRace:sleepers') as InstancedMesh | undefined;
+    if (!sleepers) {
+      console.error(`check:tie-frame: FAIL — no railRace:sleepers on the ${name}; the sleeper clause is VOID.`);
+      process.exit(1);
+    }
+    const route = ring.route;
+    const perLane = Math.floor(route.length / SLEEPER_SPACING);
+    // Where `track.ts` laid each lane's sleepers — asked of the same owner it
+    // asks, `stationsEvenlyAlongDrawn`, over the same lane sampler. Only the
+    // *station* is shared; the rail direction there is still this check's own
+    // finite difference of the drawn points.
+    const stationsByLane = Array.from({ length: route.laneOffsets.length }, (_u, lane) =>
+      stationsEvenlyAlongDrawn({ length: route.length, pointAt: (d, t) => route.pointAt(lane, d, t) }, perLane),
+    );
+    results.push({
+      name: `Rail Race ${name}`,
+      ...measure(sleepers, (i) => {
+        const lane = Math.floor(i / perLane);
+        const at = stationsByLane[lane]![i % perLane]!;
+        return {
+          at,
+          pointAt: (d, t) => route.pointAt(lane, route.wrap(d), t),
+          where: `lane ${lane} s=${at.toFixed(1)} m`,
+        };
+      }),
+    });
+  }
+  let failed = false;
+  for (const r of results) {
+    console.log(
+      `check:tie-frame — ${r.name}: ${r.count} sleepers, worst ${r.worst.value.toFixed(2)}° off the ` +
+        `drawn rails (${r.worst.where}), allowed ${SLEEPER_ON_RAILS_DEGREES}°`,
+    );
+    if (!(r.count > 0) || !Number.isFinite(r.worst.value)) failed = true;
+    else if (r.worst.value > SLEEPER_ON_RAILS_DEGREES) failed = true;
+  }
+  if (failed) {
+    console.error(
+      'check:tie-frame: FAIL — a sleeper is turned off the rails drawn over it (or none was measured). ' +
+        "Its frame comes from `railFrameAt`, whose forward is the sampler's `tangentAt`; that has to be " +
+        'the direction the rails are drawn in — `rail/sweptRail.ts`\'s `drawnDirection` — not a flat or ' +
+        'chart tangent turned onto the sphere.',
+    );
+    process.exit(1);
+  }
 }
 
 console.log('tie frame: every tie sits on both rails, within epsilon.');

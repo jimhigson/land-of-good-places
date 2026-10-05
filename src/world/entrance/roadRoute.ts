@@ -1,4 +1,5 @@
 import { RIM_OUTSET_START } from '../../core/constants';
+import { registerPlanCache } from '../../boot/planCaches';
 import { PARK_BOUNDARY, TERRAIN_APRON } from '../boundary';
 import { RingPath } from '../railRace/ringPath';
 import { outsetClearOfSupports } from '../railRace/supportGround';
@@ -701,3 +702,11 @@ export function entranceRoadInnerEdgeAcross(
 export function entranceRoadOutsetAt(x: number, z: number): number {
   return -PARK_BOUNDARY.distanceToEdge(x, z);
 }
+
+// Derived from a decision the park's driver may unwind: forgotten with it.
+registerPlanCache(() => {
+  stationCache = null;
+  corridorCache = null;
+  browCache = null;
+  innerEdgeRingCache = null;
+});

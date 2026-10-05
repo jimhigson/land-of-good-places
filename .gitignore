@@ -64,3 +64,6 @@ coverage/
 # and the results file it appends to. Both are scratch for a seed search.
 test/procgen/vet-seed-*.test.ts
 seed-vetting*.jsonl
+
+# Prebuilt park files written by `pnpm run build:parks` for `vite build` to ship.
+.parks/

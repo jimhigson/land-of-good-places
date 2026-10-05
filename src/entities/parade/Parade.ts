@@ -1,4 +1,4 @@
-import { Box3, Group, Object3D, Raycaster, Vector2, Vector3 } from 'three';
+import { Box3, Group, Object3D, Quaternion, Raycaster, Vector2, Vector3 } from 'three';
 import { PARADE_MEMBER_RADIUS } from '../../core/constants';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
@@ -190,7 +190,7 @@ export class Parade implements GameSystem, PetParadeLink, PetSlideLink {
     y: 0,
     z: 0,
     facing: 0,
-    pitch: 0,
+    turn: new Quaternion(),
     recline: 0,
   };
 

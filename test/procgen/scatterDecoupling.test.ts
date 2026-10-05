@@ -47,6 +47,8 @@ interface Group {
 
 interface Digest {
   readonly seed: number;
+  readonly restart: number;
+  readonly plan: readonly string[];
   readonly paths: { readonly metres: number; readonly digest: string };
   readonly spur: { readonly name: string; readonly points: readonly (readonly [number, number])[] };
   readonly trees: Group;
@@ -120,59 +122,102 @@ function positionOf(label: string): readonly [number, number] {
   return [Number(parts[1]), Number(parts[2])];
 }
 
+/**
+ * The parks the property is proved on. The canonical seed, because it is the
+ * park everyone looks at; and seed 12, because it is the one that caught the
+ * last coupling: the scatter planted to a park-wide count of 72 trees, so the
+ * three trees its bowed spur cost were replaced 31 m and 43.6 m away. The
+ * canonical seed happens to lose no tree to the bow and could not see that. A
+ * property proved on one seed is a property of that seed. Seed 12 also builds
+ * in a fraction of the canonical seed's time.
+ */
+const PARKS: readonly { readonly label: string; readonly env: Record<string, string> }[] = [
+  { label: 'the canonical seed', env: {} },
+  { label: 'seed 12', env: { LGP_SEED: '12' } },
+];
+
 describe('scenery scatter is decoupled from the paths', () => {
-  const baseline = buildDigest({});
-  const bowed = buildDigest({ LGP_SPUR_STRETCH: String(BOW) });
+  const baselines: Digest[] = [];
+  for (const park of PARKS) {
+    describe(park.label, () => {
+      const baseline = buildDigest(park.env);
+      // **The same restart as the baseline, pinned.** LGP_SPUR_STRETCH is a
+      // park-changing switch, so with the restart unset the resolver builds
+      // restart 0 while the baseline is the accepted restart: two different
+      // parks. On #705's CI seed 12 (accepted restart 2) failed exactly so:
+      // layout attempt 5 against 4, trees "moved" 100 m.
+      const bowed = buildDigest({ ...park.env, LGP_PARK_RESTART: String(baseline.restart), LGP_SPUR_STRETCH: String(BOW) });
+      baselines.push(baseline);
 
-  it('perturbed the park for real — otherwise everything below is vacuous', () => {
-    // The load-bearing assertion. A knob that silently does nothing would make
-    // every "unchanged" check below pass for the worst possible reason, and
-    // that is not hypothetical: the first version of this hook extended the
-    // ribbon backwards from its branch point onto ground that was already
-    // paved, and moved nothing on `origin/main` at 1, 2, 3, 4, 6, 8, 10, 14, 18
-    // or 24 m. A perturbation that cannot break the broken version cannot
-    // validate the fixed one.
-    expect(baseline.paths.digest).not.toBe(bowed.paths.digest);
-    expect(baseline.spur.points.length).toBeGreaterThan(1);
-    expect(Number.isFinite(baseline.paths.metres)).toBe(true);
-    expect(Number.isFinite(bowed.paths.metres)).toBe(true);
-    expect(bowed.paths.metres).not.toBeCloseTo(baseline.paths.metres, 3);
-  });
+      it('built the bowed park at the baseline park\'s restart', () => {
+        expect(bowed.restart).toBe(baseline.restart);
+      });
 
-  it('measured a real park on both sides', () => {
-    for (const park of [baseline, bowed]) {
-      expect(park.trees.count).toBeGreaterThan(24);
-      expect(park.bushes.count).toBeGreaterThan(107);
-      expect(park.walls.count).toBeGreaterThan(0);
-    }
-  });
+      it('perturbed the park for real — otherwise everything below is vacuous', () => {
+        // The load-bearing assertion. A knob that silently does nothing would make
+        // every "unchanged" check below pass for the worst possible reason, and
+        // that is not hypothetical: the first version of this hook extended the
+        // ribbon backwards from its branch point onto ground that was already
+        // paved, and moved nothing on `origin/main` at 1, 2, 3, 4, 6, 8, 10, 14, 18
+        // or 24 m. A perturbation that cannot break the broken version cannot
+        // validate the fixed one.
+        expect(baseline.paths.digest).not.toBe(bowed.paths.digest);
+        expect(baseline.spur.points.length).toBeGreaterThan(1);
+        expect(Number.isFinite(baseline.paths.metres)).toBe(true);
+        expect(Number.isFinite(bowed.paths.metres)).toBe(true);
+        expect(bowed.paths.metres).not.toBeCloseTo(baseline.paths.metres, 3);
+      });
 
-  it('leaves every tree, bush and wall away from the change exactly where it was', () => {
-    const ribbons = [baseline.spur.points, bowed.spur.points];
-    const strays: string[] = [];
-    for (const kind of ['trees', 'bushes', 'walls'] as const) {
-      const before = new Set(baseline[kind].labels);
-      const after = new Set(bowed[kind].labels);
-      const changed = [
-        ...[...before].filter((label) => !after.has(label)).map((l) => `gone: ${l}`),
-        ...[...after].filter((label) => !before.has(label)).map((l) => `new:  ${l}`),
-      ];
-      for (const entry of changed) {
-        const distance = distanceToSpur(positionOf(entry.slice(6)), ribbons);
-        if (distance > LOCALITY_LIMIT) {
-          strays.push(`${entry} — ${distance.toFixed(1)} m from the spur that moved`);
+      it('bowed one spur of the same park — the plan settled on the same decisions', () => {
+        // Without this, the test below compares two different parks. On seed 5 a
+        // whole-segment bow read as a street off the lattice, the plan refused the
+        // paths and unwound to another layout, and "the scatter moved 52 m away"
+        // was the castle, the walls and the fairy chains all being somewhere else.
+        expect(baseline.plan.length).toBeGreaterThan(0);
+        expect(
+          bowed.plan,
+          `bowing ${baseline.spur.name} by ${BOW} m changed the plan's decisions, so the two parks differ ` +
+            `upstream of the scatter and the locality check below would measure that, not the scatter`,
+        ).toEqual(baseline.plan);
+      });
+
+      it('measured a real park on both sides', () => {
+        for (const park of [baseline, bowed]) {
+          expect(park.trees.count).toBeGreaterThan(24);
+          expect(park.bushes.count).toBeGreaterThan(107);
+          expect(park.walls.count).toBeGreaterThan(0);
         }
-      }
-    }
-    expect(
-      strays,
-      `bowing ${baseline.spur.name} by ${BOW} m changed scenery more than ` +
-        `${LOCALITY_LIMIT} m away, so the scatter is still coupled to the paths:\n` +
-        strays.join('\n'),
-    ).toHaveLength(0);
-  });
+      });
+
+      it('leaves every tree, bush and wall away from the change exactly where it was', () => {
+        const ribbons = [baseline.spur.points, bowed.spur.points];
+        const strays: string[] = [];
+        for (const kind of ['trees', 'bushes', 'walls'] as const) {
+          const before = new Set(baseline[kind].labels);
+          const after = new Set(bowed[kind].labels);
+          const changed = [
+            ...[...before].filter((label) => !after.has(label)).map((l) => `gone: ${l}`),
+            ...[...after].filter((label) => !before.has(label)).map((l) => `new:  ${l}`),
+          ];
+          for (const entry of changed) {
+            const distance = distanceToSpur(positionOf(entry.slice(6)), ribbons);
+            if (distance > LOCALITY_LIMIT) {
+              strays.push(`${entry} — ${distance.toFixed(1)} m from the spur that moved`);
+            }
+          }
+        }
+        expect(
+          strays,
+          `bowing ${baseline.spur.name} by ${BOW} m changed scenery more than ` +
+            `${LOCALITY_LIMIT} m away, so the scatter is still coupled to the paths:\n` +
+            strays.join('\n'),
+        ).toHaveLength(0);
+      });
+    });
+  }
 
   it('can tell two parks apart at all', () => {
+    const baseline = baselines[0] as Digest;
     // The control. Everything above is an assertion that digests *match*, and a
     // digest that always matched — one hashing a constant, say — would sail
     // through all of it. A different seed must produce a different scatter.
@@ -184,8 +229,19 @@ describe('scenery scatter is decoupled from the paths', () => {
     // than falling back to level crossings (it was retired from the sweep
     // for exactly this pathology, #429/seed-24.test.ts's header). Any pool
     // seed serves; 5 is the one the sweep already builds everywhere else.
-    const other = buildDigest({ LGP_SEED: '5' });
-    expect(other.seed).toBe(5);
+    // Any supported seed other than the baseline's: the canonical seed became
+    // 5 when the pool became 0..15, and a control that builds the baseline's
+    // own park again cannot tell two parks apart.
+    // Seed 10 restart 0 since #708's band fix: the shipped park with the
+    // fastest plan (11.5 s on CI). A pinned restart goes stale when the park
+    // changes; re-pick from the Parks job's "plan N ms searched" lines.
+    const otherSeed = baseline.seed === 10 ? 11 : 10;
+    // An explicit restart: the control needs *a* different park, not that
+    // seed's accepted one, and leaving the restart unset made the resolver run
+    // the whole acceptance loop for it (442 s on #705's CI, over the 240 s
+    // timeout), measuring nothing this test asks about.
+    const other = buildDigest({ LGP_SEED: String(otherSeed), LGP_PARK_RESTART: '0' });
+    expect(other.seed).toBe(otherSeed);
     expect(other.all).not.toBe(baseline.all);
     expect(other.trees.digest).not.toBe(baseline.trees.digest);
     expect(other.bushes.digest).not.toBe(baseline.bushes.digest);

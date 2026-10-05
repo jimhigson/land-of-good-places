@@ -1,6 +1,5 @@
-import type { PlannedCoaster } from './solve';
-import { planCruiser } from './solve';
-import { takePrewarmedCruiser } from './prewarm';
+import type { PlannedCoaster } from './planned';
+import { planPart } from '../parkPlan';
 
 /**
  * **The Sky Cruiser's solved plan, and nothing else.**
@@ -42,7 +41,6 @@ import { takePrewarmedCruiser } from './prewarm';
  * (worst block 1354 ms to 1300 ms, against a 250 ms ceiling). See
  * `coaster/prewarm.ts`.
  */
-export * from './solve';
 
 /**
  * The plans. Import this; never re-solve — the same rule as `TRAIN_PLAN`.
@@ -68,6 +66,13 @@ export * from './solve';
  * `check:park-boot`, which runs both in one process and compares a SHA over the
  * built loop.
  */
+export type { PlannedCoaster } from './planned';
+
 export const COASTER_PLANS: {
   readonly cruiser: PlannedCoaster;
-} = { cruiser: takePrewarmedCruiser() ?? planCruiser() };
+} = {
+  /** A view: the park's driver decides the cruiser, and may re-decide it. */
+  get cruiser(): PlannedCoaster {
+    return planPart('cruiser');
+  },
+};

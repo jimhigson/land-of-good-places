@@ -13,8 +13,7 @@ import {
 import { FOUNTAIN_RIM_COLLIDER_HALF } from '../core/constants';
 import { PALETTE } from '../core/palette';
 import { pinkStoneTexture } from '../core/textures';
-import { ART } from '../art/style/artPalette';
-import { toonMaterial, inkTint } from '../art/style/materials';
+import { toonMaterial } from '../art/style/materials';
 import { createRipikaStatue, type RipikaStatueHandle } from '../art/models/ripikaStatue';
 import type { SightlineOccluder } from './FoliageFade';
 import {
@@ -96,13 +95,16 @@ const GLOW_DISTANCE = 27;
  */
 const WATER_HEIGHT = 0.82;
 
+/** The basin's rim radius — the ground the fountain claims, plus its rim collider's half. */
+export const FOUNTAIN_RIM_RADIUS = 4.2;
+
 export class Fountain implements GameSystem {
   readonly name = 'fountain';
   readonly group = new Group();
 
   /** Centre of the fountain in world space. */
   readonly centre: Vector3;
-  readonly rimRadius = 4.2;
+  readonly rimRadius = FOUNTAIN_RIM_RADIUS;
   /** World Y of the water surface **at the fountain's centre** — see {@link waterSurfaceY}. */
   readonly waterLevel: number;
 
@@ -185,7 +187,7 @@ export class Fountain implements GameSystem {
     this.centre = new Vector3(x, groundY, z);
     this.group.position.copy(this.centre);
     // The fountain is built around an origin on the ground at its own centre,
-    // so leaning the group there leans basin, statue, jets and coins together
+    // so leaning the group there leans basin, statue and jets together
     // and keeps that centre point exactly where it was. Everything inside goes
     // on being authored in plain local `+Y`.
     standOnSphere(this.group);
@@ -350,33 +352,14 @@ export class Fountain implements GameSystem {
     this.glow.position.y = 1.2;
     this.group.add(this.glow);
 
-    // --- wishing coins -----------------------------------------------------
-    // Purely decorative — the wishing/coin-toss mechanic lives elsewhere and
-    // is untouched here. Sitting just above the floor, under the water, so
-    // they glint through it rather than resting on top.
-    const coinMaterial = toonMaterial(ART.helmetGold);
-    const coinRimMaterial = toonMaterial(inkTint(ART.helmetGold, 0.3));
-    const coinLayout: readonly [x: number, z: number, rotationY: number, tilt: number][] = [
-      [1.15, 0.4, 0.4, 0.03],
-      [-1.7, -0.75, 1.9, -0.05],
-      [0.3, -1.95, 2.6, 0.02],
-      [-0.55, 1.75, 0.9, 0.06],
-      [2.1, 0.55, 3.4, -0.02],
-      [-1.15, -0.15, 4.7, 0.04],
-      [0.6, 1.1, 5.6, -0.03],
-    ];
-    for (const [cx, cz, rotationY, tilt] of coinLayout) {
-      const coin = new Mesh(new CylinderGeometry(0.13, 0.13, 0.025, 14), [
-        coinRimMaterial,
-        coinMaterial,
-        coinMaterial,
-      ]);
-      coin.position.set(cx, 0.095, cz);
-      coin.rotation.y = rotationY;
-      coin.rotation.z = tilt;
-      coin.receiveShadow = true;
-      this.group.add(coin);
-    }
+    // No wishing coins. There were seven, from the first commit of this
+    // fountain, at y 0.095 with a 0.025 m thickness — every one of them inside
+    // the 0.16 m basin floor slab above, so not one was ever on screen. Buried
+    // faces are free to delete (ART_DIRECTION.md §7), and these were not free
+    // to keep: on pool seed 428 the plaza's paving passes under the basin
+    // within 4 mm of a coin's top, which `check:coplanar` reported as a new
+    // seam. Coins a child could actually see glinting under the water would be
+    // a new, visible decoration — a design call, not this fix.
 
     // --- rim collider: a ring of short walls, not one filled circle --------
     // See the class doc for why, including why every segment is `autoHoppable`

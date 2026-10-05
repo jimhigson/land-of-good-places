@@ -28,7 +28,7 @@ import { terrainHeight } from '../src/world/terrain.ts';
 const seed = process.env.LGP_SEED ?? '(default)';
 const park = quietly(() => buildHeadlessPark());
 
-const gate = measureGateArch(park.scene);
+const gate = measureGateArch(park.scene, terrainHeight);
 
 const fouls: string[] = [];
 if (!gate || gate.posts.length !== 2) {
@@ -96,8 +96,12 @@ if (!gate || gate.posts.length !== 2) {
   // 4. Headroom, raycast up through the opening rather than read off the
   // bounding box — see `gate-arch-measure.mts` for why that distinction is the
   // whole of this clause.
-  const headroom = gate.lowestOverheadY - terrainHeight(centreX, centreZ);
-  if (!(gate.lowestOverheadY < Infinity)) {
+  // One owner: `gate-arch-measure.mts` computes it, as an altitude difference
+  // on the sphere. This script used to subtract two world `y`s itself, and
+  // `parkFacts.ts` did the same subtraction separately — the same number
+  // defined twice and wrong in both places.
+  const { headroom } = gate;
+  if (!(headroom < Infinity)) {
     fouls.push(`seed ${seed}: nothing at all overhangs the gateway — there is no arch over the opening`);
   } else if (headroom < TALLEST_CHILD_HEIGHT) {
     fouls.push(`seed ${seed}: only ${headroom.toFixed(2)} m of headroom under the arch`);

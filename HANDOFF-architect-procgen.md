@@ -11,131 +11,95 @@ SolveScheduler spine, byte-identical parks) merged as #499. The universal
 overlap invariant is in flight on `feat/universal-overlap-invariant` (its
 first honest run found #501).
 
-## State at a glance (for a cold pickup — details in the checkpoints below)
+## COLD PICKUP — read this first (written 7 Sep 2026, on Jim's pause)
 
-- **Worktree**: `.claude/worktrees/design-round-robin` on
-  `design/round-robin-generation`, merged with `origin/main` at `61e95fe5`
-  (5 Sep). Docs-only branch, no code.
-- **The design is fully written** and re-read against #474 (warp vectors =
-  baked backtracking, retired by stages 4/5) and #498 (below).
-- **Jim ruled (5 Sep): "no flat ground — it is a sphere".** The park
-  comes off its hill (#511); both ceilings of the over-determination were
-  hill constants (`RIM_OUTSET_START`); no party yields. Doc section
-  "Stage 3, ruled". Architect's rulings there: the three `*_RADIAL_NUDGES`
-  ladders are deleted (one outward march, one function, stops where the
-  world says); claims describe the drawn *post* below the road's headroom,
-  not the foot; a refused foot's next decision is a support *shape*.
-  **Corrected 5 Sep**: a radial nudge is a *lean*, so "trestles escape
-  outward" is struck; the road moves outside the ring's band (centre ~16,
-  0.1 m foot margin). **Prediction on record, restated**: with the road
-  outside the ring, posts at height are clear wherever feet are; the
-  binding number is the foot margin. **First prediction CONFIRMED on built parks** (seeds 24/131/326: feet 0,
-  posts 1–2; table in the doc). Restated one (road outside ring → feet
-  bind) still unmeasured; #511 Engineer measuring next.
-- **Seed 288, root-caused and RULED (6 Sep)**: cruiser 5.9 m clearance →
-  station → train route → sites move → a rail-unaware producer (ring /
-  spur lead / draw-time smoothing) crosses off-site → throw at planting.
-  Ruling: the `computeCrossings` predicate exported once and asked at
-  commit inside the `pathGraph` task; refusal ladder per producer;
-  on-demand `bridgeCandidateAt(d)`; forbidden to tune 5.9/tolerances,
-  drop 288, or add a warp field. **Priority: ahead of all stage 3 after
-  #528 QA** (it blocks #511, which gates step 2). Brief:
-  `docs/BRIEF-stage4-pre-crossing-refusal.md`, for the #511 Engineer.
-  #524 lands with it if not already merged.
-  **Sized 6 Sep**: screen finds ONE producer on 288 (`spur-station-1`,
-  station approach spur) at the exact throw coordinate; first fix (polyline
-  screen on the spur) measured as a NO-OP — 1342 samples → 1342, same
-  foul: the drawn Catmull-Rom bulges across the rail while the control
-  polyline holds its side. Ruling amended: a rung = change decision →
-  resample via shared `sampleCurve` → same drawn predicate; polyline
-  tests pre-reject only, never accept. Point 1 landed (detection at
-  the point of decision, `crossingPredicate.ts`). **Recovery contract
-  written 6 Sep** (doc, 8 points): site solve = pure function of a
-  demand set; path solve owns the converge loop; `CROSSING_SITES`
-  published once after convergence; `footprints()` throws if early;
-  bound derived from `SITE_SPACING`. #511 gated on it → critical path to
-  step 2. **Two pool seeds foul** (267 at railD 213.4, producer TBA;
-  288 `spur-station-1`); contract holds for any producer — each
-  producer exposes a re-route decision, the ring has only the on-demand
-  rung. #579: 7 seed files ≠ 16-seed pool. Next: review the PR (screen
-  wired into pathGraph + station spur screened); then #511 goes green
-  and step 2 unblocks.
-  Terrain is no longer seed-dependent (1200 m sphere) — the outward
-  march's bound is the support's lean limit, not the ground.
-- **Briefs**: step 1 = **#522, merged** (this branch `0845e9fa` and
-  `main`). **Step 2a = #528 `check:swept-bus`, merged to `main`** — its
-  own workflow, seed-keyed, **bidirectional** (fails on a drop as well as
-  a rise), red-by-design at 364 drawn posts across 16 seeds, so #511
-  must re-take the baseline to land (the posts-at-height prediction made
-  mechanically unavoidable). `main` = `d80a3d4c` (6 Sep).
-- **Step 2 is gated on #511 alone** (rechecked 6 Sep): step 1 done, 2a
-  done. #511 is gated on the crossing-screen PR (station spur screened,
-  screen wired into `pathGraph`, exit 2 on a zero scan) + its swept-bus
-  baseline re-take. The moment #511 merges, step 2 is dispatchable from
-  `main`; its definition of done drives the swept-bus baseline to 0 and
-  replaces it with "fails on any intrusion".
-- **Jim ruled (6 Sep): no seed is unbuildable** — backtrack to decision
-  zero ≡ another seed. Doc section "Totality, ruled and mechanised":
-  numbered decisions, refusals not throws, ladder retry → negotiate →
-  unwind (most recent blocker) → decision zero (counted); the three
-  terminal classes mapped (RailRouteUnsolvable → plot redraws; no site →
-  recovery contract then train-route redraw; **POI stranded → the POI's
-  own layout entry redraws, first rung to build, on main's ground**);
-  determinism by stream-named attempts + unwind trace hashed into the
-  digest; proof `check:every-seed-builds` with "built" and "built well"
-  on separate lines. Pool = quality curation only.
-- **POI class RULED 6 Sep (second ruling)**: nobody walks PoiGraph's
-  edges (Journey routes on NavGrid, #350); `PoiGraph.reachable :=
-  NavGrid can route from the entrance` — one instrument; edges at most a
-  prefilter. Conditional: if NavGrid over-approximates at transverse
-  deck crossings, that is a NavGrid bug fixed in the same PR. Condition DISCHARGED
-  (`reachableFrom` = `findRoute`'s steps, 0 disagreements); node placement
-  = NavGrid nearest standable cell (confirmed). New clause in the crossing
-  predicate: samples in the corridor must be on the deck (seed 6). First
-  ruling (edges follow the drawn route) withdrawn — premise inferred
-  from an import;
-  `poi.stranded` restated as NPC-reach ⊇ player-reach; layout redraw
-  kept for genuine (NavGrid) unreachability = 0 today. Seed 12 = declared
-  vs built waterFight (separate item). Baseline 4/16 build.
-- **POI rung brief written 6 Sep**: `docs/BRIEF-totality-poi-rung.md`
-  (Fable engineer). Rung 1 runs inside `parkLayout.solve`'s existing
-  loop with the router's own reachability probe; rungs 2–3 need
-  re-runnable solves (step 3 generalised) — stated, not smuggled.
-- **Merged `main` @ `bbb853af` (castle turrets) into this branch, 6 Sep**:
-  chain 64 = main's 63 + `check:ground-claims`, sets compared against
-  the merge base; `invariants.ts`/`parkFacts.ts` conflicts were NOT
-  clean both-side adds — git split the road and castle blocks mid-comment
-  and a keep-both interleaved them (tsc clean, typecheck:test red). Fixed
-  by rebuilding from main + the road pieces whole. **Lesson: after any
-  merge run `typecheck:test`, not only `tsc` — test files are not in
-  tsc's project.** #585 = this branch → main.
-- **#522 is NOT on `main`** (6 Sep): it merged into this design branch.
-  `main` lacks `roadCorridor.ts` / `check-ground-claims.mts`. Design
-  branch merged with `main` (chain 63 = main's 62 + ground-claims,
-  rebuilt from parsed steps). Overseer to merge the design branch to
-  `main`, or engineers branch from it.
-- **#524** (open): a park that fails to build is a test failure, not a
-  skip — and after the screen lands, **a named refusal at commit is a
-  failure too**, not a skip. Same issue, one more case; say so on it. Step 2 held on step 1 + #511 +
-  step 2a in the chain (dispatched). Steps 3, 4 sequential after. Step 4 re-cut: no clause
-  to delete; it is the `CoSolveEngine`→`GroundClaims` migration + the
-  first support-shape negotiation + counters, shrinking if the sphere
-  alone suffices.
-- **Step 1's finding, folded in**: the road is not constants — the spur's
-  end depends on `publishPaving()` inside `new World`, after generation;
-  the road is a two-turn (provisional → realised) placer. Trap for step 2:
-  legs are built at `World.ts:214`, entrance at `:268`.
-- **#498** (`fix/road-487-488`): OPEN, CONFLICTING (only
-  `scripts/coplanar-baseline.mts`), two unanswered "changes requested"
-  reviews (blocker: swept-bus checks feet, 8–9 leaning posts/seed still in
-  the bus body), `test:procgen` red on 5 seeds (61–67 m ring on air),
-  engineer's handoff says "needs Jim's yes" on the apron. Nobody on it;
-  the local `road-487-488` worktree is a stale mid-rebase with nothing
-  unpushed. Its #487 visibles and the swept-bus instrument are worth
-  landing separately — Overseer's call, reported.
-- **Next action if resumed**: review step 1's PR for the one-owner rule
-  when it opens; when the #511 engineer's five-seed measurement arrives,
-  confirm or strike the prediction and release step 2. Otherwise idle.
+**Work is paused by Jim** (token spend) except the spherical-earth and
+arrival-camera stream. Do not start anything until an Overseer un-pauses.
+
+- **Model: Fable, by Jim's standing instruction** for this whole procgen
+  workstream. A replacement Architect runs Fable. So does the step-2
+  engineer.
+- **Branch**: `design/round-robin-generation` — the authority is
+  `docs/DESIGN-round-robin-generation.md` there. As of this commit it is
+  **current with `main`** (dd5b3b6b; `git rev-list --count HEAD..origin/main`
+  = 0). Work in your own worktree, never the shared checkout.
+- **Step 2 (trestles become claims) is APPROVED at `a06178a4`** on
+  `feat/procgen-step2-trestles-claim`, reviewed by measurement on a
+  detached worktree at every sha. **One item outstanding**: the duck-bar
+  fairness clause re-cut, ruled at `064e834b` (design doc, "Fairness is
+  the race ring's property") — equal-per-racer on the race ring only;
+  the walk-past ring's lane counts equal the race ring's minus road-rule
+  skips, printed. When it lands: clause green on the canonical seed,
+  proved red by dropping one race-ring bar, `test:procgen` 706/706 on the
+  sphere merge. The PR cannot open green until the sphere (#511,
+  `feat/sphere-combined`) reaches the design branch; on the hill the
+  road runs along the ring and the rule costs 60–70 m spans — hill-only.
+- **Step 3's brief is implementable as written**
+  (`docs/BRIEF-stage3-step3-confront-ladder.md`): the trestles become a
+  scheduler task, the road takes two real turns (`publishPaving()` moves
+  into the `pathGraph` task — the one stage-4 item brought forward),
+  interleaving proved by the task-turn log, the decision-stream owner
+  lands. It touches the road files the sphere engineer is live in, so it
+  waits for the sphere and for step 2.
+- **Step 4 is HELD with NO CUSTOMER — deliberately, not by omission.**
+  Jim's road rule ("just skip all the legs over the road, otherwise keep
+  them") means a trestle refused by the road is skipped, never
+  negotiated, and the road is never refused by a trestle. There is
+  nothing for the pair to negotiate, so **do not build the scheduler's
+  retry/negotiate/unwind ladder for it** — that would be a mechanism
+  exercised by a check that cannot fail. It lands with the first placer
+  that genuinely returns a refusal a blocker can clear (stage 4's paths).
+
+### Two facts that are load-bearing in more than one place
+
+1. **The two rail-race rings are never in the world at the same time.**
+   Jim: *"either the small one or the big one is shown — it is purely a
+   visual trick."* In code: `RailRace.setActiveRing` (the one place).
+   Two rulings rest on it and on nothing else: both rings claim as ONE
+   feature `railRace` (they never constrain each other; the walk-past
+   colliders register after both are placed and stay, because walkers,
+   `NavGrid`, `LampPosts` and `check:park` read them), and the road
+   rule's asymmetry (the ride-scale ring keeps every leg; the walk-past
+   ring skips its own over the road). **If that fact were ever false,
+   both are wrong together.**
+2. **The seed pool shrinks while the generator is being replaced** (Jim's
+   ruling): a seed that fails the *old* generator is retired, never fixed
+   — #589 retired 267 and 288; #584 (open) makes the pool 0..15. Under
+   totality the pool survives only as quality curation; do not spend
+   engineering on making the old generator pass a seed.
+
+### Corrections made tonight — the kind that come back
+
+- **The 6.15 m bus roof was a `Box3` artefact, not a vertex**:
+  `Box3.setFromObject` without `precise` transforms each part's box, and
+  a cone tilted 0.22 rad lifts its box by radius·sin(tilt). The drawn top
+  is the face sphere's crown at **6.0429 m**; `CAT_BUS_TOP` derives from
+  it and `check:swept-bus` asserts owner == vertex-precise top at 1 mm.
+  The driven top is **6.4991 m** (heave + nose-up pitch, roll contributes
+  nothing at the crown — measured by posing the mesh; the linear
+  `roll·FACE_RADIUS` term over-stated it by 0.10 m). A derived number
+  nobody compares to the mesh is the two-definitions disease.
+- **My 93→92 walk-past leg count was measured on the branch tip alone
+  (hill geometry), not the park that ships**; on the sphere merge the
+  rings are identical. Never report a number without its base.
+- **"The road rule fires on zero slots on the sphere" was reasoned from
+  the road's outset, not measured, and was wrong**: the road runs
+  radially into the gate and crosses the band there — one walk-past slot
+  on six pool seeds. The engineer's measurement was the true one.
+- Filed, not fixed: `CAT_BUS_WIDTH` 5.28 m vs a drawn body 7.30 m wide
+  (`theRoadClaimCoversTheBusRun` samples a run narrower than the bus).
+
+### Where things are
+
+- Design doc sections ruled tonight: "Steps 3 and 4, re-cut (6 Sep)",
+  "One rail race (Jim, 6 Sep)", "The road rule (Jim, 6 Sep)" with "Final
+  form" and "Fairness is the race ring's property".
+- Step-2 engineer's handoff: `HANDOFF-procgen-step2.md` on its branch
+  (merge recipe for the sphere; the checkout-discards-edit trap).
+- Open PRs on the design branch: none from me. #584 (pool 0..15) open on
+  `main`, red by design until the generator builds 0..15.
+- The checkpoints below are the night's record, oldest first; the
+  earlier "State at a glance" they refer to is superseded by this section.
 
 ## Checkpoint, 5 Sep — #474 and #498 read against the design
 
@@ -337,3 +301,199 @@ rewriting history.
 - A constant restating something computable is a bug even while it agrees.
 - `rerere` is on: rebuild any `check`-chain conflict resolution from main's
   parsed step list, never accept the replay.
+
+## Checkpoint 6 Sep, ~13:00 — merge of `origin/main` into the design branch
+
+- Worktree `.claude/worktrees/design-merge-main`, branch `arch/design-merge-main`
+  (pushed). Merge commit `bf2ff61f` = design `2bc4b51f` + `origin/main`
+  `dd5b3b6b` (#588). `check` (64 steps), `test:procgen`, `build`,
+  `check:coplanar`, `check:swept-bus`, `check:park-pool` all exit 0 on it;
+  **pushed to `design/round-robin-generation` as `753ca8c3`** (6 Sep 20:44).
+- **Finding, verified**: `#585` on `main` is a squash of this branch (its
+  body is this branch's commit messages). So the merge's only conflicts are
+  the three docs this branch edited *after* the squash snapshot
+  (`HANDOFF-architect-procgen.md`, `docs/BRIEF-totality-poi-rung.md`,
+  `docs/DESIGN-round-robin-generation.md`), and each design copy is a strict
+  superset of main's (0 lines removed; 12/11/90 added). Resolved to ours.
+  The merged tree differs from `origin/main` by those 124 insertions only —
+  no deletions (`git diff --cached --diff-filter=D dd5b3b6b` empty).
+- `check` chain: 64 steps, same set on main, design and merged (parsed, not
+  grepped). `rerere` had nothing recorded; nothing replayed.
+- A predecessor had merged `e080b753` (#585) rather than the tip; that
+  in-progress merge was aborted and redone against `dd5b3b6b`.
+
+## Rulings, 6 Sep — step 2's four open questions (asked in `HANDOFF-procgen-step2.md`)
+
+1. **Arc nudges: delete with the radial ladders.** One search over
+   (lean, arc), nearest-first, lean-outer / arc-inner as built; the arc bound
+   is derived, `TRESTLE_SPACING / 2 − foot radius` (two neighbouring slots
+   can then never share ground), never a list. Confirmed as proposed.
+2. **Lean limit: `maxLean = tan(BRANCH_ANGLE) × trunkHeight`**, trunk height
+   from `forkPlan` (the `MIN_TRUNK_FRACTION` floor), owner
+   `trestleGeometry.ts`. Confirmed. A trunk may not lean further from
+   vertical than its own branches fork — that is the geometry's statement,
+   not a typed reach.
+3. **Headroom owner: the drawn bus, and the constant must equal it.**
+   `CAT_BUS_TOP` 5.98 m versus a drawn box of 6.15 m is the two-definitions
+   disease exactly (a constant asserting it matches a mesh). Anything drawn
+   is solid, ears included, so the headroom is the drawn top. Resolution:
+   the bus asset's own owner (`catBus.ts` — take the sphere branch's
+   `CAT_BUS_BODY_TOP_Y` if it is *derived* from the drawn geometry; if it is
+   another typed number, derive it) is what the corridor claim's `headroom`
+   reads, and `check:swept-bus` keeps measuring the drawn `Box3`
+   **independently** and gains one line asserting the owner equals the
+   drawn top within float slack — so the 0.17 m gap can never reopen
+   silently. Do not widen the claim by a margin to cover the gap.
+4. **The four legacy predicates stay behind the one predicate function,
+   registry asked first.** Confirmed, with two conditions: a refusal names
+   *which* predicate refused (registry blockers by feature name; a legacy
+   predicate by its own name, e.g. `legacy:distanceToPath`), so stage 5 can
+   see what is left to migrate from the traces rather than from the code;
+   and the count of refusals-by-legacy-predicate is printed to stderr per
+   seed as a coverage line, "0 — the registry decided every slot" when so.
+
+Not a ruling, a correction for the record: the placer **throwing** on a
+refused duck-bar slot (`track.ts` ~L1552, "refused by …") is the interim
+step 2 was allowed — it is loud and names its blockers — but under the
+totality ruling a throw on a seed's geometry is the bug; step 4 converts
+it to a refusal returned to the scheduler. Step 2 should not spend time
+on that conversion, only keep the message carrying the blockers by name.
+
+## Checkpoint 6 Sep, ~21:30 — steps 3 and 4 re-cut to implementable shape
+
+Both briefs rewritten against the code (not the earlier drafts): the
+trestles are not a scheduler task after step 2 (step 3 makes one,
+`railRaceSupports`); `roadCorridor` is `deps: ['pathGraph']` and its second
+turn is a `World` re-commit (step 3 splits it and moves `publishPaving()`
+into the `pathGraph` task — the one stage-4 item brought forward); neither
+placer draws randomness; step 4 = `SolveScheduler` absorbs `CoSolveEngine`
+(deleted with `PlacementField`), tasks return `Refused`, the trestle throw
+becomes a refusal, the road's next attempt is derived from the blocker's
+extent, scheduler decision zero wired and proved under a scratch flag, the
+layout's decision zero named as stage 4's. Design doc: "Steps 3 and 4,
+re-cut (6 Sep)". Step 2's four questions ruled (section above).
+
+## Review, 6 Sep night — step 2 at `f92830c1` (branch diff; no PR yet): changes requested
+
+Measured on a detached scratch worktree: `tsc` 0, `typecheck:test` 0,
+`check:ground-claims` 0, 45 unit tests green, swept-bus child on the
+canonical seed 0/0/0. Ruling 3 verified by measurement: owner 6.0429 m ==
+vertex-precise drawn top 6.0429 m (gap 0.0000); `CAT_BUS_TOP` + 1 cm makes
+the child throw "off by −0.0100 m". Rulings 1, 2, 4 present as ruled.
+
+**The change**: the corridor's `headroom` is the bus at rest, and the bus
+drives with `chassis.position.y = CAT_BUS_RIDE_LIFT + heave` (±0.2 m) and a
+nose-up pitch to 0.042 rad; the race ring's fork nodes sit below `beamY`
+6.35 m against a 6.04 m rest top, so a branch in that band is allowed by
+the claim and hit by a heaving bus, and `check:swept-bus` sweeps a static
+bus (its control lift is 200 m). One owner for the upward travel (the
+terms `CAT_BUS_RIDE_LIFT` is built from), a driven-top export, the claim
+reads it, the check sweeps with it. Notes for the PR body: the 91
+`legacy:collision` refusals on the canonical race ring (walk-past post
+circles wider than walk-past claims — a second definition; stage 5's
+first row); the `World.ts` reorder needs the per-seed digest accounting
+for every non-trestle group; a stale "ear tips included" comment in
+`roadCorridor.ts`; the sightline keep-out grows 6.8 cm. Step 3's brief
+corrected on the collision predicate (it is not zero).
+
+## Re-review, 6 Sep late — step 2 at `65982c2a`: one item left
+
+Measured on the sha (not the account): claim carries 6.6411 m; `tallestHeadroom`
+6.6411 on a headless park; `trestleClaims` clips at `ground + headroom`, so
+the 6.35 m fork nodes are inside the band; swept-bus child canonical 0/0/0
+with the driven envelope; rest-top assertion VOID on every built seed at
++1 cm; hill digests differ in exactly the three trestle groups on both
+building seeds; sphere-merge digests (`digest2/`) 8 of 14 identical, 6
+trestle-only, no other group anywhere — the `World.ts` reorder moved
+nothing.
+
+**Remaining change**: `CAT_BUS_DRIVEN_TOP` 6.6411 over-states the posed
+vertex-precise top by 0.147 m (heave 6.2429; + nose-up pitch 6.4991;
++ roll 6.4943 — roll *lowers* the crown 4.8 mm; the crown is at x = 0).
+Required: the check asserts the driven top against the bus posed at full
+heave + pitch + roll within 1 mm (as the rest top is), and the owner is
+derived from the face ellipsoid under the pitch rotation, roll
+contributing nothing at the crown. `suspensionTravelAt` stays right for
+the chin, wheels and step (off-axis points).
+
+## Step 2 approved, 6 Sep late — `61b306e0`
+
+Measured on the sha: rest top 6.0429 = owner; posed highest 6.4991 (heave
++0.2, nose-up pitch, roll 0) = `CAT_BUS_DRIVEN_TOP`; the ideal ellipsoid's
+support function sits 0.96 mm above the drawn polygon pole (so the
+polygon derivation is required, not decorative); driven assertion VOID at
++1 cm on both built seeds; tsc 0; canonical sweep 0/0/0 with the posed
+envelope. Approved, PR to open once the sphere reaches the design branch.
+**Struck**: an earlier note here said the canonical walk-past ring lost a
+leg (93 → 92) under the driven-top claim. That was measured on the branch
+tip alone — hill geometry, road through the ring's band — and does not
+reproduce on the sphere merge (50 + 50 per ring, 0 differing, engineer's
+measurement on `b6b1a983`). A hill-only number reported without its base;
+nothing disappears in the park that ships.
+
+## Ruling, 6 Sep late — one rail race (Jim): cross-ring constraint deleted
+
+Design doc "One rail race (Jim, 6 Sep)". Both rings claim as one feature
+`railRace`; walk-past colliders registered after both rings are placed
+(they stay — CollisionWorld, NavGrid/NPC routes, LampPosts, check:park,
+invariant #4 read them); the ~100 canonical `legacy:collision` refusals
+go. Recommended to land inside step 2. Step 3 brief re-cut to inherit.
+Open with Jim: whether the ride-scale ring may stand on/over the bus road.
+
+## Ruling, 6 Sep late — the road rule (Jim): skip legs over the road
+
+Design doc "The road rule (Jim, 6 Sep)". One sentence: a slot whose foot
+disc at its nominal position overlaps the road's corridor claim (=
+`ROAD_HALF_WIDTH`, one owner) is not built; everything else as today.
+Fires on 0 slots on the sphere. Deletes: `Claim.headroom`,
+`tallestHeadroom`, the corridor's bus height, `trestleClaims`' headroom
+(clip stays at `TALLEST_CHILD_HEIGHT`), the road's registry outset march
+and the `supportGround.ts` deletion, and **step 4's customer** — step 4 is
+HELD without one. Stays: `CAT_BUS_TOP`, `CAT_BUS_DRIVEN_TOP` + posed-crown
+owner (read by `check:swept-bus`), `suspensionTravelAt`. Lands in step 2's
+series with the one-rail-race deletion.
+
+## Re-review, 6 Sep night — step 2 at `091d813c` (one rail race + road rule + whole-tree): one item
+
+Measured: features `[road, railRace]`; `legacy:collision` 0 both rings;
+4 slots per ring skipped on the canonical hill seed; swept-bus 14/14 hill
+seeds build, 9 at zero; **residue true** — 0 of 25 residual posts on seeds
+5/11/326/346/451 inside the road's claim, all beyond the kerb claim's
+clipped end (hill `kerbReach`) under a bus run to x −29.9.
+`test:procgen` hill: 20 red / 668 green. Three invariants hill-only (road
+along the ring: 59.7/71.7 m runs, duck bars 9/9/8/9, kerb clip). **One is
+not**: "only the walk-past ring is solid" misfires on 44 race legs per
+seed (canonical included) because race legs now share slots with walk-past
+legs and the clause detects solidity by "a circle contains this leg" —
+re-cut to "collision holds exactly the walk-past feet". Filed for later:
+`CAT_BUS_WIDTH` 5.28 vs drawn 7.30 (the bus-run invariant under-asks).
+
+## Step 2 approved again, 7 Sep small hours — `ab763a4d`
+
+Clause 4 re-cut to "what a collider is": walk-past legs have a collider
+of their own foot radius (0.272) centred on the foot; no collider of the
+race radius (0.680) on a race leg. Proved red by registering the race
+ring's feet (46 legs), green restored. Radii differ by `RIDE_SCALE` (2.5),
+owner-derived — precondition `RIDE_SCALE ≠ 1`, asked to be asserted in
+the clause. **Corrections**: the road rule fires on one slot per ring on
+six sphere seeds (engineer's measurement; my "zero" was reasoned, not
+measured), and on 131/326 that slot carries a duck bar — fairness alarm
+firing as designed, left with Jim (2 of 14 seeds, one bar, one racer).
+`CAT_BUS_WIDTH` 5.28 vs drawn 7.30 still to file.
+
+## Ruling recorded, 7 Sep — the road rule's final form (Jim)
+
+Ride-scale ring keeps every leg; walk-past ring skips its own. Design doc
+"The road rule", "Final form". The load-bearing fact — the rings are never
+co-present — is now written once, with both consequences hanging off it
+and `RailRace.setActiveRing` named as where it lives. Seed 326's possible
+one-bar cost is accepted by Jim with the number; PR-body item, not his.
+
+## Step 2 approved at `a06178a4` (7 Sep); fairness ruling
+
+Measured: tsc 0; ground-claims 0 (walk-past skips 4 hill slots, race ring
+"ignores the road"); radius guard red at equal radii, green restored;
+sweep names the walk-past ring. Ruling (design doc, "Fairness is the race
+ring's property"): equal-per-racer asserted on the race ring only; the
+walk-past ring's lane counts equal the race ring's minus road-rule skips,
+printed. Expect 706/706 on the sphere merge after the re-cut.

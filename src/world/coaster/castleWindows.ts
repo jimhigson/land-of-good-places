@@ -1,3 +1,5 @@
+import { lazyArrayView } from '../../boot/lazyView';
+import { registerPlanCache } from '../../boot/planCaches';
 import { type Object3D, Raycaster, Vector3 } from 'three';
 import {
   CASTLE_INNER_X,
@@ -160,7 +162,14 @@ export function openingsFor(route: CoasterRoute): WallOpening[] {
  * matters: the castle depends on the coaster, never the reverse, because the
  * hole is a consequence of the route.
  */
-export const CASTLE_WINDOWS: readonly WallOpening[] = openingsFor(COASTER_PLANS.cruiser.route);
+let castleWindowsMemo: readonly WallOpening[] | null = null;
+/** A view: the cruiser can be re-decided by the park's driver, and the openings follow. */
+export const CASTLE_WINDOWS: readonly WallOpening[] = lazyArrayView(
+  () => (castleWindowsMemo ??= openingsFor(COASTER_PLANS.cruiser.route)),
+);
+registerPlanCache(() => {
+  castleWindowsMemo = null;
+});
 
 /**
  * **What the car actually hits**, cast against the scene that was built.

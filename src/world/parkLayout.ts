@@ -1,22 +1,12 @@
-import { candidateRng, hashString, Rng, TAU } from '../core/mathUtils';
-import {
-  BUILDING_CENTRE_NUDGE,
-  CAMERA_FACING_YAW,
-  CASTLE_TURRET_BASE_RADIUS,
-  CASTLE_TURRET_CORNERS,
-} from '../core/constants';
-import {
-  BOUNDARY_CLEARANCE,
-  GATE_CORRIDOR_HALF_WIDTH,
-  LAYOUT_VERSION,
-  PARK_MANIFEST,
-  PARK_SEED,
-  type ManifestEntry,
-} from './parkManifest';
-import { cachedSolve } from '../core/solveCache';
-import { layoutRestartBase, layoutStreamBump } from './parkWarp';
-import { PARK_BOUNDARY } from './boundary';
-import { ENTRANCE_GATE_X } from './entrance/layout';
+import { DOOR_PAVING_OVERLAP } from '../core/constants';
+import { type ManifestEntry } from './parkManifest';
+import { BUILDING_CENTRE_NUDGE } from '../core/constants';
+
+import { PARK_MANIFEST, PARK_SEED } from './parkManifest';
+import { lazyView } from '../boot/lazyView';
+import { planPart } from './parkPlan';
+import { registerPlanCache } from '../boot/planCaches';
+import { MAIN_LOOP_WIDTH, PATH_KERB_OVERHANG } from '../core/constants';
 import type { AnchorFootprint } from './anchors';
 
 /**
@@ -62,7 +52,8 @@ export interface PlacedEntry {
   readonly footprint: AnchorFootprint;
   readonly boundingRadius: number;
   /**
-   * Where a visitor arrives: on the plot's edge, facing the plaza. Path
+   * Where a visitor arrives: on the plot's edge, facing the plaza — or at
+   * its own door, where the manifest declares one (`ManifestEntry.door`). Path
    * spurs end here, signs stand here, NPC waypoints seed here.
    */
   readonly entranceX: number;
@@ -82,9 +73,6 @@ export interface ParkLayout {
   readonly fountain: { readonly x: number; readonly z: number; readonly radius: number };
   readonly entries: ReadonlyMap<string, PlacedEntry>;
 }
-
-/** Walkable clearance kept between any two plots' bounding circles. */
-const CORRIDOR_GAP = 5;
 
 /**
  * **The statue ring's one radius** (issue #269, Jim: "one central perfect
@@ -110,28 +98,26 @@ export const RING_RADIUS = (() => {
   return fountain.footprint.radius + 5.5;
 })();
 
-/** Clear ground kept either side of {@link RING_RADIUS}: the ribbon's own
- * half-width (1.8), its kerb (0.85) and a walker's stride (0.7) past the
- * paving. Deliberately no more: a plot standing right off the ring's kerb
- * is a plot *facing the circle*, which is what a park promenade looks
- * like — and every half-metre added here multiplies across the ring's
- * whole circumference into ground the big anchors (and then the railway,
- * squeezed outward behind them) no longer have. */
-export const RING_PLOT_CLEARANCE = 3.35;
-
-/** Candidate draws per entry before this whole-park attempt is abandoned. */
-const MAX_TRIES = 3000;
-
 /**
- * How many *valid* candidates an entry collects before choosing between
- * them. The choice is maximin — the candidate whose nearest already-placed
- * neighbour is furthest — which is what "distribute things evenly" cashes
- * out to without reserving an inch of space: a preference over legal spots,
- * never a claim on ground (Decision 6). Twelve is enough that the winner is
- * usually in a genuinely different pocket from the loser, and small enough
- * that a squeezed entry (whose valid pockets are few) still places fast.
+ * Clear ground kept either side of {@link RING_RADIUS}: the ribbon's own
+ * half-width, its kerb, and a walker's stride past the paving. Deliberately
+ * no more: a plot standing right off the ring's kerb is a plot *facing the
+ * circle*, which is what a park promenade looks like — and every half-metre
+ * added here multiplies across the ring's whole circumference into ground the
+ * big anchors (and then the railway, squeezed outward behind them) no longer
+ * have.
+ *
+ * **Asked for, not written down.** This was the literal `3.35`, with a comment
+ * asserting it was 1.8 + 0.85 + 0.7 — a promise that three numbers agree,
+ * which is not a mechanism. The first two now come from their owners
+ * (`MAIN_LOOP_WIDTH`, `PATH_KERB_OVERHANG`), so a change to the loop's width
+ * or its kerb moves this with it instead of silently disagreeing. Only the
+ * stride is a judgement of this file's own, so only the stride is a literal
+ * here.
  */
-const SPREAD_CHOICES = 12;
+const RING_PLOT_WALKING_STRIDE = 0.7;
+export const RING_PLOT_CLEARANCE =
+  MAIN_LOOP_WIDTH / 2 + PATH_KERB_OVERHANG * 2 + RING_PLOT_WALKING_STRIDE;
 
 /**
  * Whole-park restarts. Greedy placement can paint itself into a corner — an
@@ -141,125 +127,96 @@ const SPREAD_CHOICES = 12;
  * restart `r` is as deterministic as restart 0 and no entry ever inherits
  * another's draws.
  */
-const PARK_RESTARTS = 240;
+export const PARK_RESTARTS = 240;
 
 /**
- * The gate sits on the boundary wall; the corridor runs from it to centre.
+ * **The layout's unwind trace** — one line per decision the restart loop
+ * took, in the order it took them (design doc, "Totality, ruled and
+ * mechanised": *the unwind trace is printed to stderr on every build and
+ * its hash is folded into the park digest*).
  *
- * **Read from `entrance/layout.ts`, never restated.** These were
- * `Math.PI / 2` and `60` written out here with the comments "matches
- * entrance/layout.ts ENTRANCE_ANGLE" and "matches ENTRANCE_WALL_RADIUS" —
- * a promise that two numbers agree, which is not a mechanism, and which
- * CLAUDE.md names as the most common bug in this repo by a distance. Found
- * while fixing #481; nothing had drifted yet, and that is exactly when it is
- * cheap to fix.
- */
-
-function inGateCorridor(x: number, z: number, clearance: number): boolean {
-  // The corridor is the short axis-aligned strip inside the gate (which sits
-  // at `ENTRANCE_ANGLE`, i.e. +Z on the boundary wall). Only the strip
-  // itself must stay clear — from its mouth the approach *path* winds to
-  // wherever the plaza was placed, around whatever stands in between, and
-  // `check:park`'s routing invariant proves that walk exists.
-  const gateX = ENTRANCE_GATE_X;
-  const corridorHalf = GATE_CORRIDOR_HALF_WIDTH + clearance;
-  return Math.abs(x - gateX) < corridorHalf && z > 25;
-}
-
-/**
- * How far a plot's edge lies from its centre along a direction.
+ * `restart r` is **decision zero**: the whole park re-drawn from the same
+ * seed. A trace that reads `solved restart=0` needed no unwinding; one that
+ * reads `dead-end restart=0 entry=hotel … solved restart=3` reached decision
+ * zero three times, and that number is a *quality* measurement
+ * (`check:every-seed-builds`'s "built well" line), never a buildability
+ * verdict. It is a pure function of the seed and the fixed entry order — no
+ * timing, no map iteration — so two processes print the same lines, which is
+ * what lets `scripts/park-digest.mts` hash them.
  *
- * Exported for `paths.ts`'s `spur()`, which needs the same answer to keep a
- * spur's "past the doormat" extension from overshooting into the plot it is
- * approaching — see the fix note there.
+ * Empty when nothing in this process forced the layout decision — importing
+ * this module decides nothing, since `PARK_LAYOUT` is a lazy view over the
+ * park's driver. The exit note below says so ("nothing forced the layout
+ * decision"), so an empty trace must never read as "no unwinding".
  */
-export function edgeDistanceAlong(footprint: AnchorFootprint, dirX: number, dirZ: number): number {
-  // How far the plot's edge lies from its centre along (dirX, dirZ).
-  if (footprint.kind === 'circle') return footprint.radius;
-  const ax = Math.abs(dirX);
-  const az = Math.abs(dirZ);
-  // Distance to the rectangle's boundary along the direction, in the plot's
-  // own (unrotated) frame — plots are axis-aligned, as they always were.
-  const tx = ax > 1e-6 ? footprint.halfX / ax : Infinity;
-  const tz = az > 1e-6 ? footprint.halfZ / az : Infinity;
-  let edge = Math.min(tx, tz);
+const layoutTrace: string[] = [];
+export const LAYOUT_TRACE: readonly string[] = layoutTrace;
 
-  // **Corner solids reach past the rectangle, so they are asked too** — the
-  // castle's turrets (#549). For each disc, how far along the ray its far
-  // surface lies: the standard ray-circle exit distance, `Infinity` discarded
-  // where the ray misses the disc entirely. Taking the max keeps this exactly
-  // the rectangle's answer for every plot that has no corners declared.
-  if (footprint.corners) {
-    const { radius } = footprint.corners;
-    for (const [cx, cz] of footprint.corners.at) {
-      const along = cx * dirX + cz * dirZ;
-      const perpendicularSquared = cx * cx + cz * cz - along * along;
-      const halfChordSquared = radius * radius - perpendicularSquared;
-      if (halfChordSquared <= 0) continue; // the ray misses this corner
-      edge = Math.max(edge, along + Math.sqrt(halfChordSquared));
-    }
+export function traceLine(text: string): void {
+  const line = `layout-trace: seed=${PARK_SEED} ${text}`;
+  layoutTrace.push(line);
+  // stderr, not console.log: vitest shows stdout from failing tests only,
+  // and this line exists precisely for the passing run (CLAUDE.md).
+  try {
+    const nodeProcess = (globalThis as { process?: { stderr?: { write: (s: string) => void } } })
+      .process;
+    nodeProcess?.stderr?.write(`${line}\n`);
+  } catch {
+    /* browser: the trace is still readable from LAYOUT_TRACE */
   }
-  return edge;
 }
 
 /**
- * **The footprint a plot actually occupies once it has been placed.**
+ * **The unwind ladder** (design doc, "Totality, ruled and mechanised"): a
+ * point of interest whose doormat no child could reach is a *refusal*, never
+ * a throw, and the answer to a refusal is a different decision —
  *
- * For everything but the castle this is the authored footprint unchanged.
+ * 1. **the refused entry redraws** — its next-best candidate (see
+ *    {@link buildOnce}: the budget is the candidates it already drew);
+ * 2. **the entries it collided with redraw**, most recently placed first —
+ *    named by {@link footprintsBlocking}, from the same plot table every
+ *    other clearance question reads, never a hand-picked list;
+ * 3. **decision zero** — `restart + 1`, the whole park drawn again from the
+ *    same seed. Counted, in the trace, never silent.
  *
- * The castle is different, and issue #549 is what the difference cost. Its four
- * corner turrets stand outside the footprint rectangle, so a rectangle cannot
- * say where the castle reaches — and *everything* that asked got the same wrong
- * answer: the collision world did not know the turrets were there (a child
- * walked through them), and neither did this solver, so on three of the sixteen
- * pool seeds it put the castle's own doormat and path spur inside one.
- *
- * The turrets cannot simply be declared on the authored footprint, because the
- * drawn castle is **not centred on its plot**: `building/layout.ts` nudges it
- * {@link BUILDING_CENTRE_NUDGE} towards the park middle so every interior
- * corner stays inside `GARDEN_PLAY_RADIUS`. That direction is a function of
- * where the plot landed, so it is only knowable here, at placement — which is
- * exactly why this is the right place to resolve it, and why a static entry in
- * `parkManifest.ts` could not.
- *
- * Writing the discs into the **placed** footprint gives one owner for "how far
- * does the castle reach": `PlacedEntry.footprint` is what both consumers of
- * `edgeDistanceAlong` already read — the entrance placement below, and the path
- * spur's target in `paths.ts` — so neither had to learn about turrets, and they
- * cannot disagree.
+ * Every attempt is a pure function of `(seed, entry, restart, attempt)` and
+ * the refusal order is the placement order, so the trace replays exactly in
+ * another process — `scripts/park-digest.mts` hashes it. The one legal throw
+ * is the whole budget spent, and it carries the whole trace.
  */
-function footprintAsPlaced(entry: ManifestEntry, x: number, z: number): AnchorFootprint {
-  if (entry.id !== 'building' || entry.footprint.kind !== 'rect') return entry.footprint;
-  // The same nudge `building/layout.ts` applies: towards the park middle.
-  const length = Math.hypot(x, z) || 1;
-  const offsetX = -(x / length) * BUILDING_CENTRE_NUDGE;
-  const offsetZ = -(z / length) * BUILDING_CENTRE_NUDGE;
-  return {
-    kind: 'rect',
-    halfX: entry.footprint.halfX,
-    halfZ: entry.footprint.halfZ,
-    corners: {
-      at: CASTLE_TURRET_CORNERS.map(
-        ([cx, cz]) => [cx + offsetX, cz + offsetZ] as readonly [number, number],
-      ),
-      radius: CASTLE_TURRET_BASE_RADIUS,
-    },
-  };
+/** What one restart of the layout solve produced — a layout, or the reason this restart could not. */
+export type LayoutRestartOutcome =
+  | { readonly kind: 'layout'; readonly layout: ParkLayout }
+  | { readonly kind: 'refused'; readonly reason: string };
+
+// ------------------------------------------------- the doormat probe (rung 1)
+
+/**
+ * What a placement is refused for — one shape, the design doc's.
+ *
+ * `blockers` are manifest ids from {@link footprintsBlocking}, the plots whose
+ * footprints stand within a waypoint's search reach of the door (the ones a
+ * boxed-in door is boxed in by); `nonPlotBlockers` names what this rung
+ * cannot move — the boundary, today — so the trace says when a refusal is
+ * not this rung's to answer.
+ */
+export interface LayoutRefusal {
+  readonly kind: 'poi.stranded' | 'poi.nospot';
+  readonly entry: string;
+  readonly blockers: readonly string[];
+  readonly nonPlotBlockers: readonly ('boundary' | string)[];
+  readonly at: { readonly x: number; readonly z: number };
 }
 
-function solve(): ParkLayout {
-  // The warp vector may start the loop above zero (a whole-park re-roll the
-  // offline search chose); with no warp this is the same `0` as ever.
-  const base = layoutRestartBase();
-  for (let restart = base; restart < base + PARK_RESTARTS; restart += 1) {
-    const built = buildOnce(restart);
-    if (built) return built;
-  }
-  throw new Error(
-    `park layout: unsolvable in ${PARK_RESTARTS} restarts (seed ${PARK_SEED}) — ` +
-      `loosen bands, shrink the manifest, or bump the seed`,
-  );
-}
+/**
+ * The refusals the rung would have unwound on but did not, because
+ * `LGP_LAYOUT_RUNG=off` — for `check:park`'s `layout.falseRefusal`: every
+ * one of these must be a door the BUILT park cannot reach either, or the
+ * probe refused something real that the real park allows (seed 1's ball
+ * pit), which is the rung's one failure mode and the one this catches.
+ */
+export const ignoredRefusals: LayoutRefusal[] = [];
+export const LAYOUT_REFUSALS_IGNORED: readonly LayoutRefusal[] = ignoredRefusals;
 
 /**
  * The bearing a camera-facing entry's counter (and so its doormat) faces.
@@ -279,238 +236,39 @@ export function counterFacing(signYaw: number): number {
   return signYaw;
 }
 
-/** One candidate position, with the spread score it was chosen on. */
-interface Candidate {
-  readonly x: number;
-  readonly z: number;
-  /** Gap to the nearest placed plot's bounding circle, in metres. */
-  readonly spread: number;
-}
-
-function buildOnce(restart: number): ParkLayout | null {
-  const placed: PlacedEntry[] = [];
-  const byId = new Map<string, PlacedEntry>();
-
-  // Largest first: the manifest is sorted here rather than trusting file
-  // order, so adding an entry never changes packing feasibility by accident.
-  const order: ManifestEntry[] = [...PARK_MANIFEST].sort(
-    (a, b) => (a.solveOrder ?? 50) - (b.solveOrder ?? 50) || b.boundingRadius - a.boundingRadius,
-  );
-
-  for (const entry of order) {
-    const near = entry.near ? byId.get(entry.near.id) : undefined;
-    if (entry.near && !near) {
-      throw new Error(
-        `park layout: '${entry.id}' is near '${entry.near.id}', which is not placed yet — ` +
-          `the near target must have the larger boundingRadius (it places first)`,
-      );
-    }
-
-    // This entry's own stream — a pure function of (seed, id, restart), so
-    // no other entry's fortunes can move this one's candidates.
-    // `layoutStreamBump` is the warp vector's per-entry move: bumping ONE
-    // entry's stream index re-draws that entry's candidates while every
-    // other entry keeps the stream it had — the per-entry-stream property
-    // above is exactly what makes this a local, deterministic mutation.
-    const rng = candidateRng(hashString(entry.id) ^ PARK_SEED, restart + layoutStreamBump(entry.id));
-
-    const candidates: Candidate[] = [];
-    for (let attempt = 0; attempt < MAX_TRIES && candidates.length < SPREAD_CHOICES; attempt += 1) {
-      const drawn = drawCandidate(entry, near, rng);
-      const valid = validate(entry, near, drawn.x, drawn.z, placed);
-      if (valid === null) continue;
-      candidates.push({ x: drawn.x, z: drawn.z, spread: valid });
-      if (entry.pin) break; // a pin is one candidate, validated
-    }
-
-    if (candidates.length === 0) return null; // dead end; the caller restarts
-
-    // Maximin: of the legal spots, the one furthest from its nearest
-    // neighbour. Ties keep draw order, which keeps the choice seeded.
-    let best = candidates[0] as Candidate;
-    for (const candidate of candidates) {
-      if (candidate.spread > best.spread) best = candidate;
-    }
-    const { x, z } = best;
-
-    // Entrance: on the plot edge. Camera-facing entries (the stall booths,
-    // whose counters obey GAME_DESIGN #16's absolute readability rule) get
-    // their doormat on the side the counter actually faces — the same
-    // signYaw-derived bearing `stallPlacement.ts` builds the booth with, so
-    // the doormat, the stand and the counter are one line by construction.
-    // Everything else faces the park middle, the stable thing paths and the
-    // camera both live by.
-    //
-    // Every entry's sign — camera-facing or not — turns to exactly
-    // CAMERA_FACING_YAW (issue #269): axis-aligned to the camera's own fixed
-    // diagonal, not drawn from `rng`, so there is no per-seed rotation left
-    // to call "arbitrary."
-    const signYaw = CAMERA_FACING_YAW;
-    let dirX: number;
-    let dirZ: number;
-    if (entry.cameraFacing) {
-      const facing = counterFacing(signYaw);
-      dirX = Math.sin(facing);
-      dirZ = Math.cos(facing);
-    } else {
-      const towardMiddle = Math.hypot(x, z) > 1e-6 ? [-x, -z] : [0, 1];
-      const length = Math.hypot(towardMiddle[0] as number, towardMiddle[1] as number);
-      dirX = (towardMiddle[0] as number) / length;
-      dirZ = (towardMiddle[1] as number) / length;
-    }
-    // The placed footprint, not the authored one: for the castle it carries the
-    // corner turrets, nudged to where they are actually drawn. Asking the
-    // authored rectangle here is what put three seeds' doormats inside a tower.
-    const placedFootprint = footprintAsPlaced(entry, x, z);
-    const edge = edgeDistanceAlong(placedFootprint, dirX, dirZ);
-    const standOff = 1.4; // the sign and the doormat, just clear of the plot
-    const entranceX = x + dirX * (edge + standOff);
-    const entranceZ = z + dirZ * (edge + standOff);
-
-    const item: PlacedEntry = {
-      id: entry.id,
-      x,
-      z,
-      footprint: placedFootprint,
-      boundingRadius: entry.boundingRadius,
-      entranceX,
-      entranceZ,
-      signYaw,
-    };
-    placed.push(item);
-    byId.set(entry.id, item);
-  }
-
-  const fountain = byId.get('fountain');
-  if (!fountain || fountain.footprint.kind !== 'circle') {
-    throw new Error(`park layout: the manifest must contain a circular 'fountain'`);
-  }
-
-  return {
-    seed: PARK_SEED,
-    fountain: { x: fountain.x, z: fountain.z, radius: fountain.footprint.radius },
-    entries: byId,
-  };
-}
-
-/** One seeded draw for an entry: its pin, its relation ring, or its band. */
-function drawCandidate(
-  entry: ManifestEntry,
-  near: PlacedEntry | undefined,
-  rng: Rng,
-): { x: number; z: number } {
-  if (entry.pin) return { x: entry.pin[0], z: entry.pin[1] };
-  if (near && entry.near) {
-    // Draw around the relation target; the band still applies afterwards.
-    const angle = rng.range(0, TAU);
-    const distance = rng.range(entry.near.min, entry.near.max);
-    return { x: near.x + Math.cos(angle) * distance, z: near.z + Math.sin(angle) * distance };
-  }
-  // Area-uniform draw inside the band annulus, capped at the furthest the
-  // boundary ever reaches — beyond that a candidate cannot possibly fit, so
-  // drawing there only spends tries.
-  const angle = rng.range(0, TAU);
-  const max = Math.min(entry.band.max, PARK_BOUNDARY.maxRadius);
-  const r2min = entry.band.min * entry.band.min;
-  const r2max = max * max;
-  const radius = Math.sqrt(rng.range(r2min, Math.max(r2min, r2max)));
-  return { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius };
-}
-
-/**
- * Every constraint on one candidate, or `null` if any fails. On success,
- * returns the spread score (gap to the nearest placed plot) for maximin.
- * A pinned entry that fails throws instead: a pin must still make a
- * working park.
- */
-function validate(
-  entry: ManifestEntry,
-  near: PlacedEntry | undefined,
-  x: number,
-  z: number,
-  placed: readonly PlacedEntry[],
-): number | null {
-  const fail = (reason: string): null => {
-    if (entry.pin) {
-      throw new Error(
-        `park layout: pinned entry '${entry.id}' at [${x}, ${z}] ${reason} — ` +
-          `a pin must still make a working park`,
-      );
-    }
-    return null;
-  };
-
-  const centreDistance = Math.hypot(x, z);
-  if (centreDistance < entry.band.min - 1e-6 || centreDistance > entry.band.max + 1e-6) {
-    return fail('leaves its band');
-  }
-
-  // The park's real edge, per bearing — the constraint that replaced the
-  // 52 m circle (issue #241).
-  const edgeGap = PARK_BOUNDARY.distanceToEdge(x, z) - entry.boundingRadius;
-  if (edgeGap < BOUNDARY_CLEARANCE) return fail('does not fit inside the boundary');
-  if (entry.nearEdge && (edgeGap < entry.nearEdge.min || edgeGap > entry.nearEdge.max)) {
-    return fail('misses its nearEdge band');
-  }
-
-  if (inGateCorridor(x, z, entry.boundingRadius)) return fail('blocks the gate corridor');
-
-  // Keep every plot's bounding circle clear of the statue ring's annulus —
-  // the fountain is solveOrder 0, so it is always already placed when any
-  // other entry validates. (The fountain itself is the ring's centre; the
-  // ring stands RING_RADIUS outside it by construction, so it needs no
-  // check of its own.)
-  if (entry.id !== 'fountain') {
-    const fountainEntry = placed.find((other) => other.id === 'fountain');
-    if (fountainEntry) {
-      const ringGap = Math.abs(
-        Math.hypot(x - fountainEntry.x, z - fountainEntry.z) - RING_RADIUS,
-      );
-      if (ringGap < entry.boundingRadius + RING_PLOT_CLEARANCE) {
-        return fail('stands in the statue ring');
-      }
-    }
-  }
-
-  let spread = Infinity;
-  for (const other of placed) {
-    const gap = Math.hypot(x - other.x, z - other.z) - entry.boundingRadius - other.boundingRadius;
-    // The near-target pair is deliberately close; its manifest min is the
-    // rule. Everyone else keeps a walkable corridor.
-    const isNearTarget = near !== undefined && other.id === near.id;
-    if (!isNearTarget && gap < CORRIDOR_GAP) return fail(`crowds '${other.id}'`);
-    if (gap < spread) spread = gap;
-  }
-  return spread;
-}
-
 /**
  * The solved park. Import this; never re-run the solver — one canonical
  * layout per build is the whole point.
  */
-export const PARK_LAYOUT: ParkLayout = cachedSolve(
-  'layout',
-  `${PARK_SEED}:${LAYOUT_VERSION}`,
-  solve,
-  (layout) => ({
-    seed: layout.seed,
-    fountain: layout.fountain,
-    entries: [...layout.entries.values()],
-  }),
-  (raw) => {
-    const packed = raw as {
-      seed: number;
-      fountain: ParkLayout['fountain'];
-      entries: PlacedEntry[];
-    };
-    if (packed.seed !== PARK_SEED) throw new Error('stale seed');
-    return {
-      seed: packed.seed,
-      fountain: packed.fountain,
-      entries: new Map(packed.entries.map((entry) => [entry.id, entry])),
-    };
-  },
-);
+/**
+ * **The layout, as the park's backtracking driver decided it** — a view of
+ * `parkPlan.ts`'s state. Every consumer reads it exactly as before; what
+ * changed is that the decision behind it can be re-made (decision zero) when
+ * a later feature refuses, and this constant follows.
+ */
+export const PARK_LAYOUT: ParkLayout = lazyView(() => planPart('layout'));
+
+// An empty trace must never read as "solved first time" — the same disease as
+// a check that asserts nothing. But WHEN to say so changed under backtracking:
+// `PARK_LAYOUT` is now a lazy view, so at module-evaluation time the trace is
+// *always* empty and a note emitted here was printed on every run, including
+// the runs that went on to solve. (That stale note is what let
+// `check:layout-rung`'s machinery clause read a trace of one line and score
+// zero refusals as a measurement rather than as an absence.) The honest moment
+// is process exit: by then, either something forced the decision and traced it,
+// or nothing ever asked and the trace is empty because no layout was decided.
+try {
+  const nodeProcess = (
+    globalThis as { process?: { on?: (event: string, handler: () => void) => void } }
+  ).process;
+  nodeProcess?.on?.('exit', () => {
+    if (layoutTrace.length === 0) {
+      traceLine('no solve ran in this process — nothing forced the layout decision');
+    }
+  });
+} catch {
+  /* browser: no process to hook, and the trace is readable from LAYOUT_TRACE */
+}
 
 /**
  * The plots as a flat array, built once.
@@ -524,7 +282,7 @@ export const PARK_LAYOUT: ParkLayout = cachedSolve(
  * allocation. Lazily built because `PARK_LAYOUT` is initialised in this very
  * module and a top-level `[...values()]` here would read it mid-definition.
  */
-interface PlotColumns {
+export interface PlotColumns {
   readonly count: number;
   readonly x: Float64Array;
   readonly z: Float64Array;
@@ -539,9 +297,19 @@ interface PlotColumns {
 
 let plotColumns: PlotColumns | null = null;
 
-function plots(): PlotColumns {
+export function plots(): PlotColumns {
   if (plotColumns) return plotColumns;
-  const entries = [...PARK_LAYOUT.entries.values()];
+  plotColumns = columnsOf([...PARK_LAYOUT.entries.values()]);
+  return plotColumns;
+}
+
+/**
+ * The columns for any list of placed entries — {@link plots} for the solved
+ * park, and {@link doormatRefusals} for a *candidate* park still inside the
+ * solver, which must never read the memoised table (it does not exist yet,
+ * and a redraw would not invalidate it).
+ */
+export function columnsOf(entries: readonly PlacedEntry[]): PlotColumns {
   const count = entries.length;
   const columns: PlotColumns = {
     count,
@@ -567,21 +335,12 @@ function plots(): PlotColumns {
       columns.halfZ[i] = entry.footprint.halfZ;
     }
   }
-  plotColumns = columns;
   return columns;
 }
 
 /** The index of an id in {@link plots}, or -1. Cached: the callers below ask
  * with the same constant id millions of times in one route solve. */
-const exceptIndices = new Map<string, number>();
-function exceptIndex(exceptId: string | undefined): number {
-  if (exceptId === undefined) return -1;
-  const known = exceptIndices.get(exceptId);
-  if (known !== undefined) return known;
-  const found = plots().ids.indexOf(exceptId);
-  exceptIndices.set(exceptId, found);
-  return found;
-}
+export const exceptIndices = new Map<string, number>();
 
 /**
  * Which plots could possibly matter near each patch of ground.
@@ -665,7 +424,7 @@ function plotGrid(): PlotGrid {
  * the empty shortlist it gets is the honest answer, not a fallback.
  */
 const EMPTY_SHORTLIST: readonly number[] = [];
-function shortlistFor(x: number, z: number, margin: number): readonly number[] | null {
+export function shortlistFor(x: number, z: number, margin: number): readonly number[] | null {
   if (margin > GRID_MARGIN_CEILING) return null;
   const g = plotGrid();
   const gx = Math.floor(x / GRID_CELL) - g.minGx;
@@ -699,55 +458,123 @@ export function clearOfPlots(x: number, z: number, radius: number): boolean {
   return true;
 }
 
-/**
- * Clear of every plot's actual FOOTPRINT (rect or circle) by `margin`.
- *
- * The bounding circle overstates a rectangular plot's corners by metres —
- * fine for spacing, wrong for a ride that deliberately flies close: the Sky
- * Cruiser's station is placed beside the castle on purpose, and testing its
- * low-altitude window against the castle's 19 m circle rejects every pose
- * the near-relation just arranged. The footprint is what is really built.
- */
-export function clearOfFootprints(x: number, z: number, margin: number, exceptId?: string): boolean {
-  const plot = plots();
-  const skip = exceptIndex(exceptId);
-  const px = plot.x;
-  const pz = plot.z;
-  const hx = plot.halfX;
-  const hz = plot.halfZ;
-  const rect = plot.isRect;
-  const shortlist = shortlistFor(x, z, margin);
-  const count = shortlist ? shortlist.length : plot.count;
-  for (let at = 0; at < count; at += 1) {
-    const i = shortlist ? (shortlist[at] as number) : at;
-    if (i === skip) continue;
-    if (rect[i] === 0) {
-      const reach = (hx[i] as number) + margin;
-      // Axis prefilters, exact rather than approximate: `hypot(a, b) >= |a|`,
-      // so either axis alone exceeding the reach settles the hypot too.
-      const dx = x - (px[i] as number);
-      if (dx >= reach || -dx >= reach) continue;
-      const dz = z - (pz[i] as number);
-      if (dz >= reach || -dz >= reach) continue;
-      if (Math.hypot(dx, dz) < reach) return false;
-      continue;
-    }
-    const dx = Math.abs(x - (px[i] as number)) - (hx[i] as number);
-    // Same argument on the rectangle: `outside >= max(dx, 0)`, so a `dx` at or
-    // past the margin cannot be inside it, and `dx > 0` rules out the
-    // both-negative case as well.
-    if (dx >= margin) continue;
-    const dz = Math.abs(z - (pz[i] as number)) - (hz[i] as number);
-    if (dz >= margin) continue;
-    const outside = Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
-    if ((dx <= 0 && dz <= 0) || outside < margin) return false;
-  }
-  return true;
-}
-
 /** Convenience: the placed entry, or a loud failure naming the id. */
 export function placedEntry(id: string): PlacedEntry {
   const entry = PARK_LAYOUT.entries.get(id);
   if (!entry) throw new Error(`park layout: no entry '${id}' in the manifest`);
   return entry;
+}
+
+// The plot memos below are derived from the decided layout. Under
+// backtracking the layout can be re-decided (decision zero); every reader of
+// `plots()`, `clearOfPlots` and the plot grid — the cruiser, the loop, the
+// crossing sites, the paths — must then see the new plots, or the whole park
+// is solved against a layout that no longer exists. That is exactly what
+// happened before this registration: seed 8 produced two different parks from
+// two entry points, and a bridge site was "proven" through the hotel's walls.
+registerPlanCache(() => {
+  plotColumns = null;
+  exceptIndices.clear();
+  plotGridCache = null;
+});
+
+/**
+ * **The paving from a plot's doormat on to its drawn door, and
+ * {@link DOOR_PAVING_OVERLAP} in under it** (`ManifestEntry.door`): the
+ * hotel's sliding doors stand at the back of a recess past the trigger its
+ * doormat is on, and the castle's steps can stand inside the plot its doormat
+ * is pushed clear of. `front` is where the door's front is drawn; `to` is
+ * where the paving stops, the overlap further in, so path and door overlap
+ * with no lawn between them. `facing` points out of the door. `walkable` is
+ * whether the stretch out in front of the door is open lawn a child stands on
+ * (the castle's) or ground she is let in before reaching (the hotel's recess,
+ * behind the trigger).
+ */
+export function doorApronOf(entry: PlacedEntry): {
+  readonly front: readonly [number, number];
+  readonly to: readonly [number, number];
+  readonly facing: readonly [number, number];
+  readonly walkable: boolean;
+} | null {
+  const manifest = PARK_MANIFEST.find((candidate) => candidate.id === entry.id);
+  const door = manifest?.door;
+  if (!manifest || !door) return null;
+  const [fx, fz] = entranceFacing(entry);
+  let front: readonly [number, number];
+  let walkable: boolean;
+  if ('reach' in door) {
+    const back = door.pavedTo === undefined ? 0 : Math.max(0, door.reach - door.pavedTo);
+    front = [entry.entranceX - fx * back, entry.entranceZ - fz * back];
+    walkable = back === 0;
+  } else {
+    const [cx, cz] = drawnCentreOf(manifest, entry.x, entry.z);
+    front = [cx + door.local[0], cz + door.local[1]];
+    walkable = true;
+  }
+  return {
+    front,
+    to: [front[0] - fx * DOOR_PAVING_OVERLAP, front[1] - fz * DOOR_PAVING_OVERLAP],
+    facing: [fx, fz],
+    walkable,
+  };
+}
+
+
+/** Does this plot declare a door of its own (`ManifestEntry.door`)? */
+export function hasOwnDoor(id: string): boolean {
+  return PARK_MANIFEST.some((candidate) => candidate.id === id && candidate.door !== undefined);
+}
+
+
+/**
+ * **Which way a visitor walks in to this plot's doormat** — a unit vector
+ * pointing out of the plot, away from the door. The manifest's `door.facing`
+ * where it declares one (the castle's front door faces +Z on every bearing);
+ * otherwise the doormat's own bearing from the plot centre, which is how the
+ * doormat was placed. Paths arrive along it (`paths.ts`'s head-on lead).
+ */
+export function entranceFacing(entry: PlacedEntry): readonly [number, number] {
+  const declared = PARK_MANIFEST.find((candidate) => candidate.id === entry.id)?.door;
+  if (declared && 'facing' in declared) return declared.facing;
+  const outX = entry.entranceX - entry.x;
+  const outZ = entry.entranceZ - entry.z;
+  const out = Math.hypot(outX, outZ);
+  return out > 1e-9 ? [outX / out, outZ / out] : [0, 1];
+}
+
+/**
+ * **The footprint a plot actually occupies once it has been placed.**
+ *
+ * For everything but the castle this is the authored footprint unchanged.
+ *
+ * The castle is different, and issue #549 is what the difference cost. Its four
+ * corner turrets stand outside the footprint rectangle, so a rectangle cannot
+ * say where the castle reaches — and *everything* that asked got the same wrong
+ * answer: the collision world did not know the turrets were there (a child
+ * walked through them), and neither did this solver, so on three of the sixteen
+ * pool seeds it put the castle's own doormat and path spur inside one.
+ *
+ * The turrets cannot simply be declared on the authored footprint, because the
+ * drawn castle is **not centred on its plot**: `building/layout.ts` nudges it
+ * {@link BUILDING_CENTRE_NUDGE} towards the park middle so every interior
+ * corner stays inside `GARDEN_PLAY_RADIUS`. That direction is a function of
+ * where the plot landed, so it is only knowable here, at placement — which is
+ * exactly why this is the right place to resolve it, and why a static entry in
+ * `parkManifest.ts` could not.
+ *
+ * Writing the discs into the **placed** footprint gives one owner for "how far
+ * does the castle reach": `PlacedEntry.footprint` is what both consumers of
+ * `edgeDistanceAlong` already read — the entrance placement below, and the path
+ * spur's target in `paths.ts` — so neither had to learn about turrets, and they
+ * cannot disagree.
+ */
+/**
+ * Where a plot's building is actually drawn: its centre, except for the castle,
+ * which `building/layout.ts` nudges {@link BUILDING_CENTRE_NUDGE} towards the
+ * park middle — the same nudge {@link footprintAsPlaced} applies.
+ */
+export function drawnCentreOf(entry: ManifestEntry, x: number, z: number): readonly [number, number] {
+  if (entry.id !== 'building') return [x, z];
+  const length = Math.hypot(x, z) || 1;
+  return [x - (x / length) * BUILDING_CENTRE_NUDGE, z - (z / length) * BUILDING_CENTRE_NUDGE];
 }

@@ -1,6 +1,6 @@
-import type { PlannedSlide } from './solve';
-import { planSlide } from './solve';
-import { takePrewarmedSlide } from './prewarm';
+import type { PlannedSlide } from './planned';
+import { lazyView } from '../../boot/lazyView';
+import { planPart } from '../parkPlan';
 
 /**
  * **The ginormous slide's solved plan, and nothing else.**
@@ -35,7 +35,6 @@ import { takePrewarmedSlide } from './prewarm';
  * nine call sites had to change, which is also what keeps this refactor
  * reviewable: the diff is a rename plus this file.
  */
-export * from './solve';
 
 /**
  * The plan. Import this; never re-solve — the same rule as `TRAIN_PLAN`.
@@ -54,4 +53,7 @@ export * from './solve';
  * `check:park-boot`, which runs both in one process and compares a SHA over the
  * built chute.
  */
-export const SLIDE_PLAN: PlannedSlide = takePrewarmedSlide() ?? planSlide();
+/** A view: the park's driver decides the slide, and may re-decide it. */
+export { GIANT_SLIDE_SPEED, type PlannedSlide } from './planned';
+
+export const SLIDE_PLAN: PlannedSlide = lazyView(() => planPart('slide'));

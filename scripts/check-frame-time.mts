@@ -1,6 +1,14 @@
 /**
  * **The park's frame-time tail, measured on a real GPU.**
  *
+ * **Not a `check:` (retired from that prefix, #693).** It was
+ * `check:frame-time`, defined and run by nothing in CI for weeks. It cannot be: it needs a **real GPU** — on the software rasteriser a GitHub-hosted
+ * runner has, the timings it asserts mean nothing (and this script says so and
+ * fails). So it is `gpu:` — a check you run on a machine with a GPU, before
+ * merging anything that draws — and `check:chain-coverage` names it on every run
+ * as not gating, so nobody mistakes it for cover. Putting it in CI needs a GPU
+ * runner, which is a repository/billing decision, not a code change.
+ *
  * Nothing in this repo measured render cost at all until this landed. The
  * average frame rate was never the problem — Jim's report was *"the frame rate
  * is generally ok but there seem to be large GPU pauses from time to time"* —
@@ -19,8 +27,8 @@
  * ## Running it
  *
  * ```
- * npm run build            # it measures dist/, i.e. what actually ships
- * npm run check:frame-time
+ * pnpm run build           # it measures dist/, i.e. what actually ships
+ * pnpm run gpu:frame-time
  * ```
  *
  * It starts its own `vite preview`, boots the game through the character
@@ -93,7 +101,7 @@ function findChrome(): string {
     if (fs.existsSync(candidate)) return candidate;
   }
   throw new Error(
-    'check:frame-time needs a Chromium build with a real GPU backend. Set CHROME_PATH, ' +
+    'gpu:frame-time needs a Chromium build with a real GPU backend. Set CHROME_PATH, ' +
       `or install Playwright's browsers. Looked in:\n  ${CHROME_CANDIDATES.join('\n  ')}`,
   );
 }
@@ -182,7 +190,7 @@ async function main(): Promise<void> {
   // behind a moving bus; that is a different budget and it is not this check's.
   const play = data.frames.filter((f) => f.iv > 0 && f.ts > data.tPlayFrom);
   if (play.length < 1000) {
-    throw new Error(`check:frame-time: only ${play.length} frames of play captured — too few to judge.`);
+    throw new Error(`gpu:frame-time: only ${play.length} frames of play captured — too few to judge.`);
   }
   const intervals = play.map((f) => f.iv);
   const p50 = percentile(intervals, 50);
@@ -227,11 +235,11 @@ async function main(): Promise<void> {
   }
 
   if (failures.length > 0) {
-    console.error(`\ncheck:frame-time FAILED:\n  - ${failures.join('\n  - ')}`);
+    console.error(`\ngpu:frame-time FAILED:\n  - ${failures.join('\n  - ')}`);
     process.exitCode = 1;
     return;
   }
-  console.log('check:frame-time: the tail is within budget. ✓');
+  console.log('gpu:frame-time: the tail is within budget. ✓');
 }
 
 await main();
