@@ -29,12 +29,18 @@ import { describe, expect, it } from 'vitest';
  * old driver's semantics (no per-feature or decision-zero cap) was still
  * solving at 436 s, past vitest's 240 s timeout — which cannot interrupt a
  * synchronous solve, so it had to be killed by hand. With the budget: 21 s,
- * 43 turns, 3 road refusals. Seed 12 restart 3 (one
- * organic decision-zero redraw before the road is asked), given explicitly,
- * so no acceptance loop runs.
+ * 43 turns, 3 road refusals. Seed 10 restart 0, given explicitly, so no
+ * acceptance loop runs: the park the accept loop shipped for seed 10 at
+ * 662a1b90's successors, its whole plan searched in 11.5 s on CI — the fastest
+ * of the sixteen, so the road is asked with few organic redraws first.
+ *
+ * **This pin goes stale whenever the park changes**, and has three times on
+ * #708 (seed 12 restart 3, then seed 12 restart 2, then seed 1 restart 3,
+ * each over vitest's 240 s once the park moved). When it next times out, take
+ * the seed with the smallest "plan N ms searched" from the Parks job's log.
  */
-process.env['LGP_SEED'] = '12';
-process.env['LGP_PARK_RESTART'] = '3';
+process.env['LGP_SEED'] = '10';
+process.env['LGP_PARK_RESTART'] = '0';
 // Through a variable, as the other tests reach Node-only scripts (`test/node-env.d.ts`).
 const HEADLESS_CANVAS = '../scripts/headless-canvas.mjs';
 await import(/* @vite-ignore */ HEADLESS_CANVAS);

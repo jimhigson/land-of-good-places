@@ -19,9 +19,10 @@ name: Parks
 # installation's rate limit (HTTP 403, PR #705, 2 Oct) and every one went red
 # while every park had built. A `needs:` edge is free; a poll never is.
 #
-# One runner per seed, each running that seed's restarts four at a time
-# (`LGP_RESTART_LANES`, speculative, same answer as in order: `acceptPark`),
-# so the critical path is the slowest seed, not the sum.
+# One runner per seed x block of four restarts, each a single round of four
+# speculative lanes (`LGP_RESTART_BLOCK`, `acceptParkInRange`), and the lowest
+# accepted restart over the blocks wins (`merge-parks.mts`) — so the critical
+# path is one or two rounds, not a seed's whole run of restarts. See `seed`.
 on:
   workflow_call:
     outputs:
@@ -134,27 +135,34 @@ jobs:
           path: .parks
           key: prebuilt-parks-${{ needs.key.outputs.hash }}
 
+  # **Each seed's restarts in blocks, on many runners at once — the cap is safe
+  # by construction, not by luck.** A cold run used to give each seed ONE
+  # runner walking restarts 0, 1, 2, … four at a time; at ~25-35% of attempts
+  # accepted, one seed in sixteen needing nine or more attempts (and so more
+  # than the 60-minute cap) was more likely than not on every cold run (#708:
+  # seed 3, eight rejections, cancelled).
+  #
+  # Now restarts are cut into blocks of four (`LGP_RESTART_BLOCK`), one runner
+  # per seed x block, four lanes each, so a block is ONE round of attempts and
+  # its time is bounded by the solve's step cap (`DEFAULT_SOLVE_BUDGET.pieces`).
+  # Stage A runs blocks 0-1 for every seed; stage B runs blocks 2-15 only for
+  # seeds stage A did not accept. `merge-parks.mts` takes each seed's lowest
+  # accepted restart over a gapless run of blocks from 0 — the same restart the
+  # one-runner loop finds, so the parks are identical. A seed misses only if
+  # all 64 restarts are rejected; the odds are worked in the PR (#708) and in
+  # `scripts/parks-miss-odds.mts`.
   seed:
-    name: Park ${{ matrix.seed }}
+    name: Park ${{ matrix.seed }} block ${{ matrix.block }}
     needs: [key, reuse]
-    # !cancelled(), not always() — always() jobs ignore a superseding push's cancel: a reused set that fails verification fails the reuse job (red —
-    # the same source built two different parks, which is a bug to chase) and
-    # the matrix still builds the parks from scratch.
     if: ${{ !cancelled() && needs.key.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true' }}
     runs-on: ubuntu-latest
-    # The slowest seed's accept loop at four restarts at a time. Sized from
-    # the attempt's measured cost (#706, staged attempts, 2 Oct): a rejected
-    # restart pays its solve plus ~37-54 s of cheap measures; the accepted one
-    # its solve plus ~207 s of every measure. The dearest seed, 15, solves in
-    # 434 s CPU on a Mac (~15 min on a runner at ~2x) and now accepts at
-    # restart 0, so ~22 min; four lanes on four cores keep a seed that needs
-    # several restarts to about one solve per round. Not a budget to grow
-    # into: a seed that needs more is a generator to make cheaper.
+    # One round of four attempts, each solve capped in steps: well inside this.
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        block: [0, 1]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
@@ -164,24 +172,102 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      # Per seed, so re-running a failed matrix rebuilds only the seeds that failed.
-      - name: This seed, if already found at this source
+      # Per seed x block, so re-running a failed matrix rebuilds only what failed.
+      - name: This block, if already searched at this source
         id: seed-cache
         uses: actions/cache@v4
         with:
           path: .parks-seed
-          key: prebuilt-park-${{ needs.key.outputs.hash }}-${{ matrix.seed }}
-      - name: Find and prove seed ${{ matrix.seed }}'s accepted park
+          key: prebuilt-park-${{ needs.key.outputs.hash }}-${{ matrix.seed }}-b${{ matrix.block }}
+      - name: Search seed ${{ matrix.seed }}'s restarts in block ${{ matrix.block }}
         if: steps.seed-cache.outputs.cache-hit != 'true'
         env:
           LGP_SEEDS: ${{ matrix.seed }}
           LGP_LANES: '1'
           LGP_RESTART_LANES: '4'
+          LGP_RESTART_BLOCK: ${{ matrix.block }}
+          LGP_RESTART_BLOCK_SIZE: '4'
           LGP_PARKS_OUT: .parks-seed
         run: pnpm run build:parks
       - uses: actions/upload-artifact@v4
         with:
-          name: park-${{ matrix.seed }}
+          name: park-${{ matrix.seed }}-b${{ matrix.block }}
+          path: |
+            .parks-seed/*.json
+          if-no-files-found: error
+          # `.parks-seed` is a dot-directory, which upload-artifact skips unless told.
+          include-hidden-files: true
+          retention-days: 3
+
+  more:
+    name: Parks still to find
+    needs: [key, reuse, seed]
+    if: ${{ !cancelled() && needs.seed.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      any: ${{ steps.plan.outputs.any }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: park-*
+          path: parts
+      - name: Seeds stage A did not accept, x blocks 2-15
+        id: plan
+        run: |
+          node -e '
+            const fs = require("fs"), path = require("path");
+            const accepted = new Set();
+            for (const dir of fs.readdirSync("parts")) for (const name of fs.readdirSync(path.join("parts", dir))) {
+              if (!/^block-\d+\.json$/.test(name)) continue;
+              const record = JSON.parse(fs.readFileSync(path.join("parts", dir, name), "utf8"));
+              if (record.restart !== null) accepted.add(record.seed);
+            }
+            const include = [];
+            for (let seed = 0; seed < 16; seed += 1) if (!accepted.has(seed)) for (let block = 2; block < 16; block += 1) include.push({ seed, block });
+            console.log(`stage B: ${include.length} block(s) for seed(s) ${[...new Set(include.map((i) => i.seed))].join(", ") || "none"}`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify({ include })}\nany=${include.length > 0}\n`);
+          '
+
+  seed-more:
+    name: Park ${{ matrix.seed }} block ${{ matrix.block }}
+    needs: [key, reuse, more]
+    if: ${{ !cancelled() && needs.more.outputs.any == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.more.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Per seed x block, so re-running a failed matrix rebuilds only what failed.
+      - name: This block, if already searched at this source
+        id: seed-cache
+        uses: actions/cache@v4
+        with:
+          path: .parks-seed
+          key: prebuilt-park-${{ needs.key.outputs.hash }}-${{ matrix.seed }}-b${{ matrix.block }}
+      - name: Search seed ${{ matrix.seed }}'s restarts in block ${{ matrix.block }}
+        if: steps.seed-cache.outputs.cache-hit != 'true'
+        env:
+          LGP_SEEDS: ${{ matrix.seed }}
+          LGP_LANES: '1'
+          LGP_RESTART_LANES: '4'
+          LGP_RESTART_BLOCK: ${{ matrix.block }}
+          LGP_RESTART_BLOCK_SIZE: '4'
+          LGP_PARKS_OUT: .parks-seed
+        run: pnpm run build:parks
+      - uses: actions/upload-artifact@v4
+        with:
+          name: park-${{ matrix.seed }}-b${{ matrix.block }}
           path: |
             .parks-seed/*.json
           if-no-files-found: error
@@ -191,8 +277,8 @@ jobs:
 
   merge:
     name: Parks
-    needs: [key, reuse, seed]
-    if: ${{ !cancelled() && needs.seed.result == 'success' && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true' }}
+    needs: [key, reuse, seed, more, seed-more]
+    if: ${{ !cancelled() && needs.seed.result == 'success' && needs.more.result == 'success' && (needs.seed-more.result == 'success' || needs.seed-more.result == 'skipped') && needs.key.outputs.hit != 'true' && needs.reuse.outputs.reused != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:

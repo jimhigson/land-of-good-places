@@ -15,7 +15,7 @@ import { placedEntry } from './parkLayout';
  * network routes spurs to `entrance`, and scenery scattering avoids
  * `boundingRadius` so nobody plants a tree inside the ferris wheel.
  */
-export type AnchorId = 'building' | 'ballPit' | 'ferrisWheel' | 'dodgems' | 'waterFight' | 'hotel';
+export type AnchorId = 'building' | 'ballPit' | 'ferrisWheel' | 'dodgems' | 'waterFight' | 'hotel' | 'reptileHouse';
 
 /**
  * A plot's shape on the ground.
@@ -127,6 +127,16 @@ function anchorsNow(): readonly AnchorDefinition[] {
       'a key; the lift says "yours" on your floor; the top suite is rainbow ' +
       'with beds to sleep on or jump between. Rooms are disjoint spaces - see ' +
       'world/hotel/.',
+  }),
+    placed('reptileHouse', {
+    signTitle: 'The Reptile House',
+    signSubtitle: 'walk in through her mouth!',
+    glyph: '\u{1F40D}',
+    accent: PALETTE.markerMint,
+    notes:
+      'Jim, 2 Oct 2026: Sunny the snake is the building and her open mouth is ' +
+      'the door. Inside is its own space (world/reptileHouse/): exhibits, the ' +
+      'Tortoise Ride, the nursery and Scales & Tails.',
   }),
     placed('ballPit', {
     signTitle: 'Ball Pit',

@@ -232,8 +232,11 @@ describe('scenery scatter is decoupled from the paths', () => {
     // Any supported seed other than the baseline's: the canonical seed became
     // 5 when the pool became 0..15, and a control that builds the baseline's
     // own park again cannot tell two parks apart.
-    const otherSeed = baseline.seed === 2 ? 3 : 2;
-    // Restart 0, explicitly: the control needs *a* different park, not that
+    // Seed 10 restart 0 since #708's band fix: the shipped park with the
+    // fastest plan (11.5 s on CI). A pinned restart goes stale when the park
+    // changes; re-pick from the Parks job's "plan N ms searched" lines.
+    const otherSeed = baseline.seed === 10 ? 11 : 10;
+    // An explicit restart: the control needs *a* different park, not that
     // seed's accepted one, and leaving the restart unset made the resolver run
     // the whole acceptance loop for it (442 s on #705's CI, over the 240 s
     // timeout), measuring nothing this test asks about.

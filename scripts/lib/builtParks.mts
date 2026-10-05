@@ -61,6 +61,9 @@ export function parkSwitches(_root?: string): ReadonlySet<string> {
  * `LGP_SOLVE`. A script added here is one more that pays for a solve.
  */
 const SEARCH_SCRIPTS = new Set([
+  // `solve` produces the very file it would otherwise hydrate from (its
+  // `hydrate` mode is told its file outright, `LGP_PARK_FILE`).
+  'park-file-probe.mts',
   'park-identity.mts',
   'scatter-digest.mts',
   'check-every-seed-builds.mts',
@@ -86,22 +89,30 @@ export function isSearchScript(): boolean {
  * solved park, in milliseconds instead of a solve's minutes.
  *
  * Null — so the process solves — when the file would not be the park it asked
- * for: no fresh manifest for this source and seed; an explicit restart
- * (`LGP_PARK_RESTART`, `__LGP_PARK_RESTART__`: the accept loop's attempts, which
- * are searching); a switch the park's code reads ({@link parkSwitches});
+ * for: no fresh manifest for this source and seed; an explicit restart **other
+ * than the shipped one** (`LGP_PARK_RESTART`, `__LGP_PARK_RESTART__`: the accept
+ * loop's attempts, which are searching); a switch the park's code reads ({@link parkSwitches});
  * `LGP_SOLVE=1`; or a script in
  * {@link SEARCH_SCRIPTS}.
  */
 export function builtParkFileOf(root: string, seed: number, env: Readonly<Record<string, string | undefined>>): unknown {
   if (env['LGP_SOLVE'] === '1' || env['LGP_PARK_FILE']) return null;
   if (isSearchScript()) return null;
-  if (env['LGP_PARK_RESTART'] !== undefined && env['LGP_PARK_RESTART'] !== '') return null;
-  if ((globalThis as { __LGP_PARK_RESTART__?: unknown }).__LGP_PARK_RESTART__ !== undefined) return null;
+  const shipped = builtRestartOf(root, seed);
+  if (shipped === null) return null;
+  // **The shipped restart asked for by number is still the shipped park.** The
+  // invariant suite and every check ask for the accepted restart explicitly
+  // (`parkFacts.ts`, `acceptedRestartSync`), and refusing them made each one
+  // re-solve a park the file already proves: up to 850 s apiece on CI, three
+  // seeds a shard, past the shards' watchdogs (#708, run 37221975719).
+  const askedEnv = env['LGP_PARK_RESTART'];
+  if (askedEnv !== undefined && askedEnv !== '' && Number(askedEnv) !== shipped) return null;
+  const askedGlobal = (globalThis as { __LGP_PARK_RESTART__?: unknown }).__LGP_PARK_RESTART__;
+  if (askedGlobal !== undefined && Number(askedGlobal) !== shipped) return null;
   const switches = parkSwitches(root);
   for (const key of Object.keys(env)) {
     if (switches.has(key) && env[key] !== undefined && env[key] !== '') return null;
   }
-  if (builtRestartOf(root, seed) === null) return null;
   const file = join(root, PREBUILT_PARKS_OUT, `${seed}.json`);
   if (!existsSync(file)) return null;
   return JSON.parse(readFileSync(file, 'utf8')) as unknown;

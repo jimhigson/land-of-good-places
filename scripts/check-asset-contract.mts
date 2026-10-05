@@ -80,6 +80,20 @@ import { createLollipopTree, createPinkWall, createWoodWall } from '../src/art/m
 import { HAIR_STYLES } from '../src/art/models/hair.ts';
 import { BACKPACK_KINDS } from '../src/art/models/backpacks.ts';
 import { SHOE_KINDS } from '../src/art/models/shoes.ts';
+import { createPetSnake } from '../src/art/models/snake.ts';
+import {
+  createChameleon,
+  createCroc,
+  createEgg,
+  createFrog,
+  createGecko,
+  createIguana,
+  createSkink,
+  createTortoise,
+} from '../src/art/models/reptiles.ts';
+import { createReptileHouseExterior } from '../src/art/models/reptileHouseAssets.ts';
+import { createNoodleRock, createNoodleTailMound } from '../src/art/models/reptileNoodleAssets.ts';
+import { createNoodleMeter, createReptileStallDressing } from '../src/art/models/reptileStallAssets.ts';
 
 /**
  * How far a declared height may sit from the measured one, in metres.
@@ -280,6 +294,30 @@ function collect(): Subject[] {
   for (const kind of SHOE_KINDS) {
     add(`kid.shoe.${kind}`, createKid({ shoeKind: kind }));
   }
+
+  // The Reptile House's creatures and kits (the stall's stock arrives through
+  // `SHOP_ITEMS` above). The authored kit assemblies are measured for height
+  // only: their bases are sunk 0.05 m by design so no face shares the floor's
+  // plane (`check:coplanar`), which is a contract about the hall, not about
+  // the asset's origin.
+  for (const colourway of ['mint', 'coral', 'rainbow'] as const) add(`pet.snake.${colourway}`, createPetSnake(colourway));
+  add('reptile.croc', createCroc(1));
+  add('reptile.tortoise', createTortoise(2));
+  add('reptile.tortoise.small', createTortoise(3, 0.42));
+  add('reptile.chameleon', createChameleon(4));
+  add('reptile.frog', createFrog(5));
+  add('reptile.gecko', createGecko(6));
+  add('reptile.skink', createSkink(7));
+  add('reptile.iguana', createIguana(8));
+  add('reptile.egg', createEgg(9, false));
+  // The exterior's origin is the ground under the plinth; the arch's legs run
+  // 0.1 m down into the plinth by design (their outline to 0.12), so only the
+  // height half of the contract applies.
+  add('reptile.house', createReptileHouseExterior(), 'anchor');
+  add('reptile.noodleRock', createNoodleRock(), 'anchor');
+  add('reptile.noodleTailMound', createNoodleTailMound(), 'anchor');
+  add('reptile.stallDressing', createReptileStallDressing(), 'anchor');
+  add('reptile.meter', createNoodleMeter());
 
   // Scenery. Seeded, so a few seeds each is a fair sample of what a seed can do.
   for (const seed of [0, 1, 2, 3]) {

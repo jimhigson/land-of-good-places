@@ -239,8 +239,32 @@ export const gradientAtParkRadius = (
   radius: number = GROUND_SPHERE_RADIUS,
 ): number => (d >= radius ? Infinity : d / Math.sqrt(radius * radius - d * d));
 
+/**
+ * **How much the park grew to fit the Reptile House — the one owner of it.**
+ * Jim, 3 Oct 2026: the Reptile House goes in the park, *"with the park
+ * enlarged slightly to fit it"*, so the parks are no more crowded than before.
+ *
+ * A linear factor on the garden's half-size (and so the gate) and the play
+ * radius (and so the outline's target area) — and on nothing else: the planet
+ * keeps its radius, every building keeps its size, and the manifest's bands
+ * stay where they were (`parkManifest.ts` says why: growing them halved the
+ * acceptance rate). Measured, not
+ * guessed: at 1 the manifest's bounding discs claimed 25.3% of the park; the
+ * Reptile House's (radius 12, 452 m²) is 8.5% more claim, so the area grows
+ * 8.5% and the radius √1.085 = 1.0416 — the claimed share stays 25.3%.
+ *
+ * Not the area multiplier: growing the area against a gate that stays put is
+ * what `boundary.ts` warns swells the outline, and at 2.17 seed 5 restart 4
+ * found no gentle outline at all (`solveBoundaryRadii` threw). Scaling the gate
+ * with the park is what this constant does instead.
+ */
+export const PARK_GROWTH = 1.0416;
+
+/** Everything in the park that spreads out with it: {@link PARK_SURFACE_SCALE} × {@link PARK_GROWTH}. */
+export const PARK_EXTENT_SCALE = PARK_SURFACE_SCALE * PARK_GROWTH;
+
 /** Half-width of the playable garden, in metres. The garden is square. */
-export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
+export const GARDEN_HALF_SIZE = 62 * PARK_EXTENT_SCALE;
 
 /**
  * Player is pushed back inside this radius from the centre (soft boundary).
@@ -254,7 +278,7 @@ export const GARDEN_HALF_SIZE = 62 * PARK_SURFACE_SCALE;
  * the shell has to swell to cover. Scaling both together keeps the gate on the
  * wall rather than stranding it inside a park that grew around it.
  */
-export const GARDEN_PLAY_RADIUS = 58 * PARK_SURFACE_SCALE;
+export const GARDEN_PLAY_RADIUS = 58 * PARK_EXTENT_SCALE;
 
 /**
  * The gradient the cat bus is comfortable on, as rise over run.
@@ -467,6 +491,18 @@ export const SPUR_PAVED_REACH = WIDEST_SPUR_WIDTH / 2 + PATH_KERB_OVERHANG;
  * `drawnPavingReachesEveryDoor` asserts it.
  */
 export const DOOR_PAVING_OVERLAP = 1.0;
+
+/**
+ * How far a drawn cross-section's sampled points must keep from a built solid:
+ * a hand's breadth for what five points across a 0.8 m station cannot see —
+ * the kerb's mitre at a corner and the ribbon between stations (seeds 4 and 6,
+ * 2 Oct 2026: 0.16–0.20 m of kerb under a booth past a clean screen). The path
+ * router screens every candidate with it (`paths.ts`), and a doormat placed
+ * from a building's solids leaves it too, or every spur arriving at that
+ * doormat at an angle is refused (#708: the Reptile House's own spur, 0.23 m
+ * clear and refused).
+ */
+export const BUILT_SOLID_MARGIN = 0.25;
 
 /**
  * **The main loop's drawn width — the one owner.**

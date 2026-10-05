@@ -174,6 +174,13 @@ export interface SolveBudget {
   readonly unwinds: number;
   /** Turns (advances) in all before the attempt fails. */
   readonly turns: number;
+  /**
+   * **Steps in all — every piece any feature's search yields — before the
+   * attempt fails.** The cap on one attempt's work, counted in steps rather
+   * than seconds so it decides the same on every machine (a park is a pure
+   * function of seed and restart; a clock is not).
+   */
+  readonly pieces: number;
   /** The per-feature budgets for named features, where they differ — a test tightens one feature's alone. */
   readonly byFeature?: Readonly<Record<string, Partial<Pick<SolveBudget, 'unwindsPerFeature' | 'decisionZeroPerFeature'>>>>;
 }
@@ -183,12 +190,45 @@ export const DEFAULT_SOLVE_BUDGET: SolveBudget = {
   attemptsPerDecision: 256,
   // Worst recorded: 33 unwinds in a whole plan solve, all features together.
   unwindsPerFeature: 64,
-  decisionZeroPerFeature: 16,
-  // No tighter than the layout's own supply: redrawing it is normal (34 on seed 15 restart 0).
-  decisionZero: 256,
+  // Under `decisionZero`, so one feature's quota runs out before the whole solve's does.
+  decisionZeroPerFeature: 12,
+  // **Chosen by CPU time to an accepted park, measured — not by restart
+  // count.** Each redraw of decision zero re-solves the layout and everything
+  // after it (cruiser 30%, railRaceBars 30%, train 24%, paths 12% of plan CPU
+  // over 29 solves), so the budget trades long solves against thrown-away
+  // ones: too low and a solve a few redraws from an acceptable park is
+  // discarded (seed 14 restart 9 needs more than 8 and is the one accepted),
+  // too high and solves that the measures will reject anyway run on.
+  //
+  // Measured on #708 at a23f5b8e: the whole accept loop per seed, main-thread
+  // CPU seconds to acceptance (per-feature quota 3/4 of the total; measures
+  // run in child processes are not in these figures, so built attempts are
+  // given too — they are what the measures cost):
+  //
+  //   seed  dz8: restart  cpu-s  built  dz16: restart  cpu-s  built  dz32: restart  cpu-s  built
+  //   0              5    1385     6            5    1386     6            5    1383     6
+  //   1             15    3062    10           15    4102    13           15    4680    16
+  //   2             10    2453     6           10    3474     8           10    4360     9
+  //   14            25    5429    11            9    3971     7            9    4817     8
+  //   15            13    2317     9           12    3132    10            0     831     1
+  //   worst              5429 (14)                  4102 (1)                    4817 (14)
+  //
+  // 16 has the lowest worst seed. Earlier history: 256 let one solve outrun
+  // `PROBE_TIMEOUT_MS` (1800 s) and the Parks job died "did not finish"
+  // (seeds 1, 10, 11); 24 had the invariant shards, which re-solve each
+  // accepted restart, run out of their watchdog; 8 cost seed 14 26 restarts.
+  decisionZero: 16,
   unwinds: MAX_UNWINDS,
   // Far above a full park's advances in either phase (a few hundred).
   turns: 200_000,
+  // **The ceiling on one attempt's solve, so the Parks job's time is bounded
+  // by construction** (`parks.yml` sizes its blocks on it). Measured over 44
+  // plan solves on #708: 0.4-35 Mpieces for 39 of them, then a tail of 50, 55,
+  // 91, 161 and 186 Mpieces taking 465-1639 s — the 1300-2000 s CI attempts.
+  // At 4-12 us a piece (heavier pieces to 50 us), 40 M is a few hundred
+  // seconds of solve; a restart that needs more is refused and the accept
+  // loop takes the next one, as for any other spent budget.
+  pieces: 40_000_000,
 };
 
 /**
@@ -248,6 +288,8 @@ export interface SolveStats {
    * (`check:park-boot` asserts floors on these, per phase).
    */
   piecesByFeature: Record<string, number>;
+  /** Every piece of every feature, the {@link SolveBudget.pieces} count. */
+  pieces: number;
   /** Wall-clock milliseconds spent inside each feature's `advance`, summed over turns. Headless diagnostics only. */
   msByFeature: Record<string, number>;
   /**
@@ -279,6 +321,7 @@ export class ParkSolve {
     worstAttempt: {},
     turnsByFeature: {},
     piecesByFeature: {},
+    pieces: 0,
     msByFeature: {},
     cpuMsByFeature: {},
   };
@@ -395,6 +438,10 @@ export class ParkSolve {
         break;
       }
       this.stats.piecesByFeature[builder.name] = (this.stats.piecesByFeature[builder.name] ?? 0) + 1;
+      this.stats.pieces += 1;
+      if (this.stats.pieces > this.budget.pieces) {
+        this.exhaust('pieces', `${this.budget.pieces} steps without finishing (${builder.name} searching)`);
+      }
       yield step.value;
     }
     this.stats.msByFeature[builder.name] = (this.stats.msByFeature[builder.name] ?? 0) + (now() - began);

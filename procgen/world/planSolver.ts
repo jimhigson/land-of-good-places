@@ -649,6 +649,22 @@ function builders(): readonly FeatureBuilder[] {
       // castle (seed 5, 2 Oct 2026: 24 m of it) or through a booth (seed 12:
       // the ferris kiosk). The layout is the decision that left no way round.
       const under = drawnSampleUnderASolid(drawn);
+      // **Inside the railway's fences is the railway's to answer, not the
+      // layout's.** It was the commonest single reason a whole layout was
+      // redrawn (the gate approach alone: 66 of ~210 path refusals over 18
+      // seed-14/0/15 solves, and as common on #706's base) — and every one of
+      // them spent a decision zero, the budget a solve has least of. The loop
+      // is what ran through the paving, so the solve unwinds to the train and
+      // tries its next loop, exactly as an off-site crossing does; a refusal
+      // that recurs under a different loop is the layout's after all
+      // (`unlessTrainInnocent`). Keyed without coordinates so a different
+      // loop hitting the same run counts as the same refusal.
+      if (under && under.inRail) {
+        const key = `paths: drawn run ${routes[under.run]?.name ?? under.run} runs inside the railway's fences`;
+        return refusal(`${key} at (${under.x.toFixed(1)}, ${under.z.toFixed(1)})`, {
+          consumed: unlessTrainInnocent(key, train, ['crossings', 'train']),
+        });
+      }
       if (under) {
         return refusal(
           `paths: drawn run ${under.run} lays paving under a booth, a building or inside the railway's fences at ` +
@@ -907,7 +923,7 @@ export function parkPlanFile(world: WorldDecisions, built: Readonly<Record<strin
  * width plus the kerb either side, square to the run — reaches inside a booth
  * or a building (`distanceToBuiltSolids`), or `null`.
  */
-function drawnSampleUnderASolid(drawn: readonly PathSample[]): PathSample | null {
+function drawnSampleUnderASolid(drawn: readonly PathSample[]): (PathSample & { readonly inRail: boolean }) | null {
   for (let i = 0; i < drawn.length; i += 1) {
     const here = drawn[i] as PathSample;
     const before = drawn[i - 1]?.run === here.run ? (drawn[i - 1] as PathSample) : here;
@@ -920,7 +936,8 @@ function drawnSampleUnderASolid(drawn: readonly PathSample[]): PathSample | null
     for (const k of [0, -1, -0.5, 0.5, 1]) {
       const px = here.x - (tz / t) * reach * k;
       const pz = here.z + (tx / t) * reach * k;
-      if (distanceToBuiltSolids(px, pz) < BUILT_SOLID_MARGIN || inRailCorridor(px, pz)) return here;
+      if (distanceToBuiltSolids(px, pz) < BUILT_SOLID_MARGIN) return { ...here, inRail: false };
+      if (inRailCorridor(px, pz)) return { ...here, inRail: true };
     }
   }
   return null;

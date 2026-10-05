@@ -160,18 +160,54 @@ export async function acceptPark(
     readonly lanes?: number;
   } = {},
 ): Promise<AcceptedPark> {
+  const cap = options.maxRestarts ?? MAX_RESTARTS;
+  const found = await acceptParkInRange(seed, 0, cap, options);
+  if (found.accepted) return found.accepted;
+  const log = found.attempts
+    .map(
+      (a) =>
+        `  restart ${a.restart}: ${a.forcedBy.map((f) => `${f.measure} (${f.count})`).join('; ')}` +
+        (a.notAsked ? ` — not asked: rejected at stage ${a.notAsked.rejectedAtStage}` : ''),
+    )
+    .join('\n');
+  throw new Error(
+    `accepted park: seed ${seed} passed no attempt in ${cap} restarts — a measure nothing passes is a generator or ` +
+      `instrument bug. Restarts:\n${log}`,
+  );
+}
+
+/**
+ * **{@link acceptPark} over restarts `[from, to)` only — one block of a seed's
+ * restarts**, so several machines can search one seed at once (`build:parks`'s
+ * `LGP_RESTART_BLOCK`, `parks.yml`'s seed × block matrix). It returns the
+ * lowest accepted restart in the block, or `accepted: null` with every
+ * attempt's record when none passed; it never throws for running out. The
+ * whole-seed answer is the lowest block's accepted restart with every block
+ * below it `null` (`merge-parks.mts`) — the same restart the sequential loop
+ * finds, because each block is itself consumed strictly in restart order.
+ */
+export async function acceptParkInRange(
+  seed: number,
+  from: number,
+  to: number,
+  options: {
+    readonly onAttempt?: (record: RestartRecord) => void;
+    readonly attempt?: (seed: number, restart: number, signal?: AbortSignal) => Promise<AttemptVerdict>;
+    readonly lanes?: number;
+  } = {},
+): Promise<{ readonly accepted: AcceptedPark | null; readonly attempts: readonly RestartRecord[] }> {
   const began = performance.now();
   const attempt =
     options.attempt ?? ((s: number, r: number, signal?: AbortSignal) => attemptInFreshProcess(s, r, undefined, signal));
-  const cap = options.maxRestarts ?? MAX_RESTARTS;
+  const cap = to;
   const lanes = Math.max(1, options.lanes ?? 1);
   const attempts: RestartRecord[] = [];
   const abort = new AbortController();
   type Settled = { readonly ok: true; readonly verdict: AttemptVerdict } | { readonly ok: false; readonly error: unknown };
   const pending = new Map<number, Promise<Settled>>();
-  let launched = 0;
+  let launched = from;
   const launch = (): void => {
-    while (launched < cap && launched < attempts.length + lanes) {
+    while (launched < cap && launched < from + attempts.length + lanes) {
       const restart = launched;
       launched += 1;
       pending.set(
@@ -188,7 +224,7 @@ export async function acceptPark(
     await Promise.all(pending.values());
   };
   try {
-    for (let restart = 0; restart < cap; restart += 1) {
+    for (let restart = from; restart < cap; restart += 1) {
       launch();
       const settled = await (pending.get(restart) as Promise<Settled>);
       pending.delete(restart);
@@ -220,23 +256,13 @@ export async function acceptPark(
       attempts.push(record);
       options.onAttempt?.(record);
       if (verdict.accepted) {
-        return { seed, restart, attempts, wallMs: Math.round(performance.now() - began) };
+        return { accepted: { seed, restart, attempts, wallMs: Math.round(performance.now() - began) }, attempts };
       }
     }
   } finally {
     await stop();
   }
-  const log = attempts
-    .map(
-      (a) =>
-        `  restart ${a.restart}: ${a.forcedBy.map((f) => `${f.measure} (${f.count})`).join('; ')}` +
-        (a.notAsked ? ` — not asked: rejected at stage ${a.notAsked.rejectedAtStage}` : ''),
-    )
-    .join('\n');
-  throw new Error(
-    `accepted park: seed ${seed} passed no attempt in ${cap} restarts — a measure nothing passes is a generator or ` +
-      `instrument bug. Restarts:\n${log}`,
-  );
+  return { accepted: null, attempts };
 }
 
 /**

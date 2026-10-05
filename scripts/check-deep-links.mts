@@ -47,6 +47,12 @@
 import { tapEscapeWithinOneFrame } from './lib/keys.mts';
 import { chromium, type Page } from 'playwright-core';
 import { worldX, worldZ } from '../src/world/building/layout.ts';
+import {
+  REPTILE_HOUSE_ORIGIN_X,
+  REPTILE_HOUSE_ORIGIN_Z,
+  REPTILE_LOG_CENTRE_X,
+} from '../src/world/reptileHouse/layout.ts';
+import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
@@ -169,7 +175,120 @@ const GAME_READY_TIMEOUT_MS = 120000;
  */
 const AUTOSAVE_TIMEOUT_MS = 60000;
 
+/** Where `/reptile-house?at=` is asked to stand, in the hall's own metres — inside the Hollow Log. */
+const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
+
 const CHECKS: DeepLinkCheck[] = [
+  {
+    // The Reptile House's hall, at a spot: `inside` must flip and the player
+    // must be at the asked-for hall-local point, converted back here from the
+    // same constants the building uses — a conversion that cannot pass by
+    // agreeing with itself, exactly as `/castle?at=` below.
+    path: `/reptile-house?at=${REPTILE_AT.x},${REPTILE_AT.z}&facing=90`,
+    // The returning-save case primes a save *inside the hall* (the plain
+    // link lands at the arrival), so `continueGame` measures the case that
+    // once refused: restored into the hall, then asked for a spot in it.
+    primerPath: '/reptile-house',
+    assert: async (page) => {
+      const want = { x: REPTILE_HOUSE_ORIGIN_X + REPTILE_AT.x, z: REPTILE_HOUSE_ORIGIN_Z + REPTILE_AT.z };
+      await page
+        .waitForFunction(
+          () => ((window as unknown as { game?: any }).game)?.world?.reptileHouse?.playerIsInside === true,
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true) return { ok: false, detail: `the Reptile House was not entered (inside=${s.inside})` };
+      if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
+      const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
+      if (off > CASTLE_TOLERANCE) {
+        return { ok: false, detail: `asked to stand at hall (${REPTILE_AT.x}, ${REPTILE_AT.z}) = world (${want.x}, ${want.z}), but the player is at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)}) — ${off.toFixed(1)} m off` };
+      }
+      return { ok: true, detail: `inside the Reptile House, ${off.toFixed(2)} m from the asked-for spot` };
+    },
+  },
+  {
+    // The Tortoise Ride, boarded: inside the hall, riding, on the shell.
+    path: '/tortoise-ride',
+    primerPath: '/reptile-house',
+    assert: async (page) => {
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            return !!g && g.world?.reptileHouse?.playerOnTortoise === true && g.player?.riding === true;
+          },
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          onTortoise: g?.world?.reptileHouse?.playerOnTortoise ?? null,
+          riding: g?.player?.riding ?? null,
+          y: g?.player?.position?.y ?? null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true || s.onTortoise !== true || s.riding !== true) {
+        return { ok: false, detail: `expected to be riding the tortoise in the hall; inside=${s.inside} onTortoise=${s.onTortoise} riding=${s.riding}` };
+      }
+      return { ok: true, detail: `on the tortoise's shell, ${Number(s.y).toFixed(2)} m up, riding` };
+    },
+  },
+  {
+    // Outside the Reptile House's door, in the park: not inside, standing on
+    // the plot's own doormat (`ReptileHouse.doormat`, the spot the paths reach).
+    path: '/reptile-house-door',
+    // Primed inside the hall too: the door link must put a restored-inside
+    // player back out on the doormat.
+    primerPath: '/reptile-house',
+    assert: async (page) => {
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            const mat = g?.world?.reptileHouse?.doormat;
+            return !!g && !!mat && g.world.reptileHouse.playerIsInside === false && !!g.player?.position &&
+              Math.hypot(g.player.position.x - mat.x, g.player.position.z - mat.z) < 1;
+          },
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        const mat = g?.world?.reptileHouse?.doormat;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.reptileHouse?.playerIsInside ?? null,
+          mat: mat ? { x: mat.x, z: mat.z } : null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (!s.playerPos || !s.mat) return { ok: false, detail: 'the player or the doormat had no position' };
+      const space = spaceAt(s.playerPos.x, s.playerPos.z);
+      if (space !== SPACE_GARDEN || s.inside !== false) {
+        return { ok: false, detail: `expected to stand in the park outside the door; she is in '${space}' (inside=${s.inside}) at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)})` };
+      }
+      const off = Math.hypot(s.playerPos.x - s.mat.x, s.playerPos.z - s.mat.z);
+      if (off > CASTLE_TOLERANCE) return { ok: false, detail: `in the park but ${off.toFixed(1)} m from the doormat at (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
+      return { ok: true, detail: `on the Reptile House's park doormat, ${off.toFixed(2)} m from (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
+    },
+  },
   {
     // **This target exists because of a bug it would have caught.** `at` is in
     // the interior's own metres and `teleportTo` takes world coordinates, so

@@ -41,6 +41,11 @@ export interface CreatureHandle extends AssetHandle {
  * look like beach balls; a sphere squashed 10–25% on one axis looks like it was
  * sewn and stuffed.
  */
+/** Whether an asset can be walked — a parade member, a pet trotting to its bowl. */
+export function hasWalk(handle: AssetHandle): handle is CreatureHandle {
+  return typeof (handle as Partial<CreatureHandle>).setWalkPhase === 'function';
+}
+
 export function blob(
   radius: number,
   material: Material,

@@ -1,0 +1,893 @@
+/**
+ * **`check:reptile-house` — the Reptile House is solid, walkable, and nobody
+ * can get stuck in it.**
+ *
+ * ```
+ * pnpm run check:reptile-house
+ * REPTILE_CHECK_REMOVE=lagoon pnpm run check:reptile-house   # prove it red
+ * ```
+ *
+ * Built on the real `World` (`park-harness.mts`), so every number here is
+ * measured off the colliders the game registers, never off a description of
+ * them. In order, with a **control on every instrument before it is trusted**
+ * (CLAUDE.md: two agents got clean, decisive, entirely wrong answers from
+ * flood fills that were measuring the wrong thing):
+ *
+ *  1. The fill instrument sees a sealed pocket (a hollow rectangle in a world
+ *     of its own) and, in a hall with nothing but its four walls, reaches the
+ *     middle of the lagoon.
+ *  2. A flood fill at the player's radius from the arrival reaches every
+ *     keep-out — arrival, doorway, every stand spot, the inside of the Hollow
+ *     Log, every path node, the exit — and **no clear cell on the plate is
+ *     unreachable**: a pocket a child could land in is a hard failure.
+ *  3. Every path keeps its width: a player disc sweeps every `PATHS` polyline
+ *     and the clear radius at every node is at least 1.5 m.
+ *  4. A player-sized body marched at every enclosure, case, planter, post
+ *     and the stall from sixteen bearings at 5 cm and at `PLAYER_LONGEST_STEP`
+ *     never gets inside it.
+ *  5. The 1.4 m enclosure walls hold a body at jump height; a wall at 1.2 m
+ *     would not (control).
+ *  6. The exterior: the shell is solid from thirty-two bearings but the
+ *     doorway's own cone (`check:hotel` probe 22).
+ *  7. The doors work both ways at a sprint stride, through the real
+ *     `ReptileHouse` on the real harness.
+ *  8. Every drawn solid taller than 0.6 m under the hall root has a collider
+ *     at its middle, bar a named walk-through list.
+ *  9. Every animal is inside its own enclosure.
+ * 10. The Tortoise Ride, on a real `Player`: boards by the link, and mid-lap
+ *     a jump, the stick or a tap each put her off the shell on clear floor
+ *     with `Player.riding` false, and the tortoise parks itself.
+ *
+ * **Proven red before trusted green**, on 2 October 2026 with
+ * `REPTILE_CHECK_REMOVE=lagoon` (the lagoon's one stadium collider removed
+ * after the build), seed 5 restart 1, 8 clauses red:
+ *
+ * ```
+ *   ✗ lagoon's middle is NOT reachable
+ *   ✗ lagoon — 22 of 32 marches got inside it
+ *   ✗ 11 of 60 jump-height marches got over a 1.45 m wall (apex 1.28 m)
+ *   ✗ enclosure:lagoon/rc-lagoon-wall/rc-lagoon-wall (1.50 m tall) has no collider at (15.00, -3.00)
+ *   ✗ enclosure:lagoon/rp-rock-a/rp-rock-a (0.74 m tall) has no collider at (15.52, -3.83)
+ *   ✗ enclosure:lagoon/reptile.croc//rr-croc-body/rr-croc-body (0.78 m tall) has no collider at (13.27, -2.26)
+ *   ✗ enclosure:lagoon/reptile.croc//rr-croc-tail/rr-croc-tail (0.66 m tall) has no collider at (13.99, -3.21)
+ *   ✗ 55 tall drawn solids checked, 4 with no collider
+ * ```
+ *
+ * The geometry that was proved against is `layout.ts`'s `EXHIBIT_PLACEMENTS`
+ * lagoon stadium (13, −3)→(17, −3) half 3 at origin (600, −600), walls at
+ * `REPTILE_ENCLOSURE_WALL_HEIGHT` 1.45. (Clause 9 stays green under that
+ * mutation: animals are measured by position, not by collider.)
+ *
+ * Clause 10 proved red the same day with the one line in
+ * `TortoiseRide.update` that reads the input commented out (the mouth-door
+ * geometry, `TORTOISE_RIDE_LOOP` as in `layout.ts`, seed 5 restart 1), 4
+ * clauses red — the tap route calls `dismount()` itself and rightly stayed
+ * green:
+ *
+ * ```
+ *   ✗   one frame later she is off the shell and in control (Player.riding false)
+ *   ✗   on the floor (y 1.64)
+ *   ✗   one frame later she is off the shell and in control (Player.riding false)
+ *   ✗   on the floor (y 1.64)
+ *   4 clause(s) FAILED.
+ * ```
+ */
+import './headless-canvas.mjs';
+import { BackSide, Group, InstancedMesh, Matrix4, Mesh, Box3, Vector3, type BufferAttribute, type MeshToonMaterial, type Texture } from 'three';
+import { buildHeadlessPark, quietly } from './park-harness.mts';
+import { clearsTop, CollisionWorld } from '../src/world/Collision.ts';
+import { WalkSurfaces } from '../src/world/building/surfaces.ts';
+import { MAX_FRAME_DELTA, PLAYER_LONGEST_STEP, PLAYER_RADIUS } from '../src/core/constants.ts';
+import { IsoCamera } from '../src/core/IsoCamera.ts';
+import { JUMP_APEX_HEIGHT, Player } from '../src/entities/Player.ts';
+import { TALLEST_CHILD_HEIGHT } from '../src/art/models/kid.ts';
+import { createHat } from '../src/art/models/hats.ts';
+import { SNAKE_FACE_ROWS, SUNNY_FACE_EYE_ROW } from '../src/art/models/snakeFace.ts';
+import { reptileHouseLipThickness, reptileHousePlinthTop } from '../src/art/models/reptileHouseAssets.ts';
+import { bandCrossed } from '../src/world/tapSpacing.ts';
+import { PRIMARY_ACTION } from '../src/world/interact.ts';
+import { SPACE_GARDEN, SPACE_REPTILE_HOUSE, spaceAt } from '../src/world/spaces.ts';
+import { placedEntry } from '../src/world/parkLayout.ts';
+import { reptileKeepOuts, segmentDistance } from '../src/world/reptileHouse/props.ts';
+import { meterReading, meterRungs } from '../src/world/reptileHouse/stall.ts';
+import { buildHallShell, facadeToWorld, reptileEntryBand, reptileExitBand, REPTILE_INNER_X, REPTILE_INNER_Z } from '../src/world/reptileHouse/shell.ts';
+import { pointInPolygon, distanceToOutline, REPTILE_BED_EDGE_HALF } from '../src/world/reptileHouse/planting.ts';
+import {
+  BEDS,
+  EXHIBIT_PLACEMENTS,
+  REPTILE_ARCH_HEIGHT,
+  REPTILE_HOUSE_FLOOR_Y,
+  TORTOISE_RIDE_PARK,
+  PATHS,
+  REPTILE_ARCH_WIDTH,
+  REPTILE_ARRIVAL_X,
+  REPTILE_ARRIVAL_Z,
+  REPTILE_BACK_WALL_ALONG,
+  REPTILE_DOOR_BAND_OUTER,
+  REPTILE_DOOR_X,
+  REPTILE_ENCLOSURE_WALL_HEIGHT,
+  REPTILE_EXIT_BAND_Z,
+  REPTILE_HOUSE_ORIGIN_X,
+  REPTILE_HOUSE_ORIGIN_Z,
+  REPTILE_LOG_CENTRE_X,
+  REPTILE_PATH_MIN_CLEAR,
+  REPTILE_SHELL_RADIUS,
+  STALL_POSITION,
+  type ExhibitShape,
+  type LocalPoint,
+} from '../src/world/reptileHouse/layout.ts';
+import type { FrameContext } from '../src/core/types.ts';
+
+const OX = REPTILE_HOUSE_ORIGIN_X;
+const OZ = REPTILE_HOUSE_ORIGIN_Z;
+const CELL = 0.25;
+
+let bad = 0;
+const say = (ok: boolean, line: string): void => {
+  if (!ok) bad += 1;
+  console.log(`  ${ok ? '✓' : '✗'} ${line}`);
+};
+const note = (line: string): void => {
+  process.stderr.write(`  note: ${line}\n`);
+};
+
+// ---------------------------------------------------------------------------
+// The instrument: a flood fill over the plate at the player's radius.
+// ---------------------------------------------------------------------------
+
+interface Fill {
+  readonly reached: Set<string>;
+  /** Every clear cell on the plate, reached or not. */
+  readonly clear: Set<string>;
+}
+
+const key = (cx: number, cz: number): string => `${cx},${cz}`;
+const cellOf = (x: number, z: number): [number, number] => [Math.round((x - OX) / CELL), Math.round((z - OZ) / CELL)];
+
+/** On the walkable plate — the floor inside the walls, plus the doorway's apron. */
+function onPlate(localX: number, localZ: number): boolean {
+  if (Math.abs(localX) <= REPTILE_INNER_X && Math.abs(localZ) <= REPTILE_INNER_Z) return true;
+  // The doorway, out to the plate's own 0.6 m apron past the wall line.
+  return Math.abs(localX - REPTILE_DOOR_X) <= 1.3 && localZ > REPTILE_INNER_Z && localZ <= REPTILE_INNER_Z + 0.85;
+}
+
+function fill(collision: CollisionWorld, fromX: number, fromZ: number, radius = PLAYER_RADIUS): Fill {
+  const clear = new Set<string>();
+  const reach = Math.ceil(26 / CELL);
+  for (let cx = -reach; cx <= reach; cx += 1) {
+    for (let cz = -reach; cz <= reach; cz += 1) {
+      const x = OX + cx * CELL;
+      const z = OZ + cz * CELL;
+      if (!onPlate(x - OX, z - OZ)) continue;
+      if (collision.isClearCircle(x, z, radius)) clear.add(key(cx, cz));
+    }
+  }
+  const [sx, sz] = cellOf(fromX, fromZ);
+  const reached = new Set<string>();
+  const queue: [number, number][] = [[sx, sz]];
+  if (clear.has(key(sx, sz))) reached.add(key(sx, sz));
+  while (queue.length > 0) {
+    const [cx, cz] = queue.pop()!;
+    for (const [dx, dz] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const) {
+      const k = key(cx + dx, cz + dz);
+      if (reached.has(k) || !clear.has(k)) continue;
+      reached.add(k);
+      queue.push([cx + dx, cz + dz]);
+    }
+  }
+  return { reached, clear };
+}
+
+function reached(result: Fill, x: number, z: number): boolean {
+  const [cx, cz] = cellOf(x, z);
+  for (let dx = -1; dx <= 1; dx += 1) {
+    for (let dz = -1; dz <= 1; dz += 1) if (result.reached.has(key(cx + dx, cz + dz))) return true;
+  }
+  return false;
+}
+
+/** March a body from `from` towards `to` in `step`s; returns where it ended. */
+function march(collision: CollisionWorld, from: Vector3, to: Vector3, step: number, travel = 12): Vector3 {
+  const p = from.clone();
+  const dir = to.clone().sub(from);
+  dir.y = 0;
+  dir.normalize();
+  for (let t = 0; t < travel; t += step) {
+    collision.resolveMovement(p, dir.x * step, dir.z * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+  }
+  return p;
+}
+
+function insideShape(shape: ExhibitShape, p: LocalPoint, slack = 0.01): boolean {
+  if (shape.kind === 'disc') return Math.hypot(p.x - shape.centre.x, p.z - shape.centre.z) < shape.radius - slack;
+  return segmentDistance(shape.a, shape.b, p) < shape.half - slack;
+}
+
+function shapeCentre(shape: ExhibitShape): LocalPoint {
+  return shape.kind === 'disc' ? shape.centre : { x: (shape.a.x + shape.b.x) / 2, z: (shape.a.z + shape.b.z) / 2 };
+}
+
+// ---------------------------------------------------------------------------
+// 1. CONTROLS — the instrument, before the building.
+// ---------------------------------------------------------------------------
+console.log('CONTROL — the fill instrument:');
+{
+  // A hollow rectangle in an otherwise empty hall: the fill must report its
+  // inside as clear-but-unreachable, which is the pocket this whole check
+  // exists to find.
+  const control = new CollisionWorld();
+  buildHallShell(new Group(), control, new WalkSurfaces());
+  control.addRectangle(OX, OZ, 3, 3, 0.3);
+  const seen = fill(control, OX + REPTILE_ARRIVAL_X, OZ + REPTILE_ARRIVAL_Z);
+  const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
+  say(seen.reached.size > 10000, `the fill floods the empty hall: ${seen.reached.size} cells reached`);
+  say(pockets.length > 50 && !reached(seen, OX, OZ), `the fill sees a sealed pocket: ${pockets.length} clear cells inside a hollow rectangle are unreachable`);
+  say(!seen.clear.has(key(...cellOf(OX, OZ + 30))), 'nothing off the plate counts as floor');
+
+  // And with nothing but the walls, every exhibit's middle is reachable —
+  // the fill can say yes as well as no.
+  const empty = new CollisionWorld();
+  buildHallShell(new Group(), empty, new WalkSurfaces());
+  const open = fill(empty, OX + REPTILE_ARRIVAL_X, OZ + REPTILE_ARRIVAL_Z);
+  const lagoon = EXHIBIT_PLACEMENTS.find((e) => e.id === 'lagoon')!;
+  const lagoonCentre = shapeCentre(lagoon.shape);
+  say(reached(open, OX + lagoonCentre.x, OZ + lagoonCentre.z), 'with no exhibit colliders the lagoon\'s middle is reachable');
+  say(reached(open, OX, OZ), "with no exhibit colliders Noodle's rock is reachable");
+}
+
+// ---------------------------------------------------------------------------
+// The real building.
+// ---------------------------------------------------------------------------
+const { world, scene } = quietly(() => buildHeadlessPark());
+const house = world.reptileHouse;
+const collision = world.collision;
+const remove = process.env['REPTILE_CHECK_REMOVE'];
+if (remove) {
+  const victim = house.solids.find((solid) => solid.what.includes(remove));
+  if (!victim) throw new Error(`REPTILE_CHECK_REMOVE=${remove} names no solid`);
+  if (typeof victim.handle === 'number') collision.removeCircle(victim.handle);
+  else collision.removeWall(victim.handle);
+  note(`REMOVED ${victim.what} on purpose — this run must go red`);
+}
+// `REPTILE_CHECK_OPEN_SHELL=8` takes chord 8 of the exterior's sixteen out
+// (chord 8 is dead opposite the doorway), so the facade clause can be re-armed
+// without anyone editing shell.ts to prove it.
+const openShell = process.env['REPTILE_CHECK_OPEN_SHELL'];
+if (openShell) {
+  const chord = Number(openShell);
+  const wall = house.shellSolids[chord - 1];
+  if (!Number.isInteger(chord) || chord < 1 || chord > 15 || !wall) throw new Error(`REPTILE_CHECK_OPEN_SHELL=${openShell}: chords are 1..15`);
+  collision.removeWall(wall);
+  note(`OPENED shell chord ${chord} on purpose — this run must go red`);
+}
+// `REPTILE_CHECK_MUTATE=faces-upside-down` flips every painted head's and
+// plank's texture the other way up before the painted-faces clause measures,
+// which is what painting them through `glbCanvasTexture` did.
+const mutate = process.env['REPTILE_CHECK_MUTATE'];
+if (mutate && mutate !== 'faces-upside-down') throw new Error(`REPTILE_CHECK_MUTATE=${mutate}: only faces-upside-down is known`);
+collision.setPlayBounds({ radius: 1e6, distanceToEdge: () => 1e6 });
+
+console.log(`\nREACHABILITY — ${house.solids.length} solids registered by the hall:`);
+{
+  const seen = fill(collision, OX + REPTILE_ARRIVAL_X, OZ + REPTILE_ARRIVAL_Z);
+  say(seen.reached.size > 5000, `the fill leaves the arrival: ${seen.reached.size} cells reached`);
+  const keepOuts = reptileKeepOuts();
+  let unreachable = 0;
+  for (const spot of keepOuts) {
+    if (!reached(seen, OX + spot.x, OZ + spot.z)) {
+      unreachable += 1;
+      say(false, `${spot.what} at (${spot.x}, ${spot.z}) is not reachable from the arrival`);
+    }
+  }
+  say(unreachable === 0, `every keep-out is reachable: ${keepOuts.length - unreachable} of ${keepOuts.length}`);
+  say(reached(seen, OX + REPTILE_LOG_CENTRE_X, OZ), 'the inside of the Hollow Log is reachable');
+  say(reached(seen, OX + REPTILE_DOOR_X, OZ + REPTILE_EXIT_BAND_Z), "the exit band's centre is reachable");
+  for (const exhibit of EXHIBIT_PLACEMENTS) {
+    const centre = shapeCentre(exhibit.shape);
+    say(!reached(seen, OX + centre.x, OZ + centre.z), `${exhibit.id}'s middle is NOT reachable`);
+  }
+  // The keeper's pocket behind the counter.
+  const yaw = (45 * Math.PI) / 180;
+  const keeperX = STALL_POSITION.x + Math.cos(yaw) * -0.9 + Math.sin(yaw) * 0.45;
+  const keeperZ = STALL_POSITION.z - Math.sin(yaw) * -0.9 + Math.cos(yaw) * 0.45;
+  say(!reached(seen, OX + keeperX, OZ + keeperZ), "the keeper's pocket behind the counter is NOT reachable");
+  const pockets = [...seen.clear].filter((k) => !seen.reached.has(k));
+  if (pockets.length > 0) {
+    const sample = pockets.slice(0, 6).map((k) => {
+      const [cx, cz] = k.split(',').map(Number) as [number, number];
+      return `(${(cx * CELL).toFixed(2)}, ${(cz * CELL).toFixed(2)})`;
+    });
+    say(false, `${pockets.length} clear cell(s) on the plate are unreachable — a pocket a child could be stuck in: ${sample.join(' ')}…`);
+  } else {
+    say(true, `no pockets: every one of the ${seen.clear.size} clear cells on the plate is reachable`);
+  }
+}
+
+console.log('\nPATH WIDTHS — a player disc swept along every path, then grown at every node:');
+{
+  let stations = 0;
+  let blocked = 0;
+  for (const path of PATHS) {
+    for (let i = 0; i + 1 < path.points.length; i += 1) {
+      const a = path.points[i]!;
+      const b = path.points[i + 1]!;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      for (let s = 0; s <= length; s += CELL) {
+        const t = length === 0 ? 0 : s / length;
+        const x = OX + a.x + (b.x - a.x) * t;
+        const z = OZ + a.z + (b.z - a.z) * t;
+        stations += 1;
+        if (!collision.isClearCircle(x, z, PLAYER_RADIUS)) {
+          blocked += 1;
+          if (blocked <= 5) say(false, `path '${path.id}' is blocked at (${(x - OX).toFixed(2)}, ${(z - OZ).toFixed(2)})`);
+        }
+      }
+    }
+    for (const node of path.points) {
+      let radius = PLAYER_RADIUS;
+      while (radius < 3 && collision.isClearCircle(OX + node.x, OZ + node.z, radius + 0.05)) radius += 0.05;
+      if (radius < REPTILE_PATH_MIN_CLEAR / 2) {
+        say(false, `path '${path.id}' node (${node.x}, ${node.z}) has only ${(radius * 2).toFixed(2)} m clear (rule: ${REPTILE_PATH_MIN_CLEAR})`);
+      }
+    }
+  }
+  say(blocked === 0, `${stations} stations swept on ${PATHS.length} paths, ${blocked} blocked`);
+}
+
+console.log('\nMARCHED at every solid from 16 bearings, at 5 cm and at the sprint stride:');
+{
+  let marches = 0;
+  let got = 0;
+  for (const exhibit of EXHIBIT_PLACEMENTS) {
+    const centre = shapeCentre(exhibit.shape);
+    let inside = 0;
+    for (let b = 0; b < 16; b += 1) {
+      const angle = (b / 16) * Math.PI * 2;
+      for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+        marches += 1;
+        const from = new Vector3(OX + centre.x + Math.cos(angle) * 9, 0, OZ + centre.z + Math.sin(angle) * 9);
+        const end = march(collision, from, new Vector3(OX + centre.x, 0, OZ + centre.z), step);
+        if (insideShape(exhibit.shape, { x: end.x - OX, z: end.z - OZ })) inside += 1;
+      }
+    }
+    got += inside;
+    say(inside === 0, `${exhibit.id} — ${inside} of 32 marches got inside it`);
+  }
+  // Every bed, at every corner of its outline and at the middle of every
+  // edge, from the nearest path node outside it — where a child actually
+  // comes at that kerb from. The first cut marched at the bed's centroid from
+  // 14 m out on bearings uncorrelated with the corner it named, so it never
+  // reached the open corners and reported 0.00 m on beds a body could walk
+  // 0.59 m into. Corners alone are not enough either: with one whole edge's
+  // capsule removed, the two neighbouring capsules still stop a body at each
+  // corner, and only a march at the edge's middle finds the hole.
+  const nodes = PATHS.flatMap((path) => path.points);
+  let touched = 0;
+  let bedMarches = 0;
+  // A convex corner rounds off by the capsule's own radius: its two capsules
+  // are pulled back to stay inside the kerb, and a body's edge can reach
+  // h·(1/sin(θ/2) − 1) past the point of a corner of interior angle θ — 0.12 m
+  // at a right angle. The allowance is that figure for the sharpest convex
+  // corner any bed has, plus three centimetres of resolver slack; anything
+  // over it is a hole.
+  const sharpest = Math.max(
+    ...BEDS.flatMap((bed) =>
+      bed.outline.map((c, i) => {
+        const p = bed.outline[(i - 1 + bed.outline.length) % bed.outline.length]!;
+        const q = bed.outline[(i + 1) % bed.outline.length]!;
+        const a = Math.atan2(p.z - c.z, p.x - c.x);
+        const b = Math.atan2(q.z - c.z, q.x - c.x);
+        const interior = Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+        return REPTILE_BED_EDGE_HALF * (1 / Math.sin(interior / 2) - 1);
+      }),
+    ),
+  );
+  const allowance = sharpest + 0.03;
+  for (const bed of BEDS) {
+    let deepest = 0;
+    const outside = nodes.filter((node) => !pointInPolygon(node, bed.outline));
+    const targets: LocalPoint[] = bed.outline.flatMap((vertex, i) => {
+      const next = bed.outline[(i + 1) % bed.outline.length]!;
+      return [vertex, { x: (vertex.x + next.x) / 2, z: (vertex.z + next.z) / 2 }];
+    });
+    for (const vertex of targets) {
+      const from = outside.reduce((best, node) =>
+        Math.hypot(node.x - vertex.x, node.z - vertex.z) < Math.hypot(best.x - vertex.x, best.z - vertex.z) ? node : best,
+      );
+      const distance = Math.hypot(from.x - vertex.x, from.z - vertex.z);
+      for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+        marches += 1;
+        bedMarches += 1;
+        const end = march(collision, new Vector3(OX + from.x, 0, OZ + from.z), new Vector3(OX + vertex.x, 0, OZ + vertex.z), step, distance + 1.5);
+        const local = { x: end.x - OX, z: end.z - OZ };
+        const inside = pointInPolygon(local, bed.outline);
+        // How far the body's **edge** crossed the kerb: its radius less its
+        // centre's distance to the outline, or plus it once the centre is in.
+        // Measured at the edge, not the centre, because the interior discs
+        // alone stop a body 0.3 m short of a long edge — its edge over the
+        // kerb by 0.3 m, its centre still outside — and a centre-only
+        // reading called that solid.
+        const over = inside ? PLAYER_RADIUS + distanceToOutline(local, bed.outline) : PLAYER_RADIUS - distanceToOutline(local, bed.outline);
+        deepest = Math.max(deepest, over);
+        // Reached the kerb: the body's edge within 0.15 m of the outline (or over it).
+        if (over >= -0.15) touched += 1;
+      }
+    }
+    // The edge capsules put the solid boundary on the kerb; a right-angled
+    // corner rounds off 0.12 m short of its point and nothing else gives.
+    say(
+      deepest < allowance,
+      `bed '${bed.id}' — furthest a body's edge got over the kerb, at ${bed.outline.length} corners and ${bed.outline.length} edge middles from the nearest path node: ${deepest.toFixed(2)} m (allowance ${allowance.toFixed(2)}, the sharpest corner's rounding ${sharpest.toFixed(2)} + 0.03)`,
+    );
+  }
+  // The marches have to be measuring the beds, not stopping on something in
+  // the way: most of them must actually arrive at the kerb.
+  say(touched >= bedMarches * 0.7, `${touched} of ${bedMarches} bed marches reached a kerb (rule: 70 %)`);
+  // The walls: from inside, at 12 stations a side, nobody leaves the plate but through the door.
+  let escaped = 0;
+  for (let i = 0; i < 12; i += 1) {
+    const t = -0.9 + (1.8 * i) / 11;
+    for (const [from, to] of [
+      [new Vector3(OX + t * REPTILE_INNER_X, 0, OZ - 10), new Vector3(OX + t * REPTILE_INNER_X, 0, OZ - 30)],
+      [new Vector3(OX + t * REPTILE_INNER_X, 0, OZ + 8), new Vector3(OX + t * REPTILE_INNER_X, 0, OZ + 30)],
+      [new Vector3(OX - 10, 0, OZ + t * REPTILE_INNER_Z), new Vector3(OX - 30, 0, OZ + t * REPTILE_INNER_Z)],
+      [new Vector3(OX + 10, 0, OZ + t * REPTILE_INNER_Z), new Vector3(OX + 30, 0, OZ + t * REPTILE_INNER_Z)],
+    ] as const) {
+      marches += 1;
+      const end = march(collision, from, to, PLAYER_LONGEST_STEP, 24);
+      const lx = end.x - OX;
+      const lz = end.z - OZ;
+      const throughDoor = Math.abs(lx - REPTILE_DOOR_X) < 1.4 && lz > REPTILE_INNER_Z;
+      if ((Math.abs(lx) > REPTILE_INNER_X + 0.05 || Math.abs(lz) > REPTILE_INNER_Z + 0.05) && !throughDoor) escaped += 1;
+    }
+  }
+  say(escaped === 0, `the walls hold: ${escaped} of 48 marches left the plate other than through the door`);
+  note(`${marches} marches in all, ${got} got inside an exhibit`);
+}
+
+console.log('\nHOP — the 1.4 m walls hold a body at jump height:');
+{
+  // The control first: a 1.2 m wall would not.
+  const probe = new Vector3(0, JUMP_APEX_HEIGHT, 0);
+  const low = new CollisionWorld();
+  low.addCircle(0, 0, 2.4, JUMP_APEX_HEIGHT - 0.08, false, true);
+  probe.set(5, JUMP_APEX_HEIGHT, 0);
+  const lowEnd = march(low, probe, new Vector3(0, 0, 0), 0.1, 6);
+  say(Math.hypot(lowEnd.x, lowEnd.z) < 2.4, `CONTROL: a wall ${(JUMP_APEX_HEIGHT - 0.08).toFixed(2)} m tall lets a body at the apex in (ended ${Math.hypot(lowEnd.x, lowEnd.z).toFixed(2)} m from the centre)`);
+  say(!clearsTop(REPTILE_ENCLOSURE_WALL_HEIGHT, JUMP_APEX_HEIGHT), `the engine's own rule holds a body at the apex under a ${REPTILE_ENCLOSURE_WALL_HEIGHT} m wall (clearsTop)`);
+  let breached = 0;
+  for (const exhibit of EXHIBIT_PLACEMENTS) {
+    if (!['snakeGrove', 'tortoiseGarden', 'lagoon', 'iguanaRocks', 'nursery'].includes(exhibit.id)) continue;
+    const centre = shapeCentre(exhibit.shape);
+    for (let b = 0; b < 12; b += 1) {
+      const angle = (b / 12) * Math.PI * 2;
+      const from = new Vector3(OX + centre.x + Math.cos(angle) * 8, JUMP_APEX_HEIGHT, OZ + centre.z + Math.sin(angle) * 8);
+      const end = march(collision, from, new Vector3(OX + centre.x, JUMP_APEX_HEIGHT, OZ + centre.z), 0.1, 9);
+      if (insideShape(exhibit.shape, { x: end.x - OX, z: end.z - OZ })) breached += 1;
+    }
+  }
+  say(breached === 0, `${breached} of 60 jump-height marches got over a ${REPTILE_ENCLOSURE_WALL_HEIGHT} m wall (apex ${JUMP_APEX_HEIGHT.toFixed(2)} m)`);
+}
+
+console.log('\nFACADE — the shell is solid from 32 bearings but the doorway:');
+{
+  const frame = house.facade;
+  const facade = REPTILE_SHELL_RADIUS * Math.cos(Math.PI / 16);
+  const doorCone = Math.atan2(REPTILE_ARCH_WIDTH / 2, facade);
+  const alongOf = (px: number, pz: number): number => (px - frame.x) * Math.sin(frame.yaw) + (pz - frame.z) * Math.cos(frame.yaw);
+  const acrossOf = (px: number, pz: number): number =>
+    (px - frame.x) * Math.sin(frame.yaw + Math.PI / 2) + (pz - frame.z) * Math.cos(frame.yaw + Math.PI / 2);
+  let reachedShell = 0;
+  let doorwaysIn = 0;
+  let holes = 0;
+  for (let i = 0; i < 32; i += 1) {
+    const bearing = frame.yaw + (i / 32) * Math.PI * 2;
+    const offAxis = Math.abs(Math.atan2(Math.sin(bearing - frame.yaw), Math.cos(bearing - frame.yaw)));
+    for (const step of [0.05, PLAYER_LONGEST_STEP]) {
+      const probe = new Vector3(frame.x + Math.sin(bearing) * 14, 0, frame.z + Math.cos(bearing) * 14);
+      let closest = Infinity;
+      let closestNotByDoor = Infinity;
+      let byDoor = false;
+      for (let travelled = 0; travelled < 18; travelled += step) {
+        const fromAlong = alongOf(probe.x, probe.z);
+        const fromAcross = acrossOf(probe.x, probe.z);
+        collision.resolveMovement(probe, -Math.sin(bearing) * step, -Math.cos(bearing) * step, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+        const toAlong = alongOf(probe.x, probe.z);
+        const toAcross = acrossOf(probe.x, probe.z);
+        if (!byDoor && fromAlong >= facade && toAlong < facade) {
+          const t = (fromAlong - facade) / (fromAlong - toAlong);
+          if (Math.abs(fromAcross + t * (toAcross - fromAcross)) < REPTILE_ARCH_WIDTH / 2) byDoor = true;
+        }
+        const r = Math.hypot(probe.x - frame.x, probe.z - frame.z);
+        closest = Math.min(closest, r);
+        if (!byDoor) closestNotByDoor = Math.min(closestNotByDoor, r);
+      }
+      if (closest < facade + 2.5) reachedShell += 1;
+      if (offAxis > doorCone) {
+        if (closestNotByDoor < facade - 0.05) {
+          holes += 1;
+          say(false, `the shell is open ${((offAxis * 180) / Math.PI).toFixed(0)}° off the doorway: a body in ${step.toFixed(2)} m steps got to ${closestNotByDoor.toFixed(2)} m from the centre`);
+        }
+      } else if (closest < facade) doorwaysIn += 1;
+    }
+  }
+  say(holes === 0, `no bearing off the doorway got inside the ${facade.toFixed(2)} m shell`);
+  say(doorwaysIn > 0, `the doorway lets a body in: ${doorwaysIn} marches entered through it`);
+  say(reachedShell >= 48, `${reachedShell} of 64 marches reached the shell (the rest met the tail or the sign)`);
+  // A sprinter through the door stops on the back wall within two metres.
+  const band = reptileEntryBand(frame);
+  const start = facadeToWorld(frame, REPTILE_DOOR_BAND_OUTER + 3, 0);
+  const probe = new Vector3(start.x, 0, start.z);
+  const end = march(collision, probe, new Vector3(frame.x, 0, frame.z), PLAYER_LONGEST_STEP, 8);
+  const stoppedAt = alongOf(end.x, end.z);
+  say(
+    stoppedAt > REPTILE_BACK_WALL_ALONG && stoppedAt < (REPTILE_BACK_WALL_ALONG + REPTILE_DOOR_BAND_OUTER) / 2 + 2,
+    `a sprinter through the door stops at ${stoppedAt.toFixed(2)} m along (back wall ${REPTILE_BACK_WALL_ALONG.toFixed(2)} m, band ${band.halfAlong.toFixed(2)} m deep)`,
+  );
+}
+
+console.log('\nDOORS — both ways, on the real building:');
+{
+  const probe = {
+    position: new Vector3(0, 0, 0),
+    previousPosition: new Vector3(0, 0, 0),
+    riding: false,
+    model: { height: 2.12 },
+    // What the real Player answers hat and all; the bare rig's height is
+    // `model.height` above and never moves. The meter clause moves this one.
+    topHeight: 2.12,
+    teleportTo(x: number, y: number, z: number) {
+      probe.position.set(x, y, z);
+      probe.previousPosition.set(x, y, z);
+    },
+  };
+  house.attachPlayer(probe as never);
+  const context = { dt: 1 / 60, elapsed: 1, playerPosition: probe.position, frame: 1 } as unknown as FrameContext;
+  say(house.requestEnterDoor(), '/reptile-house-door puts her outside the door');
+  for (let i = 0; i < 70; i += 1) house.update(context);
+  say(spaceAt(probe.position.x, probe.position.z) === SPACE_GARDEN, `she stands in the park (${spaceAt(probe.position.x, probe.position.z)})`);
+  {
+    const plot = placedEntry('reptileHouse');
+    const off = Math.hypot(probe.position.x - plot.entranceX, probe.position.z - plot.entranceZ);
+    say(off < 0.01, `on the plot's own doormat, ${off.toFixed(3)} m from (${plot.entranceX.toFixed(2)}, ${plot.entranceZ.toFixed(2)})`);
+  }
+  say(house.interactZones().some((zone) => zone.id === 'reptile-entrance'), 'the entrance zone is offered from outside');
+  // Walk in through the band, at a sprint stride.
+  const band = reptileEntryBand(house.facade);
+  const outside = facadeToWorld(house.facade, REPTILE_DOOR_BAND_OUTER + 0.3, 0);
+  const in1 = facadeToWorld(house.facade, REPTILE_DOOR_BAND_OUTER + 0.3 - PLAYER_LONGEST_STEP, 0);
+  say(bandCrossed(band, outside.x, outside.z, in1.x, in1.z), 'a sprint stride across the front band fires it');
+  probe.previousPosition.set(outside.x, 0, outside.z);
+  probe.position.set(in1.x, 0, in1.z);
+  house.update(context);
+  for (let i = 0; i < 70; i += 1) house.update(context);
+  const local = { x: probe.position.x - OX, z: probe.position.z - OZ };
+  const off = Math.hypot(local.x - REPTILE_ARRIVAL_X, local.z - REPTILE_ARRIVAL_Z);
+  say(spaceAt(probe.position.x, probe.position.z) === SPACE_REPTILE_HOUSE && house.playerIsInside, 'walking through the front door enters the hall');
+  say(off < 0.5, `she arrives ${off.toFixed(2)} m from the arrival (${REPTILE_ARRIVAL_X}, ${REPTILE_ARRIVAL_Z})`);
+  say(house.interactZones().length >= 17, `${house.interactZones().length} zones are offered inside`);
+  say(world.shopStands().some((stand) => stand.id === 'reptileStall') && world.shopStands().some((stand) => stand.id === 'reptileNursery'), 'both shop stands are found by World.shopStands()');
+  // And out again through the exit band.
+  const exit = reptileExitBand();
+  probe.previousPosition.set(OX + REPTILE_DOOR_X, 0, OZ + REPTILE_EXIT_BAND_Z - 1.2);
+  probe.position.set(OX + REPTILE_DOOR_X, 0, OZ + REPTILE_EXIT_BAND_Z - 1.2 + PLAYER_LONGEST_STEP);
+  say(bandCrossed(exit, probe.previousPosition.x, probe.previousPosition.z, probe.position.x, probe.position.z), 'a sprint stride across the exit band fires it');
+  house.update(context);
+  for (let i = 0; i < 70; i += 1) house.update(context);
+  say(!house.playerIsInside && spaceAt(probe.position.x, probe.position.z) === SPACE_GARDEN, 'walking out through the exit leaves into the park');
+  say(collision.isClearCircle(probe.position.x, probe.position.z, PLAYER_RADIUS), 'she lands on clear ground outside the door');
+  // Back in by the deep link, at a chosen spot.
+  say(house.requestEnter({ x: REPTILE_LOG_CENTRE_X, z: 0, facing: 90 }), '/reptile-house?at= enters at a spot');
+  for (let i = 0; i < 70; i += 1) house.update(context);
+  say(Math.abs(probe.position.x - OX - REPTILE_LOG_CENTRE_X) < 0.01 && Math.abs(probe.position.z - OZ) < 0.01, 'and she stands exactly there, inside the log');
+  // And again from inside: a save written in the hall restores her there
+  // before the link runs, and the link once refused "already inside".
+  say(house.requestEnter(), '/reptile-house from inside the hall still enters');
+  for (let i = 0; i < 70; i += 1) house.update(context);
+  const back = Math.hypot(probe.position.x - OX - REPTILE_ARRIVAL_X, probe.position.z - OZ - REPTILE_ARRIVAL_Z);
+  say(back < 0.01 && house.playerIsInside, `and puts her back on the arrival (${back.toFixed(2)} m off)`);
+
+  console.log('\nNOODLE-O-METER — a hat changes the answer:');
+  // The real rule, on a real Player: `topHeight` is the hat's own measured
+  // height over the model's own anchor, which is what the name label clears.
+  const player = quietly(() => new Player(collision, new IsoCamera(), new Vector3(OX + REPTILE_ARRIVAL_X, 0, OZ + REPTILE_ARRIVAL_Z)));
+  const hat = createHat('snake');
+  const bare = player.topHeight;
+  say(Math.abs(bare - player.model.height) < 1e-6, `bare-headed, Player.topHeight is the rig's own ${bare.toFixed(2)} m`);
+  // The worn-hat system's one read property, with the real hat's measured height.
+  player.wornHat = { hatHeight: hat.height } as never;
+  const hatted = player.topHeight;
+  say(hatted > bare + 0.2, `in the snake hat (${hat.height.toFixed(2)} m from its anchor), Player.topHeight is ${hatted.toFixed(2)} m`);
+  say(meterRungs(hatted) > meterRungs(bare), `the meter reads ${meterRungs(bare)} rungs bare-headed and ${meterRungs(hatted)} in the hat`);
+  // And the chip itself, on the probe the hall has: it must read `topHeight`.
+  const meter = house.interactZones().find((zone) => zone.id === 'reptile:meter');
+  const press = (): string => {
+    const action = meter?.actions?.().find((a) => a.id === PRIMARY_ACTION);
+    if (!action) throw new Error('no Noodle-o-meter chip');
+    action.run();
+    return house.lastBubble;
+  };
+  probe.topHeight = 2.12;
+  const saidBare = press();
+  probe.topHeight = TALLEST_CHILD_HEIGHT;
+  const saidTall = press();
+  say(saidBare === meterReading(2.12), `the chip says "${saidBare}" at 2.12 m`);
+  say(saidTall === meterReading(TALLEST_CHILD_HEIGHT) && saidTall !== saidBare, `and "${saidTall}" at ${TALLEST_CHILD_HEIGHT} m (the tallest hat)`);
+}
+
+console.log('\nTORTOISE RIDE — on by the link, off by any input, onto clear floor, and the tortoise comes home:');
+{
+  // A real Player this time: the ride hands her back through `endRide`.
+  const rider = quietly(() => new Player(collision, new IsoCamera(), new Vector3(OX + REPTILE_ARRIVAL_X, 0, OZ + REPTILE_ARRIVAL_Z)));
+  house.attachPlayer(rider);
+  const quiet = { justPressed: () => false, moveAmount: 0 };
+  const frame = (input: { justPressed(a: string): boolean; moveAmount: number }): FrameContext =>
+    ({ dt: 1 / 60, elapsed: 1, playerPosition: rider.position, frame: 1, input } as unknown as FrameContext);
+  const bayX = OX + TORTOISE_RIDE_PARK.x;
+  const bayZ = OZ + TORTOISE_RIDE_PARK.z;
+  const ride = (name: string, off: () => void): void => {
+    say(house.requestTortoiseRide(), `${name}: /tortoise-ride boards`);
+    for (let i = 0; i < 70; i += 1) house.update(frame(quiet));
+    say(rider.riding && house.playerOnTortoise && rider.position.y > 1, `  she is riding, ${rider.position.y.toFixed(2)} m up on the shell`); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere: 1 m over that floor is up on the shell
+    say(collision.isClearCircle(bayX, bayZ, PLAYER_RADIUS), '  the bay is clear floor while the tortoise is out');
+    // Twelve seconds in: out of the foyer, on the ring.
+    for (let i = 0; i < 12 * 60; i += 1) house.update(frame(quiet));
+    const local = { x: rider.position.x - OX, z: rider.position.z - OZ };
+    say(rider.riding && Math.hypot(local.x, local.z) < 9, `  mid-lap at (${local.x.toFixed(1)}, ${local.z.toFixed(1)}), still riding`);
+    off();
+    say(!rider.riding && !house.playerOnTortoise, '  one frame later she is off the shell and in control (Player.riding false)');
+    say(Math.abs(rider.position.y - REPTILE_HOUSE_FLOOR_Y) < 1e-6, `  on the floor (y ${rider.position.y.toFixed(2)})`);
+    say(collision.isClearCircle(rider.position.x, rider.position.z, PLAYER_RADIUS), `  on clear floor at hall (${(rider.position.x - OX).toFixed(1)}, ${(rider.position.z - OZ).toFixed(1)})`);
+    say(!house.tortoiseParked, '  the tortoise is still out');
+    for (let i = 0; i < 60 * 60 && !house.tortoiseParked; i += 1) house.update(frame(quiet));
+    say(house.tortoiseParked && !collision.isClearCircle(bayX, bayZ, PLAYER_RADIUS), '  and plods home on its own: parked, bay solid again');
+    say(!rider.riding, '  without picking her up again');
+  };
+  ride('jump', () => house.update(frame({ justPressed: (a) => a === 'jump', moveAmount: 0 })));
+  ride('the stick', () => house.update(frame({ justPressed: () => false, moveAmount: 1 })));
+  ride('a tap', () => {
+    house.dismountTortoise();
+    house.update(frame(quiet));
+  });
+}
+
+console.log('\nDRAWN ⇒ SOLID — every tall solid mesh under the hall root has a collider at its middle:');
+{
+  // Things drawn with no collider at their middle on purpose, by name, with
+  // the reason. Anything whose lowest point is above the tallest hat is
+  // overhead and never met at all, so it is skipped before this list.
+  const walkThrough: readonly [string, string][] = [
+    ['shopkeeper', 'behind the counter, in the pocket the fill proved unreachable'],
+    ['reptile.wall', 'the walls are colliders themselves and the probe above marches at them'],
+    ['rp-log-hollow', "a walk-through: its middle is the Log Walk, its walls are the two capsules marched above"],
+    ['rs-awning-posts', "both posts stand inside the counter's capsule; the pair's middle is the sealed pocket"],
+  ];
+  // The plants kit is all `InstancedMesh` (`instancedPlant`), shadowless by
+  // the interior rule — so castShadow cannot say which of those is solid.
+  // Every instance is a drawn thing unless its species is foliage: a child
+  // brushes through a fern, a tuft, a lily pad, a hanging vine and the
+  // leaves and flowers that lean out over a path from the bed or pot they
+  // root in (the bed probe above is what proves those solid at the kerb).
+  // Trunks, rocks, logs and the banyan stay in. The first cut skipped
+  // instanced meshes wholesale, and stayed green with the collider gone from
+  // under both hop-on rocks and the foyer log.
+  const softSpecies = [
+    'rp-fern-frond',
+    'reptile-tufts',
+    'rp-vine-strand',
+    'rp-vine-leaves',
+    'rp-lily-pad',
+    'rp-banana-leaf',
+    'rp-monstera-leaf',
+    'rp-monstera-stalk',
+    'rp-heliconia',
+    'rp-heliconia-stalk',
+    'rp-palm-frond',
+  ];
+  let checked = 0;
+  let naked = 0;
+  let instances = 0;
+  const box = new Box3();
+  const instance = new Matrix4();
+  const world = new Matrix4();
+  const pathOf = (object: Mesh): string => {
+    let ancestor: typeof object.parent = object;
+    let name = object.name;
+    while (ancestor) {
+      name = `${ancestor.name}/${name}`;
+      ancestor = ancestor.parent;
+      if (ancestor === house.hallRoot) break;
+    }
+    return name;
+  };
+  const probeBox = (name: string): void => {
+    const height = box.max.y - box.min.y; // flat-ok: a prop mesh's box in the reptile hall, a flat space (floor y 0, off the sphere)
+    if (height < 0.6 || !Number.isFinite(height)) return;
+    if (box.min.y > TALLEST_CHILD_HEIGHT) return; // flat-ok: the same prop box in the flat reptile hall (floor y 0, off the sphere); TALLEST_CHILD_HEIGHT over that floor
+    if (walkThrough.some(([prefix]) => name.includes(prefix))) return;
+    checked += 1;
+    const cx = (box.min.x + box.max.x) / 2;
+    const cz = (box.min.z + box.max.z) / 2;
+    if (collision.isClearCircle(cx, cz, 0.1)) {
+      naked += 1;
+      if (naked <= 8) say(false, `${name} (${height.toFixed(2)} m tall) has no collider at (${(cx - OX).toFixed(2)}, ${(cz - OZ).toFixed(2)})`);
+    }
+  };
+  house.hallRoot.updateWorldMatrix(true, true);
+  house.hallRoot.traverse((object) => {
+    if (!(object instanceof Mesh) || !object.visible) return;
+    if (object instanceof InstancedMesh) {
+      // Outline hulls are drawn inside-out round their plant and are not a thing of their own.
+      if ((object.material as { side?: number }).side === BackSide) return;
+      if (softSpecies.includes(object.name)) return;
+      object.geometry.computeBoundingBox();
+      const local = object.geometry.boundingBox;
+      if (!local) return;
+      for (let i = 0; i < object.count; i += 1) {
+        object.getMatrixAt(i, instance);
+        world.multiplyMatrices(object.matrixWorld, instance);
+        box.copy(local).applyMatrix4(world);
+        instances += 1;
+        probeBox(`${pathOf(object)}[${i}]`);
+      }
+      return;
+    }
+    if (!object.castShadow) return;
+    box.setFromObject(object);
+    probeBox(pathOf(object));
+  });
+  say(naked === 0, `${checked} tall drawn solids checked (${instances} plant instances among them), ${naked} with no collider`);
+  note(`walk-through list: ${walkThrough.map(([prefix, why]) => `${prefix} (${why})`).join('; ')}; soft species: ${softSpecies.join(', ')}`);
+}
+
+console.log('\nPAINTED FACES — eyes above the smile on every painted head, the motif upright on every plank:');
+{
+  // The three heads share one canvas and one UV contract; the three planks
+  // are authored the same way (`planarUvCanvasTexture`'s doc comment owns
+  // it). Read each mesh's UVs against the texture's own `flipY` and ask which
+  // canvas row a vertex samples: higher vertices must sample rows nearer the
+  // top. Painted through the wrong helper, every head wore its mouth above
+  // its eyes and no frame would have said so.
+  const heads = new Map<string, Mesh>();
+  const planks = new Map<string, Mesh>();
+  for (const root of [house.hallRoot, house.parkRoot]) {
+    root.traverse((object) => {
+      if (!(object instanceof Mesh)) return;
+      if (['rh-head', 'rn-head', 'rr-snake-head'].includes(object.name) && !heads.has(object.name)) heads.set(object.name, object);
+      if (['rh-sign', 'rs-sign', 'rs-meter-board'].includes(object.name) && !planks.has(object.name)) planks.set(object.name, object);
+    });
+  }
+  say(heads.size === 3, `painted heads found: ${[...heads.keys()].join(', ') || 'none'}`);
+  say(planks.size === 3, `dressed planks found: ${[...planks.keys()].join(', ') || 'none'}`);
+  if (mutate === 'faces-upside-down') {
+    const flipped = new Set<Texture>();
+    for (const mesh of [...heads.values(), ...planks.values()]) {
+      const map = (mesh.material as MeshToonMaterial).map;
+      if (map && !flipped.has(map)) {
+        map.flipY = !map.flipY;
+        flipped.add(map);
+      }
+    }
+    note(`FLIPPED ${flipped.size} texture(s) the other way up on purpose — this run must go red`);
+  }
+  // Least-squares slope of one series against another.
+  const slope = (xs: number[], ys: number[]): number => {
+    const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+    let num = 0;
+    let den = 0;
+    for (let i = 0; i < xs.length; i += 1) {
+      num += (xs[i]! - mx) * (ys[i]! - my);
+      den += (xs[i]! - mx) ** 2;
+    }
+    return den > 0 ? num / den : Number.NaN;
+  };
+  for (const [name, mesh] of heads) {
+    const map = (mesh.material as MeshToonMaterial).map;
+    const position = mesh.geometry.getAttribute('position') as BufferAttribute;
+    const uv = mesh.geometry.getAttribute('uv') as BufferAttribute | undefined;
+    if (!map || !uv) {
+      say(false, `${name} wears no painted face (map ${!!map}, uv ${!!uv})`);
+      continue;
+    }
+    const ys: number[] = [];
+    const rows: number[] = [];
+    for (let i = 0; i < uv.count; i += 1) {
+      const u = uv.getX(i);
+      const v = uv.getY(i);
+      if (u < 0.05 && v < 0.05) continue; // the parked back faces
+      ys.push(position.getY(i));
+      rows.push(map.flipY ? 1 - v : v);
+    }
+    const fall = slope(ys, rows);
+    if (name === 'rh-head') {
+      // Sunny's mouth is the doorway, not a painted smile: her eye row has to
+      // land above the lips round the bore, which the plinth top, the bore's
+      // height and the lining's thickness put at a known height.
+      const eye = rows.reduce((best, row, i) => (Math.abs(row - SUNNY_FACE_EYE_ROW) < Math.abs(rows[best]! - SUNNY_FACE_EYE_ROW) ? i : best), 0);
+      const lipsTop = reptileHousePlinthTop() + REPTILE_ARCH_HEIGHT + reptileHouseLipThickness();
+      say(
+        fall < 0 && ys[eye]! > lipsTop + 0.3,
+        `${name}: ${ys.length} front vertices, canvas row ${fall < 0 ? 'falls' : 'RISES'} ${Math.abs(fall).toFixed(2)}/m with height (flipY ${map.flipY}); ` +
+          `the eye row lands at y ${ys[eye]!.toFixed(2)}, over the lips' top at ${lipsTop.toFixed(2)} (the mouth is the door)`,
+      );
+      continue;
+    }
+    const eye = rows.reduce((best, row, i) => (Math.abs(row - SNAKE_FACE_ROWS.eye) < Math.abs(rows[best]! - SNAKE_FACE_ROWS.eye) ? i : best), 0);
+    const mouth = rows.reduce((best, row, i) => (Math.abs(row - SNAKE_FACE_ROWS.mouth) < Math.abs(rows[best]! - SNAKE_FACE_ROWS.mouth) ? i : best), 0);
+    say(
+      fall < 0 && ys[eye]! > ys[mouth]!,
+      `${name}: ${ys.length} front vertices, canvas row ${fall < 0 ? 'falls' : 'RISES'} ${Math.abs(fall).toFixed(2)}/m with height (flipY ${map.flipY}); ` +
+        `the eye row lands at y ${ys[eye]!.toFixed(2)} and the smile row at y ${ys[mouth]!.toFixed(2)}`,
+    );
+  }
+  for (const [name, mesh] of planks) {
+    const map = (mesh.material as MeshToonMaterial).map;
+    const position = mesh.geometry.getAttribute('position') as BufferAttribute;
+    const uv = mesh.geometry.getAttribute('uv') as BufferAttribute | undefined;
+    const normal = mesh.geometry.getAttribute('normal') as BufferAttribute | undefined;
+    if (!map || !uv || !normal) {
+      say(false, `${name} is not dressed (map ${!!map}, uv ${!!uv}, normal ${!!normal})`);
+      continue;
+    }
+    for (const facing of [1, -1]) {
+      const xs: number[] = [];
+      const us: number[] = [];
+      const ys: number[] = [];
+      const rows: number[] = [];
+      for (let i = 0; i < uv.count; i += 1) {
+        if (normal.getZ(i) * facing < 0.9) continue;
+        xs.push(position.getX(i));
+        us.push(uv.getX(i));
+        ys.push(position.getY(i));
+        rows.push(map.flipY ? 1 - uv.getY(i) : uv.getY(i));
+      }
+      const fall = slope(ys, rows);
+      const run = slope(xs, us) * facing;
+      say(
+        xs.length >= 4 && fall < 0 && run > 0,
+        `${name}'s ${facing > 0 ? 'front' : 'back'} face (${xs.length} vertices): canvas row ${fall < 0 ? 'falls' : 'RISES'} with height, ` +
+          `the motif runs ${run > 0 ? 'left to right' : 'MIRRORED'} as read from that side (flipY ${map.flipY})`,
+      );
+    }
+  }
+}
+
+console.log('\nANIMALS — every one inside its own enclosure:');
+{
+  const spots = house.animalSpots();
+  let outside = 0;
+  for (const spot of spots) {
+    const exhibit = EXHIBIT_PLACEMENTS.find((e) => e.id === spot.id);
+    if (!exhibit || !insideShape(exhibit.shape, spot, -0.3)) {
+      outside += 1;
+      say(false, `${spot.id}'s animal at (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}) is outside its enclosure`);
+    }
+  }
+  say(spots.length >= 15 && outside === 0, `${spots.length} animals measured, ${outside} outside`);
+}
+
+console.log('\nHOUSEKEEPING:');
+{
+  let lights = 0;
+  house.hallRoot.traverse((object) => {
+    if ((object as { isLight?: boolean }).isLight) lights += 1;
+  });
+  say(lights >= 8, `${lights} lights under the hall root`);
+  say(spaceAt(OX, OZ) === SPACE_REPTILE_HOUSE, `spaceAt the hall origin is '${spaceAt(OX, OZ)}'`);
+  say(scene.children.includes(house.hallRoot), 'the hall root is in the scene');
+  {
+    let parent = house.parkRoot.parent;
+    while (parent && parent.parent && parent.parent !== scene) parent = parent.parent;
+    say(house.parkRoot.parent?.name === 'anchor:reptileHouse' && Boolean(parent), `the exterior stands in its park plot (${house.parkRoot.parent?.name ?? 'nowhere'})`);
+  }
+  note(`${EXHIBIT_PLACEMENTS.length} exhibits probed, ${BEDS.length} beds marched, ${PATHS.length} paths swept, facade marched on its park plot`);
+}
+
+console.log(bad === 0 ? '\nAll clauses passed.' : `\n${bad} clause(s) FAILED.`);
+process.exit(bad === 0 ? 0 : 1);

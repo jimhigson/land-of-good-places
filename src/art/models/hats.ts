@@ -25,6 +25,7 @@ import { css, FACE_FILL_INSET, paintFaceOnFill, type FacePaintOptions } from '..
 import { createPuffNotes, createSongScheduler, playPuffMelody } from '../effects/puffSong';
 import { blob, type AssetHandle } from '../style/asset';
 import { KID_HEAD_SCALE, kidEyeTopAt } from './kid';
+import { createSnake } from './snake';
 import {
   CHEERY_HOOD,
   CHEERY_PEAK,
@@ -81,7 +82,7 @@ import {
  * band, which is what "the hats are all much too small" looks like from a
  * sofa. One `FIT` group per hat fixes the lot and keeps them fixed.
  */
-export type HatKind = 'party' | 'crown' | 'bobble' | 'sun' | 'cap' | 'flower' | 'ripikaHat' | 'puff';
+export type HatKind = 'party' | 'crown' | 'bobble' | 'sun' | 'cap' | 'flower' | 'ripikaHat' | 'puff' | 'snake';
 
 export const HAT_KINDS: readonly HatKind[] = [
   'party',
@@ -92,6 +93,7 @@ export const HAT_KINDS: readonly HatKind[] = [
   'flower',
   'ripikaHat',
   'puff',
+  'snake',
 ];
 
 /**
@@ -1032,6 +1034,32 @@ function createPuffHat(): AssetHandle {
 /** Staggers each bonnet's jiggle and song, deterministically — never `Math.random()`. */
 let puffHatCount = 0;
 
+/**
+ * **The Snake Hat** — Scales & Tails' own: a baby snake coiled on the crown,
+ * head peeking over the brow and smiling. The same `createSnake` as every
+ * snake in the Reptile House, so the hat and the pet are visibly kin; its
+ * coil is a spiral path two turns round the crown, rising, with the head at
+ * the front.
+ */
+function createSnakeHat(): AssetHandle {
+  const { root, fit } = hatGroups('hat.snake');
+  const path: Vector3[] = [];
+  const steps = 16;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    const angle = Math.PI * 0.5 + t * Math.PI * 2 * 1.75;
+    const r = 0.27 - t * 0.09;
+    path.push(new Vector3(Math.cos(angle) * r, SIT + 0.06 + t * 0.2, Math.sin(angle) * r));
+  }
+  const snake = createSnake({ length: 2.4, radius: 0.075, colourway: 'mint', seed: 0x4a7, path, headLookAt: new Vector3(0, SIT + 0.1, 2) });
+  fit.add(snake.root);
+  const band = ring(0.25, 0.03, PALETTE.markerPink);
+  band.position.y = SIT + 0.02;
+  fit.add(band);
+  const handle = finish(root, fit, 'snake');
+  return { ...handle, update: snake.update };
+}
+
 const BUILDERS: Readonly<Record<HatKind, () => AssetHandle>> = {
   party: createPartyHat,
   crown: createCrown,
@@ -1041,6 +1069,7 @@ const BUILDERS: Readonly<Record<HatKind, () => AssetHandle>> = {
   flower: createFlowerCrown,
   ripikaHat: createRipikaHat,
   puff: createPuffHat,
+  snake: createSnakeHat,
 };
 
 /** A fresh hat. Parent it to `hatAnchor` (head) or to a shop stand. */

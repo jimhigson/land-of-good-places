@@ -12,7 +12,8 @@ import { HOTEL_FLOOR_Y, HOTEL_ORIGIN_X } from '../core/constants';
 import { registerPlanCache } from '../boot/planCaches';
 import { CASTLE_FLOORS } from './building/floors';
 import { BUILDING_BASE_Y } from './building/layout';
-import { HOTEL_ROOM_Z, SPACE_GARDEN, type SpaceId } from './spaces';
+import { HOTEL_ROOM_Z, REPTILE_SPACE_ORIGINS, SPACE_GARDEN, type SpaceId } from './spaces';
+import { REPTILE_HOUSE_FLOOR_Y } from './reptileHouse/layout';
 
 interface SpaceOrigin {
   readonly x: number;
@@ -33,6 +34,11 @@ function originsNow(): Readonly<Record<SpaceId, SpaceOrigin>> {
   ),
   ...Object.fromEntries(
     HOTEL_ROOM_Z.map(([space, z]) => [space, { x: HOTEL_ORIGIN_X, y: HOTEL_FLOOR_Y, z }]),
+  ),
+  // The Reptile House's hall and its forecourt — both flat plates at
+  // `REPTILE_HOUSE_FLOOR_Y`, read off the same table `spaceAt` uses.
+  ...Object.fromEntries(
+    REPTILE_SPACE_ORIGINS.map(([space, x, z]) => [space, { x, y: REPTILE_HOUSE_FLOOR_Y, z }]),
   ),
   };
 }
