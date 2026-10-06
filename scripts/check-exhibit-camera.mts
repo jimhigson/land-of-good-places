@@ -28,7 +28,7 @@
  *     drawn in the hall or her own body (glass is see-through), and so do
  *     rays to most (`CROWD_SEEN`) of a crowd — twelve babies, five geckos,
  *     points along a coiled body;
- *  3. **framed**: the animals' box spans at least {@link MIN_SPAN} of the
+ *  3. **framed**: the animals' box spans at least {@link SUBJECT_SPAN_MIN} of the
  *     frame, and its middle is in the middle part of the screen;
  *  4. **inside the hall**: the settled eye is inside the walls; and on every
  *     frame of the way down and back up, the eye is either over the hall's
@@ -88,6 +88,9 @@ import {
   EXHIBIT_SHOT_EASE_CANCEL,
   EXHIBIT_SHOT_EASE_IN,
   CROWD_SEEN,
+  HER_SHARE_MAX,
+  SUBJECT_SPAN_MIN,
+  herBodyBox,
   sightlinesPass,
   eyeInHallSpace,
   insideHall,
@@ -96,12 +99,6 @@ import {
 import { EXHIBIT_PLACEMENTS, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z } from '../src/world/reptileHouse/layout.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
-/**
- * The animals must span at least this share of the frame's width or height —
- * a span, not an area, so a long thin snake and a round tortoise are held to
- * the same idea of "big enough to see the reaction".
- */
-const MIN_SPAN = 0.2;
 /** And its middle within this much of the screen's middle, in NDC (±1 is the edge). */
 const MAX_CENTRE_OFF = 0.45;
 /** Degrees the view direction may turn in one 60 fps frame. */
@@ -329,7 +326,7 @@ for (const [label, width, height] of VIEWPORTS) {
     const shot = house.exhibitCamera.shot;
     const solved = house.exhibitCamera.active && shot?.exhibitId === id;
     const report = house.exhibitCamera.report;
-    const why = report ? `rejected: ${report.outside} outside the hall, ${report.overSolid} over a solid, ${report.tooClose} too close to something, ${report.blocked} blocked, ${report.approach} with a blocked way down; blockers ${JSON.stringify(report.blockers)}` : '';
+    const why = report ? `rejected: ${report.outside} outside the hall, ${report.overSolid} over a solid, ${report.tooClose} too close to something, ${report.blocked} blocked, ${report.approach} with a blocked way down, ${report.herTooBig} where she would fill the frame, ${report.tooSmall} where the animals would be too small; blockers ${JSON.stringify(report.blockers)}` : '';
     say(solved, solved && shot ? `${id}: a shot was solved — candidate ${shot.tried} in order of preference was the first to pass (solved over ${solveFrames + 1} frame(s), ${solveMs.toFixed(0)} ms here)` : `${id}: NO shot was solved — ${why}`);
     if (shot && shot.exhibitId === id && shot.zoom > CAMERA_ZOOM_MAX) note(`${id}: the framing wanted zoom ${shot.zoom.toFixed(2)}, past CAMERA_ZOOM_MAX ${CAMERA_ZOOM_MAX} — the clamp is deciding this shot's size`);
     if (!solved || !shot) {
@@ -364,7 +361,10 @@ for (const [label, width, height] of VIEWPORTS) {
       `  unoccluded from the real eye: ${starsSeen} of ${stars} star(s), ${crowdSeen} of ${crowd} in the crowd (at least ${Math.round(CROWD_SEEN * 100)}%)${blocked.length ? ` — blocked by ${blocked.join('; ')}` : ''}`,
     );
     const { span, share, centre } = frameShare(box);
-    say(span >= MIN_SPAN, `  framed: the animals span ${(span * 100).toFixed(1)}% of the frame (at least ${MIN_SPAN * 100}%; ${(share * 100).toFixed(1)}% of its area), against ${(rigSpan * 100).toFixed(1)}% before the chip`);
+    say(span >= SUBJECT_SPAN_MIN, `  framed: the animals span ${(span * 100).toFixed(1)}% of the frame (at least ${SUBJECT_SPAN_MIN * 100}%; ${(share * 100).toFixed(1)}% of its area), against ${(rigSpan * 100).toFixed(1)}% before the chip`);
+    // Over her shoulder, not through her: she is in the frame, but a corner of it.
+    const her = frameShare(herBodyBox(player.position, player.topHeight));
+    say(her.share <= HER_SHARE_MAX, `  over her shoulder: she covers ${(her.share * 100).toFixed(1)}% of the frame (at most ${HER_SHARE_MAX * 100}%)`);
     say(Math.abs(centre.x) <= MAX_CENTRE_OFF && Math.abs(centre.y) <= MAX_CENTRE_OFF && centre.z < 1, `  centred: their middle at NDC (${centre.x.toFixed(2)}, ${centre.y.toFixed(2)})`);
     say(insideHall(eye, 0.3), `  the settled eye is inside the hall at (${(eye.x - OX).toFixed(2)}, ${eye.y.toFixed(2)}, ${(eye.z - OZ).toFixed(2)}), ${eye.distanceTo(shot.focus).toFixed(2)} m from the animals`);
     for (const panel of extra) house.hallRoot.remove(panel);

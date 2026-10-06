@@ -1,5 +1,5 @@
-import { Box3, InstancedMesh, Line3, Matrix4, Mesh, Raycaster, Sphere, Vector3, type Material, type Object3D } from 'three';
-import { CAMERA_DISTANCE, CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
+import { Box3, InstancedMesh, Line3, Matrix4, Mesh, PerspectiveCamera, Raycaster, Sphere, Vector3, type Material, type Object3D } from 'three';
+import { CAMERA_DISTANCE, CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES, CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN, PLAYER_RADIUS, cameraViewHalfHeight } from '../../core/constants';
 import { CAMERA_FOCUS_LIFT, type IsoCamera } from '../../core/IsoCamera';
 import type { CollisionWorld } from '../Collision';
 import { REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z, REPTILE_WALL_HEIGHT } from './layout';
@@ -78,16 +78,24 @@ const LIVE_FOCUS_HALF_LIFE = 0.35;
 const EXHIBIT_SHOT_MOVE_CANCEL = 0.25;
 
 /** Eye heights tried, above the hall floor. Her head is at about 1.4 m; "slightly above". */
-const EYE_HEIGHTS = [2.3, 2.8, 3.3, 3.8, 4.3] as const;
+const EYE_HEIGHTS = [2.3, 2.8, 3.3, 3.8, 4.3, 4.8, 5.3] as const;
 /** How far behind her the eye stands, along the line from the animal through her. */
-const EYE_BACKS = [1.6, 2.4, 3.2] as const;
+const EYE_BACKS = [1.6, 2.4, 3.2, 4.0, 4.8, 5.6] as const;
 /**
  * Bearings either side of "straight behind her", in degrees — the shoulder.
  * Ordered by preference only for readability: {@link shotCost} decides.
  */
-const EYE_SWINGS = [20, -20, 32, -32, 10, -10, 45, -45, 0, 60, -60, 75, -75, 90, -90] as const;
+const EYE_SWINGS = [20, -20, 32, -32, 10, -10, 45, -45, 0, 60, -60, 75, -75, 90, -90, 120, -120, 150, -150, 180] as const;
 /** The bearing off "straight behind" a shot is happiest at: past her shoulder, not through her head. */
-const IDEAL_SWING = 20;
+const IDEAL_SWING = 28;
+/**
+ * The stand-back and height a shot is happiest at. Far enough behind her and
+ * high enough over her hat that she is a shoulder in the corner of the frame
+ * rather than half of it — the first cut stood 2.4 m back at 2.8 m and her
+ * hat filled 40% of the picture (measured in a real page, 6 October 2026).
+ */
+const IDEAL_BACK = 3.2;
+const IDEAL_HEIGHT = 3.3;
 /** Kept clear of the hall's walls, metres. */
 const WALL_MARGIN = 0.8;
 /** No drawn surface nearer the eye than this — the lens's near plane is 0.1 m. */
@@ -448,6 +456,77 @@ export function shotAngles(eye: Vector3, focus: Vector3): { yawDegrees: number; 
  * little over the subject's own size, never tighter than a metre and a bit
  * (a single gecko still gets its board round it).
  */
+/**
+ * Her body as a box: the player's own collision radius round her feet, up to
+ * the top of her hat. Not her group's bounding box — that carries her name
+ * label, her shadow and whatever she is holding, and came out 2.1 m wide,
+ * overlapping the snake she was looking at.
+ */
+export function herBodyBox(feet: Vector3, topHeight: number): Box3 {
+  return new Box3(new Vector3(feet.x - PLAYER_RADIUS, feet.y, feet.z - PLAYER_RADIUS), new Vector3(feet.x + PLAYER_RADIUS, feet.y + topHeight, feet.z + PLAYER_RADIUS));
+}
+
+/** {@link herBodyBox} for an object that carries a `topHeight` (a `Player`'s group does not; see {@link ShotPlayer}). */
+function bodyBoxOf(body: Object3D): Box3 {
+  const top = (body.userData['topHeight'] as number | undefined) ?? 2.2;
+  return herBodyBox(body.getWorldPosition(new Vector3()), top);
+}
+
+/** The least span of the frame the animals must reach — `check:exhibit-camera` holds the real frame to {@link SUBJECT_SPAN_MIN}. */
+const SUBJECT_SPAN_TO_SOLVE = 0.24;
+export const SUBJECT_SPAN_MIN = 0.2;
+
+/** Her largest share of the frame's area the solver will take — `check:exhibit-camera` allows {@link HER_SHARE_MAX}. */
+const HER_SHARE_TO_SOLVE = 0.22;
+/** Her largest share of the frame's area a shot may show: she is the shoulder, the animal is the subject. */
+export const HER_SHARE_MAX = 0.27;
+
+const SCRATCH_LENS = new PerspectiveCamera();
+
+/**
+ * The share of the frame's area `box` would cover from `eye` looking at
+ * `focus` — the lens solved exactly as `IsoCamera.applyFrustum` solves it
+ * for this distance and (clamped) zoom.
+ */
+export function screenShare(camera: IsoCamera, eye: Vector3, focus: Vector3, zoom: number, box: Box3): number {
+  return screenExtent(camera, eye, focus, zoom, box).share;
+}
+
+/**
+ * {@link screenShare}, and the box's **span** — the larger of the share of
+ * the frame's width and of its height it reaches across.
+ */
+export function screenExtent(camera: IsoCamera, eye: Vector3, focus: Vector3, zoom: number, box: Box3): { share: number; span: number } {
+  const aspect = camera.camera.aspect;
+  const halfHeight = cameraViewHalfHeight(aspect) / Math.min(CAMERA_ZOOM_MAX, Math.max(CAMERA_ZOOM_MIN, zoom));
+  const lens = SCRATCH_LENS;
+  lens.fov = (2 * Math.atan(halfHeight / eye.distanceTo(focus)) * 180) / Math.PI;
+  lens.aspect = aspect;
+  lens.near = 0.1;
+  lens.far = 100;
+  lens.position.copy(eye);
+  lens.up.set(0, 1, 0); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
+  lens.lookAt(focus);
+  lens.updateMatrixWorld();
+  lens.updateProjectionMatrix();
+  let minX = 1;
+  let minY = 1;
+  let maxX = -1;
+  let maxY = -1;
+  const corner = new Vector3();
+  for (let i = 0; i < 8; i += 1) {
+    corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(lens);
+    minX = Math.min(minX, corner.x);
+    maxX = Math.max(maxX, corner.x);
+    minY = Math.min(minY, corner.y);
+    maxY = Math.max(maxY, corner.y);
+  }
+  const clampN = (v: number): number => Math.max(-1, Math.min(1, v));
+  const width = Math.max(0, clampN(maxX) - clampN(minX)) / 2;
+  const height = Math.max(0, clampN(maxY) - clampN(minY)) / 2;
+  return { share: width * height, span: Math.max(width, height) };
+}
+
 export function shotZoom(camera: IsoCamera, subject: Box3): number {
   const size = subject.getSize(new Vector3());
   const half = Math.max(0.55, Math.hypot(size.x, size.z) / 2, size.y / 2);
@@ -457,7 +536,7 @@ export function shotZoom(camera: IsoCamera, subject: Box3): number {
 /** Lower is better: how far a clear candidate is from the shot we would draw by hand. */
 function shotCost(swing: number, back: number, height: number, yawDegrees: number): number {
   const rigTurn = Math.abs(wrapDegrees(yawDegrees - CAMERA_YAW_DEGREES));
-  return Math.abs(Math.abs(swing) - IDEAL_SWING) / 10 + Math.abs(back - 2.4) + Math.abs(height - 2.8) + rigTurn / 90;
+  return Math.abs(Math.abs(swing) - IDEAL_SWING) / 10 + Math.abs(back - IDEAL_BACK) + Math.abs(height - IDEAL_HEIGHT) + rigTurn / 90;
 }
 
 /**
@@ -498,6 +577,7 @@ export function* solveExhibitShotSteps(
   body: Object3D | null,
   report?: SolveReport,
   preferred?: Vector3,
+  her?: Box3,
 ): Generator<void, ExhibitShot | null> {
   const { box, targets } = subjectOf(subjects);
   if (box.isEmpty()) return null;
@@ -508,6 +588,7 @@ export function* solveExhibitShotSteps(
   // clear of by a hand's breadth — the shot is over her shoulder.
   const near = collectOccluders([world.hall], ignore);
   const zoom = shotZoom(world.camera, box);
+  const herBox = her ?? (body ? bodyBoxOf(body) : null);
   const rig = rigPose(player, world.camera.targetZoom);
 
   // "Behind her": along the line from the animals through her. Stood right
@@ -543,14 +624,31 @@ export function* solveExhibitShotSteps(
           if (report) report.overSolid += 1;
           continue;
         }
-        candidates.push({ eye, cost: shotCost(swing, back, height, shotAngles(eye, focus).yawDegrees) });
+        // Over her shoulder, not through her: how much of the frame she
+        // would fill, from this eye, at this shot's lens.
+        const share = herBox ? screenShare(world.camera, eye, focus, zoom, herBox) : 0;
+        if (report) report.herLeast = Math.min(report.herLeast ?? 1, share);
+        if (share > HER_SHARE_TO_SOLVE) {
+          if (report) report.herTooBig += 1;
+          continue;
+        }
+        // And big enough to see the reaction: the clamped zoom can only
+        // frame so tight, so a small animal wants the eye nearer.
+        const { span } = screenExtent(world.camera, eye, focus, zoom, box);
+        if (span < SUBJECT_SPAN_TO_SOLVE) {
+          if (report) report.tooSmall += 1;
+          continue;
+        }
+        candidates.push({ eye, cost: shotCost(swing, back, height, shotAngles(eye, focus).yawDegrees) + share * 4 + Math.max(0, 0.35 - span) * 6 });
       }
     }
   }
   candidates.sort((a, b) => a.cost - b.cost);
   // The eye that worked last time from here goes first: every test still runs
   // on it, so it is only ever a guess about where to start looking.
-  if (preferred) candidates.unshift({ eye: preferred.clone(), cost: -1 });
+  if (preferred && insideHall(preferred) && (!herBox || screenShare(world.camera, preferred, focus, zoom, herBox) <= HER_SHARE_TO_SOLVE)) {
+    candidates.unshift({ eye: preferred.clone(), cost: -1 });
+  }
 
   let best: { eye: Vector3; seen: boolean[]; cost: number } | null = null;
   let tried = 0;
@@ -599,6 +697,10 @@ export interface SolveReport {
   tooClose: number;
   blocked: number;
   approach: number;
+  herTooBig: number;
+  tooSmall: number;
+  /** The smallest share of the frame she would have filled from any eye that got that far. */
+  herLeast?: number;
   /** What blocked the stars' sightlines, by mesh name, over every candidate. */
   blockers: Record<string, number>;
 }
@@ -708,6 +810,8 @@ export interface ShotPlayer {
   readonly facing: number;
   readonly riding: boolean;
   readonly group: Object3D;
+  /** The top of her head, hat and all, above her feet. */
+  readonly topHeight: number;
 }
 
 /** What the director needs from the frame's input. */
@@ -789,11 +893,11 @@ export class ExhibitCamera {
    */
   start(id: string, subjects: readonly Object3D[], cast: readonly Object3D[], player: ShotPlayer): boolean {
     if (player.riding) return false;
-    const report: SolveReport = { outside: 0, overSolid: 0, tooClose: 0, blocked: 0, approach: 0, blockers: {} };
+    const report: SolveReport = { outside: 0, overSolid: 0, tooClose: 0, blocked: 0, approach: 0, herTooBig: 0, tooSmall: 0, blockers: {} };
     this.lastReport = report;
     const remembered = this.memory.get(id);
     const preferred = remembered && Math.hypot(remembered.at.x - player.position.x, remembered.at.z - player.position.z) < REMEMBER_WITHIN ? remembered.eye : undefined;
-    this.pending = { id, subjects, steps: solveExhibitShotSteps(this.world, id, subjects, cast, player.position, player.facing, player.group, report, preferred) };
+    this.pending = { id, subjects, steps: solveExhibitShotSteps(this.world, id, subjects, cast, player.position, player.facing, player.group, report, preferred, herBodyBox(player.position, player.topHeight)) };
     this.anchor.copy(player.position);
     this.lastPlayer = player;
     // Most shots solve inside this first slice; a hard one finishes over the
@@ -818,6 +922,13 @@ export class ExhibitCamera {
     return this.warmQueue.length + (this.warming ? 1 : 0);
   }
 
+  /** Her box as it would be stood at `feet` — for warming a shot from a stand spot she is not on yet. */
+  private herAt(feet: Vector3): Box3 | undefined {
+    const player = this.lastPlayer;
+    if (!player) return undefined;
+    return herBodyBox(feet, player.topHeight);
+  }
+
   private advanceWarm(): void {
     const deadline = now() + WARM_BUDGET_MS;
     while (now() < deadline) {
@@ -827,7 +938,7 @@ export class ExhibitCamera {
         this.warming = {
           id: next.id,
           at: next.at.clone(),
-          steps: solveExhibitShotSteps(this.world, next.id, next.subjects(), next.cast(), next.at, next.facing, null),
+          steps: solveExhibitShotSteps(this.world, next.id, next.subjects(), next.cast(), next.at, next.facing, null, undefined, undefined, this.herAt(next.at)),
         };
       }
       const step = this.warming.steps.next();
