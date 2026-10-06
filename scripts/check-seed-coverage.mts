@@ -253,7 +253,8 @@ if (wiredInto.length === 0) {
  */
 {
   const suiteFiles = globSync(PROCGEN_SUITE_GLOB).map((f) => f.split('\\').join('/')).sort();
-  for (const problem of shardMapProblems(suiteFiles)) fail(problem);
+  const mapProblems = shardMapProblems(suiteFiles);
+  for (const problem of mapProblems) fail(problem);
   const workflow = '.github/workflows/procgen-invariants.yml';
   const yml = readFileSync(workflow, 'utf8')
     .split('\n')
@@ -283,7 +284,8 @@ if (wiredInto.length === 0) {
   }
   const sizes = PROCGEN_SHARDS.map((shard) => shard.length).join('/');
   process.stdout.write(
-    `  procgen shards: ${suiteFiles.length} suite files over ${PROCGEN_SHARDS.length} shards (${sizes} files), each exactly once\n`,
+    `  procgen shards: ${suiteFiles.length} suite files over ${PROCGEN_SHARDS.length} shards (${sizes} files)` +
+      `${mapProblems.length === 0 ? ', each exactly once' : `, ${mapProblems.length} problem(s) above`}\n`,
   );
 }
 
