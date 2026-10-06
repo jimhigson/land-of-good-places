@@ -41,6 +41,7 @@ import { reptileCaseMesh, REPTILE_NURSERY_GLASS_RADIUS } from '../../art/models/
 import { instancedPlant, reptilePlantAnchor, reptilePlantBottom, reptilePlantMesh } from '../../art/models/reptilePlantsAssets';
 import { createNoodleRock, createNoodleTailMound, type NoodleRock } from '../../art/models/reptileNoodleAssets';
 import type { HallContext } from './context';
+import { asCrowd } from './exhibitCamera';
 import {
   EXHIBIT_PLACEMENTS,
   FOYER_POT,
@@ -164,6 +165,34 @@ interface Exhibit {
   update(dt: number, elapsed: number, player: LocalPoint | null): void;
   /** Where each animal's root is, hall-local — for the "every animal is inside its enclosure" check. */
   animals(): LocalPoint[];
+  /**
+   * What the exhibit camera frames and must see unblocked when this exhibit's
+   * chip is pressed — the animals that react, read live (several move). An
+   * object with nothing drawn under it counts as a point at its own origin
+   * (the snake grove's greeter's low spot). See `exhibitCamera.ts`.
+   */
+  subjects(): readonly Object3D[];
+  /**
+   * Every animal in the exhibit, reacting or not — never an obstacle to the
+   * camera's view of the others (a grove snake in front of the greeter, a
+   * python's own coil in front of her head). Defaults to {@link subjects}.
+   */
+  cast?(): readonly Object3D[];
+}
+
+/**
+ * Empty markers at points along a pooled snake's body, in `parent`'s frame. A
+ * pooled snake draws its body from the shared segment pool, so its own root
+ * holds only the head; these give the camera the body's extent to frame.
+ */
+function bodyMarkers(parent: Object3D, points: readonly Vector3[], name: string): Object3D[] {
+  return asCrowd(points.map((point, index) => {
+    const marker = new Group();
+    marker.name = `${name}-body-${index}`;
+    marker.position.copy(point);
+    parent.add(marker);
+    return marker;
+  }));
 }
 
 interface HiddenBaby {
@@ -199,6 +228,25 @@ export class Exhibits {
 
   zones(): InteractZone[] {
     return [...this.exhibits.map((exhibit) => exhibit.zone), ...this.babyZones];
+  }
+
+  /** Every exhibit's id, in table order — for the exhibit-camera check. */
+  get ids(): readonly string[] {
+    return this.exhibits.map((exhibit) => exhibit.id);
+  }
+
+  /** The animals an exhibit's camera shot frames — see {@link Exhibit.subjects}. */
+  subjectsOf(id: string): readonly Object3D[] {
+    const exhibit = this.exhibits.find((row) => row.id === id);
+    if (!exhibit) throw new Error(`Reptile House: no exhibit '${id}'`);
+    return exhibit.subjects();
+  }
+
+  /** Every animal in an exhibit — see {@link Exhibit.cast}. */
+  castOf(id: string): readonly Object3D[] {
+    const exhibit = this.exhibits.find((row) => row.id === id);
+    if (!exhibit) throw new Error(`Reptile House: no exhibit '${id}'`);
+    return exhibit.cast ? exhibit.cast() : exhibit.subjects();
   }
 
   /** Hall-local spots of every animal, with the exhibit it belongs to. */
@@ -391,9 +439,11 @@ export class Exhibits {
     ];
     const boa = createSnake({ length: 3.2, radius: 0.2, colourway: 'rainbow', seed: 101, path: loop, crawl: 0.18, pool: this.ctx.adults });
     group.add(boa.root);
+    const boaBody = bodyMarkers(group, loop, 'boa');
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [boa.head, ...boaBody],
       zone: this.zone(placement.id, centre, placement.stand, boa.head, () => {
         boa.poke();
         this.ctx.hearts(centre, 2.6);
@@ -438,6 +488,8 @@ export class Exhibits {
     let nextEgg = 0;
     return {
       id: placement.id,
+      subjects: () => asCrowd([...eggs.map((egg) => egg.root), ...hatchlings.map((baby) => baby.head)]),
+      cast: () => [...eggs.map((egg) => egg.root), ...hatchlings.map((baby) => baby.root)],
       zone: this.zone(placement.id, centre, placement.stand, group, () => {
         const egg = eggs[nextEgg];
         if (egg) {
@@ -458,6 +510,7 @@ export class Exhibits {
     const group = this.buildCase(placement);
     const floor = REPTILE_CASE_PLINTH_HEIGHT;
     const snakes: SnakeHandle[] = [];
+    const cornBodies: Object3D[] = [];
     const anchors: [number, number, number][] = [
       [-1.5, 0, -0.2],
       [0, 0.4, 0.1],
@@ -478,10 +531,14 @@ export class Exhibits {
       const snake = createSnake({ length: 1.6, radius: 0.1, colourway: 'corn', seed: 300 + index, path: loop, crawl: 0.12 + index * 0.03, pool: this.ctx.adults });
       group.add(snake.root);
       snakes.push(snake);
+      cornBodies.push(...bodyMarkers(group, loop, `corn-${index}`));
     }
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      // They crawl their loops the whole time, so any one head may be round the
+      // back of a branch: a crowd of three.
+      subjects: () => [...asCrowd(snakes.map((snake) => snake.head)), ...cornBodies],
       zone: this.zone(placement.id, centre, placement.stand, group, () => {
         for (const snake of snakes) snake.poke();
       }),
@@ -506,6 +563,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [cammy.root],
       zone: this.zone(placement.id, centre, placement.stand, cammy.root, () => cammy.poke()),
       update: (dt, elapsed) => cammy.update(dt, elapsed),
       animals: () => [{ x: centre.x + 0.3, z: centre.z + 0.1 }],
@@ -541,6 +599,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => asCrowd(geckos.map((gecko) => gecko.root)),
       zone: this.zone(placement.id, centre, placement.stand, group, () => {
         for (const gecko of geckos) gecko.poke();
       }),
@@ -577,9 +636,11 @@ export class Exhibits {
     ];
     const emmy = createSnake({ length: 2.4, radius: 0.14, colourway: 'emerald', seed: 600, path: loops, headLookAt: new Vector3(1.2, floor + 0.3, 1.5), pool: this.ctx.adults });
     group.add(emmy.root);
+    const emmyBody = bodyMarkers(group, loops, 'emmy');
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [emmy.head, ...emmyBody],
       zone: this.zone(placement.id, centre, placement.stand, emmy.head, () => emmy.poke()),
       update: (dt, elapsed) => emmy.update(dt, elapsed),
       animals: () => [centre],
@@ -602,9 +663,12 @@ export class Exhibits {
     ];
     const minty = createSnake({ length: 2, radius: 0.12, colourway: 'milk', seed: 700, path, pool: this.ctx.adults });
     group.add(minty.root);
+    // Only the coils out in the open: the rest of her is in her log on purpose.
+    const mintyBody = bodyMarkers(group, path.slice(2), 'minty');
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [minty.head, ...mintyBody],
       zone: this.zone(placement.id, centre, placement.stand, minty.head, () => minty.poke()),
       update: (dt, elapsed) => minty.update(dt, elapsed),
       animals: () => [centre],
@@ -619,6 +683,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [smudge.root],
       zone: this.zone(placement.id, centre, placement.stand, smudge.root, () => smudge.poke()),
       update: (dt, elapsed) => smudge.update(dt, elapsed),
       animals: () => [centre],
@@ -709,6 +774,11 @@ export class Exhibits {
     const greeter = snakes[3]!;
     const greeterHang = hangs[3]!;
     const low = new Vector3(Math.sin(toward) * 1.1, REPTILE_ENCLOSURE_WALL_HEIGHT + 1.0, Math.cos(toward) * 1.1);
+    // Where the greeter's head comes down to say hello — what the exhibit
+    // camera frames, rather than her starting perch up in the canopy.
+    const greetSpot = new Group();
+    greetSpot.name = 'grove-greet-spot';
+    group.add(greetSpot);
     const DESCEND = 1.8;
     const HOLD = 2.0;
     const total = DESCEND * 2 + HOLD;
@@ -716,6 +786,15 @@ export class Exhibits {
     const ease = (t: number): number => t * t * (3 - 2 * t);
     return {
       id: placement.id,
+      subjects: () => {
+        // Where her head will be once she has slid down: the head's offset
+        // from her root now, carried to the low spot.
+        greeter.root.updateWorldMatrix(true, true);
+        const head = greeter.head.getWorldPosition(new Vector3()).sub(greeter.root.getWorldPosition(new Vector3()));
+        greetSpot.position.copy(low).add(head);
+        return [greetSpot, ...asCrowd(snakes.filter((snake) => snake !== greeter).map((snake) => snake.head))];
+      },
+      cast: () => [greetSpot, ...snakes.map((snake) => snake.root)],
       zone: this.zone(placement.id, centre, placement.stand, banyan, () => {
         for (const snake of snakes) snake.poke();
         greet = total;
@@ -767,6 +846,8 @@ export class Exhibits {
     const ahead = new Vector3();
     return {
       id: placement.id,
+      subjects: () => [tock.root],
+      cast: () => [tock.root, ...sleepers.map((small) => small.root)],
       zone: this.zone(
         placement.id,
         centre,
@@ -831,6 +912,8 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [snappy.root],
+      cast: () => [snappy.root, baby.root],
       zone: this.zone(placement.id, centre, placement.stand, snappy.root, () => {
         snappy.poke();
         bubbleTime = 1.5;
@@ -879,6 +962,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => iguanas.map((iguana) => iguana.root),
       zone: this.zone(placement.id, centre, placement.stand, group, () => {
         for (const iguana of iguanas) iguana.poke();
       }),
@@ -923,6 +1007,8 @@ export class Exhibits {
     ];
     const tail = createSnake({ length: 2.6, radius: 0.3, colourway: 'mint', seed: 1300, path: tailPath, headless: true, taper: 0.25, pool: this.ctx.adults });
     group.add(tail.root);
+    // Not the first point: that is where the tail comes out of its mound.
+    const tailBody = bodyMarkers(group, tailPath.slice(1), 'nursery-tail');
     const colourways = ['mint', 'coral', 'corn', 'rainbow'] as const;
     const sizes = [
       [0.3, 0.05],
@@ -958,6 +1044,8 @@ export class Exhibits {
     group.add(lampGlow);
     return {
       id: placement.id,
+      subjects: () => [...asCrowd(this.nurseryBabies.map((baby) => baby.head)), ...tailBody],
+      cast: () => [...this.nurseryBabies.map((baby) => baby.root), tail.root, ...tailBody],
       zone: this.zone(
         placement.id,
         centre,
@@ -1030,6 +1118,7 @@ export class Exhibits {
     let chorus = 0;
     return {
       id: placement.id,
+      subjects: () => asCrowd(frogs.map((frog) => frog.root)),
       zone: this.zone(
         placement.id,
         centre,
@@ -1086,6 +1175,8 @@ export class Exhibits {
     const headAt: LocalPoint = { x: rock.head.position.x, z: rock.head.position.z };
     return {
       id: placement.id,
+      subjects: () => [rock.head],
+      cast: () => [rock.head, rock.coil],
       zone: this.zone(placement.id, headAt, placement.stand, rock.head, () => {
         this.noodleLift = 1.6;
         this.noodleMood = 2.2;
