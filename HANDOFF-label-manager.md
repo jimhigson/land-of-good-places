@@ -21,5 +21,17 @@ hysteresis. Design doc `docs/design/LABELS.md`, check `check:labels`.
   bubble = `hotel-reception`; wild pet bubble = `wildPet:<uid>`; NPC pill and
   bubble = `npc:<name>`; player pill = `player`.
 
+Model: Opus 5.5 (1M), chosen by the Overseer.
+
 ## State
-- [ ] manager  - [ ] migrate  - [ ] check:labels  - [ ] doc  - [ ] PR
+- [x] manager  - [x] migrate (park + dodgems + water fight)  - [x] check:labels
+  green, all four LABELS_MUTATE red  - [x] doc with transcripts
+- [x] check:speech-bubbles adapted (green; --mutate-label/--mutate-latch red)
+- [ ] wide speech-bubbles, reptile-house, hotel, crowd checks running
+- [ ] local headless screenshot (scratchpad shoot.mjs, dev server 5963)
+- [ ] PR + preview screenshot at /reptile-house?at=4.4,2.4&facing=267 (Noodle)
+
+## Gotchas
+- Any src/ edit changes the park source hash → first check run re-solves
+  seed 5 (~19 min). Batch src edits.
+- IsoCamera is perspective: worldUnitsPerPixel only true at the focus.

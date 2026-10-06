@@ -152,5 +152,58 @@ Its `--mutate-label` now breaks rule 1 (every label its own item).
 
 ## Transcripts
 
-(Filled in from real runs before the PR was raised; see the PR description for
-the exact commit.)
+Measured on 6 October 2026, branch `feat/label-manager` at `eda3c922` +
+the check refinements committed after it, canonical seed 5 (restart as
+accepted for that source), `VIEW=390x844`, Node 26.5.0. Every scene, every
+mutation, the same 12 570 frames.
+
+```
+(unmutated)                  exit 0
+check:labels — 12570 frames at 390x844: plaza 4224, castle shops 1278,
+  hotel lobby 708, reptile house 6360.
+  53 labels registered; up to 5 drawn at once; 5815 frames with two or more up.
+  3801 label-frames held back by a more important neighbour; 3483 frames a call
+  to action was put away for its own action's answer; 4220 frames an answer
+  was up over its item.
+  Reptile House: 21 chips pressed; castle: 7 shop counters; hotel:
+  receptionist talked. 19975 drawn rectangles measured twice.
+
+LABELS_MUTATE=overlap        exit 1
+  FAIL  A overlap: 3728 occasion(s). First: npc-name:Rosa at (390,240)–(429,271)
+        and npc-name:Zara at (365,209)–(403,240) overlap, frame 512 (plaza)
+  FAIL  E coverage: only 0 label-frames were held back by a neighbour
+
+LABELS_MUTATE=item           exit 1
+  FAIL  B one per item: 127 occasion(s). First: 2 labels drawn over npc:Noor:
+        npc-name:Noor, npc-speech:Noor, frame 4653 (castle shops)
+  FAIL  C precedence: 526 occasion(s). First: npc-name:Noor is drawn over
+        npc:Noor while a more important label of the same item wants to be
+
+LABELS_MUTATE=precedence     exit 1
+  FAIL  C precedence: 6556 occasion(s). First: action-chips [callToAction over
+        flower:6] at (59,336)–(327,384) is hidden under player [playerName],
+        which is less important, frame 3000 (plaza)
+
+LABELS_MUTATE=ties           exit 1
+  FAIL  D flicker: 262 occasion(s). First: npc-name:Zara went down and back up
+        2 frame(s) apart while wanting to be drawn throughout, frame 514 (plaza)
+```
+
+Two things those numbers taught, kept because they are the lesson:
+
+- **The first instrument was wrong, and its control said so.** It sized
+  sprites by `IsoCamera.worldUnitsPerPixel`, which is only true at the focus —
+  the rig is a perspective camera — and disagreed with the manager by 3 px on
+  5 945 drawn rectangles. Measured by the pinhole relation at each sprite's own
+  depth, the two agree to a pixel on every one of 19 975.
+- **`item` alone does not break #486 any more.** With rule 1 off the pill and
+  bubble over one child still touch, so rule 2 hides the pill:
+  `check:speech-bubbles -- --mutate-label` stayed green until it broke rule 2
+  as well. One owner, two rules guarding the same thing — which is why this
+  check's own `item` mutation fails B on the shop crowd, where pill and bubble
+  happen not to touch.
+
+`check:speech-bubbles` at 390x844 (120 s): green; `--mutate-label` →
+`FAIL A child's name pill was drawn under her own speech bubble, on 1224
+occasion(s)… First: Cleo … frame 951`; `--mutate-latch` → `FAIL 1 child(ren)
+went without their name while silent and in shot… Cleo … 68 frame(s)`.
