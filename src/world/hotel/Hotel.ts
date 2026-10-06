@@ -85,6 +85,7 @@ import { createKeeper, type KeeperHandle } from '../../art/models/keeper';
 import { KID_SKIN_TONES } from '../../art/models/kid';
 import { CharacterModel } from '../../entities/CharacterModel';
 import { SpeechBubble } from '../../ui/SpeechBubble';
+import type { ManagedLabel } from '../../ui/LabelManager';
 import type { IsoCamera } from '../../core/IsoCamera';
 import {
   bedsideTable,
@@ -1047,7 +1048,15 @@ export class Hotel implements GameSystem {
   private seatedAt: string | null = null;
   /** The person behind the desk, who does the talking. See {@link checkIn}. */
   private receptionist: KeeperHandle | null = null;
-  private readonly receptionBubble = new SpeechBubble(PALETTE.markerLilac);
+  /**
+   * Her script answers a press at the desk ("Check in here!", "Say hello!"),
+   * so it is that zone's `actionFeedback`: while she talks, the desk's chip is
+   * put away rather than drawn over her words (`ui/LabelManager.ts`, rule 1).
+   */
+  private readonly receptionBubble = new SpeechBubble(
+    { id: 'hotel-receptionist', item: 'hotel-reception', kind: 'actionFeedback' },
+    PALETTE.markerLilac,
+  );
   /** The lines still to say, and how long the current one has left. */
   private speech: { lines: readonly string[]; index: number; timer: number; cheerAt: number } | null =
     null;
@@ -1536,6 +1545,11 @@ export class Hotel implements GameSystem {
    */
   get residents(): readonly ResidentSpec[] {
     return this.guests;
+  }
+
+  /** The receptionist's bubble, for `World` to register with the park's `LabelManager`. */
+  get screenLabels(): readonly ManagedLabel[] {
+    return [this.receptionBubble];
   }
 
   /**

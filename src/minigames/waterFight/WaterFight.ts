@@ -10,6 +10,7 @@ import {
   MeshBasicMaterial,
   type CanvasTexture,
 } from 'three';
+import { LabelManager } from '../../ui/LabelManager';
 import { PALETTE } from '../../core/palette';
 import { CAMERA_PITCH_DEGREES } from '../../core/constants';
 import { DEG, Rng, clamp, clamp01, damp } from '../../core/mathUtils';
@@ -234,6 +235,10 @@ class WaterFight implements MiniGame {
   private walkGoal: { x: number; z: number } | null = null;
 
   private aspect = 1;
+  private viewWidth = 1;
+  private viewHeight = 1;
+  /** The garden's label owner — today only her "YOU". See `ui/LabelManager.ts`. */
+  private readonly labels = new LabelManager();
   private yaw = LANDSCAPE_YAW;
   private sprinklerPhase = 0;
   /** Metres of pool walked through since the last splashy footstep. */
@@ -395,6 +400,7 @@ class WaterFight implements MiniGame {
       label: { text: 'YOU', accent: PALETTE.markerPink },
     });
     group.add(model.root);
+    if (model.label) this.labels.add(model.label);
     this.fighters.push(this.makeFighter(model, player.name, PALETTE.markerPink, true, spot[0], spot[1]));
 
     for (const fighter of this.fighters) {
@@ -506,6 +512,8 @@ class WaterFight implements MiniGame {
     this.updateAimRing(dt);
     this.hud?.update(dt);
     this.portraits?.update(dt);
+    // Every frame, against this game's own camera — the one owner of what is drawn.
+    this.labels.resolve({ camera: this.camera, width: this.viewWidth, height: this.viewHeight }, dt);
 
     // The rainbow's one-off bonus. Claimed once a round, so it is a moment
     // rather than an income. The 3D rainbow in the garden (`rainbow.ts`) is
@@ -1048,6 +1056,8 @@ class WaterFight implements MiniGame {
    * garden itself is always all there.
    */
   resize(width: number, height: number): void {
+    this.viewWidth = Math.max(1, width);
+    this.viewHeight = Math.max(1, height);
     this.aspect = width / Math.max(1, height);
     this.yaw = this.aspect < 1 ? PORTRAIT_YAW : LANDSCAPE_YAW;
     this.applyCamera();

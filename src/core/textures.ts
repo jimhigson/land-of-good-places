@@ -775,6 +775,14 @@ export function nameLabelTexture(name: string, accent: number = PALETTE.markerPi
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   texture.anisotropy = 4;
+  // The painted pill, shadow included, as fractions of the canvas: what
+  // `LabelManager` judges overlap by, rather than the transparent margins.
+  texture.userData['contentBox'] = {
+    x0: pillX / width,
+    y0: pillY / height,
+    x1: (pillX + pillWidth) / width,
+    y1: (pillY + pillHeight + 8) / height,
+  };
   return texture;
 }
 

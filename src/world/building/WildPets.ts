@@ -5,6 +5,7 @@ import { createPet, PET_KINDS, type PetKind } from '../../art/models/pets';
 import { createRipika, WILD_RIPIKA_PALETTE } from '../../art/models/ripika';
 import type { CreatureHandle } from '../../art/style/asset';
 import { SpeechBubble } from '../../ui/SpeechBubble';
+import type { ManagedLabel } from '../../ui/LabelManager';
 import { PALETTE } from '../../core/palette';
 import type { IsoCamera } from '../../core/IsoCamera';
 import type { FrameContext } from '../../core/types';
@@ -191,7 +192,13 @@ export class WildPets {
   private readonly burrows: readonly Burrow[];
   private readonly cells: readonly { x: number; z: number }[];
   private readonly live: WildOne[] = [];
-  private readonly bubble = new SpeechBubble(PALETTE.markerLemon);
+  /**
+   * "a wild bunny appears!" — over the creature, and the same item as its
+   * catch chip (`wildPet:<uid>`), so the two are never both drawn over it. It
+   * is `speech`, below the chip: nobody pressed anything, and the chip is what
+   * she needs to catch it.
+   */
+  private readonly bubble = new SpeechBubble({ id: 'wild-pet-announce', item: '', kind: 'speech' }, PALETTE.markerLemon);
 
   /** Seconds until the next one surfaces. */
   private nextEmergence = 1.5;
@@ -248,6 +255,11 @@ export class WildPets {
     this.originX = floor?.originX ?? 0;
     this.originZ = floor?.originZ ?? 0;
     this.root.add(this.bubble.sprite);
+  }
+
+  /** The announcement bubble, registered with the park's `LabelManager` by `World`. */
+  get screenLabels(): readonly ManagedLabel[] {
+    return [this.bubble];
   }
 
   /** True when there is anywhere for them to live at all. A roof with no
@@ -601,6 +613,7 @@ export class WildPets {
   private announce(one: WildOne): void {
     this.announcing = one;
     this.announceLeft = ANNOUNCE_SECONDS;
+    this.bubble.identity.item = `wildPet:${one.uid}`;
     this.bubble.setText(`a wild ${one.displayName} appears!`);
   }
 

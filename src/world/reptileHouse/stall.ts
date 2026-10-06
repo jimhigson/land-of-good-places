@@ -209,7 +209,7 @@ export class ReptileStall {
           verb: 'How tall',
           highlight: highlightObject(this.meterGroup),
         },
-        () => this.ctx.say(meterReading(this.ctx.playerHeight()), METER_POSITION, 3.3),
+        () => this.ctx.say('reptile:meter', meterReading(this.ctx.playerHeight()), METER_POSITION, 3.3),
         '📏',
         'How tall?',
       ),

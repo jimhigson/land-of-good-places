@@ -1,4 +1,5 @@
 import { circleBoundary, GARDEN_PLAY_BOUNDARY } from '../boundary';
+import type { ManagedLabel } from '../../ui/LabelManager';
 import { damp } from '../../core/mathUtils';
 import { CylinderGeometry, Group, Mesh, Object3D, Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import { BUILDING_FLOOR_COUNT, BUILDING_FLOOR_HEIGHT, BUILDING_HALF_X, BUILDING_HALF_Z, INTERIOR_HALF_Z, INTERIOR_ORIGIN_X, INTERIOR_ORIGIN_Z, INTERIOR_PLAY_RADIUS, SLIDE_SPEED } from '../../core/constants';
@@ -1091,6 +1092,11 @@ export class Building implements GameSystem {
 
   interactZones(): InteractZone[] {
     return [...this.wildPets.interactZones(), ...this.buildingZones()];
+  }
+
+  /** The building's world labels, for `World` to register with the park's `LabelManager`. */
+  get screenLabels(): readonly ManagedLabel[] {
+    return this.wildPets.screenLabels;
   }
 
   private buildingZones(): InteractZone[] {

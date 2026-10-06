@@ -776,6 +776,9 @@ export class Game {
       () => this.player.riding,
     );
     this.addSystem(this.actionChips);
+    // The chips are the call to action, one label among the park's labels —
+    // the manager decides whether they are drawn (`ui/LabelManager.ts`).
+    this.world.labels.add(this.actionChips);
 
     // Registered last of the systems, and it has to be: it draws the pick
     // `selection` has just made this frame, so the outline can never point
@@ -1922,6 +1925,12 @@ export class Game {
     for (const system of this.systems) system.update(this.frameContext);
 
     this.updateHud(tick);
+    // Every label has said what it wants this frame; now the one owner decides
+    // which are drawn — after every system, against the camera about to draw.
+    this.world.labels.resolve(
+      { camera: this.cameraOverride ?? this.camera.camera, width: this.engine.width, height: this.engine.height },
+      tick.dt,
+    );
     this.render();
   }
 

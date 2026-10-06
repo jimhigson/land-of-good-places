@@ -200,6 +200,8 @@ interface HiddenBaby {
   readonly snake: SnakeHandle;
   readonly at: LocalPoint;
   readonly restY: number;
+  /** The zone whose press finds her — the item the "found!" bubble is over. */
+  readonly item: string;
   found: boolean;
 }
 
@@ -348,7 +350,7 @@ export class Exhibits {
       run();
       // The first hello gets the exhibit's one line as a bubble over it —
       // after `run`, so it wins over the reaction's own 'peep!' this once.
-      if (first) this.ctx.say(copy.blurb, focus, BLURB_BUBBLE_Y);
+      if (first) this.ctx.say(`reptile:${id}`, copy.blurb, focus, BLURB_BUBBLE_Y);
     };
     return {
       id: `reptile:${id}`,
@@ -496,7 +498,7 @@ export class Exhibits {
           egg.hatch();
           nextEgg = (nextEgg + 2) % eggs.length;
         }
-        this.ctx.say('peep!', centre, 3.1);
+        this.ctx.say(`reptile:${placement.id}`, 'peep!', centre, 3.1);
       }),
       update: (dt, elapsed) => {
         for (const egg of eggs) egg.update(dt, elapsed);
@@ -830,7 +832,7 @@ export class Exhibits {
     rider.root.position.set(0, 0.85, 0);
     tock.shell.add(rider.root);
     const centre = this.shapeCentre(placement.shape);
-    const baby: HiddenBaby = { index: 3, snake: rider, at: centre, restY: 0.85, found: false };
+    const baby: HiddenBaby = { index: 3, snake: rider, at: centre, restY: 0.85, item: `reptile:${placement.id}`, found: false };
     this.babies.push(baby);
     // Tock's loop, inside the wall.
     const loop = new CatmullRomCurve3(
@@ -1112,7 +1114,7 @@ export class Exhibits {
     group.add(baby.root);
     const hat = instancedPlant('rp-lily-pad', [{ x: 0, y: 0.13, z: 0.18, yaw: 0, scale: 0.35 }]);
     baby.head.add(...hat);
-    const hidden: HiddenBaby = { index: 4, snake: baby, at: { x: centre.x + hatSpot.x, z: centre.z + hatSpot.z }, restY: floor + 0.08, found: false };
+    const hidden: HiddenBaby = { index: 4, snake: baby, at: { x: centre.x + hatSpot.x, z: centre.z + hatSpot.z }, restY: floor + 0.08, item: `reptile:${placement.id}`, found: false };
     this.babies.push(hidden);
     this.registerShape(placement.id, shape, REPTILE_GLASS_TOP);
     let chorus = 0;
@@ -1126,7 +1128,7 @@ export class Exhibits {
         group,
         () => {
           chorus = 1;
-          this.ctx.say('ribbit!', centre, 3.2);
+          this.ctx.say(`reptile:${placement.id}`, 'ribbit!', centre, 3.2);
         },
         () => (hidden.found ? [] : [{ id: 'found', label: FOUND_YOU_CHIP, glyph: '🐍', run: () => this.found(hidden) }]),
       ),
@@ -1181,7 +1183,7 @@ export class Exhibits {
         this.noodleLift = 1.6;
         this.noodleMood = 2.2;
         rock.setFace('happy');
-        this.ctx.say('Hisss-ello!', headAt, 1.8);
+        this.ctx.say(`reptile:${placement.id}`, 'Hisss-ello!', headAt, 1.8);
         this.ctx.hearts(headAt, 1.4);
       }),
       update: () => {},
@@ -1309,7 +1311,7 @@ export class Exhibits {
   }
 
   private hiddenBaby(index: number, snake: SnakeHandle, at: LocalPoint, restY: number, stand: StandSpot, label: string): void {
-    const baby: HiddenBaby = { index, snake, at, restY, found: false };
+    const baby: HiddenBaby = { index, snake, at, restY, item: `reptile:baby:${index}`, found: false };
     this.babies.push(baby);
     this.babyZones.push({
       id: `reptile:baby:${index}`,
@@ -1331,7 +1333,7 @@ export class Exhibits {
     baby.found = true;
     baby.snake.poke();
     this.ctx.hearts(baby.at, baby.restY + 0.8);
-    this.ctx.say(`${this.babiesFound} of 5 babies found!`, baby.at, baby.restY + 1.1);
+    this.ctx.say(baby.item, `${this.babiesFound} of 5 babies found!`, baby.at, baby.restY + 1.1);
     this.ctx.findBaby(baby.index);
   }
 }

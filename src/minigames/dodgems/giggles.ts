@@ -2,6 +2,7 @@ import { CanvasTexture, Group, SRGBColorSpace, Sprite, SpriteMaterial } from 'th
 import { PALETTE, hexToCss } from '../../core/palette';
 import { Rng, clamp01 } from '../../core/mathUtils';
 import { minTextPx } from '../../core/uiScale';
+import { SpriteLabel, type ManagedLabel } from '../../ui/LabelManager';
 
 /**
  * "hee hee!" — the little giggle bubbles that pop over a car when it is bumped.
@@ -38,6 +39,12 @@ export interface Giggles {
    * tall, easily the smallest text in the game.
    */
   update(dt: number, worldUnitsPerPixel: number): void;
+  /**
+   * One label per pooled word, for the dodgems' `LabelManager`: a burst of
+   * giggles still never piles words on top of each other — the elder stays,
+   * a newcomer that would cover it waits its turn or is not drawn.
+   */
+  readonly labels: readonly ManagedLabel[];
   dispose(): void;
 }
 
@@ -50,6 +57,7 @@ export function createGiggles(): Giggles {
 
   interface Bubble {
     readonly sprite: Sprite;
+    readonly label: SpriteLabel;
     readonly material: SpriteMaterial;
     life: number;
     x: number;
@@ -68,16 +76,17 @@ export function createGiggles(): Giggles {
     });
     const sprite = new Sprite(material);
     sprite.scale.set(1.7, 0.95, 1);
-    sprite.visible = false;
     sprite.renderOrder = 4;
     root.add(sprite);
-    bubbles.push({ sprite, material, life: 0, x: 0, y: 0, z: 0 });
+    const label = new SpriteLabel({ id: `dodgems-giggle:${i}`, item: `dodgems:giggle:${i}`, kind: 'actionFeedback' }, sprite);
+    bubbles.push({ sprite, label, material, life: 0, x: 0, y: 0, z: 0 });
   }
 
   let next = 0;
 
   return {
     root,
+    labels: bubbles.map((bubble) => bubble.label),
 
     pop(x: number, y: number, z: number): void {
       const bubble = bubbles[next % POOL];
@@ -92,7 +101,7 @@ export function createGiggles(): Giggles {
       bubble.x = x + rng.range(-0.3, 0.3);
       bubble.y = y;
       bubble.z = z + rng.range(-0.3, 0.3);
-      bubble.sprite.visible = true;
+      bubble.label.want(true);
       bubble.sprite.position.set(bubble.x, bubble.y, bubble.z);
     },
 
@@ -104,7 +113,7 @@ export function createGiggles(): Giggles {
         if (bubble.life <= 0) continue;
         bubble.life -= dt;
         if (bubble.life <= 0) {
-          bubble.sprite.visible = false;
+          bubble.label.want(false);
           continue;
         }
         const t = 1 - bubble.life / LIFE;

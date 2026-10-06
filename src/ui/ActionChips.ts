@@ -3,6 +3,7 @@ import { isTouchDevice } from '../core/device';
 import type { FrameContext, GameSystem } from '../core/types';
 import type { Selection } from '../world/Selection';
 import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../world/interact';
+import type { LabelIdentity, LabelView, ManagedLabel, ScreenRect } from './LabelManager';
 
 /**
  * The action chips — GAME_DESIGN.md's SELECTION RULE, step 2: *"once selected,
@@ -34,6 +35,15 @@ import { PRIMARY_ACTION, type InteractZone, type ZoneAction } from '../world/int
  *
  * The DOM is rebuilt only when the action list actually changes, because that
  * changes about once a minute and the position changes sixty times a second.
+ *
+ * ### The chips are a label like any other (6 October 2026)
+ *
+ * They are the call to action for the selected item, and the `LabelManager`
+ * decides whether they are drawn, exactly as it does for every pill and bubble
+ * — which is how a chip goes away while its own action is talking (rule 1 in
+ * `ui/LabelManager.ts`) instead of sitting on top of the answer. Their item is
+ * the selected zone's id, so the reptile's "peep!" over the same exhibit is
+ * the same item.
  */
 
 /** How high above the item the chips float, as a floor and a ceiling in metres. */
@@ -46,8 +56,9 @@ const EDGE_MARGIN = 14;
 /** Keys the chips name, in order. The first is the ordinary interact key. */
 const ACTION_KEYS = ['E', 'F', 'R'] as const;
 
-export class ActionChips implements GameSystem {
+export class ActionChips implements GameSystem, ManagedLabel {
   readonly name = 'actionChips';
+  readonly identity: LabelIdentity = { id: 'action-chips', item: '', kind: 'callToAction' };
 
   private readonly root: HTMLElement;
   private readonly row: HTMLElement;
@@ -56,7 +67,13 @@ export class ActionChips implements GameSystem {
 
   /** What is currently on screen, so a rebuild is only ever a real change. */
   private signature = '';
-  private visible = false;
+  /** There is a selection with actions, so the chips want to be drawn. */
+  private wanted = false;
+  /** The manager's verdict for this frame. */
+  private granted = false;
+  private shown = false;
+  /** Where the row's top-left corner and size were put this frame, in CSS px. */
+  private readonly laidOut: ScreenRect = { left: 0, top: 0, right: 0, bottom: 0 };
   /**
    * Sizes measured when the row is rebuilt rather than every frame — the row
    * only changes size when its words do, and these are layout reads.
@@ -95,12 +112,34 @@ export class ActionChips implements GameSystem {
     const actions = this.selection.actions;
 
     if (!zone || actions.length === 0) {
-      this.setVisible(false);
+      this.wanted = false;
+      this.apply();
       return;
     }
 
+    this.identity.item = zone.id;
     this.sync(actions);
-    this.setVisible(this.place(zone));
+    this.wanted = this.place(zone);
+    this.apply();
+  }
+
+  measure(_view: LabelView, out: ScreenRect): boolean {
+    if (!this.wanted) return false;
+    out.left = this.laidOut.left;
+    out.top = this.laidOut.top;
+    out.right = this.laidOut.right;
+    out.bottom = this.laidOut.bottom;
+    return true;
+  }
+
+  grant(shown: boolean): void {
+    this.granted = shown;
+    this.apply();
+  }
+
+  /** True while the chips are on screen — the manager's verdict, applied. */
+  get drawn(): boolean {
+    return this.shown;
   }
 
   dispose(): void {
@@ -109,9 +148,10 @@ export class ActionChips implements GameSystem {
 
   // -------------------------------------------------------------- internals
 
-  private setVisible(visible: boolean): void {
-    if (this.visible === visible) return;
-    this.visible = visible;
+  private apply(): void {
+    const visible = this.wanted && this.granted;
+    if (this.shown === visible) return;
+    this.shown = visible;
     this.root.dataset.show = visible ? 'true' : 'false';
   }
 
@@ -157,9 +197,9 @@ export class ActionChips implements GameSystem {
 
     // Measured here rather than in `place`, which runs every frame: these are
     // layout reads, and the row only changes size when its words do.
-    const row = this.row.getBoundingClientRect();
-    this.rowWidth = row.width;
-    this.rowHeight = row.height;
+    const row = this.row.getBoundingClientRect?.();
+    this.rowWidth = row?.width ?? 0;
+    this.rowHeight = row?.height ?? 0;
   }
 
   /**
@@ -227,6 +267,12 @@ export class ActionChips implements GameSystem {
     y = clamp(y, rowHeight + EDGE_MARGIN, height - EDGE_MARGIN);
 
     this.root.style.transform = `translate(-50%, -100%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+    // The rectangle the row occupies — the `translate(-50%, -100%)` above,
+    // spelled out — which is what the label manager judges overlap by.
+    this.laidOut.left = x - halfRow;
+    this.laidOut.right = x + halfRow;
+    this.laidOut.top = y - rowHeight;
+    this.laidOut.bottom = y;
     return true;
   }
 }
