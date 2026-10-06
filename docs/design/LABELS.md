@@ -96,7 +96,7 @@ action for what she is standing at is beaten only by `actionFeedback`, and
 every `actionFeedback` is the answer to a press and gone within seconds:
 `ReptileHouse.say` holds a line for `1.6 + 0.07 × length` s (about 3–5 s), the
 receptionist's script runs line by line and stops if she leaves the lobby, the
-dodgems' words last 1.15 s and the bird 2.4 s. Speech and names — the clutter —
+dodgems' words last 1.15 s and the bird 2.9 s. Speech and names — the clutter —
 are below it, so a crowd can never take the chip away. Inside one item the
 answer winning is the point; across items, a neighbour's answer can cover her
 chip only for the few seconds it is up, and only if they are on top of each
