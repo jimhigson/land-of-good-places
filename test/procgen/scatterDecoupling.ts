@@ -1,5 +1,7 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
+
+import { CANONICAL_PARK_SEED } from '../../src/world/parkSeedPool.ts';
 
 /**
  * **Moving a path must not move scenery on the other side of the park.**
@@ -30,6 +32,14 @@ import { describe, expect, it } from 'vitest';
  * spawned rather than imported. Importing it would measure one park twice and
  * pass unconditionally, which is the same failure mode `vitest.config.ts`'s
  * `isolate: true` exists to prevent for the seed files.
+ *
+ * ### One file per park, every build at once
+ *
+ * The body lives here; each park has its own `scatterDecoupling-*.test.ts`.
+ * As one file it built five parks back to back, 17-23 minutes on a CI runner,
+ * which ran its procgen shard out of the 22m30s watchdog on `main` (7c8faaf0).
+ * Split by park, and with a park's baseline and bowed builds spawned together
+ * (each is one single-threaded process), the slowest file is one build long.
  */
 
 const DIGEST_ARGS = [
@@ -57,14 +67,38 @@ interface Digest {
   readonly all: string;
 }
 
-function buildDigest(env: Record<string, string>): Digest {
-  const out = execFileSync('node', DIGEST_ARGS, {
-    cwd: new URL('../..', import.meta.url).pathname,
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-    maxBuffer: 64 * 1024 * 1024,
+function buildDigest(env: Record<string, string>): Promise<Digest> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'node',
+      DIGEST_ARGS,
+      {
+        cwd: new URL('../..', import.meta.url).pathname,
+        encoding: 'utf8',
+        env: { ...process.env, ...env },
+        maxBuffer: 256 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        // The child's trace, which `execFileSync` used to pass straight through.
+        process.stderr.write(stderr);
+        if (error !== null) reject(error);
+        else resolve(JSON.parse(stdout) as Digest);
+      },
+    );
   });
-  return JSON.parse(out) as Digest;
+}
+
+/**
+ * The restart the baseline will be built at, asked of the same resolver the
+ * child uses (`test/setupDeterministicMath.ts` installs it here too), so the
+ * bowed park can be pinned to it without waiting for the baseline to finish.
+ * The first test below still asserts the two came out equal.
+ */
+function acceptedRestart(env: Record<string, string>): number {
+  const seed = Number(env['LGP_SEED'] ?? CANONICAL_PARK_SEED);
+  const resolve = (globalThis as { __LGP_RESOLVE_RESTART__?: (seed: number) => number }).__LGP_RESOLVE_RESTART__;
+  if (typeof resolve !== 'function') throw new Error('no restart resolver installed — is the vitest setup file running?');
+  return resolve(seed);
 }
 
 /**
@@ -123,7 +157,8 @@ function positionOf(label: string): readonly [number, number] {
 }
 
 /**
- * The parks the property is proved on. The canonical seed, because it is the
+ * A park the property is proved on. Two are, each by its own test file
+ * (`scatterDecoupling-canonical.test.ts`, `scatterDecoupling-seed12.test.ts`). The canonical seed, because it is the
  * park everyone looks at; and seed 12, because it is the one that caught the
  * last coupling: the scatter planted to a park-wide count of 72 trees, so the
  * three trees its bowed spur cost were replaced 31 m and 43.6 m away. The
@@ -131,24 +166,42 @@ function positionOf(label: string): readonly [number, number] {
  * property proved on one seed is a property of that seed. Seed 12 also builds
  * in a fraction of the canonical seed's time.
  */
-const PARKS: readonly { readonly label: string; readonly env: Record<string, string> }[] = [
-  { label: 'the canonical seed', env: {} },
-  { label: 'seed 12', env: { LGP_SEED: '12' } },
-];
+export interface ScatterPark {
+  readonly label: string;
+  readonly env: Record<string, string>;
+}
 
-describe('scenery scatter is decoupled from the paths', () => {
-  const baselines: Digest[] = [];
-  for (const park of PARKS) {
+/**
+ * Builds `park` twice — as accepted, and with one spur bowed — and registers
+ * the locality tests on the pair. With `control`, also builds a different
+ * seed's park and registers the test that the digest can tell them apart.
+ * Await it at a test file's top level: the builds run at collection, where no
+ * hook timeout applies, exactly as the single file's `execFileSync` did.
+ */
+export async function proveScatterDecoupled(park: ScatterPark, options: { readonly control: boolean }): Promise<void> {
+  // **The same restart as the baseline, pinned.** LGP_SPUR_STRETCH is a
+  // park-changing switch, so with the restart unset the resolver builds
+  // restart 0 while the baseline is the accepted restart: two different
+  // parks. On #705's CI seed 12 (accepted restart 2) failed exactly so:
+  // layout attempt 5 against 4, trees "moved" 100 m.
+  const restart = acceptedRestart(park.env);
+  const seed = Number(park.env['LGP_SEED'] ?? CANONICAL_PARK_SEED);
+  // Seed 10 restart 0 since #708's band fix: the shipped park with the
+  // fastest plan (11.5 s on CI). A pinned restart goes stale when the park
+  // changes; re-pick from the Parks job's "plan N ms searched" lines.
+  const otherSeed = seed === 10 ? 11 : 10;
+  const [baseline, bowed, other] = await Promise.all([
+    buildDigest(park.env),
+    buildDigest({ ...park.env, LGP_PARK_RESTART: String(restart), LGP_SPUR_STRETCH: String(BOW) }),
+    // An explicit restart: the control needs *a* different park, not that
+    // seed's accepted one, and leaving the restart unset made the resolver run
+    // the whole acceptance loop for it (442 s on #705's CI, over the 240 s
+    // timeout), measuring nothing this test asks about.
+    options.control ? buildDigest({ LGP_SEED: String(otherSeed), LGP_PARK_RESTART: '0' }) : Promise.resolve(null),
+  ]);
+
+  describe('scenery scatter is decoupled from the paths', () => {
     describe(park.label, () => {
-      const baseline = buildDigest(park.env);
-      // **The same restart as the baseline, pinned.** LGP_SPUR_STRETCH is a
-      // park-changing switch, so with the restart unset the resolver builds
-      // restart 0 while the baseline is the accepted restart: two different
-      // parks. On #705's CI seed 12 (accepted restart 2) failed exactly so:
-      // layout attempt 5 against 4, trees "moved" 100 m.
-      const bowed = buildDigest({ ...park.env, LGP_PARK_RESTART: String(baseline.restart), LGP_SPUR_STRETCH: String(BOW) });
-      baselines.push(baseline);
-
       it('built the bowed park at the baseline park\'s restart', () => {
         expect(bowed.restart).toBe(baseline.restart);
       });
@@ -214,36 +267,28 @@ describe('scenery scatter is decoupled from the paths', () => {
         ).toHaveLength(0);
       });
     });
-  }
 
-  it('can tell two parks apart at all', () => {
-    const baseline = baselines[0] as Digest;
-    // The control. Everything above is an assertion that digests *match*, and a
-    // digest that always matched — one hashing a constant, say — would sail
-    // through all of it. A different seed must produce a different scatter.
-    //
-    // Seed 5, not the seed 2 this control used since it was written: the
-    // property is "two different parks differ", agnostic to WHICH other
-    // park, and seed 2 cannot build a park at all since 2 Sep 2026 — it
-    // proves zero bridge sites, which now fails the build loudly rather
-    // than falling back to level crossings (it was retired from the sweep
-    // for exactly this pathology, #429/seed-24.test.ts's header). Any pool
-    // seed serves; 5 is the one the sweep already builds everywhere else.
-    // Any supported seed other than the baseline's: the canonical seed became
-    // 5 when the pool became 0..15, and a control that builds the baseline's
-    // own park again cannot tell two parks apart.
-    // Seed 10 restart 0 since #708's band fix: the shipped park with the
-    // fastest plan (11.5 s on CI). A pinned restart goes stale when the park
-    // changes; re-pick from the Parks job's "plan N ms searched" lines.
-    const otherSeed = baseline.seed === 10 ? 11 : 10;
-    // An explicit restart: the control needs *a* different park, not that
-    // seed's accepted one, and leaving the restart unset made the resolver run
-    // the whole acceptance loop for it (442 s on #705's CI, over the 240 s
-    // timeout), measuring nothing this test asks about.
-    const other = buildDigest({ LGP_SEED: String(otherSeed), LGP_PARK_RESTART: '0' });
-    expect(other.seed).toBe(otherSeed);
-    expect(other.all).not.toBe(baseline.all);
-    expect(other.trees.digest).not.toBe(baseline.trees.digest);
-    expect(other.bushes.digest).not.toBe(baseline.bushes.digest);
+    if (other !== null) {
+      it('can tell two parks apart at all', () => {
+        // The control. Everything above is an assertion that digests *match*, and a
+        // digest that always matched — one hashing a constant, say — would sail
+        // through all of it. A different seed must produce a different scatter.
+        //
+        // Seed 5, not the seed 2 this control used since it was written: the
+        // property is "two different parks differ", agnostic to WHICH other
+        // park, and seed 2 cannot build a park at all since 2 Sep 2026 — it
+        // proves zero bridge sites, which now fails the build loudly rather
+        // than falling back to level crossings (it was retired from the sweep
+        // for exactly this pathology, #429/seed-24.test.ts's header). Any pool
+        // seed serves; 5 is the one the sweep already builds everywhere else.
+        // Any supported seed other than the baseline's: the canonical seed became
+        // 5 when the pool became 0..15, and a control that builds the baseline's
+        // own park again cannot tell two parks apart.
+        expect(other.seed).toBe(otherSeed);
+        expect(other.all).not.toBe(baseline.all);
+        expect(other.trees.digest).not.toBe(baseline.trees.digest);
+        expect(other.bushes.digest).not.toBe(baseline.bushes.digest);
+      });
+    }
   });
-});
+}

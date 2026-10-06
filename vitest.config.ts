@@ -1,4 +1,7 @@
+import { globSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
+
+import { PROCGEN_SHARDS, PROCGEN_SUITE_GLOB, shardMapProblems } from './test/procgenShards.ts';
 
 /**
  * The procgen invariant suite.
@@ -14,9 +17,27 @@ import { defineConfig } from 'vitest/config';
  * measure the first one's park. `parkFacts.ts` asserts the seed it got back to
  * catch that if it ever regresses, but the fix is here.
  */
+/**
+ * `LGP_PROCGEN_SHARD=N` runs only shard N of `test/procgenShards.ts` — the
+ * CI matrix sets it. Refuses to run any shard while the map is not a partition
+ * of the suite, so a new test file nobody placed fails CI rather than never
+ * running in it.
+ */
+function procgenInclude(): string[] {
+  const raw = process.env['LGP_PROCGEN_SHARD'];
+  if (raw === undefined || raw === '') return [PROCGEN_SUITE_GLOB];
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > PROCGEN_SHARDS.length) {
+    throw new Error(`LGP_PROCGEN_SHARD=${raw}: expected a shard number 1..${PROCGEN_SHARDS.length} (test/procgenShards.ts)`);
+  }
+  const problems = shardMapProblems(globSync(PROCGEN_SUITE_GLOB).map((f) => f.split('\\').join('/')));
+  if (problems.length > 0) throw new Error(`test/procgenShards.ts is not a partition of the suite:\n${problems.join('\n')}`);
+  return [...PROCGEN_SHARDS[n - 1]!];
+}
+
 export default defineConfig({
   test: {
-    include: ['test/**/*.test.ts'],
+    include: procgenInclude(),
     // Before any test file's imports: see src/core/deterministicMath.ts.
     setupFiles: ['test/setupDeterministicMath.ts'],
     pool: 'forks',

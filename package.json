@@ -127,7 +127,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "sweep:seeds": "node --import ./scripts/ts-extension-resolver-register.mjs scripts/sweep-park-seeds.mts",
-    "test:procgen": "vitest run ${LGP_PROCGEN_SHARD:+--shard=$LGP_PROCGEN_SHARD}",
+    "test:procgen": "vitest run",
     "test:procgen:watch": "vitest",
     "check:statue-occlusion": "node --no-warnings --import ./scripts/ts-extension-resolver-register.mjs scripts/check-statue-occlusion.mts",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",

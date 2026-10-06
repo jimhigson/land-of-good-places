@@ -53,9 +53,9 @@ declare const process: {
 };
 
 /**
- * `execFileSync`, for the one test that shells out.
+ * `execFileSync` and `execFile`, for the one test that shells out.
  *
- * `test/procgen/scatterDecoupling.test.ts` runs `scripts/scatter-digest.mts` in
+ * `test/procgen/scatterDecoupling.ts` runs `scripts/scatter-digest.mts` in
  * a child process, because proving the scatter is *stable* means building the
  * park twice under different inputs and diffing — two module loads of
  * `parkManifest.ts`, which reads its seed once and caches it, so they cannot
@@ -86,6 +86,27 @@ declare module 'node:child_process' {
       readonly maxBuffer?: number;
     },
   ): string;
+
+  /** The callback form, so a test can run several digests at once. Same narrowing. */
+  export function execFile(
+    file: string,
+    args: readonly string[],
+    options: {
+      readonly encoding: 'utf8';
+      readonly cwd?: string;
+      readonly env?: Record<string, string | undefined>;
+      readonly maxBuffer?: number;
+    },
+    callback: (error: Error | null, stdout: string, stderr: string) => void,
+  ): unknown;
+}
+
+/**
+ * `globSync`, for `vitest.config.ts`: the procgen shard map is checked against
+ * the files on disk before a shard runs (`test/procgenShards.ts`).
+ */
+declare module 'node:fs' {
+  export function globSync(pattern: string): string[];
 }
 
 /**
