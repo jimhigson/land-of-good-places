@@ -143,6 +143,11 @@ export class SpeechBubble implements ManagedLabel {
     this.wanted = true;
   }
 
+  /** Where the pill and tail are painted on the current canvas — read by `check:labels`. */
+  get contentBox(): ContentBox {
+    return this.box;
+  }
+
   measure(view: LabelView, out: ScreenRect): boolean {
     if (!this.wanted || !this.currentText) return false;
     return measureSprite(this.sprite, this.box, view, out);

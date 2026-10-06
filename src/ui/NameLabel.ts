@@ -105,7 +105,7 @@ export class NameLabel implements ManagedLabel {
 
   measure(view: LabelView, out: ScreenRect): boolean {
     if (!this.wanted) return false;
-    return measureSprite(this.sprite, this.contentBox(), view, out);
+    return measureSprite(this.sprite, this.contentBox, view, out);
   }
 
   grant(shown: boolean): void {
@@ -128,7 +128,8 @@ export class NameLabel implements ManagedLabel {
     this.sprite.visible = false;
   }
 
-  private contentBox(): ContentBox {
+  /** Where the pill is painted on the canvas — read by `check:labels`. */
+  get contentBox(): ContentBox {
     return (this.texture.userData['contentBox'] as ContentBox | undefined) ?? FULL_BOX;
   }
 

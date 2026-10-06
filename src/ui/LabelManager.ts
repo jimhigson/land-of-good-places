@@ -214,14 +214,14 @@ export class LabelManager {
     this.itemBest.clear();
     for (const entry of this.entries) {
       if (!entry.wanted) continue;
-      const item = entry.label.identity.item;
+      const item = this.itemOf(entry);
       const best = this.itemBest.get(item);
       if (!best || this.precedes(entry, best)) this.itemBest.set(item, entry);
     }
     this.contenders.length = 0;
     for (const entry of this.entries) {
       if (!entry.wanted) continue;
-      if (this.itemBest.get(entry.label.identity.item) === entry) this.contenders.push(entry);
+      if (this.itemBest.get(this.itemOf(entry)) === entry) this.contenders.push(entry);
       else entry.verdict = 'item';
     }
 
@@ -231,7 +231,7 @@ export class LabelManager {
     for (const entry of this.contenders) {
       if (this.collides(entry, this.accepted)) {
         entry.verdict = 'overlap';
-        entry.heldUntil = this.clock + LABEL_HOLD_SECONDS;
+        entry.heldUntil = this.clock + this.holdSeconds();
         continue;
       }
       if (!entry.wasShown && this.clock < entry.heldUntil) {
@@ -251,10 +251,28 @@ export class LabelManager {
     }
   }
 
+  // The three rules' own small questions, one method each, so `check:labels`
+  // can break exactly one of them and watch its own assertion go red.
+
+  /** Rule 1's key: which item a label speaks for. */
+  private itemOf(entry: Entry): string {
+    return entry.label.identity.item;
+  }
+
+  /** Rule 2's order: the label's place in {@link LABEL_PRECEDENCE}. */
+  private rank(entry: Entry): number {
+    return LABEL_PRECEDENCE[entry.label.identity.kind];
+  }
+
+  /** Rule 3's hysteresis. */
+  private holdSeconds(): number {
+    return LABEL_HOLD_SECONDS;
+  }
+
   /** True if `a` goes before `b`: precedence, then the incumbent, then the elder, then the id. */
   private precedes(a: Entry, b: Entry): boolean {
-    const pa = LABEL_PRECEDENCE[a.label.identity.kind];
-    const pb = LABEL_PRECEDENCE[b.label.identity.kind];
+    const pa = this.rank(a);
+    const pb = this.rank(b);
     if (pa !== pb) return pa > pb;
     if (a.wasShown !== b.wasShown) return a.wasShown;
     if (a.wasShown && a.shownSince !== b.shownSince) return a.shownSince < b.shownSince;
@@ -375,14 +393,14 @@ const FULL_BOX: ContentBox = { x0: 0, y0: 0, x1: 1, y1: 1 };
 export class SpriteLabel implements ManagedLabel {
   readonly identity: LabelIdentity;
   readonly sprite: Sprite;
-  private readonly box: ContentBox;
+  readonly contentBox: ContentBox;
   private wanted = false;
   private granted = false;
 
   constructor(identity: LabelIdentity, sprite: Sprite, box: ContentBox = FULL_BOX) {
     this.identity = identity;
     this.sprite = sprite;
-    this.box = box;
+    this.contentBox = box;
     this.sprite.visible = false;
   }
 
@@ -398,7 +416,7 @@ export class SpriteLabel implements ManagedLabel {
 
   measure(view: LabelView, out: ScreenRect): boolean {
     if (!this.wanted) return false;
-    return measureSprite(this.sprite, this.box, view, out);
+    return measureSprite(this.sprite, this.contentBox, view, out);
   }
 
   grant(shown: boolean): void {
