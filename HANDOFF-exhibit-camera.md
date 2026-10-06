@@ -1,6 +1,7 @@
 # HANDOFF — exhibit camera (Reptile House over-shoulder shot)
 
 Branch `feat/exhibit-camera`, worktree `.claude/worktrees/exhibit-camera`.
+Model: Opus 5.5 (claude-opus-5-5[1m]), Engineer, dispatched by the Overseer.
 
 ## Ask
 Jim: exhibit reactions are hard to see zoomed out — the camera should come
@@ -22,7 +23,7 @@ several candidate eyes). Check `check:exhibit-camera` in a shard, proved red.
 - Cancel: manual move, jump, she moves >0.25 m, rides, leaves hall.
 
 ## Status
-- [ ] solver + director
-- [ ] Game wiring
+- [x] solver + director (src/world/reptileHouse/exhibitCamera.ts)
+- [x] Game wiring (Game.ts focusClaim; ReptileHouse.onGreet starts it)
 - [ ] check:exhibit-camera + red proof
 - [ ] PR + preview screenshots

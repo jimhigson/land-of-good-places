@@ -33,6 +33,7 @@ import { ReptileLighting } from './lighting';
 import { SignAtlas } from './signs';
 import { ReptileProps } from './props';
 import { Exhibits } from './exhibits';
+import { ExhibitCamera } from './exhibitCamera';
 import { Planting } from './planting';
 import { paintPaths } from './floorPaint';
 import { ReptileStall } from './stall';
@@ -187,6 +188,8 @@ export class ReptileHouse implements GameSystem {
   private readonly spaces: SpaceManager;
   private readonly props: ReptileProps;
   private readonly exhibits: Exhibits;
+  /** The over-the-shoulder shot an exhibit's chip brings the camera down to. */
+  readonly exhibitCamera: ExhibitCamera;
   private readonly stall: ReptileStall;
   private readonly ride: TortoiseRide;
   private readonly exterior: ReptileHouseExterior;
@@ -228,16 +231,18 @@ export class ReptileHouse implements GameSystem {
     const atlas = new SignAtlas();
     this.hearts = new HeartPuffs(this.hallRoot, 12);
     this.hallRoot.add(this.bubble.sprite);
+    const adults = new SnakeSegmentPool(this.hallRoot, 260, 'reptile-adults');
+    const babies = new SnakeSegmentPool(this.hallRoot, 200, 'reptile-babies');
     const context = {
       root: this.hallRoot,
       props: this.props,
       atlas,
-      adults: new SnakeSegmentPool(this.hallRoot, 260, 'reptile-adults'),
-      babies: new SnakeSegmentPool(this.hallRoot, 200, 'reptile-babies'),
+      adults,
+      babies,
       rng: this.rng,
       say: (text: string, at: LocalPoint, y: number) => this.say(text, at, y),
       hearts: (at: LocalPoint, y: number) => this.hearts.puff(at.x, y, at.z, this.rng),
-      greet: () => this.onGreet(),
+      greet: (id: string) => this.onGreet(id),
       findBaby: () => this.onBabyFound(),
       openShop: (shopId: string) => this.controls.openShop(shopId),
       // Hat and all — `topHeight` is what the name label clears, so the
@@ -246,6 +251,9 @@ export class ReptileHouse implements GameSystem {
       playerHeight: () => this.player?.topHeight ?? 0,
     };
     this.exhibits = new Exhibits(context);
+    // The snake pools are animals, every one of them — a body is never an
+    // obstacle to seeing an animal.
+    this.exhibitCamera = new ExhibitCamera({ hall: this.hallRoot, collision, camera: deps.camera, seeThrough: [...adults.meshes, ...babies.meshes] });
     new Planting(context);
     paintPaths(context);
     this.stall = new ReptileStall(context);
@@ -455,6 +463,7 @@ export class ReptileHouse implements GameSystem {
     if (this.inside) {
       const local: LocalPoint | null = player ? { x: player.position.x - REPTILE_HOUSE_ORIGIN_X, z: player.position.z - REPTILE_HOUSE_ORIGIN_Z } : null;
       this.exhibits.update(dt, elapsed, local);
+      if (player) this.exhibitCamera.update(dt, context.input, player, true, this.bubbleFor);
       this.stall.update(dt, elapsed);
       this.ride.update(dt, elapsed, context.input);
       this.hearts.update(dt);
@@ -539,6 +548,7 @@ export class ReptileHouse implements GameSystem {
     const player = this.player;
     if (!player) return;
     this.inside = false;
+    this.exhibitCamera.cancel();
     this.hallRoot.visible = false;
     this.bubble.setText(null);
     const plot = this.deps.plot;
@@ -634,7 +644,9 @@ export class ReptileHouse implements GameSystem {
     this.bubbleFor = 1.6 + text.length * 0.07;
   }
 
-  private onGreet(): void {
+  private onGreet(id: string): void {
+    const player = this.player;
+    if (player && this.inside) this.exhibitCamera.start(id, this.exhibits.subjectsOf(id), player);
     if (this.exhibits.exhibitsGreeted >= 15) discoverSecret('secret.metTheReptiles');
   }
 

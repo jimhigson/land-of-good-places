@@ -164,6 +164,13 @@ interface Exhibit {
   update(dt: number, elapsed: number, player: LocalPoint | null): void;
   /** Where each animal's root is, hall-local — for the "every animal is inside its enclosure" check. */
   animals(): LocalPoint[];
+  /**
+   * What the exhibit camera frames and must see unblocked when this exhibit's
+   * chip is pressed — the animals that react, read live (several move). An
+   * object with nothing drawn under it counts as a point at its own origin
+   * (the snake grove's greeter's low spot). See `exhibitCamera.ts`.
+   */
+  subjects(): readonly Object3D[];
 }
 
 interface HiddenBaby {
@@ -199,6 +206,18 @@ export class Exhibits {
 
   zones(): InteractZone[] {
     return [...this.exhibits.map((exhibit) => exhibit.zone), ...this.babyZones];
+  }
+
+  /** Every exhibit's id, in table order — for the exhibit-camera check. */
+  get ids(): readonly string[] {
+    return this.exhibits.map((exhibit) => exhibit.id);
+  }
+
+  /** The animals an exhibit's camera shot frames — see {@link Exhibit.subjects}. */
+  subjectsOf(id: string): readonly Object3D[] {
+    const exhibit = this.exhibits.find((row) => row.id === id);
+    if (!exhibit) throw new Error(`Reptile House: no exhibit '${id}'`);
+    return exhibit.subjects();
   }
 
   /** Hall-local spots of every animal, with the exhibit it belongs to. */
@@ -394,6 +413,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [boa.head],
       zone: this.zone(placement.id, centre, placement.stand, boa.head, () => {
         boa.poke();
         this.ctx.hearts(centre, 2.6);
@@ -438,6 +458,7 @@ export class Exhibits {
     let nextEgg = 0;
     return {
       id: placement.id,
+      subjects: () => [...eggs.map((egg) => egg.root), ...hatchlings.map((baby) => baby.head)],
       zone: this.zone(placement.id, centre, placement.stand, group, () => {
         const egg = eggs[nextEgg];
         if (egg) {
@@ -482,6 +503,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => snakes.map((snake) => snake.head),
       zone: this.zone(placement.id, centre, placement.stand, group, () => {
         for (const snake of snakes) snake.poke();
       }),
@@ -506,6 +528,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [cammy.root],
       zone: this.zone(placement.id, centre, placement.stand, cammy.root, () => cammy.poke()),
       update: (dt, elapsed) => cammy.update(dt, elapsed),
       animals: () => [{ x: centre.x + 0.3, z: centre.z + 0.1 }],
@@ -541,6 +564,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => geckos.map((gecko) => gecko.root),
       zone: this.zone(placement.id, centre, placement.stand, group, () => {
         for (const gecko of geckos) gecko.poke();
       }),
@@ -580,6 +604,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [emmy.head],
       zone: this.zone(placement.id, centre, placement.stand, emmy.head, () => emmy.poke()),
       update: (dt, elapsed) => emmy.update(dt, elapsed),
       animals: () => [centre],
@@ -605,6 +630,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [minty.head],
       zone: this.zone(placement.id, centre, placement.stand, minty.head, () => minty.poke()),
       update: (dt, elapsed) => minty.update(dt, elapsed),
       animals: () => [centre],
@@ -619,6 +645,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [smudge.root],
       zone: this.zone(placement.id, centre, placement.stand, smudge.root, () => smudge.poke()),
       update: (dt, elapsed) => smudge.update(dt, elapsed),
       animals: () => [centre],
@@ -709,6 +736,11 @@ export class Exhibits {
     const greeter = snakes[3]!;
     const greeterHang = hangs[3]!;
     const low = new Vector3(Math.sin(toward) * 1.1, REPTILE_ENCLOSURE_WALL_HEIGHT + 1.0, Math.cos(toward) * 1.1);
+    // Where the greeter's head comes down to say hello — what the exhibit
+    // camera frames, rather than her starting perch up in the canopy.
+    const greetSpot = new Group();
+    greetSpot.name = 'grove-greet-spot';
+    group.add(greetSpot);
     const DESCEND = 1.8;
     const HOLD = 2.0;
     const total = DESCEND * 2 + HOLD;
@@ -716,6 +748,14 @@ export class Exhibits {
     const ease = (t: number): number => t * t * (3 - 2 * t);
     return {
       id: placement.id,
+      subjects: () => {
+        // Where her head will be once she has slid down: the head's offset
+        // from her root now, carried to the low spot.
+        greeter.root.updateWorldMatrix(true, true);
+        const head = greeter.head.getWorldPosition(new Vector3()).sub(greeter.root.getWorldPosition(new Vector3()));
+        greetSpot.position.copy(low).add(head);
+        return [greetSpot];
+      },
       zone: this.zone(placement.id, centre, placement.stand, banyan, () => {
         for (const snake of snakes) snake.poke();
         greet = total;
@@ -767,6 +807,7 @@ export class Exhibits {
     const ahead = new Vector3();
     return {
       id: placement.id,
+      subjects: () => [tock.root],
       zone: this.zone(
         placement.id,
         centre,
@@ -831,6 +872,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => [snappy.root],
       zone: this.zone(placement.id, centre, placement.stand, snappy.root, () => {
         snappy.poke();
         bubbleTime = 1.5;
@@ -879,6 +921,7 @@ export class Exhibits {
     const centre = this.shapeCentre(placement.shape);
     return {
       id: placement.id,
+      subjects: () => iguanas.map((iguana) => iguana.root),
       zone: this.zone(placement.id, centre, placement.stand, group, () => {
         for (const iguana of iguanas) iguana.poke();
       }),
@@ -958,6 +1001,7 @@ export class Exhibits {
     group.add(lampGlow);
     return {
       id: placement.id,
+      subjects: () => this.nurseryBabies.map((baby) => baby.head),
       zone: this.zone(
         placement.id,
         centre,
@@ -1030,6 +1074,7 @@ export class Exhibits {
     let chorus = 0;
     return {
       id: placement.id,
+      subjects: () => frogs.map((frog) => frog.root),
       zone: this.zone(
         placement.id,
         centre,
@@ -1086,6 +1131,7 @@ export class Exhibits {
     const headAt: LocalPoint = { x: rock.head.position.x, z: rock.head.position.z };
     return {
       id: placement.id,
+      subjects: () => [rock.head],
       zone: this.zone(placement.id, headAt, placement.stand, rock.head, () => {
         this.noodleLift = 1.6;
         this.noodleMood = 2.2;

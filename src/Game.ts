@@ -1833,6 +1833,15 @@ export class Game {
       this.camera.clearPoseOverride();
     }
 
+    // The Reptile House's exhibit shot: a chip pressed on an exhibit brings the
+    // camera down behind her shoulder to watch the animals react, and home
+    // again when they are done or she moves (`reptileHouse/exhibitCamera.ts`).
+    // It writes its own pose and zoom and *claims* the focus like the others;
+    // the keychain rack below still outranks it, though the two can never
+    // hold at once — one is in the park and the other in the hall.
+    const exhibitClaim = this.world.reptileHouse.exhibitCamera.apply(this.camera);
+    if (exhibitClaim) focusClaim = exhibitClaim;
+
     // The keychain rack's zoomed picker (#331): the camera orbits the centre of
     // everything that must be in shot (`KeychainShop.viewFocus`) instead of the
     // player while `viewOpen`, at whatever zoom actually holds it
