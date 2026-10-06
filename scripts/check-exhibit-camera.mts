@@ -48,25 +48,25 @@
  *
  * **Proven red before trusted green**, 6 October 2026, on the hall as built
  * by `layout.ts`'s `EXHIBIT_PLACEMENTS` at origin (600, −600) and the
- * solver's fan in `exhibitCamera.ts` (`EYE_SWINGS` ±0–90°, `EYE_BACKS`
- * 1.6/2.4/3.2 m, `EYE_HEIGHTS` 2.3–4.3 m, `SIGHTLINE_TUBE` 0.07 m), two ways:
+ * solver's fan in `exhibitCamera.ts` (`EYE_SWINGS` 0–180°, `EYE_BACKS`
+ * 1.6–5.6 m, `EYE_HEIGHTS` 2.3–5.3 m, `SIGHTLINE_TUBE` 0.07 m,
+ * `IDEAL_BACK` 3.2, `IDEAL_HEIGHT` 3.3), two ways:
  *
  * - `EXHIBIT_CAMERA_BREAK=block` stands an opaque 1.6 m panel across each
  *   settled shot — the deliberately blocked shot. **30 clauses red**, every
  *   exhibit on both screens, e.g.
- *   `✗ unoccluded from the real eye: 0 of 1 star(s) … — blocked by deliberate-blocker at 2.44 m`.
+ *   `✗ unoccluded from the real eye: 0 of 1 star(s) … — blocked by deliberate-blocker at 3.35 m`.
  * - With the solver's sightline test switched off (`const seen = targets.map(() => true)`
- *   in `solveExhibitShotSteps`, so it takes its favourite eye blind), **11
+ *   in `solveExhibitShotSteps`, so it takes its favourite eye blind), **9
  *   clauses red**, all on real geometry:
  *
  * ```
- *   ✗   unoccluded from the real eye: 0 of 1 star(s), 0 of 0 in the crowd (at least 67%) — blocked by rc-tortoise-wall at 4.54 m
- *   ✗   unoccluded from the real eye: 0 of 1 star(s), 0 of 0 in the crowd (at least 67%) — blocked by rc-lagoon-wall at 3.84 m
- *   ✗   unoccluded from the real eye: 1 of 2 star(s), 0 of 0 in the crowd (at least 67%) — blocked by rc-round-wall at 4.09 m
- *   ✗   unoccluded from the real eye: 0 of 0 star(s), 10 of 16 in the crowd (at least 67%) — blocked by rn-tail-mound at 8.40 m; …
- *   ✗   the eye stayed in the hall on every frame down and back — 2 faults, first: eye within 0.15 m of rp-vine-strand at (-12.19, 4.65, -10.02)
- *   ✗ chameleon: with a panel across (4.18, 2.80, -11.64) → focus, it chose an eye 0.00 m away
- *   11 clause(s) FAILED.
+ *   ✗   unoccluded from the real eye: 0 of 1 star(s), 0 of 0 in the crowd (at least 67%) — blocked by rc-tortoise-wall at 5.16 m
+ *   ✗   unoccluded from the real eye: 1 of 2 star(s), 0 of 0 in the crowd (at least 67%) — blocked by rc-round-wall at 5.52 m
+ *   ✗   unoccluded from the real eye: 0 of 0 star(s), 9 of 16 in the crowd (at least 67%) — blocked by rc-nursery-rail at 6.33 m; rn-tail-mound at 9.44 m; …
+ *   ✗ chameleon: with a panel across (2.79, 3.30, -11.67) → focus, it chose an eye 0.00 m away
+ *   ✗   and that eye sees the animal past the panel — blocked by deliberate-blocker at 3.03 m
+ *   9 clause(s) FAILED.
  * ```
  *
  * `EXHIBIT_CAMERA_ONLY=<id>` measures one exhibit, for iterating. The hall is
