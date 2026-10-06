@@ -1,4 +1,4 @@
-import { Group, Sprite, SpriteMaterial, Vector3 } from 'three';
+import { Group, Sprite, SpriteMaterial, Vector3, type Object3D } from 'three';
 import { clearsTop, type CollisionWorld, type WallCollider } from '../Collision';
 import type { WalkSurfaces } from '../building/surfaces';
 import type { InteriorControls } from '../building/Building';
@@ -335,6 +335,16 @@ export class ReptileHouse implements GameSystem {
 
   get babiesFound(): number {
     return this.exhibits.babiesFound;
+  }
+
+  /** Every exhibit's id, in table order — for `check:exhibit-camera`. */
+  get exhibitIds(): readonly string[] {
+    return this.exhibits.ids;
+  }
+
+  /** The animals an exhibit's shot frames — for `check:exhibit-camera`. */
+  exhibitSubjects(id: string): readonly Object3D[] {
+    return this.exhibits.subjectsOf(id);
   }
 
   /** Every animal's hall-local spot with its exhibit, for the check. */
