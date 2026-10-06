@@ -414,7 +414,7 @@ function audit(): void {
     // Coverage: a call to action put away because its own action is answering.
     const cta = wanted.find((label) => label.identity.kind === 'callToAction');
     const answer = wanted.find((label) => label.identity.kind === 'actionFeedback');
-    if (cta && answer && isDrawn(answer)) coverage.ctaPutAwayForItsAction += 1;
+    if (cta && answer && isDrawn(answer) && !isDrawn(cta)) coverage.ctaPutAwayForItsAction += 1;
     if (answer && isDrawn(answer)) coverage.feedbackShownOverItsItem += 1;
     for (const label of wanted) {
       if (prec(label) !== top || isDrawn(label)) continue;

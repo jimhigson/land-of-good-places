@@ -108,8 +108,9 @@
  *    `ui/LabelManager.ts` draws one or the other, never both; the gate that
  *    used to live in `NpcSystem.updateLabels` (and the frame-order hazard it
  *    carried, which an earlier version of this paragraph measured) is gone.
- *    `--mutate-label` now breaks exactly that rule — every label its own
- *    item — and 4a must fail on it. The general form of 4a, for every label
+ *    `--mutate-label` now breaks that rule — every label its own item — and
+ *    rule 2 (no overlaps) with it, since either alone keeps pill and bubble
+ *    apart; 4a must fail on it. The general form of 4a, for every label
  *    in the park, is `check:labels` assertion B.
  *
  *    **4b and 4c ask the manager why, and only excuse two answers.** A pill
@@ -442,11 +443,18 @@ if (mutateAnchor) {
 }
 
 if (mutateLabel) {
-  // The park as it was before #486, restored as the one rule that now owns
-  // the fix: every label its own item, so a talking child's pill and bubble
-  // are no longer one item and both are drawn — `ui/LabelManager.ts`, rule 1.
-  (LabelManager.prototype as unknown as { itemOf: (e: { label: ManagedLabel }) => string }).itemOf = (entry) =>
-    entry.label.identity.id;
+  // The park as it was before #486 — and before the label manager, because
+  // two of its rules now keep a talking child's pill from her bubble, and
+  // breaking only one leaves the other doing the job (measured: rule 1 alone
+  // off, 4a stays at 0, since the pill and bubble over one head touch, and
+  // rule 2 then hides the pill). So both: every label its own item (rule 1)
+  // and nothing ever colliding (rule 2).
+  const innards = LabelManager.prototype as unknown as {
+    itemOf: (e: { label: ManagedLabel }) => string;
+    collides: () => boolean;
+  };
+  innards.itemOf = (entry) => entry.label.identity.id;
+  innards.collides = () => false;
 }
 
 /** The two reasons a label may be down that are Jim's rule rather than a lost name. */
@@ -756,7 +764,12 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
       latch = { current: 0, worst: 0, worstLine: '' };
       latches.set(character.name, latch);
     }
-    const owedHerName = spoken.has(character.name) && !speaking && entitledToPill && !pillCrowded;
+    // "In shot", as the failure line says: the label manager draws nothing
+    // whose rectangle is off the screen, so a pill over a child the frustum
+    // does not contain is not owed. Asked with the real frustum test, of where
+    // the pill hangs.
+    const pillInShot = isOnScreen.call(camera, label.sprite.getWorldPosition(new Vector3()));
+    const owedHerName = spoken.has(character.name) && !speaking && entitledToPill && !pillCrowded && pillInShot;
     if (owedHerName && !label.sprite.visible) {
       latch.current += 1;
       if (latch.current > latch.worst) {
