@@ -4,26 +4,22 @@ Branch `feat/exhibit-camera`, worktree `.claude/worktrees/exhibit-camera`.
 Model: Opus 5.5 (claude-opus-5-5[1m]), Engineer, dispatched by the Overseer.
 
 ## Ask
-Jim: exhibit reactions are hard to see zoomed out — the camera should come
-down to an over-shoulder view of the animal while it reacts; eases back when
-the reaction ends or she moves. Shot solved against occlusion (raycasts,
-several candidate eyes). Check `check:exhibit-camera` in a shard, proved red.
+Jim: exhibit reactions are hard to see zoomed out — camera comes down to an
+over-shoulder view while the animal reacts; back when done or she moves.
 
-## Design (decided)
-- Reuse IsoCamera's existing shot API: `setFocusOverride` (via Game's
-  `focusClaim` arbitration), `setShotOverride(yaw, pitch, distance)`,
-  `setZoomTarget` — the arrival/keychain precedent. No new camera mechanism.
-- `src/world/reptileHouse/exhibitCamera.ts`: solver (candidate eyes behind her,
-  raycast eye→animal points against the hall + her body, glass see-through)
-  and a director that eases a pose (yaw/pitch/log-distance/zoom/focus,
-  smoothstep) in and out; `apply(camera)` is the one wiring both Game and the
-  check call.
-- Each `Exhibit` gains `subject()` — a world Box3 of its animals.
-- Trigger: `ctx.greet(id)` (already called by every exhibit's primary chip).
-- Cancel: manual move, jump, she moves >0.25 m, rides, leaves hall.
+## Done (all pushed)
+- `src/world/reptileHouse/exhibitCamera.ts`: solver (fan of eyes behind her,
+  star/crowd sightline tubes vs hall + her body, glass see-through, approach
+  path sampled clear) + `ExhibitCamera` director (smoothstep ease in 1.0 s,
+  hold ≥2.6 s and until the blurb bubble ends, ease out 0.9 s / 0.45 s on
+  cancel). Places the camera exactly on its curve each frame (snap* calls) —
+  damping on top made the real path stray 0.15 m from ribs/vines.
+- Exhibits expose `subjects()` (stars/crowds via `asCrowd`, body markers for
+  pooled snakes) and `cast()` (animals never occluders of each other).
+- Game.ts: `exhibitCamera.apply(camera)` claims focus before keychain.
+- `check:exhibit-camera` in shard 4; green; red proofs in its docstring.
+- Local runs: `LGP_PARK_RESTART=0 pnpm run check:exhibit-camera` (~90 s);
+  without it, importing the game triggers a multi-minute park acceptance.
 
-## Status
-- [x] solver + director (src/world/reptileHouse/exhibitCamera.ts)
-- [x] Game wiring (Game.ts focusClaim; ReptileHouse.onGreet starts it)
-- [ ] check:exhibit-camera + red proof
-- [ ] PR + preview screenshots
+## Left
+- PR, preview, headless screenshots at /reptile-house.

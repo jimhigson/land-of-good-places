@@ -46,8 +46,32 @@
  * eye that sees past it; and a **control** — the same panel stood across the
  * real settled shot — the occlusion instrument reports blocked.
  *
- * **Proven red before trusted green** — see the PR / the transcript pasted
- * below once taken.
+ * **Proven red before trusted green**, 6 October 2026, on the hall as built
+ * by `layout.ts`'s `EXHIBIT_PLACEMENTS` at origin (600, −600) and the
+ * solver's fan in `exhibitCamera.ts` (`EYE_SWINGS` ±0–90°, `EYE_BACKS`
+ * 1.6/2.4/3.2 m, `EYE_HEIGHTS` 2.3–4.3 m, `SIGHTLINE_TUBE` 0.07 m), two ways:
+ *
+ * - `EXHIBIT_CAMERA_BREAK=block` stands an opaque 1.6 m panel across each
+ *   settled shot — the deliberately blocked shot. **30 clauses red**, every
+ *   exhibit on both screens, e.g.
+ *   `✗ unoccluded from the real eye: 0 of 1 star(s) … — blocked by deliberate-blocker at 2.45 m`.
+ * - With the solver's occlusion test switched off (`if (false && !sightlinesPass(…))`
+ *   in `solveExhibitShot`, so it takes its favourite eye blind), **14 clauses
+ *   red**, all real geometry:
+ *
+ * ```
+ *   ✗   unoccluded from the real eye: 0 of 1 star(s) … — blocked by rc-tortoise-wall at 4.94 m
+ *   ✗   unoccluded from the real eye: 0 of 1 star(s) … — blocked by rc-lagoon-wall at 4.38 m
+ *   ✗   unoccluded from the real eye: 1 of 2 star(s) … — blocked by rc-round-wall at 4.10 m
+ *   ✗   unoccluded from the real eye: 0 of 0 star(s), 10 of 17 in the crowd … — blocked by rn-tail-mound at 8.40 m; …
+ *   ✗   the eye stayed in the hall on every frame down and back — 2 faults, first: eye within 0.15 m of rp-vine-strand at (-12.19, 4.65, -10.02)
+ *   ✗ chameleon: with a panel across (4.18, 2.80, -11.64) → focus, it chose an eye 0.00 m away
+ *   14 clause(s) FAILED.
+ * ```
+ *
+ * `EXHIBIT_CAMERA_ONLY=<id>` measures one exhibit, for iterating. The hall is
+ * built on its own, so locally `LGP_PARK_RESTART=0` skips waiting on the
+ * park acceptance loop that importing the game's modules otherwise triggers.
  */
 import './headless-canvas.mjs';
 import { Box3, BoxGeometry, Mesh, MeshBasicMaterial, Raycaster, Vector3, type Object3D } from 'three';
