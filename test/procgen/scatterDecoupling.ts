@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
 import { CANONICAL_PARK_SEED } from '../../src/world/parkSeedPool.ts';
@@ -68,18 +67,25 @@ interface Digest {
   readonly all: string;
 }
 
-const execFileAsync = promisify(execFile);
-
-async function buildDigest(env: Record<string, string>): Promise<Digest> {
-  const { stdout, stderr } = await execFileAsync('node', DIGEST_ARGS, {
-    cwd: new URL('../..', import.meta.url).pathname,
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-    maxBuffer: 256 * 1024 * 1024,
+function buildDigest(env: Record<string, string>): Promise<Digest> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'node',
+      DIGEST_ARGS,
+      {
+        cwd: new URL('../..', import.meta.url).pathname,
+        encoding: 'utf8',
+        env: { ...process.env, ...env },
+        maxBuffer: 256 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        // The child's trace, which `execFileSync` used to pass straight through.
+        process.stderr.write(stderr);
+        if (error !== null) reject(error);
+        else resolve(JSON.parse(stdout) as Digest);
+      },
+    );
   });
-  // The child's trace, which `execFileSync` used to pass straight through.
-  process.stderr.write(stderr);
-  return JSON.parse(stdout) as Digest;
 }
 
 /**
