@@ -203,6 +203,15 @@ Two things those numbers taught, kept because they are the lesson:
   check's own `item` mutation fails B on the shop crowd, where pill and bubble
   happen not to touch.
 
+`check:speech-bubbles:wide` (1920x1080, 420 s) first went red on this branch
+— ten children "without their name while in shot" — and every one of them had
+a pill rectangle wholly past an edge (Theo at x −54…−7, Iris at y 1082…1120 of
+1080): the clause had judged "in shot" by `IsoCamera.isOnScreen`, a test at the
+focus depth that is generous nearer the lens, and the manager rightly draws
+nothing wholly off the screen. It now asks the drawing camera's own
+projection. After: green at both viewports; `--mutate-text-gate` at 1920x1080
+→ 124 frames of 4c, first Ola at frame 14690.
+
 `check:speech-bubbles` at 390x844 (120 s): green; `--mutate-label` →
 `FAIL A child's name pill was drawn under her own speech bubble, on 1224
 occasion(s)… First: Cleo … frame 951`; `--mutate-latch` → `FAIL 1 child(ren)
