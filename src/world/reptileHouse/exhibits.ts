@@ -1007,7 +1007,8 @@ export class Exhibits {
     ];
     const tail = createSnake({ length: 2.6, radius: 0.3, colourway: 'mint', seed: 1300, path: tailPath, headless: true, taper: 0.25, pool: this.ctx.adults });
     group.add(tail.root);
-    const tailBody = bodyMarkers(group, tailPath, 'nursery-tail');
+    // Not the first point: that is where the tail comes out of its mound.
+    const tailBody = bodyMarkers(group, tailPath.slice(1), 'nursery-tail');
     const colourways = ['mint', 'coral', 'corn', 'rainbow'] as const;
     const sizes = [
       [0.3, 0.05],

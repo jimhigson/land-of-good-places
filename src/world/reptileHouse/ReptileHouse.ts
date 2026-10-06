@@ -70,6 +70,7 @@ import {
   REPTILE_HOUSE_PLAY_RADIUS,
   REPTILE_SHELL_RADIUS,
   TORTOISE_RIDE_STAND,
+  EXHIBIT_PLACEMENTS,
   type LocalPoint,
 } from './layout';
 
@@ -407,6 +408,7 @@ export class ReptileHouse implements GameSystem {
       this.forecourtRoot.visible = false;
       this.boundToHall();
       this.spaces.holdOff();
+      this.warmExhibitCamera();
     } else if (space === SPACE_REPTILE_FORECOURT) {
       this.inside = false;
       this.onForecourt = true;
@@ -556,6 +558,7 @@ export class ReptileHouse implements GameSystem {
     const z = at ? at.z : REPTILE_ARRIVAL_Z;
     const facing = ((at?.facing ?? REPTILE_ARRIVAL_FACING) * Math.PI) / 180;
     player.teleportTo(REPTILE_HOUSE_ORIGIN_X + x, REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_Z + z, facing);
+    this.warmExhibitCamera();
   }
 
   /** Out through the door: into the park at the plot's doormat, or onto the forecourt. */
@@ -591,6 +594,19 @@ export class ReptileHouse implements GameSystem {
     this.forecourtRoot.visible = true;
     this.boundToForecourt();
     player.teleportTo(mat.x, REPTILE_HOUSE_FLOOR_Y, mat.z, facing);
+  }
+
+  /** Every exhibit's shot, solved in the background from its stand spot (`ExhibitCamera.warm`). */
+  private warmExhibitCamera(): void {
+    this.exhibitCamera.warm(
+      EXHIBIT_PLACEMENTS.map((placement) => ({
+        id: placement.id,
+        subjects: () => this.exhibits.subjectsOf(placement.id),
+        cast: () => this.exhibits.castOf(placement.id),
+        at: new Vector3(REPTILE_HOUSE_ORIGIN_X + placement.stand.x, REPTILE_HOUSE_FLOOR_Y, REPTILE_HOUSE_ORIGIN_Z + placement.stand.z),
+        facing: (placement.stand.facing * Math.PI) / 180,
+      })),
+    );
   }
 
   private boundToHall(): void {

@@ -1,4 +1,4 @@
-import { Box3, InstancedMesh, Mesh, Raycaster, Vector3, type Material, type Object3D } from 'three';
+import { Box3, InstancedMesh, Line3, Matrix4, Mesh, Raycaster, Sphere, Vector3, type Material, type Object3D } from 'three';
 import { CAMERA_DISTANCE, CAMERA_PITCH_DEGREES, CAMERA_YAW_DEGREES } from '../../core/constants';
 import { CAMERA_FOCUS_LIFT, type IsoCamera } from '../../core/IsoCamera';
 import type { CollisionWorld } from '../Collision';
@@ -61,6 +61,17 @@ export const EXHIBIT_SHOT_EASE_OUT = 0.9;
 export const EXHIBIT_SHOT_EASE_CANCEL = 0.45;
 /** The least time the shot holds once it has landed — every reaction is about two seconds. */
 export const EXHIBIT_SHOT_HOLD = 2.6;
+/**
+ * Milliseconds of solving per frame. A shot that cannot be found inside one
+ * slice carries on next frame rather than stalling this one.
+ */
+const SOLVE_BUDGET_MS = 4;
+/** Milliseconds a frame of background warming may take, while no shot is wanted. */
+const WARM_BUDGET_MS = 2;
+/** A remembered eye is tried first when she presses from within this many metres of where it was solved. */
+const REMEMBER_WITHIN = 0.6;
+const now = (): number => performance.now();
+
 /** Seconds per halving for the aim to follow animals that move during the shot. */
 const LIVE_FOCUS_HALF_LIFE = 0.35;
 /** How far she may drift (a nudge, an idle shuffle) before it counts as walking off. Metres. */
@@ -159,8 +170,14 @@ export function asCrowd<T extends Object3D>(objects: readonly T[]): T[] {
   return [...objects];
 }
 
-/** The share of a crowd a shot must see. */
-export const CROWD_SEEN = 0.75;
+/** The share of a crowd a shot must see — what `check:exhibit-camera` holds the real eye to. */
+export const CROWD_SEEN = 2 / 3;
+/**
+ * What the solver asks for, a margin over {@link CROWD_SEEN}: twelve babies
+ * tumbling round their mum for the length of the shot will not all stay
+ * where they were when it was solved.
+ */
+const CROWD_SEEN_TO_SOLVE = 0.75;
 
 /** One sightline target: an animal's middle, and whether it is a star or one of a crowd. */
 export interface ShotTarget {
@@ -189,7 +206,7 @@ export function subjectOf(subjects: readonly Object3D[]): { box: Box3; targets: 
 const SIGHTLINE_TUBE = 0.07;
 
 /** Seen from `eye` down a whole {@link SIGHTLINE_TUBE}. */
-function robustlySeen(eye: Vector3, target: Vector3, occluders: readonly Mesh[], report?: SolveReport): boolean {
+function robustlySeen(eye: Vector3, target: Vector3, occluders: OccluderSet, report?: SolveReport): boolean {
   const along = target.clone().sub(eye).normalize();
   const side = new Vector3(0, 1, 0).cross(along); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
   if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
@@ -207,6 +224,33 @@ function robustlySeen(eye: Vector3, target: Vector3, occluders: readonly Mesh[],
     }
   }
   return true;
+}
+
+/**
+ * The sightlines from `eye`, stars first and failing fast: `null` as soon as
+ * a star is hidden or too much of the crowd is for {@link CROWD_SEEN} to be
+ * reachable, else every target's result. Equivalent to {@link sightlinesPass}
+ * over all of them, without casting the rays that cannot change the answer.
+ */
+function shotSees(eye: Vector3, targets: readonly ShotTarget[], occluders: OccluderSet, report?: SolveReport): boolean[] | null {
+  const seen: boolean[] = targets.map(() => false);
+  for (const [index, target] of targets.entries()) {
+    if (target.crowd) continue;
+    if (!robustlySeen(eye, target.point, occluders, report)) return null;
+    seen[index] = true;
+  }
+  const crowd = targets.filter((target) => target.crowd).length;
+  const mayMiss = crowd - Math.ceil(CROWD_SEEN_TO_SOLVE * crowd);
+  let missed = 0;
+  for (const [index, target] of targets.entries()) {
+    if (!target.crowd) continue;
+    seen[index] = !sightlineBlocked(eye, target.point, occluders);
+    if (!seen[index]) {
+      missed += 1;
+      if (missed > mayMiss) return null;
+    }
+  }
+  return seen;
 }
 
 /**
@@ -244,7 +288,7 @@ function shownInScene(object: Object3D): boolean {
  * visible, not glass, not one of the animals themselves and not under
  * anything in `ignore`.
  */
-export function collectOccluders(roots: readonly Object3D[], ignore: readonly Object3D[]): Mesh[] {
+export function collectOccluders(roots: readonly Object3D[], ignore: readonly Object3D[]): OccluderSet {
   const skip = new Set<Object3D>();
   for (const root of ignore) root.traverse((child) => skip.add(child));
   const meshes: Mesh[] = [];
@@ -258,34 +302,110 @@ export function collectOccluders(roots: readonly Object3D[], ignore: readonly Ob
       meshes.push(child);
     });
   }
-  return meshes;
+  // An instanced mesh is one bounding sphere round every instance in the
+  // hall — every fern, every tuft — so it passes any sphere test and three
+  // then walks all of its instances per ray. Each instance stands in as its
+  // own proxy instead, so the cull sees the one fern actually in the way.
+  const expanded: Mesh[] = [];
+  const spheres: Sphere[] = [];
+  for (const mesh of meshes) {
+    if (mesh instanceof InstancedMesh) {
+      for (const proxy of instanceProxies(mesh)) {
+        expanded.push(proxy);
+        spheres.push(worldSphere(proxy));
+      }
+    } else {
+      expanded.push(mesh);
+      spheres.push(worldSphere(mesh));
+    }
+  }
+  return { meshes: expanded, spheres };
+}
+
+function worldSphere(mesh: Mesh): Sphere {
+  if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+  const sphere = mesh.geometry.boundingSphere;
+  return sphere ? sphere.clone().applyMatrix4(mesh.matrixWorld) : new Sphere(new Vector3(), Infinity);
+}
+
+/** Per-instance stand-ins, kept while the instances have not moved (the hall's plants never do). */
+const PROXIES = new WeakMap<InstancedMesh, { version: number; count: number; world: Matrix4; proxies: Mesh[] }>();
+
+function instanceProxies(mesh: InstancedMesh): Mesh[] {
+  const cached = PROXIES.get(mesh);
+  if (cached && cached.version === mesh.instanceMatrix.version && cached.count === mesh.count && cached.world.equals(mesh.matrixWorld)) {
+    return cached.proxies;
+  }
+  const proxies: Mesh[] = [];
+  const local = new Matrix4();
+  for (let i = 0; i < mesh.count; i += 1) {
+    const proxy = new Mesh(mesh.geometry, mesh.material);
+    proxy.name = mesh.name;
+    proxy.matrixAutoUpdate = false;
+    proxy.matrixWorldAutoUpdate = false;
+    mesh.getMatrixAt(i, local);
+    proxy.matrixWorld.multiplyMatrices(mesh.matrixWorld, local);
+    proxies.push(proxy);
+  }
+  PROXIES.set(mesh, { version: mesh.instanceMatrix.version, count: mesh.count, world: mesh.matrixWorld.clone(), proxies });
+  return proxies;
+}
+
+/**
+ * The meshes that can block a view, with each one's world bounding sphere, so
+ * a ray is only ever tested against the handful it could possibly meet. The
+ * hall has hundreds of meshes and a solve casts thousands of rays; three's own
+ * per-mesh culling still pays a matrix inverse and an instance walk for every
+ * one, which on a phone was most of a second's hitch on the chip.
+ */
+export interface OccluderSet {
+  readonly meshes: readonly Mesh[];
+  readonly spheres: readonly Sphere[];
+}
+
+const SCRATCH_CLOSEST = new Vector3();
+const SCRATCH_SEGMENT = new Line3();
+
+/** The meshes whose bounding sphere comes within `pad` of the segment `a`–`b`. */
+function alongSegment(set: OccluderSet, a: Vector3, b: Vector3, pad: number): Mesh[] {
+  SCRATCH_SEGMENT.set(a, b);
+  const out: Mesh[] = [];
+  set.spheres.forEach((sphere, index) => {
+    SCRATCH_SEGMENT.closestPointToPoint(sphere.center, true, SCRATCH_CLOSEST);
+    if (SCRATCH_CLOSEST.distanceTo(sphere.center) <= sphere.radius + pad) out.push(set.meshes[index]!);
+  });
+  return out;
 }
 
 /** Whether anything in `occluders` crosses the open segment from `eye` to `target`. */
-export function sightlineBlocked(eye: Vector3, target: Vector3, occluders: readonly Mesh[]): boolean {
+export function sightlineBlocked(eye: Vector3, target: Vector3, occluders: OccluderSet): boolean {
   return firstHit(eye, target, occluders) !== null;
 }
 
 /** The name of the first thing crossing the segment from `eye` to `target`, or `null`. */
-function firstHit(eye: Vector3, target: Vector3, occluders: readonly Mesh[]): string | null {
+function firstHit(eye: Vector3, target: Vector3, occluders: OccluderSet): string | null {
   const toward = target.clone().sub(eye);
   const length = toward.length();
   if (length < 1e-6) return null;
+  const candidates = alongSegment(occluders, eye, target, 0.01);
+  if (candidates.length === 0) return null;
   RAYCASTER.set(eye, toward.divideScalar(length));
   RAYCASTER.near = 0;
   // A hair short of the target, so the far side of a thin animal is never "in front" of it.
   RAYCASTER.far = Math.max(0, length - 0.05);
-  const hit = RAYCASTER.intersectObjects(occluders as Mesh[], false)[0];
+  const hit = RAYCASTER.intersectObjects(candidates, false)[0];
   return hit ? hit.object.name || hit.object.parent?.name || '(unnamed)' : null;
 }
 
 /** Whether any drawn surface is within {@link EYE_CLEARANCE} of the eye, along the six axes. */
-export function eyeTooClose(eye: Vector3, occluders: readonly Mesh[], clearance = EYE_CLEARANCE): boolean {
+export function eyeTooClose(eye: Vector3, occluders: OccluderSet, clearance = EYE_CLEARANCE): boolean {
+  const nearby = alongSegment(occluders, eye, eye, clearance + 0.01);
+  if (nearby.length === 0) return false;
   RAYCASTER.near = 0;
   RAYCASTER.far = clearance;
   for (const direction of DIRECTIONS) {
     RAYCASTER.set(eye, direction);
-    if (RAYCASTER.intersectObjects(occluders as Mesh[], false).length > 0) return true;
+    if (RAYCASTER.intersectObjects(nearby, false).length > 0) return true;
   }
   return false;
 }
@@ -355,6 +475,30 @@ export function solveExhibitShot(
   body: Object3D | null,
   report?: SolveReport,
 ): ExhibitShot | null {
+  const steps = solveExhibitShotSteps(world, exhibitId, subjects, cast, player, facing, body, report);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * {@link solveExhibitShot}, one candidate eye per step — so the director can
+ * spread a hard solve (the nursery's babies behind their rail can take a
+ * hundred candidates) over a few frames instead of hitching the one frame
+ * the chip is pressed on.
+ */
+export function* solveExhibitShotSteps(
+  world: ShotWorld,
+  exhibitId: string,
+  subjects: readonly Object3D[],
+  cast: readonly Object3D[],
+  player: Vector3,
+  facing: number,
+  body: Object3D | null,
+  report?: SolveReport,
+  preferred?: Vector3,
+): Generator<void, ExhibitShot | null> {
   const { box, targets } = subjectOf(subjects);
   if (box.isEmpty()) return null;
   const focus = box.getCenter(new Vector3());
@@ -381,16 +525,16 @@ export function solveExhibitShot(
   const behind = Math.atan2(behindX, behindZ);
   const start = Math.max(reach, 0.5);
 
-  let best: { eye: Vector3; seen: boolean[]; cost: number } | null = null;
-  let tried = 0;
-  let clear = 0;
-  const eye = new Vector3();
+  // Every candidate, cheapest-to-reject tests first, then in order of how
+  // close each is to the shot we would draw by hand: the first that passes
+  // everything is the best there is, so nothing after it is ever cast.
+  const candidates: { eye: Vector3; cost: number }[] = [];
   for (const swing of EYE_SWINGS) {
     const bearing = behind + (swing * Math.PI) / 180;
     for (const back of EYE_BACKS) {
       for (const height of EYE_HEIGHTS) {
         const out = start + back;
-        eye.set(focus.x + Math.sin(bearing) * out, REPTILE_HOUSE_FLOOR_Y + height, focus.z + Math.cos(bearing) * out);
+        const eye = new Vector3(focus.x + Math.sin(bearing) * out, REPTILE_HOUSE_FLOOR_Y + height, focus.z + Math.cos(bearing) * out);
         if (!insideHall(eye)) {
           if (report) report.outside += 1;
           continue;
@@ -399,31 +543,39 @@ export function solveExhibitShot(
           if (report) report.overSolid += 1;
           continue;
         }
-        if (eyeTooClose(eye, near)) {
-          if (report) report.tooClose += 1;
-          continue;
-        }
-        tried += 1;
-        const seen = targets.map((target) => (target.crowd ? !sightlineBlocked(eye, target.point, occluders) : robustlySeen(eye, target.point, occluders, report)));
-        if (!sightlinesPass(targets, seen)) {
-          if (report) report.blocked += 1;
-          continue;
-        }
-        // And the way there and back: the eye sweeps down from the rig, and
-        // a shot whose own approach crosses a wall, the log or a vine is no
-        // shot at all.
-        const angles = shotAngles(eye, focus);
-        const shotPose: Pose = { focus, ...angles, zoom };
-        if (!approachClear(rig, shotPose, near)) {
-          if (report) report.approach += 1;
-          continue;
-        }
-        clear += 1;
-        const cost = shotCost(swing, back, height, shotAngles(eye, focus).yawDegrees);
-        if (!best || cost < best.cost) best = { eye: eye.clone(), seen, cost };
+        candidates.push({ eye, cost: shotCost(swing, back, height, shotAngles(eye, focus).yawDegrees) });
       }
     }
   }
+  candidates.sort((a, b) => a.cost - b.cost);
+  // The eye that worked last time from here goes first: every test still runs
+  // on it, so it is only ever a guess about where to start looking.
+  if (preferred) candidates.unshift({ eye: preferred.clone(), cost: -1 });
+
+  let best: { eye: Vector3; seen: boolean[]; cost: number } | null = null;
+  let tried = 0;
+  for (const { eye, cost } of candidates) {
+    if (tried > 0) yield;
+    tried += 1;
+    if (eyeTooClose(eye, near)) {
+      if (report) report.tooClose += 1;
+      continue;
+    }
+    const seen = shotSees(eye, targets, occluders, report);
+    if (!seen) {
+      if (report) report.blocked += 1;
+      continue;
+    }
+    // And the way there and back: the eye sweeps down from the rig, and a
+    // shot whose own approach crosses a wall, the log or a vine is no shot.
+    if (!approachClear(rig, { focus, ...shotAngles(eye, focus), zoom }, near)) {
+      if (report) report.approach += 1;
+      continue;
+    }
+    best = { eye, seen, cost };
+    break;
+  }
+  const clear = best ? 1 : 0;
   if (!best) return null;
   const angles = shotAngles(best.eye, focus);
   return {
@@ -473,7 +625,7 @@ export function eyeOfPose(pose: Pose, out = new Vector3()): Vector3 {
  * in the hall's space and clear of everything drawn — sampled on the same
  * blend {@link ExhibitCamera} drives, so it is the path the camera takes.
  */
-function approachClear(rig: Pose, shot: Pose, near: readonly Mesh[]): boolean {
+function approachClear(rig: Pose, shot: Pose, near: OccluderSet): boolean {
   const scratch = { focus: new Vector3() };
   const eye = new Vector3();
   for (const [from, to] of [[rig, shot], [shot, rig]] as const) {
@@ -539,6 +691,17 @@ function blendPose(from: Pose, to: Pose, t: number, out: { focus: Vector3 }): Po
 
 type Phase = 'idle' | 'in' | 'hold' | 'out';
 
+/** One exhibit to solve in the background from its stand spot — see {@link ExhibitCamera.warm}. */
+export interface WarmEntry {
+  readonly id: string;
+  subjects(): readonly Object3D[];
+  cast(): readonly Object3D[];
+  /** Her feet at the stand spot, world. */
+  readonly at: Vector3;
+  /** Her facing there, radians. */
+  readonly facing: number;
+}
+
 /** What the director needs to know about her each frame. */
 export interface ShotPlayer {
   readonly position: Vector3;
@@ -576,6 +739,10 @@ export class ExhibitCamera {
   private lastPlayer: ShotPlayer | null = null;
   private failures: string[] = [];
   private lastReport: SolveReport | null = null;
+  private readonly memory = new Map<string, { at: Vector3; eye: Vector3 }>();
+  private warmQueue: WarmEntry[] = [];
+  private warming: { id: string; at: Vector3; steps: Generator<void, ExhibitShot | null> } | null = null;
+  private pending: { id: string; subjects: readonly Object3D[]; steps: Generator<void, ExhibitShot | null> } | null = null;
   private subjects: readonly Object3D[] = [];
   private readonly liveFocus = new Vector3();
   private lastDt = 0;
@@ -601,7 +768,12 @@ export class ExhibitCamera {
 
   /** `true` from the chip until the camera is home again. */
   get active(): boolean {
-    return this.phase !== 'idle';
+    return this.phase !== 'idle' || this.pending !== null;
+  }
+
+  /** A chip has been pressed and its shot is still being solved. */
+  get solving(): boolean {
+    return this.pending !== null;
   }
 
   /** Where the shot is in its life — for the check. */
@@ -619,11 +791,75 @@ export class ExhibitCamera {
     if (player.riding) return false;
     const report: SolveReport = { outside: 0, overSolid: 0, tooClose: 0, blocked: 0, approach: 0, blockers: {} };
     this.lastReport = report;
-    const shot = solveExhibitShot(this.world, id, subjects, cast, player.position, player.facing, player.group, report);
-    if (!shot) {
-      this.failures.push(id);
-      return false;
+    const remembered = this.memory.get(id);
+    const preferred = remembered && Math.hypot(remembered.at.x - player.position.x, remembered.at.z - player.position.z) < REMEMBER_WITHIN ? remembered.eye : undefined;
+    this.pending = { id, subjects, steps: solveExhibitShotSteps(this.world, id, subjects, cast, player.position, player.facing, player.group, report, preferred) };
+    this.anchor.copy(player.position);
+    this.lastPlayer = player;
+    // Most shots solve inside this first slice; a hard one finishes over the
+    // next frames, in `update`.
+    this.advanceSolve(player);
+    return true;
+  }
+
+  /**
+   * Queues every exhibit's shot to be solved in the background from its own
+   * stand spot — on entering the hall — so that pressing a chip where the
+   * layout stands her starts from an eye already known to work, and the
+   * press only has to re-check it. Called again, it starts over.
+   */
+  warm(entries: readonly WarmEntry[]): void {
+    this.warmQueue = [...entries];
+    this.warming = null;
+  }
+
+  /** How many exhibits' shots are still to be warmed — for the check. */
+  get warmingLeft(): number {
+    return this.warmQueue.length + (this.warming ? 1 : 0);
+  }
+
+  private advanceWarm(): void {
+    const deadline = now() + WARM_BUDGET_MS;
+    while (now() < deadline) {
+      if (!this.warming) {
+        const next = this.warmQueue.shift();
+        if (!next) return;
+        this.warming = {
+          id: next.id,
+          at: next.at.clone(),
+          steps: solveExhibitShotSteps(this.world, next.id, next.subjects(), next.cast(), next.at, next.facing, null),
+        };
+      }
+      const step = this.warming.steps.next();
+      if (step.done) {
+        if (step.value && !this.memory.has(this.warming.id)) this.memory.set(this.warming.id, { at: this.warming.at, eye: step.value.eye.clone() });
+        this.warming = null;
+      }
     }
+  }
+
+  /** Runs the pending solve for up to {@link SOLVE_BUDGET_MS}, and starts the move when it lands. */
+  private advanceSolve(player: ShotPlayer): void {
+    const pending = this.pending;
+    if (!pending) return;
+    const deadline = now() + SOLVE_BUDGET_MS;
+    for (;;) {
+      const step = pending.steps.next();
+      if (step.done) {
+        this.pending = null;
+        if (step.value) {
+          this.memory.set(pending.id, { at: player.position.clone(), eye: step.value.eye.clone() });
+          this.begin(step.value, pending.subjects, player);
+        }
+        else this.failures.push(pending.id);
+        return;
+      }
+      if (now() >= deadline) return;
+    }
+  }
+
+  /** The solved shot takes the camera: the move starts from wherever it is now. */
+  private begin(shot: ExhibitShot, subjects: readonly Object3D[], player: ShotPlayer): void {
     if (this.phase === 'idle') {
       const camera = this.world.camera;
       this.zoomBefore = camera.targetZoom;
@@ -643,11 +879,11 @@ export class ExhibitCamera {
     this.t = 0;
     this.duration = EXHIBIT_SHOT_EASE_IN;
     this.held = 0;
-    return true;
   }
 
   /** Hands the camera straight back (leaving the hall, boarding the tortoise). */
   cancel(): void {
+    this.pending = null;
     if (this.phase === 'in' || this.phase === 'hold') this.beginOut(EXHIBIT_SHOT_EASE_CANCEL);
   }
 
@@ -658,6 +894,12 @@ export class ExhibitCamera {
   update(dt: number, input: ShotInput, player: ShotPlayer, inside: boolean, bubbleLeft: number): void {
     this.lastPlayer = player;
     this.lastDt = dt;
+    if (this.pending) {
+      const moved = Math.hypot(player.position.x - this.anchor.x, player.position.z - this.anchor.z) > EXHIBIT_SHOT_MOVE_CANCEL;
+      if (!inside || player.riding || moved || input.manualMoveActive || input.justPressed('jump')) this.pending = null;
+      else this.advanceSolve(player);
+    }
+    if (!this.pending && this.phase === 'idle') this.advanceWarm();
     if (this.phase === 'idle') return;
     if (this.phase === 'in' || this.phase === 'hold') {
       const moved = Math.hypot(player.position.x - this.anchor.x, player.position.z - this.anchor.z) > EXHIBIT_SHOT_MOVE_CANCEL;

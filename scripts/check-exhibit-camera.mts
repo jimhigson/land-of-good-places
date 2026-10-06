@@ -54,19 +54,19 @@
  * - `EXHIBIT_CAMERA_BREAK=block` stands an opaque 1.6 m panel across each
  *   settled shot — the deliberately blocked shot. **30 clauses red**, every
  *   exhibit on both screens, e.g.
- *   `✗ unoccluded from the real eye: 0 of 1 star(s) … — blocked by deliberate-blocker at 2.45 m`.
- * - With the solver's occlusion test switched off (`if (false && !sightlinesPass(…))`
- *   in `solveExhibitShot`, so it takes its favourite eye blind), **14 clauses
- *   red**, all real geometry:
+ *   `✗ unoccluded from the real eye: 0 of 1 star(s) … — blocked by deliberate-blocker at 2.44 m`.
+ * - With the solver's sightline test switched off (`const seen = targets.map(() => true)`
+ *   in `solveExhibitShotSteps`, so it takes its favourite eye blind), **11
+ *   clauses red**, all on real geometry:
  *
  * ```
- *   ✗   unoccluded from the real eye: 0 of 1 star(s) … — blocked by rc-tortoise-wall at 4.94 m
- *   ✗   unoccluded from the real eye: 0 of 1 star(s) … — blocked by rc-lagoon-wall at 4.38 m
- *   ✗   unoccluded from the real eye: 1 of 2 star(s) … — blocked by rc-round-wall at 4.10 m
- *   ✗   unoccluded from the real eye: 0 of 0 star(s), 10 of 17 in the crowd … — blocked by rn-tail-mound at 8.40 m; …
+ *   ✗   unoccluded from the real eye: 0 of 1 star(s), 0 of 0 in the crowd (at least 67%) — blocked by rc-tortoise-wall at 4.54 m
+ *   ✗   unoccluded from the real eye: 0 of 1 star(s), 0 of 0 in the crowd (at least 67%) — blocked by rc-lagoon-wall at 3.84 m
+ *   ✗   unoccluded from the real eye: 1 of 2 star(s), 0 of 0 in the crowd (at least 67%) — blocked by rc-round-wall at 4.09 m
+ *   ✗   unoccluded from the real eye: 0 of 0 star(s), 10 of 16 in the crowd (at least 67%) — blocked by rn-tail-mound at 8.40 m; …
  *   ✗   the eye stayed in the hall on every frame down and back — 2 faults, first: eye within 0.15 m of rp-vine-strand at (-12.19, 4.65, -10.02)
  *   ✗ chameleon: with a panel across (4.18, 2.80, -11.64) → focus, it chose an eye 0.00 m away
- *   14 clause(s) FAILED.
+ *   11 clause(s) FAILED.
  * ```
  *
  * `EXHIBIT_CAMERA_ONLY=<id>` measures one exhibit, for iterating. The hall is
@@ -257,11 +257,18 @@ function standAt(id: string): void {
   for (let i = 0; i < 30; i += 1) frame();
 }
 
-function press(id: string): void {
+/** Presses the chip and lets the solve finish (it may spread over frames); returns how many frames it took. */
+function press(id: string): number {
   const zone = house.interactZones().find((z) => z.id === `reptile:${id}`);
   const action = zone?.actions?.().find((a) => a.id === PRIMARY_ACTION);
   if (!action) throw new Error(`no chip on ${id}`);
   action.run();
+  let frames = 0;
+  while (house.exhibitCamera.solving && frames < 600) {
+    frame();
+    frames += 1;
+  }
+  return frames;
 }
 
 /** Puts an opaque panel across the segment from `eye` to `target`, into the hall. */
@@ -280,6 +287,7 @@ function blocker(eye: Vector3, target: Vector3): Mesh {
 // ---------------------------------------------------------------- the run
 
 const only = process.env['EXHIBIT_CAMERA_ONLY'];
+let slowest = 0;
 const ids = only ? house.exhibitIds.filter((id) => id === only) : house.exhibitIds;
 if (only) note(`EXHIBIT_CAMERA_ONLY=${only} — measuring one exhibit, not a full run`);
 say(only !== undefined || (ids.length === EXHIBIT_PLACEMENTS.length && ids.length >= 15), `${ids.length} exhibits in the hall, every one measured below`);
@@ -313,12 +321,16 @@ for (const [label, width, height] of VIEWPORTS) {
     };
 
     const rigSpan = frameShare(subjectOf(house.exhibitSubjects(id)).box).span;
-    press(id);
+    const pressedAt = performance.now();
+    const solveFrames = press(id);
+    const solveMs = performance.now() - pressedAt;
+    slowest = Math.max(slowest, solveFrames);
+    if (process.env["EXHIBIT_CAMERA_DEBUG"]) note(`${id}: ${JSON.stringify(house.exhibitCamera.report)} tried ${house.exhibitCamera.shot?.tried}`);
     const shot = house.exhibitCamera.shot;
     const solved = house.exhibitCamera.active && shot?.exhibitId === id;
     const report = house.exhibitCamera.report;
     const why = report ? `rejected: ${report.outside} outside the hall, ${report.overSolid} over a solid, ${report.tooClose} too close to something, ${report.blocked} blocked, ${report.approach} with a blocked way down; blockers ${JSON.stringify(report.blockers)}` : '';
-    say(solved, solved && shot ? `${id}: a shot was solved (${shot.clear} of ${shot.tried} candidate eyes saw every animal)` : `${id}: NO shot was solved — ${why}`);
+    say(solved, solved && shot ? `${id}: a shot was solved — candidate ${shot.tried} in order of preference was the first to pass (solved over ${solveFrames + 1} frame(s), ${solveMs.toFixed(0)} ms here)` : `${id}: NO shot was solved — ${why}`);
     if (shot && shot.exhibitId === id && shot.zoom > CAMERA_ZOOM_MAX) note(`${id}: the framing wanted zoom ${shot.zoom.toFixed(2)}, past CAMERA_ZOOM_MAX ${CAMERA_ZOOM_MAX} — the clamp is deciding this shot's size`);
     if (!solved || !shot) {
       for (let i = 0; i < 600 && house.exhibitCamera.active; i += 1) frame();
@@ -442,6 +454,7 @@ console.log('\nTHE SOLVER BACKTRACKS — a panel across its first choice, and it
   }
 }
 
+note(`slowest solve: ${slowest + 1} frame(s) at 4 ms of solving a frame`);
 if (house.exhibitCamera.unsolved.length) note(`exhibits with no clear shot at some point: ${[...new Set(house.exhibitCamera.unsolved)].join(', ')}`);
 console.log(failures === 0 ? '\nexhibit camera: all clauses green.' : `\n${failures} clause(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);
