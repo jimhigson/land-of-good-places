@@ -54,9 +54,9 @@
  * ## The instrument, and its control
  *
  * Sprites (pills and bubbles) are measured from the drawn sprite itself —
- * world position, world scale, the painted content box — through
- * `IsoCamera.worldUnitsPerPixel`, which is a different calculation from the
- * manager's corner projection. Every frame the two must agree to a pixel; a
+ * world position, world scale, the painted content box — by the pinhole
+ * relation at the sprite's own depth, which is a different calculation from
+ * the manager's corner projection. Every frame the two must agree to a pixel; a
  * disagreement is a failure of its own, because a check measuring something
  * other than what the manager judged would be passing about the wrong thing.
  *
@@ -231,18 +231,33 @@ const view = { camera: camera.camera, width: WIDTH, height: HEIGHT };
 
 const centre = new Vector3();
 const worldScale = new Vector3();
+const eye = new Vector3();
+const forward = new Vector3();
 
-/** The drawn sprite's painted rectangle, measured independently of the manager. */
+/**
+ * The drawn sprite's painted rectangle, measured independently of the manager:
+ * its centre projected, and its size from the pinhole relation at its own
+ * depth — pixels per metre = viewport height / (2 · depth · tan(fov/2)) —
+ * rather than by projecting four corners along the camera's axes as the
+ * manager does. (Not `IsoCamera.worldUnitsPerPixel`: the rig is perspective,
+ * and that figure is only true at the focus — the first version of this
+ * instrument used it and disagreed with the manager by 3 px off-focus.)
+ */
 function spriteRect(label: NameLabel | SpeechBubble | SpriteLabel, out: ScreenRect): void {
   const sprite = label.sprite;
+  const lens = camera.camera;
   sprite.updateWorldMatrix(true, false);
   sprite.getWorldPosition(centre);
   sprite.getWorldScale(worldScale);
-  centre.project(camera.camera);
+  lens.getWorldPosition(eye);
+  lens.getWorldDirection(forward);
+  const depth = centre.clone().sub(eye).dot(forward);
+  const pxPerMetre = HEIGHT / (2 * depth * Math.tan(((lens.fov / 2) * Math.PI) / 180));
+  centre.project(lens);
   const cx = (centre.x * 0.5 + 0.5) * WIDTH;
   const cy = (1 - (centre.y * 0.5 + 0.5)) * HEIGHT;
-  const w = worldScale.x / camera.worldUnitsPerPixel;
-  const h = worldScale.y / camera.worldUnitsPerPixel;
+  const w = worldScale.x * pxPerMetre;
+  const h = worldScale.y * pxPerMetre;
   const box: ContentBox = label.contentBox;
   out.left = cx + (box.x0 - 0.5) * w;
   out.right = cx + (box.x1 - 0.5) * w;
@@ -443,11 +458,20 @@ function audit(): void {
       track.changes.push(frame);
       if (track.changes.length > 2) track.changes.shift();
       const [before, after] = track.changes;
+      // A cause, for going down: its own item has something more important
+      // to say, or something strictly more important has just arrived on top
+      // of it. Coming back up never has one inside the hold — that is the hold.
+      const mine = rects.get(label)!;
+      const caused =
+        !now &&
+        (state.verdict === 'item' ||
+          drawn.some((other) => prec(other) > prec(label) && rectsTouch(mine, rects.get(other)!, LABEL_MARGIN_PX)));
       if (
         before !== undefined &&
         after !== undefined &&
-        after - before <= HOLD_FRAMES &&
-        track.wantedSince <= before - 1
+        after - before < HOLD_FRAMES &&
+        track.wantedSince <= before - 1 &&
+        !caused
       ) {
         fail(
           'D flicker',
@@ -531,7 +555,34 @@ scene_ = 'plaza';
   for (const zone of garden) visit(zone, false, 3);
 }
 
-// 2 — the Reptile House: every chip pressed, every answer watched.
+// 2 — the castle shops (from the garden: the castle's own door sequence), ground floor, with their shoppers.
+scene_ = 'castle shops';
+let shopsVisited = 0;
+{
+  quietly(() => world.building.enterCastleSpawn(0));
+  run(1);
+  const shops = world.building.interactZones().filter((zone) => zone.id.startsWith('shop'));
+  if (process.env['LABELS_DEBUG']) {
+    process.stderr.write(`castle: player at ${player.position.x.toFixed(1)},${player.position.z.toFixed(1)} (${spaceAt(player.position.x, player.position.z)}); zones ${world.building.interactZones().map((z) => z.id).join(' ')}\n`);
+  }
+  for (const zone of shops) if (visit(zone, false, 2.5)) shopsVisited += 1;
+}
+
+// 3 — the hotel lobby: check in, and let her talk.
+scene_ = 'hotel lobby';
+let receptionTalked = false;
+{
+  quietly(() => world.hotel.requestEnterLobby());
+  run(1);
+  const desk = world.hotel.interactZones().find((zone) => zone.id === 'hotel-reception');
+  if (desk && spaceAt(desk.x, desk.z) === SPACE_HOTEL_LOBBY) {
+    visit(desk, true, 6);
+    visit(desk, true, 4);
+    receptionTalked = true;
+  }
+}
+
+// 4 — the Reptile House: every chip pressed, every answer watched.
 scene_ = 'reptile house';
 let reptileVisited = 0;
 {
@@ -544,30 +595,6 @@ let reptileVisited = 0;
   // Everything once more, quickly, now that the first-hello blurbs are spent —
   // the short reactions ("peep!") against chips that stay put.
   for (const zone of zones) visit(zone, true, 1.2);
-}
-
-// 3 — the castle shops, ground floor, with their shoppers.
-scene_ = 'castle shops';
-let shopsVisited = 0;
-{
-  quietly(() => world.building.enterCastleSpawn(0));
-  run(1);
-  const shops = world.building.interactZones().filter((zone) => zone.id.startsWith('shop'));
-  for (const zone of shops) if (visit(zone, false, 2.5)) shopsVisited += 1;
-}
-
-// 4 — the hotel lobby: check in, and let her talk.
-scene_ = 'hotel lobby';
-let receptionTalked = false;
-{
-  quietly(() => world.hotel.requestEnterLobby());
-  run(1);
-  const desk = world.hotel.interactZones().find((zone) => zone.id === 'hotel-reception');
-  if (desk && spaceAt(desk.x, desk.z) === SPACE_HOTEL_LOBBY) {
-    visit(desk, true, 6);
-    visit(desk, true, 4);
-    receptionTalked = true;
-  }
 }
 
 // --- the verdict ---------------------------------------------------------------------------
