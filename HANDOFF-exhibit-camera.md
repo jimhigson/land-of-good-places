@@ -22,4 +22,5 @@ over-shoulder view while the animal reacts; back when done or she moves.
   without it, importing the game triggers a multi-minute park acceptance.
 
 ## Left
-- PR, preview, headless screenshots at /reptile-house.
+- PR #711 open. Waiting on CI parks + preview; then run `node scripts/tmp-exhibit-shots.mjs <preview> <outdir>` (untracked helper) for before/after shots.
+- Note: `LGP_PARK_RESTART=0` makes check:reptile-house fail at park solve (restart 0 not the accepted one for seed 5) — unrelated; leave that check to CI.
