@@ -228,7 +228,7 @@ function frameShare(box: Box3): { span: number; share: number; centre: Vector3 }
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (let i = 0; i < 8; i += 1) {
-    const corner = new Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(lens);
+    const corner = new Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(lens); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
     minX = Math.min(minX, corner.x);
     maxX = Math.max(maxX, corner.x);
     minY = Math.min(minY, corner.y);
@@ -300,7 +300,7 @@ for (const [label, width, height] of VIEWPORTS) {
     const watch = (): void => {
       const eye = camera.camera.position;
       if (!eyeInHallSpace(eye)) pathFaults.push(`eye outside the hall below the wall tops at (${(eye.x - OX).toFixed(2)}, ${eye.y.toFixed(2)}, ${(eye.z - OZ).toFixed(2)})`);
-      if (eye.y < 6) {
+      if (eye.y < 6) { // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
         const near = tooClose(eye, occluders([]));
         if (near) pathFaults.push(`eye within ${LENS_CLEARANCE} m of ${near} at (${(eye.x - OX).toFixed(2)}, ${eye.y.toFixed(2)}, ${(eye.z - OZ).toFixed(2)})`);
       }

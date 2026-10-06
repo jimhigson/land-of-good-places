@@ -127,8 +127,8 @@ const RAYCASTER = new Raycaster();
 const DIRECTIONS = [
   new Vector3(1, 0, 0),
   new Vector3(-1, 0, 0),
-  new Vector3(0, 1, 0),
-  new Vector3(0, -1, 0),
+  new Vector3(0, 1, 0), // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
+  new Vector3(0, -1, 0), // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
   new Vector3(0, 0, 1),
   new Vector3(0, 0, -1),
 ];
@@ -191,7 +191,7 @@ const SIGHTLINE_TUBE = 0.07;
 /** Seen from `eye` down a whole {@link SIGHTLINE_TUBE}. */
 function robustlySeen(eye: Vector3, target: Vector3, occluders: readonly Mesh[], report?: SolveReport): boolean {
   const along = target.clone().sub(eye).normalize();
-  const side = new Vector3(0, 1, 0).cross(along);
+  const side = new Vector3(0, 1, 0).cross(along); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
   if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
   side.normalize();
   const up = along.clone().cross(side).normalize();
@@ -314,7 +314,7 @@ const wrapDegrees = (degrees: number): number => ((((degrees + 180) % 360) + 360
 /** The yaw/pitch/distance `IsoCamera.setShotOverride` takes for an eye looking at a focus. */
 export function shotAngles(eye: Vector3, focus: Vector3): { yawDegrees: number; pitchDegrees: number; distance: number } {
   const dx = eye.x - focus.x;
-  const dy = eye.y - focus.y;
+  const dy = eye.y - focus.y; // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
   const dz = eye.z - focus.z;
   return {
     yawDegrees: (Math.atan2(dx, dz) * 180) / Math.PI,
