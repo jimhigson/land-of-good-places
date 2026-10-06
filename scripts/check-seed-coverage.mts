@@ -58,9 +58,10 @@
  * silently editing branch protection.
  */
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { globSync, readdirSync, readFileSync } from 'node:fs';
 
 import { CI_SWEEP_SEEDS, PARK_SEED_POOL } from '../src/world/parkSeedPool.ts';
+import { PROCGEN_SHARDS, PROCGEN_SUITE_GLOB, shardMapProblems } from '../test/procgenShards.ts';
 
 /**
  * **Workflow jobs that block a merge, by the `name:` GitHub matches on.**
@@ -236,6 +237,53 @@ if (wiredInto.length === 0) {
     `no merge-blocking workflow runs test:procgen, so the per-seed measures gate nothing. ` +
       `It is defined in package.json and never run — which looks identical to a working gate ` +
       `from the inside, and is the failure #510 was written about.`,
+  );
+}
+
+// ------------------------------- 2b. every suite file runs, exactly once
+
+/**
+ * **The suite is split over runners by `test/procgenShards.ts`, so a file in
+ * no shard runs nowhere in CI** while every shard goes green. Parsed, not
+ * grepped: the map must be a partition of the files vitest would collect, and
+ * the matrix in the called workflow must list exactly `1..N` for its `N`
+ * shards — a shard missing from the matrix is the silent direction, its files
+ * simply never run. `vitest.config.ts` refuses to run a shard on a broken map
+ * too; this is the same question asked before CI spends a runner on it.
+ */
+{
+  const suiteFiles = globSync(PROCGEN_SUITE_GLOB).map((f) => f.split('\\').join('/')).sort();
+  for (const problem of shardMapProblems(suiteFiles)) fail(problem);
+  const workflow = '.github/workflows/procgen-invariants.yml';
+  const yml = readFileSync(workflow, 'utf8')
+    .split('\n')
+    .map((line) => line.replace(/(^|\s)#.*$/, ''))
+    .join('\n');
+  const matrices = [...yml.matchAll(/^\s+shard:\s*\[([^\]]*)\]\s*$/gm)];
+  const expected = PROCGEN_SHARDS.map((_, i) => i + 1);
+  if (matrices.length !== 1) {
+    fail(`${workflow} has ${matrices.length} \`shard: [...]\` matrices; expected exactly 1`);
+  } else {
+    const listed = matrices[0]![1]!.split(',').map((x) => Number(x.trim()));
+    if (listed.join(',') !== expected.join(',')) {
+      fail(
+        `${workflow}'s matrix is shard: [${listed.join(', ')}] but test/procgenShards.ts has ` +
+          `${PROCGEN_SHARDS.length} shards — it must be exactly [${expected.join(', ')}], or some files never run in CI`,
+      );
+    }
+  }
+  if (!/^\s+LGP_PROCGEN_SHARD:\s*\$\{\{\s*matrix\.shard\s*\}\}\s*$/m.test(yml)) {
+    fail(`${workflow} does not set LGP_PROCGEN_SHARD: \${{ matrix.shard }}, so every runner would run the whole suite`);
+  }
+  const testProcgen = (JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> }).scripts[
+    'test:procgen'
+  ];
+  if (testProcgen === undefined || /--shard/.test(testProcgen)) {
+    fail(`package.json's test:procgen is ${JSON.stringify(testProcgen)} — vitest's --shard on top of the shard map would drop files`);
+  }
+  const sizes = PROCGEN_SHARDS.map((shard) => shard.length).join('/');
+  process.stdout.write(
+    `  procgen shards: ${suiteFiles.length} suite files over ${PROCGEN_SHARDS.length} shards (${sizes} files), each exactly once\n`,
   );
 }
 

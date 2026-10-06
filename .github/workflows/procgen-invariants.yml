@@ -24,8 +24,10 @@ jobs:
   # **Sharded, gated by one aggregator named `Procgen invariants`.** The suite
   # measures every recorded park (16 since the root acceptance loop,
   # against 5 before), about 5.5 minutes per five parks on a runner — one job
-  # could not hold it under its cap. So the seed files are split over runners
-  # with vitest's own `--shard`, and the job GitHub gates on (`Procgen invariants`, a required check matched BY
+  # could not hold it under its cap. So the files are split over runners by
+  # the map in `test/procgenShards.ts`, placed by measured time (vitest's own
+  # `--shard` splits by count, and once put a 20-minute file on one runner
+  # beside two seeds: red on main at 7c8faaf0), and the job GitHub gates on (`Procgen invariants`, a required check matched BY
   # NAME) is the aggregator in `ci.yml`, which fails unless every part
   # succeeded — the same shape as `checks.yml`.
   #
@@ -38,13 +40,14 @@ jobs:
   suite:
     name: Procgen invariants shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    # A shard holds five or six parks; see the history of this number in the
-    # aggregator's comment. The watchdog reads it (`--job suite`).
+    # Every shard measured well inside this (test/procgenShards.ts); the
+    # watchdog reads it (`--job suite`).
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        # Exactly 1..PROCGEN_SHARDS.length — check:seed-coverage parses both.
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -66,7 +69,7 @@ jobs:
 
       - name: Procgen invariant suite, this shard
         env:
-          LGP_PROCGEN_SHARD: ${{ matrix.shard }}/5
+          LGP_PROCGEN_SHARD: ${{ matrix.shard }}
         run: pnpm run test:procgen:watchdog
 
 # The `Procgen invariants` aggregator — the required status check — is in
