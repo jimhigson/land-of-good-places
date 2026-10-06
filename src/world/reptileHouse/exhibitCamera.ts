@@ -515,7 +515,7 @@ export function screenExtent(camera: IsoCamera, eye: Vector3, focus: Vector3, zo
   let maxY = -1;
   const corner = new Vector3();
   for (let i = 0; i < 8; i += 1) {
-    corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(lens);
+    corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(lens); // flat-ok: the reptile house is its own flat space at x 600, floor y 0, off the sphere
     minX = Math.min(minX, corner.x);
     maxX = Math.max(maxX, corner.x);
     minY = Math.min(minY, corner.y);
