@@ -23,8 +23,12 @@ export interface HallContext {
   /** Every baby's and grove snake's segments, one draw call. */
   readonly babies: SnakeSegmentPool;
   readonly rng: Rng;
-  /** A speech bubble over a spot, for a few seconds. */
-  say(text: string, at: LocalPoint, y: number): void;
+  /**
+   * A speech bubble over a spot, for a few seconds — the answer to a press,
+   * so `item` is the id of the zone that was pressed: while it is up, that
+   * zone's own chip is put away (`ui/LabelManager.ts`, rule 1).
+   */
+  say(item: string, text: string, at: LocalPoint, y: number): void;
   /** A puff of hearts over a spot. */
   hearts(at: LocalPoint, y: number): void;
   /** An exhibit was greeted — towards the "Reptile friend" deed. */

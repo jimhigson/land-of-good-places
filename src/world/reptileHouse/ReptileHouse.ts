@@ -19,6 +19,7 @@ import { Rng } from '../../core/mathUtils';
 import { PALETTE } from '../../core/palette';
 import { glowTexture } from '../../core/textures';
 import { SpeechBubble } from '../../ui/SpeechBubble';
+import type { ManagedLabel } from '../../ui/LabelManager';
 import { discoverSecret } from '../../state/secrets';
 import { JUMP_APEX_HEIGHT } from '../../entities/Player';
 import { SnakeSegmentPool } from '../../art/models/snake';
@@ -195,7 +196,8 @@ export class ReptileHouse implements GameSystem {
   private readonly ride: TortoiseRide;
   private readonly exterior: ReptileHouseExterior;
   private readonly frame: FacadeFrame;
-  private readonly bubble = new SpeechBubble(PALETTE.markerMint);
+  /** Every line the hall says — an answer to a press, so `actionFeedback`. Its item is set per line. */
+  private readonly bubble = new SpeechBubble({ id: 'reptile-house-say', item: '', kind: 'actionFeedback' }, PALETTE.markerMint);
   private readonly hearts: HeartPuffs;
   private readonly rng = new Rng(0x5e7a1e);
   private player: Player | null = null;
@@ -241,7 +243,7 @@ export class ReptileHouse implements GameSystem {
       adults,
       babies,
       rng: this.rng,
-      say: (text: string, at: LocalPoint, y: number) => this.say(text, at, y),
+      say: (item: string, text: string, at: LocalPoint, y: number) => this.say(item, text, at, y),
       hearts: (at: LocalPoint, y: number) => this.hearts.puff(at.x, y, at.z, this.rng),
       greet: (id: string) => this.onGreet(id),
       findBaby: () => this.onBabyFound(),
@@ -361,6 +363,11 @@ export class ReptileHouse implements GameSystem {
   /** Every solid the hall registered, with its collision handle — so a check can remove one and go red. */
   get solids(): ReptileProps['solids'] {
     return this.props.solids;
+  }
+
+  /** The hall's one bubble, for `World` to register with the park's `LabelManager`. */
+  get screenLabels(): readonly ManagedLabel[] {
+    return [this.bubble];
   }
 
   /** The last line a bubble was asked to say — for the checks, which cannot read a sprite. */
@@ -668,8 +675,9 @@ export class ReptileHouse implements GameSystem {
     );
   }
 
-  private say(text: string, at: LocalPoint, y: number): void {
+  private say(item: string, text: string, at: LocalPoint, y: number): void {
     this.lastSaid = text;
+    this.bubble.identity.item = item;
     this.bubble.anchorAt(at.x, y, at.z);
     this.bubble.setText(text);
     this.bubbleFor = 1.6 + text.length * 0.07;

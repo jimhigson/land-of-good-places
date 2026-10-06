@@ -8,6 +8,7 @@ import {
   RingGeometry,
   Scene,
 } from 'three';
+import { LabelManager } from '../../ui/LabelManager';
 import { PALETTE } from '../../core/palette';
 import { Rng, TAU, angleDelta, clamp, clamp01, damp, turnTowards } from '../../core/mathUtils';
 import { cameraOffset } from '../../core/cameraRig';
@@ -272,6 +273,9 @@ class Dodgems implements MiniGame {
   /** CSS pixels, kept only so the giggle bubbles can be sized on screen rather
    *  than in the world — see `worldUnitsPerPixel` below. */
   private viewportHeight = 1;
+  private viewportWidth = 1;
+  /** The rink's own label owner — "TWEET!?" and the giggles. See `ui/LabelManager.ts`. */
+  private readonly labels = new LabelManager();
   private focusX = 0;
   private focusZ = 0;
   private taughtSteering = false;
@@ -299,12 +303,14 @@ class Dodgems implements MiniGame {
 
     this.tree = createWobblyTree();
     this.scene.add(this.tree.root);
+    this.labels.add(this.tree.label);
 
     this.sparks = createSparks();
     this.scene.add(this.sparks.root);
 
     this.giggles = createGiggles();
     this.scene.add(this.giggles.root);
+    for (const label of this.giggles.labels) this.labels.add(label);
 
     this.buildCars();
 
@@ -484,6 +490,8 @@ class Dodgems implements MiniGame {
     this.giggles?.update(dt, this.worldUnitsPerPixel);
     this.arena?.update(elapsed);
     this.updateCamera(dt);
+    // Last, against the camera just placed: which of the rink's words are drawn.
+    this.labels.resolve({ camera: this.camera, width: this.viewportWidth, height: this.viewportHeight }, dt);
   }
 
   /**
@@ -997,6 +1005,7 @@ class Dodgems implements MiniGame {
   resize(width: number, height: number): void {
     this.aspect = width / Math.max(1, height);
     this.viewportHeight = Math.max(1, height);
+    this.viewportWidth = Math.max(1, width);
     // Fit the rink both ways: on screen it is an ellipse, squashed vertically by
     // the camera's pitch, so the height it needs is far less than its width.
     // Take whichever of the two is the binding constraint, then stop at

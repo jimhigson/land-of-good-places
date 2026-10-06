@@ -24,6 +24,7 @@ import { addOutline, decal, solid, toonMaterial } from '../../art/style/material
 import { createFacePatch } from '../../art/style/faces';
 import { CAR_RADIUS } from './layout';
 import { minTextPx } from '../../core/uiScale';
+import { SpriteLabel, type ManagedLabel } from '../../ui/LabelManager';
 
 /**
  * **The fake wooden tree.** The whole reason the dodgems exist.
@@ -85,6 +86,8 @@ export interface WobblyTree {
   bonk(dirX: number, dirZ: number, strength: number): void;
   /** True while the bird is out — the HUD uses it to keep the cheer on screen. */
   readonly birdOut: boolean;
+  /** "TWEET!?", for the dodgems' `LabelManager` — it decides whether it is drawn. */
+  readonly label: ManagedLabel;
   /**
    * `worldUnitsPerPixel` sizes the "TWEET!?" bubble on screen rather than in
    * the world, the same way `ui/NameLabel.ts` sizes a name pill — see the
@@ -292,8 +295,9 @@ export function createWobblyTree(): WobblyTree {
   // Up and to the side, clear of the bird itself: the first pass put the bubble
   // squarely in front of the one thing it is drawing attention to.
   bubble.position.set(1.5, 1.15, 0);
-  bubble.visible = false;
   bird.root.add(bubble);
+  // The answer to her bonk, so `actionFeedback`; the tree is its item.
+  const bubbleLabel = new SpriteLabel({ id: 'dodgems-tweet', item: 'dodgems:tree', kind: 'actionFeedback' }, bubble);
 
   // --- state ----------------------------------------------------------------
   let wobble = 0;
@@ -357,6 +361,7 @@ export function createWobblyTree(): WobblyTree {
 
   return {
     root,
+    label: bubbleLabel,
 
     get birdOut(): boolean {
       return birdTimer > 0;
@@ -381,7 +386,7 @@ export function createWobblyTree(): WobblyTree {
       birdTimer = BIRD_UP_SECONDS;
       bird.root.visible = true;
       bird.setExpression('surprised');
-      bubble.visible = true;
+      bubbleLabel.want(true);
       bubbleMaterial.opacity = 1;
     },
 
@@ -535,7 +540,7 @@ export function createWobblyTree(): WobblyTree {
         bubbleMaterial.opacity = clamp01(birdTimer * 1.6);
         if (birdTimer === 0) {
           bird.root.visible = false;
-          bubble.visible = false;
+          bubbleLabel.want(false);
           bird.setExpression('happy');
         }
       }

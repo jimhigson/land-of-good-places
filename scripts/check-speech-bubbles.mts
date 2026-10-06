@@ -103,30 +103,22 @@
  *    asking whether one value equals itself; asking the sprites is what still
  *    catches a later refactor handing the pill an opinion of its own.
  *
- *    **What 4a is still worth now that the shipping code reads the bubble's
- *    own flag**, since a fair reading is that it has become a restatement:
- *    it is the **frame order** it now guards. `updateLabels` gets *this*
- *    frame's flag only because `NpcSystem.update` calls `updateBubbles` first.
- *    Put them back the other way round and the pill is decided from last
- *    frame's bubble. **Measured, by swapping those two lines in the shipping
- *    code and running this file unmodified** (390x844, `SECONDS=120`, this
- *    head):
+ *    **Since 6 October 2026 4a is the label manager's rule 1.** The pill and
+ *    the bubble share the item `npc:<name>` and speech outranks a name, so
+ *    `ui/LabelManager.ts` draws one or the other, never both; the gate that
+ *    used to live in `NpcSystem.updateLabels` (and the frame-order hazard it
+ *    carried, which an earlier version of this paragraph measured) is gone.
+ *    `--mutate-label` now breaks that rule — every label its own item — and
+ *    rule 2 (no overlaps) with it, since either alone keeps pill and bubble
+ *    apart; 4a must fail on it. The general form of 4a, for every label
+ *    in the park, is `check:labels` assertion B.
  *
- *    ```
- *    FAIL  name pill drawn under her own bubble, 6 occasion(s).
- *          First: Finn talking at (-2.78, -0.10, 51.88), frame 840
- *    FAIL  5 child(ren) went without their name while silent and in shot.
- *          Worst: Noor, 1 frame, 2.1 m from focus at rank 0
- *    exit 1
- *    ```
- *
- *    Six, not thousands: it is one frame at each end of each sentence — the
- *    pill lags on into the bubble's first frame (4a) and lags down past its
- *    last (4b). A single frame of overlap is invisible to a person and
- *    invisible to a screenshot, which is exactly why a check has to own it.
- *    So 4a is no longer a guard on the *rule* — the shipping code reads the
- *    same flag 4a asks about — it is a guard on the **ordering** that rule
- *    depends on, and it is armed.
+ *    **4b and 4c ask the manager why, and only excuse two answers.** A pill
+ *    or bubble can now also be down because it would overlap a more
+ *    important label (`overlap`) or lost one a moment ago (`hold`) — Jim's
+ *    rule, and `check:labels` asserts it is applied honestly. Those two
+ *    verdicts are excused here; every other reason a pill is down is still
+ *    a lost name.
  *
  *    **4b is per child, and it did not start out that way.** It
  *    was first written as `spoken.size > 0 && namesReturned.size === 0` — true
@@ -188,11 +180,11 @@
  *    is tall enough that this essentially never happens, which is the whole
  *    reason one viewport reported 0 for three rounds.
  *
- *    **So it is fixed rather than documented.** `NpcSystem.updateLabels` now
- *    hides the pill for `bubble.sprite.visible` — a bubble that is *drawn* —
- *    with `updateBubbles` moved ahead of it so the flag is the same frame's.
- *    The pill's condition and the bubble's are then literally one expression,
- *    and 4c is 0 by construction rather than by nobody having stood there.
+ *    **So it is fixed rather than documented.** Since 6 October 2026 the
+ *    label manager decides it: the pill gives way only to a bubble that
+ *    *wants* to be drawn (rule 1 is taken over wanted labels), and a bubble
+ *    withheld for being off screen or too far does not want to be — so 4c is
+ *    0 by construction rather than by nobody having stood there.
  *    4c's **on-screen half is asserted**; the frames nobody renders are
  *    reported, because a check that failed on those would be failing on a
  *    difference no player can see.
@@ -322,6 +314,7 @@ import { InputSystem } from '../src/core/input/InputSystem.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
 import { SpeechBubble, BUBBLE_EDGE_MARGIN_PX } from '../src/ui/SpeechBubble.ts';
 import { LABEL_MAX_DISTANCE } from '../src/ui/NameLabel.ts';
+import { LabelManager, type LabelVerdict, type ManagedLabel } from '../src/ui/LabelManager.ts';
 import { VISIBLE_LABEL_CAP } from '../src/entities/npc/NpcSystem.ts';
 import { ENTRANCE_PLAYER_X, ENTRANCE_PLAYER_Z } from '../src/world/entrance/layout.ts';
 import { terrainHeight } from '../src/world/terrain.ts';
@@ -449,6 +442,39 @@ if (mutateAnchor) {
   } as typeof SpeechBubble.prototype.updateScreenSize;
 }
 
+if (mutateLabel) {
+  // The park as it was before #486 — and before the label manager, because
+  // two of its rules now keep a talking child's pill from her bubble, and
+  // breaking only one leaves the other doing the job (measured: rule 1 alone
+  // off, 4a stays at 0, since the pill and bubble over one head touch, and
+  // rule 2 then hides the pill). So both: every label its own item (rule 1)
+  // and nothing ever colliding (rule 2).
+  const innards = LabelManager.prototype as unknown as {
+    itemOf: (e: { label: ManagedLabel }) => string;
+    collides: () => boolean;
+  };
+  innards.itemOf = (entry) => entry.label.identity.id;
+  innards.collides = () => false;
+}
+
+/**
+ * **Is the pill itself on the screen?** Projected through the camera that
+ * draws the frame — three.js's own answer — not `IsoCamera.isOnScreen`, which
+ * judges at the focus depth and is generous nearer the lens (its own doc says
+ * so). The label manager draws nothing wholly off the screen, so a pill that
+ * is not here is not owed: measured at 1920x1080, every "nameless" child the
+ * focus-depth test reported had a pill rectangle past an edge — Theo's at
+ * x −54…−7, Iris's at y 1082…1120 of 1080.
+ */
+const pillCentre = new Vector3();
+function pillOnScreen(label: { sprite: { getWorldPosition(v: Vector3): Vector3 } }): boolean {
+  label.sprite.getWorldPosition(pillCentre).project(camera.camera);
+  return Math.abs(pillCentre.x) <= 1 && Math.abs(pillCentre.y) <= 1 && pillCentre.z >= -1 && pillCentre.z <= 1;
+}
+
+/** The two reasons a label may be down that are Jim's rule rather than a lost name. */
+const crowdedOut = (verdict: LabelVerdict | undefined): boolean => verdict === 'overlap' || verdict === 'hold';
+
 const park = quietly(() => buildHeadlessPark());
 const { world, scene, camera } = park;
 
@@ -474,8 +500,9 @@ const input = new InputSystem();
 const probeGroup = new Group();
 scene.add(probeGroup);
 const probes = [3, 8, 14].map((radius, i) => {
-  const bubble = new SpeechBubble();
+  const bubble = new SpeechBubble({ id: `probe:${radius}`, item: `probe:${radius}`, kind: 'speech' });
   probeGroup.add(bubble.sprite);
+  world.labels.add(bubble);
   const angle = (i * 2 * Math.PI) / 3;
   const anchor = new Vector3(
     ENTRANCE_PLAYER_X + Math.cos(angle) * radius,
@@ -643,22 +670,10 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
   // was taken from somewhere the game never stands.
   camera.update(context, playerPosition, playerVelocity);
   quietly(() => world.update(context));
-
-  if (mutateLabel) {
-    // The park exactly as it was before #486, restored as the one clause the
-    // fix added to `updateLabels`: the pill sized and shown by distance alone,
-    // with no idea that its owner is mid-sentence. `NameLabel.updateScreenSize`
-    // is the shipping call `updateLabels` makes, so only the *speech* half of
-    // the skip is undone — `VISIBLE_LABEL_CAP` still holds, which is why the
-    // rank is consulted here. An earlier draft of this mutation dropped the cap
-    // as well while its comment claimed otherwise: it went red for two reasons
-    // at once and could not have told you which.
-    for (const { label, labelRank, labelDistance } of world.npcs.speechBubbles) {
-      if (label.sprite.visible) continue;
-      if (labelRank < 0 || labelRank >= VISIBLE_LABEL_CAP) continue;
-      label.updateScreenSize(camera.worldUnitsPerPixel, labelDistance);
-    }
-  }
+  // The set-once probes say where they want to be, then the one owner of what
+  // is drawn decides — `Game.tick`'s last step before the render.
+  for (const probe of probes) probe.bubble.updateScreenSize(camera);
+  world.labels.resolve({ camera: camera.camera, width: VIEW_WIDTH, height: VIEW_HEIGHT }, DT);
 
   if (mutateLatch) {
     // One child's name, hidden forever by a sentence that finished — the bug
@@ -680,7 +695,8 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
     // It fixes the overlap (4a stays at 0) and opens a different hole: a child
     // whose bubble `SpeechBubble.updateScreenSize` declines to draw loses her
     // name with nothing in its place. That is clause 4c, and it is the reason
-    // the shipping code reads `bubble.sprite.visible` instead.
+    // the label manager gives the pill way only to a bubble that *wants* to be
+    // drawn. Applied after `resolve`, as an owner overriding the manager.
     //
     // **This mutation cannot be proved red at 390x844.** Portrait finds only
     // children the frustum never contained; the visible case needs the top
@@ -723,9 +739,16 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
     // cap, or too far to draw) is not counted as a loss.
     const entitledToPill =
       labelRank >= 0 && labelRank < VISIBLE_LABEL_CAP && labelDistance <= LABEL_MAX_DISTANCE;
+    const pillCrowded = crowdedOut(world.labels.verdictOf(label));
     if (speaking) {
       spoken.add(character.name);
-      if (entitledToPill && !bubble.sprite.visible) {
+      if (
+        entitledToPill &&
+        !bubble.sprite.visible &&
+        !pillCrowded &&
+        !crowdedOut(world.labels.verdictOf(bubble)) &&
+        pillOnScreen(label)
+      ) {
         // The real frustum test, captured before `--mutate` blinds it, asked
         // of where she is *standing* — a head-anchor that has slipped past an
         // edge does not make the child invisible, and that is exactly the case
@@ -740,7 +763,8 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
               worstNothingDrawnLine =
                 `${character.name} is mid-word at (${fmt(character.position)}) on frame ${frame}, ` +
                 `on screen and ${labelDistance.toFixed(1)} m from the camera's focus at rank ` +
-                `${labelRank} — but her bubble is not drawn and neither is her name`;
+                `${labelRank} — but her bubble is not drawn and neither is her name ` +
+                `(label manager's verdicts: pill ${world.labels.verdictOf(label)}, bubble ${world.labels.verdictOf(bubble)})`;
             }
             record({
               frame,
@@ -762,7 +786,8 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
       latch = { current: 0, worst: 0, worstLine: '' };
       latches.set(character.name, latch);
     }
-    const owedHerName = spoken.has(character.name) && !speaking && entitledToPill;
+    const pillInShot = pillOnScreen(label);
+    const owedHerName = spoken.has(character.name) && !speaking && entitledToPill && !pillCrowded && pillInShot;
     if (owedHerName && !label.sprite.visible) {
       latch.current += 1;
       if (latch.current > latch.worst) {
@@ -770,7 +795,8 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
         latch.worstLine =
           `${character.name} has finished talking and has gone ${latch.current} frame(s) ` +
           `without her name, ${labelDistance.toFixed(1)} m from the camera's focus at rank ` +
-          `${labelRank} — inside the cap and inside ${LABEL_MAX_DISTANCE} m, so it should be up`;
+          `${labelRank} — inside the cap and inside ${LABEL_MAX_DISTANCE} m, so it should be up ` +
+          `(label manager's verdict: ${world.labels.verdictOf(label)}; her bubble's: ${world.labels.verdictOf(bubble)})`;
       }
       record({
         frame,
@@ -829,7 +855,6 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
 
   // --- 3: the set-once bubbles ---------------------------------------------
   for (const probe of probes) {
-    probe.bubble.updateScreenSize(camera);
     if (!probe.bubble.sprite.visible) continue;
     const overshoot = overshootOf(probe.anchor, probe.bubble);
     if (overshoot <= 0) continue;
@@ -896,7 +921,7 @@ if (spokeWithNothingDrawnOnScreen > 0) {
     `A child on screen was left mid-word with neither her name pill nor a speech bubble ` +
       `drawn over her, on ${spokeWithNothingDrawnOnScreen} occasion(s). Hiding the pill must ` +
       `be paid for by a bubble that is actually drawn, never by text that merely exists — ` +
-      `see NpcSystem.updateLabels. First: ${worstNothingDrawnLine}`,
+      `see ui/LabelManager.ts, rule 1. First: ${worstNothingDrawnLine}`,
   );
 }
 if (sightings < MIN_SIGHTINGS) {

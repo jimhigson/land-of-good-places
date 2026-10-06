@@ -626,7 +626,8 @@ export class Player implements GameSystem {
     this.face = createFaceLife((expression) => this.model.setExpression(expression));
     this.group.add(this.model.root);
 
-    this.label = new NameLabel(playerState.name);
+    // Registered with the park's `LabelManager` by `World.attachPlayer`.
+    this.label = new NameLabel({ id: 'player', item: 'player', kind: 'playerName' }, playerState.name);
     this.label.sprite.position.y = this.labelTopHeight() + 0.42;
     this.group.add(this.label.sprite);
 

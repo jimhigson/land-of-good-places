@@ -1,4 +1,5 @@
 import type { Object3D, Scene } from 'three';
+import { LabelManager } from '../ui/LabelManager';
 import { CollisionWorld } from './Collision';
 import { Garden } from './Garden';
 import { Scenery } from './Scenery';
@@ -112,6 +113,13 @@ export class World implements GameSystem {
   readonly ferrisWheel: FerrisWheelRide;
   readonly dayNight: DayNight;
   readonly npcs: NpcSystem;
+  /**
+   * **The one owner of every text label drawn over the park** — chips, name
+   * pills, speech bubbles. See `ui/LabelManager.ts` and `docs/design/LABELS.md`.
+   * Everything below registers its labels here; `Game` registers the chips and
+   * calls `resolve` once a frame, after every system and before the render.
+   */
+  readonly labels = new LabelManager();
   /** The face-painting stall (additive). See `FacePaintStall.ts`. */
   readonly facePaintStall: FacePaintStall;
   /** The keychain stall (additive). See `KeychainShop.ts`. */
@@ -434,6 +442,17 @@ export class World implements GameSystem {
     // same late-binding `attachPlayer` has always used.
     this.entrance.attachNpcs(this.npcs.all.slice(0, ARRIVAL_KID_COUNT));
 
+    // Every world label, into the one manager. A label that is not here is
+    // never drawn, so a new owner that forgets this line is found on sight.
+    for (const label of [
+      ...this.npcs.screenLabels,
+      ...this.hotel.screenLabels,
+      ...this.reptileHouse.screenLabels,
+      ...this.building.screenLabels,
+    ]) {
+      this.labels.add(label);
+    }
+
     // The park is complete, so the meadow can finally be asked the one question
     // it could not answer when it was sown two hundred lines above: is any
     // flower standing inside something solid? The lamp posts, the stalls, the
@@ -685,6 +704,7 @@ export class World implements GameSystem {
    * wading works without either system knowing about the other.
    */
   attachPlayer(player: Player): void {
+    this.labels.add(player.label);
     this.building.attachPlayer(player);
     this.hotel.attachPlayer(player);
     this.reptileHouse.attachPlayer(player);

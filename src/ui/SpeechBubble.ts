@@ -2,6 +2,14 @@ import { CanvasTexture, Sprite, SpriteMaterial, SRGBColorSpace, Vector3 } from '
 import type { IsoCamera } from '../core/IsoCamera';
 import { hexToCss, PALETTE } from '../core/palette';
 import { minTextPx } from '../core/uiScale';
+import {
+  measureSprite,
+  type ContentBox,
+  type LabelIdentity,
+  type LabelView,
+  type ManagedLabel,
+  type ScreenRect,
+} from './LabelManager';
 
 /**
  * The little speech bubble a chatting child gets over their head (see
@@ -39,6 +47,11 @@ import { minTextPx } from '../core/uiScale';
  *    "I'm going to The Castle" over empty railway. `IsoCamera.isOnScreen` is
  *    the gate. With the anchor in shot the clamp can shift a bubble by at most
  *    its own half-extents, so it still reads as that child's.
+ *
+ * **It does not decide whether it is drawn** — it says whether it wants to be,
+ * and a `LabelManager` it is registered with grants the frame or not (see
+ * `ui/LabelManager.ts`). `sprite.visible` is therefore the *outcome*: what was
+ * actually drawn, which is what the checks read.
  */
 
 /** Beyond this many metres from the camera a bubble is not worth drawing. */
@@ -64,8 +77,17 @@ export const BUBBLE_EDGE_MARGIN_PX = 12;
 // never stored, so safe to share across every bubble's own call.
 const SCRATCH_ANCHOR = new Vector3();
 
-export class SpeechBubble {
+export class SpeechBubble implements ManagedLabel {
   readonly sprite: Sprite;
+  /** `item` is writable: a bubble that hops between exhibits says whose it is each time. */
+  readonly identity: LabelIdentity;
+
+  /** Its own wish to be drawn: there is text, and the speaker is near and in shot. */
+  private wanted = false;
+  /** The manager's verdict for this frame. */
+  private granted = false;
+  /** Where the pill and tail are painted on the current canvas. */
+  private box: ContentBox = { x0: 0, y0: 0, x1: 1, y1: 1 };
 
   private texture: CanvasTexture | null = null;
   private readonly material: SpriteMaterial;
@@ -83,7 +105,8 @@ export class SpeechBubble {
    *  anchor, because the sprite's position is written by the clamp. */
   private readonly anchorLocal = new Vector3();
 
-  constructor(accent: number = PALETTE.markerSky) {
+  constructor(identity: LabelIdentity, accent: number = PALETTE.markerSky) {
+    this.identity = identity;
     this.accent = accent;
     this.material = new SpriteMaterial({
       transparent: true,
@@ -103,20 +126,41 @@ export class SpeechBubble {
     this.currentText = text;
 
     if (!text) {
-      this.sprite.visible = false;
+      this.setWanted(false);
       return;
     }
 
     const previous = this.texture;
-    this.texture = drawBubble(text, this.accent);
+    const drawn = drawBubble(text, this.accent);
+    this.texture = drawn.texture;
+    this.box = drawn.box;
     this.material.map = this.texture;
     this.material.needsUpdate = true;
     this.canvasHeight = this.texture.image.height;
     this.aspect = this.texture.image.width / this.canvasHeight;
     previous?.dispose();
-    // `updateScreenSize` sets real visibility/size next frame; this just
-    // keeps it from flashing at whatever scale it last had.
-    this.sprite.visible = true;
+    // Wanted from now; `updateScreenSize` settles where, and the manager whether.
+    this.wanted = true;
+  }
+
+  /** Where the pill and tail are painted on the current canvas — read by `check:labels`. */
+  get contentBox(): ContentBox {
+    return this.box;
+  }
+
+  measure(view: LabelView, out: ScreenRect): boolean {
+    if (!this.wanted || !this.currentText) return false;
+    return measureSprite(this.sprite, this.box, view, out);
+  }
+
+  grant(shown: boolean): void {
+    this.granted = shown;
+    this.sprite.visible = this.wanted && shown;
+  }
+
+  private setWanted(wanted: boolean): void {
+    this.wanted = wanted;
+    this.sprite.visible = wanted && this.granted;
   }
 
   /**
@@ -139,16 +183,16 @@ export class SpeechBubble {
     if (parent) anchor.applyMatrix4(parent.matrixWorld);
     const distanceToCamera = anchor.distanceTo(camera.focusPoint);
     if (distanceToCamera > BUBBLE_MAX_DISTANCE) {
-      this.sprite.visible = false;
+      this.setWanted(false);
       return;
     }
     // The speaker is not in shot: hide, rather than let the clamp below tow
     // the bubble back onto the screen and draw it over nobody — issue #415.
     if (!camera.isOnScreen(anchor)) {
-      this.sprite.visible = false;
+      this.setWanted(false);
       return;
     }
-    this.sprite.visible = true;
+    this.setWanted(true);
     const worldUnitsPerPixel = camera.worldUnitsPerPixel;
     const height = worldUnitsPerPixel * this.canvasHeight * (minTextPx() / FONT_PX);
     const width = height * this.aspect;
@@ -210,7 +254,7 @@ function wrap(ctx: CanvasRenderingContext2D, text: string): string[] {
   return lines;
 }
 
-function drawBubble(text: string, accent: number): CanvasTexture {
+function drawBubble(text: string, accent: number): { texture: CanvasTexture; box: ContentBox } {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('2D canvas context unavailable');
@@ -269,7 +313,14 @@ function drawBubble(text: string, accent: number): CanvasTexture {
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   texture.anisotropy = 4;
-  return texture;
+  // The pill, its shadow and its tail, as fractions of the canvas.
+  const box: ContentBox = {
+    x0: pillX / CANVAS_WIDTH,
+    y0: pillY / height,
+    x1: (pillX + pillWidth) / CANVAS_WIDTH,
+    y1: Math.min(1, (tailTop + TAIL_HEIGHT) / height),
+  };
+  return { texture, box };
 }
 
 function roundedRect(

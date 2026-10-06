@@ -14,6 +14,7 @@ import { angleDelta, clamp01, damp, lerp } from '../../core/mathUtils';
 import { addOutline, decal, disposeTree, solid, toonMaterial } from '../../art/style/materials';
 import { createKid, type KidHandle } from '../../art/models/kid';
 import { applyWalk } from '../../art/style/asset';
+import type { ManagedLabel } from '../../ui/LabelManager';
 import { NameLabel } from '../../ui/NameLabel';
 
 /**
@@ -59,6 +60,8 @@ export interface ChildModel {
   readonly kid: KidHandle;
   /** True while the drippy hair is on. */
   readonly soaked: boolean;
+  /** The floating pill, if this child has one — for the game's `LabelManager`. */
+  readonly label: ManagedLabel | null;
   /** Writes the muzzle's world position into `out` and returns it. */
   muzzleWorld(out: Vector3): Vector3;
   /** Writes the middle of the head's world position into `out`. */
@@ -202,8 +205,11 @@ export function createChild(options: ChildOptions): ChildModel {
   // --- the name pill ---------------------------------------------------------------
   let nameLabel: NameLabel | null = null;
   if (options.label) {
-    nameLabel = new NameLabel(options.label.text, options.label.accent);
+    nameLabel = new NameLabel({ id: 'water-fight-you', item: 'player', kind: 'playerName' }, options.label.text, options.label.accent);
     nameLabel.sprite.position.set(0, kid.height + 0.34, 0);
+    // Always wanted, at the world size it is built with; the game's
+    // `LabelManager` is still what draws it.
+    nameLabel.want();
     root.add(nameLabel.sprite);
   }
 
@@ -223,6 +229,7 @@ export function createChild(options: ChildOptions): ChildModel {
   return {
     root,
     kid,
+    label: nameLabel,
 
     get soaked(): boolean {
       return soakLeft > 0;

@@ -6,6 +6,14 @@ import {
 } from '../core/textures';
 import { minTextPx } from '../core/uiScale';
 import { PALETTE } from '../core/palette';
+import {
+  measureSprite,
+  type ContentBox,
+  type LabelIdentity,
+  type LabelView,
+  type ManagedLabel,
+  type ScreenRect,
+} from './LabelManager';
 
 /**
  * How tall the whole pill has to read on screen, in CSS pixels, for the name
@@ -36,6 +44,9 @@ export const LABEL_MAX_DISTANCE = 46;
 /** The label canvas is 512x160 — kept as a ratio so any target height stays honest. */
 const LABEL_ASPECT = 512 / 160;
 
+/** The whole canvas, for a texture that did not say where its pill is. */
+const FULL_BOX: ContentBox = { x0: 0, y0: 0, x1: 1, y1: 1 };
+
 /**
  * The floating name pill above a character's head.
  *
@@ -46,9 +57,20 @@ const LABEL_ASPECT = 512 / 160;
  *
  * Reusable for any character, not just the player: `updateScreenSize` is the
  * whole contract an NPC label needs, and takes nothing player-specific.
+ *
+ * **It does not decide whether it is drawn.** It says whether it *wants* to be
+ * ({@link updateScreenSize}, {@link withhold}); the owner registers it with a
+ * `LabelManager`, which grants it a frame or not — see `ui/LabelManager.ts`.
+ * A pill nobody registered is never drawn.
  */
-export class NameLabel {
+export class NameLabel implements ManagedLabel {
   readonly sprite: Sprite;
+  readonly identity: LabelIdentity;
+
+  /** The label's own wish to be drawn — distance, a cap, an owner's say-so. */
+  private wanted = false;
+  /** The manager's verdict for this frame. */
+  private granted = false;
 
   private texture: CanvasTexture;
   private readonly material: SpriteMaterial;
@@ -59,7 +81,8 @@ export class NameLabel {
    *  never be scaled below the minimum readable size. */
   private readonly sizeScale: number;
 
-  constructor(name: string, accent: number = PALETTE.markerPink, sizeScale: number = 1) {
+  constructor(identity: LabelIdentity, name: string, accent: number = PALETTE.markerPink, sizeScale: number = 1) {
+    this.identity = identity;
     this.accent = accent;
     this.sizeScale = Math.max(1, sizeScale);
     this.texture = nameLabelTexture(name, accent);
@@ -77,6 +100,37 @@ export class NameLabel {
     // call lands.
     this.sprite.scale.set(1.9, 0.594, 1);
     this.sprite.renderOrder = 10;
+    this.sprite.visible = false;
+  }
+
+  measure(view: LabelView, out: ScreenRect): boolean {
+    if (!this.wanted) return false;
+    return measureSprite(this.sprite, this.contentBox, view, out);
+  }
+
+  grant(shown: boolean): void {
+    this.granted = shown;
+    this.sprite.visible = this.wanted && shown;
+  }
+
+  /**
+   * Wanted at whatever size it already has, for an owner with no camera to
+   * size it against (the water fight's "YOU", a fixed scene and a fixed rig).
+   */
+  want(): void {
+    this.wanted = true;
+    this.sprite.visible = this.granted;
+  }
+
+  /** Not this frame — the owner's own reason (a cap, a ride). Undone by the next {@link updateScreenSize}. */
+  withhold(): void {
+    this.wanted = false;
+    this.sprite.visible = false;
+  }
+
+  /** Where the pill is painted on the canvas — read by `check:labels`. */
+  get contentBox(): ContentBox {
+    return (this.texture.userData['contentBox'] as ContentBox | undefined) ?? FULL_BOX;
   }
 
   /**
@@ -91,8 +145,9 @@ export class NameLabel {
    * "hide if very far away" check, not for any size falloff.
    */
   updateScreenSize(worldUnitsPerPixel: number, distanceToCamera: number): void {
-    this.sprite.visible = distanceToCamera <= LABEL_MAX_DISTANCE;
-    if (!this.sprite.visible) return;
+    this.wanted = distanceToCamera <= LABEL_MAX_DISTANCE;
+    this.sprite.visible = this.wanted && this.granted;
+    if (!this.wanted) return;
 
     const height = worldUnitsPerPixel * labelPixelHeight() * this.sizeScale;
     this.sprite.scale.set(height * LABEL_ASPECT, height, 1);
