@@ -457,6 +457,21 @@ if (mutateLabel) {
   innards.collides = () => false;
 }
 
+/**
+ * **Is the pill itself on the screen?** Projected through the camera that
+ * draws the frame — three.js's own answer — not `IsoCamera.isOnScreen`, which
+ * judges at the focus depth and is generous nearer the lens (its own doc says
+ * so). The label manager draws nothing wholly off the screen, so a pill that
+ * is not here is not owed: measured at 1920x1080, every "nameless" child the
+ * focus-depth test reported had a pill rectangle past an edge — Theo's at
+ * x −54…−7, Iris's at y 1082…1120 of 1080.
+ */
+const pillCentre = new Vector3();
+function pillOnScreen(label: { sprite: { getWorldPosition(v: Vector3): Vector3 } }): boolean {
+  label.sprite.getWorldPosition(pillCentre).project(camera.camera);
+  return Math.abs(pillCentre.x) <= 1 && Math.abs(pillCentre.y) <= 1 && pillCentre.z >= -1 && pillCentre.z <= 1;
+}
+
 /** The two reasons a label may be down that are Jim's rule rather than a lost name. */
 const crowdedOut = (verdict: LabelVerdict | undefined): boolean => verdict === 'overlap' || verdict === 'hold';
 
@@ -727,7 +742,13 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
     const pillCrowded = crowdedOut(world.labels.verdictOf(label));
     if (speaking) {
       spoken.add(character.name);
-      if (entitledToPill && !bubble.sprite.visible && !pillCrowded && !crowdedOut(world.labels.verdictOf(bubble))) {
+      if (
+        entitledToPill &&
+        !bubble.sprite.visible &&
+        !pillCrowded &&
+        !crowdedOut(world.labels.verdictOf(bubble)) &&
+        pillOnScreen(label)
+      ) {
         // The real frustum test, captured before `--mutate` blinds it, asked
         // of where she is *standing* — a head-anchor that has slipped past an
         // edge does not make the child invisible, and that is exactly the case
@@ -742,7 +763,8 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
               worstNothingDrawnLine =
                 `${character.name} is mid-word at (${fmt(character.position)}) on frame ${frame}, ` +
                 `on screen and ${labelDistance.toFixed(1)} m from the camera's focus at rank ` +
-                `${labelRank} — but her bubble is not drawn and neither is her name`;
+                `${labelRank} — but her bubble is not drawn and neither is her name ` +
+                `(label manager's verdicts: pill ${world.labels.verdictOf(label)}, bubble ${world.labels.verdictOf(bubble)})`;
             }
             record({
               frame,
@@ -764,11 +786,7 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
       latch = { current: 0, worst: 0, worstLine: '' };
       latches.set(character.name, latch);
     }
-    // "In shot", as the failure line says: the label manager draws nothing
-    // whose rectangle is off the screen, so a pill over a child the frustum
-    // does not contain is not owed. Asked with the real frustum test, of where
-    // the pill hangs.
-    const pillInShot = isOnScreen.call(camera, label.sprite.getWorldPosition(new Vector3()));
+    const pillInShot = pillOnScreen(label);
     const owedHerName = spoken.has(character.name) && !speaking && entitledToPill && !pillCrowded && pillInShot;
     if (owedHerName && !label.sprite.visible) {
       latch.current += 1;
@@ -777,7 +795,8 @@ for (let frame = 0; frame < FRAMES; frame += 1) {
         latch.worstLine =
           `${character.name} has finished talking and has gone ${latch.current} frame(s) ` +
           `without her name, ${labelDistance.toFixed(1)} m from the camera's focus at rank ` +
-          `${labelRank} — inside the cap and inside ${LABEL_MAX_DISTANCE} m, so it should be up`;
+          `${labelRank} — inside the cap and inside ${LABEL_MAX_DISTANCE} m, so it should be up ` +
+          `(label manager's verdict: ${world.labels.verdictOf(label)}; her bubble's: ${world.labels.verdictOf(bubble)})`;
       }
       record({
         frame,
