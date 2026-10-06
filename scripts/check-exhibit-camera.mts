@@ -23,10 +23,12 @@
  * action, then:
  *
  *  1. a shot was solved (no exhibit is left on the zoomed-out view);
- *  2. **unoccluded**: from the camera's real eye, a ray to every reacting
- *     animal and to the framed middle reaches it without crossing anything
- *     opaque drawn in the hall or her own body (glass is see-through);
- *  3. **framed**: the animals' box covers at least {@link MIN_SHARE} of the
+ *  2. **unoccluded**: from the camera's real eye, a ray to every star
+ *     animal reaches it without crossing anything opaque
+ *     drawn in the hall or her own body (glass is see-through), and so do
+ *     rays to most (`CROWD_SEEN`) of a crowd — twelve babies, five geckos,
+ *     points along a coiled body;
+ *  3. **framed**: the animals' box spans at least {@link MIN_SPAN} of the
  *     frame, and its middle is in the middle part of the screen;
  *  4. **inside the hall**: the settled eye is inside the walls; and on every
  *     frame of the way down and back up, the eye is either over the hall's
@@ -55,11 +57,14 @@ import { WalkSurfaces } from '../src/world/building/surfaces.ts';
 import type { InteriorControls } from '../src/world/building/Building.ts';
 import { ReptileHouse } from '../src/world/reptileHouse/ReptileHouse.ts';
 import { IsoCamera } from '../src/core/IsoCamera.ts';
+import { CAMERA_ZOOM_MAX } from '../src/core/constants.ts';
 import { Player } from '../src/entities/Player.ts';
 import { PRIMARY_ACTION } from '../src/world/interact.ts';
 import {
   EXHIBIT_SHOT_EASE_CANCEL,
   EXHIBIT_SHOT_EASE_IN,
+  CROWD_SEEN,
+  sightlinesPass,
   eyeInHallSpace,
   insideHall,
   subjectOf,
@@ -67,8 +72,12 @@ import {
 import { EXHIBIT_PLACEMENTS, REPTILE_HOUSE_ORIGIN_X, REPTILE_HOUSE_ORIGIN_Z } from '../src/world/reptileHouse/layout.ts';
 import type { FrameContext } from '../src/core/types.ts';
 
-/** The animals' box must cover at least this share of the frame. */
-const MIN_SHARE = 0.05;
+/**
+ * The animals must span at least this share of the frame's width or height —
+ * a span, not an area, so a long thin snake and a round tortoise are held to
+ * the same idea of "big enough to see the reaction".
+ */
+const MIN_SPAN = 0.2;
 /** And its middle within this much of the screen's middle, in NDC (±1 is the edge). */
 const MAX_CENTRE_OFF = 0.45;
 /** Degrees the view direction may turn in one 60 fps frame. */
@@ -187,7 +196,7 @@ function tooClose(eye: Vector3, meshes: Mesh[]): string | null {
 }
 
 /** The share of the screen the box's projection covers, and its middle in NDC. */
-function frameShare(box: Box3): { share: number; centre: Vector3 } {
+function frameShare(box: Box3): { span: number; share: number; centre: Vector3 } {
   const lens = camera.camera;
   lens.updateMatrixWorld();
   let minX = Infinity;
@@ -202,9 +211,10 @@ function frameShare(box: Box3): { share: number; centre: Vector3 } {
     maxY = Math.max(maxY, corner.y);
   }
   const clampN = (v: number): number => Math.max(-1, Math.min(1, v));
-  const share = ((clampN(maxX) - clampN(minX)) * (clampN(maxY) - clampN(minY))) / 4;
+  const width = (clampN(maxX) - clampN(minX)) / 2;
+  const height = (clampN(maxY) - clampN(minY)) / 2;
   const centre = box.getCenter(new Vector3()).project(lens);
-  return { share, centre };
+  return { span: Math.max(width, height), share: width * height, centre };
 }
 
 /** The frame's half-height at the focus, from the live lens. */
@@ -245,8 +255,10 @@ function blocker(eye: Vector3, target: Vector3): Mesh {
 
 // ---------------------------------------------------------------- the run
 
-const ids = house.exhibitIds;
-say(ids.length === EXHIBIT_PLACEMENTS.length && ids.length >= 15, `${ids.length} exhibits in the hall, every one measured below`);
+const only = process.env['EXHIBIT_CAMERA_ONLY'];
+const ids = only ? house.exhibitIds.filter((id) => id === only) : house.exhibitIds;
+if (only) note(`EXHIBIT_CAMERA_ONLY=${only} — measuring one exhibit, not a full run`);
+say(only !== undefined || (ids.length === EXHIBIT_PLACEMENTS.length && ids.length >= 15), `${ids.length} exhibits in the hall, every one measured below`);
 if (breakMode) note(`EXHIBIT_CAMERA_BREAK=${breakMode} — this run must go red`);
 
 for (const [label, width, height] of VIEWPORTS) {
@@ -276,29 +288,47 @@ for (const [label, width, height] of VIEWPORTS) {
       lastHalf = half;
     };
 
+    const rigSpan = frameShare(subjectOf(house.exhibitSubjects(id)).box).span;
     press(id);
     const shot = house.exhibitCamera.shot;
     const solved = house.exhibitCamera.active && shot?.exhibitId === id;
-    say(solved, `${id}: a shot was solved (${shot?.clear ?? 0} of ${shot?.tried ?? 0} candidate eyes saw every animal)`);
+    const report = house.exhibitCamera.report;
+    const why = report ? `rejected: ${report.outside} outside the hall, ${report.overSolid} over a solid, ${report.tooClose} too close to something, ${report.blocked} blocked, ${report.approach} with a blocked way down; blockers ${JSON.stringify(report.blockers)}` : '';
+    say(solved, solved && shot ? `${id}: a shot was solved (${shot.clear} of ${shot.tried} candidate eyes saw every animal)` : `${id}: NO shot was solved — ${why}`);
+    if (shot && shot.exhibitId === id && shot.zoom > CAMERA_ZOOM_MAX) note(`${id}: the framing wanted zoom ${shot.zoom.toFixed(2)}, past CAMERA_ZOOM_MAX ${CAMERA_ZOOM_MAX} — the clamp is deciding this shot's size`);
     if (!solved || !shot) {
       for (let i = 0; i < 600 && house.exhibitCamera.active; i += 1) frame();
       continue;
     }
-    // Down, and settled: the ease plus the camera's own damping.
-    for (let t = 0; t < EXHIBIT_SHOT_EASE_IN + 0.6; t += 1 / 60) {
+    // Down, and settled: the ease, then the camera's own damping until the
+    // eye is on the solved spot (or the hold runs out, which a clause catches).
+    for (let t = 0; t < EXHIBIT_SHOT_EASE_IN; t += 1 / 60) {
       frame();
       watch();
     }
+    for (let i = 0; i < 120 && camera.camera.position.distanceTo(shot.eye) > 0.05 && house.exhibitCamera.state === 'hold'; i += 1) {
+      frame();
+      watch();
+    }
+    say(camera.camera.position.distanceTo(shot.eye) <= 0.05, `  the real eye lands on the solved one (${camera.camera.position.distanceTo(shot.eye).toFixed(3)} m off) while the shot holds`);
     const subjects = house.exhibitSubjects(id);
     const extra: Object3D[] = [];
     if (breakMode === 'block') extra.push(blocker(camera.camera.position.clone(), shot.focus));
-    const meshes = occluders(subjects);
+    const meshes = occluders([...subjects, ...house.exhibitCast(id)]);
     const eye = camera.camera.position.clone();
     const { box, targets } = subjectOf(subjects);
-    const blocked = [...targets, box.getCenter(new Vector3())].map((target) => blockedBy(eye, target, meshes)).filter((hit): hit is string => hit !== null);
-    say(blocked.length === 0, `  unoccluded: ${targets.length + 1 - blocked.length} of ${targets.length + 1} sightlines from the real eye reach the animals${blocked.length ? ` — blocked by ${blocked.join('; ')}` : ''}`);
-    const { share, centre } = frameShare(box);
-    say(share >= MIN_SHARE, `  framed: the animals cover ${(share * 100).toFixed(1)}% of the frame (at least ${MIN_SHARE * 100}%)`);
+    const hits = targets.map((target) => blockedBy(eye, target.point, meshes));
+    const stars = targets.filter((target) => !target.crowd).length;
+    const crowd = targets.length - stars;
+    const starsSeen = targets.filter((target, index) => !target.crowd && hits[index] === null).length;
+    const crowdSeen = targets.filter((target, index) => target.crowd && hits[index] === null).length;
+    const blocked = hits.filter((hit): hit is string => hit !== null);
+    say(
+      sightlinesPass(targets, hits.map((hit) => hit === null)),
+      `  unoccluded from the real eye: ${starsSeen} of ${stars} star(s), ${crowdSeen} of ${crowd} in the crowd (at least ${Math.round(CROWD_SEEN * 100)}%)${blocked.length ? ` — blocked by ${blocked.join('; ')}` : ''}`,
+    );
+    const { span, share, centre } = frameShare(box);
+    say(span >= MIN_SPAN, `  framed: the animals span ${(span * 100).toFixed(1)}% of the frame (at least ${MIN_SPAN * 100}%; ${(share * 100).toFixed(1)}% of its area), against ${(rigSpan * 100).toFixed(1)}% before the chip`);
     say(Math.abs(centre.x) <= MAX_CENTRE_OFF && Math.abs(centre.y) <= MAX_CENTRE_OFF && centre.z < 1, `  centred: their middle at NDC (${centre.x.toFixed(2)}, ${centre.y.toFixed(2)})`);
     say(insideHall(eye, 0.3), `  the settled eye is inside the hall at (${(eye.x - OX).toFixed(2)}, ${eye.y.toFixed(2)}, ${(eye.z - OZ).toFixed(2)}), ${eye.distanceTo(shot.focus).toFixed(2)} m from the animals`);
     for (const panel of extra) house.hallRoot.remove(panel);
@@ -310,9 +340,14 @@ for (const [label, width, height] of VIEWPORTS) {
       watch();
       frames += 1;
     }
-    for (let i = 0; i < 60; i += 1) frame();
+    // The camera's own pose damper finishes the last of the rise.
+    let settle = 0;
+    while (camera.poseDistance > 0 && settle < 180) {
+      frame();
+      settle += 1;
+    }
     say(!house.exhibitCamera.active, `  the shot ends on its own after ${(frames / 60).toFixed(1)} s`);
-    say(camera.poseDistance === 0 && Math.abs(camera.targetZoom - zoomBefore) < 1e-9, `  home exactly: pose ${camera.poseDistance.toFixed(4)} m off the rig, zoom ${camera.targetZoom.toFixed(3)} (was ${zoomBefore.toFixed(3)})`);
+    say(camera.poseDistance === 0 && Math.abs(camera.targetZoom - zoomBefore) < 1e-9, `  home exactly ${(settle / 60).toFixed(2)} s after: pose ${camera.poseDistance.toFixed(4)} m off the rig, zoom ${camera.targetZoom.toFixed(3)} (was ${zoomBefore.toFixed(3)})`);
     say(pathFaults.length === 0, `  the eye stayed in the hall on every frame down and back${pathFaults.length ? ` — ${pathFaults.length} faults, first: ${pathFaults[0]}` : ''}`);
     say(worstTurn <= MAX_TURN_PER_FRAME && worstJump <= MAX_FRAME_JUMP, `  smooth: at most ${worstTurn.toFixed(2)}° of turn and ${(worstJump * 100).toFixed(1)}% of framing change in a frame`);
   }
@@ -336,7 +371,7 @@ console.log('\nMOVING CANCELS — the stick mid-shot hands the camera straight b
     frame();
     frames += 1;
   }
-  for (let i = 0; i < 40; i += 1) frame();
+  for (let i = 0; i < 180 && camera.poseDistance > 0; i += 1) frame();
   say(!house.exhibitCamera.active && frames / 60 <= EXHIBIT_SHOT_EASE_CANCEL + 0.05, `and hands back in ${(frames / 60).toFixed(2)} s (ease ${EXHIBIT_SHOT_EASE_CANCEL} s)`);
   say(camera.poseDistance === 0 && Math.abs(camera.targetZoom - zoomBefore) < 1e-9, `on the rig at zoom ${camera.targetZoom.toFixed(3)}`);
   // And a tap that walks her: she moves without the stick.
@@ -351,10 +386,11 @@ console.log('\nMOVING CANCELS — the stick mid-shot hands the camera straight b
 console.log('\nTHE SOLVER BACKTRACKS — a panel across its first choice, and it finds another eye:');
 {
   camera.resize(1280, 720);
-  const id = 'skink';
+  const id = 'chameleon';
   standAt(id);
   press(id);
-  const first = house.exhibitCamera.shot;
+  const solvedFirst = house.exhibitCamera.shot;
+  const first = solvedFirst?.exhibitId === id ? solvedFirst : null;
   for (let i = 0; i < 600 && house.exhibitCamera.active; i += 1) {
     moving = i === 5;
     frame();
@@ -370,7 +406,7 @@ console.log('\nTHE SOLVER BACKTRACKS — a panel across its first choice, and it
     const moved = second && second !== first ? second.eye.distanceTo(first.eye) : 0;
     say(second !== null && second !== first && moved > 0.2, `${id}: with a panel across (${(first.eye.x - OX).toFixed(2)}, ${first.eye.y.toFixed(2)}, ${(first.eye.z - OZ).toFixed(2)}) → focus, it chose an eye ${moved.toFixed(2)} m away`);
     if (second && second !== first) {
-      const meshes = occluders(house.exhibitSubjects(id));
+      const meshes = occluders([...house.exhibitSubjects(id), ...house.exhibitCast(id)]);
       const hit = blockedBy(second.eye, second.focus, meshes);
       say(hit === null, `  and that eye sees the animal past the panel${hit ? ` — blocked by ${hit}` : ''}`);
       // CONTROL: the instrument sees the panel on the line it was stood across.

@@ -347,6 +347,11 @@ export class ReptileHouse implements GameSystem {
     return this.exhibits.subjectsOf(id);
   }
 
+  /** Every animal in an exhibit, for `check:exhibit-camera`. */
+  exhibitCast(id: string): readonly Object3D[] {
+    return this.exhibits.castOf(id);
+  }
+
   /** Every animal's hall-local spot with its exhibit, for the check. */
   animalSpots(): { id: string; x: number; z: number }[] {
     return this.exhibits.animalSpots();
@@ -656,7 +661,7 @@ export class ReptileHouse implements GameSystem {
 
   private onGreet(id: string): void {
     const player = this.player;
-    if (player && this.inside) this.exhibitCamera.start(id, this.exhibits.subjectsOf(id), player);
+    if (player && this.inside) this.exhibitCamera.start(id, this.exhibits.subjectsOf(id), this.exhibits.castOf(id), player);
     if (this.exhibits.exhibitsGreeted >= 15) discoverSecret('secret.metTheReptiles');
   }
 

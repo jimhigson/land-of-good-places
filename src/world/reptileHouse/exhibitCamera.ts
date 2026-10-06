@@ -61,18 +61,20 @@ export const EXHIBIT_SHOT_EASE_OUT = 0.9;
 export const EXHIBIT_SHOT_EASE_CANCEL = 0.45;
 /** The least time the shot holds once it has landed — every reaction is about two seconds. */
 export const EXHIBIT_SHOT_HOLD = 2.6;
+/** Seconds per halving for the aim to follow animals that move during the shot. */
+const LIVE_FOCUS_HALF_LIFE = 0.35;
 /** How far she may drift (a nudge, an idle shuffle) before it counts as walking off. Metres. */
 const EXHIBIT_SHOT_MOVE_CANCEL = 0.25;
 
 /** Eye heights tried, above the hall floor. Her head is at about 1.4 m; "slightly above". */
-const EYE_HEIGHTS = [2.3, 2.8, 3.3] as const;
+const EYE_HEIGHTS = [2.3, 2.8, 3.3, 3.8, 4.3] as const;
 /** How far behind her the eye stands, along the line from the animal through her. */
 const EYE_BACKS = [1.6, 2.4, 3.2] as const;
 /**
  * Bearings either side of "straight behind her", in degrees — the shoulder.
  * Ordered by preference only for readability: {@link shotCost} decides.
  */
-const EYE_SWINGS = [20, -20, 32, -32, 10, -10, 45, -45, 0, 60, -60] as const;
+const EYE_SWINGS = [20, -20, 32, -32, 10, -10, 45, -45, 0, 60, -60, 75, -75, 90, -90] as const;
 /** The bearing off "straight behind" a shot is happiest at: past her shoulder, not through her head. */
 const IDEAL_SWING = 20;
 /** Kept clear of the hall's walls, metres. */
@@ -103,6 +105,8 @@ export interface ExhibitShot {
   readonly subject: Box3;
   /** Every sightline target, seen or not, for the chosen eye. */
   readonly samples: readonly ShotSample[];
+  /** Every animal in the exhibit — never an occluder of the others. */
+  readonly cast: readonly Object3D[];
   /** How many candidate eyes were tried and how many could see everything. */
   readonly tried: number;
   readonly clear: number;
@@ -129,27 +133,100 @@ const DIRECTIONS = [
   new Vector3(0, 0, -1),
 ];
 
-/** An object nothing is drawn under is a point at its own origin. */
+/** A marker's footprint: an object nothing is drawn under is this big a box round its origin. */
+const MARKER_HALF = 0.15;
+
+/** An object nothing is drawn under is a small box round its own origin. */
 function boxOf(object: Object3D, out: Box3): Box3 {
   object.updateWorldMatrix(true, true);
   out.setFromObject(object);
   if (out.isEmpty()) {
     const at = object.getWorldPosition(new Vector3());
-    out.set(at, at);
+    out.set(at, at).expandByScalar(MARKER_HALF);
   }
   return out;
 }
 
+/**
+ * Marks subjects as part of a **crowd**: twelve babies, five geckos, the
+ * points along a snake's body. A shot must see most of a crowd
+ * ({@link CROWD_SEEN}) — a baby behind a rail post, a coil round its branch
+ * are what a crowd *is* — but every subject not so marked, every **star**,
+ * it must see outright.
+ */
+export function asCrowd<T extends Object3D>(objects: readonly T[]): T[] {
+  for (const object of objects) object.userData['exhibitCrowd'] = true;
+  return [...objects];
+}
+
+/** The share of a crowd a shot must see. */
+export const CROWD_SEEN = 0.75;
+
+/** One sightline target: an animal's middle, and whether it is a star or one of a crowd. */
+export interface ShotTarget {
+  readonly point: Vector3;
+  readonly crowd: boolean;
+}
+
 /** The animals' world box and one sightline target per animal (its middle). */
-export function subjectOf(subjects: readonly Object3D[]): { box: Box3; targets: Vector3[] } {
+export function subjectOf(subjects: readonly Object3D[]): { box: Box3; targets: ShotTarget[] } {
   const box = new Box3();
-  const targets: Vector3[] = [];
+  const targets: ShotTarget[] = [];
   for (const subject of subjects) {
     boxOf(subject, SCRATCH_BOX);
     box.union(SCRATCH_BOX);
-    targets.push(SCRATCH_BOX.getCenter(new Vector3()));
+    targets.push({ point: SCRATCH_BOX.getCenter(new Vector3()), crowd: subject.userData['exhibitCrowd'] === true });
   }
   return { box, targets };
+}
+
+/**
+ * How fat a star's sightline is: it is tested as a tube of this radius — its
+ * own line and four more beside it, above, below and either side — rather
+ * than one hairline. An animal breathes, does push-ups, potters about; a line
+ * that only just grazes a wall top or a branch is a line the next frame loses.
+ */
+const SIGHTLINE_TUBE = 0.07;
+
+/** Seen from `eye` down a whole {@link SIGHTLINE_TUBE}. */
+function robustlySeen(eye: Vector3, target: Vector3, occluders: readonly Mesh[], report?: SolveReport): boolean {
+  const along = target.clone().sub(eye).normalize();
+  const side = new Vector3(0, 1, 0).cross(along);
+  if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+  side.normalize();
+  const up = along.clone().cross(side).normalize();
+  const from = new Vector3();
+  const to = new Vector3();
+  for (const [a, b] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    from.copy(eye).addScaledVector(side, a * SIGHTLINE_TUBE).addScaledVector(up, b * SIGHTLINE_TUBE);
+    to.copy(target).addScaledVector(side, a * SIGHTLINE_TUBE).addScaledVector(up, b * SIGHTLINE_TUBE);
+    const hit = firstHit(from, to, occluders);
+    if (hit) {
+      if (report) report.blockers[hit] = (report.blockers[hit] ?? 0) + 1;
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether a set of sightline results is a shot: every star, and most of the
+ * crowd. The box's middle is only where the camera aims — on the tree snake
+ * it is inside her branch, with her head in clear air beside it — so it is
+ * not itself something that has to be seen.
+ */
+export function sightlinesPass(targets: readonly ShotTarget[], seen: readonly boolean[]): boolean {
+  let crowd = 0;
+  let crowdSeen = 0;
+  for (const [index, target] of targets.entries()) {
+    const ok = seen[index] ?? false;
+    if (!target.crowd && !ok) return false;
+    if (target.crowd) {
+      crowd += 1;
+      if (ok) crowdSeen += 1;
+    }
+  }
+  return crowd === 0 || crowdSeen >= CROWD_SEEN * crowd;
 }
 
 function isSeeThrough(material: Material | Material[]): boolean {
@@ -186,14 +263,20 @@ export function collectOccluders(roots: readonly Object3D[], ignore: readonly Ob
 
 /** Whether anything in `occluders` crosses the open segment from `eye` to `target`. */
 export function sightlineBlocked(eye: Vector3, target: Vector3, occluders: readonly Mesh[]): boolean {
+  return firstHit(eye, target, occluders) !== null;
+}
+
+/** The name of the first thing crossing the segment from `eye` to `target`, or `null`. */
+function firstHit(eye: Vector3, target: Vector3, occluders: readonly Mesh[]): string | null {
   const toward = target.clone().sub(eye);
   const length = toward.length();
-  if (length < 1e-6) return false;
+  if (length < 1e-6) return null;
   RAYCASTER.set(eye, toward.divideScalar(length));
   RAYCASTER.near = 0;
   // A hair short of the target, so the far side of a thin animal is never "in front" of it.
   RAYCASTER.far = Math.max(0, length - 0.05);
-  return RAYCASTER.intersectObjects(occluders as Mesh[], false).length > 0;
+  const hit = RAYCASTER.intersectObjects(occluders as Mesh[], false)[0];
+  return hit ? hit.object.name || hit.object.parent?.name || '(unnamed)' : null;
 }
 
 /** Whether any drawn surface is within {@link EYE_CLEARANCE} of the eye, along the six axes. */
@@ -266,17 +349,22 @@ export function solveExhibitShot(
   world: ShotWorld,
   exhibitId: string,
   subjects: readonly Object3D[],
+  cast: readonly Object3D[],
   player: Vector3,
   facing: number,
   body: Object3D | null,
+  report?: SolveReport,
 ): ExhibitShot | null {
   const { box, targets } = subjectOf(subjects);
   if (box.isEmpty()) return null;
   const focus = box.getCenter(new Vector3());
-  const occluders = collectOccluders(body ? [world.hall, body] : [world.hall], [...subjects, ...world.seeThrough]);
+  const ignore = [...subjects, ...cast, ...world.seeThrough];
+  const occluders = collectOccluders(body ? [world.hall, body] : [world.hall], ignore);
   // The eye must not be inside her, either, but she is not something to keep
   // clear of by a hand's breadth — the shot is over her shoulder.
-  const near = collectOccluders([world.hall], [...subjects, ...world.seeThrough]);
+  const near = collectOccluders([world.hall], ignore);
+  const zoom = shotZoom(world.camera, box);
+  const rig = rigPose(player, world.camera.targetZoom);
 
   // "Behind her": along the line from the animals through her. Stood right
   // on top of the focus, her own back is the answer instead.
@@ -303,13 +391,33 @@ export function solveExhibitShot(
       for (const height of EYE_HEIGHTS) {
         const out = start + back;
         eye.set(focus.x + Math.sin(bearing) * out, REPTILE_HOUSE_FLOOR_Y + height, focus.z + Math.cos(bearing) * out);
-        if (!insideHall(eye)) continue;
-        if (!world.collision.isClearCircle(eye.x, eye.z, EYE_FLOOR_CLEAR)) continue;
-        if (eyeTooClose(eye, near)) continue;
+        if (!insideHall(eye)) {
+          if (report) report.outside += 1;
+          continue;
+        }
+        if (!world.collision.isClearCircle(eye.x, eye.z, EYE_FLOOR_CLEAR)) {
+          if (report) report.overSolid += 1;
+          continue;
+        }
+        if (eyeTooClose(eye, near)) {
+          if (report) report.tooClose += 1;
+          continue;
+        }
         tried += 1;
-        const seen = targets.map((target) => !sightlineBlocked(eye, target, occluders));
-        const centreSeen = !sightlineBlocked(eye, focus, occluders);
-        if (!centreSeen || seen.some((s) => !s)) continue;
+        const seen = targets.map((target) => (target.crowd ? !sightlineBlocked(eye, target.point, occluders) : robustlySeen(eye, target.point, occluders, report)));
+        if (!sightlinesPass(targets, seen)) {
+          if (report) report.blocked += 1;
+          continue;
+        }
+        // And the way there and back: the eye sweeps down from the rig, and
+        // a shot whose own approach crosses a wall, the log or a vine is no
+        // shot at all.
+        const angles = shotAngles(eye, focus);
+        const shotPose: Pose = { focus, ...angles, zoom };
+        if (!approachClear(rig, shotPose, near)) {
+          if (report) report.approach += 1;
+          continue;
+        }
         clear += 1;
         const cost = shotCost(swing, back, height, shotAngles(eye, focus).yawDegrees);
         if (!best || cost < best.cost) best = { eye: eye.clone(), seen, cost };
@@ -323,12 +431,59 @@ export function solveExhibitShot(
     focus,
     eye: best.eye,
     ...angles,
-    zoom: shotZoom(world.camera, box),
+    zoom,
     subject: box,
-    samples: targets.map((point, index) => ({ point, seen: best.seen[index] ?? false })),
+    samples: targets.map((target, index) => ({ point: target.point, seen: best.seen[index] ?? false })),
+    cast,
     tried,
     clear,
   };
+}
+
+/** Why candidate eyes were turned down — for the check, so an unsolved shot says why. */
+export interface SolveReport {
+  outside: number;
+  overSolid: number;
+  tooClose: number;
+  blocked: number;
+  approach: number;
+  /** What blocked the stars' sightlines, by mesh name, over every candidate. */
+  blockers: Record<string, number>;
+}
+
+/** Samples along a move, both ways, the eye checked at each — see {@link solveExhibitShot}. */
+const APPROACH_SAMPLES = 60;
+/**
+ * Clearance along the way down and back — wider than at the eye's resting
+ * spot because the real eye trails the eased path a little (the camera's own
+ * pose damper), so the path it flies is not quite the one sampled here.
+ */
+const APPROACH_CLEARANCE = 0.6;
+
+/** Where the eye stands for a pose: the focus plus the shot override's offset. */
+export function eyeOfPose(pose: Pose, out = new Vector3()): Vector3 {
+  const yaw = (pose.yawDegrees * Math.PI) / 180;
+  const pitch = (pose.pitchDegrees * Math.PI) / 180;
+  const horizontal = Math.cos(pitch) * pose.distance;
+  return out.set(pose.focus.x + Math.sin(yaw) * horizontal, pose.focus.y + Math.sin(pitch) * pose.distance, pose.focus.z + Math.cos(yaw) * horizontal);
+}
+
+/**
+ * Whether the eye's path down from the rig to `shot` and back up again stays
+ * in the hall's space and clear of everything drawn — sampled on the same
+ * blend {@link ExhibitCamera} drives, so it is the path the camera takes.
+ */
+function approachClear(rig: Pose, shot: Pose, near: readonly Mesh[]): boolean {
+  const scratch = { focus: new Vector3() };
+  const eye = new Vector3();
+  for (const [from, to] of [[rig, shot], [shot, rig]] as const) {
+    for (let i = 1; i < APPROACH_SAMPLES; i += 1) {
+      eyeOfPose(blendPose(from, to, smoothstep(i / APPROACH_SAMPLES), scratch), eye);
+      if (!eyeInHallSpace(eye)) return false;
+      if (eye.y < REPTILE_HOUSE_FLOOR_Y + REPTILE_WALL_HEIGHT + 3 && eyeTooClose(eye, near, APPROACH_CLEARANCE)) return false;
+    }
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------- director
@@ -420,6 +575,10 @@ export class ExhibitCamera {
   private lastShot: ExhibitShot | null = null;
   private lastPlayer: ShotPlayer | null = null;
   private failures: string[] = [];
+  private lastReport: SolveReport | null = null;
+  private subjects: readonly Object3D[] = [];
+  private readonly liveFocus = new Vector3();
+  private lastDt = 0;
 
   constructor(world: ShotWorld) {
     this.world = world;
@@ -428,6 +587,11 @@ export class ExhibitCamera {
   /** The most recent solved shot — for the check. */
   get shot(): ExhibitShot | null {
     return this.lastShot;
+  }
+
+  /** Why the last solve turned its candidates down — for the check. */
+  get report(): SolveReport | null {
+    return this.lastReport;
   }
 
   /** Exhibits a chip was pressed on and no clear shot could be found — for the check. */
@@ -451,20 +615,27 @@ export class ExhibitCamera {
    * move — from wherever the camera is, so a second chip mid-shot glides on
    * to the next animal rather than jumping home first.
    */
-  start(id: string, subjects: readonly Object3D[], player: ShotPlayer): boolean {
+  start(id: string, subjects: readonly Object3D[], cast: readonly Object3D[], player: ShotPlayer): boolean {
     if (player.riding) return false;
-    const shot = solveExhibitShot(this.world, id, subjects, player.position, player.facing, player.group);
+    const report: SolveReport = { outside: 0, overSolid: 0, tooClose: 0, blocked: 0, approach: 0, blockers: {} };
+    this.lastReport = report;
+    const shot = solveExhibitShot(this.world, id, subjects, cast, player.position, player.facing, player.group, report);
     if (!shot) {
       this.failures.push(id);
       return false;
     }
     if (this.phase === 'idle') {
-      this.zoomBefore = this.world.camera.targetZoom;
-      this.from = rigPose(player.position, this.zoomBefore);
+      const camera = this.world.camera;
+      this.zoomBefore = camera.targetZoom;
+      // From exactly where the camera is: the focus it is really orbiting and
+      // the zoom it has really reached, so the first placed frame is a no-op.
+      this.from = { ...rigPose(player.position, camera.zoom), focus: camera.focusPoint.clone() };
     } else {
       this.from = this.snapshot(player);
     }
     this.lastShot = shot;
+    this.subjects = subjects;
+    this.liveFocus.copy(shot.focus);
     this.lastPlayer = player;
     this.to = { focus: shot.focus, yawDegrees: shot.yawDegrees, pitchDegrees: shot.pitchDegrees, distance: shot.distance, zoom: shot.zoom };
     this.anchor.copy(player.position);
@@ -486,6 +657,7 @@ export class ExhibitCamera {
    */
   update(dt: number, input: ShotInput, player: ShotPlayer, inside: boolean, bubbleLeft: number): void {
     this.lastPlayer = player;
+    this.lastDt = dt;
     if (this.phase === 'idle') return;
     if (this.phase === 'in' || this.phase === 'hold') {
       const moved = Math.hypot(player.position.x - this.anchor.x, player.position.z - this.anchor.z) > EXHIBIT_SHOT_MOVE_CANCEL;
@@ -524,8 +696,16 @@ export class ExhibitCamera {
     const pose = this.pose();
     if (!pose) return null;
     this.current = pose;
-    camera.setShotOverride(pose.yawDegrees, pose.pitchDegrees, pose.distance);
-    camera.setZoomTarget(pose.zoom);
+    // **Placed, not chased.** The ease is this module's own smooth curve, so
+    // the camera is put exactly on it each frame rather than damped towards
+    // it: a damper on top would trail the curve by metres on the way down,
+    // and the path the solver proved clear of the walls, the ribs and the
+    // vines would not be the path the eye actually flew (measured: 0.15 m
+    // off a rib at 6 m up). The curve starts from where the camera really
+    // was (`start`), so the first frame does not move it.
+    camera.snapShotOverride(pose.yawDegrees, pose.pitchDegrees, pose.distance);
+    camera.snapZoomTarget(pose.zoom);
+    camera.snapTo(pose.focus);
     this.engaged = true;
     return pose.focus;
   }
@@ -546,12 +726,30 @@ export class ExhibitCamera {
     return { ...pose, focus: pose.focus.clone() };
   }
 
+  /**
+   * The shot as it stands this frame: the eye held on the spot that was
+   * proven clear, the aim on the animals as they are *now* — a tortoise
+   * plods, a croc drifts, a skink potters — so the reaction stays in the
+   * middle of the frame without the eye wandering anywhere unproven.
+   */
+  private liveShot(): Pose | null {
+    const shot = this.lastShot;
+    if (!shot || !this.to) return this.to;
+    const { box } = subjectOf(this.subjects);
+    if (box.isEmpty()) return this.to;
+    // Eased towards the animals rather than pinned to them: a wriggling head
+    // must not shake the picture.
+    const at = box.getCenter(new Vector3());
+    const focus = this.liveFocus.lerp(at, 1 - Math.pow(2, -this.lastDt / LIVE_FOCUS_HALF_LIFE));
+    return { focus, ...shotAngles(shot.eye, focus), zoom: shot.zoom };
+  }
+
   /** This frame's pose: the ease from `from` to the shot, or to the rig as it stands round her now. */
   private pose(): Pose | null {
     const from = this.from;
     const player = this.lastPlayer;
     if (!from || !player) return null;
-    const target = this.phase === 'out' ? rigPose(player.position, this.zoomBefore) : this.to;
+    const target = this.phase === 'out' ? rigPose(player.position, this.zoomBefore) : this.liveShot();
     if (!target) return null;
     const t = this.phase === 'hold' ? 1 : smoothstep(this.t / this.duration);
     return blendPose(from, target, t, this.blended);
