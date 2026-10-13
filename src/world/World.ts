@@ -20,6 +20,7 @@ import { COASTER_PLANS } from './coaster/plan';
 import { RailRace } from './railRace/RailRace';
 import { Hotel } from './hotel/Hotel';
 import { ReptileHouse } from './reptileHouse/ReptileHouse';
+import { Library } from './library/Library';
 import type { ShopStand } from './building/shops/Shops';
 import { MiniGameStalls } from '../minigames';
 import { dressWaterFightPlot } from '../minigames/waterFight/plot';
@@ -104,6 +105,8 @@ export class World implements GameSystem {
   readonly hotel: Hotel;
   /** The Reptile House (Jim, 2 Oct 2026): snakes behind glass and over walls, one expansive floor. */
   readonly reptileHouse: ReptileHouse;
+  /** The Library (#714/#716): a pillared building whose door leads to a dim one-floor reading room. */
+  readonly library: Library;
   readonly stalls: MiniGameStalls;
   readonly train: ParkTrain;
   readonly coaster: Coaster;
@@ -188,6 +191,15 @@ export class World implements GameSystem {
       nightFactor: () => this.dayNight.nightFactor,
     }));
     tapZones.push(...this.reptileHouse.interactZones());
+    // The Library (#716): the pillared building on the `library` plot, its door
+    // the way into a reading room that is its own space. Owned like the
+    // hotel's solids, so a measure can ask what a collider is.
+    this.library = this.collision.ownedBy('library', () => new Library(this.collision, interiorControls, this.building.surfaces, {
+      plot: placedEntry('library'),
+      anchorPlots: this.anchorPlots,
+      camera,
+    }));
+    tapZones.push(...this.library.interactZones());
     // The water-fight garden's shop window: takes the "coming soon" sign off the
     // `waterFight` plot and lays it out as a water-fight corner — pools, hedges,
     // a sprinkler and a rack of very big water guns. The fight itself is a
@@ -448,6 +460,7 @@ export class World implements GameSystem {
       ...this.npcs.screenLabels,
       ...this.hotel.screenLabels,
       ...this.reptileHouse.screenLabels,
+      ...this.library.screenLabels,
       ...this.building.screenLabels,
     ]) {
       this.labels.add(label);
@@ -496,6 +509,7 @@ export class World implements GameSystem {
       this.hotel.hotelRoot,
       this.reptileHouse.hallRoot,
       this.reptileHouse.forecourtRoot,
+      this.library.roomRoot,
       this.ferrisWheel.group,
     );
   }
@@ -562,7 +576,12 @@ export class World implements GameSystem {
    * `hotel/lighting.ts` for the hotel.
    */
   private get playerInAnyInterior(): boolean {
-    return this.building.playerInRoofedInterior || this.hotel.playerIsInside || this.reptileHouse.playerIsInside;
+    return (
+      this.building.playerInRoofedInterior ||
+      this.hotel.playerIsInside ||
+      this.reptileHouse.playerIsInside ||
+      this.library.playerIsInside
+    );
   }
 
   /**
@@ -609,6 +628,7 @@ export class World implements GameSystem {
     this.building.update(context);
     this.hotel.update(context);
     this.reptileHouse.update(context);
+    this.library.update(context);
 
     // The train runs before the children, and it has to: it carries the ones
     // who are aboard by writing their position, and their own movement code —
@@ -670,6 +690,7 @@ export class World implements GameSystem {
       ...this.building.interactZones(),
       ...this.hotel.interactZones(),
       ...this.reptileHouse.interactZones(),
+      ...this.library.interactZones(),
       ...this.stalls.interactZones(),
       ...this.facePaintStall.interactZones(),
       ...this.keychainShop.interactZones(),
@@ -708,6 +729,7 @@ export class World implements GameSystem {
     this.building.attachPlayer(player);
     this.hotel.attachPlayer(player);
     this.reptileHouse.attachPlayer(player);
+    this.library.attachPlayer(player);
     this.facePaintStall.attachPlayer(player);
     this.keychainShop.attachPlayer(player);
     this.train.attachPlayer(player);
@@ -734,6 +756,7 @@ export class World implements GameSystem {
 
   dispose(): void {
     this.reptileHouse.dispose();
+    this.library.dispose();
     this.fountain.dispose();
     this.fairyLights.dispose();
     this.lampPosts.dispose();

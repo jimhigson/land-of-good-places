@@ -51,7 +51,7 @@ import { SaveSystem } from './SaveSystem';
 import { gameStore, type CharacterCreationChoice } from './state';
 import { shopItem } from './world/building/shops/catalogue';
 import type { SavedPlace } from './state/save';
-import { SPACE_GARDEN } from './world/spaces';
+import { SPACE_GARDEN, SPACE_LIBRARY } from './world/spaces';
 import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
 import { attractionOwnsTheScreen } from './core/attraction';
@@ -261,6 +261,8 @@ export class Game {
     this.world.hotel.adoptRestoredPlayer();
     // …and the Reptile House's hall and forecourt, for the same reason.
     this.world.reptileHouse.adoptRestoredPlayer();
+    // …and the Library's reading room (#716).
+    this.world.library.adoptRestoredPlayer();
     // `Player`'s constructor samples the terrain for its own height, which is
     // right for a fresh spawn and wrong for a restored one — she may have been
     // standing on a bridge, a deck or the fountain rim. Now that the building's
@@ -1002,6 +1004,10 @@ export class Game {
       if (stallId === 'reptileHouseDoor') return this.world.reptileHouse.requestEnterDoor();
       // The Tortoise Ride (`/tortoise-ride`): into the hall and onto the shell.
       if (stallId === 'reptileTortoiseRide') return this.world.reptileHouse.requestTortoiseRide();
+      // Not rides either: the Library's reading room (`/library`) and its
+      // front door from outside (`/library-door`), #716.
+      if (stallId === 'library') return this.world.library.requestEnter();
+      if (stallId === 'libraryDoor') return this.world.library.requestEnterDoor();
       return false;
     };
 
@@ -2046,10 +2052,12 @@ function resolveSpawn(place: SavedPlace | undefined): Vector3 {
   // restore stays deliberately deferred to Decision 3 (see below).
   // …and so does the Reptile House (`ReptileHouse.adoptRestoredPlayer`), hall
   // and forecourt alike — `spaces.ts` names both with the `reptileHouse` stem.
+  // …and the Library's reading room (`Library.adoptRestoredPlayer`), #716.
   if (
     place.space !== SPACE_GARDEN &&
     !place.space.startsWith('hotel.') &&
-    !place.space.startsWith('reptileHouse')
+    !place.space.startsWith('reptileHouse') &&
+    place.space !== SPACE_LIBRARY
   ) {
     return DEFAULT_SPAWN;
   }

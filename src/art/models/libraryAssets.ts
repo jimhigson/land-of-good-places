@@ -1,8 +1,15 @@
 import {
+  BackSide,
+  BoxGeometry,
+  Color,
   CylinderGeometry,
   ExtrudeGeometry,
+  Float32BufferAttribute,
   Group,
+  Matrix4,
   Mesh,
+  MeshBasicMaterial,
+  MeshToonMaterial,
   Shape,
   SphereGeometry,
   type BufferGeometry,
@@ -10,9 +17,10 @@ import {
   type Object3D,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PALETTE } from '../../core/palette';
 import { ART } from '../style/artPalette';
-import { addOutline, decal, markShared, solid, toonMaterial, type ToonOptions } from '../style/materials';
+import { addOutline, addSmoothOutline, decal, markShared, solid, toonMaterial, type ToonOptions } from '../style/materials';
 import { visiblePoints } from '../style/measure';
 import type { AssetHandle } from '../style/asset';
 import { COUNTER_TOP_Y } from '../../world/building/shops/stallShape';
@@ -118,13 +126,20 @@ function paint(style: PartStyle): Material {
   return material;
 }
 
-/** A part: its geometry, painted, outlined and shadowed by its style. */
+/**
+ * A part: its geometry, painted, outlined and shadowed by its style. A
+ * hard-edged extrusion takes the welded outline (`addSmoothOutline`), or its
+ * corners blow the hull apart into flaps.
+ */
 function part(name: string, geometry: BufferGeometry, style: PartStyle): Mesh {
   const mesh = new Mesh(geometry, paint(style));
   mesh.name = name;
   if (style.glow) decal(mesh);
   else solid(mesh);
-  if (style.outline) addOutline(mesh, style.outline);
+  if (style.outline) {
+    if (geometry instanceof ExtrudeGeometry) addSmoothOutline(mesh, style.outline);
+    else addOutline(mesh, style.outline);
+  }
   return mesh;
 }
 
@@ -292,7 +307,7 @@ export function createLibraryExterior(): LibraryExterior {
   const frame = part(
     'library-door-frame',
     new ExtrudeGeometry(archedWall(doorHalf + 0.28, LIBRARY_DOOR_HEIGHT + 0.28, doorHalf, LIBRARY_DOOR_HEIGHT), {
-      depth: 0.12,
+      depth: 0.06,
       bevelEnabled: false,
       curveSegments: 16,
     }),
@@ -381,6 +396,8 @@ export interface LibraryExteriorPlan {
   /** The plinth's own extent, step included: x half-width, the back, the step's front. */
   readonly plinthHalfX: number;
   readonly plinthBackZ: number;
+  /** The lower step's tread, back (where the plinth's front face is) to front. */
+  readonly stepBackZ: number;
   readonly stepFrontZ: number;
   /** The plinth's walkable top and the step's. */
   readonly plinthTop: number;
@@ -389,6 +406,8 @@ export interface LibraryExteriorPlan {
   readonly cellaHalfX: number;
   readonly cellaBackZ: number;
   readonly cellaFrontZ: number;
+  /** The front wall's back face: the front wall's collider runs from here to {@link cellaFrontZ}. */
+  readonly frontWallBackZ: number;
   /** The doorway's clear half-width and how deep its recess runs. */
   readonly doorHalf: number;
   readonly recessBackZ: number;
@@ -407,6 +426,7 @@ export function measureLibraryExterior(exterior: LibraryExterior): LibraryExteri
   const step = measurePlan(root, (name) => name === 'library-step');
   const cella = measurePlan(root, (name) => name.startsWith('library-cella') || name === 'library-front-wall');
   const recess = measurePlan(root, (name) => name === 'library-door-glow');
+  const frontWall = measurePlan(root, (name) => name === 'library-front-wall');
   const columns = LIBRARY_COLUMN_XS.map((_, i) => {
     const base = measurePlan(root, (name) => name === `library-column-base-${i + 1}`);
     return {
@@ -426,12 +446,14 @@ export function measureLibraryExterior(exterior: LibraryExterior): LibraryExteri
   return {
     plinthHalfX: Math.max(-plinth.minX, plinth.maxX),
     plinthBackZ: plinth.minZ,
+    stepBackZ: step.minZ,
     stepFrontZ: step.maxZ,
     plinthTop,
     stepTop: step.maxY,
     cellaHalfX: Math.max(-cella.minX, cella.maxX),
     cellaBackZ: cella.minZ,
     cellaFrontZ: cella.maxZ,
+    frontWallBackZ: frontWall.minZ,
     doorHalf: (recess.maxX - recess.minX) / 2,
     recessBackZ: recess.minZ,
     columns,
@@ -561,7 +583,10 @@ export function libraryBookShapes(): readonly BookShape[] {
   const shapes: BookShape[] = [];
   for (const height of BOOK_HEIGHTS) {
     for (const thickness of BOOK_THICKNESSES) {
-      const geometry = markShared(roundedBox(thickness, height, BOOK_DEPTH, 0.012));
+      // Plain boxes: a book is a few centimetres across and there are
+      // thousands of them, so a rounded corner nobody can see would cost
+      // twenty times the triangles.
+      const geometry = markShared(new BoxGeometry(thickness, height, BOOK_DEPTH));
       geometry.translate(0, height / 2, 0);
       geometry.computeBoundingBox();
       const box = geometry.boundingBox!;
@@ -747,4 +772,104 @@ export function createLibrarySconce(): LampHandle {
   bulb.position.set(0, 0.12, 0.36);
   root.add(arm, cup, bulb);
   return { root, height: 0.3, bulbY: 0.12 };
+}
+
+// ---------------------------------------------------------------------------
+// Baking — a model's parts into a handful of draw calls
+// ---------------------------------------------------------------------------
+
+/**
+ * **A model, baked**: every painted part merged into one geometry carrying
+ * its paint as vertex colour, every outline into one more, and each glow
+ * colour into its own (a glow is an emissive material, which a vertex colour
+ * cannot carry). A bookcase of nine parts and nine outlines becomes two draw
+ * calls, which is what lets the reading room hold forty of them.
+ */
+export interface BakedModel {
+  readonly body: BufferGeometry;
+  readonly outline: BufferGeometry | null;
+  readonly glows: readonly { readonly colour: number; readonly geometry: BufferGeometry }[];
+}
+
+function coloured(geometry: BufferGeometry, transform: Matrix4, colour: Color): BufferGeometry {
+  const flat = (geometry.index ? geometry.toNonIndexed() : geometry.clone()).applyMatrix4(transform);
+  for (const name of Object.keys(flat.attributes)) if (name !== 'position' && name !== 'normal') flat.deleteAttribute(name);
+  const count = flat.getAttribute('position').count;
+  const colours = new Float32Array(count * 3);
+  for (let i = 0; i < count; i += 1) {
+    colours[i * 3] = colour.r;
+    colours[i * 3 + 1] = colour.g;
+    colours[i * 3 + 2] = colour.b;
+  }
+  flat.setAttribute('color', new Float32BufferAttribute(colours, 3));
+  return flat;
+}
+
+export function bakeModel(root: Object3D): BakedModel {
+  root.updateMatrixWorld(true);
+  const toRoot = new Matrix4().copy(root.matrixWorld).invert();
+  const bodies: BufferGeometry[] = [];
+  const outlines: BufferGeometry[] = [];
+  const glows = new Map<number, BufferGeometry[]>();
+  root.traverse((node) => {
+    if (!(node instanceof Mesh) || !node.visible) return;
+    const transform = new Matrix4().multiplyMatrices(toRoot, node.matrixWorld);
+    const material = node.material as Material;
+    if (material instanceof MeshBasicMaterial && material.side === BackSide) {
+      outlines.push(coloured(node.geometry, transform, material.color));
+      return;
+    }
+    if (material instanceof MeshToonMaterial && material.emissive.getHex() !== 0) {
+      const hex = material.color.getHex();
+      const list = glows.get(hex) ?? [];
+      list.push(coloured(node.geometry, transform, material.color));
+      glows.set(hex, list);
+      return;
+    }
+    const colour = (material as Material & { color?: Color }).color ?? new Color(PALETTE.ink);
+    bodies.push(coloured(node.geometry, transform, colour));
+  });
+  const merge = (list: BufferGeometry[]): BufferGeometry => {
+    const merged = mergeGeometries(list, false);
+    if (!merged) throw new Error('libraryAssets: a model would not merge');
+    merged.computeBoundingSphere();
+    return merged;
+  };
+  return {
+    body: merge(bodies),
+    outline: outlines.length > 0 ? merge(outlines) : null,
+    glows: [...glows.entries()].map(([colour, list]) => ({ colour, geometry: merge(list) })),
+  };
+}
+
+/**
+ * The baked parts' materials: a white toon body under the vertex colours
+ * (white being the identity of the multiply, not a paint), and the outlines'
+ * back-face shell, both fresh per call so a model that fades can own its
+ * opacity.
+ */
+export function bakedBodyMaterial(): MeshToonMaterial {
+  const material = toonMaterial(0xffffff);
+  material.vertexColors = true;
+  return material;
+}
+
+export function bakedOutlineMaterial(): MeshBasicMaterial {
+  return new MeshBasicMaterial({ color: 0xffffff, vertexColors: true, side: BackSide });
+}
+
+/** A glow part's material, shared by colour. */
+export function bakedGlowMaterial(colour: number): Material {
+  return paint({ colour, glow: true });
+}
+
+/** Every bookcase kind, baked once. */
+const bakedCases = new Map<BookcaseKind, BakedModel>();
+export function libraryBookcaseBaked(kind: BookcaseKind): BakedModel {
+  let baked = bakedCases.get(kind);
+  if (!baked) {
+    baked = bakeModel(buildBookcase(kind));
+    bakedCases.set(kind, baked);
+  }
+  return baked;
 }

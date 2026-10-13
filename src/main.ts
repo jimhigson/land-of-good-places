@@ -210,6 +210,14 @@ const RIDE_DEEP_LINKS: Readonly<Record<string, string>> = {
   // The Reptile House's Tortoise Ride, boarded: into the hall at its stand
   // spot and straight onto the shell — `ReptileHouse.requestTortoiseRide`.
   '/tortoise-ride': 'reptileTortoiseRide',
+  // The Library's reading room (#716) — the hotel's QA problem again: reaching
+  // it means finding the building on a layout different on every seed, then
+  // the door. Drops her just inside the door, facing up the central aisle at
+  // the story rug — `Library.requestEnter`.
+  '/library': 'library',
+  // …and the building from outside: on the plot's doormat at the foot of the
+  // steps, facing the door — `Library.requestEnterDoor`.
+  '/library-door': 'libraryDoor',
 };
 
 /**
