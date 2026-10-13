@@ -139,6 +139,8 @@ export class BookReader {
 
   private readonly onFinished: (book: LibraryBook) => void;
   private readonly artist: PageArtist;
+  /** The game's canvas — what the book is drawn into, so what the buttons are measured against. */
+  private readonly canvas: HTMLCanvasElement;
   /** Leans the book back; the book's own frame (spine base at the origin) hangs off it. */
   private readonly tilt = new Group();
   private readonly bookRoot = new Group();
@@ -173,6 +175,7 @@ export class BookReader {
   constructor(options: BookReaderOptions) {
     this.onFinished = options.onFinished;
     this.artist = new PageArtist(options.renderer);
+    this.canvas = options.renderer.domElement;
 
     this.scene.name = 'library.reader';
     this.scene.add(this.camera);
@@ -559,8 +562,9 @@ export class BookReader {
    * sides — whichever lets the book be bigger on this screen.
    */
   private layout(): void {
-    const width = Math.max(1, window.innerWidth);
-    const height = Math.max(1, window.innerHeight);
+    const view = this.canvas.getBoundingClientRect();
+    const width = Math.max(1, view.width || window.innerWidth);
+    const height = Math.max(1, view.height || window.innerHeight);
     this.camera.aspect = width / height;
     const band = uiUnitPx() * CLOSE_BAND_UNITS;
     const aspect = BOOK_WIDTH / BOOK_HEIGHT;
@@ -616,16 +620,17 @@ export class BookReader {
       const bottom = this.toScreen(new Vector3(x, 0, READER_BLOCK_THICKNESS));
       shortest = Math.min(shortest, Math.abs(bottom.y - top.y));
     }
-    return Number.isFinite(shortest) ? shortest : window.innerHeight;
+    return Number.isFinite(shortest) ? shortest : this.canvas.getBoundingClientRect().height;
   }
 
-  /** A book-space point, in CSS pixels from the top left of the window. */
+  /** A book-space point, in CSS pixels from the top left of the window (client coordinates). */
   private toScreen(point: Vector3): { x: number; y: number } {
+    const view = this.canvas.getBoundingClientRect();
     const world = point.clone().applyMatrix4(this.bookRoot.matrixWorld);
     const ndc = world.project(this.camera);
     return {
-      x: ((ndc.x + 1) / 2) * window.innerWidth,
-      y: ((1 - ndc.y) / 2) * window.innerHeight,
+      x: view.left + ((ndc.x + 1) / 2) * view.width,
+      y: view.top + ((1 - ndc.y) / 2) * view.height,
     };
   }
 
@@ -646,8 +651,11 @@ export class BookReader {
         bottom = Math.max(bottom, at.y);
       }
     }
-    button.style.left = `${left}px`;
-    button.style.top = `${top}px`;
+    // The buttons live in the reader's own box; the page was measured in the
+    // window's, so take the one from the other.
+    const origin = this.root.getBoundingClientRect();
+    button.style.left = `${left - origin.left}px`;
+    button.style.top = `${top - origin.top}px`;
     button.style.width = `${right - left}px`;
     button.style.height = `${bottom - top}px`;
   }
@@ -658,6 +666,12 @@ export class BookReader {
     const atEnd = this.spreadIndex >= this.spreadCount - 1 && !(this.turn && this.turn.direction < 0);
     this.prevButton.dataset.show = atStart ? 'false' : 'true';
     this.nextButton.dataset.show = atEnd ? 'false' : 'true';
+    // A button about to be disabled under keyboard focus would drop the focus
+    // on the floor; hand it to whatever is still useful — the other page, or
+    // at the very end, the ✕ that is the only thing left to press.
+    const focused = document.activeElement;
+    if (atEnd && focused === this.nextButton) this.closeButton.focus({ preventScroll: true });
+    if (atStart && focused === this.prevButton) this.nextButton.focus({ preventScroll: true });
     this.prevButton.disabled = atStart;
     this.nextButton.disabled = atEnd;
     this.settleIfIdle();

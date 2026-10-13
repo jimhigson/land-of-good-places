@@ -127,7 +127,8 @@ async function measureFaces(page: Page): Promise<{ rootPx: number; faces: FaceMe
       }
       top.multiplyScalar(1 / nTop).project(camera);
       bottom.multiplyScalar(1 / nBottom).project(camera);
-      return (Math.abs(top.y - bottom.y) / 2) * window.innerHeight;
+      const view = (document.getElementById('game-canvas') as HTMLCanvasElement).getBoundingClientRect();
+      return (Math.abs(top.y - bottom.y) / 2) * view.height;
     };
     const faces = (r.facesPainted() as any[]).map((painted, index) => {
       if (!painted) return { index, kind: 'unpainted', fontPx: 0, onScreenPx: 0, coverage: null, canvas: false };
@@ -166,10 +167,11 @@ async function measureLayout(page: Page): Promise<{
       let right = -Infinity;
       let bottom = -Infinity;
       const v = new V();
+      const view = (document.getElementById('game-canvas') as HTMLCanvasElement).getBoundingClientRect();
       for (let i = 0; i < position.count; i += 1) {
         v.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(mesh.matrixWorld).project(camera);
-        const x = ((v.x + 1) / 2) * window.innerWidth;
-        const y = ((1 - v.y) / 2) * window.innerHeight;
+        const x = view.left + ((v.x + 1) / 2) * view.width;
+        const y = view.top + ((1 - v.y) / 2) * view.height;
         left = Math.min(left, x);
         right = Math.max(right, x);
         top = Math.min(top, y);
