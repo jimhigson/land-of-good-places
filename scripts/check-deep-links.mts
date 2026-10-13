@@ -52,7 +52,8 @@ import {
   REPTILE_HOUSE_ORIGIN_Z,
   REPTILE_LOG_CENTRE_X,
 } from '../src/world/reptileHouse/layout.ts';
-import { SPACE_GARDEN, spaceAt } from '../src/world/spaces.ts';
+import { SPACE_GARDEN, SPACE_LIBRARY, spaceAt } from '../src/world/spaces.ts';
+import { LIBRARY_ARRIVAL, LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z } from '../src/world/library/layout.ts';
 import { ARRIVAL_BEATS } from '../src/world/entrance/ArrivalSequence.ts';
 import { CANONICAL_PARK_SEED } from '../src/world/parkSeedPool.ts';
 
@@ -179,6 +180,74 @@ const AUTOSAVE_TIMEOUT_MS = 60000;
 const REPTILE_AT = { x: REPTILE_LOG_CENTRE_X, z: 0 };
 
 const CHECKS: DeepLinkCheck[] = [
+  {
+    // The Library's reading room (#716): inside, standing on the arrival just
+    // in from the door — converted back to world here from the same layout
+    // constants the building uses.
+    path: '/library',
+    assert: async (page) => {
+      const want = { x: LIBRARY_ORIGIN_X + LIBRARY_ARRIVAL.x, z: LIBRARY_ORIGIN_Z + LIBRARY_ARRIVAL.z };
+      await page
+        .waitForFunction(() => ((window as unknown as { game?: any }).game)?.world?.library?.playerIsInside === true, undefined, { timeout: 10000 })
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.library?.playerIsInside ?? null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (s.inside !== true) return { ok: false, detail: `the Library was not entered (inside=${s.inside})` };
+      if (!s.playerPos) return { ok: false, detail: 'the player had no position' };
+      const space = spaceAt(s.playerPos.x, s.playerPos.z);
+      const off = Math.hypot(s.playerPos.x - want.x, s.playerPos.z - want.z);
+      if (space !== SPACE_LIBRARY || off > CASTLE_TOLERANCE) {
+        return { ok: false, detail: `expected the arrival at world (${want.x}, ${want.z}); she is in '${space}' at (${s.playerPos.x.toFixed(1)}, ${s.playerPos.z.toFixed(1)})` };
+      }
+      return { ok: true, detail: `inside the Library, ${off.toFixed(2)} m from the arrival` };
+    },
+  },
+  {
+    // Outside the Library's door, in the park, on the plot's own doormat.
+    path: '/library-door',
+    // Primed inside the room: the door link must put a restored-inside player back out.
+    primerPath: '/library',
+    assert: async (page) => {
+      await page
+        .waitForFunction(
+          () => {
+            const g = (window as unknown as { game?: any }).game;
+            const mat = g?.world?.library?.doormat;
+            return !!g && !!mat && g.world.library.playerIsInside === false && !!g.player?.position &&
+              Math.hypot(g.player.position.x - mat.x, g.player.position.z - mat.z) < 1;
+          },
+          undefined,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+      const s = await page.evaluate(() => {
+        const g = (window as unknown as { game?: any }).game;
+        const mat = g?.world?.library?.doormat;
+        return {
+          hasGame: !!g,
+          inside: g?.world?.library?.playerIsInside ?? null,
+          mat: mat ? { x: mat.x, z: mat.z } : null,
+          playerPos: g?.player?.position ? { x: g.player.position.x, z: g.player.position.z } : null,
+        };
+      });
+      if (!s.hasGame) return { ok: false, detail: 'window.game never appeared' };
+      if (!s.playerPos || !s.mat) return { ok: false, detail: 'the player or the doormat had no position' };
+      const space = spaceAt(s.playerPos.x, s.playerPos.z);
+      if (space !== SPACE_GARDEN || s.inside !== false) {
+        return { ok: false, detail: `expected to stand in the park outside the door; she is in '${space}' (inside=${s.inside})` };
+      }
+      const off = Math.hypot(s.playerPos.x - s.mat.x, s.playerPos.z - s.mat.z);
+      if (off > CASTLE_TOLERANCE) return { ok: false, detail: `in the park but ${off.toFixed(1)} m from the doormat at (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
+      return { ok: true, detail: `on the Library's doormat, ${off.toFixed(2)} m from (${s.mat.x.toFixed(1)}, ${s.mat.z.toFixed(1)})` };
+    },
+  },
   {
     // The Reptile House's hall, at a spot: `inside` must flip and the player
     // must be at the asked-for hall-local point, converted back here from the
