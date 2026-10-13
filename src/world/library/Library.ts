@@ -13,6 +13,7 @@ import { terrainHeight } from '../terrain';
 import type { Player } from '../../entities/Player';
 import type { FrameContext, GameSystem } from '../../core/types';
 import type { IsoCamera } from '../../core/IsoCamera';
+import { BUILDING_STEP_UP } from '../../core/constants';
 import type { ManagedLabel } from '../../ui/LabelManager';
 import { createLibraryExterior, measureLibraryExterior, type LibraryExterior, type LibraryExteriorPlan } from '../../art/models/libraryAssets';
 import { LibraryLighting } from './lighting';
@@ -114,6 +115,8 @@ export class Library implements GameSystem {
   readonly bookCount: number;
   /** The room's light rig — for the checks (no black light, the darkest floor). */
   readonly lighting: LibraryLighting;
+  /** How far the building is moved along its up from the ground at its centre (`libraryBaseSink`). */
+  readonly baseSink: number;
 
   private readonly collision: CollisionWorld;
   private readonly controls: InteriorControls;
@@ -151,16 +154,30 @@ export class Library implements GameSystem {
     // ------------------------------------------------------- the building
     const plot = deps.plot;
     const yaw = Math.atan2(plot.entranceX - plot.x, plot.entranceZ - plot.z);
-    this.frame = new LibraryFrame(plot.x, plot.z, yaw, terrainHeight(plot.x, plot.z));
     this.exterior = createLibraryExterior();
     this.plan = measureLibraryExterior(this.exterior);
     this.assertExteriorMatchesLayout();
+    // **Set down to meet the ground at the foot of its steps.** The building
+    // stands square to the local up at its centre, and the planet falls away
+    // from that on every side — 0.11 m at the step's front on a flat seed,
+    // more or less where the ground's waves rise and fall across it. Stood on
+    // its centre, the bottom riser could be the drawn 0.18 plus all of that.
+    // So the building is lowered (or raised) until the ground where the path
+    // arrives — the middle of the step's front — is level with its base, and
+    // no further than keeps every other riser along the front inside the step
+    // a child can take (`libraryBaseSink`). `aChildWalksUpTheLibraryStepsAndIn`
+    // walks up it on every seed. The plinth's skirt runs a metre into the
+    // ground, so nothing shows a gap.
+    const centreGround = terrainHeight(plot.x, plot.z);
+    const sink = libraryBaseSink(new LibraryFrame(plot.x, plot.z, yaw, centreGround), this.plan);
+    this.baseSink = sink;
+    this.frame = new LibraryFrame(plot.x, plot.z, yaw, centreGround + sink);
     const group = deps.anchorPlots.getGroup('library');
     this.parkRoot.name = 'the-library-outside';
     // The plot's own origin is the ground under the building, leant to the
     // local up; `standInPlot` carries the world transform back through it, so
     // the plinth stands on the sphere (the hotel's 13 Sep "floating" fix).
-    standInPlot(group, this.parkRoot, plot.x, plot.z, 0, yaw);
+    standInPlot(group, this.parkRoot, plot.x, plot.z, sink, yaw);
     this.parkRoot.add(this.exterior.root);
     group.add(this.parkRoot);
     deps.anchorPlots.setPlaceholderVisible('library', false);
@@ -377,4 +394,27 @@ export class Library implements GameSystem {
       standZ: band.centreZ,
     };
   }
+}
+
+/**
+ * **How far to move the building along its own up so a child can walk onto its
+ * step anywhere along it.** Metres; negative lowers it.
+ *
+ * The ground along the front of the lower tread, a few centimetres out where
+ * her feet are before she steps up, in the building's own frame. The middle
+ * of it — where the path arrives — is set level with the base, so the path's
+ * paving meets the step's foot and the riser there is the drawn one. Unless
+ * that leaves the lowest point along the front with a riser past
+ * `BUILDING_STEP_UP` (less a 0.1 m margin): then the building goes down to
+ * there, and the middle of the step is a little sunk in the lawn instead.
+ */
+export function libraryBaseSink(frame: LibraryFrame, plan: LibraryExteriorPlan): number {
+  const groundAt = (across: number): number => {
+    const at = frame.foot(across, plan.stepFrontZ + 0.1);
+    return frame.toLocal(at.x, terrainHeight(at.x, at.z), at.z, new Vector3()).y;
+  };
+  let lowest = Infinity;
+  for (let across = -plan.plinthHalfX; across <= plan.plinthHalfX + 1e-6; across += 0.5) lowest = Math.min(lowest, groundAt(across));
+  const steepest = BUILDING_STEP_UP - 0.1 - plan.stepTop;
+  return Math.min(groundAt(0), lowest + steepest);
 }

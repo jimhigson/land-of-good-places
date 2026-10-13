@@ -308,15 +308,15 @@ export const LIBRARY_FURNITURE: readonly FurnitureSpec[] = [
   { id: 'cushion-5', kind: 'cushion', at: { x: 5, z: -9.5 }, facing: 180 },
 
   // The north-west reading nook, by the secret shelf.
-  { id: 'nook-armchair', kind: 'armchair', at: { x: -12.6, z: -9.4 }, facing: 135 },
+  { id: 'nook-armchair', kind: 'armchair', at: { x: -12.6, z: -9.4 }, facing: 45 },
   { id: 'nook-table', kind: 'sideTable', at: { x: -14.4, z: -10.6 }, facing: 0 },
   { id: 'nook-lamp', kind: 'readingLamp', at: { x: -14.4, z: -10.6 }, facing: 0, pool: true },
 
   // The north-east reading nook.
-  { id: 'east-armchair', kind: 'armchair', at: { x: 14, z: -9.4 }, facing: 225 },
+  { id: 'east-armchair', kind: 'armchair', at: { x: 14, z: -9.4 }, facing: 315 },
   { id: 'east-table', kind: 'sideTable', at: { x: 15.8, z: -10.6 }, facing: 0 },
   { id: 'east-lamp', kind: 'readingLamp', at: { x: 15.8, z: -10.6 }, facing: 0 },
-  { id: 'east-floor-lamp', kind: 'floorLamp', at: { x: 12.2, z: -10.9 }, facing: 0, pool: true },
+  { id: 'east-floor-lamp', kind: 'floorLamp', at: { x: 15.6, z: -8.2 }, facing: 0, pool: true },
 
   // Sconces above the cases: the north wall's three and the west wall's two.
   { id: 'sconce-north-1', kind: 'sconce', at: { x: -8, z: -LIBRARY_INNER_Z }, facing: 0, y: 3.9, pool: true },
@@ -382,9 +382,9 @@ function slotStand(bookcase: string, along: number, index: number): StandSpot {
 }
 
 const READABLE: readonly (readonly [string, number, number])[] = [
-  ['north-1', 2, 0.6],
+  ['north-2', 2, 0.6],
   ['north-3', 1, -0.8],
-  ['north-7', 2, 0.4],
+  ['north-6', 2, 0.6],
   ['north-8', 1, -0.6],
   ['west-1', 2, 0.5],
   ['west-3', 1, -0.5],
@@ -434,6 +434,13 @@ export const LIBRARY_AISLES: readonly Aisle[] = [
 ];
 
 /**
+ * Where she stands to sit in a chair: this far out along its facing from its
+ * middle — a metre clear of the seat's front edge, so the stand spot's keep-out
+ * never reaches the chair itself.
+ */
+export const LIBRARY_SEAT_FRONT = 1.5;
+
+/**
  * **Every spot a child must be able to stand on, room-local** — the arrival,
  * the doorway, the desk's front, the librarian's spot, the rug, every seat's
  * front, the secret shelf's stand, the twelve readable books' stands, and
@@ -453,7 +460,12 @@ export function libraryStandSpots(): StandSpot[] {
   for (const piece of LIBRARY_FURNITURE) {
     if (piece.kind !== 'armchair' && piece.kind !== 'storyChair') continue;
     const yaw = (piece.facing * Math.PI) / 180;
-    spots.push({ what: `${piece.id}'s front`, x: piece.at.x + Math.sin(yaw) * 1.25, z: piece.at.z + Math.cos(yaw) * 1.25, facing: (piece.facing + 180) % 360 });
+    spots.push({
+      what: `${piece.id}'s front`,
+      x: piece.at.x + Math.sin(yaw) * LIBRARY_SEAT_FRONT,
+      z: piece.at.z + Math.cos(yaw) * LIBRARY_SEAT_FRONT,
+      facing: (piece.facing + 180) % 360,
+    });
   }
   for (const slot of LIBRARY_READABLE_SLOTS) spots.push(slot.stand);
   for (const aisle of LIBRARY_AISLES) {

@@ -12,6 +12,8 @@ import {
   MeshToonMaterial,
   Shape,
   SphereGeometry,
+  Vector3,
+  type BufferAttribute,
   type BufferGeometry,
   type Material,
   type Object3D,
@@ -170,7 +172,19 @@ export interface PlanBounds {
   readonly maxZ: number;
 }
 
-/** Every visible vertex's extent, `root`'s own frame — `visiblePoints`, never a bounding box. */
+/** Is this mesh an ink outline (an inverted hull), rather than the shape it outlines? */
+function isOutline(mesh: Mesh): boolean {
+  const material = mesh.material as Material;
+  return material instanceof MeshBasicMaterial && material.side === BackSide;
+}
+
+/**
+ * The extent of a model's **shape** in `root`'s own frame — every visible
+ * vertex of every painted part, never a bounding box, and never an outline
+ * (an outline is the ink round a shape, not the shape: measuring it made the
+ * plinth 3 cm wider than the one the park was solved with). `only` picks the
+ * parts by name.
+ */
 export function measurePlan(root: Object3D, only?: (name: string) => boolean): PlanBounds {
   let minX = Infinity;
   let maxX = -Infinity;
@@ -178,27 +192,27 @@ export function measurePlan(root: Object3D, only?: (name: string) => boolean): P
   let maxY = -Infinity;
   let minZ = Infinity;
   let maxZ = -Infinity;
-  const measure = (node: Object3D): void => {
-    visiblePoints(
-      node,
-      (p) => {
-        minX = Math.min(minX, p.x);
-        maxX = Math.max(maxX, p.x);
-        minY = Math.min(minY, p.y);
-        maxY = Math.max(maxY, p.y);
-        minZ = Math.min(minZ, p.z);
-        maxZ = Math.max(maxZ, p.z);
-      },
-      root,
-    );
-  };
-  if (only) {
-    root.traverse((node) => {
-      if (node !== root && node instanceof Mesh && only(node.name)) measure(node);
-    });
-  } else {
-    measure(root);
-  }
+  root.updateMatrixWorld(true);
+  const toRoot = new Matrix4().copy(root.matrixWorld).invert();
+  const combined = new Matrix4();
+  const point = new Vector3();
+  root.traverse((node) => {
+    if (!(node instanceof Mesh) || isOutline(node)) return;
+    for (let up: Object3D | null = node; up && up !== root; up = up.parent) if (!up.visible) return;
+    if (only && !only(node.name)) return;
+    const position = node.geometry.getAttribute('position');
+    if (!position) return;
+    combined.multiplyMatrices(toRoot, node.matrixWorld);
+    for (let i = 0; i < position.count; i += 1) {
+      point.fromBufferAttribute(position as BufferAttribute, i).applyMatrix4(combined);
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+      minZ = Math.min(minZ, point.z);
+      maxZ = Math.max(maxZ, point.z);
+    }
+  });
   return { minX, maxX, minY, maxY, minZ, maxZ };
 }
 
@@ -413,7 +427,7 @@ export interface LibraryExteriorPlan {
   readonly recessBackZ: number;
   /** Each column's base footprint: the widest thing at a child's height. */
   readonly columns: readonly { readonly x: number; readonly z: number; readonly radius: number }[];
-  /** The furthest any drawn vertex stands from the centre, in plan. */
+  /** The furthest any drawn vertex stands from the centre, in plan — outlines included, as `anchor.reach` counts them. */
   readonly reach: number;
   /** The tallest drawn point. */
   readonly height: number;

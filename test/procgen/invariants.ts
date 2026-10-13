@@ -86,6 +86,7 @@ import { frameFor } from '../../src/world/train/bridgeSpine.ts';
 // world/interact — nothing seeded, so a static import cannot fix the park.
 import {
   type PortalBand,
+  bandCrossed,
   differentActions,
   sameStorey,
   TAP_FINGER_METRES,
@@ -1486,13 +1487,16 @@ const drawnPavingReachesEveryDoor: Invariant = (facts) => {
 
   const doors: { id: string; at: readonly [number, number] | null }[] = [];
   const complaints: string[] = [];
-  // The three doors that open onto the park, each with the mesh that is its
+  // The four doors that open onto the park, each with the mesh that is its
   // front. The Reptile House's door is Sunny's mouth, so its front is the
   // mouth's pink lining (`rh-mouth`), the lips.
   const bands = [
     { band: facts.world.hotel.towerDoorBand(), front: 'tower-door-glow' },
     { band: castleFrontDoorBand(facts), front: 'entrance-steps' },
     { band: facts.world.reptileHouse.doorBands()[0] ?? null, front: 'rh-mouth' },
+    // The Library's door (#716) is reached up its steps, so its front — where
+    // the paving arrives and runs in under — is the lower step's.
+    { band: facts.world.library.doorBands()[0] ?? null, front: 'library-step' },
   ];
   let overlapsMeasured = 0;
   for (const { band, front } of bands) {
@@ -1662,7 +1666,7 @@ const UNDER_A_SOLID_TOLERANCE = PAVING_CELL / 2;
  * (`wallsRunAlongsideAPath`), the fountain's rim stands on the plaza, and a
  * lamp may stand at a path's edge; those are counted on every run, not judged.
  */
-const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'reptile house', 'booth', 'boundary wall']);
+const BUILT_SOLIDS: ReadonlySet<string> = new Set(['castle', 'hotel', 'reptile house', 'library', 'booth', 'boundary wall']);
 
 /**
  * **No drawn paving lies under a building, a booth or the boundary wall.**
@@ -11959,7 +11963,13 @@ const tapTargetsKeepTheirDistance: Invariant = (facts) => {
   }
   // …and the walk-through doorways: nothing may eat a tap aimed at a door.
   const reptileFront = facts.world.reptileHouse.doorBands()[0];
-  const bands = [facts.world.hotel.towerDoorBand(), ...facts.world.building.doorBands(), ...(reptileFront ? [reptileFront] : [])];
+  const libraryFront = facts.world.library.doorBands()[0];
+  const bands = [
+    facts.world.hotel.towerDoorBand(),
+    ...facts.world.building.doorBands(),
+    ...(reptileFront ? [reptileFront] : []),
+    ...(libraryFront ? [libraryFront] : []),
+  ];
   for (const zone of zones) {
     for (const band of bands) {
       if (band.ownZoneId === zone.id) continue;
@@ -13366,6 +13376,123 @@ const theParkIsFurnished: Invariant = (facts) => {
   return complaints;
 };
 
+
+/**
+ * **A child walks from the Library's doormat up its steps and in through its
+ * door — and nowhere else gets in** (#716).
+ *
+ * The plot is new procgen (`parkManifest.ts`'s `library`), so it carries its
+ * own invariant, measured on the built park: a player-sized body
+ * ({@link PLAYER_RADIUS}) is walked from the plot's doormat — where the
+ * paths arrive — straight at the front door's band, through the real
+ * `CollisionWorld` and the real `WalkSurfaces` sampler, 5 cm at a time:
+ *
+ * 1. **She gets in.** The walk crosses the door's own band
+ *    (`bandCrossed`, the door's own trigger). Anything the seed stood
+ *    between the doormat and the door — a lamp post, a tree, a bench, a
+ *    column — stops her short, and says how far short.
+ * 2. **She walks up the steps, never through them.** Wherever her centre is
+ *    over the drawn step or plinth, her feet are on its top — the sampler
+ *    only lifts her onto a surface within {@link BUILDING_STEP_UP}, so a riser
+ *    the ground fell away from on this seed's slope leaves her feet inside
+ *    the stone, and that is measured to the centimetre.
+ * 3. **The control, and the other half of "the door is the one way in":**
+ *    the same walk from directly behind the building, aimed at the same band,
+ *    must *not* get in — the cella's ring is closed. A walk that cannot be
+ *    stopped is not measuring the door.
+ *
+ * Thresholds are the game's own: her radius, the step-up rule, the band.
+ */
+const aChildWalksUpTheLibraryStepsAndIn: Invariant = (facts) => {
+  const library = facts.world.library;
+  const collision = facts.world.collision;
+  const surfaces = facts.world.building.surfaces;
+  const band = library.doorBands()[0];
+  if (!band) return ["the Library offers no front door band — this asserts nothing"];
+  const frame = library.frame;
+  const plan = library.plan;
+  const fouls: string[] = [];
+  const local = new Vector3();
+  const walkTowards = (
+    fromX: number,
+    fromZ: number,
+    aimX: number,
+    aimZ: number,
+  ): { crossed: boolean; short: number; deepest: number; steps: number; over: number } => {
+    const p = new Vector3(fromX, surfaces.sample(fromX, fromZ, terrainHeight(fromX, fromZ) + 3), fromZ);
+    let crossed = false;
+    let deepest = 0;
+    let over = 0;
+    let steps = 0;
+    let still = 0;
+    for (; steps < 800 && !crossed; steps += 1) {
+      const toX = aimX - p.x;
+      const toZ = aimZ - p.z;
+      if (Math.hypot(toX, toZ) < 0.05) break;
+      const length = Math.hypot(toX, toZ);
+      if (length < 1e-6) break;
+      const fromPX = p.x;
+      const fromPZ = p.z;
+      collision.resolveMovement(p, (toX / length) * 0.05, (toZ / length) * 0.05, PLAYER_RADIUS, 0, MAX_FRAME_DELTA);
+      p.y = surfaces.sample(p.x, p.z, p.y);
+      if (bandCrossed(band, fromPX, fromPZ, p.x, p.z)) crossed = true;
+      still = Math.hypot(p.x - fromPX, p.z - fromPZ) < 1e-4 ? still + 1 : 0;
+      if (still > 20) break;
+      // Over the drawn stone: her feet on its top, not in it.
+      frame.toLocal(p.x, p.y, p.z, local);
+      if (Math.abs(local.x) <= plan.plinthHalfX && local.z >= plan.recessBackZ && local.z <= plan.stepFrontZ) {
+        over += 1;
+        const top = local.z >= plan.stepBackZ ? plan.stepTop : plan.plinthTop;
+        deepest = Math.max(deepest, top - local.y);
+      }
+    }
+    return { crossed, short: Math.hypot(band.centreX - p.x, band.centreZ - p.z), deepest, steps, over };
+  };
+  const walk = (fromX: number, fromZ: number): ReturnType<typeof walkTowards> => walkTowards(fromX, fromZ, band.centreX, band.centreZ);
+  // Up the steps everywhere along them, not only on the path's line: straight
+  // in, square to the facade, from 2.5 m out, at seven points across — the
+  // ground falls away under one end of the step on a sloping seed.
+  let worstAcross = { at: 0, deepest: 0 };
+  for (const across of [-8.3, -6.5, -3.5, 0, 3.5, 6.5, 8.3]) {
+    const start = frame.foot(across, plan.stepFrontZ + 2.5);
+    const target = frame.foot(across, plan.stepBackZ - 1);
+    const climb = walkTowards(start.x, start.z, target.x, target.z);
+    if (climb.deepest > worstAcross.deepest) worstAcross = { at: across, deepest: climb.deepest };
+  }
+  if (worstAcross.deepest > 0.02) {
+    fouls.push(
+      `walking straight up the Library's step ${worstAcross.at} m across its front, her feet went ` +
+        `${worstAcross.deepest.toFixed(3)} m below the stone — a riser past what she can step up (${BUILDING_STEP_UP} m) on this seed's ground`,
+    );
+  }
+  const front = walk(library.doormat.x, library.doormat.z);
+  if (!front.crossed) {
+    fouls.push(
+      `a child walking from the Library's doormat ${fmt([library.doormat.x, library.doormat.z])} at its door stopped ` +
+        `${front.short.toFixed(2)} m short of ${band.what} — something stands between the path and the door`,
+    );
+  }
+  if (front.deepest > 0.02) {
+    fouls.push(
+      `walking up the Library's steps her feet went ${front.deepest.toFixed(3)} m below the stone she stood over — ` +
+        `a riser past what she can step up (${BUILDING_STEP_UP} m) on this seed's ground`,
+    );
+  }
+  if (front.over === 0) fouls.push("the walk to the Library's door never stood over its steps — it measured nothing of them");
+  const behind = frame.foot(0, plan.plinthBackZ - 3);
+  const back = walk(behind.x, behind.z);
+  if (back.crossed) {
+    fouls.push(`CONTROL: a walk from behind the Library ${fmt([behind.x, behind.z])} reached its door through the back wall — the cella's ring is open`);
+  }
+  process.stderr.write(
+    `  aChildWalksUpTheLibraryStepsAndIn: seed ${facts.seed}, doormat to door in ${front.steps} x 5 cm steps ` +
+      `(${front.over} over the stone, feet at worst ${front.deepest.toFixed(3)} m into it), ${front.crossed ? 'in' : 'NOT in'}; ` +
+      `seven climbs across the step, feet at worst ${worstAcross.deepest.toFixed(3)} m into it (${worstAcross.at} m across); ` +
+      `from behind: ${back.crossed ? 'IN (open)' : `stopped ${back.short.toFixed(2)} m short`}\n`,
+  );
+  return fouls;
+};
+
 const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   [
     'every scattered feature actually puts something in the park',
@@ -13571,6 +13698,7 @@ const INVARIANTS: readonly (readonly [string, Invariant])[] = [
   ],
   ['you can see the cat bus she arrives on', nothingPlantedHidesTheArrivingBus],
   ['nothing is planted in the road the cat bus drives', nothingIsPlantedInTheBusRoad],
+  ["a child walks up the Library's steps and in through its door, and nowhere else", aChildWalksUpTheLibraryStepsAndIn],
 ];
 
 /**
