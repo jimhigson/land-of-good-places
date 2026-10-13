@@ -230,6 +230,28 @@ def arch_block(half_w: float, spring_z: float, top_z: float, y0: float, y1: floa
     return verts, faces
 
 
+def band_prism(xs, z_bottom, z_top, y0: float, y1: float):
+    """A solid between two curves over the same x stations, from y0 to y1 —
+    a curved page, a line of text along it. Quads only, so no triangulator
+    has to guess at a shape that is not star-shaped."""
+    n = len(xs)
+    verts = []
+    for y in (y0, y1):
+        verts += [(x, y, z) for x, z in zip(xs, z_bottom)]
+        verts += [(x, y, z) for x, z in zip(xs, z_top)]
+    b0, t0, b1, t1 = 0, n, 2 * n, 3 * n
+    faces = []
+    for i in range(n - 1):
+        j = i + 1
+        faces.append((b0 + i, b0 + j, t0 + j, t0 + i))
+        faces.append((b1 + j, b1 + i, t1 + i, t1 + j))
+        faces.append((b1 + i, b1 + j, b0 + j, b0 + i))
+        faces.append((t0 + i, t0 + j, t1 + j, t1 + i))
+    faces.append((b0, t0, t1, b1))
+    faces.append((b0 + n - 1, b1 + n - 1, t1 + n - 1, t0 + n - 1))
+    return verts, faces
+
+
 def torus(major: float, minor: float, segments: int = 16, sides: int = 6):
     """A ring lying in XY about Z — a glasses rim, once turned to face −Y."""
     profile = [
@@ -413,8 +435,12 @@ class Asset:
             p = self.marks[pivot[0]]
             part.verts = [(v[0] - p.x, v[1] - p.y, v[2] - p.z) for v in part.verts]
             objs[node] = part.emit(coll, location=tuple(p))
-        for node, (lo_key, hi_key, _eyes) in self.faces.items():
+        for node, (lo_key, hi_key, eyes) in self.faces.items():
             face_window_uvs(objs[node], self.marks[lo_key], self.marks[hi_key])
+            # The eye anchors travel with the .blend (never the .glb:
+            # `export_extras` is off) so the review render can paint dots on
+            # them without a second copy of the numbers.
+            objs[node]["face_eyes_uv"] = [c for key in eyes for c in self.face_uv(node, key)]
         return objs
 
     def face_uv(self, node: str, key: str):
@@ -624,6 +650,9 @@ ROOF_BACK_Y = 6.95
 ROOF_SLOPE = (ROOF_APEX - EAVE_TOP) / ROOF_HALF
 PEDIMENT_FRONT_Y = -6.15
 PEDIMENT_FRAME = 0.42
+# The pediment's raking cornice stands this far proud of the roof's slope, so
+# the roof's tile battens end behind it instead of poking up over the gable.
+RAKE_LIFT = 0.14
 TYMPANUM_FRONT_Y = -5.95
 ROOF_OUTLINE = [
     (-ROOF_HALF, CORNICE_TOP), (-ROOF_HALF, EAVE_TOP), (0.0, ROOF_APEX),
@@ -640,10 +669,12 @@ def inner_gable(offset: float, base_z: float):
 
 
 def pediment_frame(y_front: float, y_back: float):
-    """The pediment's stone frame: the roof outline with the tympanum cut out
-    of it, as one closed ring. Outer is the five-point roof outline; inner is
-    the three-point gable :data:`PEDIMENT_FRAME` in from it."""
-    outer = ROOF_OUTLINE
+    """The pediment's stone frame: the roof outline (raised by
+    :data:`RAKE_LIFT` along its rakes) with the tympanum cut out of it, as one
+    closed ring. Inner is the three-point gable :data:`PEDIMENT_FRAME` in from
+    the roof's own slope."""
+    lift = RAKE_LIFT * math.sqrt(1.0 + ROOF_SLOPE ** 2)
+    outer = [(x, z + (lift if z > CORNICE_TOP else 0.0)) for x, z in ROOF_OUTLINE]
     inner = inner_gable(PEDIMENT_FRAME, CORNICE_TOP + PEDIMENT_FRAME)
     verts = []
     for y in (y_front, y_back):
@@ -826,19 +857,47 @@ def build_shell() -> None:
                                   centre=(0.0, tymp[0][1] + 0.6)),
                  matrix=Matrix.Translation((0.0, (TYMPANUM_FRONT_Y + ROOF_FRONT_Y) * 0.5, 0.0)))
 
-    # The carved book: a closed book face-on — cover, a fat spine down its
-    # left edge, a star on the cover and a bookmark ribbon hanging out.
-    bx, bz, bw, bh = 0.10, 9.95, 2.20, 1.50
-    by = TYMPANUM_FRONT_Y - 0.04
-    book.at(*rounded_box(bw, 0.16, bh, 0.08, 2), x=bx, y=by, z=bz)
-    book.at(*rounded_box(0.28, 0.22, bh + 0.08, 0.10, 2), x=bx - bw * 0.5, y=by - 0.02, z=bz)
-    for dz in (-0.45, 0.45):
-        book.at(*rounded_box(0.34, 0.24, 0.10, 0.04, 1), x=bx - bw * 0.5, y=by - 0.03, z=bz + dz)
-    book.add(*extrude_outline(star_outline(0.0, 0.0, 0.42, 0.19), 0.10, centre=(0.0, 0.0)),
-             matrix=Matrix.Translation((bx + 0.12, by - 0.09, bz + 0.05)))
-    ribbon = [(-0.10, 0.0), (0.10, 0.0), (0.10, -0.40), (0.0, -0.30), (-0.10, -0.40)]
-    book.add(*extrude_outline(ribbon, 0.06, centre=(0.0, -0.15)),
-             matrix=Matrix.Translation((bx + 0.55, by - 0.07, bz - bh * 0.5 + 0.06)))
+    # The carved book: an **open** book, the library sign every child knows
+    # (📖) — two pages curving down into the gutter over a cover board, three
+    # lines of "text" on each page, and a ribbon hanging from the spine.
+    #
+    # The brief asked for a *closed* book. Three closed cuts were rendered and
+    # none read as a book from the street: cover-on it was a gold plaque,
+    # fore-edge-on a grille, spine-on a log. Jim's own words were "a pediment
+    # with a book carved in it", and his scale rule puts recognisability
+    # first, so the book is open. Recorded in HANDOFF-library-art.md.
+    half_w, page_h, dip = 2.30, 1.20, 0.22
+    z0 = CORNICE_TOP + PEDIMENT_FRAME + 0.43
+    face_y = TYMPANUM_FRONT_Y
+
+    def page_curves(sx, inset_top, inset_bottom, reach, u0=0.0, u1=1.0, steps=5):
+        """(xs, bottom, top) for one page: u runs from the gutter (0) to the
+        page's outer edge (1); both edges sag ``dip`` into the gutter."""
+        xs, zb, zt = [], [], []
+        for k in range(steps + 1):
+            u = u0 + (u1 - u0) * k / steps
+            sag = dip * (1.0 - u) ** 2
+            xs.append(sx * reach * u)
+            zb.append(z0 - sag + inset_bottom)
+            zt.append(z0 + page_h - sag - inset_top)
+        return xs, zb, zt
+
+    for sx in (-1.0, 1.0):
+        # The cover board, standing 12 cm proud of the pages at the outer edge
+        # and the foot, the deepest layer and buried in the tympanum.
+        book.add(*band_prism(*page_curves(sx, 0.0, -0.12, half_w + 0.12), face_y - 0.06, face_y + 0.05))
+        # The block of pages under the top page, 6 cm lower: the book's depth.
+        book.add(*band_prism(*page_curves(sx, 0.06, -0.06, half_w + 0.04), face_y - 0.11, face_y - 0.03))
+        # The open page itself.
+        book.add(*band_prism(*page_curves(sx, 0.0, 0.0, half_w), face_y - 0.15, face_y - 0.07))
+        for k, (frac, u1) in enumerate(((0.72, 0.86), (0.50, 0.86), (0.28, 0.62))):
+            xs, zb, _ = page_curves(sx, 0.0, 0.0, half_w, 0.14, u1, 3)
+            line_b = [z + page_h * frac - 0.035 for z in zb]
+            line_t = [z + page_h * frac + 0.035 for z in zb]
+            book.add(*band_prism(xs, line_b, line_t, face_y - 0.185, face_y - 0.13))
+    ribbon = [(-0.12, 0.0), (0.12, 0.0), (0.12, -0.42), (0.0, -0.33), (-0.12, -0.42)]
+    book.add(*extrude_outline(ribbon, 0.05, centre=(0.0, -0.17)),
+             matrix=Matrix.Translation((0.0, face_y - 0.17, z0 - dip + 0.30)))
 
     a.mark("doorThreshold", 0.0, DOOR_BACK_Y, PLINTH_TOP)
 
@@ -1150,8 +1209,7 @@ def build_owl() -> None:
         fx = sx * 0.16
         for yaw in (-30.0, 0.0, 30.0):
             dx, dy = math.sin(deg(yaw)) * 0.07, -math.cos(deg(yaw)) * 0.07
-            feet.add(*ellipsoid(0.05, 0.085, 0.045, 1), matrix=place(fx + dx, -0.05 + dy, 0.045, rz=yaw))
-        feet.at(*ellipsoid(0.075, 0.07, 0.045, 1), x=fx, y=0.0, z=0.045)
+            feet.add(*ellipsoid(0.055, 0.10, 0.045, 2), matrix=place(fx + dx, dy, 0.045, rz=yaw))
 
     body_c, body_r = (0.0, 0.0, 0.50), (0.40, 0.36, 0.42)
     body.at(*ellipsoid(*body_r, 3), *body_c)
@@ -1166,7 +1224,7 @@ def build_owl() -> None:
     # Ear tufts, the left one tipped further out — the asymmetric feature.
     head.add(*ellipsoid(0.085, 0.07, 0.17, 2), matrix=place(0.30, 0.0, 1.46, ry=22.0))
     head.add(*ellipsoid(0.085, 0.07, 0.17, 2), matrix=place(-0.30, 0.0, 1.45, ry=-32.0))
-    head.at(*ellipsoid(0.10, 0.08, 0.06, 1), x=0.07, y=0.04, z=1.52)
+    head.at(*ellipsoid(0.10, 0.08, 0.06, 2), x=0.07, y=0.04, z=1.52)
     a.mark("faceLo", head_c[0] - head_r[0], 0.0, head_c[2] - head_r[2])
     a.mark("faceHi", head_c[0] + head_r[0], 0.0, head_c[2] + head_r[2])
 
@@ -1174,7 +1232,7 @@ def build_owl() -> None:
 
     # Glasses: the eyes are painted where the rims are. The eye landmarks ARE
     # the rim centres, so the two cannot be placed apart.
-    rim_r, rim_t, eye_x, eye_z = 0.15, 0.03, 0.19, 1.17
+    rim_r, rim_t, eye_x, eye_z = 0.15, 0.03, 0.19, 1.20
     rim_y = ellipsoid_front_y(head_c, head_r, eye_x, eye_z) - 0.045
     for sx, key in ((1.0, "eyeL"), (-1.0, "eyeR")):
         glasses.add(*torus(rim_r, rim_t, 16, 5),
@@ -1182,17 +1240,21 @@ def build_owl() -> None:
         a.mark(key, sx * eye_x, rim_y, eye_z)
         out_x = sx * (eye_x + rim_r * math.cos(deg(14.0)))
         out_y = rim_y + rim_r * math.sin(deg(14.0))
-        glasses.add(*tapered_sweep([(out_x, out_y, eye_z + 0.02), (sx * 0.43, -0.25, eye_z + 0.04),
-                                    (sx * 0.47, -0.10, eye_z + 0.05)], [0.022, 0.022, 0.022], 6))
+        # The arms run back hugging the head and end inside it, rather than
+        # standing off it like whiskers.
+        glasses.add(*tapered_sweep([(out_x, out_y, eye_z + 0.02), (sx * 0.41, -0.30, eye_z + 0.03),
+                                    (sx * 0.45, -0.17, eye_z + 0.03)], [0.022, 0.022, 0.022], 6))
     in_x = eye_x - rim_r * math.cos(deg(14.0))
     in_y = rim_y - rim_r * math.sin(deg(14.0))
     glasses.add(*tapered_sweep([(-in_x, in_y, eye_z + 0.01), (0.0, in_y - 0.03, eye_z + 0.045),
                                 (in_x, in_y, eye_z + 0.01)], [0.022, 0.024, 0.022], 6))
 
-    wing = ellipsoid(0.11, 0.24, 0.34, 2)
+    wing = ellipsoid(0.11, 0.24, 0.34, 3)
     wing_l.add(*wing, matrix=place(0.40, 0.02, 0.52, ry=-14.0))
-    wing_r.add(*wing, matrix=place(-0.37, -0.14, 0.52, ry=14.0, rz=32.0))
-    held.add(*rounded_box(0.30, 0.07, 0.36, 0.025, 1), matrix=place(-0.15, -0.41, 0.47, ry=10.0, rz=16.0))
+    # Her right wing comes forward round the book and its tip lies over the
+    # book's near edge, so the book is *held* rather than floating in front.
+    wing_r.add(*wing, matrix=place(-0.36, -0.20, 0.50, ry=14.0, rz=35.0))
+    held.add(*rounded_box(0.30, 0.07, 0.36, 0.025, 1), matrix=place(-0.20, -0.38, 0.47, ry=8.0, rz=-16.0))
 
     a.mark("neck", 0.0, -0.02, 0.86)
     a.mark("shoulderL", 0.34, 0.0, 0.80)
@@ -1230,8 +1292,9 @@ def build_dragon() -> None:
     body_c, body_r = (0.0, 0.04, 0.29), (0.34, 0.32, 0.29)
     body.at(*ellipsoid(*body_r, 3), *body_c)
     for sx in (-1.0, 1.0):
-        body.at(*ellipsoid(0.085, 0.11, 0.06, 1), x=sx * 0.17, y=-0.25, z=0.06)
-        body.at(*ellipsoid(0.12, 0.14, 0.09, 1), x=sx * 0.27, y=0.07, z=0.09)
+        body.at(*ellipsoid(0.085, 0.11, 0.055, 2), x=sx * 0.15, y=-0.24, z=0.055)
+        body.at(*ellipsoid(0.15, 0.17, 0.12, 2), x=sx * 0.22, y=0.10, z=0.12)
+        body.at(*ellipsoid(0.08, 0.11, 0.05, 2), x=sx * 0.29, y=-0.04, z=0.05)
     belly.at(*ellipsoid(0.22, 0.10, 0.22, 2), y=-0.23, z=0.29)
 
     head_c, head_r = (0.0, -0.16, 0.62), (0.27, 0.23, 0.22)
@@ -1245,9 +1308,10 @@ def build_dragon() -> None:
         a.mark(key, sx * 0.115, ellipsoid_front_y(head_c, head_r, sx * 0.115, 0.67), 0.67)
 
     for sx in (-1.0, 1.0):
-        horns.add(*tapered_sweep([(sx * 0.12, -0.12, 0.78), (sx * 0.14, -0.07, 0.86),
-                                  (sx * 0.16, 0.0, 0.90)], [0.05, 0.035, 0.02], 8))
-        horns.at(*icosphere(0.022, 1), x=sx * 0.16, y=0.0, z=0.90)
+        # Stubby, round-ended nubs: a baby's horns, not a bull's.
+        horns.add(*tapered_sweep([(sx * 0.12, -0.12, 0.78), (sx * 0.14, -0.08, 0.85),
+                                  (sx * 0.155, -0.03, 0.89)], [0.055, 0.044, 0.032], 8))
+        horns.at(*icosphere(0.032, 2), x=sx * 0.155, y=-0.03, z=0.89)
     for phi in (40.0, 58.0, 76.0):
         n = Vector((0.0, math.sin(deg(phi)), math.cos(deg(phi))))
         p = Vector(body_c) + Vector((0.0, body_r[1] * n.y, body_r[2] * n.z)) * 0.97
@@ -1257,21 +1321,33 @@ def build_dragon() -> None:
     for sx in (-1.0, 1.0):
         m = place(sx * 0.24, 0.24, 0.50, rx=-20.0, rz=sx * 35.0)
         wings.add(*ellipsoid(0.20, 0.035, 0.13, 2), matrix=m @ Matrix.Translation((sx * 0.12, 0.0, 0.0)))
-        for k in range(3):
-            wings.add(*ellipsoid(0.065, 0.03, 0.06, 1),
-                      matrix=m @ Matrix.Translation((sx * (0.03 + 0.09 * k), 0.0, -0.10)))
+        for k in range(2):
+            wings.add(*ellipsoid(0.08, 0.03, 0.065, 2),
+                      matrix=m @ Matrix.Translation((sx * (0.06 + 0.13 * k), 0.0, -0.10)))
         wings.add(*tapered_sweep([(0.0, 0.0, 0.0), (sx * 0.17, 0.0, 0.10), (sx * 0.30, 0.0, 0.07)],
                                  [0.035, 0.03, 0.026], 6), matrix=m)
 
-    path = [(0.10, 0.30, 0.12), (0.32, 0.34, 0.09), (0.52, 0.18, 0.075), (0.58, -0.08, 0.065),
-            (0.50, -0.30, 0.06), (0.32, -0.44, 0.055), (0.14, -0.48, 0.05)]
-    tail.add(*tapered_sweep(path, [0.12, 0.11, 0.095, 0.08, 0.065, 0.05, 0.04], 10))
-    tip = Vector(path[-1])
-    for dx in (-0.045, 0.045):
-        tail.add(*ellipsoid(0.065, 0.055, 0.03, 1), matrix=place(tip.x - 0.06, tip.y + dx, tip.z, rz=-30.0))
+    # The tail is one smooth arc from behind, round its left side (+X) and
+    # across the front to rest by its paw, ending in a heart.
+    path, radii = [], []
+    for i in range(16):
+        t = i / 15.0
+        theta = deg(95.0 - 215.0 * t)
+        r = 0.30 + 0.22 * math.sin(math.pi * t * 0.9)
+        path.append((r * math.cos(theta), 0.04 + r * math.sin(theta), 0.13 - 0.075 * t))
+        radii.append(0.12 - 0.075 * t)
+    tail.add(*tapered_sweep(path, radii, 10))
+    tip, before = Vector(path[-1]), Vector(path[-2])
+    along = (tip - before).normalized()
+    heading = math.degrees(math.atan2(along.y, along.x))
+    side = Vector((-along.y, along.x, 0.0))
+    for k in (-1.0, 1.0):
+        centre = tip + along * 0.05 + side * (k * 0.035)
+        tail.add(*ellipsoid(0.075, 0.045, 0.03, 2),
+                 matrix=place(centre.x, centre.y, centre.z, rz=heading - k * 35.0))
 
     a.mark("neck", 0.0, -0.06, 0.48)
-    a.mark("tailRoot", 0.10, 0.28, 0.12)
+    a.mark("tailRoot", *path[0])
     a.pivots = {"dragon-head": ("neck", "dragon-body"), "dragon-tail": ("tailRoot", "dragon-body")}
     a.faces = {"dragon-head": ("faceLo", "faceHi", ["eyeL", "eyeR"])}
     a.normalise(height=DRAGON_HEIGHT, length=DRAGON_LENGTH)
@@ -1330,34 +1406,50 @@ def build_cat() -> None:
     body.at(*ellipsoid(0.25, 0.19, 0.15, 3), x=0.03, y=0.03, z=0.15)
     body.at(*ellipsoid(0.13, 0.14, 0.11, 2), x=0.15, y=0.05, z=0.15)
     for dx in (-0.06, 0.05):
-        body.at(*ellipsoid(0.05, 0.07, 0.035, 1), x=-0.11 + dx, y=-0.17, z=0.035)
+        body.at(*ellipsoid(0.05, 0.07, 0.035, 2), x=-0.11 + dx, y=-0.17, z=0.035)
 
-    head_c, head_r = (-0.14, -0.09, 0.17), (0.14, 0.12, 0.115)
+    head_c, head_r = (-0.13, -0.09, 0.18), (0.16, 0.135, 0.13)
     head.at(*ellipsoid(*head_r, 3), *head_c)
     for sx in (-1.0, 1.0):
-        head.at(*ellipsoid(0.055, 0.045, 0.045, 1), x=head_c[0] + sx * 0.05, y=-0.19, z=0.125)
+        head.at(*ellipsoid(0.045, 0.038, 0.038, 2), x=head_c[0] + sx * 0.042, y=head_c[1] - head_r[1] + 0.04,
+                z=head_c[2] - 0.05)
     a.mark("faceLo", head_c[0] - head_r[0], 0.0, head_c[2] - head_r[2])
     a.mark("faceHi", head_c[0] + head_r[0], 0.0, head_c[2] + head_r[2])
     for sx, key in ((1.0, "eyeL"), (-1.0, "eyeR")):
-        x = head_c[0] + sx * 0.06
-        a.mark(key, x, ellipsoid_front_y(head_c, head_r, x, 0.185), 0.185)
+        x, z = head_c[0] + sx * 0.065, head_c[2] + 0.015
+        a.mark(key, x, ellipsoid_front_y(head_c, head_r, x, z), z)
 
-    ear = cone(0.06, 0.10, 8)
+    # A flat rounded triangle: a sweep tapering to a soft point, squashed
+    # front-to-back. (A cone with a bead on its tip read as a party hat with a
+    # pompom.)
+    ear = tapered_sweep([(0.0, 0.0, 0.0), (0.0, 0.0, 0.05), (0.0, 0.0, 0.088)],
+                        [0.062, 0.036, 0.008], 8)
     # Each ear leans outward; the right one further — the asymmetric feature.
-    for part, base, tilt, key in ((ear_l, (-0.07, -0.08, 0.245), 18.0, "earBaseL"),
-                                  (ear_r, (-0.21, -0.09, 0.24), -26.0, "earBaseR")):
+    def ear_base(dx):
+        x = head_c[0] + dx
+        top = head_c[2] + head_r[2] * math.sqrt(1.0 - (dx / head_r[0]) ** 2)
+        return (x, head_c[1] + 0.01, top - 0.022)
+
+    for part, base, tilt, key in ((ear_l, ear_base(0.075), 18.0, "earBaseL"),
+                                  (ear_r, ear_base(-0.075), -26.0, "earBaseR")):
         m = Matrix.Translation(base) @ rot(y=tilt) @ scaled(1.0, 0.55, 1.0)
         part.add(*ear, matrix=m)
-        part.add(*icosphere(0.016, 1), matrix=m @ Matrix.Translation((0.0, 0.0, 0.092)))
         a.mark(key, *base)
 
-    path = [(0.24, 0.12, 0.07), (0.30, -0.04, 0.055), (0.22, -0.19, 0.045), (0.05, -0.23, 0.045),
-            (-0.04, -0.215, 0.05)]
-    tail.add(*tapered_sweep(path, [0.05, 0.048, 0.046, 0.043, 0.04], 8))
-    tail.at(*icosphere(0.04, 1), *path[-1])
+    # Wrapped close round the body's foot from behind its right side to the
+    # front, ending by the paws — a smooth arc, not a hose with elbows.
+    path, radii = [], []
+    for i in range(12):
+        t = i / 11.0
+        theta = deg(45.0 - 160.0 * t)
+        r = 0.16 + 0.09 * min(1.0, t * 4.0)
+        path.append((0.03 + r * math.cos(theta), 0.03 + r * math.sin(theta), 0.06 - 0.015 * min(1.0, t * 4.0)))
+        radii.append(0.05 - 0.01 * t)
+    tail.add(*tapered_sweep(path, radii, 8))
+    tail.at(*icosphere(0.04, 2), *path[-1])
 
-    a.mark("neck", -0.08, -0.04, 0.13)
-    a.mark("tailRoot", 0.23, 0.12, 0.08)
+    a.mark("neck", head_c[0] + 0.06, -0.04, 0.13)
+    a.mark("tailRoot", *path[0])
     a.pivots = {
         "cat-head": ("neck", "cat-body"),
         "cat-earL": ("earBaseL", "cat-head"),
