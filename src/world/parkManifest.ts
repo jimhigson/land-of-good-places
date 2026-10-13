@@ -7,6 +7,7 @@ import {
   REPTILE_FOOTPRINT_RADIUS,
   REPTILE_LIPS_REACH,
 } from './reptileHouse/layout';
+import { LIBRARY_BOUNDING_RADIUS, LIBRARY_FOOTPRINT_RADIUS, LIBRARY_STEPS_FRONT_Z } from './library/layout';
 import { parkSeedAsked } from './parkSeedPool';
 import { generationSeed, restartFor } from './parkRestart';
 import { BUILT_SOLID_MARGIN, CASTLE_PLOT_REACH, PARK_SURFACE_SCALE, SPUR_PAVED_REACH } from '../core/constants';
@@ -167,7 +168,20 @@ export interface ManifestEntry {
    *   `facing`, whatever bearing the plot stands on.
    */
   readonly door?:
-    | { readonly reach: number; readonly pavedTo?: number }
+    | {
+        readonly reach: number;
+        readonly pavedTo?: number;
+        /**
+         * The paving between the doormat and `pavedTo` is **lawn she walks
+         * across** to reach the door — the library's forecourt up to the foot of
+         * its steps — rather than ground behind the trigger she is let in
+         * before reaching (the hotel's recess, the default when `pavedTo` stands
+         * short of `reach`). Walked paving is recorded like any route, so the
+         * scatter, the router and the waypoints all know it is path
+         * (`parkLayout.ts`'s `doorApronOf`).
+         */
+        readonly apronWalked?: true;
+      }
     | { readonly local: readonly [number, number]; readonly facing: readonly [number, number] };
 }
 
@@ -311,6 +325,30 @@ const AUTHORED_MANIFEST: readonly ManifestEntry[] = [
     door: { reach: REPTILE_LIPS_REACH + SPUR_PAVED_REACH + BUILT_SOLID_MARGIN, pavedTo: REPTILE_DRAWN_DOOR_ALONG },
     // ALL assets face the camera (Jim, 7 Aug): the mouth, the tongue and the
     // sign all derive from this, exactly as the hotel's door does.
+    cameraFacing: true,
+  },
+  // The Library (#714/#716, Jim, 13 Oct 2026): a classic pillared library —
+  // steps, six fat columns, a pediment with a book carved in it — whose door
+  // leads to a dim one-floor reading room that is its own space
+  // (`world/library/`). The plinth is 18 x 14 m; plots are axis-aligned and
+  // the camera-facing door turns it 45 degrees, so the plot is the circle that
+  // holds the plinth at that turn (`LIBRARY_FOOTPRINT_RADIUS`). The doormat
+  // stands a spur's paved half-width (plus the router's margin) out past the
+  // foot of the steps, and the paving runs on across the forecourt to the
+  // steps and `DOOR_PAVING_OVERLAP` in under the lower tread — lawn she walks,
+  // so `apronWalked`.
+  {
+    id: 'library',
+    footprint: { kind: 'circle', radius: LIBRARY_FOOTPRINT_RADIUS },
+    boundingRadius: LIBRARY_BOUNDING_RADIUS,
+    band: { min: 24, max: 90 },
+    door: {
+      reach: LIBRARY_STEPS_FRONT_Z + SPUR_PAVED_REACH + BUILT_SOLID_MARGIN,
+      pavedTo: LIBRARY_STEPS_FRONT_Z,
+      apronWalked: true,
+    },
+    // ALL assets face the camera (Jim, 7 Aug): the portico, the steps and the
+    // doormat all derive from this one flag, as the hotel's door does.
     cameraFacing: true,
   },
   // Fun-fair stalls: doorways into mini-games, small plots near the paths.

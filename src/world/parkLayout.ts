@@ -505,7 +505,7 @@ export function doorApronOf(entry: PlacedEntry): {
   if ('reach' in door) {
     const back = door.pavedTo === undefined ? 0 : Math.max(0, door.reach - door.pavedTo);
     front = [entry.entranceX - fx * back, entry.entranceZ - fz * back];
-    walkable = back === 0;
+    walkable = back === 0 || door.apronWalked === true;
   } else {
     const [cx, cz] = drawnCentreOf(manifest, entry.x, entry.z);
     front = [cx + door.local[0], cz + door.local[1]];

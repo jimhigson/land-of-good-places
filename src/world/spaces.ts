@@ -54,6 +54,7 @@ import {
   REPTILE_HOUSE_ORIGIN_Z,
   REPTILE_HOUSE_SPACE_RADIUS,
 } from './reptileHouse/layout';
+import { LIBRARY_ORIGIN_X, LIBRARY_ORIGIN_Z, LIBRARY_SPACE_RADIUS } from './library/layout';
 
 /**
  * A place, as a save file names it.
@@ -119,6 +120,14 @@ export const SPACE_REPTILE_HOUSE: SpaceId = 'reptileHouse';
 export const SPACE_REPTILE_FORECOURT: SpaceId = 'reptileHouse.forecourt';
 
 /**
+ * **The Library's reading room** (#716) — one floor, one disjoint space at its
+ * own far origin (`core/constants.ts`'s `LIBRARY_ORIGIN_X`), entered through
+ * the front door of the pillared building the park places. A hotel room in
+ * shape: a flat open-topped plate the door teleports her into.
+ */
+export const SPACE_LIBRARY: SpaceId = 'library';
+
+/**
  * Every reptile-house space's origin, written once — read by {@link spaceAt}
  * here and by `spaceOrigins.ts` for saves, for the same reason
  * {@link HOTEL_ROOM_Z} exists.
@@ -176,6 +185,11 @@ export function spaceAt(x: number, z: number): SpaceId {
     const rx = x - originX;
     const rz = z - originZ;
     if (rx * rx + rz * rz <= REPTILE_HOUSE_SPACE_RADIUS * REPTILE_HOUSE_SPACE_RADIUS) return space;
+  }
+  {
+    const lx = x - LIBRARY_ORIGIN_X;
+    const lz = z - LIBRARY_ORIGIN_Z;
+    if (lx * lx + lz * lz <= LIBRARY_SPACE_RADIUS * LIBRARY_SPACE_RADIUS) return SPACE_LIBRARY;
   }
   return SPACE_GARDEN;
 }

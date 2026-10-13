@@ -15,7 +15,7 @@ import { placedEntry } from './parkLayout';
  * network routes spurs to `entrance`, and scenery scattering avoids
  * `boundingRadius` so nobody plants a tree inside the ferris wheel.
  */
-export type AnchorId = 'building' | 'ballPit' | 'ferrisWheel' | 'dodgems' | 'waterFight' | 'hotel' | 'reptileHouse';
+export type AnchorId = 'building' | 'ballPit' | 'ferrisWheel' | 'dodgems' | 'waterFight' | 'hotel' | 'reptileHouse' | 'library';
 
 /**
  * A plot's shape on the ground.
@@ -137,6 +137,16 @@ function anchorsNow(): readonly AnchorDefinition[] {
       'Jim, 2 Oct 2026: Sunny the snake is the building and her open mouth is ' +
       'the door. Inside is its own space (world/reptileHouse/): exhibits, the ' +
       'Tortoise Ride, the nursery and Scales & Tails.',
+  }),
+    placed('library', {
+    signTitle: 'The Library',
+    signSubtitle: 'shh! stories inside!',
+    glyph: '\u{1F4DA}',
+    accent: PALETTE.markerSky,
+    notes:
+      'Jim, 13 Oct 2026 (#714): a pillared library whose door leads to a dim ' +
+      'one-floor reading room, its own space (world/library/): shelves of ' +
+      'books, the librarian\'s desk, the story rug and a secret shelf.',
   }),
     placed('ballPit', {
     signTitle: 'Ball Pit',

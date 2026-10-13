@@ -6,6 +6,7 @@ import {
   REPTILE_TAIL_BEARING_OFFSET,
   REPTILE_TAIL_REACH,
 } from './reptileHouse/layout';
+import { LIBRARY_PLINTH_HALF_X, LIBRARY_PLINTH_HALF_Z } from './library/layout';
 import { BOUNDARY_WALL_COLLISION_HALF, PARK_BOUNDARY } from './boundary';
 import { distanceToBoothBodies } from '../minigames/stallPlacement';
 import { ENTRANCE_GATE_HALF_WIDTH, ENTRANCE_GATE_X } from './entrance/layout';
@@ -853,6 +854,21 @@ export function distanceToBuiltSolids(x: number, z: number): number {
     const tailX = reptile.x + Math.sin(bearing) * REPTILE_TAIL_REACH;
     const tailZ = reptile.z + Math.cos(bearing) * REPTILE_TAIL_REACH;
     best = Math.min(best, Math.hypot(x - tailX, z - tailZ) - REPTILE_TAIL_BASE_RADIUS);
+  }
+  // The Library (#716): its plinth and steps, turned to face the camera with
+  // the doormat. The plinth is not a collider (she walks up onto it) but it
+  // is a 0.36 m slab a path cannot be drawn through, so the router keeps off
+  // all of it; the door's own apron runs in to the steps on its own
+  // (`doorApronOf`), as the castle's does.
+  const library = PARK_LAYOUT.entries.get('library');
+  if (library) {
+    const yaw = Math.atan2(library.entranceX - library.x, library.entranceZ - library.z);
+    const dx = x - library.x;
+    const dz = z - library.z;
+    const along = Math.abs(dx * Math.sin(yaw) + dz * Math.cos(yaw)) - LIBRARY_PLINTH_HALF_Z;
+    const across = Math.abs(dx * Math.cos(yaw) - dz * Math.sin(yaw)) - LIBRARY_PLINTH_HALF_X;
+    const outside = Math.hypot(Math.max(along, 0), Math.max(across, 0));
+    best = Math.min(best, outside > 0 ? outside : Math.max(along, across));
   }
   const castle = PARK_LAYOUT.entries.get('building');
   if (castle) {
