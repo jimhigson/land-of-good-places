@@ -91,6 +91,7 @@ export const PROCGEN_SHARDS: readonly (readonly string[])[] = [
     'test/store/overlay-pause.test.ts',
     'test/store/save-flags-round-trip.test.ts',
     'test/store/save-migration-ripika.test.ts',
+    'test/library/pageCurl.test.ts',
   ],
 ];
 

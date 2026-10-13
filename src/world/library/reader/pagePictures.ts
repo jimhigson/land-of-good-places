@@ -30,6 +30,7 @@ import { createStoryBook, createStoryDragon } from '../../../art/models/libraryA
 import { hazardTapeTexture } from '../../../core/textures';
 import { createCatBus } from '../../entrance/catBus';
 import { createCart } from '../../railRace/cart';
+import { RIDE_SCALE } from '../../railRace/dimensions';
 import type { BackpackKind, GlassesKind, HairStyle, ShoeKind } from '../../../state';
 import type { PagePicture, PictureActor } from '../books';
 
@@ -206,8 +207,15 @@ function buildActor(actor: PictureActor, look: ReaderLook): AssetHandle {
       return createCatBus();
     case 'statue':
       return createRipikaStatue();
-    case 'cart':
-      return createCart(colour ?? PALETTE.markerPink);
+    case 'cart': {
+      // At the size the race draws it: `RailRace` scales every cart by
+      // `RIDE_SCALE`, so a bare one would be a toy beside the girl riding it.
+      const cart = createCart(colour ?? PALETTE.markerPink);
+      const root = new Group();
+      cart.root.scale.setScalar(RIDE_SCALE);
+      root.add(cart.root);
+      return { root, height: RIDE_SCALE, dispose: () => cart.dispose() };
+    }
     case 'balloon':
       return createBalloon((actor.variant as BalloonKind | undefined) ?? 'dalmatian');
     case 'keychain': {

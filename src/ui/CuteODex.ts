@@ -10,7 +10,11 @@ import {
 } from '../state';
 import { EGG_PRIZES, SHOP_ITEMS, type ShopItem } from '../world/building/shops/catalogue';
 import { isTouchDevice } from '../core/device';
-import { DexPrize, hasSeenDexPrize, markDexPrizeSeen } from './DexPrize';
+import { hexToCss, PALETTE } from '../core/palette';
+import { saveFlags } from '../state/flags';
+import { BOOKS, type LibraryBook } from '../world/library/books';
+import { booksRead, isBookRead } from '../world/library/readBooks';
+import { DexPrize, hasSeenDexPrize, markDexPrizeSeen, type PrizeCopy } from './DexPrize';
 
 /**
  * The Cute-o-dex — the collection book.
@@ -40,6 +44,29 @@ import { DexPrize, hasSeenDexPrize, markDexPrizeSeen } from './DexPrize';
  * grown-up who missed it the first time.
  */
 
+/**
+ * The library's prize (#717): every one of the twelve books read. The Cute-o-dex
+ * prize's celebration with its own words — see `DexPrize`'s `PrizeCopy`.
+ */
+const BOOK_PRIZE_COPY: PrizeCopy = {
+  label: 'You read every book!',
+  title: '📚 YOU READ EVERY BOOK! 📚',
+  note: (name) =>
+    `Dear Mummy or Daddy: <strong>${name}</strong> read every book in the ` +
+    'library. Please award one extra bedtime story. 📖<br>' +
+    '<span class="dexprize-sign">— The Library</span>',
+};
+
+/** The parade of books the library prize marches across the screen. */
+const BOOK_PARADE_ICONS = ['📕', '📗', '📘', '📙'] as const;
+
+/** What the Cute-o-dex needs from the book reader — `Game` hands it over. */
+export interface DexBookReader {
+  /** Opens a book at its title page. */
+  open(bookId: string): boolean;
+  isOpen(): boolean;
+}
+
 /** Section order, and what each one is called in the book. */
 const SECTIONS: readonly { category: CuteCategory; title: string; glyph: string }[] = [
   { category: 'toy', title: 'Toys', glyph: '🧸' },
@@ -58,6 +85,9 @@ const SECTIONS: readonly { category: CuteCategory; title: string; glyph: string 
   // Free finds from the meadow, not sold in any shop — rendered from
   // `FLOWER_COLOURS` rather than the shop catalogue, see `renderFlowerSection`.
   { category: 'flower', title: 'Flowers', glyph: '🌷' },
+  // A bookmark for every library book read to the end (#717) — rendered from
+  // `world/library/books.ts`'s `BOOKS`, see `renderBookSection`.
+  { category: 'book', title: 'Books', glyph: '📚' },
   // Things you *do* rather than things you own, so they come from `SECRETS`
   // rather than the shop catalogue — see `renderSecretSection`.
   { category: 'secret', title: 'Secrets', glyph: '🌟' },
@@ -83,13 +113,19 @@ export class CuteODex {
   private readonly countEl: HTMLElement;
   private readonly barFill: HTMLElement;
   private readonly prize: DexPrize;
+  /** The every-book-read celebration (#717) — the same prize, its own words. */
+  private readonly bookPrize: DexPrize;
   private readonly unsubscribe: () => void;
+  /** The library's reader, once `Game` has built it. */
+  private reader: DexBookReader | null = null;
 
   private open = false;
   /** True when we are the reason the park is paused — see `Shopping.setPaused`. */
   private pausedByUs = false;
   /** Guards the automatic celebration so it only ever fires once per browser. */
   private prizeAutoShown = hasSeenDexPrize();
+  /** The same guard for the book prize. */
+  private bookPrizeAutoShown = saveFlags.bookPrizeSeen;
 
   constructor(container: HTMLElement) {
     // --- the HUD button ---------------------------------------------------
@@ -185,13 +221,23 @@ export class CuteODex {
     // The full-screen celebration. A separate class (its own confetti,
     // fireworks and parade), but triggered from here — see the class doc.
     this.prize = new DexPrize(container);
+    this.bookPrize = new DexPrize(container, BOOK_PRIZE_COPY);
 
     window.addEventListener('keydown', this.onKeyDown);
     this.unsubscribe = gameStore.subscribe((state) => this.render(state));
   }
 
   get isOpen(): boolean {
-    return this.open || this.prize.isOpen;
+    return this.open || this.prize.isOpen || this.bookPrize.isOpen;
+  }
+
+  /**
+   * Hands over the library's reader, so a read bookmark can open its book — and
+   * so the book prize waits for the book to be closed rather than bursting out
+   * over its last page.
+   */
+  setBookReader(reader: DexBookReader): void {
+    this.reader = reader;
   }
 
   toggle(): void {
@@ -222,6 +268,10 @@ export class CuteODex {
       this.prize.close();
       return;
     }
+    if (this.bookPrize.isOpen) {
+      this.bookPrize.close();
+      return;
+    }
     if (!this.open) return;
     this.open = false;
     this.root.dataset.open = 'false';
@@ -236,6 +286,7 @@ export class CuteODex {
     window.removeEventListener('keydown', this.onKeyDown);
     this.unsubscribe();
     this.prize.dispose();
+    this.bookPrize.dispose();
     this.root.remove();
     this.button.remove();
   }
@@ -263,11 +314,13 @@ export class CuteODex {
       (colour) => state.collection[`flower.${colour}`]?.discovered,
     ).length;
     const secretFound = SECRETS.filter((secret) => state.collection[secret.id]?.discovered).length;
+    const bookFound = booksRead(state);
     const found =
       CATALOGUE.filter((item) => state.collection[item.id]?.discovered).length +
       flowerFound +
-      secretFound;
-    const total = CATALOGUE.length + FLOWER_COLOURS.length + SECRETS.length;
+      secretFound +
+      bookFound;
+    const total = CATALOGUE.length + FLOWER_COLOURS.length + SECRETS.length + BOOKS.length;
     const complete = found === total;
     this.button.innerHTML = `<span class="emoji">📖</span><span>${found}/${total}</span>`;
     this.button.dataset.active = this.open ? 'true' : 'false';
@@ -280,6 +333,16 @@ export class CuteODex {
       this.prizeAutoShown = true;
       markDexPrizeSeen();
       this.prize.show(this.paradeItems(state), state.player.name);
+    }
+
+    // Every library book read: the library's own celebration, once, the same
+    // way. Never over an open book — the last page is still being looked at —
+    // so it waits; closing the book unpauses the park, which notifies, which
+    // brings us back here with the reader shut.
+    if (bookFound === BOOKS.length && !this.bookPrizeAutoShown && !this.reader?.isOpen()) {
+      this.bookPrizeAutoShown = true;
+      saveFlags.markBookPrizeSeen();
+      this.bookPrize.show(bookParade(), state.player.name);
     }
 
     if (!this.open) return;
@@ -298,6 +361,10 @@ export class CuteODex {
       }
       if (section.category === 'secret') {
         this.pages.append(this.renderSecretSection(section.title, section.glyph, state));
+        continue;
+      }
+      if (section.category === 'book') {
+        this.pages.append(this.renderBookSection(section.title, section.glyph, state));
         continue;
       }
       const items = CATALOGUE.filter((item) => item.category === section.category);
@@ -429,6 +496,77 @@ export class CuteODex {
 
     section.append(heading, grid);
     return section;
+  }
+
+  /**
+   * The library's bookmarks (#717): one per book, read ones in the book's own
+   * cover colour with its title, unread ones as a crushed-out silhouette over
+   * `???` — the same promise every other section makes. A read bookmark is a
+   * button that opens its book again; the book is closed over to the reader.
+   * When all twelve are read the heading grows a ⭐ that replays the library's
+   * celebration, the way the book's own ⭐ replays the dex's.
+   */
+  private renderBookSection(title: string, glyph: string, state: GameState): HTMLElement {
+    const section = document.createElement('section');
+    section.className = 'dex-section';
+
+    const heading = document.createElement('h3');
+    heading.className = 'dex-heading';
+    const read = booksRead(state);
+    heading.innerHTML =
+      `<span class="emoji">${glyph}</span><span>${escapeHtml(title)}</span>` +
+      `<span class="dex-tally">${read}/${BOOKS.length}</span>`;
+    if (read === BOOKS.length) {
+      const again = document.createElement('button');
+      again.type = 'button';
+      again.className = 'dex-star';
+      again.setAttribute('aria-label', 'Show the every-book celebration again');
+      again.textContent = '⭐';
+      again.addEventListener('click', () => {
+        again.blur();
+        this.bookPrize.show(bookParade(), gameStore.get().player.name);
+      });
+      heading.append(again);
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'dex-grid';
+    for (const book of BOOKS) grid.append(this.renderBookmark(book, state));
+
+    section.append(heading, grid);
+    return section;
+  }
+
+  private renderBookmark(book: LibraryBook, state: GameState): HTMLElement {
+    const colour = hexToCss(PALETTE[book.cover]);
+    if (!isBookRead(state, book.id)) {
+      const unknown = document.createElement('div');
+      unknown.className = 'dex-card';
+      unknown.dataset.owned = 'false';
+      unknown.setAttribute('aria-label', 'Not read yet');
+      unknown.innerHTML =
+        `<span class="dex-bookmark dex-icon--hidden" style="--book-colour: ${colour}"></span>` +
+        '<span class="dex-name">???</span>';
+      return unknown;
+    }
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'dex-card';
+    card.dataset.owned = 'true';
+    card.dataset.book = book.id;
+    card.setAttribute('aria-label', `${book.title} — read it again`);
+    card.innerHTML =
+      `<span class="dex-bookmark" style="--book-colour: ${colour}"></span>` +
+      `<span class="dex-name">${escapeHtml(book.title)}</span>` +
+      '<span class="dex-state">Read it again!</span>';
+    card.addEventListener('click', () => {
+      card.blur();
+      // Close first: the book pauses the park itself, and must not open on
+      // top of the Cute-o-dex's own pause.
+      this.close();
+      this.reader?.open(book.id);
+    });
+    return card;
   }
 
   private renderSecretCard(secret: Secret, state: GameState): HTMLElement {
@@ -564,6 +702,14 @@ export class CuteODex {
 
     return card;
   }
+}
+
+/** Every library book as a parade item, in shelf order. */
+function bookParade(): { icon: string; displayName: string }[] {
+  return BOOKS.map((book, index) => ({
+    icon: BOOK_PARADE_ICONS[index % BOOK_PARADE_ICONS.length] ?? '📖',
+    displayName: book.title,
+  }));
 }
 
 function escapeHtml(text: string): string {

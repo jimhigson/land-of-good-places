@@ -55,6 +55,8 @@ import { SPACE_GARDEN } from './world/spaces';
 import { localToWorld } from './world/spaceOrigins';
 import { OverlayPause } from './core/overlayPause';
 import { attractionOwnsTheScreen } from './core/attraction';
+import { BookReader } from './world/library/reader/BookReader';
+import { markBookRead } from './world/library/readBooks';
 
 /**
  * Where a brand-new player starts: **the park edge, at the gate, where the cat
@@ -152,6 +154,8 @@ export class Game {
   readonly wornKeychain: WornKeychain;
   readonly heldBalloons: HeldBalloons;
   readonly cuteODex: CuteODex;
+  /** The library's picture-book reader (#717) — a mode over the paused park. */
+  readonly bookReader: BookReader;
   readonly whatsNew: WhatsNew;
   readonly parkMap: ParkMap;
   readonly saveSystem: SaveSystem;
@@ -568,6 +572,20 @@ export class Game {
     // The collection book. Mounts its own pill into the HUD's top row and owns
     // the C key, so neither `Hud` nor the input bindings need to know about it.
     this.cuteODex = new CuteODex(uiRoot);
+    // The library's book reader (#717): a 3D book drawn over the paused park,
+    // its page and close buttons mounted with the rest of the HUD. A book read
+    // to its last page is filed in the Cute-o-dex as a bookmark, and a read
+    // bookmark opens its book again — the dex closes itself first, so the
+    // reader is never opened on top of another pause.
+    this.bookReader = new BookReader({
+      renderer: this.engine.renderer,
+      container: uiRoot,
+      onFinished: (book) => markBookRead(book),
+    });
+    this.cuteODex.setBookReader({
+      open: (bookId) => this.bookReader.openBook(bookId),
+      isOpen: () => this.bookReader.isOpen,
+    });
     // "What's new": checks `whatsnew.json` against localStorage and shows
     // itself, synchronously, if there is anything the player has not seen —
     // see `ui/WhatsNew.ts`. Built here so the check happens before the first
@@ -589,7 +607,7 @@ export class Game {
       // and would have been written out longhand a second time in `tick` for
       // #404, which is how "the map refuses but its pill is still there" gets
       // to be a thing.
-      blocked: () => this.attractionHasHer(),
+      blocked: () => this.attractionHasHer() || this.bookReader.isOpen,
       // Issue #309: a map tap that lands on an attraction (a ride, a stall, the
       // hotel lobby, a garden cart…) walks her to its stand point and uses it
       // on arrival, instead of the old flat refusal a solid collider used to
@@ -1149,6 +1167,7 @@ export class Game {
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
       this.cuteODex.isOpen ||
+      this.bookReader.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
       this.player.riding
@@ -1230,6 +1249,7 @@ export class Game {
       this.shopping.uiOpen ||
       this.world.facePaintStall.uiOpen ||
       this.cuteODex.isOpen ||
+      this.bookReader.isOpen ||
       this.whatsNew.isOpen ||
       this.miniGames.frozen ||
       this.parkMap.isOpen ||
@@ -1590,6 +1610,7 @@ export class Game {
     this.transitions.dispose();
     this.world.dispose();
     this.player.dispose();
+    this.bookReader.dispose();
     this.cuteODex.dispose();
     this.whatsNew.dispose();
     this.parkMap.dispose();
@@ -1613,7 +1634,9 @@ export class Game {
     // grip on the character rather than announced by each ride, so a ride
     // written next year cannot forget to give the button back — see
     // `core/attraction.ts`. The setter short-circuits when nothing changed.
-    this.hud.setMenuAvailable(!this.attractionHasHer());
+    // The book reader is not an attraction, but it owns the screen the same
+    // way: while a book is open, the menu (and the map pill in it) goes too.
+    this.hud.setMenuAvailable(!this.attractionHasHer() && !this.bookReader.isOpen);
     // Re-derived every frame, like the shop's and the face-paint stall's.
     this.syncLookPaused();
 
@@ -1642,6 +1665,12 @@ export class Game {
       // The book has the screen: Escape and B close it, and nothing else.
       if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
         this.cuteODex.close();
+      }
+    } else if (this.bookReader.isOpen) {
+      // A library book has the screen, the same way: Escape and B close it,
+      // and never pause the park underneath (it already did that itself).
+      if (this.input.justPressed('menu') || this.input.justPressed('cancel')) {
+        this.bookReader.close();
       }
     } else if (this.parkMap.isOpen) {
       // The map has the screen: Escape and B close it, same as every other
@@ -1673,6 +1702,8 @@ export class Game {
     // Mini-games run on the loop's real delta, not the frame context's: the
     // context's is about to be zeroed by the very freeze they ask for.
     this.miniGames.update(tick.dt);
+    // So does the book reader: the park is paused under it, its pages are not.
+    this.bookReader.update(tick.dt);
 
     const paused = gameStore.get().paused || this.miniGames.frozen;
     this.world.dayNight.setPaused(paused);
@@ -2006,6 +2037,9 @@ export class Game {
       }
     }
     this.miniGames.render(renderer);
+    // A library book, open over everything else — its own scene and camera,
+    // on a cleared depth buffer, in front of its own dim vignette.
+    this.bookReader.render(renderer);
   }
 }
 

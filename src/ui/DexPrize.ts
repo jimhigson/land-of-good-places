@@ -29,6 +29,29 @@ export function markDexPrizeSeen(): void {
   saveFlags.markDexPrizeSeen();
 }
 
+/**
+ * The words on a prize card. The Cute-o-dex's own is {@link DEX_PRIZE_COPY};
+ * the library's all-twelve-books prize (#717) is the same celebration with its
+ * own words — one class, so the two can never drift into two looks.
+ */
+export interface PrizeCopy {
+  /** The dialog's accessible name. */
+  readonly label: string;
+  readonly title: string;
+  /** The note to the grown-up, as HTML. `name` arrives already escaped. */
+  readonly note: (name: string) => string;
+}
+
+/** The Cute-o-dex's 100% celebration — the original words, unchanged. */
+export const DEX_PRIZE_COPY: PrizeCopy = {
+  label: 'You found every cute thing!',
+  title: '⭐ YOU FOUND EVERY CUTE THING! ⭐',
+  note: (name) =>
+    `Dear Mummy or Daddy: <strong>${name}</strong> completed the whole ` +
+    'Cute-o-dex. Please award real-life sweeties immediately. 🍬<br>' +
+    '<span class="dexprize-sign">— Land of Good Places management</span>',
+};
+
 /** One cutie's worth of parade — just enough to draw its icon and say its name. */
 export interface PrizeParadeItem {
   readonly icon: string;
@@ -56,18 +79,20 @@ export class DexPrize {
   private readonly paradeTrack: HTMLElement;
   private readonly confettiPieces: HTMLElement[] = [];
   private readonly fireworkPieces: HTMLElement[] = [];
+  private readonly copy: PrizeCopy;
 
   private open = false;
   /** True when we are the reason the park is paused — see `CuteODex.pausedByUs`. */
   private pausedByUs = false;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, copy: PrizeCopy = DEX_PRIZE_COPY) {
+    this.copy = copy;
     this.root = document.createElement('div');
     this.root.className = 'dexprize';
     this.root.dataset.open = 'false';
     this.root.setAttribute('role', 'dialog');
     this.root.setAttribute('aria-modal', 'true');
-    this.root.setAttribute('aria-label', 'You found every cute thing!');
+    this.root.setAttribute('aria-label', copy.label);
 
     const confetti = document.createElement('div');
     confetti.className = 'dexprize-confetti';
@@ -101,7 +126,7 @@ export class DexPrize {
 
     this.titleEl = document.createElement('h2');
     this.titleEl.className = 'dexprize-title';
-    this.titleEl.textContent = '⭐ YOU FOUND EVERY CUTE THING! ⭐';
+    this.titleEl.textContent = copy.title;
 
     this.noteEl = document.createElement('p');
     this.noteEl.className = 'dexprize-note';
@@ -131,10 +156,7 @@ export class DexPrize {
    * way the parade and the name are refreshed from what is true right now.
    */
   show(items: readonly PrizeParadeItem[], playerName: string): void {
-    this.noteEl.innerHTML =
-      `Dear Mummy or Daddy: <strong>${escapeHtml(playerName)}</strong> completed the whole ` +
-      'Cute-o-dex. Please award real-life sweeties immediately. 🍬<br>' +
-      '<span class="dexprize-sign">— Land of Good Places management</span>';
+    this.noteEl.innerHTML = this.copy.note(escapeHtml(playerName));
 
     this.buildParade(items);
     this.restartEffects();
