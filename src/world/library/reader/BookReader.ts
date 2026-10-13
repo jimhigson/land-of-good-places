@@ -136,6 +136,13 @@ export class BookReader {
   /** The reader's own scene and camera, drawn over the park by {@link render}. */
   readonly scene = new Scene();
   readonly camera = new PerspectiveCamera(READER_FOV, 1, 0.05, 30);
+  /**
+   * The dim vignette, in a scene of its own drawn first. It is transparent, and
+   * three draws every transparent thing *after* every opaque one within a
+   * scene — so in the book's own scene it would be painted over the book.
+   */
+  private readonly backdrop = new Scene();
+  private readonly vignette: Mesh;
 
   private readonly onFinished: (book: LibraryBook) => void;
   private readonly artist: PageArtist;
@@ -178,8 +185,8 @@ export class BookReader {
     this.canvas = options.renderer.domElement;
 
     this.scene.name = 'library.reader';
-    this.scene.add(this.camera);
-    this.camera.add(this.buildVignette());
+    this.vignette = this.buildVignette();
+    this.backdrop.add(this.vignette);
     this.scene.add(this.tilt);
     this.tilt.rotation.x = -READER_TILT;
     this.tilt.add(this.bookRoot);
@@ -389,6 +396,7 @@ export class BookReader {
   render(renderer: WebGLRenderer): void {
     if (!this.open) return;
     renderer.clearDepth();
+    renderer.render(this.backdrop, this.camera);
     renderer.render(this.scene, this.camera);
   }
 
@@ -452,10 +460,7 @@ export class BookReader {
     });
     const mesh = new Mesh(geometry, material);
     mesh.name = 'reader.vignette';
-    mesh.renderOrder = -10;
     mesh.frustumCulled = false;
-    // One metre in front of the camera; `layout` stretches it to the frustum.
-    mesh.position.set(0, 0, -1);
     return mesh;
   }
 
@@ -575,14 +580,18 @@ export class BookReader {
     const distance = (BOOK_HEIGHT * height) / (2 * bookPx * tanHalf);
     this.camera.position.set(0, 0, distance);
     this.camera.lookAt(0, 0, 0);
-    this.camera.near = Math.max(0.01, distance * 0.2);
+    // Never past a metre: the vignette hangs one metre in front of the lens.
+    this.camera.near = Math.min(0.5, Math.max(0.01, distance * 0.2));
     this.camera.far = distance * 4;
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld(true);
 
-    // The vignette, one metre out, stretched to the frustum with room to spare.
-    const vignette = this.camera.children[0];
-    if (vignette) vignette.scale.set(tanHalf * this.camera.aspect * 1.2, tanHalf * 1.2, 1);
+    // The vignette: one metre in front of the lens, square on to it, and
+    // stretched past the edges of the frustum with room to spare.
+    this.vignette.position.set(0, 0, distance - 1);
+    this.vignette.quaternion.copy(this.camera.quaternion);
+    this.vignette.scale.set(tanHalf * this.camera.aspect * 1.2, tanHalf * 1.2, 1);
+    this.vignette.updateMatrixWorld(true);
 
     this.scene.updateMatrixWorld(true);
     this.placeButton(this.prevButton, -1);
