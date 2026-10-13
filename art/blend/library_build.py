@@ -298,7 +298,8 @@ def tapered_sweep(points, radii, sides: int = 8):
     return verts, faces
 
 
-def lying_book(width: float, depth: float, thick: float, board: float = 0.03):
+def lying_book(width: float, depth: float, thick: float, board: float = 0.03,
+               round_spine: bool = True):
     """A closed book lying flat: two cover boards and a spine (the cover, one
     colour) and the page block between them (cream, its own node).
 
@@ -311,14 +312,18 @@ def lying_book(width: float, depth: float, thick: float, board: float = 0.03):
     """
     cover = Part("_cover")
     pages = Part("_pages")
-    cover.at(*rounded_box(width, depth, board, 0.012, 1), z=board * 0.5)
-    cover.at(*rounded_box(width, depth, board, 0.012, 1), z=thick - board * 0.5)
+    # Plain boxes for the boards and the page block: 3 cm of board edge seen
+    # from the iso camera does not show a bevel, and two dozen of these books
+    # are in the nest — a bevel there was 40 KB of shipped file.
+    cover.at(*box(width, depth, board), z=board * 0.5)
+    cover.at(*box(width, depth, board), z=thick - board * 0.5)
     spine_d = 0.05
-    cover.at(*rounded_box(width - 0.01, spine_d, thick - 0.004, 0.018, 1),
-             y=-depth * 0.5 - 0.01 + spine_d * 0.5, z=thick * 0.5)
+    spine = (rounded_box(width - 0.01, spine_d, thick - 0.004, 0.018, 1) if round_spine
+             else box(width - 0.01, spine_d, thick - 0.004))
+    cover.at(*spine, y=-depth * 0.5 - 0.01 + spine_d * 0.5, z=thick * 0.5)
     page_y0 = -depth * 0.5 + spine_d - 0.02
     page_y1 = depth * 0.5 - 0.018
-    pages.at(*rounded_box(width - 0.036, page_y1 - page_y0, thick - 2.0 * board + 0.004, 0.006, 1),
+    pages.at(*box(width - 0.036, page_y1 - page_y0, thick - 2.0 * board + 0.004),
              y=(page_y0 + page_y1) * 0.5, z=thick * 0.5)
     return cover, pages
 
@@ -764,20 +769,20 @@ def build_shell() -> None:
         door.at(*icosphere(0.09, 1), x=sx * 0.24, y=DOOR_BACK_Y - 0.21, z=PLINTH_TOP + 1.55)
 
     # --- columns -------------------------------------------------------------
+    # One turned profile per column, foot to capital: a round plinth, a fat
+    # torus, a shaft swelling to exactly COLUMN_DIAMETER a third of the way up
+    # (entasis), a neck ring and a cushion capital that runs up into the
+    # square abacus. Round at the foot, so its collider can be a disc.
     base_h = 0.14
-    shaft = [
-        (0.0, PLINTH_TOP + base_h - 0.02), (0.70, PLINTH_TOP + base_h - 0.02),
-        (0.725, 0.58), (0.69, 0.64), (0.615, 0.68),
-        (0.588, 0.74), (0.600, 2.60), (0.592, 4.40), (0.565, 5.70), (0.545, 6.16),
-        (0.585, 6.22), (0.585, 6.30), (0.55, 6.34),
-        (0.62, 6.48), (0.71, 6.62), (0.74, 6.74), (0.0, 6.74),
+    profile = [
+        (0.0, PLINTH_TOP), (COLUMN_BASE_RADIUS, PLINTH_TOP),
+        (COLUMN_BASE_RADIUS, PLINTH_TOP + base_h - 0.04), (COLUMN_BASE_RADIUS - 0.04, PLINTH_TOP + base_h),
+        (0.725, 0.58), (0.60, 0.70),
+        (COLUMN_DIAMETER * 0.5, 2.60), (0.545, 6.16), (0.59, 6.25),
+        (0.70, 6.58), (0.74, 6.74), (0.0, 6.74),
     ]
     for x in COLUMN_XS:
-        columns.at(*revolve([(0.0, PLINTH_TOP), (COLUMN_BASE_RADIUS, PLINTH_TOP),
-                             (COLUMN_BASE_RADIUS, PLINTH_TOP + base_h - 0.04),
-                             (COLUMN_BASE_RADIUS - 0.04, PLINTH_TOP + base_h),
-                             (0.0, PLINTH_TOP + base_h)], 16), x=x, y=COLUMN_Y)
-        columns.at(*revolve(shaft, 16), x=x, y=COLUMN_Y)
+        columns.at(*revolve(profile, 16), x=x, y=COLUMN_Y)
         columns.at(*rounded_box(ABACUS, ABACUS, 0.30, 0.05, 1), x=x, y=COLUMN_Y,
                    z=COLUMN_TOP - 0.15)
 
@@ -789,8 +794,8 @@ def build_shell() -> None:
     entablature.at(*flat_top_box(half * 2.0, y1 - y0, z1 - z0, 0.06, 1),
                    y=(y0 + y1) * 0.5, z=(z0 + z1) * 0.5)
     # A row of chunky dentils under the cornice, across the front only.
-    for i in range(21):
-        x = -7.8 + i * 0.78
+    for i in range(13):
+        x = -7.8 + i * 1.30
         entablature.at(*box(0.24, 0.14, 0.17), x=x, y=FRIEZE[3] - 0.05, z=CORNICE[0] - 0.075)
 
     # --- roof ---------------------------------------------------------------
@@ -1172,7 +1177,7 @@ def build_owl() -> None:
     rim_r, rim_t, eye_x, eye_z = 0.15, 0.03, 0.19, 1.17
     rim_y = ellipsoid_front_y(head_c, head_r, eye_x, eye_z) - 0.045
     for sx, key in ((1.0, "eyeL"), (-1.0, "eyeR")):
-        glasses.add(*torus(rim_r, rim_t, 18, 6),
+        glasses.add(*torus(rim_r, rim_t, 16, 5),
                     matrix=place(sx * eye_x, rim_y, eye_z, rz=sx * 14.0) @ rot(x=90.0))
         a.mark(key, sx * eye_x, rim_y, eye_z)
         out_x = sx * (eye_x + rim_r * math.cos(deg(14.0)))
@@ -1277,14 +1282,14 @@ def nest_ring(radius: float):
     w, d, t) — one place the ring is described, used to build it and to fit
     it to its diameter."""
     books = []
-    for layer, (count, t, z, spin, r_off) in enumerate(((9, 0.10, 0.0, 0.0, 0.0),
-                                                         (9, 0.09, 0.10, 20.0, -0.03))):
+    for layer, (count, t, z, spin, r_off) in enumerate(((8, 0.10, 0.0, 0.0, 0.0),
+                                                         (7, 0.09, 0.10, 22.5, -0.03))):
         for k in range(count):
             theta = spin + k * 360.0 / count
             yaw = theta + 90.0 + (6.0 if (k + layer) % 2 else -6.0)
             r = radius + r_off
             m = place(r * math.cos(deg(theta)), r * math.sin(deg(theta)), z, rz=yaw)
-            books.append((layer, k, m, 0.40, 0.28, t))
+            books.append((layer, k, m, 0.44, 0.30, t))
     return books
 
 
@@ -1299,7 +1304,8 @@ def build_nest() -> None:
     pad.add(*revolve_lobed([(0.0, 0.0), (0.56, 0.0), (0.60, 0.04), (0.58, 0.10),
                             (0.48, 0.135), (0.0, 0.145)], 28, 7, 0.06))
     for i, (_layer, _k, m, w, d, t) in enumerate(nest_ring(0.64)):
-        cover_part, page_part = lying_book(w, d, t)
+        # Square spines here: fifteen books, seen from above, in a ring.
+        cover_part, page_part = lying_book(w, d, t, round_spine=False)
         covers[i % 3].add(cover_part.verts, cover_part.faces, matrix=m)
         pages.add(page_part.verts, page_part.faces, matrix=m)
     a.normalise(span=NEST_DIAMETER)
