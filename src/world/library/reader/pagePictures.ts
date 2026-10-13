@@ -241,7 +241,7 @@ function buildActor(actor: PictureActor, look: ReaderLook): AssetHandle {
 const DEG = Math.PI / 180;
 
 /** Where the camera looks from, relative to the picture's centre: in front, a little above. */
-const VIEW_DIRECTION = new Vector3(0, 0.26, 1).normalize();
+const VIEW_DIRECTION = new Vector3(0, 0.18, 1).normalize();
 /** Vertical field of view of the picture camera, degrees — long-ish, so a toy is not distorted. */
 const PICTURE_FOV = 26;
 /** Breathing room round the cast: 1 would touch the picture's edges. */
@@ -253,7 +253,7 @@ const FRAME_MARGIN = 1.16;
  * is moved to the middle of them, and the camera backs off until the widest
  * and tallest of them are inside the frame with {@link FRAME_MARGIN} to spare.
  */
-function frameCast(camera: PerspectiveCamera, cast: readonly Object3D[]): void {
+function frameCast(camera: PerspectiveCamera, cast: readonly Object3D[]): { target: Vector3; distance: number } {
   const points: Vector3[] = [];
   for (const root of cast) {
     root.updateMatrixWorld(true);
@@ -262,7 +262,7 @@ function frameCast(camera: PerspectiveCamera, cast: readonly Object3D[]): void {
   if (points.length === 0) {
     camera.position.set(0, 1, 6);
     camera.lookAt(0, 1, 0);
-    return;
+    return { target: new Vector3(0, 1, 0), distance: 6 };
   }
   const forward = VIEW_DIRECTION.clone();
   const right = new Vector3(0, 1, 0).cross(forward).normalize();
@@ -308,6 +308,7 @@ function frameCast(camera: PerspectiveCamera, cast: readonly Object3D[]): void {
   camera.far = distance * 6 + 40;
   camera.updateProjectionMatrix();
   camera.lookAt(target);
+  return { target, distance };
 }
 
 /** The light rig: the park's three (hemisphere, warm key, cool fill) plus a soft rim from behind. */
@@ -379,17 +380,22 @@ export function renderPicture(renderer: WebGLRenderer, picture: PagePicture, loo
   }
   for (const handle of handles) (handle as Partial<KidHandle>).resetHair?.();
 
-  // The hill under their feet, a soft dome in the ground colour whose top is
-  // the floor. Not part of the framing: it is scenery, and it runs off the
-  // edges of the picture the way a hill in a picture book does.
-  if (picture.ground) {
-    const hill = blob(7, toonMaterial(PALETTE[picture.ground]), [1, 0.1, 0.62], 48);
-    hill.position.set(0, -0.7, -1.2);
-    scene.add(hill);
-  }
-
   const camera = new PerspectiveCamera(PICTURE_FOV, PICTURE_WIDTH / PICTURE_HEIGHT, 0.05, 100);
-  frameCast(camera, cast);
+  const framed = frameCast(camera, cast);
+
+  // The hill under their feet: a wide, gentle dome in the ground colour whose
+  // top is the floor. Not part of the framing — it is scenery — and sized from
+  // it, so it always runs out under the camera and off both sides of the
+  // picture, and only its far edge shows, as the brow of a hill.
+  if (picture.ground) {
+    const radius = Math.max(6, framed.distance * 1.1);
+    const rise = 0.9;
+    const hill = blob(radius, toonMaterial(PALETTE[picture.ground]), [1, rise / radius, 1], 64);
+    hill.position.set(framed.target.x, -rise, 0);
+    scene.add(hill);
+    camera.far = Math.max(camera.far, framed.distance + radius * 2);
+    camera.updateProjectionMatrix();
+  }
 
   const target = new WebGLRenderTarget(PICTURE_WIDTH, PICTURE_HEIGHT, { samples: 4 });
   const previousTarget = renderer.getRenderTarget();
