@@ -132,6 +132,8 @@ export interface SavedFlags {
   readonly whatsNewSeenId?: number;
   /** The Land Hotel's reception gave her the key to floor 50 (issue #236). */
   readonly hotelKey?: boolean;
+  /** The every-library-book-read celebration has fired (#717) — `dexPrizeSeen`'s twin. */
+  readonly bookPrizeSeen?: boolean;
 }
 
 /**
@@ -629,6 +631,7 @@ function readFlags(value: unknown): SavedFlags {
   put(flags, 'arrivedByBus', readBoolean(value['arrivedByBus']));
   put(flags, 'dexPrizeSeen', readBoolean(value['dexPrizeSeen']));
   put(flags, 'hotelKey', readBoolean(value['hotelKey']));
+  put(flags, 'bookPrizeSeen', readBoolean(value['bookPrizeSeen']));
   put(flags, 'whatsNewSeenId', readNumber(value['whatsNewSeenId']));
   return flags;
 }
