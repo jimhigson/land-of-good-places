@@ -115,6 +115,7 @@ for (const command of commands) {
       ...process.env,
       CHECK_WALKING_URL: BASE,
       CHECK_DEEP_LINKS_URL: BASE,
+      CHECK_BOOK_READER_URL: BASE,
     },
   });
   if (result.status !== 0) {
