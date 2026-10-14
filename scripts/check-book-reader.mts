@@ -464,6 +464,15 @@ try {
     const pages = book.pages.length;
     assert(pages >= BOOK_MIN_PAGES && pages <= BOOK_MAX_PAGES, `${book.id} page count`, `${pages} pages`);
     assert(measured.faces.length % 2 === 0, `${book.id} faces pair into spreads`, `${measured.faces.length} faces`);
+    // A printed picture book's order: "The End" last, on a right-hand page,
+    // and with an odd number of pages the title on a right-hand page too.
+    const kinds = measured.faces.map((face) => face.kind);
+    const titleAt = kinds.indexOf('title');
+    assert(
+      kinds.at(-1) === 'end' && (pages % 2 === 0 || titleAt % 2 === 1),
+      `${book.id} opens and ends like a picture book`,
+      `faces ${kinds.join(' | ')}`,
+    );
     const flat = measured.faces.filter((face) => !face.canvas);
     assert(flat.length === 0, `${book.id} every face is a painted canvas`, `${flat.length} of ${measured.faces.length} not`);
     const pictures = measured.faces.filter((face) => face.coverage !== null);

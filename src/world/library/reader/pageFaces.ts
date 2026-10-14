@@ -16,15 +16,22 @@ import { lookKey, PICTURE_HEIGHT, PICTURE_WIDTH, renderPicture, type ReaderLook,
  * ## The order of a book's faces
  *
  * {@link bookFaces} lays a book out as the sequence of faces a reader sees,
- * left page then right page, spread after spread:
+ * left page then right page, spread after spread. When the count would
+ * otherwise be odd — every book with an odd number of pages, which today is
+ * all twelve — a blank endpaper goes in **first**, the way a printed picture
+ * book opens:
  *
- *     [ title | page 1 ] [ page 2 | page 3 ] … [ … | The End ]
+ *     [ endpaper | title ] [ page 1 | page 2 ] … [ page 5 | The End ]
  *
- * with one blank endpaper added when the count would otherwise be odd, so the
- * last spread is always whole. `BookReader` hangs them on paper: face 0 is the
- * fixed left-hand page under everything, the last face the fixed right-hand
- * one, and every leaf between carries an odd face on its front and the next
- * even one on its back.
+ * so the title and "The End" are both right-hand pages, and the last spread is
+ * always whole. With an even count there is no endpaper:
+ *
+ *     [ title | page 1 ] … [ page 4 | The End ]
+ *
+ * "The End" is the last face either way. `BookReader` hangs them on paper:
+ * face 0 is the fixed left-hand page under everything, the last face the fixed
+ * right-hand one, and every leaf between carries an odd face on its front and
+ * the next even one on its back.
  *
  * ## How big the words are — the TEXT RULE, as rendered
  *
@@ -59,12 +66,12 @@ export interface PageFace {
   readonly side: 'left' | 'right';
 }
 
-/** The faces of `book`, in reading order — see the file comment. Always an even count. */
+/** The faces of `book`, in reading order — see the file comment. Always an even count; "The End" always last. */
 export function bookFaces(book: LibraryBook): PageFace[] {
   const kinds: { kind: FaceKind; page: number }[] = [{ kind: 'title', page: -1 }];
   book.pages.forEach((_, page) => kinds.push({ kind: 'story', page }));
   kinds.push({ kind: 'end', page: -1 });
-  if (kinds.length % 2 === 1) kinds.push({ kind: 'blank', page: -1 });
+  if (kinds.length % 2 === 1) kinds.unshift({ kind: 'blank', page: -1 });
   return kinds.map((face, index) => ({ ...face, side: index % 2 === 0 ? 'left' : 'right' }));
 }
 

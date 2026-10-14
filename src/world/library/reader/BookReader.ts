@@ -247,7 +247,7 @@ export class BookReader {
     return this.book?.id ?? null;
   }
 
-  /** Which spread is showing: 0 is the title page and page one. */
+  /** Which spread is showing: 0 holds the title page (`pageFaces.ts`'s `bookFaces` says which side). */
   get spread(): number {
     return this.spreadIndex;
   }
