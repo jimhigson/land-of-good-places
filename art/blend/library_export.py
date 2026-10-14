@@ -50,9 +50,10 @@ def export() -> None:
         export_cameras=False,
         export_lights=False,
         # On, for exactly one thing: the faced heads' measured face figures
-        # (`face_eyes_uv`, `face_window_m`, the owl's `face_rim_uv`) ride to
-        # the game as node extras, so nobody types them. `main` asserts no
-        # other custom property is in the scene to ride along with them.
+        # (`face_eyes_uv`, `face_window_m`, the owl's `face_rim_uv`) ride out
+        # as node extras, and `pack:library` copies them into `LIBRARY_FACES`,
+        # so nobody types them. `main` asserts no other custom property is in
+        # the scene to ride along with them.
         export_extras=True,
         export_animations=False,
         export_skins=False,

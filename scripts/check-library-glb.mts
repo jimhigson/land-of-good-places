@@ -24,14 +24,16 @@
  *    only if it carries the face figures the build measured (`face_eyes_uv`,
  *    `face_window_m`, and on the owl `face_rim_uv`) — so the faced heads are
  *    found from the file, not from a list typed here. The figures are in
- *    range, and `v` climbs with height on every one of them, which is what
- *    makes `planarUvCanvasTexture` (flipY = true) the right way to paint them
- *    and `glbCanvasTexture` the wrong one (`art/style/glb.ts` says why).
+ *    range; `LIBRARY_FACES` (what the Engineer imports) is exactly the file's
+ *    extras, and `GLTFLoader` reads the same; and `v` climbs with height on
+ *    every face, which is what makes `planarUvCanvasTexture` (flipY = true)
+ *    the right way to paint them and `glbCanvasTexture` the wrong one
+ *    (`art/style/glb.ts` says why).
  * 4. **Two readers, one answer.** `readGlbParts` (hand-rolled, synchronous,
  *    the one the game uses) and three.js's own `GLTFLoader` read every node,
  *    and must agree exactly on which nodes exist, every position, normal, uv
- *    and index, every node transform, and every node's `extras` — the second
- *    reader is the evidence that the first is right, which `glb.ts` claims.
+ *    and index, and every node transform — the second reader is the evidence
+ *    that the first is right, which `glb.ts` claims.
  *
  * What it does **not** do: measure the CONTRACT (sizes, seat heights, shelf
  * rows). That is the build's job on every export, and the Engineer's
@@ -43,8 +45,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Mesh, type BufferAttribute, type Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { LIBRARY_GLB_BASE64 } from '../src/art/assets/libraryGlb.ts';
-import { base64ToArrayBuffer, readGlbParts, type GlbPart } from '../src/art/style/glb.ts';
+import { LIBRARY_FACES, LIBRARY_GLB_BASE64 } from '../src/art/assets/libraryGlb.ts';
+import { base64ToArrayBuffer, readGlbParts } from '../src/art/style/glb.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const GLB_PATH = resolve(here, '../src/art/assets/library.glb');
@@ -173,6 +175,27 @@ notes.push(
   `  ${faced.length} faced heads, found from the file: ${faced.join(', ')}`,
 );
 
+/** JSON with sorted keys, so two objects with the same content compare equal. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+      : v,
+  );
+}
+
+// LIBRARY_FACES is what the Engineer imports: it must be the file's extras,
+// verbatim, for exactly the faced heads the file has.
+const fileFaces = Object.fromEntries(
+  nodes.filter((node) => faced.includes(node.name ?? '')).map((node) => [node.name, node.extras]),
+);
+check(
+  canonical(LIBRARY_FACES) === canonical(fileFaces),
+  `LIBRARY_FACES is not the .glb's face extras — run \`pnpm run pack:library\`.\n` +
+    `      module: ${canonical(LIBRARY_FACES)}\n      file:   ${canonical(fileFaces)}`,
+);
+notes.push(`  LIBRARY_FACES equals the file's face extras for all ${Object.keys(LIBRARY_FACES).length} heads`);
+
 // --------------------------------------------- 3. v climbs with height on every face
 
 const ours = readGlbParts(shipped.slice().buffer);
@@ -240,19 +263,11 @@ check(
 );
 check(ourNames.length === nodes.length, `our reader found ${ourNames.length} of ${nodes.length} nodes`);
 
-/** JSON with sorted keys, so two objects with the same content compare equal. */
-function canonical(value: unknown): string {
-  return JSON.stringify(value, (_key, v: unknown) =>
-    v && typeof v === 'object' && !Array.isArray(v)
-      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
-      : v,
-  );
-}
-
 let worst = 0;
 let compared = 0;
+const extrasOf = new Map(nodes.map((node) => [node.name ?? '', node.extras ?? {}]));
 for (const name of ourNames) {
-  const mine: GlbPart | undefined = ours.get(name);
+  const mine = ours.get(name);
   const other = theirs.get(name);
   if (!mine || !other) continue;
   compared += 1;
@@ -283,25 +298,26 @@ for (const name of ourNames) {
   check(mine.position.distanceTo(other.position) < 1e-9, `${name}: the readers disagree on the node position`);
   check(mine.scale.distanceTo(other.scale) < 1e-9, `${name}: the readers disagree on the node scale`);
   check(Math.abs(mine.quaternion.dot(other.quaternion)) > 1 - 1e-9, `${name}: the readers disagree on the rotation`);
+  // The file's extras, as three.js hands them to a game that loads with it.
   // GLTFLoader writes the node's raw glTF name into `userData.name` itself
   // (before merging the extras), so that key is the loader's, not the file's —
-  // unless the extras carry a `name` of their own, which then wins on both
-  // sides and is compared like any other key.
+  // unless the extras carry a `name` of their own, which then wins.
+  const fileExtras = (extrasOf.get(name) ?? {}) as Record<string, unknown>;
   const theirExtras: Record<string, unknown> = { ...other.userData };
-  if (!(mine.extras && 'name' in mine.extras)) {
+  if (!('name' in fileExtras)) {
     check(theirExtras.name === name, `${name}: GLTFLoader recorded the raw name ${String(theirExtras.name)}`);
     delete theirExtras.name;
   }
   check(
-    canonical(mine.extras ?? {}) === canonical(theirExtras),
-    `${name}: extras ${canonical(mine.extras ?? {})} to us, ${canonical(theirExtras)} to three.js`,
+    canonical(fileExtras) === canonical(theirExtras),
+    `${name}: extras ${canonical(fileExtras)} in the file, ${canonical(theirExtras)} to three.js`,
   );
 }
 check(worst === 0, `our .glb reader and three.js's disagree on an attribute by up to ${worst}`);
 check(compared > 0, 'no node was compared between the two readers');
 notes.push(
   `  read twice — ours and three.js's GLTFLoader agree exactly on ${compared} nodes ` +
-    '(attributes, indices, transforms, extras)',
+    '(attributes, indices, transforms); GLTFLoader\'s userData is the file\'s extras',
 );
 
 // ------------------------------------------------------------------------ done
