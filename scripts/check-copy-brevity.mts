@@ -28,10 +28,14 @@
  * The three sources named in the rule that are *data* rather than prose woven
  * into a builder: `whatsnew.json`, the shop catalogue (`displayName`, `blurb`)
  * the anchor signs (`signTitle`, `signSubtitle`) and the library's picture
- * books (`world/library/books.ts`: every title and every page). Those are enumerated
- * from the real modules the game imports, so a new shop item or a new
- * what's-new entry is covered the day it is added, with no list to keep in
- * step.
+ * books (`world/library/books.ts`: every title and every page). And beside
+ * them the Library's own words — the owl's, the story's, the dragon's, the
+ * cat's and every chip (`world/library/libraryLines.ts`, each template held
+ * to the rule with every book's title rendered in) — and the Cute-o-dex's
+ * secrets (`state/secrets.ts`: each card's name and what it says once found).
+ * Those are enumerated from the real modules the game imports, so a new shop
+ * item, a new what's-new entry or a new line for the owl is covered the day
+ * it is added, with no list to keep in step.
  *
  * Not covered: sign text written inline at a builder call site (`Entrance.ts`,
  * `FacePaintStall.ts`, the mini-game plots), and the shopkeepers' `SKINS`
@@ -61,6 +65,8 @@ import { SHOP_ITEMS, EGG_PRIZES } from '../src/world/building/shops/catalogue.ts
 import { ANCHORS } from '../src/world/anchors.ts';
 import { EXHIBITS } from '../src/world/reptileHouse/exhibits.ts';
 import { BOOKS } from '../src/world/library/books.ts';
+import { libraryCopyForBrevity } from '../src/world/library/libraryLines.ts';
+import { SECRETS } from '../src/state/secrets.ts';
 
 /**
  * The longest a title may be, in characters.
@@ -220,6 +226,42 @@ function collect(): Copy[] {
       });
     });
   }
+
+  // The Library's own words (#718, #719): every line the owl, the story, the
+  // dragon and the cat say, every template rendered with every book's title,
+  // every chip, and the card's name — walked out of `libraryLines.ts`.
+  const library = libraryCopyForBrevity();
+  for (const entry of library) {
+    copy.push({
+      key: entry.key,
+      where: entry.key.startsWith('libraryCard:') ? 'src/world/library/libraryCard.ts' : 'src/world/library/libraryLines.ts',
+      shape: entry.shape,
+      text: entry.text,
+    });
+  }
+  // A template held to the rule must have met every title: one book whose
+  // title was never rendered into a template is a book nobody measured.
+  const unrendered = BOOKS.filter((book) => !library.some((entry) => entry.key.endsWith(`:${book.id}`)));
+  if (library.length === 0 || unrendered.length > 0) {
+    throw new Error(
+      `check:brevity: libraryCopyForBrevity() measured ${library.length} pieces and rendered no template with ` +
+        `${unrendered.map((book) => book.id).join(', ') || 'every title'} — the walk over libraryLines.ts is broken`,
+    );
+  }
+  const rendered = library.filter((entry) => BOOKS.some((book) => entry.key.endsWith(`:${book.id}`))).length;
+  process.stderr.write(
+    `check:brevity: the Library — ${library.filter((entry) => entry.shape === 'line').length} lines ` +
+      `(${rendered} of them templates rendered with each of the ${BOOKS.length} titles), ` +
+      `${library.filter((entry) => entry.shape === 'title').length} titles (the chips and the card)\n`,
+  );
+
+  // The Cute-o-dex's secrets: a found card shows its name and what she did.
+  for (const secret of SECRETS) {
+    copy.push({ key: `secretName:${secret.id}`, where: 'src/state/secrets.ts', shape: 'title', text: secret.name });
+    copy.push({ key: `secretDone:${secret.id}`, where: 'src/state/secrets.ts', shape: 'line', text: secret.done });
+  }
+  if (SECRETS.length === 0) throw new Error('check:brevity: SECRETS is empty — the secrets loop measured nothing');
+  process.stderr.write(`check:brevity: the secrets — ${SECRETS.length} names and ${SECRETS.length} lines\n`);
 
   for (const anchor of ANCHORS) {
     copy.push({
