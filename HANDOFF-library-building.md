@@ -68,12 +68,20 @@ it. Do not raise a part-PR from here.
 - [x] look, judged on real-game headless frames (seed 5): dim room under the nap night sky,
       5.5 m pools, lilac fill 0.4, key 0.25, room lift 0.04, glowing doormat at the way out,
       warm-wood bin backs (0cc342b8).
-- [ ] CI: run 38558411242 on f33fe483 (parks for that hash; checks follow). Re-dispatch on
-      the final commit — 0cc342b8 changed the closure (lighting/shell/furnish/World), so
-      parks rebuild.
-- [ ] delete library-preview.* scratch: it no longer loads (parkManifest's deterministic-
-      math guard and the no-client-solver rule) and bypasses the real lighting/terrain, so
-      its frames are not evidence; the real deep links are.
+- [x] CI run 38558411242 on f33fe483: all 16 parks accepted (restarts 0:3 1:1 2:3 3:7 4:1
+      5:1 6:1 7:5 8:1 9:5 10:9 11:4 12:0 13:6 14:8 15:4); green: Checks shards 2-6/8 (shard
+      4 = check:library on the accepted park), Coplanar faces (interiors incl.), Procgen
+      shards 1-4/6, Walk reach, Every seed builds, Swept bus, Entrance road. Red, fixed at
+      cause: shard 1 (check:flat-primitives — four object-local expressions marked flat-ok;
+      check:brevity — the sign subtitle was two sentences), shard 7 (check:layout-rung's
+      ring fixture now allows a real plot inside the ring: seed 5's ball pit), procgen shard 5
+      (railRaceRefusals' pin re-picked: seed 3 restart 7, 35.1 s plan on CI).
+- [x] local after the fixes (seed-5 park, .parks pointed at the current hash): shard 1 green,
+      shard 7 green, check:brevity, check:layout-rung, railRaceRefusals (16.5 s) green.
+- [ ] CI run 38569170320 dispatched on d10fd02d (the final closure): result pending at the
+      time of writing — read it before raising the PR.
+- [x] library-preview.* deleted: it no longer loads (parkManifest's deterministic-math guard,
+      no client solver) and bypasses the real lighting/terrain, so its frames are no evidence.
 - [ ] DO NOT edit src/, procgen/, test/procgen/ while an acceptance/build:parks run is live:
       its child attempts load whatever is on disk.
 
@@ -126,5 +134,15 @@ at (50.1, -2.3), lean tan 0.234, base set -0.236 m, plan: plinth +-9 x [-7, 7], 
   f33fe483's hash; later commits changed only the room's look and the nap-sky line):
   scratchpad/building/final-*.png and v2/v3-*.png.
 
-## Dev server
-- vite on 5671 (`--strictPort`), PID recorded in the session; kill by PID when done.
+## Dev server, and a trap worth knowing
+- vite on 5671 (`--strictPort`) for screenshots; stopped by PID when done.
+- **Editing anything in the park closure while a dev server or a Node check is running
+  against `.parks/` starts acceptance loops**: the dev middleware and the restart resolver
+  both key on the source hash, so a stale `.parks/manifest.json` sends every page and
+  every check into `build:parks`/`accept-parks`. Look-only iteration was done by pointing
+  the manifest at the new hash (layout unchanged); the manifest is restored to the hash it
+  was accepted at (55ce5f5b) now.
+- Screenshots in the scratchpad `building/`: final-exterior-from-park, final-exterior-side,
+  final-door-from-doormat, final-interior-{arrival,stacks,story-rug,nook,desk,
+  door-from-inside} — seed 5, the park accepted at f33fe483's hash (restart 1), code at
+  d10fd02d's look.
