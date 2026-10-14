@@ -34,10 +34,10 @@ import { kitBounds, kitTreads, libraryPart, libraryPartNames, LIBRARY_SHELF_FOOT
  * `castleAssets.ts`'s split, followed rather than reinvented. The 3D Artist
  * owns **shape**: `library.glb` (#715, `art/blend/library_build.py`, its
  * `CONTRACT` asserted against the emitted vertices on every build), read once
- * by `libraryKit.ts`. Everything below — the {@link STYLES} table, the ink
- * outlines, the shadow flags, the glow of a lamp's shade — is this file's.
- * `art/blend/library_render.py` reads {@link STYLES} back out of this file for
- * its review renders and copies no hex.
+ * by `libraryKit.ts`. Everything below — the {@link LIBRARY_GLB_STYLES} table,
+ * the ink outlines, the shadow flags, the glow of a lamp's shade — is this
+ * file's. `art/blend/library_render.py` reads {@link LIBRARY_GLB_STYLES} back
+ * out of this file for its review renders and copies no hex.
  *
  * ## No size is typed here
  *
@@ -62,7 +62,7 @@ import { kitBounds, kitTreads, libraryPart, libraryPartNames, LIBRARY_SHELF_FOOT
 // ---------------------------------------------------------------------------
 
 /** A part's paint. From `PALETTE` or `ART` only (ART_DIRECTION §5). */
-interface PartStyle {
+export interface PartStyle {
   readonly colour: number;
   /** Inverted-hull outline thickness in metres; omitted for parts that draw no silhouette. */
   readonly outline?: number;
@@ -79,6 +79,21 @@ interface PartStyle {
  * throws at load rather than arriving undressed, and a row naming no node
  * throws too (see the check below the table).
  *
+ * **Exported, and keyed by node name with literal `PALETTE.`/`ART.` keys**,
+ * for two readers. `art/blend/library_render.py` reads each row's colour key
+ * out of this file's text with a regex (so no example row may appear in a
+ * comment here), and a colour computed or aliased here would silently fall
+ * back to the Artist's proposal in the review renders. And the storybook's dragon
+ * (`world/library/reader/readerAssets.ts`, `createStoryDragon`) reads its
+ * body, belly, horn and wing colours from the `dragon-*` rows, so the dragon
+ * a child reads about and the one she finds in the den are one dragon — which
+ * is why `dragon-wings` is `ART.miniLilac`, the storybook dragon's wings,
+ * rather than the Artist's proposed pink.
+ *
+ * The creatures are dressed through {@link libraryKitMesh}
+ * (`art/models/libraryCreatures.ts`); a faced head and the dragon's glowing
+ * belly own their materials, and still take their colour and outline from here.
+ *
  * The building is the park's stone, cream and sky-blue: a pale plinth and
  * darker steps a child reads as somewhere to climb, rose-stone walls, cream
  * columns and entablature, the gold open book on the pediment, a roof in the
@@ -87,7 +102,7 @@ interface PartStyle {
  * lamps' shades glow, and each chair and cushion takes its own bright cloth
  * from the furnisher (the colour here is the default).
  */
-const STYLES: Readonly<Record<string, PartStyle>> = {
+export const LIBRARY_GLB_STYLES: Readonly<Record<string, PartStyle>> = {
   // --- the building -----------------------------------------------------------
   'shell-plinth': { colour: PALETTE.stoneGreyLight, outline: 0.03 },
   'shell-steps': { colour: PALETTE.stoneGrey, outline: 0.03 },
@@ -159,7 +174,7 @@ const STYLES: Readonly<Record<string, PartStyle>> = {
   'dragon-head': { colour: ART.snakeMint, outline: 0.016 },
   'dragon-horns': { colour: ART.miniHorn, outline: 0.01 },
   'dragon-spines': { colour: ART.miniHorn, outline: 0.01 },
-  'dragon-wings': { colour: PALETTE.markerPink, outline: 0.012 },
+  'dragon-wings': { colour: ART.miniLilac, outline: 0.012 },
   'dragon-tail': { colour: ART.snakeMint, outline: 0.016 },
   'dragonNest-pad': { colour: ART.heartPink, outline: 0.012 },
   'dragonNest-coversA': { colour: PALETTE.markerSky, outline: 0.012 },
@@ -177,11 +192,11 @@ const STYLES: Readonly<Record<string, PartStyle>> = {
 // would arrive undressed, a row the file lacks is a stale name.
 {
   const names = libraryPartNames();
-  const undressed = names.filter((name) => !STYLES[name]);
-  const stale = Object.keys(STYLES).filter((name) => !names.includes(name));
+  const undressed = names.filter((name) => !LIBRARY_GLB_STYLES[name]);
+  const stale = Object.keys(LIBRARY_GLB_STYLES).filter((name) => !names.includes(name));
   if (undressed.length > 0 || stale.length > 0) {
     throw new Error(
-      `libraryAssets: STYLES and library.glb disagree — undressed nodes: ${undressed.join(', ') || 'none'}; ` +
+      `libraryAssets: LIBRARY_GLB_STYLES and library.glb disagree — undressed nodes: ${undressed.join(', ') || 'none'}; ` +
         `rows naming no node: ${stale.join(', ') || 'none'}`,
     );
   }
@@ -233,18 +248,45 @@ function dress(mesh: Mesh, style: PartStyle): Mesh {
   return mesh;
 }
 
-/** One node of the kit, dressed, its node transform carried across with its shape. `colour` overrides the table's (a chair's cloth). */
-function kitMesh(name: string, colour?: number): Mesh {
-  const style = STYLES[name];
+/** A node's row in {@link LIBRARY_GLB_STYLES}, or a throw naming it. */
+function styleOf(name: string): PartStyle {
+  const style = LIBRARY_GLB_STYLES[name];
   if (!style) throw new Error(`libraryAssets: no style for node '${name}'`);
-  const used = colour === undefined ? style : { ...style, colour };
+  return style;
+}
+
+/** A node's shape in `material`, its node transform carried across with it, dressed by `style`. */
+function placedKitMesh(name: string, material: Material, style: PartStyle): Mesh {
   const part = libraryPart(name);
-  const mesh = new Mesh(part.geometry, paint(used));
+  const mesh = new Mesh(part.geometry, material);
   mesh.name = name;
   mesh.position.copy(part.position);
   mesh.quaternion.copy(part.quaternion);
   mesh.scale.copy(part.scale);
-  return dress(mesh, used);
+  return dress(mesh, style);
+}
+
+/** One node of the kit, dressed, its node transform carried across with its shape. `colour` overrides the table's (a chair's cloth). */
+function kitMesh(name: string, colour?: number): Mesh {
+  const style = styleOf(name);
+  const used = colour === undefined ? style : { ...style, colour };
+  return placedKitMesh(name, paint(used), used);
+}
+
+/**
+ * **One node of the kit, dressed by {@link LIBRARY_GLB_STYLES}** — its paint,
+ * its ink outline, its shadow flags and its node transform (a pivoted node's
+ * translation is its pivot) — for the creature factories in
+ * `libraryCreatures.ts`. The same dressing every piece of the room gets: one
+ * decode (`libraryKit.ts`), one table, one dresser.
+ *
+ * `material` replaces the table's shared paint for a part that has to own its
+ * material — a head whose face map is swapped to blink, a belly whose glow is
+ * animated — so changing it can never reach another part painted the same
+ * colour. The row's outline and shadow flags still apply.
+ */
+export function libraryKitMesh(name: string, material?: Material): Mesh {
+  return material ? placedKitMesh(name, material, styleOf(name)) : kitMesh(name);
 }
 
 /** A named group of dressed kit nodes. */
